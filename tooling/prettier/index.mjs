@@ -6,6 +6,14 @@ import { fileURLToPath } from "url";
 
 /** @type { PrettierConfig | SortImportsConfig | TailwindConfig } */
 const config = {
+  arrowParens: "avoid",
+  bracketSpacing: true,
+  jsxSingleQuote: false,
+  printWidth: 120,
+  semi: true,
+  singleQuote: true,
+  tabWidth: 2,
+  trailingComma: "all",
   plugins: [
     "@ianvs/prettier-plugin-sort-imports",
     "prettier-plugin-tailwindcss",
@@ -14,19 +22,23 @@ const config = {
     new URL("../../tooling/tailwind/index.ts", import.meta.url),
   ),
   importOrder: [
+    "<BUILTIN_MODULES>",
+    "",
     "^(react/(.*)$)|^(react$)|^(react-native(.*)$)",
     "^(next/(.*)$)|^(next$)",
     "^(expo(.*)$)|^(expo$)",
     "<THIRD_PARTY_MODULES>",
     "",
     "^@arki/(.*)$",
+    "^@arki$",
     "",
+    "^types$",
     "^~/",
     "^[../]",
     "^[./]",
   ],
   importOrderParserPlugins: ["typescript", "jsx", "decorators-legacy"],
-  importOrderTypeScriptVersion: "4.4.0",
+  importOrderTypeScriptVersion: "5.0.0",
 };
 
 export default config;

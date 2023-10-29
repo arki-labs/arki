@@ -1,10 +1,13 @@
-import { Attributes, Body, Severity, SeverityKind, Record } from './types';
 import { configuration } from './config';
+import { Attributes, Body, Record, Severity, SeverityKind } from './types';
 
 export class Logger {
   private severity: SeverityKind;
 
-  constructor(private readonly name?: string, private readonly attributes?: Attributes) {
+  constructor(
+    private readonly name?: string,
+    private readonly attributes?: Attributes,
+  ) {
     this.severity = configuration.getSeverity(name);
   }
 

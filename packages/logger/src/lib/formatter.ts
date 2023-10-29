@@ -1,4 +1,4 @@
-import { SeverityName, SeverityText, Record } from './types';
+import { Record, SeverityName, SeverityText } from './types';
 
 const serviceContext = {
   service: process.env.SERVICE_NAME || process.env.SERVICE_CONTEXT_NAME || process.env.HOSTNAME,
