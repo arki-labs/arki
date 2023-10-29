@@ -1,6 +1,6 @@
 {
   "name": "ui",
-  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/ui/src",
   "projectType": "library",
   "tags": [],
@@ -17,7 +17,7 @@
       "outputs": ["{workspaceRoot}/coverage/packages/ui"],
       "options": {
         "passWithNoTests": true,
-        "reportsDirectory": "../../coverage/packages/ui"
+        "reportsDirectory": "../../../coverage/packages/ui"
       }
     }
   }
