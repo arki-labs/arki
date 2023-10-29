@@ -1,3 +1,15 @@
 {
+  "scripts": {
+    "clean": "rm -rf .turbo node_modules",
+    "lint": "eslint .",
+    "format": "prettier --check \"**/*.{mjs,ts,md,json}\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "eslintConfig": {
+    "root": true,
+    "extends": [
+      "@arki/eslint-config/base"
+    ]
+  },
   "prettier": "@arki/prettier-config"
 }
