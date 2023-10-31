@@ -1,4 +1,5 @@
 {
+  "name": "@arki/theme",
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
     "lint": "eslint .",

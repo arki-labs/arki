@@ -1,4 +1,5 @@
 {
+  "name": "@arki/logger",
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
     "lint": "eslint .",

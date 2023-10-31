@@ -1,16 +1,8 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "@arki/tsconfig/base.json",
   "compilerOptions": {
-    "module": "commonjs"
+    "tsBuildInfoFile": "node_modules/.cache/tsbuildinfo.json"
   },
-  "files": [],
-  "include": [],
-  "references": [
-    {
-      "path": "./tsconfig.lib.json"
-    },
-    {
-      "path": "./tsconfig.spec.json"
-    }
-  ]
+  "include": ["."],
+  "exclude": ["node_modules"]
 }

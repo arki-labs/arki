@@ -1,21 +1,8 @@
 {
+  "extends": "@arki/tsconfig/base.json",
   "compilerOptions": {
-    "jsx": "react-jsx",
-    "allowJs": false,
-    "esModuleInterop": false,
-    "allowSyntheticDefaultImports": true,
-    "strict": true,
-    "types": ["vitest"]
+    "tsBuildInfoFile": "node_modules/.cache/tsbuildinfo.json"
   },
-  "files": [],
-  "include": [],
-  "references": [
-    {
-      "path": "./tsconfig.lib.json"
-    },
-    {
-      "path": "./tsconfig.spec.json"
-    }
-  ],
-  "extends": "../../../tsconfig.base.json"
+  "include": ["."],
+  "exclude": ["node_modules"]
 }
