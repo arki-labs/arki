@@ -1,5 +1,19 @@
 {
   "name": "@arki/ui",
+  "version": "1.0.0",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "src/*"
+      ]
+    }
+  },
+  "dependencies": {
+    "@arki/base-ui": "workspace:1.0.0"
+  },
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
     "lint": "eslint .",

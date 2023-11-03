@@ -1,6 +1,6 @@
 {
   "name": "@arki/db",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "main": "./index.ts",
   "types": "./index.ts",
@@ -18,9 +18,9 @@
     "drizzle-orm": "^0.28.6"
   },
   "devDependencies": {
-    "@arki/eslint-config": "^0.2.0",
-    "@arki/prettier-config": "^0.1.0",
-    "@arki/tsconfig": "^0.1.0",
+    "@arki/eslint-config": "workspace:1.0.0",
+    "@arki/prettier-config": "workspace:1.0.0",
+    "@arki/tsconfig": "workspace:1.0.0",
     "dotenv-cli": "^7.3.0",
     "drizzle-kit": "^0.19.13",
     "eslint": "^8.52.0",

@@ -1,5 +1,23 @@
 {
   "name": "@arki/base-ui",
+  "version": "1.0.0",
+  "exports": {
+    "./accordion": "./src/accordion.tsx",
+    "./avatar": "./src/avatar.tsx",
+    "./button": "./src/button.tsx",
+    "./card": "./src/card.tsx",
+    "./cn": "./src/cn.ts",
+    "./collapsible": "./src/collapsible.tsx",
+    "./context-menu": "./src/context-menu.tsx",
+    "./dropdown-menu": "./src/dropdown-menu.tsx",
+    "./popover": "./src/popover.tsx",
+    "./separator": "./src/separator.tsx",
+    "./sheet": "./src/sheet.tsx",
+    "./skeleton": "./src/skeleton.tsx",
+    "./tooltip": "./src/tooltip.tsx",
+    "./toast": "./src/toast/index.ts"
+  },
+  "module:jsx": "src",
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
     "lint": "eslint .",
