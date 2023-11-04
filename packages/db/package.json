@@ -8,9 +8,10 @@
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
     "format": "prettier --check \"**/*.{mjs,ts,md,json}\"",
+    "generate:strophie": "drizzle-kit generate:pg --config ./strophie.config.ts",
     "lint": "eslint .",
-    "push": "drizzle-kit push:mysql",
-    "studio": "drizzle-kit studio",
+    "push:strophie": "drizzle-kit push:pg --config ./strophie.config.ts",
+    "studio:strophie": "drizzle-kit studio --config ./strophie.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
@@ -21,8 +22,13 @@
     "root": true
   },
   "dependencies": {
-    "@planetscale/database": "^1.11.0",
-    "drizzle-orm": "^0.28.6"
+    "@auth/core": "^0.18.0",
+    "@paralleldrive/cuid2": "2.2.2",
+    "@vercel/postgres": "^0.5.1",
+    "drizzle-kit": "^0.19.13",
+    "drizzle-orm": "^0.28.6",
+    "drizzle-zod": "^0.5.1",
+    "pg": "^8.11.3"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:1.0.0",

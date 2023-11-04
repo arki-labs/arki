@@ -1,7 +1,9 @@
 {
   "extends": "@arki/tsconfig/base.json",
   "compilerOptions": {
-    "tsBuildInfoFile": "node_modules/.cache/tsbuildinfo.json"
+    "tsBuildInfoFile": "node_modules/.cache/tsbuildinfo.json",
+    "moduleResolution": "Bundler",
+    "module": "ESNext"
   },
   "include": ["."],
   "exclude": ["node_modules"]
