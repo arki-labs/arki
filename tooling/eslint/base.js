@@ -5,15 +5,19 @@ const config = {
     'eslint:recommended',
     'plugin:@typescript-eslint/recommended-type-checked',
     'plugin:@typescript-eslint/stylistic-type-checked',
+    'plugin:unicorn/recommended',
     'prettier',
   ],
   env: {
     es2022: true,
+    es2024: true,
     node: true,
   },
   parser: '@typescript-eslint/parser',
   parserOptions: {
     project: true,
+    ecmaVersion: 'latest',
+    sourceType: 'module',
   },
   plugins: ['@typescript-eslint', 'import', 'unused-imports'],
   rules: {

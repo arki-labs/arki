@@ -1,35 +1,42 @@
-import { Record, SeverityName, SeverityText } from './types';
+import { SeverityName, type LogRecord, type SeverityText } from './types';
 
 const serviceContext = {
-  service: process.env.SERVICE_NAME || process.env.SERVICE_CONTEXT_NAME || process.env.HOSTNAME,
-  version: process.env.SERVICE_CONTEXT_VERSION,
+  service: process.env['SERVICE_NAME'] || process.env['SERVICE_CONTEXT_NAME'] || process.env['HOSTNAME'],
+  version: process.env['SERVICE_CONTEXT_VERSION'],
 };
 
 const convertSeverity = (severity: SeverityText) => {
   switch (severity) {
-    case SeverityName.TRACE:
+    case SeverityName.TRACE: {
       return 'DEFAULT';
-    case SeverityName.DEBUG:
+    }
+    case SeverityName.DEBUG: {
       return 'DEBUG';
-    case SeverityName.INFO:
+    }
+    case SeverityName.INFO: {
       return 'INFO';
-    case SeverityName.WARN:
+    }
+    case SeverityName.WARN: {
       return 'WARNING';
-    case SeverityName.ERROR:
+    }
+    case SeverityName.ERROR: {
       return 'ERROR';
-    case SeverityName.FATAL:
+    }
+    case SeverityName.FATAL: {
       return 'EMERGENCY';
-    default:
+    }
+    default: {
       return 'DEFAULT';
+    }
   }
 };
 
 export class LoggingFormatter {
-  log(object) {
-    return LoggingFormatter.format(object as Record);
+  log(object: LogRecord) {
+    return LoggingFormatter.format(object);
   }
 
-  static format(record: Record) {
+  static format(record: LogRecord) {
     const entry: any = {
       severity: convertSeverity(record.severityText),
       logName: record.name,

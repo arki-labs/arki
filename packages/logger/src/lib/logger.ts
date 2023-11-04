@@ -1,5 +1,5 @@
 import { configuration } from './config';
-import { Attributes, Body, Record, Severity, SeverityKind } from './types';
+import { Severity, type Attributes, type Body, type LogRecord, type SeverityKind } from './types';
 
 export class Logger {
   private severity: SeverityKind;
@@ -55,7 +55,7 @@ export class Logger {
     return new Logger(this.getName(name), this.mergeAttributes(attributes));
   }
 
-  protected buildRecord(severityType: SeverityKind, body: Body, attributes?: Attributes): Record {
+  protected buildRecord(severityType: SeverityKind, body: Body, attributes?: Attributes): LogRecord {
     return {
       name: this.name,
       body,
@@ -79,7 +79,6 @@ export class Logger {
       return undefined;
     }
 
-    // eslint-disable-next-line prefer-object-spread
     return Object.assign({}, this.attributes || {}, attributes || {});
   }
 }

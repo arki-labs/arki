@@ -1,7 +1,9 @@
-import pino, { Logger, LoggerOptions } from 'pino';
+import type { Logger, LoggerOptions } from 'pino';
+import pino from 'pino';
 
 import { LoggingFormatter } from './formatter';
-import { Severity, SeverityKind } from './types';
+import type { SeverityKind } from './types';
+import { Severity } from './types';
 
 export class Configuration {
   debug?: string[];
@@ -15,11 +17,7 @@ export class Configuration {
       this.debug = process.env.DEBUG.split(',');
     }
 
-    if (process.env.LOG_LEVEL) {
-      this.severity = Severity[process.env.LOG_LEVEL] || Severity.INFO;
-    } else {
-      this.severity = Severity.INFO;
-    }
+    this.severity = process.env.LOG_LEVEL ? Severity[process.env.LOG_LEVEL] || Severity.INFO : Severity.INFO;
 
     const transportOptions: LoggerOptions = {
       level: 'trace',

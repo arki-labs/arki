@@ -2,21 +2,18 @@ export type AttributeValue =
   | string
   | number
   | boolean
-  | Array<null | undefined | string>
-  | Array<null | undefined | number>
-  | Array<null | undefined | boolean>;
+  | (null | undefined | string)[]
+  | (null | undefined | number)[]
+  | (null | undefined | boolean)[];
 
-export interface Attributes {
-  [attributeKey: string]: AttributeValue | undefined;
-}
+export type Attributes = Record<string, AttributeValue | undefined>;
 
-export type BodyData = { [key: string]: any };
+export type BodyData = Record<string, any>;
 
 export type Body = string | Error | BodyData | any;
 
 export type SeverityNumber = number;
 
-// eslint-disable-next-line no-shadow
 export enum SeverityName {
   TRACE = 'TRACE',
   DEBUG = 'DEBUG',
@@ -65,7 +62,7 @@ export class Severity {
   };
 }
 
-export interface Record {
+export interface LogRecord {
   timestamp: number;
   traceId?: string;
   spanId?: string;
