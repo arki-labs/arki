@@ -8,11 +8,12 @@
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
     "format": "prettier --check \"**/*.{mjs,ts,md,json}\"",
-    "generate:strophie": "drizzle-kit generate:pg --config ./strophie.config.ts",
+    "generate:strophie": "pnpm with-env drizzle-kit generate:pg --config ./strophie.config.ts",
     "lint": "eslint .",
-    "push:strophie": "drizzle-kit push:pg --config ./strophie.config.ts",
-    "studio:strophie": "drizzle-kit studio --config ./strophie.config.ts",
-    "typecheck": "tsc --noEmit"
+    "push:strophie": "pnpm with-env drizzle-kit push:pg --config ./strophie.config.ts",
+    "studio:strophie": "pnpm with-env drizzle-kit studio --config ./strophie.config.ts",
+    "typecheck": "tsc --noEmit",
+    "with-env": "dotenv -e ../../.env --"
   },
   "prettier": "@arki/prettier-config",
   "eslintConfig": {
@@ -34,6 +35,7 @@
     "@arki/eslint-config": "workspace:1.0.0",
     "@arki/prettier-config": "workspace:1.0.0",
     "@arki/tsconfig": "workspace:1.0.0",
+    "@t3-oss/env-nextjs": "^0.7.1",
     "dotenv-cli": "^7.3.0",
     "drizzle-kit": "^0.19.13",
     "eslint": "^8.53.0",
