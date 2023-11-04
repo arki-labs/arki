@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 /* @see https://github.com/nextauthjs/next-auth/pull/8932 */
 
-import EmailProvider from '@auth/core/providers/email';
 import type { DefaultSession } from '@auth/core/types';
 import { DrizzleAdapter } from '@auth/drizzle-adapter';
 import NextAuth from 'next-auth';
@@ -9,7 +8,7 @@ import NextAuth from 'next-auth';
 import { db, tableCreator } from '@arki/db';
 
 import { env } from './env.mjs';
-import { sendVerificationRequest } from './sendVerificationRequest';
+import ResendProvider from './resendAuthProvider';
 
 export type { Session } from 'next-auth';
 
@@ -29,10 +28,8 @@ export const {
 } = NextAuth({
   adapter: DrizzleAdapter(db, tableCreator),
   providers: [
-    EmailProvider({
+    ResendProvider({
       from: env.EMAIL_FROM,
-      server: '',
-      sendVerificationRequest,
     }) as any,
   ],
   callbacks: {
