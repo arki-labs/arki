@@ -8,15 +8,15 @@ dotenv.config({
   debug: true,
 });
 
-if (!process.env['DATABASE_URL']) {
-  throw new Error('DATABASE_URL is not set');
+if (!process.env['POSTGRES_URL']) {
+  throw new Error('POSTGRES_URL is not set');
 }
 
 export default {
   schema: './strophie/schema',
   driver: 'pg',
   dbCredentials: {
-    connectionString: process.env['DATABASE_URL'] + '?sslmode=require',
+    connectionString: process.env['POSTGRES_URL'] + '?sslmode=require',
   },
   tablesFilter: [`${TABLE_PREFIX}*`],
   out: './strophie/migrations',
