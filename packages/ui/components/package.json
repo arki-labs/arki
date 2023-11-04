@@ -11,20 +11,20 @@
       ]
     }
   },
-  "dependencies": {
-    "@arki/base-ui": "workspace:1.0.0"
-  },
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
-    "lint": "eslint .",
     "format": "prettier --check \"**/*.{mjs,ts,md,json}\"",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
+  "prettier": "@arki/prettier-config",
   "eslintConfig": {
-    "root": true,
     "extends": [
       "@arki/eslint-config/base"
-    ]
+    ],
+    "root": true
   },
-  "prettier": "@arki/prettier-config"
+  "dependencies": {
+    "@arki/base-ui": "workspace:1.0.0"
+  }
 }

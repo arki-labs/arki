@@ -2,14 +2,21 @@
   "name": "@arki/auth",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "main": "./index.ts",
   "types": "./index.ts",
-  "license": "MIT",
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
-    "lint": "eslint .",
     "format": "prettier --check \"**/*.{mjs,ts,md,json}\"",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit"
+  },
+  "prettier": "@arki/prettier-config",
+  "eslintConfig": {
+    "extends": [
+      "@arki/eslint-config/base"
+    ],
+    "root": true
   },
   "dependencies": {
     "@arki/db": "workspace:1.0.0",
@@ -28,12 +35,5 @@
     "@arki/prettier-config": "workspace:1.0.0",
     "@arki/tsconfig": "workspace:1.0.0",
     "typescript": "^5.2.2"
-  },
-  "eslintConfig": {
-    "root": true,
-    "extends": [
-      "@arki/eslint-config/base"
-    ]
-  },
-  "prettier": "@arki/prettier-config"
+  }
 }

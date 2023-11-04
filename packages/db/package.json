@@ -2,16 +2,23 @@
   "name": "@arki/db",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "main": "./index.ts",
   "types": "./index.ts",
-  "license": "MIT",
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
-    "lint": "eslint .",
     "format": "prettier --check \"**/*.{mjs,ts,md,json}\"",
+    "lint": "eslint .",
     "push": "drizzle-kit push:mysql",
     "studio": "drizzle-kit studio",
     "typecheck": "tsc --noEmit"
+  },
+  "prettier": "@arki/prettier-config",
+  "eslintConfig": {
+    "extends": [
+      "@arki/eslint-config/base"
+    ],
+    "root": true
   },
   "dependencies": {
     "@planetscale/database": "^1.11.0",
@@ -26,12 +33,5 @@
     "eslint": "^8.53.0",
     "prettier": "^3.0.3",
     "typescript": "^5.2.2"
-  },
-  "eslintConfig": {
-    "root": true,
-    "extends": [
-      "@arki/eslint-config/base"
-    ]
-  },
-  "prettier": "@arki/prettier-config"
+  }
 }

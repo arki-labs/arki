@@ -10,9 +10,16 @@
   ],
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
-    "lint": "eslint .",
     "format": "prettier --check \"**/*.{mjs,ts,md,json}\"",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit"
+  },
+  "prettier": "@arki/prettier-config",
+  "eslintConfig": {
+    "extends": [
+      "./base.js"
+    ],
+    "root": true
   },
   "dependencies": {
     "@next/eslint-plugin-next": "^14.0.1",
@@ -40,12 +47,5 @@
     "@types/eslint": "^8.44.6",
     "eslint": "^8.53.0",
     "typescript": "^5.2.2"
-  },
-  "eslintConfig": {
-    "root": true,
-    "extends": [
-      "./base.js"
-    ]
-  },
-  "prettier": "@arki/prettier-config"
+  }
 }

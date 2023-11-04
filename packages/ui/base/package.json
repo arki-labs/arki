@@ -17,12 +17,18 @@
     "./tooltip": "./src/tooltip.tsx",
     "./toast": "./src/toast/index.ts"
   },
-  "module:jsx": "src",
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
-    "lint": "eslint .",
     "format": "prettier --check \"**/*.{mjs,ts,md,json}\"",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit"
+  },
+  "prettier": "@arki/prettier-config",
+  "eslintConfig": {
+    "extends": [
+      "@arki/eslint-config/base"
+    ],
+    "root": true
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.1.2",
@@ -38,11 +44,5 @@
     "@radix-ui/react-toast": "^1.1.5",
     "@radix-ui/react-tooltip": "^1.0.7"
   },
-  "eslintConfig": {
-    "root": true,
-    "extends": [
-      "@arki/eslint-config/base"
-    ]
-  },
-  "prettier": "@arki/prettier-config"
+  "module:jsx": "src"
 }

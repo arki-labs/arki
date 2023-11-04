@@ -1,9 +1,9 @@
 {
   "name": "@arki/vitest-config",
-  "private": true,
   "version": "1.0.0",
-  "main": "index.ts",
+  "private": true,
   "license": "MIT",
+  "main": "index.ts",
   "files": [
     "index.ts"
   ],
@@ -12,12 +12,12 @@
     "format": "prettier --check \"**/*.{mjs,ts,md,json}\"",
     "typecheck": "tsc --noEmit"
   },
+  "prettier": "@arki/prettier-config",
   "dependencies": {
     "vitest": "0.34.6"
   },
   "devDependencies": {
     "@arki/tsconfig": "workspace:1.0.0",
     "typescript": "^5.2.2"
-  },
-  "prettier": "@arki/prettier-config"
+  }
 }
