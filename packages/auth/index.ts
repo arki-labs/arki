@@ -5,8 +5,8 @@ import NextAuth from 'next-auth';
 
 import { getDb, getTableCreator } from '@arki/db';
 
+import ResendProvider from './email/resendAuthProvider';
 import { env } from './env.mjs';
-import ResendProvider from './resendAuthProvider';
 
 export type { Session } from 'next-auth';
 
@@ -20,10 +20,10 @@ declare module 'next-auth' {
 
 const cache = new Map<string, ReturnType<typeof NextAuth>>();
 
-export const init = (dbName: string) => {
-  if (!cache.has(dbName)) {
+export const init = (appName: string) => {
+  if (!cache.has(appName)) {
     const nAuth = NextAuth({
-      adapter: DrizzleAdapter(getDb(dbName), getTableCreator(dbName)),
+      adapter: DrizzleAdapter(getDb(appName), getTableCreator(appName)),
       providers: [
         ResendProvider({
           from: env.EMAIL_FROM,
@@ -40,10 +40,10 @@ export const init = (dbName: string) => {
       },
     });
 
-    cache.set(dbName, nAuth);
+    cache.set(appName, nAuth);
   }
 
-  const nAuth = cache.get(dbName)!;
+  const nAuth = cache.get(appName)!;
 
   return {
     GET: nAuth.handlers.GET,
