@@ -20,7 +20,7 @@ declare module 'next-auth' {
 
 const cache = new Map<string, ReturnType<typeof NextAuth>>();
 
-export const init = (appName: string) => {
+export const initAuth = (appName: string) => {
   if (!cache.has(appName)) {
     const nAuth = NextAuth({
       adapter: DrizzleAdapter(getDb(appName), getTableCreator(appName)),

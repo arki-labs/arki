@@ -8,9 +8,12 @@
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
     "format": "prettier --check \"**/*.{mjs,ts,md,json}\"",
+    "generate:radarama": "pnpm with-env drizzle-kit generate:pg --config ./radarama.config.ts",
     "generate:strophie": "pnpm with-env drizzle-kit generate:pg --config ./strophie.config.ts",
     "lint": "eslint .",
+    "push:radarama": "pnpm with-env drizzle-kit push:pg --config ./radarama.config.ts",
     "push:strophie": "pnpm with-env drizzle-kit push:pg --config ./strophie.config.ts",
+    "studio:radarama": "pnpm with-env drizzle-kit studio --config ./radarama.config.ts",
     "studio:strophie": "pnpm with-env drizzle-kit studio --config ./strophie.config.ts",
     "typecheck": "tsc --noEmit",
     "with-env": "dotenv -e ../../.env --"
