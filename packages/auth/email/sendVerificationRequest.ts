@@ -1,9 +1,9 @@
 import type { SendVerificationRequestParams } from '@auth/core/providers';
 import type { Theme } from '@auth/core/types';
 
-import { resend } from './resend';
+import { Resend } from 'resend';
 
-export async function sendVerificationRequest(params: SendVerificationRequestParams) {
+export const sendVerificationRequest = (resend: Resend) => async (params: SendVerificationRequestParams) => {
   const { identifier, url, provider, theme } = params;
   const { host } = new URL(url);
 

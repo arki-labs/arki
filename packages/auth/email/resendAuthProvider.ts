@@ -2,6 +2,7 @@ import { CommonProviderOptions } from '@auth/core/providers';
 import { Awaitable, Theme } from '@auth/core/types';
 
 import { sendVerificationRequest } from './sendVerificationRequest';
+import { Resend } from 'resend';
 
 export interface SendVerificationRequestParams {
   identifier: string;
@@ -97,7 +98,9 @@ export interface EmailConfig extends CommonProviderOptions {
   normalizeIdentifier?: (identifier: string) => string;
 }
 
-export default function ResendProvider(config: EmailUserConfig): EmailConfig {
+export function ResendProvider(apiKey: string, config: EmailUserConfig): EmailConfig {
+  const resend = new Resend(apiKey);
+
   return {
     id: 'email',
     type: 'email',
@@ -105,7 +108,7 @@ export default function ResendProvider(config: EmailUserConfig): EmailConfig {
     server: '',
     from: 'Auth.js <no-reply@authjs.dev>',
     maxAge: 24 * 60 * 60,
-    sendVerificationRequest,
+    sendVerificationRequest: sendVerificationRequest(resend),
     options: config,
   };
 }
