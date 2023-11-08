@@ -19,7 +19,7 @@
     "root": true
   },
   "dependencies": {
-    "@arki/db": "workspace:1.0.0",
+
     "@auth/core": "^0.18.0",
     "@auth/drizzle-adapter": "^0.3.5",
     "@t3-oss/env-nextjs": "^0.7.1",
