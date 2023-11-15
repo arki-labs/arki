@@ -9,7 +9,7 @@
     "clean": "rm -rf .turbo node_modules",
     "dev": "email dev",
     "export": "email export",
-    "format": "prettier --check \"**/*.{mjs,ts,md,json}\"",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
