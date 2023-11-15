@@ -1,0 +1,33 @@
+{
+  "name": "@arki/emails",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "scripts": {
+    "clean": "rm -rf .turbo node_modules",
+    "dev": "email dev",
+    "export": "email export",
+    "format": "prettier --check \"**/*.{mjs,ts,md,json}\"",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "prettier": "@arki/prettier-config",
+  "eslintConfig": {
+    "extends": [
+      "@arki/eslint-config/base"
+    ]
+  },
+  "dependencies": {
+    "@react-email/components": "^0.0.11",
+    "react-email": "^1.9.5"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:1.0.0",
+    "@arki/prettier-config": "workspace:1.0.0",
+    "@arki/tsconfig": "workspace:1.0.0",
+    "eslint": "^8.53.0",
+    "typescript": "^5.2.2"
+  }
+}
