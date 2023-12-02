@@ -16,16 +16,6 @@ export interface SendVerificationRequestParams {
 }
 
 /**
- * The Email Provider needs to be configured with an e-mail client.
- * By default, it uses `nodemailer`, which you have to install if this
- * provider is present.
- *
- * You can use a other services as well, like:
- * - [Postmark](https://postmarkapp.com)
- * - [Mailgun](https://www.mailgun.com)
- * - [SendGrid](https://sendgrid.com)
- * - etc.
- *
  * [Custom email service with Auth.js](https://authjs.dev/guides/providers/email#custom-email-service)
  */
 export interface EmailUserConfig extends Record<string, unknown> {
