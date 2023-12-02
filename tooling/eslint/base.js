@@ -6,6 +6,7 @@ const config = {
     'plugin:@typescript-eslint/recommended-type-checked',
     'plugin:@typescript-eslint/stylistic-type-checked',
     'plugin:unicorn/recommended',
+    'plugin:drizzle/recommended',
     'prettier',
   ],
   env: {
@@ -19,7 +20,7 @@ const config = {
     ecmaVersion: 'latest',
     sourceType: 'module',
   },
-  plugins: ['@typescript-eslint', 'import', 'unused-imports'],
+  plugins: ['@typescript-eslint', 'import', 'unused-imports', 'drizzle'],
   rules: {
     'turbo/no-undeclared-env-vars': 'off',
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
