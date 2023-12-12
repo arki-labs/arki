@@ -12,5 +12,11 @@
       "@arki/eslint-config/base"
     ],
     "root": true
+  },
+  "dependencies": {
+    "voca": "^1.4.1"
+  },
+  "devDependencies": {
+    "@types/voca": "^1.4.5"
   }
 }
