@@ -26,5 +26,13 @@
   },
   "dependencies": {
     "@arki/base-ui": "workspace:1.0.0"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:1.0.0",
+    "@arki/prettier-config": "workspace:1.0.0",
+    "@arki/tsconfig": "workspace:1.0.0",
+    "eslint": "^8.55.0",
+    "prettier": "^3.1.1",
+    "typescript": "^5.3.3"
   }
 }
