@@ -29,7 +29,7 @@
     "@arki/eslint-config": "workspace:1.0.0",
     "@arki/prettier-config": "workspace:1.0.0",
     "@arki/tsconfig": "workspace:1.0.0",
-    "eslint": "^8.55.0",
+    "eslint": "^8.56.0",
     "typescript": "^5.3.3"
   }
 }
