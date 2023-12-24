@@ -2,10 +2,7 @@
 
 import { forwardRef } from 'react';
 import { format } from 'date-fns';
-import {
-  Calendar as CalendarIcon,
-  //@ts-ignore
-} from 'lucide-react/dist/esm/lucide-react';
+import { LuCalendar as CalendarIcon } from 'react-icons/lu';
 
 import { Button } from './button';
 import { Calendar } from './calendar';

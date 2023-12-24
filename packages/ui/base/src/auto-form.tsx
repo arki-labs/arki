@@ -2,9 +2,9 @@
 
 import React from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-// @ts-ignore
-import { Plus, Trash } from 'lucide-react/dist/esm/lucide-react';
 import { ControllerRenderProps, DefaultValues, FieldValues, useFieldArray, useForm } from 'react-hook-form';
+// @ts-ignore
+import { Plus, Trash } from 'react-icons/lu';
 import { z } from 'zod';
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './accordion';
