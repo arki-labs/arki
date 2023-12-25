@@ -13,6 +13,9 @@
     ],
     "root": true
   },
+  "dependencies": {
+    "pino": "^8.17.1"
+  },
   "devDependencies": {
     "@arki/eslint-config": "workspace:1.0.0",
     "@arki/prettier-config": "workspace:1.0.0",

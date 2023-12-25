@@ -1,9 +1,7 @@
-import type { Logger, LoggerOptions } from 'pino';
-import pino from 'pino';
+import pino, { type Logger, type LoggerOptions } from 'pino';
 
 import { LoggingFormatter } from './formatter';
-import type { SeverityKind } from './types';
-import { Severity } from './types';
+import { Severity, type SeverityKind } from './types';
 
 export class Configuration {
   debug?: string[];
@@ -13,11 +11,11 @@ export class Configuration {
   transport: Logger;
 
   constructor() {
-    if (process.env.DEBUG) {
-      this.debug = process.env.DEBUG.split(',');
+    if (process.env['DEBUG']) {
+      this.debug = process.env['DEBUG'].split(',');
     }
 
-    this.severity = process.env.LOG_LEVEL ? Severity[process.env.LOG_LEVEL] || Severity.INFO : Severity.INFO;
+    this.severity = process.env['LOG_LEVEL'] ? Severity[process.env['LOG_LEVEL']] || Severity.INFO : Severity.INFO;
 
     const transportOptions: LoggerOptions = {
       level: 'trace',
@@ -25,7 +23,7 @@ export class Configuration {
       timestamp: false,
     };
 
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env['NODE_ENV'] === 'production') {
       transportOptions.formatters = new LoggingFormatter();
     }
 
