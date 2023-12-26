@@ -14,7 +14,9 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "vitest": "0.34.6"
+    "@vitest/coverage-v8": "^1.1.0",
+    "@vitest/ui": "1.1.0",
+    "vitest": "1.1.0"
   },
   "devDependencies": {
     "@arki/tsconfig": "workspace:1.0.0",

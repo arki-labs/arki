@@ -1,7 +1,9 @@
-import { logger } from './logger';
+import { describe, expect, it } from 'vitest';
+
+import { Logger } from './logger';
 
 describe('logger', () => {
   it('should work', () => {
-    expect(logger()).toEqual('logger');
+    expect(new Logger()).toEqual('logger');
   });
 });
