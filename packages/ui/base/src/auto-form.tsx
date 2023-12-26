@@ -3,8 +3,7 @@
 import React from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ControllerRenderProps, DefaultValues, FieldValues, useFieldArray, useForm } from 'react-hook-form';
-// @ts-ignore
-import { Plus, Trash } from 'react-icons/lu';
+import { LuPlus as Plus, LuTrash as Trash } from 'react-icons/lu';
 import { z } from 'zod';
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './accordion';
