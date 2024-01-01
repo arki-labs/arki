@@ -1,1 +1,1 @@
-export * from './src/comming-soon'
+export * from './src/coming-soon';
