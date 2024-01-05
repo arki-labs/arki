@@ -1,0 +1,32 @@
+{
+  "name": "@arki/date",
+  "version": "1.0.0",
+  "exports": {
+    "./format": "./format.ts"
+  },
+  "scripts": {
+    "clean": "rm -rf .turbo node_modules",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "prettier": "@arki/prettier-config",
+  "eslintConfig": {
+    "extends": [
+      "@arki/eslint-config/base"
+    ],
+    "root": true
+  },
+  "dependencies": {
+    "date-fns": "3.1.0"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:1.0.0",
+    "@arki/prettier-config": "workspace:1.0.0",
+    "@arki/tsconfig": "workspace:1.0.0",
+    "@arki/vitest-config": "workspace:1.0.0",
+    "eslint": "^8.56.0",
+    "prettier": "^3.1.1",
+    "typescript": "^5.3.3"
+  }
+}
