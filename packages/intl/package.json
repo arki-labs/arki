@@ -1,0 +1,35 @@
+{
+  "name": "@arki/intl",
+  "version": "1.0.0",
+  "exports": {
+    "./next-client": "./next/client.ts",
+    "./next-middleware": "./next/middleware.ts",
+    "./next-navigation": "./next/navigation.ts",
+    "./next-server": "./next/server.ts"
+  },
+  "scripts": {
+    "clean": "rm -rf .turbo node_modules",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "prettier": "@arki/prettier-config",
+  "eslintConfig": {
+    "extends": [
+      "@arki/eslint-config/base"
+    ],
+    "root": true
+  },
+  "dependencies": {
+    "next-intl": "3.4.1"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:1.0.0",
+    "@arki/prettier-config": "workspace:1.0.0",
+    "@arki/tsconfig": "workspace:1.0.0",
+    "@arki/vitest-config": "workspace:1.0.0",
+    "eslint": "^8.56.0",
+    "prettier": "^3.1.1",
+    "typescript": "^5.3.3"
+  }
+}
