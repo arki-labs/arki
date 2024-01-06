@@ -1,8 +1,9 @@
 'use client';
 
 import { forwardRef } from 'react';
-import { format } from 'date-fns';
 import { LuCalendar as CalendarIcon } from 'react-icons/lu';
+
+import { format } from '@arki/date/format';
 
 import { Button } from './button';
 import { Calendar } from './calendar';
