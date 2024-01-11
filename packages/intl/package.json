@@ -2,10 +2,10 @@
   "name": "@arki/intl",
   "version": "1.0.0",
   "exports": {
-    "./next-client": "./next/client.ts",
-    "./next-middleware": "./next/middleware.ts",
-    "./next-navigation": "./next/navigation.ts",
-    "./next-server": "./next/server.ts"
+    "./next-client": "./integrations/next/client.ts",
+    "./next-middleware": "./integrations/next/middleware.ts",
+    "./next-navigation": "./integrations/next/navigation.ts",
+    "./next-server": "./integrations/next/server.ts"
   },
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
@@ -21,8 +21,11 @@
     "root": true
   },
   "dependencies": {
+    "cldr-core": "44.1.0",
     "flag-icons": "7.1.0",
-    "next-intl": "3.4.1"
+    "full-icu": "1.5.0",
+    "next-intl": "3.4.2",
+    "react-intl": "6.5.5"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:1.0.0",
