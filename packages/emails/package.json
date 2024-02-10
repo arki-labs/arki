@@ -3,8 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "license": "MIT",
-  "main": "./index.ts",
-  "types": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./send": "./send.ts"
+  },
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
     "dev": "email dev",
@@ -20,6 +22,7 @@
     ]
   },
   "dependencies": {
+    "@paralleldrive/cuid2": "2.2.2",
     "@react-email/body": "0.0.7",
     "@react-email/button": "0.0.13",
     "@react-email/column": "^0.0.9",
@@ -36,7 +39,8 @@
     "@react-email/row": "^0.0.7",
     "@react-email/section": "^0.0.11",
     "@react-email/tailwind": "^0.0.13",
-    "@react-email/text": "^0.0.7"
+    "@react-email/text": "^0.0.7",
+    "resend": "^2.0.0"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:1.0.0",
