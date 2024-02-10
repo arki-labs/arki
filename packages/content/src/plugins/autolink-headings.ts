@@ -1,7 +1,7 @@
 import rehypeAutolinkHeadings from 'rehype-autolink-headings';
 import type * as unified from 'unified';
 
-export const autolinkHeadings: unified.Pluggable<any[]> = [
+export const autolinkHeadings: unified.Pluggable = [
   rehypeAutolinkHeadings,
   {
     behavior: 'append',

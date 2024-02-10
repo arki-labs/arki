@@ -7,6 +7,7 @@ const config = {
     'plugin:@typescript-eslint/stylistic-type-checked',
     'plugin:unicorn/recommended',
     'plugin:drizzle/recommended',
+    'plugin:regexp/recommended',
     'prettier',
   ],
   env: {
@@ -20,7 +21,7 @@ const config = {
     ecmaVersion: 'latest',
     sourceType: 'module',
   },
-  plugins: ['@typescript-eslint', 'import', 'unused-imports', 'drizzle'],
+  plugins: ['@typescript-eslint', 'import', 'unused-imports', 'drizzle', 'regexp', 'unicorn'],
   rules: {
     'turbo/no-undeclared-env-vars': 'off',
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
@@ -30,6 +31,16 @@ const config = {
     ],
     '@typescript-eslint/no-misused-promises': [2, { checksVoidReturn: { attributes: false } }],
     'import/consistent-type-specifier-style': ['error', 'prefer-top-level'],
+    'unicorn/prevent-abbreviations': 'off',
+    'unicorn/filename-case': [
+      'error',
+      {
+        cases: {
+          camelCase: true,
+          kebabCase: true,
+        },
+      },
+    ],
     'unused-imports/no-unused-imports': 'error',
     'unused-imports/no-unused-vars': [
       'warn',
@@ -40,6 +51,7 @@ const config = {
     '**/.eslintrc.cjs',
     '**/*.config.js',
     '**/*.config.cjs',
+    '**/tooling/**',
     'pnpm-lock.yaml',
     '**/node_modules/**',
     '**/dist/**',
@@ -53,4 +65,5 @@ const config = {
   reportUnusedDisableDirectives: true,
 };
 
+// eslint-disable-next-line unicorn/prefer-module
 module.exports = config;
