@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "exports": {
     ".": "./src/index.ts",
-    "./send": "./src/send.ts"
+    "./send": "./src/send.ts",
+    "./templates/*": "./src/templates/*.tsx"
   },
   "typesVersions": {
     "*": {

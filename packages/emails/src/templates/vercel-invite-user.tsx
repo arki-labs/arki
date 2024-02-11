@@ -68,7 +68,7 @@ export const VercelInviteUserEmail = ({
               </Link>
               ) has invited you to the <strong>{teamName}</strong> team on <strong>Vercel</strong>.
             </Text>
-            <section className="w-full">
+            <Section className="w-full">
               <Row>
                 <Column align="right">
                   <Img className="rounded-full" src={userImage} width="64" height="64" />
