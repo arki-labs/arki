@@ -110,6 +110,9 @@ export const send = async (apiKey: string, payload: CreateEmailOptions) => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
+        // Set this to prevent Gmail from threading emails.
+        // More info: https://resend.com/changelog/custom-email-headers
+        'X-Entity-Ref-ID': Date.now() + '',
         ...payload.headers,
       },
       body: JSON.stringify({

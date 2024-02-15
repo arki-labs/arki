@@ -21,7 +21,16 @@ const config = {
     ecmaVersion: 'latest',
     sourceType: 'module',
   },
-  plugins: ['@typescript-eslint', 'import', 'unused-imports', 'drizzle', 'regexp', 'unicorn'],
+  plugins: [
+    '@typescript-eslint',
+    'import',
+    'unused-imports',
+    'drizzle',
+    'regexp',
+    'unicorn',
+    'eslint-plugin-tsdoc',
+    'eslint-plugin-eslint-comments',
+  ],
   rules: {
     'turbo/no-undeclared-env-vars': 'off',
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
@@ -30,7 +39,6 @@ const config = {
       { prefer: 'type-imports', fixStyle: 'separate-type-imports' },
     ],
     '@typescript-eslint/no-misused-promises': [2, { checksVoidReturn: { attributes: false } }],
-    'import/consistent-type-specifier-style': ['error', 'prefer-top-level'],
     'unicorn/prevent-abbreviations': 'off',
     'unicorn/filename-case': [
       'error',
@@ -42,10 +50,18 @@ const config = {
       },
     ],
     'unused-imports/no-unused-imports': 'error',
+    /**
+     * Disallow expressions where the operation doesn't affect the value.
+     *
+     * 🚫 Not fixable
+     * https://eslint.org/blog/2022/07/interesting-bugs-caught-by-no-constant-binary-expression/
+     */
+    'no-constant-binary-expression': 'error',
     'unused-imports/no-unused-vars': [
       'warn',
       { vars: 'all', varsIgnorePattern: '^_', args: 'after-used', argsIgnorePattern: '^_' },
     ],
+    'import/consistent-type-specifier-style': ['error', 'prefer-inline'],
   },
   ignorePatterns: [
     '**/.eslintrc.cjs',

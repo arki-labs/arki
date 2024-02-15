@@ -1,7 +1,7 @@
 /** @type {import('eslint').Linter.Config} */
 const config = {
   extends: ['plugin:vitest/recommended'],
-  plugins: ['vitest'],
+  plugins: ['vitest', 'eslint-plugin-playwright', 'eslint-plugin-testing-library'],
 };
 
 // eslint-disable-next-line unicorn/prefer-module
