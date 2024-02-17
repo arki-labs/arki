@@ -2,8 +2,8 @@
   "name": "@arki/ui",
   "version": "1.0.0",
   "exports": {
-    ".": "./index.ts",
-    "./coming-soon": "./src/coming-soon/index.tsx"
+    "./coming-soon": "./src/coming-soon.tsx",
+    "./theme-switcher": "./src/theme-switcher.tsx"
   },
   "typesVersions": {
     "*": {
@@ -27,7 +27,8 @@
     "root": true
   },
   "dependencies": {
-    "@arki/base-ui": "workspace:1.0.0"
+    "@arki/base-ui": "workspace:1.0.0",
+    "@arki/theme": "workspace:1.0.0"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:1.0.0",
