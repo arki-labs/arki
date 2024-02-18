@@ -13,14 +13,14 @@ import { useTheme } from '@arki/theme';
 export function ThemeSelect() {
   const { resolvedTheme, setTheme } = useTheme();
 
-  // const [hasMounted, setHasMounted] = React.useState(false);
-  // React.useEffect(() => {
-  //   setHasMounted(true);
-  // }, []);
+  const [hasMounted, setHasMounted] = React.useState(false);
+  React.useEffect(() => {
+    setHasMounted(true);
+  }, []);
 
-  // if (!hasMounted) {
-  //   return null;
-  // }
+  if (!hasMounted) {
+    return null;
+  }
 
   return (
     <DropdownMenu>
