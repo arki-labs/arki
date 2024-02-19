@@ -17,6 +17,7 @@
     "./context-menu": "./src/context-menu.tsx",
     "./date-picker": "./src/date-picker.tsx",
     "./dialog": "./src/dialog.tsx",
+    "./drawer": "./src/drawer.tsx",
     "./dropdown-menu": "./src/dropdown-menu.tsx",
     "./form": "./src/form.tsx",
     "./hover-card": "./src/hover-card.tsx",
@@ -83,7 +84,8 @@
     "react-spring": "^9.7.3",
     "react-textarea-autosize": "8.5.3",
     "react-tweet": "^3.2.0",
-    "tailwind-merge": "^2.2.1"
+    "tailwind-merge": "^2.2.1",
+    "vaul": "^0.9.0"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:1.0.0",
