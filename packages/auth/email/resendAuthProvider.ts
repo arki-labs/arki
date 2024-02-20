@@ -1,5 +1,5 @@
-import { CommonProviderOptions } from '@auth/core/providers';
-import { Awaitable, Theme } from '@auth/core/types';
+import { type CommonProviderOptions } from '@auth/core/providers';
+import { type Awaitable, type Theme } from '@auth/core/types';
 import { Resend } from 'resend';
 
 import { sendVerificationRequest } from './sendVerificationRequest';
@@ -91,7 +91,7 @@ export interface EmailConfig extends CommonProviderOptions {
 export function ResendProvider(
   apiKey: string,
   config: EmailUserConfig,
-  sendVerificationRequestTemplate: ({ loginUrl }: { loginUrl: string }) => React.ReactElement | React.ReactNode,
+  sendVerificationRequestTemplate: (conf: { loginUrl: string }) => React.ReactElement | React.ReactNode,
 ): EmailConfig {
   const resend = new Resend(apiKey);
 
