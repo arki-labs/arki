@@ -8,7 +8,6 @@ const config = {
     'plugin:unicorn/recommended',
     'plugin:drizzle/recommended',
     'plugin:regexp/recommended',
-    'prettier',
   ],
   env: {
     es2022: true,

@@ -1,6 +1,6 @@
 {
   "name": "@arki/intl",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "exports": {
     "./next-client": "./integrations/next/client.ts",
     "./next-middleware": "./integrations/next/middleware.ts",
@@ -28,10 +28,10 @@
     "react-intl": "6.6.2"
   },
   "devDependencies": {
-    "@arki/eslint-config": "workspace:1.0.0",
-    "@arki/prettier-config": "workspace:1.0.0",
-    "@arki/tsconfig": "workspace:1.0.0",
-    "@arki/vitest-config": "workspace:1.0.0",
+    "@arki/eslint-config": "workspace:^0.1.0",
+    "@arki/prettier-config": "workspace:^0.1.0",
+    "@arki/tsconfig": "workspace:^0.1.0",
+    "@arki/vitest-config": "workspace:^0.1.0",
     "eslint": "^8.56.0",
     "prettier": "^3.2.5",
     "typescript": "^5.3.3"

@@ -1,6 +1,6 @@
 {
   "name": "@arki/prettier-config",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "private": true,
   "main": "index.mjs",
   "scripts": {
@@ -16,7 +16,7 @@
     "prettier-plugin-tailwindcss": "^0.5.11"
   },
   "devDependencies": {
-    "@arki/tsconfig": "workspace:1.0.0",
+    "@arki/tsconfig": "workspace:^0.1.0",
     "typescript": "^5.3.3"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@arki/emails",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "exports": {
     ".": "./src/index.ts",
     "./send": "./src/send.ts",
@@ -48,10 +48,10 @@
     "resend": "^3.2.0"
   },
   "devDependencies": {
-    "@arki/eslint-config": "workspace:1.0.0",
-    "@arki/prettier-config": "workspace:1.0.0",
-    "@arki/tsconfig": "workspace:1.0.0",
-    "@arki/vitest-config": "workspace:1.0.0",
+    "@arki/eslint-config": "workspace:^0.1.0",
+    "@arki/prettier-config": "workspace:^0.1.0",
+    "@arki/tsconfig": "workspace:^0.1.0",
+    "@arki/vitest-config": "workspace:^0.1.0",
     "eslint": "^8.56.0",
     "typescript": "^5.3.3"
   }

@@ -1,6 +1,6 @@
 {
   "name": "@arki/ui",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "exports": {
     "./coming-soon": "./src/coming-soon.tsx",
     "./theme-switcher": "./src/theme-switcher.tsx"
@@ -27,14 +27,14 @@
     "root": true
   },
   "dependencies": {
-    "@arki/base-ui": "workspace:1.0.0",
-    "@arki/theme": "workspace:1.0.0"
+    "@arki/base-ui": "workspace:^0.1.0",
+    "@arki/theme": "workspace:^0.1.0"
   },
   "devDependencies": {
-    "@arki/eslint-config": "workspace:1.0.0",
-    "@arki/prettier-config": "workspace:1.0.0",
-    "@arki/tsconfig": "workspace:1.0.0",
-    "@arki/vitest-config": "workspace:1.0.0",
+    "@arki/eslint-config": "workspace:^0.1.0",
+    "@arki/prettier-config": "workspace:^0.1.0",
+    "@arki/tsconfig": "workspace:^0.1.0",
+    "@arki/vitest-config": "workspace:^0.1.0",
     "eslint": "^8.56.0",
     "prettier": "^3.2.5",
     "typescript": "^5.3.3"

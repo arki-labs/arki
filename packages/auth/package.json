@@ -1,6 +1,6 @@
 {
   "name": "@arki/auth",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "private": true,
   "license": "MIT",
   "main": "./index.ts",
@@ -30,10 +30,10 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@arki/eslint-config": "workspace:1.0.0",
-    "@arki/prettier-config": "workspace:1.0.0",
-    "@arki/tsconfig": "workspace:1.0.0",
-    "@arki/vitest-config": "workspace:1.0.0",
+    "@arki/eslint-config": "workspace:^0.1.0",
+    "@arki/prettier-config": "workspace:^0.1.0",
+    "@arki/tsconfig": "workspace:^0.1.0",
+    "@arki/vitest-config": "workspace:^0.1.0",
     "typescript": "^5.3.3"
   }
 }
