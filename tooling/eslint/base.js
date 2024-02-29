@@ -29,6 +29,7 @@ const config = {
     'unicorn',
     'eslint-plugin-tsdoc',
     'eslint-plugin-eslint-comments',
+    'check-file',
   ],
   rules: {
     'turbo/no-undeclared-env-vars': 'off',
