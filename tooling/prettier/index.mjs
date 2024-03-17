@@ -15,7 +15,8 @@ const config = {
   tabWidth: 2,
   trailingComma: 'all',
   plugins: ['@ianvs/prettier-plugin-sort-imports', 'prettier-plugin-tailwindcss', 'prettier-plugin-packagejson'],
-  tailwindConfig: fileURLToPath(new URL('../../tooling/tailwind/index.ts', import.meta.url)),
+  tailwindConfig: fileURLToPath(new URL('../../tooling/tailwind/web.ts', import.meta.url)),
+  tailwindFunctions: ["cn", "cva"],
   importOrder: [
     '<BUILTIN_MODULES>',
     '',

@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "@react-email/body": "0.0.7",
-    "@react-email/button": "0.0.13",
+    "@react-email/button": "0.0.14",
     "@react-email/column": "^0.0.9",
     "@react-email/container": "^0.0.11",
     "@react-email/font": "^0.0.5",
@@ -52,6 +52,6 @@
     "@arki/prettier-config": "workspace:^0.1.0",
     "@arki/tsconfig": "workspace:^0.1.0",
     "@arki/vitest-config": "workspace:^0.1.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.4.2"
   }
 }
