@@ -1,5 +1,1 @@
-
-
-
-
-export {useLocale, useTranslations} from 'next-intl';
+export { useLocale, useTranslations } from 'next-intl';

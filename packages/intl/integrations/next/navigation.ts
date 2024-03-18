@@ -1,6 +1,1 @@
-
-
-
-
-
-export {createSharedPathnamesNavigation, type Pathnames} from 'next-intl/navigation';
+export { createSharedPathnamesNavigation, type Pathnames } from 'next-intl/navigation';

@@ -5,7 +5,8 @@
     "./next-client": "./integrations/next/client.ts",
     "./next-middleware": "./integrations/next/middleware.ts",
     "./next-navigation": "./integrations/next/navigation.ts",
-    "./next-server": "./integrations/next/server.ts"
+    "./next-server": "./integrations/next/server.ts",
+    "./next-shared": "./integrations/next/shared.ts"
   },
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
