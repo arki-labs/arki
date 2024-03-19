@@ -5,18 +5,19 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from './cn';
 
 const buttonVariants = cva(
-  'focus-visible:ring-ring focus:ring-ring ring-offset-background inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2   focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
+  'inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus:outline-none focus:ring-2  focus:ring-ring focus:ring-offset-2 focus-visible:outline-none   focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2  disabled:pointer-events-none disabled:opacity-50',
   {
     variants: {
       variant: {
-        primary: 'bg-primary text-primary-foreground hover:bg-primary/90',
-        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
-        destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
-        outline: 'border-input hover:bg-accent hover:text-accent-foreground border',
-        secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-        tertiary: 'bg-tertiary text-tertiary-foreground hover:bg-tertiary/80',
-        ghost: 'hover:bg-accent hover:text-accent-foreground',
-        link: 'text-primary underline-offset-4 hover:underline',
+        primary: 'bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80',
+        default: 'bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80',
+        destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90 active:bg-destructive/80',
+        outline:
+          'border border-input hover:bg-accent hover:text-accent-foreground active:bg-accent active:text-accent-foreground',
+        secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80 active:bg-secondary/70',
+        tertiary: 'bg-tertiary text-tertiary-foreground hover:bg-tertiary/80 active:bg-tertiary/70',
+        ghost: 'hover:bg-accent hover:text-accent-foreground active:bg-accent active:text-accent-foreground',
+        link: 'text-primary underline-offset-4 hover:underline focus:underline-offset-8',
       },
       size: {
         default: 'h-10 px-4 py-2',
