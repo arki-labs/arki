@@ -1,0 +1,44 @@
+{
+  "name": "@arki/math",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./number": "./src/number.ts"
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "./src/*"
+      ]
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf .turbo node_modules",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "prettier": "@arki/prettier-config",
+  "eslintConfig": {
+    "extends": [
+      "@arki/eslint-config/base",
+      "@arki/eslint-config/react"
+    ],
+    "root": true
+  },
+  "dependencies": {
+    "big.js": "^6.2.1",
+    "bignumber.js": "^9.1.2",
+    "decimal.js": "^10.4.3",
+    "mathjs": "^12.4.1"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:^0.1.0",
+    "@arki/prettier-config": "workspace:^0.1.0",
+    "@arki/tsconfig": "workspace:^0.1.0",
+    "@arki/vitest-config": "workspace:^0.1.0",
+    "@types/big.js": "^6.2.2",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.2"
+  }
+}
