@@ -53,6 +53,6 @@
     "@arki/prettier-config": "workspace:^0.1.0",
     "@arki/tsconfig": "workspace:^0.1.0",
     "@types/eslint": "^8.56.5",
-    "typescript": "^5.4.2"
+    "typescript": "^5.4.3"
   }
 }

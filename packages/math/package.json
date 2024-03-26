@@ -39,6 +39,6 @@
     "@arki/vitest-config": "workspace:^0.1.0",
     "@types/big.js": "^6.2.2",
     "prettier": "^3.2.5",
-    "typescript": "^5.4.2"
+    "typescript": "^5.4.3"
   }
 }
