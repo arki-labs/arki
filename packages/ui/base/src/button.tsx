@@ -18,9 +18,11 @@ const buttonVariants = cva(
         tertiary: 'bg-tertiary text-tertiary-foreground hover:bg-tertiary/80 active:bg-tertiary/70',
         ghost: 'hover:bg-accent hover:text-accent-foreground active:bg-accent active:text-accent-foreground',
         link: 'text-primary underline-offset-4 hover:underline focus:underline-offset-8',
+        text: 'text-muted-foreground underline-offset-4 hover:underline focus:underline-offset-8 focus:ring-0 focus:ring-offset-0',
       },
       size: {
         default: 'h-10 px-4 py-2',
+        xs: 'h-7 px-2 py-1',
         sm: 'h-9 rounded-md px-3',
         md: 'h-10 rounded-md px-4',
         lg: 'h-11 rounded-md px-8',

@@ -1,19 +1,27 @@
 import * as React from 'react';
-import * as LabelPrimitive from '@radix-ui/react-label';
+import type * as LabelPrimitive from '@radix-ui/react-label';
 import { Slot } from '@radix-ui/react-slot';
-import { Controller, ControllerProps, FieldPath, FieldValues, FormProvider, useFormContext } from 'react-hook-form';
+import {
+  Controller,
+  FormProvider,
+  useFormContext,
+  type ControllerProps,
+  type FieldPath,
+  type FieldValues,
+} from 'react-hook-form';
 
+import { Button } from '..';
 import { cn } from './cn';
 import { Label } from './label';
 
 const Form = FormProvider;
 
-type FormFieldContextValue<
+interface FormFieldContextValue<
   TFieldValues extends FieldValues = FieldValues,
   TName extends FieldPath<TFieldValues> = FieldPath<TFieldValues>,
-> = {
+> {
   name: TName;
-};
+}
 
 const FormFieldContext = React.createContext<FormFieldContextValue>({} as FormFieldContextValue);
 
@@ -53,9 +61,9 @@ const useFormField = () => {
   };
 };
 
-type FormItemContextValue = {
+interface FormItemContextValue {
   id: string;
-};
+}
 
 const FormItemContext = React.createContext<FormItemContextValue>({} as FormItemContextValue);
 
@@ -90,7 +98,7 @@ const FormControl = React.forwardRef<React.ElementRef<typeof Slot>, React.Compon
       <Slot
         ref={ref}
         id={formItemId}
-        aria-describedby={!error ? `${formDescriptionId}` : `${formDescriptionId} ${formMessageId}`}
+        aria-describedby={error ? `${formDescriptionId} ${formMessageId}` : `${formDescriptionId}`}
         aria-invalid={!!error}
         {...props}
       />
@@ -98,6 +106,37 @@ const FormControl = React.forwardRef<React.ElementRef<typeof Slot>, React.Compon
   },
 );
 FormControl.displayName = 'FormControl';
+
+const randomId = () => Math.random().toString(36).slice(2, 15);
+
+const FormHints = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement> & { hints: any[] }>(
+  ({ className, hints, ...props }, ref) => {
+    const { setValue } = useFormContext();
+    const { name } = useFormField();
+    const id = React.useId();
+
+    return (
+      <div ref={ref} className={cn('space-y-1', className)} {...props}>
+        {hints.map((hint, index) => (
+          <React.Fragment key={`${id}-${name}-hint-${hint}`}>
+            <Button
+              variant="text"
+              size="xs"
+              className="p-0"
+              onClick={() => {
+                setValue(name, hint);
+              }}
+            >
+              {hint}
+            </Button>
+            {index < hints.length - 1 && <span className="text-muted-foreground">, </span>}
+          </React.Fragment>
+        ))}
+      </div>
+    );
+  },
+);
+FormHints.displayName = 'FormHints';
 
 const FormDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
   ({ className, ...props }, ref) => {
@@ -133,4 +172,4 @@ const FormMessage = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<
 );
 FormMessage.displayName = 'FormMessage';
 
-export { useFormField, Form, FormItem, FormLabel, FormControl, FormDescription, FormMessage, FormField };
+export { useFormField, Form, FormItem, FormLabel, FormControl, FormDescription, FormMessage, FormField, FormHints };
