@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    "./number": "./src/number.ts"
+    "./number": "./src/number.ts",
+    "./react-integration": "./src/integrations/react/index.tsx"
   },
   "typesVersions": {
     "*": {
@@ -30,6 +31,7 @@
     "big.js": "^6.2.1",
     "bignumber.js": "^9.1.2",
     "decimal.js": "^10.4.3",
+    "katex": "^0.16.10",
     "mathjs": "^12.4.1"
   },
   "devDependencies": {
@@ -38,6 +40,7 @@
     "@arki/tsconfig": "workspace:^0.1.0",
     "@arki/vitest-config": "workspace:^0.1.0",
     "@types/big.js": "^6.2.2",
+    "@types/katex": "^0.16.7",
     "prettier": "^3.2.5",
     "typescript": "^5.4.3"
   }

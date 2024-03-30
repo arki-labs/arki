@@ -107,8 +107,6 @@ const FormControl = React.forwardRef<React.ElementRef<typeof Slot>, React.Compon
 );
 FormControl.displayName = 'FormControl';
 
-const randomId = () => Math.random().toString(36).slice(2, 15);
-
 const FormHints = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement> & { hints: any[] }>(
   ({ className, hints, ...props }, ref) => {
     const { setValue } = useFormContext();
@@ -124,7 +122,7 @@ const FormHints = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivE
               size="xs"
               className="p-0"
               onClick={() => {
-                setValue(name, hint);
+                setValue(name, hint, { shouldValidate: false });
               }}
             >
               {hint}
