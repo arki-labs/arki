@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     "./number": "./src/number.ts",
+    "./fractions": "./src/fractions.ts",
     "./react-integration": "./src/integrations/react/index.tsx"
   },
   "typesVersions": {
