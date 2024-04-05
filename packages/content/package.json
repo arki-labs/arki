@@ -30,6 +30,6 @@
     "@arki/prettier-config": "workspace:^0.1.0",
     "@arki/tsconfig": "workspace:^0.1.0",
     "@arki/vitest-config": "workspace:^0.1.0",
-    "typescript": "^5.4.3"
+    "typescript": "^5.4.4"
   }
 }
