@@ -14,12 +14,12 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@vitest/coverage-v8": "^1.3.1",
-    "@vitest/ui": "1.3.1",
-    "vitest": "1.3.1"
+    "@vitest/coverage-v8": "^1.5.2",
+    "@vitest/ui": "1.5.2",
+    "vitest": "1.5.2"
   },
   "devDependencies": {
     "@arki/tsconfig": "workspace:^0.1.0",
-    "typescript": "^5.4.4"
+    "typescript": "^5.4.5"
   }
 }

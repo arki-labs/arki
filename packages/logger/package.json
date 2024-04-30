@@ -14,7 +14,7 @@
     "root": true
   },
   "dependencies": {
-    "pino": "^8.19.0"
+    "pino": "^8.21.0"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:^0.1.0",
@@ -22,6 +22,6 @@
     "@arki/tsconfig": "workspace:^0.1.0",
     "@arki/vitest-config": "workspace:^0.1.0",
     "prettier": "^3.2.5",
-    "typescript": "^5.4.4"
+    "typescript": "^5.4.5"
   }
 }

@@ -33,7 +33,7 @@
     "bignumber.js": "^9.1.2",
     "decimal.js": "^10.4.3",
     "katex": "^0.16.10",
-    "mathjs": "^12.4.1"
+    "mathjs": "^12.4.2"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:^0.1.0",
@@ -43,6 +43,6 @@
     "@types/big.js": "^6.2.2",
     "@types/katex": "^0.16.7",
     "prettier": "^3.2.5",
-    "typescript": "^5.4.4"
+    "typescript": "^5.4.5"
   }
 }

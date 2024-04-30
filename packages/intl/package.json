@@ -22,11 +22,11 @@
     "root": true
   },
   "dependencies": {
-    "cldr-core": "44.1.0",
-    "flag-icons": "7.2.0",
+    "cldr-core": "45.0.0",
+    "flag-icons": "7.2.1",
     "full-icu": "1.5.0",
-    "next-intl": "3.9.3",
-    "react-intl": "6.6.2"
+    "next-intl": "3.12.0",
+    "react-intl": "6.6.5"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:^0.1.0",
@@ -34,6 +34,6 @@
     "@arki/tsconfig": "workspace:^0.1.0",
     "@arki/vitest-config": "workspace:^0.1.0",
     "prettier": "^3.2.5",
-    "typescript": "^5.4.4"
+    "typescript": "^5.4.5"
   }
 }
