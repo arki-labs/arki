@@ -14,7 +14,7 @@
     "root": true
   },
   "dependencies": {
-    "pino": "^8.21.0"
+    "pino": "^9.0.0"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:^0.1.0",
