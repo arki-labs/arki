@@ -80,13 +80,13 @@
     "cmdk": "^1.0.0",
     "next": "^14.2.3",
     "react-day-picker": "8.10.1",
-    "react-icons": "^5.2.0",
+    "react-icons": "^5.2.1",
     "react-spinners": "^0.13.8",
     "react-spring": "^9.7.3",
     "react-textarea-autosize": "8.5.3",
     "react-tweet": "^3.2.1",
     "tailwind-merge": "^2.3.0",
-    "vaul": "^0.9.0"
+    "vaul": "^0.9.1"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:^0.1.0",
