@@ -22,6 +22,7 @@ const config = {
   },
   plugins: [
     '@typescript-eslint',
+    'turbo',
     'import',
     'unused-imports',
     'drizzle',
