@@ -23,9 +23,9 @@
   },
   "dependencies": {
     "cldr-core": "45.0.0",
-    "flag-icons": "7.2.1",
+    "flag-icons": "7.2.3",
     "full-icu": "1.5.0",
-    "next-intl": "3.14.0",
+    "next-intl": "3.15.3",
     "react-intl": "6.6.8"
   },
   "devDependencies": {
@@ -33,7 +33,7 @@
     "@arki/prettier-config": "workspace:^0.1.0",
     "@arki/tsconfig": "workspace:^0.1.0",
     "@arki/vitest-config": "workspace:^0.1.0",
-    "prettier": "^3.3.1",
+    "prettier": "^3.3.2",
     "typescript": "^5.5.3"
   }
 }

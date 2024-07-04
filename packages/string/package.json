@@ -22,7 +22,7 @@
     "@arki/tsconfig": "workspace:^0.1.0",
     "@arki/vitest-config": "workspace:^0.1.0",
     "@types/voca": "^1.4.5",
-    "prettier": "^3.3.1",
+    "prettier": "^3.3.2",
     "typescript": "^5.5.3"
   }
 }
