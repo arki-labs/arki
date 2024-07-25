@@ -35,6 +35,10 @@
     "./spinners": "./src/spinners.tsx",
     "./surface": "./src/surface.tsx",
     "./switch": "./src/switch.tsx",
+    "./table": "./src/table.tsx",
+    "./tabs": "./src/tabs.tsx",
+    "./toggle": "./src/toggle.tsx",
+    "./toggle-group": "./src/toggle-group.tsx",
     "./toolbar": "./src/toolbar.tsx",
     "./tooltip": "./src/tooltip.tsx",
     "./textarea": "./src/textarea.tsx",
@@ -74,8 +78,10 @@
     "@radix-ui/react-separator": "^1.1.0",
     "@radix-ui/react-slot": "^1.1.0",
     "@radix-ui/react-switch": "^1.1.0",
+    "@radix-ui/react-tabs": "^1.1.0",
     "@radix-ui/react-toast": "^1.2.1",
     "@radix-ui/react-toggle": "^1.1.0",
+    "@radix-ui/react-toggle-group": "^1.1.0",
     "@radix-ui/react-tooltip": "^1.1.2",
     "cmdk": "^1.0.0",
     "next": "^14.2.5",
@@ -94,7 +100,7 @@
     "@arki/tsconfig": "workspace:^0.1.0",
     "@arki/vitest-config": "workspace:^0.1.0",
     "prettier": "^3.3.3",
-    "typescript": "^5.5.3"
+    "typescript": "^5.5.4"
   },
   "module:jsx": "src"
 }
