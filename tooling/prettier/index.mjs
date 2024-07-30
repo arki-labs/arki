@@ -6,6 +6,9 @@ import { fileURLToPath } from 'url';
 
 /** @type { PrettierConfig | SortImportsConfig | TailwindConfig } */
 const config = {
+  plugins: ['@ianvs/prettier-plugin-sort-imports', 'prettier-plugin-tailwindcss', 'prettier-plugin-packagejson'],
+  tailwindConfig: fileURLToPath(new URL('../../tooling/tailwind/web.ts', import.meta.url)),
+  tailwindFunctions: ['cn', 'cva'],
   arrowParens: 'avoid',
   bracketSpacing: true,
   jsxSingleQuote: false,
@@ -14,29 +17,43 @@ const config = {
   singleQuote: true,
   tabWidth: 2,
   trailingComma: 'all',
-  plugins: ['@ianvs/prettier-plugin-sort-imports', 'prettier-plugin-tailwindcss', 'prettier-plugin-packagejson'],
-  tailwindConfig: fileURLToPath(new URL('../../tooling/tailwind/web.ts', import.meta.url)),
-  tailwindFunctions: ["cn", "cva"],
   importOrder: [
-    '<BUILTIN_MODULES>',
-    '',
+    '<TYPES>',
     '^(react/(.*)$)|^(react$)|^(react-native(.*)$)',
     '^(next/(.*)$)|^(next$)',
     '^(expo(.*)$)|^(expo$)',
     '<THIRD_PARTY_MODULES>',
     '',
+    '<TYPES>^@arki',
     '^@arki/(.*)$',
+    '<TYPES>^@brandability',
     '^@brandability/(.*)$',
+    '<TYPES>^@strophie',
     '^@strophie/(.*)$',
+    '<TYPES>^@radarama',
     '^@radarama/(.*)$',
     '',
-    '^types$',
+    '<TYPES>^[.|..|~]',
     '^~/',
     '^[../]',
     '^[./]',
   ],
   importOrderParserPlugins: ['typescript', 'jsx', 'decorators-legacy'],
-  importOrderTypeScriptVersion: '5.0.0',
+  importOrderTypeScriptVersion: '4.4.0',
+  overrides: [
+    {
+      files: '*.json.hbs',
+      options: {
+        parser: 'json',
+      },
+    },
+    {
+      files: '*.js.hbs',
+      options: {
+        parser: 'babel',
+      },
+    },
+  ],
 };
 
 export default config;
