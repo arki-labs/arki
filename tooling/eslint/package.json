@@ -52,7 +52,6 @@
   "devDependencies": {
     "@arki/prettier-config": "workspace:^0.1.0",
     "@arki/tsconfig": "workspace:^0.1.0",
-    "@types/eslint": "~8.56.11",
-    "typescript": "^5.5.4"
+    "@types/eslint": "~8.56.11"
   }
 }

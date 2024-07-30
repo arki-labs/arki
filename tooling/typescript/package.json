@@ -4,5 +4,8 @@
   "private": true,
   "files": [
     "base.json"
-  ]
+  ],
+  "dependencies": {
+    "typescript": "^5.5.4"
+  }
 }

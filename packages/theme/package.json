@@ -27,8 +27,6 @@
     "@arki/eslint-config": "workspace:^0.1.0",
     "@arki/prettier-config": "workspace:^0.1.0",
     "@arki/tsconfig": "workspace:^0.1.0",
-    "@arki/vitest-config": "workspace:^0.1.0",
-    "prettier": "^3.3.3",
-    "typescript": "^5.5.4"
+    "@arki/vitest-config": "workspace:^0.1.0"
   }
 }
