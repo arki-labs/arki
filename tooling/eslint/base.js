@@ -1,7 +1,7 @@
 /** @type {import("eslint").Linter.Config} */
 const config = {
   extends: [
-    'turbo',
+    'plugin:turbo/recommended',
     'eslint:recommended',
     'plugin:@typescript-eslint/recommended-type-checked',
     'plugin:@typescript-eslint/stylistic-type-checked',
@@ -33,7 +33,6 @@ const config = {
     'check-file',
   ],
   rules: {
-    'turbo/no-undeclared-env-vars': 'off',
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     '@typescript-eslint/consistent-type-imports': [
       'warn',
