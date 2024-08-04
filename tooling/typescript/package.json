@@ -5,7 +5,18 @@
   "files": [
     "base.json"
   ],
+  "prettier": "@arki/prettier-config",
+  "eslintConfig": {
+    "extends": [
+      "@arki/eslint-config/base"
+    ],
+    "root": true
+  },
   "dependencies": {
     "typescript": "^5.5.4"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:^0.1.0",
+    "@arki/prettier-config": "workspace:^0.1.0"
   }
 }
