@@ -2,8 +2,8 @@
   "name": "@arki/theme",
   "version": "0.1.0",
   "exports": {
-    ".": "./index.ts",
-    "./switcher": "./switcher.tsx"
+    ".": "./src/index.ts",
+    "./switcher": "./src/switcher.tsx"
   },
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
