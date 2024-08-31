@@ -53,7 +53,7 @@ export function ThemeToggle() {
   return (
     <Tooltip delayDuration={500}>
       <TooltipTrigger
-        className="mr-1 h-10 w-10 px-2 opacity-30 transition-opacity hover:bg-inherit  hover:opacity-100"
+        className="mr-1 h-10 w-10 px-2 opacity-30 transition-opacity hover:bg-inherit hover:opacity-100"
         onClick={() => {
           setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
         }}

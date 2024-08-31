@@ -449,7 +449,7 @@ function AutoFormObject<SchemaType extends z.ZodObject<any, any>>({
                       ...zodInputProps,
                       ...field,
                       ...fieldConfigItem.inputProps,
-                      value: !fieldConfigItem.inputProps?.defaultValue ? field.value ?? '' : undefined,
+                      value: !fieldConfigItem.inputProps?.defaultValue ? (field.value ?? '') : undefined,
                     }}
                   />
                 </ParentElement>

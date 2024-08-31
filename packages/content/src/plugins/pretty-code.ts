@@ -1,5 +1,5 @@
-import rehypePrettyCode from 'rehype-pretty-code';
 import type * as unified from 'unified';
+import rehypePrettyCode from 'rehype-pretty-code';
 
 // props to https://rehype-pretty-code.netlify.app/
 

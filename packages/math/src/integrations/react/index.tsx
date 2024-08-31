@@ -1,12 +1,7 @@
-import React, {
-  memo,
-  useEffect,
-  useState,
-  type ComponentPropsWithoutRef,
-  type ElementType,
-  type ReactElement,
-} from 'react';
-import KaTeX, { type KatexOptions, type ParseError } from 'katex';
+import type { KatexOptions, ParseError } from 'katex';
+import type { ComponentPropsWithoutRef, ElementType, ReactElement } from 'react';
+import React, { memo, useEffect, useState } from 'react';
+import KaTeX from 'katex';
 
 const TeX: React.FC<TeXProps> = ({
   children,

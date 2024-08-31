@@ -1,5 +1,6 @@
+import type { Attributes, Body, LogRecord, SeverityKind } from './types';
 import { configuration } from './config';
-import { Severity, type Attributes, type Body, type LogRecord, type SeverityKind } from './types';
+import { Severity } from './types';
 
 export class Logger {
   private severity: SeverityKind;

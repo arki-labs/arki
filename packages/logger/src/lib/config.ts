@@ -1,7 +1,9 @@
-import pino, { type Logger, type LoggerOptions } from 'pino';
+import type { Logger, LoggerOptions } from 'pino';
+import pino from 'pino';
 
+import type { SeverityKind } from './types';
 import { LoggingFormatter } from './formatter';
-import { Severity, type SeverityKind } from './types';
+import { Severity } from './types';
 
 export class Configuration {
   debug?: string[];

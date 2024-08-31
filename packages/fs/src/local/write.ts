@@ -1,5 +1,1 @@
-
-
-
-
-export {appendFile as writeToTheFileEnd} from 'node:fs/promises';
+export { appendFile as writeToTheFileEnd } from 'node:fs/promises';

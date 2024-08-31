@@ -1,5 +1,4 @@
 import { readFileSync } from 'node:fs';
-
 import { decode } from 'iconv-lite';
 
 export const readFile = (pathToFile: string, encoding: string) => {
