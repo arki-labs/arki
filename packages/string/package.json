@@ -1,6 +1,6 @@
 {
   "name": "@arki/string",
-  "private": "true",
+  "private": true,
   "type": "module",
   "exports": {
     "./count-characters": "./src/count/countCharacters.ts"
