@@ -36,7 +36,7 @@ const config = {
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     '@typescript-eslint/consistent-type-imports': [
       'warn',
-      { prefer: 'type-imports', fixStyle: 'separate-type-imports' },
+      { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
     ],
     '@typescript-eslint/no-misused-promises': [2, { checksVoidReturn: { attributes: false } }],
     'unicorn/prevent-abbreviations': 'off',

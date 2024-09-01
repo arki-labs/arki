@@ -2,9 +2,10 @@
 
 import React from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { ControllerRenderProps, DefaultValues, FieldValues, useFieldArray, useForm } from 'react-hook-form';
+import  { type ControllerRenderProps, type DefaultValues, type FieldValues} from 'react-hook-form';
+import { useFieldArray, useForm } from 'react-hook-form';
 import { LuPlus as Plus, LuTrash as Trash } from 'react-icons/lu';
-import { z } from 'zod';
+import  { type z } from 'zod';
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './accordion';
 import { Button } from './button';
@@ -24,7 +25,7 @@ import { Textarea } from './textarea';
  * e.g. "myString" -> "My String"
  */
 function beautifyObjectName(string: string) {
-  let output = string.replace(/([A-Z])/g, ' $1');
+  let output = string.replaceAll(/([A-Z])/g, ' $1');
   output = output.charAt(0).toUpperCase() + output.slice(1);
   return output;
 }
@@ -38,7 +39,7 @@ function getBaseSchema(schema: z.ZodAny | z.ZodEffects<z.ZodAny>): z.ZodAny {
     return getBaseSchema(schema._def.innerType as z.ZodAny);
   }
   if ('schema' in schema._def) {
-    return getBaseSchema(schema._def.schema as z.ZodAny);
+    return getBaseSchema(schema._def.schema);
   }
   return schema as z.ZodAny;
 }
@@ -151,13 +152,13 @@ function zodToHtmlInputProps(
   return inputProps;
 }
 
-export type FieldConfigItem = {
+export interface FieldConfigItem {
   description?: React.ReactNode;
   inputProps?: React.InputHTMLAttributes<HTMLInputElement>;
   fieldType?: keyof typeof INPUT_COMPONENTS | React.FC<AutoFormInputComponentProps>;
 
   renderParent?: (props: { children: React.ReactNode }) => React.ReactElement | null;
-};
+}
 
 export type FieldConfig<SchemaType extends z.infer<z.ZodObject<any, any>>> = {
   // If SchemaType.key is an object, create a nested FieldConfig, otherwise FieldConfigItem
@@ -167,7 +168,7 @@ export type FieldConfig<SchemaType extends z.infer<z.ZodObject<any, any>>> = {
 /**
  * A FormInput component can handle a specific Zod type (e.g. "ZodBoolean")
  */
-export type AutoFormInputComponentProps = {
+export interface AutoFormInputComponentProps {
   zodInputProps: React.InputHTMLAttributes<HTMLInputElement>;
   field: ControllerRenderProps<FieldValues, any>;
   fieldConfigItem: FieldConfigItem;
@@ -175,7 +176,7 @@ export type AutoFormInputComponentProps = {
   isRequired: boolean;
   fieldProps: any;
   zodItem: z.ZodAny;
-};
+}
 
 function AutoFormInput({ label, isRequired, fieldConfigItem, fieldProps }: AutoFormInputComponentProps) {
   return (
@@ -306,11 +307,7 @@ function AutoFormEnum({ label, isRequired, field, fieldConfigItem, zodItem }: Au
   const baseValues = (getBaseSchema(zodItem) as unknown as z.ZodEnum<any>)._def.values;
 
   let values: [string, string][] = [];
-  if (!Array.isArray(baseValues)) {
-    values = Object.entries(baseValues);
-  } else {
-    values = baseValues.map(value => [value, value]);
-  }
+  values = Array.isArray(baseValues) ? baseValues.map(value => [value, value]) : Object.entries(baseValues);
 
   function findItem(value: any) {
     return values.find(item => item[0] === value);
@@ -359,9 +356,7 @@ const INPUT_COMPONENTS = {
  * Define handlers for specific Zod types.
  * You can expand this object to support more types.
  */
-const DEFAULT_ZOD_HANDLERS: {
-  [key: string]: keyof typeof INPUT_COMPONENTS;
-} = {
+const DEFAULT_ZOD_HANDLERS: Record<string, keyof typeof INPUT_COMPONENTS> = {
   ZodBoolean: 'checkbox',
   ZodDate: 'date',
   ZodEnum: 'select',
@@ -449,7 +444,7 @@ function AutoFormObject<SchemaType extends z.ZodObject<any, any>>({
                       ...zodInputProps,
                       ...field,
                       ...fieldConfigItem.inputProps,
-                      value: !fieldConfigItem.inputProps?.defaultValue ? (field.value ?? '') : undefined,
+                      value: fieldConfigItem.inputProps?.defaultValue ? undefined : (field.value ?? ''),
                     }}
                   />
                 </ParentElement>

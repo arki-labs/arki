@@ -3,11 +3,11 @@
 import { Toast, ToastClose, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from './toast';
 import { useToast } from './use-toast';
 
-type Props = {
+interface Props {
   viewport?: {
     className?: string;
   };
-};
+}
 
 export function Toaster({ viewport: { className: viewportClassName } = {} }: Props) {
   const { toasts } = useToast();

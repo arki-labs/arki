@@ -1,5 +1,5 @@
 declare module 'eslint-plugin-react-hooks' {
-  import type { Linter, Rule } from 'eslint';
+  import  { type Linter, type Rule } from 'eslint';
   export const configs: {
     recommended: {
       rules: {
@@ -11,7 +11,7 @@ declare module 'eslint-plugin-react-hooks' {
   export const rules: Record<string, Rule.RuleModule>;
 }
 declare module '@next/eslint-plugin-next' {
-  import type { Linter, Rule } from 'eslint';
+  import  { type Linter, type Rule } from 'eslint';
   export const configs: {
     recommended: { rules: Linter.RulesRecord };
     'core-web-vitals': { rules: Linter.RulesRecord };
@@ -20,7 +20,7 @@ declare module '@next/eslint-plugin-next' {
 }
 
 declare module 'eslint-plugin-turbo' {
-  import type { Linter, Rule } from 'eslint';
+  import  { type Linter, type Rule } from 'eslint';
 
   export const configs: {
     recommended: { rules: Linter.RulesRecord };

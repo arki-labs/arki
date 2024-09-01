@@ -1,6 +1,6 @@
-import type { SendVerificationRequestParams } from '@auth/core/providers';
+import  { type SendVerificationRequestParams } from '@auth/core/providers';
 import { createId } from '@paralleldrive/cuid2';
-import { Resend } from 'resend';
+import  { type Resend } from 'resend';
 
 export const sendVerificationRequest =
   (resend: Resend, template: ({ loginUrl }: { loginUrl: string }) => React.ReactElement | React.ReactNode) =>
@@ -22,7 +22,7 @@ export const sendVerificationRequest =
           'X-Entity-Ref-ID': createId(),
         },
       });
-    } catch (error) {
+    } catch {
       throw new Error(`Verification request email to ${identifier} can't be sent`);
     }
   };
