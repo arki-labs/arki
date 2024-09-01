@@ -21,25 +21,18 @@
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
-  "eslintConfig": {
-    "extends": [
-      "@arki/eslint-config/base",
-      "@arki/eslint-config/react"
-    ],
-    "root": true
-  },
   "dependencies": {
     "big.js": "^6.2.1",
     "bignumber.js": "^9.1.2",
     "decimal.js": "^10.4.3",
     "katex": "^0.16.11",
-    "mathjs": "^13.0.3"
+    "mathjs": "^13.1.1"
   },
   "devDependencies": {
-    "@arki/eslint-config": "workspace:^0.1.0",
-    "@arki/prettier-config": "workspace:^0.1.0",
-    "@arki/tsconfig": "workspace:^0.1.0",
-    "@arki/vitest-config": "workspace:^0.1.0",
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
     "@types/big.js": "^6.2.2",
     "@types/katex": "^0.16.7"
   }

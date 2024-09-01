@@ -1,10 +1,18 @@
-/** @type {import('eslint').Linter.Config} */
-const config = {
-  extends: ['plugin:@next/next/recommended'],
-  rules: {
-    '@next/next/no-html-link-for-pages': 'off',
-  },
-};
+import nextPlugin from "@next/eslint-plugin-next";
 
-// eslint-disable-next-line unicorn/prefer-module
-module.exports = config;
+/** @type {Awaited<import('typescript-eslint').Config>} */
+export default [
+  {
+    files: ["**/*.ts", "**/*.tsx"],
+    plugins: {
+      "@next/next": nextPlugin,
+    },
+    rules: {
+      ...nextPlugin.configs.recommended.rules,
+      ...nextPlugin.configs["core-web-vitals"].rules,
+      // TypeError: context.getAncestors is not a function
+      "@next/next/no-duplicate-head": "off",
+      '@next/next/no-html-link-for-pages': 'off',
+    },
+  },
+];

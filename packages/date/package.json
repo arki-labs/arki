@@ -11,19 +11,13 @@
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
-  "eslintConfig": {
-    "extends": [
-      "@arki/eslint-config/base"
-    ],
-    "root": true
-  },
   "dependencies": {
     "date-fns": "3.6.0"
   },
   "devDependencies": {
-    "@arki/eslint-config": "workspace:^0.1.0",
-    "@arki/prettier-config": "workspace:^0.1.0",
-    "@arki/tsconfig": "workspace:^0.1.0",
-    "@arki/vitest-config": "workspace:^0.1.0"
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*"
   }
 }

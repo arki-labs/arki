@@ -16,6 +16,6 @@
     "prettier-plugin-tailwindcss": "^0.6.6"
   },
   "devDependencies": {
-    "@arki/tsconfig": "workspace:^0.1.0"
+    "@arki/tsconfig": "workspace:*"
   }
 }

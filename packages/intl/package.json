@@ -15,23 +15,17 @@
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
-  "eslintConfig": {
-    "extends": [
-      "@arki/eslint-config/base"
-    ],
-    "root": true
-  },
   "dependencies": {
     "cldr-core": "45.0.0",
     "flag-icons": "7.2.3",
     "full-icu": "1.5.0",
-    "next-intl": "3.17.2",
+    "next-intl": "3.19.0",
     "react-intl": "6.6.8"
   },
   "devDependencies": {
-    "@arki/eslint-config": "workspace:^0.1.0",
-    "@arki/prettier-config": "workspace:^0.1.0",
-    "@arki/tsconfig": "workspace:^0.1.0",
-    "@arki/vitest-config": "workspace:^0.1.0"
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*"
   }
 }

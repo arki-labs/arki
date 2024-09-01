@@ -18,20 +18,14 @@
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
-  "eslintConfig": {
-    "extends": [
-      "@arki/eslint-config/base"
-    ],
-    "root": true
-  },
   "dependencies": {
     "del": "^7.1.0",
     "iconv-lite": "^0.6.3"
   },
   "devDependencies": {
-    "@arki/eslint-config": "workspace:^0.1.0",
-    "@arki/prettier-config": "workspace:^0.1.0",
-    "@arki/tsconfig": "workspace:^0.1.0",
-    "@arki/vitest-config": "workspace:^0.1.0"
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*"
   }
 }

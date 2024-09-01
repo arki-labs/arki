@@ -22,11 +22,6 @@
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
-  "eslintConfig": {
-    "extends": [
-      "@arki/eslint-config/base"
-    ]
-  },
   "dependencies": {
     "@react-email/body": "0.0.10",
     "@react-email/button": "0.0.17",
@@ -48,9 +43,9 @@
     "resend": "^4.0.0"
   },
   "devDependencies": {
-    "@arki/eslint-config": "workspace:^0.1.0",
-    "@arki/prettier-config": "workspace:^0.1.0",
-    "@arki/tsconfig": "workspace:^0.1.0",
-    "@arki/vitest-config": "workspace:^0.1.0"
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*"
   }
 }
