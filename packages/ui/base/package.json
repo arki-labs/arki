@@ -1,6 +1,7 @@
 {
   "name": "@arki/base-ui",
   "version": "0.1.0",
+  "type": "module",
   "exports": {
     "./accordion": "./src/accordion.tsx",
     "./alert": "./src/alert.tsx",

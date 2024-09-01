@@ -94,15 +94,7 @@ export default tseslint.config(
       "@typescript-eslint/no-non-null-assertion": "error",
       'import/consistent-type-specifier-style': ['error', 'prefer-inline'],
       'unicorn/prevent-abbreviations': 'off',
-      'unicorn/filename-case': [
-        'error',
-        {
-          cases: {
-            camelCase: true,
-            kebabCase: true,
-          },
-        },
-      ],
+      'unicorn/filename-case': 'off',
       'unused-imports/no-unused-imports': 'error',
       /**
        * Disallow expressions where the operation doesn't affect the value.

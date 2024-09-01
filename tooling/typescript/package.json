@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "files": [
-    "base.json"
+    "*.json"
   ],
   "dependencies": {
     "typescript": "^5.5.4"

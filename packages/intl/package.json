@@ -1,6 +1,8 @@
 {
   "name": "@arki/intl",
   "version": "0.1.0",
+  "private": true,
+  "type": "module",
   "exports": {
     "./next-client": "./integrations/next/client.ts",
     "./next-middleware": "./integrations/next/middleware.ts",
