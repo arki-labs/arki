@@ -2,35 +2,28 @@
   "name": "@arki/eslint-config",
   "version": "0.1.0",
   "private": true,
-  "license": "MIT",
-  "files": [
-    "./base.js",
-    "./nextjs.js",
-    "./react.js"
-  ],
+  "type": "module",
+  "exports": {
+    "./base": "./base.js",
+    "./nextjs": "./nextjs.js",
+    "./react": "./react.js"
+  },
   "scripts": {
-    "clean": "rm -rf .turbo node_modules",
+    "clean": "git clean -xdf .cache .cache .turbo node_modules",
     "format": "prettier --check . --ignore-path ../../.gitignore",
-    "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
-  "eslintConfig": {
-    "extends": [
-      "./base.js"
-    ],
-    "root": true
-  },
   "dependencies": {
-    "@next/eslint-plugin-next": "^14.2.5",
+    "@eslint/compat": "^1.1.1",
+    "@next/eslint-plugin-next": "^14.2.7",
     "@rushstack/eslint-patch": "^1.10.4",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
-    "eslint": "~8.57.0",
     "eslint-config-airbnb-base": "^15.0.0",
-    "eslint-config-next": "^14.2.5",
+    "eslint-config-next": "^14.2.7",
     "eslint-import-resolver-alias": "^1.1.2",
-    "eslint-import-resolver-typescript": "^3.6.1",
+    "eslint-import-resolver-typescript": "^3.6.3",
     "eslint-plugin-check-file": "^2.8.0",
     "eslint-plugin-drizzle": "^0.2.3",
     "eslint-plugin-eslint-comments": "^3.2.0",
@@ -43,15 +36,16 @@
     "eslint-plugin-tailwindcss": "^3.17.4",
     "eslint-plugin-testing-library": "^6.3.0",
     "eslint-plugin-tsdoc": "^0.3.0",
-    "eslint-plugin-turbo": "^2.0.12",
+    "eslint-plugin-turbo": "^2.1.1",
     "eslint-plugin-unicorn": "^55.0.0",
     "eslint-plugin-unused-imports": "~3.2.0",
     "eslint-plugin-vitest": "^0.5.4",
+    "typescript-eslint": "^8.3.0",
     "vite-plugin-eslint": "^1.8.1"
   },
   "devDependencies": {
     "@arki/prettier-config": "workspace:^0.1.0",
     "@arki/tsconfig": "workspace:^0.1.0",
-    "@types/eslint": "~8.56.11"
+    "@types/eslint": "~8.56.12"
   }
 }

@@ -1,8 +1,11 @@
 {
   "extends": "@arki/tsconfig/base.json",
-  "compilerOptions": {
-    "tsBuildInfoFile": "node_modules/.cache/tsbuildinfo.json"
-  },
-  "include": ["*.ts", "src", "src/templates"],
-  "exclude": ["node_modules"]
+  "include": [
+    "*.ts",
+    "src",
+    "src/templates"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }
