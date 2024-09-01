@@ -14,6 +14,9 @@ import tsdocPlugin from "eslint-plugin-tsdoc";
 import eslintCommentsPlugin from "eslint-plugin-eslint-comments";
 import checkFilePlugin from "eslint-plugin-check-file";
 
+const ignoreFilePath = path.join(import.meta.dirname, "../../.gitignore")
+
+console.warn('ignoreFilePath', ignoreFilePath)
 
 /**
  * All packages that leverage t3-env should use this rule
@@ -47,7 +50,7 @@ export const restrictEnvAccess = tseslint.config(
 
 export default tseslint.config(
   // Ignore files not tracked by VCS and any config files
-  includeIgnoreFile(path.join(import.meta.dirname, "../../.gitignore")),
+  includeIgnoreFile(ignoreFilePath),
   { ignores: ["**/*.config.*"] },
   {
     files: ["**/*.js", "**/*.ts", "**/*.tsx"],

@@ -1,6 +1,17 @@
-import  { type SendVerificationRequestParams } from '@auth/core/providers';
+import type { EmailConfig } from '@auth/core/providers/email';
+import type { Theme } from '@auth/core/types';
 import { createId } from '@paralleldrive/cuid2';
 import  { type Resend } from 'resend';
+
+type SendVerificationRequestParams = {
+  identifier: string
+  url: string
+  expires: Date
+  provider: EmailConfig
+  token: string
+  theme: Theme
+  request: Request
+}
 
 export const sendVerificationRequest =
   (resend: Resend, template: ({ loginUrl }: { loginUrl: string }) => React.ReactElement | React.ReactNode) =>
