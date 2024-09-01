@@ -2,9 +2,12 @@
   "name": "@arki/content",
   "version": "0.1.0",
   "private": true,
-  "license": "MIT",
-  "main": "./index.ts",
-  "types": "./index.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./index.ts"
+    }
+  },
   "scripts": {
     "clean": "git clean -xdf .cache .turbo node_modules",
     "format": "prettier --check . --ignore-path ../../.gitignore",

@@ -1,6 +1,7 @@
 {
   "name": "@arki/date",
   "version": "0.1.0",
+  "type": "module",
   "exports": {
     "./format": "./format.ts"
   },
