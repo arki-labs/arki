@@ -14,7 +14,7 @@ import tsdocPlugin from "eslint-plugin-tsdoc";
 import eslintCommentsPlugin from "eslint-plugin-eslint-comments";
 import checkFilePlugin from "eslint-plugin-check-file";
 
-const ignoreFilePath = path.join(import.meta.dirname, "../../.gitignore")
+const ignoreFilePath = import.meta.dirname ? path.join(import.meta.dirname, "../../.gitignore") : undefined;
 
 console.warn('ignoreFilePath', ignoreFilePath)
 
@@ -50,8 +50,8 @@ export const restrictEnvAccess = tseslint.config(
 
 export default tseslint.config(
   // Ignore files not tracked by VCS and any config files
-  includeIgnoreFile(ignoreFilePath),
-  { ignores: ["**/*.config.*"] },
+  ignoreFilePath ? includeIgnoreFile(ignoreFilePath) : {},
+  { ignores: ["**/*.config.*", '**/tooling/eslint/**'] },
   {
     files: ["**/*.js", "**/*.ts", "**/*.tsx"],
     plugins: {

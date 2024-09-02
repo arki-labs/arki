@@ -1,5 +1,5 @@
 {
-  "extends": "@arki/tsconfig/base.json",
+  "extends": "@arki/tsconfig/internal-package.json",
   "include": [
     "."
   ],
