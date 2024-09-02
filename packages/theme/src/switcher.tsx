@@ -1,6 +1,5 @@
 'use client';
 
-import * as React from 'react';
 import { useTheme } from 'next-themes';
 import { LuMoon as MoonIcon, LuSun as SunIcon } from 'react-icons/lu';
 
