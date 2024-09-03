@@ -1,4 +1,4 @@
-import { UserWorkspaceConfig } from 'vitest/config';
+import { type UserWorkspaceConfig } from 'vitest/config';
 
 export default {
   test: {
