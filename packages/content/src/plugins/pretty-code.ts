@@ -3,7 +3,7 @@ import rehypePrettyCode from 'rehype-pretty-code';
 
 // props to https://rehype-pretty-code.netlify.app/
 
-export const prettyCode: unified.Pluggable<any[]> = [
+export const prettyCode: unified.Pluggable = [
   rehypePrettyCode,
   {
     theme: 'github-light',

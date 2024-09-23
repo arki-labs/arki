@@ -57,6 +57,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/date": "workspace:*",
+    "@arki/nextjs": "workspace:*",
     "@hookform/resolvers": "^3.9.0",
     "@radix-ui/react-accordion": "^1.2.0",
     "@radix-ui/react-alert-dialog": "^1.1.1",
@@ -81,15 +82,14 @@
     "@radix-ui/react-toggle-group": "^1.1.0",
     "@radix-ui/react-tooltip": "^1.1.2",
     "cmdk": "^1.0.0",
-    "next": "^14.2.7",
-    "react-day-picker": "9.0.8",
+    "react-day-picker": "9.1.2",
     "react-icons": "^5.3.0",
     "react-spinners": "^0.14.1",
     "react-spring": "^9.7.4",
     "react-textarea-autosize": "8.5.3",
     "react-tweet": "^3.2.1",
     "tailwind-merge": "^2.5.2",
-    "vaul": "^0.9.1"
+    "vaul": "^0.9.4"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
