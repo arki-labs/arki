@@ -1,4 +1,4 @@
-import { defineDocumentType, defineNestedType } from 'contentlayer/source-files';
+import { defineDocumentType, defineNestedType } from 'contentlayer2/source-files';
 import readingTime from 'reading-time';
 
 const Author = defineNestedType(() => ({
