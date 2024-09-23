@@ -1,13 +1,13 @@
-import type { EmailConfig } from '@auth/core/providers/email';
-import type { Theme } from '@auth/core/types';
+import  { type EmailConfig } from '@auth/core/providers/email';
+import  { type Theme } from '@auth/core/types';
 import { createId } from '@paralleldrive/cuid2';
 import  { type Resend } from 'resend';
 
-type SendVerificationRequestParams = {
+interface SendVerificationRequestParams {
   identifier: string
   url: string
   expires: Date
-  provider: EmailConfig
+  provider: EmailConfig & { from: string }
   token: string
   theme: Theme
   request: Request
