@@ -49,7 +49,7 @@ export const restrictEnvAccess = tseslint.config(
 export default tseslint.config(
   // Ignore files not tracked by VCS and any config files
   ignoreFilePathConfig,
-  { ignores: ['**/*.config.*', '**/tooling/eslint/**'] },
+  { ignores: ['**/*.config.*', '**/tooling/eslint/**', '**/node_modules/**', '**/.next/**', '**/.turbo/**', '**/.cache/**', '**/.git/**', '**/.github/**', '**/.vscode/**', '**/dist/**'] },
   {
     files: ['**/*.js', '**/*.ts', '**/*.tsx'],
     plugins: {

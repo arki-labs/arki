@@ -122,7 +122,7 @@ export const send = async (apiKey: string, payload: CreateEmailOptions) => {
     });
 
     const { headers } = response;
-    const contentType = headers.get('content-type') || '';
+    const contentType = headers.get('content-type') ?? '';
     if (contentType.includes('application/json')) {
       return JSON.stringify(await response.json());
     }

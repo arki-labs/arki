@@ -1,7 +1,7 @@
-import type { Logger, LoggerOptions } from 'pino';
+import  { type Logger, type LoggerOptions } from 'pino';
 import pino from 'pino';
 
-import type { SeverityKind } from './types';
+import  { type SeverityKind } from './types';
 import { LoggingFormatter } from './formatter';
 import { Severity } from './types';
 

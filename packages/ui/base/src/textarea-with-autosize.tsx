@@ -1,4 +1,4 @@
-import type { TextareaAutosizeProps } from 'react-textarea-autosize';
+import  { type TextareaAutosizeProps } from 'react-textarea-autosize';
 import * as React from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 
