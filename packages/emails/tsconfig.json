@@ -1,11 +1,5 @@
 {
   "extends": "@arki/tsconfig/internal-package.json",
-  "include": [
-    "*.ts",
-    "src",
-    "src/templates"
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["*.ts", "src", "src/templates"],
+  "exclude": ["node_modules"]
 }

@@ -1,7 +1,7 @@
-import  { type ButtonHTMLAttributes, type HTMLProps } from 'react';
+import type { ButtonHTMLAttributes, HTMLProps } from 'react';
 import { forwardRef } from 'react';
 
-import  { type ButtonProps } from './button';
+import type { ButtonProps } from './button';
 import { Button } from './button';
 import { cn } from './cn';
 import { Surface } from './surface';

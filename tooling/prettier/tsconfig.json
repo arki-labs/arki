@@ -1,9 +1,5 @@
 {
   "extends": "@arki/tsconfig/base.json",
-  "include": [
-    "."
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["."],
+  "exclude": ["node_modules"]
 }

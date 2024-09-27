@@ -1,10 +1,10 @@
-import baseConfig from "@arki/eslint-config/base";
-import reactConfig from "@arki/eslint-config/react";
+import baseConfig from '@arki/eslint-config/base';
+import reactConfig from '@arki/eslint-config/react';
 
 /** @type {import('typescript-eslint').Config} */
 export default [
   {
-    ignores: ["dist/**"],
+    ignores: ['dist/**'],
   },
   ...baseConfig,
   ...reactConfig,
