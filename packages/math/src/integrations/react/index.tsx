@@ -1,5 +1,5 @@
-import type { KatexOptions, ParseError } from 'katex';
-import type { ComponentPropsWithoutRef, ElementType, ReactElement } from 'react';
+import  { type KatexOptions, type ParseError } from 'katex';
+import  { type ComponentPropsWithoutRef, type ElementType, type ReactElement } from 'react';
 import React, { memo, useEffect, useState } from 'react';
 import KaTeX from 'katex';
 
