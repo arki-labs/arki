@@ -1,1 +1,1 @@
-export * from "@poppinss/utils/string"
+export * from '@poppinss/utils/string';

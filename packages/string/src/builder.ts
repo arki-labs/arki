@@ -1,1 +1,1 @@
-export * from "@poppinss/utils/string_builder"
+export * from '@poppinss/utils/string_builder';
