@@ -1,4 +1,4 @@
-import type { HTMLProps } from 'react';
+import  { type HTMLProps } from 'react';
 import { forwardRef } from 'react';
 
 import { cn } from './cn';

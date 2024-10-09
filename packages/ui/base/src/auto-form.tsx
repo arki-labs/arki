@@ -1,6 +1,6 @@
 'use client';
 
-import type { ControllerRenderProps, DefaultValues, FieldValues } from 'react-hook-form';
+import  { type ControllerRenderProps, type DefaultValues, type FieldValues } from 'react-hook-form';
 import React from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useFieldArray, useForm } from 'react-hook-form';

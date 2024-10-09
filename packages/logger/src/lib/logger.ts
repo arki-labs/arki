@@ -1,4 +1,4 @@
-import type { Attributes, Body, LogRecord, SeverityKind } from './types';
+import  { type Attributes, type Body, type LogRecord, type SeverityKind } from './types';
 import { configuration } from './config';
 import { Severity } from './types';
 
