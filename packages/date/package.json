@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    "./format": "./format.ts"
+    "./format": "./src/format.ts"
   },
   "scripts": {
     "build": "tsc",
@@ -15,7 +15,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "date-fns": "3.6.0"
+    "date-fns": "4.1.0"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
