@@ -14,11 +14,12 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@ianvs/prettier-plugin-sort-imports": "^4.3.1",
-    "prettier": "^3.3.3",
+    "prettier": "catalog:",
     "prettier-plugin-packagejson": "^2.5.3",
     "prettier-plugin-tailwindcss": "^0.6.8"
   },
   "devDependencies": {
-    "@arki/tsconfig": "workspace:*"
+    "@arki/tsconfig": "workspace:*",
+    "typescript": "catalog:"
   }
 }
