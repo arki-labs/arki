@@ -32,6 +32,8 @@ const config = {
     '^@strophie/(.*)$',
     '<TYPES>^@radarama',
     '^@radarama/(.*)$',
+    '<TYPES>^@hyphenate',
+    '^@hyphenate/(.*)$',
     '',
     '<TYPES>^[.|..|~]',
     '^~/',
