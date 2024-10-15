@@ -1,4 +1,4 @@
-import  { type LogRecord, type SeverityText } from './types';
+import type { LogRecord, SeverityText } from './types';
 import { SeverityName } from './types';
 
 const serviceContext = {

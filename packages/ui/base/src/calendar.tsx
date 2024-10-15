@@ -1,6 +1,6 @@
 'use client';
 
-import  { type DayPickerProps } from 'react-day-picker';
+import type { DayPickerProps } from 'react-day-picker';
 import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon } from '@radix-ui/react-icons';
 import { DayPicker } from 'react-day-picker';
 

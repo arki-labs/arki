@@ -1,7 +1,7 @@
-import { type EmailConfig } from '@auth/core/providers/email';
-import { type Theme } from '@auth/core/types';
+import type { EmailConfig } from '@auth/core/providers/email';
+import type { Theme } from '@auth/core/types';
+import type { Resend } from 'resend';
 import { createId } from '@paralleldrive/cuid2';
-import { type Resend } from 'resend';
 
 interface SendVerificationRequestParams {
   identifier: string;

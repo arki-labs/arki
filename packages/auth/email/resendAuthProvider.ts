@@ -1,4 +1,4 @@
-import { type EmailConfig, type EmailUserConfig } from '@auth/core/providers/email';
+import type { EmailConfig, EmailUserConfig } from '@auth/core/providers/email';
 import { Resend } from 'resend';
 
 import { sendVerificationRequest } from './sendVerificationRequest';

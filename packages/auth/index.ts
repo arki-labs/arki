@@ -1,5 +1,5 @@
 /* @see https://github.com/nextauthjs/next-auth/pull/8932 */
-import { type DefaultSession } from '@auth/core/types';
+import type { DefaultSession } from '@auth/core/types';
 
 export { ResendProvider } from './email/resendAuthProvider';
 
