@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./next-client": "./integrations/next/client.ts",
-    "./next-middleware": "./integrations/next/middleware.ts",
-    "./next-navigation": "./integrations/next/navigation.ts",
-    "./next-server": "./integrations/next/server.ts",
-    "./next-shared": "./integrations/next/shared.ts"
+    "./next-client": "./src/integrations/next/client.ts",
+    "./next-middleware": "./src/integrations/next/middleware.ts",
+    "./next-navigation": "./src/integrations/next/navigation.ts",
+    "./next-server": "./src/integrations/next/server.ts",
+    "./next-shared": "./src/integrations/next/shared.ts",
+    "./language": "./src/language.ts"
   },
   "scripts": {
     "build": "tsc",
@@ -20,6 +21,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "all-iso-language-codes": "^1.0.17",
     "cldr-core": "45.0.0",
     "flag-icons": "7.2.3",
     "full-icu": "1.5.0",
