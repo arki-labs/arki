@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    "./flags": "./src/flags/index.ts"
+    "./flags": "./src/flags/index.tsx"
   },
   "scripts": {
     "build": "tsc",
