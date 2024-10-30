@@ -22,11 +22,11 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "all-iso-language-codes": "^1.0.17",
-    "cldr-core": "45.0.0",
+    "cldr-core": "46.0.0",
     "flag-icons": "7.2.3",
     "full-icu": "1.5.0",
-    "next-intl": "3.21.1",
-    "react-intl": "6.8.0"
+    "next-intl": "3.23.5",
+    "react-intl": "6.8.4"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
