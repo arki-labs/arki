@@ -8,7 +8,7 @@ import { Link } from '@react-email/link';
 import { Section } from '@react-email/section';
 import { Text } from '@react-email/text';
 
-interface PlaidVerifyIdentityEmailProps {
+type PlaidVerifyIdentityEmailProps = {
   validationCode?: string;
 }
 

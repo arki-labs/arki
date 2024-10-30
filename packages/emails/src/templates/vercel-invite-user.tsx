@@ -14,7 +14,7 @@ import { Section } from '@react-email/section';
 import { Tailwind } from '@react-email/tailwind';
 import { Text } from '@react-email/text';
 
-interface VercelInviteUserEmailProps {
+type VercelInviteUserEmailProps = {
   username?: string;
   userImage?: string;
   invitedByUsername?: string;

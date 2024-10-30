@@ -25,7 +25,7 @@ export enum SeverityName {
 
 export type SeverityText = keyof typeof SeverityName;
 
-export interface SeverityKind {
+export type SeverityKind = {
   text: SeverityText;
   number: SeverityNumber;
 }
@@ -62,7 +62,7 @@ export class Severity {
   };
 }
 
-export interface LogRecord {
+export type LogRecord = {
   timestamp: number;
   traceId?: string;
   spanId?: string;

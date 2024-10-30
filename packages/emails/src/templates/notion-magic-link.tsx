@@ -7,7 +7,7 @@ import { Link } from '@react-email/link';
 import { Preview } from '@react-email/preview';
 import { Text } from '@react-email/text';
 
-interface NotionMagicLinkEmailProps {
+type NotionMagicLinkEmailProps = {
   loginUrl?: string;
   appUrl?: string;
   appName?: string;

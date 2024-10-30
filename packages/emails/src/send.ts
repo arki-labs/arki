@@ -3,7 +3,7 @@ import type * as React from 'react';
 type RequireAtLeastOne<T> = {
   [K in keyof T]-?: Required<Pick<T, K>> & Partial<Pick<T, Exclude<keyof T, K>>>;
 }[keyof T];
-interface Attachment {
+type Attachment = {
   /** Content of an attached file. */
   content?: string | Buffer;
   /** Name of attached file. */
@@ -12,7 +12,7 @@ interface Attachment {
   path?: string;
 }
 
-interface Tag {
+type Tag = {
   /**
    * The name of the email tag. It can only contain ASCII letters (a–z, A–Z), numbers (0–9), underscores (_), or dashes (-). It can contain no more than 256 characters.
    */
@@ -22,7 +22,7 @@ interface Tag {
    */
   value: string;
 }
-interface EmailRenderOptions {
+type EmailRenderOptions = {
   /**
    * The React component used to write the message.
    *
@@ -42,7 +42,7 @@ interface EmailRenderOptions {
    */
   text?: string;
 }
-interface CreateEmailBaseOptions extends EmailRenderOptions {
+type CreateEmailBaseOptions = {
   /**
    * Filename and content of attachments (max 40mb per email)
    *
@@ -97,7 +97,7 @@ interface CreateEmailBaseOptions extends EmailRenderOptions {
    * @link https://resend.com/docs/api-reference/emails/send-email#body-parameters
    */
   to: string | string[];
-}
+} & EmailRenderOptions
 type CreateEmailOptions = RequireAtLeastOne<EmailRenderOptions> & CreateEmailBaseOptions;
 
 export const send = async (apiKey: string, payload: CreateEmailOptions) => {

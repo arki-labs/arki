@@ -8,7 +8,7 @@ export type { Session } from 'next-auth';
 type UserId = string;
 
 declare module 'next-auth' {
-  interface Session {
+  type Session = {
     user: {
       id: UserId;
     } & DefaultSession['user'];

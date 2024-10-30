@@ -152,7 +152,7 @@ function zodToHtmlInputProps(
   return inputProps;
 }
 
-export interface FieldConfigItem {
+export type FieldConfigItem = {
   description?: React.ReactNode;
   inputProps?: React.InputHTMLAttributes<HTMLInputElement>;
   fieldType?: keyof typeof INPUT_COMPONENTS | React.FC<AutoFormInputComponentProps>;
@@ -168,7 +168,7 @@ export type FieldConfig<SchemaType extends z.infer<z.ZodObject<any, any>>> = {
 /**
  * A FormInput component can handle a specific Zod type (e.g. "ZodBoolean")
  */
-export interface AutoFormInputComponentProps {
+export type AutoFormInputComponentProps = {
   zodInputProps: React.InputHTMLAttributes<HTMLInputElement>;
   field: ControllerRenderProps<FieldValues, any>;
   fieldConfigItem: FieldConfigItem;

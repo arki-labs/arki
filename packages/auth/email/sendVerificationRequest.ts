@@ -3,7 +3,7 @@ import type { Theme } from '@auth/core/types';
 import type { Resend } from 'resend';
 import { createId } from '@paralleldrive/cuid2';
 
-interface SendVerificationRequestParams {
+type SendVerificationRequestParams = {
   identifier: string;
   url: string;
   expires: Date;

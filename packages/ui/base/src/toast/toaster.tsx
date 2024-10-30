@@ -3,7 +3,7 @@
 import { Toast, ToastClose, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from './toast';
 import { useToast } from './use-toast';
 
-interface Props {
+type Props = {
   viewport?: {
     className?: string;
   };
