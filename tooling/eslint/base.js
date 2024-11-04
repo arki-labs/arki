@@ -104,6 +104,7 @@ export default tseslint.config(
       'import/consistent-type-specifier-style': ['error', 'prefer-top-level'],
       'unicorn/prevent-abbreviations': 'off',
       'unicorn/filename-case': 'off',
+      'unicorn/prefer-string-raw': 'off', // This causes issues with Next.js
       'unused-imports/no-unused-imports': 'error',
       /**
        * Disallow expressions where the operation doesn't affect the value.

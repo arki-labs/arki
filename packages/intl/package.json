@@ -6,6 +6,7 @@
   "exports": {
     "./next-client": "./src/integrations/next/client.ts",
     "./next-middleware": "./src/integrations/next/middleware.ts",
+    "./next-routing": "./src/integrations/next/routing.ts",
     "./next-navigation": "./src/integrations/next/navigation.ts",
     "./next-server": "./src/integrations/next/server.ts",
     "./next-shared": "./src/integrations/next/shared.ts",
