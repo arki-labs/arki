@@ -11,7 +11,7 @@ type SendVerificationRequestParams = {
   token: string;
   theme: Theme;
   request: Request;
-}
+};
 
 export const sendVerificationRequest =
   (resend: Resend, template: ({ loginUrl }: { loginUrl: string }) => React.ReactElement | React.ReactNode) =>

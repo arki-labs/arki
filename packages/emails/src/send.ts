@@ -10,7 +10,7 @@ type Attachment = {
   filename?: string | false | undefined;
   /** Path where the attachment file is hosted */
   path?: string;
-}
+};
 
 type Tag = {
   /**
@@ -21,7 +21,7 @@ type Tag = {
    * The value of the email tag. It can only contain ASCII letters (a–z, A–Z), numbers (0–9), underscores (_), or dashes (-). It can contain no more than 256 characters.
    */
   value: string;
-}
+};
 type EmailRenderOptions = {
   /**
    * The React component used to write the message.
@@ -41,7 +41,7 @@ type EmailRenderOptions = {
    * @link https://resend.com/api-reference/emails/send-email#body-parameters
    */
   text?: string;
-}
+};
 type CreateEmailBaseOptions = {
   /**
    * Filename and content of attachments (max 40mb per email)
@@ -97,7 +97,7 @@ type CreateEmailBaseOptions = {
    * @link https://resend.com/docs/api-reference/emails/send-email#body-parameters
    */
   to: string | string[];
-} & EmailRenderOptions
+} & EmailRenderOptions;
 type CreateEmailOptions = RequireAtLeastOne<EmailRenderOptions> & CreateEmailBaseOptions;
 
 export const send = async (apiKey: string, payload: CreateEmailOptions) => {

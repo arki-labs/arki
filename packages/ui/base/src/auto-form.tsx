@@ -158,7 +158,7 @@ export type FieldConfigItem = {
   fieldType?: keyof typeof INPUT_COMPONENTS | React.FC<AutoFormInputComponentProps>;
 
   renderParent?: (props: { children: React.ReactNode }) => React.ReactElement | null;
-}
+};
 
 export type FieldConfig<SchemaType extends z.infer<z.ZodObject<any, any>>> = {
   // If SchemaType.key is an object, create a nested FieldConfig, otherwise FieldConfigItem
@@ -176,7 +176,7 @@ export type AutoFormInputComponentProps = {
   isRequired: boolean;
   fieldProps: any;
   zodItem: z.ZodAny;
-}
+};
 
 function AutoFormInput({ label, isRequired, fieldConfigItem, fieldProps }: AutoFormInputComponentProps) {
   return (

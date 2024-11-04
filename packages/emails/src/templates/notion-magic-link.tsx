@@ -12,7 +12,7 @@ type NotionMagicLinkEmailProps = {
   appUrl?: string;
   appName?: string;
   appDescription?: string;
-}
+};
 
 export const NotionMagicLinkEmail = ({
   loginUrl = 'fake-news',

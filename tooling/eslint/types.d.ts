@@ -21,7 +21,7 @@ declare module 'eslint-plugin-jsx-a11y' {
   export const rules: Record<string, Rule.RuleModule>;
 }
 
-declare module "eslint-plugin-react-compiler" {}
+declare module 'eslint-plugin-react-compiler' {}
 
 declare module 'eslint-plugin-import' {
   import type { Linter, Rule } from 'eslint';

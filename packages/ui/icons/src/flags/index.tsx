@@ -11,7 +11,7 @@ export type FlagProps = {
   hasDropShadow?: boolean;
   hasBorderRadius?: boolean;
   className?: string;
-}
+};
 
 export const Flag: React.FC<FlagProps> = ({
   code = 'NL',
@@ -32,6 +32,4 @@ export const Flag: React.FC<FlagProps> = ({
   );
 };
 
-
-
-export {type Flags} from 'flagpack-core';
+export { type Flags } from 'flagpack-core';

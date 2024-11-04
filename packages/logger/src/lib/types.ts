@@ -28,7 +28,7 @@ export type SeverityText = keyof typeof SeverityName;
 export type SeverityKind = {
   text: SeverityText;
   number: SeverityNumber;
-}
+};
 
 export class Severity {
   static TRACE: SeverityKind = {
@@ -72,4 +72,4 @@ export type LogRecord = {
   body: Body;
   attributes?: Attributes;
   resource?: any;
-}
+};

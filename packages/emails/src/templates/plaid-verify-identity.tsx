@@ -10,7 +10,7 @@ import { Text } from '@react-email/text';
 
 type PlaidVerifyIdentityEmailProps = {
   validationCode?: string;
-}
+};
 
 const baseUrl = process.env['VERCEL_URL'] ? `https://${process.env['VERCEL_URL']}` : '';
 

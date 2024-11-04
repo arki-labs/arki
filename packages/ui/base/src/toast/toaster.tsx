@@ -7,7 +7,7 @@ type Props = {
   viewport?: {
     className?: string;
   };
-}
+};
 
 export function Toaster({ viewport: { className: viewportClassName } = {} }: Props) {
   const { toasts } = useToast();
