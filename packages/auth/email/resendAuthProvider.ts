@@ -6,7 +6,7 @@ import { sendVerificationRequest } from './sendVerificationRequest';
 export function ResendProvider(
   apiKey: string,
   config: EmailUserConfig,
-  sendVerificationRequestTemplate: (conf: { loginUrl: string }) => React.ReactElement | React.ReactNode,
+  sendVerificationRequestTemplate?: (conf: { loginUrl: string }) => React.ReactElement | React.ReactNode,
 ): EmailConfig & { from: string } {
   const resend = new Resend(apiKey);
 
