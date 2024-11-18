@@ -21,8 +21,8 @@
   "dependencies": {
     "@arki/emails": "workspace:*",
     "@arki/nextjs": "workspace:*",
-    "@auth/core": "^0.37.3",
-    "@auth/drizzle-adapter": "^1.7.3",
+    "@auth/core": "^0.37.4",
+    "@auth/drizzle-adapter": "^1.7.4",
     "@paralleldrive/cuid2": "2.2.2",
     "next-auth": "beta",
     "react": "rc",

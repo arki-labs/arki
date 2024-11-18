@@ -24,11 +24,11 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "big.js": "^6.2.1",
+    "big.js": "^6.2.2",
     "bignumber.js": "^9.1.2",
     "decimal.js": "^10.4.3",
     "katex": "^0.16.11",
-    "mathjs": "^13.1.1"
+    "mathjs": "^13.2.2"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
