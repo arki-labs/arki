@@ -13,8 +13,10 @@ type SendVerificationRequestParams = {
   request: Request;
 };
 
-export const sendVerificationRequest =
-  (resend: Resend, template?: ({ loginUrl }: { loginUrl: string }) => React.ReactElement | React.ReactNode) => {
+export const sendVerificationRequest = (
+  resend: Resend,
+  template?: ({ loginUrl }: { loginUrl: string }) => React.ReactElement | React.ReactNode,
+) => {
   async (params: SendVerificationRequestParams) => {
     const { identifier, url, provider } = params;
     const { host } = new URL(url);
@@ -37,6 +39,7 @@ export const sendVerificationRequest =
       throw new Error(`Verification request email to ${identifier} can't be sent`);
     }
   };
+};
 
 /** Email Text body (fallback for email clients that don't render HTML, e.g. feature phones) */
 function text({ url, host }: { url: string; host: string }) {
