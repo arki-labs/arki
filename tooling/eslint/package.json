@@ -33,13 +33,13 @@
     "eslint-plugin-react-hooks": "^5.0.0",
     "eslint-plugin-regexp": "^2.7.0",
     "eslint-plugin-tailwindcss": "^3.17.5",
-    "eslint-plugin-testing-library": "^6.5.0",
-    "eslint-plugin-tsdoc": "^0.3.0",
-    "eslint-plugin-turbo": "^2.3.0",
+    "eslint-plugin-testing-library": "^7.0.0",
+    "eslint-plugin-tsdoc": "^0.4.0",
+    "eslint-plugin-turbo": "^2.3.2",
     "eslint-plugin-unicorn": "^56.0.1",
     "eslint-plugin-unused-imports": "~4.1.4",
     "eslint-plugin-vitest": "^0.5.4",
-    "typescript-eslint": "^8.15.0",
+    "typescript-eslint": "^8.16.0",
     "vite-plugin-eslint": "^1.8.1"
   },
   "devDependencies": {
