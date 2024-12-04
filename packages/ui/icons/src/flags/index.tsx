@@ -23,12 +23,12 @@ export const Flag: React.FC<FlagProps> = ({
   className,
 }: FlagProps) => {
   return (
-    <div
+    <span
       className={`flag ${gradient} size-${size} ${hasBorder ? 'border' : ''} ${hasDropShadow ? 'drop-shadow' : ''} ${hasBorderRadius ? 'border-radius' : ''} ${className ? className.replaceAll(/\s{2,}/g, ' ').trim() : ''}`}
     >
       {/* Depend on the build configs to make the assets available at this location */}
       <img src={`/flags/${size}/${code}.svg`} alt={code} />
-    </div>
+    </span>
   );
 };
 
