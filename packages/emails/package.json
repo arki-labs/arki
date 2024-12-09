@@ -49,5 +49,6 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*"
-  }
+  },
+  "module:jsx": "src"
 }
