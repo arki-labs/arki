@@ -25,8 +25,8 @@
     "@auth/drizzle-adapter": "^1.7.4",
     "@paralleldrive/cuid2": "2.2.2",
     "next-auth": "beta",
-    "react": "rc",
-    "react-dom": "rc",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
