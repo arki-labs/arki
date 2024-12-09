@@ -5,9 +5,9 @@
   "type": "module",
   "exports": {
     ".": {
-      "default": "./index.ts"
+      "default": "./src/index.ts"
     },
-    "./email/schema": "./email/schema.ts"
+    "./email/schema": "./src/email/schema.ts"
   },
   "scripts": {
     "build": "tsc",
