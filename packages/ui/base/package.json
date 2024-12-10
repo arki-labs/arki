@@ -97,7 +97,7 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@types/react": "^19.0.1",
-    "@types/react-dom": "^19.0.1"
+    "@types/react-dom": "^19.0.2"
   },
   "module:jsx": "src"
 }
