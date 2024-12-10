@@ -34,9 +34,6 @@
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*",
-    "@types/mdx": "^2.0.13",
-    "@types/react": "^19.0.1",
-    "@types/react-dom": "^19.0.1"
+    "@arki/vitest-config": "workspace:*"
   }
 }
