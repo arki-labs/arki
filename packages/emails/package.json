@@ -16,10 +16,10 @@
   },
   "scripts": {
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "email dev",
-    "export": "email export",
+    "export": "pnpm email export --dir src/templates",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
+    "studio": "pnpm email dev --dir src/templates --port 3333",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
@@ -39,7 +39,7 @@
     "@react-email/preview": "^0.0.12",
     "@react-email/row": "^0.0.12",
     "@react-email/section": "^0.0.16",
-    "@react-email/tailwind": "^1.0.3",
+    "@react-email/tailwind": "^1.0.4",
     "@react-email/text": "^0.0.11",
     "resend": "^4.0.1"
   },
@@ -47,7 +47,8 @@
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*"
+    "@arki/vitest-config": "workspace:*",
+    "react-email": "3.0.4"
   },
   "module:jsx": "src"
 }
