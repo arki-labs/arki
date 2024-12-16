@@ -26,8 +26,8 @@
     "big.js": "^6.2.2",
     "bignumber.js": "^9.1.2",
     "decimal.js": "^10.4.3",
-    "katex": "^0.16.14",
-    "mathjs": "^14.0.0"
+    "katex": "^0.16.15",
+    "mathjs": "^14.0.1"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
