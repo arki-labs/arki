@@ -1,0 +1,23 @@
+{
+  "name": "@arki/spinners",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*"
+  },
+  "scripts": {
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*"
+  },
+  "module:jsx": "src"
+}
