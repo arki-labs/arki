@@ -1,28 +1,25 @@
-import type { HTMLProps } from 'react';
-import { forwardRef } from 'react';
+import type { ComponentProps } from 'react';
 
 import { cn } from './cn';
 
-export type SurfaceProps = HTMLProps<HTMLDivElement> & {
+export type SurfaceProps = ComponentProps<'div'> & {
   withShadow?: boolean;
   withBorder?: boolean;
 };
 
-export const Surface = forwardRef<HTMLDivElement, SurfaceProps>(
-  ({ children, className, withShadow = true, withBorder = true, ...props }, ref) => {
-    const surfaceClass = cn(
-      'rounded-lg bg-white dark:bg-black',
-      withShadow ? 'shadow-sm' : '',
-      withBorder ? 'border border-neutral-200 dark:border-neutral-800' : '',
-      className,
-    );
+export function Surface({ children, className, withShadow = true, withBorder = true, ...props }: SurfaceProps) {
+  const surfaceClass = cn(
+    'rounded-lg bg-white dark:bg-black',
+    withShadow ? 'shadow-sm' : '',
+    withBorder ? 'border border-neutral-200 dark:border-neutral-800' : '',
+    className,
+  );
 
-    return (
-      <div className={surfaceClass} {...props} ref={ref}>
-        {children}
-      </div>
-    );
-  },
-);
+  return (
+    <div className={surfaceClass} {...props}>
+      {children}
+    </div>
+  );
+}
 
 Surface.displayName = 'Surface';
