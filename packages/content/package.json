@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./*": "./src/*.ts",
-    "./components/*": "./src/components/*.tsx"
+    "./*": [
+      "./src/*.ts",
+      "./src/*.tsx"
+    ]
   },
   "typesVersions": {
     "*": {
