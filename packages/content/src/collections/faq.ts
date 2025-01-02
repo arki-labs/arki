@@ -4,6 +4,13 @@ import rehypeSlug from 'rehype-slug';
 import { prettyCode } from '../plugins/pretty-code';
 import { autolinkHeadings } from '../plugins/autolink-headings';
 
+export type Faq = {
+  title: string;
+  order: number;
+  mdx: string;
+  slug: string;
+};
+
 export const faqs = defineCollection({
   name: "FAQs",
   directory: "src/content/faq",
@@ -23,3 +30,5 @@ export const faqs = defineCollection({
     };
   },
 });
+
+export type FaqCollectionType = typeof faqs;

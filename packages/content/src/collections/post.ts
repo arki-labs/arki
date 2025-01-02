@@ -76,6 +76,7 @@ export type Post = {
     blurDataURL: string;
   };
   url: string;
+  slug: string;
   _meta: Meta;
 };
 
@@ -117,9 +118,12 @@ export const posts = defineCollection({
       lastModification,
       image,
       url: `/posts/${post._meta.path}`,
+      slug: post._meta.path,
     };
   },
   onSuccess: async documents => {
     await Promise.all([withoutBody(documents, '.generated'), searchIndex(documents, '.generated')]);
   },
 });
+
+export type PostCollectionType = typeof posts;

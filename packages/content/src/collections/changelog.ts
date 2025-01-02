@@ -37,3 +37,5 @@ export const changelogs = defineCollection({
     };
   },
 });
+
+export type ChangelogCollectionType = typeof changelogs;
