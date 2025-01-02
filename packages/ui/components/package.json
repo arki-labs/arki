@@ -3,8 +3,14 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    "./coming-soon": "./src/coming-soon.tsx",
-    "./theme-switcher": "./src/theme-switcher.tsx"
+    "./*": "./src/*.tsx"
+  },
+  "typesVersions": {
+    "*": {
+      "./*": [
+        "./*"
+      ]
+    }
   },
   "scripts": {
     "clean": "git clean -xdf .cache .turbo dist node_modules",

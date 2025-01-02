@@ -6,6 +6,13 @@
     "./flags": "./src/flags/index.tsx",
     "./*": "./src/*.ts"
   },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "src/*"
+      ]
+    }
+  },
   "scripts": {
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",

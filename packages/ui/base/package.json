@@ -3,48 +3,16 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    "./accordion": "./src/accordion.tsx",
-    "./alert": "./src/alert.tsx",
-    "./auto-form": "./src/auto-form.tsx",
-    "./avatar": "./src/avatar.tsx",
-    "./badge": "./src/badge.tsx",
-    "./breadcrumb": "./src/breadcrumb.tsx",
-    "./button": "./src/button.tsx",
-    "./calendar": "./src/calendar.tsx",
-    "./card": "./src/card.tsx",
-    "./checkbox": "./src/checkbox.tsx",
     "./cn": "./src/cn.ts",
-    "./collapsible": "./src/collapsible.tsx",
-    "./command": "./src/command.tsx",
-    "./context-menu": "./src/context-menu.tsx",
-    "./date-picker": "./src/date-picker.tsx",
-    "./dialog": "./src/dialog.tsx",
-    "./drawer": "./src/drawer.tsx",
-    "./dropdown-menu": "./src/dropdown-menu.tsx",
-    "./form": "./src/form.tsx",
-    "./hover-card": "./src/hover-card.tsx",
-    "./input": "./src/input.tsx",
-    "./label": "./src/label.tsx",
-    "./pagination": "./src/pagination.tsx",
-    "./panel": "./src/panel.tsx",
-    "./popover": "./src/popover.tsx",
-    "./radio-group": "./src/radio-group.tsx",
-    "./select": "./src/select.tsx",
-    "./separator": "./src/separator.tsx",
-    "./sheet": "./src/sheet.tsx",
-    "./skeleton": "./src/skeleton.tsx",
-    "./spinners": "./src/spinners.tsx",
-    "./surface": "./src/surface.tsx",
-    "./switch": "./src/switch.tsx",
-    "./table": "./src/table.tsx",
-    "./tabs": "./src/tabs.tsx",
-    "./toggle": "./src/toggle.tsx",
-    "./toggle-group": "./src/toggle-group.tsx",
-    "./toolbar": "./src/toolbar.tsx",
-    "./tooltip": "./src/tooltip.tsx",
-    "./textarea": "./src/textarea.tsx",
-    "./textarea-with-autosize": "./src/textarea-with-autosize.tsx",
-    "./toast": "./src/toast/index.ts"
+    "./toast": "./src/toast/index.ts",
+    "./*": "./src/*.tsx"
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "src/*"
+      ]
+    }
   },
   "scripts": {
     "clean": "git clean -xdf .cache .turbo dist node_modules",
@@ -56,7 +24,6 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/date": "workspace:*",
-    "@arki/nextjs": "workspace:*",
     "@hookform/resolvers": "^3.9.1",
     "@radix-ui/react-accordion": "^1.2.2",
     "@radix-ui/react-alert-dialog": "^1.1.2",
