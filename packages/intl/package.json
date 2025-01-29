@@ -21,19 +21,18 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "all-iso-language-codes": "^1.0.18",
+    "all-iso-language-codes": "^1.0.19",
     "cldr-core": "46.1.0",
-    "flag-icons": "7.2.3",
     "full-icu": "1.5.0",
     "next-intl": "3.26.3",
-    "react-intl": "7.0.4"
+    "react-intl": "7.1.5"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/react": "^19.0.4",
-    "@types/react-dom": "^19.0.2"
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3"
   }
 }
