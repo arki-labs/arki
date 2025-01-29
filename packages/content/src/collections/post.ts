@@ -7,7 +7,6 @@ import { remarkCodeHike } from '@code-hike/mdx';
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
 import readingTime from 'reading-time';
-import rehypeSlug from 'rehype-slug';
 import remarkGfm from 'remark-gfm';
 
 import theme from '../lib/ch-theme.json' with { type: 'json' };
@@ -16,6 +15,7 @@ import mdxEmbedder from '../lib/mdxEmbedder';
 import searchIndex from '../lib/searchIndex';
 import staticImages, { staticCoverImage } from '../lib/static-images';
 import withoutBody from '../lib/withoutBody';
+import { addIdToHeadings } from '../plugins/add-id-to-headings';
 
 const exec = promisify(syncExec);
 
@@ -92,7 +92,7 @@ export const posts = defineCollection({
         appender.directory('./components', directory);
       },
       rehypePlugins: [
-        rehypeSlug,
+        addIdToHeadings,
         [
           staticImages,
           {

@@ -1,8 +1,6 @@
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
-import rehypeSlug from 'rehype-slug';
-import { prettyCode } from '../plugins/pretty-code';
-import { autolinkHeadings } from '../plugins/autolink-headings';
+import { addIdToHeadings } from '../plugins/add-id-to-headings';
 
 export type Legal = {
   title: string;
@@ -21,7 +19,7 @@ export const legals = defineCollection({
   }),
   transform: async (document, context) => {
     const mdx = await compileMDX(context, document, {
-      rehypePlugins: [rehypeSlug, prettyCode, autolinkHeadings],
+      rehypePlugins: [addIdToHeadings],
     });
     return {
       ...document,
