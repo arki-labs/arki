@@ -10,7 +10,8 @@
     "./next-navigation": "./src/integrations/next/navigation.ts",
     "./next-server": "./src/integrations/next/server.ts",
     "./next-shared": "./src/integrations/next/shared.ts",
-    "./language": "./src/language.ts"
+    "./language": "./src/language.ts",
+    "./dictionaries": "./src/dictionaries.ts"
   },
   "scripts": {
     "clean": "git clean -xdf .cache .turbo dist node_modules",
