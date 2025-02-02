@@ -22,10 +22,10 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "ioredis": "^5.4.2",
-    "keyv": "^5.2.3",
     "@keyv/redis": "4.2.0",
-    "@unkey/ratelimit": "^0.5.4"
+    "@unkey/ratelimit": "^0.5.4",
+    "ioredis": "^5.4.2",
+    "keyv": "^5.2.3"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
