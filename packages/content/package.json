@@ -25,6 +25,7 @@
     "@arki/base-ui": "workspace:*",
     "@arki/date": "workspace:*",
     "@arki/react-hooks": "workspace:*",
+    "@arki/rss": "workspace:*",
     "@arki/ui": "workspace:*",
     "@code-hike/mdx": "0.9.0",
     "@content-collections/core": "0.8.0",

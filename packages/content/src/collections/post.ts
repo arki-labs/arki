@@ -1,14 +1,15 @@
+import { remarkCodeHike } from '@code-hike/mdx';
+import type { Meta } from '@content-collections/core';
+import { defineCollection } from '@content-collections/core';
+import { compileMDX } from '@content-collections/mdx';
 import { exec as syncExec } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { Meta } from '@content-collections/core';
-import type { z as Z } from 'zod';
-import { remarkCodeHike } from '@code-hike/mdx';
-import { defineCollection } from '@content-collections/core';
-import { compileMDX } from '@content-collections/mdx';
 import readingTime from 'reading-time';
 import remarkGfm from 'remark-gfm';
+import type { z as Z } from 'zod';
 
+import { RSS } from '@arki/rss';
 import theme from '../lib/ch-theme.json' with { type: 'json' };
 import resolveImageBlurDataURL from '../lib/imageBlurDataURL';
 import mdxEmbedder from '../lib/mdxEmbedder';
@@ -127,3 +128,41 @@ export const posts = defineCollection({
 });
 
 export type PostCollectionType = typeof posts;
+
+export function buildPostFeed(
+  items: Post[],
+  {
+    appTitle,
+    appDomain,
+    appLink,
+}: {
+  appTitle: string;
+  appDomain: string;
+  appLink: string;
+}) {
+  const feed = new RSS({
+    title: appTitle,
+    description: appTitle + ' blog feed',
+    generator: appDomain,
+    feed_url: appLink + '/posts/feed.xml',
+    site_url: appLink,
+    managingEditor: `ping@${appDomain} (${appTitle} Team)`,
+    webMaster: `ping@${appDomain} (${appTitle} Team)`,
+    copyright: `Copyright ${new Date().getFullYear().toString()}, ${appTitle}`,
+    language: 'en-US',
+    pubDate: new Date().toUTCString(),
+    ttl: 60,
+  });
+
+  items.map(post => {
+    feed.item({
+      title: post.title,
+      description: post.description,
+      url: `${appLink}/posts/${post.slug}`,
+      author: post.author.name,
+      date: post.publishedAt,
+    });
+  });
+
+  return feed.xml({ indent: true });
+}
