@@ -6,11 +6,11 @@ import { cva } from 'class-variance-authority';
 import { cn } from './cn';
 
 const buttonVariants = cva(
-  "outline-ring/50 ring-ring/10 dark:outline-ring/40 dark:ring-ring/20 inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-[color,box-shadow] focus:outline-none focus-visible:ring focus-visible:ring-4 focus-visible:ring-blue-500/75 focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 aria-invalid:focus-visible:ring-0 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "outline-ring/50 ring-ring/10 dark:outline-ring/40 dark:ring-ring/20 inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-[color,box-shadow] focus:outline-hidden focus-visible:ring focus-visible:ring-4 focus-visible:ring-blue-500/75 focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 aria-invalid:focus-visible:ring-0 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm',
+        default: 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs',
         destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-xs',
         outline: 'border-input bg-background hover:bg-accent hover:text-accent-foreground border shadow-xs',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80 shadow-xs',

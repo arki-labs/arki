@@ -18,7 +18,7 @@ const EmbeddedCard = ({ href, className, children }: Props) => (
       rel="noreferrer"
       className={clsx(
         'group mb-2 block space-y-2 rounded-md p-5 shadow-md',
-        'border-b border-l-8 border-r border-t',
+        'border-t border-r border-b border-l-8',
         'border-base-300 dark:border-base-600',
         'hover:border-primary-600 dark:hover:border-primary-400',
         className,
@@ -37,7 +37,7 @@ type IconProps = {
 const EmbeddedIcon = ({ icon: Icon, className }: IconProps) => (
   <Icon
     className={clsx(
-      'flex-shrink-0 stroke-2 group-hover:stroke-[3px]',
+      'shrink-0 stroke-2 group-hover:stroke-[3px]',
       'text-base-400 dark:text-base-500',
       'group-hover:text-primary-600 dark:group-hover:text-primary-400',
       className,

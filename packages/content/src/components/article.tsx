@@ -19,14 +19,14 @@ export function Article({ post }: { post: Post }) {
     <article className="relative mx-auto flex max-w-prose flex-col gap-8">
       <div className="grid w-full gap-3">
         <h1 className="font-cal mb-5 text-3xl">{post.title}</h1>
-        <figure className="aspect-video relative w-full overflow-hidden rounded-lg border border-border">
+        <figure className="border-border relative aspect-video w-full overflow-hidden rounded-lg border">
           <Image
             src={post.image.url}
             blurDataURL={post.image.blurDataURL}
             placeholder="blur"
             fill
             alt={post.title}
-            className="border-base-200 dark:border-base-700 h-40 w-64 flex-shrink-0 rounded-md border-2 object-cover"
+            className="border-base-200 dark:border-base-700 h-40 w-64 shrink-0 rounded-md border-2 object-cover"
           />
         </figure>
         <div className="flex items-center gap-3">
@@ -34,11 +34,11 @@ export function Article({ post }: { post: Post }) {
             <AvatarImage src={post.author.avatar} />
             <AvatarFallback>{getNameInitials(post.author.name)}</AvatarFallback>
           </Avatar>
-          <div className="text-sm font-light text-muted-foreground">
+          <div className="text-muted-foreground text-sm font-light">
             <Link
               href={post.author.url ?? '#'}
               target="_blank"
-              className="cursor-pointer font-medium text-foreground hover:underline"
+              className="text-foreground cursor-pointer font-medium hover:underline"
             >
               {post.author.name}
             </Link>

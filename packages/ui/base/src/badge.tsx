@@ -6,14 +6,14 @@ import { cva } from 'class-variance-authority';
 import { cn } from './cn';
 
 const badgeVariants = cva(
-  'aria-invalid:focus-visible:ring-0 inline-flex w-fit shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-md border px-2 py-0.5 text-xs font-semibold outline-ring/50 ring-ring/10 transition-[color,box-shadow] focus-visible:outline-1 focus-visible:ring-4 dark:outline-ring/40 dark:ring-ring/20 [&>svg]:pointer-events-none [&>svg]:size-3',
+  'outline-ring/50 ring-ring/10 dark:outline-ring/40 dark:ring-ring/20 inline-flex w-fit shrink-0 items-center justify-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold whitespace-nowrap transition-[color,box-shadow] focus-visible:ring-4 focus-visible:outline-1 aria-invalid:focus-visible:ring-0 [&>svg]:pointer-events-none [&>svg]:size-3',
   {
     variants: {
       variant: {
-        default: 'border-transparent bg-primary text-primary-foreground shadow-sm [a&]:hover:bg-primary/90',
-        secondary: 'border-transparent bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90',
+        default: 'bg-primary text-primary-foreground [a&]:hover:bg-primary/90 border-transparent shadow-xs',
+        secondary: 'bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90 border-transparent',
         destructive:
-          'border-transparent bg-destructive text-destructive-foreground shadow-sm [a&]:hover:bg-destructive/90',
+          'bg-destructive text-destructive-foreground [a&]:hover:bg-destructive/90 border-transparent shadow-xs',
         outline: 'text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground',
       },
     },
