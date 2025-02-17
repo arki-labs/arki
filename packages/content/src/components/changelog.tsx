@@ -16,7 +16,7 @@ export function ChangelogPagination({ prev, next }: { prev?: Changelog; next?: C
         <div className="w-1/2 flex-1 text-left">
           <Button asChild variant="link">
             <Link href={`/changelog/${prev.slug}`} className="group">
-              <ChevronLeft className="mr-2 h-4 w-4 text-muted-foreground group-hover:text-foreground" />
+              <ChevronLeft className="text-muted-foreground group-hover:text-foreground mr-2 h-4 w-4" />
               <span className="truncate">{prev.title}</span>
             </Link>
           </Button>
@@ -29,7 +29,7 @@ export function ChangelogPagination({ prev, next }: { prev?: Changelog; next?: C
           <Button asChild variant="link">
             <Link href={`/changelog/${next.slug}`} className="group">
               <span className="truncate">{next.title}</span>
-              <ChevronRight className="ml-2 h-4 w-4 text-muted-foreground group-hover:text-foreground" />
+              <ChevronRight className="text-muted-foreground group-hover:text-foreground ml-2 h-4 w-4" />
             </Link>
           </Button>
         </div>
@@ -44,13 +44,20 @@ export function ChangelogCard({ post }: { post: Changelog }) {
   return (
     <article className="relative mx-auto flex max-w-prose flex-col gap-8">
       <div className="grid w-full gap-3">
-        <p className="font-mono text-sm text-muted-foreground">{toHumanReadableDate(new Date(post.publishedAt))}</p>
+        <p className="text-muted-foreground font-mono text-sm">{toHumanReadableDate(new Date(post.publishedAt))}</p>
         <h1 className="font-cal mb-5 text-3xl">{post.title}</h1>
-        <div className="aspect-video relative w-full overflow-hidden rounded-lg border border-border">
-          <Image src={post.image} fill={true} alt={post.title} className="object-cover" />
+        <div className="border-border relative aspect-video w-full overflow-hidden rounded-lg border">
+          <Image
+            src={post.image.url}
+            fill={true}
+            alt={post.title}
+            className="object-cover"
+            blurDataURL={post.image.blurDataURL}
+            placeholder="blur"
+          />
         </div>
       </div>
-      <Mdx code={post.mdx} />
+      <Mdx code={post.content.mdx} />
     </article>
   );
 }

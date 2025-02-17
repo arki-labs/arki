@@ -17,7 +17,7 @@ export function Timeline({ title, description, children, actions }: TimelineProp
         <div className="md:col-span-1" />
         <div className="flex items-end justify-between gap-3 md:col-span-4">
           <div className="grid gap-4">
-            <h1 className="font-cal text-4xl text-foreground">{title}</h1>
+            <h1 className="font-cal text-foreground text-4xl">{title}</h1>
             <p className="text-muted-foreground">{description}</p>
           </div>
           <div>{actions}</div>
@@ -34,25 +34,33 @@ type ArticleProps = {
   imageSrc: string;
   title: string;
   children?: React.ReactNode;
+  blurDataURL?: string;
 };
 
-function Article({ publishedAt, imageSrc, title, children, href }: ArticleProps) {
+function Article({ publishedAt, imageSrc, title, children, href, blurDataURL }: ArticleProps) {
   return (
     <article className="grid grid-cols-1 gap-4 md:grid-cols-5 md:gap-6">
       <div className="relative row-span-2">
         <div className="sticky top-20">
-          <time className="order-2 font-mono text-sm text-muted-foreground md:order-1 md:col-span-1">
+          <time className="text-muted-foreground order-2 font-mono text-sm md:order-1 md:col-span-1">
             {toHumanReadableDate(publishedAt)}
           </time>
         </div>
       </div>
-      <div className="aspect-video relative order-1 w-full overflow-hidden rounded-md border border-border md:order-2 md:col-span-4">
+      <div className="border-border relative order-1 aspect-video h-full w-full overflow-hidden rounded-md border md:order-2 md:col-span-4">
         <Link href={href}>
-          <Image src={imageSrc} fill={true} alt={title} className="object-cover" />
+          <Image
+            src={imageSrc}
+            fill={true}
+            alt={title}
+            className="object-cover"
+            blurDataURL={blurDataURL}
+            placeholder="blur"
+          />
         </Link>
       </div>
       <div className="order-3 grid grid-cols-1 gap-4 md:col-span-4 md:col-start-2">
-        <h2 className="font-cal text-2xl text-foreground">{title}</h2>
+        <h2 className="font-cal text-foreground text-2xl">{title}</h2>
         {children}
       </div>
     </article>

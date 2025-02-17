@@ -1,19 +1,41 @@
+import path from 'node:path';
+import type { Meta } from '@content-collections/core';
+import { remarkCodeHike } from '@code-hike/mdx';
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
-import readingTime from 'reading-time';
+import remarkGfm from 'remark-gfm';
 
-import { RSS } from '@arki/rss';
-
+import theme from '../lib/ch-theme.json' with { type: 'json' };
+import resolveImageBlurDataURL from '../lib/imageBlurDataURL';
+import mdxEmbedder from '../lib/mdxEmbedder';
+import staticImages, { staticCoverImage } from '../lib/static-images';
 import { addIdToHeadings } from '../plugins/add-id-to-headings';
+
+const changelogDirectory = 'src/content/changelog';
+
+type ImageParams = { image: string; directory: string };
+
+async function collectImageInformation({ image, directory }: ImageParams) {
+  const url = await staticCoverImage(changelogDirectory, 'public/changelog', '/changelog', directory, image);
+  const blurDataURL = await resolveImageBlurDataURL(changelogDirectory, directory, image);
+  return { url, blurDataURL };
+}
 
 export type Changelog = {
   title: string;
   description: string;
-  image: string;
   publishedAt: Date;
-  mdx: string;
+  content: {
+    mdx: string;
+    raw: string;
+  };
+  image: {
+    url: string;
+    blurDataURL: string;
+  };
+  url: string;
   slug: string;
-  readingTime: string;
+  _meta: Meta;
 };
 
 export const changelogs = defineCollection({
@@ -26,55 +48,42 @@ export const changelogs = defineCollection({
     image: z.string(),
     publishedAt: z.coerce.date(),
   }),
-  transform: async (document, context) => {
-    const mdx = await compileMDX(context, document, {
-      rehypePlugins: [addIdToHeadings],
+  transform: async (document, ctx) => {
+    const mdx = await compileMDX(ctx, document, {
+      files: appender => {
+        const directory = path.join(changelogDirectory, document._meta.directory, 'components');
+        appender.directory('./components', directory);
+      },
+      rehypePlugins: [
+        addIdToHeadings,
+        [
+          staticImages,
+          {
+            publicDir: path.join('public', 'changelog'),
+            resourcePath: '/changelog',
+            sourceRoot: changelogDirectory,
+          },
+        ],
+      ],
+      remarkPlugins: [remarkGfm, mdxEmbedder, [remarkCodeHike, { theme, showCopyButton: true, autoImport: true }]],
     });
+
+    const image = await ctx.cache(
+      { image: document.image, directory: document._meta.directory },
+      collectImageInformation,
+    );
+
     return {
       ...document,
-      mdx,
-      slug: document._meta.fileName.replace(/\.mdx$/, ''),
-      readingTime: readingTime(document.content).text,
+      content: {
+        mdx,
+        raw: document.content,
+      },
+      image,
+      url: `/changelog/${document._meta.path}`,
+      slug: document._meta.path,
     };
   },
 });
 
 export type ChangelogCollectionType = typeof changelogs;
-
-export function buildChangelogFeed(
-  items: Changelog[],
-  {
-    appTitle,
-    appDomain,
-    appLink,
-  }: {
-    appTitle: string;
-    appDomain: string;
-    appLink: string;
-  },
-) {
-  const feed = new RSS({
-    title: appTitle,
-    description: appTitle + ' changelog feed',
-    generator: appTitle,
-    feed_url: appLink + '/changelog/feed.xml',
-    site_url: appLink,
-    managingEditor: `ping@${appDomain} (${appTitle} Team)`,
-    webMaster: `ping@${appDomain} (${appTitle} Team)`,
-    copyright: `Copyright ${new Date().getFullYear().toString()}, ${appTitle}`,
-    language: 'en-US',
-    pubDate: new Date().toUTCString(),
-    ttl: 60,
-  });
-
-  items.map(post => {
-    feed.item({
-      title: post.title,
-      description: post.description,
-      url: `${appLink}/changelog/${post.slug}`,
-      author: appTitle + ' Team',
-      date: post.publishedAt,
-    });
-  });
-  return feed.xml({ indent: true });
-}
