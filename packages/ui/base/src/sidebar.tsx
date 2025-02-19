@@ -4,8 +4,8 @@ import type { VariantProps } from 'class-variance-authority';
 import * as React from 'react';
 import { Slot } from '@radix-ui/react-slot';
 import { cva } from 'class-variance-authority';
-import { PanelLeftCloseIcon, PanelLeftOpenIcon } from 'lucide-react';
 
+import { PanelLeftCloseIcon, PanelLeftOpenIcon } from '@arki/icons';
 import { useIsMobile } from '@arki/react-hooks/mobile';
 
 import { Button } from './button';

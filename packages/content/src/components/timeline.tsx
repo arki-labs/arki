@@ -1,6 +1,6 @@
 import Image from 'next/image';
-import Link from 'next/link';
 
+import type { IntlLink } from '@arki/intl/next-navigation';
 import { toHumanReadableDate } from '@arki/date/format';
 
 type TimelineProps = {
@@ -35,9 +35,10 @@ type ArticleProps = {
   title: string;
   children?: React.ReactNode;
   blurDataURL?: string;
+  Link: IntlLink;
 };
 
-function Article({ publishedAt, imageSrc, title, children, href, blurDataURL }: ArticleProps) {
+function Article({ publishedAt, imageSrc, title, children, href, blurDataURL, Link }: ArticleProps) {
   return (
     <article className="grid grid-cols-1 gap-4 md:grid-cols-5 md:gap-6">
       <div className="relative row-span-2">

@@ -1,6 +1,10 @@
+import type { createNavigation } from 'next-intl/navigation';
+
 export {
-  createSharedPathnamesNavigation,
   createLocalizedPathnamesNavigation,
-  type Pathnames,
   createNavigation,
+  createSharedPathnamesNavigation,
+  type Pathnames,
 } from 'next-intl/navigation';
+
+export type IntlLink = ReturnType<typeof createNavigation>['Link'];

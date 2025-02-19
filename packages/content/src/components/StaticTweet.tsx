@@ -1,4 +1,4 @@
-import { Twitter } from 'lucide-react';
+import { XIcon } from '@arki/icons';
 
 import type { Tweet } from '../lib/mdxEmbedder/twitter';
 import DateTime from './DateTime';
@@ -10,7 +10,7 @@ type Props = {
 
 export const StaticTweet = ({ tweet }: Props) => (
   <EmbeddedCard href={tweet.url} className="gap-5">
-    <EmbeddedCard.Title icon={Twitter}>
+    <EmbeddedCard.Title icon={XIcon}>
       <p className="text-base-500 dark:text-base-400">
         Tweet from <DateTime value={tweet.createdAt} />
       </p>

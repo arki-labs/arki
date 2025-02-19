@@ -1,5 +1,6 @@
 import * as React from 'react';
-import { ChevronLeftIcon, ChevronRightIcon, MoreHorizontalIcon } from 'lucide-react';
+
+import { ChevronLeftIcon, ChevronRightIcon, MoreHorizontalIcon } from '@arki/icons';
 
 import { Button, buttonVariants } from './button';
 import { cn } from './cn';

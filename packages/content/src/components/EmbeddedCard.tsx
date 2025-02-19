@@ -1,8 +1,8 @@
-import type { LucideProps } from 'lucide-react';
-import type { ComponentType, ReactNode } from 'react';
-import clsx from 'clsx';
+import type { ReactNode } from 'react';
 
+import type { LucideIcon } from '@arki/icons';
 import { AvatarImage } from '@arki/base-ui/avatar';
+import { cn } from '@arki/base-ui/cn';
 
 type Props = {
   href: string;
@@ -16,7 +16,7 @@ const EmbeddedCard = ({ href, className, children }: Props) => (
       href={href}
       target="_blank"
       rel="noreferrer"
-      className={clsx(
+      className={cn(
         'group mb-2 block space-y-2 rounded-md p-5 shadow-md',
         'border-t border-r border-b border-l-8',
         'border-base-300 dark:border-base-600',
@@ -30,13 +30,13 @@ const EmbeddedCard = ({ href, className, children }: Props) => (
 );
 
 type IconProps = {
-  icon: ComponentType<LucideProps>;
+  icon: LucideIcon;
   className?: string;
 };
 
 const EmbeddedIcon = ({ icon: Icon, className }: IconProps) => (
   <Icon
-    className={clsx(
+    className={cn(
       'shrink-0 stroke-2 group-hover:stroke-[3px]',
       'text-base-400 dark:text-base-500',
       'group-hover:text-primary-600 dark:group-hover:text-primary-400',
@@ -47,7 +47,7 @@ const EmbeddedIcon = ({ icon: Icon, className }: IconProps) => (
 
 type TitleProps = {
   children?: ReactNode;
-  icon: ComponentType<LucideProps>;
+  icon: LucideIcon;
 };
 
 const Title = ({ children, icon }: TitleProps) => (

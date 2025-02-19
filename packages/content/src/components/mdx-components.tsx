@@ -3,12 +3,12 @@ import type { AnchorHTMLAttributes, HTMLAttributes, ReactNode, TdHTMLAttributes,
 import type { TweetProps } from 'react-tweet';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Hash } from 'lucide-react';
 import { Tweet } from 'react-tweet';
 
 import type { CalloutProps } from '@arki/base-ui/callout';
 import { Callout } from '@arki/base-ui/callout';
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@arki/base-ui/table';
+import { Hash } from '@arki/icons';
 
 import type { FileTreeProps } from './FileTree';
 import { FileTree } from './FileTree';

@@ -1,3 +1,5 @@
+import { useTranslations } from '@arki/intl/next-client';
+
 const messages = [
   "We're coming soon, but our procrastination skills are already here!",
   "Our website is like a fine wine, it's taking a while to mature. Coming soon!",
@@ -52,13 +54,15 @@ const messages = [
 ];
 
 export const ComingSoon = () => {
+  const t = useTranslations('ComingSoon');
+
   const message = messages[Math.floor(Math.random() * messages.length)];
   return (
     <div className="relative isolate px-6 pt-14 lg:px-8">
       <div className="mx-auto max-w-2xl py-32 sm:py-48 lg:py-56">
         <div className="text-center">
           <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-6xl dark:text-gray-100">
-            Coming Soon
+            {t('title')}
           </h1>
           <p className="mt-6 text-lg leading-8 text-gray-600">{message}</p>
           {/* <p className="mt-6 text-lg leading-8 text-gray-600">

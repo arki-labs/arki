@@ -1,5 +1,5 @@
-import clsx from 'clsx';
-import { CornerDownRight, File, FolderOpen } from 'lucide-react';
+import { cn } from '@arki/base-ui/cn';
+import { CornerDownRight, File, FolderOpen } from '@arki/icons';
 
 type DirectoryNode = {
   name: string;
@@ -82,7 +82,7 @@ const NonLeafNode = ({ node, depth }: NodeProps) => (
 
 export const FileTree = ({ nodes, className }: FileTreeProps) => (
   <div
-    className={clsx(
+    className={cn(
       'not-prose border-base-300 dark:border-base-700 flex flex-col gap-2 overflow-x-scroll rounded-md border-2 p-5 shadow-md',
       className,
     )}

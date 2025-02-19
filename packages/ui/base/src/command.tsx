@@ -2,7 +2,8 @@
 
 import * as React from 'react';
 import { Command as CommandPrimitive } from 'cmdk';
-import { SearchIcon } from 'lucide-react';
+
+import { SearchIcon } from '@arki/icons';
 
 import { cn } from './cn';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './dialog';

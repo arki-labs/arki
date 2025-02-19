@@ -38,6 +38,8 @@
   "dependencies": {
     "@arki/base-ui": "workspace:*",
     "@arki/date": "workspace:*",
+    "@arki/icons": "workspace:*",
+    "@arki/intl": "workspace:*",
     "@arki/react-hooks": "workspace:*",
     "@arki/rss": "workspace:*",
     "@arki/ui": "workspace:*",

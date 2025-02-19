@@ -1,4 +1,4 @@
-import { Github } from 'lucide-react';
+import { Github } from '@arki/icons';
 
 import type { Issue, PullRequest, Repository } from '../lib/mdxEmbedder/github';
 import DateTime from './DateTime';

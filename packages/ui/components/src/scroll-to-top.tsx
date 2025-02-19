@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUpCircle } from 'lucide-react';
+import { ArrowUpCircle } from '@arki/icons';
 
 export const ScrollToTop = () => {
   const scrollToTop = () => window.scroll({ top: 0, behavior: 'smooth' });
