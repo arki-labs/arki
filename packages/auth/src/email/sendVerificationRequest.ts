@@ -17,7 +17,7 @@ export const sendVerificationRequest = (
   resend: Resend,
   template?: ({ loginUrl }: { loginUrl: string }) => React.ReactElement | React.ReactNode,
 ) => {
-  async (params: SendVerificationRequestParams) => {
+  return async (params: SendVerificationRequestParams) => {
     const { identifier, url, provider } = params;
     const { host } = new URL(url);
 

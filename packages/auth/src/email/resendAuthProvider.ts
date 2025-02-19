@@ -17,8 +17,7 @@ export function ResendProvider(
     server: '',
     from: 'Auth.js <no-reply@authjs.dev>',
     maxAge: 24 * 60 * 60,
-    // TODO: fix type
-    sendVerificationRequest: sendVerificationRequest(resend, sendVerificationRequestTemplate) as any,
+    sendVerificationRequest: sendVerificationRequest(resend, sendVerificationRequestTemplate),
     options: config,
   };
 }
