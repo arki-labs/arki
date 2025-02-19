@@ -1,22 +1,23 @@
 import type { VariantProps } from 'class-variance-authority';
 import { cva } from 'class-variance-authority';
-import { LuCheck, LuInfo, LuSiren, LuTriangleAlert } from 'react-icons/lu';
+
+import { Check, Info, Siren, TriangleAlert } from '@arki/icons';
 
 import { cn } from './cn';
 
 function getIcon(variant: CalloutProps['variant']) {
   switch (variant) {
     case 'warning': {
-      return LuTriangleAlert;
+      return TriangleAlert;
     }
     case 'success': {
-      return LuCheck;
+      return Check;
     }
     case 'error': {
-      return LuSiren;
+      return Siren;
     }
     default: {
-      return LuInfo;
+      return Info;
     }
   }
 }

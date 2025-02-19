@@ -5,7 +5,8 @@ import type { z } from 'zod';
 import React from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useFieldArray, useForm } from 'react-hook-form';
-import { LuPlus as Plus, LuTrash as Trash } from 'react-icons/lu';
+
+import { Plus, Trash } from '@arki/icons';
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './accordion';
 import { Button } from './button';
@@ -224,7 +225,7 @@ function AutoFormTextarea({ label, isRequired, fieldConfigItem, fieldProps }: Au
 
 function AutoFormCheckbox({ label, isRequired, field, fieldConfigItem, fieldProps }: AutoFormInputComponentProps) {
   return (
-    <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+    <FormItem className="flex flex-row items-start space-y-0 space-x-3 rounded-md border p-4">
       <FormControl>
         <Checkbox checked={field.value} onCheckedChange={field.onChange} {...fieldProps} />
       </FormControl>
@@ -241,7 +242,7 @@ function AutoFormCheckbox({ label, isRequired, field, fieldConfigItem, fieldProp
 
 function AutoFormSwitch({ label, isRequired, field, fieldConfigItem, fieldProps }: AutoFormInputComponentProps) {
   return (
-    <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+    <FormItem className="flex flex-row items-start space-y-0 space-x-3 rounded-md border p-4">
       <FormControl>
         <Switch checked={field.value} onCheckedChange={field.onChange} {...fieldProps} />
       </FormControl>
@@ -273,7 +274,7 @@ function AutoFormRadioGroup({ label, isRequired, field, zodItem, fieldProps }: A
           {...fieldProps}
         >
           {values.map((value: any) => (
-            <FormItem className="flex items-center space-x-3 space-y-0" key={value}>
+            <FormItem className="flex items-center space-y-0 space-x-3" key={value}>
               <FormControl>
                 <RadioGroupItem value={value} />
               </FormControl>

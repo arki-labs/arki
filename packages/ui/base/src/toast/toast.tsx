@@ -1,9 +1,10 @@
 'use client';
 
 import type { VariantProps } from 'class-variance-authority';
-import { Cross2Icon } from '@radix-ui/react-icons';
 import * as ToastPrimitives from '@radix-ui/react-toast';
 import { cva } from 'class-variance-authority';
+
+import { CrossIcon } from '@arki/icons';
 
 import { cn } from '../cn';
 
@@ -69,7 +70,7 @@ function ToastClose({ className, ...props }: React.ComponentProps<typeof ToastPr
       toast-close=""
       {...props}
     >
-      <Cross2Icon className="h-4 w-4" />
+      <CrossIcon className="h-4 w-4" />
     </ToastPrimitives.Close>
   );
 }

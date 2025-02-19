@@ -1,9 +1,9 @@
 'use client';
 
 import { type ComponentProps } from 'react';
-import { LuCalendar as CalendarIcon } from 'react-icons/lu';
 
 import { format } from '@arki/date/format';
+import { CalendarIcon } from '@arki/icons';
 
 import { Button } from './button';
 import { Calendar } from './calendar';
