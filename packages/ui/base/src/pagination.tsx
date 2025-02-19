@@ -2,7 +2,8 @@ import * as React from 'react';
 
 import { ChevronLeftIcon, ChevronRightIcon, MoreHorizontalIcon } from '@arki/icons';
 
-import { Button, buttonVariants } from './button';
+import type { Button} from './button';
+import { buttonVariants } from './button';
 import { cn } from './cn';
 
 function Pagination({ className, ...props }: React.ComponentProps<'nav'>) {

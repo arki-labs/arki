@@ -29,7 +29,7 @@ export function EnhancedLink({ href, label, external = false, title, children, c
     <HoverCard>
       <LinkSlot
         className={cn(isExternal ? 'underline underline-offset-4 hover:no-underline' : '', 'w-full', className)}
-        href={href as string}
+        href={href}
         {...externalProps}
       >
         <span className="inline-flex items-center gap-3 [&>svg]:size-4">
