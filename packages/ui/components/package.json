@@ -22,6 +22,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/base-ui": "workspace:*",
+    "@arki/icons": "workspace:*",
     "@arki/intl": "workspace:*",
     "@arki/theme": "workspace:*"
   },

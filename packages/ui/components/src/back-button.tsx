@@ -1,8 +1,8 @@
 import type { LinkProps } from 'next/link';
 import Link from 'next/link';
-import { LuChevronLeft } from 'react-icons/lu';
 
 import { Button } from '@arki/base-ui/button';
+import { ChevronLeft } from '@arki/icons';
 
 type BackButtonProps = {
   children?: React.ReactNode;
@@ -12,8 +12,7 @@ export const BackButton = ({ href, children }: BackButtonProps) => {
   return (
     <Button variant="link" asChild>
       <Link href={href} className="group mb-1">
-        <LuChevronLeft className="mr-1 h-4 w-4 text-muted-foreground group-hover:text-foreground" />{' '}
-        {children || 'Back'}
+        <ChevronLeft className="text-muted-foreground group-hover:text-foreground mr-1 h-4 w-4" /> {children || 'Back'}
       </Link>
     </Button>
   );

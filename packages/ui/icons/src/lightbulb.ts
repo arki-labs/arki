@@ -1,1 +1,1 @@
-export { LuLightbulb as Lightbulb } from 'react-icons/lu';
+export { Lightbulb, LightbulbIcon } from './lucide';

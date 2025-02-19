@@ -1,1 +1,1 @@
-export { LuCalculator as Calculator } from 'react-icons/lu';
+export { Calculator, CalculatorIcon } from './lucide';

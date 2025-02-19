@@ -1,1 +1,1 @@
-export { LuSearch as Search } from 'react-icons/lu';
+export { Search, SearchIcon } from './lucide';
