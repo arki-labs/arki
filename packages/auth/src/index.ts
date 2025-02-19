@@ -1,16 +1,15 @@
-/* @see https://github.com/nextauthjs/next-auth/pull/8932 */
-// import type { DefaultSession } from '@auth/core/types';
+import type { DefaultSession } from 'next-auth';
 
 export { ResendProvider } from './email/resendAuthProvider';
 
 export type { Session } from 'next-auth';
 
-// type UserId = string;
-
-// declare module 'next-auth' {
-//   type Session = {
-//     user: {
-//       id: UserId;
-//     } & DefaultSession['user'];
-//   }
-// }
+declare module 'next-auth' {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
+  interface Session {
+    user: {
+      id: string;
+    } & DefaultSession['user'];
+    expires: string;
+  }
+}
