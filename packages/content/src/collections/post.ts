@@ -2,12 +2,13 @@ import { exec as syncExec } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Meta } from '@content-collections/core';
-import type { z as Z } from 'zod';
 import { remarkCodeHike } from '@code-hike/mdx';
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
 import readingTime from 'reading-time';
 import remarkGfm from 'remark-gfm';
+
+import type { z as Z } from '@arki/schema';
 
 import theme from '../lib/ch-theme.json' with { type: 'json' };
 import resolveImageBlurDataURL from '../lib/imageBlurDataURL';
