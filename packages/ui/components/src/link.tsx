@@ -32,7 +32,7 @@ export function EnhancedLink({ href, label, external = false, title, children, c
         href={href}
         {...externalProps}
       >
-        <span className="inline-flex items-center gap-3 [&>svg]:size-4">
+        <span className="inline-flex items-center gap-3 [&>svg]:size-4 [&>svg]:shrink-0">
           {children ?? label}
           {isExternal ? <ArrowUpRight className="ml-1 h-4 w-4 shrink-0" /> : null}
         </span>
