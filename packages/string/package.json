@@ -24,7 +24,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@poppinss/utils": "^6.8.3",
+    "@poppinss/utils": "^6.9.2",
     "voca": "^1.4.1"
   },
   "devDependencies": {

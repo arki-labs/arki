@@ -23,8 +23,8 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@keyv/redis": "4.2.0",
-    "@unkey/ratelimit": "^0.5.4",
-    "ioredis": "^5.4.2",
+    "@unkey/ratelimit": "^0.5.5",
+    "ioredis": "^5.5.0",
     "keyv": "^5.2.3"
   },
   "devDependencies": {
