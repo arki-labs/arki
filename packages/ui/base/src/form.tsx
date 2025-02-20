@@ -1,15 +1,31 @@
 'use client';
 
-import type { ControllerProps, FieldPath, FieldValues } from 'react-hook-form';
-import * as React from 'react';
 import type * as LabelPrimitive from '@radix-ui/react-label';
+import type { ControllerProps, FieldPath, FieldValues, UseFormProps } from 'react-hook-form';
+import type { ZodTypeDef } from 'zod';
+import * as React from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { Slot } from '@radix-ui/react-slot';
-import { Controller, FormProvider, useFormContext, useFormState } from 'react-hook-form';
+import { useForm as __useForm, Controller, FormProvider, useFormContext, useFormState } from 'react-hook-form';
+import { ZodType } from 'zod';
 
 import { cn } from './cn';
 import { Label } from './label';
 
 const Form = FormProvider;
+
+const useForm = <TOut extends FieldValues, TDef extends ZodTypeDef, TIn extends FieldValues>(
+  props: Omit<UseFormProps<TIn>, 'resolver'> & {
+    schema: ZodType<TOut, TDef, TIn>;
+  },
+) => {
+  const form = __useForm<TIn, unknown, TOut>({
+    ...props,
+    resolver: zodResolver(props.schema, undefined) as any,
+  });
+
+  return form;
+};
 
 type FormFieldContextValue<
   TFieldValues extends FieldValues = FieldValues,
@@ -107,7 +123,7 @@ function FormDescription({ className, ...props }: React.ComponentProps<'p'>) {
     <p
       data-slot="form-description"
       id={formDescriptionId}
-      className={cn('text-sm text-muted-foreground', className)}
+      className={cn('text-muted-foreground text-sm', className)}
       {...props}
     />
   );
@@ -125,7 +141,7 @@ function FormMessage({ className, ...props }: React.ComponentProps<'p'>) {
     <p
       data-slot="form-message"
       id={formMessageId}
-      className={cn('text-sm font-medium text-destructive', className)}
+      className={cn('text-destructive text-sm font-medium', className)}
       {...props}
     >
       {body}
@@ -133,4 +149,4 @@ function FormMessage({ className, ...props }: React.ComponentProps<'p'>) {
   );
 }
 
-export { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage, useFormField };
+export { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage, useForm, useFormField };
