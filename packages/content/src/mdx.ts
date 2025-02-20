@@ -1,1 +1,1 @@
-export * from '@content-collections/mdx'
+export * from '@content-collections/mdx';

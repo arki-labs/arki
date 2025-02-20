@@ -1,7 +1,8 @@
-import type { Paragraph } from "mdast";
-import { createJSONParseAST } from "../utils";
-import type { Author, Repository } from "./core";
-import { queryGitHub } from "./core";
+import type { Paragraph } from 'mdast';
+
+import type { Author, Repository } from './core';
+import { createJSONParseAST } from '../utils';
+import { queryGitHub } from './core';
 
 const query = `query pullRequest($owner: String!, $repo: String!, $id: Int!) {
   repository(owner: $owner, name: $repo) {
@@ -42,7 +43,7 @@ const fetchPullRequest = async (owner: string, repo: string, id: string) => {
     id: Number(id),
   };
 
-  const result = await queryGitHub<Result>(query, variables)
+  const result = await queryGitHub<Result>(query, variables);
   return result.data.repository.pullRequest;
 };
 
@@ -54,24 +55,24 @@ const fetchAndTransformPullRequest = async (node: Paragraph, owner: string, repo
   };
 
   Object.assign(node, {
-    type: "mdxJsxFlowElement",
-    name: "GitHubPullRequest",
+    type: 'mdxJsxFlowElement',
+    name: 'GitHubPullRequest',
     attributes: [
       {
-        type: "mdxJsxAttribute",
-        name: "pullRequest",
+        type: 'mdxJsxAttribute',
+        name: 'pullRequest',
         value: {
-          type: "mdxJsxAttributeValueExpression",
+          type: 'mdxJsxAttributeValueExpression',
           data: {
             estree: createJSONParseAST(JSON.stringify(pullRequest)),
           },
         },
       },
       {
-        type: "mdxJsxAttribute",
-        name: "repository",
+        type: 'mdxJsxAttribute',
+        name: 'repository',
         value: {
-          type: "mdxJsxAttributeValueExpression",
+          type: 'mdxJsxAttributeValueExpression',
           data: {
             estree: createJSONParseAST(JSON.stringify(repository)),
           },

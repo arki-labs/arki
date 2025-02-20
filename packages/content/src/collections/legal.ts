@@ -1,5 +1,6 @@
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
+
 import { addIdToHeadings } from '../plugins/add-id-to-headings';
 
 export type Legal = {
@@ -10,10 +11,10 @@ export type Legal = {
 };
 
 export const legals = defineCollection({
-  name: "Legals",
-  directory: "src/content/legal",
-  include: "**/*.mdx",
-  schema: (z) => ({
+  name: 'Legals',
+  directory: 'src/content/legal',
+  include: '**/*.mdx',
+  schema: z => ({
     title: z.string(),
     updatedAt: z.string(),
   }),
@@ -24,7 +25,7 @@ export const legals = defineCollection({
     return {
       ...document,
       mdx,
-      slug: document._meta.fileName.replace(/\.mdx$/, ""),
+      slug: document._meta.fileName.replace(/\.mdx$/, ''),
     };
   },
 });

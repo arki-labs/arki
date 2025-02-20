@@ -1,5 +1,6 @@
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
+
 import { addIdToHeadings } from '../plugins/add-id-to-headings';
 
 export type Faq = {
@@ -10,10 +11,10 @@ export type Faq = {
 };
 
 export const faqs = defineCollection({
-  name: "FAQs",
-  directory: "src/content/faq",
-  include: "**/*.mdx",
-  schema: (z) => ({
+  name: 'FAQs',
+  directory: 'src/content/faq',
+  include: '**/*.mdx',
+  schema: z => ({
     title: z.string(),
     order: z.number(),
   }),
@@ -24,7 +25,7 @@ export const faqs = defineCollection({
     return {
       ...document,
       mdx,
-      slug: document._meta.fileName.replace(/\.mdx$/, ""),
+      slug: document._meta.fileName.replace(/\.mdx$/, ''),
     };
   },
 });

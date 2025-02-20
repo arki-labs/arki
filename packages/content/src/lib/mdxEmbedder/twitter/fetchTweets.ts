@@ -1,5 +1,5 @@
-import fs from "node:fs/promises";
-import path from "node:path";
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 type Tweet = {
   __typename: string;
@@ -16,14 +16,14 @@ type Tweet = {
   news_action_type: string;
   isEdited: boolean;
   isStaleEdit: boolean;
-}
+};
 
 type Entities = {
   hashtags: any[];
   urls: any[];
   user_mentions: any[];
   symbols: any[];
-}
+};
 
 type User = {
   id_str: string;
@@ -32,33 +32,33 @@ type User = {
   screen_name: string;
   verified: boolean;
   is_blue_verified: boolean;
-}
+};
 
 type Edit_control = {
   edit_tweet_ids: string[];
   editable_until_msecs: string;
   is_edit_eligible: boolean;
   edits_remaining: string;
-}
+};
 
 // https://github.com/vercel/react-tweet/pull/128/files
-const getToken = (id: string) => ((Number(id) / 1e15) * Math.PI).toString(6 ** 2).replaceAll(/(0+|\.)/g, "");
+const getToken = (id: string) => ((Number(id) / 1e15) * Math.PI).toString(6 ** 2).replaceAll(/(0+|\.)/g, '');
 
 const fetchTweetFromTwitter = async (id: string): Promise<Tweet> => {
   const response = await fetch(`https://cdn.syndication.twimg.com/tweet-result?id=${id}&token=${getToken(id)}`);
   if (!response.ok) {
-    throw new Error("Twitter response is not ok");
+    throw new Error('Twitter response is not ok');
   }
 
   return await response.json();
 };
 
-const createFilePath = (id: string) => path.join(process.cwd(), "content", "tweets", `${id}.json`);
+const createFilePath = (id: string) => path.join(process.cwd(), 'content', 'tweets', `${id}.json`);
 
 const readTweetFromLocalStorage = async (id: string): Promise<Tweet | null> => {
   const file = createFilePath(id);
   try {
-    const tweet = await fs.readFile(file, "utf8");
+    const tweet = await fs.readFile(file, 'utf8');
     return JSON.parse(tweet);
   } catch {
     return null;

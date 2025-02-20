@@ -1,19 +1,19 @@
-import type { Provider } from "../provider";
-import fetchAndTransformIssue from "./issue";
-import fetchAndTransformPullRequest from "./pull";
+import type { Provider } from '../provider';
+import fetchAndTransformIssue from './issue';
+import fetchAndTransformPullRequest from './pull';
 
 const GitHubProvider: Provider = {
-  baseUrl: "https://github.com",
+  baseUrl: 'https://github.com',
   transform(node, url) {
-    const parts = url.split("/").slice(3, 7);
+    const parts = url.split('/').slice(3, 7);
     if (parts.length !== 4) {
       return null;
     }
 
     const [slug, repo, type, id] = parts;
-    if (type === "pull" && slug && repo && id) {
+    if (type === 'pull' && slug && repo && id) {
       return fetchAndTransformPullRequest(node, slug, repo, id);
-    } else if (type === "issues" && slug && repo && id) {
+    } else if (type === 'issues' && slug && repo && id) {
       return fetchAndTransformIssue(node, slug, repo, id);
     } else {
       console.log(`Unsupported github type: ${type}`);
@@ -25,6 +25,6 @@ const GitHubProvider: Provider = {
 
 export default GitHubProvider;
 
-export {type Author, type Repository} from "./core";
-export {type Issue} from "./issue";
-export {type PullRequest} from "./pull";
+export { type Author, type Repository } from './core';
+export { type Issue } from './issue';
+export { type PullRequest } from './pull';

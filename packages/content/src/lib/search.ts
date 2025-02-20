@@ -1,12 +1,13 @@
-import type { Options } from "minisearch";
-import type { PostOverview } from "./types";
+import type { Options } from 'minisearch';
+
 import type { Post } from '../collections/post';
+import type { PostOverview } from './types';
 
 const createSearchOptions = <T extends (keyof Post)[]>(
   idField: keyof Post,
   fields: T,
   storeFields: (keyof PostOverview)[],
-  boost: Record<T[number], number>
+  boost: Record<T[number], number>,
 ): Options<PostOverview> => ({
   idField,
   fields,
@@ -17,15 +18,15 @@ const createSearchOptions = <T extends (keyof Post)[]>(
 });
 
 const searchOptions = createSearchOptions(
-  "url",
-  ["title", "description", "content", "tags"],
-  ["url", "title", "description", "publishedAt", "readingTime", "image"],
+  'url',
+  ['title', 'description', 'content', 'tags'],
+  ['url', 'title', 'description', 'publishedAt', 'readingTime', 'image'],
   {
     title: 1.6,
     description: 1.2,
     content: 1,
     tags: 1.8,
-  }
+  },
 );
 
 export default searchOptions;

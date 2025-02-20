@@ -1,6 +1,6 @@
 'use client';
 
-import type {ComponentProps} from 'react';
+import type { ComponentProps } from 'react';
 
 import { format } from '@arki/date/format';
 import { CalendarIcon } from '@arki/icons';
@@ -13,7 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from './popover';
 type DatePickerProps = {
   date?: Date;
   setDate: (date?: Date) => void;
-} & ComponentProps<'div'>
+} & ComponentProps<'div'>;
 
 export function DatePicker({ date, setDate, ...props }: DatePickerProps) {
   return (

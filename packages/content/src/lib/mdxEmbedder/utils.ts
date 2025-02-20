@@ -2,28 +2,28 @@
 // https://github.com/ggoodman/nostalgie/blob/26a7fad65faefdffe3ea06f0b9892ba3dd5c1efa/src/worker/mdxCompiler.ts
 export const createJSONParseAST = (value: string) => {
   return {
-    type: "Program",
+    type: 'Program',
     body: [
       {
-        type: "ExpressionStatement",
+        type: 'ExpressionStatement',
         expression: {
-          type: "CallExpression",
+          type: 'CallExpression',
           callee: {
-            type: "MemberExpression",
+            type: 'MemberExpression',
             object: {
-              type: "Identifier",
-              name: "JSON",
+              type: 'Identifier',
+              name: 'JSON',
             },
             property: {
-              type: "Identifier",
-              name: "parse",
+              type: 'Identifier',
+              name: 'parse',
             },
             computed: false,
             optional: false,
           },
           arguments: [
             {
-              type: "Literal",
+              type: 'Literal',
               value: value,
               raw: JSON.stringify(value),
             },
@@ -32,7 +32,7 @@ export const createJSONParseAST = (value: string) => {
         },
       },
     ],
-    sourceType: "module",
+    sourceType: 'module',
     comments: [],
   };
 };

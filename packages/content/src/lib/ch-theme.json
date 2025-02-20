@@ -18,7 +18,6 @@
     "editorGroup.border": "var(--ch-debug)",
     "input.border": "var(--ch-debug)",
     "sideBar.border": "var(--ch-debug)"
-
   },
   "tokenColors": [
     {

@@ -1,9 +1,9 @@
-import type sharp from "sharp";
+import type sharp from 'sharp';
 
 const createPlaceholder = async (image: sharp.Sharp) => {
   const { width, height } = await image.metadata();
   if (!width || !height) {
-    throw new Error("fetched image without width and height");
+    throw new Error('fetched image without width and height');
   }
 
   const imgAspectRatio = width / height;
@@ -17,7 +17,7 @@ const createPlaceholder = async (image: sharp.Sharp) => {
       quality: 75,
     })
     .toBuffer()
-    .then((buffer) => `data:image/png;base64,${buffer.toString("base64")}`);
+    .then(buffer => `data:image/png;base64,${buffer.toString('base64')}`);
 };
 
 export default createPlaceholder;

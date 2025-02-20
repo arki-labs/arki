@@ -6,13 +6,13 @@ export const autolinkHeadings: unified.Pluggable = [
   {
     behavior: 'append',
     headingProperties: {
-      className: "group",
+      className: 'group',
     },
     properties: {
       className: [
         "no-underline group-hover:after:content-['#'] after:text-muted-foreground/30 after:hover:text-muted-foreground ml-1 after:p-1",
       ],
-      "aria-hidden": "true",
+      'aria-hidden': 'true',
     },
   },
 ];

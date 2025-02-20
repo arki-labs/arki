@@ -1,9 +1,11 @@
-import { useDebouncedValue } from "@arki/react-hooks/debounce";
-import { useEffect, useState } from "react";
-import type { PostOverview } from "./types";
+import { useEffect, useState } from 'react';
+
+import { useDebouncedValue } from '@arki/react-hooks/debounce';
+
+import type { PostOverview } from './types';
 
 const useSearch = () => {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState('');
   const [result, setResult] = useState<PostOverview[]>([]);
   const debouncedQuery = useDebouncedValue(query, 300);
   const [isLoading, setIsLoading] = useState(false);
@@ -17,14 +19,14 @@ const useSearch = () => {
         signal: abortController.signal,
       });
       if (!result.ok) {
-        throw new Error("failed to search");
+        throw new Error('failed to search');
       }
       const json = await result.json();
       setResult(json);
       setIsLoading(false);
     };
     if (debouncedQuery.length > 0) {
-        search();
+      search();
     } else {
       setResult([]);
     }
@@ -40,7 +42,7 @@ const useSearch = () => {
     result,
     search: setQuery,
     isLoading,
-  }
-}
+  };
+};
 
 export default useSearch;

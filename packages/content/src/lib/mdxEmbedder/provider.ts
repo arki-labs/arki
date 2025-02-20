@@ -1,4 +1,4 @@
-import type { Paragraph } from "mdast";
+import type { Paragraph } from 'mdast';
 
 export type Provider = {
   baseUrl: string;

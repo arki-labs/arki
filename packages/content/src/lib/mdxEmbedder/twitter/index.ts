@@ -1,14 +1,15 @@
-import type { Paragraph } from "mdast";
-import fetchTweet from "./fetchTweets";
-import type { Provider } from "../provider";
-import { createJSONParseAST } from "../utils";
+import type { Paragraph } from 'mdast';
+
+import type { Provider } from '../provider';
+import { createJSONParseAST } from '../utils';
+import fetchTweet from './fetchTweets';
 
 export type Tweet = Awaited<ReturnType<typeof fetchTweet>>;
 
 const getIdFromUrl = (url: string) => {
-  const parts = url.split("/");
+  const parts = url.split('/');
   const lastPart = parts.at(-1);
-  const index = lastPart?.indexOf("?");
+  const index = lastPart?.indexOf('?');
   if (index && index > 0 && lastPart) {
     return lastPart.slice(0, Math.max(0, index));
   }
@@ -19,14 +20,14 @@ const fetchAndTransform = async (node: Paragraph, id: string) => {
   const tweet = await fetchTweet(id);
 
   Object.assign(node, {
-    type: "mdxJsxFlowElement",
-    name: "StaticTweet",
+    type: 'mdxJsxFlowElement',
+    name: 'StaticTweet',
     attributes: [
       {
-        type: "mdxJsxAttribute",
-        name: "tweet",
+        type: 'mdxJsxAttribute',
+        name: 'tweet',
         value: {
-          type: "mdxJsxAttributeValueExpression",
+          type: 'mdxJsxAttributeValueExpression',
           data: {
             estree: createJSONParseAST(JSON.stringify(tweet)),
           },
@@ -39,7 +40,7 @@ const fetchAndTransform = async (node: Paragraph, id: string) => {
 };
 
 const TwitterProvider: Provider = {
-  baseUrl: "https://twitter.com",
+  baseUrl: 'https://twitter.com',
   transform(node, url) {
     const id = getIdFromUrl(url);
     if (!id) {

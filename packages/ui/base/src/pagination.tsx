@@ -2,7 +2,7 @@ import * as React from 'react';
 
 import { ChevronLeftIcon, ChevronRightIcon, MoreHorizontalIcon } from '@arki/icons';
 
-import type { Button} from './button';
+import type { Button } from './button';
 import { buttonVariants } from './button';
 import { cn } from './cn';
 

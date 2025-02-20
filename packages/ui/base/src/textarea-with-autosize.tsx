@@ -1,5 +1,5 @@
+import type { ComponentProps } from 'react';
 import type { TextareaAutosizeProps } from 'react-textarea-autosize';
-import type {ComponentProps} from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 
 import { cn } from './cn';

@@ -9,7 +9,7 @@ type Props = {
 export function Preview({ md }: Props) {
   const Component = useProcessor(md || '');
   return (
-    <div className="prose-headings:font-cal prose prose-sm h-[158px] w-full overflow-auto rounded-md border border-input px-3 py-2 dark:prose-invert">
+    <div className="prose-headings:font-cal prose prose-sm border-input dark:prose-invert h-[158px] w-full overflow-auto rounded-md border px-3 py-2">
       {Component}
     </div>
   );

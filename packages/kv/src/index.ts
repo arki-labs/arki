@@ -64,7 +64,7 @@ export class KV {
   async mget(keys: string[]) {
     const values = await this.redis.mget(keys.map(key => `${this.namespace}:${key}`));
 
-    return values.map(value => value ? JSON.parse(value) : null);
+    return values.map(value => (value ? JSON.parse(value) : null));
   }
 
   async inc(key: string, amount = 1) {

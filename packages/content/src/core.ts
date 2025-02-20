@@ -1,1 +1,1 @@
-export * from '@content-collections/core'
+export * from '@content-collections/core';

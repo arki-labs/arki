@@ -1,1 +1,1 @@
-export * from '@content-collections/next'
+export * from '@content-collections/next';
