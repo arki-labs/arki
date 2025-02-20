@@ -7,7 +7,7 @@ type SendVerificationRequestParams = {
   identifier: string;
   url: string;
   expires: Date;
-  provider: EmailConfig & { from: string };
+  provider: EmailConfig & { from?: string };
   token: string;
   theme: Theme;
   request: Request;
@@ -19,6 +19,11 @@ export const sendVerificationRequest = (
 ) => {
   return async (params: SendVerificationRequestParams) => {
     const { identifier, url, provider } = params;
+
+    if (!provider.from) {
+      throw new Error('from is required');
+    }
+
     const { host } = new URL(url);
 
     const isDevOrStaging = process.env.NODE_ENV === 'development' || process.env['VERCEL_ENV'] === 'preview';
