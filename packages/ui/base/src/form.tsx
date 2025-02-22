@@ -1,14 +1,16 @@
 'use client';
 
 import type * as LabelPrimitive from '@radix-ui/react-label';
+import type { ComponentProps } from 'react';
 import type { ControllerProps, FieldPath, FieldValues, UseFormProps } from 'react-hook-form';
-import type { ZodTypeDef } from 'zod';
+import type { ZodType, ZodTypeDef } from 'zod';
 import * as React from 'react';
+import { Fragment, useId } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Slot } from '@radix-ui/react-slot';
 import { useForm as __useForm, Controller, FormProvider, useFormContext, useFormState } from 'react-hook-form';
-import type { ZodType } from 'zod';
 
+import { Button } from './button';
 import { cn } from './cn';
 import { Label } from './label';
 
@@ -149,4 +151,41 @@ function FormMessage({ className, ...props }: React.ComponentProps<'p'>) {
   );
 }
 
-export { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage, useForm, useFormField };
+function FormHints({ className, hints, ...props }: ComponentProps<'div'> & { hints: any[] }) {
+  const { setValue } = useFormContext();
+  const { name } = useFormField();
+  const id = useId();
+
+  return (
+    <div className={cn('space-y-1', className)} {...props}>
+      {hints.map((hint, index) => (
+        <Fragment key={`${id}-${name}-hint-${hint}`}>
+          <Button
+            variant="text"
+            size="xs"
+            className="p-0"
+            onClick={() => {
+              setValue(name, hint, { shouldValidate: false });
+            }}
+          >
+            {hint}
+          </Button>
+          {index < hints.length - 1 && <span className="text-muted-foreground">, </span>}
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+export {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormHints,
+  FormItem,
+  FormLabel,
+  FormMessage,
+  useForm,
+  useFormField,
+};
