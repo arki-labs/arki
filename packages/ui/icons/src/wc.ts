@@ -1,1 +1,1 @@
-export { Icon, addIcon } from '@iconify-icon/react';
+export { addIcon, Icon, type IconifyIconProps } from '@iconify-icon/react';

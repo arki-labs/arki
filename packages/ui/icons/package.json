@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
+    ".": "./src/index.ts",
     "./flags": "./src/flags/index.tsx",
-    "./*": "./src/*.ts",
-    ".": "./src/lucide.ts"
+    "./*": "./src/*.ts"
   },
   "typesVersions": {
     "*": {
@@ -24,12 +24,15 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@iconify-icon/react": "^2.3.0",
+    "@iconify/json": "^2.2.309",
     "@iconify/react": "^5.2.0",
+    "@iconify/tailwind4": "^1.0.3",
     "flag-icons": "^7.3.2",
     "flagpack-core": "^2.0.0",
     "lucide-react": "0.475.0",
     "react-flagpack": "^2.0.6",
-    "react-icons": "^5.5.0"
+    "react-icons": "^5.5.0",
+    "unplugin-icons": "^22.1.0"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",

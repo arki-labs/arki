@@ -16,6 +16,7 @@
       "ES2015",
       "ESNext"
     ],
-    "jsx": "preserve"
+    "jsx": "preserve",
+    "types": ["unplugin-icons/types/react"]
   }
 }
