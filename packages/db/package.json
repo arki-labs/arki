@@ -23,6 +23,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/assert": "workspace:*",
     "@paralleldrive/cuid2": "^2.2.2",
     "drizzle-orm": "^0.39.3",
     "drizzle-zod": "^0.7.0",
