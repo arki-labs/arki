@@ -14,7 +14,7 @@ import { Input } from './input';
 import { Separator } from './separator';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from './sheet';
 import { Skeleton } from './skeleton';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, WithTooltip } from './tooltip';
 
 const SIDEBAR_COOKIE_NAME = 'sidebar_state';
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
@@ -151,7 +151,10 @@ function Sidebar({
     return (
       <div
         data-slot="sidebar"
-        className={cn('bg-sidebar text-sidebar-foreground flex h-full w-(--sidebar-width) flex-col', className)}
+        className={cn(
+          'group/sidebar bg-sidebar text-sidebar-foreground flex h-full w-(--sidebar-width) flex-col',
+          className,
+        )}
         {...props}
       >
         {children}
@@ -170,7 +173,7 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
+          className="group/sidebar bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
           style={
             {
               '--sidebar-width': SIDEBAR_WIDTH_MOBILE,
@@ -186,7 +189,7 @@ function Sidebar({
 
   return (
     <div
-      className="text-sidebar-foreground group peer hidden md:block"
+      className="text-sidebar-foreground group peer group/sidebar hidden md:block"
       data-state={state}
       data-collapsible={state === 'collapsed' ? collapsible : ''}
       data-variant={variant}
@@ -231,23 +234,31 @@ function Sidebar({
 
 function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
   const { toggleSidebar, open } = useSidebar();
+  const title = open ? 'Collapse Sidebar' : 'Expand Sidebar';
 
   return (
-    <Button
-      data-sidebar="trigger"
-      data-slot="sidebar-trigger"
-      variant="ghost"
-      size="icon"
-      className={cn('size-8', className)}
-      onClick={event => {
-        onClick?.(event);
-        toggleSidebar();
-      }}
-      {...props}
-    >
-      {open ? <PanelLeftCloseIcon /> : <PanelLeftOpenIcon />}
-      <span className="sr-only">Toggle Sidebar</span>
-    </Button>
+    <WithTooltip
+      delayDuration={1000}
+      content={title}
+      side="right"
+      trigger={
+        <Button
+          data-sidebar="trigger"
+          data-slot="sidebar-trigger"
+          variant="ghost"
+          size="icon"
+          className={cn('size-8', className)}
+          onClick={event => {
+            onClick?.(event);
+            toggleSidebar();
+          }}
+          {...props}
+        >
+          {open ? <PanelLeftCloseIcon /> : <PanelLeftOpenIcon />}
+          <span className="sr-only">{title}</span>
+        </Button>
+      }
+    />
   );
 }
 

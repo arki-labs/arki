@@ -1,5 +1,6 @@
 'use client';
 
+import type { FC } from 'react';
 import * as React from 'react';
 import * as TooltipPrimitive from '@radix-ui/react-tooltip';
 
@@ -45,4 +46,24 @@ function TooltipContent({
   );
 }
 
-export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger };
+interface WithTooltipProps {
+  content: React.ReactNode;
+  trigger: React.ReactNode;
+
+  delayDuration?: number;
+  side?: 'left' | 'right' | 'top' | 'bottom';
+}
+
+const WithTooltip: FC<WithTooltipProps> = ({ content, trigger, delayDuration = 500, side = 'right' }) => {
+  return (
+    <TooltipProvider delayDuration={delayDuration}>
+      <Tooltip>
+        <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+
+        <TooltipContent side={side}>{content}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
+
+export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, WithTooltip };
