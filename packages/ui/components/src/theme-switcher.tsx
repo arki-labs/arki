@@ -3,7 +3,6 @@
 import React from 'react';
 
 import { Button } from '@arki/base-ui/button';
-import { cn } from '@arki/base-ui/cn';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@arki/base-ui/dropdown-menu';
 import { WithTooltip } from '@arki/base-ui/tooltip';
 import { CloudMoon, Moon, Sun } from '@arki/icons';
@@ -15,7 +14,7 @@ export function ThemeSelect() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="h-12 w-12 px-2">
+        <Button variant="ghost" size="icon">
           <Sun className="size-6 scale-100 rotate-0 transition-all dark:scale-0 dark:rotate-90" />
           <Moon className="absolute size-6 scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0" />
         </Button>
@@ -53,7 +52,8 @@ export function ThemeToggle({
       trigger={
         <Button
           variant="ghost"
-          className={cn('size-8 px-2', className)}
+          size="icon"
+          className={className}
           onClick={() => {
             setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
           }}
@@ -82,9 +82,9 @@ export function ThemeSwitcher({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button data-slot="theme-switcher" variant="ghost" className={className} {...buttonProps}>
-          <Sun className="size-6 scale-100 rotate-0 transition-all dark:scale-0 dark:rotate-90" />
-          <Moon className="absolute size-6 scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0" />
+        <Button data-slot="theme-switcher" variant="ghost" size="icon" className={className} {...buttonProps}>
+          <Sun className="scale-100 rotate-0 transition-all dark:scale-0 dark:rotate-90" />
+          <Moon className="absolute scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0" />
           <span className="sr-only">Toggle theme</span>
         </Button>
       </DropdownMenuTrigger>
