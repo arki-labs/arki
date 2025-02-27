@@ -16,9 +16,9 @@ export type FlagProps = {
 export const Flag: React.FC<FlagProps> = ({
   code = 'NL',
   size = 'l',
-  gradient = '',
-  hasBorder = true,
-  hasDropShadow = false,
+  gradient = 'real-circular',
+  hasBorder = false,
+  hasDropShadow = true,
   hasBorderRadius = true,
   className,
 }: FlagProps) => {

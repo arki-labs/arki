@@ -10,14 +10,14 @@ import { Text } from '@react-email/text';
 type NotionMagicLinkEmailProps = {
   loginUrl?: string;
   appUrl?: string;
-  appName?: string;
+  appKey?: string;
   appDescription?: string;
 };
 
 export const NotionMagicLinkEmail = ({
   loginUrl = 'fake-news',
   appUrl,
-  appName,
+  appKey,
   appDescription,
 }: NotionMagicLinkEmailProps) => (
   <Html>
@@ -52,7 +52,7 @@ export const NotionMagicLinkEmail = ({
 
         <Text style={footer}>
           <Link href={appUrl} target="_blank" style={{ ...link, color: '#898989' }}>
-            {appName}
+            {appKey}
           </Link>
           , {appDescription}
         </Text>
