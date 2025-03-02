@@ -1,7 +1,7 @@
 'use client';
 
 import type { ToasterProps } from 'sonner';
-import { Toaster as Sonner } from 'sonner';
+import { Toaster as Sonner, toast } from 'sonner';
 
 import { useTheme } from '@arki/theme';
 
@@ -26,4 +26,4 @@ const Toaster = ({ ...props }: ToasterProps) => {
   );
 };
 
-export { Toaster };
+export { toast, Toaster };
