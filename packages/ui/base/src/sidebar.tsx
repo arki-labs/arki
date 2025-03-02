@@ -6,7 +6,7 @@ import { Slot } from '@radix-ui/react-slot';
 import { cva } from 'class-variance-authority';
 
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from '@arki/icons';
-import { useIsMobile } from '@arki/react-hooks/mobile';
+import { useIsMobile, useIsTablet } from '@arki/react-hooks/media-query';
 
 import { Button } from './button';
 import { cn } from './cn';
@@ -53,11 +53,12 @@ const SidebarProvider = React.forwardRef<
   }
 >(({ defaultOpen = true, open: openProp, onOpenChange: setOpenProp, className, style, children, ...props }, ref) => {
   const isMobile = useIsMobile();
+  const isTablet = useIsTablet();
   const [openMobile, setOpenMobile] = React.useState(false);
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
-  const [_open, _setOpen] = React.useState(defaultOpen);
+  const [_open, _setOpen] = React.useState(isTablet ? false : defaultOpen);
   const open = openProp ?? _open;
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
@@ -91,6 +92,12 @@ const SidebarProvider = React.forwardRef<
     globalThis.addEventListener('keydown', handleKeyDown);
     return () => globalThis.removeEventListener('keydown', handleKeyDown);
   }, [toggleSidebar]);
+
+  React.useEffect(() => {
+    if (isTablet) {
+      setOpen(false);
+    }
+  }, [isTablet]);
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.
