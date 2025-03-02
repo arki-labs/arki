@@ -239,7 +239,12 @@ function Sidebar({
   );
 }
 
-function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
+function SidebarTrigger({
+  className,
+  onClick,
+  iconClassName,
+  ...props
+}: React.ComponentProps<typeof Button> & { iconClassName?: string }) {
   const { toggleSidebar, open } = useSidebar();
   const title = open ? 'Collapse Sidebar' : 'Expand Sidebar';
 
@@ -261,7 +266,11 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
           }}
           {...props}
         >
-          {open ? <PanelLeftCloseIcon /> : <PanelLeftOpenIcon />}
+          {open ? (
+            <PanelLeftCloseIcon className={cn('size-4', iconClassName)} />
+          ) : (
+            <PanelLeftOpenIcon className={cn('size-4', iconClassName)} />
+          )}
           <span className="sr-only">{title}</span>
         </Button>
       }
