@@ -4,6 +4,6 @@ export const createId = () => {
   return createCuid();
 };
 
-export const createPrefixedId = (prefix: string) => {
+export const createPrefixedId = <T extends string>(prefix: T): `${T}${string}` => {
   return `${prefix}${createId()}`;
 };
