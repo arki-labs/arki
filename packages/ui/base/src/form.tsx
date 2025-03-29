@@ -151,7 +151,19 @@ function FormMessage({ className, ...props }: React.ComponentProps<'p'>) {
   );
 }
 
-function FormHints({ className, hints, ...props }: ComponentProps<'div'> & { hints: any[] }) {
+function FormHints({
+  className,
+  hints,
+  slotProps,
+  onClick,
+  ...props
+}: ComponentProps<'div'> & {
+  hints: string[];
+  slotProps?: {
+    button: ComponentProps<typeof Button>;
+  };
+  onClick?: (hint: string) => void;
+}) {
   const { setValue } = useFormContext();
   const { name } = useFormField();
   const id = useId();
@@ -163,9 +175,12 @@ function FormHints({ className, hints, ...props }: ComponentProps<'div'> & { hin
           <Button
             variant="text"
             size="xs"
-            className="p-0"
-            onClick={() => {
+            {...slotProps?.button}
+            className={cn(slotProps?.button?.className, 'p-0')}
+            onClick={e => {
+              e.preventDefault();
               setValue(name, hint, { shouldValidate: false });
+              onClick?.(hint);
             }}
           >
             {hint}
