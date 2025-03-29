@@ -155,14 +155,14 @@ function FormHints({
   className,
   hints,
   slotProps,
-  onClick,
+  onHintClick,
   ...props
 }: ComponentProps<'div'> & {
   hints: string[];
   slotProps?: {
     button: ComponentProps<typeof Button>;
   };
-  onClick?: (hint: string) => void;
+  onHintClick?: (hint: string) => void;
 }) {
   const { setValue } = useFormContext();
   const { name } = useFormField();
@@ -180,7 +180,7 @@ function FormHints({
             onClick={e => {
               e.preventDefault();
               setValue(name, hint, { shouldValidate: false });
-              onClick?.(hint);
+              onHintClick?.(hint);
             }}
           >
             {hint}
