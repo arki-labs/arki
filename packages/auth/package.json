@@ -5,10 +5,29 @@
   "type": "module",
   "exports": {
     ".": {
-      "default": "./src/index.ts"
+      "default": "./src/index.ts",
+      "types": "./dist/index.d.ts"
     },
-    "./crypto": "./src/crypto.ts",
-    "./email/schema": "./src/email/schema.ts"
+    "./errors": {
+      "default": "./src/errors.ts",
+      "types": "./dist/errors.d.ts"
+    },
+    "./password": {
+      "default": "./src/password.ts",
+      "types": "./dist/password.d.ts"
+    },
+    "./token": {
+      "default": "./src/token.ts",
+      "types": "./dist/token.d.ts"
+    },
+    "./security/*": {
+      "default": "./src/security/*.ts",
+      "types": "./dist/security/*.d.ts"
+    },
+    "./email/schema": {
+      "default": "./src/email/schema.ts",
+      "types": "./dist/email/schema.d.ts"
+    }
   },
   "scripts": {
     "clean": "git clean -xdf .cache .turbo dist node_modules",
@@ -20,6 +39,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/emails": "workspace:*",
+    "@arki/kv": "workspace:*",
     "@arki/nextjs": "workspace:*",
     "@arki/schema": "workspace:*",
     "@auth/core": "^0.38.0",
