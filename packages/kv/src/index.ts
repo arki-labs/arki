@@ -8,7 +8,7 @@ export class KV {
   readonly #keyv: Keyv;
   readonly #redisClient: Redis; // Dedicated Redis client for rate limiter
   readonly #limiterInstances = new Map<string, RateLimiterAbstract>();
-  private isRateLimiterReady = false;
+  #isRateLimiterReady = false;
 
   constructor(
     redisUrl: string,
@@ -31,13 +31,13 @@ export class KV {
 
     this.#redisClient.on('error', err => {
       console.error('Rate Limiter Redis Client Error:', err);
-      this.isRateLimiterReady = false;
+      this.#isRateLimiterReady = false;
       // Consider adding logic to potentially disable rate limiting or use fallback if needed
     });
 
     this.#redisClient.on('ready', () => {
       console.log('Rate Limiter Redis Client Ready.');
-      this.isRateLimiterReady = true;
+      this.#isRateLimiterReady = true;
     });
   }
 
@@ -62,7 +62,7 @@ export class KV {
   }
 
   async exists(key: string): Promise<boolean> {
-    const value = await this.#keyv.get(key);
+    const value = await this.#keyv.get<unknown>(key);
     return value !== undefined;
   }
 
@@ -100,7 +100,7 @@ export class KV {
     // Use Redis limiter if the client is ready, otherwise fallback to in-memory
     // This fallback prevents application failure but loses persistence during Redis downtime.
     let limiter: RateLimiterAbstract;
-    if (this.isRateLimiterReady && this.#redisClient.status === 'ready') {
+    if (this.#isRateLimiterReady && this.#redisClient.status === 'ready') {
       console.log(`Creating Redis Rate Limiter: ${id}`);
       limiter = new RateLimiterRedis({
         storeClient: this.#redisClient,
