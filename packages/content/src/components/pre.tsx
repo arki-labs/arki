@@ -2,8 +2,8 @@
 
 import React from 'react';
 
-import { Button } from '@arki/base-ui/button';
-import { cn } from '@arki/base-ui/cn';
+import { Button } from '@arki/ui/button';
+import { cn } from '@arki/ui/cn';
 import { Clipboard, ClipboardCopy } from '@arki/icons';
 
 export type PreProps = {} & React.HTMLAttributes<HTMLPreElement>;

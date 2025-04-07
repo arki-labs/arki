@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { cn } from '@arki/base-ui/cn';
+import { cn } from '@arki/ui/cn';
 import { AlertTriangle, CheckCircle, Lightbulb, XOctagon } from '@arki/icons';
 
 export const types = ['info', 'success', 'warning', 'error'] as const;

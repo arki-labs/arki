@@ -1,8 +1,8 @@
 import Image from 'next/image';
 import Link from 'next/link';
 
-import { Avatar, AvatarFallback, AvatarImage } from '@arki/base-ui/avatar';
-import { Badge } from '@arki/base-ui/badge';
+import { Avatar, AvatarFallback, AvatarImage } from '@arki/ui/avatar';
+import { Badge } from '@arki/ui/badge';
 import { toHumanReadableDate } from '@arki/date/format';
 import { ScrollToTop } from '@arki/sitekit/components/scroll-to-top';
 

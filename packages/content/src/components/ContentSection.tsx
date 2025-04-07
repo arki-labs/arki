@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { cn } from '@arki/base-ui/cn';
+import { cn } from '@arki/ui/cn';
 
 type Props = {
   children: ReactNode;

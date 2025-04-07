@@ -1,8 +1,8 @@
 import { createParser, createSearchParamsCache, parseAsInteger } from 'nuqs/server';
 
 import type { IntlLink } from '@arki/intl/next-navigation';
-import { Button } from '@arki/base-ui/button';
-import { Pagination, PaginationContent, PaginationLink } from '@arki/base-ui/pagination';
+import { Button } from '@arki/ui/button';
+import { Pagination, PaginationContent, PaginationLink } from '@arki/ui/pagination';
 import { Rss } from '@arki/icons';
 import { useTranslations } from '@arki/intl/next-client';
 

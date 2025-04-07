@@ -1,5 +1,5 @@
 {
-  "name": "@arki/base-ui",
+  "name": "@arki/ui",
   "version": "0.1.0",
   "type": "module",
   "exports": {

@@ -1,4 +1,4 @@
-import { cn } from '@arki/base-ui/cn';
+import { cn } from '@arki/ui/cn';
 import { CornerDownRight, File, FolderOpen } from '@arki/icons';
 
 type DirectoryNode = {

@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 
 import type { LucideIcon } from '@arki/icons';
-import { AvatarImage } from '@arki/base-ui/avatar';
-import { cn } from '@arki/base-ui/cn';
+import { AvatarImage } from '@arki/ui/avatar';
+import { cn } from '@arki/ui/cn';
 
 type Props = {
   href: string;
