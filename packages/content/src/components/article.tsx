@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from '@arki/base-ui/avatar';
 import { Badge } from '@arki/base-ui/badge';
 import { toHumanReadableDate } from '@arki/date/format';
-import { ScrollToTop } from '@arki/ui/scroll-to-top';
+import { ScrollToTop } from '@arki/sitekit/components/scroll-to-top';
 
 import type { Post } from '../collections/post';
 import { Mdx } from './mdx';
