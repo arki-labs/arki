@@ -21,6 +21,13 @@ import { KV } from '@arki/kv';
 import { RateLimitExceededError } from '@arki/kv/errors';
 import { ZodError } from '@arki/schema';
 
+// Define types for the auth functions we need
+type AuthPackage = {
+  auth: () => Promise<Session | null>;
+  validateSessionToken: (token: string) => Promise<Session | null>;
+  invalidateSessionToken: (token: string) => Promise<void>;
+};
+
 // #region Core Type Definitions
 /**
  * Represents the structure of a database schema recognized by Drizzle.
@@ -54,6 +61,69 @@ type EnvConfig = {
   KV_URL?: string;
   EVENT_STORE_URL?: string;
   [key: string]: string | number | boolean | undefined; // Allow other validated keys
+};
+
+/**
+ * Authentication configuration options
+ */
+export type AuthConfig = {
+  /**
+   * Authentication secret for JWT signing
+   */
+  secret: string;
+
+  /**
+   * Base URL for authentication redirects
+   */
+  baseUrl?: string;
+
+  /**
+   * Debug mode for authentication
+   */
+  debug?: boolean;
+
+  /**
+   * Custom session validation function
+   */
+  validateSession?: (token: string) => Promise<Session | null>;
+
+  /**
+   * Authentication providers
+   */
+  providers?: any[];
+
+  /**
+   * Custom authentication pages
+   */
+  pages?: {
+    signIn?: string;
+    signOut?: string;
+    error?: string;
+    verifyRequest?: string;
+    newUser?: string;
+  };
+
+  /**
+   * Authentication callbacks
+   */
+  callbacks?: {
+    session?: (params: any) => any;
+    signIn?: (params: any) => Promise<boolean>;
+    redirect?: (params: { baseUrl: string }) => Promise<string>;
+    jwt?: (params: { token: any }) => Promise<any>;
+  };
+
+  /**
+   * Authentication events
+   */
+  events?: {
+    signIn?: (message: any) => Promise<void>;
+    signOut?: (message: any) => Promise<void>;
+    createUser?: (message: any) => Promise<void>;
+    updateUser?: (message: any) => Promise<void>;
+    linkAccount?: (message: any) => Promise<void>;
+    session?: (message: any) => Promise<void>;
+  };
 };
 
 /**
@@ -157,6 +227,7 @@ export class Dot<
   readonly #env: TEnv;
   readonly #commandHandlers: CommandHandlerRegistration[];
   readonly #trpcOptions: TRPCOptions<TSchema> | null;
+  readonly #authConfig: AuthConfig | null;
 
   // #region Environment Variable Constants
   /** @internal Alternative names for the primary database connection URL environment variable. */
@@ -182,6 +253,7 @@ export class Dot<
       env?: TEnv;
       commandHandlers?: CommandHandlerRegistration[];
       trpcOptions?: TRPCOptions<TSchema> | null;
+      authConfig?: AuthConfig | null;
     } = {},
   ) {
     this.#appName = name;
@@ -192,6 +264,7 @@ export class Dot<
     this.#env = options.env ?? ({} as TEnv);
     this.#commandHandlers = options.commandHandlers ?? [];
     this.#trpcOptions = options.trpcOptions ?? null;
+    this.#authConfig = options.authConfig ?? null;
   }
 
   // #region Helper Methods
@@ -229,6 +302,7 @@ export class Dot<
       env: this.#env,
       commandHandlers: this.#commandHandlers,
       trpcOptions: options ?? this.#trpcOptions,
+      authConfig: this.#authConfig,
     });
   }
 
@@ -264,6 +338,7 @@ export class Dot<
       env: this.#env,
       commandHandlers: this.#commandHandlers,
       trpcOptions: this.#trpcOptions as TRPCOptions<TNewSchema>,
+      authConfig: this.#authConfig,
     });
   }
 
@@ -289,6 +364,7 @@ export class Dot<
       env: this.#env,
       commandHandlers: this.#commandHandlers,
       trpcOptions: this.#trpcOptions,
+      authConfig: this.#authConfig,
     });
   }
 
@@ -316,6 +392,7 @@ export class Dot<
       env: this.#env,
       commandHandlers: this.#commandHandlers,
       trpcOptions: this.#trpcOptions,
+      authConfig: this.#authConfig,
     });
   }
 
@@ -341,6 +418,7 @@ export class Dot<
       env: this.#env,
       commandHandlers: [...this.#commandHandlers, ...commandHandlers],
       trpcOptions: this.#trpcOptions,
+      authConfig: this.#authConfig,
     });
   }
 
@@ -374,6 +452,7 @@ export class Dot<
       env: this.#env,
       commandHandlers: this.#commandHandlers,
       trpcOptions: this.#trpcOptions,
+      authConfig: this.#authConfig,
     });
   }
 
@@ -400,6 +479,60 @@ export class Dot<
       env: currentEnv,
       commandHandlers: this.#commandHandlers,
       trpcOptions: this.#trpcOptions,
+      authConfig: this.#authConfig,
+    });
+  }
+
+  /**
+   * Configures authentication for the application.
+   *
+   * This method sets up authentication using the @arki/auth package.
+   * It configures session handling, JWT validation, and other auth-related features.
+   *
+   * @param config Authentication configuration options
+   * @returns A new Dot instance with the updated configuration
+   * @example
+   * .withAuth({
+   *   secret: env.AUTH_SECRET,
+   *   debug: env.NODE_ENV === 'development',
+   *   providers: [
+   *     // Your auth providers
+   *   ],
+   * })
+   */
+  withAuth(config: AuthConfig): Dot<TAppName, TRouters, TSchema, TRepositories, TEnv> {
+    // Apply defaults for validateSession if not provided
+    if (!config.validateSession && this.#dbConfig) {
+      config = {
+        ...config,
+        // By default, create a function that will validate the session token
+        validateSession: async (token: string) => {
+          if (!token.startsWith('Bearer ')) return null;
+
+          try {
+            // Import is used to avoid circular dependencies
+            // In real usage, your backend will have access to the auth package's functions
+            const authPackage = (await import('@arki/auth')) as unknown as AuthPackage;
+            if (typeof authPackage.validateSessionToken === 'function') {
+              return authPackage.validateSessionToken(token);
+            }
+          } catch {
+            console.warn('Failed to import validateSessionToken from @arki/auth, session validation will not work');
+          }
+          return null;
+        },
+      };
+    }
+
+    return new Dot<TAppName, TRouters, TSchema, TRepositories, TEnv>(this.#appName, {
+      routers: this.#routers,
+      dbConfig: this.#dbConfig,
+      eventSourcingConfig: this.#eventSourcingConfig,
+      kvConfig: this.#kvConfig,
+      env: this.#env,
+      commandHandlers: this.#commandHandlers,
+      trpcOptions: this.#trpcOptions,
+      authConfig: config,
     });
   }
   // #endregion
@@ -413,18 +546,43 @@ export class Dot<
     const authToken = headers.get('Authorization') ?? null;
     const source = headers.get('x-trpc-source') ?? 'unknown';
 
+    // Get session from token if not provided
+    let resolvedSession = session;
+    if (!resolvedSession && authToken && this.#authConfig?.validateSession) {
+      try {
+        resolvedSession = await this.#authConfig.validateSession(authToken);
+      } catch (error) {
+        console.error('Error validating session token:', error);
+      }
+    }
+
+    // Attempt to get session from cookies if still not resolved
+    // This would be handled by the NextAuth auth() function in API routes
+    if (!resolvedSession && !authToken) {
+      try {
+        // Import is used to avoid circular dependencies
+        // In real usage, your backend will have access to the auth package's functions
+        const authPackage = (await import('@arki/auth')) as unknown as AuthPackage;
+        if (typeof authPackage.auth === 'function') {
+          resolvedSession = await authPackage.auth();
+        }
+      } catch {
+        // Silently ignore - this is expected when not in a Next.js context
+      }
+    }
+
     // Log request source and user if available
-    if (session?.user) {
-      console.log('>>> tRPC Request from', source, 'by', session.user);
+    if (resolvedSession?.user) {
+      console.log('>>> tRPC Request from', source, 'by', resolvedSession.user);
     }
 
     const db = this.#initDrizzle();
 
     // Create base context with initialized components
     const baseContext: BaseTRPCContext<TSchema> = {
-      session,
+      session: resolvedSession,
       token: authToken,
-      user: session?.user,
+      user: resolvedSession?.user,
       db,
       repo: this.#dbConfig?.repositories ?? {},
       kv: this.#initKv(),
@@ -718,6 +876,8 @@ export class Dot<
       trpc: trpc?.procedures,
       /** Custom context creation function that can be used in API routes */
       createContext: this.#createTRPCContext,
+      /** Authentication configuration */
+      auth: this.#authConfig,
     };
   }
 
