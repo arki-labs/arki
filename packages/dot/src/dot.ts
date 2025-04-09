@@ -522,12 +522,12 @@ export class Dot<
     return <E extends Event>(
       canHandle: CanHandle<E>,
       handle: (events: PostgresReadEvent<E>[], context: Context) => Promise<void>,
-    ): BaseProjectionDefinition => {
+    ) => {
       // Cast needed because CanHandle type from emmett might not perfectly match drizzleProjection's expectation
       return drizzleProjection(db, {
         handle,
         canHandle: canHandle as unknown as CanHandle<E>,
-      }) as BaseProjectionDefinition;
+      });
     };
   }
 
