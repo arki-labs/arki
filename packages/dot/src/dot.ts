@@ -1,8 +1,12 @@
 import type { CanHandle, Command, Event, EventStore, MessageBus, ProjectionDefinition } from '@event-driven-io/emmett';
-import type { AnyRouter } from '@trpc/server/unstable-core-do-not-import';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres'; // Import NodePgDatabase directly
+import type { AnyRouter, DataTransformer } from '@trpc/server/unstable-core-do-not-import';
+import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import { getInMemoryMessageBus } from '@event-driven-io/emmett';
+import { initTRPC, TRPCError } from '@trpc/server';
+import superjson from 'superjson';
 
+import type { Session } from '@arki/auth';
+import type { ExtractTablesWithRelations } from '@arki/db/orm';
 import type { CommandHandlerType } from '@arki/event-sourcing/command';
 import type {
   DrizzleProjectionHandlerContext,
@@ -14,8 +18,8 @@ import type {
 import { initDb } from '@arki/db/init';
 import { drizzleProjection, drizzleWithRepoProjection, getEventStore, projections } from '@arki/event-sourcing/store';
 import { KV } from '@arki/kv';
-
-import { createCallerFactory, createTRPCRouter } from './core/trpc';
+import { RateLimitExceededError } from '@arki/kv/errors';
+import { ZodError } from '@arki/schema';
 
 // #region Core Type Definitions
 /**
@@ -75,6 +79,55 @@ type CommandHandlerRegistration<C extends Command = any> = {
   handler: CommandHandlerType<C, any, any>;
   getStreamName: (command: C) => string;
 };
+
+/**
+ * Represents a session user with basic properties.
+ * Specific implementations can extend this interface.
+ */
+export type SessionUser = Session['user'] & {
+  roles?: string[];
+};
+
+/**
+ * Base context for tRPC procedures.
+ * Can be extended in application implementations.
+ */
+export type BaseTRPCContext<TSchema extends SchemaInterface> = {
+  session: Session | null;
+  user?: SessionUser;
+  token: string | null;
+  db?: NodePgDatabase<TSchema>;
+  runInTransaction?: <T>(
+    callback: (tx: NodePgTransaction<TSchema, ExtractTablesWithRelations<TSchema>>) => Promise<T>,
+  ) => Promise<T>;
+  repo?: Repository;
+  kv?: KV;
+  messageBus?: MessageBus;
+  [key: string]: unknown;
+};
+
+/**
+ * Options for customizing tRPC initialization.
+ */
+export type TRPCOptions<TSchema extends SchemaInterface> = {
+  /**
+   * Function to get a session from headers
+   */
+  getSession?: (headers: Headers) => Promise<Session | null>;
+
+  /**
+   * Optional transformer for tRPC (default: superjson)
+   */
+  transformer?: DataTransformer;
+
+  /**
+   * Context creator extension function
+   */
+  extendContext?: (
+    baseContext: BaseTRPCContext<TSchema>,
+    opts: { headers: Headers; session: Session | null },
+  ) => Promise<Record<string, unknown>> | Record<string, unknown>;
+};
 // #endregion
 
 /**
@@ -103,6 +156,7 @@ export class Dot<
   readonly #kvConfig: { url: string } | null;
   readonly #env: TEnv;
   readonly #commandHandlers: CommandHandlerRegistration[];
+  readonly #trpcOptions: TRPCOptions<TSchema> | null;
 
   // #region Environment Variable Constants
   /** @internal Alternative names for the primary database connection URL environment variable. */
@@ -127,6 +181,7 @@ export class Dot<
       kvConfig?: { url: string } | null;
       env?: TEnv;
       commandHandlers?: CommandHandlerRegistration[];
+      trpcOptions?: TRPCOptions<TSchema> | null;
     } = {},
   ) {
     this.#appName = name;
@@ -136,6 +191,7 @@ export class Dot<
     this.#kvConfig = options.kvConfig ?? null;
     this.#env = options.env ?? ({} as TEnv);
     this.#commandHandlers = options.commandHandlers ?? [];
+    this.#trpcOptions = options.trpcOptions ?? null;
   }
 
   // #region Helper Methods
@@ -164,7 +220,7 @@ export class Dot<
    * @example
    * .withTrpc({ user: userRouter, post: postRouter })
    */
-  withTrpc<TNewRouters extends RouterRecord>(routers: TNewRouters) {
+  withTrpc<TNewRouters extends RouterRecord>(routers: TNewRouters, options?: TRPCOptions<TSchema>) {
     return new Dot<TAppName, TNewRouters, TSchema, TRepositories, TEnv>(this.#appName, {
       routers,
       dbConfig: this.#dbConfig,
@@ -172,6 +228,7 @@ export class Dot<
       kvConfig: this.#kvConfig,
       env: this.#env,
       commandHandlers: this.#commandHandlers,
+      trpcOptions: options ?? this.#trpcOptions,
     });
   }
 
@@ -195,7 +252,7 @@ export class Dot<
     schema: Readonly<TNewSchema>,
     repositories?: Readonly<TNewRepositories>,
     options: { url?: string; debug?: boolean } = {},
-  ): Dot<TAppName, TRouters, TNewSchema, TNewRepositories, TEnv> {
+  ) {
     // Explicitly cast repositories to ensure type compatibility if provided
     const currentRepositories = repositories as TNewRepositories | undefined;
     return new Dot<TAppName, TRouters, TNewSchema, TNewRepositories, TEnv>(this.#appName, {
@@ -206,6 +263,7 @@ export class Dot<
       kvConfig: this.#kvConfig,
       env: this.#env,
       commandHandlers: this.#commandHandlers,
+      trpcOptions: this.#trpcOptions as TRPCOptions<TNewSchema>,
     });
   }
 
@@ -230,6 +288,7 @@ export class Dot<
       kvConfig: this.#kvConfig,
       env: this.#env,
       commandHandlers: this.#commandHandlers,
+      trpcOptions: this.#trpcOptions,
     });
   }
 
@@ -256,6 +315,7 @@ export class Dot<
       kvConfig: this.#kvConfig,
       env: this.#env,
       commandHandlers: this.#commandHandlers,
+      trpcOptions: this.#trpcOptions,
     });
   }
 
@@ -275,11 +335,12 @@ export class Dot<
   withCommandHandlers(...commandHandlers: CommandHandlerRegistration[]) {
     return new Dot<TAppName, TRouters, TSchema, TRepositories, TEnv>(this.#appName, {
       routers: this.#routers,
-      dbConfig: this.#dbConfig, // Pass existing dbConfig
+      dbConfig: this.#dbConfig,
       eventSourcingConfig: this.#eventSourcingConfig,
       kvConfig: this.#kvConfig,
       env: this.#env,
       commandHandlers: [...this.#commandHandlers, ...commandHandlers],
+      trpcOptions: this.#trpcOptions,
     });
   }
 
@@ -312,6 +373,7 @@ export class Dot<
       kvConfig: { url: kvUrl },
       env: this.#env,
       commandHandlers: this.#commandHandlers,
+      trpcOptions: this.#trpcOptions,
     });
   }
 
@@ -337,7 +399,263 @@ export class Dot<
       kvConfig: this.#kvConfig,
       env: currentEnv,
       commandHandlers: this.#commandHandlers,
+      trpcOptions: this.#trpcOptions,
     });
+  }
+  // #endregion
+
+  // #region TRPC Initialization
+  /**
+   * Creates a TRPC context based on the provided options and Dot configuration.
+   */
+  #createTRPCContext = async (opts: { headers: Headers; session: Session | null }) => {
+    const { headers, session } = opts;
+    const authToken = headers.get('Authorization') ?? null;
+    const source = headers.get('x-trpc-source') ?? 'unknown';
+
+    // Log request source and user if available
+    if (session?.user) {
+      console.log('>>> tRPC Request from', source, 'by', session.user);
+    }
+
+    const db = this.#initDrizzle();
+
+    // Create base context with initialized components
+    const baseContext: BaseTRPCContext<TSchema> = {
+      session,
+      token: authToken,
+      user: session?.user,
+      db,
+      repo: this.#dbConfig?.repositories ?? {},
+      kv: this.#initKv(),
+      messageBus: this.#initMessageBus(this.#initEventSourcing()),
+      runInTransaction: db?.transaction.bind(db),
+    };
+
+    // Extend context with custom properties if extension function is provided
+    if (this.#trpcOptions?.extendContext) {
+      const extendedProps = await this.#trpcOptions.extendContext(baseContext, opts);
+      return { ...baseContext, ...extendedProps };
+    }
+
+    return baseContext;
+  };
+
+  /**
+   * Initialize the TRPC instance with middlewares and procedures.
+   */
+  #initTrpc() {
+    if (!this.#routers || Object.keys(this.#routers).length === 0) return;
+
+    // Initialize tRPC with context and transformer
+    const t = initTRPC.context<BaseTRPCContext<TSchema>>().create({
+      transformer: this.#trpcOptions?.transformer ?? superjson,
+      errorFormatter: ({ shape, error }) => ({
+        ...shape,
+        data: {
+          ...shape.data,
+          zodError: error.cause instanceof ZodError ? error.cause.flatten() : null,
+        },
+      }),
+    });
+
+    // Create error handling middleware
+    const errorHandlingMiddleware = t.middleware(async ({ next }) => {
+      try {
+        return await next();
+      } catch (error) {
+        // Handle RateLimitExceededError specifically
+        if (error instanceof RateLimitExceededError) {
+          // Add a random delay to obscure timing differences
+          await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 500));
+
+          throw new TRPCError({
+            code: 'TOO_MANY_REQUESTS',
+            message: `Rate limit exceeded. Try again later.`,
+            cause: this.#env.NODE_ENV === 'development' ? error : undefined,
+          });
+        }
+
+        if (error instanceof TRPCError) {
+          // Re-throw known tRPC errors
+          throw error;
+        }
+
+        // Log unknown errors for debugging
+        console.error('Unhandled error in tRPC procedure:', error);
+
+        // Throw a generic server error
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'An unexpected internal server error occurred.',
+          cause: this.#env.NODE_ENV === 'development' ? error : undefined,
+        });
+      }
+    });
+
+    // Create timing middleware
+    const timingMiddleware = t.middleware(async ({ next, path }) => {
+      const start = Date.now();
+
+      // Add artificial delay in development
+      if (this.#env.NODE_ENV === 'development') {
+        // artificial delay in dev 100-500ms
+        const waitMs = Math.floor(Math.random() * 400) + 100;
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+      }
+
+      const result = await next();
+
+      const end = Date.now();
+      console.log(`[TRPC] ${path} took ${end - start}ms to execute`);
+
+      return result;
+    });
+
+    // Create base procedures
+    const publicProcedure = t.procedure.use(errorHandlingMiddleware).use(timingMiddleware);
+
+    // Create protected procedure that requires authentication
+    const protectedProcedure = t.procedure
+      .use(errorHandlingMiddleware)
+      .use(timingMiddleware)
+      .use(({ ctx, next }) => {
+        if (!ctx.session?.user) {
+          throw new TRPCError({ code: 'UNAUTHORIZED' });
+        }
+        return next({
+          ctx: {
+            // infers the `session` as non-nullable
+            session: { ...ctx.session, user: ctx.session.user },
+          },
+        });
+      });
+
+    // Create admin procedure that requires admin role
+    const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
+      if (!ctx.user?.roles?.includes('admin')) {
+        throw new TRPCError({ code: 'UNAUTHORIZED' });
+      }
+
+      return next({ ctx });
+    });
+
+    // Create factory function for permission-based procedures
+    const createPermissionProcedure = (resource: string, action: string) => {
+      return protectedProcedure.use(async ({ ctx, next }) => {
+        // Implementation will depend on your repository structure
+        // Here's a flexible approach that doesn't assume a specific repo structure
+        const hasPermission = await this.#checkPermission(ctx, resource, action);
+
+        if (!hasPermission) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'You do not have permission to access this resource',
+          });
+        }
+
+        return next();
+      });
+    };
+
+    // Create factory function for role-based procedures
+    const createRoleProcedure = (roles: string[]) => {
+      return protectedProcedure.use(async ({ ctx, next }) => {
+        // Implementation will depend on your repository structure
+        const hasRole = await this.#checkRoles(ctx, roles);
+
+        if (!hasRole) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'You do not have the required role to access this resource',
+          });
+        }
+
+        return next();
+      });
+    };
+
+    // Create factory function for ownership-based procedures
+    const createOwnerProcedure = <TInput, M>(
+      resourceIdParam: keyof TInput,
+      checkOwnership: (ctx: BaseTRPCContext<TSchema>, resourceId: M) => Promise<boolean>,
+    ) => {
+      return protectedProcedure.use(async ({ ctx, next, getRawInput }) => {
+        if (!ctx.user) {
+          throw new TRPCError({
+            code: 'UNAUTHORIZED',
+            message: 'You must be logged in to access this resource',
+          });
+        }
+
+        const input = getRawInput() as TInput;
+        const resourceId = input[resourceIdParam] as M;
+        if (!resourceId) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Resource ID parameter '${String(resourceIdParam)}' is required`,
+          });
+        }
+
+        const isOwner = await checkOwnership(ctx, resourceId);
+
+        if (!isOwner) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'You do not have permission to access this resource',
+          });
+        }
+
+        return next();
+      });
+    };
+
+    // Merge routers
+    const router = t.router(this.#routers);
+
+    // Return an object with all TRPC components
+    return {
+      t,
+      router,
+      createCaller: t.createCallerFactory(router),
+      procedures: {
+        public: publicProcedure,
+        protected: protectedProcedure,
+        admin: adminProcedure,
+        withPermission: createPermissionProcedure,
+        withRole: createRoleProcedure,
+        withOwnership: createOwnerProcedure,
+      },
+    };
+  }
+
+  /**
+   * Checks if a user has a specific permission
+   * This is a placeholder implementation - customize based on your auth system
+   */
+  async #checkPermission(ctx: BaseTRPCContext<TSchema>, resource: string, action: string) {
+    // Default implementation - override this with your actual permission check
+    if (!ctx.user) return false;
+
+    // For admin users, grant all permissions by default
+    if (ctx.user.roles?.includes('admin')) return true;
+
+    // If you have a user repository with permission checking, use it here
+    // Example: return await ctx.repo.user.hasPermission(ctx.user.id, resource, action);
+
+    return false;
+  }
+
+  /**
+   * Checks if a user has any of the specified roles
+   * This is a placeholder implementation - customize based on your auth system
+   */
+  async #checkRoles(ctx: BaseTRPCContext<TSchema>, requiredRoles: string[]) {
+    // Default implementation - override this with your actual role check
+    if (!ctx.user?.roles) return false;
+
+    // Check if the user has any of the required roles
+    return requiredRoles.some(role => ctx.user?.roles?.includes(role));
   }
   // #endregion
 
@@ -355,10 +673,12 @@ export class Dot<
     // Initialize components, respecting dependencies
     const db = this.#initDrizzle();
     const eventStore = this.#initEventSourcing();
-    const router = this.#initTrpc();
     const kv = this.#initKv();
     // Pass initialized eventStore to message bus
     const messageBus = this.#initMessageBus(eventStore);
+
+    // Initialize tRPC with all components
+    const trpc = this.#initTrpc();
 
     // Extract env and repositories from config
     const env = this.#env;
@@ -371,13 +691,11 @@ export class Dot<
     const createWithRepoProjection =
       db && Object.keys(repositories).length > 0 ? this.#createWithRepoProjectionHelper(repositories) : undefined;
 
-    // Create tRPC caller utility
-    const createCaller = router ? createCallerFactory(router) : undefined;
-
+    // Return all the initialized components
     return {
       name: this.#appName,
       /** The configured and merged tRPC router instance, or undefined if not configured. */
-      router,
+      router: trpc?.router,
       /** The initialized Drizzle database instance, or undefined if not configured. */
       db,
       /** The initialized Event Store instance, or undefined if not configured. */
@@ -395,15 +713,12 @@ export class Dot<
       /** Utility function to create a Drizzle projection definition with repository access, or undefined if DB/Repositories not configured. */
       createWithRepoProjection,
       /** Utility function to create a server-side tRPC caller, or undefined if router not configured. */
-      createCaller,
+      createCaller: trpc?.createCaller,
+      /** All tRPC procedures and middlewares */
+      trpc: trpc?.procedures,
+      /** Custom context creation function that can be used in API routes */
+      createContext: this.#createTRPCContext,
     };
-  }
-
-  /** @internal Initializes the tRPC router. */
-  #initTrpc() {
-    if (!this.#routers || Object.keys(this.#routers).length === 0) return;
-
-    return createTRPCRouter(this.#routers);
   }
 
   /** @internal Initializes the Drizzle ORM database connection. */
