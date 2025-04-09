@@ -1,0 +1,41 @@
+{
+  "name": "@arki/dot",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/assert": "workspace:*",
+    "@arki/auth": "workspace:*",
+    "@arki/db": "workspace:*",
+    "@arki/emails": "workspace:*",
+    "@arki/event-sourcing": "workspace:*",
+    "@arki/kv": "workspace:*",
+    "@arki/schema": "workspace:*",
+    "@arki/slugify": "workspace:*",
+    "@trpc/client": "11.0.4",
+    "@trpc/server": "11.0.4",
+    "superjson": "latest"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "typescript": "^5.8.3"
+  }
+}
