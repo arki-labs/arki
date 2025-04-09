@@ -18,7 +18,6 @@ import { db, repositories } from '../db';
 import { env } from '../env';
 import { kv } from '../kv';
 import { auth, validateSessionToken } from './auth';
-import { messageBus } from './messageBus';
 
 /**
  * Isomorphic Session getter for API requests
