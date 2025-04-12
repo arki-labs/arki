@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
+    ".": "./src/cn.ts",
+    "./utils": "./src/cn.ts",
     "./cn": "./src/cn.ts",
     "./toast": "./src/toast/index.ts",
     "./*": "./src/*.tsx"
