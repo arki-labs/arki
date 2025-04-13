@@ -8,9 +8,8 @@ export type AttributeValue =
 
 export type Attributes = Record<string, AttributeValue | undefined>;
 
-export type BodyData = Record<string, any>;
-
-export type Body = string | Error | BodyData | any;
+export type StructuredBody = Record<string, unknown>;
+export type Body = string | Error | StructuredBody;
 
 export type SeverityNumber = number;
 
@@ -72,4 +71,10 @@ export type LogRecord = {
   body: Body;
   attributes?: Attributes;
   resource?: any;
+
+  /**
+   * @internal
+   * Used internally for batch processing
+   */
+  _level?: string;
 };
