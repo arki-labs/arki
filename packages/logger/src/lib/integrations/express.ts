@@ -148,10 +148,10 @@ export function expressLogger(logger: Logger, options: ExpressLoggerOptions = {}
       // Call original end with all arguments
       switch (arguments.length) {
         case 0: {
-          return originalEnd.call(this, null, 'utf-8');
+          return originalEnd.call(this, null, 'utf8');
         }
         case 1: {
-          return originalEnd.call(this, chunk, 'utf-8');
+          return originalEnd.call(this, chunk, 'utf8');
         }
         case 2: {
           return originalEnd.call(this, chunk, encoding);
