@@ -1,4 +1,3 @@
-import type { AnyRouter } from '@trpc/server';
 import { TRPCError } from '@trpc/server';
 
 import type { Logger } from '../logger';
@@ -26,7 +25,7 @@ import type { Attributes } from '../types';
  * export const publicProcedure = t.procedure.use(loggerMiddleware);
  * ```
  */
-export function createTRPCLoggerMiddleware<TRouter extends AnyRouter>(
+export function createTRPCLoggerMiddleware(
   logger: Logger,
   options: {
     /**
