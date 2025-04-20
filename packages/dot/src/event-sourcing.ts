@@ -1,11 +1,42 @@
-import type { Command, EventStore, MessageBus, ProjectionDefinition } from '@event-driven-io/emmett';
-import { getInMemoryMessageBus } from '@event-driven-io/emmett';
+import type {
+  Command,
+  Event,
+  EventStore,
+  MessageBus,
+  MessageProcessor,
+  ProjectionDefinition,
+} from '@event-driven-io/emmett';
+import { getInMemoryMessageBus, reactor } from '@event-driven-io/emmett';
 
 import type { CommandHandlerType } from '@arki/event-sourcing/command';
-import type { PostgreSQLProjectionHandlerContext, PostgresReadEventMetadata } from '@arki/event-sourcing/store';
+import type {
+  PostgresEventStore,
+  PostgreSQLProjectionHandlerContext,
+  PostgresReadEventMetadata,
+} from '@arki/event-sourcing/store';
 import { getEventStore, projections } from '@arki/event-sourcing/store';
 
 import type { CommandHandlerRegistration } from './types';
+
+export function createProcessManager<TEvent extends Event, TContext extends Record<string, any>>(
+  context: TContext,
+  name: string,
+  eventTypes: TEvent['type'][],
+  handlerFn: (event: TEvent, context: TContext) => Promise<void>,
+) {
+  return reactor({
+    canHandle: [...eventTypes],
+    eachMessage: async message => {
+      try {
+        await handlerFn(message, context);
+      } catch (error) {
+        console.error(`Error in process manager ${name}:`, error, message);
+        throw error; // Allow the consumer's error handling to take over
+      }
+    },
+    processorId: `process-manager-${name}`,
+  });
+}
 
 /** @internal Alternative names for the Event Store connection URL environment variable. */
 export const EVENT_STORE_URL_VARIANTS = ['EVENT_STORE_URL', 'EVENTSTORE_URL', 'EVENT_DB_URL'];
@@ -79,5 +110,27 @@ export const eventSourcingFeatures = {
     }
 
     return messageBus;
+  },
+
+  async setupProcessManagers(
+    eventStore: PostgresEventStore,
+    processManagers: MessageProcessor<any, any, any, bigint>[],
+  ) {
+    const processManagerConsumers = processManagers.map(pm =>
+      eventStore.consumer({
+        consumerId: pm.id,
+        processors: [pm],
+      }),
+    );
+
+    await Promise.all(processManagerConsumers.map(consumer => consumer.start()));
+
+    process.on('SIGTERM', async () => {
+      await Promise.all(processManagerConsumers.map(consumer => consumer.stop()));
+      await Promise.all(processManagerConsumers.map(consumer => consumer.close()));
+      process.exit(0);
+    });
+
+    return processManagerConsumers;
   },
 };
