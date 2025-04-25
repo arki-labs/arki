@@ -54,7 +54,7 @@ interface WithTooltipProps {
   side?: 'left' | 'right' | 'top' | 'bottom';
 }
 
-const WithTooltip: FC<WithTooltipProps> = ({ content, trigger, delayDuration = 500, side = 'right' }) => {
+const WithTooltip: FC<WithTooltipProps> = ({ content, trigger, delayDuration = 700, side = 'right' }) => {
   return (
     <TooltipProvider delayDuration={delayDuration}>
       <Tooltip>

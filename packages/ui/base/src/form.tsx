@@ -151,18 +151,20 @@ function FormMessage({ className, ...props }: React.ComponentProps<'p'>) {
   );
 }
 
-function FormHints({
+function FormHints<T extends string | number>({
   className,
   hints,
   slotProps,
   onHintClick,
+  renderHint,
   ...props
 }: ComponentProps<'div'> & {
-  hints: string[];
+  hints: T[];
   slotProps?: {
     button: ComponentProps<typeof Button>;
   };
-  onHintClick?: (hint: string) => void;
+  onHintClick?: (hint: T) => void;
+  renderHint?: (hint: T) => React.ReactNode;
 }) {
   const { setValue } = useFormContext();
   const { name } = useFormField();
@@ -176,14 +178,18 @@ function FormHints({
             variant="text"
             size="xs"
             {...slotProps?.button}
-            className={cn(slotProps?.button?.className, 'p-0')}
+            className={cn(slotProps?.button?.className, 'cursor-pointer p-0 text-gray-500 dark:text-gray-400')}
             onClick={e => {
               e.preventDefault();
-              setValue(name, hint, { shouldValidate: false });
+              setValue(name, hint, {
+                shouldDirty: true,
+                shouldTouch: true,
+                shouldValidate: true,
+              });
               onHintClick?.(hint);
             }}
           >
-            {hint}
+            {renderHint?.(hint) ?? hint.toString()}
           </Button>
           {index < hints.length - 1 && <span className="text-muted-foreground">, </span>}
         </Fragment>
