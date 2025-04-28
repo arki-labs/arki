@@ -8,32 +8,89 @@ import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from '@arki/icons';
 import { buttonVariants } from './button';
 import { cn } from './cn';
 
-function Calendar({ className, classNames, showOutsideDays = true, ...props }: React.ComponentProps<typeof DayPicker>) {
+type CalendarProps = React.ComponentProps<typeof DayPicker> & {
+  fullWidth?: boolean;
+  size?: 'sm' | 'md' | 'lg';
+};
+
+function Calendar({
+  className,
+  classNames,
+  showOutsideDays = true,
+  fullWidth = false,
+  size = 'md',
+  ...props
+}: CalendarProps) {
+  const sizeClasses = {
+    sm: {
+      padding: 'p-2',
+      captionLabel: 'text-xs',
+      navButtonSize: 'size-6',
+      weekdayWidth: 'w-7',
+      weekdayText: 'text-[0.7rem]',
+      daySize: 'size-7',
+      dayText: 'text-xs',
+    },
+    md: {
+      padding: 'p-3',
+      captionLabel: 'text-sm',
+      navButtonSize: 'size-7',
+      weekdayWidth: 'w-8',
+      weekdayText: 'text-[0.8rem]',
+      daySize: 'size-8',
+      dayText: 'text-sm',
+    },
+    lg: {
+      padding: 'p-4',
+      captionLabel: 'text-base',
+      navButtonSize: 'size-8',
+      weekdayWidth: 'w-9',
+      weekdayText: 'text-[0.9rem]',
+      daySize: 'size-9',
+      dayText: 'text-base',
+    },
+  };
+
+  const currentSize = sizeClasses[size];
+
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
-      className={cn('p-3', className)}
+      className={cn(currentSize.padding, fullWidth && 'w-full', className)}
       classNames={{
         months: 'flex flex-row sm:flex-col gap-2',
         month: 'flex flex-col gap-4',
         month_caption: 'flex justify-center pt-1 relative items-center w-full',
-        caption_label: 'text-sm font-medium',
+        caption_label: cn('font-medium', currentSize.captionLabel),
         nav: 'flex items-center gap-1 relative justify-between',
         button_previous: cn(
           buttonVariants({ variant: 'outline' }),
-          'absolute top-5 left-1 size-7 bg-transparent p-0 opacity-50 hover:opacity-100',
+          'absolute top-5 left-1 bg-transparent p-0 opacity-50 hover:opacity-100',
+          currentSize.navButtonSize,
         ),
         button_next: cn(
           buttonVariants({ variant: 'outline' }),
-          'absolute top-5 right-1 size-7 bg-transparent p-0 opacity-50 hover:opacity-100',
+          'absolute top-5 right-1 bg-transparent p-0 opacity-50 hover:opacity-100',
+          currentSize.navButtonSize,
         ),
-        table: 'w-full border-collapse space-x-1',
+        table: 'w-full border-collapse',
         weekdays: 'flex',
-        weekday: 'text-muted-foreground rounded-md w-8 font-normal text-[0.8rem]',
+        weekday: cn(
+          'flex-1',
+          'text-muted-foreground flex items-center justify-center rounded-md font-normal',
+          currentSize.weekdayText,
+          !fullWidth && currentSize.weekdayWidth,
+        ),
         week: 'flex w-full mt-2',
         day: cn(
           buttonVariants({ variant: 'ghost' }),
-          '[&:has([aria-selected])]:bg-accent [&:has([aria-selected].day-outside)]:bg-accent/50 relative size-8 p-0 text-center text-sm font-normal focus-within:relative focus-within:z-20 aria-selected:opacity-100 [&:has([aria-selected].day-range-end)]:rounded-r-md',
+          'relative p-0 text-center font-normal focus-within:relative focus-within:z-20 aria-selected:opacity-100',
+          'w-full',
+          currentSize.daySize,
+          currentSize.dayText,
+          fullWidth && 'flex-1',
+          '[&:has([aria-selected])]:bg-accent [&:has([aria-selected].day-outside)]:bg-accent/50',
+          '[&:has([aria-selected].day-range-end)]:rounded-r-md',
           props.mode === 'range'
             ? '[&:has(>.day-range-end)]:rounded-r-md [&:has(>.day-range-start)]:rounded-l-md first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md'
             : '[&:has([aria-selected])]:rounded-md',
