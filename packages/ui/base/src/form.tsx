@@ -151,7 +151,7 @@ function FormMessage({ className, ...props }: React.ComponentProps<'p'>) {
   );
 }
 
-function FormHints<T extends string | number>({
+function FormHints<T extends string | number | Date>({
   className,
   hints,
   slotProps,
