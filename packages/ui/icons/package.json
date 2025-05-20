@@ -24,16 +24,16 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@iconify-icon/react": "^2.3.0",
-    "@iconify/json": "^2.2.310",
-    "@iconify/react": "^5.2.0",
-    "@iconify/tailwind4": "^1.0.3",
+    "@iconify-icon/react": "^3.0.0",
+    "@iconify/json": "^2.2.340",
+    "@iconify/react": "^6.0.0",
+    "@iconify/tailwind4": "^1.0.6",
     "flag-icons": "^7.3.2",
     "flagpack-core": "^2.0.0",
-    "lucide-react": "0.475.0",
+    "lucide-react": "0.511.0",
     "react-flagpack": "^2.0.6",
     "react-icons": "^5.5.0",
-    "simple-icons": "^14.8.0",
+    "simple-icons": "^14.14.0",
     "unplugin-icons": "^22.1.0"
   },
   "devDependencies": {
