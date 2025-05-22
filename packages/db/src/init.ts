@@ -1,7 +1,11 @@
+import 'server-only';
+
 import type { DrizzleConfig } from 'drizzle-orm/utils';
 import { drizzle } from 'drizzle-orm/node-postgres';
 // import postgres from 'postgres';
-import { native } from 'pg';
+import pg from 'pg';
+
+const { native } = pg;
 
 if (!native) {
   throw new Error('Please install the pg-native package');
