@@ -27,8 +27,8 @@
     "@arki/kv": "workspace:*",
     "@arki/schema": "workspace:*",
     "@arki/slugify": "workspace:*",
-    "@trpc/client": "11.1.2",
-    "@trpc/server": "11.1.2",
+    "@trpc/client": "catalog:trpc",
+    "@trpc/server": "catalog:trpc",
     "superjson": "latest"
   },
   "devDependencies": {
@@ -36,6 +36,6 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "typescript": "^5.8.3"
+    "typescript": "catalog:"
   }
 }

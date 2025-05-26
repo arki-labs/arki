@@ -106,6 +106,7 @@ export default tseslint.config(
       'unicorn/filename-case': 'off',
       'unicorn/prefer-string-raw': 'off', // This causes issues with Next.js
       'unicorn/no-null': 'off',
+      'unicorn/prefer-dom-node-remove': 'off',
       'unused-imports/no-unused-imports': 'error',
       /**
        * Disallow expressions where the operation doesn't affect the value.
