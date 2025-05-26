@@ -25,8 +25,8 @@
   "dependencies": {
     "@arki/assert": "workspace:*",
     "@paralleldrive/cuid2": "^2.2.2",
-    "drizzle-orm": "^0.43.1",
-    "drizzle-zod": "~0.7.1",
+    "drizzle-orm": "catalog:drizzle",
+    "drizzle-zod": "catalog:drizzle",
     "pg": "8.16.0",
     "pg-native": "^3.5.0",
     "postgres": "^3.4.7"
