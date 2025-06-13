@@ -78,8 +78,8 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/react": "^19.1.4",
-    "@types/react-dom": "^19.1.5"
+    "@types/react": "catalog:react",
+    "@types/react-dom": "catalog:react"
   },
   "module:jsx": "src"
 }
