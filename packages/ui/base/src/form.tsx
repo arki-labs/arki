@@ -3,7 +3,7 @@
 import type * as LabelPrimitive from '@radix-ui/react-label';
 import type { ComponentProps } from 'react';
 import type { ControllerProps, FieldPath, FieldValues, UseFormProps } from 'react-hook-form';
-import type { ZodType, ZodTypeDef } from 'zod';
+import type { ZodType } from 'zod/v4';
 import * as React from 'react';
 import { Fragment, useId } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -16,9 +16,9 @@ import { Label } from './label';
 
 const Form = FormProvider;
 
-const useForm = <TOut extends FieldValues, TDef extends ZodTypeDef, TIn extends FieldValues>(
+const useForm = <TOut extends FieldValues, TIn extends FieldValues>(
   props: Omit<UseFormProps<TIn>, 'resolver'> & {
-    schema: ZodType<TOut, TDef, TIn>;
+    schema: ZodType<TOut, TIn>;
   },
 ) => {
   const form = __useForm<TIn, unknown, TOut>({

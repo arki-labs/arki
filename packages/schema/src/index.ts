@@ -1,2 +1,2 @@
-export * from 'zod';
-export * from 'zod-form-data';
+export * as formData from 'zod-form-data';
+export * from 'zod/v4';
