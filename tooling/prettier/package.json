@@ -15,8 +15,8 @@
   "dependencies": {
     "@ianvs/prettier-plugin-sort-imports": "^4.4.2",
     "prettier": "catalog:",
-    "prettier-plugin-packagejson": "^2.5.15",
-    "prettier-plugin-tailwindcss": "^0.6.12"
+    "prettier-plugin-packagejson": "^2.5.18",
+    "prettier-plugin-tailwindcss": "^0.6.13"
   },
   "devDependencies": {
     "@arki/tsconfig": "workspace:*",

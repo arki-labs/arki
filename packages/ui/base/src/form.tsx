@@ -2,32 +2,18 @@
 
 import type * as LabelPrimitive from '@radix-ui/react-label';
 import type { ComponentProps } from 'react';
-import type { ControllerProps, FieldPath, FieldValues, UseFormProps } from 'react-hook-form';
-import type { ZodType } from 'zod/v4';
+import type { ControllerProps, FieldPath, FieldValues } from 'react-hook-form';
 import * as React from 'react';
 import { Fragment, useId } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Slot } from '@radix-ui/react-slot';
-import { useForm as __useForm, Controller, FormProvider, useFormContext, useFormState } from 'react-hook-form';
+import { Controller, FormProvider, useForm, useFormContext, useFormState } from 'react-hook-form';
 
 import { Button } from './button';
 import { cn } from './cn';
 import { Label } from './label';
 
 const Form = FormProvider;
-
-const useForm = <TOut extends FieldValues, TIn extends FieldValues>(
-  props: Omit<UseFormProps<TIn>, 'resolver'> & {
-    schema: ZodType<TOut, TIn>;
-  },
-) => {
-  const form = __useForm<TIn, unknown, TOut>({
-    ...props,
-    resolver: zodResolver(props.schema) as any,
-  });
-
-  return form;
-};
 
 type FormFieldContextValue<
   TFieldValues extends FieldValues = FieldValues,
@@ -209,4 +195,5 @@ export {
   FormMessage,
   useForm,
   useFormField,
+  zodResolver,
 };
