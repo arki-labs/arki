@@ -99,6 +99,7 @@ export default tseslint.config(
           allowConstantLoopConditions: true,
         },
       ],
+      '@typescript-eslint/no-unsafe-return': 'off',
       '@typescript-eslint/no-non-null-assertion': 'error',
       '@typescript-eslint/consistent-type-definitions': ['error', 'type'],
       'import/consistent-type-specifier-style': ['error', 'prefer-top-level'],
