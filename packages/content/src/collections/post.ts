@@ -8,8 +8,6 @@ import { compileMDX } from '@content-collections/mdx';
 import readingTime from 'reading-time';
 import remarkGfm from 'remark-gfm';
 
-import type { z as Z } from '@arki/schema';
-
 import theme from '../lib/ch-theme.json' with { type: 'json' };
 import resolveImageBlurDataURL from '../lib/imageBlurDataURL';
 import mdxEmbedder from '../lib/mdxEmbedder';
@@ -43,19 +41,6 @@ async function collectImageInformation({ image, directory }: ImageParams) {
   return { url, blurDataURL };
 }
 
-const postSchema = (z: typeof Z) => ({
-  title: z.string(),
-  description: z.string(),
-  image: z.string(),
-  publishedAt: z.coerce.date(),
-  author: z.object({
-    name: z.string(),
-    url: z.string().optional(),
-    avatar: z.string().optional(),
-  }),
-  tags: z.array(z.string()),
-});
-
 export type Post = {
   title: string;
   description: string;
@@ -85,7 +70,18 @@ export const posts = defineCollection({
   name: 'posts',
   directory: postDirectory,
   include: '*/index.mdx',
-  schema: postSchema,
+  schema: z => ({
+    title: z.string(),
+    description: z.string(),
+    image: z.string(),
+    publishedAt: z.coerce.date(),
+    author: z.object({
+      name: z.string(),
+      url: z.string().optional(),
+      avatar: z.string().optional(),
+    }),
+    tags: z.array(z.string()),
+  }),
   transform: async (post, ctx) => {
     const mdx = await compileMDX(ctx, post, {
       files: appender => {
