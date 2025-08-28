@@ -41,7 +41,7 @@
     "@react-email/section": "^0.0.16",
     "@react-email/tailwind": "^1.2.2",
     "@react-email/text": "^0.1.5",
-    "resend": "^4.8.0"
+    "resend": "^6.0.1"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",

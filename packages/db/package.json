@@ -27,8 +27,8 @@
     "@paralleldrive/cuid2": "^2.2.2",
     "drizzle-orm": "catalog:drizzle",
     "drizzle-zod": "catalog:drizzle",
-    "pg": "8.16.0",
-    "pg-native": "^3.5.0",
+    "pg": "8.16.3",
+    "pg-native": "^3.5.2",
     "postgres": "^3.4.7"
   },
   "devDependencies": {
