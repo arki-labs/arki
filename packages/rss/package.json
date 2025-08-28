@@ -26,7 +26,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "feed": "^5.0.1",
+    "feed": "^5.1.0",
     "rss": "^1.2.2"
   },
   "devDependencies": {
