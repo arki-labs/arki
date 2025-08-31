@@ -36,6 +36,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@types/pg": "^8.15.5",
     "typescript": "catalog:"
   }
 }
