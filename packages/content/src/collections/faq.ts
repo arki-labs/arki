@@ -1,3 +1,4 @@
+import type { AnyCollection } from '@content-collections/core';
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
 
@@ -10,7 +11,7 @@ export type Faq = {
   slug: string;
 };
 
-export const faqs = defineCollection({
+export const faqs: AnyCollection = defineCollection({
   name: 'FAQs',
   directory: 'src/content/faq',
   include: '**/*.mdx',

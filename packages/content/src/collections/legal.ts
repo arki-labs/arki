@@ -1,3 +1,4 @@
+import type { AnyCollection } from '@content-collections/core';
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
 
@@ -10,7 +11,7 @@ export type Legal = {
   slug: string;
 };
 
-export const legals = defineCollection({
+export const legals: AnyCollection = defineCollection({
   name: 'Legals',
   directory: 'src/content/legal',
   include: '**/*.mdx',

@@ -1,7 +1,7 @@
 import { exec as syncExec } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { Meta } from '@content-collections/core';
+import type { AnyCollection, Meta } from '@content-collections/core';
 import { remarkCodeHike } from '@code-hike/mdx';
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
@@ -66,7 +66,7 @@ export type Post = {
   _meta: Meta;
 };
 
-export const posts = defineCollection({
+export const posts: AnyCollection = defineCollection({
   name: 'posts',
   directory: postDirectory,
   include: '*/index.mdx',

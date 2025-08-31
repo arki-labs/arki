@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { Meta } from '@content-collections/core';
+import type { AnyCollection, Meta } from '@content-collections/core';
 import { remarkCodeHike } from '@code-hike/mdx';
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
@@ -38,7 +38,7 @@ export type Changelog = {
   _meta: Meta;
 };
 
-export const changelogs = defineCollection({
+export const changelogs: AnyCollection = defineCollection({
   name: 'Changelogs',
   directory: 'src/content/changelog',
   include: '*/index.mdx',
