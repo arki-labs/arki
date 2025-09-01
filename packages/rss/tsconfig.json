@@ -1,8 +1,5 @@
 {
   "extends": "@arki/tsconfig/internal-package.json",
   "include": ["src"],
-  "exclude": ["node_modules"],
-  "compilerOptions": {
-    "types": ["minimatch"] // Ensure TypeScript includes the minimatch types
-  }
+  "exclude": ["node_modules"]
 }
