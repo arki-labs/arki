@@ -1,6 +1,6 @@
-import type { AnyCollection } from '@content-collections/core';
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
+import { z } from 'zod';
 
 import { addIdToHeadings } from '../plugins/add-id-to-headings';
 
@@ -11,11 +11,11 @@ export type Legal = {
   slug: string;
 };
 
-export const legals: AnyCollection = defineCollection({
+export const legals = defineCollection({
   name: 'Legals',
   directory: 'src/content/legal',
   include: '**/*.mdx',
-  schema: z => ({
+  schema: z.object({
     title: z.string(),
     updatedAt: z.string(),
   }),

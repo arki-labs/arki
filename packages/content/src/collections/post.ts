@@ -1,12 +1,13 @@
 import { exec as syncExec } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { AnyCollection, Meta } from '@content-collections/core';
+import type { Meta } from '@content-collections/core';
 import { remarkCodeHike } from '@code-hike/mdx';
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
 import readingTime from 'reading-time';
 import remarkGfm from 'remark-gfm';
+import { z } from 'zod';
 
 import theme from '../lib/ch-theme.json' with { type: 'json' };
 import resolveImageBlurDataURL from '../lib/imageBlurDataURL';
@@ -66,11 +67,11 @@ export type Post = {
   _meta: Meta;
 };
 
-export const posts: AnyCollection = defineCollection({
+export const posts = defineCollection({
   name: 'posts',
   directory: postDirectory,
   include: '*/index.mdx',
-  schema: z => ({
+  schema: z.object({
     title: z.string(),
     description: z.string(),
     image: z.string(),
