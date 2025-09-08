@@ -1,10 +1,5 @@
 export {
-  getRequestConfig,
-  getTranslations,
-  setRequestLocale,
-  getMessages,
-  getTimeZone,
-  getFormatter,
-  getLocale,
-  getNow,
-} from 'next-intl/server';
+    getFormatter,
+    getLocale, getMessages, getNow, getRequestConfig, getTimeZone, getTranslations,
+    setRequestLocale
+} from '@arki/intl/next-server';
