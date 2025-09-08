@@ -1,7 +1,7 @@
-import type { IRateLimiterOptions, RateLimiterAbstract } from 'rate-limiter-flexible';
 import KeyvRedis from '@keyv/redis';
 import Redis from 'ioredis'; // Import ioredis for rate limiter
 import Keyv from 'keyv';
+import type { IRateLimiterOptions, RateLimiterAbstract } from 'rate-limiter-flexible';
 import { RateLimiterMemory, RateLimiterRedis } from 'rate-limiter-flexible';
 
 export class KV {
@@ -76,6 +76,12 @@ export class KV {
 
   async clear(): Promise<void> {
     await this.#keyv.clear();
+  }
+
+  // --- Redis Pub/Sub Methods ---
+
+  async publish(channel: string, message: string): Promise<number> {
+    return this.#redisClient.publish(channel, message);
   }
 
   // --- Rate Limiting Methods (using rate-limiter-flexible) ---
