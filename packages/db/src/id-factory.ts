@@ -1,6 +1,7 @@
+import type { PgColumn } from 'drizzle-orm/pg-core';
 import { createId as createCuid } from '@paralleldrive/cuid2';
 import { varchar } from 'drizzle-orm/pg-core';
-import { z } from 'zod';
+import { z } from 'zod/v4';
 
 // Core ID creation
 export const createId = () => createCuid();
@@ -74,7 +75,7 @@ export function createIdFactory<TPrefix extends string, TId extends `${TPrefix}$
      */
     foreignKey: (
       name: string,
-      referenceFn: () => any,
+      referenceFn: () => PgColumn,
       options?: { onDelete?: 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default' },
     ) => varchar(name, { length: 256 }).notNull().$type<TId>().references(referenceFn, options),
 
@@ -84,7 +85,7 @@ export function createIdFactory<TPrefix extends string, TId extends `${TPrefix}$
      */
     optionalForeignKey: (
       name: string,
-      referenceFn: () => any,
+      referenceFn: () => PgColumn,
       options?: { onDelete?: 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default' },
     ) => varchar(name, { length: 256 }).$type<TId>().references(referenceFn, options),
 
@@ -92,7 +93,7 @@ export function createIdFactory<TPrefix extends string, TId extends `${TPrefix}$
      * Creates a foreign key factory bound to a specific table
      * This allows creating multiple foreign keys to the same table without repeating the reference
      */
-    createForeignKeyFactory: (referenceFn: () => any) => ({
+    createForeignKeyFactory: (referenceFn: () => PgColumn) => ({
       required: (
         name: string,
         options?: { onDelete?: 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default' },
