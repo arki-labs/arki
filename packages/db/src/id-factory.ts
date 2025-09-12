@@ -59,7 +59,6 @@ export function createIdFactory<TPrefix extends string, TId extends `${TPrefix}$
 
     optionalColumn: (name = 'id') =>
       varchar(name, { length: 256 })
-        .primaryKey()
         .$type<TId | null>()
         .$defaultFn(() => null),
 
