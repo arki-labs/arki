@@ -29,10 +29,8 @@ export const createPrefixedId = <T extends string>(prefix: T): `${T}${string}` =
  * });
  * ```
  */
-export function createIdFactory<TPrefix extends string, TId extends `${TPrefix}${string}`>(
-  prefix: TPrefix
-) {
-  return {
+export function createIdFactory<TPrefix extends string, TId extends `${TPrefix}${string}`>(prefix: TPrefix) {
+  const factory = {
     /**
      * Creates a new ID with the specified prefix
      */
@@ -45,33 +43,68 @@ export function createIdFactory<TPrefix extends string, TId extends `${TPrefix}$
     schema: z
       .string()
       .startsWith(prefix)
-      .transform((id) => id as TId),
+      .transform(id => id as TId),
 
     /**
      * Drizzle column helper for primary key columns
      * Automatically configures as varchar(256), not null, primary key, with proper type and default
      */
-    column: (name = 'id') => varchar(name, { length: 256 })
-      .notNull()
-      .primaryKey()
-      .$type<TId>()
-      .$defaultFn(() => createPrefixedId(prefix) as TId),
+    column: (name = 'id') =>
+      varchar(name, { length: 256 })
+        .notNull()
+        .primaryKey()
+        .$type<TId>()
+        .$defaultFn(() => createPrefixedId(prefix) as TId),
 
     /**
      * Drizzle column helper for foreign key reference columns
      * Configures as varchar(256), not null, with proper type (no default or primary key)
      */
-    reference: (name: string) => varchar(name, { length: 256 })
-      .notNull()
-      .$type<TId>(),
+    reference: (name: string) => varchar(name, { length: 256 }).notNull().$type<TId>(),
 
     /**
      * Drizzle column helper for optional foreign key reference columns
      * Configures as varchar(256), nullable, with proper type
      */
-    optionalReference: (name: string) => varchar(name, { length: 256 })
-      .$type<TId>(),
+    optionalReference: (name: string) => varchar(name, { length: 256 }).$type<TId>(),
+
+    /**
+     * Drizzle column helper for foreign key reference with relation
+     * Configures as varchar(256), not null, with proper type and foreign key constraint
+     */
+    foreignKey: (
+      name: string,
+      referenceFn: () => any,
+      options?: { onDelete?: 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default' },
+    ) => varchar(name, { length: 256 }).notNull().$type<TId>().references(referenceFn, options),
+
+    /**
+     * Drizzle column helper for optional foreign key reference with relation
+     * Configures as varchar(256), nullable, with proper type and foreign key constraint
+     */
+    optionalForeignKey: (
+      name: string,
+      referenceFn: () => any,
+      options?: { onDelete?: 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default' },
+    ) => varchar(name, { length: 256 }).$type<TId>().references(referenceFn, options),
+
+    /**
+     * Creates a foreign key factory bound to a specific table
+     * This allows creating multiple foreign keys to the same table without repeating the reference
+     */
+    createForeignKeyFactory: (referenceFn: () => any) => ({
+      required: (
+        name: string,
+        options?: { onDelete?: 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default' },
+      ) => factory.foreignKey(name, referenceFn, options),
+      optional: (
+        name: string,
+        options?: { onDelete?: 'cascade' | 'restrict' | 'no action' | 'set null' | 'set default' },
+      ) => factory.optionalForeignKey(name, referenceFn, options),
+    }),
   };
+
+  return factory;
 }
 
 // Re-export drizzle and zod utilities
