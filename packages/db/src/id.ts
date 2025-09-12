@@ -7,3 +7,6 @@ export const createId = () => {
 export const createPrefixedId = <T extends string>(prefix: T): `${T}${string}` => {
   return `${prefix}${createId()}`;
 };
+
+// Re-export the new ID factory
+export * from './id-factory';
