@@ -57,6 +57,12 @@ export function createIdFactory<TPrefix extends string, TId extends `${TPrefix}$
         .$type<TId>()
         .$defaultFn(() => createPrefixedId(prefix) as TId),
 
+    optionalColumn: (name = 'id') =>
+      varchar(name, { length: 256 })
+        .primaryKey()
+        .$type<TId | null>()
+        .$defaultFn(() => null),
+
     /**
      * Drizzle column helper for foreign key reference columns
      * Configures as varchar(256), not null, with proper type (no default or primary key)
