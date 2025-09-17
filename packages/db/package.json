@@ -27,16 +27,16 @@
     "@paralleldrive/cuid2": "^2.2.2",
     "drizzle-orm": "catalog:drizzle",
     "drizzle-zod": "catalog:drizzle",
-    "pg": "8.16.3",
-    "pg-native": "^3.5.2",
-    "postgres": "^3.4.7"
+    "pg": "catalog:drizzle",
+    "pg-native": "catalog:drizzle",
+    "postgres": "catalog:drizzle"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/pg": "^8.15.5",
+    "@types/pg": "catalog:drizzle",
     "typescript": "catalog:"
   }
 }
