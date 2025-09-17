@@ -6,5 +6,5 @@ export {
   getRequestConfig,
   getTimeZone,
   getTranslations,
-  setRequestLocale,
+  setRequestLocale
 } from 'next-intl/server';
