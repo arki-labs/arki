@@ -1,7 +1,5 @@
-import 'server-only';
-
-import type { DrizzleConfig } from 'drizzle-orm/utils';
 import { drizzle } from 'drizzle-orm/node-postgres';
+import type { DrizzleConfig } from 'drizzle-orm/utils';
 // import postgres from 'postgres';
 import pg from 'pg';
 
