@@ -54,7 +54,6 @@
     "@t3-oss/env-core": "catalog:env",
     "bcrypt": "6.0.0",
     "better-auth": "catalog:better-auth",
-    "next-auth": "beta",
     "react": "catalog:react",
     "react-dom": "catalog:react",
     "zod": "catalog:"

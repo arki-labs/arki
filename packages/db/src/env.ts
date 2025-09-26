@@ -11,7 +11,7 @@ export const env = createEnv({
 
     // Database Connection - Primary method (connection string)
     // Either DB_URL or DATABASE_URL must be provided (validated after env creation)
-    DB_URL: z.url().optional(),
+    DB_URL: z.url(),
     DATABASE_URL: z.url().optional(), // Alternative name used by many platforms (Vercel, Railway, etc.)
 
     // Database Connection - Individual parameters (alternative to DB_URL)
@@ -60,7 +60,7 @@ export const env = createEnv({
    */
   runtimeEnv: {
     NODE_ENV: process.env['NODE_ENV'],
-    DB_URL: process.env['DB_URL'],
+    DB_URL: process.env['DB_URL'] || process.env['DATABASE_URL'],
     DATABASE_URL: process.env['DATABASE_URL'],
     PGUSER: process.env['PGUSER'],
     PGPASSWORD: process.env['PGPASSWORD'],
