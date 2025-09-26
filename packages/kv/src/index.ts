@@ -99,8 +99,9 @@ export class KV {
   getRateLimiter(id: string, options: Partial<IRateLimiterOptions>): RateLimiterAbstract {
     const instanceKey = `${id}-${JSON.stringify(options)}`; // Simple key based on id + options
 
-    if (this.#limiterInstances.has(instanceKey)) {
-      return this.#limiterInstances.get(instanceKey)!;
+    const existingLimiter = this.#limiterInstances.get(instanceKey);
+    if (existingLimiter) {
+      return existingLimiter;
     }
 
     // Use Redis limiter if the client is ready, otherwise fallback to in-memory
@@ -153,3 +154,6 @@ export class KV {
     this.#limiterInstances.clear();
   }
 }
+
+// Re-export factory functions
+export { createKV, createRateLimitKV } from './factory';

@@ -27,6 +27,10 @@
     "./email/schema": {
       "default": "./src/email/schema.ts",
       "types": "./dist/email/schema.d.ts"
+    },
+    "./env": {
+      "default": "./src/env.ts",
+      "types": "./dist/env.d.ts"
     }
   },
   "scripts": {
@@ -44,17 +48,22 @@
     "@arki/schema": "workspace:*",
     "@auth/core": "^0.40.0",
     "@auth/drizzle-adapter": "^1.10.0",
+    "@better-auth/expo": "catalog:better-auth",
+    "@daveyplate/better-auth-ui": "catalog:better-auth",
     "@paralleldrive/cuid2": "^2.2.2",
+    "@t3-oss/env-core": "catalog:env",
     "bcrypt": "6.0.0",
+    "better-auth": "catalog:better-auth",
     "next-auth": "beta",
     "react": "catalog:react",
-    "react-dom": "catalog:react"
+    "react-dom": "catalog:react",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/bcrypt": "5.0.2"
+    "@types/bcrypt": "6.0.0"
   }
 }

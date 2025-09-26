@@ -69,69 +69,195 @@
   },
   "typesVersions": {
     "*": {
-      "index": ["src/index.ts"],
-      "cn": ["src/cn.ts"],
-      "utils": ["src/cn.ts"],
-      "toast": ["src/toast/index.ts"],
-      "accordion": ["src/accordion.tsx"],
-      "alert": ["src/alert.tsx"],
-      "alert-dialog": ["src/alert-dialog.tsx"],
-      "aspect-ratio": ["src/aspect-ratio.tsx"],
-      "avatar": ["src/avatar.tsx"],
-      "badge": ["src/badge.tsx"],
-      "breadcrumb": ["src/breadcrumb.tsx"],
-      "button": ["src/button.tsx"],
-      "calendar": ["src/calendar.tsx"],
-      "callout": ["src/callout.tsx"],
-      "card": ["src/card.tsx"],
-      "carousel": ["src/carousel.tsx"],
-      "chart": ["src/chart.tsx"],
-      "checkbox": ["src/checkbox.tsx"],
-      "collapsible": ["src/collapsible.tsx"],
-      "color-picker": ["src/color-picker.tsx"],
-      "command": ["src/command.tsx"],
-      "context-menu": ["src/context-menu.tsx"],
-      "control-group": ["src/control-group.tsx"],
-      "date-picker": ["src/date-picker.tsx"],
-      "dialog": ["src/dialog.tsx"],
-      "drawer": ["src/drawer.tsx"],
-      "dropdown-menu": ["src/dropdown-menu.tsx"],
-      "form": ["src/form.tsx"],
-      "hover-card": ["src/hover-card.tsx"],
-      "input": ["src/input.tsx"],
-      "input-base": ["src/input-base.tsx"],
-      "input-otp": ["src/input-otp.tsx"],
-      "label": ["src/label.tsx"],
-      "menubar": ["src/menubar.tsx"],
-      "navigation-menu": ["src/navigation-menu.tsx"],
-      "pagination": ["src/pagination.tsx"],
-      "panel": ["src/panel.tsx"],
-      "popover": ["src/popover.tsx"],
-      "progress": ["src/progress.tsx"],
-      "radio-group": ["src/radio-group.tsx"],
-      "resizable": ["src/resizable.tsx"],
-      "scroll-area": ["src/scroll-area.tsx"],
-      "scroll-to-top": ["src/scroll-to-top.tsx"],
-      "select": ["src/select.tsx"],
-      "separator": ["src/separator.tsx"],
-      "sheet": ["src/sheet.tsx"],
-      "sidebar": ["src/sidebar.tsx"],
-      "skeleton": ["src/skeleton.tsx"],
-      "slider": ["src/slider.tsx"],
-      "sonner": ["src/sonner.tsx"],
-      "spinners": ["src/spinners.tsx"],
-      "surface": ["src/surface.tsx"],
-      "switch": ["src/switch.tsx"],
-      "table": ["src/table.tsx"],
-      "tabs": ["src/tabs.tsx"],
-      "textarea": ["src/textarea.tsx"],
-      "textarea-with-autosize": ["src/textarea-with-autosize.tsx"],
-      "timeline": ["src/timeline.tsx"],
-      "toggle": ["src/toggle.tsx"],
-      "toggle-group": ["src/toggle-group.tsx"],
-      "toolbar": ["src/toolbar.tsx"],
-      "tooltip": ["src/tooltip.tsx"],
-      "*": ["src/*"]
+      "index": [
+        "src/index.ts"
+      ],
+      "cn": [
+        "src/cn.ts"
+      ],
+      "utils": [
+        "src/cn.ts"
+      ],
+      "toast": [
+        "src/toast/index.ts"
+      ],
+      "accordion": [
+        "src/accordion.tsx"
+      ],
+      "alert": [
+        "src/alert.tsx"
+      ],
+      "alert-dialog": [
+        "src/alert-dialog.tsx"
+      ],
+      "aspect-ratio": [
+        "src/aspect-ratio.tsx"
+      ],
+      "avatar": [
+        "src/avatar.tsx"
+      ],
+      "badge": [
+        "src/badge.tsx"
+      ],
+      "breadcrumb": [
+        "src/breadcrumb.tsx"
+      ],
+      "button": [
+        "src/button.tsx"
+      ],
+      "calendar": [
+        "src/calendar.tsx"
+      ],
+      "callout": [
+        "src/callout.tsx"
+      ],
+      "card": [
+        "src/card.tsx"
+      ],
+      "carousel": [
+        "src/carousel.tsx"
+      ],
+      "chart": [
+        "src/chart.tsx"
+      ],
+      "checkbox": [
+        "src/checkbox.tsx"
+      ],
+      "collapsible": [
+        "src/collapsible.tsx"
+      ],
+      "color-picker": [
+        "src/color-picker.tsx"
+      ],
+      "command": [
+        "src/command.tsx"
+      ],
+      "context-menu": [
+        "src/context-menu.tsx"
+      ],
+      "control-group": [
+        "src/control-group.tsx"
+      ],
+      "date-picker": [
+        "src/date-picker.tsx"
+      ],
+      "dialog": [
+        "src/dialog.tsx"
+      ],
+      "drawer": [
+        "src/drawer.tsx"
+      ],
+      "dropdown-menu": [
+        "src/dropdown-menu.tsx"
+      ],
+      "form": [
+        "src/form.tsx"
+      ],
+      "hover-card": [
+        "src/hover-card.tsx"
+      ],
+      "input": [
+        "src/input.tsx"
+      ],
+      "input-base": [
+        "src/input-base.tsx"
+      ],
+      "input-otp": [
+        "src/input-otp.tsx"
+      ],
+      "label": [
+        "src/label.tsx"
+      ],
+      "menubar": [
+        "src/menubar.tsx"
+      ],
+      "navigation-menu": [
+        "src/navigation-menu.tsx"
+      ],
+      "pagination": [
+        "src/pagination.tsx"
+      ],
+      "panel": [
+        "src/panel.tsx"
+      ],
+      "popover": [
+        "src/popover.tsx"
+      ],
+      "progress": [
+        "src/progress.tsx"
+      ],
+      "radio-group": [
+        "src/radio-group.tsx"
+      ],
+      "resizable": [
+        "src/resizable.tsx"
+      ],
+      "scroll-area": [
+        "src/scroll-area.tsx"
+      ],
+      "scroll-to-top": [
+        "src/scroll-to-top.tsx"
+      ],
+      "select": [
+        "src/select.tsx"
+      ],
+      "separator": [
+        "src/separator.tsx"
+      ],
+      "sheet": [
+        "src/sheet.tsx"
+      ],
+      "sidebar": [
+        "src/sidebar.tsx"
+      ],
+      "skeleton": [
+        "src/skeleton.tsx"
+      ],
+      "slider": [
+        "src/slider.tsx"
+      ],
+      "sonner": [
+        "src/sonner.tsx"
+      ],
+      "spinners": [
+        "src/spinners.tsx"
+      ],
+      "surface": [
+        "src/surface.tsx"
+      ],
+      "switch": [
+        "src/switch.tsx"
+      ],
+      "table": [
+        "src/table.tsx"
+      ],
+      "tabs": [
+        "src/tabs.tsx"
+      ],
+      "textarea": [
+        "src/textarea.tsx"
+      ],
+      "textarea-with-autosize": [
+        "src/textarea-with-autosize.tsx"
+      ],
+      "timeline": [
+        "src/timeline.tsx"
+      ],
+      "toggle": [
+        "src/toggle.tsx"
+      ],
+      "toggle-group": [
+        "src/toggle-group.tsx"
+      ],
+      "toolbar": [
+        "src/toolbar.tsx"
+      ],
+      "tooltip": [
+        "src/tooltip.tsx"
+      ],
+      "*": [
+        "src/*"
+      ]
     }
   },
   "scripts": {
@@ -181,10 +307,10 @@
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "react-colorful": "^5.6.1",
-    "react-day-picker": "9.10.0",
-    "react-hook-form": "^7.62.0",
+    "react-day-picker": "9.11.0",
+    "react-hook-form": "^7.63.0",
     "react-spinners": "^0.17.0",
-    "react-spring": "^10.0.1",
+    "react-spring": "^10.0.3",
     "react-textarea-autosize": "8.5.9",
     "react-tweet": "^3.2.2",
     "recharts": "^3.2.1",

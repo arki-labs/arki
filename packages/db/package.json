@@ -5,6 +5,10 @@
   "license": "MIT",
   "type": "module",
   "exports": {
+    "./env": {
+      "default": "./src/env.ts",
+      "types": "./dist/env.d.ts"
+    },
     "./*": "./src/*.ts"
   },
   "typesVersions": {
@@ -25,11 +29,13 @@
   "dependencies": {
     "@arki/assert": "workspace:*",
     "@paralleldrive/cuid2": "^2.2.2",
+    "@t3-oss/env-core": "catalog:env",
     "drizzle-orm": "catalog:drizzle",
     "drizzle-zod": "catalog:drizzle",
     "pg": "catalog:drizzle",
     "pg-native": "catalog:drizzle",
-    "postgres": "catalog:drizzle"
+    "postgres": "catalog:drizzle",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",

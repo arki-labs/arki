@@ -7,6 +7,10 @@
       "default": "./src/index.ts",
       "types": "./dist/index.d.ts"
     },
+    "./env": {
+      "default": "./src/env.ts",
+      "types": "./dist/env.d.ts"
+    },
     "./*": {
       "default": "./src/*.ts",
       "types": "./dist/*.d.ts"
@@ -21,10 +25,12 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@keyv/redis": "5.1.1",
-    "ioredis": "^5.7.0",
-    "keyv": "^5.5.0",
-    "rate-limiter-flexible": "^7.2.0"
+    "@keyv/redis": "5.1.2",
+    "@t3-oss/env-core": "catalog:env",
+    "ioredis": "^5.8.0",
+    "keyv": "^5.5.2",
+    "rate-limiter-flexible": "^8.0.1",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",

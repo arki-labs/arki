@@ -26,3 +26,6 @@ export const initDb = <TSchema extends Record<string, unknown> = Record<string, 
 
   return drizzle(client, config);
 };
+
+// Re-export factory functions
+export { createDb, getDbConnectionOptions, getDbConnectionParams } from './factory';
