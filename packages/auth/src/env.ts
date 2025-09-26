@@ -6,6 +6,9 @@ export const env = createEnv({
    * Environment variables schema for authentication services
    */
   server: {
+    NEXT_PUBLIC_URL: z.url(),
+    PRODUCTION_URL: z.url().optional(),
+
     // General Configuration
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
@@ -13,7 +16,7 @@ export const env = createEnv({
     AUTH_SECRET: z.string().min(1),
     AUTH_DEBUG: z
       .string()
-      .default(String(process.env.NODE_ENV !== 'production'))
+      .default(String(process.env['NODE_ENV'] !== 'production'))
       .transform(val => val === 'true'),
 
     // Email Configuration
@@ -57,7 +60,9 @@ export const env = createEnv({
    * Destructure all variables from `process.env` to make sure they aren't tree-shaken away.
    */
   runtimeEnv: {
-    NODE_ENV: process.env.NODE_ENV,
+    NEXT_PUBLIC_URL: process.env['NEXT_PUBLIC_URL'],
+    PRODUCTION_URL: process.env['PRODUCTION_URL'],
+    NODE_ENV: process.env['NODE_ENV'],
     AUTH_SECRET: process.env['AUTH_SECRET'],
     AUTH_DEBUG: process.env['AUTH_DEBUG'],
     RESEND_API_KEY: process.env['RESEND_API_KEY'],
@@ -79,5 +84,5 @@ export const env = createEnv({
     LINKEDIN_CLIENT_SECRET: process.env['LINKEDIN_CLIENT_SECRET'],
   },
 
-  skipValidation: !!process.env['CI'] || process.env.NODE_ENV !== 'development',
+  skipValidation: !!process.env['CI'] || process.env['NODE_ENV'] !== 'development',
 });

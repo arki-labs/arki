@@ -24,6 +24,7 @@
     "@arki/db": "workspace:*",
     "@arki/emails": "workspace:*",
     "@arki/event-sourcing": "workspace:*",
+    "@arki/fs": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/schema": "workspace:*",
     "@arki/slugify": "workspace:*",

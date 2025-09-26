@@ -8,18 +8,6 @@
       "default": "./src/index.ts",
       "types": "./dist/index.d.ts"
     },
-    "./errors": {
-      "default": "./src/errors.ts",
-      "types": "./dist/errors.d.ts"
-    },
-    "./password": {
-      "default": "./src/password.ts",
-      "types": "./dist/password.d.ts"
-    },
-    "./token": {
-      "default": "./src/token.ts",
-      "types": "./dist/token.d.ts"
-    },
     "./security/*": {
       "default": "./src/security/*.ts",
       "types": "./dist/security/*.d.ts"
@@ -28,10 +16,7 @@
       "default": "./src/email/schema.ts",
       "types": "./dist/email/schema.d.ts"
     },
-    "./env": {
-      "default": "./src/env.ts",
-      "types": "./dist/env.d.ts"
-    }
+    "./*": "./src/*.ts"
   },
   "scripts": {
     "clean": "git clean -xdf .cache .turbo dist node_modules",
@@ -42,6 +27,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/db": "workspace:*",
     "@arki/emails": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/nextjs": "workspace:*",

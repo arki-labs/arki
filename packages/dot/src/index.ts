@@ -14,7 +14,7 @@ import type {
   SchemaInterface,
   TRPCOptions,
 } from './types';
-import { authFeatures } from './auth';
+import { authFeatures, type DotAuth } from './auth';
 import { dbFeatures } from './db';
 import { EVENT_STORE_URL_VARIANTS, eventSourcingFeatures } from './event-sourcing';
 import { kvFeatures } from './kv';
@@ -336,13 +336,19 @@ export class Dot<
    *
    * @returns An object containing the initialized application components and utilities.
    */
-  bootstrap() {
+  async bootstrap() {
     // Initialize components, respecting dependencies
     const db = this.#initDrizzle();
     const eventStore = this.#initEventSourcing();
     const kv = this.#initKv();
     // Pass initialized eventStore to message bus
     const messageBus = this.#initMessageBus(eventStore);
+
+    // Initialize auth if configured
+    let dotAuth: DotAuth | undefined;
+    if (this.#authConfig) {
+      dotAuth = await authFeatures.initAuth(this.#authConfig, db);
+    }
 
     // Initialize tRPC with all components
     const trpc = this.#initTrpc();
@@ -385,8 +391,8 @@ export class Dot<
       trpc: trpc?.procedures,
       /** Custom context creation function that can be used in API routes */
       createContext: this.#createTRPCContext,
-      /** Authentication configuration */
-      auth: this.#authConfig,
+      /** The initialized DotAuth instance with better-auth integration */
+      auth: dotAuth,
     };
   }
 
@@ -460,3 +466,42 @@ export function createDot<TAppName extends string>(name: TAppName) {
 
 // Re-export types
 export * from './types';
+
+// Re-export auth module
+export {
+  // Main auth functionality
+  createDotAuth,
+  createAuthConfigFromEnv,
+  authPresets,
+  dotAuthIntegration,
+  sessionUtils,
+
+  // Types
+  type DotAuth,
+  type DotAuthConfig,
+  type DotUser,
+  type DotSession,
+  type DotSessionManager,
+  type DotRBACManager,
+
+  // Auth types
+  type Role,
+  type Permission,
+  type PolicyContext,
+  type SessionConfig,
+  type RBACConfig,
+  type MFAConfig,
+  type SecurityConfig,
+  type EmailConfig,
+
+  // Provider types
+  type BuiltInProvider,
+  type CustomProvider,
+  type ProviderConfig,
+
+  // Error types
+  type AuthErrorCode,
+} from './auth/index';
+
+// Re-export auth features
+export { authFeatures } from './auth';

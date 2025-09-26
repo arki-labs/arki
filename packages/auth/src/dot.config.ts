@@ -1,0 +1,163 @@
+import 'server-only';
+
+import { expo } from '@better-auth/expo';
+import { betterAuth } from 'better-auth';
+import type { DB } from 'better-auth/adapters/drizzle';
+import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { magicLink, oAuthProxy } from 'better-auth/plugins';
+import { Resend } from 'resend';
+
+import { createPrefixedId } from '@arki/db/id';
+
+import { env } from './env';
+
+export function initAuth(
+  db: DB,
+  userOptions: {
+    appName: string;
+    appKey?: string;
+    baseUrl?: string;
+    productionUrl?: string;
+    secret?: string;
+
+    googleClientId?: string;
+    googleClientSecret?: string;
+
+    appleClientId?: string;
+    appleClientSecret?: string;
+    appleAppBundleIdentifier?: string;
+
+    facebookClientId?: string;
+    facebookClientSecret?: string;
+
+    resendApiKey?: string;
+  },
+) {
+  const options = {
+    baseUrl: env.NEXT_PUBLIC_URL,
+    productionUrl: env.PRODUCTION_URL || env.NEXT_PUBLIC_URL,
+    secret: env.AUTH_SECRET,
+
+    googleClientId: env.GOOGLE_CLIENT_ID,
+    googleClientSecret: env.GOOGLE_CLIENT_SECRET,
+
+    appleClientId: env.APPLE_CLIENT_ID,
+    appleClientSecret: env.APPLE_CLIENT_SECRET,
+    appleAppBundleIdentifier: env.APPLE_APP_BUNDLE_IDENTIFIER,
+
+    facebookClientId: env.FACEBOOK_CLIENT_ID,
+    facebookClientSecret: env.FACEBOOK_CLIENT_SECRET,
+
+    resendApiKey: env.RESEND_API_KEY,
+    ...userOptions,
+  };
+
+  if (!options.secret) {
+    throw new Error('AUTH_SECRET is not set');
+  }
+
+  if (!options.baseUrl) {
+    throw new Error('NEXT_PUBLIC_URL is not set');
+  }
+
+  const resend = options.resendApiKey ? new Resend(options.resendApiKey) : undefined;
+
+  const googleProvider =
+    options.googleClientId && options.googleClientSecret
+      ? {
+          clientId: options.googleClientId,
+          clientSecret: options.googleClientSecret,
+        }
+      : undefined;
+
+  const facebookProvider =
+    options.facebookClientId && options.facebookClientSecret
+      ? {
+          clientId: options.facebookClientId,
+          clientSecret: options.facebookClientSecret,
+        }
+      : undefined;
+
+  const appleProvider =
+    options.appleClientId && options.appleClientSecret && options.appleAppBundleIdentifier
+      ? {
+          clientId: options.appleClientId,
+          clientSecret: options.appleClientSecret,
+          appBundleIdentifier: options.appleAppBundleIdentifier,
+        }
+      : undefined;
+
+  return betterAuth({
+    database: drizzleAdapter(db, {
+      provider: 'pg',
+      usePlural: true,
+    }),
+    appName: options.appName,
+    baseURL: options.baseUrl,
+    secret: options.secret,
+
+    advanced: {
+      cookiePrefix: options.appKey ? `auth-${options.appKey}` : 'auth',
+      database: {
+        generateId: ({ model }) => {
+          if (model === 'users') {
+            return createPrefixedId(`u_`);
+          }
+          if (model === 'sessions') {
+            return createPrefixedId(`sess_`);
+          }
+          if (model === 'accounts') {
+            return createPrefixedId(`acc_`);
+          }
+          if (model === 'verifications') {
+            return createPrefixedId(`verif_`);
+          }
+
+          return createPrefixedId(`${model}_`);
+        },
+      },
+    },
+    plugins: [
+      oAuthProxy({
+        /**
+         * Auto-inference blocked by https://github.com/better-auth/better-auth/pull/2891
+         */
+        currentURL: options.baseUrl,
+        productionURL: options.productionUrl,
+      }) as any,
+      expo(),
+      magicLink({
+        sendMagicLink: async ({ email, url }) => {
+          if (!resend) {
+            console.error('Resend not configured, cannot send magic link');
+            throw new Error('Email service not configured. Please try again later.');
+          }
+
+          const resp = await resend.emails.send({
+            to: email,
+            from: 'Brandability <no-reply@furculita.net>',
+            subject: 'Your magic link',
+            text: `Click the link to sign in: ${url}`,
+          });
+
+          if (resp.error) {
+            console.error('Failed to send magic link email:', resp.error);
+            throw new Error('Failed to send magic link email. Please try again later.');
+          }
+        },
+      }),
+    ],
+    user: {
+      additionalFields: {
+        // Add any additional user fields here if needed
+      },
+    },
+    socialProviders: {
+      ...(googleProvider && { google: googleProvider }),
+      ...(facebookProvider && { facebook: facebookProvider }),
+      ...(appleProvider && { apple: appleProvider }),
+    },
+  });
+}
+
+export type Auth = ReturnType<typeof initAuth>;

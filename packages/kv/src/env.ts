@@ -11,6 +11,7 @@ export const env = createEnv({
 
     // KV/Redis Configuration
     KV_URL: z.url().optional(),
+    KV_NAMESPACE: z.string().optional(),
 
     // Redis-specific configurations (for advanced Redis features)
     REDIS_HOST: z.string().optional(),

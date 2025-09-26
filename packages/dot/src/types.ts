@@ -3,6 +3,7 @@ import type { AnyRouter, DataTransformer } from '@trpc/server/unstable-core-do-n
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 
 import type { Session } from '@arki/auth';
+import type { DotAuth, DotRBACManager, DotSessionManager } from './auth/index';
 import type { ExtractTablesWithRelations } from '@arki/db/orm';
 import type { CommandHandlerType } from '@arki/event-sourcing/command';
 import type { PostgreSQLProjectionHandlerContext, PostgresReadEventMetadata } from '@arki/event-sourcing/store';
@@ -159,6 +160,10 @@ export type BaseTRPCContext<TSchema extends SchemaInterface> = {
   repo?: Repository;
   kv?: KV;
   messageBus?: any;
+  // Auth-related properties
+  auth?: DotAuth;
+  sessionManager?: DotSessionManager;
+  rbac?: DotRBACManager;
   [key: string]: unknown;
 };
 

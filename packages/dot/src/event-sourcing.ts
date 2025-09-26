@@ -54,8 +54,15 @@ export const eventSourcingFeatures = {
    */
   initEventSourcing(
     p: ProjectionDefinition<any, PostgresReadEventMetadata, PostgreSQLProjectionHandlerContext>[],
-    dbUrl: string,
+    dbUrl?: string,
   ) {
+    if (!dbUrl) {
+      throw new Error(
+        `Event Store database URL is not defined. Please set one of the following environment variables: ${EVENT_STORE_URL_VARIANTS.join(
+          ', ',
+        )}`,
+      );
+    }
     return getEventStore(dbUrl, {
       // Ensure projections are passed correctly
       projections: projections.inline(p),

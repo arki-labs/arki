@@ -6,7 +6,7 @@ import { RateLimitExceededError } from '@arki/kv/errors';
 import { ZodError } from '@arki/schema';
 
 import type { AuthConfig, BaseTRPCContext, RouterRecord, SchemaInterface, TRPCOptions } from './types';
-import { authFeatures } from './auth';
+import { authFeatures, type DotAuth } from './auth';
 
 /**
  * TRPC functionality for the Dot framework.
@@ -38,8 +38,27 @@ export const trpcFeatures = {
       const authToken = headers.get('Authorization') ?? null;
       const source = headers.get('x-trpc-source') ?? 'unknown';
 
+      const db = initDrizzleFn();
+
+      // Initialize auth module if configured
+      let dotAuth: DotAuth | undefined;
+      if (authConfig) {
+        dotAuth = await authFeatures.initAuth(authConfig, db);
+      }
+
       // Get session from token if not provided
       let resolvedSession = session;
+
+      // Try to get session from DotAuth first
+      if (!resolvedSession && dotAuth && authToken) {
+        try {
+          resolvedSession = await dotAuth.session.validateToken(authToken);
+        } catch (error) {
+          console.error('Error validating session token:', error);
+        }
+      }
+
+      // Fall back to legacy validateSession if available
       if (!resolvedSession && authToken && authConfig?.validateSession) {
         try {
           resolvedSession = await authConfig.validateSession(authToken);
@@ -51,7 +70,11 @@ export const trpcFeatures = {
       // Attempt to get session from cookies if still not resolved
       if (!resolvedSession && !authToken) {
         try {
-          resolvedSession = await authFeatures.getSessionFromCookies();
+          if (dotAuth) {
+            resolvedSession = await dotAuth.getSession(headers);
+          } else {
+            resolvedSession = await authFeatures.getSessionFromCookies();
+          }
         } catch {
           // Silently ignore - this is expected when not in a Next.js context
         }
@@ -61,8 +84,6 @@ export const trpcFeatures = {
       if (resolvedSession?.user) {
         console.log('>>> tRPC Request from', source, 'by', resolvedSession.user);
       }
-
-      const db = initDrizzleFn();
 
       // Create base context with initialized components
       const baseContext: BaseTRPCContext<TSchema> = {
@@ -74,6 +95,10 @@ export const trpcFeatures = {
         kv: initKvFn(),
         messageBus: initMessageBusFn(initEventSourcingFn()),
         runInTransaction: db?.transaction.bind(db),
+        // Add auth-related properties
+        auth: dotAuth,
+        sessionManager: dotAuth?.session,
+        rbac: dotAuth?.rbac,
       };
 
       // Extend context with custom properties if extension function is provided
@@ -284,18 +309,27 @@ export const trpcFeatures = {
 };
 
 /**
- * Checks if a user has a specific permission
- * This is a placeholder implementation - customize based on your auth system
+ * Checks if a user has a specific permission using the RBAC system
  */
 async function checkPermission<TSchema extends SchemaInterface>(
   ctx: BaseTRPCContext<TSchema>,
-  _resource: string,
-  _action: string,
+  resource: string,
+  action: string,
 ): Promise<boolean> {
-  // Default implementation - override this with your actual permission check
-  if (!ctx.user) return false;
+  // Check if user is authenticated
+  if (!ctx.user || !ctx.user.id) return false;
 
-  // For admin users, grant all permissions by default
+  // Use RBAC manager if available
+  if (ctx.rbac) {
+    try {
+      return await ctx.rbac.hasPermission(ctx.user.id, resource, action);
+    } catch (error) {
+      console.error('Error checking permission:', error);
+      return false;
+    }
+  }
+
+  // Fallback: For admin users, grant all permissions by default
   if (ctx.user.roles?.includes('admin')) return true;
 
   // If you have a user repository with permission checking, use it here
@@ -305,16 +339,33 @@ async function checkPermission<TSchema extends SchemaInterface>(
 }
 
 /**
- * Checks if a user has any of the specified roles
- * This is a placeholder implementation - customize based on your auth system
+ * Checks if a user has any of the specified roles using the RBAC system
  */
 async function checkRoles<TSchema extends SchemaInterface>(
   ctx: BaseTRPCContext<TSchema>,
   requiredRoles: string[],
 ): Promise<boolean> {
-  // Default implementation - override this with your actual role check
-  if (!ctx.user?.roles) return false;
+  // Check if user is authenticated
+  if (!ctx.user || !ctx.user.id) return false;
 
-  // Check if the user has any of the required roles
-  return requiredRoles.some(role => ctx.user?.roles?.includes(role));
+  // Use RBAC manager if available
+  if (ctx.rbac) {
+    try {
+      for (const role of requiredRoles) {
+        const hasRole = await ctx.rbac.hasRole(ctx.user.id, role);
+        if (hasRole) return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error checking roles:', error);
+      // Fall back to user.roles if RBAC fails
+    }
+  }
+
+  // Fallback: Check roles directly on the user object
+  if (ctx.user.roles) {
+    return requiredRoles.some(role => ctx.user.roles?.includes(role));
+  }
+
+  return false;
 }
