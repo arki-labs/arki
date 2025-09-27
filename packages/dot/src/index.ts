@@ -1,7 +1,7 @@
 import type { EventStore, MessageBus } from '@event-driven-io/emmett';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
-import type { Session } from '@arki/auth';
+// Session type is provided by our auth module
 import type { KV } from '@arki/kv';
 
 import type {
@@ -306,7 +306,7 @@ export class Dot<
   /**
    * @internal Creates a TRPC context based on the provided options and Dot configuration.
    */
-  #createTRPCContext = (opts: { headers: Headers; session: Session | null }) => {
+  #createTRPCContext = (opts: { headers: Headers; session: DotSession | null }) => {
     return trpcFeatures.createTRPCContextFactory<TSchema>(
       this.#dbConfig,
       () => this.#initDrizzle(),
@@ -497,10 +497,7 @@ export {
   // Provider types
   type BuiltInProvider,
   type CustomProvider,
-  type ProviderConfig,
-
-  // Error types
-  type AuthErrorCode,
+  type ProviderConfigs,
 } from './auth/index';
 
 // Re-export auth features

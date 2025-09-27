@@ -1,7 +1,8 @@
 import type { EmailConfig } from '@auth/core/providers/email';
 import type { Theme } from '@auth/core/types';
-import type { Resend } from 'resend';
 import { createId } from '@paralleldrive/cuid2';
+import type { Resend } from 'resend';
+import { env } from '../env';
 
 type SendVerificationRequestParams = {
   identifier: string;
@@ -26,7 +27,7 @@ export const sendVerificationRequest = (
 
     const { host } = new URL(url);
 
-    const isDevOrStaging = process.env.NODE_ENV === 'development' || process.env['VERCEL_ENV'] === 'preview';
+    const isDevOrStaging = env.NODE_ENV === 'development';
     const to = isDevOrStaging ? 'delivered@resend.dev' : identifier;
 
     try {

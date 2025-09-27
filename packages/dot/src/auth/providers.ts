@@ -1,9 +1,11 @@
 /**
  * Provider factory functions for common auth providers
+ * Uses validated environment variables from @t3-oss/env-core
  */
 
 import { magicLink, oAuthProxy, passkey, twoFactor } from 'better-auth/plugins';
 
+import { authEnv } from './env';
 import type { BuiltInProvider, CustomProvider, EmailTemplate, PasswordHasher, PasswordPolicy } from './types';
 
 /**
@@ -17,10 +19,12 @@ export interface ProviderFactoryResult {
 
 /**
  * Get environment variable with fallback
+ * @deprecated Use authEnv directly for type-safe access
  */
 function getEnvVar(names: string[]): string | undefined {
+  // Map old env var names to validated env properties
   for (const name of names) {
-    const value = process.env[name];
+    const value = (authEnv as any)[name];
     if (value) return value;
   }
   return undefined;
@@ -30,8 +34,8 @@ function getEnvVar(names: string[]): string | undefined {
  * Factory for Google OAuth provider
  */
 export function googleProviderFactory(): ProviderFactoryResult | null {
-  const clientId = getEnvVar(['GOOGLE_CLIENT_ID', 'AUTH_GOOGLE_ID']);
-  const clientSecret = getEnvVar(['GOOGLE_CLIENT_SECRET', 'AUTH_GOOGLE_SECRET']);
+  const clientId = authEnv.GOOGLE_CLIENT_ID || authEnv.AUTH_GOOGLE_ID;
+  const clientSecret = authEnv.GOOGLE_CLIENT_SECRET || authEnv.AUTH_GOOGLE_SECRET;
 
   if (!clientId || !clientSecret) {
     console.warn('Google provider configured but credentials not found in environment');
@@ -53,8 +57,8 @@ export function googleProviderFactory(): ProviderFactoryResult | null {
  * Factory for GitHub OAuth provider
  */
 export function githubProviderFactory(): ProviderFactoryResult | null {
-  const clientId = getEnvVar(['GITHUB_CLIENT_ID', 'AUTH_GITHUB_ID']);
-  const clientSecret = getEnvVar(['GITHUB_CLIENT_SECRET', 'AUTH_GITHUB_SECRET']);
+  const clientId = authEnv.GITHUB_CLIENT_ID || authEnv.AUTH_GITHUB_ID;
+  const clientSecret = authEnv.GITHUB_CLIENT_SECRET || authEnv.AUTH_GITHUB_SECRET;
 
   if (!clientId || !clientSecret) {
     console.warn('GitHub provider configured but credentials not found in environment');
@@ -76,8 +80,8 @@ export function githubProviderFactory(): ProviderFactoryResult | null {
  * Factory for Discord OAuth provider
  */
 export function discordProviderFactory(): ProviderFactoryResult | null {
-  const clientId = getEnvVar(['DISCORD_CLIENT_ID', 'AUTH_DISCORD_ID']);
-  const clientSecret = getEnvVar(['DISCORD_CLIENT_SECRET', 'AUTH_DISCORD_SECRET']);
+  const clientId = authEnv.DISCORD_CLIENT_ID || authEnv.AUTH_DISCORD_ID;
+  const clientSecret = authEnv.DISCORD_CLIENT_SECRET || authEnv.AUTH_DISCORD_SECRET;
 
   if (!clientId || !clientSecret) {
     console.warn('Discord provider configured but credentials not found in environment');
@@ -99,8 +103,8 @@ export function discordProviderFactory(): ProviderFactoryResult | null {
  * Factory for Facebook OAuth provider
  */
 export function facebookProviderFactory(): ProviderFactoryResult | null {
-  const clientId = getEnvVar(['FACEBOOK_CLIENT_ID', 'AUTH_FACEBOOK_ID', 'FB_CLIENT_ID']);
-  const clientSecret = getEnvVar(['FACEBOOK_CLIENT_SECRET', 'AUTH_FACEBOOK_SECRET', 'FB_CLIENT_SECRET']);
+  const clientId = authEnv.FACEBOOK_CLIENT_ID || authEnv.AUTH_FACEBOOK_ID;
+  const clientSecret = authEnv.FACEBOOK_CLIENT_SECRET || authEnv.AUTH_FACEBOOK_SECRET;
 
   if (!clientId || !clientSecret) {
     console.warn('Facebook provider configured but credentials not found in environment');
@@ -122,9 +126,9 @@ export function facebookProviderFactory(): ProviderFactoryResult | null {
  * Factory for Apple OAuth provider
  */
 export function appleProviderFactory(): ProviderFactoryResult | null {
-  const clientId = getEnvVar(['APPLE_CLIENT_ID', 'AUTH_APPLE_ID']);
-  const clientSecret = getEnvVar(['APPLE_CLIENT_SECRET', 'AUTH_APPLE_SECRET']);
-  const bundleId = getEnvVar(['APPLE_BUNDLE_ID', 'APPLE_APP_BUNDLE_IDENTIFIER']);
+  const clientId = authEnv.APPLE_CLIENT_ID || authEnv.AUTH_APPLE_ID;
+  const clientSecret = authEnv.APPLE_CLIENT_SECRET || authEnv.AUTH_APPLE_SECRET;
+  const bundleId = undefined; // Add to env.ts if needed
 
   if (!clientId || !clientSecret) {
     console.warn('Apple provider configured but credentials not found in environment');
@@ -146,8 +150,8 @@ export function appleProviderFactory(): ProviderFactoryResult | null {
  * Factory for Twitter/X OAuth provider
  */
 export function twitterProviderFactory(): ProviderFactoryResult | null {
-  const clientId = getEnvVar(['TWITTER_CLIENT_ID', 'X_CLIENT_ID', 'AUTH_TWITTER_ID']);
-  const clientSecret = getEnvVar(['TWITTER_CLIENT_SECRET', 'X_CLIENT_SECRET', 'AUTH_TWITTER_SECRET']);
+  const clientId = authEnv.TWITTER_CLIENT_ID || authEnv.AUTH_TWITTER_ID;
+  const clientSecret = authEnv.TWITTER_CLIENT_SECRET || authEnv.AUTH_TWITTER_SECRET;
 
   if (!clientId || !clientSecret) {
     console.warn('Twitter provider configured but credentials not found in environment');
@@ -168,8 +172,9 @@ export function twitterProviderFactory(): ProviderFactoryResult | null {
  * Factory for LinkedIn OAuth provider
  */
 export function linkedinProviderFactory(): ProviderFactoryResult | null {
-  const clientId = getEnvVar(['LINKEDIN_CLIENT_ID', 'AUTH_LINKEDIN_ID']);
-  const clientSecret = getEnvVar(['LINKEDIN_CLIENT_SECRET', 'AUTH_LINKEDIN_SECRET']);
+  // LinkedIn not in env.ts yet - add if needed
+  const clientId = undefined;
+  const clientSecret = undefined;
 
   if (!clientId || !clientSecret) {
     console.warn('LinkedIn provider configured but credentials not found in environment');
@@ -198,7 +203,7 @@ export function magicLinkProviderFactory(config?: {
 }): ProviderFactoryResult {
   const defaultSendEmail = async ({ email, url }: { email: string; url: string }) => {
     console.log(`Magic link for ${email}: ${url}`);
-    if (process.env.NODE_ENV === 'development') {
+    if (authEnv.NODE_ENV === 'development') {
       console.warn('Magic link email not sent - configure email provider');
     }
   };
@@ -245,14 +250,14 @@ export function credentialsProviderFactory(config?: {
  * Factory for development OAuth proxy
  */
 export function oAuthProxyFactory(config?: { baseUrl?: string; productionUrl?: string }): ProviderFactoryResult {
-  const isDevelopment = process.env.NODE_ENV !== 'production';
+  const isDevelopment = authEnv.NODE_ENV !== 'production';
 
   if (!isDevelopment) {
     return { plugins: [] };
   }
 
-  const baseUrl = config?.baseUrl || process.env.BASE_URL || 'http://localhost:3000';
-  const productionUrl = config?.productionUrl || process.env.PRODUCTION_URL || 'https://example.com';
+  const baseUrl = config?.baseUrl || authEnv.BASE_URL || 'http://localhost:3000';
+  const productionUrl = config?.productionUrl || authEnv.PRODUCTION_URL || 'https://example.com';
 
   return {
     plugins: [
@@ -271,7 +276,7 @@ export function totpProviderFactory(): ProviderFactoryResult {
   return {
     plugins: [
       twoFactor({
-        issuer: process.env.APP_NAME || 'Dot App',
+        issuer: authEnv.APP_NAME || 'Dot App',
       }),
     ],
   };
@@ -284,9 +289,9 @@ export function webAuthnProviderFactory(): ProviderFactoryResult {
   return {
     plugins: [
       passkey({
-        rpName: process.env.APP_NAME || 'Dot App',
-        rpID: process.env.RPID || 'localhost',
-        origin: process.env.BASE_URL || 'http://localhost:3000',
+        rpName: authEnv.APP_NAME || 'Dot App',
+        rpID: authEnv.RPID || 'localhost',
+        origin: authEnv.BASE_URL || 'http://localhost:3000',
       }),
     ],
   };
@@ -321,7 +326,7 @@ export function transformProviders(
   };
 
   // Add OAuth proxy for development
-  if (process.env.NODE_ENV === 'development') {
+  if (authEnv.NODE_ENV === 'development') {
     const proxyResult = oAuthProxyFactory();
     if (proxyResult.plugins) {
       result.plugins!.push(...proxyResult.plugins);

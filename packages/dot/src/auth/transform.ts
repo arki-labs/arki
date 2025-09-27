@@ -9,6 +9,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { createPrefixedId } from '@arki/db/id';
 
 import type { DotAuthConfig } from './config';
+import { authEnv, getAuthSecret as getEnvAuthSecret, getBaseUrl as getEnvBaseUrl } from './env';
 import { totpProviderFactory, transformProviders, webAuthnProviderFactory } from './providers';
 
 /**
@@ -17,25 +18,30 @@ import { totpProviderFactory, transformProviders, webAuthnProviderFactory } from
 function parseDuration(duration: string | number): number {
   if (typeof duration === 'number') return duration;
 
-  const match = duration.match(/^(\d+)([dhms])$/);
+  const match = /^(\d+)([dhms])$/.exec(duration);
   if (!match) {
     throw new Error(`Invalid duration format: ${duration}`);
   }
 
-  const value = parseInt(match[1], 10);
+  const value = Number.parseInt(match[1]!, 10);
   const unit = match[2];
 
   switch (unit) {
-    case 'd':
-      return value * 86400; // days to seconds
-    case 'h':
-      return value * 3600; // hours to seconds
-    case 'm':
-      return value * 60; // minutes to seconds
-    case 's':
-      return value; // already in seconds
-    default:
+    case 'd': {
+      return value * 86_400;
+    } // days to seconds
+    case 'h': {
+      return value * 3600;
+    } // hours to seconds
+    case 'm': {
+      return value * 60;
+    } // minutes to seconds
+    case 's': {
+      return value;
+    } // already in seconds
+    default: {
       throw new Error(`Invalid duration unit: ${unit}`);
+    }
   }
 }
 
@@ -43,12 +49,10 @@ function parseDuration(duration: string | number): number {
  * Get auth secret from config or environment
  */
 function getAuthSecret(config: DotAuthConfig): string {
-  const secret = config.secret || process.env.AUTH_SECRET || process.env.BETTER_AUTH_SECRET;
+  const secret = config.secret || getEnvAuthSecret();
 
   if (!secret) {
-    throw new Error(
-      'Auth secret is required. Set it in the config or as AUTH_SECRET environment variable'
-    );
+    throw new Error('Auth secret is required. Set it in the config or as AUTH_SECRET environment variable');
   }
 
   return secret;
@@ -58,15 +62,13 @@ function getAuthSecret(config: DotAuthConfig): string {
  * Get base URL from config or environment
  */
 function getBaseUrl(config: DotAuthConfig): string {
-  const baseUrl = config.baseUrl || process.env.BASE_URL || process.env.NEXT_PUBLIC_BASE_URL;
+  const baseUrl = config.baseUrl || getEnvBaseUrl();
 
   if (!baseUrl) {
-    if (process.env.NODE_ENV === 'development') {
+    if (authEnv.NODE_ENV === 'development') {
       return 'http://localhost:3000';
     }
-    throw new Error(
-      'Base URL is required. Set it in the config or as BASE_URL environment variable'
-    );
+    throw new Error('Base URL is required. Set it in the config or as BASE_URL environment variable');
   }
 
   return baseUrl;
@@ -86,12 +88,8 @@ function transformSession(config: DotAuthConfig): BetterAuthOptions['session'] {
   }
 
   return {
-    expiresIn: sessionConfig.expiresIn
-      ? parseDuration(sessionConfig.expiresIn)
-      : 60 * 60 * 24 * 30,
-    updateAge: sessionConfig.updateAge
-      ? parseDuration(sessionConfig.updateAge)
-      : 60 * 60 * 24,
+    expiresIn: sessionConfig.expiresIn ? parseDuration(sessionConfig.expiresIn) : 60 * 60 * 24 * 30,
+    updateAge: sessionConfig.updateAge ? parseDuration(sessionConfig.updateAge) : 60 * 60 * 24,
     ...(sessionConfig.cookieOptions && {
       cookieCache: {
         enabled: true,
@@ -104,7 +102,7 @@ function transformSession(config: DotAuthConfig): BetterAuthOptions['session'] {
 /**
  * Create ID generator for better-auth
  */
-function createIdGenerator(appKey?: string) {
+function createIdGenerator(_appKey?: string) {
   return ({ model }: { model: string }) => {
     // Map model names to prefixes
     const prefixMap: Record<string, string> = {
@@ -160,7 +158,7 @@ function transformEmailConfig(config: DotAuthConfig): Partial<BetterAuthOptions>
   result.user = {
     changeEmail: {
       enabled: config.features?.emailChange !== false,
-      sendChangeEmailVerification: async ({ user, newEmail, url, token }) => {
+      sendChangeEmailVerification: async ({ user, newEmail, url }) => {
         // This will be overridden by the email provider
         console.log(`Change email for ${user.email} to ${newEmail}: ${url}`);
       },
@@ -178,9 +176,10 @@ function transformAccountConfig(config: DotAuthConfig): Partial<BetterAuthOption
     account: {
       accountLinking: {
         enabled: config.features?.accountLinking !== false,
-        trustedProviders: config.providers
-          ?.filter((p) => typeof p === 'string' && p !== 'credentials' && p !== 'magicLink')
-          .map((p) => p as string) || [],
+        trustedProviders:
+          config.providers
+            ?.filter(p => typeof p === 'string' && p !== 'credentials' && p !== 'magicLink')
+            .map(p => p as string) || [],
       },
     },
   };
@@ -195,12 +194,14 @@ function transformMFA(config: DotAuthConfig): any[] {
   if (config.mfa?.providers) {
     for (const provider of config.mfa.providers) {
       switch (provider) {
-        case 'totp':
+        case 'totp': {
           plugins.push(...(totpProviderFactory().plugins || []));
           break;
-        case 'webauthn':
+        }
+        case 'webauthn': {
           plugins.push(...(webAuthnProviderFactory().plugins || []));
           break;
+        }
         // SMS and email MFA would need custom implementation
       }
     }
@@ -211,93 +212,178 @@ function transformMFA(config: DotAuthConfig): any[] {
 
 /**
  * Transform Dot auth config to better-auth config
+ *
+ * @param dotConfig - The Dot framework auth configuration
+ * @param db - Optional database connection for session storage
+ * @returns Configuration object for better-auth
  */
-export function toBetterAuthConfig(
-  dotConfig: DotAuthConfig,
-  db?: NodePgDatabase<any>
-): BetterAuthOptions {
-  // Start with base configuration
-  const config: BetterAuthOptions = {
-    appName: dotConfig.appName || process.env.APP_NAME || 'Dot App',
-    baseURL: getBaseUrl(dotConfig),
-    secret: getAuthSecret(dotConfig),
-    database: dotConfig.database || (db && drizzleAdapter(db, {
-      provider: 'pg',
-      usePlural: true,
-    })),
-    trustedOrigins: dotConfig.trustedOrigins || [],
-  };
+export function toBetterAuthConfig(dotConfig: DotAuthConfig, db?: NodePgDatabase<any>): BetterAuthOptions {
+  try {
+    // Start with base configuration
+    const config: BetterAuthOptions = {
+      appName: dotConfig.appName || authEnv.APP_NAME || 'Dot App',
+      baseURL: getBaseUrl(dotConfig),
+      secret: getAuthSecret(dotConfig),
+      database: dotConfig.database || (db ? createDatabaseAdapter(db) : undefined),
+      trustedOrigins: dotConfig.trustedOrigins || [],
+    };
 
-  // Advanced configuration
-  config.advanced = {
-    cookiePrefix: dotConfig.appKey ? `auth-${dotConfig.appKey}` : 'auth',
-    database: {
-      generateId: createIdGenerator(dotConfig.appKey),
-    },
-  };
+    // Continue with the rest of the configuration...
 
-  // Transform session config
-  config.session = transformSession(dotConfig);
+    // Advanced configuration
+    config.advanced = {
+      cookiePrefix: dotConfig.appKey ? `auth-${dotConfig.appKey}` : 'auth',
+      database: {
+        generateId: createIdGenerator(dotConfig.appKey),
+      },
+      // Enable secure defaults in production
+      ...(authEnv.NODE_ENV === 'production' && {
+        secureCookies: true,
+        sameSiteCookie: 'strict',
+        crossOriginOpenerPolicy: true,
+      }),
+    };
 
-  // Transform providers
-  if (dotConfig.providers) {
-    const providerResult = transformProviders(dotConfig.providers);
-    config.socialProviders = providerResult.socialProviders;
-    config.plugins = providerResult.plugins || [];
+    // Transform session config
+    config.session = transformSession(dotConfig);
 
-    // Merge additional config
-    if (providerResult.config) {
-      Object.assign(config, providerResult.config);
+    // Transform providers
+    if (dotConfig.providers) {
+      const providerResult = transformProviders(dotConfig.providers);
+      config.socialProviders = providerResult.socialProviders;
+      config.plugins = providerResult.plugins || [];
+
+      // Merge additional config
+      if (providerResult.config) {
+        Object.assign(config, providerResult.config);
+      }
+    } else {
+      config.plugins = [];
     }
-  } else {
-    config.plugins = [];
+
+    // Transform email config
+    Object.assign(config, transformEmailConfig(dotConfig));
+
+    // Transform account config
+    Object.assign(config, transformAccountConfig(dotConfig));
+
+    // Add MFA plugins
+    if (dotConfig.mfa) {
+      config.plugins.push(...transformMFA(dotConfig));
+    }
+
+    // Add production URL for OAuth proxy
+    if (dotConfig.productionUrl) {
+      // The oAuthProxy plugin will use this
+      (config as any).productionURL = dotConfig.productionUrl;
+    }
+
+    return config;
+  } catch (error) {
+    console.error('Failed to transform auth config:', error);
+    throw new Error(`Invalid auth configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
-
-  // Transform email config
-  Object.assign(config, transformEmailConfig(dotConfig));
-
-  // Transform account config
-  Object.assign(config, transformAccountConfig(dotConfig));
-
-  // Add MFA plugins
-  if (dotConfig.mfa) {
-    config.plugins!.push(...transformMFA(dotConfig));
-  }
-
-  // Add production URL for OAuth proxy
-  if (dotConfig.productionUrl) {
-    // The oAuthProxy plugin will use this
-    (config as any).productionURL = dotConfig.productionUrl;
-  }
-
-  return config;
 }
 
 /**
- * Validate Dot auth configuration
+ * Create database adapter with error handling
+ *
+ * @private
  */
-export function validateConfig(config: DotAuthConfig): void {
-  // Validate required fields based on features
-  if (config.email && !config.email.from) {
-    throw new Error('Email from address is required when email is configured');
-  }
-
-  // Validate provider configuration
-  if (config.providers) {
-    for (const provider of config.providers) {
-      if (typeof provider !== 'string' && !provider.id) {
-        throw new Error('Custom provider must have an id');
-      }
-    }
-  }
-
-  // Validate RBAC configuration
-  if (config.rbac?.enabled && !config.rbac.roles) {
-    throw new Error('Roles must be defined when RBAC is enabled');
-  }
-
-  // Validate MFA configuration
-  if (config.mfa?.required && !config.mfa.providers) {
-    throw new Error('MFA providers must be configured when MFA is required');
+function createDatabaseAdapter(db: NodePgDatabase<any>) {
+  try {
+    return drizzleAdapter(db, {
+      provider: 'pg',
+      usePlural: true,
+    });
+  } catch (error) {
+    console.error('Failed to create database adapter:', error);
+    // Return undefined to allow auth to work without database
+    return;
   }
 }
+
+/**
+ * Validate Dot auth configuration for production readiness
+ *
+ * @param config - The auth configuration to validate
+ * @throws {Error} If configuration is invalid or missing required fields
+ */
+export function validateConfig(config: DotAuthConfig): void {
+    if (!config) {
+      throw new Error('Auth configuration is required');
+    }
+
+    // Validate secret for production
+    if (authEnv.NODE_ENV === 'production') {
+      const secret = config.secret || getEnvAuthSecret();
+      if (!secret) {
+        throw new Error(
+          'Auth secret is required in production. Set AUTH_SECRET or BETTER_AUTH_SECRET environment variable.',
+        );
+      }
+      if (secret.length < 32) {
+        throw new Error('Auth secret must be at least 32 characters in production for security.');
+      }
+    }
+
+    // Validate base URL for production
+    if (authEnv.NODE_ENV === 'production') {
+      const baseUrl = config.baseUrl || getEnvBaseUrl();
+      if (!baseUrl || baseUrl.includes('localhost')) {
+        throw new Error('Production base URL is required and cannot be localhost.');
+      }
+    }
+
+    // Validate email configuration if email features are enabled
+    if (config.features?.emailPassword || config.features?.passwordReset || config.providers?.includes('magicLink')) {
+      if (!config.email?.from) {
+        throw new Error('Email from address is required when using email-based authentication.');
+      }
+      if (authEnv.NODE_ENV === 'production' && !config.email?.server) {
+        console.warn('Email server not configured. Email features will not work properly in production.');
+      }
+    }
+
+    // Validate provider configuration
+    if (config.providers) {
+      for (const provider of config.providers) {
+        if (typeof provider !== 'string' && !provider.id) {
+          throw new Error('Custom provider must have an id');
+        }
+      }
+    }
+
+    // Validate RBAC configuration
+    if (config.rbac?.enabled) {
+      if (!config.rbac.roles || config.rbac.roles.length === 0) {
+        throw new Error('At least one role must be defined when RBAC is enabled');
+      }
+      if (config.rbac.defaultRole && !config.rbac.roles.includes(config.rbac.defaultRole)) {
+        throw new Error(`Default role '${config.rbac.defaultRole}' is not in the list of configured roles`);
+      }
+    }
+
+    // Validate MFA configuration
+    if (config.mfa?.required) {
+      if (!config.mfa.providers || config.mfa.providers.length === 0) {
+        throw new Error('At least one MFA provider must be configured when MFA is required');
+      }
+      if (config.mfa.gracePeriod && config.mfa.gracePeriod < 0) {
+        throw new Error('MFA grace period cannot be negative');
+      }
+    }
+
+    // Validate security settings
+    if (config.security?.passwordPolicy) {
+      const policy = config.security.passwordPolicy;
+      if (policy.minLength && policy.minLength < 8) {
+        console.warn('Password minimum length is less than 8 characters. Consider increasing for better security.');
+      }
+    }
+
+    // Validate session configuration
+    if (config.session?.strategy === 'jwt' && !config.secret) {
+      throw new Error('JWT session strategy requires a secret for signing tokens');
+    }
+  }

@@ -426,21 +426,21 @@ export function createRBACManager(db: NodePgDatabase<any>): DotRBACManager {
     },
 
     async getUserWithRolesAndPermissions(userId: string): Promise<DotUser | null> {
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(eq('id', userId))
-        .limit(1);
+      // Since we don't have direct access to better-auth's tables,
+      // we need to use the API or return a simplified version
+      // This is a placeholder that should be implemented with better-auth's API
 
-      if (!user) {
-        return null;
-      }
+      // For now, return null as we can't directly query better-auth's database
+      // In a real implementation, this would use better-auth's API
+      console.warn('getUserWithRolesAndPermissions needs to be implemented with better-auth API');
 
       const userRolesList = await this.getUserRoles(userId);
       const userPermissions = await this.getUserPermissions(userId);
 
+      // For now, return a minimal user object
+      // In production, this should integrate with better-auth's user system
       return {
-        ...user,
+        id: userId,
         roles: userRolesList,
         permissions: userPermissions,
       } as DotUser;

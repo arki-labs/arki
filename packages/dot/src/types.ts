@@ -2,8 +2,8 @@ import type { Command, ProjectionDefinition } from '@event-driven-io/emmett';
 import type { AnyRouter, DataTransformer } from '@trpc/server/unstable-core-do-not-import';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 
-import type { Session } from '@arki/auth';
-import type { DotAuth, DotRBACManager, DotSessionManager } from './auth/index';
+// Auth types are provided by our auth module
+import type { DotAuth, DotRBACManager, DotSession, DotSessionManager } from './auth/index';
 import type { ExtractTablesWithRelations } from '@arki/db/orm';
 import type { CommandHandlerType } from '@arki/event-sourcing/command';
 import type { PostgreSQLProjectionHandlerContext, PostgresReadEventMetadata } from '@arki/event-sourcing/store';
@@ -11,8 +11,8 @@ import type { KV } from '@arki/kv';
 
 // Define types for the auth functions we need
 export type AuthPackage = {
-  auth: () => Promise<Session | null>;
-  validateSessionToken: (token: string) => Promise<Session | null>;
+  auth: () => Promise<DotSession | null>;
+  validateSessionToken: (token: string) => Promise<DotSession | null>;
   invalidateSessionToken: (token: string) => Promise<void>;
 };
 
@@ -72,7 +72,7 @@ export type AuthConfig = {
   /**
    * Custom session validation function
    */
-  validateSession?: (token: string) => Promise<Session | null>;
+  validateSession?: (token: string) => Promise<DotSession | null>;
 
   /**
    * Authentication providers
@@ -141,7 +141,7 @@ export type CommandHandlerRegistration<C extends Command = any> = {
  * Represents a session user with basic properties.
  * Specific implementations can extend this interface.
  */
-export type SessionUser = Session['user'] & {
+export type SessionUser = DotSession['user'] & {
   roles?: string[];
 };
 
@@ -150,7 +150,7 @@ export type SessionUser = Session['user'] & {
  * Can be extended in application implementations.
  */
 export type BaseTRPCContext<TSchema extends SchemaInterface> = {
-  session: Session | null;
+  session: DotSession | null;
   user?: SessionUser;
   token: string | null;
   db?: NodePgDatabase<TSchema>;
@@ -174,7 +174,7 @@ export type TRPCOptions<TSchema extends SchemaInterface> = {
   /**
    * Function to get a session from headers
    */
-  getSession?: (headers: Headers) => Promise<Session | null>;
+  getSession?: (headers: Headers) => Promise<DotSession | null>;
 
   /**
    * Optional transformer for tRPC (default: superjson)
@@ -186,6 +186,6 @@ export type TRPCOptions<TSchema extends SchemaInterface> = {
    */
   extendContext?: (
     baseContext: BaseTRPCContext<TSchema>,
-    opts: { headers: Headers; session: Session | null },
+    opts: { headers: Headers; session: DotSession | null },
   ) => Promise<Record<string, unknown>> | Record<string, unknown>;
 };

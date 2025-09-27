@@ -6,7 +6,6 @@ import type {
   BuiltInProvider,
   CookieOptions,
   CustomProvider,
-  DotSession,
   DotUser,
   EmailProvider,
   EmailTemplates,
@@ -28,7 +27,7 @@ import type {
 /**
  * Main Dot Auth configuration
  */
-export interface DotAuthConfig {
+export type DotAuthConfig = {
   /**
    * Application name for auth
    */
@@ -57,7 +56,7 @@ export interface DotAuthConfig {
   /**
    * Authentication providers
    */
-  providers?: Array<BuiltInProvider | CustomProvider>;
+  providers?: (BuiltInProvider | CustomProvider)[];
 
   /**
    * Session configuration
@@ -108,7 +107,7 @@ export interface DotAuthConfig {
 /**
  * Session configuration
  */
-export interface SessionConfig {
+export type SessionConfig = {
   /**
    * Session strategy
    */
@@ -143,7 +142,7 @@ export interface SessionConfig {
 /**
  * Email configuration
  */
-export interface EmailConfig {
+export type EmailConfig = {
   /**
    * Default from address
    */
@@ -178,7 +177,7 @@ export interface EmailConfig {
 /**
  * RBAC configuration
  */
-export interface RBACConfig {
+export type RBACConfig = {
   /**
    * Enable RBAC
    */
@@ -192,7 +191,7 @@ export interface RBACConfig {
   /**
    * Default role for new users
    */
-  defaultRole?: string;
+  defaultRole?: string | RoleDefinition;
 
   /**
    * Permission schema
@@ -213,7 +212,7 @@ export interface RBACConfig {
 /**
  * Role definition
  */
-export interface RoleDefinition {
+export type RoleDefinition = {
   name: string;
   description?: string;
   permissions?: string[] | Permission[];
@@ -224,7 +223,7 @@ export interface RoleDefinition {
 /**
  * Permission schema
  */
-export interface PermissionSchema {
+export type PermissionSchema = {
   resources: string[];
   actions: string[];
   conditions?: Record<string, any>;
@@ -233,7 +232,7 @@ export interface PermissionSchema {
 /**
  * MFA configuration
  */
-export interface MFAConfig {
+export type MFAConfig = {
   /**
    * Available MFA providers
    */
@@ -267,7 +266,7 @@ export interface MFAConfig {
 /**
  * Security configuration
  */
-export interface SecurityConfig {
+export type SecurityConfig = {
   /**
    * Rate limiting configuration
    */
@@ -325,7 +324,7 @@ export interface SecurityConfig {
 /**
  * Auth features toggles
  */
-export interface AuthFeatures {
+export type AuthFeatures = {
   /**
    * Enable email/password authentication
    */
@@ -360,12 +359,17 @@ export interface AuthFeatures {
    * Enable social login
    */
   socialLogin?: boolean;
+
+  /**
+   * Enable debug mode
+   */
+  debugMode?: boolean;
 }
 
 /**
  * Auth event hooks
  */
-export interface AuthHooks {
+export type AuthHooks = {
   /**
    * Called after successful sign in
    */
@@ -410,7 +414,7 @@ export interface AuthHooks {
 /**
  * Provider-specific configurations
  */
-export interface ProviderConfigs {
+export type ProviderConfigs = {
   /**
    * Google OAuth configuration
    */

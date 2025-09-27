@@ -1,82 +1,130 @@
 /**
  * Dot Auth Module - Better-Auth Integration
+ *
+ * Provides a comprehensive authentication solution with:
+ * - Zero-boilerplate configuration
+ * - Built-in RBAC (Role-Based Access Control)
+ * - Session management
+ * - OAuth provider auto-detection
+ * - Type-safe tRPC integration
  */
 
-import { betterAuth } from 'better-auth';
 import type { Auth } from 'better-auth';
+import { betterAuth } from 'better-auth';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import type { DotAuthConfig } from './config';
+import { authEnv, getAuthSecret as getEnvAuthSecret, getBaseUrl as getEnvBaseUrl, getProductionUrl as getEnvProductionUrl } from './env';
 import { createAuthMiddleware, createAuthProcedures } from './middleware';
-import { createRBACManager, initializeRBAC, type DotRBACManager } from './rbac';
-import { createSessionManager, sessionUtils, type DotSessionManager } from './session';
+import type { DotRBACManager } from './rbac';
+import { createRBACManager, initializeRBAC } from './rbac';
+import type { DotSessionManager } from './session';
+import { createSessionManager } from './session';
 import { toBetterAuthConfig, validateConfig } from './transform';
-import type { DotSession, DotUser } from './types';
+import type { DotSession } from './types';
 
 // Re-export all types
-export * from './types';
 export * from './config';
-export { sessionUtils };
+export * from './types';
+
+export type { DotRBACManager } from './rbac';
+export type { DotSessionManager } from './session';
+
+// Re-export security utilities
+export {
+  addSecurityDelay, compareTokens, createRateLimitKey, generateSecureToken,
+  generateSessionToken, hashToken, isValidEmail, isValidSessionToken, rateLimitDefaults, sanitizeInput, secureCompare, securityHeaders, validatePassword, type RateLimitConfig
+} from './security';
+export { sessionUtils } from './session';
 
 /**
- * Dot Auth instance
+ * Dot Auth instance - The main authentication interface
+ *
+ * @example
+ * ```typescript
+ * const auth = await createDotAuth(config, db);
+ * const session = await auth.getSession(headers);
+ * ```
  */
-export interface DotAuth {
+export type DotAuth = {
   /**
-   * The underlying better-auth instance
+   * The underlying better-auth instance for direct access when needed
    */
   instance: Auth;
 
   /**
-   * Better-auth API methods
+   * Better-auth API methods for authentication operations
    */
   api: Auth['api'];
 
   /**
-   * Session manager
+   * Session manager for handling user sessions
    */
   session: DotSessionManager;
 
   /**
-   * RBAC manager
+   * RBAC manager for role and permission management
    */
   rbac: DotRBACManager;
 
   /**
-   * Create tRPC procedures with auth
+   * Create tRPC procedures with built-in auth middleware
+   * @param t - The tRPC instance
+   * @returns Auth-aware procedures (public, protected, admin, etc.)
    */
   createProcedures: <TRouter>(t: any) => ReturnType<typeof createAuthProcedures>;
 
   /**
-   * Create auth middleware
+   * Create auth middleware for custom use
+   * @returns Middleware functions for authentication and authorization
    */
   createMiddleware: () => ReturnType<typeof createAuthMiddleware>;
 
   /**
-   * Get session from headers
+   * Get session from HTTP headers
+   * @param headers - HTTP headers containing session information
+   * @returns The user session or null if not authenticated
    */
   getSession: (headers: Headers) => Promise<DotSession | null>;
 
   /**
-   * Sign out a session
+   * Sign out a user session
+   * @param sessionId - The session ID to invalidate
    */
   signOut: (sessionId: string) => Promise<void>;
 
   /**
-   * Configuration
+   * The current auth configuration
    */
   config: DotAuthConfig;
 }
 
 /**
- * Create a Dot Auth instance
+ * Create a Dot Auth instance with better-auth integration
+ *
+ * @param config - The authentication configuration
+ * @param db - Optional database connection for session storage and RBAC
+ * @returns A configured DotAuth instance
+ * @throws {Error} If configuration is invalid
+ *
+ * @example
+ * ```typescript
+ * const auth = await createDotAuth({
+ *   providers: ['google', 'github'],
+ *   rbac: { enabled: true }
+ * }, db);
+ * ```
  */
 export async function createDotAuth(
   config: DotAuthConfig,
   db?: NodePgDatabase<any>
 ): Promise<DotAuth> {
   // Validate configuration
-  validateConfig(config);
+  try {
+    validateConfig(config);
+  } catch (error) {
+    throw new Error(`Invalid auth configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 
   // Transform to better-auth config
   const betterAuthConfig = toBetterAuthConfig(config, db);
@@ -84,18 +132,33 @@ export async function createDotAuth(
   // Create better-auth instance
   const auth = betterAuth(betterAuthConfig);
 
-  // Create managers
-  const sessionManager = createSessionManager(auth, db);
-  const rbacManager = db ? createRBACManager(db) : createMockRBACManager();
+  // Create managers with error handling
+  let sessionManager: DotSessionManager;
+  let rbacManager: DotRBACManager;
+
+  try {
+    sessionManager = createSessionManager(auth, db);
+    rbacManager = db ? createRBACManager(db) : createMockRBACManager();
+  } catch (error) {
+    console.error('Failed to initialize auth managers:', error);
+    throw new Error(`Failed to initialize auth: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 
   // Initialize default roles if RBAC is enabled
   if (config.rbac?.enabled && db) {
-    await initializeRBAC(rbacManager);
+    try {
+      await initializeRBAC(rbacManager);
 
-    // Assign default role to new users if configured
-    if (config.rbac.defaultRole) {
-      // This would be done in a sign-up hook
-      // We'll add this to the hooks configuration
+      // Log successful RBAC initialization
+      console.log('RBAC initialized with default roles');
+    } catch (error) {
+      // Log error but don't fail - RBAC is optional
+      console.error('Failed to initialize RBAC roles:', error);
+
+      // Only throw if RBAC is required
+      if (config.rbac.required) {
+        throw new Error(`RBAC initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
     }
   }
 
@@ -114,11 +177,25 @@ export async function createDotAuth(
     },
 
     getSession: async (headers: Headers) => {
-      return sessionManager.getSession(headers);
+      try {
+        return await sessionManager.getSession(headers);
+      } catch (error) {
+        console.error('Error getting session:', error);
+        return null; // Return null on error rather than throwing
+      }
     },
 
     signOut: async (sessionId: string) => {
-      return sessionManager.invalidateSession(sessionId);
+      if (!sessionId) {
+        throw new Error('Session ID is required for sign out');
+      }
+
+      try {
+        return await sessionManager.invalidateSession(sessionId);
+      } catch (error) {
+        console.error('Error signing out session:', error);
+        throw new Error(`Failed to sign out: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
     },
 
     config,
@@ -127,9 +204,15 @@ export async function createDotAuth(
 
 /**
  * Create mock RBAC manager for when database is not available
+ * This allows the auth module to work without a database connection
+ * but with limited functionality
+ *
+ * @private
  */
 function createMockRBACManager(): DotRBACManager {
-  console.warn('Database not configured - using mock RBAC manager');
+  if (authEnv.NODE_ENV !== 'test') {
+    console.warn('Database not configured - using mock RBAC manager. RBAC features will be limited.');
+  }
 
   return {
     createRole: async () => {
@@ -171,17 +254,33 @@ function createMockRBACManager(): DotRBACManager {
 }
 
 /**
- * Helper to create auth configuration from environment variables
+ * Create auth configuration from environment variables
+ *
+ * Automatically detects OAuth providers and other settings from environment
+ *
+ * @param overrides - Optional configuration overrides
+ * @returns Complete auth configuration
+ *
+ * @example
+ * ```typescript
+ * // Auto-detect everything from environment
+ * const config = createAuthConfigFromEnv();
+ *
+ * // Override specific settings
+ * const config = createAuthConfigFromEnv({
+ *   rbac: { enabled: true }
+ * });
+ * ```
  */
 export function createAuthConfigFromEnv(
   overrides?: Partial<DotAuthConfig>
 ): DotAuthConfig {
   const config: DotAuthConfig = {
-    appName: process.env.APP_NAME,
-    appKey: process.env.APP_KEY,
-    baseUrl: process.env.BASE_URL || process.env.NEXT_PUBLIC_BASE_URL,
-    productionUrl: process.env.PRODUCTION_URL || process.env.NEXT_PUBLIC_PRODUCTION_URL,
-    secret: process.env.AUTH_SECRET || process.env.BETTER_AUTH_SECRET,
+    appName: authEnv.APP_NAME,
+    appKey: authEnv.APP_KEY,
+    baseUrl: getEnvBaseUrl(),
+    productionUrl: getEnvProductionUrl(),
+    secret: getEnvAuthSecret(),
 
     // Detect providers from environment
     providers: [],
@@ -207,20 +306,19 @@ export function createAuthConfigFromEnv(
     ...overrides,
   };
 
-  // Auto-detect OAuth providers from environment
+  // Auto-detect OAuth providers from environment using validated env
   const providerChecks = [
-    { provider: 'google', envVars: ['GOOGLE_CLIENT_ID', 'AUTH_GOOGLE_ID'] },
-    { provider: 'github', envVars: ['GITHUB_CLIENT_ID', 'AUTH_GITHUB_ID'] },
-    { provider: 'discord', envVars: ['DISCORD_CLIENT_ID', 'AUTH_DISCORD_ID'] },
-    { provider: 'facebook', envVars: ['FACEBOOK_CLIENT_ID', 'AUTH_FACEBOOK_ID'] },
-    { provider: 'apple', envVars: ['APPLE_CLIENT_ID', 'AUTH_APPLE_ID'] },
-    { provider: 'twitter', envVars: ['TWITTER_CLIENT_ID', 'AUTH_TWITTER_ID'] },
+    { provider: 'google', check: () => !!(authEnv.GOOGLE_CLIENT_ID || authEnv.AUTH_GOOGLE_ID) },
+    { provider: 'github', check: () => !!(authEnv.GITHUB_CLIENT_ID || authEnv.AUTH_GITHUB_ID) },
+    { provider: 'discord', check: () => !!(authEnv.DISCORD_CLIENT_ID || authEnv.AUTH_DISCORD_ID) },
+    { provider: 'facebook', check: () => !!(authEnv.FACEBOOK_CLIENT_ID || authEnv.AUTH_FACEBOOK_ID) },
+    { provider: 'apple', check: () => !!(authEnv.APPLE_CLIENT_ID || authEnv.AUTH_APPLE_ID) },
+    { provider: 'twitter', check: () => !!(authEnv.TWITTER_CLIENT_ID || authEnv.AUTH_TWITTER_ID) },
   ];
 
-  for (const check of providerChecks) {
-    const hasProvider = check.envVars.some(envVar => process.env[envVar]);
-    if (hasProvider && config.providers) {
-      config.providers.push(check.provider as any);
+  for (const { provider, check } of providerChecks) {
+    if (check() && config.providers) {
+      config.providers.push(provider as any);
     }
   }
 

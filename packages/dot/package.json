@@ -28,9 +28,13 @@
     "@arki/kv": "workspace:*",
     "@arki/schema": "workspace:*",
     "@arki/slugify": "workspace:*",
+    "@t3-oss/env-core": "^0.13.8",
     "@trpc/client": "catalog:trpc",
     "@trpc/server": "catalog:trpc",
-    "superjson": "latest"
+    "better-auth": "^1.3.18",
+    "drizzle-orm": "^0.44.5",
+    "superjson": "latest",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",

@@ -1,7 +1,7 @@
 import { initTRPC, TRPCError } from '@trpc/server';
 import superjson from 'superjson';
 
-import type { Session } from '@arki/auth';
+// Session type is provided by our auth module
 import { RateLimitExceededError } from '@arki/kv/errors';
 import { ZodError } from '@arki/schema';
 
@@ -33,7 +33,7 @@ export const trpcFeatures = {
     trpcOptions?: TRPCOptions<TSchema> | null,
   ) {
     // Return a context creation function that will be called by tRPC
-    return async (opts: { headers: Headers; session: Session | null }) => {
+    return async (opts: { headers: Headers; session: DotSession | null }) => {
       const { headers, session } = opts;
       const authToken = headers.get('Authorization') ?? null;
       const source = headers.get('x-trpc-source') ?? 'unknown';

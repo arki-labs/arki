@@ -7,7 +7,9 @@ import type { Auth } from 'better-auth';
 import type { DotSession, DotUser } from './types';
 
 /**
- * Session manager interface
+ * Session manager interface for comprehensive session management
+ *
+ * Provides methods for creating, validating, refreshing, and invalidating sessions
  */
 export interface DotSessionManager {
   /**
@@ -53,19 +55,61 @@ export interface DotSessionManager {
 
 /**
  * Create session manager wrapper around better-auth
+ *
+ * @param auth - The better-auth instance
+ * @param db - Optional database connection for direct session operations
+ * @returns A session manager with comprehensive session management capabilities
  */
 export function createSessionManager(auth: Auth, db?: any): DotSessionManager {
   return {
     async getSession(headers: Headers): Promise<DotSession | null> {
-      try {
-        const session = await auth.api.getSession({ headers });
+      if (!headers || !(headers instanceof Headers)) {
+        console.warn('Invalid headers provided to getSession');
+        return null;
+      }
 
-        if (!session) {
+      try {
+        const result = await auth.api.getSession({ headers });
+
+        if (!result) {
           return null;
         }
 
-        // Enhance with additional data if needed
-        return session as DotSession;
+        // Better-auth returns an object with session and user properties
+        const { session, user } = result;
+
+        if (!session || !user) {
+          console.warn('Invalid session structure received from better-auth');
+          return null;
+        }
+
+        // Check if session is expired
+        if (session.expiresAt && new Date(session.expiresAt) < new Date()) {
+          console.debug('Session expired');
+          return null;
+        }
+
+        // Map to DotSession structure
+        const dotSession: DotSession = {
+          id: session.id,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          userId: session.userId,
+          expiresAt: session.expiresAt,
+          token: session.token,
+          ipAddress: session.ipAddress,
+          userAgent: session.userAgent,
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            emailVerified: user.emailVerified,
+            image: user.image,
+            roles: user.roles || []
+          }
+        };
+
+        return dotSession;
       } catch (error) {
         console.error('Error getting session:', error);
         return null;
@@ -73,56 +117,90 @@ export function createSessionManager(auth: Auth, db?: any): DotSessionManager {
     },
 
     async createSession(userId: string, metadata?: Record<string, any>): Promise<DotSession> {
+      if (!userId || typeof userId !== 'string') {
+        throw new Error('Valid user ID is required to create a session');
+      }
+
       // Create session through better-auth
       // This would typically be done through the sign-in flow
       // For direct session creation, we'd need to interact with the database
       if (!db) {
-        throw new Error('Database is required for direct session creation');
+        throw new Error('Database connection is required for direct session creation');
       }
 
-      // Create session token
-      const sessionToken = crypto.randomUUID();
-      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+      try {
+        // Create secure session token
+        const sessionToken = crypto.randomUUID();
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days
 
-      // Insert session into database
-      const [session] = await db
-        .insert('sessions')
-        .values({
-          id: `sess_${crypto.randomUUID()}`,
-          userId,
-          token: sessionToken,
-          expiresAt,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          ...metadata,
-        })
-        .returning();
+        // Insert session into database
+        const [session] = await db
+          .insert('sessions')
+          .values({
+            id: `sess_${crypto.randomUUID()}`,
+            userId,
+            token: sessionToken,
+            expiresAt,
+            createdAt: now,
+            updatedAt: now,
+            ipAddress: metadata?.['ipAddress'],
+            userAgent: metadata?.['userAgent'],
+            ...metadata,
+          })
+          .returning();
 
-      // Get user data
-      const [user] = await db
-        .select()
-        .from('users')
-        .where({ id: userId })
-        .limit(1);
+        if (!session) {
+          throw new Error('Failed to create session in database');
+        }
 
-      return {
-        ...session,
-        user,
-      } as DotSession;
+        // Get user data
+        const [user] = await db
+          .select()
+          .from('users')
+          .where({ id: userId })
+          .limit(1);
+
+        if (!user) {
+          // Clean up session if user not found
+          await db.delete('sessions').where({ id: session.id });
+          throw new Error('User not found for session creation');
+        }
+
+        return {
+          ...session,
+          user,
+        } as DotSession;
+      } catch (error) {
+        console.error('Failed to create session:', error);
+        throw new Error(`Session creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
     },
 
     async invalidateSession(sessionId: string): Promise<void> {
+      if (!sessionId || typeof sessionId !== 'string') {
+        throw new Error('Valid session ID is required for invalidation');
+      }
+
       try {
         // Invalidate through better-auth API if available
         // Otherwise, delete from database
-        if (db) {
-          await db
-            .delete('sessions')
-            .where({ id: sessionId });
+        if (!db) {
+          console.warn('No database connection - session invalidation may not persist');
+          return;
+        }
+
+        const result = await db
+          .delete('sessions')
+          .where({ id: sessionId })
+          .returning();
+
+        if (!result || result.length === 0) {
+          console.debug(`Session ${sessionId} not found or already invalidated`);
         }
       } catch (error) {
         console.error('Error invalidating session:', error);
-        throw error;
+        throw new Error(`Failed to invalidate session: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     },
 
@@ -173,9 +251,14 @@ export function createSessionManager(auth: Auth, db?: any): DotSessionManager {
     },
 
     async validateToken(token: string): Promise<DotSession | null> {
+      if (!token || typeof token !== 'string') {
+        return null;
+      }
+
       try {
         if (!db) {
-          throw new Error('Database is required for token validation');
+          console.warn('Database is required for token validation');
+          return null;
         }
 
         // Find session by token
@@ -264,15 +347,30 @@ export function createSessionManager(auth: Auth, db?: any): DotSessionManager {
 }
 
 /**
- * Session utilities
+ * Session utility functions for common session operations
+ *
+ * @example
+ * ```typescript
+ * if (sessionUtils.isExpired(session)) {
+ *   // Handle expired session
+ * }
+ * ```
  */
 export const sessionUtils = {
   /**
    * Check if session is expired
+   * @param session - The session to check
+   * @returns True if session is expired, false otherwise
    */
-  isExpired(session: DotSession): boolean {
-    if (!session.expiresAt) return false;
-    return new Date(session.expiresAt) < new Date();
+  isExpired(session: DotSession | null | undefined): boolean {
+    if (!session || !session.expiresAt) return false;
+
+    try {
+      return new Date(session.expiresAt) < new Date();
+    } catch (error) {
+      console.warn('Invalid expiration date in session');
+      return true; // Treat invalid dates as expired for safety
+    }
   },
 
   /**
