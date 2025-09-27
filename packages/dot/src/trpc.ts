@@ -5,8 +5,9 @@ import superjson from 'superjson';
 import { RateLimitExceededError } from '@arki/kv/errors';
 import { ZodError } from '@arki/schema';
 
-import type { AuthConfig, BaseTRPCContext, RouterRecord, SchemaInterface, TRPCOptions } from './types';
-import { authFeatures, type DotAuth } from './auth';
+import type { DotAuth, DotSession } from './auth';
+import { authFeatures } from './auth';
+import type { AuthConfig, BaseTRPCContext, RouterRecord, SchemaInterface, SessionUser, TRPCOptions } from './types';
 
 /**
  * TRPC functionality for the Dot framework.
@@ -70,11 +71,7 @@ export const trpcFeatures = {
       // Attempt to get session from cookies if still not resolved
       if (!resolvedSession && !authToken) {
         try {
-          if (dotAuth) {
-            resolvedSession = await dotAuth.getSession(headers);
-          } else {
-            resolvedSession = await authFeatures.getSessionFromCookies();
-          }
+          resolvedSession = await (dotAuth ? dotAuth.getSession(headers) : authFeatures.getSessionFromCookies());
         } catch {
           // Silently ignore - this is expected when not in a Next.js context
         }
@@ -89,7 +86,7 @@ export const trpcFeatures = {
       const baseContext: BaseTRPCContext<TSchema> = {
         session: resolvedSession,
         token: authToken,
-        user: resolvedSession?.user,
+        user: resolvedSession?.user as SessionUser | undefined,
         db,
         repo: dbConfig?.repositories ?? {},
         kv: initKvFn(),
@@ -317,7 +314,7 @@ async function checkPermission<TSchema extends SchemaInterface>(
   action: string,
 ): Promise<boolean> {
   // Check if user is authenticated
-  if (!ctx.user || !ctx.user.id) return false;
+  if (!ctx.user?.id) return false;
 
   // Use RBAC manager if available
   if (ctx.rbac) {
@@ -346,7 +343,7 @@ async function checkRoles<TSchema extends SchemaInterface>(
   requiredRoles: string[],
 ): Promise<boolean> {
   // Check if user is authenticated
-  if (!ctx.user || !ctx.user.id) return false;
+  if (!ctx.user?.id) return false;
 
   // Use RBAC manager if available
   if (ctx.rbac) {
@@ -363,8 +360,8 @@ async function checkRoles<TSchema extends SchemaInterface>(
   }
 
   // Fallback: Check roles directly on the user object
-  if (ctx.user.roles) {
-    return requiredRoles.some(role => ctx.user.roles?.includes(role));
+  if (ctx.user?.roles) {
+    return requiredRoles.some(role => ctx.user?.roles?.includes(role));
   }
 
   return false;

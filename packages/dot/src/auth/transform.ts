@@ -269,7 +269,10 @@ export function toBetterAuthConfig(dotConfig: DotAuthConfig, db?: NodePgDatabase
 
     // Add MFA plugins
     if (dotConfig.mfa) {
-      config.plugins.push(...transformMFA(dotConfig));
+      const mfaPlugins = transformMFA(dotConfig);
+      if (mfaPlugins.length > 0) {
+        (config.plugins as any[]).push(...mfaPlugins);
+      }
     }
 
     // Add production URL for OAuth proxy
@@ -340,8 +343,8 @@ export function validateConfig(config: DotAuthConfig): void {
       if (!config.email?.from) {
         throw new Error('Email from address is required when using email-based authentication.');
       }
-      if (authEnv.NODE_ENV === 'production' && !config.email?.server) {
-        console.warn('Email server not configured. Email features will not work properly in production.');
+      if (authEnv.NODE_ENV === 'production' && !config.email?.provider) {
+        console.warn('Email provider not configured. Email features will not work properly in production.');
       }
     }
 
@@ -359,8 +362,15 @@ export function validateConfig(config: DotAuthConfig): void {
       if (!config.rbac.roles || config.rbac.roles.length === 0) {
         throw new Error('At least one role must be defined when RBAC is enabled');
       }
-      if (config.rbac.defaultRole && !config.rbac.roles.includes(config.rbac.defaultRole)) {
-        throw new Error(`Default role '${config.rbac.defaultRole}' is not in the list of configured roles`);
+      if (config.rbac.defaultRole) {
+        const defaultRoleName = typeof config.rbac.defaultRole === 'string'
+          ? config.rbac.defaultRole
+          : config.rbac.defaultRole.name;
+
+        const roleNames = config.rbac.roles.map(r => typeof r === 'string' ? r : r.name);
+        if (!roleNames.includes(defaultRoleName)) {
+          throw new Error(`Default role '${defaultRoleName}' is not in the list of configured roles`);
+        }
       }
     }
 

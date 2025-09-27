@@ -20,9 +20,7 @@ export const authEnv = createEnv({
 
     // URLs
     BASE_URL: z.string().url().optional(),
-    NEXT_PUBLIC_BASE_URL: z.string().url().optional(),
     PRODUCTION_URL: z.string().url().optional(),
-    NEXT_PUBLIC_PRODUCTION_URL: z.string().url().optional(),
 
     // App configuration
     APP_NAME: z.string().optional(),
@@ -103,6 +101,7 @@ export const authEnv = createEnv({
   client: {
     // Add any client-side env vars here if needed
   },
+  clientPrefix: 'NEXT_PUBLIC_',
 
   /**
    * Runtime environment variables
@@ -110,96 +109,96 @@ export const authEnv = createEnv({
    */
   runtimeEnv: {
     // Core auth
-    AUTH_SECRET: process.env.AUTH_SECRET,
-    BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
+    AUTH_SECRET: process.env['AUTH_SECRET'],
+    BETTER_AUTH_SECRET: process.env['BETTER_AUTH_SECRET'],
 
     // URLs
-    BASE_URL: process.env.BASE_URL,
-    NEXT_PUBLIC_BASE_URL: process.env.NEXT_PUBLIC_BASE_URL,
-    PRODUCTION_URL: process.env.PRODUCTION_URL,
-    NEXT_PUBLIC_PRODUCTION_URL: process.env.NEXT_PUBLIC_PRODUCTION_URL,
+    BASE_URL: process.env['BASE_URL'],
+    NEXT_PUBLIC_BASE_URL: process.env['NEXT_PUBLIC_BASE_URL'],
+    PRODUCTION_URL: process.env['PRODUCTION_URL'],
+    NEXT_PUBLIC_PRODUCTION_URL: process.env['NEXT_PUBLIC_PRODUCTION_URL'],
 
     // App config
-    APP_NAME: process.env.APP_NAME,
-    APP_KEY: process.env.APP_KEY,
+    APP_NAME: process.env['APP_NAME'],
+    APP_KEY: process.env['APP_KEY'],
 
     // Database
-    DATABASE_URL: process.env.DATABASE_URL,
-    DB_URL: process.env.DB_URL,
-    POSTGRES_URL: process.env.POSTGRES_URL,
+    DATABASE_URL: process.env['DATABASE_URL'],
+    DB_URL: process.env['DB_URL'],
+    POSTGRES_URL: process.env['POSTGRES_URL'],
 
     // OAuth - Google
-    GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
-    AUTH_GOOGLE_ID: process.env.AUTH_GOOGLE_ID,
-    AUTH_GOOGLE_SECRET: process.env.AUTH_GOOGLE_SECRET,
+    GOOGLE_CLIENT_ID: process.env['GOOGLE_CLIENT_ID'],
+    GOOGLE_CLIENT_SECRET: process.env['GOOGLE_CLIENT_SECRET'],
+    AUTH_GOOGLE_ID: process.env['AUTH_GOOGLE_ID'],
+    AUTH_GOOGLE_SECRET: process.env['AUTH_GOOGLE_SECRET'],
 
     // OAuth - GitHub
-    GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
-    GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET,
-    AUTH_GITHUB_ID: process.env.AUTH_GITHUB_ID,
-    AUTH_GITHUB_SECRET: process.env.AUTH_GITHUB_SECRET,
+    GITHUB_CLIENT_ID: process.env['GITHUB_CLIENT_ID'],
+    GITHUB_CLIENT_SECRET: process.env['GITHUB_CLIENT_SECRET'],
+    AUTH_GITHUB_ID: process.env['AUTH_GITHUB_ID'],
+    AUTH_GITHUB_SECRET: process.env['AUTH_GITHUB_SECRET'],
 
     // OAuth - Discord
-    DISCORD_CLIENT_ID: process.env.DISCORD_CLIENT_ID,
-    DISCORD_CLIENT_SECRET: process.env.DISCORD_CLIENT_SECRET,
-    AUTH_DISCORD_ID: process.env.AUTH_DISCORD_ID,
-    AUTH_DISCORD_SECRET: process.env.AUTH_DISCORD_SECRET,
+    DISCORD_CLIENT_ID: process.env['DISCORD_CLIENT_ID'],
+    DISCORD_CLIENT_SECRET: process.env['DISCORD_CLIENT_SECRET'],
+    AUTH_DISCORD_ID: process.env['AUTH_DISCORD_ID'],
+    AUTH_DISCORD_SECRET: process.env['AUTH_DISCORD_SECRET'],
 
     // OAuth - Facebook
-    FACEBOOK_CLIENT_ID: process.env.FACEBOOK_CLIENT_ID,
-    FACEBOOK_CLIENT_SECRET: process.env.FACEBOOK_CLIENT_SECRET,
-    AUTH_FACEBOOK_ID: process.env.AUTH_FACEBOOK_ID,
-    AUTH_FACEBOOK_SECRET: process.env.AUTH_FACEBOOK_SECRET,
+    FACEBOOK_CLIENT_ID: process.env['FACEBOOK_CLIENT_ID'],
+    FACEBOOK_CLIENT_SECRET: process.env['FACEBOOK_CLIENT_SECRET'],
+    AUTH_FACEBOOK_ID: process.env['AUTH_FACEBOOK_ID'],
+    AUTH_FACEBOOK_SECRET: process.env['AUTH_FACEBOOK_SECRET'],
 
     // OAuth - Apple
-    APPLE_CLIENT_ID: process.env.APPLE_CLIENT_ID,
-    APPLE_CLIENT_SECRET: process.env.APPLE_CLIENT_SECRET,
-    AUTH_APPLE_ID: process.env.AUTH_APPLE_ID,
-    AUTH_APPLE_SECRET: process.env.AUTH_APPLE_SECRET,
+    APPLE_CLIENT_ID: process.env['APPLE_CLIENT_ID'],
+    APPLE_CLIENT_SECRET: process.env['APPLE_CLIENT_SECRET'],
+    AUTH_APPLE_ID: process.env['AUTH_APPLE_ID'],
+    AUTH_APPLE_SECRET: process.env['AUTH_APPLE_SECRET'],
 
     // OAuth - Twitter
-    TWITTER_CLIENT_ID: process.env.TWITTER_CLIENT_ID,
-    TWITTER_CLIENT_SECRET: process.env.TWITTER_CLIENT_SECRET,
-    AUTH_TWITTER_ID: process.env.AUTH_TWITTER_ID,
-    AUTH_TWITTER_SECRET: process.env.AUTH_TWITTER_SECRET,
+    TWITTER_CLIENT_ID: process.env['TWITTER_CLIENT_ID'],
+    TWITTER_CLIENT_SECRET: process.env['TWITTER_CLIENT_SECRET'],
+    AUTH_TWITTER_ID: process.env['AUTH_TWITTER_ID'],
+    AUTH_TWITTER_SECRET: process.env['AUTH_TWITTER_SECRET'],
 
     // Email
-    EMAIL_FROM: process.env.EMAIL_FROM,
-    EMAIL_SERVER: process.env.EMAIL_SERVER,
-    EMAIL_SERVER_HOST: process.env.EMAIL_SERVER_HOST,
-    EMAIL_SERVER_PORT: process.env.EMAIL_SERVER_PORT,
-    EMAIL_SERVER_USER: process.env.EMAIL_SERVER_USER,
-    EMAIL_SERVER_PASSWORD: process.env.EMAIL_SERVER_PASSWORD,
-    SMTP_HOST: process.env.SMTP_HOST,
-    SMTP_PORT: process.env.SMTP_PORT,
-    SMTP_USER: process.env.SMTP_USER,
-    SMTP_PASSWORD: process.env.SMTP_PASSWORD,
-    SMTP_FROM: process.env.SMTP_FROM,
+    EMAIL_FROM: process.env['EMAIL_FROM'],
+    EMAIL_SERVER: process.env['EMAIL_SERVER'],
+    EMAIL_SERVER_HOST: process.env['EMAIL_SERVER_HOST'],
+    EMAIL_SERVER_PORT: process.env['EMAIL_SERVER_PORT'],
+    EMAIL_SERVER_USER: process.env['EMAIL_SERVER_USER'],
+    EMAIL_SERVER_PASSWORD: process.env['EMAIL_SERVER_PASSWORD'],
+    SMTP_HOST: process.env['SMTP_HOST'],
+    SMTP_PORT: process.env['SMTP_PORT'],
+    SMTP_USER: process.env['SMTP_USER'],
+    SMTP_PASSWORD: process.env['SMTP_PASSWORD'],
+    SMTP_FROM: process.env['SMTP_FROM'],
 
     // Redis/KV
-    REDIS_URL: process.env.REDIS_URL,
-    KV_URL: process.env.KV_URL,
-    UPSTASH_REDIS_URL: process.env.UPSTASH_REDIS_URL,
-    UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
-    UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
+    REDIS_URL: process.env['REDIS_URL'],
+    KV_URL: process.env['KV_URL'],
+    UPSTASH_REDIS_URL: process.env['UPSTASH_REDIS_URL'],
+    UPSTASH_REDIS_REST_URL: process.env['UPSTASH_REDIS_REST_URL'],
+    UPSTASH_REDIS_REST_TOKEN: process.env['UPSTASH_REDIS_REST_TOKEN'],
 
     // WebAuthn
-    RPID: process.env.RPID,
+    RPID: process.env['RPID'],
 
     // Node environment
-    NODE_ENV: process.env.NODE_ENV,
+    NODE_ENV: process.env['NODE_ENV'],
   },
 
   /**
    * Skip validation in certain environments
    */
-  skipValidation: !!process.env.CI || process.env.NODE_ENV === 'test',
+  skipValidation: !!process.env['CI'] || process.env['NODE_ENV'] === 'test',
 
   /**
    * Tell the library when we're in a server context
    */
-  isServer: typeof window === 'undefined',
+  isServer: globalThis.window === undefined,
 });
 
 /**
@@ -213,14 +212,14 @@ export function getAuthSecret(): string | undefined {
  * Helper function to get base URL from validated environment
  */
 export function getBaseUrl(): string | undefined {
-  return authEnv.BASE_URL || authEnv.NEXT_PUBLIC_BASE_URL;
+  return authEnv.BASE_URL;
 }
 
 /**
  * Helper function to get production URL from validated environment
  */
 export function getProductionUrl(): string | undefined {
-  return authEnv.PRODUCTION_URL || authEnv.NEXT_PUBLIC_PRODUCTION_URL;
+  return authEnv.PRODUCTION_URL;
 }
 
 /**
@@ -268,7 +267,7 @@ export function getEmailConfig() {
   const password = authEnv.EMAIL_SERVER_PASSWORD || authEnv.SMTP_PASSWORD;
 
   if (!from || !host || !port || !user || !password) {
-    return undefined;
+    return;
   }
 
   return {
@@ -326,6 +325,3 @@ export function validateProductionEnv(): void {
     throw new Error(`Production environment validation failed:\n${errors.join('\n')}`);
   }
 }
-
-// Export the env object for direct access if needed
-export { authEnv };

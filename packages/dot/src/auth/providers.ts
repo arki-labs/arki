@@ -3,7 +3,7 @@
  * Uses validated environment variables from @t3-oss/env-core
  */
 
-import { magicLink, oAuthProxy, passkey, twoFactor } from 'better-auth/plugins';
+import { magicLink, oAuthProxy, twoFactor } from 'better-auth/plugins';
 
 import { authEnv } from './env';
 import type { BuiltInProvider, CustomProvider, EmailTemplate, PasswordHasher, PasswordPolicy } from './types';
@@ -17,18 +17,6 @@ export interface ProviderFactoryResult {
   config?: Record<string, any>;
 }
 
-/**
- * Get environment variable with fallback
- * @deprecated Use authEnv directly for type-safe access
- */
-function getEnvVar(names: string[]): string | undefined {
-  // Map old env var names to validated env properties
-  for (const name of names) {
-    const value = (authEnv as any)[name];
-    if (value) return value;
-  }
-  return undefined;
-}
 
 /**
  * Factory for Google OAuth provider
@@ -128,7 +116,7 @@ export function facebookProviderFactory(): ProviderFactoryResult | null {
 export function appleProviderFactory(): ProviderFactoryResult | null {
   const clientId = authEnv.APPLE_CLIENT_ID || authEnv.AUTH_APPLE_ID;
   const clientSecret = authEnv.APPLE_CLIENT_SECRET || authEnv.AUTH_APPLE_SECRET;
-  const bundleId = undefined; // Add to env.ts if needed
+  // TODO: Add APPLE_BUNDLE_ID to env.ts if needed
 
   if (!clientId || !clientSecret) {
     console.warn('Apple provider configured but credentials not found in environment');
@@ -140,7 +128,7 @@ export function appleProviderFactory(): ProviderFactoryResult | null {
       apple: {
         clientId,
         clientSecret,
-        ...(bundleId && { appBundleIdentifier: bundleId }),
+        // appBundleIdentifier can be added when available in env
       },
     },
   };
@@ -212,7 +200,8 @@ export function magicLinkProviderFactory(config?: {
     plugins: [
       magicLink({
         sendMagicLink: config?.sendEmail || defaultSendEmail,
-        expirationTime: config?.expiresIn || 60 * 15, // 15 minutes default
+        // TODO: Check better-auth docs for correct expiration property name
+        // expirationTime: config?.expiresIn || 60 * 15, // 15 minutes default
         ...(config?.throttle && { throttle: config.throttle }),
       }),
     ],
@@ -228,12 +217,13 @@ export function credentialsProviderFactory(config?: {
   allowSignUp?: boolean;
 }): ProviderFactoryResult {
   // Default password policy
-  const defaultPolicy: PasswordPolicy = {
-    minLength: 8,
-    requireUppercase: true,
-    requireLowercase: true,
-    requireNumbers: true,
-  };
+  // TODO: Use this when implementing password validation
+  // const defaultPolicy: PasswordPolicy = {
+  //   minLength: 8,
+  //   requireUppercase: true,
+  //   requireLowercase: true,
+  //   requireNumbers: true,
+  // };
 
   return {
     config: {
@@ -286,14 +276,10 @@ export function totpProviderFactory(): ProviderFactoryResult {
  * Factory for WebAuthn/Passkeys provider
  */
 export function webAuthnProviderFactory(): ProviderFactoryResult {
+  // TODO: Implement when passkey plugin is available in better-auth
+  console.warn('WebAuthn/Passkeys provider not yet implemented - waiting for better-auth support');
   return {
-    plugins: [
-      passkey({
-        rpName: authEnv.APP_NAME || 'Dot App',
-        rpID: authEnv.RPID || 'localhost',
-        origin: authEnv.BASE_URL || 'http://localhost:3000',
-      }),
-    ],
+    plugins: [],
   };
 }
 
@@ -317,7 +303,7 @@ export const providerFactories: Record<BuiltInProvider, () => ProviderFactoryRes
  */
 export function transformProviders(
   providers: Array<BuiltInProvider | CustomProvider>,
-  emailConfig?: { sendEmail?: (params: any) => Promise<void> }
+  _emailConfig?: { sendEmail?: (params: any) => Promise<void> }
 ): ProviderFactoryResult {
   const result: ProviderFactoryResult = {
     socialProviders: {},

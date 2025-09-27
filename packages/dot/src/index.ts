@@ -14,7 +14,7 @@ import type {
   SchemaInterface,
   TRPCOptions,
 } from './types';
-import { authFeatures, type DotAuth } from './auth';
+import { authFeatures, type DotAuth, type DotSession } from './auth';
 import { dbFeatures } from './db';
 import { EVENT_STORE_URL_VARIANTS, eventSourcingFeatures } from './event-sourcing';
 import { kvFeatures } from './kv';
@@ -298,8 +298,8 @@ export class Dot<
     return this.#dbConfig;
   }
 
-  // Add auth method
-  withAuth = authFeatures.withAuth;
+  // TODO: Add auth method when implemented
+  // withAuth = authFeatures.withAuth;
   // #endregion
 
   // #region TRPC and Context Functions

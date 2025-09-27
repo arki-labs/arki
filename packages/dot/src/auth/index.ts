@@ -9,7 +9,6 @@
  * - Type-safe tRPC integration
  */
 
-import type { Auth } from 'better-auth';
 import { betterAuth } from 'better-auth';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
@@ -50,12 +49,12 @@ export type DotAuth = {
   /**
    * The underlying better-auth instance for direct access when needed
    */
-  instance: Auth;
+  instance: ReturnType<typeof betterAuth>;
 
   /**
    * Better-auth API methods for authentication operations
    */
-  api: Auth['api'];
+  api: ReturnType<typeof betterAuth>['api'];
 
   /**
    * Session manager for handling user sessions
@@ -72,7 +71,7 @@ export type DotAuth = {
    * @param t - The tRPC instance
    * @returns Auth-aware procedures (public, protected, admin, etc.)
    */
-  createProcedures: <TRouter>(t: any) => ReturnType<typeof createAuthProcedures>;
+  createProcedures: (t: any) => ReturnType<typeof createAuthProcedures>;
 
   /**
    * Create auth middleware for custom use
@@ -155,8 +154,8 @@ export async function createDotAuth(
       // Log error but don't fail - RBAC is optional
       console.error('Failed to initialize RBAC roles:', error);
 
-      // Only throw if RBAC is required
-      if (config.rbac.required) {
+      // Only throw if RBAC is explicitly enabled
+      if (config.rbac.enabled) {
         throw new Error(`RBAC initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     }
@@ -168,8 +167,8 @@ export async function createDotAuth(
     session: sessionManager,
     rbac: rbacManager,
 
-    createProcedures: <TRouter>(t: any) => {
-      return createAuthProcedures<TRouter>(t, sessionManager, rbacManager);
+    createProcedures: (t: any) => {
+      return createAuthProcedures(t, sessionManager, rbacManager);
     },
 
     createMiddleware: () => {
@@ -480,4 +479,31 @@ export const dotAuthIntegration = {
 
     return merged;
   },
+};
+
+/**
+ * Auth features for use by Dot framework
+ */
+export const authFeatures = {
+  createDotAuth,
+  createAuthConfigFromEnv,
+  authPresets,
+  dotAuthIntegration,
+
+  /**
+   * Get session from cookies (for Next.js contexts)
+   */
+  getSessionFromCookies: async () => {
+    // This would be implemented with Next.js specific logic
+    // For now, return null as a placeholder
+    console.warn('getSessionFromCookies needs to be implemented for your specific context');
+    return null;
+  },
+
+  /**
+   * Initialize auth with configuration
+   */
+  initAuth: async (config: DotAuthConfig, db?: NodePgDatabase<any>) => {
+    return createDotAuth(config, db);
+  }
 };

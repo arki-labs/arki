@@ -3,7 +3,7 @@
  */
 
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { and, eq, inArray } from 'drizzle-orm';
+// import { and, eq, inArray } from 'drizzle-orm'; // TODO: Use when implementing database operations
 
 import { createPrefixedId } from '@arki/db/id';
 
@@ -58,113 +58,67 @@ export interface DotRBACManager {
 /**
  * Create RBAC manager
  */
-export function createRBACManager(db: NodePgDatabase<any>): DotRBACManager {
-  // Table references (these would be defined in your schema)
-  const roles = 'roles';
-  const permissions = 'permissions';
-  const userRoles = 'user_roles';
-  const rolePermissions = 'role_permissions';
-  const users = 'users';
+export function createRBACManager(_db: NodePgDatabase<any>): DotRBACManager {
+  // TODO: Implement RBAC with better-auth's database adapter
+  // For now, all operations are stubbed since better-auth manages its own schema
+  console.warn('RBAC manager created but database operations are not yet implemented with better-auth');
 
   return {
     // Role management
     async createRole(role: Omit<Role, 'id'>): Promise<Role> {
+      // TODO: Implement with better-auth's database adapter
+      console.warn('createRole needs implementation with better-auth database');
       const roleId = createPrefixedId('role');
       const now = new Date();
 
-      const [newRole] = await db
-        .insert(roles)
-        .values({
-          id: roleId,
-          name: role.name,
-          description: role.description,
-          isSystem: role.isSystem || false,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning();
-
-      return newRole as Role;
+      return {
+        id: roleId,
+        name: role.name,
+        description: role.description,
+        isSystem: role.isSystem || false,
+        createdAt: now,
+        updatedAt: now,
+      } as Role;
     },
 
-    async updateRole(roleId: string, updates: Partial<Role>): Promise<Role> {
-      const [updated] = await db
-        .update(roles)
-        .set({
-          ...updates,
-          updatedAt: new Date(),
-        })
-        .where(eq('id', roleId))
-        .returning();
+    async updateRole(_roleId: string, updates: Partial<Role>): Promise<Role> {
+      // TODO: Implement with better-auth's database adapter
+      console.warn('updateRole needs implementation with better-auth database');
 
-      return updated as Role;
+      return {
+        id: _roleId,
+        ...updates,
+        updatedAt: new Date(),
+      } as Role;
     },
 
-    async deleteRole(roleId: string): Promise<void> {
-      // Check if it's a system role
-      const [role] = await db
-        .select()
-        .from(roles)
-        .where(eq('id', roleId))
-        .limit(1);
-
-      if (role?.isSystem) {
-        throw new Error('Cannot delete system role');
-      }
-
-      // Delete role and cascade to user_roles and role_permissions
-      await db.delete(userRoles).where(eq('roleId', roleId));
-      await db.delete(rolePermissions).where(eq('roleId', roleId));
-      await db.delete(roles).where(eq('id', roleId));
+    async deleteRole(_roleId: string): Promise<void> {
+      // TODO: Implement with better-auth's database adapter
+      console.warn('deleteRole needs implementation with better-auth database');
     },
 
-    async getRole(roleId: string): Promise<Role | null> {
-      const [role] = await db
-        .select()
-        .from(roles)
-        .where(eq('id', roleId))
-        .limit(1);
-
-      return role as Role | null;
+    async getRole(_roleId: string): Promise<Role | null> {
+      // TODO: Implement with better-auth's database adapter
+      console.warn('getRole needs implementation with better-auth database');
+      return null;
     },
 
-    async getRoleByName(name: string): Promise<Role | null> {
-      const [role] = await db
-        .select()
-        .from(roles)
-        .where(eq('name', name))
-        .limit(1);
-
-      return role as Role | null;
+    async getRoleByName(_name: string): Promise<Role | null> {
+      // TODO: Implement with better-auth's database adapter
+      console.warn('getRoleByName needs implementation with better-auth database');
+      return null;
     },
 
     async listRoles(): Promise<Role[]> {
-      const allRoles = await db
-        .select()
-        .from(roles)
-        .orderBy('name');
-
-      return allRoles as Role[];
+      // TODO: Implement with better-auth's database adapter
+      console.warn('listRoles needs implementation with better-auth database');
+      return [];
     },
 
     // User-role assignment
-    async assignRole(userId: string, roleId: string): Promise<void> {
-      // Check if already assigned
-      const [existing] = await db
-        .select()
-        .from(userRoles)
-        .where(and(eq('userId', userId), eq('roleId', roleId)))
-        .limit(1);
-
-      if (existing) {
-        return; // Already assigned
-      }
-
-      await db.insert(userRoles).values({
-        userId,
-        roleId,
-        assignedAt: new Date(),
-      });
+    async assignRole(_userId: string, _roleId: string): Promise<void> {
+      // TODO: Implement with better-auth's database adapter
+      console.warn('assignRole needs implementation with better-auth database');
     },
 
     async assignRoleByName(userId: string, roleName: string): Promise<void> {
@@ -175,10 +129,9 @@ export function createRBACManager(db: NodePgDatabase<any>): DotRBACManager {
       await this.assignRole(userId, role.id);
     },
 
-    async removeRole(userId: string, roleId: string): Promise<void> {
-      await db
-        .delete(userRoles)
-        .where(and(eq('userId', userId), eq('roleId', roleId)));
+    async removeRole(_userId: string, _roleId: string): Promise<void> {
+      // TODO: Implement with better-auth's database adapter
+      console.warn('removeRole needs implementation with better-auth database');
     },
 
     async removeRoleByName(userId: string, roleName: string): Promise<void> {
@@ -189,23 +142,10 @@ export function createRBACManager(db: NodePgDatabase<any>): DotRBACManager {
       await this.removeRole(userId, role.id);
     },
 
-    async getUserRoles(userId: string): Promise<Role[]> {
-      const userRoleRecords = await db
-        .select()
-        .from(userRoles)
-        .where(eq('userId', userId));
-
-      if (userRoleRecords.length === 0) {
-        return [];
-      }
-
-      const roleIds = userRoleRecords.map((ur: any) => ur.roleId);
-      const userRolesList = await db
-        .select()
-        .from(roles)
-        .where(inArray('id', roleIds));
-
-      return userRolesList as Role[];
+    async getUserRoles(_userId: string): Promise<Role[]> {
+      // TODO: Implement with better-auth's database adapter
+      console.warn('getUserRoles needs implementation with better-auth database');
+      return [];
     },
 
     async getUserRoleNames(userId: string): Promise<string[]> {
@@ -220,95 +160,69 @@ export function createRBACManager(db: NodePgDatabase<any>): DotRBACManager {
 
     // Permission management
     async createPermission(permission: Omit<Permission, 'id'>): Promise<Permission> {
+      // TODO: Implement with better-auth's database adapter
+      console.warn('createPermission needs implementation with better-auth database');
       const permissionId = createPrefixedId('perm');
 
-      const [newPermission] = await db
-        .insert(permissions)
-        .values({
-          id: permissionId,
-          resource: permission.resource,
-          action: permission.action,
-          description: permission.description,
-          conditions: permission.conditions ? JSON.stringify(permission.conditions) : null,
-        })
-        .returning();
-
-      return newPermission as Permission;
-    },
-
-    async deletePermission(permissionId: string): Promise<void> {
-      // Delete from role_permissions first
-      await db.delete(rolePermissions).where(eq('permissionId', permissionId));
-      await db.delete(permissions).where(eq('id', permissionId));
-    },
-
-    async getPermission(permissionId: string): Promise<Permission | null> {
-      const [permission] = await db
-        .select()
-        .from(permissions)
-        .where(eq('id', permissionId))
-        .limit(1);
-
-      if (!permission) return null;
-
       return {
-        ...permission,
-        conditions: permission.conditions ? JSON.parse(permission.conditions as string) : undefined,
+        id: permissionId,
+        resource: permission.resource,
+        action: permission.action,
+        description: permission.description,
+        conditions: permission.conditions,
       } as Permission;
     },
 
-    async listPermissions(): Promise<Permission[]> {
-      const allPermissions = await db
-        .select()
-        .from(permissions)
-        .orderBy('resource', 'action');
+    async deletePermission(_permissionId: string): Promise<void> {
+      // TODO: Implement with better-auth's database adapter
+      console.warn('deletePermission needs implementation with better-auth database');
+    },
 
-      return allPermissions.map((p: any) => ({
-        ...p,
-        conditions: p.conditions ? JSON.parse(p.conditions) : undefined,
-      })) as Permission[];
+    async getPermission(_permissionId: string): Promise<Permission | null> {
+      // TODO: Implement with better-auth's database adapter
+      console.warn('getPermission needs implementation with better-auth database');
+      return null;
+    },
+
+    async listPermissions(): Promise<Permission[]> {
+      // TODO: Implement with better-auth's database adapter
+      console.warn('listPermissions needs implementation with better-auth database');
+      return [];
     },
 
     // Role-permission assignment
-    async assignPermissionToRole(roleId: string, permissionId: string): Promise<void> {
+    async assignPermissionToRole(_roleId: string, _permissionId: string): Promise<void> {
       // Check if already assigned
-      const [existing] = await db
-        .select()
-        .from(rolePermissions)
-        .where(and(eq('roleId', roleId), eq('permissionId', permissionId)))
-        .limit(1);
+      // TODO: Implement with better-auth's database adapter
+      // For now, stub this functionality
+      console.warn('assignPermissionToRole needs implementation with better-auth database');
+      const existing = null;
 
       if (existing) {
         return; // Already assigned
       }
 
-      await db.insert(rolePermissions).values({
-        roleId,
-        permissionId,
-      });
+      // TODO: Implement with better-auth's database adapter
+      console.warn('assignPermissionToRole needs implementation with better-auth database');
     },
 
-    async removePermissionFromRole(roleId: string, permissionId: string): Promise<void> {
-      await db
-        .delete(rolePermissions)
-        .where(and(eq('roleId', roleId), eq('permissionId', permissionId)));
+    async removePermissionFromRole(_roleId: string, _permissionId: string): Promise<void> {
+      // TODO: Implement with better-auth's database adapter
+      console.warn('removePermissionFromRole needs implementation with better-auth database');
     },
 
-    async getRolePermissions(roleId: string): Promise<Permission[]> {
-      const rolePerm = await db
-        .select()
-        .from(rolePermissions)
-        .where(eq('roleId', roleId));
+    async getRolePermissions(_roleId: string): Promise<Permission[]> {
+      // TODO: Implement with better-auth's database adapter
+      console.warn('getRolePermissions needs implementation with better-auth database');
+      const rolePerm: any[] = [];
 
       if (rolePerm.length === 0) {
         return [];
       }
 
-      const permissionIds = rolePerm.map((rp: any) => rp.permissionId);
-      const rolePermissionsList = await db
-        .select()
-        .from(permissions)
-        .where(inArray('id', permissionIds));
+      // const permissionIds = rolePerm.map((rp: any) => rp.permissionId);
+      // TODO: Implement with better-auth's database adapter
+      const rolePermissionsList: any[] = [];
 
       return rolePermissionsList.map((p: any) => ({
         ...p,

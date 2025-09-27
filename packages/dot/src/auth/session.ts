@@ -2,7 +2,7 @@
  * Session management wrapper for better-auth
  */
 
-import type { Auth } from 'better-auth';
+import type { betterAuth } from 'better-auth';
 
 import type { DotSession, DotUser } from './types';
 
@@ -60,7 +60,7 @@ export interface DotSessionManager {
  * @param db - Optional database connection for direct session operations
  * @returns A session manager with comprehensive session management capabilities
  */
-export function createSessionManager(auth: Auth, db?: any): DotSessionManager {
+export function createSessionManager(auth: ReturnType<typeof betterAuth>, db?: any): DotSessionManager {
   return {
     async getSession(headers: Headers): Promise<DotSession | null> {
       if (!headers || !(headers instanceof Headers)) {
@@ -105,7 +105,9 @@ export function createSessionManager(auth: Auth, db?: any): DotSessionManager {
             email: user.email,
             emailVerified: user.emailVerified,
             image: user.image,
-            roles: user.roles || []
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt,
+            roles: (user as any).roles || []
           }
         };
 

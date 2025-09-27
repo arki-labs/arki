@@ -25,7 +25,7 @@ export interface AuthContext {
  * Create auth middleware factories
  */
 export function createAuthMiddleware<TContext extends AuthContext>(
-  sessionManager: DotSessionManager,
+  _sessionManager: DotSessionManager,
   rbac: DotRBACManager
 ) {
   return {
