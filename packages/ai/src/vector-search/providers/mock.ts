@@ -4,14 +4,14 @@
 
 import type { EmbeddingProvider, VectorSearchProvider, VectorSearchResult } from '../../types';
 
-export interface MockDocument<TMetadata = any> {
+export interface MockDocument<TMetadata = Record<string, unknown>> {
   id: string;
   text: string;
   embedding?: number[];
   metadata?: TMetadata;
 }
 
-export class MockVectorProvider<TMetadata = any> implements VectorSearchProvider<TMetadata> {
+export class MockVectorProvider<TMetadata = Record<string, unknown>> implements VectorSearchProvider<TMetadata> {
   private documents = new Map<string, MockDocument<TMetadata>>();
   private embeddingProvider: EmbeddingProvider;
 

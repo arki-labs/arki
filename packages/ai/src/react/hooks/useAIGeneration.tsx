@@ -4,25 +4,38 @@
 
 import { useState, useCallback } from 'react';
 
+import type { z } from 'zod/v4';
+
 export interface GenerationOptions {
   type?: 'text' | 'structured' | 'stream';
-  schema?: unknown; // Zod schema for structured generation
+  schema?: z.ZodType<unknown>; // Zod schema for structured generation
   systemPrompt?: string;
   temperature?: number;
   maxTokens?: number;
 }
 
+export interface GenerationResult {
+  content: string | Record<string, unknown>;
+  type: 'text' | 'structured' | 'stream';
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+  metadata?: Record<string, string | number | boolean>;
+}
+
 export interface UseAIGenerationOptions {
   apiEndpoint?: string;
   defaultOptions?: GenerationOptions;
-  onSuccess?: (result: unknown) => void;
+  onSuccess?: (result: GenerationResult) => void;
   onError?: (error: Error) => void;
 }
 
 export interface UseAIGenerationReturn {
-  generate: (prompt: string, options?: GenerationOptions) => Promise<unknown>;
+  generate: (prompt: string, options?: GenerationOptions) => Promise<GenerationResult | null>;
   isGenerating: boolean;
-  result: unknown;
+  result: GenerationResult | null;
   error: Error | null;
   clear: () => void;
 }
@@ -41,7 +54,7 @@ export function useAIGeneration(
   } = options;
 
   const [isGenerating, setIsGenerating] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<GenerationResult | null>(null);
   const [error, setError] = useState<Error | null>(null);
 
   const generate = useCallback(
@@ -83,17 +96,22 @@ export function useAIGeneration(
 
               const chunk = decoder.decode(value);
               fullText += chunk;
-              setResult(fullText); // Update result incrementally
+              setResult({ content: fullText, type: 'stream' }); // Update result incrementally
             }
           } finally {
             reader.releaseLock();
           }
 
-          if (onSuccess) onSuccess(fullText);
-          return fullText;
+          const streamResult: GenerationResult = {
+            content: fullText,
+            type: 'stream'
+          };
+          setResult(streamResult);
+          if (onSuccess) onSuccess(streamResult);
+          return streamResult;
         } else {
           // Handle non-streaming response
-          const data = await response.json();
+          const data: GenerationResult = await response.json();
           setResult(data);
 
           if (onSuccess) onSuccess(data);

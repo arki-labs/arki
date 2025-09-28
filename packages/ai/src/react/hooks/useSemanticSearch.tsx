@@ -14,7 +14,7 @@ export interface SearchResult<TMetadata = Record<string, unknown>> {
 }
 
 export interface SearchFilters {
-  [key: string]: unknown;
+  [key: string]: string | number | boolean | string[] | number[];
 }
 
 export interface UseSemanticSearchOptions {

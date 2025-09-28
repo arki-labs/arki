@@ -343,7 +343,7 @@ export class PromptValidator {
    */
   static validateVariables(
     template: string,
-    variables: Record<string, any>
+    variables: Record<string, string | number | boolean>
   ): { valid: boolean; missing: string[] } {
     const requiredVars = template.match(/\{(\w+)\}/g)?.map(v => v.slice(1, -1)) || [];
     const missing = requiredVars.filter(v => !(v in variables));

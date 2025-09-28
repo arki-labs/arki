@@ -7,7 +7,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { SearchResult } from '../hooks/useSemanticSearch';
 
-export interface SearchInterfaceProps<TMetadata = any> {
+export interface SearchInterfaceProps<TMetadata = Record<string, unknown>> {
   query: string;
   results: SearchResult<TMetadata>[];
   suggestions: string[];
@@ -27,7 +27,7 @@ export interface SearchInterfaceProps<TMetadata = any> {
 /**
  * Generic Search Interface Component
  */
-export function SearchInterface<TMetadata = any>({
+export function SearchInterface<TMetadata = Record<string, unknown>>({
   query,
   results,
   suggestions,
@@ -126,11 +126,11 @@ export function SearchInterface<TMetadata = any>({
       key={result.id || index}
       className="p-4 border-b last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-800"
     >
-      {(result as any).preview && (
+      {'preview' in result && result.preview ? (
         <p className="text-gray-700 dark:text-gray-300 mb-2">
-          {(result as any).preview}
+          {String(result.preview)}
         </p>
-      )}
+      ) : null}
       <div className="flex justify-between items-center">
         <span className="text-sm text-gray-500">
           Score: {(result.score * 100).toFixed(1)}%

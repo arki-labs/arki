@@ -7,6 +7,7 @@ import type { QdrantClient, Schemas as QdrantSchemas } from '@qdrant/js-client-r
 
 import type { EmbeddingProvider, VectorSearchProvider, VectorSearchResult } from '../../types';
 import { VectorSearchError, getErrorMessage } from '../../errors';
+import { TransactionManager } from '../../utils/transaction-manager';
 
 export interface QdrantConfig {
   url: string;
@@ -19,7 +20,7 @@ export interface QdrantConfig {
 export interface QdrantSearchFilter {
   must?: Array<{
     key: string;
-    match?: any;
+    match?: string | number | boolean | Record<string, unknown>;
     range?: {
       gt?: number;
       gte?: number;
@@ -29,15 +30,15 @@ export interface QdrantSearchFilter {
   }>;
   should?: Array<{
     key: string;
-    match?: any;
+    match?: string | number | boolean | Record<string, unknown>;
   }>;
   mustNot?: Array<{
     key: string;
-    match?: any;
+    match?: string | number | boolean | Record<string, unknown>;
   }>;
 }
 
-export class QdrantVectorProvider<TMetadata = any> implements VectorSearchProvider<TMetadata> {
+export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implements VectorSearchProvider<TMetadata> {
   private client: QdrantClient | null = null;
   private collectionName: string;
   private vectorSize: number;
@@ -142,31 +143,69 @@ export class QdrantVectorProvider<TMetadata = any> implements VectorSearchProvid
     }>,
   ): Promise<void> {
     const client = await this.getClient();
+    const transactionManager = new TransactionManager();
 
-    // Generate embeddings in batch for efficiency
-    const texts = documents.map(d => d.text);
-    const embeddings = await this.embeddingProvider.getEmbeddings?.(texts)
-      || await Promise.all(texts.map(t => this.embeddingProvider.getEmbedding(t)));
+    // Keep track of indexed document IDs for rollback
+    const indexedIds: string[] = [];
 
-    // Prepare points for batch indexing
-    const points: QdrantSchemas['PointStruct'][] = documents.map((doc, i) => ({
-      id: doc.id,
-      vector: embeddings[i]!,
-      payload: {
-        text: doc.text.substring(0, 1000),
-        ...doc.metadata,
-        indexedAt: new Date().toISOString(),
-      },
-    }));
+    try {
+      // Generate embeddings in batch for efficiency
+      const texts = documents.map(d => d.text);
+      const embeddings = await this.embeddingProvider.getEmbeddings?.(texts)
+        || await Promise.all(texts.map(t => this.embeddingProvider.getEmbedding(t)));
 
-    // Batch upsert for better performance
-    const batchSize = 100;
-    for (let i = 0; i < points.length; i += batchSize) {
-      const batch = points.slice(i, i + batchSize);
-      await client.upsert(this.collectionName, {
-        points: batch,
-        wait: true,
-      });
+      // Prepare points for batch indexing
+      const points: QdrantSchemas['PointStruct'][] = documents.map((doc, i) => ({
+        id: doc.id,
+        vector: embeddings[i]!,
+        payload: {
+          text: doc.text.substring(0, 1000),
+          ...doc.metadata,
+          indexedAt: new Date().toISOString(),
+        },
+      }));
+
+      // Create transaction operations for each batch
+      const batchSize = 100;
+      const operations = [];
+
+      for (let i = 0; i < points.length; i += batchSize) {
+        const batch = points.slice(i, i + batchSize);
+        const batchIds = batch.map(p => p.id as string);
+
+        operations.push({
+          name: `Index batch ${Math.floor(i / batchSize) + 1}`,
+          execute: async () => {
+            await client.upsert(this.collectionName, {
+              points: batch,
+              wait: true,
+            });
+            indexedIds.push(...batchIds);
+            return batchIds;
+          },
+          rollback: async () => {
+            // Remove indexed documents on rollback
+            if (batchIds.length > 0) {
+              await client.delete(this.collectionName, {
+                points: batchIds,
+                wait: true,
+              });
+            }
+          },
+        });
+      }
+
+      // Execute all operations with transaction support
+      const result = await transactionManager.executeTransaction(operations);
+
+      if (!result.success) {
+        throw result.error || new VectorSearchError('Batch indexing failed');
+      }
+    } catch (error) {
+      throw new VectorSearchError(
+        `Failed to index documents batch: ${getErrorMessage(error)}`,
+        error
+      );
     }
   }
 

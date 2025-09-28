@@ -2,9 +2,16 @@
  * Search Cache Implementation
  */
 
+export type CacheableValue =
+  | string
+  | number
+  | boolean
+  | Record<string, unknown>
+  | unknown[];
+
 export interface SearchCache {
-  get<T = unknown>(key: string): Promise<T | null>;
-  set(key: string, value: unknown): Promise<void>;
+  get<T extends CacheableValue = CacheableValue>(key: string): Promise<T | null>;
+  set<T extends CacheableValue>(key: string, value: T): Promise<void>;
   clear(): void;
   destroy(): void;
 }
@@ -13,7 +20,7 @@ export interface SearchCache {
  * In-memory cache implementation
  */
 export class InMemorySearchCache implements SearchCache {
-  private cache = new Map<string, { value: unknown; expires: number }>();
+  private cache = new Map<string, { value: CacheableValue; expires: number }>();
   private cleanupInterval: NodeJS.Timeout;
 
   constructor(private ttl: number = 3600) {
@@ -21,7 +28,7 @@ export class InMemorySearchCache implements SearchCache {
     this.cleanupInterval = setInterval(() => this.cleanup(), 60000);
   }
 
-  async get<T = unknown>(key: string): Promise<T | null> {
+  async get<T extends CacheableValue = CacheableValue>(key: string): Promise<T | null> {
     const entry = this.cache.get(key);
     if (!entry) return null;
 
@@ -33,7 +40,7 @@ export class InMemorySearchCache implements SearchCache {
     return entry.value as T;
   }
 
-  async set(key: string, value: unknown): Promise<void> {
+  async set<T extends CacheableValue>(key: string, value: T): Promise<void> {
     this.cache.set(key, {
       value,
       expires: Date.now() + this.ttl * 1000,
@@ -78,7 +85,7 @@ export class RedisSearchCache implements SearchCache {
     private ttl: number = 3600
   ) {}
 
-  async get<T = unknown>(key: string): Promise<T | null> {
+  async get<T extends CacheableValue = CacheableValue>(key: string): Promise<T | null> {
     const client = this.redisClient as {
       get: (key: string) => Promise<string | null>
     };
@@ -92,7 +99,7 @@ export class RedisSearchCache implements SearchCache {
     }
   }
 
-  async set(key: string, value: unknown): Promise<void> {
+  async set<T extends CacheableValue>(key: string, value: T): Promise<void> {
     const client = this.redisClient as {
       setex: (key: string, ttl: number, value: string) => Promise<void>
     };

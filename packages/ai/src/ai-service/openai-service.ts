@@ -9,6 +9,7 @@ import type { CoreMessage } from 'ai';
 import { z } from 'zod/v4';
 import { GenerationError, getErrorMessage } from '../errors';
 import { validateInput, aiServiceConfigSchema } from '../validation';
+import { rateLimiters } from '../utils/rate-limiter';
 
 export interface OpenAIServiceConfig {
   model?: string;
@@ -38,12 +39,16 @@ export class OpenAIService {
   private model: string;
   private defaultTemperature: number;
   private defaultMaxRetries: number;
+  // private apiKey: string; // Reserved for future use
 
   constructor(config: OpenAIServiceConfig = {}) {
     const validConfig = validateInput(aiServiceConfigSchema, config);
     this.model = validConfig.model || 'gpt-4o-mini';
     this.defaultTemperature = validConfig.temperature || 0.7;
     this.defaultMaxRetries = validConfig.maxRetries || 2;
+
+    // API key handling is managed through environment variables
+    // See env.ts for configuration
   }
 
   /**
@@ -54,23 +59,39 @@ export class OpenAIService {
     schema: z.ZodSchema<T>,
     options: GenerationOptions = {}
   ): Promise<T> {
-    try {
-      const result = await generateObject({
-        model: openai(this.model),
-        system: options.systemPrompt,
-        prompt,
-        schema: schema as any, // AI SDK requires 'any' for complex schemas
-        maxRetries: options.maxRetries || this.defaultMaxRetries,
-        temperature: options.temperature || this.defaultTemperature,
-      });
+    // Apply rate limiting
+    const rateLimitResult = await rateLimiters.openai.execute(
+      'generateStructuredData',
+      async () => {
+        try {
+          const result = await generateObject({
+            model: openai(this.model),
+            system: options.systemPrompt,
+            prompt,
+            output: 'object',
+            schema: schema as any, // Zod schema is compatible but types don't align perfectly with AI SDK
+            maxRetries: options.maxRetries || this.defaultMaxRetries,
+            temperature: options.temperature || this.defaultTemperature,
+          });
 
-      return result.object as T;
-    } catch (error) {
+          return result.object as T;
+        } catch (error) {
+          throw new GenerationError(
+            `Failed to generate structured data: ${getErrorMessage(error)}`,
+            error
+          );
+        }
+      }
+    );
+
+    if (!rateLimitResult.success) {
       throw new GenerationError(
-        `Failed to generate structured data: ${getErrorMessage(error)}`,
-        error
+        `Rate limit exceeded: retry after ${rateLimitResult.retryAfterMs}ms`,
+        rateLimitResult.error
       );
     }
+
+    return rateLimitResult.data!;
   }
 
   /**

@@ -142,11 +142,14 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
       score: vResult.score,
       metadata: vResult.metadata as TMetadata,
       preview: this.createPreview(
-        ((vResult.metadata as any)?.text as string) || '',
+        (vResult.metadata && 'text' in vResult.metadata && typeof vResult.metadata['text'] === 'string' ? vResult.metadata['text'] : ''),
         options.query
       ),
       highlights: options.highlightTerms
-        ? this.highlightText(((vResult.metadata as any)?.text as string) || '', options.query)
+        ? this.highlightText(
+            (vResult.metadata && 'text' in vResult.metadata && typeof vResult.metadata['text'] === 'string' ? vResult.metadata['text'] : ''),
+            options.query
+          )
         : undefined,
     }));
   }
