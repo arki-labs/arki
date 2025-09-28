@@ -1,0 +1,57 @@
+{
+  "name": "@arki/ai",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": "./src/*.ts"
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "src/*"
+      ]
+    }
+  },
+  "scripts": {
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@ai-sdk/openai": "catalog:ai",
+    "@ai-sdk/react": "catalog:ai",
+    "@ai-sdk/ui-utils": "catalog:ai",
+    "@qdrant/js-client-rest": "^1.7.0",
+    "@t3-oss/env-core": "^0.13.8",
+    "ai": "catalog:ai",
+    "csv-parse": "^5.5.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
+  }
+}
