@@ -4,28 +4,108 @@
  */
 
 // Core types and interfaces
-export * from './types';
+export type {
+  EmbeddingProvider,
+  VectorSearchProvider,
+  VectorSearchResult,
+  SearchMode,
+  SearchResult,
+  SearchOptions as SearchOptionsType,
+  AIServiceConfig as AIServiceConfigType,
+  StreamingHandler,
+  RAGConfig,
+  DocumentChunk,
+  CacheEntry,
+  AnalyticsEvent,
+} from './types';
 
 // Error handling
-export * from './errors';
+export {
+  AIError,
+  EmbeddingError,
+  VectorSearchError,
+  GenerationError,
+  ValidationError,
+  RateLimitError,
+  ConfigurationError,
+  isAIError,
+  hasErrorMessage,
+  getErrorMessage,
+} from './errors';
 
 // Input validation
-export * from './validation';
+export {
+  // Schemas
+  openaiEmbeddingConfigSchema,
+  mockEmbeddingConfigSchema,
+  qdrantConfigSchema,
+  embeddingConfigSchema,
+  vectorProviderConfigSchema,
+  searchOptionsSchema,
+  aiServiceConfigSchema,
+  generationOptionsSchema,
+  documentSchema,
+  documentsSchema,
+  chatMessageSchema,
+  // Types
+  type OpenAIEmbeddingConfig,
+  type MockEmbeddingConfig,
+  type QdrantConfig,
+  type EmbeddingConfig,
+  type VectorProviderConfig,
+  type SearchOptions,
+  type AIServiceConfig,
+  type GenerationOptions,
+  type Document,
+  type ChatMessage,
+  // Functions
+  validateInput,
+  validateInputAsync,
+} from './validation';
 
 // Embedding providers and interfaces
-export * from './embeddings';
+export {
+  OpenAIEmbeddingProvider,
+  MockEmbeddingProvider,
+  createEmbeddingProvider,
+  createEmbeddingProviderFromEnv,
+  type EmbeddingProviderType,
+  type EmbeddingProviderConfig,
+} from './embeddings';
 
 // Vector search providers and interfaces
-export * from './vector-search';
+export {
+  QdrantVectorProvider,
+  MockVectorProvider,
+  createVectorSearchProvider,
+  createVectorSearchProviderFromEnv,
+  type VectorProviderType,
+  type VectorSearchConfig,
+  type QdrantSearchFilter,
+} from './vector-search';
 
 // Semantic search service and utilities
-export * from './semantic-search';
+export {
+  SemanticSearchService,
+  SearchAnalyticsCollector,
+  InMemorySearchCache,
+  RedisSearchCache,
+  type SemanticSearchConfig,
+  type KeywordSearchProvider,
+  type SearchAnalytics,
+  type SearchMetrics,
+  type SearchCache,
+} from './semantic-search';
 
 // AI service utilities and providers
-export * from './ai-service';
+export {
+  OpenAIService,
+  type OpenAIServiceConfig,
+  type StreamOptions,
+} from './ai-service';
 
 // React components and hooks
 export * from './react';
 
-// Specific types are already exported via export * from './types' and './errors'
-// No need to re-export them individually
+// Environment configuration
+export { env } from './env';

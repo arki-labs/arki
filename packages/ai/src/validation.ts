@@ -75,7 +75,7 @@ export const vectorProviderConfigSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('mock'),
     embeddingProvider: z.unknown(), // Will be validated at runtime
-    config: z.record(z.unknown()).optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
   }),
   z.object({
     type: z.literal('pinecone'),
@@ -108,7 +108,7 @@ export const searchOptionsSchema = z.object({
   limit: z.number().min(1).max(1000).optional(),
   offset: z.number().min(0).optional(),
   scoreThreshold: z.number().min(0).max(1).optional(),
-  filters: z.record(z.unknown()).optional(),
+  filters: z.record(z.string(), z.unknown()).optional(),
   highlightTerms: z.boolean().optional(),
   includeMetadata: z.boolean().optional(),
 });
@@ -145,7 +145,7 @@ export type GenerationOptions = z.infer<typeof generationOptionsSchema>;
 export const documentSchema = z.object({
   id: z.string().min(1),
   text: z.string().min(1),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type Document = z.infer<typeof documentSchema>;
@@ -160,7 +160,7 @@ export const chatMessageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system']),
   content: z.string(),
   timestamp: z.date().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
@@ -176,14 +176,12 @@ export function validateInput<T>(
   const result = schema.safeParse(input);
 
   if (!result.success) {
-    const errors = result.error.issues.map(e => ({
-      field: e.path.join('.'),
-      message: e.message,
-    }));
+    const errorDetails = result.error.issues.map(e =>
+      `${e.path.join('.')}: ${e.message}`
+    ).join(', ');
 
     throw new ValidationError(
-      errorMessage || 'Input validation failed',
-      errors
+      errorMessage || `Input validation failed: ${errorDetails}`
     );
   }
 
@@ -201,14 +199,12 @@ export async function validateInputAsync<T>(
   const result = await schema.safeParseAsync(input);
 
   if (!result.success) {
-    const errors = result.error.issues.map(e => ({
-      field: e.path.join('.'),
-      message: e.message,
-    }));
+    const errorDetails = result.error.issues.map(e =>
+      `${e.path.join('.')}: ${e.message}`
+    ).join(', ');
 
     throw new ValidationError(
-      errorMessage || 'Input validation failed',
-      errors
+      errorMessage || `Input validation failed: ${errorDetails}`
     );
   }
 

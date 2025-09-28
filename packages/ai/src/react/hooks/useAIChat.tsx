@@ -3,7 +3,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import type { Message as CoreMessage } from 'ai';
+// Removed unused import - Message type from 'ai' package not used in this file
 
 export interface ChatMessage {
   id: string;

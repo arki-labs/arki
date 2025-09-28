@@ -29,10 +29,10 @@
     "@ai-sdk/openai": "catalog:ai",
     "@ai-sdk/react": "catalog:ai",
     "@ai-sdk/ui-utils": "catalog:ai",
-    "@qdrant/js-client-rest": "^1.7.0",
+    "@qdrant/js-client-rest": "^1.15.1",
     "@t3-oss/env-core": "^0.13.8",
     "ai": "catalog:ai",
-    "csv-parse": "^5.5.0",
+    "csv-parse": "^6.1.0",
     "zod": "catalog:"
   },
   "devDependencies": {

@@ -132,7 +132,7 @@ export class MockEmbeddingProvider implements EmbeddingProvider {
       },
     };
 
-    Object.entries(categories).forEach(([category, { keywords, weight }], categoryIndex) => {
+    Object.entries(categories).forEach(([ , { keywords, weight }], categoryIndex) => {
       let categoryScore = 0;
 
       keywords.forEach((keyword) => {
@@ -149,6 +149,7 @@ export class MockEmbeddingProvider implements EmbeddingProvider {
     });
 
     // Add text statistics as features
+    const words = text.split(/\s+/);
     features[80] = text.length / 1000; // Text length normalized
     features[81] = words.length / 100; // Word count normalized
     features[82] = (text.match(/[.!?]/g) || []).length / 10; // Sentence count normalized

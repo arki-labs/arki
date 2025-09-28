@@ -5,11 +5,9 @@
 
 import type {
   VectorSearchProvider,
-  VectorSearchResult,
   SearchOptions as BaseSearchOptions,
   SearchMode
 } from '../types';
-import type { SearchAnalytics } from './analytics';
 import type { SearchCache } from './cache';
 import { InMemorySearchCache } from './cache';
 import { SearchAnalyticsCollector } from './analytics';
@@ -134,21 +132,21 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
     );
 
     // Filter by score threshold if specified
-    const filtered = options.scoreThreshold
-      ? vectorResults.filter(r => r.score >= options.scoreThreshold)
+    const filtered = options.scoreThreshold !== undefined
+      ? vectorResults.filter(r => r.score >= options.scoreThreshold!)
       : vectorResults;
 
     // Map to search results
     return filtered.map(vResult => ({
       id: vResult.id,
       score: vResult.score,
-      metadata: vResult.metadata,
+      metadata: vResult.metadata as TMetadata,
       preview: this.createPreview(
-        (vResult.metadata as {text?: string})?.text || '',
+        ((vResult.metadata as any)?.text as string) || '',
         options.query
       ),
       highlights: options.highlightTerms
-        ? this.highlightText((vResult.metadata as {text?: string})?.text || '', options.query)
+        ? this.highlightText(((vResult.metadata as any)?.text as string) || '', options.query)
         : undefined,
     }));
   }
@@ -290,7 +288,6 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
 
     const words = query.split(/\s+/);
     const highlights: string[] = [];
-    const lowerText = text.toLowerCase();
 
     for (const word of words) {
       const regex = new RegExp(`\\b(${word})\\b`, 'gi');
@@ -345,13 +342,13 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
     for (let i = 0; i < documents.length; i += batchSize) {
       const batch = documents.slice(i, i + batchSize);
 
-      await this.config.vectorProvider.indexDocumentsBatch(
+      await this.config.vectorProvider.indexDocumentsBatch?.(
         batch.map(doc => ({
           id: doc.id,
           text: doc.text,
-          metadata: doc.metadata,
+          metadata: doc.metadata as Record<string, unknown>,
         }))
-      );
+      ) || Promise.resolve();
 
       indexed += batch.length;
     }

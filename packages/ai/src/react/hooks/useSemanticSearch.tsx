@@ -3,9 +3,13 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import type { SearchMode, SearchResult as BaseSearchResult } from '../../types';
+import type { SearchMode } from '../../types';
 
-export interface SearchResult<TMetadata = Record<string, unknown>> extends BaseSearchResult {
+export interface SearchResult<TMetadata = Record<string, unknown>> {
+  id: string;
+  score: number;
+  data?: Record<string, unknown>;
+  highlights?: string[];
   metadata?: TMetadata;
 }
 

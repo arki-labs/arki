@@ -51,7 +51,7 @@ export class SearchAnalyticsCollector {
   /**
    * Record a cache hit
    */
-  recordCacheHit(query: string): void {
+  recordCacheHit(_query: string): void {
     this.cacheHits++;
     this.totalRequests++;
   }

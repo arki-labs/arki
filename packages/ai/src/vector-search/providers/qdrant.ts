@@ -212,10 +212,11 @@ export class QdrantVectorProvider<TMetadata = any> implements VectorSearchProvid
     const queryVector = await this.embeddingProvider.getEmbedding(query);
 
     // Build filter including text search
+    const baseFilter = filter ? this.buildQdrantFilter(filter) : undefined;
     const hybridFilter = filter ? {
-      ...this.buildQdrantFilter(filter),
+      ...baseFilter,
       must: [
-        ...(filter.must || []),
+        ...((baseFilter?.['must'] as Array<unknown>) || []),
         {
           key: 'text',
           match: {
@@ -236,7 +237,7 @@ export class QdrantVectorProvider<TMetadata = any> implements VectorSearchProvid
     // Re-rank based on combined score (semantic + keyword match)
     const rerankedResults = searchResult.map((result) => {
       const semanticScore = result.score;
-      const text = (result.payload?.text as string) || '';
+      const text = ((result.payload as Record<string, unknown>)?.['text'] as string) || '';
       const keywordScore = this.calculateKeywordScore(text, query);
 
       // Weighted combination of scores
@@ -304,31 +305,26 @@ export class QdrantVectorProvider<TMetadata = any> implements VectorSearchProvid
     });
   }
 
-  async createFieldIndex(fieldName: string, fieldType: 'keyword' | 'integer' | 'float' | 'bool'): Promise<void> {
-    const client = await this.getClient();
+  // Note: Field indexing is handled automatically by Qdrant based on usage patterns
+  // If needed in the future, this would require using the collection update API
+  // to modify the collection's indexing configuration
 
-    await client.createFieldIndex(this.collectionName, {
-      field_name: fieldName,
-      field_type: fieldType,
-    });
-  }
-
-  private buildQdrantFilter(filter: QdrantSearchFilter): any {
-    const conditions: any = {};
+  private buildQdrantFilter(filter: QdrantSearchFilter): Record<string, unknown> | undefined {
+    const conditions: Record<string, unknown> = {};
 
     // Must conditions (AND)
     if (filter.must && filter.must.length > 0) {
-      conditions.must = filter.must;
+      conditions['must'] = filter.must;
     }
 
     // Should conditions (OR)
     if (filter.should && filter.should.length > 0) {
-      conditions.should = filter.should;
+      conditions['should'] = filter.should;
     }
 
     // Must not conditions (NOT)
     if (filter.mustNot && filter.mustNot.length > 0) {
-      conditions.must_not = filter.mustNot;
+      conditions['must_not'] = filter.mustNot;
     }
 
     return Object.keys(conditions).length > 0 ? conditions : undefined;

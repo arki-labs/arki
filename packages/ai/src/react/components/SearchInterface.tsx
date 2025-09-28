@@ -126,9 +126,9 @@ export function SearchInterface<TMetadata = any>({
       key={result.id || index}
       className="p-4 border-b last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-800"
     >
-      {result.preview && (
+      {(result as any).preview && (
         <p className="text-gray-700 dark:text-gray-300 mb-2">
-          {result.preview}
+          {(result as any).preview}
         </p>
       )}
       <div className="flex justify-between items-center">
