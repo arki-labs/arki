@@ -1,6 +1,6 @@
 import type { DrizzleConfig } from 'drizzle-orm/utils';
 import { env } from './env';
-import { initDb } from './init';
+import { initDbWithOptions } from './init';
 
 /**
  * Create a database connection using environment configuration
@@ -16,7 +16,9 @@ export function createDb<TSchema extends Record<string, unknown> = Record<string
     throw new Error('Database URL is not configured. Please set DB_URL environment variable.');
   }
 
-  return initDb(connectionUrl, {
+  const connectionOptions = getDbConnectionOptions();
+
+  return initDbWithOptions(connectionOptions, {
     ...config,
     logger: config.logger ?? (env.DB_LOGGING || env.NODE_ENV === 'development'),
   });
