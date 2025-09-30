@@ -18,6 +18,11 @@ export function createDb<TSchema extends Record<string, unknown> = Record<string
 
   const connectionOptions = getDbConnectionOptions();
 
+  console.log('Database connection options:', {
+    ...connectionOptions,
+    connectionString: connectionOptions.connectionString ? '****' : undefined, // Mask the actual URL
+  });
+
   return initDbWithOptions(connectionOptions, {
     ...config,
     logger: config.logger ?? (env.DB_LOGGING || env.NODE_ENV === 'development'),
