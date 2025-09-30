@@ -10,9 +10,8 @@ export const env = createEnv({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
     // Database Connection - Primary method (connection string)
-    // Either DB_URL or DATABASE_URL must be provided (validated after env creation)
+    // Either DB_URL must be provided (validated after env creation)
     DB_URL: z.url(),
-    DATABASE_URL: z.url().optional(), // Alternative name used by many platforms (Vercel, Railway, etc.)
 
     // Database Connection - Individual parameters (alternative to DB_URL)
     PGUSER: z.string().optional(),
@@ -60,8 +59,7 @@ export const env = createEnv({
    */
   runtimeEnv: {
     NODE_ENV: process.env['NODE_ENV'],
-    DB_URL: process.env['DB_URL'] || process.env['DATABASE_URL'],
-    DATABASE_URL: process.env['DATABASE_URL'],
+    DB_URL: process.env['DB_URL'],
     PGUSER: process.env['PGUSER'],
     PGPASSWORD: process.env['PGPASSWORD'],
     PGHOST: process.env['PGHOST'],
@@ -84,11 +82,3 @@ export const env = createEnv({
 
   skipValidation: !!process.env['CI'] || process.env['NODE_ENV'] !== 'development',
 });
-
-// Validate that at least one database URL is provided
-if (!env.DATABASE_URL && !env.DB_URL) {
-  throw new Error(
-    'Database configuration error: Either DATABASE_URL or DB_URL must be provided. ' +
-    'DATABASE_URL is preferred for cloud platform compatibility.'
-  );
-}

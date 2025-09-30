@@ -5,7 +5,7 @@
 
 import type { EmbeddingProvider } from '../../types';
 
-export interface MockEmbeddingConfig {
+export type MockEmbeddingConfig = {
   dimensions?: number;
   delay?: number; // Simulate API latency
   shouldFail?: boolean; // For testing error handling
@@ -17,7 +17,7 @@ export class MockEmbeddingProvider implements EmbeddingProvider {
   private delay: number;
   private shouldFail: boolean;
   private failureRate: number;
-  private cache: Map<string, number[]> = new Map();
+  private cache = new Map<string, number[]>();
 
   constructor(config: MockEmbeddingConfig = {}) {
     this.dimensions = config.dimensions || 1536;
@@ -65,7 +65,7 @@ export class MockEmbeddingProvider implements EmbeddingProvider {
     const vector = new Array(this.dimensions).fill(0);
 
     // Create a hash-based embedding
-    words.forEach((word, wordIndex) => {
+    for (const [wordIndex, word] of words.entries()) {
       const hash = this.hashString(word);
 
       // Distribute word features across dimensions
@@ -74,7 +74,7 @@ export class MockEmbeddingProvider implements EmbeddingProvider {
         const weight = 1 / (wordIndex + 1); // Decay by position
         vector[index] += weight * (1 + (hash % 10) / 10);
       }
-    });
+    }
 
     // Add some semantic features based on common patterns
     const semanticFeatures = this.extractSemanticFeatures(text);
@@ -104,8 +104,8 @@ export class MockEmbeddingProvider implements EmbeddingProvider {
     return Math.abs(hash);
   }
 
-  private extractSemanticFeatures(text: string): number[] {
-    const features = new Array(100).fill(0);
+  private extractSemanticFeatures(text: string) {
+    const features = Array.from<number>({length: 100}).fill(0);
     const lowerText = text.toLowerCase();
 
     // Common semantic categories with weights
@@ -132,21 +132,21 @@ export class MockEmbeddingProvider implements EmbeddingProvider {
       },
     };
 
-    Object.entries(categories).forEach(([ , { keywords, weight }], categoryIndex) => {
+    for (const [categoryIndex, [ , { keywords, weight }]] of Object.entries(categories).entries()) {
       let categoryScore = 0;
 
-      keywords.forEach((keyword) => {
+      for (const keyword of keywords) {
         if (lowerText.includes(keyword)) {
           categoryScore += weight;
         }
-      });
+      }
 
       if (categoryScore > 0) {
         features[categoryIndex * 10] = categoryScore;
         features[categoryIndex * 10 + 1] = categoryScore * 0.5;
         features[categoryIndex * 10 + 2] = categoryScore * 0.25;
       }
-    });
+    }
 
     // Add text statistics as features
     const words = text.split(/\s+/);

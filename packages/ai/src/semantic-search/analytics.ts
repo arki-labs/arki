@@ -2,7 +2,7 @@
  * Search Analytics Collection
  */
 
-export interface SearchAnalytics {
+export type SearchAnalytics = {
   query: string;
   mode: string;
   filters?: Record<string, unknown>;
@@ -12,7 +12,7 @@ export interface SearchAnalytics {
   timestamp: Date;
 }
 
-export interface SearchMetrics {
+export type SearchMetrics = {
   totalSearches: number;
   averageResponseTime: number;
   popularQueries: string[];
@@ -42,7 +42,7 @@ export class SearchAnalyticsCollector {
     );
 
     // Keep only last N entries to prevent memory issues
-    const maxHistory = 10000;
+    const maxHistory = 10_000;
     if (this.history.length > maxHistory) {
       this.history = this.history.slice(-maxHistory);
     }
@@ -60,7 +60,7 @@ export class SearchAnalyticsCollector {
    * Get popular searches matching a prefix
    */
   async getPopularSearches(prefix: string, limit: number): Promise<string[]> {
-    const matches: Array<[string, number]> = [];
+    const matches: [string, number][] = [];
 
     for (const [query, count] of this.popularSearches.entries()) {
       if (query.toLowerCase().startsWith(prefix.toLowerCase())) {
@@ -84,7 +84,7 @@ export class SearchAnalyticsCollector {
         ? this.history.reduce((sum, h) => sum + h.responseTime, 0) / totalSearches
         : 0;
 
-    const popularQueries = Array.from(this.popularSearches.entries())
+    const popularQueries = [...this.popularSearches.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
       .map(([query]) => query);
@@ -143,7 +143,7 @@ export class SearchAnalyticsCollector {
     return {
       count: matches.length,
       firstSeen: matches[0]!.timestamp,
-      lastSeen: matches[matches.length - 1]!.timestamp,
+      lastSeen: matches.at(-1)!.timestamp,
     };
   }
 
@@ -162,13 +162,13 @@ export class SearchAnalyticsCollector {
    */
   export(): {
     history: SearchAnalytics[];
-    popularSearches: Array<[string, number]>;
+    popularSearches: [string, number][];
     cacheHits: number;
     totalRequests: number;
   } {
     return {
       history: this.history,
-      popularSearches: Array.from(this.popularSearches.entries()),
+      popularSearches: [...this.popularSearches.entries()],
       cacheHits: this.cacheHits,
       totalRequests: this.totalRequests,
     };
@@ -179,7 +179,7 @@ export class SearchAnalyticsCollector {
    */
   import(data: {
     history: SearchAnalytics[];
-    popularSearches: Array<[string, number]>;
+    popularSearches: [string, number][];
     cacheHits: number;
     totalRequests: number;
   }): void {

@@ -6,15 +6,14 @@ import { initDb } from './init';
  * Create a database connection using environment configuration
  * @param config - Drizzle configuration object
  * @returns Drizzle database instance
- * @throws Error if neither DATABASE_URL nor DB_URL is configured
- * @description Prefers DATABASE_URL over DB_URL for broader platform compatibility
+ * @throws Error if DB_URL is configured
  */
 export function createDb<TSchema extends Record<string, unknown> = Record<string, never>>(
   config: DrizzleConfig<TSchema>,
 ) {
-  const connectionUrl = env.DATABASE_URL ?? env.DB_URL;
+  const connectionUrl = env.DB_URL;
   if (!connectionUrl) {
-    throw new Error('Database URL is not configured. Please set either DATABASE_URL or DB_URL environment variable.');
+    throw new Error('Database URL is not configured. Please set DB_URL environment variable.');
   }
 
   return initDb(connectionUrl, {
@@ -26,10 +25,9 @@ export function createDb<TSchema extends Record<string, unknown> = Record<string
 /**
  * Get database connection options from environment variables
  * @returns Connection options object for pg Pool
- * @description Prefers DATABASE_URL over DB_URL for connection string
  */
 export function getDbConnectionOptions() {
-  const connectionUrl = env.DATABASE_URL ?? env.DB_URL;
+  const connectionUrl = env.DB_URL;
   return {
     connectionString: connectionUrl,
     min: env.DB_POOL_MIN,

@@ -4,15 +4,15 @@
  */
 
 import type {
-  VectorSearchProvider,
   SearchOptions as BaseSearchOptions,
-  SearchMode
+  SearchMode,
+  VectorSearchProvider
 } from '../types';
+import { SearchAnalyticsCollector } from './analytics';
 import type { SearchCache } from './cache';
 import { InMemorySearchCache } from './cache';
-import { SearchAnalyticsCollector } from './analytics';
 
-export interface SemanticSearchConfig {
+export type SemanticSearchConfig = {
   vectorProvider: VectorSearchProvider;
   cache?: SearchCache;
   analytics?: SearchAnalyticsCollector;
@@ -20,7 +20,7 @@ export interface SemanticSearchConfig {
   cacheTTL?: number;
 }
 
-export interface SearchOptions extends BaseSearchOptions {
+export type SearchOptions = {
   query: string;
   mode?: SearchMode;
   limit?: number;
@@ -29,9 +29,9 @@ export interface SearchOptions extends BaseSearchOptions {
   filters?: Record<string, unknown>;
   highlightTerms?: boolean;
   includeMetadata?: boolean;
-}
+} & BaseSearchOptions
 
-export interface SearchResult<TMetadata = Record<string, unknown>> {
+export type SearchResult<TMetadata = Record<string, unknown>> = {
   id: string;
   text?: string;
   preview?: string;
@@ -40,7 +40,7 @@ export interface SearchResult<TMetadata = Record<string, unknown>> {
   metadata?: TMetadata;
 }
 
-export interface KeywordSearchProvider<TMetadata = Record<string, unknown>> {
+export type KeywordSearchProvider<TMetadata = Record<string, unknown>> = {
   search(query: string, options?: SearchOptions): Promise<SearchResult<TMetadata>[]>;
 }
 
@@ -81,19 +81,15 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
     }
 
     if (mode === 'keyword' || mode === 'hybrid') {
-      if (!this.keywordProvider) {
+      if (this.keywordProvider) {
+        const keywordResults = await this.performKeywordSearch(options);
+
+        results = mode === 'hybrid' ? this.mergeResults(results, keywordResults) : keywordResults;
+      } else {
         if (mode === 'keyword') {
           throw new Error('Keyword search provider not configured');
         }
         // Continue with just semantic results for hybrid mode
-      } else {
-        const keywordResults = await this.performKeywordSearch(options);
-
-        if (mode === 'hybrid') {
-          results = this.mergeResults(results, keywordResults);
-        } else {
-          results = keywordResults;
-        }
       }
     }
 
@@ -132,9 +128,9 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
     );
 
     // Filter by score threshold if specified
-    const filtered = options.scoreThreshold !== undefined
-      ? vectorResults.filter(r => r.score >= options.scoreThreshold!)
-      : vectorResults;
+    const filtered = options.scoreThreshold === undefined
+      ? vectorResults
+      : vectorResults.filter(r => r.score >= options.scoreThreshold!);
 
     // Map to search results
     return filtered.map(vResult => ({
@@ -205,7 +201,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
     }
 
     // Sort by combined score
-    return Array.from(merged.values()).sort((a, b) => b.score - a.score);
+    return [...merged.values()].sort((a, b) => b.score - a.score);
   }
 
   /**
@@ -268,7 +264,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
 
     if (bestIndex === -1) {
       return text.length > maxLength
-        ? text.substring(0, maxLength) + '...'
+        ? text.slice(0, Math.max(0, maxLength)) + '...'
         : text;
     }
 
@@ -294,11 +290,11 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
 
     for (const word of words) {
       const regex = new RegExp(`\\b(${word})\\b`, 'gi');
-      const matches = Array.from(text.matchAll(regex));
+      const matches = [...text.matchAll(regex)];
 
       for (const match of matches) {
-        const start = Math.max(0, match.index! - 30);
-        const end = Math.min(text.length, match.index! + word.length + 30);
+        const start = Math.max(0, match.index - 30);
+        const end = Math.min(text.length, match.index + word.length + 30);
         const highlight = text.substring(start, end);
         highlights.push(highlight);
       }
@@ -332,11 +328,11 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
    * Index documents for vector search
    */
   async indexDocuments(
-    documents: Array<{
+    documents: {
       id: string;
       text: string;
       metadata?: TMetadata;
-    }>,
+    }[],
     batchSize = 100
   ): Promise<{ success: boolean; count: number }> {
     let indexed = 0;

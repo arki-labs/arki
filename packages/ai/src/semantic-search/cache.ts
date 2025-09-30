@@ -9,7 +9,7 @@ export type CacheableValue =
   | Record<string, unknown>
   | unknown[];
 
-export interface SearchCache {
+export type SearchCache = {
   get<T extends CacheableValue = CacheableValue>(key: string): Promise<T | null>;
   set<T extends CacheableValue>(key: string, value: T): Promise<void>;
   clear(): void;
@@ -23,9 +23,9 @@ export class InMemorySearchCache implements SearchCache {
   private cache = new Map<string, { value: CacheableValue; expires: number }>();
   private cleanupInterval: NodeJS.Timeout;
 
-  constructor(private ttl: number = 3600) {
+  constructor(private ttl = 3600) {
     // Cleanup expired entries every minute
-    this.cleanupInterval = setInterval(() => this.cleanup(), 60000);
+    this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
   }
 
   async get<T extends CacheableValue = CacheableValue>(key: string): Promise<T | null> {
@@ -82,7 +82,7 @@ export class InMemorySearchCache implements SearchCache {
 export class RedisSearchCache implements SearchCache {
   constructor(
     private redisClient: unknown, // Redis client instance
-    private ttl: number = 3600
+    private ttl = 3600
   ) {}
 
   async get<T extends CacheableValue = CacheableValue>(key: string): Promise<T | null> {
