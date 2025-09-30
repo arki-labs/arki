@@ -28,10 +28,7 @@ export const env = createEnv({
     DB_POOL_CONNECTION_TIMEOUT: z.coerce.number().default(2000), // 2 seconds
 
     // Database Behavior Configuration
-    DB_LOGGING: z
-      .string()
-      .optional()
-      .transform(val => val === 'true'),
+    DB_LOGGING: z.coerce.boolean().default(false),
     DB_MIGRATIONS_FOLDER: z.string().default('./migrations'),
     DB_SCHEMA: z.string().default('public'),
 
