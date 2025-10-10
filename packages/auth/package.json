@@ -32,13 +32,13 @@
     "@arki/kv": "workspace:*",
     "@arki/nextjs": "workspace:*",
     "@arki/schema": "workspace:*",
-    "@auth/core": "^0.40.0",
-    "@auth/drizzle-adapter": "^1.10.0",
+    "@auth/core": "catalog:",
+    "@auth/drizzle-adapter": "catalog:drizzle",
     "@better-auth/expo": "catalog:better-auth",
     "@daveyplate/better-auth-ui": "catalog:better-auth",
-    "@paralleldrive/cuid2": "^2.2.2",
+    "@paralleldrive/cuid2": "catalog:utilities",
     "@t3-oss/env-core": "catalog:env",
-    "bcrypt": "6.0.0",
+    "bcrypt": "catalog:",
     "better-auth": "catalog:better-auth",
     "react": "catalog:react",
     "react-dom": "catalog:react",
@@ -49,6 +49,6 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/bcrypt": "6.0.0"
+    "@types/bcrypt": "catalog:types"
   }
 }

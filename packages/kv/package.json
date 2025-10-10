@@ -25,11 +25,11 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@keyv/redis": "5.1.2",
+    "@keyv/redis": "catalog:backend",
     "@t3-oss/env-core": "catalog:env",
-    "ioredis": "^5.8.0",
-    "keyv": "^5.5.2",
-    "rate-limiter-flexible": "^8.0.1",
+    "ioredis": "catalog:",
+    "keyv": "catalog:backend",
+    "rate-limiter-flexible": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

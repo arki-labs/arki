@@ -26,15 +26,15 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "feed": "^5.1.0",
-    "rss": "^1.2.2"
+    "feed": "catalog:",
+    "rss": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/rss": "^0.0.32",
+    "@types/rss": "catalog:types",
     "typescript": "catalog:"
   }
 }

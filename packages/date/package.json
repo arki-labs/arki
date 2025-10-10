@@ -14,7 +14,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "date-fns": "4.1.0"
+    "date-fns": "catalog:utilities"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",

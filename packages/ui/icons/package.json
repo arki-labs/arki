@@ -24,17 +24,17 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@iconify-icon/react": "^3.0.0",
-    "@iconify/json": "^2.2.340",
-    "@iconify/react": "^6.0.0",
-    "@iconify/tailwind4": "^1.0.6",
-    "flag-icons": "^7.3.2",
-    "flagpack-core": "^2.0.0",
-    "lucide-react": "0.511.0",
-    "react-flagpack": "^2.0.6",
-    "react-icons": "^5.5.0",
-    "simple-icons": "^14.14.0",
-    "unplugin-icons": "^22.1.0"
+    "@iconify-icon/react": "catalog:",
+    "@iconify/json": "catalog:",
+    "@iconify/react": "catalog:",
+    "@iconify/tailwind4": "catalog:",
+    "flag-icons": "catalog:",
+    "flagpack-core": "catalog:",
+    "lucide-react": "catalog:",
+    "react-flagpack": "catalog:",
+    "react-icons": "catalog:",
+    "simple-icons": "catalog:",
+    "unplugin-icons": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",

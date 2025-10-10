@@ -24,22 +24,22 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "big.js": "^7.0.1",
-    "bignumber.js": "^9.3.1",
-    "decimal.js": "^10.6.0",
-    "jstat": "^1.9.6",
-    "katex": "^0.16.22",
-    "mathjs": "^14.7.0",
-    "react-katex": "^3.1.0",
-    "recharts": "^3.2.1",
-    "simple-statistics": "7.8.8"
+    "big.js": "catalog:",
+    "bignumber.js": "catalog:",
+    "decimal.js": "catalog:",
+    "jstat": "catalog:",
+    "katex": "catalog:",
+    "mathjs": "catalog:",
+    "react-katex": "catalog:",
+    "recharts": "catalog:",
+    "simple-statistics": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/big.js": "^6.2.2",
-    "@types/katex": "^0.16.7"
+    "@types/big.js": "catalog:types",
+    "@types/katex": "catalog:types"
   }
 }

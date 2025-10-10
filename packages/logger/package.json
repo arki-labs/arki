@@ -15,7 +15,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "pino": "^9.9.5"
+    "pino": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",

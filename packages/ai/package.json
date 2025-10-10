@@ -29,10 +29,10 @@
     "@ai-sdk/openai": "catalog:ai",
     "@ai-sdk/react": "catalog:ai",
     "@ai-sdk/ui-utils": "catalog:ai",
-    "@qdrant/js-client-rest": "^1.15.1",
-    "@t3-oss/env-core": "^0.13.8",
+    "@qdrant/js-client-rest": "catalog:",
+    "@t3-oss/env-core": "catalog:env",
     "ai": "catalog:ai",
-    "csv-parse": "^6.1.0",
+    "csv-parse": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -43,8 +43,8 @@
     "typescript": "catalog:"
   },
   "peerDependencies": {
-    "react": "^18.0.0",
-    "react-dom": "^18.0.0"
+    "react": "catalog:react",
+    "react-dom": "catalog:react"
   },
   "peerDependenciesMeta": {
     "react": {

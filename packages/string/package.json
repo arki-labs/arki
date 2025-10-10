@@ -24,14 +24,14 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@poppinss/utils": "^6.9.2",
-    "voca": "^1.4.1"
+    "@poppinss/utils": "catalog:",
+    "voca": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/voca": "^1.4.6"
+    "@types/voca": "catalog:types"
   }
 }

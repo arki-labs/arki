@@ -27,7 +27,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "zod": "catalog:",
-    "zod-form-data": "^2.0.8"
+    "zod-form-data": "catalog:validation"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",

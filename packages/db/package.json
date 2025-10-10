@@ -28,7 +28,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/assert": "workspace:*",
-    "@paralleldrive/cuid2": "^2.2.2",
+    "@paralleldrive/cuid2": "catalog:utilities",
     "@t3-oss/env-core": "catalog:env",
     "drizzle-orm": "catalog:drizzle",
     "drizzle-zod": "catalog:drizzle",
