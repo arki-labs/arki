@@ -1,4 +1,4 @@
-import type { ConnectionOptions, Job as BullMQJob, JobsOptions, Queue, Worker, WorkerOptions } from 'bullmq';
+import type { Job as BullMQJob, ConnectionOptions, JobsOptions, Queue, Worker, WorkerOptions } from 'bullmq';
 import type { z } from 'zod/v4';
 
 // ============================================
@@ -215,111 +215,23 @@ export type ScheduleDefinition<TInput, TOutput> = {
 };
 
 // ============================================
-// Workflow Types
+// Flow Types
 // ============================================
 
 /**
- * Step builder for workflows
- * Inspired by Convex workflow's step-based execution
+ * A step in the flow representing a job and its dependencies
  */
-export type StepBuilder = {
+export type FlowStep<TInput = unknown> = {
   /**
-   * Run a single step
+   * Unique identifier for this step
+   * Used to reference this step in dependsOn arrays
    */
-  run<T>(stepName: string, fn: () => Promise<T>): Promise<T>;
-
-  /**
-   * Run multiple steps in parallel
-   */
-  parallel<T extends readonly unknown[]>(steps: readonly [...{ [K in keyof T]: Promise<T[K]> }]): Promise<T>;
+  id: string;
 
   /**
-   * Run multiple steps sequentially
+   * Job definition to execute
    */
-  sequence<T extends readonly unknown[]>(steps: readonly [...{ [K in keyof T]: () => Promise<T[K]> }]): Promise<T>;
-
-  /**
-   * Sleep for a duration
-   */
-  sleep(milliseconds: number): Promise<void>;
-};
-
-/**
- * Workflow step function
- */
-export type WorkflowStepFunction<TInput, TOutput> = (
-  step: StepBuilder,
-  args: TInput,
-  ctx: JobContext,
-) => Promise<TOutput>;
-
-/**
- * Options for workflow definitions
- */
-export type WorkflowOptions<TInput, TOutput> = {
-  /**
-   * Maximum number of workflow instances to process concurrently
-   */
-  maxParallelism?: number;
-
-  /**
-   * Retry configuration for the entire workflow
-   */
-  retry?: RetryConfig;
-
-  /**
-   * Additional job options
-   */
-  jobOptions?: JobOptions<TInput, TOutput>;
-};
-
-/**
- * Workflow definition created by defineWorkflow
- */
-export type WorkflowDefinition<TInput, TOutput> = {
-  /**
-   * Unique name for this workflow (e.g., 'orders:process')
-   */
-  name: string;
-
-  /**
-   * Zod schema for validating workflow input
-   */
-  schema: z.ZodType<TInput>;
-
-  /**
-   * Workflow step function
-   */
-  steps: WorkflowStepFunction<TInput, TOutput>;
-
-  /**
-   * Workflow options
-   */
-  options?: WorkflowOptions<TInput, TOutput>;
-
-  /**
-   * Internal: BullMQ queue instance (set during initialization)
-   */
-  _queue?: Queue;
-
-  /**
-   * Internal: BullMQ worker instance (set during initialization)
-   */
-  _worker?: Worker;
-};
-
-// ============================================
-// Flow Types (Distributed Workflows)
-// ============================================
-
-/**
- * A node in the flow graph representing a job and its dependencies
- */
-export type FlowNode<TInput = unknown> = {
-  /**
-   * Name of the job to execute
-   */
-  name: string;
+  job: JobDefinition<unknown, unknown>;
 
   /**
    * Queue name (defaults to job name)
@@ -337,9 +249,11 @@ export type FlowNode<TInput = unknown> = {
   opts?: JobsOptions;
 
   /**
-   * Child jobs that depend on this job
+   * Array of step IDs that must complete before this step runs
+   * If empty or undefined, step runs immediately
+   * Multiple dependencies means this step waits for ALL of them
    */
-  children?: FlowNode[];
+  dependsOn?: string[];
 };
 
 /**
@@ -360,7 +274,7 @@ export type FlowOptions = {
 /**
  * Flow definition created by defineFlow
  */
-export type FlowDefinition<TInput, TJobs extends Record<string, JobDefinition<unknown, unknown>>> = {
+export type FlowDefinition<TInput> = {
   /**
    * Unique name for this flow (e.g., 'orders:process-complex')
    */
@@ -372,14 +286,10 @@ export type FlowDefinition<TInput, TJobs extends Record<string, JobDefinition<un
   schema: z.ZodType<TInput>;
 
   /**
-   * Job definitions that can be used in the flow
+   * Function that builds the flow steps from input
+   * Returns a flat array of steps with dependency references
    */
-  jobs: TJobs;
-
-  /**
-   * Function that builds the flow graph from input
-   */
-  flow: (jobs: { [K in keyof TJobs]: string }, input: TInput) => FlowNode;
+  flow: (input: TInput) => FlowStep[];
 
   /**
    * Flow options
@@ -436,16 +346,9 @@ export type QueueInstance = {
   registerSchedule<TInput, TOutput>(definition: ScheduleDefinition<TInput, TOutput>): Promise<void>;
 
   /**
-   * Register a workflow definition
-   */
-  registerWorkflow<TInput, TOutput>(definition: WorkflowDefinition<TInput, TOutput>): void;
-
-  /**
    * Register a flow definition (distributed workflow)
    */
-  registerFlow<TInput, TJobs extends Record<string, JobDefinition<unknown, unknown>>>(
-    definition: FlowDefinition<TInput, TJobs>,
-  ): void;
+  registerFlow<TInput>(definition: FlowDefinition<TInput>): void;
 
   /**
    * Start all registered workers

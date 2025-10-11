@@ -1,7 +1,6 @@
 import { FlowProducer, Queue, Worker } from 'bullmq';
 import type { Job as BullMQJob, RepeatOptions } from 'bullmq';
 
-import type { StepBuilder } from './types/index.ts';
 import type {
   FlowDefinition,
   JobContext,
@@ -10,12 +9,10 @@ import type {
   QueueInstance,
   ScheduleDefinition,
   ScheduleInfo,
-  WorkflowDefinition,
 } from './types/index.ts';
-import { createStepBuilder } from './utils/step-builder.ts';
 
 /**
- * Create a queue instance for managing jobs, schedules, and workflows
+ * Create a queue instance for managing jobs, schedules, and flows
  *
  * @example
  * ```typescript
@@ -25,7 +22,7 @@ import { createStepBuilder } from './utils/step-builder.ts';
  * // Import your job definitions
  * import { sendEmail } from './jobs/send-email';
  * import { dailyCleanup } from './jobs/daily-cleanup';
- * import { processOrder } from './workflows/process-order';
+ * import { processOrderFlow } from './flows/process-order';
  *
  * const queue = createQueue({
  *   connection: env.REDIS_URL,
@@ -35,7 +32,7 @@ import { createStepBuilder } from './utils/step-builder.ts';
  * // Register jobs
  * queue.registerJob(sendEmail);
  * queue.registerSchedule(dailyCleanup);
- * queue.registerWorkflow(processOrder);
+ * queue.registerFlow(processOrderFlow);
  *
  * // Start processing
  * await queue.start();
@@ -47,9 +44,7 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
   // Track registered definitions
   const jobDefinitions: Map<string, JobDefinition<unknown, unknown>> = new Map();
   const scheduleDefinitions: Map<string, ScheduleDefinition<unknown, unknown>> = new Map();
-  const workflowDefinitions: Map<string, WorkflowDefinition<unknown, unknown>> = new Map();
-  const flowDefinitions: Map<string, FlowDefinition<unknown, Record<string, JobDefinition<unknown, unknown>>>> =
-    new Map();
+  const flowDefinitions: Map<string, FlowDefinition<unknown, string>> = new Map();
 
   // Track BullMQ instances for cleanup
   const queues: Queue[] = [];
@@ -218,75 +213,27 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
   }
 
   /**
-   * Register a workflow definition
-   */
-  function registerWorkflow<TInput, TOutput>(definition: WorkflowDefinition<TInput, TOutput>): void {
-    if (workflowDefinitions.has(definition.name)) {
-      throw new Error(`Workflow "${definition.name}" is already registered`);
-    }
-
-    // Create BullMQ queue
-    const queue = new Queue(definition.name, {
-      connection: getConnection(),
-      prefix: keyPrefix,
-      defaultJobOptions: {
-        ...defaultJobOptions,
-        ...definition.options?.jobOptions?.bullmqOptions,
-        attempts: definition.options?.retry?.attempts ?? defaultJobOptions?.attempts,
-        backoff: definition.options?.retry?.backoff
-          ? {
-              type: definition.options.retry.backoff.type,
-              delay: definition.options.retry.backoff.delay,
-            }
-          : defaultJobOptions?.backoff,
-      },
-    });
-
-    // Create BullMQ worker
-    const worker = new Worker(
-      definition.name,
-      async (job: BullMQJob<TInput, TOutput>) => {
-        // Validate input data
-        const validatedData = definition.schema.parse(job.data);
-
-        // Create context
-        const ctx = createJobContext(job);
-
-        // Create step builder
-        const stepBuilder: StepBuilder = createStepBuilder(job);
-
-        // Execute workflow steps
-        return await definition.steps(stepBuilder, validatedData, ctx);
-      },
-      {
-        connection: getConnection(),
-        prefix: keyPrefix,
-        ...defaultWorkerOptions,
-        ...definition.options?.jobOptions?.workerOptions,
-        concurrency: definition.options?.maxParallelism ?? defaultWorkerOptions?.concurrency,
-      },
-    );
-
-    // Store instances
-    definition._queue = queue;
-    definition._worker = worker;
-    queues.push(queue);
-    workers.push(worker);
-    workflowDefinitions.set(definition.name, definition as WorkflowDefinition<unknown, unknown>);
-  }
-
-  /**
    * Register a flow definition (distributed workflow)
    */
-  function registerFlow<TInput, TJobs extends Record<string, JobDefinition<unknown, unknown>>>(
-    definition: FlowDefinition<TInput, TJobs>,
-  ): void {
+  function registerFlow<TInput, TStepId extends string = string>(definition: FlowDefinition<TInput, TStepId>): void {
     if (flowDefinitions.has(definition.name)) {
       throw new Error(`Flow "${definition.name}" is already registered`);
     }
 
-    // Register all jobs in the flow if not already registered
-    for (const [_jobKey, jobDefinition] of Object.entries(definition.jobs)) {
+    // Extract all unique job definitions from the flow steps
+    // We need to call the flow function with a dummy input to get the steps
+    // Note: This requires the flow function to be pure and not depend on specific input values for structure
+    const dummyInput = {} as TInput;
+    const flowSteps = definition.flow(dummyInput);
+
+    // Collect unique job definitions
+    const uniqueJobs = new Set<JobDefinition<unknown, unknown>>();
+    for (const step of flowSteps) {
+      uniqueJobs.add(step.job);
+    }
+
+    // Register all jobs if not already registered
+    for (const jobDefinition of uniqueJobs) {
       if (!jobDefinitions.has(jobDefinition.name)) {
         registerJob(jobDefinition);
       }
@@ -301,10 +248,7 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
     // Store FlowProducer in definition
     definition._flowProducer = flowProducer;
     flowProducers.push(flowProducer);
-    flowDefinitions.set(
-      definition.name,
-      definition as FlowDefinition<unknown, Record<string, JobDefinition<unknown, unknown>>>,
-    );
+    flowDefinitions.set(definition.name, definition as FlowDefinition<unknown>);
   }
 
   /**
@@ -314,7 +258,6 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
     console.log('✓ Queue infrastructure started');
     console.log(`  - ${jobDefinitions.size} job(s) registered`);
     console.log(`  - ${scheduleDefinitions.size} schedule(s) registered`);
-    console.log(`  - ${workflowDefinitions.size} workflow(s) registered`);
     console.log(`  - ${flowDefinitions.size} flow(s) registered`);
   }
 
@@ -449,7 +392,6 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
   return {
     registerJob,
     registerSchedule,
-    registerWorkflow,
     registerFlow,
     start,
     stop,

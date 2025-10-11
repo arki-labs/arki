@@ -1,11 +1,11 @@
 import type { z } from 'zod/v4';
 
-import type { FlowDefinition, FlowNode, FlowOptions, JobDefinition } from './types/index.ts';
+import type { FlowDefinition, FlowOptions, FlowStep } from './types/index.ts';
 
 /**
  * Configuration for defining a flow
  */
-export type DefineFlowConfig<TInput, TJobs extends Record<string, JobDefinition<unknown, unknown>>> = {
+export type DefineFlowConfig<TInput> = {
   /**
    * Unique name for this flow (e.g., 'orders:process-complex')
    */
@@ -17,34 +17,40 @@ export type DefineFlowConfig<TInput, TJobs extends Record<string, JobDefinition<
   schema: z.ZodType<TInput>;
 
   /**
-   * Job definitions that can be used in the flow
-   * Each job will be registered independently and can be monitored/retried separately
-   */
-  jobs: TJobs;
-
-  /**
-   * Function that builds the flow graph from input
-   * Receives a map of job names and the input data
-   * Returns the root FlowNode describing the flow structure
+   * Function that builds the flow steps from input
+   * Returns a flat array of steps with dependency references
+   * Each job definition is referenced directly in the steps
    *
    * @example
    * ```typescript
-   * flow: (jobs, input) => ({
-   *   name: jobs.validate,
-   *   data: input,
-   *   children: [
-   *     {
-   *       name: jobs.process,
-   *       data: { validatedInput: input },
-   *       children: [
-   *         { name: jobs.notify, data: { result: 'success' } }
-   *       ]
-   *     }
-   *   ]
-   * })
+   * flow: (input) => [
+   *   {
+   *     id: 'validate',
+   *     job: validateJob,  // Direct reference to job definition
+   *     data: input,
+   *   },
+   *   {
+   *     id: 'payment',
+   *     job: processPaymentJob,
+   *     data: { amount: input.amount },
+   *     dependsOn: ['validate'], // Wait for validate to complete
+   *   },
+   *   {
+   *     id: 'inventory',
+   *     job: updateInventoryJob,
+   *     data: input,
+   *     dependsOn: ['payment'], // Wait for payment
+   *   },
+   *   {
+   *     id: 'notify',
+   *     job: sendNotificationJob,
+   *     data: { message: 'Order complete' },
+   *     dependsOn: ['payment'], // Runs in parallel with inventory
+   *   },
+   * ]
    * ```
    */
-  flow: (jobs: { [K in keyof TJobs]: string }, input: TInput) => FlowNode;
+  flow: (input: TInput) => FlowStep[];
 
   /**
    * Optional flow configuration
@@ -59,14 +65,14 @@ export type DefineFlowConfig<TInput, TJobs extends Record<string, JobDefinition<
  * - Step-level retry and error handling (each job can retry independently)
  * - Better observability (monitor each step separately in Bull Board)
  * - True distribution (steps can run on different workers)
- * - Complex dependency graphs (parent-child relationships)
+ * - Complex dependency graphs (any step can depend on multiple other steps)
  *
  * For simpler sequential workflows, consider using `defineWorkflow` instead.
  *
- * @example Basic Flow
+ * @example Basic Flow with Dependencies
  * ```typescript
- * import { defineFlow } from '@arki/queue';
- * import { z } from 'zod/v4';
+ * import { defineFlow, defineJob } from '@arki/queue';
+ * import { z } from 'zod';
  *
  * const validateJob = defineJob({
  *   name: 'order:validate',
@@ -96,26 +102,27 @@ export type DefineFlowConfig<TInput, TJobs extends Record<string, JobDefinition<
  * });
  *
  * const orderFlow = defineFlow({
- *   name: 'order:complex-process',
+ *   name: 'order:process-flow',
  *   schema: z.object({ orderId: z.string() }),
- *   jobs: {
- *     validate: validateJob,
- *     process: processJob,
- *     notify: notifyJob,
- *   },
- *   flow: (jobs, input) => ({
- *     name: jobs.validate,
- *     data: input,
- *     children: [
- *       {
- *         name: jobs.process,
- *         data: input,
- *         children: [
- *           { name: jobs.notify, data: input }
- *         ]
- *       }
- *     ]
- *   }),
+ *   flow: (input) => [
+ *     {
+ *       id: 'validate-step',
+ *       job: validateJob,
+ *       data: input,
+ *     },
+ *     {
+ *       id: 'process-step',
+ *       job: processJob,
+ *       data: input,
+ *       dependsOn: ['validate-step'],
+ *     },
+ *     {
+ *       id: 'notify-step',
+ *       job: notifyJob,
+ *       data: input,
+ *       dependsOn: ['process-step'],
+ *     },
+ *   ],
  * });
  *
  * // Register with queue
@@ -126,44 +133,90 @@ export type DefineFlowConfig<TInput, TJobs extends Record<string, JobDefinition<
  * await flowApi.add('process-order-123', { orderId: '123' });
  * ```
  *
- * @example Complex Flow with Parallel Steps
+ * @example Parallel Steps (Fan-out Pattern)
  * ```typescript
- * const complexFlow = defineFlow({
+ * const etlFlow = defineFlow({
  *   name: 'data:etl-pipeline',
  *   schema: z.object({ sourceId: z.string() }),
- *   jobs: {
- *     extract: extractJob,
- *     transformA: transformAJob,
- *     transformB: transformBJob,
- *     load: loadJob,
- *   },
- *   flow: (jobs, input) => ({
- *     name: jobs.extract,
- *     data: input,
- *     children: [
- *       // Parallel transformations
- *       {
- *         name: jobs.transformA,
- *         data: { type: 'A' },
- *         children: [{ name: jobs.load, data: { target: 'A' } }]
- *       },
- *       {
- *         name: jobs.transformB,
- *         data: { type: 'B' },
- *         children: [{ name: jobs.load, data: { target: 'B' } }]
- *       }
- *     ]
- *   }),
+ *   flow: (input) => [
+ *     {
+ *       id: 'extract',
+ *       job: extractJob,
+ *       data: input,
+ *     },
+ *     // These run in parallel after extract completes
+ *     {
+ *       id: 'transform-a',
+ *       job: transformAJob,
+ *       data: { type: 'A' },
+ *       dependsOn: ['extract'],
+ *     },
+ *     {
+ *       id: 'transform-b',
+ *       job: transformBJob,
+ *       data: { type: 'B' },
+ *       dependsOn: ['extract'],
+ *     },
+ *     // Load waits for both transforms
+ *     {
+ *       id: 'load',
+ *       job: loadJob,
+ *       data: {},
+ *       dependsOn: ['transform-a', 'transform-b'],
+ *     },
+ *   ],
+ * });
+ * ```
+ *
+ * @example Complex DAG with Multiple Dependencies
+ * ```typescript
+ * const complexFlow = defineFlow({
+ *   name: 'ml:training-pipeline',
+ *   schema: z.object({ modelId: z.string() }),
+ *   flow: (input) => [
+ *     {
+ *       id: 'fetch',
+ *       job: fetchDataJob,
+ *       data: input,
+ *     },
+ *     {
+ *       id: 'preprocess',
+ *       job: preprocessJob,
+ *       data: input,
+ *       dependsOn: ['fetch'],
+ *     },
+ *     {
+ *       id: 'train',
+ *       job: trainModelJob,
+ *       data: input,
+ *       dependsOn: ['preprocess'],
+ *     },
+ *     {
+ *       id: 'validate',
+ *       job: validateModelJob,
+ *       data: input,
+ *       dependsOn: ['train'],
+ *     },
+ *     {
+ *       id: 'deploy',
+ *       job: deployModelJob,
+ *       data: input,
+ *       dependsOn: ['validate'],
+ *     },
+ *     {
+ *       id: 'notify',
+ *       job: notifyJob,
+ *       data: { message: 'Deployment complete' },
+ *       dependsOn: ['deploy'],
+ *     },
+ *   ],
  * });
  * ```
  */
-export function defineFlow<TInput, TJobs extends Record<string, JobDefinition<unknown, unknown>>>(
-  config: DefineFlowConfig<TInput, TJobs>,
-): FlowDefinition<TInput, TJobs> {
+export function defineFlow<TInput>(config: DefineFlowConfig<TInput>): FlowDefinition<TInput> {
   return {
     name: config.name,
     schema: config.schema,
-    jobs: config.jobs,
     flow: config.flow,
     options: config.options,
   };

@@ -4,13 +4,12 @@ A declarative, type-safe background job processing library for TypeScript applic
 
 ## Features
 
-- **Declarative API**: Define jobs, schedules, workflows, and distributed flows with a simple, declarative API inspired by `@content-collections/core`
+- **Declarative API**: Define jobs, schedules, and distributed flows with a simple, declarative API inspired by `@content-collections/core`
 - **Type-Safe**: Full TypeScript support with automatic type inference
-- **Powerful Patterns**: Supports on-demand jobs, scheduled jobs (cron/interval), multi-step workflows, and distributed flows
+- **Powerful Patterns**: Supports on-demand jobs, scheduled jobs (cron/interval), and distributed flows
 - **Built on BullMQ**: Leverages the reliability and features of BullMQ
 - **Runtime Schedule Management**: Register, list, and delete schedules at runtime (inspired by Convex)
 - **Retry & Backoff**: Configurable retry strategies with exponential or fixed backoff
-- **Workflow Steps**: Multi-step workflows with parallel/sequential execution and automatic retry
 - **Distributed Flows**: Complex multi-job workflows with parent-child dependencies using BullMQ's FlowProducer
 - **Callbacks**: OnComplete and onError hooks for job lifecycle events
 
@@ -23,28 +22,44 @@ pnpm add @arki/queue bullmq ioredis zod
 ## Quick Start
 
 ```typescript
-import { createQueue, defineJob, defineSchedule, defineWorkflow } from '@arki/queue';
+import { createQueue, defineJob, defineSchedule, defineFlow } from '@arki/queue';
 import { z } from 'zod';
 
-// 1. Define a job
-export const sendEmail = defineJob({
-  name: 'notifications:send-email',
-  schema: z.object({
-    to: z.string().email(),
-    subject: z.string(),
-    body: z.string(),
-  }),
+// 1. Define jobs for the flow
+export const validateOrder = defineJob({
+  name: 'orders:validate',
+  schema: z.object({ orderId: z.string() }),
   handler: async (data, ctx) => {
-    // Your email sending logic
-    await emailService.send(data);
-    return { sent: true };
+    const order = await db.orders.findById(data.orderId);
+    if (!order) throw new Error('Order not found');
+    return { valid: true, order };
   },
-  options: {
-    maxParallelism: 50,
-    retry: {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 1000 },
-    },
+});
+
+export const processPayment = defineJob({
+  name: 'orders:payment',
+  schema: z.object({ orderId: z.string() }),
+  handler: async (data, ctx) => {
+    const result = await paymentService.charge(data);
+    return { paymentId: result.id };
+  },
+});
+
+export const updateInventory = defineJob({
+  name: 'orders:inventory',
+  schema: z.object({ orderId: z.string() }),
+  handler: async (data, ctx) => {
+    await inventoryService.reserve(data.orderId);
+    return { reserved: true };
+  },
+});
+
+export const sendOrderConfirmation = defineJob({
+  name: 'orders:notify',
+  schema: z.object({ orderId: z.string() }),
+  handler: async (data, ctx) => {
+    await emailService.sendOrderConfirmation(data);
+    return { sent: true };
   },
 });
 
@@ -62,31 +77,37 @@ export const dailyCleanup = defineSchedule({
   },
 });
 
-// 3. Define a workflow
-export const processOrder = defineWorkflow({
-  name: 'orders:process',
+// 3. Define a flow
+export const processOrderFlow = defineFlow({
+  name: 'orders:process-flow',
   schema: z.object({
     orderId: z.string(),
   }),
-  steps: async (step, args, ctx) => {
-    // Step 1: Validate
-    const validation = await step.run('validate', async () => {
-      return await validateOrder(args.orderId);
-    });
-
-    // Step 2: Process payment and inventory in parallel
-    const [payment, inventory] = await step.parallel([
-      step.run('payment', async () => processPayment(validation)),
-      step.run('inventory', async () => updateInventory(validation)),
-    ]);
-
-    // Step 3: Send confirmation
-    await step.run('notify', async () => {
-      await sendOrderConfirmation(args.orderId);
-    });
-
-    return { orderId: args.orderId, status: 'completed' };
-  },
+  flow: (input) => [
+    {
+      id: 'validate',
+      job: validateOrder,
+      data: { orderId: input.orderId },
+    },
+    {
+      id: 'payment',
+      job: processPayment,
+      data: { orderId: input.orderId },
+      dependsOn: ['validate'],
+    },
+    {
+      id: 'inventory',
+      job: updateInventory,
+      data: { orderId: input.orderId },
+      dependsOn: ['payment'],
+    },
+    {
+      id: 'notify',
+      job: sendOrderConfirmation,
+      data: { orderId: input.orderId },
+      dependsOn: ['payment'],
+    },
+  ],
 });
 
 // 4. Create queue and register definitions
@@ -95,9 +116,8 @@ const queue = createQueue({
   keyPrefix: 'myapp:',
 });
 
-queue.registerJob(sendEmail);
 queue.registerSchedule(dailyCleanup);
-queue.registerWorkflow(processOrder);
+queue.registerFlow(processOrderFlow);
 
 // 5. Start processing
 await queue.start();
@@ -241,76 +261,6 @@ export const healthCheck = defineSchedule({
 });
 ```
 
-### Workflows
-
-Workflows are multi-step processes where each step can be independently retried.
-
-**Note**: The `defineWorkflow` API provides a simple step builder for in-process workflows. For complex distributed workflows with independent job dependencies, use BullMQ's `FlowProducer` directly (see [BullMQ Flows Documentation](https://docs.bullmq.io/guide/flows)).
-
-```typescript
-export const processOrder = defineWorkflow({
-  name: 'orders:process',
-  schema: z.object({
-    orderId: z.string(),
-    customerId: z.string(),
-  }),
-  steps: async (step, args, ctx) => {
-    // Step 1: Validate order
-    const validation = await step.run('validate-order', async () => {
-      const order = await db.orders.findById(args.orderId);
-      if (!order) throw new Error('Order not found');
-      return order;
-    });
-
-    // Step 2: Process payment and reserve inventory in parallel
-    const [payment, inventory] = await step.parallel([
-      step.run('process-payment', async () => {
-        return await paymentService.charge({
-          customerId: args.customerId,
-          amount: validation.total,
-        });
-      }),
-      step.run('reserve-inventory', async () => {
-        return await inventoryService.reserve(validation.items);
-      }),
-    ]);
-
-    // Step 3: Wait before sending confirmation
-    await step.sleep(5000); // Wait 5 seconds
-
-    // Step 4: Send confirmation
-    await step.run('send-confirmation', async () => {
-      await emailService.sendOrderConfirmation({
-        orderId: args.orderId,
-        paymentId: payment.id,
-      });
-    });
-
-    return {
-      orderId: args.orderId,
-      status: 'completed',
-      paymentId: payment.id,
-    };
-  },
-  options: {
-    maxParallelism: 10,
-    retry: {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 2000 },
-    },
-  },
-});
-```
-
-#### Step Builder API
-
-The `step` parameter provides methods for workflow execution:
-
-- `step.run(name, fn)`: Execute a single step
-- `step.parallel(steps)`: Execute multiple steps in parallel
-- `step.sequence(steps)`: Execute multiple steps sequentially
-- `step.sleep(ms)`: Sleep for a duration
-
 ### Flows (Distributed Workflows)
 
 For complex distributed workflows with parent-child job dependencies, use `defineFlow`. Flows leverage BullMQ's `FlowProducer` to create job graphs where each node can:
@@ -324,12 +274,7 @@ For complex distributed workflows with parent-child job dependencies, use `defin
 - Steps need independent retry logic
 - Steps should be distributed across different workers/queues
 - Better observability per step
-
-**When to use Workflows:**
-- Simple sequential/parallel workflows
-- Steps need to share in-memory state
-- Workflow runs in a single process
-- Simpler API and easier to maintain
+- Multi-step processes with sophisticated orchestration needs
 
 ```typescript
 import { defineFlow, defineJob } from '@arki/queue';
@@ -379,7 +324,7 @@ const sendNotification = defineJob({
   },
 });
 
-// Define the flow with job dependencies
+// Define the flow with a flat array of steps and dependencies
 export const orderFlow = defineFlow({
   name: 'orders:process-flow',
   schema: z.object({
@@ -387,37 +332,33 @@ export const orderFlow = defineFlow({
     customerId: z.string(),
     amount: z.number(),
   }),
-  // Map job definitions for type-safe references
-  jobs: {
-    validate: validateOrder,
-    payment: processPayment,
-    inventory: updateInventory,
-    notify: sendNotification,
-  },
-  // Define the flow graph
-  flow: (jobs, input) => ({
-    // Root job: validate order
-    name: jobs.validate,
-    data: { orderId: input.orderId },
-    children: [
-      // After validation, process payment
-      {
-        name: jobs.payment,
-        data: { orderId: input.orderId, amount: input.amount },
-        children: [
-          // After payment succeeds, update inventory and send notification in parallel
-          {
-            name: jobs.inventory,
-            data: { orderId: input.orderId },
-          },
-          {
-            name: jobs.notify,
-            data: { orderId: input.orderId, message: 'Order confirmed!' },
-          },
-        ],
-      },
-    ],
-  }),
+  // Define the flow as a flat array with dependencies
+  // Reference job definitions directly
+  flow: (input) => [
+    {
+      id: 'validate',
+      job: validateOrder,  // Direct reference to job definition
+      data: { orderId: input.orderId },
+    },
+    {
+      id: 'payment',
+      job: processPayment,
+      data: { orderId: input.orderId, amount: input.amount },
+      dependsOn: ['validate'], // Wait for validation
+    },
+    {
+      id: 'inventory',
+      job: updateInventory,
+      data: { orderId: input.orderId },
+      dependsOn: ['payment'], // Wait for payment
+    },
+    {
+      id: 'notify',
+      job: sendNotification,
+      data: { orderId: input.orderId, message: 'Order confirmed!' },
+      dependsOn: ['payment'], // Also wait for payment (runs in parallel with inventory)
+    },
+  ],
 });
 
 // Register the flow (this will automatically register all jobs)
@@ -459,22 +400,36 @@ console.log(status);
 
 **Type-Safe Job References:**
 ```typescript
-flow: (jobs, input) => ({
-  name: jobs.validate, // Type-safe reference to job name
-  data: { orderId: input.orderId }, // Validated input data
-})
+flow: (jobs, input) => [
+  {
+    id: 'validate',
+    job: jobs.validate, // Type-safe reference to job name
+    data: { orderId: input.orderId }, // Validated input data
+  }
+]
 ```
 
-**Parent-Child Dependencies:**
+**Dependency Graph:**
 ```typescript
-{
-  name: jobs.parent,
-  data: { ... },
-  children: [
-    { name: jobs.child1, data: { ... } },
-    { name: jobs.child2, data: { ... } },
-  ]
-}
+flow: (jobs, input) => [
+  {
+    id: 'parent',
+    job: jobs.parent,
+    data: { ... },
+  },
+  {
+    id: 'child1',
+    job: jobs.child1,
+    data: { ... },
+    dependsOn: ['parent'], // Wait for parent
+  },
+  {
+    id: 'child2',
+    job: jobs.child2,
+    data: { ... },
+    dependsOn: ['parent'], // Also wait for parent (runs in parallel with child1)
+  },
+]
 ```
 
 **Independent Retry:**
@@ -502,18 +457,21 @@ const nonCriticalJob = defineJob({
 **Queue-Level Control:**
 Specify different queues for different jobs:
 ```typescript
-flow: (jobs, input) => ({
-  name: jobs.highPriority,
-  queueName: 'priority-queue', // Use a specific queue
-  data: { ... },
-  children: [
-    {
-      name: jobs.lowPriority,
-      queueName: 'background-queue', // Different queue for child
-      data: { ... }
-    }
-  ]
-})
+flow: (jobs, input) => [
+  {
+    id: 'high-priority',
+    job: jobs.highPriority,
+    queueName: 'priority-queue', // Use a specific queue
+    data: { ... },
+  },
+  {
+    id: 'low-priority',
+    job: jobs.lowPriority,
+    queueName: 'background-queue', // Different queue
+    data: { ... },
+    dependsOn: ['high-priority'],
+  }
+]
 ```
 
 ## Bull Board UI Integration
@@ -687,23 +645,7 @@ Define a scheduled job (cron or interval).
 
 **Returns:** `ScheduleDefinition<TInput, TOutput>`
 
-### `defineWorkflow<TInput, TOutput>(config)`
-
-Define a multi-step workflow.
-
-**Parameters:**
-
-- `name: string` - Unique workflow name
-- `schema: ZodSchema<TInput>` - Zod schema for input validation
-- `steps: (step: StepBuilder, args: TInput, ctx: JobContext) => Promise<TOutput>` - Workflow steps function
-- `options?` - Workflow options:
-  - `maxParallelism?: number` - Max concurrent workflows
-  - `retry?: RetryConfig` - Retry configuration for entire workflow
-  - `jobOptions?: JobOptions<TInput, TOutput>` - Additional job options
-
-**Returns:** `WorkflowDefinition<TInput, TOutput>`
-
-### `defineFlow<TInput, TJobs>(config)`
+### `defineFlow<TInput>(config)`
 
 Define a distributed workflow using BullMQ's FlowProducer.
 
@@ -711,41 +653,55 @@ Define a distributed workflow using BullMQ's FlowProducer.
 
 - `name: string` - Unique flow name
 - `schema: ZodSchema<TInput>` - Zod schema for input validation
-- `jobs: Record<string, JobDefinition>` - Map of job definitions used in the flow
-- `flow: (jobs: Record<string, string>, input: TInput) => FlowNode` - Function that builds the flow graph
+- `flow: (input: TInput) => FlowStep[]` - Function that returns a flat array of steps with dependencies. Reference job definitions directly in the steps.
 - `options?` - Flow options:
   - `defaultJobOptions?: Partial<JobsOptions>` - Default options for all jobs in the flow
   - `prefix?: string` - Key prefix for flow IDs
 
-**Returns:** `FlowDefinition<TInput, TJobs>`
+**Returns:** `FlowDefinition<TInput>`
+
+**FlowStep Structure:**
+```typescript
+{
+  id: string;                        // Unique step identifier
+  job: JobDefinition<unknown, unknown>; // Job definition to execute
+  data: unknown;                     // Data to pass to the job
+  queueName?: string;                // Optional: specific queue name
+  opts?: JobsOptions;                // Optional: job-specific options
+  dependsOn?: string[];              // Optional: array of step IDs to wait for
+}
+```
 
 **Example:**
 ```typescript
 const orderFlow = defineFlow({
   name: 'orders:complex',
   schema: z.object({ orderId: z.string() }),
-  jobs: {
-    validate: validateJob,
-    process: processJob,
-    notify: notifyJob,
-  },
-  flow: (jobs, input) => ({
-    name: jobs.validate,
-    data: input,
-    children: [
-      {
-        name: jobs.process,
-        data: input,
-        children: [{ name: jobs.notify, data: input }]
-      }
-    ]
-  })
+  flow: (input) => [
+    {
+      id: 'validate',
+      job: validateJob,  // Direct reference to job definition
+      data: input,
+    },
+    {
+      id: 'process',
+      job: processJob,
+      data: input,
+      dependsOn: ['validate'],
+    },
+    {
+      id: 'notify',
+      job: notifyJob,
+      data: input,
+      dependsOn: ['process'],
+    }
+  ]
 });
 ```
 
 ### `createQueue(options)`
 
-Create a queue instance for managing jobs, schedules, and workflows.
+Create a queue instance for managing jobs, schedules, and flows.
 
 **Parameters:**
 
@@ -760,7 +716,6 @@ Create a queue instance for managing jobs, schedules, and workflows.
 
 - `registerJob(definition)` - Register a job definition
 - `registerSchedule(definition)` - Register a schedule definition
-- `registerWorkflow(definition)` - Register a workflow definition
 - `registerFlow(definition)` - Register a flow definition (automatically registers all jobs in the flow)
 - `start()` - Start all workers
 - `stop()` - Stop all workers and close connections
@@ -791,7 +746,6 @@ Create a programmatic API for managing jobs and queues.
 
 **Similar APIs:**
 - `createScheduleApi(definition)` - For schedule definitions
-- `createWorkflowApi(definition)` - For workflow definitions
 - `createFlowApi(definition)` - For flow definitions
 
 ### `createFlowApi(definition)`
@@ -833,7 +787,7 @@ The `ctx` parameter provided to handlers includes:
 
 ## Choosing the Right Pattern
 
-### Jobs vs Schedules vs Workflows vs Flows
+### Jobs vs Schedules vs Flows
 
 **Use Jobs when:**
 - Processing on-demand, event-driven tasks
@@ -845,17 +799,12 @@ The `ctx` parameter provided to handlers includes:
 - Tasks need to run at specific times or intervals
 - Examples: Daily reports, hourly health checks, weekly cleanup
 
-**Use Workflows when:**
-- Sequential or parallel steps in a single process
-- Steps need to share in-memory state
-- Simpler orchestration needs
-- Examples: Multi-step user onboarding, order processing with shared context
-
 **Use Flows when:**
 - Complex job dependencies (parent-child relationships)
 - Steps need independent retry logic
 - Steps should be distributed across different workers/queues
 - Better observability per step required
+- Multi-step processes with sophisticated orchestration needs
 - Examples: Complex ETL pipelines, distributed order processing, multi-stage data transformations
 
 ## Best Practices
@@ -951,7 +900,6 @@ describe('sendEmail job', () => {
 | Cron schedules | ✅ | ✅ |
 | Interval schedules | ✅ | ✅ |
 | Workpool (parallelism control) | ✅ | ✅ (via `maxParallelism`) |
-| Multi-step workflows | ✅ | ✅ (via `defineWorkflow`) |
 | Distributed workflows | ❌ | ✅ (via `defineFlow`) |
 | Step-based retry | ✅ | ✅ |
 | Independent job retry | ❌ | ✅ (in flows) |

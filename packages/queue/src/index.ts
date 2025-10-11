@@ -1,12 +1,12 @@
 /**
  * @arki/queue - Background job processing library
  *
- * A declarative API for defining and managing jobs, schedules, and workflows
+ * A declarative API for defining and managing jobs, schedules, and flows
  * built on top of BullMQ and Redis.
  *
  * @example
  * ```typescript
- * import { createQueue, defineJob, defineSchedule, defineWorkflow } from '@arki/queue';
+ * import { createQueue, defineJob, defineSchedule, defineFlow } from '@arki/queue';
  * import { z } from 'zod';
  *
  * // Define a job
@@ -37,24 +37,31 @@
  *   },
  * });
  *
- * // Define a workflow
- * export const processOrder = defineWorkflow({
- *   name: 'orders:process',
+ * // Define a flow
+ * export const processOrderFlow = defineFlow({
+ *   name: 'orders:process-flow',
  *   schema: z.object({
  *     orderId: z.string(),
  *   }),
- *   steps: async (step, args, ctx) => {
- *     const validation = await step.run('validate', async () => {
- *       return await validateOrder(args.orderId);
- *     });
- *
- *     const [payment, inventory] = await step.parallel([
- *       step.run('payment', async () => processPayment(validation)),
- *       step.run('inventory', async () => updateInventory(validation)),
- *     ]);
- *
- *     return { orderId: args.orderId, status: 'completed' };
- *   },
+ *   flow: (input) => [
+ *     {
+ *       id: 'validate',
+ *       job: validateOrderJob,
+ *       data: { orderId: input.orderId },
+ *     },
+ *     {
+ *       id: 'payment',
+ *       job: processPaymentJob,
+ *       data: { orderId: input.orderId },
+ *       dependsOn: ['validate'],
+ *     },
+ *     {
+ *       id: 'inventory',
+ *       job: updateInventoryJob,
+ *       data: { orderId: input.orderId },
+ *       dependsOn: ['payment'],
+ *     },
+ *   ],
  * });
  *
  * // Create queue instance
@@ -65,7 +72,7 @@
  * // Register definitions
  * queue.registerJob(sendEmail);
  * queue.registerSchedule(dailyCleanup);
- * queue.registerWorkflow(processOrder);
+ * queue.registerFlow(processOrderFlow);
  *
  * // Start processing
  * await queue.start();
@@ -76,21 +83,20 @@
 export { createQueue } from './create-queue.ts';
 export { defineJob } from './define-job.ts';
 export { defineSchedule } from './define-schedule.ts';
-export { defineWorkflow } from './define-workflow.ts';
 export { defineFlow } from './define-flow.ts';
 
 // Bull Board UI
 export { BullMQAdapter, createBoard, HonoAdapter } from './create-board.ts';
 
 // Queue API for job/queue management
-export { createFlowApi, createJobApi, createScheduleApi, createWorkflowApi } from './queue-api.ts';
+export { createFlowApi, createJobApi, createScheduleApi } from './queue-api.ts';
 export type { FlowInfo, JobInfo, QueueStats } from './queue-api.ts';
 
 // Type exports
 export type {
   FlowDefinition,
-  FlowNode,
   FlowOptions,
+  FlowStep,
   JobContext,
   JobDefinition,
   JobHandler,
@@ -102,10 +108,6 @@ export type {
   ScheduleDefinition,
   ScheduleInfo,
   ScheduleOptions,
-  StepBuilder,
-  WorkflowDefinition,
-  WorkflowOptions,
-  WorkflowStepFunction,
 } from './types/index.ts';
 
 // Constants
