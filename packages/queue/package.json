@@ -1,0 +1,32 @@
+{
+  "name": "@arki/queue",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types/index.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "dev": "tsc --watch",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bull-board/api": "catalog:queue",
+    "@bull-board/hono": "catalog:queue",
+    "bullmq": "catalog:queue",
+    "ioredis": "catalog:queue",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@types/node": "catalog:node",
+    "typescript": "catalog:"
+  }
+}
