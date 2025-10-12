@@ -72,13 +72,9 @@ export type DefineFlowConfig<TInput, TStepId extends string = string> = {
 };
 
 /**
- * Define a distributed workflow using BullMQ's FlowProducer
+ * (Legacy) Define a distributed workflow using a plain array.
  *
- * Flows are useful when you need:
- * - Step-level retry and error handling (each job can retry independently)
- * - Better observability (monitor each step separately in Bull Board)
- * - True distribution (steps can run on different workers)
- * - Complex dependency graphs (any step can depend on multiple other steps)
+ * @deprecated It is recommended to use the `buildFlow` builder for a better developer experience and improved type safety without needing `as const`. This function will be removed in a future version.
  *
  * @template TInput - Type of input data for the flow
  * @template TSteps - Const array of steps (for automatic type inference)
@@ -86,77 +82,6 @@ export type DefineFlowConfig<TInput, TStepId extends string = string> = {
  * **IMPORTANT**: You MUST use `as const` after your flow array to enable type-safe
  * dependency validation. Without `as const`, TypeScript cannot extract literal step IDs,
  * and invalid `dependsOn` references won't be caught at compile time.
- *
- * @example Automatic Step ID Inference (with Type Safety)
- * ```typescript
- * import { defineFlow, defineJob } from '@arki/queue';
- * import { z } from 'zod';
- *
- * const validateJob = defineJob({
- *   name: 'order:validate',
- *   inputSchema: z.object({ orderId: z.string() }),
- *   handler: async (data) => ({ valid: true }),
- * });
- *
- * const processJob = defineJob({
- *   name: 'order:process',
- *   inputSchema: z.object({ orderId: z.string() }),
- *   handler: async (data) => ({ processed: true }),
- * });
- *
- * // Add 'as const' to enable automatic type inference
- * const orderFlow = defineFlow({
- *   name: 'order:process-flow',
- *   inputSchema: z.object({ orderId: z.string() }),
- *   flow: (input) => [
- *     {
- *       id: 'validate',
- *       job: validateJob,
- *       data: input,
- *     },
- *     {
- *       id: 'process',
- *       job: processJob,
- *       data: input,
- *       dependsOn: ['validate'], // ✅ Type-safe! Autocomplete works
- *     },
- *   ] as const, // Important: enables type inference and type-safe dependencies
- * });
- * ```
- *
- * @example Without 'as const' - No Type Safety (DON'T DO THIS)
- * ```typescript
- * // ❌ BAD: Without 'as const', TypeScript cannot validate dependencies
- * const unsafeFlow = defineFlow({
- *   name: 'unsafe-flow',
- *   inputSchema: z.object({ id: z.string() }),
- *   flow: (input) => [
- *     { id: 'step1', job: job1, data: input },
- *     {
- *       id: 'step2',
- *       job: job2,
- *       data: input,
- *       dependsOn: ['step1-typo'], // ❌ No type error! Will fail at runtime
- *     },
- *   ], // Missing 'as const'
- * });
- * ```
- *
- * @example Parallel Steps (Fan-out Pattern)
- * ```typescript
- * const etlFlow = defineFlow({
- *   name: 'data:etl-pipeline',
- *   inputSchema: z.object({ sourceId: z.string() }),
- *   flow: (input) => [
- *     { id: 'extract', job: extractJob, data: input },
- *     // These run in parallel after extract
- *     { id: 'transform-a', job: transformAJob, data: { type: 'A' }, dependsOn: ['extract'] },
- *     { id: 'transform-b', job: transformBJob, data: { type: 'B' }, dependsOn: ['extract'] },
- *     // Load waits for both transforms
- *     { id: 'load', job: loadJob, data: {}, dependsOn: ['transform-a', 'transform-b'] },
- *   ] as const,
- * });
- * ```
  */
 // Automatic inference with const array and type-safe dependencies
 export function defineFlow<TInput, const TSteps extends readonly FlowStep<unknown, string>[]>(

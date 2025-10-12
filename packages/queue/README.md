@@ -29,7 +29,7 @@ import { buildFlow, createQueue, defineFlow, defineJob, defineSchedule } from '@
 // 1. Define jobs for the flow
 export const validateOrder = defineJob({
   name: 'orders:validate',
-  schema: z.object({ orderId: z.string() }),
+  inputSchema: z.object({ orderId: z.string() }),
   handler: async (data, ctx) => {
     const order = await db.orders.findById(data.orderId);
     if (!order) throw new Error('Order not found');
@@ -39,7 +39,7 @@ export const validateOrder = defineJob({
 
 export const processPayment = defineJob({
   name: 'orders:payment',
-  schema: z.object({ orderId: z.string() }),
+  inputSchema: z.object({ orderId: z.string() }),
   handler: async (data, ctx) => {
     const result = await paymentService.charge(data);
     return { paymentId: result.id };
@@ -48,7 +48,7 @@ export const processPayment = defineJob({
 
 export const updateInventory = defineJob({
   name: 'orders:inventory',
-  schema: z.object({ orderId: z.string() }),
+  inputSchema: z.object({ orderId: z.string() }),
   handler: async (data, ctx) => {
     await inventoryService.reserve(data.orderId);
     return { reserved: true };
@@ -57,7 +57,7 @@ export const updateInventory = defineJob({
 
 export const sendOrderConfirmation = defineJob({
   name: 'orders:notify',
-  schema: z.object({ orderId: z.string() }),
+  inputSchema: z.object({ orderId: z.string() }),
   handler: async (data, ctx) => {
     await emailService.sendOrderConfirmation(data);
     return { sent: true };
@@ -71,7 +71,7 @@ export const dailyCleanup = defineSchedule({
     type: 'cron',
     pattern: '0 2 * * *', // Every day at 2 AM
   },
-  schema: z.object({}),
+  inputSchema: z.object({}),
   handler: async (data, ctx) => {
     await cleanupOldData();
     return { cleaned: true };
@@ -81,7 +81,7 @@ export const dailyCleanup = defineSchedule({
 // 3. Define a flow
 export const processOrderFlow = defineFlow({
   name: 'orders:process-flow',
-  schema: z.object({
+  inputSchema: z.object({
     orderId: z.string(),
   }),
   flow: input => [
@@ -133,7 +133,7 @@ Jobs are on-demand units of work that can be enqueued and processed asynchronous
 ```typescript
 export const sendEmail = defineJob({
   name: 'notifications:send-email',
-  schema: z.object({
+  inputSchema: z.object({
     to: z.string().email(),
     subject: z.string(),
     body: z.string(),
@@ -239,7 +239,7 @@ export const dailyReport = defineSchedule({
     pattern: '0 9 * * *', // Every day at 9 AM
     timezone: 'America/New_York',
   },
-  schema: z.object({
+  inputSchema: z.object({
     reportType: z.string().default('daily'),
   }),
   handler: async (data, ctx) => {
@@ -258,7 +258,7 @@ export const healthCheck = defineSchedule({
     type: 'interval',
     milliseconds: 60000, // Every minute
   },
-  schema: z.object({}),
+  inputSchema: z.object({}),
   handler: async (data, ctx) => {
     const health = await checkSystemHealth();
     return { healthy: health.allSystemsGo };
@@ -292,7 +292,7 @@ import { createFlowApi, defineFlow, defineJob } from '@arki/queue';
 // Define individual jobs that will be used in the flow
 const validateOrder = defineJob({
   name: 'orders:validate',
-  schema: z.object({ orderId: z.string() }),
+  inputSchema: z.object({ orderId: z.string() }),
   handler: async (data, ctx) => {
     const order = await db.orders.findById(data.orderId);
     if (!order) throw new Error('Order not found');
@@ -305,7 +305,7 @@ const validateOrder = defineJob({
 
 const processPayment = defineJob({
   name: 'orders:payment',
-  schema: z.object({ orderId: z.string(), amount: z.number() }),
+  inputSchema: z.object({ orderId: z.string(), amount: z.number() }),
   handler: async (data, ctx) => {
     const result = await paymentService.charge(data);
     return { paymentId: result.id, charged: true };
@@ -317,7 +317,7 @@ const processPayment = defineJob({
 
 const updateInventory = defineJob({
   name: 'orders:inventory',
-  schema: z.object({ orderId: z.string() }),
+  inputSchema: z.object({ orderId: z.string() }),
   handler: async (data, ctx) => {
     await inventoryService.reserve(data.orderId);
     return { reserved: true };
@@ -326,7 +326,7 @@ const updateInventory = defineJob({
 
 const sendNotification = defineJob({
   name: 'orders:notify',
-  schema: z.object({ orderId: z.string(), message: z.string() }),
+  inputSchema: z.object({ orderId: z.string(), message: z.string() }),
   handler: async (data, ctx) => {
     await emailService.send(data);
     return { sent: true };
@@ -336,7 +336,7 @@ const sendNotification = defineJob({
 // Define the flow with a flat array of steps and dependencies
 export const orderFlow = defineFlow({
   name: 'orders:process-flow',
-  schema: z.object({
+  inputSchema: z.object({
     orderId: z.string(),
     customerId: z.string(),
     amount: z.number(),
@@ -446,7 +446,7 @@ Each job in the flow can have its own retry configuration:
 ```typescript
 const criticalJob = defineJob({
   name: 'critical',
-  schema: z.object({}),
+  inputSchema: z.object({}),
   handler: async () => { ... },
   options: {
     retry: { attempts: 10, backoff: { type: 'exponential', delay: 5000 } }
@@ -455,7 +455,7 @@ const criticalJob = defineJob({
 
 const nonCriticalJob = defineJob({
   name: 'non-critical',
-  schema: z.object({}),
+  inputSchema: z.object({}),
   handler: async () => { ... },
   options: {
     retry: { attempts: 2, backoff: { type: 'fixed', delay: 1000 } }
@@ -639,7 +639,7 @@ import { createBoard, createQueue, defineJob } from '@arki/queue';
 // Define your jobs
 const sendEmail = defineJob({
   name: 'notifications:send-email',
-  schema: z.object({ to: z.string().email() }),
+  inputSchema: z.object({ to: z.string().email() }),
   handler: async data => {
     // ...
     return { sent: true };
@@ -729,7 +729,7 @@ const scheduleName = await queue.schedules.register(
   defineSchedule({
     name: 'dynamic:cleanup',
     schedule: { type: 'interval', milliseconds: 3600000 },
-    schema: z.object({}),
+    inputSchema: z.object({}),
     handler: async () => {
       await cleanupTempFiles();
       return { cleaned: true };
@@ -765,7 +765,7 @@ Define an on-demand job.
 **Parameters:**
 
 - `name: string` - Unique job name (use pattern: `featureName:jobType`)
-- `schema: ZodSchema<TInput>` - Zod schema for input validation
+- `inputSchema: ZodSchema<TInput>` - Zod schema for input validation
 - `handler: (data: TInput, ctx: JobContext) => Promise<TOutput>` - Job handler function
 - `options?` - Job options:
   - `maxParallelism?: number` - Max concurrent jobs
@@ -787,7 +787,7 @@ Define a scheduled job (cron or interval).
 - `schedule: ScheduleConfig` - Schedule configuration:
   - Cron: `{ type: 'cron', pattern: string, timezone?: string }`
   - Interval: `{ type: 'interval', milliseconds: number }`
-- `schema: ZodSchema<TInput>` - Zod schema for input validation
+- `inputSchema: ZodSchema<TInput>` - Zod schema for input validation
 - `handler: (data: TInput, ctx: JobContext) => Promise<TOutput>` - Handler function
 - `options?` - Schedule options:
   - `defaultData?: TInput` - Default data for scheduled jobs
@@ -867,7 +867,7 @@ const flow = buildFlow('my-flow', inputSchema)
 ```typescript
 const orderFlow = defineFlow({
   name: 'orders:complex',
-  schema: z.object({ orderId: z.string() }),
+  inputSchema: z.object({ orderId: z.string() }),
   flow: input => [
     {
       id: 'validate',

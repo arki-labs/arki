@@ -349,6 +349,12 @@ export type FlowDefinition<TInput, TStepId extends string = string> = {
    * Internal: FlowProducer instance (set during initialization)
    */
   _flowProducer?: import('bullmq').FlowProducer;
+
+  /**
+   * Internal: Actual root queue name used when creating flows
+   * Stored during first add() call to enable correct getFlow() lookups
+   */
+  _rootQueueName?: string;
 };
 
 // ============================================

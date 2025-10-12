@@ -6,63 +6,34 @@
  *
  * @example
  * ```typescript
- * import { createQueue, defineJob, defineSchedule, defineFlow } from '@arki/queue';
+ * import { createQueue, defineJob, defineSchedule, buildFlow } from '@arki/queue';
  * import { z } from 'zod';
  *
- * // Define a job
- * export const sendEmail = defineJob({
- *   name: 'notifications:send-email',
- *   inputSchema: z.object({
- *     to: z.string().email(),
- *     subject: z.string(),
- *     body: z.string(),
- *   }),
- *   handler: async (data, ctx) => {
- *     // Send email
- *     return { sent: true };
- *   },
- * });
+ * // Define jobs
+ * export const validateOrderJob = defineJob({ ... });
+ * export const processPaymentJob = defineJob({ ... });
+ * export const updateInventoryJob = defineJob({ ... });
  *
- * // Define a schedule
- * export const dailyCleanup = defineSchedule({
- *   name: 'maintenance:daily-cleanup',
- *   schedule: {
- *     type: 'cron',
- *     pattern: '0 2 * * *',
- *   },
- *   inputSchema: z.object({}),
- *   handler: async (data, ctx) => {
- *     // Cleanup logic
- *     return { cleaned: true };
- *   },
- * });
- *
- * // Define a flow
- * export const processOrderFlow = defineFlow({
- *   name: 'orders:process-flow',
- *   inputSchema: z.object({
- *     orderId: z.string(),
- *   }),
- *   flow: (input) => [
- *     {
- *       id: 'validate',
- *       job: validateOrderJob,
- *       data: { orderId: input.orderId },
- *     },
- *     {
- *       id: 'payment',
- *       job: processPaymentJob,
- *       data: { orderId: input.orderId },
- *       dependsOn: ['validate'],
- *     },
- *     {
- *       id: 'inventory',
- *       job: updateInventoryJob,
- *       data: { orderId: input.orderId },
- *       dependsOn: ['payment'],
- *     },
- *   ],
- * });
+ * // Define a flow using the builder
+ * export const processOrderFlow = buildFlow(
+ *   'orders:process-flow',
+ *   z.object({ orderId: z.string() }),
+ * )
+ *   .step('validate', {
+ *     job: validateOrderJob,
+ *     data: input => ({ orderId: input.orderId }),
+ *   })
+ *   .step('payment', {
+ *     job: processPaymentJob,
+ *     data: input => ({ orderId: input.orderId }),
+ *     dependsOn: ['validate'],
+ *   })
+ *   .step('inventory', {
+ *     job: updateInventoryJob,
+ *     data: input => ({ orderId: input.orderId }),
+ *     dependsOn: ['payment'],
+ *   })
+ *   .build();
  *
  * // Create queue instance
  * const queue = createQueue({
@@ -70,8 +41,6 @@
  * });
  *
  * // Register definitions
- * queue.registerJob(sendEmail);
- * queue.registerSchedule(dailyCleanup);
  * queue.registerFlow(processOrderFlow);
  *
  * // Start processing
@@ -83,10 +52,8 @@
 export { createQueue } from './create-queue.ts';
 export { defineJob } from './define-job.ts';
 export { defineSchedule } from './define-schedule.ts';
-export { defineFlow } from './define-flow.ts';
-
-// Builder API (recommended for better type inference without `as const`)
 export { buildFlow, FlowBuilder } from './define-flow-builder.ts';
+export { defineFlow } from './define-flow.ts';
 
 // Bull Board UI
 export { BullMQAdapter, createBoard, HonoAdapter } from './create-board.ts';

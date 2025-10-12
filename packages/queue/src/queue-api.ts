@@ -1,4 +1,4 @@
-import type { FlowJob, Job, JobsOptions, JobState, Queue } from 'bullmq';
+import type { FlowJob, Job, JobNode, JobsOptions, JobState, Queue } from 'bullmq';
 
 import type { FlowDefinition, JobDefinition, QueuePriority, ScheduleDefinition } from './types/index.ts';
 
@@ -70,7 +70,7 @@ export function createJobApi<TInput, TOutput>(definition: JobDefinition<TInput, 
       if (!job) return null;
 
       return {
-        id: job.id!,
+        id: job.id ?? 'unknown',
         name: job.name,
         data: job.data,
         result: job.returnvalue,
@@ -92,8 +92,8 @@ export function createJobApi<TInput, TOutput>(definition: JobDefinition<TInput, 
       state: JobState | JobState[],
       options?: { start?: number; end?: number },
     ): Promise<JobInfo<TInput, TOutput>[]> {
-      const states = Array.isArray(state) ? state : [state];
-      const { start = 0, end = 10 } = options || {};
+      const states = Array.isArray(state) ? state : ([state] as JobState[]);
+      const { start = 0, end = 10 } = options ?? {};
 
       const jobs: Job<TInput, TOutput>[] = [];
       for (const s of states) {
@@ -103,7 +103,7 @@ export function createJobApi<TInput, TOutput>(definition: JobDefinition<TInput, 
 
       return Promise.all(
         jobs.map(async job => ({
-          id: job.id!,
+          id: job.id ?? 'unknown',
           name: job.name,
           data: job.data,
           result: job.returnvalue,
@@ -255,99 +255,80 @@ function buildFlowTree<TStepId extends string>(
     name: string;
     queueName: string;
     data: unknown;
-    opts?: Partial<JobsOptions>;
+    opts?: JobsOptions;
     children?: TreeNode[];
   };
 
-  // Build a map of steps by ID
   const stepsById = new Map(steps.map(step => [step.id, step]));
+  const childrenByParentId = new Map<TStepId, TStepId[]>();
+  const inDegree = new Map<TStepId, number>();
 
-  // Find all root steps (no dependencies)
-  const roots = steps.filter(step => !step.dependsOn || step.dependsOn.length === 0);
-
-  if (roots.length === 0) {
-    throw new Error('Flow must have at least one step with no dependencies (root step)');
-  }
-
-  // Build dependency graph: for each step, track which steps depend on it
-  const dependents = new Map<TStepId, TStepId[]>();
   for (const step of steps) {
+    inDegree.set(step.id, step.dependsOn?.length ?? 0);
     if (step.dependsOn) {
-      for (const depId of step.dependsOn) {
-        if (!dependents.has(depId)) {
-          dependents.set(depId, []);
+      for (const parentId of step.dependsOn) {
+        if (!childrenByParentId.has(parentId)) {
+          childrenByParentId.set(parentId, []);
         }
-        dependents.get(depId)!.push(step.id);
+        const children = childrenByParentId.get(parentId);
+        if (children) {
+          children.push(step.id);
+        }
       }
     }
   }
 
-  // Recursively build tree
-  function buildNode(stepId: TStepId): TreeNode {
-    const step = stepsById.get(stepId);
-    if (!step) {
-      throw new Error(`Step "${stepId}" not found in flow definition`);
+  const queue: TStepId[] = [];
+  for (const [stepId, degree] of inDegree.entries()) {
+    if (degree === 0) {
+      queue.push(stepId);
     }
+  }
 
-    // Extract job name from the job definition
-    const jobName = step.job.name;
+  const roots: TreeNode[] = [];
+  const nodeMap = new Map<TStepId, TreeNode>();
+
+  while (queue.length > 0) {
+    const stepId = queue.shift();
+    if (!stepId) continue;
+
+    const step = stepsById.get(stepId);
+    if (!step) continue;
 
     const node: TreeNode = {
-      name: jobName,
-      queueName: step.queueName || jobName,
+      name: step.job.name,
+      queueName: step.queueName ?? step.job.name,
       data: step.data,
-      opts: step.opts as Partial<JobsOptions> | undefined,
+      opts: step.opts as JobsOptions | undefined,
+      children: [],
     };
 
-    // Get all steps that depend directly on this step
-    const childIds = dependents.get(stepId) || [];
+    nodeMap.set(stepId, node);
 
-    // For each child, check if ALL its dependencies are met at this point
-    // Only add children whose dependencies are all in the current path
-    const validChildren: TStepId[] = [];
-    for (const childId of childIds) {
-      const childStep = stepsById.get(childId);
-      if (!childStep?.dependsOn) continue;
-
-      // Check if this step is the "last" dependency for the child
-      // (i.e., all other dependencies are ancestors of this step)
-      // For simplicity, we'll use a heuristic: if this step is the first dependency listed, add the child here
-      if (childStep.dependsOn.at(-1) === stepId) {
-        validChildren.push(childId);
+    if (!step.dependsOn || step.dependsOn.length === 0) {
+      roots.push(node);
+    } else {
+      for (const parentId of step.dependsOn) {
+        const parentNode = nodeMap.get(parentId);
+        parentNode?.children?.push(node);
       }
     }
 
-    if (validChildren.length > 0) {
-      node.children = validChildren.map(buildNode);
+    const children = childrenByParentId.get(stepId) ?? [];
+    for (const childId of children) {
+      const newDegree = (inDegree.get(childId) ?? 0) - 1;
+      inDegree.set(childId, newDegree);
+      if (newDegree === 0) {
+        queue.push(childId);
+      }
     }
-
-    return node;
   }
 
-  // Start with the first root
-  const firstRoot = roots[0];
-  if (!firstRoot) {
-    throw new Error('Flow must have at least one step with no dependencies');
+  if (nodeMap.size !== steps.length) {
+    throw new Error('Cycle detected in flow dependencies');
   }
 
-  // If multiple roots, create a synthetic parent node
-  if (roots.length > 1) {
-    const firstRootChildren = (dependents.get(firstRoot.id) || []).map(buildNode);
-    const otherRootsAsChildren = roots.slice(1).map(root => buildNode(root.id));
-
-    // Extract job name from first root
-    const firstRootJobName = firstRoot.job.name;
-
-    return {
-      name: firstRootJobName,
-      queueName: firstRoot.queueName || firstRootJobName,
-      data: firstRoot.data,
-      opts: firstRoot.opts as Partial<JobsOptions> | undefined,
-      children: [...otherRootsAsChildren, ...firstRootChildren],
-    };
-  }
-
-  return buildNode(firstRoot.id);
+  return roots;
 }
 
 /**
@@ -379,20 +360,58 @@ export function createFlowApi<TInput, TStepId extends string = string>(definitio
       const flowSteps = definition.flow(validatedData);
 
       // Convert flat array with dependencies to nested tree structure
-      const flowTree = buildFlowTree(flowSteps);
+      const flowTrees = buildFlowTree(flowSteps);
+
+      if (flowTrees.length === 0) {
+        throw new Error('Flow must have at least one step');
+      }
+
+      const firstTree = flowTrees[0];
+      if (!firstTree) {
+        throw new Error('Flow must have at least one step');
+      }
+
+      // Store the root queue name for getFlow() lookups
+      definition._rootQueueName = firstTree.queueName;
+
+      if (flowTrees.length > 1) {
+        // For multiple root flows, use the first job as root and add others as siblings
+        // This avoids creating a phantom parent job with no worker
+        const otherTrees = flowTrees.slice(1);
+
+        const flow = await flowProducer.add({
+          name: firstTree.name,
+          queueName: firstTree.queueName,
+          data: firstTree.data,
+          children: [
+            // Add first tree's children
+            ...(firstTree.children ?? []),
+            // Add other roots as siblings at the same level
+            ...otherTrees,
+          ],
+          opts: {
+            ...definition.options?.defaultJobOptions,
+            ...(firstTree.opts ?? undefined),
+            ...options,
+            jobId: flowId,
+          } as JobsOptions,
+        });
+
+        return flow.job;
+      }
 
       // Add the flow to BullMQ
       const flow = await flowProducer.add({
-        name: flowTree.name,
-        queueName: flowTree.queueName,
-        data: flowTree.data,
-        children: flowTree.children,
+        name: firstTree.name,
+        queueName: firstTree.queueName,
+        data: firstTree.data,
+        children: firstTree.children,
         opts: {
           ...definition.options?.defaultJobOptions,
-          ...flowTree.opts,
+          ...(firstTree.opts ?? undefined),
           ...options,
           jobId: flowId,
-        },
+        } as JobsOptions,
       });
 
       return flow.job;
@@ -402,20 +421,36 @@ export function createFlowApi<TInput, TStepId extends string = string>(definitio
      * Get flow status by ID
      * Returns information about the flow and its child jobs
      */
-    async getFlow(_flowId: string): Promise<FlowInfo | null> {
-      // Get job queues from a sample flow execution to determine which queues to check
-      // We need to call the flow function with dummy data to extract job definitions
-      // This is a limitation - we can't easily get flow status without knowing the input
-      // For now, we'll use a simplified approach that looks for jobs by name
+    async getFlow(flowId: string): Promise<FlowInfo | null> {
+      // Use the stored root queue name, fallback to definition name
+      const queueName = definition._rootQueueName ?? definition.name;
 
-      // Get all unique queues from job definitions used in the flow
-      // This requires calling flow() with a sample input, which we don't have
-      // So for now, we return null and recommend using queue-specific job tracking
+      const flow = await flowProducer.getFlow({
+        id: flowId,
+        queueName,
+      });
 
-      // TODO: Consider storing job definitions or queue references during registerFlow
-      // to enable flow status tracking without needing sample input data
+      if (!flow) {
+        return null;
+      }
 
-      return null;
+      const mapNode = async (node: JobNode): Promise<FlowInfo> => {
+        const job = node.job;
+        const jobState = await job.getState();
+        const jobProgress = typeof job.progress === 'number' ? job.progress : 0;
+
+        const children = await Promise.all((node.children ?? []).map(child => mapNode(child)));
+
+        return {
+          id: job.id ?? flowId,
+          name: job.name,
+          state: jobState,
+          progress: jobProgress,
+          children: children.length > 0 ? children : undefined,
+        };
+      };
+
+      return mapNode(flow);
     },
 
     /**
