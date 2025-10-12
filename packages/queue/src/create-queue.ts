@@ -1,5 +1,5 @@
-import { FlowProducer, Queue, Worker } from 'bullmq';
 import type { Job as BullMQJob, RepeatOptions } from 'bullmq';
+import { FlowProducer, Queue, Worker } from 'bullmq';
 
 import type {
   FlowDefinition,
@@ -42,9 +42,9 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
   const { connection, keyPrefix = 'queue:', defaultJobOptions, defaultWorkerOptions } = options;
 
   // Track registered definitions
-  const jobDefinitions: Map<string, JobDefinition<unknown, unknown>> = new Map();
-  const scheduleDefinitions: Map<string, ScheduleDefinition<unknown, unknown>> = new Map();
-  const flowDefinitions: Map<string, FlowDefinition<unknown, string>> = new Map();
+  const jobDefinitions = new Map<string, JobDefinition<unknown, unknown>>();
+  const scheduleDefinitions = new Map<string, ScheduleDefinition<unknown, unknown>>();
+  const flowDefinitions = new Map<string, FlowDefinition<unknown, string>>();
 
   // Track BullMQ instances for cleanup
   const queues: Queue[] = [];
@@ -103,7 +103,7 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
       definition.name,
       async (job: BullMQJob<TInput, TOutput>) => {
         // Validate input data
-        const validatedData = definition.schema.parse(job.data);
+        const validatedData = definition.inputSchema.parse(job.data);
 
         // Create context
         const ctx = createJobContext(job);
@@ -165,7 +165,7 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
       definition.name,
       async (job: BullMQJob<TInput, TOutput>) => {
         // Validate input data
-        const validatedData = definition.schema.parse(job.data);
+        const validatedData = definition.inputSchema.parse(job.data);
 
         // Create context
         const ctx = createJobContext(job);
@@ -227,7 +227,7 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
     const flowSteps = definition.flow(dummyInput);
 
     // Collect unique job definitions
-    const uniqueJobs = new Set<JobDefinition<unknown, unknown>>();
+    const uniqueJobs = new Set<JobDefinition<any, any>>();
     for (const step of flowSteps) {
       uniqueJobs.add(step.job);
     }
@@ -248,7 +248,7 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
     // Store FlowProducer in definition
     definition._flowProducer = flowProducer;
     flowProducers.push(flowProducer);
-    flowDefinitions.set(definition.name, definition as FlowDefinition<unknown>);
+    flowDefinitions.set(definition.name, definition as FlowDefinition<unknown, string>);
   }
 
   /**
@@ -337,7 +337,7 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
      */
     async get(name: string): Promise<ScheduleInfo | null> {
       const definition = scheduleDefinitions.get(name);
-      if (!definition || !definition._queue) return null;
+      if (!definition?._queue) return null;
 
       const queue = definition._queue;
       const repeatableJobs = await queue.getRepeatableJobs();
@@ -357,7 +357,7 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
      */
     async delete(name: string): Promise<void> {
       const definition = scheduleDefinitions.get(name);
-      if (!definition || !definition._queue) {
+      if (!definition?._queue) {
         throw new Error(`Schedule "${name}" not found`);
       }
 
@@ -377,12 +377,12 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
       if (definition._worker) {
         await definition._worker.close();
         const workerIndex = workers.indexOf(definition._worker);
-        if (workerIndex > -1) workers.splice(workerIndex, 1);
+        if (workerIndex !== -1) workers.splice(workerIndex, 1);
       }
 
       await queue.close();
       const queueIndex = queues.indexOf(queue);
-      if (queueIndex > -1) queues.splice(queueIndex, 1);
+      if (queueIndex !== -1) queues.splice(queueIndex, 1);
 
       // Remove from definitions
       scheduleDefinitions.delete(name);

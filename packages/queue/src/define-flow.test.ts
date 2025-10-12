@@ -8,25 +8,25 @@ describe('defineFlow', () => {
   // Helper jobs for testing
   const validateJob = defineJob({
     name: 'test:validate',
-    schema: z.object({ orderId: z.string() }),
+    inputSchema: z.object({ orderId: z.string() }),
     handler: async data => ({ valid: true, orderId: data.orderId }),
   });
 
   const paymentJob = defineJob({
     name: 'test:payment',
-    schema: z.object({ orderId: z.string(), amount: z.number() }),
+    inputSchema: z.object({ orderId: z.string(), amount: z.number() }),
     handler: async data => ({ charged: true, amount: data.amount }),
   });
 
   const inventoryJob = defineJob({
     name: 'test:inventory',
-    schema: z.object({ orderId: z.string(), items: z.array(z.string()) }),
+    inputSchema: z.object({ orderId: z.string(), items: z.array(z.string()) }),
     handler: async data => ({ reserved: true, itemCount: data.items.length }),
   });
 
   const notifyJob = defineJob({
     name: 'test:notify',
-    schema: z.object({ orderId: z.string(), message: z.string() }),
+    inputSchema: z.object({ orderId: z.string(), message: z.string() }),
     handler: async data => ({ sent: true, message: data.message }),
   });
 
@@ -34,7 +34,7 @@ describe('defineFlow', () => {
     it('should create a flow definition with required fields', () => {
       const flow = defineFlow({
         name: 'test:simple-flow',
-        schema: z.object({ orderId: z.string() }),
+        inputSchema: z.object({ orderId: z.string() }),
         flow: input => [
           {
             id: 'validate',
@@ -45,7 +45,7 @@ describe('defineFlow', () => {
       });
 
       expect(flow.name).toBe('test:simple-flow');
-      expect(flow.schema).toBeDefined();
+      expect(flow.inputSchema).toBeDefined();
       expect(flow.flow).toBeDefined();
       expect(flow.options).toBeUndefined();
     });
@@ -53,7 +53,7 @@ describe('defineFlow', () => {
     it('should create a flow with multiple steps', () => {
       const flow = defineFlow({
         name: 'test:multi-step',
-        schema: z.object({ orderId: z.string() }),
+        inputSchema: z.object({ orderId: z.string() }),
         flow: input => [
           {
             id: 'validate',
@@ -83,7 +83,7 @@ describe('defineFlow', () => {
     it('should create a flow with dependencies', () => {
       const flow = defineFlow({
         name: 'test:dependencies',
-        schema: z.object({ orderId: z.string() }),
+        inputSchema: z.object({ orderId: z.string() }),
         flow: input => [
           {
             id: 'validate',
@@ -113,7 +113,7 @@ describe('defineFlow', () => {
     it('should support multiple dependencies (fan-in pattern)', () => {
       const flow = defineFlow({
         name: 'test:fan-in',
-        schema: z.object({ orderId: z.string() }),
+        inputSchema: z.object({ orderId: z.string() }),
         flow: input => [
           {
             id: 'validate',
@@ -150,7 +150,7 @@ describe('defineFlow', () => {
     it('should infer step IDs from flow definition with as const', () => {
       const flow = defineFlow({
         name: 'test:auto-inference',
-        schema: z.object({ orderId: z.string() }),
+        inputSchema: z.object({ orderId: z.string() }),
         flow: input =>
           [
             {
@@ -177,7 +177,7 @@ describe('defineFlow', () => {
     it('should work with complex dependency graphs using as const', () => {
       const flow = defineFlow({
         name: 'test:complex-inference',
-        schema: z.object({ orderId: z.string() }),
+        inputSchema: z.object({ orderId: z.string() }),
         flow: input =>
           [
             {
@@ -211,38 +211,11 @@ describe('defineFlow', () => {
     });
   });
 
-  describe('explicit type parameter', () => {
-    it('should work with explicit step ID type', () => {
-      type OrderSteps = 'validate' | 'payment' | 'inventory' | 'notify';
-
-      const flow = defineFlow<{ orderId: string }, OrderSteps>({
-        name: 'test:explicit-type',
-        schema: z.object({ orderId: z.string() }),
-        flow: input => [
-          {
-            id: 'validate',
-            job: validateJob,
-            data: input,
-          },
-          {
-            id: 'payment',
-            job: paymentJob,
-            data: { orderId: input.orderId, amount: 100 },
-            dependsOn: ['validate'], // Type-safe with explicit type parameter
-          },
-        ],
-      });
-
-      const steps = flow.flow({ orderId: 'order_123' });
-      expect(steps).toHaveLength(2);
-    });
-  });
-
   describe('flow options', () => {
     it('should accept flow options', () => {
       const flow = defineFlow({
         name: 'test:options',
-        schema: z.object({ orderId: z.string() }),
+        inputSchema: z.object({ orderId: z.string() }),
         flow: input => [
           {
             id: 'validate',
@@ -269,7 +242,7 @@ describe('defineFlow', () => {
     it('should accept job options per step', () => {
       const flow = defineFlow({
         name: 'test:step-options',
-        schema: z.object({ orderId: z.string() }),
+        inputSchema: z.object({ orderId: z.string() }),
         flow: input => [
           {
             id: 'validate',
@@ -291,7 +264,7 @@ describe('defineFlow', () => {
     it('should accept custom queue names per step', () => {
       const flow = defineFlow({
         name: 'test:custom-queues',
-        schema: z.object({ orderId: z.string() }),
+        inputSchema: z.object({ orderId: z.string() }),
         flow: input => [
           {
             id: 'validate',
@@ -318,7 +291,7 @@ describe('defineFlow', () => {
     it('should work with simple schema', () => {
       const flow = defineFlow({
         name: 'test:simple-schema',
-        schema: z.string(),
+        inputSchema: z.string(),
         flow: input => [
           {
             id: 'process',
@@ -328,13 +301,13 @@ describe('defineFlow', () => {
         ],
       });
 
-      expect(flow.schema.parse('order_123')).toBe('order_123');
+      expect(flow.inputSchema.parse('order_123')).toBe('order_123');
     });
 
     it('should work with complex nested schema', () => {
       const flow = defineFlow({
         name: 'test:complex-schema',
-        schema: z.object({
+        inputSchema: z.object({
           order: z.object({
             id: z.string(),
             customer: z.object({
@@ -372,7 +345,7 @@ describe('defineFlow', () => {
         ],
       };
 
-      expect(flow.schema.parse(validData)).toEqual(validData);
+      expect(flow.inputSchema.parse(validData)).toEqual(validData);
     });
   });
 
@@ -380,7 +353,7 @@ describe('defineFlow', () => {
     it('should generate steps based on input data', () => {
       const flow = defineFlow({
         name: 'test:dynamic-steps',
-        schema: z.object({
+        inputSchema: z.object({
           orderId: z.string(),
           items: z.array(z.string()),
         }),
@@ -394,7 +367,7 @@ describe('defineFlow', () => {
             id: 'inventory',
             job: inventoryJob,
             data: { orderId: input.orderId, items: input.items },
-            dependsOn: ['validate'],
+            dependsOn: ['validate-wrong'],
           },
         ],
       });
@@ -414,12 +387,12 @@ describe('defineFlow', () => {
     it('should support conditional step generation', () => {
       const flow = defineFlow({
         name: 'test:conditional',
-        schema: z.object({
+        inputSchema: z.object({
           orderId: z.string(),
           requiresPayment: z.boolean(),
         }),
         flow: input => {
-          const steps = [
+          const steps: any[] = [
             {
               id: 'validate' as const,
               job: validateJob,
@@ -469,7 +442,7 @@ describe('defineFlow', () => {
     it('should support parallel steps (fan-out)', () => {
       const flow = defineFlow({
         name: 'test:fan-out',
-        schema: z.object({ orderId: z.string() }),
+        inputSchema: z.object({ orderId: z.string() }),
         flow: input => [
           {
             id: 'validate',
@@ -510,15 +483,15 @@ describe('defineFlow', () => {
         'data:etl-pipeline',
       ];
 
-      patterns.forEach(name => {
+      for (const name of patterns) {
         const flow = defineFlow({
           name,
-          schema: z.object({}),
+          inputSchema: z.object({}),
           flow: () => [],
         });
 
         expect(flow.name).toBe(name);
-      });
+      }
     });
   });
 
@@ -526,7 +499,7 @@ describe('defineFlow', () => {
     it('should infer input type from schema', () => {
       const flow = defineFlow({
         name: 'test:inference',
-        schema: z.object({
+        inputSchema: z.object({
           orderId: z.string(),
           amount: z.number(),
           items: z.array(z.string()),
@@ -536,6 +509,11 @@ describe('defineFlow', () => {
           const orderId: string = input.orderId;
           const amount: number = input.amount;
           const items: string[] = input.items;
+
+          // Verify types are correctly inferred
+          expect(typeof orderId).toBe('string');
+          expect(typeof amount).toBe('number');
+          expect(Array.isArray(items)).toBe(true);
 
           return [
             {

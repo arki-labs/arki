@@ -101,9 +101,9 @@ export type JobDefinition<TInput, TOutput> = {
   name: string;
 
   /**
-   * Zod schema for validating job data
+   * Zod schema for validating job input data
    */
-  schema: z.ZodType<TInput>;
+  inputSchema: z.ZodType<TInput>;
 
   /**
    * Handler function to process the job
@@ -184,9 +184,9 @@ export type ScheduleDefinition<TInput, TOutput> = {
   schedule: ScheduleConfig;
 
   /**
-   * Zod schema for validating job data
+   * Zod schema for validating schedule input data
    */
-  schema: z.ZodType<TInput>;
+  inputSchema: z.ZodType<TInput>;
 
   /**
    * Handler function to process the scheduled job
@@ -220,18 +220,34 @@ export type ScheduleDefinition<TInput, TOutput> = {
 
 /**
  * A step in the flow representing a job and its dependencies
+ *
+ * @template TInput - Type of data passed to the job
+ * @template TStepId - Union type of valid step IDs (default: string for backward compatibility)
+ *
+ * @example
+ * ```typescript
+ * // Type-safe step IDs
+ * type OrderSteps = 'validate' | 'payment' | 'notify';
+ * const step: FlowStep<OrderData, OrderSteps> = {
+ *   id: 'payment',
+ *   job: paymentJob,
+ *   data: orderData,
+ *   dependsOn: ['validate'], // ✅ Type-safe! Only accepts 'validate' | 'payment' | 'notify'
+ * };
+ * ```
  */
-export type FlowStep<TInput = unknown> = {
+export type FlowStep<TInput = unknown, TStepId extends string = string> = {
   /**
    * Unique identifier for this step
    * Used to reference this step in dependsOn arrays
    */
-  id: string;
+  id: TStepId;
 
   /**
    * Job definition to execute
+   * Accepts jobs with any input/output types since BullMQ handles type safety at runtime
    */
-  job: JobDefinition<unknown, unknown>;
+  job: JobDefinition<any, any>;
 
   /**
    * Queue name (defaults to job name)
@@ -252,8 +268,14 @@ export type FlowStep<TInput = unknown> = {
    * Array of step IDs that must complete before this step runs
    * If empty or undefined, step runs immediately
    * Multiple dependencies means this step waits for ALL of them
+   *
+   * @example
+   * ```typescript
+   * // Type-safe dependencies
+   * dependsOn: ['validate', 'payment'] // Only accepts valid step IDs
+   * ```
    */
-  dependsOn?: string[];
+  dependsOn?: readonly TStepId[];
 };
 
 /**
@@ -273,23 +295,50 @@ export type FlowOptions = {
 
 /**
  * Flow definition created by defineFlow
+ *
+ * @template TInput - Type of input data for the flow
+ * @template TStepId - Union type of valid step IDs (default: string for backward compatibility)
+ *
+ * @example
+ * ```typescript
+ * // Type-safe flow definition
+ * type OrderFlowSteps = 'validate' | 'payment' | 'inventory' | 'notify';
+ *
+ * const orderFlow = defineFlow<OrderInput, OrderFlowSteps>({
+ *   name: 'orders:process',
+ *   inputSchema: orderSchema,
+ *   flow: (input) => [
+ *     {
+ *       id: 'validate',
+ *       job: validateJob,
+ *       data: input,
+ *     },
+ *     {
+ *       id: 'payment',
+ *       job: paymentJob,
+ *       data: input,
+ *       dependsOn: ['validate'], // ✅ Type-safe!
+ *     },
+ *   ],
+ * });
+ * ```
  */
-export type FlowDefinition<TInput> = {
+export type FlowDefinition<TInput, TStepId extends string = string> = {
   /**
    * Unique name for this flow (e.g., 'orders:process-complex')
    */
   name: string;
 
   /**
-   * Zod schema for validating flow input
+   * Zod schema for validating flow input data
    */
-  schema: z.ZodType<TInput>;
+  inputSchema: z.ZodType<TInput>;
 
   /**
    * Function that builds the flow steps from input
    * Returns a flat array of steps with dependency references
    */
-  flow: (input: TInput) => FlowStep[];
+  flow: (input: TInput) => readonly FlowStep<unknown, TStepId>[];
 
   /**
    * Flow options
@@ -348,7 +397,7 @@ export type QueueInstance = {
   /**
    * Register a flow definition (distributed workflow)
    */
-  registerFlow<TInput>(definition: FlowDefinition<TInput>): void;
+  registerFlow<TInput, TStepId extends string = string>(definition: FlowDefinition<TInput, TStepId>): void;
 
   /**
    * Start all registered workers

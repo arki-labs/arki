@@ -9,7 +9,7 @@ import type { JobDefinition, JobHandler, JobOptions } from './types/index.ts';
  * ```typescript
  * export const sendEmail = defineJob({
  *   name: 'notifications:send-email',
- *   schema: z.object({
+ *   inputSchema: z.object({
  *     to: z.string().email(),
  *     subject: z.string(),
  *     body: z.string(),
@@ -39,9 +39,9 @@ export function defineJob<TInput, TOutput = unknown>(config: {
   name: string;
 
   /**
-   * Zod schema for validating job data
+   * Zod schema for validating job input data
    */
-  schema: z.ZodType<TInput>;
+  inputSchema: z.ZodType<TInput>;
 
   /**
    * Handler function to process the job
@@ -55,7 +55,7 @@ export function defineJob<TInput, TOutput = unknown>(config: {
 }): JobDefinition<TInput, TOutput> {
   return {
     name: config.name,
-    schema: config.schema,
+    inputSchema: config.inputSchema,
     handler: config.handler,
     options: config.options,
   };

@@ -14,7 +14,7 @@ import type { JobHandler, ScheduleConfig, ScheduleDefinition, ScheduleOptions } 
  *     pattern: '0 2 * * *', // Every day at 2 AM
  *     timezone: 'America/New_York',
  *   },
- *   schema: z.object({
+ *   inputSchema: z.object({
  *     dryRun: z.boolean().default(false),
  *   }),
  *   handler: async (data, ctx) => {
@@ -32,7 +32,7 @@ import type { JobHandler, ScheduleConfig, ScheduleDefinition, ScheduleOptions } 
  *     type: 'interval',
  *     milliseconds: 60000, // Every minute
  *   },
- *   schema: z.object({}),
+ *   inputSchema: z.object({}),
  *   handler: async (data, ctx) => {
  *     const health = await checkSystemHealth();
  *     return { healthy: health.allSystemsGo };
@@ -53,9 +53,9 @@ export function defineSchedule<TInput, TOutput = unknown>(config: {
   schedule: ScheduleConfig;
 
   /**
-   * Zod schema for validating job data
+   * Zod schema for validating schedule input data
    */
-  schema: z.ZodType<TInput>;
+  inputSchema: z.ZodType<TInput>;
 
   /**
    * Handler function to process the scheduled job
@@ -70,7 +70,7 @@ export function defineSchedule<TInput, TOutput = unknown>(config: {
   return {
     name: config.name,
     schedule: config.schedule,
-    schema: config.schema,
+    inputSchema: config.inputSchema,
     handler: config.handler,
     options: config.options,
   };

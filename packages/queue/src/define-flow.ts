@@ -3,30 +3,55 @@ import type { z } from 'zod/v4';
 import type { FlowDefinition, FlowOptions, FlowStep } from './types/index.ts';
 
 /**
- * Configuration for defining a flow
+ * Helper type to extract step IDs from a steps array
  */
-export type DefineFlowConfig<TInput> = {
+type ExtractStepIds<T extends readonly FlowStep<unknown, string>[]> = T[number]['id'];
+
+/**
+ * Helper type that validates a flow step's dependencies against valid step IDs
+ */
+type ValidatedFlowStep<TInput, TValidIds extends string> = {
+  id: TValidIds;
+  job: import('./types/index.ts').JobDefinition<any, any>;
+  queueName?: string;
+  data: TInput;
+  opts?: import('bullmq').JobsOptions;
+  dependsOn?: readonly TValidIds[];
+};
+
+/**
+ * Helper type to validate that all dependencies in a steps array reference valid step IDs
+ */
+type ValidateDependencies<TSteps extends readonly FlowStep<unknown, string>[]> = TSteps extends readonly ValidatedFlowStep<unknown, ExtractStepIds<TSteps>>[] ? TSteps : never;
+
+/**
+ * Configuration for defining a flow
+ *
+ * @template TInput - Type of input data for the flow
+ * @template TStepId - Union type of valid step IDs (inferred from steps array)
+ */
+export type DefineFlowConfig<TInput, TStepId extends string = string> = {
   /**
    * Unique name for this flow (e.g., 'orders:process-complex')
    */
   name: string;
 
   /**
-   * Zod schema for validating flow input
+   * Zod schema for validating flow input data
    */
-  schema: z.ZodType<TInput>;
+  inputSchema: z.ZodType<TInput>;
 
   /**
    * Function that builds the flow steps from input
    * Returns a flat array of steps with dependency references
    * Each job definition is referenced directly in the steps
    *
-   * @example
+   * @example Basic flow
    * ```typescript
    * flow: (input) => [
    *   {
    *     id: 'validate',
-   *     job: validateJob,  // Direct reference to job definition
+   *     job: validateJob,
    *     data: input,
    *   },
    *   {
@@ -35,22 +60,10 @@ export type DefineFlowConfig<TInput> = {
    *     data: { amount: input.amount },
    *     dependsOn: ['validate'], // Wait for validate to complete
    *   },
-   *   {
-   *     id: 'inventory',
-   *     job: updateInventoryJob,
-   *     data: input,
-   *     dependsOn: ['payment'], // Wait for payment
-   *   },
-   *   {
-   *     id: 'notify',
-   *     job: sendNotificationJob,
-   *     data: { message: 'Order complete' },
-   *     dependsOn: ['payment'], // Runs in parallel with inventory
-   *   },
    * ]
    * ```
    */
-  flow: (input: TInput) => FlowStep[];
+  flow: (input: TInput) => readonly FlowStep<unknown, TStepId>[];
 
   /**
    * Optional flow configuration
@@ -67,157 +80,94 @@ export type DefineFlowConfig<TInput> = {
  * - True distribution (steps can run on different workers)
  * - Complex dependency graphs (any step can depend on multiple other steps)
  *
- * For simpler sequential workflows, consider using `defineWorkflow` instead.
+ * @template TInput - Type of input data for the flow
+ * @template TSteps - Const array of steps (for automatic type inference)
  *
- * @example Basic Flow with Dependencies
+ * **IMPORTANT**: You MUST use `as const` after your flow array to enable type-safe
+ * dependency validation. Without `as const`, TypeScript cannot extract literal step IDs,
+ * and invalid `dependsOn` references won't be caught at compile time.
+ *
+ * @example Automatic Step ID Inference (with Type Safety)
  * ```typescript
  * import { defineFlow, defineJob } from '@arki/queue';
  * import { z } from 'zod';
  *
  * const validateJob = defineJob({
  *   name: 'order:validate',
- *   schema: z.object({ orderId: z.string() }),
- *   handler: async (data) => {
- *     // Validation logic
- *     return { valid: true };
- *   },
+ *   inputSchema: z.object({ orderId: z.string() }),
+ *   handler: async (data) => ({ valid: true }),
  * });
  *
  * const processJob = defineJob({
  *   name: 'order:process',
- *   schema: z.object({ orderId: z.string() }),
- *   handler: async (data) => {
- *     // Processing logic
- *     return { processed: true };
- *   },
+ *   inputSchema: z.object({ orderId: z.string() }),
+ *   handler: async (data) => ({ processed: true }),
  * });
  *
- * const notifyJob = defineJob({
- *   name: 'order:notify',
- *   schema: z.object({ orderId: z.string() }),
- *   handler: async (data) => {
- *     // Notification logic
- *     return { notified: true };
- *   },
- * });
- *
+ * // Add 'as const' to enable automatic type inference
  * const orderFlow = defineFlow({
  *   name: 'order:process-flow',
- *   schema: z.object({ orderId: z.string() }),
+ *   inputSchema: z.object({ orderId: z.string() }),
  *   flow: (input) => [
  *     {
- *       id: 'validate-step',
+ *       id: 'validate',
  *       job: validateJob,
  *       data: input,
  *     },
  *     {
- *       id: 'process-step',
+ *       id: 'process',
  *       job: processJob,
  *       data: input,
- *       dependsOn: ['validate-step'],
+ *       dependsOn: ['validate'], // ✅ Type-safe! Autocomplete works
  *     },
- *     {
- *       id: 'notify-step',
- *       job: notifyJob,
- *       data: input,
- *       dependsOn: ['process-step'],
- *     },
- *   ],
+ *   ] as const, // Important: enables type inference and type-safe dependencies
  * });
+ * ```
  *
- * // Register with queue
- * queue.registerFlow(orderFlow);
- *
- * // Execute the flow
- * const flowApi = createFlowApi(orderFlow);
- * await flowApi.add('process-order-123', { orderId: '123' });
+ * @example Without 'as const' - No Type Safety (DON'T DO THIS)
+ * ```typescript
+ * // ❌ BAD: Without 'as const', TypeScript cannot validate dependencies
+ * const unsafeFlow = defineFlow({
+ *   name: 'unsafe-flow',
+ *   inputSchema: z.object({ id: z.string() }),
+ *   flow: (input) => [
+ *     { id: 'step1', job: job1, data: input },
+ *     {
+ *       id: 'step2',
+ *       job: job2,
+ *       data: input,
+ *       dependsOn: ['step1-typo'], // ❌ No type error! Will fail at runtime
+ *     },
+ *   ], // Missing 'as const'
+ * });
  * ```
  *
  * @example Parallel Steps (Fan-out Pattern)
  * ```typescript
  * const etlFlow = defineFlow({
  *   name: 'data:etl-pipeline',
- *   schema: z.object({ sourceId: z.string() }),
+ *   inputSchema: z.object({ sourceId: z.string() }),
  *   flow: (input) => [
- *     {
- *       id: 'extract',
- *       job: extractJob,
- *       data: input,
- *     },
- *     // These run in parallel after extract completes
- *     {
- *       id: 'transform-a',
- *       job: transformAJob,
- *       data: { type: 'A' },
- *       dependsOn: ['extract'],
- *     },
- *     {
- *       id: 'transform-b',
- *       job: transformBJob,
- *       data: { type: 'B' },
- *       dependsOn: ['extract'],
- *     },
+ *     { id: 'extract', job: extractJob, data: input },
+ *     // These run in parallel after extract
+ *     { id: 'transform-a', job: transformAJob, data: { type: 'A' }, dependsOn: ['extract'] },
+ *     { id: 'transform-b', job: transformBJob, data: { type: 'B' }, dependsOn: ['extract'] },
  *     // Load waits for both transforms
- *     {
- *       id: 'load',
- *       job: loadJob,
- *       data: {},
- *       dependsOn: ['transform-a', 'transform-b'],
- *     },
- *   ],
- * });
- * ```
- *
- * @example Complex DAG with Multiple Dependencies
- * ```typescript
- * const complexFlow = defineFlow({
- *   name: 'ml:training-pipeline',
- *   schema: z.object({ modelId: z.string() }),
- *   flow: (input) => [
- *     {
- *       id: 'fetch',
- *       job: fetchDataJob,
- *       data: input,
- *     },
- *     {
- *       id: 'preprocess',
- *       job: preprocessJob,
- *       data: input,
- *       dependsOn: ['fetch'],
- *     },
- *     {
- *       id: 'train',
- *       job: trainModelJob,
- *       data: input,
- *       dependsOn: ['preprocess'],
- *     },
- *     {
- *       id: 'validate',
- *       job: validateModelJob,
- *       data: input,
- *       dependsOn: ['train'],
- *     },
- *     {
- *       id: 'deploy',
- *       job: deployModelJob,
- *       data: input,
- *       dependsOn: ['validate'],
- *     },
- *     {
- *       id: 'notify',
- *       job: notifyJob,
- *       data: { message: 'Deployment complete' },
- *       dependsOn: ['deploy'],
- *     },
- *   ],
+ *     { id: 'load', job: loadJob, data: {}, dependsOn: ['transform-a', 'transform-b'] },
+ *   ] as const,
  * });
  * ```
  */
-export function defineFlow<TInput>(config: DefineFlowConfig<TInput>): FlowDefinition<TInput> {
+// Automatic inference with const array and type-safe dependencies
+export function defineFlow<TInput, const TSteps extends readonly FlowStep<unknown, string>[]>(
+  config: Omit<DefineFlowConfig<TInput, ExtractStepIds<TSteps>>, 'flow'> & {
+    flow: (input: TInput) => ValidateDependencies<TSteps>;
+  },
+): FlowDefinition<TInput, ExtractStepIds<TSteps>> {
   return {
     name: config.name,
-    schema: config.schema,
-    flow: config.flow,
+    inputSchema: config.inputSchema,
+    flow: config.flow as (input: TInput) => readonly FlowStep<unknown, ExtractStepIds<TSteps>>[],
     options: config.options,
   };
 }

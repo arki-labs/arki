@@ -217,7 +217,7 @@ export function createScheduleApi<TInput, TOutput>(definition: ScheduleDefinitio
   // Create a compatible JobDefinition for the API
   const jobDefinition: JobDefinition<TInput, TOutput> = {
     name: definition.name,
-    schema: definition.schema,
+    inputSchema: definition.inputSchema,
     handler: definition.handler,
     options: definition.options?.jobOptions,
     _queue: queue,
@@ -242,14 +242,14 @@ export type FlowInfo = {
  * Convert flat array of steps with dependencies to BullMQ's nested tree structure
  */
 function buildFlowTree<TStepId extends string>(
-  steps: Array<{
+  steps: readonly {
     id: TStepId;
     job: JobDefinition<unknown, unknown>;
     queueName?: string;
     data: unknown;
     opts?: unknown;
     dependsOn?: readonly TStepId[];
-  }>,
+  }[],
 ) {
   type TreeNode = {
     name: string;
@@ -373,7 +373,7 @@ export function createFlowApi<TInput, TStepId extends string = string>(definitio
       },
     ): Promise<FlowJob> {
       // Validate input data
-      const validatedData = definition.schema.parse(data);
+      const validatedData = definition.inputSchema.parse(data);
 
       // Build the flat flow steps using the definition's flow function
       const flowSteps = definition.flow(validatedData);

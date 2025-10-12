@@ -85,6 +85,9 @@ export { defineJob } from './define-job.ts';
 export { defineSchedule } from './define-schedule.ts';
 export { defineFlow } from './define-flow.ts';
 
+// Builder API (recommended for better type inference without `as const`)
+export { buildFlow, FlowBuilder } from './define-flow-builder.ts';
+
 // Bull Board UI
 export { BullMQAdapter, createBoard, HonoAdapter } from './create-board.ts';
 

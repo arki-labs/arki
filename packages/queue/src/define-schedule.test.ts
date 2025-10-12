@@ -12,7 +12,7 @@ describe('defineSchedule', () => {
           type: 'cron',
           pattern: '0 2 * * *',
         },
-        schema: z.object({}),
+        inputSchema: z.object({}),
         handler: async () => ({ completed: true }),
       });
 
@@ -32,7 +32,7 @@ describe('defineSchedule', () => {
           pattern: '0 9 * * *',
           timezone: 'America/New_York',
         },
-        schema: z.object({}),
+        inputSchema: z.object({}),
         handler: async () => ({ completed: true }),
       });
 
@@ -57,7 +57,7 @@ describe('defineSchedule', () => {
             type: 'cron',
             pattern,
           },
-          schema: z.object({}),
+          inputSchema: z.object({}),
           handler: async () => ({}),
         });
 
@@ -76,7 +76,7 @@ describe('defineSchedule', () => {
           type: 'interval',
           milliseconds: 60000,
         },
-        schema: z.object({}),
+        inputSchema: z.object({}),
         handler: async () => ({ completed: true }),
       });
 
@@ -102,7 +102,7 @@ describe('defineSchedule', () => {
             type: 'interval',
             milliseconds: ms,
           },
-          schema: z.object({}),
+          inputSchema: z.object({}),
           handler: async () => ({}),
         });
 
@@ -121,7 +121,7 @@ describe('defineSchedule', () => {
           type: 'interval',
           milliseconds: 60000,
         },
-        schema: z.object({
+        inputSchema: z.object({
           taskId: z.string(),
         }),
         handler: async data => {
@@ -149,8 +149,8 @@ describe('defineSchedule', () => {
           type: 'cron',
           pattern: '0 0 * * *',
         },
-        schema: z.object({}),
-        handler: async (data, ctx) => {
+        inputSchema: z.object({}),
+        handler: async (_data, ctx) => {
           await ctx.log('Starting scheduled task');
           await ctx.updateProgress(50);
           await ctx.log('Task completed');
@@ -185,7 +185,7 @@ describe('defineSchedule', () => {
           type: 'cron',
           pattern: '0 0 * * *',
         },
-        schema: z.object({
+        inputSchema: z.object({
           dryRun: z.boolean(),
           maxItems: z.number(),
         }),
@@ -209,7 +209,7 @@ describe('defineSchedule', () => {
           type: 'interval',
           milliseconds: 30000,
         },
-        schema: z.object({}),
+        inputSchema: z.object({}),
         handler: async () => ({ completed: true }),
         options: {
           jobOptions: {
@@ -240,11 +240,11 @@ describe('defineSchedule', () => {
           type: 'cron',
           pattern: '0 0 * * *',
         },
-        schema: z.object({}),
+        inputSchema: z.object({}),
         handler: async () => ({ success: true }),
       });
 
-      expect(schedule.schema.parse({})).toEqual({});
+      expect(schedule.inputSchema.parse({})).toEqual({});
     });
 
     it('should work with complex schema', () => {
@@ -254,7 +254,7 @@ describe('defineSchedule', () => {
           type: 'cron',
           pattern: '0 0 * * *',
         },
-        schema: z.object({
+        inputSchema: z.object({
           options: z.object({
             batchSize: z.number().min(1).max(1000),
             dryRun: z.boolean().default(false),
@@ -272,7 +272,7 @@ describe('defineSchedule', () => {
         filters: ['active', 'verified'],
       };
 
-      expect(schedule.schema.parse(validData)).toEqual(validData);
+      expect(schedule.inputSchema.parse(validData)).toEqual(validData);
     });
 
     it('should work with default values', () => {
@@ -282,14 +282,14 @@ describe('defineSchedule', () => {
           type: 'cron',
           pattern: '0 0 * * *',
         },
-        schema: z.object({
+        inputSchema: z.object({
           enabled: z.boolean().default(true),
           maxRetries: z.number().default(3),
         }),
         handler: async data => ({ enabled: data.enabled }),
       });
 
-      const parsed = schedule.schema.parse({});
+      const parsed = schedule.inputSchema.parse({});
       expect(parsed.enabled).toBe(true);
       expect(parsed.maxRetries).toBe(3);
     });
@@ -311,7 +311,7 @@ describe('defineSchedule', () => {
             type: 'cron',
             pattern: '0 0 * * *',
           },
-          schema: z.object({}),
+          inputSchema: z.object({}),
           handler: async () => ({}),
         });
 
@@ -328,7 +328,7 @@ describe('defineSchedule', () => {
           type: 'cron',
           pattern: '0 0 * * *',
         },
-        schema: z.object({
+        inputSchema: z.object({
           targetDate: z.string(),
           includeArchived: z.boolean(),
         }),
@@ -355,7 +355,7 @@ describe('defineSchedule', () => {
           type: 'interval',
           milliseconds: 60000,
         },
-        schema: z.object({
+        inputSchema: z.object({
           batchSize: z.number(),
         }),
         handler: async data => {

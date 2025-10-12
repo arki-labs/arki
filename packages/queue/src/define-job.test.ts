@@ -8,7 +8,7 @@ describe('defineJob', () => {
     it('should create a job definition with required fields', () => {
       const job = defineJob({
         name: 'test:basic-job',
-        schema: z.object({
+        inputSchema: z.object({
           message: z.string(),
         }),
         handler: async data => {
@@ -17,7 +17,7 @@ describe('defineJob', () => {
       });
 
       expect(job.name).toBe('test:basic-job');
-      expect(job.schema).toBeDefined();
+      expect(job.inputSchema).toBeDefined();
       expect(job.handler).toBeDefined();
       expect(job.options).toBeUndefined();
     });
@@ -32,7 +32,7 @@ describe('defineJob', () => {
 
       const job = defineJob({
         name: 'test:full-job',
-        schema: z.object({
+        inputSchema: z.object({
           id: z.string(),
           count: z.number(),
         }),
@@ -73,7 +73,7 @@ describe('defineJob', () => {
     it('should execute handler with correct input', async () => {
       const job = defineJob({
         name: 'test:handler',
-        schema: z.object({
+        inputSchema: z.object({
           value: z.number(),
         }),
         handler: async data => {
@@ -97,7 +97,7 @@ describe('defineJob', () => {
 
       const job = defineJob({
         name: 'test:context',
-        schema: z.object({
+        inputSchema: z.object({
           steps: z.number(),
         }),
         handler: async (data, ctx) => {
@@ -130,18 +130,18 @@ describe('defineJob', () => {
     it('should work with simple schemas', () => {
       const job = defineJob({
         name: 'test:simple-schema',
-        schema: z.string(),
+        inputSchema: z.string(),
         handler: async data => ({ length: data.length }),
       });
 
-      expect(job.schema.parse('hello')).toBe('hello');
-      expect(() => job.schema.parse(123)).toThrow();
+      expect(job.inputSchema.parse('hello')).toBe('hello');
+      expect(() => job.inputSchema.parse(123)).toThrow();
     });
 
     it('should work with complex nested schemas', () => {
       const job = defineJob({
         name: 'test:complex-schema',
-        schema: z.object({
+        inputSchema: z.object({
           user: z.object({
             id: z.string(),
             email: z.string().email(),
@@ -164,21 +164,21 @@ describe('defineJob', () => {
         tags: ['important', 'urgent'],
       };
 
-      expect(job.schema.parse(validData)).toEqual(validData);
+      expect(job.inputSchema.parse(validData)).toEqual(validData);
     });
 
     it('should work with optional fields', () => {
       const job = defineJob({
         name: 'test:optional',
-        schema: z.object({
+        inputSchema: z.object({
           required: z.string(),
           optional: z.string().optional(),
         }),
         handler: async data => ({ hasOptional: !!data.optional }),
       });
 
-      expect(job.schema.parse({ required: 'test' })).toEqual({ required: 'test' });
-      expect(job.schema.parse({ required: 'test', optional: 'value' })).toEqual({
+      expect(job.inputSchema.parse({ required: 'test' })).toEqual({ required: 'test' });
+      expect(job.inputSchema.parse({ required: 'test', optional: 'value' })).toEqual({
         required: 'test',
         optional: 'value',
       });
@@ -187,14 +187,14 @@ describe('defineJob', () => {
     it('should work with transformed schemas', () => {
       const job = defineJob({
         name: 'test:transform',
-        schema: z
+        inputSchema: z
           .string()
           .transform(s => s.toUpperCase())
           .pipe(z.string().min(1)),
         handler: async data => ({ processed: data }),
       });
 
-      expect(job.schema.parse('hello')).toBe('HELLO');
+      expect(job.inputSchema.parse('hello')).toBe('HELLO');
     });
   });
 
@@ -202,7 +202,7 @@ describe('defineJob', () => {
     it('should accept exponential backoff', () => {
       const job = defineJob({
         name: 'test:exponential',
-        schema: z.object({ id: z.string() }),
+        inputSchema: z.object({ id: z.string() }),
         handler: async () => ({ success: true }),
         options: {
           retry: {
@@ -226,7 +226,7 @@ describe('defineJob', () => {
     it('should accept fixed backoff', () => {
       const job = defineJob({
         name: 'test:fixed',
-        schema: z.object({ id: z.string() }),
+        inputSchema: z.object({ id: z.string() }),
         handler: async () => ({ success: true }),
         options: {
           retry: {
@@ -248,7 +248,7 @@ describe('defineJob', () => {
     it('should infer input type from schema', () => {
       const job = defineJob({
         name: 'test:inference',
-        schema: z.object({
+        inputSchema: z.object({
           name: z.string(),
           age: z.number(),
         }),
@@ -271,7 +271,7 @@ describe('defineJob', () => {
 
       const job = defineJob<{ input: string }, JobOutput>({
         name: 'test:output-type',
-        schema: z.object({ input: z.string() }),
+        inputSchema: z.object({ input: z.string() }),
         handler: async data => {
           return {
             status: 'success',
@@ -296,7 +296,7 @@ describe('defineJob', () => {
       patterns.forEach(name => {
         const job = defineJob({
           name,
-          schema: z.object({}),
+          inputSchema: z.object({}),
           handler: async () => ({}),
         });
 

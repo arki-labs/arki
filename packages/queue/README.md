@@ -22,8 +22,9 @@ pnpm add @arki/queue bullmq ioredis zod
 ## Quick Start
 
 ```typescript
-import { createQueue, defineJob, defineSchedule, defineFlow } from '@arki/queue';
 import { z } from 'zod';
+
+import { createQueue, defineFlow, defineJob, defineSchedule } from '@arki/queue';
 
 // 1. Define jobs for the flow
 export const validateOrder = defineJob({
@@ -83,7 +84,7 @@ export const processOrderFlow = defineFlow({
   schema: z.object({
     orderId: z.string(),
   }),
-  flow: (input) => [
+  flow: input => [
     {
       id: 'validate',
       job: validateOrder,
@@ -172,14 +173,18 @@ import { createJobApi } from '@arki/queue';
 const emailApi = createJobApi(sendEmail);
 
 // Add a job to the queue
-const job = await emailApi.add('welcome-email', {
-  to: 'user@example.com',
-  subject: 'Welcome!',
-  body: 'Thanks for signing up.',
-}, {
-  priority: 3,
-  delay: 5000, // Delay 5 seconds
-});
+const job = await emailApi.add(
+  'welcome-email',
+  {
+    to: 'user@example.com',
+    subject: 'Welcome!',
+    body: 'Thanks for signing up.',
+  },
+  {
+    priority: 3,
+    delay: 5000, // Delay 5 seconds
+  },
+);
 
 // Get job status
 const jobInfo = await emailApi.getJob(job.id!);
@@ -264,12 +269,14 @@ export const healthCheck = defineSchedule({
 ### Flows (Distributed Workflows)
 
 For complex distributed workflows with parent-child job dependencies, use `defineFlow`. Flows leverage BullMQ's `FlowProducer` to create job graphs where each node can:
+
 - Retry independently
 - Run on different workers/queues
 - Be monitored separately in Bull Board
 - Have its own priority and options
 
 **When to use Flows:**
+
 - Complex job dependencies (parent-child relationships)
 - Steps need independent retry logic
 - Steps should be distributed across different workers/queues
@@ -277,8 +284,10 @@ For complex distributed workflows with parent-child job dependencies, use `defin
 - Multi-step processes with sophisticated orchestration needs
 
 ```typescript
-import { defineFlow, defineJob } from '@arki/queue';
 import { z } from 'zod';
+
+// Use the flow API to add flows
+import { createFlowApi, defineFlow, defineJob } from '@arki/queue';
 
 // Define individual jobs that will be used in the flow
 const validateOrder = defineJob({
@@ -334,10 +343,10 @@ export const orderFlow = defineFlow({
   }),
   // Define the flow as a flat array with dependencies
   // Reference job definitions directly
-  flow: (input) => [
+  flow: input => [
     {
       id: 'validate',
-      job: validateOrder,  // Direct reference to job definition
+      job: validateOrder, // Direct reference to job definition
       data: { orderId: input.orderId },
     },
     {
@@ -363,9 +372,6 @@ export const orderFlow = defineFlow({
 
 // Register the flow (this will automatically register all jobs)
 queue.registerFlow(orderFlow);
-
-// Use the flow API to add flows
-import { createFlowApi } from '@arki/queue';
 
 const flowApi = createFlowApi(orderFlow);
 
@@ -399,17 +405,19 @@ console.log(status);
 #### Flow Features
 
 **Type-Safe Job References:**
+
 ```typescript
 flow: (jobs, input) => [
   {
     id: 'validate',
     job: jobs.validate, // Type-safe reference to job name
     data: { orderId: input.orderId }, // Validated input data
-  }
-]
+  },
+];
 ```
 
 **Dependency Graph:**
+
 ```typescript
 flow: (jobs, input) => [
   {
@@ -434,6 +442,7 @@ flow: (jobs, input) => [
 
 **Independent Retry:**
 Each job in the flow can have its own retry configuration:
+
 ```typescript
 const criticalJob = defineJob({
   name: 'critical',
@@ -456,6 +465,7 @@ const nonCriticalJob = defineJob({
 
 **Queue-Level Control:**
 Specify different queues for different jobs:
+
 ```typescript
 flow: (jobs, input) => [
   {
@@ -482,14 +492,15 @@ flow: (jobs, input) => [
 
 ```typescript
 import { Hono } from 'hono';
-import { createBoard, createQueue, defineJob } from '@arki/queue';
 import { z } from 'zod';
+
+import { createBoard, createQueue, defineJob } from '@arki/queue';
 
 // Define your jobs
 const sendEmail = defineJob({
   name: 'notifications:send-email',
   schema: z.object({ to: z.string().email() }),
-  handler: async (data) => {
+  handler: async data => {
     // ...
     return { sent: true };
   },
@@ -509,9 +520,7 @@ const { adapter } = createBoard({
   basePath: '/admin/queues',
   uiOptions: {
     boardTitle: 'My App - Job Queue Monitor',
-    miscLinks: [
-      { text: 'Documentation', url: 'https://docs.myapp.com' },
-    ],
+    miscLinks: [{ text: 'Documentation', url: 'https://docs.myapp.com' }],
   },
 });
 
@@ -539,6 +548,7 @@ removeQueue('queue-name');
 ### Accessing the UI
 
 Once mounted, visit `http://localhost:3000/admin/queues` (or your configured path) to:
+
 - Monitor job counts (waiting, active, completed, failed, delayed)
 - View job details and data
 - Retry failed jobs
@@ -661,6 +671,7 @@ Define a distributed workflow using BullMQ's FlowProducer.
 **Returns:** `FlowDefinition<TInput>`
 
 **FlowStep Structure:**
+
 ```typescript
 {
   id: string;                        // Unique step identifier
@@ -673,14 +684,15 @@ Define a distributed workflow using BullMQ's FlowProducer.
 ```
 
 **Example:**
+
 ```typescript
 const orderFlow = defineFlow({
   name: 'orders:complex',
   schema: z.object({ orderId: z.string() }),
-  flow: (input) => [
+  flow: input => [
     {
       id: 'validate',
-      job: validateJob,  // Direct reference to job definition
+      job: validateJob, // Direct reference to job definition
       data: input,
     },
     {
@@ -694,8 +706,8 @@ const orderFlow = defineFlow({
       job: notifyJob,
       data: input,
       dependsOn: ['process'],
-    }
-  ]
+    },
+  ],
 });
 ```
 
@@ -729,9 +741,11 @@ Create a queue instance for managing jobs, schedules, and flows.
 Create a programmatic API for managing jobs and queues.
 
 **Parameters:**
+
 - `definition: JobDefinition<TInput, TOutput>` - Job definition created by `defineJob`
 
 **Returns:** Object with methods:
+
 - `add(name, data, options?)` - Add a job to the queue
 - `getJob(jobId)` - Get job status by ID
 - `getJobs(state, options?)` - Get multiple jobs by state
@@ -745,6 +759,7 @@ Create a programmatic API for managing jobs and queues.
 - `getQueue()` - Get underlying BullMQ queue
 
 **Similar APIs:**
+
 - `createScheduleApi(definition)` - For schedule definitions
 - `createFlowApi(definition)` - For flow definitions
 
@@ -753,9 +768,11 @@ Create a programmatic API for managing jobs and queues.
 Create a programmatic API for managing distributed flows.
 
 **Parameters:**
+
 - `definition: FlowDefinition<TInput, TJobs>` - Flow definition created by `defineFlow`
 
 **Returns:** Object with methods:
+
 - `add(flowId, data, options?)` - Add a new flow to the queue
   - Validates input data
   - Builds the flow tree
@@ -764,13 +781,14 @@ Create a programmatic API for managing distributed flows.
 - `getFlowProducer()` - Get underlying BullMQ FlowProducer instance
 
 **Example:**
+
 ```typescript
 const flowApi = createFlowApi(orderFlow);
 
 // Add a flow
 const flow = await flowApi.add('order-123', {
   orderId: '123',
-  amount: 99.99
+  amount: 99.99,
 });
 
 // Get flow status with all children
@@ -790,16 +808,19 @@ The `ctx` parameter provided to handlers includes:
 ### Jobs vs Schedules vs Flows
 
 **Use Jobs when:**
+
 - Processing on-demand, event-driven tasks
 - Each task is independent
 - Examples: Send email, process payment, resize image
 
 **Use Schedules when:**
+
 - Running tasks on a recurring schedule
 - Tasks need to run at specific times or intervals
 - Examples: Daily reports, hourly health checks, weekly cleanup
 
 **Use Flows when:**
+
 - Complex job dependencies (parent-child relationships)
 - Steps need independent retry logic
 - Steps should be distributed across different workers/queues
@@ -815,13 +836,13 @@ Use the pattern `featureName:jobType` for job names:
 
 ```typescript
 // Good
-'notifications:send-email'
-'orders:process'
-'reports:generate-daily'
+'notifications:send-email';
+'orders:process';
+'reports:generate-daily';
 
 // Avoid
-'sendEmail'
-'processOrder'
+'sendEmail';
+'processOrder';
 ```
 
 ### Error Handling
@@ -841,7 +862,7 @@ handler: async (data, ctx) => {
     // Network errors - will be retried
     throw error;
   }
-}
+};
 ```
 
 ### Resource Management
@@ -865,7 +886,7 @@ process.on('SIGINT', async () => {
 Test job handlers independently of the queue infrastructure:
 
 ```typescript
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 describe('sendEmail job', () => {
   it('should send email successfully', async () => {
@@ -894,19 +915,19 @@ describe('sendEmail job', () => {
 
 `@arki/queue` draws inspiration from Convex's excellent API design:
 
-| Feature | Convex | @arki/queue |
-|---------|--------|-------------|
-| Runtime schedule management | ✅ | ✅ |
-| Cron schedules | ✅ | ✅ |
-| Interval schedules | ✅ | ✅ |
-| Workpool (parallelism control) | ✅ | ✅ (via `maxParallelism`) |
-| Distributed workflows | ❌ | ✅ (via `defineFlow`) |
-| Step-based retry | ✅ | ✅ |
-| Independent job retry | ❌ | ✅ (in flows) |
-| Declarative API | ✅ | ✅ |
-| UI Dashboard | ✅ | ✅ (via Bull Board) |
-| Self-hosted | ❌ | ✅ |
-| Built on Redis | ❌ | ✅ |
+| Feature                        | Convex | @arki/queue               |
+| ------------------------------ | ------ | ------------------------- |
+| Runtime schedule management    | ✅     | ✅                        |
+| Cron schedules                 | ✅     | ✅                        |
+| Interval schedules             | ✅     | ✅                        |
+| Workpool (parallelism control) | ✅     | ✅ (via `maxParallelism`) |
+| Distributed workflows          | ❌     | ✅ (via `defineFlow`)     |
+| Step-based retry               | ✅     | ✅                        |
+| Independent job retry          | ❌     | ✅ (in flows)             |
+| Declarative API                | ✅     | ✅                        |
+| UI Dashboard                   | ✅     | ✅ (via Bull Board)       |
+| Self-hosted                    | ❌     | ✅                        |
+| Built on Redis                 | ❌     | ✅                        |
 
 ## License
 
