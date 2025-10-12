@@ -24,7 +24,7 @@ pnpm add @arki/queue bullmq ioredis zod
 ```typescript
 import { z } from 'zod';
 
-import { createQueue, defineFlow, defineJob, defineSchedule } from '@arki/queue';
+import { buildFlow, createQueue, defineFlow, defineJob, defineSchedule } from '@arki/queue';
 
 // 1. Define jobs for the flow
 export const validateOrder = defineJob({
@@ -484,6 +484,146 @@ flow: (jobs, input) => [
 ]
 ```
 
+### Flow API: Type-Safe Dependency Validation
+
+`@arki/queue` provides two APIs for defining flows, both with full type-safe dependency validation:
+
+#### API Comparison
+
+| Feature                       | `defineFlow`      | `buildFlow` ⭐ **RECOMMENDED** |
+| ----------------------------- | ----------------- | ------------------------------ |
+| **Requires `as const`**       | ✅ Yes            | ❌ No                          |
+| **Type-safe dependencies**    | ✅ Yes            | ✅ Yes                         |
+| **Autocomplete for step IDs** | ✅ Yes            | ✅ Yes                         |
+| **API Style**                 | Declarative array | Fluent/builder pattern         |
+| **Prevents duplicate IDs**    | ❌ No             | ✅ Yes (compile-time)          |
+| **Readability**               | Good              | Excellent                      |
+
+#### Option 1: `defineFlow` (Array API)
+
+The array-based API requires `as const` annotation for type safety:
+
+```typescript
+import { defineFlow } from '@arki/queue';
+
+// ⚠️ MUST use `as const` for type-safe dependency validation
+const orderFlow = defineFlow({
+  name: 'order:process-flow',
+  inputSchema: z.object({ orderId: z.string() }),
+  flow: input =>
+    [
+      {
+        id: 'validate',
+        job: validateJob,
+        data: input,
+      },
+      {
+        id: 'process',
+        job: processJob,
+        data: input,
+        dependsOn: ['validate'], // ✅ Type-safe with `as const`
+      },
+    ] as const, // ⚠️ Required for type safety
+});
+```
+
+**Without `as const`:** Invalid dependencies won't be caught at compile time!
+
+#### Option 2: `buildFlow` (Builder API) ⭐ **RECOMMENDED**
+
+The builder API provides type safety WITHOUT requiring `as const`:
+
+```typescript
+import { buildFlow } from '@arki/queue';
+
+// ✅ No `as const` needed - type-safe by default!
+const orderFlow = buildFlow('order:process-flow', z.object({ orderId: z.string() }))
+  .step('validate', {
+    job: validateJob,
+    data: input => input,
+  })
+  .step('process', {
+    job: processJob,
+    data: input => input,
+    dependsOn: ['validate'], // ✅ Automatically type-safe! Autocomplete works
+  })
+  .build();
+```
+
+**Why use `buildFlow`:**
+
+- ✅ **No `as const` required** - One less thing to remember
+- ✅ **Better IDE experience** - Autocomplete guides you through the API
+- ✅ **Prevents duplicate step IDs** at compile time
+- ✅ **Self-documenting** - Method chaining makes flow structure clear
+- ✅ **Safer by default** - Can't forget type safety annotations
+
+**Complex ETL Example with `buildFlow`:**
+
+```typescript
+const etlFlow = buildFlow('data:etl-pipeline', z.object({ sourceId: z.string() }))
+  .step('extract', {
+    job: extractJob,
+    data: input => ({ sourceId: input.sourceId }),
+  })
+  // Parallel transformations
+  .step('transform-a', {
+    job: transformAJob,
+    data: () => ({ type: 'A' }),
+    dependsOn: ['extract'],
+  })
+  .step('transform-b', {
+    job: transformBJob,
+    data: () => ({ type: 'B' }),
+    dependsOn: ['extract'],
+  })
+  .step('transform-c', {
+    job: transformCJob,
+    data: () => ({ type: 'C' }),
+    dependsOn: ['extract'],
+  })
+  // Fan-in: wait for all transforms
+  .step('load', {
+    job: loadJob,
+    data: () => ({}),
+    dependsOn: ['transform-a', 'transform-b', 'transform-c'],
+  })
+  .build();
+```
+
+**Migration from `defineFlow` to `buildFlow`:**
+
+```typescript
+// Before (defineFlow)
+const flow = defineFlow({
+  name: 'my-flow',
+  inputSchema: mySchema,
+  flow: input =>
+    [
+      { id: 'step1', job: job1, data: input },
+      { id: 'step2', job: job2, data: input, dependsOn: ['step1'] },
+    ] as const,
+  options: {
+    /* ... */
+  },
+});
+
+// After (buildFlow)
+const flow = buildFlow('my-flow', mySchema, {
+  /* options */
+})
+  .step('step1', {
+    job: job1,
+    data: input => input,
+  })
+  .step('step2', {
+    job: job2,
+    data: input => input,
+    dependsOn: ['step1'],
+  })
+  .build();
+```
+
 ## Bull Board UI Integration
 
 `@arki/queue` includes built-in support for Bull Board, a UI dashboard for monitoring and managing your queues.
@@ -655,20 +795,59 @@ Define a scheduled job (cron or interval).
 
 **Returns:** `ScheduleDefinition<TInput, TOutput>`
 
-### `defineFlow<TInput>(config)`
+### `defineFlow<TInput>(config)` (Array API)
 
-Define a distributed workflow using BullMQ's FlowProducer.
+Define a distributed workflow using BullMQ's FlowProducer with array-based syntax.
+
+**⚠️ Note:** Requires `as const` annotation for type-safe dependency validation. Consider using `buildFlow` for better type safety without `as const`.
 
 **Parameters:**
 
 - `name: string` - Unique flow name
-- `schema: ZodSchema<TInput>` - Zod schema for input validation
+- `inputSchema: ZodSchema<TInput>` - Zod schema for input validation
 - `flow: (input: TInput) => FlowStep[]` - Function that returns a flat array of steps with dependencies. Reference job definitions directly in the steps.
 - `options?` - Flow options:
   - `defaultJobOptions?: Partial<JobsOptions>` - Default options for all jobs in the flow
   - `prefix?: string` - Key prefix for flow IDs
 
 **Returns:** `FlowDefinition<TInput>`
+
+### `buildFlow<TInput>(name, inputSchema, options?)` (Builder API) ⭐ **RECOMMENDED**
+
+Create a flow builder for type-safe flow definition without requiring `as const`.
+
+**Parameters:**
+
+- `name: string` - Unique flow name
+- `inputSchema: ZodSchema<TInput>` - Zod schema for input validation
+- `options?` - Flow options (same as `defineFlow`)
+
+**Returns:** `FlowBuilder<TInput>` with methods:
+
+- `.step<TId>(id, config)` - Add a step to the flow
+  - `id: string` - Step identifier (must be unique)
+  - `config.job: JobDefinition` - Job definition to execute
+  - `config.data: (input: TInput) => unknown` - Function to derive step data from flow input
+  - `config.queueName?: string` - Optional custom queue name
+  - `config.opts?: JobsOptions` - Optional job-specific options
+  - `config.dependsOn?: string[]` - Array of step IDs to wait for (type-safe!)
+- `.build()` - Build the final flow definition
+
+**Example:**
+
+```typescript
+const flow = buildFlow('my-flow', inputSchema)
+  .step('validate', {
+    job: validateJob,
+    data: input => input,
+  })
+  .step('process', {
+    job: processJob,
+    data: input => input,
+    dependsOn: ['validate'], // ✅ Type-safe without as const!
+  })
+  .build();
+```
 
 **FlowStep Structure:**
 
