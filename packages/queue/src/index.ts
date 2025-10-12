@@ -12,7 +12,7 @@
  * // Define a job
  * export const sendEmail = defineJob({
  *   name: 'notifications:send-email',
- *   schema: z.object({
+ *   inputSchema: z.object({
  *     to: z.string().email(),
  *     subject: z.string(),
  *     body: z.string(),
@@ -30,7 +30,7 @@
  *     type: 'cron',
  *     pattern: '0 2 * * *',
  *   },
- *   schema: z.object({}),
+ *   inputSchema: z.object({}),
  *   handler: async (data, ctx) => {
  *     // Cleanup logic
  *     return { cleaned: true };
@@ -40,7 +40,7 @@
  * // Define a flow
  * export const processOrderFlow = defineFlow({
  *   name: 'orders:process-flow',
- *   schema: z.object({
+ *   inputSchema: z.object({
  *     orderId: z.string(),
  *   }),
  *   flow: (input) => [

@@ -91,7 +91,7 @@ export function createJobApi<TInput, TOutput>(definition: JobDefinition<TInput, 
     async getJobs(
       state: JobState | JobState[],
       options?: { start?: number; end?: number },
-    ): Promise<Array<JobInfo<TInput, TOutput>>> {
+    ): Promise<JobInfo<TInput, TOutput>[]> {
       const states = Array.isArray(state) ? state : [state];
       const { start = 0, end = 10 } = options || {};
 
@@ -312,7 +312,7 @@ function buildFlowTree<TStepId extends string>(
       // Check if this step is the "last" dependency for the child
       // (i.e., all other dependencies are ancestors of this step)
       // For simplicity, we'll use a heuristic: if this step is the first dependency listed, add the child here
-      if (childStep.dependsOn[childStep.dependsOn.length - 1] === stepId) {
+      if (childStep.dependsOn.at(-1) === stepId) {
         validChildren.push(childId);
       }
     }
@@ -389,7 +389,7 @@ export function createFlowApi<TInput, TStepId extends string = string>(definitio
         children: flowTree.children,
         opts: {
           ...definition.options?.defaultJobOptions,
-          ...(flowTree.opts || {}),
+          ...flowTree.opts,
           ...options,
           jobId: flowId,
         },
