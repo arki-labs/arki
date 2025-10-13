@@ -35,7 +35,7 @@ import type {
   QueueBuilder,
   ScheduleBuilderFactory,
 } from './types/builder.ts';
-import type { JobContext } from './types/job.ts';
+import type { JobContext } from './types/index.ts';
 import type { JobMiddleware, MiddlewareFunction } from './types/middleware.ts';
 import type { DataTransformer, QueueConfig, QueueMeta } from './types/queue.ts';
 
