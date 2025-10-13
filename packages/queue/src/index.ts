@@ -103,6 +103,7 @@ export { BullMQAdapter, createBoard, HonoAdapter } from './create-board.ts';
 
 // Type exports
 export type {
+  BackoffStrategy,
   FlowDefinition,
   JobBuilderChain,
   JobBuilderDef,
@@ -121,3 +122,6 @@ export type {
 
 // Constants
 export { QUEUE_PRIORITIES } from './types/index.ts';
+
+// Retry strategies
+export { COMMON_RETRY_CONFIGS, createBackoffStrategy } from './retry-strategies.ts';

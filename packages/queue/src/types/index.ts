@@ -21,7 +21,15 @@ export type {
 
 // Job types
 export { QUEUE_PRIORITIES } from './job.ts';
-export type { JobContext, JobDefinition, JobHandler, JobOptions, QueuePriority, RetryConfig } from './job.ts';
+export type {
+  BackoffStrategy,
+  JobContext,
+  JobDefinition,
+  JobHandler,
+  JobOptions,
+  QueuePriority,
+  RetryConfig,
+} from './job.ts';
 
 // Middleware types
 export type { ComputeFinalContext, JobMiddleware, MiddlewareChainContext, MiddlewareContext, MiddlewareFunction, MiddlewareResult } from './middleware.ts';

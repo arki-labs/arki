@@ -16,6 +16,7 @@ import type { z } from 'zod/v4';
 import type { InternalFlowDefinition } from './flow-builder.ts';
 import { createJobContext, executeMiddlewareChain } from './middleware.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
+import { getWorkerBackoffStrategy, toBullMQBackoff } from './retry-strategies.ts';
 import type { FlowDefinition, QueueInstance, ScheduleDefinition } from './types/builder.ts';
 import type { JobDefinition, JobHandler } from './types/job.ts';
 import type { QueueMeta } from './types/queue.ts';
@@ -87,15 +88,12 @@ export function createQueueInstance<TContext>(
       prefix: keyPrefix,
       defaultJobOptions: {
         attempts: internal.options?.retry?.attempts ?? 3,
-        backoff:
-          internal.options?.retry?.backoff ?
-            {
-              type: internal.options.retry.backoff.type,
-              delay: internal.options.retry.backoff.delay,
-            }
-          : { type: 'exponential', delay: 1000 },
+        backoff: toBullMQBackoff(internal.options?.retry),
       },
     });
+
+    // Get custom backoff strategy if needed
+    const backoffStrategy = getWorkerBackoffStrategy(internal.options?.retry);
 
     // Create BullMQ worker
     const worker = new Worker(
@@ -124,6 +122,11 @@ export function createQueueInstance<TContext>(
         connection: connectionConfig,
         prefix: keyPrefix,
         concurrency: internal.options?.maxParallelism ?? 5,
+        ...(backoffStrategy && {
+          settings: {
+            backoffStrategy,
+          },
+        }),
       },
     );
 
@@ -272,7 +275,7 @@ export function createQueueInstance<TContext>(
       // Check if it's a definition
       if (typeof value === 'object') {
         if ('_type' in value) {
-          // It's a definition
+        // It's a definition
           switch (value._type) {
           case 'job': {
             registerJobDefinition(value as JobDefinition<unknown, unknown, TContext>);
