@@ -10,7 +10,7 @@ import type { FlowDefinition, FlowOptions, FlowStep, JobDefinition } from './typ
  * @template TStepIds - Union type of all step IDs defined so far
  */
 export class FlowBuilder<TInput, TStepIds extends string = never> {
-  private steps: Array<FlowStep<unknown, string>> = [];
+  private steps: FlowStep<unknown, string>[] = [];
 
   constructor(
     private readonly name: string,

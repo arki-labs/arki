@@ -1,6 +1,6 @@
 import type { z } from 'zod/v4';
 
-import type { FlowDefinition, FlowOptions, FlowStep } from './types/index.ts';
+import type { FlowDefinition, FlowOptions, FlowStep, JobDefinition } from './types/index.ts';
 
 /**
  * Helper type to extract step IDs from a steps array
@@ -12,7 +12,7 @@ type ExtractStepIds<T extends readonly FlowStep<unknown, string>[]> = T[number][
  */
 type ValidatedFlowStep<TInput, TValidIds extends string> = {
   id: TValidIds;
-  job: import('./types/index.ts').JobDefinition<any, any>;
+  job: JobDefinition<any, any>;
   queueName?: string;
   data: TInput;
   opts?: import('bullmq').JobsOptions;

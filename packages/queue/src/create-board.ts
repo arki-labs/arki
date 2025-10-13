@@ -1,8 +1,8 @@
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { HonoAdapter } from '@bull-board/hono';
-import type { MiddlewareHandler } from 'hono';
 import type { Queue } from 'bullmq';
+import type { MiddlewareHandler } from 'hono';
 
 /**
  * Create a Bull Board UI for monitoring queues
@@ -43,7 +43,7 @@ export function createBoard(options: {
   /**
    * Array of BullMQ Queue instances to monitor
    */
-  queues: Array<Queue | undefined>;
+  queues: (Queue | undefined)[];
 
   /**
    * Base path for the UI (default: '/admin/queues')
@@ -67,7 +67,7 @@ export function createBoard(options: {
     /**
      * Misc UI options
      */
-    miscLinks?: Array<{ text: string; url: string }>;
+    miscLinks?: { text: string; url: string }[];
   };
 }) {
   const { queues, basePath = '/admin/queues', uiOptions } = options;
@@ -125,4 +125,7 @@ export function createBoard(options: {
 /**
  * Create Bull Board adapters for different frameworks
  */
-export { BullMQAdapter, HonoAdapter };
+
+
+export { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
+export { HonoAdapter } from '@bull-board/hono';

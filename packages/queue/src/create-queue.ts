@@ -143,7 +143,7 @@ export function createQueue<TDeps = Record<string, never>>(
         const ctx = createJobContext(job);
 
         // Execute handler
-        const result = await definition.handler(validatedData, ctx);
+        const result = await definition.handler(validatedData, ctx as unknown as JobContext<TJobDeps>);
 
         // Call onComplete callback if provided
         if (definition.options?.onComplete) {
@@ -162,9 +162,9 @@ export function createQueue<TDeps = Record<string, never>>(
     );
 
     // Set up error handler
-    worker.on('failed', async (job: BullMQJob<TInput, TOutput> | undefined, error: Error) => {
+    worker.on('failed', (job: BullMQJob<TInput, TOutput> | undefined, error: Error) => {
       if (job && definition.options?.onError) {
-        await definition.options.onError(job, error);
+        void definition.options.onError(job, error);
       }
     });
 
@@ -207,7 +207,7 @@ export function createQueue<TDeps = Record<string, never>>(
         const ctx = createJobContext(job);
 
         // Execute handler
-        return await definition.handler(validatedData, ctx);
+        return await definition.handler(validatedData, ctx as unknown as JobContext<TJobDeps>);
       },
       {
         connection: getConnection(),
@@ -263,7 +263,7 @@ export function createQueue<TDeps = Record<string, never>>(
     const flowSteps = definition.flow(dummyInput);
 
     // Collect unique job definitions
-    const uniqueJobs = new Set<JobDefinition<any, any>>();
+    const uniqueJobs = new Set<JobDefinition<unknown, unknown>>();
     for (const step of flowSteps) {
       uniqueJobs.add(step.job);
     }
@@ -290,11 +290,13 @@ export function createQueue<TDeps = Record<string, never>>(
   /**
    * Start all registered workers
    */
-  async function start(): Promise<void> {
+  function start(): Promise<void> {
     console.log('✓ Queue infrastructure started');
     console.log(`  - ${jobDefinitions.size} job(s) registered`);
     console.log(`  - ${scheduleDefinitions.size} schedule(s) registered`);
     console.log(`  - ${flowDefinitions.size} flow(s) registered`);
+
+    return Promise.resolve();
   }
 
   /**
@@ -337,7 +339,9 @@ export function createQueue<TDeps = Record<string, never>>(
     /**
      * Register a new schedule at runtime
      */
-    async register<TInput, TOutput>(definition: ScheduleDefinition<TInput, TOutput>): Promise<string> {
+    async register<TInput, TOutput, TDeps = Record<string, never>>(
+      definition: ScheduleDefinition<TInput, TOutput, TDeps>,
+    ): Promise<string> {
       await registerSchedule(definition);
       return definition.name;
     },
@@ -420,7 +424,8 @@ export function createQueue<TDeps = Record<string, never>>(
       const queueIndex = queues.indexOf(queue);
       if (queueIndex !== -1) queues.splice(queueIndex, 1);
 
-      // Remove from definitions
+      // Remove from definitions (this is a Map, not a database operation)
+      // eslint-disable-next-line drizzle/enforce-delete-with-where
       scheduleDefinitions.delete(name);
     },
   };
