@@ -162,6 +162,174 @@ export const sendEmail = defineJob({
 });
 ```
 
+### Dependency Injection
+
+Inject custom dependencies (like repositories, services, or database clients) into your job handlers for better testability and cleaner code:
+
+```typescript
+import { createQueue, defineJob } from '@arki/queue';
+import { z } from 'zod';
+
+// 1. Define your dependencies type
+type QueueDependencies = {
+  db: Database;
+  repo: Repositories;
+  email: EmailService;
+  logger: Logger;
+};
+
+// 2. Define jobs with typed dependencies
+export const sendWelcomeEmail = defineJob<
+  { userId: string; email: string },
+  { sent: boolean },
+  QueueDependencies // ← Specify dependencies as third generic parameter
+>({
+  name: 'users:send-welcome-email',
+  inputSchema: z.object({
+    userId: z.string(),
+    email: z.string().email(),
+  }),
+  handler: async (data, ctx) => {
+    // ctx now has access to db, repo, email, logger with full type safety
+    await ctx.logger.info(`Sending welcome email to ${data.email}`);
+
+    const user = await ctx.repo.users.findById(data.userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    await ctx.email.send({
+      to: data.email,
+      subject: 'Welcome!',
+      template: 'welcome',
+      data: { userName: user.name },
+    });
+
+    await ctx.repo.notifications.logEmailSent(data.userId, 'welcome');
+
+    return { sent: true };
+  },
+});
+
+// 3. Create queue with dependencies
+const queue = createQueue<QueueDependencies>({
+  connection: env.REDIS_URL,
+  keyPrefix: 'myapp:',
+  dependencies: {
+    db: database,
+    repo: repositories,
+    email: emailService,
+    logger: logger,
+  },
+});
+
+// 4. Register jobs - dependencies are automatically injected
+queue.registerJob(sendWelcomeEmail);
+await queue.start();
+```
+
+**Benefits:**
+
+- **Type Safety**: Full TypeScript support for all dependencies in job handlers
+- **Testability**: Easy to mock dependencies in tests
+- **Separation of Concerns**: Keep job logic separate from infrastructure setup
+- **Flexibility**: Different queue instances can use different dependencies
+
+**Example with schedules:**
+
+```typescript
+type ScheduleDependencies = {
+  db: Database;
+  analytics: AnalyticsService;
+};
+
+export const dailyReport = defineSchedule<
+  { reportType: string },
+  { generated: boolean },
+  ScheduleDependencies
+>({
+  name: 'reports:daily',
+  schedule: {
+    type: 'cron',
+    pattern: '0 9 * * *',
+  },
+  inputSchema: z.object({
+    reportType: z.string().default('daily'),
+  }),
+  handler: async (data, ctx) => {
+    // Access dependencies with full type safety
+    const stats = await ctx.analytics.getDailyStats();
+    await ctx.db.reports.create({
+      type: data.reportType,
+      data: stats,
+    });
+
+    return { generated: true };
+  },
+});
+
+const queue = createQueue<ScheduleDependencies>({
+  connection: env.REDIS_URL,
+  dependencies: {
+    db: database,
+    analytics: analyticsService,
+  },
+});
+
+queue.registerSchedule(dailyReport);
+```
+
+**Testing with dependencies:**
+
+```typescript
+import { describe, expect, it, vi } from 'vitest';
+
+describe('sendWelcomeEmail job', () => {
+  it('should send email successfully', async () => {
+    // Create mock dependencies
+    const mockDependencies = {
+      db: {} as Database,
+      repo: {
+        users: {
+          findById: vi.fn().mockResolvedValue({ id: '1', name: 'John', email: 'john@example.com' }),
+        },
+        notifications: {
+          logEmailSent: vi.fn(),
+        },
+      },
+      email: {
+        send: vi.fn().mockResolvedValue({ id: 'email-123' }),
+      },
+      logger: {
+        info: vi.fn(),
+      },
+    } as unknown as QueueDependencies;
+
+    // Create mock context
+    const mockCtx = {
+      updateProgress: vi.fn(),
+      log: vi.fn(),
+      job: {} as any,
+      ...mockDependencies, // Spread dependencies into context
+    };
+
+    // Test the handler
+    const result = await sendWelcomeEmail.handler(
+      {
+        userId: '1',
+        email: 'john@example.com',
+      },
+      mockCtx,
+    );
+
+    expect(result.sent).toBe(true);
+    expect(mockDependencies.repo.users.findById).toHaveBeenCalledWith('1');
+    expect(mockDependencies.email.send).toHaveBeenCalled();
+    expect(mockDependencies.repo.notifications.logEmailSent).toHaveBeenCalledWith('1', 'welcome');
+  });
+});
+```
+
 ### Programmatic Job API
 
 Use `createJobApi` for a type-safe API to manage jobs:
@@ -758,15 +926,21 @@ await queue.schedules.delete('dynamic:cleanup');
 
 ## API Reference
 
-### `defineJob<TInput, TOutput>(config)`
+### `defineJob<TInput, TOutput, TDeps>(config)`
 
-Define an on-demand job.
+Define an on-demand job with optional dependency injection.
+
+**Type Parameters:**
+
+- `TInput` - Type of input data for the job
+- `TOutput` - Type of output/result from the job
+- `TDeps` - Custom dependencies available in context (default: `Record<string, never>`)
 
 **Parameters:**
 
 - `name: string` - Unique job name (use pattern: `featureName:jobType`)
 - `inputSchema: ZodSchema<TInput>` - Zod schema for input validation
-- `handler: (data: TInput, ctx: JobContext) => Promise<TOutput>` - Job handler function
+- `handler: (data: TInput, ctx: JobContext<TDeps>) => Promise<TOutput>` - Job handler function with typed context
 - `options?` - Job options:
   - `maxParallelism?: number` - Max concurrent jobs
   - `retry?: RetryConfig` - Retry configuration
@@ -775,11 +949,33 @@ Define an on-demand job.
   - `bullmqOptions?: Partial<JobsOptions>` - Additional BullMQ options
   - `workerOptions?: Partial<WorkerOptions>` - Additional worker options
 
-**Returns:** `JobDefinition<TInput, TOutput>`
+**Returns:** `JobDefinition<TInput, TOutput, TDeps>`
 
-### `defineSchedule<TInput, TOutput>(config)`
+**Example:**
 
-Define a scheduled job (cron or interval).
+```typescript
+type MyDeps = { db: Database; email: EmailService };
+
+const job = defineJob<MyInput, MyOutput, MyDeps>({
+  name: 'my-job',
+  inputSchema: inputSchema,
+  handler: async (data, ctx) => {
+    // ctx.db and ctx.email are available with full type safety
+    await ctx.email.send(data);
+    return { success: true };
+  },
+});
+```
+
+### `defineSchedule<TInput, TOutput, TDeps>(config)`
+
+Define a scheduled job (cron or interval) with optional dependency injection.
+
+**Type Parameters:**
+
+- `TInput` - Type of input data for the schedule
+- `TOutput` - Type of output/result from the schedule
+- `TDeps` - Custom dependencies available in context (default: `Record<string, never>`)
 
 **Parameters:**
 
@@ -788,12 +984,30 @@ Define a scheduled job (cron or interval).
   - Cron: `{ type: 'cron', pattern: string, timezone?: string }`
   - Interval: `{ type: 'interval', milliseconds: number }`
 - `inputSchema: ZodSchema<TInput>` - Zod schema for input validation
-- `handler: (data: TInput, ctx: JobContext) => Promise<TOutput>` - Handler function
+- `handler: (data: TInput, ctx: JobContext<TDeps>) => Promise<TOutput>` - Handler function with typed context
 - `options?` - Schedule options:
   - `defaultData?: TInput` - Default data for scheduled jobs
-  - `jobOptions?: JobOptions<TInput, TOutput>` - Job options
+  - `jobOptions?: JobOptions<TInput, TOutput, TDeps>` - Job options
 
-**Returns:** `ScheduleDefinition<TInput, TOutput>`
+**Returns:** `ScheduleDefinition<TInput, TOutput, TDeps>`
+
+**Example:**
+
+```typescript
+type MyDeps = { db: Database; analytics: AnalyticsService };
+
+const schedule = defineSchedule<MyInput, MyOutput, MyDeps>({
+  name: 'daily-report',
+  schedule: { type: 'cron', pattern: '0 9 * * *' },
+  inputSchema: inputSchema,
+  handler: async (data, ctx) => {
+    // ctx.db and ctx.analytics are available with full type safety
+    const stats = await ctx.analytics.getStats();
+    await ctx.db.reports.create(stats);
+    return { generated: true };
+  },
+});
+```
 
 ### `defineFlow<TInput>(config)` (Array API)
 
@@ -890,9 +1104,13 @@ const orderFlow = defineFlow({
 });
 ```
 
-### `createQueue(options)`
+### `createQueue<TDeps>(options)`
 
-Create a queue instance for managing jobs, schedules, and flows.
+Create a queue instance for managing jobs, schedules, and flows with optional dependency injection.
+
+**Type Parameters:**
+
+- `TDeps` - Custom dependencies to inject into job contexts (default: `Record<string, never>`)
 
 **Parameters:**
 
@@ -900,8 +1118,33 @@ Create a queue instance for managing jobs, schedules, and flows.
 - `keyPrefix?: string` - Redis key prefix (default: `'queue:'`)
 - `defaultJobOptions?: Partial<JobsOptions>` - Default options for all jobs
 - `defaultWorkerOptions?: Partial<WorkerOptions>` - Default options for all workers
+- `dependencies?: TDeps` - Custom dependencies to inject into job handler contexts
 
 **Returns:** `QueueInstance`
+
+**Example:**
+
+```typescript
+type QueueDeps = {
+  db: Database;
+  repo: Repositories;
+  email: EmailService;
+};
+
+const queue = createQueue<QueueDeps>({
+  connection: env.REDIS_URL,
+  keyPrefix: 'myapp:',
+  dependencies: {
+    db: database,
+    repo: repositories,
+    email: emailService,
+  },
+});
+
+// All registered jobs will have access to db, repo, and email in their context
+queue.registerJob(myJob);
+await queue.start();
+```
 
 **QueueInstance Methods:**
 

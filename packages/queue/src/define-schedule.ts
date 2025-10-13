@@ -5,7 +5,11 @@ import type { JobHandler, ScheduleConfig, ScheduleDefinition, ScheduleOptions } 
 /**
  * Define a scheduled job (cron or interval)
  *
- * @example Cron-based schedule
+ * @template TInput - Type of input data for the schedule
+ * @template TOutput - Type of output/result from the schedule
+ * @template TDeps - Custom dependencies available in context (default: no dependencies)
+ *
+ * @example Cron-based schedule without dependencies
  * ```typescript
  * export const dailyCleanup = defineSchedule({
  *   name: 'maintenance:daily-cleanup',
@@ -18,15 +22,20 @@ import type { JobHandler, ScheduleConfig, ScheduleDefinition, ScheduleOptions } 
  *     dryRun: z.boolean().default(false),
  *   }),
  *   handler: async (data, ctx) => {
- *     await ctx.repositories.cleanup.removeOldData();
+ *     await ctx.log('Starting daily cleanup');
  *     return { cleaned: true };
  *   },
  * });
  * ```
  *
- * @example Interval-based schedule
+ * @example Interval-based schedule with typed dependencies
  * ```typescript
- * export const healthCheck = defineSchedule({
+ * type MyDependencies = {
+ *   db: Database;
+ *   repo: Repositories;
+ * };
+ *
+ * export const healthCheck = defineSchedule<HealthInput, HealthResult, MyDependencies>({
  *   name: 'system:health-check',
  *   schedule: {
  *     type: 'interval',
@@ -34,13 +43,14 @@ import type { JobHandler, ScheduleConfig, ScheduleDefinition, ScheduleOptions } 
  *   },
  *   inputSchema: z.object({}),
  *   handler: async (data, ctx) => {
- *     const health = await checkSystemHealth();
+ *     // ctx now has access to db, repo
+ *     const health = await ctx.repo.system.checkHealth();
  *     return { healthy: health.allSystemsGo };
  *   },
  * });
  * ```
  */
-export function defineSchedule<TInput, TOutput = unknown>(config: {
+export function defineSchedule<TInput, TOutput = unknown, TDeps = Record<string, never>>(config: {
   /**
    * Unique name for this schedule (e.g., 'maintenance:daily-cleanup')
    * Use the pattern: featureName:jobType
@@ -60,13 +70,13 @@ export function defineSchedule<TInput, TOutput = unknown>(config: {
   /**
    * Handler function to process the scheduled job
    */
-  handler: JobHandler<TInput, TOutput>;
+  handler: JobHandler<TInput, TOutput, TDeps>;
 
   /**
    * Schedule options
    */
-  options?: ScheduleOptions<TInput, TOutput>;
-}): ScheduleDefinition<TInput, TOutput> {
+  options?: ScheduleOptions<TInput, TOutput, TDeps>;
+}): ScheduleDefinition<TInput, TOutput, TDeps> {
   return {
     name: config.name,
     schedule: config.schedule,

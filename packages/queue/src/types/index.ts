@@ -7,8 +7,28 @@ import type { z } from 'zod/v4';
 
 /**
  * Context provided to job handlers
+ *
+ * @template TDeps - Custom dependencies injected into the context (e.g., repositories, services)
+ *
+ * @example
+ * ```typescript
+ * type MyDependencies = {
+ *   db: Database;
+ *   repo: Repositories;
+ *   email: EmailService;
+ * };
+ *
+ * const ctx: JobContext<MyDependencies> = {
+ *   updateProgress: async (progress) => { ... },
+ *   log: async (message) => { ... },
+ *   job: bullmqJob,
+ *   db: database,        // Injected dependency
+ *   repo: repositories,  // Injected dependency
+ *   email: emailService, // Injected dependency
+ * };
+ * ```
  */
-export type JobContext = {
+export type JobContext<TDeps = Record<string, never>> = {
   /**
    * Update job progress (0-100)
    */
@@ -23,12 +43,19 @@ export type JobContext = {
    * The underlying BullMQ job instance
    */
   job: BullMQJob;
-};
+} & TDeps;
 
 /**
  * Handler function for processing jobs
+ *
+ * @template TInput - Type of input data for the job
+ * @template TOutput - Type of output/result from the job
+ * @template TDeps - Custom dependencies available in context
  */
-export type JobHandler<TInput, TOutput> = (data: TInput, ctx: JobContext) => Promise<TOutput>;
+export type JobHandler<TInput, TOutput, TDeps = Record<string, never>> = (
+  data: TInput,
+  ctx: JobContext<TDeps>,
+) => Promise<TOutput>;
 
 /**
  * Retry configuration
@@ -56,11 +83,14 @@ export type RetryConfig = {
 
 /**
  * Options for job definitions
+ *
+ * @template TInput - Type of input data for the job
+ * @template TOutput - Type of output/result from the job
+ * @template TDeps - Custom dependencies available in context
  */
-export type JobOptions<TInput, TOutput> = {
+export type JobOptions<TInput, TOutput, TDeps = Record<string, never>> = {
   /**
    * Maximum number of jobs to process concurrently
-   * Inspired by Convex workpool's maxParallelism
    */
   maxParallelism?: number;
 
@@ -71,7 +101,6 @@ export type JobOptions<TInput, TOutput> = {
 
   /**
    * Callback when job completes successfully
-   * Inspired by Convex workpool's onComplete
    */
   onComplete?: (job: BullMQJob<TInput, TOutput>, result: TOutput) => Promise<void>;
 
@@ -93,8 +122,12 @@ export type JobOptions<TInput, TOutput> = {
 
 /**
  * Job definition created by defineJob
+ *
+ * @template TInput - Type of input data for the job
+ * @template TOutput - Type of output/result from the job
+ * @template TDeps - Custom dependencies available in context (default: no dependencies)
  */
-export type JobDefinition<TInput, TOutput> = {
+export type JobDefinition<TInput, TOutput, TDeps = Record<string, never>> = {
   /**
    * Unique name for this job (e.g., 'notifications:send-email')
    */
@@ -108,12 +141,12 @@ export type JobDefinition<TInput, TOutput> = {
   /**
    * Handler function to process the job
    */
-  handler: JobHandler<TInput, TOutput>;
+  handler: JobHandler<TInput, TOutput, TDeps>;
 
   /**
    * Job options
    */
-  options?: JobOptions<TInput, TOutput>;
+  options?: JobOptions<TInput, TOutput, TDeps>;
 
   /**
    * Internal: BullMQ queue instance (set during initialization)
@@ -156,8 +189,12 @@ export type ScheduleConfig =
 
 /**
  * Options for scheduled jobs
+ *
+ * @template TInput - Type of input data for the scheduled job
+ * @template TOutput - Type of output/result from the scheduled job
+ * @template TDeps - Custom dependencies available in context
  */
-export type ScheduleOptions<TInput, TOutput> = {
+export type ScheduleOptions<TInput, TOutput, TDeps = Record<string, never>> = {
   /**
    * Default data to pass to the job
    */
@@ -166,13 +203,17 @@ export type ScheduleOptions<TInput, TOutput> = {
   /**
    * Additional job options
    */
-  jobOptions?: JobOptions<TInput, TOutput>;
+  jobOptions?: JobOptions<TInput, TOutput, TDeps>;
 };
 
 /**
  * Schedule definition created by defineSchedule
+ *
+ * @template TInput - Type of input data for the scheduled job
+ * @template TOutput - Type of output/result from the scheduled job
+ * @template TDeps - Custom dependencies available in context (default: no dependencies)
  */
-export type ScheduleDefinition<TInput, TOutput> = {
+export type ScheduleDefinition<TInput, TOutput, TDeps = Record<string, never>> = {
   /**
    * Unique name for this schedule (e.g., 'maintenance:daily-cleanup')
    */
@@ -191,12 +232,12 @@ export type ScheduleDefinition<TInput, TOutput> = {
   /**
    * Handler function to process the scheduled job
    */
-  handler: JobHandler<TInput, TOutput>;
+  handler: JobHandler<TInput, TOutput, TDeps>;
 
   /**
    * Schedule options
    */
-  options?: ScheduleOptions<TInput, TOutput>;
+  options?: ScheduleOptions<TInput, TOutput, TDeps>;
 
   /**
    * Internal: BullMQ queue instance (set during initialization)
@@ -363,8 +404,10 @@ export type FlowDefinition<TInput, TStepId extends string = string> = {
 
 /**
  * Options for creating a queue instance
+ *
+ * @template TDeps - Custom dependencies to inject into job contexts
  */
-export type QueueFactoryOptions = {
+export type QueueFactoryOptions<TDeps = Record<string, never>> = {
   /**
    * Redis connection string or IORedis connection options
    */
@@ -384,6 +427,24 @@ export type QueueFactoryOptions = {
    * Default worker options for all workers in this queue
    */
   defaultWorkerOptions?: Partial<WorkerOptions>;
+
+  /**
+   * Custom dependencies to inject into job context
+   * These will be available in the `ctx` parameter of job handlers
+   *
+   * @example
+   * ```typescript
+   * const queue = createQueue({
+   *   connection: 'redis://localhost:6379',
+   *   dependencies: {
+   *     db: database,
+   *     repo: repositories,
+   *     email: emailService,
+   *   },
+   * });
+   * ```
+   */
+  dependencies?: TDeps;
 };
 
 /**
@@ -393,12 +454,16 @@ export type QueueInstance = {
   /**
    * Register a job definition
    */
-  registerJob<TInput, TOutput>(definition: JobDefinition<TInput, TOutput>): void;
+  registerJob<TInput, TOutput, TDeps = Record<string, never>>(
+    definition: JobDefinition<TInput, TOutput, TDeps>,
+  ): void;
 
   /**
    * Register a schedule definition
    */
-  registerSchedule<TInput, TOutput>(definition: ScheduleDefinition<TInput, TOutput>): Promise<void>;
+  registerSchedule<TInput, TOutput, TDeps = Record<string, never>>(
+    definition: ScheduleDefinition<TInput, TOutput, TDeps>,
+  ): Promise<void>;
 
   /**
    * Register a flow definition (distributed workflow)
@@ -422,7 +487,9 @@ export type QueueInstance = {
     /**
      * Register a new schedule at runtime
      */
-    register<TInput, TOutput>(definition: ScheduleDefinition<TInput, TOutput>): Promise<string>;
+    register<TInput, TOutput, TDeps = Record<string, never>>(
+      definition: ScheduleDefinition<TInput, TOutput, TDeps>,
+    ): Promise<string>;
 
     /**
      * List all registered schedules

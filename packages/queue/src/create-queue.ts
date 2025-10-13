@@ -14,7 +14,9 @@ import type {
 /**
  * Create a queue instance for managing jobs, schedules, and flows
  *
- * @example
+ * @template TDeps - Custom dependencies to inject into job contexts
+ *
+ * @example Basic usage
  * ```typescript
  * import { createQueue } from '@arki/queue';
  * import { env } from './env';
@@ -37,9 +39,36 @@ import type {
  * // Start processing
  * await queue.start();
  * ```
+ *
+ * @example With dependency injection
+ * ```typescript
+ * import { createQueue } from '@arki/queue';
+ * import { db, repositories } from './db';
+ * import { emailService } from './services/email';
+ *
+ * type QueueDependencies = {
+ *   db: typeof db;
+ *   repo: typeof repositories;
+ *   email: typeof emailService;
+ * };
+ *
+ * const queue = createQueue<QueueDependencies>({
+ *   connection: 'redis://localhost:6379',
+ *   keyPrefix: 'myapp:',
+ *   dependencies: {
+ *     db,
+ *     repo: repositories,
+ *     email: emailService,
+ *   },
+ * });
+ *
+ * // Now all job handlers will have access to ctx.db, ctx.repo, ctx.email
+ * ```
  */
-export function createQueue(options: QueueFactoryOptions): QueueInstance {
-  const { connection, keyPrefix = 'queue:', defaultJobOptions, defaultWorkerOptions } = options;
+export function createQueue<TDeps = Record<string, never>>(
+  options: QueueFactoryOptions<TDeps>,
+): QueueInstance {
+  const { connection, keyPrefix = 'queue:', defaultJobOptions, defaultWorkerOptions, dependencies } = options;
 
   // Track registered definitions
   const jobDefinitions = new Map<string, JobDefinition<unknown, unknown>>();
@@ -60,8 +89,9 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
 
   /**
    * Create job context for handlers
+   * Injects custom dependencies into the context
    */
-  function createJobContext<TInput, TOutput>(job: BullMQJob<TInput, TOutput>): JobContext {
+  function createJobContext<TInput, TOutput>(job: BullMQJob<TInput, TOutput>): JobContext<TDeps> {
     return {
       updateProgress: async (progress: number) => {
         await job.updateProgress(progress);
@@ -70,13 +100,17 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
         await job.log(message);
       },
       job,
+      // Spread dependencies into context
+      ...(dependencies as TDeps),
     };
   }
 
   /**
    * Register a job definition
    */
-  function registerJob<TInput, TOutput>(definition: JobDefinition<TInput, TOutput>): void {
+  function registerJob<TInput, TOutput, TJobDeps = Record<string, never>>(
+    definition: JobDefinition<TInput, TOutput, TJobDeps>,
+  ): void {
     if (jobDefinitions.has(definition.name)) {
       throw new Error(`Job "${definition.name}" is already registered`);
     }
@@ -145,7 +179,9 @@ export function createQueue(options: QueueFactoryOptions): QueueInstance {
   /**
    * Register a schedule definition
    */
-  async function registerSchedule<TInput, TOutput>(definition: ScheduleDefinition<TInput, TOutput>): Promise<void> {
+  async function registerSchedule<TInput, TOutput, TJobDeps = Record<string, never>>(
+    definition: ScheduleDefinition<TInput, TOutput, TJobDeps>,
+  ): Promise<void> {
     if (scheduleDefinitions.has(definition.name)) {
       throw new Error(`Schedule "${definition.name}" is already registered`);
     }
