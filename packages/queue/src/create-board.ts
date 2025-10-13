@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/consistent-function-scoping */
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { HonoAdapter } from '@bull-board/hono';
@@ -7,16 +8,25 @@ import type { MiddlewareHandler } from 'hono';
 /**
  * Create a Bull Board UI for monitoring queues
  *
+ * This is a utility for setting up Bull Board monitoring UI for BullMQ queues.
+ * In v2.0, you'll need to access the internal BullMQ Queue instances from the
+ * queue infrastructure layer (server/workers) where they are created.
+ *
  * @example With Hono
  * ```typescript
  * import { Hono } from 'hono';
  * import { createBoard } from '@arki/queue';
+ * import { Queue } from 'bullmq';
  *
  * const app = new Hono();
  *
- * // Create board with all your queues
+ * // Create or import your BullMQ Queue instances
+ * const emailQueue = new Queue('notifications:send-email', { connection });
+ * const orderQueue = new Queue('orders:process', { connection });
+ *
+ * // Create board with your queues
  * const { adapter } = createBoard({
- *   queues: [sendEmail._queue, processOrder._queue],
+ *   queues: [emailQueue, orderQueue],
  *   basePath: '/admin/queues',
  * });
  *
@@ -28,11 +38,16 @@ import type { MiddlewareHandler } from 'hono';
  *
  * @example Direct Board Access
  * ```typescript
+ * import { Queue } from 'bullmq';
+ *
+ * const myQueue = new Queue('my-queue', { connection });
+ *
  * const { board, adapter } = createBoard({
- *   queues: [myQueue._queue],
+ *   queues: [myQueue],
  * });
  *
  * // Add queues dynamically
+ * const anotherQueue = new Queue('another-queue', { connection });
  * board.addQueue(new BullMQAdapter(anotherQueue));
  *
  * // Remove queues

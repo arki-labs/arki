@@ -1,85 +1,123 @@
 /**
- * @arki/queue - Background job processing library
+ * @arki/queue v2.0 - Background job processing library
  *
- * A declarative API for defining and managing jobs, schedules, and flows
+ * A tRPC-inspired API for defining and managing jobs, schedules, and flows
  * built on top of BullMQ and Redis.
  *
  * @example
  * ```typescript
- * import { createQueue, defineJob, defineSchedule, buildFlow } from '@arki/queue';
+ * import { initQueue } from '@arki/queue';
  * import { z } from 'zod';
  *
- * // Define jobs
- * export const validateOrderJob = defineJob({ ... });
- * export const processPaymentJob = defineJob({ ... });
- * export const updateInventoryJob = defineJob({ ... });
+ * // 1. Create context
+ * const createContext = () => ({
+ *   db: database,
+ *   repo: repositories,
+ *   kv: kvStore,
+ * });
  *
- * // Define a flow using the builder
- * export const processOrderFlow = buildFlow(
- *   'orders:process-flow',
- *   z.object({ orderId: z.string() }),
- * )
+ * // 2. Initialize queue
+ * const q = initQueue
+ *   .context<typeof createContext>()
+ *   .create({
+ *     transformer: superjson,
+ *   });
+ *
+ * // 3. Create job builders with middleware
+ * const baseJob = q.job.use(errorHandling).use(logging);
+ * const authJob = baseJob.use(authMiddleware);
+ *
+ * // 4. Define jobs
+ * const sendEmail = authJob
+ *   .name('notifications:send-email')
+ *   .input(z.object({ to: z.string().email(), subject: z.string(), body: z.string() }))
+ *   .handler(async (data, ctx) => {
+ *     // ctx has: db, repo, kv, user (from middleware)
+ *     await ctx.repo.notifications.create(data);
+ *     return { sent: true };
+ *   });
+ *
+ * // 5. Create flows
+ * const orderFlow = q.flow
+ *   .name('orders:process')
+ *   .input(z.object({ orderId: z.string() }))
  *   .step('validate', {
- *     job: validateOrderJob,
+ *     job: validateJob,
  *     data: input => ({ orderId: input.orderId }),
  *   })
  *   .step('payment', {
- *     job: processPaymentJob,
+ *     job: paymentJob,
  *     data: input => ({ orderId: input.orderId }),
  *     dependsOn: ['validate'],
  *   })
- *   .step('inventory', {
- *     job: updateInventoryJob,
- *     data: input => ({ orderId: input.orderId }),
- *     dependsOn: ['payment'],
- *   })
  *   .build();
  *
- * // Create queue instance
- * const queue = createQueue({
- *   connection: 'redis://localhost:6379',
+ * // 6. Organize with registries
+ * const jobs = q.registry({
+ *   notifications: q.registry({
+ *     email: sendEmail,
+ *   }),
  * });
  *
- * // Register definitions
- * queue.registerFlow(processOrderFlow);
- *
- * // Start processing
+ * // 7. Create and start queue
+ * const queue = q.createQueue({
+ *   connection: 'redis://localhost:6379',
+ *   createContext,
+ * });
+ * await queue.register(jobs);
  * await queue.start();
  * ```
  */
 
-// Core API
-export { createQueue } from './create-queue.ts';
-export { defineJob } from './define-job.ts';
-export { defineSchedule } from './define-schedule.ts';
-export { buildFlow, FlowBuilder } from './define-flow-builder.ts';
-export { defineFlow } from './define-flow.ts';
+// Core API - NEW v2.0
+export { initQueue } from './init.ts';
+export type { InternalScheduleDefinition } from './schedule-builder.ts';
+export type { InternalFlowDefinition } from './flow-builder.ts';
 
-// Bull Board UI
+// Middleware execution (for advanced use cases)
+export { createJobContext, executeMiddlewareChain } from './middleware.ts';
+
+// Standard middleware
+export {
+  ConsoleLogger,
+  customLoggingMiddleware,
+  customValidationMiddleware,
+  devTimingMiddleware,
+  errorHandlingMiddleware,
+  errorHandlingMiddlewareWithFormatter,
+  JobError,
+  JobValidationError,
+  loggingMiddleware,
+  outputValidationMiddleware,
+  PerformanceTracker,
+  performanceMiddleware,
+  structuredLoggingMiddleware,
+  timeoutMiddleware,
+  timingMiddleware,
+  validationMiddleware,
+} from './middleware/index.ts';
+export type { LogEntry, Logger, LogLevel } from './middleware/index.ts';
+
+// Bull Board UI (unchanged)
 export { BullMQAdapter, createBoard, HonoAdapter } from './create-board.ts';
-
-// Queue API for job/queue management
-export { createFlowApi, createJobApi, createScheduleApi } from './queue-api.ts';
-export type { FlowInfo, JobInfo, QueueStats } from './queue-api.ts';
 
 // Type exports
 export type {
   FlowDefinition,
-  FlowOptions,
-  FlowStep,
+  JobBuilderChain,
+  JobBuilderDef,
   JobContext,
   JobDefinition,
   JobHandler,
+  JobMiddleware,
   JobOptions,
-  QueueFactoryOptions,
+  MiddlewareFunction,
+  QueueBuilder,
   QueueInstance,
+  QueuePriority,
   RetryConfig,
-  ScheduleConfig,
   ScheduleDefinition,
-  ScheduleInfo,
-  ScheduleOptions,
 } from './types/index.ts';
 
 // Constants
 export { QUEUE_PRIORITIES } from './types/index.ts';
-export type { QueuePriority } from './types/index.ts';

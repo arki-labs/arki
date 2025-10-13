@@ -1,740 +1,377 @@
-# @arki/queue
+# @arki/queue v2.0
 
-A declarative, type-safe background job processing library for TypeScript applications built on top of BullMQ and Redis.
+A type-safe background job processing library for TypeScript applications, inspired by tRPC's elegant API design. Built on BullMQ and Redis.
+
+## ⚠️ Breaking Changes in v2.0
+
+Version 2.0 is a complete architectural rewrite inspired by tRPC. The new API focuses on:
+- **Builder Patterns**: tRPC-inspired `initQueue` and chainable builders
+- **Middleware System**: Composable middleware for cross-cutting concerns
+- **Type-Safe Context**: Full type safety through middleware chain
+- **Registry Organization**: Hierarchical job organization by feature
+
+**Migration Guide**: See [MIGRATION.md](./MIGRATION.md) for upgrading from v1.x
 
 ## Features
 
-- **Declarative API**: Define jobs, schedules, and distributed flows with a simple, declarative API inspired by `@content-collections/core`
-- **Type-Safe**: Full TypeScript support with automatic type inference
-- **Powerful Patterns**: Supports on-demand jobs, scheduled jobs (cron/interval), and distributed flows
-- **Built on BullMQ**: Leverages the reliability and features of BullMQ
-- **Runtime Schedule Management**: Register, list, and delete schedules at runtime (inspired by Convex)
-- **Retry & Backoff**: Configurable retry strategies with exponential or fixed backoff
-- **Distributed Flows**: Complex multi-job workflows with parent-child dependencies using BullMQ's FlowProducer
-- **Callbacks**: OnComplete and onError hooks for job lifecycle events
+- **tRPC-Inspired API**: Familiar patterns if you use tRPC
+- **Type-Safe**: End-to-end type safety with context transformation
+- **Middleware System**: Composable middleware for logging, error handling, timing, etc.
+- **Powerful Patterns**: Jobs, schedules (cron/interval), and distributed flows
+- **Built on BullMQ**: Leverages the reliability of BullMQ and Redis
+- **Context Management**: Inject dependencies and extend context through middleware
 
 ## Installation
 
 ```bash
-pnpm add @arki/queue bullmq ioredis zod
+pnpm add @arki/queue bullmq ioredis zod superjson
 ```
 
 ## Quick Start
 
 ```typescript
-import { z } from 'zod';
+import { z } from 'zod/v4';
+import {
+  initQueue,
+  errorHandlingMiddleware,
+  loggingMiddleware,
+  timingMiddleware
+} from '@arki/queue';
 
-import { buildFlow, createQueue, defineFlow, defineJob, defineSchedule } from '@arki/queue';
+// 1. Define your application context type
+type AppContext = {
+  db: Database;
+  repo: Repositories;
+  kv: KVStore;
+};
 
-// 1. Define jobs for the flow
-export const validateOrder = defineJob({
-  name: 'orders:validate',
-  inputSchema: z.object({ orderId: z.string() }),
-  handler: async (data, ctx) => {
-    const order = await db.orders.findById(data.orderId);
-    if (!order) throw new Error('Order not found');
-    return { valid: true, order };
-  },
+const createContext = (): AppContext => ({
+  db: database,
+  repo: repositories,
+  kv: kvStore,
 });
 
-export const processPayment = defineJob({
-  name: 'orders:payment',
-  inputSchema: z.object({ orderId: z.string() }),
-  handler: async (data, ctx) => {
-    const result = await paymentService.charge(data);
-    return { paymentId: result.id };
-  },
-});
+// 2. Initialize queue with context
+const q = initQueue
+  .context<AppContext>()
+  .create({
+    transformer: superjson, // Optional: for complex types
+  });
 
-export const updateInventory = defineJob({
-  name: 'orders:inventory',
-  inputSchema: z.object({ orderId: z.string() }),
-  handler: async (data, ctx) => {
-    await inventoryService.reserve(data.orderId);
-    return { reserved: true };
-  },
-});
+// 3. Create job builders with middleware
+const baseJob = q.job
+  .use(errorHandlingMiddleware())
+  .use(timingMiddleware())
+  .use(loggingMiddleware());
 
-export const sendOrderConfirmation = defineJob({
-  name: 'orders:notify',
-  inputSchema: z.object({ orderId: z.string() }),
-  handler: async (data, ctx) => {
-    await emailService.sendOrderConfirmation(data);
-    return { sent: true };
-  },
-});
+// 4. Define jobs using chainable API
+const sendEmail = baseJob
+  .name('notifications:send-email')
+  .input(z.object({
+    to: z.string().email(),
+    subject: z.string(),
+    body: z.string(),
+  }))
+  .options({
+    maxParallelism: 50,
+    retry: {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 1000 },
+    },
+  })
+  .handler(async (data, ctx) => {
+    // ctx has: db, repo, kv (from context)
+    await ctx.repo.notifications.create({
+      type: 'email',
+      recipient: data.to,
+      subject: data.subject,
+      body: data.body,
+    });
 
-// 2. Define a schedule
-export const dailyCleanup = defineSchedule({
-  name: 'maintenance:daily-cleanup',
-  schedule: {
-    type: 'cron',
-    pattern: '0 2 * * *', // Every day at 2 AM
-  },
-  inputSchema: z.object({}),
-  handler: async (data, ctx) => {
-    await cleanupOldData();
-    return { cleaned: true };
-  },
-});
+    return { sent: true, messageId: `msg_${Date.now()}` };
+  });
 
-// 3. Define a flow
-export const processOrderFlow = defineFlow({
-  name: 'orders:process-flow',
-  inputSchema: z.object({
-    orderId: z.string(),
+// 5. Organize jobs with registries
+const jobs = q.registry({
+  notifications: q.registry({
+    sendEmail,
   }),
-  flow: input => [
-    {
-      id: 'validate',
-      job: validateOrder,
-      data: { orderId: input.orderId },
-    },
-    {
-      id: 'payment',
-      job: processPayment,
-      data: { orderId: input.orderId },
-      dependsOn: ['validate'],
-    },
-    {
-      id: 'inventory',
-      job: updateInventory,
-      data: { orderId: input.orderId },
-      dependsOn: ['payment'],
-    },
-    {
-      id: 'notify',
-      job: sendOrderConfirmation,
-      data: { orderId: input.orderId },
-      dependsOn: ['payment'],
-    },
-  ],
 });
 
-// 4. Create queue and register definitions
-const queue = createQueue({
-  connection: process.env.REDIS_URL!,
-  keyPrefix: 'myapp:',
+// 6. Create queue instance
+const queue = q.createQueue({
+  connection: 'redis://localhost:6379',
+  createContext,
 });
 
-queue.registerSchedule(dailyCleanup);
-queue.registerFlow(processOrderFlow);
-
-// 5. Start processing
+// 7. Register and start
+await queue.register(jobs);
 await queue.start();
 ```
 
 ## Core Concepts
 
-### Jobs
+### Initialization: `initQueue`
 
-Jobs are on-demand units of work that can be enqueued and processed asynchronously.
+Similar to tRPC's `initTRPC`, `initQueue` is the starting point:
 
 ```typescript
-export const sendEmail = defineJob({
-  name: 'notifications:send-email',
-  inputSchema: z.object({
-    to: z.string().email(),
-    subject: z.string(),
-    body: z.string(),
-  }),
-  handler: async (data, ctx) => {
-    // Process the job
-    await ctx.log('Sending email...');
-    await ctx.updateProgress(50);
-    await emailService.send(data);
-    await ctx.updateProgress(100);
-    return { sent: true, messageId: '123' };
-  },
-  options: {
-    maxParallelism: 50, // Process up to 50 emails concurrently
-    retry: {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 1000, base: 2 },
-    },
-    onComplete: async (job, result) => {
-      await logEmailSent(job.data.to, result.messageId);
-    },
-    onError: async (job, error) => {
-      await alertEmailFailed(job.data.to, error);
-    },
-  },
-});
+// With context type
+const q = initQueue
+  .context<AppContext>()
+  .create({
+    transformer: superjson,
+    errorFormatter: (error) => error,
+    isDev: process.env.NODE_ENV === 'development',
+  });
+
+// Without context (uses empty context)
+const q = initQueue.create();
 ```
 
-### Dependency Injection
+### Job Builders
 
-Inject custom dependencies (like repositories, services, or database clients) into your job handlers for better testability and cleaner code:
+Job builders are similar to tRPC procedures. They can be composed with middleware:
 
 ```typescript
-import { createQueue, defineJob } from '@arki/queue';
-import { z } from 'zod';
+// Base job with common middleware
+const baseJob = q.job
+  .use(errorHandlingMiddleware())
+  .use(timingMiddleware())
+  .use(loggingMiddleware());
 
-// 1. Define your dependencies type
-type QueueDependencies = {
-  db: Database;
-  repo: Repositories;
-  email: EmailService;
-  logger: Logger;
-};
+// Extend with more middleware
+const authenticatedJob = baseJob.use(authMiddleware);
 
-// 2. Define jobs with typed dependencies
-export const sendWelcomeEmail = defineJob<
-  { userId: string; email: string },
-  { sent: boolean },
-  QueueDependencies // ← Specify dependencies as third generic parameter
->({
-  name: 'users:send-welcome-email',
-  inputSchema: z.object({
-    userId: z.string(),
-    email: z.string().email(),
-  }),
-  handler: async (data, ctx) => {
-    // ctx now has access to db, repo, email, logger with full type safety
-    await ctx.logger.info(`Sending welcome email to ${data.email}`);
+// Define a job
+const myJob = authenticatedJob
+  .name('my-job-name')
+  .input(inputSchema)
+  .options({ maxParallelism: 10 })
+  .handler(async (data, ctx) => {
+    // Handler implementation
+    return { success: true };
+  });
+```
 
-    const user = await ctx.repo.users.findById(data.userId);
+### Middleware
+
+Middleware can transform context and add cross-cutting concerns:
+
+```typescript
+// Custom middleware that adds a user to context
+const authMiddleware = q.middleware<AppContext & { user: User }>(
+  async ({ ctx, data, next }) => {
+    // Extract user ID from data
+    const userId = (data as any).userId;
+
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+
+    // Fetch user
+    const user = await ctx.db.users.findById(userId);
+
     if (!user) {
       throw new Error('User not found');
     }
 
-    await ctx.email.send({
-      to: data.email,
-      subject: 'Welcome!',
-      template: 'welcome',
-      data: { userName: user.name },
+    // Add user to context
+    return next({
+      ctx: {
+        ...ctx,
+        user,
+      },
     });
-
-    await ctx.repo.notifications.logEmailSent(data.userId, 'welcome');
-
-    return { sent: true };
-  },
-});
-
-// 3. Create queue with dependencies
-const queue = createQueue<QueueDependencies>({
-  connection: env.REDIS_URL,
-  keyPrefix: 'myapp:',
-  dependencies: {
-    db: database,
-    repo: repositories,
-    email: emailService,
-    logger: logger,
-  },
-});
-
-// 4. Register jobs - dependencies are automatically injected
-queue.registerJob(sendWelcomeEmail);
-await queue.start();
-```
-
-**Benefits:**
-
-- **Type Safety**: Full TypeScript support for all dependencies in job handlers
-- **Testability**: Easy to mock dependencies in tests
-- **Separation of Concerns**: Keep job logic separate from infrastructure setup
-- **Flexibility**: Different queue instances can use different dependencies
-
-**Example with schedules:**
-
-```typescript
-type ScheduleDependencies = {
-  db: Database;
-  analytics: AnalyticsService;
-};
-
-export const dailyReport = defineSchedule<
-  { reportType: string },
-  { generated: boolean },
-  ScheduleDependencies
->({
-  name: 'reports:daily',
-  schedule: {
-    type: 'cron',
-    pattern: '0 9 * * *',
-  },
-  inputSchema: z.object({
-    reportType: z.string().default('daily'),
-  }),
-  handler: async (data, ctx) => {
-    // Access dependencies with full type safety
-    const stats = await ctx.analytics.getDailyStats();
-    await ctx.db.reports.create({
-      type: data.reportType,
-      data: stats,
-    });
-
-    return { generated: true };
-  },
-});
-
-const queue = createQueue<ScheduleDependencies>({
-  connection: env.REDIS_URL,
-  dependencies: {
-    db: database,
-    analytics: analyticsService,
-  },
-});
-
-queue.registerSchedule(dailyReport);
-```
-
-**Testing with dependencies:**
-
-```typescript
-import { describe, expect, it, vi } from 'vitest';
-
-describe('sendWelcomeEmail job', () => {
-  it('should send email successfully', async () => {
-    // Create mock dependencies
-    const mockDependencies = {
-      db: {} as Database,
-      repo: {
-        users: {
-          findById: vi.fn().mockResolvedValue({ id: '1', name: 'John', email: 'john@example.com' }),
-        },
-        notifications: {
-          logEmailSent: vi.fn(),
-        },
-      },
-      email: {
-        send: vi.fn().mockResolvedValue({ id: 'email-123' }),
-      },
-      logger: {
-        info: vi.fn(),
-      },
-    } as unknown as QueueDependencies;
-
-    // Create mock context
-    const mockCtx = {
-      updateProgress: vi.fn(),
-      log: vi.fn(),
-      job: {} as any,
-      ...mockDependencies, // Spread dependencies into context
-    };
-
-    // Test the handler
-    const result = await sendWelcomeEmail.handler(
-      {
-        userId: '1',
-        email: 'john@example.com',
-      },
-      mockCtx,
-    );
-
-    expect(result.sent).toBe(true);
-    expect(mockDependencies.repo.users.findById).toHaveBeenCalledWith('1');
-    expect(mockDependencies.email.send).toHaveBeenCalled();
-    expect(mockDependencies.repo.notifications.logEmailSent).toHaveBeenCalledWith('1', 'welcome');
-  });
-});
-```
-
-### Programmatic Job API
-
-Use `createJobApi` for a type-safe API to manage jobs:
-
-```typescript
-import { createJobApi } from '@arki/queue';
-
-// Create API for the job definition
-const emailApi = createJobApi(sendEmail);
-
-// Add a job to the queue
-const job = await emailApi.add(
-  'welcome-email',
-  {
-    to: 'user@example.com',
-    subject: 'Welcome!',
-    body: 'Thanks for signing up.',
-  },
-  {
-    priority: 3,
-    delay: 5000, // Delay 5 seconds
-  },
+  }
 );
-
-// Get job status
-const jobInfo = await emailApi.getJob(job.id!);
-console.log(jobInfo?.state); // 'waiting', 'active', 'completed', 'failed'
-
-// Get all failed jobs
-const failedJobs = await emailApi.getJobs('failed', { start: 0, end: 10 });
-
-// Retry a failed job
-await emailApi.retry(job.id!);
-
-// Remove a job
-await emailApi.remove(job.id!);
-
-// Get queue statistics
-const stats = await emailApi.getStats();
-console.log(stats);
-// {
-//   name: 'notifications:send-email',
-//   waiting: 5,
-//   active: 2,
-//   completed: 100,
-//   failed: 3,
-//   delayed: 0,
-//   paused: false
-// }
-
-// Pause the queue
-await emailApi.pause();
-
-// Resume the queue
-await emailApi.resume();
-
-// Clean old completed jobs (older than 1 hour)
-await emailApi.clean(3600000, 100, 'completed');
-
-// Access underlying BullMQ queue for advanced operations
-const queue = emailApi.getQueue();
 ```
+
+**Standard Middleware:**
+
+- `errorHandlingMiddleware()` - Catches and formats errors
+- `loggingMiddleware()` - Logs job execution
+- `structuredLoggingMiddleware()` - Adds `logger` to context
+- `timingMiddleware()` - Logs execution time
+- `performanceMiddleware()` - Adds `performance` tracker to context
+- `timeoutMiddleware({ timeout: 30000 })` - Enforces max execution time
+- `validationMiddleware()` - Validates input (handled automatically)
 
 ### Schedules
 
-Schedules are jobs that run on a recurring basis, either on a cron schedule or at fixed intervals.
-
-#### Cron-based Schedule
+Schedules run jobs on a recurring basis:
 
 ```typescript
-export const dailyReport = defineSchedule({
-  name: 'reports:daily',
-  schedule: {
-    type: 'cron',
-    pattern: '0 9 * * *', // Every day at 9 AM
-    timezone: 'America/New_York',
-  },
-  inputSchema: z.object({
-    reportType: z.string().default('daily'),
-  }),
-  handler: async (data, ctx) => {
-    await generateReport(data.reportType);
-    return { generated: true };
-  },
-});
+// Wrap an existing job
+const dailyReport = q.schedule
+  .cron('0 9 * * *', { timezone: 'America/New_York' })
+  .job(generateReport)
+  .data({
+    reportType: 'daily',
+  });
+
+// Inline handler with middleware
+const hourlySync = q.schedule
+  .interval(60 * 60 * 1000) // Every hour
+  .use(structuredLoggingMiddleware())
+  .name('data:hourly-sync')
+  .input(z.object({ timestamp: z.string() }))
+  .handler(async (data, ctx) => {
+    ctx.logger.info('Running hourly sync');
+    // Implementation
+    return { synced: true };
+  });
 ```
 
-#### Interval-based Schedule
+### Flows (Multi-Step Workflows)
+
+Flows define complex workflows with dependencies:
 
 ```typescript
-export const healthCheck = defineSchedule({
-  name: 'system:health-check',
-  schedule: {
-    type: 'interval',
-    milliseconds: 60000, // Every minute
-  },
-  inputSchema: z.object({}),
-  handler: async (data, ctx) => {
-    const health = await checkSystemHealth();
-    return { healthy: health.allSystemsGo };
-  },
-});
-```
-
-### Flows (Distributed Workflows)
-
-For complex distributed workflows with parent-child job dependencies, use `defineFlow`. Flows leverage BullMQ's `FlowProducer` to create job graphs where each node can:
-
-- Retry independently
-- Run on different workers/queues
-- Be monitored separately in Bull Board
-- Have its own priority and options
-
-**When to use Flows:**
-
-- Complex job dependencies (parent-child relationships)
-- Steps need independent retry logic
-- Steps should be distributed across different workers/queues
-- Better observability per step
-- Multi-step processes with sophisticated orchestration needs
-
-```typescript
-import { z } from 'zod';
-
-// Use the flow API to add flows
-import { createFlowApi, defineFlow, defineJob } from '@arki/queue';
-
-// Define individual jobs that will be used in the flow
-const validateOrder = defineJob({
-  name: 'orders:validate',
-  inputSchema: z.object({ orderId: z.string() }),
-  handler: async (data, ctx) => {
-    const order = await db.orders.findById(data.orderId);
-    if (!order) throw new Error('Order not found');
-    return { valid: true, order };
-  },
-  options: {
-    retry: { attempts: 3, backoff: { type: 'fixed', delay: 1000 } },
-  },
-});
-
-const processPayment = defineJob({
-  name: 'orders:payment',
-  inputSchema: z.object({ orderId: z.string(), amount: z.number() }),
-  handler: async (data, ctx) => {
-    const result = await paymentService.charge(data);
-    return { paymentId: result.id, charged: true };
-  },
-  options: {
-    retry: { attempts: 5, backoff: { type: 'exponential', delay: 2000 } },
-  },
-});
-
-const updateInventory = defineJob({
-  name: 'orders:inventory',
-  inputSchema: z.object({ orderId: z.string() }),
-  handler: async (data, ctx) => {
-    await inventoryService.reserve(data.orderId);
-    return { reserved: true };
-  },
-});
-
-const sendNotification = defineJob({
-  name: 'orders:notify',
-  inputSchema: z.object({ orderId: z.string(), message: z.string() }),
-  handler: async (data, ctx) => {
-    await emailService.send(data);
-    return { sent: true };
-  },
-});
-
-// Define the flow with a flat array of steps and dependencies
-export const orderFlow = defineFlow({
-  name: 'orders:process-flow',
-  inputSchema: z.object({
-    orderId: z.string(),
-    customerId: z.string(),
-    amount: z.number(),
-  }),
-  // Define the flow as a flat array with dependencies
-  // Reference job definitions directly
-  flow: input => [
-    {
-      id: 'validate',
-      job: validateOrder, // Direct reference to job definition
-      data: { orderId: input.orderId },
-    },
-    {
-      id: 'payment',
-      job: processPayment,
-      data: { orderId: input.orderId, amount: input.amount },
-      dependsOn: ['validate'], // Wait for validation
-    },
-    {
-      id: 'inventory',
-      job: updateInventory,
-      data: { orderId: input.orderId },
-      dependsOn: ['payment'], // Wait for payment
-    },
-    {
-      id: 'notify',
-      job: sendNotification,
-      data: { orderId: input.orderId, message: 'Order confirmed!' },
-      dependsOn: ['payment'], // Also wait for payment (runs in parallel with inventory)
-    },
-  ],
-});
-
-// Register the flow (this will automatically register all jobs)
-queue.registerFlow(orderFlow);
-
-const flowApi = createFlowApi(orderFlow);
-
-// Add a new flow
-const flow = await flowApi.add('order-123', {
-  orderId: '123',
-  customerId: 'cust-456',
-  amount: 99.99,
-});
-
-// Get flow status (includes all child jobs)
-const status = await flowApi.getFlow('order-123');
-console.log(status);
-// {
-//   id: 'order-123',
-//   name: 'orders:validate',
-//   state: 'completed',
-//   progress: 100,
-//   children: [
-//     {
-//       id: 'child-job-1',
-//       name: 'orders:payment',
-//       state: 'completed',
-//       progress: 100,
-//       children: [...]
-//     }
-//   ]
-// }
-```
-
-#### Flow Features
-
-**Type-Safe Job References:**
-
-```typescript
-flow: (jobs, input) => [
-  {
-    id: 'validate',
-    job: jobs.validate, // Type-safe reference to job name
-    data: { orderId: input.orderId }, // Validated input data
-  },
-];
-```
-
-**Dependency Graph:**
-
-```typescript
-flow: (jobs, input) => [
-  {
-    id: 'parent',
-    job: jobs.parent,
-    data: { ... },
-  },
-  {
-    id: 'child1',
-    job: jobs.child1,
-    data: { ... },
-    dependsOn: ['parent'], // Wait for parent
-  },
-  {
-    id: 'child2',
-    job: jobs.child2,
-    data: { ... },
-    dependsOn: ['parent'], // Also wait for parent (runs in parallel with child1)
-  },
-]
-```
-
-**Independent Retry:**
-Each job in the flow can have its own retry configuration:
-
-```typescript
-const criticalJob = defineJob({
-  name: 'critical',
-  inputSchema: z.object({}),
-  handler: async () => { ... },
-  options: {
-    retry: { attempts: 10, backoff: { type: 'exponential', delay: 5000 } }
-  }
-});
-
-const nonCriticalJob = defineJob({
-  name: 'non-critical',
-  inputSchema: z.object({}),
-  handler: async () => { ... },
-  options: {
-    retry: { attempts: 2, backoff: { type: 'fixed', delay: 1000 } }
-  }
-});
-```
-
-**Queue-Level Control:**
-Specify different queues for different jobs:
-
-```typescript
-flow: (jobs, input) => [
-  {
-    id: 'high-priority',
-    job: jobs.highPriority,
-    queueName: 'priority-queue', // Use a specific queue
-    data: { ... },
-  },
-  {
-    id: 'low-priority',
-    job: jobs.lowPriority,
-    queueName: 'background-queue', // Different queue
-    data: { ... },
-    dependsOn: ['high-priority'],
-  }
-]
-```
-
-### Flow API: Type-Safe Dependency Validation
-
-`@arki/queue` provides two APIs for defining flows, both with full type-safe dependency validation:
-
-#### API Comparison
-
-| Feature                       | `defineFlow`      | `buildFlow` ⭐ **RECOMMENDED** |
-| ----------------------------- | ----------------- | ------------------------------ |
-| **Requires `as const`**       | ✅ Yes            | ❌ No                          |
-| **Type-safe dependencies**    | ✅ Yes            | ✅ Yes                         |
-| **Autocomplete for step IDs** | ✅ Yes            | ✅ Yes                         |
-| **API Style**                 | Declarative array | Fluent/builder pattern         |
-| **Prevents duplicate IDs**    | ❌ No             | ✅ Yes (compile-time)          |
-| **Readability**               | Good              | Excellent                      |
-
-#### Option 1: `defineFlow` (Array API)
-
-The array-based API requires `as const` annotation for type safety:
-
-```typescript
-import { defineFlow } from '@arki/queue';
-
-// ⚠️ MUST use `as const` for type-safe dependency validation
-const orderFlow = defineFlow({
-  name: 'order:process-flow',
-  inputSchema: z.object({ orderId: z.string() }),
-  flow: input =>
-    [
-      {
-        id: 'validate',
-        job: validateJob,
-        data: input,
-      },
-      {
-        id: 'process',
-        job: processJob,
-        data: input,
-        dependsOn: ['validate'], // ✅ Type-safe with `as const`
-      },
-    ] as const, // ⚠️ Required for type safety
-});
-```
-
-**Without `as const`:** Invalid dependencies won't be caught at compile time!
-
-#### Option 2: `buildFlow` (Builder API) ⭐ **RECOMMENDED**
-
-The builder API provides type safety WITHOUT requiring `as const`:
-
-```typescript
-import { buildFlow } from '@arki/queue';
-
-// ✅ No `as const` needed - type-safe by default!
-const orderFlow = buildFlow('order:process-flow', z.object({ orderId: z.string() }))
+const orderFlow = q.flow
+  .name('orders:process-flow')
+  .input(z.object({ orderId: z.string() }))
+  .use(loggingMiddleware())
   .step('validate', {
     job: validateJob,
-    data: input => input,
+    data: input => ({ orderId: input.orderId }),
   })
-  .step('process', {
-    job: processJob,
-    data: input => input,
-    dependsOn: ['validate'], // ✅ Automatically type-safe! Autocomplete works
+  .step('payment', {
+    job: paymentJob,
+    data: input => ({ orderId: input.orderId }),
+    dependsOn: ['validate'], // Wait for validation
+  })
+  .step('inventory', {
+    job: inventoryJob,
+    data: input => ({ orderId: input.orderId }),
+    dependsOn: ['payment'], // Wait for payment
+  })
+  .step('notify', {
+    job: notifyJob,
+    data: input => ({ orderId: input.orderId }),
+    dependsOn: ['payment'], // Runs in parallel with inventory
   })
   .build();
 ```
 
-**Why use `buildFlow`:**
+**Flow features:**
+- Automatic dependency validation (no circular dependencies)
+- Type-safe step IDs
+- Parallel execution (steps with same dependencies run in parallel)
+- Middleware applies to all steps
 
-- ✅ **No `as const` required** - One less thing to remember
-- ✅ **Better IDE experience** - Autocomplete guides you through the API
-- ✅ **Prevents duplicate step IDs** at compile time
-- ✅ **Self-documenting** - Method chaining makes flow structure clear
-- ✅ **Safer by default** - Can't forget type safety annotations
+### Registry Organization
 
-**Complex ETL Example with `buildFlow`:**
+Organize jobs hierarchically by feature:
 
 ```typescript
-const etlFlow = buildFlow('data:etl-pipeline', z.object({ sourceId: z.string() }))
+const jobs = q.registry({
+  notifications: q.registry({
+    email: sendEmail,
+    sms: sendSMS,
+  }),
+  users: q.registry({
+    onboarding: onboardUser,
+    cleanup: cleanupInactiveUsers,
+  }),
+  data: q.registry({
+    sync: syncData,
+  }),
+});
+
+// Jobs are nested: jobs.notifications.email, jobs.users.onboarding, etc.
+```
+
+## Advanced Patterns
+
+### Extending Context with Middleware
+
+Middleware can extend the context type:
+
+```typescript
+// Structured logging middleware adds logger to context
+const jobWithLogger = q.job
+  .use(structuredLoggingMiddleware())
+  .name('my-job')
+  .input(schema)
+  .handler(async (data, ctx) => {
+    // ctx.logger is available!
+    ctx.logger.info('Starting job', { data });
+    ctx.logger.warn('Something happened');
+    ctx.logger.error('Error occurred', { error });
+
+    return { success: true };
+  });
+
+// Performance middleware adds performance tracker
+const jobWithPerformance = q.job
+  .use(performanceMiddleware())
+  .name('my-job')
+  .input(schema)
+  .handler(async (data, ctx) => {
+    const mark = ctx.performance.mark('database-query');
+    await ctx.db.query(...);
+    ctx.performance.measure('database-query', mark);
+
+    return { success: true };
+  });
+```
+
+### Custom Middleware Patterns
+
+```typescript
+// Timing middleware with custom behavior
+const customTimingMiddleware = q.middleware(
+  async ({ ctx, next, job }) => {
+    const start = Date.now();
+    const result = await next();
+    const duration = Date.now() - start;
+
+    console.log(`[${job.name}] took ${duration}ms`);
+
+    // Store timing in database
+    await ctx.db.metrics.create({
+      job: job.name,
+      duration,
+      timestamp: new Date(),
+    });
+
+    return result;
+  }
+);
+
+// Rate limiting middleware
+const rateLimitMiddleware = q.middleware(
+  async ({ ctx, data, next }) => {
+    const key = `rate-limit:${(data as any).userId}`;
+    const count = await ctx.kv.get(key);
+
+    if (count && count > 100) {
+      throw new Error('Rate limit exceeded');
+    }
+
+    await ctx.kv.set(key, (count || 0) + 1, 60); // 1 minute TTL
+
+    return next();
+  }
+);
+```
+
+### Complex Flow Example
+
+```typescript
+// ETL pipeline with parallel transformations
+const etlFlow = q.flow
+  .name('data:etl-pipeline')
+  .input(z.object({ sourceId: z.string() }))
+  .use(structuredLoggingMiddleware())
+  .use(errorHandlingMiddleware())
+  // Extract step
   .step('extract', {
     job: extractJob,
     data: input => ({ sourceId: input.sourceId }),
   })
-  // Parallel transformations
+  // Three parallel transformations
   .step('transform-a', {
     job: transformAJob,
     data: () => ({ type: 'A' }),
@@ -750,7 +387,7 @@ const etlFlow = buildFlow('data:etl-pipeline', z.object({ sourceId: z.string() }
     data: () => ({ type: 'C' }),
     dependsOn: ['extract'],
   })
-  // Fan-in: wait for all transforms
+  // Load step waits for all transformations
   .step('load', {
     job: loadJob,
     data: () => ({}),
@@ -759,553 +396,120 @@ const etlFlow = buildFlow('data:etl-pipeline', z.object({ sourceId: z.string() }
   .build();
 ```
 
-**Migration from `defineFlow` to `buildFlow`:**
+## Queue Instance
+
+The queue instance manages job registration and execution:
 
 ```typescript
-// Before (defineFlow)
-const flow = defineFlow({
-  name: 'my-flow',
-  inputSchema: mySchema,
-  flow: input =>
-    [
-      { id: 'step1', job: job1, data: input },
-      { id: 'step2', job: job2, data: input, dependsOn: ['step1'] },
-    ] as const,
-  options: {
-    /* ... */
-  },
-});
-
-// After (buildFlow)
-const flow = buildFlow('my-flow', mySchema, {
-  /* options */
-})
-  .step('step1', {
-    job: job1,
-    data: input => input,
-  })
-  .step('step2', {
-    job: job2,
-    data: input => input,
-    dependsOn: ['step1'],
-  })
-  .build();
-```
-
-## Bull Board UI Integration
-
-`@arki/queue` includes built-in support for Bull Board, a UI dashboard for monitoring and managing your queues.
-
-### Setup with Hono
-
-```typescript
-import { Hono } from 'hono';
-import { z } from 'zod';
-
-import { createBoard, createQueue, defineJob } from '@arki/queue';
-
-// Define your jobs
-const sendEmail = defineJob({
-  name: 'notifications:send-email',
-  inputSchema: z.object({ to: z.string().email() }),
-  handler: async data => {
-    // ...
-    return { sent: true };
-  },
-});
-
-// Create and register queue
-const queue = createQueue({ connection: env.REDIS_URL });
-queue.registerJob(sendEmail);
-await queue.start();
-
-// Create Bull Board
-const { adapter } = createBoard({
-  queues: [
-    sendEmail._queue,
-    // Add more queues...
-  ],
-  basePath: '/admin/queues',
-  uiOptions: {
-    boardTitle: 'My App - Job Queue Monitor',
-    miscLinks: [{ text: 'Documentation', url: 'https://docs.myapp.com' }],
-  },
-});
-
-// Mount Bull Board in your Hono app
-const app = new Hono();
-app.route('/admin/queues', adapter.registerPlugin());
-
-export default app;
-```
-
-### Dynamic Queue Management
-
-```typescript
-const { board, addQueue, removeQueue } = createBoard({
-  queues: [initialQueue._queue],
-});
-
-// Add a queue at runtime
-addQueue(newQueue._queue!);
-
-// Remove a queue
-removeQueue('queue-name');
-```
-
-### Accessing the UI
-
-Once mounted, visit `http://localhost:3000/admin/queues` (or your configured path) to:
-
-- Monitor job counts (waiting, active, completed, failed, delayed)
-- View job details and data
-- Retry failed jobs
-- Clean up old jobs
-- Pause/resume queues
-- View job logs and stack traces
-
-### Security Considerations
-
-**Important**: Always protect the Bull Board UI in production:
-
-```typescript
-import { Hono } from 'hono';
-import { basicAuth } from 'hono/basic-auth';
-
-const app = new Hono();
-
-// Add authentication
-app.use(
-  '/admin/*',
-  basicAuth({
-    username: env.ADMIN_USERNAME,
-    password: env.ADMIN_PASSWORD,
-  }),
-);
-
-// Mount Bull Board under protected route
-app.route('/admin/queues', adapter.registerPlugin());
-```
-
-## Runtime Schedule Management
-
-Inspired by Convex, `@arki/queue` allows you to manage schedules at runtime:
-
-```typescript
-// Register a new schedule at runtime
-const scheduleName = await queue.schedules.register(
-  defineSchedule({
-    name: 'dynamic:cleanup',
-    schedule: { type: 'interval', milliseconds: 3600000 },
-    inputSchema: z.object({}),
-    handler: async () => {
-      await cleanupTempFiles();
-      return { cleaned: true };
-    },
-  }),
-);
-
-// List all schedules
-const schedules = await queue.schedules.list();
-console.log(schedules);
-// [
-//   {
-//     name: 'dynamic:cleanup',
-//     schedule: { type: 'interval', milliseconds: 3600000 },
-//     nextRun: Date,
-//     active: true
-//   }
-// ]
-
-// Get a specific schedule
-const schedule = await queue.schedules.get('dynamic:cleanup');
-
-// Delete a schedule
-await queue.schedules.delete('dynamic:cleanup');
-```
-
-## API Reference
-
-### `defineJob<TInput, TOutput, TDeps>(config)`
-
-Define an on-demand job with optional dependency injection.
-
-**Type Parameters:**
-
-- `TInput` - Type of input data for the job
-- `TOutput` - Type of output/result from the job
-- `TDeps` - Custom dependencies available in context (default: `Record<string, never>`)
-
-**Parameters:**
-
-- `name: string` - Unique job name (use pattern: `featureName:jobType`)
-- `inputSchema: ZodSchema<TInput>` - Zod schema for input validation
-- `handler: (data: TInput, ctx: JobContext<TDeps>) => Promise<TOutput>` - Job handler function with typed context
-- `options?` - Job options:
-  - `maxParallelism?: number` - Max concurrent jobs
-  - `retry?: RetryConfig` - Retry configuration
-  - `onComplete?: (job, result) => Promise<void>` - Success callback
-  - `onError?: (job, error) => Promise<void>` - Error callback
-  - `bullmqOptions?: Partial<JobsOptions>` - Additional BullMQ options
-  - `workerOptions?: Partial<WorkerOptions>` - Additional worker options
-
-**Returns:** `JobDefinition<TInput, TOutput, TDeps>`
-
-**Example:**
-
-```typescript
-type MyDeps = { db: Database; email: EmailService };
-
-const job = defineJob<MyInput, MyOutput, MyDeps>({
-  name: 'my-job',
-  inputSchema: inputSchema,
-  handler: async (data, ctx) => {
-    // ctx.db and ctx.email are available with full type safety
-    await ctx.email.send(data);
-    return { success: true };
-  },
-});
-```
-
-### `defineSchedule<TInput, TOutput, TDeps>(config)`
-
-Define a scheduled job (cron or interval) with optional dependency injection.
-
-**Type Parameters:**
-
-- `TInput` - Type of input data for the schedule
-- `TOutput` - Type of output/result from the schedule
-- `TDeps` - Custom dependencies available in context (default: `Record<string, never>`)
-
-**Parameters:**
-
-- `name: string` - Unique schedule name
-- `schedule: ScheduleConfig` - Schedule configuration:
-  - Cron: `{ type: 'cron', pattern: string, timezone?: string }`
-  - Interval: `{ type: 'interval', milliseconds: number }`
-- `inputSchema: ZodSchema<TInput>` - Zod schema for input validation
-- `handler: (data: TInput, ctx: JobContext<TDeps>) => Promise<TOutput>` - Handler function with typed context
-- `options?` - Schedule options:
-  - `defaultData?: TInput` - Default data for scheduled jobs
-  - `jobOptions?: JobOptions<TInput, TOutput, TDeps>` - Job options
-
-**Returns:** `ScheduleDefinition<TInput, TOutput, TDeps>`
-
-**Example:**
-
-```typescript
-type MyDeps = { db: Database; analytics: AnalyticsService };
-
-const schedule = defineSchedule<MyInput, MyOutput, MyDeps>({
-  name: 'daily-report',
-  schedule: { type: 'cron', pattern: '0 9 * * *' },
-  inputSchema: inputSchema,
-  handler: async (data, ctx) => {
-    // ctx.db and ctx.analytics are available with full type safety
-    const stats = await ctx.analytics.getStats();
-    await ctx.db.reports.create(stats);
-    return { generated: true };
-  },
-});
-```
-
-### `defineFlow<TInput>(config)` (Array API)
-
-Define a distributed workflow using BullMQ's FlowProducer with array-based syntax.
-
-**⚠️ Note:** Requires `as const` annotation for type-safe dependency validation. Consider using `buildFlow` for better type safety without `as const`.
-
-**Parameters:**
-
-- `name: string` - Unique flow name
-- `inputSchema: ZodSchema<TInput>` - Zod schema for input validation
-- `flow: (input: TInput) => FlowStep[]` - Function that returns a flat array of steps with dependencies. Reference job definitions directly in the steps.
-- `options?` - Flow options:
-  - `defaultJobOptions?: Partial<JobsOptions>` - Default options for all jobs in the flow
-  - `prefix?: string` - Key prefix for flow IDs
-
-**Returns:** `FlowDefinition<TInput>`
-
-### `buildFlow<TInput>(name, inputSchema, options?)` (Builder API) ⭐ **RECOMMENDED**
-
-Create a flow builder for type-safe flow definition without requiring `as const`.
-
-**Parameters:**
-
-- `name: string` - Unique flow name
-- `inputSchema: ZodSchema<TInput>` - Zod schema for input validation
-- `options?` - Flow options (same as `defineFlow`)
-
-**Returns:** `FlowBuilder<TInput>` with methods:
-
-- `.step<TId>(id, config)` - Add a step to the flow
-  - `id: string` - Step identifier (must be unique)
-  - `config.job: JobDefinition` - Job definition to execute
-  - `config.data: (input: TInput) => unknown` - Function to derive step data from flow input
-  - `config.queueName?: string` - Optional custom queue name
-  - `config.opts?: JobsOptions` - Optional job-specific options
-  - `config.dependsOn?: string[]` - Array of step IDs to wait for (type-safe!)
-- `.build()` - Build the final flow definition
-
-**Example:**
-
-```typescript
-const flow = buildFlow('my-flow', inputSchema)
-  .step('validate', {
-    job: validateJob,
-    data: input => input,
-  })
-  .step('process', {
-    job: processJob,
-    data: input => input,
-    dependsOn: ['validate'], // ✅ Type-safe without as const!
-  })
-  .build();
-```
-
-**FlowStep Structure:**
-
-```typescript
-{
-  id: string;                        // Unique step identifier
-  job: JobDefinition<unknown, unknown>; // Job definition to execute
-  data: unknown;                     // Data to pass to the job
-  queueName?: string;                // Optional: specific queue name
-  opts?: JobsOptions;                // Optional: job-specific options
-  dependsOn?: string[];              // Optional: array of step IDs to wait for
-}
-```
-
-**Example:**
-
-```typescript
-const orderFlow = defineFlow({
-  name: 'orders:complex',
-  inputSchema: z.object({ orderId: z.string() }),
-  flow: input => [
-    {
-      id: 'validate',
-      job: validateJob, // Direct reference to job definition
-      data: input,
-    },
-    {
-      id: 'process',
-      job: processJob,
-      data: input,
-      dependsOn: ['validate'],
-    },
-    {
-      id: 'notify',
-      job: notifyJob,
-      data: input,
-      dependsOn: ['process'],
-    },
-  ],
-});
-```
-
-### `createQueue<TDeps>(options)`
-
-Create a queue instance for managing jobs, schedules, and flows with optional dependency injection.
-
-**Type Parameters:**
-
-- `TDeps` - Custom dependencies to inject into job contexts (default: `Record<string, never>`)
-
-**Parameters:**
-
-- `connection: string | ConnectionOptions` - Redis connection
-- `keyPrefix?: string` - Redis key prefix (default: `'queue:'`)
-- `defaultJobOptions?: Partial<JobsOptions>` - Default options for all jobs
-- `defaultWorkerOptions?: Partial<WorkerOptions>` - Default options for all workers
-- `dependencies?: TDeps` - Custom dependencies to inject into job handler contexts
-
-**Returns:** `QueueInstance`
-
-**Example:**
-
-```typescript
-type QueueDeps = {
-  db: Database;
-  repo: Repositories;
-  email: EmailService;
-};
-
-const queue = createQueue<QueueDeps>({
-  connection: env.REDIS_URL,
+const queue = q.createQueue({
+  connection: 'redis://localhost:6379',
   keyPrefix: 'myapp:',
-  dependencies: {
-    db: database,
-    repo: repositories,
-    email: emailService,
-  },
+  createContext,
 });
 
-// All registered jobs will have access to db, repo, and email in their context
-queue.registerJob(myJob);
+// Register jobs, schedules, and flows
+await queue.register(jobs);
+
+// Start all workers
 await queue.start();
+
+// Graceful shutdown
+await queue.stop();
 ```
 
-**QueueInstance Methods:**
-
-- `registerJob(definition)` - Register a job definition
-- `registerSchedule(definition)` - Register a schedule definition
-- `registerFlow(definition)` - Register a flow definition (automatically registers all jobs in the flow)
-- `start()` - Start all workers
-- `stop()` - Stop all workers and close connections
-- `schedules.register(definition)` - Register schedule at runtime
-- `schedules.list()` - List all schedules
-- `schedules.get(name)` - Get a specific schedule
-- `schedules.delete(name)` - Delete a schedule
-
-### `createJobApi(definition)`
-
-Create a programmatic API for managing jobs and queues.
-
-**Parameters:**
-
-- `definition: JobDefinition<TInput, TOutput>` - Job definition created by `defineJob`
-
-**Returns:** Object with methods:
-
-- `add(name, data, options?)` - Add a job to the queue
-- `getJob(jobId)` - Get job status by ID
-- `getJobs(state, options?)` - Get multiple jobs by state
-- `retry(jobId)` - Retry a failed job
-- `remove(jobId)` - Remove a job
-- `getStats()` - Get queue statistics
-- `pause()` - Pause the queue
-- `resume()` - Resume the queue
-- `clean(grace, limit, type)` - Clean old jobs
-- `drain(delayed?)` - Remove all jobs from queue
-- `getQueue()` - Get underlying BullMQ queue
-
-**Similar APIs:**
-
-- `createScheduleApi(definition)` - For schedule definitions
-- `createFlowApi(definition)` - For flow definitions
-
-### `createFlowApi(definition)`
-
-Create a programmatic API for managing distributed flows.
-
-**Parameters:**
-
-- `definition: FlowDefinition<TInput, TJobs>` - Flow definition created by `defineFlow`
-
-**Returns:** Object with methods:
-
-- `add(flowId, data, options?)` - Add a new flow to the queue
-  - Validates input data
-  - Builds the flow tree
-  - Returns the root FlowJob
-- `getFlow(flowId)` - Get flow status by ID (includes all child jobs recursively)
-- `getFlowProducer()` - Get underlying BullMQ FlowProducer instance
-
-**Example:**
-
-```typescript
-const flowApi = createFlowApi(orderFlow);
-
-// Add a flow
-const flow = await flowApi.add('order-123', {
-  orderId: '123',
-  amount: 99.99,
-});
-
-// Get flow status with all children
-const status = await flowApi.getFlow('order-123');
-```
-
-### Job Context
-
-The `ctx` parameter provided to handlers includes:
-
-- `updateProgress(progress: number)` - Update job progress (0-100)
-- `log(message: string)` - Log a message for this job
-- `job: BullMQJob` - The underlying BullMQ job instance
-
-## Choosing the Right Pattern
-
-### Jobs vs Schedules vs Flows
-
-**Use Jobs when:**
-
-- Processing on-demand, event-driven tasks
-- Each task is independent
-- Examples: Send email, process payment, resize image
-
-**Use Schedules when:**
-
-- Running tasks on a recurring schedule
-- Tasks need to run at specific times or intervals
-- Examples: Daily reports, hourly health checks, weekly cleanup
-
-**Use Flows when:**
-
-- Complex job dependencies (parent-child relationships)
-- Steps need independent retry logic
-- Steps should be distributed across different workers/queues
-- Better observability per step required
-- Multi-step processes with sophisticated orchestration needs
-- Examples: Complex ETL pipelines, distributed order processing, multi-stage data transformations
+**Registry traversal:**
+The `register` method automatically traverses nested registries and registers:
+- Jobs (immediate execution)
+- Schedules (cron/interval)
+- Flows (registers all jobs in the flow)
 
 ## Best Practices
 
-### Naming Convention
+### 1. Context Organization
 
-Use the pattern `featureName:jobType` for job names:
-
-```typescript
-// Good
-'notifications:send-email';
-'orders:process';
-'reports:generate-daily';
-
-// Avoid
-'sendEmail';
-'processOrder';
-```
-
-### Error Handling
-
-Differentiate between retriable and non-retriable errors:
+Define a clear context type with all dependencies:
 
 ```typescript
-handler: async (data, ctx) => {
-  try {
-    await processData(data);
-  } catch (error) {
-    if (error instanceof ValidationError) {
-      // Don't retry validation errors
-      await ctx.log('Validation failed - not retrying');
-      throw new Error('VALIDATION_ERROR');
-    }
-    // Network errors - will be retried
-    throw error;
-  }
+type AppContext = {
+  // Database
+  db: Database;
+
+  // Repositories
+  repo: {
+    users: UserRepository;
+    notifications: NotificationRepository;
+  };
+
+  // Services
+  email: EmailService;
+  storage: StorageService;
+
+  // Infrastructure
+  kv: KVStore;
 };
 ```
 
-### Resource Management
+### 2. Middleware Composition
 
-Always call `queue.stop()` on application shutdown:
+Build reusable job builders with common middleware:
 
 ```typescript
-process.on('SIGTERM', async () => {
-  await queue.stop();
-  process.exit(0);
-});
+// Base job for all jobs
+const baseJob = q.job
+  .use(errorHandlingMiddleware())
+  .use(timingMiddleware());
 
-process.on('SIGINT', async () => {
-  await queue.stop();
-  process.exit(0);
-});
+// Job that needs logging
+const monitoredJob = baseJob
+  .use(structuredLoggingMiddleware());
+
+// Job that needs authentication
+const authJob = monitoredJob
+  .use(authMiddleware);
+
+// Job that needs rate limiting
+const rateLimitedJob = authJob
+  .use(rateLimitMiddleware);
 ```
 
-### Testing
+### 3. Job Naming
 
-Test job handlers independently of the queue infrastructure:
+Use the pattern `featureName:jobType`:
+
+```typescript
+'notifications:send-email'
+'users:onboarding'
+'data:sync'
+'reports:generate-daily'
+```
+
+### 4. Error Handling
+
+Let middleware handle errors, but throw specific errors when needed:
+
+```typescript
+.handler(async (data, ctx) => {
+  // Validation errors (don't retry)
+  if (!data.orderId) {
+    throw new Error('VALIDATION_ERROR: orderId is required');
+  }
+
+  // Business logic errors (don't retry)
+  const order = await ctx.db.orders.findById(data.orderId);
+  if (order.status === 'cancelled') {
+    throw new Error('BUSINESS_ERROR: Order is cancelled');
+  }
+
+  // Network/transient errors (will retry)
+  await externalAPI.call(data);
+
+  return { success: true };
+})
+```
+
+### 5. Testing
+
+Test job handlers independently:
 
 ```typescript
 import { describe, expect, it, vi } from 'vitest';
@@ -1313,43 +517,138 @@ import { describe, expect, it, vi } from 'vitest';
 describe('sendEmail job', () => {
   it('should send email successfully', async () => {
     const mockCtx = {
-      updateProgress: vi.fn(),
-      log: vi.fn(),
-      job: {} as any,
-    };
+      db: mockDatabase,
+      repo: mockRepositories,
+      kv: mockKVStore,
+    } as AppContext;
 
-    const result = await sendEmail.handler(
+    const result = await sendEmail._internal.handler(
       {
         to: 'test@example.com',
         subject: 'Test',
         body: 'Test body',
       },
-      mockCtx,
+      mockCtx
     );
 
     expect(result.sent).toBe(true);
-    expect(mockCtx.updateProgress).toHaveBeenCalledWith(100);
   });
 });
 ```
 
-## Comparison with Convex
+### 6. Graceful Shutdown
 
-`@arki/queue` draws inspiration from Convex's excellent API design:
+Always handle shutdown properly:
 
-| Feature                        | Convex | @arki/queue               |
-| ------------------------------ | ------ | ------------------------- |
-| Runtime schedule management    | ✅     | ✅                        |
-| Cron schedules                 | ✅     | ✅                        |
-| Interval schedules             | ✅     | ✅                        |
-| Workpool (parallelism control) | ✅     | ✅ (via `maxParallelism`) |
-| Distributed workflows          | ❌     | ✅ (via `defineFlow`)     |
-| Step-based retry               | ✅     | ✅                        |
-| Independent job retry          | ❌     | ✅ (in flows)             |
-| Declarative API                | ✅     | ✅                        |
-| UI Dashboard                   | ✅     | ✅ (via Bull Board)       |
-| Self-hosted                    | ❌     | ✅                        |
-| Built on Redis                 | ❌     | ✅                        |
+```typescript
+const shutdown = async (signal: string) => {
+  console.log(`${signal} received, shutting down...`);
+  await queue.stop();
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+```
+
+## API Reference
+
+### `initQueue`
+
+Entry point for creating a queue builder.
+
+```typescript
+// With context
+initQueue.context<TContext>().create(config?)
+
+// Without context
+initQueue.create(config?)
+```
+
+### `QueueBuilder`
+
+```typescript
+interface QueueBuilder<TContext> {
+  job: JobBuilderDef<TContext, TContext>;
+  middleware<TContextOut>(fn): JobMiddleware<...>;
+  registry<TRegistry>(jobs): TRegistry;
+  schedule: ScheduleBuilderFactory<TContext>;
+  flow: FlowBuilderFactory<TContext>;
+  createQueue(options): QueueInstance<TContext>;
+}
+```
+
+### `JobBuilderDef`
+
+Chainable builder for creating jobs:
+
+```typescript
+q.job
+  .use(middleware)              // Add middleware
+  .name(string)                 // Set name
+  .input(schema)                // Set input schema
+  .options(options)             // Set job options
+  .handler((data, ctx) => ...)  // Set handler (completes builder)
+```
+
+### `ScheduleBuilderFactory`
+
+Create scheduled jobs:
+
+```typescript
+q.schedule
+  .cron(pattern, options?)           // Cron-based
+  .interval(milliseconds)            // Interval-based
+  .use(middleware)                   // Add middleware
+  .job(existingJob).data(data)       // Wrap existing job
+  // OR
+  .name(name).input(schema).handler(...) // Inline handler
+```
+
+### `FlowBuilderFactory`
+
+Create multi-step workflows:
+
+```typescript
+q.flow
+  .name(name)
+  .input(schema)
+  .use(middleware)
+  .step(id, {
+    job,
+    data: (input) => ...,
+    dependsOn?: string[],
+    queueName?: string,
+    opts?: JobOptions,
+  })
+  .build()
+```
+
+## Migration from v1.x
+
+See [MIGRATION.md](./MIGRATION.md) for detailed migration guide.
+
+**Quick comparison:**
+
+```typescript
+// v1.x
+const job = defineJob({
+  name: 'my-job',
+  inputSchema: schema,
+  handler: async (data, ctx) => { ... },
+});
+
+// v2.0
+const job = q.job
+  .name('my-job')
+  .input(schema)
+  .handler(async (data, ctx) => { ... });
+```
+
+## Examples
+
+See the [examples](./examples/) directory for complete examples:
+- [basic-usage.ts](./examples/basic-usage.ts) - Comprehensive example of all features
 
 ## License
 

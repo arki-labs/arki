@@ -1,302 +1,321 @@
+/* eslint-disable @typescript-eslint/require-await */
+/**
+ * Queue instance implementation for v2.0
+ *
+ * Integrates with initQueue builder pattern and supports:
+ * - Job registration and execution with middleware
+ * - Schedule registration (cron and interval)
+ * - Flow registration (multi-step workflows)
+ * - Registry traversal (nested job organization)
+ */
+
 import type { Job as BullMQJob, RepeatOptions } from 'bullmq';
 import { FlowProducer, Queue, Worker } from 'bullmq';
+import type { z } from 'zod/v4';
 
-import type {
-  FlowDefinition,
-  JobContext,
-  JobDefinition,
-  QueueFactoryOptions,
-  QueueInstance,
-  ScheduleDefinition,
-  ScheduleInfo,
-} from './types/index.ts';
+import type { InternalFlowDefinition } from './flow-builder.ts';
+import { createJobContext, executeMiddlewareChain } from './middleware.ts';
+import type { InternalScheduleDefinition } from './schedule-builder.ts';
+import type { FlowDefinition, QueueInstance, ScheduleDefinition } from './types/builder.ts';
+import type { JobDefinition, JobHandler } from './types/job.ts';
+import type { QueueMeta } from './types/queue.ts';
 
 /**
- * Create a queue instance for managing jobs, schedules, and flows
- *
- * @template TDeps - Custom dependencies to inject into job contexts
- *
- * @example Basic usage
- * ```typescript
- * import { createQueue } from '@arki/queue';
- * import { env } from './env';
- *
- * // Import your job definitions
- * import { sendEmail } from './jobs/send-email';
- * import { dailyCleanup } from './jobs/daily-cleanup';
- * import { processOrderFlow } from './flows/process-order';
- *
- * const queue = createQueue({
- *   connection: env.REDIS_URL,
- *   keyPrefix: 'myapp:',
- * });
- *
- * // Register jobs
- * queue.registerJob(sendEmail);
- * queue.registerSchedule(dailyCleanup);
- * queue.registerFlow(processOrderFlow);
- *
- * // Start processing
- * await queue.start();
- * ```
- *
- * @example With dependency injection
- * ```typescript
- * import { createQueue } from '@arki/queue';
- * import { db, repositories } from './db';
- * import { emailService } from './services/email';
- *
- * type QueueDependencies = {
- *   db: typeof db;
- *   repo: typeof repositories;
- *   email: typeof emailService;
- * };
- *
- * const queue = createQueue<QueueDependencies>({
- *   connection: 'redis://localhost:6379',
- *   keyPrefix: 'myapp:',
- *   dependencies: {
- *     db,
- *     repo: repositories,
- *     email: emailService,
- *   },
- * });
- *
- * // Now all job handlers will have access to ctx.db, ctx.repo, ctx.email
- * ```
+ * Registry type - nested structure of jobs, schedules, and flows
+ * Can contain definitions or nested registries
  */
-export function createQueue<TDeps = Record<string, never>>(
-  options: QueueFactoryOptions<TDeps>,
+type Registry = {
+  [key: string]: JobDefinition<unknown, unknown, unknown> | ScheduleDefinition | FlowDefinition | Registry;
+}
+
+/**
+ * Queue instance options
+ */
+export type QueueInstanceOptions<TContext> = {
+  connection: string | { host: string; port: number; password?: string };
+  keyPrefix?: string;
+  createContext: () => TContext | Promise<TContext>;
+};
+
+/**
+ * Create a queue instance that can register and run jobs, schedules, and flows
+ * @internal - Called by QueueBuilder.createQueue()
+ */
+export function createQueueInstance<TContext>(
+  options: QueueInstanceOptions<TContext>,
 ): QueueInstance {
-  const { connection, keyPrefix = 'queue:', defaultJobOptions, defaultWorkerOptions, dependencies } = options;
+  const { connection, keyPrefix = 'queue:', createContext } = options;
 
-  // Track registered definitions
-  const jobDefinitions = new Map<string, JobDefinition<unknown, unknown>>();
-  const scheduleDefinitions = new Map<string, ScheduleDefinition<unknown, unknown>>();
-  const flowDefinitions = new Map<string, FlowDefinition<unknown, string>>();
+  // Parse connection string or use connection object
+  const connectionConfig =
+    typeof connection === 'string'
+      ? (() => {
+          // Simple parsing of redis://host:port format
+          const url = new URL(connection);
+          return {
+            host: url.hostname,
+            port: Number.parseInt(url.port) || 6379,
+            password: url.password || undefined,
+          };
+        })()
+      : connection;
 
-  // Track BullMQ instances for cleanup
+  // Track registered items
+  const registeredJobs = new Map<string, JobDefinition<unknown, unknown, TContext>>();
+  const registeredSchedules = new Map<string, InternalScheduleDefinition<unknown, unknown, TContext>>();
+  const registeredFlows = new Map<string, InternalFlowDefinition>();
+
+  // Track BullMQ instances
   const queues: Queue[] = [];
   const workers: Worker[] = [];
   const flowProducers: FlowProducer[] = [];
 
   /**
-   * Get or create a Redis connection instance
+   * Register a single job definition
    */
-  function getConnection(): typeof connection {
-    return connection;
-  }
+  function registerJobDefinition<TInput, TOutput>(definition: JobDefinition<TInput, TOutput, TContext>): void {
+    const internal = definition._internal;
 
-  /**
-   * Create job context for handlers
-   * Injects custom dependencies into the context
-   */
-  function createJobContext<TInput, TOutput>(job: BullMQJob<TInput, TOutput>): JobContext<TDeps> {
-    return {
-      updateProgress: async (progress: number) => {
-        await job.updateProgress(progress);
-      },
-      log: async (message: string) => {
-        await job.log(message);
-      },
-      job,
-      // Spread dependencies into context
-      ...(dependencies as TDeps),
-    };
-  }
-
-  /**
-   * Register a job definition
-   */
-  function registerJob<TInput, TOutput, TJobDeps = Record<string, never>>(
-    definition: JobDefinition<TInput, TOutput, TJobDeps>,
-  ): void {
-    if (jobDefinitions.has(definition.name)) {
-      throw new Error(`Job "${definition.name}" is already registered`);
+    if (registeredJobs.has(internal.name)) {
+      console.warn(`Job "${internal.name}" is already registered, skipping`);
+      return;
     }
 
     // Create BullMQ queue
-    const queue = new Queue(definition.name, {
-      connection: getConnection(),
+    const queue = new Queue(internal.name, {
+      connection: connectionConfig,
       prefix: keyPrefix,
       defaultJobOptions: {
-        ...defaultJobOptions,
-        ...definition.options?.bullmqOptions,
-        attempts: definition.options?.retry?.attempts ?? defaultJobOptions?.attempts,
-        backoff: definition.options?.retry?.backoff
-          ? {
-              type: definition.options.retry.backoff.type,
-              delay: definition.options.retry.backoff.delay,
+        attempts: internal.options?.retry?.attempts ?? 3,
+        backoff:
+          internal.options?.retry?.backoff ?
+            {
+              type: internal.options.retry.backoff.type,
+              delay: internal.options.retry.backoff.delay,
             }
-          : defaultJobOptions?.backoff,
+          : { type: 'exponential', delay: 1000 },
       },
     });
 
     // Create BullMQ worker
     const worker = new Worker(
-      definition.name,
+      internal.name,
       async (job: BullMQJob<TInput, TOutput>) => {
-        // Validate input data
-        const validatedData = definition.inputSchema.parse(job.data);
+        // Validate input
+        const validatedData = internal.inputSchema.parse(job.data);
 
-        // Create context
-        const ctx = createJobContext(job);
+        // Create base context
+        const baseContext = await createContext();
+        const jobContext = createJobContext(baseContext, job);
 
-        // Execute handler
-        const result = await definition.handler(validatedData, ctx as unknown as JobContext<TJobDeps>);
+        // Execute middleware chain + handler
+        const result = await executeMiddlewareChain<typeof jobContext, typeof jobContext>(
+          internal.middlewares,
+          jobContext,
+          validatedData,
+          job,
+          {} as QueueMeta, // Meta will be populated by middleware if needed
+        );
 
-        // Call onComplete callback if provided
-        if (definition.options?.onComplete) {
-          await definition.options.onComplete(job, result);
-        }
-
-        return result;
+        // Final handler execution (after all middleware)
+        return await internal.handler(validatedData, result);
       },
       {
-        connection: getConnection(),
+        connection: connectionConfig,
         prefix: keyPrefix,
-        ...defaultWorkerOptions,
-        ...definition.options?.workerOptions,
-        concurrency: definition.options?.maxParallelism ?? defaultWorkerOptions?.concurrency,
+        concurrency: internal.options?.maxParallelism ?? 5,
       },
     );
 
-    // Set up error handler
-    worker.on('failed', (job: BullMQJob<TInput, TOutput> | undefined, error: Error) => {
-      if (job && definition.options?.onError) {
-        void definition.options.onError(job, error);
+    // Error handling
+    worker.on('failed', (job: BullMQJob | undefined, error: Error) => {
+      console.error(`Job ${internal.name} failed:`, error);
+      if (job) {
+        console.error(`Job ID: ${job.id}, Data:`, job.data);
       }
     });
 
     // Store instances
-    definition._queue = queue;
-    definition._worker = worker;
     queues.push(queue);
     workers.push(worker);
-    jobDefinitions.set(definition.name, definition as JobDefinition<unknown, unknown>);
+    registeredJobs.set(internal.name, definition as JobDefinition<unknown, unknown, TContext>);
+
+    console.log(`✓ Registered job: ${internal.name}`);
   }
 
   /**
    * Register a schedule definition
    */
-  async function registerSchedule<TInput, TOutput, TJobDeps = Record<string, never>>(
-    definition: ScheduleDefinition<TInput, TOutput, TJobDeps>,
-  ): Promise<void> {
-    if (scheduleDefinitions.has(definition.name)) {
-      throw new Error(`Schedule "${definition.name}" is already registered`);
+  async function registerScheduleDefinition(definition: ScheduleDefinition): Promise<void> {
+    const internal = definition._internal as InternalScheduleDefinition;
+
+    if (registeredSchedules.has(internal.name)) {
+      console.warn(`Schedule "${internal.name}" is already registered, skipping`);
+      return;
     }
 
-    // Create BullMQ queue
-    const queue = new Queue(definition.name, {
-      connection: getConnection(),
+    // Create queue for the schedule
+    const queue = new Queue(internal.name, {
+      connection: connectionConfig,
       prefix: keyPrefix,
-      defaultJobOptions: {
-        ...defaultJobOptions,
-        ...definition.options?.jobOptions?.bullmqOptions,
-      },
     });
 
-    // Create BullMQ worker
+    // Determine the handler based on job variant
+    let handler: JobHandler<unknown, unknown, TContext>;
+    let inputSchema: z.ZodType<unknown>;
+
+    if (internal.jobVariant.type === 'existing') {
+      // Use existing job's handler
+      const jobInternal = internal.jobVariant.job._internal;
+      handler = jobInternal.handler as JobHandler<unknown, unknown, TContext>;
+      inputSchema = jobInternal.inputSchema;
+
+      // Ensure the job is registered
+      if (!registeredJobs.has(jobInternal.name)) {
+        registerJobDefinition(internal.jobVariant.job);
+      }
+    } else {
+      // Use inline handler
+      handler = internal.jobVariant.handler as JobHandler<unknown, unknown, TContext>;
+      inputSchema = internal.jobVariant.inputSchema;
+    }
+
+    // Create worker for the schedule
     const worker = new Worker(
-      definition.name,
-      async (job: BullMQJob<TInput, TOutput>) => {
-        // Validate input data
-        const validatedData = definition.inputSchema.parse(job.data);
+      internal.name,
+      async (job: BullMQJob) => {
+        // Validate input
+        const validatedData = inputSchema.parse(job.data);
 
         // Create context
-        const ctx = createJobContext(job);
+        const baseContext = await createContext();
+        const jobContext = createJobContext(baseContext, job);
 
-        // Execute handler
-        return await definition.handler(validatedData, ctx as unknown as JobContext<TJobDeps>);
+        // Execute middleware chain + handler
+        const contextAfterMiddleware = await executeMiddlewareChain<typeof jobContext, typeof jobContext>(
+          internal.middlewares,
+          jobContext,
+          validatedData,
+          job,
+          {} as QueueMeta,
+        );
+
+        return await handler(validatedData, contextAfterMiddleware);
       },
       {
-        connection: getConnection(),
+        connection: connectionConfig,
         prefix: keyPrefix,
-        ...defaultWorkerOptions,
-        ...definition.options?.jobOptions?.workerOptions,
       },
     );
 
-    // Convert schedule config to BullMQ repeat options
+    // Set up the schedule
     const repeatOptions: RepeatOptions =
-      definition.schedule.type === 'cron'
+      internal.type === 'cron'
         ? {
-            pattern: definition.schedule.pattern,
-            tz: definition.schedule.timezone,
+            pattern: internal.value as string,
+            tz: internal.options?.timezone,
           }
         : {
-            every: definition.schedule.milliseconds,
+            every: internal.value as number,
           };
 
     // Add repeatable job
-    const jobId = `schedule:${definition.name}`;
-    await queue.add(
-      'scheduled-job',
-      (definition.options?.defaultData ?? {}) as TInput,
-      {
-        repeat: repeatOptions,
-        jobId,
-      },
-    );
+    const scheduleData = internal.jobVariant.type === 'existing' ? internal.jobVariant.data : {};
 
-    // Store instances
-    definition._queue = queue;
-    definition._worker = worker;
-    definition._jobId = jobId;
+    await queue.add('scheduled-job', scheduleData, {
+      repeat: repeatOptions,
+      jobId: `schedule:${internal.name}`,
+    });
+
     queues.push(queue);
     workers.push(worker);
-    scheduleDefinitions.set(definition.name, definition as ScheduleDefinition<unknown, unknown>);
+    registeredSchedules.set(internal.name, internal);
+
+    console.log(`✓ Registered schedule: ${internal.name} (${internal.type})`);
   }
 
   /**
-   * Register a flow definition (distributed workflow)
+   * Register a flow definition
    */
-  function registerFlow<TInput, TStepId extends string = string>(definition: FlowDefinition<TInput, TStepId>): void {
-    if (flowDefinitions.has(definition.name)) {
-      throw new Error(`Flow "${definition.name}" is already registered`);
+  function registerFlowDefinition(definition: FlowDefinition): void {
+    const internal = definition._internal as InternalFlowDefinition;
+
+    if (registeredFlows.has(internal.name)) {
+      console.warn(`Flow "${internal.name}" is already registered, skipping`);
+      return;
     }
 
-    // Extract all unique job definitions from the flow steps
-    // We need to call the flow function with a dummy input to get the steps
-    // Note: This requires the flow function to be pure and not depend on specific input values for structure
-    const dummyInput = {} as TInput;
-    const flowSteps = definition.flow(dummyInput);
-
-    // Collect unique job definitions
-    const uniqueJobs = new Set<JobDefinition<unknown, unknown>>();
-    for (const step of flowSteps) {
-      uniqueJobs.add(step.job);
-    }
-
-    // Register all jobs if not already registered
-    for (const jobDefinition of uniqueJobs) {
-      if (!jobDefinitions.has(jobDefinition.name)) {
-        registerJob(jobDefinition);
+    // Register all jobs used in the flow
+    for (const step of internal.steps) {
+      if (!registeredJobs.has(step.job._internal.name)) {
+        registerJobDefinition(step.job);
       }
     }
 
-    // Create FlowProducer instance
+    // Create FlowProducer
     const flowProducer = new FlowProducer({
-      connection: getConnection(),
+      connection: connectionConfig,
       prefix: keyPrefix,
     });
 
-    // Store FlowProducer in definition
-    definition._flowProducer = flowProducer;
     flowProducers.push(flowProducer);
-    flowDefinitions.set(definition.name, definition as FlowDefinition<unknown, string>);
+    registeredFlows.set(internal.name, internal);
+
+    console.log(`✓ Registered flow: ${internal.name} (${internal.steps.length} steps)`);
   }
 
   /**
-   * Start all registered workers
+   * Traverse registry and register all items
    */
-  function start(): Promise<void> {
-    console.log('✓ Queue infrastructure started');
-    console.log(`  - ${jobDefinitions.size} job(s) registered`);
-    console.log(`  - ${scheduleDefinitions.size} schedule(s) registered`);
-    console.log(`  - ${flowDefinitions.size} flow(s) registered`);
+  function traverseRegistry(registry: Registry): void {
+    for (const [_key, value] of Object.entries(registry)) {
+      // Check if it's a definition
+      if (typeof value === 'object') {
+        if ('_type' in value) {
+          // It's a definition
+          switch (value._type) {
+          case 'job': {
+            registerJobDefinition(value as JobDefinition<unknown, unknown, TContext>);
 
-    return Promise.resolve();
+          break;
+          }
+          case 'schedule': {
+            void registerScheduleDefinition(value);
+
+          break;
+          }
+          case 'flow': {
+            registerFlowDefinition(value);
+
+          break;
+          }
+          // No default
+          }
+        } else if (typeof value === 'object' && !Array.isArray(value)) {
+          // It's a nested registry, recurse
+          traverseRegistry(value);
+        }
+      }
+    }
+  }
+
+  /**
+   * Register a registry of jobs, schedules, and flows
+   */
+  async function register(registry: Registry): Promise<void> {
+    console.log('Registering queue items...');
+    traverseRegistry(registry);
+    console.log('✓ Registration complete');
+  }
+
+  /**
+   * Start all workers
+   */
+  async function start(): Promise<void> {
+    console.log('✓ Queue infrastructure started');
+    console.log(`  - ${registeredJobs.size} job(s) registered`);
+    console.log(`  - ${registeredSchedules.size} schedule(s) registered`);
+    console.log(`  - ${registeredFlows.size} flow(s) registered`);
   }
 
   /**
@@ -305,10 +324,9 @@ export function createQueue<TDeps = Record<string, never>>(
   async function stop(): Promise<void> {
     console.log('Shutting down queue infrastructure...');
 
-    // Close all workers first (stop accepting new jobs)
+    // Close all workers
     await Promise.all(
       workers.map(async worker => {
-        console.log(`Closing worker: ${worker.name}`);
         await worker.close();
       }),
     );
@@ -316,15 +334,13 @@ export function createQueue<TDeps = Record<string, never>>(
     // Close all flow producers
     await Promise.all(
       flowProducers.map(async flowProducer => {
-        console.log('Closing flow producer');
         await flowProducer.close();
       }),
     );
 
-    // Then close queues
+    // Close all queues
     await Promise.all(
       queues.map(async queue => {
-        console.log(`Closing queue: ${queue.name}`);
         await queue.close();
       }),
     );
@@ -332,110 +348,9 @@ export function createQueue<TDeps = Record<string, never>>(
     console.log('✓ Queue infrastructure shut down');
   }
 
-  /**
-   * Schedule management API
-   */
-  const schedules = {
-    /**
-     * Register a new schedule at runtime
-     */
-    async register<TInput, TOutput, TDeps = Record<string, never>>(
-      definition: ScheduleDefinition<TInput, TOutput, TDeps>,
-    ): Promise<string> {
-      await registerSchedule(definition);
-      return definition.name;
-    },
-
-    /**
-     * List all registered schedules
-     */
-    async list(): Promise<ScheduleInfo[]> {
-      const scheduleInfos: ScheduleInfo[] = [];
-
-      for (const [name, definition] of scheduleDefinitions.entries()) {
-        const queue = definition._queue;
-        if (!queue) continue;
-
-        // Get repeatable jobs for this schedule
-        const repeatableJobs = await queue.getRepeatableJobs();
-        const scheduleJob = repeatableJobs.find(job => job.id === definition._jobId);
-
-        scheduleInfos.push({
-          name,
-          schedule: definition.schedule,
-          nextRun: scheduleJob?.next ? new Date(scheduleJob.next) : undefined,
-          lastRun: undefined, // BullMQ doesn't track last run easily
-          active: !!scheduleJob,
-        });
-      }
-
-      return scheduleInfos;
-    },
-
-    /**
-     * Get a specific schedule by name
-     */
-    async get(name: string): Promise<ScheduleInfo | null> {
-      const definition = scheduleDefinitions.get(name);
-      if (!definition?._queue) return null;
-
-      const queue = definition._queue;
-      const repeatableJobs = await queue.getRepeatableJobs();
-      const scheduleJob = repeatableJobs.find(job => job.id === definition._jobId);
-
-      return {
-        name,
-        schedule: definition.schedule,
-        nextRun: scheduleJob?.next ? new Date(scheduleJob.next) : undefined,
-        lastRun: undefined,
-        active: !!scheduleJob,
-      };
-    },
-
-    /**
-     * Delete a schedule by name
-     */
-    async delete(name: string): Promise<void> {
-      const definition = scheduleDefinitions.get(name);
-      if (!definition?._queue) {
-        throw new Error(`Schedule "${name}" not found`);
-      }
-
-      const queue = definition._queue;
-
-      // Remove repeatable job
-      if (definition._jobId) {
-        const repeatableJobs = await queue.getRepeatableJobs();
-        const scheduleJob = repeatableJobs.find(job => job.id === definition._jobId);
-
-        if (scheduleJob) {
-          await queue.removeRepeatableByKey(scheduleJob.key);
-        }
-      }
-
-      // Close worker and queue
-      if (definition._worker) {
-        await definition._worker.close();
-        const workerIndex = workers.indexOf(definition._worker);
-        if (workerIndex !== -1) workers.splice(workerIndex, 1);
-      }
-
-      await queue.close();
-      const queueIndex = queues.indexOf(queue);
-      if (queueIndex !== -1) queues.splice(queueIndex, 1);
-
-      // Remove from definitions (this is a Map, not a database operation)
-      // eslint-disable-next-line drizzle/enforce-delete-with-where
-      scheduleDefinitions.delete(name);
-    },
-  };
-
   return {
-    registerJob,
-    registerSchedule,
-    registerFlow,
+    register,
     start,
     stop,
-    schedules,
   };
 }
