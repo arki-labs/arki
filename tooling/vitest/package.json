@@ -22,6 +22,7 @@
     "@vitest/coverage-v8": "catalog:testing",
     "@vitest/ui": "catalog:testing",
     "jsdom": "catalog:text-processing",
+    "testcontainers": "catalog:testing",
     "vitest": "catalog:"
   },
   "devDependencies": {
