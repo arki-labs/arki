@@ -4,6 +4,14 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 // Session type is provided by our auth module
 import type { KV } from '@arki/kv';
 
+import type { DotAuth, DotSession } from './auth';
+import { authFeatures } from './auth';
+import { dbFeatures } from './db';
+import { EVENT_STORE_URL_VARIANTS, eventSourcingFeatures } from './event-sourcing';
+import { kvFeatures } from './kv';
+import type { ExtractAllRouterNames, PluginConfig, PluginRouterRecord } from './plugin';
+import { PluginRegistry } from './plugin';
+import { trpcFeatures } from './trpc';
 import type {
   AuthConfig,
   BaseProjectionDefinition,
@@ -14,11 +22,6 @@ import type {
   SchemaInterface,
   TRPCOptions,
 } from './types';
-import { authFeatures, type DotAuth, type DotSession } from './auth';
-import { dbFeatures } from './db';
-import { EVENT_STORE_URL_VARIANTS, eventSourcingFeatures } from './event-sourcing';
-import { kvFeatures } from './kv';
-import { trpcFeatures } from './trpc';
 
 /**
  * Dot Framework Builder
@@ -34,9 +37,9 @@ import { trpcFeatures } from './trpc';
  */
 export class Dot<
   TAppName extends string,
-  TRouters extends RouterRecord = Record<string, never>,
+  TRouters extends RouterRecord = {},
   TSchema extends SchemaInterface = SchemaInterface,
-  TRepositories extends Repository = Record<string, never>,
+  TRepositories extends Repository = {},
   TEnv extends EnvConfig = EnvConfig,
 > {
   readonly #appName: TAppName;
@@ -48,6 +51,7 @@ export class Dot<
   readonly #commandHandlers: CommandHandlerRegistration[];
   readonly #trpcOptions: TRPCOptions<TSchema> | null;
   readonly #authConfig: AuthConfig | null;
+  readonly #pluginRegistry: PluginRegistry<TSchema>;
 
   // #region Environment Variable Constants
   /** @internal Alternative names for the primary database connection URL environment variable. */
@@ -70,6 +74,7 @@ export class Dot<
       commandHandlers?: CommandHandlerRegistration[];
       trpcOptions?: TRPCOptions<TSchema> | null;
       authConfig?: AuthConfig | null;
+      pluginRegistry?: PluginRegistry<TSchema>;
     } = {},
   ) {
     this.#appName = name;
@@ -81,6 +86,7 @@ export class Dot<
     this.#commandHandlers = options.commandHandlers ?? [];
     this.#trpcOptions = options.trpcOptions ?? null;
     this.#authConfig = options.authConfig ?? null;
+    this.#pluginRegistry = options.pluginRegistry ?? new PluginRegistry<TSchema>();
   }
 
   // #region Helper Methods
@@ -117,6 +123,7 @@ export class Dot<
     commandHandlers?: CommandHandlerRegistration[];
     trpcOptions?: TRPCOptions<TNewSchema> | null;
     authConfig?: AuthConfig | null;
+    pluginRegistry?: PluginRegistry<TNewSchema>;
   }) {
     return new Dot<TAppName, TNewRouters, TNewSchema, TNewRepositories, TNewEnv>(this.#appName, {
       routers: options.routers ?? (this.#routers as unknown as TNewRouters),
@@ -134,6 +141,7 @@ export class Dot<
       commandHandlers: options.commandHandlers ?? this.#commandHandlers,
       trpcOptions: options.trpcOptions ?? (this.#trpcOptions as unknown as TRPCOptions<TNewSchema>),
       authConfig: options.authConfig ?? this.#authConfig,
+      pluginRegistry: options.pluginRegistry ?? (this.#pluginRegistry as unknown as PluginRegistry<TNewSchema>),
     });
   }
   // #endregion
@@ -293,6 +301,40 @@ export class Dot<
     });
   }
 
+  /**
+   * Register plugins with the application.
+   * Plugins will be initialized during bootstrap in dependency order.
+   *
+   * @param plugins Array of plugin configurations
+   * @returns A new Dot instance with the plugins registered and router types merged
+   * @example
+   * .registerPlugins([authPlugin, trackingPlugin, socialPlugin])
+   */
+  registerPlugins<Plugins extends readonly PluginConfig<TSchema>[]>(
+    plugins: Plugins
+  ): Dot<
+    TAppName,
+    TRouters & PluginRouterRecord<ExtractAllRouterNames<Plugins>>,
+    TSchema,
+    TRepositories,
+    TEnv
+  > {
+    type MergedRouters = TRouters & PluginRouterRecord<ExtractAllRouterNames<Plugins>>;
+
+    const newRegistry = new PluginRegistry<TSchema>();
+    // Spread to convert readonly array to mutable array
+    newRegistry.add([...plugins]);
+
+    // Type assertion is necessary here because:
+    // 1. Plugin routers are registered in the plugin registry
+    // 2. They will be merged during bootstrap()
+    // 3. The type system can't verify this multi-step process
+    // 4. We're promising the routers will be available after bootstrap
+    return this.createNew<MergedRouters>({
+      pluginRegistry: newRegistry,
+    });
+  }
+
   // Get access to dbConfig for internal use
   getDbConfig() {
     return this.#dbConfig;
@@ -322,7 +364,7 @@ export class Dot<
    * @internal Initialize the TRPC instance with middlewares and procedures.
    */
   #initTrpc() {
-    return trpcFeatures.initTrpc<TSchema>(this.#routers, this.#trpcOptions, this.#env);
+    return trpcFeatures.initTrpc<TSchema, TRouters>(this.#routers, this.#trpcOptions, this.#env);
   }
   // #endregion
 
@@ -334,31 +376,114 @@ export class Dot<
    * It resolves connection URLs, initializes databases, event stores, KV stores,
    * the message bus, and creates utility functions.
    *
+   * If plugins are registered, they will be initialized first and their registrations
+   * will be merged with any explicit configuration.
+   *
    * @returns An object containing the initialized application components and utilities.
    */
-  async bootstrap() {
-    // Initialize components, respecting dependencies
+  async bootstrap(): Promise<{
+    name: TAppName;
+    router: TRouters | undefined;
+    db: NodePgDatabase<TSchema> | undefined;
+    eventStore: EventStore | undefined;
+    kv: KV | undefined;
+    env: TEnv;
+    repositories: TRepositories;
+    bus: MessageBus;
+    createProjection: ReturnType<typeof dbFeatures.createProjectionHelper> | undefined;
+    createWithRepoProjection: ReturnType<typeof dbFeatures.createWithRepoProjectionHelper<TRepositories>> | undefined;
+    createCaller: unknown;
+    trpc: unknown;
+    createContext: (opts: { headers: Headers; session: DotSession | null }) => Promise<unknown>;
+    auth: DotAuth | undefined;
+    plugins: PluginRegistry<TSchema>;
+  }> {
+    // Create a mutable working copy for plugin merging
+    let workingRouters = this.#routers ? { ...this.#routers } : {};
+    let workingDbConfig = this.#dbConfig ? { ...this.#dbConfig } : null;
+    let workingEventSourcingConfig = this.#eventSourcingConfig ? { ...this.#eventSourcingConfig } : null;
+    const workingCommandHandlers = [...this.#commandHandlers];
+
+    // Step 1: Initialize plugins if any are registered
+    if (this.#pluginRegistry.size > 0) {
+      // Initialize basic services that plugins might need during setup
+      const pluginDb = this.#initDrizzle();
+      const pluginKv = this.#initKv();
+      const pluginEventStore = this.#initEventSourcing();
+      const pluginMessageBus = this.#initMessageBus(pluginEventStore);
+
+      // Initialize plugins with services
+      await this.#pluginRegistry.initialize({
+        db: pluginDb,
+        kv: pluginKv,
+        eventStore: pluginEventStore,
+        messageBus: pluginMessageBus,
+      });
+
+      // Get plugin registrations
+      const registrations = this.#pluginRegistry.getRegistrations();
+
+      // Merge plugin registrations with explicit config
+      // Plugins take precedence - they extend/override manual config
+      workingRouters = { ...workingRouters, ...registrations.routers };
+
+      if (Object.keys(registrations.schemas).length > 0) {
+        workingDbConfig = {
+          url: workingDbConfig?.url,
+          schema: { ...workingDbConfig?.schema, ...registrations.schemas } as TSchema,
+          debug: workingDbConfig?.debug,
+          repositories: workingDbConfig?.repositories,
+        };
+      }
+
+      // Merge command handlers and projections
+      workingCommandHandlers.push(...registrations.commandHandlers);
+      workingEventSourcingConfig = {
+        dbUrl: workingEventSourcingConfig?.dbUrl,
+        projections: [...(workingEventSourcingConfig?.projections ?? []), ...registrations.projections],
+      };
+
+      // Note: Repositories are handled separately since they need db instance
+    }
+
+    // Step 2: Initialize components with merged configuration
     const db = this.#initDrizzle();
     const eventStore = this.#initEventSourcing();
     const kv = this.#initKv();
-    // Pass initialized eventStore to message bus
     const messageBus = this.#initMessageBus(eventStore);
 
-    // Initialize auth if configured
+    // Step 3: Build repositories (including plugin repos)
+    let repositories = this.#dbConfig?.repositories ?? ({} as TRepositories);
+
+    if (this.#pluginRegistry.size > 0 && db) {
+      const pluginRegistrations = this.#pluginRegistry.getRegistrations();
+      const pluginRepos: Record<string, unknown> = {};
+
+      for (const [name, factory] of pluginRegistrations.repositories.entries()) {
+        pluginRepos[name] = factory(db);
+      }
+
+      repositories = { ...repositories, ...pluginRepos } as TRepositories;
+    }
+
+    // Step 4: Initialize auth if configured
     let dotAuth: DotAuth | undefined;
     if (this.#authConfig) {
       dotAuth = await authFeatures.initAuth(this.#authConfig, db);
     }
 
-    // Initialize tRPC with all components
-    const trpc = this.#initTrpc();
+    // Step 5: Initialize tRPC with merged routers
+    // Use the merged workingRouters instead of this.#routers to include plugin routers
+    const trpc = trpcFeatures.initTrpc<TSchema, TRouters>(
+      workingRouters as TRouters,
+      this.#trpcOptions,
+      this.#env,
+    );
 
-    // Extract env and repositories from config
+    // Step 6: Extract env
     const env = this.#env;
-    // Provide default empty object if repositories aren't configured
-    const repositories = this.#dbConfig?.repositories ?? ({} as TRepositories);
 
-    // Create projection helper utilities - only if db is initialized
+    // Step 7: Create projection helper utilities - only if db is initialized
     const createProjection = db ? this.#createProjectionHelper(db) : undefined;
     // Only create repo projection helper if both db and repositories exist
     const createWithRepoProjection =
@@ -377,7 +502,7 @@ export class Dot<
       kv,
       /** The validated environment variables object. */
       env,
-      /** The configured repositories object. */
+      /** The configured repositories object (includes plugin repositories). */
       repositories,
       /** The initialized message bus instance. */
       bus: messageBus,
@@ -393,6 +518,8 @@ export class Dot<
       createContext: this.#createTRPCContext,
       /** The initialized DotAuth instance with better-auth integration */
       auth: dotAuth,
+      /** Plugin registry for inspection */
+      plugins: this.#pluginRegistry,
     };
   }
 
@@ -467,37 +594,25 @@ export function createDot<TAppName extends string>(name: TAppName) {
 // Re-export types
 export * from './types';
 
+// Re-export plugin system
+export { definePlugin, PluginBuilder, type PluginConfig, type PluginContext } from './plugin';
+
 // Re-export auth module
 export {
+  authPresets, createAuthConfigFromEnv,
   // Main auth functionality
-  createDotAuth,
-  createAuthConfigFromEnv,
-  authPresets,
-  dotAuthIntegration,
+  createDotAuth, dotAuthIntegration,
   sessionUtils,
-
-  // Types
-  type DotAuth,
-  type DotAuthConfig,
-  type DotUser,
-  type DotSession,
-  type DotSessionManager,
-  type DotRBACManager,
-
-  // Auth types
-  type Role,
-  type Permission,
-  type PolicyContext,
-  type SessionConfig,
-  type RBACConfig,
-  type MFAConfig,
-  type SecurityConfig,
-  type EmailConfig,
-
   // Provider types
   type BuiltInProvider,
   type CustomProvider,
-  type ProviderConfigs,
+  // Types
+  type DotAuth,
+  type DotAuthConfig, type DotRBACManager, type DotSession,
+  type DotSessionManager, type DotUser, type EmailConfig, type MFAConfig, type Permission,
+  type PolicyContext, type ProviderConfigs, type RBACConfig,
+  // Auth types
+  type Role, type SecurityConfig, type SessionConfig
 } from './auth/index';
 
 // Re-export auth features

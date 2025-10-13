@@ -115,10 +115,10 @@ export const trpcFeatures = {
    * @param createContextFn A function to create the tRPC context
    * @param env The environment configuration
    */
-  initTrpc<TSchema extends SchemaInterface>(
-    routers: RouterRecord | null,
+  initTrpc<TSchema extends SchemaInterface, TRouters extends RouterRecord = RouterRecord>(
+    routers: TRouters | null,
     trpcOptions: TRPCOptions<TSchema> | null,
-    env: Record<string, any>,
+    env: Record<string, unknown>,
   ) {
     if (!routers || Object.keys(routers).length === 0) return;
 
@@ -289,9 +289,10 @@ export const trpcFeatures = {
     const router = t.router(routers);
 
     // Return an object with all TRPC components
+    // Cast router to preserve the specific router names for autocomplete
     return {
       t,
-      router,
+      router: router as typeof router & TRouters,
       createCaller: t.createCallerFactory(router),
       procedures: {
         public: publicProcedure,
