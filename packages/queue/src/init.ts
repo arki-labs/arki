@@ -103,9 +103,10 @@ function createQueueBuilder<TContext, TMeta extends QueueMeta>(
   });
 
   // Middleware factory
-  const middlewareFactory = <TContextOut>(
-    fn: MiddlewareFunction<TContext, TContextOut, TMeta>,
-  ): JobMiddleware<TContext, TContextOut, TMeta> => ({
+  // By default, middleware maintains JobContext<TContext> as both input and output
+  const middlewareFactory = <TContextIn = JobContext<TContext>, TContextOut = TContextIn>(
+    fn: MiddlewareFunction<TContextIn, TContextOut, TMeta>,
+  ): JobMiddleware<TContextIn, TContextOut, TMeta> => ({
     _type: 'middleware',
     _fn: fn,
   });

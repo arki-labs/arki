@@ -24,7 +24,7 @@ export { QUEUE_PRIORITIES } from './job.ts';
 export type { JobContext, JobDefinition, JobHandler, JobOptions, QueuePriority, RetryConfig } from './job.ts';
 
 // Middleware types
-export type { JobMiddleware, MiddlewareChainContext, MiddlewareContext, MiddlewareFunction, MiddlewareResult } from './middleware.ts';
+export type { ComputeFinalContext, JobMiddleware, MiddlewareChainContext, MiddlewareContext, MiddlewareFunction, MiddlewareResult } from './middleware.ts';
 
 // Queue types
 export type { DataTransformer, ErrorFormatter, QueueConfig, QueueMeta } from './queue.ts';

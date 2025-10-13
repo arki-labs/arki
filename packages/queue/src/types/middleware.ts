@@ -81,3 +81,36 @@ export type MiddlewareChainContext<
         : TOut
       : TContext
     : TContext;
+
+/**
+ * Compute the final context type from a middleware chain
+ * This type helper recursively processes middleware to determine the final output context
+ *
+ * @template TInitialContext - The starting context type (before any middleware)
+ * @template TMiddlewares - Tuple of middleware in the chain
+ *
+ * @example
+ * type MyMiddlewares = [
+ *   JobMiddleware<BaseCtx, BaseCtx & { user: User }, Meta>,
+ *   JobMiddleware<BaseCtx & { user: User }, BaseCtx & { user: User, db: DB }, Meta>
+ * ];
+ * type FinalCtx = ComputeFinalContext<BaseCtx, MyMiddlewares>;
+ * // Result: BaseCtx & { user: User, db: DB }
+ */
+export type ComputeFinalContext<
+  TInitialContext,
+  TMiddlewares extends readonly unknown[]
+> =
+  // If empty array, return initial context
+  TMiddlewares extends readonly []
+    ? TInitialContext
+    // If has elements, process first middleware
+    : TMiddlewares extends readonly [infer First, ...infer Rest]
+      // Check if First is a middleware and extract its output type
+      ? First extends JobMiddleware<unknown, infer TOut, QueueMeta>
+        // Recursively process remaining middleware with the output of this one
+        ? ComputeFinalContext<TOut, Rest>
+        // If not a valid middleware, just use initial context
+        : TInitialContext
+      // Fallback to initial context
+      : TInitialContext;

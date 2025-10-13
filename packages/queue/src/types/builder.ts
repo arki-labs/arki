@@ -28,10 +28,15 @@ export type QueueBuilder<TContext, TMeta extends QueueMeta = QueueMeta> = {
 
   /**
    * Create middleware for jobs
+   *
+   * By default, middleware maintains JobContext<TContext> as both input and output.
+   * Provide explicit type parameters to transform context:
+   * - middleware<MyContextIn, MyContextOut>(...) for full control
+   * - middleware<MyContext>(...) to use same type for input and output
    */
-  middleware: <TContextOut>(
-    fn: MiddlewareFunction<TContext, TContextOut, TMeta>,
-  ) => JobMiddleware<TContext, TContextOut, TMeta>;
+  middleware: <TContextIn = JobContext<TContext>, TContextOut = TContextIn>(
+    fn: MiddlewareFunction<TContextIn, TContextOut, TMeta>,
+  ) => JobMiddleware<TContextIn, TContextOut, TMeta>;
 
   /**
    * Create a job registry for organizing jobs by feature
@@ -61,6 +66,10 @@ export type QueueBuilder<TContext, TMeta extends QueueMeta = QueueMeta> = {
 /**
  * Job builder definition - chainable builder for creating jobs
  * Similar to tRPC's procedure builder
+ *
+ * @template TContext - The base context type provided by createContext
+ * @template TContextOut - The current output context type (after middleware chain)
+ * @template TMeta - Metadata type for the queue
  */
 export type JobBuilderDef<TContext, TContextOut, TMeta extends QueueMeta> = {
   /**
@@ -79,6 +88,12 @@ export type JobBuilderDef<TContext, TContextOut, TMeta extends QueueMeta> = {
 
 /**
  * Job builder chain - after name is set
+ *
+ * @template TContext - The base context type provided by createContext
+ * @template TContextOut - The current output context type (after middleware chain)
+ * @template TMeta - Metadata type for the queue
+ * @template TInput - Input data type for the job
+ * @template TOutput - Output/return type for the job
  */
 export type JobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, TInput, TOutput> = {
   /**

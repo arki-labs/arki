@@ -31,6 +31,8 @@ export function createJobBuilder<TContext, TContextOut, TMeta extends QueueMeta>
 }): JobBuilderDef<TContext, TContextOut, TMeta> {
   return {
     use<TContextOut2>(middleware: JobMiddleware<TContextOut, TContextOut2, TMeta>) {
+      // Type safety: middleware transforms TContextOut -> TContextOut2
+      // Runtime: store as unknown array for execution
       return createJobBuilder<TContext, TContextOut2, TMeta>({
         config: params.config,
         middlewares: [...params.middlewares, middleware as JobMiddleware<unknown, unknown, QueueMeta>],
@@ -94,6 +96,7 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
           inputSchema: state.inputSchema as z.ZodType<ActualInput>,
           handler: handler as JobHandler<ActualInput, ActualOutput, TContextOut>,
           options: state.options,
+          // Middleware array stored for runtime execution
           middlewares: state.middlewares,
         },
       };
