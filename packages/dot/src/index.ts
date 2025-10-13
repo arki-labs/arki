@@ -310,7 +310,7 @@ export class Dot<
    * @example
    * .registerPlugins([authPlugin, trackingPlugin, socialPlugin])
    */
-  registerPlugins<Plugins extends readonly PluginConfig<TSchema>[]>(
+  registerPlugins<const Plugins extends readonly PluginConfig<TSchema, string, string>[]>(
     plugins: Plugins
   ): Dot<
     TAppName,
@@ -360,12 +360,6 @@ export class Dot<
     )(opts);
   };
 
-  /**
-   * @internal Initialize the TRPC instance with middlewares and procedures.
-   */
-  #initTrpc() {
-    return trpcFeatures.initTrpc<TSchema, TRouters>(this.#routers, this.#trpcOptions, this.#env);
-  }
   // #endregion
 
   // #region Initialization and Bootstrap

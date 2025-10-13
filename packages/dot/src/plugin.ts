@@ -121,9 +121,10 @@ export type PluginConfig<
   /**
    * @internal
    * Phantom type to track registered router names at the type level.
-   * This property doesn't exist at runtime.
+   * This property doesn't exist at runtime but is required for type inference.
+   * Use 'never' type assertion to satisfy the compiler.
    */
-  _routerNames?: TRouterNames;
+  _routerNames: TRouterNames;
 }
 
 
@@ -183,6 +184,12 @@ export class PluginBuilder<
   #commands: CommandHandlerRegistration[] = [];
   #jobs: Record<string, unknown> = {};
   #processManagers: unknown[] = [];
+
+  /**
+   * Phantom property for type inference - never accessed at runtime
+   * @internal
+   */
+  _routerNames!: TRouterNames;
 
   constructor(name: TName) {
     this.name = name;
