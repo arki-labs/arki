@@ -2,9 +2,47 @@
  * Schedule builder implementation
  * Provides chainable API for creating scheduled jobs
  *
+ * ## Schedule Types
+ *
+ * - **CRON**: Recurring schedule based on cron pattern (e.g., '0 0 * * *' for daily at midnight)
+ * - **INTERVAL**: Recurring schedule at fixed intervals (e.g., every 60000ms)
+ * - **TIMEOUT**: One-time execution after a delay (e.g., run once after 60000ms)
+ *
+ * ## Usage Patterns
+ *
  * Schedules can either:
- * 1. Wrap an existing job: q.schedule.cron('0 0 * * *').job(existingJob).data({ ... })
- * 2. Define inline: q.schedule.interval(60000).name('my-schedule').input(schema).handler(fn)
+ * 1. Wrap an existing job: `q.schedule.cron('0 0 * * *').job(existingJob).data({ ... })`
+ * 2. Define inline: `q.schedule.interval(60000).name('my-schedule').input(schema).handler(fn)`
+ *
+ * @example
+ * ```typescript
+ * // CRON: Daily report at midnight
+ * const dailyReport = q.schedule
+ *   .cron('0 0 * * *', { timezone: 'America/New_York' })
+ *   .job(generateReportJob)
+ *   .data({ reportType: 'daily' });
+ *
+ * // INTERVAL: Health check every 30 seconds (repeating)
+ * const healthCheck = q.schedule
+ *   .interval(30000)
+ *   .job(pingServiceJob)
+ *   .data({});
+ *
+ * // TIMEOUT: Send reminder email once after 24 hours
+ * const reminderEmail = q.schedule
+ *   .timeout(24 * 60 * 60 * 1000)
+ *   .job(sendReminderJob)
+ *   .data({ userId: 'usr_123' });
+ *
+ * // Inline handler
+ * const customSchedule = q.schedule
+ *   .interval(60000)
+ *   .name('custom-task')
+ *   .input(z.object({ value: z.number() }))
+ *   .handler(async (data, ctx) => {
+ *     console.log('Running custom task with value:', data.value);
+ *   });
+ * ```
  */
 
 import type { z } from 'zod/v4';
@@ -22,7 +60,7 @@ import type { QueueConfig, QueueMeta } from './types/queue.ts';
 /**
  * Schedule type
  */
-type ScheduleType = 'cron' | 'interval';
+type ScheduleType = 'cron' | 'interval' | 'timeout';
 
 /**
  * Internal schedule definition structure

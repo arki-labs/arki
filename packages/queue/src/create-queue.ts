@@ -212,23 +212,31 @@ export function createQueueInstance<TContext>(
     );
 
     // Set up the schedule
-    const repeatOptions: RepeatOptions =
-      internal.type === 'cron'
-        ? {
-            pattern: internal.value as string,
-            tz: internal.options?.timezone,
-          }
-        : {
-            every: internal.value as number,
-          };
-
-    // Add repeatable job
     const scheduleData = internal.jobVariant.type === 'existing' ? internal.jobVariant.data : {};
 
-    await queue.add('scheduled-job', scheduleData, {
-      repeat: repeatOptions,
-      jobId: `schedule:${internal.name}`,
-    });
+    if (internal.type === 'timeout') {
+      // Timeout: one-time execution after delay
+      await queue.add('scheduled-job', scheduleData, {
+        delay: internal.value as number,
+        jobId: `schedule:${internal.name}`,
+      });
+    } else {
+      // Cron or Interval: repeating execution
+      const repeatOptions: RepeatOptions =
+        internal.type === 'cron'
+          ? {
+              pattern: internal.value as string,
+              tz: internal.options?.timezone,
+            }
+          : {
+              every: internal.value as number,
+            };
+
+      await queue.add('scheduled-job', scheduleData, {
+        repeat: repeatOptions,
+        jobId: `schedule:${internal.name}`,
+      });
+    }
 
     queues.push(queue);
     workers.push(worker);

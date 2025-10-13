@@ -123,5 +123,9 @@ export type {
 // Constants
 export { QUEUE_PRIORITIES } from './types/index.ts';
 
+// Cron pattern helpers
+export { CronPatterns } from './cron-patterns.ts';
+export type { DayOfWeek } from './cron-patterns.ts';
+
 // Retry strategies
 export { COMMON_RETRY_CONFIGS, createBackoffStrategy } from './retry-strategies.ts';

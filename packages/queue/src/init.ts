@@ -26,6 +26,7 @@
 import superjson from 'superjson';
 
 import type { QueueInstanceOptions } from './create-queue.ts';
+import { CronPatterns } from './cron-patterns.ts';
 import { createQueueInstance } from './create-queue.ts';
 import { createFlowBuilder } from './flow-builder.ts';
 import { createJobBuilder } from './job-builder.ts';
@@ -118,8 +119,24 @@ function createQueueBuilder<TContext, TMeta extends QueueMeta>(
 
   // Schedule builder factory
   const scheduleBuilderFactory: ScheduleBuilderFactory<TContext, TMeta> = {
+    // Core Schedule Types
     cron: (pattern, options) => createScheduleBuilder<TContext, JobContext<TContext>, TMeta>('cron', pattern, options, config, []),
     interval: milliseconds => createScheduleBuilder<TContext, JobContext<TContext>, TMeta>('interval', milliseconds, undefined, config, []),
+    timeout: milliseconds => createScheduleBuilder<TContext, JobContext<TContext>, TMeta>('timeout', milliseconds, undefined, config, []),
+
+    // Time-Based Helpers
+    everySeconds: n => createScheduleBuilder<TContext, JobContext<TContext>, TMeta>('cron', CronPatterns.everySeconds(n), undefined, config, []),
+    everyMinutes: n => createScheduleBuilder<TContext, JobContext<TContext>, TMeta>('cron', CronPatterns.everyMinutes(n), undefined, config, []),
+    everyHours: n => createScheduleBuilder<TContext, JobContext<TContext>, TMeta>('cron', CronPatterns.everyHours(n), undefined, config, []),
+
+    // Daily Schedules
+    daily: (time, options) => createScheduleBuilder<TContext, JobContext<TContext>, TMeta>('cron', CronPatterns.daily(time), options, config, []),
+    weekdays: (time, options) => createScheduleBuilder<TContext, JobContext<TContext>, TMeta>('cron', CronPatterns.weekdays(time), options, config, []),
+    weekends: (time, options) => createScheduleBuilder<TContext, JobContext<TContext>, TMeta>('cron', CronPatterns.weekends(time), options, config, []),
+
+    // Weekly/Monthly Schedules
+    weekly: (day, time, options) => createScheduleBuilder<TContext, JobContext<TContext>, TMeta>('cron', CronPatterns.weekly(day, time), options, config, []),
+    monthly: (day, time, options) => createScheduleBuilder<TContext, JobContext<TContext>, TMeta>('cron', CronPatterns.monthly(day, time), options, config, []),
   };
 
   // Flow builder factory

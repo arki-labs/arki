@@ -121,6 +121,10 @@ export type JobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, TInp
  * Schedule builder factory
  */
 export type ScheduleBuilderFactory<TContext, TMeta extends QueueMeta> = {
+  // ============================================
+  // Core Schedule Types
+  // ============================================
+
   /**
    * Create a cron-based schedule
    * Output context is JobContext<TContext> because runtime wraps user context
@@ -128,10 +132,129 @@ export type ScheduleBuilderFactory<TContext, TMeta extends QueueMeta> = {
   cron(pattern: string, options?: { timezone?: string }): ScheduleBuilderDef<TContext, JobContext<TContext>, TMeta>;
 
   /**
-   * Create an interval-based schedule
+   * Create an interval-based schedule (repeating)
    * Output context is JobContext<TContext> because runtime wraps user context
    */
   interval(milliseconds: number): ScheduleBuilderDef<TContext, JobContext<TContext>, TMeta>;
+
+  /**
+   * Create a timeout-based schedule (one-time execution after delay)
+   * Output context is JobContext<TContext> because runtime wraps user context
+   *
+   * @example
+   * ```typescript
+   * // Send reminder email once after 24 hours
+   * const reminder = q.schedule
+   *   .timeout(24 * 60 * 60 * 1000)
+   *   .job(sendReminderJob)
+   *   .data({ userId: 'usr_123' });
+   * ```
+   */
+  timeout(milliseconds: number): ScheduleBuilderDef<TContext, JobContext<TContext>, TMeta>;
+
+  // ============================================
+  // Time-Based Helpers
+  // ============================================
+
+  /**
+   * Every N seconds (requires 6-field cron support in BullMQ)
+   *
+   * @example
+   * ```typescript
+   * q.schedule.everySeconds(5).job(task).data({})  // Every 5 seconds
+   * q.schedule.everySeconds(30).job(task).data({}) // Every 30 seconds
+   * ```
+   */
+  everySeconds(n: number): ScheduleBuilderDef<TContext, JobContext<TContext>, TMeta>;
+
+  /**
+   * Every N minutes
+   *
+   * @example
+   * ```typescript
+   * q.schedule.everyMinutes(5).job(task).data({})  // Every 5 minutes
+   * q.schedule.everyMinutes(15).job(task).data({}) // Every 15 minutes
+   * ```
+   */
+  everyMinutes(n: number): ScheduleBuilderDef<TContext, JobContext<TContext>, TMeta>;
+
+  /**
+   * Every N hours
+   *
+   * @example
+   * ```typescript
+   * q.schedule.everyHours(2).job(task).data({})  // Every 2 hours
+   * q.schedule.everyHours(6).job(task).data({})  // Every 6 hours
+   * ```
+   */
+  everyHours(n: number): ScheduleBuilderDef<TContext, JobContext<TContext>, TMeta>;
+
+  // ============================================
+  // Daily Schedules
+  // ============================================
+
+  /**
+   * Daily at specified time (HH:mm format)
+   *
+   * @example
+   * ```typescript
+   * q.schedule.daily('09:00').job(task).data({})                              // Every day at 9am
+   * q.schedule.daily('14:30', { timezone: 'America/New_York' }).job(task).data({})  // Every day at 2:30pm ET
+   * ```
+   */
+  daily(time: string, options?: { timezone?: string }): ScheduleBuilderDef<TContext, JobContext<TContext>, TMeta>;
+
+  /**
+   * Weekdays (Monday-Friday) at specified time
+   *
+   * @example
+   * ```typescript
+   * q.schedule.weekdays('09:00').job(task).data({})  // Weekdays at 9am
+   * q.schedule.weekdays('17:30').job(task).data({})  // Weekdays at 5:30pm
+   * ```
+   */
+  weekdays(time: string, options?: { timezone?: string }): ScheduleBuilderDef<TContext, JobContext<TContext>, TMeta>;
+
+  /**
+   * Weekends (Saturday-Sunday) at specified time
+   *
+   * @example
+   * ```typescript
+   * q.schedule.weekends('10:00').job(task).data({})  // Weekends at 10am
+   * q.schedule.weekends('14:00').job(task).data({})  // Weekends at 2pm
+   * ```
+   */
+  weekends(time: string, options?: { timezone?: string }): ScheduleBuilderDef<TContext, JobContext<TContext>, TMeta>;
+
+  // ============================================
+  // Weekly/Monthly Schedules
+  // ============================================
+
+  /**
+   * Weekly on specific day at specified time
+   *
+   * @example
+   * ```typescript
+   * q.schedule.weekly('monday', '09:00').job(task).data({})  // Mondays at 9am
+   * q.schedule.weekly('friday', '17:00').job(task).data({})  // Fridays at 5pm
+   * ```
+   */
+  weekly(
+    day: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday',
+    time: string,
+    options?: { timezone?: string },
+  ): ScheduleBuilderDef<TContext, JobContext<TContext>, TMeta>;
+
+  /**
+   * Monthly on specific day at specified time
+   *
+   * @example
+   * ```typescript
+   * q.schedule.monthly(1, '09:00').job(task).data({})   // First day of month at 9am
+   * q.schedule.monthly(15, '12:00').job(task).data({})  // 15th of month at noon
+   * ```
+   */
+  monthly(day: number, time: string, options?: { timezone?: string }): ScheduleBuilderDef<TContext, JobContext<TContext>, TMeta>;
 };
 
 /**
