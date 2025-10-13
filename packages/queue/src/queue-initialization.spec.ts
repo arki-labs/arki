@@ -68,14 +68,8 @@ describe('Queue Initialization', () => {
 
     it('should create queue with custom transformer', () => {
       const customTransformer = {
-        input: {
-          serialize: (data: unknown) => JSON.stringify(data),
-          deserialize: (data: string) => JSON.parse(data),
-        },
-        output: {
-          serialize: (data: unknown) => JSON.stringify(data),
-          deserialize: (data: string) => JSON.parse(data),
-        },
+        serialize: (data: unknown) => JSON.stringify(data),
+        deserialize: (data: unknown) => JSON.parse(data as string),
       };
 
       const q = initQueue.context<TestContext>().create({
@@ -100,7 +94,7 @@ describe('Queue Initialization', () => {
       const job = q.job
         .name('test:simple-job')
         .input(z.object({ message: z.string() }))
-        .handler(async (data, ctx) => {
+        .handler(async (data) => {
           return { success: true, message: data.message };
         });
 
@@ -163,8 +157,8 @@ describe('Queue Initialization', () => {
       const q = initQueue.context<TestContext>().create();
 
       expect(() => {
-        // @ts-expect-error - Testing runtime validation
-        q.job.name('test:missing-input').handler(async () => ({ result: 'test' }));
+        const builder = q.job.name('test:missing-input') as any;
+        builder.handler(async () => ({ result: 'test' }));
       }).toThrow('Input schema is required');
     });
   });
@@ -285,7 +279,7 @@ describe('Job Registration and Execution', () => {
         .name('test:multi-job-1')
         .input(z.object({ id: z.string() }))
         .handler(async (data) => {
-          results.job1.push(data.id);
+          results['job1']!.push(data.id);
           return { processed: data.id };
         });
 
@@ -293,7 +287,7 @@ describe('Job Registration and Execution', () => {
         .name('test:multi-job-2')
         .input(z.object({ value: z.number() }))
         .handler(async (data) => {
-          results.job2.push(`value-${data.value}`);
+          results['job2']!.push(`value-${data.value}`);
           return { doubled: data.value * 2 };
         });
 
@@ -301,7 +295,7 @@ describe('Job Registration and Execution', () => {
         .name('test:multi-job-3')
         .input(z.object({ name: z.string() }))
         .handler(async (data) => {
-          results.job3.push(data.name);
+          results['job3']!.push(data.name);
           return { greeting: `Hello, ${data.name}!` };
         });
 
@@ -331,9 +325,9 @@ describe('Job Registration and Execution', () => {
 
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
-      expect(results.job1).toContain('id-123');
-      expect(results.job2).toContain('value-42');
-      expect(results.job3).toContain('Alice');
+      expect(results['job1']).toContain('id-123');
+      expect(results['job2']).toContain('value-42');
+      expect(results['job3']).toContain('Alice');
 
       await queue.stop();
     }, 15000);
@@ -703,7 +697,7 @@ describe('Retry and Error Handling', () => {
     // Wait for all retry attempts
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
-    const state = await jobInstance.getState();
+    const _state = await jobInstance.getState();
     expect(attemptCount).toBeGreaterThanOrEqual(3);
 
     // Check that retries happened with delays
@@ -751,7 +745,7 @@ describe('Retry and Error Handling', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const jobInstance = await job._internal._queue!.add('test', { id: 'test-maxdelay' });
+    const _jobInstance = await job._internal._queue!.add('test', { id: 'test-maxdelay' });
 
     await new Promise((resolve) => setTimeout(resolve, 5000));
 

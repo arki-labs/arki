@@ -686,7 +686,7 @@ describe('Edge Cases and Boundary Conditions', () => {
 });
 
 describe('Real-World Scenarios', () => {
-  it('should implement AWS recommended decorrelated jitter correctly', () => {
+  it('should implement AWS recommended decorrelated jitter correctly', async () => {
     const strategy = createBackoffStrategy({
       type: 'decorrelated-jitter',
       delay: 1000,
@@ -696,7 +696,7 @@ describe('Real-World Scenarios', () => {
     // Each delay should be between min and previous * multiplier
     const delays: number[] = [];
     for (let i = 0; i < 10; i++) {
-      delays.push(strategy(i));
+      delays.push(await strategy(i));
     }
 
     // All delays should be >= base delay

@@ -195,8 +195,8 @@ export type BackoffStrategy =
 export type RetryConfig = {
   /** Maximum number of retry attempts */
   attempts: number;
-  /** Backoff strategy for retries */
-  backoff: BackoffStrategy;
+  /** Backoff strategy for retries (optional, defaults to exponential) */
+  backoff?: BackoffStrategy;
   /** Maximum delay cap in milliseconds (optional) */
   maxDelay?: number;
 };
