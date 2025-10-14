@@ -9,7 +9,7 @@ import { authFeatures } from './auth';
 import { dbFeatures } from './db';
 import { EVENT_STORE_URL_VARIANTS, eventSourcingFeatures } from './event-sourcing';
 import { kvFeatures } from './kv';
-import type { ExtractAllRouterNames, PluginConfig, PluginRouterRecord } from './plugin';
+import type { ExtractAllRouterTypes, PluginConfig } from './plugin';
 import { PluginRegistry } from './plugin';
 import { trpcFeatures } from './trpc';
 import type {
@@ -310,16 +310,16 @@ export class Dot<
    * @example
    * .registerPlugins([authPlugin, trackingPlugin, socialPlugin])
    */
-  registerPlugins<const Plugins extends readonly PluginConfig<TSchema, string, string>[]>(
+  registerPlugins<const Plugins extends readonly PluginConfig<TSchema, string, string, Record<string, any>>[]>(
     plugins: Plugins
   ): Dot<
     TAppName,
-    TRouters & PluginRouterRecord<ExtractAllRouterNames<Plugins>>,
+    TRouters & ExtractAllRouterTypes<Plugins>,
     TSchema,
     TRepositories,
     TEnv
   > {
-    type MergedRouters = TRouters & PluginRouterRecord<ExtractAllRouterNames<Plugins>>;
+    type MergedRouters = TRouters & ExtractAllRouterTypes<Plugins>;
 
     const newRegistry = new PluginRegistry<TSchema>();
     // Spread to convert readonly array to mutable array

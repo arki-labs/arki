@@ -83,6 +83,7 @@ export type PluginConfig<
   TSchema extends SchemaInterface = SchemaInterface,
   TName extends string = string,
   TRouterNames extends string = never,
+  TRouterTypes extends Record<string, AnyRouter> = Record<never, never>,
 > = {
   /**
    * Unique identifier for this plugin
@@ -122,9 +123,15 @@ export type PluginConfig<
    * @internal
    * Phantom type to track registered router names at the type level.
    * This property doesn't exist at runtime but is required for type inference.
-   * Use 'never' type assertion to satisfy the compiler.
    */
   _routerNames: TRouterNames;
+
+  /**
+   * @internal
+   * Phantom type to track actual router types at the type level.
+   * This property doesn't exist at runtime but is required for type inference.
+   */
+  _routerTypes: TRouterTypes;
 }
 
 
@@ -142,6 +149,21 @@ export type ExtractAllRouterNames<Plugins extends readonly any[]> = Plugins exte
 ]
   ? ExtractRouterNames<First> | ExtractAllRouterNames<Rest>
   : never;
+
+/**
+ * Extract router types from a single plugin
+ */
+export type ExtractRouterTypes<P> = P extends PluginConfig<any, any, any, infer Types> ? Types : Record<never, never>;
+
+/**
+ * Extract all router types from an array of plugins recursively
+ */
+export type ExtractAllRouterTypes<Plugins extends readonly any[]> = Plugins extends readonly [
+  infer First,
+  ...infer Rest,
+]
+  ? ExtractRouterTypes<First> & ExtractAllRouterTypes<Rest>
+  : Record<never, never>;
 
 /**
  * Create a router record type from router names
@@ -171,7 +193,8 @@ export class PluginBuilder<
   TSchema extends SchemaInterface = SchemaInterface,
   TName extends string = string,
   TRouterNames extends string = never,
-> implements PluginConfig<TSchema, TName, TRouterNames>
+  TRouterTypes extends Record<string, AnyRouter> = Record<never, never>,
+> implements PluginConfig<TSchema, TName, TRouterNames, TRouterTypes>
 {
   readonly name: TName;
   #dependencies?: string[];
@@ -190,6 +213,12 @@ export class PluginBuilder<
    * @internal
    */
   _routerNames!: TRouterNames;
+
+  /**
+   * Phantom property for type inference - never accessed at runtime
+   * @internal
+   */
+  _routerTypes!: TRouterTypes;
 
   constructor(name: TName) {
     this.name = name;
@@ -230,8 +259,13 @@ export class PluginBuilder<
    * .router('tracking.movies', moviesRouter)  // Explicit name
    * ```
    */
-  router(router: AnyRouter): PluginBuilder<TSchema, TName, TRouterNames | TName>;
-  router<N extends string>(name: N, router: AnyRouter): PluginBuilder<TSchema, TName, TRouterNames | N>;
+  router<R extends AnyRouter>(
+    router: R,
+  ): PluginBuilder<TSchema, TName, TRouterNames | TName, TRouterTypes & Record<TName, R>>;
+  router<N extends string, R extends AnyRouter>(
+    name: N,
+    router: R,
+  ): PluginBuilder<TSchema, TName, TRouterNames | N, TRouterTypes & Record<N, R>>;
   router(nameOrRouter: string | AnyRouter, maybeRouter?: AnyRouter) {
     if (typeof nameOrRouter === 'string') {
       this.#routers[nameOrRouter] = maybeRouter!;
@@ -396,8 +430,8 @@ export class PluginBuilder<
  */
 export function definePlugin<TName extends string>(
   name: TName,
-): PluginBuilder<SchemaInterface, TName, never> {
-  return new PluginBuilder<SchemaInterface, TName, never>(name);
+): PluginBuilder<SchemaInterface, TName, never, Record<never, never>> {
+  return new PluginBuilder<SchemaInterface, TName, never, Record<never, never>>(name);
 }
 
 /**
