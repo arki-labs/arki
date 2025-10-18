@@ -84,6 +84,7 @@ export type PluginConfig<
   TName extends string = string,
   TRouterNames extends string = never,
   TRouterTypes extends Record<string, AnyRouter> = Record<never, never>,
+  TRepositoryTypes extends Record<string, Repository> = Record<never, never>,
 > = {
   /**
    * Unique identifier for this plugin
@@ -132,6 +133,13 @@ export type PluginConfig<
    * This property doesn't exist at runtime but is required for type inference.
    */
   _routerTypes: TRouterTypes;
+
+  /**
+   * @internal
+   * Phantom type to track actual repository types at the type level.
+   * This property doesn't exist at runtime but is required for type inference.
+   */
+  _repositoryTypes: TRepositoryTypes;
 }
 
 
@@ -166,6 +174,21 @@ export type ExtractAllRouterTypes<Plugins extends readonly any[]> = Plugins exte
   : Record<never, never>;
 
 /**
+ * Extract repository types from a single plugin
+ */
+export type ExtractRepositoryTypes<P> = P extends PluginConfig<any, any, any, any, infer Types> ? Types : Record<never, never>;
+
+/**
+ * Extract all repository types from an array of plugins recursively
+ */
+export type ExtractAllRepositoryTypes<Plugins extends readonly any[]> = Plugins extends readonly [
+  infer First,
+  ...infer Rest,
+]
+  ? ExtractRepositoryTypes<First> & ExtractAllRepositoryTypes<Rest>
+  : Record<never, never>;
+
+/**
  * Create a router record type from router names
  * Uses a mapped type instead of Record to enable autocomplete
  */
@@ -194,7 +217,8 @@ export class PluginBuilder<
   TName extends string = string,
   TRouterNames extends string = never,
   TRouterTypes extends Record<string, AnyRouter> = Record<never, never>,
-> implements PluginConfig<TSchema, TName, TRouterNames, TRouterTypes>
+  TRepositoryTypes extends Record<string, Repository> = Record<never, never>,
+> implements PluginConfig<TSchema, TName, TRouterNames, TRouterTypes, TRepositoryTypes>
 {
   readonly name: TName;
   #dependencies?: string[];
@@ -219,6 +243,12 @@ export class PluginBuilder<
    * @internal
    */
   _routerTypes!: TRouterTypes;
+
+  /**
+   * Phantom property for type inference - never accessed at runtime
+   * @internal
+   */
+  _repositoryTypes!: TRepositoryTypes;
 
   constructor(name: TName) {
     this.name = name;
@@ -298,9 +328,14 @@ export class PluginBuilder<
    * .repository('tracking.movies', createMoviesRepository)  // Explicit name
    * ```
    */
-  repository(factory: RepositoryFactory): this;
-  repository(name: string, factory: RepositoryFactory): this;
-  repository(nameOrFactory: string | RepositoryFactory, maybeFactory?: RepositoryFactory): this {
+  repository<R extends Repository>(
+    factory: (db: NodePgDatabase<SchemaInterface>) => R,
+  ): PluginBuilder<TSchema, TName, TRouterNames, TRouterTypes, TRepositoryTypes & Record<TName, R>>;
+  repository<N extends string, R extends Repository>(
+    name: N,
+    factory: (db: NodePgDatabase<SchemaInterface>) => R,
+  ): PluginBuilder<TSchema, TName, TRouterNames, TRouterTypes, TRepositoryTypes & Record<N, R>>;
+  repository(nameOrFactory: string | RepositoryFactory, maybeFactory?: RepositoryFactory) {
     if (typeof nameOrFactory === 'string') {
       this.#repositories.set(nameOrFactory, maybeFactory!);
     } else {
@@ -430,8 +465,8 @@ export class PluginBuilder<
  */
 export function definePlugin<TName extends string>(
   name: TName,
-): PluginBuilder<SchemaInterface, TName, never, Record<never, never>> {
-  return new PluginBuilder<SchemaInterface, TName, never, Record<never, never>>(name);
+): PluginBuilder<SchemaInterface, TName, never, Record<never, never>, Record<never, never>> {
+  return new PluginBuilder<SchemaInterface, TName, never, Record<never, never>, Record<never, never>>(name);
 }
 
 /**

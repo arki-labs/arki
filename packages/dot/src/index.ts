@@ -9,7 +9,7 @@ import { authFeatures } from './auth';
 import { dbFeatures } from './db';
 import { EVENT_STORE_URL_VARIANTS, eventSourcingFeatures } from './event-sourcing';
 import { kvFeatures } from './kv';
-import type { ExtractAllRouterTypes, PluginConfig } from './plugin';
+import type { ExtractAllRepositoryTypes, ExtractAllRouterTypes, PluginConfig } from './plugin';
 import { PluginRegistry } from './plugin';
 import { trpcFeatures } from './trpc';
 import type {
@@ -306,31 +306,32 @@ export class Dot<
    * Plugins will be initialized during bootstrap in dependency order.
    *
    * @param plugins Array of plugin configurations
-   * @returns A new Dot instance with the plugins registered and router types merged
+   * @returns A new Dot instance with the plugins registered, router types and repository types merged
    * @example
    * .registerPlugins([authPlugin, trackingPlugin, socialPlugin])
    */
-  registerPlugins<const Plugins extends readonly PluginConfig<TSchema, string, string, Record<string, any>>[]>(
+  registerPlugins<const Plugins extends readonly PluginConfig<TSchema, string, string, Record<string, any>, Record<string, any>>[]>(
     plugins: Plugins
   ): Dot<
     TAppName,
     TRouters & ExtractAllRouterTypes<Plugins>,
     TSchema,
-    TRepositories,
+    TRepositories & ExtractAllRepositoryTypes<Plugins>,
     TEnv
   > {
     type MergedRouters = TRouters & ExtractAllRouterTypes<Plugins>;
+    type MergedRepositories = TRepositories & ExtractAllRepositoryTypes<Plugins>;
 
     const newRegistry = new PluginRegistry<TSchema>();
     // Spread to convert readonly array to mutable array
     newRegistry.add([...plugins]);
 
     // Type assertion is necessary here because:
-    // 1. Plugin routers are registered in the plugin registry
+    // 1. Plugin routers and repositories are registered in the plugin registry
     // 2. They will be merged during bootstrap()
     // 3. The type system can't verify this multi-step process
-    // 4. We're promising the routers will be available after bootstrap
-    return this.createNew<MergedRouters>({
+    // 4. We're promising the routers and repositories will be available after bootstrap
+    return this.createNew<MergedRouters, TSchema, MergedRepositories>({
       pluginRegistry: newRegistry,
     });
   }
