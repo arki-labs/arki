@@ -5,9 +5,14 @@ import superjson from 'superjson';
 import { RateLimitExceededError } from '@arki/kv/errors';
 import { ZodError } from '@arki/schema';
 
-import type { DotAuth, DotSession } from './auth';
-import { authFeatures } from './auth';
-import type { AuthConfig, BaseTRPCContext, RouterRecord, SchemaInterface, SessionUser, TRPCOptions } from './types';
+import type { DotAuth, DotSession } from '../auth';
+import { authFeatures } from '../auth';
+import type { AuthConfig, BaseTRPCContext, RouterRecord, SchemaInterface, SessionUser, TRPCOptions } from '../types';
+
+/**
+ * @deprecated This is legacy API - use `createDotProcedures` from './init' instead
+ * This module is kept for backward compatibility only.
+ */
 
 /**
  * TRPC functionality for the Dot framework.

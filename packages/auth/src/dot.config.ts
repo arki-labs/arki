@@ -32,7 +32,7 @@ export function initAuth(
 
     resendApiKey?: string;
   },
-) {
+): ReturnType<typeof betterAuth> {
   const options = {
     baseUrl: env.NEXT_PUBLIC_URL,
     productionUrl: env.PRODUCTION_URL || env.NEXT_PUBLIC_URL,

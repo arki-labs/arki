@@ -10,6 +10,7 @@ import type {
   Repository,
   SchemaInterface,
 } from './types';
+import type { TRPCKit, PluginSetupContext } from './trpc';
 
 /**
  * Repository factory that accepts any schema type
@@ -104,6 +105,32 @@ export type PluginConfig<
    * ```
    */
   setup: (context: PluginContext<TSchema>) => void | Promise<void>;
+
+  /**
+   * Optional: Router factory function that receives tRPC procedures.
+   * This is the new, portable way to define routers.
+   *
+   * @example
+   * ```typescript
+   * routerFactory: (procedures) => procedures.router({
+   *   getUser: procedures.publicProcedure.query(async () => { ... }),
+   * })
+   * ```
+   */
+  routerFactory?: (procedures: TRPCKit) => AnyRouter;
+
+  /**
+   * Optional: Lifecycle hook called during plugin setup.
+   * Receives procedures and initialized services.
+   *
+   * @example
+   * ```typescript
+   * onSetup: async ({ procedures, db, kv }) => {
+   *   // Custom setup logic
+   * }
+   * ```
+   */
+  onSetup?: (ctx: PluginSetupContext<TSchema>) => Promise<void> | void;
 
   /**
    * Optional: Plugin dependencies (load order)
@@ -225,12 +252,14 @@ export class PluginBuilder<
   #metadata?: { version?: string; description?: string; author?: string };
 
   #routers: Record<string, AnyRouter> = {};
+  #routerFactories: Record<string, (procedures: TRPCKit) => AnyRouter> = {};
   #schemas: Record<string, unknown> = {};
   #repositories = new Map<string, RepositoryFactory>();
   #projections: BaseProjectionDefinition[] = [];
   #commands: CommandHandlerRegistration[] = [];
   #jobs: Record<string, unknown> = {};
   #processManagers: unknown[] = [];
+  #onSetupHandler?: (ctx: PluginSetupContext<TSchema>) => Promise<void> | void;
 
   /**
    * Phantom property for type inference - never accessed at runtime
@@ -261,6 +290,29 @@ export class PluginBuilder<
 
   get metadata(): { version?: string; description?: string; author?: string } | undefined {
     return this.#metadata;
+  }
+
+  get routerFactory(): ((procedures: TRPCKit) => AnyRouter) | undefined {
+    // If we have router factories, return a combined factory
+    const factories = Object.entries(this.#routerFactories);
+    if (factories.length === 0) return undefined;
+
+    if (factories.length === 1) {
+      return factories[0]![1];
+    }
+
+    // Multiple factories - need to merge routers
+    return (procedures) => {
+      const routers: Record<string, AnyRouter> = {};
+      for (const [name, factory] of factories) {
+        routers[name] = factory(procedures);
+      }
+      return procedures.mergeRouters(...Object.values(routers));
+    };
+  }
+
+  get onSetup(): ((ctx: PluginSetupContext<TSchema>) => Promise<void> | void) | undefined {
+    return this.#onSetupHandler;
   }
 
   /**
@@ -302,6 +354,59 @@ export class PluginBuilder<
     } else {
       this.#routers[this.name] = nameOrRouter;
     }
+    return this;
+  }
+
+  /**
+   * Define a tRPC router using a factory function (NEW - portable pattern)
+   * The factory receives tRPC procedures from the framework, making plugins portable.
+   *
+   * @param factory - Factory function that receives procedures and returns a router
+   * @param name - Optional explicit name (defaults to plugin name)
+   * @example
+   * ```typescript
+   * .defineRouter((procedures) => procedures.router({
+   *   getUser: procedures.publicProcedure.query(async ({ ctx }) => { ... }),
+   *   createUser: procedures.protectedProcedure.mutation(async ({ ctx, input }) => { ... }),
+   * }))
+   * ```
+   */
+  defineRouter<R extends AnyRouter>(
+    factory: (procedures: TRPCKit) => R,
+  ): PluginBuilder<TSchema, TName, TRouterNames | TName, TRouterTypes & Record<TName, R>>;
+  defineRouter<N extends string, R extends AnyRouter>(
+    name: N,
+    factory: (procedures: TRPCKit) => R,
+  ): PluginBuilder<TSchema, TName, TRouterNames | N, TRouterTypes & Record<N, R>>;
+  defineRouter(
+    nameOrFactory: string | ((procedures: TRPCKit) => AnyRouter),
+    maybeFactory?: (procedures: TRPCKit) => AnyRouter,
+  ) {
+    if (typeof nameOrFactory === 'string') {
+      this.#routerFactories[nameOrFactory] = maybeFactory!;
+    } else {
+      this.#routerFactories[this.name] = nameOrFactory;
+    }
+    return this;
+  }
+
+  /**
+   * Configure plugin initialization hook (NEW - advanced use cases)
+   * Called during plugin setup with access to procedures and services.
+   *
+   * @param handler - Setup function that receives plugin setup context
+   * @example
+   * ```typescript
+   * .configure(async ({ procedures, db, kv }) => {
+   *   // Custom initialization logic
+   *   console.log('Plugin initialized with procedures:', procedures);
+   * })
+   * ```
+   */
+  configure(
+    handler: (ctx: PluginSetupContext<TSchema>) => Promise<void> | void,
+  ): this {
+    this.#onSetupHandler = handler;
     return this;
   }
 
@@ -537,9 +642,42 @@ export class PluginRegistry<TSchema extends SchemaInterface = SchemaInterface> {
   }
 
   /**
-   * Initialize all plugins in dependency order
+   * Build routers from plugin factories
+   * This should be called after plugins are initialized but before the app starts
+   * @param procedures - tRPC procedures from the framework
    */
-  async initialize(services?: PluginContext<TSchema>['services']) {
+  buildRoutersFromFactories(procedures: TRPCKit) {
+    const orderedPlugins = this.getOrderedPlugins();
+
+    for (const plugin of orderedPlugins) {
+      // Skip plugins without router factories
+      if (!plugin.routerFactory) continue;
+
+      try {
+        const router = plugin.routerFactory(procedures);
+
+        // Register the router under the plugin name
+        if (this.routers[plugin.name]) {
+          throw new Error(`Router "${plugin.name}" is already registered`);
+        }
+        this.routers[plugin.name] = router;
+      } catch (error) {
+        throw new Error(
+          `Failed to build router for plugin "${plugin.name}": ${error instanceof Error ? error.message : 'Unknown error'}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Initialize all plugins in dependency order
+   * @param services - Optional services to provide to plugins
+   * @param setupContext - Optional setup context with procedures for onSetup hooks
+   */
+  async initialize(
+    services?: PluginContext<TSchema>['services'],
+    setupContext?: PluginSetupContext<TSchema>,
+  ) {
     const orderedPlugins = this.getOrderedPlugins();
 
     const context: PluginContext<TSchema> = {
@@ -573,10 +711,16 @@ export class PluginRegistry<TSchema extends SchemaInterface = SchemaInterface> {
       services,
     };
 
-    // Execute each plugin's setup function
+    // Execute each plugin's setup function and onSetup hooks
     for (const plugin of orderedPlugins) {
       try {
+        // Call the standard setup function (registers routers, schemas, etc.)
         await plugin.setup(context);
+
+        // Call the onSetup hook if present and setup context is provided
+        if (plugin.onSetup && setupContext) {
+          await plugin.onSetup(setupContext);
+        }
       } catch (error) {
         throw new Error(
           `Failed to initialize plugin "${plugin.name}": ${error instanceof Error ? error.message : 'Unknown error'}`,

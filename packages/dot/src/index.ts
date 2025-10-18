@@ -11,7 +11,8 @@ import { EVENT_STORE_URL_VARIANTS, eventSourcingFeatures } from './event-sourcin
 import { kvFeatures } from './kv';
 import type { ExtractAllRepositoryTypes, ExtractAllRouterTypes, PluginConfig } from './plugin';
 import { PluginRegistry } from './plugin';
-import { trpcFeatures } from './trpc';
+import { createDotProcedures, trpcFeatures } from './trpc';
+import type { PluginSetupContext } from './trpc/types';
 import type {
   AuthConfig,
   BaseProjectionDefinition,
@@ -376,23 +377,7 @@ export class Dot<
    *
    * @returns An object containing the initialized application components and utilities.
    */
-  async bootstrap(): Promise<{
-    name: TAppName;
-    router: TRouters | undefined;
-    db: NodePgDatabase<TSchema> | undefined;
-    eventStore: EventStore | undefined;
-    kv: KV | undefined;
-    env: TEnv;
-    repositories: TRepositories;
-    bus: MessageBus;
-    createProjection: ReturnType<typeof dbFeatures.createProjectionHelper> | undefined;
-    createWithRepoProjection: ReturnType<typeof dbFeatures.createWithRepoProjectionHelper<TRepositories>> | undefined;
-    createCaller: unknown;
-    trpc: unknown;
-    createContext: (opts: { headers: Headers; session: DotSession | null }) => Promise<unknown>;
-    auth: DotAuth | undefined;
-    plugins: PluginRegistry<TSchema>;
-  }> {
+  async bootstrap() {
     // Create a mutable working copy for plugin merging
     let workingRouters = this.#routers ? { ...this.#routers } : {};
     let workingDbConfig = this.#dbConfig ? { ...this.#dbConfig } : null;
@@ -407,15 +392,37 @@ export class Dot<
       const pluginEventStore = this.#initEventSourcing();
       const pluginMessageBus = this.#initMessageBus(pluginEventStore);
 
-      // Initialize plugins with services
-      await this.#pluginRegistry.initialize({
+      // Create tRPC procedures for portable plugins
+      // Plugins use these procedures to define routers without importing app-specific code
+      const procedures = createDotProcedures({
+        isDevelopment: this.#env['NODE_ENV'] === 'development',
+        env: this.#env,
+      });
+
+      // Create setup context with procedures and services for plugin onSetup hooks
+      const setupContext: PluginSetupContext<TSchema> = {
+        procedures,
         db: pluginDb,
         kv: pluginKv,
         eventStore: pluginEventStore,
         messageBus: pluginMessageBus,
-      });
+      };
 
-      // Get plugin registrations
+      // Initialize plugins with services and setup context
+      await this.#pluginRegistry.initialize(
+        {
+          db: pluginDb,
+          kv: pluginKv,
+          eventStore: pluginEventStore,
+          messageBus: pluginMessageBus,
+        },
+        setupContext,
+      );
+
+      // Build routers from factory functions (new portable pattern)
+      this.#pluginRegistry.buildRoutersFromFactories(procedures);
+
+      // Get plugin registrations (includes both direct routers and factory-built routers)
       const registrations = this.#pluginRegistry.getRegistrations();
 
       // Merge plugin registrations with explicit config
@@ -591,6 +598,19 @@ export * from './types';
 
 // Re-export plugin system
 export { definePlugin, PluginBuilder, type PluginConfig, type PluginContext } from './plugin';
+
+// Re-export tRPC module (new portable API)
+export { createDotProcedures } from './trpc';
+export type {
+  DotContext,
+  TRPCKit,
+  TRPCKitWithT,
+  PluginSetupContext,
+} from './trpc';
+export type {
+  CreateDotProceduresOptions,
+  DotTRPCMiddlewareConfig,
+} from './trpc/types';
 
 // Re-export auth module
 export {
