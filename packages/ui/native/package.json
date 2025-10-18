@@ -1,0 +1,61 @@
+{
+  "name": "@arki/native-ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./components/*": "./src/components/*.tsx",
+    "./primitives/*": "./src/primitives/*/index.tsx",
+    "./lib/*": "./src/lib/*.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rn-primitives/accordion": "catalog:expo",
+    "@rn-primitives/alert-dialog": "catalog:expo",
+    "@rn-primitives/aspect-ratio": "catalog:expo",
+    "@rn-primitives/avatar": "catalog:expo",
+    "@rn-primitives/checkbox": "catalog:expo",
+    "@rn-primitives/collapsible": "catalog:expo",
+    "@rn-primitives/context-menu": "catalog:expo",
+    "@rn-primitives/dialog": "catalog:expo",
+    "@rn-primitives/dropdown-menu": "catalog:expo",
+    "@rn-primitives/hover-card": "catalog:expo",
+    "@rn-primitives/label": "catalog:expo",
+    "@rn-primitives/menubar": "catalog:expo",
+    "@rn-primitives/popover": "catalog:expo",
+    "@rn-primitives/portal": "catalog:expo",
+    "@rn-primitives/progress": "catalog:expo",
+    "@rn-primitives/radio-group": "catalog:expo",
+    "@rn-primitives/select": "catalog:expo",
+    "@rn-primitives/separator": "catalog:expo",
+    "@rn-primitives/slot": "catalog:expo",
+    "@rn-primitives/switch": "catalog:expo",
+    "@rn-primitives/tabs": "catalog:expo",
+    "@rn-primitives/toggle": "catalog:expo",
+    "@rn-primitives/toggle-group": "catalog:expo",
+    "@rn-primitives/tooltip": "catalog:expo",
+    "class-variance-authority": "catalog:styling",
+    "clsx": "catalog:styling",
+    "lucide-react-native": "catalog:expo",
+    "tailwind-merge": "catalog:styling"
+  },
+  "peerDependencies": {
+    "react": "catalog:react19",
+    "react-native": "catalog:expo",
+    "react-native-reanimated": "catalog:expo",
+    "react-native-gesture-handler": "catalog:expo",
+    "react-native-svg": "catalog:expo"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@types/react": "catalog:react19",
+    "eslint": "catalog:",
+    "nativewind": "catalog:expo",
+    "typescript": "catalog:"
+  }
+}
