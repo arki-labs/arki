@@ -382,7 +382,7 @@ const app = createDot('my-app')
 const { auth, trpc } = app;
 
 // Use in tRPC context - auth is already integrated
-export const createTRPCContext = async opts => {
+export const createRPCContext = async opts => {
   const session = await auth.api.getSession(opts.headers);
 
   return {

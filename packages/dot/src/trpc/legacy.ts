@@ -29,7 +29,7 @@ export const trpcFeatures = {
    * @param authConfig The authentication configuration
    * @param trpcOptions The tRPC options
    */
-  createTRPCContextFactory<TSchema extends SchemaInterface>(
+  createRPCContextFactory<TSchema extends SchemaInterface>(
     dbConfig: { url?: string; schema: TSchema; debug?: boolean; repositories?: Record<string, any> } | null,
     initDrizzleFn: () => any,
     initKvFn: () => any,
@@ -42,7 +42,7 @@ export const trpcFeatures = {
     return async (opts: { headers: Headers; session: DotSession | null }) => {
       const { headers, session } = opts;
       const authToken = headers.get('Authorization') ?? null;
-      const source = headers.get('x-trpc-source') ?? 'unknown';
+      const source = headers.get('x-rpc-source') ?? 'unknown';
 
       const db = initDrizzleFn();
 

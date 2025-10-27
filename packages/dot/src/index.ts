@@ -350,8 +350,8 @@ export class Dot<
   /**
    * @internal Creates a TRPC context based on the provided options and Dot configuration.
    */
-  #createTRPCContext = (opts: { headers: Headers; session: DotSession | null }) => {
-    return trpcFeatures.createTRPCContextFactory<TSchema>(
+  #createRPCContext = (opts: { headers: Headers; session: DotSession | null }) => {
+    return trpcFeatures.createRPCContextFactory<TSchema>(
       this.#dbConfig,
       () => this.#initDrizzle(),
       () => this.#initKv(),
@@ -517,7 +517,7 @@ export class Dot<
       /** All tRPC procedures and middlewares */
       trpc: trpc?.procedures,
       /** Custom context creation function that can be used in API routes */
-      createContext: this.#createTRPCContext,
+      createContext: this.#createRPCContext,
       /** The initialized DotAuth instance with better-auth integration */
       auth: dotAuth,
       /** Plugin registry for inspection */
