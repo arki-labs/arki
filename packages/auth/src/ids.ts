@@ -1,7 +1,5 @@
 import { createIdFactory } from '@arki/db/id-factory';
 
-import { User } from './schema';
-
 // ID types
 export type UserId = `usr_${string}`;
 export type UserVerificationId = `verif_${string}`;
@@ -42,6 +40,3 @@ export const sessionIdFactory = sessionId;
 export const roleIdFactory = roleId;
 export const permissionIdFactory = permissionId;
 export const accountIdFactory = accountId;
-
-// Export foreign keys factories
-export const userForeignKeys = userId.createForeignKeyFactory(() => User.id);
