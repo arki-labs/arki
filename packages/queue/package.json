@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist",
-    "dev": "tsc --watch",
+    "dev": "tsc",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "lint": "eslint .",
     "test": "vitest run",
