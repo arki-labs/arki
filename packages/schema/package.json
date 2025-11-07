@@ -26,6 +26,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "drizzle-zod": "catalog:drizzle",
     "zod": "catalog:",
     "zod-form-data": "catalog:validation"
   },
