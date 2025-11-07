@@ -5,6 +5,7 @@ A type-safe background job processing library for TypeScript applications, inspi
 ## ⚠️ Breaking Changes in v2.0
 
 Version 2.0 is a complete architectural rewrite inspired by tRPC. The new API focuses on:
+
 - **Builder Patterns**: tRPC-inspired `initQueue` and chainable builders
 - **Middleware System**: Composable middleware for cross-cutting concerns
 - **Type-Safe Context**: Full type safety through middleware chain
@@ -30,13 +31,8 @@ pnpm add @arki/queue bullmq ioredis zod superjson
 ## Quick Start
 
 ```typescript
-import { z } from 'zod/v4';
-import {
-  initQueue,
-  errorHandlingMiddleware,
-  loggingMiddleware,
-  timingMiddleware
-} from '@arki/queue';
+import { errorHandlingMiddleware, initQueue, loggingMiddleware, timingMiddleware } from '@arki/queue';
+import { z } from '@arki/schema';
 
 // 1. Define your application context type
 type AppContext = {
@@ -52,26 +48,23 @@ const createContext = (): AppContext => ({
 });
 
 // 2. Initialize queue with context
-const q = initQueue
-  .context<AppContext>()
-  .create({
-    transformer: superjson, // Optional: for complex types
-  });
+const q = initQueue.context<AppContext>().create({
+  transformer: superjson, // Optional: for complex types
+});
 
 // 3. Create job builders with middleware
-const baseJob = q.job
-  .use(errorHandlingMiddleware())
-  .use(timingMiddleware())
-  .use(loggingMiddleware());
+const baseJob = q.job.use(errorHandlingMiddleware()).use(timingMiddleware()).use(loggingMiddleware());
 
 // 4. Define jobs using chainable API
 const sendEmail = baseJob
   .name('notifications:send-email')
-  .input(z.object({
-    to: z.string().email(),
-    subject: z.string(),
-    body: z.string(),
-  }))
+  .input(
+    z.object({
+      to: z.string().email(),
+      subject: z.string(),
+      body: z.string(),
+    }),
+  )
   .options({
     maxParallelism: 50,
     retry: {
@@ -117,13 +110,11 @@ Similar to tRPC's `initTRPC`, `initQueue` is the starting point:
 
 ```typescript
 // With context type
-const q = initQueue
-  .context<AppContext>()
-  .create({
-    transformer: superjson,
-    errorFormatter: (error) => error,
-    isDev: process.env.NODE_ENV === 'development',
-  });
+const q = initQueue.context<AppContext>().create({
+  transformer: superjson,
+  errorFormatter: error => error,
+  isDev: process.env.NODE_ENV === 'development',
+});
 
 // Without context (uses empty context)
 const q = initQueue.create();
@@ -135,10 +126,7 @@ Job builders are similar to tRPC procedures. They can be composed with middlewar
 
 ```typescript
 // Base job with common middleware
-const baseJob = q.job
-  .use(errorHandlingMiddleware())
-  .use(timingMiddleware())
-  .use(loggingMiddleware());
+const baseJob = q.job.use(errorHandlingMiddleware()).use(timingMiddleware()).use(loggingMiddleware());
 
 // Extend with more middleware
 const authenticatedJob = baseJob.use(authMiddleware);
@@ -160,31 +148,29 @@ Middleware can transform context and add cross-cutting concerns:
 
 ```typescript
 // Custom middleware that adds a user to context
-const authMiddleware = q.middleware<AppContext & { user: User }>(
-  async ({ ctx, data, next }) => {
-    // Extract user ID from data
-    const userId = (data as any).userId;
+const authMiddleware = q.middleware<AppContext & { user: User }>(async ({ ctx, data, next }) => {
+  // Extract user ID from data
+  const userId = (data as any).userId;
 
-    if (!userId) {
-      throw new Error('User ID is required');
-    }
-
-    // Fetch user
-    const user = await ctx.db.users.findById(userId);
-
-    if (!user) {
-      throw new Error('User not found');
-    }
-
-    // Add user to context
-    return next({
-      ctx: {
-        ...ctx,
-        user,
-      },
-    });
+  if (!userId) {
+    throw new Error('User ID is required');
   }
-);
+
+  // Fetch user
+  const user = await ctx.db.users.findById(userId);
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Add user to context
+  return next({
+    ctx: {
+      ...ctx,
+      user,
+    },
+  });
+});
 ```
 
 **Standard Middleware:**
@@ -203,12 +189,9 @@ Schedules run jobs on a recurring basis:
 
 ```typescript
 // Wrap an existing job
-const dailyReport = q.schedule
-  .cron('0 9 * * *', { timezone: 'America/New_York' })
-  .job(generateReport)
-  .data({
-    reportType: 'daily',
-  });
+const dailyReport = q.schedule.cron('0 9 * * *', { timezone: 'America/New_York' }).job(generateReport).data({
+  reportType: 'daily',
+});
 
 // Inline handler with middleware
 const hourlySync = q.schedule
@@ -255,6 +238,7 @@ const orderFlow = q.flow
 ```
 
 **Flow features:**
+
 - Automatic dependency validation (no circular dependencies)
 - Type-safe step IDs
 - Parallel execution (steps with same dependencies run in parallel)
@@ -321,40 +305,36 @@ const jobWithPerformance = q.job
 
 ```typescript
 // Timing middleware with custom behavior
-const customTimingMiddleware = q.middleware(
-  async ({ ctx, next, job }) => {
-    const start = Date.now();
-    const result = await next();
-    const duration = Date.now() - start;
+const customTimingMiddleware = q.middleware(async ({ ctx, next, job }) => {
+  const start = Date.now();
+  const result = await next();
+  const duration = Date.now() - start;
 
-    console.log(`[${job.name}] took ${duration}ms`);
+  console.log(`[${job.name}] took ${duration}ms`);
 
-    // Store timing in database
-    await ctx.db.metrics.create({
-      job: job.name,
-      duration,
-      timestamp: new Date(),
-    });
+  // Store timing in database
+  await ctx.db.metrics.create({
+    job: job.name,
+    duration,
+    timestamp: new Date(),
+  });
 
-    return result;
-  }
-);
+  return result;
+});
 
 // Rate limiting middleware
-const rateLimitMiddleware = q.middleware(
-  async ({ ctx, data, next }) => {
-    const key = `rate-limit:${(data as any).userId}`;
-    const count = await ctx.kv.get(key);
+const rateLimitMiddleware = q.middleware(async ({ ctx, data, next }) => {
+  const key = `rate-limit:${(data as any).userId}`;
+  const count = await ctx.kv.get(key);
 
-    if (count && count > 100) {
-      throw new Error('Rate limit exceeded');
-    }
-
-    await ctx.kv.set(key, (count || 0) + 1, 60); // 1 minute TTL
-
-    return next();
+  if (count && count > 100) {
+    throw new Error('Rate limit exceeded');
   }
-);
+
+  await ctx.kv.set(key, (count || 0) + 1, 60); // 1 minute TTL
+
+  return next();
+});
 ```
 
 ### Complex Flow Example
@@ -419,6 +399,7 @@ await queue.stop();
 
 **Registry traversal:**
 The `register` method automatically traverses nested registries and registers:
+
 - Jobs (immediate execution)
 - Schedules (cron/interval)
 - Flows (registers all jobs in the flow)
@@ -455,21 +436,16 @@ Build reusable job builders with common middleware:
 
 ```typescript
 // Base job for all jobs
-const baseJob = q.job
-  .use(errorHandlingMiddleware())
-  .use(timingMiddleware());
+const baseJob = q.job.use(errorHandlingMiddleware()).use(timingMiddleware());
 
 // Job that needs logging
-const monitoredJob = baseJob
-  .use(structuredLoggingMiddleware());
+const monitoredJob = baseJob.use(structuredLoggingMiddleware());
 
 // Job that needs authentication
-const authJob = monitoredJob
-  .use(authMiddleware);
+const authJob = monitoredJob.use(authMiddleware);
 
 // Job that needs rate limiting
-const rateLimitedJob = authJob
-  .use(rateLimitMiddleware);
+const rateLimitedJob = authJob.use(rateLimitMiddleware);
 ```
 
 ### 3. Job Naming
@@ -477,10 +453,10 @@ const rateLimitedJob = authJob
 Use the pattern `featureName:jobType`:
 
 ```typescript
-'notifications:send-email'
-'users:onboarding'
-'data:sync'
-'reports:generate-daily'
+'notifications:send-email';
+'users:onboarding';
+'data:sync';
+'reports:generate-daily';
 ```
 
 ### 4. Error Handling
@@ -528,7 +504,7 @@ describe('sendEmail job', () => {
         subject: 'Test',
         body: 'Test body',
       },
-      mockCtx
+      mockCtx,
     );
 
     expect(result.sent).toBe(true);
@@ -648,6 +624,7 @@ const job = q.job
 ## Examples
 
 See the [examples](./examples/) directory for complete examples:
+
 - [basic-usage.ts](./examples/basic-usage.ts) - Comprehensive example of all features
 
 ## License

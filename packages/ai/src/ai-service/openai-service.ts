@@ -6,7 +6,7 @@
 import { openai } from '@ai-sdk/openai';
 import { generateObject, streamText, generateText } from 'ai';
 import type { CoreMessage } from 'ai';
-import { z } from 'zod/v4';
+import { z } from '@arki/schema';
 import { GenerationError, getErrorMessage } from '../errors';
 import { validateInput, aiServiceConfigSchema } from '../validation';
 import { rateLimiters } from '../utils/rate-limiter';

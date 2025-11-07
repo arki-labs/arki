@@ -1,6 +1,6 @@
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
-import { z } from 'zod';
+import { z } from '@arki/schema';
 
 import { addIdToHeadings } from '../plugins/add-id-to-headings';
 

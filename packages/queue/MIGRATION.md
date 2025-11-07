@@ -84,9 +84,8 @@ const q = initQueue.context<AppContext>().create();
 **v1.x:**
 
 ```typescript
-import { z } from 'zod/v4';
-
 import { defineJob } from '@arki/queue';
+import { z } from '@arki/schema';
 
 export const sendEmail = defineJob({
   name: 'notifications:send-email',

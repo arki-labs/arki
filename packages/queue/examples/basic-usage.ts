@@ -4,7 +4,7 @@
  * This example demonstrates the new tRPC-inspired API
  */
 
-import { z } from 'zod/v4';
+import { z } from '@arki/schema';
 
 import {
   errorHandlingMiddleware,

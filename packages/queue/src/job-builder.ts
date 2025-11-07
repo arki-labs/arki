@@ -3,7 +3,7 @@
  * Provides chainable API for creating jobs with middleware
  */
 
-import type { z } from 'zod/v4';
+import type { z } from '@arki/schema';
 
 import type { JobBuilderChain, JobBuilderDef } from './types/builder.ts';
 import type { JobDefinition, JobHandler, JobOptions } from './types/job.ts';

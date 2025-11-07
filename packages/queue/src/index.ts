@@ -7,7 +7,7 @@
  * @example
  * ```typescript
  * import { initQueue } from '@arki/queue';
- * import { z } from 'zod';
+ * import { z } from '@arki/schema';
  *
  * // 1. Create context
  * const createContext = () => ({
@@ -70,54 +70,49 @@
  */
 
 // Core API - NEW v2.0
+export type { InternalFlowDefinition } from './flow-builder.ts';
 export { initQueue } from './init.ts';
 export type { InternalScheduleDefinition } from './schedule-builder.ts';
-export type { InternalFlowDefinition } from './flow-builder.ts';
 
 // Middleware execution (for advanced use cases)
 export { createJobContext, executeMiddlewareChain } from './middleware.ts';
 
 // Standard middleware
 export {
-  ConsoleLogger,
-  customLoggingMiddleware,
-  customValidationMiddleware,
-  devTimingMiddleware,
-  errorHandlingMiddleware,
-  errorHandlingMiddlewareWithFormatter,
-  JobError,
-  JobValidationError,
-  loggingMiddleware,
-  outputValidationMiddleware,
-  PerformanceTracker,
-  performanceMiddleware,
-  structuredLoggingMiddleware,
-  timeoutMiddleware,
-  timingMiddleware,
-  validationMiddleware,
+    ConsoleLogger, JobError,
+    JobValidationError, PerformanceTracker, customLoggingMiddleware,
+    customValidationMiddleware,
+    devTimingMiddleware,
+    errorHandlingMiddleware,
+    errorHandlingMiddlewareWithFormatter, loggingMiddleware,
+    outputValidationMiddleware, performanceMiddleware,
+    structuredLoggingMiddleware,
+    timeoutMiddleware,
+    timingMiddleware,
+    validationMiddleware
 } from './middleware/index.ts';
-export type { LogEntry, Logger, LogLevel } from './middleware/index.ts';
+export type { LogEntry, LogLevel, Logger } from './middleware/index.ts';
 
 // Bull Board UI (unchanged)
-export { BullMQAdapter, createBoard, HonoAdapter } from './create-board.ts';
+export { BullMQAdapter, HonoAdapter, createBoard } from './create-board.ts';
 
 // Type exports
 export type {
-  BackoffStrategy,
-  FlowDefinition,
-  JobBuilderChain,
-  JobBuilderDef,
-  JobContext,
-  JobDefinition,
-  JobHandler,
-  JobMiddleware,
-  JobOptions,
-  MiddlewareFunction,
-  QueueBuilder,
-  QueueInstance,
-  QueuePriority,
-  RetryConfig,
-  ScheduleDefinition,
+    BackoffStrategy,
+    FlowDefinition,
+    JobBuilderChain,
+    JobBuilderDef,
+    JobContext,
+    JobDefinition,
+    JobHandler,
+    JobMiddleware,
+    JobOptions,
+    MiddlewareFunction,
+    QueueBuilder,
+    QueueInstance,
+    QueuePriority,
+    RetryConfig,
+    ScheduleDefinition
 } from './types/index.ts';
 
 // Constants

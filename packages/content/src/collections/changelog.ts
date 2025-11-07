@@ -1,10 +1,10 @@
-import path from 'node:path';
-import type { Meta } from '@content-collections/core';
 import { remarkCodeHike } from '@code-hike/mdx';
+import type { Meta } from '@content-collections/core';
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
+import path from 'node:path';
 import remarkGfm from 'remark-gfm';
-import { z } from 'zod';
+import { z } from '@arki/schema';
 
 import theme from '../lib/ch-theme.json' with { type: 'json' };
 import resolveImageBlurDataURL from '../lib/imageBlurDataURL';

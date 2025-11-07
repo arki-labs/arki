@@ -45,7 +45,7 @@
  * ```
  */
 
-import type { z } from 'zod/v4';
+import type { z } from '@arki/schema';
 
 import type {
   ScheduleBuilderChain,

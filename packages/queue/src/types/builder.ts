@@ -3,7 +3,7 @@
  * Inspired by tRPC's builder pattern
  */
 
-import type { z } from 'zod/v4';
+import type { z } from '@arki/schema';
 
 import type { JobContext, JobDefinition, JobOptions } from './job.ts';
 import type { JobMiddleware, MiddlewareFunction } from './middleware.ts';

@@ -1,4 +1,4 @@
-import { z } from 'zod/v4';
+import { z } from '@arki/schema';
 
 export const UserEmail = z.object({
   email: z.email(),

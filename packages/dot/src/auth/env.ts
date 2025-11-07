@@ -4,7 +4,7 @@
  */
 
 import { createEnv } from '@t3-oss/env-core';
-import { z } from 'zod';
+import { z } from '@arki/schema';
 
 /**
  * Auth-specific environment variables with validation

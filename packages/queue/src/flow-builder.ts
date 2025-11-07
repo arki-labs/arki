@@ -27,7 +27,7 @@
  * ```
  */
 
-import type { z } from 'zod/v4';
+import type { z } from '@arki/schema';
 
 import type { FlowBuilderStart, FlowBuilderWithInput, FlowDefinition } from './types/builder.ts';
 import type { JobDefinition } from './types/job.ts';

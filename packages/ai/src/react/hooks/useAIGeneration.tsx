@@ -2,9 +2,9 @@
  * React hook for AI content generation
  */
 
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 
-import type { z } from 'zod/v4';
+import type { z } from '@arki/schema';
 
 export interface GenerationOptions {
   type?: 'text' | 'structured' | 'stream';
@@ -43,15 +43,8 @@ export interface UseAIGenerationReturn {
 /**
  * Hook for AI content generation
  */
-export function useAIGeneration(
-  options: UseAIGenerationOptions = {}
-): UseAIGenerationReturn {
-  const {
-    apiEndpoint = '/api/ai/generate',
-    defaultOptions = {},
-    onSuccess,
-    onError,
-  } = options;
+export function useAIGeneration(options: UseAIGenerationOptions = {}): UseAIGenerationReturn {
+  const { apiEndpoint = '/api/ai/generate', defaultOptions = {}, onSuccess, onError } = options;
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState<GenerationResult | null>(null);
@@ -104,7 +97,7 @@ export function useAIGeneration(
 
           const streamResult: GenerationResult = {
             content: fullText,
-            type: 'stream'
+            type: 'stream',
           };
           setResult(streamResult);
           if (onSuccess) onSuccess(streamResult);
@@ -126,7 +119,7 @@ export function useAIGeneration(
         setIsGenerating(false);
       }
     },
-    [apiEndpoint, defaultOptions, onSuccess, onError]
+    [apiEndpoint, defaultOptions, onSuccess, onError],
   );
 
   const clear = useCallback(() => {
