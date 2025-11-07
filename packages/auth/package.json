@@ -27,11 +27,11 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/contracts": "workspace:*",
     "@arki/db": "workspace:*",
     "@arki/emails": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/nextjs": "workspace:*",
-    "@arki/schema": "workspace:*",
     "@auth/core": "catalog:",
     "@auth/drizzle-adapter": "catalog:drizzle",
     "@better-auth/expo": "catalog:better-auth",

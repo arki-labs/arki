@@ -3,7 +3,7 @@
  */
 
 import type { Job as BullMQJob, JobsOptions, Queue, Worker, WorkerOptions } from 'bullmq';
-import type { z } from '@arki/schema';
+import type { z } from '@arki/contracts';
 
 import type { JobMiddleware } from './middleware.ts';
 import type { QueueMeta } from './queue.ts';

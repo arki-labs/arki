@@ -7,7 +7,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import readingTime from 'reading-time';
 import remarkGfm from 'remark-gfm';
-import { z } from '@arki/schema';
+import { z } from '@arki/contracts';
 
 import theme from '../lib/ch-theme.json' with { type: 'json' };
 import resolveImageBlurDataURL from '../lib/imageBlurDataURL';

@@ -4,7 +4,7 @@
 
 import { useCallback, useState } from 'react';
 
-import type { z } from '@arki/schema';
+import type { z } from '@arki/contracts';
 
 export interface GenerationOptions {
   type?: 'text' | 'structured' | 'stream';

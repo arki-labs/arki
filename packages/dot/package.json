@@ -21,12 +21,12 @@
   "dependencies": {
     "@arki/assert": "workspace:*",
     "@arki/auth": "workspace:*",
+    "@arki/contracts": "workspace:*",
     "@arki/db": "workspace:*",
     "@arki/emails": "workspace:*",
     "@arki/event-sourcing": "workspace:*",
     "@arki/fs": "workspace:*",
     "@arki/kv": "workspace:*",
-    "@arki/schema": "workspace:*",
     "@arki/slugify": "workspace:*",
     "@t3-oss/env-core": "catalog:env",
     "@trpc/client": "catalog:trpc",

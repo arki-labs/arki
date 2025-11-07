@@ -3,7 +3,7 @@
  * Validates job input data with Zod schemas
  */
 
-import type { z } from '@arki/schema';
+import type { z } from '@arki/contracts';
 
 import type { MiddlewareFunction } from '../types/middleware.ts';
 import type { QueueMeta } from '../types/queue.ts';

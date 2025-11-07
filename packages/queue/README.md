@@ -31,8 +31,8 @@ pnpm add @arki/queue bullmq ioredis zod superjson
 ## Quick Start
 
 ```typescript
+import { z } from '@arki/contracts';
 import { errorHandlingMiddleware, initQueue, loggingMiddleware, timingMiddleware } from '@arki/queue';
-import { z } from '@arki/schema';
 
 // 1. Define your application context type
 type AppContext = {

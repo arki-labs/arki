@@ -7,7 +7,7 @@
  * @example
  * ```typescript
  * import { initQueue } from '@arki/queue';
- * import { z } from '@arki/schema';
+ * import { z } from '@arki/contracts';
  *
  * // 1. Create context
  * const createContext = () => ({

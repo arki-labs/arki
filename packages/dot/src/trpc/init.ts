@@ -1,6 +1,6 @@
 import { initTRPC, TRPCError } from '@trpc/server';
 import superjson from 'superjson';
-import { ZodError } from '@arki/schema';
+import { ZodError } from '@arki/contracts';
 import { RateLimitExceededError } from '@arki/kv/errors';
 
 import type { DotContext } from './types';

@@ -27,7 +27,7 @@
  * ```
  */
 
-import type { z } from '@arki/schema';
+import type { z } from '@arki/contracts';
 
 import type { FlowBuilderStart, FlowBuilderWithInput, FlowDefinition } from './types/builder.ts';
 import type { JobDefinition } from './types/job.ts';

@@ -11,7 +11,7 @@
 
 import type { Job as BullMQJob, RepeatOptions } from 'bullmq';
 import { FlowProducer, Queue, Worker } from 'bullmq';
-import type { z } from '@arki/schema';
+import type { z } from '@arki/contracts';
 
 import type { InternalFlowDefinition } from './flow-builder.ts';
 import { createJobContext, executeMiddlewareChain } from './middleware.ts';

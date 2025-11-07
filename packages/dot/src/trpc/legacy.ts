@@ -3,7 +3,7 @@ import superjson from 'superjson';
 
 // Session type is provided by our auth module
 import { RateLimitExceededError } from '@arki/kv/errors';
-import { ZodError } from '@arki/schema';
+import { ZodError } from '@arki/contracts';
 
 import type { DotAuth, DotSession } from '../auth';
 import { authFeatures } from '../auth';

@@ -36,12 +36,12 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/contracts": "workspace:*",
     "@arki/date": "workspace:*",
     "@arki/icons": "workspace:*",
     "@arki/intl": "workspace:*",
     "@arki/react-hooks": "workspace:*",
     "@arki/rss": "workspace:*",
-    "@arki/schema": "workspace:*",
     "@arki/ui": "workspace:*",
     "@code-hike/mdx": "catalog:",
     "@content-collections/core": "catalog:next",

@@ -10,7 +10,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { z } from '@arki/schema';
+import { z } from '@arki/contracts';
 
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 

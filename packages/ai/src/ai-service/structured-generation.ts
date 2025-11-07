@@ -3,7 +3,7 @@
  * Helper functions for common structured generation tasks
  */
 
-import { z } from '@arki/schema';
+import { z } from '@arki/contracts';
 import type { OpenAIService } from './openai-service';
 
 export interface StructuredGenerationOptions {

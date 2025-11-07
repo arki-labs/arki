@@ -2,7 +2,7 @@
  * Input validation schemas for @arki/ai
  */
 
-import { z } from '@arki/schema';
+import { z } from '@arki/contracts';
 import { ValidationError } from './errors';
 
 /**
