@@ -3,8 +3,8 @@
  * Using @t3-oss/env-core for type-safe environment variables
  */
 
-import { createEnv } from '@t3-oss/env-core';
 import { z } from '@arki/contracts';
+import { createEnv } from '@t3-oss/env-core';
 
 /**
  * Auth-specific environment variables with validation
@@ -16,7 +16,7 @@ export const authEnv = createEnv({
   server: {
     // Core auth configuration
     AUTH_SECRET: z.string().min(1).optional(),
-    BETTER_AUTH_SECRET: z.string().min(1).optional(),
+    AUTH_SECRET: z.string().min(1).optional(),
 
     // URLs
     BASE_URL: z.string().url().optional(),
@@ -110,7 +110,7 @@ export const authEnv = createEnv({
   runtimeEnv: {
     // Core auth
     AUTH_SECRET: process.env['AUTH_SECRET'],
-    BETTER_AUTH_SECRET: process.env['BETTER_AUTH_SECRET'],
+    AUTH_SECRET: process.env['AUTH_SECRET'],
 
     // URLs
     BASE_URL: process.env['BASE_URL'],
@@ -205,7 +205,7 @@ export const authEnv = createEnv({
  * Helper function to get auth secret from validated environment
  */
 export function getAuthSecret(): string | undefined {
-  return authEnv.AUTH_SECRET || authEnv.BETTER_AUTH_SECRET;
+  return authEnv.AUTH_SECRET || authEnv.AUTH_SECRET;
 }
 
 /**
@@ -303,7 +303,7 @@ export function validateProductionEnv(): void {
   // Check auth secret
   const secret = getAuthSecret();
   if (!secret) {
-    errors.push('AUTH_SECRET or BETTER_AUTH_SECRET is required in production');
+    errors.push('AUTH_SECRET or AUTH_SECRET is required in production');
   } else if (secret.length < 32) {
     errors.push('Auth secret must be at least 32 characters in production');
   }

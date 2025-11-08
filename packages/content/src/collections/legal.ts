@@ -1,6 +1,6 @@
+import { z } from '@arki/contracts';
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
-import { z } from '@arki/contracts';
 
 import { addIdToHeadings } from '../plugins/add-id-to-headings';
 
@@ -18,6 +18,7 @@ export const legals = defineCollection({
   schema: z.object({
     title: z.string(),
     updatedAt: z.string(),
+    content: z.string(),
   }),
   transform: async (document, context) => {
     const mdx = await compileMDX(context, document, {

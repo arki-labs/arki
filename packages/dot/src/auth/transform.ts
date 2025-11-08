@@ -322,7 +322,7 @@ export function validateConfig(config: DotAuthConfig): void {
       const secret = config.secret || getEnvAuthSecret();
       if (!secret) {
         throw new Error(
-          'Auth secret is required in production. Set AUTH_SECRET or BETTER_AUTH_SECRET environment variable.',
+          'Auth secret is required in production. Set AUTH_SECRET or AUTH_SECRET environment variable.',
         );
       }
       if (secret.length < 32) {

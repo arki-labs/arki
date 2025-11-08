@@ -1,3 +1,4 @@
+import { z } from '@arki/contracts';
 import { remarkCodeHike } from '@code-hike/mdx';
 import type { Meta } from '@content-collections/core';
 import { defineCollection } from '@content-collections/core';
@@ -7,7 +8,6 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import readingTime from 'reading-time';
 import remarkGfm from 'remark-gfm';
-import { z } from '@arki/contracts';
 
 import theme from '../lib/ch-theme.json' with { type: 'json' };
 import resolveImageBlurDataURL from '../lib/imageBlurDataURL';
@@ -82,6 +82,7 @@ export const posts = defineCollection({
       avatar: z.string().optional(),
     }),
     tags: z.array(z.string()),
+    content: z.string(),
   }),
   transform: async (post, ctx) => {
     const mdx = await compileMDX(ctx, post, {

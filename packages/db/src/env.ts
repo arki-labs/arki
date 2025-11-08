@@ -1,5 +1,5 @@
-import { createEnv } from '@t3-oss/env-core';
 import { z } from '@arki/contracts';
+import { createEnv } from '@t3-oss/env-core';
 
 export const env = createEnv({
   /**
@@ -55,6 +55,7 @@ export const env = createEnv({
    * Destructure all variables from `process.env` to make sure they aren't tree-shaken away.
    */
   runtimeEnv: {
+    // eslint-disable-next-line @typescript-eslint/dot-notation
     NODE_ENV: process.env['NODE_ENV'],
     DB_URL: process.env['DB_URL'],
     PGUSER: process.env['PGUSER'],
@@ -77,5 +78,5 @@ export const env = createEnv({
     DB_DROP_ON_START: process.env['DB_DROP_ON_START'],
   },
 
-  skipValidation: !!process.env['CI'] || process.env['NODE_ENV'] !== 'development',
+  skipValidation: !!process.env['SKIP_ENV_VALIDATION'] || !!process.env['CI'],
 });

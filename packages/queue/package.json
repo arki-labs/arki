@@ -19,6 +19,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@arki/contracts": "workspace:*",
     "@bull-board/api": "catalog:queue",
     "@bull-board/hono": "catalog:queue",
     "bullmq": "catalog:queue",

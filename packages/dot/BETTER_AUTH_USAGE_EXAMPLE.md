@@ -46,18 +46,19 @@ if (auth) {
 ## Using Auth Presets
 
 ```typescript
-import { createDot, authPresets } from '@arki/dot';
+import { authPresets, createDot } from '@arki/dot';
 
 // Use a preset configuration
 const app = await createDot('my-app')
   .withEnv(env)
   .withDb(schema, repositories)
-  .withAuth(authPresets.full())  // Full-featured auth with OAuth, MFA, and RBAC
+  .withAuth(authPresets.full()) // Full-featured auth with OAuth, MFA, and RBAC
   .withTrpc(routers)
   .bootstrap();
 ```
 
 Available presets:
+
 - `authPresets.basic()` - Email/password auth only
 - `authPresets.socialOnly()` - OAuth providers only
 - `authPresets.full()` - Everything enabled
@@ -75,7 +76,7 @@ GITHUB_CLIENT_ID=xxx
 GITHUB_CLIENT_SECRET=xxx
 
 # Auth Secret
-AUTH_SECRET=xxx  # or BETTER_AUTH_SECRET
+AUTH_SECRET=xxx  # or AUTH_SECRET
 
 # URLs
 BASE_URL=http://localhost:3000
@@ -94,7 +95,7 @@ SMTP_PASSWORD=xxx
 const app = await createDot('my-app')
   .withEnv(env)
   .withDb(schema, repositories)
-  .withAuth()  // Auto-configures from environment
+  .withAuth() // Auto-configures from environment
   .withTrpc(routers)
   .bootstrap();
 ```
@@ -105,36 +106,32 @@ The auth module integrates seamlessly with tRPC:
 
 ```typescript
 // The auth context is automatically available in procedures
-export const createPost = protectedProcedure
-  .input(createPostSchema)
-  .mutation(async ({ ctx, input }) => {
-    const { user, rbac } = ctx;
+export const createPost = protectedProcedure.input(createPostSchema).mutation(async ({ ctx, input }) => {
+  const { user, rbac } = ctx;
 
-    // Check permission using RBAC
-    if (!await rbac.hasPermission(user.id, 'posts', 'create')) {
-      throw new TRPCError({ code: 'FORBIDDEN' });
-    }
+  // Check permission using RBAC
+  if (!(await rbac.hasPermission(user.id, 'posts', 'create'))) {
+    throw new TRPCError({ code: 'FORBIDDEN' });
+  }
 
-    // Create post with user association
-    return ctx.repo.posts.create({
-      ...input,
-      authorId: user.id,
-    });
+  // Create post with user association
+  return ctx.repo.posts.create({
+    ...input,
+    authorId: user.id,
   });
+});
 
 // Use role-based procedures
 export const adminRouter = createTRPCRouter({
   // This procedure requires admin role
-  deleteUser: adminProcedure
-    .input(z.object({ userId: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      return ctx.repo.users.delete(input.userId);
-    }),
+  deleteUser: adminProcedure.input(z.object({ userId: z.string() })).mutation(async ({ ctx, input }) => {
+    return ctx.repo.users.delete(input.userId);
+  }),
 });
 
 // Create custom permission-based procedures
 export const moderatorProcedure = protectedProcedure.use(async ({ ctx, next }) => {
-  if (!await ctx.rbac.hasRole(ctx.user.id, 'moderator')) {
+  if (!(await ctx.rbac.hasRole(ctx.user.id, 'moderator'))) {
     throw new TRPCError({ code: 'FORBIDDEN' });
   }
   return next();
@@ -153,48 +150,45 @@ const procedures = auth.createProcedures(t);
 
 export const postRouter = createTRPCRouter({
   // Public - no auth required
-  list: procedures.public
-    .query(async ({ ctx }) => {
-      return ctx.repo.posts.findMany();
-    }),
+  list: procedures.public.query(async ({ ctx }) => {
+    return ctx.repo.posts.findMany();
+  }),
 
   // Protected - requires authentication
-  create: procedures.protected
-    .input(createPostSchema)
-    .mutation(async ({ ctx, input }) => {
-      return ctx.repo.posts.create({
-        ...input,
-        authorId: ctx.user.id,
-      });
-    }),
+  create: procedures.protected.input(createPostSchema).mutation(async ({ ctx, input }) => {
+    return ctx.repo.posts.create({
+      ...input,
+      authorId: ctx.user.id,
+    });
+  }),
 
   // Admin - requires admin role
-  deleteAll: procedures.admin
-    .mutation(async ({ ctx }) => {
-      return ctx.repo.posts.deleteAll();
-    }),
+  deleteAll: procedures.admin.mutation(async ({ ctx }) => {
+    return ctx.repo.posts.deleteAll();
+  }),
 
   // Custom permission
-  moderate: procedures.withPermission('posts', 'moderate')
+  moderate: procedures
+    .withPermission('posts', 'moderate')
     .input(moderatePostSchema)
     .mutation(async ({ ctx, input }) => {
       return ctx.repo.posts.moderate(input);
     }),
 
   // Custom role
-  review: procedures.withRole(['editor', 'reviewer'])
+  review: procedures
+    .withRole(['editor', 'reviewer'])
     .input(reviewPostSchema)
     .mutation(async ({ ctx, input }) => {
       return ctx.repo.posts.review(input);
     }),
 
   // Resource ownership
-  update: procedures.withOwnership(
-    async (input, ctx) => {
+  update: procedures
+    .withOwnership(async (input, ctx) => {
       const post = await ctx.repo.posts.findById(input.id);
       return post?.authorId;
-    }
-  )
+    })
     .input(updatePostSchema)
     .mutation(async ({ ctx, input }) => {
       return ctx.repo.posts.update(input);
@@ -277,6 +271,7 @@ await session.invalidateAllUserSessions(userId);
 If you're currently using better-auth directly, migrating to Dot is straightforward:
 
 ### Before (Raw Better-Auth)
+
 ```typescript
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
@@ -307,13 +302,14 @@ const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
 ```
 
 ### After (Dot Framework)
+
 ```typescript
 import { createDot } from '@arki/dot';
 
 const app = await createDot('my-app')
   .withEnv(env)
   .withDb(schema, repositories)
-  .withAuth()  // Auto-configures everything
+  .withAuth() // Auto-configures everything
   .withTrpc(routers)
   .bootstrap();
 

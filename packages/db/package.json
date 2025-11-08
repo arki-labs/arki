@@ -19,6 +19,7 @@
     }
   },
   "scripts": {
+    "build": "tsc",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
@@ -28,6 +29,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/assert": "workspace:*",
+    "@arki/contracts": "workspace:*",
     "@paralleldrive/cuid2": "catalog:utilities",
     "@t3-oss/env-core": "catalog:env",
     "drizzle-orm": "catalog:drizzle",
