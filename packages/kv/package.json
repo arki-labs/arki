@@ -25,6 +25,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/contracts": "workspace:*",
     "@keyv/redis": "catalog:backend",
     "@t3-oss/env-core": "catalog:env",
     "ioredis": "catalog:",
