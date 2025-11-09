@@ -1,4 +1,3 @@
-import type { AnyProcedure, AnyRouter } from '@trpc/server';
 import type { EventStore, MessageBus } from '@event-driven-io/emmett';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { KV } from '@arki/kv';
@@ -15,9 +14,9 @@ import type { BaseTRPCContext, SessionUser, SchemaInterface } from '../types';
  */
 export interface DotContext<TSchema extends SchemaInterface = SchemaInterface> extends BaseTRPCContext<TSchema> {
   // Auth - session information
-  session?: DotSession | null;
+  session: DotSession | null;
   user?: SessionUser;
-  token?: string | null;
+  token: string | null;
 
   // Core services (optional - plugins request these)
   db?: NodePgDatabase<TSchema>;
@@ -100,7 +99,6 @@ export interface DotTRPCMiddlewareConfig<
  * Options for creating Dot procedures.
  */
 export interface CreateDotProceduresOptions<
-  TContext extends DotContext = DotContext,
   TBeforeAuth = never,
   TAfterAuth = never,
   TErrorHandling = never,

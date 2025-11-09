@@ -17,10 +17,12 @@
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
+    "build": "tsc"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/contracts": "workspace:*",
     "@aws-sdk/client-s3": "catalog:",
     "@aws-sdk/s3-request-presigner": "catalog:",
     "@flystorage/aws-s3": "catalog:",

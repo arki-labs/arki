@@ -16,7 +16,6 @@ export const authEnv = createEnv({
   server: {
     // Core auth configuration
     AUTH_SECRET: z.string().min(1).optional(),
-    AUTH_SECRET: z.string().min(1).optional(),
 
     // URLs
     BASE_URL: z.string().url().optional(),
@@ -110,7 +109,6 @@ export const authEnv = createEnv({
   runtimeEnv: {
     // Core auth
     AUTH_SECRET: process.env['AUTH_SECRET'],
-    AUTH_SECRET: process.env['AUTH_SECRET'],
 
     // URLs
     BASE_URL: process.env['BASE_URL'],
@@ -198,7 +196,7 @@ export const authEnv = createEnv({
   /**
    * Tell the library when we're in a server context
    */
-  isServer: globalThis.window === undefined,
+  isServer: typeof window === 'undefined',
 });
 
 /**

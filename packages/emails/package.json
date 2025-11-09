@@ -20,7 +20,8 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "studio": "pnpm email dev --dir src/templates --port 3333",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
+    "build": "tsc"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {

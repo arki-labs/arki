@@ -11,7 +11,8 @@
   },
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
   },
   "dependencies": {
     "@rn-primitives/accordion": "catalog:expo",
