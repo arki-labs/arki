@@ -109,6 +109,7 @@ export default tseslint.config(
       'unicorn/no-null': 'off',
       'unicorn/prefer-dom-node-remove': 'off',
       'unused-imports/no-unused-imports': 'error',
+      'unicorn/prefer-global-this': 'off',
       'unicorn/no-nested-ternary': 'off',
       /**
        * Disallow expressions where the operation doesn't affect the value.
