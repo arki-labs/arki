@@ -1,0 +1,127 @@
+{
+  "name": "@arki/geo",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./client": {
+      "types": "./src/client.ts",
+      "default": "./src/client.ts"
+    },
+    "./geocoding": {
+      "types": "./src/geocoding/index.ts",
+      "default": "./src/geocoding/index.ts"
+    },
+    "./maps/google": {
+      "types": "./src/maps/google/index.ts",
+      "default": "./src/maps/google/index.ts"
+    },
+    "./maps/apple": {
+      "types": "./src/maps/apple/index.ts",
+      "default": "./src/maps/apple/index.ts"
+    },
+    "./maps/mapbox": {
+      "types": "./src/maps/mapbox/index.ts",
+      "default": "./src/maps/mapbox/index.ts"
+    },
+    "./maps/leaflet": {
+      "types": "./src/maps/leaflet/index.ts",
+      "default": "./src/maps/leaflet/index.ts"
+    },
+    "./maps/here": {
+      "types": "./src/maps/here/index.ts",
+      "default": "./src/maps/here/index.ts"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "src/*"
+      ],
+      "client": [
+        "src/client.ts"
+      ],
+      "geocoding": [
+        "src/geocoding/index.ts"
+      ],
+      "maps/google": [
+        "src/maps/google/index.ts"
+      ],
+      "maps/apple": [
+        "src/maps/apple/index.ts"
+      ],
+      "maps/mapbox": [
+        "src/maps/mapbox/index.ts"
+      ],
+      "maps/leaflet": [
+        "src/maps/leaflet/index.ts"
+      ],
+      "maps/here": [
+        "src/maps/here/index.ts"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc --watch",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/contracts": "workspace:*",
+    "@arki/kv": "workspace:*",
+    "@t3-oss/env-core": "catalog:env",
+    "node-geocoder": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@types/node": "catalog:node",
+    "@types/react": "catalog:react",
+    "react": "catalog:react",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "@vis.gl/react-google-maps": "catalog:",
+    "leaflet": "catalog:",
+    "mapbox-gl": "catalog:",
+    "react": "catalog:react",
+    "react-dom": "catalog:react",
+    "react-leaflet": "catalog:",
+    "react-map-gl": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "@vis.gl/react-google-maps": {
+      "optional": true
+    },
+    "leaflet": {
+      "optional": true
+    },
+    "mapbox-gl": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "react-leaflet": {
+      "optional": true
+    },
+    "react-map-gl": {
+      "optional": true
+    }
+  }
+}
