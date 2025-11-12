@@ -18,8 +18,8 @@ export const authEnv = createEnv({
     AUTH_SECRET: z.string().min(1).optional(),
 
     // URLs
-    BASE_URL: z.string().url().optional(),
-    PRODUCTION_URL: z.string().url().optional(),
+    BASE_URL: z.url().optional(),
+    PRODUCTION_URL: z.url().optional(),
 
     // App configuration
     APP_NAME: z.string().optional(),

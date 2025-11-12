@@ -34,7 +34,7 @@ export type MockEmbeddingConfig = z.infer<typeof mockEmbeddingConfigSchema>;
  * QDrant configuration validation
  */
 export const qdrantConfigSchema = z.object({
-  url: z.string().url(),
+  url: z.url(),
   apiKey: z.string().optional(),
   collectionName: z.string().min(1),
   vectorSize: z.number().optional(),
@@ -65,7 +65,7 @@ export const vectorProviderConfigSchema = z.discriminatedUnion('type', [
     type: z.literal('qdrant'),
     embeddingProvider: z.unknown(), // Will be validated at runtime
     config: z.object({
-      url: z.string().url(),
+      url: z.url(),
       apiKey: z.string().optional(),
       collectionName: z.string().min(1),
       vectorSize: z.number().optional(),
@@ -90,7 +90,7 @@ export const vectorProviderConfigSchema = z.discriminatedUnion('type', [
     type: z.literal('weaviate'),
     embeddingProvider: z.unknown(),
     config: z.object({
-      url: z.string().url(),
+      url: z.url(),
       apiKey: z.string().optional(),
       className: z.string(),
     }),

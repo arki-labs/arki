@@ -3,8 +3,8 @@
  * Using T3 Env pattern for type-safe environment variables
  */
 
-import { createEnv } from '@t3-oss/env-core';
 import { z } from '@arki/contracts';
+import { createEnv } from '@t3-oss/env-core';
 
 export const env = createEnv({
   server: {
@@ -12,7 +12,7 @@ export const env = createEnv({
     OPENAI_EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
     ANTHROPIC_API_KEY: z.string().optional(),
     EMBEDDING_PROVIDER: z.enum(['openai', 'mock', 'cohere', 'anthropic']).default('mock'),
-    QDRANT_URL: z.string().url().optional(),
+    QDRANT_URL: z.url().optional(),
     QDRANT_API_KEY: z.string().optional(),
   },
   client: {},
