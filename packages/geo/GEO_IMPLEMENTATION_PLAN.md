@@ -6,7 +6,7 @@ Create a comprehensive geospatial package `@arki/geo` that consolidates geocodin
 
 ## 🎯 Goals
 
-1. **Consolidate** existing geocoding functionality from `@arki/geocoding`
+1. **Consolidate** existing geocoding functionality from `@arki/geo/geocoding`
 2. **Extract** reusable geospatial utilities from apps (distance calculations, coordinate transformations)
 3. **Separate** server-side and client-side code for optimal tree-shaking
 4. **Future-proof** architecture for maps, geofencing, and spatial queries
@@ -14,7 +14,7 @@ Create a comprehensive geospatial package `@arki/geo` that consolidates geocodin
 
 ## 📦 Current State Analysis
 
-### Existing `@arki/geocoding` Package
+### Existing `@arki/geo/geocoding` Package
 
 **Location:** `packages/geocoding/`
 
@@ -422,7 +422,7 @@ export function useDistance(from: Coordinates | null, to: Coordinates | null, op
 
 ### 5. Geocoding Service (Server-only) (`src/geocoding/service.ts`)
 
-**Migrate from `@arki/geocoding` with minimal changes**
+**Migrate from `@arki/geo/geocoding` with minimal changes**
 
 ## 📦 Package Configuration
 
@@ -620,7 +620,7 @@ export { isValidCoordinates, formatCoordinates } from './core/coordinates';
 
 **Timeline:** Week 2-3
 
-1. **Copy `@arki/geocoding` to `src/geocoding/`:**
+1. **Copy `@arki/geo/geocoding` to `src/geocoding/`:**
    - Move service class
    - Move types
    - Move environment config
@@ -658,10 +658,10 @@ export { isValidCoordinates, formatCoordinates } from './core/coordinates';
 **`apps/kapodopera/backend`:**
 
 ```diff
-- import { createGeocodingServiceFromEnv } from '@arki/geocoding';
+- import { createGeocodingServiceFromEnv } from '@arki/geo/geocoding';
 + import { createGeocodingServiceFromEnv } from '@arki/geo/geocoding';
 
-- import type { GeocodeResult } from '@arki/geocoding';
+- import type { GeocodeResult } from '@arki/geo/geocoding';
 + import type { GeocodeResult } from '@arki/geo';
 ```
 
@@ -682,7 +682,7 @@ export { isValidCoordinates, formatCoordinates } from './core/coordinates';
 **`apps/games-platform/backend`:**
 
 ```diff
-- import { GeocodingService } from '@arki/geocoding';
+- import { GeocodingService } from '@arki/geo/geocoding';
 + import { GeocodingService } from '@arki/geo/geocoding';
 ```
 
@@ -723,7 +723,7 @@ export { isValidCoordinates, formatCoordinates } from './core/coordinates';
 
 **Timeline:** Week 6
 
-1. Mark `@arki/geocoding` as deprecated
+1. Mark `@arki/geo/geocoding` as deprecated
 2. Add deprecation notices
 3. Update package.json
 4. Plan removal timeline
@@ -874,12 +874,12 @@ describe('calculateDistance', () => {
 
 ## 🚨 Breaking Changes
 
-### For Consumers of `@arki/geocoding`
+### For Consumers of `@arki/geo/geocoding`
 
 1. **Import paths changed:**
 
    ```diff
-   - import { ... } from '@arki/geocoding';
+   - import { ... } from '@arki/geo/geocoding';
    + import { ... } from '@arki/geo/geocoding';
    ```
 
@@ -1050,7 +1050,7 @@ export function clusterPoints(points: GeoPoint[], maxDistance: number): GeoPoint
 
 ### For Migration Completion
 
-- [ ] All existing `@arki/geocoding` functionality works in `@arki/geo`
+- [ ] All existing `@arki/geo/geocoding` functionality works in `@arki/geo`
 - [ ] All apps using geocoding migrated to new package
 - [ ] All apps using distance calculations migrated to shared utilities
 - [ ] Frontend bundles do NOT include `node-geocoder`

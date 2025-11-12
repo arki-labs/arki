@@ -4,7 +4,7 @@
 
 Create a unified geospatial package that:
 
-- **Consolidates** existing geocoding from `@arki/geocoding`
+- **Consolidates** existing geocoding from `@arki/geo/geocoding`
 - **Extracts** scattered distance calculation utilities
 - **Separates** server-side (Node.js) and client-side (React) code
 - **Prepares** for future maps, geofencing, and spatial features
@@ -97,7 +97,7 @@ const dist = calculateDistance(pointA, pointB, 'mi');
 
 ### Backend Apps
 
-- [ ] Replace `@arki/geocoding` → `@arki/geo/geocoding`
+- [ ] Replace `@arki/geo/geocoding` → `@arki/geo/geocoding`
 - [ ] Replace local distance functions → `@arki/geo`
 - [ ] Update `Coordinates` type to standard format
 - [ ] Update package.json dependencies
@@ -219,7 +219,7 @@ See **`MAP_PROVIDERS_GUIDE.md`** for complete implementation examples.
 - **Week 3**: Create React hooks
 - **Week 4-5**: Update all consumers
 - **Week 5**: Documentation
-- **Week 6**: Deprecate `@arki/geocoding`
+- **Week 6**: Deprecate `@arki/geo/geocoding`
 
 **Total: 3-4 weeks**
 
