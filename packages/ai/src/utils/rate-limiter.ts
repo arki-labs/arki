@@ -197,6 +197,12 @@ export const rateLimiters = {
     maxRetries: 3,
     retryDelayMs: 2000,
   }),
+  anthropic: new RateLimiter({
+    maxRequests: 50,
+    windowMs: 60 * 1000,
+    maxRetries: 3,
+    retryDelayMs: 2000,
+  }),
   embedding: new RateLimiter({
     maxRequests: 100,         // 100 requests
     windowMs: 60 * 1000,      // per minute

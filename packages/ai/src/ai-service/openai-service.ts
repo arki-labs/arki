@@ -59,15 +59,36 @@ export class OpenAIService {
     schema: z.ZodSchema<T>,
     options: GenerationOptions = {}
   ): Promise<T> {
+    return this.generateStructuredDataFromMessages(
+      [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      schema,
+      options,
+    );
+  }
+
+  /**
+   * Generate structured data using explicit message payloads
+   * Supports multimodal content (e.g., including images)
+   */
+  async generateStructuredDataFromMessages<T>(
+    messages: CoreMessage[],
+    schema: z.ZodSchema<T>,
+    options: GenerationOptions = {}
+  ): Promise<T> {
     // Apply rate limiting
     const rateLimitResult = await rateLimiters.openai.execute(
-      'generateStructuredData',
+      'generateStructuredDataFromMessages',
       async () => {
         try {
           const result = await generateObject({
             model: openai(this.model),
             system: options.systemPrompt,
-            prompt,
+            messages,
             output: 'object',
             schema: schema as any, // Zod schema is compatible but types don't align perfectly with AI SDK
             maxRetries: options.maxRetries || this.defaultMaxRetries,

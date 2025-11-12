@@ -10,6 +10,7 @@ export const env = createEnv({
   server: {
     OPENAI_API_KEY: z.string().optional(),
     OPENAI_EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
+    ANTHROPIC_API_KEY: z.string().optional(),
     EMBEDDING_PROVIDER: z.enum(['openai', 'mock', 'cohere', 'anthropic']).default('mock'),
     QDRANT_URL: z.string().url().optional(),
     QDRANT_API_KEY: z.string().optional(),
@@ -19,6 +20,7 @@ export const env = createEnv({
   runtimeEnv: {
     OPENAI_API_KEY: process.env['OPENAI_API_KEY'],
     OPENAI_EMBEDDING_MODEL: process.env['OPENAI_EMBEDDING_MODEL'],
+    ANTHROPIC_API_KEY: process.env['ANTHROPIC_API_KEY'],
     EMBEDDING_PROVIDER: process.env['EMBEDDING_PROVIDER'],
     QDRANT_URL: process.env['QDRANT_URL'],
     QDRANT_API_KEY: process.env['QDRANT_API_KEY'],

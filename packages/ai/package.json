@@ -18,18 +18,20 @@
     }
   },
   "scripts": {
+    "build": "tsc",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@ai-sdk/anthropic": "catalog:ai",
     "@ai-sdk/openai": "catalog:ai",
     "@ai-sdk/react": "catalog:ai",
     "@ai-sdk/ui-utils": "catalog:ai",
+    "@arki/contracts": "workspace:*",
     "@qdrant/js-client-rest": "catalog:",
     "@t3-oss/env-core": "catalog:env",
     "ai": "catalog:ai",

@@ -102,10 +102,9 @@ export {
   OpenAIService,
   type OpenAIServiceConfig,
   type StreamOptions,
+  AnthropicService,
+  type AnthropicServiceConfig,
 } from './ai-service';
-
-// React components and hooks
-export * from './react';
 
 // Environment configuration
 export { env } from './env';
