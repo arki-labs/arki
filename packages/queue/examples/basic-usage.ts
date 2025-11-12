@@ -7,11 +7,11 @@
 import { z } from '@arki/contracts';
 
 import {
-  errorHandlingMiddleware,
-  initQueue,
-  loggingMiddleware,
-  structuredLoggingMiddleware,
-  timingMiddleware,
+    errorHandlingMiddleware,
+    initQueue,
+    loggingMiddleware,
+    structuredLoggingMiddleware,
+    timingMiddleware,
 } from '../src/index.ts';
 
 // ============================================
@@ -122,7 +122,7 @@ const sendEmail = baseJob
   .name('notifications:send-email')
   .input(
     z.object({
-      to: z.string().email(),
+      to: z.email(),
       subject: z.string(),
       body: z.string(),
     }),
@@ -367,17 +367,17 @@ async function example() {
 // ============================================
 
 export {
-  createContext,
-  dailyEmailSchedule,
-  dataProcessingFlow,
-  hourlyDataSync,
-  jobs,
-  processUserData,
-  q,
-  sendEmail,
-  syncData,
-  userOnboardingFlow,
-  weeklyCleanup,
+    createContext,
+    dailyEmailSchedule,
+    dataProcessingFlow,
+    hourlyDataSync,
+    jobs,
+    processUserData,
+    q,
+    sendEmail,
+    syncData,
+    userOnboardingFlow,
+    weeklyCleanup
 };
 
 console.log('✅ Example setup complete!');

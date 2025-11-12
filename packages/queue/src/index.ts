@@ -30,7 +30,7 @@
  * // 4. Define jobs
  * const sendEmail = authJob
  *   .name('notifications:send-email')
- *   .input(z.object({ to: z.string().email(), subject: z.string(), body: z.string() }))
+ *   .input(z.object({ to: z.email(), subject: z.string(), body: z.string() }))
  *   .handler(async (data, ctx) => {
  *     // ctx has: db, repo, kv, user (from middleware)
  *     await ctx.repo.notifications.create(data);
@@ -79,39 +79,39 @@ export { createJobContext, executeMiddlewareChain } from './middleware.ts';
 
 // Standard middleware
 export {
-  ConsoleLogger, customLoggingMiddleware,
-  customValidationMiddleware,
-  devTimingMiddleware,
-  errorHandlingMiddleware,
-  errorHandlingMiddlewareWithFormatter, JobError,
-  JobValidationError, loggingMiddleware,
-  outputValidationMiddleware, performanceMiddleware, PerformanceTracker, structuredLoggingMiddleware,
-  timeoutMiddleware,
-  timingMiddleware,
-  validationMiddleware
+    ConsoleLogger, JobError,
+    JobValidationError, PerformanceTracker, customLoggingMiddleware,
+    customValidationMiddleware,
+    devTimingMiddleware,
+    errorHandlingMiddleware,
+    errorHandlingMiddlewareWithFormatter, loggingMiddleware,
+    outputValidationMiddleware, performanceMiddleware, structuredLoggingMiddleware,
+    timeoutMiddleware,
+    timingMiddleware,
+    validationMiddleware
 } from './middleware/index.ts';
-export type { LogEntry, Logger, LogLevel } from './middleware/index.ts';
+export type { LogEntry, LogLevel, Logger } from './middleware/index.ts';
 
 // Bull Board UI (unchanged)
-export { BullMQAdapter, createBoard, HonoAdapter } from './create-board.ts';
+export { BullMQAdapter, HonoAdapter, createBoard } from './create-board.ts';
 
 // Type exports
 export type {
-  BackoffStrategy,
-  FlowDefinition,
-  JobBuilderChain,
-  JobBuilderDef,
-  JobContext,
-  JobDefinition,
-  JobHandler,
-  JobMiddleware,
-  JobOptions,
-  MiddlewareFunction,
-  QueueBuilder,
-  QueueInstance,
-  QueuePriority,
-  RetryConfig,
-  ScheduleDefinition
+    BackoffStrategy,
+    FlowDefinition,
+    JobBuilderChain,
+    JobBuilderDef,
+    JobContext,
+    JobDefinition,
+    JobHandler,
+    JobMiddleware,
+    JobOptions,
+    MiddlewareFunction,
+    QueueBuilder,
+    QueueInstance,
+    QueuePriority,
+    RetryConfig,
+    ScheduleDefinition
 } from './types/index.ts';
 
 // Constants

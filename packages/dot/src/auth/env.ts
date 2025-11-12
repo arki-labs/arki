@@ -67,7 +67,7 @@ export const authEnv = createEnv({
     AUTH_TWITTER_SECRET: z.string().optional(),
 
     // Email configuration
-    EMAIL_FROM: z.string().email().optional(),
+    EMAIL_FROM: z.email().optional(),
     EMAIL_SERVER: z.string().optional(),
     EMAIL_SERVER_HOST: z.string().optional(),
     EMAIL_SERVER_PORT: z.string().transform(Number).pipe(z.number()).optional(),
@@ -78,7 +78,7 @@ export const authEnv = createEnv({
     SMTP_PORT: z.string().transform(Number).pipe(z.number()).optional(),
     SMTP_USER: z.string().optional(),
     SMTP_PASSWORD: z.string().optional(),
-    SMTP_FROM: z.string().email().optional(),
+    SMTP_FROM: z.email().optional(),
 
     // Redis/KV configuration
     REDIS_URL: z.string().optional(),

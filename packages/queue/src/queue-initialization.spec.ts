@@ -5,8 +5,8 @@
  * Covers: initialization, job registration, worker startup, job execution, and shutdown.
  */
 
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from '@arki/contracts';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 
@@ -216,7 +216,7 @@ describe('Job Registration and Execution', () => {
         .name('test:validation-job')
         .input(
           z.object({
-            email: z.string().email(),
+            email: z.email(),
             age: z.number().min(0).max(120),
           }),
         )

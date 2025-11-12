@@ -60,7 +60,7 @@ const sendEmail = baseJob
   .name('notifications:send-email')
   .input(
     z.object({
-      to: z.string().email(),
+      to: z.email(),
       subject: z.string(),
       body: z.string(),
     }),

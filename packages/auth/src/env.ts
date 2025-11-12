@@ -1,5 +1,5 @@
-import { createEnv } from '@t3-oss/env-core';
 import { z } from '@arki/contracts';
+import { createEnv } from '@t3-oss/env-core';
 
 export const env = createEnv({
   /**
@@ -21,7 +21,7 @@ export const env = createEnv({
 
     // Email Configuration
     RESEND_API_KEY: z.string().optional(),
-    EMAIL_FROM: z.string().email().default('noreply@furculita.net'),
+    EMAIL_FROM: z.email().default('noreply@furculita.net'),
 
     // OAuth Providers - Google
     GOOGLE_CLIENT_ID: z.string().min(1).optional(),

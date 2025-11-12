@@ -51,7 +51,7 @@ export function validationMiddleware<TContext>(): MiddlewareFunction<TContext, T
  *   customValidationMiddleware({
  *     schema: z.object({
  *       userId: z.string(),
- *       email: z.string().email(),
+ *       email: z.email(),
  *     }),
  *   })
  * );
