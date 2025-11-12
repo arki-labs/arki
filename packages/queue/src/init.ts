@@ -62,7 +62,7 @@ export const initQueue = {
             const fullConfig: QueueConfig = {
               transformer: config?.transformer ?? (superjson as DataTransformer),
               errorFormatter: config?.errorFormatter ?? (error => error),
-              isDev: config?.isDev ?? process.env.NODE_ENV === 'development',
+              isDev: config?.isDev ?? process.env['NODE_ENV'] === 'development',
             };
 
             return createQueueBuilder<TContext, TMeta>(fullConfig);

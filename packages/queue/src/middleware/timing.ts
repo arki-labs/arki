@@ -58,7 +58,7 @@ export function devTimingMiddleware<TContext>(options?: {
 }): MiddlewareFunction<TContext, TContext, QueueMeta> {
   const minDelay = options?.minDelay ?? 100;
   const maxDelay = options?.maxDelay ?? 500;
-  const enabled = options?.enabled ?? process.env.NODE_ENV === 'development';
+  const enabled = options?.enabled ?? process.env['NODE_ENV'] === 'development';
 
   return async ({ next, job }) => {
     const start = Date.now();
