@@ -4,24 +4,24 @@ import { env } from './env';
 
 /**
  * Initializes the shared KV client instance and tests the connection.
- * Throws an error and exits if connection fails or if required env vars are missing.
+ * Returns null if connection fails or if env vars are missing (for development).
  * Returns null during build time to prevent build failures.
  */
 const initializeKV = async (): Promise<KV | null> => {
   // Skip KV initialization during build time
-  if (process.env['NEXT_PHASE'] === 'phase-production-build') {
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
     console.log('Skipping KV initialization during build time');
     return null;
   }
 
-  if (!env.KV_URL) {
-    console.error('CRITICAL: KV_URL is not defined. KV store is required.');
-    process.exit(1);
-  }
-
-  if (!env.KV_NAMESPACE) {
-    console.error('CRITICAL: KV_NAMESPACE is not defined. KV store is required.');
-    process.exit(1);
+  // Skip KV initialization in development if not configured
+  if (!env.KV_URL || !env.KV_NAMESPACE) {
+    if (env.NODE_ENV === 'production') {
+      console.error('CRITICAL: KV_URL and KV_NAMESPACE must be defined in production.');
+      process.exit(1);
+    }
+    console.warn('⚠️  KV_URL or KV_NAMESPACE not defined. Running without KV store (development mode).');
+    return null;
   }
 
   try {
@@ -39,12 +39,15 @@ const initializeKV = async (): Promise<KV | null> => {
       throw new Error('KV connection test failed: Set/Get mismatch.');
     }
 
-    console.log('KV connection successful.');
+    console.log('✅ KV connection successful.');
     return instance;
   } catch (error) {
-    console.error('CRITICAL: Failed to initialize or connect to KV store.', error);
-    // Exit the process to prevent the application from running in a broken state
-    process.exit(1);
+    if (env.NODE_ENV === 'production') {
+      console.error('CRITICAL: Failed to initialize or connect to KV store.', error);
+      process.exit(1);
+    }
+    console.error('⚠️  Failed to connect to KV store. Running without KV (development mode).', error);
+    return null;
   }
 };
 

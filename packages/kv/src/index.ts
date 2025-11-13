@@ -15,8 +15,15 @@ export class KV {
     private readonly namespace?: string, // Keyv namespace
     private readonly rateLimitPrefix = 'rl', // Prefix for rate limiter keys
   ) {
+    // Parse Redis URL and determine if TLS is needed
+    const isTLS = redisUrl.startsWith('rediss://');
+    const tlsOptions = isTLS ? { rejectUnauthorized: false } : undefined;
+
     // Keyv setup
-    const store = new KeyvRedis(redisUrl);
+    const store = new KeyvRedis(redisUrl, {
+      namespace: this.namespace,
+      ...(tlsOptions && { socket: { tls: true, rejectUnauthorized: false } }),
+    });
     this.#keyv = new Keyv({ store, namespace: this.namespace });
     this.#keyv.on('error', err => console.error('Keyv connection error:', err));
 
@@ -26,6 +33,7 @@ export class KV {
       // indefinitely if connection is lost during startup or runtime.
       // rate-limiter-flexible handles connection issues internally.
       enableOfflineQueue: false,
+      ...(tlsOptions && { tls: tlsOptions }),
       // Add any other ioredis options if needed (e.g., maxRetriesPerRequest)
     });
 
