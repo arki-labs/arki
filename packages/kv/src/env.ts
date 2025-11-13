@@ -47,6 +47,7 @@ export const env = createEnv({
   runtimeEnv: {
     NODE_ENV: process.env['NODE_ENV'],
     KV_URL: process.env['KV_URL'],
+    KV_NAMESPACE: process.env['KV_NAMESPACE'],
     REDIS_HOST: process.env['REDIS_HOST'],
     REDIS_PORT: process.env['REDIS_PORT'],
     REDIS_USERNAME: process.env['REDIS_USERNAME'],

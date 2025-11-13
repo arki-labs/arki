@@ -5,8 +5,15 @@ import { env } from './env';
 /**
  * Initializes the shared KV client instance and tests the connection.
  * Throws an error and exits if connection fails or if required env vars are missing.
+ * Returns null during build time to prevent build failures.
  */
-const initializeKV = async (): Promise<KV> => {
+const initializeKV = async (): Promise<KV | null> => {
+  // Skip KV initialization during build time
+  if (process.env['NEXT_PHASE'] === 'phase-production-build') {
+    console.log('Skipping KV initialization during build time');
+    return null;
+  }
+
   if (!env.KV_URL) {
     console.error('CRITICAL: KV_URL is not defined. KV store is required.');
     process.exit(1);
