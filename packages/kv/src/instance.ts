@@ -4,17 +4,17 @@ import { env } from './env';
 
 /**
  * Initializes the shared KV client instance and tests the connection.
- * Logs a critical error and exits if connection fails.
+ * Throws an error and exits if connection fails or if required env vars are missing.
  */
-const initializeKV = async (): Promise<KV | undefined> => {
+const initializeKV = async (): Promise<KV> => {
   if (!env.KV_URL) {
-    console.warn('KV_URL is not defined, skipping KV initialization.');
-    return;
+    console.error('CRITICAL: KV_URL is not defined. KV store is required.');
+    process.exit(1);
   }
 
   if (!env.KV_NAMESPACE) {
-    console.warn('KV_NAMESPACE is not defined, skipping KV initialization.');
-    return;
+    console.error('CRITICAL: KV_NAMESPACE is not defined. KV store is required.');
+    process.exit(1);
   }
 
   try {

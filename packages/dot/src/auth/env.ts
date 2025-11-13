@@ -185,18 +185,13 @@ export const authEnv = createEnv({
     RPID: process.env['RPID'],
 
     // Node environment
-    NODE_ENV: process.env['NODE_ENV'],
+    NODE_ENV: process.env.NODE_ENV,
   },
 
   /**
    * Skip validation in certain environments
    */
-  skipValidation: !!process.env['CI'] || process.env['NODE_ENV'] === 'test',
-
-  /**
-   * Tell the library when we're in a server context
-   */
-  isServer: typeof window === 'undefined',
+  skipValidation: !!process.env['CI'] || process.env.NODE_ENV === 'test',
 });
 
 /**
