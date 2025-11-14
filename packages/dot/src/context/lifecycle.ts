@@ -63,33 +63,39 @@ export class LifecycleManager {
 
     this.signalsRegistered = true;
 
-    const handleSignal = (signal: string) => {
+    const handleSignal = async (signal: string) => {
       console.log(`\nReceived ${signal}, starting graceful shutdown...`);
 
-      this.shutdown()
-        .then(results => {
-          const failures = results.filter(r => !r.success);
+      try {
+        const results = await this.shutdown();
+        const failures = results.filter(r => !r.success);
 
-          if (failures.length > 0) {
-            const errorMsg = `Shutdown completed with ${failures.length} error(s): ${failures.map(f => f.error?.message).join(', ')}`;
-            console.error(errorMsg);
-            if (exitOnComplete) {
-              throw new Error(errorMsg);
-            }
-          } else {
-            console.log('Graceful shutdown completed successfully');
-          }
-        })
-        .catch(error => {
-          console.error('Fatal error during shutdown:', error);
+        if (failures.length > 0) {
+          const errorMsg = `Shutdown completed with ${failures.length} error(s): ${failures.map(f => f.error?.message).join(', ')}`;
+          console.error(errorMsg);
           if (exitOnComplete) {
-            throw error instanceof Error ? error : new Error(String(error));
+            process.exit(1);
           }
-        });
+        } else {
+          console.log('Graceful shutdown completed successfully');
+          if (exitOnComplete) {
+            process.exit(0);
+          }
+        }
+      } catch (error) {
+        console.error('Fatal error during shutdown:', error);
+        if (exitOnComplete) {
+          process.exit(1);
+        }
+      }
     };
 
-    process.on('SIGTERM', () => handleSignal('SIGTERM'));
-    process.on('SIGINT', () => handleSignal('SIGINT'));
+    process.on('SIGTERM', () => {
+      void handleSignal('SIGTERM');
+    });
+    process.on('SIGINT', () => {
+      void handleSignal('SIGINT');
+    });
   }
 
   /**
