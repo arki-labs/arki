@@ -14,14 +14,14 @@ import { PluginRegistry } from './plugin';
 import { createDotProcedures, trpcFeatures } from './trpc';
 import type { PluginSetupContext } from './trpc/types';
 import type {
-  AuthConfig,
-  BaseProjectionDefinition,
-  CommandHandlerRegistration,
-  EnvConfig,
-  Repository,
-  RouterRecord,
-  SchemaInterface,
-  TRPCOptions,
+    AuthConfig,
+    BaseProjectionDefinition,
+    CommandHandlerRegistration,
+    EnvConfig,
+    Repository,
+    RouterRecord,
+    SchemaInterface,
+    TRPCOptions,
 } from './types';
 
 /**
@@ -599,35 +599,36 @@ export * from './types';
 // Re-export plugin system
 export { definePlugin, PluginBuilder, type PluginConfig, type PluginContext } from './plugin';
 
+// Re-export context management utilities
+export * from './context';
+
 // Re-export tRPC module (new portable API)
 export { createDotProcedures } from './trpc';
 export type {
-  DotContext,
-  TRPCKit,
-  TRPCKitWithT,
-  PluginSetupContext,
+    DotContext, PluginSetupContext, TRPCKit,
+    TRPCKitWithT
 } from './trpc';
 export type {
-  CreateDotProceduresOptions,
-  DotTRPCMiddlewareConfig,
+    CreateDotProceduresOptions,
+    DotTRPCMiddlewareConfig
 } from './trpc/types';
 
 // Re-export auth module
 export {
-  authPresets, createAuthConfigFromEnv,
-  // Main auth functionality
-  createDotAuth, dotAuthIntegration,
-  sessionUtils,
-  // Provider types
-  type BuiltInProvider,
-  type CustomProvider,
-  // Types
-  type DotAuth,
-  type DotAuthConfig, type DotRBACManager, type DotSession,
-  type DotSessionManager, type DotUser, type EmailConfig, type MFAConfig, type Permission,
-  type PolicyContext, type ProviderConfigs, type RBACConfig,
-  // Auth types
-  type Role, type SecurityConfig, type SessionConfig
+    authPresets, createAuthConfigFromEnv,
+    // Main auth functionality
+    createDotAuth, dotAuthIntegration,
+    sessionUtils,
+    // Provider types
+    type BuiltInProvider,
+    type CustomProvider,
+    // Types
+    type DotAuth,
+    type DotAuthConfig, type DotRBACManager, type DotSession,
+    type DotSessionManager, type DotUser, type EmailConfig, type MFAConfig, type Permission,
+    type PolicyContext, type ProviderConfigs, type RBACConfig,
+    // Auth types
+    type Role, type SecurityConfig, type SessionConfig
 } from './auth/index';
 
 // Re-export auth features
