@@ -4,27 +4,33 @@
   "type": "module",
   "exports": {
     "./nextjs": {
+      "react-server": "./dist/nextjs/index.js",
       "source": "./src/nextjs/index.ts",
+      "import": "./dist/nextjs/index.js",
       "types": "./dist/nextjs/index.d.ts",
       "default": "./dist/nextjs/index.js"
     },
     "./nextjs/client": {
       "source": "./src/nextjs/client.ts",
+      "import": "./dist/nextjs/client.js",
       "types": "./dist/nextjs/client.d.ts",
       "default": "./dist/nextjs/client.js"
     },
     "./core": {
       "source": "./src/core/index.ts",
+      "import": "./dist/core/index.js",
       "types": "./dist/core/index.d.ts",
       "default": "./dist/core/index.js"
     },
     "./contracts": {
       "source": "./src/contracts/index.ts",
+      "import": "./dist/contracts/index.js",
       "types": "./dist/contracts/index.d.ts",
       "default": "./dist/contracts/index.js"
     },
     ".": {
       "source": "./src/index.ts",
+      "import": "./dist/index.js",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }

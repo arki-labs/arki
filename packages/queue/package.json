@@ -44,6 +44,6 @@
     "testcontainers": "^10.14.0",
     "typescript": "catalog:"
   },
-  "types": "./dist/index.d.ts",
+  "types": "./dist/src/index.d.ts",
   "sideEffects": false
 }

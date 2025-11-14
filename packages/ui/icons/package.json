@@ -61,6 +61,6 @@
     "@arki/vitest-config": "workspace:*"
   },
   "module:jsx": "src",
-  "types": "./dist/index.d.ts",
+  "types": "./dist/src/index.d.ts",
   "sideEffects": false
 }
