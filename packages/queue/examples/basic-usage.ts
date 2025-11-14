@@ -7,11 +7,11 @@
 import { z } from '@arki/contracts';
 
 import {
-    errorHandlingMiddleware,
-    initQueue,
-    loggingMiddleware,
-    structuredLoggingMiddleware,
-    timingMiddleware,
+  errorHandlingMiddleware,
+  initQueue,
+  loggingMiddleware,
+  structuredLoggingMiddleware,
+  timingMiddleware,
 } from '../src/index.ts';
 
 // ============================================
@@ -71,16 +71,10 @@ const q = initQueue.context<AppContext>().create({
 // ============================================
 
 // Base job with standard middleware
-const baseJob = q.job
-  .use(errorHandlingMiddleware())
-  .use(timingMiddleware())
-  .use(loggingMiddleware());
+const baseJob = q.job.use(errorHandlingMiddleware()).use(timingMiddleware()).use(loggingMiddleware());
 
 // Job with structured logging (adds logger to context)
-const monitoredJob = q.job
-  .use(errorHandlingMiddleware())
-  .use(timingMiddleware())
-  .use(structuredLoggingMiddleware());
+const monitoredJob = q.job.use(errorHandlingMiddleware()).use(timingMiddleware()).use(structuredLoggingMiddleware());
 
 // Custom auth middleware example
 const authMiddleware = q.middleware<AppContext & { user: { id: string; email: string } }>(
@@ -367,17 +361,17 @@ async function example() {
 // ============================================
 
 export {
-    createContext,
-    dailyEmailSchedule,
-    dataProcessingFlow,
-    hourlyDataSync,
-    jobs,
-    processUserData,
-    q,
-    sendEmail,
-    syncData,
-    userOnboardingFlow,
-    weeklyCleanup
+  createContext,
+  dailyEmailSchedule,
+  dataProcessingFlow,
+  hourlyDataSync,
+  jobs,
+  processUserData,
+  q,
+  sendEmail,
+  syncData,
+  userOnboardingFlow,
+  weeklyCleanup,
 };
 
 console.log('✅ Example setup complete!');
