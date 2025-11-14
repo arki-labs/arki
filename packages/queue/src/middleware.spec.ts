@@ -8,14 +8,14 @@
  * - Error handling
  * - Real-world middleware patterns
  */
-
+import type { StartedTestContainer } from 'testcontainers';
+import { GenericContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+
 import { z } from '@arki/contracts';
 
-import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
-
-import { initQueue } from './init.ts';
 import type { JobContext } from './types/job.ts';
+import { initQueue } from './init.ts';
 
 // Test context types
 type BaseContext = {
@@ -72,7 +72,7 @@ describe('Basic Middleware Execution', () => {
 
     const executionLog: string[] = [];
 
-    const middleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>((opts) => {
+    const middleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(opts => {
       executionLog.push('middleware-executed');
       return opts.next({ ctx: opts.ctx });
     });
@@ -81,7 +81,7 @@ describe('Basic Middleware Execution', () => {
       .use(middleware)
       .name('test:single-middleware')
       .input(z.object({ value: z.number() }))
-      .handler(async (data) => {
+      .handler(async data => {
         executionLog.push('handler-executed');
         return { result: data.value };
       });
@@ -97,11 +97,11 @@ describe('Basic Middleware Execution', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { value: 42 });
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     expect(executionLog).toContain('middleware-executed');
     expect(executionLog).toContain('handler-executed');
@@ -115,21 +115,21 @@ describe('Basic Middleware Execution', () => {
 
     const executionOrder: string[] = [];
 
-    const middleware1 = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>((opts) => {
+    const middleware1 = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(opts => {
       executionOrder.push('m1-start');
       const result = opts.next({ ctx: opts.ctx });
       executionOrder.push('m1-end');
       return result;
     });
 
-    const middleware2 = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>((opts) => {
+    const middleware2 = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(opts => {
       executionOrder.push('m2-start');
       const result = opts.next({ ctx: opts.ctx });
       executionOrder.push('m2-end');
       return result;
     });
 
-    const middleware3 = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>((opts) => {
+    const middleware3 = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(opts => {
       executionOrder.push('m3-start');
       const result = opts.next({ ctx: opts.ctx });
       executionOrder.push('m3-end');
@@ -158,21 +158,13 @@ describe('Basic Middleware Execution', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { value: 1 });
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
-    expect(executionOrder).toEqual([
-      'm1-start',
-      'm2-start',
-      'm3-start',
-      'handler',
-      'm3-end',
-      'm2-end',
-      'm1-end',
-    ]);
+    expect(executionOrder).toEqual(['m1-start', 'm2-start', 'm3-start', 'handler', 'm3-end', 'm2-end', 'm1-end']);
 
     await queue.stop();
   }, 15000);
@@ -182,13 +174,13 @@ describe('Basic Middleware Execution', () => {
 
     const executionLog: string[] = [];
 
-    const shortCircuitMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async (opts) => {
+    const shortCircuitMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async opts => {
       executionLog.push('short-circuit');
       // Don't call opts.next() - early return
       return { ctx: opts.ctx };
     });
 
-    const laterMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>((opts) => {
+    const laterMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(opts => {
       executionLog.push('later-middleware');
       return opts.next({ ctx: opts.ctx });
     });
@@ -214,11 +206,11 @@ describe('Basic Middleware Execution', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { value: 1 });
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     expect(executionLog).toContain('short-circuit');
     // Later middleware and handler should not execute
@@ -240,7 +232,7 @@ describe('Context Transformation', () => {
     let capturedRequestId: string | undefined;
     let capturedStartTime: number | undefined;
 
-    const enrichmentMiddleware = q.middleware<JobContext<BaseContext>, ExtendedContext>((opts) => {
+    const enrichmentMiddleware = q.middleware<JobContext<BaseContext>, ExtendedContext>(opts => {
       const enrichedCtx: ExtendedContext = {
         ...opts.ctx,
         requestId: `req-${Date.now()}`,
@@ -272,11 +264,11 @@ describe('Context Transformation', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { value: 42 });
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     expect(capturedRequestId).toBeDefined();
     expect(capturedRequestId).toMatch(/^req-\d+$/);
@@ -295,15 +287,15 @@ describe('Context Transformation', () => {
 
     let capturedContext: Partial<Step3Context> = {};
 
-    const middleware1 = q.middleware<JobContext<BaseContext>, Step1Context>((opts) => {
+    const middleware1 = q.middleware<JobContext<BaseContext>, Step1Context>(opts => {
       return opts.next({ ctx: { ...opts.ctx, step1: 'added-by-m1' } });
     });
 
-    const middleware2 = q.middleware<Step1Context, Step2Context>((opts) => {
+    const middleware2 = q.middleware<Step1Context, Step2Context>(opts => {
       return opts.next({ ctx: { ...opts.ctx, step2: 42 } });
     });
 
-    const middleware3 = q.middleware<Step2Context, Step3Context>((opts) => {
+    const middleware3 = q.middleware<Step2Context, Step3Context>(opts => {
       return opts.next({ ctx: { ...opts.ctx, step3: true } });
     });
 
@@ -329,11 +321,11 @@ describe('Context Transformation', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { value: 1 });
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     expect(capturedContext.step1).toBe('added-by-m1');
     expect(capturedContext.step2).toBe(42);
@@ -348,7 +340,7 @@ describe('Context Transformation', () => {
     let capturedUserId: string | undefined;
     let capturedTimestamp: Date | undefined;
 
-    const middleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>((opts) => {
+    const middleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(opts => {
       capturedUserId = opts.ctx.userId;
       capturedTimestamp = opts.ctx.timestamp;
 
@@ -374,11 +366,11 @@ describe('Context Transformation', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { value: 1 });
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     expect(capturedUserId).toBe('original-user-456');
     expect(capturedTimestamp).toEqual(testTimestamp);
@@ -396,25 +388,24 @@ describe('Async Middleware Operations', () => {
     const q = initQueue.context<BaseContext>().create();
 
     const mockAsyncOperation = vi.fn(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 100));
       return { apiData: 'fetched' };
     });
 
     let capturedData: { apiData: string } | undefined;
 
-    const asyncMiddleware = q.middleware<
-      JobContext<BaseContext>,
-      JobContext<BaseContext> & { apiData: string }
-    >(async (opts) => {
-      const result = await mockAsyncOperation();
+    const asyncMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext> & { apiData: string }>(
+      async opts => {
+        const result = await mockAsyncOperation();
 
-      return opts.next({
-        ctx: {
-          ...opts.ctx,
-          apiData: result.apiData,
-        },
-      });
-    });
+        return opts.next({
+          ctx: {
+            ...opts.ctx,
+            apiData: result.apiData,
+          },
+        });
+      },
+    );
 
     const job = q.job
       .use(asyncMiddleware)
@@ -436,11 +427,11 @@ describe('Async Middleware Operations', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { value: 1 });
 
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise(resolve => setTimeout(resolve, 1500));
 
     expect(mockAsyncOperation).toHaveBeenCalled();
     expect(capturedData).toEqual({ apiData: 'fetched' });
@@ -453,18 +444,18 @@ describe('Async Middleware Operations', () => {
 
     const executionOrder: string[] = [];
 
-    const asyncMiddleware1 = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async (opts) => {
+    const asyncMiddleware1 = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async opts => {
       executionOrder.push('async1-start');
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
       executionOrder.push('async1-middle');
       const result = await opts.next({ ctx: opts.ctx });
       executionOrder.push('async1-end');
       return result;
     });
 
-    const asyncMiddleware2 = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async (opts) => {
+    const asyncMiddleware2 = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async opts => {
       executionOrder.push('async2-start');
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 50));
       executionOrder.push('async2-middle');
       const result = await opts.next({ ctx: opts.ctx });
       executionOrder.push('async2-end');
@@ -492,11 +483,11 @@ describe('Async Middleware Operations', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { value: 1 });
 
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     expect(executionOrder).toEqual([
       'async1-start',
@@ -522,7 +513,7 @@ describe('Real-World Middleware Patterns', () => {
 
     const logs: Array<{ level: string; message: string; data?: unknown }> = [];
 
-    const loggingMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async (opts) => {
+    const loggingMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async opts => {
       const startTime = Date.now();
 
       logs.push({
@@ -556,7 +547,7 @@ describe('Real-World Middleware Patterns', () => {
       .use(loggingMiddleware)
       .name('test:logging-middleware')
       .input(z.object({ taskId: z.string() }))
-      .handler(async (data) => {
+      .handler(async data => {
         return { taskId: data.taskId, completed: true };
       });
 
@@ -571,11 +562,11 @@ describe('Real-World Middleware Patterns', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { taskId: 'task-123' });
 
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise(resolve => setTimeout(resolve, 1500));
 
     expect(logs.length).toBeGreaterThanOrEqual(2);
     expect(logs[0]!.message).toBe('Job started');
@@ -589,7 +580,7 @@ describe('Real-World Middleware Patterns', () => {
 
     const timings: Array<{ jobName: string; duration: number }> = [];
 
-    const timingMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async (opts) => {
+    const timingMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async opts => {
       const startTime = Date.now();
 
       const result = await opts.next({ ctx: opts.ctx });
@@ -607,8 +598,8 @@ describe('Real-World Middleware Patterns', () => {
       .use(timingMiddleware)
       .name('test:timing-middleware')
       .input(z.object({ delay: z.number() }))
-      .handler(async (data) => {
-        await new Promise((resolve) => setTimeout(resolve, data.delay));
+      .handler(async data => {
+        await new Promise(resolve => setTimeout(resolve, data.delay));
         return { completed: true };
       });
 
@@ -623,11 +614,11 @@ describe('Real-World Middleware Patterns', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { delay: 200 });
 
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise(resolve => setTimeout(resolve, 1500));
 
     expect(timings.length).toBe(1);
     expect(timings[0]!.duration).toBeGreaterThanOrEqual(180);
@@ -641,7 +632,7 @@ describe('Real-World Middleware Patterns', () => {
     let wasAuthenticated = false;
     let capturedPermissions: string[] = [];
 
-    const authMiddleware = q.middleware<JobContext<BaseContext>, AuthContext>((opts) => {
+    const authMiddleware = q.middleware<JobContext<BaseContext>, AuthContext>(opts => {
       const authCtx: AuthContext = {
         ...opts.ctx,
         authenticated: true,
@@ -673,11 +664,11 @@ describe('Real-World Middleware Patterns', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { action: 'delete' });
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     expect(wasAuthenticated).toBe(true);
     expect(capturedPermissions).toEqual(['read', 'write', 'delete']);
@@ -691,7 +682,7 @@ describe('Real-World Middleware Patterns', () => {
     const validationErrors: string[] = [];
     const processedValues: number[] = [];
 
-    const validationMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async (opts) => {
+    const validationMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async opts => {
       const data = opts.data as { value: number };
 
       // Validate business rules
@@ -714,7 +705,7 @@ describe('Real-World Middleware Patterns', () => {
       .use(validationMiddleware)
       .name('test:validation-middleware')
       .input(z.object({ value: z.number() }))
-      .handler(async (data) => {
+      .handler(async data => {
         processedValues.push(data.value);
         return { processed: true };
       });
@@ -730,7 +721,7 @@ describe('Real-World Middleware Patterns', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // Valid value
     await job._internal._queue!.add('valid', { value: 50 });
@@ -738,7 +729,7 @@ describe('Real-World Middleware Patterns', () => {
     await job._internal._queue!.add('negative', { value: -10 });
     await job._internal._queue!.add('too-large', { value: 2000 });
 
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     expect(processedValues).toEqual([50]); // Only valid value processed
     expect(validationErrors.length).toBeGreaterThanOrEqual(2);
@@ -781,11 +772,11 @@ describe('Error Handling in Middleware', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     const jobInstance = await job._internal._queue!.add('test', { value: 1 });
 
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise(resolve => setTimeout(resolve, 1500));
 
     const state = await jobInstance.getState();
     expect(state).toBe('failed');
@@ -799,7 +790,7 @@ describe('Error Handling in Middleware', () => {
     const errorLog: string[] = [];
     let handlerExecuted = false;
 
-    const errorHandlingMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async (opts) => {
+    const errorHandlingMiddleware = q.middleware<JobContext<BaseContext>, JobContext<BaseContext>>(async opts => {
       try {
         throw new Error('Simulated error');
       } catch (error) {
@@ -829,11 +820,11 @@ describe('Error Handling in Middleware', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { value: 1 });
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     expect(errorLog).toContain('Simulated error');
     expect(handlerExecuted).toBe(true);

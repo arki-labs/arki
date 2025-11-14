@@ -1,9 +1,9 @@
 /* eslint-disable unicorn/consistent-function-scoping */
+import type { Queue } from 'bullmq';
+import type { MiddlewareHandler } from 'hono';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { HonoAdapter } from '@bull-board/hono';
-import type { Queue } from 'bullmq';
-import type { MiddlewareHandler } from 'hono';
 
 /**
  * Create a Bull Board UI for monitoring queues
@@ -140,7 +140,6 @@ export function createBoard(options: {
 /**
  * Create Bull Board adapters for different frameworks
  */
-
 
 export { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 export { HonoAdapter } from '@bull-board/hono';

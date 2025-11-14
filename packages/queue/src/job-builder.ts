@@ -77,7 +77,11 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
         data: THandlerInput extends never ? TInput : THandlerInput,
         ctx: TContextOut,
       ) => Promise<THandlerOutput extends never ? TOutput : THandlerOutput>,
-    ): JobDefinition<THandlerInput extends never ? TInput : THandlerInput, THandlerOutput extends never ? TOutput : THandlerOutput, TContextOut> {
+    ): JobDefinition<
+      THandlerInput extends never ? TInput : THandlerInput,
+      THandlerOutput extends never ? TOutput : THandlerOutput,
+      TContextOut
+    > {
       if (!state.name) {
         throw new Error('Job name is required. Call .name() first.');
       }

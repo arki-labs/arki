@@ -6,11 +6,7 @@
  */
 
 // Error handling
-export {
-  errorHandlingMiddleware,
-  errorHandlingMiddlewareWithFormatter,
-  JobError,
-} from './error-handling.ts';
+export { errorHandlingMiddleware, errorHandlingMiddlewareWithFormatter, JobError } from './error-handling.ts';
 
 // Logging
 export {

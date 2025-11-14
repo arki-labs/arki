@@ -79,16 +79,22 @@ export { createJobContext, executeMiddlewareChain } from './middleware.ts';
 
 // Standard middleware
 export {
-    ConsoleLogger, JobError,
-    JobValidationError, PerformanceTracker, customLoggingMiddleware,
-    customValidationMiddleware,
-    devTimingMiddleware,
-    errorHandlingMiddleware,
-    errorHandlingMiddlewareWithFormatter, loggingMiddleware,
-    outputValidationMiddleware, performanceMiddleware, structuredLoggingMiddleware,
-    timeoutMiddleware,
-    timingMiddleware,
-    validationMiddleware
+  ConsoleLogger,
+  JobError,
+  JobValidationError,
+  PerformanceTracker,
+  customLoggingMiddleware,
+  customValidationMiddleware,
+  devTimingMiddleware,
+  errorHandlingMiddleware,
+  errorHandlingMiddlewareWithFormatter,
+  loggingMiddleware,
+  outputValidationMiddleware,
+  performanceMiddleware,
+  structuredLoggingMiddleware,
+  timeoutMiddleware,
+  timingMiddleware,
+  validationMiddleware,
 } from './middleware/index.ts';
 export type { LogEntry, LogLevel, Logger } from './middleware/index.ts';
 
@@ -97,21 +103,21 @@ export { BullMQAdapter, HonoAdapter, createBoard } from './create-board.ts';
 
 // Type exports
 export type {
-    BackoffStrategy,
-    FlowDefinition,
-    JobBuilderChain,
-    JobBuilderDef,
-    JobContext,
-    JobDefinition,
-    JobHandler,
-    JobMiddleware,
-    JobOptions,
-    MiddlewareFunction,
-    QueueBuilder,
-    QueueInstance,
-    QueuePriority,
-    RetryConfig,
-    ScheduleDefinition
+  BackoffStrategy,
+  FlowDefinition,
+  JobBuilderChain,
+  JobBuilderDef,
+  JobContext,
+  JobDefinition,
+  JobHandler,
+  JobMiddleware,
+  JobOptions,
+  MiddlewareFunction,
+  QueueBuilder,
+  QueueInstance,
+  QueuePriority,
+  RetryConfig,
+  ScheduleDefinition,
 } from './types/index.ts';
 
 // Constants

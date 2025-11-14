@@ -223,11 +223,7 @@ export function timeoutMiddleware<TContext>(options: {
   return async ({ next, job }) => {
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => {
-        reject(
-          new Error(
-            options.message ?? `Job ${job.name} timed out after ${options.timeout}ms`,
-          ),
-        );
+        reject(new Error(options.message ?? `Job ${job.name} timed out after ${options.timeout}ms`));
       }, options.timeout);
     });
 

@@ -148,8 +148,8 @@ function detectCircularDependencies(steps: readonly FlowStepInternal[]): void {
 
   for (const step of steps) {
     if (!visited.has(step.id) && hasCycle(step.id)) {
-        throw new Error(`Circular dependency detected in flow steps starting from step "${step.id}"`);
-      }
+      throw new Error(`Circular dependency detected in flow steps starting from step "${step.id}"`);
+    }
   }
 }
 

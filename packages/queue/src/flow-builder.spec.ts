@@ -11,17 +11,17 @@
  * - Error handling
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { z } from '@arki/contracts';
-
 import type { StartedTestContainer } from 'testcontainers';
 import { GenericContainer, Wait } from 'testcontainers';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { z } from '@arki/contracts';
 
 import type { InternalFlowDefinition } from './flow-builder.ts';
-import { initQueue } from './init.ts';
 import type { JobContext, JobDefinition } from './types/job.ts';
 import type { JobMiddleware } from './types/middleware.ts';
 import type { QueueMeta } from './types/queue.ts';
+import { initQueue } from './init.ts';
 
 // Helper to cast job to expected type for flow steps
 const asFlowJob = (job: JobDefinition<any, any, any>): JobDefinition<unknown, unknown, unknown> => job as any;
@@ -76,23 +76,23 @@ describe('Basic Flow Creation', () => {
     const step1Job = q.job
       .name('test:flow-step1')
       .input(z.object({ value: z.number() }))
-      .handler(async (data) => ({ result: data.value * 2 }));
+      .handler(async data => ({ result: data.value * 2 }));
 
     const step2Job = q.job
       .name('test:flow-step2')
       .input(z.object({ value: z.number() }))
-      .handler(async (data) => ({ result: data.value + 10 }));
+      .handler(async data => ({ result: data.value + 10 }));
 
     const flow = q.flow
       .name('test:simple-flow')
       .input(z.object({ initialValue: z.number() }))
       .step('step1', {
         job: asFlowJob(step1Job),
-        data: (input) => ({ value: input.initialValue }),
+        data: input => ({ value: input.initialValue }),
       })
       .step('step2', {
         job: asFlowJob(step2Job),
-        data: (input) => ({ value: input.initialValue }),
+        data: input => ({ value: input.initialValue }),
         dependsOn: ['step1'],
       })
       .build();
@@ -113,32 +113,32 @@ describe('Basic Flow Creation', () => {
     const jobA = q.job
       .name('test:parallel-a')
       .input(z.object({ data: z.string() }))
-      .handler(async (data) => ({ result: `A:${data.data}` }));
+      .handler(async data => ({ result: `A:${data.data}` }));
 
     const jobB = q.job
       .name('test:parallel-b')
       .input(z.object({ data: z.string() }))
-      .handler(async (data) => ({ result: `B:${data.data}` }));
+      .handler(async data => ({ result: `B:${data.data}` }));
 
     const jobC = q.job
       .name('test:parallel-c')
       .input(z.object({ data: z.string() }))
-      .handler(async (data) => ({ result: `C:${data.data}` }));
+      .handler(async data => ({ result: `C:${data.data}` }));
 
     const flow = q.flow
       .name('test:parallel-flow')
       .input(z.object({ data: z.string() }))
       .step('stepA', {
         job: asFlowJob(jobA),
-        data: (input) => ({ data: input.data }),
+        data: input => ({ data: input.data }),
       })
       .step('stepB', {
         job: asFlowJob(jobB),
-        data: (input) => ({ data: input.data }),
+        data: input => ({ data: input.data }),
       })
       .step('stepC', {
         job: asFlowJob(jobC),
-        data: (input) => ({ data: input.data }),
+        data: input => ({ data: input.data }),
       })
       .build();
 
@@ -156,22 +156,22 @@ describe('Basic Flow Creation', () => {
     const job = q.job
       .name('test:multi-dep-job')
       .input(z.object({ value: z.number() }))
-      .handler(async (data) => ({ result: data.value }));
+      .handler(async data => ({ result: data.value }));
 
     const flow = q.flow
       .name('test:multi-dep-flow')
       .input(z.object({ value: z.number() }))
       .step('step1', {
         job: asFlowJob(job),
-        data: (input) => ({ value: input.value }),
+        data: input => ({ value: input.value }),
       })
       .step('step2', {
         job: asFlowJob(job),
-        data: (input) => ({ value: input.value }),
+        data: input => ({ value: input.value }),
       })
       .step('step3', {
         job: asFlowJob(job),
-        data: (input) => ({ value: input.value }),
+        data: input => ({ value: input.value }),
         dependsOn: ['step1', 'step2'], // Wait for both step1 and step2
       })
       .build();
@@ -205,10 +205,12 @@ describe('Basic Flow Creation', () => {
       // We need to get the builder to a state where it has steps but no input
       // This is tricky because the type system prevents it, but we can test the runtime validation
       const builder = q.flow.name('test:no-input') as any;
-      builder.step('step1', {
-        job: asFlowJob(job),
-        data: () => ({ value: 1 }),
-      }).build();
+      builder
+        .step('step1', {
+          job: asFlowJob(job),
+          data: () => ({ value: 1 }),
+        })
+        .build();
     }).toThrow('Input schema is required');
   });
 });
@@ -232,11 +234,11 @@ describe('Dependency Validation', () => {
         .input(z.object({ value: z.number() }))
         .step('step1', {
           job: asFlowJob(job),
-          data: (input) => ({ value: input.value }),
+          data: input => ({ value: input.value }),
         })
         .step('step2', {
           job: asFlowJob(job),
-          data: (input) => ({ value: input.value }),
+          data: input => ({ value: input.value }),
           dependsOn: ['nonexistent-step'], // Invalid dependency
         })
         .build();
@@ -270,21 +272,21 @@ describe('Dependency Validation', () => {
       .input(z.object({ value: z.number() }))
       .step('step1', {
         job: asFlowJob(job),
-        data: (input) => ({ value: input.value }),
+        data: input => ({ value: input.value }),
       })
       .step('step2', {
         job: asFlowJob(job),
-        data: (input) => ({ value: input.value }),
+        data: input => ({ value: input.value }),
         dependsOn: ['step1'],
       })
       .step('step3', {
         job: asFlowJob(job),
-        data: (input) => ({ value: input.value }),
+        data: input => ({ value: input.value }),
         dependsOn: ['step2'],
       })
       .step('step4', {
         job: asFlowJob(job),
-        data: (input) => ({ value: input.value }),
+        data: input => ({ value: input.value }),
         dependsOn: ['step3'],
       })
       .build();
@@ -308,7 +310,7 @@ describe('Flow Execution', () => {
     const step1Job = q.job
       .name('test:ordered-step1')
       .input(z.object({ id: z.string() }))
-      .handler(async (data) => {
+      .handler(async data => {
         executionOrder.push('step1');
         return { id: data.id, step: 'step1' };
       });
@@ -316,7 +318,7 @@ describe('Flow Execution', () => {
     const step2Job = q.job
       .name('test:ordered-step2')
       .input(z.object({ id: z.string() }))
-      .handler(async (data) => {
+      .handler(async data => {
         executionOrder.push('step2');
         return { id: data.id, step: 'step2' };
       });
@@ -324,7 +326,7 @@ describe('Flow Execution', () => {
     const step3Job = q.job
       .name('test:ordered-step3')
       .input(z.object({ id: z.string() }))
-      .handler(async (data) => {
+      .handler(async data => {
         executionOrder.push('step3');
         return { id: data.id, step: 'step3' };
       });
@@ -334,16 +336,16 @@ describe('Flow Execution', () => {
       .input(z.object({ flowId: z.string() }))
       .step('step1', {
         job: asFlowJob(step1Job),
-        data: (input) => ({ id: input.flowId }),
+        data: input => ({ id: input.flowId }),
       })
       .step('step2', {
         job: asFlowJob(step2Job),
-        data: (input) => ({ id: input.flowId }),
+        data: input => ({ id: input.flowId }),
         dependsOn: ['step1'],
       })
       .step('step3', {
         job: asFlowJob(step3Job),
-        data: (input) => ({ id: input.flowId }),
+        data: input => ({ id: input.flowId }),
         dependsOn: ['step2'],
       })
       .build();
@@ -359,7 +361,7 @@ describe('Flow Execution', () => {
     await queue.register(q.registry({ flow }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Note: BullMQ flows need FlowProducer to execute
     // This validates the flow structure but actual execution
@@ -376,18 +378,18 @@ describe('Flow Execution', () => {
     const stepJobA = q.job
       .name('test:parallel-exec-a')
       .input(z.object({ delay: z.number() }))
-      .handler(async (data) => {
+      .handler(async data => {
         executionTimes['stepA'] = Date.now();
-        await new Promise((resolve) => setTimeout(resolve, data.delay));
+        await new Promise(resolve => setTimeout(resolve, data.delay));
         return { step: 'A', completed: true };
       });
 
     const stepJobB = q.job
       .name('test:parallel-exec-b')
       .input(z.object({ delay: z.number() }))
-      .handler(async (data) => {
+      .handler(async data => {
         executionTimes['stepB'] = Date.now();
-        await new Promise((resolve) => setTimeout(resolve, data.delay));
+        await new Promise(resolve => setTimeout(resolve, data.delay));
         return { step: 'B', completed: true };
       });
 
@@ -421,23 +423,23 @@ describe('Data Flow Between Steps', () => {
     const step1Job = q.job
       .name('test:transform-step1')
       .input(z.object({ value: z.number() }))
-      .handler(async (data) => ({ doubled: data.value * 2 }));
+      .handler(async data => ({ doubled: data.value * 2 }));
 
     const step2Job = q.job
       .name('test:transform-step2')
       .input(z.object({ value: z.number(), extra: z.string() }))
-      .handler(async (data) => ({ result: `${data.value}-${data.extra}` }));
+      .handler(async data => ({ result: `${data.value}-${data.extra}` }));
 
     const flow = q.flow
       .name('test:transform-flow')
       .input(z.object({ initialValue: z.number() }))
       .step('double', {
         job: asFlowJob(step1Job),
-        data: (input) => ({ value: input.initialValue }),
+        data: input => ({ value: input.initialValue }),
       })
       .step('format', {
         job: asFlowJob(step2Job),
-        data: (input) => ({
+        data: input => ({
           value: input.initialValue * 2,
           extra: 'formatted',
         }),
@@ -456,7 +458,7 @@ describe('Data Flow Between Steps', () => {
     const validateUserJob = q.job
       .name('test:validate-user')
       .input(z.object({ userId: z.string(), email: z.string() }))
-      .handler(async (data) => ({ valid: true, userId: data.userId }));
+      .handler(async data => ({ valid: true, userId: data.userId }));
 
     const createOrderJob = q.job
       .name('test:create-order')
@@ -467,7 +469,7 @@ describe('Data Flow Between Steps', () => {
           items: z.array(z.string()),
         }),
       )
-      .handler(async (data) => ({ orderId: data.orderId, created: true }));
+      .handler(async data => ({ orderId: data.orderId, created: true }));
 
     const flow = q.flow
       .name('test:complex-transform')
@@ -479,14 +481,14 @@ describe('Data Flow Between Steps', () => {
       )
       .step('validateUser', {
         job: asFlowJob(validateUserJob),
-        data: (input) => ({
+        data: input => ({
           userId: input.user.id,
           email: input.user.email,
         }),
       })
       .step('createOrder', {
         job: asFlowJob(createOrderJob),
-        data: (input) => ({
+        data: input => ({
           orderId: input.order.id,
           userId: input.user.id,
           items: input.order.products,
@@ -509,7 +511,7 @@ describe('Middleware with Flows', () => {
   it('should apply middleware to all flow steps', () => {
     const q = initQueue.context<TestContext>().create();
 
-    const loggingMiddleware = q.middleware<JobContext<TestContext>, JobContext<TestContext>>((opts) => {
+    const loggingMiddleware = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts => {
       return opts.next({ ctx: opts.ctx });
     });
 
@@ -524,11 +526,11 @@ describe('Middleware with Flows', () => {
       .use(asFlowMiddleware(loggingMiddleware))
       .step('step1', {
         job: asFlowJob(job),
-        data: (input) => ({ value: input.value }),
+        data: input => ({ value: input.value }),
       })
       .step('step2', {
         job: asFlowJob(job),
-        data: (input) => ({ value: input.value }),
+        data: input => ({ value: input.value }),
       })
       .build();
 
@@ -540,15 +542,15 @@ describe('Middleware with Flows', () => {
   it('should chain multiple middleware in flows', () => {
     const q = initQueue.context<TestContext>().create();
 
-    const middleware1 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>((opts) =>
+    const middleware1 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts =>
       opts.next({ ctx: opts.ctx }),
     );
 
-    const middleware2 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>((opts) =>
+    const middleware2 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts =>
       opts.next({ ctx: opts.ctx }),
     );
 
-    const middleware3 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>((opts) =>
+    const middleware3 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts =>
       opts.next({ ctx: opts.ctx }),
     );
 
@@ -565,7 +567,7 @@ describe('Middleware with Flows', () => {
       .use(asFlowMiddleware(middleware3))
       .step('step1', {
         job: asFlowJob(job),
-        data: (input) => ({ value: input.value }),
+        data: input => ({ value: input.value }),
       })
       .build();
 
@@ -586,22 +588,22 @@ describe('Real-World Flow Scenarios', () => {
     const validateOrderJob = q.job
       .name('test:validate-order')
       .input(z.object({ orderId: z.string() }))
-      .handler(async (data) => ({ orderId: data.orderId, valid: true }));
+      .handler(async data => ({ orderId: data.orderId, valid: true }));
 
     const processPaymentJob = q.job
       .name('test:process-payment')
       .input(z.object({ orderId: z.string(), amount: z.number() }))
-      .handler(async (data) => ({ orderId: data.orderId, paid: true }));
+      .handler(async data => ({ orderId: data.orderId, paid: true }));
 
     const updateInventoryJob = q.job
       .name('test:update-inventory')
       .input(z.object({ orderId: z.string(), items: z.array(z.string()) }))
-      .handler(async (data) => ({ orderId: data.orderId, updated: true }));
+      .handler(async data => ({ orderId: data.orderId, updated: true }));
 
     const sendConfirmationJob = q.job
       .name('test:send-confirmation')
       .input(z.object({ orderId: z.string(), email: z.string() }))
-      .handler(async (data) => ({ orderId: data.orderId, sent: true }));
+      .handler(async data => ({ orderId: data.orderId, sent: true }));
 
     const flow = q.flow
       .name('test:order-processing')
@@ -615,21 +617,21 @@ describe('Real-World Flow Scenarios', () => {
       )
       .step('validate', {
         job: asFlowJob(validateOrderJob),
-        data: (input) => ({ orderId: input.orderId }),
+        data: input => ({ orderId: input.orderId }),
       })
       .step('payment', {
         job: asFlowJob(processPaymentJob),
-        data: (input) => ({ orderId: input.orderId, amount: input.amount }),
+        data: input => ({ orderId: input.orderId, amount: input.amount }),
         dependsOn: ['validate'],
       })
       .step('inventory', {
         job: asFlowJob(updateInventoryJob),
-        data: (input) => ({ orderId: input.orderId, items: input.items }),
+        data: input => ({ orderId: input.orderId, items: input.items }),
         dependsOn: ['payment'],
       })
       .step('confirmation', {
         job: asFlowJob(sendConfirmationJob),
-        data: (input) => ({ orderId: input.orderId, email: input.email }),
+        data: input => ({ orderId: input.orderId, email: input.email }),
         dependsOn: ['payment', 'inventory'],
       })
       .build();
@@ -669,7 +671,7 @@ describe('Real-World Flow Scenarios', () => {
       .input(z.object({ dataSource: z.string() }))
       .step('fetch', {
         job: asFlowJob(fetchDataJob),
-        data: (input) => ({ source: input.dataSource }),
+        data: input => ({ source: input.dataSource }),
       })
       .step('transform', {
         job: asFlowJob(transformDataJob),
@@ -726,7 +728,7 @@ describe('Real-World Flow Scenarios', () => {
       .input(z.object({ requestId: z.string() }))
       .step('prepare', {
         job: asFlowJob(prepareJob),
-        data: (input) => ({ id: input.requestId }),
+        data: input => ({ id: input.requestId }),
       })
       // Fan out: These run in parallel after prepare
       .step('processA', {
@@ -747,7 +749,7 @@ describe('Real-World Flow Scenarios', () => {
       // Fan in: Waits for all parallel processes to complete
       .step('aggregate', {
         job: asFlowJob(aggregateJob),
-        data: (input) => ({ id: input.requestId }),
+        data: input => ({ id: input.requestId }),
         dependsOn: ['processA', 'processB', 'processC'],
       })
       .build();
@@ -777,12 +779,12 @@ describe('Flow Configuration', () => {
       .input(z.object({ value: z.number() }))
       .step('highPriority', {
         job: asFlowJob(job),
-        data: (input) => ({ value: input.value }),
+        data: input => ({ value: input.value }),
         queueName: 'high-priority-queue',
       })
       .step('lowPriority', {
         job: asFlowJob(job),
-        data: (input) => ({ value: input.value }),
+        data: input => ({ value: input.value }),
         queueName: 'low-priority-queue',
         dependsOn: ['highPriority'],
       })
@@ -807,12 +809,12 @@ describe('Flow Configuration', () => {
       .input(z.object({ value: z.number() }))
       .step('step1', {
         job: asFlowJob(job),
-        data: (input) => ({ value: input.value }),
+        data: input => ({ value: input.value }),
         opts: { priority: 1, delay: 1000 },
       })
       .step('step2', {
         job: asFlowJob(job),
-        data: (input) => ({ value: input.value }),
+        data: input => ({ value: input.value }),
         opts: { priority: 5, attempts: 3 },
       })
       .build();

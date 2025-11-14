@@ -31,13 +31,16 @@ export type Logger = {
   info(message: string, data?: unknown): void;
   warn(message: string, data?: unknown): void;
   error(message: string, data?: unknown): void;
-}
+};
 
 /**
  * Console logger implementation
  */
 export class ConsoleLogger implements Logger {
-  constructor(private readonly jobName: string, private readonly jobId: string | undefined) {}
+  constructor(
+    private readonly jobName: string,
+    private readonly jobId: string | undefined,
+  ) {}
 
   private log(level: LogLevel, message: string, data?: unknown) {
     const entry: LogEntry = {

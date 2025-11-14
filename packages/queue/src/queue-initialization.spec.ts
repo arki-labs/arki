@@ -4,14 +4,14 @@
  * Tests the complete flow from queue creation to job execution using real Redis.
  * Covers: initialization, job registration, worker startup, job execution, and shutdown.
  */
-
-import { z } from '@arki/contracts';
+import type { StartedTestContainer } from 'testcontainers';
+import { GenericContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
+import { z } from '@arki/contracts';
 
-import { initQueue } from './init.ts';
 import type { JobContext } from './types/job.ts';
+import { initQueue } from './init.ts';
 
 // Test context type
 type TestContext = {
@@ -94,7 +94,7 @@ describe('Queue Initialization', () => {
       const job = q.job
         .name('test:simple-job')
         .input(z.object({ message: z.string() }))
-        .handler(async (data) => {
+        .handler(async data => {
           return { success: true, message: data.message };
         });
 
@@ -107,7 +107,7 @@ describe('Queue Initialization', () => {
     it('should create job with middleware', () => {
       const q = initQueue.context<TestContext>().create();
 
-      const middleware = q.middleware<JobContext<TestContext>, JobContext<TestContext>>((opts) =>
+      const middleware = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts =>
         opts.next({ ctx: opts.ctx }),
       );
 
@@ -115,7 +115,7 @@ describe('Queue Initialization', () => {
         .use(middleware)
         .name('test:job-with-middleware')
         .input(z.object({ value: z.number() }))
-        .handler(async (data) => {
+        .handler(async data => {
           return { result: data.value * 2 };
         });
 
@@ -136,7 +136,7 @@ describe('Queue Initialization', () => {
             maxDelay: 60000,
           },
         })
-        .handler(async (data) => {
+        .handler(async data => {
           return { processed: data.id };
         });
 
@@ -178,7 +178,7 @@ describe('Job Registration and Execution', () => {
       const job = q.job
         .name('test:single-job')
         .input(z.object({ message: z.string() }))
-        .handler(async (data) => {
+        .handler(async data => {
           processedMessages.push(data.message);
           return { success: true, processed: data.message };
         });
@@ -195,14 +195,14 @@ describe('Job Registration and Execution', () => {
       await queue.start();
 
       // Wait for worker to be ready
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Add job to queue
       const jobInstance = job._internal._queue!;
       await jobInstance.add('test-job', { message: 'Hello from test!' });
 
       // Wait for job to be processed
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       expect(processedMessages).toContain('Hello from test!');
 
@@ -220,7 +220,7 @@ describe('Job Registration and Execution', () => {
             age: z.number().min(0).max(120),
           }),
         )
-        .handler(async (data) => {
+        .handler(async data => {
           return { valid: true, email: data.email, age: data.age };
         });
 
@@ -235,7 +235,7 @@ describe('Job Registration and Execution', () => {
       await queue.register(q.registry({ job }));
       await queue.start();
 
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       const jobInstance = job._internal._queue!;
 
@@ -245,7 +245,7 @@ describe('Job Registration and Execution', () => {
         age: 25,
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       const validState = await validJob.getState();
       expect(validState).toBe('completed');
@@ -256,7 +256,7 @@ describe('Job Registration and Execution', () => {
         age: 150,
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       const invalidState = await invalidJob.getState();
       expect(invalidState).toBe('failed');
@@ -278,7 +278,7 @@ describe('Job Registration and Execution', () => {
       const job1 = q.job
         .name('test:multi-job-1')
         .input(z.object({ id: z.string() }))
-        .handler(async (data) => {
+        .handler(async data => {
           results['job1']!.push(data.id);
           return { processed: data.id };
         });
@@ -286,7 +286,7 @@ describe('Job Registration and Execution', () => {
       const job2 = q.job
         .name('test:multi-job-2')
         .input(z.object({ value: z.number() }))
-        .handler(async (data) => {
+        .handler(async data => {
           results['job2']!.push(`value-${data.value}`);
           return { doubled: data.value * 2 };
         });
@@ -294,7 +294,7 @@ describe('Job Registration and Execution', () => {
       const job3 = q.job
         .name('test:multi-job-3')
         .input(z.object({ name: z.string() }))
-        .handler(async (data) => {
+        .handler(async data => {
           results['job3']!.push(data.name);
           return { greeting: `Hello, ${data.name}!` };
         });
@@ -316,14 +316,14 @@ describe('Job Registration and Execution', () => {
       );
       await queue.start();
 
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Execute all jobs
       await job1._internal._queue!.add('test', { id: 'id-123' });
       await job2._internal._queue!.add('test', { value: 42 });
       await job3._internal._queue!.add('test', { name: 'Alice' });
 
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
       expect(results['job1']).toContain('id-123');
       expect(results['job2']).toContain('value-42');
@@ -340,7 +340,7 @@ describe('Job Registration and Execution', () => {
       const emailJob = q.job
         .name('test:nested-email')
         .input(z.object({ to: z.string() }))
-        .handler(async (data) => {
+        .handler(async data => {
           results.push(`email:${data.to}`);
           return { sent: true };
         });
@@ -348,7 +348,7 @@ describe('Job Registration and Execution', () => {
       const smsJob = q.job
         .name('test:nested-sms')
         .input(z.object({ phone: z.string() }))
-        .handler(async (data) => {
+        .handler(async data => {
           results.push(`sms:${data.phone}`);
           return { sent: true };
         });
@@ -371,12 +371,12 @@ describe('Job Registration and Execution', () => {
       );
       await queue.start();
 
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       await emailJob._internal._queue!.add('test', { to: 'user@example.com' });
       await smsJob._internal._queue!.add('test', { phone: '+1234567890' });
 
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
       expect(results).toContain('email:user@example.com');
       expect(results).toContain('sms:+1234567890');
@@ -419,11 +419,11 @@ describe('Job Registration and Execution', () => {
       await queue.register(q.registry({ job }));
       await queue.start();
 
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       await job._internal._queue!.add('test', { steps: 5 });
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       expect(progressUpdates.length).toBeGreaterThan(0);
       expect(logMessages.length).toBeGreaterThan(0);
@@ -461,11 +461,11 @@ describe('Job Registration and Execution', () => {
       await queue.register(q.registry({ job }));
       await queue.start();
 
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       await job._internal._queue!.add('test', { action: 'process' });
 
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       expect(capturedUserId).toBe('custom-user-456');
       expect(capturedTimestamp).toEqual(testTimestamp);
@@ -485,7 +485,7 @@ describe('Middleware Integration', () => {
 
     const executionOrder: string[] = [];
 
-    const loggingMiddleware = q.middleware<JobContext<TestContext>, JobContext<TestContext>>((opts) => {
+    const loggingMiddleware = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts => {
       executionOrder.push('middleware-start');
       const result = opts.next({ ctx: opts.ctx });
       executionOrder.push('middleware-end');
@@ -496,7 +496,7 @@ describe('Middleware Integration', () => {
       .use(loggingMiddleware)
       .name('test:middleware-job')
       .input(z.object({ data: z.string() }))
-      .handler(async (data) => {
+      .handler(async data => {
         executionOrder.push('handler');
         return { processed: data.data };
       });
@@ -512,11 +512,11 @@ describe('Middleware Integration', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { data: 'test-data' });
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     expect(executionOrder).toEqual(['middleware-start', 'handler', 'middleware-end']);
 
@@ -528,21 +528,21 @@ describe('Middleware Integration', () => {
 
     const executionOrder: string[] = [];
 
-    const middleware1 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>((opts) => {
+    const middleware1 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts => {
       executionOrder.push('m1-start');
       const result = opts.next({ ctx: opts.ctx });
       executionOrder.push('m1-end');
       return result;
     });
 
-    const middleware2 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>((opts) => {
+    const middleware2 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts => {
       executionOrder.push('m2-start');
       const result = opts.next({ ctx: opts.ctx });
       executionOrder.push('m2-end');
       return result;
     });
 
-    const middleware3 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>((opts) => {
+    const middleware3 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts => {
       executionOrder.push('m3-start');
       const result = opts.next({ ctx: opts.ctx });
       executionOrder.push('m3-end');
@@ -555,7 +555,7 @@ describe('Middleware Integration', () => {
       .use(middleware3)
       .name('test:chain-middleware')
       .input(z.object({ value: z.number() }))
-      .handler(async (data) => {
+      .handler(async data => {
         executionOrder.push('handler');
         return { result: data.value };
       });
@@ -571,21 +571,13 @@ describe('Middleware Integration', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { value: 42 });
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
-    expect(executionOrder).toEqual([
-      'm1-start',
-      'm2-start',
-      'm3-start',
-      'handler',
-      'm3-end',
-      'm2-end',
-      'm1-end',
-    ]);
+    expect(executionOrder).toEqual(['m1-start', 'm2-start', 'm3-start', 'handler', 'm3-end', 'm2-end', 'm1-end']);
 
     await queue.stop();
   }, 15000);
@@ -601,7 +593,7 @@ describe('Middleware Integration', () => {
     let capturedRequestId: string | undefined;
     let capturedStartTime: number | undefined;
 
-    const enrichmentMiddleware = q.middleware<JobContext<TestContext>, ExtendedContext>((opts) => {
+    const enrichmentMiddleware = q.middleware<JobContext<TestContext>, ExtendedContext>(opts => {
       const enrichedCtx: ExtendedContext = {
         ...opts.ctx,
         requestId: `req-${Date.now()}`,
@@ -633,11 +625,11 @@ describe('Middleware Integration', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { action: 'transform' });
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     expect(capturedRequestId).toBeDefined();
     expect(capturedRequestId).toMatch(/^req-\d+$/);
@@ -668,7 +660,7 @@ describe('Retry and Error Handling', () => {
           backoff: { type: 'fixed', delay: 100 },
         },
       })
-      .handler(async (data) => {
+      .handler(async data => {
         attemptCount++;
         attemptTimestamps.push(Date.now());
 
@@ -690,12 +682,12 @@ describe('Retry and Error Handling', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     const jobInstance = await job._internal._queue!.add('test', { shouldFail: true });
 
     // Wait for all retry attempts
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
     const _state = await jobInstance.getState();
     expect(attemptCount).toBeGreaterThanOrEqual(3);
@@ -743,11 +735,11 @@ describe('Retry and Error Handling', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     const _jobInstance = await job._internal._queue!.add('test', { id: 'test-maxdelay' });
 
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     // Should have retried multiple times
     expect(attemptCount).toBeGreaterThanOrEqual(3);
@@ -769,7 +761,7 @@ describe('Retry and Error Handling', () => {
           backoff: { type: 'fixed', delay: 100 },
         },
       })
-      .handler(async (data) => {
+      .handler(async data => {
         if (data.throwError) {
           throw new Error('Intentional failure');
         }
@@ -787,11 +779,11 @@ describe('Retry and Error Handling', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // Set up worker error listener
     const worker = job._internal._worker!;
-    worker.on('failed', (failedJob) => {
+    worker.on('failed', failedJob => {
       if (failedJob?.id) {
         failedJobIds.push(failedJob.id);
       }
@@ -799,7 +791,7 @@ describe('Retry and Error Handling', () => {
 
     const failingJob = await job._internal._queue!.add('test', { throwError: true });
 
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise(resolve => setTimeout(resolve, 1500));
 
     const state = await failingJob.getState();
     expect(state).toBe('failed');
@@ -820,7 +812,7 @@ describe('Graceful Shutdown', () => {
     const job = q.job
       .name('test:shutdown-job')
       .input(z.object({ id: z.string() }))
-      .handler(async (data) => {
+      .handler(async data => {
         return { processed: data.id };
       });
 
@@ -835,7 +827,7 @@ describe('Graceful Shutdown', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // Queue should be running
     expect(job._internal._worker).toBeDefined();
@@ -859,8 +851,8 @@ describe('Graceful Shutdown', () => {
     const job = q.job
       .name('test:inflight-job')
       .input(z.object({ id: z.string(), delay: z.number() }))
-      .handler(async (data) => {
-        await new Promise((resolve) => setTimeout(resolve, data.delay));
+      .handler(async data => {
+        await new Promise(resolve => setTimeout(resolve, data.delay));
         processedIds.push(data.id);
         return { completed: data.id };
       });
@@ -876,13 +868,13 @@ describe('Graceful Shutdown', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // Add a slow job
     await job._internal._queue!.add('test', { id: 'slow-job', delay: 2000 });
 
     // Wait a bit for job to start processing
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await new Promise(resolve => setTimeout(resolve, 300));
 
     // Stop the queue (should wait for in-flight job)
     const stopPromise = queue.stop();
@@ -916,7 +908,7 @@ describe('Real-World Scenarios', () => {
       .options({
         maxParallelism: 10, // Process 10 jobs concurrently
       })
-      .handler(async (data) => {
+      .handler(async data => {
         processedCount.value++;
         return { index: data.index };
       });
@@ -932,7 +924,7 @@ describe('Real-World Scenarios', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // Add multiple jobs
     const addPromises = [];
@@ -942,7 +934,7 @@ describe('Real-World Scenarios', () => {
     await Promise.all(addPromises);
 
     // Wait for all jobs to complete
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     expect(processedCount.value).toBe(JOB_COUNT);
 
@@ -954,7 +946,7 @@ describe('Real-World Scenarios', () => {
 
     // Mock external API
     const mockApiCall = vi.fn(async (userId: string) => {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 100));
       return { userId, data: `processed-${userId}` };
     });
 
@@ -969,7 +961,7 @@ describe('Real-World Scenarios', () => {
           backoff: { type: 'exponential', delay: 500 },
         },
       })
-      .handler(async (data) => {
+      .handler(async data => {
         const result = await mockApiCall(data.userId);
         processedResults.push(result.data);
         return result;
@@ -986,12 +978,12 @@ describe('Real-World Scenarios', () => {
     await queue.register(q.registry({ job }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     await job._internal._queue!.add('test', { userId: 'user-abc' });
     await job._internal._queue!.add('test', { userId: 'user-xyz' });
 
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     expect(mockApiCall).toHaveBeenCalledTimes(2);
     expect(processedResults).toContain('processed-user-abc');

@@ -76,11 +76,7 @@ export function customValidationMiddleware<TContext, TInput>(options: {
         }
 
         // Throw validation error
-        throw new JobValidationError(
-          `Validation failed for job ${job.name}`,
-          job.name,
-          zodError.issues,
-        );
+        throw new JobValidationError(`Validation failed for job ${job.name}`, job.name, zodError.issues);
       }
 
       throw error;

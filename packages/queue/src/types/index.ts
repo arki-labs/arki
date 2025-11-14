@@ -16,7 +16,7 @@ export type {
   ScheduleBuilderDef,
   ScheduleBuilderFactory,
   ScheduleDefinition,
-  ScheduleJobWrapper
+  ScheduleJobWrapper,
 } from './builder.ts';
 
 // Job types
@@ -32,7 +32,14 @@ export type {
 } from './job.ts';
 
 // Middleware types
-export type { ComputeFinalContext, JobMiddleware, MiddlewareChainContext, MiddlewareContext, MiddlewareFunction, MiddlewareResult } from './middleware.ts';
+export type {
+  ComputeFinalContext,
+  JobMiddleware,
+  MiddlewareChainContext,
+  MiddlewareContext,
+  MiddlewareFunction,
+  MiddlewareResult,
+} from './middleware.ts';
 
 // Queue types
 export type { DataTransformer, ErrorFormatter, QueueConfig, QueueMeta } from './queue.ts';

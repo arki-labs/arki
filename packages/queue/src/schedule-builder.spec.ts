@@ -9,15 +9,15 @@
  * - Timezone support
  * - Middleware integration
  */
-
+import type { StartedTestContainer } from 'testcontainers';
+import { GenericContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
 import { z } from '@arki/contracts';
 
-import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
-
+import type { JobContext } from './types/job.ts';
 import { CronPatterns } from './cron-patterns.ts';
 import { initQueue } from './init.ts';
-import type { JobContext } from './types/job.ts';
 
 // Test context type
 type TestContext = {
@@ -68,7 +68,7 @@ describe('CRON Schedules', () => {
       const job = q.job
         .name('test:cron-job')
         .input(z.object({ taskId: z.string() }))
-        .handler(async (data) => {
+        .handler(async data => {
           executionCount.value++;
           return { completed: data.taskId };
         });
@@ -88,7 +88,7 @@ describe('CRON Schedules', () => {
       await queue.start();
 
       // Wait for multiple executions
-      await new Promise((resolve) => setTimeout(resolve, 5500));
+      await new Promise(resolve => setTimeout(resolve, 5500));
 
       // Should have executed 2-3 times (at 0s, 2s, 4s)
       expect(executionCount.value).toBeGreaterThanOrEqual(2);
@@ -106,7 +106,7 @@ describe('CRON Schedules', () => {
         .cron('*/2 * * * * *')
         .name('test:inline-cron')
         .input(z.object({ message: z.string() }))
-        .handler(async (data) => {
+        .handler(async data => {
           executions.push(data.message);
           return { processed: true };
         });
@@ -122,7 +122,7 @@ describe('CRON Schedules', () => {
       await queue.register(q.registry({ schedule }));
       await queue.start();
 
-      await new Promise((resolve) => setTimeout(resolve, 5500));
+      await new Promise(resolve => setTimeout(resolve, 5500));
 
       expect(executions.length).toBeGreaterThanOrEqual(2);
 
@@ -135,7 +135,7 @@ describe('CRON Schedules', () => {
       const job = q.job
         .name('test:tz-job')
         .input(z.object({ zone: z.string() }))
-        .handler(async (data) => {
+        .handler(async data => {
           return { zone: data.zone, executed: true };
         });
 
@@ -159,7 +159,7 @@ describe('CRON Schedules', () => {
       const job = q.job
         .name('test:every-seconds')
         .input(z.object({ tick: z.number() }))
-        .handler(async (data) => {
+        .handler(async data => {
           executions.push(data.tick);
           return { tick: data.tick };
         });
@@ -180,7 +180,7 @@ describe('CRON Schedules', () => {
       await queue.register(q.registry({ schedule }));
       await queue.start();
 
-      await new Promise((resolve) => setTimeout(resolve, 5500));
+      await new Promise(resolve => setTimeout(resolve, 5500));
 
       expect(executions.length).toBeGreaterThanOrEqual(2);
 
@@ -272,7 +272,7 @@ describe('INTERVAL Schedules', () => {
     const job = q.job
       .name('test:interval-job')
       .input(z.object({ counter: z.number() }))
-      .handler(async (data) => {
+      .handler(async data => {
         executionTimestamps.push(Date.now());
         return { counter: data.counter };
       });
@@ -295,7 +295,7 @@ describe('INTERVAL Schedules', () => {
     await queue.start();
 
     // Wait for multiple executions
-    await new Promise((resolve) => setTimeout(resolve, 3500));
+    await new Promise(resolve => setTimeout(resolve, 3500));
 
     expect(executionTimestamps.length).toBeGreaterThanOrEqual(3);
 
@@ -318,7 +318,7 @@ describe('INTERVAL Schedules', () => {
       .interval(1000)
       .name('test:inline-interval')
       .input(z.object({ id: z.string() }))
-      .handler(async (data) => {
+      .handler(async data => {
         executions.push(data.id);
         return { processed: true };
       });
@@ -334,7 +334,7 @@ describe('INTERVAL Schedules', () => {
     await queue.register(q.registry({ schedule }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 3500));
+    await new Promise(resolve => setTimeout(resolve, 3500));
 
     expect(executions.length).toBeGreaterThanOrEqual(3);
 
@@ -368,7 +368,7 @@ describe('INTERVAL Schedules', () => {
     await queue.register(q.registry({ schedule }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
     // Should have executed ~6 times in 3 seconds
     expect(executionCount.value).toBeGreaterThanOrEqual(5);
@@ -392,7 +392,7 @@ describe('TIMEOUT Schedules', () => {
     const job = q.job
       .name('test:timeout-job')
       .input(z.object({ taskId: z.string() }))
-      .handler(async (data) => {
+      .handler(async data => {
         executionCount.value++;
         executionTime.value = Date.now();
         return { completed: data.taskId };
@@ -418,7 +418,7 @@ describe('TIMEOUT Schedules', () => {
     await queue.start();
 
     // Wait for execution plus some buffer
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
     // Should have executed exactly once
     expect(executionCount.value).toBe(1);
@@ -429,7 +429,7 @@ describe('TIMEOUT Schedules', () => {
     expect(actualDelay).toBeLessThanOrEqual(2500);
 
     // Wait a bit more to confirm it doesn't execute again
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Still should be exactly 1 execution
     expect(executionCount.value).toBe(1);
@@ -447,7 +447,7 @@ describe('TIMEOUT Schedules', () => {
       .timeout(1500)
       .name('test:inline-timeout')
       .input(z.object({ message: z.string() }))
-      .handler(async (data) => {
+      .handler(async data => {
         executed.value = true;
         executedAt.value = Date.now();
         return { message: data.message, executed: true };
@@ -467,7 +467,7 @@ describe('TIMEOUT Schedules', () => {
     await queue.start();
 
     // Wait for execution
-    await new Promise((resolve) => setTimeout(resolve, 2500));
+    await new Promise(resolve => setTimeout(resolve, 2500));
 
     expect(executed.value).toBe(true);
 
@@ -505,7 +505,7 @@ describe('TIMEOUT Schedules', () => {
     await queue.start();
 
     // Wait well beyond the timeout
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     // Should still be exactly 1 execution
     expect(executionCount.value).toBe(1);
@@ -524,7 +524,7 @@ describe('Schedules with Middleware', () => {
 
     const executionOrder: string[] = [];
 
-    const loggingMiddleware = q.middleware<JobContext<TestContext>, JobContext<TestContext>>((opts) => {
+    const loggingMiddleware = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts => {
       executionOrder.push('middleware-start');
       const result = opts.next({ ctx: opts.ctx });
       executionOrder.push('middleware-end');
@@ -553,7 +553,7 @@ describe('Schedules with Middleware', () => {
     await queue.register(q.registry({ schedule }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 2500));
+    await new Promise(resolve => setTimeout(resolve, 2500));
 
     // Should have executed with middleware
     expect(executionOrder).toContain('middleware-start');
@@ -569,7 +569,7 @@ describe('Schedules with Middleware', () => {
     const middlewareExecuted = { value: false };
     const handlerExecuted = { value: false };
 
-    const trackingMiddleware = q.middleware<JobContext<TestContext>, JobContext<TestContext>>((opts) => {
+    const trackingMiddleware = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts => {
       middlewareExecuted.value = true;
       return opts.next({ ctx: opts.ctx });
     });
@@ -595,7 +595,7 @@ describe('Schedules with Middleware', () => {
     await queue.register(q.registry({ schedule }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     expect(middlewareExecuted.value).toBe(true);
     expect(handlerExecuted.value).toBe(true);
@@ -651,7 +651,10 @@ describe('Schedule Name Generation', () => {
 
     expect(() => {
       // @ts-expect-error - Testing runtime validation
-      q.schedule.interval(1000).name('test-schedule').handler(async () => ({ result: 1 }));
+      q.schedule
+        .interval(1000)
+        .name('test-schedule')
+        .handler(async () => ({ result: 1 }));
     }).toThrow('Input schema is required');
   });
 });
@@ -669,16 +672,19 @@ describe('Real-World Schedule Scenarios', () => {
     const generateReportJob = q.job
       .name('test:daily-report')
       .input(z.object({ reportType: z.string(), date: z.string() }))
-      .handler(async (data) => {
+      .handler(async data => {
         reportsGenerated.push(`${data.reportType}-${data.date}`);
         return { generated: true, type: data.reportType };
       });
 
     // Daily at 9 AM (simulated with fast execution for testing)
-    const schedule = q.schedule.everySeconds(2).job(generateReportJob).data({
-      reportType: 'daily',
-      date: new Date().toISOString().split('T')[0]!,
-    });
+    const schedule = q.schedule
+      .everySeconds(2)
+      .job(generateReportJob)
+      .data({
+        reportType: 'daily',
+        date: new Date().toISOString().split('T')[0]!,
+      });
 
     const queue = q.createQueue({
       connection: redisUrl,
@@ -691,7 +697,7 @@ describe('Real-World Schedule Scenarios', () => {
     await queue.register(q.registry({ schedule }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     expect(reportsGenerated.length).toBeGreaterThanOrEqual(2);
     expect(reportsGenerated[0]).toMatch(/^daily-\d{4}-\d{2}-\d{2}$/);
@@ -707,7 +713,7 @@ describe('Real-World Schedule Scenarios', () => {
     const healthCheckJob = q.job
       .name('test:health-check')
       .input(z.object({ service: z.string() }))
-      .handler(async (data) => {
+      .handler(async data => {
         healthChecks.push({
           timestamp: Date.now(),
           status: 'healthy',
@@ -729,7 +735,7 @@ describe('Real-World Schedule Scenarios', () => {
     await queue.register(q.registry({ schedule }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 3500));
+    await new Promise(resolve => setTimeout(resolve, 3500));
 
     expect(healthChecks.length).toBeGreaterThanOrEqual(3);
 
@@ -752,7 +758,7 @@ describe('Real-World Schedule Scenarios', () => {
     const sendReminderJob = q.job
       .name('test:send-reminder')
       .input(z.object({ userId: z.string(), message: z.string() }))
-      .handler(async (data) => {
+      .handler(async data => {
         reminderSent.value = true;
         sentAt.value = Date.now();
         return { sent: true, userId: data.userId };
@@ -777,7 +783,7 @@ describe('Real-World Schedule Scenarios', () => {
     await queue.register(q.registry({ schedule }));
     await queue.start();
 
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
     expect(reminderSent.value).toBe(true);
 
@@ -786,7 +792,7 @@ describe('Real-World Schedule Scenarios', () => {
     expect(delay).toBeLessThanOrEqual(2500);
 
     // Verify it doesn't send again
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 2000));
     expect(reminderSent.value).toBe(true); // Still just once
 
     await queue.stop();

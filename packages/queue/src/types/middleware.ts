@@ -61,10 +61,7 @@ export type JobMiddleware<TContextOut1, TContextOut2, TMeta extends QueueMeta> =
 /**
  * Helper type to extract context type from middleware
  */
-export type MiddlewareContext<T> =
-  T extends JobMiddleware<unknown, infer TContextOut, QueueMeta>
-    ? TContextOut
-    : never;
+export type MiddlewareContext<T> = T extends JobMiddleware<unknown, infer TContextOut, QueueMeta> ? TContextOut : never;
 
 /**
  * Helper type for middleware chain
@@ -72,15 +69,14 @@ export type MiddlewareContext<T> =
  */
 export type MiddlewareChainContext<
   TContext,
-  TMiddlewares extends readonly JobMiddleware<unknown, unknown, QueueMeta>[]
-> =
-  TMiddlewares extends readonly [infer First, ...infer Rest]
-    ? First extends JobMiddleware<unknown, infer TOut, QueueMeta>
-      ? Rest extends readonly JobMiddleware<unknown, unknown, QueueMeta>[]
-        ? MiddlewareChainContext<TOut, Rest>
-        : TOut
-      : TContext
-    : TContext;
+  TMiddlewares extends readonly JobMiddleware<unknown, unknown, QueueMeta>[],
+> = TMiddlewares extends readonly [infer First, ...infer Rest]
+  ? First extends JobMiddleware<unknown, infer TOut, QueueMeta>
+    ? Rest extends readonly JobMiddleware<unknown, unknown, QueueMeta>[]
+      ? MiddlewareChainContext<TOut, Rest>
+      : TOut
+    : TContext
+  : TContext;
 
 /**
  * Compute the final context type from a middleware chain
@@ -97,20 +93,17 @@ export type MiddlewareChainContext<
  * type FinalCtx = ComputeFinalContext<BaseCtx, MyMiddlewares>;
  * // Result: BaseCtx & { user: User, db: DB }
  */
-export type ComputeFinalContext<
-  TInitialContext,
-  TMiddlewares extends readonly unknown[]
-> =
+export type ComputeFinalContext<TInitialContext, TMiddlewares extends readonly unknown[]> =
   // If empty array, return initial context
   TMiddlewares extends readonly []
     ? TInitialContext
-    // If has elements, process first middleware
-    : TMiddlewares extends readonly [infer First, ...infer Rest]
-      // Check if First is a middleware and extract its output type
-      ? First extends JobMiddleware<unknown, infer TOut, QueueMeta>
-        // Recursively process remaining middleware with the output of this one
-        ? ComputeFinalContext<TOut, Rest>
-        // If not a valid middleware, just use initial context
-        : TInitialContext
-      // Fallback to initial context
-      : TInitialContext;
+    : // If has elements, process first middleware
+      TMiddlewares extends readonly [infer First, ...infer Rest]
+      ? // Check if First is a middleware and extract its output type
+        First extends JobMiddleware<unknown, infer TOut, QueueMeta>
+        ? // Recursively process remaining middleware with the output of this one
+          ComputeFinalContext<TOut, Rest>
+        : // If not a valid middleware, just use initial context
+          TInitialContext
+      : // Fallback to initial context
+        TInitialContext;

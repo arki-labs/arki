@@ -11,15 +11,16 @@
 
 import type { Job as BullMQJob, RepeatOptions } from 'bullmq';
 import { FlowProducer, Queue, Worker } from 'bullmq';
+
 import type { z } from '@arki/contracts';
 
 import type { InternalFlowDefinition } from './flow-builder.ts';
-import { createJobContext, executeMiddlewareChain } from './middleware.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
-import { getWorkerBackoffStrategy, toBullMQBackoff } from './retry-strategies.ts';
 import type { FlowDefinition, QueueInstance, ScheduleDefinition } from './types/builder.ts';
 import type { JobDefinition, JobHandler } from './types/job.ts';
 import type { QueueMeta } from './types/queue.ts';
+import { createJobContext, executeMiddlewareChain } from './middleware.ts';
+import { getWorkerBackoffStrategy, toBullMQBackoff } from './retry-strategies.ts';
 
 /**
  * Registry type - nested structure of jobs, schedules, and flows
@@ -27,7 +28,7 @@ import type { QueueMeta } from './types/queue.ts';
  */
 type Registry = {
   [key: string]: JobDefinition<unknown, unknown, unknown> | ScheduleDefinition | FlowDefinition | Registry;
-}
+};
 
 /**
  * Queue instance options
@@ -42,9 +43,7 @@ export type QueueInstanceOptions<TContext> = {
  * Create a queue instance that can register and run jobs, schedules, and flows
  * @internal - Called by QueueBuilder.createQueue()
  */
-export function createQueueInstance<TContext>(
-  options: QueueInstanceOptions<TContext>,
-): QueueInstance {
+export function createQueueInstance<TContext>(options: QueueInstanceOptions<TContext>): QueueInstance {
   const { connection, keyPrefix = 'queue:', createContext } = options;
 
   // Parse connection string or use connection object
@@ -283,24 +282,24 @@ export function createQueueInstance<TContext>(
       // Check if it's a definition
       if (typeof value === 'object') {
         if ('_type' in value) {
-        // It's a definition
+          // It's a definition
           switch (value._type) {
-          case 'job': {
-            registerJobDefinition(value as JobDefinition<unknown, unknown, TContext>);
+            case 'job': {
+              registerJobDefinition(value as JobDefinition<unknown, unknown, TContext>);
 
-          break;
-          }
-          case 'schedule': {
-            void registerScheduleDefinition(value);
+              break;
+            }
+            case 'schedule': {
+              void registerScheduleDefinition(value);
 
-          break;
-          }
-          case 'flow': {
-            registerFlowDefinition(value);
+              break;
+            }
+            case 'flow': {
+              registerFlowDefinition(value);
 
-          break;
-          }
-          // No default
+              break;
+            }
+            // No default
           }
         } else if (typeof value === 'object' && !Array.isArray(value)) {
           // It's a nested registry, recurse

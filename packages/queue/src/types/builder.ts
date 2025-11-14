@@ -61,7 +61,7 @@ export type QueueBuilder<TContext, TMeta extends QueueMeta = QueueMeta> = {
     keyPrefix?: string;
     createContext: () => TContext | Promise<TContext>;
   }) => QueueInstance;
-}
+};
 
 /**
  * Job builder definition - chainable builder for creating jobs
@@ -84,7 +84,7 @@ export type JobBuilderDef<TContext, TContextOut, TMeta extends QueueMeta> = {
    * Set the job name (starts the chainable builder)
    */
   name(name: string): JobBuilderChain<TContext, TContextOut, TMeta, never, never>;
-}
+};
 
 /**
  * Job builder chain - after name is set
@@ -114,8 +114,12 @@ export type JobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, TInp
       data: THandlerInput extends never ? TInput : THandlerInput,
       ctx: TContextOut,
     ) => Promise<THandlerOutput extends never ? TOutput : THandlerOutput>,
-  ): JobDefinition<THandlerInput extends never ? TInput : THandlerInput, THandlerOutput extends never ? TOutput : THandlerOutput, TContextOut>;
-}
+  ): JobDefinition<
+    THandlerInput extends never ? TInput : THandlerInput,
+    THandlerOutput extends never ? TOutput : THandlerOutput,
+    TContextOut
+  >;
+};
 
 /**
  * Schedule builder factory
@@ -254,7 +258,11 @@ export type ScheduleBuilderFactory<TContext, TMeta extends QueueMeta> = {
    * q.schedule.monthly(15, '12:00').job(task).data({})  // 15th of month at noon
    * ```
    */
-  monthly(day: number, time: string, options?: { timezone?: string }): ScheduleBuilderDef<TContext, JobContext<TContext>, TMeta>;
+  monthly(
+    day: number,
+    time: string,
+    options?: { timezone?: string },
+  ): ScheduleBuilderDef<TContext, JobContext<TContext>, TMeta>;
 };
 
 /**
@@ -277,7 +285,7 @@ export type ScheduleBuilderDef<TContext, TContextOut, TMeta extends QueueMeta> =
    * Set name for inline handler
    */
   name(name: string): ScheduleBuilderChain<TContext, TContextOut, TMeta, never, never>;
-}
+};
 
 /**
  * Schedule job wrapper - for setting data
@@ -287,7 +295,7 @@ export type ScheduleJobWrapper<TInput> = {
    * Set the data to pass to the job
    */
   data(data: TInput): ScheduleDefinition;
-}
+};
 
 /**
  * Schedule builder chain - after name is set
@@ -296,7 +304,9 @@ export type ScheduleBuilderChain<TContext, TContextOut, TMeta extends QueueMeta,
   /**
    * Set input schema
    */
-  input<TNewInput>(schema: z.ZodType<TNewInput>): ScheduleBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>;
+  input<TNewInput>(
+    schema: z.ZodType<TNewInput>,
+  ): ScheduleBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>;
 
   /**
    * Set handler function (completes the builder)
@@ -307,7 +317,7 @@ export type ScheduleBuilderChain<TContext, TContextOut, TMeta extends QueueMeta,
       ctx: TContextOut,
     ) => Promise<THandlerOutput extends never ? TOutput : THandlerOutput>,
   ): ScheduleDefinition;
-}
+};
 
 /**
  * Schedule definition (opaque type for now)
@@ -335,7 +345,7 @@ export type FlowBuilderStart<TContext, TMeta extends QueueMeta> = {
    * Set input schema
    */
   input<TInput>(schema: z.ZodType<TInput>): FlowBuilderWithInput<TContext, TMeta, TInput>;
-}
+};
 
 /**
  * Flow builder with input - can add middleware and steps
@@ -364,7 +374,7 @@ export type FlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput> = {
    * Build the final flow definition
    */
   build(): FlowDefinition;
-}
+};
 
 /**
  * Flow definition (opaque type for now)
@@ -392,4 +402,4 @@ export type QueueInstance = {
    * Stop all workers and close connections
    */
   stop(): Promise<void>;
-}
+};
