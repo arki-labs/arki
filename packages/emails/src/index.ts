@@ -1,3 +1,4 @@
+export * from './templates/arki-magic-link';
 export * from './templates/notion-magic-link';
 export * from './templates/plaid-verify-identity';
 export * from './templates/vercel-invite-user';
