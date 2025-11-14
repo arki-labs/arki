@@ -17,16 +17,17 @@
     }
   },
   "scripts": {
+    "build": "tsc",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/contracts": "workspace:*",
+    "@arki/logger": "workspace:*",
     "@keyv/redis": "catalog:backend",
     "@t3-oss/env-core": "catalog:env",
     "ioredis": "catalog:",
