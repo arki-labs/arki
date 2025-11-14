@@ -6,10 +6,16 @@
   "type": "module",
   "exports": {
     "./env": {
-      "default": "./src/env.ts",
-      "types": "./dist/env.d.ts"
+      "types": "./dist/src/env.d.ts",
+      "import": "./src/env.ts",
+      "node": "./src/env.ts"
     },
-    "./*": "./src/*.ts"
+    "./*": {
+      "types": "./dist/src/*.d.ts",
+      "import": "./src/*.ts",
+      "node": "./src/*.ts"
+    },
+    "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
@@ -46,5 +52,6 @@
     "@arki/vitest-config": "workspace:*",
     "@types/pg": "catalog:drizzle",
     "typescript": "catalog:"
-  }
+  },
+  "sideEffects": false
 }

@@ -4,17 +4,21 @@
   "type": "module",
   "exports": {
     ".": {
-      "default": "./src/index.ts",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/src/index.d.ts",
+      "import": "./src/index.ts",
+      "node": "./src/index.ts"
     },
     "./env": {
-      "default": "./src/env.ts",
-      "types": "./dist/env.d.ts"
+      "types": "./dist/src/env.d.ts",
+      "import": "./src/env.ts",
+      "node": "./src/env.ts"
     },
     "./*": {
-      "default": "./src/*.ts",
-      "types": "./dist/*.d.ts"
-    }
+      "types": "./dist/src/*.d.ts",
+      "import": "./src/*.ts",
+      "node": "./src/*.ts"
+    },
+    "./package.json": "./package.json"
   },
   "scripts": {
     "build": "tsc",
@@ -40,5 +44,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*"
-  }
+  },
+  "types": "./dist/index.d.ts",
+  "sideEffects": false
 }

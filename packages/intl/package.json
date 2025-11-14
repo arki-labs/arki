@@ -4,13 +4,42 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./next-client": "./src/integrations/next/client.ts",
-    "./next-middleware": "./src/integrations/next/middleware.ts",
-    "./next-routing": "./src/integrations/next/routing.ts",
-    "./next-navigation": "./src/integrations/next/navigation.ts",
-    "./next-shared": "./src/integrations/next/shared.ts",
-    "./language": "./src/language.ts",
-    "./dictionaries": "./src/dictionaries.ts"
+    "./next-client": {
+      "types": "./dist/src/integrations/next/client.d.ts",
+      "import": "./src/integrations/next/client.ts",
+      "browser": "./src/integrations/next/client.ts"
+    },
+    "./next-middleware": {
+      "types": "./dist/src/integrations/next/middleware.d.ts",
+      "import": "./src/integrations/next/middleware.ts",
+      "node": "./src/integrations/next/middleware.ts"
+    },
+    "./next-routing": {
+      "types": "./dist/src/integrations/next/routing.d.ts",
+      "import": "./src/integrations/next/routing.ts",
+      "node": "./src/integrations/next/routing.ts"
+    },
+    "./next-navigation": {
+      "types": "./dist/src/integrations/next/navigation.d.ts",
+      "import": "./src/integrations/next/navigation.ts",
+      "node": "./src/integrations/next/navigation.ts"
+    },
+    "./next-shared": {
+      "types": "./dist/src/integrations/next/shared.d.ts",
+      "import": "./src/integrations/next/shared.ts",
+      "node": "./src/integrations/next/shared.ts"
+    },
+    "./language": {
+      "types": "./dist/src/language.d.ts",
+      "import": "./src/language.ts",
+      "node": "./src/language.ts"
+    },
+    "./dictionaries": {
+      "types": "./dist/src/dictionaries.d.ts",
+      "import": "./src/dictionaries.ts",
+      "node": "./src/dictionaries.ts"
+    },
+    "./package.json": "./package.json"
   },
   "scripts": {
     "clean": "git clean -xdf .cache .turbo dist node_modules",
@@ -35,5 +64,6 @@
     "@arki/vitest-config": "workspace:*",
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react"
-  }
+  },
+  "sideEffects": false
 }

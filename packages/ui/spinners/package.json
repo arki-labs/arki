@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    "./*": "./src/*"
+    "./*": {
+      "import": "./src/*",
+      "browser": "./src/*"
+    },
+    "./package.json": "./package.json"
   },
   "scripts": {
     "clean": "git clean -xdf .cache .turbo dist node_modules",
@@ -20,5 +24,6 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*"
   },
-  "module:jsx": "src"
+  "module:jsx": "src",
+  "sideEffects": false
 }

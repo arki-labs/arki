@@ -6,9 +6,16 @@
   "type": "module",
   "exports": {
     ".": {
-      "default": "./src/index.ts"
+      "types": "./dist/src/index.d.ts",
+      "import": "./src/index.ts",
+      "node": "./src/index.ts"
     },
-    "./*": "./src/*.ts"
+    "./*": {
+      "types": "./dist/src/*.d.ts",
+      "import": "./src/*.ts",
+      "node": "./src/*.ts"
+    },
+    "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
@@ -37,5 +44,7 @@
     "@arki/vitest-config": "workspace:*",
     "@types/rss": "catalog:types",
     "typescript": "catalog:"
-  }
+  },
+  "types": "./dist/index.d.ts",
+  "sideEffects": false
 }

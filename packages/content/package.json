@@ -5,20 +5,31 @@
   "type": "module",
   "exports": {
     "./collections/*": {
-      "default": "./src/collections/*.ts"
+      "types": "./dist/src/collections/*.d.ts",
+      "import": "./src/collections/*.ts",
+      "browser": "./src/collections/*.ts"
     },
     "./components/*": {
-      "default": "./src/components/*.tsx"
+      "types": "./dist/src/components/*.d.ts",
+      "import": "./src/components/*.tsx",
+      "browser": "./src/components/*.tsx"
     },
     "./next": {
-      "default": "./src/next.ts"
+      "types": "./dist/src/next.d.ts",
+      "import": "./src/next.ts",
+      "node": "./src/next.ts"
     },
     "./mdx": {
-      "default": "./src/mdx.ts"
+      "types": "./dist/src/mdx.d.ts",
+      "import": "./src/mdx.ts",
+      "browser": "./src/mdx.ts"
     },
     "./core": {
-      "default": "./src/core.ts"
-    }
+      "types": "./dist/src/core.d.ts",
+      "import": "./src/core.ts",
+      "browser": "./src/core.ts"
+    },
+    "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
@@ -67,5 +78,6 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*"
-  }
+  },
+  "sideEffects": false
 }

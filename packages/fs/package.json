@@ -3,7 +3,12 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    "./*": "./src/*.ts"
+    "./*": {
+      "types": "./dist/src/*.d.ts",
+      "import": "./src/*.ts",
+      "node": "./src/*.ts"
+    },
+    "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
@@ -39,5 +44,6 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*"
-  }
+  },
+  "sideEffects": false
 }

@@ -6,9 +6,26 @@
   "type": "module",
   "exports": {
     ".": {
-      "default": "./src/index.ts"
+      "types": "./dist/src/index.d.ts",
+      "import": "./src/index.ts",
+      "node": "./src/index.ts"
     },
-    "./*": "./src/*.ts"
+    "./react": {
+      "types": "./dist/src/react/index.d.ts",
+      "import": "./src/react/index.ts",
+      "browser": "./src/react/index.ts"
+    },
+    "./react/*": {
+      "types": "./dist/src/react/*.d.ts",
+      "import": "./src/react/*.tsx",
+      "browser": "./src/react/*.tsx"
+    },
+    "./*": {
+      "types": "./dist/src/*.d.ts",
+      "import": "./src/*.ts",
+      "node": "./src/*.ts"
+    },
+    "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
@@ -56,5 +73,7 @@
     "react-dom": {
       "optional": true
     }
-  }
+  },
+  "types": "./dist/index.d.ts",
+  "sideEffects": false
 }

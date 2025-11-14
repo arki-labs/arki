@@ -3,10 +3,27 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./flags": "./src/flags/index.tsx",
-    "./brands": "./src/brands/index.ts",
-    "./*": "./src/*.ts"
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./src/index.ts",
+      "browser": "./src/index.ts"
+    },
+    "./flags": {
+      "types": "./dist/src/flags/index.d.ts",
+      "import": "./src/flags/index.tsx",
+      "browser": "./src/flags/index.tsx"
+    },
+    "./brands": {
+      "types": "./dist/src/brands/index.d.ts",
+      "import": "./src/brands/index.ts",
+      "browser": "./src/brands/index.ts"
+    },
+    "./*": {
+      "types": "./dist/src/*.d.ts",
+      "import": "./src/*.ts",
+      "browser": "./src/*.ts"
+    },
+    "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
@@ -43,5 +60,7 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*"
   },
-  "module:jsx": "src"
+  "module:jsx": "src",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false
 }

@@ -3,9 +3,22 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./send": "./src/send.ts",
-    "./templates/*": "./src/templates/*.tsx"
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./src/index.ts",
+      "browser": "./src/index.ts"
+    },
+    "./send": {
+      "types": "./dist/src/send.d.ts",
+      "import": "./src/send.ts",
+      "browser": "./src/send.ts"
+    },
+    "./templates/*": {
+      "types": "./dist/src/templates/*.d.ts",
+      "import": "./src/templates/*.tsx",
+      "browser": "./src/templates/*.tsx"
+    },
+    "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
@@ -51,5 +64,7 @@
     "@arki/vitest-config": "workspace:*",
     "react-email": "catalog:"
   },
-  "module:jsx": "src"
+  "module:jsx": "src",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false
 }

@@ -3,10 +3,27 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./count-characters": "./src/count/countCharacters.ts",
-    "./base64": "./src/base64.ts",
-    "./utils": "./src/utils.ts",
-    "./builder": "./src/builder.ts"
+    "./count-characters": {
+      "types": "./dist/src/count/countCharacters.d.ts",
+      "import": "./src/count/countCharacters.ts",
+      "node": "./src/count/countCharacters.ts"
+    },
+    "./base64": {
+      "types": "./dist/src/base64.d.ts",
+      "import": "./src/base64.ts",
+      "node": "./src/base64.ts"
+    },
+    "./utils": {
+      "types": "./dist/src/utils.d.ts",
+      "import": "./src/utils.ts",
+      "node": "./src/utils.ts"
+    },
+    "./builder": {
+      "types": "./dist/src/builder.d.ts",
+      "import": "./src/builder.ts",
+      "node": "./src/builder.ts"
+    },
+    "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
@@ -34,5 +51,6 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@types/voca": "catalog:types"
-  }
+  },
+  "sideEffects": false
 }

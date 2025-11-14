@@ -3,10 +3,27 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    "./number": "./src/number.ts",
-    "./fractions": "./src/fractions.ts",
-    "./react-integration": "./src/integrations/react/index.tsx",
-    "./stat": "./src/stat.ts"
+    "./number": {
+      "types": "./dist/src/number.d.ts",
+      "import": "./src/number.ts",
+      "node": "./src/number.ts"
+    },
+    "./fractions": {
+      "types": "./dist/src/fractions.d.ts",
+      "import": "./src/fractions.ts",
+      "node": "./src/fractions.ts"
+    },
+    "./react-integration": {
+      "types": "./dist/src/integrations/react/index.d.ts",
+      "import": "./src/integrations/react/index.tsx",
+      "browser": "./src/integrations/react/index.tsx"
+    },
+    "./stat": {
+      "types": "./dist/src/stat.d.ts",
+      "import": "./src/stat.ts",
+      "node": "./src/stat.ts"
+    },
+    "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
@@ -42,5 +59,6 @@
     "@arki/vitest-config": "workspace:*",
     "@types/big.js": "catalog:types",
     "@types/katex": "catalog:types"
-  }
+  },
+  "sideEffects": false
 }
