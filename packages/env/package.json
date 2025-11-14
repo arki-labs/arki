@@ -1,0 +1,54 @@
+{
+  "name": "@arki/env",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./nextjs": {
+      "source": "./src/nextjs/index.ts",
+      "types": "./dist/nextjs/index.d.ts",
+      "default": "./dist/nextjs/index.js"
+    },
+    "./nextjs/client": {
+      "source": "./src/nextjs/client.ts",
+      "types": "./dist/nextjs/client.d.ts",
+      "default": "./dist/nextjs/client.js"
+    },
+    "./core": {
+      "source": "./src/core/index.ts",
+      "types": "./dist/core/index.d.ts",
+      "default": "./dist/core/index.js"
+    },
+    "./contracts": {
+      "source": "./src/contracts/index.ts",
+      "types": "./dist/contracts/index.d.ts",
+      "default": "./dist/contracts/index.js"
+    },
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@arki/contracts": "workspace:*",
+    "@t3-oss/env-core": "catalog:env",
+    "@t3-oss/env-nextjs": "catalog:env",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "typescript": "catalog:"
+  },
+  "prettier": "@arki/prettier-config"
+}
