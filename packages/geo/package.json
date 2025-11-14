@@ -96,6 +96,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@types/google.maps": "^3.58.1",
     "@types/node": "catalog:node",
     "@types/node-geocoder": "^4.2.6",
     "@types/react": "catalog:react",
