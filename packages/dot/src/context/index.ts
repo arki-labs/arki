@@ -13,13 +13,13 @@ export type { ExecutionContextType } from './execution-types';
 export { SingletonServicesRegistry } from './singleton-registry';
 
 // Lifecycle management
-export { LifecycleManager, globalLifecycle } from './lifecycle';
+export { globalLifecycle, LifecycleManager } from './lifecycle';
 
 // Lazy initialization
-export { LazyInitializer, lazy } from './lazy-initializer';
+export { lazy, LazyInitializer } from './lazy-initializer';
 
 // Metrics tracking
-export { ServiceMetricsCollector, globalMetrics } from './metrics';
+export { globalMetrics, ServiceMetricsCollector } from './metrics';
 export type { MetricsReport, ServiceMetric } from './metrics';
 
 // Base context builder
@@ -33,5 +33,5 @@ export {
   createMockContextBuilder,
   createMockMetrics,
   createMockRegistry,
-  waitForInitialization,
+  waitForInitialization
 } from './testing';

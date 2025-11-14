@@ -54,13 +54,19 @@ type AppServices = {
 
 const registry = new SingletonServicesRegistry<AppServices>();
 
-// Register services
-registry.register('db', await createDatabase());
-registry.register('kv', await createKVStore());
-registry.register('messageBus', createMessageBus());
+// Register services with manual timing (if you measure externally)
+registry.register('db', await createDatabase(), 45.2); // 45.2ms elapsed
+
+// Or use registerWithTiming for automatic measurement
+await registry.registerWithTiming('kv', async () => await createKVStore());
+await registry.registerWithTiming('messageBus', () => createMessageBus());
 
 // Access services
 const db = registry.get('db');
+
+// Get metrics with actual elapsed initialization time
+const metrics = registry.getMetrics('db');
+// { initElapsedMs: 45.2, accessCount: 1 }
 
 // Graceful disposal
 await registry.dispose();
@@ -69,7 +75,8 @@ await registry.dispose();
 **Features:**
 
 - Type-safe service access
-- Automatic metrics tracking (init time, access count)
+- Automatic metrics tracking (actual initialization elapsed time, access count)
+- `registerWithTiming()` helper for automatic timing measurement
 - Disposal coordination for cleanup
 
 ### 2. LifecycleManager
@@ -242,6 +249,28 @@ builder.setContextFactory(services => ({
 // Create request contexts (fast!)
 const ctx1 = builder.createContext();
 const ctx2 = builder.createContext();
+```
+
+**Alternative: Factory Function**
+
+For convenience, use `createBaseContextBuilder()` which sets up all components:
+
+```typescript
+import { createBaseContextBuilder } from '@arki/dot/context';
+
+// With metrics enabled (default)
+const builder = createBaseContextBuilder<AppServices, RequestContext>();
+
+// Disable metrics for performance-sensitive environments
+const builderNoMetrics = createBaseContextBuilder<AppServices, RequestContext>({
+  enableMetrics: false,
+});
+
+// When metrics are disabled:
+// - No initialization time tracking
+// - No access count tracking
+// - No metrics recommendations
+// - Zero instrumentation overhead
 ```
 
 ## Complete Example

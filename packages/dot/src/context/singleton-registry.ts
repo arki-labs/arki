@@ -5,21 +5,47 @@
  */
 export class SingletonServicesRegistry<TServices extends Record<string, unknown>> {
   private services: Partial<TServices> = {};
-  private readonly initTimestamps = new Map<keyof TServices, number>();
+  private readonly initElapsedMs = new Map<keyof TServices, number>();
   private readonly accessCounts = new Map<keyof TServices, number>();
+  private isDisposed = false;
 
   /**
    * Register a service in the singleton registry
    * @param key - Service identifier
    * @param service - Service instance
+   * @param elapsedMs - Optional elapsed time in milliseconds for initialization
    */
-  register<K extends keyof TServices>(key: K, service: TServices[K]): void {
+  register<K extends keyof TServices>(
+    key: K,
+    service: TServices[K],
+    elapsedMs?: number
+  ): void {
+    if (this.isDisposed) {
+      throw new Error('Cannot register service: Registry has been disposed');
+    }
     if (key in this.services) {
       throw new Error(`Service '${String(key)}' is already registered`);
     }
     this.services[key] = service;
-    this.initTimestamps.set(key, Date.now());
+    if (elapsedMs !== undefined) {
+      this.initElapsedMs.set(key, elapsedMs);
+    }
     this.accessCounts.set(key, 0);
+  }
+
+  /**
+   * Register a service with automatic timing measurement
+   * @param key - Service identifier
+   * @param factory - Async factory function that creates the service
+   */
+  async registerWithTiming<K extends keyof TServices>(
+    key: K,
+    factory: () => Promise<TServices[K]> | TServices[K]
+  ): Promise<void> {
+    const startTime = performance.now();
+    const service = await factory();
+    const elapsedMs = performance.now() - startTime;
+    this.register(key, service, elapsedMs);
   }
 
   /**
@@ -29,6 +55,9 @@ export class SingletonServicesRegistry<TServices extends Record<string, unknown>
    * @throws If service is not registered
    */
   get<K extends keyof TServices>(key: K): TServices[K] {
+    if (this.isDisposed) {
+      throw new Error('Cannot get service: Registry has been disposed');
+    }
     if (!(key in this.services)) {
       throw new Error(`Service '${String(key)}' is not registered`);
     }
@@ -60,15 +89,13 @@ export class SingletonServicesRegistry<TServices extends Record<string, unknown>
    * @param key - Service identifier
    */
   getMetrics<K extends keyof TServices>(key: K): {
-    initTime: number | null;
+    initElapsedMs: number | null;
     accessCount: number;
-    ageMs: number | null;
   } {
-    const initTime = this.initTimestamps.get(key) ?? null;
+    const initElapsedMs = this.initElapsedMs.get(key) ?? null;
     const accessCount = this.accessCounts.get(key) ?? 0;
-    const ageMs = initTime ? Date.now() - initTime : null;
 
-    return { initTime, accessCount, ageMs };
+    return { initElapsedMs, accessCount };
   }
 
   /**
@@ -77,7 +104,7 @@ export class SingletonServicesRegistry<TServices extends Record<string, unknown>
    */
   clear(): void {
     this.services = {};
-    this.initTimestamps.clear();
+    this.initElapsedMs.clear();
     this.accessCounts.clear();
   }
 
@@ -116,6 +143,12 @@ export class SingletonServicesRegistry<TServices extends Record<string, unknown>
         });
       }
     }
+
+    // Clear all maps and mark registry as disposed
+    this.services = {};
+    this.initElapsedMs.clear();
+    this.accessCounts.clear();
+    this.isDisposed = true;
 
     return results;
   }

@@ -45,18 +45,18 @@ export class BaseContextBuilder<
 > {
   private readonly singletonsRegistry: SingletonServicesRegistry<TSingletons>;
   private readonly lifecycleManager: LifecycleManager;
-  private readonly metricsCollector: ServiceMetricsCollector;
+  private readonly metricsCollector: ServiceMetricsCollector | null;
   private initialized = false;
   private contextFactory: ((singletons: TSingletons) => TContext) | null = null;
 
   constructor(
     singletonsRegistry: SingletonServicesRegistry<TSingletons>,
     lifecycleManager: LifecycleManager,
-    metricsCollector?: ServiceMetricsCollector
+    metricsCollector: ServiceMetricsCollector | null = null
   ) {
     this.singletonsRegistry = singletonsRegistry;
     this.lifecycleManager = lifecycleManager;
-    this.metricsCollector = metricsCollector ?? new ServiceMetricsCollector();
+    this.metricsCollector = metricsCollector;
   }
 
   /**
@@ -74,18 +74,20 @@ export class BaseContextBuilder<
 
     await initializer(this.singletonsRegistry);
 
-    // Track initialization metrics
-    const services = this.singletonsRegistry.getAll();
-    for (const [name, service] of Object.entries(services)) {
-      if (service) {
-        const metrics = this.singletonsRegistry.getMetrics(name as keyof TSingletons);
-        this.metricsCollector.record({
-          name,
-          initTimeMs: metrics.initTime ? Date.now() - metrics.initTime : null,
-          accessCount: 0,
-          ageMs: metrics.ageMs,
-          initialized: true,
-        });
+    // Track initialization metrics if enabled
+    if (this.metricsCollector) {
+      const services = this.singletonsRegistry.getAll();
+      for (const [name, service] of Object.entries(services)) {
+        if (service) {
+          const metrics = this.singletonsRegistry.getMetrics(name as keyof TSingletons);
+          this.metricsCollector.record({
+            name,
+            initTimeMs: metrics.initElapsedMs,
+            accessCount: 0,
+            ageMs: null,
+            initialized: true,
+          });
+        }
       }
     }
 
@@ -147,9 +149,11 @@ export class BaseContextBuilder<
       );
     }
 
-    // Track singleton access
-    for (const key of allKeys) {
-      this.metricsCollector.incrementAccess(key);
+    // Track singleton access if metrics enabled
+    if (this.metricsCollector) {
+      for (const key of allKeys) {
+        this.metricsCollector.incrementAccess(key);
+      }
     }
 
     return this.contextFactory(singletons as TSingletons);
@@ -171,8 +175,9 @@ export class BaseContextBuilder<
 
   /**
    * Get the metrics collector
+   * Returns null if metrics are disabled
    */
-  getMetricsCollector(): ServiceMetricsCollector {
+  getMetricsCollector(): ServiceMetricsCollector | null {
     return this.metricsCollector;
   }
 
@@ -203,6 +208,6 @@ export function createBaseContextBuilder<
   return new BaseContextBuilder(
     new SingletonServicesRegistry<TSingletons>(),
     new LifecycleManager(),
-    enableMetrics ? new ServiceMetricsCollector() : undefined
+    enableMetrics ? new ServiceMetricsCollector() : null
   );
 }
