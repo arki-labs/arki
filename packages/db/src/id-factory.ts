@@ -37,6 +37,14 @@ export function createIdFactory<TPrefix extends string, TId extends `${TPrefix}$
      * Creates a new ID with the specified prefix
      */
     create: (): TId => createPrefixedId(prefix) as TId,
+    /**
+     * Creates a new ID with the specified prefix
+     */
+    make: (): TId => createPrefixedId(prefix) as TId,
+    /**
+     * Creates a new ID with the specified prefix
+     */
+    new: (): TId => createPrefixedId(prefix) as TId,
 
     /**
      * Zod validation schema for the ID type
