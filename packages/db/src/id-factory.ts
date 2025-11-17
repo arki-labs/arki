@@ -1,7 +1,8 @@
-import { z } from '@arki/contracts';
 import { createId as createCuid } from '@paralleldrive/cuid2';
 import type { PgColumn } from 'drizzle-orm/pg-core';
 import { varchar } from 'drizzle-orm/pg-core';
+
+import { z } from '@arki/contracts';
 
 // Core ID creation
 export const createId = () => createCuid();
@@ -25,7 +26,7 @@ export const createPrefixedId = <T extends string>(prefix: T): `${T}${string}` =
  * export const poetIdSchema = poetId.schema;
  *
  * export const poets = schema.table('poets', {
- *   id: poetId.column(),
+ *   id: poetId.primaryColumn(),
  *   // ... other columns
  * });
  * ```
@@ -44,23 +45,30 @@ export function createIdFactory<TPrefix extends string, TId extends `${TPrefix}$
     schema: z
       .string()
       .startsWith(prefix)
+      .brand<TId>()
       .transform(id => id as TId),
 
     /**
      * Drizzle column helper for primary key columns
      * Automatically configures as varchar(256), not null, primary key, with proper type and default
      */
-    column: (name = 'id') =>
+    primaryColumn: (name = 'id') =>
       varchar(name, { length: 256 })
         .notNull()
         .primaryKey()
         .$type<TId>()
         .$defaultFn(() => createPrefixedId(prefix) as TId),
 
-    optionalColumn: (name = 'id') =>
+    optionalColumn: (name: string) =>
       varchar(name, { length: 256 })
         .$type<TId | null>()
         .$defaultFn(() => null),
+
+    requiredColumn: (name: string) =>
+      varchar(name, { length: 256 })
+        .notNull()
+        .$type<TId>()
+        .$defaultFn(() => createPrefixedId(prefix) as TId),
 
     /**
      * Drizzle column helper for foreign key reference columns
