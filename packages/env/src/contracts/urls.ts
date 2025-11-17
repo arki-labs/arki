@@ -8,7 +8,6 @@ export const urlContracts = {
 
   databaseUrl: () =>
     z
-      .string()
       .url()
       .refine(
         url => url.startsWith('postgres://') || url.startsWith('postgresql://'),
@@ -17,7 +16,6 @@ export const urlContracts = {
 
   redisUrl: () =>
     z
-      .string()
       .url()
       .refine(url => url.startsWith('redis://') || url.startsWith('rediss://'), 'Redis URL must start with redis:// or rediss://'),
 };

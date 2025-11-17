@@ -345,7 +345,6 @@ export const urlContracts = {
 
   databaseUrl: () =>
     z
-      .string()
       .url()
       .refine(
         url => url.startsWith('postgres://') || url.startsWith('postgresql://'),
@@ -354,7 +353,6 @@ export const urlContracts = {
 
   redisUrl: () =>
     z
-      .string()
       .url()
       .refine(
         url => url.startsWith('redis://') || url.startsWith('rediss://'),
@@ -730,16 +728,10 @@ import { z } from 'zod';
 
 export const env = createEnv({
   server: {
-    DATABASE_URL: z
-      .string()
-      .url()
-      .refine(url => url.startsWith('postgres://'), 'Must be postgres URL'),
+    DATABASE_URL: z.url().refine(url => url.startsWith('postgres://'), 'Must be postgres URL'),
     PORT: z.coerce.number().min(1).max(65535).default(3000),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-    REDIS_URL: z
-      .string()
-      .url()
-      .refine(url => url.startsWith('redis://'), 'Must be redis URL'),
+    REDIS_URL: z.url().refine(url => url.startsWith('redis://'), 'Must be redis URL'),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
     AUTH_SECRET: z.string().min(1),
     ENABLE_ANALYTICS: z
