@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
+  "sideEffects": false,
   "type": "module",
   "exports": {
     "./env": {
@@ -39,7 +40,6 @@
     "@paralleldrive/cuid2": "catalog:utilities",
     "@t3-oss/env-core": "catalog:env",
     "drizzle-orm": "catalog:drizzle",
-    "drizzle-zod": "catalog:drizzle",
     "pg": "catalog:drizzle",
     "pg-native": "catalog:drizzle",
     "postgres": "catalog:drizzle",
@@ -52,6 +52,5 @@
     "@arki/vitest-config": "workspace:*",
     "@types/pg": "catalog:drizzle",
     "typescript": "catalog:"
-  },
-  "sideEffects": false
+  }
 }
