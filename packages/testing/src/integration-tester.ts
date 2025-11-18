@@ -76,31 +76,34 @@ export class IntegrationTester<
   TCaller,
   TContext extends Record<string, unknown>,
 > {
-  private readonly config: IntegrationTesterConfig<TSchema, TDatabase, TRepositories, TCaller, TContext>;
-  private readonly options: TesterOptions;
+  protected readonly config: IntegrationTesterConfig<TSchema, TDatabase, TRepositories, TCaller, TContext>;
+  protected readonly options: TesterOptions;
 
-  private container: StartedPostgreSqlContainer | null = null;
-  private ownsContainer = false;
-  private baseConnectionString: string | null = null;
-  private uniqueDatabaseName: string | null = null;
+  protected container: StartedPostgreSqlContainer | null = null;
+  protected ownsContainer = false;
+  protected baseConnectionString: string | null = null;
+  protected uniqueDatabaseName: string | null = null;
 
-  private redisContainer: StartedTestContainer | null = null;
-  private ownsRedisContainer = false;
-  private redisNamespace: string | null = null;
+  protected redisContainer: StartedTestContainer | null = null;
+  protected ownsRedisContainer = false;
+  protected redisNamespace: string | null = null;
 
-  private _db: TDatabase | null = null;
-  private _repo: TRepositories | null = null;
-  private _kv: KV | null = null;
-  private _users: TesterUsers | null = null;
-  private _caller: CallerCollection<TCaller> | null = null;
+  protected _db: TDatabase | null = null;
+  protected _repo: TRepositories | null = null;
+  protected _kv: KV | null = null;
+  protected _users: TesterUsers | null = null;
+  protected _caller: CallerCollection<TCaller> | null = null;
 
-  private currentTransaction: PgTransaction<NodePgQueryResultHKT, TSchema, ExtractTablesWithRelations<TSchema>> | null =
-    null;
+  protected currentTransaction: PgTransaction<
+    NodePgQueryResultHKT,
+    TSchema,
+    ExtractTablesWithRelations<TSchema>
+  > | null = null;
 
-  private randomCounter = 0;
-  private randomSeed: string;
+  protected randomCounter = 0;
+  protected randomSeed: string;
 
-  private _factoryRegistry: FactoryRegistry | null = null;
+  protected _factoryRegistry: FactoryRegistry | null = null;
 
   /**
    * Access to assertion utilities
@@ -769,7 +772,7 @@ export class IntegrationTester<
       const { years = 0, months = 0, days = 0 } = options.future;
       const msInDay = 24 * 60 * 60 * 1000;
       const msInYear = 365 * msInDay;
-      const msInMonth = 30 * msInMonth;
+      const msInMonth = 30 * msInDay;
 
       const totalMs = years * msInYear + months * msInMonth + days * msInDay;
       const randomTime = this.generateBetween(now, now + totalMs);
@@ -846,7 +849,7 @@ export class IntegrationTester<
     this.randomCounter = 0;
   }
 
-  private mergeUsers(overrides: TesterUserOverrides = {}): TesterUsers {
+  protected mergeUsers(overrides: TesterUserOverrides = {}): TesterUsers {
     return {
       user: overrides.user ?? { ...this.config.defaultUsers.user },
       moderator: overrides.moderator ?? { ...this.config.defaultUsers.moderator },
@@ -854,7 +857,7 @@ export class IntegrationTester<
     };
   }
 
-  private createCaller(role: TestUserRole, user: TestUser | null, context: TContext): TCaller {
+  protected createCaller(role: TestUserRole, user: TestUser | null, context: TContext): TCaller {
     return this.config.createCaller({
       context,
       role,
@@ -863,31 +866,17 @@ export class IntegrationTester<
     });
   }
 
-  private buildBaseContext(): TContext {
+  protected buildBaseContext(): TContext {
     if (!this._db || !this._repo) {
       throw new Error('Tester not initialized. Call setup() first.');
     }
     return this.config.createContext({ db: this._db, repo: this._repo, kv: this._kv });
   }
 
-  private createDatabaseConnection(connectionString: string): TDatabase {
+  protected createDatabaseConnection(connectionString: string): TDatabase {
     return initDb.schema(this.config.schema).create({
       connectionString,
       isDev: true,
     }).db as TDatabase;
   }
-}
-
-export function createIntegrationTester<
-  TSchema extends Record<string, unknown>,
-  TDatabase extends NodePgDatabase<any>,
-  TRepositories,
-  TCaller,
-  TContext,
->(config: IntegrationTesterConfig<TSchema, TDatabase, TRepositories, TCaller, TContext>) {
-  return class Tester extends IntegrationTester<TSchema, TDatabase, TRepositories, TCaller, TContext> {
-    constructor(options?: TesterOptions) {
-      super(config, options);
-    }
-  };
 }
