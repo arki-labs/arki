@@ -33,11 +33,20 @@ export function getGlobalRedisConnectionString(): string | undefined {
 export async function setupGlobalTestContainers(options?: SharedContainerOptions): Promise<void> {
   const totalStartTime = Date.now();
 
+  // Set test environment variables
+  process.env.NODE_ENV = 'test';
+  process.env.AUTH_SECRET = 'test-secret-key-for-testing-only';
+  process.env.NEXT_PUBLIC_URL = 'http://localhost:3000';
+
   console.log('🚀 Starting shared PostgreSQL container...');
   const pgStart = Date.now();
   sharedPostgresContainer = await startPostgresContainer(options?.postgresImage);
   const postgresUri = sharedPostgresContainer.getConnectionUri();
   (global as any)[POSTGRES_GLOBAL_KEY] = postgresUri;
+
+  // Set database environment variables
+  process.env.DB_URL = postgresUri;
+
   console.log(`✓ Shared PostgreSQL container started in ${((Date.now() - pgStart) / 1000).toFixed(2)}s`);
   console.log(`  Connection: ${postgresUri}`);
 
@@ -48,6 +57,11 @@ export async function setupGlobalTestContainers(options?: SharedContainerOptions
   const redisPort = sharedRedisContainer.getMappedPort(6379);
   const redisUrl = `redis://${redisHost}:${redisPort}`;
   (global as any)[REDIS_GLOBAL_KEY] = redisUrl;
+
+  // Set Redis environment variables
+  process.env.REDIS_URL = redisUrl;
+  process.env.KV_URL = redisUrl;
+
   console.log(`✓ Shared Redis container started in ${((Date.now() - redisStart) / 1000).toFixed(2)}s`);
   console.log(`  Connection: ${redisUrl}`);
 

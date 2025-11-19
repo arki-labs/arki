@@ -1,5 +1,6 @@
-import { z } from '@arki/contracts';
 import { createEnv } from '@t3-oss/env-core';
+
+import { z } from '@arki/contracts';
 
 export const env = createEnv({
   /**
@@ -84,5 +85,5 @@ export const env = createEnv({
     LINKEDIN_CLIENT_SECRET: process.env.LINKEDIN_CLIENT_SECRET,
   },
 
-  skipValidation: !!process.env.CI || process.env.NODE_ENV !== 'development',
+  skipValidation: !!process.env.CI || process.env.NODE_ENV === 'test',
 });

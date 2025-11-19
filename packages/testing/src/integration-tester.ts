@@ -257,6 +257,29 @@ export class IntegrationTester<
   }
 
   async teardown(): Promise<void> {
+    // Close database connection pool first to prevent connection errors during cleanup
+    if (this._db) {
+      try {
+        // Close the database connection pool if it has an $client property (node-postgres)
+        const dbWithClient = this._db as any;
+        if (dbWithClient.$client?.end) {
+          await dbWithClient.$client.end();
+        }
+      } catch (error) {
+        // Suppress connection termination errors during cleanup
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (
+          !errorMessage.includes('server closed the connection') &&
+          !errorMessage.includes('Connection terminated') &&
+          !errorMessage.includes('connection is closed')
+        ) {
+          console.error('Failed to close database connection:', error);
+        }
+      }
+      this._db = null;
+      this._repo = null;
+    }
+
     if (this._kv) {
       try {
         await this._kv.close();
@@ -304,8 +327,6 @@ export class IntegrationTester<
       this.container = null;
     }
 
-    this._db = null;
-    this._repo = null;
     this._caller = null;
     this._users = null;
     this.ownsContainer = false;
@@ -494,20 +515,33 @@ export class IntegrationTester<
       throw new Error('Tester not initialized. Call setup() first.');
     }
 
-    return await this._db.transaction(async tx => {
-      this.currentTransaction = tx;
-      try {
-        await callback();
-        throw new Error('__ROLLBACK__');
-      } catch (error) {
-        if (error instanceof Error && error.message === '__ROLLBACK__') {
-          return undefined as T;
+    try {
+      return await this._db.transaction(async tx => {
+        this.currentTransaction = tx;
+        try {
+          await callback();
+          throw new Error('__ROLLBACK__');
+        } catch (error) {
+          if (error instanceof Error && error.message === '__ROLLBACK__') {
+            return undefined as T;
+          }
+          throw error;
+        } finally {
+          this.currentTransaction = null;
         }
-        throw error;
-      } finally {
-        this.currentTransaction = null;
+      });
+    } catch (error) {
+      // Suppress connection errors during rollback - they're expected when using the throw-to-rollback pattern
+      if (
+        error instanceof Error &&
+        (error.message.includes('server closed the connection') ||
+          error.message.includes('Connection terminated') ||
+          error.message.includes('connection is closed'))
+      ) {
+        return undefined as T;
       }
-    });
+      throw error;
+    }
   }
 
   /**

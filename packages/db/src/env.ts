@@ -1,5 +1,6 @@
-import { z } from '@arki/contracts';
 import { createEnv } from '@t3-oss/env-core';
+
+import { z } from '@arki/contracts';
 
 export const env = createEnv({
   /**
@@ -78,5 +79,5 @@ export const env = createEnv({
     DB_DROP_ON_START: process.env['DB_DROP_ON_START'],
   },
 
-  skipValidation: !!process.env['SKIP_ENV_VALIDATION'] || !!process.env['CI'],
+  skipValidation: !!process.env['SKIP_ENV_VALIDATION'] || !!process.env['CI'] || process.env['NODE_ENV'] === 'test',
 });

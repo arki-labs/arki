@@ -1,9 +1,10 @@
+import type { UserId } from '@arki/auth';
 import type { KV } from '@arki/kv';
 
 export type TestUserRole = 'public' | 'user' | 'moderator' | 'admin';
 
 export interface TestUser {
-  id: string;
+  id: UserId;
   email: string;
   name: string;
   permissions?: string[];
@@ -35,7 +36,13 @@ export interface CreateCallerArgs<TContext> {
   responseHeaders: Headers;
 }
 
-export interface IntegrationTesterConfig<TSchema extends Record<string, unknown>, TDatabase, TRepositories, TCaller, TContext> {
+export interface IntegrationTesterConfig<
+  TSchema extends Record<string, unknown>,
+  TDatabase,
+  TRepositories,
+  TCaller,
+  TContext,
+> {
   schema: TSchema;
   migrationsFolder: string;
   createContext(params: { db: TDatabase; repo: TRepositories; kv: KV | null }): TContext;
