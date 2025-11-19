@@ -504,12 +504,17 @@ export class IntegrationTester<
    * ```
    */
   createCustomCaller(user: TestUser): TCaller {
-    if (!this._db) {
+    if (!this._db || !this.baseConnectionString) {
       throw new Error('Tester not initialized. Call setup() first.');
     }
 
     const repositories = this.config.createRepositories(this._db);
-    const context = this.config.createContext({ db: this._db, repo: repositories, kv: this._kv });
+    const context = this.config.createContext({
+      db: this._db,
+      repo: repositories,
+      kv: this._kv,
+      connectionString: this.baseConnectionString,
+    });
 
     return this.config.createCaller({
       context,
@@ -1133,10 +1138,15 @@ export class IntegrationTester<
   }
 
   protected buildBaseContext(): TContext {
-    if (!this._db || !this._repo) {
+    if (!this._db || !this._repo || !this.baseConnectionString) {
       throw new Error('Tester not initialized. Call setup() first.');
     }
-    return this.config.createContext({ db: this._db, repo: this._repo, kv: this._kv });
+    return this.config.createContext({
+      db: this._db,
+      repo: this._repo,
+      kv: this._kv,
+      connectionString: this.baseConnectionString,
+    });
   }
 
   protected createDatabaseConnection(connectionString: string): TDatabase {

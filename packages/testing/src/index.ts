@@ -29,3 +29,6 @@ export * from './debug';
 
 // Performance utilities
 export * from './performance';
+
+// Vitest setup utilities
+export * from './vitest-setup';

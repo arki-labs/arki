@@ -33,49 +33,63 @@ export type ProjectionHandlerContext<TRepos, TSchema extends Record<string, unkn
  */
 export type ProjectionHandler<TEvent, TRepos, TSchema extends Record<string, unknown> = Record<string, unknown>> = (
   events: TEvent[],
-  context: ProjectionHandlerContext<TRepos, TSchema>
+  context: ProjectionHandlerContext<TRepos, TSchema>,
 ) => Promise<void>;
 
 /**
  * Projection builder interface
  */
-export interface ProjectionBuilder<TEvent = never, TRepos = never, TSchema extends Record<string, unknown> = Record<string, unknown>> {
+export type ProjectionBuilder<
+  TEvent = never,
+  TRepos = never,
+  TSchema extends Record<string, unknown> = Record<string, unknown>,
+> = {
   /**
    * Set the projection name
    */
   named<TName extends string>(name: TName): ProjectionBuilderWithName<TEvent, TRepos, TSchema, TName>;
-}
+};
 
-export interface ProjectionBuilderWithName<_TEvent, TRepos, TSchema extends Record<string, unknown>, TName extends string> {
+export type ProjectionBuilderWithName<
+  _TEvent,
+  TRepos,
+  TSchema extends Record<string, unknown>,
+  TName extends string,
+> = {
   /**
    * Define which events this projection handles
    */
   on<TEventType extends { type: string }>(
-    eventTypes: ReadonlyArray<TEventType['type']> | TEventType['type'][]
+    eventTypes: readonly TEventType['type'][] | TEventType['type'][],
   ): ProjectionBuilderWithEvents<TEventType, TRepos, TSchema, TName>;
-}
+};
 
-export interface ProjectionBuilderWithEvents<TEvent, TRepos, TSchema extends Record<string, unknown>, TName extends string> {
+export type ProjectionBuilderWithEvents<
+  TEvent,
+  TRepos,
+  TSchema extends Record<string, unknown>,
+  TName extends string,
+> = {
   /**
    * Define the handler function for the events
    */
   handle(handler: ProjectionHandler<TEvent, TRepos, TSchema>): ProjectionDefinition<TEvent, TRepos, TSchema, TName>;
-}
+};
 
 /**
  * Complete projection definition
  */
-export interface ProjectionDefinition<TEvent, TRepos, TSchema extends Record<string, unknown>, TName extends string> {
+export type ProjectionDefinition<TEvent, TRepos, TSchema extends Record<string, unknown>, TName extends string> = {
   name: TName;
   eventTypes: string[];
   handler: ProjectionHandler<TEvent, TRepos, TSchema>;
   middleware: ProjectionMiddleware[];
-}
+};
 
 /**
  * Database builder with projection support
  */
-export interface DbBuilder<TSchema extends Record<string, unknown>, TRepos extends Record<string, unknown>> {
+export type DbBuilder<TSchema extends Record<string, unknown>, TRepos extends Record<string, unknown>> = {
   /**
    * Database instance
    */
@@ -91,7 +105,7 @@ export interface DbBuilder<TSchema extends Record<string, unknown>, TRepos exten
    */
   registerRepository<K extends string, R>(
     key: K,
-    factory: (db: NodePgDatabase<TSchema>) => R
+    factory: (db: NodePgDatabase<TSchema>) => R,
   ): DbBuilder<TSchema, TRepos & Record<K, R>>;
 
   /**
@@ -103,22 +117,22 @@ export interface DbBuilder<TSchema extends Record<string, unknown>, TRepos exten
    * Start building a projection
    */
   readonly projection: ProjectionBuilderRoot<TRepos, TSchema>;
-}
+};
 
 /**
  * Projection builder root that can have middleware applied
  */
-export interface ProjectionBuilderRoot<TRepos, TSchema extends Record<string, unknown> = Record<string, unknown>> extends ProjectionBuilder<never, TRepos, TSchema> {
+export type ProjectionBuilderRoot<TRepos, TSchema extends Record<string, unknown> = Record<string, unknown>> = {
   /**
    * Apply middleware to all projections created from this builder
    */
   use(middleware: ProjectionMiddleware): ProjectionBuilderRoot<TRepos, TSchema>;
-}
+} & ProjectionBuilder<never, TRepos, TSchema>;
 
 /**
  * Schema configuration step
  */
-export interface SchemaBuilder<TSchema extends Record<string, unknown>> {
+export type SchemaBuilder<TSchema extends Record<string, unknown>> = {
   /**
    * Create the database instance
    */
@@ -127,19 +141,17 @@ export interface SchemaBuilder<TSchema extends Record<string, unknown>> {
     isDev?: boolean;
     poolConfig?: Partial<PoolConfig>;
   }): DbBuilder<TSchema, Record<string, never>>;
-}
+};
 
 /**
  * Initial builder step
  */
-export interface InitialBuilder {
+export type InitialBuilder = {
   /**
    * Set the database schema
    */
-  schema<TSchema extends Record<string, unknown>>(
-    schema: TSchema
-  ): SchemaBuilder<TSchema>;
-}
+  schema<TSchema extends Record<string, unknown>>(schema: TSchema): SchemaBuilder<TSchema>;
+};
 
 /**
  * Implementation of the projection builder
@@ -149,8 +161,8 @@ class ProjectionBuilderImpl<TEvent, TRepos, TSchema extends Record<string, unkno
     ProjectionBuilder<TEvent, TRepos, TSchema>,
     ProjectionBuilderWithName<TEvent, TRepos, TSchema, TName>,
     ProjectionBuilderWithEvents<TEvent, TRepos, TSchema, TName>,
-    ProjectionBuilderRoot<TRepos, TSchema> {
-
+    ProjectionBuilderRoot<TRepos, TSchema>
+{
   private _name?: string;
   private _eventTypes?: string[];
   private _middleware: ProjectionMiddleware[] = [];
@@ -158,7 +170,7 @@ class ProjectionBuilderImpl<TEvent, TRepos, TSchema extends Record<string, unkno
   constructor(
     private readonly repos: TRepos,
     private readonly db: NodePgDatabase<TSchema>,
-    middleware?: ProjectionMiddleware[]
+    middleware?: ProjectionMiddleware[],
   ) {
     if (middleware) {
       this._middleware = [...middleware];
@@ -171,9 +183,9 @@ class ProjectionBuilderImpl<TEvent, TRepos, TSchema extends Record<string, unkno
   }
 
   on<TEventType extends { type: string }>(
-    eventTypes: ReadonlyArray<TEventType['type']> | TEventType['type'][]
+    eventTypes: readonly TEventType['type'][] | TEventType['type'][],
   ): ProjectionBuilderWithEvents<TEventType, TRepos, TSchema, TName> {
-    this._eventTypes = Array.from(eventTypes);
+    this._eventTypes = [...eventTypes];
     return this as unknown as ProjectionBuilderImpl<TEventType, TRepos, TSchema, TName>;
   }
 
@@ -194,11 +206,10 @@ class ProjectionBuilderImpl<TEvent, TRepos, TSchema extends Record<string, unkno
   }
 
   use(middleware: ProjectionMiddleware): ProjectionBuilderRoot<TRepos, TSchema> {
-    const newBuilder = new ProjectionBuilderImpl<TEvent, TRepos, TSchema, TName>(
-      this.repos,
-      this.db,
-      [...this._middleware, middleware]
-    );
+    const newBuilder = new ProjectionBuilderImpl<TEvent, TRepos, TSchema, TName>(this.repos, this.db, [
+      ...this._middleware,
+      middleware,
+    ]);
     return newBuilder;
   }
 }
@@ -206,7 +217,9 @@ class ProjectionBuilderImpl<TEvent, TRepos, TSchema extends Record<string, unkno
 /**
  * Implementation of the database builder
  */
-class DbBuilderImpl<TSchema extends Record<string, unknown>, TRepos extends Record<string, unknown>> implements DbBuilder<TSchema, TRepos> {
+class DbBuilderImpl<TSchema extends Record<string, unknown>, TRepos extends Record<string, unknown>>
+  implements DbBuilder<TSchema, TRepos>
+{
   readonly db: NodePgDatabase<TSchema>;
   readonly isDev: boolean;
   private _repos?: TRepos;
@@ -215,7 +228,7 @@ class DbBuilderImpl<TSchema extends Record<string, unknown>, TRepos extends Reco
   constructor(
     db: NodePgDatabase<TSchema>,
     isDev: boolean,
-    repoFactories?: Map<string, (db: NodePgDatabase<TSchema>) => unknown>
+    repoFactories?: Map<string, (db: NodePgDatabase<TSchema>) => unknown>,
   ) {
     this.db = db;
     this.isDev = isDev;
@@ -224,15 +237,14 @@ class DbBuilderImpl<TSchema extends Record<string, unknown>, TRepos extends Reco
 
   registerRepository<K extends string, R>(
     key: K,
-    factory: (db: NodePgDatabase<TSchema>) => R
+    factory: (db: NodePgDatabase<TSchema>) => R,
   ): DbBuilder<TSchema, TRepos & Record<K, R>> {
     const newFactories = new Map(this._repoFactories);
     newFactories.set(key, factory);
-    return new DbBuilderImpl<TSchema, TRepos & Record<K, R>>(
-      this.db,
-      this.isDev,
-      newFactories
-    ) as DbBuilder<TSchema, TRepos & Record<K, R>>;
+    return new DbBuilderImpl<TSchema, TRepos & Record<K, R>>(this.db, this.isDev, newFactories) as DbBuilder<
+      TSchema,
+      TRepos & Record<K, R>
+    >;
   }
 
   projectionMiddleware(fn: ProjectionMiddleware): ProjectionMiddleware {
@@ -248,10 +260,7 @@ class DbBuilderImpl<TSchema extends Record<string, unknown>, TRepos extends Reco
       }
       this._repos = repos as TRepos;
     }
-    return new ProjectionBuilderImpl<never, TRepos, TSchema>(
-      this._repos,
-      this.db
-    );
+    return new ProjectionBuilderImpl<never, TRepos, TSchema>(this._repos, this.db);
   }
 }
 

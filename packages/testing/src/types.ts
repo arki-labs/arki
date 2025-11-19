@@ -47,7 +47,7 @@ export interface IntegrationTesterConfig<
 > {
   schema: TSchema;
   migrationsFolder: string;
-  createContext(params: { db: TDatabase; repo: TRepositories; kv: KV | null }): TContext;
+  createContext(params: { db: TDatabase; repo: TRepositories; kv: KV | null; connectionString: string }): TContext;
   createCaller(args: CreateCallerArgs<TContext>): TCaller;
   createRepositories(db: TDatabase): TRepositories;
   defaultUsers: TesterUsers;

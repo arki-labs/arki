@@ -1,7 +1,7 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
 import type { DrizzleConfig } from 'drizzle-orm/utils';
 // import postgres from 'postgres';
 import type { PoolConfig } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 
 const { native } = pg;
