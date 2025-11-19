@@ -2,6 +2,8 @@
  * Search Analytics Collection
  */
 
+import { debugSemantic } from '../debug.ts';
+
 export type SearchAnalytics = {
   query: string;
   mode: string;
@@ -36,30 +38,46 @@ export class SearchAnalyticsCollector {
     this.totalRequests++;
 
     // Update popular searches
-    this.popularSearches.set(
+    const queryCount = (this.popularSearches.get(analytics.query) || 0) + 1;
+    this.popularSearches.set(analytics.query, queryCount);
+
+    debugSemantic(
+      '[Analytics] Recorded search (query: "%s", mode: %s, results: %d, responseTime: %dms, totalRequests: %d)',
       analytics.query,
-      (this.popularSearches.get(analytics.query) || 0) + 1
+      analytics.mode,
+      analytics.resultCount,
+      analytics.responseTime,
+      this.totalRequests,
     );
 
     // Keep only last N entries to prevent memory issues
     const maxHistory = 10_000;
     if (this.history.length > maxHistory) {
+      const trimmed = this.history.length - maxHistory;
       this.history = this.history.slice(-maxHistory);
+      debugSemantic('[Analytics] Trimmed history to prevent memory issues (removed %d old entries)', trimmed);
     }
   }
 
   /**
    * Record a cache hit
    */
-  recordCacheHit(_query: string): void {
+  recordCacheHit(query: string): void {
     this.cacheHits++;
     this.totalRequests++;
+    debugSemantic(
+      '[Analytics] Cache hit recorded (query: "%s", cacheHits: %d, totalRequests: %d)',
+      query,
+      this.cacheHits,
+      this.totalRequests,
+    );
   }
 
   /**
    * Get popular searches matching a prefix
    */
   async getPopularSearches(prefix: string, limit: number): Promise<string[]> {
+    debugSemantic('[Analytics] Getting popular searches (prefix: "%s", limit: %d)', prefix, limit);
     const matches: [string, number][] = [];
 
     for (const [query, count] of this.popularSearches.entries()) {
@@ -71,7 +89,9 @@ export class SearchAnalyticsCollector {
     // Sort by popularity
     matches.sort((a, b) => b[1] - a[1]);
 
-    return matches.slice(0, limit).map(([query]) => query);
+    const results = matches.slice(0, limit).map(([query]) => query);
+    debugSemantic('[Analytics] Found %d popular searches matching prefix "%s"', results.length, prefix);
+    return results;
   }
 
   /**
@@ -93,6 +113,13 @@ export class SearchAnalyticsCollector {
       this.totalRequests > 0
         ? (this.cacheHits / this.totalRequests) * 100
         : 0;
+
+    debugSemantic(
+      '[Analytics] Metrics retrieved (totalSearches: %d, avgResponseTime: %dms, cacheHitRate: %f%%)',
+      totalSearches,
+      averageResponseTime,
+      cacheHitRate,
+    );
 
     return {
       totalSearches,
@@ -151,10 +178,17 @@ export class SearchAnalyticsCollector {
    * Clear all analytics data
    */
   clear(): void {
+    const historySize = this.history.length;
+    const popularSize = this.popularSearches.size;
     this.history = [];
     this.popularSearches.clear();
     this.cacheHits = 0;
     this.totalRequests = 0;
+    debugSemantic(
+      '[Analytics] Cleared all data (history: %d entries, popularSearches: %d queries)',
+      historySize,
+      popularSize,
+    );
   }
 
   /**
@@ -166,12 +200,20 @@ export class SearchAnalyticsCollector {
     cacheHits: number;
     totalRequests: number;
   } {
-    return {
+    const exported = {
       history: this.history,
       popularSearches: [...this.popularSearches.entries()],
       cacheHits: this.cacheHits,
       totalRequests: this.totalRequests,
     };
+    debugSemantic(
+      '[Analytics] Exported data (history: %d entries, popularSearches: %d queries, cacheHits: %d, totalRequests: %d)',
+      exported.history.length,
+      exported.popularSearches.length,
+      exported.cacheHits,
+      exported.totalRequests,
+    );
+    return exported;
   }
 
   /**
@@ -183,6 +225,13 @@ export class SearchAnalyticsCollector {
     cacheHits: number;
     totalRequests: number;
   }): void {
+    debugSemantic(
+      '[Analytics] Importing data (history: %d entries, popularSearches: %d queries, cacheHits: %d, totalRequests: %d)',
+      data.history.length,
+      data.popularSearches.length,
+      data.cacheHits,
+      data.totalRequests,
+    );
     this.history = data.history.map(h => ({
       ...h,
       timestamp: new Date(h.timestamp),
@@ -190,5 +239,6 @@ export class SearchAnalyticsCollector {
     this.popularSearches = new Map(data.popularSearches);
     this.cacheHits = data.cacheHits;
     this.totalRequests = data.totalRequests;
+    debugSemantic('[Analytics] Data imported successfully');
   }
 }

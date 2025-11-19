@@ -2,31 +2,30 @@
  * Type definitions for the Dot Auth module
  */
 
-import type { User as BetterAuthUser, Session as BetterAuthSession } from 'better-auth';
+import type { Session as BetterAuthSession, User as BetterAuthUser } from 'better-auth';
 
 // Re-export better-auth types for convenience
-export type { BetterAuthUser, BetterAuthSession };
 
 /**
  * Extended user type with RBAC support
  */
-export interface DotUser extends BetterAuthUser {
+export type DotUser = {
   roles?: Role[];
   permissions?: Permission[];
   attributes?: Record<string, any>;
-}
+} & BetterAuthUser;
 
 /**
  * Extended session type
  */
-export interface DotSession extends BetterAuthSession {
+export type DotSession = {
   user: DotUser;
-}
+} & BetterAuthSession;
 
 /**
  * Role definition
  */
-export interface Role {
+export type Role = {
   id: string;
   name: string;
   description?: string;
@@ -34,18 +33,18 @@ export interface Role {
   isSystem?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
-}
+};
 
 /**
  * Permission definition
  */
-export interface Permission {
+export type Permission = {
   id: string;
   resource: string;
   action: string;
   description?: string;
   conditions?: Record<string, any>;
-}
+};
 
 /**
  * Provider types
@@ -64,11 +63,11 @@ export type BuiltInProvider =
 /**
  * Custom provider configuration
  */
-export interface CustomProvider {
+export type CustomProvider = {
   id: string;
   type: 'oauth' | 'oidc' | 'custom';
   config: Record<string, any>;
-}
+};
 
 /**
  * Email provider types
@@ -93,70 +92,70 @@ export type MFAProvider = 'totp' | 'sms' | 'email' | 'webauthn';
 /**
  * Auth event types for hooks
  */
-export interface AuthEvent<T = any> {
+export type AuthEvent<T = any> = {
   type: string;
   user?: DotUser;
   session?: DotSession;
   data?: T;
   timestamp: Date;
-}
+};
 
-export interface SignInEvent extends AuthEvent {
+export type SignInEvent = {
   type: 'signIn';
   provider: string;
   isNewUser: boolean;
-}
+} & AuthEvent;
 
-export interface SignUpEvent extends AuthEvent {
+export type SignUpEvent = {
   type: 'signUp';
   provider: string;
-}
+} & AuthEvent;
 
-export interface SignOutEvent extends AuthEvent {
+export type SignOutEvent = {
   type: 'signOut';
-}
+} & AuthEvent;
 
-export interface PasswordResetEvent extends AuthEvent {
+export type PasswordResetEvent = {
   type: 'passwordReset';
-}
+} & AuthEvent;
 
-export interface EmailVerificationEvent extends AuthEvent {
+export type EmailVerificationEvent = {
   type: 'emailVerification';
   verified: boolean;
-}
+} & AuthEvent;
 
-export interface MFAEvent extends AuthEvent {
+export type MFAEvent = {
   type: 'mfa';
   action: 'enabled' | 'disabled' | 'verified';
   method: MFAProvider;
-}
+} & AuthEvent;
 
 /**
  * Policy context for ABAC
  */
-export interface PolicyContext {
+export type PolicyContext = {
   user: DotUser;
   resource: string;
   action: string;
   environment?: Record<string, any>;
   attributes?: Record<string, any>;
-}
+};
 
 /**
  * Rate limit configuration
  */
-export interface RateLimitConfig {
+export type RateLimitConfig = {
   enabled?: boolean;
   maxAttempts?: number;
   windowMs?: number;
   blockDurationMs?: number;
   skipSuccessfulRequests?: boolean;
-}
+};
 
 /**
  * Password policy configuration
  */
-export interface PasswordPolicy {
+export type PasswordPolicy = {
   minLength?: number;
   maxLength?: number;
   requireUppercase?: boolean;
@@ -166,48 +165,49 @@ export interface PasswordPolicy {
   preventCommon?: boolean;
   preventUserInfo?: boolean;
   customValidator?: (password: string, user?: DotUser) => boolean | string;
-}
+};
 
 /**
  * Account lockout configuration
  */
-export interface LockoutConfig {
+export type LockoutConfig = {
   enabled?: boolean;
   maxAttempts?: number;
   lockoutDurationMs?: number;
   resetAfterMs?: number;
-}
+};
 
 /**
  * Cookie options
  */
-export interface CookieOptions {
+export type CookieOptions = {
   secure?: boolean;
   sameSite?: 'lax' | 'strict' | 'none';
   httpOnly?: boolean;
   domain?: string;
   path?: string;
-}
+};
 
 /**
  * Email template
  */
-export interface EmailTemplate {
+export type EmailTemplate = {
   subject: string;
   text?: string;
   html?: string;
   from?: string;
   replyTo?: string;
-}
+};
 
 /**
  * Email templates collection
  */
-export interface EmailTemplates {
+export type EmailTemplates = {
   verifyEmail?: EmailTemplate;
   resetPassword?: EmailTemplate;
   magicLink?: EmailTemplate;
   changeEmail?: EmailTemplate;
   mfaCode?: EmailTemplate;
   welcome?: EmailTemplate;
-}
+};
+export { type Session as BetterAuthSession, type User as BetterAuthUser } from 'better-auth';

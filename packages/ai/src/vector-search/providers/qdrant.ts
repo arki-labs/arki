@@ -5,6 +5,7 @@
 
 import type { QdrantClient, Schemas as QdrantSchemas } from '@qdrant/js-client-rest';
 
+import { debugVector } from '../../debug.ts';
 import type { EmbeddingProvider, VectorSearchProvider, VectorSearchResult } from '../../types';
 import { VectorSearchError, getErrorMessage } from '../../errors';
 import { TransactionManager } from '../../utils/transaction-manager';
@@ -53,10 +54,19 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     this.vectorSize = config.vectorSize || embeddingProvider.getDimensions?.() || 1536;
     this.embeddingProvider = embeddingProvider;
     this.createIfNotExists = config.createCollectionIfNotExists !== false;
+
+    debugVector(
+      '[Qdrant] Provider initialized (collection: %s, vectorSize: %d, autoCreate: %s, url: %s)',
+      this.collectionName,
+      this.vectorSize,
+      this.createIfNotExists,
+      config.url,
+    );
   }
 
   private async getClient(): Promise<QdrantClient> {
     if (!this.client) {
+      debugVector('[Qdrant] Initializing Qdrant client (url: %s)', this.config.url);
       // Dynamic import to avoid loading if not needed
       const { QdrantClient } = await import('@qdrant/js-client-rest');
 
@@ -65,7 +75,10 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
         apiKey: this.config.apiKey,
       });
 
+      debugVector('[Qdrant] Client initialized successfully');
+
       if (this.createIfNotExists) {
+        debugVector('[Qdrant] Auto-create enabled, ensuring collection exists');
         await this.ensureCollection();
       }
     }
@@ -75,6 +88,8 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
   private async ensureCollection(): Promise<void> {
     if (!this.client) return;
 
+    debugVector('[Qdrant] Checking if collection exists: %s', this.collectionName);
+
     try {
       // Check if collection exists
       const collections = await this.client.getCollections();
@@ -83,6 +98,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
       );
 
       if (!exists) {
+        debugVector('[Qdrant] Collection does not exist, creating: %s (vectorSize: %d)', this.collectionName, this.vectorSize);
         // Create collection with optimized settings for semantic search
         await this.client.createCollection(this.collectionName, {
           vectors: {
@@ -96,10 +112,12 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
           replication_factor: 2,
           write_consistency_factor: 1,
         });
+        debugVector('[Qdrant] Collection created successfully: %s', this.collectionName);
+      } else {
+        debugVector('[Qdrant] Collection already exists: %s', this.collectionName);
       }
     } catch (error) {
-      // Log the error but don't throw - collection might exist or be created manually
-      // In production, you might want to use a proper logger here
+      debugVector('[Qdrant] Failed to ensure collection: %s', getErrorMessage(error));
       throw new VectorSearchError(
         `Failed to ensure QDrant collection: ${getErrorMessage(error)}`,
         error
@@ -112,10 +130,12 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     text: string,
     metadata?: TMetadata,
   ): Promise<void> {
+    debugVector('[Qdrant] Indexing document (id: %s, text length: %d)', id, text.length);
     const client = await this.getClient();
 
     // Generate embedding
     const vector = await this.embeddingProvider.getEmbedding(text);
+    debugVector('[Qdrant] Generated embedding for document: %s (dimensions: %d)', id, vector.length);
 
     // Prepare point for indexing
     const point: QdrantSchemas['PointStruct'] = {
@@ -133,6 +153,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
       points: [point],
       wait: true, // Wait for the operation to complete
     });
+    debugVector('[Qdrant] Document indexed successfully: %s', id);
   }
 
   async indexDocumentsBatch(
@@ -142,6 +163,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
       metadata?: TMetadata;
     }>,
   ): Promise<void> {
+    debugVector('[Qdrant] Indexing documents batch (count: %d)', documents.length);
     const client = await this.getClient();
     const transactionManager = new TransactionManager();
 
@@ -151,8 +173,10 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     try {
       // Generate embeddings in batch for efficiency
       const texts = documents.map(d => d.text);
+      debugVector('[Qdrant] Generating embeddings for batch (count: %d)', texts.length);
       const embeddings = await this.embeddingProvider.getEmbeddings?.(texts)
         || await Promise.all(texts.map(t => this.embeddingProvider.getEmbedding(t)));
+      debugVector('[Qdrant] Embeddings generated successfully (count: %d)', embeddings.length);
 
       // Prepare points for batch indexing
       const points: QdrantSchemas['PointStruct'][] = documents.map((doc, i) => ({
@@ -168,24 +192,31 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
       // Create transaction operations for each batch
       const batchSize = 100;
       const operations = [];
+      const numBatches = Math.ceil(points.length / batchSize);
+
+      debugVector('[Qdrant] Splitting into %d batches of max %d documents', numBatches, batchSize);
 
       for (let i = 0; i < points.length; i += batchSize) {
         const batch = points.slice(i, i + batchSize);
         const batchIds = batch.map(p => p.id as string);
+        const batchNum = Math.floor(i / batchSize) + 1;
 
         operations.push({
-          name: `Index batch ${Math.floor(i / batchSize) + 1}`,
+          name: `Index batch ${batchNum}`,
           execute: async () => {
+            debugVector('[Qdrant] Executing batch %d/%d (documents: %d)', batchNum, numBatches, batch.length);
             await client.upsert(this.collectionName, {
               points: batch,
               wait: true,
             });
             indexedIds.push(...batchIds);
+            debugVector('[Qdrant] Batch %d/%d indexed successfully', batchNum, numBatches);
             return batchIds;
           },
           rollback: async () => {
             // Remove indexed documents on rollback
             if (batchIds.length > 0) {
+              debugVector('[Qdrant] Rolling back batch %d (removing %d documents)', batchNum, batchIds.length);
               await client.delete(this.collectionName, {
                 points: batchIds,
                 wait: true,
@@ -196,12 +227,17 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
       }
 
       // Execute all operations with transaction support
+      debugVector('[Qdrant] Executing transaction with %d operations', operations.length);
       const result = await transactionManager.executeTransaction(operations);
 
       if (!result.success) {
+        debugVector('[Qdrant] Transaction failed, rolling back');
         throw result.error || new VectorSearchError('Batch indexing failed');
       }
+
+      debugVector('[Qdrant] Batch indexing completed successfully (total documents: %d)', documents.length);
     } catch (error) {
+      debugVector('[Qdrant] Batch indexing failed: %s', getErrorMessage(error));
       throw new VectorSearchError(
         `Failed to index documents batch: ${getErrorMessage(error)}`,
         error
@@ -214,10 +250,12 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     limit: number = 10,
     filter?: QdrantSearchFilter,
   ): Promise<VectorSearchResult<TMetadata>[]> {
+    debugVector('[Qdrant] Searching similar documents (query length: %d, limit: %d, hasFilter: %s)', query.length, limit, !!filter);
     const client = await this.getClient();
 
     // Generate query embedding
     const queryVector = await this.embeddingProvider.getEmbedding(query);
+    debugVector('[Qdrant] Generated query embedding (dimensions: %d)', queryVector.length);
 
     // Build QDrant filter from our search filter
     const qdrantFilter = filter ? this.buildQdrantFilter(filter) : undefined;
@@ -230,6 +268,8 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
       with_payload: true,
       score_threshold: 0, // Return all results, let caller filter by score
     });
+
+    debugVector('[Qdrant] Search completed (results: %d)', searchResult.length);
 
     // Transform results
     return searchResult.map((result) => ({
@@ -245,10 +285,12 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     filter?: QdrantSearchFilter,
     keywordWeight: number = 0.3,
   ): Promise<VectorSearchResult<TMetadata>[]> {
+    debugVector('[Qdrant] Hybrid search (query length: %d, limit: %d, keywordWeight: %f)', query.length, limit, keywordWeight);
     const client = await this.getClient();
 
     // Generate query embedding for semantic search
     const queryVector = await this.embeddingProvider.getEmbedding(query);
+    debugVector('[Qdrant] Generated query embedding (dimensions: %d)', queryVector.length);
 
     // Build filter including text search
     const baseFilter = filter ? this.buildQdrantFilter(filter) : undefined;
@@ -266,14 +308,17 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     } : undefined;
 
     // Perform semantic search
+    debugVector('[Qdrant] Performing semantic search (initial limit: %d)', limit * 2);
     const searchResult = await client.search(this.collectionName, {
       vector: queryVector,
       limit: limit * 2, // Get more results for re-ranking
       filter: hybridFilter,
       with_payload: true,
     });
+    debugVector('[Qdrant] Semantic search completed (results: %d)', searchResult.length);
 
     // Re-rank based on combined score (semantic + keyword match)
+    debugVector('[Qdrant] Re-ranking results with keyword scores');
     const rerankedResults = searchResult.map((result) => {
       const semanticScore = result.score;
       const text = ((result.payload as Record<string, unknown>)?.['text'] as string) || '';
@@ -290,27 +335,34 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     });
 
     // Sort by combined score and return top results
-    return rerankedResults
+    const finalResults = rerankedResults
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
+
+    debugVector('[Qdrant] Hybrid search completed (final results: %d)', finalResults.length);
+    return finalResults;
   }
 
   async deleteDocument(id: string): Promise<void> {
+    debugVector('[Qdrant] Deleting document (id: %s)', id);
     const client = await this.getClient();
 
     await client.delete(this.collectionName, {
       points: [id],
       wait: true,
     });
+    debugVector('[Qdrant] Document deleted successfully: %s', id);
   }
 
   async deleteDocumentsBatch(ids: string[]): Promise<void> {
+    debugVector('[Qdrant] Deleting documents batch (count: %d)', ids.length);
     const client = await this.getClient();
 
     await client.delete(this.collectionName, {
       points: ids,
       wait: true,
     });
+    debugVector('[Qdrant] Batch deletion completed (count: %d)', ids.length);
   }
 
   async getEmbedding(text: string): Promise<number[]> {
@@ -322,17 +374,28 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     indexedSize: number;
     segmentsCount: number;
   }> {
+    debugVector('[Qdrant] Getting collection stats: %s', this.collectionName);
     const client = await this.getClient();
     const info = await client.getCollection(this.collectionName);
 
-    return {
+    const stats = {
       vectorCount: info.vectors_count || 0,
       indexedSize: info.indexed_vectors_count || 0,
       segmentsCount: info.segments_count || 0,
     };
+
+    debugVector(
+      '[Qdrant] Collection stats (vectors: %d, indexed: %d, segments: %d)',
+      stats.vectorCount,
+      stats.indexedSize,
+      stats.segmentsCount,
+    );
+
+    return stats;
   }
 
   async optimizeCollection(): Promise<void> {
+    debugVector('[Qdrant] Optimizing collection: %s', this.collectionName);
     const client = await this.getClient();
 
     // Trigger optimization to improve search performance
@@ -342,6 +405,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
         default_segment_number: 2,
       },
     });
+    debugVector('[Qdrant] Collection optimization completed: %s', this.collectionName);
   }
 
   // Note: Field indexing is handled automatically by Qdrant based on usage patterns
@@ -403,17 +467,21 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
    * Clear the entire collection (use with caution!)
    */
   async clearCollection(): Promise<void> {
+    debugVector('[Qdrant] Clearing entire collection: %s (use with caution!)', this.collectionName);
     const client = await this.getClient();
 
     // Delete and recreate collection
     await client.deleteCollection(this.collectionName);
+    debugVector('[Qdrant] Collection deleted: %s', this.collectionName);
     await this.ensureCollection();
+    debugVector('[Qdrant] Collection cleared and recreated: %s', this.collectionName);
   }
 
   /**
    * Get document by ID
    */
   async getDocument(id: string): Promise<TMetadata | null> {
+    debugVector('[Qdrant] Getting document by ID: %s', id);
     const client = await this.getClient();
 
     try {
@@ -423,8 +491,11 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
         with_vector: false,
       });
 
-      return points[0]?.payload as TMetadata || null;
+      const result = points[0]?.payload as TMetadata || null;
+      debugVector('[Qdrant] Document retrieved: %s (found: %s)', id, !!result);
+      return result;
     } catch (error) {
+      debugVector('[Qdrant] Failed to get document: %s - %s', id, getErrorMessage(error));
       return null;
     }
   }

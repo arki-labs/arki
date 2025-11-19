@@ -4,6 +4,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import type { KV } from '@arki/kv';
 
+import { debugPlugin } from './debug.ts';
 import type {
   BaseProjectionDefinition,
   CommandHandlerRegistration,
@@ -592,18 +593,23 @@ export class PluginRegistry<TSchema extends SchemaInterface = SchemaInterface> {
    * Add plugins to the registry
    */
   add(plugins: PluginConfig<TSchema, string, string>[]) {
+    debugPlugin('[PluginRegistry] Adding %d plugin(s) to registry', plugins.length);
     for (const plugin of plugins) {
       if (this.plugins.has(plugin.name)) {
+        debugPlugin('[PluginRegistry] Error: Plugin "%s" is already registered', plugin.name);
         throw new Error(`Plugin "${plugin.name}" is already registered`);
       }
+      debugPlugin('[PluginRegistry] Registering plugin: %s', plugin.name);
       this.plugins.set(plugin.name, plugin);
     }
+    debugPlugin('[PluginRegistry] Successfully added %d plugin(s). Total plugins: %d', plugins.length, this.plugins.size);
   }
 
   /**
    * Get plugins in dependency order
    */
   private getOrderedPlugins(): PluginConfig<TSchema, string, string>[] {
+    debugPlugin('[PluginRegistry] Sorting %d plugin(s) by dependency order', this.plugins.size);
     const sorted: PluginConfig<TSchema, string, string>[] = [];
     const visited = new Set<string>();
     const visiting = new Set<string>();
@@ -611,11 +617,13 @@ export class PluginRegistry<TSchema extends SchemaInterface = SchemaInterface> {
     const visit = (name: string) => {
       if (visited.has(name)) return;
       if (visiting.has(name)) {
+        debugPlugin('[PluginRegistry] Circular dependency detected for plugin: %s', name);
         throw new Error(`Circular dependency detected for plugin "${name}"`);
       }
 
       const plugin = this.plugins.get(name);
       if (!plugin) {
+        debugPlugin('[PluginRegistry] Plugin not found: %s (required as dependency)', name);
         throw new Error(`Plugin "${name}" not found (required as dependency)`);
       }
 
@@ -623,6 +631,7 @@ export class PluginRegistry<TSchema extends SchemaInterface = SchemaInterface> {
 
       // Visit dependencies first
       if (plugin.dependencies) {
+        debugPlugin('[PluginRegistry] Processing %d dependency/dependencies for plugin: %s', plugin.dependencies.length, name);
         for (const dep of plugin.dependencies) {
           visit(dep);
         }
@@ -631,6 +640,7 @@ export class PluginRegistry<TSchema extends SchemaInterface = SchemaInterface> {
       visiting.delete(name);
       visited.add(name);
       sorted.push(plugin);
+      debugPlugin('[PluginRegistry] Plugin "%s" added to sorted list (position: %d)', name, sorted.length);
     };
 
     // Visit all plugins
@@ -638,6 +648,7 @@ export class PluginRegistry<TSchema extends SchemaInterface = SchemaInterface> {
       visit(name);
     }
 
+    debugPlugin('[PluginRegistry] Dependency sorting complete. Order: %s', sorted.map(p => p.name).join(' -> '));
     return sorted;
   }
 
@@ -648,25 +659,33 @@ export class PluginRegistry<TSchema extends SchemaInterface = SchemaInterface> {
    */
   buildRoutersFromFactories(procedures: TRPCKit) {
     const orderedPlugins = this.getOrderedPlugins();
+    const pluginsWithFactories = orderedPlugins.filter(p => p.routerFactory);
+    debugPlugin('[PluginRegistry] Building routers from %d plugin(s) with router factories', pluginsWithFactories.length);
 
     for (const plugin of orderedPlugins) {
       // Skip plugins without router factories
       if (!plugin.routerFactory) continue;
 
+      debugPlugin('[PluginRegistry] Building router for plugin: %s', plugin.name);
       try {
         const router = plugin.routerFactory(procedures);
 
         // Register the router under the plugin name
         if (this.routers[plugin.name]) {
+          debugPlugin('[PluginRegistry] Error: Router "%s" is already registered', plugin.name);
           throw new Error(`Router "${plugin.name}" is already registered`);
         }
         this.routers[plugin.name] = router;
+        debugPlugin('[PluginRegistry] Successfully built and registered router for plugin: %s', plugin.name);
       } catch (error) {
+        debugPlugin('[PluginRegistry] Failed to build router for plugin "%s": %s', plugin.name, error instanceof Error ? error.message : 'Unknown error');
         throw new Error(
           `Failed to build router for plugin "${plugin.name}": ${error instanceof Error ? error.message : 'Unknown error'}`,
         );
       }
     }
+
+    debugPlugin('[PluginRegistry] Router building complete. Total routers: %d', Object.keys(this.routers).length);
   }
 
   /**
@@ -679,33 +698,45 @@ export class PluginRegistry<TSchema extends SchemaInterface = SchemaInterface> {
     setupContext?: PluginSetupContext<TSchema>,
   ) {
     const orderedPlugins = this.getOrderedPlugins();
+    debugPlugin('[PluginRegistry] Initializing %d plugin(s) in dependency order', orderedPlugins.length);
 
     const context: PluginContext<TSchema> = {
       registerRouter: (name, router) => {
         if (this.routers[name]) {
+          debugPlugin('[PluginRegistry] Error: Router "%s" is already registered', name);
           throw new Error(`Router "${name}" is already registered`);
         }
+        debugPlugin('[PluginRegistry] Registered router: %s', name);
         this.routers[name] = router;
       },
       registerSchema: schema => {
+        const schemaKeys = Object.keys(schema);
+        debugPlugin('[PluginRegistry] Registered %d schema definition(s): %s', schemaKeys.length, schemaKeys.join(', '));
         Object.assign(this.schemas, schema);
       },
       registerRepository: (name, factory) => {
         if (this.repositories.has(name)) {
+          debugPlugin('[PluginRegistry] Error: Repository "%s" is already registered', name);
           throw new Error(`Repository "${name}" is already registered`);
         }
+        debugPlugin('[PluginRegistry] Registered repository: %s', name);
         this.repositories.set(name, factory);
       },
       registerProjections: (...projections) => {
+        debugPlugin('[PluginRegistry] Registered %d projection(s)', projections.length);
         this.projections.push(...projections);
       },
       registerCommands: (...handlers) => {
+        debugPlugin('[PluginRegistry] Registered %d command handler(s)', handlers.length);
         this.commandHandlers.push(...handlers);
       },
       registerJobs: jobs => {
+        const jobKeys = Object.keys(jobs);
+        debugPlugin('[PluginRegistry] Registered %d job(s): %s', jobKeys.length, jobKeys.join(', '));
         Object.assign(this.jobs, jobs);
       },
       registerProcessManager: pm => {
+        debugPlugin('[PluginRegistry] Registered process manager');
         this.processManagers.push(pm);
       },
       services,
@@ -713,26 +744,46 @@ export class PluginRegistry<TSchema extends SchemaInterface = SchemaInterface> {
 
     // Execute each plugin's setup function and onSetup hooks
     for (const plugin of orderedPlugins) {
+      debugPlugin('[PluginRegistry] Initializing plugin: %s', plugin.name);
       try {
         // Call the standard setup function (registers routers, schemas, etc.)
         await plugin.setup(context);
+        debugPlugin('[PluginRegistry] Plugin "%s" setup completed', plugin.name);
 
         // Call the onSetup hook if present and setup context is provided
         if (plugin.onSetup && setupContext) {
+          debugPlugin('[PluginRegistry] Calling onSetup hook for plugin: %s', plugin.name);
           await plugin.onSetup(setupContext);
+          debugPlugin('[PluginRegistry] Plugin "%s" onSetup hook completed', plugin.name);
         }
       } catch (error) {
+        debugPlugin('[PluginRegistry] Failed to initialize plugin "%s": %s', plugin.name, error instanceof Error ? error.message : 'Unknown error');
         throw new Error(
           `Failed to initialize plugin "${plugin.name}": ${error instanceof Error ? error.message : 'Unknown error'}`,
         );
       }
     }
+
+    debugPlugin('[PluginRegistry] All plugins initialized successfully. Routers: %d, Repositories: %d, Projections: %d, Commands: %d',
+      Object.keys(this.routers).length,
+      this.repositories.size,
+      this.projections.length,
+      this.commandHandlers.length
+    );
   }
 
   /**
    * Get all registered components
    */
   getRegistrations() {
+    debugPlugin('[PluginRegistry] Getting registrations (Routers: %d, Repositories: %d, Projections: %d, Commands: %d, Jobs: %d, Process Managers: %d)',
+      Object.keys(this.routers).length,
+      this.repositories.size,
+      this.projections.length,
+      this.commandHandlers.length,
+      Object.keys(this.jobs).length,
+      this.processManagers.length
+    );
     return {
       routers: this.routers,
       schemas: this.schemas,
@@ -748,13 +799,16 @@ export class PluginRegistry<TSchema extends SchemaInterface = SchemaInterface> {
    * Check if a plugin is registered
    */
   has(name: string): boolean {
-    return this.plugins.has(name);
+    const exists = this.plugins.has(name);
+    debugPlugin('[PluginRegistry] Checking if plugin "%s" exists: %s', name, exists);
+    return exists;
   }
 
   /**
    * Get plugin count
    */
   get size(): number {
+    debugPlugin('[PluginRegistry] Getting plugin count: %d', this.plugins.size);
     return this.plugins.size;
   }
 }

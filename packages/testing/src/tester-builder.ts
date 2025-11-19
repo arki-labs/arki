@@ -28,7 +28,7 @@
 import type { KV } from '@arki/kv';
 
 import type { Factory } from './factories';
-import type { CreateCallerArgs, TesterOptions, TesterUsers } from './types';
+import type { CreateCallerArgs, TesterOptions, TesterUsers, TestUser } from './types';
 import { IntegrationTester } from './integration-tester';
 
 /**
@@ -48,11 +48,29 @@ type InferRepositories<TContext> = TContext extends { repo: infer TRepo } ? TRep
 export interface TesterConfig<TContext extends Record<string, unknown>, TCaller> {
   schema: Record<string, unknown>;
   migrationsFolder: string;
-  createContext(params: { db: InferDatabase<TContext>; repo: InferRepositories<TContext>; kv: KV | null }): TContext;
+  createContext(params: {
+    db: InferDatabase<TContext>;
+    repo: InferRepositories<TContext>;
+    kv: KV | null;
+    connectionString: string;
+  }): TContext;
   createCaller(args: CreateCallerArgs<TContext>): TCaller;
   createRepositories(db: InferDatabase<TContext>): InferRepositories<TContext>;
   defaultUsers: TesterUsers;
   baseFactories?: Record<string, Factory<any>>;
+
+  /**
+   * Optional hook called after a test user is created.
+   * Use this to perform additional setup like creating related records.
+   */
+  onUserCreate?: (params: { user: TestUser; context: TContext }) => Promise<void>;
+
+  /**
+   * Optional hook called during setup after database and context are ready,
+   * but before default callers are created.
+   * Use this to create default users in the database (via auth system).
+   */
+  onSetup?: (params: { context: TContext; users: TesterUsers }) => Promise<void>;
 }
 
 /**

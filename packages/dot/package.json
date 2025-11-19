@@ -35,6 +35,7 @@
     "@arki/event-sourcing": "workspace:*",
     "@arki/fs": "workspace:*",
     "@arki/kv": "workspace:*",
+    "@arki/logger": "workspace:*",
     "@arki/slugify": "workspace:*",
     "@t3-oss/env-core": "catalog:env",
     "@trpc/client": "catalog:trpc",

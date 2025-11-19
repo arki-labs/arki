@@ -31,6 +31,7 @@
   },
   "dependencies": {
     "@arki/contracts": "workspace:*",
+    "@arki/logger": "workspace:*",
     "@bull-board/api": "catalog:queue",
     "@bull-board/hono": "catalog:queue",
     "bullmq": "catalog:queue",

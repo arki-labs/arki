@@ -49,6 +49,7 @@
     "@ai-sdk/react": "catalog:ai",
     "@ai-sdk/ui-utils": "catalog:ai",
     "@arki/contracts": "workspace:*",
+    "@arki/logger": "workspace:*",
     "@qdrant/js-client-rest": "catalog:",
     "@t3-oss/env-core": "catalog:env",
     "ai": "catalog:ai",

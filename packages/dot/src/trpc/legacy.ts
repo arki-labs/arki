@@ -2,12 +2,13 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import superjson from 'superjson';
 
 // Session type is provided by our auth module
-import { RateLimitExceededError } from '@arki/kv/errors';
 import { ZodError } from '@arki/contracts';
+import { RateLimitExceededError } from '@arki/kv/errors';
 
 import type { DotAuth, DotSession } from '../auth';
-import { authFeatures } from '../auth';
 import type { AuthConfig, BaseTRPCContext, RouterRecord, SchemaInterface, SessionUser, TRPCOptions } from '../types';
+import { authFeatures } from '../auth';
+import { debugTRPC } from '../debug';
 
 /**
  * @deprecated This is legacy API - use `createDotProcedures` from './init' instead
@@ -38,18 +39,24 @@ export const trpcFeatures = {
     authConfig: AuthConfig | null,
     trpcOptions?: TRPCOptions<TSchema> | null,
   ) {
+    debugTRPC('[legacy] Creating RPC context factory (hasAuth: %s, hasDb: %s)', !!authConfig, !!dbConfig);
+
     // Return a context creation function that will be called by tRPC
     return async (opts: { headers: Headers; session: DotSession | null }) => {
+      debugTRPC('[legacy] Creating request context');
       const { headers, session } = opts;
       const authToken = headers.get('Authorization') ?? null;
       const source = headers.get('x-rpc-source') ?? 'unknown';
+      debugTRPC('[legacy] Request source: %s, hasToken: %s, hasSession: %s', source, !!authToken, !!session);
 
       const db = initDrizzleFn();
 
       // Initialize auth module if configured
       let dotAuth: DotAuth | undefined;
       if (authConfig) {
+        debugTRPC('[legacy] Initializing auth module');
         dotAuth = await authFeatures.initAuth(authConfig, db);
+        debugTRPC('[legacy] Auth module initialized');
       }
 
       // Get session from token if not provided
@@ -57,34 +64,58 @@ export const trpcFeatures = {
 
       // Try to get session from DotAuth first
       if (!resolvedSession && dotAuth && authToken) {
+        debugTRPC('[legacy] Attempting to validate token with DotAuth');
         try {
           resolvedSession = await dotAuth.session.validateToken(authToken);
+          debugTRPC('[legacy] Session validated via DotAuth');
         } catch (error) {
+          debugTRPC(
+            '[legacy] DotAuth token validation failed: %s',
+            error instanceof Error ? error.message : 'unknown error',
+          );
           console.error('Error validating session token:', error);
         }
       }
 
       // Fall back to legacy validateSession if available
       if (!resolvedSession && authToken && authConfig?.validateSession) {
+        debugTRPC('[legacy] Attempting legacy session validation');
         try {
           resolvedSession = await authConfig.validateSession(authToken);
+          debugTRPC('[legacy] Session validated via legacy method');
         } catch (error) {
+          debugTRPC(
+            '[legacy] Legacy session validation failed: %s',
+            error instanceof Error ? error.message : 'unknown error',
+          );
           console.error('Error validating session token:', error);
         }
       }
 
       // Attempt to get session from cookies if still not resolved
       if (!resolvedSession && !authToken) {
+        debugTRPC('[legacy] Attempting to get session from cookies');
         try {
           resolvedSession = await (dotAuth ? dotAuth.getSession(headers) : authFeatures.getSessionFromCookies());
+          if (resolvedSession) {
+            debugTRPC('[legacy] Session retrieved from cookies');
+          }
         } catch {
+          debugTRPC('[legacy] Failed to get session from cookies (expected in non-Next.js context)');
           // Silently ignore - this is expected when not in a Next.js context
         }
       }
 
       // Log request source and user if available
       if (resolvedSession?.user) {
+        debugTRPC(
+          '[legacy] Request context created for user: %s (source: %s)',
+          resolvedSession.user.id || resolvedSession.user.email,
+          source,
+        );
         console.log('>>> tRPC Request from', source, 'by', resolvedSession.user);
+      } else {
+        debugTRPC('[legacy] Request context created without session');
       }
 
       // Create base context with initialized components
@@ -125,7 +156,14 @@ export const trpcFeatures = {
     trpcOptions: TRPCOptions<TSchema> | null,
     env: Record<string, unknown>,
   ) {
-    if (!routers || Object.keys(routers).length === 0) return;
+    debugTRPC('[legacy] Initializing tRPC (hasRouters: %s)', !!routers);
+    if (!routers || Object.keys(routers).length === 0) {
+      debugTRPC('[legacy] No routers provided, skipping initialization');
+      return;
+    }
+
+    const routerCount = Object.keys(routers).length;
+    debugTRPC('[legacy] Initializing tRPC with %d router(s)', routerCount);
 
     // Initialize tRPC with context and transformer
     const t = initTRPC.context<BaseTRPCContext<TSchema>>().create({
@@ -152,7 +190,7 @@ export const trpcFeatures = {
           throw new TRPCError({
             code: 'TOO_MANY_REQUESTS',
             message: `Rate limit exceeded. Try again later.`,
-            cause: env['NODE_ENV'] === 'development' ? error : undefined,
+            cause: env.NODE_ENV === 'development' ? error : undefined,
           });
         }
 
@@ -168,7 +206,7 @@ export const trpcFeatures = {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: 'An unexpected internal server error occurred.',
-          cause: env['NODE_ENV'] === 'development' ? error : undefined,
+          cause: env.NODE_ENV === 'development' ? error : undefined,
         });
       }
     });
@@ -178,7 +216,7 @@ export const trpcFeatures = {
       const start = Date.now();
 
       // Add artificial delay in development
-      if (env['NODE_ENV'] === 'development') {
+      if (env.NODE_ENV === 'development') {
         // artificial delay in dev 100-500ms
         const waitMs = Math.floor(Math.random() * 400) + 100;
         await new Promise(resolve => setTimeout(resolve, waitMs));
@@ -291,7 +329,9 @@ export const trpcFeatures = {
     };
 
     // Merge routers
+    debugTRPC('[legacy] Merging %d router(s)', routerCount);
     const router = t.router(routers);
+    debugTRPC('[legacy] tRPC initialization complete');
 
     // Return an object with all TRPC components
     // Cast router to preserve the specific router names for autocomplete
@@ -319,25 +359,43 @@ async function checkPermission<TSchema extends SchemaInterface>(
   resource: string,
   action: string,
 ): Promise<boolean> {
+  debugTRPC(
+    '[legacy] Checking permission (resource: %s, action: %s, userId: %s)',
+    resource,
+    action,
+    ctx.user?.id || 'none',
+  );
+
   // Check if user is authenticated
-  if (!ctx.user?.id) return false;
+  if (!ctx.user?.id) {
+    debugTRPC('[legacy] Permission denied: user not authenticated');
+    return false;
+  }
 
   // Use RBAC manager if available
   if (ctx.rbac) {
+    debugTRPC('[legacy] Using RBAC manager for permission check');
     try {
-      return await ctx.rbac.hasPermission(ctx.user.id, resource, action);
+      const hasPermission = await ctx.rbac.hasPermission(ctx.user.id, resource, action);
+      debugTRPC('[legacy] RBAC permission check result: %s', hasPermission);
+      return hasPermission;
     } catch (error) {
+      debugTRPC('[legacy] RBAC permission check failed: %s', error instanceof Error ? error.message : 'unknown error');
       console.error('Error checking permission:', error);
       return false;
     }
   }
 
   // Fallback: For admin users, grant all permissions by default
-  if (ctx.user.roles?.includes('admin')) return true;
+  if (ctx.user.roles?.includes('admin')) {
+    debugTRPC('[legacy] Permission granted: user has admin role');
+    return true;
+  }
 
   // If you have a user repository with permission checking, use it here
   // Example: return await ctx.repo.user.hasPermission(ctx.user.id, resource, action);
 
+  debugTRPC('[legacy] Permission denied: no RBAC manager and not admin');
   return false;
 }
 
@@ -348,18 +406,32 @@ async function checkRoles<TSchema extends SchemaInterface>(
   ctx: BaseTRPCContext<TSchema>,
   requiredRoles: string[],
 ): Promise<boolean> {
+  debugTRPC('[legacy] Checking roles (required: %s, userId: %s)', requiredRoles.join(', '), ctx.user?.id || 'none');
+
   // Check if user is authenticated
-  if (!ctx.user?.id) return false;
+  if (!ctx.user?.id) {
+    debugTRPC('[legacy] Role check failed: user not authenticated');
+    return false;
+  }
 
   // Use RBAC manager if available
   if (ctx.rbac) {
+    debugTRPC('[legacy] Using RBAC manager for role check');
     try {
       for (const role of requiredRoles) {
         const hasRole = await ctx.rbac.hasRole(ctx.user.id, role);
-        if (hasRole) return true;
+        if (hasRole) {
+          debugTRPC('[legacy] Role check passed: user has role "%s"', role);
+          return true;
+        }
       }
+      debugTRPC('[legacy] Role check failed: user has none of the required roles');
       return false;
     } catch (error) {
+      debugTRPC(
+        '[legacy] RBAC role check failed: %s, falling back to user.roles',
+        error instanceof Error ? error.message : 'unknown error',
+      );
       console.error('Error checking roles:', error);
       // Fall back to user.roles if RBAC fails
     }
@@ -367,8 +439,12 @@ async function checkRoles<TSchema extends SchemaInterface>(
 
   // Fallback: Check roles directly on the user object
   if (ctx.user?.roles) {
-    return requiredRoles.some(role => ctx.user?.roles?.includes(role));
+    debugTRPC('[legacy] Checking roles from user object (roles: %s)', ctx.user.roles.join(', '));
+    const hasRole = requiredRoles.some(role => ctx.user?.roles?.includes(role));
+    debugTRPC('[legacy] Role check result from user object: %s', hasRole);
+    return hasRole;
   }
 
+  debugTRPC('[legacy] Role check failed: no RBAC manager and no user.roles');
   return false;
 }

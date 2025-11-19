@@ -16,6 +16,7 @@ import type {
 } from '@arki/event-sourcing/store';
 import { getEventStore, projections } from '@arki/event-sourcing/store';
 
+import { debugEventSourcing } from './debug.ts';
 import type { CommandHandlerRegistration } from './types';
 
 export function createProcessManager<TEvent extends Event, TContext extends Record<string, any>>(
@@ -24,12 +25,16 @@ export function createProcessManager<TEvent extends Event, TContext extends Reco
   eventTypes: TEvent['type'][],
   handlerFn: (event: TEvent, context: TContext) => Promise<void>,
 ) {
+  debugEventSourcing('[createProcessManager] Creating process manager: %s for event types: %s', name, eventTypes.join(', '));
   return reactor({
     canHandle: [...eventTypes],
     eachMessage: async message => {
+      debugEventSourcing('[createProcessManager:%s] Processing event: %s', name, message.type);
       try {
         await handlerFn(message, context);
+        debugEventSourcing('[createProcessManager:%s] Successfully processed event: %s', name, message.type);
       } catch (error) {
+        debugEventSourcing('[createProcessManager:%s] Error processing event %s: %s', name, message.type, error instanceof Error ? error.message : String(error));
         console.error(`Error in process manager ${name}:`, error, message);
         throw error; // Allow the consumer's error handling to take over
       }
@@ -57,16 +62,20 @@ export const eventSourcingFeatures = {
     dbUrl?: string,
   ) {
     if (!dbUrl) {
+      debugEventSourcing('[eventSourcingFeatures] Event Store URL not found. Required environment variables: %s', EVENT_STORE_URL_VARIANTS.join(', '));
       throw new Error(
         `Event Store database URL is not defined. Please set one of the following environment variables: ${EVENT_STORE_URL_VARIANTS.join(
           ', ',
         )}`,
       );
     }
-    return getEventStore(dbUrl, {
+    debugEventSourcing('[eventSourcingFeatures] Initializing Event Store with %d projection(s)', p.length);
+    const eventStore = getEventStore(dbUrl, {
       // Ensure projections are passed correctly
       projections: projections.inline(p),
     });
+    debugEventSourcing('[eventSourcingFeatures] Event Store initialized successfully');
+    return eventStore;
   },
 
   /**
@@ -75,13 +84,17 @@ export const eventSourcingFeatures = {
    * @param commandHandlers The command handlers to register
    */
   initMessageBus(eventStore: EventStore | undefined, commandHandlers: CommandHandlerRegistration[]): MessageBus {
+    debugEventSourcing('[eventSourcingFeatures] Initializing Message Bus with %d command handler(s)', commandHandlers.length);
     const messageBus = getInMemoryMessageBus();
 
     // Event Store is required to handle commands that interact with aggregates
     if (!eventStore) {
       if (commandHandlers.length > 0) {
+        debugEventSourcing('[eventSourcingFeatures] Warning: %d command handler(s) configured but Event Store not initialized', commandHandlers.length);
         // Log a warning if handlers were configured but event store is missing
         console.warn('Command handlers were configured, but the Event Store is not initialized. Commands may fail.');
+      } else {
+        debugEventSourcing('[eventSourcingFeatures] No Event Store and no command handlers - returning empty Message Bus');
       }
       return messageBus; // Return bus even if handlers can't be registered
     }
@@ -94,14 +107,18 @@ export const eventSourcingFeatures = {
       ) => {
         return async (command: C) => {
           const streamName = getStreamNameFn(command);
+          debugEventSourcing('[MessageBus] Executing command handler for %s on stream: %s', command.type, streamName);
           try {
             // Runtime check for safety
             if (typeof handler === 'function') {
               await handler(eventStore, streamName, command);
+              debugEventSourcing('[MessageBus] Command handler for %s completed successfully', command.type);
             } else {
+              debugEventSourcing('[MessageBus] Invalid handler type for command: %s', command.type);
               console.error(`Invalid handler type encountered for command: ${command.type}`);
             }
           } catch (error) {
+            debugEventSourcing('[MessageBus] Error executing command handler for %s on stream %s: %s', command.type, streamName, error instanceof Error ? error.message : String(error));
             console.error(`Error executing command handler for ${command.type} on stream ${streamName}:`, error);
             // Decide if errors should be re-thrown or handled differently
             throw error;
@@ -110,10 +127,14 @@ export const eventSourcingFeatures = {
       };
 
       for (const config of commandHandlers) {
+        debugEventSourcing('[eventSourcingFeatures] Registering command handler for type: %s', config.commandType);
         messageBus.handle(createCommandHandlerWrapper(config.handler, config.getStreamName), config.commandType);
       }
 
+      debugEventSourcing('[eventSourcingFeatures] Message Bus initialized with %d command handler(s)', commandHandlers.length);
       console.log(`Message Bus initialized with ${commandHandlers.length} command handlers.`);
+    } else {
+      debugEventSourcing('[eventSourcingFeatures] No command handlers to register');
     }
 
     return messageBus;
@@ -123,18 +144,25 @@ export const eventSourcingFeatures = {
     eventStore: PostgresEventStore,
     processManagers: MessageProcessor<any, any, any, bigint>[],
   ) {
-    const processManagerConsumers = processManagers.map(pm =>
-      eventStore.consumer({
+    debugEventSourcing('[eventSourcingFeatures] Setting up %d process manager(s)', processManagers.length);
+    const processManagerConsumers = processManagers.map(pm => {
+      debugEventSourcing('[eventSourcingFeatures] Creating consumer for process manager: %s', pm.id);
+      return eventStore.consumer({
         consumerId: pm.id,
         processors: [pm],
-      }),
-    );
+      });
+    });
 
+    debugEventSourcing('[eventSourcingFeatures] Starting %d process manager consumer(s)', processManagerConsumers.length);
     await Promise.all(processManagerConsumers.map(consumer => consumer.start()));
+    debugEventSourcing('[eventSourcingFeatures] All process manager consumers started successfully');
 
     process.on('SIGTERM', async () => {
+      debugEventSourcing('[eventSourcingFeatures] SIGTERM received, stopping process managers');
       await Promise.all(processManagerConsumers.map(consumer => consumer.stop()));
+      debugEventSourcing('[eventSourcingFeatures] All process managers stopped, closing consumers');
       await Promise.all(processManagerConsumers.map(consumer => consumer.close()));
+      debugEventSourcing('[eventSourcingFeatures] All consumers closed, exiting');
       process.exit(0);
     });
 

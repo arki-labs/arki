@@ -8,7 +8,6 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 
 import type { UserId } from '@arki/auth';
 import type { ExtractTablesWithRelations } from '@arki/db/id-factory';
-import { userIdFactory } from '@arki/auth';
 import { initDb } from '@arki/db/builder';
 import { KV } from '@arki/kv';
 
@@ -28,6 +27,7 @@ import {
   startRedisContainer,
 } from './containers';
 import * as debug from './debug';
+import { debugTester } from './debug';
 import { FactoryRegistry, faker } from './factories';
 import * as performance from './performance';
 
@@ -217,71 +217,101 @@ export class IntegrationTester<
   }
 
   async setup(): Promise<void> {
+    debugTester('[tester] Setting up integration tester (useUniqueDb: %s)', this.options.useUniqueDatabase ?? false);
     const { users = {}, connectionString: customConnectionString, useUniqueDatabase = false } = this.options;
 
     let connectionString: string;
     const globalConnectionString = getGlobalPostgresConnectionString();
+    debugTester('[tester] Connection string sources (custom: %s, global: %s)', !!customConnectionString, !!globalConnectionString);
 
     if (customConnectionString) {
+      debugTester('[tester] Using custom connection string');
       connectionString = customConnectionString;
       this.ownsContainer = false;
     } else if (globalConnectionString) {
+      debugTester('[tester] Using global connection string');
       connectionString = globalConnectionString;
       this.ownsContainer = false;
     } else {
+      debugTester('[tester] Starting new PostgreSQL container (owning)');
       this.container = await startPostgresContainer();
       connectionString = this.container.getConnectionUri();
       this.ownsContainer = true;
+      debugTester('[tester] PostgreSQL container started');
     }
 
     this.baseConnectionString = connectionString;
 
     if (useUniqueDatabase) {
       this.uniqueDatabaseName = `test_${crypto.randomBytes(8).toString('hex')}`;
+      debugTester('[tester] Creating unique database (name: %s)', this.uniqueDatabaseName);
       const adminDb = this.createDatabaseConnection(connectionString);
       await adminDb.execute(sql.raw(`CREATE DATABASE "${this.uniqueDatabaseName}"`));
 
       const url = new URL(connectionString);
       url.pathname = `/${this.uniqueDatabaseName}`;
       connectionString = url.toString();
+      debugTester('[tester] Unique database created');
     }
 
+    debugTester('[tester] Creating database connection and running migrations');
     const database = this.createDatabaseConnection(connectionString);
     this._db = database;
     await migrate(this._db as any, { migrationsFolder: this.config.migrationsFolder });
+    debugTester('[tester] Migrations completed');
+
+    debugTester('[tester] Creating repositories');
     this._repo = this.config.createRepositories(this._db);
+    debugTester('[tester] Repositories created');
 
     const { redisConnectionString: customRedisConnectionString, useUniqueRedisNamespace = false } = this.options;
 
     let redisUrl: string;
     const globalRedisConnection = getGlobalRedisConnectionString();
+    debugTester('[tester] Redis sources (custom: %s, global: %s)', !!customRedisConnectionString, !!globalRedisConnection);
 
     if (customRedisConnectionString) {
+      debugTester('[tester] Using custom Redis connection');
       redisUrl = customRedisConnectionString;
       this.ownsRedisContainer = false;
     } else if (globalRedisConnection) {
+      debugTester('[tester] Using global Redis connection');
       redisUrl = globalRedisConnection;
       this.ownsRedisContainer = false;
     } else {
+      debugTester('[tester] Starting new Redis container (owning)');
       this.redisContainer = await startRedisContainer();
       const redisHost = this.redisContainer.getHost();
       const redisPort = this.redisContainer.getMappedPort(6379);
       redisUrl = `redis://${redisHost}:${redisPort}`;
       this.ownsRedisContainer = true;
+      debugTester('[tester] Redis container started');
     }
 
     this.redisNamespace = useUniqueRedisNamespace ? `test:${crypto.randomBytes(8).toString('hex')}` : 'test';
+    debugTester('[tester] Creating KV instance (namespace: %s)', this.redisNamespace);
     this._kv = new KV(redisUrl, this.redisNamespace);
+    debugTester('[tester] KV instance created');
 
     const baseContext = this.buildBaseContext();
+    debugTester('[tester] Creating test users');
     this._users = this.mergeUsers(users);
 
+    // Call onSetup hook to create default users in database if provided
+    if (this.config.onSetup) {
+      debugTester('[tester] Running onSetup hook');
+      await this.config.onSetup({ context: baseContext, users: this._users });
+      debugTester('[tester] onSetup hook completed');
+    }
+
+    debugTester('[tester] Creating callers for all roles');
     this._caller = {
       public: this.createCaller('public', null, baseContext),
       user: this.createCaller('user', this._users.user, baseContext),
       moderator: this.createCaller('moderator', this._users.moderator, baseContext),
       admin: this.createCaller('admin', this._users.admin, baseContext),
     };
+    debugTester('[tester] Setup completed successfully');
   }
 
   async teardown(): Promise<void> {
@@ -525,7 +555,7 @@ export class IntegrationTester<
   }
 
   /**
-   * Create a new test user and return caller for that user
+   * Return the default test user and caller with 'user' role
    *
    * @returns Object with user and caller
    *
@@ -536,7 +566,31 @@ export class IntegrationTester<
    * ```
    */
   asUser(): { user: TestUser; caller: TCaller } {
-    const userId = userIdFactory.create();
+    if (!this._users || !this._caller) {
+      throw new Error('Tester not initialized. Call setup() first.');
+    }
+
+    this.currentUser = this._users.user;
+    this.currentCaller = this._caller.user;
+
+    return { user: this._users.user, caller: this._caller.user };
+  }
+
+  /**
+   * Create a new dynamic test user with 'user' role and return caller.
+   * This creates a new user in the database via the onUserCreate hook.
+   * Use this when you need multiple different users in a test.
+   *
+   * @returns Promise with user and caller
+   *
+   * @example
+   * ```typescript
+   * const { user: player1, caller: caller1 } = await tester.createUser();
+   * const { user: player2, caller: caller2 } = await tester.createUser();
+   * ```
+   */
+  async createUser(): Promise<{ user: TestUser; caller: TCaller }> {
+    const userId = crypto.randomBytes(12).toString('hex') as UserId;
     const email = this.generateEmail();
     const name = `Test User ${this.generateString(8)}`;
 
@@ -548,13 +602,16 @@ export class IntegrationTester<
       roles: ['user'],
     };
 
-    this.currentUser = user;
-
-    // Create caller for this user using the base context
     const baseContext = this.buildBaseContext();
-    this.currentCaller = this.createCaller('user', user, baseContext);
 
-    return { user, caller: this.currentCaller };
+    // Call onUserCreate hook if provided to create user in database
+    if (this.config.onUserCreate) {
+      await this.config.onUserCreate({ user, context: baseContext });
+    }
+
+    const caller = this.createCaller('user', user, baseContext);
+
+    return { user, caller };
   }
 
   /**
@@ -576,7 +633,7 @@ export class IntegrationTester<
   }
 
   /**
-   * Create a moderator user and return caller
+   * Return the default test user and caller with 'moderator' role
    *
    * @returns Object with moderator user and caller
    *
@@ -587,15 +644,18 @@ export class IntegrationTester<
    * ```
    */
   asModerator(): { user: TestUser; caller: TCaller } {
-    const moderator = this.getUser('moderator');
-    this.currentUser = moderator;
-    const baseContext = this.buildBaseContext();
-    this.currentCaller = this.createCaller('moderator', moderator, baseContext);
-    return { user: moderator, caller: this.currentCaller };
+    if (!this._users || !this._caller) {
+      throw new Error('Tester not initialized. Call setup() first.');
+    }
+
+    this.currentUser = this._users.moderator;
+    this.currentCaller = this._caller.moderator;
+
+    return { user: this._users.moderator, caller: this._caller.moderator };
   }
 
   /**
-   * Create an admin user and return caller
+   * Return the default test user and caller with 'admin' role
    *
    * @returns Object with admin user and caller
    *
@@ -606,11 +666,14 @@ export class IntegrationTester<
    * ```
    */
   asAdmin(): { user: TestUser; caller: TCaller } {
-    const admin = this.getUser('admin');
-    this.currentUser = admin;
-    const baseContext = this.buildBaseContext();
-    this.currentCaller = this.createCaller('admin', admin, baseContext);
-    return { user: admin, caller: this.currentCaller };
+    if (!this._users || !this._caller) {
+      throw new Error('Tester not initialized. Call setup() first.');
+    }
+
+    this.currentUser = this._users.admin;
+    this.currentCaller = this._caller.admin;
+
+    return { user: this._users.admin, caller: this._caller.admin };
   }
 
   /**

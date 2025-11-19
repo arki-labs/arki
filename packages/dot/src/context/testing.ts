@@ -3,9 +3,9 @@
  * Provides helpers for creating mock contexts and testing lifecycle
  */
 
+import type { ServiceMetric } from './metrics';
 import { BaseContextBuilder } from './base-context';
 import { LifecycleManager } from './lifecycle';
-import type { ServiceMetric } from './metrics';
 import { ServiceMetricsCollector } from './metrics';
 import { SingletonServicesRegistry } from './singleton-registry';
 
@@ -22,7 +22,7 @@ import { SingletonServicesRegistry } from './singleton-registry';
  * ```
  */
 export function createMockRegistry<TServices extends Record<string, unknown>>(
-  services: Partial<TServices>
+  services: Partial<TServices>,
 ): SingletonServicesRegistry<TServices> {
   const registry = new SingletonServicesRegistry<TServices>();
 
@@ -71,7 +71,7 @@ export function createMockMetrics(initialData?: ServiceMetric[]): ServiceMetrics
  */
 export async function waitForInitialization<T>(
   lazy: { isInitialized: () => boolean; get: () => Promise<T> },
-  timeoutMs = 5000
+  timeoutMs = 5000,
 ): Promise<void> {
   const startTime = Date.now();
 
@@ -136,7 +136,7 @@ export function createMockContextBuilder<
   return new BaseContextBuilder<TSingletons, TContext>(
     new SingletonServicesRegistry<TSingletons>(),
     new LifecycleManager(),
-    new ServiceMetricsCollector()
+    new ServiceMetricsCollector(),
   );
 }
 
@@ -150,7 +150,7 @@ export function createMockContextBuilder<
  */
 export function assertHasServices<TServices extends Record<string, unknown>>(
   registry: SingletonServicesRegistry<TServices>,
-  expectedKeys: (keyof TServices)[]
+  expectedKeys: (keyof TServices)[],
 ): void {
   for (const key of expectedKeys) {
     if (!registry.has(key)) {

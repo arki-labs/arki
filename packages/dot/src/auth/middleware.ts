@@ -2,31 +2,32 @@
  * tRPC middleware for authentication and authorization
  */
 
-import { TRPCError } from '@trpc/server';
 import type { AnyRouter, inferRouterContext } from '@trpc/server';
+import { TRPCError } from '@trpc/server';
 
 import type { DotRBACManager } from './rbac';
 import type { DotSessionManager } from './session';
 import type { DotSession, DotUser } from './types';
+import { debugAuth } from '../debug.ts';
 
 /**
  * Context with auth
  */
-export interface AuthContext {
+export type AuthContext = {
   session: DotSession | null;
   user: DotUser | null;
   auth?: {
     sessionManager: DotSessionManager;
     rbac: DotRBACManager;
   };
-}
+};
 
 /**
  * Create auth middleware factories
  */
 export function createAuthMiddleware<TContext extends AuthContext>(
   _sessionManager: DotSessionManager,
-  rbac: DotRBACManager
+  rbac: DotRBACManager,
 ) {
   return {
     /**
@@ -34,18 +35,22 @@ export function createAuthMiddleware<TContext extends AuthContext>(
      */
     requireAuth: () => {
       return async ({ ctx, next }: { ctx: TContext; next: any }) => {
+        debugAuth('[middleware] Checking authentication (session: %s, user: %s)', !!ctx.session, !!ctx.session?.user);
+
         if (!ctx.session?.user) {
+          debugAuth('[middleware] Authentication check failed: no user session');
           throw new TRPCError({
             code: 'UNAUTHORIZED',
             message: 'You must be logged in to access this resource',
           });
         }
 
+        debugAuth('[middleware] Authentication check passed (userId: %s)', ctx.session.user.id);
         return next({
           ctx: {
             ...ctx,
-            session: ctx.session as DotSession,
-            user: ctx.session.user as DotUser,
+            session: ctx.session,
+            user: ctx.session.user,
           },
         });
       };
@@ -58,28 +63,34 @@ export function createAuthMiddleware<TContext extends AuthContext>(
       const requiredRoles = Array.isArray(roles) ? roles : [roles];
 
       return async ({ ctx, next }: { ctx: TContext; next: any }) => {
+        debugAuth('[middleware] Checking roles (required: %s)', requiredRoles.join(', '));
+
         if (!ctx.session?.user) {
+          debugAuth('[middleware] Role check failed: no user session');
           throw new TRPCError({
             code: 'UNAUTHORIZED',
             message: 'You must be logged in to access this resource',
           });
         }
 
-        const userRoles = await rbac.getUserRoleNames(ctx.session.user.id!);
+        const userRoles = await rbac.getUserRoleNames(ctx.session.user.id);
+        debugAuth('[middleware] User roles: %s', userRoles.join(', '));
         const hasRequiredRole = requiredRoles.some(role => userRoles.includes(role));
 
         if (!hasRequiredRole) {
+          debugAuth('[middleware] Role check failed: user lacks required role(s)');
           throw new TRPCError({
             code: 'FORBIDDEN',
             message: `You need one of these roles: ${requiredRoles.join(', ')}`,
           });
         }
 
+        debugAuth('[middleware] Role check passed');
         return next({
           ctx: {
             ...ctx,
-            session: ctx.session as DotSession,
-            user: ctx.session.user as DotUser,
+            session: ctx.session,
+            user: ctx.session.user,
           },
         });
       };
@@ -90,31 +101,32 @@ export function createAuthMiddleware<TContext extends AuthContext>(
      */
     requirePermission: (resource: string, action: string) => {
       return async ({ ctx, next }: { ctx: TContext; next: any }) => {
+        debugAuth('[middleware] Checking permission (resource: %s, action: %s)', resource, action);
+
         if (!ctx.session?.user) {
+          debugAuth('[middleware] Permission check failed: no user session');
           throw new TRPCError({
             code: 'UNAUTHORIZED',
             message: 'You must be logged in to access this resource',
           });
         }
 
-        const hasPermission = await rbac.hasPermission(
-          ctx.session.user.id!,
-          resource,
-          action
-        );
+        const hasPermission = await rbac.hasPermission(ctx.session.user.id, resource, action);
 
         if (!hasPermission) {
+          debugAuth('[middleware] Permission check failed: user lacks %s permission on %s', action, resource);
           throw new TRPCError({
             code: 'FORBIDDEN',
             message: `You do not have permission to ${action} ${resource}`,
           });
         }
 
+        debugAuth('[middleware] Permission check passed');
         return next({
           ctx: {
             ...ctx,
-            session: ctx.session as DotSession,
-            user: ctx.session.user as DotUser,
+            session: ctx.session,
+            user: ctx.session.user,
           },
         });
       };
@@ -123,32 +135,34 @@ export function createAuthMiddleware<TContext extends AuthContext>(
     /**
      * Require any of the specified permissions
      */
-    requireAnyPermission: (permissions: Array<{ resource: string; action: string }>) => {
+    requireAnyPermission: (permissions: { resource: string; action: string }[]) => {
       return async ({ ctx, next }: { ctx: TContext; next: any }) => {
+        debugAuth('[middleware] Checking any of %d permission(s)', permissions.length);
+
         if (!ctx.session?.user) {
+          debugAuth('[middleware] Any permission check failed: no user session');
           throw new TRPCError({
             code: 'UNAUTHORIZED',
             message: 'You must be logged in to access this resource',
           });
         }
 
-        const hasPermission = await rbac.hasAnyPermission(
-          ctx.session.user.id!,
-          permissions
-        );
+        const hasPermission = await rbac.hasAnyPermission(ctx.session.user.id, permissions);
 
         if (!hasPermission) {
+          debugAuth('[middleware] Any permission check failed: user lacks all required permissions');
           throw new TRPCError({
             code: 'FORBIDDEN',
             message: 'You do not have the required permissions',
           });
         }
 
+        debugAuth('[middleware] Any permission check passed');
         return next({
           ctx: {
             ...ctx,
-            session: ctx.session as DotSession,
-            user: ctx.session.user as DotUser,
+            session: ctx.session,
+            user: ctx.session.user,
           },
         });
       };
@@ -157,32 +171,34 @@ export function createAuthMiddleware<TContext extends AuthContext>(
     /**
      * Require all of the specified permissions
      */
-    requireAllPermissions: (permissions: Array<{ resource: string; action: string }>) => {
+    requireAllPermissions: (permissions: { resource: string; action: string }[]) => {
       return async ({ ctx, next }: { ctx: TContext; next: any }) => {
+        debugAuth('[middleware] Checking all %d permission(s)', permissions.length);
+
         if (!ctx.session?.user) {
+          debugAuth('[middleware] All permissions check failed: no user session');
           throw new TRPCError({
             code: 'UNAUTHORIZED',
             message: 'You must be logged in to access this resource',
           });
         }
 
-        const hasPermissions = await rbac.hasAllPermissions(
-          ctx.session.user.id!,
-          permissions
-        );
+        const hasPermissions = await rbac.hasAllPermissions(ctx.session.user.id, permissions);
 
         if (!hasPermissions) {
+          debugAuth('[middleware] All permissions check failed: user lacks some required permissions');
           throw new TRPCError({
             code: 'FORBIDDEN',
             message: 'You do not have all the required permissions',
           });
         }
 
+        debugAuth('[middleware] All permissions check passed');
         return next({
           ctx: {
             ...ctx,
-            session: ctx.session as DotSession,
-            user: ctx.session.user as DotUser,
+            session: ctx.session,
+            user: ctx.session.user,
           },
         });
       };
@@ -191,11 +207,12 @@ export function createAuthMiddleware<TContext extends AuthContext>(
     /**
      * Check ownership of a resource
      */
-    requireOwnership: <TInput>(
-      getResourceOwnerId: (input: TInput, ctx: TContext) => Promise<string> | string
-    ) => {
+    requireOwnership: <TInput>(getResourceOwnerId: (input: TInput, ctx: TContext) => Promise<string> | string) => {
       return async ({ ctx, next, input }: { ctx: TContext; next: any; input: TInput }) => {
+        debugAuth('[middleware] Checking resource ownership');
+
         if (!ctx.session?.user) {
+          debugAuth('[middleware] Ownership check failed: no user session');
           throw new TRPCError({
             code: 'UNAUTHORIZED',
             message: 'You must be logged in to access this resource',
@@ -203,24 +220,31 @@ export function createAuthMiddleware<TContext extends AuthContext>(
         }
 
         const ownerId = await getResourceOwnerId(input, ctx);
+        debugAuth('[middleware] Resource owner: %s, current user: %s', ownerId, ctx.session.user.id);
 
-        if (ownerId !== ctx.session.user.id) {
+        if (ownerId === ctx.session.user.id) {
+          debugAuth('[middleware] Ownership check passed: user is owner');
+        } else {
+          debugAuth('[middleware] User is not owner, checking admin role');
           // Check if user is admin (can access any resource)
-          const isAdmin = await rbac.hasRole(ctx.session.user.id!, 'admin');
+          const isAdmin = await rbac.hasRole(ctx.session.user.id, 'admin');
 
           if (!isAdmin) {
+            debugAuth('[middleware] Ownership check failed: user is not owner and not admin');
             throw new TRPCError({
               code: 'FORBIDDEN',
               message: 'You do not own this resource',
             });
           }
+
+          debugAuth('[middleware] Ownership check passed: user is admin');
         }
 
         return next({
           ctx: {
             ...ctx,
-            session: ctx.session as DotSession,
-            user: ctx.session.user as DotUser,
+            session: ctx.session,
+            user: ctx.session.user,
           },
         });
       };
@@ -231,6 +255,7 @@ export function createAuthMiddleware<TContext extends AuthContext>(
      */
     optionalAuth: () => {
       return async ({ ctx, next }: { ctx: TContext; next: any }) => {
+        debugAuth('[middleware] Optional auth (authenticated: %s)', !!ctx.session?.user);
         return next({
           ctx: {
             ...ctx,
@@ -252,31 +277,34 @@ export function createAuthMiddleware<TContext extends AuthContext>(
       const attempts = new Map<string, { count: number; resetAt: number }>();
 
       return async ({ ctx, next }: { ctx: TContext; next: any }) => {
-        const key = options.key
-          ? options.key(ctx)
-          : ctx.session?.user?.id || ctx.session?.id || 'anonymous';
+        const key = options.key ? options.key(ctx) : ctx.session?.user?.id || ctx.session?.id || 'anonymous';
+
+        debugAuth('[middleware] Rate limit check for key: %s (limit: %d/%ds)', key, options.limit, options.window);
 
         const now = Date.now();
         const attempt = attempts.get(key);
 
         if (attempt) {
           if (now > attempt.resetAt) {
+            debugAuth('[middleware] Rate limit window reset for key: %s', key);
             // Reset the window
             attempts.set(key, {
               count: 1,
               resetAt: now + options.window * 1000,
             });
           } else if (attempt.count >= options.limit) {
+            const retrySeconds = Math.ceil((attempt.resetAt - now) / 1000);
+            debugAuth('[middleware] Rate limit exceeded for key: %s (retry in %ds)', key, retrySeconds);
             throw new TRPCError({
               code: 'TOO_MANY_REQUESTS',
-              message: `Rate limit exceeded. Try again in ${Math.ceil(
-                (attempt.resetAt - now) / 1000
-              )} seconds`,
+              message: `Rate limit exceeded. Try again in ${retrySeconds} seconds`,
             });
           } else {
             attempt.count++;
+            debugAuth('[middleware] Rate limit attempt %d/%d for key: %s', attempt.count, options.limit, key);
           }
         } else {
+          debugAuth('[middleware] First rate limit attempt for key: %s', key);
           attempts.set(key, {
             count: 1,
             resetAt: now + options.window * 1000,
@@ -285,6 +313,7 @@ export function createAuthMiddleware<TContext extends AuthContext>(
 
         // Clean up old entries periodically
         if (Math.random() < 0.01) {
+          debugAuth('[middleware] Cleaning up old rate limit entries');
           for (const [k, v] of attempts.entries()) {
             if (now > v.resetAt) {
               attempts.delete(k);
@@ -301,6 +330,11 @@ export function createAuthMiddleware<TContext extends AuthContext>(
      */
     auditLog: (action: string) => {
       return async ({ ctx, next, input }: { ctx: TContext; next: any; input: any }) => {
+        debugAuth(
+          '[middleware] Audit log starting for action: %s (user: %s)',
+          action,
+          ctx.session?.user?.id || 'anonymous',
+        );
         const startTime = Date.now();
         let success = false;
         let error: any = null;
@@ -308,12 +342,25 @@ export function createAuthMiddleware<TContext extends AuthContext>(
         try {
           const result = await next({ ctx });
           success = true;
+          debugAuth('[middleware] Audit log: action %s succeeded', action);
           return result;
-        } catch (err) {
-          error = err;
-          throw err;
+        } catch (error_) {
+          error = error_;
+          debugAuth(
+            '[middleware] Audit log: action %s failed (error: %s)',
+            action,
+            error_ instanceof Error ? error_.message : 'unknown',
+          );
+          throw error_;
         } finally {
           const duration = Date.now() - startTime;
+
+          debugAuth(
+            '[middleware] Audit log complete (action: %s, success: %s, duration: %dms)',
+            action,
+            success,
+            duration,
+          );
 
           // Log the audit entry
           console.log('Audit Log:', {
@@ -340,7 +387,7 @@ export function createAuthMiddleware<TContext extends AuthContext>(
 export function createAuthProcedures<TRouter extends AnyRouter>(
   t: any,
   sessionManager: DotSessionManager,
-  rbac: DotRBACManager
+  rbac: DotRBACManager,
 ) {
   const middleware = createAuthMiddleware<inferRouterContext<TRouter>>(sessionManager, rbac);
 
@@ -363,17 +410,13 @@ export function createAuthProcedures<TRouter extends AnyRouter>(
     /**
      * Moderator procedure - requires moderator or admin role
      */
-    moderator: t.procedure
-      .use(middleware.requireAuth())
-      .use(middleware.requireRole(['moderator', 'admin'])),
+    moderator: t.procedure.use(middleware.requireAuth()).use(middleware.requireRole(['moderator', 'admin'])),
 
     /**
      * Create a procedure that requires specific permission
      */
     withPermission: (resource: string, action: string) => {
-      return t.procedure
-        .use(middleware.requireAuth())
-        .use(middleware.requirePermission(resource, action));
+      return t.procedure.use(middleware.requireAuth()).use(middleware.requirePermission(resource, action));
     },
 
     /**
@@ -386,12 +429,8 @@ export function createAuthProcedures<TRouter extends AnyRouter>(
     /**
      * Create a procedure that requires resource ownership
      */
-    withOwnership: <TInput>(
-      getResourceOwnerId: (input: TInput, ctx: any) => Promise<string> | string
-    ) => {
-      return t.procedure
-        .use(middleware.requireAuth())
-        .use(middleware.requireOwnership(getResourceOwnerId));
+    withOwnership: <TInput>(getResourceOwnerId: (input: TInput, ctx: any) => Promise<string> | string) => {
+      return t.procedure.use(middleware.requireAuth()).use(middleware.requireOwnership(getResourceOwnerId));
     },
 
     /**

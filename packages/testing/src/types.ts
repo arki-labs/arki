@@ -52,4 +52,17 @@ export interface IntegrationTesterConfig<
   createRepositories(db: TDatabase): TRepositories;
   defaultUsers: TesterUsers;
   baseFactories?: Record<string, Factory<any>>;
+
+  /**
+   * Optional hook called after a test user is created.
+   * Use this to perform additional setup like creating related records.
+   */
+  onUserCreate?: (params: { user: TestUser; context: TContext }) => Promise<void>;
+
+  /**
+   * Optional hook called during setup after database and context are ready,
+   * but before default callers are created.
+   * Use this to create default users in the database (via auth system).
+   */
+  onSetup?: (params: { context: TContext; users: TesterUsers }) => Promise<void>;
 }

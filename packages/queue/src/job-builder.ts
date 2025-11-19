@@ -5,6 +5,7 @@
 
 import type { z } from '@arki/contracts';
 
+import { debugBuilder } from './debug.ts';
 import type { JobBuilderChain, JobBuilderDef } from './types/builder.ts';
 import type { JobDefinition, JobHandler, JobOptions } from './types/job.ts';
 import type { JobMiddleware } from './types/middleware.ts';
@@ -29,8 +30,12 @@ export function createJobBuilder<TContext, TContextOut, TMeta extends QueueMeta>
   config: QueueConfig;
   middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[];
 }): JobBuilderDef<TContext, TContextOut, TMeta> {
+  debugBuilder('Creating job builder with %d middleware', params.middlewares.length);
+
   return {
     use<TContextOut2>(middleware: JobMiddleware<TContextOut, TContextOut2, TMeta>) {
+      debugBuilder('Adding middleware to job builder (total: %d)', params.middlewares.length + 1);
+
       // Type safety: middleware transforms TContextOut -> TContextOut2
       // Runtime: store as unknown array for execution
       return createJobBuilder<TContext, TContextOut2, TMeta>({
@@ -40,6 +45,8 @@ export function createJobBuilder<TContext, TContextOut, TMeta extends QueueMeta>
     },
 
     name(name: string) {
+      debugBuilder('Setting job name: %s', name);
+
       return createJobBuilderChain<TContext, TContextOut, TMeta, never, never>({
         config: params.config,
         middlewares: params.middlewares,
@@ -58,6 +65,8 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
 ): JobBuilderChain<TContext, TContextOut, TMeta, TInput, TOutput> {
   return {
     input<TNewInput>(schema: z.ZodType<TNewInput>) {
+      debugBuilder('[%s] Setting input schema', state.name ?? 'unnamed');
+
       return createJobBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>({
         ...state,
         inputSchema: schema,
@@ -66,6 +75,13 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
     },
 
     options(options: JobOptions) {
+      debugBuilder(
+        '[%s] Setting job options (retry attempts: %d, maxParallelism: %d)',
+        state.name ?? 'unnamed',
+        options.retry?.attempts ?? 3,
+        options.maxParallelism ?? 5,
+      );
+
       return createJobBuilderChain<TContext, TContextOut, TMeta, TInput, TOutput>({
         ...state,
         options: options,
@@ -89,6 +105,12 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
       if (!state.inputSchema) {
         throw new Error('Input schema is required. Call .input() before .handler().');
       }
+
+      debugBuilder(
+        '[%s] Creating job definition with %d middleware',
+        state.name,
+        state.middlewares.length,
+      );
 
       type ActualInput = THandlerInput extends never ? TInput : THandlerInput;
       type ActualOutput = THandlerOutput extends never ? TOutput : THandlerOutput;

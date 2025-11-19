@@ -3,6 +3,7 @@ import superjson from 'superjson';
 import { ZodError } from '@arki/contracts';
 import { RateLimitExceededError } from '@arki/kv/errors';
 
+import { debugTRPC } from '../debug.ts';
 import type { DotContext } from './types';
 
 /**
@@ -39,6 +40,8 @@ export function createDotProcedures(options?: {
 }) {
   const isDevelopment = options?.isDevelopment ?? options?.env?.['NODE_ENV'] === 'development';
 
+  debugTRPC('[init] Creating Dot procedures (isDevelopment: %s)', isDevelopment);
+
   // Initialize tRPC with context type
   const t = initTRPC
     .context<DotContext>()
@@ -53,6 +56,8 @@ export function createDotProcedures(options?: {
       }),
     });
 
+  debugTRPC('[init] tRPC instance created with superjson transformer and error formatter');
+
   // Standard error handling middleware
   const defaultErrorMiddleware = t.middleware(async ({ next }) => {
     try {
@@ -60,6 +65,7 @@ export function createDotProcedures(options?: {
     } catch (error) {
       // Handle rate limit errors
       if (error instanceof RateLimitExceededError) {
+        debugTRPC('[middleware:error] Rate limit exceeded: %s', error.message);
         // Add a random delay to obscure timing differences
         await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 500));
 
@@ -72,10 +78,12 @@ export function createDotProcedures(options?: {
 
       // Re-throw known tRPC errors
       if (error instanceof TRPCError) {
+        debugTRPC('[middleware:error] tRPC error: %s (code: %s)', error.message, error.code);
         throw error;
       }
 
       // Log unknown errors for debugging
+      debugTRPC('[middleware:error] Unhandled error: %s', error instanceof Error ? error.message : String(error));
       console.error('Unhandled error in tRPC procedure:', error);
 
       // Throw a generic server error
@@ -94,13 +102,15 @@ export function createDotProcedures(options?: {
     // Add artificial delay in development to catch waterfalls
     if (isDevelopment) {
       const waitMs = Math.floor(Math.random() * 400) + 100;
+      debugTRPC('[middleware:timing] Adding %dms artificial delay for %s (development mode)', waitMs, path);
       await new Promise(resolve => setTimeout(resolve, waitMs));
     }
 
     const result = await next();
 
     const end = Date.now();
-    console.log(`[TRPC] ${path} took ${end - start}ms to execute`);
+    const duration = end - start;
+    debugTRPC('[middleware:timing] %s took %dms to execute', path, duration);
 
     return result;
   });
@@ -108,11 +118,14 @@ export function createDotProcedures(options?: {
   // Standard auth middleware
   const authMiddleware = t.middleware(({ ctx, next }) => {
     if (!ctx.session?.user) {
+      debugTRPC('[middleware:auth] No authenticated user session found, throwing UNAUTHORIZED');
       throw new TRPCError({
         code: 'UNAUTHORIZED',
         message: 'You must be logged in to access this resource',
       });
     }
+
+    debugTRPC('[middleware:auth] Authenticated user: %s', ctx.session.user.id);
 
     return next({
       ctx: {
@@ -133,6 +146,8 @@ export function createDotProcedures(options?: {
     .use(defaultErrorMiddleware)
     .use(defaultTimingMiddleware)
     .use(authMiddleware);
+
+  debugTRPC('[init] Dot procedures created successfully (publicProcedure, protectedProcedure, router, mergeRouters)');
 
   // Return procedures object that plugins can use
   // No explicit type annotation - let TypeScript infer the full types to preserve

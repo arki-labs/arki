@@ -1,3 +1,4 @@
+import { debugKV } from './debug';
 
 import { KV } from '.';
 import { env } from './env';
@@ -10,44 +11,57 @@ import { env } from './env';
  * @internal Use this function in application singletons, not at module level
  */
 export async function initializeKV(): Promise<KV | null> {
+  debugKV('[instance] Initializing KV (env: %s, phase: %s)', env.NODE_ENV, process.env.NEXT_PHASE);
+
   // Skip KV initialization during build time
   if (process.env.NEXT_PHASE === 'phase-production-build') {
+    debugKV('[instance] Skipping initialization during build phase');
     console.log('Skipping KV initialization during build time');
     return null;
   }
 
   // Skip KV initialization in development if not configured
   if (!env.KV_URL || !env.KV_NAMESPACE) {
+    debugKV('[instance] Missing configuration (url: %s, namespace: %s)', !!env.KV_URL, !!env.KV_NAMESPACE);
     if (env.NODE_ENV === 'production') {
+      debugKV('[instance] CRITICAL: KV configuration required in production');
       console.error('CRITICAL: KV_URL and KV_NAMESPACE must be defined in production.');
       process.exit(1);
     }
+    debugKV('[instance] Running without KV in development mode');
     console.warn('⚠️  KV_URL or KV_NAMESPACE not defined. Running without KV store (development mode).');
     return null;
   }
 
   try {
+    debugKV('[instance] Creating KV instance (namespace: %s)', env.KV_NAMESPACE);
     console.log('Initializing KV connection...');
     const instance = new KV(env.KV_URL, env.KV_NAMESPACE);
 
     // Test the connection with a simple operation
     // keyv might connect lazily, so a quick set/get ensures it's working.
+    debugKV('[instance] Testing connection with set/get/delete cycle');
     const testKey = 'startup-test';
     await instance.set(testKey, 'ok', 5); // Set with short TTL
     const result = await instance.get(testKey);
     await instance.delete(testKey);
 
     if (result !== 'ok') {
+      debugKV('[instance] Connection test failed: value mismatch (expected: "ok", got: %s)', result);
       throw new Error('KV connection test failed: Set/Get mismatch.');
     }
 
+    debugKV('[instance] KV initialized and connection test passed');
     console.log('✅ KV connection successful.');
     return instance;
   } catch (error) {
+    debugKV('[instance] Initialization failed: %s', error instanceof Error ? error.message : 'unknown error');
     if (env.NODE_ENV === 'production') {
+      debugKV('[instance] CRITICAL: Production initialization failure');
       console.error('CRITICAL: Failed to initialize or connect to KV store.', error);
       process.exit(1);
     }
+    debugKV('[instance] Running without KV in development mode after error');
     console.error('⚠️  Failed to connect to KV store. Running without KV (development mode).', error);
     return null;
   }
@@ -63,30 +77,41 @@ export async function initializeKV(): Promise<KV | null> {
  * @internal Use this in application singletons for synchronous initialization
  */
 export function createKV(): KV | null {
+  debugKV('[instance] Creating KV synchronously (env: %s, phase: %s)', env.NODE_ENV, process.env.NEXT_PHASE);
+
   // Skip KV initialization during build time
   if (process.env.NEXT_PHASE === 'phase-production-build') {
+    debugKV('[instance] Skipping creation during build phase');
     return null;
   }
 
   // Skip KV initialization in development if not configured
   if (!env.KV_URL || !env.KV_NAMESPACE) {
+    debugKV('[instance] Missing configuration (url: %s, namespace: %s)', !!env.KV_URL, !!env.KV_NAMESPACE);
     if (env.NODE_ENV === 'production') {
+      debugKV('[instance] CRITICAL: KV configuration required in production');
       console.error('CRITICAL: KV_URL and KV_NAMESPACE must be defined in production.');
       process.exit(1);
     }
+    debugKV('[instance] Returning null in development mode (missing config)');
     return null;
   }
 
   try {
+    debugKV('[instance] Creating KV instance (namespace: %s, lazy connection)', env.KV_NAMESPACE);
     console.log('Creating KV instance (connection will be established lazily)...');
     const instance = new KV(env.KV_URL, env.KV_NAMESPACE);
+    debugKV('[instance] KV instance created successfully');
     console.log('✅ KV instance created.');
     return instance;
   } catch (error) {
+    debugKV('[instance] Creation failed: %s', error instanceof Error ? error.message : 'unknown error');
     if (env.NODE_ENV === 'production') {
+      debugKV('[instance] CRITICAL: Production creation failure');
       console.error('CRITICAL: Failed to create KV instance.', error);
       process.exit(1);
     }
+    debugKV('[instance] Returning null in development mode after error');
     console.error('⚠️  Failed to create KV instance. Running without KV (development mode).', error);
     return null;
   }

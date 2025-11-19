@@ -102,7 +102,7 @@ export type DotAuthConfig = {
    * Enable/disable features
    */
   features?: AuthFeatures;
-}
+};
 
 /**
  * Session configuration
@@ -137,7 +137,7 @@ export type SessionConfig = {
    * Enable secure cookies (auto-detected in production)
    */
   secure?: boolean;
-}
+};
 
 /**
  * Email configuration
@@ -172,7 +172,7 @@ export type EmailConfig = {
    * Auto sign-in after email verification
    */
   autoSignInAfterVerification?: boolean;
-}
+};
 
 /**
  * RBAC configuration
@@ -207,7 +207,7 @@ export type RBACConfig = {
    * Custom policy evaluator
    */
   policyEvaluator?: (context: any) => Promise<boolean>;
-}
+};
 
 /**
  * Role definition
@@ -218,7 +218,7 @@ export type RoleDefinition = {
   permissions?: string[] | Permission[];
   isDefault?: boolean;
   isSystem?: boolean;
-}
+};
 
 /**
  * Permission schema
@@ -227,7 +227,7 @@ export type PermissionSchema = {
   resources: string[];
   actions: string[];
   conditions?: Record<string, any>;
-}
+};
 
 /**
  * MFA configuration
@@ -261,7 +261,7 @@ export type MFAConfig = {
     count?: number;
     length?: number;
   };
-}
+};
 
 /**
  * Security configuration
@@ -319,7 +319,7 @@ export type SecurityConfig = {
      */
     validateIp?: boolean;
   };
-}
+};
 
 /**
  * Auth features toggles
@@ -364,7 +364,7 @@ export type AuthFeatures = {
    * Enable debug mode
    */
   debugMode?: boolean;
-}
+};
 
 /**
  * Auth event hooks
@@ -409,7 +409,7 @@ export type AuthHooks = {
    * Called before sign up (can prevent sign up by throwing)
    */
   beforeSignUp?: (email: string, provider: string) => Promise<void> | void;
-}
+};
 
 /**
  * Provider-specific configurations
@@ -450,4 +450,4 @@ export type ProviderConfigs = {
     passwordPolicy?: PasswordPolicy;
     allowSignUp?: boolean;
   };
-}
+};

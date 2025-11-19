@@ -33,5 +33,5 @@ export {
   createMockContextBuilder,
   createMockMetrics,
   createMockRegistry,
-  waitForInitialization
+  waitForInitialization,
 } from './testing';

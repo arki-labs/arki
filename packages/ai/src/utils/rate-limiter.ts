@@ -3,6 +3,8 @@
  * Implements token bucket algorithm with sliding window
  */
 
+import { debugRetry } from '../debug.ts';
+
 export interface RateLimiterConfig {
   maxRequests: number;      // Maximum requests allowed
   windowMs: number;          // Time window in milliseconds
@@ -28,6 +30,14 @@ export class RateLimiter {
       maxRetries: config.maxRetries ?? 3,
       retryDelayMs: config.retryDelayMs ?? 1000,
     };
+
+    debugRetry(
+      '[RateLimiter] Initialized (maxRequests: %d, windowMs: %dms, maxRetries: %d, retryDelayMs: %dms)',
+      this.config.maxRequests,
+      this.config.windowMs,
+      this.config.maxRetries,
+      this.config.retryDelayMs,
+    );
   }
 
   /**
@@ -37,16 +47,20 @@ export class RateLimiter {
     key: string,
     fn: () => Promise<T>
   ): Promise<RateLimitResult<T>> {
+    debugRetry('[RateLimiter] Executing function for key: %s', key);
     let attempts = 0;
 
     while (attempts < this.config.maxRetries) {
       const canProceed = this.checkLimit(key);
 
       if (canProceed) {
+        debugRetry('[RateLimiter] Rate limit check passed for key: %s (attempt %d/%d)', key, attempts + 1, this.config.maxRetries);
         try {
           const data = await fn();
+          debugRetry('[RateLimiter] Function executed successfully for key: %s', key);
           return { success: true, data };
         } catch (error) {
+          debugRetry('[RateLimiter] Function execution failed for key: %s - %s', key, error instanceof Error ? error.message : 'Unknown error');
           return {
             success: false,
             error: error as Error
@@ -56,9 +70,11 @@ export class RateLimiter {
 
       // Rate limited, calculate retry delay
       const retryAfterMs = this.getRetryAfterMs(key);
+      debugRetry('[RateLimiter] Rate limit hit for key: %s (attempt %d/%d, retry after %dms)', key, attempts + 1, this.config.maxRetries, retryAfterMs);
 
       if (attempts === this.config.maxRetries - 1) {
         // Last attempt failed
+        debugRetry('[RateLimiter] Max retries reached for key: %s', key);
         return {
           success: false,
           error: new Error(`Rate limit exceeded for ${key}`),
@@ -67,10 +83,12 @@ export class RateLimiter {
       }
 
       // Wait before retrying
+      debugRetry('[RateLimiter] Waiting %dms before retry for key: %s', retryAfterMs, key);
       await this.delay(retryAfterMs);
       attempts++;
     }
 
+    debugRetry('[RateLimiter] All retry attempts exhausted for key: %s', key);
     return {
       success: false,
       error: new Error(`Max retry attempts reached for ${key}`),
@@ -89,15 +107,24 @@ export class RateLimiter {
       timestamp => now - timestamp < this.config.windowMs
     );
 
+    debugRetry(
+      '[RateLimiter] Checking rate limit for key: %s (valid requests: %d/%d)',
+      key,
+      validRequests.length,
+      this.config.maxRequests,
+    );
+
     if (validRequests.length >= this.config.maxRequests) {
       // Update the map with cleaned requests
       this.requests.set(key, validRequests);
+      debugRetry('[RateLimiter] Rate limit exceeded for key: %s', key);
       return false;
     }
 
     // Add current request
     validRequests.push(now);
     this.requests.set(key, validRequests);
+    debugRetry('[RateLimiter] Request allowed for key: %s (used: %d/%d)', key, validRequests.length, this.config.maxRequests);
     return true;
   }
 
@@ -108,6 +135,7 @@ export class RateLimiter {
     const requests = this.requests.get(key) || [];
 
     if (requests.length === 0) {
+      debugRetry('[RateLimiter] No requests tracked for key: %s, retry delay: 0ms', key);
       return 0;
     }
 
@@ -115,8 +143,11 @@ export class RateLimiter {
     const oldestRequest = Math.min(...requests);
     const now = Date.now();
     const timeUntilExpiry = (oldestRequest + this.config.windowMs) - now;
+    const retryDelay = Math.max(0, timeUntilExpiry);
 
-    return Math.max(0, timeUntilExpiry);
+    debugRetry('[RateLimiter] Calculated retry delay for key: %s - %dms', key, retryDelay);
+
+    return retryDelay;
   }
 
   /**
@@ -130,6 +161,7 @@ export class RateLimiter {
    * Reset rate limit for a specific key
    */
   reset(key: string): void {
+    debugRetry('[RateLimiter] Resetting rate limit for key: %s', key);
     this.requests.delete(key);
   }
 
@@ -137,6 +169,8 @@ export class RateLimiter {
    * Reset all rate limits
    */
   resetAll(): void {
+    const keyCount = this.requests.size;
+    debugRetry('[RateLimiter] Resetting all rate limits (%d keys)', keyCount);
     this.requests.clear();
   }
 
@@ -160,6 +194,15 @@ export class RateLimiter {
 
     const resetInMs = Math.max(0, (oldestRequest + this.config.windowMs) - now);
 
+    debugRetry(
+      '[RateLimiter] Usage for key: %s (used: %d/%d, remaining: %d, reset in: %dms)',
+      key,
+      used,
+      this.config.maxRequests,
+      remaining,
+      resetInMs,
+    );
+
     return { used, remaining, resetInMs };
   }
 }
@@ -172,10 +215,13 @@ export function createRateLimitedFunction<TArgs extends unknown[], TResult>(
   config: RateLimiterConfig
 ): (...args: TArgs) => Promise<TResult> {
   const limiter = new RateLimiter(config);
+  const functionKey = fn.name || 'anonymous';
+
+  debugRetry('[RateLimiter] Created rate-limited wrapper for function: %s', functionKey);
 
   return async (...args: TArgs): Promise<TResult> => {
     // Use a stable key for this function
-    const key = fn.name || 'anonymous';
+    const key = functionKey;
 
     const result = await limiter.execute(key, () => fn(...args));
 
@@ -190,6 +236,8 @@ export function createRateLimitedFunction<TArgs extends unknown[], TResult>(
 /**
  * Global rate limiter instances for different services
  */
+debugRetry('[RateLimiter] Initializing global rate limiter instances');
+
 export const rateLimiters = {
   openai: new RateLimiter({
     maxRequests: 60,          // 60 requests
@@ -216,3 +264,5 @@ export const rateLimiters = {
     retryDelayMs: 500,
   }),
 };
+
+debugRetry('[RateLimiter] Global rate limiter instances initialized (openai, anthropic, embedding, vectorSearch)');

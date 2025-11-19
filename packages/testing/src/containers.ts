@@ -3,6 +3,8 @@ import type { StartedTestContainer } from 'testcontainers';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { GenericContainer } from 'testcontainers';
 
+import { debugContainers } from './debug';
+
 export const POSTGRES_GLOBAL_KEY = '__POSTGRES_CONNECTION_STRING__';
 export const REDIS_GLOBAL_KEY = '__REDIS_CONNECTION_STRING__';
 
@@ -15,25 +17,40 @@ let sharedPostgresContainer: StartedPostgreSqlContainer | undefined;
 let sharedRedisContainer: StartedTestContainer | undefined;
 
 export async function startPostgresContainer(image = 'postgres:16'): Promise<StartedPostgreSqlContainer> {
-  return await new PostgreSqlContainer(image).withDatabase('test').withUsername('test').withPassword('test').start();
+  debugContainers('[containers] Starting PostgreSQL container (image: %s)', image);
+  const container = await new PostgreSqlContainer(image).withDatabase('test').withUsername('test').withPassword('test').start();
+  debugContainers('[containers] PostgreSQL container started (uri: %s)', container.getConnectionUri());
+  return container;
 }
 
 export async function startRedisContainer(image = 'redis:7-alpine'): Promise<StartedTestContainer> {
-  return await new GenericContainer(image).withExposedPorts(6379).start();
+  debugContainers('[containers] Starting Redis container (image: %s)', image);
+  const container = await new GenericContainer(image).withExposedPorts(6379).start();
+  const host = container.getHost();
+  const port = container.getMappedPort(6379);
+  debugContainers('[containers] Redis container started (host: %s, port: %d)', host, port);
+  return container;
 }
 
 export function getGlobalPostgresConnectionString(): string | undefined {
-  return (global as any)[POSTGRES_GLOBAL_KEY];
+  const connectionString = (global as any)[POSTGRES_GLOBAL_KEY];
+  debugContainers('[containers] Getting global Postgres connection (exists: %s)', !!connectionString);
+  return connectionString;
 }
 
 export function getGlobalRedisConnectionString(): string | undefined {
-  return (global as any)[REDIS_GLOBAL_KEY];
+  const connectionString = (global as any)[REDIS_GLOBAL_KEY];
+  debugContainers('[containers] Getting global Redis connection (exists: %s)', !!connectionString);
+  return connectionString;
 }
 
 export async function setupGlobalTestContainers(options?: SharedContainerOptions): Promise<void> {
+  debugContainers('[containers] Setting up global test containers (pgImage: %s, redisImage: %s)',
+    options?.postgresImage || 'postgres:16', options?.redisImage || 'redis:7-alpine');
   const totalStartTime = Date.now();
 
   // Set test environment variables
+  debugContainers('[containers] Setting test environment variables');
   process.env.NODE_ENV = 'test';
   process.env.AUTH_SECRET = 'test-secret-key-for-testing-only';
   process.env.NEXT_PUBLIC_URL = 'http://localhost:3000';
@@ -45,9 +62,12 @@ export async function setupGlobalTestContainers(options?: SharedContainerOptions
   (global as any)[POSTGRES_GLOBAL_KEY] = postgresUri;
 
   // Set database environment variables
+  debugContainers('[containers] Setting database environment variables');
   process.env.DB_URL = postgresUri;
 
-  console.log(`✓ Shared PostgreSQL container started in ${((Date.now() - pgStart) / 1000).toFixed(2)}s`);
+  const pgElapsed = ((Date.now() - pgStart) / 1000).toFixed(2);
+  debugContainers('[containers] PostgreSQL setup completed in %ss', pgElapsed);
+  console.log(`✓ Shared PostgreSQL container started in ${pgElapsed}s`);
   console.log(`  Connection: ${postgresUri}`);
 
   console.log('🚀 Starting shared Redis container...');
@@ -59,30 +79,46 @@ export async function setupGlobalTestContainers(options?: SharedContainerOptions
   (global as any)[REDIS_GLOBAL_KEY] = redisUrl;
 
   // Set Redis environment variables
+  debugContainers('[containers] Setting Redis environment variables');
   process.env.REDIS_URL = redisUrl;
   process.env.KV_URL = redisUrl;
 
-  console.log(`✓ Shared Redis container started in ${((Date.now() - redisStart) / 1000).toFixed(2)}s`);
+  const redisElapsed = ((Date.now() - redisStart) / 1000).toFixed(2);
+  debugContainers('[containers] Redis setup completed in %ss', redisElapsed);
+  console.log(`✓ Shared Redis container started in ${redisElapsed}s`);
   console.log(`  Connection: ${redisUrl}`);
 
-  console.log(`\n✨ All shared containers started in ${((Date.now() - totalStartTime) / 1000).toFixed(2)}s`);
+  const totalElapsed = ((Date.now() - totalStartTime) / 1000).toFixed(2);
+  debugContainers('[containers] All shared containers setup completed in %ss', totalElapsed);
+  console.log(`\n✨ All shared containers started in ${totalElapsed}s`);
 }
 
 export async function teardownGlobalTestContainers(): Promise<void> {
+  debugContainers('[containers] Tearing down global test containers');
   console.log('🛑 Stopping shared containers...');
 
   if (sharedPostgresContainer) {
+    debugContainers('[containers] Stopping PostgreSQL container');
     await sharedPostgresContainer.stop();
     sharedPostgresContainer = undefined;
+    debugContainers('[containers] PostgreSQL container stopped');
     console.log('✓ Shared PostgreSQL container stopped');
+  } else {
+    debugContainers('[containers] No PostgreSQL container to stop');
   }
 
   if (sharedRedisContainer) {
+    debugContainers('[containers] Stopping Redis container');
     await sharedRedisContainer.stop();
     sharedRedisContainer = undefined;
+    debugContainers('[containers] Redis container stopped');
     console.log('✓ Shared Redis container stopped');
+  } else {
+    debugContainers('[containers] No Redis container to stop');
   }
 
+  debugContainers('[containers] Clearing global connection strings');
   delete (global as any)[POSTGRES_GLOBAL_KEY];
   delete (global as any)[REDIS_GLOBAL_KEY];
+  debugContainers('[containers] Teardown complete');
 }

@@ -1,3 +1,4 @@
+import { debugContext } from '../debug.ts';
 import { LifecycleManager } from './lifecycle';
 import { ServiceMetricsCollector } from './metrics';
 import { SingletonServicesRegistry } from './singleton-registry';
@@ -39,10 +40,7 @@ import { SingletonServicesRegistry } from './singleton-registry';
  * }));
  * ```
  */
-export class BaseContextBuilder<
-  TSingletons extends Record<string, unknown>,
-  TContext extends Record<string, unknown>,
-> {
+export class BaseContextBuilder<TSingletons extends Record<string, unknown>, TContext extends Record<string, unknown>> {
   private readonly singletonsRegistry: SingletonServicesRegistry<TSingletons>;
   private readonly lifecycleManager: LifecycleManager;
   private readonly metricsCollector: ServiceMetricsCollector | null;
@@ -52,11 +50,12 @@ export class BaseContextBuilder<
   constructor(
     singletonsRegistry: SingletonServicesRegistry<TSingletons>,
     lifecycleManager: LifecycleManager,
-    metricsCollector: ServiceMetricsCollector | null = null
+    metricsCollector: ServiceMetricsCollector | null = null,
   ) {
     this.singletonsRegistry = singletonsRegistry;
     this.lifecycleManager = lifecycleManager;
     this.metricsCollector = metricsCollector;
+    debugContext('[BaseContextBuilder] Constructor initialized (metricsEnabled: %s)', !!metricsCollector);
   }
 
   /**
@@ -64,12 +63,14 @@ export class BaseContextBuilder<
    * Should be called once during application startup
    */
   async initializeSingletons(
-    initializer: (registry: SingletonServicesRegistry<TSingletons>) => Promise<void> | void
+    initializer: (registry: SingletonServicesRegistry<TSingletons>) => Promise<void> | void,
   ): Promise<void> {
     if (this.initialized) {
+      debugContext('[BaseContextBuilder] initializeSingletons called but already initialized, throwing error');
       throw new Error('Singletons already initialized');
     }
 
+    debugContext('[BaseContextBuilder] Starting singleton services initialization');
     const startTime = Date.now();
 
     await initializer(this.singletonsRegistry);
@@ -77,6 +78,8 @@ export class BaseContextBuilder<
     // Track initialization metrics if enabled
     if (this.metricsCollector) {
       const services = this.singletonsRegistry.getAll();
+      const serviceCount = Object.keys(services).length;
+      debugContext('[BaseContextBuilder] Recording metrics for %d services', serviceCount);
       for (const [name, service] of Object.entries(services)) {
         if (service) {
           const metrics = this.singletonsRegistry.getMetrics(name as keyof TSingletons);
@@ -87,6 +90,11 @@ export class BaseContextBuilder<
             ageMs: null,
             initialized: true,
           });
+          debugContext(
+            '[BaseContextBuilder] Metrics recorded for service: %s (initTime: %dms)',
+            name,
+            metrics.initElapsedMs,
+          );
         }
       }
     }
@@ -95,18 +103,23 @@ export class BaseContextBuilder<
 
     // Register shutdown handler
     this.lifecycleManager.onShutdown(async () => {
+      debugContext('[BaseContextBuilder] Shutdown initiated, disposing singletons');
       const results = await this.singletonsRegistry.dispose();
       const failures = results.filter(r => !r.success);
 
       if (failures.length > 0) {
+        debugContext('[BaseContextBuilder] Service disposal completed with %d error(s)', failures.length);
         console.error(
           `Service disposal completed with ${failures.length} error(s):`,
-          failures.map(f => `${f.key}: ${f.error?.message}`).join(', ')
+          failures.map(f => `${f.key}: ${f.error?.message}`).join(', '),
         );
+      } else {
+        debugContext('[BaseContextBuilder] All services disposed successfully');
       }
     });
 
-    console.log(`Singleton services initialized in ${Date.now() - startTime}ms`);
+    const elapsedMs = Date.now() - startTime;
+    debugContext('[BaseContextBuilder] Singleton services initialized in %dms', elapsedMs);
   }
 
   /**
@@ -114,6 +127,7 @@ export class BaseContextBuilder<
    * This function creates request-scoped context from singletons
    */
   setContextFactory(factory: (singletons: TSingletons) => TContext): void {
+    debugContext('[BaseContextBuilder] Context factory set');
     this.contextFactory = factory;
   }
 
@@ -123,18 +137,20 @@ export class BaseContextBuilder<
    */
   createContext(): TContext {
     if (!this.initialized) {
+      debugContext('[BaseContextBuilder] Cannot create context: Singletons not initialized');
       throw new Error(
         'Cannot create context: Singletons not initialized.\n' +
-        'Call builder.initializeSingletons() during application startup.\n' +
-        'See: packages/dot/src/context/README.md#basecontextbuilder'
+          'Call builder.initializeSingletons() during application startup.\n' +
+          'See: packages/dot/src/context/README.md#basecontextbuilder',
       );
     }
 
     if (!this.contextFactory) {
+      debugContext('[BaseContextBuilder] Cannot create context: Context factory not set');
       throw new Error(
         'Cannot create context: Context factory not set.\n' +
-        'Call builder.setContextFactory() to define how contexts are created.\n' +
-        'Example: builder.setContextFactory(services => ({ ...services, repo: createRepos(services.db) }))'
+          'Call builder.setContextFactory() to define how contexts are created.\n' +
+          'Example: builder.setContextFactory(services => ({ ...services, repo: createRepos(services.db) }))',
       );
     }
 
@@ -143,17 +159,21 @@ export class BaseContextBuilder<
     // Validate all expected singletons are present
     const allKeys = Object.keys(singletons);
     if (allKeys.length === 0) {
+      debugContext('[BaseContextBuilder] Cannot create context: No singletons registered');
       throw new Error(
         'Cannot create context: No singletons registered.\n' +
-        'Register services using registry.register() inside initializeSingletons()'
+          'Register services using registry.register() inside initializeSingletons()',
       );
     }
+
+    debugContext('[BaseContextBuilder] Creating context with %d singleton(s)', allKeys.length);
 
     // Track singleton access if metrics enabled
     if (this.metricsCollector) {
       for (const key of allKeys) {
         this.metricsCollector.incrementAccess(key);
       }
+      debugContext('[BaseContextBuilder] Incremented access count for %d singleton(s)', allKeys.length);
     }
 
     return this.contextFactory(singletons as TSingletons);
@@ -163,13 +183,17 @@ export class BaseContextBuilder<
    * Get the singleton registry
    */
   getSingletons(): Partial<TSingletons> {
-    return this.singletonsRegistry.getAll();
+    const singletons = this.singletonsRegistry.getAll();
+    const count = Object.keys(singletons).length;
+    debugContext('[BaseContextBuilder] Getting %d singleton(s)', count);
+    return singletons;
   }
 
   /**
    * Get the lifecycle manager
    */
   getLifecycleManager(): LifecycleManager {
+    debugContext('[BaseContextBuilder] Getting lifecycle manager');
     return this.lifecycleManager;
   }
 
@@ -178,6 +202,7 @@ export class BaseContextBuilder<
    * Returns null if metrics are disabled
    */
   getMetricsCollector(): ServiceMetricsCollector | null {
+    debugContext('[BaseContextBuilder] Getting metrics collector (enabled: %s)', !!this.metricsCollector);
     return this.metricsCollector;
   }
 
@@ -185,6 +210,7 @@ export class BaseContextBuilder<
    * Setup signal handlers for graceful shutdown
    */
   setupGracefulShutdown(exitOnComplete = true): void {
+    debugContext('[BaseContextBuilder] Setting up graceful shutdown (exitOnComplete: %s)', exitOnComplete);
     this.lifecycleManager.setupSignalHandlers(exitOnComplete);
   }
 
@@ -192,7 +218,9 @@ export class BaseContextBuilder<
    * Manually trigger shutdown
    */
   async shutdown(): Promise<void> {
+    debugContext('[BaseContextBuilder] Manual shutdown triggered');
     await this.lifecycleManager.shutdown();
+    debugContext('[BaseContextBuilder] Manual shutdown completed');
   }
 }
 
@@ -205,9 +233,10 @@ export function createBaseContextBuilder<
   TContext extends Record<string, unknown>,
 >(options?: { enableMetrics?: boolean }): BaseContextBuilder<TSingletons, TContext> {
   const enableMetrics = options?.enableMetrics ?? true;
+  debugContext('[createBaseContextBuilder] Creating new context builder (metricsEnabled: %s)', enableMetrics);
   return new BaseContextBuilder(
     new SingletonServicesRegistry<TSingletons>(),
     new LifecycleManager(),
-    enableMetrics ? new ServiceMetricsCollector() : null
+    enableMetrics ? new ServiceMetricsCollector() : null,
   );
 }

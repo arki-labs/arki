@@ -29,6 +29,7 @@
 
 import type { z } from '@arki/contracts';
 
+import { debugBuilder } from './debug.ts';
 import type { FlowBuilderStart, FlowBuilderWithInput, FlowDefinition } from './types/builder.ts';
 import type { JobDefinition } from './types/job.ts';
 import type { JobMiddleware } from './types/middleware.ts';
@@ -94,13 +95,18 @@ type FlowBuilderState<TInput> = {
  * @internal
  */
 function validateFlowDependencies(steps: readonly FlowStepInternal[]): void {
+  debugBuilder('Validating flow dependencies for %d steps', steps.length);
+
   const stepIds = new Set(steps.map(step => step.id));
 
   for (const step of steps) {
     if (!step.dependsOn) continue;
 
+    debugBuilder('[%s] Validating dependencies: %s', step.id, step.dependsOn.join(', '));
+
     for (const dependency of step.dependsOn) {
       if (!stepIds.has(dependency)) {
+        debugBuilder('[%s] Invalid dependency detected: %s', step.id, dependency);
         throw new Error(
           `Step "${step.id}" depends on "${dependency}", but no step with that ID exists. ` +
             `Available step IDs: ${[...stepIds].join(', ')}`,
@@ -111,6 +117,7 @@ function validateFlowDependencies(steps: readonly FlowStepInternal[]): void {
 
   // Check for circular dependencies
   detectCircularDependencies(steps);
+  debugBuilder('Flow dependencies validated successfully');
 }
 
 /**
@@ -118,6 +125,8 @@ function validateFlowDependencies(steps: readonly FlowStepInternal[]): void {
  * @internal
  */
 function detectCircularDependencies(steps: readonly FlowStepInternal[]): void {
+  debugBuilder('Checking for circular dependencies in flow');
+
   const graph = new Map<string, Set<string>>();
 
   // Build dependency graph
@@ -138,6 +147,7 @@ function detectCircularDependencies(steps: readonly FlowStepInternal[]): void {
       if (!visited.has(dep)) {
         if (hasCycle(dep)) return true;
       } else if (recursionStack.has(dep)) {
+        debugBuilder('Circular dependency detected: %s -> %s', stepId, dep);
         return true;
       }
     }
@@ -151,6 +161,8 @@ function detectCircularDependencies(steps: readonly FlowStepInternal[]): void {
       throw new Error(`Circular dependency detected in flow steps starting from step "${step.id}"`);
     }
   }
+
+  debugBuilder('No circular dependencies found');
 }
 
 /**
@@ -161,8 +173,12 @@ export function createFlowBuilder<TContext, TMeta extends QueueMeta>(
   name: string,
   config: QueueConfig,
 ): FlowBuilderStart<TContext, TMeta> {
+  debugBuilder('[%s] Creating flow builder', name);
+
   return {
     input<TInput>(schema: z.ZodType<TInput>): FlowBuilderWithInput<TContext, TMeta, TInput> {
+      debugBuilder('[%s] Setting input schema for flow', name);
+
       return createFlowBuilderWithInput<TContext, TMeta, TInput>({
         config,
         name,
@@ -183,6 +199,8 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
 ): FlowBuilderWithInput<TContext, TMeta, TInput> {
   return {
     use(middleware: JobMiddleware<unknown, unknown, TMeta>) {
+      debugBuilder('[%s] Adding middleware to flow (total: %d)', state.name, state.middlewares.length + 1);
+
       return createFlowBuilderWithInput<TContext, TMeta, TInput>({
         ...state,
         middlewares: [...state.middlewares, middleware as JobMiddleware<unknown, unknown, QueueMeta>],
@@ -199,6 +217,14 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
         dependsOn?: readonly string[];
       },
     ) {
+      debugBuilder(
+        '[%s] Adding step "%s" (job: %s, dependencies: %s)',
+        state.name,
+        id,
+        config.job._internal.name,
+        config.dependsOn?.join(', ') ?? 'none',
+      );
+
       const newStep: FlowStepInternal = {
         id,
         job: config.job,
@@ -223,6 +249,13 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
         throw new Error('At least one step is required. Call .step() before .build().');
       }
 
+      debugBuilder(
+        '[%s] Building flow definition with %d steps and %d middleware',
+        state.name,
+        state.steps.length,
+        state.middlewares.length,
+      );
+
       // Validate step dependencies
       validateFlowDependencies(state.steps);
 
@@ -233,6 +266,8 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
         middlewares: state.middlewares,
         config: state.config,
       };
+
+      debugBuilder('[%s] Flow definition built successfully', state.name);
 
       return {
         _type: 'flow',

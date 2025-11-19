@@ -3,6 +3,8 @@
  * Tracks initialization time, access patterns, and provides recommendations
  */
 
+import { debugContext } from '../debug.ts';
+
 export type ServiceMetric = {
   name: string;
   initTimeMs: number | null;
@@ -28,6 +30,13 @@ export class ServiceMetricsCollector {
    */
   record(metric: ServiceMetric): void {
     this.metrics.set(metric.name, metric);
+    debugContext(
+      '[MetricsCollector] Recorded metric for service %s (initTime: %s, accessCount: %d, initialized: %s)',
+      metric.name,
+      metric.initTimeMs === null ? 'unknown' : `${metric.initTimeMs}ms`,
+      metric.accessCount,
+      metric.initialized,
+    );
   }
 
   /**
@@ -37,6 +46,9 @@ export class ServiceMetricsCollector {
     const metric = this.metrics.get(name);
     if (metric) {
       metric.accessCount++;
+      debugContext('[MetricsCollector] Incremented access count for service %s (count: %d)', name, metric.accessCount);
+    } else {
+      debugContext('[MetricsCollector] Cannot increment access for unknown service: %s', name);
     }
   }
 
@@ -44,58 +56,71 @@ export class ServiceMetricsCollector {
    * Get metric for a specific service
    */
   get(name: string): ServiceMetric | undefined {
-    return this.metrics.get(name);
+    const metric = this.metrics.get(name);
+    debugContext('[MetricsCollector] Getting metric for service %s (found: %s)', name, !!metric);
+    return metric;
   }
 
   /**
    * Get all metrics
    */
   getAll(): ServiceMetric[] {
-    return [...this.metrics.values()];
+    const metrics = [...this.metrics.values()];
+    debugContext('[MetricsCollector] Getting all metrics (count: %d)', metrics.length);
+    return metrics;
   }
 
   /**
    * Generate a comprehensive metrics report with recommendations
    */
   generateReport(): MetricsReport {
+    debugContext('[MetricsCollector] Generating comprehensive metrics report');
     const services = this.getAll();
     const initialized = services.filter(s => s.initialized);
     const totalAccess = services.reduce((sum, s) => sum + s.accessCount, 0);
     const avgInit =
-      initialized.length > 0
-        ? initialized.reduce((sum, s) => sum + (s.initTimeMs ?? 0), 0) / initialized.length
-        : 0;
+      initialized.length > 0 ? initialized.reduce((sum, s) => sum + (s.initTimeMs ?? 0), 0) / initialized.length : 0;
+
+    debugContext(
+      '[MetricsCollector] Report stats: %d total services, %d initialized, %d total accesses, %.2f avg init time',
+      services.length,
+      initialized.length,
+      totalAccess,
+      avgInit,
+    );
 
     const recommendations: string[] = [];
 
     // Analyze patterns and generate recommendations
     const unused = services.filter(s => s.initialized && s.accessCount === 0);
     if (unused.length > 0) {
-      recommendations.push(
-        `${unused.length} service(s) initialized but never accessed: ${unused.map(s => s.name).join(', ')}`
-      );
+      const recommendation = `${unused.length} service(s) initialized but never accessed: ${unused.map(s => s.name).join(', ')}`;
+      recommendations.push(recommendation);
+      debugContext('[MetricsCollector] Recommendation: %s', recommendation);
     }
 
     const lowUsage = services.filter(s => s.initialized && s.accessCount > 0 && s.accessCount < 5);
     if (lowUsage.length > 0) {
-      recommendations.push(
-        `${lowUsage.length} service(s) with low usage (<5 accesses): ${lowUsage.map(s => s.name).join(', ')} - consider lazy initialization`
-      );
+      const recommendation = `${lowUsage.length} service(s) with low usage (<5 accesses): ${lowUsage.map(s => s.name).join(', ')} - consider lazy initialization`;
+      recommendations.push(recommendation);
+      debugContext('[MetricsCollector] Recommendation: %s', recommendation);
     }
 
     const slowInit = initialized.filter(s => (s.initTimeMs ?? 0) > 100);
     if (slowInit.length > 0) {
-      recommendations.push(
-        `${slowInit.length} service(s) with slow initialization (>100ms): ${slowInit.map(s => `${s.name} (${s.initTimeMs}ms)`).join(', ')}`
-      );
+      const recommendation = `${slowInit.length} service(s) with slow initialization (>100ms): ${slowInit.map(s => `${s.name} (${s.initTimeMs}ms)`).join(', ')}`;
+      recommendations.push(recommendation);
+      debugContext('[MetricsCollector] Recommendation: %s', recommendation);
     }
 
     const uninitialized = services.filter(s => !s.initialized);
     if (uninitialized.length > 0) {
-      recommendations.push(
-        `${uninitialized.length} service(s) not yet initialized: ${uninitialized.map(s => s.name).join(', ')}`
-      );
+      const recommendation = `${uninitialized.length} service(s) not yet initialized: ${uninitialized.map(s => s.name).join(', ')}`;
+      recommendations.push(recommendation);
+      debugContext('[MetricsCollector] Recommendation: %s', recommendation);
     }
+
+    debugContext('[MetricsCollector] Report complete with %d recommendation(s)', recommendations.length);
 
     return {
       totalServices: services.length,
@@ -103,9 +128,7 @@ export class ServiceMetricsCollector {
       totalAccessCount: totalAccess,
       avgInitTimeMs: Math.round(avgInit * 100) / 100,
       recommendations,
-      services: [...services].sort(
-        (a: ServiceMetric, b: ServiceMetric) => b.accessCount - a.accessCount
-      ),
+      services: [...services].sort((a: ServiceMetric, b: ServiceMetric) => b.accessCount - a.accessCount),
     };
   }
 
@@ -113,14 +136,18 @@ export class ServiceMetricsCollector {
    * Clear all metrics
    */
   clear(): void {
+    const count = this.metrics.size;
     this.metrics.clear();
+    debugContext('[MetricsCollector] Cleared %d metric(s)', count);
   }
 
   /**
    * Export metrics in JSON format
    */
   toJSON(): Record<string, ServiceMetric> {
-    return Object.fromEntries(this.metrics.entries());
+    const json = Object.fromEntries(this.metrics.entries());
+    debugContext('[MetricsCollector] Exported %d metric(s) to JSON', this.metrics.size);
+    return json;
   }
 }
 

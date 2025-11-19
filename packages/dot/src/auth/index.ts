@@ -9,18 +9,24 @@
  * - Type-safe tRPC integration
  */
 
-import { betterAuth } from 'better-auth';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { betterAuth } from 'better-auth';
 
 import type { DotAuthConfig } from './config';
-import { authEnv, getAuthSecret as getEnvAuthSecret, getBaseUrl as getEnvBaseUrl, getProductionUrl as getEnvProductionUrl } from './env';
-import { createAuthMiddleware, createAuthProcedures } from './middleware';
 import type { DotRBACManager } from './rbac';
-import { createRBACManager, initializeRBAC } from './rbac';
 import type { DotSessionManager } from './session';
+import type { DotSession } from './types';
+import { debugAuth } from './../debug.ts';
+import {
+  authEnv,
+  getAuthSecret as getEnvAuthSecret,
+  getBaseUrl as getEnvBaseUrl,
+  getProductionUrl as getEnvProductionUrl,
+} from './env';
+import { createAuthMiddleware, createAuthProcedures } from './middleware';
+import { createRBACManager, initializeRBAC } from './rbac';
 import { createSessionManager } from './session';
 import { toBetterAuthConfig, validateConfig } from './transform';
-import type { DotSession } from './types';
 
 // Re-export all types
 export * from './config';
@@ -31,8 +37,20 @@ export type { DotSessionManager } from './session';
 
 // Re-export security utilities
 export {
-  addSecurityDelay, compareTokens, createRateLimitKey, generateSecureToken,
-  generateSessionToken, hashToken, isValidEmail, isValidSessionToken, rateLimitDefaults, sanitizeInput, secureCompare, securityHeaders, validatePassword, type RateLimitConfig
+  addSecurityDelay,
+  compareTokens,
+  createRateLimitKey,
+  generateSecureToken,
+  generateSessionToken,
+  hashToken,
+  isValidEmail,
+  isValidSessionToken,
+  rateLimitDefaults,
+  sanitizeInput,
+  secureCompare,
+  securityHeaders,
+  validatePassword,
+  type RateLimitConfig,
 } from './security';
 export { sessionUtils } from './session';
 
@@ -96,7 +114,7 @@ export type DotAuth = {
    * The current auth configuration
    */
   config: DotAuthConfig;
-}
+};
 
 /**
  * Create a Dot Auth instance with better-auth integration
@@ -114,43 +132,58 @@ export type DotAuth = {
  * }, db);
  * ```
  */
-export async function createDotAuth(
-  config: DotAuthConfig,
-  db?: NodePgDatabase<any>
-): Promise<DotAuth> {
+export async function createDotAuth(config: DotAuthConfig, db?: NodePgDatabase<any>): Promise<DotAuth> {
+  debugAuth('[index] Creating DotAuth instance (hasDb: %s)', !!db);
+
   // Validate configuration
   try {
+    debugAuth('[index] Validating auth configuration');
     validateConfig(config);
+    debugAuth('[index] Configuration validation passed');
   } catch (error) {
+    debugAuth('[index] Configuration validation failed: %s', error instanceof Error ? error.message : 'unknown error');
     throw new Error(`Invalid auth configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 
   // Transform to better-auth config
+  debugAuth('[index] Transforming config to better-auth format');
   const betterAuthConfig = toBetterAuthConfig(config, db);
+  debugAuth('[index] Config transformation complete');
 
   // Create better-auth instance
+  debugAuth('[index] Creating better-auth instance');
   const auth = betterAuth(betterAuthConfig);
+  debugAuth('[index] better-auth instance created');
 
   // Create managers with error handling
   let sessionManager: DotSessionManager;
   let rbacManager: DotRBACManager;
 
   try {
+    debugAuth('[index] Creating session and RBAC managers');
     sessionManager = createSessionManager(auth, db);
     rbacManager = db ? createRBACManager(db) : createMockRBACManager();
+    debugAuth('[index] Managers created successfully (rbac: %s)', db ? 'real' : 'mock');
   } catch (error) {
+    debugAuth(
+      '[index] Failed to initialize auth managers: %s',
+      error instanceof Error ? error.message : 'unknown error',
+    );
     console.error('Failed to initialize auth managers:', error);
     throw new Error(`Failed to initialize auth: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 
   // Initialize default roles if RBAC is enabled
   if (config.rbac?.enabled && db) {
+    debugAuth('[index] RBAC enabled, initializing default roles');
     try {
       await initializeRBAC(rbacManager);
 
       // Log successful RBAC initialization
+      debugAuth('[index] RBAC initialized with default roles');
       console.log('RBAC initialized with default roles');
     } catch (error) {
+      debugAuth('[index] RBAC initialization failed: %s', error instanceof Error ? error.message : 'unknown error');
       // Log error but don't fail - RBAC is optional
       console.error('Failed to initialize RBAC roles:', error);
 
@@ -159,8 +192,11 @@ export async function createDotAuth(
         throw new Error(`RBAC initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     }
+  } else {
+    debugAuth('[index] Skipping RBAC initialization (enabled: %s, hasDb: %s)', !!config.rbac?.enabled, !!db);
   }
 
+  debugAuth('[index] DotAuth instance created successfully');
   return {
     instance: auth,
     api: auth.api,
@@ -168,30 +204,40 @@ export async function createDotAuth(
     rbac: rbacManager,
 
     createProcedures: (t: any) => {
+      debugAuth('[index] Creating auth procedures');
       return createAuthProcedures(t, sessionManager, rbacManager);
     },
 
     createMiddleware: () => {
+      debugAuth('[index] Creating auth middleware');
       return createAuthMiddleware(sessionManager, rbacManager);
     },
 
     getSession: async (headers: Headers) => {
+      debugAuth('[index] Getting session from headers');
       try {
-        return await sessionManager.getSession(headers);
+        const session = await sessionManager.getSession(headers);
+        debugAuth('[index] Session retrieved (found: %s)', !!session);
+        return session;
       } catch (error) {
+        debugAuth('[index] Error getting session: %s', error instanceof Error ? error.message : 'unknown error');
         console.error('Error getting session:', error);
         return null; // Return null on error rather than throwing
       }
     },
 
     signOut: async (sessionId: string) => {
+      debugAuth('[index] Signing out session: %s', sessionId);
       if (!sessionId) {
+        debugAuth('[index] Sign out failed: session ID required');
         throw new Error('Session ID is required for sign out');
       }
 
       try {
-        return await sessionManager.invalidateSession(sessionId);
+        await sessionManager.invalidateSession(sessionId);
+        debugAuth('[index] Session signed out successfully: %s', sessionId);
       } catch (error) {
+        debugAuth('[index] Error signing out session: %s', error instanceof Error ? error.message : 'unknown error');
         console.error('Error signing out session:', error);
         throw new Error(`Failed to sign out: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
@@ -209,7 +255,9 @@ export async function createDotAuth(
  * @private
  */
 function createMockRBACManager(): DotRBACManager {
+  debugAuth('[index] Creating mock RBAC manager (env: %s)', authEnv.NODE_ENV);
   if (authEnv.NODE_ENV !== 'test') {
+    debugAuth('[index] Warning: mock RBAC manager - features will be limited');
     console.warn('Database not configured - using mock RBAC manager. RBAC features will be limited.');
   }
 
@@ -271,9 +319,9 @@ function createMockRBACManager(): DotRBACManager {
  * });
  * ```
  */
-export function createAuthConfigFromEnv(
-  overrides?: Partial<DotAuthConfig>
-): DotAuthConfig {
+export function createAuthConfigFromEnv(overrides?: Partial<DotAuthConfig>): DotAuthConfig {
+  debugAuth('[index] Creating auth config from environment (hasOverrides: %s)', !!overrides);
+
   const config: DotAuthConfig = {
     appName: authEnv.APP_NAME,
     appKey: authEnv.APP_KEY,
@@ -305,6 +353,8 @@ export function createAuthConfigFromEnv(
     ...overrides,
   };
 
+  debugAuth('[index] Base config created (appName: %s, baseUrl: %s)', config.appName, config.baseUrl);
+
   // Auto-detect OAuth providers from environment using validated env
   const providerChecks = [
     { provider: 'google', check: () => !!(authEnv.GOOGLE_CLIENT_ID || authEnv.AUTH_GOOGLE_ID) },
@@ -315,12 +365,17 @@ export function createAuthConfigFromEnv(
     { provider: 'twitter', check: () => !!(authEnv.TWITTER_CLIENT_ID || authEnv.AUTH_TWITTER_ID) },
   ];
 
+  debugAuth('[index] Auto-detecting OAuth providers from environment');
+  let detectedCount = 0;
   for (const { provider, check } of providerChecks) {
     if (check() && config.providers) {
+      debugAuth('[index] Detected provider: %s', provider);
       config.providers.push(provider as any);
+      detectedCount++;
     }
   }
 
+  debugAuth('[index] Config from environment complete (detected providers: %d)', detectedCount);
   return config;
 }
 
@@ -438,9 +493,7 @@ export const dotAuthIntegration = {
     providers: providers as any[],
     features: {
       emailPassword: providers.includes('credentials'),
-      socialLogin: providers.some(p =>
-        ['google', 'github', 'discord', 'facebook', 'apple', 'twitter'].includes(p)
-      ),
+      socialLogin: providers.some(p => ['google', 'github', 'discord', 'facebook', 'apple', 'twitter'].includes(p)),
     },
   }),
 
@@ -448,35 +501,46 @@ export const dotAuthIntegration = {
    * Merge configs with proper precedence
    */
   mergeConfigs: (...configs: Partial<DotAuthConfig>[]): DotAuthConfig => {
+    debugAuth('[index] Merging %d auth config(s)', configs.length);
     const merged: DotAuthConfig = {};
 
-    for (const config of configs) {
+    for (let i = 0; i < configs.length; i++) {
+      const config = configs[i];
+      debugAuth('[index] Merging config %d of %d', i + 1, configs.length);
       Object.assign(merged, config);
 
       // Special handling for nested objects
-      if (config.session) {
+      if (config?.session) {
+        debugAuth('[index] Merging session config');
         merged.session = { ...merged.session, ...config.session };
       }
-      if (config.email) {
+      if (config?.email) {
+        debugAuth('[index] Merging email config');
         merged.email = { ...merged.email, ...config.email };
       }
-      if (config.rbac) {
+      if (config?.rbac) {
+        debugAuth('[index] Merging RBAC config');
         merged.rbac = { ...merged.rbac, ...config.rbac };
       }
-      if (config.mfa) {
+      if (config?.mfa) {
+        debugAuth('[index] Merging MFA config');
         merged.mfa = { ...merged.mfa, ...config.mfa };
       }
-      if (config.security) {
+      if (config?.security) {
+        debugAuth('[index] Merging security config');
         merged.security = { ...merged.security, ...config.security };
       }
-      if (config.features) {
+      if (config?.features) {
+        debugAuth('[index] Merging features config');
         merged.features = { ...merged.features, ...config.features };
       }
-      if (config.hooks) {
+      if (config?.hooks) {
+        debugAuth('[index] Merging hooks config');
         merged.hooks = { ...merged.hooks, ...config.hooks };
       }
     }
 
+    debugAuth('[index] Config merge complete');
     return merged;
   },
 };
@@ -505,5 +569,5 @@ export const authFeatures = {
    */
   initAuth: async (config: DotAuthConfig, db?: NodePgDatabase<any>) => {
     return createDotAuth(config, db);
-  }
+  },
 };

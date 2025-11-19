@@ -7,6 +7,7 @@ import { openai } from '@ai-sdk/openai';
 import { generateObject, streamText, generateText } from 'ai';
 import type { CoreMessage } from 'ai';
 import { z } from '@arki/contracts';
+import { debugService } from '../debug.ts';
 import { GenerationError, getErrorMessage } from '../errors';
 import { validateInput, aiServiceConfigSchema } from '../validation';
 import { rateLimiters } from '../utils/rate-limiter';
@@ -47,6 +48,13 @@ export class OpenAIService {
     this.defaultTemperature = validConfig.temperature || 0.7;
     this.defaultMaxRetries = validConfig.maxRetries || 2;
 
+    debugService(
+      '[OpenAI] Service initialized (model: %s, temperature: %d, maxRetries: %d)',
+      this.model,
+      this.defaultTemperature,
+      this.defaultMaxRetries,
+    );
+
     // API key handling is managed through environment variables
     // See env.ts for configuration
   }
@@ -80,11 +88,15 @@ export class OpenAIService {
     schema: z.ZodSchema<T>,
     options: GenerationOptions = {}
   ): Promise<T> {
+    debugService('[OpenAI] Generating structured data (messages: %d, temperature: %d)', messages.length, options.temperature || this.defaultTemperature);
+
     // Apply rate limiting
     const rateLimitResult = await rateLimiters.openai.execute(
       'generateStructuredDataFromMessages',
       async () => {
         try {
+          debugService('[OpenAI] Calling OpenAI API for structured generation');
+
           const result = await generateObject({
             model: openai(this.model),
             system: options.systemPrompt,
@@ -95,8 +107,12 @@ export class OpenAIService {
             temperature: options.temperature || this.defaultTemperature,
           });
 
+          debugService('[OpenAI] Structured data generated successfully');
+
           return result.object as T;
         } catch (error) {
+          debugService('[OpenAI] Structured generation failed: %s', getErrorMessage(error));
+
           throw new GenerationError(
             `Failed to generate structured data: ${getErrorMessage(error)}`,
             error
@@ -106,6 +122,8 @@ export class OpenAIService {
     );
 
     if (!rateLimitResult.success) {
+      debugService('[OpenAI] Rate limit exceeded (retry after: %dms)', rateLimitResult.retryAfterMs);
+
       throw new GenerationError(
         `Rate limit exceeded: retry after ${rateLimitResult.retryAfterMs}ms`,
         rateLimitResult.error
@@ -122,6 +140,8 @@ export class OpenAIService {
     prompt: string,
     options: GenerationOptions = {}
   ): Promise<string> {
+    debugService('[OpenAI] Generating text (prompt length: %d)', prompt.length);
+
     try {
       const result = await generateText({
         model: openai(this.model),
@@ -131,8 +151,12 @@ export class OpenAIService {
         maxRetries: options.maxRetries || this.defaultMaxRetries,
       });
 
+      debugService('[OpenAI] Text generated successfully (length: %d)', result.text.length);
+
       return result.text;
     } catch (error) {
+      debugService('[OpenAI] Text generation failed: %s', getErrorMessage(error));
+
       throw new GenerationError(
         `Failed to generate text: ${getErrorMessage(error)}`,
         error
@@ -281,6 +305,8 @@ export class OpenAIService {
     schema?: z.ZodSchema<T>,
     options: GenerationOptions = {}
   ): Promise<(T | string)[]> {
+    debugService('[OpenAI] Batch generating %d prompts (structured: %s)', prompts.length, !!schema);
+
     const results = await Promise.allSettled(
       prompts.map(prompt =>
         schema
@@ -288,6 +314,9 @@ export class OpenAIService {
           : this.generateText(prompt, options)
       )
     );
+
+    const successCount = results.filter(r => r.status === 'fulfilled').length;
+    debugService('[OpenAI] Batch generation complete (%d/%d successful)', successCount, prompts.length);
 
     return results.map((result, index) => {
       if (result.status === 'fulfilled') {
