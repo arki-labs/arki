@@ -2,6 +2,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { DrizzleConfig } from 'drizzle-orm/utils';
 import type { PoolConfig } from 'pg';
 
+import { debugProjection } from './debug';
 import { initDbWithOptions } from './init';
 
 /**
@@ -178,6 +179,7 @@ class ProjectionBuilderImpl<TEvent, TRepos, TSchema extends Record<string, unkno
   }
 
   named<N extends string>(name: N): ProjectionBuilderWithName<TEvent, TRepos, TSchema, N> {
+    debugProjection('[builder] Setting projection name: %s', name);
     this._name = name;
     return this as unknown as ProjectionBuilderImpl<TEvent, TRepos, TSchema, N>;
   }
@@ -185,17 +187,23 @@ class ProjectionBuilderImpl<TEvent, TRepos, TSchema extends Record<string, unkno
   on<TEventType extends { type: string }>(
     eventTypes: readonly TEventType['type'][] | TEventType['type'][],
   ): ProjectionBuilderWithEvents<TEventType, TRepos, TSchema, TName> {
+    debugProjection('[builder] Registering event types: %o', eventTypes);
     this._eventTypes = [...eventTypes];
     return this as unknown as ProjectionBuilderImpl<TEventType, TRepos, TSchema, TName>;
   }
 
   handle(handler: ProjectionHandler<TEvent, TRepos, TSchema>): ProjectionDefinition<TEvent, TRepos, TSchema, TName> {
     if (!this._name) {
+      debugProjection('[builder] Error: Projection name is required');
       throw new Error('Projection name is required. Call .named() first.');
     }
     if (!this._eventTypes) {
+      debugProjection('[builder] Error: Event types are required');
       throw new Error('Event types are required. Call .on() first.');
     }
+
+    debugProjection('[builder] Creating projection definition (name: %s, eventTypes: %o, middlewareCount: %d)',
+      this._name, this._eventTypes, this._middleware.length);
 
     return {
       name: this._name as TName,
@@ -206,10 +214,12 @@ class ProjectionBuilderImpl<TEvent, TRepos, TSchema extends Record<string, unkno
   }
 
   use(middleware: ProjectionMiddleware): ProjectionBuilderRoot<TRepos, TSchema> {
+    debugProjection('[builder] Adding projection middleware (currentCount: %d)', this._middleware.length);
     const newBuilder = new ProjectionBuilderImpl<TEvent, TRepos, TSchema, TName>(this.repos, this.db, [
       ...this._middleware,
       middleware,
     ]);
+    debugProjection('[builder] Middleware added (newCount: %d)', this._middleware.length + 1);
     return newBuilder;
   }
 }
@@ -239,8 +249,10 @@ class DbBuilderImpl<TSchema extends Record<string, unknown>, TRepos extends Reco
     key: K,
     factory: (db: NodePgDatabase<TSchema>) => R,
   ): DbBuilder<TSchema, TRepos & Record<K, R>> {
+    debugProjection('[builder] Registering repository (key: %s, currentCount: %d)', key, this._repoFactories.size);
     const newFactories = new Map(this._repoFactories);
     newFactories.set(key, factory);
+    debugProjection('[builder] Repository registered (key: %s, newCount: %d)', key, newFactories.size);
     return new DbBuilderImpl<TSchema, TRepos & Record<K, R>>(this.db, this.isDev, newFactories) as DbBuilder<
       TSchema,
       TRepos & Record<K, R>
@@ -253,13 +265,17 @@ class DbBuilderImpl<TSchema extends Record<string, unknown>, TRepos extends Reco
 
   get projection(): ProjectionBuilderRoot<TRepos, TSchema> {
     if (!this._repos) {
+      debugProjection('[builder] Initializing repositories from factories (count: %d)', this._repoFactories.size);
       // Build all repositories from factories
       const repos: Record<string, unknown> = {};
       for (const [key, factory] of this._repoFactories) {
+        debugProjection('[builder] Creating repository: %s', key);
         repos[key] = factory(this.db);
       }
       this._repos = repos as TRepos;
+      debugProjection('[builder] All repositories initialized');
     }
+    debugProjection('[builder] Creating projection builder');
     return new ProjectionBuilderImpl<never, TRepos, TSchema>(this._repos, this.db);
   }
 }
@@ -275,6 +291,9 @@ class SchemaBuilderImpl<TSchema extends Record<string, unknown>> implements Sche
     isDev?: boolean;
     poolConfig?: Partial<PoolConfig>;
   }): DbBuilder<TSchema, Record<string, never>> {
+    debugProjection('[builder] Creating database builder (isDev: %s, hasPoolConfig: %s)',
+      options.isDev ?? false, !!options.poolConfig);
+
     const poolConfig: PoolConfig = {
       connectionString: options.connectionString,
       ...options.poolConfig,
@@ -285,8 +304,10 @@ class SchemaBuilderImpl<TSchema extends Record<string, unknown>> implements Sche
       logger: options.isDev,
     };
 
+    debugProjection('[builder] Initializing database with pool config');
     const db = initDbWithOptions(poolConfig, drizzleConfig);
 
+    debugProjection('[builder] Database builder created successfully');
     return new DbBuilderImpl<TSchema, Record<string, never>>(db, options.isDev ?? false);
   }
 }
@@ -296,6 +317,7 @@ class SchemaBuilderImpl<TSchema extends Record<string, unknown>> implements Sche
  */
 class InitialBuilderImpl implements InitialBuilder {
   schema<TSchema extends Record<string, unknown>>(schema: TSchema): SchemaBuilder<TSchema> {
+    debugProjection('[builder] Setting database schema');
     return new SchemaBuilderImpl(schema);
   }
 }

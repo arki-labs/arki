@@ -4,12 +4,16 @@ import type { PoolConfig } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 
+import { debugInit } from './debug';
+
 const { native } = pg;
 
 if (!native) {
+  debugInit('[init] pg-native package not found');
   throw new Error('Please install the pg-native package');
 }
 
+debugInit('[init] Using pg-native for database connections');
 const { Pool } = native;
 
 // const client = postgres(connectionString, {
@@ -21,20 +25,31 @@ export const initDb = <TSchema extends Record<string, unknown> = Record<string, 
   connectionString: string,
   config: DrizzleConfig<TSchema>,
 ) => {
+  debugInit('[init] Initializing database with connection string (logger: %s)', !!config.logger);
+
   const client = new Pool({
     connectionString,
   });
 
-  return drizzle(client, config);
+  const db = drizzle(client, config);
+  debugInit('[init] Database initialized successfully');
+
+  return db;
 };
 
 export const initDbWithOptions = <TSchema extends Record<string, unknown> = Record<string, never>>(
   poolConfig: PoolConfig,
   config: DrizzleConfig<TSchema>,
 ) => {
+  debugInit('[init] Initializing database with pool config (min: %d, max: %d, logger: %s)',
+    poolConfig.min ?? 0, poolConfig.max ?? 10, !!config.logger);
+
   const client = new Pool(poolConfig);
 
-  return drizzle(client, config);
+  const db = drizzle(client, config);
+  debugInit('[init] Database initialized with custom pool configuration');
+
+  return db;
 };
 
 // Re-export factory functions

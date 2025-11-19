@@ -1,4 +1,5 @@
 import type { DrizzleConfig } from 'drizzle-orm/utils';
+import { debugFactory } from './debug';
 import { env } from './env';
 import { initDbWithOptions } from './init';
 
@@ -11,22 +12,28 @@ import { initDbWithOptions } from './init';
 export function createDb<TSchema extends Record<string, unknown> = Record<string, never>>(
   config: DrizzleConfig<TSchema>,
 ) {
+  debugFactory('[factory] Creating database from environment configuration');
+
   const connectionUrl = env.DB_URL;
   if (!connectionUrl) {
+    debugFactory('[factory] Database creation failed: DB_URL not configured');
     throw new Error('Database URL is not configured. Please set DB_URL environment variable.');
   }
 
   const connectionOptions = getDbConnectionOptions();
 
-  console.log('Database connection options:', {
-    ...connectionOptions,
-    connectionString: connectionOptions.connectionString ? '****' : undefined, // Mask the actual URL
-  });
+  debugFactory('[factory] Connection options (min: %d, max: %d, idleTimeout: %dms, connTimeout: %dms)',
+    connectionOptions.min, connectionOptions.max,
+    connectionOptions.idleTimeoutMillis, connectionOptions.connectionTimeoutMillis);
 
-  return initDbWithOptions(connectionOptions, {
+  const db = initDbWithOptions(connectionOptions, {
     ...config,
     logger: config.logger ?? (env.DB_LOGGING || env.NODE_ENV === 'development'),
   });
+
+  debugFactory('[factory] Database created successfully');
+
+  return db;
 }
 
 /**
@@ -34,8 +41,10 @@ export function createDb<TSchema extends Record<string, unknown> = Record<string
  * @returns Connection options object for pg Pool
  */
 export function getDbConnectionOptions() {
+  debugFactory('[factory] Retrieving database connection options from environment');
+
   const connectionUrl = env.DB_URL;
-  return {
+  const options = {
     connectionString: connectionUrl,
     min: env.DB_POOL_MIN,
     max: env.DB_POOL_MAX,
@@ -45,6 +54,10 @@ export function getDbConnectionOptions() {
     query_timeout: env.DB_QUERY_TIMEOUT,
     idle_in_transaction_session_timeout: env.DB_IDLE_IN_TRANSACTION_SESSION_TIMEOUT,
   };
+
+  debugFactory('[factory] Connection options retrieved (hasUrl: %s)', !!connectionUrl);
+
+  return options;
 }
 
 /**
@@ -53,7 +66,9 @@ export function getDbConnectionOptions() {
  * @returns Connection parameters object
  */
 export function getDbConnectionParams() {
-  return {
+  debugFactory('[factory] Retrieving database connection parameters from environment');
+
+  const params = {
     user: env.PGUSER,
     password: env.PGPASSWORD,
     host: env.PGHOST,
@@ -61,4 +76,9 @@ export function getDbConnectionParams() {
     database: env.PGDATABASE,
     ssl: env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: env.PGSSLMODE === 'verify-full' },
   };
+
+  debugFactory('[factory] Connection parameters retrieved (host: %s, port: %d, database: %s, ssl: %s)',
+    params.host, params.port, params.database, env.PGSSLMODE);
+
+  return params;
 }

@@ -2,6 +2,8 @@ import type { EmailConfig } from '@auth/core/providers/email';
 import type { Theme } from '@auth/core/types';
 import { createId } from '@paralleldrive/cuid2';
 import type { Resend } from 'resend';
+
+import { debugEmail } from '../debug';
 import { env } from '../env';
 
 type SendVerificationRequestParams = {
@@ -18,10 +20,16 @@ export const sendVerificationRequest = (
   resend: Resend,
   template?: ({ loginUrl }: { loginUrl: string }) => React.ReactElement | React.ReactNode,
 ) => {
+  debugEmail('[sendVerificationRequest] Creating verification email sender (hasTemplate: %s)', !!template);
+
   return async (params: SendVerificationRequestParams) => {
     const { identifier, url, provider } = params;
 
+    debugEmail('[sendVerificationRequest] Sending verification email (to: %s, hasFrom: %s)',
+      identifier, !!provider.from);
+
     if (!provider.from) {
+      debugEmail('[sendVerificationRequest] Error: from address is required');
       throw new Error('from is required');
     }
 
@@ -29,6 +37,9 @@ export const sendVerificationRequest = (
 
     const isDevOrStaging = env.NODE_ENV === 'development';
     const to = isDevOrStaging ? 'delivered@resend.dev' : identifier;
+
+    debugEmail('[sendVerificationRequest] Email configuration (host: %s, isDev: %s, recipient: %s)',
+      host, isDevOrStaging, to);
 
     try {
       await resend.emails.send({
@@ -41,7 +52,10 @@ export const sendVerificationRequest = (
           'X-Entity-Ref-ID': createId(),
         },
       });
-    } catch {
+      debugEmail('[sendVerificationRequest] Verification email sent successfully to %s', to);
+    } catch (error) {
+      debugEmail('[sendVerificationRequest] Error sending verification email: %s',
+        error instanceof Error ? error.message : 'Unknown error');
       throw new Error(`Verification request email to ${identifier} can't be sent`);
     }
   };

@@ -1,5 +1,7 @@
 import type * as React from 'react';
 
+import { debugEmails } from './debug';
+
 type RequireAtLeastOne<T> = {
   [K in keyof T]-?: Required<Pick<T, K>> & Partial<Pick<T, Exclude<keyof T, K>>>;
 }[keyof T];
@@ -104,6 +106,14 @@ export const send = async (apiKey: string, payload: CreateEmailOptions) => {
   const isDevOrStaging = process.env['NODE_ENV'] === 'development' || process.env['VERCEL_ENV'] === 'preview';
   const to = isDevOrStaging ? 'delivered@resend.dev' : payload.to;
 
+  const recipientCount = Array.isArray(to) ? to.length : 1;
+  const hasAttachments = payload.attachments && payload.attachments.length > 0;
+  const hasCc = payload.cc !== undefined;
+  const hasBcc = payload.bcc !== undefined;
+
+  debugEmails('[send] Sending email (subject: "%s", to: %d recipients, isDev: %s, hasAttachments: %s, hasCc: %s, hasBcc: %s)',
+    payload.subject, recipientCount, isDevOrStaging, hasAttachments, hasCc, hasBcc);
+
   try {
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -121,15 +131,22 @@ export const send = async (apiKey: string, payload: CreateEmailOptions) => {
       }),
     });
 
+    debugEmails('[send] Resend API response received (status: %d, ok: %s)',
+      response.status, response.ok);
+
     const { headers } = response;
     const contentType = headers.get('content-type') ?? '';
     if (contentType.includes('application/json')) {
-      return JSON.stringify(await response.json());
+      const result = JSON.stringify(await response.json());
+      debugEmails('[send] Email sent successfully (JSON response)');
+      return result;
     }
 
-    return response.text();
+    const result = await response.text();
+    debugEmails('[send] Email sent successfully (text response)');
+    return result;
   } catch (error) {
-    console.error(error);
+    debugEmails('[send] Error sending email: %s', error instanceof Error ? error.message : 'Unknown error');
 
     throw new Error(`Email can't be sent: ${JSON.stringify(payload)}`);
   }

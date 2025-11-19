@@ -1,1 +1,6 @@
-export { default as createDebug, default as createDebugLogger, default as debug } from 'debug';
+import debugLib from 'debug';
+
+export const createDebug = debugLib;
+export const createDebugLogger = debugLib;
+export const debug = debugLib;
+export default debugLib;

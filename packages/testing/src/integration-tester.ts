@@ -315,14 +315,18 @@ export class IntegrationTester<
   }
 
   async teardown(): Promise<void> {
+    debugTester('[tester] Starting teardown');
+
     // Close database connection pool first to prevent connection errors during cleanup
     if (this._db) {
+      debugTester('[tester] Closing database connection');
       try {
         // Close the database connection pool if it has an $client property (node-postgres)
         const dbWithClient = this._db as any;
         if (dbWithClient.$client?.end) {
           await dbWithClient.$client.end();
         }
+        debugTester('[tester] Database connection closed');
       } catch (error) {
         // Suppress connection termination errors during cleanup
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -331,7 +335,10 @@ export class IntegrationTester<
           !errorMessage.includes('Connection terminated') &&
           !errorMessage.includes('connection is closed')
         ) {
+          debugTester('[tester] Error closing database: %s', errorMessage);
           console.error('Failed to close database connection:', error);
+        } else {
+          debugTester('[tester] Database connection already closed');
         }
       }
       this._db = null;
@@ -339,9 +346,12 @@ export class IntegrationTester<
     }
 
     if (this._kv) {
+      debugTester('[tester] Closing KV instance');
       try {
         await this._kv.close();
+        debugTester('[tester] KV instance closed');
       } catch (error) {
+        debugTester('[tester] Error closing KV: %s', error instanceof Error ? error.message : 'unknown error');
         console.error('Failed to close KV instance:', error);
       }
       this._kv = null;
@@ -350,9 +360,12 @@ export class IntegrationTester<
     this.redisNamespace = null;
 
     if (this.redisContainer && this.ownsRedisContainer) {
+      debugTester('[tester] Stopping owned Redis container');
       try {
         await this.redisContainer.stop();
+        debugTester('[tester] Redis container stopped');
       } catch (error) {
+        debugTester('[tester] Error stopping Redis: %s', error instanceof Error ? error.message : 'unknown error');
         console.error('Failed to stop Redis container:', error);
       }
       this.redisContainer = null;
@@ -361,6 +374,7 @@ export class IntegrationTester<
     this.ownsRedisContainer = false;
 
     if (this.uniqueDatabaseName) {
+      debugTester('[tester] Dropping unique database (name: %s)', this.uniqueDatabaseName);
       try {
         const connection =
           this.options.connectionString ?? this.baseConnectionString ?? getGlobalPostgresConnectionString();
@@ -368,8 +382,12 @@ export class IntegrationTester<
         if (connection) {
           const adminDb = this.createDatabaseConnection(connection);
           await adminDb.execute(sql.raw(`DROP DATABASE IF EXISTS "${this.uniqueDatabaseName}" WITH (FORCE)`));
+          debugTester('[tester] Unique database dropped');
+        } else {
+          debugTester('[tester] No connection available to drop unique database');
         }
       } catch (error) {
+        debugTester('[tester] Error dropping unique database: %s', error instanceof Error ? error.message : 'unknown error');
         console.error(`Failed to drop unique database ${this.uniqueDatabaseName}:`, error);
       }
 
@@ -377,18 +395,23 @@ export class IntegrationTester<
     }
 
     if (this.container && this.ownsContainer) {
+      debugTester('[tester] Stopping owned PostgreSQL container');
       try {
         await this.container.stop();
+        debugTester('[tester] PostgreSQL container stopped');
       } catch (error) {
+        debugTester('[tester] Error stopping PostgreSQL: %s', error instanceof Error ? error.message : 'unknown error');
         console.error('Failed to stop container:', error);
       }
       this.container = null;
     }
 
+    debugTester('[tester] Cleaning up references');
     this._caller = null;
     this._users = null;
     this.ownsContainer = false;
     this.baseConnectionString = null;
+    debugTester('[tester] Teardown completed');
   }
 
   /**
@@ -594,6 +617,8 @@ export class IntegrationTester<
     const email = this.generateEmail();
     const name = `Test User ${this.generateString(8)}`;
 
+    debugTester('[tester] Creating dynamic user (id: %s, email: %s)', userId, email);
+
     const user: TestUser = {
       id: userId,
       email,
@@ -606,10 +631,13 @@ export class IntegrationTester<
 
     // Call onUserCreate hook if provided to create user in database
     if (this.config.onUserCreate) {
+      debugTester('[tester] Running onUserCreate hook for dynamic user');
       await this.config.onUserCreate({ user, context: baseContext });
+      debugTester('[tester] User created in database');
     }
 
     const caller = this.createCaller('user', user, baseContext);
+    debugTester('[tester] Dynamic user and caller created');
 
     return { user, caller };
   }
@@ -798,16 +826,21 @@ export class IntegrationTester<
       throw new Error('Tester not initialized. Call setup() first.');
     }
 
+    debugTester('[tester] Starting auto-rollback transaction');
     try {
       return await this._db.transaction(async tx => {
         this.currentTransaction = tx;
+        debugTester('[tester] Transaction started');
         try {
           await callback();
+          debugTester('[tester] Callback completed, initiating rollback');
           throw new Error('__ROLLBACK__');
         } catch (error) {
           if (error instanceof Error && error.message === '__ROLLBACK__') {
+            debugTester('[tester] Transaction rolled back successfully');
             return undefined as T;
           }
+          debugTester('[tester] Error in transaction callback: %s', error instanceof Error ? error.message : 'unknown error');
           throw error;
         } finally {
           this.currentTransaction = null;
@@ -821,6 +854,7 @@ export class IntegrationTester<
           error.message.includes('Connection terminated') ||
           error.message.includes('connection is closed'))
       ) {
+        debugTester('[tester] Connection closed during rollback (expected)');
         return undefined as T;
       }
       throw error;

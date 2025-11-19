@@ -34,6 +34,8 @@
 
 import { faker } from '@faker-js/faker';
 
+import { debugFactories } from './debug';
+
 /**
  * Factory builder for creating test data with a fluent API
  */
@@ -230,6 +232,7 @@ export class FactoryRegistry {
    * Register a factory
    */
   register<T>(name: string, factory: Factory<T>): void {
+    debugFactories('[factories] Registering factory (name: %s)', name);
     this.factories.set(name, factory);
   }
 
@@ -237,43 +240,58 @@ export class FactoryRegistry {
    * Check if a factory is registered
    */
   has(name: string): boolean {
-    return this.factories.has(name);
+    const exists = this.factories.has(name);
+    debugFactories('[factories] Checking factory exists (name: %s, exists: %s)', name, exists);
+    return exists;
   }
 
   /**
    * Get a registered factory
    */
   get<T>(name: string): Factory<T> | undefined {
-    return this.factories.get(name);
+    const factory = this.factories.get(name);
+    debugFactories('[factories] Getting factory (name: %s, found: %s)', name, !!factory);
+    return factory;
   }
 
   /**
    * Create an instance using a registered factory
    */
   create<T>(name: string, overrides?: Partial<T>): T {
+    debugFactories('[factories] Creating instance (name: %s, hasOverrides: %s)', name, !!overrides);
     const factory = this.factories.get(name);
     if (!factory) {
+      debugFactories('[factories] Factory not found: %s', name);
       throw new Error(`Factory '${name}' not registered`);
     }
-    return factory(overrides);
+    const instance = factory(overrides);
+    debugFactories('[factories] Instance created (name: %s)', name);
+    return instance;
   }
 
   /**
    * Create multiple instances using a registered factory
    */
   createMany<T>(name: string, count: number, overrides?: Partial<T> | ((index: number) => Partial<T>)): T[] {
+    debugFactories('[factories] Creating multiple instances (name: %s, count: %d)', name, count);
     const factory = this.factories.get(name);
     if (!factory) {
+      debugFactories('[factories] Factory not found: %s', name);
       throw new Error(`Factory '${name}' not registered`);
     }
-    return createMany(factory, count, overrides);
+    const instances = createMany(factory, count, overrides);
+    debugFactories('[factories] %d instances created (name: %s)', instances.length, name);
+    return instances;
   }
 
   /**
    * Clear all registered factories
    */
   clear(): void {
+    const count = this.factories.size;
+    debugFactories('[factories] Clearing all factories (count: %d)', count);
     this.factories.clear();
+    debugFactories('[factories] All factories cleared');
   }
 }
 
