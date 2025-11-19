@@ -339,6 +339,45 @@ export type FactoriesOutput<T extends Record<string, Factory<any>>> = {
 };
 
 /**
+ * Create a typed factory registry with full type inference
+ *
+ * Following tRPC's createTRPCRouter pattern - automatically infers types
+ * from the factory object structure without needing explicit type parameters.
+ *
+ * @param factories - Object containing factory functions
+ * @returns Typed factory registry with full autocomplete
+ *
+ * @example
+ * ```typescript
+ * // Define factories with createFactory
+ * const gameFactory = createFactory<Game>(() => ({
+ *   id: createGameId(),
+ *   name: faker.word.words(2),
+ * }));
+ *
+ * const gameModeFactory = createFactory<GameMode>(() => ({
+ *   id: createGameModeId(),
+ *   name: faker.word.word(),
+ * }));
+ *
+ * // Create registry - types are automatically inferred!
+ * const gameRegistryFactories = createFactories({
+ *   game: gameFactory,
+ *   gameMode: gameModeFactory,
+ * });
+ *
+ * // Full type inference and autocomplete
+ * const game = gameRegistryFactories.game({ name: 'Chess' }); // Type: Game
+ * const mode = gameRegistryFactories.gameMode(); // Type: GameMode
+ * ```
+ */
+export function createFactories<TFactories extends Record<string, Factory<any> | Record<string, any>>>(
+  factories: TFactories,
+): TFactories {
+  return factories;
+}
+
+/**
  * Export faker instance for convenience
  */
 export { faker };

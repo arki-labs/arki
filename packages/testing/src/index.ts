@@ -13,8 +13,13 @@ export * from './containers';
 export * from './integration-tester';
 export * from './types';
 
+// Tester builder (tRPC-style initialization)
+export { initTester } from './tester-builder';
+export type { TesterConfig } from './tester-builder';
+
 // Factory system
 export * from './factories';
+export { createFactories } from './factories';
 
 // Enhanced assertions
 export * from './assertions';

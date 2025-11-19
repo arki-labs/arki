@@ -6,7 +6,9 @@ import type { StartedTestContainer } from 'testcontainers';
 import { sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 
+import type { UserId } from '@arki/auth';
 import type { ExtractTablesWithRelations } from '@arki/db/id-factory';
+import { userIdFactory } from '@arki/auth';
 import { initDb } from '@arki/db/builder';
 import { KV } from '@arki/kv';
 
@@ -80,6 +82,7 @@ export class IntegrationTester<
   TRepositories extends Record<string, unknown>,
   TCaller,
   TContext extends Record<string, unknown>,
+  TFactories = FactoryRegistry,
 > {
   protected readonly config: IntegrationTesterConfig<TSchema, TDatabase, TRepositories, TCaller, TContext>;
   protected readonly options: TesterOptions;
@@ -108,7 +111,10 @@ export class IntegrationTester<
   protected randomCounter = 0;
   protected randomSeed: string;
 
-  protected _factoryRegistry: FactoryRegistry | null = null;
+  protected _factoryRegistry: TFactories | null = null;
+
+  protected currentUser: TestUser | null = null;
+  protected currentCaller: TCaller | null = null;
 
   /**
    * Access to assertion utilities
@@ -180,13 +186,29 @@ export class IntegrationTester<
 
   /**
    * Get factory registry for managing test data factories
+   * When using createTester pattern, factories are injected via setFactoryRegistry()
    */
-  get factory(): FactoryRegistry {
+  get factory(): TFactories {
     if (!this._factoryRegistry) {
-      this._factoryRegistry = new FactoryRegistry();
+      // Fallback for backward compatibility
+      this._factoryRegistry = new FactoryRegistry() as TFactories;
       this.registerBaseFactories();
     }
     return this._factoryRegistry;
+  }
+
+  /**
+   * Inject typed factory registry from outside
+   * Used by createTester() factory function to avoid inheritance
+   *
+   * @example
+   * ```typescript
+   * const tester = new AppTester(config);
+   * tester.setFactoryRegistry(factories);
+   * ```
+   */
+  setFactoryRegistry<T extends TFactories>(registry: T): void {
+    this._factoryRegistry = registry as TFactories;
   }
 
   getUser(role: 'user' | 'moderator' | 'admin'): TestUser {
@@ -495,6 +517,193 @@ export class IntegrationTester<
       user,
       responseHeaders: new Headers(),
     });
+  }
+
+  /**
+   * Create a new test user and return caller for that user
+   *
+   * @returns Object with user and caller
+   *
+   * @example
+   * ```typescript
+   * const { user, caller } = tester.asUser();
+   * await caller.someMethod();
+   * ```
+   */
+  asUser(): { user: TestUser; caller: TCaller } {
+    const userId = userIdFactory.create();
+    const email = this.generateEmail();
+    const name = `Test User ${this.generateString(8)}`;
+
+    const user: TestUser = {
+      id: userId,
+      email,
+      name,
+      permissions: [],
+      roles: ['user'],
+    };
+
+    this.currentUser = user;
+
+    // Create caller for this user using the base context
+    const baseContext = this.buildBaseContext();
+    this.currentCaller = this.createCaller('user', user, baseContext);
+
+    return { user, caller: this.currentCaller };
+  }
+
+  /**
+   * Create a guest (unauthenticated) caller
+   *
+   * @returns Caller without authentication
+   *
+   * @example
+   * ```typescript
+   * const caller = tester.asGuest();
+   * await caller.public.getPublicData();
+   * ```
+   */
+  asGuest(): TCaller {
+    this.currentUser = null;
+    const baseContext = this.buildBaseContext();
+    this.currentCaller = this.createCaller('user', null, baseContext);
+    return this.currentCaller;
+  }
+
+  /**
+   * Create a moderator user and return caller
+   *
+   * @returns Object with moderator user and caller
+   *
+   * @example
+   * ```typescript
+   * const { user, caller } = tester.asModerator();
+   * await caller.moderation.reviewContent();
+   * ```
+   */
+  asModerator(): { user: TestUser; caller: TCaller } {
+    const moderator = this.getUser('moderator');
+    this.currentUser = moderator;
+    const baseContext = this.buildBaseContext();
+    this.currentCaller = this.createCaller('moderator', moderator, baseContext);
+    return { user: moderator, caller: this.currentCaller };
+  }
+
+  /**
+   * Create an admin user and return caller
+   *
+   * @returns Object with admin user and caller
+   *
+   * @example
+   * ```typescript
+   * const { user, caller } = tester.asAdmin();
+   * await caller.admin.deleteUser();
+   * ```
+   */
+  asAdmin(): { user: TestUser; caller: TCaller } {
+    const admin = this.getUser('admin');
+    this.currentUser = admin;
+    const baseContext = this.buildBaseContext();
+    this.currentCaller = this.createCaller('admin', admin, baseContext);
+    return { user: admin, caller: this.currentCaller };
+  }
+
+  /**
+   * Switch context to a different user and return caller
+   *
+   * @param userId - User ID to switch to
+   * @returns Caller for the specified user
+   *
+   * @example
+   * ```typescript
+   * const { user: user1 } = tester.asUser();
+   * const { user: user2 } = tester.asUser();
+   * const caller1 = tester.withUser(user1.id);
+   * await caller1.someMethod();
+   * ```
+   */
+  withUser(userId: UserId): TCaller {
+    if (this.currentUser?.id !== userId) {
+      // Create a user with this ID
+      const user: TestUser = {
+        id: userId,
+        email: `${userId}@example.com`,
+        name: `User ${userId}`,
+        permissions: [],
+        roles: ['user'],
+      };
+      this.currentUser = user;
+      const baseContext = this.buildBaseContext();
+      this.currentCaller = this.createCaller('user', user, baseContext);
+    }
+
+    if (!this.currentCaller) {
+      throw new Error('No caller available');
+    }
+
+    return this.currentCaller;
+  }
+
+  /**
+   * Get the current user in the test context
+   *
+   * @returns Current test user or null if unauthenticated
+   *
+   * @example
+   * ```typescript
+   * const { user } = tester.asUser();
+   * const currentUser = tester.getCurrentUser();
+   * expect(currentUser?.id).toBe(user.id);
+   * ```
+   */
+  getCurrentUser(): TestUser | null {
+    return this.currentUser;
+  }
+
+  /**
+   * Get the current caller
+   *
+   * @returns Current caller instance
+   * @throws Error if no caller is available
+   *
+   * @example
+   * ```typescript
+   * tester.asUser();
+   * const caller = tester.getCaller();
+   * await caller.someMethod();
+   * ```
+   */
+  getCaller(): TCaller {
+    if (!this.currentCaller) {
+      throw new Error('No caller available. Call asUser(), asGuest(), asModerator(), or asAdmin() first.');
+    }
+    return this.currentCaller;
+  }
+
+  /**
+   * Wait for async projections to complete
+   *
+   * In event-sourced systems, projections update asynchronously after events are stored.
+   * This method waits for a short period to allow projections to process.
+   *
+   * @param ms - Milliseconds to wait (default: 100ms)
+   *
+   * @example
+   * ```typescript
+   * await tester.caller.user.createUser({ ... });
+   * await tester.waitForProjections();
+   * const user = await tester.caller.user.getUser();
+   * ```
+   */
+  async waitForProjections(ms = 100): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Get the current test context with all services
+   */
+  get context(): TContext {
+    return this.buildBaseContext();
   }
 
   /**
@@ -891,14 +1100,18 @@ export class IntegrationTester<
 
   /**
    * Register base factories from config
+   * Only works with FactoryRegistry instances, skipped for custom typed registries
    */
   protected registerBaseFactories(): void {
     if (!this.config.baseFactories || !this._factoryRegistry) {
       return;
     }
 
-    for (const [name, factory] of Object.entries(this.config.baseFactories)) {
-      this._factoryRegistry.register(name, factory);
+    // Only register if using base FactoryRegistry (not custom typed registry)
+    if (this._factoryRegistry instanceof FactoryRegistry) {
+      for (const [name, factory] of Object.entries(this.config.baseFactories)) {
+        this._factoryRegistry.register(name, factory);
+      }
     }
   }
 
