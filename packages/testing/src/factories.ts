@@ -278,6 +278,67 @@ export class FactoryRegistry {
 }
 
 /**
+ * Type-safe factory registry with full type inference
+ *
+ * Supports nested factory structures with complete TypeScript autocomplete.
+ * Inspired by tRPC's type inference patterns.
+ *
+ * @example
+ * ```typescript
+ * // Define feature-specific factories
+ * const userFactories = {
+ *   user: createFactory<User>(() => ({ id: '1', name: 'John' })),
+ *   profile: createFactory<Profile>(() => ({ userId: '1', bio: 'Hello' })),
+ * } as const;
+ *
+ * const postFactories = {
+ *   post: createFactory<Post>(() => ({ id: '1', title: 'Hello' })),
+ * } as const;
+ *
+ * // Merge into typed registry
+ * const factories = {
+ *   user: userFactories,
+ *   post: postFactories,
+ * } as const;
+ *
+ * const registry = new TypedFactoryRegistry(factories);
+ *
+ * // Full type inference and autocomplete!
+ * const user = registry.user.user({ name: 'Jane' }); // Type: User
+ * const post = registry.post.post({ title: 'World' }); // Type: Post
+ * ```
+ */
+export class TypedFactoryRegistry<
+  TFactories extends Record<string, Record<string, Factory<any>>>,
+> extends FactoryRegistry {
+  [K: string]: any;
+
+  constructor(typedFactories: TFactories) {
+    super();
+    // Expose typed factories as properties for direct access
+    Object.entries(typedFactories).forEach(([namespace, factories]) => {
+      (this as any)[namespace] = factories;
+    });
+  }
+}
+
+// Helper type to merge FactoryRegistry base with TFactories
+export type TypedFactoryRegistryInstance<TFactories extends Record<string, Record<string, Factory<any>>>> =
+  TypedFactoryRegistry<TFactories> & TFactories;
+
+/**
+ * Helper type to extract the return type of a factory
+ */
+export type FactoryOutput<T extends Factory<any>> = ReturnType<T>;
+
+/**
+ * Helper type to extract all factory outputs from a factories object
+ */
+export type FactoriesOutput<T extends Record<string, Factory<any>>> = {
+  [K in keyof T]: FactoryOutput<T[K]>;
+};
+
+/**
  * Export faker instance for convenience
  */
 export { faker };

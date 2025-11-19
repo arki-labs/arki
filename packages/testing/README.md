@@ -58,6 +58,12 @@ const TesterBase = createIntegrationTester({
       roles: ['admin'],
     },
   },
+  // Optional: Register base factories available in all tests
+  baseFactories: {
+    user: userFactory,
+    game: gameFactory,
+    session: sessionFactory,
+  },
 });
 
 export class Tester extends TesterBase {}
@@ -329,6 +335,51 @@ tester.factory.register('session', sessionFactory);
 // Use registered factories
 const user = tester.factory.create('user', { email: 'test@example.com' });
 const users = tester.factory.createMany('user', 5);
+```
+
+### Base Factories
+
+Register factories once during tester configuration to make them available in all tests:
+
+```typescript
+// In tester.ts - define your factories
+const userFactory = createFactory<User>(() => ({
+  id: createUserId(),
+  email: faker.internet.email(),
+  name: faker.person.fullName(),
+  createdAt: faker.date.past(),
+  updatedAt: new Date(),
+}));
+
+const gameFactory = createFactory<Game>(() => ({
+  id: createGameId(),
+  name: faker.word.words(2),
+  slug: faker.helpers.slugify(faker.word.words(2)),
+  status: 'active',
+  createdAt: faker.date.past(),
+  updatedAt: new Date(),
+}));
+
+// Register as base factories
+const TesterBase = createIntegrationTester({
+  // ... other config
+  baseFactories: {
+    user: userFactory,
+    game: gameFactory,
+    session: sessionFactory,
+  },
+});
+
+// In tests - factories are automatically available
+const tester = new Tester();
+await tester.setup();
+
+const user = tester.factory.create('user');
+const games = tester.factory.createMany('game', 10);
+const customGame = tester.factory.create('game', { name: 'Chess' });
+
+// You can still register additional test-specific factories
+tester.factory.register('tempEntity', tempEntityFactory);
 ```
 
 ## Enhanced Assertions
