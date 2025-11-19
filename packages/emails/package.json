@@ -1,6 +1,7 @@
 {
   "name": "@arki/emails",
   "version": "0.1.0",
+  "sideEffects": false,
   "type": "module",
   "exports": {
     ".": {
@@ -20,6 +21,7 @@
     },
     "./package.json": "./package.json"
   },
+  "types": "./dist/src/index.d.ts",
   "typesVersions": {
     "*": {
       "*": [
@@ -28,16 +30,17 @@
     }
   },
   "scripts": {
+    "build": "tsc",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "export": "pnpm email export --dir src/templates",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "studio": "pnpm email dev --dir src/templates --port 3333",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/logger": "workspace:*",
     "@react-email/body": "catalog:react-email",
     "@react-email/button": "catalog:react-email",
     "@react-email/column": "catalog:react-email",
@@ -64,7 +67,5 @@
     "@arki/vitest-config": "workspace:*",
     "react-email": "catalog:"
   },
-  "module:jsx": "src",
-  "types": "./dist/src/index.d.ts",
-  "sideEffects": false
+  "module:jsx": "src"
 }

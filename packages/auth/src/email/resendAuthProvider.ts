@@ -9,14 +9,17 @@ export function ResendProvider(
   config: EmailUserConfig,
   sendVerificationRequestTemplate?: (conf: { loginUrl: string }) => React.ReactElement | React.ReactNode,
 ): EmailConfig & { from: string } {
-  debugAuth('[ResendProvider] Initializing Resend email provider (hasApiKey: %s, hasTemplate: %s)',
-    !!apiKey, !!sendVerificationRequestTemplate);
+  debugAuth(
+    '[ResendProvider] Initializing Resend email provider (hasApiKey: %s, hasTemplate: %s)',
+    !!apiKey,
+    !!sendVerificationRequestTemplate,
+  );
 
   const resend = new Resend(apiKey);
 
   const provider = {
     id: 'email',
-    type: 'email',
+    type: 'email' as const,
     name: 'Email',
     server: '',
     from: 'Auth.js <no-reply@authjs.dev>',
@@ -25,8 +28,7 @@ export function ResendProvider(
     options: config,
   };
 
-  debugAuth('[ResendProvider] Resend provider initialized (from: %s, maxAge: %ds)',
-    provider.from, provider.maxAge);
+  debugAuth('[ResendProvider] Resend provider initialized (from: %s, maxAge: %ds)', provider.from, provider.maxAge);
 
   return provider;
 }
