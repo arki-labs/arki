@@ -1,6 +1,8 @@
 import type { UserId } from '@arki/auth';
 import type { KV } from '@arki/kv';
 
+import type { Factory } from './factories';
+
 export type TestUserRole = 'public' | 'user' | 'moderator' | 'admin';
 
 export interface TestUser {
@@ -49,4 +51,5 @@ export interface IntegrationTesterConfig<
   createCaller(args: CreateCallerArgs<TContext>): TCaller;
   createRepositories(db: TDatabase): TRepositories;
   defaultUsers: TesterUsers;
+  baseFactories?: Record<string, Factory<any>>;
 }

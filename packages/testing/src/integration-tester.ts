@@ -55,6 +55,10 @@ type CallerCollection<TCaller> = {
  *   createCaller,
  *   createRepositories,
  *   defaultUsers: { user, moderator, admin },
+ *   baseFactories: {
+ *     user: userFactory,
+ *     game: gameFactory,
+ *   },
  * });
  *
  * export class Tester extends TesterBase {}
@@ -63,6 +67,7 @@ type CallerCollection<TCaller> = {
  * const tester = new Tester();
  * await tester.setup();
  * await tester.withTransaction(async () => {
+ *   const user = tester.factory.create('user'); // Base factory auto-registered
  *   const result = await tester.caller.user.someMethod();
  *   tester.assertValidId(result.id, 'prefix_');
  * });
@@ -179,6 +184,7 @@ export class IntegrationTester<
   get factory(): FactoryRegistry {
     if (!this._factoryRegistry) {
       this._factoryRegistry = new FactoryRegistry();
+      this.registerBaseFactories();
     }
     return this._factoryRegistry;
   }
@@ -881,6 +887,19 @@ export class IntegrationTester<
    */
   resetRandomCounter(): void {
     this.randomCounter = 0;
+  }
+
+  /**
+   * Register base factories from config
+   */
+  protected registerBaseFactories(): void {
+    if (!this.config.baseFactories || !this._factoryRegistry) {
+      return;
+    }
+
+    for (const [name, factory] of Object.entries(this.config.baseFactories)) {
+      this._factoryRegistry.register(name, factory);
+    }
   }
 
   protected mergeUsers(overrides: TesterUserOverrides = {}): TesterUsers {
