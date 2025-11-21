@@ -30,5 +30,5 @@ export * from './debug';
 // Performance utilities
 export * from './performance';
 
-// Vitest setup utilities
-export * from './vitest-setup';
+// Note: vitest-setup is available as a separate entry point
+// Import it directly via '@arki/testing/vitest-setup' in your setup files
