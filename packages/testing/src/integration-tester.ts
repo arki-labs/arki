@@ -7,6 +7,7 @@ import { sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 
 import type { UserId } from '@arki/auth';
+import { createUserId } from '@arki/auth';
 import type { ExtractTablesWithRelations } from '@arki/db/id-factory';
 import { initDb } from '@arki/db/builder';
 import { KV } from '@arki/kv';
@@ -152,6 +153,22 @@ export class IntegrationTester<
     return this._db;
   }
 
+  /**
+   * Get the current database context (transaction if active, otherwise base db)
+   * This ensures operations use the transaction when running inside withTransaction()
+   */
+  protected getCurrentDb(): TDatabase {
+    if (!this._db) {
+      throw new Error('Tester not initialized. Call setup() first.');
+    }
+    // Return transaction if one is active, otherwise return base db
+    const useTransaction = !!this.currentTransaction;
+    if (useTransaction) {
+      debugTester('[tester] getCurrentDb: Using transaction context');
+    }
+    return (this.currentTransaction ?? this._db) as TDatabase;
+  }
+
   get repo(): TRepositories {
     if (!this._repo) {
       throw new Error('Tester not initialized. Call setup() first.');
@@ -246,12 +263,29 @@ export class IntegrationTester<
       this.uniqueDatabaseName = `test_${crypto.randomBytes(8).toString('hex')}`;
       debugTester('[tester] Creating unique database (name: %s)', this.uniqueDatabaseName);
       const adminDb = this.createDatabaseConnection(connectionString);
-      await adminDb.execute(sql.raw(`CREATE DATABASE "${this.uniqueDatabaseName}"`));
+      try {
+        await adminDb.execute(sql.raw(`CREATE DATABASE "${this.uniqueDatabaseName}"`));
 
-      const url = new URL(connectionString);
-      url.pathname = `/${this.uniqueDatabaseName}`;
-      connectionString = url.toString();
-      debugTester('[tester] Unique database created');
+        const url = new URL(connectionString);
+        url.pathname = `/${this.uniqueDatabaseName}`;
+        connectionString = url.toString();
+        debugTester('[tester] Unique database created');
+      } finally {
+        // Close the admin connection after creating the database
+        try {
+          const dbWithClient = adminDb as any;
+          if (dbWithClient.$client) {
+            if (typeof dbWithClient.$client.end === 'function') {
+              await dbWithClient.$client.end();
+            } else if (typeof dbWithClient.$client.release === 'function') {
+              await dbWithClient.$client.release();
+            }
+          }
+          debugTester('[tester] Admin database connection closed after setup');
+        } catch (closeError) {
+          debugTester('[tester] Error closing admin connection during setup: %s', closeError instanceof Error ? closeError.message : 'unknown error');
+        }
+      }
     }
 
     debugTester('[tester] Creating database connection and running migrations');
@@ -323,8 +357,15 @@ export class IntegrationTester<
       try {
         // Close the database connection pool if it has an $client property (node-postgres)
         const dbWithClient = this._db as any;
-        if (dbWithClient.$client?.end) {
-          await dbWithClient.$client.end();
+        if (dbWithClient.$client) {
+          // Check if it's a Pool (has 'end' method) or a Client (has 'release' method)
+          if (typeof dbWithClient.$client.end === 'function') {
+            debugTester('[tester] Ending database pool');
+            await dbWithClient.$client.end();
+          } else if (typeof dbWithClient.$client.release === 'function') {
+            debugTester('[tester] Releasing database client');
+            await dbWithClient.$client.release();
+          }
         }
         debugTester('[tester] Database connection closed');
       } catch (error) {
@@ -333,12 +374,13 @@ export class IntegrationTester<
         if (
           !errorMessage.includes('server closed the connection') &&
           !errorMessage.includes('Connection terminated') &&
-          !errorMessage.includes('connection is closed')
+          !errorMessage.includes('connection is closed') &&
+          !errorMessage.includes('terminating connection due to administrator command')
         ) {
           debugTester('[tester] Error closing database: %s', errorMessage);
           console.error('Failed to close database connection:', error);
         } else {
-          debugTester('[tester] Database connection already closed');
+          debugTester('[tester] Database connection already closed or terminated');
         }
       }
       this._db = null;
@@ -375,12 +417,13 @@ export class IntegrationTester<
 
     if (this.uniqueDatabaseName) {
       debugTester('[tester] Dropping unique database (name: %s)', this.uniqueDatabaseName);
+      let adminDb: TDatabase | null = null;
       try {
         const connection =
           this.options.connectionString ?? this.baseConnectionString ?? getGlobalPostgresConnectionString();
 
         if (connection) {
-          const adminDb = this.createDatabaseConnection(connection);
+          adminDb = this.createDatabaseConnection(connection);
           await adminDb.execute(sql.raw(`DROP DATABASE IF EXISTS "${this.uniqueDatabaseName}" WITH (FORCE)`));
           debugTester('[tester] Unique database dropped');
         } else {
@@ -389,6 +432,26 @@ export class IntegrationTester<
       } catch (error) {
         debugTester('[tester] Error dropping unique database: %s', error instanceof Error ? error.message : 'unknown error');
         console.error(`Failed to drop unique database ${this.uniqueDatabaseName}:`, error);
+      } finally {
+        // Close the admin connection
+        if (adminDb) {
+          try {
+            const dbWithClient = adminDb as any;
+            if (dbWithClient.$client) {
+              if (typeof dbWithClient.$client.end === 'function') {
+                await dbWithClient.$client.end();
+              } else if (typeof dbWithClient.$client.release === 'function') {
+                await dbWithClient.$client.release();
+              }
+            }
+            debugTester('[tester] Admin database connection closed');
+          } catch (closeError) {
+            const errorMessage = closeError instanceof Error ? closeError.message : String(closeError);
+            if (!errorMessage.includes('terminating connection due to administrator command')) {
+              debugTester('[tester] Error closing admin connection: %s', errorMessage);
+            }
+          }
+        }
       }
 
       this.uniqueDatabaseName = null;
@@ -561,9 +624,11 @@ export class IntegrationTester<
       throw new Error('Tester not initialized. Call setup() first.');
     }
 
-    const repositories = this.config.createRepositories(this._db);
+    // Use current db (transaction if active) to ensure operations are isolated
+    const currentDb = this.getCurrentDb();
+    const repositories = this.config.createRepositories(currentDb);
     const context = this.config.createContext({
-      db: this._db,
+      db: currentDb,
       repo: repositories,
       kv: this._kv,
       connectionString: this.baseConnectionString,
@@ -613,7 +678,7 @@ export class IntegrationTester<
    * ```
    */
   async createUser(): Promise<{ user: TestUser; caller: TCaller }> {
-    const userId = crypto.randomBytes(12).toString('hex') as UserId;
+    const userId = createUserId();
     const email = this.generateEmail();
     const name = `Test User ${this.generateString(8)}`;
 
@@ -1238,9 +1303,13 @@ export class IntegrationTester<
     if (!this._db || !this._repo || !this.baseConnectionString) {
       throw new Error('Tester not initialized. Call setup() first.');
     }
+    // Use current db (transaction if active) and create fresh repositories
+    // This ensures event sourcing projections write within the transaction scope
+    const currentDb = this.getCurrentDb();
+    const repositories = this.config.createRepositories(currentDb);
     return this.config.createContext({
-      db: this._db,
-      repo: this._repo,
+      db: currentDb,
+      repo: repositories,
       kv: this._kv,
       connectionString: this.baseConnectionString,
     });
