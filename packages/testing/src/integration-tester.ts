@@ -102,6 +102,7 @@ export class IntegrationTester<
   protected _kv: KV | null = null;
   protected _users: TesterUsers | null = null;
   protected _caller: CallerCollection<TCaller> | null = null;
+  protected _baseContext: TContext | null = null;
 
   protected currentTransaction: PgTransaction<
     NodePgQueryResultHKT,
@@ -328,6 +329,7 @@ export class IntegrationTester<
     debugTester('[tester] KV instance created');
 
     const baseContext = this.buildBaseContext();
+    this._baseContext = baseContext;
     debugTester('[tester] Creating test users');
     this._users = this.mergeUsers(users);
 
@@ -351,38 +353,75 @@ export class IntegrationTester<
   async teardown(): Promise<void> {
     debugTester('[tester] Starting teardown');
 
-    // Close database connection pool first to prevent connection errors during cleanup
-    if (this._db) {
-      debugTester('[tester] Closing database connection');
+    // Step 1: Close event store connection first (if exists in context)
+    const contextForCleanup = this._baseContext;
+    if (contextForCleanup && 'closeEventStore' in contextForCleanup) {
+      debugTester('[tester] Closing event store connection via cleanup function');
       try {
-        // Close the database connection pool if it has an $client property (node-postgres)
-        const dbWithClient = this._db as any;
-        if (dbWithClient.$client) {
-          // Check if it's a Pool (has 'end' method) or a Client (has 'release' method)
-          if (typeof dbWithClient.$client.end === 'function') {
-            debugTester('[tester] Ending database pool');
-            await dbWithClient.$client.end();
-          } else if (typeof dbWithClient.$client.release === 'function') {
-            debugTester('[tester] Releasing database client');
-            await dbWithClient.$client.release();
-          }
+        const closeEventStore = (contextForCleanup as any).closeEventStore;
+        if (typeof closeEventStore === 'function') {
+          await closeEventStore();
+          debugTester('[tester] Event store connection closed successfully');
+        } else {
+          debugTester('[tester] closeEventStore is not a function, skipping');
         }
-        debugTester('[tester] Database connection closed');
       } catch (error) {
-        // Suppress connection termination errors during cleanup
         const errorMessage = error instanceof Error ? error.message : String(error);
+        debugTester('[tester] Error closing event store: %s', errorMessage);
+        // Only log significant errors, not expected cleanup messages
         if (
           !errorMessage.includes('server closed the connection') &&
           !errorMessage.includes('Connection terminated') &&
           !errorMessage.includes('connection is closed') &&
           !errorMessage.includes('terminating connection due to administrator command')
         ) {
-          debugTester('[tester] Error closing database: %s', errorMessage);
-          console.error('Failed to close database connection:', error);
-        } else {
-          debugTester('[tester] Database connection already closed or terminated');
+          console.error('Failed to close event store connection:', error);
         }
       }
+    } else if (contextForCleanup && 'eventStore' in contextForCleanup) {
+      // Fallback: try old method if closeEventStore function doesn't exist
+      debugTester('[tester] No closeEventStore function found, attempting direct close');
+      try {
+        const eventStore = (contextForCleanup as any).eventStore;
+        if (eventStore && typeof eventStore.close === 'function') {
+          await eventStore.close();
+          debugTester('[tester] Event store connection closed via direct method');
+        }
+      } catch (error) {
+        debugTester('[tester] Error in fallback event store close: %s', error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    // Step 2: Close database connection pool
+    if (this._db) {
+      debugTester('[tester] Closing database connection');
+      try {
+        const dbWithClient = this._db as any;
+        if (dbWithClient.$client) {
+          if (typeof dbWithClient.$client.end === 'function') {
+            debugTester('[tester] Ending database pool');
+            await dbWithClient.$client.end();
+            debugTester('[tester] Database pool ended successfully');
+          } else if (typeof dbWithClient.$client.release === 'function') {
+            debugTester('[tester] Releasing database client');
+            await dbWithClient.$client.release();
+            debugTester('[tester] Database client released successfully');
+          }
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        debugTester('[tester] Error closing database: %s', errorMessage);
+        // Only log significant errors
+        if (
+          !errorMessage.includes('server closed the connection') &&
+          !errorMessage.includes('Connection terminated') &&
+          !errorMessage.includes('connection is closed') &&
+          !errorMessage.includes('terminating connection due to administrator command')
+        ) {
+          console.error('Failed to close database connection:', error);
+        }
+      }
+
       this._db = null;
       this._repo = null;
     }
@@ -472,6 +511,7 @@ export class IntegrationTester<
     debugTester('[tester] Cleaning up references');
     this._caller = null;
     this._users = null;
+    this._baseContext = null;
     this.ownsContainer = false;
     this.baseConnectionString = null;
     debugTester('[tester] Teardown completed');
@@ -1303,16 +1343,47 @@ export class IntegrationTester<
     if (!this._db || !this._repo || !this.baseConnectionString) {
       throw new Error('Tester not initialized. Call setup() first.');
     }
-    // Use current db (transaction if active) and create fresh repositories
-    // This ensures event sourcing projections write within the transaction scope
+
     const currentDb = this.getCurrentDb();
     const repositories = this.config.createRepositories(currentDb);
-    return this.config.createContext({
+
+    // Reuse the initial context when not in a transaction to avoid creating duplicate connections
+    if (!this.currentTransaction && this._baseContext) {
+      return this._baseContext;
+    }
+
+    // When running inside a transaction, reuse heavy resources (event store, message bus)
+    // from the base context while swapping in the transactional db/repositories.
+    if (this._baseContext && this.currentTransaction) {
+      const clonedContext: any = {
+        ...(this._baseContext as any),
+        db: currentDb,
+        repo: repositories,
+      };
+
+      if ('kv' in clonedContext && this._kv) {
+        clonedContext.kv = this._kv;
+      }
+
+      if ('runInTransaction' in clonedContext && typeof (currentDb as any).transaction === 'function') {
+        clonedContext.runInTransaction = (currentDb as any).transaction.bind(currentDb);
+      }
+
+      return clonedContext as TContext;
+    }
+
+    const context = this.config.createContext({
       db: currentDb,
       repo: repositories,
       kv: this._kv,
       connectionString: this.baseConnectionString,
     });
+
+    if (!this.currentTransaction) {
+      this._baseContext = context;
+    }
+
+    return context;
   }
 
   protected createDatabaseConnection(connectionString: string): TDatabase {

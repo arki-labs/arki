@@ -97,6 +97,13 @@ export async function teardownGlobalTestContainers(): Promise<void> {
   debugContainers('[containers] Tearing down global test containers');
   console.log('🛑 Stopping shared containers...');
 
+  // Add a delay to allow connections (main db, event store, admin) to fully close
+  // Event stores use connection pools with many connections that need time to drain
+  // With high _poolUseCount (48+), we need sufficient time for graceful shutdown
+  // This prevents "terminating connection due to administrator command" errors
+  debugContainers('[containers] Waiting for connections to close...');
+  await new Promise(resolve => setTimeout(resolve, 5000));
+
   if (sharedPostgresContainer) {
     debugContainers('[containers] Stopping PostgreSQL container');
     await sharedPostgresContainer.stop();

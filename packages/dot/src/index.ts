@@ -553,7 +553,10 @@ export class Dot<
       }
     }
 
-    return eventSourcingFeatures.initEventSourcing(this.#eventSourcingConfig?.projections ?? [], eventDbUrl);
+    // Destructure to extract only the eventStore
+    // The close function is available but not currently used by the Dot framework
+    const { eventStore } = eventSourcingFeatures.initEventSourcing(this.#eventSourcingConfig?.projections ?? [], eventDbUrl);
+    return eventStore;
   }
 
   /** @internal Initializes the Key-Value store. */

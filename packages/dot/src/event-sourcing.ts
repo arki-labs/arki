@@ -56,6 +56,7 @@ export const eventSourcingFeatures = {
    * @internal Initializes the Event Store.
    * @param projections The projections to initialize the event store with
    * @param dbUrl The database URL to initialize the event store with
+   * @returns Object with eventStore and close function for cleanup
    */
   initEventSourcing(
     p: ProjectionDefinition<any, PostgresReadEventMetadata, PostgreSQLProjectionHandlerContext>[],
@@ -70,12 +71,12 @@ export const eventSourcingFeatures = {
       );
     }
     debugEventSourcing('[eventSourcingFeatures] Initializing Event Store with %d projection(s)', p.length);
-    const eventStore = getEventStore(dbUrl, {
+    const { eventStore, close } = getEventStore(dbUrl, {
       // Ensure projections are passed correctly
       projections: projections.inline(p),
     });
     debugEventSourcing('[eventSourcingFeatures] Event Store initialized successfully');
-    return eventStore;
+    return { eventStore, close };
   },
 
   /**
