@@ -1,0 +1,101 @@
+/* ===========================================
+   Design System Animation Utilities
+   @arki/ui/styles/animations.css
+   =========================================== */
+
+/* ---------------------------------------------
+   Theme Transition Handling
+   Prevents jarring flashes when switching
+   between light and dark modes
+   --------------------------------------------- */
+.disable-transitions,
+.disable-transitions *,
+.disable-transitions *::before,
+.disable-transitions *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* ---------------------------------------------
+   Progress/Loading Keyframes
+   --------------------------------------------- */
+@theme inline {
+  --animate-progress-slide: progress-slide 1.5s ease-in-out infinite;
+  --animate-shimmer: shimmer 2s infinite;
+  --animate-progress-pulse: progress-pulse 1.5s ease-in-out infinite;
+
+  @keyframes progress-slide {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  @keyframes shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  @keyframes progress-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+}
+
+/* ---------------------------------------------
+   Animated Link Underline - Expands from Left
+   Usage: <a class="link-underline">...</a>
+   --------------------------------------------- */
+@utility link-underline {
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 1px;
+    width: 0;
+    background-color: currentColor;
+    transition: width 300ms ease-out;
+  }
+
+  &:hover::after {
+    width: 100%;
+  }
+}
+
+/* ---------------------------------------------
+   Animated Link Underline - Expands from Center
+   Usage: <a class="link-underline-center">...</a>
+   --------------------------------------------- */
+@utility link-underline-center {
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    height: 1px;
+    width: 0;
+    background-color: currentColor;
+    transform: translateX(-50%);
+    transition: width 300ms ease-out;
+  }
+
+  &:hover::after {
+    width: 100%;
+  }
+}

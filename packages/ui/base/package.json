@@ -313,6 +313,7 @@
       "import": "./src/tooltip.tsx",
       "browser": "./src/tooltip.tsx"
     },
+    "./styles/animations.css": "./src/styles/animations.css",
     "./*": {
       "types": "./dist/src/*.d.ts",
       "import": "./src/*.tsx",
