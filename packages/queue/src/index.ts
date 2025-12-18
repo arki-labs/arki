@@ -118,6 +118,7 @@ export type {
   QueuePriority,
   RetryConfig,
   ScheduleDefinition,
+  TriggerOptions,
 } from './types/index.ts';
 
 // Constants

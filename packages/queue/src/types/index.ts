@@ -29,6 +29,7 @@ export type {
   JobOptions,
   QueuePriority,
   RetryConfig,
+  TriggerOptions,
 } from './job.ts';
 
 // Middleware types

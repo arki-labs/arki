@@ -5,7 +5,7 @@
  * beyond the basic assertions built into IntegrationTester.
  */
 
-import type { ZodSchema } from 'zod';
+import type { ZodSchema } from 'zod/v4';
 
 /**
  * Assert that a pagination response is valid

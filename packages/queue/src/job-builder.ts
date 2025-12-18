@@ -115,17 +115,42 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
       type ActualInput = THandlerInput extends never ? TInput : THandlerInput;
       type ActualOutput = THandlerOutput extends never ? TOutput : THandlerOutput;
 
-      return {
+      const jobName = state.name;
+
+      const definition: JobDefinition<ActualInput, ActualOutput, TContextOut> = {
         _type: 'job',
         _internal: {
-          name: state.name,
+          name: jobName,
           inputSchema: state.inputSchema as z.ZodType<ActualInput>,
           handler: handler as JobHandler<ActualInput, ActualOutput, TContextOut>,
           options: state.options,
           // Middleware array stored for runtime execution
           middlewares: state.middlewares,
         },
+        trigger: async (data, options) => {
+          const queue = definition._internal._queue;
+          if (!queue) {
+            throw new Error(
+              `Job "${jobName}" is not registered with a queue. ` +
+                `Call queue.register() before calling trigger().`,
+            );
+          }
+
+          debugBuilder('[%s] Triggering job with options: %o', jobName, options);
+
+          const job = await queue.add(jobName, data, {
+            priority: options?.priority,
+            delay: options?.delay,
+            jobId: options?.jobId,
+            ...options?.bullmqOptions,
+          });
+
+          debugBuilder('[%s] Job triggered with ID: %s', jobName, job.id);
+          return job.id ?? '';
+        },
       };
+
+      return definition;
     },
   };
 }

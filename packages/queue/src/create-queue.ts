@@ -155,6 +155,9 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
       }
     });
 
+    // Store queue reference on the definition for trigger()
+    internal._queue = queue;
+
     // Store instances
     queues.push(queue);
     workers.push(worker);

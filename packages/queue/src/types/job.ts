@@ -226,11 +226,32 @@ export type InternalJobDefinition<TInput, TOutput, TDeps = Record<string, never>
 };
 
 /**
+ * Options for triggering a job
+ */
+export type TriggerOptions = {
+  /** Job priority (lower number = higher priority) */
+  priority?: QueuePriority;
+  /** Delay in milliseconds before processing */
+  delay?: number;
+  /** Custom job ID (defaults to auto-generated) */
+  jobId?: string;
+  /** Additional BullMQ job options */
+  bullmqOptions?: Partial<JobsOptions>;
+};
+
+/**
  * Job definition created by job builder
  */
 export type JobDefinition<TInput, TOutput, TDeps = Record<string, never>> = {
   _type: 'job';
   _internal: InternalJobDefinition<TInput, TOutput, TDeps>;
+  /**
+   * Trigger a job with the given input data
+   * @param data - Input data for the job
+   * @param options - Optional trigger options (priority, delay, etc.)
+   * @returns Promise resolving to the job ID
+   */
+  trigger: (data: TInput, options?: TriggerOptions) => Promise<string>;
 };
 
 /**
