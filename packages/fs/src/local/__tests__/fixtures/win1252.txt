@@ -1,0 +1,1 @@
+Windows encoding: "smart quotes" and €

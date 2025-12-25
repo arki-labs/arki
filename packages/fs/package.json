@@ -23,7 +23,8 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "vitest run"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {

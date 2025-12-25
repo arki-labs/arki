@@ -1,0 +1,3 @@
+Hello, World!
+This is a UTF-8 encoded file.
+Special characters: áéíóú ñ € £ ¥
