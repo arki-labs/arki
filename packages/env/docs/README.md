@@ -13,7 +13,7 @@ After analyzing environment variable usage across the monorepo, several patterns
 - Next.js apps use `@t3-oss/env-nextjs` with `experimental__runtimeEnv`
 - Backend/server packages use `@t3-oss/env-core` with `runtimeEnv`
 - Every environment variable must be manually mapped in `runtimeEnv` (50%+ boilerplate)
-- Common schemas (NODE_ENV, PORT, DATABASE_URL) are repeated across apps
+- Common schemas (NODE_ENV, PORT, DB_URL) are repeated across apps
 - Inconsistent `skipValidation` patterns across different packages
 
 **Typical Next.js env.ts Structure:**
@@ -24,7 +24,7 @@ import { z } from 'zod';
 
 export const env = createEnv({
   server: {
-    DATABASE_URL: z.string().url(),
+    DB_URL: z.string().url(),
     API_KEY: z.string(),
     PORT: z.coerce.number().default(3000),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -34,7 +34,7 @@ export const env = createEnv({
   },
   // PAIN POINT: Every variable must be manually mapped
   experimental__runtimeEnv: {
-    DATABASE_URL: process.env['DATABASE_URL'],
+    DB_URL: process.env['DB_URL'],
     API_KEY: process.env['API_KEY'],
     PORT: process.env['PORT'],
     NODE_ENV: process.env['NODE_ENV'],
@@ -61,7 +61,7 @@ Reduce boilerplate while maintaining Next.js bundler compatibility:
 ```typescript
 // ❌ Before: Manual mapping (repetitive)
 experimental__runtimeEnv: {
-  DATABASE_URL: process.env['DATABASE_URL'],
+  DB_URL: process.env['DB_URL'],
   API_KEY: process.env['API_KEY'],
   REDIS_URL: process.env['REDIS_URL'],
   PORT: process.env['PORT'],
@@ -72,7 +72,7 @@ experimental__runtimeEnv: {
 import { serverEnv, clientEnv } from '@arki/env/nextjs';
 
 experimental__runtimeEnv: {
-  ...serverEnv(['DATABASE_URL', 'API_KEY', 'REDIS_URL', 'PORT']),
+  ...serverEnv(['DB_URL', 'API_KEY', 'REDIS_URL', 'PORT']),
   ...clientEnv(['API_URL']), // Auto-handles NEXT_PUBLIC_ prefix
 }
 ```
@@ -94,7 +94,7 @@ import { defineEnv, serverEnv, clientEnv, contracts } from '@arki/env/nextjs';
 export const env = defineEnv({
   server: {
     // Common contracts with sensible defaults
-    DATABASE_URL: contracts.databaseUrl(),        // postgres:// validation
+    DB_URL: contracts.databaseUrl(),        // postgres:// validation
     REDIS_URL: contracts.redisUrl(),              // redis:// validation
     PORT: contracts.port(3000),                   // number, 1-65535, default 3000
     NODE_ENV: contracts.nodeEnv(),                // enum + default
@@ -109,7 +109,7 @@ export const env = defineEnv({
     API_URL: contracts.url('https://api.example.com'),
   },
   experimental__runtimeEnv: {
-    ...serverEnv(['DATABASE_URL', 'REDIS_URL', 'PORT', 'NODE_ENV', 'LOG_LEVEL', 'ENABLE_FEATURE_X', 'JSON_CONFIG', 'ALLOWED_ORIGINS']),
+    ...serverEnv(['DB_URL', 'REDIS_URL', 'PORT', 'NODE_ENV', 'LOG_LEVEL', 'ENABLE_FEATURE_X', 'JSON_CONFIG', 'ALLOWED_ORIGINS']),
     ...clientEnv(['API_URL']),
   },
 });
@@ -172,7 +172,7 @@ Better error formatting with descriptions:
 ```typescript
 export const env = defineEnv({
   server: {
-    DATABASE_URL: contracts.databaseUrl().describe('PostgreSQL connection string from Vercel/Supabase dashboard'),
+    DB_URL: contracts.databaseUrl().describe('PostgreSQL connection string from Vercel/Supabase dashboard'),
   },
   options: {
     // Different validation modes
@@ -210,14 +210,14 @@ export const baseServerEnv = {
 export const env = defineEnv(
   extendEnv(baseServerEnv, {
     server: {
-      DATABASE_URL: contracts.databaseUrl(),
+      DB_URL: contracts.databaseUrl(),
       // Inherits NODE_ENV and LOG_LEVEL from baseServerEnv
     },
     client: {
       API_URL: contracts.url(),
     },
     experimental__runtimeEnv: {
-      ...serverEnv(['NODE_ENV', 'LOG_LEVEL', 'DATABASE_URL']),
+      ...serverEnv(['NODE_ENV', 'LOG_LEVEL', 'DB_URL']),
       ...clientEnv(['API_URL']),
     },
   }),
@@ -585,7 +585,7 @@ import { clientEnv, contracts, defineEnv, serverEnv } from '@arki/env/nextjs';
 export const env = defineEnv({
   server: {
     // Database
-    DATABASE_URL: contracts.databaseUrl(),
+    DB_URL: contracts.databaseUrl(),
 
     // Redis
     REDIS_URL: contracts.redisUrl(),
@@ -612,7 +612,7 @@ export const env = defineEnv({
   },
   experimental__runtimeEnv: {
     ...serverEnv([
-      'DATABASE_URL',
+      'DB_URL',
       'REDIS_URL',
       'PORT',
       'NODE_ENV',
@@ -635,7 +635,7 @@ import { contracts, defineEnv } from '@arki/env/core';
 
 export const env = defineEnv({
   server: {
-    DATABASE_URL: contracts.databaseUrl(),
+    DB_URL: contracts.databaseUrl(),
     REDIS_URL: contracts.redisUrl(),
     PORT: contracts.port(3001),
     NODE_ENV: contracts.nodeEnv(),
@@ -677,14 +677,14 @@ export const baseServerEnv = {
 export const env = defineEnv(
   extendEnv(baseServerEnv, {
     server: {
-      DATABASE_URL: contracts.databaseUrl(),
+      DB_URL: contracts.databaseUrl(),
       // Inherits NODE_ENV and LOG_LEVEL
     },
     client: {
       API_URL: contracts.url(),
     },
     experimental__runtimeEnv: {
-      ...serverEnv(['NODE_ENV', 'LOG_LEVEL', 'DATABASE_URL']),
+      ...serverEnv(['NODE_ENV', 'LOG_LEVEL', 'DB_URL']),
       ...clientEnv(['API_URL']),
     },
   }),
@@ -700,7 +700,7 @@ export const env = defineEnv(
    - After: 1 line with `serverEnv()` helper
 
 2. **Zero Schema Duplication**
-   - Before: Copy-paste PORT, NODE_ENV, DATABASE_URL across 10+ apps
+   - Before: Copy-paste PORT, NODE_ENV, DB_URL across 10+ apps
    - After: Single `contracts.port()` reused everywhere
 
 3. **Improved Type Safety**
@@ -728,7 +728,7 @@ import { z } from 'zod';
 
 export const env = createEnv({
   server: {
-    DATABASE_URL: z.url().refine(url => url.startsWith('postgres://'), 'Must be postgres URL'),
+    DB_URL: z.url().refine(url => url.startsWith('postgres://'), 'Must be postgres URL'),
     PORT: z.coerce.number().min(1).max(65535).default(3000),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     REDIS_URL: z.url().refine(url => url.startsWith('redis://'), 'Must be redis URL'),
@@ -744,7 +744,7 @@ export const env = createEnv({
     NEXT_PUBLIC_API_URL: z.string().url().default('https://api.example.com'),
   },
   experimental__runtimeEnv: {
-    DATABASE_URL: process.env['DATABASE_URL'],
+    DB_URL: process.env['DB_URL'],
     PORT: process.env['PORT'],
     NODE_ENV: process.env['NODE_ENV'],
     REDIS_URL: process.env['REDIS_URL'],
@@ -764,7 +764,7 @@ import { clientEnv, contracts, defineEnv, serverEnv } from '@arki/env/nextjs';
 
 export const env = defineEnv({
   server: {
-    DATABASE_URL: contracts.databaseUrl(),
+    DB_URL: contracts.databaseUrl(),
     PORT: contracts.port(3000),
     NODE_ENV: contracts.nodeEnv(),
     REDIS_URL: contracts.redisUrl(),
@@ -776,7 +776,7 @@ export const env = defineEnv({
     API_URL: contracts.url('https://api.example.com'),
   },
   experimental__runtimeEnv: {
-    ...serverEnv(['DATABASE_URL', 'PORT', 'NODE_ENV', 'REDIS_URL', 'LOG_LEVEL', 'AUTH_SECRET', 'ENABLE_ANALYTICS']),
+    ...serverEnv(['DB_URL', 'PORT', 'NODE_ENV', 'REDIS_URL', 'LOG_LEVEL', 'AUTH_SECRET', 'ENABLE_ANALYTICS']),
     ...clientEnv(['API_URL']),
   },
 });

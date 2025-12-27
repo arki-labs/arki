@@ -51,6 +51,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@types/bun": "catalog:",
     "@types/pg": "catalog:drizzle",
     "typescript": "catalog:"
   }

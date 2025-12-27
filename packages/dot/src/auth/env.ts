@@ -29,7 +29,7 @@ export const authEnv = createEnv({
     APP_KEY: z.string().optional(),
 
     // Database
-    DATABASE_URL: z.string().optional(),
+    DB_URL: z.string().optional(),
     DB_URL: z.string().optional(),
     POSTGRES_URL: z.string().optional(),
 
@@ -124,7 +124,7 @@ export const authEnv = createEnv({
     APP_KEY: process.env.APP_KEY,
 
     // Database
-    DATABASE_URL: process.env.DATABASE_URL,
+    DB_URL: process.env.DB_URL,
     DB_URL: process.env.DB_URL,
     POSTGRES_URL: process.env.POSTGRES_URL,
 
@@ -222,7 +222,7 @@ export function getProductionUrl(): string | undefined {
  * Helper function to get database URL from validated environment
  */
 export function getDatabaseUrl(): string | undefined {
-  return authEnv.DATABASE_URL || authEnv.DB_URL || authEnv.POSTGRES_URL;
+  return authEnv.DB_URL || authEnv.DB_URL || authEnv.POSTGRES_URL;
 }
 
 /**

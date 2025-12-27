@@ -5,24 +5,24 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { KV } from '@arki/kv';
 
 import type { DotAuth, DotSession } from './auth';
+import type { ExtractAllRepositoryTypes, ExtractAllRouterTypes, PluginConfig } from './plugin';
+import type { PluginSetupContext } from './trpc/types';
+import type {
+  AuthConfig,
+  BaseProjectionDefinition,
+  CommandHandlerRegistration,
+  EnvConfig,
+  Repository,
+  RouterRecord,
+  SchemaInterface,
+  TRPCOptions,
+} from './types';
 import { authFeatures } from './auth';
 import { dbFeatures } from './db';
 import { EVENT_STORE_URL_VARIANTS, eventSourcingFeatures } from './event-sourcing';
 import { kvFeatures } from './kv';
-import type { ExtractAllRepositoryTypes, ExtractAllRouterTypes, PluginConfig } from './plugin';
 import { PluginRegistry } from './plugin';
 import { createDotProcedures, trpcFeatures } from './trpc';
-import type { PluginSetupContext } from './trpc/types';
-import type {
-    AuthConfig,
-    BaseProjectionDefinition,
-    CommandHandlerRegistration,
-    EnvConfig,
-    Repository,
-    RouterRecord,
-    SchemaInterface,
-    TRPCOptions,
-} from './types';
 
 /**
  * Dot Framework Builder
@@ -56,7 +56,7 @@ export class Dot<
 
   // #region Environment Variable Constants
   /** @internal Alternative names for the primary database connection URL environment variable. */
-  static readonly #DB_URL_VARIANTS = ['DB_URL', 'DATABASE_URL', 'POSTGRES_URL', 'POSTGRESQL_URL', 'PG_URL', 'SQL_URL'];
+  static readonly #DB_URL_VARIANTS = ['DB_URL', 'DB_URL', 'POSTGRES_URL', 'POSTGRESQL_URL', 'PG_URL', 'SQL_URL'];
 
   /** @internal Alternative names for the Key-Value store connection URL environment variable. */
   static readonly #KV_URL_VARIANTS = ['KV_URL', 'REDIS_URL', 'KEYVALUE_URL', 'CACHE_URL', 'UPSTASH_REDIS_URL'];
@@ -167,7 +167,7 @@ export class Dot<
    *
    * This is the primary method for setting up Drizzle ORM and associated repositories.
    * The database URL will be automatically inferred from environment variables
-   * (e.g., DB_URL, DATABASE_URL) if not explicitly provided in `options.url`.
+   * (e.g., DB_URL, DB_URL) if not explicitly provided in `options.url`.
    *
    * @param schema The Drizzle schema definition (type: `SchemaInterface`).
    * @param repositories An object containing repository instances, keyed by name (optional).
@@ -311,8 +311,10 @@ export class Dot<
    * @example
    * .registerPlugins([authPlugin, trackingPlugin, socialPlugin])
    */
-  registerPlugins<const Plugins extends readonly PluginConfig<TSchema, string, string, Record<string, any>, Record<string, any>>[]>(
-    plugins: Plugins
+  registerPlugins<
+    const Plugins extends readonly PluginConfig<TSchema, string, string, Record<string, any>, Record<string, any>>[],
+  >(
+    plugins: Plugins,
   ): Dot<
     TAppName,
     TRouters & ExtractAllRouterTypes<Plugins>,
@@ -476,11 +478,7 @@ export class Dot<
 
     // Step 5: Initialize tRPC with merged routers
     // Use the merged workingRouters instead of this.#routers to include plugin routers
-    const trpc = trpcFeatures.initTrpc<TSchema, TRouters>(
-      workingRouters as TRouters,
-      this.#trpcOptions,
-      this.#env,
-    );
+    const trpc = trpcFeatures.initTrpc<TSchema, TRouters>(workingRouters as TRouters, this.#trpcOptions, this.#env);
 
     // Step 6: Extract env
     const env = this.#env;
@@ -555,7 +553,10 @@ export class Dot<
 
     // Destructure to extract only the eventStore
     // The close function is available but not currently used by the Dot framework
-    const { eventStore } = eventSourcingFeatures.initEventSourcing(this.#eventSourcingConfig?.projections ?? [], eventDbUrl);
+    const { eventStore } = eventSourcingFeatures.initEventSourcing(
+      this.#eventSourcingConfig?.projections ?? [],
+      eventDbUrl,
+    );
     return eventStore;
   }
 
@@ -607,31 +608,37 @@ export * from './context';
 
 // Re-export tRPC module (new portable API)
 export { createDotProcedures } from './trpc';
-export type {
-    DotContext, PluginSetupContext, TRPCKit,
-    TRPCKitWithT
-} from './trpc';
-export type {
-    CreateDotProceduresOptions,
-    DotTRPCMiddlewareConfig
-} from './trpc/types';
+export type { DotContext, PluginSetupContext, TRPCKit, TRPCKitWithT } from './trpc';
+export type { CreateDotProceduresOptions, DotTRPCMiddlewareConfig } from './trpc/types';
 
 // Re-export auth module
 export {
-    authPresets, createAuthConfigFromEnv,
-    // Main auth functionality
-    createDotAuth, dotAuthIntegration,
-    sessionUtils,
-    // Provider types
-    type BuiltInProvider,
-    type CustomProvider,
-    // Types
-    type DotAuth,
-    type DotAuthConfig, type DotRBACManager, type DotSession,
-    type DotSessionManager, type DotUser, type EmailConfig, type MFAConfig, type Permission,
-    type PolicyContext, type ProviderConfigs, type RBACConfig,
-    // Auth types
-    type Role, type SecurityConfig, type SessionConfig
+  authPresets,
+  createAuthConfigFromEnv,
+  // Main auth functionality
+  createDotAuth,
+  dotAuthIntegration,
+  sessionUtils,
+  // Provider types
+  type BuiltInProvider,
+  type CustomProvider,
+  // Types
+  type DotAuth,
+  type DotAuthConfig,
+  type DotRBACManager,
+  type DotSession,
+  type DotSessionManager,
+  type DotUser,
+  type EmailConfig,
+  type MFAConfig,
+  type Permission,
+  type PolicyContext,
+  type ProviderConfigs,
+  type RBACConfig,
+  // Auth types
+  type Role,
+  type SecurityConfig,
+  type SessionConfig,
 } from './auth/index';
 
 // Re-export auth features

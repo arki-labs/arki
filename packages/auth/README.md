@@ -5,6 +5,7 @@ Authentication utilities and configuration for Arki applications using better-au
 ## Overview
 
 This package provides:
+
 - better-auth configuration and setup
 - User and session management
 - OAuth provider integration
@@ -39,7 +40,7 @@ AUTH_URL=http://localhost:3000
 AUTH_SECRET=your-secret-key
 
 # Database
-DATABASE_URL=postgresql://...
+DB_URL=postgresql://...
 
 # OAuth Providers (optional)
 GOOGLE_CLIENT_ID=
@@ -64,6 +65,7 @@ RESEND_API_KEY=
 **Read the full guide:** [User vs Account Documentation](./docs/USER_VS_ACCOUNT.md)
 
 **Quick rules:**
+
 - ✅ Always reference `userId` in your features
 - ❌ Never reference `accountId` in application features
 - ✅ Store profile data on `User` or related tables
@@ -74,9 +76,9 @@ RESEND_API_KEY=
 ```typescript
 import { createAccountId, createSessionId, createUserId } from '@arki/auth/ids';
 
-const userId = createUserId();        // "usr_..."
-const accountId = createAccountId();  // "acc_..."
-const sessionId = createSessionId();  // "ses_..."
+const userId = createUserId(); // "usr_..."
+const accountId = createAccountId(); // "acc_..."
+const sessionId = createSessionId(); // "ses_..."
 ```
 
 ### Password Utilities
@@ -96,16 +98,16 @@ const isValid = await comparePasswords('user-password', hashedPassword);
 ### Main Exports (`@arki/auth`)
 
 ```typescript
-import { auth } from '@arki/auth';              // better-auth instance
-import { createUserId } from '@arki/auth/ids';  // ID generators
+import { auth } from '@arki/auth'; // better-auth instance
+import { createUserId } from '@arki/auth/ids'; // ID generators
 import { hashPassword } from '@arki/auth/password'; // Password utilities
 ```
 
 ### Security Utilities (`@arki/auth/security/*`)
 
 ```typescript
-import { rateLimit } from '@arki/auth/security/rate-limit';
 import { validateCsrf } from '@arki/auth/security/csrf';
+import { rateLimit } from '@arki/auth/security/rate-limit';
 ```
 
 ### Email Schema (`@arki/auth/email/schema`)
@@ -132,7 +134,7 @@ export const playerProfiles = pgTable('player_profiles', {
   userId: varchar('user_id', { length: 256 })
     .$type<UserId>()
     .notNull()
-    .references(() => users.id),  // ✅ Reference User, not Account
+    .references(() => users.id), // ✅ Reference User, not Account
   // ... other fields
 });
 ```
@@ -141,11 +143,10 @@ export const playerProfiles = pgTable('player_profiles', {
 
 ```typescript
 // features/player-profile/procedures/get-profile.ts
-export const getProfile = protectedProcedure
-  .query(async ({ ctx }) => {
-    const userId = ctx.session.user.id;  // ✅ User ID from session
-    return await ctx.repo.playerProfile.findByUserId(userId);
-  });
+export const getProfile = protectedProcedure.query(async ({ ctx }) => {
+  const userId = ctx.session.user.id; // ✅ User ID from session
+  return await ctx.repo.playerProfile.findByUserId(userId);
+});
 ```
 
 ### Checking Authentication Status

@@ -52,5 +52,6 @@ export const initDbWithOptions = <TSchema extends Record<string, unknown> = Reco
   return db;
 };
 
-// Re-export factory functions
-export { createDb, getDbConnectionOptions, getDbConnectionParams } from './factory';
+// Re-export factory and connection utilities
+export { createDb } from './factory';
+export { getDbConnectionOptions, getDbConnectionParams } from './connection-options';

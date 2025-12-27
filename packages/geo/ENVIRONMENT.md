@@ -247,7 +247,7 @@ NEXT_PUBLIC_MAPBOX_TOKEN=pk.eyJ1IjoieW91ciIsImEiOiJYWFhYWFhYWFgifQ.XXXXX
 REDIS_URL=redis://localhost:6379
 
 # Postgres for spatial data (optional)
-DATABASE_URL=postgresql://user:pass@localhost:5432/db
+DB_URL=postgresql://user:pass@localhost:5432/db
 ```
 
 ## Loading Environment Variables in Different Contexts

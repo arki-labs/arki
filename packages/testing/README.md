@@ -736,7 +736,7 @@ All table operations use `PgTable` type from Drizzle ORM for proper type checkin
 ## Environment Variables
 
 - `DEBUG_TESTS=true` - Enable debug logging
-- `DATABASE_URL` - Custom database connection (overrides testcontainers)
+- `DB_URL` - Custom database connection (overrides testcontainers)
 - `REDIS_URL` - Custom Redis connection (overrides testcontainers)
 
 ## License
