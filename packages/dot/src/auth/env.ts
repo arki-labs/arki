@@ -30,7 +30,6 @@ export const authEnv = createEnv({
 
     // Database
     DB_URL: z.string().optional(),
-    DB_URL: z.string().optional(),
     POSTGRES_URL: z.string().optional(),
 
     // OAuth - Google
@@ -124,7 +123,6 @@ export const authEnv = createEnv({
     APP_KEY: process.env.APP_KEY,
 
     // Database
-    DB_URL: process.env.DB_URL,
     DB_URL: process.env.DB_URL,
     POSTGRES_URL: process.env.POSTGRES_URL,
 
