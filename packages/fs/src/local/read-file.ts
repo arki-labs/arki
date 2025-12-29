@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { decode } from 'iconv-lite';
+import iconv from 'iconv-lite';
 
 export const readFile = (pathToFile: string, encoding: string) => {
   console.debug(`Reading file ${pathToFile} with encoding ${encoding}`);
@@ -9,5 +9,5 @@ export const readFile = (pathToFile: string, encoding: string) => {
     return buffer.toString();
   }
 
-  return decode(buffer, encoding);
+  return iconv.decode(buffer, encoding);
 };
