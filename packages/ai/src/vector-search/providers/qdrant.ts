@@ -379,9 +379,9 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     const info = await client.getCollection(this.collectionName);
 
     const stats = {
-      vectorCount: info.vectors_count || 0,
-      indexedSize: info.indexed_vectors_count || 0,
-      segmentsCount: info.segments_count || 0,
+      vectorCount: info.points_count ?? 0,
+      indexedSize: info.indexed_vectors_count ?? 0,
+      segmentsCount: info.segments_count ?? 0,
     };
 
     debugVector(

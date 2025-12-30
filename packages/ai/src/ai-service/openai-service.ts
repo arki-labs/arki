@@ -5,8 +5,12 @@
 
 import { openai } from '@ai-sdk/openai';
 import { generateObject, streamText, generateText } from 'ai';
-import type { CoreMessage } from 'ai';
 import { z } from '@arki/contracts';
+
+type ChatMessage = {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+};
 import { debugService } from '../debug.ts';
 import { GenerationError, getErrorMessage } from '../errors';
 import { validateInput, aiServiceConfigSchema } from '../validation';
@@ -26,7 +30,7 @@ export interface GenerationOptions {
   systemPrompt?: string;
 }
 
-export interface StreamOptions extends GenerationOptions {
+export interface OpenAIStreamOptions extends GenerationOptions {
   onStart?: () => void;
   onToken?: (token: string) => void;
   onComplete?: (text: string) => void;
@@ -84,7 +88,7 @@ export class OpenAIService {
    * Supports multimodal content (e.g., including images)
    */
   async generateStructuredDataFromMessages<T>(
-    messages: CoreMessage[],
+    messages: ChatMessage[],
     schema: z.ZodSchema<T>,
     options: GenerationOptions = {}
   ): Promise<T> {
@@ -172,14 +176,12 @@ export class OpenAIService {
     options: GenerationOptions = {}
   ): Promise<string> {
     try {
-      const coreMessages: CoreMessage[] = messages.map(msg => ({
-        role: msg.role,
-        content: msg.content,
-      }));
-
       const result = await generateText({
         model: openai(this.model),
-        messages: coreMessages,
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+        })),
         temperature: options.temperature || this.defaultTemperature,
         maxRetries: options.maxRetries || this.defaultMaxRetries,
       });
@@ -198,7 +200,7 @@ export class OpenAIService {
    */
   async *streamText(
     prompt: string,
-    options: StreamOptions = {}
+    options: OpenAIStreamOptions = {}
   ): AsyncGenerator<string, void, unknown> {
     try {
       if (options.onStart) {
@@ -242,21 +244,19 @@ export class OpenAIService {
    */
   async *streamConversation(
     messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
-    options: StreamOptions = {}
+    options: OpenAIStreamOptions = {}
   ): AsyncGenerator<string, void, unknown> {
     try {
       if (options.onStart) {
         options.onStart();
       }
 
-      const coreMessages: CoreMessage[] = messages.map(msg => ({
-        role: msg.role,
-        content: msg.content,
-      }));
-
       const stream = await streamText({
         model: openai(this.model),
-        messages: coreMessages,
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+        })),
         temperature: options.temperature || this.defaultTemperature,
       });
 
@@ -288,7 +288,7 @@ export class OpenAIService {
   /**
    * Create a text stream (useful for tRPC streaming endpoints)
    */
-  createTextStream(prompt: string, systemPrompt?: string) {
+  createTextStream(prompt: string, systemPrompt?: string): ReturnType<typeof streamText> {
     return streamText({
       model: openai(this.model),
       system: systemPrompt,

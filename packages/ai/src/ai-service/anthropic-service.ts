@@ -5,8 +5,12 @@
 
 import { anthropic } from '@ai-sdk/anthropic';
 import { generateObject, generateText } from 'ai';
-import type { CoreMessage } from 'ai';
 import { z } from '@arki/contracts';
+
+type ChatMessage = {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+};
 
 import { debugService } from '../debug.ts';
 import { GenerationError, getErrorMessage } from '../errors';
@@ -46,7 +50,7 @@ export class AnthropicService {
    * Generate structured data from message payloads (supports multimodal content)
    */
   async generateStructuredDataFromMessages<T>(
-    messages: CoreMessage[],
+    messages: ChatMessage[],
     schema: z.ZodSchema<T>,
     options: { temperature?: number; maxRetries?: number; systemPrompt?: string } = {},
   ): Promise<T> {

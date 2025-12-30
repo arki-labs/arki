@@ -99,11 +99,37 @@ export {
 
 // AI service utilities and providers
 export {
+  // OpenAI and Anthropic services
   OpenAIService,
   type OpenAIServiceConfig,
   type StreamOptions,
   AnthropicService,
   type AnthropicServiceConfig,
+  // New LLM provider services
+  GroqService,
+  createGroqService,
+  type GroqServiceConfig,
+  GoogleService,
+  createGoogleService,
+  type GoogleServiceConfig,
+  MistralService,
+  createMistralService,
+  type MistralServiceConfig,
+  OpenRouterService,
+  createOpenRouterService,
+  type OpenRouterServiceConfig,
+  // Provider router for multi-provider rotation and fallback
+  ProviderRouter,
+  createProviderRouter,
+  createDefaultProviderRouter,
+  type ProviderRouterConfig,
+  // Common LLM types
+  type LLMProvider,
+  type ProviderConfig,
+  type ProviderHealth,
+  type ProviderResult,
+  type Message,
+  type GenerateOptions,
 } from './ai-service';
 
 // Environment configuration

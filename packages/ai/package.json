@@ -45,6 +45,8 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@ai-sdk/anthropic": "catalog:ai",
+    "@ai-sdk/google": "catalog:ai",
+    "@ai-sdk/mistral": "catalog:ai",
     "@ai-sdk/openai": "catalog:ai",
     "@ai-sdk/react": "catalog:ai",
     "@ai-sdk/ui-utils": "catalog:ai",

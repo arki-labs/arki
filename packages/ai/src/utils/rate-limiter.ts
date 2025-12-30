@@ -239,30 +239,69 @@ export function createRateLimitedFunction<TArgs extends unknown[], TResult>(
 debugRetry('[RateLimiter] Initializing global rate limiter instances');
 
 export const rateLimiters = {
+  // OpenAI: 60 RPM on most tiers
   openai: new RateLimiter({
-    maxRequests: 60,          // 60 requests
-    windowMs: 60 * 1000,      // per minute
+    maxRequests: 60,
+    windowMs: 60 * 1000,
     maxRetries: 3,
     retryDelayMs: 2000,
   }),
+
+  // Anthropic: 50 RPM
   anthropic: new RateLimiter({
     maxRequests: 50,
     windowMs: 60 * 1000,
     maxRetries: 3,
     retryDelayMs: 2000,
   }),
-  embedding: new RateLimiter({
-    maxRequests: 100,         // 100 requests
-    windowMs: 60 * 1000,      // per minute
+
+  // Groq: 240 requests/minute on free tier (14,400/day)
+  groq: new RateLimiter({
+    maxRequests: 240,
+    windowMs: 60 * 1000,
     maxRetries: 3,
     retryDelayMs: 1000,
   }),
+
+  // Google AI (Gemini): 60 RPM on free tier
+  google: new RateLimiter({
+    maxRequests: 60,
+    windowMs: 60 * 1000,
+    maxRetries: 3,
+    retryDelayMs: 2000,
+  }),
+
+  // Mistral: 60 RPM (varies by tier)
+  mistral: new RateLimiter({
+    maxRequests: 60,
+    windowMs: 60 * 1000,
+    maxRetries: 3,
+    retryDelayMs: 2000,
+  }),
+
+  // OpenRouter: varies by model, conservative default
+  openrouter: new RateLimiter({
+    maxRequests: 60,
+    windowMs: 60 * 1000,
+    maxRetries: 3,
+    retryDelayMs: 2000,
+  }),
+
+  // Embeddings
+  embedding: new RateLimiter({
+    maxRequests: 100,
+    windowMs: 60 * 1000,
+    maxRetries: 3,
+    retryDelayMs: 1000,
+  }),
+
+  // Vector search
   vectorSearch: new RateLimiter({
-    maxRequests: 200,         // 200 requests
-    windowMs: 60 * 1000,      // per minute
+    maxRequests: 200,
+    windowMs: 60 * 1000,
     maxRetries: 2,
     retryDelayMs: 500,
   }),
 };
 
-debugRetry('[RateLimiter] Global rate limiter instances initialized (openai, anthropic, embedding, vectorSearch)');
+debugRetry('[RateLimiter] Global rate limiter instances initialized (openai, anthropic, groq, google, mistral, openrouter, embedding, vectorSearch)');
