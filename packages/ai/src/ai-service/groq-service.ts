@@ -5,7 +5,7 @@
  * Free tier: 14,400 requests/day, 240 requests/minute
  */
 
-import { createOpenAI } from '@ai-sdk/openai';
+import { createGroq } from '@ai-sdk/groq';
 import { generateText, streamText } from 'ai';
 
 import { debugService } from '../debug.ts';
@@ -40,16 +40,15 @@ export class GroqService implements LLMProvider {
   readonly model: string;
   private readonly defaultTemperature: number;
   private readonly defaultMaxRetries: number;
-  private readonly client: ReturnType<typeof createOpenAI>;
+  private readonly client: ReturnType<typeof createGroq>;
 
   constructor(config: GroqServiceConfig = {}) {
     this.model = config.model ?? 'gemma2-9b-it';
     this.defaultTemperature = config.temperature ?? 0.7;
     this.defaultMaxRetries = config.maxRetries ?? 2;
 
-    // Create OpenAI-compatible client with Groq base URL
-    this.client = createOpenAI({
-      baseURL: 'https://api.groq.com/openai/v1',
+    // Create Groq client using the dedicated @ai-sdk/groq package
+    this.client = createGroq({
       apiKey: env.GROQ_API_KEY ?? '',
     });
 
@@ -237,13 +236,35 @@ export class GroqService implements LLMProvider {
 
     debugService('[Groq] Streaming conversation (messages: %d)', messages.length);
 
+    // Map messages to the format expected by the API
+    const mappedMessages = messages.map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+    }));
+
+    // Log the full request for debugging
+    console.log('[Groq] Request details:', {
+      model: this.model,
+      temperature: options.temperature ?? this.defaultTemperature,
+      maxTokens: options.maxTokens,
+      messagesCount: mappedMessages.length,
+      messages: mappedMessages.map((m, i) => ({
+        index: i,
+        role: m.role,
+        contentType: typeof m.content,
+        contentLength: typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content).length,
+        contentPreview: typeof m.content === 'string'
+          ? m.content.substring(0, 200) + (m.content.length > 200 ? '...' : '')
+          : JSON.stringify(m.content).substring(0, 200),
+        // Check for any unexpected properties
+        originalMessageKeys: Object.keys(messages[i] ?? {}),
+      })),
+    });
+
     try {
       const stream = await streamText({
         model: this.client(this.model),
-        messages: messages.map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        })),
+        messages: mappedMessages,
         temperature: options.temperature ?? this.defaultTemperature,
         maxOutputTokens: options.maxTokens,
       });
