@@ -27,9 +27,13 @@ function calculateReadingTime(content: string) {
 }
 
 async function lastModificationDate(filePath: string) {
-  const { stdout } = await exec(`git log -1 --format=%ai -- ${path.join(postDirectory, filePath)}`);
-  if (stdout) {
-    return new Date(stdout.trim()).toISOString();
+  try {
+    const { stdout } = await exec(`git log -1 --format=%ai -- ${path.join(postDirectory, filePath)}`);
+    if (stdout) {
+      return new Date(stdout.trim()).toISOString();
+    }
+  } catch {
+    // Git not available (e.g., in Docker builds) - fall back to current date
   }
   return new Date().toISOString();
 }
