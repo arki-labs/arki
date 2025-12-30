@@ -135,21 +135,94 @@ export function useAIChat(options: UseAIChatOptions = {}): UseAIChatReturn {
         setMessages(prev => [...prev, assistantMessage]);
 
         try {
+          let buffer = '';
+
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
 
-            const chunk = decoder.decode(value);
-            assistantContent += chunk;
+            // Decode the chunk and add to buffer
+            buffer += decoder.decode(value, { stream: true });
 
-            // Update message content
-            setMessages(prev =>
-              prev.map(msg =>
-                msg.id === assistantMessageId
-                  ? { ...msg, content: assistantContent }
-                  : msg
-              )
-            );
+            // Process complete lines (AI SDK Data Stream Protocol uses \n as delimiter)
+            const lines = buffer.split('\n');
+
+            // Keep the last potentially incomplete line in the buffer
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (!line) continue;
+
+              // AI SDK Data Stream Protocol format: TYPE:VALUE
+              // 0 = text chunk, 3 = error, d = finish message
+              const colonIndex = line.indexOf(':');
+              if (colonIndex === -1) continue;
+
+              const type = line.slice(0, colonIndex);
+              const value = line.slice(colonIndex + 1);
+
+              try {
+                switch (type) {
+                  case '0': {
+                    // Text chunk - value is JSON-stringified string
+                    const text = JSON.parse(value) as string;
+                    assistantContent += text;
+
+                    // Update message content
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === assistantMessageId
+                          ? { ...msg, content: assistantContent }
+                          : msg
+                      )
+                    );
+                    break;
+                  }
+                  case '3': {
+                    // Error - value is JSON-stringified error message
+                    const errorMessage = JSON.parse(value) as string;
+                    throw new Error(errorMessage);
+                  }
+                  case 'd': {
+                    // Finish message - stream is complete
+                    // Could extract finishReason from value if needed
+                    break;
+                  }
+                  // Other types (2 = data, e = message annotations, etc.) can be added as needed
+                }
+              } catch (parseError) {
+                if (parseError instanceof SyntaxError) {
+                  // JSON parse error - could be incomplete chunk, skip
+                  continue;
+                }
+                throw parseError;
+              }
+            }
+          }
+
+          // Process any remaining data in the buffer
+          if (buffer) {
+            const colonIndex = buffer.indexOf(':');
+            if (colonIndex !== -1) {
+              const type = buffer.slice(0, colonIndex);
+              const value = buffer.slice(colonIndex + 1);
+
+              if (type === '0') {
+                try {
+                  const text = JSON.parse(value) as string;
+                  assistantContent += text;
+                  setMessages(prev =>
+                    prev.map(msg =>
+                      msg.id === assistantMessageId
+                        ? { ...msg, content: assistantContent }
+                        : msg
+                    )
+                  );
+                } catch {
+                  // Ignore parse errors for final buffer
+                }
+              }
+            }
           }
         } finally {
           reader.releaseLock();

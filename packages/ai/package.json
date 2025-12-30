@@ -20,6 +20,11 @@
       "import": "./src/react/*.tsx",
       "browser": "./src/react/*.tsx"
     },
+    "./md": {
+      "types": "./dist/src/md/index.d.ts",
+      "import": "./src/md/index.tsx",
+      "browser": "./src/md/index.tsx"
+    },
     "./*": {
       "types": "./dist/src/*.d.ts",
       "import": "./src/*.ts",
@@ -52,10 +57,16 @@
     "@ai-sdk/ui-utils": "catalog:ai",
     "@arki/contracts": "workspace:*",
     "@arki/logger": "workspace:*",
+    "@google/genai": "catalog:ai",
+    "@openrouter/ai-sdk-provider": "catalog:ai",
     "@qdrant/js-client-rest": "catalog:",
     "@t3-oss/env-core": "catalog:env",
     "ai": "catalog:ai",
     "csv-parse": "catalog:",
+    "ollama": "catalog:ai",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "streamdown": "^1.6.10",
     "zod": "catalog:"
   },
   "devDependencies": {
