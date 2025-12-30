@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * React hook for AI chat functionality
  */
