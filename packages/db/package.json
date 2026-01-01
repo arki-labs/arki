@@ -11,6 +11,12 @@
       "import": "./src/env.ts",
       "node": "./src/env.ts"
     },
+    "./init": {
+      "bun": "./src/init.bun.ts",
+      "types": "./dist/src/init.d.ts",
+      "import": "./src/init.ts",
+      "node": "./src/init.ts"
+    },
     "./*": {
       "types": "./dist/src/*.d.ts",
       "import": "./src/*.ts",

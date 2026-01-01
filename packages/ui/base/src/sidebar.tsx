@@ -6,6 +6,7 @@ import { Slot } from '@radix-ui/react-slot';
 import { cva } from 'class-variance-authority';
 
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from '@arki/icons';
+import { useIsClient } from '@arki/react-hooks/is-client';
 import { useIsMobile, useIsTablet } from '@arki/react-hooks/media-query';
 
 import { Button } from './button';
@@ -52,8 +53,12 @@ const SidebarProvider = React.forwardRef<
     onOpenChange?: (open: boolean) => void;
   }
 >(({ defaultOpen = true, open: openProp, onOpenChange: setOpenProp, className, style, children, ...props }, ref) => {
-  const isMobile = useIsMobile();
-  const isTablet = useIsTablet();
+  const isClient = useIsClient();
+  // Use safe defaults during SSR/SSG to avoid "uncached data" errors
+  const isMobileQuery = useIsMobile();
+  const isTabletQuery = useIsTablet();
+  const isMobile = isClient ? isMobileQuery : false;
+  const isTablet = isClient ? isTabletQuery : false;
   const [openMobile, setOpenMobile] = React.useState(false);
 
   // This is the internal state of the sidebar.

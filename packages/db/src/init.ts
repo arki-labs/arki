@@ -1,25 +1,19 @@
 import type { DrizzleConfig } from 'drizzle-orm/utils';
-// import postgres from 'postgres';
 import type { PoolConfig } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 
 import { debugInit } from './debug';
 
-const { native } = pg;
+// Detect if running in Bun - skip native bindings (incompatible ABI)
+// Note: When running in Bun, the conditional export in package.json should route
+// to init.bun.ts. This fallback handles cases where conditional exports aren't resolved.
+const isBun = 'Bun' in globalThis;
 
-if (!native) {
-  debugInit('[init] pg-native package not found');
-  throw new Error('Please install the pg-native package');
-}
-
-debugInit('[init] Using pg-native for database connections');
-const { Pool } = native;
-
-// const client = postgres(connectionString, {
-//   // Connection Pool Settings
-//   max: 20,                    // Maximum number of connections in the pool
-// });
+// Use native bindings only in Node.js for better performance
+// In Bun, use pure JS pg (pg-native uses Node.js native addons incompatible with Bun)
+const Pool = isBun ? pg.Pool : (pg.native?.Pool ?? pg.Pool);
+debugInit('[init] Using %s for database connections', isBun ? 'pg (pure JS - Bun detected)' : 'pg-native');
 
 export const initDb = <TSchema extends Record<string, unknown> = Record<string, never>>(
   connectionString: string,
@@ -41,8 +35,12 @@ export const initDbWithOptions = <TSchema extends Record<string, unknown> = Reco
   poolConfig: PoolConfig,
   config: DrizzleConfig<TSchema>,
 ) => {
-  debugInit('[init] Initializing database with pool config (min: %d, max: %d, logger: %s)',
-    poolConfig.min ?? 0, poolConfig.max ?? 10, !!config.logger);
+  debugInit(
+    '[init] Initializing database with pool config (min: %d, max: %d, logger: %s)',
+    poolConfig.min ?? 0,
+    poolConfig.max ?? 10,
+    !!config.logger,
+  );
 
   const client = new Pool(poolConfig);
 
