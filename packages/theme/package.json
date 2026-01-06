@@ -1,33 +1,39 @@
 {
   "name": "@arki/theme",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "sideEffects": false,
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
       "import": "./src/index.ts",
       "browser": "./src/index.ts"
     },
+    "./script": {
+      "types": "./dist/src/script.d.ts",
+      "import": "./src/script.ts"
+    },
     "./package.json": "./package.json"
   },
+  "types": "./dist/src/index.d.ts",
   "scripts": {
+    "build": "tsc",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
-  "dependencies": {
-    "next-themes": "catalog:"
-  },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*"
+    "@arki/vitest-config": "workspace:*",
+    "@types/react": "catalog:",
+    "react": "catalog:"
   },
-  "type": "module",
-  "types": "./dist/src/index.d.ts",
-  "sideEffects": false
+  "peerDependencies": {
+    "react": ">=19.2.3"
+  }
 }
