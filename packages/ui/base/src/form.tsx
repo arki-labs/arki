@@ -157,28 +157,26 @@ function FormHints<T extends string | number | Date>({
   const id = useId();
 
   return (
-    <div className={cn('space-y-1', className)} {...props}>
-      {hints.map((hint, index) => (
-        <Fragment key={`${id}-${name}-hint-${hint}`}>
-          <Button
-            variant="text"
-            size="xs"
-            {...slotProps?.button}
-            className={cn(slotProps?.button?.className, 'cursor-pointer p-0 text-gray-500 dark:text-gray-400')}
-            onClick={e => {
-              e.preventDefault();
-              setValue(name, hint, {
-                shouldDirty: true,
-                shouldTouch: true,
-                shouldValidate: true,
-              });
-              onHintClick?.(hint);
-            }}
-          >
-            {renderHint?.(hint) ?? hint.toString()}
-          </Button>
-          {index < hints.length - 1 && <span className="text-muted-foreground">, </span>}
-        </Fragment>
+    <div className={cn('flex flex-wrap gap-1.5', className)} {...props}>
+      {hints.map(hint => (
+        <Button
+          key={`${id}-${name}-hint-${hint}`}
+          variant="text"
+          size="xs"
+          {...slotProps?.button}
+          className={cn(slotProps?.button?.className, 'cursor-pointer')}
+          onClick={e => {
+            e.preventDefault();
+            setValue(name, hint, {
+              shouldDirty: true,
+              shouldTouch: true,
+              shouldValidate: true,
+            });
+            onHintClick?.(hint);
+          }}
+        >
+          {renderHint?.(hint) ?? hint.toString()}
+        </Button>
       ))}
     </div>
   );
