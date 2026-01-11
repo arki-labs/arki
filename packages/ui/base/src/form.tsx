@@ -4,10 +4,9 @@ import type * as LabelPrimitive from '@radix-ui/react-label';
 import type { ComponentProps } from 'react';
 import type { ControllerProps, FieldPath, FieldValues } from 'react-hook-form';
 import * as React from 'react';
-import { Fragment, useId } from 'react';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { useId } from 'react';
 import { Slot } from '@radix-ui/react-slot';
-import { Controller, FormProvider, useForm, useFormContext, useFormState } from 'react-hook-form';
+import { Controller, FormProvider, useFormContext, useFormState } from 'react-hook-form';
 
 import { Button } from './button';
 import { cn } from './cn';
@@ -111,7 +110,7 @@ function FormDescription({ className, ...props }: React.ComponentProps<'p'>) {
     <p
       data-slot="form-description"
       id={formDescriptionId}
-      className={cn('text-muted-foreground text-sm', className)}
+      className={cn('text-sm text-muted-foreground', className)}
       {...props}
     />
   );
@@ -129,7 +128,7 @@ function FormMessage({ className, ...props }: React.ComponentProps<'p'>) {
     <p
       data-slot="form-message"
       id={formMessageId}
-      className={cn('text-destructive text-sm font-medium', className)}
+      className={cn('text-sm font-medium text-destructive', className)}
       {...props}
     >
       {body}
@@ -182,16 +181,7 @@ function FormHints<T extends string | number | Date>({
   );
 }
 
-export {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormHints,
-  FormItem,
-  FormLabel,
-  FormMessage,
-  useForm,
-  useFormField,
-  zodResolver,
-};
+export { Form, FormControl, FormDescription, FormField, FormHints, FormItem, FormLabel, FormMessage, useFormField };
+
+export { zodResolver } from '@hookform/resolvers/zod';
+export { useForm } from 'react-hook-form';
