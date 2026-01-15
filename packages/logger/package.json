@@ -5,14 +5,14 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/src/index.d.ts",
+      "types": "./dist/index.d.ts",
       "import": "./src/index.ts",
-      "node": "./src/index.ts"
+      "default": "./src/index.ts"
     },
     "./debug": {
-      "types": "./dist/src/debug.d.ts",
+      "types": "./dist/debug.d.ts",
       "import": "./src/debug.ts",
-      "node": "./src/debug.ts"
+      "default": "./src/debug.ts"
     },
     "./package.json": "./package.json"
   },
