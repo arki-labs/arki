@@ -184,4 +184,4 @@ function FormHints<T extends string | number | Date>({
 export { Form, FormControl, FormDescription, FormField, FormHints, FormItem, FormLabel, FormMessage, useFormField };
 
 export { zodResolver } from '@hookform/resolvers/zod';
-export { useForm } from 'react-hook-form';
+export { useForm, useWatch } from 'react-hook-form';
