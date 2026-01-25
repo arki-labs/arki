@@ -37,6 +37,12 @@ export const debugRetry = debug('ai:retry');
 export const debugCache = debug('ai:cache');
 
 /**
+ * Debug logger for orchestration flow operations
+ * Enable with: DEBUG=ai:flow
+ */
+export const debugOrchestration = debug('ai:flow');
+
+/**
  * Enable all AI debug logs
  * Enable with: DEBUG=ai:*
  */

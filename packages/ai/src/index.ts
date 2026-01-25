@@ -134,3 +134,13 @@ export {
 
 // Environment configuration
 export { env } from './env';
+
+// Flow orchestration utilities
+export {
+  Flow,
+  FlowError,
+  createFlow,
+  type FlowConfig,
+  type FlowEvent,
+  type FlowNode,
+} from './orchestration';

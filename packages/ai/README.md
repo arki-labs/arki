@@ -37,7 +37,7 @@ const embedding = await embedder.getEmbedding('Hello world');
 ### Vector Search
 
 ```typescript
-import { createQdrantProvider, createEmbeddingProvider } from '@arki/ai';
+import { createEmbeddingProvider, createQdrantProvider } from '@arki/ai';
 
 const embedder = createEmbeddingProvider({ type: 'openai' });
 const vectorStore = createQdrantProvider(
@@ -45,7 +45,7 @@ const vectorStore = createQdrantProvider(
     url: 'http://localhost:6333',
     collectionName: 'documents',
   },
-  embedder
+  embedder,
 );
 
 // Index documents
@@ -58,13 +58,13 @@ const results = await vectorStore.searchSimilar('test query', 10);
 ### Semantic Search Service
 
 ```typescript
-import { SemanticSearchService, createVectorProvider, createEmbeddingProvider } from '@arki/ai';
+import { createEmbeddingProvider, createVectorProvider, SemanticSearchService } from '@arki/ai';
 
 const embedder = createEmbeddingProvider({ type: 'openai' });
 const vectorProvider = createVectorProvider({
   type: 'qdrant',
   embeddingProvider: embedder,
-  config: { url: 'http://localhost:6333', collectionName: 'docs' }
+  config: { url: 'http://localhost:6333', collectionName: 'docs' },
 });
 
 const searchService = new SemanticSearchService({
@@ -95,6 +95,90 @@ const summary = await generator.generateSummary('Long text to summarize...');
 for await (const chunk of ai.streamText('Tell me a story')) {
   console.log(chunk);
 }
+```
+
+### Orchestration (Flow)
+
+```typescript
+import { createFlow } from '@arki/ai';
+
+type StoryState = {
+  outline?: string;
+  draft?: string;
+  edited?: string;
+  status: 'planning' | 'writing' | 'editing' | 'complete';
+};
+
+type CouncilContext = {
+  planner: (input: string) => Promise<string>;
+  writer: (input: string) => Promise<string>;
+  editor: (input: string) => Promise<string>;
+};
+
+const flow = createFlow<StoryState, CouncilContext>({
+  start: 'plan',
+  nodes: {
+    plan: {
+      id: 'plan',
+      run: async (state, ctx) => ({
+        outline: await ctx.planner('Create an outline'),
+        status: 'planning',
+      }),
+      next: 'write',
+    },
+    write: {
+      id: 'write',
+      run: async (state, ctx) => ({
+        draft: await ctx.writer(state.outline ?? ''),
+        status: 'writing',
+      }),
+      next: 'edit',
+    },
+    edit: {
+      id: 'edit',
+      run: async (state, ctx) => ({
+        edited: await ctx.editor(state.draft ?? ''),
+        status: 'complete',
+      }),
+      next: undefined,
+    },
+  },
+});
+
+const result = await flow.run(
+  { status: 'planning' },
+  {
+    planner: async input => input,
+    writer: async input => input,
+    editor: async input => input,
+  },
+);
+```
+
+### Agents (AI SDK ToolLoopAgent)
+
+`@arki/ai` re-exports the AI SDK agent utilities for tool-based loops.
+
+```typescript
+import { stepCountIs, tool, ToolLoopAgent } from '@arki/ai';
+import { z } from '@arki/contracts';
+
+const lookupTool = tool({
+  description: 'Look up a story constraint by key',
+  inputSchema: z.object({ key: z.string() }),
+  execute: async ({ key }) => `value-for-${key}`,
+});
+
+const agent = new ToolLoopAgent({
+  model: 'gpt-4o-mini',
+  tools: { lookup: lookupTool },
+  maxSteps: 4,
+  stopWhen: stepCountIs(4),
+});
+
+const result = await agent.generate({
+  prompt: 'Check the universe rule for "magic".',
+});
 ```
 
 ### React Components
@@ -151,6 +235,7 @@ function SearchComponent() {
 Creates an embedding provider instance.
 
 **Config Options:**
+
 - `type`: 'openai' | 'mock' | 'cohere' | 'anthropic'
 - `apiKey`: API key for the provider
 - `model`: Model to use for embeddings
@@ -164,6 +249,7 @@ Creates an embedding provider instance.
 Creates a vector search provider instance.
 
 **Config Options:**
+
 - `type`: 'qdrant' | 'mock' | 'pinecone' | 'weaviate'
 - `embeddingProvider`: Embedding provider instance
 - `config`: Provider-specific configuration
@@ -175,6 +261,7 @@ Creates a vector search provider instance.
 Advanced search service with caching and analytics.
 
 **Methods:**
+
 - `search(options)`: Perform search
 - `indexDocuments(documents)`: Index documents
 - `getSuggestions(prefix)`: Get search suggestions
@@ -187,6 +274,7 @@ Advanced search service with caching and analytics.
 OpenAI integration using Vercel AI SDK.
 
 **Methods:**
+
 - `generateStructuredData(prompt, schema)`: Generate structured data
 - `generateText(prompt)`: Generate text
 - `streamText(prompt)`: Stream text generation
@@ -197,6 +285,7 @@ OpenAI integration using Vercel AI SDK.
 Helper for common generation tasks.
 
 **Methods:**
+
 - `generateSummary(text)`: Generate summary
 - `answerQuestion(question, context)`: Answer questions
 - `classifyText(text, categories)`: Classify text
@@ -210,6 +299,7 @@ Helper for common generation tasks.
 Hook for AI chat functionality.
 
 **Returns:**
+
 - `messages`: Chat messages
 - `input`: Current input
 - `isLoading`: Loading state
@@ -221,6 +311,7 @@ Hook for AI chat functionality.
 Hook for semantic search.
 
 **Returns:**
+
 - `query`: Search query
 - `results`: Search results
 - `isSearching`: Loading state
@@ -270,8 +361,7 @@ class CustomVectorProvider implements VectorSearchProvider {
 ```typescript
 import { PromptBuilder, PromptTemplates } from '@arki/ai';
 
-const prompt = PromptBuilder
-  .fromTemplate(PromptTemplates.summarize)
+const prompt = PromptBuilder.fromTemplate(PromptTemplates.summarize)
   .setVariable('contentType', 'article')
   .setVariable('content', articleText)
   .setVariable('focus', 'key takeaways')
@@ -279,7 +369,7 @@ const prompt = PromptBuilder
   .build();
 
 const summary = await ai.generateText(prompt.prompt, {
-  systemPrompt: prompt.systemPrompt
+  systemPrompt: prompt.systemPrompt,
 });
 ```
 
