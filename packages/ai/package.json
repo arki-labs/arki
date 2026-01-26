@@ -25,6 +25,16 @@
       "import": "./src/md/index.tsx",
       "browser": "./src/md/index.tsx"
     },
+    "./cost": {
+      "types": "./dist/src/cost/index.d.ts",
+      "import": "./src/cost/index.ts",
+      "node": "./src/cost/index.ts"
+    },
+    "./safety": {
+      "types": "./dist/src/safety/index.d.ts",
+      "import": "./src/safety/index.ts",
+      "node": "./src/safety/index.ts"
+    },
     "./*": {
       "types": "./dist/src/*.d.ts",
       "import": "./src/*.ts",

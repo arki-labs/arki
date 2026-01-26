@@ -144,3 +144,51 @@ export {
   type FlowEvent,
   type FlowNode,
 } from './orchestration';
+
+// Cost management utilities
+export {
+  // Types
+  type BudgetCheckResult,
+  type BudgetConfig,
+  type BudgetLimits,
+  type BudgetPeriod,
+  type CircuitBreakerResult,
+  type CircuitBreakerState,
+  type CircuitState,
+  type CostCircuitConfig,
+  type CostEstimate,
+  type ModelPricing,
+  type KVStore,
+  type SpendMetadata,
+  type SpendRecord,
+  type StandardBudgetPeriod,
+  // Constants
+  BUDGET_PERIODS,
+  CIRCUIT_STATES,
+  LLM_PRICING,
+  DEFAULT_PRICING,
+  DEFAULT_BUDGET_LIMITS,
+  DEFAULT_CIRCUIT_CONFIG,
+  BUDGET_PERIOD_DURATIONS,
+  // Classes
+  CostEstimator,
+  BudgetManager,
+  CostCircuitBreaker,
+  CircuitBreakerError,
+  UserCircuitBreakerManager,
+  // Instances
+  costEstimator,
+  // Factory functions
+  createCostEstimator,
+  createBudgetManager,
+  createCostCircuitBreaker,
+  createUserCircuitBreakerManager,
+  // Utility functions
+  getModelPricing,
+  hasKnownPricing,
+  calculateLLMCost,
+  estimateTokens,
+  estimateTokensFromWords,
+  getSupportedModels,
+  getModelsByProvider,
+} from './cost';
