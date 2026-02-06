@@ -75,9 +75,9 @@
     "ai": "catalog:ai",
     "csv-parse": "catalog:",
     "ollama": "catalog:ai",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1",
-    "streamdown": "^1.6.10",
+    "react-markdown": "catalog:content",
+    "remark-gfm": "catalog:content",
+    "streamdown": "catalog:ai",
     "zod": "catalog:"
   },
   "devDependencies": {
