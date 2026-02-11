@@ -2,6 +2,7 @@
   "name": "@arki/native-ui",
   "version": "0.0.0",
   "private": true,
+  "sideEffects": false,
   "type": "module",
   "exports": {
     ".": {
@@ -26,10 +27,11 @@
     },
     "./package.json": "./package.json"
   },
+  "types": "./dist/src/index.d.ts",
   "scripts": {
+    "build": "tsc",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@rn-primitives/accordion": "catalog:expo",
@@ -61,13 +63,6 @@
     "lucide-react-native": "catalog:expo",
     "tailwind-merge": "catalog:styling"
   },
-  "peerDependencies": {
-    "react": "catalog:react19",
-    "react-native": "catalog:expo",
-    "react-native-reanimated": "catalog:expo",
-    "react-native-gesture-handler": "catalog:expo",
-    "react-native-svg": "catalog:expo"
-  },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
@@ -76,6 +71,11 @@
     "nativewind": "catalog:expo",
     "typescript": "catalog:"
   },
-  "types": "./dist/src/index.d.ts",
-  "sideEffects": false
+  "peerDependencies": {
+    "react": "catalog:react19",
+    "react-native": "catalog:expo",
+    "react-native-gesture-handler": "catalog:expo",
+    "react-native-reanimated": "catalog:expo",
+    "react-native-svg": "catalog:expo"
+  }
 }

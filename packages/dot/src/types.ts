@@ -1,4 +1,4 @@
-import type { Command, ProjectionDefinition } from '@event-driven-io/emmett';
+import type { Command, Event, ProjectionDefinition } from '@event-driven-io/emmett';
 import type { AnyRouter, DataTransformer } from '@trpc/server/unstable-core-do-not-import';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 
@@ -115,25 +115,23 @@ export type AuthConfig = {
 
 /**
  * Base type for projection definitions used internally.
- * Uses `any` for the event type to allow heterogeneous arrays.
+ * Uses the base `Event` type for heterogeneous projection arrays.
  */
 export type BaseProjectionDefinition = ProjectionDefinition<
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  any,
+  Event,
   PostgresReadEventMetadata,
   PostgreSQLProjectionHandlerContext
 >;
 
 /**
  * Configuration for a specific command handler.
- * Uses `any` for state/event types for flexibility in registration.
  * @template C The specific command type this handler processes.
+ * @template State The aggregate state type.
+ * @template StreamEvent The stream event type.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type CommandHandlerRegistration<C extends Command = any> = {
+export type CommandHandlerRegistration<C extends Command = Command, State = never, StreamEvent extends Event = Event> = {
   commandType: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  handler: CommandHandlerType<C, any, any>;
+  handler: CommandHandlerType<C, State, StreamEvent>;
   getStreamName: (command: C) => string;
 };
 

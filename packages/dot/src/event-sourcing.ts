@@ -3,8 +3,10 @@ import type {
   Event,
   EventStore,
   MessageBus,
+  MessageHandlerResult,
   MessageProcessor,
   ProjectionDefinition,
+  ReadEvent,
 } from '@event-driven-io/emmett';
 import { getInMemoryMessageBus, reactor } from '@event-driven-io/emmett';
 
@@ -16,16 +18,39 @@ import type {
 } from '@arki/event-sourcing/store';
 import { getEventStore, projections } from '@arki/event-sourcing/store';
 
-import { debugEventSourcing } from './debug.ts';
 import type { CommandHandlerRegistration } from './types';
+import { debugEventSourcing } from './debug.ts';
 
-export function createProcessManager<TEvent extends Event, TContext extends Record<string, any>>(
+/**
+ * Structural interface for PostgreSQL projection definitions.
+ *
+ * Uses method syntax for `handle` to enable TypeScript's bivariant parameter
+ * checking. This allows `ProjectionDefinition<SpecificEvent>` (which uses property
+ * syntax and is invariant on EventType) to be assigned to this interface,
+ * working around the invariance that prevents heterogeneous projection arrays.
+ */
+type PostgreSQLProjectionInput = {
+  name?: string;
+  canHandle: string[];
+  handle(
+    events: ReadEvent<Event, PostgresReadEventMetadata>[],
+    context: PostgreSQLProjectionHandlerContext,
+  ): MessageHandlerResult | Promise<MessageHandlerResult>;
+  truncate?(context: PostgreSQLProjectionHandlerContext): Promise<void>;
+  init?(context: PostgreSQLProjectionHandlerContext): void | Promise<void>;
+};
+
+export function createProcessManager<TEvent extends Event, TContext extends object>(
   context: TContext,
   name: string,
   eventTypes: TEvent['type'][],
   handlerFn: (event: TEvent, context: TContext) => Promise<void>,
 ) {
-  debugEventSourcing('[createProcessManager] Creating process manager: %s for event types: %s', name, eventTypes.join(', '));
+  debugEventSourcing(
+    '[createProcessManager] Creating process manager: %s for event types: %s',
+    name,
+    eventTypes.join(', '),
+  );
   return reactor({
     canHandle: [...eventTypes],
     eachMessage: async message => {
@@ -34,7 +59,12 @@ export function createProcessManager<TEvent extends Event, TContext extends Reco
         await handlerFn(message, context);
         debugEventSourcing('[createProcessManager:%s] Successfully processed event: %s', name, message.type);
       } catch (error) {
-        debugEventSourcing('[createProcessManager:%s] Error processing event %s: %s', name, message.type, error instanceof Error ? error.message : String(error));
+        debugEventSourcing(
+          '[createProcessManager:%s] Error processing event %s: %s',
+          name,
+          message.type,
+          error instanceof Error ? error.message : String(error),
+        );
         console.error(`Error in process manager ${name}:`, error, message);
         throw error; // Allow the consumer's error handling to take over
       }
@@ -58,12 +88,12 @@ export const eventSourcingFeatures = {
    * @param dbUrl The database URL to initialize the event store with
    * @returns Object with eventStore and close function for cleanup
    */
-  initEventSourcing(
-    p: ProjectionDefinition<any, PostgresReadEventMetadata, PostgreSQLProjectionHandlerContext>[],
-    dbUrl?: string,
-  ) {
+  initEventSourcing(p: readonly PostgreSQLProjectionInput[], dbUrl?: string) {
     if (!dbUrl) {
-      debugEventSourcing('[eventSourcingFeatures] Event Store URL not found. Required environment variables: %s', EVENT_STORE_URL_VARIANTS.join(', '));
+      debugEventSourcing(
+        '[eventSourcingFeatures] Event Store URL not found. Required environment variables: %s',
+        EVENT_STORE_URL_VARIANTS.join(', '),
+      );
       throw new Error(
         `Event Store database URL is not defined. Please set one of the following environment variables: ${EVENT_STORE_URL_VARIANTS.join(
           ', ',
@@ -72,8 +102,9 @@ export const eventSourcingFeatures = {
     }
     debugEventSourcing('[eventSourcingFeatures] Initializing Event Store with %d projection(s)', p.length);
     const { eventStore, close } = getEventStore(dbUrl, {
-      // Ensure projections are passed correctly
-      projections: projections.inline(p),
+      projections: projections.inline(
+        p as ProjectionDefinition<Event, PostgresReadEventMetadata, PostgreSQLProjectionHandlerContext>[],
+      ),
     });
     debugEventSourcing('[eventSourcingFeatures] Event Store initialized successfully');
     return { eventStore, close };
@@ -85,25 +116,32 @@ export const eventSourcingFeatures = {
    * @param commandHandlers The command handlers to register
    */
   initMessageBus(eventStore: EventStore | undefined, commandHandlers: CommandHandlerRegistration[]): MessageBus {
-    debugEventSourcing('[eventSourcingFeatures] Initializing Message Bus with %d command handler(s)', commandHandlers.length);
+    debugEventSourcing(
+      '[eventSourcingFeatures] Initializing Message Bus with %d command handler(s)',
+      commandHandlers.length,
+    );
     const messageBus = getInMemoryMessageBus();
 
     // Event Store is required to handle commands that interact with aggregates
     if (!eventStore) {
       if (commandHandlers.length > 0) {
-        debugEventSourcing('[eventSourcingFeatures] Warning: %d command handler(s) configured but Event Store not initialized', commandHandlers.length);
+        debugEventSourcing(
+          '[eventSourcingFeatures] Warning: %d command handler(s) configured but Event Store not initialized',
+          commandHandlers.length,
+        );
         // Log a warning if handlers were configured but event store is missing
         console.warn('Command handlers were configured, but the Event Store is not initialized. Commands may fail.');
       } else {
-        debugEventSourcing('[eventSourcingFeatures] No Event Store and no command handlers - returning empty Message Bus');
+        debugEventSourcing(
+          '[eventSourcingFeatures] No Event Store and no command handlers - returning empty Message Bus',
+        );
       }
       return messageBus; // Return bus even if handlers can't be registered
     }
 
     if (commandHandlers.length > 0) {
-      const createCommandHandlerWrapper = <C extends Command>(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        handler: CommandHandlerType<C, any, any>,
+      const createCommandHandlerWrapper = <C extends Command, State, StreamEvent extends Event>(
+        handler: CommandHandlerType<C, State, StreamEvent>,
         getStreamNameFn: (cmd: C) => string,
       ) => {
         return async (command: C) => {
@@ -119,7 +157,12 @@ export const eventSourcingFeatures = {
               console.error(`Invalid handler type encountered for command: ${command.type}`);
             }
           } catch (error) {
-            debugEventSourcing('[MessageBus] Error executing command handler for %s on stream %s: %s', command.type, streamName, error instanceof Error ? error.message : String(error));
+            debugEventSourcing(
+              '[MessageBus] Error executing command handler for %s on stream %s: %s',
+              command.type,
+              streamName,
+              error instanceof Error ? error.message : String(error),
+            );
             console.error(`Error executing command handler for ${command.type} on stream ${streamName}:`, error);
             // Decide if errors should be re-thrown or handled differently
             throw error;
@@ -132,7 +175,10 @@ export const eventSourcingFeatures = {
         messageBus.handle(createCommandHandlerWrapper(config.handler, config.getStreamName), config.commandType);
       }
 
-      debugEventSourcing('[eventSourcingFeatures] Message Bus initialized with %d command handler(s)', commandHandlers.length);
+      debugEventSourcing(
+        '[eventSourcingFeatures] Message Bus initialized with %d command handler(s)',
+        commandHandlers.length,
+      );
       console.log(`Message Bus initialized with ${commandHandlers.length} command handlers.`);
     } else {
       debugEventSourcing('[eventSourcingFeatures] No command handlers to register');
@@ -141,10 +187,7 @@ export const eventSourcingFeatures = {
     return messageBus;
   },
 
-  async setupProcessManagers(
-    eventStore: PostgresEventStore,
-    processManagers: MessageProcessor<any, any, any, bigint>[],
-  ) {
+  async setupProcessManagers(eventStore: PostgresEventStore, processManagers: MessageProcessor[]) {
     debugEventSourcing('[eventSourcingFeatures] Setting up %d process manager(s)', processManagers.length);
     const processManagerConsumers = processManagers.map(pm => {
       debugEventSourcing('[eventSourcingFeatures] Creating consumer for process manager: %s', pm.id);
@@ -154,7 +197,10 @@ export const eventSourcingFeatures = {
       });
     });
 
-    debugEventSourcing('[eventSourcingFeatures] Starting %d process manager consumer(s)', processManagerConsumers.length);
+    debugEventSourcing(
+      '[eventSourcingFeatures] Starting %d process manager consumer(s)',
+      processManagerConsumers.length,
+    );
     await Promise.all(processManagerConsumers.map(consumer => consumer.start()));
     debugEventSourcing('[eventSourcingFeatures] All process manager consumers started successfully');
 
