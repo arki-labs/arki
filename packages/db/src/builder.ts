@@ -72,19 +72,29 @@ export type ProjectionBuilderWithEvents<
   TName extends string,
 > = {
   /**
-   * Define the handler function for the events
+   * Define the handler function for the events.
+   * Returns an Emmett-compatible projection definition with `canHandle` and `handle`.
    */
-  handle(handler: ProjectionHandler<TEvent, TRepos, TSchema>): ProjectionDefinition<TEvent, TRepos, TSchema, TName>;
+  handle(handler: ProjectionHandler<TEvent, TRepos, TSchema>): ProjectionDefinition<TName>;
 };
 
 /**
- * Complete projection definition
+ * Emmett-compatible projection definition.
+ *
+ * Produced by the builder's `.handle()` terminal method. Contains:
+ * - `name`: Projection identifier for logging
+ * - `canHandle`: Event type strings (mapped from `.on()` call)
+ * - `handle`: Wrapped handler that constructs the `{ repo, db }` context internally
+ *   and applies any registered middleware
+ *
+ * The `handle` function accepts events from the event store (which may include
+ * metadata wrappers like ReadEvent) and an opaque context. Since the builder
+ * constructs its own `{ repo, db }` context, the event store's context is unused.
  */
-export type ProjectionDefinition<TEvent, TRepos, TSchema extends Record<string, unknown>, TName extends string> = {
+export type ProjectionDefinition<TName extends string = string> = {
   name: TName;
-  eventTypes: string[];
-  handler: ProjectionHandler<TEvent, TRepos, TSchema>;
-  middleware: ProjectionMiddleware[];
+  canHandle: string[];
+  handle: (events: { type: string }[]) => Promise<void>;
 };
 
 /**
@@ -155,6 +165,29 @@ export type InitialBuilder = {
 };
 
 /**
+ * Applies a middleware chain around a core handler function.
+ * Each middleware wraps the next, forming an onion-like execution order.
+ */
+function applyMiddleware(
+  middleware: ProjectionMiddleware[],
+  name: string,
+  eventCount: number,
+  coreHandler: () => Promise<void>,
+): Promise<void> {
+  const meta = { name, eventCount };
+
+  // Build the chain from inside out: the innermost "next" is the core handler
+  let next = coreHandler;
+  for (let i = middleware.length - 1; i >= 0; i--) {
+    const mw = middleware[i]!;
+    const currentNext = next;
+    next = () => mw({ next: currentNext, meta });
+  }
+
+  return next();
+}
+
+/**
  * Implementation of the projection builder
  */
 class ProjectionBuilderImpl<TEvent, TRepos, TSchema extends Record<string, unknown>, TName extends string = string>
@@ -170,7 +203,7 @@ class ProjectionBuilderImpl<TEvent, TRepos, TSchema extends Record<string, unkno
 
   constructor(
     private readonly repos: TRepos,
-    private readonly db: NodePgDatabase<TSchema>,
+    private readonly _db: NodePgDatabase<TSchema>,
     middleware?: ProjectionMiddleware[],
   ) {
     if (middleware) {
@@ -192,7 +225,7 @@ class ProjectionBuilderImpl<TEvent, TRepos, TSchema extends Record<string, unkno
     return this as unknown as ProjectionBuilderImpl<TEventType, TRepos, TSchema, TName>;
   }
 
-  handle(handler: ProjectionHandler<TEvent, TRepos, TSchema>): ProjectionDefinition<TEvent, TRepos, TSchema, TName> {
+  handle(handler: ProjectionHandler<TEvent, TRepos, TSchema>): ProjectionDefinition<TName> {
     if (!this._name) {
       debugProjection('[builder] Error: Projection name is required');
       throw new Error('Projection name is required. Call .named() first.');
@@ -202,20 +235,34 @@ class ProjectionBuilderImpl<TEvent, TRepos, TSchema extends Record<string, unkno
       throw new Error('Event types are required. Call .on() first.');
     }
 
+    const name = this._name as TName;
+    const eventTypes = this._eventTypes;
+    const middleware = this._middleware;
+    const repos = this.repos;
+    const db = this._db;
+
     debugProjection('[builder] Creating projection definition (name: %s, eventTypes: %o, middlewareCount: %d)',
-      this._name, this._eventTypes, this._middleware.length);
+      name, eventTypes, middleware.length);
 
     return {
-      name: this._name as TName,
-      eventTypes: this._eventTypes,
-      handler,
-      middleware: this._middleware,
+      name,
+      canHandle: eventTypes,
+      handle: async (events: { type: string }[]) => {
+        const context: ProjectionHandlerContext<TRepos, TSchema> = { repo: repos, db };
+        const coreHandler = () => handler(events as TEvent[], context);
+
+        if (middleware.length > 0) {
+          await applyMiddleware(middleware, name, events.length, coreHandler);
+        } else {
+          await coreHandler();
+        }
+      },
     };
   }
 
   use(middleware: ProjectionMiddleware): ProjectionBuilderRoot<TRepos, TSchema> {
     debugProjection('[builder] Adding projection middleware (currentCount: %d)', this._middleware.length);
-    const newBuilder = new ProjectionBuilderImpl<TEvent, TRepos, TSchema, TName>(this.repos, this.db, [
+    const newBuilder = new ProjectionBuilderImpl<TEvent, TRepos, TSchema, TName>(this.repos, this._db, [
       ...this._middleware,
       middleware,
     ]);

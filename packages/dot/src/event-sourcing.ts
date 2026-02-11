@@ -3,10 +3,8 @@ import type {
   Event,
   EventStore,
   MessageBus,
-  MessageHandlerResult,
   MessageProcessor,
   ProjectionDefinition,
-  ReadEvent,
 } from '@event-driven-io/emmett';
 import { getInMemoryMessageBus, reactor } from '@event-driven-io/emmett';
 
@@ -22,22 +20,21 @@ import type { CommandHandlerRegistration } from './types';
 import { debugEventSourcing } from './debug.ts';
 
 /**
- * Structural interface for PostgreSQL projection definitions.
+ * Structural interface for projection definitions accepted by initEventSourcing.
  *
  * Uses method syntax for `handle` to enable TypeScript's bivariant parameter
- * checking. This allows `ProjectionDefinition<SpecificEvent>` (which uses property
- * syntax and is invariant on EventType) to be assigned to this interface,
- * working around the invariance that prevents heterogeneous projection arrays.
+ * checking, which allows heterogeneous projection arrays where each projection
+ * is parametrized on a different event type.
+ *
+ * Accepts projections from three different builder patterns:
+ * 1. Emmett's `postgreSQLProjection` / `PostgreSQLProjectionDefinition<E>`
+ * 2. The custom `defineProjection` builder (returns `{ canHandle, handle(events, context: unknown) }`)
+ * 3. The `@arki/db` builder `projection.named().on().handle()` (returns `{ canHandle, handle(events) }`)
  */
 type PostgreSQLProjectionInput = {
   name?: string;
   canHandle: string[];
-  handle(
-    events: ReadEvent<Event, PostgresReadEventMetadata>[],
-    context: PostgreSQLProjectionHandlerContext,
-  ): MessageHandlerResult | Promise<MessageHandlerResult>;
-  truncate?(context: PostgreSQLProjectionHandlerContext): Promise<void>;
-  init?(context: PostgreSQLProjectionHandlerContext): void | Promise<void>;
+  handle(events: Event[], context: object): void;
 };
 
 export function createProcessManager<TEvent extends Event, TContext extends object>(
