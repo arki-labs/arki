@@ -1,5 +1,4 @@
 import type {
-  Command,
   Event,
   EventStore,
   MessageBus,
@@ -8,7 +7,7 @@ import type {
 } from '@event-driven-io/emmett';
 import { getInMemoryMessageBus, reactor } from '@event-driven-io/emmett';
 
-import type { CommandHandlerType } from '@arki/event-sourcing/command';
+import type { CommandHandler } from '@arki/event-sourcing/builders';
 import type {
   PostgresEventStore,
   PostgreSQLProjectionHandlerContext,
@@ -137,8 +136,8 @@ export const eventSourcingFeatures = {
     }
 
     if (commandHandlers.length > 0) {
-      const createCommandHandlerWrapper = <C extends Command, State, StreamEvent extends Event>(
-        handler: CommandHandlerType<C, State, StreamEvent>,
+      const createCommandHandlerWrapper = <C extends { type: string }, State, StreamEvent extends Event>(
+        handler: CommandHandler<State, C, StreamEvent>,
         getStreamNameFn: (cmd: C) => string,
       ) => {
         return async (command: C) => {
@@ -169,7 +168,12 @@ export const eventSourcingFeatures = {
 
       for (const config of commandHandlers) {
         debugEventSourcing('[eventSourcingFeatures] Registering command handler for type: %s', config.commandType);
-        messageBus.handle(createCommandHandlerWrapper(config.handler, config.getStreamName), config.commandType);
+        // Type erasure boundary: handlers stored with C=never for variance-safe
+        // heterogeneous arrays, cast to callable types for runtime dispatch
+        type Cmd = { type: string };
+        const handler = config.handler as CommandHandler<unknown, Cmd, Event>;
+        const getStreamName = config.getStreamName as (cmd: Cmd) => string;
+        messageBus.handle(createCommandHandlerWrapper(handler, getStreamName), config.commandType);
       }
 
       debugEventSourcing(

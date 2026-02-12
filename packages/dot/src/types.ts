@@ -1,11 +1,11 @@
-import type { Command, Event, ProjectionDefinition } from '@event-driven-io/emmett';
+import type { Event, ProjectionDefinition } from '@event-driven-io/emmett';
 import type { AnyRouter, DataTransformer } from '@trpc/server/unstable-core-do-not-import';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 
 // Auth types are provided by our auth module
 import type { DotAuth, DotRBACManager, DotSession, DotSessionManager } from './auth/index';
 import type { ExtractTablesWithRelations } from '@arki/db/orm';
-import type { CommandHandlerType } from '@arki/event-sourcing/command';
+import type { CommandHandler } from '@arki/event-sourcing/builders';
 import type { PostgreSQLProjectionHandlerContext, PostgresReadEventMetadata } from '@arki/event-sourcing/store';
 import type { KV } from '@arki/kv';
 
@@ -125,13 +125,23 @@ export type BaseProjectionDefinition = ProjectionDefinition<
 
 /**
  * Configuration for a specific command handler.
+ *
+ * Default type parameters are chosen for **variance compatibility** so that
+ * `CommandHandlerRegistration[]` can hold handlers of many concrete types:
+ *
+ * - `C = never` — contravariant (parameter position): `never` extends every
+ *   specific command type, so any handler function is assignable.
+ * - `State = null | Record<string, unknown>` — covariant (return position):
+ *   all aggregate states (including `null | { ... }` patterns) extend this.
+ * - `StreamEvent = Event` — covariant: all events extend the base `Event`.
+ *
  * @template C The specific command type this handler processes.
  * @template State The aggregate state type.
  * @template StreamEvent The stream event type.
  */
-export type CommandHandlerRegistration<C extends Command = Command, State = never, StreamEvent extends Event = Event> = {
+export type CommandHandlerRegistration<C = never, State = unknown, StreamEvent extends Event = Event> = {
   commandType: string;
-  handler: CommandHandlerType<C, State, StreamEvent>;
+  handler: CommandHandler<State, C, StreamEvent>;
   getStreamName: (command: C) => string;
 };
 
