@@ -33,6 +33,16 @@
       "import": "./src/trpc/server.ts",
       "node": "./src/trpc/server.ts"
     },
+    "./orpc/client": {
+      "types": "./dist/src/orpc/client.d.ts",
+      "import": "./src/orpc/client.ts",
+      "browser": "./src/orpc/client.ts"
+    },
+    "./orpc/server": {
+      "types": "./dist/src/orpc/server.d.ts",
+      "import": "./src/orpc/server.ts",
+      "node": "./src/orpc/server.ts"
+    },
     "./seo": {
       "types": "./dist/src/seo.d.ts",
       "import": "./src/seo.ts",
@@ -60,6 +70,9 @@
     "@arki/intl": "workspace:*",
     "@arki/meter": "workspace:*",
     "@arki/ts": "workspace:*",
+    "@orpc/client": "catalog:backend",
+    "@orpc/server": "catalog:backend",
+    "@orpc/tanstack-query": "catalog:backend",
     "@tanstack/react-query": "catalog:tanstack/react-query",
     "@tanstack/react-query-devtools": "catalog:tanstack/react-query",
     "@tanstack/react-router": "catalog:tanstack/start",
