@@ -12,7 +12,9 @@ export function getInitials(name: string): string {
   if (parts.length === 1) {
     return parts[0]!.substring(0, 2).toUpperCase();
   }
-  return (parts[0]![0] + parts[parts.length - 1]![0]).toUpperCase();
+  const first = parts[0]!.charAt(0);
+  const last = parts[parts.length - 1]!.charAt(0);
+  return (first + last).toUpperCase();
 }
 
 /**
@@ -49,7 +51,7 @@ export function debounce<T extends (...args: any[]) => any>(
   fn: T,
   delay: number
 ): (...args: Parameters<T>) => void {
-  let timeoutId: NodeJS.Timeout;
+  let timeoutId: ReturnType<typeof setTimeout>;
   return (...args: Parameters<T>) => {
     clearTimeout(timeoutId);
     timeoutId = setTimeout(() => fn(...args), delay);

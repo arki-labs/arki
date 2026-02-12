@@ -1,6 +1,6 @@
 import { cn } from '~/lib/cn';
 import type { LucideIcon, LucideProps } from 'lucide-react-native';
-import { cssInterop } from 'nativewind';
+import { styled } from 'nativewind';
 
 type IconProps = LucideProps & {
   as: LucideIcon;
@@ -10,10 +10,10 @@ function IconImpl({ as: IconComponent, ...props }: IconProps) {
   return <IconComponent {...props} />;
 }
 
-cssInterop(IconImpl, {
+const StyledIconImpl = styled(IconImpl, {
   className: {
     target: 'style',
-    nativeStyleToProp: {
+    nativeStyleMapping: {
       height: 'size',
       width: 'size',
     },
@@ -21,7 +21,7 @@ cssInterop(IconImpl, {
 });
 
 /**
- * A wrapper component for Lucide icons with Nativewind `className` support via `cssInterop`.
+ * A wrapper component for Lucide icons with Nativewind `className` support via `styled`.
  *
  * This component allows you to render any Lucide icon while applying utility classes
  * using `nativewind`. It avoids the need to wrap or configure each icon individually.
@@ -42,7 +42,7 @@ cssInterop(IconImpl, {
  */
 function Icon({ as: IconComponent, className, size = 14, ...props }: IconProps) {
   return (
-    <IconImpl
+    <StyledIconImpl
       as={IconComponent}
       className={cn('text-foreground', className)}
       size={size}
