@@ -10,7 +10,7 @@
 import type { ReactNode } from 'react';
 import { APIProvider } from '@vis.gl/react-google-maps';
 
-export interface GoogleMapsProviderProps {
+export type GoogleMapsProviderProps = {
   /**
    * Google Maps API key (required)
    */

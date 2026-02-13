@@ -146,7 +146,7 @@ export class CostEstimator {
    * @param model - Embedding model (defaults to text-embedding-3-small)
    * @returns Cost in USD
    */
-  estimateEmbeddingCost(text: string, model: string = 'text-embedding-3-small'): number {
+  estimateEmbeddingCost(text: string, model = 'text-embedding-3-small'): number {
     const tokens = this.estimateTokens(text);
     return this.estimateLLMCost(model, tokens, 0);
   }
@@ -160,7 +160,7 @@ export class CostEstimator {
    */
   estimateBatchEmbeddingCost(
     texts: string[],
-    model: string = 'text-embedding-3-small'
+    model = 'text-embedding-3-small'
   ): number {
     const totalTokens = texts.reduce((sum, text) => sum + this.estimateTokens(text), 0);
     return this.estimateLLMCost(model, totalTokens, 0);

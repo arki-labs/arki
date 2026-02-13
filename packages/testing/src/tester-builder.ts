@@ -45,7 +45,7 @@ type InferRepositories<TContext> = TContext extends { repo: infer TRepo } ? TRep
  * Configuration for tester initialization
  * All generic types are inferred from the factory functions
  */
-export interface TesterConfig<TContext extends Record<string, unknown>, TCaller> {
+export type TesterConfig<TContext extends Record<string, unknown>, TCaller> = {
   schema: Record<string, unknown>;
   migrationsFolder: string;
   createContext(params: {
@@ -76,7 +76,7 @@ export interface TesterConfig<TContext extends Record<string, unknown>, TCaller>
 /**
  * Tester builder with context and caller types captured
  */
-export interface TesterBuilder<TContext extends Record<string, unknown>, TCaller> {
+export type TesterBuilder<TContext extends Record<string, unknown>, TCaller> = {
   /**
    * Create the tester builder with configuration
    *
@@ -119,7 +119,7 @@ export interface TesterBuilder<TContext extends Record<string, unknown>, TCaller
 /**
  * Builder with context type captured
  */
-export interface ContextTesterBuilder<TContext extends Record<string, unknown>> {
+export type ContextTesterBuilder<TContext extends Record<string, unknown>> = {
   /**
    * Capture the caller type for type inference
    *
@@ -137,7 +137,7 @@ export interface ContextTesterBuilder<TContext extends Record<string, unknown>> 
 /**
  * Initial tester builder (no types captured yet)
  */
-export interface InitialTesterBuilder {
+export type InitialTesterBuilder = {
   /**
    * Capture the context type for type inference
    *

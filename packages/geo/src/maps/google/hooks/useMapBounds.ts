@@ -11,7 +11,7 @@ import type { Coordinates } from '../types';
 import { useGoogleMap } from './useGoogleMap';
 import { useApiIsLoaded } from './useApiIsLoaded';
 
-export interface UseMapBoundsOptions {
+export type UseMapBoundsOptions = {
   /**
    * Padding around bounds in pixels
    * @default 40
@@ -58,9 +58,9 @@ export function useMapBounds(options: UseMapBoundsOptions = {}) {
 
       const bounds = new google.maps.LatLngBounds();
 
-      coordinates.forEach(coord => {
+      for (const coord of coordinates) {
         bounds.extend(new google.maps.LatLng(coord.lat, coord.lng));
-      });
+      }
 
       map.fitBounds(bounds, customPadding ?? padding);
     },
@@ -86,9 +86,9 @@ export function useMapBounds(options: UseMapBoundsOptions = {}) {
 
       const bounds = new google.maps.LatLngBounds();
 
-      coordinates.forEach(coord => {
+      for (const coord of coordinates) {
         bounds.extend(new google.maps.LatLng(coord.lat, coord.lng));
-      });
+      }
 
       return bounds;
     },

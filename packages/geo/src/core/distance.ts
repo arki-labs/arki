@@ -46,16 +46,21 @@ export function calculateDistance(
 
   // Convert to requested unit
   switch (unit) {
-    case 'km':
+    case 'km': {
       return distanceKm;
-    case 'mi':
+    }
+    case 'mi': {
       return distanceKm * CONVERSION_FACTORS.KM_TO_MI;
-    case 'm':
+    }
+    case 'm': {
       return distanceKm * CONVERSION_FACTORS.KM_TO_M;
-    case 'ft':
+    }
+    case 'ft': {
       return distanceKm * CONVERSION_FACTORS.KM_TO_MI * CONVERSION_FACTORS.MI_TO_FT;
-    default:
+    }
+    default: {
       return distanceKm;
+    }
   }
 }
 
@@ -193,30 +198,38 @@ export function convertDistance(
   // Convert to kilometers first
   let distanceKm: number;
   switch (fromUnit) {
-    case 'km':
+    case 'km': {
       distanceKm = distance;
       break;
-    case 'mi':
+    }
+    case 'mi': {
       distanceKm = distance * CONVERSION_FACTORS.MI_TO_KM;
       break;
-    case 'm':
+    }
+    case 'm': {
       distanceKm = distance * CONVERSION_FACTORS.M_TO_KM;
       break;
-    case 'ft':
+    }
+    case 'ft': {
       distanceKm =
         distance * CONVERSION_FACTORS.FT_TO_MI * CONVERSION_FACTORS.MI_TO_KM;
       break;
+    }
   }
 
   // Convert from kilometers to target unit
   switch (toUnit) {
-    case 'km':
+    case 'km': {
       return distanceKm;
-    case 'mi':
+    }
+    case 'mi': {
       return distanceKm * CONVERSION_FACTORS.KM_TO_MI;
-    case 'm':
+    }
+    case 'm': {
       return distanceKm * CONVERSION_FACTORS.KM_TO_M;
-    case 'ft':
+    }
+    case 'ft': {
       return distanceKm * CONVERSION_FACTORS.KM_TO_MI * CONVERSION_FACTORS.MI_TO_FT;
+    }
   }
 }

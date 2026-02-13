@@ -1,5 +1,6 @@
 import { cn } from '~/lib/cn';
-import { Platform, TextInput, type TextInputProps } from 'react-native';
+import { Platform, TextInput  } from 'react-native';
+import type {TextInputProps} from 'react-native';
 
 function Textarea({
   className,

@@ -11,7 +11,7 @@ import { createORPCClient } from '@orpc/client';
 import { RPCLink } from '@orpc/client/fetch';
 import { createTanstackQueryUtils } from '@orpc/tanstack-query';
 
-export interface ORPCClientConfig {
+export type ORPCClientConfig = {
   /**
    * Base URL for the oRPC API endpoint
    * @default '/api/orpc'
@@ -84,5 +84,10 @@ export function getORPCUrl(): string {
   return `http://localhost:${port}/api/orpc`;
 }
 
-export { createORPCClient, RPCLink, createTanstackQueryUtils };
-export type { RouterClient };
+
+
+
+export {createORPCClient} from '@orpc/client';
+export {RPCLink} from '@orpc/client/fetch';
+export {createTanstackQueryUtils} from '@orpc/tanstack-query';
+export {type RouterClient} from '@orpc/server';

@@ -14,7 +14,7 @@ import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ID, DEFAULT_MAP_ZOOM } from '../constan
 import type { Coordinates } from '../types';
 import type { MapCameraChangedEvent, MapMouseEvent } from '../types';
 
-export interface GoogleMapProps {
+export type GoogleMapProps = {
   /**
    * Map center coordinates
    * @default { lat: 20, lng: 0 }

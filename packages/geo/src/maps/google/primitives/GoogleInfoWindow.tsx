@@ -11,7 +11,7 @@ import { InfoWindow } from '@vis.gl/react-google-maps';
 
 import type { Coordinates } from '../types';
 
-export interface GoogleInfoWindowProps {
+export type GoogleInfoWindowProps = {
   /**
    * Info window position (where it should appear)
    */

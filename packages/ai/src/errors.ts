@@ -56,7 +56,7 @@ export class GenerationError extends AIError {
 export class ValidationError extends AIError {
   constructor(
     message: string,
-    public readonly validationErrors?: Array<{ field: string; message: string }>
+    public readonly validationErrors?: { field: string; message: string }[]
   ) {
     super(message, 'VALIDATION_ERROR');
     this.name = 'ValidationError';
@@ -124,7 +124,7 @@ export function getErrorMessage(error: unknown): string {
 /**
  * Error logging interface (to be implemented by consumer)
  */
-export interface ErrorLogger {
+export type ErrorLogger = {
   logError(error: AIError): void;
   logWarning(message: string, context?: Record<string, unknown>): void;
 }

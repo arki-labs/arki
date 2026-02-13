@@ -121,7 +121,7 @@ export function formatCoordinatesDMS(coords: Coordinates): string {
  * @throws InvalidCoordinatesError if string cannot be parsed
  */
 export function parseCoordinates(str: string): Coordinates {
-  const cleaned = str.trim().replace(/[,\s]+/g, ' ');
+  const cleaned = str.trim().replaceAll(/[,\s]+/g, ' ');
   const parts = cleaned.split(' ');
 
   if (parts.length !== 2) {
@@ -149,7 +149,7 @@ export function parseCoordinates(str: string): Coordinates {
 export function coordinatesEqual(
   coords1: Coordinates,
   coords2: Coordinates,
-  epsilon = 0.000001,
+  epsilon = 0.000_001,
 ): boolean {
   return (
     Math.abs(coords1.lat - coords2.lat) < epsilon &&

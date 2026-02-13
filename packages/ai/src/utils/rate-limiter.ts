@@ -5,14 +5,14 @@
 
 import { debugRetry } from '../debug.ts';
 
-export interface RateLimiterConfig {
+export type RateLimiterConfig = {
   maxRequests: number;      // Maximum requests allowed
   windowMs: number;          // Time window in milliseconds
   maxRetries?: number;       // Maximum retry attempts
   retryDelayMs?: number;     // Base delay between retries
 }
 
-export interface RateLimitResult<T> {
+export type RateLimitResult<T> = {
   success: boolean;
   data?: T;
   error?: Error;
@@ -20,7 +20,7 @@ export interface RateLimitResult<T> {
 }
 
 export class RateLimiter {
-  private requests: Map<string, number[]> = new Map();
+  private requests = new Map<string, number[]>();
   private readonly config: Required<RateLimiterConfig>;
 
   constructor(config: RateLimiterConfig) {

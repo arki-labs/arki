@@ -3,10 +3,10 @@
  * Handles sensitive data like API keys with encryption and validation
  */
 
-import { createHash, randomBytes, createCipheriv, createDecipheriv } from 'crypto';
+import { createHash, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { ValidationError } from '../errors';
 
-export interface SecureConfigOptions {
+export type SecureConfigOptions = {
   encryptionKey?: string;
   validateOnAccess?: boolean;
   maskInLogs?: boolean;
@@ -15,7 +15,7 @@ export interface SecureConfigOptions {
 export class SecureConfig {
   private readonly encryptionKey: Buffer;
   private readonly algorithm = 'aes-256-gcm';
-  private readonly configs: Map<string, { encrypted: string; iv: string; tag: string }> = new Map();
+  private readonly configs = new Map<string, { encrypted: string; iv: string; tag: string }>();
   private readonly validateOnAccess: boolean;
   private readonly maskInLogs: boolean;
 
@@ -88,7 +88,7 @@ export class SecureConfig {
       }
 
       return decrypted;
-    } catch (error) {
+    } catch {
       throw new ValidationError(`Failed to decrypt value for key: ${key}`);
     }
   }
@@ -138,8 +138,8 @@ export class SecureConfig {
     // Check for common API key patterns
     const patterns = [
       /^sk-[a-zA-Z0-9]{40,}$/,        // OpenAI pattern
-      /^[a-zA-Z0-9]{32,}$/,            // Generic alphanumeric
-      /^[a-zA-Z0-9-_]{40,}$/,          // With dashes and underscores
+      /^[a-z0-9]{32,}$/i,            // Generic alphanumeric
+      /^[\w-]{40,}$/,          // With dashes and underscores
     ];
 
     return patterns.some(pattern => pattern.test(value));
@@ -157,7 +157,7 @@ export class SecureConfig {
     const visibleEnd = 4;
     const masked = '*'.repeat(value.length - visibleStart - visibleEnd);
 
-    return value.substring(0, visibleStart) + masked + value.substring(value.length - visibleEnd);
+    return value.slice(0, Math.max(0, visibleStart)) + masked + value.slice(Math.max(0, value.length - visibleEnd));
   }
 
   /**
@@ -165,7 +165,7 @@ export class SecureConfig {
    */
   export(): string {
     return JSON.stringify({
-      configs: Array.from(this.configs.entries()),
+      configs: [...this.configs.entries()],
       timestamp: new Date().toISOString(),
     });
   }
@@ -181,7 +181,7 @@ export class SecureConfig {
       for (const [key, value] of parsed.configs) {
         this.configs.set(key, value);
       }
-    } catch (error) {
+    } catch {
       throw new ValidationError('Failed to import configuration');
     }
   }
@@ -207,7 +207,7 @@ export function getSecureApiKey(
 
   // Check environment variable
   if (envVar && process.env[envVar]) {
-    const value = process.env[envVar]!;
+    const value = process.env[envVar];
     // Store in secure config for future use
     secureConfig.set(keyName, value);
     return value;

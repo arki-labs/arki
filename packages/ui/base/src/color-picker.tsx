@@ -13,7 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from './popover';
 
 extend([namesPlugin]);
 
-interface ColorPickerProps {
+type ColorPickerProps = {
   value: string;
   onChange: (value: string) => void;
   onBlur?: () => void;

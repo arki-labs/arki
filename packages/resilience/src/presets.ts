@@ -15,7 +15,7 @@ export const externalApiPolicy: IPolicy = createResiliencePolicy({
   retry: {
     maxAttempts: 3,
     initialDelay: 200,
-    maxDelay: 5_000,
+    maxDelay: 5000,
   },
   circuitBreaker: {
     consecutiveFailures: 5,
@@ -39,10 +39,10 @@ export const databasePolicy: IPolicy = wrap(
   createRetryPolicy({
     maxAttempts: 2,
     initialDelay: 50,
-    maxDelay: 1_000,
+    maxDelay: 1000,
   }),
   createTimeoutPolicy({
-    timeoutMs: 5_000,
+    timeoutMs: 5000,
   }),
 );
 

@@ -11,7 +11,7 @@ import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
 import SuperJSON from 'superjson';
 
-export interface TRPCClientConfig {
+export type TRPCClientConfig = {
   /**
    * Base URL for the tRPC API
    * @default '/api/trpc'
@@ -100,4 +100,7 @@ export function getTRPCUrl(): string {
   return `http://localhost:${port}/api/trpc`;
 }
 
-export { createTRPCClient, httpBatchLink, SuperJSON };
+
+
+export {createTRPCClient, httpBatchLink} from '@trpc/client';
+export {default as SuperJSON} from 'superjson';

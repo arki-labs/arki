@@ -5,7 +5,7 @@
 
 import { getErrorMessage } from '../errors';
 
-export interface RetryConfig {
+export type RetryConfig = {
   maxAttempts?: number;
   initialDelayMs?: number;
   maxDelayMs?: number;
@@ -15,7 +15,7 @@ export interface RetryConfig {
   onRetry?: (attempt: number, error: Error, delayMs: number) => void;
 }
 
-export interface RetryResult<T> {
+export type RetryResult<T> = {
   success: boolean;
   data?: T;
   error?: Error;
@@ -32,7 +32,7 @@ export class RetryManager {
     this.config = {
       maxAttempts: config.maxAttempts ?? 3,
       initialDelayMs: config.initialDelayMs ?? 1000,
-      maxDelayMs: config.maxDelayMs ?? 30000,
+      maxDelayMs: config.maxDelayMs ?? 30_000,
       backoffMultiplier: config.backoffMultiplier ?? 2,
       jitterEnabled: config.jitterEnabled ?? true,
     };
@@ -119,7 +119,7 @@ export class RetryManager {
    * Execute multiple operations with individual retry logic
    */
   async executeBatch<T>(
-    operations: Array<() => Promise<T>>,
+    operations: (() => Promise<T>)[],
     customConfig?: Partial<RetryConfig>
   ): Promise<RetryResult<T>[]> {
     return Promise.all(
@@ -199,7 +199,7 @@ export function withRetry<TArgs extends unknown[], TResult>(
 export const defaultRetryManager = new RetryManager({
   maxAttempts: 3,
   initialDelayMs: 1000,
-  maxDelayMs: 10000,
+  maxDelayMs: 10_000,
   backoffMultiplier: 2,
   jitterEnabled: true,
 });

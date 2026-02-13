@@ -46,7 +46,7 @@ function TooltipContent({
   );
 }
 
-interface WithTooltipProps {
+type WithTooltipProps = {
   content: React.ReactNode;
   trigger: React.ReactNode;
 

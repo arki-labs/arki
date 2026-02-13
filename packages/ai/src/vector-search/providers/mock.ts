@@ -4,7 +4,7 @@
 
 import type { EmbeddingProvider, VectorSearchProvider, VectorSearchResult } from '../../types';
 
-export interface MockDocument<TMetadata = Record<string, unknown>> {
+export type MockDocument<TMetadata = Record<string, unknown>> = {
   id: string;
   text: string;
   embedding?: number[];
@@ -35,11 +35,11 @@ export class MockVectorProvider<TMetadata = Record<string, unknown>> implements 
   }
 
   async indexDocumentsBatch(
-    documents: Array<{
+    documents: {
       id: string;
       text: string;
       metadata?: TMetadata;
-    }>,
+    }[],
   ): Promise<void> {
     for (const doc of documents) {
       await this.indexDocument(doc.id, doc.text, doc.metadata);
@@ -48,7 +48,7 @@ export class MockVectorProvider<TMetadata = Record<string, unknown>> implements 
 
   async searchSimilar(
     query: string,
-    limit: number = 10,
+    limit = 10,
   ): Promise<VectorSearchResult<TMetadata>[]> {
     const queryEmbedding = await this.embeddingProvider.getEmbedding(query);
     const results: VectorSearchResult<TMetadata>[] = [];
@@ -96,7 +96,7 @@ export class MockVectorProvider<TMetadata = Record<string, unknown>> implements 
    * Get all documents (for testing)
    */
   getAllDocuments(): MockDocument<TMetadata>[] {
-    return Array.from(this.documents.values());
+    return [...this.documents.values()];
   }
 
   /**
@@ -120,9 +120,9 @@ export class MockVectorProvider<TMetadata = Record<string, unknown>> implements 
     let magnitudeA = 0;
     let magnitudeB = 0;
 
-    for (let i = 0; i < a.length; i++) {
-      dotProduct += a[i]! * b[i]!;
-      magnitudeA += a[i]! * a[i]!;
+    for (const [i, element] of a.entries()) {
+      dotProduct += element * b[i]!;
+      magnitudeA += element * element;
       magnitudeB += b[i]! * b[i]!;
     }
 

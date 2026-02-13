@@ -39,7 +39,7 @@ export type BaseIssueType = (typeof BASE_ISSUE_TYPES)[number];
 /**
  * A single issue found during sanitization.
  */
-export interface SanitizationIssue<TIssueType extends string = BaseIssueType> {
+export type SanitizationIssue<TIssueType extends string = BaseIssueType> = {
   /** The type of issue detected */
   type: TIssueType;
   /** Human-readable description of the issue */
@@ -55,7 +55,7 @@ export interface SanitizationIssue<TIssueType extends string = BaseIssueType> {
 /**
  * Complete report from the sanitization process.
  */
-export interface SanitizationReport<TIssueType extends string = BaseIssueType> {
+export type SanitizationReport<TIssueType extends string = BaseIssueType> = {
   /** The overall result of sanitization */
   result: SanitizationResult;
   /** The original input text before sanitization */
@@ -77,7 +77,7 @@ export interface SanitizationReport<TIssueType extends string = BaseIssueType> {
 /**
  * A pattern used for detecting issues in input.
  */
-export interface DetectionPattern {
+export type DetectionPattern = {
   /** Regular expression pattern to match */
   pattern: RegExp;
   /** Human-readable description of what this pattern detects */
@@ -87,7 +87,7 @@ export interface DetectionPattern {
 /**
  * A pattern for PII detection with replacement text.
  */
-export interface PIIPattern {
+export type PIIPattern = {
   /** Regular expression pattern to match */
   pattern: RegExp;
   /** Text to replace matched content with */
@@ -103,7 +103,7 @@ export interface PIIPattern {
 /**
  * Configuration options for the base input sanitizer.
  */
-export interface SanitizerConfig {
+export type SanitizerConfig = {
   /** Maximum allowed input length in characters */
   maxInputLength?: number;
   /** Whether to detect and block prompt injection attempts */
@@ -126,7 +126,7 @@ export interface SanitizerConfig {
 export const DEFAULT_SANITIZER_CONFIG: Required<
   Omit<SanitizerConfig, 'customInjectionPatterns' | 'customPIIPatterns'>
 > = {
-  maxInputLength: 10000,
+  maxInputLength: 10_000,
   detectPromptInjection: true,
   redactPII: true,
   stripDangerousCharacters: true,
@@ -149,7 +149,7 @@ export type ContentRating = (typeof CONTENT_RATINGS)[number];
 /**
  * A pattern for content detection with weighting.
  */
-export interface ContentPattern {
+export type ContentPattern = {
   /** Regular expression pattern to match */
   pattern: RegExp;
   /** Weight indicating severity (0-1, higher = more severe) */
@@ -161,7 +161,7 @@ export interface ContentPattern {
 /**
  * Suggested replacement for problematic content.
  */
-export interface ReplacementSuggestion {
+export type ReplacementSuggestion = {
   /** The word or phrase to replace */
   original: string;
   /** The suggested replacement */
@@ -171,7 +171,7 @@ export interface ReplacementSuggestion {
 /**
  * A segment of content that was flagged during filtering.
  */
-export interface FlaggedSegment<TCategory extends string = string> {
+export type FlaggedSegment<TCategory extends string = string> = {
   /** The text that was flagged */
   text: string;
   /** The category that triggered the flag */
@@ -189,7 +189,7 @@ export interface FlaggedSegment<TCategory extends string = string> {
 /**
  * A suggested edit for improving content safety.
  */
-export interface SuggestedEdit {
+export type SuggestedEdit = {
   /** The original text to be replaced */
   original: string;
   /** The suggested replacement */
@@ -205,10 +205,10 @@ export interface SuggestedEdit {
 /**
  * Complete result from output content filtering.
  */
-export interface ContentFilterResult<
+export type ContentFilterResult<
   TCategory extends string = string,
   TScores extends Record<string, number> = Record<string, number>,
-> {
+> = {
   /** The overall rating of the content */
   rating: ContentRating;
   /** Detailed category scores */
@@ -228,7 +228,7 @@ export interface ContentFilterResult<
 /**
  * Configuration for the output content filter.
  */
-export interface OutputFilterConfig<TCategory extends string = string> {
+export type OutputFilterConfig<TCategory extends string = string> = {
   /** Patterns to detect for each category */
   categoryPatterns: Record<TCategory, ContentPattern[]>;
   /** Thresholds for each category (0-1, scores above this trigger flags) */
@@ -243,5 +243,5 @@ export interface OutputFilterConfig<TCategory extends string = string> {
  * Default configuration values for output filter.
  */
 export const DEFAULT_OUTPUT_FILTER_CONFIG = {
-  blockingMultiplier: 2.0,
+  blockingMultiplier: 2,
 } as const;

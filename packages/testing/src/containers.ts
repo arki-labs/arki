@@ -8,7 +8,7 @@ import { debugContainers } from './debug';
 export const POSTGRES_GLOBAL_KEY = '__POSTGRES_CONNECTION_STRING__';
 export const REDIS_GLOBAL_KEY = '__REDIS_CONNECTION_STRING__';
 
-export interface SharedContainerOptions {
+export type SharedContainerOptions = {
   postgresImage?: string;
   redisImage?: string;
 }

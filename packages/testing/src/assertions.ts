@@ -44,7 +44,7 @@ export function assertPaginationValid(
   const resp = response as any;
 
   if (!Array.isArray(resp.items)) {
-    throw new Error('Expected paginated response to have items array');
+    throw new TypeError('Expected paginated response to have items array');
   }
 
   if (options?.itemsCount !== undefined && resp.items.length !== options.itemsCount) {
@@ -53,7 +53,7 @@ export function assertPaginationValid(
 
   if (options?.total !== undefined) {
     if (typeof resp.total !== 'number') {
-      throw new Error(`Expected total to be a number, got ${typeof resp.total}`);
+      throw new TypeError(`Expected total to be a number, got ${typeof resp.total}`);
     }
     if (resp.total !== options.total) {
       throw new Error(`Expected total to be ${options.total}, got ${resp.total}`);
@@ -93,7 +93,7 @@ export function assertTimestampRecent(
   const { withinSeconds = 10, label = 'timestamp' } = options;
 
   if (!(timestamp instanceof Date)) {
-    throw new Error(`Expected ${label} to be a Date, got ${typeof timestamp}`);
+    throw new TypeError(`Expected ${label} to be a Date, got ${typeof timestamp}`);
   }
 
   const now = Date.now();
@@ -179,8 +179,8 @@ export async function assertErrorThrown(
 
   try {
     await callback();
-  } catch (err) {
-    error = err as Error;
+  } catch (error_) {
+    error = error_ as Error;
   }
 
   if (!error) {

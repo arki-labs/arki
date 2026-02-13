@@ -6,7 +6,7 @@
 
 import React, { useState, useEffect } from 'react';
 
-export interface StreamingTextProps {
+export type StreamingTextProps = {
   text: string;
   speed?: number; // Characters per second
   onComplete?: () => void;
@@ -65,7 +65,7 @@ export function StreamingText({
   );
 }
 
-export interface TypewriterProps {
+export type TypewriterProps = {
   texts: string[];
   speed?: number;
   pauseBetween?: number;

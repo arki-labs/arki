@@ -15,7 +15,7 @@
  * Pricing structure for LLM models.
  * Prices are in USD per 1,000 tokens.
  */
-export interface ModelPricing {
+export type ModelPricing = {
   /** Cost per 1,000 input tokens in USD */
   inputPer1k: number;
 
@@ -30,7 +30,7 @@ export interface ModelPricing {
  * Pricing for image generation models.
  * Prices are in USD per image.
  */
-export interface ImagePricing {
+export type ImagePricing = {
   /** Model identifier */
   model: string;
 
@@ -44,7 +44,7 @@ export interface ImagePricing {
 /**
  * Cost estimate for a single operation.
  */
-export interface CostEstimate {
+export type CostEstimate = {
   /** Description of the operation */
   operation: string;
 
@@ -89,7 +89,7 @@ export type BudgetLimits<TPeriod extends string = StandardBudgetPeriod> = Record
 /**
  * Budget configuration for the budget manager.
  */
-export interface BudgetConfig<TPeriod extends string = StandardBudgetPeriod> {
+export type BudgetConfig<TPeriod extends string = StandardBudgetPeriod> = {
   /** Budget limits per period in USD */
   limits: BudgetLimits<TPeriod>;
 
@@ -106,7 +106,7 @@ export interface BudgetConfig<TPeriod extends string = StandardBudgetPeriod> {
 /**
  * Result of a budget check operation.
  */
-export interface BudgetCheckResult<TPeriod extends string = StandardBudgetPeriod> {
+export type BudgetCheckResult<TPeriod extends string = StandardBudgetPeriod> = {
   /** Whether the operation is allowed */
   allowed: boolean;
 
@@ -126,7 +126,7 @@ export interface BudgetCheckResult<TPeriod extends string = StandardBudgetPeriod
 /**
  * Metadata for a spend record.
  */
-export interface SpendMetadata {
+export type SpendMetadata = {
   /** Type of operation */
   operationType: string;
 
@@ -152,7 +152,7 @@ export interface SpendMetadata {
 /**
  * A recorded spend entry.
  */
-export interface SpendRecord {
+export type SpendRecord = {
   /** Unique identifier */
   id: string;
 
@@ -189,7 +189,7 @@ export const CIRCUIT_STATES = ['closed', 'open', 'half_open'] as const;
 /**
  * Configuration for the cost circuit breaker.
  */
-export interface CostCircuitConfig {
+export type CostCircuitConfig = {
   /** Number of failures before opening the circuit */
   failureThreshold: number;
 
@@ -206,7 +206,7 @@ export interface CostCircuitConfig {
 /**
  * Current state of the circuit breaker.
  */
-export interface CircuitBreakerState {
+export type CircuitBreakerState = {
   /** Current circuit state */
   state: CircuitState;
 
@@ -229,7 +229,7 @@ export interface CircuitBreakerState {
 /**
  * Result of a circuit breaker execution.
  */
-export interface CircuitBreakerResult<T> {
+export type CircuitBreakerResult<T> = {
   /** Whether the operation was executed */
   executed: boolean;
 
@@ -254,7 +254,7 @@ export interface CircuitBreakerResult<T> {
  * Minimal KV store interface required by budget manager.
  * Compatible with @arki/kv and similar implementations.
  */
-export interface KVStore {
+export type KVStore = {
   get<T>(key: string): Promise<T | null>;
   set<T>(key: string, value: T, ttl?: number): Promise<void>;
   delete(key: string): Promise<void>;

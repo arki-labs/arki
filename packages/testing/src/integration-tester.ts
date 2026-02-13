@@ -981,7 +981,7 @@ export class IntegrationTester<
    */
   assertValidId(value: unknown, prefix: string): asserts value is string {
     if (typeof value !== 'string') {
-      throw new Error(`Expected ID to be a string, got ${typeof value}`);
+      throw new TypeError(`Expected ID to be a string, got ${typeof value}`);
     }
     if (!value.startsWith(prefix)) {
       throw new Error(`Expected ID to start with '${prefix}', got '${value}'`);
@@ -1010,10 +1010,10 @@ export class IntegrationTester<
 
     const record = obj as any;
     if (!(record.createdAt instanceof Date)) {
-      throw new Error(`Expected createdAt to be a Date, got ${typeof record.createdAt}`);
+      throw new TypeError(`Expected createdAt to be a Date, got ${typeof record.createdAt}`);
     }
     if (!(record.updatedAt instanceof Date)) {
-      throw new Error(`Expected updatedAt to be a Date, got ${typeof record.updatedAt}`);
+      throw new TypeError(`Expected updatedAt to be a Date, got ${typeof record.updatedAt}`);
     }
   }
 
@@ -1063,7 +1063,7 @@ export class IntegrationTester<
 
     const resp = response as any;
     if (!Array.isArray(resp.items)) {
-      throw new Error('Expected paginated response to have items array');
+      throw new TypeError('Expected paginated response to have items array');
     }
   }
 
@@ -1084,7 +1084,7 @@ export class IntegrationTester<
       .createHash('sha256')
       .update(`${this.randomSeed}-${this.randomCounter++}`)
       .digest('hex')
-      .substring(0, 8);
+      .slice(0, 8);
 
     return prefix ? `${prefix}-${hash}` : `test-${hash}`;
   }
@@ -1106,7 +1106,7 @@ export class IntegrationTester<
       .createHash('sha256')
       .update(`${this.randomSeed}-${this.randomCounter++}`)
       .digest('hex')
-      .substring(0, 8);
+      .slice(0, 8);
 
     const emailPrefix = prefix ?? 'test';
     return `${emailPrefix}-${hash}@example.com`;
@@ -1133,7 +1133,7 @@ export class IntegrationTester<
       .createHash('sha256')
       .update(`${this.randomSeed}-${this.randomCounter++}`)
       .digest('hex')
-      .substring(0, 8);
+      .slice(0, 8);
 
     return `https://example.com/test-${hash}`;
   }
@@ -1150,9 +1150,9 @@ export class IntegrationTester<
    * const code = tester.generateString(6);
    * ```
    */
-  generateString(length: number = 16): string {
+  generateString(length = 16): string {
     const hash = crypto.createHash('sha256').update(`${this.randomSeed}-${this.randomCounter++}`).digest('hex');
-    return hash.substring(0, Math.min(length, hash.length));
+    return hash.slice(0, Math.max(0, Math.min(length, hash.length)));
   }
 
   /**
@@ -1256,7 +1256,7 @@ export class IntegrationTester<
     const hash = crypto.createHash('sha256').update(`${this.randomSeed}-${this.randomCounter++}`).digest('hex');
 
     // Use first 8 characters as hex number
-    const randomHex = parseInt(hash.substring(0, 8), 16);
+    const randomHex = Number.parseInt(hash.slice(0, 8), 16);
     const range = max - min + 1;
     return min + (randomHex % range);
   }

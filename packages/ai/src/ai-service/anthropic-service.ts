@@ -5,7 +5,7 @@
 
 import { anthropic } from '@ai-sdk/anthropic';
 import { generateObject, generateText } from 'ai';
-import { z } from '@arki/contracts';
+import type { z } from '@arki/contracts';
 
 type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
@@ -17,7 +17,7 @@ import { GenerationError, getErrorMessage } from '../errors';
 import { validateInput, aiServiceConfigSchema } from '../validation';
 import { rateLimiters } from '../utils/rate-limiter';
 
-export interface AnthropicServiceConfig {
+export type AnthropicServiceConfig = {
   model?: string;
   temperature?: number;
   maxRetries?: number;

@@ -25,7 +25,7 @@ export const DEFAULT_CIRCUIT_CONFIG: CostCircuitConfig = {
   failureThreshold: 3,
   successThreshold: 2,
   timeoutSeconds: 60,
-  costThresholdUsd: 10.0,
+  costThresholdUsd: 10,
 };
 
 // ============================================
@@ -82,7 +82,7 @@ export class CircuitBreakerError extends Error {
 export class CostCircuitBreaker {
   private state: CircuitBreakerState;
   private readonly config: CostCircuitConfig;
-  private cumulativeCost: number = 0;
+  private cumulativeCost = 0;
 
   constructor(config: Partial<CostCircuitConfig> = {}) {
     this.config = { ...DEFAULT_CIRCUIT_CONFIG, ...config };
@@ -102,7 +102,7 @@ export class CostCircuitBreaker {
    */
   async execute<T>(
     operation: () => Promise<T>,
-    estimatedCost: number = 0
+    estimatedCost = 0
   ): Promise<CircuitBreakerResult<T>> {
     // Check if circuit should transition from open to half-open
     this.checkTimeout();
@@ -150,7 +150,7 @@ export class CostCircuitBreaker {
    */
   async executeOrThrow<T>(
     operation: () => Promise<T>,
-    estimatedCost: number = 0
+    estimatedCost = 0
   ): Promise<T> {
     const result = await this.execute(operation, estimatedCost);
 
@@ -262,8 +262,7 @@ export class CostCircuitBreaker {
   }
 
   private checkTimeout(): void {
-    if (this.state.state === 'open' && this.state.resetAt) {
-      if (new Date() >= this.state.resetAt) {
+    if (this.state.state === 'open' && this.state.resetAt && new Date() >= this.state.resetAt) {
         // Transition to half-open
         this.state = {
           ...this.state,
@@ -271,7 +270,6 @@ export class CostCircuitBreaker {
           successCount: 0,
         };
       }
-    }
   }
 
   private recordSuccess(): void {
@@ -411,12 +409,12 @@ export class UserCircuitBreakerManager {
   /**
    * Get status of all circuit breakers.
    */
-  getAllStatus(): Array<{
+  getAllStatus(): {
     userId: string;
     state: CircuitState;
     cumulativeCost: number;
-  }> {
-    return Array.from(this.circuits.entries()).map(([userId, circuit]) => ({
+  }[] {
+    return [...this.circuits.entries()].map(([userId, circuit]) => ({
       userId,
       state: circuit.getState().state,
       cumulativeCost: circuit.getCumulativeCost(),

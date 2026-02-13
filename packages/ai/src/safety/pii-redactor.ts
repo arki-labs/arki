@@ -21,7 +21,7 @@ import type { PIIPattern, SanitizationIssue } from './types';
 export const DEFAULT_PII_PATTERNS: PIIPattern[] = [
   // Email addresses
   {
-    pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
+    pattern: /\b[\w.%+-]+@[A-Z0-9.-]+\.[A-Z|]{2,}\b/gi,
     replacement: '[EMAIL REDACTED]',
     description: 'Email address',
   },
@@ -49,7 +49,7 @@ export const DEFAULT_PII_PATTERNS: PIIPattern[] = [
 
   // US Street addresses (basic pattern)
   {
-    pattern: /\b\d{1,5}\s+[\w\s]+(?:street|st|avenue|ave|road|rd|boulevard|blvd|lane|ln|drive|dr|court|ct|way|place|pl)\b,?\s*(?:apt\.?\s*\d+)?,?\s*[a-zA-Z]+,?\s*[a-zA-Z]{2}\s*\d{5}(?:-\d{4})?\b/gi,
+    pattern: /\b\d{1,5}\s[\w\s]+(?:street|st|avenue|ave|road|rd|boulevard|blvd|lane|ln|drive|dr|court|ct|way|place|pl)\b,?\s*(?:apt\.?\s*\d+)?,?\s*[a-z]+,?\s*[a-z]{2}\s*\d{5}(?:-\d{4})?\b/gi,
     replacement: '[ADDRESS REDACTED]',
     description: 'Street address',
   },
@@ -62,7 +62,7 @@ export const DEFAULT_PII_PATTERNS: PIIPattern[] = [
 /**
  * Result of PII detection and redaction.
  */
-export interface PIIRedactionResult {
+export type PIIRedactionResult = {
   /** The text with PII redacted */
   redactedText: string;
   /** List of issues found during redaction */

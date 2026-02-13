@@ -5,7 +5,7 @@
 /**
  * Generic embedding provider interface
  */
-export interface EmbeddingProvider {
+export type EmbeddingProvider = {
   /**
    * Generate embedding for a single text
    */
@@ -30,7 +30,7 @@ export interface EmbeddingProvider {
 /**
  * Vector search result
  */
-export interface VectorSearchResult<TMetadata = Record<string, unknown>> {
+export type VectorSearchResult<TMetadata = Record<string, unknown>> = {
   id: string;
   score: number;
   metadata?: TMetadata;
@@ -39,7 +39,7 @@ export interface VectorSearchResult<TMetadata = Record<string, unknown>> {
 /**
  * Vector search provider interface
  */
-export interface VectorSearchProvider<TMetadata = Record<string, unknown>> {
+export type VectorSearchProvider<TMetadata = Record<string, unknown>> = {
   /**
    * Index a document with its embedding
    */
@@ -48,11 +48,11 @@ export interface VectorSearchProvider<TMetadata = Record<string, unknown>> {
   /**
    * Index multiple documents in batch
    */
-  indexDocumentsBatch?(documents: Array<{
+  indexDocumentsBatch?(documents: {
     id: string;
     text: string;
     metadata?: TMetadata;
-  }>): Promise<void>;
+  }[]): Promise<void>;
 
   /**
    * Search for similar documents
@@ -87,7 +87,7 @@ export type SearchMode = 'semantic' | 'keyword' | 'hybrid';
 /**
  * Generic search result
  */
-export interface SearchResult<TData = Record<string, unknown>> {
+export type SearchResult<TData = Record<string, unknown>> = {
   id: string;
   score: number;
   data?: TData;
@@ -98,7 +98,7 @@ export interface SearchResult<TData = Record<string, unknown>> {
 /**
  * Search options
  */
-export interface SearchOptions {
+export type SearchOptions = {
   mode?: SearchMode;
   limit?: number;
   offset?: number;
@@ -110,7 +110,7 @@ export interface SearchOptions {
 /**
  * AI service configuration
  */
-export interface AIServiceConfig {
+export type AIServiceConfig = {
   provider: 'openai' | 'anthropic' | 'cohere' | 'local';
   apiKey?: string;
   baseUrl?: string;
@@ -122,7 +122,7 @@ export interface AIServiceConfig {
 /**
  * Streaming response handler
  */
-export interface StreamingHandler {
+export type StreamingHandler = {
   onToken?: (token: string) => void;
   onComplete?: (fullText: string) => void;
   onError?: (error: Error) => void;
@@ -131,7 +131,7 @@ export interface StreamingHandler {
 /**
  * RAG (Retrieval-Augmented Generation) configuration
  */
-export interface RAGConfig {
+export type RAGConfig = {
   embeddingProvider: EmbeddingProvider;
   vectorSearchProvider: VectorSearchProvider;
   aiService: AIServiceConfig;
@@ -144,7 +144,7 @@ export interface RAGConfig {
 /**
  * Document chunk for RAG
  */
-export interface DocumentChunk {
+export type DocumentChunk = {
   id: string;
   content: string;
   metadata?: {
@@ -158,7 +158,7 @@ export interface DocumentChunk {
 /**
  * Cache entry
  */
-export interface CacheEntry<T> {
+export type CacheEntry<T> = {
   data: T;
   timestamp: number;
   ttl: number;
@@ -167,7 +167,7 @@ export interface CacheEntry<T> {
 /**
  * Analytics event
  */
-export interface AnalyticsEvent {
+export type AnalyticsEvent = {
   type: string;
   query?: string;
   results?: number;

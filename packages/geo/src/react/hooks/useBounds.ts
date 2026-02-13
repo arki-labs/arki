@@ -11,7 +11,7 @@ import {
 } from '../../core/bounds';
 import type { Bounds, Coordinates } from '../../core/types';
 
-export interface UseBoundsReturn {
+export type UseBoundsReturn = {
   bounds: Bounds | null;
   center: Coordinates | null;
   radius: number | null;

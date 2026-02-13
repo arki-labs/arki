@@ -26,8 +26,8 @@ import type {
  */
 export const BUDGET_PERIOD_DURATIONS = {
   hourly: 3600,
-  daily: 86400,
-  monthly: 2592000, // 30 days
+  daily: 86_400,
+  monthly: 2_592_000, // 30 days
 } as const;
 
 /**
@@ -35,10 +35,10 @@ export const BUDGET_PERIOD_DURATIONS = {
  * Applications should override these based on their needs.
  */
 export const DEFAULT_BUDGET_LIMITS: BudgetLimits = {
-  hourly: 1.0,
-  daily: 10.0,
-  weekly: 50.0,
-  monthly: 100.0,
+  hourly: 1,
+  daily: 10,
+  weekly: 50,
+  monthly: 100,
 };
 
 // ============================================
@@ -238,13 +238,13 @@ export class BudgetManager<TPeriod extends string = BudgetPeriod> {
    * @returns Budget status with percentages
    */
   async getBudgetStatus(userId: string): Promise<
-    Array<{
+    {
       period: TPeriod;
       spent: number;
       limit: number;
       remaining: number;
       percentUsed: number;
-    }>
+    }[]
   > {
     const breakdown = await this.getSpendBreakdown(userId);
 

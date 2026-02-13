@@ -6,7 +6,7 @@
 import { z } from '@arki/contracts';
 import type { OpenAIService } from './openai-service';
 
-export interface StructuredGenerationOptions {
+export type StructuredGenerationOptions = {
   temperature?: number;
   maxRetries?: number;
   systemPrompt?: string;

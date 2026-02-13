@@ -16,7 +16,7 @@ import type { IPolicy } from 'cockatiel';
 // Option types
 // ---------------------------------------------------------------------------
 
-export interface RetryPolicyOptions {
+export type RetryPolicyOptions = {
   /** Maximum number of retry attempts (default: 3) */
   maxAttempts?: number;
   /** Initial delay in milliseconds before the first retry (default: 100) */
@@ -27,26 +27,26 @@ export interface RetryPolicyOptions {
   exponent?: number;
 }
 
-export interface CircuitBreakerPolicyOptions {
+export type CircuitBreakerPolicyOptions = {
   /** Duration in milliseconds before the breaker transitions from open to half-open (default: 30_000) */
   halfOpenAfter?: number;
   /** Number of consecutive failures before the breaker opens (default: 5) */
   consecutiveFailures?: number;
 }
 
-export interface TimeoutPolicyOptions {
+export type TimeoutPolicyOptions = {
   /** Timeout duration in milliseconds (default: 30_000) */
   timeoutMs?: number;
 }
 
-export interface BulkheadPolicyOptions {
+export type BulkheadPolicyOptions = {
   /** Maximum concurrent executions (default: 10) */
   maxConcurrent?: number;
   /** Maximum queue size for pending executions (default: 100) */
   maxQueue?: number;
 }
 
-export interface ResiliencePolicyOptions {
+export type ResiliencePolicyOptions = {
   retry?: RetryPolicyOptions;
   circuitBreaker?: CircuitBreakerPolicyOptions;
   timeout?: TimeoutPolicyOptions;

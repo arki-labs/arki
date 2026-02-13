@@ -11,7 +11,7 @@ import { useEffect, useId } from 'react';
 
 import type { Coordinates } from '../../types';
 
-export interface StreetViewPanoramaProps {
+export type StreetViewPanoramaProps = {
   /**
    * Location to display Street View
    */

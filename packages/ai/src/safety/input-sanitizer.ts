@@ -22,7 +22,7 @@ import type {
 // ============================================
 
 /** Characters to strip from input for safety */
-const DANGEROUS_CHARACTERS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
+const DANGEROUS_CHARACTERS = /[\u0000-\u0008\v\f\u000E-\u001F\u007F]/g;
 
 // ============================================
 // BaseInputSanitizer Class
@@ -79,7 +79,7 @@ export class BaseInputSanitizer<TIssueType extends string = BaseIssueType> {
    */
   constructor(config?: SanitizerConfig) {
     this.config = {
-      maxInputLength: config?.maxInputLength ?? 10000,
+      maxInputLength: config?.maxInputLength ?? 10_000,
       detectPromptInjection: config?.detectPromptInjection ?? true,
       redactPII: config?.redactPII ?? true,
       stripDangerousCharacters: config?.stripDangerousCharacters ?? true,
@@ -181,11 +181,9 @@ export class BaseInputSanitizer<TIssueType extends string = BaseIssueType> {
    */
   public wouldBlock(input: string): boolean {
     // Check for prompt injection
-    if (this.config.detectPromptInjection) {
-      if (this.injectionDetector.hasInjection(input)) {
+    if (this.config.detectPromptInjection && this.injectionDetector.hasInjection(input)) {
         return true;
       }
-    }
 
     // Empty input would be blocked
     if (input.trim().length === 0) {
@@ -199,7 +197,7 @@ export class BaseInputSanitizer<TIssueType extends string = BaseIssueType> {
    * Removes dangerous control characters from the input.
    */
   protected stripDangerousCharacters(input: string): string {
-    return input.replace(DANGEROUS_CHARACTERS, '');
+    return input.replaceAll(DANGEROUS_CHARACTERS, '');
   }
 
   /**
@@ -207,8 +205,8 @@ export class BaseInputSanitizer<TIssueType extends string = BaseIssueType> {
    */
   protected normalizeWhitespace(input: string): string {
     return input
-      .replace(/\s+/g, ' ') // Replace multiple spaces with single space
-      .replace(/^\s+|\s+$/g, ''); // Trim leading and trailing whitespace
+      .replaceAll(/\s+/g, ' ') // Replace multiple spaces with single space
+      .replaceAll(/^\s+|\s+$/g, ''); // Trim leading and trailing whitespace
   }
 
   /**

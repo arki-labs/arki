@@ -6,7 +6,7 @@
 
 import React from 'react';
 
-export interface MetaProps {
+export type MetaProps = {
   /**
    * Page title
    */
@@ -36,12 +36,12 @@ export interface MetaProps {
     type?: 'website' | 'article' | 'product';
     url?: string;
     siteName?: string;
-    images?: Array<{
+    images?: {
       url: string;
       width?: number;
       height?: number;
       alt?: string;
-    }>;
+    }[];
     locale?: string;
     publishedTime?: string;
     authors?: string[];
@@ -62,21 +62,21 @@ export interface MetaProps {
   /**
    * Additional meta tags
    */
-  additionalMetaTags?: Array<{
+  additionalMetaTags?: {
     name?: string;
     property?: string;
     content: string;
-  }>;
+  }[];
 
   /**
    * Additional link tags
    */
-  additionalLinkTags?: Array<{
+  additionalLinkTags?: {
     rel: string;
     href: string;
     sizes?: string;
     type?: string;
-  }>;
+  }[];
 
   /**
    * Robots meta tag
@@ -110,8 +110,8 @@ export interface MetaProps {
  * });
  * ```
  */
-export function Meta(props: MetaProps): Array<{ name?: string; property?: string; content: string }> {
-  const tags: Array<{ name?: string; property?: string; content: string }> = [];
+export function Meta(props: MetaProps): { name?: string; property?: string; content: string }[] {
+  const tags: { name?: string; property?: string; content: string }[] = [];
 
   // Title
   if (props.title) {
@@ -148,15 +148,15 @@ export function Meta(props: MetaProps): Array<{ name?: string; property?: string
     if (og.siteName) tags.push({ property: 'og:site_name', content: og.siteName });
     if (og.locale) tags.push({ property: 'og:locale', content: og.locale });
     if (og.publishedTime) tags.push({ property: 'article:published_time', content: og.publishedTime });
-    og.authors?.forEach(author => {
+    if (og.authors) for (const author of og.authors) {
       tags.push({ property: 'article:author', content: author });
-    });
-    og.images?.forEach(image => {
+    }
+    if (og.images) for (const image of og.images) {
       tags.push({ property: 'og:image', content: image.url });
       if (image.width) tags.push({ property: 'og:image:width', content: String(image.width) });
       if (image.height) tags.push({ property: 'og:image:height', content: String(image.height) });
       if (image.alt) tags.push({ property: 'og:image:alt', content: image.alt });
-    });
+    }
   }
 
   // Twitter
@@ -171,14 +171,14 @@ export function Meta(props: MetaProps): Array<{ name?: string; property?: string
   }
 
   // Additional meta tags
-  props.additionalMetaTags?.forEach(tag => {
+  if (props.additionalMetaTags) for (const tag of props.additionalMetaTags) {
     tags.push(tag);
-  });
+  }
 
   return tags;
 }
 
-export interface HeadProps {
+export type HeadProps = {
   /**
    * Page title
    */
@@ -216,7 +216,7 @@ export function Head(props: HeadProps): React.ReactElement {
   );
 }
 
-export interface ScriptsProps {
+export type ScriptsProps = {
   /**
    * Defer script loading
    * @default true

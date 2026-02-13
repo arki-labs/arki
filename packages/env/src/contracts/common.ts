@@ -15,7 +15,7 @@ export const commonContracts = {
     z
       .coerce.number()
       .min(1, 'Port must be at least 1')
-      .max(65535, 'Port must be at most 65535')
+      .max(65_535, 'Port must be at most 65535')
       .default(defaultValue),
 
   nodeEnv: () => z.enum(['development', 'production', 'test']).default('development'),

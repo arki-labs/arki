@@ -35,7 +35,7 @@ export function createMarchingAntsAnimation(
 /**
  * Create dashed polyline configuration
  */
-export function createDashedPolylineConfig(color: string = '#FFA07A'): google.maps.PolylineOptions {
+export function createDashedPolylineConfig(color = '#FFA07A'): google.maps.PolylineOptions {
   return {
     strokeOpacity: 0,
     icons: [
@@ -56,7 +56,7 @@ export function createDashedPolylineConfig(color: string = '#FFA07A'): google.ma
 /**
  * Create solid polyline configuration
  */
-export function createSolidPolylineConfig(color: string = '#FFA07A', weight: number = 2): google.maps.PolylineOptions {
+export function createSolidPolylineConfig(color = '#FFA07A', weight = 2): google.maps.PolylineOptions {
   return {
     strokeColor: color,
     strokeOpacity: 0.8,

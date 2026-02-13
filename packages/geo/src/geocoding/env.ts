@@ -21,7 +21,7 @@ export const geocodingEnv = createEnv({
 
     // Cache configuration
     GEOCODING_CACHE_ENABLED: z.coerce.boolean().default(true),
-    GEOCODING_CACHE_TTL: z.coerce.number().default(2592000), // 30 days in seconds
+    GEOCODING_CACHE_TTL: z.coerce.number().default(2_592_000), // 30 days in seconds
     GEOCODING_CACHE_KEY_PREFIX: z.string().default('geo:'),
   },
   runtimeEnv: process.env,

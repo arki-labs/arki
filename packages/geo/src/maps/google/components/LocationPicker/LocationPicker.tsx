@@ -54,7 +54,7 @@ export function LocationPicker({
 
   // Use external control if provided, otherwise use internal state
   const mapCenter = externalCenter || internalMapCenter;
-  const mapZoom = externalZoom !== undefined ? externalZoom : internalMapZoom;
+  const mapZoom = externalZoom === undefined ? internalMapZoom : externalZoom;
 
   /**
    * Handle map center changes

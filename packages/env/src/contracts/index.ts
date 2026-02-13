@@ -10,4 +10,8 @@ export const contracts = {
 };
 
 // Individual category exports
-export { commonContracts, urlContracts, parseContracts };
+
+
+export {commonContracts} from './common.js';
+export {urlContracts} from './urls.js';
+export {parseContracts} from './parsing.js';

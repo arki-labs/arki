@@ -17,7 +17,7 @@ export type GeocodingProvider =
 /**
  * Address components following Schema.org PostalAddress structure
  */
-export interface AddressComponents {
+export type AddressComponents = {
   streetAddress?: string;
   locality?: string; // City
   region?: string; // State/Province
@@ -28,7 +28,7 @@ export interface AddressComponents {
 /**
  * Result from geocoding operation
  */
-export interface GeocodeResult {
+export type GeocodeResult = {
   latitude: number;
   longitude: number;
   formattedAddress: string;
@@ -40,7 +40,7 @@ export interface GeocodeResult {
 /**
  * Configuration for geocoding service
  */
-export interface GeocodingConfig {
+export type GeocodingConfig = {
   provider: GeocodingProvider;
   fallbackProviders: GeocodingProvider[];
   google: {

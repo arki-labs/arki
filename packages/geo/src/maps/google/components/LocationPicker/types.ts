@@ -4,7 +4,7 @@
 
 import type { Coordinates } from '../../types';
 
-export interface LocationPickerProps {
+export type LocationPickerProps = {
   /**
    * Called when user selects a location by clicking the map
    */

@@ -11,7 +11,7 @@ import type { Coordinates } from '../types';
  * formatCoordinates({ lat: 37.7749, lng: -122.4194 })
  * // Returns: "37.7749, -122.4194"
  */
-export function formatCoordinates(coords: Coordinates, precision: number = 4): string {
+export function formatCoordinates(coords: Coordinates, precision = 4): string {
   return `${coords.lat.toFixed(precision)}, ${coords.lng.toFixed(precision)}`;
 }
 
@@ -22,7 +22,7 @@ export function formatCoordinates(coords: Coordinates, precision: number = 4): s
  * formatCoordinatesWithCardinals({ lat: 37.7749, lng: -122.4194 })
  * // Returns: "37.7749°N, 122.4194°W"
  */
-export function formatCoordinatesWithCardinals(coords: Coordinates, precision: number = 4): string {
+export function formatCoordinatesWithCardinals(coords: Coordinates, precision = 4): string {
   const lat = Math.abs(coords.lat).toFixed(precision);
   const lng = Math.abs(coords.lng).toFixed(precision);
   const latDir = coords.lat >= 0 ? 'N' : 'S';
@@ -55,8 +55,8 @@ export function parseCoordinates(coordString: string): Coordinates | null {
 
   if (parts.length !== 2) return null;
 
-  const lat = parseFloat(parts[0]!);
-  const lng = parseFloat(parts[1]!);
+  const lat = Number.parseFloat(parts[0]!);
+  const lng = Number.parseFloat(parts[1]!);
 
   if (isNaN(lat) || isNaN(lng)) return null;
   if (lat < -90 || lat > 90) return null;

@@ -20,7 +20,7 @@ import type {
   StreamOptions,
 } from './types.ts';
 
-export interface GoogleServiceConfig {
+export type GoogleServiceConfig = {
   model?: string;
   temperature?: number;
   maxRetries?: number;

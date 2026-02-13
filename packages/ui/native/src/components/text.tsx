@@ -1,8 +1,10 @@
 import { cn } from '~/lib/cn';
 import * as Slot from '@rn-primitives/slot';
-import { cva, type VariantProps } from 'class-variance-authority';
+import { cva  } from 'class-variance-authority';
+import type {VariantProps} from 'class-variance-authority';
 import * as React from 'react';
-import { Platform, Text as RNText, type Role } from 'react-native';
+import { Platform, Text as RNText  } from 'react-native';
+import type {Role} from 'react-native';
 
 const textVariants = cva(
   cn(

@@ -34,7 +34,7 @@ export const debugFactories = createDebugLogger('testing:factories');
 /**
  * Options for debug logging
  */
-export interface DebugOptions {
+export type DebugOptions = {
   /**
    * Whether debug logging is enabled
    * @default process.env.DEBUG_TESTS === 'true'

@@ -7,7 +7,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 // Removed unused import - Message type from 'ai' package not used in this file
 
-export interface ChatMessage {
+export type ChatMessage = {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -15,7 +15,7 @@ export interface ChatMessage {
   metadata?: Record<string, unknown>;
 }
 
-export interface UseAIChatOptions {
+export type UseAIChatOptions = {
   apiEndpoint?: string;
   initialMessages?: ChatMessage[];
   onMessage?: (message: ChatMessage) => void;
@@ -24,7 +24,7 @@ export interface UseAIChatOptions {
   context?: Record<string, unknown>;
 }
 
-export interface UseAIChatReturn {
+export type UseAIChatReturn = {
   messages: ChatMessage[];
   input: string;
   isLoading: boolean;
@@ -60,7 +60,7 @@ export function useAIChat(options: UseAIChatOptions = {}): UseAIChatReturn {
    * Generate unique message ID
    */
   const generateId = useCallback(() => {
-    return `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
   }, []);
 
   /**
@@ -244,10 +244,10 @@ export function useAIChat(options: UseAIChatOptions = {}): UseAIChatReturn {
         setMessages(prev => [...prev, assistantMessage]);
         if (onMessage) onMessage(assistantMessage);
       }
-    } catch (err) {
-      if (err instanceof Error && err.name !== 'AbortError') {
-        setError(err);
-        if (onError) onError(err);
+    } catch (error_) {
+      if (error_ instanceof Error && error_.name !== 'AbortError') {
+        setError(error_);
+        if (onError) onError(error_);
       }
     } finally {
       setIsLoading(false);

@@ -17,9 +17,9 @@ function useTimeline() {
   return context;
 }
 
-export interface TimelineProps extends React.ComponentPropsWithoutRef<'ol'> {
+export type TimelineProps = {
   orientation?: 'horizontal' | 'vertical';
-}
+} & React.ComponentPropsWithoutRef<'ol'>
 
 export const Timeline = React.forwardRef<React.ElementRef<'ol'>, TimelineProps>(
   ({ className, orientation = 'vertical', ...props }, ref) => (
@@ -68,9 +68,9 @@ export const TimelineSeparator = React.forwardRef<React.ElementRef<'div'>, React
 );
 TimelineSeparator.displayName = 'TimelineSeparator';
 
-export interface TimelineDotProps extends React.ComponentPropsWithoutRef<'div'> {
+export type TimelineDotProps = {
   variant?: 'default' | 'outline';
-}
+} & React.ComponentPropsWithoutRef<'div'>
 
 export const TimelineDot = React.forwardRef<React.ElementRef<'div'>, TimelineDotProps>(
   ({ variant = 'default', className, ...props }, ref) => {

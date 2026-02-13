@@ -4,12 +4,12 @@
  * Provides server-side tRPC configuration using server functions.
  */
 
-import type { AnyTRPCRouter, TRPCRouterRecord } from '@trpc/server';
+import type { AnyTRPCRouter } from '@trpc/server';
 import type { FetchHandlerOptions } from '@trpc/server/adapters/fetch';
 import { createServerFn } from '@tanstack/react-start/server';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 
-export interface TRPCServerConfig<TRouter extends AnyTRPCRouter> {
+export type TRPCServerConfig<TRouter extends AnyTRPCRouter> = {
   /**
    * The tRPC router
    */
@@ -114,7 +114,7 @@ export function createServerProcedure<TInput, TOutput>(
 /**
  * CORS headers for tRPC API routes
  */
-export function getCorsHeaders(origin: string = '*'): Record<string, string> {
+export function getCorsHeaders(origin = '*'): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -123,4 +123,7 @@ export function getCorsHeaders(origin: string = '*'): Record<string, string> {
   };
 }
 
-export { fetchRequestHandler, createServerFn };
+
+
+export {fetchRequestHandler} from '@trpc/server/adapters/fetch';
+export {createServerFn} from '@tanstack/react-start/server';

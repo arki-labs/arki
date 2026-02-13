@@ -7,7 +7,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { SearchResult } from '../hooks/useSemanticSearch';
 
-export interface SearchInterfaceProps<TMetadata = Record<string, unknown>> {
+export type SearchInterfaceProps<TMetadata = Record<string, unknown>> = {
   query: string;
   results: SearchResult<TMetadata>[];
   suggestions: string[];
@@ -98,26 +98,30 @@ export function SearchInterface<TMetadata = Record<string, unknown>>({
     if (!showSuggestionsDropdown || suggestions.length === 0) return;
 
     switch (e.key) {
-      case 'ArrowDown':
+      case 'ArrowDown': {
         e.preventDefault();
         setSelectedSuggestionIndex((prev) =>
           prev < suggestions.length - 1 ? prev + 1 : prev
         );
         break;
-      case 'ArrowUp':
+      }
+      case 'ArrowUp': {
         e.preventDefault();
         setSelectedSuggestionIndex((prev) => (prev > 0 ? prev - 1 : -1));
         break;
-      case 'Enter':
+      }
+      case 'Enter': {
         if (selectedSuggestionIndex >= 0) {
           e.preventDefault();
           handleSuggestionClick(suggestions[selectedSuggestionIndex]!);
         }
         break;
-      case 'Escape':
+      }
+      case 'Escape': {
         setShowSuggestionsDropdown(false);
         setSelectedSuggestionIndex(-1);
         break;
+      }
     }
   };
 
@@ -137,7 +141,7 @@ export function SearchInterface<TMetadata = Record<string, unknown>>({
         </span>
         {result.metadata && (
           <span className="text-sm text-gray-500">
-            {JSON.stringify(result.metadata).substring(0, 50)}...
+            {JSON.stringify(result.metadata).slice(0, 50)}...
           </span>
         )}
       </div>

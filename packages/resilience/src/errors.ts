@@ -1,7 +1,8 @@
-import {
-  BrokenCircuitError,
-  TaskCancelledError,
+import type {
   BulkheadRejectedError,
+  BrokenCircuitError} from 'cockatiel';
+import {
+  TaskCancelledError,
   isBrokenCircuitError,
   isBulkheadRejectedError,
 } from 'cockatiel';
@@ -10,13 +11,13 @@ import {
  * Thrown when a circuit breaker is in the open state and rejects execution.
  * Re-exported from cockatiel for semantic clarity.
  */
-export { BrokenCircuitError as CircuitOpenError };
+
 
 /**
  * Thrown when an operation exceeds its configured timeout duration.
  * Re-exported from cockatiel.
  */
-export { TaskCancelledError as TimeoutError };
+
 
 /**
  * Thrown when all retry attempts have been exhausted without a successful result.
@@ -52,4 +53,6 @@ export function isResilienceError(
   return false;
 }
 
-export { isBrokenCircuitError, isBulkheadRejectedError };
+
+
+export {BrokenCircuitError as CircuitOpenError, TaskCancelledError as TimeoutError, isBrokenCircuitError, isBulkheadRejectedError} from 'cockatiel';

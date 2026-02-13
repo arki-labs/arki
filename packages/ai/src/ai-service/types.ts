@@ -8,7 +8,7 @@
 /**
  * Message format for conversation-based interactions
  */
-export interface Message {
+export type Message = {
   role: 'user' | 'assistant' | 'system';
   content: string;
 }
@@ -16,7 +16,7 @@ export interface Message {
 /**
  * Common options for text generation
  */
-export interface GenerateOptions {
+export type GenerateOptions = {
   /** Temperature for response randomness (0-1) */
   temperature?: number;
   /** Maximum tokens to generate */
@@ -32,19 +32,19 @@ export interface GenerateOptions {
 /**
  * Options specific to streaming generation
  */
-export interface StreamOptions extends GenerateOptions {
+export type StreamOptions = {
   /** Callback for each chunk received */
   onChunk?: (chunk: string) => void;
   /** Callback when stream completes */
   onComplete?: (fullText: string) => void;
   /** Callback on error */
   onError?: (error: Error) => void;
-}
+} & GenerateOptions
 
 /**
  * Provider health status
  */
-export interface ProviderHealth {
+export type ProviderHealth = {
   /** Whether the provider is currently healthy */
   isHealthy: boolean;
   /** Last successful request timestamp */
@@ -60,7 +60,7 @@ export interface ProviderHealth {
 /**
  * Configuration for a provider in the rotation
  */
-export interface ProviderConfig {
+export type ProviderConfig = {
   /** Provider identifier */
   name: 'groq' | 'google' | 'mistral' | 'openrouter' | 'openai' | 'anthropic';
   /** Model to use for this provider */
@@ -74,7 +74,7 @@ export interface ProviderConfig {
 /**
  * Result from a provider operation
  */
-export interface ProviderResult<T> {
+export type ProviderResult<T> = {
   /** The result data */
   data: T;
   /** Which provider handled the request */
@@ -89,7 +89,7 @@ export interface ProviderResult<T> {
  * All provider implementations must implement this interface to ensure
  * compatibility with the ProviderRouter for rotation and fallback.
  */
-export interface LLMProvider {
+export type LLMProvider = {
   /** Provider name identifier */
   readonly name: string;
 

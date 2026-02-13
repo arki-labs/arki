@@ -10,7 +10,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 /**
  * Performance measurement result
  */
-export interface PerformanceResult {
+export type PerformanceResult = {
   /**
    * Operation label
    */
@@ -151,7 +151,7 @@ export async function benchmarkQuery<T>(
   const totalMs = durations.reduce((sum, d) => sum + d, 0);
   const avgMs = totalMs / iterations;
   const minMs = durations[0]!;
-  const maxMs = durations[durations.length - 1]!;
+  const maxMs = durations.at(-1)!;
   const p50Ms = durations[Math.floor(iterations * 0.5)]!;
   const p95Ms = durations[Math.floor(iterations * 0.95)]!;
   const p99Ms = durations[Math.floor(iterations * 0.99)]!;
@@ -202,20 +202,20 @@ export async function comparePerformance<T extends Record<string, () => Promise<
   operations: T,
   iterations = 10,
 ): Promise<
-  Array<{
+  {
     label: string;
     avgMs: number;
     minMs: number;
     maxMs: number;
     relativeDiff: string;
-  }>
+  }[]
 > {
-  const results: Array<{
+  const results: {
     label: string;
     avgMs: number;
     minMs: number;
     maxMs: number;
-  }> = [];
+  }[] = [];
 
   for (const [label, operation] of Object.entries(operations)) {
     const durations: number[] = [];
@@ -232,7 +232,7 @@ export async function comparePerformance<T extends Record<string, () => Promise<
     const totalMs = durations.reduce((sum, d) => sum + d, 0);
     const avgMs = totalMs / iterations;
     const minMs = durations[0]!;
-    const maxMs = durations[durations.length - 1]!;
+    const maxMs = durations.at(-1)!;
 
     results.push({ label, avgMs, minMs, maxMs });
   }
@@ -248,10 +248,10 @@ export async function comparePerformance<T extends Record<string, () => Promise<
   }));
 
   console.log(`\n📊 Performance Comparison (${iterations} iterations each):`);
-  comparison.forEach((result, index) => {
+  for (const [index, result] of comparison.entries()) {
     const rank = index + 1;
     console.log(`  ${rank}. ${result.label}: ${result.avgMs.toFixed(2)}ms (${result.relativeDiff})`);
-  });
+  }
 
   return comparison;
 }
@@ -342,12 +342,12 @@ export function createPerformanceTracker() {
       console.log(`  Operations: ${measurements.length}`);
       console.log(`\n  Breakdown:`);
 
-      measurements.forEach(m => {
+      for (const m of measurements) {
         const status = m.passed ? '✓' : '✗';
         const threshold = m.maxMs ? ` (threshold: ${m.maxMs}ms)` : '';
         const percentage = ((m.durationMs / total) * 100).toFixed(1);
         console.log(`    ${status} ${m.label}: ${m.durationMs.toFixed(2)}ms (${percentage}%)${threshold}`);
-      });
+      }
     },
 
     clear(): void {

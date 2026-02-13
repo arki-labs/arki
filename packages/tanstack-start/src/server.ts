@@ -6,7 +6,7 @@
 
 import type { Server } from 'bun';
 
-export interface ServerConfig {
+export type ServerConfig = {
   /**
    * Server port
    * @default 3000

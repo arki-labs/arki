@@ -3,7 +3,8 @@ import { Text, TextClassContext } from '~/components/text';
 import { cn } from '~/lib/cn';
 import type { LucideIcon } from 'lucide-react-native';
 import * as React from 'react';
-import { View, type ViewProps } from 'react-native';
+import { View  } from 'react-native';
+import type {ViewProps} from 'react-native';
 
 function Alert({
   className,

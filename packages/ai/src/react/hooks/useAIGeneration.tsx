@@ -8,7 +8,7 @@ import { useCallback, useState } from 'react';
 
 import type { z } from '@arki/contracts';
 
-export interface GenerationOptions {
+export type GenerationOptions = {
   type?: 'text' | 'structured' | 'stream';
   schema?: z.ZodType<unknown>; // Zod schema for structured generation
   systemPrompt?: string;
@@ -16,7 +16,7 @@ export interface GenerationOptions {
   maxTokens?: number;
 }
 
-export interface GenerationResult {
+export type GenerationResult = {
   content: string | Record<string, unknown>;
   type: 'text' | 'structured' | 'stream';
   usage?: {
@@ -27,14 +27,14 @@ export interface GenerationResult {
   metadata?: Record<string, string | number | boolean>;
 }
 
-export interface UseAIGenerationOptions {
+export type UseAIGenerationOptions = {
   apiEndpoint?: string;
   defaultOptions?: GenerationOptions;
   onSuccess?: (result: GenerationResult) => void;
   onError?: (error: Error) => void;
 }
 
-export interface UseAIGenerationReturn {
+export type UseAIGenerationReturn = {
   generate: (prompt: string, options?: GenerationOptions) => Promise<GenerationResult | null>;
   isGenerating: boolean;
   result: GenerationResult | null;
@@ -112,8 +112,8 @@ export function useAIGeneration(options: UseAIGenerationOptions = {}): UseAIGene
           if (onSuccess) onSuccess(data);
           return data;
         }
-      } catch (err) {
-        const error = err as Error;
+      } catch (error_) {
+        const error = error_ as Error;
         setError(error);
         if (onError) onError(error);
         throw error;

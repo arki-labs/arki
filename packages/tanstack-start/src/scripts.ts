@@ -7,7 +7,7 @@
 
 import React from 'react';
 
-export interface AnalyticsConfig {
+export type AnalyticsConfig = {
   /**
    * Analytics provider type
    */
@@ -63,7 +63,7 @@ export function AnalyticsScript(props: AnalyticsConfig): React.ReactElement | nu
   }
 
   switch (provider) {
-    case 'plausible':
+    case 'plausible': {
       if (!config.domain) {
         console.warn('Plausible analytics requires a domain');
         return null;
@@ -73,8 +73,9 @@ export function AnalyticsScript(props: AnalyticsConfig): React.ReactElement | nu
         'data-domain': config.domain,
         src: 'https://plausible.io/js/script.js',
       });
+    }
 
-    case 'google-analytics':
+    case 'google-analytics': {
       if (!config.measurementId) {
         console.warn('Google Analytics requires a measurementId');
         return null;
@@ -84,8 +85,9 @@ export function AnalyticsScript(props: AnalyticsConfig): React.ReactElement | nu
         async: true,
         src: `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(config.measurementId)}`,
       });
+    }
 
-    case 'custom':
+    case 'custom': {
       if (!config.src) {
         console.warn('Custom analytics requires a src');
         return null;
@@ -94,9 +96,11 @@ export function AnalyticsScript(props: AnalyticsConfig): React.ReactElement | nu
         src: config.src,
         defer: true,
       });
+    }
 
-    default:
+    default: {
       return null;
+    }
   }
 }
 
@@ -145,13 +149,13 @@ export function initClarity(projectId: string): void {
   const script = document.createElement('script');
   script.async = true;
   script.src = `https://www.clarity.ms/tag/${encodeURIComponent(projectId)}`;
-  document.head.appendChild(script);
+  document.head.append(script);
 }
 
 /**
  * Cloudflare Turnstile script component
  */
-export interface TurnstileConfig {
+export type TurnstileConfig = {
   /**
    * Site key for Turnstile
    */
@@ -174,7 +178,7 @@ export function TurnstileScript(_props: TurnstileConfig): React.ReactElement {
 /**
  * Google AdSense meta tag component
  */
-export interface AdsenseConfig {
+export type AdsenseConfig = {
   /**
    * AdSense publisher ID (ca-pub-XXXXXXXXXXXXXXXX)
    */
@@ -191,7 +195,7 @@ export function AdsenseMeta(props: AdsenseConfig): React.ReactElement {
 /**
  * Axiom Web Vitals script component
  */
-export interface AxiomConfig {
+export type AxiomConfig = {
   /**
    * Axiom dataset token
    */
@@ -209,7 +213,7 @@ export function AxiomScript(props: AxiomConfig): React.ReactElement {
 /**
  * CSP (Content Security Policy) meta component
  */
-export interface CSPConfig {
+export type CSPConfig = {
   /**
    * CSP directives
    */

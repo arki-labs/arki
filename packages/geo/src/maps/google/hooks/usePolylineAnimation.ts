@@ -13,7 +13,7 @@ import { getMarkerColor } from '../utils/colors';
 import { useGoogleMap } from './useGoogleMap';
 import { useGoogleMaps } from './useGoogleMaps';
 
-export interface PolylineData {
+export type PolylineData = {
   /**
    * Start coordinate
    */
@@ -47,7 +47,7 @@ export interface PolylineData {
   strokeWeight?: number;
 }
 
-export interface UsePolylineAnimationOptions {
+export type UsePolylineAnimationOptions = {
   /**
    * Animation interval in milliseconds
    * @default 50
@@ -89,7 +89,7 @@ export function usePolylineAnimation(polylines: PolylineData[], options: UsePoly
   const map = useGoogleMap();
   const mapsLibrary = useGoogleMaps();
   const polylinesRef = useRef<google.maps.Polyline[]>([]);
-  const cleanupFnsRef = useRef<Array<() => void>>([]);
+  const cleanupFnsRef = useRef<(() => void)[]>([]);
 
   useEffect(() => {
     if (!map || !mapsLibrary || !enabled || polylines.length === 0) return;
@@ -106,7 +106,7 @@ export function usePolylineAnimation(polylines: PolylineData[], options: UsePoly
 
     // Create new polylines
     for (const [index, data] of polylines.entries()) {
-      const color = data.color || (data.colorIndex !== undefined ? getMarkerColor(data.colorIndex) : getMarkerColor(index));
+      const color = data.color || (data.colorIndex === undefined ? getMarkerColor(index) : getMarkerColor(data.colorIndex));
       const path = createPolylinePath(data.start, data.end);
       const config = createDashedPolylineConfig(color);
 
@@ -114,7 +114,7 @@ export function usePolylineAnimation(polylines: PolylineData[], options: UsePoly
         ...config,
         path,
         map,
-        strokeOpacity: data.opacity ?? 1.0,
+        strokeOpacity: data.opacity ?? 1,
         strokeWeight: data.strokeWeight ?? 2,
       });
 

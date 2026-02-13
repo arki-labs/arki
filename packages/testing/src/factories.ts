@@ -32,7 +32,7 @@
  * ```
  */
 
-import { faker } from '@faker-js/faker';
+
 
 import { debugFactories } from './debug';
 
@@ -74,7 +74,7 @@ export class FactoryBuilder<T> {
 /**
  * Factory function that supports both direct call and builder pattern
  */
-export interface Factory<T> {
+export type Factory<T> = {
   /**
    * Create instance with overrides (function pattern)
    */
@@ -334,9 +334,9 @@ export class TypedFactoryRegistry<
   constructor(typedFactories: TFactories) {
     super();
     // Expose typed factories as properties for direct access
-    Object.entries(typedFactories).forEach(([namespace, factories]) => {
+    for (const [namespace, factories] of Object.entries(typedFactories)) {
       (this as any)[namespace] = factories;
-    });
+    }
   }
 }
 
@@ -398,4 +398,6 @@ export function createFactories<TFactories extends Record<string, Factory<any> |
 /**
  * Export faker instance for convenience
  */
-export { faker };
+
+
+export {faker} from '@faker-js/faker';

@@ -5,7 +5,7 @@ declare module 'iconv-lite' {
   export function decodeStream(encoding: string, options?: Options): NodeJS.ReadWriteStream;
   export function encodeStream(encoding: string, options?: Options): NodeJS.ReadWriteStream;
 
-  export interface Options {
+  export type Options = {
     stripBOM?: boolean;
     addBOM?: boolean;
     defaultEncoding?: string;

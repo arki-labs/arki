@@ -8,7 +8,7 @@
 
 import { Pin } from '@vis.gl/react-google-maps';
 
-export interface GooglePinProps {
+export type GooglePinProps = {
   /**
    * Pin background color
    */

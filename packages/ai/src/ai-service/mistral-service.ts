@@ -20,7 +20,7 @@ import type {
   StreamOptions,
 } from './types.ts';
 
-export interface MistralServiceConfig {
+export type MistralServiceConfig = {
   model?: string;
   temperature?: number;
   maxRetries?: number;

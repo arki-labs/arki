@@ -10,7 +10,7 @@ import type { EmbeddingProvider, VectorSearchProvider, VectorSearchResult } from
 import { VectorSearchError, getErrorMessage } from '../../errors';
 import { TransactionManager } from '../../utils/transaction-manager';
 
-export interface QdrantConfig {
+export type QdrantConfig = {
   url: string;
   apiKey?: string;
   collectionName: string;
@@ -18,8 +18,8 @@ export interface QdrantConfig {
   createCollectionIfNotExists?: boolean;
 }
 
-export interface QdrantSearchFilter {
-  must?: Array<{
+export type QdrantSearchFilter = {
+  must?: {
     key: string;
     match?: string | number | boolean | Record<string, unknown>;
     range?: {
@@ -28,15 +28,15 @@ export interface QdrantSearchFilter {
       lt?: number;
       lte?: number;
     };
-  }>;
-  should?: Array<{
+  }[];
+  should?: {
     key: string;
     match?: string | number | boolean | Record<string, unknown>;
-  }>;
-  mustNot?: Array<{
+  }[];
+  mustNot?: {
     key: string;
     match?: string | number | boolean | Record<string, unknown>;
-  }>;
+  }[];
 }
 
 export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implements VectorSearchProvider<TMetadata> {
@@ -97,7 +97,9 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
         (col) => col.name === this.collectionName
       );
 
-      if (!exists) {
+      if (exists) {
+        debugVector('[Qdrant] Collection already exists: %s', this.collectionName);
+      } else {
         debugVector('[Qdrant] Collection does not exist, creating: %s (vectorSize: %d)', this.collectionName, this.vectorSize);
         // Create collection with optimized settings for semantic search
         await this.client.createCollection(this.collectionName, {
@@ -107,14 +109,12 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
           },
           optimizers_config: {
             default_segment_number: 2,
-            indexing_threshold: 20000,
+            indexing_threshold: 20_000,
           },
           replication_factor: 2,
           write_consistency_factor: 1,
         });
         debugVector('[Qdrant] Collection created successfully: %s', this.collectionName);
-      } else {
-        debugVector('[Qdrant] Collection already exists: %s', this.collectionName);
       }
     } catch (error) {
       debugVector('[Qdrant] Failed to ensure collection: %s', getErrorMessage(error));
@@ -142,7 +142,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
       id,
       vector,
       payload: {
-        text: text.substring(0, 1000), // Store preview of text
+        text: text.slice(0, 1000), // Store preview of text
         ...metadata,
         indexedAt: new Date().toISOString(),
       },
@@ -157,11 +157,11 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
   }
 
   async indexDocumentsBatch(
-    documents: Array<{
+    documents: {
       id: string;
       text: string;
       metadata?: TMetadata;
-    }>,
+    }[],
   ): Promise<void> {
     debugVector('[Qdrant] Indexing documents batch (count: %d)', documents.length);
     const client = await this.getClient();
@@ -183,7 +183,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
         id: doc.id,
         vector: embeddings[i]!,
         payload: {
-          text: doc.text.substring(0, 1000),
+          text: doc.text.slice(0, 1000),
           ...doc.metadata,
           indexedAt: new Date().toISOString(),
         },
@@ -247,7 +247,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
 
   async searchSimilar(
     query: string,
-    limit: number = 10,
+    limit = 10,
     filter?: QdrantSearchFilter,
   ): Promise<VectorSearchResult<TMetadata>[]> {
     debugVector('[Qdrant] Searching similar documents (query length: %d, limit: %d, hasFilter: %s)', query.length, limit, !!filter);
@@ -281,9 +281,9 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
 
   async hybridSearch(
     query: string,
-    limit: number = 10,
+    limit = 10,
     filter?: QdrantSearchFilter,
-    keywordWeight: number = 0.3,
+    keywordWeight = 0.3,
   ): Promise<VectorSearchResult<TMetadata>[]> {
     debugVector('[Qdrant] Hybrid search (query length: %d, limit: %d, keywordWeight: %f)', query.length, limit, keywordWeight);
     const client = await this.getClient();
@@ -297,7 +297,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     const hybridFilter = filter ? {
       ...baseFilter,
       must: [
-        ...((baseFilter?.['must'] as Array<unknown>) || []),
+        ...((baseFilter?.['must'] as unknown[]) || []),
         {
           key: 'text',
           match: {
@@ -401,7 +401,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     // Trigger optimization to improve search performance
     await client.updateCollection(this.collectionName, {
       optimizers_config: {
-        indexing_threshold: 10000,
+        indexing_threshold: 10_000,
         default_segment_number: 2,
       },
     });
@@ -456,9 +456,9 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
 
     // Add position bonus (earlier matches score higher)
     const firstMatchIndex = lowerText.indexOf(lowerQuery);
-    const positionBonus = firstMatchIndex !== -1
-      ? Math.max(0, 1 - firstMatchIndex / 1000) * 0.2
-      : 0;
+    const positionBonus = firstMatchIndex === -1
+      ? 0
+      : Math.max(0, 1 - firstMatchIndex / 1000) * 0.2;
 
     return Math.min(1, baseScore + score + positionBonus);
   }

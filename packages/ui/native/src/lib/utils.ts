@@ -10,10 +10,10 @@
 export function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 1) {
-    return parts[0]!.substring(0, 2).toUpperCase();
+    return parts[0]!.slice(0, 2).toUpperCase();
   }
   const first = parts[0]!.charAt(0);
-  const last = parts[parts.length - 1]!.charAt(0);
+  const last = parts.at(-1)!.charAt(0);
   return (first + last).toUpperCase();
 }
 
@@ -25,7 +25,7 @@ export function getInitials(name: string): string {
  */
 export function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
-  return text.substring(0, maxLength - 3) + '...';
+  return text.slice(0, Math.max(0, maxLength - 3)) + '...';
 }
 
 /**

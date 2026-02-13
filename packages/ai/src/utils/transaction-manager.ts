@@ -5,24 +5,24 @@
 
 import { VectorSearchError, getErrorMessage } from '../errors';
 
-export interface TransactionOperation<T = unknown> {
+export type TransactionOperation<T = unknown> = {
   name: string;
   execute: () => Promise<T>;
   rollback?: () => Promise<void>;
 }
 
-export interface TransactionResult<T = unknown> {
+export type TransactionResult<T = unknown> = {
   success: boolean;
   results?: T[];
   error?: Error;
-  rollbackResults?: Array<{ name: string; success: boolean; error?: Error }>;
+  rollbackResults?: { name: string; success: boolean; error?: Error }[];
 }
 
 export class TransactionManager {
-  private executedOperations: Array<{
+  private executedOperations: {
     operation: TransactionOperation;
     result: unknown;
-  }> = [];
+  }[] = [];
 
   /**
    * Execute a batch of operations with automatic rollback on failure
@@ -88,9 +88,9 @@ export class TransactionManager {
       );
 
       // Track executed operations for potential rollback
-      operations.forEach((operation, index) => {
+      for (const [index, operation] of operations.entries()) {
         this.executedOperations.push({ operation, result: results[index] });
-      });
+      }
 
       return {
         success: true,
@@ -115,8 +115,8 @@ export class TransactionManager {
   /**
    * Rollback executed operations in reverse order
    */
-  private async rollback(): Promise<Array<{ name: string; success: boolean; error?: Error }>> {
-    const rollbackResults: Array<{ name: string; success: boolean; error?: Error }> = [];
+  private async rollback(): Promise<{ name: string; success: boolean; error?: Error }[]> {
+    const rollbackResults: { name: string; success: boolean; error?: Error }[] = [];
 
     // Rollback in reverse order
     for (let i = this.executedOperations.length - 1; i >= 0; i--) {

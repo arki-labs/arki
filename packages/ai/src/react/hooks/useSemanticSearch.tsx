@@ -7,7 +7,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { SearchMode } from '../../types';
 
-export interface SearchResult<TMetadata = Record<string, unknown>> {
+export type SearchResult<TMetadata = Record<string, unknown>> = {
   id: string;
   score: number;
   data?: Record<string, unknown>;
@@ -15,11 +15,9 @@ export interface SearchResult<TMetadata = Record<string, unknown>> {
   metadata?: TMetadata;
 }
 
-export interface SearchFilters {
-  [key: string]: string | number | boolean | string[] | number[];
-}
+export type SearchFilters = Record<string, string | number | boolean | string[] | number[]>
 
-export interface UseSemanticSearchOptions {
+export type UseSemanticSearchOptions = {
   apiEndpoint?: string;
   mode?: SearchMode;
   limit?: number;
@@ -30,7 +28,7 @@ export interface UseSemanticSearchOptions {
   onError?: (error: Error) => void;
 }
 
-export interface UseSemanticSearchReturn<TMetadata = Record<string, unknown>> {
+export type UseSemanticSearchReturn<TMetadata = Record<string, unknown>> = {
   query: string;
   results: SearchResult<TMetadata>[];
   isSearching: boolean;
@@ -115,10 +113,10 @@ export function useSemanticSearch<TMetadata = Record<string, unknown>>(
 
         setResults(searchResults);
         if (onResults) onResults(searchResults);
-      } catch (err) {
-        if (err instanceof Error && err.name !== 'AbortError') {
-          setError(err);
-          if (onError) onError(err);
+      } catch (error_) {
+        if (error_ instanceof Error && error_.name !== 'AbortError') {
+          setError(error_);
+          if (onError) onError(error_);
         }
       } finally {
         setIsSearching(false);
@@ -153,7 +151,7 @@ export function useSemanticSearch<TMetadata = Record<string, unknown>>(
    */
   const getSuggestions = useCallback(
     async (prefix: string) => {
-      if (prefix.length < 1) {
+      if (prefix.length === 0) {
         setSuggestions([]);
         return;
       }
@@ -174,7 +172,7 @@ export function useSemanticSearch<TMetadata = Record<string, unknown>>(
           const data = await response.json();
           setSuggestions(data.suggestions || []);
         }
-      } catch (err) {
+      } catch {
         // Silently fail for suggestions - they're not critical
         setSuggestions([]);
       }

@@ -94,14 +94,18 @@ export function fromStandardCoordinates(
   | { latitude: number; longitude: number }
   | { lat: number; lon: number } {
   switch (format) {
-    case 'latLng':
+    case 'latLng': {
       return { lat: coords.lat, lng: coords.lng };
-    case 'latitudeLongitude':
+    }
+    case 'latitudeLongitude': {
       return { latitude: coords.lat, longitude: coords.lng };
-    case 'latLon':
+    }
+    case 'latLon': {
       return { lat: coords.lat, lon: coords.lng };
-    default:
+    }
+    default: {
       return { lat: coords.lat, lng: coords.lng };
+    }
   }
 }
 
@@ -125,7 +129,7 @@ export function coordinatesFromUrl(urlParam: string): Coordinates {
   const lng = Number.parseFloat(lngStr!);
 
   if (Number.isNaN(lat) || Number.isNaN(lng)) {
-    throw new Error(`Invalid URL coordinate format: ${urlParam}`);
+    throw new TypeError(`Invalid URL coordinate format: ${urlParam}`);
   }
 
   return { lat, lng };

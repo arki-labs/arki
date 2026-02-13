@@ -2,7 +2,8 @@ import { Icon } from '~/components/icon';
 import { TextClassContext } from '~/components/text';
 import { cn } from '~/lib/cn';
 import * as TogglePrimitive from '@rn-primitives/toggle';
-import { cva, type VariantProps } from 'class-variance-authority';
+import { cva  } from 'class-variance-authority';
+import type {VariantProps} from 'class-variance-authority';
 import * as React from 'react';
 import { Platform } from 'react-native';
 

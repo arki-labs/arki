@@ -3,7 +3,7 @@
  * @property lat - Latitude in decimal degrees (-90 to 90)
  * @property lng - Longitude in decimal degrees (-180 to 180)
  */
-export interface Coordinates {
+export type Coordinates = {
   lat: number;
   lng: number;
 }
@@ -11,7 +11,7 @@ export interface Coordinates {
 /**
  * Represents a geographic bounding box
  */
-export interface Bounds {
+export type Bounds = {
   north: number;
   south: number;
   east: number;
@@ -58,10 +58,10 @@ export const EARTH_RADIUS_MI = 3959;
  * Conversion factors
  */
 export const CONVERSION_FACTORS = {
-  KM_TO_MI: 0.621371,
-  MI_TO_KM: 1.60934,
+  KM_TO_MI: 0.621_371,
+  MI_TO_KM: 1.609_34,
   KM_TO_M: 1000,
   M_TO_KM: 0.001,
   MI_TO_FT: 5280,
-  FT_TO_MI: 0.000189394,
+  FT_TO_MI: 0.000_189_394,
 } as const;

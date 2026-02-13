@@ -8,7 +8,7 @@
  * @returns True if valid hex color
  */
 export function isValidHexColor(color: string): boolean {
-  return /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3}|[A-Fa-f0-9]{8})$/.test(color);
+  return /^#([A-F0-9]{6}|[A-F0-9]{3}|[A-F0-9]{8})$/i.test(color);
 }
 
 /**
@@ -17,11 +17,11 @@ export function isValidHexColor(color: string): boolean {
  * @param alpha - Alpha value (0-1)
  * @returns RGBA color string
  */
-export function hexToRgba(hex: string, alpha: number = 1): string {
+export function hexToRgba(hex: string, alpha = 1): string {
   const cleanHex = hex.replace('#', '');
-  const r = parseInt(cleanHex.substring(0, 2), 16);
-  const g = parseInt(cleanHex.substring(2, 4), 16);
-  const b = parseInt(cleanHex.substring(4, 6), 16);
+  const r = Number.parseInt(cleanHex.slice(0, 2), 16);
+  const g = Number.parseInt(cleanHex.slice(2, 4), 16);
+  const b = Number.parseInt(cleanHex.slice(4, 6), 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
@@ -32,15 +32,15 @@ export function hexToRgba(hex: string, alpha: number = 1): string {
  * @returns Lightened hex color
  */
 export function lightenColor(hex: string, percent: number): string {
-  const num = parseInt(hex.replace('#', ''), 16);
+  const num = Number.parseInt(hex.replace('#', ''), 16);
   const amt = Math.round(2.55 * percent);
   const R = (num >> 16) + amt;
-  const G = (num >> 8 & 0x00FF) + amt;
-  const B = (num & 0x0000FF) + amt;
+  const G = (num >> 8 & 0x00_FF) + amt;
+  const B = (num & 0x00_00_FF) + amt;
   return '#' + (
-    0x1000000 +
-    (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
-    (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
+    0x1_00_00_00 +
+    (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x1_00_00 +
+    (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x1_00 +
     (B < 255 ? (B < 1 ? 0 : B) : 255)
   ).toString(16).slice(1);
 }

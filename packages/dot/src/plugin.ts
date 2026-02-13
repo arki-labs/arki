@@ -220,9 +220,7 @@ export type ExtractAllRepositoryTypes<Plugins extends readonly any[]> = Plugins 
  * Create a router record type from router names
  * Uses a mapped type instead of Record to enable autocomplete
  */
-export type PluginRouterRecord<Names extends string> = {
-  [K in Names]: AnyRouter;
-};
+export type PluginRouterRecord<Names extends string> = Record<Names, AnyRouter>;
 
 /**
  * Fluent builder for creating type-safe plugins

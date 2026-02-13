@@ -69,7 +69,7 @@ export class KV {
   async get<T = unknown>(key: string): Promise<T | undefined> {
     debugKV('[kv] Getting key: %s', key);
     const result = await this.#keyv.get(key);
-    debugKV('[kv] Get result for key %s: %s', key, result !== undefined ? 'found' : 'not found');
+    debugKV('[kv] Get result for key %s: %s', key, result === undefined ? 'not found' : 'found');
     return result;
   }
 

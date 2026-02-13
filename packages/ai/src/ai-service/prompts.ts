@@ -3,7 +3,7 @@
  * Helper functions and templates for creating effective AI prompts
  */
 
-export interface PromptTemplate {
+export type PromptTemplate = {
   template: string;
   variables: string[];
   systemPrompt?: string;
@@ -123,9 +123,9 @@ export class PromptBuilder {
    * Set multiple variables at once
    */
   setVariables(variables: Record<string, string>): this {
-    Object.entries(variables).forEach(([key, value]) => {
+    for (const [key, value] of Object.entries(variables)) {
       this.variables.set(key, value);
-    });
+    }
     return this;
   }
 
@@ -157,7 +157,7 @@ export class PromptBuilder {
   /**
    * Add examples to the prompt
    */
-  addExamples(examples: Array<{ input: string; output: string }>): this {
+  addExamples(examples: { input: string; output: string }[]): this {
     const exampleText = examples
       .map((ex, i) => `Example ${i + 1}:\nInput: ${ex.input}\nOutput: ${ex.output}`)
       .join('\n\n');
@@ -188,10 +188,10 @@ export class PromptBuilder {
     let finalPrompt = this.template;
 
     // Replace variables in the template
-    this.variables.forEach((value, key) => {
+    for (const [key, value] of this.variables.entries()) {
       const regex = new RegExp(`\\{${key}\\}`, 'g');
       finalPrompt = finalPrompt.replace(regex, value);
-    });
+    }
 
     return {
       prompt: finalPrompt.trim(),
@@ -228,7 +228,7 @@ export class PromptBuilder {
    */
   static fewShot(
     task: string,
-    examples: Array<{ input: string; output: string }>
+    examples: { input: string; output: string }[]
   ): PromptBuilder {
     return new PromptBuilder()
       .addText(task)
@@ -249,11 +249,11 @@ export class PromptBuilder {
 /**
  * Prompt optimization utilities
  */
-export class PromptOptimizer {
+export const PromptOptimizer = {
   /**
    * Add clarity to a prompt
    */
-  static clarify(prompt: string): string {
+  clarify(prompt: string): string {
     const clarifications = [
       'Be specific and detailed in your response.',
       'Use clear, unambiguous language.',
@@ -261,12 +261,12 @@ export class PromptOptimizer {
     ];
 
     return `${prompt}\n\n${clarifications.join(' ')}`;
-  }
+  },
 
   /**
    * Add constraints to limit response
    */
-  static constrain(
+  constrain(
     prompt: string,
     constraints: {
       maxLength?: number;
@@ -291,12 +291,12 @@ export class PromptOptimizer {
     }
 
     return parts.join('\n\n');
-  }
+  },
 
   /**
    * Add context to improve response relevance
    */
-  static addContext(
+  addContext(
     prompt: string,
     context: {
       background?: string;
@@ -317,31 +317,31 @@ export class PromptOptimizer {
     }
 
     return parts.join('\n\n');
-  }
+  },
 
   /**
    * Format prompt for better structure
    */
-  static format(prompt: string): string {
+  format(prompt: string): string {
     // Remove excessive whitespace
-    let formatted = prompt.replace(/\n{3,}/g, '\n\n');
+    let formatted = prompt.replaceAll(/\n{3,}/g, '\n\n');
 
     // Ensure proper spacing around sections
-    formatted = formatted.replace(/^(#{1,3}\s+.+)$/gm, '\n$1\n');
+    formatted = formatted.replaceAll(/^(#{1,3}\s+(?:\S.*|[\t\v\f \u00A0\u1680\u2000-\u200A\u202F\u205F\u3000\uFEFF]))$/gm, '\n$1\n');
 
     // Trim and return
     return formatted.trim();
-  }
-}
+  },
+};
 
 /**
  * Prompt validation utilities
  */
-export class PromptValidator {
+export const PromptValidator = {
   /**
    * Check if all required variables are provided
    */
-  static validateVariables(
+  validateVariables(
     template: string,
     variables: Record<string, string | number | boolean>
   ): { valid: boolean; missing: string[] } {
@@ -352,12 +352,12 @@ export class PromptValidator {
       valid: missing.length === 0,
       missing,
     };
-  }
+  },
 
   /**
    * Check prompt length
    */
-  static checkLength(
+  checkLength(
     prompt: string,
     maxTokens = 4000
   ): { valid: boolean; estimatedTokens: number } {
@@ -368,12 +368,12 @@ export class PromptValidator {
       valid: estimatedTokens <= maxTokens,
       estimatedTokens,
     };
-  }
+  },
 
   /**
    * Check for potential issues
    */
-  static checkQuality(prompt: string): {
+  checkQuality(prompt: string): {
     issues: string[];
     suggestions: string[];
   } {
@@ -382,12 +382,12 @@ export class PromptValidator {
 
     // Check for vague language
     const vagueTerms = ['thing', 'stuff', 'something', 'whatever'];
-    vagueTerms.forEach(term => {
+    for (const term of vagueTerms) {
       if (prompt.toLowerCase().includes(term)) {
         issues.push(`Contains vague term: "${term}"`);
         suggestions.push('Use more specific language');
       }
-    });
+    }
 
     // Check for missing context
     if (prompt.length < 50) {
@@ -396,10 +396,10 @@ export class PromptValidator {
     }
 
     // Check for unclear instructions
-    if (!prompt.includes('?') && !prompt.match(/^(create|generate|write|explain|describe|analyze)/i)) {
+    if (!prompt.includes('?') && !/^(create|generate|write|explain|describe|analyze)/i.test(prompt)) {
       suggestions.push('Consider starting with a clear action verb');
     }
 
     return { issues, suggestions };
-  }
-}
+  },
+};

@@ -117,13 +117,13 @@ function ChartTooltipContent({
   ref,
 }: React.ComponentProps<'div'> & {
   active?: boolean;
-  payload?: Array<{
+  payload?: {
     name?: string;
     dataKey?: string;
     value?: number | string;
     color?: string;
     payload?: Record<string, unknown>;
-  }>;
+  }[];
   label?: string | number;
   labelFormatter?: (value: unknown, payload: unknown[]) => React.ReactNode;
   formatter?: (value: unknown, name: unknown, item: unknown, index: number, payload: unknown) => React.ReactNode;
@@ -249,11 +249,11 @@ function ChartLegendContent({
   nameKey,
   ref,
 }: React.ComponentProps<'div'> & {
-  payload?: Array<{
+  payload?: {
     value?: string;
     dataKey?: string;
     color?: string;
-  }>;
+  }[];
   verticalAlign?: 'top' | 'bottom';
   hideIcon?: boolean;
   nameKey?: string;

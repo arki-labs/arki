@@ -4,7 +4,7 @@ import type { IPolicy, RetryPolicy, CircuitBreakerPolicy, TimeoutPolicy } from '
 // Logger interface — intentionally minimal so callers can pass any logger.
 // ---------------------------------------------------------------------------
 
-export interface PolicyLogger {
+export type PolicyLogger = {
   info(message: string, context?: Record<string, unknown>): void;
   warn(message: string, context?: Record<string, unknown>): void;
   error(message: string, context?: Record<string, unknown>): void;
@@ -45,7 +45,7 @@ export function attachPolicyLogger(
   logger: PolicyLogger,
   policyName = 'resilience',
 ): () => void {
-  const disposables: Array<{ dispose(): void }> = [];
+  const disposables: { dispose(): void }[] = [];
 
   // Retry events
   if (hasRetryEvents(policy)) {

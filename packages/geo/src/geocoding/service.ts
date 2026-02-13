@@ -312,8 +312,8 @@ export class GeocodingService {
   private hashAddress(address: string): string {
     return address
       .toLowerCase()
-      .replace(/\s+/g, '-')
-      .replace(/[^a-z0-9-]/g, '');
+      .replaceAll(/\s+/g, '-')
+      .replaceAll(/[^a-z0-9-]/g, '');
   }
 }
 

@@ -56,7 +56,7 @@ export const env = createEnv({
    * Destructure all variables from `process.env` to make sure they aren't tree-shaken away.
    */
   runtimeEnv: {
-    // eslint-disable-next-line @typescript-eslint/dot-notation
+     
     NODE_ENV: process.env['NODE_ENV'],
     DB_URL: process.env['DB_URL'],
     PGUSER: process.env['PGUSER'],

@@ -16,26 +16,26 @@ import { GenerationError, getErrorMessage } from '../errors';
 import { validateInput, aiServiceConfigSchema } from '../validation';
 import { rateLimiters } from '../utils/rate-limiter';
 
-export interface OpenAIServiceConfig {
+export type OpenAIServiceConfig = {
   model?: string;
   apiKey?: string;
   temperature?: number;
   maxRetries?: number;
 }
 
-export interface GenerationOptions {
+export type GenerationOptions = {
   temperature?: number;
   maxTokens?: number;
   maxRetries?: number;
   systemPrompt?: string;
 }
 
-export interface OpenAIStreamOptions extends GenerationOptions {
+export type OpenAIStreamOptions = {
   onStart?: () => void;
   onToken?: (token: string) => void;
   onComplete?: (text: string) => void;
   onError?: (error: Error) => void;
-}
+} & GenerationOptions
 
 /**
  * Generic OpenAI Service for various AI tasks
@@ -172,7 +172,7 @@ export class OpenAIService {
    * Generate text with conversation context
    */
   async generateConversation(
-    messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+    messages: { role: 'user' | 'assistant' | 'system'; content: string }[],
     options: GenerationOptions = {}
   ): Promise<string> {
     try {
@@ -243,7 +243,7 @@ export class OpenAIService {
    * Stream conversation with context
    */
   async *streamConversation(
-    messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+    messages: { role: 'user' | 'assistant' | 'system'; content: string }[],
     options: OpenAIStreamOptions = {}
   ): AsyncGenerator<string, void, unknown> {
     try {

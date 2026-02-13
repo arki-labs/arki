@@ -18,9 +18,9 @@ function useControlGroupContext() {
   return context;
 }
 
-export interface ControlGroupProps extends React.ComponentPropsWithoutRef<typeof Primitive.div> {
+export type ControlGroupProps = {
   orientation?: 'horizontal' | 'vertical';
-}
+} & React.ComponentPropsWithoutRef<typeof Primitive.div>
 
 export const ControlGroup = React.forwardRef<React.ElementRef<typeof Primitive.div>, ControlGroupProps>(
   ({ className, orientation = 'horizontal', ...props }, ref) => (

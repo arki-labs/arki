@@ -10,7 +10,7 @@ import type { AdvancedMarkerProps, PinProps } from './primitives';
 /**
  * Google Marker configuration
  */
-export interface GoogleMarkerProps extends Omit<AdvancedMarkerProps, 'position'> {
+export type GoogleMarkerProps = {
   /**
    * Marker position coordinates
    */
@@ -35,12 +35,12 @@ export interface GoogleMarkerProps extends Omit<AdvancedMarkerProps, 'position'>
    * Additional className for styling
    */
   className?: string;
-}
+} & Omit<AdvancedMarkerProps, 'position'>
 
 /**
  * Google Pin configuration (marker visual)
  */
-export interface GooglePinProps extends PinProps {
+export type GooglePinProps = {
   /**
    * Pin background color
    */
@@ -65,12 +65,12 @@ export interface GooglePinProps extends PinProps {
    * Additional className for styling
    */
   className?: string;
-}
+} & PinProps
 
 /**
  * Marker with metadata (for ResultsMap, etc.)
  */
-export interface MarkerInfo<T = unknown> {
+export type MarkerInfo<T = unknown> = {
   /**
    * Unique identifier
    */

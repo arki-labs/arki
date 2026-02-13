@@ -9,7 +9,7 @@ import {
 } from '../../core/coordinates';
 import type { Coordinates } from '../../core/types';
 
-export interface UseCoordinatesReturn {
+export type UseCoordinatesReturn = {
   coordinates: Coordinates | null;
   setCoordinates: (coords: Coordinates) => void;
   updateLatitude: (lat: number) => void;

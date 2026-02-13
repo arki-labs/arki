@@ -71,7 +71,7 @@ export type UseMapOverlayReturn = {
   handleResizeStart: (e: React.MouseEvent, handle: string) => void;
 };
 
-export interface UseMapOverlayOptions {
+export type UseMapOverlayOptions = {
   /**
    * Initial map width in pixels
    * @default 700

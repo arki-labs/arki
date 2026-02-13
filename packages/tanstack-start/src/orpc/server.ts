@@ -10,7 +10,7 @@ import type { RPCHandlerOptions } from '@orpc/server/fetch';
 import { createRouterClient } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
 
-export interface ORPCServerConfig<TRouter extends AnyRouter> {
+export type ORPCServerConfig<TRouter extends AnyRouter> = {
   /**
    * The oRPC router (plain object of procedures)
    */
@@ -145,7 +145,7 @@ export function createServerCaller<TRouter extends AnyRouter>(config: {
 /**
  * CORS headers for oRPC API routes
  */
-export function getCorsHeaders(origin: string = '*'): Record<string, string> {
+export function getCorsHeaders(origin = '*'): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
@@ -154,5 +154,8 @@ export function getCorsHeaders(origin: string = '*'): Record<string, string> {
   };
 }
 
-export { RPCHandler, createRouterClient };
-export type { RouterClient };
+
+
+
+export {RPCHandler} from '@orpc/server/fetch';
+export {createRouterClient, type RouterClient} from '@orpc/server';

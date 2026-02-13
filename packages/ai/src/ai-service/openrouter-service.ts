@@ -20,7 +20,7 @@ import type {
   StreamOptions,
 } from './types.ts';
 
-export interface OpenRouterServiceConfig {
+export type OpenRouterServiceConfig = {
   model?: string;
   temperature?: number;
   maxRetries?: number;

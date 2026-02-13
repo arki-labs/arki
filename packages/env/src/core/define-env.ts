@@ -15,9 +15,9 @@ export function defineEnv(config: CoreEnvConfig) {
 
   // Auto-generate runtimeEnv (no Next.js bundler constraints)
   const runtimeEnv: Record<string, string | undefined> = {};
-  Object.keys(config.server).forEach(key => {
+  for (const key of Object.keys(config.server)) {
     runtimeEnv[key] = process.env[key];
-  });
+  }
 
   return createEnv({
     server: config.server,

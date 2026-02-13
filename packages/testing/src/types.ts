@@ -5,7 +5,7 @@ import type { Factory } from './factories';
 
 export type TestUserRole = 'public' | 'user' | 'moderator' | 'admin';
 
-export interface TestUser {
+export type TestUser = {
   id: UserId;
   email: string;
   name: string;
@@ -15,13 +15,13 @@ export interface TestUser {
 
 export type TesterUserOverrides = Partial<Record<'user' | 'moderator' | 'admin', TestUser>>;
 
-export interface TesterUsers {
+export type TesterUsers = {
   user: TestUser;
   moderator: TestUser;
   admin: TestUser;
 }
 
-export interface TesterOptions {
+export type TesterOptions = {
   users?: TesterUserOverrides;
   autoRollback?: boolean;
   randomSeed?: string;
@@ -31,20 +31,20 @@ export interface TesterOptions {
   useUniqueRedisNamespace?: boolean;
 }
 
-export interface CreateCallerArgs<TContext> {
+export type CreateCallerArgs<TContext> = {
   context: TContext;
   role: TestUserRole;
   user: TestUser | null;
   responseHeaders: Headers;
 }
 
-export interface IntegrationTesterConfig<
+export type IntegrationTesterConfig<
   TSchema extends Record<string, unknown>,
   TDatabase,
   TRepositories,
   TCaller,
   TContext,
-> {
+> = {
   schema: TSchema;
   migrationsFolder: string;
   createContext(params: { db: TDatabase; repo: TRepositories; kv: KV | null; connectionString: string }): TContext;

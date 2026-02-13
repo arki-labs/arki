@@ -23,10 +23,10 @@ const InputBaseContext = React.createContext<InputBaseContextProps>({
 
 const useInputBaseContext = () => React.useContext(InputBaseContext);
 
-export interface InputBaseProps extends React.ComponentPropsWithoutRef<typeof Primitive.div> {
+export type InputBaseProps = {
   autoFocus?: boolean;
   disabled?: boolean;
-}
+} & React.ComponentPropsWithoutRef<typeof Primitive.div>
 
 export const InputBase = React.forwardRef<React.ElementRef<typeof Primitive.div>, InputBaseProps>(
   ({ autoFocus, disabled, className, onClick, ...props }, ref) => {
@@ -93,10 +93,10 @@ export const InputBaseControl = React.forwardRef<
 });
 InputBaseControl.displayName = 'InputBaseControl';
 
-export interface InputBaseAdornmentProps extends React.ComponentPropsWithoutRef<'div'> {
+export type InputBaseAdornmentProps = {
   asChild?: boolean;
   disablePointerEvents?: boolean;
-}
+} & React.ComponentPropsWithoutRef<'div'>
 
 export const InputBaseAdornment = React.forwardRef<React.ElementRef<'div'>, InputBaseAdornmentProps>(
   ({ className, disablePointerEvents, asChild, children, ...props }, ref) => {

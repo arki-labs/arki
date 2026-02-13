@@ -9,13 +9,14 @@ import * as React from 'react';
 import {
   Platform,
   Pressable,
-  type StyleProp,
+  
   StyleSheet,
   Text,
-  type TextProps,
-  View,
-  type ViewStyle,
+  
+  View
+  
 } from 'react-native';
+import type {StyleProp, TextProps, ViewStyle} from 'react-native';
 import { FadeIn } from 'react-native-reanimated';
 import { FullWindowOverlay as RNFullWindowOverlay } from 'react-native-screens';
 
@@ -38,11 +39,11 @@ function Menubar({
   ...props
 }: MenubarPrimitive.RootProps & React.RefAttributes<MenubarPrimitive.RootRef>) {
   const id = React.useId();
-  const [value, setValue] = React.useState<string | undefined>(undefined);
+  const [value, setValue] = React.useState<string | undefined>();
 
   function closeMenu() {
     if (onValueChangeProp) {
-      onValueChangeProp(undefined);
+      onValueChangeProp();
       return;
     }
     setValue(undefined);

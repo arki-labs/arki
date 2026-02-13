@@ -10,7 +10,7 @@ export type { MapCameraChangedEvent, MapEvent, MapMouseEvent } from './primitive
 /**
  * Custom coordinate event (simplified from MapMouseEvent)
  */
-export interface CoordinateEvent {
+export type CoordinateEvent = {
   /**
    * Clicked coordinates
    */
@@ -25,7 +25,7 @@ export interface CoordinateEvent {
 /**
  * Camera change details
  */
-export interface CameraChangeDetails {
+export type CameraChangeDetails = {
   /**
    * New center coordinates
    */

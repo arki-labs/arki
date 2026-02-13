@@ -11,7 +11,7 @@ import { AdvancedMarker } from '@vis.gl/react-google-maps';
 
 import type { Coordinates } from '../types';
 
-export interface GoogleMarkerProps {
+export type GoogleMarkerProps = {
   /**
    * Marker position coordinates
    */

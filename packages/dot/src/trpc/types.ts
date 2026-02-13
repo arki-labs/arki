@@ -12,7 +12,7 @@ import type { BaseTRPCContext, SessionUser, SchemaInterface } from '../types';
  * This interface provides a portable contract for plugins - they only need
  * to import from @arki/dot, not from app-specific code.
  */
-export interface DotContext<TSchema extends SchemaInterface = SchemaInterface> extends BaseTRPCContext<TSchema> {
+export type DotContext<TSchema extends SchemaInterface = SchemaInterface> = {
   // Auth - session information
   session: DotSession | null;
   user?: SessionUser;
@@ -35,7 +35,7 @@ export interface DotContext<TSchema extends SchemaInterface = SchemaInterface> e
   auth?: DotAuth;
   sessionManager?: DotSessionManager;
   rbac?: DotRBACManager;
-}
+} & BaseTRPCContext<TSchema>
 
 /**
  * NOTE: TRPCKit and TRPCKitWithT are now inferred from createDotProcedures()
@@ -51,7 +51,7 @@ export interface DotContext<TSchema extends SchemaInterface = SchemaInterface> e
  * Note: procedures type is inferred from createDotProcedures() at runtime,
  * preserving full type information for plugin router factories.
  */
-export interface PluginSetupContext<TSchema extends SchemaInterface = SchemaInterface> {
+export type PluginSetupContext<TSchema extends SchemaInterface = SchemaInterface> = {
   /** tRPC procedures for building routers (type inferred at runtime) */
   procedures: any;
 
@@ -76,12 +76,12 @@ export interface PluginSetupContext<TSchema extends SchemaInterface = SchemaInte
  * to properly infer types from the actual middleware provided. The middleware
  * must be compatible with tRPC's middleware builder API.
  */
-export interface DotTRPCMiddlewareConfig<
+export type DotTRPCMiddlewareConfig<
   TBeforeAuth = never,
   TAfterAuth = never,
   TErrorHandling = never,
   TTiming = never,
-> {
+> = {
   /** Middleware to run before authentication check */
   beforeAuth?: TBeforeAuth;
 
@@ -98,12 +98,12 @@ export interface DotTRPCMiddlewareConfig<
 /**
  * Options for creating Dot procedures.
  */
-export interface CreateDotProceduresOptions<
+export type CreateDotProceduresOptions<
   TBeforeAuth = never,
   TAfterAuth = never,
   TErrorHandling = never,
   TTiming = never,
-> {
+> = {
   /** Custom middleware configuration */
   customMiddleware?: DotTRPCMiddlewareConfig<TBeforeAuth, TAfterAuth, TErrorHandling, TTiming>;
 

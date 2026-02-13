@@ -37,7 +37,7 @@ const DEFAULT_MODELS: Record<ProviderConfig['name'], string> = {
 /**
  * Configuration for the ProviderRouter
  */
-export interface ProviderRouterConfig {
+export type ProviderRouterConfig = {
   /** List of provider configurations */
   providers: ProviderConfig[];
   /** Maximum consecutive failures before marking provider as unhealthy */
@@ -57,9 +57,9 @@ export interface ProviderRouterConfig {
  * - Health tracking and recovery
  */
 export class ProviderRouter {
-  private readonly providers: Map<string, LLMProvider> = new Map();
+  private readonly providers = new Map<string, LLMProvider>();
   private readonly configs: ProviderConfig[];
-  private readonly healthStatus: Map<string, ProviderHealth> = new Map();
+  private readonly healthStatus = new Map<string, ProviderHealth>();
   private readonly maxConsecutiveFailures: number;
   private readonly healthCheckIntervalMs: number;
   private currentIndex = 0;
@@ -68,7 +68,7 @@ export class ProviderRouter {
   constructor(config: ProviderRouterConfig) {
     this.configs = config.providers.filter((p) => p.enabled !== false);
     this.maxConsecutiveFailures = config.maxConsecutiveFailures ?? 3;
-    this.healthCheckIntervalMs = config.healthCheckIntervalMs ?? 60000;
+    this.healthCheckIntervalMs = config.healthCheckIntervalMs ?? 60_000;
 
     // Initialize providers
     for (const providerConfig of this.configs) {
@@ -123,25 +123,31 @@ export class ProviderRouter {
     const temperature = defaultTemperature ?? 0.7;
 
     switch (config.name) {
-      case 'groq':
+      case 'groq': {
         return createGroqService({ model, temperature });
-      case 'google':
+      }
+      case 'google': {
         return createGoogleService({ model, temperature });
-      case 'mistral':
+      }
+      case 'mistral': {
         return createMistralService({ model, temperature });
-      case 'openrouter':
+      }
+      case 'openrouter': {
         return createOpenRouterService({ model, temperature });
+      }
       case 'openai':
-      case 'anthropic':
+      case 'anthropic': {
         // These are supported but need to be added separately if needed
         debugService(
           '[ProviderRouter] Provider %s not yet implemented in router',
           config.name,
         );
         return null;
-      default:
+      }
+      default: {
         debugService('[ProviderRouter] Unknown provider: %s', config.name);
         return null;
+      }
     }
   }
 
@@ -287,7 +293,7 @@ export class ProviderRouter {
       if (!provider) {
         throw new GenerationError(
           'No healthy providers available',
-          new Error(`Tried providers: ${Array.from(triedProviders).join(', ')}`),
+          new Error(`Tried providers: ${[...triedProviders].join(', ')}`),
         );
       }
 
@@ -325,7 +331,7 @@ export class ProviderRouter {
 
     throw new GenerationError(
       'All providers failed',
-      new Error(`Tried providers: ${Array.from(triedProviders).join(', ')}`),
+      new Error(`Tried providers: ${[...triedProviders].join(', ')}`),
     );
   }
 
@@ -346,7 +352,7 @@ export class ProviderRouter {
       if (!provider) {
         throw new GenerationError(
           'No healthy providers available',
-          new Error(`Tried providers: ${Array.from(triedProviders).join(', ')}`),
+          new Error(`Tried providers: ${[...triedProviders].join(', ')}`),
         );
       }
 
@@ -386,7 +392,7 @@ export class ProviderRouter {
 
     throw new GenerationError(
       'All providers failed',
-      new Error(`Tried providers: ${Array.from(triedProviders).join(', ')}`),
+      new Error(`Tried providers: ${[...triedProviders].join(', ')}`),
     );
   }
 
@@ -449,14 +455,14 @@ export class ProviderRouter {
    * Get list of available provider names
    */
   getAvailableProviders(): string[] {
-    return Array.from(this.providers.keys());
+    return [...this.providers.keys()];
   }
 
   /**
    * Get list of healthy provider names
    */
   getHealthyProviderNames(): string[] {
-    return Array.from(this.healthStatus.entries())
+    return [...this.healthStatus.entries()]
       .filter(([, health]) => health.isHealthy)
       .map(([name]) => name);
   }

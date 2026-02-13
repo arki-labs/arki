@@ -7,7 +7,7 @@
 import React, { useEffect, useRef } from 'react';
 import type { ChatMessage } from '../hooks/useAIChat';
 
-export interface AIChatProps {
+export type AIChatProps = {
   messages: ChatMessage[];
   input: string;
   isLoading: boolean;

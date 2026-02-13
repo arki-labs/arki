@@ -20,7 +20,7 @@ import type {
   StreamOptions,
 } from './types.ts';
 
-export interface GroqServiceConfig {
+export type GroqServiceConfig = {
   model?: string;
   temperature?: number;
   maxRetries?: number;
@@ -254,8 +254,8 @@ export class GroqService implements LLMProvider {
         contentType: typeof m.content,
         contentLength: typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content).length,
         contentPreview: typeof m.content === 'string'
-          ? m.content.substring(0, 200) + (m.content.length > 200 ? '...' : '')
-          : JSON.stringify(m.content).substring(0, 200),
+          ? m.content.slice(0, 200) + (m.content.length > 200 ? '...' : '')
+          : JSON.stringify(m.content).slice(0, 200),
         // Check for any unexpected properties
         originalMessageKeys: Object.keys(messages[i] ?? {}),
       })),

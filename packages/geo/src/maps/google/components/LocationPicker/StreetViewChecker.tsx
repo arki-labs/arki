@@ -12,7 +12,7 @@ import { useEffect } from 'react';
 import type { Coordinates } from '../../types';
 import { useApiIsLoaded } from '../../hooks';
 
-export interface StreetViewCheckerProps {
+export type StreetViewCheckerProps = {
   /**
    * Location to check for Street View availability
    */
