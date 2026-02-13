@@ -1,0 +1,25 @@
+{
+  "name": "@arki/playwright-config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "clean": "git clean -xdf .cache .turbo node_modules",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "typecheck": "tsc --noEmit --skipLibCheck"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@playwright/test": "catalog:testing"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*"
+  }
+}
