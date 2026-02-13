@@ -302,7 +302,7 @@ export function createBackoffStrategy(
         const attemptNumber = attemptsMade + 1;
         const tier = sortedTiers.find(t => attemptNumber <= t.maxAttempt);
 
-        const calculatedDelay = tier?.delay ?? sortedTiers[sortedTiers.length - 1]!.delay;
+        const calculatedDelay = tier?.delay ?? sortedTiers.at(-1)!.delay;
         return maxDelay ? Math.min(calculatedDelay, maxDelay) : calculatedDelay;
       };
     }
@@ -505,7 +505,7 @@ export const COMMON_RETRY_CONFIGS = {
   AGGRESSIVE: {
     attempts: 10,
     backoff: { type: 'exponential' as const, delay: 1000 },
-    maxDelay: 30000, // Cap at 30 seconds
+    maxDelay: 30_000, // Cap at 30 seconds
   },
 
   /**
@@ -523,7 +523,7 @@ export const COMMON_RETRY_CONFIGS = {
    */
   FIXED: {
     attempts: 3,
-    backoff: { type: 'fixed' as const, delay: 10000 },
+    backoff: { type: 'fixed' as const, delay: 10_000 },
   },
 
   /**
@@ -597,7 +597,7 @@ export const COMMON_RETRY_CONFIGS = {
       tiers: [
         { maxAttempt: 3, delay: 1000 }, // First 3: 1s
         { maxAttempt: 5, delay: 5000 }, // Next 2: 5s
-        { maxAttempt: Infinity, delay: 30000 }, // Rest: 30s
+        { maxAttempt: Infinity, delay: 30_000 }, // Rest: 30s
       ],
     },
   },
@@ -612,7 +612,7 @@ export const COMMON_RETRY_CONFIGS = {
       type: 'stepped' as const,
       tiers: [
         { maxAttempt: 2, delay: 5000 }, // First 2: 5s
-        { maxAttempt: Infinity, delay: 60000 }, // Rest: 1 minute
+        { maxAttempt: Infinity, delay: 60_000 }, // Rest: 1 minute
       ],
     },
   },

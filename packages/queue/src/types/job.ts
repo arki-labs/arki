@@ -167,12 +167,12 @@ export type BackoffStrategy =
        */
       type: 'stepped';
       /** Tier definitions with max attempt and delay */
-      tiers: Array<{
+      tiers: {
         /** Maximum attempt number for this tier (use Infinity for last tier) */
         maxAttempt: number;
         /** Delay in milliseconds for this tier */
         delay: number;
-      }>;
+      }[];
     }
   | {
       /**

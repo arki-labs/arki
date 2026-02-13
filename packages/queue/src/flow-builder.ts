@@ -131,7 +131,7 @@ function detectCircularDependencies(steps: readonly FlowStepInternal[]): void {
 
   // Build dependency graph
   for (const step of steps) {
-    graph.set(step.id, new Set(step.dependsOn ?? []));
+    graph.set(step.id, new Set(step.dependsOn));
   }
 
   // Detect cycles using DFS
