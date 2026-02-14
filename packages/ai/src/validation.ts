@@ -118,11 +118,25 @@ export type SearchOptions = z.infer<typeof searchOptionsSchema>;
 /**
  * AI service configuration validation
  */
+/**
+ * Sanitization configuration for the AI service.
+ * When `true`, uses default sanitizer settings.
+ * When an object, configures specific sanitization options.
+ */
+export const sanitizerConfigSchema = z.object({
+  maxInputLength: z.number().min(1).optional(),
+  detectPromptInjection: z.boolean().optional(),
+  redactPII: z.boolean().optional(),
+  stripDangerousCharacters: z.boolean().optional(),
+  normalizeWhitespace: z.boolean().optional(),
+});
+
 export const aiServiceConfigSchema = z.object({
   model: z.string().optional(),
   apiKey: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxRetries: z.number().min(0).max(10).optional(),
+  sanitize: z.union([z.boolean(), sanitizerConfigSchema]).optional(),
 });
 
 export type AIServiceConfig = z.infer<typeof aiServiceConfigSchema>;
