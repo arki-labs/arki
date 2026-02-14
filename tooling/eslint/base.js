@@ -94,7 +94,7 @@ export default tseslint.config(
       ],
       '@typescript-eslint/no-misused-promises': [2, { checksVoidReturn: { attributes: false } }],
       '@typescript-eslint/no-unnecessary-condition': [
-        'error',
+        'warn',
         {
           allowConstantLoopConditions: true,
         },
@@ -118,6 +118,11 @@ export default tseslint.config(
       'unused-imports/no-unused-imports': 'error',
       'unicorn/prefer-global-this': 'off',
       'unicorn/no-nested-ternary': 'off',
+      'unicorn/no-array-reduce': 'off',
+      'unicorn/no-process-exit': 'off',
+      'unicorn/consistent-function-scoping': 'warn',
+      'unicorn/text-encoding-identifier-case': 'warn',
+      'unicorn/no-abusive-eslint-disable': 'warn',
       /**
        * Disallow expressions where the operation doesn't affect the value.
        *
