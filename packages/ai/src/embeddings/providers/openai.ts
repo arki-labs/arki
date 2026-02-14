@@ -88,7 +88,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     // Check cache and identify missing embeddings
     const results: (number[] | null)[] = this.cacheEnabled
       ? normalizedTexts.map((text) => this.cache.get(text) || null)
-      : Array.from({length: texts.length}).fill(null);
+      : Array.from<number[] | null>({length: texts.length}).fill(null);
 
     const missingIndices: number[] = [];
     const missingTexts: string[] = [];
