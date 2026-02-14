@@ -1,6 +1,7 @@
 {
   "name": "@arki/ui",
   "version": "0.1.0",
+  "sideEffects": false,
   "type": "module",
   "exports": {
     ".": {
@@ -523,17 +524,17 @@
     }
   },
   "scripts": {
+    "build": "tsc",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@arki/design-systems": "workspace:*",
     "@arki/date": "workspace:*",
+    "@arki/design-systems": "workspace:*",
     "@arki/icons": "workspace:*",
     "@arki/react-hooks": "workspace:*",
     "@arki/theme": "workspace:*",
@@ -590,6 +591,5 @@
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react"
   },
-  "module:jsx": "src",
-  "sideEffects": false
+  "module:jsx": "src"
 }
