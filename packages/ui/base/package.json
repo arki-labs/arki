@@ -23,6 +23,11 @@
       "import": "./src/toast/index.ts",
       "browser": "./src/toast/index.ts"
     },
+    "./design-system": {
+      "types": "./dist/src/design-system.d.ts",
+      "import": "./src/design-system.ts",
+      "browser": "./src/design-system.ts"
+    },
     "./accordion": {
       "types": "./dist/src/accordion.d.ts",
       "import": "./src/accordion.tsx",
@@ -335,6 +340,9 @@
       "toast": [
         "src/toast/index.ts"
       ],
+      "design-system": [
+        "src/design-system.ts"
+      ],
       "accordion": [
         "src/accordion.tsx"
       ],
@@ -524,6 +532,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/design-systems": "workspace:*",
     "@arki/date": "workspace:*",
     "@arki/icons": "workspace:*",
     "@arki/react-hooks": "workspace:*",
