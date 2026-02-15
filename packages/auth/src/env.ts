@@ -7,7 +7,7 @@ export const env = createEnv({
    * Environment variables schema for authentication services
    */
   server: {
-    NEXT_PUBLIC_URL: z.url(),
+    NEXT_PUBLIC_URL: z.url().optional(),
     PRODUCTION_URL: z.url().optional(),
 
     // General Configuration

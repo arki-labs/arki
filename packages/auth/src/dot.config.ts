@@ -16,7 +16,7 @@ export function initAuth(
   userOptions: {
     appName: string;
     appKey?: string;
-    baseUrl?: string;
+    baseUrl: string;
     productionUrl?: string;
     secret?: string;
 
@@ -34,8 +34,7 @@ export function initAuth(
   },
 ): ReturnType<typeof betterAuth> {
   const options = {
-    baseUrl: env.NEXT_PUBLIC_URL,
-    productionUrl: env.PRODUCTION_URL || env.NEXT_PUBLIC_URL,
+    productionUrl: env.PRODUCTION_URL || userOptions.baseUrl,
     secret: env.AUTH_SECRET,
 
     googleClientId: env.GOOGLE_CLIENT_ID,
@@ -54,10 +53,6 @@ export function initAuth(
 
   if (!options.secret) {
     throw new Error('AUTH_SECRET is not set');
-  }
-
-  if (!options.baseUrl) {
-    throw new Error('NEXT_PUBLIC_URL is not set');
   }
 
   const resend = options.resendApiKey ? new Resend(options.resendApiKey) : undefined;
