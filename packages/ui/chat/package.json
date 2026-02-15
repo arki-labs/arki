@@ -1,0 +1,136 @@
+{
+  "name": "@arki/chat-ui",
+  "version": "0.1.0",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    "./thread": {
+      "types": "./dist/src/thread.d.ts",
+      "import": "./src/thread.tsx",
+      "browser": "./src/thread.tsx"
+    },
+    "./message": {
+      "types": "./dist/src/message.d.ts",
+      "import": "./src/message.tsx",
+      "browser": "./src/message.tsx"
+    },
+    "./composer": {
+      "types": "./dist/src/composer.d.ts",
+      "import": "./src/composer.tsx",
+      "browser": "./src/composer.tsx"
+    },
+    "./action-bar": {
+      "types": "./dist/src/action-bar.d.ts",
+      "import": "./src/action-bar.tsx",
+      "browser": "./src/action-bar.tsx"
+    },
+    "./branch-picker": {
+      "types": "./dist/src/branch-picker.d.ts",
+      "import": "./src/branch-picker.tsx",
+      "browser": "./src/branch-picker.tsx"
+    },
+    "./tool-call": {
+      "types": "./dist/src/tool-call.d.ts",
+      "import": "./src/tool-call.tsx",
+      "browser": "./src/tool-call.tsx"
+    },
+    "./thinking-block": {
+      "types": "./dist/src/thinking-block.d.ts",
+      "import": "./src/thinking-block.tsx",
+      "browser": "./src/thinking-block.tsx"
+    },
+    "./approval-card": {
+      "types": "./dist/src/approval-card.d.ts",
+      "import": "./src/approval-card.tsx",
+      "browser": "./src/approval-card.tsx"
+    },
+    "./step-indicator": {
+      "types": "./dist/src/step-indicator.d.ts",
+      "import": "./src/step-indicator.tsx",
+      "browser": "./src/step-indicator.tsx"
+    },
+    "./agent-status": {
+      "types": "./dist/src/agent-status.d.ts",
+      "import": "./src/agent-status.tsx",
+      "browser": "./src/agent-status.tsx"
+    },
+    "./code-block": {
+      "types": "./dist/src/code-block.d.ts",
+      "import": "./src/code-block.tsx",
+      "browser": "./src/code-block.tsx"
+    },
+    "./markdown-message": {
+      "types": "./dist/src/markdown-message.d.ts",
+      "import": "./src/markdown-message.tsx",
+      "browser": "./src/markdown-message.tsx"
+    },
+    "./tool-registry": {
+      "types": "./dist/src/tool-registry.d.ts",
+      "import": "./src/tool-registry.tsx",
+      "browser": "./src/tool-registry.tsx"
+    },
+    "./types": {
+      "types": "./dist/src/types.d.ts",
+      "import": "./src/types.ts",
+      "browser": "./src/types.ts"
+    },
+    "./styles/chat.css": "./src/styles/chat.css",
+    "./*": {
+      "types": "./dist/src/*.d.ts",
+      "import": "./src/*.tsx",
+      "browser": "./src/*.tsx"
+    },
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "thread": ["src/thread.tsx"],
+      "message": ["src/message.tsx"],
+      "composer": ["src/composer.tsx"],
+      "action-bar": ["src/action-bar.tsx"],
+      "branch-picker": ["src/branch-picker.tsx"],
+      "tool-call": ["src/tool-call.tsx"],
+      "thinking-block": ["src/thinking-block.tsx"],
+      "approval-card": ["src/approval-card.tsx"],
+      "step-indicator": ["src/step-indicator.tsx"],
+      "agent-status": ["src/agent-status.tsx"],
+      "code-block": ["src/code-block.tsx"],
+      "markdown-message": ["src/markdown-message.tsx"],
+      "tool-registry": ["src/tool-registry.tsx"],
+      "types": ["src/types.ts"],
+      "*": ["src/*"]
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc",
+    "format": "prettier --check . --ignore-path ../../../.gitignore",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/icons": "workspace:*",
+    "@arki/ui": "workspace:*",
+    "@assistant-ui/react": "catalog:",
+    "@assistant-ui/react-ai-sdk": "catalog:",
+    "class-variance-authority": "catalog:styling",
+    "clsx": "catalog:styling",
+    "tailwind-merge": "catalog:styling"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@types/react": "catalog:react",
+    "@types/react-dom": "catalog:react"
+  },
+  "peerDependencies": {
+    "react": "^18 || ^19",
+    "react-dom": "^18 || ^19"
+  },
+  "module:jsx": "src"
+}
