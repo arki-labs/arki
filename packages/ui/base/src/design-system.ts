@@ -1,15 +1,5 @@
-import {
-  DESIGN_SYSTEM_IDS,
-  DESIGN_SYSTEMS,
-  designSystemIdSchema,
-  getDesignSystemById,
-  getDesignSystemByIdSafe,
-  isDesignSystemId,
-  parseDesignSystemId,
-  resolveDesignSystemId,
-  type DesignSystemId,
-  type DesignSystemMetadata,
-} from '@arki/design-systems/registry';
+import { resolveDesignSystemId } from '@arki/design-systems/registry';
+import type { DesignSystemId } from '@arki/design-systems/registry';
 
 export {
   DESIGN_SYSTEM_IDS,
@@ -19,8 +9,8 @@ export {
   getDesignSystemByIdSafe,
   isDesignSystemId,
   parseDesignSystemId,
-};
-export type { DesignSystemId, DesignSystemMetadata };
+} from '@arki/design-systems/registry';
+export type { DesignSystemId, DesignSystemMetadata } from '@arki/design-systems/registry';
 
 /**
  * Default design system id used by `@arki/ui` when a consumer does not provide one.
