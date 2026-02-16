@@ -8,9 +8,11 @@ import { env } from './env';
  * Returns null if connection fails or if env vars are missing (for development).
  * Returns null during build time to prevent build failures.
  *
+ * @param namespace - The KV namespace (typically the app key, e.g. 'games', 'novelette').
+ *   Falls back to the KV_NAMESPACE environment variable if not provided.
  * @internal Use this function in application singletons, not at module level
  */
-export async function initializeKV(): Promise<KV | null> {
+export async function initializeKV(namespace?: string): Promise<KV | null> {
   debugKV('[instance] Initializing KV (env: %s, phase: %s)', env.NODE_ENV, process.env.NEXT_PHASE);
 
   // Skip KV initialization during build time
@@ -21,22 +23,24 @@ export async function initializeKV(): Promise<KV | null> {
   }
 
   // Skip KV initialization in development if not configured
-  if (!env.KV_URL || !env.KV_NAMESPACE) {
-    debugKV('[instance] Missing configuration (url: %s, namespace: %s)', !!env.KV_URL, !!env.KV_NAMESPACE);
+  if (!env.KV_URL) {
+    debugKV('[instance] Missing KV_URL configuration');
     if (env.NODE_ENV === 'production') {
-      debugKV('[instance] CRITICAL: KV configuration required in production');
-      console.error('CRITICAL: KV_URL and KV_NAMESPACE must be defined in production.');
+      debugKV('[instance] CRITICAL: KV_URL required in production');
+      console.error('CRITICAL: KV_URL must be defined in production.');
       process.exit(1);
     }
     debugKV('[instance] Running without KV in development mode');
-    console.warn('⚠️  KV_URL or KV_NAMESPACE not defined. Running without KV store (development mode).');
+    console.warn('⚠️  KV_URL not defined. Running without KV store (development mode).');
     return null;
   }
 
+  const resolvedNamespace = namespace ?? env.KV_NAMESPACE;
+
   try {
-    debugKV('[instance] Creating KV instance (namespace: %s)', env.KV_NAMESPACE);
+    debugKV('[instance] Creating KV instance (namespace: %s)', resolvedNamespace ?? 'none');
     console.log('Initializing KV connection...');
-    const instance = new KV(env.KV_URL, env.KV_NAMESPACE);
+    const instance = new KV(env.KV_URL, resolvedNamespace);
 
     // Test the connection with a simple operation
     // keyv might connect lazily, so a quick set/get ensures it's working.
@@ -74,9 +78,11 @@ export async function initializeKV(): Promise<KV | null> {
  * lazy connection establishment. The connection will be established
  * on first use.
  *
+ * @param namespace - The KV namespace (typically the app key, e.g. 'games', 'novelette').
+ *   Falls back to the KV_NAMESPACE environment variable if not provided.
  * @internal Use this in application singletons for synchronous initialization
  */
-export function createKV(): KV | null {
+export function createKVInstance(namespace?: string): KV | null {
   debugKV('[instance] Creating KV synchronously (env: %s, phase: %s)', env.NODE_ENV, process.env.NEXT_PHASE);
 
   // Skip KV initialization during build time
@@ -86,21 +92,23 @@ export function createKV(): KV | null {
   }
 
   // Skip KV initialization in development if not configured
-  if (!env.KV_URL || !env.KV_NAMESPACE) {
-    debugKV('[instance] Missing configuration (url: %s, namespace: %s)', !!env.KV_URL, !!env.KV_NAMESPACE);
+  if (!env.KV_URL) {
+    debugKV('[instance] Missing KV_URL configuration');
     if (env.NODE_ENV === 'production') {
-      debugKV('[instance] CRITICAL: KV configuration required in production');
-      console.error('CRITICAL: KV_URL and KV_NAMESPACE must be defined in production.');
+      debugKV('[instance] CRITICAL: KV_URL required in production');
+      console.error('CRITICAL: KV_URL must be defined in production.');
       process.exit(1);
     }
     debugKV('[instance] Returning null in development mode (missing config)');
     return null;
   }
 
+  const resolvedNamespace = namespace ?? env.KV_NAMESPACE;
+
   try {
-    debugKV('[instance] Creating KV instance (namespace: %s, lazy connection)', env.KV_NAMESPACE);
+    debugKV('[instance] Creating KV instance (namespace: %s, lazy connection)', resolvedNamespace ?? 'none');
     console.log('Creating KV instance (connection will be established lazily)...');
-    const instance = new KV(env.KV_URL, env.KV_NAMESPACE);
+    const instance = new KV(env.KV_URL, resolvedNamespace);
     debugKV('[instance] KV instance created successfully');
     console.log('✅ KV instance created.');
     return instance;
@@ -118,10 +126,10 @@ export function createKV(): KV | null {
 }
 
 /**
- * @deprecated Use createKV() or initializeKV() in your application singleton instead.
+ * @deprecated Use createKVInstance() or initializeKV() in your application singleton instead.
  * This export is kept for backward compatibility but will be removed in a future version.
  *
  * Direct usage of this export causes re-initialization on every module import,
  * especially problematic in Next.js development with HMR.
  */
-export const kv = createKV();
+export const kv = createKVInstance();

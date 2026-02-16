@@ -4,13 +4,15 @@ import { KV } from './index';
 
 /**
  * Create a KV instance using environment configuration
- * @param namespace - Optional namespace for the KV store
+ * @param namespace - The KV namespace (typically the app key, e.g. 'games', 'novelette').
+ *   Falls back to the KV_NAMESPACE environment variable if not provided.
  * @param rateLimitPrefix - Optional prefix for rate limiter keys (default: 'rl')
  * @returns KV instance
  * @throws Error if KV_URL is not configured
  */
 export function createKV(namespace?: string, rateLimitPrefix?: string): KV {
-  debugKV('[factory] Creating KV instance (namespace: %s, rateLimitPrefix: %s)', namespace || 'default', rateLimitPrefix || env.RATE_LIMIT_PREFIX);
+  const resolvedNamespace = namespace ?? env.KV_NAMESPACE;
+  debugKV('[factory] Creating KV instance (namespace: %s, rateLimitPrefix: %s)', resolvedNamespace ?? 'none', rateLimitPrefix || env.RATE_LIMIT_PREFIX);
 
   if (!env.KV_URL) {
     debugKV('[factory] KV creation failed: KV_URL not configured');
@@ -18,17 +20,19 @@ export function createKV(namespace?: string, rateLimitPrefix?: string): KV {
   }
 
   debugKV('[factory] KV instance created successfully');
-  return new KV(env.KV_URL, namespace, rateLimitPrefix ?? env.RATE_LIMIT_PREFIX);
+  return new KV(env.KV_URL, resolvedNamespace, rateLimitPrefix ?? env.RATE_LIMIT_PREFIX);
 }
 
 /**
  * Create a KV instance for rate limiting using environment configuration
- * @param namespace - Optional namespace for the KV store
+ * @param namespace - The KV namespace (typically the app key, e.g. 'games', 'novelette').
+ *   Falls back to the KV_NAMESPACE environment variable if not provided.
  * @returns KV instance configured for rate limiting
  * @throws Error if RATE_LIMIT_REDIS_URL or KV_URL is not configured
  */
 export function createRateLimitKV(namespace?: string): KV {
-  debugKV('[factory] Creating rate limit KV instance (namespace: %s)', namespace || 'default');
+  const resolvedNamespace = namespace ?? env.KV_NAMESPACE;
+  debugKV('[factory] Creating rate limit KV instance (namespace: %s)', resolvedNamespace ?? 'none');
 
   const redisUrl = env.RATE_LIMIT_REDIS_URL ?? env.KV_URL;
 
@@ -43,5 +47,5 @@ export function createRateLimitKV(namespace?: string): KV {
   debugKV('[factory] Using %s for rate limiting (prefix: %s)', usingFallback ? 'fallback KV_URL' : 'RATE_LIMIT_REDIS_URL', env.RATE_LIMIT_PREFIX);
 
   debugKV('[factory] Rate limit KV instance created successfully');
-  return new KV(redisUrl, namespace, env.RATE_LIMIT_PREFIX);
+  return new KV(redisUrl, resolvedNamespace, env.RATE_LIMIT_PREFIX);
 }
