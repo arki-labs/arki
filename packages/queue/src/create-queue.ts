@@ -73,6 +73,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
   const queues: Queue[] = [];
   const workers: Worker[] = [];
   const flowProducers: FlowProducer[] = [];
+  const startedWorkers = new WeakSet<Worker>();
 
   /**
    * Register a single job definition
@@ -96,6 +97,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
       defaultJobOptions: {
         attempts: internal.options?.retry?.attempts ?? 3,
         backoff: toBullMQBackoff(internal.options?.retry),
+        ...internal.options?.bullmqOptions,
       },
     });
 
@@ -137,10 +139,15 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
       {
         connection: connectionConfig,
         prefix: keyPrefix,
+        autorun: false,
         concurrency: internal.options?.maxParallelism ?? 5,
-        ...(backoffStrategy && {
+        ...internal.options?.workerOptions,
+        ...((backoffStrategy || internal.options?.workerOptions?.settings) && {
           settings: {
-            backoffStrategy,
+            ...internal.options?.workerOptions?.settings,
+            ...(backoffStrategy && {
+              backoffStrategy,
+            }),
           },
         }),
       },
@@ -239,6 +246,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
       {
         connection: connectionConfig,
         prefix: keyPrefix,
+        autorun: false,
       },
     );
 
@@ -319,7 +327,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
   /**
    * Traverse registry and register all items
    */
-  function traverseRegistry(registry: Registry): void {
+  async function traverseRegistry(registry: Registry): Promise<void> {
     for (const [_key, value] of Object.entries(registry)) {
       // Check if it's a definition
       if (typeof value === 'object') {
@@ -332,7 +340,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
               break;
             }
             case 'schedule': {
-              void registerScheduleDefinition(value);
+              await registerScheduleDefinition(value);
 
               break;
             }
@@ -345,7 +353,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
           }
         } else if (typeof value === 'object' && !Array.isArray(value)) {
           // It's a nested registry, recurse
-          traverseRegistry(value);
+          await traverseRegistry(value);
         }
       }
     }
@@ -357,7 +365,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
   async function register(registry: Registry): Promise<void> {
     debugRegister('Starting registry traversal');
     console.log('Registering queue items...');
-    traverseRegistry(registry);
+    await traverseRegistry(registry);
     debugRegister('Registry traversal complete');
     console.log('✓ Registration complete');
   }
@@ -372,6 +380,18 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     debugWorker('Flows registered: %d', registeredFlows.size);
     debugWorker('Workers created: %d', workers.length);
     debugWorker('Queues created: %d', queues.length);
+
+    for (const worker of workers) {
+      if (!startedWorkers.has(worker)) {
+        startedWorkers.add(worker);
+        // Worker.run() resolves when worker stops, so fire-and-forget here.
+        void worker.run().catch(error => {
+          console.error(`Worker ${worker.name} stopped unexpectedly:`, error);
+        });
+      }
+      await worker.waitUntilReady();
+    }
+
     console.log('✓ Queue infrastructure started');
     console.log(`  - ${registeredJobs.size} job(s) registered`);
     console.log(`  - ${registeredSchedules.size} schedule(s) registered`);
