@@ -40,24 +40,29 @@ export class KV {
     // ioredis setup for rate limiter
     debugLimiter('[kv] Setting up ioredis client for rate limiting');
     this.#redisClient = new Redis(redisUrl, {
-      // Important: enableOfflineQueue: false prevents commands from buffering
-      // indefinitely if connection is lost during startup or runtime.
-      // rate-limiter-flexible handles connection issues internally.
       enableOfflineQueue: false,
+      maxRetriesPerRequest: 1,
+      retryStrategy(times) {
+        if (times > 10) {
+          debugLimiter('[kv] Rate limiter Redis: giving up after %d retries', times);
+          // Return null to stop retrying — the in-memory fallback will handle rate limiting
+          return null;
+        }
+        // Exponential backoff capped at 5 seconds
+        const delay = Math.min(times * 500, 5_000);
+        debugLimiter('[kv] Rate limiter Redis: retry %d in %dms', times, delay);
+        return delay;
+      },
       ...(tlsOptions && { tls: tlsOptions }),
-      // Add any other ioredis options if needed (e.g., maxRetriesPerRequest)
     });
 
     this.#redisClient.on('error', err => {
       debugLimiter('[kv] Rate limiter Redis client error: %s', err.message);
-      console.error('Rate Limiter Redis Client Error:', err);
       this.#isRateLimiterReady = false;
-      // Consider adding logic to potentially disable rate limiting or use fallback if needed
     });
 
     this.#redisClient.on('ready', () => {
       debugLimiter('[kv] Rate limiter Redis client ready');
-      console.log('Rate Limiter Redis Client Ready.');
       this.#isRateLimiterReady = true;
     });
 
