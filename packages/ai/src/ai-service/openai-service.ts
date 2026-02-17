@@ -9,7 +9,7 @@ import { generateObject, streamText, generateText } from 'ai';
 import { z } from '@arki/contracts';
 
 import { debugService } from '../debug.ts';
-import { GenerationError, getErrorMessage } from '../errors';
+import { GenerationError, RateLimitError, getErrorMessage } from '../errors';
 import { BaseInputSanitizer } from '../safety/input-sanitizer';
 import type { SanitizerConfig } from '../safety/types';
 import { validateInput, aiServiceConfigSchema } from '../validation';
@@ -410,13 +410,13 @@ Content: "${text}"`;
     if (!result.success) {
       debugService('[OpenAI] Rate limit exceeded for %s (retry after: %dms)', key, result.retryAfterMs);
 
-      throw new GenerationError(
+      throw new RateLimitError(
         `Rate limit exceeded for ${key}: retry after ${result.retryAfterMs}ms`,
-        result.error,
+        result.retryAfterMs,
       );
     }
 
-    return result.data!;
+    return result.data;
   }
 
   /**

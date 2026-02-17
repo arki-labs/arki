@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { z } from '@arki/contracts';
 
-import { GenerationError } from '../errors';
+import { GenerationError, RateLimitError } from '../errors';
 import { rateLimiters } from '../utils/rate-limiter';
 
 import { OpenAIService } from './openai-service';
@@ -319,7 +319,7 @@ describe('OpenAIService', () => {
       expect(executeSpy).toHaveBeenCalledWith('moderateContent', expect.any(Function));
     });
 
-    it('throws GenerationError when rate limit is exceeded', async () => {
+    it('throws RateLimitError when rate limit is exceeded', async () => {
       const ai = new OpenAIService();
 
       // Exhaust the rate limiter (60 RPM)
@@ -329,7 +329,7 @@ describe('OpenAIService', () => {
         retryAfterMs: 5000,
       });
 
-      await expect(ai.generateText('hello')).rejects.toThrow(GenerationError);
+      await expect(ai.generateText('hello')).rejects.toThrow(RateLimitError);
 
       executeSpy.mockRestore();
     });

@@ -12,12 +12,9 @@ export type RateLimiterConfig = {
   retryDelayMs?: number;     // Base delay between retries
 }
 
-export type RateLimitResult<T> = {
-  success: boolean;
-  data?: T;
-  error?: Error;
-  retryAfterMs?: number;
-}
+export type RateLimitResult<T> =
+  | { success: true; data: T }
+  | { success: false; error: Error; retryAfterMs: number };
 
 export class RateLimiter {
   private requests = new Map<string, number[]>();
@@ -55,17 +52,9 @@ export class RateLimiter {
 
       if (canProceed) {
         debugRetry('[RateLimiter] Rate limit check passed for key: %s (attempt %d/%d)', key, attempts + 1, this.config.maxRetries);
-        try {
-          const data = await fn();
-          debugRetry('[RateLimiter] Function executed successfully for key: %s', key);
-          return { success: true, data };
-        } catch (error) {
-          debugRetry('[RateLimiter] Function execution failed for key: %s - %s', key, error instanceof Error ? error.message : 'Unknown error');
-          return {
-            success: false,
-            error: error as Error
-          };
-        }
+        const data = await fn();
+        debugRetry('[RateLimiter] Function executed successfully for key: %s', key);
+        return { success: true, data };
       }
 
       // Rate limited, calculate retry delay
@@ -92,6 +81,7 @@ export class RateLimiter {
     return {
       success: false,
       error: new Error(`Max retry attempts reached for ${key}`),
+      retryAfterMs: this.getRetryAfterMs(key),
     };
   }
 
@@ -229,7 +219,7 @@ export function createRateLimitedFunction<TArgs extends unknown[], TResult>(
       throw result.error;
     }
 
-    return result.data!;
+    return result.data;
   };
 }
 

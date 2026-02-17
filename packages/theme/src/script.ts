@@ -13,7 +13,8 @@
  * <ScriptOnce>{themeScript(THEME_STORAGE_KEY)}</ScriptOnce>
  * ```
  *
- * For Next.js, this is handled automatically by the ThemeProvider.
+ * For Next.js, add a blocking inline script in the root layout's
+ * html element (before body) using themeScript() to prevent FOUC.
  */
 
 export const THEME_STORAGE_KEY = 'theme';

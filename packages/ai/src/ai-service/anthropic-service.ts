@@ -13,7 +13,7 @@ type ChatMessage = {
 };
 
 import { debugService } from '../debug.ts';
-import { GenerationError, getErrorMessage } from '../errors';
+import { GenerationError, RateLimitError, getErrorMessage } from '../errors';
 import { validateInput, aiServiceConfigSchema } from '../validation';
 import { rateLimiters } from '../utils/rate-limiter';
 
@@ -86,13 +86,13 @@ export class AnthropicService {
     if (!result.success) {
       debugService('[Anthropic] Rate limit exceeded (retry after: %dms)', result.retryAfterMs);
 
-      throw new GenerationError(
-        `Anthropic rate limit exceeded: retry after ${result.retryAfterMs ?? 0}ms`,
-        result.error,
+      throw new RateLimitError(
+        `Anthropic rate limit exceeded: retry after ${result.retryAfterMs}ms`,
+        result.retryAfterMs,
       );
     }
 
-    return result.data!;
+    return result.data;
   }
 
   /**

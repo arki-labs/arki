@@ -10,7 +10,7 @@ import { generateText, streamText } from 'ai';
 
 import { debugService } from '../debug.ts';
 import { env } from '../env.ts';
-import { GenerationError, getErrorMessage } from '../errors.ts';
+import { GenerationError, RateLimitError, getErrorMessage } from '../errors.ts';
 import { rateLimiters } from '../utils/rate-limiter.ts';
 
 import type {
@@ -103,13 +103,13 @@ export class GoogleService implements LLMProvider {
     );
 
     if (!rateLimitResult.success) {
-      throw new GenerationError(
+      throw new RateLimitError(
         `Rate limit exceeded: retry after ${rateLimitResult.retryAfterMs}ms`,
-        rateLimitResult.error,
+        rateLimitResult.retryAfterMs,
       );
     }
 
-    return rateLimitResult.data!;
+    return rateLimitResult.data;
   }
 
   /**
@@ -160,13 +160,13 @@ export class GoogleService implements LLMProvider {
     );
 
     if (!rateLimitResult.success) {
-      throw new GenerationError(
+      throw new RateLimitError(
         `Rate limit exceeded: retry after ${rateLimitResult.retryAfterMs}ms`,
-        rateLimitResult.error,
+        rateLimitResult.retryAfterMs,
       );
     }
 
-    return rateLimitResult.data!;
+    return rateLimitResult.data;
   }
 
   /**
