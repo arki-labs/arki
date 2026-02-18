@@ -69,6 +69,8 @@ export type ProviderConfig = {
   weight?: number;
   /** Whether this provider is enabled */
   enabled?: boolean;
+  /** Optional API key override — when set, used instead of the default env-based key */
+  apiKey?: string;
 }
 
 /**

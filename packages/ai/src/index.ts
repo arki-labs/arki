@@ -123,6 +123,7 @@ export {
   createProviderRouter,
   createDefaultProviderRouter,
   type ProviderRouterConfig,
+  type ResolvedLanguageModel,
   // Common LLM types
   type LLMProvider,
   type ProviderConfig,

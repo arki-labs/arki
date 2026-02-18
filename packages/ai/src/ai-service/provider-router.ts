@@ -5,7 +5,15 @@
  * between multiple LLM providers.
  */
 
+import { anthropic, createAnthropic } from '@ai-sdk/anthropic';
+import { createGoogleGenerativeAI, google } from '@ai-sdk/google';
+import { createGroq } from '@ai-sdk/groq';
+import { createMistral, mistral } from '@ai-sdk/mistral';
+import { createOpenAI, openai } from '@ai-sdk/openai';
+import type { LanguageModel } from 'ai';
+
 import { debugService } from '../debug.ts';
+import { env } from '../env.ts';
 import { GenerationError, getErrorMessage } from '../errors.ts';
 
 import { createGoogleService } from './google-service.ts';
@@ -32,6 +40,67 @@ const DEFAULT_MODELS: Record<ProviderConfig['name'], string> = {
   openrouter: 'meta-llama/llama-3.2-3b-instruct:free',
   openai: 'gpt-4o-mini',
   anthropic: 'claude-3-haiku-20240307',
+};
+
+/**
+ * Create an AI SDK LanguageModel from a provider config.
+ *
+ * Maps our internal provider names to the corresponding `@ai-sdk/*` factory
+ * functions. When a custom `apiKey` is provided on the config, we use the
+ * provider's factory (`createGoogleGenerativeAI`, `createAnthropic`, etc.)
+ * to create an isolated instance with that key. Otherwise we fall back to
+ * the default singletons which read from environment variables.
+ */
+function createLanguageModel(config: ProviderConfig): LanguageModel {
+  const { name, model, apiKey } = config;
+
+  switch (name) {
+    case 'anthropic': {
+      if (apiKey) {
+        return createAnthropic({ apiKey })(model);
+      }
+      return anthropic(model);
+    }
+    case 'openai': {
+      if (apiKey) {
+        return createOpenAI({ apiKey })(model);
+      }
+      return openai(model);
+    }
+    case 'google': {
+      if (apiKey) {
+        return createGoogleGenerativeAI({ apiKey })(model);
+      }
+      return google(model);
+    }
+    case 'groq': {
+      const groq = createGroq({ apiKey: apiKey ?? env.GROQ_API_KEY });
+      return groq(model);
+    }
+    case 'mistral': {
+      if (apiKey) {
+        return createMistral({ apiKey })(model);
+      }
+      return mistral(model);
+    }
+    case 'openrouter': {
+      const openrouter = createOpenAI({
+        baseURL: 'https://openrouter.ai/api/v1',
+        apiKey: apiKey ?? env.OPENROUTER_API_KEY,
+      });
+      return openrouter(model);
+    }
+  }
+}
+
+/**
+ * Result from resolving a LanguageModel via the router.
+ */
+export type ResolvedLanguageModel = {
+  /** The AI SDK LanguageModel ready for use with streamText/generateText */
+  model: LanguageModel;
+  /** The provider that was selected */
+  providerName: ProviderConfig['name'];
 };
 
 /**
@@ -487,6 +556,74 @@ export class ProviderRouter {
     for (const name of this.providers.keys()) {
       this.resetProviderHealth(name);
     }
+  }
+
+  /**
+   * Resolve the next healthy provider as an AI SDK LanguageModel.
+   *
+   * This bridges the ProviderRouter's health-aware selection with the
+   * Vercel AI SDK's `streamText()` / `generateText()` functions, which
+   * require a `LanguageModel` instance.
+   *
+   * @returns The resolved model and provider name for health reporting
+   * @throws GenerationError if no healthy provider is available
+   *
+   * @example
+   * ```ts
+   * const router = createProviderRouter({ providers: [...] });
+   * const { model, providerName } = router.toLanguageModel();
+   *
+   * const result = streamText({
+   *   model,
+   *   messages,
+   *   onFinish: () => router.reportSuccess(providerName),
+   *   onError: () => router.reportFailure(providerName, new Error('failed')),
+   * });
+   * ```
+   */
+  toLanguageModel(): ResolvedLanguageModel {
+    const healthyConfigs = this.configs.filter(
+      (c) =>
+        this.providers.has(c.name) &&
+        this.healthStatus.get(c.name)?.isHealthy !== false,
+    );
+
+    if (healthyConfigs.length === 0) {
+      // Attempt recovery before giving up
+      const recovered = this.tryRecoverProvider();
+      if (recovered) {
+        const config = this.configs.find((c) => c.name === recovered.name);
+        if (config) {
+          const model = createLanguageModel(config);
+          debugService(
+            '[ProviderRouter] Resolved recovered AI SDK model: %s (%s)',
+            config.name,
+            config.model,
+          );
+          return { model, providerName: config.name };
+        }
+      }
+
+      throw new GenerationError(
+        'No healthy LLM provider available. Configure at least one provider API key.',
+      );
+    }
+
+    const config = healthyConfigs[this.currentIndex % healthyConfigs.length];
+    if (!config) {
+      throw new GenerationError('No healthy LLM provider available.');
+    }
+    this.currentIndex = (this.currentIndex + 1) % healthyConfigs.length;
+
+    const model = createLanguageModel(config);
+
+    debugService(
+      '[ProviderRouter] Resolved AI SDK model: %s (%s)',
+      config.name,
+      config.model,
+    );
+
+    return { model, providerName: config.name };
   }
 }
 

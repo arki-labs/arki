@@ -28,4 +28,67 @@ export default {
     generalFeedbackDescription: "Anything else you'd like us to know? We're listening!",
     generalFeedbackButton: 'Send',
   },
+  FeedbackUnified: {
+    badge: 'Feedback',
+    titleText: 'Tell us how we can improve {appTitle}',
+    titleDescription:
+      "Write in your own words. We'll route your feedback to the right place. For sensitive information, email us at <a>{supportEmail}</a>.",
+    composer: {
+      title: 'Share your feedback',
+      description: 'A quick note is enough. Add details if you want faster follow-up.',
+      placeholder: 'What happened, what you expected, and what would help most?',
+      submit: 'Submit feedback',
+    },
+    mood: {
+      label: 'How did this feel?',
+      frustrated: 'Frustrated',
+      disappointed: 'Disappointed',
+      neutral: 'Neutral',
+      happy: 'Happy',
+      delighted: 'Delighted',
+    },
+    quickStarter: {
+      bug: 'I ran into a problem with...',
+      feature: 'I wish I could...',
+      praise: 'I really like how...',
+    },
+    guest: {
+      nameLabel: 'Name',
+      namePlaceholder: 'Your name',
+      emailLabel: 'Email',
+      emailPlaceholder: 'you@example.com',
+    },
+    context: {
+      summaryPrefix: 'Auto-attached',
+    },
+    processing: {
+      title: 'Submitting feedback',
+      description: 'Please wait while we process your message.',
+    },
+    errors: {
+      title: 'We could not submit your feedback',
+      retry: 'Try again',
+      edit: 'Back to form',
+      contentRequired: 'Please add feedback before submitting.',
+      guestIdentityRequired: 'Please provide both your name and email.',
+      antiSpam: 'Please complete the security check and try again.',
+    },
+    summary: {
+      heading: 'Understood - here is what we received',
+      done: 'Done',
+      sendMore: 'Send more feedback',
+    },
+    followUp: {
+      submit: 'Add detail',
+      skip: 'Skip',
+    },
+    category: {
+      bug: 'Bug',
+      featureRequest: 'Feature request',
+      general: 'General',
+      praise: 'Praise',
+      question: 'Question',
+      support: 'Support',
+    },
+  },
 } as const;
