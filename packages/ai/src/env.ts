@@ -20,6 +20,8 @@ export const env = createEnv({
 
     // Google AI (Gemini)
     GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),
+    // Multiple Google AI keys (comma-separated) for load distribution
+    GOOGLE_API_KEYS: z.string().optional(),
 
     // Mistral AI
     MISTRAL_API_KEY: z.string().optional(),
@@ -40,6 +42,7 @@ export const env = createEnv({
     ANTHROPIC_API_KEY: process.env['ANTHROPIC_API_KEY'],
     GROQ_API_KEY: process.env['GROQ_API_KEY'],
     GOOGLE_GENERATIVE_AI_API_KEY: process.env['GOOGLE_GENERATIVE_AI_API_KEY'],
+    GOOGLE_API_KEYS: process.env['GOOGLE_API_KEYS'],
     MISTRAL_API_KEY: process.env['MISTRAL_API_KEY'],
     OPENROUTER_API_KEY: process.env['OPENROUTER_API_KEY'],
     EMBEDDING_PROVIDER: process.env['EMBEDDING_PROVIDER'],
