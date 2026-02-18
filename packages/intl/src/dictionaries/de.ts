@@ -41,6 +41,7 @@ export default {
     },
     mood: {
       label: 'Wie hat sich das angefühlt?',
+      ariaLabel: 'Feedback-Stimmung',
       frustrated: 'Frustriert',
       disappointed: 'Enttäuscht',
       neutral: 'Neutral',
@@ -60,6 +61,11 @@ export default {
     },
     context: {
       summaryPrefix: 'Automatisch angehängt',
+      pathnameLabel: 'Pfad',
+      localeLabel: 'Sprache',
+      browserLabel: 'Browser',
+      osLabel: 'Betriebssystem',
+      versionLabel: 'Version',
     },
     processing: {
       title: 'Feedback wird gesendet',
@@ -72,6 +78,7 @@ export default {
       contentRequired: 'Bitte gib Feedback ein, bevor du sendest.',
       guestIdentityRequired: 'Bitte gib sowohl Namen als auch E-Mail an.',
       antiSpam: 'Bitte schließe die Sicherheitsprüfung ab und versuche es erneut.',
+      unexpected: 'Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut.',
     },
     summary: {
       heading: 'Verstanden - das haben wir erhalten',

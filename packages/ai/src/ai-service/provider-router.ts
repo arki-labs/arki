@@ -10,6 +10,7 @@ import { createGoogleGenerativeAI, google } from '@ai-sdk/google';
 import { createGroq } from '@ai-sdk/groq';
 import { createMistral, mistral } from '@ai-sdk/mistral';
 import { createOpenAI, openai } from '@ai-sdk/openai';
+import { generateText, streamText } from 'ai';
 import type { LanguageModel } from 'ai';
 
 import { debugService } from '../debug.ts';
@@ -42,6 +43,41 @@ const DEFAULT_MODELS: Record<ProviderConfig['name'], string> = {
   anthropic: 'claude-3-haiku-20240307',
 };
 
+function resolveModel(config: ProviderConfig): string {
+  if (config.model.length > 0) {
+    return config.model;
+  }
+
+  return DEFAULT_MODELS[config.name];
+}
+
+function getProviderApiKey(name: ProviderConfig['name']): string | undefined {
+  switch (name) {
+    case 'anthropic': {
+      return env.ANTHROPIC_API_KEY;
+    }
+    case 'openai': {
+      return env.OPENAI_API_KEY;
+    }
+    case 'google': {
+      return env.GOOGLE_GENERATIVE_AI_API_KEY;
+    }
+    case 'groq': {
+      return env.GROQ_API_KEY;
+    }
+    case 'mistral': {
+      return env.MISTRAL_API_KEY;
+    }
+    case 'openrouter': {
+      return env.OPENROUTER_API_KEY;
+    }
+  }
+}
+
+function hasConfiguredCredentials(config: ProviderConfig): boolean {
+  return Boolean(config.apiKey ?? getProviderApiKey(config.name));
+}
+
 /**
  * Create an AI SDK LanguageModel from a provider config.
  *
@@ -52,7 +88,8 @@ const DEFAULT_MODELS: Record<ProviderConfig['name'], string> = {
  * the default singletons which read from environment variables.
  */
 function createLanguageModel(config: ProviderConfig): LanguageModel {
-  const { name, model, apiKey } = config;
+  const { name, apiKey } = config;
+  const model = resolveModel(config);
 
   switch (name) {
     case 'anthropic': {
@@ -91,6 +128,148 @@ function createLanguageModel(config: ProviderConfig): LanguageModel {
       return openrouter(model);
     }
   }
+}
+
+function createLanguageModelProvider(
+  config: ProviderConfig,
+  defaultTemperature: number,
+): LLMProvider {
+  const model = resolveModel(config);
+  const maxRetries = 2;
+
+  return {
+    name: config.name,
+    model,
+    isAvailable: () => hasConfiguredCredentials(config),
+    generateText: async (prompt, options = {}) => {
+      if (!hasConfiguredCredentials(config)) {
+        throw new GenerationError(`${config.name} API key not configured`);
+      }
+
+      try {
+        const result = await generateText({
+          model: createLanguageModel(config),
+          system: options.systemPrompt,
+          prompt,
+          temperature: options.temperature ?? defaultTemperature,
+          maxOutputTokens: options.maxTokens,
+          maxRetries: options.maxRetries ?? maxRetries,
+          stopSequences: options.stopSequences,
+        });
+
+        return result.text;
+      } catch (error) {
+        throw new GenerationError(
+          `Failed to generate text with ${config.name}: ${getErrorMessage(error)}`,
+          error,
+        );
+      }
+    },
+    generateConversation: async (messages, options = {}) => {
+      if (!hasConfiguredCredentials(config)) {
+        throw new GenerationError(`${config.name} API key not configured`);
+      }
+
+      try {
+        const result = await generateText({
+          model: createLanguageModel(config),
+          messages: messages.map((msg) => ({
+            role: msg.role,
+            content: msg.content,
+          })),
+          temperature: options.temperature ?? defaultTemperature,
+          maxOutputTokens: options.maxTokens,
+          maxRetries: options.maxRetries ?? maxRetries,
+          stopSequences: options.stopSequences,
+        });
+
+        return result.text;
+      } catch (error) {
+        throw new GenerationError(
+          `Failed to generate conversation with ${config.name}: ${getErrorMessage(error)}`,
+          error,
+        );
+      }
+    },
+    streamText: async function* (prompt, options = {}) {
+      if (!hasConfiguredCredentials(config)) {
+        throw new GenerationError(`${config.name} API key not configured`);
+      }
+
+      try {
+        const stream = streamText({
+          model: createLanguageModel(config),
+          system: options.systemPrompt,
+          prompt,
+          temperature: options.temperature ?? defaultTemperature,
+          maxOutputTokens: options.maxTokens,
+          stopSequences: options.stopSequences,
+        });
+
+        let fullText = '';
+        for await (const chunk of stream.textStream) {
+          fullText += chunk;
+          if (options.onChunk) {
+            options.onChunk(chunk);
+          }
+          yield chunk;
+        }
+
+        if (options.onComplete) {
+          options.onComplete(fullText);
+        }
+      } catch (error) {
+        if (options.onError) {
+          options.onError(error as Error);
+        }
+
+        throw new GenerationError(
+          `Failed to stream text with ${config.name}: ${getErrorMessage(error)}`,
+          error,
+        );
+      }
+    },
+    streamConversation: async function* (messages, options = {}) {
+      if (!hasConfiguredCredentials(config)) {
+        throw new GenerationError(`${config.name} API key not configured`);
+      }
+
+      try {
+        const stream = streamText({
+          model: createLanguageModel(config),
+          messages: messages.map((msg) => ({
+            role: msg.role,
+            content: msg.content,
+          })),
+          temperature: options.temperature ?? defaultTemperature,
+          maxOutputTokens: options.maxTokens,
+          stopSequences: options.stopSequences,
+        });
+
+        let fullText = '';
+        for await (const chunk of stream.textStream) {
+          fullText += chunk;
+          if (options.onChunk) {
+            options.onChunk(chunk);
+          }
+          yield chunk;
+        }
+
+        if (options.onComplete) {
+          options.onComplete(fullText);
+        }
+      } catch (error) {
+        if (options.onError) {
+          options.onError(error as Error);
+        }
+
+        throw new GenerationError(
+          `Failed to stream conversation with ${config.name}: ${getErrorMessage(error)}`,
+          error,
+        );
+      }
+    },
+  };
 }
 
 /**
@@ -188,8 +367,14 @@ export class ProviderRouter {
     config: ProviderConfig,
     defaultTemperature?: number,
   ): LLMProvider | null {
-    const model = config.model ?? DEFAULT_MODELS[config.name];
+    const model = resolveModel(config);
     const temperature = defaultTemperature ?? 0.7;
+
+    // Use AI SDK-native provider wrapper when API key override is provided
+    // or for providers that do not have dedicated LLMProvider services here.
+    if (config.apiKey || config.name === 'openai' || config.name === 'anthropic') {
+      return createLanguageModelProvider({ ...config, model }, temperature);
+    }
 
     switch (config.name) {
       case 'groq': {
@@ -204,29 +389,64 @@ export class ProviderRouter {
       case 'openrouter': {
         return createOpenRouterService({ model, temperature });
       }
-      case 'openai':
-      case 'anthropic': {
-        // These are supported but need to be added separately if needed
-        debugService(
-          '[ProviderRouter] Provider %s not yet implemented in router',
-          config.name,
-        );
-        return null;
-      }
       default: {
-        debugService('[ProviderRouter] Unknown provider: %s', config.name);
-        return null;
+        return createLanguageModelProvider({ ...config, model }, temperature);
       }
     }
+  }
+
+  /**
+   * Get all healthy provider configs that are currently available.
+   */
+  private getHealthyConfigs(): ProviderConfig[] {
+    return this.configs.filter(
+      (config) =>
+        this.providers.has(config.name) &&
+        this.healthStatus.get(config.name)?.isHealthy !== false,
+    );
+  }
+
+  /**
+   * Select the next config using weighted round-robin.
+   */
+  private selectNextWeightedConfig(configs: ProviderConfig[]): ProviderConfig | null {
+    if (configs.length === 0) {
+      return null;
+    }
+
+    const normalized = configs.map((config) => ({
+      config,
+      weight: Math.max(1, config.weight ?? 1),
+    }));
+
+    const totalWeight = normalized.reduce((total, item) => total + item.weight, 0);
+
+    if (totalWeight === 0) {
+      return null;
+    }
+
+    const slot = this.currentIndex % totalWeight;
+    this.currentIndex = (this.currentIndex + 1) % totalWeight;
+
+    let cumulativeWeight = 0;
+
+    for (const item of normalized) {
+      cumulativeWeight += item.weight;
+      if (slot < cumulativeWeight) {
+        return item.config;
+      }
+    }
+
+    return normalized.at(-1)?.config ?? null;
   }
 
   /**
    * Get the next healthy provider using weighted round-robin
    */
   getNextProvider(): LLMProvider | null {
-    const availableProviders = this.getHealthyProviders();
+    const healthyConfigs = this.getHealthyConfigs();
 
-    if (availableProviders.length === 0) {
+    if (healthyConfigs.length === 0) {
       // Try to recover an unhealthy provider
       const recoveredProvider = this.tryRecoverProvider();
       if (recoveredProvider) {
@@ -235,44 +455,15 @@ export class ProviderRouter {
       return null;
     }
 
-    // Weighted round-robin selection
-    const configsWithProviders = this.configs.filter(
-      (c) =>
-        this.providers.has(c.name) &&
-        this.healthStatus.get(c.name)?.isHealthy !== false,
-    );
-
-    if (configsWithProviders.length === 0) {
-      return null;
-    }
-
-    // Simple round-robin for now (can be enhanced with weighted selection)
-    const config = configsWithProviders[this.currentIndex % configsWithProviders.length];
+    const config = this.selectNextWeightedConfig(healthyConfigs);
     if (!config) {
       return null;
     }
-    this.currentIndex = (this.currentIndex + 1) % configsWithProviders.length;
 
     const provider = this.providers.get(config.name);
     debugService('[ProviderRouter] Selected provider: %s', config.name);
 
     return provider ?? null;
-  }
-
-  /**
-   * Get all healthy providers
-   */
-  private getHealthyProviders(): LLMProvider[] {
-    const healthy: LLMProvider[] = [];
-
-    for (const [name, provider] of this.providers) {
-      const health = this.healthStatus.get(name);
-      if (health?.isHealthy !== false) {
-        healthy.push(provider);
-      }
-    }
-
-    return healthy;
   }
 
   /**
@@ -582,11 +773,7 @@ export class ProviderRouter {
    * ```
    */
   toLanguageModel(): ResolvedLanguageModel {
-    const healthyConfigs = this.configs.filter(
-      (c) =>
-        this.providers.has(c.name) &&
-        this.healthStatus.get(c.name)?.isHealthy !== false,
-    );
+    const healthyConfigs = this.getHealthyConfigs();
 
     if (healthyConfigs.length === 0) {
       // Attempt recovery before giving up
@@ -609,11 +796,10 @@ export class ProviderRouter {
       );
     }
 
-    const config = healthyConfigs[this.currentIndex % healthyConfigs.length];
+    const config = this.selectNextWeightedConfig(healthyConfigs);
     if (!config) {
       throw new GenerationError('No healthy LLM provider available.');
     }
-    this.currentIndex = (this.currentIndex + 1) % healthyConfigs.length;
 
     const model = createLanguageModel(config);
 

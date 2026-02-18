@@ -41,6 +41,7 @@ export default {
     },
     mood: {
       label: 'How did this feel?',
+      ariaLabel: 'Feedback mood',
       frustrated: 'Frustrated',
       disappointed: 'Disappointed',
       neutral: 'Neutral',
@@ -60,6 +61,11 @@ export default {
     },
     context: {
       summaryPrefix: 'Auto-attached',
+      pathnameLabel: 'Pathname',
+      localeLabel: 'Locale',
+      browserLabel: 'Browser',
+      osLabel: 'OS',
+      versionLabel: 'Version',
     },
     processing: {
       title: 'Submitting feedback',
@@ -72,6 +78,7 @@ export default {
       contentRequired: 'Please add feedback before submitting.',
       guestIdentityRequired: 'Please provide both your name and email.',
       antiSpam: 'Please complete the security check and try again.',
+      unexpected: 'An unexpected error occurred. Please try again.',
     },
     summary: {
       heading: 'Understood - here is what we received',
