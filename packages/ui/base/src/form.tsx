@@ -8,7 +8,6 @@ import { useId } from 'react';
 import { Slot } from '@radix-ui/react-slot';
 import { Controller, FormProvider, useFormContext, useFormState } from 'react-hook-form';
 
-import { Button } from './button';
 import { cn } from './cn';
 import { Label } from './label';
 
@@ -136,51 +135,70 @@ function FormMessage({ className, ...props }: React.ComponentProps<'p'>) {
   );
 }
 
+/** A hint item can be a plain value or an object with a custom display label. */
+type HintItem<T> = T | { value: T; label: React.ReactNode };
+
+/**
+ * Inline ghost-token hints displayed as subtle clickable text separated by `·`.
+ * Clicking a hint sets the parent form field to that value.
+ */
 function FormHints<T extends string | number | Date>({
   className,
   hints,
-  slotProps,
   onHintClick,
   renderHint,
   ...props
-}: ComponentProps<'div'> & {
-  hints: T[];
-  slotProps?: {
-    button: ComponentProps<typeof Button>;
-  };
-  onHintClick?: (hint: T) => void;
-  renderHint?: (hint: T) => React.ReactNode;
+}: Omit<ComponentProps<'div'>, 'children'> & {
+  hints: HintItem<T>[];
+  onHintClick?: (value: T) => void;
+  renderHint?: (value: T) => React.ReactNode;
 }) {
   const { setValue } = useFormContext();
   const { name } = useFormField();
   const id = useId();
 
+  const resolved = hints.map((hint) => {
+    if (typeof hint === 'object' && hint !== null && !(hint instanceof Date) && 'value' in hint && 'label' in hint) {
+      return hint as { value: T; label: React.ReactNode };
+    }
+    const value = hint as T;
+    return { value, label: renderHint?.(value) ?? value.toString() };
+  });
+
   return (
-    <div className={cn('flex flex-wrap gap-1.5', className)} {...props}>
-      {hints.map(hint => (
-        <Button
-          key={`${id}-${name}-hint-${hint}`}
-          variant="text"
-          size="xs"
-          {...slotProps?.button}
-          className={cn(slotProps?.button?.className, 'cursor-pointer')}
-          onClick={e => {
-            e.preventDefault();
-            setValue(name, hint, {
-              shouldDirty: true,
-              shouldTouch: true,
-              shouldValidate: true,
-            });
-            onHintClick?.(hint);
-          }}
-        >
-          {renderHint?.(hint) ?? hint.toString()}
-        </Button>
+    <div
+      className={cn('flex flex-wrap items-center gap-1 text-xs text-muted-foreground', className)}
+      {...props}
+    >
+      {resolved.map((hint, index) => (
+        <React.Fragment key={`${id}-${name}-hint-${index}`}>
+          {index > 0 && (
+            <span className="select-none text-border" aria-hidden="true">
+              ·
+            </span>
+          )}
+          <button
+            type="button"
+            className="cursor-pointer rounded px-1 py-0.5 tabular-nums transition-colors hover:bg-muted hover:text-foreground"
+            onClick={(e) => {
+              e.preventDefault();
+              setValue(name, hint.value, {
+                shouldDirty: true,
+                shouldTouch: true,
+                shouldValidate: true,
+              });
+              onHintClick?.(hint.value);
+            }}
+          >
+            {hint.label}
+          </button>
+        </React.Fragment>
       ))}
     </div>
   );
 }
 
+export type { HintItem };
 export { Form, FormControl, FormDescription, FormField, FormHints, FormItem, FormLabel, FormMessage, useFormField };
 
 export { zodResolver } from '@hookform/resolvers/zod';
