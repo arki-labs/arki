@@ -55,6 +55,9 @@ export function initAuth(
     throw new Error('AUTH_SECRET is not set');
   }
 
+  // Sync AUTH_SECRET to BETTER_AUTH_SECRET for Better Auth's internal env lookups
+  process.env.BETTER_AUTH_SECRET = options.secret;
+
   const resend = options.resendApiKey ? new Resend(options.resendApiKey) : undefined;
 
   const googleProvider =

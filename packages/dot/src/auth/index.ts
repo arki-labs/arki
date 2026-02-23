@@ -150,6 +150,11 @@ export async function createDotAuth(config: DotAuthConfig, db?: NodePgDatabase<a
   const betterAuthConfig = toBetterAuthConfig(config, db);
   debugAuth('[index] Config transformation complete');
 
+  // Sync AUTH_SECRET to BETTER_AUTH_SECRET for Better Auth's internal env lookups
+  if (typeof betterAuthConfig.secret === 'string') {
+    process.env.BETTER_AUTH_SECRET = betterAuthConfig.secret;
+  }
+
   // Create better-auth instance
   debugAuth('[index] Creating better-auth instance');
   const auth = betterAuth(betterAuthConfig);
