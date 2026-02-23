@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { expo } from '@better-auth/expo';
-import { betterAuth } from 'better-auth';
+import { betterAuth } from './create-auth';
 import type { DB } from 'better-auth/adapters/drizzle';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { magicLink, oAuthProxy } from 'better-auth/plugins';
@@ -54,9 +54,6 @@ export function initAuth(
   if (!options.secret) {
     throw new Error('AUTH_SECRET is not set');
   }
-
-  // Sync AUTH_SECRET to BETTER_AUTH_SECRET for Better Auth's internal env lookups
-  process.env.BETTER_AUTH_SECRET = options.secret;
 
   const resend = options.resendApiKey ? new Resend(options.resendApiKey) : undefined;
 

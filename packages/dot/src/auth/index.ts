@@ -10,7 +10,7 @@
  */
 
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { betterAuth } from 'better-auth';
+import { betterAuth } from '@arki/auth';
 
 import type { DotAuthConfig } from './config';
 import type { DotRBACManager } from './rbac';
@@ -149,11 +149,6 @@ export async function createDotAuth(config: DotAuthConfig, db?: NodePgDatabase<a
   debugAuth('[index] Transforming config to better-auth format');
   const betterAuthConfig = toBetterAuthConfig(config, db);
   debugAuth('[index] Config transformation complete');
-
-  // Sync AUTH_SECRET to BETTER_AUTH_SECRET for Better Auth's internal env lookups
-  if (typeof betterAuthConfig.secret === 'string') {
-    process.env.BETTER_AUTH_SECRET = betterAuthConfig.secret;
-  }
 
   // Create better-auth instance
   debugAuth('[index] Creating better-auth instance');
