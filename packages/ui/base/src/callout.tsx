@@ -45,7 +45,7 @@ export function Callout({ variant, children, className, ...props }: CalloutProps
   return (
     <div className={cn(calloutVariants({ variant, className }))} {...props}>
       <Icon className="my-1.5 mr-2 h-4 w-4 shrink-0" />
-      <p>{children}</p>
+      <div>{children}</div>
     </div>
   );
 }
