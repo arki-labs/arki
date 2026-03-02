@@ -5,7 +5,8 @@ import * as React from 'react';
 import { Sigma } from '@arki/icons/lucide';
 
 import { Button } from '../button';
-import { InputBase, InputBaseControl, InputBaseInput } from '../input-base';
+import { cn } from '../cn';
+import { Input } from '../input';
 import { Popover, PopoverContent, PopoverTrigger } from '../popover';
 import { Separator } from '../separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../tabs';
@@ -111,18 +112,17 @@ export function MathInput({
   };
 
   return (
-    <InputBase disabled={disabled} className={className}>
-      <InputBaseControl>
-        <InputBaseInput
-          type="text"
-          inputMode="decimal"
-          placeholder={placeholder}
-          value={displayValue}
-          disabled={disabled}
-          onChange={e => setDisplayValue(e.target.value)}
-          onBlur={handleBlur}
-        />
-      </InputBaseControl>
+    <div className={cn('flex items-center gap-1', className)}>
+      <Input
+        type="text"
+        inputMode="decimal"
+        placeholder={placeholder}
+        value={displayValue}
+        disabled={disabled}
+        onChange={e => setDisplayValue(e.target.value)}
+        onBlur={handleBlur}
+        className="flex-1"
+      />
       {!disabled && (
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
@@ -130,7 +130,7 @@ export function MathInput({
               type="button"
               variant="ghost"
               size="icon"
-              className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
+              className="size-9 shrink-0 text-muted-foreground hover:text-foreground"
               aria-label="Open mathematical constant picker"
             >
               <Sigma className="size-4" />
@@ -243,6 +243,6 @@ export function MathInput({
           </PopoverContent>
         </Popover>
       )}
-    </InputBase>
+    </div>
   );
 }
