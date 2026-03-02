@@ -174,6 +174,16 @@
       "import": "./src/label.tsx",
       "browser": "./src/label.tsx"
     },
+    "./math-input": {
+      "types": "./dist/src/math-input/index.d.ts",
+      "import": "./src/math-input/index.tsx",
+      "browser": "./src/math-input/index.tsx"
+    },
+    "./complex-input": {
+      "types": "./dist/src/math-input/complex-input.d.ts",
+      "import": "./src/math-input/complex-input.tsx",
+      "browser": "./src/math-input/complex-input.tsx"
+    },
     "./menubar": {
       "types": "./dist/src/menubar.d.ts",
       "import": "./src/menubar.tsx",
@@ -430,6 +440,12 @@
       ],
       "label": [
         "src/label.tsx"
+      ],
+      "math-input": [
+        "src/math-input/index.tsx"
+      ],
+      "complex-input": [
+        "src/math-input/complex-input.tsx"
       ],
       "menubar": [
         "src/menubar.tsx"
