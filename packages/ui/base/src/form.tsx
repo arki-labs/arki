@@ -8,8 +8,11 @@ import { useId } from 'react';
 import { Slot } from '@radix-ui/react-slot';
 import { Controller, FormProvider, useFormContext, useFormState } from 'react-hook-form';
 
+import * as TooltipPrimitive from '@radix-ui/react-tooltip';
+
 import { cn } from './cn';
 import { Label } from './label';
+import { TooltipContent, TooltipProvider, TooltipTrigger } from './tooltip';
 
 const Form = FormProvider;
 
@@ -166,35 +169,42 @@ function FormHints<T extends string | number | Date>({
   });
 
   return (
-    <div
-      className={cn('flex flex-wrap items-center gap-1 text-xs text-muted-foreground', className)}
-      {...props}
-    >
-      {resolved.map((hint, index) => (
-        <React.Fragment key={`${id}-${name}-hint-${index}`}>
-          {index > 0 && (
-            <span className="select-none text-border" aria-hidden="true">
-              ·
-            </span>
-          )}
-          <button
-            type="button"
-            className="cursor-pointer rounded px-1 py-0.5 tabular-nums transition-colors hover:bg-muted hover:text-foreground"
-            onClick={(e) => {
-              e.preventDefault();
-              setValue(name, hint.value, {
-                shouldDirty: true,
-                shouldTouch: true,
-                shouldValidate: true,
-              });
-              onHintClick?.(hint.value);
-            }}
-          >
-            {hint.label}
-          </button>
-        </React.Fragment>
-      ))}
-    </div>
+    <TooltipProvider delayDuration={500}>
+      <div
+        className={cn('flex flex-wrap items-center gap-1 text-xs text-muted-foreground', className)}
+        {...props}
+      >
+        {resolved.map((hint, index) => (
+          <React.Fragment key={`${id}-${name}-hint-${index}`}>
+            {index > 0 && (
+              <span className="select-none text-border" aria-hidden="true">
+                ·
+              </span>
+            )}
+            <TooltipPrimitive.Root>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="cursor-pointer rounded px-1 py-0.5 tabular-nums transition-colors hover:bg-muted hover:text-foreground"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setValue(name, hint.value, {
+                      shouldDirty: true,
+                      shouldTouch: true,
+                      shouldValidate: true,
+                    });
+                    onHintClick?.(hint.value);
+                  }}
+                >
+                  {hint.label}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Click to use this value</TooltipContent>
+            </TooltipPrimitive.Root>
+          </React.Fragment>
+        ))}
+      </div>
+    </TooltipProvider>
   );
 }
 
