@@ -1,6 +1,7 @@
 import { z } from '@arki/contracts';
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
+import remarkGfm from 'remark-gfm';
 
 import { addIdToHeadings } from '../plugins/add-id-to-headings';
 
@@ -22,6 +23,7 @@ export const legals = defineCollection({
   }),
   transform: async (document, context) => {
     const mdx = await compileMDX(context, document, {
+      remarkPlugins: [remarkGfm],
       rehypePlugins: [addIdToHeadings],
     });
     return {
