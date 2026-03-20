@@ -125,16 +125,18 @@ export function MathInput({
       />
       {!disabled && (
         <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-9 shrink-0 text-muted-foreground hover:text-foreground"
-              aria-label="Open mathematical constant picker"
-            >
-              <Sigma className="size-4" />
-            </Button>
+          <PopoverTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-9 shrink-0 text-muted-foreground hover:text-foreground"
+                aria-label="Open mathematical constant picker"
+              />
+            }
+          >
+            <Sigma className="size-4" />
           </PopoverTrigger>
           <PopoverContent className="w-80 p-0" align="end" sideOffset={6}>
             <Tabs defaultValue="constants" className="w-full">

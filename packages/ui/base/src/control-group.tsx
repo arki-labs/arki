@@ -1,8 +1,6 @@
 import * as React from 'react';
-import { Primitive } from '@radix-ui/react-primitive';
-import { Slot } from '@radix-ui/react-slot';
-
 import { cn } from './cn';
+import { Slot } from './slot';
 
 const ControlGroupContext = React.createContext<Pick<ControlGroupProps, 'orientation'>>({
   orientation: 'horizontal',
@@ -20,12 +18,12 @@ function useControlGroupContext() {
 
 export type ControlGroupProps = {
   orientation?: 'horizontal' | 'vertical';
-} & React.ComponentPropsWithoutRef<typeof Primitive.div>
+} & React.ComponentPropsWithoutRef<'div'>
 
-export const ControlGroup = React.forwardRef<React.ElementRef<typeof Primitive.div>, ControlGroupProps>(
+export const ControlGroup = React.forwardRef<HTMLDivElement, ControlGroupProps>(
   ({ className, orientation = 'horizontal', ...props }, ref) => (
     <ControlGroupContext.Provider value={{ orientation }}>
-      <Primitive.div
+      <div
         ref={ref}
         data-orientation={orientation}
         className={cn('flex', orientation === 'vertical' && 'flex-col', className)}
@@ -37,8 +35,8 @@ export const ControlGroup = React.forwardRef<React.ElementRef<typeof Primitive.d
 ControlGroup.displayName = 'ControlGroup';
 
 export const ControlGroupItem = React.forwardRef<
-  React.ElementRef<typeof Slot>,
-  React.ComponentPropsWithoutRef<typeof Slot>
+  HTMLElement,
+  React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }
 >(({ className, ...props }, ref) => {
   const { orientation } = useControlGroupContext();
 

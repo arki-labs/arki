@@ -1,18 +1,14 @@
 'use client';
 
-import type * as LabelPrimitive from '@radix-ui/react-label';
 import type { ComponentProps } from 'react';
 import type { ControllerProps, FieldPath, FieldValues } from 'react-hook-form';
 import * as React from 'react';
 import { useId } from 'react';
-import { Slot } from '@radix-ui/react-slot';
 import { Controller, FormProvider, useFormContext, useFormState } from 'react-hook-form';
-
-import * as TooltipPrimitive from '@radix-ui/react-tooltip';
 
 import { cn } from './cn';
 import { Label } from './label';
-import { TooltipContent, TooltipProvider, TooltipTrigger } from './tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './tooltip';
 
 const Form = FormProvider;
 
@@ -77,7 +73,7 @@ function FormItem({ className, ...props }: React.ComponentProps<'div'>) {
   );
 }
 
-function FormLabel({ className, ...props }: React.ComponentProps<typeof LabelPrimitive.Root>) {
+function FormLabel({ className, ...props }: React.ComponentProps<'label'>) {
   const { error, formItemId } = useFormField();
 
   return (
@@ -91,18 +87,22 @@ function FormLabel({ className, ...props }: React.ComponentProps<typeof LabelPri
   );
 }
 
-function FormControl({ ...props }: React.ComponentProps<typeof Slot>) {
+type FormControlProps = {
+  children: React.ReactElement;
+};
+
+function FormControl({ children }: FormControlProps) {
   const { error, formItemId, formDescriptionId, formMessageId } = useFormField();
 
-  return (
-    <Slot
-      data-slot="form-control"
-      id={formItemId}
-      aria-describedby={error ? `${formDescriptionId} ${formMessageId}` : `${formDescriptionId}`}
-      aria-invalid={!!error}
-      {...props}
-    />
-  );
+  // Merge accessibility props into the child form control element via cloneElement.
+  // This replaces the Radix Slot pattern, injecting id and aria attributes without
+  // adding a wrapper DOM node.
+  return React.cloneElement(children, {
+    'data-slot': 'form-control',
+    id: formItemId,
+    'aria-describedby': error ? `${formDescriptionId} ${formMessageId}` : formDescriptionId,
+    'aria-invalid': !!error || undefined,
+  } as React.HTMLAttributes<HTMLElement>);
 }
 
 function FormDescription({ className, ...props }: React.ComponentProps<'p'>) {
@@ -169,7 +169,7 @@ function FormHints<T extends string | number | Date>({
   });
 
   return (
-    <TooltipProvider delayDuration={500}>
+    <TooltipProvider delay={500}>
       <div
         className={cn('flex flex-wrap items-center gap-1 text-xs text-muted-foreground', className)}
         {...props}
@@ -181,26 +181,28 @@ function FormHints<T extends string | number | Date>({
                 ·
               </span>
             )}
-            <TooltipPrimitive.Root>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  className="cursor-pointer rounded px-1 py-0.5 tabular-nums transition-colors hover:bg-muted hover:text-foreground"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setValue(name, hint.value, {
-                      shouldDirty: true,
-                      shouldTouch: true,
-                      shouldValidate: true,
-                    });
-                    onHintClick?.(hint.value);
-                  }}
-                >
-                  {hint.label}
-                </button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded px-1 py-0.5 tabular-nums transition-colors hover:bg-muted hover:text-foreground"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setValue(name, hint.value, {
+                        shouldDirty: true,
+                        shouldTouch: true,
+                        shouldValidate: true,
+                      });
+                      onHintClick?.(hint.value);
+                    }}
+                  />
+                }
+              >
+                {hint.label}
               </TooltipTrigger>
               <TooltipContent side="bottom">Click to use this value</TooltipContent>
-            </TooltipPrimitive.Root>
+            </Tooltip>
           </React.Fragment>
         ))}
       </div>

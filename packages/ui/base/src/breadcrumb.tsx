@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { Slot } from '@radix-ui/react-slot';
 
 import { ChevronRight, MoreHorizontal } from '@arki/icons';
 
@@ -29,14 +28,26 @@ function BreadcrumbItem({ className, ...props }: React.ComponentProps<'li'>) {
 function BreadcrumbLink({
   asChild,
   className,
+  children,
   ...props
 }: React.ComponentProps<'a'> & {
   asChild?: boolean;
 }) {
-  const Comp = asChild ? Slot : 'a';
+  const linkClassName = cn('hover:text-foreground transition-colors', className);
+
+  // When asChild is true, merge link styles into the single child element
+  // (e.g. Next.js <Link>) using React.cloneElement instead of Radix's Slot.
+  if (asChild && React.isValidElement(children)) {
+    return React.cloneElement(children as React.ReactElement<React.HTMLAttributes<HTMLElement>>, {
+      'data-slot': 'breadcrumb-link',
+      className: cn(linkClassName, (children as React.ReactElement<{ className?: string }>).props.className),
+    } as React.HTMLAttributes<HTMLElement>);
+  }
 
   return (
-    <Comp data-slot="breadcrumb-link" className={cn('hover:text-foreground transition-colors', className)} {...props} />
+    <a data-slot="breadcrumb-link" className={linkClassName} {...props}>
+      {children}
+    </a>
   );
 }
 

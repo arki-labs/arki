@@ -1,27 +1,27 @@
 'use client';
 
 import * as React from 'react';
-import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
+import { Checkbox as CheckboxPrimitive } from '@base-ui/react/checkbox';
 
 import { CheckIcon } from '@arki/icons';
 
 import { cn } from './cn';
 
-function Checkbox({ className, ...props }: React.ComponentProps<typeof CheckboxPrimitive.Root>) {
+function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {
   return (
     <CheckboxPrimitive.Root
       data-slot="checkbox"
       className={cn(
-        'peer border-input outline-ring/50 ring-ring/10 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:outline-ring/40 dark:ring-ring/20 size-4 shrink-0 rounded-[4px] border shadow-xs transition-[color,box-shadow] focus-visible:ring-4 focus-visible:outline-1 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:focus-visible:ring-0',
+        'peer relative flex items-center justify-center border-input outline-ring/50 ring-ring/10 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground dark:outline-ring/40 dark:ring-ring/20 size-4 shrink-0 rounded-[4px] border shadow-xs transition-[color,box-shadow] focus-visible:ring-4 focus-visible:outline-1 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:focus-visible:ring-0 after:absolute after:-inset-x-3 after:-inset-y-2',
         className,
       )}
       {...props}
     >
       <CheckboxPrimitive.Indicator
         data-slot="checkbox-indicator"
-        className="flex items-center justify-center text-current"
+        className="grid place-content-center text-current transition-none [&>svg]:size-3.5"
       >
-        <CheckIcon className="size-3.5" />
+        <CheckIcon />
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   );

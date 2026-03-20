@@ -39,22 +39,26 @@ function ColorPicker({
 
   return (
     <Popover onOpenChange={setOpen} open={open}>
-      <PopoverTrigger asChild disabled={disabled} onBlur={onBlur}>
-        <Button
-          {...props}
-          className={cn('block', className)}
-          name={name}
-          onClick={() => {
-            setOpen(true);
-          }}
-          size="icon"
-          style={{
-            backgroundColor: parsedValue,
-          }}
-          variant="outline"
-        >
-          <div />
-        </Button>
+      <PopoverTrigger
+        disabled={disabled}
+        onBlur={onBlur}
+        render={
+          <Button
+            {...props}
+            className={cn('block', className)}
+            name={name}
+            onClick={() => {
+              setOpen(true);
+            }}
+            size="icon"
+            style={{
+              backgroundColor: parsedValue,
+            }}
+            variant="outline"
+          />
+        }
+      >
+        <div />
       </PopoverTrigger>
       <PopoverContent className="w-full">
         <RgbaStringColorPicker color={parsedValue} onChange={onChange} />

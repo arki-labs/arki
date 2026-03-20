@@ -2,7 +2,6 @@
 
 import type { VariantProps } from 'class-variance-authority';
 import * as React from 'react';
-import { Slot } from '@radix-ui/react-slot';
 import { cva } from 'class-variance-authority';
 import createDebug from 'debug';
 
@@ -12,6 +11,7 @@ import { useIsMobile, useIsTablet } from '@arki/react-hooks/media-query';
 
 import { Button } from './button';
 import { cn } from './cn';
+import { Slot } from './slot';
 import { Input } from './input';
 import { Separator } from './separator';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from './sheet';
@@ -196,7 +196,7 @@ const SidebarProvider = React.forwardRef<
 
   return (
     <SidebarContext.Provider value={contextValue}>
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <div
           data-slot="sidebar-wrapper"
           style={
@@ -645,7 +645,9 @@ function SidebarMenuButton({
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipTrigger render={button as React.ReactElement}>
+          {(button as React.ReactElement<{ children?: React.ReactNode }>).props.children}
+        </TooltipTrigger>
       <TooltipContent side="right" align="center" hidden={state !== 'collapsed' || isMobile} {...tooltip} />
     </Tooltip>
   );

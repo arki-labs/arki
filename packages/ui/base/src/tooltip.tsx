@@ -2,15 +2,15 @@
 
 import type { FC } from 'react';
 import * as React from 'react';
-import * as TooltipPrimitive from '@radix-ui/react-tooltip';
+import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip';
 
 import { cn } from './cn';
 
-function TooltipProvider({ delayDuration = 0, ...props }: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
-  return <TooltipPrimitive.Provider data-slot="tooltip-provider" delayDuration={delayDuration} {...props} />;
+function TooltipProvider({ delay = 0, ...props }: TooltipPrimitive.Provider.Props) {
+  return <TooltipPrimitive.Provider data-slot="tooltip-provider" delay={delay} {...props} />;
 }
 
-function Tooltip({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
+function Tooltip({ ...props }: TooltipPrimitive.Root.Props) {
   return (
     <TooltipProvider>
       <TooltipPrimitive.Root data-slot="tooltip" {...props} />
@@ -18,30 +18,34 @@ function Tooltip({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Root
   );
 }
 
-function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
+function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
 }
 
 function TooltipContent({
   className,
   sideOffset = 4,
+  side = 'top',
+  align = 'center',
+  alignOffset = 0,
   children,
   ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+}: TooltipPrimitive.Popup.Props & Pick<TooltipPrimitive.Positioner.Props, 'side' | 'sideOffset' | 'align' | 'alignOffset'>) {
   return (
     <TooltipPrimitive.Portal>
-      <TooltipPrimitive.Content
-        data-slot="tooltip-content"
-        sideOffset={sideOffset}
-        className={cn(
-          'bg-primary text-primary-foreground animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 max-w-sm rounded-md px-3 py-1.5 text-xs',
-          className,
-        )}
-        {...props}
-      >
-        {children}
-        <TooltipPrimitive.Arrow className="bg-primary fill-primary z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px]" />
-      </TooltipPrimitive.Content>
+      <TooltipPrimitive.Positioner side={side} sideOffset={sideOffset} align={align} alignOffset={alignOffset} className="isolate z-50">
+        <TooltipPrimitive.Popup
+          data-slot="tooltip-content"
+          className={cn(
+            'bg-primary text-primary-foreground z-50 max-w-sm rounded-md px-3 py-1.5 text-xs origin-(--transform-origin) data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2',
+            className,
+          )}
+          {...props}
+        >
+          {children}
+          <TooltipPrimitive.Arrow className="bg-primary fill-primary z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px]" />
+        </TooltipPrimitive.Popup>
+      </TooltipPrimitive.Positioner>
     </TooltipPrimitive.Portal>
   );
 }
@@ -49,17 +53,32 @@ function TooltipContent({
 type WithTooltipProps = {
   content: React.ReactNode;
   trigger: React.ReactNode;
-
   delayDuration?: number;
   side?: 'left' | 'right' | 'top' | 'bottom';
-}
+};
 
 const WithTooltip: FC<WithTooltipProps> = ({ content, trigger, delayDuration = 700, side = 'right' }) => {
-  return (
-    <TooltipProvider delayDuration={delayDuration}>
-      <Tooltip>
-        <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+  // Base UI's TooltipTrigger uses `render` instead of `asChild`.
+  // When trigger is a React element, use it as the render target so the tooltip
+  // attaches to the element directly rather than wrapping it in a button.
+  if (React.isValidElement(trigger)) {
+    const triggerEl = trigger as React.ReactElement<{ children?: React.ReactNode }>;
+    return (
+      <TooltipProvider delay={delayDuration}>
+        <Tooltip>
+          <TooltipTrigger render={triggerEl as React.ReactElement}>
+            {triggerEl.props.children}
+          </TooltipTrigger>
+          <TooltipContent side={side}>{content}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
 
+  return (
+    <TooltipProvider delay={delayDuration}>
+      <Tooltip>
+        <TooltipTrigger>{trigger}</TooltipTrigger>
         <TooltipContent side={side}>{content}</TooltipContent>
       </Tooltip>
     </TooltipProvider>

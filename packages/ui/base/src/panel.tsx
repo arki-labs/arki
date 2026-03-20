@@ -1,7 +1,6 @@
 import type { ComponentProps } from 'react';
-import { Slot } from '@radix-ui/react-slot';
-
 import { cn } from './cn';
+import { Slot } from './slot';
 import { Surface } from './surface';
 
 export type PanelProps = {
