@@ -28,7 +28,7 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
     <SheetPrimitive.Backdrop
       data-slot="sheet-overlay"
       className={cn(
-        'fixed inset-0 z-50 bg-black/80 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0',
+        'fixed inset-0 z-50 bg-black/50 transition-opacity duration-200 data-starting-style:opacity-0 data-ending-style:opacity-0',
         className,
       )}
       {...props}
@@ -51,15 +51,15 @@ function SheetContent({
         data-slot="sheet-content"
         data-side={side}
         className={cn(
-          'bg-background fixed z-50 flex flex-col gap-4 shadow-lg transition ease-in-out duration-300 outline-none',
+          'bg-background fixed z-50 flex flex-col gap-4 shadow-lg outline-none transition duration-200 ease-in-out data-starting-style:opacity-0 data-ending-style:opacity-0',
           side === 'right' &&
-            'inset-y-0 right-0 h-full w-3/4 border-l sm:max-w-sm data-starting-style:translate-x-full data-ending-style:translate-x-full',
+            'inset-y-0 right-0 h-full w-3/4 border-l sm:max-w-sm data-starting-style:translate-x-[2.5rem] data-ending-style:translate-x-[2.5rem]',
           side === 'left' &&
-            'inset-y-0 left-0 h-full w-3/4 border-r sm:max-w-sm data-starting-style:-translate-x-full data-ending-style:-translate-x-full',
+            'inset-y-0 left-0 h-full w-3/4 border-r sm:max-w-sm data-starting-style:-translate-x-[2.5rem] data-ending-style:-translate-x-[2.5rem]',
           side === 'top' &&
-            'inset-x-0 top-0 h-auto border-b data-starting-style:-translate-y-full data-ending-style:-translate-y-full',
+            'inset-x-0 top-0 h-auto border-b data-starting-style:-translate-y-[2.5rem] data-ending-style:-translate-y-[2.5rem]',
           side === 'bottom' &&
-            'inset-x-0 bottom-0 h-auto border-t data-starting-style:translate-y-full data-ending-style:translate-y-full',
+            'inset-x-0 bottom-0 h-auto border-t data-starting-style:translate-y-[2.5rem] data-ending-style:translate-y-[2.5rem]',
           className,
         )}
         {...props}
