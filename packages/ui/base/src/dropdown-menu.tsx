@@ -55,6 +55,7 @@ function DropdownMenuItem({
 }: MenuPrimitive.Item.Props & {
   inset?: boolean;
   variant?: 'default' | 'destructive';
+  render?: React.ReactElement;
 }) {
   return (
     <MenuPrimitive.Item

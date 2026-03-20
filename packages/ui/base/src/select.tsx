@@ -7,8 +7,18 @@ import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from '@arki/icons';
 
 import { cn } from './cn';
 
-function Select({ ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) {
-  return <SelectPrimitive.Root data-slot="select" {...props} />;
+type SelectProps = Omit<React.ComponentProps<typeof SelectPrimitive.Root>, 'onValueChange'> & {
+  onValueChange?: (value: string) => void;
+};
+
+function Select({ onValueChange, ...props }: SelectProps) {
+  return (
+    <SelectPrimitive.Root
+      data-slot="select"
+      onValueChange={onValueChange ? (value) => onValueChange(value as string) : undefined}
+      {...props}
+    />
+  );
 }
 
 function SelectGroup({ ...props }: React.ComponentProps<typeof SelectPrimitive.Group>) {

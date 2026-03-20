@@ -5,14 +5,19 @@ import { Slider as SliderPrimitive } from '@base-ui/react/slider';
 
 import { cn } from './cn';
 
+type SliderProps = Omit<SliderPrimitive.Root.Props, 'onValueChange'> & {
+  onValueChange?: (value: number[]) => void;
+};
+
 function Slider({
   className,
   defaultValue,
   value,
   min = 0,
   max = 100,
+  onValueChange,
   ...props
-}: SliderPrimitive.Root.Props) {
+}: SliderProps) {
   const _values = React.useMemo(
     () => (Array.isArray(value) ? value : (Array.isArray(defaultValue) ? defaultValue : [min, max])),
     [value, defaultValue, min, max],
@@ -27,6 +32,7 @@ function Slider({
       max={max}
       thumbAlignment="edge"
       className={cn('relative flex w-full touch-none select-none data-disabled:opacity-50 data-vertical:h-full', className)}
+      onValueChange={onValueChange ? (v) => onValueChange(Array.isArray(v) ? [...v] : [v]) : undefined}
       {...props}
     >
       <SliderPrimitive.Control className="relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-vertical:h-full data-vertical:min-h-44 data-vertical:w-auto data-vertical:flex-col">

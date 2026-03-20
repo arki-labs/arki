@@ -105,6 +105,7 @@ function ContextMenuItem({
 }: ContextMenuPrimitive.Item.Props & {
   inset?: boolean;
   variant?: 'default' | 'destructive';
+  render?: React.ReactElement;
 }) {
   return (
     <ContextMenuPrimitive.Item
