@@ -3,6 +3,12 @@ import { createEnv } from '@t3-oss/env-core';
 import { z } from '@arki/contracts';
 
 export const env = createEnv({
+  onValidationError(issues) {
+    console.error(
+      '❌ [@arki/db] Invalid environment variables:\n' + issues.map(i => `  ${(i.path ?? []).join('.')}: ${i.message}`).join('\n'),
+    );
+    throw new Error('Invalid environment variables');
+  },
   /**
    * Environment variables schema for database services (PostgreSQL)
    */
