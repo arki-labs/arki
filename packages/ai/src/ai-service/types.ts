@@ -159,3 +159,47 @@ export type LLMProviderFactory = (config?: {
   temperature?: number;
   maxRetries?: number;
 }) => LLMProvider;
+
+/**
+ * Provider-agnostic interface for structured LLM generation.
+ *
+ * Any LLM (OpenAI, Anthropic, Groq, …) that implements this interface
+ * can be used interchangeably by @arki/ai capabilities and app services.
+ * Use `createLLMProvider(config?)` to obtain an instance driven by the
+ * `LLM_PROVIDER` environment variable.
+ */
+export type StructuredLLMProvider = {
+  /**
+   * Generate a structured object from a single prompt.
+   * Output is validated against the supplied Zod schema.
+   */
+  generateStructuredData<T>(
+    prompt: string,
+    schema: import('zod').ZodSchema<T>,
+    options?: GenerateOptions,
+  ): Promise<T>;
+
+  /**
+   * Generate a structured object from a conversation history.
+   * Useful for multi-turn interactions where context matters.
+   */
+  generateStructuredDataFromMessages<T>(
+    messages: Message[],
+    schema: import('zod').ZodSchema<T>,
+    options?: GenerateOptions,
+  ): Promise<T>;
+
+  /**
+   * Generate plain text from a single prompt.
+   */
+  generateText(prompt: string, options?: GenerateOptions): Promise<string>;
+
+  /**
+   * Stream a conversational response, yielding text chunks as they arrive.
+   * Used for real-time copilot streaming endpoints.
+   */
+  streamConversation(
+    messages: Message[],
+    options?: StreamOptions,
+  ): AsyncGenerator<string, void, unknown>;
+};

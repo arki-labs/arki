@@ -131,10 +131,35 @@ export {
   type ProviderResult,
   type Message,
   type GenerateOptions,
+  // Provider-agnostic factory and interface
+  createLLMProvider,
+  type LLMProviderConfig,
+  type StructuredLLMProvider,
 } from './ai-service';
 
 // Environment configuration
 export { env } from './env';
+
+// Higher-level AI capabilities (provider-agnostic, schema-validated)
+export {
+  classifyIntent,
+  type ClassifiedIntent,
+  type IntentType,
+  nameCluster,
+  type ClusterName,
+  type ClusterNamingContext,
+  type ClusterType,
+  analyzeContent,
+  ContentAnalysisSchema,
+  type ContentAnalysis,
+  type ContentCategory,
+  type ContentType,
+  type EntityType,
+  type ImportanceLevel,
+  classifyConnection,
+  type ConnectionClassification,
+  type ConnectionType,
+} from './capabilities';
 
 // Flow orchestration utilities
 export {

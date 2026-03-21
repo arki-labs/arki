@@ -14,7 +14,7 @@ export type EmbeddingProvider = {
   /**
    * Generate embeddings for multiple texts (batch processing)
    */
-  getEmbeddings?(texts: string[]): Promise<number[][]>;
+  getEmbeddings(texts: string[]): Promise<number[][]>;
 
   /**
    * Get the dimension size of embeddings

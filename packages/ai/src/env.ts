@@ -29,6 +29,13 @@ export const env = createEnv({
     // OpenRouter (aggregator for multiple models)
     OPENROUTER_API_KEY: z.string().optional(),
 
+    // LLM provider selection for createLLMProvider() factory
+    LLM_PROVIDER: z
+      .enum(['openai', 'anthropic', 'groq', 'google', 'mistral'])
+      .default('openai'),
+    // Default model for the selected LLM provider
+    LLM_MODEL: z.string().optional(),
+
     // Embedding and vector search
     EMBEDDING_PROVIDER: z.enum(['openai', 'mock', 'cohere', 'anthropic']).default('mock'),
     QDRANT_URL: z.url().optional(),
@@ -45,6 +52,8 @@ export const env = createEnv({
     GOOGLE_API_KEYS: process.env['GOOGLE_API_KEYS'],
     MISTRAL_API_KEY: process.env['MISTRAL_API_KEY'],
     OPENROUTER_API_KEY: process.env['OPENROUTER_API_KEY'],
+    LLM_PROVIDER: process.env['LLM_PROVIDER'],
+    LLM_MODEL: process.env['LLM_MODEL'],
     EMBEDDING_PROVIDER: process.env['EMBEDDING_PROVIDER'],
     QDRANT_URL: process.env['QDRANT_URL'],
     QDRANT_API_KEY: process.env['QDRANT_API_KEY'],

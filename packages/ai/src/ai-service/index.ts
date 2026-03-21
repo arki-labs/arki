@@ -16,6 +16,9 @@ export * from './openrouter-service';
 // Provider router (rotation + fallback)
 export * from './provider-router';
 
+// LLM provider factory (provider-agnostic, driven by LLM_PROVIDER env var)
+export { createLLMProvider, type LLMProviderConfig } from './factory';
+
 // Utilities
 export * from './structured-generation';
 export * from './prompts';

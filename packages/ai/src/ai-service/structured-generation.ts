@@ -4,7 +4,7 @@
  */
 
 import { z } from '@arki/contracts';
-import type { OpenAIService } from './openai-service';
+import type { StructuredLLMProvider } from './types';
 
 export type StructuredGenerationOptions = {
   temperature?: number;
@@ -92,8 +92,12 @@ export const CommonSchemas = {
 /**
  * Helper class for common structured generation tasks
  */
+/**
+ * Helper class for common structured generation tasks.
+ * Accepts any `StructuredLLMProvider` — use `createLLMProvider()` to obtain one.
+ */
 export class StructuredGenerator {
-  constructor(private openAIService: OpenAIService) {}
+  constructor(private provider: StructuredLLMProvider) {}
 
   /**
    * Generate a summary of text
@@ -108,7 +112,7 @@ export class StructuredGenerator {
 
 Include a title, main summary, and key points.`;
 
-    return this.openAIService.generateStructuredData(
+    return this.provider.generateStructuredData(
       prompt,
       CommonSchemas.summary,
       {
@@ -134,7 +138,7 @@ Question: "${question}"
 
 Provide your answer with a confidence score.`;
 
-    return this.openAIService.generateStructuredData(
+    return this.provider.generateStructuredData(
       prompt,
       CommonSchemas.qa,
       {
@@ -158,7 +162,7 @@ Text: "${text}"
 
 Provide the classification with confidence score and reasoning.`;
 
-    return this.openAIService.generateStructuredData(
+    return this.provider.generateStructuredData(
       prompt,
       CommonSchemas.classification,
       {
@@ -185,7 +189,7 @@ ${typesHint}
 
 Text: "${text}"`;
 
-    return this.openAIService.generateStructuredData(
+    return this.provider.generateStructuredData(
       prompt,
       CommonSchemas.entities,
       {
@@ -208,7 +212,7 @@ Text: "${text}"`;
 
 Provide the sentiment classification, score, detected emotions, and reasoning.`;
 
-    return this.openAIService.generateStructuredData(
+    return this.provider.generateStructuredData(
       prompt,
       CommonSchemas.sentiment,
       {
@@ -230,7 +234,7 @@ Provide the sentiment classification, score, detected emotions, and reasoning.`;
 
 "${text}"`;
 
-    return this.openAIService.generateStructuredData(
+    return this.provider.generateStructuredData(
       prompt,
       CommonSchemas.translation,
       {
@@ -254,7 +258,7 @@ Provide the sentiment classification, score, detected emotions, and reasoning.`;
 
 Include the code, an explanation, and any required dependencies.`;
 
-    return this.openAIService.generateStructuredData(
+    return this.provider.generateStructuredData(
       prompt,
       CommonSchemas.code,
       {
@@ -287,7 +291,7 @@ Include the code, an explanation, and any required dependencies.`;
 
 Each question should have 4 options with one correct answer.`;
 
-    return this.openAIService.generateStructuredData(
+    return this.provider.generateStructuredData(
       prompt,
       schema,
       {
@@ -305,7 +309,7 @@ Each question should have 4 options with one correct answer.`;
     schema: z.ZodSchema<T>,
     options: StructuredGenerationOptions = {}
   ) {
-    return this.openAIService.generateStructuredData(
+    return this.provider.generateStructuredData(
       prompt,
       schema,
       options
