@@ -319,6 +319,11 @@
       "import": "./src/toggle-group.tsx",
       "browser": "./src/toggle-group.tsx"
     },
+    "./tool-panels": {
+      "types": "./dist/src/tool-panels.d.ts",
+      "import": "./src/tool-panels.tsx",
+      "browser": "./src/tool-panels.tsx"
+    },
     "./toolbar": {
       "types": "./dist/src/toolbar.d.ts",
       "import": "./src/toolbar.tsx",
@@ -528,6 +533,9 @@
       "toggle-group": [
         "src/toggle-group.tsx"
       ],
+      "tool-panels": [
+        "src/tool-panels.tsx"
+      ],
       "toolbar": [
         "src/toolbar.tsx"
       ],
@@ -564,6 +572,7 @@
     "react-colorful": "catalog:",
     "react-day-picker": "catalog:",
     "react-hook-form": "catalog:validation",
+    "react-resizable-panels": "^2.1.7",
     "react-spinners": "catalog:",
     "react-spring": "catalog:",
     "react-textarea-autosize": "catalog:",
