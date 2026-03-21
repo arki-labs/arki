@@ -5,7 +5,8 @@ import { z } from '@arki/contracts';
 export const env = createEnv({
   onValidationError(issues) {
     console.error(
-      '❌ [@arki/db] Invalid environment variables:\n' + issues.map(i => `  ${(i.path ?? []).join('.')}: ${i.message}`).join('\n'),
+      '❌ [@arki/db] Invalid environment variables:\n' +
+        issues.map(i => `  ${(i.path ?? []).join('.')}: ${i.message}`).join('\n'),
     );
     throw new Error('Invalid environment variables');
   },
@@ -62,7 +63,6 @@ export const env = createEnv({
    * Destructure all variables from `process.env` to make sure they aren't tree-shaken away.
    */
   runtimeEnv: {
-     
     NODE_ENV: process.env['NODE_ENV'],
     DB_URL: process.env['DB_URL'],
     PGUSER: process.env['PGUSER'],

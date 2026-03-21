@@ -39,6 +39,21 @@
       "import": "./src/dictionaries.ts",
       "node": "./src/dictionaries.ts"
     },
+    "./types": {
+      "types": "./dist/src/types.d.ts",
+      "import": "./src/types.ts",
+      "browser": "./src/types.ts"
+    },
+    "./tanstack-start": {
+      "types": "./dist/src/integrations/tanstack-start/index.d.ts",
+      "import": "./src/integrations/tanstack-start/index.ts",
+      "browser": "./src/integrations/tanstack-start/index.ts"
+    },
+    "./slug-registry": {
+      "types": "./dist/src/slug-registry.d.ts",
+      "import": "./src/slug-registry.ts",
+      "browser": "./src/slug-registry.ts"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {

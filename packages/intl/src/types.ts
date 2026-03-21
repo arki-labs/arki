@@ -35,4 +35,11 @@ export type LocalizedResourceSlug = {
   locale: string;
   /** The localized public slug (e.g., 'bmi-rechner' for German) */
   slug: string;
+  /**
+   * Optional scope for disambiguation when the same slug appears under
+   * multiple URL segments (e.g., 'formatierer' under 'json', 'yaml', 'csv').
+   * For tool apps this is the format segment of the URL (e.g., 'json', 'yaml',
+   * 'werkzeuge'). When present, slug lookup is scoped to this value.
+   */
+  scope?: string;
 };
