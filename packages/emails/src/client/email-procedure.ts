@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { z } from 'zod';
 
 import type { EmailProvider, SendEmailPayload, SendEmailResult } from '../providers/types';
@@ -12,6 +13,7 @@ type EmailProcedureConfig<TInput> = {
   subject?: Resolver<TInput, string>;
   text?: Resolver<TInput, string>;
   html?: Resolver<TInput, string>;
+  react?: Resolver<TInput, ReactElement>;
 };
 
 function resolve<TInput, TOut>(
@@ -56,7 +58,7 @@ type SendOptions<TInput> = [TInput] extends [never]
  *   .input(z.object({ url: z.string().url() }))
  *   .from('Avocabo <no-reply@avocabo.app>')
  *   .subject('Your magic link')
- *   .text(({ url }) => `Sign in: ${url}`);
+ *   .react(({ url }) => <MagicLinkEmail url={url} />);
  *
  * await magicLink.send({ to: user.email, input: { url } });
  * ```
@@ -109,6 +111,23 @@ export class EmailProcedure<TInput = never> {
     return new EmailProcedure(this._provider, { ...this._config, html: value });
   }
 
+  /**
+   * Set the React Email component as the email body.
+   *
+   * The component is rendered to HTML via `@react-email/render` at send time,
+   * making it compatible with all providers (not just Resend).
+   *
+   * @example
+   * ```tsx
+   * const invite = emails.email
+   *   .input(z.object({ name: z.string(), url: z.string() }))
+   *   .react(({ name, url }) => <InviteEmail name={name} url={url} />);
+   * ```
+   */
+  react(value: Resolver<TInput, ReactElement>): EmailProcedure<TInput> {
+    return new EmailProcedure(this._provider, { ...this._config, react: value });
+  }
+
   // ── Execution ────────────────────────────────────────────
 
   /**
@@ -124,19 +143,37 @@ export class EmailProcedure<TInput = never> {
     const callInput = (options as { input?: TInput }).input as TInput;
 
     if (this._config.schema) {
-      this._config.schema.parse(callInput);
+      const parsed = this._config.schema.safeParse(callInput);
+      if (!parsed.success) {
+        const message = parsed.error.issues.map(i => i.message).join(', ');
+        return { data: null, error: { message, name: 'ValidationError' } };
+      }
     }
 
     const from = (options as { from?: string }).from ?? resolve(this._config.from, callInput, '');
     const subject =
       (options as { subject?: string }).subject ?? resolve(this._config.subject, callInput, '');
 
+    let html: string | undefined =
+      resolve(this._config.html, callInput, undefined as unknown as string) || undefined;
+
+    // Render React Email component to HTML if provided and no static HTML set.
+    const reactEl = resolve(
+      this._config.react,
+      callInput,
+      undefined as unknown as ReactElement,
+    );
+    if (reactEl && !html) {
+      const { render } = await import('@react-email/render');
+      html = await render(reactEl);
+    }
+
     const payload: SendEmailPayload = {
       to: options.to,
       from,
       subject,
       text: resolve(this._config.text, callInput, undefined as unknown as string) || undefined,
-      html: resolve(this._config.html, callInput, undefined as unknown as string) || undefined,
+      html,
       cc: options.cc,
       bcc: options.bcc,
     };

@@ -30,6 +30,10 @@
       "types": "./dist/src/providers/quota-router.d.ts",
       "import": "./src/providers/quota-router.ts"
     },
+    "./providers/quota-store-kv": {
+      "types": "./dist/src/providers/quota-store-kv.d.ts",
+      "import": "./src/providers/quota-store-kv.ts"
+    },
     "./templates/*": {
       "types": "./dist/src/templates/*.d.ts",
       "import": "./src/templates/*.tsx",
@@ -74,6 +78,7 @@
     "@react-email/section": "catalog:react-email",
     "@react-email/tailwind": "catalog:react-email",
     "@react-email/text": "catalog:react-email",
+    "@react-email/render": "^2.0.4",
     "resend": "catalog:"
   },
   "devDependencies": {

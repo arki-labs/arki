@@ -1,5 +1,6 @@
 import { debugEmails } from '../debug';
 import { quotaRouter } from '../providers/quota-router';
+import type { QuotaStore } from '../providers/quota-store';
 import type { EmailProvider, SendEmailPayload, SendEmailResult } from '../providers/types';
 
 import { EmailProcedure } from './email-procedure';
@@ -18,6 +19,23 @@ type InitEmailsOptions = {
    * Defaults to `process.env.NODE_ENV === 'development'`.
    */
   isDev?: boolean;
+  /**
+   * Custom quota store for the quota router.
+   *
+   * Only relevant when multiple providers are supplied (single-provider
+   * setups skip the router entirely). Defaults to the in-process
+   * `inMemoryQuotaStore`. Pass a `kvQuotaStore` for multi-instance
+   * deployments so all replicas share the same counter.
+   *
+   * @example
+   * ```ts
+   * import { kvQuotaStore } from '@arki/emails';
+   * import { kv } from '@avocabo/backend/core/kv';
+   *
+   * initEmails({ providers, store: kvQuotaStore(kv) });
+   * ```
+   */
+  store?: QuotaStore;
 };
 
 /**
@@ -80,7 +98,7 @@ export function initEmails(options: InitEmailsOptions): EmailClient {
   const provider: EmailProvider =
     options.providers.length === 1
       ? options.providers[0]!
-      : quotaRouter(options.providers);
+      : quotaRouter(options.providers, { store: options.store });
 
   const devProvider: EmailProvider = {
     name: 'dev',
