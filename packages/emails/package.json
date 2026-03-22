@@ -74,11 +74,11 @@
     "@react-email/link": "catalog:react-email",
     "@react-email/markdown": "catalog:react-email",
     "@react-email/preview": "catalog:react-email",
+    "@react-email/render": "^2.0.4",
     "@react-email/row": "catalog:react-email",
     "@react-email/section": "catalog:react-email",
     "@react-email/tailwind": "catalog:react-email",
     "@react-email/text": "catalog:react-email",
-    "@react-email/render": "^2.0.4",
     "resend": "catalog:"
   },
   "devDependencies": {
