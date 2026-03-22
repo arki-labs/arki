@@ -10,7 +10,7 @@ import { themes } from './themes';
 const lightThemes = themes.filter((t) => t.variant === 'light');
 const darkThemes = themes.filter((t) => t.variant === 'dark');
 
-function ThemeSwatch({
+export function ThemeSwatch({
   config,
   selected,
   onSelect,
@@ -41,7 +41,7 @@ function ThemeSwatch({
   );
 }
 
-function ThemeGroup({
+export function ThemeGroup({
   label,
   items,
   selected,
