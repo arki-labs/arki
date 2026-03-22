@@ -1,153 +1,29 @@
-import type * as React from 'react';
+/**
+ * @deprecated Use `initEmails` from `@arki/emails` instead.
+ *
+ * This low-level helper is kept for backward compatibility.
+ * Internally it delegates to the Resend provider.
+ */
+import { resendProvider } from './providers/resend';
+import type { SendEmailPayload } from './providers/types';
 
-import { debugEmails } from './debug';
+export type { SendEmailPayload };
 
-type RequireAtLeastOne<T> = {
-  [K in keyof T]-?: Required<Pick<T, K>> & Partial<Pick<T, Exclude<keyof T, K>>>;
-}[keyof T];
-type Attachment = {
-  /** Content of an attached file. */
-  content?: string | Buffer;
-  /** Name of attached file. */
-  filename?: string | false | undefined;
-  /** Path where the attachment file is hosted */
-  path?: string;
-};
+/**
+ * @deprecated Use `initEmails({ providers: [resendProvider({ apiKey })] }).send(payload)`.
+ *
+ * Sends an email via Resend. `isDev` redirects all mail to `delivered@resend.dev`.
+ */
+export const send = async (apiKey: string, payload: SendEmailPayload): Promise<void> => {
+  const isDevOrStaging =
+    process.env['NODE_ENV'] === 'development' || process.env['VERCEL_ENV'] === 'preview';
 
-type Tag = {
-  /**
-   * The name of the email tag. It can only contain ASCII letters (a–z, A–Z), numbers (0–9), underscores (_), or dashes (-). It can contain no more than 256 characters.
-   */
-  name: string;
-  /**
-   * The value of the email tag. It can only contain ASCII letters (a–z, A–Z), numbers (0–9), underscores (_), or dashes (-). It can contain no more than 256 characters.
-   */
-  value: string;
-};
-type EmailRenderOptions = {
-  /**
-   * The React component used to write the message.
-   *
-   * @link https://resend.com/api-reference/emails/send-email#body-parameters
-   */
-  react?: React.ReactElement | React.ReactNode | null;
-  /**
-   * The HTML version of the message.
-   *
-   * @link https://resend.com/api-reference/emails/send-email#body-parameters
-   */
-  html?: string;
-  /**
-   * The plain text version of the message.
-   *
-   * @link https://resend.com/api-reference/emails/send-email#body-parameters
-   */
-  text?: string;
-};
-type CreateEmailBaseOptions = {
-  /**
-   * Filename and content of attachments (max 40mb per email)
-   *
-   * @link https://resend.com/docs/api-reference/emails/send-email#body-parameters
-   */
-  attachments?: Attachment[];
-  /**
-   * Blind carbon copy recipient email address. For multiple addresses, send as an array of strings.
-   *
-   * @link https://resend.com/docs/api-reference/emails/send-email#body-parameters
-   */
-  bcc?: string | string[];
-  /**
-   * Carbon copy recipient email address. For multiple addresses, send as an array of strings.
-   *
-   * @link https://resend.com/docs/api-reference/emails/send-email#body-parameters
-   */
-  cc?: string | string[];
-  /**
-   * Sender email address. To include a friendly name, use the format `"Your Name <sender@domain.com>"`
-   *
-   * @link https://resend.com/docs/api-reference/emails/send-email#body-parameters
-   */
-  from: string;
-  /**
-   * Custom headers to add to the email.
-   *
-   * @link https://resend.com/docs/api-reference/emails/send-email#body-parameters
-   */
-  headers?: Record<string, string>;
-  /**
-   * Reply-to email address. For multiple addresses, send as an array of strings.
-   *
-   * @link https://resend.com/docs/api-reference/emails/send-email#body-parameters
-   */
-  reply_to?: string | string[];
-  /**
-   * Email subject.
-   *
-   * @link https://resend.com/docs/api-reference/emails/send-email#body-parameters
-   */
-  subject: string;
-  /**
-   * Email tags
-   *
-   * @link https://resend.com/docs/api-reference/emails/send-email#body-parameters
-   */
-  tags?: Tag[];
-  /**
-   * Recipient email address. For multiple addresses, send as an array of strings. Max 50.
-   *
-   * @link https://resend.com/docs/api-reference/emails/send-email#body-parameters
-   */
-  to: string | string[];
-} & EmailRenderOptions;
-type CreateEmailOptions = RequireAtLeastOne<EmailRenderOptions> & CreateEmailBaseOptions;
-
-export const send = async (apiKey: string, payload: CreateEmailOptions) => {
-  const isDevOrStaging = process.env['NODE_ENV'] === 'development' || process.env['VERCEL_ENV'] === 'preview';
   const to = isDevOrStaging ? 'delivered@resend.dev' : payload.to;
 
-  const recipientCount = Array.isArray(to) ? to.length : 1;
-  const hasAttachments = payload.attachments && payload.attachments.length > 0;
-  const hasCc = payload.cc !== undefined;
-  const hasBcc = payload.bcc !== undefined;
+  const provider = resendProvider({ apiKey });
+  const { error } = await provider.send({ ...payload, to });
 
-  debugEmails('[send] Sending email (subject: "%s", to: %d recipients, isDev: %s, hasAttachments: %s, hasCc: %s, hasBcc: %s)',
-    payload.subject, recipientCount, isDevOrStaging, hasAttachments, hasCc, hasBcc);
-
-  try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-        // Set this to prevent Gmail from threading emails.
-        // More info: https://resend.com/changelog/custom-email-headers
-        'X-Entity-Ref-ID': Date.now() + '',
-        ...payload.headers,
-      },
-      body: JSON.stringify({
-        ...payload,
-        to: [to],
-      }),
-    });
-
-    debugEmails('[send] Resend API response received (status: %d, ok: %s)',
-      response.status, response.ok);
-
-    const { headers } = response;
-    const contentType = headers.get('content-type') ?? '';
-    if (contentType.includes('application/json')) {
-      const result = JSON.stringify(await response.json());
-      debugEmails('[send] Email sent successfully (JSON response)');
-      return result;
-    }
-
-    const result = await response.text();
-    debugEmails('[send] Email sent successfully (text response)');
-    return result;
-  } catch (error) {
-    debugEmails('[send] Error sending email: %s', error instanceof Error ? error.message : 'Unknown error');
-
-    throw new Error(`Email can't be sent: ${JSON.stringify(payload)}`);
+  if (error) {
+    throw new Error(`Email can't be sent: ${error.message}`);
   }
 };

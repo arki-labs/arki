@@ -5,7 +5,7 @@ import { betterAuth } from './create-auth';
 import type { DB } from 'better-auth/adapters/drizzle';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { magicLink, oAuthProxy } from 'better-auth/plugins';
-import { Resend } from 'resend';
+import { createEmailClientFromEnv } from '@arki/emails';
 
 import { createPrefixedId } from '@arki/db/id';
 
@@ -55,7 +55,9 @@ export function initAuth(
     throw new Error('AUTH_SECRET is not set');
   }
 
-  const resend = options.resendApiKey ? new Resend(options.resendApiKey) : undefined;
+  const emailClient = options.resendApiKey
+    ? createEmailClientFromEnv({ resendApiKey: options.resendApiKey })
+    : undefined;
 
   const googleProvider =
     options.googleClientId && options.googleClientSecret
@@ -123,20 +125,20 @@ export function initAuth(
       expo(),
       magicLink({
         sendMagicLink: async ({ email, url }) => {
-          if (!resend) {
-            console.error('Resend not configured, cannot send magic link');
+          if (!emailClient) {
+            console.error('Email client not configured, cannot send magic link');
             throw new Error('Email service not configured. Please try again later.');
           }
 
-          const resp = await resend.emails.send({
+          const { error } = await emailClient.send({
             to: email,
             from: 'Brandability <no-reply@furculita.net>',
             subject: 'Your magic link',
             text: `Click the link to sign in: ${url}`,
           });
 
-          if (resp.error) {
-            console.error('Failed to send magic link email:', resp.error);
+          if (error) {
+            console.error('Failed to send magic link email:', error.message);
             throw new Error('Failed to send magic link email. Please try again later.');
           }
         },

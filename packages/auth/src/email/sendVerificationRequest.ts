@@ -1,7 +1,7 @@
 import type { EmailConfig } from '@auth/core/providers/email';
 import type { Theme } from '@auth/core/types';
 import { createId } from '@paralleldrive/cuid2';
-import type { Resend } from 'resend';
+import type { EmailClient } from '@arki/emails';
 
 import { debugEmail } from '../debug';
 import { env } from '../env';
@@ -17,7 +17,7 @@ type SendVerificationRequestParams = {
 };
 
 export const sendVerificationRequest = (
-  resend: Resend,
+  emailClient: EmailClient,
   template?: ({ loginUrl }: { loginUrl: string }) => React.ReactElement | React.ReactNode,
 ) => {
   debugEmail('[sendVerificationRequest] Creating verification email sender (hasTemplate: %s)', !!template);
@@ -41,23 +41,22 @@ export const sendVerificationRequest = (
     debugEmail('[sendVerificationRequest] Email configuration (host: %s, isDev: %s, recipient: %s)',
       host, isDevOrStaging, to);
 
-    try {
-      await resend.emails.send({
-        to,
-        from: provider.from,
-        subject: `Sign in to ${host}`,
-        react: template?.({ loginUrl: url }),
-        text: text({ url, host }),
-        headers: {
-          'X-Entity-Ref-ID': createId(),
-        },
-      });
-      debugEmail('[sendVerificationRequest] Verification email sent successfully to %s', to);
-    } catch (error) {
-      debugEmail('[sendVerificationRequest] Error sending verification email: %s',
-        error instanceof Error ? error.message : 'Unknown error');
+    const { error } = await emailClient.send({
+      to,
+      from: provider.from,
+      subject: `Sign in to ${host}`,
+      text: text({ url, host }),
+      headers: {
+        'X-Entity-Ref-ID': createId(),
+      },
+    });
+
+    if (error) {
+      debugEmail('[sendVerificationRequest] Error sending verification email: %s', error.message);
       throw new Error(`Verification request email to ${identifier} can't be sent`);
     }
+
+    debugEmail('[sendVerificationRequest] Verification email sent successfully to %s', to);
   };
 };
 

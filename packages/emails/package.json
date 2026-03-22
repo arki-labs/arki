@@ -14,6 +14,22 @@
       "import": "./src/send.ts",
       "browser": "./src/send.ts"
     },
+    "./client": {
+      "types": "./dist/src/client/init.d.ts",
+      "import": "./src/client/init.ts"
+    },
+    "./providers/resend": {
+      "types": "./dist/src/providers/resend.d.ts",
+      "import": "./src/providers/resend.ts"
+    },
+    "./providers/unosend": {
+      "types": "./dist/src/providers/unosend.d.ts",
+      "import": "./src/providers/unosend.ts"
+    },
+    "./providers/quota-router": {
+      "types": "./dist/src/providers/quota-router.d.ts",
+      "import": "./src/providers/quota-router.ts"
+    },
     "./templates/*": {
       "types": "./dist/src/templates/*.d.ts",
       "import": "./src/templates/*.tsx",

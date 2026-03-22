@@ -1,5 +1,5 @@
 import type { EmailConfig, EmailUserConfig } from '@auth/core/providers/email';
-import { Resend } from 'resend';
+import { createEmailClientFromEnv } from '@arki/emails';
 
 import { debugAuth } from '../debug';
 import { sendVerificationRequest } from './sendVerificationRequest';
@@ -15,7 +15,7 @@ export function ResendProvider(
     !!sendVerificationRequestTemplate,
   );
 
-  const resend = new Resend(apiKey);
+  const emailClient = createEmailClientFromEnv({ resendApiKey: apiKey });
 
   const provider = {
     id: 'email',
@@ -24,7 +24,7 @@ export function ResendProvider(
     server: '',
     from: 'Auth.js <no-reply@authjs.dev>',
     maxAge: 24 * 60 * 60,
-    sendVerificationRequest: sendVerificationRequest(resend, sendVerificationRequestTemplate),
+    sendVerificationRequest: sendVerificationRequest(emailClient, sendVerificationRequestTemplate),
     options: config,
   };
 
