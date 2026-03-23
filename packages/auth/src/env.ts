@@ -2,6 +2,20 @@ import { createEnv } from '@t3-oss/env-core';
 
 import { z } from '@arki/contracts';
 
+/**
+ * Treats an empty string the same as absent.
+ *
+ * Deployment platforms (Coolify, Vercel, etc.) often store unset optional
+ * credentials as "" rather than omitting the variable entirely.  Zod's
+ * `.optional()` only skips validation for `undefined`, so an empty string
+ * still triggers `.min(1)`.  This preprocessor normalises "" → undefined
+ * before the schema runs.
+ */
+const optionalCredential = z.preprocess(
+  val => (val === '' ? undefined : val),
+  z.string().min(1).optional(),
+);
+
 export const env = createEnv({
   onValidationError(issues) {
     console.error(
@@ -35,33 +49,33 @@ export const env = createEnv({
     EMAIL_FROM: z.email().default('noreply@furculita.net'),
 
     // OAuth Providers - Google
-    GOOGLE_CLIENT_ID: z.string().min(1).optional(),
-    GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
+    GOOGLE_CLIENT_ID: optionalCredential,
+    GOOGLE_CLIENT_SECRET: optionalCredential,
 
     // OAuth Providers - Apple
-    APPLE_CLIENT_ID: z.string().min(1).optional(),
-    APPLE_CLIENT_SECRET: z.string().min(1).optional(),
-    APPLE_APP_BUNDLE_IDENTIFIER: z.string().min(1).optional(),
+    APPLE_CLIENT_ID: optionalCredential,
+    APPLE_CLIENT_SECRET: optionalCredential,
+    APPLE_APP_BUNDLE_IDENTIFIER: optionalCredential,
 
     // OAuth Providers - Facebook
-    FACEBOOK_CLIENT_ID: z.string().min(1).optional(),
-    FACEBOOK_CLIENT_SECRET: z.string().min(1).optional(),
+    FACEBOOK_CLIENT_ID: optionalCredential,
+    FACEBOOK_CLIENT_SECRET: optionalCredential,
 
     // OAuth Providers - GitHub
-    GITHUB_CLIENT_ID: z.string().min(1).optional(),
-    GITHUB_CLIENT_SECRET: z.string().min(1).optional(),
+    GITHUB_CLIENT_ID: optionalCredential,
+    GITHUB_CLIENT_SECRET: optionalCredential,
 
     // OAuth Providers - Discord
-    DISCORD_CLIENT_ID: z.string().min(1).optional(),
-    DISCORD_CLIENT_SECRET: z.string().min(1).optional(),
+    DISCORD_CLIENT_ID: optionalCredential,
+    DISCORD_CLIENT_SECRET: optionalCredential,
 
     // OAuth Providers - Twitter/X
-    TWITTER_CLIENT_ID: z.string().min(1).optional(),
-    TWITTER_CLIENT_SECRET: z.string().min(1).optional(),
+    TWITTER_CLIENT_ID: optionalCredential,
+    TWITTER_CLIENT_SECRET: optionalCredential,
 
     // OAuth Providers - LinkedIn
-    LINKEDIN_CLIENT_ID: z.string().min(1).optional(),
-    LINKEDIN_CLIENT_SECRET: z.string().min(1).optional(),
+    LINKEDIN_CLIENT_ID: optionalCredential,
+    LINKEDIN_CLIENT_SECRET: optionalCredential,
   },
 
   client: {},
