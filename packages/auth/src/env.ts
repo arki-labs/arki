@@ -5,9 +5,13 @@ import { z } from '@arki/contracts';
 export const env = createEnv({
   onValidationError(issues) {
     console.error(
-      '❌ [@arki/auth] Invalid environment variables:\n' + issues.map(i => `  ${(i.path ?? []).join('.')}: ${i.message}`).join('\n'),
+      '❌ [@arki/auth] Invalid environment variables:\n' +
+        issues.map(i => `  ${(i.path ?? []).join('.')}: ${i.message}`).join('\n'),
     );
-    throw new Error('Invalid environment variables');
+    throw new Error(
+      '❌ [@arki/auth] Invalid environment variables:\n' +
+        issues.map(i => `  ${(i.path ?? []).join('.')}: ${i.message}`).join('\n'),
+    );
   },
   /**
    * Environment variables schema for authentication services
