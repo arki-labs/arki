@@ -6,6 +6,7 @@
 
 import { openai } from '@ai-sdk/openai';
 import { generateObject, streamText, generateText } from 'ai';
+import type { ModelMessage } from 'ai';
 import { z } from '@arki/contracts';
 
 import { debugService } from '../debug.ts';
@@ -15,10 +16,7 @@ import type { SanitizerConfig } from '../safety/types';
 import { validateInput, aiServiceConfigSchema } from '../validation';
 import { rateLimiters } from '../utils/rate-limiter';
 
-type ChatMessage = {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-};
+type ChatMessage = ModelMessage;
 
 export type OpenAIServiceConfig = {
   model?: string;
@@ -190,10 +188,7 @@ export class OpenAIService {
       try {
         const result = await generateText({
           model: openai(this.model),
-          messages: sanitizedMessages.map(msg => ({
-            role: msg.role,
-            content: msg.content,
-          })),
+          messages: sanitizedMessages,
           temperature: options.temperature || this.defaultTemperature,
           maxRetries: options.maxRetries || this.defaultMaxRetries,
         });
@@ -276,10 +271,7 @@ export class OpenAIService {
 
       const stream = await streamText({
         model: openai(this.model),
-        messages: sanitizedMessages.map(msg => ({
-          role: msg.role,
-          content: msg.content,
-        })),
+        messages: sanitizedMessages,
         temperature: options.temperature || this.defaultTemperature,
       });
 
@@ -474,7 +466,11 @@ Content: "${text}"`;
       if (msg.role !== 'user') {
         return msg;
       }
-      return { ...msg, content: this.sanitizeInput(msg.content) };
+      // Only sanitize plain string content — multimodal content is passed through
+      if (typeof msg.content !== 'string') {
+        return msg;
+      }
+      return { role: 'user' as const, content: this.sanitizeInput(msg.content) };
     });
   }
 }

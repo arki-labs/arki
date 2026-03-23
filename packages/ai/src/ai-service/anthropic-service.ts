@@ -5,12 +5,10 @@
 
 import { anthropic } from '@ai-sdk/anthropic';
 import { generateObject, generateText } from 'ai';
+import type { ModelMessage } from 'ai';
 import type { z } from '@arki/contracts';
 
-type ChatMessage = {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-};
+type ChatMessage = ModelMessage;
 
 import { debugService } from '../debug.ts';
 import { GenerationError, RateLimitError, getErrorMessage } from '../errors';
