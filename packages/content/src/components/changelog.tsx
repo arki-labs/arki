@@ -7,7 +7,7 @@ import { Button } from '@arki/ui/button';
 import { Pagination, PaginationContent, PaginationLink } from '@arki/ui/pagination';
 import { toHumanReadableDate } from '@arki/date/format';
 import { ChevronLeft, ChevronRight, Rss } from '@arki/icons';
-import { useTranslations } from '@arki/intl/next-client';
+import { useTranslations } from 'use-intl';
 
 import type { Changelog } from '../collections/changelog';
 import { Mdx } from './mdx';

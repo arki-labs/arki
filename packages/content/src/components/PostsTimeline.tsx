@@ -4,7 +4,7 @@ import type { IntlLink } from '@arki/intl/next-navigation';
 import { Button } from '@arki/ui/button';
 import { Pagination, PaginationContent, PaginationLink } from '@arki/ui/pagination';
 import { Rss } from '@arki/icons';
-import { useTranslations } from '@arki/intl/next-client';
+import { useTranslations } from 'use-intl';
 
 import type { Post } from '../collections/post';
 import { Timeline } from './timeline';
