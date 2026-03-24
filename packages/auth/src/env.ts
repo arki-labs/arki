@@ -76,6 +76,10 @@ export const env = createEnv({
     // OAuth Providers - LinkedIn
     LINKEDIN_CLIENT_ID: optionalCredential,
     LINKEDIN_CLIENT_SECRET: optionalCredential,
+
+    // OAuth Providers - Microsoft
+    MICROSOFT_CLIENT_ID: optionalCredential,
+    MICROSOFT_CLIENT_SECRET: optionalCredential,
   },
 
   client: {},
@@ -107,6 +111,8 @@ export const env = createEnv({
     TWITTER_CLIENT_SECRET: process.env.TWITTER_CLIENT_SECRET,
     LINKEDIN_CLIENT_ID: process.env.LINKEDIN_CLIENT_ID,
     LINKEDIN_CLIENT_SECRET: process.env.LINKEDIN_CLIENT_SECRET,
+    MICROSOFT_CLIENT_ID: process.env.MICROSOFT_CLIENT_ID,
+    MICROSOFT_CLIENT_SECRET: process.env.MICROSOFT_CLIENT_SECRET,
   },
 
   skipValidation: !!process.env.CI || process.env.NODE_ENV === 'test',
