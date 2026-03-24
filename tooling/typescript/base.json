@@ -34,6 +34,8 @@
     "strictNullChecks": true,
     "strictPropertyInitialization": true,
     "strictBindCallApply": true,
+    "strictBuiltinIteratorReturn": true,
+    "alwaysStrict": true,
     "noImplicitOverride": true,
     "noImplicitReturns": true,
     "noImplicitThis": true,

@@ -12,13 +12,15 @@ const LocaleContext = createContext<string>('en');
  */
 export const LocaleProvider = ({
   locale = 'en',
+  messages = {},
   children,
 }: {
   locale?: string;
+  messages?: Record<string, unknown>;
   children: React.ReactNode;
 }) => (
   <LocaleContext.Provider value={locale}>
-    <NextIntlClientProvider locale={locale} messages={{}}>
+    <NextIntlClientProvider locale={locale} messages={messages}>
       {children}
     </NextIntlClientProvider>
   </LocaleContext.Provider>
