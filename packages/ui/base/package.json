@@ -169,6 +169,11 @@
       "import": "./src/input-otp.tsx",
       "browser": "./src/input-otp.tsx"
     },
+    "./katex": {
+      "types": "./dist/src/katex.d.ts",
+      "import": "./src/katex.tsx",
+      "browser": "./src/katex.tsx"
+    },
     "./label": {
       "types": "./dist/src/label.d.ts",
       "import": "./src/label.tsx",
@@ -569,6 +574,7 @@
     "colord": "catalog:styling",
     "embla-carousel-react": "catalog:",
     "input-otp": "catalog:",
+    "katex": "catalog:",
     "react-colorful": "catalog:",
     "react-day-picker": "catalog:",
     "react-hook-form": "catalog:validation",

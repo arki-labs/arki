@@ -13,11 +13,6 @@
       "import": "./src/fractions.ts",
       "node": "./src/fractions.ts"
     },
-    "./react-integration": {
-      "types": "./dist/src/integrations/react/index.d.ts",
-      "import": "./src/integrations/react/index.tsx",
-      "browser": "./src/integrations/react/index.tsx"
-    },
     "./stat": {
       "types": "./dist/src/stat.d.ts",
       "import": "./src/stat.ts",
@@ -48,7 +43,6 @@
     "jstat": "catalog:",
     "katex": "catalog:",
     "mathjs": "catalog:",
-    "react-katex": "catalog:",
     "recharts": "catalog:",
     "simple-statistics": "catalog:"
   },
