@@ -14,11 +14,6 @@
       "import": "./src/components/*.tsx",
       "browser": "./src/components/*.tsx"
     },
-    "./next": {
-      "types": "./dist/src/next.d.ts",
-      "import": "./src/next.ts",
-      "node": "./src/next.ts"
-    },
     "./mdx": {
       "types": "./dist/src/mdx.d.ts",
       "import": "./src/mdx.ts",
@@ -58,10 +53,8 @@
     "@code-hike/mdx": "catalog:",
     "@content-collections/core": "catalog:next",
     "@content-collections/mdx": "catalog:next",
-    "@content-collections/next": "catalog:next",
     "@mdx-js/loader": "catalog:content",
     "@mdx-js/react": "catalog:content",
-    "@next/mdx": "catalog:next",
     "mdx-bundler": "catalog:content",
     "minisearch": "catalog:",
     "reading-time": "catalog:content",

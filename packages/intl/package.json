@@ -4,31 +4,6 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./next-client": {
-      "types": "./dist/src/integrations/next/client.d.ts",
-      "import": "./src/integrations/next/client.ts",
-      "browser": "./src/integrations/next/client.ts"
-    },
-    "./next-middleware": {
-      "types": "./dist/src/integrations/next/middleware.d.ts",
-      "import": "./src/integrations/next/middleware.ts",
-      "node": "./src/integrations/next/middleware.ts"
-    },
-    "./next-routing": {
-      "types": "./dist/src/integrations/next/routing.d.ts",
-      "import": "./src/integrations/next/routing.ts",
-      "node": "./src/integrations/next/routing.ts"
-    },
-    "./next-navigation": {
-      "types": "./dist/src/integrations/next/navigation.d.ts",
-      "import": "./src/integrations/next/navigation.ts",
-      "node": "./src/integrations/next/navigation.ts"
-    },
-    "./next-shared": {
-      "types": "./dist/src/integrations/next/shared.d.ts",
-      "import": "./src/integrations/next/shared.ts",
-      "node": "./src/integrations/next/shared.ts"
-    },
     "./language": {
       "types": "./dist/src/language.d.ts",
       "import": "./src/language.ts",

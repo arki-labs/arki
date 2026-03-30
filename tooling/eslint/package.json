@@ -5,7 +5,6 @@
   "type": "module",
   "exports": {
     "./base": "./base.js",
-    "./nextjs": "./nextjs.js",
     "./react": "./react.js"
   },
   "scripts": {
@@ -16,10 +15,8 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@eslint/compat": "catalog:",
-    "@next/eslint-plugin-next": "catalog:next",
     "@rushstack/eslint-patch": "catalog:",
     "eslint-config-airbnb-base": "catalog:",
-    "eslint-config-next": "catalog:next",
     "eslint-import-resolver-alias": "catalog:",
     "eslint-import-resolver-typescript": "catalog:",
     "eslint-plugin-check-file": "catalog:",

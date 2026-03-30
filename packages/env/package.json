@@ -3,19 +3,6 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    "./nextjs": {
-      "react-server": "./dist/nextjs/index.js",
-      "source": "./src/nextjs/index.ts",
-      "import": "./dist/nextjs/index.js",
-      "types": "./dist/nextjs/index.d.ts",
-      "default": "./dist/nextjs/index.js"
-    },
-    "./nextjs/client": {
-      "source": "./src/nextjs/client.ts",
-      "import": "./dist/nextjs/client.js",
-      "types": "./dist/nextjs/client.d.ts",
-      "default": "./dist/nextjs/client.js"
-    },
     "./core": {
       "source": "./src/core/index.ts",
       "import": "./dist/core/index.js",
@@ -46,7 +33,6 @@
   "dependencies": {
     "@arki/contracts": "workspace:*",
     "@t3-oss/env-core": "catalog:env",
-    "@t3-oss/env-nextjs": "catalog:env",
     "zod": "catalog:"
   },
   "devDependencies": {
