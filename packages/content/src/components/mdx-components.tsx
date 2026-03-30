@@ -1,8 +1,5 @@
-import type { ImageProps } from 'next/image';
-import type { AnchorHTMLAttributes, HTMLAttributes, ReactNode, TdHTMLAttributes, ThHTMLAttributes } from 'react';
+import type { AnchorHTMLAttributes, HTMLAttributes, ImgHTMLAttributes, ReactNode, TdHTMLAttributes, ThHTMLAttributes } from 'react';
 import type { TweetProps } from 'react-tweet';
-import Image from 'next/image';
-import Link from 'next/link';
 import { Tweet } from 'react-tweet';
 
 import type { CalloutProps } from '@arki/ui/callout';
@@ -56,7 +53,7 @@ export const components = {
       );
     }
 
-    return <Link href={href} className="text-foreground underline underline-offset-4 hover:no-underline" {...props} />;
+    return <a href={href} className="text-foreground underline underline-offset-4 hover:no-underline" {...props} />;
   },
   Tweet: (props: TweetProps) => {
     return (
@@ -65,7 +62,7 @@ export const components = {
       </div>
     );
   },
-  Image: (props: ImageProps) => <Image {...props} />,
+  Image: (props: ImgHTMLAttributes<HTMLImageElement>) => <img loading="lazy" decoding="async" {...props} />,
   img: MarkdownImage,
   Callout: (props: CalloutProps) => {
     return (

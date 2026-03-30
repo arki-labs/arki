@@ -1,5 +1,3 @@
-import Image from 'next/image';
-import Link from 'next/link';
 
 import { toHumanReadableDate } from '@arki/date/format';
 import { Avatar, AvatarFallback, AvatarImage } from '@arki/ui/avatar';
@@ -20,13 +18,12 @@ export function Article({ post }: { post: Post }) {
       <div className="grid w-full gap-3">
         <h1 className="font-cal mb-5 text-3xl">{post.title}</h1>
         <figure className="border-border relative aspect-video w-full overflow-hidden rounded-lg border">
-          <Image
+          <img
             src={post.image.url}
-            blurDataURL={post.image.blurDataURL}
-            placeholder="blur"
-            fill
             alt={post.title}
-            className="border-base-200 dark:border-base-700 h-40 w-64 shrink-0 rounded-md border-2 object-cover"
+            className="absolute inset-0 h-full w-full object-cover"
+            loading="lazy"
+            decoding="async"
           />
         </figure>
         <div className="flex items-center gap-3">
@@ -35,13 +32,14 @@ export function Article({ post }: { post: Post }) {
             <AvatarFallback>{getNameInitials(post.author.name)}</AvatarFallback>
           </Avatar>
           <div className="text-muted-foreground text-sm font-light">
-            <Link
+            <a
               href={post.author.url ?? '#'}
               target="_blank"
+              rel="noopener noreferrer"
               className="text-foreground cursor-pointer font-medium hover:underline"
             >
               {post.author.name}
-            </Link>
+            </a>
             <div className="flex flex-wrap items-center gap-1.5">
               <time className="font-mono">{toHumanReadableDate(post.publishedAt)}</time>
               <span className="text-muted-foreground/70">&bull;</span>

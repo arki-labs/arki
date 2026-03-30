@@ -1,6 +1,4 @@
-import Image from 'next/image';
-
-import type { IntlLink } from '@arki/intl/next-navigation';
+import type { LinkComponent } from '@arki/intl/types';
 import { toHumanReadableDate } from '@arki/date/format';
 
 type TimelineProps = {
@@ -35,7 +33,7 @@ type ArticleProps = {
   title: string;
   children?: React.ReactNode;
   blurDataURL?: string;
-  Link: IntlLink;
+  Link: LinkComponent;
 };
 
 function Article({ publishedAt, imageSrc, title, children, href, blurDataURL, Link }: ArticleProps) {
@@ -50,13 +48,10 @@ function Article({ publishedAt, imageSrc, title, children, href, blurDataURL, Li
       </div>
       <div className="border-border relative order-1 aspect-video h-full w-full overflow-hidden rounded-md border md:order-2 md:col-span-4">
         <Link href={href}>
-          <Image
+          <img
             src={imageSrc}
-            fill={true}
             alt={title}
-            className="object-cover"
-            blurDataURL={blurDataURL}
-            placeholder="blur"
+            className="absolute inset-0 h-full w-full object-cover"
           />
         </Link>
       </div>

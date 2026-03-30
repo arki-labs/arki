@@ -1,26 +1,23 @@
-import Image from 'next/image';
-
 type Props = {
   src?: string;
   alt?: string;
   width?: number | string;
   height?: number | string;
-  blurDataURL?: string;
 };
 
-const MarkdownImage = ({ src, alt, width, height, blurDataURL }: Props) => {
+const MarkdownImage = ({ src, alt, width, height }: Props) => {
   if (!src || !alt) {
     throw new Error('src and alt is required');
   }
   return (
-    <Image
-      blurDataURL={blurDataURL}
-      placeholder={blurDataURL ? 'blur' : 'empty'}
+    <img
       src={src}
       alt={alt}
-      width={Number(width)}
-      height={Number(height)}
+      width={width !== undefined ? Number(width) : undefined}
+      height={height !== undefined ? Number(height) : undefined}
       className="rounded-md shadow-md"
+      loading="lazy"
+      decoding="async"
     />
   );
 };

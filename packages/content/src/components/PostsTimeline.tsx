@@ -1,6 +1,6 @@
 import { createParser, createSearchParamsCache, parseAsInteger } from 'nuqs/server';
 
-import type { IntlLink } from '@arki/intl/next-navigation';
+import type { LinkComponent } from '@arki/intl/types';
 import { Button } from '@arki/ui/button';
 import { Pagination, PaginationContent, PaginationLink } from '@arki/ui/pagination';
 import { Rss } from '@arki/icons';
@@ -38,7 +38,7 @@ export const PostsTimeline = ({
   appTitle: string;
   posts: Post[];
   searchParams: Record<'p', string | string[] | undefined>;
-  Link: IntlLink;
+  Link: LinkComponent;
 }) => {
   const { p } = searchParamsCache.parse(searchParams);
   const maxPageIndex = Math.ceil(posts.length / ITEMS_PER_PAGE) - 1;
