@@ -40,7 +40,7 @@ export type RouterRecord = Record<string, AnyRouter>;
 
 /**
  * Defines the expected structure for validated environment variables.
- * Assumes processing by a library like `@t3-oss/env-nextjs`.
+ * Assumes processing by a library like `@t3-oss/env-core`.
  */
 export type EnvConfig = {
   NODE_ENV?: string;
