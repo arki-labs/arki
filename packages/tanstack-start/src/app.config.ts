@@ -6,7 +6,6 @@
  */
 
 import { defineConfig } from '@tanstack/react-start/config';
-import viteTsConfigPaths from 'vite-tsconfig-paths';
 
 export interface AppConfig {
   /**
@@ -82,7 +81,8 @@ export function createAppConfig(config: AppConfig = {}) {
       }),
     },
     vite: {
-      plugins: [viteTsConfigPaths(), ...vitePlugins],
+      resolve: { tsconfigPaths: true },
+      plugins: [...vitePlugins],
       envPrefix: clientEnvPrefix,
       build: {
         // Enable source maps for production debugging

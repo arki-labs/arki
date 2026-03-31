@@ -73,8 +73,7 @@
     "react": "catalog:react",
     "react-dom": "catalog:react",
     "superjson": "catalog:utilities",
-    "vite": "catalog:build-tools",
-    "vite-tsconfig-paths": "catalog:tanstack/start"
+    "vite": "catalog:build-tools"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
