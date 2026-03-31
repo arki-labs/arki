@@ -6,7 +6,7 @@
  * - Built-in RBAC (Role-Based Access Control)
  * - Session management
  * - OAuth provider auto-detection
- * - Type-safe tRPC integration
+ * - Type-safe oRPC integration
  */
 
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -85,8 +85,8 @@ export type DotAuth = {
   rbac: DotRBACManager;
 
   /**
-   * Create tRPC procedures with built-in auth middleware
-   * @param t - The tRPC instance
+   * Create oRPC procedures with built-in auth middleware
+   * @param t - The oRPC instance
    * @returns Auth-aware procedures (public, protected, admin, etc.)
    */
   createProcedures: (t: any) => ReturnType<typeof createAuthProcedures>;

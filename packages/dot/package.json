@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
+  "sideEffects": false,
   "type": "module",
   "exports": {
     ".": {
@@ -17,13 +18,14 @@
     },
     "./package.json": "./package.json"
   },
+  "types": "./dist/src/index.d.ts",
   "scripts": {
+    "build": "tsc",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -37,12 +39,10 @@
     "@arki/kv": "workspace:*",
     "@arki/logger": "workspace:*",
     "@arki/slugify": "workspace:*",
+    "@orpc/server": "catalog:backend",
     "@t3-oss/env-core": "catalog:env",
-    "@trpc/client": "catalog:trpc",
-    "@trpc/server": "catalog:trpc",
     "better-auth": "catalog:better-auth",
     "drizzle-orm": "catalog:drizzle",
-    "superjson": "catalog:utilities",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -51,7 +51,5 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "typescript": "catalog:"
-  },
-  "types": "./dist/src/index.d.ts",
-  "sideEffects": false
+  }
 }

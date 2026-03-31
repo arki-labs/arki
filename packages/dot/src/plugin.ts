@@ -1,5 +1,6 @@
 import type { EventStore, MessageBus } from '@event-driven-io/emmett';
-import type { AnyRouter } from '@trpc/server/unstable-core-do-not-import';
+/** oRPC routers are plain objects — this alias preserves readability */
+type AnyRouter = Record<string, unknown>;
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import type { KV } from '@arki/kv';
@@ -11,7 +12,7 @@ import type {
   Repository,
   SchemaInterface,
 } from './types';
-import type { TRPCKit, PluginSetupContext } from './trpc';
+import type { ORPCKit, PluginSetupContext } from './orpc';
 
 /**
  * Repository factory that accepts any schema type
@@ -24,7 +25,7 @@ export type RepositoryFactory = (db: NodePgDatabase<SchemaInterface>) => Reposit
  */
 export type PluginContext<TSchema extends SchemaInterface = SchemaInterface> = {
   /**
-   * Register a tRPC router under a specific namespace
+   * Register a oRPC router under a specific namespace
    * @example registerRouter('tracking', trackingRouter)
    */
   registerRouter: (name: string, router: AnyRouter) => void;
@@ -108,7 +109,7 @@ export type PluginConfig<
   setup: (context: PluginContext<TSchema>) => void | Promise<void>;
 
   /**
-   * Optional: Router factory function that receives tRPC procedures.
+   * Optional: Router factory function that receives oRPC procedures.
    * This is the new, portable way to define routers.
    *
    * @example
@@ -118,7 +119,7 @@ export type PluginConfig<
    * })
    * ```
    */
-  routerFactory?: (procedures: TRPCKit) => AnyRouter;
+  routerFactory?: (procedures: ORPCKit) => AnyRouter;
 
   /**
    * Optional: Lifecycle hook called during plugin setup.
@@ -251,7 +252,7 @@ export class PluginBuilder<
   #metadata?: { version?: string; description?: string; author?: string };
 
   #routers: Record<string, AnyRouter> = {};
-  #routerFactories: Record<string, (procedures: TRPCKit) => AnyRouter> = {};
+  #routerFactories: Record<string, (procedures: ORPCKit) => AnyRouter> = {};
   #schemas: Record<string, unknown> = {};
   #repositories = new Map<string, RepositoryFactory>();
   #projections: BaseProjectionDefinition[] = [];
@@ -291,7 +292,7 @@ export class PluginBuilder<
     return this.#metadata;
   }
 
-  get routerFactory(): ((procedures: TRPCKit) => AnyRouter) | undefined {
+  get routerFactory(): ((procedures: ORPCKit) => AnyRouter) | undefined {
     // If we have router factories, return a combined factory
     const factories = Object.entries(this.#routerFactories);
     if (factories.length === 0) return undefined;
@@ -300,13 +301,13 @@ export class PluginBuilder<
       return factories[0]![1];
     }
 
-    // Multiple factories - need to merge routers
+    // Multiple factories - merge by spreading into a single plain object
     return (procedures) => {
       const routers: Record<string, AnyRouter> = {};
       for (const [name, factory] of factories) {
         routers[name] = factory(procedures);
       }
-      return procedures.mergeRouters(...Object.values(routers));
+      return routers;
     };
   }
 
@@ -331,7 +332,7 @@ export class PluginBuilder<
   }
 
   /**
-   * Register a tRPC router
+   * Register a oRPC router
    * @param router - Router to register (name defaults to plugin name)
    * @param name - Optional explicit name
    * @example
@@ -357,8 +358,8 @@ export class PluginBuilder<
   }
 
   /**
-   * Define a tRPC router using a factory function (NEW - portable pattern)
-   * The factory receives tRPC procedures from the framework, making plugins portable.
+   * Define a oRPC router using a factory function (NEW - portable pattern)
+   * The factory receives oRPC procedures from the framework, making plugins portable.
    *
    * @param factory - Factory function that receives procedures and returns a router
    * @param name - Optional explicit name (defaults to plugin name)
@@ -371,15 +372,15 @@ export class PluginBuilder<
    * ```
    */
   defineRouter<R extends AnyRouter>(
-    factory: (procedures: TRPCKit) => R,
+    factory: (procedures: ORPCKit) => R,
   ): PluginBuilder<TSchema, TName, TRouterNames | TName, TRouterTypes & Record<TName, R>>;
   defineRouter<N extends string, R extends AnyRouter>(
     name: N,
-    factory: (procedures: TRPCKit) => R,
+    factory: (procedures: ORPCKit) => R,
   ): PluginBuilder<TSchema, TName, TRouterNames | N, TRouterTypes & Record<N, R>>;
   defineRouter(
-    nameOrFactory: string | ((procedures: TRPCKit) => AnyRouter),
-    maybeFactory?: (procedures: TRPCKit) => AnyRouter,
+    nameOrFactory: string | ((procedures: ORPCKit) => AnyRouter),
+    maybeFactory?: (procedures: ORPCKit) => AnyRouter,
   ) {
     if (typeof nameOrFactory === 'string') {
       this.#routerFactories[nameOrFactory] = maybeFactory!;
@@ -653,9 +654,9 @@ export class PluginRegistry<TSchema extends SchemaInterface = SchemaInterface> {
   /**
    * Build routers from plugin factories
    * This should be called after plugins are initialized but before the app starts
-   * @param procedures - tRPC procedures from the framework
+   * @param procedures - oRPC procedures from the framework
    */
-  buildRoutersFromFactories(procedures: TRPCKit) {
+  buildRoutersFromFactories(procedures: ORPCKit) {
     const orderedPlugins = this.getOrderedPlugins();
     const pluginsWithFactories = orderedPlugins.filter(p => p.routerFactory);
     debugPlugin('[PluginRegistry] Building routers from %d plugin(s) with router factories', pluginsWithFactories.length);

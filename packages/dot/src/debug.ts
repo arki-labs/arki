@@ -4,7 +4,7 @@
  * Enable debug logging by setting the DEBUG environment variable:
  *
  * - DEBUG=dot:* - All dot package logs
- * - DEBUG=dot:trpc - Only tRPC initialization and procedure logs
+ * - DEBUG=dot:trpc - Only oRPC initialization and procedure logs
  * - DEBUG=dot:auth - Only authentication logs
  * - DEBUG=dot:context - Only context creation logs
  * - DEBUG=dot:plugin - Only plugin logs
@@ -18,8 +18,8 @@
 
 import { createDebugLogger } from '@arki/logger/debug';
 
-// tRPC infrastructure debugging
-export const debugTRPC = createDebugLogger('dot:trpc');
+// oRPC infrastructure debugging
+export const debugRPC = createDebugLogger('dot:trpc');
 
 // Authentication debugging
 export const debugAuth = createDebugLogger('dot:auth');

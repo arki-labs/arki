@@ -6,7 +6,7 @@ import type { KV } from '@arki/kv';
 
 import type { DotAuth, DotSession } from './auth';
 import type { ExtractAllRepositoryTypes, ExtractAllRouterTypes, PluginConfig } from './plugin';
-import type { PluginSetupContext } from './trpc/types';
+import type { PluginSetupContext } from './orpc/types';
 import type {
   AuthConfig,
   BaseProjectionDefinition,
@@ -15,14 +15,14 @@ import type {
   Repository,
   RouterRecord,
   SchemaInterface,
-  TRPCOptions,
+  RPCOptions,
 } from './types';
 import { authFeatures } from './auth';
 import { dbFeatures } from './db';
 import { EVENT_STORE_URL_VARIANTS, eventSourcingFeatures } from './event-sourcing';
 import { kvFeatures } from './kv';
 import { PluginRegistry } from './plugin';
-import { createDotProcedures, trpcFeatures } from './trpc';
+import { createDotProcedures, rpcFeatures } from './orpc';
 
 /**
  * Dot Framework Builder
@@ -31,7 +31,7 @@ import { createDotProcedures, trpcFeatures } from './trpc';
  * the core components of a full-stack application.
  *
  * @template TAppName A string literal type for the application name.
- * @template TRouters The structure of the combined tRPC routers.
+ * @template TRouters The structure of the combined oRPC routers.
  * @template TSchema The Drizzle database schema structure.
  * @template TRepositories The structure of the application's repositories.
  * @template TEnv The structure of the validated environment variables.
@@ -50,7 +50,7 @@ export class Dot<
   readonly #kvConfig: { url: string } | null;
   readonly #env: TEnv;
   readonly #commandHandlers: CommandHandlerRegistration[];
-  readonly #trpcOptions: TRPCOptions<TSchema> | null;
+  readonly #rpcOptions: RPCOptions<TSchema> | null;
   readonly #authConfig: AuthConfig | null;
   readonly #pluginRegistry: PluginRegistry<TSchema>;
 
@@ -73,7 +73,7 @@ export class Dot<
       kvConfig?: { url: string } | null;
       env?: TEnv;
       commandHandlers?: CommandHandlerRegistration[];
-      trpcOptions?: TRPCOptions<TSchema> | null;
+      rpcOptions?: RPCOptions<TSchema> | null;
       authConfig?: AuthConfig | null;
       pluginRegistry?: PluginRegistry<TSchema>;
     } = {},
@@ -85,7 +85,7 @@ export class Dot<
     this.#kvConfig = options.kvConfig ?? null;
     this.#env = options.env ?? ({} as TEnv);
     this.#commandHandlers = options.commandHandlers ?? [];
-    this.#trpcOptions = options.trpcOptions ?? null;
+    this.#rpcOptions = options.rpcOptions ?? null;
     this.#authConfig = options.authConfig ?? null;
     this.#pluginRegistry = options.pluginRegistry ?? new PluginRegistry<TSchema>();
   }
@@ -122,7 +122,7 @@ export class Dot<
     kvConfig?: { url: string } | null;
     env?: TNewEnv;
     commandHandlers?: CommandHandlerRegistration[];
-    trpcOptions?: TRPCOptions<TNewSchema> | null;
+    rpcOptions?: RPCOptions<TNewSchema> | null;
     authConfig?: AuthConfig | null;
     pluginRegistry?: PluginRegistry<TNewSchema>;
   }) {
@@ -140,7 +140,7 @@ export class Dot<
       kvConfig: options.kvConfig ?? this.#kvConfig,
       env: options.env ?? (this.#env as unknown as TNewEnv),
       commandHandlers: options.commandHandlers ?? this.#commandHandlers,
-      trpcOptions: options.trpcOptions ?? (this.#trpcOptions as unknown as TRPCOptions<TNewSchema>),
+      rpcOptions: options.rpcOptions ?? (this.#rpcOptions as unknown as RPCOptions<TNewSchema>),
       authConfig: options.authConfig ?? this.#authConfig,
       pluginRegistry: options.pluginRegistry ?? (this.#pluginRegistry as unknown as PluginRegistry<TNewSchema>),
     });
@@ -149,16 +149,16 @@ export class Dot<
 
   // #region Configuration Methods
   /**
-   * Adds tRPC routers to the application configuration.
-   * @param routers An object mapping router names to tRPC router instances (`AnyRouter`).
+   * Adds oRPC routers to the application configuration.
+   * @param routers An object mapping router names to oRPC router instances (`AnyRouter`).
    * @returns A new Dot instance with the updated configuration.
    * @example
-   * .withTrpc({ user: userRouter, post: postRouter })
+   * .withRouters({ user: userRouter, post: postRouter })
    */
-  withTrpc<TNewRouters extends RouterRecord>(routers: TNewRouters, options?: TRPCOptions<TSchema>) {
+  withRouters<TNewRouters extends RouterRecord>(routers: TNewRouters, options?: RPCOptions<TSchema>) {
     return this.createNew<TNewRouters>({
       routers,
-      trpcOptions: options ?? this.#trpcOptions,
+      rpcOptions: options ?? this.#rpcOptions,
     });
   }
 
@@ -348,19 +348,19 @@ export class Dot<
   // withAuth = authFeatures.withAuth;
   // #endregion
 
-  // #region TRPC and Context Functions
+  // #region RPC and Context Functions
   /**
-   * @internal Creates a TRPC context based on the provided options and Dot configuration.
+   * @internal Creates an RPC context based on the provided options and Dot configuration.
    */
   #createRPCContext = (opts: { headers: Headers; session: DotSession | null }) => {
-    return trpcFeatures.createRPCContextFactory<TSchema>(
+    return rpcFeatures.createRPCContextFactory<TSchema>(
       this.#dbConfig,
       () => this.#initDrizzle(),
       () => this.#initKv(),
       () => this.#initEventSourcing(),
       eventStore => this.#initMessageBus(eventStore),
       this.#authConfig,
-      this.#trpcOptions,
+      this.#rpcOptions,
     )(opts);
   };
 
@@ -394,7 +394,7 @@ export class Dot<
       const pluginEventStore = this.#initEventSourcing();
       const pluginMessageBus = this.#initMessageBus(pluginEventStore);
 
-      // Create tRPC procedures for portable plugins
+      // Create oRPC procedures for portable plugins
       // Plugins use these procedures to define routers without importing app-specific code
       const procedures = createDotProcedures({
         isDevelopment: this.#env['NODE_ENV'] === 'development',
@@ -476,9 +476,9 @@ export class Dot<
       dotAuth = await authFeatures.initAuth(this.#authConfig, db);
     }
 
-    // Step 5: Initialize tRPC with merged routers
+    // Step 5: Initialize oRPC with merged routers
     // Use the merged workingRouters instead of this.#routers to include plugin routers
-    const trpc = trpcFeatures.initTrpc<TSchema, TRouters>(workingRouters as TRouters, this.#trpcOptions, this.#env);
+    const rpc = rpcFeatures.initRPC<TRouters>(workingRouters as TRouters, this.#rpcOptions as RPCOptions<SchemaInterface> | null, this.#env);
 
     // Step 6: Extract env
     const env = this.#env;
@@ -492,8 +492,8 @@ export class Dot<
     // Return all the initialized components
     return {
       name: this.#appName,
-      /** The configured and merged tRPC router instance, or undefined if not configured. */
-      router: trpc?.router,
+      /** The configured and merged oRPC router instance, or undefined if not configured. */
+      router: rpc?.router,
       /** The initialized Drizzle database instance, or undefined if not configured. */
       db,
       /** The initialized Event Store instance, or undefined if not configured. */
@@ -510,10 +510,10 @@ export class Dot<
       createProjection,
       /** Utility function to create a Drizzle projection definition with repository access, or undefined if DB/Repositories not configured. */
       createWithRepoProjection,
-      /** Utility function to create a server-side tRPC caller, or undefined if router not configured. */
-      createCaller: trpc?.createCaller,
-      /** All tRPC procedures and middlewares */
-      trpc: trpc?.procedures,
+      /** Utility function to create a server-side oRPC caller, or undefined if router not configured. */
+      createCaller: rpc?.createCaller,
+      /** All oRPC procedures */
+      rpc: rpc?.procedures,
       /** Custom context creation function that can be used in API routes */
       createContext: this.#createRPCContext,
       /** The initialized DotAuth instance with better-auth integration */
@@ -606,10 +606,10 @@ export { definePlugin, PluginBuilder, type PluginConfig, type PluginContext } fr
 // Re-export context management utilities
 export * from './context';
 
-// Re-export tRPC module (new portable API)
-export { createDotProcedures } from './trpc';
-export type { DotContext, PluginSetupContext, TRPCKit, TRPCKitWithT } from './trpc';
-export type { CreateDotProceduresOptions, DotTRPCMiddlewareConfig } from './trpc/types';
+// Re-export oRPC module (portable API)
+export { createDotProcedures } from './orpc';
+export type { DotContext, PluginSetupContext, ORPCKit, ORPCKitWithO } from './orpc';
+export type { CreateDotProceduresOptions, DotMiddlewareConfig } from './orpc/types';
 
 // Re-export auth module
 export {

@@ -1,5 +1,4 @@
 import type { Event, ProjectionDefinition } from '@event-driven-io/emmett';
-import type { AnyRouter, DataTransformer } from '@trpc/server/unstable-core-do-not-import';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 
 // Auth types are provided by our auth module
@@ -32,11 +31,11 @@ export type SchemaInterface = Record<string, unknown>;
 export type Repository<T = unknown> = Record<string, T>;
 
 /**
- * Represents a collection of tRPC routers.
- * Using `Record<string, AnyRouter>` for compatibility with tRPC internal types.
+ * Represents a collection of oRPC routers (plain objects).
+ * In oRPC, routers are plain objects where each key is a procedure or nested router.
  * @example { user: userRouter, post: postRouter }
  */
-export type RouterRecord = Record<string, AnyRouter>;
+export type RouterRecord = Record<string, unknown>;
 
 /**
  * Defines the expected structure for validated environment variables.
@@ -77,7 +76,7 @@ export type AuthConfig = {
   /**
    * Authentication providers
    */
-  providers?: any[];
+  providers?: unknown[];
 
   /**
    * Custom authentication pages
@@ -94,22 +93,22 @@ export type AuthConfig = {
    * Authentication callbacks
    */
   callbacks?: {
-    session?: (params: any) => any;
-    signIn?: (params: any) => Promise<boolean>;
+    session?: (params: unknown) => unknown;
+    signIn?: (params: unknown) => Promise<boolean>;
     redirect?: (params: { baseUrl: string }) => Promise<string>;
-    jwt?: (params: { token: any }) => Promise<any>;
+    jwt?: (params: { token: unknown }) => Promise<unknown>;
   };
 
   /**
    * Authentication events
    */
   events?: {
-    signIn?: (message: any) => Promise<void>;
-    signOut?: (message: any) => Promise<void>;
-    createUser?: (message: any) => Promise<void>;
-    updateUser?: (message: any) => Promise<void>;
-    linkAccount?: (message: any) => Promise<void>;
-    session?: (message: any) => Promise<void>;
+    signIn?: (message: unknown) => Promise<void>;
+    signOut?: (message: unknown) => Promise<void>;
+    createUser?: (message: unknown) => Promise<void>;
+    updateUser?: (message: unknown) => Promise<void>;
+    linkAccount?: (message: unknown) => Promise<void>;
+    session?: (message: unknown) => Promise<void>;
   };
 };
 
@@ -154,10 +153,10 @@ export type SessionUser = DotSession['user'] & {
 };
 
 /**
- * Base context for tRPC procedures.
+ * Base context for oRPC procedures.
  * Can be extended in application implementations.
  */
-export type BaseTRPCContext<TSchema extends SchemaInterface> = {
+export type BaseRPCContext<TSchema extends SchemaInterface> = {
   session: DotSession | null;
   user?: SessionUser;
   token: string | null;
@@ -167,7 +166,7 @@ export type BaseTRPCContext<TSchema extends SchemaInterface> = {
   ) => Promise<T>;
   repo?: Repository;
   kv?: KV;
-  messageBus?: any;
+  messageBus?: unknown;
   // Auth-related properties
   auth?: DotAuth;
   sessionManager?: DotSessionManager;
@@ -176,24 +175,19 @@ export type BaseTRPCContext<TSchema extends SchemaInterface> = {
 };
 
 /**
- * Options for customizing tRPC initialization.
+ * Options for customizing RPC initialization.
  */
-export type TRPCOptions<TSchema extends SchemaInterface> = {
+export type RPCOptions<TSchema extends SchemaInterface> = {
   /**
    * Function to get a session from headers
    */
   getSession?: (headers: Headers) => Promise<DotSession | null>;
 
   /**
-   * Optional transformer for tRPC (default: superjson)
-   */
-  transformer?: DataTransformer;
-
-  /**
    * Context creator extension function
    */
   extendContext?: (
-    baseContext: BaseTRPCContext<TSchema>,
+    baseContext: BaseRPCContext<TSchema>,
     opts: { headers: Headers; session: DotSession | null },
   ) => Promise<Record<string, unknown>> | Record<string, unknown>;
 };

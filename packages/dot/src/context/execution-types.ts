@@ -3,7 +3,7 @@
  * Used for logging, tracing, and context-specific behavior
  */
 export enum ExecutionContext {
-  /** tRPC API request */
+  /** oRPC API request */
   RPC = 'rpc',
   /** Queue job processing */
   QUEUE = 'queue',
