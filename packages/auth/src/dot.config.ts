@@ -1,5 +1,3 @@
-import 'server-only';
-
 import { expo } from '@better-auth/expo';
 import { betterAuth } from './create-auth';
 import type { DB } from 'better-auth/adapters/drizzle';
