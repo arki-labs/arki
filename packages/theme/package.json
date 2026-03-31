@@ -25,12 +25,14 @@
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
+  "peerDependencies": {
+    "react": "catalog:react"
+  },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/react": "catalog:react",
-    "react": "catalog:react"
+    "@types/react": "catalog:react"
   }
 }

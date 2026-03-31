@@ -100,7 +100,6 @@
     "@types/node": "catalog:node",
     "@types/node-geocoder": "catalog:types",
     "@types/react": "catalog:react",
-    "react": "catalog:react",
     "typescript": "catalog:"
   },
   "peerDependencies": {

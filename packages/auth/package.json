@@ -51,15 +51,19 @@
     "@t3-oss/env-core": "catalog:env",
     "bcrypt": "catalog:",
     "better-auth": "catalog:better-auth",
-    "react": "catalog:react",
-    "react-dom": "catalog:react",
     "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:react",
+    "react-dom": "catalog:react"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/bcrypt": "catalog:types"
+    "@types/bcrypt": "catalog:types",
+    "@types/react": "catalog:react",
+    "@types/react-dom": "catalog:react"
   }
 }

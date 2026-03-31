@@ -70,10 +70,12 @@
     "@tanstack/start-vite-plugin": "catalog:tanstack/start",
 "@unpic/react": "catalog:tanstack/start",
     "nitropack": "catalog:tanstack/start",
-    "react": "catalog:react",
-    "react-dom": "catalog:react",
     "superjson": "catalog:utilities",
     "vite": "catalog:build-tools"
+  },
+  "peerDependencies": {
+    "react": "catalog:react",
+    "react-dom": "catalog:react"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
