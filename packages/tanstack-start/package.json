@@ -23,17 +23,7 @@
       "import": "./src/router.ts",
       "browser": "./src/router.ts"
     },
-    "./trpc/client": {
-      "types": "./dist/src/trpc/client.d.ts",
-      "import": "./src/trpc/client.ts",
-      "browser": "./src/trpc/client.ts"
-    },
-    "./trpc/server": {
-      "types": "./dist/src/trpc/server.d.ts",
-      "import": "./src/trpc/server.ts",
-      "node": "./src/trpc/server.ts"
-    },
-    "./orpc/client": {
+"./orpc/client": {
       "types": "./dist/src/orpc/client.d.ts",
       "import": "./src/orpc/client.ts",
       "browser": "./src/orpc/client.ts"
@@ -78,11 +68,7 @@
     "@tanstack/react-router": "catalog:tanstack/start",
     "@tanstack/react-start": "catalog:tanstack/start",
     "@tanstack/start-vite-plugin": "catalog:tanstack/start",
-    "@trpc/client": "catalog:trpc",
-    "@trpc/react-query": "catalog:trpc",
-    "@trpc/server": "catalog:trpc",
-    "@trpc/tanstack-react-query": "catalog:trpc",
-    "@unpic/react": "catalog:tanstack/start",
+"@unpic/react": "catalog:tanstack/start",
     "nitropack": "catalog:tanstack/start",
     "react": "catalog:react",
     "react-dom": "catalog:react",
