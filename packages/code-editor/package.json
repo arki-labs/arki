@@ -48,13 +48,13 @@
     "@codemirror/lang-json": "catalog:codemirror",
     "@codemirror/lang-markdown": "catalog:codemirror",
     "@codemirror/lang-python": "catalog:codemirror",
-    "@codemirror/lang-sql": "^6.9.2",
-    "@codemirror/lang-xml": "^6.1.0",
-    "@codemirror/lang-yaml": "^6.1.2",
+    "@codemirror/lang-sql": "catalog:codemirror",
+    "@codemirror/lang-xml": "catalog:codemirror",
+    "@codemirror/lang-yaml": "catalog:codemirror",
     "@codemirror/state": "catalog:codemirror",
     "@codemirror/view": "catalog:codemirror",
-    "@uiw/codemirror-themes-all": "^4.25.8",
-    "@uiw/react-codemirror": "^4.25.8"
+    "@uiw/codemirror-themes-all": "catalog:",
+    "@uiw/react-codemirror": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",

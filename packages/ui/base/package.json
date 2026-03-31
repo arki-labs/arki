@@ -578,7 +578,7 @@
     "react-colorful": "catalog:",
     "react-day-picker": "catalog:",
     "react-hook-form": "catalog:validation",
-    "react-resizable-panels": "^2.1.7",
+    "react-resizable-panels": "catalog:",
     "react-spinners": "catalog:",
     "react-spring": "catalog:",
     "react-textarea-autosize": "catalog:",

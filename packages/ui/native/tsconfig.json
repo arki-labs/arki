@@ -1,7 +1,6 @@
 {
   "extends": "@arki/tsconfig/react.json",
   "compilerOptions": {
-    "baseUrl": ".",
     "paths": {
       "~/*": ["./src/*"]
     },
