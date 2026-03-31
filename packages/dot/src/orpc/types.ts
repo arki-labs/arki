@@ -37,30 +37,6 @@ export type DotContext<TSchema extends SchemaInterface = SchemaInterface> = {
   rbac?: DotRBACManager;
 }
 
-/**
- * Context available to plugins during setup.
- * Plugins receive this during initialization and can use it
- * to set up their routers and other components.
- *
- * Note: procedures type is inferred from createDotProcedures() at runtime,
- * preserving full type information for plugin router factories.
- */
-export type PluginSetupContext<TSchema extends SchemaInterface = SchemaInterface> = {
-  /** oRPC procedures for building routers (type inferred at runtime) */
-  procedures: unknown;
-
-  /** Database instance (if configured) */
-  db?: NodePgDatabase<TSchema>;
-
-  /** Key-value store instance (if configured) */
-  kv?: KV;
-
-  /** Event store instance (if configured) */
-  eventStore?: EventStore;
-
-  /** Message bus instance (if configured) */
-  messageBus?: MessageBus;
-}
 
 /**
  * Configuration for custom middleware injection.

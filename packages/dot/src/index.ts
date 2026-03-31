@@ -6,7 +6,7 @@ import type { KV } from '@arki/kv';
 
 import type { DotAuth, DotSession } from './auth';
 import type { ExtractAllRepositoryTypes, ExtractAllRouterTypes, PluginConfig } from './plugin';
-import type { PluginSetupContext } from './orpc/types';
+import type { PluginSetupContext } from './orpc/init';
 import type {
   AuthConfig,
   BaseProjectionDefinition,

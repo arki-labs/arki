@@ -153,7 +153,34 @@ export type ORPCKitWithO = ReturnType<typeof createDotProcedures>;
  */
 export type ORPCKit = Omit<ORPCKitWithO, 'o'>;
 
+import type { EventStore, MessageBus } from '@event-driven-io/emmett';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { KV } from '@arki/kv';
+import type { SchemaInterface } from '../types';
+
+/**
+ * Context available to plugins during setup.
+ * Plugins receive this during initialization and can use it
+ * to set up their routers and other components.
+ */
+export type PluginSetupContext<TSchema extends SchemaInterface = SchemaInterface> = {
+  /** oRPC procedures for building routers — fully typed from createDotProcedures */
+  procedures: ORPCKitWithO;
+
+  /** Database instance (if configured) */
+  db?: NodePgDatabase<TSchema>;
+
+  /** Key-value store instance (if configured) */
+  kv?: KV;
+
+  /** Event store instance (if configured) */
+  eventStore?: EventStore;
+
+  /** Message bus instance (if configured) */
+  messageBus?: MessageBus;
+}
+
 /**
  * Re-export context types
  */
-export type { DotContext, PluginSetupContext } from './types';
+export type { DotContext } from './types';
