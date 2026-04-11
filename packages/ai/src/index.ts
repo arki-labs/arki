@@ -105,6 +105,7 @@ export {
   type StreamOptions,
   AnthropicService,
   type AnthropicServiceConfig,
+  type SystemPart,
   // New LLM provider services
   GroqService,
   createGroqService,

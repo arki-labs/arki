@@ -5,7 +5,7 @@
 
 import { anthropic } from '@ai-sdk/anthropic';
 import { generateObject, generateText } from 'ai';
-import type { ModelMessage } from 'ai';
+import type { ModelMessage, SystemModelMessage } from 'ai';
 import type { z } from '@arki/contracts';
 
 type ChatMessage = ModelMessage;
@@ -15,10 +15,40 @@ import { GenerationError, RateLimitError, getErrorMessage } from '../errors';
 import { validateInput, aiServiceConfigSchema } from '../validation';
 import { rateLimiters } from '../utils/rate-limiter';
 
+/**
+ * A system prompt part that can optionally be cached via Anthropic's prompt caching.
+ * When `cacheControl` is set, the content is marked for caching at Anthropic's edge,
+ * reducing cost by ~90% on cache hits (5-minute TTL).
+ */
+export type SystemPart = {
+  text: string;
+  cacheControl?: { type: 'ephemeral' };
+};
+
 export type AnthropicServiceConfig = {
   model?: string;
   temperature?: number;
   maxRetries?: number;
+}
+
+/**
+ * Converts a system prompt (string or SystemPart[]) into the format expected by
+ * the Vercel AI SDK. When parts have `cacheControl`, they are passed via
+ * `providerOptions.anthropic.cacheControl` for Anthropic's prompt caching.
+ */
+function buildSystemParam(
+  systemPrompt: string | SystemPart[] | undefined,
+): string | SystemModelMessage[] | undefined {
+  if (!systemPrompt) return undefined;
+  if (typeof systemPrompt === 'string') return systemPrompt;
+
+  return systemPrompt.map((part): SystemModelMessage => ({
+    role: 'system',
+    content: part.text,
+    providerOptions: part.cacheControl
+      ? { anthropic: { cacheControl: part.cacheControl } }
+      : undefined,
+  }));
 }
 
 export class AnthropicService {
@@ -50,7 +80,7 @@ export class AnthropicService {
   async generateStructuredDataFromMessages<T>(
     messages: ChatMessage[],
     schema: z.ZodSchema<T>,
-    options: { temperature?: number; maxRetries?: number; systemPrompt?: string } = {},
+    options: { temperature?: number; maxRetries?: number; systemPrompt?: string | SystemPart[] } = {},
   ): Promise<T> {
     debugService(
       '[Anthropic] Generating structured data (messages: %d, temperature: %d)',
@@ -58,20 +88,26 @@ export class AnthropicService {
       options.temperature ?? this.defaultTemperature,
     );
 
+    const system = buildSystemParam(options.systemPrompt);
+
     const result = await rateLimiters.anthropic.execute('generateStructuredDataFromMessages', async () => {
       try {
         debugService('[Anthropic] Calling Anthropic API for structured generation');
 
         const response = await generateObject({
           model: anthropic(this.model),
-          system: options.systemPrompt,
+          system,
           messages,
           schema: schema as any,
           maxRetries: options.maxRetries ?? this.defaultMaxRetries,
           temperature: options.temperature ?? this.defaultTemperature,
         });
 
-        debugService('[Anthropic] Structured data generated successfully');
+        debugService(
+          '[Anthropic] Structured data generated successfully (cache: creation=%d, read=%d)',
+          (response.providerMetadata?.anthropic as Record<string, number> | undefined)?.cacheCreationInputTokens ?? 0,
+          (response.providerMetadata?.anthropic as Record<string, number> | undefined)?.cacheReadInputTokens ?? 0,
+        );
 
         return response.object as T;
       } catch (error) {
