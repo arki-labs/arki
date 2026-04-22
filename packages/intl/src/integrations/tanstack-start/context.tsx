@@ -1,14 +1,14 @@
 import { createContext, useContext } from 'react';
-import { NextIntlClientProvider } from 'next-intl';
+import { IntlProvider } from 'use-intl';
 
 const LocaleContext = createContext<string>('en');
 
 /**
  * Provides locale to TanStack Start apps.
  *
- * Also mounts next-intl/use-intl context so that @arki/sitekit components
- * that call useLocale() or useTranslations() from use-intl work without
- * requiring a separate NextIntlClientProvider.
+ * Mounts `use-intl`'s `IntlProvider` so shared components that call
+ * `useLocale()` / `useTranslations()` from `use-intl` (e.g. `@arki/sitekit`)
+ * resolve context correctly under Vite SSR.
  */
 export const LocaleProvider = ({
   locale = 'en',
@@ -20,9 +20,9 @@ export const LocaleProvider = ({
   children: React.ReactNode;
 }) => (
   <LocaleContext.Provider value={locale}>
-    <NextIntlClientProvider locale={locale} messages={messages}>
+    <IntlProvider locale={locale} messages={messages}>
       {children}
-    </NextIntlClientProvider>
+    </IntlProvider>
   </LocaleContext.Provider>
 );
 

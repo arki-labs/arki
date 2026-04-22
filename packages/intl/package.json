@@ -44,8 +44,7 @@
     "all-iso-language-codes": "catalog:",
     "cldr-core": "catalog:",
     "full-icu": "catalog:",
-    "next-intl": "catalog:",
-    "react-intl": "catalog:"
+    "use-intl": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
