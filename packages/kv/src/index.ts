@@ -32,6 +32,20 @@ export class KV {
     });
     this.#keyv = new Keyv({ store, namespace: this.namespace });
     this.#keyv.on('error', err => {
+      // `SocketClosedUnexpectedlyError` from @redis/client fires during
+      // normal events: dev-server SSR reloads tearing down the old module,
+      // network blips that auto-reconnect, Redis server restarts. The
+      // client retries transparently; callers see no effect unless a KV
+      // call is in flight at that moment (and those throw at the call site
+      // with a meaningful stack). Keep the noise at debug level.
+      //
+      // Any other Keyv error is genuinely unexpected and still loud.
+      const isTransientSocketClose =
+        err instanceof Error && err.name === 'SocketClosedUnexpectedlyError';
+      if (isTransientSocketClose) {
+        debugKV('[kv] Keyv socket closed (transient): %s', err.message);
+        return;
+      }
       debugKV('[kv] Keyv connection error: %s', err.message);
       console.error('Keyv connection error:', err);
     });
