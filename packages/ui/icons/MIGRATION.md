@@ -1,11 +1,35 @@
 # Lucide → Phosphor Migration
 
-**Status:** Phosphor available alongside Lucide. Lucide is **not** removed yet — apps migrate
-one at a time, then `lucide-react` is dropped from the catalog.
+**Status:** Every workspace consumer has been migrated. `@arki/icons/lucide` and the bare
+`@arki/icons` barrel still re-export Lucide for backwards compatibility, but **no source file
+imports from them anymore**. The final step (drop `lucide-react` from the catalog and remove
+the Lucide barrel files) waits on browser-level visual QA across apps.
+
+**Done**
+
+- Apps with `<WorkbenchIconDefaults>` mounted (`weight: 'regular'`): `hyphenate`, `sudoku`,
+  `typeroom`, `diffdigg`, `ucssr`, `toolsforwords`, `toolsforstructures`, `brandability`,
+  `evervest`, `games-platform`, `loonytools`.
+- Apps with `<AtelierIconDefaults>` mounted (`weight: 'duotone'`): `ekuation`, `manuscribed`,
+  `domodoro`.
+- Apps with no shared design system (Phosphor's default `regular` is used): `novelette`,
+  `holyspace`/`everseek`, `kapodopera`, `strophie`, `readingpath`, `solitairium`,
+  `movietracker`, `forkworks`, `avocabo`.
+- Shared packages migrated: `@arki/sitekit`, `@arki/ui/base`, `@arki/ui/chat`,
+  `@arki/games/sudoku`, `@arki/games/solitaire-ui`, `@arki/content`, `@arki/rich-text`,
+  `@arki/code-editor`, `@arki/images`.
+
+**Still on Lucide (intentional)**
+
+- `packages/ui/icons/src/lucide.ts` and its semantic alias siblings (`heart.ts`,
+  `calculator.ts`, etc.) — they keep `@arki/icons/lucide` working as a compat barrel until
+  removal.
+- `packages/ui/native/src/components/{alert,icon}.tsx` — these import from `lucide-react-native`,
+  not the web Lucide. Untouched by this migration.
 
 **Decisions in force**
 
-- **Mode:** Phosphor first, drop Lucide later (additive — both libs ship until migration completes).
+- **Mode:** Phosphor first, drop Lucide later (additive — both libs ship until removal).
 - **Default weight:** per design system. Atelier uses `duotone`; workbench uses `regular`. See
   `src/phosphor-defaults.tsx`. Tune in one place per system.
 - **Missing icons:** closest manual mapping — see table below. No Iconify fallback.
