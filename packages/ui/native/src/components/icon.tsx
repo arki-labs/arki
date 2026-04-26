@@ -1,9 +1,15 @@
 import { cn } from '~/lib/cn';
-import type { LucideIcon, LucideProps } from 'lucide-react-native';
+import type { Icon as PhosphorIcon, IconProps as PhosphorIconProps } from 'phosphor-react-native';
 import { styled } from 'nativewind';
 
-type IconProps = LucideProps & {
-  as: LucideIcon;
+type IconProps = PhosphorIconProps & {
+  as: PhosphorIcon;
+  /**
+   * Nativewind className. Phosphor RN's `IconProps` doesn't declare it because the
+   * upstream package is unaware of Nativewind, but `styled()` rewrites it to `style`
+   * at runtime, so the Icon wrapper must surface it on the public API.
+   */
+  className?: string;
 };
 
 function IconImpl({ as: IconComponent, ...props }: IconProps) {
@@ -21,24 +27,25 @@ const StyledIconImpl = styled(IconImpl, {
 });
 
 /**
- * A wrapper component for Lucide icons with Nativewind `className` support via `styled`.
+ * A wrapper component for Phosphor React Native icons with Nativewind `className` support
+ * via `styled`.
  *
- * This component allows you to render any Lucide icon while applying utility classes
+ * This component allows you to render any Phosphor icon while applying utility classes
  * using `nativewind`. It avoids the need to wrap or configure each icon individually.
  *
  * @component
  * @example
  * ```tsx
- * import { ArrowRight } from 'lucide-react-native';
+ * import { ArrowRight } from 'phosphor-react-native';
  * import { Icon } from '@/registry/components/ui/icon';
  *
  * <Icon as={ArrowRight} className="text-red-500" size={16} />
  * ```
  *
- * @param {LucideIcon} as - The Lucide icon component to render.
- * @param {string} className - Utility classes to style the icon using Nativewind.
- * @param {number} size - Icon size (defaults to 14).
- * @param {...LucideProps} ...props - Additional Lucide icon props passed to the "as" icon.
+ * @param as - The Phosphor icon component to render.
+ * @param className - Utility classes to style the icon via Nativewind.
+ * @param size - Icon size (defaults to 14).
+ * @param props - Additional Phosphor icon props (`weight`, `color`, `mirrored`, …) passed to the `as` icon.
  */
 function Icon({ as: IconComponent, className, size = 14, ...props }: IconProps) {
   return (

@@ -3,7 +3,7 @@ import { NativeOnlyAnimatedView } from '~/components/native-only-animated-view';
 import { TextClassContext } from '~/components/text';
 import { cn } from '~/lib/cn';
 import * as DropdownMenuPrimitive from '@rn-primitives/dropdown-menu';
-import { Check, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react-native';
+import { Check, CaretDown, CaretRight, CaretUp } from 'phosphor-react-native';
 import * as React from 'react';
 import {
   Platform,
@@ -43,7 +43,7 @@ function DropdownMenuSubTrigger({
     inset?: boolean;
   }) {
   const { open } = DropdownMenuPrimitive.useSubContext();
-  const icon = Platform.OS === 'web' ? ChevronRight : open ? ChevronUp : ChevronDown;
+  const icon = Platform.OS === 'web' ? CaretRight : open ? CaretUp : CaretDown;
   return (
     <TextClassContext.Provider
       value={cn(

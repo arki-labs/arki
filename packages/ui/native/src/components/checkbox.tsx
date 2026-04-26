@@ -1,7 +1,7 @@
 import { Icon } from '~/components/icon';
 import { cn } from '~/lib/cn';
 import * as CheckboxPrimitive from '@rn-primitives/checkbox';
-import { Check } from 'lucide-react-native';
+import { Check } from 'phosphor-react-native';
 import { Platform } from 'react-native';
 
 const DEFAULT_HIT_SLOP = 24;
@@ -37,7 +37,7 @@ function Checkbox({
         <Icon
           as={Check}
           size={12}
-          strokeWidth={Platform.OS === 'web' ? 2.5 : 3.5}
+          weight={Platform.OS === 'web' ? 'bold' : 'duotone'}
           className={cn('text-primary-foreground', iconClassName)}
         />
       </CheckboxPrimitive.Indicator>

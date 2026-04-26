@@ -60,7 +60,7 @@
     "@rn-primitives/tooltip": "catalog:expo",
     "class-variance-authority": "catalog:styling",
     "clsx": "catalog:styling",
-    "lucide-react-native": "catalog:expo",
+    "phosphor-react-native": "catalog:expo",
     "tailwind-merge": "catalog:styling"
   },
   "devDependencies": {

@@ -19,13 +19,31 @@ the Lucide barrel files) waits on browser-level visual QA across apps.
   `@arki/games/sudoku`, `@arki/games/solitaire-ui`, `@arki/content`, `@arki/rich-text`,
   `@arki/code-editor`, `@arki/images`.
 
+**React Native side**
+
+`packages/ui/native` (the `@arki/native-ui` package) has been switched from
+`lucide-react-native` to `phosphor-react-native@^3.0.6` — a community-maintained
+port whose API mirrors web Phosphor (same `weight`, `size`, `color`, `mirrored`,
+same `IconContext`). The 9 affected files (`icon.tsx`, `alert.tsx`, `accordion.tsx`,
+`checkbox.tsx`, `context-menu.tsx`, `dialog.tsx`, `dropdown-menu.tsx`, `menubar.tsx`,
+`select.tsx`, `toggle.tsx`, `toggle-group.tsx`) now import directly from
+`phosphor-react-native`. The native package depends on it directly — `@arki/icons`
+intentionally does not, because `phosphor-react-native` peer-deps `react-native`
+and `react-native-svg` and we don't want those leaking into web consumers.
+
+The wrapper at `packages/ui/native/src/components/icon.tsx` adds a `className?: string`
+field on top of Phosphor's `IconProps` — Phosphor RN doesn't declare it, but
+Nativewind's `styled()` rewrites `className` to `style` at runtime so the public
+API needs to surface it.
+
+Note: `phosphor-react-native` is not in the official `@phosphor-icons/*` org. If
+the org ever ships an official RN port, the path forward is straightforward.
+
 **Still on Lucide (intentional)**
 
 - `packages/ui/icons/src/lucide.ts` and its semantic alias siblings (`heart.ts`,
   `calculator.ts`, etc.) — they keep `@arki/icons/lucide` working as a compat barrel until
   removal.
-- `packages/ui/native/src/components/{alert,icon}.tsx` — these import from `lucide-react-native`,
-  not the web Lucide. Untouched by this migration.
 
 **Decisions in force**
 

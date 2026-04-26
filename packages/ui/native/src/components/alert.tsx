@@ -1,10 +1,10 @@
 import { Icon } from '~/components/icon';
 import { Text, TextClassContext } from '~/components/text';
 import { cn } from '~/lib/cn';
-import type { Icon as LucideIcon } from "@arki/icons/phosphor";
+import type { Icon as PhosphorIcon } from 'phosphor-react-native';
 import * as React from 'react';
-import { View  } from 'react-native';
-import type {ViewProps} from 'react-native';
+import { View } from 'react-native';
+import type { ViewProps } from 'react-native';
 
 function Alert({
   className,
@@ -15,7 +15,7 @@ function Alert({
   ...props
 }: ViewProps &
   React.RefAttributes<View> & {
-    icon: LucideIcon;
+    icon: PhosphorIcon;
     variant?: 'default' | 'destructive';
     iconClassName?: string;
   }) {
