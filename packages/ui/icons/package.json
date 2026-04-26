@@ -18,6 +18,21 @@
       "import": "./src/brands/index.ts",
       "browser": "./src/brands/index.ts"
     },
+    "./phosphor": {
+      "types": "./dist/src/phosphor.d.ts",
+      "import": "./src/phosphor.ts",
+      "browser": "./src/phosphor.ts"
+    },
+    "./phosphor/ssr": {
+      "types": "./dist/src/phosphor-ssr.d.ts",
+      "import": "./src/phosphor-ssr.ts",
+      "browser": "./src/phosphor-ssr.ts"
+    },
+    "./phosphor/defaults": {
+      "types": "./dist/src/phosphor-defaults.d.ts",
+      "import": "./src/phosphor-defaults.tsx",
+      "browser": "./src/phosphor-defaults.tsx"
+    },
     "./*": {
       "types": "./dist/src/*.d.ts",
       "import": "./src/*.ts",
@@ -46,6 +61,7 @@
     "@iconify/json": "catalog:",
     "@iconify/react": "catalog:",
     "@iconify/tailwind4": "catalog:",
+    "@phosphor-icons/react": "catalog:",
     "flag-icons": "catalog:",
     "flagpack-core": "catalog:",
     "lucide-react": "catalog:",
