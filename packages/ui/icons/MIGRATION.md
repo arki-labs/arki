@@ -1,9 +1,15 @@
 # Lucide → Phosphor Migration
 
-**Status:** Every workspace consumer has been migrated. `@arki/icons/lucide` and the bare
-`@arki/icons` barrel still re-export Lucide for backwards compatibility, but **no source file
-imports from them anymore**. The final step (drop `lucide-react` from the catalog and remove
-the Lucide barrel files) waits on browser-level visual QA across apps.
+**Status: complete.** `lucide-react` and `lucide-react-native` are no longer in the
+workspace catalog or any package's dependency graph. `@arki/icons/lucide` and the
+Lucide-backed alias paths (`@arki/icons/calculator`, `/finance`, `/heart`, `/lightbulb`,
+`/search`) have been deleted. `@arki/icons` (the bare root barrel) now re-exports from
+Phosphor, so any future code can write `import { Heart } from '@arki/icons'` and get
+a Phosphor icon.
+
+The non-Lucide subpaths under `@arki/icons` are unchanged: `/types` (the local
+`IconSVG` type), `/flags` (`react-flagpack`), `/brands` (`simple-icons`), `/home`
+(Twemoji via `unplugin-icons`), `/wc` (Iconify's `addIcon`).
 
 **Done**
 
@@ -39,15 +45,9 @@ API needs to surface it.
 Note: `phosphor-react-native` is not in the official `@phosphor-icons/*` org. If
 the org ever ships an official RN port, the path forward is straightforward.
 
-**Still on Lucide (intentional)**
-
-- `packages/ui/icons/src/lucide.ts` and its semantic alias siblings (`heart.ts`,
-  `calculator.ts`, etc.) — they keep `@arki/icons/lucide` working as a compat barrel until
-  removal.
-
 **Decisions in force**
 
-- **Mode:** Phosphor first, drop Lucide later (additive — both libs ship until removal).
+- **Mode:** done. `lucide-react` / `lucide-react-native` are gone from the catalog.
 - **Default weight:** per design system. Atelier uses `duotone`; workbench uses `regular`. See
   `src/phosphor-defaults.tsx`. Tune in one place per system.
 - **Missing icons:** closest manual mapping — see table below. No Iconify fallback.

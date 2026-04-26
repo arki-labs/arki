@@ -1,2 +1,2 @@
-export * from './lucide';
+export * from './phosphor';
 export * from './types';
