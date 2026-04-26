@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { OTPInput, OTPInputContext } from 'input-otp';
 
-import { MinusIcon } from '@arki/icons';
+import { MinusIcon } from '@arki/icons/phosphor';
 
 import { cn } from './cn';
 

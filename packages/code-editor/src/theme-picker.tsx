@@ -1,6 +1,6 @@
 'use client';
 
-import { PaletteIcon } from '@arki/icons/lucide';
+import { PaletteIcon } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 import { Popover, PopoverContent, PopoverTrigger } from '@arki/ui/popover';
 

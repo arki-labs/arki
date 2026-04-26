@@ -4,7 +4,7 @@ import type { LinkComponent } from '@arki/intl/types';
 import { Button } from '@arki/ui/button';
 import { Pagination, PaginationContent, PaginationLink } from '@arki/ui/pagination';
 import { toHumanReadableDate } from '@arki/date/format';
-import { ChevronLeft, ChevronRight, Rss } from '@arki/icons';
+import { CaretLeft, CaretRight, Rss } from '@arki/icons/phosphor';
 import { useTranslations } from 'use-intl';
 
 import type { Changelog } from '../collections/changelog';
@@ -103,7 +103,7 @@ export function ChangelogPagination({ prev, next }: { prev?: Changelog; next?: C
         <div className="w-1/2 flex-1 text-left">
           <Button asChild variant="link">
             <a href={`/changelog/${prev.slug}`} className="group">
-              <ChevronLeft className="text-muted-foreground group-hover:text-foreground mr-2 h-4 w-4" />
+              <CaretLeft className="text-muted-foreground group-hover:text-foreground mr-2 h-4 w-4" />
               <span className="truncate">{prev.title}</span>
             </a>
           </Button>
@@ -116,7 +116,7 @@ export function ChangelogPagination({ prev, next }: { prev?: Changelog; next?: C
           <Button asChild variant="link">
             <a href={`/changelog/${next.slug}`} className="group">
               <span className="truncate">{next.title}</span>
-              <ChevronRight className="text-muted-foreground group-hover:text-foreground ml-2 h-4 w-4" />
+              <CaretRight className="text-muted-foreground group-hover:text-foreground ml-2 h-4 w-4" />
             </a>
           </Button>
         </div>

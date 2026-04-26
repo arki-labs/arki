@@ -5,7 +5,7 @@ import * as React from 'react';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
-import { GripVertical, Maximize2, Minimize2 } from '@arki/icons/lucide';
+import { DotsSixVertical, CornersOut, CornersIn } from '@arki/icons/phosphor';
 import { cn } from './cn';
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -169,7 +169,7 @@ function ToolPanelHandle({ className }: { className?: string }) {
           'group-data-[resize-handle-state=drag]:border-primary/60 group-data-[resize-handle-state=drag]:bg-primary/5',
         )}
       >
-        <GripVertical className="h-3 w-3 text-muted-foreground group-hover:text-foreground" />
+        <DotsSixVertical className="h-3 w-3 text-muted-foreground group-hover:text-foreground" />
       </div>
     </PanelResizeHandle>
   );
@@ -195,7 +195,7 @@ function PanelExpandButton({ panelId }: { panelId: string }) {
       className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       title={isMaximized ? 'Restore panel' : 'Expand panel'}
     >
-      {isMaximized ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+      {isMaximized ? <CornersIn className="h-3 w-3" /> : <CornersOut className="h-3 w-3" />}
     </button>
   );
 }

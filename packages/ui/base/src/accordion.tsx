@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { Accordion as AccordionPrimitive } from '@base-ui/react/accordion';
 
-import { ChevronDownIcon, ChevronUpIcon } from '@arki/icons';
+import { CaretDownIcon, CaretUpIcon } from '@arki/icons/phosphor';
 
 import { cn } from './cn';
 
@@ -33,8 +33,8 @@ function AccordionTrigger({ className, children, ...props }: AccordionPrimitive.
         {...props}
       >
         {children}
-        <ChevronDownIcon className="text-muted-foreground pointer-events-none shrink-0 group-aria-expanded/accordion-trigger:hidden" />
-        <ChevronUpIcon className="text-muted-foreground pointer-events-none hidden shrink-0 group-aria-expanded/accordion-trigger:inline" />
+        <CaretDownIcon className="text-muted-foreground pointer-events-none shrink-0 group-aria-expanded/accordion-trigger:hidden" />
+        <CaretUpIcon className="text-muted-foreground pointer-events-none hidden shrink-0 group-aria-expanded/accordion-trigger:inline" />
       </AccordionPrimitive.Trigger>
     </AccordionPrimitive.Header>
   );

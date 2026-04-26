@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { cn } from '@arki/ui/cn';
-import { AlertTriangle, CheckCircle, Lightbulb, XOctagon } from '@arki/icons';
+import { Warning, CheckCircle, Lightbulb, XCircle } from '@arki/icons/phosphor';
 
 export const types = ['info', 'success', 'warning', 'error'] as const;
 
@@ -17,8 +17,8 @@ type Props = {
 const icons = {
   info: Lightbulb,
   success: CheckCircle,
-  warning: AlertTriangle,
-  error: XOctagon,
+  warning: Warning,
+  error: XCircle,
 };
 
 export const Notification = ({ title, children, type = 'warning', prose = false }: Props) => {

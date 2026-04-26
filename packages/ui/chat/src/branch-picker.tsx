@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { BranchPickerPrimitive } from '@assistant-ui/react';
-import { ChevronLeft, ChevronRight } from '@arki/icons';
+import { CaretLeft, CaretRight } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
 function BranchPicker({ className, ...props }: React.ComponentProps<'div'>) {
@@ -38,7 +38,7 @@ function BranchPickerPrevious({
       className={cn(navButtonStyles, className)}
       {...props}
     >
-      <ChevronLeft className="size-3" />
+      <CaretLeft className="size-3" />
       <span className="sr-only">Previous version</span>
     </BranchPickerPrimitive.Previous>
   );
@@ -54,7 +54,7 @@ function BranchPickerNext({
       className={cn(navButtonStyles, className)}
       {...props}
     >
-      <ChevronRight className="size-3" />
+      <CaretRight className="size-3" />
       <span className="sr-only">Next version</span>
     </BranchPickerPrimitive.Next>
   );

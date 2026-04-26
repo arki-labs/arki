@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Check, Circle, Loader2 } from '@arki/icons';
+import { Check, Circle, CircleNotch } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
 import type { AgentStep } from './types';
@@ -71,7 +71,7 @@ function StepIcon({ status }: { status: AgentStep['status'] }) {
     case 'active': {
       return (
         <div className={cn(base, 'bg-primary/10 border-primary border')}>
-          <Loader2 className="text-primary size-3 animate-spin" />
+          <CircleNotch className="text-primary size-3 animate-spin" />
         </div>
       );
     }

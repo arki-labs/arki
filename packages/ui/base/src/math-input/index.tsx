@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 
-import { Sigma } from '@arki/icons/lucide';
+import { Sigma } from '@arki/icons/phosphor';
 
 import { Button } from '../button';
 import { cn } from '../cn';

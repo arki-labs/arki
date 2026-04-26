@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { Dialog as SheetPrimitive } from '@base-ui/react/dialog';
 
-import { XIcon } from '@arki/icons';
+import { XIcon } from '@arki/icons/phosphor';
 
 import { cn } from './cn';
 

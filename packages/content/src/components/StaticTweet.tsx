@@ -1,4 +1,4 @@
-import { XIcon } from '@arki/icons';
+import { XIcon } from '@arki/icons/phosphor';
 
 import type { Tweet } from '../lib/mdxEmbedder/twitter';
 import DateTime from './DateTime';

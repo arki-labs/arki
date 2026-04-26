@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { ActionBarPrimitive } from '@assistant-ui/react';
-import { Check, Copy, Pencil, RefreshCw } from '@arki/icons';
+import { Check, Copy, Pencil, ArrowsClockwise } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
 function ActionBar({ className, ...props }: React.ComponentProps<typeof ActionBarPrimitive.Root>) {
@@ -40,7 +40,7 @@ function ActionBarReload({ className, ...props }: React.ComponentProps<typeof Ac
       className={cn(actionButtonStyles, className)}
       {...props}
     >
-      <RefreshCw className="size-3.5" />
+      <ArrowsClockwise className="size-3.5" />
       <span className="sr-only">Regenerate</span>
     </ActionBarPrimitive.Reload>
   );

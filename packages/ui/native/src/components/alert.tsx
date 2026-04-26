@@ -1,7 +1,7 @@
 import { Icon } from '~/components/icon';
 import { Text, TextClassContext } from '~/components/text';
 import { cn } from '~/lib/cn';
-import type { LucideIcon } from 'lucide-react-native';
+import type { Icon as LucideIcon } from "@arki/icons/phosphor";
 import * as React from 'react';
 import { View  } from 'react-native';
 import type {ViewProps} from 'react-native';

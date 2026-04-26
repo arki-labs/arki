@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { ChevronRight, MoreHorizontal } from '@arki/icons';
+import { CaretRight, DotsThree } from '@arki/icons/phosphor';
 
 import { cn } from './cn';
 
@@ -73,7 +73,7 @@ function BreadcrumbSeparator({ children, className, ...props }: React.ComponentP
       className={cn('[&>svg]:size-3.5', className)}
       {...props}
     >
-      {children ?? <ChevronRight />}
+      {children ?? <CaretRight />}
     </li>
   );
 }
@@ -87,7 +87,7 @@ function BreadcrumbEllipsis({ className, ...props }: React.ComponentProps<'span'
       className={cn('flex size-9 items-center justify-center', className)}
       {...props}
     >
-      <MoreHorizontal className="size-4" />
+      <DotsThree className="size-4" />
       <span className="sr-only">More</span>
     </span>
   );

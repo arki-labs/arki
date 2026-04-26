@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { DayPicker } from 'react-day-picker';
 
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from '@arki/icons';
+import { CaretDown, CaretLeft, CaretRight, CaretUp } from '@arki/icons/phosphor';
 
 import { buttonVariants } from './button';
 import { cn } from './cn';
@@ -109,18 +109,18 @@ function Calendar({
       components={{
         Chevron: ({ className, ...props }) => {
           if (props.orientation === 'left') {
-            return <ChevronLeft className={cn('size-4', className)} {...props} />;
+            return <CaretLeft className={cn('size-4', className)} {...props} />;
           }
 
           if (props.orientation === 'right') {
-            return <ChevronRight className={cn('size-4', className)} {...props} />;
+            return <CaretRight className={cn('size-4', className)} {...props} />;
           }
 
           if (props.orientation === 'up') {
-            return <ChevronUp className={cn('size-4', className)} {...props} />;
+            return <CaretUp className={cn('size-4', className)} {...props} />;
           }
 
-          return <ChevronDown className={cn('size-4', className)} {...props} />;
+          return <CaretDown className={cn('size-4', className)} {...props} />;
         },
       }}
       {...props}

@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { ContextMenu as ContextMenuPrimitive } from '@base-ui/react/context-menu';
 
-import { CheckIcon, ChevronRightIcon, CircleIcon } from '@arki/icons';
+import { CheckIcon, CaretRightIcon, CircleIcon } from '@arki/icons/phosphor';
 
 import { cn } from './cn';
 
@@ -50,7 +50,7 @@ function ContextMenuSubTrigger({
       {...props}
     >
       {children}
-      <ChevronRightIcon className="ml-auto" />
+      <CaretRightIcon className="ml-auto" />
     </ContextMenuPrimitive.SubmenuTrigger>
   );
 }

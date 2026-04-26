@@ -3,7 +3,7 @@
 import type { ComponentProps } from 'react';
 
 import { format } from '@arki/date/format';
-import { CalendarIcon } from '@arki/icons';
+import { CalendarIcon } from '@arki/icons/phosphor';
 
 import { Button } from './button';
 import { Calendar } from './calendar';

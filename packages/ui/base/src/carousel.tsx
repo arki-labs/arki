@@ -4,7 +4,7 @@ import type { UseEmblaCarouselType } from 'embla-carousel-react';
 import * as React from 'react';
 import useEmblaCarousel from 'embla-carousel-react';
 
-import { ArrowLeft, ArrowRight } from '@arki/icons';
+import { ArrowLeft, ArrowRight } from '@arki/icons/phosphor';
 
 import { Button } from './button';
 import { cn } from './cn';

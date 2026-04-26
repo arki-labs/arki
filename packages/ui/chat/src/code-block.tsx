@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Check, Copy } from '@arki/icons';
+import { Check, Copy } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
 type CodeBlockProps = React.ComponentProps<'div'> & {

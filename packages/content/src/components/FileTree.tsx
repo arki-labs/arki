@@ -1,5 +1,5 @@
 import { cn } from '@arki/ui/cn';
-import { CornerDownRight, File, FolderOpen } from '@arki/icons';
+import { ArrowBendDownRight, File, FolderOpen } from '@arki/icons/phosphor';
 
 type DirectoryNode = {
   name: string;
@@ -55,7 +55,7 @@ const LeafNode = ({ node, depth }: NodeProps) => {
     <li className="flex gap-1">
       {depth > 0 ? (
         <div className="flex items-center justify-end" style={{ width: depth * 24 }}>
-          <CornerDownRight className="text-base-300 dark:text-base-600 w-4" />
+          <ArrowBendDownRight className="text-base-300 dark:text-base-600 w-4" />
         </div>
       ) : null}
       <Icon className="w-6" />

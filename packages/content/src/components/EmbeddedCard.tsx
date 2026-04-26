@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import type { LucideIcon } from '@arki/icons';
+import type { Icon as LucideIcon } from "@arki/icons/phosphor";
 import { AvatarImage } from '@arki/ui/avatar';
 import { cn } from '@arki/ui/cn';
 

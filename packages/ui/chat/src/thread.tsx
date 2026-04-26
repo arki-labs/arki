@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { ThreadPrimitive } from '@assistant-ui/react';
-import { ArrowDown } from '@arki/icons';
+import { ArrowDown } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
 function ThreadRoot({ className, ...props }: React.ComponentProps<typeof ThreadPrimitive.Root>) {

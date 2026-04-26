@@ -1,4 +1,4 @@
-import { Github } from '@arki/icons';
+import { GithubLogo } from '@arki/icons/phosphor';
 
 import type { Issue, PullRequest, Repository } from '../lib/mdxEmbedder/github';
 import DateTime from './DateTime';
@@ -18,7 +18,7 @@ type Props =
 
 const EmbeddedEntity = ({ repository, entity, type }: Props) => (
   <EmbeddedCard href={entity.url}>
-    <EmbeddedCard.Title icon={Github}>
+    <EmbeddedCard.Title icon={GithubLogo}>
       <p className="text-lg font-bold">
         <span className="text-base-500 dark:text-base-400">
           {repository.owner}/{repository.name}

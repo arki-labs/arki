@@ -5,7 +5,7 @@ import * as React from 'react';
 import { cva } from 'class-variance-authority';
 import createDebug from 'debug';
 
-import { PanelLeftCloseIcon, PanelLeftOpenIcon } from '@arki/icons';
+import { SidebarIcon, SidebarSimpleIcon } from '@arki/icons/phosphor';
 import { useIsClient } from '@arki/react-hooks/is-client';
 import { useIsMobile, useIsTablet } from '@arki/react-hooks/media-query';
 
@@ -362,9 +362,9 @@ function SidebarTrigger({
           {...props}
         >
           {open ? (
-            <PanelLeftCloseIcon className={cn('size-4', iconClassName)} />
+            <SidebarSimpleIcon className={cn('size-4', iconClassName)} />
           ) : (
-            <PanelLeftOpenIcon className={cn('size-4', iconClassName)} />
+            <SidebarIcon className={cn('size-4', iconClassName)} />
           )}
           <span className="sr-only">{title}</span>
         </Button>

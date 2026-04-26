@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { AlertTriangle, Check, Pencil, X } from '@arki/icons';
+import { Warning, Check, Pencil, X } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
 import type { ApprovalAction, ApprovalResult } from './types';
@@ -41,7 +41,7 @@ function ApprovalCard({ className, title, description, onAction, children, ...pr
       {...props}
     >
       <div className="flex items-start gap-3">
-        <AlertTriangle className="text-warning mt-0.5 size-5 shrink-0" />
+        <Warning className="text-warning mt-0.5 size-5 shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">{title}</p>
           {description && <p className="text-muted-foreground mt-1 text-sm">{description}</p>}

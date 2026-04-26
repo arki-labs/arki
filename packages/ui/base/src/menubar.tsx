@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { Menubar as MenubarPrimitive } from '@base-ui/react/menubar';
 
-import { ChevronRightIcon } from '@arki/icons';
+import { CaretRightIcon } from '@arki/icons/phosphor';
 
 import { cn } from './cn';
 import {
@@ -196,7 +196,7 @@ function MenubarSubTrigger({
       {...props}
     >
       {children}
-      <ChevronRightIcon className="ml-auto h-4 w-4" />
+      <CaretRightIcon className="ml-auto h-4 w-4" />
     </DropdownMenuSubTrigger>
   );
 }

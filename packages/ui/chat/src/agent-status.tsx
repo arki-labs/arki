@@ -2,7 +2,7 @@
 
 import type { VariantProps } from 'class-variance-authority';
 import * as React from 'react';
-import { AlertCircle, Brain, CheckCircle2, Loader2, MessageSquare, Pause } from '@arki/icons';
+import { WarningCircle, Brain, CheckCircle, CircleNotch, ChatTeardrop, Pause } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 import { cva } from 'class-variance-authority';
 
@@ -47,22 +47,22 @@ function AgentStatusIcon({ status }: { status: AgentStatusType }) {
   const iconClass = 'size-3';
   switch (status) {
     case 'idle': {
-      return <MessageSquare className={iconClass} />;
+      return <ChatTeardrop className={iconClass} />;
     }
     case 'thinking': {
       return <Brain className={iconClass} />;
     }
     case 'executing': {
-      return <Loader2 className={cn(iconClass, 'animate-spin')} />;
+      return <CircleNotch className={cn(iconClass, 'animate-spin')} />;
     }
     case 'waiting-for-input': {
       return <Pause className={iconClass} />;
     }
     case 'complete': {
-      return <CheckCircle2 className={iconClass} />;
+      return <CheckCircle className={iconClass} />;
     }
     case 'error': {
-      return <AlertCircle className={iconClass} />;
+      return <WarningCircle className={iconClass} />;
     }
   }
 }

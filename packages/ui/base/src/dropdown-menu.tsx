@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { Menu as MenuPrimitive } from '@base-ui/react/menu';
 
-import { CheckIcon, ChevronRightIcon, CircleIcon } from '@arki/icons';
+import { CheckIcon, CaretRightIcon, CircleIcon } from '@arki/icons/phosphor';
 
 import { cn } from './cn';
 
@@ -185,7 +185,7 @@ function DropdownMenuSubTrigger({
       {...props}
     >
       {children}
-      <ChevronRightIcon className="ml-auto size-4" />
+      <CaretRightIcon className="ml-auto size-4" />
     </MenuPrimitive.SubmenuTrigger>
   );
 }

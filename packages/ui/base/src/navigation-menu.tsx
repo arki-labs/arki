@@ -4,7 +4,7 @@ import * as React from 'react';
 import { NavigationMenu as NavigationMenuPrimitive } from '@base-ui/react/navigation-menu';
 import { cva } from 'class-variance-authority';
 
-import { ChevronDownIcon } from '@arki/icons';
+import { CaretDownIcon } from '@arki/icons/phosphor';
 
 import { cn } from './cn';
 
@@ -61,7 +61,7 @@ function NavigationMenuTrigger({
       {...props}
     >
       {children}{' '}
-      <ChevronDownIcon
+      <CaretDownIcon
         className="relative top-[1px] ml-1 size-3 transition duration-300 group-data-open:rotate-180"
         aria-hidden="true"
       />

@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { ComposerPrimitive } from '@assistant-ui/react';
-import { SendHorizontal } from '@arki/icons';
+import { PaperPlaneTilt } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
 function Composer({ className, ...props }: React.ComponentProps<typeof ComposerPrimitive.Root>) {
@@ -42,7 +42,7 @@ function ComposerSend({ className, ...props }: React.ComponentProps<typeof Compo
       )}
       {...props}
     >
-      <SendHorizontal className="size-4" />
+      <PaperPlaneTilt className="size-4" />
       <span className="sr-only">Send message</span>
     </ComposerPrimitive.Send>
   );

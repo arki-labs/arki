@@ -3,7 +3,7 @@
 import * as React from 'react';
 import type { ReasoningMessagePartProps } from '@assistant-ui/react';
 import { ChainOfThoughtPrimitive } from '@assistant-ui/react';
-import { Brain, ChevronDown } from '@arki/icons';
+import { Brain, CaretDown } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 
 type ThinkingBlockProps = React.ComponentProps<typeof ChainOfThoughtPrimitive.Root> & {
@@ -46,7 +46,7 @@ function ThinkingBlockTrigger({ label = 'Thinking', duration }: { label?: string
       {duration != null && (
         <span className="text-muted-foreground/60 text-xs">{formatDuration(duration)}</span>
       )}
-      <ChevronDown className="text-muted-foreground ml-auto size-3.5 transition-transform group-data-[state=open]:rotate-180" />
+      <CaretDown className="text-muted-foreground ml-auto size-3.5 transition-transform group-data-[state=open]:rotate-180" />
     </ChainOfThoughtPrimitive.AccordionTrigger>
   );
 }

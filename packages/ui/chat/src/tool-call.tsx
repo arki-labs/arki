@@ -2,7 +2,7 @@
 
 import type { VariantProps } from 'class-variance-authority';
 import * as React from 'react';
-import { AlertCircle, CheckCircle2, Loader2, Clock } from '@arki/icons';
+import { WarningCircle, CheckCircle, CircleNotch, Clock } from '@arki/icons/phosphor';
 import { cn } from '@arki/ui/cn';
 import { cva } from 'class-variance-authority';
 
@@ -54,13 +54,13 @@ function ToolCallStatusIcon({ status }: { status: ToolCallStatus }) {
       return <Clock className="text-muted-foreground size-4" />;
     }
     case 'running': {
-      return <Loader2 className="text-primary size-4 animate-spin" />;
+      return <CircleNotch className="text-primary size-4 animate-spin" />;
     }
     case 'complete': {
-      return <CheckCircle2 className="text-green-500 size-4" />;
+      return <CheckCircle className="text-green-500 size-4" />;
     }
     case 'error': {
-      return <AlertCircle className="text-destructive size-4" />;
+      return <WarningCircle className="text-destructive size-4" />;
     }
   }
 }

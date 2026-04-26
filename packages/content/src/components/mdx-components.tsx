@@ -5,7 +5,7 @@ import { Tweet } from 'react-tweet';
 import type { CalloutProps } from '@arki/ui/callout';
 import { Callout } from '@arki/ui/callout';
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@arki/ui/table';
-import { Hash } from '@arki/icons';
+import { Hash } from '@arki/icons/phosphor';
 
 import type { FileTreeProps } from './FileTree';
 import { FileTree } from './FileTree';

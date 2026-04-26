@@ -1,14 +1,14 @@
 import type { VariantProps } from 'class-variance-authority';
 import { cva } from 'class-variance-authority';
 
-import { Check, Info, Siren, TriangleAlert } from '@arki/icons';
+import { Check, Info, Siren, Warning } from '@arki/icons/phosphor';
 
 import { cn } from './cn';
 
 function getIcon(variant: CalloutProps['variant']) {
   switch (variant) {
     case 'warning': {
-      return TriangleAlert;
+      return Warning;
     }
     case 'success': {
       return Check;

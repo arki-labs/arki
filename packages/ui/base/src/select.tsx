@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { Select as SelectPrimitive } from '@base-ui/react/select';
 
-import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from '@arki/icons';
+import { CheckIcon, CaretDownIcon, CaretUpIcon } from '@arki/icons/phosphor';
 
 import { cn } from './cn';
 
@@ -40,7 +40,7 @@ function SelectTrigger({ className, children, ...props }: React.ComponentProps<t
       {...props}
     >
       {children}
-      <ChevronDownIcon className="size-4 shrink-0 opacity-50" />
+      <CaretDownIcon className="size-4 shrink-0 opacity-50" />
     </SelectPrimitive.Trigger>
   );
 }
@@ -122,7 +122,7 @@ function SelectScrollUpButton({ className, ...props }: React.ComponentProps<type
       className={cn('flex cursor-default items-center justify-center py-1', className)}
       {...props}
     >
-      <ChevronUpIcon className="size-4" />
+      <CaretUpIcon className="size-4" />
     </SelectPrimitive.ScrollUpArrow>
   );
 }
@@ -134,7 +134,7 @@ function SelectScrollDownButton({ className, ...props }: React.ComponentProps<ty
       className={cn('flex cursor-default items-center justify-center py-1', className)}
       {...props}
     >
-      <ChevronDownIcon className="size-4" />
+      <CaretDownIcon className="size-4" />
     </SelectPrimitive.ScrollDownArrow>
   );
 }
