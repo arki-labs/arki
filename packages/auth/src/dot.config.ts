@@ -30,7 +30,10 @@ export function initAuth(
 
     resendApiKey?: string;
   },
-): ReturnType<typeof betterAuth> {
+) {
+  // Return type intentionally inferred — explicit `ReturnType<typeof betterAuth>`
+  // widens to `Auth<BetterAuthOptions>` and clashes with the narrower inferred
+  // type post-better-auth API drift. Inference preserves the precise plugin shape.
   const options = {
     productionUrl: env.PRODUCTION_URL || userOptions.baseUrl,
     secret: env.AUTH_SECRET,

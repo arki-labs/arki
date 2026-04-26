@@ -214,7 +214,15 @@ function transformEmailConfig(config: DotAuthConfig): Partial<BetterAuthOptions>
   result.user = {
     changeEmail: {
       enabled: emailChangeEnabled,
-      sendChangeEmailVerification: async ({ user, newEmail, url }) => {
+      sendChangeEmailConfirmation: async ({
+        user,
+        newEmail,
+        url,
+      }: {
+        user: { email: string };
+        newEmail: string;
+        url: string;
+      }) => {
         // This will be overridden by the email provider
         console.log(`Change email for ${user.email} to ${newEmail}: ${url}`);
       },
