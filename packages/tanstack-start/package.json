@@ -43,6 +43,16 @@
       "import": "./src/scripts.ts",
       "browser": "./src/scripts.ts"
     },
+    "./error": {
+      "types": "./dist/src/error.d.ts",
+      "import": "./src/error.tsx",
+      "browser": "./src/error.tsx"
+    },
+    "./devtools": {
+      "types": "./dist/src/devtools.d.ts",
+      "import": "./src/devtools.tsx",
+      "browser": "./src/devtools.tsx"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -63,9 +73,11 @@
     "@orpc/client": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@orpc/tanstack-query": "catalog:backend",
+    "@tanstack/react-devtools": "catalog:tanstack/start",
     "@tanstack/react-query": "catalog:tanstack/react-query",
     "@tanstack/react-query-devtools": "catalog:tanstack/react-query",
     "@tanstack/react-router": "catalog:tanstack/start",
+    "@tanstack/react-router-devtools": "catalog:tanstack/start",
     "@tanstack/react-start": "catalog:tanstack/start",
     "@tanstack/start-vite-plugin": "catalog:tanstack/start",
 "@unpic/react": "catalog:tanstack/start",
