@@ -149,6 +149,11 @@
       "import": "./src/form.tsx",
       "browser": "./src/form.tsx"
     },
+    "./glass-card": {
+      "types": "./dist/src/glass-card.d.ts",
+      "import": "./src/glass-card.tsx",
+      "browser": "./src/glass-card.tsx"
+    },
     "./hover-card": {
       "types": "./dist/src/hover-card.d.ts",
       "import": "./src/hover-card.tsx",

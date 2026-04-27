@@ -2,6 +2,19 @@ export default {
   ComingSoon: {
     title: 'Bald vorbei',
   },
+  LocaleSwitcher: {
+    label: 'Sprache wechseln',
+    searchPlaceholder: 'Sprache suchen…',
+    empty: 'Keine passende Sprache.',
+    suggested: 'Für dich empfohlen',
+    region: {
+      europe: 'Europa',
+      americas: 'Amerika',
+      asiaPacific: 'Asien · Pazifik',
+      middleEast: 'Naher Osten',
+      africa: 'Afrika',
+    },
+  },
   PostsTimeline: {
     title: 'Beiträge',
     description: 'Alle neuesten Artikel und Neuigkeiten aus {appTitle}.',

@@ -2,6 +2,19 @@ export default {
   ComingSoon: {
     title: 'Coming Soon',
   },
+  LocaleSwitcher: {
+    label: 'Switch language',
+    searchPlaceholder: 'Search language…',
+    empty: 'No matching language.',
+    suggested: 'Suggested for you',
+    region: {
+      europe: 'Europe',
+      americas: 'Americas',
+      asiaPacific: 'Asia · Pacific',
+      middleEast: 'Middle East',
+      africa: 'Africa',
+    },
+  },
   PostsTimeline: {
     title: 'Posts',
     description: 'All the latest articles and news from {appTitle}.',

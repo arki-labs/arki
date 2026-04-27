@@ -9,6 +9,7 @@ describe('@arki/ui design system helpers', () => {
 
   it('resolves known ids unchanged', () => {
     expect(resolveUiDesignSystemId('workbench')).toBe('workbench');
+    expect(resolveUiDesignSystemId('arena')).toBe('arena');
   });
 
   it('falls back to default for invalid values', () => {
