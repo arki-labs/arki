@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 /**
  * Jotai panel for the unified devtools shell.
  *
@@ -22,10 +23,9 @@ import { DevTools as JotaiDevTools } from 'jotai-devtools';
 import type { createStore } from 'jotai';
 
 // Side-effect import — Jotai devtools' panel needs its own stylesheet to
-// render correctly. The package doesn't ship a `.d.ts` for the css import,
-// hence the suppression. The file is only loaded inside this dev-only
-// module so it never reaches production bundles.
-// @ts-expect-error — no types for the .css side-effect import
+// render correctly. Typed via `vite/client` (see vite-env.d.ts). The file
+// is only loaded inside this dev-only module so it never reaches
+// production bundles.
 import 'jotai-devtools/styles.css';
 
 const HIDE_INNER_TRIGGER_STYLES = `

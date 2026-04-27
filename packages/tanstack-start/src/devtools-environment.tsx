@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 /**
  * Environment panel for the unified devtools shell.
  *

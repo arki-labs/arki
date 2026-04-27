@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 /**
  * Unified dev-only devtools shell for TanStack Start apps.
  *
