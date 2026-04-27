@@ -50,7 +50,7 @@ function ContextMenuSubTrigger({
       {...props}
     >
       {children}
-      <CaretRightIcon className="ml-auto" />
+      <CaretRightIcon className="ml-auto" weight="regular" />
     </ContextMenuPrimitive.SubmenuTrigger>
   );
 }
@@ -139,7 +139,7 @@ function ContextMenuCheckboxItem({
     >
       <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
         <ContextMenuPrimitive.CheckboxItemIndicator>
-          <CheckIcon className="size-4" />
+          <CheckIcon className="size-4" weight="regular" />
         </ContextMenuPrimitive.CheckboxItemIndicator>
       </span>
       {children}
@@ -163,7 +163,7 @@ function ContextMenuRadioItem({
     >
       <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
         <ContextMenuPrimitive.RadioItemIndicator>
-          <CircleIcon className="size-2 fill-current" />
+          <CircleIcon className="size-2 fill-current" weight="regular" />
         </ContextMenuPrimitive.RadioItemIndicator>
       </span>
       {children}

@@ -45,7 +45,7 @@ function SelectTrigger({ className, children, ...props }: React.ComponentProps<t
       {...props}
     >
       {children}
-      <CaretDownIcon className="size-4 shrink-0 opacity-50" />
+      <CaretDownIcon className="size-4 shrink-0 opacity-50" weight="regular" />
     </SelectPrimitive.Trigger>
   );
 }
@@ -102,7 +102,7 @@ function SelectItem({ className, children, ...props }: React.ComponentProps<type
     >
       <span className="absolute right-2 flex size-3.5 items-center justify-center">
         <SelectPrimitive.ItemIndicator>
-          <CheckIcon className="size-4" />
+          <CheckIcon className="size-4" weight="regular" />
         </SelectPrimitive.ItemIndicator>
       </span>
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
@@ -127,7 +127,7 @@ function SelectScrollUpButton({ className, ...props }: React.ComponentProps<type
       className={cn('flex cursor-default items-center justify-center py-1', className)}
       {...props}
     >
-      <CaretUpIcon className="size-4" />
+      <CaretUpIcon className="size-4" weight="regular" />
     </SelectPrimitive.ScrollUpArrow>
   );
 }
@@ -139,7 +139,7 @@ function SelectScrollDownButton({ className, ...props }: React.ComponentProps<ty
       className={cn('flex cursor-default items-center justify-center py-1', className)}
       {...props}
     >
-      <CaretDownIcon className="size-4" />
+      <CaretDownIcon className="size-4" weight="regular" />
     </SelectPrimitive.ScrollDownArrow>
   );
 }

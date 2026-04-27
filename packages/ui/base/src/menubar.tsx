@@ -196,7 +196,7 @@ function MenubarSubTrigger({
       {...props}
     >
       {children}
-      <CaretRightIcon className="ml-auto h-4 w-4" />
+      <CaretRightIcon className="ml-auto h-4 w-4" weight="regular" />
     </DropdownMenuSubTrigger>
   );
 }

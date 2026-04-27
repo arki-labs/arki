@@ -74,8 +74,8 @@ function AccordionTrigger({ className, children, ...props }: AccordionPrimitive.
         {...props}
       >
         {children}
-        <CaretDownIcon className="pointer-events-none shrink-0 text-muted-foreground group-aria-expanded/accordion-trigger:hidden" />
-        <CaretUpIcon className="pointer-events-none hidden shrink-0 text-muted-foreground group-aria-expanded/accordion-trigger:inline" />
+        <CaretDownIcon className="pointer-events-none shrink-0 text-muted-foreground group-aria-expanded/accordion-trigger:hidden" weight="regular" />
+        <CaretUpIcon className="pointer-events-none hidden shrink-0 text-muted-foreground group-aria-expanded/accordion-trigger:inline" weight="regular" />
       </AccordionPrimitive.Trigger>
     </AccordionPrimitive.Header>
   );

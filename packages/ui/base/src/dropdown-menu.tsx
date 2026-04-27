@@ -100,7 +100,7 @@ function DropdownMenuCheckboxItem({
     >
       <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
         <MenuPrimitive.CheckboxItemIndicator>
-          <CheckIcon className="size-4" />
+          <CheckIcon className="size-4" weight="regular" />
         </MenuPrimitive.CheckboxItemIndicator>
       </span>
       {children}
@@ -128,7 +128,7 @@ function DropdownMenuRadioItem({
     >
       <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
         <MenuPrimitive.RadioItemIndicator>
-          <CircleIcon className="size-2 fill-current" />
+          <CircleIcon className="size-2 fill-current" weight="regular" />
         </MenuPrimitive.RadioItemIndicator>
       </span>
       {children}
@@ -196,7 +196,7 @@ function DropdownMenuSubTrigger({
       {...props}
     >
       {children}
-      <CaretRightIcon className="ml-auto size-4" />
+      <CaretRightIcon className="ml-auto size-4" weight="regular" />
     </MenuPrimitive.SubmenuTrigger>
   );
 }

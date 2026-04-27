@@ -362,9 +362,9 @@ function SidebarTrigger({
           {...props}
         >
           {open ? (
-            <SidebarSimpleIcon className={cn('size-4', iconClassName)} />
+            <SidebarSimpleIcon className={cn('size-4', iconClassName)} weight="regular" />
           ) : (
-            <SidebarIcon className={cn('size-4', iconClassName)} />
+            <SidebarIcon className={cn('size-4', iconClassName)} weight="regular" />
           )}
           <span className="sr-only">{title}</span>
         </Button>

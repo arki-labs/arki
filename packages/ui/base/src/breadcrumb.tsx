@@ -73,7 +73,7 @@ function BreadcrumbSeparator({ children, className, ...props }: React.ComponentP
       className={cn('[&>svg]:size-3.5', className)}
       {...props}
     >
-      {children ?? <CaretRight />}
+      {children ?? <CaretRight weight="regular" />}
     </li>
   );
 }
@@ -87,7 +87,7 @@ function BreadcrumbEllipsis({ className, ...props }: React.ComponentProps<'span'
       className={cn('flex size-9 items-center justify-center', className)}
       {...props}
     >
-      <DotsThree className="size-4" />
+      <DotsThree className="size-4" weight="regular" />
       <span className="sr-only">More</span>
     </span>
   );

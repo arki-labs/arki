@@ -109,18 +109,18 @@ function Calendar({
       components={{
         Chevron: ({ className, ...props }) => {
           if (props.orientation === 'left') {
-            return <CaretLeft className={cn('size-4', className)} {...props} />;
+            return <CaretLeft className={cn('size-4', className)} {...props} weight="regular" />;
           }
 
           if (props.orientation === 'right') {
-            return <CaretRight className={cn('size-4', className)} {...props} />;
+            return <CaretRight className={cn('size-4', className)} {...props} weight="regular" />;
           }
 
           if (props.orientation === 'up') {
-            return <CaretUp className={cn('size-4', className)} {...props} />;
+            return <CaretUp className={cn('size-4', className)} {...props} weight="regular" />;
           }
 
-          return <CaretDown className={cn('size-4', className)} {...props} />;
+          return <CaretDown className={cn('size-4', className)} {...props} weight="regular" />;
         },
       }}
       {...props}

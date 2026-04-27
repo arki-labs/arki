@@ -1,5 +1,6 @@
 'use client';
 
+import { useContext } from 'react';
 import { IconContext, type IconWeight } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
 
@@ -75,4 +76,27 @@ export function PhosphorIconDefaults({
   defaults: PhosphorDefaults;
 }) {
   return <IconContext.Provider value={defaults}>{children}</IconContext.Provider>;
+}
+
+/**
+ * Subtree-scoped overrides that *merge* with the inherited Phosphor context
+ * instead of replacing it. Use this when one region of the UI should opt out
+ * of a design-system default (e.g. logos and footer chrome staying on
+ * `weight: 'regular'` even under `AtelierIconDefaults`).
+ *
+ * Unlike `IconContext.Provider`, which replaces the entire context value,
+ * this wrapper preserves the parent's size/color/weight and only changes
+ * the fields you pass in `overrides`.
+ */
+export function PhosphorIconScope({
+  children,
+  overrides,
+}: {
+  children: ReactNode;
+  overrides: PhosphorDefaults;
+}) {
+  const inherited = useContext(IconContext);
+  return (
+    <IconContext.Provider value={{ ...inherited, ...overrides }}>{children}</IconContext.Provider>
+  );
 }
