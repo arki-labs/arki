@@ -58,6 +58,16 @@
       "import": "./src/vite-plugin-spotlight.js",
       "node": "./src/vite-plugin-spotlight.js"
     },
+    "./sentry/client": {
+      "types": "./dist/src/sentry-client.d.ts",
+      "import": "./src/sentry-client.ts",
+      "browser": "./src/sentry-client.ts"
+    },
+    "./sentry/server": {
+      "types": "./dist/src/sentry-server.d.ts",
+      "import": "./src/sentry-server.ts",
+      "node": "./src/sentry-server.ts"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -78,6 +88,9 @@
     "@orpc/client": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@orpc/tanstack-query": "catalog:backend",
+    "@sentry/node": "catalog:",
+    "@sentry/react": "catalog:",
+    "@sentry/tanstackstart-react": "catalog:",
     "@spotlightjs/overlay": "catalog:",
     "@spotlightjs/spotlight": "catalog:",
     "@tanstack/react-devtools": "catalog:tanstack/start",

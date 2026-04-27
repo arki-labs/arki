@@ -9,6 +9,8 @@
  * and React component stack so the cause is visible without opening devtools.
  * The dev branch is tree-shaken in production via `import.meta.env.DEV`.
  */
+import { useEffect } from 'react';
+import { captureException } from '@sentry/react';
 import type { ErrorComponentProps } from '@tanstack/react-router';
 
 import { ArrowClockwiseIcon, BugIcon, HouseSimpleIcon, WarningIcon } from '@arki/icons/phosphor';
@@ -27,6 +29,19 @@ type RootErrorComponentProps = ErrorComponentProps<unknown> & {
 export function RootErrorComponent({ error, info, reset, className }: RootErrorComponentProps) {
   const normalized = normalizeError(error);
   const isDev = import.meta.env.DEV;
+
+  // Forward to Sentry. `captureException` is a no-op when the host app
+  // hasn't called `initSentryClient`, so this is safe to call unconditionally.
+  // When Sentry IS initialized with `spotlightBrowserIntegration`, the
+  // captured event also flows to the local Spotlight overlay.
+  useEffect(() => {
+    captureException(error, {
+      contexts: {
+        react: info?.componentStack ? { componentStack: info.componentStack } : undefined,
+        source: { from: '@arki/tanstack-start/error#RootErrorComponent' },
+      },
+    });
+  }, [error, info?.componentStack]);
 
   return (
     <div
@@ -93,6 +108,7 @@ function safeStringify(value: unknown): string {
     return String(value);
   }
 }
+
 
 function DevDiagnostics({
   error,
