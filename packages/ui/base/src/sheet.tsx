@@ -5,14 +5,25 @@ import { Dialog as SheetPrimitive } from '@base-ui/react/dialog';
 
 import { XIcon } from '@arki/icons/phosphor';
 
+import { withAsChild, type AsChildProp } from './as-child';
 import { cn } from './cn';
 
 function Sheet({ ...props }: SheetPrimitive.Root.Props) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />;
 }
 
-function SheetTrigger({ ...props }: SheetPrimitive.Trigger.Props) {
-  return <SheetPrimitive.Trigger data-slot="sheet-trigger" {...props} />;
+function SheetTrigger({
+  asChild,
+  children,
+  ...props
+}: SheetPrimitive.Trigger.Props & AsChildProp) {
+  return (
+    <SheetPrimitive.Trigger
+      data-slot="sheet-trigger"
+      {...props}
+      {...withAsChild({ asChild, children })}
+    />
+  );
 }
 
 function SheetClose({ ...props }: SheetPrimitive.Close.Props) {

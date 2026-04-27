@@ -5,8 +5,15 @@ import { Slider as SliderPrimitive } from '@base-ui/react/slider';
 
 import { cn } from './cn';
 
-type SliderProps = Omit<SliderPrimitive.Root.Props, 'onValueChange'> & {
+type SliderProps = Omit<
+  SliderPrimitive.Root.Props,
+  'onValueChange' | 'onValueCommitted'
+> & {
   onValueChange?: (value: number[]) => void;
+  /** Fires after the user finishes a drag/keyboard interaction. */
+  onValueCommitted?: (value: number[]) => void;
+  /** Radix-era alias for `onValueCommitted` — accepted for backwards compat. */
+  onValueCommit?: (value: number[]) => void;
 };
 
 function Slider({
@@ -16,12 +23,15 @@ function Slider({
   min = 0,
   max = 100,
   onValueChange,
+  onValueCommitted,
+  onValueCommit,
   ...props
 }: SliderProps) {
   const _values = React.useMemo(
     () => (Array.isArray(value) ? value : (Array.isArray(defaultValue) ? defaultValue : [min, max])),
     [value, defaultValue, min, max],
   );
+  const handleCommit = onValueCommitted ?? onValueCommit;
 
   return (
     <SliderPrimitive.Root
@@ -33,6 +43,7 @@ function Slider({
       thumbAlignment="edge"
       className={cn('relative flex w-full touch-none select-none data-disabled:opacity-50 data-vertical:h-full', className)}
       onValueChange={onValueChange ? (v) => onValueChange(Array.isArray(v) ? [...v] : [v]) : undefined}
+      onValueCommitted={handleCommit ? (v) => handleCommit(Array.isArray(v) ? [...v] : [v]) : undefined}
       {...props}
     >
       <SliderPrimitive.Control className="relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-vertical:h-full data-vertical:min-h-44 data-vertical:w-auto data-vertical:flex-col">

@@ -4,10 +4,22 @@ import type { FC } from 'react';
 import * as React from 'react';
 import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip';
 
+import { withAsChild, type AsChildProp } from './as-child';
 import { cn } from './cn';
 
-function TooltipProvider({ delay = 0, ...props }: TooltipPrimitive.Provider.Props) {
-  return <TooltipPrimitive.Provider data-slot="tooltip-provider" delay={delay} {...props} />;
+function TooltipProvider({
+  delay = 0,
+  // Radix-era alias kept for backwards compat — Base UI renamed to `delay`.
+  delayDuration,
+  ...props
+}: TooltipPrimitive.Provider.Props & { delayDuration?: number }) {
+  return (
+    <TooltipPrimitive.Provider
+      data-slot="tooltip-provider"
+      delay={delayDuration ?? delay}
+      {...props}
+    />
+  );
 }
 
 function Tooltip({ ...props }: TooltipPrimitive.Root.Props) {
@@ -18,8 +30,18 @@ function Tooltip({ ...props }: TooltipPrimitive.Root.Props) {
   );
 }
 
-function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
+function TooltipTrigger({
+  asChild,
+  children,
+  ...props
+}: TooltipPrimitive.Trigger.Props & AsChildProp) {
+  return (
+    <TooltipPrimitive.Trigger
+      data-slot="tooltip-trigger"
+      {...props}
+      {...withAsChild({ asChild, children })}
+    />
+  );
 }
 
 function TooltipContent({

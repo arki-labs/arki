@@ -1,91 +1,71 @@
-import React, { useMemo } from 'react';
-import PropTypes from 'prop-types';
+import React, { useMemo, type ReactNode, type ComponentType } from 'react';
 import KaTeX from 'katex';
 
-/**
- * @typedef {import("react").ReactNode} ReactNode
- *
- *
- * @callback ErrorRenderer
- * @param {Error} error
- * @returns {ReactNode}
- *
- *
- * @typedef {object} MathComponentPropsWithMath
- * @property {string} math
- * @property {ReactNode=} children
- * @property {string=} errorColor
- * @property {ErrorRenderer=} renderError
- *
- *
- * @typedef {object} MathComponentPropsWithChildren
- * @property {string=} math
- * @property {ReactNode} children
- * @property {string=} errorColor
- * @property {ErrorRenderer=} renderError
- *
- * @typedef {MathComponentPropsWithMath | MathComponentPropsWithChildren} MathComponentProps
- */
+type ErrorRenderer = (error: Error) => ReactNode;
 
-const createMathComponent = (Component, { displayMode }) => {
-  /**
-   *
-   * @param {MathComponentProps} props
-   * @returns {ReactNode}
-   */
-  const MathComponent = ({ children, errorColor, math, renderError }) => {
-    const formula = math ?? children;
+export type MathComponentProps = {
+  /** LaTeX expression as a string. Either `math` or `children` must be provided. */
+  math?: string;
+  /** LaTeX expression as React children. Either `math` or `children` must be provided. */
+  children?: ReactNode;
+  /** Color used by KaTeX when rendering a parse error inline (instead of throwing). */
+  errorColor?: string;
+  /** Custom render function for parse errors. When provided, KaTeX will throw and this handles the result. */
+  renderError?: ErrorRenderer;
+};
 
-    const { html, error } = useMemo(() => {
+type InternalRenderProps = { html: string };
+
+const createMathComponent = (
+  Component: ComponentType<InternalRenderProps>,
+  { displayMode }: { displayMode: boolean },
+): ComponentType<MathComponentProps> => {
+  const MathComponent = ({ children, errorColor, math, renderError }: MathComponentProps) => {
+    const formula = (math ?? children ?? '') as string;
+
+    const { html, error } = useMemo<{ html?: string; error?: Error }>(() => {
       try {
-        const html = KaTeX.renderToString(formula, {
+        const rendered = KaTeX.renderToString(formula, {
           displayMode,
           errorColor,
           throwOnError: !!renderError,
         });
-
-        return { html, error: undefined };
-      } catch (error) {
-        if (error instanceof KaTeX.ParseError || error instanceof TypeError) {
-          return { error };
+        return { html: rendered, error: undefined };
+      } catch (caught) {
+        if (caught instanceof KaTeX.ParseError || caught instanceof TypeError) {
+          return { error: caught };
         }
-
-        throw error;
+        throw caught;
       }
     }, [formula, errorColor, renderError]);
 
     if (error) {
-      return renderError ? renderError(error) : <Component html={`${error.message}`} />;
+      return renderError ? <>{renderError(error)}</> : <Component html={error.message} />;
     }
 
-    return <Component html={html} />;
-  };
-
-  MathComponent.propTypes = {
-    children: PropTypes.string,
-    errorColor: PropTypes.string,
-    math: PropTypes.string,
-    renderError: PropTypes.func,
+    return <Component html={html ?? ''} />;
   };
 
   return MathComponent;
 };
 
-const InternalPathComponentPropTypes = {
-  html: PropTypes.string.isRequired,
-};
-
-const InternalBlockMath = ({ html }) => {
+// KaTeX produces trusted server-rendered HTML for LaTeX; embedding via
+// dangerouslySetInnerHTML is the supported pattern (no untrusted user input
+// flows here without going through KaTeX's own escape rules).
+const InternalBlockMath = ({ html }: InternalRenderProps) => {
   return <div data-testid="react-katex" dangerouslySetInnerHTML={{ __html: html }} />;
 };
 
-InternalBlockMath.propTypes = InternalPathComponentPropTypes;
-
-const InternalInlineMath = ({ html }) => {
+const InternalInlineMath = ({ html }: InternalRenderProps) => {
   return <span data-testid="react-katex" dangerouslySetInnerHTML={{ __html: html }} />;
 };
 
-InternalInlineMath.propTypes = InternalPathComponentPropTypes;
+export const BlockMath: ComponentType<MathComponentProps> = createMathComponent(
+  InternalBlockMath,
+  { displayMode: true },
+);
 
-export const BlockMath = createMathComponent(InternalBlockMath, { displayMode: true });
-export const InlineMath = createMathComponent(InternalInlineMath, { displayMode: false });
+export const InlineMath: ComponentType<MathComponentProps> = createMathComponent(
+  InternalInlineMath,
+  { displayMode: false },
+);

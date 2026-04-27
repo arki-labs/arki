@@ -3,14 +3,25 @@
 import * as React from 'react';
 import { PreviewCard as PreviewCardPrimitive } from '@base-ui/react/preview-card';
 
+import { withAsChild, type AsChildProp } from './as-child';
 import { cn } from './cn';
 
 function HoverCard({ ...props }: PreviewCardPrimitive.Root.Props) {
   return <PreviewCardPrimitive.Root data-slot="hover-card" {...props} />;
 }
 
-function HoverCardTrigger({ ...props }: PreviewCardPrimitive.Trigger.Props) {
-  return <PreviewCardPrimitive.Trigger data-slot="hover-card-trigger" {...props} />;
+function HoverCardTrigger({
+  asChild,
+  children,
+  ...props
+}: PreviewCardPrimitive.Trigger.Props & AsChildProp) {
+  return (
+    <PreviewCardPrimitive.Trigger
+      data-slot="hover-card-trigger"
+      {...props}
+      {...withAsChild({ asChild, children })}
+    />
+  );
 }
 
 function HoverCardContent({

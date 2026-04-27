@@ -5,22 +5,43 @@ import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
 
 import { XIcon } from '@arki/icons/phosphor';
 
+import { withAsChild, type AsChildProp } from './as-child';
 import { cn } from './cn';
 
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;
 }
 
-function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {
-  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />;
+function DialogTrigger({
+  asChild,
+  children,
+  ...props
+}: DialogPrimitive.Trigger.Props & AsChildProp) {
+  return (
+    <DialogPrimitive.Trigger
+      data-slot="dialog-trigger"
+      {...props}
+      {...withAsChild({ asChild, children })}
+    />
+  );
 }
 
 function DialogPortal({ ...props }: DialogPrimitive.Portal.Props) {
   return <DialogPrimitive.Portal {...props} />;
 }
 
-function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
-  return <DialogPrimitive.Close data-slot="dialog-close" {...props} />;
+function DialogClose({
+  asChild,
+  children,
+  ...props
+}: DialogPrimitive.Close.Props & AsChildProp) {
+  return (
+    <DialogPrimitive.Close
+      data-slot="dialog-close"
+      {...props}
+      {...withAsChild({ asChild, children })}
+    />
+  );
 }
 
 function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) {

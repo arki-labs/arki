@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { AlertDialog as AlertDialogPrimitive } from '@base-ui/react/alert-dialog';
 
+import { withAsChild, type AsChildProp } from './as-child';
 import { buttonVariants } from './button';
 import { cn } from './cn';
 
@@ -10,8 +11,18 @@ function AlertDialog({ ...props }: AlertDialogPrimitive.Root.Props) {
   return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
 }
 
-function AlertDialogTrigger({ ...props }: AlertDialogPrimitive.Trigger.Props) {
-  return <AlertDialogPrimitive.Trigger data-slot="alert-dialog-trigger" {...props} />;
+function AlertDialogTrigger({
+  asChild,
+  children,
+  ...props
+}: AlertDialogPrimitive.Trigger.Props & AsChildProp) {
+  return (
+    <AlertDialogPrimitive.Trigger
+      data-slot="alert-dialog-trigger"
+      {...props}
+      {...withAsChild({ asChild, children })}
+    />
+  );
 }
 
 function AlertDialogPortal({ ...props }: AlertDialogPrimitive.Portal.Props) {

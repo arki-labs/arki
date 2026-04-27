@@ -5,6 +5,7 @@ import { Menu as MenuPrimitive } from '@base-ui/react/menu';
 
 import { CheckIcon, CaretRightIcon, CircleIcon } from '@arki/icons/phosphor';
 
+import { withAsChild, type AsChildProp } from './as-child';
 import { cn } from './cn';
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
@@ -15,8 +16,18 @@ function DropdownMenuPortal({ ...props }: MenuPrimitive.Portal.Props) {
   return <MenuPrimitive.Portal data-slot="dropdown-menu-portal" {...props} />;
 }
 
-function DropdownMenuTrigger({ ...props }: MenuPrimitive.Trigger.Props) {
-  return <MenuPrimitive.Trigger data-slot="dropdown-menu-trigger" {...props} />;
+function DropdownMenuTrigger({
+  asChild,
+  children,
+  ...props
+}: MenuPrimitive.Trigger.Props & AsChildProp) {
+  return (
+    <MenuPrimitive.Trigger
+      data-slot="dropdown-menu-trigger"
+      {...props}
+      {...withAsChild({ asChild, children })}
+    />
+  );
 }
 
 function DropdownMenuContent({
