@@ -88,6 +88,12 @@ const SidebarProvider = React.forwardRef<
   const [_open, _setOpen] = React.useState(isTablet ? false : defaultOpen);
   const open = openProp ?? _open;
 
+  // Mirror `open` into a ref so `setOpen` can read the latest value without
+  // listing `open` as a dep. Without this, every state change minted a new
+  // `setOpen` identity, which broke downstream `useEffect` deps.
+  const openRef = React.useRef(open);
+  openRef.current = open;
+
   debugState('SidebarProvider: initial state computed', {
     _open,
     openProp,
@@ -99,10 +105,10 @@ const SidebarProvider = React.forwardRef<
 
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
-      const openState = typeof value === 'function' ? value(open) : value;
+      const openState = typeof value === 'function' ? value(openRef.current) : value;
       debugState('SidebarProvider: setOpen called', {
         valueType: typeof value,
-        previousOpen: open,
+        previousOpen: openRef.current,
         newOpenState: openState,
         hasExternalSetOpenProp: !!setOpenProp,
       });
@@ -123,7 +129,7 @@ const SidebarProvider = React.forwardRef<
       });
       document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
     },
-    [setOpenProp, open],
+    [setOpenProp],
   );
 
   // Helper to toggle the sidebar.
