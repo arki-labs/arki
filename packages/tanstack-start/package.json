@@ -53,6 +53,11 @@
       "import": "./src/devtools.tsx",
       "browser": "./src/devtools.tsx"
     },
+    "./vite-plugin-spotlight": {
+      "types": "./src/vite-plugin-spotlight.d.ts",
+      "import": "./src/vite-plugin-spotlight.js",
+      "node": "./src/vite-plugin-spotlight.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -73,6 +78,8 @@
     "@orpc/client": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@orpc/tanstack-query": "catalog:backend",
+    "@spotlightjs/overlay": "catalog:",
+    "@spotlightjs/spotlight": "catalog:",
     "@tanstack/react-devtools": "catalog:tanstack/start",
     "@tanstack/react-query": "catalog:tanstack/react-query",
     "@tanstack/react-query-devtools": "catalog:tanstack/react-query",
