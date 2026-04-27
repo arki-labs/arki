@@ -2,7 +2,8 @@
 
 import { PreviewCard as PreviewCardPrimitive } from '@base-ui/react/preview-card';
 
-import type { AsChildProp, withAsChild } from './as-child';
+import type { AsChildProp } from './as-child';
+import { withAsChild } from './as-child';
 import { cn } from './cn';
 
 function HoverCard({
