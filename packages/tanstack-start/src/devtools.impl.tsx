@@ -4,17 +4,24 @@
  * file from production bundles because the `lazy()` import is gated by
  * `import.meta.env.DEV`.
  *
- * Three panels ship by default:
+ * Default panels (always present):
  *   1. Environment — locale, mode, Sentry status, build info, quick actions.
  *   2. TanStack Router — route tree + match state.
  *   3. TanStack Query — cache + mutation state.
+ *
+ * Optional panels (mounted only when the corresponding prop is provided):
+ *   4. Jotai — when `jotaiStore` is passed. Embeds `jotai-devtools`'s
+ *      `<DevTools />` as a tab and suppresses its own floating trigger,
+ *      so apps no longer need to mount jotai-devtools separately.
  */
-import { TanStackDevtools, type TanStackDevtoolsReactPlugin } from '@tanstack/react-devtools';
+import type { TanStackDevtoolsReactPlugin } from '@tanstack/react-devtools';
+import { TanStackDevtools } from '@tanstack/react-devtools';
 import { ReactQueryDevtoolsPanel } from '@tanstack/react-query-devtools';
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
 
 import type { DevToolsProps } from './devtools';
 import { EnvironmentPanel } from './devtools-environment';
+import { JotaiPanel } from './devtools-jotai';
 
 const ENVIRONMENT_PLUGIN: TanStackDevtoolsReactPlugin = {
   name: 'Environment',
@@ -37,10 +44,24 @@ export function DevToolsImpl({
   defaultOpen = false,
   openHotkey = ['Shift', 'Alt', 'D'],
   panelLocation = 'bottom',
+  jotaiStore,
 }: DevToolsProps) {
+  const plugins: TanStackDevtoolsReactPlugin[] = [
+    ENVIRONMENT_PLUGIN,
+    ROUTER_PLUGIN,
+    QUERY_PLUGIN,
+  ];
+
+  if (jotaiStore) {
+    plugins.push({
+      name: 'Jotai',
+      render: <JotaiPanel store={jotaiStore} />,
+    });
+  }
+
   return (
     <TanStackDevtools
-      plugins={[ENVIRONMENT_PLUGIN, ROUTER_PLUGIN, QUERY_PLUGIN]}
+      plugins={plugins}
       config={{
         position,
         hideUntilHover,

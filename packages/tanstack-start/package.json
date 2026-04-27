@@ -98,7 +98,8 @@
     "@tanstack/react-router-devtools": "catalog:tanstack/start",
     "@tanstack/react-start": "catalog:tanstack/start",
     "@tanstack/start-vite-plugin": "catalog:tanstack/start",
-"@unpic/react": "catalog:tanstack/start",
+    "@unpic/react": "catalog:tanstack/start",
+    "jotai-devtools": "catalog:",
     "nitropack": "catalog:tanstack/start",
     "superjson": "catalog:utilities",
     "vite": "catalog:build-tools"

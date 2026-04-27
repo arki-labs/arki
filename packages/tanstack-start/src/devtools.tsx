@@ -22,8 +22,11 @@
  * Apps can override every default via props.
  */
 import { lazy, Suspense, useEffect, useState } from 'react';
+import type { createStore } from 'jotai';
 
 const isDev = import.meta.env.DEV;
+
+type JotaiStore = ReturnType<typeof createStore>;
 
 const LazyDevToolsImpl = isDev
   ? lazy(() => import('./devtools.impl').then((mod) => ({ default: mod.DevToolsImpl })))
@@ -66,6 +69,16 @@ export type DevToolsProps = {
    * @default 'bottom'
    */
   panelLocation?: 'top' | 'bottom';
+  /**
+   * Optional Jotai store. When provided, a "Jotai" tab is added to the
+   * shell that embeds `jotai-devtools`'s `<DevTools />`. Apps that pass
+   * this should remove their inline `<DevTools from 'jotai-devtools'>`
+   * mount so only one floating button remains.
+   *
+   * Pass either a custom store created with `createStore()` from `jotai`,
+   * or `undefined` to skip the panel entirely.
+   */
+  jotaiStore?: JotaiStore;
 };
 
 /**
