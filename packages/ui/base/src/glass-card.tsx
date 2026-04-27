@@ -48,37 +48,37 @@ const glassCardVariants = cva(
       tone: {
         default: 'bg-card border-border',
         slate:
-          'bg-gradient-to-b from-slate-50/50 to-slate-50/10 border-slate-200/70 dark:from-slate-950/30 dark:to-slate-950/10 dark:border-slate-800/40',
-        gray: 'bg-gradient-to-b from-gray-50/50 to-gray-50/10 border-gray-200/70 dark:from-gray-950/30 dark:to-gray-950/10 dark:border-gray-800/40',
-        zinc: 'bg-gradient-to-b from-zinc-50/50 to-zinc-50/10 border-zinc-200/70 dark:from-zinc-950/30 dark:to-zinc-950/10 dark:border-zinc-800/40',
+          'bg-card bg-gradient-to-b from-slate-50/50 to-slate-50/10 border-slate-200/70 dark:from-slate-950/30 dark:to-slate-950/10 dark:border-slate-800/40',
+        gray: 'bg-card bg-gradient-to-b from-gray-50/50 to-gray-50/10 border-gray-200/70 dark:from-gray-950/30 dark:to-gray-950/10 dark:border-gray-800/40',
+        zinc: 'bg-card bg-gradient-to-b from-zinc-50/50 to-zinc-50/10 border-zinc-200/70 dark:from-zinc-950/30 dark:to-zinc-950/10 dark:border-zinc-800/40',
         stone:
-          'bg-gradient-to-b from-stone-50/50 to-stone-50/10 border-stone-200/70 dark:from-stone-950/30 dark:to-stone-950/10 dark:border-stone-800/40',
-        red: 'bg-gradient-to-b from-red-50/50 to-red-50/10 border-red-200/70 dark:from-red-950/30 dark:to-red-950/10 dark:border-red-800/40',
+          'bg-card bg-gradient-to-b from-stone-50/50 to-stone-50/10 border-stone-200/70 dark:from-stone-950/30 dark:to-stone-950/10 dark:border-stone-800/40',
+        red: 'bg-card bg-gradient-to-b from-red-50/50 to-red-50/10 border-red-200/70 dark:from-red-950/30 dark:to-red-950/10 dark:border-red-800/40',
         orange:
-          'bg-gradient-to-b from-orange-50/50 to-orange-50/10 border-orange-200/70 dark:from-orange-950/30 dark:to-orange-950/10 dark:border-orange-800/40',
+          'bg-card bg-gradient-to-b from-orange-50/50 to-orange-50/10 border-orange-200/70 dark:from-orange-950/30 dark:to-orange-950/10 dark:border-orange-800/40',
         amber:
-          'bg-gradient-to-b from-amber-50/50 to-amber-50/10 border-amber-200/70 dark:from-amber-950/30 dark:to-amber-950/10 dark:border-amber-800/40',
+          'bg-card bg-gradient-to-b from-amber-50/50 to-amber-50/10 border-amber-200/70 dark:from-amber-950/30 dark:to-amber-950/10 dark:border-amber-800/40',
         yellow:
-          'bg-gradient-to-b from-yellow-50/50 to-yellow-50/10 border-yellow-200/70 dark:from-yellow-950/30 dark:to-yellow-950/10 dark:border-yellow-800/40',
-        lime: 'bg-gradient-to-b from-lime-50/50 to-lime-50/10 border-lime-200/70 dark:from-lime-950/30 dark:to-lime-950/10 dark:border-lime-800/40',
+          'bg-card bg-gradient-to-b from-yellow-50/50 to-yellow-50/10 border-yellow-200/70 dark:from-yellow-950/30 dark:to-yellow-950/10 dark:border-yellow-800/40',
+        lime: 'bg-card bg-gradient-to-b from-lime-50/50 to-lime-50/10 border-lime-200/70 dark:from-lime-950/30 dark:to-lime-950/10 dark:border-lime-800/40',
         green:
-          'bg-gradient-to-b from-green-50/50 to-green-50/10 border-green-200/70 dark:from-green-950/30 dark:to-green-950/10 dark:border-green-800/40',
+          'bg-card bg-gradient-to-b from-green-50/50 to-green-50/10 border-green-200/70 dark:from-green-950/30 dark:to-green-950/10 dark:border-green-800/40',
         emerald:
-          'bg-gradient-to-b from-emerald-50/50 to-emerald-50/10 border-emerald-200/70 dark:from-emerald-950/30 dark:to-emerald-950/10 dark:border-emerald-800/40',
-        teal: 'bg-gradient-to-b from-teal-50/50 to-teal-50/10 border-teal-200/70 dark:from-teal-950/30 dark:to-teal-950/10 dark:border-teal-800/40',
-        cyan: 'bg-gradient-to-b from-cyan-50/50 to-cyan-50/10 border-cyan-200/70 dark:from-cyan-950/30 dark:to-cyan-950/10 dark:border-cyan-800/40',
-        sky: 'bg-gradient-to-b from-sky-50/50 to-sky-50/10 border-sky-200/70 dark:from-sky-950/30 dark:to-sky-950/10 dark:border-sky-800/40',
-        blue: 'bg-gradient-to-b from-blue-50/50 to-blue-50/10 border-blue-200/70 dark:from-blue-950/30 dark:to-blue-950/10 dark:border-blue-800/40',
+          'bg-card bg-gradient-to-b from-emerald-50/50 to-emerald-50/10 border-emerald-200/70 dark:from-emerald-950/30 dark:to-emerald-950/10 dark:border-emerald-800/40',
+        teal: 'bg-card bg-gradient-to-b from-teal-50/50 to-teal-50/10 border-teal-200/70 dark:from-teal-950/30 dark:to-teal-950/10 dark:border-teal-800/40',
+        cyan: 'bg-card bg-gradient-to-b from-cyan-50/50 to-cyan-50/10 border-cyan-200/70 dark:from-cyan-950/30 dark:to-cyan-950/10 dark:border-cyan-800/40',
+        sky: 'bg-card bg-gradient-to-b from-sky-50/50 to-sky-50/10 border-sky-200/70 dark:from-sky-950/30 dark:to-sky-950/10 dark:border-sky-800/40',
+        blue: 'bg-card bg-gradient-to-b from-blue-50/50 to-blue-50/10 border-blue-200/70 dark:from-blue-950/30 dark:to-blue-950/10 dark:border-blue-800/40',
         indigo:
-          'bg-gradient-to-b from-indigo-50/50 to-indigo-50/10 border-indigo-200/70 dark:from-indigo-950/30 dark:to-indigo-950/10 dark:border-indigo-800/40',
+          'bg-card bg-gradient-to-b from-indigo-50/50 to-indigo-50/10 border-indigo-200/70 dark:from-indigo-950/30 dark:to-indigo-950/10 dark:border-indigo-800/40',
         violet:
-          'bg-gradient-to-b from-violet-50/50 to-violet-50/10 border-violet-200/70 dark:from-violet-950/30 dark:to-violet-950/10 dark:border-violet-800/40',
+          'bg-card bg-gradient-to-b from-violet-50/50 to-violet-50/10 border-violet-200/70 dark:from-violet-950/30 dark:to-violet-950/10 dark:border-violet-800/40',
         purple:
-          'bg-gradient-to-b from-purple-50/50 to-purple-50/10 border-purple-200/70 dark:from-purple-950/30 dark:to-purple-950/10 dark:border-purple-800/40',
+          'bg-card bg-gradient-to-b from-purple-50/50 to-purple-50/10 border-purple-200/70 dark:from-purple-950/30 dark:to-purple-950/10 dark:border-purple-800/40',
         fuchsia:
-          'bg-gradient-to-b from-fuchsia-50/50 to-fuchsia-50/10 border-fuchsia-200/70 dark:from-fuchsia-950/30 dark:to-fuchsia-950/10 dark:border-fuchsia-800/40',
-        pink: 'bg-gradient-to-b from-pink-50/50 to-pink-50/10 border-pink-200/70 dark:from-pink-950/30 dark:to-pink-950/10 dark:border-pink-800/40',
-        rose: 'bg-gradient-to-b from-rose-50/50 to-rose-50/10 border-rose-200/70 dark:from-rose-950/30 dark:to-rose-950/10 dark:border-rose-800/40',
+          'bg-card bg-gradient-to-b from-fuchsia-50/50 to-fuchsia-50/10 border-fuchsia-200/70 dark:from-fuchsia-950/30 dark:to-fuchsia-950/10 dark:border-fuchsia-800/40',
+        pink: 'bg-card bg-gradient-to-b from-pink-50/50 to-pink-50/10 border-pink-200/70 dark:from-pink-950/30 dark:to-pink-950/10 dark:border-pink-800/40',
+        rose: 'bg-card bg-gradient-to-b from-rose-50/50 to-rose-50/10 border-rose-200/70 dark:from-rose-950/30 dark:to-rose-950/10 dark:border-rose-800/40',
       },
     },
     defaultVariants: {
