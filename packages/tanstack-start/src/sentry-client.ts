@@ -6,11 +6,6 @@
  * unhandled errors) when `init()` runs, and anything imported earlier
  * is missed.
  *
- * In dev with the Spotlight Vite plugin (`@arki/tanstack-start/vite-plugin-spotlight`),
- * `import.meta.env.VITE_ARKI_SPOTLIGHT_URL` is defined and the
- * `spotlightBrowserIntegration` is auto-added — every captured event
- * also flows to the local sidecar and shows up in the overlay.
- *
  * If `dsn` is omitted/falsy the function is a no-op. That lets apps
  * call `initSentryClient({ dsn: import.meta.env.VITE_SENTRY_DSN })`
  * unconditionally and have Sentry only activate when the env var is set.
@@ -55,16 +50,7 @@ export type InitSentryClientOptions = {
    * `replayIntegration()`, `feedbackIntegration()`, etc.
    */
   integrations?: Integration[];
-  /**
-   * Forward events to a local Spotlight sidecar in dev. When `true`
-   * (default), the helper auto-detects the sidecar URL from
-   * `import.meta.env.VITE_ARKI_SPOTLIGHT_URL` (set by the Vite plugin).
-   * Set to `false` to skip Spotlight even when the URL is present.
-   */
-  spotlight?: boolean;
 };
-
-const SPOTLIGHT_SIDECAR_URL = import.meta.env.VITE_ARKI_SPOTLIGHT_URL as string | undefined;
 
 export function initSentryClient(options: InitSentryClientOptions): void {
   const {
@@ -75,7 +61,6 @@ export function initSentryClient(options: InitSentryClientOptions): void {
     replaysSessionSampleRate = 0,
     replaysOnErrorSampleRate = 1.0,
     integrations: extraIntegrations = [],
-    spotlight = true,
   } = options;
 
   if (!dsn) return;
@@ -84,10 +69,6 @@ export function initSentryClient(options: InitSentryClientOptions): void {
     Sentry.browserTracingIntegration(),
     ...extraIntegrations,
   ];
-
-  if (spotlight && SPOTLIGHT_SIDECAR_URL) {
-    integrations.push(Sentry.spotlightBrowserIntegration({ sidecarUrl: SPOTLIGHT_SIDECAR_URL }));
-  }
 
   Sentry.init({
     dsn,

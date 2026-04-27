@@ -4,23 +4,22 @@
  * file from production bundles because the `lazy()` import is gated by
  * `import.meta.env.DEV`.
  *
- * Mounts the unified `<TanStackDevtools>` host with Router + React Query
- * panels as tabs. A single floating button in the corner opens both.
- *
- * Spotlight (Sentry's local-dev error overlay) mounts as a separate
- * floating overlay when the app's `vite.config.ts` includes
- * `@arki/tanstack-start/vite-plugin-spotlight`. The plugin sets
- * `import.meta.env.VITE_ARKI_SPOTLIGHT_URL`; we read it at runtime and
- * lazy-load `@spotlightjs/overlay` when present. Apps that don't add the
- * Vite plugin leave the env var undefined and the spotlight branch is
- * dead-code-eliminated.
+ * Three panels ship by default:
+ *   1. Environment — locale, mode, Sentry status, build info, quick actions.
+ *   2. TanStack Router — route tree + match state.
+ *   3. TanStack Query — cache + mutation state.
  */
-import { useEffect } from 'react';
 import { TanStackDevtools, type TanStackDevtoolsReactPlugin } from '@tanstack/react-devtools';
 import { ReactQueryDevtoolsPanel } from '@tanstack/react-query-devtools';
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
 
 import type { DevToolsProps } from './devtools';
+import { EnvironmentPanel } from './devtools-environment';
+
+const ENVIRONMENT_PLUGIN: TanStackDevtoolsReactPlugin = {
+  name: 'Environment',
+  render: <EnvironmentPanel />,
+};
 
 const ROUTER_PLUGIN: TanStackDevtoolsReactPlugin = {
   name: 'TanStack Router',
@@ -32,31 +31,22 @@ const QUERY_PLUGIN: TanStackDevtoolsReactPlugin = {
   render: <ReactQueryDevtoolsPanel />,
 };
 
-const SPOTLIGHT_URL = import.meta.env.VITE_ARKI_SPOTLIGHT_URL as string | undefined;
-
-export function DevToolsImpl({ position = 'bottom-right' }: DevToolsProps) {
-  useEffect(() => {
-    if (!SPOTLIGHT_URL) return;
-    let cancelled = false;
-    void import('@spotlightjs/overlay')
-      .then(async (mod) => {
-        if (cancelled) return;
-        await mod._init({ sidecarUrl: SPOTLIGHT_URL });
-      })
-      .catch((error) => {
-        console.warn('[arki:devtools] Spotlight overlay failed to mount:', error);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
+export function DevToolsImpl({
+  position = 'bottom-right',
+  hideUntilHover = true,
+  defaultOpen = false,
+  openHotkey = ['Shift', 'Alt', 'D'],
+  panelLocation = 'bottom',
+}: DevToolsProps) {
   return (
     <TanStackDevtools
-      plugins={[ROUTER_PLUGIN, QUERY_PLUGIN]}
+      plugins={[ENVIRONMENT_PLUGIN, ROUTER_PLUGIN, QUERY_PLUGIN]}
       config={{
         position,
-        defaultOpen: false,
+        hideUntilHover,
+        defaultOpen,
+        openHotkey,
+        panelLocation,
       }}
     />
   );

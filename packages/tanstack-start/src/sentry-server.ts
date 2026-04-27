@@ -25,12 +25,6 @@ export type InitSentryServerOptions = {
   tracesSampleRate?: number;
   /** Extra integrations merged with defaults. */
   integrations?: Integration[];
-  /**
-   * Forward events to a local Spotlight sidecar in dev. Auto-detects the
-   * default localhost URL when enabled.
-   * @default true
-   */
-  spotlight?: boolean;
 };
 
 const isDev = process.env.NODE_ENV !== 'production';
@@ -42,23 +36,15 @@ export function initSentryServer(options: InitSentryServerOptions): void {
     release,
     tracesSampleRate = isDev ? 1.0 : 0.1,
     integrations: extraIntegrations = [],
-    spotlight = true,
   } = options;
 
   if (!dsn) return;
-
-  const integrations: Integration[] = [...extraIntegrations];
-
-  if (spotlight && isDev) {
-    // The Node SDK ships its own `spotlightIntegration` (no `Browser` suffix).
-    integrations.push(Sentry.spotlightIntegration());
-  }
 
   Sentry.init({
     dsn,
     environment,
     release,
-    integrations,
+    integrations: [...extraIntegrations],
     tracesSampleRate,
     sendDefaultPii: false,
   });

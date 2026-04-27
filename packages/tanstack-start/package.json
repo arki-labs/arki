@@ -53,11 +53,6 @@
       "import": "./src/devtools.tsx",
       "browser": "./src/devtools.tsx"
     },
-    "./vite-plugin-spotlight": {
-      "types": "./src/vite-plugin-spotlight.d.ts",
-      "import": "./src/vite-plugin-spotlight.js",
-      "node": "./src/vite-plugin-spotlight.js"
-    },
     "./sentry/client": {
       "types": "./dist/src/sentry-client.d.ts",
       "import": "./src/sentry-client.ts",
@@ -96,8 +91,6 @@
     "@sentry/node": "catalog:",
     "@sentry/react": "catalog:",
     "@sentry/tanstackstart-react": "catalog:",
-    "@spotlightjs/overlay": "catalog:",
-    "@spotlightjs/spotlight": "catalog:",
     "@tanstack/react-devtools": "catalog:tanstack/start",
     "@tanstack/react-query": "catalog:tanstack/react-query",
     "@tanstack/react-query-devtools": "catalog:tanstack/react-query",
