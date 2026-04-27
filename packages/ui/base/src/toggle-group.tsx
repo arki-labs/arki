@@ -13,23 +13,58 @@ const ToggleGroupContext = React.createContext<VariantProps<typeof toggleVariant
   variant: 'default',
 });
 
+type ToggleGroupCompatProps = Omit<ToggleGroupPrimitive.Props, 'value' | 'defaultValue' | 'onValueChange'> &
+  VariantProps<typeof toggleVariants> & {
+    /** Radix-era prop: 'single' (one selection) or 'multiple' (many). Maps to Base UI `multiple`. */
+    type?: 'single' | 'multiple';
+    /** Radix-shape value: a single string in `single` mode, an array in `multiple` mode. */
+    value?: string | readonly string[];
+    defaultValue?: string | readonly string[];
+    /** Radix-shape callback: receives a string in `single` mode, an array in `multiple` mode. */
+    onValueChange?: (value: string & string[]) => void;
+  };
+
 function ToggleGroup({
   className,
   variant,
   size,
   children,
+  type,
+  value,
+  defaultValue,
+  onValueChange,
   ...props
-}: ToggleGroupPrimitive.Props & VariantProps<typeof toggleVariants>) {
+}: ToggleGroupCompatProps) {
+  // Translate Radix `type` → Base UI `multiple`, and normalize Radix's
+  // string-or-array value/callback shape to Base UI's always-array shape.
+  const multiple = type === 'multiple' ? true : props.multiple;
+  const normalizedValue = value === undefined ? undefined : Array.isArray(value) ? value : [value as string];
+  const normalizedDefault =
+    defaultValue === undefined ? undefined : Array.isArray(defaultValue) ? defaultValue : [defaultValue as string];
+  const handleValueChange = onValueChange
+    ? (groupValue: string[]) => {
+        if (multiple) {
+          (onValueChange as unknown as (v: string[]) => void)(groupValue);
+        } else {
+          (onValueChange as unknown as (v: string) => void)(groupValue[0] ?? '');
+        }
+      }
+    : undefined;
+
   return (
     <ToggleGroupPrimitive
       data-slot="toggle-group"
       data-variant={variant}
       data-size={size}
       className={cn(
-        'group/toggle-group flex items-center justify-center rounded-md data-[variant=outline]:shadow-xs',
+        'group/toggle-group data-[variant=outline]:shadow-xs flex items-center justify-center rounded-md',
         className,
       )}
       {...props}
+      multiple={multiple}
+      value={normalizedValue}
+      defaultValue={normalizedDefault}
+      onValueChange={handleValueChange}
     >
       <ToggleGroupContext.Provider value={{ variant, size }}>{children}</ToggleGroupContext.Provider>
     </ToggleGroupPrimitive>
