@@ -68,6 +68,11 @@
       "import": "./src/sentry-server.ts",
       "node": "./src/sentry-server.ts"
     },
+    "./server-error-overlay": {
+      "types": "./dist/src/server-error-overlay.d.ts",
+      "import": "./src/server-error-overlay.ts",
+      "node": "./src/server-error-overlay.ts"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
