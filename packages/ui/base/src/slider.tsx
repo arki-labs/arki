@@ -41,19 +41,19 @@ function Slider({
       min={min}
       max={max}
       thumbAlignment="edge"
-      className={cn('relative flex w-full touch-none select-none data-disabled:opacity-50 data-vertical:h-full', className)}
+      className={cn('relative flex w-full touch-none select-none data-disabled:opacity-50 data-[orientation=vertical]:h-full', className)}
       onValueChange={onValueChange ? (v) => onValueChange(Array.isArray(v) ? [...v] : [v]) : undefined}
       onValueCommitted={handleCommit ? (v) => handleCommit(Array.isArray(v) ? [...v] : [v]) : undefined}
       {...props}
     >
-      <SliderPrimitive.Control className="relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-vertical:h-full data-vertical:min-h-44 data-vertical:w-auto data-vertical:flex-col">
+      <SliderPrimitive.Control className="relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-[orientation=vertical]:h-full data-[orientation=vertical]:min-h-44 data-[orientation=vertical]:w-auto data-[orientation=vertical]:flex-col">
         <SliderPrimitive.Track
           data-slot="slider-track"
-          className="relative grow overflow-hidden rounded-full bg-muted data-horizontal:h-1.5 data-horizontal:w-full data-vertical:h-full data-vertical:w-1.5"
+          className="relative grow overflow-hidden rounded-full bg-muted data-[orientation=horizontal]:h-1.5 data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1.5"
         >
           <SliderPrimitive.Indicator
             data-slot="slider-range"
-            className="bg-primary data-horizontal:h-full data-vertical:w-full"
+            className="bg-primary data-[orientation=horizontal]:h-full data-[orientation=vertical]:w-full"
           />
         </SliderPrimitive.Track>
         {Array.from({ length: _values.length }, (_, index) => (
