@@ -136,7 +136,36 @@ function DropdownMenuRadioItem({
   );
 }
 
+/**
+ * Visual heading inside a dropdown menu. Stands alone — does NOT require a `DropdownMenuGroup`
+ * ancestor. Renders a plain styled `<div>` (no ARIA group-label association).
+ *
+ * For proper Group-Label ARIA wiring, wrap items in `DropdownMenuGroup` and use
+ * `DropdownMenuGroupLabel` instead.
+ */
 function DropdownMenuLabel({
+  className,
+  inset,
+  ...props
+}: React.ComponentProps<'div'> & {
+  inset?: boolean;
+}) {
+  return (
+    <div
+      data-slot="dropdown-menu-label"
+      data-inset={inset}
+      className={cn('px-2 py-1.5 text-sm font-semibold data-[inset]:pl-8', className)}
+      {...props}
+    />
+  );
+}
+
+/**
+ * Heading for a `DropdownMenuGroup` with proper ARIA group-label association.
+ * MUST be rendered as a child of `DropdownMenuGroup` — BaseUI's `Menu.GroupLabel` asserts
+ * the Group context at render time.
+ */
+function DropdownMenuGroupLabel({
   className,
   inset,
   ...props
@@ -145,7 +174,7 @@ function DropdownMenuLabel({
 }) {
   return (
     <MenuPrimitive.GroupLabel
-      data-slot="dropdown-menu-label"
+      data-slot="dropdown-menu-group-label"
       data-inset={inset}
       className={cn('px-2 py-1.5 text-sm font-semibold data-[inset]:pl-8', className)}
       {...props}
@@ -219,6 +248,7 @@ export {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
+  DropdownMenuGroupLabel,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuPortal,
