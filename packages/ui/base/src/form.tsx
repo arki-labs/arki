@@ -8,6 +8,7 @@ import { Controller, FormProvider, useFormContext, useFormState } from 'react-ho
 
 import { cn } from './cn';
 import { Label } from './label';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './tooltip';
 
 const Form = FormProvider;
 
@@ -168,36 +169,44 @@ function FormHints<T extends string | number | Date>({
   });
 
   return (
-    <div
-      className={cn('flex flex-wrap items-center gap-1 text-xs text-muted-foreground', className)}
-      {...props}
-    >
-      {resolved.map((hint, index) => (
-        <React.Fragment key={`${id}-${name}-hint-${index}`}>
-          {index > 0 && (
-            <span className="select-none text-border" aria-hidden="true">
-              ·
-            </span>
-          )}
-          <button
-            type="button"
-            aria-label={`Use value ${hint.value}`}
-            className="cursor-pointer rounded px-1 py-0.5 tabular-nums transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={(e) => {
-              e.preventDefault();
-              setValue(name, hint.value, {
-                shouldDirty: true,
-                shouldTouch: true,
-                shouldValidate: true,
-              });
-              onHintClick?.(hint.value);
-            }}
-          >
-            {hint.label}
-          </button>
-        </React.Fragment>
-      ))}
-    </div>
+    <TooltipProvider delay={500}>
+      <div
+        className={cn('flex flex-wrap items-center gap-1 text-xs text-muted-foreground', className)}
+        {...props}
+      >
+        {resolved.map((hint, index) => (
+          <React.Fragment key={`${id}-${name}-hint-${index}`}>
+            {index > 0 && (
+              <span className="select-none text-border" aria-hidden="true">
+                ·
+              </span>
+            )}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded px-1 py-0.5 tabular-nums transition-colors hover:bg-muted hover:text-foreground"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setValue(name, hint.value, {
+                        shouldDirty: true,
+                        shouldTouch: true,
+                        shouldValidate: true,
+                      });
+                      onHintClick?.(hint.value);
+                    }}
+                  />
+                }
+              >
+                {hint.label}
+              </TooltipTrigger>
+              <TooltipContent side="top">Click to use this value</TooltipContent>
+            </Tooltip>
+          </React.Fragment>
+        ))}
+      </div>
+    </TooltipProvider>
   );
 }
 
