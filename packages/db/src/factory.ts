@@ -1,4 +1,5 @@
-import type { DrizzleConfig } from 'drizzle-orm/utils';
+import type { AnyRelations, EmptyRelations } from 'drizzle-orm';
+import type { DrizzlePgConfig } from 'drizzle-orm/pg-core/utils';
 
 import { getDbConnectionOptions } from './connection-options';
 import { debugFactory } from './debug';
@@ -6,13 +7,12 @@ import { env } from './env';
 import { initDbWithOptions } from './init';
 
 /**
- * Create a database connection using environment configuration
- * @param config - Drizzle configuration object
- * @returns Drizzle database instance
- * @throws Error if DB_URL is configured
+ * Create a database connection using environment configuration.
+ * @param config - Drizzle pg configuration (relations + logger).
+ * @throws Error if DB_URL is not configured.
  */
-export function createDb<TSchema extends Record<string, unknown> = Record<string, never>>(
-  config: DrizzleConfig<TSchema>,
+export function createDb<TRelations extends AnyRelations = EmptyRelations>(
+  config: DrizzlePgConfig<TRelations>,
 ) {
   debugFactory('[factory] Creating database from environment configuration');
 
@@ -38,5 +38,4 @@ export function createDb<TSchema extends Record<string, unknown> = Record<string
   return db;
 }
 
-// Re-export connection options utilities
 export { getDbConnectionOptions, getDbConnectionParams } from './connection-options';

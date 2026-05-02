@@ -1,27 +1,27 @@
-import type { DrizzleConfig } from 'drizzle-orm/utils';
-import { drizzle } from 'drizzle-orm/bun-sql';
+import type { AnyRelations, EmptyRelations } from 'drizzle-orm';
+import type { DrizzlePgConfig } from 'drizzle-orm/pg-core/utils';
+import { drizzle } from 'drizzle-orm/bun-sql/postgres';
 import { SQL } from 'bun';
 
 import { debugInit } from './debug';
 
-// Use Bun's native SQL for PostgreSQL (much faster than pg)
 debugInit('[init.bun] Using Bun SQL (native) for database connections');
 
-export const initDb = <TSchema extends Record<string, unknown> = Record<string, never>>(
+export const initDb = <TRelations extends AnyRelations = EmptyRelations>(
   connectionString: string,
-  config: DrizzleConfig<TSchema>,
+  config: DrizzlePgConfig<TRelations>,
 ) => {
   debugInit('[init.bun] Initializing database with connection string (logger: %s)', !!config.logger);
 
   const client = new SQL(connectionString);
-  const db = drizzle({ client, ...config });
+  const db = drizzle({ ...config, client });
 
   debugInit('[init.bun] Database initialized successfully');
 
   return db;
 };
 
-export const initDbWithOptions = <TSchema extends Record<string, unknown> = Record<string, never>>(
+export const initDbWithOptions = <TRelations extends AnyRelations = EmptyRelations>(
   poolConfig: {
     connectionString?: string;
     host?: string;
@@ -32,12 +32,11 @@ export const initDbWithOptions = <TSchema extends Record<string, unknown> = Reco
     min?: number;
     max?: number;
   },
-  config: DrizzleConfig<TSchema>,
+  config: DrizzlePgConfig<TRelations>,
 ) => {
   debugInit('[init.bun] Initializing database with pool config (min: %d, max: %d, logger: %s)',
     poolConfig.min ?? 0, poolConfig.max ?? 10, !!config.logger);
 
-  // Bun SQL accepts either a connection string or individual options
   const client = poolConfig.connectionString
     ? new SQL(poolConfig.connectionString)
     : new SQL({
@@ -48,13 +47,12 @@ export const initDbWithOptions = <TSchema extends Record<string, unknown> = Reco
         password: poolConfig.password,
       });
 
-  const db = drizzle({ client, ...config });
+  const db = drizzle({ ...config, client });
 
   debugInit('[init.bun] Database initialized with custom pool configuration');
 
   return db;
 };
 
-// Re-export factory and connection utilities
 export { createDb } from './factory';
 export { getDbConnectionOptions, getDbConnectionParams } from './connection-options';

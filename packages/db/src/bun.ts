@@ -1,29 +1,26 @@
 import { SQL } from 'bun';
-import type { BunSQLDatabase } from 'drizzle-orm/bun-sql';
-import { drizzle } from 'drizzle-orm/bun-sql';
-import type { DrizzleConfig } from 'drizzle-orm/utils';
+import type { AnyRelations, EmptyRelations } from 'drizzle-orm';
+import type { BunSQLDatabase } from 'drizzle-orm/bun-sql/postgres';
+import { drizzle } from 'drizzle-orm/bun-sql/postgres';
+import type { DrizzlePgConfig } from 'drizzle-orm/pg-core/utils';
 
 import { debugInit } from './debug';
 import { env } from './env';
 
 /**
- * Initialize database with Bun's native SQL driver
- * @param connectionString - PostgreSQL connection string
- * @param config - Drizzle configuration object
- * @returns Drizzle database instance
+ * Initialize database with Bun's native SQL driver.
+ * @param connectionString - PostgreSQL connection string.
+ * @param config - Drizzle pg configuration.
  */
-export const initDb = <TSchema extends Record<string, unknown> = Record<string, never>>(
+export const initDb = <TRelations extends AnyRelations = EmptyRelations>(
   connectionString: string,
-  config: DrizzleConfig<TSchema>,
-): BunSQLDatabase<TSchema> => {
+  config: DrizzlePgConfig<TRelations>,
+): BunSQLDatabase<TRelations> => {
   debugInit('[bun] Initializing database with connection string (logger: %s)', !!config.logger);
 
   const client = new SQL(connectionString);
 
-  const db = drizzle({
-    client,
-    ...config,
-  });
+  const db = drizzle({ ...config, client });
 
   debugInit('[bun] Database initialized successfully with Bun SQL driver');
 
@@ -31,14 +28,13 @@ export const initDb = <TSchema extends Record<string, unknown> = Record<string, 
 };
 
 /**
- * Create a database connection using environment configuration with Bun SQL
- * @param config - Drizzle configuration object
- * @returns Drizzle database instance
- * @throws Error if DB_URL is not configured
+ * Create a database connection using environment configuration with Bun SQL.
+ * @param config - Drizzle pg configuration.
+ * @throws Error if DB_URL is not configured.
  */
-export function createDb<TSchema extends Record<string, unknown> = Record<string, never>>(
-  config: DrizzleConfig<TSchema>,
-): BunSQLDatabase<TSchema> {
+export function createDb<TRelations extends AnyRelations = EmptyRelations>(
+  config: DrizzlePgConfig<TRelations>,
+): BunSQLDatabase<TRelations> {
   debugInit('[bun] Creating database from environment configuration');
 
   const connectionUrl = env.DB_URL;
@@ -57,8 +53,6 @@ export function createDb<TSchema extends Record<string, unknown> = Record<string
   return db;
 }
 
-// Re-export common utilities (from connection-options to avoid pg-native dependency)
 export { getDbConnectionOptions, getDbConnectionParams } from './connection-options';
 
-// Re-export types for convenience
-export type { BunSQLDatabase } from 'drizzle-orm/bun-sql';
+export type { BunSQLDatabase } from 'drizzle-orm/bun-sql/postgres';
