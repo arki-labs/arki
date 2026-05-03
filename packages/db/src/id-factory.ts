@@ -131,5 +131,4 @@ export function createIdFactory<TPrefix extends string, TId extends `${TPrefix}$
 
 // Re-export drizzle and zod utilities
 export * from 'drizzle-orm';
-export { relations } from 'drizzle-orm/_relations';
 export { createInsertSchema, createSelectSchema, createSchemaFactory, createUpdateSchema } from 'drizzle-orm/zod';
