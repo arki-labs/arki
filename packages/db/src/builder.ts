@@ -120,10 +120,21 @@ export type InitialBuilder = {
   /**
    * Set the database tables. Internally builds a relations config via
    * `defineRelations()` so consumers keep passing a plain table record.
+   *
+   * Use this for backends that don't define explicit relations and rely on
+   * auto-derivation (no joins). For explicit RQBv2 relations, prefer
+   * `.relations(...)` with a `defineRelations(tables, cb)` result.
    */
   schema<TSchema extends Record<string, unknown>>(
     schema: TSchema,
   ): SchemaBuilder<ReturnType<typeof defineRelations<TSchema>>>;
+
+  /**
+   * Pass a pre-built relations object (the result of
+   * `defineRelations(tables, cb)`) so the database knows about every table
+   * AND the explicit one/many relations declared by the application.
+   */
+  relations<TRelations extends AnyRelations>(relations: TRelations): SchemaBuilder<TRelations>;
 };
 
 /**
@@ -318,6 +329,11 @@ class InitialBuilderImpl implements InitialBuilder {
   ): SchemaBuilder<ReturnType<typeof defineRelations<TSchema>>> {
     debugProjection('[builder] Setting database schema (deriving relations via defineRelations)');
     const relations = defineRelations(schema) as ReturnType<typeof defineRelations<TSchema>>;
+    return new SchemaBuilderImpl(relations);
+  }
+
+  relations<TRelations extends AnyRelations>(relations: TRelations): SchemaBuilder<TRelations> {
+    debugProjection('[builder] Setting database relations (explicit RQBv2)');
     return new SchemaBuilderImpl(relations);
   }
 }
