@@ -123,6 +123,7 @@ export default tseslint.config(
       'unicorn/consistent-function-scoping': 'warn',
       'unicorn/text-encoding-identifier-case': 'warn',
       'unicorn/no-abusive-eslint-disable': 'warn',
+      'unicorn/prefer-native-coercion-functions': 'off',
       /**
        * Disallow expressions where the operation doesn't affect the value.
        *
