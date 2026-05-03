@@ -1,7 +1,6 @@
 import type { AnyRelations } from 'drizzle-orm';
 import { defineRelations } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import type { DrizzlePgConfig } from 'drizzle-orm/pg-core/utils';
 import type { PoolConfig } from 'pg';
 
 import { debugProjection } from './debug';
@@ -302,13 +301,11 @@ class SchemaBuilderImpl<TRelations extends AnyRelations> implements SchemaBuilde
       ...options.poolConfig,
     };
 
-    const drizzleConfig: DrizzlePgConfig<TRelations> = {
+    debugProjection('[builder] Initializing database with pool config');
+    const db = initDbWithOptions<TRelations>(poolConfig, {
       relations: this.relations,
       logger: options.isDev,
-    };
-
-    debugProjection('[builder] Initializing database with pool config');
-    const db = initDbWithOptions<TRelations>(poolConfig, drizzleConfig);
+    });
 
     debugProjection('[builder] Database builder created successfully');
     return new DbBuilderImpl<TRelations, Record<string, never>>(db, options.isDev ?? false);

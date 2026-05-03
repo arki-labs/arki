@@ -1,5 +1,5 @@
 import { SQL } from 'bun';
-import type { AnyRelations, EmptyRelations } from 'drizzle-orm';
+import type { AnyRelations } from 'drizzle-orm';
 import type { BunSQLDatabase } from 'drizzle-orm/bun-sql/postgres';
 import { drizzle } from 'drizzle-orm/bun-sql/postgres';
 import type { DrizzlePgConfig } from 'drizzle-orm/pg-core/utils';
@@ -12,15 +12,15 @@ import { env } from './env';
  * @param connectionString - PostgreSQL connection string.
  * @param config - Drizzle pg configuration.
  */
-export const initDb = <TRelations extends AnyRelations = EmptyRelations>(
+export const initDb = <TRelations extends AnyRelations>(
   connectionString: string,
-  config: DrizzlePgConfig<TRelations>,
+  config: Omit<DrizzlePgConfig<TRelations>, 'relations'> & { relations: TRelations },
 ): BunSQLDatabase<TRelations> => {
   debugInit('[bun] Initializing database with connection string (logger: %s)', !!config.logger);
 
   const client = new SQL(connectionString);
 
-  const db = drizzle({ ...config, client });
+  const db = drizzle<TRelations>({ ...config, client });
 
   debugInit('[bun] Database initialized successfully with Bun SQL driver');
 
@@ -32,8 +32,8 @@ export const initDb = <TRelations extends AnyRelations = EmptyRelations>(
  * @param config - Drizzle pg configuration.
  * @throws Error if DB_URL is not configured.
  */
-export function createDb<TRelations extends AnyRelations = EmptyRelations>(
-  config: DrizzlePgConfig<TRelations>,
+export function createDb<TRelations extends AnyRelations>(
+  config: Omit<DrizzlePgConfig<TRelations>, 'relations'> & { relations: TRelations },
 ): BunSQLDatabase<TRelations> {
   debugInit('[bun] Creating database from environment configuration');
 

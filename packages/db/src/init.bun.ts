@@ -1,4 +1,4 @@
-import type { AnyRelations, EmptyRelations } from 'drizzle-orm';
+import type { AnyRelations } from 'drizzle-orm';
 import type { DrizzlePgConfig } from 'drizzle-orm/pg-core/utils';
 import { drizzle } from 'drizzle-orm/bun-sql/postgres';
 import { SQL } from 'bun';
@@ -7,21 +7,21 @@ import { debugInit } from './debug';
 
 debugInit('[init.bun] Using Bun SQL (native) for database connections');
 
-export const initDb = <TRelations extends AnyRelations = EmptyRelations>(
+export const initDb = <TRelations extends AnyRelations>(
   connectionString: string,
-  config: DrizzlePgConfig<TRelations>,
+  config: Omit<DrizzlePgConfig<TRelations>, 'relations'> & { relations: TRelations },
 ) => {
   debugInit('[init.bun] Initializing database with connection string (logger: %s)', !!config.logger);
 
   const client = new SQL(connectionString);
-  const db = drizzle({ ...config, client });
+  const db = drizzle<TRelations>({ ...config, client });
 
   debugInit('[init.bun] Database initialized successfully');
 
   return db;
 };
 
-export const initDbWithOptions = <TRelations extends AnyRelations = EmptyRelations>(
+export const initDbWithOptions = <TRelations extends AnyRelations>(
   poolConfig: {
     connectionString?: string;
     host?: string;
@@ -32,7 +32,7 @@ export const initDbWithOptions = <TRelations extends AnyRelations = EmptyRelatio
     min?: number;
     max?: number;
   },
-  config: DrizzlePgConfig<TRelations>,
+  config: Omit<DrizzlePgConfig<TRelations>, 'relations'> & { relations: TRelations },
 ) => {
   debugInit('[init.bun] Initializing database with pool config (min: %d, max: %d, logger: %s)',
     poolConfig.min ?? 0, poolConfig.max ?? 10, !!config.logger);
@@ -47,7 +47,7 @@ export const initDbWithOptions = <TRelations extends AnyRelations = EmptyRelatio
         password: poolConfig.password,
       });
 
-  const db = drizzle({ ...config, client });
+  const db = drizzle<TRelations>({ ...config, client });
 
   debugInit('[init.bun] Database initialized with custom pool configuration');
 

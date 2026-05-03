@@ -1,5 +1,4 @@
-import type { AnyRelations, EmptyRelations } from 'drizzle-orm';
-import type { DrizzlePgConfig } from 'drizzle-orm/pg-core/utils';
+import type { AnyRelations, Logger } from 'drizzle-orm';
 
 import { getDbConnectionOptions } from './connection-options';
 import { debugFactory } from './debug';
@@ -8,11 +7,18 @@ import { initDbWithOptions } from './init';
 
 /**
  * Create a database connection using environment configuration.
- * @param config - Drizzle pg configuration (relations + logger).
+ *
+ * `relations` is required (mark the field even when empty) so TypeScript can
+ * infer the precise relations type for `db.query.*` autocomplete. Use
+ * `defineRelations(schema, callback)` to build the value.
+ *
  * @throws Error if DB_URL is not configured.
  */
-export function createDb<TRelations extends AnyRelations = EmptyRelations>(
-  config: DrizzlePgConfig<TRelations>,
+export function createDb<TRelations extends AnyRelations>(
+  config: {
+    relations: TRelations;
+    logger?: boolean | Logger | undefined;
+  },
 ) {
   debugFactory('[factory] Creating database from environment configuration');
 
@@ -28,7 +34,7 @@ export function createDb<TRelations extends AnyRelations = EmptyRelations>(
     connectionOptions.min, connectionOptions.max,
     connectionOptions.idleTimeoutMillis, connectionOptions.connectionTimeoutMillis);
 
-  const db = initDbWithOptions(connectionOptions, {
+  const db = initDbWithOptions<TRelations>(connectionOptions, {
     ...config,
     logger: config.logger ?? (env.DB_LOGGING || env.NODE_ENV === 'development'),
   });

@@ -1,4 +1,4 @@
-import type { AnyRelations, EmptyRelations } from 'drizzle-orm';
+import type { AnyRelations } from 'drizzle-orm';
 import type { DrizzlePgConfig } from 'drizzle-orm/pg-core/utils';
 import type { PoolConfig } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -11,9 +11,9 @@ const isBun = 'Bun' in globalThis;
 const Pool = isBun ? pg.Pool : (pg.native?.Pool ?? pg.Pool);
 debugInit('[init] Using %s for database connections', isBun ? 'pg (pure JS - Bun detected)' : 'pg-native');
 
-export const initDb = <TRelations extends AnyRelations = EmptyRelations>(
+export const initDb = <TRelations extends AnyRelations>(
   connectionString: string,
-  config: DrizzlePgConfig<TRelations>,
+  config: Omit<DrizzlePgConfig<TRelations>, 'relations'> & { relations: TRelations },
 ) => {
   debugInit('[init] Initializing database with connection string (logger: %s)', !!config.logger);
 
@@ -21,15 +21,15 @@ export const initDb = <TRelations extends AnyRelations = EmptyRelations>(
     connectionString,
   });
 
-  const db = drizzle({ ...config, client });
+  const db = drizzle<TRelations>({ ...config, client });
   debugInit('[init] Database initialized successfully');
 
   return db;
 };
 
-export const initDbWithOptions = <TRelations extends AnyRelations = EmptyRelations>(
+export const initDbWithOptions = <TRelations extends AnyRelations>(
   poolConfig: PoolConfig,
-  config: DrizzlePgConfig<TRelations>,
+  config: Omit<DrizzlePgConfig<TRelations>, 'relations'> & { relations: TRelations },
 ) => {
   debugInit(
     '[init] Initializing database with pool config (min: %d, max: %d, logger: %s)',
@@ -40,7 +40,7 @@ export const initDbWithOptions = <TRelations extends AnyRelations = EmptyRelatio
 
   const client = new Pool(poolConfig);
 
-  const db = drizzle({ ...config, client });
+  const db = drizzle<TRelations>({ ...config, client });
   debugInit('[init] Database initialized with custom pool configuration');
 
   return db;
