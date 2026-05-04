@@ -73,6 +73,7 @@
     "@qdrant/js-client-rest": "catalog:",
     "@t3-oss/env-core": "catalog:env",
     "ai": "catalog:ai",
+    "ai-sdk-ollama": "catalog:ai",
     "csv-parse": "catalog:",
     "ollama": "catalog:ai",
     "react-markdown": "catalog:content",

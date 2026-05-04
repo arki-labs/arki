@@ -106,6 +106,10 @@ export {
   AnthropicService,
   type AnthropicServiceConfig,
   type SystemPart,
+  // Local-first LLM service (default per @arki/ai/AGENTS.md LAW 1)
+  OllamaService,
+  type OllamaServiceConfig,
+  type OllamaGenerationOptions,
   // New LLM provider services
   GroqService,
   createGroqService,

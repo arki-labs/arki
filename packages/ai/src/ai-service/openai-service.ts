@@ -5,7 +5,7 @@
  */
 
 import { openai } from '@ai-sdk/openai';
-import { generateObject, streamText, generateText } from 'ai';
+import { Output, streamText, generateText } from 'ai';
 import type { ModelMessage } from 'ai';
 import { z } from '@arki/contracts';
 
@@ -32,6 +32,12 @@ export type GenerationOptions = {
   maxTokens?: number;
   maxRetries?: number;
   systemPrompt?: string;
+  /**
+   * Forwarded as `abortSignal` to the AI SDK so the upstream HTTP
+   * call is cancelled when the signal aborts. Required for cockatiel
+   * timeouts to actually stop work upstream.
+   */
+  signal?: AbortSignal;
 }
 
 export type OpenAIStreamOptions = {
@@ -116,19 +122,19 @@ export class OpenAIService {
       try {
         debugService('[OpenAI] Calling OpenAI API for structured generation');
 
-        const result = await generateObject({
+        const result = await generateText({
           model: openai(this.model),
           system: options.systemPrompt,
           messages: sanitizedMessages,
-          output: 'object',
-          schema: schema as z.ZodSchema, // Zod schema is compatible but types don't align perfectly with AI SDK
+          output: Output.object({ schema: schema as z.ZodSchema }),
           maxRetries: options.maxRetries || this.defaultMaxRetries,
           temperature: options.temperature || this.defaultTemperature,
+          abortSignal: options.signal,
         });
 
         debugService('[OpenAI] Structured data generated successfully');
 
-        return result.object as T;
+        return result.output as T;
       } catch (error) {
         debugService('[OpenAI] Structured generation failed: %s', getErrorMessage(error));
 
@@ -159,6 +165,7 @@ export class OpenAIService {
           prompt: sanitizedPrompt,
           temperature: options.temperature || this.defaultTemperature,
           maxRetries: options.maxRetries || this.defaultMaxRetries,
+          abortSignal: options.signal,
         });
 
         debugService('[OpenAI] Text generated successfully (length: %d)', result.text.length);
@@ -191,6 +198,7 @@ export class OpenAIService {
           messages: sanitizedMessages,
           temperature: options.temperature || this.defaultTemperature,
           maxRetries: options.maxRetries || this.defaultMaxRetries,
+          abortSignal: options.signal,
         });
 
         return result.text;
@@ -225,6 +233,7 @@ export class OpenAIService {
         system: options.systemPrompt,
         prompt: sanitizedPrompt,
         temperature: options.temperature || this.defaultTemperature,
+        abortSignal: options.signal,
       });
 
       let fullText = '';
@@ -273,6 +282,7 @@ export class OpenAIService {
         model: openai(this.model),
         messages: sanitizedMessages,
         temperature: options.temperature || this.defaultTemperature,
+        abortSignal: options.signal,
       });
 
       let fullText = '';
@@ -371,17 +381,16 @@ Content: "${text}"`;
     try {
       // Bypass sanitization for moderation — we need to analyze raw text
       return await this.withRateLimit('moderateContent', async () => {
-        const result = await generateObject({
+        const result = await generateText({
           model: openai(this.model),
           system: 'You are a content moderation assistant. Analyze text for safety.',
           messages: [{ role: 'user', content: prompt }],
-          output: 'object',
-          schema: moderationSchema,
+          output: Output.object({ schema: moderationSchema }),
           maxRetries: this.defaultMaxRetries,
           temperature: 0.1,
         });
 
-        return result.object;
+        return result.output;
       });
     } catch (error) {
       throw new GenerationError(

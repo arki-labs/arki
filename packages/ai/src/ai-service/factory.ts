@@ -23,7 +23,7 @@ import { google } from '@ai-sdk/google';
 import { groq } from '@ai-sdk/groq';
 import { mistral } from '@ai-sdk/mistral';
 import { openai } from '@ai-sdk/openai';
-import { generateObject, generateText, streamText } from 'ai';
+import { Output, generateText, streamText } from 'ai';
 
 import type { z } from '@arki/contracts';
 
@@ -101,8 +101,11 @@ export function createLLMProvider(config: LLMProviderConfig = {}): StructuredLLM
 
 /**
  * Wraps a Vercel AI SDK `LanguageModel` and implements `StructuredLLMProvider`.
- * All methods use the provider-neutral AI SDK primitives (`generateObject`,
- * `generateText`, `streamText`) so the same code path works for every backend.
+ * All methods use the provider-neutral AI SDK primitives — `generateText`
+ * with `output: Output.object({ schema })` for structured output, and
+ * `streamText` for streaming — so the same code path works for every
+ * backend. The deprecated `generateObject` / `streamObject` paths are
+ * NOT used.
  */
 class LanguageModelAdapter implements StructuredLLMProvider {
   constructor(
@@ -115,16 +118,16 @@ class LanguageModelAdapter implements StructuredLLMProvider {
 
   async generateStructuredData<T>(prompt: string, schema: z.ZodSchema<T>, options: GenerateOptions = {}): Promise<T> {
     try {
-      const result = await generateObject({
+      const result = await generateText({
         model: this.languageModel,
         system: options.systemPrompt,
         prompt,
-        output: 'object',
-        schema: schema as z.ZodSchema,
+        output: Output.object({ schema: schema as z.ZodSchema }),
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
+        abortSignal: options.signal,
       });
-      return result.object as T;
+      return result.output as T;
     } catch (error) {
       throw new GenerationError(
         `[${this.providerName}/${this.modelName}] Structured generation failed: ${getErrorMessage(error)}`,
@@ -139,16 +142,16 @@ class LanguageModelAdapter implements StructuredLLMProvider {
     options: GenerateOptions = {},
   ): Promise<T> {
     try {
-      const result = await generateObject({
+      const result = await generateText({
         model: this.languageModel,
         system: options.systemPrompt,
         messages: messages.map(m => ({ role: m.role, content: m.content })),
-        output: 'object',
-        schema: schema as z.ZodSchema,
+        output: Output.object({ schema: schema as z.ZodSchema }),
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
+        abortSignal: options.signal,
       });
-      return result.object as T;
+      return result.output as T;
     } catch (error) {
       throw new GenerationError(
         `[${this.providerName}/${this.modelName}] Structured generation from messages failed: ${getErrorMessage(error)}`,
@@ -165,6 +168,7 @@ class LanguageModelAdapter implements StructuredLLMProvider {
         prompt,
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
+        abortSignal: options.signal,
       });
       return result.text;
     } catch (error) {
@@ -183,6 +187,7 @@ class LanguageModelAdapter implements StructuredLLMProvider {
         messages: messages.map(m => ({ role: m.role, content: m.content })),
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
+        abortSignal: options.signal,
       });
 
       for await (const chunk of (await stream).textStream) {

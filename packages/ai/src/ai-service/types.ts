@@ -27,6 +27,18 @@ export type GenerateOptions = {
   systemPrompt?: string;
   /** Number of retries on failure */
   maxRetries?: number;
+  /**
+   * Abort signal honored by the underlying provider.
+   *
+   * When the signal aborts (e.g., a cockatiel timeout fires), the SDK
+   * stops streaming, closes the HTTP connection, and the model on the
+   * other end stops generating tokens. Without this, "timed out" calls
+   * keep running on the daemon — wasted compute and hidden cost.
+   *
+   * Optional: callers that don't need cancellation can omit it; the
+   * SDK proceeds normally.
+   */
+  signal?: AbortSignal;
 }
 
 /**

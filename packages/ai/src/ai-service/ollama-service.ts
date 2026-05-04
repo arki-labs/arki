@@ -1,0 +1,223 @@
+/**
+ * Ollama Service — local-first LLM provider for `@arki/ai`.
+ *
+ * Targets a locally-running Ollama daemon (default `http://localhost:11434`)
+ * via the `ai-sdk-ollama` AI SDK v6 provider — *not* the OpenAI-compat
+ * shim and not raw `ollama-js`. The choice gives us, in one swap:
+ *
+ *   1. **Constrained decoding via Ollama's native `format` param.** The
+ *      provider feeds the JSON Schema (derived from the Zod schema by
+ *      AI SDK's `Output.object()`) directly into Ollama's grammar
+ *      engine. Result: every emitted token is a valid prefix of the
+ *      schema.
+ *   2. **Cascade JSON repair, automatic.** When constrained decoding
+ *      produces output that nonetheless fails Zod parsing (a refinement
+ *      like `.min(5)` on an array, a stray trailing comma from a
+ *      smaller model, etc.), `ai-sdk-ollama`'s enhanced `generateText`
+ *      / `streamText` runs `jsonrepair` then an Ollama-specific
+ *      fallback transparently — controlled by `enableTextRepair`
+ *      (default `true`).
+ *   3. **v6-idiomatic `generateText({ output: Output.object(...) })`.**
+ *      Same SDK surface as our `OpenAIService` and `AnthropicService`,
+ *      so the three providers remain interchangeable through the
+ *      `DiscoveryLlmAdapter` boundary. The deprecated
+ *      `generateObject` / `streamObject` paths are NOT used — they emit
+ *      deprecation warnings under `ai@^6` and are scheduled for
+ *      removal.
+ *
+ * No API key, no egress, no per-call cost. Per `@arki/ai/AGENTS.md`
+ * LAW 1, this is the **default** LLM provider in Arki — cloud
+ * providers are explicit fall-throughs.
+ */
+
+import { createOllama, generateText, streamText } from 'ai-sdk-ollama';
+import { Output } from 'ai';
+import type { ModelMessage } from 'ai';
+import { z } from '@arki/contracts';
+
+import { debugService } from '../debug.ts';
+import { GenerationError, getErrorMessage } from '../errors';
+
+type ChatMessage = ModelMessage;
+
+export type OllamaServiceConfig = {
+  /** Model tag, e.g. `gemma4`, `qwen3.6`, `llama3.2-vision:11b`. */
+  model?: string;
+  /**
+   * Base URL of the Ollama daemon. Defaults to `OLLAMA_HOST` env, then
+   * `OLLAMA_BASE_URL` env (with `/v1` suffix stripped if present), then
+   * `http://localhost:11434`.
+   */
+  host?: string;
+  /** Default sampling temperature (0–2). */
+  temperature?: number;
+  /** Per-call retry budget. Local models rarely need >1 retry. */
+  maxRetries?: number;
+};
+
+export type OllamaGenerationOptions = {
+  temperature?: number;
+  maxRetries?: number;
+  systemPrompt?: string;
+  /**
+   * Per-token streaming callback. When provided, the service uses
+   * `streamText` so each delta token (the raw text the model emits
+   * mid-generation) is forwarded to this callback. The structured
+   * output is still parsed + Zod-validated at the end of the stream,
+   * so the caller gets the same `T` return value as the non-streaming
+   * path — `onToken` is purely a side-channel for observability
+   * (debug panes, smoke tests, log files, …).
+   *
+   * NB: with constrained decoding, partial output is always a valid
+   * JSON prefix — useful when you want to render structured output
+   * progressively. For *parsed* partial objects (DeepPartial<T> as
+   * the model fills fields in), expose `partialOutputStream` from the
+   * underlying `streamText` result instead.
+   */
+  onToken?: (chunk: string) => void;
+  /**
+   * Abort signal forwarded to the AI SDK (`abortSignal`). When the
+   * signal aborts, the streaming/non-streaming request is cancelled
+   * AND the upstream Ollama daemon stops generating — without this,
+   * a cockatiel timeout would hand control back to the caller while
+   * the model kept burning cycles on a now-orphaned response.
+   */
+  signal?: AbortSignal;
+};
+
+const DEFAULT_MODEL = 'gemma4';
+const DEFAULT_TEMPERATURE = 0.7;
+const DEFAULT_MAX_RETRIES = 1;
+
+/**
+ * Resolve the Ollama daemon host with sensible fallbacks.
+ *
+ * `OLLAMA_BASE_URL` is what the discovery feature uses, plus many
+ * `@ai-sdk/openai`-against-`/v1` setups. The `ai-sdk-ollama` provider
+ * expects a host without the `/v1` suffix, so we strip it when present.
+ * That way operators can keep one env var across both call paths.
+ */
+function resolveHost(explicit?: string): string {
+  const raw =
+    explicit ?? process.env['OLLAMA_HOST'] ?? process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434';
+  return raw.replace(/\/v1\/?$/, '');
+}
+
+/**
+ * Local-first LLM service. Mirrors `OpenAIService` / `AnthropicService`
+ * for the `generateStructured*` methods — drop-in compatible for callers
+ * typed against the `DiscoveryLlmAdapter` boundary.
+ */
+export class OllamaService {
+  private readonly provider: ReturnType<typeof createOllama>;
+  private readonly model: string;
+  private readonly defaultTemperature: number;
+  private readonly defaultMaxRetries: number;
+
+  constructor(config: OllamaServiceConfig = {}) {
+    this.model = config.model ?? DEFAULT_MODEL;
+    this.defaultTemperature = config.temperature ?? DEFAULT_TEMPERATURE;
+    this.defaultMaxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
+
+    const host = resolveHost(config.host);
+    this.provider = createOllama({ baseURL: host });
+
+    debugService(
+      '[Ollama] Service initialized (model: %s, host: %s, temperature: %d, maxRetries: %d)',
+      this.model,
+      host,
+      this.defaultTemperature,
+      this.defaultMaxRetries,
+    );
+  }
+
+  /**
+   * Single-prompt structured generation. Convenience wrapper around
+   * {@link generateStructuredDataFromMessages}.
+   */
+  async generateStructuredData<T>(
+    prompt: string,
+    schema: z.ZodSchema<T>,
+    options: OllamaGenerationOptions = {},
+  ): Promise<T> {
+    return this.generateStructuredDataFromMessages(
+      [{ role: 'user', content: prompt }],
+      schema,
+      options,
+    );
+  }
+
+  /**
+   * Multi-message structured generation. Uses AI SDK v6's
+   * `generateText({ output: Output.object({ schema }) })` — the
+   * stable replacement for the deprecated `generateObject`. Cascade
+   * JSON repair is auto-applied by `ai-sdk-ollama`'s enhanced
+   * functions (`enableTextRepair: true` by default).
+   */
+  async generateStructuredDataFromMessages<T>(
+    messages: ChatMessage[],
+    schema: z.ZodSchema<T>,
+    options: OllamaGenerationOptions = {},
+  ): Promise<T> {
+    const temperature = options.temperature ?? this.defaultTemperature;
+    const maxRetries = options.maxRetries ?? this.defaultMaxRetries;
+    const output = Output.object({ schema: schema as z.ZodSchema });
+
+    debugService(
+      '[Ollama] generateText (model=%s, messages=%d, temperature=%d, stream=%s)',
+      this.model,
+      messages.length,
+      temperature,
+      !!options.onToken,
+    );
+
+    try {
+      // Streaming path — emit token deltas to `onToken` as the model
+      // generates, then await the assembled + Zod-validated output.
+      if (options.onToken) {
+        const result = await streamText({
+          model: this.provider(this.model),
+          system: options.systemPrompt,
+          messages,
+          output,
+          temperature,
+          maxRetries,
+          abortSignal: options.signal,
+        });
+
+        for await (const chunk of result.textStream) {
+          options.onToken(chunk);
+        }
+
+        const obj = await result.output;
+        debugService('[Ollama] Structured data generated successfully (streamed)');
+        return obj as T;
+      }
+
+      // Non-streaming path — single round-trip, full structured output
+      // arrives in `result.output`.
+      const result = await generateText({
+        model: this.provider(this.model),
+        system: options.systemPrompt,
+        messages,
+        output,
+        temperature,
+        maxRetries,
+        abortSignal: options.signal,
+      });
+
+      debugService('[Ollama] Structured data generated successfully');
+      return result.output as T;
+    } catch (error) {
+      debugService(
+        '[Ollama] Structured generation failed (model=%s): %s',
+        this.model,
+        getErrorMessage(error),
+      );
+      throw new GenerationError(
+        `Failed to generate structured data via Ollama (${this.model}): ${getErrorMessage(error)}`,
+        error,
+      );
+    }
+  }
+}

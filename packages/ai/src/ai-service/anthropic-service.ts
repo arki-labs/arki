@@ -4,7 +4,7 @@
  */
 
 import { anthropic } from '@ai-sdk/anthropic';
-import { generateObject, generateText } from 'ai';
+import { Output, generateText } from 'ai';
 import type { ModelMessage, SystemModelMessage } from 'ai';
 import type { z } from '@arki/contracts';
 
@@ -75,12 +75,42 @@ export class AnthropicService {
   }
 
   /**
+   * Generate structured data from a single text prompt.
+   *
+   * Convenience wrapper over {@link generateStructuredDataFromMessages} that
+   * mirrors the API surface of `OpenAIService.generateStructuredData`, so
+   * both services are interchangeable for callers that only need
+   * single-prompt structured generation.
+   */
+  async generateStructuredData<T>(
+    prompt: string,
+    schema: z.ZodSchema<T>,
+    options: {
+      temperature?: number;
+      maxRetries?: number;
+      systemPrompt?: string | SystemPart[];
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<T> {
+    return this.generateStructuredDataFromMessages(
+      [{ role: 'user', content: prompt }],
+      schema,
+      options,
+    );
+  }
+
+  /**
    * Generate structured data from message payloads (supports multimodal content)
    */
   async generateStructuredDataFromMessages<T>(
     messages: ChatMessage[],
     schema: z.ZodSchema<T>,
-    options: { temperature?: number; maxRetries?: number; systemPrompt?: string | SystemPart[] } = {},
+    options: {
+      temperature?: number;
+      maxRetries?: number;
+      systemPrompt?: string | SystemPart[];
+      signal?: AbortSignal;
+    } = {},
   ): Promise<T> {
     debugService(
       '[Anthropic] Generating structured data (messages: %d, temperature: %d)',
@@ -94,13 +124,14 @@ export class AnthropicService {
       try {
         debugService('[Anthropic] Calling Anthropic API for structured generation');
 
-        const response = await generateObject({
+        const response = await generateText({
           model: anthropic(this.model),
           system,
           messages,
-          schema: schema as any,
+          output: Output.object({ schema: schema as z.ZodSchema }),
           maxRetries: options.maxRetries ?? this.defaultMaxRetries,
           temperature: options.temperature ?? this.defaultTemperature,
+          abortSignal: options.signal,
         });
 
         debugService(
@@ -109,7 +140,7 @@ export class AnthropicService {
           (response.providerMetadata?.anthropic as Record<string, number> | undefined)?.cacheReadInputTokens ?? 0,
         );
 
-        return response.object as T;
+        return response.output as T;
       } catch (error) {
         debugService('[Anthropic] Structured generation failed: %s', getErrorMessage(error));
 
@@ -132,7 +163,15 @@ export class AnthropicService {
   /**
    * Generate plain text (helper for future use cases)
    */
-  async generateText(prompt: string, options: { temperature?: number; maxRetries?: number; systemPrompt?: string } = {}) {
+  async generateText(
+    prompt: string,
+    options: {
+      temperature?: number;
+      maxRetries?: number;
+      systemPrompt?: string;
+      signal?: AbortSignal;
+    } = {},
+  ) {
     debugService('[Anthropic] Generating text (prompt length: %d)', prompt.length);
 
     try {
@@ -142,6 +181,7 @@ export class AnthropicService {
         prompt,
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
+        abortSignal: options.signal,
       });
 
       debugService('[Anthropic] Text generated successfully (length: %d)', result.text.length);
