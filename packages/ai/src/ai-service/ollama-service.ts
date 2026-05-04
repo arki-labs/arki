@@ -53,6 +53,20 @@ export type OllamaServiceConfig = {
   temperature?: number;
   /** Per-call retry budget. Local models rarely need >1 retry. */
   maxRetries?: number;
+  /**
+   * How long the daemon should keep the model resident in memory
+   * after a call completes. Forwarded as `keep_alive` to the Ollama
+   * provider's `chat` settings.
+   *
+   * Format accepts duration strings like `'5m'`, `'20m'`, `'1h'`,
+   * or `0` to unload immediately. Defaults to Ollama's built-in
+   * 5-minute idle unload.
+   *
+   * Why a caller might set this: pipelines that issue many vision
+   * calls back-to-back pay a 10-20s reload cost every time the model
+   * unloads between calls. A longer keep-alive amortizes that cost.
+   */
+  keepAlive?: string | number;
 };
 
 export type OllamaGenerationOptions = {
@@ -113,22 +127,36 @@ export class OllamaService {
   private readonly model: string;
   private readonly defaultTemperature: number;
   private readonly defaultMaxRetries: number;
+  private readonly keepAlive: string | number | undefined;
 
   constructor(config: OllamaServiceConfig = {}) {
     this.model = config.model ?? DEFAULT_MODEL;
     this.defaultTemperature = config.temperature ?? DEFAULT_TEMPERATURE;
     this.defaultMaxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
+    this.keepAlive = config.keepAlive;
 
     const host = resolveHost(config.host);
     this.provider = createOllama({ baseURL: host });
 
     debugService(
-      '[Ollama] Service initialized (model: %s, host: %s, temperature: %d, maxRetries: %d)',
+      '[Ollama] Service initialized (model: %s, host: %s, temperature: %d, maxRetries: %d, keepAlive: %s)',
       this.model,
       host,
       this.defaultTemperature,
       this.defaultMaxRetries,
+      this.keepAlive ?? 'default',
     );
+  }
+
+  /**
+   * Build the ai-sdk-ollama LanguageModel for this call. Threads
+   * `keep_alive` into the chat settings so the daemon doesn't unload
+   * the model between calls (default Ollama unload is 5 min idle).
+   */
+  private buildModel() {
+    return this.keepAlive !== undefined
+      ? this.provider(this.model, { keep_alive: this.keepAlive })
+      : this.provider(this.model);
   }
 
   /**
@@ -176,7 +204,7 @@ export class OllamaService {
       // generates, then await the assembled + Zod-validated output.
       if (options.onToken) {
         const result = await streamText({
-          model: this.provider(this.model),
+          model: this.buildModel(),
           system: options.systemPrompt,
           messages,
           output,
