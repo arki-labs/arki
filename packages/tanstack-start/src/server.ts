@@ -4,7 +4,9 @@
  * Provides server setup utilities for running TanStack Start with Bun.
  */
 
-import type { Server } from 'bun';
+import type { Server, ServerWebSocket } from 'bun';
+
+type AnyServer = Server<ServerWebSocket<unknown>>;
 
 export type ServerConfig = {
   /**
@@ -73,7 +75,7 @@ export type ServerConfig = {
 export function createServerHandler(
   config: ServerConfig,
   appHandler: (request: Request) => Response | Promise<Response>,
-): Server {
+): AnyServer {
   const {
     port = Number(process.env.PORT) || 3000,
     hostname = '0.0.0.0',
@@ -145,7 +147,7 @@ export function createServerHandler(
 /**
  * Graceful shutdown handler for Bun server
  */
-export function setupGracefulShutdown(server: Server, cleanup?: () => Promise<void>): void {
+export function setupGracefulShutdown(server: AnyServer, cleanup?: () => Promise<void>): void {
   const shutdown = async (signal: string) => {
     console.log(`\n${signal} received, shutting down gracefully...`);
 

@@ -3,7 +3,8 @@
   "compilerOptions": {
     "lib": ["ES2022", "dom", "dom.iterable"],
     "jsx": "react-jsx",
-    "rootDir": "."
+    "rootDir": ".",
+    "types": ["bun", "node"]
   },
   "include": ["src"],
   "exclude": ["node_modules"]

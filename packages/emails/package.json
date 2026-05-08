@@ -94,6 +94,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@types/node": "catalog:node",
     "react-email": "catalog:"
   },
   "module:jsx": "src"

@@ -6,7 +6,7 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./dist/src/index.d.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
@@ -27,7 +27,8 @@
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
-    "@arki/tsconfig": "workspace:*"
+    "@arki/tsconfig": "workspace:*",
+    "@types/node": "catalog:node"
   },
   "types": "./dist/src/index.d.ts"
 }

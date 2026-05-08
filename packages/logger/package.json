@@ -5,12 +5,12 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./dist/src/index.d.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
     "./debug": {
-      "types": "./dist/debug.d.ts",
+      "types": "./dist/src/debug.d.ts",
       "import": "./src/debug.ts",
       "default": "./src/debug.ts"
     },

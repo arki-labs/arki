@@ -36,7 +36,7 @@ type ArticleProps = {
   Link: LinkComponent;
 };
 
-function Article({ publishedAt, imageSrc, title, children, href, blurDataURL, Link }: ArticleProps) {
+function Article({ publishedAt, imageSrc, title, children, href, Link }: ArticleProps) {
   return (
     <article className="grid grid-cols-1 gap-4 md:grid-cols-5 md:gap-6">
       <div className="relative row-span-2">
