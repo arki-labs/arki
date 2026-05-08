@@ -125,7 +125,7 @@ function ChatPage() {
 
 ## Migration Guide
 
-### From Holyspace (Next.js API route)
+### From Everseek (Next.js API route)
 1. Keep the existing `/api/ai/chat/route.ts` backend (already uses `streamText`)
 2. Replace custom `AIChat` component with `@arki/chat-ui` primitives
 3. Replace custom `useAIChat` hook with `useChatRuntime` from `@assistant-ui/react-ai-sdk`

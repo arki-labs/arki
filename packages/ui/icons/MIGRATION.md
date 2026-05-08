@@ -19,7 +19,7 @@ The non-Lucide subpaths under `@arki/icons` are unchanged: `/types` (the local
 - Apps with `<AtelierIconDefaults>` mounted (`weight: 'duotone'`): `ekuation`, `manuscribed`,
   `domodoro`.
 - Apps with no shared design system (Phosphor's default `regular` is used): `novelette`,
-  `holyspace`/`everseek`, `kapodopera`, `strophie`, `readingpath`, `solitairium`,
+  `everseek`/`everseek`, `kapodopera`, `strophie`, `readingpath`, `solitairium`,
   `movietracker`, `forkworks`, `avocabo`.
 - Shared packages migrated: `@arki/sitekit`, `@arki/ui/base`, `@arki/ui/chat`,
   `@arki/games/sudoku`, `@arki/games/solitaire-ui`, `@arki/content`, `@arki/rich-text`,
