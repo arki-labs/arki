@@ -17,6 +17,6 @@
       "ESNext"
     ],
     "jsx": "preserve",
-    "types": ["unplugin-icons/types/react"]
+    "types": ["unplugin-icons/types/react", "@tanstack/start-client-core"]
   }
 }
