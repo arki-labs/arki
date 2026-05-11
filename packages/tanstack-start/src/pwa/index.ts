@@ -24,6 +24,11 @@
  *   falls through to the network on demand. Pass an explicit
  *   `injectManifest.globIgnores` to override (use `[]` to precache
  *   everything).
+ * - Defaults `injectManifest.maximumFileSizeToCacheInBytes` to 4 MiB.
+ *   Workbox's own default is 2 MiB, which vite-plugin-pwa treats as a
+ *   build-blocking error rather than a warning — any single chunk over
+ *   the limit fails `vite build`. 4 MiB covers real-world heavy entry
+ *   chunks (ekuation main: ~2.5 MB) while still flagging genuine bloat.
  */
 
 import type { Plugin } from 'vite';
@@ -40,7 +45,13 @@ type InjectManifestOverrides = {
 
   /**
    * Maximum size, in bytes, of a single file workbox will precache.
-   * @default 3_000_000 (3 MB)
+   * Files larger than this fail the build (vite-plugin-pwa treats the
+   * Workbox warning as fatal). Defaults to 4 MiB — enough headroom for
+   * heavy entry chunks (e.g. ekuation's ~2.5 MB main bundle) while still
+   * acting as a guardrail against accidentally precaching very large
+   * assets. Bump higher if your app legitimately needs to precache files
+   * over 4 MiB; consider code-splitting first.
+   * @default 4_194_304 (4 MiB)
    */
   maximumFileSizeToCacheInBytes?: number;
 
@@ -113,7 +124,11 @@ export function createPwaPlugin(options: CreatePwaPluginOptions = {}): Plugin[] 
     injectManifest = {},
   } = options;
 
-  const { globIgnores = [...LAZY_CHUNK_IGNORES], ...restInjectManifest } = injectManifest;
+  const {
+    globIgnores = [...LAZY_CHUNK_IGNORES],
+    maximumFileSizeToCacheInBytes = 4 * 1024 * 1024,
+    ...restInjectManifest
+  } = injectManifest;
 
   return VitePWA({
     registerType: 'autoUpdate',
@@ -126,6 +141,7 @@ export function createPwaPlugin(options: CreatePwaPluginOptions = {}): Plugin[] 
       globDirectory: '.output/public',
       globPatterns,
       globIgnores,
+      maximumFileSizeToCacheInBytes,
       ...restInjectManifest,
     },
   });
