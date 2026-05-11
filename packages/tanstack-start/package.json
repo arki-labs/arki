@@ -70,8 +70,7 @@
     },
     "./pwa": {
       "types": "./dist/src/pwa/index.d.ts",
-      "import": "./src/pwa/index.ts",
-      "node": "./src/pwa/index.ts"
+      "default": "./dist/src/pwa/index.js"
     },
     "./pwa/sw": {
       "types": "./dist/src/pwa/sw.d.ts",
@@ -86,7 +85,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && tsc -p tsconfig.pwa.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",

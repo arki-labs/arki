@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "emitDeclarationOnly": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "allowImportingTsExtensions": false,
+    "tsBuildInfoFile": "${configDir}/.cache/tsbuildinfo.pwa.json"
+  },
+  "include": ["src/pwa/index.ts"],
+  "exclude": ["node_modules"]
+}
