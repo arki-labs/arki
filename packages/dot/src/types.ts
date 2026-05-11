@@ -2,8 +2,8 @@ import type { Event, ProjectionDefinition } from '@event-driven-io/emmett';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 
 // Auth types are provided by our auth module
-import type { DotAuth, DotRBACManager, DotSession, DotSessionManager } from './auth/index';
-import type { ExtractTablesWithRelations } from '@arki/db/orm';
+import type { DotAuth, DotAuthConfig, DotRBACManager, DotSession, DotSessionManager } from './auth/index';
+import type { AnyRelations } from '@arki/db/orm';
 import type { CommandHandler } from '@arki/event-sourcing/builders';
 import type { PostgreSQLProjectionHandlerContext, PostgresReadEventMetadata } from '@arki/event-sourcing/store';
 import type { KV } from '@arki/kv';
@@ -16,12 +16,15 @@ export type AuthPackage = {
 };
 
 /**
- * Represents the structure of a database schema recognized by Drizzle.
- * Should be a record mapping table names to Drizzle table objects (e.g., PgTable).
- * Using `Record<string, unknown>` for flexibility in the builder.
- * @example { users: PgTable<any>, posts: PgTable<any> }
+ * Represents the relational config recognized by Drizzle 1.0 (RQBv2).
+ *
+ * In Drizzle 1.0 the legacy `schema` argument was replaced by a single
+ * `relations` config built with `defineRelations(tables, builder)`. The
+ * resulting object satisfies `TablesRelationalConfig`, which is exactly
+ * what `AnyRelations` aliases. We keep the historical name `SchemaInterface`
+ * for source-compatibility across this package.
  */
-export type SchemaInterface = Record<string, unknown>;
+export type SchemaInterface = AnyRelations;
 
 /**
  * Represents a collection of repositories, typically mapping names to repository instances.
@@ -50,66 +53,23 @@ export type EnvConfig = {
 };
 
 /**
- * Authentication configuration options
+ * Authentication configuration options.
+ *
+ * The canonical type lives in `./auth/config` as `DotAuthConfig`. We
+ * re-export it here under the legacy name `AuthConfig` so existing
+ * imports keep working. The previous local duplicate had drifted —
+ * `providers` was typed as `unknown[]` instead of
+ * `(BuiltInProvider | CustomProvider)[]` — which broke the call into
+ * `authFeatures.initAuth(config: DotAuthConfig)`.
+ *
+ * Custom session validation can still be expressed via `DotAuthConfig.hooks`.
  */
-export type AuthConfig = {
+export type AuthConfig = DotAuthConfig & {
   /**
-   * Authentication secret for JWT signing
-   */
-  secret: string;
-
-  /**
-   * Base URL for authentication redirects
-   */
-  baseUrl?: string;
-
-  /**
-   * Debug mode for authentication
-   */
-  debug?: boolean;
-
-  /**
-   * Custom session validation function
+   * Custom session validation function used by the legacy oRPC bridge
+   * (`orpc/legacy.ts`) when no DotAuth instance is configured.
    */
   validateSession?: (token: string) => Promise<DotSession | null>;
-
-  /**
-   * Authentication providers
-   */
-  providers?: unknown[];
-
-  /**
-   * Custom authentication pages
-   */
-  pages?: {
-    signIn?: string;
-    signOut?: string;
-    error?: string;
-    verifyRequest?: string;
-    newUser?: string;
-  };
-
-  /**
-   * Authentication callbacks
-   */
-  callbacks?: {
-    session?: (params: unknown) => unknown;
-    signIn?: (params: unknown) => Promise<boolean>;
-    redirect?: (params: { baseUrl: string }) => Promise<string>;
-    jwt?: (params: { token: unknown }) => Promise<unknown>;
-  };
-
-  /**
-   * Authentication events
-   */
-  events?: {
-    signIn?: (message: unknown) => Promise<void>;
-    signOut?: (message: unknown) => Promise<void>;
-    createUser?: (message: unknown) => Promise<void>;
-    updateUser?: (message: unknown) => Promise<void>;
-    linkAccount?: (message: unknown) => Promise<void>;
-    session?: (message: unknown) => Promise<void>;
-  };
 };
 
 /**
@@ -162,7 +122,7 @@ export type BaseRPCContext<TSchema extends SchemaInterface> = {
   token: string | null;
   db?: NodePgDatabase<TSchema>;
   runInTransaction?: <T>(
-    callback: (tx: NodePgTransaction<TSchema, ExtractTablesWithRelations<TSchema>>) => Promise<T>,
+    callback: (tx: NodePgTransaction<TSchema>) => Promise<T>,
   ) => Promise<T>;
   repo?: Repository;
   kv?: KV;

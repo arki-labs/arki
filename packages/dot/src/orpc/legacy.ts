@@ -1,6 +1,9 @@
+import type { EventStore, MessageBus } from '@event-driven-io/emmett';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { createRouterClient, ORPCError, os } from '@orpc/server';
 import { ZodError } from '@arki/contracts';
 
+import type { KV } from '@arki/kv';
 // Session type is provided by our auth module
 import { RateLimitExceededError } from '@arki/kv/errors';
 
@@ -26,11 +29,11 @@ export const rpcFeatures = {
    * @param rpcOptions The RPC options
    */
   createRPCContextFactory<TSchema extends SchemaInterface>(
-    dbConfig: { url?: string; schema: TSchema; debug?: boolean; repositories?: Record<string, unknown> } | null,
-    initDrizzleFn: () => unknown,
-    initKvFn: () => unknown,
-    initEventSourcingFn: () => unknown,
-    initMessageBusFn: (eventStore: unknown) => unknown,
+    dbConfig: { url?: string; relations: TSchema; debug?: boolean; repositories?: Record<string, unknown> } | null,
+    initDrizzleFn: () => NodePgDatabase<TSchema> | undefined,
+    initKvFn: () => KV | undefined,
+    initEventSourcingFn: () => EventStore | undefined,
+    initMessageBusFn: (eventStore: EventStore | undefined) => MessageBus,
     authConfig: AuthConfig | null,
     rpcOptions?: RPCOptions<TSchema> | null,
   ) {
@@ -110,15 +113,15 @@ export const rpcFeatures = {
       }
 
       // Create base context with initialized components
-      const baseContext: DotContext = {
+      const baseContext: DotContext<TSchema> = {
         session: resolvedSession,
         token: authToken,
         user: resolvedSession?.user as DotUser | undefined,
-        db: db as DotContext['db'],
+        db,
         repo: dbConfig?.repositories ?? {},
-        kv: initKvFn() as DotContext['kv'],
-        messageBus: initMessageBusFn(initEventSourcingFn()) as DotContext['messageBus'],
-        runInTransaction: (db as { transaction?: { bind: (thisArg: unknown) => unknown } })?.transaction?.bind(db) as DotContext['runInTransaction'],
+        kv: initKvFn(),
+        messageBus: initMessageBusFn(initEventSourcingFn()),
+        runInTransaction: db?.transaction.bind(db) as DotContext<TSchema>['runInTransaction'],
         // Add auth-related properties
         auth: dotAuth,
         sessionManager: dotAuth?.session,

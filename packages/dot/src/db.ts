@@ -19,13 +19,13 @@ import type { Repository, SchemaInterface } from './types';
 export const dbFeatures = {
   /**
    * @internal Initializes the Drizzle ORM database connection.
-   * @param dbConfig The database configuration with URL and schema
+   * @param dbConfig The database configuration with URL and relations
    * @param env The environment configuration
    * @param dbUrlVariants Priority-ordered list of environment variable names
    * @param getEnvVar Function to get environment variables
    */
   initDrizzle<TSchema extends SchemaInterface>(
-    dbConfig: { url?: string; schema: TSchema; debug?: boolean } | null,
+    dbConfig: { url?: string; relations: TSchema; debug?: boolean } | null,
     env: Record<string, any>,
     dbUrlVariants: string[],
     getEnvVar: (variantNames: string[]) => string | undefined,
@@ -36,7 +36,7 @@ export const dbFeatures = {
     }
 
     debugDB('[dbFeatures] Initializing Drizzle database connection');
-    const { url, schema, debug } = dbConfig;
+    const { url, relations, debug } = dbConfig;
     let dbUrl: string | undefined = url;
     dbUrl ??= getEnvVar(dbUrlVariants);
 
@@ -50,8 +50,8 @@ export const dbFeatures = {
 
     const enableLogging = debug ?? env['NODE_ENV'] === 'development';
     debugDB('[dbFeatures] Initializing database (logging: %s)', enableLogging);
-    const db = initDb(dbUrl, {
-      schema,
+    const db = initDb<TSchema>(dbUrl, {
+      relations,
       logger: enableLogging,
     });
     debugDB('[dbFeatures] Database connection initialized successfully');

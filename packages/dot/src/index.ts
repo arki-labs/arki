@@ -45,7 +45,7 @@ export class Dot<
 > {
   readonly #appName: TAppName;
   readonly #routers: TRouters | null;
-  readonly #dbConfig: { url?: string; schema: TSchema; debug?: boolean; repositories?: TRepositories } | null;
+  readonly #dbConfig: { url?: string; relations: TSchema; debug?: boolean; repositories?: TRepositories } | null;
   readonly #eventSourcingConfig: { dbUrl?: string; projections: BaseProjectionDefinition[] } | null;
   readonly #kvConfig: { url: string } | null;
   readonly #env: TEnv;
@@ -68,7 +68,7 @@ export class Dot<
     name: TAppName,
     options: {
       routers?: TRouters | null;
-      dbConfig?: { url?: string; schema: TSchema; debug?: boolean; repositories?: TRepositories } | null;
+      dbConfig?: { url?: string; relations: TSchema; debug?: boolean; repositories?: TRepositories } | null;
       eventSourcingConfig?: { dbUrl?: string; projections: BaseProjectionDefinition[] } | null;
       kvConfig?: { url: string } | null;
       env?: TEnv;
@@ -117,7 +117,7 @@ export class Dot<
     TNewEnv extends EnvConfig = TEnv,
   >(options: {
     routers?: TNewRouters | null;
-    dbConfig?: { url?: string; schema: TNewSchema; debug?: boolean; repositories?: TNewRepositories } | null;
+    dbConfig?: { url?: string; relations: TNewSchema; debug?: boolean; repositories?: TNewRepositories } | null;
     eventSourcingConfig?: { dbUrl?: string; projections: BaseProjectionDefinition[] } | null;
     kvConfig?: { url: string } | null;
     env?: TNewEnv;
@@ -132,7 +132,7 @@ export class Dot<
         options.dbConfig ??
         (this.#dbConfig as unknown as {
           url?: string;
-          schema: TNewSchema;
+          relations: TNewSchema;
           debug?: boolean;
           repositories?: TNewRepositories;
         }),
@@ -163,23 +163,24 @@ export class Dot<
   }
 
   /**
-   * Configures the database connection, schema, and repositories.
+   * Configures the database connection, relations, and repositories.
    *
    * This is the primary method for setting up Drizzle ORM and associated repositories.
    * The database URL will be automatically inferred from environment variables
    * (e.g., DB_URL, DB_URL) if not explicitly provided in `options.url`.
    *
-   * @param schema The Drizzle schema definition (type: `SchemaInterface`).
+   * @param relations The Drizzle 1.0 relations config produced by
+   *   `defineRelations(tables, builder)` (type: `SchemaInterface` aka `AnyRelations`).
    * @param repositories An object containing repository instances, keyed by name (optional).
    * @param options Optional configuration: `url` overrides environment variables, `debug` enables Drizzle logging.
    * @returns A new Dot instance with the updated configuration.
    * @example
-   * .withDb(schema, { userRepo, postRepo }, { debug: true })
-   * .withDb(schema, { userRepo }, { url: 'postgres://...' })
-   * .withDb(schema) // Only configure schema and default DB connection
+   * .withDb(relations, { userRepo, postRepo }, { debug: true })
+   * .withDb(relations, { userRepo }, { url: 'postgres://...' })
+   * .withDb(relations) // Only configure relations and default DB connection
    */
   withDb<TNewSchema extends SchemaInterface, TNewRepositories extends Repository = TRepositories>(
-    schema: Readonly<TNewSchema>,
+    relations: Readonly<TNewSchema>,
     repositories?: Readonly<TNewRepositories>,
     options: { url?: string; debug?: boolean } = {},
   ) {
@@ -188,7 +189,7 @@ export class Dot<
     return this.createNew<TRouters, TNewSchema, TNewRepositories>({
       dbConfig: {
         url: options.url,
-        schema,
+        relations,
         debug: options.debug,
         repositories: currentRepositories,
       },
@@ -434,7 +435,11 @@ export class Dot<
       if (Object.keys(registrations.schemas).length > 0) {
         workingDbConfig = {
           url: workingDbConfig?.url,
-          schema: { ...workingDbConfig?.schema, ...registrations.schemas } as TSchema,
+          // Plugin builders' `.schema(...)` registry is type-erased (a plain
+          // bag of unknown). The cast here bridges that bag into the
+          // type-safe `relations` field; runtime correctness is the
+          // responsibility of the plugin author calling `defineRelations`.
+          relations: { ...workingDbConfig?.relations, ...registrations.schemas } as TSchema,
           debug: workingDbConfig?.debug,
           repositories: workingDbConfig?.repositories,
         };
