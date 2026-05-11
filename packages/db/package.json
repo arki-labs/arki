@@ -48,7 +48,6 @@
     "@t3-oss/env-core": "catalog:env",
     "drizzle-orm": "catalog:drizzle",
     "pg": "catalog:drizzle",
-    "pg-native": "catalog:drizzle",
     "postgres": "catalog:drizzle",
     "zod": "catalog:"
   },
