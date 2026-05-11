@@ -1,0 +1,77 @@
+{
+  "name": "@arki/payments",
+  "version": "0.1.0",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./src/index.ts",
+      "node": "./src/index.ts"
+    },
+    "./core": {
+      "types": "./dist/src/core/index.d.ts",
+      "import": "./src/core/index.ts",
+      "node": "./src/core/index.ts"
+    },
+    "./dunning": {
+      "types": "./dist/src/dunning/index.d.ts",
+      "import": "./src/dunning/index.ts",
+      "node": "./src/dunning/index.ts"
+    },
+    "./tax": {
+      "types": "./dist/src/tax/index.d.ts",
+      "import": "./src/tax/index.ts",
+      "node": "./src/tax/index.ts"
+    },
+    "./refunds": {
+      "types": "./dist/src/refunds/index.d.ts",
+      "import": "./src/refunds/index.ts",
+      "node": "./src/refunds/index.ts"
+    },
+    "./repositories": {
+      "types": "./dist/src/repositories.d.ts",
+      "import": "./src/repositories.ts",
+      "node": "./src/repositories.ts"
+    },
+    "./*": {
+      "types": "./dist/src/*.d.ts",
+      "import": "./src/*.ts",
+      "node": "./src/*.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "src/*"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/auth": "workspace:*",
+    "@arki/contracts": "workspace:*",
+    "@arki/db": "workspace:*",
+    "@arki/kv": "workspace:*",
+    "@arki/logger": "workspace:*",
+    "drizzle-orm": "catalog:drizzle",
+    "stripe": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*"
+  }
+}
