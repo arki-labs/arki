@@ -51,9 +51,19 @@ export type SubscriptionWithPlan = Subscription & {
   customer?: Customer;
 };
 
+export type SubscriptionWithRelations = Subscription & {
+  plan?: Plan;
+  customer?: Customer;
+};
+
 export type Payment = InferSelectModel<CoreTables['payments']>;
 export type NewPayment = InferInsertModel<CoreTables['payments']>;
 export type UpdatePayment = Partial<Omit<NewPayment, 'id' | 'createdAt' | 'updatedAt'>>;
+
+export type PaymentWithRelations = Payment & {
+  subscription?: SubscriptionWithRelations;
+  customer?: Customer;
+};
 
 export type WebhookEvent = InferSelectModel<CoreTables['webhookEvents']>;
 export type NewWebhookEvent = InferInsertModel<CoreTables['webhookEvents']>;
