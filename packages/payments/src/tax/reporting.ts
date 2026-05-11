@@ -1,5 +1,4 @@
 import type { StripeProvider } from '../core/providers/stripe-provider';
-import type { TaxDatabase } from './repository';
 
 /**
  * Tax compliance and reporting periods
@@ -89,10 +88,7 @@ export type TaxAuditEntry = {
  * and audit trail functionality for tax operations.
  */
 export class TaxReportingService {
-  constructor(
-    _db: TaxDatabase,
-    private readonly stripeProvider: StripeProvider,
-  ) {}
+  constructor(private readonly stripeProvider: StripeProvider) {}
 
   /**
    * Generate comprehensive tax compliance report
@@ -377,11 +373,8 @@ export class TaxReportingService {
 /**
  * Factory function to create TaxReportingService
  */
-export function createTaxReportingService(
-  db: TaxDatabase,
-  stripeProvider: StripeProvider,
-): TaxReportingService {
-  return new TaxReportingService(db, stripeProvider);
+export function createTaxReportingService(stripeProvider: StripeProvider): TaxReportingService {
+  return new TaxReportingService(stripeProvider);
 }
 
 /**

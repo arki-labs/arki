@@ -1,6 +1,5 @@
 import type { StripeProvider } from '../core/providers/stripe-provider';
 import type { CustomerId, PaymentId, SubscriptionId } from '../core/types';
-import type { TaxDatabase } from './repository';
 
 /**
  * Tax calculation input for subscriptions and one-time payments
@@ -74,10 +73,7 @@ export type TaxTransaction = {
  * audit trails and business logic.
  */
 export class TaxService {
-  constructor(
-    _db: TaxDatabase,
-    private readonly stripeProvider: StripeProvider,
-  ) {
+  constructor(private readonly stripeProvider: StripeProvider) {
     // Verify that Stripe provider supports tax features
     if (!stripeProvider.features.taxCalculation) {
       throw new Error('Tax service requires a provider with tax calculation capabilities');
@@ -344,11 +340,8 @@ export class TaxService {
 /**
  * Factory function to create TaxService
  */
-export function createTaxService(
-  db: TaxDatabase,
-  stripeProvider: StripeProvider,
-): TaxService {
-  return new TaxService(db, stripeProvider);
+export function createTaxService(stripeProvider: StripeProvider): TaxService {
+  return new TaxService(stripeProvider);
 }
 
 /**
