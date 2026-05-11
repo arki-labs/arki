@@ -6,10 +6,8 @@ import pg from 'pg';
 
 import { debugInit } from './debug';
 
-const isBun = 'Bun' in globalThis;
-
-const Pool = isBun ? pg.Pool : (pg.native?.Pool ?? pg.Pool);
-debugInit('[init] Using %s for database connections', isBun ? 'pg (pure JS - Bun detected)' : 'pg-native');
+const Pool = pg.Pool;
+debugInit('[init] Using pg (pure JS) for database connections');
 
 export const initDb = <TRelations extends AnyRelations>(
   connectionString: string,
