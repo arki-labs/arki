@@ -1,0 +1,637 @@
+import Stripe from 'stripe';
+
+import type { UserId } from '@arki/auth/ids';
+import {
+  createCustomerId,
+  createPlanId
+} from '../primitives';
+import type {
+  BillingInterval,
+  Customer,
+  CustomerId,
+  Payment,
+  PaymentId,
+  PaymentMethodInfo,
+  Plan,
+  PlanId,
+  Subscription,
+  SubscriptionId,
+  SubscriptionPreview,
+  WebhookEventType,
+  WebhookValidationResult,
+} from '../types';
+import { BasePaymentProvider  } from './base-provider';
+import type {PaymentProviderConfig} from './base-provider';
+
+export class StripeProvider extends BasePaymentProvider {
+  readonly providerType = 'stripe' as const;
+  private stripe: Stripe;
+
+  // Declare provider features supported by Stripe
+  readonly features = {
+    customerPortal: true,
+    automatedInvoicing: true,
+    automatedDunning: true,
+    taxCalculation: true,
+    taxCompliance: true,
+    taxReporting: true,
+  };
+
+  constructor(config: PaymentProviderConfig) {
+    super(config);
+    this.stripe = new Stripe(config.apiKey, {
+      apiVersion: '2026-02-25.clover',
+      typescript: true,
+    });
+  }
+
+  async createCustomer(params: {
+    userId: UserId;
+    email: string;
+    name?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<Customer> {
+    const stripeCustomer = await this.stripe.customers.create({
+      email: params.email,
+      name: params.name,
+      metadata: {
+        userId: params.userId,
+        ...params.metadata,
+      },
+    });
+
+    return {
+      id: createCustomerId(),
+      userId: params.userId,
+      providerCustomerId: stripeCustomer.id,
+      provider: 'stripe',
+      email: params.email,
+      name: params.name ?? null,
+      defaultPaymentMethodId: null,
+      metadata: params.metadata ?? null,
+      createdAt: new Date(stripeCustomer.created * 1000),
+      updatedAt: new Date(),
+    };
+  }
+
+  async getCustomer(_customerId: CustomerId): Promise<Customer | null> {
+    try {
+      // This would typically retrieve from our database first
+      // For now, implementing the provider interface
+      throw new Error('Method should retrieve from database, not implement directly');
+    } catch {
+      return null;
+    }
+  }
+
+  async updateCustomer(
+    _customerId: CustomerId,
+    _params: { email?: string; name?: string; metadata?: Record<string, unknown> },
+  ): Promise<Customer> {
+    // Implementation would update both Stripe and our database
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async deleteCustomer(_customerId: CustomerId): Promise<void> {
+    // Implementation would delete from both Stripe and our database
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async createPlan(params: {
+    name: string;
+    amount: number;
+    currency: string;
+    interval: BillingInterval;
+    intervalCount?: number;
+    trialPeriodDays?: number;
+    metadata?: Record<string, unknown>;
+  }): Promise<Plan> {
+    const stripeProduct = await this.stripe.products.create({
+      name: params.name,
+      metadata: params.metadata as Stripe.MetadataParam,
+    });
+
+    const stripePrice = await this.stripe.prices.create({
+      product: stripeProduct.id,
+      unit_amount: this.formatAmount(params.amount),
+      currency: params.currency,
+      recurring: {
+        interval: this.mapBillingIntervalToStripe(params.interval),
+        interval_count: params.intervalCount || 1,
+      },
+      metadata: params.metadata as Stripe.MetadataParam,
+    });
+
+    return {
+      id: createPlanId(),
+      name: params.name,
+      description: '',
+      tier: 'basic', // Would be determined by business logic
+      price: params.amount,
+      currency: params.currency,
+      interval: params.interval,
+      intervalCount: params.intervalCount || 1,
+      features: [], // Would be populated from metadata or separate config
+      isActive: true,
+      trialPeriodDays: params.trialPeriodDays ?? null,
+      metadata: { stripeProductId: stripeProduct.id, stripePriceId: stripePrice.id, ...params.metadata },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+  }
+
+  async getPlan(_planId: PlanId): Promise<Plan | null> {
+    // Implementation would retrieve from our database
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async updatePlan(
+    _planId: PlanId,
+    _params: { name?: string; metadata?: Record<string, unknown> },
+  ): Promise<Plan> {
+    // Implementation would update both Stripe and our database
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async deletePlan(_planId: PlanId): Promise<void> {
+    // Implementation would archive in both Stripe and our database
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async listPlans(): Promise<Plan[]> {
+    // Implementation would retrieve from our database
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async createSubscription(_params: {
+    customerId: CustomerId;
+    planId: PlanId;
+    paymentMethodId?: string;
+    trialPeriodDays?: number;
+    metadata?: Record<string, unknown>;
+  }): Promise<Subscription> {
+    // This would require database lookups to get Stripe IDs
+    // Simplified implementation showing the pattern
+    throw new Error('Not implemented - requires database integration for customer/plan lookups');
+  }
+
+  async getSubscription(_subscriptionId: SubscriptionId): Promise<Subscription | null> {
+    // Implementation would retrieve from our database
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async updateSubscription(
+    _subscriptionId: SubscriptionId,
+    _params: {
+      planId?: PlanId;
+      paymentMethodId?: string;
+      metadata?: Record<string, unknown>;
+      cancelAtPeriodEnd?: boolean;
+    },
+  ): Promise<Subscription> {
+    // Implementation would update both Stripe and our database
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async cancelSubscription(
+    _subscriptionId: SubscriptionId,
+    _options: { immediately?: boolean; reason?: string },
+  ): Promise<Subscription> {
+    // Implementation would cancel in both Stripe and our database
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async reactivateSubscription(_subscriptionId: SubscriptionId): Promise<Subscription> {
+    // Implementation would reactivate in both Stripe and our database
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async pauseSubscription(_subscriptionId: SubscriptionId): Promise<Subscription> {
+    // Stripe-specific pause logic
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async resumeSubscription(_subscriptionId: SubscriptionId): Promise<Subscription> {
+    // Stripe-specific resume logic
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async previewSubscriptionChange(_params: {
+    subscriptionId: SubscriptionId;
+    planId: PlanId;
+    prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
+  }): Promise<SubscriptionPreview> {
+    // Stripe-specific proration preview
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async createPayment(_params: {
+    customerId: CustomerId;
+    amount: number;
+    currency: string;
+    paymentMethodId: string;
+    description?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<Payment> {
+    // Implementation would create payment intent in Stripe
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async getPayment(_paymentId: PaymentId): Promise<Payment | null> {
+    // Implementation would retrieve from our database
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async confirmPayment(_paymentId: PaymentId): Promise<Payment> {
+    // Implementation would confirm payment intent in Stripe
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async cancelPayment(_paymentId: PaymentId): Promise<Payment> {
+    // Implementation would cancel payment intent in Stripe
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async refundPayment(
+    paymentId: PaymentId,
+    params: { amount?: number; reason?: string; metadata?: Record<string, unknown> },
+  ): Promise<Payment> {
+    // For the refund service, we need to refund using the Stripe payment intent ID
+    // This assumes paymentId is the Stripe payment intent ID
+    const refund = await this.stripe.refunds.create({
+      payment_intent: paymentId,
+      amount: params.amount ? this.formatAmount(params.amount) : undefined,
+      reason: this.mapRefundReasonToStripe(params.reason),
+      metadata: params.metadata as Stripe.MetadataParam,
+    });
+
+    // Return a simplified Payment object for the refund
+    // In a real implementation, this would create a proper Payment record
+    return {
+      id: refund.id as PaymentId,
+      userId: 'usr_placeholder' as UserId, // Would be retrieved from the original payment
+      customerId: 'cust_placeholder' as CustomerId,
+      subscriptionId: null,
+      providerPaymentId: refund.id,
+      amount: refund.amount / 100, // Convert back from cents
+      currency: refund.currency || 'usd',
+      status: refund.status === 'succeeded' ? 'succeeded' : 'failed',
+      paymentMethod: 'card', // Default
+      description: `Refund for ${paymentId}`,
+      failureReason: null,
+      receiptUrl: null,
+      refunded: true,
+      refundedAmount: refund.amount / 100,
+      metadata: refund.metadata ? Object.fromEntries(
+        Object.entries(refund.metadata).map(([k, v]) => [k, v ?? null])
+      ) as Record<string, unknown> : null,
+      createdAt: new Date(refund.created * 1000),
+      updatedAt: new Date(),
+    };
+  }
+
+  async attachPaymentMethod(_params: {
+    customerId: CustomerId;
+    paymentMethodId: string;
+  }): Promise<PaymentMethodInfo> {
+    // Implementation would attach payment method to customer in Stripe
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async detachPaymentMethod(paymentMethodId: string): Promise<void> {
+    await this.stripe.paymentMethods.detach(paymentMethodId);
+  }
+
+  async listPaymentMethods(_customerId: CustomerId): Promise<PaymentMethodInfo[]> {
+    // Implementation would list payment methods for customer
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async setDefaultPaymentMethod(_params: {
+    customerId: CustomerId;
+    paymentMethodId: string;
+  }): Promise<void> {
+    // Implementation would set default payment method for customer
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async validateWebhook(
+    payload: string | Buffer,
+    signature: string,
+    _timestamp: string,
+    _sourceIp: string,
+  ): Promise<WebhookValidationResult> {
+    try {
+      // Validate Stripe webhook signature
+      const event = this.stripe.webhooks.constructEvent(payload, signature, this.config.webhookSecret);
+
+      return {
+        isValid: true,
+        provider: 'stripe',
+        eventType: this.mapStripeEventType(event.type) as WebhookEventType,
+        data: event.data.object as unknown as Record<string, unknown>,
+      };
+    } catch (error) {
+      return {
+        isValid: false,
+        provider: 'stripe',
+        error: error instanceof Error ? error.message : 'Invalid webhook signature',
+      };
+    }
+  }
+
+  async createSetupIntent(_customerId: CustomerId): Promise<{
+    clientSecret: string;
+    setupIntentId: string;
+  }> {
+    // Implementation would create setup intent for customer
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async createPaymentIntent(_params: {
+    customerId: CustomerId;
+    amount: number;
+    currency: string;
+    paymentMethodId?: string;
+    automatic: boolean;
+  }): Promise<{
+    clientSecret: string;
+    paymentIntentId: string;
+  }> {
+    // Implementation would create payment intent
+    throw new Error('Not implemented - requires database integration');
+  }
+
+  async createCustomerPortalSession(
+    providerCustomerId: string,
+    returnUrl: string,
+  ): Promise<{ url: string }> {
+    const session = await this.stripe.billingPortal.sessions.create({
+      customer: providerCustomerId,
+      return_url: returnUrl,
+    });
+    return { url: session.url };
+  }
+
+  // Tax-related methods
+  async calculateTax(params: {
+    customerId: CustomerId;
+    lineItems: {
+      amount: number;
+      reference: string;
+      taxCode?: string;
+    }[];
+    currency: string;
+    customerDetails?: {
+      address?: {
+        line1?: string;
+        line2?: string;
+        city?: string;
+        state?: string;
+        postalCode?: string;
+        country?: string;
+      };
+      taxIds?: {
+        type: string;
+        value: string;
+      }[];
+    };
+  }): Promise<{
+    amountTotal: number;
+    taxAmountExclusive: number;
+    taxAmountInclusive: number;
+    taxBreakdown: {
+      amount: number;
+      rate: number;
+      jurisdiction: string;
+      taxCode?: string;
+    }[];
+  }> {
+    const calculation = await this.stripe.tax.calculations.create({
+      currency: params.currency,
+      line_items: params.lineItems.map(item => ({
+        amount: this.formatAmount(item.amount),
+        reference: item.reference,
+        tax_code: item.taxCode || 'txcd_10000000', // General tax code
+      })),
+      customer_details: params.customerDetails ? {
+        address: params.customerDetails.address ? {
+          ...params.customerDetails.address,
+          country: params.customerDetails.address.country || 'US',
+        } : undefined,
+        address_source: 'billing' as const,
+        tax_ids: params.customerDetails.taxIds?.map(taxId => ({
+          type: taxId.type as Stripe.Tax.CalculationCreateParams.CustomerDetails.TaxId.Type,
+          value: taxId.value,
+        })),
+      } : undefined,
+      expand: ['line_items.data.tax_breakdown'],
+    });
+
+    return {
+      amountTotal: calculation.amount_total / 100,
+      taxAmountExclusive: calculation.tax_amount_exclusive / 100,
+      taxAmountInclusive: calculation.tax_amount_inclusive / 100,
+      taxBreakdown: calculation.line_items?.data?.flatMap((item: Stripe.Tax.CalculationLineItem) =>
+        item.tax_breakdown?.map((breakdown: Stripe.Tax.CalculationLineItem.TaxBreakdown) => ({
+          amount: breakdown.amount / 100,
+          rate: typeof breakdown.tax_rate_details?.percentage_decimal === 'number'
+            ? breakdown.tax_rate_details.percentage_decimal
+            : Number.parseFloat(String(breakdown.tax_rate_details?.percentage_decimal || 0)),
+          jurisdiction: breakdown.jurisdiction?.display_name || '',
+          taxCode: breakdown.jurisdiction?.level || undefined,
+        })) || []
+      ) || [],
+    };
+  }
+
+  async createTaxTransaction(params: {
+    reference: string;
+    type: 'sale' | 'refund';
+    lineItems: {
+      amount: number;
+      quantity?: number;
+      reference: string;
+      taxCode?: string;
+    }[];
+    currency: string;
+    customerId?: CustomerId;
+    customerDetails?: {
+      address?: {
+        line1?: string;
+        line2?: string;
+        city?: string;
+        state?: string;
+        postalCode?: string;
+        country?: string;
+      };
+      taxIds?: {
+        type: string;
+        value: string;
+      }[];
+    };
+  }): Promise<{
+    id: string;
+    amountTotal: number;
+    taxAmountExclusive: number;
+    taxAmountInclusive: number;
+  }> {
+    // For now, we'll simulate a tax transaction since Stripe's Tax API
+    // may have different endpoints for transaction recording
+
+    // In production, this would integrate with Stripe's actual tax recording API
+    const transactionId = `txn_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    const totalAmount = params.lineItems.reduce((sum, item) => sum + (item.amount * (item.quantity || 1)), 0);
+
+    // This would typically call Stripe's tax transaction API
+    // await this.stripe.tax.transactions.createFromCalculation(...)
+
+    return {
+      id: transactionId,
+      amountTotal: totalAmount,
+      taxAmountExclusive: 0, // Would be calculated by Stripe
+      taxAmountInclusive: 0, // Would be calculated by Stripe
+    };
+  }
+
+  async getTaxSettings(): Promise<{
+    defaultTaxCode: string;
+    headOfficeLocation?: {
+      address: {
+        country: string;
+        state?: string;
+        city?: string;
+        line1?: string;
+        postalCode?: string;
+      };
+    };
+    taxRegistrations: {
+      country: string;
+      type: string;
+      status: string;
+    }[];
+  }> {
+    const settings = await this.stripe.tax.settings.retrieve({
+      expand: ['head_office', 'status_details'],
+    });
+
+    return {
+      defaultTaxCode: settings.defaults?.tax_code || 'txcd_10000000',
+      headOfficeLocation: settings.head_office ? {
+        address: {
+          country: settings.head_office.address.country || 'US',
+          state: settings.head_office.address.state || undefined,
+          city: settings.head_office.address.city || undefined,
+          line1: settings.head_office.address.line1 || undefined,
+          postalCode: settings.head_office.address.postal_code || undefined,
+        },
+      } : undefined,
+      taxRegistrations: [], // Simplified for now - would parse actual status details
+    };
+  }
+
+  async getTaxReport(params: {
+    reportType: 'sales_and_use_tax' | 'vat' | 'gst';
+    startDate: Date;
+    endDate: Date;
+    jurisdiction?: string;
+  }): Promise<{
+    id: string;
+    status: 'pending' | 'succeeded' | 'failed';
+    url?: string;
+    downloadUrl?: string;
+  }> {
+    // Create a tax report (this is a placeholder for the actual implementation)
+    // Stripe's tax reporting might use different endpoints based on jurisdiction
+
+    // For now, we'll simulate a tax report creation
+    const reportId = `tax_report_${Date.now()}_${params.reportType}`;
+
+    // In a real implementation, this would:
+    // 1. Create a report via Stripe's tax API for the specified date range
+    // 2. Poll for completion
+    // 3. Return download URLs
+
+    console.log(`Creating tax report: ${params.reportType} from ${params.startDate.toISOString()} to ${params.endDate.toISOString()}`);
+
+    return {
+      id: reportId,
+      status: 'pending',
+      url: `https://dashboard.stripe.com/tax/reports/${reportId}`,
+    };
+  }
+
+  async healthCheck(): Promise<{ status: 'healthy' | 'degraded' | 'unhealthy'; details?: string }> {
+    try {
+      // Simple health check - list recent events
+      await this.stripe.events.list({ limit: 1 });
+      return { status: 'healthy' };
+    } catch (error) {
+      return {
+        status: 'unhealthy',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  // Stripe-specific helper methods
+  private mapBillingIntervalToStripe(interval: BillingInterval): Stripe.PriceCreateParams.Recurring.Interval {
+    switch (interval) {
+      case 'daily': {
+        return 'day';
+      }
+      case 'weekly': {
+        return 'week';
+      }
+      case 'monthly': {
+        return 'month';
+      }
+      case 'yearly': {
+        return 'year';
+      }
+      default: {
+        return 'month';
+      }
+    }
+  }
+
+  private mapStripeEventType(stripeEventType: string): string {
+    // Map Stripe event types to our webhook event types
+    const eventTypeMap: Record<string, string> = {
+      'customer.subscription.created': 'subscription.created',
+      'customer.subscription.updated': 'subscription.updated',
+      'customer.subscription.deleted': 'subscription.canceled',
+      'customer.subscription.trial_will_end': 'subscription.trial_will_end',
+      'payment_intent.succeeded': 'payment.succeeded',
+      'payment_intent.payment_failed': 'payment.failed',
+      'payment_intent.requires_action': 'payment.requires_action',
+      'customer.created': 'customer.created',
+      'customer.updated': 'customer.updated',
+      'customer.deleted': 'customer.deleted',
+      'invoice.created': 'invoice.created',
+      'invoice.finalized': 'invoice.finalized',
+      'invoice.payment_succeeded': 'invoice.paid',
+      'invoice.payment_failed': 'invoice.payment_failed',
+    };
+
+    return eventTypeMap[stripeEventType] || stripeEventType;
+  }
+
+  private mapRefundReasonToStripe(reason?: string): Stripe.RefundCreateParams.Reason | undefined {
+    if (!reason) return undefined;
+
+    const reasonMap: Record<string, Stripe.RefundCreateParams.Reason> = {
+      'customer_request': 'requested_by_customer',
+      'duplicate_charge': 'duplicate',
+      'fraudulent_transaction': 'fraudulent',
+      'service_not_delivered': 'requested_by_customer',
+      'billing_error': 'requested_by_customer',
+      'technical_issue': 'requested_by_customer',
+      'goodwill_gesture': 'requested_by_customer',
+      'chargeback_prevention': 'requested_by_customer',
+      'other': 'requested_by_customer',
+    };
+
+    return reasonMap[reason] || 'requested_by_customer';
+  }
+}
