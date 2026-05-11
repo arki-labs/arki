@@ -11,6 +11,7 @@
  * - DEBUG=testing:* - All testing package logs
  */
 
+import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { sql } from 'drizzle-orm';
 
@@ -146,7 +147,7 @@ export function logState(label: string, state: any): void {
  * // - sessions: 25 rows
  * ```
  */
-export async function dumpDatabase<TSchema extends Record<string, unknown>>(
+export async function dumpDatabase<TSchema extends AnyRelations>(
   db: NodePgDatabase<TSchema>,
 ): Promise<void> {
   if (!debugEnabled) return;
@@ -182,7 +183,7 @@ export async function dumpDatabase<TSchema extends Record<string, unknown>>(
  * await dumpTable(tester.db, 'users', 5);
  * ```
  */
-export async function dumpTable<TSchema extends Record<string, unknown>>(
+export async function dumpTable<TSchema extends AnyRelations>(
   db: NodePgDatabase<TSchema>,
   tableName: string,
   limit = 10,

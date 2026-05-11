@@ -1,14 +1,14 @@
 import crypto from 'node:crypto';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import type { NodePgDatabase, NodePgQueryResultHKT } from 'drizzle-orm/node-postgres';
-import type { PgTable, PgTransaction } from 'drizzle-orm/pg-core';
+import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
+import type { PgTable } from 'drizzle-orm/pg-core';
 import type { StartedTestContainer } from 'testcontainers';
+import type { AnyRelations } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 
 import type { UserId } from '@arki/auth';
 import { createUserId } from '@arki/auth';
-import type { ExtractTablesWithRelations } from '@arki/db/id-factory';
 import { initDb } from '@arki/db/builder';
 import { KV } from '@arki/kv';
 
@@ -79,7 +79,7 @@ type CallerCollection<TCaller> = {
  */
 export class IntegrationTester<
   TSchema extends Record<string, unknown>,
-  TDatabase extends NodePgDatabase<TSchema>,
+  TDatabase extends NodePgDatabase<AnyRelations>,
   TRepositories extends Record<string, unknown>,
   TCaller,
   TContext extends Record<string, unknown>,
@@ -104,11 +104,7 @@ export class IntegrationTester<
   protected _caller: CallerCollection<TCaller> | null = null;
   protected _baseContext: TContext | null = null;
 
-  protected currentTransaction: PgTransaction<
-    NodePgQueryResultHKT,
-    TSchema,
-    ExtractTablesWithRelations<TSchema>
-  > | null = null;
+  protected currentTransaction: NodePgTransaction<AnyRelations> | null = null;
 
   protected randomCounter = 0;
   protected randomSeed: string;
@@ -1390,6 +1386,6 @@ export class IntegrationTester<
     return initDb.schema(this.config.schema).create({
       connectionString,
       isDev: true,
-    }).db as TDatabase;
+    }).db as unknown as TDatabase;
   }
 }

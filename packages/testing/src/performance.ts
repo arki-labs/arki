@@ -5,6 +5,7 @@
  * of database operations and API calls.
  */
 
+import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 /**
@@ -373,7 +374,7 @@ export function createPerformanceTracker() {
  * );
  * ```
  */
-export async function measureQuery<TSchema extends Record<string, unknown>, T>(
+export async function measureQuery<TSchema extends AnyRelations, T>(
   db: NodePgDatabase<TSchema>,
   queryFn: (db: NodePgDatabase<TSchema>) => Promise<T>,
   label?: string,
