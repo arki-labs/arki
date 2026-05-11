@@ -1,11 +1,23 @@
 'use client';
 
 /**
- * React hook for AI chat functionality
+ * Thin wrapper around `useChat` from `@ai-sdk/react@3` that preserves the
+ * historical `{ messages, input, isLoading, sendMessage, ... }` surface used by
+ * downstream apps (hyphenate, ekuation, everseek).
+ *
+ * The SDK handles the UI Message Stream Protocol, retries, abort, and message
+ * accumulation. We translate its `UIMessage[]` (parts-based) into the flat
+ * `ChatMessage[]` shape and provide a local `input` state that the SDK no
+ * longer ships in v3.
+ *
+ * Server pairing: the API route must end with `result.toUIMessageStreamResponse()`,
+ * NOT `result.toTextStreamResponse()`.
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react';
-// Removed unused import - Message type from 'ai' package not used in this file
+import { useCallback, useMemo, useState } from 'react';
+import type { UIMessage } from 'ai';
+import { DefaultChatTransport } from 'ai';
+import { useChat } from '@ai-sdk/react';
 
 export type ChatMessage = {
   id: string;
@@ -13,16 +25,20 @@ export type ChatMessage = {
   content: string;
   timestamp?: Date;
   metadata?: Record<string, unknown>;
-}
+};
 
 export type UseAIChatOptions = {
   apiEndpoint?: string;
   initialMessages?: ChatMessage[];
   onMessage?: (message: ChatMessage) => void;
   onError?: (error: Error) => void;
+  /**
+   * Retained for API compatibility. The SDK's `useChat` always streams; this
+   * option is ignored.
+   */
   streamResponse?: boolean;
   context?: Record<string, unknown>;
-}
+};
 
 export type UseAIChatReturn = {
   messages: ChatMessage[];
@@ -35,277 +51,116 @@ export type UseAIChatReturn = {
   addMessage: (message: ChatMessage) => void;
   removeMessage: (id: string) => void;
   updateMessage: (id: string, content: string) => void;
+};
+
+function uiMessageToChatMessage(message: UIMessage): ChatMessage {
+  const content = message.parts
+    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+    .map(part => part.text)
+    .join('');
+
+  return {
+    id: message.id,
+    role: message.role,
+    content,
+  };
 }
 
-/**
- * Custom hook for AI chat interactions
- */
+function chatMessageToUIMessage(message: ChatMessage): UIMessage {
+  return {
+    id: message.id,
+    role: message.role,
+    parts: [{ type: 'text', text: message.content }],
+  };
+}
+
 export function useAIChat(options: UseAIChatOptions = {}): UseAIChatReturn {
   const {
     apiEndpoint = '/api/ai/chat',
     initialMessages = [],
     onMessage,
     onError,
-    streamResponse = true,
-    context = {},
+    context,
   } = options;
 
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: apiEndpoint,
+        body: context ? { context } : undefined,
+      }),
+    [apiEndpoint, context],
+  );
+
+  const chat = useChat({
+    transport,
+    messages: initialMessages.map(chatMessageToUIMessage),
+    onError: error => {
+      onError?.(error);
+    },
+    onFinish: ({ message }) => {
+      onMessage?.(uiMessageToChatMessage(message));
+    },
+  });
+
   const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
-  /**
-   * Generate unique message ID
-   */
-  const generateId = useCallback(() => {
-    return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-  }, []);
+  const messages = useMemo<ChatMessage[]>(
+    () => chat.messages.map(uiMessageToChatMessage),
+    [chat.messages],
+  );
 
-  /**
-   * Send a message to the AI
-   */
-  const sendMessage = useCallback(async (messageText?: string) => {
-    const text = messageText || input;
-    if (!text.trim()) return;
+  const isLoading = chat.status === 'submitted' || chat.status === 'streaming';
+  const error = chat.error ?? null;
 
-    setIsLoading(true);
-    setError(null);
+  const sendMessage = useCallback(
+    async (messageText?: string) => {
+      const text = (messageText ?? input).trim();
+      if (!text) return;
 
-    // Add user message
-    const userMessage: ChatMessage = {
-      id: generateId(),
-      role: 'user',
-      content: text,
-      timestamp: new Date(),
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    if (onMessage) onMessage(userMessage);
-
-    // Clear input if using default
-    if (!messageText) {
-      setInput('');
-    }
-
-    try {
-      // Cancel any previous request
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-
-      abortControllerRef.current = new AbortController();
-
-      const response = await fetch(apiEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: [...messages, userMessage].map(msg => ({
-            role: msg.role,
-            content: msg.content,
-          })),
-          context,
-          stream: streamResponse,
-        }),
-        signal: abortControllerRef.current.signal,
+      // Fire onMessage for the user's turn so suggestion-dismissal hooks fire
+      // synchronously, matching the prior contract.
+      onMessage?.({
+        id: `local-${Date.now()}`,
+        role: 'user',
+        content: text,
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      if (!messageText) setInput('');
 
-      if (streamResponse && response.body) {
-        // Handle streaming response
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        const assistantMessageId = generateId();
-        let assistantContent = '';
+      await chat.sendMessage({ text });
+    },
+    [chat, input, onMessage],
+  );
 
-        // Add empty assistant message
-        const assistantMessage: ChatMessage = {
-          id: assistantMessageId,
-          role: 'assistant',
-          content: '',
-          timestamp: new Date(),
-        };
-
-        setMessages(prev => [...prev, assistantMessage]);
-
-        try {
-          let buffer = '';
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            // Decode the chunk and add to buffer
-            buffer += decoder.decode(value, { stream: true });
-
-            // Process complete lines (AI SDK Data Stream Protocol uses \n as delimiter)
-            const lines = buffer.split('\n');
-
-            // Keep the last potentially incomplete line in the buffer
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-              if (!line) continue;
-
-              // AI SDK Data Stream Protocol format: TYPE:VALUE
-              // 0 = text chunk, 3 = error, d = finish message
-              const colonIndex = line.indexOf(':');
-              if (colonIndex === -1) continue;
-
-              const type = line.slice(0, colonIndex);
-              const value = line.slice(colonIndex + 1);
-
-              try {
-                switch (type) {
-                  case '0': {
-                    // Text chunk - value is JSON-stringified string
-                    const text = JSON.parse(value) as string;
-                    assistantContent += text;
-
-                    // Update message content
-                    setMessages(prev =>
-                      prev.map(msg =>
-                        msg.id === assistantMessageId
-                          ? { ...msg, content: assistantContent }
-                          : msg
-                      )
-                    );
-                    break;
-                  }
-                  case '3': {
-                    // Error - value is JSON-stringified error message
-                    const errorMessage = JSON.parse(value) as string;
-                    throw new Error(errorMessage);
-                  }
-                  case 'd': {
-                    // Finish message - stream is complete
-                    // Could extract finishReason from value if needed
-                    break;
-                  }
-                  // Other types (2 = data, e = message annotations, etc.) can be added as needed
-                }
-              } catch (parseError) {
-                if (parseError instanceof SyntaxError) {
-                  // JSON parse error - could be incomplete chunk, skip
-                  continue;
-                }
-                throw parseError;
-              }
-            }
-          }
-
-          // Process any remaining data in the buffer
-          if (buffer) {
-            const colonIndex = buffer.indexOf(':');
-            if (colonIndex !== -1) {
-              const type = buffer.slice(0, colonIndex);
-              const value = buffer.slice(colonIndex + 1);
-
-              if (type === '0') {
-                try {
-                  const text = JSON.parse(value) as string;
-                  assistantContent += text;
-                  setMessages(prev =>
-                    prev.map(msg =>
-                      msg.id === assistantMessageId
-                        ? { ...msg, content: assistantContent }
-                        : msg
-                    )
-                  );
-                } catch {
-                  // Ignore parse errors for final buffer
-                }
-              }
-            }
-          }
-        } finally {
-          reader.releaseLock();
-        }
-
-        if (onMessage) {
-          onMessage({ ...assistantMessage, content: assistantContent });
-        }
-      } else {
-        // Handle non-streaming response
-        const data = await response.json();
-        const assistantMessage: ChatMessage = {
-          id: generateId(),
-          role: 'assistant',
-          content: data.content || data.message || '',
-          timestamp: new Date(),
-        };
-
-        setMessages(prev => [...prev, assistantMessage]);
-        if (onMessage) onMessage(assistantMessage);
-      }
-    } catch (error_) {
-      if (error_ instanceof Error && error_.name !== 'AbortError') {
-        setError(error_);
-        if (onError) onError(error_);
-      }
-    } finally {
-      setIsLoading(false);
-      abortControllerRef.current = null;
-    }
-  }, [
-    input,
-    messages,
-    apiEndpoint,
-    context,
-    streamResponse,
-    generateId,
-    onMessage,
-    onError,
-  ]);
-
-  /**
-   * Clear all messages
-   */
   const clearMessages = useCallback(() => {
-    setMessages([]);
-  }, []);
+    chat.setMessages([]);
+  }, [chat]);
 
-  /**
-   * Add a message manually
-   */
-  const addMessage = useCallback((message: ChatMessage) => {
-    setMessages(prev => [...prev, message]);
-  }, []);
+  const addMessage = useCallback(
+    (message: ChatMessage) => {
+      chat.setMessages(prev => [...prev, chatMessageToUIMessage(message)]);
+    },
+    [chat],
+  );
 
-  /**
-   * Remove a message by ID
-   */
-  const removeMessage = useCallback((id: string) => {
-    setMessages(prev => prev.filter(msg => msg.id !== id));
-  }, []);
+  const removeMessage = useCallback(
+    (id: string) => {
+      chat.setMessages(prev => prev.filter(m => m.id !== id));
+    },
+    [chat],
+  );
 
-  /**
-   * Update a message content
-   */
-  const updateMessage = useCallback((id: string, content: string) => {
-    setMessages(prev =>
-      prev.map(msg =>
-        msg.id === id ? { ...msg, content } : msg
-      )
-    );
-  }, []);
-
-  /**
-   * Cleanup on unmount
-   */
-  useEffect(() => {
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, []);
+  const updateMessage = useCallback(
+    (id: string, content: string) => {
+      chat.setMessages(prev =>
+        prev.map(m =>
+          m.id === id ? { ...m, parts: [{ type: 'text', text: content }] } : m,
+        ),
+      );
+    },
+    [chat],
+  );
 
   return {
     messages,
