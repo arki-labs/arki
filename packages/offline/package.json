@@ -1,0 +1,78 @@
+{
+  "name": "@arki/offline",
+  "version": "0.0.0",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    "./query": {
+      "types": "./dist/src/query/index.d.ts",
+      "browser": "./src/query/index.ts",
+      "import": "./src/query/index.ts",
+      "default": "./src/query/index.ts"
+    },
+    "./mutations": {
+      "types": "./dist/src/mutations/index.d.ts",
+      "browser": "./src/mutations/index.ts",
+      "import": "./src/mutations/index.ts",
+      "default": "./src/mutations/index.ts"
+    },
+    "./collections": {
+      "types": "./dist/src/collections/index.d.ts",
+      "browser": "./src/collections/index.ts",
+      "import": "./src/collections/index.ts",
+      "default": "./src/collections/index.ts"
+    },
+    "./pwa": {
+      "types": "./dist/src/pwa/index.d.ts",
+      "browser": "./src/pwa/index.ts",
+      "import": "./src/pwa/index.ts",
+      "default": "./src/pwa/index.ts"
+    },
+    "./status": {
+      "types": "./dist/src/status/index.d.ts",
+      "browser": "./src/status/index.ts",
+      "import": "./src/status/index.ts",
+      "default": "./src/status/index.ts"
+    },
+    "./orpc": {
+      "types": "./dist/src/orpc/index.d.ts",
+      "node": "./src/orpc/index.node.ts",
+      "browser": "./src/orpc/index.browser.ts",
+      "default": "./src/orpc/index.browser.ts"
+    },
+    "./devtools": {
+      "types": "./dist/src/devtools/index.d.ts",
+      "browser": "./src/devtools/index.ts",
+      "import": "./src/devtools/index.ts",
+      "default": "./src/devtools/index.ts"
+    },
+    "./preset": {
+      "types": "./dist/src/preset/index.d.ts",
+      "browser": "./src/preset/index.ts",
+      "import": "./src/preset/index.ts",
+      "default": "./src/preset/index.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "dev": "tsc",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/testing": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@types/node": "catalog:node",
+    "typescript": "catalog:"
+  }
+}
