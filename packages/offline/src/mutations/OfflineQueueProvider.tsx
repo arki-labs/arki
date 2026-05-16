@@ -66,3 +66,11 @@ export function useOfflineQueue(): OfflineQueueContextValue {
   }
   return ctx;
 }
+
+/**
+ * Like `useOfflineQueue` but returns `null` when no provider is present.
+ * Use this in components that are queue-optional (e.g. `OfflineBanner`).
+ */
+export function useOfflineQueueOptional(): OfflineQueueContextValue | null {
+  return useContext(OfflineQueueContext);
+}

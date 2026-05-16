@@ -72,7 +72,10 @@
     "@tanstack/react-query-persist-client": "catalog:tanstack/react-query",
     "idb-keyval": "catalog:",
     "nanoid": "catalog:utilities",
-    "superjson": "catalog:utilities"
+    "superjson": "catalog:utilities",
+    "workbox-expiration": "catalog:tanstack/start",
+    "workbox-routing": "catalog:tanstack/start",
+    "workbox-strategies": "catalog:tanstack/start"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:tanstack/react-query",
