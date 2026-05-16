@@ -5,22 +5,16 @@ import { env } from './env';
 
 /**
  * Initializes the shared KV client instance and tests the connection.
- * Returns null if connection fails or if env vars are missing (for development).
- * Returns null during build time to prevent build failures.
+ * Returns null if env vars are missing (development only).
  *
  * @param namespace - The KV namespace (typically the app key, e.g. 'games', 'novelette').
  *   Falls back to the KV_NAMESPACE environment variable if not provided.
- * @internal Use this function in application singletons, not at module level
+ * @internal Use this function in application singletons, not at module level.
+ *   Lazy invocation from request handlers is required — calling at module load
+ *   time will attempt a Redis connection during build/test.
  */
 export async function initializeKV(namespace?: string): Promise<KV | null> {
-  debugKV('[instance] Initializing KV (env: %s, phase: %s)', env.NODE_ENV, process.env.NEXT_PHASE);
-
-  // Skip KV initialization during build time
-  if (process.env.NEXT_PHASE === 'phase-production-build') {
-    debugKV('[instance] Skipping initialization during build phase');
-    console.log('Skipping KV initialization during build time');
-    return null;
-  }
+  debugKV('[instance] Initializing KV (env: %s)', env.NODE_ENV);
 
   // Skip KV initialization in development if not configured
   if (!env.KV_URL) {
@@ -83,13 +77,7 @@ export async function initializeKV(namespace?: string): Promise<KV | null> {
  * @internal Use this in application singletons for synchronous initialization
  */
 export function createKVInstance(namespace?: string): KV | null {
-  debugKV('[instance] Creating KV synchronously (env: %s, phase: %s)', env.NODE_ENV, process.env.NEXT_PHASE);
-
-  // Skip KV initialization during build time
-  if (process.env.NEXT_PHASE === 'phase-production-build') {
-    debugKV('[instance] Skipping creation during build phase');
-    return null;
-  }
+  debugKV('[instance] Creating KV synchronously (env: %s)', env.NODE_ENV);
 
   // Skip KV initialization in development if not configured
   if (!env.KV_URL) {

@@ -28,7 +28,7 @@ export function GoogleMapExample() {
   const center: Coordinates = { lat: 40.7128, lng: -74.0060 };
 
   return (
-    <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!}>
+    <APIProvider apiKey={process.env.VITE_PUBLIC_GOOGLE_MAPS_API_KEY!}>
       <Map
         defaultCenter={center}
         defaultZoom={12}
@@ -63,7 +63,7 @@ export function GoogleMapWithDistance() {
   return (
     <div>
       <p>Distance: {formatted}</p>
-      <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!}>
+      <APIProvider apiKey={process.env.VITE_PUBLIC_GOOGLE_MAPS_API_KEY!}>
         <Map
           defaultCenter={userLocation}
           defaultZoom={12}
@@ -121,7 +121,7 @@ export function GoogleMapAdvanced() {
   }, [placesLib]);
 
   return (
-    <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!}>
+    <APIProvider apiKey={process.env.VITE_PUBLIC_GOOGLE_MAPS_API_KEY!}>
       <Map
         defaultCenter={{ lat: 40.7128, lng: -74.0060 }}
         defaultZoom={14}
@@ -328,7 +328,7 @@ export function MapboxExample() {
 
   return (
     <Map
-      mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_TOKEN!}
+      mapboxAccessToken={process.env.VITE_PUBLIC_MAPBOX_TOKEN!}
       initialViewState={{
         longitude: center.lng,
         latitude: center.lat,
@@ -377,7 +377,7 @@ export function MapboxCustom() {
     <Map
       {...viewState}
       onMove={evt => setViewState(evt.viewState)}
-      mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_TOKEN!}
+      mapboxAccessToken={process.env.VITE_PUBLIC_MAPBOX_TOKEN!}
       style={{ width: '100%', height: '500px' }}
       mapStyle="mapbox://styles/mapbox/dark-v11" // Custom style
     >
@@ -583,7 +583,7 @@ export function HereMapExample() {
       loadScript('https://js.api.here.com/v3/3.1/mapsjs-mapevents.js'),
     ]).then(() => {
       const platform = new window.H.service.Platform({
-        apikey: process.env.NEXT_PUBLIC_HERE_API_KEY
+        apikey: process.env.VITE_PUBLIC_HERE_API_KEY
       });
 
       const defaultLayers = platform.createDefaultLayers();

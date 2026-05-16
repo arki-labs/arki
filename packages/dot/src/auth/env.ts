@@ -102,7 +102,7 @@ export const authEnv = createEnv({
   client: {
     // Add any client-side env vars here if needed
   },
-  clientPrefix: 'NEXT_PUBLIC_',
+  clientPrefix: 'VITE_PUBLIC_',
 
   /**
    * Runtime environment variables
@@ -114,9 +114,9 @@ export const authEnv = createEnv({
 
     // URLs
     BASE_URL: process.env.BASE_URL,
-    NEXT_PUBLIC_BASE_URL: process.env.NEXT_PUBLIC_BASE_URL,
+    VITE_PUBLIC_BASE_URL: process.env.VITE_PUBLIC_BASE_URL,
     PRODUCTION_URL: process.env.PRODUCTION_URL,
-    NEXT_PUBLIC_PRODUCTION_URL: process.env.NEXT_PUBLIC_PRODUCTION_URL,
+    VITE_PUBLIC_PRODUCTION_URL: process.env.VITE_PUBLIC_PRODUCTION_URL,
 
     // App config
     APP_NAME: process.env.APP_NAME,
@@ -340,7 +340,7 @@ export function validateProductionEnv(): void {
   const baseUrl = getBaseUrl();
   if (!baseUrl) {
     debugAuth('[env] Validation error: BASE_URL not configured');
-    errors.push('BASE_URL or NEXT_PUBLIC_BASE_URL is required in production');
+    errors.push('BASE_URL or VITE_PUBLIC_BASE_URL is required in production');
   } else if (baseUrl.includes('localhost')) {
     debugAuth('[env] Validation error: BASE_URL contains localhost (%s)', baseUrl);
     errors.push('Base URL cannot be localhost in production');

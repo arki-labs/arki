@@ -30,7 +30,7 @@ export const env = createEnv({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   },
   client: {
-    NEXT_PUBLIC_API_URL: z.string().url(),
+    VITE_PUBLIC_API_URL: z.string().url(),
   },
   // PAIN POINT: Every variable must be manually mapped
   experimental__runtimeEnv: {
@@ -38,7 +38,7 @@ export const env = createEnv({
     API_KEY: process.env['API_KEY'],
     PORT: process.env['PORT'],
     NODE_ENV: process.env['NODE_ENV'],
-    NEXT_PUBLIC_API_URL: process.env['NEXT_PUBLIC_API_URL'],
+    VITE_PUBLIC_API_URL: process.env['VITE_PUBLIC_API_URL'],
   },
   skipValidation: !!process.env['CI'] || process.env['npm_lifecycle_event'] === 'lint',
 });
@@ -65,7 +65,7 @@ experimental__runtimeEnv: {
   API_KEY: process.env['API_KEY'],
   REDIS_URL: process.env['REDIS_URL'],
   PORT: process.env['PORT'],
-  NEXT_PUBLIC_API_URL: process.env['NEXT_PUBLIC_API_URL'],
+  VITE_PUBLIC_API_URL: process.env['VITE_PUBLIC_API_URL'],
 }
 
 // ✅ After: Type-checked helpers
@@ -741,7 +741,7 @@ export const env = createEnv({
       .default('false'),
   },
   client: {
-    NEXT_PUBLIC_API_URL: z.string().url().default('https://api.example.com'),
+    VITE_PUBLIC_API_URL: z.string().url().default('https://api.example.com'),
   },
   experimental__runtimeEnv: {
     DB_URL: process.env['DB_URL'],
@@ -751,7 +751,7 @@ export const env = createEnv({
     LOG_LEVEL: process.env['LOG_LEVEL'],
     AUTH_SECRET: process.env['AUTH_SECRET'],
     ENABLE_ANALYTICS: process.env['ENABLE_ANALYTICS'],
-    NEXT_PUBLIC_API_URL: process.env['NEXT_PUBLIC_API_URL'],
+    VITE_PUBLIC_API_URL: process.env['VITE_PUBLIC_API_URL'],
   },
   skipValidation: !!process.env['CI'] || process.env['npm_lifecycle_event'] === 'lint',
 });
