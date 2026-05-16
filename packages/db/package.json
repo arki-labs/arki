@@ -17,6 +17,16 @@
       "import": "./src/init.ts",
       "node": "./src/init.ts"
     },
+    "./client": {
+      "types": "./dist/src/client/index.d.ts",
+      "import": "./src/client/index.ts",
+      "node": "./src/client/index.ts"
+    },
+    "./runtime-local": {
+      "types": "./dist/src/runtime-local.d.ts",
+      "import": "./src/runtime-local.ts",
+      "node": "./src/runtime-local.ts"
+    },
     "./*": {
       "types": "./dist/src/*.d.ts",
       "import": "./src/*.ts",
@@ -44,6 +54,7 @@
     "@arki/assert": "workspace:*",
     "@arki/contracts": "workspace:*",
     "@arki/logger": "workspace:*",
+    "@electric-sql/pglite": "^0.4.5",
     "@paralleldrive/cuid2": "catalog:utilities",
     "@t3-oss/env-core": "catalog:env",
     "drizzle-orm": "catalog:drizzle",

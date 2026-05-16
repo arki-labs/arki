@@ -15,6 +15,11 @@
       "import": "./src/types/index.ts",
       "node": "./src/types/index.ts"
     },
+    "./runtime-local": {
+      "types": "./dist/src/runtime-local/index.d.ts",
+      "import": "./src/runtime-local/index.ts",
+      "node": "./src/runtime-local/index.ts"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/src/index.d.ts",
@@ -34,8 +39,10 @@
     "@arki/logger": "workspace:*",
     "@bull-board/api": "catalog:queue",
     "@bull-board/hono": "catalog:queue",
+    "@electric-sql/pglite": "^0.4.5",
     "bullmq": "catalog:queue",
     "ioredis": "catalog:queue",
+    "pg-boss": "catalog:queue",
     "zod": "catalog:"
   },
   "devDependencies": {

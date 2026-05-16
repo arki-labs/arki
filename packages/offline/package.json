@@ -66,13 +66,27 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@tanstack/query-async-storage-persister": "catalog:tanstack/react-query",
+    "@tanstack/react-query-persist-client": "catalog:tanstack/react-query",
+    "idb-keyval": "catalog:",
+    "nanoid": "catalog:utilities",
+    "superjson": "catalog:utilities"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "catalog:tanstack/react-query",
+    "react": "catalog:react"
+  },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/testing": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@tanstack/react-query": "catalog:tanstack/react-query",
     "@types/node": "catalog:node",
+    "@types/react": "catalog:react",
+    "react": "catalog:react",
     "typescript": "catalog:"
   }
 }
