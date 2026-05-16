@@ -1,0 +1,137 @@
+/// <reference path="../query/vite-env.d.ts" />
+import type { ReactNode } from 'react';
+import { useState, useEffect } from 'react';
+import { useOnlineStatus } from '../status/useOnlineStatus.ts';
+import { useOfflineQueueOptional } from '../mutations/OfflineQueueProvider.tsx';
+import type { QueuedMutation } from '../mutations/queue.ts';
+
+/**
+ * Floating debug panel for inspecting the offline mutation queue.
+ *
+ * Rendered only in development builds (guarded by `import.meta.env.DEV`).
+ * In production, the component returns null immediately — tree-shaking
+ * eliminates it from the bundle entirely.
+ */
+export function OfflineDevPanel(): ReactNode {
+  // Gate: no-op in production. Vite replaces import.meta.env.DEV at build time.
+  if (!import.meta.env.DEV) return null;
+
+  return <DevPanelImpl />;
+}
+
+function DevPanelImpl(): ReactNode {
+  const [isOpen, setIsOpen] = useState(false);
+  const [deadLettered, setDeadLettered] = useState<readonly QueuedMutation[]>([]);
+  const { online } = useOnlineStatus();
+  const queueCtx = useOfflineQueueOptional();
+
+  useEffect(() => {
+    if (!queueCtx) return;
+    const { queue } = queueCtx;
+
+    const refresh = (): void => {
+      void queue.deadLetter.list().then(setDeadLettered);
+    };
+
+    refresh();
+
+    const unsub = queue.subscribe(() => {
+      refresh();
+    });
+
+    return unsub;
+  }, [queueCtx]);
+
+  const status = queueCtx?.queue.status();
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        bottom: 12,
+        right: 12,
+        zIndex: 9999,
+        fontFamily: 'monospace',
+        fontSize: 12,
+      }}
+    >
+      <button
+        onClick={() => setIsOpen((v) => !v)}
+        style={{
+          background: online ? '#166534' : '#991b1b',
+          color: '#fff',
+          border: 'none',
+          borderRadius: 6,
+          padding: '4px 10px',
+          cursor: 'pointer',
+        }}
+      >
+        offline {online ? '✓' : '✗'}
+        {status && status.queued > 0 ? ` · ${status.queued}q` : ''}
+        {status && status.deadLettered > 0 ? ` · ${status.deadLettered}dl` : ''}
+      </button>
+
+      {isOpen && (
+        <div
+          style={{
+            background: '#1c1c1e',
+            color: '#e5e5ea',
+            borderRadius: 8,
+            padding: 12,
+            marginTop: 6,
+            minWidth: 280,
+            maxHeight: 400,
+            overflowY: 'auto',
+            boxShadow: '0 4px 24px rgba(0,0,0,.5)',
+          }}
+        >
+          <div style={{ marginBottom: 8, fontWeight: 'bold' }}>
+            Offline Dev Panel
+          </div>
+          <div>
+            <strong>Status:</strong> {online ? '🟢 online' : '🔴 offline'}
+          </div>
+          {status && (
+            <div>
+              <strong>Queue:</strong> {status.queued} queued · {status.sending ? 'sending…' : 'idle'} · {status.deadLettered} dead-lettered
+            </div>
+          )}
+
+          {deadLettered.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <strong>Dead-letter:</strong>
+              {deadLettered.map((m) => (
+                <div key={m.id} style={{ fontSize: 11, marginTop: 4, opacity: 0.8 }}>
+                  {m.procedurePath.join('.')} — {m.lastError?.message ?? 'unknown error'}
+                  {queueCtx && (
+                    <span>
+                      {' '}
+                      <button
+                        style={{ fontSize: 10, cursor: 'pointer', marginLeft: 4 }}
+                        onClick={() => void queueCtx.queue.deadLetter.retry(m.id)}
+                      >
+                        retry
+                      </button>
+                      <button
+                        style={{ fontSize: 10, cursor: 'pointer', marginLeft: 4 }}
+                        onClick={() => void queueCtx.queue.deadLetter.discard(m.id)}
+                      >
+                        discard
+                      </button>
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!queueCtx && (
+            <div style={{ marginTop: 8, opacity: 0.6, fontSize: 11 }}>
+              No OfflineQueueProvider in tree — queue features unavailable.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

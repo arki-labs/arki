@@ -1,1 +1,1 @@
-export {};
+export { OfflineDevPanel } from './DevPanel.tsx';
