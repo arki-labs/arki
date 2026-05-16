@@ -35,6 +35,7 @@
     "@testcontainers/postgresql": "catalog:testing",
     "@testcontainers/redis": "catalog:testing",
     "drizzle-orm": "catalog:drizzle",
+    "msw": "catalog:testing",
     "testcontainers": "catalog:testing"
   },
   "devDependencies": {

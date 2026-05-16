@@ -2,6 +2,8 @@
 
 Comprehensive testing utilities for tRPC + Drizzle + PostgreSQL + Redis applications in the Arki monorepo.
 
+> **Built on the same TDD discipline as the rest of the workspace.** Primitives land here when a real consumer test drives their shape — not before. See [Adding a New Primitive](#adding-a-new-primitive-lift-after-second-use) below for the lift workflow, and see the workspace `test-driven-development` skill for the broader red-green-refactor playbook.
+
 ## Features
 
 - ✅ **Integration Testing** - Full-featured `IntegrationTester` class with container lifecycle management
@@ -13,6 +15,7 @@ Comprehensive testing utilities for tRPC + Drizzle + PostgreSQL + Redis applicat
 - ✅ **Container Management** - Automated PostgreSQL and Redis testcontainer setup
 - ✅ **Test Isolation** - Transaction-based rollback for clean test state
 - ✅ **Random Data Generation** - Deterministic generators for reproducible tests
+- ✅ **HTTP Mocking (MSW)** - Network-layer intercepts via `setupMswServer()` from `@arki/testing/msw`
 
 ## Installation
 
@@ -466,6 +469,90 @@ debug.state('User', user);
 debug.section('Validation Phase');
 ```
 
+## HTTP Mocking (MSW)
+
+For unit/integration tests that exercise production code calling external HTTP services (REST APIs, webhooks, third-party SaaS), use the `@arki/testing/msw` subpath. It wraps [MSW](https://mswjs.io) (Mock Service Worker) with Vitest lifecycle wiring and a fail-loud default, so you can intercept network calls at the request layer without stubbing `globalThis.fetch`.
+
+### Why MSW (not `vi.stubGlobal('fetch')`)
+
+- The impl really calls `fetch()` with the real URL — so `encodeURIComponent`, header construction, query-string building, and URL parsing all execute for real.
+- `onUnhandledRequest: 'error'` (the default) catches accidental real-network calls **and** URL-construction bugs: an un-encoded slug that breaks the path shape will fail the test instead of silently hitting a different stub.
+- Handlers are declarative — you write *"for this URL, respond with this"* — instead of imperatively re-stubbing a global.
+
+### Setup (one-time, per app)
+
+```typescript
+// apps/your-app/backend/__tests__/setup/msw.ts
+import { setupMswServer } from '@arki/testing/msw';
+
+export const server = setupMswServer();
+```
+
+```typescript
+// apps/your-app/backend/vitest.config.ts
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    setupFiles: ['./__tests__/setup/msw.ts'],
+    // ...
+  },
+});
+```
+
+`setupMswServer()` registers `beforeAll(listen)`, `afterEach(resetHandlers)`, and `afterAll(close)` by side effect. Default policy is `onUnhandledRequest: 'error'`. Pass `{ onUnhandledRequest: 'warn' | 'bypass' }` to relax it during migration.
+
+### Usage in tests
+
+```typescript
+import { describe, expect, it } from 'vitest';
+import { http, HttpResponse } from '@arki/testing/msw';
+
+import { fetchGreenhouse } from '../src/features/ingestion/sources/greenhouse';
+import { server } from './setup/msw';
+
+const GH_URL = 'https://boards-api.greenhouse.io/v1/boards/:slug/jobs';
+
+describe('fetchGreenhouse', () => {
+  it('maps a posting', async () => {
+    server.use(http.get(GH_URL, () => HttpResponse.json({ jobs: [{ id: 1 }] })));
+    const rows = await fetchGreenhouse('stripe');
+    expect(rows).toHaveLength(1);
+  });
+
+  it('throws on 503', async () => {
+    server.use(http.get(GH_URL, () => new HttpResponse(null, { status: 503 })));
+    await expect(fetchGreenhouse('downco')).rejects.toThrow(/503/);
+  });
+
+  it('url-encodes the slug', async () => {
+    // MSW path params (`:slug`) match a single URL segment. If the impl forgets
+    // to encode a slug containing `/`, MSW gets an unmatched request and the
+    // 'error' policy fails the test automatically — no extra assertion needed.
+    let capturedUrl: string | null = null;
+    server.use(http.get(GH_URL, ({ request }) => {
+      capturedUrl = request.url;
+      return HttpResponse.json({ jobs: [] });
+    }));
+
+    await fetchGreenhouse('weird slug/with-chars');
+
+    expect(capturedUrl).toBe(
+      'https://boards-api.greenhouse.io/v1/boards/weird%20slug%2Fwith-chars/jobs',
+    );
+  });
+});
+```
+
+The `@arki/testing/msw` subpath re-exports the common authoring surface (`http`, `HttpResponse`, `passthrough`, `delay`, and core types), so your tests don't need a direct `msw` dependency — `@arki/testing` is the single import surface and the single place to upgrade the MSW version monorepo-wide.
+
+### Patterns
+
+- **Per-test handlers:** prefer `server.use(...)` inside `it(...)` over registering at setup. Handlers reset after each test (`afterEach`), keeping tests isolated.
+- **Capturing request shape:** when you need to assert the URL or body the impl sent, capture `request.url` / `await request.json()` inside the handler and assert after.
+- **Fail-loud:** the `'error'` default is intentional. Don't lower it to `'warn'` to silence noise — investigate why the test is making an unmocked request (usually a URL bug worth fixing).
+- **Live the real Request/Response:** `HttpResponse.json(body)` is the canonical helper; for non-JSON or no-body responses use `new HttpResponse(null, { status, statusText })` or `new HttpResponse(text, { status, headers })`.
+
 ## Performance Testing
 
 ```typescript
@@ -738,6 +825,40 @@ All table operations use `PgTable` type from Drizzle ORM for proper type checkin
 - `DEBUG_TESTS=true` - Enable debug logging
 - `DB_URL` - Custom database connection (overrides testcontainers)
 - `REDIS_URL` - Custom Redis connection (overrides testcontainers)
+
+## Adding a New Primitive (lift-after-second-use)
+
+`@arki/testing` is governed by the same TDD discipline as workspace production code: **a primitive only lands when a real consumer test drives its shape**. We do not anticipate; we lift after the second use.
+
+### Why "second use"
+
+A helper written for a single test optimizes for one call site. A helper written for two call sites discovers its real interface — what's actually shared vs. what was incidental. The first inline copy is a draft; the second use is the design review. By the third site, the lift has already paid for itself.
+
+### Workflow
+
+1. **First use — inline.** Write the helper directly in the consumer test file. Keep it as small as the one test demands. Don't generalize yet.
+2. **Second use — stop and lift.** When another test (same app or another app) wants the same primitive, move it to `packages/testing/src/{name}.ts`. Wire it as a re-export from `src/index.ts` (eagerly evaluated) or expose via the `./*` subpath pattern (lazy-imported, like `@arki/testing/msw`).
+3. **Test only what's non-trivial.** Tiny re-exports, one-line factories, and string formatters don't need their own tests — the consumers exercise them by virtue of using them. Primitives with non-trivial logic (lifecycle wiring, parsing, generator state, container orchestration) get their own focused test next to the source file.
+4. **Document in this README.** Add a section explaining (a) **why** this exists vs. the obvious alternative, (b) **how** to set it up (the per-app boilerplate, if any), and (c) **one concrete usage example**. The "why" section is what stops future contributors from reinventing it.
+5. **Pin via the workspace catalog.** External deps go in the root `package.json` under `catalogs.testing`, then `@arki/testing` references them as `catalog:testing`. This guarantees one version across the monorepo and one place to upgrade.
+
+### What belongs in `@arki/testing`
+
+- ✅ Lifecycle wiring — test containers, MSW server, Vitest hooks
+- ✅ Assertion helpers that encode workspace conventions — prefixed IDs, branded types, pagination shape, timestamp recency
+- ✅ Cross-cutting infrastructure — deterministic randomness, debug logging, performance measurement
+- ✅ Cross-app entity factories (rare; most live in the consuming app via `tester.factory.register(...)`)
+
+### What does **not** belong here
+
+- ❌ App-specific factories — those stay in the consuming app
+- ❌ Anything used by only one app — wait for the second consumer
+- ❌ Wrappers that add no value over the underlying library — re-exporting `HttpResponse` is fine; renaming it to `apiResponse` is noise
+- ❌ Speculative "we might need this" helpers — YAGNI applies here the same way it applies to production code
+
+### Real example
+
+`@arki/testing/msw` was added after MSW setup boilerplate appeared in a second app. The 15-line `setupServer` + `beforeAll/afterEach/afterAll` block in app A was about to be copy-pasted into app B. That copy-paste was the trigger: the primitive was lifted, the re-exports of `http` / `HttpResponse` came with it (so consumers don't need a direct `msw` devDep), and the documentation explained *why* MSW over `vi.stubGlobal('fetch')` — the same explanation that would have lived in two test-file headers becomes one canonical reference.
 
 ## License
 
