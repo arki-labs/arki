@@ -36,8 +36,8 @@
       "default": "./src/status/index.ts"
     },
     "./orpc": {
-      "types": "./dist/src/orpc/index.d.ts",
-      "node": "./src/orpc/index.node.ts",
+      "types": "./src/orpc/index.ts",
+      "node": "./src/orpc/index.ts",
       "browser": "./src/orpc/index.browser.ts",
       "default": "./src/orpc/index.browser.ts"
     },
@@ -54,6 +54,13 @@
       "default": "./src/preset/index.ts"
     },
     "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "src/*"
+      ]
+    }
   },
   "scripts": {
     "build": "tsc",
