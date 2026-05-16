@@ -68,6 +68,7 @@
   },
   "dependencies": {
     "@tanstack/query-async-storage-persister": "catalog:tanstack/react-query",
+    "@tanstack/react-db": "catalog:",
     "@tanstack/react-query-persist-client": "catalog:tanstack/react-query",
     "idb-keyval": "catalog:",
     "nanoid": "catalog:utilities",
