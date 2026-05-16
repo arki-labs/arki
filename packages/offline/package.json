@@ -78,7 +78,9 @@
     "workbox-strategies": "catalog:tanstack/start"
   },
   "peerDependencies": {
+    "@orpc/server": "catalog:backend",
     "@tanstack/react-query": "catalog:tanstack/react-query",
+    "drizzle-orm": "catalog:drizzle",
     "react": "catalog:react"
   },
   "devDependencies": {
@@ -87,9 +89,13 @@
     "@arki/testing": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@orpc/server": "catalog:backend",
     "@tanstack/react-query": "catalog:tanstack/react-query",
     "@types/node": "catalog:node",
+    "@types/pg": "catalog:drizzle",
     "@types/react": "catalog:react",
+    "drizzle-orm": "catalog:drizzle",
+    "pg": "catalog:drizzle",
     "react": "catalog:react",
     "typescript": "catalog:"
   }
