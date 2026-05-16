@@ -1,8 +1,4 @@
-export type {
-  OfflineSafeMeta,
-  OfflineSafeProcedure,
-  InferOfflineSafeInput,
-} from './offline-safe-marker';
+export type { OfflineSafeMeta } from './offline-safe-marker';
 
 export { idempotencyKeys, createIdempotencyTable } from './idempotency-table';
 export type { IdempotencyKeyId, IdempotencyKeysTable } from './idempotency-table';

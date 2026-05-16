@@ -1,6 +1,6 @@
 /// <reference path="../query/vite-env.d.ts" />
 import type { ReactNode } from 'react';
-import type { QueryClient } from '@tanstack/react-query';
+import type { DefaultOptions, QueryClient } from '@tanstack/react-query';
 import { createElement, Fragment } from 'react';
 
 import { createPersistedQueryClient } from '../query/createPersistedQueryClient.ts';
@@ -22,6 +22,8 @@ export interface CacheOnlyConfig {
   appId: string;
   buster?: string;
   devtools?: boolean;
+  /** Forwarded to the underlying QueryClient — wire SuperJSON / staleTime / dehydration filters here. */
+  queryDefaults?: DefaultOptions;
 }
 
 export interface QueueConfig {
@@ -30,6 +32,8 @@ export interface QueueConfig {
   rpc: AnyRpcClient;
   buster?: string;
   devtools?: boolean;
+  /** Forwarded to the underlying QueryClient — wire SuperJSON / staleTime / dehydration filters here. */
+  queryDefaults?: DefaultOptions;
 }
 
 export type OfflineRuntimeConfig = CacheOnlyConfig | QueueConfig;
@@ -88,11 +92,12 @@ export interface OfflineRuntime {
  * ```
  */
 export function createOfflineRuntime(config: OfflineRuntimeConfig): OfflineRuntime {
-  const { appId, buster, devtools = false } = config;
+  const { appId, buster, devtools = false, queryDefaults } = config;
 
   const { queryClient, persister, maxAge } = createPersistedQueryClient({
     storageKey: `arki-offline-query:${appId}`,
     buster,
+    defaultOptions: queryDefaults,
   });
 
   let queue: OfflineMutationQueue | undefined;

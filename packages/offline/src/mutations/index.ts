@@ -10,6 +10,7 @@ export type {
   QueuedMutation,
   QueueEvent,
   AnyRpcClient,
+  EnqueueOptions,
   OfflineMutationQueueOptions,
   OfflineMutationQueue,
 } from './queue.ts';
@@ -32,5 +33,9 @@ export type { OfflineQueueProviderProps } from './OfflineQueueProvider.tsx';
 export { OfflineQueueProvider, useOfflineQueue } from './OfflineQueueProvider.tsx';
 
 // React hooks
-export type { QueueStatus, UseOfflineMutationResult } from './hooks.ts';
+export type {
+  QueueStatus,
+  UseOfflineMutationOptions,
+  UseOfflineMutationResult,
+} from './hooks.ts';
 export { useQueueStatus, useOfflineMutation } from './hooks.ts';

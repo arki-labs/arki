@@ -31,8 +31,7 @@ const { createOfflineMutationQueue } = await import('../../src/mutations/queue.t
 // Helpers
 // ---------------------------------------------------------------------------
 
-type SafeProc = { readonly meta: { readonly offlineSafe: true }; input: { title: string } };
-const safeProc: SafeProc = { meta: { offlineSafe: true }, input: { title: '' } };
+const TEST_PATH = ['posts', 'create'] as const;
 
 function makeRpc(
   behavior: 'success' | 'fail-401' | 'fail-422' | 'fail-500' | 'network-error' = 'success',
@@ -75,7 +74,7 @@ describe('OfflineMutationQueue', () => {
     const rpc = makeRpc('success');
     const queue = createOfflineMutationQueue({ rpc, storageKey: 'q1', deadLetterStorageKey: 'dl1' });
 
-    await queue.enqueue(safeProc, { title: 'Hello' });
+    await queue.enqueue({ path: TEST_PATH, input: { title: 'Hello' } });
 
     // The mutation must be persisted: we verify by checking the raw storage key
     const raw = store['q1'];
@@ -89,7 +88,7 @@ describe('OfflineMutationQueue', () => {
     const rpc = makeRpc('success');
     const queue = createOfflineMutationQueue({ rpc, storageKey: 'q2', deadLetterStorageKey: 'dl2' });
 
-    const result = await queue.enqueue(safeProc, { title: 'World' });
+    const result = await queue.enqueue({ path: TEST_PATH, input: { title: 'World' } });
 
     expect(result.idempotencyKey).toBe('test-id-1');
     expect(result.status).toBe('queued');
@@ -101,9 +100,9 @@ describe('OfflineMutationQueue', () => {
     const rpc = makeRpc('success');
     const queue = createOfflineMutationQueue({ rpc, storageKey: 'q3', deadLetterStorageKey: 'dl3' });
 
-    await queue.enqueue(safeProc, { title: 'First' });
-    await queue.enqueue(safeProc, { title: 'Second' });
-    await queue.enqueue(safeProc, { title: 'Third' });
+    await queue.enqueue({ path: TEST_PATH, input: { title: 'First' } });
+    await queue.enqueue({ path: TEST_PATH, input: { title: 'Second' } });
+    await queue.enqueue({ path: TEST_PATH, input: { title: 'Third' } });
 
     // Read the stored state to verify order
     const { createQueueStorage } = await import('../../src/mutations/storage.ts');
@@ -125,7 +124,7 @@ describe('OfflineMutationQueue', () => {
     const events: Array<{ type: string }> = [];
     queue.subscribe((event) => events.push(event));
 
-    await queue.enqueue(safeProc, { title: 'Event test' });
+    await queue.enqueue({ path: TEST_PATH, input: { title: 'Event test' } });
 
     const enqueued = events.find((e) => e.type === 'enqueued');
     expect(enqueued).toBeDefined();
@@ -133,7 +132,7 @@ describe('OfflineMutationQueue', () => {
       type: 'enqueued',
       entry: expect.objectContaining({
         idempotencyKey: 'test-id-1',
-        procedurePath: [],
+        procedurePath: TEST_PATH,
       }) as unknown,
     });
 
@@ -149,7 +148,7 @@ describe('OfflineMutationQueue', () => {
       maxRetries: 0,
     });
 
-    await queue.enqueue(safeProc, { title: 'Will fail' });
+    await queue.enqueue({ path: TEST_PATH, input: { title: 'Will fail' } });
     await queue.drain();
 
     // Wait for dead-letter count update (it's async via subscribe)
@@ -170,7 +169,7 @@ describe('OfflineMutationQueue', () => {
       maxRetries: 0,
     });
 
-    await queue.enqueue(safeProc, { title: 'Permanent fail' });
+    await queue.enqueue({ path: TEST_PATH, input: { title: 'Permanent fail' } });
     await queue.drain();
 
     const items = await queue.deadLetter.list();
@@ -189,7 +188,7 @@ describe('OfflineMutationQueue', () => {
       maxRetries: 0,
     });
 
-    await queue.enqueue(safeProc, { title: 'Discard me' });
+    await queue.enqueue({ path: TEST_PATH, input: { title: 'Discard me' } });
     await queue.drain();
 
     const before = await queue.deadLetter.list();
@@ -220,7 +219,7 @@ describe('OfflineMutationQueue', () => {
       maxRetries: 0,
     });
 
-    await queue.enqueue(safeProc, { title: 'Retry me' });
+    await queue.enqueue({ path: TEST_PATH, input: { title: 'Retry me' } });
     await queue.drain();
 
     const dlBefore = await queue.deadLetter.list();

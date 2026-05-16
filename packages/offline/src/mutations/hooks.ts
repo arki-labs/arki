@@ -6,7 +6,6 @@
  */
 import { useSyncExternalStore, useCallback } from 'react';
 
-import type { OfflineSafeProcedure, InferOfflineSafeInput } from '../orpc/offline-safe-marker.ts';
 import { useOfflineQueue } from './OfflineQueueProvider.tsx';
 import type { QueueEvent } from './queue.ts';
 
@@ -47,28 +46,43 @@ export function useQueueStatus(): QueueStatus {
 // useOfflineMutation
 // ---------------------------------------------------------------------------
 
-export interface UseOfflineMutationResult<TProc extends OfflineSafeProcedure> {
-  mutate: (input: InferOfflineSafeInput<TProc>) => Promise<{ idempotencyKey: string }>;
+export interface UseOfflineMutationOptions {
+  /**
+   * Dot-path of the procedure on the server router (e.g. `['highlights', 'create']`).
+   *
+   * Kept explicit rather than inferred because oRPC's client erases path metadata
+   * at the leaf — the procedure callable carries the path only in a closure.
+   */
+  path: readonly string[];
+}
+
+export interface UseOfflineMutationResult<TInput> {
+  mutate: (input: TInput) => Promise<{ idempotencyKey: string }>;
   isQueued: boolean;
 }
 
 /**
- * Returns a mutate function that enqueues the given offline-safe procedure.
- * isQueued reflects whether there are pending mutations in the queue.
+ * Enqueues a mutation by procedure path. The replay loop uses the queue's
+ * configured `rpc.call(path, input, headers)` to actually invoke the server.
+ *
+ * The caller's server-side procedure MUST be marked with `.use(offlineSafe())`
+ * — otherwise replays are not deduped. There is no compile-time enforcement
+ * of this contract (oRPC client procedures do not carry meta typings); it is
+ * the developer's responsibility to keep client and server in sync.
  */
-export function useOfflineMutation<TProc extends OfflineSafeProcedure>(
-  procedure: TProc,
-): UseOfflineMutationResult<TProc> {
+export function useOfflineMutation<TInput = unknown>(
+  options: UseOfflineMutationOptions,
+): UseOfflineMutationResult<TInput> {
   const { queue } = useOfflineQueue();
-
   const status = useQueueStatus();
+  const { path } = options;
 
   const mutate = useCallback(
-    async (input: InferOfflineSafeInput<TProc>): Promise<{ idempotencyKey: string }> => {
-      const result = await queue.enqueue(procedure, input);
+    async (input: TInput): Promise<{ idempotencyKey: string }> => {
+      const result = await queue.enqueue<TInput>({ path, input });
       return { idempotencyKey: result.idempotencyKey };
     },
-    [queue, procedure],
+    [queue, path],
   );
 
   return {

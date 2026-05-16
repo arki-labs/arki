@@ -1,5 +1,1 @@
-export type {
-  OfflineSafeMeta,
-  OfflineSafeProcedure,
-  InferOfflineSafeInput,
-} from './offline-safe-marker';
+export type { OfflineSafeMeta } from './offline-safe-marker';

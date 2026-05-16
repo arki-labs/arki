@@ -7,7 +7,6 @@
  */
 import { nanoid } from 'nanoid';
 
-import type { OfflineSafeProcedure, InferOfflineSafeInput } from '../orpc/offline-safe-marker.ts';
 import { createQueueStorage } from './storage.ts';
 import type { QueueStorage } from './storage.ts';
 import { createDeadLetterStore } from './dead-letter.ts';
@@ -58,10 +57,16 @@ export interface OfflineMutationQueueOptions {
   onDeadLetter?: (entry: QueuedMutation, error: Error) => void;
 }
 
+export interface EnqueueOptions<TInput = unknown> {
+  /** Dot-path of the procedure on the server router, e.g. `['highlights', 'create']`. */
+  path: readonly string[];
+  /** Serializable input. The replay loop sends it back through `rpc.call`. */
+  input: TInput;
+}
+
 export interface OfflineMutationQueue {
-  enqueue<TProc extends OfflineSafeProcedure>(
-    procedure: TProc,
-    input: InferOfflineSafeInput<TProc>,
+  enqueue<TInput = unknown>(
+    options: EnqueueOptions<TInput>,
   ): Promise<{ idempotencyKey: string; status: 'queued' | 'sent' }>;
 
   status(): { queued: number; sending: boolean; deadLettered: number };
@@ -160,19 +165,15 @@ export function createOfflineMutationQueue(
   // Public API
   // -------------------------------------------------------------------------
 
-  async function enqueue<TProc extends OfflineSafeProcedure>(
-    procedure: TProc,
-    input: InferOfflineSafeInput<TProc>,
+  async function enqueue<TInput = unknown>(
+    options: EnqueueOptions<TInput>,
   ): Promise<{ idempotencyKey: string; status: 'queued' | 'sent' }> {
     const id = nanoid();
     const entry: QueuedMutation = {
       id,
       idempotencyKey: id,
-      // Extract the procedure path from the procedure object.
-      // oRPC procedures expose their route as `~orpc.path`; we fall back to
-      // an empty array — callers using the type-safe API should not hit this.
-      procedurePath: getProcedurePath(procedure),
-      input,
+      procedurePath: options.path,
+      input: options.input,
       enqueuedAt: Date.now(),
       attempts: 0,
     };
@@ -261,23 +262,4 @@ export function createOfflineMutationQueue(
     subscribe,
     dispose,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function getProcedurePath(procedure: unknown): readonly string[] {
-  if (
-    procedure !== null &&
-    typeof procedure === 'object' &&
-    '~orpc' in procedure &&
-    typeof (procedure as Record<string, unknown>)['~orpc'] === 'object'
-  ) {
-    const orpc = (procedure as Record<string, unknown>)['~orpc'] as Record<string, unknown>;
-    if (Array.isArray(orpc['path'])) {
-      return orpc['path'] as string[];
-    }
-  }
-  return [];
 }

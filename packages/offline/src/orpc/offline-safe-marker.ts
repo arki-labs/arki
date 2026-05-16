@@ -1,27 +1,14 @@
 /**
- * Brand applied to oRPC procedures whose .meta.offlineSafe is true.
- * Consumed by @arki/offline/mutations to enforce strict idempotency
- * at the call site: only branded procedures can be queued offline.
+ * Meta shape stamped on oRPC procedures that are safe to enqueue offline.
+ *
+ * Apps server-side: `.meta({ offlineSafe: true } satisfies OfflineSafeMeta).use(offlineSafe())`.
+ *
+ * The marker is documentation-only at the type level — oRPC's client erases
+ * procedure meta at the leaf callable, so `useOfflineMutation` requires an
+ * explicit `path` rather than reading it from the procedure object. Keeping
+ * `.meta({ offlineSafe: true })` on the server side is still useful as
+ * declarative intent for codegen, audit tooling, and visual scanning.
  */
 export interface OfflineSafeMeta {
   readonly offlineSafe: true;
 }
-
-/**
- * Type predicate: any oRPC-ish procedure whose `.meta` includes `offlineSafe: true`.
- *
- * We keep this structurally typed (no nominal brand) so it composes with
- * arbitrary oRPC procedure types from any app's contract.
- */
-export type OfflineSafeProcedure<TProc = unknown> = TProc & {
-  readonly meta: OfflineSafeMeta;
-};
-
-/**
- * Convenience: extract the input type of an offline-safe procedure.
- * Apps wire this via the queue API. Kept loose at the type level
- * because oRPC's procedure types vary across versions; consumers
- * supplying their own typed procedure get full input inference.
- */
-export type InferOfflineSafeInput<TProc> =
-  TProc extends { input: infer I } ? I : never;
