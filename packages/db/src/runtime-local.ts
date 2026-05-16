@@ -1,5 +1,5 @@
 import type { AnyRelations } from 'drizzle-orm';
-import { PGlite } from '@electric-sql/pglite';
+import { PGlite, type Extension } from '@electric-sql/pglite';
 import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite';
 
 import { debugInit } from './debug';
@@ -9,6 +9,8 @@ export type PgliteInitOptions = {
   dataDir?: string;
   /** Use an in-memory database (overrides dataDir). */
   memory?: boolean;
+  /** PGlite extensions to load (e.g. `{ vector }` from `@electric-sql/pglite/vector`). */
+  extensions?: Record<string, Extension>;
 };
 
 /**
@@ -30,7 +32,9 @@ export async function initDbRuntimeLocal<TRelations extends AnyRelations>(
   const url = options.memory === true ? 'memory://' : (options.dataDir ?? './.local/db');
   debugInit('[runtime-local] Initializing PGlite at: %s', url);
 
-  const pglite = new PGlite(url);
+  const pglite = options.extensions
+    ? new PGlite(url, { extensions: options.extensions })
+    : new PGlite(url);
   await pglite.waitReady;
   debugInit('[runtime-local] PGlite ready');
 
