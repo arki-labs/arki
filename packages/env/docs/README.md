@@ -30,7 +30,7 @@ export const env = createEnv({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   },
   client: {
-    VITE_PUBLIC_API_URL: z.string().url(),
+    VITE_API_URL: z.string().url(),
   },
   // PAIN POINT: Every variable must be manually mapped
   experimental__runtimeEnv: {
@@ -38,7 +38,7 @@ export const env = createEnv({
     API_KEY: process.env['API_KEY'],
     PORT: process.env['PORT'],
     NODE_ENV: process.env['NODE_ENV'],
-    VITE_PUBLIC_API_URL: process.env['VITE_PUBLIC_API_URL'],
+    VITE_API_URL: process.env['VITE_API_URL'],
   },
   skipValidation: !!process.env['CI'] || process.env['npm_lifecycle_event'] === 'lint',
 });
@@ -65,7 +65,7 @@ experimental__runtimeEnv: {
   API_KEY: process.env['API_KEY'],
   REDIS_URL: process.env['REDIS_URL'],
   PORT: process.env['PORT'],
-  VITE_PUBLIC_API_URL: process.env['VITE_PUBLIC_API_URL'],
+  VITE_API_URL: process.env['VITE_API_URL'],
 }
 
 // ✅ After: Type-checked helpers
@@ -73,7 +73,7 @@ import { serverEnv, clientEnv } from '@arki/env/nextjs';
 
 experimental__runtimeEnv: {
   ...serverEnv(['DB_URL', 'API_KEY', 'REDIS_URL', 'PORT']),
-  ...clientEnv(['API_URL']), // Auto-handles NEXT_PUBLIC_ prefix
+  ...clientEnv(['API_URL']), // Auto-handles VITE_ prefix
 }
 ```
 
@@ -82,7 +82,7 @@ experimental__runtimeEnv: {
 - Still explicit (Next.js bundler compatible)
 - Type-checked array prevents typos
 - Less repetitive
-- Auto-handles `NEXT_PUBLIC_` prefix for client vars
+- Auto-handles `VITE_` prefix for client vars
 
 ### 2. Schema Contracts Library
 
@@ -427,14 +427,14 @@ export function serverEnv<T extends readonly string[]>(keys: T): Record<T[number
 
 /**
  * Type-safe helper to map client environment variables
- * Automatically handles NEXT_PUBLIC_ prefix
+ * Automatically handles VITE_ prefix
  */
 export function clientEnv<T extends readonly string[]>(keys: T): Record<T[number], string | undefined> {
   const env: Record<string, string | undefined> = {};
 
-  // Client vars must use NEXT_PUBLIC_ prefix
+  // Client vars must use VITE_ prefix
   for (const key of keys) {
-    env[key] = process.env[`NEXT_PUBLIC_${key}`];
+    env[key] = process.env[`VITE_${key}`];
   }
 
   return env as Record<T[number], string | undefined>;
@@ -741,7 +741,7 @@ export const env = createEnv({
       .default('false'),
   },
   client: {
-    VITE_PUBLIC_API_URL: z.string().url().default('https://api.example.com'),
+    VITE_API_URL: z.string().url().default('https://api.example.com'),
   },
   experimental__runtimeEnv: {
     DB_URL: process.env['DB_URL'],
@@ -751,7 +751,7 @@ export const env = createEnv({
     LOG_LEVEL: process.env['LOG_LEVEL'],
     AUTH_SECRET: process.env['AUTH_SECRET'],
     ENABLE_ANALYTICS: process.env['ENABLE_ANALYTICS'],
-    VITE_PUBLIC_API_URL: process.env['VITE_PUBLIC_API_URL'],
+    VITE_API_URL: process.env['VITE_API_URL'],
   },
   skipValidation: !!process.env['CI'] || process.env['npm_lifecycle_event'] === 'lint',
 });
@@ -790,7 +790,7 @@ export const env = defineEnv({
 
 1. Provide a shared `createEnv(config)` signature where the runtime is implied by the import path (`@arki/env/server` vs `@arki/env/client`) while still returning typed helpers (e.g., `.get`, `.toJSONSafe`).
 2. Offer specialized factories `defineServerEnv` and `defineClientEnv` that enforce correct runtime defaults, transformers, and redaction rules.
-3. Include a `withPrefix('NEXT_PUBLIC_')` helper to apply naming conventions and map server vars to client-safe names automatically.
+3. Include a `withPrefix('VITE_')` helper to apply naming conventions and map server vars to client-safe names automatically.
 4. Add runtime guards like `assertEnvReady()` and helper methods like `optional('SOME_VAR')` to cut down on manual null checks and boilerplate.
 5. Ship an `EnvTester` utility for tests that loads overrides from a partial object, validates, and restores originals when tests finish.
 
@@ -805,7 +805,7 @@ export const env = defineEnv({
 ### Import-path split
 
 - Create `packages/arki/env/server/index.ts` to wrap @t3-oss/env-core (or env-nextjs server helpers) and export server-only utilities like `createServerEnv` / `defineServerEnv`.
-- Create `packages/arki/env/client/index.ts` that re-exports client-safe helpers built on @t3-oss/env-nextjs and enforces `NEXT_PUBLIC_` (or configured) prefixes.
+- Create `packages/arki/env/client/index.ts` that re-exports client-safe helpers built on @t3-oss/env-nextjs and enforces `VITE_` (or configured) prefixes.
 - Configure `package.json` exports so consumers import via `@arki/env/server` or `@arki/env/client`, each pointing to the correct build artifacts.
 - Optionally add `exports["./client"].browser` to keep bundlers like Next.js from bundling server code into client builds.
 - Make sure documentation clearly states that server utilities must never run in the browser bundle.

@@ -29,19 +29,19 @@ GEOCODIO_API_KEY=your_geocodio_key
 
 ```bash
 # Google Maps (for @vis.gl/react-google-maps)
-VITE_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_api_key
+VITE_GOOGLE_MAPS_API_KEY=your_google_maps_api_key
 
 # Mapbox (for react-map-gl)
-VITE_PUBLIC_MAPBOX_TOKEN=your_mapbox_token
+VITE_MAPBOX_TOKEN=your_mapbox_token
 
 # Apple Maps (for MapKit JS)
-VITE_PUBLIC_APPLE_MAPS_TOKEN=your_apple_maps_jwt_token
+VITE_APPLE_MAPS_TOKEN=your_apple_maps_jwt_token
 APPLE_MAPS_TEAM_ID=your_apple_team_id
 APPLE_MAPS_KEY_ID=your_apple_key_id
 APPLE_MAPS_PRIVATE_KEY=your_apple_private_key
 
 # HERE Maps
-VITE_PUBLIC_HERE_API_KEY=your_here_api_key
+VITE_HERE_API_KEY=your_here_api_key
 ```
 
 ## Environment Variable Setup with T3 Env
@@ -77,16 +77,16 @@ import { z } from 'zod';
 export const env = createEnv({
   client: {
     // Map providers (client-side - exposed to browser)
-    VITE_PUBLIC_GOOGLE_MAPS_API_KEY: z.string().optional(),
-    VITE_PUBLIC_MAPBOX_TOKEN: z.string().optional(),
-    VITE_PUBLIC_APPLE_MAPS_TOKEN: z.string().optional(),
-    VITE_PUBLIC_HERE_API_KEY: z.string().optional(),
+    VITE_GOOGLE_MAPS_API_KEY: z.string().optional(),
+    VITE_MAPBOX_TOKEN: z.string().optional(),
+    VITE_APPLE_MAPS_TOKEN: z.string().optional(),
+    VITE_HERE_API_KEY: z.string().optional(),
   },
   runtimeEnv: {
-    VITE_PUBLIC_GOOGLE_MAPS_API_KEY: process.env.VITE_PUBLIC_GOOGLE_MAPS_API_KEY,
-    VITE_PUBLIC_MAPBOX_TOKEN: process.env.VITE_PUBLIC_MAPBOX_TOKEN,
-    VITE_PUBLIC_APPLE_MAPS_TOKEN: process.env.VITE_PUBLIC_APPLE_MAPS_TOKEN,
-    VITE_PUBLIC_HERE_API_KEY: process.env.VITE_PUBLIC_HERE_API_KEY,
+    VITE_GOOGLE_MAPS_API_KEY: process.env.VITE_GOOGLE_MAPS_API_KEY,
+    VITE_MAPBOX_TOKEN: process.env.VITE_MAPBOX_TOKEN,
+    VITE_APPLE_MAPS_TOKEN: process.env.VITE_APPLE_MAPS_TOKEN,
+    VITE_HERE_API_KEY: process.env.VITE_HERE_API_KEY,
   },
   skipValidation: !!process.env.CI || !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === 'lint',
 });
@@ -169,10 +169,10 @@ Add to `.gitignore`:
 
 ```bash
 # .env.local (development)
-VITE_PUBLIC_GOOGLE_MAPS_API_KEY=dev_key_here
+VITE_GOOGLE_MAPS_API_KEY=dev_key_here
 
 # .env.production (production - in deployment platform)
-VITE_PUBLIC_GOOGLE_MAPS_API_KEY=prod_key_here
+VITE_GOOGLE_MAPS_API_KEY=prod_key_here
 ```
 
 ### 3. Rotate Keys Regularly
@@ -227,7 +227,7 @@ HTTP referrers: your-domain.com/*
 
 ### Map Not Loading
 
-1. Check `NEXT_PUBLIC_*` prefix for client-side variables
+1. Check `VITE_*` prefix for client-side variables
 2. Verify environment file is loaded (restart dev server)
 3. Check browser console for specific error messages
 4. Ensure map provider dependencies are installed
@@ -240,8 +240,8 @@ GOOGLE_MAPS_API_KEY=AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 MAPBOX_ACCESS_TOKEN=pk.eyJ1IjoieW91ciIsImEiOiJYWFhYWFhYWFgifQ.XXXXX
 
 # Frontend maps (client-side)
-VITE_PUBLIC_GOOGLE_MAPS_API_KEY=AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-VITE_PUBLIC_MAPBOX_TOKEN=pk.eyJ1IjoieW91ciIsImEiOiJYWFhYWFhYWFgifQ.XXXXX
+VITE_GOOGLE_MAPS_API_KEY=AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+VITE_MAPBOX_TOKEN=pk.eyJ1IjoieW91ciIsImEiOiJYWFhYWFhYWFgifQ.XXXXX
 
 # Redis for geocoding cache (optional)
 REDIS_URL=redis://localhost:6379
@@ -290,8 +290,8 @@ export const env = createEnv({
 ```typescript
 'use client';
 
-// Must use NEXT_PUBLIC_ prefix to expose to browser
-const apiKey = process.env.VITE_PUBLIC_GOOGLE_MAPS_API_KEY;
+// Must use VITE_ prefix to expose to browser
+const apiKey = process.env.VITE_GOOGLE_MAPS_API_KEY;
 
 if (!apiKey) {
   throw new Error('Google Maps API key not configured');
