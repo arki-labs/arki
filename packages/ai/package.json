@@ -60,6 +60,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@ai-sdk/anthropic": "catalog:ai",
+    "@ai-sdk/cohere": "catalog:ai",
     "@ai-sdk/google": "catalog:ai",
     "@ai-sdk/groq": "catalog:ai",
     "@ai-sdk/mistral": "catalog:ai",
@@ -81,24 +82,40 @@
     "streamdown": "catalog:ai",
     "zod": "catalog:"
   },
-  "devDependencies": {
-    "@arki/eslint-config": "workspace:*",
-    "@arki/prettier-config": "workspace:*",
-    "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*",
-    "typescript": "catalog:"
-  },
-  "peerDependencies": {
-    "react": "catalog:react",
-    "react-dom": "catalog:react"
-  },
   "peerDependenciesMeta": {
     "react": {
       "optional": true
     },
     "react-dom": {
       "optional": true
+    },
+    "@ai-sdk/amazon-bedrock": {
+      "optional": true
+    },
+    "voyageai": {
+      "optional": true
+    },
+    "@mixedbread-ai/sdk": {
+      "optional": true
+    },
+    "@huggingface/transformers": {
+      "optional": true
     }
+  },
+  "peerDependencies": {
+    "@ai-sdk/amazon-bedrock": "catalog:ai",
+    "@huggingface/transformers": "*",
+    "@mixedbread-ai/sdk": "*",
+    "react": "catalog:react",
+    "react-dom": "catalog:react",
+    "voyageai": "*"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "typescript": "catalog:"
   },
   "types": "./dist/src/index.d.ts",
   "sideEffects": false
