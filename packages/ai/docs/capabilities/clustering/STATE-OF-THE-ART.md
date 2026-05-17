@@ -8,19 +8,19 @@ Document clustering has evolved from simple bag-of-words approaches to neural to
 
 ### Evolution Timeline
 
-| Year | Milestone | Key Innovation |
-|------|-----------|----------------|
-| 1998 | K-Means + TF-IDF | Statistical clustering on term frequencies |
-| 2003 | Latent Dirichlet Allocation (LDA) | Probabilistic topic modeling |
-| 2013 | Word2Vec clustering | Dense word embeddings + K-Means |
-| 2017 | Doc2Vec clustering | Document-level embeddings |
-| 2018 | UMAP + HDBSCAN | Dimensionality reduction + density-based clustering |
-| 2019 | Top2Vec | Jointly learns topic embeddings and document embeddings |
-| 2022 | BERTopic | Transformer embeddings + UMAP + HDBSCAN + c-TF-IDF |
-| 2023 | LLM-powered topic naming | GPT/Claude for human-readable cluster labels |
-| 2024 | Dynamic BERTopic | Online topic modeling for streaming data |
-| 2025 | Embedding-first + LLM-hybrid | Production systems combining embedding clustering with LLM interpretation |
-| 2026 | Multi-modal clustering | Clustering across text, images, and audio content |
+| Year | Milestone                         | Key Innovation                                                            |
+| ---- | --------------------------------- | ------------------------------------------------------------------------- |
+| 1998 | K-Means + TF-IDF                  | Statistical clustering on term frequencies                                |
+| 2003 | Latent Dirichlet Allocation (LDA) | Probabilistic topic modeling                                              |
+| 2013 | Word2Vec clustering               | Dense word embeddings + K-Means                                           |
+| 2017 | Doc2Vec clustering                | Document-level embeddings                                                 |
+| 2018 | UMAP + HDBSCAN                    | Dimensionality reduction + density-based clustering                       |
+| 2019 | Top2Vec                           | Jointly learns topic embeddings and document embeddings                   |
+| 2022 | BERTopic                          | Transformer embeddings + UMAP + HDBSCAN + c-TF-IDF                        |
+| 2023 | LLM-powered topic naming          | GPT/Claude for human-readable cluster labels                              |
+| 2024 | Dynamic BERTopic                  | Online topic modeling for streaming data                                  |
+| 2025 | Embedding-first + LLM-hybrid      | Production systems combining embedding clustering with LLM interpretation |
+| 2026 | Multi-modal clustering            | Clustering across text, images, and audio content                         |
 
 ### Paradigm Shifts
 
@@ -40,14 +40,14 @@ LLM-Enhanced Clustering (2024+)
 
 ### Approach Comparison
 
-| Approach | Quality | Scalability | Interpretability | Dynamic | Cold Start |
-|----------|---------|-------------|------------------|---------|------------|
-| LDA | Moderate | Excellent | Good (word lists) | Online LDA | Moderate |
-| K-Means + TF-IDF | Moderate | Excellent | Limited | Re-cluster | Good |
-| Top2Vec | Good | Good | Good | Limited | Good |
-| BERTopic | Very Good | Good | Very Good (c-TF-IDF) | Dynamic variant | Good |
-| UMAP + HDBSCAN | Very Good | Moderate | Requires labeling | Re-cluster | Good |
-| LLM-enhanced | Excellent | Limited | Excellent | Per-batch | Excellent |
+| Approach         | Quality   | Scalability | Interpretability     | Dynamic         | Cold Start |
+| ---------------- | --------- | ----------- | -------------------- | --------------- | ---------- |
+| LDA              | Moderate  | Excellent   | Good (word lists)    | Online LDA      | Moderate   |
+| K-Means + TF-IDF | Moderate  | Excellent   | Limited              | Re-cluster      | Good       |
+| Top2Vec          | Good      | Good        | Good                 | Limited         | Good       |
+| BERTopic         | Very Good | Good        | Very Good (c-TF-IDF) | Dynamic variant | Good       |
+| UMAP + HDBSCAN   | Very Good | Moderate    | Requires labeling    | Re-cluster      | Good       |
+| LLM-enhanced     | Excellent | Limited     | Excellent            | Per-batch       | Excellent  |
 
 ### BERTopic (Current Best Practice)
 
@@ -60,6 +60,7 @@ Documents → Embedding model → UMAP (reduce dims) → HDBSCAN (cluster) → c
 ```
 
 **Key strengths:**
+
 - Works with any embedding model (swap Voyage-3, OpenAI, etc.)
 - HDBSCAN finds clusters of varying density without specifying K
 - c-TF-IDF creates interpretable topic representations
@@ -68,13 +69,13 @@ Documents → Embedding model → UMAP (reduce dims) → HDBSCAN (cluster) → c
 
 ### Framework Comparison
 
-| Framework | Language | Embedding | Clustering | Labeling | Production-Ready |
-|-----------|----------|-----------|------------|----------|-----------------|
-| **BERTopic** | Python | Any | HDBSCAN | c-TF-IDF + LLM | Yes |
-| **Top2Vec** | Python | Doc2Vec/SBERT | HDBSCAN | Centroid words | Moderate |
-| **Scikit-learn** | Python | TF-IDF | K-Means/DBSCAN | Manual | Yes (basic) |
-| **Gensim LDA** | Python | Bag-of-words | Probabilistic | Word distributions | Yes |
-| **Custom (embeddings + cluster)** | Any | Voyage/OpenAI | Any algorithm | LLM-generated | Flexible |
+| Framework                         | Language | Embedding     | Clustering     | Labeling           | Production-Ready |
+| --------------------------------- | -------- | ------------- | -------------- | ------------------ | ---------------- |
+| **BERTopic**                      | Python   | Any           | HDBSCAN        | c-TF-IDF + LLM     | Yes              |
+| **Top2Vec**                       | Python   | Doc2Vec/SBERT | HDBSCAN        | Centroid words     | Moderate         |
+| **Scikit-learn**                  | Python   | TF-IDF        | K-Means/DBSCAN | Manual             | Yes (basic)      |
+| **Gensim LDA**                    | Python   | Bag-of-words  | Probabilistic  | Word distributions | Yes              |
+| **Custom (embeddings + cluster)** | Any      | Voyage/OpenAI | Any algorithm  | LLM-generated      | Flexible         |
 
 ## Architecture Patterns
 
@@ -116,31 +117,31 @@ LLM labeling: Sonnet 4.5 generates human-readable cluster names
 
 ### Dimensionality Reduction
 
-| Method | Speed | Preservation | Best For |
-|--------|-------|-------------|----------|
-| UMAP | Moderate | Local + global structure | BERTopic pipeline |
-| t-SNE | Slow | Local structure only | Visualization |
-| PCA | Fast | Global variance | Pre-processing |
-| Truncated SVD | Fast | Global variance | Large sparse matrices |
+| Method        | Speed    | Preservation             | Best For              |
+| ------------- | -------- | ------------------------ | --------------------- |
+| UMAP          | Moderate | Local + global structure | BERTopic pipeline     |
+| t-SNE         | Slow     | Local structure only     | Visualization         |
+| PCA           | Fast     | Global variance          | Pre-processing        |
+| Truncated SVD | Fast     | Global variance          | Large sparse matrices |
 
 ### Clustering Algorithms
 
-| Algorithm | Requires K? | Handles Noise? | Varying Density? | Complexity |
-|-----------|------------|----------------|-------------------|------------|
-| **HDBSCAN** | No | Yes | Yes | O(n log n) |
-| K-Means | Yes | No | No | O(n·k·i) |
-| DBSCAN | No (needs epsilon) | Yes | No | O(n log n) |
-| Agglomerative | Optional | No | Partial | O(n² log n) |
-| Spectral | Yes | No | Yes | O(n³) |
+| Algorithm     | Requires K?        | Handles Noise? | Varying Density? | Complexity  |
+| ------------- | ------------------ | -------------- | ---------------- | ----------- |
+| **HDBSCAN**   | No                 | Yes            | Yes              | O(n log n)  |
+| K-Means       | Yes                | No             | No               | O(n·k·i)    |
+| DBSCAN        | No (needs epsilon) | Yes            | No               | O(n log n)  |
+| Agglomerative | Optional           | No             | Partial          | O(n² log n) |
+| Spectral      | Yes                | No             | Yes              | O(n³)       |
 
 ### Cluster Naming Strategies
 
-| Strategy | Quality | Cost | Speed |
-|----------|---------|------|-------|
-| Top-N keywords (c-TF-IDF) | Moderate | Free | Fast |
-| LLM-generated from sample | Excellent | ~$0.003/cluster | ~2s |
-| LLM-generated from all items | Excellent+ | ~$0.01/cluster | ~5s |
-| User-defined (manual override) | Perfect | Free | Manual |
+| Strategy                       | Quality    | Cost            | Speed  |
+| ------------------------------ | ---------- | --------------- | ------ |
+| Top-N keywords (c-TF-IDF)      | Moderate   | Free            | Fast   |
+| LLM-generated from sample      | Excellent  | ~$0.003/cluster | ~2s    |
+| LLM-generated from all items   | Excellent+ | ~$0.01/cluster  | ~5s    |
+| User-defined (manual override) | Perfect    | Free            | Manual |
 
 ## Advanced Techniques (2025-2026)
 
@@ -201,29 +202,29 @@ Cluster "AI Infrastructure" with 12 items:
 
 ### Internal Metrics (No Ground Truth)
 
-| Metric | Description | Interpretation |
-|--------|-------------|----------------|
-| Silhouette score | Cohesion vs. separation | Higher = better (-1 to 1) |
-| Calinski-Harabasz | Ratio of between/within cluster variance | Higher = better |
-| Davies-Bouldin | Average similarity of clusters | Lower = better |
-| Noise ratio | % items not assigned | Lower = more inclusive |
+| Metric            | Description                              | Interpretation            |
+| ----------------- | ---------------------------------------- | ------------------------- |
+| Silhouette score  | Cohesion vs. separation                  | Higher = better (-1 to 1) |
+| Calinski-Harabasz | Ratio of between/within cluster variance | Higher = better           |
+| Davies-Bouldin    | Average similarity of clusters           | Lower = better            |
+| Noise ratio       | % items not assigned                     | Lower = more inclusive    |
 
 ### External Metrics (With Ground Truth)
 
-| Metric | Description | Use Case |
-|--------|-------------|----------|
-| Adjusted Rand Index | Agreement with human labels | Gold standard evaluation |
-| Normalized Mutual Information | Information overlap | Comparing cluster configurations |
-| Cluster purity | % items correctly assigned | Quality monitoring |
+| Metric                        | Description                 | Use Case                         |
+| ----------------------------- | --------------------------- | -------------------------------- |
+| Adjusted Rand Index           | Agreement with human labels | Gold standard evaluation         |
+| Normalized Mutual Information | Information overlap         | Comparing cluster configurations |
+| Cluster purity                | % items correctly assigned  | Quality monitoring               |
 
 ### User-Centric Metrics
 
-| Metric | Description |
-|--------|-------------|
-| Rename rate | How often users rename AI-generated cluster labels |
-| Manual override rate | How often users move items between clusters |
+| Metric                 | Description                                           |
+| ---------------------- | ----------------------------------------------------- |
+| Rename rate            | How often users rename AI-generated cluster labels    |
+| Manual override rate   | How often users move items between clusters           |
 | Engagement per cluster | Click-through rate on cluster-grouped digest sections |
-| Cluster discovery rate | % of clusters users explore beyond default view |
+| Cluster discovery rate | % of clusters users explore beyond default view       |
 
 ## Challenges and Limitations
 
