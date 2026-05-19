@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { QueuedMutation, AnyRpcClient } from '../../src/mutations/queue.ts';
+import * as idbKeyval from 'idb-keyval';
 
 // ---------------------------------------------------------------------------
 // In-memory IDB mock
@@ -254,5 +255,33 @@ describe('OfflineMutationQueue', () => {
     // We can't easily test listener clearing on the disposed queue,
     // but we verify dispose() doesn't throw
     expect(preLength).toBe(0);
+  });
+
+  // Regression — production Avocabo SSR crash: top-level
+  // `createOfflineRuntime` evaluates during SSR, where `indexedDB` is undefined.
+  // The factory must not touch idb-keyval at construction when there is no
+  // `window` global. See queue.ts `isBrowser` guard.
+  it('does not touch idb-keyval during construction when window is undefined (SSR)', () => {
+    const originalWindow = (globalThis as { window?: unknown }).window;
+    delete (globalThis as { window?: unknown }).window;
+
+    try {
+      const rpc = makeRpc('success');
+      const queue = createOfflineMutationQueue({
+        rpc,
+        storageKey: 'q-ssr',
+        deadLetterStorageKey: 'dl-ssr',
+      });
+
+      // Mock was reset in beforeEach, so any call counted here came from construction
+      expect(vi.mocked(idbKeyval.get)).not.toHaveBeenCalled();
+      expect(queue.status()).toEqual({ queued: 0, sending: false, deadLettered: 0 });
+
+      queue.dispose();
+    } finally {
+      if (originalWindow !== undefined) {
+        (globalThis as { window?: unknown }).window = originalWindow;
+      }
+    }
   });
 });

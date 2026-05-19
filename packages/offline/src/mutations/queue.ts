@@ -116,15 +116,25 @@ export function createOfflineMutationQueue(
   const listeners = new Set<(event: QueueEvent) => void>();
   const state: QueueState = { sending: false, queuedCount: 0, deadLetteredCount: 0 };
 
-  // Sync counts on startup (fire-and-forget; acceptable startup race)
-  void storage.read().then((items) => {
-    state.queuedCount = items.length;
-  });
-  void dlStore.list().then((items) => {
-    state.deadLetteredCount = items.length;
-  });
+  // IDB access is browser-only. The factory may be evaluated during SSR
+  // (e.g. when an app constructs the runtime at module top level) — in that
+  // case the resulting queue is a transient stub that no caller ever uses
+  // before the request ends, so skipping the bootstrap reads is safe.
+  const isBrowser = typeof window !== 'undefined';
 
-  // Keep dead-letter count in sync whenever the dead-letter store changes
+  // Sync counts on startup (fire-and-forget; acceptable startup race)
+  if (isBrowser) {
+    void storage.read().then((items) => {
+      state.queuedCount = items.length;
+    });
+    void dlStore.list().then((items) => {
+      state.deadLetteredCount = items.length;
+    });
+  }
+
+  // Keep dead-letter count in sync whenever the dead-letter store changes.
+  // The subscribe callback only fires after `dlStore.add` succeeded, so by
+  // definition IDB was reachable — no `isBrowser` guard needed here.
   const unsubscribeDL = dlStore.subscribe(() => {
     void dlStore.list().then((items) => {
       state.deadLetteredCount = items.length;
