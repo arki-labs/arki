@@ -31,7 +31,7 @@ export const env = createEnv({
    * Environment variables schema for authentication services
    */
   server: {
-    VITE_PUBLIC_URL: z.url().optional(),
+    VITE_URL: z.url().optional(),
     PRODUCTION_URL: z.url().optional(),
 
     // General Configuration
@@ -89,7 +89,7 @@ export const env = createEnv({
    * Destructure all variables from `process.env` to make sure they aren't tree-shaken away.
    */
   runtimeEnv: {
-    VITE_PUBLIC_URL: process.env.VITE_PUBLIC_URL,
+    VITE_URL: process.env.VITE_URL,
     PRODUCTION_URL: process.env.PRODUCTION_URL,
     NODE_ENV: process.env.NODE_ENV,
     AUTH_SECRET: process.env.AUTH_SECRET,

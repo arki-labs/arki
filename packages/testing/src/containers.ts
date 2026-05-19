@@ -53,7 +53,7 @@ export async function setupGlobalTestContainers(options?: SharedContainerOptions
   debugContainers('[containers] Setting test environment variables');
   process.env.NODE_ENV = 'test';
   process.env.AUTH_SECRET = 'test-secret-key-for-testing-only';
-  process.env.VITE_PUBLIC_URL = 'http://localhost:3000';
+  process.env.VITE_URL = 'http://localhost:3000';
 
   console.log('🚀 Starting shared PostgreSQL container...');
   const pgStart = Date.now();
