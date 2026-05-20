@@ -478,3 +478,110 @@ export interface ExportSummary {
   readonly failed: number;
   readonly outputPath: string;
 }
+
+/**
+ * Identifier for one of the package managers the fixture matrix supports.
+ *
+ * Each `(package, packageManager)` pair produces a single
+ * {@link FixtureRun} so the matrix can document both per-PM compatibility
+ * and per-package regressions.
+ */
+export type PackageManagerId = 'npm' | 'pnpm' | 'bun';
+
+/**
+ * Status of a single stage within a {@link FixtureRun}.
+ *
+ * - `success`  — stage executed and met its assertions.
+ * - `failure`  — stage executed but produced a publication-blocking issue.
+ * - `skipped`  — stage was intentionally not run, e.g. because an upstream
+ *   stage failed, the operator passed `--skip-install`, or the run is
+ *   forward-dependent on a future task (e.g. the DOT fixture).
+ */
+export type FixtureStageStatus = 'success' | 'failure' | 'skipped';
+
+/**
+ * Top-level status of a single fixture run (one package × one PM).
+ *
+ * - `success` — every executed stage succeeded.
+ * - `failure` — at least one stage failed.
+ * - `skipped` — the whole run was skipped (e.g. forward-dependency stub).
+ */
+export type FixtureRunStatus = 'success' | 'failure' | 'skipped';
+
+/**
+ * Stages exercised inside a single fixture run, in execution order.
+ *
+ * - `pack`                 — pack the package into a tarball with npm.
+ * - `workspace-leak-check` — verify the tarball/manifest carries no
+ *   unresolved `workspace:*` or `catalog:` references.
+ * - `install`              — install the tarball into the fixture dir
+ *   with the requested package manager (npm / pnpm / bun).
+ * - `import-esm`           — run `node import-check.mjs` to verify the
+ *   published ESM entry resolves and exposes named exports.
+ * - `import-types`         — run `tsc --noEmit tsc-check.ts` to verify
+ *   the package's `.d.ts` declarations are consumable.
+ */
+export type FixtureStageName =
+  | 'pack'
+  | 'workspace-leak-check'
+  | 'install'
+  | 'import-esm'
+  | 'import-types';
+
+/**
+ * One stage of a single fixture run. Stages record their lifecycle status,
+ * the time they took, and optionally truncated stdout/stderr so failures
+ * are diagnosable without re-running.
+ *
+ * `reason` is a short, human-readable label — used for both `skipped` and
+ * `failure` so the envelope can display a one-liner.
+ */
+export interface FixtureStage {
+  readonly name: FixtureStageName;
+  readonly status: FixtureStageStatus;
+  readonly durationMs: number;
+  readonly stdout?: string;
+  readonly stderr?: string;
+  readonly reason?: string;
+}
+
+/**
+ * A single (package, packageManager) outcome from the fixture matrix.
+ *
+ * `tarballPath` and `fixtureDir` are non-empty even when stages are
+ * skipped — they document what would have been used.
+ *
+ * `errors` mirrors the envelope `errors[]` shape: stable `FIX_E0xx` codes
+ * with severities so CI gates can match on specific failures.
+ */
+export interface FixtureRun {
+  readonly packageName: string;
+  readonly packageManager: PackageManagerId;
+  readonly tarballPath: string;
+  readonly fixtureDir: string;
+  readonly status: FixtureRunStatus;
+  readonly stages: readonly FixtureStage[];
+  readonly errors: readonly ReleaseError[];
+  readonly skipReason?: string;
+}
+
+/**
+ * Aggregate summary for the fixture envelope.
+ */
+export interface FixtureMatrixSummary {
+  readonly message: string;
+  readonly totalRuns: number;
+  readonly successCount: number;
+  readonly failureCount: number;
+  readonly skippedCount: number;
+  readonly publicTreePath: string;
+}
+
+/**
+ * Full result of running the fixture matrix. The envelope's `items[]`
+ * carries the per-run details; `summary` carries the totals.
+ */
+export interface FixtureMatrix {
+  readonly runs: readonly FixtureRun[];
+  readonly summary: FixtureMatrixSummary;
+}

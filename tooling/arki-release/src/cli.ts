@@ -13,6 +13,12 @@ import debugFactory from 'debug';
 
 import { defaultConfigPath, loadConfig, ReleaseConfigError } from './config';
 import { EXPORT_ERROR_CODES, exportPublicTree } from './export-public';
+import {
+  buildDotFixtureForwardStubRuns,
+  DEFAULT_PACKAGE_MANAGERS,
+  FIXTURE_ERROR_CODES,
+  runFixtureMatrix,
+} from './fixture';
 import { runInventory, type InventoryItem } from './inventory';
 import { createEnvelope, emitEnvelope } from './json-output';
 import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
@@ -20,8 +26,11 @@ import { auditPack, PACK_ERROR_CODES } from './pack';
 import type {
   ExportItem,
   ExportSummary,
+  FixtureMatrixSummary,
+  FixtureRun,
   LeakHit,
   PackAuditResult,
+  PackageManagerId,
   ParsedCliArgs,
   ReleaseCommand,
   ReleaseCommandEnvelope,
@@ -249,6 +258,10 @@ export async function dispatch(args: ParsedCliArgs): Promise<number> {
 
   if (args.command === 'export-public') {
     return runExportPublicHandler(args);
+  }
+
+  if (args.command === 'fixture') {
+    return runFixtureHandler(args);
   }
 
   const envelope = buildStubEnvelope(args.command);
@@ -686,6 +699,122 @@ async function runExportPublicHandler(args: ParsedCliArgs): Promise<number> {
     emitEnvelope(envelope, { json: args.json });
     return 1;
   }
+}
+
+/**
+ * `fixture` subcommand handler — drive the external fixture matrix
+ * against the materialized public tree.
+ *
+ * Flags:
+ *   --package <name>      Restrict the matrix to a single package.
+ *   --pm <id>             Restrict the matrix to a single package manager
+ *                         (`npm` | `pnpm` | `bun`). May repeat (e.g.
+ *                         `--pm npm --pm pnpm`).
+ *   --public-tree <path>  Override the default `.release/arki-public`
+ *                         path resolved against the workspace root.
+ *   --skip-install        Run pack + workspace-leak-check only — skip
+ *                         install / import probes. Useful for fast CI
+ *                         dry-runs.
+ *
+ * The handler also appends DOT-fixture forward-dependency stubs so the
+ * envelope documents what's planned for Tasks 9 / 10 / 11.5 — these
+ * appear as `skipped` runs with severity `info` error entries, never as
+ * `success`.
+ *
+ * Exit codes:
+ *   - 0 when every run succeeds.
+ *   - 1 on any failure (or if the public tree is missing).
+ */
+async function runFixtureHandler(args: ParsedCliArgs): Promise<number> {
+  const cwd = process.cwd();
+  const packageFilter = extractOption(args.rest, 'package');
+  const publicTreeOverride = extractOption(args.rest, 'public-tree');
+  const skipInstall = args.rest.includes('--skip-install');
+  const pmFilters = extractAllOptions(args.rest, 'pm');
+
+  const publicTreePath =
+    publicTreeOverride !== null
+      ? path.resolve(cwd, publicTreeOverride)
+      : path.join(cwd, '.release', 'arki-public');
+
+  const packageManagers: readonly PackageManagerId[] =
+    pmFilters.length > 0 ? pmFilters.filter(isPackageManagerId) : DEFAULT_PACKAGE_MANAGERS;
+
+  if (pmFilters.length > 0 && packageManagers.length === 0) {
+    const envelope = createEnvelope<FixtureRun, FixtureMatrixSummary>({
+      command: 'fixture',
+      status: 'failure',
+      summary: {
+        message: `No supported package manager in --pm filter: ${pmFilters.join(', ')}`,
+        totalRuns: 0,
+        successCount: 0,
+        failureCount: 0,
+        skippedCount: 0,
+        publicTreePath,
+      },
+      items: [],
+      errors: [
+        {
+          code: FIXTURE_ERROR_CODES.packageNotInTree,
+          severity: 'error',
+          message: `--pm must be one of: ${DEFAULT_PACKAGE_MANAGERS.join(', ')}`,
+          remediation: 'Pass --pm npm, --pm pnpm, or --pm bun (or omit the flag).',
+        },
+      ],
+    });
+    emitEnvelope(envelope, { json: args.json });
+    return 1;
+  }
+
+  const envelope = await runFixtureMatrix({
+    rootCwd: cwd,
+    publicTreePath,
+    packageManagers,
+    ...(packageFilter !== null ? { packageNames: [packageFilter] } : {}),
+    skipInstall,
+  });
+
+  // Append DOT fixture forward-dependency stubs so the envelope documents
+  // what's planned for Tasks 9 / 10 / 11.5. Only attach when no --package
+  // filter was supplied — operators auditing a single package shouldn't
+  // see unrelated stubs in the envelope.
+  if (packageFilter === null) {
+    const stubs = buildDotFixtureForwardStubRuns(packageManagers);
+    const merged = createEnvelope<FixtureRun, FixtureMatrixSummary>({
+      command: 'fixture',
+      status: envelope.status,
+      summary: {
+        ...envelope.summary,
+        totalRuns: envelope.summary.totalRuns + stubs.length,
+        skippedCount: envelope.summary.skippedCount + stubs.length,
+      },
+      items: [...envelope.items, ...stubs],
+      errors: [...envelope.errors, ...stubs.flatMap(s => s.errors)],
+    });
+    emitEnvelope(merged, { json: args.json });
+    return merged.status === 'failure' ? 1 : 0;
+  }
+
+  emitEnvelope(envelope, { json: args.json });
+  return envelope.status === 'failure' ? 1 : 0;
+}
+
+/** Extract every value passed via repeating `--<name> <value>` pairs. */
+function extractAllOptions(rest: readonly string[], name: string): readonly string[] {
+  const out: string[] = [];
+  for (let i = 0; i < rest.length; i += 1) {
+    if (rest[i] === `--${name}`) {
+      const next = rest[i + 1];
+      if (next !== undefined && !next.startsWith('-')) {
+        out.push(next);
+      }
+    }
+  }
+  return out;
+}
+
+function isPackageManagerId(value: string): value is PackageManagerId {
+  return value === 'npm' || value === 'pnpm' || value === 'bun';
 }
 
 /**

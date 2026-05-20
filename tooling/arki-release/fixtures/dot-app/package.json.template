@@ -1,0 +1,21 @@
+{
+  "name": "arki-dot-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Forward-dependency stub — see README.md. Replace FORWARD_TASK_* once Tasks 9 + 10 land.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "boot": "node --experimental-strip-types src/app.ts"
+  },
+  "dependencies": {
+    "@arki/dot": "FORWARD_TASK_9",
+    "@arki/env": "FORWARD_TASK_10",
+    "@arki/kv": "FORWARD_TASK_10"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^3"
+  }
+}

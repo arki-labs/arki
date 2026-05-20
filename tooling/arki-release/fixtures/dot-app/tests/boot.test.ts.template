@@ -1,0 +1,63 @@
+// FORWARD-DEPENDENCY: Task 9 + Task 10 fill in the real boot test once
+// @arki/dot has `defineApp` and the three adapters exist.
+//
+// FORWARD-DEPENDENCY: Task 11.5 adds the `dot new fixture-app` test
+// against the published `@arki/dot/cli`.
+//
+// Reference shape — DO NOT remove these comments until the file is
+// promoted from `.template` to `.ts`. They document the exact
+// assertions the fixture matrix will run once dependencies land.
+//
+// ```ts
+// import { describe, expect, it } from 'vitest';
+// import type { DotAppManifest, DotDiagnosticsSnapshot } from '@arki/dot';
+//
+// import { app } from '../src/app';
+//
+// describe('DOT fixture boot', () => {
+//   it('exposes app.manifest as DotAppManifest', () => {
+//     const manifest: DotAppManifest = app.manifest;
+//     expect(manifest.name).toBe('fixture');
+//     expect(manifest.adapters.length).toBeGreaterThanOrEqual(3);
+//   });
+//
+//   it('exposes app.diagnostics as DotDiagnosticsSnapshot with all five arrays', () => {
+//     const diagnostics: DotDiagnosticsSnapshot = app.diagnostics;
+//     // Even when no failures exist, every diagnostic category is an array.
+//     expect(Array.isArray(diagnostics.errors)).toBe(true);
+//     expect(Array.isArray(diagnostics.warnings)).toBe(true);
+//     expect(Array.isArray(diagnostics.notes)).toBe(true);
+//     expect(Array.isArray(diagnostics.suggestions)).toBe(true);
+//     expect(Array.isArray(diagnostics.recoveries)).toBe(true);
+//   });
+//
+//   it('matches the `dot explain --json` static graph', async () => {
+//     const { stdout } = await runDotCli(['explain', '--json']);
+//     expect(JSON.parse(stdout)).toEqual(app.manifest);
+//   });
+//
+//   it('matches the `dot doctor --json` snapshot', async () => {
+//     const { stdout } = await runDotCli(['doctor', '--json']);
+//     expect(JSON.parse(stdout)).toEqual(app.diagnostics);
+//   });
+//
+//   // Task 11.5:
+//   it('`dot new fixture-app --dry-run --json` previews exact file ops without writing', async () => {
+//     const { stdout, filesWritten } = await runDotCli(['new', 'fixture-app', '--dry-run', '--json']);
+//     expect(filesWritten).toEqual([]);
+//     expect(JSON.parse(stdout)).toMatchObject({ planned: expect.any(Array) });
+//   });
+//
+//   it('`dot new fixture-app` produces an installable, typechecking, testable, bootable app with AGENTS.md', async () => {
+//     // Runs `dot new` into a tempdir OUTSIDE the monorepo, then runs
+//     // `npm install && npm run typecheck && npm test && npm run boot`.
+//     // ...
+//   });
+// });
+// ```
+
+// Throw so an accidental promotion-without-impl falls over in the suite.
+throw new Error(
+  'DOT fixture boot test is not yet implementable — Tasks 9, 10, and 11.5 must land first. ' +
+    'Promote this file from `boot.test.ts.template` to `boot.test.ts` once the dependencies exist.',
+);

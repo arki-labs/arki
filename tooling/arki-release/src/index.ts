@@ -58,6 +58,15 @@ export type { BuildCopyPlanOptions, CopyPlanEntry } from './files';
 export { EXPORT_ERROR_CODES, exportPublicTree } from './export-public';
 
 export {
+  buildDotFixtureForwardStubRuns,
+  DEFAULT_PACKAGE_MANAGERS,
+  defaultProcessRunner,
+  FIXTURE_ERROR_CODES,
+  runFixtureMatrix,
+} from './fixture';
+export type { FixtureOptions, ProcessResult, ProcessRunner } from './fixture';
+
+export {
   DEFAULT_EXCLUDE_DIRS,
   DEFAULT_LEAK_PATTERNS,
   DEFAULT_SCAN_EXTENSIONS,
@@ -84,6 +93,13 @@ export type {
   ExportItemStatus,
   ExportOptions,
   ExportSummary,
+  FixtureMatrix,
+  FixtureMatrixSummary,
+  FixtureRun,
+  FixtureRunStatus,
+  FixtureStage,
+  FixtureStageName,
+  FixtureStageStatus,
   InventoryBlocker,
   LeakHit,
   LeakPattern,
@@ -96,6 +112,7 @@ export type {
   PackAuditResult,
   PackAuditRule,
   PackageClassification,
+  PackageManagerId,
   PackageWave,
   ParsedCliArgs,
   PublicMetadataDefaults,
