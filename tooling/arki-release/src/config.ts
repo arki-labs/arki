@@ -22,6 +22,7 @@ import path from 'node:path';
 import debugFactory from 'debug';
 
 import type {
+  LeakPattern,
   PublicMetadataDefaults,
   ReleaseConfig,
   ReleaseWave,
@@ -129,12 +130,57 @@ export function validateConfig(raw: unknown): ReleaseConfig {
 
   const publicMetadataDefaults = validateMetadataDefaults(record['publicMetadataDefaults']);
   const waves = validateWaves(record['waves']);
+  const leakPatterns = validateLeakPatterns(record['leakPatterns']);
 
   return {
     publicTreePath,
     publicMetadataDefaults,
     waves,
+    ...(leakPatterns !== undefined ? { leakPatterns } : {}),
   };
+}
+
+/**
+ * Validate the optional `leakPatterns` field. Returns `undefined` when
+ * the field is absent — the scanner then falls back to
+ * `DEFAULT_LEAK_PATTERNS`.
+ */
+function validateLeakPatterns(raw: unknown): readonly LeakPattern[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) {
+    throw new ReleaseConfigError(
+      CONFIG_ERROR_CODES.invalidShape,
+      '`leakPatterns` must be an array if defined.',
+    );
+  }
+  const out: LeakPattern[] = [];
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== 'object') {
+      throw new ReleaseConfigError(CONFIG_ERROR_CODES.invalidShape, 'Each leak pattern must be an object.');
+    }
+    const e = entry as Record<string, unknown>;
+    const id = e['id'];
+    const description = e['description'];
+    const pattern = e['pattern'];
+    const severity = e['severity'];
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new ReleaseConfigError(CONFIG_ERROR_CODES.invalidShape, 'Leak pattern `id` must be a non-empty string.');
+    }
+    if (typeof description !== 'string') {
+      throw new ReleaseConfigError(CONFIG_ERROR_CODES.invalidShape, `Leak pattern \`${id}\` is missing \`description\`.`);
+    }
+    if (!(pattern instanceof RegExp)) {
+      throw new ReleaseConfigError(CONFIG_ERROR_CODES.invalidShape, `Leak pattern \`${id}\`.pattern must be a RegExp.`);
+    }
+    if (severity !== 'error' && severity !== 'warning') {
+      throw new ReleaseConfigError(
+        CONFIG_ERROR_CODES.invalidShape,
+        `Leak pattern \`${id}\`.severity must be "error" or "warning".`,
+      );
+    }
+    out.push({ id, description, pattern, severity });
+  }
+  return out;
 }
 
 function validateMetadataDefaults(raw: unknown): PublicMetadataDefaults {

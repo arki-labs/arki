@@ -7,12 +7,24 @@
  * subcommand is an honest stub that returns `status: 'pending'` — the real
  * logic lands in Tasks 2-7.
  */
+import path from 'node:path';
+
 import debugFactory from 'debug';
 
 import { defaultConfigPath, loadConfig, ReleaseConfigError } from './config';
-import { runInventory } from './inventory';
+import { runInventory, type InventoryItem } from './inventory';
 import { createEnvelope, emitEnvelope } from './json-output';
-import type { ParsedCliArgs, ReleaseCommand, ReleaseCommandEnvelope } from './types';
+import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
+import { auditPack, PACK_ERROR_CODES } from './pack';
+import type {
+  LeakHit,
+  PackAuditResult,
+  ParsedCliArgs,
+  ReleaseCommand,
+  ReleaseCommandEnvelope,
+  ReleaseConfig,
+  ReleaseError,
+} from './types';
 
 const debug = debugFactory('arki:release:cli');
 
@@ -43,8 +55,8 @@ const SUBCOMMANDS: ReadonlyArray<{
   },
   {
     name: 'pack',
-    task: 'Task 3',
-    description: 'Resolve workspace:* / catalog: into concrete npm versions.',
+    task: 'Task 4',
+    description: 'Run npm pack --dry-run audits across public-candidate packages.',
   },
   {
     name: 'fixture',
@@ -224,9 +236,28 @@ export async function dispatch(args: ParsedCliArgs): Promise<number> {
     return runInventoryHandler(args.json);
   }
 
+  if (args.command === 'audit') {
+    return runAuditHandler(args);
+  }
+
+  if (args.command === 'pack') {
+    return runPackHandler(args);
+  }
+
   const envelope = buildStubEnvelope(args.command);
   emitEnvelope(envelope, { json: args.json });
   return 0;
+}
+
+/**
+ * Extract `--package <name>` / `--path <abs>` style flags from
+ * `args.rest`. Minimal — we only need a handful of options for now.
+ */
+function extractOption(rest: readonly string[], name: string): string | null {
+  const idx = rest.indexOf(`--${name}`);
+  if (idx === -1) return null;
+  const value = rest[idx + 1];
+  return value !== undefined && !value.startsWith('-') ? value : null;
 }
 
 /**
@@ -248,6 +279,331 @@ async function runInventoryHandler(json: boolean): Promise<number> {
     if (cause instanceof ReleaseConfigError) {
       const envelope = buildConfigErrorEnvelope('inventory', cause);
       emitEnvelope(envelope, { json });
+      return 1;
+    }
+    throw cause;
+  }
+}
+
+/** Per-package leak summary item emitted by the audit envelope. */
+interface AuditEnvelopeItem {
+  readonly name: string;
+  readonly manifestPath: string;
+  readonly classification: string;
+  readonly hitsByseverity: { readonly error: number; readonly warning: number };
+  readonly hits: readonly LeakHit[];
+}
+
+/** Aggregate summary for the audit envelope. */
+interface AuditSummary {
+  readonly message: string;
+  readonly packagesScanned: number;
+  readonly totalHits: number;
+  readonly byseverity: { readonly error: number; readonly warning: number };
+}
+
+/**
+ * Resolve the list of inventory items the `audit` / `pack` commands
+ * should operate on, based on `--package <name>` (single package) or
+ * `--path <abs>` (single directory).
+ *
+ * Returns null when the operator explicitly asked for a package that
+ * doesn't appear in the inventory — the handler converts that to a
+ * failure envelope.
+ */
+async function resolveAuditTargets(args: ParsedCliArgs): Promise<{
+  readonly config: ReleaseConfig;
+  readonly items: readonly InventoryItem[];
+  readonly cwd: string;
+  readonly inventoryEnvelope: ReleaseCommandEnvelope<InventoryItem, unknown>;
+} | { readonly error: ReleaseError }> {
+  const cwd = process.cwd();
+  const configPath = defaultConfigPath(cwd);
+  const config = await loadConfig(configPath);
+  const inventoryEnvelope = await runInventory({ cwd, config });
+
+  const packageFilter = extractOption(args.rest, 'package');
+  const pathFilter = extractOption(args.rest, 'path');
+
+  if (packageFilter !== null) {
+    const match = inventoryEnvelope.items.find(item => item.name === packageFilter);
+    if (match === undefined) {
+      return {
+        error: {
+          code: LEAK_ERROR_CODES.scanIoError,
+          severity: 'error',
+          message: `--package ${packageFilter} did not match any workspace package.`,
+          remediation: 'Run `bun release:arki inventory --json` to see the package list.',
+          target: packageFilter,
+        },
+      };
+    }
+    return { config, items: [match], cwd, inventoryEnvelope };
+  }
+
+  if (pathFilter !== null) {
+    // Synthesize a single item for the requested path.
+    const item: InventoryItem = {
+      name: path.basename(pathFilter),
+      version: '0.0.0',
+      manifestPath: path.relative(cwd, path.join(pathFilter, 'package.json')),
+      private: false,
+      wave: null,
+      classification: 'public-candidate',
+      blockers: [],
+    };
+    return { config, items: [item], cwd, inventoryEnvelope };
+  }
+
+  return { config, items: inventoryEnvelope.items, cwd, inventoryEnvelope };
+}
+
+/**
+ * `audit` subcommand handler — runs the leak scanner across the
+ * requested package set.
+ *
+ * Exit codes:
+ *   - 0 on success (no error-severity hits — warnings OK)
+ *   - 1 on failure (any error-severity hits)
+ */
+async function runAuditHandler(args: ParsedCliArgs): Promise<number> {
+  try {
+    const targets = await resolveAuditTargets(args);
+    if ('error' in targets) {
+      const envelope = createEnvelope<AuditEnvelopeItem, AuditSummary>({
+        command: 'audit',
+        status: 'failure',
+        summary: {
+          message: targets.error.message,
+          packagesScanned: 0,
+          totalHits: 0,
+          byseverity: { error: 0, warning: 0 },
+        },
+        items: [],
+        errors: [targets.error],
+      });
+      emitEnvelope(envelope, { json: args.json });
+      return 1;
+    }
+
+    const { items, cwd, config } = targets;
+    const patterns = config.leakPatterns ?? DEFAULT_LEAK_PATTERNS;
+    const auditAll = args.rest.includes('--all');
+
+    // Default policy: only audit packages we intend to publish — i.e.
+    // `public-candidate` and any wave-listed package currently blocked
+    // by a private flag, private dep, or future leak/build-shape audit.
+    // Pass `--all` to scan every package (private-only included).
+    const filtered =
+      args.rest.includes('--package') || args.rest.includes('--path') || auditAll
+        ? items
+        : items.filter(
+            i =>
+              i.classification === 'public-candidate' ||
+              i.classification === 'blocked-by-private-flag' ||
+              i.classification === 'blocked-by-private-dependency' ||
+              i.classification === 'blocked-by-leak' ||
+              i.classification === 'blocked-by-build-shape',
+          );
+
+    const auditItems: AuditEnvelopeItem[] = [];
+    const errors: ReleaseError[] = [];
+    let totalError = 0;
+    let totalWarning = 0;
+
+    for (const item of filtered) {
+      const packageDir = path.dirname(path.join(cwd, item.manifestPath));
+      const hits = await scanDirectory(packageDir, { patterns });
+      const errorCount = hits.filter(h => h.severity === 'error').length;
+      const warningCount = hits.filter(h => h.severity === 'warning').length;
+      totalError += errorCount;
+      totalWarning += warningCount;
+
+      auditItems.push({
+        name: item.name,
+        manifestPath: item.manifestPath,
+        classification: item.classification,
+        hitsByseverity: { error: errorCount, warning: warningCount },
+        hits,
+      });
+
+      for (const hit of hits) {
+        errors.push({
+          code: LEAK_ERROR_CODES.patternMatched,
+          severity: hit.severity === 'error' ? 'error' : 'warning',
+          message: `${item.name}: ${hit.description} at ${hit.sourcePath}:${hit.line.toString()}:${hit.column.toString()} — "${hit.matchedText}"`,
+          target: item.name,
+          remediation: 'Remove the leaked identifier or, if intentional, add a config override.',
+        });
+      }
+    }
+
+    const status: 'success' | 'warning' | 'failure' =
+      totalError > 0 ? 'failure' : totalWarning > 0 ? 'warning' : 'success';
+
+    const envelope = createEnvelope<AuditEnvelopeItem, AuditSummary>({
+      command: 'audit',
+      status,
+      summary: {
+        message:
+          totalError === 0 && totalWarning === 0
+            ? `Leak scan complete: ${filtered.length.toString()} packages scanned, no hits.`
+            : `Leak scan complete: ${filtered.length.toString()} packages, ${totalError.toString()} error hits, ${totalWarning.toString()} warning hits.`,
+        packagesScanned: filtered.length,
+        totalHits: totalError + totalWarning,
+        byseverity: { error: totalError, warning: totalWarning },
+      },
+      items: auditItems,
+      errors,
+    });
+
+    emitEnvelope(envelope, { json: args.json });
+    return status === 'failure' ? 1 : 0;
+  } catch (cause) {
+    if (cause instanceof ReleaseConfigError) {
+      const envelope = buildConfigErrorEnvelope('audit', cause);
+      emitEnvelope(envelope, { json: args.json });
+      return 1;
+    }
+    throw cause;
+  }
+}
+
+/** Per-package pack-audit summary item emitted by the pack envelope. */
+interface PackEnvelopeItem {
+  readonly name: string;
+  readonly manifestPath: string;
+  readonly classification: string;
+  readonly status: 'pass' | 'fail' | 'warn' | 'skipped';
+  readonly skipReason?: string;
+  readonly result?: PackAuditResult;
+}
+
+/** Aggregate summary for the pack envelope. */
+interface PackSummary {
+  readonly message: string;
+  readonly packagesAudited: number;
+  readonly bystatus: { readonly pass: number; readonly warn: number; readonly fail: number; readonly skipped: number };
+}
+
+/**
+ * `pack` subcommand handler — runs `npm pack --dry-run --json` and
+ * audits each `public-candidate` package.
+ *
+ * Only packages classified `public-candidate` are audited; everything
+ * else is reported as skipped with a reason so the envelope still
+ * documents that the package was considered.
+ *
+ * Exit codes:
+ *   - 0 on success (no fail entries)
+ *   - 1 on failure (any fail entries)
+ */
+async function runPackHandler(args: ParsedCliArgs): Promise<number> {
+  try {
+    const targets = await resolveAuditTargets(args);
+    if ('error' in targets) {
+      const envelope = createEnvelope<PackEnvelopeItem, PackSummary>({
+        command: 'pack',
+        status: 'failure',
+        summary: {
+          message: targets.error.message,
+          packagesAudited: 0,
+          bystatus: { pass: 0, warn: 0, fail: 0, skipped: 0 },
+        },
+        items: [],
+        errors: [targets.error],
+      });
+      emitEnvelope(envelope, { json: args.json });
+      return 1;
+    }
+
+    const { items, cwd } = targets;
+    const packItems: PackEnvelopeItem[] = [];
+    const errors: ReleaseError[] = [];
+    const counts = { pass: 0, warn: 0, fail: 0, skipped: 0 };
+
+    for (const item of items) {
+      if (item.classification !== 'public-candidate') {
+        counts.skipped += 1;
+        packItems.push({
+          name: item.name,
+          manifestPath: item.manifestPath,
+          classification: item.classification,
+          status: 'skipped',
+          skipReason: `classification=${item.classification} — only public-candidate packages are pack-audited.`,
+        });
+        continue;
+      }
+
+      const packageDir = path.dirname(path.join(cwd, item.manifestPath));
+      const auditResult = await auditPack(packageDir, {
+        manifest: { name: item.name, version: item.version },
+        isSourceDistributed: false,
+      });
+
+      if (!auditResult.ok) {
+        counts.fail += 1;
+        packItems.push({
+          name: item.name,
+          manifestPath: item.manifestPath,
+          classification: item.classification,
+          status: 'fail',
+        });
+        errors.push({
+          code: PACK_ERROR_CODES.packInvocationFailed,
+          severity: 'error',
+          message: `${item.name}: ${auditResult.error}`,
+          target: item.name,
+          remediation: 'Inspect the package directory and ensure `npm pack` succeeds locally.',
+        });
+        continue;
+      }
+
+      const result = auditResult.result;
+      counts[result.status] += 1;
+      packItems.push({
+        name: item.name,
+        manifestPath: item.manifestPath,
+        classification: item.classification,
+        status: result.status,
+        result,
+      });
+
+      for (const hit of result.ruleHits) {
+        errors.push({
+          code: PACK_ERROR_CODES.packAuditRuleFailed,
+          severity: hit.severity === 'error' ? 'error' : 'warning',
+          message: `${item.name}: [${hit.ruleId}] ${hit.reason}`,
+          target: item.name,
+          remediation: hit.description,
+        });
+      }
+    }
+
+    const status: 'success' | 'warning' | 'failure' =
+      counts.fail > 0 ? 'failure' : counts.warn > 0 ? 'warning' : 'success';
+
+    const envelope = createEnvelope<PackEnvelopeItem, PackSummary>({
+      command: 'pack',
+      status,
+      summary: {
+        message:
+          counts.fail === 0 && counts.warn === 0
+            ? `Pack audit complete: ${counts.pass.toString()} passed, ${counts.skipped.toString()} skipped.`
+            : `Pack audit complete: ${counts.pass.toString()} passed, ${counts.warn.toString()} warned, ${counts.fail.toString()} failed, ${counts.skipped.toString()} skipped.`,
+        packagesAudited: counts.pass + counts.warn + counts.fail,
+        bystatus: counts,
+      },
+      items: packItems,
+      errors,
+    });
+
+    emitEnvelope(envelope, { json: args.json });
+    return status === 'failure' ? 1 : 0;
+  } catch (cause) {
+    if (cause instanceof ReleaseConfigError) {
+      const envelope = buildConfigErrorEnvelope('pack', cause);
+      emitEnvelope(envelope, { json: args.json });
       return 1;
     }
     throw cause;

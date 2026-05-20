@@ -46,11 +46,40 @@ export type { ResolveCatalogResult } from './catalogs';
 
 export { MANIFEST_ERROR_CODES, materializeManifest } from './manifest';
 
+export {
+  DEFAULT_EXCLUDE_DIRS,
+  DEFAULT_LEAK_PATTERNS,
+  DEFAULT_SCAN_EXTENSIONS,
+  LEAK_ERROR_CODES,
+  NEUTRAL_ALLOW_PATTERNS,
+  scanDirectory,
+  scanFile,
+  scanText,
+} from './leaks';
+export type { ScanDirectoryOptions } from './leaks';
+
+export {
+  auditPack,
+  auditPackEntry,
+  DEFAULT_PACK_RULES,
+  PACK_ERROR_CODES,
+  runNpmPack,
+} from './pack';
+export type { NpmPackResult, NpmPackRunner, NpmPackRunOutput } from './pack';
+
 export type {
   CatalogTables,
   InventoryBlocker,
+  LeakHit,
+  LeakPattern,
+  LeakSeverity,
   MaterializationContext,
   MaterializationResult,
+  NpmPackEntry,
+  NpmPackFileEntry,
+  PackAuditContext,
+  PackAuditResult,
+  PackAuditRule,
   PackageClassification,
   PackageWave,
   ParsedCliArgs,

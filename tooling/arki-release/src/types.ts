@@ -162,6 +162,148 @@ export interface PublicMetadataDefaults {
 }
 
 /**
+ * Severity of a {@link LeakPattern} match.
+ *
+ * - `error` — a confirmed leak that MUST block publication (e.g.
+ *   `furculita.net`, private app name).
+ * - `warning` — an ambiguous match that needs human triage (e.g. `sudoku`
+ *   may legitimately appear in a games package).
+ */
+export type LeakSeverity = 'error' | 'warning';
+
+/**
+ * A single leak-detection pattern. Patterns are evaluated against every
+ * scanned text line; matches produce {@link LeakHit} entries. The
+ * `allowList` is per-pattern belt-and-braces — a top-level neutral allow
+ * list runs first, so most patterns won't need their own entries.
+ */
+export interface LeakPattern {
+  /** Stable identifier, e.g. `'personal-domain-furculita'`. */
+  readonly id: string;
+  /** Human-readable description, shown in envelope errors. */
+  readonly description: string;
+  /** The regex used to detect the leak. Case-insensitive by convention. */
+  readonly pattern: RegExp;
+  /** Match severity — `error` blocks publication, `warning` does not. */
+  readonly severity: LeakSeverity;
+  /**
+   * Optional per-pattern allow list. A pattern match whose `matchedText`
+   * matches any of these regexes is dropped. Mostly unused — defaults
+   * include a hard-coded neutral allow list (`example.com`, `acme`, …).
+   */
+  readonly allowList?: readonly RegExp[];
+}
+
+/**
+ * A single leak detection — produced by the scanner when a pattern
+ * matches in a scanned file.
+ */
+export interface LeakHit {
+  /** The {@link LeakPattern} that fired. */
+  readonly patternId: string;
+  /** Mirrored from the pattern for downstream filtering convenience. */
+  readonly severity: LeakSeverity;
+  /** Pattern description (human-readable). */
+  readonly description: string;
+  /** File the hit was found in (relative when possible). */
+  readonly sourcePath: string;
+  /** 1-indexed line number of the match. */
+  readonly line: number;
+  /** 1-indexed column number of the start of the match. */
+  readonly column: number;
+  /** The exact matched substring. */
+  readonly matchedText: string;
+  /** ~80 chars of trimmed surrounding context (one line). */
+  readonly snippet: string;
+}
+
+/**
+ * A single npm-pack audit rule. Rules are evaluated against the JSON
+ * output of `npm pack --dry-run --json` — one entry per package.
+ */
+export interface PackAuditRule {
+  /** Stable identifier, e.g. `'no-tests'`. */
+  readonly id: string;
+  /** Human-readable description, shown in envelope errors. */
+  readonly description: string;
+  /** Match severity. `error` blocks publication; `warning` does not. */
+  readonly severity: LeakSeverity;
+  /**
+   * Pure check. Returns `null` when the rule passes; a human-readable
+   * reason string when it fails. The implementation must not perform I/O.
+   */
+  readonly check: (entry: NpmPackEntry, context: PackAuditContext) => string | null;
+}
+
+/**
+ * A single file entry from `npm pack --dry-run --json` output.
+ *
+ * `mode` is the unix file mode as an integer; npm emits it for every
+ * file. We don't validate it but expose it so future rules can.
+ */
+export interface NpmPackFileEntry {
+  readonly path: string;
+  readonly size: number;
+  readonly mode: number;
+}
+
+/**
+ * A single entry in the `npm pack --dry-run --json` output array.
+ *
+ * Fields not consumed by our audit (e.g. `shasum`, `integrity`) are kept
+ * optional so we don't reject future npm versions that omit them.
+ */
+export interface NpmPackEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly version: string;
+  readonly filename: string;
+  readonly files: readonly NpmPackFileEntry[];
+  readonly entryCount: number;
+  readonly bundled: readonly string[];
+  readonly size: number;
+  readonly unpackedSize: number;
+  readonly shasum?: string;
+  readonly integrity?: string;
+}
+
+/**
+ * Context passed to every {@link PackAuditRule}. Carries the manifest +
+ * a flag saying whether the package is allowed to ship raw `.ts`.
+ *
+ * `isSourceDistributed` defaults to `false` initially — Task 8 may opt
+ * specific packages into `true` once their build shape supports it.
+ */
+export interface PackAuditContext {
+  readonly packageDir: string;
+  readonly manifest: { readonly name: string; readonly version: string };
+  readonly isSourceDistributed: boolean;
+}
+
+/**
+ * Result of auditing a single package's pack output.
+ *
+ * - `pass`   — no rule hits, ready to publish.
+ * - `warn`   — only warning-severity hits, can publish with caveats.
+ * - `fail`   — at least one error-severity hit, publication is blocked.
+ */
+export interface PackAuditResult {
+  readonly package: { readonly name: string; readonly version: string };
+  readonly status: 'pass' | 'fail' | 'warn';
+  readonly ruleHits: ReadonlyArray<{
+    readonly ruleId: string;
+    readonly severity: LeakSeverity;
+    readonly description: string;
+    readonly reason: string;
+  }>;
+  readonly totals: {
+    readonly fileCount: number;
+    readonly unpackedSize: number;
+    readonly packedSize: number;
+  };
+}
+
+/**
  * Top-level shape of `arki.release.config.ts`.
  *
  * Reserved fields (e.g. leak patterns for Task 4) are added as optional
@@ -175,6 +317,12 @@ export interface ReleaseConfig {
   readonly publicMetadataDefaults: PublicMetadataDefaults;
   /** Ordered wave list — Wave 1 first, last wave last. */
   readonly waves: readonly ReleaseWave[];
+  /**
+   * Optional override of the default leak-pattern list. When omitted the
+   * scanner uses {@link DEFAULT_LEAK_PATTERNS}. Useful for tests and for
+   * one-off audits that need to add or relax patterns.
+   */
+  readonly leakPatterns?: readonly LeakPattern[];
 }
 
 /**
