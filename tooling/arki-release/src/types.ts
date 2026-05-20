@@ -417,3 +417,64 @@ export interface MaterializationResult {
   readonly manifest: PublishableManifest;
   readonly errors: readonly ReleaseError[];
 }
+
+/**
+ * Options accepted by the public-tree exporter.
+ *
+ * `outputPath` defaults to `config.publicTreePath` resolved against
+ * `rootCwd`. The exporter enforces a path-safety guard: the resolved
+ * output path MUST live inside `rootCwd` — paths that escape (`..`,
+ * absolute paths outside the repo) are rejected with a structured error
+ * so we never wipe an arbitrary directory.
+ *
+ * `leakScan` is on by default. Disable only for diagnosis — the exporter
+ * records a loud warning in the envelope when it's bypassed.
+ *
+ * `includeBlockedByLeak` opts packages classified `blocked-by-leak`
+ * (Task 4) into the export attempt. The pre-output leak gate (when
+ * enabled) will still refuse them — the flag exists for operators who
+ * want a `--no-leak-scan` diagnostic dump of what would ship once the
+ * leaks are gone.
+ */
+export interface ExportOptions {
+  readonly rootCwd: string;
+  readonly outputPath?: string;
+  readonly config: ReleaseConfig;
+  readonly leakScan?: boolean;
+  readonly includeBlockedByLeak?: boolean;
+}
+
+/**
+ * Lifecycle status for a single export attempt.
+ */
+export type ExportItemStatus = 'exported' | 'skipped' | 'failed';
+
+/**
+ * A single package's export outcome.
+ *
+ * `errors` carries any `ReleaseError` records produced by the
+ * materializer or the pre-output leak gate — even on `exported` we may
+ * record warnings (e.g. missing-description) the caller wants to surface.
+ */
+export interface ExportItem {
+  readonly name: string;
+  readonly version: string;
+  readonly sourcePath: string;
+  readonly destPath: string;
+  readonly fileCount: number;
+  readonly status: ExportItemStatus;
+  readonly reason?: string;
+  readonly errors: readonly ReleaseError[];
+}
+
+/**
+ * Aggregate summary for the export envelope.
+ */
+export interface ExportSummary {
+  readonly message: string;
+  readonly totalCandidates: number;
+  readonly exported: number;
+  readonly skipped: number;
+  readonly failed: number;
+  readonly outputPath: string;
+}

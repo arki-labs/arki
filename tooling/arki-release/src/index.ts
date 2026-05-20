@@ -47,6 +47,17 @@ export type { ResolveCatalogResult } from './catalogs';
 export { MANIFEST_ERROR_CODES, materializeManifest } from './manifest';
 
 export {
+  buildCopyPlan,
+  DEFAULT_FILE_EXCLUDES,
+  DEFAULT_FILE_INCLUDES,
+  executeCopyPlan,
+  removeDirectory,
+} from './files';
+export type { BuildCopyPlanOptions, CopyPlanEntry } from './files';
+
+export { EXPORT_ERROR_CODES, exportPublicTree } from './export-public';
+
+export {
   DEFAULT_EXCLUDE_DIRS,
   DEFAULT_LEAK_PATTERNS,
   DEFAULT_SCAN_EXTENSIONS,
@@ -69,6 +80,10 @@ export type { NpmPackResult, NpmPackRunner, NpmPackRunOutput } from './pack';
 
 export type {
   CatalogTables,
+  ExportItem,
+  ExportItemStatus,
+  ExportOptions,
+  ExportSummary,
   InventoryBlocker,
   LeakHit,
   LeakPattern,

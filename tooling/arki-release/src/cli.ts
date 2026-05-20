@@ -12,11 +12,14 @@ import path from 'node:path';
 import debugFactory from 'debug';
 
 import { defaultConfigPath, loadConfig, ReleaseConfigError } from './config';
+import { EXPORT_ERROR_CODES, exportPublicTree } from './export-public';
 import { runInventory, type InventoryItem } from './inventory';
 import { createEnvelope, emitEnvelope } from './json-output';
 import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
 import { auditPack, PACK_ERROR_CODES } from './pack';
 import type {
+  ExportItem,
+  ExportSummary,
   LeakHit,
   PackAuditResult,
   ParsedCliArgs,
@@ -242,6 +245,10 @@ export async function dispatch(args: ParsedCliArgs): Promise<number> {
 
   if (args.command === 'pack') {
     return runPackHandler(args);
+  }
+
+  if (args.command === 'export-public') {
+    return runExportPublicHandler(args);
   }
 
   const envelope = buildStubEnvelope(args.command);
@@ -607,6 +614,77 @@ async function runPackHandler(args: ParsedCliArgs): Promise<number> {
       return 1;
     }
     throw cause;
+  }
+}
+
+/**
+ * `export-public` subcommand handler.
+ *
+ * Flags:
+ *   --output <path>             Override `config.publicTreePath`. Path
+ *                               must resolve inside the workspace root —
+ *                               the exporter refuses otherwise.
+ *   --no-leak-scan              Disable the pre-output leak gate. The
+ *                               exporter records a loud warning when
+ *                               this is set.
+ *   --include-blocked-by-leak   Attempt packages classified
+ *                               `blocked-by-leak` in addition to
+ *                               `public-candidate`. Useful for diagnosis.
+ *
+ * Exit codes:
+ *   - 0 when every candidate exports successfully.
+ *   - 1 on any failure.
+ */
+async function runExportPublicHandler(args: ParsedCliArgs): Promise<number> {
+  const cwd = process.cwd();
+  const configPath = defaultConfigPath(cwd);
+  const outputOverride = extractOption(args.rest, 'output');
+  const leakScan = !args.rest.includes('--no-leak-scan');
+  const includeBlockedByLeak = args.rest.includes('--include-blocked-by-leak');
+
+  try {
+    const config = await loadConfig(configPath);
+    const envelope = await exportPublicTree({
+      rootCwd: cwd,
+      config,
+      ...(outputOverride !== null ? { outputPath: outputOverride } : {}),
+      leakScan,
+      includeBlockedByLeak,
+    });
+    emitEnvelope(envelope, { json: args.json });
+    return envelope.status === 'failure' ? 1 : 0;
+  } catch (cause) {
+    if (cause instanceof ReleaseConfigError) {
+      const envelope = buildConfigErrorEnvelope('export-public', cause);
+      emitEnvelope(envelope, { json: args.json });
+      return 1;
+    }
+    // Last-resort guard: convert unexpected errors into a failure envelope
+    // so the operator sees the message via the standard channel.
+    const message = cause instanceof Error ? cause.message : String(cause);
+    const envelope = createEnvelope<ExportItem, ExportSummary>({
+      command: 'export-public',
+      status: 'failure',
+      summary: {
+        message: `Export failed: ${message}`,
+        totalCandidates: 0,
+        exported: 0,
+        skipped: 0,
+        failed: 0,
+        outputPath: outputOverride ?? '',
+      },
+      items: [],
+      errors: [
+        {
+          code: EXPORT_ERROR_CODES.materializationFailed,
+          severity: 'error',
+          message,
+          remediation: 'Inspect the stack trace and retry once the underlying issue is fixed.',
+        },
+      ],
+    });
+    emitEnvelope(envelope, { json: args.json });
+    return 1;
   }
 }
 
