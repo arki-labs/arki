@@ -35,12 +35,27 @@ export type {
   RunInventoryOptions,
 } from './inventory';
 
+export {
+  CATALOG_ERROR_CODES,
+  CatalogLoadError,
+  isCatalogRef,
+  loadCatalogs,
+  resolveCatalogRef,
+} from './catalogs';
+export type { ResolveCatalogResult } from './catalogs';
+
+export { MANIFEST_ERROR_CODES, materializeManifest } from './manifest';
+
 export type {
+  CatalogTables,
   InventoryBlocker,
+  MaterializationContext,
+  MaterializationResult,
   PackageClassification,
   PackageWave,
   ParsedCliArgs,
   PublicMetadataDefaults,
+  PublishableManifest,
   ReleaseCommand,
   ReleaseCommandEnvelope,
   ReleaseConfig,

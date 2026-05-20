@@ -191,3 +191,81 @@ export interface ParsedCliArgs {
   /** Remaining positional/option arguments for future subcommand options. */
   rest: string[];
 }
+
+/**
+ * Bun catalog tables extracted from the root `package.json`.
+ *
+ * - `default`: the `"catalog"` object — referenced from manifests as
+ *   `"catalog:"`.
+ * - `named`: the `"catalogs"` object — referenced as `"catalog:<name>"`,
+ *   keyed by catalog name then by package name.
+ *
+ * Frozen at load time. The downstream materializer treats both maps as
+ * read-only — never mutate.
+ */
+export interface CatalogTables {
+  readonly default: Readonly<Record<string, string>>;
+  readonly named: Readonly<Record<string, Readonly<Record<string, string>>>>;
+}
+
+/**
+ * Inputs to the manifest materializer.
+ *
+ * Pure — no I/O at all. Tests build this in-memory; the production caller
+ * (Task 5's export-public command) constructs it from `loadCatalogs(root)`
+ * + the inventory item map.
+ */
+export interface MaterializationContext {
+  /** Catalog tables resolved from the root `package.json`. */
+  readonly catalogs: CatalogTables;
+  /** Public ARKI workspace versions, keyed by `@arki/*` package name. */
+  readonly workspaceVersions: ReadonlyMap<string, string>;
+  /** ARKI workspace packages marked `"private": true`. */
+  readonly privateArkiPackages: ReadonlySet<string>;
+  /** Repository/license/homepage/bugs/keywords defaults from the release config. */
+  readonly metadataDefaults: PublicMetadataDefaults;
+}
+
+/**
+ * A publishable `package.json` shape — what would be written to disk by
+ * Task 5 once Task 3 has resolved every workspace/catalog reference.
+ *
+ * Field order in the output JSON is preserved by the materializer so diffs
+ * against the source manifest are reviewable.
+ */
+export interface PublishableManifest {
+  readonly name: string;
+  readonly version: string;
+  readonly description: string;
+  readonly license: string;
+  readonly repository: { readonly type: string; readonly url: string };
+  readonly homepage: string;
+  readonly bugs: { readonly url: string };
+  readonly keywords: readonly string[];
+  readonly type?: 'module' | 'commonjs';
+  readonly sideEffects?: boolean | readonly string[];
+  readonly exports?: Readonly<Record<string, unknown>>;
+  readonly main?: string;
+  readonly module?: string;
+  readonly types?: string;
+  readonly files?: readonly string[];
+  readonly dependencies?: Readonly<Record<string, string>>;
+  readonly peerDependencies?: Readonly<Record<string, string>>;
+  readonly optionalDependencies?: Readonly<Record<string, string>>;
+  readonly peerDependenciesMeta?: Readonly<Record<string, { readonly optional?: boolean }>>;
+  readonly bundleDependencies?: readonly string[];
+  readonly publishConfig: Readonly<Record<string, unknown>>;
+  readonly engines?: Readonly<Record<string, string>>;
+}
+
+/**
+ * Result returned by the manifest materializer.
+ *
+ * The function is pure — errors are returned, not thrown. The caller
+ * decides on exit code / abort behaviour. Fatal errors (severity
+ * `'error'`) signal that the manifest must not be published as-is.
+ */
+export interface MaterializationResult {
+  readonly manifest: PublishableManifest;
+  readonly errors: readonly ReleaseError[];
+}
