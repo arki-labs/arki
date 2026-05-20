@@ -1,11 +1,10 @@
 /**
- * Time-source abstraction — the single boundary across the monorepo where
+ * Time-source abstraction — the single boundary where
  * "what time is it?" is answered.
  *
  * Inject a `Clock` wherever code needs the current time so tests can swap in
- * `MockClock` and deterministically simulate long waits (F-01 72h cooling
- * windows, F-04 7-day akrasia gates, F-11 daily crons, F-12 regime-shift
- * detection). See evervest TODOS.md T-01 for the motivating context.
+ * `MockClock` and deterministically simulate long waits (cooling windows,
+ * delayed gates, daily crons, regime-shift detection).
  */
 export type Clock = {
   now(): Date;

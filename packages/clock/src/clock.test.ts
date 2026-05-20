@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { MockClock, SystemClock } from './clock';
+import { MockClock, SystemClock } from './clock.js';
 
 describe('SystemClock', () => {
   it('returns the current system time within a tight window', () => {
@@ -72,7 +72,7 @@ describe('MockClock', () => {
     expect(clock.now().toISOString()).toBe('2026-01-01T00:00:00.000Z');
   });
 
-  it('supports the 72h cooling-window use case (F-01 Codex Finding 12)', () => {
+  it('supports advancing across a 72h window deterministically', () => {
     const start = new Date('2026-04-21T12:00:00.000Z');
     const clock = new MockClock(start);
     const sevenTwoHoursMs = 72 * 60 * 60 * 1000;

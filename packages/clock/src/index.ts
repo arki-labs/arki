@@ -1,1 +1,1 @@
-export { type Clock, MockClock, SystemClock } from './clock';
+export { type Clock, MockClock, SystemClock } from './clock.js';
