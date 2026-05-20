@@ -1,37 +1,68 @@
 {
   "name": "@arki/ts",
   "version": "0.1.0",
-  "private": true,
+  "description": "TypeScript utility types — Prettify, DeepPartial, SnakeToCamel, RecordToPath, and other type helpers.",
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-dev/arki.git",
+    "directory": "packages/ts"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-dev/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "types",
+    "type-utilities",
+    "prettify",
+    "deep-partial"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
   "exports": {
-    "./*": {
-      "types": "./dist/src/*.d.ts",
-      "import": "./src/*.ts",
-      "node": "./src/*.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./prettify": {
+      "types": "./dist/prettify.d.ts",
+      "import": "./dist/prettify.js",
+      "default": "./dist/prettify.js"
+    },
+    "./utils": {
+      "types": "./dist/utils.d.ts",
+      "import": "./dist/utils.js",
+      "default": "./dist/utils.js"
     },
     "./package.json": "./package.json"
   },
-  "typesVersions": {
-    "*": {
-      "*": [
-        "src/*"
-      ]
-    }
-  },
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*"
-  },
-  "sideEffects": false
+    "@arki/vitest-config": "workspace:*",
+    "typescript": "catalog:"
+  }
 }
