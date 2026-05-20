@@ -108,14 +108,22 @@ function collectArkiWorkspaceDeps(manifest: ParsedManifest, knownNames: Readonly
 }
 
 /**
- * Walk the graph starting from `root` (inclusive) and collect every
- * transitively reachable `@arki/*` workspace dep. Cycles are tolerated —
- * a visited set prevents infinite recursion.
+ * Collect every `@arki/*` workspace package reachable from `root` via
+ * `dependencies` / `peerDependencies` / `optionalDependencies` edges.
+ *
+ * Contract:
+ *   - `root` itself is **never** included in the result, even when `root`
+ *     reaches itself via a cycle. Callers asking "what does X depend on?"
+ *     never want X in the answer.
+ *   - Cycles are tolerated — a visited set prevents infinite recursion.
+ *   - The returned order is the order packages were first reached during a
+ *     depth-first walk; it is deterministic per input but is not a
+ *     topological sort.
  *
  * Used by the inventory command to determine whether a public-candidate
  * pulls in any private packages anywhere in its dep chain.
  */
-export function collectTransitiveDeps(graph: DependencyGraph, root: string): readonly string[] {
+export function collectReachableArkiDeps(graph: DependencyGraph, root: string): readonly string[] {
   const visited = new Set<string>();
   const ordered: string[] = [];
 
@@ -126,6 +134,7 @@ export function collectTransitiveDeps(graph: DependencyGraph, root: string): rea
     const node = graph.byName.get(next);
     if (node === undefined) continue;
     for (const dep of node.dependsOn) {
+      if (dep === root) continue; // `root` itself is never included in the result.
       if (visited.has(dep)) continue;
       visited.add(dep);
       ordered.push(dep);

@@ -80,23 +80,38 @@ export interface ReleaseCommandEnvelope<TItem = unknown, TSummary = unknown> {
  * commands (audit, export-public, scorecard) can consume the type.
  *
  * - `public-candidate` — wave-allowlisted, `private: false`, no private deps
- * - `private-only` — internal package, no intent to publish
+ * - `private-only` — `private: true` AND not allowlisted in any wave (the
+ *   intended internal-forever case)
+ * - `unassigned` — `private: false` but not allowlisted in any wave; an
+ *   ambiguous state that emits a warning (INV_E004) so a maintainer can
+ *   either add it to a wave or flip `private: true`
  * - `blocked-by-private-flag` — wave-allowlisted but still `private: true`
  * - `blocked-by-private-dependency` — wave-allowlisted but transitively
  *   depends on a `private: true` ARKI workspace package
  * - `blocked-by-leak` — reserved for Task 4 (leak scanner)
  * - `blocked-by-build-shape` — reserved for Task 5 (build-shape audit)
  *
- * Task 2 only emits the first four states; the leak/build-shape labels
- * exist here so later commands can extend without breaking the type seam.
+ * Task 2 emits the first five states; the leak/build-shape labels exist
+ * here so later commands can extend without breaking the type seam.
  */
 export type PackageClassification =
   | 'public-candidate'
   | 'private-only'
+  | 'unassigned'
   | 'blocked-by-private-flag'
   | 'blocked-by-private-dependency'
   | 'blocked-by-leak'
   | 'blocked-by-build-shape';
+
+/**
+ * A single blocker entry attached to an {@link InventoryItem}. Shared
+ * shape used both inside the inventory command and on the item type.
+ */
+export interface InventoryBlocker {
+  readonly code: string;
+  readonly reason: string;
+  readonly target?: string;
+}
 
 /**
  * Coarse-grained legacy label retained for backwards compatibility with

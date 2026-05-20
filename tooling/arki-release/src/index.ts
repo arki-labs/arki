@@ -17,7 +17,7 @@ export { CONFIG_ERROR_CODES, defaultConfigPath, loadConfig, ReleaseConfigError, 
 
 export {
   buildDependencyGraph,
-  collectTransitiveDeps,
+  collectReachableArkiDeps,
 } from './dependency-graph';
 export type { DependencyGraph, DependencyNode } from './dependency-graph';
 
@@ -36,6 +36,7 @@ export type {
 } from './inventory';
 
 export type {
+  InventoryBlocker,
   PackageClassification,
   PackageWave,
   ParsedCliArgs,

@@ -26,10 +26,11 @@ import debugFactory from 'debug';
 
 import {
   buildDependencyGraph,
-  collectTransitiveDeps,
+  collectReachableArkiDeps,
 } from './dependency-graph';
 import { createEnvelope } from './json-output';
 import type {
+  InventoryBlocker,
   PackageClassification,
   ReleaseCommandEnvelope,
   ReleaseConfig,
@@ -49,6 +50,8 @@ export const INVENTORY_ERROR_CODES = {
   privateDependencyBlocker: 'INV_E003',
   /** Public manifest but not allowlisted in any wave (warning). */
   unclassifiedPublicManifest: 'INV_E004',
+  /** Wave references a workspace package that does not exist (warning). */
+  waveReferencesMissingPackage: 'INV_E005',
 } as const;
 
 /** A parsed manifest (a thin wrapper around the on-disk JSON shape). */
@@ -74,11 +77,7 @@ export interface InventoryItem {
   readonly private: boolean;
   readonly wave: ReleaseWaveId | null;
   readonly classification: PackageClassification;
-  readonly blockers: ReadonlyArray<{
-    readonly code: string;
-    readonly reason: string;
-    readonly target?: string;
-  }>;
+  readonly blockers: readonly InventoryBlocker[];
 }
 
 /** Aggregate summary for the inventory envelope. */
@@ -246,6 +245,41 @@ export interface ClassifyManifestsOptions {
 }
 
 /**
+ * Type-level exhaustiveness guard. If a future task adds a new variant to
+ * {@link PackageClassification} without updating the switch in
+ * {@link classifyManifests}, the compiler will refuse to call this with the
+ * unhandled variant — the function expects `never`.
+ */
+function assertNever(x: never): never {
+  throw new Error(`Unhandled classification case: ${String(x)}`);
+}
+
+/**
+ * Decide the classification label for a single manifest based on its
+ * `private` flag, its wave assignment, and any private dep blockers found
+ * earlier. Pure helper — no side effects, no error emission. The caller
+ * uses the returned label to drive the error/blocker arrays.
+ *
+ * Reserved labels (`blocked-by-leak`, `blocked-by-build-shape`) are NOT
+ * produced here — those belong to Tasks 4 and 5. Listing them in the
+ * union keeps the seam stable so future tasks can extend without
+ * touching this function's signature.
+ */
+function decideClassification(opts: {
+  readonly manifest: ParsedManifest;
+  readonly wave: ReleaseWaveId | null;
+  readonly privateDepBlockers: readonly string[];
+}): PackageClassification {
+  const { manifest, wave, privateDepBlockers } = opts;
+  if (wave === null) {
+    return manifest.private ? 'private-only' : 'unassigned';
+  }
+  if (manifest.private) return 'blocked-by-private-flag';
+  if (privateDepBlockers.length > 0) return 'blocked-by-private-dependency';
+  return 'public-candidate';
+}
+
+/**
  * Classify every parsed manifest using the wave allowlist + dep graph.
  * Pure function — no disk access. Splitting it out lets us unit-test
  * classification without filesystem fixtures.
@@ -261,48 +295,55 @@ export function classifyManifests(
 
   for (const manifest of opts.manifests) {
     const wave = waveLookup.get(manifest.name) ?? null;
-    const blockers: Array<{ code: string; reason: string; target?: string }> = [];
-    let classification: PackageClassification;
+    const blockers: InventoryBlocker[] = [];
 
-    if (wave === null) {
-      if (manifest.private) {
-        classification = 'private-only';
-      } else {
-        // Public manifest with no wave home — warn, but not a blocker.
-        classification = 'private-only';
-        const warn: ReleaseError = {
+    // Compute private dep blockers up-front so the decision function has
+    // all the inputs it needs and the switch below can stay shallow.
+    let privateDepBlockers: readonly string[] = [];
+    if (wave !== null && !manifest.private) {
+      const reachable = collectReachableArkiDeps(graph, manifest.name);
+      const offenders: string[] = [];
+      for (const depName of reachable) {
+        const depNode = graph.byName.get(depName);
+        if (depNode !== undefined && depNode.manifest.private) {
+          offenders.push(depName);
+        }
+      }
+      privateDepBlockers = offenders;
+    }
+
+    const classification = decideClassification({ manifest, wave, privateDepBlockers });
+
+    switch (classification) {
+      case 'public-candidate':
+      case 'private-only':
+        // No diagnostics — the intended happy paths.
+        break;
+      case 'unassigned': {
+        errors.push({
           code: INVENTORY_ERROR_CODES.unclassifiedPublicManifest,
           severity: 'warning',
           message: `${manifest.name} is not \`private: true\` but is not allowlisted for any release wave.`,
           target: manifest.name,
-          remediation: 'Add it to a wave in arki.release.config.ts, or set `"private": true` in its package.json.',
-        };
-        errors.push(warn);
+          remediation:
+            'Add it to a wave in arki.release.config.ts, or set `"private": true` in its package.json.',
+        });
+        break;
       }
-    } else if (manifest.private) {
-      classification = 'blocked-by-private-flag';
-      const reason = `Wave \`${wave}\` lists ${manifest.name}, but its package.json still has \`"private": true\`.`;
-      blockers.push({ code: INVENTORY_ERROR_CODES.privateFlagBlocker, reason });
-      errors.push({
-        code: INVENTORY_ERROR_CODES.privateFlagBlocker,
-        severity: 'error',
-        message: reason,
-        target: manifest.name,
-        remediation: 'Drop the `private` flag once the package is publish-ready (Task 8).',
-      });
-    } else {
-      // Public + wave-allowlisted — check for private ARKI deps.
-      const transitiveDeps = collectTransitiveDeps(graph, manifest.name);
-      const privateDeps: string[] = [];
-      for (const depName of transitiveDeps) {
-        const depNode = graph.byName.get(depName);
-        if (depNode !== undefined && depNode.manifest.private) {
-          privateDeps.push(depName);
-        }
+      case 'blocked-by-private-flag': {
+        const reason = `Wave \`${wave!}\` lists ${manifest.name}, but its package.json still has \`"private": true\`.`;
+        blockers.push({ code: INVENTORY_ERROR_CODES.privateFlagBlocker, reason });
+        errors.push({
+          code: INVENTORY_ERROR_CODES.privateFlagBlocker,
+          severity: 'error',
+          message: reason,
+          target: manifest.name,
+          remediation: 'Drop the `private` flag once the package is publish-ready (Task 8).',
+        });
+        break;
       }
-      if (privateDeps.length > 0) {
-        classification = 'blocked-by-private-dependency';
-        for (const offender of privateDeps) {
+      case 'blocked-by-private-dependency': {
+        for (const offender of privateDepBlockers) {
           const reason = `${manifest.name} depends on private package ${offender}.`;
           blockers.push({
             code: INVENTORY_ERROR_CODES.privateDependencyBlocker,
@@ -317,9 +358,15 @@ export function classifyManifests(
             remediation: `Promote ${offender} to public first, or remove the dep.`,
           });
         }
-      } else {
-        classification = 'public-candidate';
+        break;
       }
+      case 'blocked-by-leak':
+      case 'blocked-by-build-shape':
+        // Reserved for Tasks 4 and 5. Task 2 never produces these, but
+        // listing them here keeps the switch exhaustive.
+        break;
+      default:
+        assertNever(classification);
     }
 
     items.push({
@@ -331,6 +378,25 @@ export function classifyManifests(
       classification,
       blockers,
     });
+  }
+
+  // Detect waves that reference workspace packages we never discovered.
+  // Warning (not error): Task 8 may legitimately list a package in a wave
+  // before it physically exists in the workspace. This surfaces the gap
+  // without blocking the inventory.
+  const discoveredNames = new Set(opts.manifests.map(m => m.name));
+  for (const wave of opts.config.waves) {
+    for (const pkgName of wave.packages) {
+      if (!discoveredNames.has(pkgName)) {
+        errors.push({
+          code: INVENTORY_ERROR_CODES.waveReferencesMissingPackage,
+          severity: 'warning',
+          message: `Wave \`${wave.id}\` references \`${pkgName}\` but no workspace manifest with that name was found.`,
+          remediation: `Either create the package or remove it from the \`${wave.id}\` wave in arki.release.config.ts.`,
+          target: pkgName,
+        });
+      }
+    }
   }
 
   const byClassification: Record<string, number> = {};

@@ -54,14 +54,7 @@ export class ReleaseConfigError extends Error {
   }
 }
 
-/**
- * Resolve the default config path (`arki.release.config.ts` at the repo
- * root). The repo root is detected by walking up from this file until we
- * find the root `package.json` whose `name` is `arki`.
- *
- * Falls back to `process.cwd()` if the walk fails — useful for tests
- * running in temp dirs.
- */
+/** Resolve the default config path: `<cwd>/arki.release.config.ts`. */
 export function defaultConfigPath(cwd: string = process.cwd()): string {
   return path.join(cwd, 'arki.release.config.ts');
 }
@@ -221,6 +214,16 @@ const VALID_WAVE_IDS: ReadonlySet<ReleaseWaveId> = new Set<ReleaseWaveId>([
   'specialized',
 ]);
 
+/**
+ * User-defined type guard that narrows an arbitrary string to the
+ * {@link ReleaseWaveId} union. The internal `as ReleaseWaveId` is a
+ * contained, intentional cast — it's only used for the membership check
+ * against {@link VALID_WAVE_IDS}.
+ */
+function isReleaseWaveId(v: string): v is ReleaseWaveId {
+  return VALID_WAVE_IDS.has(v as ReleaseWaveId);
+}
+
 function validateWaves(raw: unknown): readonly ReleaseWave[] {
   if (!Array.isArray(raw) || raw.length === 0) {
     throw new ReleaseConfigError(
@@ -238,7 +241,7 @@ function validateWaves(raw: unknown): readonly ReleaseWave[] {
     const id = rec['id'];
     const label = rec['label'];
     const packages = rec['packages'];
-    if (typeof id !== 'string' || !(VALID_WAVE_IDS as ReadonlySet<string>).has(id)) {
+    if (typeof id !== 'string' || !isReleaseWaveId(id)) {
       throw new ReleaseConfigError(
         CONFIG_ERROR_CODES.invalidShape,
         `Wave \`id\` must be one of: ${[...VALID_WAVE_IDS].join(', ')}.`,
@@ -271,9 +274,9 @@ function validateWaves(raw: unknown): readonly ReleaseWave[] {
           `Package \`${pkg}\` appears in both \`${prior}\` and \`${id}\` waves.`,
         );
       }
-      seenPackages.set(pkg, id as ReleaseWaveId);
+      seenPackages.set(pkg, id);
     }
-    result.push({ id: id as ReleaseWaveId, label, packages: narrowed });
+    result.push({ id, label, packages: narrowed });
   }
   return result;
 }

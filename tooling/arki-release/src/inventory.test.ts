@@ -15,7 +15,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { buildDependencyGraph, collectTransitiveDeps } from './dependency-graph';
+import { buildDependencyGraph, collectReachableArkiDeps } from './dependency-graph';
 import { classifyManifests, runInventory } from './inventory';
 import type { ReleaseConfig } from './types';
 
@@ -72,7 +72,10 @@ describe('runInventory', () => {
     expect(item.classification).toBe('public-candidate');
     expect(item.wave).toBe('foundation');
     expect(item.blockers).toHaveLength(0);
-    expect(env.errors).toHaveLength(0);
+    // The fixture wave lists other packages we haven't written — those produce
+    // INV_E005 warnings. We assert specifically that no blocker-grade errors fire.
+    expect(env.errors.filter(e => e.severity === 'error')).toHaveLength(0);
+    expect(env.errors.find(e => e.code === 'INV_E004')).toBeUndefined();
   });
 
   it('classifies a private wave-allowlisted package as blocked-by-private-flag and fails', async () => {
@@ -138,12 +141,15 @@ describe('runInventory', () => {
     expect(env.items[0]!.name).toBe('@arki/assert');
   });
 
-  it('emits an unclassified-public-manifest warning but does not fail', async () => {
+  it('emits an unclassified-public-manifest warning and labels the package `unassigned`', async () => {
     writeManifest(tmp, 'packages/orphan', { name: '@arki/orphan', version: '1.0.0' });
     const env = await runInventory({ cwd: tmp, config: baseConfig });
     expect(env.status).toBe('success');
     expect(env.items).toHaveLength(1);
-    expect(env.items[0]!.wave).toBeNull();
+    const item = env.items[0]!;
+    expect(item.wave).toBeNull();
+    expect(item.private).toBe(false);
+    expect(item.classification).toBe('unassigned');
     const warn = env.errors.find(e => e.code === 'INV_E004');
     expect(warn).toBeDefined();
     expect(warn!.severity).toBe('warning');
@@ -155,6 +161,27 @@ describe('runInventory', () => {
     expect(env.status).toBe('success');
     expect(env.items[0]!.classification).toBe('private-only');
     expect(env.errors.filter(e => e.code === 'INV_E004')).toHaveLength(0);
+  });
+
+  it('emits INV_E005 (warning) when a wave references a workspace package that does not exist', async () => {
+    // Only @arki/assert is on disk; the wave also lists @arki/contracts and @arki/logger.
+    writeManifest(tmp, 'packages/assert', { name: '@arki/assert', version: '1.0.0' });
+    const env = await runInventory({ cwd: tmp, config: baseConfig });
+    expect(env.status).toBe('success'); // warnings don't fail the gate
+    const missing = env.errors.filter(e => e.code === 'INV_E005');
+    expect(missing.map(e => e.target).sort()).toEqual(['@arki/contracts', '@arki/dot', '@arki/logger']);
+    for (const m of missing) {
+      expect(m.severity).toBe('warning');
+    }
+  });
+
+  it('does not emit INV_E005 when every wave package is present in the workspace', async () => {
+    writeManifest(tmp, 'packages/assert', { name: '@arki/assert', version: '1.0.0' });
+    writeManifest(tmp, 'packages/contracts', { name: '@arki/contracts', version: '1.0.0' });
+    writeManifest(tmp, 'packages/logger', { name: '@arki/logger', version: '1.0.0' });
+    writeManifest(tmp, 'packages/dot', { name: '@arki/dot', version: '1.0.0' });
+    const env = await runInventory({ cwd: tmp, config: baseConfig });
+    expect(env.errors.filter(e => e.code === 'INV_E005')).toHaveLength(0);
   });
 });
 
@@ -168,14 +195,16 @@ describe('classifyManifests (pure)', () => {
         { manifestPath: 'packages/b/package.json', name: '@arki/contracts', version: '1.0.0', private: true },
         { manifestPath: 'packages/c/package.json', name: '@arki/dot', version: '1.0.0', private: false },
         { manifestPath: 'packages/d/package.json', name: '@arki/internal', version: '1.0.0', private: true },
+        { manifestPath: 'packages/e/package.json', name: '@arki/orphan', version: '1.0.0', private: false },
       ],
     });
     expect(env.summary.byClassification['public-candidate']).toBe(2);
     expect(env.summary.byClassification['blocked-by-private-flag']).toBe(1);
     expect(env.summary.byClassification['private-only']).toBe(1);
+    expect(env.summary.byClassification['unassigned']).toBe(1);
     expect(env.summary.byWave['foundation']).toBe(2);
     expect(env.summary.byWave['dot-kernel']).toBe(1);
-    expect(env.summary.byWave['unassigned']).toBe(1);
+    expect(env.summary.byWave['unassigned']).toBe(2);
   });
 });
 
@@ -214,23 +243,27 @@ describe('buildDependencyGraph', () => {
     expect(graph.byName.get('@arki/a')!.dependsOn).toEqual([]);
   });
 
-  it('collectTransitiveDeps follows the chain', () => {
+  it('collectReachableArkiDeps follows the chain', () => {
     const graph = buildDependencyGraph([
       { manifestPath: 'a/package.json', name: '@arki/a', version: '1.0.0', private: false, dependencies: { '@arki/b': 'workspace:*' } },
       { manifestPath: 'b/package.json', name: '@arki/b', version: '1.0.0', private: false, dependencies: { '@arki/c': 'workspace:*' } },
       { manifestPath: 'c/package.json', name: '@arki/c', version: '1.0.0', private: true },
     ]);
-    const deps = collectTransitiveDeps(graph, '@arki/a');
+    const deps = collectReachableArkiDeps(graph, '@arki/a');
     expect(deps).toContain('@arki/b');
     expect(deps).toContain('@arki/c');
+    // `root` itself is never included.
+    expect(deps).not.toContain('@arki/a');
   });
 
-  it('tolerates cycles without infinite looping', () => {
+  it('tolerates cycles without infinite looping and excludes `root` from the result', () => {
     const graph = buildDependencyGraph([
       { manifestPath: 'a/package.json', name: '@arki/a', version: '1.0.0', private: false, dependencies: { '@arki/b': 'workspace:*' } },
       { manifestPath: 'b/package.json', name: '@arki/b', version: '1.0.0', private: false, dependencies: { '@arki/a': 'workspace:*' } },
     ]);
-    const deps = collectTransitiveDeps(graph, '@arki/a');
-    expect([...deps].sort()).toEqual(['@arki/a', '@arki/b']);
+    const deps = collectReachableArkiDeps(graph, '@arki/a');
+    // Cycle is tolerated; `root` (@arki/a) is never included even though it is reachable via @arki/b.
+    expect([...deps].sort()).toEqual(['@arki/b']);
+    expect(deps).not.toContain('@arki/a');
   });
 });
