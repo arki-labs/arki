@@ -33,6 +33,7 @@
  *     monorepo (workspace-resolution leak).
  *   - `FIX_E008` — forward-dependency stub (run skipped pending Tasks 9/10/11.5).
  *   - `FIX_E009` — requested package not present in the public tree.
+ *   - `FIX_E010` — invalid CLI argument (e.g. unrecognized `--pm` value).
  */
 
 import { mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -65,6 +66,7 @@ export const FIXTURE_ERROR_CODES = {
   workspaceResolutionLeak: 'FIX_E007',
   forwardDependencyStub: 'FIX_E008',
   packageNotInTree: 'FIX_E009',
+  invalidCliArgument: 'FIX_E010',
 } as const;
 
 /** All package managers the matrix supports, in declaration order. */
@@ -263,6 +265,21 @@ async function workspaceLeakCheck(
     };
   }
 
+  /**
+   * Defence-in-depth: scan raw tarball bytes for workspace/catalog tokens.
+   *
+   * Note: `npm pack` produces gzipped `.tgz` files, so this scan rarely
+   * fires in practice — the literal substring `"workspace:"` won't appear
+   * in compressed bytes. The PRIMARY verifier is the source-manifest check
+   * above (~line 252); this is a belt-and-braces backstop for the
+   * uncompressed-tarball edge case (e.g. custom registries that ship raw
+   * `.tar`, or a future pack flow that skips compression).
+   *
+   * If we ever switch to a real tar reader (parsing entries instead of
+   * raw bytes), this scan should become an entry-level "did the
+   * materializer fail to rewrite this manifest" check on each
+   * `package.json` inside the archive.
+   */
   try {
     const tarballBytes = await readFile(tarballPath);
     const text = tarballBytes.toString('binary');
