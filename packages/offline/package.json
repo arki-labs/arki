@@ -98,12 +98,16 @@
     "@arki/vitest-config": "workspace:*",
     "@orpc/server": "catalog:backend",
     "@tanstack/react-query": "catalog:tanstack/react-query",
+    "@testing-library/react": "catalog:testing",
     "@types/node": "catalog:node",
     "@types/pg": "catalog:drizzle",
     "@types/react": "catalog:react",
+    "@vitejs/plugin-react": "catalog:",
     "drizzle-orm": "catalog:drizzle",
+    "jsdom": "catalog:text-processing",
     "pg": "catalog:drizzle",
     "react": "catalog:react",
+    "react-dom": "catalog:react",
     "typescript": "catalog:"
   }
 }

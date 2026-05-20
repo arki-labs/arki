@@ -18,21 +18,33 @@ export interface OnlineStatus {
   lastChange: number;
 }
 
-let lastChange = Date.now();
+// Cached snapshot — useSyncExternalStore compares with Object.is, so we MUST
+// return the same reference until the underlying state actually changes.
+// Returning a fresh object on every call triggers React error #185
+// ("Maximum update depth exceeded").
+let cachedSnapshot: OnlineStatus = {
+  online: isOnline(),
+  lastChange: Date.now(),
+};
 
-// Track timestamp of the last online/offline change process-wide.
-// SSR-safe: only wires events in browser environments.
+// Refresh the cached snapshot on online/offline events. SSR-safe: only wires
+// listeners in browser environments.
 if (typeof window !== 'undefined') {
-  const markChange = () => {
-    lastChange = Date.now();
+  const refresh = () => {
+    cachedSnapshot = { online: isOnline(), lastChange: Date.now() };
   };
-  window.addEventListener('online', markChange);
-  window.addEventListener('offline', markChange);
+  window.addEventListener('online', refresh);
+  window.addEventListener('offline', refresh);
 }
 
 function getOnlineSnapshot(): OnlineStatus {
-  return { online: isOnline(), lastChange };
+  return cachedSnapshot;
 }
+
+// Stable server snapshot — referentially constant across renders so the
+// useSyncExternalStore contract holds during SSR/hydration.
+const SERVER_SNAPSHOT: OnlineStatus = { online: true, lastChange: 0 };
+const getServerSnapshot = (): OnlineStatus => SERVER_SNAPSHOT;
 
 /**
  * Returns the current online status and the timestamp of the last change.
@@ -41,10 +53,5 @@ function getOnlineSnapshot(): OnlineStatus {
  * React renders — no stale reads mid-flight.
  */
 export function useOnlineStatus(): OnlineStatus {
-  return useSyncExternalStore(
-    subscribeToOnlineStatus,
-    getOnlineSnapshot,
-    // Server snapshot: assume online (avoids mismatched hydration)
-    () => ({ online: true, lastChange: 0 }),
-  );
+  return useSyncExternalStore(subscribeToOnlineStatus, getOnlineSnapshot, getServerSnapshot);
 }

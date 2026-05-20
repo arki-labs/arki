@@ -43,17 +43,31 @@ export function OfflineBanner({ children }: OfflineBannerProps): ReactNode {
     [queueCtx],
   );
 
-  const getQueueSnapshot = useCallback(() => {
-    if (!queueCtx) return { queued: 0, deadLettered: 0 };
-    const s = queueCtx.queue.status();
-    return { queued: s.queued, deadLettered: s.deadLettered };
-  }, [queueCtx]);
+  // Return primitives, not objects. useSyncExternalStore compares snapshots
+  // with Object.is, so a fresh object literal on every call breaks the
+  // contract and triggers React error #185 ("Maximum update depth exceeded").
+  const getQueuedSnapshot = useCallback(
+    () => (queueCtx ? queueCtx.queue.status().queued : 0),
+    [queueCtx],
+  );
+  const getDeadLetteredSnapshot = useCallback(
+    () => (queueCtx ? queueCtx.queue.status().deadLettered : 0),
+    [queueCtx],
+  );
 
-  const { queued, deadLettered } = useSyncExternalStore(
+  const queued = useSyncExternalStore(
     subscribeToQueue,
-    getQueueSnapshot,
-    getQueueSnapshot,
+    getQueuedSnapshot,
+    getServerZero,
+  );
+  const deadLettered = useSyncExternalStore(
+    subscribeToQueue,
+    getDeadLetteredSnapshot,
+    getServerZero,
   );
 
   return children({ online, queued, deadLettered });
 }
+
+// Stable server-snapshot getter (referentially constant across renders).
+const getServerZero = (): number => 0;
