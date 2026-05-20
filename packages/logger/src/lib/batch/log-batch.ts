@@ -1,5 +1,5 @@
-import type { LogRecord } from '../types';
-import { configuration } from '../config';
+import type { LogRecord } from '../types.js';
+import { configuration } from '../config.js';
 
 // Define allowed log levels
 type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';

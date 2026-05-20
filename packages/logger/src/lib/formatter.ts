@@ -1,5 +1,5 @@
-import type { LogRecord, SeverityText } from './types';
-import { SeverityName } from './types';
+import type { LogRecord, SeverityText } from './types.js';
+import { SeverityName } from './types.js';
 
 const serviceContext = {
   service: process.env['SERVICE_NAME'] || process.env['SERVICE_CONTEXT_NAME'] || process.env['HOSTNAME'],

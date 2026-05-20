@@ -1,10 +1,10 @@
 /**
  * Logger class for structured logging with severity levels and attributes
  */
-import type { Attributes, Body, LogRecord, SeverityKind } from './types';
-import { LogBatch } from './batch/log-batch';
-import { configuration } from './config';
-import { Severity } from './types';
+import type { Attributes, Body, LogRecord, SeverityKind } from './types.js';
+import { LogBatch } from './batch/log-batch.js';
+import { configuration } from './config.js';
+import { Severity } from './types.js';
 
 // Define the log level methods available on the transport
 type LogLevelMethod = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';

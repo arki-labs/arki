@@ -1,9 +1,9 @@
 import type { Logger, LoggerOptions } from 'pino';
 import pino from 'pino';
 
-import type { LogRecord, SeverityKind, SeverityText } from './types';
-import { LoggingFormatter } from './formatter';
-import { Severity, SeverityName } from './types';
+import type { LogRecord, SeverityKind, SeverityText } from './types.js';
+import { LoggingFormatter } from './formatter.js';
+import { Severity, SeverityName } from './types.js';
 
 /**
  * Logger configuration options

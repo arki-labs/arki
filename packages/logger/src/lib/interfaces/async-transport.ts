@@ -1,4 +1,4 @@
-import type { LogRecord } from '../types';
+import type { LogRecord } from '../types.js';
 
 /**
  * Interface for asynchronous log transports

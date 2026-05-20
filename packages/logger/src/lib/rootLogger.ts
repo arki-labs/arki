@@ -1,5 +1,5 @@
-import type { Attributes } from './types';
-import { Logger } from './logger';
+import type { Attributes } from './types.js';
+import { Logger } from './logger.js';
 
 /**
  * Singleton root logger instance

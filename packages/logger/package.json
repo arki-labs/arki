@@ -1,28 +1,57 @@
 {
   "name": "@arki/logger",
   "version": "0.1.0",
-  "private": true,
+  "description": "Structured logging primitives for ARKI — severity levels, batching, distributed tracing hooks, and Pino-backed transports.",
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-dev/arki.git",
+    "directory": "packages/logger"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-dev/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "logger",
+    "logging",
+    "pino",
+    "debug",
+    "observability"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/src/index.d.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./debug": {
-      "types": "./dist/src/debug.d.ts",
-      "import": "./src/debug.ts",
-      "default": "./src/debug.ts"
+      "types": "./dist/debug.d.ts",
+      "import": "./dist/debug.js",
+      "default": "./dist/debug.js"
     },
     "./package.json": "./package.json"
   },
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+    "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -33,8 +62,9 @@
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*"
-  },
-  "types": "./dist/src/index.d.ts",
-  "sideEffects": false
+    "@arki/vitest-config": "workspace:*",
+    "@types/debug": "catalog:",
+    "@types/node": "catalog:node",
+    "typescript": "catalog:"
+  }
 }
