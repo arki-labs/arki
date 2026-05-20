@@ -78,8 +78,89 @@ export interface ReleaseCommandEnvelope<TItem = unknown, TSummary = unknown> {
  *
  * Filled in by the inventory command (Task 2). Defined here so later
  * commands (audit, export-public, scorecard) can consume the type.
+ *
+ * - `public-candidate` — wave-allowlisted, `private: false`, no private deps
+ * - `private-only` — internal package, no intent to publish
+ * - `blocked-by-private-flag` — wave-allowlisted but still `private: true`
+ * - `blocked-by-private-dependency` — wave-allowlisted but transitively
+ *   depends on a `private: true` ARKI workspace package
+ * - `blocked-by-leak` — reserved for Task 4 (leak scanner)
+ * - `blocked-by-build-shape` — reserved for Task 5 (build-shape audit)
+ *
+ * Task 2 only emits the first four states; the leak/build-shape labels
+ * exist here so later commands can extend without breaking the type seam.
+ */
+export type PackageClassification =
+  | 'public-candidate'
+  | 'private-only'
+  | 'blocked-by-private-flag'
+  | 'blocked-by-private-dependency'
+  | 'blocked-by-leak'
+  | 'blocked-by-build-shape';
+
+/**
+ * Coarse-grained legacy label retained for backwards compatibility with
+ * downstream code from Task 1. Prefer {@link PackageClassification}.
+ *
+ * @deprecated Use {@link PackageClassification}.
  */
 export type PackageWave = 'public-candidate' | 'blocked' | 'internal' | 'unclassified';
+
+/**
+ * Stable identifiers for each release wave. Matches the design spec
+ * (Wave 1 = foundation, Wave 2 = dot-kernel, etc.).
+ */
+export type ReleaseWaveId =
+  | 'foundation'
+  | 'dot-kernel'
+  | 'infrastructure-adapters'
+  | 'frontend'
+  | 'specialized';
+
+/**
+ * A single release wave — a labelled allowlist of `@arki/*` package names
+ * that the release pipeline is expected to publish together.
+ */
+export interface ReleaseWave {
+  /** Stable identifier, e.g. `'foundation'`. */
+  readonly id: ReleaseWaveId;
+  /** Human-readable label, e.g. `'Wave 1 — Foundation'`. */
+  readonly label: string;
+  /** Ordered list of `@arki/*` package names belonging to this wave. */
+  readonly packages: readonly string[];
+}
+
+/**
+ * The repository / bugs / homepage / license metadata that every public
+ * `@arki/*` package gets stamped with at publish time. Used by
+ * `export-public` (Task 5) to rewrite the public-tree manifests.
+ *
+ * Intentionally narrow — Task 2 only reads these; later tasks consume.
+ */
+export interface PublicMetadataDefaults {
+  readonly license: string;
+  readonly repository: { readonly type: string; readonly url: string };
+  readonly bugs: { readonly url: string };
+  readonly homepage: string;
+  readonly publishConfig: { readonly access: 'public' | 'restricted' };
+  readonly keywords: readonly string[];
+}
+
+/**
+ * Top-level shape of `arki.release.config.ts`.
+ *
+ * Reserved fields (e.g. leak patterns for Task 4) are added as optional
+ * properties so the config file can grow without breaking Task 2's
+ * loader.
+ */
+export interface ReleaseConfig {
+  /** Path (relative to the repo root) where the public tree is materialized. */
+  readonly publicTreePath: string;
+  /** Default metadata stamped onto every published manifest. */
+  readonly publicMetadataDefaults: PublicMetadataDefaults;
+  /** Ordered wave list — Wave 1 first, last wave last. */
+  readonly waves: readonly ReleaseWave[];
+}
 
 /**
  * Parsed CLI arguments — produced by the cli.ts argv parser and consumed

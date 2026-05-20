@@ -1,0 +1,236 @@
+/**
+ * Unit tests for the inventory command.
+ *
+ * Strategy: write fixture `package.json` manifests into a fresh temp dir,
+ * call the public seam (`runInventory`), and assert on the envelope. We
+ * intentionally do NOT spawn the CLI subprocess — that's an integration
+ * test owned by Task 7.
+ *
+ * Each test isolates its own temp dir so they can run in parallel.
+ */
+
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { buildDependencyGraph, collectTransitiveDeps } from './dependency-graph';
+import { classifyManifests, runInventory } from './inventory';
+import type { ReleaseConfig } from './types';
+
+/** Minimal config used by most tests. Customised per-test where needed. */
+const baseConfig: ReleaseConfig = {
+  publicTreePath: '.release/arki-public',
+  publicMetadataDefaults: {
+    license: 'MIT',
+    repository: { type: 'git', url: 'https://example.com/repo.git' },
+    bugs: { url: 'https://example.com/issues' },
+    homepage: 'https://example.com',
+    publishConfig: { access: 'public' },
+    keywords: ['arki'],
+  },
+  waves: [
+    { id: 'foundation', label: 'Wave 1', packages: ['@arki/assert', '@arki/contracts', '@arki/logger'] },
+    { id: 'dot-kernel', label: 'Wave 2', packages: ['@arki/dot'] },
+  ],
+};
+
+function writeManifest(root: string, dir: string, manifest: Record<string, unknown>): void {
+  const target = path.join(root, dir);
+  mkdirSync(target, { recursive: true });
+  writeFileSync(path.join(target, 'package.json'), JSON.stringify(manifest, null, 2));
+}
+
+describe('runInventory', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'arki-release-inv-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('returns an empty envelope when packages/ is empty', async () => {
+    mkdirSync(path.join(tmp, 'packages'), { recursive: true });
+    const env = await runInventory({ cwd: tmp, config: baseConfig });
+    expect(env.command).toBe('inventory');
+    expect(env.status).toBe('success');
+    expect(env.items).toHaveLength(0);
+    expect(env.summary.totalDiscovered).toBe(0);
+  });
+
+  it('classifies a public wave-allowlisted package as public-candidate', async () => {
+    writeManifest(tmp, 'packages/assert', { name: '@arki/assert', version: '1.0.0' });
+    const env = await runInventory({ cwd: tmp, config: baseConfig });
+    expect(env.status).toBe('success');
+    expect(env.items).toHaveLength(1);
+    const item = env.items[0]!;
+    expect(item.name).toBe('@arki/assert');
+    expect(item.classification).toBe('public-candidate');
+    expect(item.wave).toBe('foundation');
+    expect(item.blockers).toHaveLength(0);
+    expect(env.errors).toHaveLength(0);
+  });
+
+  it('classifies a private wave-allowlisted package as blocked-by-private-flag and fails', async () => {
+    writeManifest(tmp, 'packages/contracts', { name: '@arki/contracts', version: '1.0.0', private: true });
+    const env = await runInventory({ cwd: tmp, config: baseConfig });
+    expect(env.status).toBe('failure');
+    expect(env.items).toHaveLength(1);
+    const item = env.items[0]!;
+    expect(item.classification).toBe('blocked-by-private-flag');
+    expect(item.blockers).toHaveLength(1);
+    expect(item.blockers[0]!.code).toBe('INV_E002');
+    const blockerError = env.errors.find(e => e.code === 'INV_E002');
+    expect(blockerError).toBeDefined();
+    expect(blockerError!.target).toBe('@arki/contracts');
+  });
+
+  it('flags a public wave-allowlisted package that depends on a private package', async () => {
+    writeManifest(tmp, 'packages/assert', {
+      name: '@arki/assert',
+      version: '1.0.0',
+      dependencies: { '@arki/logger': 'workspace:*' },
+    });
+    writeManifest(tmp, 'packages/logger', {
+      name: '@arki/logger',
+      version: '1.0.0',
+      private: true,
+    });
+
+    const env = await runInventory({ cwd: tmp, config: baseConfig });
+    expect(env.status).toBe('failure');
+    const assertItem = env.items.find(i => i.name === '@arki/assert');
+    const loggerItem = env.items.find(i => i.name === '@arki/logger');
+    expect(assertItem).toBeDefined();
+    expect(loggerItem).toBeDefined();
+    expect(assertItem!.classification).toBe('blocked-by-private-dependency');
+    expect(loggerItem!.classification).toBe('blocked-by-private-flag');
+    expect(assertItem!.blockers[0]!.code).toBe('INV_E003');
+    expect(assertItem!.blockers[0]!.target).toBe('@arki/logger');
+  });
+
+  it('skips manifests without an @arki/* name and records an info diagnostic', async () => {
+    writeManifest(tmp, 'packages/weird', { name: 'weird-thing', version: '1.0.0' });
+    writeManifest(tmp, 'packages/no-name', { version: '1.0.0' });
+    writeManifest(tmp, 'packages/assert', { name: '@arki/assert', version: '1.0.0' });
+
+    const env = await runInventory({ cwd: tmp, config: baseConfig });
+    expect(env.items).toHaveLength(1);
+    expect(env.items[0]!.name).toBe('@arki/assert');
+    const diagnostics = env.errors.filter(e => e.code === 'INV_E001');
+    expect(diagnostics).toHaveLength(2);
+    for (const d of diagnostics) {
+      expect(d.severity).toBe('info');
+    }
+  });
+
+  it('excludes packages/**/dist/package.json build artifacts from discovery', async () => {
+    writeManifest(tmp, 'packages/assert', { name: '@arki/assert', version: '1.0.0' });
+    writeManifest(tmp, 'packages/assert/dist', { name: 'dist', version: '1.0.0' });
+    writeManifest(tmp, 'packages/some-pkg/node_modules/somedep', { name: '@arki/garbage', version: '1.0.0' });
+
+    const env = await runInventory({ cwd: tmp, config: baseConfig });
+    expect(env.items).toHaveLength(1);
+    expect(env.items[0]!.name).toBe('@arki/assert');
+  });
+
+  it('emits an unclassified-public-manifest warning but does not fail', async () => {
+    writeManifest(tmp, 'packages/orphan', { name: '@arki/orphan', version: '1.0.0' });
+    const env = await runInventory({ cwd: tmp, config: baseConfig });
+    expect(env.status).toBe('success');
+    expect(env.items).toHaveLength(1);
+    expect(env.items[0]!.wave).toBeNull();
+    const warn = env.errors.find(e => e.code === 'INV_E004');
+    expect(warn).toBeDefined();
+    expect(warn!.severity).toBe('warning');
+  });
+
+  it('treats an explicitly private package not in any wave as private-only with no errors', async () => {
+    writeManifest(tmp, 'packages/internal', { name: '@arki/internal', version: '1.0.0', private: true });
+    const env = await runInventory({ cwd: tmp, config: baseConfig });
+    expect(env.status).toBe('success');
+    expect(env.items[0]!.classification).toBe('private-only');
+    expect(env.errors.filter(e => e.code === 'INV_E004')).toHaveLength(0);
+  });
+});
+
+describe('classifyManifests (pure)', () => {
+  it('aggregates byClassification and byWave counts correctly', () => {
+    const env = classifyManifests({
+      config: baseConfig,
+      diagnostics: [],
+      manifests: [
+        { manifestPath: 'packages/a/package.json', name: '@arki/assert', version: '1.0.0', private: false },
+        { manifestPath: 'packages/b/package.json', name: '@arki/contracts', version: '1.0.0', private: true },
+        { manifestPath: 'packages/c/package.json', name: '@arki/dot', version: '1.0.0', private: false },
+        { manifestPath: 'packages/d/package.json', name: '@arki/internal', version: '1.0.0', private: true },
+      ],
+    });
+    expect(env.summary.byClassification['public-candidate']).toBe(2);
+    expect(env.summary.byClassification['blocked-by-private-flag']).toBe(1);
+    expect(env.summary.byClassification['private-only']).toBe(1);
+    expect(env.summary.byWave['foundation']).toBe(2);
+    expect(env.summary.byWave['dot-kernel']).toBe(1);
+    expect(env.summary.byWave['unassigned']).toBe(1);
+  });
+});
+
+describe('buildDependencyGraph', () => {
+  it('records edges only for @arki/* workspace deps', () => {
+    const graph = buildDependencyGraph([
+      {
+        manifestPath: 'a/package.json',
+        name: '@arki/a',
+        version: '1.0.0',
+        private: false,
+        dependencies: {
+          '@arki/b': 'workspace:*',
+          'react': '^19.0.0',
+          '@arki/c': '^1.0.0', // NOT workspace:, should be ignored
+        },
+      },
+      { manifestPath: 'b/package.json', name: '@arki/b', version: '1.0.0', private: true },
+      { manifestPath: 'c/package.json', name: '@arki/c', version: '1.0.0', private: false },
+    ]);
+    const a = graph.byName.get('@arki/a');
+    expect(a).toBeDefined();
+    expect(a!.dependsOn).toEqual(['@arki/b']);
+  });
+
+  it('ignores deps that do not exist in the workspace (defensive)', () => {
+    const graph = buildDependencyGraph([
+      {
+        manifestPath: 'a/package.json',
+        name: '@arki/a',
+        version: '1.0.0',
+        private: false,
+        dependencies: { '@arki/ghost': 'workspace:*' },
+      },
+    ]);
+    expect(graph.byName.get('@arki/a')!.dependsOn).toEqual([]);
+  });
+
+  it('collectTransitiveDeps follows the chain', () => {
+    const graph = buildDependencyGraph([
+      { manifestPath: 'a/package.json', name: '@arki/a', version: '1.0.0', private: false, dependencies: { '@arki/b': 'workspace:*' } },
+      { manifestPath: 'b/package.json', name: '@arki/b', version: '1.0.0', private: false, dependencies: { '@arki/c': 'workspace:*' } },
+      { manifestPath: 'c/package.json', name: '@arki/c', version: '1.0.0', private: true },
+    ]);
+    const deps = collectTransitiveDeps(graph, '@arki/a');
+    expect(deps).toContain('@arki/b');
+    expect(deps).toContain('@arki/c');
+  });
+
+  it('tolerates cycles without infinite looping', () => {
+    const graph = buildDependencyGraph([
+      { manifestPath: 'a/package.json', name: '@arki/a', version: '1.0.0', private: false, dependencies: { '@arki/b': 'workspace:*' } },
+      { manifestPath: 'b/package.json', name: '@arki/b', version: '1.0.0', private: false, dependencies: { '@arki/a': 'workspace:*' } },
+    ]);
+    const deps = collectTransitiveDeps(graph, '@arki/a');
+    expect([...deps].sort()).toEqual(['@arki/a', '@arki/b']);
+  });
+});

@@ -9,8 +9,10 @@
  */
 import debugFactory from 'debug';
 
-import type { ParsedCliArgs, ReleaseCommand, ReleaseCommandEnvelope } from './types';
+import { defaultConfigPath, loadConfig, ReleaseConfigError } from './config';
+import { runInventory } from './inventory';
 import { createEnvelope, emitEnvelope } from './json-output';
+import type { ParsedCliArgs, ReleaseCommand, ReleaseCommandEnvelope } from './types';
 
 const debug = debugFactory('arki:release:cli');
 
@@ -177,10 +179,35 @@ function renderHelpText(): string {
 }
 
 /**
+ * Convert a {@link ReleaseConfigError} into a failure envelope. The CLI
+ * uses this so config errors don't bubble up as uncaught exceptions; they
+ * land in the same envelope channel agents already know how to parse.
+ */
+function buildConfigErrorEnvelope(
+  command: ReleaseCommand,
+  cause: ReleaseConfigError,
+): ReleaseCommandEnvelope<never, { message: string; configError: true }> {
+  return createEnvelope({
+    command,
+    status: 'failure',
+    summary: { message: `Config load failed: ${cause.message}`, configError: true },
+    items: [],
+    errors: [
+      {
+        code: cause.code,
+        severity: 'error',
+        message: cause.message,
+        remediation: 'Fix arki.release.config.ts and retry.',
+      },
+    ],
+  });
+}
+
+/**
  * Dispatch parsed args to the right envelope-producing handler and emit
  * the result. Returns the process exit code the caller should use.
  */
-export function dispatch(args: ParsedCliArgs): number {
+export async function dispatch(args: ParsedCliArgs): Promise<number> {
   debug('dispatch %o', args);
 
   if (args.help || args.command === null) {
@@ -193,9 +220,38 @@ export function dispatch(args: ParsedCliArgs): number {
     return 0;
   }
 
+  if (args.command === 'inventory') {
+    return runInventoryHandler(args.json);
+  }
+
   const envelope = buildStubEnvelope(args.command);
   emitEnvelope(envelope, { json: args.json });
   return 0;
+}
+
+/**
+ * Inventory subcommand handler: load config, run the inventory pass,
+ * emit the envelope, and map envelope status → exit code.
+ *
+ * A `failure` envelope produces exit code 1 so CI gates treat it as a
+ * non-recoverable error.
+ */
+async function runInventoryHandler(json: boolean): Promise<number> {
+  const cwd = process.cwd();
+  const configPath = defaultConfigPath(cwd);
+  try {
+    const config = await loadConfig(configPath);
+    const envelope = await runInventory({ cwd, config });
+    emitEnvelope(envelope, { json });
+    return envelope.status === 'failure' ? 1 : 0;
+  } catch (cause) {
+    if (cause instanceof ReleaseConfigError) {
+      const envelope = buildConfigErrorEnvelope('inventory', cause);
+      emitEnvelope(envelope, { json });
+      return 1;
+    }
+    throw cause;
+  }
 }
 
 /**
@@ -207,6 +263,15 @@ export function dispatch(args: ParsedCliArgs): number {
  */
 if (import.meta.main) {
   const args = parseArgs(Bun.argv.slice(2));
-  const code = dispatch(args);
-  process.exit(code);
+  dispatch(args)
+    .then(code => {
+      process.exit(code);
+    })
+    .catch((err: unknown) => {
+      // Last-resort guard — should not happen because handlers convert
+      // expected errors into envelopes. Surface to stderr and exit 2.
+      const message = err instanceof Error ? err.stack ?? err.message : String(err);
+      process.stderr.write(`arki-release: unhandled error\n${message}\n`);
+      process.exit(2);
+    });
 }

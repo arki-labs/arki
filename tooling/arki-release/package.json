@@ -24,6 +24,8 @@
     "clean": "git clean -xdf .cache .turbo node_modules",
     "cli": "bun src/cli.ts",
     "format": "prettier --check . --ignore-path ../../.gitignore",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "typecheck": "tsc --noEmit --skipLibCheck"
   },
   "prettier": "@arki/prettier-config",
@@ -34,8 +36,10 @@
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
     "@types/bun": "catalog:",
     "@types/debug": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }
