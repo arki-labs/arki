@@ -1,0 +1,41 @@
+{
+  "name": "@arki/arki-release",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./cli": {
+      "default": "./src/cli.ts"
+    },
+    "./json-output": {
+      "default": "./src/json-output.ts"
+    },
+    "./types": {
+      "default": "./src/types.ts"
+    }
+  },
+  "bin": {
+    "arki-release": "./src/cli.ts"
+  },
+  "scripts": {
+    "clean": "git clean -xdf .cache .turbo node_modules",
+    "cli": "bun src/cli.ts",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "typecheck": "tsc --noEmit --skipLibCheck"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "debug": "catalog:"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@types/bun": "catalog:",
+    "@types/debug": "catalog:",
+    "typescript": "catalog:"
+  }
+}
