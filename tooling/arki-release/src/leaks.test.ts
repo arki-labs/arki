@@ -172,4 +172,45 @@ describe('scanFile + scanDirectory (temp fixtures)', () => {
     const hits = await scanDirectory(file, { patterns });
     expect(hits.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('scanDirectory skips files exceeding maxFileBytes (default 1MB)', async () => {
+    // Build a ~2MB file with a real leak in the middle. If the size cap
+    // is honored, the file is skipped before reading and the leak goes
+    // undetected. If the cap regresses (or maxFileBytes is set high
+    // enough), the leak fires. We assert BOTH directions to lock the
+    // behaviour in.
+    const huge = `${'A'.repeat(1_500_000)}furculita.net${'A'.repeat(500_000)}`;
+    const file = path.join(tmp, 'big.md');
+    writeFileSync(file, huge);
+
+    const hitsDefault = await scanDirectory(tmp, { patterns });
+    const personalDefault = hitsDefault.filter(h => h.patternId === 'personal-domain-furculita');
+    expect(personalDefault).toHaveLength(0);
+
+    const hitsRaised = await scanDirectory(tmp, { patterns, maxFileBytes: 5_000_000 });
+    const personalRaised = hitsRaised.filter(h => h.patternId === 'personal-domain-furculita');
+    expect(personalRaised.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('scanDirectory does not descend into nested workspaces by default', async () => {
+    // Outer "package" with a leak, plus a nested sub-package (its own
+    // package.json) that also contains a leak. Default behaviour skips
+    // the nested workspace; opting out via skipNestedWorkspaces: false
+    // walks into it.
+    writeFileSync(path.join(tmp, 'outer.md'), 'has hyphenate');
+    const innerDir = path.join(tmp, 'inner-pkg');
+    mkdirSync(innerDir, { recursive: true });
+    writeFileSync(path.join(innerDir, 'package.json'), '{"name":"inner"}');
+    writeFileSync(path.join(innerDir, 'inner.md'), 'has hyphenate');
+
+    const defaultHits = await scanDirectory(tmp, { patterns });
+    const defaultPaths = defaultHits.map(h => h.sourcePath).sort();
+    expect(defaultPaths).toContain('outer.md');
+    expect(defaultPaths).not.toContain(path.join('inner-pkg', 'inner.md'));
+
+    const allHits = await scanDirectory(tmp, { patterns, skipNestedWorkspaces: false });
+    const allPaths = allHits.map(h => h.sourcePath).sort();
+    expect(allPaths).toContain('outer.md');
+    expect(allPaths).toContain(path.join('inner-pkg', 'inner.md'));
+  });
 });

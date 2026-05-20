@@ -81,6 +81,21 @@ export const DEFAULT_EXCLUDE_DIRS: readonly string[] = [
  * These are EXAMPLES we explicitly want to permit; they are NOT the same
  * shape as leak patterns (no severity, no id). They run AFTER pattern
  * matching to filter ambiguous hits.
+ *
+ * Anchoring contract: each allow-list pattern is `^…$`-anchored and is
+ * tested against the ENTIRE `LeakHit.matchedText` (the substring captured
+ * by a leak pattern). A neutral hit is filtered ONLY when the full match
+ * text equals one of these — substring tolerance is intentionally NOT
+ * supported.
+ *
+ * Intentional: a hypothetical leak pattern that captures `user@example.com`
+ * as one match would NOT be filtered by `^example\.com$` here, because
+ * the whole match text is `user@example.com`, not `example.com`. The
+ * allow list exists to whitelist whole-word neutral EXAMPLES (`acme`,
+ * `example.com`, `foo`), not to provide substring exceptions inside
+ * richer captures. If you need substring tolerance, add a more specific
+ * neutral pattern (or narrow the leak pattern's capture) instead of
+ * weakening the anchoring.
  */
 export const NEUTRAL_ALLOW_PATTERNS: readonly RegExp[] = [
   /^example\.com$/i,

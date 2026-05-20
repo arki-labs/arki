@@ -290,7 +290,7 @@ interface AuditEnvelopeItem {
   readonly name: string;
   readonly manifestPath: string;
   readonly classification: string;
-  readonly hitsByseverity: { readonly error: number; readonly warning: number };
+  readonly hitsBySeverity: { readonly error: number; readonly warning: number };
   readonly hits: readonly LeakHit[];
 }
 
@@ -299,7 +299,7 @@ interface AuditSummary {
   readonly message: string;
   readonly packagesScanned: number;
   readonly totalHits: number;
-  readonly byseverity: { readonly error: number; readonly warning: number };
+  readonly bySeverity: { readonly error: number; readonly warning: number };
 }
 
 /**
@@ -377,7 +377,7 @@ async function runAuditHandler(args: ParsedCliArgs): Promise<number> {
           message: targets.error.message,
           packagesScanned: 0,
           totalHits: 0,
-          byseverity: { error: 0, warning: 0 },
+          bySeverity: { error: 0, warning: 0 },
         },
         items: [],
         errors: [targets.error],
@@ -423,7 +423,7 @@ async function runAuditHandler(args: ParsedCliArgs): Promise<number> {
         name: item.name,
         manifestPath: item.manifestPath,
         classification: item.classification,
-        hitsByseverity: { error: errorCount, warning: warningCount },
+        hitsBySeverity: { error: errorCount, warning: warningCount },
         hits,
       });
 
@@ -451,7 +451,7 @@ async function runAuditHandler(args: ParsedCliArgs): Promise<number> {
             : `Leak scan complete: ${filtered.length.toString()} packages, ${totalError.toString()} error hits, ${totalWarning.toString()} warning hits.`,
         packagesScanned: filtered.length,
         totalHits: totalError + totalWarning,
-        byseverity: { error: totalError, warning: totalWarning },
+        bySeverity: { error: totalError, warning: totalWarning },
       },
       items: auditItems,
       errors,
@@ -483,7 +483,7 @@ interface PackEnvelopeItem {
 interface PackSummary {
   readonly message: string;
   readonly packagesAudited: number;
-  readonly bystatus: { readonly pass: number; readonly warn: number; readonly fail: number; readonly skipped: number };
+  readonly byStatus: { readonly pass: number; readonly warn: number; readonly fail: number; readonly skipped: number };
 }
 
 /**
@@ -508,7 +508,7 @@ async function runPackHandler(args: ParsedCliArgs): Promise<number> {
         summary: {
           message: targets.error.message,
           packagesAudited: 0,
-          bystatus: { pass: 0, warn: 0, fail: 0, skipped: 0 },
+          byStatus: { pass: 0, warn: 0, fail: 0, skipped: 0 },
         },
         items: [],
         errors: [targets.error],
@@ -592,7 +592,7 @@ async function runPackHandler(args: ParsedCliArgs): Promise<number> {
             ? `Pack audit complete: ${counts.pass.toString()} passed, ${counts.skipped.toString()} skipped.`
             : `Pack audit complete: ${counts.pass.toString()} passed, ${counts.warn.toString()} warned, ${counts.fail.toString()} failed, ${counts.skipped.toString()} skipped.`,
         packagesAudited: counts.pass + counts.warn + counts.fail,
-        bystatus: counts,
+        byStatus: counts,
       },
       items: packItems,
       errors,
