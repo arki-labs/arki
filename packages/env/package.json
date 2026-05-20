@@ -1,37 +1,65 @@
 {
   "name": "@arki/env",
   "version": "0.1.0",
+  "description": "Type-safe environment variable parsing for ARKI — defineEnv() built on @t3-oss/env-core with Zod contracts for common variable shapes.",
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-dev/arki.git",
+    "directory": "packages/env"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-dev/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "env",
+    "environment",
+    "zod",
+    "t3-env",
+    "config"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
     "./core": {
-      "source": "./src/core/index.ts",
-      "import": "./dist/core/index.js",
       "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
       "default": "./dist/core/index.js"
     },
     "./contracts": {
-      "source": "./src/contracts/index.ts",
-      "import": "./dist/contracts/index.js",
       "types": "./dist/contracts/index.d.ts",
+      "import": "./dist/contracts/index.js",
       "default": "./dist/contracts/index.js"
     },
-    ".": {
-      "source": "./src/index.ts",
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
+    "./package.json": "./package.json"
   },
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc --watch",
-    "typecheck": "tsc --noEmit",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
   },
+  "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@arki/contracts": "workspace:*",
     "@t3-oss/env-core": "catalog:env",
     "zod": "catalog:"
   },
@@ -40,7 +68,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@types/node": "catalog:node",
     "typescript": "catalog:"
-  },
-  "prettier": "@arki/prettier-config"
+  }
 }

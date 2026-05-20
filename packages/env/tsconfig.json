@@ -1,16 +1,18 @@
 {
-  "extends": "@arki/tsconfig/internal-package.json",
+  "extends": "@arki/tsconfig/base.json",
   "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "emitDeclarationOnly": false,
+    "verbatimModuleSyntax": false,
+    "allowImportingTsExtensions": false,
     "noEmit": false,
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "allowImportingTsExtensions": false
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "tsBuildInfoFile": "./.cache/tsbuildinfo.json",
+    "types": ["node"]
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"]
