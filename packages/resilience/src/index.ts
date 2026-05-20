@@ -6,7 +6,7 @@ export {
   isResilienceError,
   isBrokenCircuitError,
   isBulkheadRejectedError,
-} from './errors';
+} from './errors.js';
 
 // Policy factories
 export {
@@ -15,7 +15,7 @@ export {
   createTimeoutPolicy,
   createBulkheadPolicy,
   createResiliencePolicy,
-} from './policies';
+} from './policies.js';
 
 export type {
   RetryPolicyOptions,
@@ -23,19 +23,19 @@ export type {
   TimeoutPolicyOptions,
   BulkheadPolicyOptions,
   ResiliencePolicyOptions,
-} from './policies';
+} from './policies.js';
 
 // Pre-configured presets
 export {
   externalApiPolicy,
   databasePolicy,
   backgroundJobPolicy,
-} from './presets';
+} from './presets.js';
 
 // Event / observability helpers
-export { attachPolicyLogger } from './events';
+export { attachPolicyLogger } from './events.js';
 
-export type { PolicyLogger } from './events';
+export type { PolicyLogger } from './events.js';
 
 // Execution helpers
 export {
@@ -43,7 +43,7 @@ export {
   withRetry,
   withTimeout,
   withCircuitBreaker,
-} from './execute';
+} from './execute.js';
 
 // Re-export key cockatiel types for consumers who need to type policy references
 export type { IPolicy } from 'cockatiel';

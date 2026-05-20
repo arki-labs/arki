@@ -1,7 +1,7 @@
 import type { IPolicy } from 'cockatiel';
 
-import type { CircuitBreakerPolicyOptions, RetryPolicyOptions, TimeoutPolicyOptions } from './policies';
-import { createCircuitBreakerPolicy, createRetryPolicy, createTimeoutPolicy } from './policies';
+import type { CircuitBreakerPolicyOptions, RetryPolicyOptions, TimeoutPolicyOptions } from './policies.js';
+import { createCircuitBreakerPolicy, createRetryPolicy, createTimeoutPolicy } from './policies.js';
 
 /**
  * Execute a function with an already-constructed resilience policy.

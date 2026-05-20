@@ -2,7 +2,7 @@ import { wrap } from 'cockatiel';
 
 import type { IPolicy } from 'cockatiel';
 
-import { createResiliencePolicy, createRetryPolicy, createTimeoutPolicy } from './policies';
+import { createResiliencePolicy, createRetryPolicy, createTimeoutPolicy } from './policies.js';
 
 /**
  * Resilience policy tuned for external API calls (geocoding, AI providers, etc.).
