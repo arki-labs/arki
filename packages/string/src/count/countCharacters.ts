@@ -1,5 +1,5 @@
-import count from 'voca/count';
+import voca from 'voca';
 
 export function countCharacters(subject?: string): number {
-  return count(subject);
+  return voca.count(subject);
 }

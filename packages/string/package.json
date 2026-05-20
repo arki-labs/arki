@@ -1,44 +1,71 @@
 {
   "name": "@arki/string",
-  "private": true,
+  "version": "0.1.0",
+  "description": "String manipulation utilities — case conversion, base64 encoding, character counting, and template builders.",
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-dev/arki.git",
+    "directory": "packages/string"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-dev/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "string",
+    "base64",
+    "case",
+    "utilities"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
   "exports": {
-    "./count-characters": {
-      "types": "./dist/src/count/countCharacters.d.ts",
-      "import": "./src/count/countCharacters.ts",
-      "node": "./src/count/countCharacters.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./base64": {
-      "types": "./dist/src/base64.d.ts",
-      "import": "./src/base64.ts",
-      "node": "./src/base64.ts"
+      "types": "./dist/base64.d.ts",
+      "import": "./dist/base64.js",
+      "default": "./dist/base64.js"
+    },
+    "./count-characters": {
+      "types": "./dist/count/countCharacters.d.ts",
+      "import": "./dist/count/countCharacters.js",
+      "default": "./dist/count/countCharacters.js"
     },
     "./utils": {
-      "types": "./dist/src/utils.d.ts",
-      "import": "./src/utils.ts",
-      "node": "./src/utils.ts"
+      "types": "./dist/utils.d.ts",
+      "import": "./dist/utils.js",
+      "default": "./dist/utils.js"
     },
     "./builder": {
-      "types": "./dist/src/builder.d.ts",
-      "import": "./src/builder.ts",
-      "node": "./src/builder.ts"
+      "types": "./dist/builder.d.ts",
+      "import": "./dist/builder.js",
+      "default": "./dist/builder.js"
     },
     "./package.json": "./package.json"
   },
-  "typesVersions": {
-    "*": {
-      "*": [
-        "src/*"
-      ]
-    }
-  },
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -52,6 +79,5 @@
     "@arki/vitest-config": "workspace:*",
     "@types/node": "catalog:node",
     "@types/voca": "catalog:types"
-  },
-  "sideEffects": false
+  }
 }

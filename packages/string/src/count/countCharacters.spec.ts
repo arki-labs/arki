@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { countCharacters } from './countCharacters';
+import { countCharacters } from './countCharacters.js';
 
 describe('countCharacters', () => {
   it('should work', () => {
