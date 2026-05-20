@@ -1,22 +1,56 @@
 {
   "name": "@arki/date",
   "version": "0.1.0",
+  "description": "Date and time utilities for ARKI — thin wrappers and re-exports over date-fns with project-aligned formatters.",
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-dev/arki.git",
+    "directory": "packages/date"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-dev/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "date",
+    "date-fns",
+    "time",
+    "format"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
   "exports": {
-    "./*": {
-      "types": "./dist/src/*.d.ts",
-      "import": "./src/*.ts",
-      "node": "./src/*.ts"
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "import": "./dist/format.js",
+      "default": "./dist/format.js"
+    },
+    "./parseISO": {
+      "types": "./dist/parseISO.d.ts",
+      "import": "./dist/parseISO.js",
+      "default": "./dist/parseISO.js"
     },
     "./package.json": "./package.json"
   },
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -26,7 +60,7 @@
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*"
-  },
-  "sideEffects": false
+    "@arki/vitest-config": "workspace:*",
+    "typescript": "catalog:"
+  }
 }
