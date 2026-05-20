@@ -23,6 +23,7 @@ import { runInventory, type InventoryItem } from './inventory';
 import { createEnvelope, emitEnvelope } from './json-output';
 import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
 import { auditPack, PACK_ERROR_CODES } from './pack';
+import { renderScorecardText, runScorecard } from './scorecard';
 import type {
   ExportItem,
   ExportSummary,
@@ -264,9 +265,61 @@ export async function dispatch(args: ParsedCliArgs): Promise<number> {
     return runFixtureHandler(args);
   }
 
+  if (args.command === 'scorecard') {
+    return runScorecardHandler(args);
+  }
+
   const envelope = buildStubEnvelope(args.command);
   emitEnvelope(envelope, { json: args.json });
   return 0;
+}
+
+/**
+ * `scorecard` subcommand handler — drive the aggregator across every
+ * public-candidate package and emit the result.
+ *
+ * Flags:
+ *   --json               Emit the {@link ReleaseCommandEnvelope} as JSON.
+ *   --allow-deferred     Treat deferred dimensions (DOT gates, agent-native
+ *                        gates) as passing for the top-level gate decision.
+ *                        Used post-Task-9/10 to validate the flip.
+ *   --package <name>     Score a single package by name.
+ *   --full-fixture       Run the fixture matrix in install mode (CI default).
+ *
+ * Exit codes:
+ *   - 0 when `stableReleaseGate === 'open'`.
+ *   - 1 when `stableReleaseGate === 'blocked'`.
+ */
+async function runScorecardHandler(args: ParsedCliArgs): Promise<number> {
+  const cwd = process.cwd();
+  const configPath = defaultConfigPath(cwd);
+  const packageFilter = extractOption(args.rest, 'package');
+  const allowDeferred = args.rest.includes('--allow-deferred');
+  const fullFixtureMatrix = args.rest.includes('--full-fixture');
+
+  try {
+    const config = await loadConfig(configPath);
+    const envelope = await runScorecard({
+      cwd,
+      config,
+      ...(packageFilter !== null ? { packageName: packageFilter } : {}),
+      allowDeferred,
+      fullFixtureMatrix,
+    });
+    if (args.json) {
+      emitEnvelope(envelope, { json: true });
+    } else {
+      process.stdout.write(renderScorecardText(envelope));
+    }
+    return envelope.summary.stableReleaseGate === 'open' ? 0 : 1;
+  } catch (cause) {
+    if (cause instanceof ReleaseConfigError) {
+      const envelope = buildConfigErrorEnvelope('scorecard', cause);
+      emitEnvelope(envelope, { json: args.json });
+      return 1;
+    }
+    throw cause;
+  }
 }
 
 /**

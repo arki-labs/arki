@@ -1,0 +1,148 @@
+name: ARKI Release Gates
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: arki-release-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+  # Quiet the changesets/turbo telemetry noise in CI logs.
+  TURBO_TELEMETRY_DISABLED: '1'
+  DO_NOT_TRACK: '1'
+
+jobs:
+  scorecard:
+    name: Scorecard + Gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm (for fixture matrix install stage)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Cache Bun store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'bun.lockb') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck arki-release tooling
+        run: bun --filter '@arki/arki-release' typecheck
+
+      - name: Test arki-release tooling
+        run: bun --filter '@arki/arki-release' test
+
+      - name: Inventory
+        run: bun run release:arki inventory --json > scorecard-inventory.json
+        continue-on-error: true
+
+      - name: Audit (leak scan)
+        run: bun run release:arki audit --json > scorecard-audit.json
+        continue-on-error: true
+
+      - name: Pack audit
+        run: bun run release:arki pack --json > scorecard-pack.json
+        continue-on-error: true
+
+      - name: Export public tree
+        run: bun run release:arki export-public --json > scorecard-export.json
+        continue-on-error: true
+
+      - name: Fixture matrix (full install)
+        # Full install matrix is slow but mandatory in CI to validate that
+        # the materialized public tree installs with npm, pnpm, AND Bun.
+        # On PRs we still run it; if runtime becomes a problem, switch to
+        # --skip-install here and rely on a nightly job for the full matrix.
+        run: bun run release:arki fixture --json > scorecard-fixture.json
+        continue-on-error: true
+
+      - name: Scorecard (machine output)
+        id: scorecard
+        run: |
+          set +e
+          bun run release:arki scorecard --json --full-fixture > scorecard.json
+          scorecard_exit=$?
+          set -e
+          echo "scorecard_exit=$scorecard_exit" >> "$GITHUB_OUTPUT"
+
+      - name: Scorecard (human output)
+        run: bun run release:arki scorecard --full-fixture || true
+
+      - name: Surface gate decision
+        run: |
+          gate=$(jq -r '.summary.stableReleaseGate' scorecard.json)
+          echo "stableReleaseGate=$gate" >> "$GITHUB_ENV"
+          echo "Scorecard gate: $gate"
+          jq -r '.summary.message' scorecard.json
+          echo ""
+          echo "Blockers:"
+          jq -r '.summary.stableReleaseBlockers[]?' scorecard.json | sed 's/^/  - /'
+
+      - name: Upload scorecard artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arki-release-scorecard
+          path: |
+            scorecard-inventory.json
+            scorecard-audit.json
+            scorecard-pack.json
+            scorecard-export.json
+            scorecard-fixture.json
+            scorecard.json
+          retention-days: 30
+
+      - name: Fail on blocked gate (release branches / tags only)
+        # PRs surface the gate as a check but don't block — the merge can
+        # land with deferred items. Tags + master pushes require the gate
+        # to be open.
+        if: |
+          (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+          startsWith(github.ref, 'refs/tags/')
+        env:
+          GATE: ${{ env.stableReleaseGate }}
+        run: |
+          if [ "$GATE" != "open" ]; then
+            echo "::error::Stable release gate is blocked on a release-trigger branch/tag. Failing the workflow."
+            exit 1
+          fi
+          echo "Stable release gate is open."
+
+      - name: Annotate PR (advisory, non-blocking)
+        if: github.event_name == 'pull_request'
+        env:
+          GATE: ${{ env.stableReleaseGate }}
+        run: |
+          if [ "$GATE" != "open" ]; then
+            echo "::warning::Stable release gate is currently blocked. Merging is permitted (PR mode); fix the blockers before tagging a release."
+          fi

@@ -585,3 +585,99 @@ export interface FixtureMatrix {
   readonly runs: readonly FixtureRun[];
   readonly summary: FixtureMatrixSummary;
 }
+
+/**
+ * One of the eight scorecard dimensions. Each dimension is evaluated
+ * independently and reported with its own `pass | warn | fail | deferred`
+ * status so operators can see exactly WHY a package is blocked.
+ *
+ * The dimension list mirrors the public-release spec:
+ *
+ *   - `metadata`           — license, description, repository, homepage,
+ *                            bugs, keywords (from the materialized manifest).
+ *   - `privacy`            — leak scanner did not flag this package.
+ *   - `dependencies`       — materializer did not flag unresolved
+ *                            catalog refs / private ARKI deps.
+ *   - `build-output`       — `dist/` contains compiled JS AND .d.ts
+ *                            (or, for source-distributed packages, the
+ *                            equivalent .ts + .d.ts pair). Future Task 8
+ *                            opts each package into the right build shape.
+ *   - `packlist`           — `npm pack --dry-run` audit passes (no tests,
+ *                            no env files, no node_modules, etc.).
+ *   - `docs`               — README.md and LICENSE present in the source
+ *                            dir.
+ *   - `fixtures`           — fixture matrix's pack stage succeeded for
+ *                            this package on at least one PM (full install
+ *                            matrix in CI mode).
+ *   - `dot-gates`          — DOT-specific runtime gates: `dot doctor
+ *                            --json`, `dot explain --json`, and DOT-boots-
+ *                            with-three-adapters. DEFERRED until Tasks
+ *                            9 / 10 land.
+ *   - `agent-native-gates` — Agent-native CLI gates: every command emits
+ *                            envelope JSON when `--json` is passed; `dot
+ *                            new --dry-run --json` scaffolds a fresh app.
+ *                            DEFERRED until Tasks 9 / 11.5 land.
+ */
+export type ScorecardDimension =
+  | 'metadata'
+  | 'privacy'
+  | 'dependencies'
+  | 'build-output'
+  | 'packlist'
+  | 'docs'
+  | 'fixtures'
+  | 'dot-gates'
+  | 'agent-native-gates';
+
+/**
+ * Stable severity ordering for the overall-status derivation.
+ * `fail` is worst (gate-blocking), `pass` is best.
+ */
+export type ScorecardStatus = 'pass' | 'fail' | 'warn' | 'deferred';
+
+/**
+ * One dimension's outcome for one package. `details` is the one-line
+ * human-readable reason; `evidence` carries the structured errors that
+ * drove the verdict (e.g. RELEASE_E006 for missing description).
+ */
+export interface ScorecardDimensionResult {
+  readonly status: ScorecardStatus;
+  readonly details: string;
+  readonly evidence: readonly ReleaseError[];
+}
+
+/**
+ * A single package's scorecard. `overall` is the worst status across the
+ * dimensions; `blockers` is the human-readable list of failing dimensions
+ * (one entry per `fail` / `deferred` / `warn` dimension that contributed
+ * to the worst-of overall).
+ */
+export interface ScorecardPackageResult {
+  readonly name: string;
+  readonly version: string;
+  readonly classification: PackageClassification;
+  readonly wave: ReleaseWaveId | null;
+  readonly dimensions: Readonly<Record<ScorecardDimension, ScorecardDimensionResult>>;
+  readonly overall: ScorecardStatus;
+  readonly blockers: readonly string[];
+}
+
+/**
+ * Aggregate scorecard summary for the envelope.
+ *
+ * `stableReleaseGate` is `'open'` only when every public-candidate
+ * package has `overall: 'pass'` (i.e. no `fail`, no `warn`, no
+ * `deferred`) OR the operator passed `--allow-deferred` and the only
+ * non-pass dimensions are the deferred DOT/agent-native gates.
+ */
+export interface ScorecardSummary {
+  readonly message: string;
+  readonly totalPackages: number;
+  readonly pass: number;
+  readonly fail: number;
+  readonly warn: number;
+  readonly deferred: number;
+  readonly stableReleaseGate: 'open' | 'blocked';
+  readonly stableReleaseBlockers: readonly string[];
+  readonly allowDeferred: boolean;
+}
