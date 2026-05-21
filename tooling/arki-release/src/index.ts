@@ -58,7 +58,6 @@ export type { BuildCopyPlanOptions, CopyPlanEntry } from './files';
 export { EXPORT_ERROR_CODES, exportPublicTree } from './export-public';
 
 export {
-  buildDotFixtureForwardStubRuns,
   DEFAULT_PACKAGE_MANAGERS,
   defaultProcessRunner,
   FIXTURE_ERROR_CODES,

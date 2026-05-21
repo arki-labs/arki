@@ -31,7 +31,6 @@
  *   - `FIX_E006` — TypeScript declaration probe failed.
  *   - `FIX_E007` — fixture's `node_modules/@arki/*` resolves back into the
  *     monorepo (workspace-resolution leak).
- *   - `FIX_E008` — forward-dependency stub (run skipped pending Tasks 9/10/11.5).
  *   - `FIX_E009` — requested package not present in the public tree.
  *   - `FIX_E010` — invalid CLI argument (e.g. unrecognized `--pm` value).
  */
@@ -64,7 +63,6 @@ export const FIXTURE_ERROR_CODES = {
   importEsmFailed: 'FIX_E005',
   importTypesFailed: 'FIX_E006',
   workspaceResolutionLeak: 'FIX_E007',
-  forwardDependencyStub: 'FIX_E008',
   packageNotInTree: 'FIX_E009',
   invalidCliArgument: 'FIX_E010',
 } as const;
@@ -809,43 +807,6 @@ function buildRun(opts: {
 }
 
 /**
- * Build a `skipped` run that documents a forward-dependency stub —
- * e.g. the DOT fixture, which can't run until Tasks 9/10/11.5 land.
- */
-function buildForwardDependencyRun(
-  packageName: string,
-  pm: PackageManagerId,
-  reason: string,
-): FixtureRun {
-  const stages: readonly FixtureStage[] = (['pack', 'workspace-leak-check', 'install', 'import-esm', 'import-types'] as const).map(
-    name => ({
-      name,
-      status: 'skipped',
-      durationMs: 0,
-      reason,
-    }),
-  );
-  return {
-    packageName,
-    packageManager: pm,
-    tarballPath: '',
-    fixtureDir: '',
-    status: 'skipped',
-    stages,
-    errors: [
-      {
-        code: FIXTURE_ERROR_CODES.forwardDependencyStub,
-        severity: 'info',
-        message: `${packageName} (${pm}): forward-dependency stub — ${reason}`,
-        target: packageName,
-        remediation: 'Wait until the referenced task lands; this run will then be exercised.',
-      },
-    ],
-    skipReason: reason,
-  };
-}
-
-/**
  * Main entrypoint — run the full fixture matrix.
  */
 export async function runFixtureMatrix(
@@ -977,22 +938,3 @@ export async function runFixtureMatrix(
   });
 }
 
-/**
- * Build the DOT fixture forward-dependency stubs.
- *
- * Records one `skipped` run per PM for `@arki/dot` with `FIX_E008`
- * (forward-dependency stub) as info severity. The remaining forward
- * dependency is Task 11.5 — the `dot new <name>` scaffold subcommand.
- *
- * Tasks 9 (kernel) and 10 (adapters) have landed — the boot fixture
- * exists and runs end-to-end via `runFixtureMatrix`. Once Task 11.5
- * lands, the `dot new` scenario will be exercised inside the same
- * fixture and this helper can be deleted.
- */
-export function buildDotFixtureForwardStubRuns(
-  packageManagers: readonly PackageManagerId[] = DEFAULT_PACKAGE_MANAGERS,
-): readonly FixtureRun[] {
-  const reason =
-    'DOT fixture forward-dependency stub: Task 11.5 (`dot new` scaffold) is the remaining task. The boot fixture (Tasks 9 + 10) is exercised by the live matrix.';
-  return packageManagers.map(pm => buildForwardDependencyRun('@arki/dot', pm, reason));
-}

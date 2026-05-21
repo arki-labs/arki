@@ -14,7 +14,6 @@ import debugFactory from 'debug';
 import { defaultConfigPath, loadConfig, ReleaseConfigError } from './config';
 import { EXPORT_ERROR_CODES, exportPublicTree } from './export-public';
 import {
-  buildDotFixtureForwardStubRuns,
   DEFAULT_PACKAGE_MANAGERS,
   FIXTURE_ERROR_CODES,
   runFixtureMatrix,
@@ -826,41 +825,6 @@ async function runFixtureHandler(args: ParsedCliArgs): Promise<number> {
     ...(packageFilter !== null ? { packageNames: [packageFilter] } : {}),
     skipInstall,
   });
-
-  // Append DOT fixture forward-dependency stubs so the envelope documents
-  // what's planned for Tasks 9 / 10 / 11.5. Only attach when no --package
-  // filter was supplied — operators auditing a single package shouldn't
-  // see unrelated stubs in the envelope.
-  if (packageFilter === null) {
-    const stubs = buildDotFixtureForwardStubRuns(packageManagers);
-    const mergedTotalRuns = envelope.summary.totalRuns + stubs.length;
-    const mergedSuccessCount = envelope.summary.successCount;
-    const mergedFailureCount = envelope.summary.failureCount;
-    const mergedSkippedCount = envelope.summary.skippedCount + stubs.length;
-    const mergedErrors = [...envelope.errors, ...stubs.flatMap(s => s.errors)];
-    // Rebuild the message string from the merged counts so the text mode
-    // matches the numeric fields. Mirrors the format produced by
-    // `runFixtureMatrix` (see fixture.ts ~944) to stay consistent
-    // whether or not DOT stubs are merged in.
-    const mergedMessage =
-      mergedFailureCount === 0 && !mergedErrors.some(e => e.severity === 'error')
-        ? `Fixture matrix: ${mergedSuccessCount.toString()} successful runs, ${mergedSkippedCount.toString()} skipped.`
-        : `Fixture matrix: ${mergedFailureCount.toString()} failures across ${mergedTotalRuns.toString()} runs.`;
-    const merged = createEnvelope<FixtureRun, FixtureMatrixSummary>({
-      command: 'fixture',
-      status: envelope.status,
-      summary: {
-        ...envelope.summary,
-        message: mergedMessage,
-        totalRuns: mergedTotalRuns,
-        skippedCount: mergedSkippedCount,
-      },
-      items: [...envelope.items, ...stubs],
-      errors: mergedErrors,
-    });
-    emitEnvelope(merged, { json: args.json });
-    return merged.status === 'failure' ? 1 : 0;
-  }
 
   emitEnvelope(envelope, { json: args.json });
   return envelope.status === 'failure' ? 1 : 0;

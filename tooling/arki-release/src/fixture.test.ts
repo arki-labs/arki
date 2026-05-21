@@ -15,7 +15,6 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  buildDotFixtureForwardStubRuns,
   DEFAULT_PACKAGE_MANAGERS,
   FIXTURE_ERROR_CODES,
   runFixtureMatrix,
@@ -420,22 +419,3 @@ describe('runFixtureMatrix — public tree missing', () => {
   });
 });
 
-describe('buildDotFixtureForwardStubRuns', () => {
-  it('produces one skipped run per package manager with FIX_E008 info', () => {
-    const stubs = buildDotFixtureForwardStubRuns(['npm', 'pnpm', 'bun']);
-    expect(stubs).toHaveLength(3);
-    for (const stub of stubs) {
-      expect(stub.packageName).toBe('@arki/dot');
-      expect(stub.status).toBe('skipped');
-      expect(stub.skipReason).toMatch(/forward-dependency/i);
-      expect(stub.stages.every(s => s.status === 'skipped')).toBe(true);
-      expect(stub.errors[0]?.code).toBe(FIXTURE_ERROR_CODES.forwardDependencyStub);
-      expect(stub.errors[0]?.severity).toBe('info');
-    }
-  });
-
-  it('does NOT pretend the DOT fixture passed — status is `skipped`', () => {
-    const stubs = buildDotFixtureForwardStubRuns(['npm']);
-    expect(stubs[0]?.status).not.toBe('success');
-  });
-});
