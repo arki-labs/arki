@@ -73,6 +73,13 @@ Controllable clock for tests.
 - `advance(ms: number): void` — moves time forward. Throws `RangeError` on negative or non-finite values.
 - `setNow(date: Date): void` — sets absolute time; allowed to go backward for arranging past scenarios.
 
+## Documentation
+
+`@arki/clock` is framework-agnostic and works on its own. When you compose
+it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
+application framework, see `packages/dot/docs/` for plugin authoring,
+lifecycle, and diagnostics.
+
 ## License
 
 MIT. See [LICENSE](./LICENSE).

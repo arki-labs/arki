@@ -81,6 +81,15 @@ When the rate-limiter Redis client is not ready, the limiter transparently falls
 | `RATE_LIMIT_PREFIX`       | Prefix for rate-limit keys (default `rl`).    |
 | `CACHE_TTL_DEFAULT`       | Default TTL in seconds (default `3600`).      |
 
+## Documentation
+
+`@arki/kv` ships an optional `@arki/kv/dot` adapter for the
+[`@arki/dot`](https://www.npmjs.com/package/@arki/dot) framework.
+
+- See `packages/dot/docs/` in the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
+  package for plugin authoring, lifecycle, diagnostics, and the
+  [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

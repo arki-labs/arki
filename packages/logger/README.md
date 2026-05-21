@@ -113,6 +113,13 @@ log('charge', { amount: 1000 });
 - `AsyncTransport` — interface for async log sinks.
 - `LogRecord`, `Attributes`, `Body`, `SeverityKind`, `SeverityText` — core types.
 
+## Documentation
+
+`@arki/logger` is framework-agnostic and works on its own. When you compose
+it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
+application framework, see `packages/dot/docs/` for plugin authoring,
+lifecycle, and diagnostics.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

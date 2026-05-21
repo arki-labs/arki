@@ -44,6 +44,13 @@ The subpath layout (`@arki/date/format`, `@arki/date/parseISO`) lets bundlers tr
 - `@arki/date/parseISO`
   - `parseISO` — re-export of `date-fns/parseISO`.
 
+## Documentation
+
+`@arki/date` is framework-agnostic and works on its own. When you compose
+it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
+application framework, see `packages/dot/docs/` for plugin authoring,
+lifecycle, and diagnostics.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

@@ -1,0 +1,36 @@
+# @arki/dot
+
+> TypeScript-first application composition framework with typed plugins, a 5-hook lifecycle (`configure` / `boot` / `start` / `stop` / `dispose`), structured manifest + diagnostics contracts, and an agent-readable CLI (`dot explain --json`, `dot doctor --json`).
+
+`@arki/dot` is the kernel. Package adapters (`@arki/env/dot`, `@arki/kv/dot`, `@arki/db/dot`) layer on top and are versioned independently.
+
+## Quickstart
+
+- [Quickstart tutorial](docs/quickstart.md): Boot your first DOT app in five minutes
+- [README](README.md): Overview, install, top-level concepts
+- [Quickstart example](docs/examples/quickstart.ts): Runnable code for the quickstart
+
+## Plugins and lifecycle
+
+- [Plugin authoring](docs/plugin-authoring.md): Write a `DotPlugin` — anatomy, hooks, DI, manifest contribution
+- [Lifecycle](docs/lifecycle.md): The 5-hook contract — state machine, failure ordering, idempotency rules, error codes
+- [Adapter authoring](docs/adapter-authoring.md): Expose a package as a DOT plugin via a `./dot` subpath export
+
+## Diagnostics
+
+- [Diagnostics](docs/diagnostics.md): `app.manifest`, `app.diagnostics`, `dot explain`, `dot doctor`
+- [Manifest contract](docs/diagnostics.md#dotappmanifest): Static graph — five-array shape
+- [Diagnostics contract](docs/diagnostics.md#dotdiagnosticssnapshot): Runtime snapshot — five-array shape
+- [`DiagnosticIssue` shape](docs/diagnostics.md#diagnosticissue): Stable code, severity, remediation, docsUrl
+
+## For agents
+
+- [Agent guide](docs/agent-guide.md): How agents inspect, generate, and verify DOT apps
+- [The verification loop](docs/agent-guide.md#4-the-verification-loop): `tsc --noEmit` + `dot explain --json` + `dot doctor --json`
+- [AGENTS.md convention](docs/agent-guide.md#6-agentsmd-convention): Per-app agent guidance file (emitted by `dot new`, ships in v1.1)
+- [MCP is a future adapter](docs/agent-guide.md#7-mcp-is-a-future-adapter): The kernel does not depend on MCP
+
+## Releases
+
+- [Release policy](docs/release-policy.md): SemVer, public surface, deprecation cycle, stability gates
+- [Upgrade guide](docs/upgrade-guide.md): Migration notes across breaking changes (empty in v0.1)

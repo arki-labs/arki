@@ -115,6 +115,23 @@ own packages and consume `@arki/dot` as a peer dependency.
 This keeps the kernel free of optional dependencies and lets each adapter
 ship at its own cadence.
 
+## Documentation
+
+The full docs live in [`docs/`](./docs):
+
+- [Quickstart](./docs/quickstart.md) — boot your first app in five minutes.
+- [Plugin authoring](./docs/plugin-authoring.md) — write your own `DotPlugin`.
+- [Lifecycle](./docs/lifecycle.md) — the 5-hook contract.
+- [Diagnostics](./docs/diagnostics.md) — `app.manifest`, `app.diagnostics`,
+  `dot explain`, `dot doctor`.
+- [Adapter authoring](./docs/adapter-authoring.md) — expose your package as
+  a DOT plugin.
+- [Agent guide](./docs/agent-guide.md) — how coding agents inspect, modify,
+  and verify DOT apps.
+- [Release policy](./docs/release-policy.md) — SemVer and deprecation.
+
+Agent-discoverable index: [`llms.txt`](./llms.txt).
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

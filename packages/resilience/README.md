@@ -80,6 +80,13 @@ attachPolicyLogger(policy, {
 - `CircuitOpenError`, `TimeoutError`, `RetriesExhaustedError` — typed errors with helpers (`isResilienceError`, `isBrokenCircuitError`, `isBulkheadRejectedError`).
 - Re-exports `IPolicy`, `wrap`, `noop` from `cockatiel`.
 
+## Documentation
+
+`@arki/resilience` is framework-agnostic and works on its own. When you
+compose it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
+application framework, see `packages/dot/docs/` for plugin authoring,
+lifecycle, and diagnostics.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

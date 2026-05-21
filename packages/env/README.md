@@ -65,6 +65,15 @@ const env = defineEnv({
 - `@arki/env`
   - Re-exports `contracts` from `@arki/env/contracts`.
 
+## Documentation
+
+`@arki/env` ships an optional `@arki/env/dot` adapter for the
+[`@arki/dot`](https://www.npmjs.com/package/@arki/dot) framework.
+
+- See `packages/dot/docs/` in the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
+  package for plugin authoring, lifecycle, diagnostics, and the
+  [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

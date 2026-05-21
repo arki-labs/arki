@@ -99,6 +99,15 @@ const postId = idFactory.next();
 | `DB_LOGGING`                            | Enable Drizzle logger when truthy.                            |
 | `DB_STATEMENT_TIMEOUT`, `DB_QUERY_TIMEOUT` | Per-statement / per-query timeouts in ms.                  |
 
+## Documentation
+
+`@arki/db` ships an optional `@arki/db/dot` adapter for the
+[`@arki/dot`](https://www.npmjs.com/package/@arki/dot) framework.
+
+- See `packages/dot/docs/` in the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
+  package for plugin authoring, lifecycle, diagnostics, and the
+  [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

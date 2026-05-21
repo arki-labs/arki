@@ -15,6 +15,15 @@ behavior works outside the monorepo:
 Task 11.5 (`dot new` scaffold) is the remaining piece — it will append a
 generated-app test alongside the boot test below.
 
+## Docs cross-reference
+
+The quickstart tutorial in `packages/dot/docs/quickstart.md` ships with a
+runnable companion at `packages/dot/docs/examples/quickstart.ts`. That
+example is structurally identical to `src/app.ts` (defineApp → use(env) →
+boot → emit manifest+diagnostics → dispose) and is intended to be picked
+up by future fixture-matrix expansions so docs examples cannot drift from
+working code.
+
 ## How the fixture runs
 
 The `bun release:arki fixture` matrix:

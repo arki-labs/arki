@@ -93,6 +93,13 @@ const strictSelect = createSelectSchema(users, {
 - `formData` — re-exported `zod-form-data` namespace.
 - `z`, `ZodError`, every Zod export — re-exported from `zod/v4`.
 
+## Documentation
+
+`@arki/contracts` is framework-agnostic and works on its own. When you
+compose it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
+application framework, see `packages/dot/docs/` for plugin authoring,
+lifecycle, and diagnostics.
+
 ## License
 
 MIT. See [LICENSE](./LICENSE).

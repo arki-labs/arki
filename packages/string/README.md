@@ -60,6 +60,13 @@ The root entry re-exports everything for convenience:
 import { base64, countCharacters, camelCase } from '@arki/string';
 ```
 
+## Documentation
+
+`@arki/string` is framework-agnostic and works on its own. When you compose
+it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
+application framework, see `packages/dot/docs/` for plugin authoring,
+lifecycle, and diagnostics.
+
 ## License
 
 MIT. See [LICENSE](./LICENSE).
