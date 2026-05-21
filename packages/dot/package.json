@@ -19,6 +19,9 @@
     "./package.json": "./package.json"
   },
   "types": "./dist/src/index.d.ts",
+  "bin": {
+    "dot": "./src/cli/index.ts"
+  },
   "scripts": {
     "build": "tsc",
     "clean": "git clean -xdf .cache .turbo dist node_modules",

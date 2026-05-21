@@ -662,6 +662,9 @@ export type {
 } from './diagnostics';
 export { testApp, bootTestApp } from './test-harness';
 export type { TestAppOptions } from './test-harness';
+// Task 9b: CLI envelope type is exported so adapter packages can produce the
+// same shape from related tooling (release-tooling, plugin scaffolds, etc.).
+export type { DotCliEnvelope, DotCliEnvelopeStatus } from './cli/render-explain';
 // #endregion
 
 // Re-export types
