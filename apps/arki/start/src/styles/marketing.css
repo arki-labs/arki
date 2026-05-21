@@ -56,25 +56,15 @@
 .marketing button { font: inherit; cursor: pointer; }
 
 /* ============================================================
-   NAV — sticky top bar
+   HEADER — page banner with the big brand mark.
+   Not sticky: at hero-size, sticky would eat 10-15% of viewport
+   on every scroll. The status bar (footer) carries the persistent
+   utilities (theme toggle, GitHub) instead.
    ============================================================ */
 .marketing-nav {
-  height: 56px;
   border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
+  padding: 40px 24px 32px;
   background: var(--background);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-.marketing-nav-left,
-.marketing-nav-right {
-  display: flex;
-  align-items: center;
-  gap: 22px;
 }
 /* Brand mark — L01 Monospace wordmark (arki Design System).
    Pure type, two sizes. Anchor styling is inherited. */
@@ -171,6 +161,13 @@
   height: 6px;
   border-radius: 9999px;
   background: currentColor;
+}
+.marketing-statusbar .marketing-icon-btn {
+  height: 24px;
+  width: 24px;
+}
+.marketing-statusbar .marketing-icon-btn svg {
+  font-size: 14px;
 }
 
 @media (max-width: 720px) {
