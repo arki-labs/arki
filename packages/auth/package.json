@@ -20,6 +20,11 @@
       "import": "./src/email/schema.ts",
       "node": "./src/email/schema.ts"
     },
+    "./tweaks-column": {
+      "types": "./dist/src/tweaks-column.d.ts",
+      "import": "./src/tweaks-column.ts",
+      "node": "./src/tweaks-column.ts"
+    },
     "./*": {
       "types": "./dist/src/*.d.ts",
       "import": "./src/*.ts",
