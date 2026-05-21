@@ -30,7 +30,7 @@ type InitEmailsOptions = {
    * @example
    * ```ts
    * import { kvQuotaStore } from '@arki/emails';
-   * import { kv } from '@avocabo/backend/core/kv';
+   * import { kv } from './kv';
    *
    * initEmails({ providers, store: kvQuotaStore(kv) });
    * ```

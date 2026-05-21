@@ -56,7 +56,7 @@ type SendOptions<TInput> = [TInput] extends [never]
  * ```ts
  * const magicLink = emails.email
  *   .input(z.object({ url: z.string().url() }))
- *   .from('Avocabo <no-reply@avocabo.app>')
+ *   .from('Acme <no-reply@example.com>')
  *   .subject('Your magic link')
  *   .react(({ url }) => <MagicLinkEmail url={url} />);
  *

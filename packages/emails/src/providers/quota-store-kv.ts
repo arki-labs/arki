@@ -26,7 +26,7 @@ export interface KVLike {
  * @example With `@arki/kv`
  * ```ts
  * import { kvQuotaStore } from '@arki/emails';
- * import { kv } from '@avocabo/backend/core/kv';
+ * import { kv } from './kv';
  *
  * const router = quotaRouter(
  *   [resendProvider({ apiKey, quotaPerMonth: 3_000 })],

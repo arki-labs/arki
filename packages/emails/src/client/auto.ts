@@ -74,7 +74,7 @@ export function createEmailClientFromEnv(overrides?: {
    *
    * @example
    * ```ts
-   * import { kv } from '@avocabo/backend/core/kv';
+   * import { kv } from './kv';
    *
    * export const emailClient = createEmailClientFromEnv({ kv });
    * ```
