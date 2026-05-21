@@ -123,6 +123,45 @@ describe('auditPackEntry — error rules', () => {
     expect(hit?.severity).toBe('error');
   });
 
+  it('no-tests rule allows .tmpl test files inside templates/', () => {
+    const entry = makeEntry([
+      { path: 'dist/foo.js' },
+      { path: 'dist/foo.d.ts' },
+      { path: 'templates/app-minimal/tests/boot.test.ts.tmpl' },
+      { path: 'README.md' },
+      { path: 'LICENSE' },
+    ]);
+    const result = auditPackEntry(entry, ctx);
+    const hits = result.ruleHits.filter(h => h.ruleId === 'no-tests');
+    expect(hits).toHaveLength(0);
+  });
+
+  it('no-tests rule still catches real .test.ts files outside templates/', () => {
+    const entry = makeEntry([
+      { path: 'dist/foo.js' },
+      { path: 'dist/foo.d.ts' },
+      { path: 'src/foo.test.ts' },
+      { path: 'README.md' },
+      { path: 'LICENSE' },
+    ]);
+    const result = auditPackEntry(entry, ctx);
+    const hits = result.ruleHits.filter(h => h.ruleId === 'no-tests');
+    expect(hits).toHaveLength(1);
+  });
+
+  it('no-tests rule catches non-tmpl test files inside templates/', () => {
+    const entry = makeEntry([
+      { path: 'dist/foo.js' },
+      { path: 'dist/foo.d.ts' },
+      { path: 'templates/foo/tests/boot.test.ts' },
+      { path: 'README.md' },
+      { path: 'LICENSE' },
+    ]);
+    const result = auditPackEntry(entry, ctx);
+    const hits = result.ruleHits.filter(h => h.ruleId === 'no-tests');
+    expect(hits).toHaveLength(1);
+  });
+
   it('flags private docs', () => {
     const entry = makeEntry([
       { path: 'dist/foo.js' },
