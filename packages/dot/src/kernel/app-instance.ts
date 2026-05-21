@@ -485,6 +485,22 @@ export class DotAppImpl {
     }
     // From booted or stopped, run start hooks.
     debugLifecycle('[%s] start: starting', this.#appName);
+
+    return withPhaseSpan(
+      {
+        appName: this.#appName,
+        phase: 'start',
+        pipCount: this.#ordered.length,
+      },
+      () => this.#runStartInner(),
+    );
+  }
+
+  /**
+   * Inner start loop. Separated from `start()` so the phase span wrapper
+   * stays thin and the rollback-cascade error path stays readable.
+   */
+  async #runStartInner(): Promise<void> {
     const startedRecords: PipRecord[] = [];
     for (const pip of this.#ordered) {
       const record = this.#records.get(pip.name)!;
@@ -502,7 +518,16 @@ export class DotAppImpl {
 
       const startedAt = performance.now();
       try {
-        await pip.start(ctx);
+        await withPipHookSpan(
+          {
+            appName: this.#appName,
+            pipName: pip.name,
+            pipVersion: pip.version,
+            hook: 'start',
+            order: record.order,
+          },
+          () => pip.start!(ctx),
+        );
       } catch (error) {
         const issue = makeIssue({
           code: DotLifecycleErrorCode.StartFailed,
@@ -585,20 +610,32 @@ export class DotAppImpl {
 
   async #runStop(): Promise<void> {
     debugLifecycle('[%s] stop: starting', this.#appName);
-    const startedRecords = this.#ordered.map(p => this.#records.get(p.name)!).filter(r => r.started);
-    const failures = await this.#runStopForRecords(reverseRecords(startedRecords));
-    this.#state = 'stopped';
-    this.#manifest = this.#buildManifest();
-    if (failures.length > 0) {
-      debugLifecycle('[%s] stop: complete with %d failure(s)', this.#appName, failures.length);
-      throw new DotLifecycleError({
-        code: DotLifecycleErrorCode.StopFailed,
+
+    return withPhaseSpan(
+      {
+        appName: this.#appName,
         phase: 'stop',
-        message: `${failures.length} pip(s) failed during stop`,
-        failures,
-      });
-    }
-    debugLifecycle('[%s] stop: complete', this.#appName);
+        pipCount: this.#ordered.length,
+      },
+      async () => {
+        const startedRecords = this.#ordered
+          .map(p => this.#records.get(p.name)!)
+          .filter(r => r.started);
+        const failures = await this.#runStopForRecords(reverseRecords(startedRecords));
+        this.#state = 'stopped';
+        this.#manifest = this.#buildManifest();
+        if (failures.length > 0) {
+          debugLifecycle('[%s] stop: complete with %d failure(s)', this.#appName, failures.length);
+          throw new DotLifecycleError({
+            code: DotLifecycleErrorCode.StopFailed,
+            phase: 'stop',
+            message: `${failures.length} pip(s) failed during stop`,
+            failures,
+          });
+        }
+        debugLifecycle('[%s] stop: complete', this.#appName);
+      },
+    );
   }
 
   async #runStopForRecords(records: readonly PipRecord[]): Promise<DotLifecyclePipFailure[]> {
@@ -613,7 +650,16 @@ export class DotAppImpl {
       };
       const startedAt = performance.now();
       try {
-        await record.pip.stop(ctx);
+        await withPipHookSpan(
+          {
+            appName: this.#appName,
+            pipName: record.pip.name,
+            pipVersion: record.pip.version,
+            hook: 'stop',
+            order: record.order,
+          },
+          () => record.pip.stop!(ctx),
+        );
         record.started = false;
         record.lifecycleDiagnostics.push({
           pip: record.pip.name,
@@ -658,6 +704,23 @@ export class DotAppImpl {
   }
 
   async #runDispose(): Promise<void> {
+    return withPhaseSpan(
+      {
+        appName: this.#appName,
+        phase: 'dispose',
+        pipCount: this.#ordered.length,
+      },
+      () => this.#runDisposeInner(),
+    );
+  }
+
+  /**
+   * Inner dispose orchestration. Separated from `#runDispose` so the
+   * phase span wrapper stays thin and the multi-state cascade (started
+   * → stop+dispose, failed → no-op, default → dispose-only) stays
+   * readable.
+   */
+  async #runDisposeInner(): Promise<void> {
     // From started, stop first.
     if (this.#state === 'started') {
       // Inline stop without throwing — we want to dispose anyway, but capture failures.
@@ -718,7 +781,16 @@ export class DotAppImpl {
       };
       const startedAt = performance.now();
       try {
-        await record.pip.dispose(ctx);
+        await withPipHookSpan(
+          {
+            appName: this.#appName,
+            pipName: record.pip.name,
+            pipVersion: record.pip.version,
+            hook: 'dispose',
+            order: record.order,
+          },
+          () => record.pip.dispose!(ctx),
+        );
         record.booted = false;
         record.lifecycleDiagnostics.push({
           pip: record.pip.name,

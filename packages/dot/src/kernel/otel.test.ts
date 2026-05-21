@@ -2,14 +2,15 @@
  * Tests for the OTel-first observability wiring.
  *
  * Registers an InMemorySpanExporter + SimpleSpanProcessor globally,
- * boots a DOT app with two pips, and asserts that:
+ * drives a DOT app through its 5-hook lifecycle, and asserts that:
  *
- *   - A `dot.app.configure` root span exists with the right attributes.
- *   - A `dot.app.boot` root span exists with the right attributes.
- *   - Each configured pip has a `dot.pip.configure` child span.
- *   - Each booted pip has a `dot.pip.boot` child span.
- *   - Child spans link to their phase via parent context.
- *   - On a failed boot, the failing pip's span is marked ERROR.
+ *   - Each public phase emits exactly one `dot.app.<phase>` root span
+ *     (`configure`, `boot`, `start`, `stop`, `dispose`).
+ *   - Each pip with a hook emits exactly one matching `dot.pip.<hook>`
+ *     child span with stable attributes (`dot.app.name`, `dot.pip.name`,
+ *     `dot.pip.version`, `dot.hook`, `dot.pip.order`).
+ *   - On a failed boot, the failing pip's span is marked ERROR and an
+ *     `exception` event is recorded; the parent phase span is also ERROR.
  *
  * Tests do NOT depend on histogram/metrics output — the in-memory metrics
  * SDK is a separate dependency. Span coverage is the load-bearing
@@ -120,6 +121,68 @@ describe('@arki/dot OTel instrumentation', () => {
     // Without it, child spans in async paths are root spans rather than
     // children of the phase span. Real consumers register a context
     // manager via the OTel SDK; we don't pull that dep into the test.
+  });
+
+  it('emits phase + per-pip spans for the full configure→boot→start→stop→dispose cascade', async () => {
+    type Svc = { web: { listening: boolean } };
+    const envPip = defineDotPip<{ env: { PORT: number } }>({
+      name: 'env',
+      version: '0.1.0',
+      configure(ctx) {
+        ctx.registerService('env', 'env');
+      },
+      boot() {
+        return { services: { env: { PORT: 3000 } } };
+      },
+    });
+    const webPip = defineDotPip<Svc>({
+      name: 'web',
+      version: '0.2.0',
+      dependencies: ['env'],
+      configure(ctx) {
+        ctx.registerService('web', 'custom');
+      },
+      boot() {
+        return { services: { web: { listening: false } } };
+      },
+      start(ctx) {
+        (ctx.services as Svc).web.listening = true;
+      },
+      stop(ctx) {
+        (ctx.services as Svc).web.listening = false;
+      },
+      dispose() {
+        /* drain */
+      },
+    });
+
+    const app = await defineApp('otel-full-lifecycle-test').use(envPip).use(webPip).start();
+    await app.stop();
+    await app.dispose();
+
+    // One root phase span per public phase call.
+    for (const phase of ['configure', 'boot', 'start', 'stop', 'dispose'] as const) {
+      const phaseSpans = spansByName(`dot.app.${phase}`);
+      expect(phaseSpans, `expected exactly one dot.app.${phase} span`).toHaveLength(1);
+      expect(phaseSpans[0]?.attributes['dot.app.name']).toBe('otel-full-lifecycle-test');
+      expect(phaseSpans[0]?.attributes['dot.app.phase']).toBe(phase);
+      expect(phaseSpans[0]?.status.code).toBe(1); // OK
+    }
+
+    // Per-pip hook spans: configure × 2, boot × 2, start × 1, stop × 1, dispose × 1.
+    // (only `web` declared start/stop/dispose; env has none of those hooks.)
+    expect(spansByName('dot.pip.configure')).toHaveLength(2);
+    expect(spansByName('dot.pip.boot')).toHaveLength(2);
+    expect(spansByName('dot.pip.start')).toHaveLength(1);
+    expect(spansByName('dot.pip.stop')).toHaveLength(1);
+    expect(spansByName('dot.pip.dispose')).toHaveLength(1);
+
+    const webStart = spansByName('dot.pip.start')[0]!;
+    expect(webStart.attributes['dot.pip.name']).toBe('web');
+    expect(webStart.attributes['dot.pip.version']).toBe('0.2.0');
+    expect(webStart.attributes['dot.hook']).toBe('start');
+    expect(webStart.attributes['dot.pip.order']).toBe(1);
+    expect(webStart.status.code).toBe(1); // OK
   });
 
   it('marks the failing pip span ERROR when boot throws', async () => {
