@@ -1,0 +1,10 @@
+{
+  "extends": "@arki/tsconfig/base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "dom", "dom.iterable"],
+    "jsx": "preserve",
+    "rootDir": "."
+  },
+  "include": ["."],
+  "exclude": ["node_modules"]
+}

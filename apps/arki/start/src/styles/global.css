@@ -1,0 +1,34 @@
+/* @import 'jotai-devtools/styles.css'; */
+@import 'tailwindcss';
+@import '@arki/design-systems/transitions/nav.css';
+
+/* Design system — choose one:
+   @import '@arki/design-systems/workbench/tokens.css';
+   @import '@arki/design-systems/workbench/theme-bridge.css';
+   — or —
+   @import '@arki/design-systems/atelier/tokens.css';
+   @import '@arki/design-systems/atelier/theme-bridge.css';
+   — or (games/scored surfaces) —
+   @import '@arki/design-systems/arena/tokens.css';
+   @import '@arki/design-systems/arena/theme-bridge.css';
+*/
+@import '@arki/design-systems/workbench/tokens.css';
+@import '@arki/design-systems/workbench/theme-bridge.css';
+
+/* Tailwind plugins */
+@plugin "tailwindcss-animate";
+@plugin "tailwindcss-radix";
+@plugin "tailwind-scrollbar-hide";
+@plugin "@tailwindcss/container-queries";
+@plugin "@tailwindcss/forms";
+@plugin "@tailwindcss/typography";
+
+/* Tailwind sources */
+@source "../../../../../packages/content/src";
+@source "../../../../../packages/ui/base/src";
+@source "../../../../../packages/ui/components/src";
+@source "../../../../../packages/theme/src";
+@source "../../../../../packages/sitekit/src";
+@source "../../../../../packages/design-systems/src";
+
+@custom-variant dark (&:is(.dark *));

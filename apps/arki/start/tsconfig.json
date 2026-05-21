@@ -1,0 +1,14 @@
+{
+  "extends": "@arki/tsconfig/react.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "paths": {
+      "~/*": ["./src/*"],
+      "content-collections": ["./.content-collections/generated"]
+    },
+    "types": ["vite/client", "@tanstack/start-client-core"]
+  },
+  "include": ["src", "vite.config.ts", "content.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}
