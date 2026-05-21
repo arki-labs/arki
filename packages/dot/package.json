@@ -1,61 +1,134 @@
 {
   "name": "@arki/dot",
   "version": "0.1.0",
-  "private": true,
+  "description": "TypeScript-first application composition framework for the ARKI package family — lifecycle-aware plugins, deterministic boot order, manifest/diagnostics envelopes, and an agent-native CLI.",
   "license": "MIT",
-  "sideEffects": false,
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-dev/arki.git",
+    "directory": "packages/dot"
+  },
+  "homepage": "https://arki.dev/dot",
+  "bugs": {
+    "url": "https://github.com/arki-dev/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "framework",
+    "plugin-system",
+    "lifecycle",
+    "diagnostics",
+    "manifest",
+    "agent-native",
+    "dot"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "bin": {
+    "dot": "./dist/cli/index.js"
+  },
   "exports": {
     ".": {
-      "types": "./dist/src/index.d.ts",
+      "types": "./dist/index.d.ts",
       "import": "./src/index.ts",
-      "node": "./src/index.ts"
+      "default": "./dist/index.js"
     },
-    "./*": {
-      "types": "./dist/src/*.d.ts",
-      "import": "./src/*.ts",
-      "node": "./src/*.ts"
+    "./package.json": "./package.json",
+    "./cli": {
+      "types": "./dist/cli/index.d.ts",
+      "import": "./src/cli/index.ts",
+      "default": "./dist/cli/index.js"
     },
-    "./package.json": "./package.json"
+    "./test-harness": {
+      "types": "./dist/test-harness.d.ts",
+      "import": "./src/test-harness.ts",
+      "default": "./dist/test-harness.js"
+    },
+    "./event-sourcing": {
+      "types": "./dist/legacy/event-sourcing.d.ts",
+      "import": "./src/legacy/event-sourcing.ts",
+      "default": "./dist/legacy/event-sourcing.js"
+    },
+    "./presets/runtime-local": {
+      "types": "./src/legacy/presets/runtime-local.ts",
+      "import": "./src/legacy/presets/runtime-local.ts",
+      "default": "./src/legacy/presets/runtime-local.ts"
+    }
   },
-  "types": "./dist/src/index.d.ts",
-  "bin": {
-    "dot": "./src/cli/index.ts"
-  },
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/assert": "workspace:*",
-    "@arki/auth": "workspace:*",
     "@arki/contracts": "workspace:*",
+    "@arki/logger": "workspace:*",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "@arki/auth": "workspace:*",
     "@arki/db": "workspace:*",
     "@arki/emails": "workspace:*",
     "@arki/event-sourcing": "workspace:*",
     "@arki/fs": "workspace:*",
     "@arki/kv": "workspace:*",
-    "@arki/logger": "workspace:*",
     "@arki/queue": "workspace:*",
     "@arki/slugify": "workspace:*",
+    "@electric-sql/pglite": "^0.4.0",
+    "@orpc/server": "catalog:backend",
+    "@t3-oss/env-core": "catalog:env",
+    "better-auth": "catalog:better-auth",
+    "drizzle-orm": "catalog:drizzle"
+  },
+  "peerDependenciesMeta": {
+    "@arki/auth": { "optional": true },
+    "@arki/db": { "optional": true },
+    "@arki/emails": { "optional": true },
+    "@arki/event-sourcing": { "optional": true },
+    "@arki/fs": { "optional": true },
+    "@arki/kv": { "optional": true },
+    "@arki/queue": { "optional": true },
+    "@arki/slugify": { "optional": true },
+    "@electric-sql/pglite": { "optional": true },
+    "@orpc/server": { "optional": true },
+    "@t3-oss/env-core": { "optional": true },
+    "better-auth": { "optional": true },
+    "drizzle-orm": { "optional": true }
+  },
+  "devDependencies": {
+    "@arki/auth": "workspace:*",
+    "@arki/db": "workspace:*",
+    "@arki/emails": "workspace:*",
+    "@arki/eslint-config": "workspace:*",
+    "@arki/event-sourcing": "workspace:*",
+    "@arki/fs": "workspace:*",
+    "@arki/kv": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/queue": "workspace:*",
+    "@arki/slugify": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
     "@electric-sql/pglite": "^0.4.5",
     "@orpc/server": "catalog:backend",
     "@t3-oss/env-core": "catalog:env",
     "better-auth": "catalog:better-auth",
     "drizzle-orm": "catalog:drizzle",
-    "zod": "catalog:"
-  },
-  "devDependencies": {
-    "@arki/eslint-config": "workspace:*",
-    "@arki/prettier-config": "workspace:*",
-    "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*",
     "typescript": "catalog:"
   }
 }

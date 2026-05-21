@@ -8,9 +8,9 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { defineApp } from '../define-app';
-import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle';
-import { defineDotPlugin } from '../plugin-contract';
+import { defineApp } from '../define-app.js';
+import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
+import { defineDotPlugin } from '../plugin-contract.js';
 
 type CallLog = {
   hook: 'configure' | 'boot' | 'start' | 'stop' | 'dispose';

@@ -15,8 +15,8 @@
  *    report an aggregate error.
  */
 
-import type { DotLifecycleHook } from './lifecycle';
-import type { DependencyEdgeKind, RouteTransport, ServiceKind } from './manifest';
+import type { DotLifecycleHook } from './lifecycle.js';
+import type { DependencyEdgeKind, RouteTransport, ServiceKind } from './manifest.js';
 
 /**
  * Aggregate registration record produced during the `configure` phase.
@@ -199,4 +199,4 @@ export function pluginDependencies(plugin: AnyDotPlugin): readonly string[] {
 
 /** Re-exported for downstream typing. */
 
-export { type DotAppManifest, type PluginManifest } from './manifest';
+export { type DotAppManifest, type PluginManifest } from './manifest.js';

@@ -12,7 +12,7 @@
  * This is the "5 arrays" contract referenced by the kernel spec.
  */
 
-import type { DotLifecycleHook, DotLifecycleState } from './lifecycle';
+import type { DotLifecycleHook, DotLifecycleState } from './lifecycle.js';
 
 /** Severity of a single diagnostic issue. */
 export type DiagnosticSeverity = 'info' | 'warning' | 'error';

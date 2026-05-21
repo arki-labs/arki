@@ -16,8 +16,8 @@ import { pathToFileURL } from 'node:url';
 
 import { createDebugLogger } from '@arki/logger/debug';
 
-import type { DotApp, DotAppBuilder, DotAppConfigured } from '../define-app';
-import { DotCliError, DotCliErrorCode } from './error-codes';
+import type { DotApp, DotAppBuilder, DotAppConfigured } from '../define-app.js';
+import { DotCliError, DotCliErrorCode } from './error-codes.js';
 
 const debugDiscover = createDebugLogger('arki:dot:cli:discover');
 

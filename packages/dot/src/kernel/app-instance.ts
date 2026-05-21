@@ -14,8 +14,8 @@ import type {
   PluginDiagnostic,
   RouteDiagnostic,
   ServiceDiagnostic,
-} from '../diagnostics';
-import type { DotLifecycleHook, DotLifecyclePluginFailure, DotLifecycleState } from '../lifecycle';
+} from '../diagnostics.js';
+import type { DotLifecycleHook, DotLifecyclePluginFailure, DotLifecycleState } from '../lifecycle.js';
 import type {
   DependencyEdge,
   DependencyEdgeKind,
@@ -24,7 +24,7 @@ import type {
   PluginManifest,
   RouteManifest,
   ServiceManifest,
-} from '../manifest';
+} from '../manifest.js';
 import type {
   AnyDotPlugin,
   DotBootContext,
@@ -33,10 +33,10 @@ import type {
   DotDisposeContext,
   DotStartContext,
   DotStopContext,
-} from '../plugin-contract';
-import { buildDependencyEdges, topologicalSort } from '../dependency-graph';
-import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle';
-import { pluginProvides } from '../plugin-contract';
+} from '../plugin-contract.js';
+import { buildDependencyEdges, topologicalSort } from '../dependency-graph.js';
+import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
+import { pluginProvides } from '../plugin-contract.js';
 
 const debugKernel = createDebugLogger('arki:dot:kernel');
 const debugLifecycle = createDebugLogger('arki:dot:lifecycle');
@@ -857,5 +857,5 @@ function reverseRecords(records: readonly PluginRecord[]): readonly PluginRecord
 
 /** Re-export `ServiceKind` and `RouteTransport` for the kernel's internal use. */
 
-export { type ServiceKind, type RouteTransport } from '../manifest';
-export { type DotPlugin } from '../plugin-contract';
+export { type ServiceKind, type RouteTransport } from '../manifest.js';
+export { type DotPlugin } from '../plugin-contract.js';

@@ -12,8 +12,8 @@ import { join, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { discoverApp, loadAppFromFile, resolveAppFile } from '../discover';
-import { DotCliError, DotCliErrorCode } from '../error-codes';
+import { discoverApp, loadAppFromFile, resolveAppFile } from '../discover.js';
+import { DotCliError, DotCliErrorCode } from '../error-codes.js';
 
 // Sources for synthetic app files. They import directly from the kernel
 // modules (not the barrel `index.ts`) so vitest's import-analysis doesn't

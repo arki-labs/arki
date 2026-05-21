@@ -4,10 +4,10 @@
 
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { DotApp } from '../define-app';
-import { defineApp } from '../define-app';
-import { defineDotPlugin } from '../plugin-contract';
-import { testApp } from '../test-harness';
+import type { DotApp } from '../define-app.js';
+import { defineApp } from '../define-app.js';
+import { defineDotPlugin } from '../plugin-contract.js';
+import { testApp } from '../test-harness.js';
 
 describe('defineApp', () => {
   it('defineApp(name) returns a builder', () => {

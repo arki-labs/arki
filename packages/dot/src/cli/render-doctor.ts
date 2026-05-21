@@ -10,8 +10,8 @@
  *   - `success` otherwise
  */
 
-import type { DiagnosticIssue, DiagnosticStatus, DotDiagnosticsSnapshot } from '../diagnostics';
-import type { DotCliEnvelope, DotCliEnvelopeStatus, RenderOptions } from './render-explain';
+import type { DiagnosticIssue, DiagnosticStatus, DotDiagnosticsSnapshot } from '../diagnostics.js';
+import type { DotCliEnvelope, DotCliEnvelopeStatus, RenderOptions } from './render-explain.js';
 
 export type DoctorSource = {
   diagnostics: DotDiagnosticsSnapshot;

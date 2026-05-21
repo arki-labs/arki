@@ -6,9 +6,9 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { defineApp } from '../../define-app';
-import { defineDotPlugin } from '../../plugin-contract';
-import { buildExplainEnvelope, renderExplain } from '../render-explain';
+import { defineApp } from '../../define-app.js';
+import { defineDotPlugin } from '../../plugin-contract.js';
+import { buildExplainEnvelope, renderExplain } from '../render-explain.js';
 
 const FROZEN_NOW = () => new Date('2026-01-01T00:00:00.000Z');
 

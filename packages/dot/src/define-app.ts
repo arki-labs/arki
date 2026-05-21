@@ -13,11 +13,11 @@
  * See `./lifecycle.ts` for hook semantics, failure ordering, idempotency rules.
  */
 
-import type { DotDiagnosticsSnapshot } from './diagnostics';
-import type { DotLifecycleState } from './lifecycle';
-import type { DotAppManifest } from './manifest';
-import type { AnyDotPlugin, DotPlugin } from './plugin-contract';
-import { DotAppImpl } from './kernel/app-instance';
+import type { DotDiagnosticsSnapshot } from './diagnostics.js';
+import type { DotLifecycleState } from './lifecycle.js';
+import type { DotAppManifest } from './manifest.js';
+import type { AnyDotPlugin, DotPlugin } from './plugin-contract.js';
+import { DotAppImpl } from './kernel/app-instance.js';
 
 /**
  * Public DotApp surface. The internal `DotAppImpl` implements this; consumers

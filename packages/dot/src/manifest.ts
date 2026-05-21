@@ -12,7 +12,7 @@
  * This shape is referenced by Task 7's scorecard.
  */
 
-import type { DotLifecycleHook } from './lifecycle';
+import type { DotLifecycleHook } from './lifecycle.js';
 
 /**
  * Kind of service that a plugin can publish.

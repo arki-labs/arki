@@ -8,11 +8,11 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { defineApp } from '../../define-app';
-import { defineDotPlugin } from '../../plugin-contract';
-import { testApp } from '../../test-harness';
-import { runDoctor } from '../index';
-import { buildDoctorEnvelope, renderDoctor } from '../render-doctor';
+import { defineApp } from '../../define-app.js';
+import { defineDotPlugin } from '../../plugin-contract.js';
+import { testApp } from '../../test-harness.js';
+import { runDoctor } from '../index.js';
+import { buildDoctorEnvelope, renderDoctor } from '../render-doctor.js';
 
 const FROZEN_NOW = () => new Date('2026-01-01T00:00:00.000Z');
 

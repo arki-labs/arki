@@ -9,8 +9,8 @@
  * agents can parse the output identically across CLI surfaces.
  */
 
-import type { DiagnosticIssue } from '../diagnostics';
-import type { DotAppManifest } from '../manifest';
+import type { DiagnosticIssue } from '../diagnostics.js';
+import type { DotAppManifest } from '../manifest.js';
 
 export type DotCliEnvelopeStatus = 'success' | 'failure' | 'warning';
 

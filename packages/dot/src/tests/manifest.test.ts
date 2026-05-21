@@ -7,8 +7,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { defineApp } from '../define-app';
-import { defineDotPlugin } from '../plugin-contract';
+import { defineApp } from '../define-app.js';
+import { defineDotPlugin } from '../plugin-contract.js';
 
 describe('DOT manifest', () => {
   it('exposes all five arrays on an empty app', async () => {

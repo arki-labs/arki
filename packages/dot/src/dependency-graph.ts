@@ -5,9 +5,9 @@
  * directly.
  */
 
-import type { AnyDotPlugin } from './plugin-contract';
-import { DotLifecycleError, DotLifecycleErrorCode } from './lifecycle';
-import { pluginDependencies } from './plugin-contract';
+import type { AnyDotPlugin } from './plugin-contract.js';
+import { DotLifecycleError, DotLifecycleErrorCode } from './lifecycle.js';
+import { pluginDependencies } from './plugin-contract.js';
 
 /**
  * Sort plugins so that every plugin appears after the plugins it depends on.

@@ -22,9 +22,9 @@
  *   });
  */
 
-import type { DotApp, DotAppBuilder } from './define-app';
-import type { AnyDotPlugin, DotPlugin } from './plugin-contract';
-import { defineApp } from './define-app';
+import type { DotApp, DotAppBuilder } from './define-app.js';
+import type { AnyDotPlugin, DotPlugin } from './plugin-contract.js';
+import { defineApp } from './define-app.js';
 
 export type TestAppOptions = {
   /** App name used in the manifest. Defaults to `'test-app'`. */

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 /**
  * `dot` CLI entry point.
@@ -22,15 +22,15 @@ import { parseArgs as nodeParseArgs } from 'node:util';
 
 import { createDebugLogger } from '@arki/logger/debug';
 
-import type { DotApp, DotAppBuilder, DotAppConfigured } from '../define-app';
-import type { DiagnosticIssue } from '../diagnostics';
-import type { DiscoveredApp } from './discover';
-import type { DotCliEnvelope, DotCliEnvelopeStatus } from './render-explain';
-import { DotLifecycleError } from '../lifecycle';
-import { discoverApp, guards } from './discover';
-import { DotCliError, DotCliErrorCode, dotCliDocsUrl } from './error-codes';
-import { renderDoctor } from './render-doctor';
-import { renderExplain } from './render-explain';
+import type { DotApp, DotAppBuilder, DotAppConfigured } from '../define-app.js';
+import type { DiagnosticIssue } from '../diagnostics.js';
+import type { DiscoveredApp } from './discover.js';
+import type { DotCliEnvelope, DotCliEnvelopeStatus } from './render-explain.js';
+import { DotLifecycleError } from '../lifecycle.js';
+import { discoverApp, guards } from './discover.js';
+import { DotCliError, DotCliErrorCode, dotCliDocsUrl } from './error-codes.js';
+import { renderDoctor } from './render-doctor.js';
+import { renderExplain } from './render-explain.js';
 
 const debugCli = createDebugLogger('arki:dot:cli');
 
@@ -373,21 +373,28 @@ function formatErrorText(err: DotCliError): string {
  * Re-exports for test consumers and adapter packages.
  */
 export { DotCliError, DotCliErrorCode, dotCliDocsUrl };
-export type { DotCliEnvelope, DotCliEnvelopeStatus } from './render-explain';
+export type { DotCliEnvelope, DotCliEnvelopeStatus } from './render-explain.js';
 
 // Direct-execution guard: only spin up the CLI when this module is the entry
 // point, not when it's imported (e.g. by tests).
-const isMainModule = (() => {
+const isMainModule = await (async () => {
   try {
-    // Bun sets `import.meta.main` when running as the entry script. Node
-    // does not, so we fall back to comparing argv[1] with this file URL.
+    // Bun sets `import.meta.main` when running as the entry script.
     if (typeof (import.meta as { main?: boolean }).main === 'boolean') {
       return (import.meta as { main: boolean }).main;
     }
   } catch {
     /* ignore */
   }
-  return false;
+  // Node fallback: compare argv[1]'s resolved file URL with import.meta.url.
+  try {
+    const entry = process.argv[1];
+    if (typeof entry !== 'string') return false;
+    const { pathToFileURL } = await import('node:url');
+    return pathToFileURL(entry).href === import.meta.url;
+  } catch {
+    return false;
+  }
 })();
 
 if (isMainModule) {
