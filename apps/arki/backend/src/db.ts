@@ -9,14 +9,14 @@ import type {
 import { drizzleProjection, drizzleWithRepoProjection } from '@arki/event-sourcing/store';
 
 import { createUserRepository } from './features/auth/repository';
-import * as schema from './schema';
+import { relations } from './relations';
 
-export const db = createDb({ schema });
+export const db = createDb({ relations });
 
 export type Db = typeof db;
 export type Transaction = Parameters<Parameters<Db['transaction']>[0]>[0];
 export type Database = Db | Transaction;
-export type Schema = typeof schema;
+export type Relations = typeof relations;
 
 export const createRepositories = async (db: Database) => {
   return {
@@ -31,7 +31,7 @@ export type AppRepositories = typeof repositories;
 
 export const createProjection = <EventType extends Event>(
   canHandle: CanHandle<EventType>,
-  handle: (events: PostgresReadEvent<EventType>[], context: DrizzleProjectionHandlerContext<Schema>) => Promise<void>,
+  handle: (events: PostgresReadEvent<EventType>[], context: DrizzleProjectionHandlerContext<Relations>) => Promise<void>,
 ) => drizzleProjection(db, { handle, canHandle });
 
 export const createWithRepoProjection = <EventType extends Event, Key extends keyof typeof repositories>(
