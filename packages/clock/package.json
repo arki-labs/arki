@@ -1,0 +1,41 @@
+{
+  "name": "@arki/clock",
+  "version": "0.0.1",
+  "description": "Clock abstraction for testable time-dependent code, with deterministic mock and system implementations.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "clock",
+    "time",
+    "mock",
+    "testing"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
