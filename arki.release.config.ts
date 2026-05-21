@@ -12,7 +12,7 @@
  * `bun release:arki` validates the config shape before running.
  *
  * Note on URLs: the repository / bugs / homepage values are intentional
- * placeholders for the eventual public `arki-dev/arki` repo. They live in
+ * placeholders for the eventual public `arki-labs/arki` repo. They live in
  * source control so the release tooling produces deterministic output and
  * the founder can swap them in one edit when the public repo is created.
  * Do NOT replace these with personal-account URLs — that is exactly the
@@ -26,10 +26,10 @@ export const config: ReleaseConfig = {
     license: 'MIT',
     repository: {
       type: 'git',
-      url: 'https://github.com/arki-dev/arki.git',
+      url: 'https://github.com/arki-labs/arki.git',
     },
     bugs: {
-      url: 'https://github.com/arki-dev/arki/issues',
+      url: 'https://github.com/arki-labs/arki/issues',
     },
     homepage: 'https://arki.dev',
     publishConfig: {

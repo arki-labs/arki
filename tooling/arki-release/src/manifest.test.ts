@@ -20,8 +20,8 @@ import type {
 /** Shared metadata defaults reused by every test. */
 const defaults: PublicMetadataDefaults = {
   license: 'MIT',
-  repository: { type: 'git', url: 'https://github.com/arki-dev/arki.git' },
-  bugs: { url: 'https://github.com/arki-dev/arki/issues' },
+  repository: { type: 'git', url: 'https://github.com/arki-labs/arki.git' },
+  bugs: { url: 'https://github.com/arki-labs/arki/issues' },
   homepage: 'https://arki.dev',
   publishConfig: { access: 'public' },
   keywords: ['arki', 'typescript'],
@@ -294,10 +294,10 @@ describe('materializeManifest — boundary cases', () => {
     // Repository / bugs come from defaults since input didn't supply them.
     expect(result.manifest.repository).toEqual({
       type: 'git',
-      url: 'https://github.com/arki-dev/arki.git',
+      url: 'https://github.com/arki-labs/arki.git',
     });
     expect(result.manifest.bugs).toEqual({
-      url: 'https://github.com/arki-dev/arki/issues',
+      url: 'https://github.com/arki-labs/arki/issues',
     });
   });
 
