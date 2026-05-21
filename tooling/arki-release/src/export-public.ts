@@ -726,6 +726,8 @@ const PUBLIC_AGENTS_MD = [
   '',
   '## Where to look',
   '',
+  '- `packages/dot/docs/principles.md` — **read first.** The five rules every',
+  '  API, error, and PR is measured against. Slightly playful, very precise.',
   '- `packages/dot/README.md` — DOT framework reference (what a pip is, the',
   '  `defineApp` + `defineDotPip` API, lifecycle hooks, CLI).',
   '- `packages/<name>/README.md` — per-package contract and examples.',

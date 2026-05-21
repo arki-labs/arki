@@ -4,6 +4,11 @@
 docs are organised by job — pick the one that matches what you are about to
 do.
 
+## Read first
+
+- [Principles](./principles.md) — the five rules every API, error message,
+  and PR is measured against. Read these before contributing.
+
 ## For app authors
 
 - [Quickstart](./quickstart.md) — boot your first DOT app in five minutes.

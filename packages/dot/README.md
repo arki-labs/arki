@@ -181,6 +181,8 @@ ship at its own cadence.
 
 The full docs live in [`docs/`](./docs):
 
+- [Principles](./docs/principles.md) — **read first.** The five rules every
+  API, error, and PR is measured against. Slightly playful, very precise.
 - [Quickstart](./docs/quickstart.md) — boot your first app in five minutes.
 - [Pip authoring](./docs/pip-authoring.md) — write your own `DotPip`.
 - [Lifecycle](./docs/lifecycle.md) — the 5-hook contract.
