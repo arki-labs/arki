@@ -30,6 +30,9 @@ import { createDotProcedures, rpcFeatures } from './orpc';
  * Provides a fluent API (builder pattern) to configure and initialize
  * the core components of a full-stack application.
  *
+ * @deprecated Use `defineApp` from the new kernel. The legacy `Dot` class is
+ * preserved for in-tree consumers (games-platform, kapodopera) only.
+ *
  * @template TAppName A string literal type for the application name.
  * @template TRouters The structure of the combined oRPC routers.
  * @template TSchema The Drizzle database schema structure.
@@ -593,6 +596,11 @@ export class Dot<
 
 /**
  * Creates a new Dot application builder instance.
+ *
+ * @deprecated Use `defineApp(name)` from the new kernel — the legacy `createDot`
+ * builder is kept for in-tree consumers (games-platform, kapodopera) and will
+ * be removed once they migrate. New code MUST use `defineApp`.
+ *
  * @param name A unique name for the application (used for KV namespacing, etc.).
  * @returns A new Dot instance to start configuration.
  * @example
@@ -601,6 +609,60 @@ export class Dot<
 export function createDot<TAppName extends string>(name: TAppName) {
   return new Dot(name);
 }
+
+// #region New kernel — public surface (Task 9a)
+//
+// `defineApp` is the new entry point. `createDot` / `definePlugin` / `Dot`
+// remain as @deprecated aliases for the duration of the migration.
+export { defineApp } from './define-app';
+export type { DotApp, DotAppBuilder, DotAppConfigured } from './define-app';
+export { defineDotPlugin } from './plugin-contract';
+export type {
+  DotPlugin,
+  DotBootContext,
+  DotBootResult,
+  DotConfigureContext,
+  DotDisposeContext,
+  DotManifestContext,
+  DotManifestContribution,
+  DotStartContext,
+  DotStopContext,
+} from './plugin-contract';
+export {
+  DotLifecycleError,
+  DotLifecycleErrorCode,
+  DOT_LIFECYCLE_HOOKS,
+} from './lifecycle';
+export type {
+  DotLifecycleHook,
+  DotLifecycleState,
+  DotLifecyclePluginFailure,
+  DotLifecycleErrorCodeValue,
+} from './lifecycle';
+export type {
+  DotAppManifest,
+  PluginManifest,
+  RouteManifest,
+  ServiceManifest,
+  LifecycleManifest,
+  DependencyEdge,
+  DependencyEdgeKind,
+  ServiceKind,
+  RouteTransport,
+} from './manifest';
+export type {
+  DotDiagnosticsSnapshot,
+  PluginDiagnostic,
+  RouteDiagnostic,
+  ServiceDiagnostic,
+  LifecycleDiagnostic,
+  DiagnosticIssue,
+  DiagnosticSeverity,
+  DiagnosticStatus,
+} from './diagnostics';
+export { testApp, bootTestApp } from './test-harness';
+export type { TestAppOptions } from './test-harness';
+// #endregion
 
 // Re-export types
 export * from './types';

@@ -557,6 +557,10 @@ export class PluginBuilder<
 /**
  * Create a new plugin builder
  *
+ * @deprecated Use `defineDotPlugin` from the new kernel. The legacy
+ * `definePlugin` is preserved for in-tree consumers (games-platform,
+ * kapodopera) only.
+ *
  * @param name - Unique plugin identifier
  * @returns Fluent builder for configuring the plugin
  *
