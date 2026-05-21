@@ -9,7 +9,7 @@ This guide is the agent's playbook.
 
 ## Why DOT is agent-native
 
-- **Inspectable app graph.** `app.manifest` is structured data: plugins,
+- **Inspectable app graph.** `app.manifest` is structured data: pips,
   services, routes, lifecycle hooks, dependency edges. No prose, no
   source-diving.
 - **Structured diagnostics.** Every issue carries a stable `code`,
@@ -41,7 +41,7 @@ Envelope:
   "data": {
     "manifest": {
       "app": { "name": "my-app" },
-      "plugins": [ /* ... */ ],
+      "pips": [ /* ... */ ],
       "routes": [ /* ... */ ],
       "services": [ /* ... */ ],
       "lifecycle": [ /* ... */ ],
@@ -59,7 +59,7 @@ import { defineApp } from '@arki/dot';
 import { app } from './app.js'; // your already-defined builder
 
 const configured = (app as ReturnType<typeof defineApp>).configure();
-const plugins = configured.manifest.plugins.map(p => p.name);
+const pips = configured.manifest.pips.map(p => p.name);
 const routes = configured.manifest.routes;
 ```
 
@@ -86,7 +86,7 @@ Look at `data.diagnostics.issues`:
         {
           "code": "ENV_E001",
           "severity": "error",
-          "plugin": "env",
+          "pip": "env",
           "message": "Missing required env var: DATABASE_URL",
           "remediation": "Add DATABASE_URL to your environment or .env file.",
           "docsUrl": "https://example.com/dot/docs/diagnostics#env-e001"
@@ -112,16 +112,16 @@ boot failure is observable, not opaque.
 
 ## 3. Safe code generation
 
-When generating plugins, routes, or services:
+When generating pips, routes, or services:
 
 - **Always validate against the manifest contract** before writing. A
-  generated plugin must produce a valid `DotManifestContribution`.
-- **Use the test harness.** Boot the generated plugin in `testApp([...])`
+  generated pip must produce a valid `DotManifestContribution`.
+- **Use the test harness.** Boot the generated pip in `testApp([...])`
   before considering the change complete.
-- **Prefer adapters over hand-rolled plugins.** If a package exposes
+- **Prefer adapters over hand-rolled pips.** If a package exposes
   `./dot`, use it.
 
-`dot new <app>` (v1.1) and `dot add <plugin>` (deferred) will both support
+`dot new <app>` (v1.1) and `dot add <pip>` (deferred) will both support
 `--dry-run --json` so agents can preview the exact file operations. Until
 those land, agents must use the existing `defineApp(...).use(...)` API
 directly and verify with `dot explain`.
@@ -148,27 +148,27 @@ single biggest correlate of broken commits.
 
 ### Add an env var
 
-1. Edit the `env({ schema: { ... } })` plugin in `app.ts` to add the new
+1. Edit the `env({ schema: { ... } })` pip in `app.ts` to add the new
    key.
 2. `npx dot explain --json | jq '.data.manifest.services[] | select(.kind == "env")'`
-   — confirm the env plugin is still registered.
+   — confirm the env pip is still registered.
 3. `npx dot doctor --json | jq '.data.diagnostics.issues'` — should be
    empty unless the env var is missing at runtime.
 
 ### Add a route
 
-1. Edit the plugin that owns the route domain. Call `ctx.registerRoute({
+1. Edit the pip that owns the route domain. Call `ctx.registerRoute({
    id, method, path, transport })` from its `configure` hook.
 2. `npx dot explain --json | jq '.data.manifest.routes'` — confirm the
-   route appears with the right plugin owner.
+   route appears with the right pip owner.
 3. `npx dot doctor --json | jq '.data.diagnostics.routes'` — confirm
    `status: "ok"`.
 
-### Add a plugin
+### Add a pip
 
-1. Import the plugin and chain `.use(plugin)` onto the builder in `app.ts`.
-2. `npx dot explain --json | jq '.data.manifest.plugins'` — confirm the new
-   plugin is in the list.
+1. Import the pip and chain `.use(pip)` onto the builder in `app.ts`.
+2. `npx dot explain --json | jq '.data.manifest.pips'` — confirm the new
+   pip is in the list.
 3. `npx dot doctor --json | jq '.data.diagnostics.lifecycle'` — confirm
    every hook ran.
 
@@ -179,7 +179,7 @@ single biggest correlate of broken commits.
 3. Re-run. Repeat.
 
 If the first issue's `code` is `DOT_LIFECYCLE_E003` (boot failure), the
-`plugin` field tells you exactly which plugin's `boot` threw. The kernel
+`pip` field tells you exactly which pip's `boot` threw. The kernel
 already cleaned up everything else.
 
 ## 6. AGENTS.md convention
@@ -189,10 +189,10 @@ app root. This file documents:
 
 - **Verification commands** — the exact `typecheck`, `test`, and `dot
   doctor` commands the agent should run.
-- **Local conventions** — naming, file layout, where to put new plugins.
+- **Local conventions** — naming, file layout, where to put new pips.
 - **Public / private boundaries** — which files agents may freely edit and
   which require human review.
-- **Where DOT artifacts live** — `dot.config.ts`, `app.ts`, `src/plugins/`.
+- **Where DOT artifacts live** — `dot.config.ts`, `app.ts`, `src/pips/`.
 
 Agents working in a DOT app should **read `AGENTS.md` first**. It is the
 contract between the app's author and the agents that will modify it. If

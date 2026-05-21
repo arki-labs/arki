@@ -1,15 +1,15 @@
 /**
  * Tests for the doctor renderer + main runDoctor flow.
  *
- * Uses synthetic plugins via testApp — no spawn, no temp dirs. Plugin failure
+ * Uses synthetic pips via testApp — no spawn, no temp dirs. Pip failure
  * tests rely on the kernel's existing diagnostics issue generation (boot
- * throw → `failed` plugin with structured DiagnosticIssue).
+ * throw → `failed` pip with structured DiagnosticIssue).
  */
 
 import { describe, expect, it, vi } from 'vitest';
 
 import { defineApp } from '../../define-app.js';
-import { defineDotPlugin } from '../../plugin-contract.js';
+import { defineDotPip } from '../../pip-contract.js';
 import { testApp } from '../../test-harness.js';
 import { runDoctor } from '../index.js';
 import { buildDoctorEnvelope, renderDoctor } from '../render-doctor.js';
@@ -18,7 +18,7 @@ const FROZEN_NOW = () => new Date('2026-01-01T00:00:00.000Z');
 
 describe('buildDoctorEnvelope', () => {
   it('emits a DotCliEnvelope with all 5 diagnostics arrays on success', async () => {
-    const p = defineDotPlugin({ name: 'p', boot: () => ({}) });
+    const p = defineDotPip({ name: 'p', boot: () => ({}) });
     const app = await testApp([p]).boot();
     const envelope = buildDoctorEnvelope({ diagnostics: app.diagnostics }, { json: true, now: FROZEN_NOW });
 
@@ -26,7 +26,7 @@ describe('buildDoctorEnvelope', () => {
     expect(envelope.command).toBe('doctor');
     expect(envelope.generatedAt).toBe('2026-01-01T00:00:00.000Z');
 
-    expect(envelope.data.plugins).toBeInstanceOf(Array);
+    expect(envelope.data.pips).toBeInstanceOf(Array);
     expect(envelope.data.routes).toBeInstanceOf(Array);
     expect(envelope.data.services).toBeInstanceOf(Array);
     expect(envelope.data.lifecycle).toBeInstanceOf(Array);
@@ -36,7 +36,7 @@ describe('buildDoctorEnvelope', () => {
   });
 
   it('clean-boot app yields status=success with no error-severity issues', async () => {
-    const p = defineDotPlugin({ name: 'p', boot: () => ({}) });
+    const p = defineDotPip({ name: 'p', boot: () => ({}) });
     const app = await testApp([p]).boot();
     const envelope = buildDoctorEnvelope({ diagnostics: app.diagnostics }, { json: true, now: FROZEN_NOW });
     expect(envelope.status).toBe('success');
@@ -44,8 +44,8 @@ describe('buildDoctorEnvelope', () => {
     await app.dispose();
   });
 
-  it('failed boot yields status=failure, failed plugin status, structured issue', async () => {
-    const bad = defineDotPlugin({
+  it('failed boot yields status=failure, failed pip status, structured issue', async () => {
+    const bad = defineDotPip({
       name: 'bad',
       boot: () => {
         throw new Error('boot-boom');
@@ -61,10 +61,10 @@ describe('buildDoctorEnvelope', () => {
     const envelope = buildDoctorEnvelope({ diagnostics: seam.diagnostics }, { json: true, now: FROZEN_NOW });
     expect(envelope.status).toBe('failure');
 
-    const badPlugin = envelope.data.plugins.find(p => p.plugin === 'bad');
-    expect(badPlugin?.status).toBe('failed');
+    const badPip = envelope.data.pips.find(p => p.pip === 'bad');
+    expect(badPip?.status).toBe('failed');
 
-    const issue = badPlugin!.issues[0]!;
+    const issue = badPip!.issues[0]!;
     expect(issue.code).toBeTruthy();
     expect(issue.remediation).toBeTruthy();
     expect(issue.docsUrl).toMatch(/^https?:\/\//);
@@ -73,7 +73,7 @@ describe('buildDoctorEnvelope', () => {
 
 describe('renderDoctor', () => {
   it('JSON mode writes a parseable envelope', async () => {
-    const p = defineDotPlugin({ name: 'p', boot: () => ({}) });
+    const p = defineDotPip({ name: 'p', boot: () => ({}) });
     const app = await testApp([p]).boot();
 
     let written = '';
@@ -90,8 +90,8 @@ describe('renderDoctor', () => {
     await app.dispose();
   });
 
-  it('text mode includes per-plugin status markers', async () => {
-    const p = defineDotPlugin({ name: 'p', boot: () => ({}) });
+  it('text mode includes per-pip status markers', async () => {
+    const p = defineDotPip({ name: 'p', boot: () => ({}) });
     const app = await testApp([p]).boot();
 
     let written = '';
@@ -110,7 +110,7 @@ describe('renderDoctor', () => {
 describe('runDoctor', () => {
   it('disposes the app after rendering when it booted from a builder', async () => {
     const disposeSpy = vi.fn();
-    const p = defineDotPlugin({
+    const p = defineDotPip({
       name: 'p',
       boot: () => ({}),
       dispose: () => {
@@ -133,7 +133,7 @@ describe('runDoctor', () => {
 
   it('does NOT dispose when caller passed an already-booted app', async () => {
     const disposeSpy = vi.fn();
-    const p = defineDotPlugin({
+    const p = defineDotPip({
       name: 'p',
       boot: () => ({}),
       dispose: () => {

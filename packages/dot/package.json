@@ -1,7 +1,7 @@
 {
   "name": "@arki/dot",
   "version": "0.1.0",
-  "description": "TypeScript-first application composition framework for the ARKI package family — lifecycle-aware plugins, deterministic boot order, manifest/diagnostics envelopes, and an agent-native CLI.",
+  "description": "TypeScript-first application composition framework for the ARKI package family — lifecycle-aware pips, deterministic boot order, manifest/diagnostics envelopes, and an agent-native CLI. A DOT app is the sum of its pips.",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -17,7 +17,8 @@
     "arki",
     "typescript",
     "framework",
-    "plugin-system",
+    "pip",
+    "pips",
     "lifecycle",
     "diagnostics",
     "manifest",
@@ -37,10 +38,10 @@
       "import": "./src/index.ts",
       "default": "./dist/index.js"
     },
-    "./plugin": {
-      "types": "./dist/plugin.d.ts",
-      "import": "./dist/plugin.js",
-      "default": "./dist/plugin.js"
+    "./pip": {
+      "types": "./dist/pip.d.ts",
+      "import": "./dist/pip.js",
+      "default": "./dist/pip.js"
     },
     "./package.json": "./package.json",
     "./cli": {

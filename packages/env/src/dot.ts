@@ -1,8 +1,8 @@
 /**
  * DOT adapter for `@arki/env`.
  *
- * Wraps `defineEnv()` as a `DotPlugin` so a DOT app can validate its
- * environment alongside any other services. The plugin is sync (env
+ * Wraps `defineEnv()` as a `DotPip` so a DOT app can validate its
+ * environment alongside any other services. The pip is sync (env
  * validation is sync), so the `boot` hook returns the validated env
  * object synchronously through the standard `services` channel.
  *
@@ -24,7 +24,7 @@
  * that is intentional: the adapter only makes sense in a DOT app.
  */
 
-import { defineDotPlugin, type DotPlugin } from '@arki/dot/plugin';
+import { defineDotPip, type DotPip } from '@arki/dot/pip';
 import type { ZodType } from 'zod';
 
 import { defineEnv } from './core/define-env.js';
@@ -36,10 +36,10 @@ import { defineEnv } from './core/define-env.js';
  *   resulting `app.services.env` is typed from this.
  */
 export type EnvDotOptions<TSchema extends Record<string, ZodType>> = {
-  /** Zod schemas for each env var the plugin validates. */
+  /** Zod schemas for each env var the pip validates. */
   readonly schema: TSchema;
   /**
-   * Plugin name override. Defaults to `'env'`. Use this only when
+   * Pip name override. Defaults to `'env'`. Use this only when
    * composing multiple env scopes inside the same app (rare).
    */
   readonly name?: string;
@@ -55,7 +55,7 @@ export type EnvDotOptions<TSchema extends Record<string, ZodType>> = {
  * The shape of services published by the env adapter.
  *
  * The key is configurable via `options.name` (defaults to `'env'`) so
- * downstream plugins can pick the right env when multiple env scopes
+ * downstream pips can pick the right env when multiple env scopes
  * exist. For the default single-env case, `app.services.env` is the
  * validated record.
  */
@@ -64,16 +64,16 @@ export type EnvServices<TSchema extends Record<string, ZodType>> = {
 };
 
 /**
- * Build a DOT plugin that validates and publishes a typed `env` service.
+ * Build a DOT pip that validates and publishes a typed `env` service.
  *
  * @param options - Schema + optional config.
- * @returns A `DotPlugin` that registers an `env`-kind service.
+ * @returns A `DotPip` that registers an `env`-kind service.
  */
 export function env<TSchema extends Record<string, ZodType>>(
   options: EnvDotOptions<TSchema>,
-): DotPlugin<EnvServices<TSchema>> {
+): DotPip<EnvServices<TSchema>> {
   const name = options.name ?? 'env';
-  return defineDotPlugin<EnvServices<TSchema>>({
+  return defineDotPip<EnvServices<TSchema>>({
     name,
     version: '0.1.0',
     provides: ['env'],

@@ -2,10 +2,51 @@
 
 > TypeScript-first application composition framework for the ARKI package family.
 
-`@arki/dot` is the kernel that wires plugins, lifecycle hooks, dependency
+`@arki/dot` is the kernel that wires **pips**, lifecycle hooks, dependency
 graphs, and diagnostics into a deterministic application boot. It gives library
 authors a stable contract for declaring how their package participates in an
 app, and gives app developers a single place to wire those packages together.
+
+## What is a pip?
+
+A **pip** is the unit a DOT app is built from — one self-describing,
+lifecycle-aware piece of an application. Each pip:
+
+- declares a **name**, **version**, and the kinds of **services it provides**;
+- runs a **5-hook lifecycle** — `configure` → `boot` → `start` → `stop` → `dispose`;
+- **publishes typed services** to a shared, type-safe registry that later pips
+  can read from;
+- **composes deterministically** — pips boot in declaration order and dispose
+  in reverse.
+
+The name comes from the small dots on dice, dominoes, and music notation:
+each pip is one small mark, and the *combination* of pips is what gives the app
+its value. Two pips on a die make a value of two; six pips make six. The pips
+**are** the app — not optional add-ons to a hidden core.
+
+```ts
+import { defineApp } from '@arki/dot';
+import { env } from '@arki/env/dot';      // env pip
+import { db } from '@arki/db/dot';        // db pip
+import { kv } from '@arki/kv/dot';        // kv pip
+
+const app = await defineApp('orders')
+  .use(env({ schema: { /* ... */ } }))     // 1st pip — provides services.env
+  .use(db({ relations }))                  // 2nd pip — provides services.db
+  .use(kv({ url: process.env.KV_URL! }))   // 3rd pip — provides services.kv
+  .boot();                                  // pips boot in declaration order
+
+await app.services.db.query(/* ... */);
+await app.dispose();                       // pips dispose in REVERSE order
+```
+
+Each `/dot` subpath exports a **pip** for that package. The subpath names
+the framework the adapter targets (DOT), not the unit (which is a pip).
+
+> **Why not "plugin"?** Plugins suggest *optional add-ons* to a core. DOT's
+> reality is the opposite: there is no hidden core — the pips *are* the app.
+> "Pip" names that truth, and ties the framework to the DOT name etymologically
+> (a dot, a pip, a small mark that gains meaning by combining with others).
 
 ## Installation
 
@@ -18,9 +59,9 @@ bun add @arki/dot
 ## Quick start
 
 ```ts
-import { defineApp, defineDotPlugin } from '@arki/dot';
+import { defineApp, defineDotPip } from '@arki/dot';
 
-const billingPlugin = defineDotPlugin({
+const billingPip = defineDotPip({
   name: 'billing',
   version: '1.0.0',
   configure(ctx) {
@@ -42,7 +83,7 @@ const billingPlugin = defineDotPlugin({
 });
 
 const app = defineApp('acme')
-  .use(billingPlugin);
+  .use(billingPip);
 
 await app.configure();
 await app.boot();
@@ -54,10 +95,10 @@ await app.stop();
 await app.dispose();
 ```
 
-## Plugin authoring
+## Pip authoring
 
-`defineDotPlugin(config)` accepts five lifecycle hooks. Each receives a
-phase-specific context with services contributed by earlier plugins:
+`defineDotPip(config)` accepts five lifecycle hooks. Each receives a
+phase-specific context with services contributed by earlier pips:
 
 | Hook        | Purpose                                                          |
 | ----------- | ---------------------------------------------------------------- |
@@ -67,14 +108,14 @@ phase-specific context with services contributed by earlier plugins:
 | `stop`      | Stop processing in reverse dependency order.                     |
 | `dispose`   | Free resources after `stop`.                                     |
 
-Plugins can declare dependencies on others by name. The kernel computes a
+Pips can declare dependencies on others by name. The kernel computes a
 topological order and runs hooks deterministically — same input, same order,
 every time.
 
 ## Lifecycle
 
-`defineApp(name)` returns a builder. Calling `.use(plugin)` accumulates
-plugins. The lifecycle then flows:
+`defineApp(name)` returns a builder. Calling `.use(pip)` accumulates
+pips. The lifecycle then flows:
 
 ```
 defined ──configure()──▶ configured ──boot()──▶ booted ──start()──▶ started
@@ -106,7 +147,7 @@ dot explain --app ./my-app.ts
 dot doctor --app ./my-app.ts
 
 # Every command supports --json for agent-friendly output.
-dot explain --app ./my-app.ts --json | jq '.data.plugins'
+dot explain --app ./my-app.ts --json | jq '.data.pips'
 ```
 
 The CLI emits the same envelope shape as the in-process diagnostics snapshot
@@ -128,7 +169,7 @@ ship with the published tarball.
 
 ## Architecture
 
-`@arki/dot` is intentionally small: it defines the contracts (plugin shape,
+`@arki/dot` is intentionally small: it defines the contracts (pip shape,
 lifecycle hooks, manifest schema, diagnostics envelope) and runs them. Adapters
 that bridge databases, queues, auth providers, and HTTP routers live in their
 own packages and consume `@arki/dot` as a peer dependency.
@@ -141,12 +182,12 @@ ship at its own cadence.
 The full docs live in [`docs/`](./docs):
 
 - [Quickstart](./docs/quickstart.md) — boot your first app in five minutes.
-- [Plugin authoring](./docs/plugin-authoring.md) — write your own `DotPlugin`.
+- [Pip authoring](./docs/pip-authoring.md) — write your own `DotPip`.
 - [Lifecycle](./docs/lifecycle.md) — the 5-hook contract.
 - [Diagnostics](./docs/diagnostics.md) — `app.manifest`, `app.diagnostics`,
   `dot explain`, `dot doctor`.
 - [Adapter authoring](./docs/adapter-authoring.md) — expose your package as
-  a DOT plugin.
+  a DOT pip.
 - [Agent guide](./docs/agent-guide.md) — how coding agents inspect, modify,
   and verify DOT apps.
 - [Release policy](./docs/release-policy.md) — SemVer and deprecation.

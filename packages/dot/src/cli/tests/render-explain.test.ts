@@ -1,19 +1,19 @@
 /**
  * Tests for the explain renderer.
  *
- * Uses `testApp` to spin up synthetic plugins — no spawn, no temp dirs.
+ * Uses `testApp` to spin up synthetic pips — no spawn, no temp dirs.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '../../define-app.js';
-import { defineDotPlugin } from '../../plugin-contract.js';
+import { defineDotPip } from '../../pip-contract.js';
 import { buildExplainEnvelope, renderExplain } from '../render-explain.js';
 
 const FROZEN_NOW = () => new Date('2026-01-01T00:00:00.000Z');
 
 function syntheticApp() {
-  const db = defineDotPlugin<{ db: { name: string } }>({
+  const db = defineDotPip<{ db: { name: string } }>({
     name: 'db',
     version: '1.0.0',
     configure: ctx => {
@@ -21,7 +21,7 @@ function syntheticApp() {
     },
     boot: () => ({ services: { db: { name: 'primary' } } }),
   });
-  const api = defineDotPlugin({
+  const api = defineDotPip({
     name: 'api',
     version: '1.0.0',
     dependencies: ['db'],
@@ -42,18 +42,18 @@ describe('buildExplainEnvelope', () => {
     expect(envelope.generatedAt).toBe('2026-01-01T00:00:00.000Z');
     expect(envelope.errors).toEqual([]);
 
-    // 5-array contract (manifest has plugins, routes, services, lifecycle, dependencies)
-    expect(envelope.data.plugins).toBeInstanceOf(Array);
+    // 5-array contract (manifest has pips, routes, services, lifecycle, dependencies)
+    expect(envelope.data.pips).toBeInstanceOf(Array);
     expect(envelope.data.routes).toBeInstanceOf(Array);
     expect(envelope.data.services).toBeInstanceOf(Array);
     expect(envelope.data.lifecycle).toBeInstanceOf(Array);
     expect(envelope.data.dependencies).toBeInstanceOf(Array);
 
     // Substance
-    expect(envelope.data.plugins.map(p => p.name)).toEqual(['db', 'api']);
-    expect(envelope.data.services).toEqual([{ name: 'db', plugin: 'db', kind: 'db' }]);
+    expect(envelope.data.pips.map(p => p.name)).toEqual(['db', 'api']);
+    expect(envelope.data.services).toEqual([{ name: 'db', pip: 'db', kind: 'db' }]);
     expect(envelope.data.routes).toEqual([
-      { id: 'api.health', plugin: 'api', method: 'GET', path: '/health', transport: 'http' },
+      { id: 'api.health', pip: 'api', method: 'GET', path: '/health', transport: 'http' },
     ]);
   });
 });
@@ -74,7 +74,7 @@ describe('renderExplain', () => {
     expect(parsed.data.app.name).toBe('synthetic');
   });
 
-  it('text mode includes plugin names, service names, and route entries', () => {
+  it('text mode includes pip names, service names, and route entries', () => {
     const configured = syntheticApp().configure();
     let written = '';
     renderExplain({ manifest: configured.manifest }, { json: false, now: FROZEN_NOW, out: line => (written += line) });

@@ -255,7 +255,7 @@ export async function runDoctor(
   }
 
   // Builder or configured seam: drive lifecycle ourselves. Boot failures fall
-  // back to the configured seam's diagnostics so per-plugin issues stay
+  // back to the configured seam's diagnostics so per-pip issues stay
   // visible.
   let configured: DotAppConfigured<Record<string, unknown>>;
   try {
@@ -272,7 +272,7 @@ export async function runDoctor(
     bootedApp = await configured.boot();
   } catch (err) {
     // Boot failed — surface diagnostics from the configured seam below.
-    // We deliberately swallow the throw so the user sees the per-plugin
+    // We deliberately swallow the throw so the user sees the per-pip
     // issues instead of an opaque wrapper error.
     bootThrew = true;
     debugCli('boot threw, falling back to configured diagnostics: %O', err);
@@ -311,8 +311,8 @@ function wrapLifecycleError(err: unknown, phase: 'configure' | 'boot'): DotCliEr
     message: `App ${phase} failed: ${message}`,
     remediation:
       phase === 'configure'
-        ? 'Check the plugins registered in your app for a synchronous `configure` hook that throws or returns a Promise. Run `dot doctor` for per-plugin diagnostics.'
-        : 'Run `dot doctor` to see per-plugin diagnostics. The boot hook for one of your plugins failed.',
+        ? 'Check the pips registered in your app for a synchronous `configure` hook that throws or returns a Promise. Run `dot doctor` for per-pip diagnostics.'
+        : 'Run `dot doctor` to see per-pip diagnostics. The boot hook for one of your pips failed.',
     metadata: { phase, underlyingCode: code },
     cause: err,
   });

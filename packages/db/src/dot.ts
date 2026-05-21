@@ -1,7 +1,7 @@
 /**
  * DOT adapter for `@arki/db`.
  *
- * Wraps the Drizzle database initialization as a `DotPlugin`. The plugin
+ * Wraps the Drizzle database initialization as a `DotPip`. The pip
  * opens a database connection in `boot`, publishes the Drizzle handle as
  * `services.db`, and tears down the underlying client in `dispose`
  * (reverse-topological order).
@@ -41,7 +41,7 @@
 import type { AnyRelations, Logger } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { defineDotPlugin, type DotPlugin } from '@arki/dot/plugin';
+import { defineDotPip, type DotPip } from '@arki/dot/pip';
 
 import { createDb } from './factory.js';
 import { initDbRuntimeLocal, type PgliteInitOptions } from './runtime-local.js';
@@ -55,7 +55,7 @@ type BaseDbDotOptions<TRelations extends AnyRelations> = {
   /** Drizzle logger override — `true`/`false` or a custom `Logger` instance. */
   readonly logger?: boolean | Logger;
   /**
-   * Plugin name override. Defaults to `'db'`. Use this only when composing
+   * Pip name override. Defaults to `'db'`. Use this only when composing
    * multiple database scopes inside the same app (e.g. primary + reporting).
    */
   readonly name?: string;
@@ -96,19 +96,19 @@ export type DbServices<
 };
 
 /**
- * Build a DOT plugin that opens a Drizzle database and publishes it as
+ * Build a DOT pip that opens a Drizzle database and publishes it as
  * a service. The kernel calls `dispose` in reverse-topological order to
  * close the underlying pool / PGlite instance.
  */
 export function db<TRelations extends AnyRelations>(
   options: PgDbDotOptions<TRelations>,
-): DotPlugin<DbServices<TRelations, 'pg'>>;
+): DotPip<DbServices<TRelations, 'pg'>>;
 export function db<TRelations extends AnyRelations>(
   options: PgliteDbDotOptions<TRelations>,
-): DotPlugin<DbServices<TRelations, 'pglite'>>;
+): DotPip<DbServices<TRelations, 'pglite'>>;
 export function db<TRelations extends AnyRelations>(
   options: DbDotOptions<TRelations>,
-): DotPlugin<DbServices<TRelations, 'pg' | 'pglite'>> {
+): DotPip<DbServices<TRelations, 'pg' | 'pglite'>> {
   const name = options.name ?? 'db';
   const driver = options.driver ?? 'pg';
 
@@ -119,7 +119,7 @@ export function db<TRelations extends AnyRelations>(
     // it deterministically. `services.db` is the Drizzle handle only —
     // exposing the PGlite client would leak driver-specific surface.
     let pgliteHandle: { close: () => Promise<void> } | undefined;
-    return defineDotPlugin<DbServices<TRelations, 'pglite'>>({
+    return defineDotPip<DbServices<TRelations, 'pglite'>>({
       name,
       version: '0.1.0',
       provides: ['db'],
@@ -144,13 +144,13 @@ export function db<TRelations extends AnyRelations>(
           pgliteHandle = undefined;
         }
       },
-    }) as DotPlugin<DbServices<TRelations, 'pg' | 'pglite'>>;
+    }) as DotPip<DbServices<TRelations, 'pg' | 'pglite'>>;
   }
 
   // Node-postgres path: createDb already reads env vars and constructs the
   // pool. Drizzle owns the pool — closing it goes via the `$client.end()`
   // path that node-postgres exposes through Drizzle's handle.
-  return defineDotPlugin<DbServices<TRelations, 'pg'>>({
+  return defineDotPip<DbServices<TRelations, 'pg'>>({
     name,
     version: '0.1.0',
     provides: ['db'],
@@ -174,5 +174,5 @@ export function db<TRelations extends AnyRelations>(
         await pgHandle.$client.end();
       }
     },
-  }) as DotPlugin<DbServices<TRelations, 'pg' | 'pglite'>>;
+  }) as DotPip<DbServices<TRelations, 'pg' | 'pglite'>>;
 }

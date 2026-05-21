@@ -6,10 +6,10 @@
  *   - manifest contribution (one `db`-kind service entry)
  *   - boot opens a Drizzle handle, dispose closes the underlying PGlite
  *   - sanity-check round-trip query through the booted handle
- *   - custom plugin-name override
+ *   - custom pip-name override
  */
 
-import { defineApp } from '@arki/dot/plugin';
+import { defineApp } from '@arki/dot/pip';
 import { defineRelations } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
@@ -30,9 +30,9 @@ describe('@arki/db/dot', () => {
       .use(db({ driver: 'pglite', memory: true, relations }))
       .configure();
     expect(configured.manifest.services).toEqual([
-      { name: 'db', plugin: 'db', kind: 'db' },
+      { name: 'db', pip: 'db', kind: 'db' },
     ]);
-    expect(configured.manifest.plugins.map(p => p.name)).toEqual(['db']);
+    expect(configured.manifest.pips.map(p => p.name)).toEqual(['db']);
   });
 
   it('boots a PGlite-backed Drizzle handle and disposes cleanly', async () => {
@@ -70,7 +70,7 @@ describe('@arki/db/dot', () => {
     }
   });
 
-  it('honors a custom plugin name', () => {
+  it('honors a custom pip name', () => {
     const configured = defineApp('db-named-test')
       .use(
         db({
@@ -81,9 +81,9 @@ describe('@arki/db/dot', () => {
         }),
       )
       .configure();
-    expect(configured.manifest.plugins.map(p => p.name)).toEqual(['primary-db']);
+    expect(configured.manifest.pips.map(p => p.name)).toEqual(['primary-db']);
     expect(configured.manifest.services).toEqual([
-      { name: 'db', plugin: 'primary-db', kind: 'db' },
+      { name: 'db', pip: 'primary-db', kind: 'db' },
     ]);
   });
 });

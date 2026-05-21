@@ -39,8 +39,8 @@ export const app = await defineApp('my-app')
 console.log(`booted ${app.name} on port ${app.services.env.PORT}`);
 ```
 
-That's the whole boot path. `defineApp(name)` returns a builder, `.use(plugin)`
-registers a plugin, and `.boot()` runs the `configure` and `boot` hooks in
+That's the whole boot path. `defineApp(name)` returns a builder, `.use(pip)`
+registers a pip, and `.boot()` runs the `configure` and `boot` hooks in
 topological order.
 
 `app.services.env` is typed from the Zod schema — `PORT` is `number`, not
@@ -60,10 +60,10 @@ You will see five top-level arrays:
 ```json
 {
   "app": { "name": "my-app" },
-  "plugins": [ { "name": "env", "version": "0.1.0", "dependencies": [], "provides": ["env"] } ],
+  "pips": [ { "name": "env", "version": "0.1.0", "dependencies": [], "provides": ["env"] } ],
   "routes": [],
-  "services": [ { "name": "env", "plugin": "env", "kind": "env" } ],
-  "lifecycle": [ { "plugin": "env", "hooks": ["configure", "boot"] } ],
+  "services": [ { "name": "env", "pip": "env", "kind": "env" } ],
+  "lifecycle": [ { "pip": "env", "hooks": ["configure", "boot"] } ],
   "dependencies": []
 }
 ```
@@ -87,7 +87,7 @@ npx dot doctor --json | jq '.data.diagnostics.issues'
 ```
 
 `app.diagnostics` is a `DotDiagnosticsSnapshot`: same five-array shape as the
-manifest, plus runtime status for each plugin/route/service and an `issues`
+manifest, plus runtime status for each pip/route/service and an `issues`
 array. Empty `issues` means the app is healthy.
 
 ## Stop and dispose
@@ -105,7 +105,7 @@ Both are idempotent — calling them twice is safe.
 
 ## Next steps
 
-- [Plugin authoring](./plugin-authoring.md) — write your own `DotPlugin`.
+- [Pip authoring](./pip-authoring.md) — write your own `DotPip`.
 - [Lifecycle](./lifecycle.md) — what each hook can (and cannot) do.
 - [Diagnostics](./diagnostics.md) — the full `dot explain` / `dot doctor`
   contract.

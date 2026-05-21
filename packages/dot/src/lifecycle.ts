@@ -18,7 +18,7 @@ export type DotLifecycleHook = 'configure' | 'boot' | 'start' | 'stop' | 'dispos
 
 /**
  * The complete set of lifecycle hooks in topological execution order.
- * `stop` and `dispose` run in reverse-topological order across plugins, but the
+ * `stop` and `dispose` run in reverse-topological order across pips, but the
  * sequence of hooks themselves is always `configure -> boot -> start -> stop -> dispose`.
  */
 export const DOT_LIFECYCLE_HOOKS: readonly DotLifecycleHook[] = [
@@ -64,10 +64,10 @@ export const DotLifecycleErrorCode = {
   ReuseAfterFailure: 'DOT_LIFECYCLE_E008',
   /** Dependency graph contains a cycle. */
   DependencyCycle: 'DOT_LIFECYCLE_E009',
-  /** Plugin declared a dependency that isn't registered. */
+  /** Pip declared a dependency that isn't registered. */
   MissingDependency: 'DOT_LIFECYCLE_E010',
-  /** Plugin registered twice. */
-  DuplicatePlugin: 'DOT_LIFECYCLE_E011',
+  /** Pip registered twice. */
+  DuplicatePip: 'DOT_LIFECYCLE_E011',
 } as const;
 
 export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];
@@ -78,38 +78,38 @@ export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof ty
  * Carries:
  *  - `code`     — stable machine-readable error code (see {@link DotLifecycleErrorCode}).
  *  - `phase`    — which hook (or pseudo-hook) failed.
- *  - `plugin`   — which plugin name, when applicable.
+ *  - `pip`   — which pip name, when applicable.
  *  - `cause`    — original error if wrapped from a hook throw.
- *  - `failures` — for aggregate errors (stop/dispose), the per-plugin failures.
+ *  - `failures` — for aggregate errors (stop/dispose), the per-pip failures.
  */
 export class DotLifecycleError extends Error {
   readonly code: DotLifecycleErrorCodeValue;
   readonly phase: DotLifecycleHook;
-  readonly plugin?: string;
+  readonly pip?: string;
   override readonly cause?: unknown;
-  readonly failures?: readonly DotLifecyclePluginFailure[];
+  readonly failures?: readonly DotLifecyclePipFailure[];
 
   constructor(args: {
     code: DotLifecycleErrorCodeValue;
     phase: DotLifecycleHook;
     message: string;
-    plugin?: string;
+    pip?: string;
     cause?: unknown;
-    failures?: readonly DotLifecyclePluginFailure[];
+    failures?: readonly DotLifecyclePipFailure[];
   }) {
     super(args.message);
     this.name = 'DotLifecycleError';
     this.code = args.code;
     this.phase = args.phase;
-    this.plugin = args.plugin;
+    this.pip = args.pip;
     this.cause = args.cause;
     this.failures = args.failures;
   }
 }
 
-/** Single plugin failure inside an aggregate lifecycle error (stop/dispose). */
-export type DotLifecyclePluginFailure = {
-  plugin: string;
+/** Single pip failure inside an aggregate lifecycle error (stop/dispose). */
+export type DotLifecyclePipFailure = {
+  pip: string;
   phase: DotLifecycleHook;
   error: unknown;
 };

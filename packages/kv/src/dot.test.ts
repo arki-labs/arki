@@ -11,7 +11,7 @@
  * `kv.get/set` in tests because that would require a real Redis instance.
  */
 
-import { defineApp } from '@arki/dot/plugin';
+import { defineApp } from '@arki/dot/pip';
 import { describe, expect, it } from 'vitest';
 
 import { KV } from './index.js';
@@ -24,9 +24,9 @@ describe('@arki/kv/dot', () => {
     );
     const configured = builder.configure();
     expect(configured.manifest.services).toEqual([
-      { name: 'kv', plugin: 'kv', kind: 'kv' },
+      { name: 'kv', pip: 'kv', kind: 'kv' },
     ]);
-    expect(configured.manifest.plugins.map(p => p.name)).toEqual(['kv']);
+    expect(configured.manifest.pips.map(p => p.name)).toEqual(['kv']);
   });
 
   it('throws a clear error when no URL is configured', async () => {
@@ -57,7 +57,7 @@ describe('@arki/kv/dot', () => {
     }
   });
 
-  it('honors a custom plugin name', () => {
+  it('honors a custom pip name', () => {
     const configured = defineApp('kv-named-test')
       .use(
         kv({
@@ -66,9 +66,9 @@ describe('@arki/kv/dot', () => {
         }),
       )
       .configure();
-    expect(configured.manifest.plugins.map(p => p.name)).toEqual(['cache']);
+    expect(configured.manifest.pips.map(p => p.name)).toEqual(['cache']);
     expect(configured.manifest.services).toEqual([
-      { name: 'kv', plugin: 'cache', kind: 'kv' },
+      { name: 'kv', pip: 'cache', kind: 'kv' },
     ]);
   });
 });

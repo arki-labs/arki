@@ -1,8 +1,8 @@
 /**
  * Public entry point for the new DOT kernel.
  *
- * `defineApp(name)` returns a `DotAppBuilder` that accumulates plugins via
- * `.use(plugin)`, then transitions through the 5-hook lifecycle:
+ * `defineApp(name)` returns a `DotAppBuilder` that accumulates pips via
+ * `.use(pip)`, then transitions through the 5-hook lifecycle:
  *
  *   defineApp -> use* -> configure() -> boot() -> start() -> stop() -> dispose()
  *
@@ -16,7 +16,7 @@
 import type { DotDiagnosticsSnapshot } from './diagnostics.js';
 import type { DotLifecycleState } from './lifecycle.js';
 import type { DotAppManifest } from './manifest.js';
-import type { AnyDotPlugin, DotPlugin } from './plugin-contract.js';
+import type { AnyDotPip, DotPip } from './pip-contract.js';
 import { DotAppImpl } from './kernel/app-instance.js';
 
 /**
@@ -29,7 +29,7 @@ export type DotApp<TServices extends Record<string, unknown>> = {
   /** Current lifecycle state. */
   readonly state: DotLifecycleState;
   /**
-   * Services published by booted plugins, merged into a single record.
+   * Services published by booted pips, merged into a single record.
    * Empty before `boot()` succeeds.
    */
   readonly services: TServices;
@@ -71,12 +71,12 @@ export type DotAppConfigured<TServices extends Record<string, unknown>> = {
 /**
  * Builder produced by `defineApp(name)`.
  *
- * `.use(plugin)` is type-tracking: services published by the plugin are
+ * `.use(pip)` is type-tracking: services published by the pip are
  * merged into `TServices` for the next builder.
  */
 export type DotAppBuilder<TServices extends Record<string, unknown>> = {
-  /** Register a plugin. Returns a new builder with merged services. */
-  use<TNew extends Record<string, unknown>>(plugin: DotPlugin<TNew>): DotAppBuilder<TServices & TNew>;
+  /** Register a pip. Returns a new builder with merged services. */
+  use<TNew extends Record<string, unknown>>(pip: DotPip<TNew>): DotAppBuilder<TServices & TNew>;
   /** Run the configure phase synchronously. Throws on configure failure. */
   configure(): DotAppConfigured<TServices>;
   /** Run configure + boot. Throws on configure or boot failure. */
@@ -88,7 +88,7 @@ export type DotAppBuilder<TServices extends Record<string, unknown>> = {
 type BuilderState = {
   appName: string;
   appVersion?: string;
-  plugins: AnyDotPlugin[];
+  pips: AnyDotPip[];
   config?: Readonly<Record<string, unknown>>;
 };
 
@@ -97,8 +97,8 @@ type BuilderState = {
  *
  * @example
  * const app = await defineApp('my-app')
- *   .use(dbPlugin)
- *   .use(authPlugin)
+ *   .use(dbPip)
+ *   .use(authPip)
  *   .boot();
  *
  * await app.start();
@@ -113,7 +113,7 @@ export function defineApp<TServices extends Record<string, unknown> = Record<str
   const state: BuilderState = {
     appName: name,
     appVersion: options.version,
-    plugins: [],
+    pips: [],
     config: options.config,
   };
   return makeBuilder<TServices>(state);
@@ -121,10 +121,10 @@ export function defineApp<TServices extends Record<string, unknown> = Record<str
 
 function makeBuilder<TServices extends Record<string, unknown>>(state: BuilderState): DotAppBuilder<TServices> {
   return {
-    use<TNew extends Record<string, unknown>>(plugin: DotPlugin<TNew>): DotAppBuilder<TServices & TNew> {
+    use<TNew extends Record<string, unknown>>(pip: DotPip<TNew>): DotAppBuilder<TServices & TNew> {
       const nextState: BuilderState = {
         ...state,
-        plugins: [...state.plugins, plugin as AnyDotPlugin],
+        pips: [...state.pips, pip as AnyDotPip],
       };
       return makeBuilder<TServices & TNew>(nextState);
     },
@@ -132,7 +132,7 @@ function makeBuilder<TServices extends Record<string, unknown>>(state: BuilderSt
       const impl = new DotAppImpl({
         appName: state.appName,
         appVersion: state.appVersion,
-        plugins: state.plugins,
+        pips: state.pips,
         config: state.config,
       });
       impl.runConfigure();
@@ -142,7 +142,7 @@ function makeBuilder<TServices extends Record<string, unknown>>(state: BuilderSt
       const impl = new DotAppImpl({
         appName: state.appName,
         appVersion: state.appVersion,
-        plugins: state.plugins,
+        pips: state.pips,
         config: state.config,
       });
       await impl.boot();
@@ -152,7 +152,7 @@ function makeBuilder<TServices extends Record<string, unknown>>(state: BuilderSt
       const impl = new DotAppImpl({
         appName: state.appName,
         appVersion: state.appVersion,
-        plugins: state.plugins,
+        pips: state.pips,
         config: state.config,
       });
       await impl.start();

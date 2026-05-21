@@ -1,14 +1,14 @@
 /**
- * Test harness for unit-testing DOT plugins.
+ * Test harness for unit-testing DOT pips.
  *
- * Provides `testApp` — a convenience wrapper that lets plugin authors verify
+ * Provides `testApp` — a convenience wrapper that lets pip authors verify
  * lifecycle behaviour, registration, and service publishing without dragging
  * in concrete framework dependencies.
  *
  * @example
- *   import { testApp, defineDotPlugin } from '@arki/dot';
+ *   import { testApp, defineDotPip } from '@arki/dot';
  *
- *   const myPlugin = defineDotPlugin<{ counter: { value: number } }>({
+ *   const myPip = defineDotPip<{ counter: { value: number } }>({
  *     name: 'counter',
  *     async boot() {
  *       return { services: { counter: { value: 0 } } };
@@ -16,14 +16,14 @@
  *   });
  *
  *   it('publishes a counter service', async () => {
- *     const app = await testApp([myPlugin]).boot();
+ *     const app = await testApp([myPip]).boot();
  *     expect(app.services.counter.value).toBe(0);
  *     await app.dispose();
  *   });
  */
 
 import type { DotApp, DotAppBuilder } from './define-app.js';
-import type { AnyDotPlugin, DotPlugin } from './plugin-contract.js';
+import type { AnyDotPip, DotPip } from './pip-contract.js';
 import { defineApp } from './define-app.js';
 
 export type TestAppOptions = {
@@ -34,18 +34,18 @@ export type TestAppOptions = {
 };
 
 /**
- * Build a DOT app builder pre-populated with the given plugins, ready to
+ * Build a DOT app builder pre-populated with the given pips, ready to
  * `.configure()`, `.boot()` or `.start()` from a test.
  */
 export function testApp<TServices extends Record<string, unknown> = Record<string, never>>(
-  // Accept any plugin shape — tests routinely mix services types. Internally
-  // we erase to `AnyDotPlugin` for the kernel.
-  plugins: readonly DotPlugin<never>[] | readonly DotPlugin<Record<string, never>>[] | readonly AnyDotPlugin[] = [],
+  // Accept any pip shape — tests routinely mix services types. Internally
+  // we erase to `AnyDotPip` for the kernel.
+  pips: readonly DotPip<never>[] | readonly DotPip<Record<string, never>>[] | readonly AnyDotPip[] = [],
   options: TestAppOptions = {},
 ): DotAppBuilder<TServices> {
   let builder = defineApp(options.name ?? 'test-app', { config: options.config });
-  for (const plugin of plugins) {
-    builder = builder.use(plugin as DotPlugin<Record<string, unknown>>);
+  for (const pip of pips) {
+    builder = builder.use(pip as DotPip<Record<string, unknown>>);
   }
   return builder as DotAppBuilder<TServices>;
 }
@@ -55,8 +55,8 @@ export function testApp<TServices extends Record<string, unknown> = Record<strin
  * calling `app.dispose()` when finished.
  */
 export async function bootTestApp<TServices extends Record<string, unknown> = Record<string, never>>(
-  plugins: readonly DotPlugin<never>[] | readonly DotPlugin<Record<string, never>>[] | readonly AnyDotPlugin[] = [],
+  pips: readonly DotPip<never>[] | readonly DotPip<Record<string, never>>[] | readonly AnyDotPip[] = [],
   options: TestAppOptions = {},
 ): Promise<DotApp<TServices>> {
-  return testApp<TServices>(plugins, options).boot();
+  return testApp<TServices>(pips, options).boot();
 }

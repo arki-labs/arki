@@ -2,12 +2,12 @@
  * Manifest types for the DOT kernel.
  *
  * A `DotAppManifest` is the static, declarative description of an app: which
- * plugins are registered, what routes/services they contribute, and how they
+ * pips are registered, what routes/services they contribute, and how they
  * depend on each other. It is built up during the `configure` phase from
  * registration calls and finalised once `configure` completes.
  *
  * CONTRACT: `DotAppManifest` always exposes the same five top-level arrays
- * (`plugins`, `routes`, `services`, `lifecycle`, `dependencies`). Consumers
+ * (`pips`, `routes`, `services`, `lifecycle`, `dependencies`). Consumers
  * MUST NOT see an omitted array — empty is empty, but never missing.
  * This shape is referenced by Task 7's scorecard.
  */
@@ -15,11 +15,11 @@
 import type { DotLifecycleHook } from './lifecycle.js';
 
 /**
- * Kind of service that a plugin can publish.
+ * Kind of service that a pip can publish.
  *
  * Well-known kinds map 1:1 to the canonical `@arki/*` adapters. `custom`
- * is the escape hatch for plugin-defined service kinds — use it whenever a
- * plugin publishes something that does not fit a reserved shape.
+ * is the escape hatch for pip-defined service kinds — use it whenever a
+ * pip publishes something that does not fit a reserved shape.
  */
 export type ServiceKind =
   | 'env'
@@ -36,7 +36,7 @@ export type ServiceKind =
 /** Transport that a route is exposed under. */
 export type RouteTransport = 'http' | 'orpc' | 'trpc' | 'rpc' | 'custom';
 
-/** Kind of dependency edge between two plugins. */
+/** Kind of dependency edge between two pips. */
 export type DependencyEdgeKind = 'requires' | 'provides' | 'uses';
 
 /**
@@ -49,44 +49,44 @@ export type DotAppManifest = {
     name: string;
     version?: string;
   };
-  plugins: PluginManifest[];
+  pips: PipManifest[];
   routes: RouteManifest[];
   services: ServiceManifest[];
   lifecycle: LifecycleManifest[];
   dependencies: DependencyEdge[];
 };
 
-/** Single plugin's declarative metadata. */
-export type PluginManifest = {
+/** Single pip's declarative metadata. */
+export type PipManifest = {
   name: string;
   version?: string;
   dependencies: readonly string[];
   provides: readonly string[];
 };
 
-/** Single route exposed by a plugin. */
+/** Single route exposed by a pip. */
 export type RouteManifest = {
   id: string;
-  plugin: string;
+  pip: string;
   method?: string;
   path?: string;
   transport: RouteTransport;
 };
 
-/** Single service published by a plugin. */
+/** Single service published by a pip. */
 export type ServiceManifest = {
   name: string;
-  plugin: string;
+  pip: string;
   kind: ServiceKind;
 };
 
-/** Which lifecycle hooks a plugin participates in. */
+/** Which lifecycle hooks a pip participates in. */
 export type LifecycleManifest = {
-  plugin: string;
+  pip: string;
   hooks: readonly DotLifecycleHook[];
 };
 
-/** Directed edge in the plugin dependency graph. */
+/** Directed edge in the pip dependency graph. */
 export type DependencyEdge = {
   from: string;
   to: string;

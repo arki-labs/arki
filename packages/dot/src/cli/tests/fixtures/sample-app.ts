@@ -6,9 +6,9 @@
  * single logger service is enough to exercise the 5-array manifest contract.
  */
 
-import { defineApp, defineDotPlugin } from '../../../index.js';
+import { defineApp, defineDotPip } from '../../../index.js';
 
-const logger = defineDotPlugin<{ logger: { info: (s: string) => void } }>({
+const logger = defineDotPip<{ logger: { info: (s: string) => void } }>({
   name: 'logger',
   version: '1.0.0',
   configure: ctx => {

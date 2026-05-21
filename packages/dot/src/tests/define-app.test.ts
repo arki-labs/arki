@@ -6,7 +6,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { DotApp } from '../define-app.js';
 import { defineApp } from '../define-app.js';
-import { defineDotPlugin } from '../plugin-contract.js';
+import { defineDotPip } from '../pip-contract.js';
 import { testApp } from '../test-harness.js';
 
 describe('defineApp', () => {
@@ -18,15 +18,15 @@ describe('defineApp', () => {
     expect(typeof builder.configure).toBe('function');
   });
 
-  it('builder.use() with a plugin returns a new builder (immutable)', () => {
-    const p = defineDotPlugin({ name: 'p' });
+  it('builder.use() with a pip returns a new builder (immutable)', () => {
+    const p = defineDotPip({ name: 'p' });
     const b1 = defineApp('app');
     const b2 = b1.use(p);
     expect(b1).not.toBe(b2);
   });
 
   it('builder.boot() returns a DotApp with state=booted', async () => {
-    const p = defineDotPlugin({ name: 'p', boot: () => ({}) });
+    const p = defineDotPip({ name: 'p', boot: () => ({}) });
     const app = await defineApp('app').use(p).boot();
     expect(app.state).toBe('booted');
     expect(app.name).toBe('app');
@@ -41,7 +41,7 @@ describe('defineApp', () => {
       verify(token: string): boolean;
     };
 
-    const dbPlugin = defineDotPlugin<{ db: DbService }>({
+    const dbPip = defineDotPip<{ db: DbService }>({
       name: 'db',
       boot: () => ({
         services: {
@@ -49,7 +49,7 @@ describe('defineApp', () => {
         },
       }),
     });
-    const authPlugin = defineDotPlugin<{ auth: AuthService }>({
+    const authPip = defineDotPip<{ auth: AuthService }>({
       name: 'auth',
       boot: () => ({
         services: {
@@ -58,28 +58,28 @@ describe('defineApp', () => {
       }),
     });
 
-    const app = await defineApp('app').use(dbPlugin).use(authPlugin).boot();
+    const app = await defineApp('app').use(dbPip).use(authPip).boot();
     expectTypeOf(app.services).toMatchTypeOf<{ db: DbService; auth: AuthService }>();
     expect(app.services.db).toBeDefined();
     expect(app.services.auth).toBeDefined();
     await app.dispose();
   });
 
-  it('defineDotPlugin returns the plugin verbatim (type-narrowing helper)', () => {
+  it('defineDotPip returns the pip verbatim (type-narrowing helper)', () => {
     const input = { name: 'p' };
-    const out = defineDotPlugin(input);
+    const out = defineDotPip(input);
     expect(out).toBe(input);
   });
 
   it('test harness produces a runnable builder', async () => {
-    const p = defineDotPlugin({ name: 'p', boot: () => ({}) });
+    const p = defineDotPip({ name: 'p', boot: () => ({}) });
     const app = await testApp([p]).boot();
     expect(app.state).toBe('booted');
     await app.dispose();
   });
 
-  it('synthetic two-plugin app surfaces manifest + diagnostics shape', async () => {
-    const db = defineDotPlugin<{ db: { name: string } }>({
+  it('synthetic two-pip app surfaces manifest + diagnostics shape', async () => {
+    const db = defineDotPip<{ db: { name: string } }>({
       name: 'db',
       version: '1.0.0',
       configure: ctx => {
@@ -87,7 +87,7 @@ describe('defineApp', () => {
       },
       boot: () => ({ services: { db: { name: 'primary' } } }),
     });
-    const api = defineDotPlugin({
+    const api = defineDotPip({
       name: 'api',
       version: '1.0.0',
       dependencies: ['db'],
@@ -102,15 +102,15 @@ describe('defineApp', () => {
 
     const m = app.manifest;
     expect(m.app.name).toBe('synthetic');
-    expect(m.plugins.map(p => p.name)).toEqual(['db', 'api']);
-    expect(m.services).toEqual([{ name: 'db', plugin: 'db', kind: 'db' }]);
-    expect(m.routes).toEqual([{ id: 'api.health', plugin: 'api', method: 'GET', path: '/health', transport: 'http' }]);
+    expect(m.pips.map(p => p.name)).toEqual(['db', 'api']);
+    expect(m.services).toEqual([{ name: 'db', pip: 'db', kind: 'db' }]);
+    expect(m.routes).toEqual([{ id: 'api.health', pip: 'api', method: 'GET', path: '/health', transport: 'http' }]);
     expect(m.dependencies).toEqual([{ from: 'api', to: 'db', kind: 'requires' }]);
 
     const d = app.diagnostics;
     expect(d.app).toEqual({ name: 'synthetic', state: 'booted' });
-    expect(d.plugins).toHaveLength(2);
-    expect(d.plugins.every(p => p.status === 'ok')).toBe(true);
+    expect(d.pips).toHaveLength(2);
+    expect(d.pips.every(p => p.status === 'ok')).toBe(true);
 
     await app.dispose();
   });

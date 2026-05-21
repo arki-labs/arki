@@ -31,11 +31,11 @@ defined ──configure()──▶ configured ──boot()──▶ booted ─�
 ```
 
 - `defined` — `defineApp(name)` was called; no hooks have run.
-- `configured` — every plugin's `configure` hook ran successfully.
-- `booted` — every plugin's `boot` hook ran; `app.services` is populated.
-- `started` — every plugin's `start` hook ran; active work is in flight.
-- `stopped` — every started plugin's `stop` hook ran; resources still open.
-- `disposed` — every booted plugin's `dispose` hook ran. **Terminal.**
+- `configured` — every pip's `configure` hook ran successfully.
+- `booted` — every pip's `boot` hook ran; `app.services` is populated.
+- `started` — every pip's `start` hook ran; active work is in flight.
+- `stopped` — every started pip's `stop` hook ran; resources still open.
+- `disposed` — every booted pip's `dispose` hook ran. **Terminal.**
 - `failed` — a hook failed irrecoverably. **Terminal.**
 
 Terminal states require a fresh `defineApp(...)` to retry.
@@ -59,12 +59,12 @@ Terminal states require a fresh `defineApp(...)` to retry.
   configuration.
 - Publishes services into `app.services` via the return value
   (`{ services: { ... } }`).
-- Downstream plugins receive these via `ctx.services`.
+- Downstream pips receive these via `ctx.services`.
 
 ### `start` — async activate
 
 - Runs **async** in topological order.
-- Begins active work after every plugin has booted: workers, schedulers,
+- Begins active work after every pip has booted: workers, schedulers,
   subscribers, listeners, long-running processes.
 
 ### `stop` — async halt
@@ -91,13 +91,13 @@ DOT cleans up exactly what was opened — no more, no less.
 
 ### `boot` failure
 
-- The throwing plugin is **not** disposed (its `boot` did not complete).
-- Every plugin whose `boot` already completed is disposed in
+- The throwing pip is **not** disposed (its `boot` did not complete).
+- Every pip whose `boot` already completed is disposed in
   reverse-topological order.
 - App transitions to `failed`.
 - Kernel throws `DotLifecycleError` with code `DOT_LIFECYCLE_E003`.
 
-A plugin whose `boot` opens partial resources before throwing **must clean
+A pip whose `boot` opens partial resources before throwing **must clean
 those up itself**:
 
 ```ts
@@ -113,23 +113,23 @@ async boot() {
 }
 ```
 
-The kernel only disposes plugins whose `boot` returned successfully.
+The kernel only disposes pips whose `boot` returned successfully.
 
 ### `start` failure
 
-- Every started plugin's `stop` runs in reverse-topological order.
-- Then every booted plugin's `dispose` runs in reverse-topological order.
+- Every started pip's `stop` runs in reverse-topological order.
+- Then every booted pip's `dispose` runs in reverse-topological order.
 - App transitions to `failed`.
 - Kernel throws `DotLifecycleError` with code `DOT_LIFECYCLE_E004`.
 
 ### `stop` / `dispose` failure
 
 - The reverse-topological pass **continues through individual failures**.
-- The kernel collects per-plugin failures and throws a single aggregate
+- The kernel collects per-pip failures and throws a single aggregate
   `DotLifecycleError` (`DOT_LIFECYCLE_E005` for stop, `DOT_LIFECYCLE_E006`
   for dispose).
-- The aggregate carries `failures: readonly { plugin, phase, error }[]` so
-  callers and agents can see exactly which plugins failed.
+- The aggregate carries `failures: readonly { pip, phase, error }[]` so
+  callers and agents can see exactly which pips failed.
 
 ## Idempotency rules
 
@@ -161,9 +161,9 @@ The kernel emits stable, machine-readable error codes:
 | `DOT_LIFECYCLE_E006`  | One or more `dispose` hooks threw (aggregate).              |
 | `DOT_LIFECYCLE_E007`  | Reuse after `dispose()`.                                    |
 | `DOT_LIFECYCLE_E008`  | Reuse after a failed lifecycle.                             |
-| `DOT_LIFECYCLE_E009`  | Plugin dependency graph contains a cycle.                   |
-| `DOT_LIFECYCLE_E010`  | Plugin declared a dependency that is not registered.        |
-| `DOT_LIFECYCLE_E011`  | Plugin registered twice.                                    |
+| `DOT_LIFECYCLE_E009`  | Pip dependency graph contains a cycle.                   |
+| `DOT_LIFECYCLE_E010`  | Pip declared a dependency that is not registered.        |
+| `DOT_LIFECYCLE_E011`  | Pip registered twice.                                    |
 
 Every code surfaces as a `DiagnosticIssue` in `app.diagnostics.issues` with
 remediation guidance.
@@ -176,14 +176,14 @@ remediation guidance.
 import { defineApp, DotLifecycleError } from '@arki/dot';
 
 try {
-  const app = await defineApp('my-app').use(somePlugin).boot();
+  const app = await defineApp('my-app').use(somePip).boot();
   // ...
 } catch (err) {
   if (err instanceof DotLifecycleError) {
-    console.error(`${err.code} in ${err.plugin}: ${err.message}`);
+    console.error(`${err.code} in ${err.pip}: ${err.message}`);
     if (err.failures) {
       for (const f of err.failures) {
-        console.error(`  ${f.plugin}/${f.phase}: ${String(f.error)}`);
+        console.error(`  ${f.pip}/${f.phase}: ${String(f.error)}`);
       }
     }
   }
@@ -209,5 +209,5 @@ in-flight promise, so a double-signal won't double-cleanup.
 
 ## See also
 
-- [Plugin authoring](./plugin-authoring.md) — writing a `DotPlugin`.
+- [Pip authoring](./pip-authoring.md) — writing a `DotPip`.
 - [Diagnostics](./diagnostics.md) — observing lifecycle state at runtime.

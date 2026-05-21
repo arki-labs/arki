@@ -1,7 +1,7 @@
 /**
- * Public plugin contract for the DOT kernel.
+ * Public pip contract for the DOT kernel.
  *
- * A `DotPlugin` is a plain object with a name, optional dependency list, and
+ * A `DotPip` is a plain object with a name, optional dependency list, and
  * up to five lifecycle hooks. The kernel calls each hook in dependency order
  * (or reverse-dependency order for `stop`/`dispose`).
  *
@@ -9,9 +9,9 @@
  *
  *  - `configure` is SYNC. Returning a Promise is an error — the kernel will
  *    throw {@link DotLifecycleError} with code `DOT_LIFECYCLE_E001`.
- *  - `boot` may publish services into the app; downstream plugins see them via
+ *  - `boot` may publish services into the app; downstream pips see them via
  *    {@link DotBootContext.services}.
- *  - `stop` and `dispose` continue through individual plugin failures and
+ *  - `stop` and `dispose` continue through individual pip failures and
  *    report an aggregate error.
  */
 
@@ -21,23 +21,23 @@ import type { DependencyEdgeKind, RouteTransport, ServiceKind } from './manifest
 /**
  * Aggregate registration record produced during the `configure` phase.
  *
- * The kernel exposes one of these to each plugin via {@link DotConfigureContext}
+ * The kernel exposes one of these to each pip via {@link DotConfigureContext}
  * and uses the merged result to build the final `DotAppManifest`.
  */
 export type DotManifestContribution = {
-  /** Services this plugin publishes. */
+  /** Services this pip publishes. */
   services?: readonly {
     name: string;
     kind: ServiceKind;
   }[];
-  /** Routes this plugin exposes. */
+  /** Routes this pip exposes. */
   routes?: readonly {
     id: string;
     method?: string;
     path?: string;
     transport: RouteTransport;
   }[];
-  /** Additional `provides` capability strings (joined with the plugin's `provides`). */
+  /** Additional `provides` capability strings (joined with the pip's `provides`). */
   provides?: readonly string[];
   /** Additional dependency edges. */
   dependencies?: readonly {
@@ -48,39 +48,39 @@ export type DotManifestContribution = {
 
 /** Context provided to a `manifest` callback. */
 export type DotManifestContext<TServices extends Record<string, unknown>> = {
-  pluginName: string;
+  pipName: string;
   /** Services published by dependencies that have already booted (read-only). */
   services: Readonly<Partial<TServices>>;
 };
 
 /** Context provided to a `configure` hook. */
 export type DotConfigureContext = {
-  pluginName: string;
+  pipName: string;
   /** App name. */
   appName: string;
   /**
-   * Register a service this plugin publishes.
+   * Register a service this pip publishes.
    * Registration is metadata-only — the actual service instance is returned
    * from the `boot` hook in `DotBootResult.services`.
    */
   registerService(name: string, kind: ServiceKind): void;
-  /** Register a route this plugin exposes. */
+  /** Register a route this pip exposes. */
   registerRoute(route: { id: string; method?: string; path?: string; transport: RouteTransport }): void;
-  /** Mark the plugin as participating in a lifecycle hook. */
+  /** Mark the pip as participating in a lifecycle hook. */
   registerLifecycleHook(hook: DotLifecycleHook): void;
   /** Append `provides` capability strings. */
   declareProvides(...capabilities: string[]): void;
-  /** Append an extra dependency edge (alongside `plugin.dependencies`). */
+  /** Append an extra dependency edge (alongside `pip.dependencies`). */
   declareDependency(to: string, kind?: DependencyEdgeKind): void;
 };
 
 /** Context provided to a `boot` hook. */
 export type DotBootContext = {
-  pluginName: string;
+  pipName: string;
   appName: string;
   /**
-   * Services published by prior-booted plugins, keyed by service name.
-   * Use this for dependency injection between plugins.
+   * Services published by prior-booted pips, keyed by service name.
+   * Use this for dependency injection between pips.
    */
   services: ReadonlyMap<string, unknown>;
   /** Read-only configuration bag. */
@@ -89,53 +89,53 @@ export type DotBootContext = {
 
 /** Context provided to a `start` hook. */
 export type DotStartContext<TServices extends Record<string, unknown>> = {
-  pluginName: string;
+  pipName: string;
   appName: string;
   services: TServices;
 };
 
 /** Context provided to a `stop` hook. */
 export type DotStopContext<TServices extends Record<string, unknown>> = {
-  pluginName: string;
+  pipName: string;
   appName: string;
   services: TServices;
 };
 
 /** Context provided to a `dispose` hook. */
 export type DotDisposeContext<TServices extends Record<string, unknown>> = {
-  pluginName: string;
+  pipName: string;
   appName: string;
   services: TServices;
 };
 
 /** Return value of a `boot` hook. */
 export type DotBootResult<TServices extends Record<string, unknown>> = {
-  /** Services this plugin publishes — added to `app.services` and visible to dependent plugins. */
+  /** Services this pip publishes — added to `app.services` and visible to dependent pips. */
   services?: TServices;
 };
 
 /**
- * The DOT plugin contract.
+ * The DOT pip contract.
  *
- * Default `TServices` is `Record<string, never>` so plugins that don't publish
+ * Default `TServices` is `Record<string, never>` so pips that don't publish
  * services don't have to specify a type argument. Default `TManifest` is the
  * full contribution shape.
  */
-export type DotPlugin<
+export type DotPip<
   TServices extends Record<string, unknown> = Record<string, never>,
   TManifest extends DotManifestContribution = DotManifestContribution,
 > = {
-  /** Unique identifier for this plugin within the app. */
+  /** Unique identifier for this pip within the app. */
   name: string;
   /** Optional semantic version string. */
   version?: string;
   /**
-   * Names of plugins this one depends on.
+   * Names of pips this one depends on.
    * The kernel ensures dependencies are configured/booted/started first, and
    * stopped/disposed last.
    */
   dependencies?: readonly string[];
-  /** Capability strings this plugin advertises (for `dependencies` resolution by capability). */
+  /** Capability strings this pip advertises (for `dependencies` resolution by capability). */
   provides?: readonly string[];
 
   /**
@@ -153,7 +153,7 @@ export type DotPlugin<
   /** Async open-resources hook. Returns published services for DI. */
   boot?: (ctx: DotBootContext) => Promise<DotBootResult<TServices>> | DotBootResult<TServices>;
 
-  /** Async begin-active-work hook. Runs after every plugin's `boot` succeeds. */
+  /** Async begin-active-work hook. Runs after every pip's `boot` succeeds. */
   start?: (ctx: DotStartContext<TServices>) => Promise<void> | void;
 
   /** Async halt-active-work hook. Runs in reverse-topological order. */
@@ -164,11 +164,11 @@ export type DotPlugin<
 };
 
 /**
- * Type-narrowing helper for plugin authors.
+ * Type-narrowing helper for pip authors.
  *
  * @example
- * export const myPlugin = defineDotPlugin<{ db: MyDb }>({
- *   name: 'my-plugin',
+ * export const myPip = defineDotPip<{ db: MyDb }>({
+ *   name: 'my-pip',
  *   async boot() {
  *     const db = await openDb();
  *     return { services: { db } };
@@ -178,25 +178,25 @@ export type DotPlugin<
  *   },
  * });
  */
-export function defineDotPlugin<TServices extends Record<string, unknown> = Record<string, never>>(
-  plugin: DotPlugin<TServices>,
-): DotPlugin<TServices> {
-  return plugin;
+export function defineDotPip<TServices extends Record<string, unknown> = Record<string, never>>(
+  pip: DotPip<TServices>,
+): DotPip<TServices> {
+  return pip;
 }
 
-/** Internal type alias used by the kernel to erase plugin service generics. */
-export type AnyDotPlugin = DotPlugin<Record<string, unknown>, DotManifestContribution>;
+/** Internal type alias used by the kernel to erase pip service generics. */
+export type AnyDotPip = DotPip<Record<string, unknown>, DotManifestContribution>;
 
-/** Internal helper: extract the `provides` field from a plugin (always returns an array). */
-export function pluginProvides(plugin: AnyDotPlugin): readonly string[] {
-  return plugin.provides ?? [];
+/** Internal helper: extract the `provides` field from a pip (always returns an array). */
+export function pipProvides(pip: AnyDotPip): readonly string[] {
+  return pip.provides ?? [];
 }
 
-/** Internal helper: extract the `dependencies` field from a plugin (always returns an array). */
-export function pluginDependencies(plugin: AnyDotPlugin): readonly string[] {
-  return plugin.dependencies ?? [];
+/** Internal helper: extract the `dependencies` field from a pip (always returns an array). */
+export function pipDependencies(pip: AnyDotPip): readonly string[] {
+  return pip.dependencies ?? [];
 }
 
 /** Re-exported for downstream typing. */
 
-export { type DotAppManifest, type PluginManifest } from './manifest.js';
+export { type DotAppManifest, type PipManifest } from './manifest.js';

@@ -45,11 +45,11 @@ adapter only makes sense inside a DOT app.
 
 ## Function shape
 
-An adapter exports a factory function that returns a `DotPlugin`:
+An adapter exports a factory function that returns a `DotPip`:
 
 ```ts
 // my-pkg/src/dot.ts
-import { defineDotPlugin, type DotPlugin } from '@arki/dot/plugin';
+import { defineDotPip, type DotPip } from '@arki/dot/pip';
 
 import { MyClient } from './index.js';
 
@@ -62,9 +62,9 @@ export type MyPkgServices = {
   readonly myClient: MyClient;
 };
 
-export function myPkg(options: MyPkgDotOptions): DotPlugin<MyPkgServices> {
+export function myPkg(options: MyPkgDotOptions): DotPip<MyPkgServices> {
   const name = options.name ?? 'my-pkg';
-  return defineDotPlugin<MyPkgServices>({
+  return defineDotPip<MyPkgServices>({
     name,
     version: '1.0.0',
     provides: ['my-pkg'],
@@ -107,7 +107,7 @@ configure(ctx) {
 }
 ```
 
-The kernel merges every plugin's registration into `app.manifest`. Agents
+The kernel merges every pip's registration into `app.manifest`. Agents
 read this to know what services exist before the app boots.
 
 ## Resource opening in `boot`
@@ -128,7 +128,7 @@ async boot(ctx) {
 ```
 
 If `boot` opens multiple resources and one of them fails, clean up the
-partial state yourself before throwing — the kernel only disposes plugins
+partial state yourself before throwing — the kernel only disposes pips
 whose `boot` returned successfully.
 
 ```ts
@@ -154,8 +154,8 @@ async dispose({ services }) {
 }
 ```
 
-`stop` runs first if the plugin has active work (workers, subscribers).
-`dispose` runs even if `stop` failed — the kernel collects per-plugin
+`stop` runs first if the pip has active work (workers, subscribers).
+`dispose` runs even if `stop` failed — the kernel collects per-pip
 failures into an aggregate `DotLifecycleError`.
 
 ## Manifest contribution beyond services
@@ -175,11 +175,11 @@ configure(ctx) {
 }
 ```
 
-Or use the declarative `manifest` field on the plugin object — it accepts a
-static value or a function that receives `services` and the plugin name:
+Or use the declarative `manifest` field on the pip object — it accepts a
+static value or a function that receives `services` and the pip name:
 
 ```ts
-return defineDotPlugin<MyPkgServices>({
+return defineDotPip<MyPkgServices>({
   name,
   manifest: {
     routes: [{ id: 'health', path: '/_health/my-pkg', transport: 'http' }],
@@ -261,8 +261,8 @@ Adapters declare `@arki/dot` as an **optional peer** so that:
 }
 ```
 
-Import the kernel from `@arki/dot/plugin` (a narrow entry that exports
-`defineDotPlugin` and the plugin types only — no `defineApp`, no CLI).
+Import the kernel from `@arki/dot/pip` (a narrow entry that exports
+`defineDotPip` and the pip types only — no `defineApp`, no CLI).
 This minimises what the adapter pulls in.
 
 ## Canonical examples
@@ -278,7 +278,7 @@ combination of the hooks.
 
 ## See also
 
-- [Plugin authoring](./plugin-authoring.md) — the general `DotPlugin`
+- [Pip authoring](./pip-authoring.md) — the general `DotPip`
   contract.
 - [Lifecycle](./lifecycle.md) — hook ordering and failure semantics.
 - [Diagnostics](./diagnostics.md) — emitting actionable issues.

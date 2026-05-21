@@ -1,7 +1,7 @@
 /**
  * DOT adapter for `@arki/kv`.
  *
- * Wraps `KV` construction as a `DotPlugin`. The plugin opens a Redis-backed
+ * Wraps `KV` construction as a `DotPip`. The pip opens a Redis-backed
  * KV client in `boot`, publishes it as `services.kv`, and closes the client
  * in `dispose` (reverse-topological order).
  *
@@ -23,7 +23,7 @@
  * that is intentional: the adapter only makes sense in a DOT app.
  */
 
-import { defineDotPlugin, type DotPlugin } from '@arki/dot/plugin';
+import { defineDotPip, type DotPip } from '@arki/dot/pip';
 
 import { KV } from './index.js';
 
@@ -32,7 +32,7 @@ import { KV } from './index.js';
  */
 export type KvDotOptions = {
   /**
-   * Redis/Keyv URL. Use `rediss://` for TLS. If omitted, the plugin reads
+   * Redis/Keyv URL. Use `rediss://` for TLS. If omitted, the pip reads
    * `KV_URL` from `process.env` (matching the `createKV` factory behaviour).
    */
   readonly url?: string;
@@ -41,7 +41,7 @@ export type KvDotOptions = {
   /** Optional prefix for rate-limit keys (default `rl`). */
   readonly rateLimitPrefix?: string;
   /**
-   * Plugin name override. Defaults to `'kv'`. Use this only when composing
+   * Pip name override. Defaults to `'kv'`. Use this only when composing
    * multiple KV scopes inside the same app (rare).
    */
   readonly name?: string;
@@ -53,14 +53,14 @@ export type KvServices = {
 };
 
 /**
- * Build a DOT plugin that opens a `KV` client and publishes it as a service.
+ * Build a DOT pip that opens a `KV` client and publishes it as a service.
  *
  * @param options - Connection + naming options.
- * @returns A `DotPlugin` that registers a `kv`-kind service.
+ * @returns A `DotPip` that registers a `kv`-kind service.
  */
-export function kv(options: KvDotOptions = {}): DotPlugin<KvServices> {
+export function kv(options: KvDotOptions = {}): DotPip<KvServices> {
   const name = options.name ?? 'kv';
-  return defineDotPlugin<KvServices>({
+  return defineDotPip<KvServices>({
     name,
     version: '0.1.0',
     provides: ['kv'],

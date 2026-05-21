@@ -1,8 +1,8 @@
 /**
- * Narrow public surface for plugin authors.
+ * Narrow public surface for pip authors.
  *
- * Exposes the new-kernel plugin contract and the entry points a plugin
- * author needs to author + test plugins — `defineDotPlugin`, `defineApp`,
+ * Exposes the new-kernel pip contract and the entry points a pip
+ * author needs to author + test pips — `defineDotPip`, `defineApp`,
  * `testApp` / `bootTestApp`, plus lifecycle / manifest / diagnostics types.
  *
  * Does NOT re-export the legacy `Dot` / `createDot` builder or the legacy
@@ -14,14 +14,14 @@
  *
  * @example
  * ```ts
- * import { defineDotPlugin, type DotPlugin } from '@arki/dot/plugin';
+ * import { defineDotPip, type DotPip } from '@arki/dot/pip';
  * ```
  */
 
-export { defineDotPlugin } from './plugin-contract.js';
+export { defineDotPip } from './pip-contract.js';
 export type {
-  AnyDotPlugin,
-  DotPlugin,
+  AnyDotPip,
+  DotPip,
   DotBootContext,
   DotBootResult,
   DotConfigureContext,
@@ -30,7 +30,7 @@ export type {
   DotManifestContribution,
   DotStartContext,
   DotStopContext,
-} from './plugin-contract.js';
+} from './pip-contract.js';
 
 export { defineApp } from './define-app.js';
 export type { DotApp, DotAppBuilder, DotAppConfigured } from './define-app.js';
@@ -41,14 +41,14 @@ export type { TestAppOptions } from './test-harness.js';
 export type {
   DotLifecycleHook,
   DotLifecycleState,
-  DotLifecyclePluginFailure,
+  DotLifecyclePipFailure,
   DotLifecycleErrorCodeValue,
 } from './lifecycle.js';
 export { DotLifecycleError, DotLifecycleErrorCode, DOT_LIFECYCLE_HOOKS } from './lifecycle.js';
 
 export type {
   DotAppManifest,
-  PluginManifest,
+  PipManifest,
   RouteManifest,
   ServiceManifest,
   LifecycleManifest,
@@ -60,7 +60,7 @@ export type {
 
 export type {
   DotDiagnosticsSnapshot,
-  PluginDiagnostic,
+  PipDiagnostic,
   RouteDiagnostic,
   ServiceDiagnostic,
   LifecycleDiagnostic,

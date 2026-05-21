@@ -1,7 +1,7 @@
 /**
  * Lifecycle behaviour tests for the DOT kernel.
  *
- * Tests enter through public boundaries only — `defineApp`, `defineDotPlugin`,
+ * Tests enter through public boundaries only — `defineApp`, `defineDotPip`,
  * and the `DotApp` lifecycle methods. The internal scheduler is not tested
  * directly.
  */
@@ -10,55 +10,55 @@ import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '../define-app.js';
 import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
-import { defineDotPlugin } from '../plugin-contract.js';
+import { defineDotPip } from '../pip-contract.js';
 
 type CallLog = {
   hook: 'configure' | 'boot' | 'start' | 'stop' | 'dispose';
-  plugin: string;
+  pip: string;
 };
 
 describe('DOT lifecycle', () => {
   it('runs all 5 hooks in topological order; stop/dispose run in reverse', async () => {
     const calls: CallLog[] = [];
 
-    const a = defineDotPlugin({
+    const a = defineDotPip({
       name: 'a',
       configure: () => {
-        calls.push({ hook: 'configure', plugin: 'a' });
+        calls.push({ hook: 'configure', pip: 'a' });
       },
       boot: () => {
-        calls.push({ hook: 'boot', plugin: 'a' });
+        calls.push({ hook: 'boot', pip: 'a' });
         return {};
       },
       start: () => {
-        calls.push({ hook: 'start', plugin: 'a' });
+        calls.push({ hook: 'start', pip: 'a' });
       },
       stop: () => {
-        calls.push({ hook: 'stop', plugin: 'a' });
+        calls.push({ hook: 'stop', pip: 'a' });
       },
       dispose: () => {
-        calls.push({ hook: 'dispose', plugin: 'a' });
+        calls.push({ hook: 'dispose', pip: 'a' });
       },
     });
 
-    const b = defineDotPlugin({
+    const b = defineDotPip({
       name: 'b',
       dependencies: ['a'],
       configure: () => {
-        calls.push({ hook: 'configure', plugin: 'b' });
+        calls.push({ hook: 'configure', pip: 'b' });
       },
       boot: () => {
-        calls.push({ hook: 'boot', plugin: 'b' });
+        calls.push({ hook: 'boot', pip: 'b' });
         return {};
       },
       start: () => {
-        calls.push({ hook: 'start', plugin: 'b' });
+        calls.push({ hook: 'start', pip: 'b' });
       },
       stop: () => {
-        calls.push({ hook: 'stop', plugin: 'b' });
+        calls.push({ hook: 'stop', pip: 'b' });
       },
       dispose: () => {
-        calls.push({ hook: 'dispose', plugin: 'b' });
+        calls.push({ hook: 'dispose', pip: 'b' });
       },
     });
 
@@ -66,21 +66,21 @@ describe('DOT lifecycle', () => {
     await app.dispose();
 
     expect(calls).toEqual([
-      { hook: 'configure', plugin: 'a' },
-      { hook: 'configure', plugin: 'b' },
-      { hook: 'boot', plugin: 'a' },
-      { hook: 'boot', plugin: 'b' },
-      { hook: 'start', plugin: 'a' },
-      { hook: 'start', plugin: 'b' },
-      { hook: 'stop', plugin: 'b' },
-      { hook: 'stop', plugin: 'a' },
-      { hook: 'dispose', plugin: 'b' },
-      { hook: 'dispose', plugin: 'a' },
+      { hook: 'configure', pip: 'a' },
+      { hook: 'configure', pip: 'b' },
+      { hook: 'boot', pip: 'a' },
+      { hook: 'boot', pip: 'b' },
+      { hook: 'start', pip: 'a' },
+      { hook: 'start', pip: 'b' },
+      { hook: 'stop', pip: 'b' },
+      { hook: 'stop', pip: 'a' },
+      { hook: 'dispose', pip: 'b' },
+      { hook: 'dispose', pip: 'a' },
     ]);
   });
 
   it('rejects an async configure hook', async () => {
-    const bad = defineDotPlugin({
+    const bad = defineDotPip({
       name: 'bad',
       // Intentional: a configure hook returning a Promise must be detected.
       configure: () => Promise.resolve() as unknown as void,
@@ -89,113 +89,113 @@ describe('DOT lifecycle', () => {
     await expect(defineApp('test').use(bad).boot()).rejects.toMatchObject({
       code: DotLifecycleErrorCode.ConfigureAsync,
       phase: 'configure',
-      plugin: 'bad',
+      pip: 'bad',
     });
   });
 
-  it('disposes already-booted plugins in reverse order when a later boot fails', async () => {
+  it('disposes already-booted pips in reverse order when a later boot fails', async () => {
     const calls: CallLog[] = [];
-    const a = defineDotPlugin({
+    const a = defineDotPip({
       name: 'a',
       boot: () => {
-        calls.push({ hook: 'boot', plugin: 'a' });
+        calls.push({ hook: 'boot', pip: 'a' });
         return {};
       },
       dispose: () => {
-        calls.push({ hook: 'dispose', plugin: 'a' });
+        calls.push({ hook: 'dispose', pip: 'a' });
       },
     });
-    const b = defineDotPlugin({
+    const b = defineDotPip({
       name: 'b',
       dependencies: ['a'],
       boot: () => {
-        calls.push({ hook: 'boot', plugin: 'b' });
+        calls.push({ hook: 'boot', pip: 'b' });
         throw new Error('boom-b');
       },
       dispose: () => {
-        calls.push({ hook: 'dispose', plugin: 'b' });
+        calls.push({ hook: 'dispose', pip: 'b' });
       },
     });
 
     await expect(defineApp('test').use(a).use(b).boot()).rejects.toBeInstanceOf(DotLifecycleError);
 
-    // Plugin a booted, then b threw — a's dispose runs, b's dispose does NOT
+    // Pip a booted, then b threw — a's dispose runs, b's dispose does NOT
     // (its boot never completed).
     expect(calls).toEqual([
-      { hook: 'boot', plugin: 'a' },
-      { hook: 'boot', plugin: 'b' },
-      { hook: 'dispose', plugin: 'a' },
+      { hook: 'boot', pip: 'a' },
+      { hook: 'boot', pip: 'b' },
+      { hook: 'dispose', pip: 'a' },
     ]);
   });
 
-  it('does not call dispose for a plugin whose boot threw with partial resources', async () => {
+  it('does not call dispose for a pip whose boot threw with partial resources', async () => {
     const calls: CallLog[] = [];
     let partialCleanup = false;
-    const a = defineDotPlugin({
+    const a = defineDotPip({
       name: 'a',
       boot: () => {
-        calls.push({ hook: 'boot', plugin: 'a' });
+        calls.push({ hook: 'boot', pip: 'a' });
         return {};
       },
       dispose: () => {
-        calls.push({ hook: 'dispose', plugin: 'a' });
+        calls.push({ hook: 'dispose', pip: 'a' });
       },
     });
-    const partial = defineDotPlugin({
+    const partial = defineDotPip({
       name: 'partial',
       dependencies: ['a'],
       boot: () => {
-        calls.push({ hook: 'boot', plugin: 'partial' });
-        // simulate partial resource setup, then failure — the plugin cleans up itself
+        calls.push({ hook: 'boot', pip: 'partial' });
+        // simulate partial resource setup, then failure — the pip cleans up itself
         partialCleanup = true;
         throw new Error('partial-failed');
       },
-      // dispose would never be called for partial — DOT only disposes booted plugins
+      // dispose would never be called for partial — DOT only disposes booted pips
       dispose: () => {
-        calls.push({ hook: 'dispose', plugin: 'partial' });
+        calls.push({ hook: 'dispose', pip: 'partial' });
       },
     });
 
     await expect(defineApp('test').use(a).use(partial).boot()).rejects.toBeInstanceOf(DotLifecycleError);
     expect(partialCleanup).toBe(true);
-    expect(calls.filter(c => c.plugin === 'partial' && c.hook === 'dispose')).toEqual([]);
-    expect(calls.filter(c => c.plugin === 'a' && c.hook === 'dispose')).toEqual([{ hook: 'dispose', plugin: 'a' }]);
+    expect(calls.filter(c => c.pip === 'partial' && c.hook === 'dispose')).toEqual([]);
+    expect(calls.filter(c => c.pip === 'a' && c.hook === 'dispose')).toEqual([{ hook: 'dispose', pip: 'a' }]);
   });
 
-  it('on start failure stops started plugins and disposes all booted plugins (reverse order)', async () => {
+  it('on start failure stops started pips and disposes all booted pips (reverse order)', async () => {
     const calls: CallLog[] = [];
-    const a = defineDotPlugin({
+    const a = defineDotPip({
       name: 'a',
       boot: () => {
-        calls.push({ hook: 'boot', plugin: 'a' });
+        calls.push({ hook: 'boot', pip: 'a' });
         return {};
       },
       start: () => {
-        calls.push({ hook: 'start', plugin: 'a' });
+        calls.push({ hook: 'start', pip: 'a' });
       },
       stop: () => {
-        calls.push({ hook: 'stop', plugin: 'a' });
+        calls.push({ hook: 'stop', pip: 'a' });
       },
       dispose: () => {
-        calls.push({ hook: 'dispose', plugin: 'a' });
+        calls.push({ hook: 'dispose', pip: 'a' });
       },
     });
-    const b = defineDotPlugin({
+    const b = defineDotPip({
       name: 'b',
       dependencies: ['a'],
       boot: () => {
-        calls.push({ hook: 'boot', plugin: 'b' });
+        calls.push({ hook: 'boot', pip: 'b' });
         return {};
       },
       start: () => {
-        calls.push({ hook: 'start', plugin: 'b' });
+        calls.push({ hook: 'start', pip: 'b' });
         throw new Error('start-failed');
       },
       stop: () => {
-        calls.push({ hook: 'stop', plugin: 'b' });
+        calls.push({ hook: 'stop', pip: 'b' });
       },
       dispose: () => {
-        calls.push({ hook: 'dispose', plugin: 'b' });
+        calls.push({ hook: 'dispose', pip: 'b' });
       },
     });
 
@@ -206,46 +206,46 @@ describe('DOT lifecycle', () => {
     // a started, then b failed. a is stopped (reverse), then both are disposed (reverse).
     // b never started so b.stop is NOT called.
     expect(calls).toEqual([
-      { hook: 'boot', plugin: 'a' },
-      { hook: 'boot', plugin: 'b' },
-      { hook: 'start', plugin: 'a' },
-      { hook: 'start', plugin: 'b' },
-      { hook: 'stop', plugin: 'a' },
-      { hook: 'dispose', plugin: 'b' },
-      { hook: 'dispose', plugin: 'a' },
+      { hook: 'boot', pip: 'a' },
+      { hook: 'boot', pip: 'b' },
+      { hook: 'start', pip: 'a' },
+      { hook: 'start', pip: 'b' },
+      { hook: 'stop', pip: 'a' },
+      { hook: 'dispose', pip: 'b' },
+      { hook: 'dispose', pip: 'a' },
     ]);
   });
 
-  it('stop continues through individual plugin failures with aggregate error', async () => {
+  it('stop continues through individual pip failures with aggregate error', async () => {
     const calls: CallLog[] = [];
-    const a = defineDotPlugin({
+    const a = defineDotPip({
       name: 'a',
       start: () => {
-        calls.push({ hook: 'start', plugin: 'a' });
+        calls.push({ hook: 'start', pip: 'a' });
       },
       stop: () => {
-        calls.push({ hook: 'stop', plugin: 'a' });
+        calls.push({ hook: 'stop', pip: 'a' });
       },
     });
-    const b = defineDotPlugin({
+    const b = defineDotPip({
       name: 'b',
       dependencies: ['a'],
       start: () => {
-        calls.push({ hook: 'start', plugin: 'b' });
+        calls.push({ hook: 'start', pip: 'b' });
       },
       stop: () => {
-        calls.push({ hook: 'stop', plugin: 'b' });
+        calls.push({ hook: 'stop', pip: 'b' });
         throw new Error('stop-b-broken');
       },
     });
-    const c = defineDotPlugin({
+    const c = defineDotPip({
       name: 'c',
       dependencies: ['b'],
       start: () => {
-        calls.push({ hook: 'start', plugin: 'c' });
+        calls.push({ hook: 'start', pip: 'c' });
       },
       stop: () => {
-        calls.push({ hook: 'stop', plugin: 'c' });
+        calls.push({ hook: 'stop', pip: 'c' });
       },
     });
 
@@ -255,15 +255,15 @@ describe('DOT lifecycle', () => {
     });
 
     expect(calls.filter(c => c.hook === 'stop')).toEqual([
-      { hook: 'stop', plugin: 'c' },
-      { hook: 'stop', plugin: 'b' },
-      { hook: 'stop', plugin: 'a' },
+      { hook: 'stop', pip: 'c' },
+      { hook: 'stop', pip: 'b' },
+      { hook: 'stop', pip: 'a' },
     ]);
   });
 
   it('boot() is idempotent while app is booted', async () => {
     let bootCalls = 0;
-    const p = defineDotPlugin({
+    const p = defineDotPip({
       name: 'p',
       boot: () => {
         bootCalls += 1;
@@ -287,7 +287,7 @@ describe('DOT lifecycle', () => {
       resolveBoot = r;
     });
 
-    const slow = defineDotPlugin({
+    const slow = defineDotPip({
       name: 'slow',
       boot: async () => {
         bootCalls += 1;
@@ -317,17 +317,17 @@ describe('DOT lifecycle', () => {
 
   it('start() from defined runs configure + boot first', async () => {
     const calls: CallLog[] = [];
-    const p = defineDotPlugin({
+    const p = defineDotPip({
       name: 'p',
       configure: () => {
-        calls.push({ hook: 'configure', plugin: 'p' });
+        calls.push({ hook: 'configure', pip: 'p' });
       },
       boot: () => {
-        calls.push({ hook: 'boot', plugin: 'p' });
+        calls.push({ hook: 'boot', pip: 'p' });
         return {};
       },
       start: () => {
-        calls.push({ hook: 'start', plugin: 'p' });
+        calls.push({ hook: 'start', pip: 'p' });
       },
     });
     const app = await defineApp('test').use(p).start();
@@ -338,7 +338,7 @@ describe('DOT lifecycle', () => {
 
   it('stop() on a booted-but-never-started app is a no-op', async () => {
     let stopCalls = 0;
-    const p = defineDotPlugin({
+    const p = defineDotPip({
       name: 'p',
       boot: () => ({}),
       stop: () => {
@@ -354,16 +354,16 @@ describe('DOT lifecycle', () => {
 
   it('dispose() from started runs stop then dispose', async () => {
     const calls: CallLog[] = [];
-    const p = defineDotPlugin({
+    const p = defineDotPip({
       name: 'p',
       start: () => {
-        calls.push({ hook: 'start', plugin: 'p' });
+        calls.push({ hook: 'start', pip: 'p' });
       },
       stop: () => {
-        calls.push({ hook: 'stop', plugin: 'p' });
+        calls.push({ hook: 'stop', pip: 'p' });
       },
       dispose: () => {
-        calls.push({ hook: 'dispose', plugin: 'p' });
+        calls.push({ hook: 'dispose', pip: 'p' });
       },
     });
     const app = await defineApp('test').use(p).start();
@@ -373,7 +373,7 @@ describe('DOT lifecycle', () => {
   });
 
   it('boot() after dispose throws DotLifecycleError with ReuseAfterDispose code', async () => {
-    const p = defineDotPlugin({ name: 'p', boot: () => ({}) });
+    const p = defineDotPip({ name: 'p', boot: () => ({}) });
     const app = await defineApp('test').use(p).boot();
     await app.dispose();
     await expect(app.start()).rejects.toMatchObject({
@@ -382,8 +382,8 @@ describe('DOT lifecycle', () => {
   });
 
   it('detects dependency cycles at configure time', () => {
-    const a = defineDotPlugin({ name: 'a', dependencies: ['b'] });
-    const b = defineDotPlugin({ name: 'b', dependencies: ['a'] });
+    const a = defineDotPip({ name: 'a', dependencies: ['b'] });
+    const b = defineDotPip({ name: 'b', dependencies: ['a'] });
     expect(() => defineApp('test').use(a).use(b).configure()).toThrow(DotLifecycleError);
     try {
       defineApp('test').use(a).use(b).configure();
@@ -393,7 +393,7 @@ describe('DOT lifecycle', () => {
   });
 
   it('detects missing dependency at configure time', () => {
-    const a = defineDotPlugin({ name: 'a', dependencies: ['missing'] });
+    const a = defineDotPip({ name: 'a', dependencies: ['missing'] });
     expect(() => defineApp('test').use(a).configure()).toThrow(DotLifecycleError);
     try {
       defineApp('test').use(a).configure();
@@ -402,13 +402,13 @@ describe('DOT lifecycle', () => {
     }
   });
 
-  it('detects duplicate plugin registration', () => {
-    const a = defineDotPlugin({ name: 'a' });
+  it('detects duplicate pip registration', () => {
+    const a = defineDotPip({ name: 'a' });
     expect(() => defineApp('test').use(a).use(a).configure()).toThrow(DotLifecycleError);
     try {
       defineApp('test').use(a).use(a).configure();
     } catch (error) {
-      expect((error as DotLifecycleError).code).toBe(DotLifecycleErrorCode.DuplicatePlugin);
+      expect((error as DotLifecycleError).code).toBe(DotLifecycleErrorCode.DuplicatePip);
     }
   });
 });

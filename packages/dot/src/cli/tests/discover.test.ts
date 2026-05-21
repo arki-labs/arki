@@ -19,20 +19,20 @@ import { DotCliError, DotCliErrorCode } from '../error-codes.js';
 // modules (not the barrel `index.ts`) so vitest's import-analysis doesn't
 // trip on transitive JSX deps from the legacy package surface.
 const DEFINE_APP_PATH = resolve(__dirname, '..', '..', 'define-app.ts');
-const PLUGIN_CONTRACT_PATH = resolve(__dirname, '..', '..', 'plugin-contract.ts');
+const PLUGIN_CONTRACT_PATH = resolve(__dirname, '..', '..', 'pip-contract.ts');
 
 const BUILDER_SOURCE = `
 import { defineApp } from '${DEFINE_APP_PATH}';
-import { defineDotPlugin } from '${PLUGIN_CONTRACT_PATH}';
-const p = defineDotPlugin({ name: 'p', boot: () => ({}) });
+import { defineDotPip } from '${PLUGIN_CONTRACT_PATH}';
+const p = defineDotPip({ name: 'p', boot: () => ({}) });
 export default defineApp('discovered').use(p);
 `;
 
 const FACTORY_SOURCE = `
 import { defineApp } from '${DEFINE_APP_PATH}';
-import { defineDotPlugin } from '${PLUGIN_CONTRACT_PATH}';
+import { defineDotPip } from '${PLUGIN_CONTRACT_PATH}';
 export default async function makeApp() {
-  const p = defineDotPlugin({ name: 'p' });
+  const p = defineDotPip({ name: 'p' });
   return defineApp('factory').use(p);
 }
 `;

@@ -1,6 +1,6 @@
-# Plugin Authoring
+# Pip Authoring
 
-A `DotPlugin` is a plain object with a name, optional dependencies, and up to
+A `DotPip` is a plain object with a name, optional dependencies, and up to
 five lifecycle hooks. The kernel runs the hooks in dependency order
 (`configure → boot → start`) and in reverse-dependency order for cleanup
 (`stop → dispose`). See [Lifecycle](./lifecycle.md) for the full contract.
@@ -8,9 +8,9 @@ five lifecycle hooks. The kernel runs the hooks in dependency order
 ## Anatomy
 
 ```ts
-import { defineDotPlugin } from '@arki/dot';
+import { defineDotPip } from '@arki/dot';
 
-export const billing = defineDotPlugin({
+export const billing = defineDotPip({
   name: 'billing',
   version: '1.0.0',
   dependencies: ['env'],
@@ -35,8 +35,8 @@ export const billing = defineDotPlugin({
 });
 ```
 
-`defineDotPlugin` is a typed identity function — it preserves the generic
-`TServices` so downstream plugins see fully typed `services` in their hook
+`defineDotPip` is a typed identity function — it preserves the generic
+`TServices` so downstream pips see fully typed `services` in their hook
 contexts.
 
 ## Fields
@@ -44,13 +44,13 @@ contexts.
 | Field          | Required | Meaning                                                              |
 | -------------- | -------- | -------------------------------------------------------------------- |
 | `name`         | yes      | Unique identifier inside an app. Used in the dependency graph.       |
-| `version`      | no       | Semver string. Surfaces in `PluginManifest.version`.                 |
-| `dependencies` | no       | Names of plugins that must boot before this one.                     |
+| `version`      | no       | Semver string. Surfaces in `PipManifest.version`.                 |
+| `dependencies` | no       | Names of pips that must boot before this one.                     |
 | `provides`     | no       | Capability strings — informational, surfaced in the manifest.        |
 | `manifest`     | no       | Static or callback-form contribution (routes, services, edges).      |
 | `configure`    | no       | Sync hook. Registers metadata. No I/O.                               |
 | `boot`         | no       | Async hook. Opens resources, publishes services for DI.              |
-| `start`        | no       | Async hook. Begins active work after every plugin has booted.        |
+| `start`        | no       | Async hook. Begins active work after every pip has booted.        |
 | `stop`         | no       | Async hook. Reverse order. Halts active work.                        |
 | `dispose`      | no       | Async hook. Reverse order. Releases resources.                       |
 
@@ -59,7 +59,7 @@ contexts.
 1. **`configure`** — sync registration. Validate options, register routes,
    declare provided services. No async, no I/O.
 2. **`boot`** — async open. Connect clients, validate runtime config, return
-   `{ services: { ... } }` for downstream plugins to consume.
+   `{ services: { ... } }` for downstream pips to consume.
 3. **`start`** — async activate. Workers, schedulers, subscribers.
 4. **`stop`** — async halt. Drain workers, unsubscribe listeners.
 5. **`dispose`** — async release. Close connections, free file handles.
@@ -69,14 +69,14 @@ idempotency) is [`lifecycle.md`](./lifecycle.md).
 
 ## Services and dependency injection
 
-A plugin publishes services by returning them from `boot`:
+A pip publishes services by returning them from `boot`:
 
 ```ts
-import { defineDotPlugin } from '@arki/dot';
+import { defineDotPip } from '@arki/dot';
 
 type Client = { ping(): Promise<void>; close(): Promise<void> };
 
-export const apiClient = defineDotPlugin<{ apiClient: Client }>({
+export const apiClient = defineDotPip<{ apiClient: Client }>({
   name: 'api-client',
   async boot() {
     const client: Client = await openClient();
@@ -88,12 +88,12 @@ export const apiClient = defineDotPlugin<{ apiClient: Client }>({
 });
 ```
 
-Downstream plugins receive prior services through `ctx.services`:
+Downstream pips receive prior services through `ctx.services`:
 
 ```ts
-import { defineDotPlugin } from '@arki/dot';
+import { defineDotPip } from '@arki/dot';
 
-export const billing = defineDotPlugin({
+export const billing = defineDotPip({
   name: 'billing',
   dependencies: ['api-client'],
   async boot(ctx) {
@@ -105,12 +105,12 @@ export const billing = defineDotPlugin({
 ```
 
 `ctx.services` is a `ReadonlyMap<string, unknown>` at the kernel level. Type
-parameters on `defineDotPlugin<TServices>` carry the types forward at the app
+parameters on `defineDotPip<TServices>` carry the types forward at the app
 boundary — `app.services.apiClient` is typed as `Client`.
 
 ## Manifest contribution
 
-During `configure`, a plugin registers what it exposes:
+During `configure`, a pip registers what it exposes:
 
 ```ts
 configure(ctx) {
@@ -133,10 +133,10 @@ understand what the app does without executing code.
 
 ## Diagnostics
 
-A plugin contributes runtime status to `app.diagnostics`. The kernel
+A pip contributes runtime status to `app.diagnostics`. The kernel
 automatically records lifecycle state. To emit a custom issue, throw a
 structured error from a hook — the kernel wraps it into a
-`DiagnosticIssue` with the plugin name attached.
+`DiagnosticIssue` with the pip name attached.
 
 ```ts
 async boot(ctx) {
@@ -144,7 +144,7 @@ async boot(ctx) {
   if (!config) {
     throw Object.assign(new Error('BILLING_KEY not set'), {
       code: 'BILLING_E001',
-      remediation: 'Set BILLING_KEY in your env or pass it to the billing plugin.',
+      remediation: 'Set BILLING_KEY in your env or pass it to the billing pip.',
       docsUrl: 'https://example.com/dot/docs/billing#config',
     });
   }
@@ -159,12 +159,12 @@ conventions.
 
 ## Type-safe services
 
-`defineDotPlugin<TServices>(plugin)` carries the services type through to the
+`defineDotPip<TServices>(pip)` carries the services type through to the
 final `app.services` record:
 
 ```ts
-const a = defineDotPlugin<{ a: number }>({ name: 'a', async boot() { return { services: { a: 1 } }; } });
-const b = defineDotPlugin<{ b: string }>({ name: 'b', async boot() { return { services: { b: 'x' } }; } });
+const a = defineDotPip<{ a: number }>({ name: 'a', async boot() { return { services: { a: 1 } }; } });
+const b = defineDotPip<{ b: string }>({ name: 'b', async boot() { return { services: { b: 'x' } }; } });
 
 const app = await defineApp('demo').use(a).use(b).boot();
 app.services.a; // number
@@ -173,7 +173,7 @@ app.services.b; // string
 
 The builder type narrows on every `.use(...)` call. No casts needed.
 
-## Testing your plugin
+## Testing your pip
 
 `@arki/dot` ships a small test harness:
 
@@ -181,9 +181,9 @@ The builder type narrows on every `.use(...)` call. No casts needed.
 import { testApp, bootTestApp } from '@arki/dot';
 import { describe, expect, it } from 'vitest';
 
-import { billing } from '../src/billing-plugin.js';
+import { billing } from '../src/billing-pip.js';
 
-describe('billing plugin', () => {
+describe('billing pip', () => {
   it('publishes a billing service', async () => {
     const app = await bootTestApp([billing]);
     expect(app.services.billing).toBeDefined();
@@ -208,5 +208,5 @@ boots immediately. Both honour the same lifecycle as production apps.
 
 - [Lifecycle](./lifecycle.md) — hook contract, failure ordering, idempotency.
 - [Diagnostics](./diagnostics.md) — manifest + diagnostics shapes.
-- [Adapter authoring](./adapter-authoring.md) — package your plugin as a
+- [Adapter authoring](./adapter-authoring.md) — package your pip as a
   reusable `./dot` subpath export.

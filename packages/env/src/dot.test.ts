@@ -7,7 +7,7 @@
  *   - boots/disposes through the standard DOT lifecycle
  */
 
-import { defineApp } from '@arki/dot/plugin';
+import { defineApp } from '@arki/dot/pip';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -47,15 +47,15 @@ describe('@arki/env/dot', () => {
       .boot();
     try {
       expect(app.manifest.services).toEqual([
-        { name: 'env', plugin: 'env', kind: 'env' },
+        { name: 'env', pip: 'env', kind: 'env' },
       ]);
-      expect(app.manifest.plugins.map(p => p.name)).toEqual(['env']);
+      expect(app.manifest.pips.map(p => p.name)).toEqual(['env']);
     } finally {
       await app.dispose();
     }
   });
 
-  it('honors a custom plugin name', async () => {
+  it('honors a custom pip name', async () => {
     const app = await defineApp('env-named-test')
       .use(
         env({
@@ -66,9 +66,9 @@ describe('@arki/env/dot', () => {
       )
       .boot();
     try {
-      expect(app.manifest.plugins.map(p => p.name)).toEqual(['public-env']);
+      expect(app.manifest.pips.map(p => p.name)).toEqual(['public-env']);
       expect(app.manifest.services).toEqual([
-        { name: 'env', plugin: 'public-env', kind: 'env' },
+        { name: 'env', pip: 'public-env', kind: 'env' },
       ]);
     } finally {
       await app.dispose();

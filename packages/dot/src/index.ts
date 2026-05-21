@@ -3,18 +3,18 @@
  *
  * Public surface:
  *   - `defineApp(name)` — the modern entry point for composing applications.
- *   - `defineDotPlugin(config)` — define lifecycle-aware plugins.
+ *   - `defineDotPip(config)` — define lifecycle-aware pips.
  *   - Lifecycle / manifest / diagnostics types.
- *   - `testApp` / `bootTestApp` — test harnesses for plugin authors.
+ *   - `testApp` / `bootTestApp` — test harnesses for pip authors.
  */
 
 // #region New kernel — public surface (Task 9a)
 export { defineApp } from './define-app.js';
 export type { DotApp, DotAppBuilder, DotAppConfigured } from './define-app.js';
 
-export { defineDotPlugin } from './plugin-contract.js';
+export { defineDotPip } from './pip-contract.js';
 export type {
-  DotPlugin,
+  DotPip,
   DotBootContext,
   DotBootResult,
   DotConfigureContext,
@@ -23,7 +23,7 @@ export type {
   DotManifestContribution,
   DotStartContext,
   DotStopContext,
-} from './plugin-contract.js';
+} from './pip-contract.js';
 
 export {
   DotLifecycleError,
@@ -33,13 +33,13 @@ export {
 export type {
   DotLifecycleHook,
   DotLifecycleState,
-  DotLifecyclePluginFailure,
+  DotLifecyclePipFailure,
   DotLifecycleErrorCodeValue,
 } from './lifecycle.js';
 
 export type {
   DotAppManifest,
-  PluginManifest,
+  PipManifest,
   RouteManifest,
   ServiceManifest,
   LifecycleManifest,
@@ -51,7 +51,7 @@ export type {
 
 export type {
   DotDiagnosticsSnapshot,
-  PluginDiagnostic,
+  PipDiagnostic,
   RouteDiagnostic,
   ServiceDiagnostic,
   LifecycleDiagnostic,
@@ -64,6 +64,6 @@ export { testApp, bootTestApp } from './test-harness.js';
 export type { TestAppOptions } from './test-harness.js';
 
 // Task 9b: CLI envelope type is exported so adapter packages can produce the
-// same shape from related tooling (release-tooling, plugin scaffolds, etc.).
+// same shape from related tooling (release-tooling, pip scaffolds, etc.).
 export type { DotCliEnvelope, DotCliEnvelopeStatus } from './cli/render-explain.js';
 // #endregion
