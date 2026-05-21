@@ -636,6 +636,54 @@ export type ScorecardDimension =
 export type ScorecardStatus = 'pass' | 'fail' | 'warn' | 'deferred';
 
 /**
+ * Result of the one-shot DOT probe that runs alongside the scorecard. The
+ * probe boots a synthetic 3-adapter DOT app (env + kv + db), reads the
+ * static `DotAppManifest` + runtime `DotDiagnosticsSnapshot`, and exercises
+ * the CLI's pure envelope builders (`buildExplainEnvelope`,
+ * `buildDoctorEnvelope`) plus `runNew --dry-run --json`. The structured
+ * output drives both the `dot-gates` and `agent-native-gates` dimensions.
+ *
+ * Counts are kept as numbers (not booleans) so the gate evaluator can
+ * surface "manifest has 4 of 5 arrays" instead of a binary pass/fail.
+ *
+ * Tests inject a synthetic `DotProbeResult` to drive deterministic gate
+ * outcomes without spawning the real probe.
+ */
+export type DotProbeResult = DotProbeOk | DotProbeFail;
+
+export interface DotProbeOk {
+  readonly status: 'pass';
+  /** Number of pips booted in the probe app. Gate requires >= 3. */
+  readonly pipCount: number;
+  /** Count of the five contract arrays present on the manifest. Gate requires 5. */
+  readonly manifestArrays: number;
+  /** Count of the five contract arrays present on diagnostics. Gate requires 5. */
+  readonly diagnosticsArrays: number;
+  /** True iff `buildExplainEnvelope` emits `{ status, command: 'explain', generatedAt, data: <manifest>, errors }`. */
+  readonly explainEnvelopeOk: boolean;
+  /** True iff `buildDoctorEnvelope` emits `{ status, command: 'doctor', generatedAt, data: <snapshot>, errors }`. */
+  readonly doctorEnvelopeOk: boolean;
+  /** True iff `runNew(--dry-run --json)` emits a success envelope with operations. */
+  readonly newEnvelopeOk: boolean;
+  /** Number of file operations the dry-run reported. */
+  readonly newOperationCount: number;
+  /**
+   * Required scaffold files actually present in the dry-run plan. The
+   * canonical required set is documented in {@link DOT_PROBE_REQUIRED_FILES}.
+   */
+  readonly newRequiredFilesPresent: readonly string[];
+  /** Lifecycle state of the probe app after boot (should be 'booted'). */
+  readonly appState: string;
+}
+
+export interface DotProbeFail {
+  readonly status: 'fail';
+  readonly reason: string;
+  /** Optional captured stderr from the probe subprocess. */
+  readonly stderr?: string;
+}
+
+/**
  * One dimension's outcome for one package. `details` is the one-line
  * human-readable reason; `evidence` carries the structured errors that
  * drove the verdict (e.g. RELEASE_E006 for missing description).

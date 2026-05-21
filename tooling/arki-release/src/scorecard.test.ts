@@ -18,8 +18,29 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { NpmPackRunner } from './pack';
 import { renderScorecardText, runScorecard, SCORECARD_ERROR_CODES } from './scorecard';
-import type { ReleaseConfig } from './types';
+import type { DotProbeOk, ReleaseConfig } from './types';
 import type { ProcessResult, ProcessRunner } from './fixture';
+
+/**
+ * Synthetic passing DOT probe for tests that want to exercise the gate
+ * evaluators. Returns the narrow `DotProbeOk` shape so tests can spread it
+ * and override individual fields (`{ ...passingDotProbe(), pipCount: 2 }`)
+ * without TypeScript losing the discriminant.
+ */
+function passingDotProbe(): DotProbeOk {
+  return {
+    status: 'pass',
+    pipCount: 3,
+    manifestArrays: 5,
+    diagnosticsArrays: 5,
+    explainEnvelopeOk: true,
+    doctorEnvelopeOk: true,
+    newEnvelopeOk: true,
+    newOperationCount: 7,
+    newRequiredFilesPresent: ['package.json', 'tsconfig.json', 'README.md', 'AGENTS.md', '.gitignore'],
+    appState: 'booted',
+  };
+}
 
 /** Shared metadata defaults used by every fixture. */
 const defaults: ReleaseConfig['publicMetadataDefaults'] = {
@@ -244,6 +265,7 @@ describe('runScorecard — happy path', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     expect(envelope.items).toHaveLength(1);
     const pkg = envelope.items[0];
@@ -273,6 +295,7 @@ describe('runScorecard — happy path', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     expect(envelope.summary.stableReleaseGate).toBe('open');
     expect(envelope.summary.allowDeferred).toBe(true);
@@ -298,6 +321,7 @@ describe('runScorecard — dimension failures', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     const pkg = envelope.items[0];
     expect(pkg?.dimensions.metadata.status).toBe('warn');
@@ -313,6 +337,7 @@ describe('runScorecard — dimension failures', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     const pkg = envelope.items[0];
     expect(pkg?.dimensions.privacy.status).toBe('fail');
@@ -337,6 +362,7 @@ describe('runScorecard — dimension failures', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     // The inventory will classify @arki/assert as blocked-by-private-dependency,
     // not public-candidate, so it is NOT a candidate for the scorecard.
@@ -354,6 +380,7 @@ describe('runScorecard — dimension failures', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     const pkg = envelope.items[0];
     expect(pkg?.dimensions['build-output'].status).toBe('fail');
@@ -369,6 +396,7 @@ describe('runScorecard — dimension failures', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     const pkg = envelope.items[0];
     expect(pkg?.dimensions['build-output'].status).toBe('fail');
@@ -388,6 +416,7 @@ describe('runScorecard — dimension failures', () => {
       npmPackRunner: runner,
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     const pkg = envelope.items[0];
     expect(pkg?.dimensions.packlist.status).toBe('fail');
@@ -403,6 +432,7 @@ describe('runScorecard — dimension failures', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     const pkg = envelope.items[0];
     expect(pkg?.dimensions.docs.status).toBe('fail');
@@ -417,6 +447,7 @@ describe('runScorecard — dimension failures', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     const pkg = envelope.items[0];
     expect(pkg?.dimensions.docs.status).toBe('warn');
@@ -431,6 +462,7 @@ describe('runScorecard — dimension failures', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner({ packFail: true }),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     const pkg = envelope.items[0];
     expect(pkg?.dimensions.fixtures.status).toBe('fail');
@@ -438,7 +470,7 @@ describe('runScorecard — dimension failures', () => {
   });
 });
 
-describe('runScorecard — DOT + agent-native gate deferral', () => {
+describe('runScorecard — DOT + agent-native gate evaluation', () => {
   let tmp: string;
   beforeEach(() => {
     tmp = mkdtempSync(path.join(tmpdir(), 'arki-scorecard-'));
@@ -447,7 +479,7 @@ describe('runScorecard — DOT + agent-native gate deferral', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('always reports DOT and agent-native gates as deferred today', async () => {
+  it('reports both gates as `deferred` when the probe is skipped (legacy fallback)', async () => {
     writeRoot(tmp);
     writeAssertPackage(tmp);
     const envelope = await runScorecard({
@@ -456,12 +488,102 @@ describe('runScorecard — DOT + agent-native gate deferral', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     const pkg = envelope.items[0];
     expect(pkg?.dimensions['dot-gates'].status).toBe('deferred');
-    expect(pkg?.dimensions['dot-gates'].details).toMatch(/Tasks? 9/);
+    expect(pkg?.dimensions['dot-gates'].details).toMatch(/skip-dot-probe/);
     expect(pkg?.dimensions['agent-native-gates'].status).toBe('deferred');
-    expect(pkg?.dimensions['agent-native-gates'].details).toMatch(/11\.5/);
+    expect(pkg?.dimensions['agent-native-gates'].details).toMatch(/skip-dot-probe/);
+  });
+
+  it('passes both gates when the injected probe satisfies every contract check', async () => {
+    writeRoot(tmp);
+    writeAssertPackage(tmp);
+    const envelope = await runScorecard({
+      cwd: tmp,
+      config: makeConfig(),
+      npmPackRunner: makeNpmPackRunner(),
+      fixtureRunner: makeFixtureRunner(),
+      fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      dotProbe: passingDotProbe(),
+    });
+    const pkg = envelope.items[0];
+    expect(pkg?.dimensions['dot-gates'].status).toBe('pass');
+    expect(pkg?.dimensions['dot-gates'].details).toMatch(/3 adapters booted/);
+    expect(pkg?.dimensions['agent-native-gates'].status).toBe('pass');
+    expect(pkg?.dimensions['agent-native-gates'].details).toMatch(/dot new --dry-run/);
+    expect(pkg?.overall).toBe('pass');
+    expect(envelope.summary.stableReleaseGate).toBe('open');
+  });
+
+  it('fails dot-gates when the manifest is missing a contract array', async () => {
+    writeRoot(tmp);
+    writeAssertPackage(tmp);
+    const probe = passingDotProbe();
+    const envelope = await runScorecard({
+      cwd: tmp,
+      config: makeConfig(),
+      npmPackRunner: makeNpmPackRunner(),
+      fixtureRunner: makeFixtureRunner(),
+      fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      dotProbe: { ...probe, manifestArrays: 4 },
+    });
+    const pkg = envelope.items[0];
+    expect(pkg?.dimensions['dot-gates'].status).toBe('fail');
+    expect(pkg?.dimensions['dot-gates'].evidence.some(e => e.code === 'SCORE_DOT_E001')).toBe(true);
+  });
+
+  it('fails dot-gates when fewer than three adapters boot', async () => {
+    writeRoot(tmp);
+    writeAssertPackage(tmp);
+    const probe = passingDotProbe();
+    const envelope = await runScorecard({
+      cwd: tmp,
+      config: makeConfig(),
+      npmPackRunner: makeNpmPackRunner(),
+      fixtureRunner: makeFixtureRunner(),
+      fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      dotProbe: { ...probe, pipCount: 2 },
+    });
+    const pkg = envelope.items[0];
+    expect(pkg?.dimensions['dot-gates'].status).toBe('fail');
+    expect(pkg?.dimensions['dot-gates'].evidence.some(e => e.code === 'SCORE_DOT_E003')).toBe(true);
+  });
+
+  it('fails agent-native-gates when `dot new --dry-run --json` is missing required files', async () => {
+    writeRoot(tmp);
+    writeAssertPackage(tmp);
+    const probe = passingDotProbe();
+    const envelope = await runScorecard({
+      cwd: tmp,
+      config: makeConfig(),
+      npmPackRunner: makeNpmPackRunner(),
+      fixtureRunner: makeFixtureRunner(),
+      fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      dotProbe: { ...probe, newRequiredFilesPresent: ['package.json'] },
+    });
+    const pkg = envelope.items[0];
+    expect(pkg?.dimensions['dot-gates'].status).toBe('pass');
+    expect(pkg?.dimensions['agent-native-gates'].status).toBe('fail');
+    expect(pkg?.dimensions['agent-native-gates'].evidence.some(e => e.code === 'SCORE_AGENT_E002')).toBe(true);
+  });
+
+  it('fails both gates when the probe itself reports a failure', async () => {
+    writeRoot(tmp);
+    writeAssertPackage(tmp);
+    const envelope = await runScorecard({
+      cwd: tmp,
+      config: makeConfig(),
+      npmPackRunner: makeNpmPackRunner(),
+      fixtureRunner: makeFixtureRunner(),
+      fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      dotProbe: { status: 'fail', reason: 'kv adapter could not boot' },
+    });
+    const pkg = envelope.items[0];
+    expect(pkg?.dimensions['dot-gates'].status).toBe('fail');
+    expect(pkg?.dimensions['dot-gates'].details).toMatch(/kv adapter could not boot/);
+    expect(pkg?.dimensions['agent-native-gates'].status).toBe('fail');
   });
 });
 
@@ -490,6 +612,7 @@ describe('runScorecard — stable release gate', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     expect(envelope.items).toHaveLength(2);
     expect(envelope.summary.stableReleaseGate).toBe('blocked');
@@ -507,6 +630,7 @@ describe('runScorecard — stable release gate', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     expect(envelope.summary.stableReleaseGate).toBe('blocked');
     // The blocker reason should mention dot-gates / agent-native-gates.
@@ -541,6 +665,7 @@ describe('runScorecard — edge cases', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     expect(envelope.items).toHaveLength(0);
     expect(envelope.errors.some(e => e.code === SCORECARD_ERROR_CODES.noPublicCandidates)).toBe(true);
@@ -556,6 +681,7 @@ describe('runScorecard — edge cases', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     expect(envelope.status).toBe('failure');
     expect(
@@ -582,6 +708,7 @@ describe('renderScorecardText', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
+      skipDotProbe: true,
     });
     const text = renderScorecardText(envelope);
     expect(text).toContain('@arki/assert');

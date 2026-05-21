@@ -38,6 +38,7 @@ import path from 'node:path';
 
 import debugFactory from 'debug';
 
+import { runDotProbe } from './dot-probe';
 import { exportPublicTree, EXPORT_ERROR_CODES } from './export-public';
 import {
   DEFAULT_PACKAGE_MANAGERS,
@@ -52,6 +53,7 @@ import { createEnvelope } from './json-output';
 import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
 import { auditPack, PACK_ERROR_CODES, type NpmPackRunner } from './pack';
 import type {
+  DotProbeResult,
   FixtureRun,
   LeakHit,
   PackAuditResult,
@@ -110,6 +112,18 @@ export interface ScorecardOptions {
    * the system tempdir.
    */
   readonly fixtureTempRoot?: string;
+  /**
+   * Synthetic DOT probe result for tests. When provided, the scorecard
+   * skips spawning the probe subprocess and uses this value directly to
+   * drive the `dot-gates` and `agent-native-gates` dimensions.
+   */
+  readonly dotProbe?: DotProbeResult;
+  /**
+   * When true, skip the DOT probe entirely. Both gate dimensions then
+   * report `deferred` (the legacy behaviour). Useful for partial-run
+   * diagnostics, never for stable-release gating.
+   */
+  readonly skipDotProbe?: boolean;
 }
 
 /**
@@ -238,6 +252,13 @@ export async function runScorecard(
     envelopeErrors.push(upstreamThrewError('fixture-matrix', '<all>', cause));
   }
 
+  // 5.5. DOT probe. Runs once per scorecard invocation — the result is
+  // global (the DOT contract is a kernel-level invariant, not per-package),
+  // but every public-candidate package's `dot-gates` + `agent-native-gates`
+  // dimensions reference it. Tests inject a synthetic result via
+  // `opts.dotProbe`; production spawns `dot-probe-runner.ts` via `bun`.
+  const dotProbe = await resolveDotProbe(opts);
+
   // 6. Per-package evaluation.
   const results: ScorecardPackageResult[] = [];
   for (const item of candidates) {
@@ -250,6 +271,7 @@ export async function runScorecard(
       materializationErrors: exportErrorsByPackage.get(item.name) ?? [],
       fixtureRuns: fixtureRunsByPackage.get(item.name) ?? [],
       fullFixtureMatrix: opts.fullFixtureMatrix === true,
+      dotProbe,
     });
     results.push(result);
   }
@@ -293,6 +315,7 @@ async function evaluatePackage(input: {
   readonly materializationErrors: readonly ReleaseError[];
   readonly fixtureRuns: readonly FixtureRun[];
   readonly fullFixtureMatrix: boolean;
+  readonly dotProbe: DotProbeResult | undefined;
 }): Promise<ScorecardPackageResult> {
   const packageDir = path.dirname(path.join(input.cwd, input.item.manifestPath));
 
@@ -304,8 +327,8 @@ async function evaluatePackage(input: {
     packlist: evaluatePacklist(input.item.name, input.packResult, input.packError),
     docs: await evaluateDocs(input.item.name, packageDir),
     fixtures: evaluateFixtures(input.item.name, input.fixtureRuns, input.fullFixtureMatrix),
-    'dot-gates': evaluateDotGates(),
-    'agent-native-gates': evaluateAgentNativeGates(),
+    'dot-gates': evaluateDotGates(input.dotProbe),
+    'agent-native-gates': evaluateAgentNativeGates(input.dotProbe),
   };
 
   const overall = rollUpStatus(Object.values(dimensions).map(d => d.status));
@@ -678,31 +701,215 @@ function evaluateFixtures(
   };
 }
 
+/** Stable error codes for the two DOT-related gate dimensions. */
+const DOT_GATE_ERROR_CODES = {
+  probeUnavailable: 'SCORE_DOT_E000',
+  manifestShape: 'SCORE_DOT_E001',
+  diagnosticsShape: 'SCORE_DOT_E002',
+  adapterCount: 'SCORE_DOT_E003',
+  explainEnvelope: 'SCORE_DOT_E004',
+  doctorEnvelope: 'SCORE_DOT_E005',
+  appNotBooted: 'SCORE_DOT_E006',
+  newEnvelope: 'SCORE_AGENT_E001',
+  newRequiredFiles: 'SCORE_AGENT_E002',
+} as const;
+
 /**
- * DOT gates dimension — `dot doctor --json`, `dot explain --json`,
- * DOT-boots-with-three-adapters. Deferred until Tasks 9 + 10 ship the
- * kernel and adapters.
+ * DOT gates dimension — driven by the {@link DotProbeResult} produced
+ * during `runScorecard`. Validates:
+ *
+ *   - DOT app boots with at least three adapters (env + kv + db)
+ *   - `DotAppManifest` exposes all five contract arrays
+ *   - `DotDiagnosticsSnapshot` exposes all five contract arrays
+ *   - `dot explain --json` envelope shape is correct
+ *   - `dot doctor --json` envelope shape is correct
+ *
+ * When the probe could not run (e.g. `--skip-dot-probe` or a subprocess
+ * crash), the dimension reports `deferred` so operators can re-run with
+ * the probe enabled.
  */
-function evaluateDotGates(): ScorecardDimensionResult {
+function evaluateDotGates(probe: DotProbeResult | undefined): ScorecardDimensionResult {
+  if (probe === undefined) {
+    return {
+      status: 'deferred',
+      details: 'DOT probe was skipped — re-run scorecard without `--skip-dot-probe` to evaluate.',
+      evidence: [],
+    };
+  }
+  if (probe.status === 'fail') {
+    return {
+      status: 'fail',
+      details: `DOT probe failed: ${probe.reason}`,
+      evidence: [
+        {
+          code: DOT_GATE_ERROR_CODES.probeUnavailable,
+          severity: 'error',
+          message: `DOT probe could not validate kernel contracts: ${probe.reason}`,
+          target: '@arki/dot',
+          remediation:
+            'Inspect `bun tooling/arki-release/src/dot-probe-runner.ts` output and the @arki/dot kernel. The probe needs env+kv+db adapters to boot successfully.',
+        },
+      ],
+    };
+  }
+
+  const checks: readonly {
+    readonly ok: boolean;
+    readonly code: (typeof DOT_GATE_ERROR_CODES)[keyof typeof DOT_GATE_ERROR_CODES];
+    readonly label: string;
+    readonly remediation: string;
+  }[] = [
+    {
+      ok: probe.appState === 'booted',
+      code: DOT_GATE_ERROR_CODES.appNotBooted,
+      label: `DOT app state expected 'booted', got '${probe.appState}'`,
+      remediation: 'Verify the env/kv/db adapters boot without throwing. Run the kernel test suite.',
+    },
+    {
+      ok: probe.pipCount >= 3,
+      code: DOT_GATE_ERROR_CODES.adapterCount,
+      label: `DOT fixture booted with ${probe.pipCount.toString()} adapter(s), expected >= 3`,
+      remediation:
+        'Stable v1 gate requires a 3-adapter boot (env + kv + db). Check the probe runner and adapter packages.',
+    },
+    {
+      ok: probe.manifestArrays === 5,
+      code: DOT_GATE_ERROR_CODES.manifestShape,
+      label: `DotAppManifest exposes ${probe.manifestArrays.toString()}/5 contract arrays`,
+      remediation:
+        '`DotAppManifest` must always carry pips, routes, services, lifecycle, dependencies — even when empty.',
+    },
+    {
+      ok: probe.diagnosticsArrays === 5,
+      code: DOT_GATE_ERROR_CODES.diagnosticsShape,
+      label: `DotDiagnosticsSnapshot exposes ${probe.diagnosticsArrays.toString()}/5 contract arrays`,
+      remediation:
+        '`DotDiagnosticsSnapshot` must always carry pips, routes, services, lifecycle, issues — even when empty.',
+    },
+    {
+      ok: probe.explainEnvelopeOk,
+      code: DOT_GATE_ERROR_CODES.explainEnvelope,
+      label: '`dot explain --json` envelope shape is invalid',
+      remediation:
+        'Envelope must be `{ status, command: "explain", generatedAt, data: <DotAppManifest>, errors }`.',
+    },
+    {
+      ok: probe.doctorEnvelopeOk,
+      code: DOT_GATE_ERROR_CODES.doctorEnvelope,
+      label: '`dot doctor --json` envelope shape is invalid',
+      remediation:
+        'Envelope must be `{ status, command: "doctor", generatedAt, data: <DotDiagnosticsSnapshot>, errors }`.',
+    },
+  ];
+
+  const failed = checks.filter(c => !c.ok);
+  if (failed.length === 0) {
+    return {
+      status: 'pass',
+      details: `DOT contracts validated (${probe.pipCount.toString()} adapters booted, manifest+diagnostics 5/5 arrays, explain/doctor envelopes OK).`,
+      evidence: [],
+    };
+  }
   return {
-    status: 'deferred',
-    details: 'DOT gates deferred — Tasks 9 (kernel) and 10 (adapters) must land first.',
-    evidence: [],
+    status: 'fail',
+    details: `${failed.length.toString()} DOT gate check(s) failed.`,
+    evidence: failed.map(c => ({
+      code: c.code,
+      severity: 'error',
+      message: c.label,
+      target: '@arki/dot',
+      remediation: c.remediation,
+    })),
   };
 }
 
 /**
- * Agent-native gates dimension — every CLI command emits envelope JSON
- * with `--json`; `dot new --dry-run --json` scaffolds a fresh app.
- * Deferred until Tasks 9 + 11.5 ship.
+ * Agent-native gates dimension — validates the `dot new --dry-run --json`
+ * envelope from the same probe result. Stable v1 only requires `dot new`;
+ * future commands (dot add / dot dev / dot migrate) plug in additional
+ * checks here when they pass their own stable gates.
  */
-function evaluateAgentNativeGates(): ScorecardDimensionResult {
+function evaluateAgentNativeGates(probe: DotProbeResult | undefined): ScorecardDimensionResult {
+  if (probe === undefined) {
+    return {
+      status: 'deferred',
+      details:
+        'DOT probe was skipped — agent-native gates depend on `dot new --dry-run --json`. Re-run scorecard without `--skip-dot-probe`.',
+      evidence: [],
+    };
+  }
+  if (probe.status === 'fail') {
+    return {
+      status: 'fail',
+      details: `DOT probe failed before agent-native checks: ${probe.reason}`,
+      evidence: [
+        {
+          code: DOT_GATE_ERROR_CODES.probeUnavailable,
+          severity: 'error',
+          message: `Agent-native probe could not run: ${probe.reason}`,
+          target: '@arki/dot',
+          remediation:
+            'Fix the underlying DOT probe failure first; agent-native gates require a passing kernel probe.',
+        },
+      ],
+    };
+  }
+
+  const evidence: ReleaseError[] = [];
+  if (!probe.newEnvelopeOk) {
+    evidence.push({
+      code: DOT_GATE_ERROR_CODES.newEnvelope,
+      severity: 'error',
+      message: `\`dot new --dry-run --json\` envelope invalid (operations=${probe.newOperationCount.toString()}).`,
+      target: '@arki/dot',
+      remediation:
+        'Envelope must be `{ status: "success", command: "new", generatedAt, app, operations: [...], errors: [] }` with at least one operation, each carrying { path, action, contentHash, contentBytes, reason }.',
+    });
+  }
+  if (probe.newRequiredFilesPresent.length < 5) {
+    evidence.push({
+      code: DOT_GATE_ERROR_CODES.newRequiredFiles,
+      severity: 'error',
+      message: `\`dot new\` scaffold missing required files (matched ${probe.newRequiredFilesPresent.length.toString()}/5).`,
+      target: '@arki/dot',
+      remediation:
+        'Scaffold must produce package.json, tsconfig.json, README.md, AGENTS.md, .gitignore. Check `packages/dot/templates/app-minimal/`.',
+    });
+  }
+
+  if (evidence.length === 0) {
+    return {
+      status: 'pass',
+      details: `\`dot new --dry-run --json\` emits ${probe.newOperationCount.toString()} ops including ${probe.newRequiredFilesPresent.join(', ')}.`,
+      evidence: [],
+    };
+  }
   return {
-    status: 'deferred',
-    details:
-      'Agent-native gates deferred — Tasks 9 (CLI --json) and 11.5 (`dot new --dry-run --json`) must land first.',
-    evidence: [],
+    status: 'fail',
+    details: `${evidence.length.toString()} agent-native check(s) failed.`,
+    evidence,
   };
+}
+
+/**
+ * Resolve the DOT probe for this scorecard run.
+ *
+ *   - `opts.dotProbe` provided  -> use it verbatim (test override).
+ *   - `opts.skipDotProbe === true` -> return `undefined` (gates report deferred).
+ *   - otherwise -> spawn the probe subprocess and parse the result.
+ */
+async function resolveDotProbe(opts: ScorecardOptions): Promise<DotProbeResult | undefined> {
+  if (opts.dotProbe !== undefined) return opts.dotProbe;
+  if (opts.skipDotProbe === true) return undefined;
+  try {
+    return await runDotProbe({ rootCwd: opts.cwd });
+  } catch (error) {
+    debug('dot probe threw unexpectedly: %s', error);
+    return {
+      status: 'fail',
+      reason: `DOT probe subprocess threw: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
