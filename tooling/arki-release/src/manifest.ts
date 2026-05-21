@@ -104,12 +104,17 @@ export function materializeManifest(
     input.name,
     errors,
   );
+  // Optional peers don't taint the publish graph — a consumer chooses
+  // whether to install them. Pass the meta so `resolveBucket` can skip
+  // the private-dep check on those entries.
+  const peerMeta = inputRaw.peerDependenciesMeta ?? input.peerDependenciesMeta;
   const peerDependencies = resolveBucket(
     'peerDependencies',
     inputRaw.peerDependencies ?? input.peerDependencies,
     ctx,
     input.name,
     errors,
+    peerMeta,
   );
   const optionalDependencies = resolveBucket(
     'optionalDependencies',
@@ -256,6 +261,7 @@ function resolveBucket(
   ctx: MaterializationContext,
   consumerName: string,
   errors: ReleaseError[],
+  peerMeta?: Readonly<Record<string, { readonly optional?: boolean }>>,
 ): Readonly<Record<string, string>> | undefined {
   if (raw === undefined) return undefined;
   const entries = Object.entries(raw);
@@ -264,12 +270,15 @@ function resolveBucket(
   const out: Record<string, string> = {};
   for (const [depName, version] of entries) {
     if (version.startsWith(WORKSPACE_PREFIX)) {
+      const isOptionalPeer =
+        bucket === 'peerDependencies' && peerMeta?.[depName]?.optional === true;
       const resolved = resolveWorkspaceDep(
         depName,
         consumerName,
         bucket,
         ctx,
         errors,
+        isOptionalPeer,
       );
       if (resolved !== null) {
         out[depName] = resolved;
@@ -312,8 +321,16 @@ function resolveWorkspaceDep(
   bucket: DepBucket,
   ctx: MaterializationContext,
   errors: ReleaseError[],
+  isOptionalPeer = false,
 ): string | null {
   if (ctx.privateArkiPackages.has(depName)) {
+    if (isOptionalPeer) {
+      // Optional peers are runtime capabilities the consumer opts into.
+      // They do not block publishing — the consumer is responsible for
+      // installing the dep only when they need it. Drop the entry from
+      // the resolved bucket and emit no error.
+      return null;
+    }
     errors.push({
       code: MANIFEST_ERROR_CODES.privateArkiDependency,
       severity: 'error',

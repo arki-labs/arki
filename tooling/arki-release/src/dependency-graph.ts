@@ -78,6 +78,12 @@ export function buildDependencyGraph(manifests: readonly ParsedManifest[]): Depe
  * - Filters out names not present in `knownNames` (defensive — shouldn't
  *   happen in a well-formed monorepo, but skipping unknown nodes keeps
  *   the graph closed under traversal).
+ * - Honors `peerDependenciesMeta.<name>.optional === true`: an optional
+ *   peer is NOT a graph edge. It documents a runtime capability the
+ *   consumer can opt into without compelling them to install the dep.
+ *   Treating optional peers as graph edges would taint adapter packages
+ *   (e.g. `@arki/env` with an optional peer on `@arki/dot`) with the
+ *   transitive private deps of the optional target.
  *
  * The same dep may appear in multiple dep buckets; the result is
  * de-duplicated and order-stable.
@@ -86,18 +92,32 @@ function collectArkiWorkspaceDeps(manifest: ParsedManifest, knownNames: Readonly
   const seen = new Set<string>();
   const ordered: string[] = [];
 
-  const buckets: ReadonlyArray<Readonly<Record<string, string>> | undefined> = [
-    manifest.dependencies,
-    manifest.peerDependencies,
-    manifest.optionalDependencies,
+  const optionalPeers = new Set<string>();
+  const meta = manifest.peerDependenciesMeta;
+  if (meta !== undefined) {
+    for (const [depName, entry] of Object.entries(meta)) {
+      if (entry?.optional === true) {
+        optionalPeers.add(depName);
+      }
+    }
+  }
+
+  const buckets: ReadonlyArray<{
+    readonly entries: Readonly<Record<string, string>> | undefined;
+    readonly skipOptional: boolean;
+  }> = [
+    { entries: manifest.dependencies, skipOptional: false },
+    { entries: manifest.peerDependencies, skipOptional: true },
+    { entries: manifest.optionalDependencies, skipOptional: false },
   ];
 
-  for (const bucket of buckets) {
-    if (bucket === undefined) continue;
-    for (const [depName, depVersion] of Object.entries(bucket)) {
+  for (const { entries, skipOptional } of buckets) {
+    if (entries === undefined) continue;
+    for (const [depName, depVersion] of Object.entries(entries)) {
       if (!depName.startsWith('@arki/')) continue;
       if (typeof depVersion !== 'string' || !depVersion.startsWith(WORKSPACE_PREFIX)) continue;
       if (!knownNames.has(depName)) continue;
+      if (skipOptional && optionalPeers.has(depName)) continue;
       if (seen.has(depName)) continue;
       seen.add(depName);
       ordered.push(depName);

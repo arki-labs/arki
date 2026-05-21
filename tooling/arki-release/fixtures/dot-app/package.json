@@ -1,0 +1,24 @@
+{
+  "name": "arki-dot-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "External fixture proving that @arki/dot + the 3-adapter trio (env/kv/db) boot, expose typed services, and emit a five-array DotAppManifest plus a DotDiagnosticsSnapshot outside the monorepo.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "boot": "node --experimental-strip-types src/app.ts"
+  },
+  "dependencies": {
+    "@arki/db": "^0.1.0",
+    "@arki/dot": "^0.1.0",
+    "@arki/env": "^0.1.0",
+    "@arki/kv": "^0.1.0",
+    "drizzle-orm": "^1.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^3"
+  }
+}

@@ -67,6 +67,14 @@ export interface ParsedManifest {
   readonly dependencies?: Readonly<Record<string, string>>;
   readonly peerDependencies?: Readonly<Record<string, string>>;
   readonly optionalDependencies?: Readonly<Record<string, string>>;
+  /**
+   * Optional-peer metadata, mirroring the shape from `package.json`.
+   * The dependency graph honors `peerDependenciesMeta.<name>.optional`
+   * so that adapter packages (e.g. `@arki/env` -> optional peer
+   * `@arki/dot`) are not tainted by the optional target's own private
+   * deps. See `dependency-graph.ts:collectArkiWorkspaceDeps`.
+   */
+  readonly peerDependenciesMeta?: Readonly<Record<string, { readonly optional?: boolean }>>;
 }
 
 /** A single classified package in the inventory output. */
@@ -197,7 +205,28 @@ function parseManifest(manifestPath: string, raw: unknown): ParsedManifest | nul
     dependencies: narrowDepBucket(m['dependencies']),
     peerDependencies: narrowDepBucket(m['peerDependencies']),
     optionalDependencies: narrowDepBucket(m['optionalDependencies']),
+    peerDependenciesMeta: narrowPeerDependenciesMeta(m['peerDependenciesMeta']),
   };
+}
+
+/**
+ * Narrow `peerDependenciesMeta` to the shape used by the graph builder.
+ * Returns `undefined` when the field is missing or malformed so callers
+ * can treat all peer deps as required.
+ */
+function narrowPeerDependenciesMeta(
+  raw: unknown,
+): Readonly<Record<string, { readonly optional?: boolean }>> | undefined {
+  if (raw === null || typeof raw !== 'object') return undefined;
+  const out: Record<string, { readonly optional?: boolean }> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof key !== 'string') continue;
+    if (value === null || typeof value !== 'object') continue;
+    const v = value as Record<string, unknown>;
+    const optional = v['optional'] === true ? true : undefined;
+    out[key] = optional === undefined ? {} : { optional };
+  }
+  return out;
 }
 
 function narrowDepBucket(raw: unknown): Readonly<Record<string, string>> | undefined {

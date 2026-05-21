@@ -978,18 +978,21 @@ export async function runFixtureMatrix(
 }
 
 /**
- * Build the DOT fixture forward-dependency stub.
+ * Build the DOT fixture forward-dependency stubs.
  *
- * Today this records one `skipped` run per PM for `@arki/dot` with
- * `FIX_E008` (forward-dependency stub) as info severity. Once
- * Tasks 9/10/11.5 land, the DOT fixture moves from skipped to exercised
- * (the package will exist in the public tree and the matrix will pick
- * it up automatically). The stub exists so reviewers see what's PLANNED.
+ * Records one `skipped` run per PM for `@arki/dot` with `FIX_E008`
+ * (forward-dependency stub) as info severity. The remaining forward
+ * dependency is Task 11.5 — the `dot new <name>` scaffold subcommand.
+ *
+ * Tasks 9 (kernel) and 10 (adapters) have landed — the boot fixture
+ * exists and runs end-to-end via `runFixtureMatrix`. Once Task 11.5
+ * lands, the `dot new` scenario will be exercised inside the same
+ * fixture and this helper can be deleted.
  */
 export function buildDotFixtureForwardStubRuns(
   packageManagers: readonly PackageManagerId[] = DEFAULT_PACKAGE_MANAGERS,
 ): readonly FixtureRun[] {
   const reason =
-    'DOT fixture is a forward-dependency stub — Tasks 9 (kernel), 10 (adapters), and 11.5 (`dot new`) must land first.';
+    'DOT fixture forward-dependency stub: Task 11.5 (`dot new` scaffold) is the remaining task. The boot fixture (Tasks 9 + 10) is exercised by the live matrix.';
   return packageManagers.map(pm => buildForwardDependencyRun('@arki/dot', pm, reason));
 }

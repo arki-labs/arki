@@ -1,75 +1,71 @@
-# DOT App Fixture — Forward-Dependency Stub
+# DOT App Fixture
 
 This fixture is the external proof that the DOT framework's end-to-end
 behavior works outside the monorepo:
 
-- booting an app with at least three adapters;
-- exposing `app.manifest` as `DotAppManifest`;
-- exposing `app.diagnostics` as `DotDiagnosticsSnapshot`;
-- matching the `dot explain --json` / `dot doctor --json` contracts; and
-- generating new apps via `dot new <app>` without writing into the monorepo.
+- booting an app with three adapters (`env`, `kv`, `db`);
+- exposing `app.services` with typed entries for each adapter;
+- exposing `app.manifest` as a `DotAppManifest` with all five contract
+  arrays present (`plugins`, `routes`, `services`, `lifecycle`,
+  `dependencies`);
+- exposing `app.diagnostics` as a `DotDiagnosticsSnapshot` with one
+  entry per plugin.
 
-**Status: SKELETON — pending Tasks 9, 10, and 11.5.**
+**Status: ACTIVE.** Tasks 9 (kernel) and 10 (adapters) have landed.
+Task 11.5 (`dot new` scaffold) is the remaining piece — it will append a
+generated-app test alongside the boot test below.
 
-Today every file in this directory ends in `.template`. Nothing here is
-imported by the live fixture matrix. The matrix's
-`buildDotFixtureForwardStubRuns()` helper produces explicit `skipped`
-runs tagged with the `FIX_E008` info code so reviewers can see what is
-PLANNED — never accidentally green.
+## How the fixture runs
 
-## Forward dependencies
+The `bun release:arki fixture` matrix:
 
-- **Task 9 — DOT Kernel.** Fills in `src/app.ts.template` with
-  `defineApp(...)`. Once `@arki/dot` exports `defineApp`, this file
-  becomes a real `app.ts` and the fixture starts asserting against
-  `app.manifest` / `app.diagnostics`.
-- **Task 10 — Adapter Waves.** Wires three of the package-owned adapters
-  (e.g. `@arki/env/dot`, `@arki/kv/dot`, `@arki/db/dot`). The fixture's
-  `dependencies` block in `package.json.template` switches from
-  `FORWARD_TASK_*` placeholders to real semver ranges. The
-  `tests/boot.test.ts.template` asserts that all five diagnostic arrays
-  surface even when no failures exist.
-- **Task 11.5 — DOT New App Scaffold.** Adds the test that runs
-  `dot new fixture-app --dry-run --json` (verifying the file-operation
-  preview is exact and writes nothing), followed by `dot new fixture-app`
-  (asserting the generated app installs, typechecks, tests, boots, and
-  ships an `AGENTS.md` outside the monorepo).
-
-Until Tasks 9 + 10 + 11.5 land, none of the assertions above can run.
-The fixture matrix records the deferred work as `skipped` runs — see
-`tooling/arki-release/src/fixture.ts`,
-`buildDotFixtureForwardStubRuns()`.
+1. Packs `@arki/dot`, `@arki/env`, `@arki/kv`, and `@arki/db` from the
+   monorepo into npm tarballs.
+2. Creates a clean temp directory copy of this fixture (no monorepo
+   workspace symlinks).
+3. Installs the tarballs with each supported package manager (`npm`,
+   `pnpm`, `bun`).
+4. Runs `typecheck` (`tsc --noEmit`), `test` (`vitest run`), and `boot`
+   (`node --experimental-strip-types src/app.ts`) inside the temp dir.
 
 ## Files
 
-| File                            | Status                                                                                                                    |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `package.json.template`         | Carries `FORWARD_TASK_9` / `FORWARD_TASK_10` strings so an accidental install fails loudly until the placeholders flip.   |
-| `tsconfig.json`                 | Strict, `NodeNext` resolution — ready to consume the published DOT packages once they exist.                              |
-| `src/app.ts.template`           | Comment-only stub describing the eventual `defineApp(...)` boot.                                                          |
-| `tests/boot.test.ts.template`   | Comment-only stub describing the eventual assertions on `app.manifest`, `app.diagnostics`, and `dot explain` / `doctor`.  |
+| File                 | Purpose                                                                          |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `package.json`       | Declares the four `@arki/*` deps + `drizzle-orm` + `zod`.                        |
+| `tsconfig.json`      | Strict, NodeNext resolution — what a real downstream consumer would use.         |
+| `src/app.ts`         | Boots a real `defineApp(...)` with env + kv + db adapters; logs manifest + diag. |
+| `tests/boot.test.ts` | Asserts the contract: typed services, five-array manifest, populated diags.      |
 
-## How to "wake" the fixture
+## Driver choices for hermeticity
 
-When Task 9 lands:
+The fixture must run on a developer laptop with no Postgres, no Redis,
+no AWS, and no external services available. Driver choices:
 
-1. Rename `package.json.template` → `package.json`, replace the
-   `FORWARD_TASK_*` strings with real semver.
-2. Rename `src/app.ts.template` → `src/app.ts`, implement the boot.
-3. Rename `tests/boot.test.ts.template` → `tests/boot.test.ts`,
-   implement the assertions.
-4. Add `@arki/dot` (and the three adapters) to the public tree
-   allowlist in `arki.release.config.ts`.
-5. Delete the `buildDotFixtureForwardStubRuns` call in
-   `tooling/arki-release/src/cli.ts` — the matrix will now exercise the
-   fixture for real because the packages exist in the public tree.
+- **env** — `skipValidation: true` so the fixture never depends on host
+  env vars. The schema's defaults are exercised instead.
+- **kv** — real `redis://127.0.0.1:1` URL (well-formed but
+  unreachable). The KV constructor never blocks on connect — Keyv and
+  ioredis open lazily. The fixture never calls `kv.get/set`, so the
+  failed connection never surfaces. `kv.close()` tolerates the
+  never-opened state during `dispose`.
+- **db** — `driver: 'pglite', memory: true`. Embedded in-process Postgres
+  via PGlite. No external server, no on-disk side effects.
 
-## Why a skeleton?
+## Forward dependencies
 
-The fixture exists today (rather than being added later) so:
+The only remaining forward dependency is **Task 11.5 — DOT New App
+Scaffold**: when `dot new <name>` lands, this README will document a
+sibling test that:
 
-- the directory layout is reviewable now;
-- the forward dependency is documented in code, not in a side doc;
-- the `buildDotFixtureForwardStubRuns()` helper can produce explicit
-  `skipped` envelope entries that fail-loud if anyone tries to mark the
-  DOT contract green ahead of the underlying work.
+1. runs `dot new fixture-app --dry-run --json` from inside the fixture's
+   temp dir and asserts the file-operation preview is exact and writes
+   nothing;
+2. runs `dot new fixture-app` for real, then runs `npm install` +
+   `typecheck` + `test` + `boot` against the generated app in another
+   temp dir and asserts it ships an `AGENTS.md`.
+
+Until Task 11.5 lands, `tooling/arki-release/src/fixture.ts`'s
+`buildDotFixtureForwardStubRuns()` helper records a single `skipped`
+run per package manager flagged with `FIX_E008` so reviewers see what
+remains.
