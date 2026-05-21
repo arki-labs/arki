@@ -52,16 +52,6 @@
       "types": "./dist/test-harness.d.ts",
       "import": "./src/test-harness.ts",
       "default": "./dist/test-harness.js"
-    },
-    "./event-sourcing": {
-      "types": "./dist/legacy/event-sourcing.d.ts",
-      "import": "./src/legacy/event-sourcing.ts",
-      "default": "./dist/legacy/event-sourcing.js"
-    },
-    "./presets/runtime-local": {
-      "types": "./src/legacy/presets/runtime-local.ts",
-      "import": "./src/legacy/presets/runtime-local.ts",
-      "default": "./src/legacy/presets/runtime-local.ts"
     }
   },
   "files": [
@@ -87,54 +77,12 @@
     "@arki/logger": "workspace:*",
     "zod": "catalog:"
   },
-  "peerDependencies": {
-    "@arki/auth": "workspace:*",
-    "@arki/db": "workspace:*",
-    "@arki/emails": "workspace:*",
-    "@arki/event-sourcing": "workspace:*",
-    "@arki/fs": "workspace:*",
-    "@arki/kv": "workspace:*",
-    "@arki/queue": "workspace:*",
-    "@arki/slugify": "workspace:*",
-    "@electric-sql/pglite": "^0.4.0",
-    "@orpc/server": "catalog:backend",
-    "@t3-oss/env-core": "catalog:env",
-    "better-auth": "catalog:better-auth",
-    "drizzle-orm": "catalog:drizzle"
-  },
-  "peerDependenciesMeta": {
-    "@arki/auth": { "optional": true },
-    "@arki/db": { "optional": true },
-    "@arki/emails": { "optional": true },
-    "@arki/event-sourcing": { "optional": true },
-    "@arki/fs": { "optional": true },
-    "@arki/kv": { "optional": true },
-    "@arki/queue": { "optional": true },
-    "@arki/slugify": { "optional": true },
-    "@electric-sql/pglite": { "optional": true },
-    "@orpc/server": { "optional": true },
-    "@t3-oss/env-core": { "optional": true },
-    "better-auth": { "optional": true },
-    "drizzle-orm": { "optional": true }
-  },
   "devDependencies": {
-    "@arki/auth": "workspace:*",
-    "@arki/db": "workspace:*",
-    "@arki/emails": "workspace:*",
     "@arki/eslint-config": "workspace:*",
-    "@arki/event-sourcing": "workspace:*",
-    "@arki/fs": "workspace:*",
-    "@arki/kv": "workspace:*",
     "@arki/prettier-config": "workspace:*",
-    "@arki/queue": "workspace:*",
-    "@arki/slugify": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@electric-sql/pglite": "^0.4.5",
-    "@orpc/server": "catalog:backend",
-    "@t3-oss/env-core": "catalog:env",
-    "better-auth": "catalog:better-auth",
-    "drizzle-orm": "catalog:drizzle",
+    "@types/node": "catalog:node",
     "typescript": "catalog:"
   }
 }

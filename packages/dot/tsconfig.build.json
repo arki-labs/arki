@@ -17,7 +17,6 @@
     "**/*.test.ts",
     "**/*.spec.ts",
     "src/cli/tests/**",
-    "src/tests/**",
-    "src/legacy/presets/**"
+    "src/tests/**"
   ]
 }
