@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 
-import { createLogger } from '@arki/logger';
+import { createLogger } from '@arki/log';
 
 import type { CoreTables } from '../../core/tables';
 import type { Customer, CustomerId } from '../../core/types';

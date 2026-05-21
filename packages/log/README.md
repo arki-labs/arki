@@ -1,15 +1,15 @@
-# @arki/logger
+# @arki/log
 
 Structured logging primitives for ARKI — severity levels, batching, distributed-tracing hooks, and Pino-backed transports.
 
 ## Installation
 
 ```sh
-npm install @arki/logger
+npm install @arki/log
 # or
-bun add @arki/logger
+bun add @arki/log
 # or
-pnpm add @arki/logger
+pnpm add @arki/log
 ```
 
 ## Usage
@@ -17,7 +17,7 @@ pnpm add @arki/logger
 ### Basic logging
 
 ```ts
-import { Logger } from '@arki/logger';
+import { Logger } from '@arki/log';
 
 const logger = new Logger('my-service');
 
@@ -30,7 +30,7 @@ logger.error('Failed to process request', { error: new Error('Connection refused
 ### Root logger and child loggers
 
 ```ts
-import { createLogger, rootLogger } from '@arki/logger';
+import { createLogger, rootLogger } from '@arki/log';
 
 rootLogger.info('Application starting');
 
@@ -44,7 +44,7 @@ userLogger.info('User logged in', { userId: 'usr_123' });
 ### Global configuration
 
 ```ts
-import { configuration } from '@arki/logger';
+import { configuration } from '@arki/log';
 
 configuration.setDebug('api,database,auth');
 
@@ -58,7 +58,7 @@ configuration.configureBatching({
 ### Batched logging
 
 ```ts
-import { Logger } from '@arki/logger';
+import { Logger } from '@arki/log';
 
 const logger = new Logger('billing');
 logger.enableBatchLogging();
@@ -73,7 +73,7 @@ await logger.disableBatchLogging();
 ### Distributed tracing
 
 ```ts
-import { Logger } from '@arki/logger';
+import { Logger } from '@arki/log';
 
 const logger = new Logger('service-a');
 logger.setTraceContext('trace-abc', 'span-1');
@@ -86,10 +86,10 @@ childLogger.info('Sub-component processing');
 
 ### `debug` adapter
 
-The `@arki/logger/debug` entry re-exports the `debug` package as a default + named export for ergonomic namespacing:
+The `@arki/log/debug` entry re-exports the `debug` package as a default + named export for ergonomic namespacing:
 
 ```ts
-import debug from '@arki/logger/debug';
+import debug from '@arki/log/debug';
 
 const log = debug('acme:billing');
 log('charge', { amount: 1000 });
@@ -115,7 +115,7 @@ log('charge', { amount: 1000 });
 
 ## Documentation
 
-`@arki/logger` is framework-agnostic and works on its own. When you compose
+`@arki/log` is framework-agnostic and works on its own. When you compose
 it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
 application framework, see `packages/dot/docs/` for plugin authoring,
 lifecycle, and diagnostics.

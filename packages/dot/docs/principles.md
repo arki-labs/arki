@@ -129,7 +129,7 @@ What this principle *forbids*:
 
 ## 5. The kernel has zero optional dependencies
 
-`@arki/dot` ships with `@arki/assert`, `@arki/contracts`, `@arki/logger`,
+`@arki/dot` ships with `@arki/assert`, `@arki/contracts`, `@arki/log`,
 and `zod`. That is the entire dependency surface. Adapters (database,
 queue, auth, event-sourcing) live in their own packages and depend on
 `@arki/dot` as an *optional peer*.

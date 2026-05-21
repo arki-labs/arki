@@ -1,4 +1,4 @@
-import { createLogger } from '@arki/logger';
+import { createLogger } from '@arki/log';
 
 import type {
   ListCommunicationsQuery,

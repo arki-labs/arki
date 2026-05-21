@@ -24,7 +24,7 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-import { createDebugLogger } from '@arki/logger/debug';
+import { createDebugLogger } from '@arki/log/debug';
 
 import type { DiagnosticIssue } from '../diagnostics.js';
 import type { FileOperation } from './files.js';

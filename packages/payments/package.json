@@ -64,7 +64,7 @@
     "@arki/db": "workspace:*",
     "@arki/event-sourcing": "workspace:*",
     "@arki/kv": "workspace:*",
-    "@arki/logger": "workspace:*",
+    "@arki/log": "workspace:*",
     "@event-driven-io/emmett": "catalog:",
     "drizzle-orm": "catalog:drizzle",
     "stripe": "catalog:",

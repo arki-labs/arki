@@ -1,4 +1,4 @@
-import { debug } from '@arki/logger/debug';
+import { debug } from '@arki/log/debug';
 
 /**
  * Debug logger for queue registration operations

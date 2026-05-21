@@ -36,7 +36,7 @@
   },
   "dependencies": {
     "@arki/contracts": "workspace:*",
-    "@arki/logger": "workspace:*",
+    "@arki/log": "workspace:*",
     "@bull-board/api": "catalog:queue",
     "@bull-board/hono": "catalog:queue",
     "@electric-sql/pglite": "^0.4.5",

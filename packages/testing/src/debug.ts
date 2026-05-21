@@ -4,7 +4,7 @@
  * Provides debugging helpers for inspecting database state,
  * queries, and test execution.
  *
- * Also provides runtime debug logging using @arki/logger/debug:
+ * Also provides runtime debug logging using @arki/log/debug:
  * - DEBUG=testing:tester - Main tester lifecycle and operations
  * - DEBUG=testing:containers - Container startup and management
  * - DEBUG=testing:factories - Factory operations and data generation
@@ -15,7 +15,7 @@ import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { sql } from 'drizzle-orm';
 
-import { createDebugLogger } from '@arki/logger/debug';
+import { createDebugLogger } from '@arki/log/debug';
 
 /**
  * Runtime debug logger for main tester operations

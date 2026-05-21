@@ -14,7 +14,7 @@ import { stat } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { createDebugLogger } from '@arki/logger/debug';
+import { createDebugLogger } from '@arki/log/debug';
 
 import type { DotApp, DotAppBuilder, DotAppConfigured } from '../define-app.js';
 import { DotCliError, DotCliErrorCode } from './error-codes.js';

@@ -30,7 +30,7 @@
     "@arki/auth": "workspace:*",
     "@arki/db": "workspace:*",
     "@arki/kv": "workspace:*",
-    "@arki/logger": "workspace:*",
+    "@arki/log": "workspace:*",
     "@faker-js/faker": "catalog:testing",
     "@testcontainers/postgresql": "catalog:testing",
     "@testcontainers/redis": "catalog:testing",

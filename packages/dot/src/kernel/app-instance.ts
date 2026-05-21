@@ -5,7 +5,7 @@
  * `defineApp(...)` and its returned `DotApp` interface.
  */
 
-import { createDebugLogger } from '@arki/logger/debug';
+import { createDebugLogger } from '@arki/log/debug';
 
 import type {
   DiagnosticIssue,
@@ -37,6 +37,7 @@ import type {
 import { buildDependencyEdges, topologicalSort } from '../dependency-graph.js';
 import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
 import { pipProvides } from '../pip-contract.js';
+import { withPhaseSpan, withPipHookSpan } from './otel.js';
 
 const debugKernel = createDebugLogger('arki:dot:kernel');
 const debugLifecycle = createDebugLogger('arki:dot:lifecycle');
@@ -198,6 +199,23 @@ export class DotAppImpl {
     }
 
     debugLifecycle('[%s] configure: starting (%d pip(s))', this.#appName, this.#ordered.length);
+
+    withPhaseSpan(
+      {
+        appName: this.#appName,
+        phase: 'configure',
+        pipCount: this.#ordered.length,
+      },
+      () => this.#runConfigureInner(),
+    );
+  }
+
+  /**
+   * Inner configure loop. Separated from `runConfigure` so the phase span
+   * wrapper can stay thin and the loop body stays unindented — keeps the
+   * intricate error-handling readable.
+   */
+  #runConfigureInner(): void {
     for (const pip of this.#ordered) {
       const record = this.#records.get(pip.name)!;
       if (!pip.configure) {
@@ -229,7 +247,16 @@ export class DotAppImpl {
       const started = performance.now();
       let returned: unknown;
       try {
-        returned = pip.configure(ctx);
+        returned = withPipHookSpan(
+          {
+            appName: this.#appName,
+            pipName: pip.name,
+            pipVersion: pip.version,
+            hook: 'configure',
+            order: record.order,
+          },
+          () => pip.configure!(ctx),
+        );
       } catch (error) {
         const issue = makeIssue({
           code: DotLifecycleErrorCode.ConfigureFailed,

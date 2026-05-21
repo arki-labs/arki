@@ -1,4 +1,4 @@
-import { createLogger } from '@arki/logger';
+import { createLogger } from '@arki/log';
 import { sql } from 'drizzle-orm';
 
 import type { PaymentRetryService } from '../../core/services/payment-retry-service';

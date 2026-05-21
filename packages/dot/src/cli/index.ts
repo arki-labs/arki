@@ -20,7 +20,7 @@
 
 import { parseArgs as nodeParseArgs } from 'node:util';
 
-import { createDebugLogger } from '@arki/logger/debug';
+import { createDebugLogger } from '@arki/log/debug';
 
 import type { DotApp, DotAppBuilder, DotAppConfigured } from '../define-app.js';
 import type { DiagnosticIssue } from '../diagnostics.js';

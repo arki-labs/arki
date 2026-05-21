@@ -688,7 +688,7 @@ const PUBLIC_README = [
   '',
   '| Wave | Theme |',
   '| ---- | ----- |',
-  '| Foundation | `@arki/assert`, `@arki/contracts`, `@arki/logger`, `@arki/env`, `@arki/ts`, `@arki/resilience`, `@arki/date`, `@arki/string`, `@arki/slugify`, `@arki/clock` |',
+  '| Foundation | `@arki/assert`, `@arki/contracts`, `@arki/log`, `@arki/env`, `@arki/ts`, `@arki/resilience`, `@arki/date`, `@arki/string`, `@arki/slugify`, `@arki/clock` |',
   '| DOT kernel | `@arki/dot` |',
   '| Adapters | `@arki/db`, `@arki/kv`, `@arki/fs`, `@arki/queue`, `@arki/event-sourcing`, `@arki/auth`, `@arki/emails` |',
   '| Frontend | `@arki/design-systems`, `@arki/theme`, `@arki/icons`, `@arki/react-hooks`, `@arki/ui` |',

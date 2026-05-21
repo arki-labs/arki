@@ -8,7 +8,7 @@
  * DEBUG=kv:* - Enable all logs
  */
 
-import { createDebug } from '@arki/logger/debug';
+import { createDebug } from '@arki/log/debug';
 
 /**
  * Debug logger for KV client operations

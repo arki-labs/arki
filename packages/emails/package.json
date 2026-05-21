@@ -68,7 +68,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@arki/logger": "workspace:*",
+    "@arki/log": "workspace:*",
     "@react-email/body": "catalog:react-email",
     "@react-email/button": "catalog:react-email",
     "@react-email/column": "catalog:react-email",

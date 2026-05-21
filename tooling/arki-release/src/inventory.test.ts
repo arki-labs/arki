@@ -31,7 +31,7 @@ const baseConfig: ReleaseConfig = {
     keywords: ['arki'],
   },
   waves: [
-    { id: 'foundation', label: 'Wave 1', packages: ['@arki/assert', '@arki/contracts', '@arki/logger'] },
+    { id: 'foundation', label: 'Wave 1', packages: ['@arki/assert', '@arki/contracts', '@arki/log'] },
     { id: 'dot-kernel', label: 'Wave 2', packages: ['@arki/dot'] },
   ],
 };
@@ -96,10 +96,10 @@ describe('runInventory', () => {
     writeManifest(tmp, 'packages/assert', {
       name: '@arki/assert',
       version: '1.0.0',
-      dependencies: { '@arki/logger': 'workspace:*' },
+      dependencies: { '@arki/log': 'workspace:*' },
     });
-    writeManifest(tmp, 'packages/logger', {
-      name: '@arki/logger',
+    writeManifest(tmp, 'packages/log', {
+      name: '@arki/log',
       version: '1.0.0',
       private: true,
     });
@@ -107,13 +107,13 @@ describe('runInventory', () => {
     const env = await runInventory({ cwd: tmp, config: baseConfig });
     expect(env.status).toBe('failure');
     const assertItem = env.items.find(i => i.name === '@arki/assert');
-    const loggerItem = env.items.find(i => i.name === '@arki/logger');
+    const loggerItem = env.items.find(i => i.name === '@arki/log');
     expect(assertItem).toBeDefined();
     expect(loggerItem).toBeDefined();
     expect(assertItem!.classification).toBe('blocked-by-private-dependency');
     expect(loggerItem!.classification).toBe('blocked-by-private-flag');
     expect(assertItem!.blockers[0]!.code).toBe('INV_E003');
-    expect(assertItem!.blockers[0]!.target).toBe('@arki/logger');
+    expect(assertItem!.blockers[0]!.target).toBe('@arki/log');
   });
 
   it('skips manifests without an @arki/* name and records an info diagnostic', async () => {
@@ -164,12 +164,12 @@ describe('runInventory', () => {
   });
 
   it('emits INV_E005 (warning) when a wave references a workspace package that does not exist', async () => {
-    // Only @arki/assert is on disk; the wave also lists @arki/contracts and @arki/logger.
+    // Only @arki/assert is on disk; the wave also lists @arki/contracts and @arki/log.
     writeManifest(tmp, 'packages/assert', { name: '@arki/assert', version: '1.0.0' });
     const env = await runInventory({ cwd: tmp, config: baseConfig });
     expect(env.status).toBe('success'); // warnings don't fail the gate
     const missing = env.errors.filter(e => e.code === 'INV_E005');
-    expect(missing.map(e => e.target).sort()).toEqual(['@arki/contracts', '@arki/dot', '@arki/logger']);
+    expect(missing.map(e => e.target).sort()).toEqual(['@arki/contracts', '@arki/dot', '@arki/log']);
     for (const m of missing) {
       expect(m.severity).toBe('warning');
     }
@@ -178,7 +178,7 @@ describe('runInventory', () => {
   it('does not emit INV_E005 when every wave package is present in the workspace', async () => {
     writeManifest(tmp, 'packages/assert', { name: '@arki/assert', version: '1.0.0' });
     writeManifest(tmp, 'packages/contracts', { name: '@arki/contracts', version: '1.0.0' });
-    writeManifest(tmp, 'packages/logger', { name: '@arki/logger', version: '1.0.0' });
+    writeManifest(tmp, 'packages/log', { name: '@arki/log', version: '1.0.0' });
     writeManifest(tmp, 'packages/dot', { name: '@arki/dot', version: '1.0.0' });
     const env = await runInventory({ cwd: tmp, config: baseConfig });
     expect(env.errors.filter(e => e.code === 'INV_E005')).toHaveLength(0);

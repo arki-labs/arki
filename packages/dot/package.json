@@ -75,7 +75,8 @@
   "dependencies": {
     "@arki/assert": "workspace:*",
     "@arki/contracts": "workspace:*",
-    "@arki/logger": "workspace:*",
+    "@arki/log": "workspace:*",
+    "@opentelemetry/api": "catalog:opentelemetry",
     "zod": "catalog:"
   },
   "devDependencies": {

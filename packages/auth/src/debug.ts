@@ -1,4 +1,4 @@
-import { createDebugLogger } from '@arki/logger/debug';
+import { createDebugLogger } from '@arki/log/debug';
 
 /**
  * Debug logger for authentication operations
