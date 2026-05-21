@@ -18,7 +18,7 @@
  * ```
  */
 
-export { defineDotPip } from './pip-contract.js';
+export { defineDotPip, DotPipError } from './pip-contract.js';
 export type {
   AnyDotPip,
   DotPip,

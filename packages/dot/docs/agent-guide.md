@@ -117,7 +117,7 @@ When generating pips, routes, or services:
 - **Always validate against the manifest contract** before writing. A
   generated pip must produce a valid `DotManifestContribution`.
 - **Use the test harness.** Boot the generated pip in `testApp([...])`
-  before considering the change complete.
+  before claiming the change is done.
 - **Prefer adapters over hand-rolled pips.** If a package exposes
   `./dot`, use it.
 
@@ -222,5 +222,5 @@ CI agents, IDE agents).
 ## See also
 
 - [Diagnostics](./diagnostics.md) — full manifest + diagnostics contracts.
-- [Lifecycle](./lifecycle.md) — error codes you may encounter in `issues`.
+- [Lifecycle](./lifecycle.md) — every error code that appears in `issues`.
 - [Quickstart](./quickstart.md) — the basic boot path agents will see.

@@ -12,7 +12,7 @@
 export { defineApp } from './define-app.js';
 export type { DotApp, DotAppBuilder, DotAppConfigured } from './define-app.js';
 
-export { defineDotPip } from './pip-contract.js';
+export { defineDotPip, DotPipError } from './pip-contract.js';
 export type {
   DotPip,
   DotBootContext,

@@ -11,11 +11,11 @@
  * `kv.get/set` in tests because that would require a real Redis instance.
  */
 
-import { defineApp } from '@arki/dot/pip';
+import { defineApp, DotLifecycleError, DotPipError } from '@arki/dot/pip';
 import { describe, expect, it } from 'vitest';
 
 import { KV } from './index.js';
-import { kv } from './dot.js';
+import { kv, KV_PIP_ERROR_CODES } from './dot.js';
 
 describe('@arki/kv/dot', () => {
   it('contributes a kv-kind service to the manifest', () => {
@@ -29,13 +29,27 @@ describe('@arki/kv/dot', () => {
     expect(configured.manifest.pips.map(p => p.name)).toEqual(['kv']);
   });
 
-  it('throws a clear error when no URL is configured', async () => {
+  it('throws a coded DotPipError when no URL is configured', async () => {
+    // The kernel wraps any throw from a boot hook in DotLifecycleError so
+    // every boot failure has a uniform outer shape. The original throw is
+    // preserved on `.cause` — that's what consumers and coding agents
+    // match against for the stable code / remediation / docsUrl.
     const previous = process.env['KV_URL'];
     delete process.env['KV_URL'];
     try {
-      await expect(
-        defineApp('kv-missing-url').use(kv()).boot(),
-      ).rejects.toThrow(/KV URL is not configured/);
+      const caught = await defineApp('kv-missing-url')
+        .use(kv())
+        .boot()
+        .catch((e: unknown) => e);
+      expect(caught).toBeInstanceOf(DotLifecycleError);
+      const cause = (caught as DotLifecycleError).cause;
+      expect(cause).toBeInstanceOf(DotPipError);
+      const pipErr = cause as DotPipError;
+      expect(pipErr.code).toBe(KV_PIP_ERROR_CODES.urlNotConfigured);
+      expect(pipErr.code).toBe('KV_PIP_E001');
+      expect(pipErr.message).toMatch(/KV URL is not configured/);
+      expect(pipErr.remediation).toMatch(/options\.url|KV_URL/);
+      expect(pipErr.docsUrl).toMatch(/^https?:\/\//);
     } finally {
       if (previous !== undefined) process.env['KV_URL'] = previous;
     }

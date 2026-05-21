@@ -197,6 +197,58 @@ export function pipDependencies(pip: AnyDotPip): readonly string[] {
   return pip.dependencies ?? [];
 }
 
+/**
+ * Stable error thrown by DOT pip adapters.
+ *
+ * Adapters MUST throw `DotPipError` (not raw `Error`) when surfacing a
+ * misconfiguration, missing-input, or other fail-fast condition. Consumers
+ * and coding agents can then match on a stable `code`, follow `docsUrl`,
+ * and apply `remediation` without parsing the message.
+ *
+ * Codes are per-adapter. Recommended prefix is `<PKG>_PIP_E<NNN>` (e.g.
+ * `KV_PIP_E001`, `DB_PIP_E001`). The kernel does not own the code
+ * namespace — each adapter defines its own constants and links them in
+ * its README.
+ *
+ * @see packages/dot/docs/principles.md — principle 1.3 ("errors are part
+ * of the API") and principle 4 ("agent-discoverable everywhere").
+ *
+ * @example
+ * ```ts
+ * import { DotPipError } from '@arki/dot/pip';
+ *
+ * const KV_PIP_ERROR_CODES = { urlNotConfigured: 'KV_PIP_E001' } as const;
+ *
+ * throw new DotPipError({
+ *   code: KV_PIP_ERROR_CODES.urlNotConfigured,
+ *   message: '[kv] KV URL is not configured.',
+ *   remediation: 'Pass options.url to kv(...) or set KV_URL in the environment.',
+ *   docsUrl: 'https://arki.dev/dot/errors/kv-pip-e001',
+ * });
+ * ```
+ */
+export class DotPipError extends Error {
+  /** Stable error code, e.g. `KV_PIP_E001`. */
+  readonly code: string;
+  /** One-sentence guidance on how to fix the underlying problem. */
+  readonly remediation: string;
+  /** URL of the documentation page that explains this error. */
+  readonly docsUrl: string;
+
+  constructor(args: {
+    readonly code: string;
+    readonly message: string;
+    readonly remediation: string;
+    readonly docsUrl: string;
+  }) {
+    super(args.message);
+    this.name = 'DotPipError';
+    this.code = args.code;
+    this.remediation = args.remediation;
+    this.docsUrl = args.docsUrl;
+  }
+}
+
 /** Re-exported for downstream typing. */
 
 export { type DotAppManifest, type PipManifest } from './manifest.js';

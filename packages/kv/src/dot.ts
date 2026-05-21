@@ -23,9 +23,18 @@
  * that is intentional: the adapter only makes sense in a DOT app.
  */
 
-import { defineDotPip, type DotPip } from '@arki/dot/pip';
+import { defineDotPip, DotPipError, type DotPip } from '@arki/dot/pip';
 
 import { KV } from './index.js';
+
+/**
+ * Stable error codes thrown by the kv pip. Exported so consumers and
+ * coding agents can match against them — never parse the message.
+ */
+export const KV_PIP_ERROR_CODES = {
+  /** boot was called without a configured URL. */
+  urlNotConfigured: 'KV_PIP_E001',
+} as const;
 
 /**
  * Options for the kv DOT adapter.
@@ -70,9 +79,13 @@ export function kv(options: KvDotOptions = {}): DotPip<KvServices> {
     boot() {
       const url = options.url ?? process.env['KV_URL'];
       if (url === undefined || url === '') {
-        throw new Error(
-          `[${name}] KV URL is not configured. Pass options.url or set KV_URL in the environment.`,
-        );
+        throw new DotPipError({
+          code: KV_PIP_ERROR_CODES.urlNotConfigured,
+          message: `[${name}] KV URL is not configured.`,
+          remediation:
+            'Pass options.url to kv(...) or set KV_URL in the environment before booting the app.',
+          docsUrl: 'https://arki.dev/dot/errors/kv-pip-e001',
+        });
       }
       const client = new KV(url, options.namespace, options.rateLimitPrefix);
       return { services: { kv: client } };
