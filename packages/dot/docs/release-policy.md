@@ -40,11 +40,12 @@ These are **experimental** in `0.x` and may change without a major bump:
 
 - `dot new` and `dot add` (deferred to `0.x`/`1.1`).
 - Internal kernel modules (`@arki/dot/kernel/*`).
-- The legacy surface (`createDot`, `definePlugin`, legacy auth/db/event-
-  sourcing exports under `@arki/dot/legacy`).
 
-The legacy surface is **deprecated** and exists only for in-monorepo
-consumer migration. It will be removed in `1.0`.
+The pre-0.1 legacy surface (`createDot`, `definePlugin`, the
+`@arki/dot/legacy/*`, `@arki/dot/event-sourcing`, and
+`@arki/dot/presets/runtime-local` subpaths) has been **removed**. Use
+`defineApp`/`defineDotPlugin` for composition and `@arki/event-sourcing`
+directly for event-sourcing helpers.
 
 ## Deprecation cycle
 
@@ -57,23 +58,23 @@ consumer migration. It will be removed in `1.0`.
 
 Example timeline:
 
-| Version | Action                                       |
-| ------- | -------------------------------------------- |
-| `0.3.0` | Deprecate `createDot`. Document replacement. |
-| `0.4.0` | Deprecation still active.                    |
-| `1.0.0` | Remove `createDot`.                          |
+| Version | Action                                                    |
+| ------- | --------------------------------------------------------- |
+| `0.3.0` | Deprecate `someApi`. Document replacement.                |
+| `0.4.0` | Deprecation still active.                                 |
+| `1.0.0` | Remove `someApi`.                                         |
 
 Deprecations and removals are listed in the [upgrade guide](./upgrade-guide.md).
 
 ## Public vs experimental imports
 
-| Import path                | Status        |
-| -------------------------- | ------------- |
-| `@arki/dot`                | stable        |
-| `@arki/dot/plugin`         | stable        |
-| `@arki/dot/legacy`         | deprecated    |
-| `@arki/dot/kernel/*`       | experimental — do not import directly |
-| `@arki/dot/cli`            | experimental — wraps the binary; use the `dot` CLI instead |
+| Import path              | Status                                                     |
+| ------------------------ | ---------------------------------------------------------- |
+| `@arki/dot`              | stable                                                     |
+| `@arki/dot/plugin`       | stable                                                     |
+| `@arki/dot/test-harness` | stable                                                     |
+| `@arki/dot/cli`          | experimental — wraps the binary; use the `dot` CLI instead |
+| `@arki/dot/kernel/*`     | experimental — do not import directly                      |
 
 Anything not listed is private. We reserve the right to change private
 modules at any time.
