@@ -23,7 +23,7 @@ async function runPermissionsTest() {
 
     // Test: Get roles for admin user
     const adminRoles = await userRepository.getUserRoles(adminUser.id);
-    console.log('Admin roles:', adminRoles.map(r => r.name).join(', '));
+    console.log('Admin roles:', adminRoles.filter((r): r is NonNullable<typeof r> => r !== null).map(r => r.name).join(', '));
 
     // Test: Get permissions for admin user
     const adminPermissions = await userRepository.getUserPermissions(adminUser.id);

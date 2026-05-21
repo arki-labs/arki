@@ -13,7 +13,7 @@ import { SYSTEM_USER, SYSTEM_USER_ID } from '../constants';
 export async function ensureSystemUserExists(db: Database): Promise<void> {
   // Check if system user already exists
   const existingUser = await db.query.User.findFirst({
-    where: eq(User.id, SYSTEM_USER_ID),
+    where: { RAW: eq(User.id, SYSTEM_USER_ID) },
   });
 
   if (!existingUser) {

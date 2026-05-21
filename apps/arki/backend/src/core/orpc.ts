@@ -130,7 +130,7 @@ const createRoleMiddleware = (roles: UserRole[]) => {
     }
 
     const userRoles = await context.repo.auth.getUserRoles(context.session.user.id as UserId);
-    const userRoleNames = new Set(userRoles.map((r: { name?: string }) => r?.name).filter(Boolean));
+    const userRoleNames = new Set(userRoles.map(r => r?.name).filter(Boolean));
     const hasRole = roles.some(role => userRoleNames.has(role));
 
     if (!hasRole) {

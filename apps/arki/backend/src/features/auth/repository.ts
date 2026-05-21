@@ -32,7 +32,7 @@ export class UserRepository {
     }
 
     return this.db.query.User.findFirst({
-      where: eq(User.id, id),
+      where: { RAW: eq(User.id, id) },
       with: {
         accounts: true,
       },
@@ -49,7 +49,7 @@ export class UserRepository {
     }
 
     return this.db.query.User.findFirst({
-      where: eq(User.email, email),
+      where: { RAW: eq(User.email, email) },
     });
   }
 
@@ -109,7 +109,7 @@ export class UserRepository {
    */
   async findRoleById(id: RoleId) {
     return this.db.query.Role.findFirst({
-      where: eq(Role.id, id),
+      where: { RAW: eq(Role.id, id) },
     });
   }
 
@@ -118,7 +118,7 @@ export class UserRepository {
    */
   async findRoleByName(name: string) {
     return this.db.query.Role.findFirst({
-      where: eq(Role.name, name),
+      where: { RAW: eq(Role.name, name) },
     });
   }
 
@@ -161,7 +161,7 @@ export class UserRepository {
    */
   async findPermissionById(id: PermissionId) {
     return this.db.query.Permission.findFirst({
-      where: eq(Permission.id, id),
+      where: { RAW: eq(Permission.id, id) },
     });
   }
 
@@ -170,7 +170,7 @@ export class UserRepository {
    */
   async findPermissionByResourceAction(resource: RestrictedResource, action: UserPermission) {
     return this.db.query.Permission.findFirst({
-      where: and(eq(Permission.resource, resource), eq(Permission.action, action)),
+      where: { RAW: and(eq(Permission.resource, resource), eq(Permission.action, action))! },
     });
   }
 
@@ -207,7 +207,7 @@ export class UserRepository {
    */
   async getUserRoles(userId: UserId) {
     const userRoles = await this.db.query.UserRoleAssignment.findMany({
-      where: eq(UserRoleAssignment.userId, userId),
+      where: { RAW: eq(UserRoleAssignment.userId, userId) },
       with: {
         role: true,
       },
@@ -234,7 +234,7 @@ export class UserRepository {
    */
   async getRoleUsers(roleId: RoleId) {
     const roleUsers = await this.db.query.UserRoleAssignment.findMany({
-      where: eq(UserRoleAssignment.roleId, roleId),
+      where: { RAW: eq(UserRoleAssignment.roleId, roleId) },
       with: {
         user: true,
       },
@@ -268,7 +268,7 @@ export class UserRepository {
    */
   async getRolePermissions(roleId: RoleId) {
     const rolePermissions = await this.db.query.RolePermission.findMany({
-      where: eq(RolePermission.roleId, roleId),
+      where: { RAW: eq(RolePermission.roleId, roleId) },
       with: {
         permission: true,
       },
@@ -281,7 +281,7 @@ export class UserRepository {
    */
   async getPermissionRoles(permissionId: PermissionId) {
     const permissionRoles = await this.db.query.RolePermission.findMany({
-      where: eq(RolePermission.permissionId, permissionId),
+      where: { RAW: eq(RolePermission.permissionId, permissionId) },
       with: {
         role: true,
       },
@@ -296,9 +296,9 @@ export class UserRepository {
     const userRoles = await this.getUserRoles(userId);
     if (userRoles.length === 0) return [];
 
-    const roleIds = userRoles.map(role => role?.id).filter(Boolean);
+    const roleIds = userRoles.map(role => role?.id).filter((id): id is RoleId => Boolean(id));
     const permissions = await this.db.query.RolePermission.findMany({
-      where: inArray(RolePermission.roleId, roleIds),
+      where: { RAW: inArray(RolePermission.roleId, roleIds) },
       with: {
         permission: true,
       },
