@@ -1,6 +1,6 @@
 {
   "name": "@arki/log",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Structured logging primitives for ARKI — severity levels, batching, distributed tracing hooks, and Pino-backed transports.",
   "license": "MIT",
   "type": "module",

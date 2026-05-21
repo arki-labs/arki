@@ -11,18 +11,22 @@ candidates for npm publication. Changesets respects each package's
 `private` flag automatically — all internal packages (`apps/`,
 `tooling/`, anything still flagged `private: true`) are never published.
 
-The five canonical release waves:
+The canonical release waves (active set — see `arki.release.config.ts`
+for the source of truth; trimmed for stable v1 per the doctrine
+"smaller and excellent rather than broad and uneven"):
 
-1. **foundation** — `@arki/assert`, `@arki/contracts`, `@arki/logger`,
+1. **foundation** — `@arki/assert`, `@arki/contracts`, `@arki/log`,
    `@arki/env`, `@arki/ts`, `@arki/resilience`, `@arki/date`,
    `@arki/string`, `@arki/slugify`, `@arki/clock`
 2. **dot-kernel** — `@arki/dot`
-3. **infrastructure-adapters** — `@arki/db`, `@arki/kv`, `@arki/fs`,
-   `@arki/queue`, `@arki/event-sourcing`, `@arki/auth`, `@arki/emails`
-4. **frontend** — `@arki/design-systems`, `@arki/theme`, `@arki/icons`,
-   `@arki/react-hooks`, `@arki/ui`
-5. **specialized** — `@arki/ai`, `@arki/rich-text`, `@arki/images`,
-   `@arki/diff-engine`
+3. **infrastructure-adapters** — `@arki/db`, `@arki/kv`,
+   `@arki/event-sourcing` (`fs`/`queue`/`auth`/`emails` rejoin once
+   they ship dist+docs / drop `private: true`)
+4. **frontend** — _empty for v1.0_; every Wave 4 candidate still
+   fails build-output / docs / privacy or depends on the
+   still-private `@arki/react-hooks`. Targeted for v1.1.
+5. **specialized** — _empty for v1.0_; every Wave 5 candidate is still
+   `private: true`. Targeted for v1.1+.
 
 ## Gating
 

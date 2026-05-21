@@ -1,6 +1,6 @@
 {
   "name": "@arki/tanstack-start",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "exports": {
     ".": {
@@ -23,7 +23,7 @@
       "import": "./src/router.ts",
       "browser": "./src/router.ts"
     },
-"./orpc/client": {
+    "./orpc/client": {
       "types": "./dist/src/orpc/client.d.ts",
       "import": "./src/orpc/client.ts",
       "browser": "./src/orpc/client.ts"

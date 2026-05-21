@@ -1,6 +1,6 @@
 {
   "name": "@arki/chat-ui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -85,21 +85,51 @@
   },
   "typesVersions": {
     "*": {
-      "thread": ["src/thread.tsx"],
-      "message": ["src/message.tsx"],
-      "composer": ["src/composer.tsx"],
-      "action-bar": ["src/action-bar.tsx"],
-      "branch-picker": ["src/branch-picker.tsx"],
-      "tool-call": ["src/tool-call.tsx"],
-      "thinking-block": ["src/thinking-block.tsx"],
-      "approval-card": ["src/approval-card.tsx"],
-      "step-indicator": ["src/step-indicator.tsx"],
-      "agent-status": ["src/agent-status.tsx"],
-      "code-block": ["src/code-block.tsx"],
-      "markdown-message": ["src/markdown-message.tsx"],
-      "tool-registry": ["src/tool-registry.tsx"],
-      "types": ["src/types.ts"],
-      "*": ["src/*"]
+      "thread": [
+        "src/thread.tsx"
+      ],
+      "message": [
+        "src/message.tsx"
+      ],
+      "composer": [
+        "src/composer.tsx"
+      ],
+      "action-bar": [
+        "src/action-bar.tsx"
+      ],
+      "branch-picker": [
+        "src/branch-picker.tsx"
+      ],
+      "tool-call": [
+        "src/tool-call.tsx"
+      ],
+      "thinking-block": [
+        "src/thinking-block.tsx"
+      ],
+      "approval-card": [
+        "src/approval-card.tsx"
+      ],
+      "step-indicator": [
+        "src/step-indicator.tsx"
+      ],
+      "agent-status": [
+        "src/agent-status.tsx"
+      ],
+      "code-block": [
+        "src/code-block.tsx"
+      ],
+      "markdown-message": [
+        "src/markdown-message.tsx"
+      ],
+      "tool-registry": [
+        "src/tool-registry.tsx"
+      ],
+      "types": [
+        "src/types.ts"
+      ],
+      "*": [
+        "src/*"
+      ]
     }
   },
   "scripts": {

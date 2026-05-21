@@ -1,6 +1,6 @@
 {
   "name": "@arki/env",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Type-safe environment variable parsing for ARKI — defineEnv() built on @t3-oss/env-core with Zod contracts for common variable shapes.",
   "license": "MIT",
   "type": "module",
@@ -73,7 +73,9 @@
     "@arki/dot": "workspace:*"
   },
   "peerDependenciesMeta": {
-    "@arki/dot": { "optional": true }
+    "@arki/dot": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@arki/dot": "workspace:*",
