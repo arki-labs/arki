@@ -222,7 +222,7 @@ export async function exportPublicTree(
   }
 
   // 7. Root tree scaffolding.
-  await writeRootScaffolding(outputPath);
+  await writeRootScaffolding(outputPath, options.skipWorkspacesRoot ?? false);
 
   const status: 'success' | 'failure' = failed > 0 ? 'failure' : 'success';
   const summary: ExportSummary = {
@@ -594,15 +594,24 @@ async function loadRootManifest(rootCwd: string): Promise<unknown> {
  * byte-identical output, so `removeDirectory` + `writeRootScaffolding`
  * is safe to run on every export.
  */
-async function writeRootScaffolding(outputPath: string): Promise<void> {
-  const rootPackage = {
+async function writeRootScaffolding(
+  outputPath: string,
+  skipWorkspacesRoot: boolean,
+): Promise<void> {
+  // Conditionally include the `workspaces` field. Omitting it makes the
+  // tree publish-safe (npm publish parent-walks find a non-workspace
+  // root and behave normally); including it makes the tree dev-friendly
+  // (cloning `arki-labs/arki` + `bun install` resolves all 14 packages).
+  const rootPackage: Record<string, unknown> = {
     name: 'arki-public',
     version: '0.0.0',
     private: true,
     description:
       'Generated public ARKI package tree — do not edit by hand. Regenerate with `bun release:arki export-public`.',
-    workspaces: ['packages/*'],
   };
+  if (!skipWorkspacesRoot) {
+    rootPackage['workspaces'] = ['packages/*'];
+  }
   await writeJsonFile(path.join(outputPath, 'package.json'), rootPackage);
 
   const gitignore = ['node_modules/', 'dist/', '.turbo/', ''].join('\n');

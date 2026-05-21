@@ -443,6 +443,19 @@ export interface ExportOptions {
   readonly config: ReleaseConfig;
   readonly leakScan?: boolean;
   readonly includeBlockedByLeak?: boolean;
+  /**
+   * When `true`, omit the `workspaces: ['packages/*']` field from the
+   * materialized root `package.json`. Default `false` (write workspaces
+   * field — needed for the `arki-labs/arki` clone-and-`bun install`
+   * use case).
+   *
+   * Enable when the materialized tree will be used for `npm publish`:
+   * npm parent-walks from any `packages/<pkg>/` child directory, finds
+   * the workspaces root, and switches to workspace mode — which mangles
+   * standalone publishes with `'@arki/<pkg>@*' is not in this registry`.
+   * Omitting the field makes the publish path always-clean.
+   */
+  readonly skipWorkspacesRoot?: boolean;
 }
 
 /**

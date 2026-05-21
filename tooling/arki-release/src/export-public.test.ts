@@ -309,6 +309,29 @@ describe('exportPublicTree', () => {
     expect(readme).toMatch(/generated/i);
   });
 
+  it('omits the workspaces field when skipWorkspacesRoot is set', async () => {
+    // Why: `npm publish` from inside `.release/arki-public/packages/<pkg>/`
+    // parent-walks into the root `package.json`. If `workspaces` is present
+    // there, npm switches to workspace mode and breaks standalone publishes
+    // (manifested as `'@arki/<pkg>@*' is not in this registry`). The opt-in
+    // flag lets the publish path materialize a non-workspaces tree while
+    // the default GitHub-mirror path keeps the workspaces field for
+    // dev-clone-and-`bun install` ergonomics.
+    writeRoot(tmp);
+    writePkg(tmp, 'assert', {
+      name: '@arki/assert',
+      version: '1.0.0',
+      description: 'Test assertions.',
+    });
+
+    await exportPublicTree({ rootCwd: tmp, config: baseConfig, skipWorkspacesRoot: true });
+    const outDir = path.join(tmp, baseConfig.publicTreePath);
+    const rootPkg = readJson(path.join(outDir, 'package.json')) as Record<string, unknown>;
+    expect(rootPkg['name']).toBe('arki-public');
+    expect(rootPkg['private']).toBe(true);
+    expect(rootPkg).not.toHaveProperty('workspaces');
+  });
+
   it('writes a publish-ready scaffolding: LICENSE, AGENTS.md, .changeset/, .github/workflows/release.yml', async () => {
     writeRoot(tmp);
     writePkg(tmp, 'assert', {

@@ -748,6 +748,14 @@ async function runPackHandler(args: ParsedCliArgs): Promise<number> {
  *   --include-blocked-by-leak   Attempt packages classified
  *                               `blocked-by-leak` in addition to
  *                               `public-candidate`. Useful for diagnosis.
+ *   --no-workspaces-root        Omit `workspaces: ['packages/*']` from
+ *                               the materialized root `package.json`.
+ *                               Use this when the tree will be the
+ *                               source of `npm publish` — npm's
+ *                               parent-walk into a workspaces root
+ *                               mangles standalone publishes. Default
+ *                               keeps the field (dev-friendly for
+ *                               `arki-labs/arki` cloners).
  *
  * Exit codes:
  *   - 0 when every candidate exports successfully.
@@ -759,6 +767,7 @@ async function runExportPublicHandler(args: ParsedCliArgs): Promise<number> {
   const outputOverride = extractOption(args.rest, 'output');
   const leakScan = !args.rest.includes('--no-leak-scan');
   const includeBlockedByLeak = args.rest.includes('--include-blocked-by-leak');
+  const skipWorkspacesRoot = args.rest.includes('--no-workspaces-root');
 
   try {
     const config = await loadConfig(configPath);
@@ -768,6 +777,7 @@ async function runExportPublicHandler(args: ParsedCliArgs): Promise<number> {
       ...(outputOverride !== null ? { outputPath: outputOverride } : {}),
       leakScan,
       includeBlockedByLeak,
+      skipWorkspacesRoot,
     });
     emitEnvelope(envelope, { json: args.json });
     return envelope.status === 'failure' ? 1 : 0;

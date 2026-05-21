@@ -87,12 +87,25 @@ for p in <pkg-list>; do
 done
 ```
 
-**Long-term fix candidates** (not done yet):
+**Built-in fix (added 2026-05-21):** `bun release:arki export-public --no-workspaces-root` materializes the tree WITHOUT a workspaces field at the root. The publish loop can then use the standard `cd packages/<pkg> && npm publish` form because npm's parent-walk finds a non-workspaces root and behaves normally. The default behavior (no flag) keeps the workspaces field for `arki-labs/arki` cloners who want `bun install` to resolve the tree.
 
-1. Make `export-public` skip writing the workspaces field by default. The fixture matrix can synthesize its own workspaces config in a temp directory when it needs one (~30 min of tooling work).
-2. Add a `.npmrc` at `.release/arki-public/packages/*/` with `workspaces=false` (npm doesn't currently honor a per-package opt-out, so this is speculative).
+**Canonical ship sequence** with the flag:
 
-For now, the path-form workaround is the canonical procedure.
+```bash
+# Publish-mode materialization (no workspaces field)
+bun release:arki export-public --no-workspaces-root
+
+# Publish loop (either form works once the root has no workspaces)
+for p in <pkg-list>; do
+  npm publish --access public ".release/arki-public/packages/$p"
+done
+
+# Before force-pushing to arki-labs/arki, re-materialize with the workspaces
+# field so cloners can `bun install` cleanly
+bun release:arki export-public
+```
+
+The path-form workaround (`npm publish <abs-path>` from outside the workspace) still works as a fallback if you forget the flag.
 
 ## The npm 2FA browser-auth "did it succeed?" pattern
 

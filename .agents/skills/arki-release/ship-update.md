@@ -28,7 +28,11 @@ bunx -p @changesets/cli changeset version
 git diff --stat packages/
 
 # 4. Re-materialize the public tree (concrete versions, no workspace:*)
-bun tooling/arki-release/src/cli.ts export-public
+#    Use --no-workspaces-root for the publish-mode tree (npm publish from
+#    a child dir would otherwise parent-walk into the workspaces field and
+#    break). Re-run WITHOUT the flag before the GitHub mirror force-push,
+#    so cloners of arki-labs/arki can still `bun install` from the root.
+bun tooling/arki-release/src/cli.ts export-public --no-workspaces-root
 
 # 5. Run the scorecard — must report `Stable release gate: OPEN`
 bun tooling/arki-release/src/cli.ts scorecard | tail -20
