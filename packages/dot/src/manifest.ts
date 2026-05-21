@@ -17,10 +17,21 @@ import type { DotLifecycleHook } from './lifecycle.js';
 /**
  * Kind of service that a plugin can publish.
  *
- * The first eight kinds are reserved well-known shapes the framework knows
- * about. `custom` is the escape hatch for plugin-defined service kinds.
+ * Well-known kinds map 1:1 to the canonical `@arki/*` adapters. `custom`
+ * is the escape hatch for plugin-defined service kinds — use it whenever a
+ * plugin publishes something that does not fit a reserved shape.
  */
-export type ServiceKind = 'env' | 'db' | 'kv' | 'queue' | 'auth' | 'email' | 'logger' | 'custom';
+export type ServiceKind =
+  | 'env'
+  | 'db'
+  | 'kv'
+  | 'queue'
+  | 'auth'
+  | 'email'
+  | 'logger'
+  | 'event-store'
+  | 'message-bus'
+  | 'custom';
 
 /** Transport that a route is exposed under. */
 export type RouteTransport = 'http' | 'orpc' | 'trpc' | 'rpc' | 'custom';
