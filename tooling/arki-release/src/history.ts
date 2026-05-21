@@ -717,15 +717,16 @@ export function renderHistoryText(
 
   if (envelope.items.length > 0) {
     const nameW = Math.max(...envelope.items.map(i => i.name.length), 20);
-    const header = `${'Package'.padEnd(nameW)}  ${'source'.padEnd(10)} ${'npm'.padEnd(10)} ${'changelog'.padEnd(10)} ${'tag'.padEnd(10)} status`;
+    const header = `${'Package'.padEnd(nameW)}  ${'source'.padEnd(10)} ${'npm'.padEnd(10)} ${'changelog'.padEnd(10)} ${'tag'.padEnd(10)} ${'status'.padEnd(16)} mirror`;
     lines.push(header);
     lines.push('─'.repeat(header.length));
     for (const item of envelope.items) {
       const tag = item.githubTag ?? '—';
       const npm = item.npm ?? '—';
       const cl = item.changelog ?? '—';
+      const repo = item.repoStatus ?? 'unchecked';
       lines.push(
-        `${item.name.padEnd(nameW)}  ${item.source.padEnd(10)} ${npm.padEnd(10)} ${cl.padEnd(10)} ${tag.padEnd(10)} ${item.status}`,
+        `${item.name.padEnd(nameW)}  ${item.source.padEnd(10)} ${npm.padEnd(10)} ${cl.padEnd(10)} ${tag.padEnd(10)} ${item.status.padEnd(16)} ${repo}`,
       );
     }
     lines.push('');
