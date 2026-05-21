@@ -19,6 +19,8 @@ export const DotCliErrorCode = {
   InvalidArgs: 'DOT_CLI_E005',
   /** Configure or boot threw while preparing the app for inspection. */
   AppLifecycleFailed: 'DOT_CLI_E006',
+  /** `dot doctor --observability` ran but no OTel SDK is registered. */
+  ObservabilityNoSdk: 'DOT_CLI_E007',
 } as const;
 
 export type DotCliErrorCodeValue = (typeof DotCliErrorCode)[keyof typeof DotCliErrorCode];
@@ -36,6 +38,7 @@ export const DotCliDocsAnchor: Record<DotCliErrorCodeValue, string> = {
   [DotCliErrorCode.UnknownCommand]: 'unknown-command',
   [DotCliErrorCode.InvalidArgs]: 'invalid-args',
   [DotCliErrorCode.AppLifecycleFailed]: 'app-lifecycle-failed',
+  [DotCliErrorCode.ObservabilityNoSdk]: 'observability-no-sdk',
 };
 
 export function dotCliDocsUrl(code: DotCliErrorCodeValue): string {

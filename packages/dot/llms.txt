@@ -25,6 +25,7 @@
 - [Observability](docs/observability.md): OTel-first traces + metrics + log correlation, `arki:dot:lifecycle` namespace, zero-cost-when-off discipline
 - [In-process observers](docs/observability.md#in-process-observers): `DotLifecycleObserver` + `defineApp({ observers })` + `app.subscribe(...)` for tests / CLI / ad-hoc inspection — peer of OTel, not layered under it
 - [ASCII timeline](docs/observability.md#ascii-timeline): `app.timeline()` / `renderTimeline(snapshot)` — per-phase, per-pip duration waterfall
+- [`dot doctor --observability`](docs/observability.md#verifying-sdk-registration): SDK-registration probe — emits coded warning issue (`DOT_CLI_E007`) when no OTel SDK is registered, with remediation pointing at the quick-reference
 
 ## For agents
 

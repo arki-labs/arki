@@ -30,6 +30,7 @@ import { DotLifecycleError } from '../lifecycle.js';
 import { discoverApp, guards } from './discover.js';
 import { DotCliError, DotCliErrorCode, dotCliDocsUrl } from './error-codes.js';
 import { runNew } from './new.js';
+import { probeObservability } from './observability-probe.js';
 import { renderDoctor } from './render-doctor.js';
 import { renderExplain } from './render-explain.js';
 
@@ -57,6 +58,11 @@ Common options:
                          ./dot.config.ts, ./src/app.ts, or ./app.ts)
   --cwd <dir>            Working directory (default: current)
 
+\`doctor\` options:
+  --observability        Also probe whether an OpenTelemetry SDK is
+                         registered. Surfaces a warning issue when not,
+                         pointing at the docs to wire one in.
+
 \`new\` options:
   --target <dir>         Directory to create the app in (default: <app-name>)
   --pm <npm|pnpm|bun>    Package manager hint for the README (default: bun)
@@ -81,6 +87,8 @@ export type CliArgs = {
   dryRun?: boolean;
   /** `--force` (only honored by `new`). */
   force?: boolean;
+  /** `--observability` (only honored by `doctor`). */
+  observability?: boolean;
 };
 
 /**
@@ -143,6 +151,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         pm: { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
         force: { type: 'boolean', default: false },
+        observability: { type: 'boolean', default: false },
       },
     });
   } catch (err) {
@@ -164,6 +173,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     pm?: string;
     'dry-run'?: boolean;
     force?: boolean;
+    observability?: boolean;
   };
 
   if (values.help) command = 'help';
@@ -194,6 +204,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     pm,
     dryRun: values['dry-run'] ?? false,
     force: values.force ?? false,
+    observability: values.observability ?? false,
   };
 }
 
@@ -232,6 +243,12 @@ type DoctorRunOptions = {
   json: boolean;
   out?: (line: string) => void;
   now?: () => Date;
+  /**
+   * When `true`, probes for a registered OpenTelemetry SDK and injects
+   * a warning-severity issue into the diagnostics envelope when none is
+   * present. Default `false`.
+   */
+  observability?: boolean;
 };
 
 /**
@@ -251,7 +268,8 @@ export async function runDoctor(
   // Already-booted app: just read diagnostics, don't touch lifecycle.
   if (!guards.isDotAppBuilder(discovered) && !guards.isDotAppConfigured(discovered)) {
     const app = discovered as DotApp<Record<string, unknown>>;
-    return renderDoctor({ diagnostics: app.diagnostics }, { json: opts.json, out: opts.out, now: opts.now });
+    const diagnostics = applyObservabilityProbe(app.diagnostics, opts.observability ?? false);
+    return renderDoctor({ diagnostics }, { json: opts.json, out: opts.out, now: opts.now });
   }
 
   // Builder or configured seam: drive lifecycle ourselves. Boot failures fall
@@ -279,7 +297,8 @@ export async function runDoctor(
   }
 
   try {
-    const diagnostics = bootedApp ? bootedApp.diagnostics : configured.diagnostics;
+    const rawDiagnostics = bootedApp ? bootedApp.diagnostics : configured.diagnostics;
+    const diagnostics = applyObservabilityProbe(rawDiagnostics, opts.observability ?? false);
     const envelope = renderDoctor({ diagnostics }, { json: opts.json, out: opts.out, now: opts.now });
     // Sanity: if boot threw, the envelope SHOULD be failure already (kernel
     // populates issues on boot failure). If somehow it isn't, downgrade
@@ -297,6 +316,21 @@ export async function runDoctor(
       }
     }
   }
+}
+
+/**
+ * Run the observability probe and fold its issue (if any) into the
+ * top-level `issues` array. Returns a new snapshot — never mutates the
+ * input.
+ */
+function applyObservabilityProbe<T extends { issues: readonly { code: string }[] }>(
+  diagnostics: T,
+  enabled: boolean,
+): T {
+  if (!enabled) return diagnostics;
+  const probeIssue = probeObservability();
+  if (!probeIssue) return diagnostics;
+  return { ...diagnostics, issues: [...diagnostics.issues, probeIssue] };
 }
 
 function wrapLifecycleError(err: unknown, phase: 'configure' | 'boot'): DotCliError {
@@ -422,7 +456,7 @@ export async function main(options: MainOptions): Promise<number> {
     if (args.command === 'explain') {
       envelope = await runExplain(discovered, opts);
     } else {
-      envelope = await runDoctor(discovered, opts);
+      envelope = await runDoctor(discovered, { ...opts, observability: args.observability });
     }
 
     return envelopeExitCode(envelope.status);

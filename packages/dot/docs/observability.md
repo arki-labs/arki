@@ -208,6 +208,42 @@ await defineApp('my-app').use(envPip).use(dbPip).start();
 
 ---
 
+## Verifying SDK registration
+
+Run `dot doctor --observability` to verify your app has an OpenTelemetry
+SDK registered. The probe starts a transient span via the public OTel
+API and inspects the resulting trace ID — when no SDK is registered,
+the API returns the all-zero sentinel; when one is, a real random ID.
+
+```sh
+$ dot doctor --observability --json
+{
+  "status": "warning",
+  "command": "doctor",
+  ...
+  "errors": [
+    {
+      "code": "DOT_CLI_E007",
+      "severity": "warning",
+      "message": "No OpenTelemetry SDK is registered. Lifecycle traces and metrics will not be exported.",
+      "remediation": "Register an OTel SDK (e.g. @opentelemetry/sdk-node with AsyncLocalStorageContextManager) once at app entry, before any DotApp boots. See the docs for a minimal example.",
+      "docsUrl": "https://docs.arki.dev/dot/cli#observability-no-sdk"
+    }
+  ]
+}
+```
+
+The probe issue is severity `warning` — lack of an SDK is a deployment
+choice, not a bug. Doctor will not exit non-zero on this alone (per-pip
+errors still take precedence and downgrade `status` to `failure`).
+
+The flag is **opt-in**: standard `dot doctor` doesn't run the probe, so
+agents that don't care about observability won't see the issue.
+
+---
+
+<a id="observability-no-sdk"></a>
+
 ## What we deliberately don't do
 
 - **No built-in exporter.** DOT does not pick stdout, OTLP, Jaeger, or
