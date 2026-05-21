@@ -37,6 +37,11 @@
       "import": "./src/index.ts",
       "default": "./dist/index.js"
     },
+    "./plugin": {
+      "types": "./dist/plugin.d.ts",
+      "import": "./dist/plugin.js",
+      "default": "./dist/plugin.js"
+    },
     "./package.json": "./package.json",
     "./cli": {
       "types": "./dist/cli/index.d.ts",
