@@ -1,6 +1,6 @@
 {
   "name": "@arki/string",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "String manipulation utilities — case conversion, base64 encoding, character counting, and template builders.",
   "license": "MIT",
   "type": "module",
