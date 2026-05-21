@@ -5,8 +5,8 @@
  * `defineApp(...)` and its returned `DotApp` interface.
  */
 
-import { createDebugLogger } from '@arki/log/debug';
 import { Logger } from '@arki/log';
+import { createDebugLogger } from '@arki/log/debug';
 
 import type {
   DiagnosticIssue,
@@ -16,6 +16,7 @@ import type {
   RouteDiagnostic,
   ServiceDiagnostic,
 } from '../diagnostics.js';
+import type { DotLifecycleEvent, DotLifecycleObserver } from '../lifecycle-observer.js';
 import type { DotLifecycleHook, DotLifecyclePipFailure, DotLifecycleState } from '../lifecycle.js';
 import type {
   DependencyEdge,
@@ -98,6 +99,12 @@ export type DotAppInternalConfig = {
   pips: readonly AnyDotPip[];
   /** Runtime config bag passed to every `boot` hook. */
   config?: Readonly<Record<string, unknown>>;
+  /**
+   * Observers registered at construction time, before any phase fires.
+   * Required if a consumer wants to see `configure`-phase events — those
+   * happen before there's a public seam to call `subscribe()` on.
+   */
+  observers?: readonly DotLifecycleObserver[];
 };
 
 /**
@@ -146,11 +153,20 @@ export class DotAppImpl {
    */
   readonly #logger: Logger;
 
+  /**
+   * In-process lifecycle observers. Fan-out is synchronous; observer
+   * exceptions are caught and dropped (DEBUG-logged). Mutable through
+   * `subscribe()` even after lifecycle starts — observers added later
+   * see only events from their subscription onwards.
+   */
+  readonly #observers: Set<DotLifecycleObserver>;
+
   constructor(config: DotAppInternalConfig) {
     this.#appName = config.appName;
     this.#appVersion = config.appVersion;
     this.#config = Object.freeze({ ...config.config });
     this.#logger = new Logger('arki:dot:lifecycle', { 'dot.app.name': config.appName });
+    this.#observers = new Set(config.observers);
 
     // Topological sort happens up-front — surfaces cycle/dup/missing-dep errors
     // at construction (the `configure` phase pseudo-time).
@@ -177,6 +193,147 @@ export class DotAppImpl {
 
     // Initial empty manifest — filled in by `runConfigure`.
     this.#manifest = this.#buildManifest();
+  }
+
+  /**
+   * Register a lifecycle observer. The returned function unregisters it.
+   * Observers added through `subscribe()` see events emitted *after*
+   * subscription only — to catch `configure` events, pass observers
+   * through `defineApp(name, { observers })` at construction time.
+   */
+  subscribe(observer: DotLifecycleObserver): () => void {
+    this.#observers.add(observer);
+    return () => {
+      this.#observers.delete(observer);
+    };
+  }
+
+  /**
+   * Fan out one event to every registered observer. Observer exceptions
+   * are caught and DEBUG-logged so a misbehaving observer can never
+   * break the lifecycle or hide an event from siblings.
+   *
+   * Hot-path note: when `#observers` is empty, the for-loop body never
+   * runs — the per-event allocation in the caller (the event object) is
+   * the only cost. The kernel never builds an event when no observers
+   * are present; see {@link #emitIfObserved}.
+   */
+  #emit(event: DotLifecycleEvent): void {
+    for (const observer of this.#observers) {
+      try {
+        observer(event);
+      } catch (error) {
+        debugKernel('[%s] observer threw on %s/%s: %O', this.#appName, event.kind, event.status, error);
+      }
+    }
+  }
+
+  /**
+   * Guarded emit. The event factory is only invoked when at least one
+   * observer is registered — keeps the no-observer path allocation-free,
+   * matching the kernel's zero-cost-when-off discipline (principle 5).
+   */
+  #emitIfObserved(makeEvent: () => DotLifecycleEvent): void {
+    if (this.#observers.size === 0) return;
+    this.#emit(makeEvent());
+  }
+
+  /**
+   * Emit a single hook-level event. Skipped (zero allocation) when no
+   * observers are registered.
+   */
+  #emitHook(
+    phase: DotLifecycleHook,
+    pip: string,
+    order: number,
+    status: 'starting' | 'completed' | 'failed',
+    opts?: { durationMs?: number; error?: unknown },
+  ): void {
+    if (this.#observers.size === 0) return;
+    const event = {
+      kind: 'pip-hook' as const,
+      phase,
+      pip,
+      order,
+      status,
+      appName: this.#appName,
+      timestamp: Date.now(),
+      ...(opts?.durationMs === undefined ? {} : { durationMs: opts.durationMs }),
+      ...(opts?.error === undefined ? {} : { error: opts.error }),
+    };
+    this.#emit(event);
+  }
+
+  /**
+   * Wrap a sync phase body with starting/completed/failed observer events.
+   * `configure` is the only sync phase in the kernel today — keep the
+   * async variant separate (no monomorphisation cost on the hot path).
+   */
+  #withPhaseEmit(phase: DotLifecycleHook, fn: () => void): void {
+    const phaseStart = performance.now();
+    this.#emitIfObserved(() => ({
+      kind: 'phase',
+      phase,
+      status: 'starting',
+      appName: this.#appName,
+      timestamp: Date.now(),
+    }));
+    try {
+      fn();
+      this.#emitIfObserved(() => ({
+        kind: 'phase',
+        phase,
+        status: 'completed',
+        appName: this.#appName,
+        durationMs: performance.now() - phaseStart,
+        timestamp: Date.now(),
+      }));
+    } catch (error) {
+      this.#emitIfObserved(() => ({
+        kind: 'phase',
+        phase,
+        status: 'failed',
+        appName: this.#appName,
+        durationMs: performance.now() - phaseStart,
+        error,
+        timestamp: Date.now(),
+      }));
+      throw error;
+    }
+  }
+
+  /** Async variant of {@link #withPhaseEmit}. */
+  async #withPhaseEmitAsync(phase: DotLifecycleHook, fn: () => Promise<void>): Promise<void> {
+    const phaseStart = performance.now();
+    this.#emitIfObserved(() => ({
+      kind: 'phase',
+      phase,
+      status: 'starting',
+      appName: this.#appName,
+      timestamp: Date.now(),
+    }));
+    try {
+      await fn();
+      this.#emitIfObserved(() => ({
+        kind: 'phase',
+        phase,
+        status: 'completed',
+        appName: this.#appName,
+        durationMs: performance.now() - phaseStart,
+        timestamp: Date.now(),
+      }));
+    } catch (error) {
+      this.#emitIfObserved(() => ({
+        kind: 'phase',
+        phase,
+        status: 'failed',
+        appName: this.#appName,
+        durationMs: performance.now() - phaseStart,
+        error,
+        timestamp: Date.now(),
+      }));
+      throw error;
+    }
   }
 
   get name(): string {
@@ -213,15 +370,17 @@ export class DotAppImpl {
     const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'configure');
     phaseLogger.debug('configure: starting', { 'dot.app.pip.count': this.#ordered.length });
 
-    withPhaseSpan(
-      {
-        appName: this.#appName,
-        phase: 'configure',
-        pipCount: this.#ordered.length,
-        logger: phaseLogger,
-      },
-      () => this.#runConfigureInner(phaseLogger),
-    );
+    this.#withPhaseEmit('configure', () => {
+      withPhaseSpan(
+        {
+          appName: this.#appName,
+          phase: 'configure',
+          pipCount: this.#ordered.length,
+          logger: phaseLogger,
+        },
+        () => this.#runConfigureInner(phaseLogger),
+      );
+    });
   }
 
   /**
@@ -260,6 +419,7 @@ export class DotAppImpl {
       };
 
       const started = performance.now();
+      this.#emitHook('configure', pip.name, record.order, 'starting');
       let returned: unknown;
       try {
         returned = withPipHookSpan(
@@ -274,6 +434,7 @@ export class DotAppImpl {
           () => pip.configure!(ctx),
         );
       } catch (error) {
+        const durationMs = performance.now() - started;
         const issue = makeIssue({
           code: DotLifecycleErrorCode.ConfigureFailed,
           pip: pip.name,
@@ -287,9 +448,10 @@ export class DotAppImpl {
           hook: 'configure',
           state: 'failed',
           order: record.order,
-          durationMs: performance.now() - started,
+          durationMs,
           issues: [issue],
         });
+        this.#emitHook('configure', pip.name, record.order, 'failed', { durationMs, error });
         this.#state = 'failed';
         this.#manifest = this.#buildManifest();
         throw new DotLifecycleError({
@@ -302,6 +464,7 @@ export class DotAppImpl {
       }
 
       if (isThenable(returned)) {
+        const durationMs = performance.now() - started;
         const issue = makeIssue({
           code: DotLifecycleErrorCode.ConfigureAsync,
           pip: pip.name,
@@ -315,8 +478,12 @@ export class DotAppImpl {
           hook: 'configure',
           state: 'failed',
           order: record.order,
-          durationMs: performance.now() - started,
+          durationMs,
           issues: [issue],
+        });
+        this.#emitHook('configure', pip.name, record.order, 'failed', {
+          durationMs,
+          error: new Error(issue.message),
         });
         this.#state = 'failed';
         this.#manifest = this.#buildManifest();
@@ -328,15 +495,17 @@ export class DotAppImpl {
         });
       }
 
+      const durationMs = performance.now() - started;
       record.lifecycleDiagnostics.push({
         pip: pip.name,
         hook: 'configure',
         state: 'configured',
         order: record.order,
-        durationMs: performance.now() - started,
+        durationMs,
         issues: [],
       });
-      pipLogger.debug('configure: done', { 'dot.pip.duration.ms': performance.now() - started });
+      this.#emitHook('configure', pip.name, record.order, 'completed', { durationMs });
+      pipLogger.debug('configure: done', { 'dot.pip.duration.ms': durationMs });
     }
 
     // Also declare lifecycle-hook participation for non-configure hooks present
@@ -379,14 +548,16 @@ export class DotAppImpl {
     const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'boot');
     phaseLogger.debug('boot: starting', { 'dot.app.pip.count': this.#ordered.length });
 
-    return withPhaseSpan(
-      {
-        appName: this.#appName,
-        phase: 'boot',
-        pipCount: this.#ordered.length,
-        logger: phaseLogger,
-      },
-      () => this.#runBootInner(phaseLogger),
+    return this.#withPhaseEmitAsync('boot', () =>
+      withPhaseSpan(
+        {
+          appName: this.#appName,
+          phase: 'boot',
+          pipCount: this.#ordered.length,
+          logger: phaseLogger,
+        },
+        () => this.#runBootInner(phaseLogger),
+      ),
     );
   }
 
@@ -417,6 +588,7 @@ export class DotAppImpl {
       };
 
       const started = performance.now();
+      this.#emitHook('boot', pip.name, record.order, 'starting');
       let result: DotBootResult<Record<string, unknown>>;
       try {
         const maybeResult = await withPipHookSpan(
@@ -432,6 +604,7 @@ export class DotAppImpl {
         );
         result = maybeResult ?? {};
       } catch (error) {
+        const durationMs = performance.now() - started;
         const issue = makeIssue({
           code: DotLifecycleErrorCode.BootFailed,
           pip: pip.name,
@@ -445,9 +618,10 @@ export class DotAppImpl {
           hook: 'boot',
           state: 'failed',
           order: record.order,
-          durationMs: performance.now() - started,
+          durationMs,
           issues: [issue],
         });
+        this.#emitHook('boot', pip.name, record.order, 'failed', { durationMs, error });
 
         pipLogger.error('boot: FAILED — rolling back already-booted pips', {
           'dot.app.rollback.count': bootedRecords.length,
@@ -475,16 +649,18 @@ export class DotAppImpl {
       record.booted = true;
       bootedRecords.push(record);
 
+      const durationMs = performance.now() - started;
       record.lifecycleDiagnostics.push({
         pip: pip.name,
         hook: 'boot',
         state: 'booted',
         order: record.order,
-        durationMs: performance.now() - started,
+        durationMs,
         issues: [],
       });
+      this.#emitHook('boot', pip.name, record.order, 'completed', { durationMs });
       pipLogger.debug('boot: done', {
-        'dot.pip.duration.ms': performance.now() - started,
+        'dot.pip.duration.ms': durationMs,
         'dot.pip.services.published': Object.keys(publishedServices).length,
       });
     }
@@ -507,14 +683,16 @@ export class DotAppImpl {
     const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'start');
     phaseLogger.debug('start: starting', { 'dot.app.pip.count': this.#ordered.length });
 
-    return withPhaseSpan(
-      {
-        appName: this.#appName,
-        phase: 'start',
-        pipCount: this.#ordered.length,
-        logger: phaseLogger,
-      },
-      () => this.#runStartInner(phaseLogger),
+    return this.#withPhaseEmitAsync('start', () =>
+      withPhaseSpan(
+        {
+          appName: this.#appName,
+          phase: 'start',
+          pipCount: this.#ordered.length,
+          logger: phaseLogger,
+        },
+        () => this.#runStartInner(phaseLogger),
+      ),
     );
   }
 
@@ -540,6 +718,7 @@ export class DotAppImpl {
       };
 
       const startedAt = performance.now();
+      this.#emitHook('start', pip.name, record.order, 'starting');
       try {
         await withPipHookSpan(
           {
@@ -553,6 +732,7 @@ export class DotAppImpl {
           () => pip.start!(ctx),
         );
       } catch (error) {
+        const durationMs = performance.now() - startedAt;
         const issue = makeIssue({
           code: DotLifecycleErrorCode.StartFailed,
           pip: pip.name,
@@ -566,9 +746,10 @@ export class DotAppImpl {
           hook: 'start',
           state: 'failed',
           order: record.order,
-          durationMs: performance.now() - startedAt,
+          durationMs,
           issues: [issue],
         });
+        this.#emitHook('start', pip.name, record.order, 'failed', { durationMs, error });
 
         pipLogger.error('start: FAILED — rolling back', {
           'dot.app.rollback.started.count': startedRecords.length,
@@ -591,15 +772,17 @@ export class DotAppImpl {
 
       record.started = true;
       startedRecords.push(record);
+      const durationMs = performance.now() - startedAt;
       record.lifecycleDiagnostics.push({
         pip: pip.name,
         hook: 'start',
         state: 'started',
         order: record.order,
-        durationMs: performance.now() - startedAt,
+        durationMs,
         issues: [],
       });
-      pipLogger.debug('start: done', { 'dot.pip.duration.ms': performance.now() - startedAt });
+      this.#emitHook('start', pip.name, record.order, 'completed', { durationMs });
+      pipLogger.debug('start: done', { 'dot.pip.duration.ms': durationMs });
     }
 
     this.#state = 'started';
@@ -633,38 +816,35 @@ export class DotAppImpl {
     const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'stop');
     phaseLogger.debug('stop: starting', { 'dot.app.pip.count': this.#ordered.length });
 
-    return withPhaseSpan(
-      {
-        appName: this.#appName,
-        phase: 'stop',
-        pipCount: this.#ordered.length,
-        logger: phaseLogger,
-      },
-      async () => {
-        const startedRecords = this.#ordered
-          .map(p => this.#records.get(p.name)!)
-          .filter(r => r.started);
-        const failures = await this.#runStopForRecords(reverseRecords(startedRecords), phaseLogger);
-        this.#state = 'stopped';
-        this.#manifest = this.#buildManifest();
-        if (failures.length > 0) {
-          phaseLogger.warn('stop: complete with failures', { 'dot.app.failure.count': failures.length });
-          throw new DotLifecycleError({
-            code: DotLifecycleErrorCode.StopFailed,
-            phase: 'stop',
-            message: `${failures.length} pip(s) failed during stop`,
-            failures,
-          });
-        }
-        phaseLogger.debug('stop: complete', { 'dot.app.pip.count': this.#ordered.length });
-      },
+    return this.#withPhaseEmitAsync('stop', () =>
+      withPhaseSpan(
+        {
+          appName: this.#appName,
+          phase: 'stop',
+          pipCount: this.#ordered.length,
+          logger: phaseLogger,
+        },
+        async () => {
+          const startedRecords = this.#ordered.map(p => this.#records.get(p.name)!).filter(r => r.started);
+          const failures = await this.#runStopForRecords(reverseRecords(startedRecords), phaseLogger);
+          this.#state = 'stopped';
+          this.#manifest = this.#buildManifest();
+          if (failures.length > 0) {
+            phaseLogger.warn('stop: complete with failures', { 'dot.app.failure.count': failures.length });
+            throw new DotLifecycleError({
+              code: DotLifecycleErrorCode.StopFailed,
+              phase: 'stop',
+              message: `${failures.length} pip(s) failed during stop`,
+              failures,
+            });
+          }
+          phaseLogger.debug('stop: complete', { 'dot.app.pip.count': this.#ordered.length });
+        },
+      ),
     );
   }
 
-  async #runStopForRecords(
-    records: readonly PipRecord[],
-    phaseLogger: Logger,
-  ): Promise<DotLifecyclePipFailure[]> {
+  async #runStopForRecords(records: readonly PipRecord[], phaseLogger: Logger): Promise<DotLifecyclePipFailure[]> {
     const failures: DotLifecyclePipFailure[] = [];
     for (const record of records) {
       if (!record.pip.stop) continue;
@@ -676,6 +856,7 @@ export class DotAppImpl {
         services: this.#aggregatedServices,
       };
       const startedAt = performance.now();
+      this.#emitHook('stop', record.pip.name, record.order, 'starting');
       try {
         await withPipHookSpan(
           {
@@ -689,16 +870,19 @@ export class DotAppImpl {
           () => record.pip.stop!(ctx),
         );
         record.started = false;
+        const durationMs = performance.now() - startedAt;
         record.lifecycleDiagnostics.push({
           pip: record.pip.name,
           hook: 'stop',
           state: 'stopped',
           order: record.order,
-          durationMs: performance.now() - startedAt,
+          durationMs,
           issues: [],
         });
-        pipLogger.debug('stop: done', { 'dot.pip.duration.ms': performance.now() - startedAt });
+        this.#emitHook('stop', record.pip.name, record.order, 'completed', { durationMs });
+        pipLogger.debug('stop: done', { 'dot.pip.duration.ms': durationMs });
       } catch (error) {
+        const durationMs = performance.now() - startedAt;
         const issue = makeIssue({
           code: DotLifecycleErrorCode.StopFailed,
           pip: record.pip.name,
@@ -712,9 +896,10 @@ export class DotAppImpl {
           hook: 'stop',
           state: 'failed',
           order: record.order,
-          durationMs: performance.now() - startedAt,
+          durationMs,
           issues: [issue],
         });
+        this.#emitHook('stop', record.pip.name, record.order, 'failed', { durationMs, error });
         failures.push({ pip: record.pip.name, phase: 'stop', error });
         pipLogger.error('stop: failed (continuing)', {
           'dot.pip.error.message': stringifyError(error),
@@ -739,14 +924,16 @@ export class DotAppImpl {
     const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'dispose');
     phaseLogger.debug('dispose: starting', { 'dot.app.pip.count': this.#ordered.length });
 
-    return withPhaseSpan(
-      {
-        appName: this.#appName,
-        phase: 'dispose',
-        pipCount: this.#ordered.length,
-        logger: phaseLogger,
-      },
-      () => this.#runDisposeInner(phaseLogger),
+    return this.#withPhaseEmitAsync('dispose', () =>
+      withPhaseSpan(
+        {
+          appName: this.#appName,
+          phase: 'dispose',
+          pipCount: this.#ordered.length,
+          logger: phaseLogger,
+        },
+        () => this.#runDisposeInner(phaseLogger),
+      ),
     );
   }
 
@@ -808,10 +995,7 @@ export class DotAppImpl {
     phaseLogger.debug('dispose: complete', { 'dot.app.pip.count': this.#ordered.length });
   }
 
-  async #runDisposeForRecords(
-    records: readonly PipRecord[],
-    phaseLogger: Logger,
-  ): Promise<DotLifecyclePipFailure[]> {
+  async #runDisposeForRecords(records: readonly PipRecord[], phaseLogger: Logger): Promise<DotLifecyclePipFailure[]> {
     const failures: DotLifecyclePipFailure[] = [];
     for (const record of records) {
       if (!record.pip.dispose) {
@@ -826,6 +1010,7 @@ export class DotAppImpl {
         services: this.#aggregatedServices,
       };
       const startedAt = performance.now();
+      this.#emitHook('dispose', record.pip.name, record.order, 'starting');
       try {
         await withPipHookSpan(
           {
@@ -839,16 +1024,19 @@ export class DotAppImpl {
           () => record.pip.dispose!(ctx),
         );
         record.booted = false;
+        const durationMs = performance.now() - startedAt;
         record.lifecycleDiagnostics.push({
           pip: record.pip.name,
           hook: 'dispose',
           state: 'disposed',
           order: record.order,
-          durationMs: performance.now() - startedAt,
+          durationMs,
           issues: [],
         });
-        pipLogger.debug('dispose: done', { 'dot.pip.duration.ms': performance.now() - startedAt });
+        this.#emitHook('dispose', record.pip.name, record.order, 'completed', { durationMs });
+        pipLogger.debug('dispose: done', { 'dot.pip.duration.ms': durationMs });
       } catch (error) {
+        const durationMs = performance.now() - startedAt;
         const issue = makeIssue({
           code: DotLifecycleErrorCode.DisposeFailed,
           pip: record.pip.name,
@@ -862,9 +1050,10 @@ export class DotAppImpl {
           hook: 'dispose',
           state: 'failed',
           order: record.order,
-          durationMs: performance.now() - startedAt,
+          durationMs,
           issues: [issue],
         });
+        this.#emitHook('dispose', record.pip.name, record.order, 'failed', { durationMs, error });
         failures.push({ pip: record.pip.name, phase: 'dispose', error });
         pipLogger.error('dispose: failed (continuing)', {
           'dot.pip.error.message': stringifyError(error),
@@ -1033,5 +1222,5 @@ function reverseRecords(records: readonly PipRecord[]): readonly PipRecord[] {
 
 /** Re-export `ServiceKind` and `RouteTransport` for the kernel's internal use. */
 
-export { type ServiceKind, type RouteTransport } from '../manifest.js';
+export { type RouteTransport, type ServiceKind } from '../manifest.js';
 export { type DotPip } from '../pip-contract.js';

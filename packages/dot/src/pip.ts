@@ -68,3 +68,14 @@ export type {
   DiagnosticSeverity,
   DiagnosticStatus,
 } from './diagnostics.js';
+
+export type {
+  DotLifecycleEvent,
+  DotLifecycleEventStatus,
+  DotLifecycleObserver,
+  DotPhaseLifecycleEvent,
+  DotPipHookLifecycleEvent,
+} from './lifecycle-observer.js';
+
+export { renderTimeline } from './timeline.js';
+export type { RenderTimelineOptions } from './timeline.js';

@@ -23,6 +23,8 @@
 - [Diagnostics contract](docs/diagnostics.md#dotdiagnosticssnapshot): Runtime snapshot — five-array shape
 - [`DiagnosticIssue` shape](docs/diagnostics.md#diagnosticissue): Stable code, severity, remediation, docsUrl
 - [Observability](docs/observability.md): OTel-first traces + metrics + log correlation, `arki:dot:lifecycle` namespace, zero-cost-when-off discipline
+- [In-process observers](docs/observability.md#in-process-observers): `DotLifecycleObserver` + `defineApp({ observers })` + `app.subscribe(...)` for tests / CLI / ad-hoc inspection — peer of OTel, not layered under it
+- [ASCII timeline](docs/observability.md#ascii-timeline): `app.timeline()` / `renderTimeline(snapshot)` — per-phase, per-pip duration waterfall
 
 ## For agents
 

@@ -226,6 +226,94 @@ await defineApp('my-app').use(envPip).use(dbPip).start();
 
 ---
 
+## In-process observers
+
+OTel is the long-range signal. For short-range, in-process inspection —
+tests, CLI tools, ad-hoc debugging — every `DotApp` also fans out a
+synchronous event stream to registered `DotLifecycleObserver`s. The two
+signals are peers; neither layers under the other.
+
+```ts
+import { defineApp, type DotLifecycleEvent } from '@arki/dot';
+
+const events: DotLifecycleEvent[] = [];
+
+const app = await defineApp('my-app', {
+  observers: [(event) => events.push(event)],
+})
+  .use(envPip)
+  .use(dbPip)
+  .boot();
+
+// `events` now contains 4 events per phase (phase-starting, hook-starting
+// per pip, hook-completed per pip, phase-completed) plus configure/boot.
+```
+
+Each event carries `kind` (`'phase'` or `'pip-hook'`), `phase`, `status`
+(`'starting'` / `'completed'` / `'failed'`), `appName`, `timestamp` (ms
+since epoch), and on completion `durationMs`. Failed events also carry
+`error`.
+
+Observers may also be added post-hoc:
+
+```ts
+const unsubscribe = app.subscribe((event) => {
+  if (event.kind === 'pip-hook' && event.status === 'failed') {
+    notifyOps(event);
+  }
+});
+// ...later
+unsubscribe();
+```
+
+Observers added through `subscribe()` see only events fired *after*
+subscription — to catch `configure`-phase events, pass them through
+`defineApp(name, { observers })` at construction.
+
+**Contract:**
+
+- Observers are called synchronously. Don't block; if you need to ship
+  events off-process, buffer and drain on a separate cadence.
+- Observer exceptions are caught and DEBUG-logged on
+  `arki:dot:lifecycle`. A misbehaving observer never breaks the
+  lifecycle and never hides events from siblings.
+- When no observers are registered, the kernel allocates nothing per
+  emission point — the same zero-cost-when-off discipline that governs
+  the OTel signals.
+
+---
+
+## ASCII timeline
+
+`app.timeline()` returns a per-phase, per-pip duration chart suitable
+for terminal output:
+
+```text
+Timeline: my-app (state=booted)
+─────────────────────────────────
+configure
+  env       0.5ms  █
+  db        1.4ms  █████
+  kv        0.3ms  █
+
+boot
+  env       2.8ms  ████████
+  db       32.9ms  ████████████████████████████████████████
+  kv        3.9ms  ████████████
+─────────────────────────────────
+```
+
+Pure render over `app.diagnostics.lifecycle` — call it after `boot()` or
+`dispose()` to see the full picture. Failed hooks are marked `✗`; if
+`showIssues: true` (default), each failed hook's `DiagnosticIssue` lines
+appear underneath the bar.
+
+The same renderer is exposed as `renderTimeline(snapshot, opts?)` for
+callers that want to feed a custom `DotDiagnosticsSnapshot` to it (e.g.
+serialised app state from another process).
+
+---
+
 ## See also
 
 - [`packages/dot/docs/principles.md`](./principles.md) — principle 5

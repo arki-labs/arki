@@ -14,10 +14,12 @@
  */
 
 import type { DotDiagnosticsSnapshot } from './diagnostics.js';
+import type { DotLifecycleObserver } from './lifecycle-observer.js';
 import type { DotLifecycleState } from './lifecycle.js';
 import type { DotAppManifest } from './manifest.js';
 import type { AnyDotPip, DotPip } from './pip-contract.js';
 import { DotAppImpl } from './kernel/app-instance.js';
+import { renderTimeline } from './timeline.js';
 
 /**
  * Public DotApp surface. The internal `DotAppImpl` implements this; consumers
@@ -52,6 +54,19 @@ export type DotApp<TServices extends Record<string, unknown>> = {
    * Idempotent while `disposed`.
    */
   dispose(): Promise<void>;
+  /**
+   * Register an in-process lifecycle observer. Returns an unsubscribe
+   * function. Observers added here see events from this point onward —
+   * pass observers through `defineApp(name, { observers })` to catch
+   * `configure`-phase events too.
+   */
+  subscribe(observer: DotLifecycleObserver): () => void;
+  /**
+   * Render the recorded lifecycle as an ASCII waterfall. Reads from
+   * the current `diagnostics` snapshot — call after `boot()` /
+   * `dispose()` / a failure to see the full picture.
+   */
+  timeline(): string;
 };
 
 /**
@@ -66,6 +81,10 @@ export type DotAppConfigured<TServices extends Record<string, unknown>> = {
   /** Continue the lifecycle. */
   boot(): Promise<DotApp<TServices>>;
   start(): Promise<DotApp<TServices>>;
+  /** See {@link DotApp.subscribe}. */
+  subscribe(observer: DotLifecycleObserver): () => void;
+  /** See {@link DotApp.timeline}. */
+  timeline(): string;
 };
 
 /**
@@ -90,6 +109,7 @@ type BuilderState = {
   appVersion?: string;
   pips: AnyDotPip[];
   config?: Readonly<Record<string, unknown>>;
+  observers?: readonly DotLifecycleObserver[];
 };
 
 /**
@@ -108,15 +128,36 @@ type BuilderState = {
  */
 export function defineApp<TServices extends Record<string, unknown> = Record<string, never>>(
   name: string,
-  options: { version?: string; config?: Readonly<Record<string, unknown>> } = {},
+  options: {
+    version?: string;
+    config?: Readonly<Record<string, unknown>>;
+    /**
+     * In-process lifecycle observers, registered before the first phase
+     * fires. Required if you want to see `configure`-phase events — after
+     * configure runs, observers can be added post-hoc via
+     * `configured.subscribe(...)` or `app.subscribe(...)`.
+     */
+    observers?: readonly DotLifecycleObserver[];
+  } = {},
 ): DotAppBuilder<TServices> {
   const state: BuilderState = {
     appName: name,
     appVersion: options.version,
     pips: [],
     config: options.config,
+    observers: options.observers,
   };
   return makeBuilder<TServices>(state);
+}
+
+function buildImpl(state: BuilderState): DotAppImpl {
+  return new DotAppImpl({
+    appName: state.appName,
+    appVersion: state.appVersion,
+    pips: state.pips,
+    config: state.config,
+    observers: state.observers,
+  });
 }
 
 function makeBuilder<TServices extends Record<string, unknown>>(state: BuilderState): DotAppBuilder<TServices> {
@@ -129,32 +170,17 @@ function makeBuilder<TServices extends Record<string, unknown>>(state: BuilderSt
       return makeBuilder<TServices & TNew>(nextState);
     },
     configure(): DotAppConfigured<TServices> {
-      const impl = new DotAppImpl({
-        appName: state.appName,
-        appVersion: state.appVersion,
-        pips: state.pips,
-        config: state.config,
-      });
+      const impl = buildImpl(state);
       impl.runConfigure();
       return wrapConfigured<TServices>(impl);
     },
     async boot(): Promise<DotApp<TServices>> {
-      const impl = new DotAppImpl({
-        appName: state.appName,
-        appVersion: state.appVersion,
-        pips: state.pips,
-        config: state.config,
-      });
+      const impl = buildImpl(state);
       await impl.boot();
       return wrapApp<TServices>(impl);
     },
     async start(): Promise<DotApp<TServices>> {
-      const impl = new DotAppImpl({
-        appName: state.appName,
-        appVersion: state.appVersion,
-        pips: state.pips,
-        config: state.config,
-      });
+      const impl = buildImpl(state);
       await impl.start();
       return wrapApp<TServices>(impl);
     },
@@ -181,6 +207,8 @@ function wrapApp<TServices extends Record<string, unknown>>(impl: DotAppImpl): D
     start: () => impl.start(),
     stop: () => impl.stop(),
     dispose: () => impl.dispose(),
+    subscribe: observer => impl.subscribe(observer),
+    timeline: () => renderTimeline(impl.diagnostics),
   };
 }
 
@@ -206,5 +234,7 @@ function wrapConfigured<TServices extends Record<string, unknown>>(impl: DotAppI
       await impl.start();
       return wrapApp<TServices>(impl);
     },
+    subscribe: observer => impl.subscribe(observer),
+    timeline: () => renderTimeline(impl.diagnostics),
   };
 }
