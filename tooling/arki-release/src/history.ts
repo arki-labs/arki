@@ -28,7 +28,12 @@ import debugFactory from 'debug';
 import { defaultProcessRunner, type ProcessRunner } from './fixture';
 import { runInventory, type InventoryItem } from './inventory';
 import { createEnvelope } from './json-output';
-import type { ReleaseCommandEnvelope, ReleaseConfig, ReleaseError } from './types';
+import type {
+  HistoryRepoStatus,
+  ReleaseCommandEnvelope,
+  ReleaseConfig,
+  ReleaseError,
+} from './types';
 
 const debug = debugFactory('arki:release:history');
 
@@ -42,6 +47,10 @@ export const HISTORY_ERROR_CODES = {
   changelogReadFailed: 'HIST_E003',
   /** A real drift was detected (npm-ahead / changelog-drift / tag-drift). */
   driftDetected: 'HIST_E004',
+  /** `gh api repos/<org>/<name>` failed for a per-package mirror probe. */
+  packageRepoProbeFailed: 'HIST_E005',
+  /** Per-package mirror drift detected (missing / tag-drift / unarchived). */
+  packageRepoDrift: 'HIST_E006',
 } as const;
 
 /**
@@ -74,6 +83,20 @@ export interface HistoryItem {
   readonly githubTag: string | null;
   readonly status: HistoryStatus;
   readonly notes: readonly string[];
+  /**
+   * Per-package repo reconciliation verdict — answers "does
+   * `arki-labs/<short-name>` exist, archived, with the expected tags?"
+   *
+   * Optional for backwards compatibility with consumers that parsed
+   * envelopes from before the per-package-repo dimension landed.
+   */
+  readonly repoStatus?: HistoryRepoStatus;
+  /** Short repo name under the GitHub org, e.g. `assert` for `@arki/assert`. */
+  readonly repoName?: string;
+  /** Tags actually present on the per-package mirror (versions, no `v` prefix). */
+  readonly repoTags?: readonly string[];
+  /** Whether the per-package mirror is currently archived. `null` when unknown. */
+  readonly repoArchived?: boolean | null;
 }
 
 /** Aggregate counts + the mirror tag list. */
@@ -87,6 +110,16 @@ export interface HistorySummary {
   readonly networkErrors: number;
   /** Every `v*` tag the GitHub mirror reports, sorted lexically. */
   readonly githubMirrorTags: readonly string[];
+  /** Per-package mirror counts (second dimension; orthogonal to top-level status). */
+  readonly packageRepos: {
+    readonly inSync: number;
+    readonly missing: number;
+    readonly tagDrift: number;
+    readonly unarchived: number;
+    readonly unchecked: number;
+  };
+  /** GitHub org used for the per-package mirror probes (default `arki-labs`). */
+  readonly packageReposOrg: string;
 }
 
 /** Public options for {@link runHistory}. */
@@ -99,11 +132,123 @@ export interface HistoryOptions {
   readonly runner?: ProcessRunner;
   /** Skip every network call. Used for offline diagnostics and tests. */
   readonly skipNetwork?: boolean;
+  /**
+   * GitHub org for per-package mirror probes. Defaults to `arki-labs`.
+   * Each wave-listed `@arki/<name>` is checked against
+   * `https://github.com/<org>/<name>` for existence + archive state +
+   * matching `v<published-version>` tags.
+   */
+  readonly packageReposOrg?: string;
+  /**
+   * Set to `false` to skip the per-package mirror dimension entirely
+   * (every item reports `repoStatus: 'unchecked'`). Defaults to `true`.
+   */
+  readonly checkPackageRepos?: boolean;
 }
 
 const DEFAULT_GITHUB_REMOTE = 'git@github.com:arki-labs/arki.git';
+const DEFAULT_PACKAGE_REPOS_ORG = 'arki-labs';
 const VERSION_HEADING_RE = /^## ([0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?)\s*$/m;
 const TAG_REF_RE = /refs\/tags\/v([0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?)(\^\{\})?$/;
+
+function shortRepoName(packageName: string): string {
+  return packageName.startsWith('@arki/') ? packageName.slice('@arki/'.length) : packageName;
+}
+
+/**
+ * Result of probing one per-package GitHub mirror. The probe is a single
+ * `gh api repos/<org>/<name>` call + a `git ls-remote --tags` to learn
+ * the archived flag and existing version tags. Returned shapes keep the
+ * caller's reconciliation logic free of `try/catch`.
+ */
+type PackageRepoProbe =
+  | {
+      readonly status: 'present';
+      readonly archived: boolean;
+      readonly tags: ReadonlySet<string>;
+    }
+  | { readonly status: 'missing' }
+  | { readonly status: 'error'; readonly reason: string };
+
+async function probePackageRepo(
+  org: string,
+  packageName: string,
+  runner: ProcessRunner,
+  cwd: string,
+): Promise<PackageRepoProbe> {
+  const repoName = shortRepoName(packageName);
+  const meta = await runner.run(
+    'gh',
+    ['api', `repos/${org}/${repoName}`, '--jq', '{archived}'],
+    { cwd },
+  );
+  if (meta.exitCode !== 0) {
+    if (
+      meta.stderr.includes('404') ||
+      meta.stderr.includes('Not Found') ||
+      meta.stderr.includes('HTTP 404')
+    ) {
+      return { status: 'missing' };
+    }
+    return {
+      status: 'error',
+      reason: meta.stderr.trim() || `gh api exit ${meta.exitCode.toString()}`,
+    };
+  }
+  let archived = false;
+  try {
+    const parsed: unknown = JSON.parse(meta.stdout);
+    if (parsed !== null && typeof parsed === 'object') {
+      const a = (parsed as Record<string, unknown>)['archived'];
+      archived = a === true;
+    }
+  } catch {
+    return { status: 'error', reason: `unexpected gh api payload: ${meta.stdout.slice(0, 120)}` };
+  }
+
+  const gitRemote = `git@github.com:${org}/${repoName}.git`;
+  const ls = await runner.run('git', ['ls-remote', '--tags', gitRemote], { cwd });
+  if (ls.exitCode !== 0) {
+    return {
+      status: 'error',
+      reason: ls.stderr.trim() || `git ls-remote exit ${ls.exitCode.toString()}`,
+    };
+  }
+  const tags = new Set<string>();
+  for (const line of ls.stdout.split('\n')) {
+    const match = TAG_REF_RE.exec(line);
+    if (match !== null && match[1] !== undefined) {
+      tags.add(match[1]);
+    }
+  }
+  return { status: 'present', archived, tags };
+}
+
+/**
+ * Combine the published-versions list (from npm) with a probe result to
+ * derive the per-package-repo verdict. Pure — driven entirely by the
+ * inputs.
+ */
+function classifyPackageRepo(
+  publishedVersions: readonly string[],
+  probe: PackageRepoProbe,
+): { readonly status: HistoryRepoStatus; readonly tags: readonly string[]; readonly archived: boolean | null } {
+  if (probe.status === 'error') {
+    return { status: 'unchecked', tags: [], archived: null };
+  }
+  if (probe.status === 'missing') {
+    return { status: 'missing', tags: [], archived: null };
+  }
+  const tagsSorted = [...probe.tags].sort();
+  const missing = publishedVersions.filter(v => !probe.tags.has(v));
+  if (missing.length > 0) {
+    return { status: 'tag-drift', tags: tagsSorted, archived: probe.archived };
+  }
+  if (!probe.archived) {
+    return { status: 'unarchived', tags: tagsSorted, archived: false };
+  }
+  return { status: 'in-sync', tags: tagsSorted, archived: true };
+}
 
 async function fetchNpmVersion(
   pkgName: string,
@@ -132,6 +277,43 @@ async function fetchNpmVersion(
     return { version: null, error: `unexpected npm view payload: ${stdout.slice(0, 120)}` };
   } catch {
     return { version: stdout, error: null };
+  }
+}
+
+/**
+ * List every published version of a package. Used by the per-package
+ * mirror reconciliation to check tag coverage. Returns an empty array
+ * when the package has never been published.
+ */
+async function fetchNpmVersionList(
+  pkgName: string,
+  runner: ProcessRunner,
+  cwd: string,
+): Promise<{ readonly versions: readonly string[]; readonly error: string | null }> {
+  const result = await runner.run('npm', ['view', pkgName, 'versions', '--json'], { cwd });
+  if (result.exitCode !== 0) {
+    if (result.stderr.includes('E404') || result.stderr.includes('404 Not Found')) {
+      return { versions: [], error: null };
+    }
+    return {
+      versions: [],
+      error: result.stderr.trim() || `npm view versions returned ${result.exitCode.toString()}`,
+    };
+  }
+  const stdout = result.stdout.trim();
+  if (stdout.length === 0) return { versions: [], error: null };
+  try {
+    const parsed: unknown = JSON.parse(stdout);
+    if (typeof parsed === 'string') return { versions: [parsed], error: null };
+    if (Array.isArray(parsed) && parsed.every((v): v is string => typeof v === 'string')) {
+      return { versions: parsed, error: null };
+    }
+    return { versions: [], error: `unexpected versions payload: ${stdout.slice(0, 120)}` };
+  } catch (cause) {
+    return {
+      versions: [],
+      error: cause instanceof Error ? cause.message : String(cause),
+    };
   }
 }
 
@@ -245,8 +427,16 @@ export async function runHistory(
   const runner = opts.runner ?? defaultProcessRunner;
   const remote = opts.githubRemote ?? DEFAULT_GITHUB_REMOTE;
   const skipNetwork = opts.skipNetwork ?? false;
+  const packageReposOrg = opts.packageReposOrg ?? DEFAULT_PACKAGE_REPOS_ORG;
+  const checkPackageRepos = (opts.checkPackageRepos ?? true) && !skipNetwork;
 
-  debug('runHistory cwd=%s skipNetwork=%s', opts.cwd, skipNetwork);
+  debug(
+    'runHistory cwd=%s skipNetwork=%s checkPackageRepos=%s org=%s',
+    opts.cwd,
+    skipNetwork,
+    checkPackageRepos,
+    packageReposOrg,
+  );
 
   const inventoryEnvelope = await runInventory({ cwd: opts.cwd, config: opts.config });
   const waveAllowlist = new Set<string>();
@@ -271,6 +461,7 @@ export async function runHistory(
   const items: HistoryItem[] = [];
   const errors: ReleaseError[] = [];
   const counts = { inSync: 0, sourceAhead: 0, unpublished: 0, driftErrors: 0, networkErrors: 0 };
+  const repoCounts = { inSync: 0, missing: 0, tagDrift: 0, unarchived: 0, unchecked: 0 };
 
   for (const item of candidates) {
     const packageDir = path.dirname(path.join(opts.cwd, item.manifestPath));
@@ -340,6 +531,79 @@ export async function runHistory(
         break;
     }
 
+    // Per-package mirror reconciliation. Skipped when offline or when
+    // the package is wave-listed but never published (no point checking
+    // a mirror for something that doesn't exist on npm yet).
+    let repoVerdict: { status: HistoryRepoStatus; tags: readonly string[]; archived: boolean | null } = {
+      status: 'unchecked',
+      tags: [],
+      archived: null,
+    };
+    if (checkPackageRepos && npmResult.version !== null) {
+      const listResult = await fetchNpmVersionList(item.name, runner, opts.cwd);
+      if (listResult.error !== null) {
+        errors.push({
+          code: HISTORY_ERROR_CODES.npmQueryFailed,
+          severity: 'warning',
+          message: `${item.name}: npm view versions failed — ${listResult.error}`,
+          target: item.name,
+        });
+      }
+      const probe = await probePackageRepo(packageReposOrg, item.name, runner, opts.cwd);
+      if (probe.status === 'error') {
+        errors.push({
+          code: HISTORY_ERROR_CODES.packageRepoProbeFailed,
+          severity: 'warning',
+          message: `${item.name}: per-package repo probe failed — ${probe.reason}`,
+          target: item.name,
+          remediation: 'Verify gh auth + SSH access to the arki-labs org.',
+        });
+      }
+      repoVerdict = classifyPackageRepo(listResult.versions, probe);
+
+      switch (repoVerdict.status) {
+        case 'in-sync':
+          repoCounts.inSync += 1;
+          break;
+        case 'missing':
+          repoCounts.missing += 1;
+          errors.push({
+            code: HISTORY_ERROR_CODES.packageRepoDrift,
+            severity: 'warning',
+            message: `${item.name}: per-package mirror at ${packageReposOrg}/${shortRepoName(item.name)} does not exist`,
+            target: item.name,
+            remediation: 'Run `bun release:arki sync-package-repos` to create it.',
+          });
+          break;
+        case 'tag-drift':
+          repoCounts.tagDrift += 1;
+          errors.push({
+            code: HISTORY_ERROR_CODES.packageRepoDrift,
+            severity: 'warning',
+            message: `${item.name}: per-package mirror missing tag(s) for published version(s)`,
+            target: item.name,
+            remediation: 'Run `bun release:arki sync-package-repos` to backfill the tags.',
+          });
+          break;
+        case 'unarchived':
+          repoCounts.unarchived += 1;
+          errors.push({
+            code: HISTORY_ERROR_CODES.packageRepoDrift,
+            severity: 'warning',
+            message: `${item.name}: per-package mirror is not archived`,
+            target: item.name,
+            remediation:
+              'Run `bun release:arki sync-package-repos` (re-archives at end of run) or `gh repo archive arki-labs/<name>`.',
+          });
+          break;
+        case 'unchecked':
+          repoCounts.unchecked += 1;
+          break;
+      }
+    } else {
+      repoCounts.unchecked += 1;
+    }
+
     items.push({
       name: item.name,
       wave: item.wave,
@@ -349,6 +613,10 @@ export async function runHistory(
       githubTag: tags.has(item.version) ? `v${item.version}` : null,
       status: verdict.status,
       notes: verdict.notes,
+      repoStatus: repoVerdict.status,
+      repoName: shortRepoName(item.name),
+      repoTags: repoVerdict.tags,
+      repoArchived: repoVerdict.archived,
     });
   }
 
@@ -363,15 +631,17 @@ export async function runHistory(
 
   const totalPackages = items.length;
   const hasNpmAhead = items.some(i => i.status === 'npm-ahead');
+  const hasRepoDrift =
+    repoCounts.missing > 0 || repoCounts.tagDrift > 0 || repoCounts.unarchived > 0;
   const status: 'success' | 'warning' | 'failure' =
     counts.driftErrors > 0 || hasNpmAhead
       ? 'failure'
-      : counts.networkErrors > 0 || githubError !== null
+      : counts.networkErrors > 0 || githubError !== null || hasRepoDrift
         ? 'warning'
         : 'success';
 
   const summary: HistorySummary = {
-    message: buildSummaryMessage(counts, totalPackages),
+    message: buildSummaryMessage(counts, repoCounts, totalPackages),
     totalPackages,
     inSync: counts.inSync,
     sourceAhead: counts.sourceAhead,
@@ -379,6 +649,14 @@ export async function runHistory(
     driftErrors: counts.driftErrors,
     networkErrors: counts.networkErrors,
     githubMirrorTags: [...tags].sort(),
+    packageRepos: {
+      inSync: repoCounts.inSync,
+      missing: repoCounts.missing,
+      tagDrift: repoCounts.tagDrift,
+      unarchived: repoCounts.unarchived,
+      unchecked: repoCounts.unchecked,
+    },
+    packageReposOrg,
   };
 
   return createEnvelope<HistoryItem, HistorySummary>({
@@ -398,6 +676,13 @@ function buildSummaryMessage(
     readonly driftErrors: number;
     readonly networkErrors: number;
   },
+  repoCounts: {
+    readonly inSync: number;
+    readonly missing: number;
+    readonly tagDrift: number;
+    readonly unarchived: number;
+    readonly unchecked: number;
+  },
   total: number,
 ): string {
   const parts: string[] = [];
@@ -407,6 +692,15 @@ function buildSummaryMessage(
   if (counts.unpublished > 0) parts.push(`${counts.unpublished.toString()} unpublished`);
   if (counts.driftErrors > 0) parts.push(`${counts.driftErrors.toString()} drift errors`);
   if (counts.networkErrors > 0) parts.push(`${counts.networkErrors.toString()} network errors`);
+  const repoParts: string[] = [];
+  if (repoCounts.inSync > 0) repoParts.push(`${repoCounts.inSync.toString()} in-sync`);
+  if (repoCounts.missing > 0) repoParts.push(`${repoCounts.missing.toString()} missing`);
+  if (repoCounts.tagDrift > 0) repoParts.push(`${repoCounts.tagDrift.toString()} tag-drift`);
+  if (repoCounts.unarchived > 0) repoParts.push(`${repoCounts.unarchived.toString()} unarchived`);
+  if (repoCounts.unchecked > 0) repoParts.push(`${repoCounts.unchecked.toString()} unchecked`);
+  if (repoParts.length > 0) {
+    parts.push(`mirrors: ${repoParts.join(', ')}`);
+  }
   return parts.join(' / ');
 }
 

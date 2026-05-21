@@ -24,6 +24,7 @@ import { createEnvelope, emitEnvelope } from './json-output';
 import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
 import { auditPack, PACK_ERROR_CODES } from './pack';
 import { renderScorecardText, runScorecard } from './scorecard';
+import { renderSyncPackageReposText, runSyncPackageRepos } from './sync-package-repos';
 import type {
   ExportItem,
   ExportSummary,
@@ -85,6 +86,11 @@ const SUBCOMMANDS: ReadonlyArray<{
     name: 'history',
     task: 'post-Task-12',
     description: 'Reconcile source / npm / CHANGELOG / GitHub tags; detect drift.',
+  },
+  {
+    name: 'sync-package-repos',
+    task: 'post-Task-12',
+    description: 'Mirror each published @arki/* into an archived arki-labs/<name> repo.',
   },
 ];
 
@@ -278,6 +284,10 @@ export async function dispatch(args: ParsedCliArgs): Promise<number> {
     return runHistoryHandler(args);
   }
 
+  if (args.command === 'sync-package-repos') {
+    return runSyncPackageReposHandler(args);
+  }
+
   const envelope = buildStubEnvelope(args.command);
   emitEnvelope(envelope, { json: args.json });
   return 0;
@@ -367,6 +377,64 @@ async function runHistoryHandler(args: ParsedCliArgs): Promise<number> {
   } catch (cause) {
     if (cause instanceof ReleaseConfigError) {
       const envelope = buildConfigErrorEnvelope('history', cause);
+      emitEnvelope(envelope, { json: args.json });
+      return 1;
+    }
+    throw cause;
+  }
+}
+
+/**
+ * `sync-package-repos` subcommand handler — create + populate the
+ * per-package read-only mirrors at `arki-labs/<name>`, one git commit
+ * per published npm version, with `v<version>` tags and an archived
+ * final state.
+ *
+ * Flags:
+ *   --json               Emit the {@link ReleaseCommandEnvelope} as JSON.
+ *   --dry-run            Plan only — no gh creates, no git pushes, no archive flips.
+ *                        Recommended for the first run; the envelope shows what
+ *                        WOULD happen.
+ *   --force              Re-push the full history (all published versions)
+ *                        instead of an incremental sync. Uses force-push.
+ *   --skip-archive       Leave repos unarchived at the end (for diagnosis).
+ *   --org <name>         Override the GitHub org (default `arki-labs`).
+ *   --package <@arki/x>  Restrict the run to a single wave-listed package.
+ *                        Repeat for multiple (e.g. `--package @arki/dot --package @arki/db`).
+ *
+ * Exit codes:
+ *   - 0 when every package returned `created`, `updated`, `in-sync`, or `skipped`.
+ *   - 1 when any package shows `failed`.
+ */
+async function runSyncPackageReposHandler(args: ParsedCliArgs): Promise<number> {
+  const cwd = process.cwd();
+  const configPath = defaultConfigPath(cwd);
+  const dryRun = args.rest.includes('--dry-run');
+  const force = args.rest.includes('--force');
+  const skipArchive = args.rest.includes('--skip-archive');
+  const orgOverride = extractOption(args.rest, 'org');
+  const packages = extractAllOptions(args.rest, 'package');
+
+  try {
+    const config = await loadConfig(configPath);
+    const envelope = await runSyncPackageRepos({
+      cwd,
+      config,
+      dryRun,
+      force,
+      skipArchive,
+      ...(orgOverride !== null ? { githubOrg: orgOverride } : {}),
+      ...(packages.length > 0 ? { packages } : {}),
+    });
+    if (args.json) {
+      emitEnvelope(envelope, { json: true });
+    } else {
+      process.stdout.write(renderSyncPackageReposText(envelope));
+    }
+    return envelope.status === 'failure' ? 1 : 0;
+  } catch (cause) {
+    if (cause instanceof ReleaseConfigError) {
+      const envelope = buildConfigErrorEnvelope('sync-package-repos', cause);
       emitEnvelope(envelope, { json: args.json });
       return 1;
     }

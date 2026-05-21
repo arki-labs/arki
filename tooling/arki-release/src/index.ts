@@ -97,6 +97,12 @@ export type {
   HistorySummary,
 } from './history';
 
+export {
+  renderSyncPackageReposText,
+  runSyncPackageRepos,
+  SYNC_REPO_ERROR_CODES,
+} from './sync-package-repos';
+
 export type {
   CatalogTables,
   ExportItem,
@@ -140,4 +146,9 @@ export type {
   ScorecardPackageResult,
   ScorecardStatus,
   ScorecardSummary,
+  SyncRepoItem,
+  SyncRepoOptions,
+  SyncRepoStatus,
+  SyncRepoSummary,
+  HistoryRepoStatus,
 } from './types';
