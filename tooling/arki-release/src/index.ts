@@ -89,6 +89,14 @@ export type { NpmPackResult, NpmPackRunner, NpmPackRunOutput } from './pack';
 export { renderScorecardText, runScorecard, SCORECARD_ERROR_CODES } from './scorecard';
 export type { ScorecardOptions } from './scorecard';
 
+export { HISTORY_ERROR_CODES, renderHistoryText, runHistory } from './history';
+export type {
+  HistoryItem,
+  HistoryOptions,
+  HistoryStatus,
+  HistorySummary,
+} from './history';
+
 export type {
   CatalogTables,
   ExportItem,

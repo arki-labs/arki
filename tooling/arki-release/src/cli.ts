@@ -18,6 +18,7 @@ import {
   FIXTURE_ERROR_CODES,
   runFixtureMatrix,
 } from './fixture';
+import { renderHistoryText, runHistory } from './history';
 import { runInventory, type InventoryItem } from './inventory';
 import { createEnvelope, emitEnvelope } from './json-output';
 import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
@@ -79,6 +80,11 @@ const SUBCOMMANDS: ReadonlyArray<{
     name: 'scorecard',
     task: 'Task 7',
     description: 'Emit the release scorecard gating publication.',
+  },
+  {
+    name: 'history',
+    task: 'post-Task-12',
+    description: 'Reconcile source / npm / CHANGELOG / GitHub tags; detect drift.',
   },
 ];
 
@@ -268,6 +274,10 @@ export async function dispatch(args: ParsedCliArgs): Promise<number> {
     return runScorecardHandler(args);
   }
 
+  if (args.command === 'history') {
+    return runHistoryHandler(args);
+  }
+
   const envelope = buildStubEnvelope(args.command);
   emitEnvelope(envelope, { json: args.json });
   return 0;
@@ -314,6 +324,49 @@ async function runScorecardHandler(args: ParsedCliArgs): Promise<number> {
   } catch (cause) {
     if (cause instanceof ReleaseConfigError) {
       const envelope = buildConfigErrorEnvelope('scorecard', cause);
+      emitEnvelope(envelope, { json: args.json });
+      return 1;
+    }
+    throw cause;
+  }
+}
+
+/**
+ * `history` subcommand handler — reconcile source / npm / CHANGELOG /
+ * GitHub tags across wave-listed packages.
+ *
+ * Flags:
+ *   --json             Emit the {@link ReleaseCommandEnvelope} as JSON.
+ *   --skip-network     Skip npm and git ls-remote calls; report source/CHANGELOG only.
+ *   --remote <url>     Override the GitHub mirror URL (default: arki-labs/arki).
+ *
+ * Exit codes:
+ *   - 0 when every wave-listed package is `in-sync`, `source-ahead`, or `unpublished`.
+ *   - 1 when any package shows real drift (`npm-ahead`, `changelog-drift`, `tag-drift`).
+ */
+async function runHistoryHandler(args: ParsedCliArgs): Promise<number> {
+  const cwd = process.cwd();
+  const configPath = defaultConfigPath(cwd);
+  const skipNetwork = args.rest.includes('--skip-network');
+  const remoteOverride = extractOption(args.rest, 'remote');
+
+  try {
+    const config = await loadConfig(configPath);
+    const envelope = await runHistory({
+      cwd,
+      config,
+      skipNetwork,
+      ...(remoteOverride !== null ? { githubRemote: remoteOverride } : {}),
+    });
+    if (args.json) {
+      emitEnvelope(envelope, { json: true });
+    } else {
+      process.stdout.write(renderHistoryText(envelope));
+    }
+    return envelope.status === 'failure' ? 1 : 0;
+  } catch (cause) {
+    if (cause instanceof ReleaseConfigError) {
+      const envelope = buildConfigErrorEnvelope('history', cause);
       emitEnvelope(envelope, { json: args.json });
       return 1;
     }

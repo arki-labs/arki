@@ -1,13 +1,13 @@
 # @arki/log
 
-## 1.0.0
+## 0.0.1
 
-### Major Changes
+### Initial release
 
-- Wave 1 stable release — initial public publication of the ARKI foundation packages at v1.0.0.
+- First public publication on npm (experimental track) — 2026-05-21.
 
-  This is the first stable npm release of the `@arki/*` foundation: zero-dependency utilities and runtime primitives (`assert`, `clock`, `contracts`, `date`, `env`, `log`, `resilience`, `slugify`, `string`, `ts`). They ship together because they're consumed together by every downstream wave (DOT kernel, infrastructure adapters).
+  Part of **Wave 1**, the ARKI foundation: zero-dependency utilities and runtime primitives shipped together because every downstream wave (DOT kernel, infrastructure adapters) consumes them. Wave 1 packages: `assert`, `clock`, `contracts`, `date`, `env`, `log`, `resilience`, `slugify`, `string`, `ts`.
 
-  Why 1.0.0 and not 0.x.x: every package in this wave passes the full release scorecard (metadata, privacy, dependencies, build-output, packlist, docs, fixtures, DOT gates, agent-native gates) and the public-tree materializer produces installable tarballs with no `workspace:*` or `catalog:` leaks. The stable-v1 commitment is "no breaking changes except in a major bump" — which we earn through the gate, not promise prematurely. Future ARKI development reserves breaking changes for the v2.0.0 channel.
+  **Why 0.0.x, not 1.0.0**: ARKI is on an experimental track. The 0.0.x prefix is an honest signal — APIs may change without semver discipline until the kernel is field-tested. The release scorecard (metadata, privacy, dependencies, build-output, packlist, docs, fixtures, DOT gates, agent-native gates) is satisfied at this version; the gate certifies _the artifact_, not _API stability_. Stability is earned through reuse, not declared at first publication.
 
   Wave 2 (`@arki/dot`) and Wave 3 (`@arki/db`, `@arki/kv`, `@arki/event-sourcing`) publish in subsequent releases once their inter-package transitive resolution against the public npm registry is verified.

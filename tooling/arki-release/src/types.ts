@@ -15,8 +15,9 @@
  *   - pack          (Task 3): resolve workspace:* / catalog: → concrete versions
  *   - fixture       (Task 6): drive external install fixtures
  *   - scorecard     (Task 7): emit release scorecard (publication gate)
+ *   - history       (post-Task-12): reconcile npm / GitHub tags / source / CHANGELOG
  */
-export type ReleaseCommand = 'inventory' | 'audit' | 'export-public' | 'pack' | 'fixture' | 'scorecard';
+export type ReleaseCommand = 'inventory' | 'audit' | 'export-public' | 'pack' | 'fixture' | 'scorecard' | 'history';
 
 /**
  * Lifecycle status of a release command run.
