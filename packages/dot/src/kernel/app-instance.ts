@@ -361,6 +361,23 @@ export class DotAppImpl {
     }
 
     debugLifecycle('[%s] boot: starting', this.#appName);
+
+    return withPhaseSpan(
+      {
+        appName: this.#appName,
+        phase: 'boot',
+        pipCount: this.#ordered.length,
+      },
+      () => this.#runBootInner(),
+    );
+  }
+
+  /**
+   * Inner boot loop. Separated from `#runBoot` so the phase span wrapper
+   * stays thin and the loop body — which orchestrates rollback on
+   * partial failure — stays unindented.
+   */
+  async #runBootInner(): Promise<void> {
     const bootedRecords: PipRecord[] = [];
 
     for (const pip of this.#ordered) {
@@ -383,7 +400,16 @@ export class DotAppImpl {
       const started = performance.now();
       let result: DotBootResult<Record<string, unknown>>;
       try {
-        const maybeResult = await pip.boot(ctx);
+        const maybeResult = await withPipHookSpan(
+          {
+            appName: this.#appName,
+            pipName: pip.name,
+            pipVersion: pip.version,
+            hook: 'boot',
+            order: record.order,
+          },
+          () => pip.boot!(ctx),
+        );
         result = maybeResult ?? {};
       } catch (error) {
         const issue = makeIssue({
