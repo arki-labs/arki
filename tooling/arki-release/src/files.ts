@@ -111,6 +111,16 @@ export const DEFAULT_FILE_INCLUDES: readonly string[] = [
   'package.json',
   // Compiled output trees.
   'dist/**',
+  // TypeScript source — shipped in both the GitHub mirror and npm
+  // tarballs so consumers can step into source maps and inspect the
+  // implementation without spelunking through compiled artifacts.
+  // The exclude list above strips test files (`*.test.ts`, `*.spec.ts`,
+  // `__tests__/**`, `tests/**`) so they don't leak through this glob.
+  'src/**',
+  // TypeScript configuration — useful for downstream IDE navigation
+  // and for consumers building from source.
+  'tsconfig.json',
+  'tsconfig.*.json',
   // Source maps.
   '**/*.map',
   // Type declarations.
