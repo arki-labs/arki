@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Footer band — 02 Ticker</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .card { padding: 0; }
+  .band {
+    position: relative; overflow: hidden;
+    background: var(--background); height: 168px;
+    display: grid; grid-template-columns: 200px 1fr; align-items: center;
+  }
+  .side {
+    height: 100%; padding: 18px 20px; border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; justify-content: center;
+    background: linear-gradient(90deg, transparent, hsl(240 6% 14% / 0.25));
+  }
+  .tag { font-family: var(--font-mono); font-size: 10px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; }
+  .title { font-family: var(--font-sans); font-size: 18px; font-weight: 600; color: var(--foreground); margin-top: 4px; letter-spacing: -0.01em; }
+  .sub { font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground); margin-top: 4px; }
+
+  .rows {
+    overflow: hidden; padding: 0 0 0 24px;
+    display: flex; flex-direction: column; gap: 10px;
+    mask-image: linear-gradient(90deg, transparent 0, #000 4%, #000 96%, transparent 100%);
+  }
+  .track {
+    display: flex; gap: 22px; white-space: nowrap;
+    animation: scroll 60s linear infinite; width: max-content;
+  }
+  .track.rev { animation-direction: reverse; animation-duration: 75s; }
+  @keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  .item {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 5px 14px; height: 30px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 4px;
+    font-family: var(--font-mono); font-size: 12px;
+  }
+  .name { color: var(--foreground); font-weight: 500; }
+  .v { color: var(--muted-foreground); }
+  .s { color: var(--muted-foreground); }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; padding: 1px 8px; border-radius: 9999px; }
+  .pill .d { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+  .ready { background: hsl(142 65% 55% / 0.16); color: hsl(142 65% 55%); }
+  .canary { background: hsl(43 96% 60% / 0.16); color: hsl(43 96% 60%); }
+  .alpha { background: hsl(217 85% 65% / 0.16); color: hsl(217 85% 65%); }
+</style></head>
+<body><div class="card"><div class="band">
+  <div class="side">
+    <div class="tag">live</div>
+    <div class="title">npm registry</div>
+    <div class="sub">arki.dev/packages</div>
+  </div>
+  <div class="rows">
+    <div class="track">
+      <span class="item"><span class="name">@arki/dot</span><span class="v">v0.1.0</span><span class="s">9.2 KB</span><span class="pill ready"><span class="d"></span>ready</span></span>
+      <span class="item"><span class="name">@arki/db</span><span class="v">v0.1.0</span><span class="s">14.4 KB</span><span class="pill ready"><span class="d"></span>ready</span></span>
+      <span class="item"><span class="name">@arki/kv</span><span class="v">v0.1.0</span><span class="s">6.1 KB</span><span class="pill ready"><span class="d"></span>ready</span></span>
+      <span class="item"><span class="name">@arki/env</span><span class="v">v0.1.0</span><span class="s">4.3 KB</span><span class="pill ready"><span class="d"></span>ready</span></span>
+      <span class="item"><span class="name">@arki/auth</span><span class="v">v0.0.9</span><span class="s">11.2 KB</span><span class="pill canary"><span class="d"></span>canary</span></span>
+      <span class="item"><span class="name">@arki/queue</span><span class="v">v0.1.0-rc.3</span><span class="s">9.7 KB</span><span class="pill canary"><span class="d"></span>canary</span></span>
+      <!-- dup -->
+      <span class="item"><span class="name">@arki/dot</span><span class="v">v0.1.0</span><span class="s">9.2 KB</span><span class="pill ready"><span class="d"></span>ready</span></span>
+      <span class="item"><span class="name">@arki/db</span><span class="v">v0.1.0</span><span class="s">14.4 KB</span><span class="pill ready"><span class="d"></span>ready</span></span>
+      <span class="item"><span class="name">@arki/kv</span><span class="v">v0.1.0</span><span class="s">6.1 KB</span><span class="pill ready"><span class="d"></span>ready</span></span>
+      <span class="item"><span class="name">@arki/env</span><span class="v">v0.1.0</span><span class="s">4.3 KB</span><span class="pill ready"><span class="d"></span>ready</span></span>
+      <span class="item"><span class="name">@arki/auth</span><span class="v">v0.0.9</span><span class="s">11.2 KB</span><span class="pill canary"><span class="d"></span>canary</span></span>
+      <span class="item"><span class="name">@arki/queue</span><span class="v">v0.1.0-rc.3</span><span class="s">9.7 KB</span><span class="pill canary"><span class="d"></span>canary</span></span>
+    </div>
+    <div class="track rev">
+      <span class="item"><span class="name">@arki/cli</span><span class="v">v0.1.0</span><span class="s">22.0 KB</span><span class="pill ready"><span class="d"></span>ready</span></span>
+      <span class="item"><span class="name">@arki/rpc</span><span class="v">v0.1.0-rc.1</span><span class="s">7.4 KB</span><span class="pill canary"><span class="d"></span>canary</span></span>
+      <span class="item"><span class="name">@arki/types</span><span class="v">v0.1.0</span><span class="s">3.1 KB</span><span class="pill ready"><span class="d"></span>ready</span></span>
+      <span class="item"><span class="name">@arki/codemod</span><span class="v">v0.0.2</span><span class="s">8.5 KB</span><span class="pill alpha"><span class="d"></span>alpha</span></span>
+      <span class="item"><span class="name">@arki/start</span><span class="v">v0.0.4</span><span class="s">6.9 KB</span><span class="pill alpha"><span class="d"></span>alpha</span></span>
+      <span class="item"><span class="name">@arki/diagnostics</span><span class="v">v0.1.0</span><span class="s">5.8 KB</span><span class="pill ready"><span class="d"></span>ready</span></span>
+      <span class="item"><span class="name">@arki/cli</span><span class="v">v0.1.0</span><span class="s">22.0 KB</span><span class="pill ready"><span class="d"></span>ready</span></span>
+      <span class="item"><span class="name">@arki/rpc</span><span class="v">v0.1.0-rc.1</span><span class="s">7.4 KB</span><span class="pill canary"><span class="d"></span>canary</span></span>
+      <span class="item"><span class="name">@arki/types</span><span class="v">v0.1.0</span><span class="s">3.1 KB</span><span class="pill ready"><span class="d"></span>ready</span></span>
+      <span class="item"><span class="name">@arki/codemod</span><span class="v">v0.0.2</span><span class="s">8.5 KB</span><span class="pill alpha"><span class="d"></span>alpha</span></span>
+      <span class="item"><span class="name">@arki/start</span><span class="v">v0.0.4</span><span class="s">6.9 KB</span><span class="pill alpha"><span class="d"></span>alpha</span></span>
+      <span class="item"><span class="name">@arki/diagnostics</span><span class="v">v0.1.0</span><span class="s">5.8 KB</span><span class="pill ready"><span class="d"></span>ready</span></span>
+    </div>
+  </div>
+</div></div></body></html>

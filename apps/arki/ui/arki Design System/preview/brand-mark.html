@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Brand — Mark + favicon studies</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .card { padding: 24px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; align-items: end; }
+  .item { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  .tile {
+    width: 80px; height: 80px; border-radius: 8px; display: grid; place-items: center;
+    font-family: var(--font-mono); font-weight: 600;
+    border: 1px solid var(--border);
+  }
+  .tile.dark { background: #09090b; color: #facc15; }
+  .tile.amber { background: #facc15; color: #09090b; }
+  .tile.muted { background: #212124; color: #e4e4e7; }
+  .tile.light { background: #f4f4f5; color: #09090b; }
+  .lbl { font-family: var(--font-mono); font-size: 10px; color: var(--muted-foreground); }
+</style></head>
+<body><div class="card">
+  <div class="item"><div class="tile dark" style="font-size: 56px;">.</div><div class="lbl">favicon · dark</div></div>
+  <div class="item"><div class="tile amber" style="font-size: 56px;">.</div><div class="lbl">app icon · amber</div></div>
+  <div class="item"><div class="tile muted" style="font-size: 18px;">dot</div><div class="lbl">tile · wordmark</div></div>
+  <div class="item"><div class="tile light" style="font-size: 56px; color: #facc15;">.</div><div class="lbl">favicon · light</div></div>
+</div></body></html>

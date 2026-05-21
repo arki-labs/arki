@@ -1,0 +1,65 @@
+/* Shared base for preview cards. 700px wide. */
+@import url("../colors_and_type.css");
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  width: 700px;
+  overflow: hidden;
+}
+
+/* default to dark mode for all preview cards
+   (use :root so we beat the light defaults in colors_and_type.css,
+   which also use :root — html selector has lower specificity) */
+:root {
+  color-scheme: dark;
+  --background:          hsl(240 10% 4%);
+  --foreground:          hsl(240 6% 90%);
+  --card:                hsl(240 8% 7%);
+  --card-foreground:     hsl(240 6% 90%);
+  --border:              hsl(240 6% 18%);
+  --input:               hsl(240 6% 18%);
+  --muted:               hsl(240 6% 14%);
+  --muted-foreground:    hsl(240 5% 60%);
+  --primary:             hsl(240 6% 90%);
+  --primary-foreground:  hsl(240 10% 4%);
+  --secondary:           hsl(240 6% 14%);
+  --accent:              hsl(43 96% 56%);
+  --accent-foreground:   hsl(240 10% 4%);
+  --ring:                hsl(43 96% 56%);
+  --destructive:         hsl(0 63% 50%);
+  --success:             hsl(142 65% 55%);
+  --warning:             hsl(43 96% 60%);
+  --info:                hsl(217 85% 65%);
+  --chart-1:             hsl(43 96% 60%);
+  --chart-2:             hsl(142 65% 55%);
+  --chart-3:             hsl(217 85% 65%);
+  --chart-4:             hsl(0 63% 60%);
+  --chart-5:             hsl(240 5% 60%);
+}
+
+.card {
+  padding: 20px 24px;
+  background: var(--background);
+  width: 100%;
+}
+
+.row { display: flex; gap: 12px; align-items: center; }
+.col { display: flex; flex-direction: column; gap: 12px; }
+
+.label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.value-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}

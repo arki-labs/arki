@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Type — Mono</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .card { padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; font-family: var(--font-mono); }
+  .lead { font-family: var(--font-sans); font-size: 14px; color: var(--muted-foreground); line-height: 20px; }
+  .lead b { color: var(--foreground); font-weight: 500; }
+  .line { display: flex; gap: 14px; align-items: baseline; }
+  .prompt { color: var(--accent); }
+  .pkg { color: var(--foreground); font-size: 13px; }
+  .nums { color: var(--foreground); font-feature-settings: "tnum", "zero"; font-size: 13px; }
+  .nums .dim { color: var(--muted-foreground); }
+</style></head>
+<body><div class="card">
+  <div class="lead">Mono is <b>first-class equal</b> to sans. Versions, packages, nav labels, status — all mono.</div>
+  <div class="line"><span class="prompt">$</span><span class="pkg">bun add @arki/dot</span></div>
+  <div class="line"><span class="nums">v0.1.0 <span class="dim">·</span> 0123456789 <span class="dim">·</span> MIT <span class="dim">·</span> 9.2 KB</span></div>
+  <div class="line value-mono">geist mono · 13/20 · tnum, zero, ss01</div>
+</div></body></html>

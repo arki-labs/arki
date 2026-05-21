@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Type — Dev-coded font stack</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .card { padding: 18px 22px; display: flex; flex-direction: column; gap: 10px; }
+  .row { display: grid; grid-template-columns: 90px 1fr auto; gap: 16px; align-items: baseline; }
+  .lbl { font-family: var(--font-mono); font-size: 10px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; }
+  .spec { color: var(--foreground); font-size: 18px; line-height: 22px; }
+  .meta { font-family: var(--font-mono); font-size: 10px; color: var(--muted-foreground); }
+  .crt { font-family: "VT323", monospace; font-size: 28px; line-height: 22px; letter-spacing: 0.04em; }
+  .code { font-family: "Fira Code", "JetBrains Mono", monospace; font-variant-ligatures: contextual; font-feature-settings: "calt", "liga"; font-size: 14px; }
+  .code .a { color: var(--accent); }
+</style></head>
+<body><div class="card">
+  <div class="row"><span class="lbl">sans</span><span class="spec" style="font-family: 'IBM Plex Sans', sans-serif; font-weight: 500;">IBM Plex Sans — body, headings, lede.</span><span class="meta">400 / 500 / 600 / 700</span></div>
+  <div class="row"><span class="lbl">mono</span><span class="spec" style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">JetBrains Mono — pkg names, versions, nav.</span><span class="meta">400 / 500 / 600 / 700</span></div>
+  <div class="row"><span class="lbl">code</span><span class="spec"><span class="code">const app = <span class="a">await</span> defineApp() =&gt; { x !== y &amp;&amp; z &gt;= 1 }</span></span><span class="meta">Fira Code + ligatures</span></div>
+  <div class="row"><span class="lbl">crt</span><span class="spec crt">VT323 &gt;_ ship faster.</span><span class="meta">retro band only</span></div>
+  <div class="row"><span class="lbl">serif</span><span class="spec" style="font-family: 'Instrument Serif', serif; font-style: italic; font-size: 20px;">Instrument Serif — rare pull-quote.</span><span class="meta">/philosophy only</span></div>
+</div></body></html>

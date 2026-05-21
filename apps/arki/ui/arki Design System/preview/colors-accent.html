@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Colors — Accent (amber)</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .card { padding: 22px 24px; display: grid; grid-template-columns: 130px 1fr; gap: 24px; align-items: center; }
+  .big {
+    height: 130px; border-radius: 6px; background: #facc15;
+    display: grid; place-items: center;
+    font-family: var(--font-mono); font-size: 11px; color: #09090b;
+  }
+  .body { display: flex; flex-direction: column; gap: 8px; font-family: var(--font-sans); font-size: 13px; color: var(--muted-foreground); line-height: 19px; }
+  .body b { color: var(--foreground); font-weight: 500; }
+  .meta { font-family: var(--font-mono); font-size: 11px; color: var(--accent); }
+  .uses { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+  .pill {
+    font-family: var(--font-mono); font-size: 10px; padding: 3px 8px;
+    border: 1px solid var(--border); border-radius: 9999px; color: var(--foreground);
+  }
+</style></head>
+<body><div class="card">
+  <div class="big">#facc15</div>
+  <div class="body">
+    <div class="meta">accent · amber · hsl(43 96% 56%)</div>
+    <div>The <b>only</b> saturated color in chrome. Same value in dark and light. Used sparingly — every interactive element competes for it.</div>
+    <div class="uses">
+      <span class="pill">primary CTA</span>
+      <span class="pill">focus ring</span>
+      <span class="pill">active ASCII glyph</span>
+      <span class="pill">warning</span>
+    </div>
+  </div>
+</div></body></html>

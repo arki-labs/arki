@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Motion — Timings</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .card { padding: 18px 24px; display: flex; flex-direction: column; gap: 6px; }
+  table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted-foreground); font-weight: 400; text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; }
+  td.k { color: var(--foreground); }
+  td.v { color: var(--accent); }
+  td.f { color: var(--muted-foreground); }
+  tr:last-child td { border-bottom: none; }
+  .note { font-family: var(--font-sans); font-size: 11px; color: var(--muted-foreground); margin-top: 6px; line-height: 16px; }
+</style></head>
+<body><div class="card">
+  <table>
+    <thead><tr><th>role</th><th>dur</th><th>easing</th><th>reduced-motion</th></tr></thead>
+    <tbody>
+      <tr><td class="k">surface enter</td><td class="v">150ms</td><td class="f">cubic-bezier(.16, 1, .3, 1)</td><td class="f">opacity-only</td></tr>
+      <tr><td class="k">surface exit</td><td class="v">100ms</td><td class="f">cubic-bezier(.16, 1, .3, 1)</td><td class="f">opacity-only</td></tr>
+      <tr><td class="k">button press</td><td class="v">100ms</td><td class="f">cubic-bezier(.65, 0, .35, 1)</td><td class="f">n/a</td></tr>
+      <tr><td class="k">number change</td><td class="v">200ms</td><td class="f">cubic-bezier(.16, 1, .3, 1)</td><td class="f">instant</td></tr>
+      <tr><td class="k">color tint flash</td><td class="v">200ms</td><td class="f">linear</td><td class="f">instant</td></tr>
+      <tr><td class="k">ASCII band loop</td><td class="v">≤ 8s</td><td class="f">per class (A–F)</td><td class="f">freeze at end-frame</td></tr>
+      <tr><td class="k">skeleton</td><td class="v">none</td><td class="f">static rectangles only</td><td class="f">n/a</td></tr>
+      <tr><td class="k">page transition</td><td class="v">none</td><td class="f">instant route change</td><td class="f">n/a</td></tr>
+    </tbody>
+  </table>
+</div></body></html>

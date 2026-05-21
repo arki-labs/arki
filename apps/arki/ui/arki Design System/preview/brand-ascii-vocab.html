@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Brand — ASCII art vocabulary</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .card { padding: 18px 24px; display: flex; flex-direction: column; gap: 8px; font-family: var(--font-mono); font-size: 12px; line-height: 18px; }
+  .h { font-family: var(--font-mono); font-size: 10px; color: var(--muted-foreground); letter-spacing: 0.06em; text-transform: uppercase; }
+  pre { margin: 0; white-space: pre; color: var(--foreground); font-family: var(--font-mono); font-size: 12px; line-height: 16px; }
+  .a { color: var(--accent); }
+  .d { color: var(--muted-foreground); }
+  .ok { color: hsl(142 65% 55%); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+</style></head>
+<body><div class="card">
+  <div class="row">
+    <div>
+      <div class="h">DAG · plugin graph</div>
+<pre>@arki/dot <span class="a">●</span>───┬── @arki/env
+              ├── @arki/db
+              ├── @arki/kv
+              └── @arki/queue</pre>
+    </div>
+    <div>
+      <div class="h">Conveyor · lifecycle</div>
+<pre><span class="a">●</span>━━━●━━━●━━━○━━━○
+config boot start stop disp</pre>
+    </div>
+    <div>
+      <div class="h">Status · ASCII pill</div>
+<pre><span class="ok">●</span> ready    <span class="a">◐</span> canary
+○ alpha    <span class="d">·</span> planned</pre>
+    </div>
+    <div>
+      <div class="h">Boot log · terminal</div>
+<pre><span class="a">$</span> dot doctor
+→ configure  <span class="ok">✓</span> db <span class="ok">✓</span> kv
+→ boot       <span class="ok">✓</span> all green</pre>
+    </div>
+  </div>
+</div></body></html>

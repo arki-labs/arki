@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Colors — Dark (terminal at 2am)</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .card { padding: 18px 24px; }
+  .grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+  .sw { display: flex; flex-direction: column; gap: 4px; }
+  .chip { height: 56px; border-radius: 6px; border: 1px solid var(--border); }
+  .name { font-family: var(--font-mono); font-size: 11px; color: var(--foreground); }
+  .hex { font-family: var(--font-mono); font-size: 10px; color: var(--muted-foreground); }
+</style></head>
+<body><div class="card">
+  <div class="grid">
+    <div class="sw"><div class="chip" style="background:#09090b"></div><div class="name">background</div><div class="hex">#09090b</div></div>
+    <div class="sw"><div class="chip" style="background:#111113"></div><div class="name">card</div><div class="hex">#111113</div></div>
+    <div class="sw"><div class="chip" style="background:#212124"></div><div class="name">muted</div><div class="hex">#212124</div></div>
+    <div class="sw"><div class="chip" style="background:#2a2a2e"></div><div class="name">border</div><div class="hex">#2a2a2e</div></div>
+    <div class="sw"><div class="chip" style="background:#94949c"></div><div class="name">muted-fg</div><div class="hex">#94949c</div></div>
+    <div class="sw"><div class="chip" style="background:#e4e4e7"></div><div class="name">foreground</div><div class="hex">#e4e4e7</div></div>
+  </div>
+</div></body></html>

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Footer band — 06 Pipeline</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .card { padding: 0; }
+  .band { background: var(--background); height: 168px; display: grid; grid-template-columns: 200px 1fr; align-items: center; }
+  .side { height: 100%; padding: 18px 20px; border-right: 1px solid var(--border); display: flex; flex-direction: column; justify-content: center;
+    background: linear-gradient(90deg, transparent, hsl(240 6% 14% / 0.25)); }
+  .tag { font-family: var(--font-mono); font-size: 10px; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; }
+  .title { font-family: var(--font-sans); font-size: 18px; font-weight: 600; color: var(--foreground); margin-top: 4px; letter-spacing: -0.01em; }
+  .sub { font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground); margin-top: 4px; }
+  .grid { padding: 12px 28px; display: grid; gap: 6px; align-content: center; }
+  .row { display: grid; grid-template-columns: 130px 1fr 200px; gap: 16px; align-items: center; }
+  .step { display: flex; align-items: center; gap: 8px; }
+  .marker { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px hsl(43 96% 56% / 0.18); }
+  .name { font-family: var(--font-mono); font-size: 11px; color: var(--foreground); }
+  .bar { height: 4px; background: var(--muted); border-radius: 2px; overflow: hidden; position: relative; }
+  .fill { height: 100%; border-radius: 2px; position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); }
+  .meta { font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground); }
+
+  /* Each row's animation: fill 0→100% over its dur, hold, fade out, reset.
+     Total 12s. Each row offset so they start in sequence. */
+  @keyframes p1 { 0% {width:0;opacity:1} 18.3% {width:100%;opacity:1} 70% {width:100%;opacity:1} 78% {width:100%;opacity:0.4} 80% {width:0;opacity:0} 100% {width:0;opacity:0} }
+  @keyframes p2 { 0%,8.3% {width:0;opacity:1} 45.8% {width:100%;opacity:1} 80% {width:100%;opacity:1} 88% {width:100%;opacity:0.4} 90% {width:0;opacity:0} 100% {width:0;opacity:0} }
+  @keyframes p3 { 0%,16.6% {width:0;opacity:1} 65% {width:100%;opacity:1} 88% {width:100%;opacity:1} 95% {width:100%;opacity:0.4} 97% {width:0;opacity:0} 100% {width:0;opacity:0} }
+  @keyframes p4 { 0%,25% {width:0;opacity:1} 55% {width:100%;opacity:1} 90% {width:100%;opacity:1} 96% {width:100%;opacity:0.4} 98% {width:0;opacity:0} 100% {width:0;opacity:0} }
+  @keyframes p5 { 0%,33.3% {width:0;opacity:1} 48.3% {width:100%;opacity:1} 95% {width:100%;opacity:1} 98% {width:100%;opacity:0.4} 99% {width:0;opacity:0} 100% {width:0;opacity:0} }
+
+  .r1 .fill { animation: p1 12s linear infinite; }
+  .r2 .fill { animation: p2 12s linear infinite; }
+  .r3 .fill { animation: p3 12s linear infinite; }
+  .r4 .fill { animation: p4 12s linear infinite; }
+  .r5 .fill { animation: p5 12s linear infinite; }
+</style></head>
+<body><div class="card"><div class="band">
+  <div class="side">
+    <div class="tag">ci</div>
+    <div class="title">release · 0.1.0</div>
+    <div class="sub">build 802cf4e</div>
+  </div>
+  <div class="grid">
+    <div class="row r1"><div class="step"><span class="marker"></span><span class="name">lint</span></div><div class="bar"><div class="fill"></div></div><div class="meta">eslint · 0 errors</div></div>
+    <div class="row r2"><div class="step"><span class="marker"></span><span class="name">typecheck</span></div><div class="bar"><div class="fill"></div></div><div class="meta">tsc --noEmit · 0 errors</div></div>
+    <div class="row r3"><div class="step"><span class="marker"></span><span class="name">test</span></div><div class="bar"><div class="fill"></div></div><div class="meta">vitest · 312 pass</div></div>
+    <div class="row r4"><div class="step"><span class="marker"></span><span class="name">build</span></div><div class="bar"><div class="fill"></div></div><div class="meta">tsup · 9.2 KB</div></div>
+    <div class="row r5"><div class="step"><span class="marker"></span><span class="name">pack</span></div><div class="bar"><div class="fill"></div></div><div class="meta">npm pack · 7 files</div></div>
+  </div>
+</div></div></body></html>

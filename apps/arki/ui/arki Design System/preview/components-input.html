@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Components — Input + Focus ring</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .card { padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
+  .field {
+    height: 36px; padding: 0 12px; border-radius: 4px;
+    background: var(--background); border: 1px solid var(--border);
+    color: var(--foreground); font-family: var(--font-mono); font-size: 13px;
+    width: 100%;
+  }
+  .field::placeholder { color: var(--muted-foreground); }
+  .field.focused { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 0; }
+  .row { display: grid; grid-template-columns: 100px 1fr; align-items: center; gap: 12px; }
+  .lbl { font-family: var(--font-mono); font-size: 10px; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.04em; }
+  .cmdk { display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 6px; }
+  .cmdk input { flex: 1; background: transparent; border: none; outline: none;
+    color: var(--foreground); font-family: var(--font-sans); font-size: 13px; }
+  .cmdk .kbd { font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground);
+    border: 1px solid var(--border); border-radius: 3px; padding: 1px 6px; }
+</style></head>
+<body><div class="card">
+  <div class="row"><span class="lbl">DEFAULT</span><input class="field" placeholder="search packages…"></div>
+  <div class="row"><span class="lbl">FOCUSED</span><input class="field focused" value="@arki/db"></div>
+  <div class="row"><span class="lbl">CMD+K</span>
+    <div class="cmdk">
+      <span style="color: var(--muted-foreground); font-family: var(--font-mono); font-size: 13px;">⌘</span>
+      <input value="dot doctor" />
+      <span class="kbd">⌘K</span>
+    </div>
+  </div>
+</div></body></html>
