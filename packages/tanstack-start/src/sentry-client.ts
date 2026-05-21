@@ -6,9 +6,11 @@
  * unhandled errors) when `init()` runs, and anything imported earlier
  * is missed.
  *
- * If `dsn` is omitted/falsy the function is a no-op. That lets apps
- * call `initSentryClient({ dsn: import.meta.env.VITE_SENTRY_DSN })`
- * unconditionally and have Sentry only activate when the env var is set.
+ * Sentry is **opt-in via DSN**. When `dsn` is missing, empty, whitespace-only,
+ * or causes `Sentry.init` to throw (e.g. malformed URL), `initSentryClient`
+ * silently disables Sentry for the app. That lets every app call this
+ * unconditionally — `initSentryClient({ dsn: import.meta.env.VITE_SENTRY_DSN })` —
+ * with Sentry activating only when a valid DSN is actually set.
  */
 import type { Integration } from '@sentry/core';
 import * as Sentry from '@sentry/react';
@@ -17,10 +19,11 @@ import { registerSentryCapture } from './sentry-bridge';
 
 export type InitSentryClientOptions = {
   /**
-   * Sentry DSN. When falsy, `initSentryClient` is a no-op. Typically set
-   * via `import.meta.env.VITE_SENTRY_DSN`.
+   * Sentry DSN. When missing, empty, whitespace-only, or malformed,
+   * `initSentryClient` is a silent no-op. Typically set via
+   * `import.meta.env.VITE_SENTRY_DSN`.
    */
-  dsn?: string;
+  dsn?: string | null;
   /**
    * Sentry environment tag (e.g. 'production', 'staging'). Defaults to
    * `import.meta.env.MODE`.
@@ -65,23 +68,31 @@ export function initSentryClient(options: InitSentryClientOptions): void {
     integrations: extraIntegrations = [],
   } = options;
 
-  if (!dsn) return;
+  const normalizedDsn = typeof dsn === 'string' ? dsn.trim() : '';
+  if (!normalizedDsn) return;
 
   const integrations: Integration[] = [
     Sentry.browserTracingIntegration(),
     ...extraIntegrations,
   ];
 
-  Sentry.init({
-    dsn,
-    environment,
-    release,
-    integrations,
-    tracesSampleRate,
-    replaysSessionSampleRate,
-    replaysOnErrorSampleRate,
-    sendDefaultPii: false,
-  });
+  try {
+    Sentry.init({
+      dsn: normalizedDsn,
+      environment,
+      release,
+      integrations,
+      tracesSampleRate,
+      replaysSessionSampleRate,
+      replaysOnErrorSampleRate,
+      sendDefaultPii: false,
+    });
+  } catch (error) {
+    // Malformed DSN or other init failure — stay off rather than crash the app.
+    // eslint-disable-next-line no-console
+    console.warn('[arki/tanstack-start] Sentry disabled — init failed:', error);
+    return;
+  }
 
   registerSentryCapture((error, hint) => {
     Sentry.captureException(error, hint as Parameters<typeof Sentry.captureException>[1]);

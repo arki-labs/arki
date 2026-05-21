@@ -12,7 +12,11 @@
  * global middleware registry to instrument server functions and route
  * loaders.
  *
- * If `dsn` is omitted/falsy this is a no-op.
+ * Sentry is **opt-in via DSN**. When `dsn` is missing, empty, whitespace-only,
+ * or causes `Sentry.init` to throw (e.g. malformed URL), `initSentryServer`
+ * silently disables Sentry for the app. That lets every app call this
+ * unconditionally — `initSentryServer({ dsn: process.env.SENTRY_DSN })` —
+ * with Sentry activating only when a valid DSN is actually set.
  */
 import type { Integration } from '@sentry/core';
 import * as Sentry from '@sentry/node';
@@ -20,7 +24,12 @@ import * as Sentry from '@sentry/node';
 import { registerSentryCapture } from './sentry-bridge';
 
 export type InitSentryServerOptions = {
-  dsn?: string;
+  /**
+   * Sentry DSN. When missing, empty, whitespace-only, or malformed,
+   * `initSentryServer` is a silent no-op. Typically set via
+   * `process.env.SENTRY_DSN`.
+   */
+  dsn?: string | null;
   environment?: string;
   release?: string;
   /** Server-side tracing rate. Defaults to `1.0` in dev, `0.1` in prod. */
@@ -40,16 +49,24 @@ export function initSentryServer(options: InitSentryServerOptions): void {
     integrations: extraIntegrations = [],
   } = options;
 
-  if (!dsn) return;
+  const normalizedDsn = typeof dsn === 'string' ? dsn.trim() : '';
+  if (!normalizedDsn) return;
 
-  Sentry.init({
-    dsn,
-    environment,
-    release,
-    integrations: [...extraIntegrations],
-    tracesSampleRate,
-    sendDefaultPii: false,
-  });
+  try {
+    Sentry.init({
+      dsn: normalizedDsn,
+      environment,
+      release,
+      integrations: [...extraIntegrations],
+      tracesSampleRate,
+      sendDefaultPii: false,
+    });
+  } catch (error) {
+    // Malformed DSN or other init failure — stay off rather than crash boot.
+    // eslint-disable-next-line no-console
+    console.warn('[arki/tanstack-start] Sentry disabled — init failed:', error);
+    return;
+  }
 
   registerSentryCapture((error, hint) => {
     Sentry.captureException(error, hint as Parameters<typeof Sentry.captureException>[1]);
