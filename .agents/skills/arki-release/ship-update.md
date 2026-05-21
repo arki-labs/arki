@@ -40,13 +40,20 @@ git -c commit.gpgsign=false commit \
   -m "release: <description>"
 
 # 7. Publish to npm — user must run this (OTP gate)
+# CRITICAL: use the path-form, NOT `cd && npm publish`. The materializer's
+# workspaces root at .release/arki-public/package.json poisons npm publish
+# when it parent-walks from a child directory (see troubleshooting.md →
+# "npm publish parent-walks into the workspaces root").
 for p in <changed-packages>; do
   echo "=== Publishing @arki/$p ==="
-  (cd .release/arki-public/packages/$p && npm publish --access public)
+  npm publish --access public "/Users/afurculita/Developer/workspace/.release/arki-public/packages/$p"
 done
 
-# 8. Verify on npm
-npm view @arki/<pkg> version
+# 8. Verify on npm — also from OUTSIDE the workspace (same parent-walk trap)
+cd ~
+for p in <changed-packages>; do
+  printf "%-25s %s\n" "@arki/$p" "$(npm view @arki/$p version 2>&1 | tail -1)"
+done
 
 # 9. Sync the GitHub mirror (see sync-github.md)
 ```

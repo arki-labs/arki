@@ -54,6 +54,63 @@ git rev-parse --git-dir
 - Commit ONLY your own paths with `git -c commit.gpgsign=false commit <my-paths> -m "..."`.
 - Sibling agents will re-stage their work as they need.
 
+## `npm publish` parent-walks into the workspaces root
+
+**Symptom:** Running `cd .release/arki-public/packages/<pkg> && npm publish --access public` fails with `'@arki/<pkg>@*' is not in this registry.` or hangs on a workspaces-mode resolution that produces nonsense `@arki/X@*` specs.
+
+**Root cause:** the materializer writes a `package.json` at `.release/arki-public/` with `"workspaces": ["packages/*"]` (it's there for the fixture matrix's install probes to have a workspace context). When `npm publish` runs from a child directory, npm parent-walks looking for the nearest `package.json`, finds the workspaces root, and switches to **workspace mode** — which mangles standalone publishes by trying to resolve every workspace-internal `@arki/X` ref as `@arki/X@*` (the wildcard "any workspace version" placeholder npm uses internally).
+
+**Detect before publishing:** verify what npm thinks the cwd is by running `npm config get registry` from inside the package dir. If you see `ENOWORKSPACES — This command does not support workspaces.`, npm IS in workspace mode and publish will fail.
+
+**Workaround — the path-form `npm publish <dir>`:** instead of `cd`-ing, pass the package directory as an absolute path argument and run from somewhere *outside* the workspace tree:
+
+```bash
+# From your home dir or /tmp — anywhere outside /Users/.../workspace
+npm publish --access public /Users/afurculita/Developer/workspace/.release/arki-public/packages/dot
+```
+
+This bypasses the parent-walk entirely. npm reads the named directory's `package.json` directly without searching up. **Use this form in every ship loop:**
+
+```bash
+for p in <pkg-list>; do
+  echo "=== Publishing @arki/$p ==="
+  npm publish --access public "/Users/afurculita/Developer/workspace/.release/arki-public/packages/$p"
+done
+```
+
+**Verification after publish** (also from outside the workspace, to avoid the same parent-walk on `npm view`):
+
+```bash
+cd ~
+for p in <pkg-list>; do
+  printf "%-25s %s\n" "@arki/$p" "$(npm view @arki/$p version 2>&1 | tail -1)"
+done
+```
+
+**Long-term fix candidates** (not done yet):
+
+1. Make `export-public` skip writing the workspaces field by default. The fixture matrix can synthesize its own workspaces config in a temp directory when it needs one (~30 min of tooling work).
+2. Add a `.npmrc` at `.release/arki-public/packages/*/` with `workspaces=false` (npm doesn't currently honor a per-package opt-out, so this is speculative).
+
+For now, the path-form workaround is the canonical procedure.
+
+## The npm 2FA browser-auth "did it succeed?" pattern
+
+**Symptom:** `npm publish` prints `Authenticate your account at: https://www.npmjs.com/auth/cli/<token> — Press ENTER to open in the browser...`, you authenticate, then **after a delay** the terminal prints `npm error code E403 — You cannot publish over the previously published versions: <ver>`.
+
+**Root cause:** npm's modern 2FA flow (rolled out 2024+) publishes the tarball **as soon as the browser auth completes**, often before the terminal session displays the result. If you retry — by hitting up-arrow or re-running the loop because the terminal looked unresponsive — npm rejects the second PUT against the now-published version. The 403 is a real error response, but the publish *already succeeded* on the first try.
+
+**Verify success before retrying:**
+
+```bash
+cd ~
+npm view @arki/<pkg> version
+# If this prints your expected version, the publish landed. Move on.
+# Only retry if it prints a DIFFERENT version or 404s.
+```
+
+**Operational habit:** in a multi-package ship loop, the 403 inside the loop is benign — keep going. Verify ALL packages at the end with the bulk `npm view` check. Do NOT abort the loop on a single 403.
+
 ## The `.git/` preservation gotcha during re-materialize
 
 **Symptom:** You move `.release/arki-public/.git/` to `/tmp/...`, run `export-public`, move it back — and on the next `git status`, the `.git/` is gone.
