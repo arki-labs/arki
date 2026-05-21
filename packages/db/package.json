@@ -1,0 +1,128 @@
+{
+  "name": "@arki/db",
+  "version": "0.1.0",
+  "description": "Drizzle ORM repositories and database helpers for ARKI — Postgres + PGlite runtimes, projection builder, branded ID factory, and env-aware connection pooling.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "drizzle",
+    "postgres",
+    "pglite",
+    "database",
+    "orm",
+    "projections"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/init.d.ts",
+      "import": "./dist/init.js",
+      "default": "./dist/init.js"
+    },
+    "./env": {
+      "types": "./dist/env.d.ts",
+      "import": "./dist/env.js",
+      "default": "./dist/env.js"
+    },
+    "./init": {
+      "bun": {
+        "types": "./dist/init.bun.d.ts",
+        "import": "./dist/init.bun.js",
+        "default": "./dist/init.bun.js"
+      },
+      "types": "./dist/init.d.ts",
+      "import": "./dist/init.js",
+      "default": "./dist/init.js"
+    },
+    "./factory": {
+      "types": "./dist/factory.d.ts",
+      "import": "./dist/factory.js",
+      "default": "./dist/factory.js"
+    },
+    "./builder": {
+      "types": "./dist/builder.d.ts",
+      "import": "./dist/builder.js",
+      "default": "./dist/builder.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js",
+      "default": "./dist/client/index.js"
+    },
+    "./runtime-local": {
+      "types": "./dist/runtime-local.d.ts",
+      "import": "./dist/runtime-local.js",
+      "default": "./dist/runtime-local.js"
+    },
+    "./id": {
+      "types": "./dist/id.d.ts",
+      "import": "./dist/id.js",
+      "default": "./dist/id.js"
+    },
+    "./id-factory": {
+      "types": "./dist/id-factory.d.ts",
+      "import": "./dist/id-factory.js",
+      "default": "./dist/id-factory.js"
+    },
+    "./orm": {
+      "types": "./dist/orm.d.ts",
+      "import": "./dist/orm.js",
+      "default": "./dist/orm.js"
+    },
+    "./pg": {
+      "types": "./dist/pg.d.ts",
+      "import": "./dist/pg.js",
+      "default": "./dist/pg.js"
+    },
+    "./bun": {
+      "types": "./dist/bun.d.ts",
+      "import": "./dist/bun.js",
+      "default": "./dist/bun.js"
+    },
+    "./dot": {
+      "types": "./dist/dot.d.ts",
+      "import": "./dist/dot.js",
+      "default": "./dist/dot.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@arki/assert": "0.0.1",
+    "@arki/contracts": "0.0.1",
+    "@arki/log": "0.0.1",
+    "@electric-sql/pglite": "^0.4.5",
+    "@paralleldrive/cuid2": "^3.3.0",
+    "@t3-oss/env-core": "^0.13.10",
+    "drizzle-orm": "1.0.0-rc.1",
+    "pg": "8.17.1",
+    "postgres": "^3.4.8",
+    "zod": "4.3.5"
+  },
+  "peerDependencies": {
+    "@arki/dot": "^0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@arki/dot": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "name": "@arki/assert",
+  "version": "0.0.1",
+  "description": "Runtime assertion helpers for ARKI — small, typed predicates for URLs, base64 strings, and language codes.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "assert",
+    "validator",
+    "url",
+    "base64",
+    "language-code"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./base64": {
+      "types": "./dist/base64.d.ts",
+      "import": "./dist/base64.js",
+      "default": "./dist/base64.js"
+    },
+    "./language": {
+      "types": "./dist/language.d.ts",
+      "import": "./dist/language.js",
+      "default": "./dist/language.js"
+    },
+    "./url": {
+      "types": "./dist/url.d.ts",
+      "import": "./dist/url.js",
+      "default": "./dist/url.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "is-language-code": "^5.1.3",
+    "validator": "^13.15.26"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
