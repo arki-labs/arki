@@ -309,6 +309,78 @@ describe('exportPublicTree', () => {
     expect(readme).toMatch(/generated/i);
   });
 
+  it('writes a publish-ready scaffolding: LICENSE, AGENTS.md, .changeset/, .github/workflows/release.yml', async () => {
+    writeRoot(tmp);
+    writePkg(tmp, 'assert', {
+      name: '@arki/assert',
+      version: '1.0.0',
+      description: 'Test assertions.',
+    });
+
+    await exportPublicTree({ rootCwd: tmp, config: baseConfig });
+    const outDir = path.join(tmp, baseConfig.publicTreePath);
+    const tree = listTreeRelative(outDir);
+
+    expect(tree).toContain('LICENSE');
+    expect(tree).toContain('AGENTS.md');
+    expect(tree).toContain('.changeset/config.json');
+    expect(tree).toContain('.changeset/README.md');
+    expect(tree).toContain('.github/workflows/release.yml');
+
+    const license = readFileSync(path.join(outDir, 'LICENSE'), 'utf8');
+    expect(license).toMatch(/^MIT License/);
+    expect(license).toMatch(/Copyright \(c\) 2026 ARKI Contributors/);
+
+    const agents = readFileSync(path.join(outDir, 'AGENTS.md'), 'utf8');
+    expect(agents).toMatch(/Agent-discoverable contract/);
+
+    const changesetCfg = readJson(
+      path.join(outDir, '.changeset/config.json'),
+    ) as Record<string, unknown>;
+    expect(changesetCfg['access']).toBe('public');
+    // Public repo defaults to `main`, even though the workspace uses `master`.
+    expect(changesetCfg['baseBranch']).toBe('main');
+    // commit:false leaves the version-bump commit to changesets/action.
+    expect(changesetCfg['commit']).toBe(false);
+
+    const workflow = readFileSync(
+      path.join(outDir, '.github/workflows/release.yml'),
+      'utf8',
+    );
+    expect(workflow).toMatch(/name: Release/);
+    expect(workflow).toMatch(/changesets\/action@v1/);
+    expect(workflow).toMatch(/NPM_TOKEN/);
+    // Canary path is gated behind workflow_dispatch + canary input.
+    expect(workflow).toMatch(/--snapshot canary/);
+    expect(workflow).toMatch(/--tag canary/);
+  });
+
+  it('regenerates the publish scaffolding byte-identically across runs', async () => {
+    writeRoot(tmp);
+    writePkg(tmp, 'assert', {
+      name: '@arki/assert',
+      version: '1.0.0',
+      description: 'Test assertions.',
+    });
+
+    await exportPublicTree({ rootCwd: tmp, config: baseConfig });
+    const outDir = path.join(tmp, baseConfig.publicTreePath);
+    const targets = [
+      'LICENSE',
+      'AGENTS.md',
+      'README.md',
+      '.changeset/config.json',
+      '.changeset/README.md',
+      '.github/workflows/release.yml',
+    ];
+    const before = targets.map(t => readFileSync(path.join(outDir, t), 'utf8'));
+
+    await exportPublicTree({ rootCwd: tmp, config: baseConfig });
+    const after = targets.map(t => readFileSync(path.join(outDir, t), 'utf8'));
+
+    expect(after).toEqual(before);
+  });
+
   it('the destination manifest is the materialized one (devDeps absent, catalog refs resolved)', async () => {
     writeRoot(tmp, { zod: '^4.0.0' });
     writePkg(tmp, 'assert', {

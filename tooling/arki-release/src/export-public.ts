@@ -570,14 +570,29 @@ async function loadRootManifest(rootCwd: string): Promise<unknown> {
 }
 
 /**
- * Write the top-level scaffolding for the generated tree: a stub root
- * `package.json`, a `.gitignore` so consumers can install without
- * polluting the source tree, and a `README.md` describing what the
- * directory is.
+ * Write the top-level scaffolding for the generated tree.
  *
- * These three files are checked-in artifacts of the generated tree — the
- * Task 6 fixtures consume them. Stable content keeps `diff -r` clean
- * across runs.
+ * The generated tree is meant to be `git push`-able to `arki-labs/arki`
+ * as-is: every file the public repo needs to install, build, and publish
+ * is produced here. The contents are split into three groups:
+ *
+ *   1. Build/install bootstrap
+ *      - `package.json` (private root, `workspaces: ['packages/*']`)
+ *      - `.gitignore`
+ *
+ *   2. Outward-facing project surface
+ *      - `README.md`     — landing page for humans on the public repo
+ *      - `LICENSE`       — MIT (matches each package's bundled LICENSE)
+ *      - `AGENTS.md`     — agent-discoverable docs convention
+ *
+ *   3. Release pipeline (Changesets + GitHub Actions)
+ *      - `.changeset/config.json`
+ *      - `.changeset/README.md`
+ *      - `.github/workflows/release.yml`
+ *
+ * All content is static. Determinism is preserved: regeneration produces
+ * byte-identical output, so `removeDirectory` + `writeRootScaffolding`
+ * is safe to run on every export.
  */
 async function writeRootScaffolding(outputPath: string): Promise<void> {
   const rootPackage = {
@@ -593,23 +608,292 @@ async function writeRootScaffolding(outputPath: string): Promise<void> {
   const gitignore = ['node_modules/', 'dist/', '.turbo/', ''].join('\n');
   await writeFile(path.join(outputPath, '.gitignore'), gitignore, 'utf8');
 
-  const readme = [
-    '# arki-public (generated)',
-    '',
-    'This directory is the public ARKI release tree produced by',
-    '`bun release:arki export-public`. **Do not edit files in here by hand —',
-    'they will be overwritten on the next export.**',
-    '',
-    'Contents are derived from the workspace under `packages/` filtered through',
-    "the release waves in `arki.release.config.ts` and each package's npm",
-    '`files` allowlist.',
-    '',
-    'External fixtures (Task 6) install this tree to verify ARKI packages',
-    'compile and run when consumed from outside the monorepo.',
-    '',
-  ].join('\n');
-  await writeFile(path.join(outputPath, 'README.md'), readme, 'utf8');
+  await writeTextFile(path.join(outputPath, 'LICENSE'), MIT_LICENSE_TEXT);
+  await writeTextFile(path.join(outputPath, 'README.md'), PUBLIC_README);
+  await writeTextFile(path.join(outputPath, 'AGENTS.md'), PUBLIC_AGENTS_MD);
+
+  await writeJsonFile(path.join(outputPath, '.changeset', 'config.json'), CHANGESET_CONFIG);
+  await writeTextFile(path.join(outputPath, '.changeset', 'README.md'), CHANGESET_README);
+
+  await writeTextFile(
+    path.join(outputPath, '.github', 'workflows', 'release.yml'),
+    RELEASE_WORKFLOW,
+  );
 }
+
+/**
+ * MIT license text. Matches the {@link CURRENT_LICENSE_YEAR} stamped on
+ * each package's bundled LICENSE so the public repo and the published
+ * tarballs agree. Year is frozen — bumping it is a one-line edit here.
+ */
+const MIT_LICENSE_TEXT = [
+  'MIT License',
+  '',
+  'Copyright (c) 2026 ARKI Contributors',
+  '',
+  'Permission is hereby granted, free of charge, to any person obtaining a copy',
+  'of this software and associated documentation files (the "Software"), to deal',
+  'in the Software without restriction, including without limitation the rights',
+  'to use, copy, modify, merge, publish, distribute, sublicense, and/or sell',
+  'copies of the Software, and to permit persons to whom the Software is',
+  'furnished to do so, subject to the following conditions:',
+  '',
+  'The above copyright notice and this permission notice shall be included in',
+  'all copies or substantial portions of the Software.',
+  '',
+  'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR',
+  'IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,',
+  'FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE',
+  'AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER',
+  'LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,',
+  'OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN',
+  'THE SOFTWARE.',
+  '',
+].join('\n');
+
+/**
+ * Outward-facing README. Describes ARKI to a developer landing on
+ * `github.com/arki-labs/arki` from npm, search, or a link. Mentions DOT
+ * as the framework that ties the packages together; intentionally avoids
+ * marketing puff and example apps until those land in the public docs
+ * (`packages/dot/README.md` is the deeper reference).
+ */
+const PUBLIC_README = [
+  '# ARKI',
+  '',
+  'TypeScript-first toolkit + plugin framework for building agent-native applications.',
+  '',
+  'ARKI is a family of small, focused packages under the `@arki/*` scope on npm,',
+  'tied together by **DOT** — the `@arki/dot` framework that gives every app',
+  'lifecycle hooks, deterministic boot order, a static manifest, and an',
+  'agent-discoverable CLI.',
+  '',
+  '## Quick start',
+  '',
+  '```bash',
+  'bunx @arki/dot new my-app',
+  'cd my-app',
+  'bun install',
+  'bun run dev',
+  '```',
+  '',
+  'See [`packages/dot/README.md`](packages/dot/README.md) for the full DOT',
+  'reference and [`packages/`](packages/) for the rest of the toolkit.',
+  '',
+  '## Packages',
+  '',
+  'Every package in this repo is published independently to npm under the',
+  '`@arki/*` scope. See each package directory for its own README.',
+  '',
+  '| Wave | Theme |',
+  '| ---- | ----- |',
+  '| Foundation | `@arki/assert`, `@arki/contracts`, `@arki/logger`, `@arki/env`, `@arki/ts`, `@arki/resilience`, `@arki/date`, `@arki/string`, `@arki/slugify`, `@arki/clock` |',
+  '| DOT kernel | `@arki/dot` |',
+  '| Adapters | `@arki/db`, `@arki/kv`, `@arki/fs`, `@arki/queue`, `@arki/event-sourcing`, `@arki/auth`, `@arki/emails` |',
+  '| Frontend | `@arki/design-systems`, `@arki/theme`, `@arki/icons`, `@arki/react-hooks`, `@arki/ui` |',
+  '| Specialized | `@arki/ai`, `@arki/rich-text`, `@arki/images`, `@arki/diff-engine` |',
+  '',
+  '## License',
+  '',
+  'MIT. See [`LICENSE`](LICENSE).',
+  '',
+  '## Contributing',
+  '',
+  'This repository is the **generated public mirror** of the ARKI workspace.',
+  'Sources are not edited here directly — open issues and discussion threads',
+  'instead, and we will land the change upstream and re-export.',
+  '',
+].join('\n');
+
+/**
+ * `AGENTS.md` for the public repo. The convention (mirrored from the
+ * private workspace) tells coding agents where to look for canonical
+ * package contracts and the publish pipeline.
+ */
+const PUBLIC_AGENTS_MD = [
+  '# AGENTS.md',
+  '',
+  '> Agent-discoverable contract for `arki-labs/arki`. Read this first if you',
+  '> are an autonomous coding agent landing in this repository.',
+  '',
+  '## What this repo is',
+  '',
+  'The public ARKI release tree. Every `packages/<name>` directory is an',
+  'independently-versioned npm package under the `@arki/*` scope. The root',
+  'is a private workspace whose only job is to host those packages and the',
+  'release pipeline that publishes them.',
+  '',
+  '## Where to look',
+  '',
+  '- `packages/dot/README.md` — DOT framework reference (lifecycle hooks,',
+  '  `defineApp`, plugin contract, CLI).',
+  '- `packages/<name>/README.md` — per-package contract and examples.',
+  '- `.changeset/` — how versions and changelogs are produced.',
+  '- `.github/workflows/release.yml` — how packages get published.',
+  '',
+  '## How to propose changes',
+  '',
+  'Source code is mirrored from an upstream workspace, so direct PRs against',
+  '`packages/**` will be overwritten on the next export. Open an issue with',
+  'a minimal reproducer or design proposal instead — maintainers land the',
+  'change upstream and re-export.',
+  '',
+  '## Stable contracts',
+  '',
+  "Every `@arki/*` package follows semver. DOT's plugin contract,",
+  '`DotAppManifest`, and `DotDiagnosticsSnapshot` are versioned as part of',
+  '`@arki/dot` — read its CHANGELOG before upgrading.',
+  '',
+].join('\n');
+
+/**
+ * `.changeset/config.json` for the public repo. Mirrors the workspace
+ * config but: (a) targets `main` (GitHub default) instead of `master`,
+ * (b) keeps `commit: false` so the changesets/action step owns commits,
+ * (c) keeps `ignore: []` because every public-candidate package is
+ * non-private and Changesets respects each package's `private` flag.
+ */
+const CHANGESET_CONFIG = {
+  $schema: 'https://unpkg.com/@changesets/config@3.0.0/schema.json',
+  changelog: '@changesets/cli/changelog',
+  commit: false,
+  fixed: [] as readonly string[],
+  linked: [] as readonly string[],
+  access: 'public',
+  baseBranch: 'main',
+  updateInternalDependencies: 'patch',
+  ignore: [] as readonly string[],
+};
+
+/**
+ * `.changeset/README.md` — convention file Changesets writes by default.
+ * We override it with a customized note explaining that the contents are
+ * generated and that changesets land upstream in the private workspace.
+ */
+const CHANGESET_README = [
+  '# Changesets',
+  '',
+  'This directory holds [Changesets](https://github.com/changesets/changesets)',
+  'configuration for the ARKI public release pipeline.',
+  '',
+  '## Author flow (maintainers)',
+  '',
+  'Changesets are authored in the upstream private workspace. When the',
+  'export-public job runs, the entire `.changeset/` directory (except this',
+  'README and `config.json`) is mirrored here so the `changesets/action`',
+  'step can see the pending bumps.',
+  '',
+  '## Consumer flow',
+  '',
+  '1. Maintainer pushes to `main` carrying one or more changeset entries.',
+  '2. `changesets/action` opens a `Version Packages` PR that consumes the',
+  '   entries and bumps each affected package + dependents.',
+  '3. Merging the PR triggers `changeset publish`, which:',
+  '   - runs the gates one more time,',
+  '   - publishes the bumped packages to npm under `@arki/*`,',
+  '   - creates a GitHub Release per published package.',
+  '',
+  '## Canary releases',
+  '',
+  'For canary publishing, run `workflow_dispatch` on `release.yml` with',
+  '`canary` set to `true`. The workflow runs:',
+  '',
+  '```bash',
+  'bunx changeset version --snapshot canary',
+  'bunx changeset publish --tag canary --no-git-tag',
+  '```',
+  '',
+  'Canary tags never become "latest" on npm — install them explicitly via',
+  '`bunx @arki/dot@canary` etc.',
+  '',
+].join('\n');
+
+/**
+ * The publish workflow. Triggers:
+ *
+ *  - `push` to `main`            — opens/refreshes the "Version Packages" PR
+ *                                  when changesets are present; publishes on
+ *                                  PR-merge that carries no changesets.
+ *  - `workflow_dispatch`         — manual trigger; `canary: true` switches
+ *                                  to snapshot publish on the `canary` tag.
+ *
+ * Required secrets:
+ *  - `NPM_TOKEN`        — npm automation token with publish rights on `@arki/*`
+ *  - `GITHUB_TOKEN`     — automatically provided by Actions
+ */
+const RELEASE_WORKFLOW = [
+  'name: Release',
+  '',
+  'on:',
+  '  push:',
+  '    branches: [main]',
+  '  workflow_dispatch:',
+  '    inputs:',
+  '      canary:',
+  '        description: "Publish a canary snapshot release"',
+  '        required: false',
+  '        default: "false"',
+  '',
+  'concurrency:',
+  '  group: release-${{ github.ref }}',
+  '  cancel-in-progress: false',
+  '',
+  'permissions:',
+  '  contents: write',
+  '  pull-requests: write',
+  '  id-token: write',
+  '',
+  'jobs:',
+  '  release:',
+  '    name: Release',
+  '    runs-on: ubuntu-latest',
+  '    timeout-minutes: 25',
+  '    steps:',
+  '      - name: Checkout',
+  '        uses: actions/checkout@v4',
+  '        with:',
+  '          fetch-depth: 0',
+  '',
+  '      - name: Setup Bun',
+  '        uses: oven-sh/setup-bun@v2',
+  '        with:',
+  '          bun-version: latest',
+  '',
+  '      - name: Setup Node 22',
+  '        uses: actions/setup-node@v4',
+  '        with:',
+  '          node-version: "22"',
+  '          registry-url: "https://registry.npmjs.org"',
+  '',
+  '      - name: Install dependencies',
+  '        run: bun install --frozen-lockfile',
+  '',
+  '      - name: Build all packages',
+  '        run: bun run -F "@arki/*" build',
+  '',
+  '      - name: Publish canary snapshot',
+  '        if: github.event_name == \'workflow_dispatch\' && github.event.inputs.canary == \'true\'',
+  '        env:',
+  '          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}',
+  '          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}',
+  '        run: |',
+  '          bunx changeset version --snapshot canary',
+  '          bunx changeset publish --tag canary --no-git-tag',
+  '',
+  '      - name: Create release PR or publish (stable)',
+  '        if: github.event_name == \'push\' || (github.event_name == \'workflow_dispatch\' && github.event.inputs.canary != \'true\')',
+  '        uses: changesets/action@v1',
+  '        with:',
+  '          publish: bunx changeset publish',
+  '          version: bunx changeset version',
+  '          title: "chore: version packages"',
+  '          commit: "chore: version packages"',
+  '        env:',
+  '          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}',
+  '          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}',
+  '          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}',
+  '',
+].join('\n');
 
 /**
  * Serialize a publishable manifest with stable field ordering, two-space
@@ -658,6 +942,17 @@ async function writeJsonFile(destPath: string, value: unknown): Promise<void> {
   const serialized = `${JSON.stringify(value, null, 2)}\n`;
   await mkdir(path.dirname(destPath), { recursive: true });
   await writeFile(destPath, serialized, 'utf8');
+}
+
+/**
+ * Write a UTF-8 text file, creating parent directories as needed. Mirrors
+ * {@link writeJsonFile}'s `mkdir -p` semantics so scaffolding files in
+ * nested directories (`.changeset/`, `.github/workflows/`) don't fail on
+ * missing parents.
+ */
+async function writeTextFile(destPath: string, contents: string): Promise<void> {
+  await mkdir(path.dirname(destPath), { recursive: true });
+  await writeFile(destPath, contents, 'utf8');
 }
 
 /**
