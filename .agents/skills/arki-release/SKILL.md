@@ -14,7 +14,7 @@ description: End-to-end release pipeline for the `@arki/*` npm scope and the `ar
 
 Don't invoke for: general npm questions, generic monorepo work, or tasks that aren't about the `@arki/*` ecosystem.
 
-## The four surfaces — keep them synchronized
+## The five surfaces — keep them synchronized
 
 ```
 ┌───────────────────────────┐   bun release:arki   ┌────────────────────┐
@@ -29,11 +29,23 @@ Don't invoke for: general npm questions, generic monorepo work, or tasks that ar
    `bun release:arki                  ┌──────────────┐  ┌──────────────┐
     scorecard` (gate)                 │ npm registry │  │ arki-labs/   │
                                       │ @arki/*      │  │ arki on      │
-                                      └──────────────┘  │ GitHub       │
-                                                        └──────────────┘
+                                      └──────┬───────┘  │ GitHub       │
+                                             │          └──────────────┘
+                                             │
+                            bun release:arki │
+                            sync-package-    │
+                            repos            │
+                                             ▼
+                                      ┌──────────────────────────────┐
+                                      │ arki-labs/<name>             │
+                                      │ (per-package archived        │
+                                      │  read-only mirrors;          │
+                                      │  one commit per published    │
+                                      │  npm version + v<x> tags)    │
+                                      └──────────────────────────────┘
 ```
 
-**Doctrine:** the **materialized tree at `.release/arki-public/`** is the canonical artifact. Both npm and GitHub are mirrors of it. The materialized tree is **deterministically regenerated** from monorepo source — never hand-edit it.
+**Doctrine:** the **materialized tree at `.release/arki-public/`** is the canonical artifact. npm and `arki-labs/arki` are mirrors of it; the per-package repos at `arki-labs/<name>` are mirrors *of npm* (reconstructed from npm tarballs, one commit per published version). The materialized tree is **deterministically regenerated** from monorepo source — never hand-edit it. Per-package repos are **deterministically reconstructable** from npm — never hand-edit them either; they are archived to enforce that signal.
 
 ## The release-doctrine non-negotiables
 
@@ -60,7 +72,8 @@ Patch bump (0.0.1 → 0.0.2): any change, breaking or not. Yes, this is anti-sem
 |---|---|---|
 | **Ship update to existing wave package** (most common) | A package in a published wave changed; ship a new version. | [ship-update.md](./ship-update.md) |
 | **Promote a private package to a public wave** | A new `@arki/*` package is ready for first publication. | [add-new-package.md](./add-new-package.md) |
-| **Sync the GitHub mirror** | After any source change that should land on `arki-labs/arki`. | [sync-github.md](./sync-github.md) |
+| **Sync the GitHub monorepo mirror** | After any source change that should land on `arki-labs/arki`. | [sync-github.md](./sync-github.md) |
+| **Sync the per-package mirrors** (`arki-labs/<name>`) | After any new npm publish, OR when `history` reports `missing` / `tag-drift` / `unarchived` on the mirror dimension. | [sync-package-repos.md](./sync-package-repos.md) |
 | **Diagnose a release issue** | `npm publish` fails, scorecard blocks, fixture matrix breaks, etc. | [troubleshooting.md](./troubleshooting.md) |
 
 ## Hard rules
@@ -88,8 +101,14 @@ done
 # Is the materialized tree current?
 bun tooling/arki-release/src/cli.ts export-public
 
-# What's on the GitHub mirror?
+# What's on the GitHub monorepo mirror?
 git ls-remote git@github.com:arki-labs/arki.git
+
+# Reconcile all five surfaces (source / npm / changelog / monorepo-mirror tags / per-package repos)
+bun tooling/arki-release/src/cli.ts history
+
+# Sync the per-package mirrors (dry-run shows the plan)
+bun tooling/arki-release/src/cli.ts sync-package-repos --dry-run
 ```
 
 ## What this skill replaces

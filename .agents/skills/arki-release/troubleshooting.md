@@ -235,3 +235,49 @@ json.dump(d, open(path, 'w'), indent=2, ensure_ascii=False)
 2. If you find content you don't recognize, STOP — surface to user.
 3. If you find user's own old work, surface and get explicit "replace" authorization before force-push.
 4. After force-push, GitHub keeps the abandoned commits temporarily — they can be recovered via the reflog UI if needed.
+
+## Per-package mirror archive-dance failures
+
+**Symptom 1:** `sync-package-repos` emits `SYNC_E001 gh unarchive failed` on a repo that exists.
+
+**Cause:** The `gh` CLI token lacks repo-admin scope. The archive flip is `gh api repos/<org>/<repo> -X PATCH -F archived=false`, which needs `repo` scope (or for orgs, `admin:org` if your auth uses fine-grained tokens scoped narrowly).
+
+**Fix:** Re-auth with `gh auth login -s repo` (broad scope). Confirm with `gh auth status -h github.com` showing `Token scopes:` containing `repo`. Re-run the sync; the archive will succeed.
+
+---
+
+**Symptom 2:** `sync-package-repos` succeeded but the mirror is left unarchived (GitHub UI doesn't show the read-only banner).
+
+**Cause:** The re-archive at the end of the sync is recorded as a *warning* (not a failure), because the push already succeeded. The mirror state diverges from the doctrine.
+
+**Fix:** Either re-run `bun release:arki sync-package-repos --package "@arki/<name>"` (it'll no-op the content and just flip the archive bit), or `gh repo archive arki-labs/<name>` directly.
+
+**Verification:** `bun release:arki history` flags unarchived mirrors with `repoStatus: 'unarchived'` and emits `HIST_E006`. Run that after every sync to confirm the dance landed clean.
+
+---
+
+**Symptom 3:** `sync-package-repos` reports `failed` mid-batch and the workspace temp dir is full of `arki-mirror-*` directories.
+
+**Cause:** A `failed` exit from `syncOnePackage` returns before the `await rm(workDir, ...)` cleanup. The orchestrator continues to the next package, but the failed package's temp dir leaks.
+
+**Fix:** `\rm -rf /tmp/arki-mirror-*` (escape `rm` to bypass the workspace `-i` alias). Re-run the sync with `--package "@arki/<failed-name>"` to retry just that one.
+
+## Per-package mirror tag-drift after a yank
+
+**Symptom:** You yank a published version from npm, then `bun release:arki history` reports the mirror as `tag-drift` with extra tags that aren't on npm.
+
+**Cause:** Tags are sticky — the mirror was synced before the yank, so it carries a `v<yanked-version>` tag that npm no longer has. The classifier compares published-versions ⊆ mirror-tags, but the inverse leak (mirror has versions npm doesn't) only shows up as a *warning* not a failure.
+
+**Fix:** `bun release:arki sync-package-repos --package "@arki/<name>" --force` — the force-rebuild deletes the local tag set and rebuilds from npm's current published list, so the yanked tag disappears on the next `git push --force --tags`.
+
+**Note:** GitHub keeps abandoned tags in dangling-tag GC for ~30-90 days; if you yanked by mistake, the tag is recoverable via reflog during that window.
+
+## Bulk-sync rate-limited by GitHub API
+
+**Symptom:** Mid-batch, `sync-package-repos` starts failing with `SYNC_E001 gh api ...` mentioning `secondary rate limit` or `403`.
+
+**Cause:** The sync makes 2-5 `gh api` calls per package (probe + unarchive + archive + repo create + repo edit). For 14 packages this is ~30-50 calls. GitHub's secondary rate limits kick in around 30 mutating requests / minute.
+
+**Fix:** Wait 60 seconds, then re-run with `--package` flags for just the packages that didn't finish (look at the `failed` items in the envelope). The sync is fully resumable — successful packages skip on the next run because they're now `in-sync`.
+
+**Prevention:** For the first bulk-create of all 14 packages, expect this and plan two passes 60 seconds apart. Subsequent incremental syncs (one new version on one package) won't hit the limit.
