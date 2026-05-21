@@ -12,12 +12,13 @@ import { Route as rootRouteImport } from './routes/__root';
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml';
 import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt';
 import { Route as ManifestDotwebmanifestRouteImport } from './routes/manifest[.]webmanifest';
+import { Route as MarketingRouteImport } from './routes/_marketing';
 import { Route as AppRouteImport } from './routes/_app';
 import { Route as PostsIndexRouteImport } from './routes/posts/index';
 import { Route as FeedbackIndexRouteImport } from './routes/feedback/index';
 import { Route as ChangelogIndexRouteImport } from './routes/changelog/index';
 import { Route as AboutIndexRouteImport } from './routes/about/index';
-import { Route as AppIndexRouteImport } from './routes/_app/index';
+import { Route as MarketingIndexRouteImport } from './routes/_marketing/index';
 import { Route as PostsFeedDotxmlRouteImport } from './routes/posts/feed[.]xml';
 import { Route as PostsSlugRouteImport } from './routes/posts/$slug';
 import { Route as LegalSlugRouteImport } from './routes/legal/$slug';
@@ -48,6 +49,10 @@ const ManifestDotwebmanifestRoute = ManifestDotwebmanifestRouteImport.update({
   path: '/manifest.webmanifest',
   getParentRoute: () => rootRouteImport,
 } as any);
+const MarketingRoute = MarketingRouteImport.update({
+  id: '/_marketing',
+  getParentRoute: () => rootRouteImport,
+} as any);
 const AppRoute = AppRouteImport.update({
   id: '/_app',
   getParentRoute: () => rootRouteImport,
@@ -72,10 +77,10 @@ const AboutIndexRoute = AboutIndexRouteImport.update({
   path: '/about/',
   getParentRoute: () => rootRouteImport,
 } as any);
-const AppIndexRoute = AppIndexRouteImport.update({
+const MarketingIndexRoute = MarketingIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => AppRoute,
+  getParentRoute: () => MarketingRoute,
 } as any);
 const PostsFeedDotxmlRoute = PostsFeedDotxmlRouteImport.update({
   id: '/posts/feed.xml',
@@ -152,7 +157,7 @@ const BackofficeBackofficeEventSourcingProjectionsRoute =
   } as any);
 
 export interface FileRoutesByFullPath {
-  '/': typeof AppIndexRoute;
+  '/': typeof MarketingIndexRoute;
   '/manifest.webmanifest': typeof ManifestDotwebmanifestRoute;
   '/robots.txt': typeof RobotsDottxtRoute;
   '/sitemap.xml': typeof SitemapDotxmlRoute;
@@ -176,6 +181,7 @@ export interface FileRoutesByFullPath {
   '/backoffice/event-sourcing/': typeof BackofficeBackofficeEventSourcingIndexRoute;
 }
 export interface FileRoutesByTo {
+  '/': typeof MarketingIndexRoute;
   '/manifest.webmanifest': typeof ManifestDotwebmanifestRoute;
   '/robots.txt': typeof RobotsDottxtRoute;
   '/sitemap.xml': typeof SitemapDotxmlRoute;
@@ -186,7 +192,6 @@ export interface FileRoutesByTo {
   '/legal/$slug': typeof LegalSlugRoute;
   '/posts/$slug': typeof PostsSlugRoute;
   '/posts/feed.xml': typeof PostsFeedDotxmlRoute;
-  '/': typeof AppIndexRoute;
   '/about': typeof AboutIndexRoute;
   '/changelog': typeof ChangelogIndexRoute;
   '/feedback': typeof FeedbackIndexRoute;
@@ -201,6 +206,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   '/_app': typeof AppRouteWithChildren;
+  '/_marketing': typeof MarketingRouteWithChildren;
   '/manifest.webmanifest': typeof ManifestDotwebmanifestRoute;
   '/robots.txt': typeof RobotsDottxtRoute;
   '/sitemap.xml': typeof SitemapDotxmlRoute;
@@ -212,7 +218,7 @@ export interface FileRoutesById {
   '/legal/$slug': typeof LegalSlugRoute;
   '/posts/$slug': typeof PostsSlugRoute;
   '/posts/feed.xml': typeof PostsFeedDotxmlRoute;
-  '/_app/': typeof AppIndexRoute;
+  '/_marketing/': typeof MarketingIndexRoute;
   '/about/': typeof AboutIndexRoute;
   '/changelog/': typeof ChangelogIndexRoute;
   '/feedback/': typeof FeedbackIndexRoute;
@@ -251,6 +257,7 @@ export interface FileRouteTypes {
     | '/backoffice/event-sourcing/';
   fileRoutesByTo: FileRoutesByTo;
   to:
+    | '/'
     | '/manifest.webmanifest'
     | '/robots.txt'
     | '/sitemap.xml'
@@ -261,7 +268,6 @@ export interface FileRouteTypes {
     | '/legal/$slug'
     | '/posts/$slug'
     | '/posts/feed.xml'
-    | '/'
     | '/about'
     | '/changelog'
     | '/feedback'
@@ -275,6 +281,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_app'
+    | '/_marketing'
     | '/manifest.webmanifest'
     | '/robots.txt'
     | '/sitemap.xml'
@@ -286,7 +293,7 @@ export interface FileRouteTypes {
     | '/legal/$slug'
     | '/posts/$slug'
     | '/posts/feed.xml'
-    | '/_app/'
+    | '/_marketing/'
     | '/about/'
     | '/changelog/'
     | '/feedback/'
@@ -301,6 +308,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren;
+  MarketingRoute: typeof MarketingRouteWithChildren;
   ManifestDotwebmanifestRoute: typeof ManifestDotwebmanifestRoute;
   RobotsDottxtRoute: typeof RobotsDottxtRoute;
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute;
@@ -343,6 +351,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ManifestDotwebmanifestRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    '/_marketing': {
+      id: '/_marketing';
+      path: '';
+      fullPath: '/';
+      preLoaderRoute: typeof MarketingRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/_app': {
       id: '/_app';
       path: '';
@@ -378,12 +393,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AboutIndexRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    '/_app/': {
-      id: '/_app/';
+    '/_marketing/': {
+      id: '/_marketing/';
       path: '/';
       fullPath: '/';
-      preLoaderRoute: typeof AppIndexRouteImport;
-      parentRoute: typeof AppRoute;
+      preLoaderRoute: typeof MarketingIndexRouteImport;
+      parentRoute: typeof MarketingRoute;
     };
     '/posts/feed.xml': {
       id: '/posts/feed.xml';
@@ -487,16 +502,26 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppRouteChildren {
-  AppIndexRoute: typeof AppIndexRoute;
   AppProfileIndexRoute: typeof AppProfileIndexRoute;
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppIndexRoute: AppIndexRoute,
   AppProfileIndexRoute: AppProfileIndexRoute,
 };
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren);
+
+interface MarketingRouteChildren {
+  MarketingIndexRoute: typeof MarketingIndexRoute;
+}
+
+const MarketingRouteChildren: MarketingRouteChildren = {
+  MarketingIndexRoute: MarketingIndexRoute,
+};
+
+const MarketingRouteWithChildren = MarketingRoute._addFileChildren(
+  MarketingRouteChildren,
+);
 
 interface BackofficeBackofficeRouteChildren {
   BackofficeBackofficeIndexRoute: typeof BackofficeBackofficeIndexRoute;
@@ -517,6 +542,7 @@ const BackofficeBackofficeRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
+  MarketingRoute: MarketingRouteWithChildren,
   ManifestDotwebmanifestRoute: ManifestDotwebmanifestRoute,
   RobotsDottxtRoute: RobotsDottxtRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,

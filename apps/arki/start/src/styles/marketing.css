@@ -1,0 +1,205 @@
+/* ────────────────────────────────────────────────────────────────
+   marketing.css — chrome and brand-token scope for the arki.dev
+   marketing surface. Loaded by `_marketing.tsx` layout route.
+   The `.marketing` root re-declares the arki brand palette (amber
+   on dark zinc, IBM Plex Sans + JetBrains Mono) so the workbench
+   design system used by the rest of the app remains untouched.
+   ──────────────────────────────────────────────────────────────── */
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+
+.marketing {
+  /* arki brand palette — dark zinc + amber accent */
+  --background: hsl(240 10% 4%);
+  --foreground: hsl(240 6% 90%);
+  --card: hsl(240 8% 7%);
+  --card-foreground: hsl(240 6% 90%);
+  --border: hsl(240 6% 18%);
+  --muted: hsl(240 6% 14%);
+  --muted-foreground: hsl(240 5% 60%);
+  --accent: hsl(43 96% 56%);
+  --accent-foreground: hsl(240 10% 4%);
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 22px;
+
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.marketing * { box-sizing: border-box; }
+.marketing a { color: inherit; text-decoration: none; }
+.marketing button { font: inherit; cursor: pointer; }
+
+/* ============================================================
+   NAV — sticky top bar
+   ============================================================ */
+.marketing-nav {
+  height: 56px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  background: var(--background);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.marketing-nav-left,
+.marketing-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+.marketing-nav-mark {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: baseline;
+  color: var(--foreground);
+}
+.marketing-nav-mark .accent { color: var(--accent); }
+.marketing-nav-mark .dim { color: var(--muted-foreground); font-weight: 500; }
+
+.marketing-nav-links {
+  display: flex;
+  gap: 4px;
+}
+.marketing-nav-link {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--muted-foreground);
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: color 150ms var(--ease-out);
+}
+.marketing-nav-link:hover { color: var(--foreground); }
+.marketing-nav-link.active { color: var(--foreground); }
+.marketing-nav-link.active::after {
+  content: "";
+  display: block;
+  height: 1px;
+  background: var(--accent);
+  margin-top: 2px;
+}
+
+.marketing-cmdk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted-foreground);
+  min-width: 180px;
+  white-space: nowrap;
+}
+.marketing-cmdk > span:not(.kbd) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.marketing-cmdk .kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin-left: auto;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--background);
+}
+
+.marketing-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  width: 32px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted-foreground);
+  transition:
+    color 150ms var(--ease-out),
+    border-color 150ms var(--ease-out),
+    background-color 150ms var(--ease-out);
+}
+.marketing-icon-btn:hover {
+  color: var(--foreground);
+  border-color: var(--border);
+  background: var(--muted);
+}
+.marketing-icon-btn svg { font-size: 16px; }
+
+@media (max-width: 720px) {
+  .marketing-nav { padding: 0 16px; }
+  .marketing-nav-links { display: none; }
+  .marketing-cmdk { display: none; }
+}
+
+/* ============================================================
+   STATUS BAR — terminal-style footer strip
+   ============================================================ */
+.marketing-statusbar {
+  border-top: 1px solid var(--border);
+  background: var(--card);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 24px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  min-height: 36px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.marketing-statusbar .grp {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.marketing-statusbar .sep { color: var(--border); }
+.marketing-statusbar a {
+  color: var(--muted-foreground);
+  transition: color 150ms var(--ease-out);
+}
+.marketing-statusbar a:hover { color: var(--foreground); }
+
+.marketing-statusbar .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 18px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  font-size: 10px;
+  color: var(--foreground);
+}
+.marketing-statusbar .pill.success { color: hsl(142 65% 55%); border-color: hsl(142 65% 55% / 0.3); }
+.marketing-statusbar .pill .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: currentColor;
+}
+
+@media (max-width: 720px) {
+  .marketing-statusbar { padding: 8px 16px; }
+}
