@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-density="compact" data-footer="rich">
+<head>
+  <meta charset="utf-8">
+  <title>defineApp(name) — arki.dev</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="src/assets/favicon.svg">
+  <link rel="stylesheet" href="src/app.css">
+  <link rel="stylesheet" href="src/lifecycle.css">
+  <link rel="stylesheet" href="src/define-app.css">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- design-system chrome + footer band variants + primitives -->
+  <script type="text/babel" src="src/components/primitives.jsx"></script>
+  <script type="text/babel" src="src/components/chrome.jsx"></script>
+  <script type="text/babel" src="src/components/footer-bands.jsx"></script>
+  <script type="text/babel" src="src/components/boot-dag.jsx"></script>
+
+  <!-- tweaks shell + screen + app boot -->
+  <script type="text/babel" src="src/tweaks-panel.jsx"></script>
+  <script type="text/babel" src="src/screens/DefineApp.jsx"></script>
+
+  <script type="text/babel">
+    const { useState: useStateApp, useEffect: useEffectApp } = React;
+
+    const TWEAK_DEFAULTS_DA = /*EDITMODE-BEGIN*/{
+      "theme": "dark",
+      "density": "compact",
+      "footer": "rich",
+      "band": "ascii",
+      "bandSpeed": 850
+    }/*EDITMODE-END*/;
+
+    function App() {
+      const [t, setTweak] = useTweaks(TWEAK_DEFAULTS_DA);
+
+      useEffectApp(() => {
+        document.documentElement.dataset.theme   = t.theme;
+        document.documentElement.dataset.density = t.density;
+        document.documentElement.dataset.footer  = t.footer;
+      }, [t.theme, t.density, t.footer]);
+
+      const setThemeBridge = (next) => setTweak("theme", next);
+
+      return (
+        <div className="shell" data-screen-label="21 defineApp">
+          <Nav route="concept" setRoute={() => {}}
+               theme={t.theme} setTheme={setThemeBridge} />
+
+          <div className="body-wrap">
+            <DefineApp />
+          </div>
+
+          <StatusBar route="concept" />
+
+          {t.band === "boot-dag" && <BandBootDag tickMs={t.bandSpeed} />}
+          {t.band === "ascii"    && <ASCIIBand />}
+          {t.band === "ticker"   && <BandTicker />}
+          {t.band === "graph"    && <BandGraph />}
+          {t.band === "monitor"  && <BandMonitor />}
+          {t.band === "kinetic"  && <BandKinetic />}
+          {t.band === "pipeline" && <BandPipeline />}
+
+          <TweaksPanel title="Tweaks" defaultOpen={false}>
+            <TweakSection label="Theme & density" />
+            <TweakRadio  label="Theme"   value={t.theme}
+                         options={["dark", "light"]}
+                         onChange={(v) => setTweak("theme", v)} />
+            <TweakRadio  label="Density" value={t.density}
+                         options={["dense", "compact", "comfy"]}
+                         onChange={(v) => setTweak("density", v)} />
+            <TweakRadio  label="Footer"  value={t.footer}
+                         options={["minimal", "rich"]}
+                         onChange={(v) => setTweak("footer", v)} />
+
+            <TweakSection label="ASCII band (C11)" />
+            <TweakSelect label="Band variant" value={t.band}
+                         options={[
+                           "boot-dag", "ascii", "ticker",
+                           "graph", "monitor", "kinetic", "pipeline",
+                         ]}
+                         onChange={(v) => setTweak("band", v)} />
+            <TweakSlider label="Boot tick"  value={t.bandSpeed}
+                         min={400} max={1600} step={50} unit="ms"
+                         onChange={(v) => setTweak("bandSpeed", v)} />
+          </TweaksPanel>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>

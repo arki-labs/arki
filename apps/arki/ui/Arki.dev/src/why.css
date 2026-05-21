@@ -1,0 +1,404 @@
+/* ============================================================
+   01 — Why ARKI
+   Long-form doctrine page. Reading-mode column at 720px,
+   left-aligned, four sections separated by hairline rules.
+   ============================================================ */
+
+.why {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* — outer column wrapper: hairline rules live between sections — */
+.why .why-col {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* ─── hero / title block ─────────────────────────────── */
+.why .why-hero {
+  padding: 72px 0 48px;
+}
+.why .why-kicker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.why .why-kicker .rule {
+  display: inline-block;
+  width: 28px; height: 1px;
+  background: hsl(43 96% 56% / 0.5);
+}
+.why h1 {
+  font-family: var(--font-sans);
+  font-size: 56px; line-height: 60px;
+  font-weight: 600; letter-spacing: -0.03em;
+  color: var(--foreground);
+  margin: 0 0 18px;
+}
+.why h1 .accent { color: var(--accent); }
+
+.why .why-subtitle {
+  font-family: var(--font-sans);
+  font-size: 19px; line-height: 30px;
+  color: var(--muted-foreground);
+  margin: 0 0 24px;
+  max-width: 60ch;
+  text-wrap: pretty;
+}
+.why .why-subtitle .fg { color: var(--foreground); }
+
+.why .why-meta {
+  display: flex; gap: 18px; align-items: center;
+  flex-wrap: wrap;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--muted-foreground); letter-spacing: 0.02em;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+  max-width: 64ch;
+}
+.why .why-meta > span,
+.why .why-meta > a { white-space: nowrap; }
+.why .why-meta .sep { color: var(--border); }
+.why .why-meta .acc { color: var(--accent); }
+
+/* ─── section frame ──────────────────────────────────── */
+.why section.s {
+  padding: 56px 0;
+  border-top: 1px solid var(--border);
+}
+
+.why .s-num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 14px;
+}
+.why .s-num .ord { color: var(--accent); }
+.why .s-num .dim { color: hsl(240 5% 35%); }
+
+.why h2 {
+  font-family: var(--font-sans);
+  font-size: 28px; line-height: 36px;
+  font-weight: 600; letter-spacing: -0.02em;
+  color: var(--foreground);
+  margin: 0 0 18px;
+  max-width: 28ch;
+  text-wrap: balance;
+}
+
+.why p {
+  font-family: var(--font-sans);
+  font-size: 17px; line-height: 28px;
+  color: var(--foreground);
+  margin: 0 0 18px;
+  max-width: 64ch;
+  text-wrap: pretty;
+}
+.why p.dim { color: var(--muted-foreground); }
+.why p code, .why li code {
+  font-family: var(--font-mono); font-size: 14px;
+  background: var(--muted); padding: 1px 6px;
+  border-radius: 3px; color: var(--foreground);
+}
+
+/* ─── inline mono callout — the composition string ───── */
+.why .why-callout {
+  margin: 20px 0 22px;
+  padding: 16px 20px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 14px; line-height: 22px;
+  color: var(--foreground);
+  letter-spacing: 0.01em;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.why .why-callout .acc { color: var(--accent); }
+.why .why-callout .dim { color: var(--muted-foreground); }
+.why .why-callout .label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  margin-bottom: 6px;
+  white-space: normal;
+}
+
+/* ─── comparison table (Section 2) ───────────────────── */
+.why .why-cmp {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 24px 0 18px;
+  font-size: 14px;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--card);
+}
+.why .why-cmp caption {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  text-align: left;
+  padding: 10px 16px;
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+  caption-side: top;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.why .why-cmp caption .tag-respect {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.why .why-cmp tbody tr.peer th {
+  text-align: left;
+  vertical-align: top;
+  padding: 18px 18px 6px;
+  border-top: 1px solid var(--border);
+  width: 36%;
+  font-weight: 500;
+}
+.why .why-cmp tbody tr.peer:first-of-type th,
+.why .why-cmp tbody tr.peer:first-of-type td {
+  border-top: none;
+}
+
+.why .why-cmp tbody tr.peer th .name {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--foreground);
+  display: block;
+  letter-spacing: -0.01em;
+}
+.why .why-cmp tbody tr.peer th .role {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted-foreground);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-top: 4px;
+  display: block;
+}
+
+.why .why-cmp tbody tr.peer td {
+  padding: 18px 18px 6px;
+  border-top: 1px solid var(--border);
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 22px;
+  vertical-align: top;
+}
+
+.why .why-cmp tbody tr.diff th,
+.why .why-cmp tbody tr.diff td {
+  vertical-align: top;
+  border-top: none;
+  padding-top: 0;
+  padding-bottom: 18px;
+}
+.why .why-cmp tbody tr.diff th {
+  padding-left: 38px;
+  padding-right: 18px;
+}
+.why .why-cmp tbody tr.diff th .label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.why .why-cmp tbody tr.diff th .label .arr {
+  color: var(--accent);
+}
+.why .why-cmp tbody tr.diff td {
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 22px;
+  padding-left: 18px;
+  padding-right: 18px;
+}
+.why .why-cmp tbody tr.diff td .fg { color: var(--foreground); }
+
+.why .why-cmp-coda {
+  font-family: var(--font-sans);
+  font-size: 16px; line-height: 26px;
+  color: var(--muted-foreground);
+  font-style: italic;
+  margin: 14px 0 4px;
+  padding-left: 14px;
+  border-left: 2px solid var(--accent);
+  max-width: 60ch;
+}
+.why .why-cmp-coda .fg { color: var(--foreground); font-style: normal; }
+
+/* ─── PRATFALL list & VALUE list — equal visual weight ─── */
+.why .why-pair {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+
+.why .why-list {
+  list-style: none;
+  padding: 0;
+  margin: 18px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.why .why-list li {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 16px;
+  line-height: 25px;
+  color: var(--foreground);
+  align-items: start;
+}
+.why .why-list li:last-child {
+  border-bottom: none;
+}
+.why .why-list li .gl {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--muted-foreground);
+  padding-top: 2px;
+  text-align: center;
+}
+.why .why-list li .body {
+  max-width: 58ch;
+  text-wrap: pretty;
+}
+.why .why-list li .body .fg { color: var(--foreground); }
+.why .why-list li .body code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--muted);
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--foreground);
+}
+
+/* destructive flavour for the NOT-pick list */
+.why .why-list.not li .gl { color: hsl(0 63% 60%); }
+.why .why-list.fits li .gl { color: var(--accent); }
+
+/* ─── CTA links — plain text, underline on hover ───── */
+.why .why-cta-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px dashed var(--border);
+  max-width: 60ch;
+}
+.why .why-cta {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  padding: 4px 0;
+  transition: color 150ms var(--ease-out);
+}
+.why .why-cta .arr {
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+.why .why-cta .target {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.why .why-cta:hover {
+  color: var(--accent);
+}
+.why .why-cta:hover .target {
+  color: var(--foreground);
+}
+.why .why-cta:hover .label {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 4px;
+}
+
+/* ─── tail block ─────────────────────────────────────── */
+.why .why-tail {
+  padding: 48px 0 64px;
+  border-top: 1px solid var(--border);
+}
+.why .why-tail .row {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 16px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--muted-foreground);
+  letter-spacing: 0.04em;
+}
+.why .why-tail .row a:hover { color: var(--foreground); }
+
+/* ─── small responsive: stack comparison rows on mobile ── */
+@media (max-width: 720px) {
+  .why h1 { font-size: 40px; line-height: 46px; }
+  .why .why-subtitle { font-size: 17px; line-height: 28px; }
+  .why h2 { font-size: 22px; line-height: 30px; }
+
+  .why .why-cmp tbody tr.peer th,
+  .why .why-cmp tbody tr.peer td {
+    display: block;
+    width: 100%;
+    padding: 14px 16px 0;
+  }
+  .why .why-cmp tbody tr.peer td {
+    padding-top: 4px;
+    padding-bottom: 6px;
+  }
+  .why .why-cmp tbody tr.diff th,
+  .why .why-cmp tbody tr.diff td {
+    display: block;
+    width: 100%;
+    padding: 0 16px;
+  }
+  .why .why-cmp tbody tr.diff th {
+    padding-left: 16px;
+    padding-top: 4px;
+  }
+  .why .why-cmp tbody tr.diff td {
+    padding-bottom: 16px;
+  }
+  .why .why-callout {
+    white-space: normal;
+  }
+}
