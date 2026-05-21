@@ -3,8 +3,8 @@ import { defineRelations } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PoolConfig } from 'pg';
 
-import { debugProjection } from './debug';
-import { initDbWithOptions } from './init';
+import { debugProjection } from './debug.js';
+import { initDbWithOptions } from './init.js';
 
 /**
  * Projection middleware context

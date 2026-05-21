@@ -3,7 +3,7 @@ import type { DrizzlePgConfig } from 'drizzle-orm/pg-core/utils';
 import { drizzle } from 'drizzle-orm/bun-sql/postgres';
 import { SQL } from 'bun';
 
-import { debugInit } from './debug';
+import { debugInit } from './debug.js';
 
 debugInit('[init.bun] Using Bun SQL (native) for database connections');
 
@@ -54,5 +54,5 @@ export const initDbWithOptions = <TRelations extends AnyRelations>(
   return db;
 };
 
-export { createDb } from './factory';
-export { getDbConnectionOptions, getDbConnectionParams } from './connection-options';
+export { createDb } from './factory.js';
+export { getDbConnectionOptions, getDbConnectionParams } from './connection-options.js';

@@ -1,5 +1,5 @@
-import { debugFactory } from './debug';
-import { env } from './env';
+import { debugFactory } from './debug.js';
+import { env } from './env.js';
 
 /**
  * Get database connection options from environment variables

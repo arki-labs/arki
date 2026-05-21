@@ -1,9 +1,9 @@
 import type { AnyRelations, Logger } from 'drizzle-orm';
 
-import { getDbConnectionOptions } from './connection-options';
-import { debugFactory } from './debug';
-import { env } from './env';
-import { initDbWithOptions } from './init';
+import { getDbConnectionOptions } from './connection-options.js';
+import { debugFactory } from './debug.js';
+import { env } from './env.js';
+import { initDbWithOptions } from './init.js';
 
 /**
  * Create a database connection using environment configuration.
@@ -44,4 +44,4 @@ export function createDb<TRelations extends AnyRelations>(
   return db;
 }
 
-export { getDbConnectionOptions, getDbConnectionParams } from './connection-options';
+export { getDbConnectionOptions, getDbConnectionParams } from './connection-options.js';

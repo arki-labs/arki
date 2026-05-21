@@ -2,7 +2,7 @@ import type { AnyRelations } from 'drizzle-orm';
 import { PGlite, type Extension } from '@electric-sql/pglite';
 import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite';
 
-import { debugInit } from './debug';
+import { debugInit } from './debug.js';
 
 export type PgliteInitOptions = {
   /** Path to the PGlite data directory. Defaults to `./.local/db`. */

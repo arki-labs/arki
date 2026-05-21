@@ -4,7 +4,7 @@ import type { PoolConfig } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 
-import { debugInit } from './debug';
+import { debugInit } from './debug.js';
 
 const Pool = pg.Pool;
 debugInit('[init] Using pg (pure JS) for database connections');
@@ -44,5 +44,5 @@ export const initDbWithOptions = <TRelations extends AnyRelations>(
   return db;
 };
 
-export { createDb } from './factory';
-export { getDbConnectionOptions, getDbConnectionParams } from './connection-options';
+export { createDb } from './factory.js';
+export { getDbConnectionOptions, getDbConnectionParams } from './connection-options.js';

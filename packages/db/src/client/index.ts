@@ -8,4 +8,4 @@
  *
  * See docs/superpowers/specs/2026-05-16-arki-offline-design.md §3.3.
  */
-export type * from './ids';
+export type * from './ids.js';

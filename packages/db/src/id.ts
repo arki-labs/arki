@@ -9,4 +9,4 @@ export const createPrefixedId = <T extends string>(prefix: T): `${T}${string}` =
 };
 
 // Re-export the new ID factory
-export * from './id-factory';
+export * from './id-factory.js';
