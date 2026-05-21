@@ -507,6 +507,8 @@ function formatErrorText(err: DotCliError): string {
  */
 export { DotCliError, DotCliErrorCode, dotCliDocsUrl };
 export type { DotCliEnvelope, DotCliEnvelopeStatus } from './render-explain.js';
+export { runNew } from './new.js';
+export type { DotNewEnvelope, DotNewOperation } from './json.js';
 
 // Direct-execution guard: only spin up the CLI when this module is the entry
 // point, not when it's imported (e.g. by tests).

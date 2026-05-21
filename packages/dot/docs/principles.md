@@ -116,8 +116,8 @@ This means we:
   public API.
 - Every error has a **`remediation` string** that tells you what to do, and
   a **`docsUrl` string** that points at the page that explains it.
-- Every public type is **importable** — no internal-only shapes that an
-  agent would need to reverse-engineer from runtime output.
+- Every public type is **importable** — no hidden shapes that an agent
+  would need to reverse-engineer from runtime output.
 
 What this principle *forbids*:
 
