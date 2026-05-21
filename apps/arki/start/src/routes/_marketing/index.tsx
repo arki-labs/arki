@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 
 import { Check, Copy, Files, GitBranch, GithubLogo } from '@arki/icons/phosphor';
@@ -443,9 +443,88 @@ function RepoPanel() {
   );
 }
 
+const LOGO_DOWNLOADS = [
+  { label: 'Download wordmark SVG', href: '/assets/arki-dev-wordmark.svg', filename: 'arki-dev-wordmark.svg' },
+  { label: 'Download monogram SVG', href: '/assets/arki-monogram.svg', filename: 'arki-monogram.svg' },
+] as const;
+
+function WipMark() {
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const logoRef = useRef<HTMLSpanElement | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  const handleContextMenu = (e: React.MouseEvent<HTMLSpanElement>) => {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  useEffect(() => {
+    if (!menu) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      closeMenu();
+    };
+    const onContextOutside = (e: MouseEvent) => {
+      if (logoRef.current?.contains(e.target as Node)) return;
+      closeMenu();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMenu();
+    };
+    window.addEventListener('click', onClickOutside);
+    window.addEventListener('contextmenu', onContextOutside);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', onClickOutside);
+      window.removeEventListener('contextmenu', onContextOutside);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [menu, closeMenu]);
+
+  return (
+    <header className="wip-mark" aria-label="arki.dev">
+      <span ref={logoRef} className="mk-logo" onContextMenu={handleContextMenu}>
+        <span className="mk-word">arki</span>
+        <span className="mk-dot">.</span>
+        <span className="mk-dim">dev</span>
+      </span>
+      <span className="mk-tag" aria-hidden="true">
+        <span className="mk-tag-prompt">&gt;</span>
+        <span>ship faster</span>
+        <span className="mk-caret" />
+      </span>
+      {menu && (
+        <div
+          ref={menuRef}
+          className="mk-menu"
+          role="menu"
+          aria-label="Logo options"
+          style={{ top: menu.y, left: menu.x }}
+        >
+          {LOGO_DOWNLOADS.map((opt) => (
+            <a
+              key={opt.href}
+              href={opt.href}
+              download={opt.filename}
+              className="mk-menu-item"
+              role="menuitem"
+              onClick={closeMenu}
+            >
+              {opt.label}
+            </a>
+          ))}
+        </div>
+      )}
+    </header>
+  );
+}
+
 function HomePage() {
   return (
     <div className="wip" id="main">
+      <WipMark />
+
       <section className="wip-hero" aria-labelledby="wip-hero-h">
         <p className="wip-kicker">
           <span className="glyph" aria-hidden="true">

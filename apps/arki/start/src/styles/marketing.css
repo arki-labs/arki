@@ -6,7 +6,7 @@
    design system used by the rest of the app remains untouched.
    ──────────────────────────────────────────────────────────────── */
 
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=VT323&display=swap");
 
 .marketing {
   /* arki brand palette — light mode ("paper-printed man page").
@@ -37,7 +37,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   display: grid;
-  grid-template-rows: auto 1fr auto auto;
+  grid-template-rows: 1fr auto auto;
 }
 
 :is(.dark) .marketing {
@@ -56,37 +56,8 @@
 .marketing button { font: inherit; cursor: pointer; }
 
 /* ============================================================
-   HEADER — page banner with the big brand mark.
-   Not sticky: at hero-size, sticky would eat 10-15% of viewport
-   on every scroll. The status bar (footer) carries the persistent
-   utilities (theme toggle, GitHub) instead.
+   ICON BUTTONS — used in the status-bar footer (theme + github).
    ============================================================ */
-.marketing-nav {
-  border-bottom: 1px solid var(--border);
-  padding: 40px 24px 32px;
-  background: var(--background);
-}
-/* Brand mark — L01 Monospace wordmark (arki Design System).
-   Pure type, two sizes. Anchor styling is inherited. */
-.brand-mark {
-  font-family: var(--font-mono);
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  line-height: 1;
-  display: inline-flex;
-  align-items: baseline;
-  color: var(--foreground);
-  transition: opacity 150ms var(--ease-out);
-}
-.brand-mark:hover { opacity: 0.85; }
-.brand-mark-accent { color: var(--accent); }
-
-.brand-mark--nav { font-size: 18px; }
-.brand-mark--hero {
-  font-size: clamp(56px, 8vw, 128px);
-  letter-spacing: -0.03em;
-}
-
 .marketing-icon-btn {
   display: inline-flex;
   align-items: center;

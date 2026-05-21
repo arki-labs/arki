@@ -11,6 +11,103 @@
 }
 
 /* ============================================================
+   WIP-MARK — giant phosphor wordmark + CRT tagline.
+   Sits at the top of the page, replacing a nav menu.
+   Structure ported from HomeWip.jsx (wip-mark + mk-* classes).
+   Brand is L01 wordmark `arki.dev`; the amber period carries the
+   phosphor glow that's the brand's pixel/cursor metaphor.
+   ============================================================ */
+.wip-mark {
+  display: block;
+  padding-bottom: 36px;
+  margin-bottom: 56px;
+  border-bottom: 1px solid var(--border);
+}
+.wip-mark .mk-logo {
+  /* Wraps the three wordmark spans; defines the right-click target. */
+  display: inline;
+  cursor: context-menu;
+}
+.wip-mark .mk-word,
+.wip-mark .mk-dot,
+.wip-mark .mk-dim {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: clamp(80px, 18vw, 240px);
+  line-height: 0.85;
+  letter-spacing: -0.04em;
+}
+.wip-mark .mk-word { color: var(--foreground); }
+.wip-mark .mk-dot {
+  color: var(--accent);
+  margin: 0 0.04em;
+  text-shadow:
+    0 0 28px hsl(43 96% 56% / 0.55),
+    0 0 64px hsl(43 96% 56% / 0.25);
+}
+.wip-mark .mk-dim { color: var(--muted-foreground); }
+.wip-mark .mk-tag {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 24px;
+  font-family: 'VT323', ui-monospace, monospace;
+  font-size: clamp(18px, 1.8vw, 26px);
+  color: var(--muted-foreground);
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+.wip-mark .mk-tag-prompt { color: var(--accent); }
+.wip-mark .mk-caret {
+  display: inline-block;
+  width: 10px;
+  height: 0.85em;
+  background: var(--accent);
+  margin-left: 4px;
+  transform: translateY(0.08em);
+  animation: mk-blink 1.1s steps(1, end) infinite;
+}
+@keyframes mk-blink {
+  0%, 50%   { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wip-mark .mk-caret { animation: none; }
+}
+
+/* Custom right-click context menu on the logo. Fixed-positioned at the
+   cursor coords captured from the `contextmenu` event. */
+.wip-mark .mk-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow:
+    0 4px 12px hsl(0 0% 0% / 0.25),
+    0 1px 0 hsl(0 0% 100% / 0.04) inset;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--foreground);
+}
+.wip-mark .mk-menu-item {
+  display: block;
+  padding: 8px 12px;
+  border-radius: 4px;
+  color: var(--foreground);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 120ms var(--ease-out);
+}
+.wip-mark .mk-menu-item:hover,
+.wip-mark .mk-menu-item:focus-visible {
+  background: var(--muted);
+  outline: none;
+}
+
+/* ============================================================
    HERO
    ============================================================ */
 .wip-hero { margin-bottom: 80px; }

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 880 240"
+     width="880"
+     height="240"
+     role="img"
+     aria-label="arki.dev">
+  <title>arki.dev</title>
+  <defs>
+    <style type="text/css"><![CDATA[
+      @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@600&display=swap");
+      .arki-wordmark {
+        font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+        font-weight: 600;
+        font-size: 200px;
+        letter-spacing: -0.04em;
+      }
+      .arki-word { fill: #e6e6e9; }
+      .arki-dot  { fill: #facc15; }
+      .arki-dim  { fill: #989899; }
+      .arki-glow { fill: #facc15; opacity: 0.6; filter: url(#arki-glow-filter); }
+    ]]></style>
+    <filter id="arki-glow-filter" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="8" />
+    </filter>
+  </defs>
+
+  <!-- Glow layer: only the period is visible; arki/dev are transparent
+       placeholders so the period lands in the same x-position as the crisp
+       layer below. The blur filter creates the amber phosphor halo. -->
+  <text x="40" y="200" class="arki-wordmark arki-glow">
+    <tspan opacity="0">arki</tspan><tspan>.</tspan><tspan opacity="0">dev</tspan>
+  </text>
+
+  <!-- Crisp layer: the actual wordmark, painted on top of the halo. -->
+  <text x="40" y="200" class="arki-wordmark">
+    <tspan class="arki-word">arki</tspan><tspan class="arki-dot">.</tspan><tspan class="arki-dim">dev</tspan>
+  </text>
+</svg>
