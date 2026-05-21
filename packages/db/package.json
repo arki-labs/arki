@@ -93,6 +93,11 @@
       "import": "./dist/bun.js",
       "default": "./dist/bun.js"
     },
+    "./dot": {
+      "types": "./dist/dot.d.ts",
+      "import": "./dist/dot.js",
+      "default": "./dist/dot.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -107,6 +112,7 @@
     "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
@@ -122,7 +128,14 @@
     "postgres": "catalog:drizzle",
     "zod": "catalog:"
   },
+  "peerDependencies": {
+    "@arki/dot": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@arki/dot": { "optional": true }
+  },
   "devDependencies": {
+    "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
