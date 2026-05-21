@@ -63,6 +63,11 @@
       "import": "./src/sentry-server.ts",
       "node": "./src/sentry-server.ts"
     },
+    "./sentry/bridge": {
+      "types": "./dist/src/sentry-bridge.d.ts",
+      "import": "./src/sentry-bridge.ts",
+      "default": "./src/sentry-bridge.ts"
+    },
     "./server-error-overlay": {
       "types": "./dist/src/server-error-overlay.d.ts",
       "import": "./src/server-error-overlay.ts",
@@ -102,9 +107,6 @@
     "@orpc/client": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@orpc/tanstack-query": "catalog:backend",
-    "@sentry/node": "catalog:",
-    "@sentry/react": "catalog:",
-    "@sentry/tanstackstart-react": "catalog:",
     "@tanstack/react-devtools": "catalog:tanstack/start",
     "@tanstack/react-query": "catalog:tanstack/react-query",
     "@tanstack/react-query-devtools": "catalog:tanstack/react-query",
@@ -121,13 +123,30 @@
     "workbox-precaching": "catalog:tanstack/start"
   },
   "peerDependencies": {
+    "@sentry/node": "catalog:",
+    "@sentry/react": "catalog:",
+    "@sentry/tanstackstart-react": "catalog:",
     "react": "catalog:react",
     "react-dom": "catalog:react"
+  },
+  "peerDependenciesMeta": {
+    "@sentry/node": {
+      "optional": true
+    },
+    "@sentry/react": {
+      "optional": true
+    },
+    "@sentry/tanstackstart-react": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
+    "@sentry/node": "catalog:",
+    "@sentry/react": "catalog:",
+    "@sentry/tanstackstart-react": "catalog:",
     "@types/bun": "catalog:",
     "@types/node": "catalog:node",
     "@types/react": "catalog:react",

@@ -1,5 +1,5 @@
 import { z } from '@arki/contracts';
-import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
+import { createInsertSchema, createSelectSchema } from '@arki/db/orm';
 
 import { User } from './schema';
 

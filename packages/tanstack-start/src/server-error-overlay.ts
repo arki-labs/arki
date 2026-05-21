@@ -23,7 +23,7 @@
  * export default { fetch: withServerErrorOverlay(inner) };
  * ```
  */
-import { captureException } from '@sentry/node';
+import { captureException } from './sentry-bridge';
 
 type FetchHandler = (request: Request) => Promise<Response> | Response;
 
@@ -41,14 +41,10 @@ export function withServerErrorOverlay(handler: FetchHandler): FetchHandler {
       }
       return result;
     } catch (error) {
-      try {
-        captureException(error, {
-          tags: { source: '@arki/tanstack-start/server-error-overlay' },
-          extra: { url: request.url, method: request.method },
-        });
-      } catch {
-        // Sentry not initialized — fine, we still render the overlay.
-      }
+      captureException(error, {
+        tags: { source: '@arki/tanstack-start/server-error-overlay' },
+        extra: { url: request.url, method: request.method },
+      });
       return errorResponse(request, normalizeError(error), 'handler-threw');
     }
   };

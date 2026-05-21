@@ -13,6 +13,8 @@
 import type { Integration } from '@sentry/core';
 import * as Sentry from '@sentry/react';
 
+import { registerSentryCapture } from './sentry-bridge';
+
 export type InitSentryClientOptions = {
   /**
    * Sentry DSN. When falsy, `initSentryClient` is a no-op. Typically set
@@ -79,6 +81,10 @@ export function initSentryClient(options: InitSentryClientOptions): void {
     replaysSessionSampleRate,
     replaysOnErrorSampleRate,
     sendDefaultPii: false,
+  });
+
+  registerSentryCapture((error, hint) => {
+    Sentry.captureException(error, hint as Parameters<typeof Sentry.captureException>[1]);
   });
 }
 

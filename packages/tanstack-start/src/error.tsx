@@ -10,12 +10,13 @@
  * The dev branch is tree-shaken in production via `import.meta.env.DEV`.
  */
 import { useEffect } from 'react';
-import { captureException } from '@sentry/react';
 import type { ErrorComponentProps } from '@tanstack/react-router';
 
 import { ArrowClockwiseIcon, BugIcon, HouseSimpleIcon, WarningIcon } from '@arki/icons/phosphor';
 import { Button } from '@arki/ui/button';
 import { cn } from '@arki/ui/utils';
+
+import { captureException } from './sentry-bridge';
 
 type RootErrorComponentProps = ErrorComponentProps<unknown> & {
   /**
@@ -30,14 +31,13 @@ export function RootErrorComponent({ error, info, reset, className }: RootErrorC
   const normalized = normalizeError(error);
   const isDev = import.meta.env.DEV;
 
-  // Forward to Sentry. `captureException` is a no-op when the host app
-  // hasn't called `initSentryClient`, so this is safe to call unconditionally.
-  // When Sentry IS initialized with `spotlightBrowserIntegration`, the
-  // captured event also flows to the local Spotlight overlay.
+  // Forward to Sentry via the local bridge. No-op when the host app
+  // hasn't called `initSentryClient` — which avoids pulling `@sentry/*`
+  // into bundles for apps that never opt in.
   useEffect(() => {
     captureException(error, {
       contexts: {
-        react: info?.componentStack ? { componentStack: info.componentStack } : undefined,
+        react: info?.componentStack ? { componentStack: info.componentStack } : {},
         source: { from: '@arki/tanstack-start/error#RootErrorComponent' },
       },
     });

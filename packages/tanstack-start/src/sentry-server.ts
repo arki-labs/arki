@@ -17,6 +17,8 @@
 import type { Integration } from '@sentry/core';
 import * as Sentry from '@sentry/node';
 
+import { registerSentryCapture } from './sentry-bridge';
+
 export type InitSentryServerOptions = {
   dsn?: string;
   environment?: string;
@@ -47,6 +49,10 @@ export function initSentryServer(options: InitSentryServerOptions): void {
     integrations: [...extraIntegrations],
     tracesSampleRate,
     sendDefaultPii: false,
+  });
+
+  registerSentryCapture((error, hint) => {
+    Sentry.captureException(error, hint as Parameters<typeof Sentry.captureException>[1]);
   });
 }
 
