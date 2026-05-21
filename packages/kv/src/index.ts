@@ -1,10 +1,10 @@
 import KeyvRedis from '@keyv/redis';
-import Redis from 'ioredis'; // Import ioredis for rate limiter
+import { Redis } from 'ioredis'; // Import ioredis for rate limiter
 import Keyv from 'keyv';
 import type { IRateLimiterOptions, RateLimiterAbstract } from 'rate-limiter-flexible';
 import { RateLimiterMemory, RateLimiterRedis } from 'rate-limiter-flexible';
 
-import { debugKV, debugLimiter } from './debug';
+import { debugKV, debugLimiter } from './debug.js';
 
 export class KV {
   readonly #keyv: Keyv;
@@ -56,7 +56,7 @@ export class KV {
     this.#redisClient = new Redis(redisUrl, {
       enableOfflineQueue: false,
       maxRetriesPerRequest: 1,
-      retryStrategy(times) {
+      retryStrategy(times: number) {
         if (times > 10) {
           debugLimiter('[kv] Rate limiter Redis: giving up after %d retries', times);
           // Return null to stop retrying — the in-memory fallback will handle rate limiting
@@ -70,7 +70,7 @@ export class KV {
       ...(tlsOptions && { tls: tlsOptions }),
     });
 
-    this.#redisClient.on('error', err => {
+    this.#redisClient.on('error', (err: Error) => {
       debugLimiter('[kv] Rate limiter Redis client error: %s', err.message);
       this.#isRateLimiterReady = false;
     });
@@ -243,4 +243,4 @@ export class KV {
 }
 
 // Re-export factory functions
-export { createKV, createRateLimitKV } from './factory';
+export { createKV, createRateLimitKV } from './factory.js';

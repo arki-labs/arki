@@ -1,32 +1,68 @@
 {
   "name": "@arki/kv",
   "version": "0.1.0",
+  "description": "Key-value store abstraction with pluggable adapters for ARKI — Redis-backed Keyv client and rate-limiter with TLS auto-detection and Upstash support.",
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-dev/arki.git",
+    "directory": "packages/kv"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-dev/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "kv",
+    "key-value",
+    "redis",
+    "keyv",
+    "rate-limit",
+    "cache"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/src/index.d.ts",
-      "import": "./src/index.ts",
-      "node": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./env": {
-      "types": "./dist/src/env.d.ts",
-      "import": "./src/env.ts",
-      "node": "./src/env.ts"
+      "types": "./dist/env.d.ts",
+      "import": "./dist/env.js",
+      "default": "./dist/env.js"
     },
-    "./*": {
-      "types": "./dist/src/*.d.ts",
-      "import": "./src/*.ts",
-      "node": "./src/*.ts"
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "default": "./dist/errors.js"
+    },
+    "./instance": {
+      "types": "./dist/instance.d.ts",
+      "import": "./dist/instance.js",
+      "default": "./dist/instance.js"
     },
     "./package.json": "./package.json"
   },
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+    "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -43,8 +79,8 @@
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*"
-  },
-  "types": "./dist/src/index.d.ts",
-  "sideEffects": false
+    "@arki/vitest-config": "workspace:*",
+    "@types/node": "catalog:node",
+    "typescript": "catalog:"
+  }
 }

@@ -1,10 +1,10 @@
-import { debugKV } from './debug';
-import { env } from './env';
-import { KV } from './index';
+import { debugKV } from './debug.js';
+import { env } from './env.js';
+import { KV } from './index.js';
 
 /**
  * Create a KV instance using environment configuration
- * @param namespace - The KV namespace (typically the app key, e.g. 'games', 'novelette').
+ * @param namespace - The KV namespace (typically the app key).
  *   Falls back to the KV_NAMESPACE environment variable if not provided.
  * @param rateLimitPrefix - Optional prefix for rate limiter keys (default: 'rl')
  * @returns KV instance
@@ -25,7 +25,7 @@ export function createKV(namespace?: string, rateLimitPrefix?: string): KV {
 
 /**
  * Create a KV instance for rate limiting using environment configuration
- * @param namespace - The KV namespace (typically the app key, e.g. 'games', 'novelette').
+ * @param namespace - The KV namespace (typically the app key).
  *   Falls back to the KV_NAMESPACE environment variable if not provided.
  * @returns KV instance configured for rate limiting
  * @throws Error if RATE_LIMIT_REDIS_URL or KV_URL is not configured
