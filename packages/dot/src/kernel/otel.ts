@@ -27,6 +27,7 @@
  */
 
 import { metrics, SpanStatusCode, trace, type Span } from '@opentelemetry/api';
+import type { Logger } from '@arki/log';
 
 import type { DotLifecycleHook } from '../lifecycle.js';
 
@@ -114,6 +115,14 @@ export function withPipHookSpan<R>(
     readonly pipVersion?: string;
     readonly hook: DotLifecycleHook;
     readonly order: number;
+    /**
+     * Optional pip-scoped logger. When present, the helper threads the
+     * span's `traceId` + `spanId` onto the logger via `setTraceContext`
+     * before invoking the body — every log line emitted from within the
+     * pip's hook is automatically correlated with this span in the
+     * `traceId`/`spanId` fields of `LogRecord`.
+     */
+    readonly logger?: Logger;
   },
   fn: (span: Span) => R,
 ): R {
@@ -126,6 +135,10 @@ export function withPipHookSpan<R>(
       'dot.pip.order': opts.order,
     }),
   });
+  if (opts.logger) {
+    const sc = span.spanContext();
+    opts.logger.setTraceContext(sc.traceId, sc.spanId);
+  }
   const started = performance.now();
   let status: 'ok' | 'failed' = 'ok';
   const finish = (): void => {
@@ -182,6 +195,14 @@ export function withPhaseSpan<R>(
     readonly appVersion?: string;
     readonly phase: DotLifecycleHook;
     readonly pipCount: number;
+    /**
+     * Optional phase-scoped logger. When present, the helper threads
+     * the span's `traceId` + `spanId` onto the logger before invoking
+     * the body — every log line written during the phase carries the
+     * trace context so it's groupable with the corresponding span in
+     * any OTel-compatible backend.
+     */
+    readonly logger?: Logger;
   },
   fn: (span: Span) => R,
 ): R {
@@ -196,6 +217,10 @@ export function withPhaseSpan<R>(
       }),
     },
     (span): R => {
+      if (opts.logger) {
+        const sc = span.spanContext();
+        opts.logger.setTraceContext(sc.traceId, sc.spanId);
+      }
       const started = performance.now();
       let status: 'ok' | 'failed' = 'ok';
       const finish = (): void => {

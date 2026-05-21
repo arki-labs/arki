@@ -6,6 +6,7 @@
  */
 
 import { createDebugLogger } from '@arki/log/debug';
+import { Logger } from '@arki/log';
 
 import type {
   DiagnosticIssue,
@@ -40,7 +41,6 @@ import { pipProvides } from '../pip-contract.js';
 import { withPhaseSpan, withPipHookSpan } from './otel.js';
 
 const debugKernel = createDebugLogger('arki:dot:kernel');
-const debugLifecycle = createDebugLogger('arki:dot:lifecycle');
 
 const DOCS_BASE = 'https://docs.arki.dev/dot/diagnostics';
 
@@ -135,10 +135,22 @@ export class DotAppImpl {
   /** In-flight dispose promise — used for concurrent dispose() coalescing. */
   #disposeInflight: Promise<void> | null = null;
 
+  /**
+   * Structured lifecycle logger. One per app instance; named so consumers
+   * can elevate it to DEBUG via `DEBUG=arki:dot:lifecycle` without
+   * touching unrelated namespaces. Every line carries the app name plus
+   * any phase/pip attributes from the call site. The span helpers
+   * (see `./otel.ts`) thread the active span's `traceId`+`spanId` onto
+   * forked instances of this logger, so every log record is groupable
+   * with its trace in any OTel-compatible backend.
+   */
+  readonly #logger: Logger;
+
   constructor(config: DotAppInternalConfig) {
     this.#appName = config.appName;
     this.#appVersion = config.appVersion;
     this.#config = Object.freeze({ ...config.config });
+    this.#logger = new Logger('arki:dot:lifecycle', { 'dot.app.name': config.appName });
 
     // Topological sort happens up-front — surfaces cycle/dup/missing-dep errors
     // at construction (the `configure` phase pseudo-time).
@@ -198,15 +210,17 @@ export class DotAppImpl {
       throw this.#reuseError('configure');
     }
 
-    debugLifecycle('[%s] configure: starting (%d pip(s))', this.#appName, this.#ordered.length);
+    const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'configure');
+    phaseLogger.debug('configure: starting', { 'dot.app.pip.count': this.#ordered.length });
 
     withPhaseSpan(
       {
         appName: this.#appName,
         phase: 'configure',
         pipCount: this.#ordered.length,
+        logger: phaseLogger,
       },
-      () => this.#runConfigureInner(),
+      () => this.#runConfigureInner(phaseLogger),
     );
   }
 
@@ -215,11 +229,12 @@ export class DotAppImpl {
    * wrapper can stay thin and the loop body stays unindented — keeps the
    * intricate error-handling readable.
    */
-  #runConfigureInner(): void {
+  #runConfigureInner(phaseLogger: Logger): void {
     for (const pip of this.#ordered) {
       const record = this.#records.get(pip.name)!;
+      const pipLogger = phaseLogger.withAttribute('dot.pip.name', pip.name);
       if (!pip.configure) {
-        debugLifecycle('[%s] configure: %s (no hook)', this.#appName, pip.name);
+        pipLogger.debug('configure: skipped (no hook)');
         continue;
       }
       record.hooks.add('configure');
@@ -254,6 +269,7 @@ export class DotAppImpl {
             pipVersion: pip.version,
             hook: 'configure',
             order: record.order,
+            logger: pipLogger,
           },
           () => pip.configure!(ctx),
         );
@@ -320,7 +336,7 @@ export class DotAppImpl {
         durationMs: performance.now() - started,
         issues: [],
       });
-      debugLifecycle('[%s] configure: %s done', this.#appName, pip.name);
+      pipLogger.debug('configure: done', { 'dot.pip.duration.ms': performance.now() - started });
     }
 
     // Also declare lifecycle-hook participation for non-configure hooks present
@@ -336,7 +352,7 @@ export class DotAppImpl {
     this.#configured = true;
     this.#state = 'configured';
     this.#manifest = this.#buildManifest();
-    debugLifecycle('[%s] configure: complete', this.#appName);
+    phaseLogger.debug('configure: complete', { 'dot.app.pip.count': this.#ordered.length });
   }
 
   /** Public boot() — idempotent + concurrent-safe. */
@@ -360,15 +376,17 @@ export class DotAppImpl {
       this.runConfigure();
     }
 
-    debugLifecycle('[%s] boot: starting', this.#appName);
+    const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'boot');
+    phaseLogger.debug('boot: starting', { 'dot.app.pip.count': this.#ordered.length });
 
     return withPhaseSpan(
       {
         appName: this.#appName,
         phase: 'boot',
         pipCount: this.#ordered.length,
+        logger: phaseLogger,
       },
-      () => this.#runBootInner(),
+      () => this.#runBootInner(phaseLogger),
     );
   }
 
@@ -377,15 +395,16 @@ export class DotAppImpl {
    * stays thin and the loop body — which orchestrates rollback on
    * partial failure — stays unindented.
    */
-  async #runBootInner(): Promise<void> {
+  async #runBootInner(phaseLogger: Logger): Promise<void> {
     const bootedRecords: PipRecord[] = [];
 
     for (const pip of this.#ordered) {
       const record = this.#records.get(pip.name)!;
+      const pipLogger = phaseLogger.withAttribute('dot.pip.name', pip.name);
       if (!pip.boot) {
         record.booted = true;
         bootedRecords.push(record);
-        debugLifecycle('[%s] boot: %s (no hook)', this.#appName, pip.name);
+        pipLogger.debug('boot: skipped (no hook)');
         continue;
       }
       record.hooks.add('boot');
@@ -407,6 +426,7 @@ export class DotAppImpl {
             pipVersion: pip.version,
             hook: 'boot',
             order: record.order,
+            logger: pipLogger,
           },
           () => pip.boot!(ctx),
         );
@@ -429,14 +449,11 @@ export class DotAppImpl {
           issues: [issue],
         });
 
-        debugLifecycle(
-          '[%s] boot: %s FAILED — disposing %d already-booted pip(s)',
-          this.#appName,
-          pip.name,
-          bootedRecords.length,
-        );
+        pipLogger.error('boot: FAILED — rolling back already-booted pips', {
+          'dot.app.rollback.count': bootedRecords.length,
+        });
         // Dispose already-booted pips in reverse-topological order.
-        const disposeFailures = await this.#runDisposeForRecords(reverseRecords(bootedRecords));
+        const disposeFailures = await this.#runDisposeForRecords(reverseRecords(bootedRecords), phaseLogger);
         this.#state = 'failed';
         this.#manifest = this.#buildManifest();
         throw new DotLifecycleError({
@@ -466,12 +483,15 @@ export class DotAppImpl {
         durationMs: performance.now() - started,
         issues: [],
       });
-      debugLifecycle('[%s] boot: %s done', this.#appName, pip.name);
+      pipLogger.debug('boot: done', {
+        'dot.pip.duration.ms': performance.now() - started,
+        'dot.pip.services.published': Object.keys(publishedServices).length,
+      });
     }
 
     this.#state = 'booted';
     this.#manifest = this.#buildManifest();
-    debugLifecycle('[%s] boot: complete', this.#appName);
+    phaseLogger.debug('boot: complete', { 'dot.app.pip.count': this.#ordered.length });
   }
 
   /** Public start(). Boots first if needed. Idempotent. */
@@ -484,15 +504,17 @@ export class DotAppImpl {
       await this.boot();
     }
     // From booted or stopped, run start hooks.
-    debugLifecycle('[%s] start: starting', this.#appName);
+    const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'start');
+    phaseLogger.debug('start: starting', { 'dot.app.pip.count': this.#ordered.length });
 
     return withPhaseSpan(
       {
         appName: this.#appName,
         phase: 'start',
         pipCount: this.#ordered.length,
+        logger: phaseLogger,
       },
-      () => this.#runStartInner(),
+      () => this.#runStartInner(phaseLogger),
     );
   }
 
@@ -500,12 +522,13 @@ export class DotAppImpl {
    * Inner start loop. Separated from `start()` so the phase span wrapper
    * stays thin and the rollback-cascade error path stays readable.
    */
-  async #runStartInner(): Promise<void> {
+  async #runStartInner(phaseLogger: Logger): Promise<void> {
     const startedRecords: PipRecord[] = [];
     for (const pip of this.#ordered) {
       const record = this.#records.get(pip.name)!;
+      const pipLogger = phaseLogger.withAttribute('dot.pip.name', pip.name);
       if (!pip.start) {
-        debugLifecycle('[%s] start: %s (no hook)', this.#appName, pip.name);
+        pipLogger.debug('start: skipped (no hook)');
         continue;
       }
       record.hooks.add('start');
@@ -525,6 +548,7 @@ export class DotAppImpl {
             pipVersion: pip.version,
             hook: 'start',
             order: record.order,
+            logger: pipLogger,
           },
           () => pip.start!(ctx),
         );
@@ -546,15 +570,12 @@ export class DotAppImpl {
           issues: [issue],
         });
 
-        debugLifecycle(
-          '[%s] start: %s FAILED — stopping %d started + disposing all booted',
-          this.#appName,
-          pip.name,
-          startedRecords.length,
-        );
-        const stopFailures = await this.#runStopForRecords(reverseRecords(startedRecords));
+        pipLogger.error('start: FAILED — rolling back', {
+          'dot.app.rollback.started.count': startedRecords.length,
+        });
+        const stopFailures = await this.#runStopForRecords(reverseRecords(startedRecords), phaseLogger);
         const bootedForDispose = this.#ordered.map(p => this.#records.get(p.name)!).filter(r => r.booted);
-        const disposeFailures = await this.#runDisposeForRecords(reverseRecords(bootedForDispose));
+        const disposeFailures = await this.#runDisposeForRecords(reverseRecords(bootedForDispose), phaseLogger);
         this.#state = 'failed';
         this.#manifest = this.#buildManifest();
         const failures = [...stopFailures, ...disposeFailures];
@@ -578,12 +599,12 @@ export class DotAppImpl {
         durationMs: performance.now() - startedAt,
         issues: [],
       });
-      debugLifecycle('[%s] start: %s done', this.#appName, pip.name);
+      pipLogger.debug('start: done', { 'dot.pip.duration.ms': performance.now() - startedAt });
     }
 
     this.#state = 'started';
     this.#manifest = this.#buildManifest();
-    debugLifecycle('[%s] start: complete', this.#appName);
+    phaseLogger.debug('start: complete', { 'dot.app.pip.count': this.#ordered.length });
   }
 
   /** Public stop(). Idempotent + concurrent-safe. */
@@ -609,23 +630,25 @@ export class DotAppImpl {
   }
 
   async #runStop(): Promise<void> {
-    debugLifecycle('[%s] stop: starting', this.#appName);
+    const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'stop');
+    phaseLogger.debug('stop: starting', { 'dot.app.pip.count': this.#ordered.length });
 
     return withPhaseSpan(
       {
         appName: this.#appName,
         phase: 'stop',
         pipCount: this.#ordered.length,
+        logger: phaseLogger,
       },
       async () => {
         const startedRecords = this.#ordered
           .map(p => this.#records.get(p.name)!)
           .filter(r => r.started);
-        const failures = await this.#runStopForRecords(reverseRecords(startedRecords));
+        const failures = await this.#runStopForRecords(reverseRecords(startedRecords), phaseLogger);
         this.#state = 'stopped';
         this.#manifest = this.#buildManifest();
         if (failures.length > 0) {
-          debugLifecycle('[%s] stop: complete with %d failure(s)', this.#appName, failures.length);
+          phaseLogger.warn('stop: complete with failures', { 'dot.app.failure.count': failures.length });
           throw new DotLifecycleError({
             code: DotLifecycleErrorCode.StopFailed,
             phase: 'stop',
@@ -633,15 +656,19 @@ export class DotAppImpl {
             failures,
           });
         }
-        debugLifecycle('[%s] stop: complete', this.#appName);
+        phaseLogger.debug('stop: complete', { 'dot.app.pip.count': this.#ordered.length });
       },
     );
   }
 
-  async #runStopForRecords(records: readonly PipRecord[]): Promise<DotLifecyclePipFailure[]> {
+  async #runStopForRecords(
+    records: readonly PipRecord[],
+    phaseLogger: Logger,
+  ): Promise<DotLifecyclePipFailure[]> {
     const failures: DotLifecyclePipFailure[] = [];
     for (const record of records) {
       if (!record.pip.stop) continue;
+      const pipLogger = phaseLogger.withAttribute('dot.pip.name', record.pip.name);
       record.hooks.add('stop');
       const ctx: DotStopContext<Record<string, unknown>> = {
         pipName: record.pip.name,
@@ -657,6 +684,7 @@ export class DotAppImpl {
             pipVersion: record.pip.version,
             hook: 'stop',
             order: record.order,
+            logger: pipLogger,
           },
           () => record.pip.stop!(ctx),
         );
@@ -669,6 +697,7 @@ export class DotAppImpl {
           durationMs: performance.now() - startedAt,
           issues: [],
         });
+        pipLogger.debug('stop: done', { 'dot.pip.duration.ms': performance.now() - startedAt });
       } catch (error) {
         const issue = makeIssue({
           code: DotLifecycleErrorCode.StopFailed,
@@ -687,6 +716,9 @@ export class DotAppImpl {
           issues: [issue],
         });
         failures.push({ pip: record.pip.name, phase: 'stop', error });
+        pipLogger.error('stop: failed (continuing)', {
+          'dot.pip.error.message': stringifyError(error),
+        });
       }
     }
     return failures;
@@ -704,13 +736,17 @@ export class DotAppImpl {
   }
 
   async #runDispose(): Promise<void> {
+    const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'dispose');
+    phaseLogger.debug('dispose: starting', { 'dot.app.pip.count': this.#ordered.length });
+
     return withPhaseSpan(
       {
         appName: this.#appName,
         phase: 'dispose',
         pipCount: this.#ordered.length,
+        logger: phaseLogger,
       },
-      () => this.#runDisposeInner(),
+      () => this.#runDisposeInner(phaseLogger),
     );
   }
 
@@ -720,20 +756,22 @@ export class DotAppImpl {
    * → stop+dispose, failed → no-op, default → dispose-only) stays
    * readable.
    */
-  async #runDisposeInner(): Promise<void> {
+  async #runDisposeInner(phaseLogger: Logger): Promise<void> {
     // From started, stop first.
     if (this.#state === 'started') {
+      phaseLogger.debug('dispose: cascading from started — running stop first');
       // Inline stop without throwing — we want to dispose anyway, but capture failures.
       const startedRecords = this.#ordered.map(p => this.#records.get(p.name)!).filter(r => r.started);
-      const stopFailures = await this.#runStopForRecords(reverseRecords(startedRecords));
+      const stopFailures = await this.#runStopForRecords(reverseRecords(startedRecords), phaseLogger);
       this.#state = 'stopped';
 
       const bootedRecords = this.#ordered.map(p => this.#records.get(p.name)!).filter(r => r.booted);
-      const disposeFailures = await this.#runDisposeForRecords(reverseRecords(bootedRecords));
+      const disposeFailures = await this.#runDisposeForRecords(reverseRecords(bootedRecords), phaseLogger);
       this.#state = 'disposed';
       this.#manifest = this.#buildManifest();
       const failures = [...stopFailures, ...disposeFailures];
       if (failures.length > 0) {
+        phaseLogger.warn('dispose: complete with failures', { 'dot.app.failure.count': failures.length });
         throw new DotLifecycleError({
           code: DotLifecycleErrorCode.DisposeFailed,
           phase: 'dispose',
@@ -741,6 +779,7 @@ export class DotAppImpl {
           failures,
         });
       }
+      phaseLogger.debug('dispose: complete (cascaded from started)');
       return;
     }
 
@@ -749,14 +788,16 @@ export class DotAppImpl {
       // Already cleaned up at the failure site — mark disposed.
       this.#state = 'disposed';
       this.#manifest = this.#buildManifest();
+      phaseLogger.debug('dispose: complete (no-op; cleanup happened at failure site)');
       return;
     }
 
     const bootedRecords = this.#ordered.map(p => this.#records.get(p.name)!).filter(r => r.booted);
-    const failures = await this.#runDisposeForRecords(reverseRecords(bootedRecords));
+    const failures = await this.#runDisposeForRecords(reverseRecords(bootedRecords), phaseLogger);
     this.#state = 'disposed';
     this.#manifest = this.#buildManifest();
     if (failures.length > 0) {
+      phaseLogger.warn('dispose: complete with failures', { 'dot.app.failure.count': failures.length });
       throw new DotLifecycleError({
         code: DotLifecycleErrorCode.DisposeFailed,
         phase: 'dispose',
@@ -764,15 +805,20 @@ export class DotAppImpl {
         failures,
       });
     }
+    phaseLogger.debug('dispose: complete', { 'dot.app.pip.count': this.#ordered.length });
   }
 
-  async #runDisposeForRecords(records: readonly PipRecord[]): Promise<DotLifecyclePipFailure[]> {
+  async #runDisposeForRecords(
+    records: readonly PipRecord[],
+    phaseLogger: Logger,
+  ): Promise<DotLifecyclePipFailure[]> {
     const failures: DotLifecyclePipFailure[] = [];
     for (const record of records) {
       if (!record.pip.dispose) {
         record.booted = false;
         continue;
       }
+      const pipLogger = phaseLogger.withAttribute('dot.pip.name', record.pip.name);
       record.hooks.add('dispose');
       const ctx: DotDisposeContext<Record<string, unknown>> = {
         pipName: record.pip.name,
@@ -788,6 +834,7 @@ export class DotAppImpl {
             pipVersion: record.pip.version,
             hook: 'dispose',
             order: record.order,
+            logger: pipLogger,
           },
           () => record.pip.dispose!(ctx),
         );
@@ -800,6 +847,7 @@ export class DotAppImpl {
           durationMs: performance.now() - startedAt,
           issues: [],
         });
+        pipLogger.debug('dispose: done', { 'dot.pip.duration.ms': performance.now() - startedAt });
       } catch (error) {
         const issue = makeIssue({
           code: DotLifecycleErrorCode.DisposeFailed,
@@ -818,6 +866,9 @@ export class DotAppImpl {
           issues: [issue],
         });
         failures.push({ pip: record.pip.name, phase: 'dispose', error });
+        pipLogger.error('dispose: failed (continuing)', {
+          'dot.pip.error.message': stringifyError(error),
+        });
       }
     }
     return failures;

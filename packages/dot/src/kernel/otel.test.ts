@@ -24,10 +24,12 @@ import {
   SimpleSpanProcessor,
   type ReadableSpan,
 } from '@opentelemetry/sdk-trace-base';
+import { Logger } from '@arki/log';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { defineApp } from '../define-app.js';
 import { defineDotPip } from '../pip-contract.js';
+import { withPhaseSpan, withPipHookSpan } from './otel.js';
 
 let exporter: InMemorySpanExporter;
 let provider: BasicTracerProvider;
@@ -183,6 +185,68 @@ describe('@arki/dot OTel instrumentation', () => {
     expect(webStart.attributes['dot.hook']).toBe('start');
     expect(webStart.attributes['dot.pip.order']).toBe(1);
     expect(webStart.status.code).toBe(1); // OK
+  });
+
+  it('threads the active span context onto the passed Logger via setTraceContext', () => {
+    // Use the span helpers directly with an isolated logger instance — we
+    // want to assert the wiring contract (`setTraceContext` is called with
+    // span's trace + span IDs), independent of the kernel's call sites.
+    const logger = new Logger('test-trace-thread');
+    // Read internal trace context via emitting a record and inspecting it.
+    // The Logger doesn't expose its fields publicly, so we sniff via a
+    // captured log record — log a single trace-level line and read the
+    // resulting LogRecord through pino's internals. Simpler: emit at INFO
+    // (which writes via pino) and assert by mocking? That's too invasive.
+    // Instead: subclass-monkey-patch buildRecord through a spy. The easiest
+    // path is calling the helper, then reading back via traceId getter —
+    // but there's no getter. So we round-trip through `buildRecord` via
+    // protected access: cast and call.
+    let observedTraceId: string | undefined;
+    let observedSpanId: string | undefined;
+    const originalSetTraceContext = logger.setTraceContext.bind(logger);
+    logger.setTraceContext = (traceId: string, spanId?: string) => {
+      observedTraceId = traceId;
+      observedSpanId = spanId;
+      originalSetTraceContext(traceId, spanId);
+    };
+
+    withPhaseSpan(
+      { appName: 'trace-thread-test', phase: 'configure', pipCount: 0, logger },
+      () => {
+        // Body runs with logger context already set; no assertion needed here.
+      },
+    );
+    expect(observedTraceId).toBeDefined();
+    expect(observedTraceId).not.toBe('00000000000000000000000000000000');
+    expect(observedSpanId).toBeDefined();
+    expect(observedSpanId).not.toBe('0000000000000000');
+
+    // Same wiring on the per-pip helper.
+    let pipTraceId: string | undefined;
+    let pipSpanId: string | undefined;
+    const pipLogger = new Logger('test-trace-thread:pip');
+    const originalPipSet = pipLogger.setTraceContext.bind(pipLogger);
+    pipLogger.setTraceContext = (t: string, s?: string) => {
+      pipTraceId = t;
+      pipSpanId = s;
+      originalPipSet(t, s);
+    };
+    withPipHookSpan(
+      {
+        appName: 'trace-thread-test',
+        pipName: 'pip',
+        hook: 'configure',
+        order: 0,
+        logger: pipLogger,
+      },
+      () => {
+        /* noop */
+      },
+    );
+    expect(pipTraceId).toBeDefined();
+    expect(pipTraceId).not.toBe('00000000000000000000000000000000');
+    expect(pipSpanId).toBeDefined();
+    expect(pipSpanId).not.toBe('0000000000000000');
   });
 
   it('marks the failing pip span ERROR when boot throws', async () => {

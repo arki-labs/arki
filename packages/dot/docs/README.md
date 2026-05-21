@@ -17,6 +17,8 @@ do.
   idempotency rules.
 - [Diagnostics](./diagnostics.md) — `app.manifest`, `app.diagnostics`, the
   `dot explain` and `dot doctor` CLI commands.
+- [Observability](./observability.md) — OTel-first traces + metrics, the
+  `arki:dot:lifecycle` logger, trace/log correlation, zero-cost-when-off.
 
 ## For package authors
 

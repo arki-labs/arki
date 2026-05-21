@@ -1,6 +1,6 @@
 # @arki/dot
 
-> TypeScript-first application composition framework with typed plugins, a 5-hook lifecycle (`configure` / `boot` / `start` / `stop` / `dispose`), structured manifest + diagnostics contracts, and an agent-readable CLI (`dot explain --json`, `dot doctor --json`).
+> TypeScript-first application composition framework with typed pips, a 5-hook lifecycle (`configure` / `boot` / `start` / `stop` / `dispose`), structured manifest + diagnostics contracts, OTel-first observability, and an agent-readable CLI (`dot explain --json`, `dot doctor --json`).
 
 `@arki/dot` is the kernel. Package adapters (`@arki/env/dot`, `@arki/kv/dot`, `@arki/db/dot`) layer on top and are versioned independently.
 
@@ -10,18 +10,19 @@
 - [README](README.md): Overview, install, top-level concepts
 - [Quickstart example](docs/examples/quickstart.ts): Runnable code for the quickstart
 
-## Plugins and lifecycle
+## Pips and lifecycle
 
-- [Plugin authoring](docs/plugin-authoring.md): Write a `DotPlugin` — anatomy, hooks, DI, manifest contribution
+- [Pip authoring](docs/pip-authoring.md): Write a `DotPip` — anatomy, hooks, DI, manifest contribution
 - [Lifecycle](docs/lifecycle.md): The 5-hook contract — state machine, failure ordering, idempotency rules, error codes
-- [Adapter authoring](docs/adapter-authoring.md): Expose a package as a DOT plugin via a `./dot` subpath export
+- [Adapter authoring](docs/adapter-authoring.md): Expose a package as a DOT pip via a `./dot` subpath export
 
-## Diagnostics
+## Diagnostics & observability
 
 - [Diagnostics](docs/diagnostics.md): `app.manifest`, `app.diagnostics`, `dot explain`, `dot doctor`
 - [Manifest contract](docs/diagnostics.md#dotappmanifest): Static graph — five-array shape
 - [Diagnostics contract](docs/diagnostics.md#dotdiagnosticssnapshot): Runtime snapshot — five-array shape
 - [`DiagnosticIssue` shape](docs/diagnostics.md#diagnosticissue): Stable code, severity, remediation, docsUrl
+- [Observability](docs/observability.md): OTel-first traces + metrics + log correlation, `arki:dot:lifecycle` namespace, zero-cost-when-off discipline
 
 ## For agents
 
