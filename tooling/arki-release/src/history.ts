@@ -49,7 +49,7 @@ export const HISTORY_ERROR_CODES = {
   driftDetected: 'HIST_E004',
   /** `gh api repos/<org>/<name>` failed for a per-package mirror probe. */
   packageRepoProbeFailed: 'HIST_E005',
-  /** Per-package mirror drift detected (missing / tag-drift / unarchived). */
+  /** Per-package mirror drift detected (missing / tag-drift). */
   packageRepoDrift: 'HIST_E006',
 } as const;
 
@@ -115,7 +115,6 @@ export interface HistorySummary {
     readonly inSync: number;
     readonly missing: number;
     readonly tagDrift: number;
-    readonly unarchived: number;
     readonly unchecked: number;
   };
   /** GitHub org used for the per-package mirror probes (default `arki-labs`). */
@@ -232,7 +231,11 @@ async function probePackageRepo(
 function classifyPackageRepo(
   publishedVersions: readonly string[],
   probe: PackageRepoProbe,
-): { readonly status: HistoryRepoStatus; readonly tags: readonly string[]; readonly archived: boolean | null } {
+): {
+  readonly status: HistoryRepoStatus;
+  readonly tags: readonly string[];
+  readonly archived: boolean | null;
+} {
   if (probe.status === 'error') {
     return { status: 'unchecked', tags: [], archived: null };
   }
@@ -244,10 +247,11 @@ function classifyPackageRepo(
   if (missing.length > 0) {
     return { status: 'tag-drift', tags: tagsSorted, archived: probe.archived };
   }
-  if (!probe.archived) {
-    return { status: 'unarchived', tags: tagsSorted, archived: false };
-  }
-  return { status: 'in-sync', tags: tagsSorted, archived: true };
+  // Archive state is informational only — the read-only signal is the
+  // description prefix stamped by `sync-package-repos`, not the archive
+  // flag. So a mirror with the right tags is in-sync regardless of
+  // whether GitHub's archive bit is set.
+  return { status: 'in-sync', tags: tagsSorted, archived: probe.archived };
 }
 
 async function fetchNpmVersion(
@@ -461,7 +465,7 @@ export async function runHistory(
   const items: HistoryItem[] = [];
   const errors: ReleaseError[] = [];
   const counts = { inSync: 0, sourceAhead: 0, unpublished: 0, driftErrors: 0, networkErrors: 0 };
-  const repoCounts = { inSync: 0, missing: 0, tagDrift: 0, unarchived: 0, unchecked: 0 };
+  const repoCounts = { inSync: 0, missing: 0, tagDrift: 0, unchecked: 0 };
 
   for (const item of candidates) {
     const packageDir = path.dirname(path.join(opts.cwd, item.manifestPath));
@@ -585,17 +589,6 @@ export async function runHistory(
             remediation: 'Run `bun release:arki sync-package-repos` to backfill the tags.',
           });
           break;
-        case 'unarchived':
-          repoCounts.unarchived += 1;
-          errors.push({
-            code: HISTORY_ERROR_CODES.packageRepoDrift,
-            severity: 'warning',
-            message: `${item.name}: per-package mirror is not archived`,
-            target: item.name,
-            remediation:
-              'Run `bun release:arki sync-package-repos` (re-archives at end of run) or `gh repo archive arki-labs/<name>`.',
-          });
-          break;
         case 'unchecked':
           repoCounts.unchecked += 1;
           break;
@@ -631,8 +624,7 @@ export async function runHistory(
 
   const totalPackages = items.length;
   const hasNpmAhead = items.some(i => i.status === 'npm-ahead');
-  const hasRepoDrift =
-    repoCounts.missing > 0 || repoCounts.tagDrift > 0 || repoCounts.unarchived > 0;
+  const hasRepoDrift = repoCounts.missing > 0 || repoCounts.tagDrift > 0;
   const status: 'success' | 'warning' | 'failure' =
     counts.driftErrors > 0 || hasNpmAhead
       ? 'failure'
@@ -653,7 +645,6 @@ export async function runHistory(
       inSync: repoCounts.inSync,
       missing: repoCounts.missing,
       tagDrift: repoCounts.tagDrift,
-      unarchived: repoCounts.unarchived,
       unchecked: repoCounts.unchecked,
     },
     packageReposOrg,
@@ -680,7 +671,6 @@ function buildSummaryMessage(
     readonly inSync: number;
     readonly missing: number;
     readonly tagDrift: number;
-    readonly unarchived: number;
     readonly unchecked: number;
   },
   total: number,
@@ -696,7 +686,6 @@ function buildSummaryMessage(
   if (repoCounts.inSync > 0) repoParts.push(`${repoCounts.inSync.toString()} in-sync`);
   if (repoCounts.missing > 0) repoParts.push(`${repoCounts.missing.toString()} missing`);
   if (repoCounts.tagDrift > 0) repoParts.push(`${repoCounts.tagDrift.toString()} tag-drift`);
-  if (repoCounts.unarchived > 0) repoParts.push(`${repoCounts.unarchived.toString()} unarchived`);
   if (repoCounts.unchecked > 0) repoParts.push(`${repoCounts.unchecked.toString()} unchecked`);
   if (repoParts.length > 0) {
     parts.push(`mirrors: ${repoParts.join(', ')}`);

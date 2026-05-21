@@ -117,7 +117,7 @@ describe('runSyncPackageRepos — dry-run', () => {
     expect(envelope.summary.dryRun).toBe(true);
   });
 
-  it('reports in-sync when repo exists, archived, and all tags present', async () => {
+  it('reports in-sync when repo exists, not archived, and all tags present', async () => {
     const runner = makeRunner([
       {
         when: (c, a) => c === 'npm' && a[0] === 'view' && a[2] === 'versions',
@@ -128,10 +128,15 @@ describe('runSyncPackageRepos — dry-run', () => {
         result: { exitCode: 0, stdout: JSON.stringify({ '0.0.1': '2026-05-21T00:00:00Z' }), stderr: '' },
       },
       {
-        when: (c, a) => c === 'gh' && a[0] === 'api',
+        when: (c, a) => c === 'npm' && a[0] === 'view' && a[2] === 'description',
+        result: { exitCode: 0, stdout: 'A test package.', stderr: '' },
+      },
+      // Repo exists, NOT archived (the new doctrine).
+      {
+        when: (c, a) => c === 'gh' && a[0] === 'api' && !a.includes('-X') && a.includes('--jq'),
         result: {
           exitCode: 0,
-          stdout: JSON.stringify({ archived: true, description: 'Test' }),
+          stdout: JSON.stringify({ archived: false, description: '[Read-only mirror] A test package.' }),
           stderr: '',
         },
       },
@@ -153,7 +158,7 @@ describe('runSyncPackageRepos — dry-run', () => {
     });
 
     expect(envelope.items[0]!.status).toBe('in-sync');
-    expect(envelope.items[0]!.archived).toBe(true);
+    expect(envelope.items[0]!.archived).toBe(false);
     expect(envelope.items[0]!.skippedVersions).toEqual(['0.0.1']);
   });
 
@@ -302,9 +307,12 @@ describe('runSyncPackageRepos — live mode (with side effects)', () => {
     await rm(tmp, { recursive: true, force: true });
   });
 
-  it('creates the repo, replays versions, pushes, and archives end-to-end', async () => {
+  it('creates the repo, replays versions, pushes, and stamps the description end-to-end', async () => {
     // Track which side effects fired so we can assert on the sequence.
     const callLog: string[] = [];
+    // Capture the description that gets passed to gh so we can assert it
+    // carries the read-only banner.
+    const createDescriptions: string[] = [];
 
     const runner: ProcessRunner = {
       async run(command, args, _opts) {
@@ -332,15 +340,29 @@ describe('runSyncPackageRepos — live mode (with side effects)', () => {
           return { exitCode: 0, stdout: 'A test package.', stderr: '' };
         }
         // gh api probe → 404 (so we exercise the create branch)
-        if (command === 'gh' && args[0] === 'api' && args[1]?.startsWith('repos/') === true && !args.includes('-X')) {
+        if (
+          command === 'gh' &&
+          args[0] === 'api' &&
+          args[1]?.startsWith('repos/') === true &&
+          !args.includes('-X') &&
+          args.includes('--jq')
+        ) {
           return { exitCode: 1, stdout: '', stderr: 'HTTP 404' };
         }
-        // gh repo create
+        // gh repo create — capture the --description argument.
         if (command === 'gh' && args[0] === 'repo' && args[1] === 'create') {
+          const descIdx = args.indexOf('--description');
+          if (descIdx !== -1 && args[descIdx + 1] !== undefined) {
+            createDescriptions.push(args[descIdx + 1]!);
+          }
           return { exitCode: 0, stdout: 'Created.', stderr: '' };
         }
-        // gh archive (PATCH archived=true)
-        if (command === 'gh' && args[0] === 'api' && args.includes('-X')) {
+        // gh repo edit (the post-push re-stamp; capture description too).
+        if (command === 'gh' && args[0] === 'repo' && args[1] === 'edit') {
+          const descIdx = args.indexOf('--description');
+          if (descIdx !== -1 && args[descIdx + 1] !== undefined) {
+            createDescriptions.push(args[descIdx + 1]!);
+          }
           return { exitCode: 0, stdout: '', stderr: '' };
         }
         // curl tarball: synthesize a minimal real tarball so `tar` can extract.
@@ -348,8 +370,6 @@ describe('runSyncPackageRepos — live mode (with side effects)', () => {
           const destIdx = args.indexOf('-o');
           const dest = args[destIdx + 1];
           if (dest !== undefined) {
-            // Create a fake .tgz: not actually valid, but our `tar` fake
-            // below ignores the file contents.
             writeFileSync(dest, 'fake', 'utf8');
           }
           return { exitCode: 0, stdout: '', stderr: '' };
@@ -387,13 +407,18 @@ describe('runSyncPackageRepos — live mode (with side effects)', () => {
     expect(envelope.status).toBe('success');
     const item = envelope.items[0]!;
     expect(item.status).toBe('created');
-    expect(item.archived).toBe(true);
+    // New doctrine: mirrors are never archived; read-only is signalled by description.
+    expect(item.archived).toBe(false);
     expect(item.pushedVersions).toEqual(['0.0.1']);
     // Confirm the expected sequence fired.
     expect(callLog.some(c => c.startsWith('gh repo create'))).toBe(true);
     expect(callLog.some(c => c.startsWith('git init'))).toBe(true);
     expect(callLog.some(c => c.startsWith('git tag'))).toBe(true);
     expect(callLog.some(c => c.startsWith('git push'))).toBe(true);
-    expect(callLog.some(c => c.startsWith('gh api repos'))).toBe(true);
+    // No archive PATCH should have fired.
+    expect(callLog.some(c => c === 'gh api repos/arki-labs/assert' && !c.includes('-X'))).toBe(false);
+    // Description carries the read-only banner.
+    expect(createDescriptions.length).toBeGreaterThan(0);
+    expect(createDescriptions[0]).toBe('[Read-only mirror] A test package.');
   });
 });

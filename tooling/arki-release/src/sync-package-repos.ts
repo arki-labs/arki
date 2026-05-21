@@ -249,7 +249,8 @@ async function fetchTarballUrl(
 
 /**
  * Fetch the published `description` field for a specific version. Used
- * to seed the GitHub repo description when first creating it.
+ * to seed the GitHub repo description when first creating it (and to
+ * keep the description in sync on every later run).
  */
 async function fetchPublishedDescription(
   packageName: string,
@@ -262,6 +263,73 @@ async function fetchPublishedDescription(
   });
   if (result.exitCode !== 0) return '';
   return result.stdout.trim();
+}
+
+/** Prefix every mirror description with this banner — the only "read-only" signal we ship. */
+const READ_ONLY_PREFIX = '[Read-only mirror]';
+
+/**
+ * Compose the canonical mirror description: the read-only banner first,
+ * then the package's npm description. Capped at GitHub's 350-character
+ * limit so we never push a description that GitHub rejects.
+ */
+function buildMirrorDescription(npmDescription: string): string {
+  const base = npmDescription.trim();
+  const composed = base.length > 0 ? `${READ_ONLY_PREFIX} ${base}` : READ_ONLY_PREFIX;
+  return composed.length <= 350 ? composed : `${composed.slice(0, 347)}...`;
+}
+
+/**
+ * Probe the current repo description; return `null` when the repo
+ * cannot be queried (caller already surfaced the probe failure).
+ */
+async function fetchCurrentRepoDescription(
+  org: string,
+  repoName: string,
+  runner: ProcessRunner,
+  cwd: string,
+): Promise<string | null> {
+  const result = await runner.run(
+    'gh',
+    ['api', `repos/${org}/${repoName}`, '--jq', '.description'],
+    { cwd },
+  );
+  if (result.exitCode !== 0) return null;
+  const desc = result.stdout.trim();
+  // `gh api --jq .description` prints `null` (literal) when unset.
+  return desc === 'null' || desc.length === 0 ? '' : desc;
+}
+
+/**
+ * Stamp the repo description via `gh repo edit`. No-op when the
+ * description already matches `desired`. Returns whether the call was
+ * needed (used to populate the per-item `reason` text on in-sync paths).
+ */
+async function ensureRepoDescription(args: {
+  readonly org: string;
+  readonly repoName: string;
+  readonly desired: string;
+  readonly runner: ProcessRunner;
+  readonly cwd: string;
+}): Promise<
+  | { readonly status: 'updated' }
+  | { readonly status: 'unchanged' }
+  | { readonly status: 'failed'; readonly reason: string }
+> {
+  const current = await fetchCurrentRepoDescription(args.org, args.repoName, args.runner, args.cwd);
+  if (current === args.desired) return { status: 'unchanged' };
+  const result = await args.runner.run(
+    'gh',
+    ['repo', 'edit', `${args.org}/${args.repoName}`, '--description', args.desired],
+    { cwd: args.cwd },
+  );
+  if (result.exitCode !== 0) {
+    return {
+      status: 'failed',
+      reason: result.stderr.trim() || `gh repo edit exit ${result.exitCode.toString()}`,
+    };
+  }
+  return { status: 'updated' };
 }
 
 /**
@@ -370,9 +438,8 @@ async function syncOnePackage(args: {
   readonly cwd: string;
   readonly dryRun: boolean;
   readonly force: boolean;
-  readonly skipArchive: boolean;
 }): Promise<SyncRepoItem> {
-  const { packageName, org, runner, cwd, dryRun, force, skipArchive } = args;
+  const { packageName, org, runner, cwd, dryRun, force } = args;
   const repoName = shortRepoName(packageName);
   const repoUrl = `https://github.com/${org}/${repoName}`;
   const gitRemote = `git@github.com:${org}/${repoName}.git`;
@@ -474,7 +541,41 @@ async function syncOnePackage(args: {
     : publishedVersions.filter(v => !existingTags.has(v.version));
   const skippedVersions = force ? [] : publishedVersions.filter(v => existingTags.has(v.version));
 
-  if (versionsToPush.length === 0 && repoExists && repoArchived) {
+  // Compute the desired description up-front so every code path
+  // (in-sync, dry-run, create, update) sees the same target string.
+  const latestVersion =
+    publishedVersions[publishedVersions.length - 1]?.version ?? publishedVersions[0]?.version ?? '';
+  const npmDescription =
+    latestVersion.length > 0
+      ? await fetchPublishedDescription(packageName, latestVersion, runner, cwd)
+      : '';
+  const desiredDescription = buildMirrorDescription(npmDescription);
+
+  if (versionsToPush.length === 0 && repoExists && !repoArchived) {
+    // Repo is "almost in-sync" — content + tags + archive state all right.
+    // The only thing left to verify is the description banner, which we
+    // stamp idempotently. In dry-run we skip the side effect.
+    let descriptionNote = '';
+    if (!dryRun) {
+      const descResult = await ensureRepoDescription({
+        org,
+        repoName,
+        desired: desiredDescription,
+        runner,
+        cwd,
+      });
+      if (descResult.status === 'failed') {
+        errors.push({
+          code: SYNC_REPO_ERROR_CODES.ghApiFailed,
+          severity: 'warning',
+          message: `${packageName}: gh repo edit (description) failed — ${descResult.reason}`,
+          target: packageName,
+          remediation: 'Run `gh repo edit arki-labs/<name> --description "<desc>"` manually.',
+        });
+      } else if (descResult.status === 'updated') {
+        descriptionNote = '; description stamped';
+      }
+    }
     return {
       packageName,
       repoName,
@@ -484,13 +585,19 @@ async function syncOnePackage(args: {
       publishedVersions: publishedVersions.map(v => v.version),
       pushedVersions: [],
       skippedVersions: skippedVersions.map(v => v.version),
-      archived: true,
-      reason: 'all published versions already mirrored; repo archived',
+      archived: false,
+      reason: `all published versions already mirrored${descriptionNote}`,
       errors,
     };
   }
 
   if (dryRun) {
+    const wouldUnarchive = repoExists && repoArchived;
+    const planParts: string[] = [];
+    if (!repoExists) planParts.push('would CREATE repo');
+    if (wouldUnarchive) planParts.push('would UNARCHIVE');
+    planParts.push(`would push ${versionsToPush.length.toString()} version(s)`);
+    planParts.push('would stamp description');
     return {
       packageName,
       repoName,
@@ -501,19 +608,12 @@ async function syncOnePackage(args: {
       pushedVersions: versionsToPush.map(v => v.version),
       skippedVersions: skippedVersions.map(v => v.version),
       archived: repoArchived,
-      reason: repoExists
-        ? `dry-run: would push ${versionsToPush.length.toString()} version(s) and ${skipArchive ? 'leave unarchived' : 'archive'}`
-        : `dry-run: would CREATE repo, push ${versionsToPush.length.toString()} version(s), ${skipArchive ? 'leave unarchived' : 'archive'}`,
+      reason: `dry-run: ${planParts.join('; ')}`,
       errors,
     };
   }
 
   if (!repoExists) {
-    const descSeed =
-      versionsToPush[versionsToPush.length - 1]?.version ?? publishedVersions[0]?.version ?? '';
-    const description = descSeed.length > 0
-      ? await fetchPublishedDescription(packageName, descSeed, runner, cwd)
-      : '';
     const createArgs: string[] = [
       'repo',
       'create',
@@ -521,10 +621,9 @@ async function syncOnePackage(args: {
       '--public',
       '--disable-issues',
       '--disable-wiki',
+      '--description',
+      desiredDescription,
     ];
-    if (description.length > 0) {
-      createArgs.push('--description', description);
-    }
     const create = await runner.run('gh', createArgs, { cwd });
     if (create.exitCode !== 0) {
       errors.push({
@@ -784,24 +883,26 @@ async function syncOnePackage(args: {
     };
   }
 
-  let archived = false;
-  if (!skipArchive) {
-    const archive = await runner.run(
-      'gh',
-      ['api', `repos/${org}/${repoName}`, '-X', 'PATCH', '-F', 'archived=true'],
-      { cwd },
-    );
-    if (archive.exitCode !== 0) {
-      errors.push({
-        code: SYNC_REPO_ERROR_CODES.ghApiFailed,
-        severity: 'warning',
-        message: `${packageName}: gh archive failed — ${archive.stderr.trim()}`,
-        target: packageName,
-        remediation: 'Re-archive manually via `gh repo archive arki-labs/<name>`.',
-      });
-    } else {
-      archived = true;
-    }
+  // Re-stamp the description on every run. For freshly-created repos the
+  // description was passed at `gh repo create` time so this is usually a
+  // no-op; for existing repos this is the only way to keep the
+  // `[Read-only mirror]` banner aligned when the npm description
+  // changes.
+  const descResult = await ensureRepoDescription({
+    org,
+    repoName,
+    desired: desiredDescription,
+    runner,
+    cwd,
+  });
+  if (descResult.status === 'failed') {
+    errors.push({
+      code: SYNC_REPO_ERROR_CODES.ghApiFailed,
+      severity: 'warning',
+      message: `${packageName}: gh repo edit (description) failed — ${descResult.reason}`,
+      target: packageName,
+      remediation: 'Run `gh repo edit arki-labs/<name> --description "<desc>"` manually.',
+    });
   }
 
   await rm(workDir, { recursive: true, force: true });
@@ -816,7 +917,7 @@ async function syncOnePackage(args: {
     publishedVersions: publishedVersions.map(v => v.version),
     pushedVersions,
     skippedVersions: skippedVersions.map(v => v.version),
-    archived,
+    archived: false,
     errors,
   };
 }
@@ -842,7 +943,6 @@ export async function runSyncPackageRepos(
   const org = opts.githubOrg ?? DEFAULT_GITHUB_ORG;
   const dryRun = opts.dryRun ?? false;
   const force = opts.force ?? false;
-  const skipArchive = opts.skipArchive ?? false;
 
   const waveAllowlist: string[] = [];
   for (const wave of opts.config.waves) {
@@ -885,7 +985,6 @@ export async function runSyncPackageRepos(
       cwd: opts.cwd,
       dryRun,
       force,
-      skipArchive,
     });
     items.push(item);
     switch (item.status) {

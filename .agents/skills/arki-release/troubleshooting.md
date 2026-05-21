@@ -236,23 +236,21 @@ json.dump(d, open(path, 'w'), indent=2, ensure_ascii=False)
 3. If you find user's own old work, surface and get explicit "replace" authorization before force-push.
 4. After force-push, GitHub keeps the abandoned commits temporarily — they can be recovered via the reflog UI if needed.
 
-## Per-package mirror archive-dance failures
+## Per-package mirror description-stamp failures
 
-**Symptom 1:** `sync-package-repos` emits `SYNC_E001 gh unarchive failed` on a repo that exists.
+**Symptom 1:** `sync-package-repos` emits a `SYNC_E001 gh repo edit (description) failed` warning.
 
-**Cause:** The `gh` CLI token lacks repo-admin scope. The archive flip is `gh api repos/<org>/<repo> -X PATCH -F archived=false`, which needs `repo` scope (or for orgs, `admin:org` if your auth uses fine-grained tokens scoped narrowly).
+**Cause:** The `gh` CLI token lacks repo-edit permission, or GitHub rejected the description (e.g. exceeded 350-char limit — the tool already truncates, but custom org policies can be stricter).
 
-**Fix:** Re-auth with `gh auth login -s repo` (broad scope). Confirm with `gh auth status -h github.com` showing `Token scopes:` containing `repo`. Re-run the sync; the archive will succeed.
+**Fix:** Re-auth with `gh auth login -s repo` (broad scope). Confirm with `gh auth status -h github.com` showing `Token scopes:` containing `repo`. Re-run the sync; the description stamp will succeed.
 
 ---
 
-**Symptom 2:** `sync-package-repos` succeeded but the mirror is left unarchived (GitHub UI doesn't show the read-only banner).
+**Symptom 2:** The mirror's description does NOT start with `[Read-only mirror]` even after a successful sync.
 
-**Cause:** The re-archive at the end of the sync is recorded as a *warning* (not a failure), because the push already succeeded. The mirror state diverges from the doctrine.
+**Cause:** Either (a) the npm `description` field is empty and you're looking at the default GitHub auto-description, or (b) the `gh repo edit` warning was suppressed in non-`--json` mode.
 
-**Fix:** Either re-run `bun release:arki sync-package-repos --package "@arki/<name>"` (it'll no-op the content and just flip the archive bit), or `gh repo archive arki-labs/<name>` directly.
-
-**Verification:** `bun release:arki history` flags unarchived mirrors with `repoStatus: 'unarchived'` and emits `HIST_E006`. Run that after every sync to confirm the dance landed clean.
+**Fix:** Run `bun release:arki sync-package-repos --json --package "@arki/<name>" | jq '.errors'` to surface any warnings. If empty, verify with `gh api repos/arki-labs/<name> --jq '.description'`. If still wrong, `gh repo edit arki-labs/<name> --description "[Read-only mirror] <desc>"` manually.
 
 ---
 
@@ -261,6 +259,10 @@ json.dump(d, open(path, 'w'), indent=2, ensure_ascii=False)
 **Cause:** A `failed` exit from `syncOnePackage` returns before the `await rm(workDir, ...)` cleanup. The orchestrator continues to the next package, but the failed package's temp dir leaks.
 
 **Fix:** `\rm -rf /tmp/arki-mirror-*` (escape `rm` to bypass the workspace `-i` alias). Re-run the sync with `--package "@arki/<failed-name>"` to retry just that one.
+
+---
+
+**Note on the previous archive doctrine (decommissioned 2026-05-21):** earlier versions of `sync-package-repos` archived each mirror at the end of every run. The unarchive→push→re-archive dance was operationally expensive (3 gh calls per sync per package) and added a failure mode where a mid-sync error could leave the mirror unarchived for days. The current doctrine drops archiving entirely; the read-only signal is the `[Read-only mirror]` description prefix plus disabled Issues/Wiki. If you find an old mirror that's still archived, run `gh api repos/arki-labs/<name> -X PATCH -F archived=false` once (or just re-run the sync — it auto-unarchives any archived mirror it touches).
 
 ## Per-package mirror tag-drift after a yank
 

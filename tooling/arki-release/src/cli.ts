@@ -392,12 +392,11 @@ async function runHistoryHandler(args: ParsedCliArgs): Promise<number> {
  *
  * Flags:
  *   --json               Emit the {@link ReleaseCommandEnvelope} as JSON.
- *   --dry-run            Plan only — no gh creates, no git pushes, no archive flips.
+ *   --dry-run            Plan only — no gh creates, no git pushes, no description stamps.
  *                        Recommended for the first run; the envelope shows what
  *                        WOULD happen.
  *   --force              Re-push the full history (all published versions)
  *                        instead of an incremental sync. Uses force-push.
- *   --skip-archive       Leave repos unarchived at the end (for diagnosis).
  *   --org <name>         Override the GitHub org (default `arki-labs`).
  *   --package <@arki/x>  Restrict the run to a single wave-listed package.
  *                        Repeat for multiple (e.g. `--package @arki/dot --package @arki/db`).
@@ -411,7 +410,6 @@ async function runSyncPackageReposHandler(args: ParsedCliArgs): Promise<number> 
   const configPath = defaultConfigPath(cwd);
   const dryRun = args.rest.includes('--dry-run');
   const force = args.rest.includes('--force');
-  const skipArchive = args.rest.includes('--skip-archive');
   const orgOverride = extractOption(args.rest, 'org');
   const packages = extractAllOptions(args.rest, 'package');
 
@@ -422,7 +420,6 @@ async function runSyncPackageReposHandler(args: ParsedCliArgs): Promise<number> 
       config,
       dryRun,
       force,
-      skipArchive,
       ...(orgOverride !== null ? { githubOrg: orgOverride } : {}),
       ...(packages.length > 0 ? { packages } : {}),
     });

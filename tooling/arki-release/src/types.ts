@@ -748,30 +748,28 @@ export type ScorecardSummary = {
 /**
  * Per-package GitHub mirror status — the dimension `history` tracks
  * alongside the source/npm/changelog/main-mirror axes. Each published
- * `@arki/<name>` is expected to have a `arki-labs/<name>` repo that is:
- *   1. created,
- *   2. archived (read-only banner),
- *   3. carrying one git tag per published npm version.
+ * `@arki/<name>` is expected to have a `arki-labs/<name>` repo that
+ * exists and carries one git tag per published npm version. The
+ * "read-only" signal is carried by the `[Read-only mirror]` description
+ * banner (stamped on every sync) rather than the archive flag — so
+ * archive state is informational only and does not drive verdict.
  *
- * - `in-sync`     — repo exists, archived, all published versions tagged.
+ * - `in-sync`     — repo exists, all published versions tagged.
  * - `missing`     — no repo at all under arki-labs.
  * - `tag-drift`   — repo exists but missing tags for at least one published version.
- * - `unarchived`  — repo exists with the right tags but isn't archived
- *                   (a transient state during sync, but worth flagging if observed).
  * - `unchecked`   — `--skip-network` or per-package repo check was disabled.
  *
- * `tag-drift` is the only failure-severity state (a real, fixable drift).
- * `missing` and `unarchived` are warnings — they're remediable by running
- * `bun release:arki sync-package-repos`.
+ * `tag-drift` and `missing` are warning-severity drifts — remediable by
+ * running `bun release:arki sync-package-repos`.
  */
-export type HistoryRepoStatus = 'in-sync' | 'missing' | 'tag-drift' | 'unarchived' | 'unchecked';
+export type HistoryRepoStatus = 'in-sync' | 'missing' | 'tag-drift' | 'unchecked';
 
 /**
  * Status of a single per-package repo sync attempt — answers "what did
  * `sync-package-repos` DO for this package."
  *
- * - `created`  — repo did not exist; created it, pushed history, archived.
- * - `updated`  — repo existed; pushed new versions / tags.
+ * - `created`  — repo did not exist; created it, pushed history, stamped description.
+ * - `updated`  — repo existed; pushed new versions / tags or restamped description.
  * - `in-sync`  — repo existed; everything already aligned; nothing pushed.
  * - `failed`   — irrecoverable error mid-sync (gh API failure, npm fetch
  *                failure, git push failure). Errors carry stable codes.
@@ -798,7 +796,15 @@ export type SyncRepoItem = {
   readonly pushedVersions: readonly string[];
   /** Versions that already had a matching tag on the mirror. */
   readonly skippedVersions: readonly string[];
-  /** Whether the mirror is archived at the end of the run. */
+  /**
+   * Whether the mirror is archived at the end of the run.
+   *
+   * Always `false` under the current model — mirrors carry their
+   * read-only signal in the description (`[Read-only mirror] …`) rather
+   * than via the archive flag. Kept on the envelope for downstream
+   * observability ("is the mirror archived?" is still a useful question
+   * to answer from the JSON output without an extra gh round-trip).
+   */
   readonly archived: boolean;
   /** Optional one-line reason (used for `skipped` / `failed`). */
   readonly reason?: string;
@@ -848,8 +854,6 @@ export type SyncRepoSummary = {
  *                   the per-package commit history from scratch). Without
  *                   `--force`, only versions missing from the mirror tags
  *                   are pushed (incremental sync).
- * - `skipArchive` — when `true`, leave repos unarchived at the end of the
- *                   run. Default `false` (sync archives at the end).
  */
 export type SyncRepoOptions = {
   readonly cwd: string;
@@ -858,5 +862,4 @@ export type SyncRepoOptions = {
   readonly packages?: readonly string[];
   readonly dryRun?: boolean;
   readonly force?: boolean;
-  readonly skipArchive?: boolean;
 };

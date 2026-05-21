@@ -36,16 +36,18 @@ Don't invoke for: general npm questions, generic monorepo work, or tasks that ar
                             sync-package-    │
                             repos            │
                                              ▼
-                                      ┌──────────────────────────────┐
-                                      │ arki-labs/<name>             │
-                                      │ (per-package archived        │
-                                      │  read-only mirrors;          │
-                                      │  one commit per published    │
-                                      │  npm version + v<x> tags)    │
-                                      └──────────────────────────────┘
+                                      ┌──────────────────────────────────┐
+                                      │ arki-labs/<name>                 │
+                                      │ (per-package read-only mirrors;  │
+                                      │  one commit per published        │
+                                      │  npm version + v<x> tags;        │
+                                      │  description prefixed            │
+                                      │  `[Read-only mirror]`;           │
+                                      │  Issues/Wiki disabled)           │
+                                      └──────────────────────────────────┘
 ```
 
-**Doctrine:** the **materialized tree at `.release/arki-public/`** is the canonical artifact. npm and `arki-labs/arki` are mirrors of it; the per-package repos at `arki-labs/<name>` are mirrors *of npm* (reconstructed from npm tarballs, one commit per published version). The materialized tree is **deterministically regenerated** from monorepo source — never hand-edit it. Per-package repos are **deterministically reconstructable** from npm — never hand-edit them either; they are archived to enforce that signal.
+**Doctrine:** the **materialized tree at `.release/arki-public/`** is the canonical artifact. npm and `arki-labs/arki` are mirrors of it; the per-package repos at `arki-labs/<name>` are mirrors *of npm* (reconstructed from npm tarballs, one commit per published version). The materialized tree is **deterministically regenerated** from monorepo source — never hand-edit it. Per-package repos are **deterministically reconstructable** from npm — never hand-edit them either; the read-only signal is the `[Read-only mirror]` prefix on the repo description plus Issues/Wiki being disabled at create time.
 
 ## The release-doctrine non-negotiables
 
