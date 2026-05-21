@@ -1,19 +1,20 @@
 import type { ReactNode } from 'react';
 
+import { KineticBand } from './kinetic-band';
 import { MarketingNav } from './marketing-nav';
 import { MarketingStatusBar } from './marketing-status-bar';
 
 type Props = {
   children: ReactNode;
-  activeHref?: string;
 };
 
-export function MarketingLayout({ children, activeHref }: Readonly<Props>) {
+export function MarketingLayout({ children }: Readonly<Props>) {
   return (
     <div className="marketing">
-      <MarketingNav activeHref={activeHref} />
+      <MarketingNav />
       <main>{children}</main>
       <MarketingStatusBar />
+      <KineticBand />
     </div>
   );
 }

@@ -9,14 +9,16 @@
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
 
 .marketing {
-  /* arki brand palette — dark zinc + amber accent */
-  --background: hsl(240 10% 4%);
-  --foreground: hsl(240 6% 90%);
-  --card: hsl(240 8% 7%);
-  --card-foreground: hsl(240 6% 90%);
-  --border: hsl(240 6% 18%);
-  --muted: hsl(240 6% 14%);
-  --muted-foreground: hsl(240 5% 60%);
+  /* arki brand palette — light mode ("paper-printed man page").
+     Theme system (@arki/theme) toggles dark mode by adding `.dark`
+     class on <html>; the overrides below kick in then. */
+  --background: hsl(240 5% 96%);
+  --foreground: hsl(240 10% 4%);
+  --card: hsl(240 6% 94%);
+  --card-foreground: hsl(240 10% 4%);
+  --border: hsl(240 5% 84%);
+  --muted: hsl(240 6% 90%);
+  --muted-foreground: hsl(240 4% 46%);
   --accent: hsl(43 96% 56%);
   --accent-foreground: hsl(240 10% 4%);
   --font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
@@ -29,9 +31,24 @@
   font-size: 14px;
   line-height: 22px;
 
-  min-height: 100vh;
+  /* The root <body> is `h-dvh overflow-hidden` (workspace-shell convention),
+     so the marketing layout owns its own scroll. */
+  height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr auto auto;
+}
+
+:is(.dark) .marketing {
+  /* Dark zinc surface. The amber accent + font tokens above are mode-neutral. */
+  --background: hsl(240 10% 4%);
+  --foreground: hsl(240 6% 90%);
+  --card: hsl(240 8% 7%);
+  --card-foreground: hsl(240 6% 90%);
+  --border: hsl(240 6% 18%);
+  --muted: hsl(240 6% 14%);
+  --muted-foreground: hsl(240 5% 60%);
 }
 
 .marketing * { box-sizing: border-box; }
@@ -59,67 +76,25 @@
   align-items: center;
   gap: 22px;
 }
-.marketing-nav-mark {
+/* Brand mark — L01 Monospace wordmark (arki Design System).
+   Pure type, two sizes. Anchor styling is inherited. */
+.brand-mark {
   font-family: var(--font-mono);
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  display: flex;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  display: inline-flex;
   align-items: baseline;
   color: var(--foreground);
+  transition: opacity 150ms var(--ease-out);
 }
-.marketing-nav-mark .accent { color: var(--accent); }
-.marketing-nav-mark .dim { color: var(--muted-foreground); font-weight: 500; }
+.brand-mark:hover { opacity: 0.85; }
+.brand-mark-accent { color: var(--accent); }
 
-.marketing-nav-links {
-  display: flex;
-  gap: 4px;
-}
-.marketing-nav-link {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--muted-foreground);
-  padding: 4px 8px;
-  border-radius: 4px;
-  transition: color 150ms var(--ease-out);
-}
-.marketing-nav-link:hover { color: var(--foreground); }
-.marketing-nav-link.active { color: var(--foreground); }
-.marketing-nav-link.active::after {
-  content: "";
-  display: block;
-  height: 1px;
-  background: var(--accent);
-  margin-top: 2px;
-}
-
-.marketing-cmdk {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  background: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--muted-foreground);
-  min-width: 180px;
-  white-space: nowrap;
-}
-.marketing-cmdk > span:not(.kbd) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.marketing-cmdk .kbd {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--muted-foreground);
-  margin-left: auto;
-  padding: 0 6px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--background);
+.brand-mark--nav { font-size: 18px; }
+.brand-mark--hero {
+  font-size: clamp(56px, 8vw, 128px);
+  letter-spacing: -0.03em;
 }
 
 .marketing-icon-btn {
@@ -146,8 +121,6 @@
 
 @media (max-width: 720px) {
   .marketing-nav { padding: 0 16px; }
-  .marketing-nav-links { display: none; }
-  .marketing-cmdk { display: none; }
 }
 
 /* ============================================================
@@ -202,4 +175,123 @@
 
 @media (max-width: 720px) {
   .marketing-statusbar { padding: 8px 16px; }
+}
+
+/* ============================================================
+   FOOTER BANDS — decorative strip below the status bar.
+   Currently: kinetic typography (cross-fading brand phrases).
+   ============================================================ */
+.band {
+  position: relative;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+  background: var(--background);
+  height: 168px;
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  align-items: center;
+}
+.band-side {
+  height: 100%;
+  padding: 18px 20px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: linear-gradient(90deg, transparent, hsl(240 6% 90% / 0.35));
+}
+:is(.dark) .band-side {
+  background: linear-gradient(90deg, transparent, hsl(240 6% 14% / 0.25));
+}
+.band-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.band-title {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--foreground);
+  margin-top: 4px;
+  letter-spacing: -0.01em;
+}
+.band-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin-top: 4px;
+}
+
+.band-kinetic { grid-template-columns: 200px 1fr 56px; }
+.band-kinetic .kin-stage {
+  padding: 0 28px;
+  position: relative;
+  overflow: hidden;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.band-kinetic .kin-phrase {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 64px;
+  line-height: 70px;
+  letter-spacing: -0.03em;
+  color: var(--foreground);
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  animation: kin-in 600ms var(--ease-out) both;
+}
+.band-kinetic .kin-lead { color: var(--muted-foreground); }
+.band-kinetic .kin-accent { color: var(--foreground); }
+.band-kinetic .kin-dot { color: var(--accent); }
+.band-kinetic .kin-sub {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted-foreground);
+  margin-top: 6px;
+  animation: kin-in 700ms 80ms var(--ease-out) both;
+}
+@keyframes kin-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.band-kinetic .kin-progress {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  padding-right: 18px;
+  align-items: center;
+}
+.band-kinetic .kin-tick {
+  width: 2px;
+  height: 12px;
+  background: var(--border);
+  border-radius: 1px;
+  transition: all 200ms var(--ease-out);
+}
+.band-kinetic .kin-tick.active {
+  height: 22px;
+  background: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .band-kinetic .kin-phrase,
+  .band-kinetic .kin-sub {
+    animation: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .band { grid-template-columns: 1fr; height: auto; }
+  .band-side { border-right: none; border-bottom: 1px solid var(--border); }
+  .band-kinetic { grid-template-columns: 1fr; }
+  .band-kinetic .kin-progress { display: none; }
+  .band-kinetic .kin-phrase { font-size: 44px; line-height: 50px; }
 }

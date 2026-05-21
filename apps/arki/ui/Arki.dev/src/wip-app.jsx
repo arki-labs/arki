@@ -25,15 +25,8 @@ function WipApp() {
 
   return (
     <div className="shell">
-      <Nav
-        route="home"
-        setRoute={() => {}}
-        theme={t.theme}
-        setTheme={setThemeBridge}
-      />
-
       <div className="body-wrap">
-        <HomeWip tweaks={t} setRoute={() => {}} />
+        <HomeWip tweaks={t} setRoute={() => {}} theme={t.theme} setTheme={setThemeBridge} />
       </div>
 
       <StatusBar route="home" />

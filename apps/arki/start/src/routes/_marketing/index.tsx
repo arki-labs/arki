@@ -6,8 +6,8 @@ import { Check, Copy, Files, GitBranch, GithubLogo } from '@arki/icons/phosphor'
 import { getDefaultMeta } from '~/shared-metadata';
 import homeWipCss from '~/styles/home-wip.css?url';
 
-const REPO = 'https://github.com/arki-dev/arki';
-const REPO_LABEL = 'github.com/arki-dev/arki';
+const REPO = 'https://github.com/arki-labs/arki';
+const REPO_LABEL = 'github.com/arki-labs/arki';
 
 export const Route = createFileRoute('/_marketing/')({
   head: () => {
@@ -443,49 +443,6 @@ function RepoPanel() {
   );
 }
 
-type Commit = {
-  hash: string;
-  scope: string;
-  message: string;
-  who: string;
-  when: string;
-};
-
-const COMMITS: Commit[] = [
-  { hash: '802cf4e', scope: 'site', message: 'write work-in-progress notice for the homepage', who: 'rfu', when: '2h' },
-  { hash: '4a91d22', scope: 'band', message: 'tune amber phosphor glow on the VT323 retro mark', who: 'rfu', when: '5h' },
-  { hash: 'e88f1c2', scope: 'dot', message: 'structured diagnostics envelope · schema v1', who: 'rfu', when: 'Mon' },
-  { hash: '31bc004', scope: 'docs', message: 'lifecycle outline · five hooks · diagram pending', who: 'rfu', when: 'Mon' },
-  { hash: 'a0e1733', scope: 'example', message: 'billing/defineApp basic fixture committed', who: 'rfu', when: 'Sun' },
-  { hash: 'f9c2b18', scope: 'ds', message: 'drop Geist · pin Plex Sans · JetBrains · Fira · VT323', who: 'rfu', when: 'Sun' },
-  { hash: '2207ade', scope: 'cli', message: 'dot doctor --json prints structured failures with fix urls', who: 'rfu', when: 'Fri' },
-  { hash: '7c44e91', scope: 'pkg', message: 'zero-deps audit · trim 11 KB → 9.2 KB', who: 'rfu', when: 'Fri' },
-];
-
-function Journal() {
-  return (
-    <div className="wip-journal">
-      {COMMITS.map((c) => (
-        <a
-          key={c.hash}
-          className="row"
-          href={`${REPO}/commit/${c.hash}`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          <span className="hash">{c.hash}</span>
-          <span className="msg">
-            <span className="scope">{c.scope}: </span>
-            {c.message}
-          </span>
-          <span className="who">@{c.who}</span>
-          <span className="when">{c.when}</span>
-        </a>
-      ))}
-    </div>
-  );
-}
-
 function HomePage() {
   return (
     <div className="wip" id="main">
@@ -546,7 +503,7 @@ function HomePage() {
         <SiteBoard />
       </section>
 
-      <section className="wip-section" aria-labelledby="repo-h">
+      <section className="wip-section" aria-labelledby="repo-h" style={{ marginBottom: 16 }}>
         <header className="wip-section-h">
           <span className="tag">source</span>
           <span className="title" id="repo-h">
@@ -556,22 +513,6 @@ function HomePage() {
           <span className="meta">github · MIT</span>
         </header>
         <RepoPanel />
-      </section>
-
-      <section className="wip-section" aria-labelledby="journal-h" style={{ marginBottom: 16 }}>
-        <header className="wip-section-h">
-          <span className="tag">journal</span>
-          <span className="title" id="journal-h">
-            recent commits
-          </span>
-          <span className="rule" aria-hidden="true" />
-          <span className="meta">
-            <a href={`${REPO}/commits/main`} target="_blank" rel="noreferrer">
-              full log on github ↗
-            </a>
-          </span>
-        </header>
-        <Journal />
       </section>
     </div>
   );

@@ -323,6 +323,14 @@ function Journal() {
 function HomeWip({ tweaks = {}, setRoute = () => {} }) {
   return (
     <main className="container wip" id="main">
+      {/* BIG WORDMARK — replaces nav, sits at the top of the page */}
+      <header className="wip-mark" aria-label="arki.dot">
+        <span className="mk-word">arki</span><span className="mk-dot">.</span><span className="mk-dim">dot</span>
+        <span className="mk-tag" aria-hidden="true">
+          <span className="mk-tag-prompt">&gt;</span> ship faster<span className="mk-caret"></span>
+        </span>
+      </header>
+
       {/* HERO */}
       <section className="wip-hero" aria-labelledby="wip-hero-h">
         <p className="wip-kicker">
