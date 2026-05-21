@@ -199,8 +199,10 @@ contract between the app's author and the agents that will modify it. If
 no `AGENTS.md` exists, work conservatively: read the manifest, ask before
 editing, and verify every change with the loop above.
 
-> **Status:** the `AGENTS.md` convention is documented now (this section).
-> The `dot new` generator that emits an AGENTS.md ships in v1.1.
+> **Status:** the `AGENTS.md` convention is documented in this section and
+> emitted by `dot new` in v1. Run `dot new my-app` and the generated
+> `AGENTS.md` will document verification commands, public/private
+> boundaries, and DOT artifact locations.
 
 ## 7. MCP is a future adapter
 

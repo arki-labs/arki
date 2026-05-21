@@ -29,6 +29,7 @@ import type { DotCliEnvelope, DotCliEnvelopeStatus } from './render-explain.js';
 import { DotLifecycleError } from '../lifecycle.js';
 import { discoverApp, guards } from './discover.js';
 import { DotCliError, DotCliErrorCode, dotCliDocsUrl } from './error-codes.js';
+import { runNew } from './new.js';
 import { renderDoctor } from './render-doctor.js';
 import { renderExplain } from './render-explain.js';
 
@@ -36,29 +37,50 @@ const debugCli = createDebugLogger('arki:dot:cli');
 
 const VERSION = '0.1.0';
 
-const HELP_TEXT = `dot — CLI for inspecting DOT apps
+const HELP_TEXT = `dot — CLI for inspecting and scaffolding DOT apps
 
 Usage:
   dot <command> [options]
 
 Commands:
-  explain    Print the static app graph (manifest)
-  doctor     Boot the app and print runtime diagnostics
+  explain                Print the static app graph (manifest)
+  doctor                 Boot the app and print runtime diagnostics
+  new <app-name>         Scaffold a minimal DOT app
 
-Options:
-  --json         Emit a JSON envelope to stdout (default: human-readable text)
-  --app <path>   Path to the app entry file (default: discovers ./dot.config.ts,
-                 ./src/app.ts, or ./app.ts)
-  --cwd <dir>    Working directory (default: current)
-  --help         Show this help and exit
-  --version      Print version and exit
+Common options:
+  --json                 Emit a JSON envelope to stdout (default: text)
+  --help                 Show this help and exit
+  --version              Print version and exit
+
+\`explain\` / \`doctor\` options:
+  --app <path>           Path to the app entry file (default: discovers
+                         ./dot.config.ts, ./src/app.ts, or ./app.ts)
+  --cwd <dir>            Working directory (default: current)
+
+\`new\` options:
+  --target <dir>         Directory to create the app in (default: <app-name>)
+  --pm <npm|pnpm|bun>    Package manager hint for the README (default: bun)
+  --dry-run              Print planned file operations without writing
+  --force                Overwrite existing files in the target directory
 `;
 
+export type CliCommand = 'explain' | 'doctor' | 'new' | 'help' | 'version';
+
 export type CliArgs = {
-  command: 'explain' | 'doctor' | 'help' | 'version';
+  command: CliCommand;
   json: boolean;
   appPath?: string;
   cwd?: string;
+  /** Positional after the command (used by `new` for the app name). */
+  positional?: string;
+  /** `--target` (only honored by `new`). */
+  target?: string;
+  /** `--pm` (only honored by `new`). */
+  pm?: 'npm' | 'pnpm' | 'bun';
+  /** `--dry-run` (only honored by `new`). */
+  dryRun?: boolean;
+  /** `--force` (only honored by `new`). */
+  force?: boolean;
 };
 
 /**
@@ -77,7 +99,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     const tok = rest[i]!;
     if (!tok.startsWith('-')) {
       const cmd = tok;
-      if (cmd === 'explain' || cmd === 'doctor' || cmd === 'help' || cmd === 'version') {
+      if (cmd === 'explain' || cmd === 'doctor' || cmd === 'new' || cmd === 'help' || cmd === 'version') {
         command = cmd;
         rest.splice(i, 1);
         break;
@@ -85,9 +107,23 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       throw new DotCliError({
         code: DotCliErrorCode.UnknownCommand,
         message: `Unknown command: ${cmd}`,
-        remediation: `Use one of: explain, doctor. Run \`dot --help\` for usage.`,
+        remediation: 'Use one of: explain, doctor, new. Run `dot --help` for usage.',
         metadata: { received: cmd },
       });
+    }
+  }
+
+  // `new` takes a positional <app-name> after the command. Pull the next
+  // non-flag token out so node:util parseArgs doesn't see it.
+  let positional: string | undefined;
+  if (command === 'new') {
+    for (let i = 0; i < rest.length; i++) {
+      const tok = rest[i]!;
+      if (!tok.startsWith('-')) {
+        positional = tok;
+        rest.splice(i, 1);
+        break;
+      }
     }
   }
 
@@ -103,6 +139,10 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         cwd: { type: 'string' },
         help: { type: 'boolean', default: false },
         version: { type: 'boolean', default: false },
+        target: { type: 'string' },
+        pm: { type: 'string' },
+        'dry-run': { type: 'boolean', default: false },
+        force: { type: 'boolean', default: false },
       },
     });
   } catch (err) {
@@ -120,6 +160,10 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     cwd?: string;
     help?: boolean;
     version?: boolean;
+    target?: string;
+    pm?: string;
+    'dry-run'?: boolean;
+    force?: boolean;
   };
 
   if (values.help) command = 'help';
@@ -127,11 +171,29 @@ export function parseArgs(argv: readonly string[]): CliArgs {
 
   if (!command) command = 'help';
 
+  let pm: CliArgs['pm'];
+  if (values.pm !== undefined) {
+    if (values.pm !== 'npm' && values.pm !== 'pnpm' && values.pm !== 'bun') {
+      throw new DotCliError({
+        code: DotCliErrorCode.InvalidArgs,
+        message: `Invalid --pm value: ${values.pm}`,
+        remediation: 'Use one of: npm, pnpm, bun.',
+        metadata: { received: values.pm },
+      });
+    }
+    pm = values.pm;
+  }
+
   return {
     command,
     json: values.json ?? false,
     appPath: values.app,
     cwd: values.cwd,
+    positional,
+    target: values.target,
+    pm,
+    dryRun: values['dry-run'] ?? false,
+    force: values.force ?? false,
   };
 }
 
@@ -313,6 +375,43 @@ export async function main(options: MainOptions): Promise<number> {
   if (args.command === 'version') {
     stdout(`${VERSION}\n`);
     return 0;
+  }
+
+  if (args.command === 'new') {
+    if (!args.positional) {
+      const err = new DotCliError({
+        code: DotCliErrorCode.InvalidArgs,
+        message: 'Missing required <app-name> positional for `dot new`.',
+        remediation: 'Run `dot new <app-name>`. Example: `dot new my-app`.',
+      });
+      const envelope = errorEnvelope(err, 'new', nowFactory);
+      if (args.json) stdout(`${JSON.stringify(envelope, null, 2)}\n`);
+      else stderr(formatErrorText(err));
+      return 1;
+    }
+    try {
+      const envelope = await runNew({
+        name: args.positional,
+        cwd: args.cwd,
+        target: args.target,
+        pm: args.pm,
+        dryRun: args.dryRun,
+        json: args.json,
+        force: args.force,
+        out: stdout,
+        err: stderr,
+        now: nowFactory,
+      });
+      return envelope.status === 'failure' ? 1 : 0;
+    } catch (err) {
+      if (err instanceof DotCliError) {
+        const envelope = errorEnvelope(err, 'new', nowFactory);
+        if (args.json) stdout(`${JSON.stringify(envelope, null, 2)}\n`);
+        else stderr(formatErrorText(err));
+        return 1;
+      }
+      throw err;
+    }
   }
 
   try {

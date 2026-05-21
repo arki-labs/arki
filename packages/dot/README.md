@@ -89,21 +89,42 @@ contract.
 
 ## CLI
 
-`@arki/dot` ships a small CLI for inspecting and validating apps:
+`@arki/dot` ships a small CLI for scaffolding and inspecting apps:
 
 ```bash
+# Scaffold a minimal DOT app (package.json, tsconfig, app entrypoint,
+# env schema, AGENTS.md, README, gitignore, vitest boot test).
+dot new my-app
+
+# Preview the file operations without writing anything.
+dot new my-app --dry-run --json | jq '.operations'
+
 # Print the app manifest as a structured envelope.
 dot explain --app ./my-app.ts
 
 # Run boot-time diagnostics; non-zero exit if any check fails.
 dot doctor --app ./my-app.ts
 
-# Both commands support --json for agent-friendly output.
-dot explain --app ./my-app.ts --json | jq '.manifest.plugins'
+# Every command supports --json for agent-friendly output.
+dot explain --app ./my-app.ts --json | jq '.data.plugins'
 ```
 
 The CLI emits the same envelope shape as the in-process diagnostics snapshot
 (`app.diagnostics`), so the same downstream tools can consume either.
+
+### `dot new <app-name>`
+
+Scaffolds a minimal DOT app under `<app-name>/` (override with `--target`).
+The scaffold ships a `defineApp(...)` entrypoint wired to `@arki/env/dot`,
+a vitest that boots the app and asserts the manifest shape, and an
+`AGENTS.md` documenting verification commands and the public/private
+boundary for agents working in the generated tree. Pass `--dry-run --json`
+to inspect the exact file operations (path, action, contentHash,
+contentBytes, reason) before committing them to disk; `--force`
+overwrites pre-existing files in the target directory.
+
+Templates live at [`templates/app-minimal/`](./templates/app-minimal) and
+ship with the published tarball.
 
 ## Architecture
 
