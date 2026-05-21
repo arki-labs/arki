@@ -17,6 +17,19 @@
  * the founder can swap them in one edit when the public repo is created.
  * Do NOT replace these with personal-account URLs — that is exactly the
  * leak surface the release rails exist to prevent.
+ *
+ * Wave discipline (per the public-release plan, doctrine section):
+ *
+ *   > First stable release should be smaller and excellent rather than
+ *   > broad and uneven.
+ *
+ * Only packages that pass every scorecard dimension belong in an active
+ * wave. Packages that are still `private: true` (auth, queue, ai, …) or
+ * still missing dist / docs (fs, emails, design-systems, theme, icons)
+ * stay out of the waves until they earn their seat. Each excluded
+ * package keeps its `private: true` flag (or, for unfinished public
+ * candidates, its un-allowlisted state) — the inventory command surfaces
+ * the gap so it can be closed in a later wave.
  */
 import type { ReleaseConfig } from './tooling/arki-release/src/types';
 
@@ -44,7 +57,7 @@ export const config: ReleaseConfig = {
       packages: [
         '@arki/assert',
         '@arki/contracts',
-        '@arki/logger',
+        '@arki/log',
         '@arki/env',
         '@arki/ts',
         '@arki/resilience',
@@ -62,36 +75,29 @@ export const config: ReleaseConfig = {
     {
       id: 'infrastructure-adapters',
       label: 'Wave 3 — Infrastructure Adapters',
-      packages: [
-        '@arki/db',
-        '@arki/kv',
-        '@arki/fs',
-        '@arki/queue',
-        '@arki/event-sourcing',
-        '@arki/auth',
-        '@arki/emails',
-      ],
+      // Stable v1: the env + kv + db trio + event-sourcing — they pass every
+      // scorecard dimension and back the DOT fixture. `@arki/fs`,
+      // `@arki/queue`, `@arki/auth`, `@arki/emails` rejoin this wave when
+      // they ship dist+docs / drop `private: true`.
+      packages: ['@arki/db', '@arki/kv', '@arki/event-sourcing'],
     },
     {
       id: 'frontend',
       label: 'Wave 4 — Frontend',
-      packages: [
-        '@arki/design-systems',
-        '@arki/theme',
-        '@arki/icons',
-        '@arki/react-hooks',
-        '@arki/ui',
-      ],
+      // Empty for v1.0 — every Wave 4 candidate (`@arki/design-systems`,
+      // `@arki/theme`, `@arki/icons`, `@arki/react-hooks`, `@arki/ui`)
+      // currently fails build-output / docs / privacy or depends on the
+      // still-private `@arki/react-hooks`. They are tracked here as a
+      // wave anchor; concrete promotion lands in v1.1.
+      packages: [],
     },
     {
       id: 'specialized',
       label: 'Wave 5 — Specialized',
-      packages: [
-        '@arki/ai',
-        '@arki/rich-text',
-        '@arki/images',
-        '@arki/diff-engine',
-      ],
+      // Empty for v1.0 — every Wave 5 candidate (`@arki/ai`,
+      // `@arki/rich-text`, `@arki/images`, `@arki/diff-engine`) is still
+      // `private: true`. They join the wave once their internals stabilise.
+      packages: [],
     },
   ],
 };
