@@ -9,12 +9,12 @@
  *   - custom pip-name override
  */
 
-import { defineApp } from '@arki/dot/pip';
+import { defineApp, DotLifecycleError, DotPipError } from '@arki/dot/pip';
 import { defineRelations } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 
-import { db } from './dot.js';
+import { DB_PIP_ERROR_CODES, db } from './dot.js';
 
 const widgets = pgTable('widgets', {
   id: text('id').primaryKey(),
@@ -67,6 +67,32 @@ describe('@arki/db/dot', () => {
       expect(rows).toEqual([{ id: 'a', label: 'first' }]);
     } finally {
       await app.dispose();
+    }
+  });
+
+  it('throws a coded DotPipError when DB_URL is not configured (pg driver)', async () => {
+    // The kernel wraps any throw from a boot hook in DotLifecycleError so
+    // every boot failure has a uniform outer shape. The original throw is
+    // preserved on `.cause` — that's what consumers and coding agents
+    // match against for the stable code / remediation / docsUrl.
+    const previous = process.env['DB_URL'];
+    delete process.env['DB_URL'];
+    try {
+      const caught = await defineApp('db-missing-url')
+        .use(db({ relations }))
+        .boot()
+        .catch((e: unknown) => e);
+      expect(caught).toBeInstanceOf(DotLifecycleError);
+      const cause = (caught as DotLifecycleError).cause;
+      expect(cause).toBeInstanceOf(DotPipError);
+      const pipErr = cause as DotPipError;
+      expect(pipErr.code).toBe(DB_PIP_ERROR_CODES.dbUrlNotConfigured);
+      expect(pipErr.code).toBe('DB_PIP_E001');
+      expect(pipErr.message).toMatch(/DB_URL is not configured/);
+      expect(pipErr.remediation).toMatch(/DB_URL|pglite/);
+      expect(pipErr.docsUrl).toMatch(/^https?:\/\//);
+    } finally {
+      if (previous !== undefined) process.env['DB_URL'] = previous;
     }
   });
 

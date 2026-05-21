@@ -41,10 +41,26 @@
 import type { AnyRelations, Logger } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { defineDotPip, type DotPip } from '@arki/dot/pip';
 
+import type { DotPip } from '@arki/dot/pip';
+import { defineDotPip, DotPipError } from '@arki/dot/pip';
+
+import type { PgliteInitOptions } from './runtime-local.js';
+import { env } from './env.js';
 import { createDb } from './factory.js';
-import { initDbRuntimeLocal, type PgliteInitOptions } from './runtime-local.js';
+import { initDbRuntimeLocal } from './runtime-local.js';
+
+/**
+ * Stable error codes thrown by the db pip. Exported so consumers and
+ * coding agents can match against them — never parse the message.
+ *
+ * @see packages/dot/docs/principles.md — principle 1.3 ("errors are part
+ * of the API") and principle 4 ("agent-discoverable everywhere").
+ */
+export const DB_PIP_ERROR_CODES = {
+  /** boot was called without a configured DB_URL (pg driver). */
+  dbUrlNotConfigured: 'DB_PIP_E001',
+} as const;
 
 /**
  * Common options shared by all DB driver variants.
@@ -62,36 +78,27 @@ type BaseDbDotOptions<TRelations extends AnyRelations> = {
 };
 
 /** Options for the node-postgres driver (the default). */
-export type PgDbDotOptions<TRelations extends AnyRelations> =
-  & BaseDbDotOptions<TRelations>
-  & {
-    /** Driver discriminant. Defaults to `'pg'` when omitted. */
-    readonly driver?: 'pg';
-  };
+export type PgDbDotOptions<TRelations extends AnyRelations> = BaseDbDotOptions<TRelations> & {
+  /** Driver discriminant. Defaults to `'pg'` when omitted. */
+  readonly driver?: 'pg';
+};
 
 /** Options for the embedded-PGlite driver. */
-export type PgliteDbDotOptions<TRelations extends AnyRelations> =
-  & BaseDbDotOptions<TRelations>
-  & PgliteInitOptions
-  & {
+export type PgliteDbDotOptions<TRelations extends AnyRelations> = BaseDbDotOptions<TRelations> &
+  PgliteInitOptions & {
     /** Driver discriminant. */
     readonly driver: 'pglite';
   };
 
 /** Discriminated union of all supported driver option shapes. */
-export type DbDotOptions<TRelations extends AnyRelations> =
-  | PgDbDotOptions<TRelations>
-  | PgliteDbDotOptions<TRelations>;
+export type DbDotOptions<TRelations extends AnyRelations> = PgDbDotOptions<TRelations> | PgliteDbDotOptions<TRelations>;
 
 /**
  * Services published by the db adapter. Keyed by the driver — for the
  * default `'pg'` driver, `services.db` is a `NodePgDatabase<TRelations>`;
  * for `'pglite'` it is a `PgliteDatabase<TRelations>`.
  */
-export type DbServices<
-  TRelations extends AnyRelations,
-  TDriver extends 'pg' | 'pglite' = 'pg',
-> = {
+export type DbServices<TRelations extends AnyRelations, TDriver extends 'pg' | 'pglite' = 'pg'> = {
   readonly db: TDriver extends 'pglite' ? PgliteDatabase<TRelations> : NodePgDatabase<TRelations>;
 };
 
@@ -129,9 +136,9 @@ export function db<TRelations extends AnyRelations>(
       async boot() {
         const { db: handle, pglite } = await initDbRuntimeLocal<TRelations>(
           {
-            ...(pgliteOptions.dataDir !== undefined ? { dataDir: pgliteOptions.dataDir } : {}),
-            ...(pgliteOptions.memory !== undefined ? { memory: pgliteOptions.memory } : {}),
-            ...(pgliteOptions.extensions !== undefined ? { extensions: pgliteOptions.extensions } : {}),
+            ...(pgliteOptions.dataDir === undefined ? {} : { dataDir: pgliteOptions.dataDir }),
+            ...(pgliteOptions.memory === undefined ? {} : { memory: pgliteOptions.memory }),
+            ...(pgliteOptions.extensions === undefined ? {} : { extensions: pgliteOptions.extensions }),
           },
           { relations: pgliteOptions.relations },
         );
@@ -158,9 +165,22 @@ export function db<TRelations extends AnyRelations>(
       ctx.registerService('db', 'db');
     },
     boot() {
+      // Validate at the pip boundary so the DOT lifecycle gets a coded
+      // error. `createDb` still throws raw `Error` for non-DOT consumers
+      // (its public contract is unchanged); the check here makes sure we
+      // never reach it without a URL.
+      if (env.DB_URL === undefined || env.DB_URL === '') {
+        throw new DotPipError({
+          code: DB_PIP_ERROR_CODES.dbUrlNotConfigured,
+          message: `[${name}] DB_URL is not configured.`,
+          remediation:
+            'Set DB_URL in the environment before booting the app, or switch the pip to the pglite driver for in-process databases.',
+          docsUrl: 'https://arki.dev/dot/errors/db-pip-e001',
+        });
+      }
       const handle = createDb<TRelations>({
         relations: options.relations,
-        ...(options.logger !== undefined ? { logger: options.logger } : {}),
+        ...(options.logger === undefined ? {} : { logger: options.logger }),
       });
       return { services: { db: handle } };
     },
