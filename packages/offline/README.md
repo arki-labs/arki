@@ -280,4 +280,4 @@ A handler is idempotent when running it twice produces the same observable state
 ## Design doc
 
 Full architecture, implementation phases, and decisions at:
-`docs/superpowers/specs/2026-05-16-arki-offline-design.md`
+[`docs/2026-05-16-arki-offline-design.md`](./docs/2026-05-16-arki-offline-design.md)
