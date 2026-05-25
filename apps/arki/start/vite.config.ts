@@ -8,6 +8,10 @@ import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { createPwaPlugin } from '@arki/tanstack-start/pwa';
 
 export default defineConfig({
+  server: {
+    port: Number(process.env.ARKI_DEV_PORT ?? 5181),
+    strictPort: true,
+  },
   resolve: {
     tsconfigPaths: true,
     dedupe: ['react', 'react-dom'],
