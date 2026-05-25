@@ -10,6 +10,11 @@
       "import": "./src/index.ts",
       "node": "./src/index.ts"
     },
+    "./tanstack-start": {
+      "types": "./dist/src/tanstack-start/index.d.ts",
+      "import": "./src/tanstack-start/index.ts",
+      "node": "./src/tanstack-start/index.ts"
+    },
     "./security/*": {
       "types": "./dist/src/security/*.d.ts",
       "import": "./src/security/*.ts",
@@ -59,14 +64,22 @@
     "zod": "catalog:"
   },
   "peerDependencies": {
+    "@tanstack/react-router": "catalog:tanstack/start",
+    "@tanstack/react-start": "catalog:tanstack/start",
     "react": "catalog:react",
     "react-dom": "catalog:react"
+  },
+  "peerDependenciesMeta": {
+    "@tanstack/react-router": { "optional": true },
+    "@tanstack/react-start": { "optional": true }
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@tanstack/react-router": "catalog:tanstack/start",
+    "@tanstack/react-start": "catalog:tanstack/start",
     "@types/bcrypt": "catalog:types",
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react"
