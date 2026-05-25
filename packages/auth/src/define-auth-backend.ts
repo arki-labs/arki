@@ -4,6 +4,7 @@ import type { DB } from 'better-auth/adapters/drizzle';
 import { magicLink, oAuthProxy } from 'better-auth/plugins';
 import { tanstackStartCookies } from 'better-auth/tanstack-start';
 import type { BetterAuthOptions, BetterAuthPlugin } from 'better-auth';
+import { createPrefixedId } from '@arki/db/id';
 import { createLogger } from '@arki/log';
 
 import { betterAuth } from './create-auth';
@@ -32,7 +33,13 @@ export type DefineAuthBackendOptions = {
   appKey: string;
   baseUrl: string;
   productionUrl: string;
-  secret: string;
+  /**
+   * Secret used by better-auth to sign session cookies and verification tokens.
+   * If `undefined`, better-auth falls back to `process.env.BETTER_AUTH_SECRET`
+   * (kept in sync by the `betterAuth` wrapper). Production callers must always
+   * provide one — leaving it `undefined` is a footgun in non-server runtimes.
+   */
+  secret: string | undefined;
 
   generateId?: GenerateIdHook;
   /**
@@ -60,7 +67,15 @@ export type DefineAuthBackendOptions = {
   };
 
   enableExpo?: boolean;
+  /**
+   * When `emailAndPassword` is unset, the factory auto-enables a minimal
+   * email/password config in non-production (NODE_ENV !== 'production') so the
+   * shared `createE2EHandler` can sign in via /sign-in/email. Pass an explicit
+   * config to override (e.g. to wire production reset-password emails).
+   */
   enableEmailAndPassword?: boolean;
+  emailAndPassword?: BetterAuthOptions['emailAndPassword'];
+  emailVerification?: BetterAuthOptions['emailVerification'];
   databaseHooks?: BetterAuthOptions['databaseHooks'];
   user?: BetterAuthOptions['user'];
   account?: BetterAuthOptions['account'];
@@ -72,6 +87,38 @@ const defaultGenerateId: GenerateIdHook = ({ model }) => {
   const slug = String(model).replace(/s$/, '');
   return `${slug}_${crypto.randomUUID().replace(/-/g, '')}`;
 };
+
+type PrefixMap = {
+  user?: string;
+  session?: string;
+  account?: string;
+  verification?: string;
+  fallback?: (model: string) => string;
+};
+
+/**
+ * Builds a `generateId` hook that uses `@arki/db/createPrefixedId` with
+ * per-model prefixes. The default matches the legacy convention used across
+ * almost every Arki app (`u_xxx`, `sess_xxx`, `acc_xxx`, `verif_xxx`).
+ *
+ * Override individual prefixes for apps that deviate — e.g. Kapodopera's
+ * underscore-free style:
+ *
+ *   createPrefixedIdHook({ user: 'usr', session: 'sess', account: 'acc', verification: 'verif' })
+ */
+export function createPrefixedIdHook(prefixes: PrefixMap = {}): GenerateIdHook {
+  const resolved: Required<Omit<PrefixMap, 'fallback'>> = {
+    user: prefixes.user ?? 'u_',
+    session: prefixes.session ?? 'sess_',
+    account: prefixes.account ?? 'acc_',
+    verification: prefixes.verification ?? 'verif_',
+  };
+  const fallback = prefixes.fallback ?? ((model: string) => `${model}_`);
+  return ({ model }) => {
+    const key = String(model).replace(/s$/, '') as keyof typeof resolved;
+    return createPrefixedId(resolved[key] ?? fallback(String(model)));
+  };
+}
 
 export function defineAuthBackend(options: DefineAuthBackendOptions) {
   const {
@@ -88,6 +135,8 @@ export function defineAuthBackend(options: DefineAuthBackendOptions) {
     socialProviders,
     enableExpo = true,
     enableEmailAndPassword,
+    emailAndPassword,
+    emailVerification,
     databaseHooks,
     user,
     account,
@@ -97,7 +146,10 @@ export function defineAuthBackend(options: DefineAuthBackendOptions) {
 
   const cookiePrefix = `auth-${appKey}`;
   const isDevOrTest = process.env['NODE_ENV'] !== 'production';
-  const emailAndPasswordEnabled = enableEmailAndPassword ?? isDevOrTest;
+  // Caller-provided emailAndPassword always wins. Otherwise auto-enable in
+  // dev/test (so `createE2EHandler` works without per-app opt-in).
+  const shouldAutoEnableEmailAndPassword =
+    !emailAndPassword && (enableEmailAndPassword ?? isDevOrTest);
 
   const plugins: BetterAuthPlugin[] = [
     oAuthProxy({ currentURL: baseUrl, productionURL: productionUrl }) as BetterAuthPlugin,
@@ -141,17 +193,22 @@ export function defineAuthBackend(options: DefineAuthBackendOptions) {
           ...(socialProviders.microsoft && { microsoft: socialProviders.microsoft }),
         }
       : undefined,
-    ...(emailAndPasswordEnabled && {
-      emailAndPassword: {
-        enabled: true,
-        autoSignIn: true,
-        sendResetPassword: async () => {
-          authLogger.warn(
-            'sendResetPassword called on auto-enabled emailAndPassword (dev/test). Configure enableEmailAndPassword + provide reset handler for production.',
-          );
-        },
-      },
-    }),
+    ...(emailAndPassword
+      ? { emailAndPassword }
+      : shouldAutoEnableEmailAndPassword
+        ? {
+            emailAndPassword: {
+              enabled: true,
+              autoSignIn: true,
+              sendResetPassword: async () => {
+                authLogger.warn(
+                  'sendResetPassword called on auto-enabled emailAndPassword (dev/test). Pass `emailAndPassword` to defineAuthBackend for production.',
+                );
+              },
+            },
+          }
+        : {}),
+    ...(emailVerification && { emailVerification }),
   });
 }
 

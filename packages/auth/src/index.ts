@@ -1,5 +1,5 @@
 export { betterAuth } from './create-auth';
-export { defineAuthBackend } from './define-auth-backend';
+export { defineAuthBackend, createPrefixedIdHook } from './define-auth-backend';
 export type {
   DefineAuthBackendOptions,
   DefinedAuth,
