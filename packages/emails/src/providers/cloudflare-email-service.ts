@@ -1,0 +1,186 @@
+import { debugEmails } from '../debug';
+
+import type { EmailProvider, SendEmailPayload, SendEmailResult } from './types';
+
+const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
+
+type CloudflareAttachment = {
+  content: string;
+  filename: string;
+  type?: string;
+  disposition?: string;
+};
+
+type CloudflarePayload = {
+  from: string;
+  to: string | string[];
+  subject: string;
+  html?: string;
+  text?: string;
+  cc?: string[];
+  bcc?: string[];
+  reply_to?: string;
+  headers?: Record<string, string>;
+  attachments?: CloudflareAttachment[];
+};
+
+type CloudflareSuccessResponse = {
+  success: true;
+  errors: unknown[];
+  messages: unknown[];
+  result: {
+    delivered: string[];
+    permanent_bounces: string[];
+    queued: string[];
+  };
+};
+
+type CloudflareErrorResponse = {
+  success: false;
+  errors: Array<{ code: number; message: string }>;
+  messages: unknown[];
+  result: unknown;
+};
+
+type CloudflareResponse = CloudflareSuccessResponse | CloudflareErrorResponse;
+
+function toArray(value: string | string[] | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
+  return Array.isArray(value) ? value : [value];
+}
+
+function firstReplyTo(value: string | string[] | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return Array.isArray(value) ? value[0] : value;
+}
+
+async function callCloudflareApi(
+  accountId: string,
+  apiToken: string,
+  body: CloudflarePayload,
+): Promise<SendEmailResult> {
+  try {
+    const response = await fetch(
+      `${CLOUDFLARE_API_BASE}/accounts/${accountId}/email/sending/send`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiToken}`,
+        },
+        body: JSON.stringify(body),
+      },
+    );
+
+    const parsed = (await response.json().catch(() => null)) as CloudflareResponse | null;
+
+    if (!response.ok || !parsed || parsed.success === false) {
+      const errorMessage =
+        parsed && parsed.success === false && parsed.errors[0]
+          ? `${parsed.errors[0].message} (code=${parsed.errors[0].code})`
+          : `HTTP ${response.status}`;
+      return {
+        data: null,
+        error: { message: errorMessage, name: 'CloudflareEmailServiceError' },
+      };
+    }
+
+    // CF Email Service returns per-recipient delivery status, not a message ID.
+    // Synthesise an ID from delivered[0] so downstream consumers have something to log.
+    const id = parsed.result.delivered[0]
+      ? `cf:${parsed.result.delivered[0]}`
+      : parsed.result.queued[0]
+        ? `cf-queued:${parsed.result.queued[0]}`
+        : '';
+
+    if (parsed.result.permanent_bounces.length > 0) {
+      debugEmails(
+        '[cloudflare-email-service] Permanent bounces: %o',
+        parsed.result.permanent_bounces,
+      );
+    }
+
+    return { data: { id }, error: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return { data: null, error: { message, name: 'CloudflareEmailServiceError' } };
+  }
+}
+
+/**
+ * Creates an email provider backed by Cloudflare Email Service (Email Sending REST API).
+ *
+ * Cloudflare Email Service is currently **in beta** (as of 2026-05-28). Features and
+ * pricing may change before GA. Workers Paid plan ($5/mo) is required for outbound;
+ * Email Routing (inbound) is unlimited and free.
+ *
+ * **Pricing as of 2026-05-28:** 3 000 emails/month included on Workers Paid, then
+ * $0.35 per 1 000 emails overage.
+ *
+ * **Message size limit:** 5 MiB total including attachments (smaller than SES's 40 MiB
+ * and Resend's 25 MiB — keep digest HTML lean).
+ *
+ * **API differences from Resend/Unosend to be aware of:**
+ * - Responds with per-recipient delivery status (`delivered`, `permanent_bounces`,
+ *   `queued`) rather than a single message ID. This provider synthesises an ID
+ *   from the first delivered recipient (`cf:recipient@example.com`) so the
+ *   downstream contract still has something to log.
+ * - `reply_to` is a single address (not an array) per the docs.
+ * - Attachments must be base64-encoded in the request body.
+ *
+ * @example
+ * ```ts
+ * cloudflareEmailServiceProvider({
+ *   accountId: env.CLOUDFLARE_ACCOUNT_ID,
+ *   apiToken: env.CLOUDFLARE_EMAIL_API_TOKEN,
+ *   quotaPerMonth: 3_000, // free tier on Workers Paid
+ * })
+ * ```
+ */
+export function cloudflareEmailServiceProvider(options: {
+  /** Cloudflare account ID (32-char hex). */
+  accountId: string;
+  /** Cloudflare API token with `Email Service: Edit` permission. */
+  apiToken: string;
+  /**
+   * Monthly send quota for this Cloudflare account.
+   * Workers Paid plan includes 3 000/month free; pay-as-you-go beyond.
+   * Used by the quota router to select providers.
+   */
+  quotaPerMonth?: number;
+}): EmailProvider {
+  return {
+    name: 'cloudflare-email-service',
+    quotaPerMonth: options.quotaPerMonth,
+
+    async send(payload: SendEmailPayload): Promise<SendEmailResult> {
+      debugEmails(
+        '[cloudflare-email-service] Sending to=%s subject="%s"',
+        payload.to,
+        payload.subject,
+      );
+
+      const body: CloudflarePayload = {
+        from: payload.from,
+        to: payload.to,
+        subject: payload.subject,
+        html: payload.html,
+        text: payload.text,
+        cc: toArray(payload.cc),
+        bcc: toArray(payload.bcc),
+        reply_to: firstReplyTo(payload.replyTo),
+        headers: payload.headers,
+      };
+
+      const result = await callCloudflareApi(options.accountId, options.apiToken, body);
+
+      if (result.error) {
+        debugEmails('[cloudflare-email-service] Send failed: %s', result.error.message);
+      } else {
+        debugEmails('[cloudflare-email-service] Sent ok id=%s', result.data?.id);
+      }
+
+      return result;
+    },
+  };
+}

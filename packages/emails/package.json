@@ -31,6 +31,16 @@
       "import": "./src/providers/unosend.ts",
       "node": "./src/providers/unosend.ts"
     },
+    "./providers/ses": {
+      "types": "./dist/src/providers/ses.d.ts",
+      "import": "./src/providers/ses.ts",
+      "node": "./src/providers/ses.ts"
+    },
+    "./providers/cloudflare-email-service": {
+      "types": "./dist/src/providers/cloudflare-email-service.d.ts",
+      "import": "./src/providers/cloudflare-email-service.ts",
+      "node": "./src/providers/cloudflare-email-service.ts"
+    },
     "./providers/quota-router": {
       "types": "./dist/src/providers/quota-router.d.ts",
       "import": "./src/providers/quota-router.ts",
@@ -69,6 +79,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/log": "workspace:*",
+    "@aws-sdk/client-sesv2": "catalog:",
     "@react-email/body": "catalog:react-email",
     "@react-email/button": "catalog:react-email",
     "@react-email/column": "catalog:react-email",

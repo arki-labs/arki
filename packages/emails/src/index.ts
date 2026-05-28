@@ -1,12 +1,19 @@
 // Client
 export { initEmails } from './client/init';
 export type { EmailClient } from './client/init';
-export { createEmailClientFromEnv, RESEND_FREE_QUOTA, UNOSEND_PRO_QUOTA } from './client/auto';
+export {
+  CLOUDFLARE_EMAIL_SERVICE_FREE_QUOTA,
+  createEmailClientFromEnv,
+  RESEND_FREE_QUOTA,
+  UNOSEND_PRO_QUOTA,
+} from './client/auto';
 export { EmailProcedure } from './client/email-procedure';
 
 // Providers
 export { resendProvider } from './providers/resend';
 export { unosendProvider } from './providers/unosend';
+export { sesProvider } from './providers/ses';
+export { cloudflareEmailServiceProvider } from './providers/cloudflare-email-service';
 export { quotaRouter } from './providers/quota-router';
 export type { QuotaStore } from './providers/quota-store';
 export { kvQuotaStore } from './providers/quota-store-kv';
