@@ -1,3 +1,5 @@
+import { z } from '@arki/contracts';
+
 import { debugEmails } from '../debug';
 
 import type { EmailProvider, SendEmailPayload, SendEmailResult } from './types';
@@ -44,6 +46,51 @@ type CloudflareErrorResponse = {
 
 type CloudflareResponse = CloudflareSuccessResponse | CloudflareErrorResponse;
 
+// Runtime-validation schemas mirroring the type aliases above. Used by callCloudflareApi
+// to safeParse the HTTP response body — if Cloudflare's beta API changes shape or a proxy
+// mangles the body, the parser surfaces a structured error instead of letting downstream
+// code throw a TypeError on `parsed.result.delivered[0]`. Mirror shape EXACTLY to keep the
+// Equals guard below honest (plan-eng-review F4, 2026-05-29).
+const CloudflareErrorEntry = z.object({
+  code: z.number(),
+  message: z.string(),
+});
+
+const CloudflareSuccessSchema = z.object({
+  success: z.literal(true),
+  errors: z.array(z.unknown()),
+  messages: z.array(z.unknown()),
+  result: z.object({
+    delivered: z.array(z.string()),
+    permanent_bounces: z.array(z.string()),
+    queued: z.array(z.string()),
+  }),
+});
+
+const CloudflareErrorSchema = z.object({
+  success: z.literal(false),
+  errors: z.array(CloudflareErrorEntry),
+  messages: z.array(z.unknown()),
+  result: z.unknown(),
+});
+
+export const CloudflareResponseSchema = z.union([CloudflareSuccessSchema, CloudflareErrorSchema]);
+
+// Compile-time guard: if CloudflareResponseSchema and CloudflareResponse drift
+// apart, the assignment below produces a TS error. This catches the case where
+// the executor wrote a schema stricter or looser than the existing type alias
+// (plan-eng-review F4, 2026-05-29).
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+type _CheckCloudflareResponseSchemaMatchesType = Equals<
+  z.infer<typeof CloudflareResponseSchema>,
+  CloudflareResponse
+> extends true
+  ? true
+  : never;
+const _checkCloudflareResponseSchemaMatchesType: _CheckCloudflareResponseSchemaMatchesType = true;
+void _checkCloudflareResponseSchemaMatchesType;
+
 function toArray(value: string | string[] | undefined): string[] | undefined {
   if (value === undefined) return undefined;
   return Array.isArray(value) ? value : [value];
@@ -72,13 +119,28 @@ async function callCloudflareApi(
       },
     );
 
-    const parsed = (await response.json().catch(() => null)) as CloudflareResponse | null;
+    const raw = await response.json().catch(() => null);
+    const parseResult = raw != null ? CloudflareResponseSchema.safeParse(raw) : null;
 
-    if (!response.ok || !parsed || parsed.success === false) {
-      const errorMessage =
-        parsed && parsed.success === false && parsed.errors[0]
-          ? `${parsed.errors[0].message} (code=${parsed.errors[0].code})`
-          : `HTTP ${response.status}`;
+    if (!response.ok || !parseResult || !parseResult.success) {
+      // Either HTTP error, no body, or body didn't match expected shape.
+      const errorMessage = !response.ok
+        ? `HTTP ${response.status}`
+        : !parseResult
+          ? 'CF: empty or non-JSON response body'
+          : 'CF: response shape did not match CloudflareResponseSchema';
+      return {
+        data: null,
+        error: { message: errorMessage, name: 'CloudflareEmailServiceError' },
+      };
+    }
+
+    const parsed = parseResult.data;
+
+    if (parsed.success === false) {
+      const errorMessage = parsed.errors[0]
+        ? `${parsed.errors[0].message} (code=${parsed.errors[0].code ?? 'unknown'})`
+        : `HTTP ${response.status}`;
       return {
         data: null,
         error: { message: errorMessage, name: 'CloudflareEmailServiceError' },
