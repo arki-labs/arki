@@ -104,3 +104,19 @@ export function createAuthenticatedTest({ authStatePath }: CreateAuthenticatedTe
 
   return { test, expect: base.expect };
 }
+
+// Two-account fixture re-exports. Lives in two-account.ts to keep the
+// single-account API readable above; consumers import either flavour from
+// `@arki/playwright-config/auth` (issue-11 will sweep both into
+// `@arki/auth/testing/playwright`).
+export {
+  createTwoAccountGlobalSetup,
+  createTwoAccountTest,
+} from './two-account';
+export type {
+  TwoAccountEmails,
+  TwoAccountStatePaths,
+  TwoAccountFixtures,
+  CreateTwoAccountGlobalSetupOptions,
+  CreateTwoAccountTestOptions,
+} from './two-account';
