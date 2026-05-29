@@ -2,6 +2,24 @@ import { createEnv } from '@t3-oss/env-core';
 
 import { z } from '@arki/contracts';
 
+// One-time deprecation log: warn operators who set DB_URL but not DATABASE_URL.
+// DATABASE_URL is the PG-standard / Coolify-standard / 12-factor convention; DB_URL
+// is the historical @arki/db name. Both are accepted via the runtimeEnv alias below;
+// this notice lets ops migrate without changing 17+ consumer apps' code at once.
+//
+// Surfaced 2026-05-29 during novelette/authentication issue 12 L3.rework iteration 2
+// (pass 2 Concern B): the silent divergence between novelette/backend's DATABASE_URL
+// schema and @arki/db's DB_URL schema blocked the production-mode smoke until both
+// were set with the same value. See `apps/novelette/docs/features/cross-app-auth-prod-fix/`
+// (umbrella) and that feature's issue 13 AC 6.
+if (process.env['DB_URL'] && !process.env['DATABASE_URL']) {
+  console.warn(
+    '⚠️  [@arki/db] DB_URL is set but DATABASE_URL is not. ' +
+      'DATABASE_URL is the preferred name (PG/Coolify/12-factor standard). ' +
+      'DB_URL will continue to work but consider migrating your env config.',
+  );
+}
+
 export const env = createEnv({
   onValidationError(issues) {
     console.error(
@@ -18,7 +36,9 @@ export const env = createEnv({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
     // Database Connection - Primary method (connection string)
-    // Either DB_URL must be provided (validated after env creation)
+    // Either DATABASE_URL (preferred, PG/Coolify/12-factor standard) OR DB_URL
+    // (historical @arki/db name) must be set; the runtimeEnv alias below
+    // resolves to the same `env.DB_URL` field so consumers don't change.
     DB_URL: z.url(),
 
     // Database Connection - Individual parameters (alternative to DB_URL)
@@ -64,7 +84,11 @@ export const env = createEnv({
    */
   runtimeEnv: {
     NODE_ENV: process.env['NODE_ENV'],
-    DB_URL: process.env['DB_URL'],
+    // Resolve DB_URL from EITHER `DATABASE_URL` (preferred) OR `DB_URL`
+    // (historical). Closes the silent divergence between novelette/backend's
+    // DATABASE_URL schema and this package's historical DB_URL schema.
+    // Issue 13 AC 6 / cross-app-auth-prod-fix umbrella.
+    DB_URL: process.env['DATABASE_URL'] ?? process.env['DB_URL'],
     PGUSER: process.env['PGUSER'],
     PGPASSWORD: process.env['PGPASSWORD'],
     PGHOST: process.env['PGHOST'],
