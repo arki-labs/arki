@@ -8,3 +8,4 @@ export type {
 export { ResendProvider } from './email/resendAuthProvider';
 export * from './ids';
 export { tweaksColumn, EMPTY_TWEAKS } from './tweaks-column';
+export { PASSWORD_MIN_LENGTH } from './constants';
