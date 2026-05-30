@@ -118,14 +118,21 @@ export type CreateTwoAccountTestOptions = {
  */
 export function createTwoAccountTest({ authStatePaths }: CreateTwoAccountTestOptions) {
   const test = base.extend<TwoAccountFixtures>({
-    pageA: async ({ browser }, use) => {
-      const context = await browser.newContext({ storageState: authStatePaths.a });
+    // baseURL is propagated from `playwright.config.ts` -> `browser.newContext`
+    // so that `pageA.request.post('/api/...')` resolves correctly. Without it
+    // the request context has no base and any relative URL throws
+    // `apiRequestContext.post: Invalid URL`. The browser-level `page.goto`
+    // does NOT need this — Playwright's page navigation reads baseURL from
+    // testInfo directly — but the API request context inside a manually-
+    // created BrowserContext only inherits options passed to newContext.
+    pageA: async ({ browser, baseURL }, use) => {
+      const context = await browser.newContext({ storageState: authStatePaths.a, baseURL });
       const page = await context.newPage();
       await use(page);
       await context.close();
     },
-    pageB: async ({ browser }, use) => {
-      const context = await browser.newContext({ storageState: authStatePaths.b });
+    pageB: async ({ browser, baseURL }, use) => {
+      const context = await browser.newContext({ storageState: authStatePaths.b, baseURL });
       const page = await context.newPage();
       await use(page);
       await context.close();
