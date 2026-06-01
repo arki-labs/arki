@@ -43,6 +43,12 @@ export const debugCache = debug('ai:cache');
 export const debugOrchestration = debug('ai:flow');
 
 /**
+ * Debug logger for the agent-runtime adapter layer
+ * Enable with: DEBUG=ai:runtime
+ */
+export const debugRuntime = debug('ai:runtime');
+
+/**
  * Enable all AI debug logs
  * Enable with: DEBUG=ai:*
  */

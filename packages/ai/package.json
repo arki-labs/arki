@@ -100,11 +100,15 @@
     },
     "@huggingface/transformers": {
       "optional": true
+    },
+    "@mastra/core": {
+      "optional": true
     }
   },
   "peerDependencies": {
     "@ai-sdk/amazon-bedrock": "catalog:ai",
     "@huggingface/transformers": "*",
+    "@mastra/core": "1.37.1",
     "@mixedbread-ai/sdk": "*",
     "react": "catalog:react",
     "react-dom": "catalog:react",
@@ -115,6 +119,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@mastra/core": "1.37.1",
     "typescript": "catalog:"
   },
   "types": "./dist/src/index.d.ts",

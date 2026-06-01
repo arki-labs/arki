@@ -176,6 +176,20 @@ export {
   type FlowNode,
 } from './orchestration';
 
+// Agent-runtime adapter layer (swappable tool-loop backends behind one neutral contract).
+// P0 ships the AI-SDK backend; Mastra/LangGraph/TanStack adapters follow the same interface.
+// See packages/ai/docs/adapter-layer-proposal.md
+export {
+  createAiSdkRuntime,
+  toAiSdkToolSet,
+  type AgentRuntime,
+  type AgentTool,
+  type AiSdkRuntimeOptions,
+  type RuntimeEvent,
+  type RuntimeUsage,
+  type ToolLoopInput,
+} from './runtime';
+
 // Cost management utilities
 export {
   // Types
