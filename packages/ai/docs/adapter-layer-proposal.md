@@ -102,9 +102,13 @@ lowest-common-denominator that loses every framework's reason to exist. Specific
    `useRuntimeStream` in `src/react/hooks/useRuntimeStream.tsx` consumes any
    `AsyncIterable<RuntimeEvent>` (a runtime's `runToolLoop()` directly, or an SSE-decoded
    client stream) and applies the reducer with abort lifecycle. The War Room, `@arki/chat-ui`,
-   and any TanStack surface now reduce ONE event shape uniformly. `@arki/ai` suite 35/35.
-   Remaining (future): an SSE transport helper + flipping `@arki/chat-ui` to render from
-   `RuntimeUiState`; add a TanStack-AI renderer when it matures.
+   and any TanStack surface now reduce ONE event shape uniformly.
+   **SSE transport (client story complete):** `toRuntimeEventStreamResponse` (server) +
+   `readRuntimeEventStream` / `fetchRuntimeEventStream` (client) in `src/runtime/sse.ts` —
+   web-standard SSE framing, round-trip tested. Full chain proven end-to-end against Ollama:
+   `createMastraRuntime.runToolLoop()` → SSE → `fetchRuntimeEventStream` → `runtimeEventReducer`
+   → `RuntimeUiState`. `@arki/ai` suite **38/38**. Remaining (future): flip `@arki/chat-ui` to
+   render from `RuntimeUiState`; add a TanStack-AI renderer when it matures.
 4. **P3 (only if needed):** `createLangGraphRuntime` / `createTanStackRuntime`. Note
    LangGraph's `StateGraph` overlaps our `Flow` — adopting it is a *replacement* decision.
 
