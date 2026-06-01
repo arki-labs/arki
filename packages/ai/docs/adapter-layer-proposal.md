@@ -107,8 +107,13 @@ lowest-common-denominator that loses every framework's reason to exist. Specific
    `readRuntimeEventStream` / `fetchRuntimeEventStream` (client) in `src/runtime/sse.ts` —
    web-standard SSE framing, round-trip tested. Full chain proven end-to-end against Ollama:
    `createMastraRuntime.runToolLoop()` → SSE → `fetchRuntimeEventStream` → `runtimeEventReducer`
-   → `RuntimeUiState`. `@arki/ai` suite **38/38**. Remaining (future): flip `@arki/chat-ui` to
-   render from `RuntimeUiState`; add a TanStack-AI renderer when it matures.
+   → `RuntimeUiState`. `@arki/ai` suite **38/38**.
+   **`@arki/chat-ui` flipped:** new `@arki/chat-ui/runtime-conversation` `<RuntimeConversation
+   state={RuntimeUiState} />` renders the reduced runtime stream through chat-ui's styled
+   primitives (AgentStatus / ToolCall / MarkdownMessage) — a runtime-agnostic counterpart to the
+   assistant-ui-backed `Thread`. So any backend renders through one component via
+   `useRuntimeStream` + `fetchRuntimeEventStream`. (chat-ui gained a type-only `@arki/ai` dep;
+   render-verified via react-dom/server.) Remaining (future): a TanStack-AI renderer when it matures.
 4. **P3 (only if needed):** `createLangGraphRuntime` / `createTanStackRuntime`. Note
    LangGraph's `StateGraph` overlaps our `Flow` — adopting it is a *replacement* decision.
 
