@@ -96,8 +96,15 @@ lowest-common-denominator that loses every framework's reason to exist. Specific
    Ollama (LAW-1), with a deterministic fallback if no model is reachable (LAW-2). Verified
    end-to-end: model chose both tools, emitted War Room `tool:*` events, produced 5 evidence
    items. See `apps/brandability/backend/src/features/assessment-agent/optional-tools-runtime.ts`.
-3. **P2:** UI adapter generalized in `@arki/ai/react`; `@arki/chat-ui` becomes the default
-   renderer. Add TanStack AI renderer when it matures.
+3. **P2 (✅ SHIPPED 2026-06-01):** UI adapter generalized. `runtimeEventReducer` +
+   `RuntimeUiState`/`RuntimeToolCall` in `src/runtime/ui-state.ts` — a PURE, framework-agnostic
+   fold of the `RuntimeEvent` stream into renderable state (5 committed tests). React binding
+   `useRuntimeStream` in `src/react/hooks/useRuntimeStream.tsx` consumes any
+   `AsyncIterable<RuntimeEvent>` (a runtime's `runToolLoop()` directly, or an SSE-decoded
+   client stream) and applies the reducer with abort lifecycle. The War Room, `@arki/chat-ui`,
+   and any TanStack surface now reduce ONE event shape uniformly. `@arki/ai` suite 35/35.
+   Remaining (future): an SSE transport helper + flipping `@arki/chat-ui` to render from
+   `RuntimeUiState`; add a TanStack-AI renderer when it matures.
 4. **P3 (only if needed):** `createLangGraphRuntime` / `createTanStackRuntime`. Note
    LangGraph's `StateGraph` overlaps our `Flow` — adopting it is a *replacement* decision.
 

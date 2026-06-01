@@ -181,11 +181,19 @@ export {
 // See packages/ai/docs/adapter-layer-proposal.md
 export {
   createAiSdkRuntime,
+  fetchRuntimeEventStream,
+  initialRuntimeUiState,
+  readRuntimeEventStream,
+  runtimeEventReducer,
   toAiSdkToolSet,
+  toRuntimeEventStreamResponse,
   type AgentRuntime,
   type AgentTool,
   type AiSdkRuntimeOptions,
   type RuntimeEvent,
+  type RuntimeToolCall,
+  type RuntimeUiState,
+  type RuntimeUiStatus,
   type RuntimeUsage,
   type ToolLoopInput,
 } from './runtime';
