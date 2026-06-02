@@ -26,6 +26,14 @@ export type FlowConfig<State, Context> = {
   mergeState?: (state: State, patch: Partial<State>) => State;
   onEvent?: (event: FlowEvent<State>) => void;
   signal?: AbortSignal;
+  /**
+   * Cooperative checkpoint awaited at each node boundary, *before* the node runs.
+   * Unlike {@link FlowConfig.onEvent} (fire-and-forget), this is `await`ed — so a
+   * consumer can park the flow on a resumable promise to implement pause/resume/step
+   * without ever interrupting an in-flight node. The sibling of {@link FlowConfig.signal}:
+   * `signal` aborts between nodes, `onCheckpoint` can hold between nodes.
+   */
+  onCheckpoint?: (nodeId: string, state: State) => Promise<void>;
 };
 
 export class FlowError extends Error {
@@ -78,6 +86,7 @@ export class Flow<State, Context> {
   private readonly mergeState: (state: State, patch: Partial<State>) => State;
   private readonly onEvent?: (event: FlowEvent<State>) => void;
   private readonly signal?: AbortSignal;
+  private readonly onCheckpoint?: (nodeId: string, state: State) => Promise<void>;
 
   constructor(config: FlowConfig<State, Context>) {
     this.nodes = new Map(Object.entries(config.nodes));
@@ -86,6 +95,7 @@ export class Flow<State, Context> {
     this.mergeState = config.mergeState ?? ((state, patch) => ({ ...state, ...patch }));
     this.onEvent = config.onEvent;
     this.signal = config.signal;
+    this.onCheckpoint = config.onCheckpoint;
 
     if (!this.nodes.has(this.start)) {
       throw new FlowError(`Flow start node not found: ${this.start}`);
@@ -123,6 +133,17 @@ export class Flow<State, Context> {
         const error = new FlowError(`Flow node not found: ${current}`, { nodeId: current });
         this.emit({ type: 'flow:failed', nodeId: current, error, steps, timestamp: Date.now() });
         throw error;
+      }
+
+      // Cooperative pause point — held at the node boundary, never mid-node. A consumer
+      // can park the flow here (pause/step); abort during the hold is honored next.
+      if (this.onCheckpoint) {
+        await this.onCheckpoint(node.id, state);
+        if (this.signal?.aborted) {
+          const error = new FlowError('Flow aborted by signal');
+          this.emit({ type: 'flow:failed', nodeId: current, error, steps, timestamp: Date.now() });
+          throw error;
+        }
       }
 
       const maxAttempts = Math.max(1, (node.retries ?? 0) + 1);
