@@ -78,6 +78,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/contracts": "workspace:*",
     "@arki/log": "workspace:*",
     "@aws-sdk/client-sesv2": "catalog:",
     "@react-email/body": "catalog:react-email",
