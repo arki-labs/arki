@@ -12,7 +12,7 @@ export const env = createEnv({
     VITE_URL: z
       .url()
       .default(() =>
-        process.env['NODE_ENV'] === 'production' ? 'https://arki.com' : 'http://localhost:3000',
+        process.env['NODE_ENV'] === 'production' ? 'https://arki.com' : 'http://localhost:5181',
       ),
     PRODUCTION_URL: z.url().default('https://arki.com').optional(),
   },
