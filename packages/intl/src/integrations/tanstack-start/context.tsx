@@ -13,14 +13,22 @@ const LocaleContext = createContext<string>('en');
 export const LocaleProvider = ({
   locale = 'en',
   messages = {},
+  timeZone = 'UTC',
   children,
 }: {
   locale?: string;
   messages?: Record<string, unknown>;
+  /**
+   * Explicit IANA time zone for use-intl date/number formatting. Required for
+   * deterministic SSR: without it, use-intl falls back to the runtime time zone
+   * (UTC in Docker, local on the client) and emits `ENVIRONMENT_FALLBACK`,
+   * risking hydration mismatches. Defaults to `'UTC'`.
+   */
+  timeZone?: string;
   children: React.ReactNode;
 }) => (
   <LocaleContext.Provider value={locale}>
-    <IntlProvider locale={locale} messages={messages}>
+    <IntlProvider locale={locale} messages={messages} timeZone={timeZone}>
       {children}
     </IntlProvider>
   </LocaleContext.Provider>

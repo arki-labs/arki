@@ -27,17 +27,24 @@ const BUILTIN_MESSAGES: Record<string, MessageBag> = {
 export const AppLocaleProvider = ({
   locale = 'en',
   messages,
+  timeZone = 'UTC',
   children,
 }: {
   locale?: string;
   messages?: MessageBag;
+  /**
+   * Explicit IANA time zone forwarded to use-intl. Defaults to `'UTC'` for
+   * deterministic SSR; pass an app's canonical zone if dates must display in a
+   * specific region.
+   */
+  timeZone?: string;
   children: ReactNode;
 }) => {
   const baseMessages = BUILTIN_MESSAGES[locale] ?? BUILTIN_MESSAGES.en!;
   const merged = messages ? { ...baseMessages, ...messages } : baseMessages;
 
   return (
-    <LocaleProvider locale={locale} messages={merged}>
+    <LocaleProvider locale={locale} messages={merged} timeZone={timeZone}>
       {children}
     </LocaleProvider>
   );
