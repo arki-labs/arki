@@ -114,6 +114,37 @@ Stubs / canned responses MUST NOT be a runtime-selectable backend.
 - "Why didn't CI catch this prompt regression?" — because CI was using
   a stub instead of a real (or recorded) model call.
 
+## LAW 3 — Cost telemetry reflects the resolved provider, never a hardcoded model
+
+A consumer that hardcodes a model name for cost accounting will misreport spend
+whenever LAW 1 resolves a different provider.
+
+### Why
+
+- **Over-reporting.** `createLlmProvider()` auto-selects provider/model from env per
+  LAW 1. A consumer that hardcodes `const COST_MODEL = 'gpt-4o-mini'` and passes it to
+  `calculateLLMCost(COST_MODEL, …)` over-reports cost whenever Ollama is the resolved
+  provider — Ollama spend is $0, but the telemetry bills it at the OpenAI rate.
+- **Silent drift.** The dollar figure looks authoritative while being wrong; operators
+  make capacity and pricing decisions off a number that tracks a constant, not reality.
+
+### How to apply
+
+Never log a single dollar value without disclosing one of these two bases:
+
+1. **Resolved-model log** — log the actual provider/model returned by the call (when the
+   provider surface exposes it). The dollar figure then matches what was actually spent.
+2. **Estimate-basis disclaimer** — log a `costEstimateBasis: '<rate-source>'` field next
+   to the dollar figure so operators read it as a ceiling (e.g. "what we would have paid
+   on OpenAI's gpt-4o-mini rate"), not as actual spend.
+
+### Failure modes this prevents
+
+- "Why does our AI cost dashboard show $40/day when the bill is $3?" — because every
+  generation logged a hardcoded `gpt-4o-mini` rate while Ollama served the requests.
+- "Which of these cost numbers is real spend vs an estimate?" — answered by the presence
+  of `costEstimateBasis`; its absence implies a resolved-model log.
+
 ## How to extend
 
 When adding a new AI-powered feature to Arki:
