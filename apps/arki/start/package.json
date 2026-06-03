@@ -22,6 +22,7 @@
     "@arki/content": "workspace:*",
     "@arki/contracts": "workspace:*",
     "@arki/date": "workspace:*",
+    "@arki/dev-certs": "workspace:*",
     "@arki/emails": "workspace:*",
     "@arki/icons": "workspace:*",
     "@arki/intl": "workspace:*",

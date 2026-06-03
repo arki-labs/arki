@@ -3,6 +3,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { devServer } from '@arki/dev-certs';
 import { nitro } from 'nitro/vite';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { createPwaPlugin } from '@arki/tanstack-start/pwa';
@@ -11,6 +12,7 @@ export default defineConfig({
   server: {
     port: Number(process.env.ARKI_DEV_PORT ?? 5181),
     strictPort: true,
+    ...devServer(),
   },
   resolve: {
     tsconfigPaths: true,
