@@ -22,7 +22,9 @@ import { ToolCall, ToolCallResult } from './tool-call';
  * return <RuntimeConversation state={state} />;
  * ```
  */
-function toAgentStatus(status: RuntimeUiStatus, hasRunningTool: boolean): AgentStatusType {
+/** Project a runtime status onto the chat-ui AgentStatus vocabulary. Exported so panels and
+ *  other surfaces derive the same pill from a `RuntimeUiState`. */
+export function runtimeStatusToAgentStatus(status: RuntimeUiStatus, hasRunningTool: boolean): AgentStatusType {
   switch (status) {
     case 'running': {
       return hasRunningTool ? 'executing' : 'thinking';
@@ -69,7 +71,7 @@ function RuntimeConversation({ state, renderText, hideStatus, className, ...prop
 
   return (
     <div data-slot="chat-runtime-conversation" className={cn('flex flex-col gap-3', className)} {...props}>
-      {!hideStatus && <AgentStatus status={toAgentStatus(state.status, hasRunningTool)} />}
+      {!hideStatus && <AgentStatus status={runtimeStatusToAgentStatus(state.status, hasRunningTool)} />}
 
       {state.toolCalls.map((toolCall, index) => (
         <ToolCall key={`${toolCall.tool}-${index}`} toolName={toolCall.tool} status={toToolStatus(toolCall.status)}>

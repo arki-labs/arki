@@ -10,6 +10,16 @@
       "import": "./src/thread.tsx",
       "browser": "./src/thread.tsx"
     },
+    "./agent-panel": {
+      "types": "./dist/src/agent-panel.d.ts",
+      "import": "./src/agent-panel.tsx",
+      "browser": "./src/agent-panel.tsx"
+    },
+    "./runtime-conversation": {
+      "types": "./dist/src/runtime-conversation.d.ts",
+      "import": "./src/runtime-conversation.tsx",
+      "browser": "./src/runtime-conversation.tsx"
+    },
     "./message": {
       "types": "./dist/src/message.d.ts",
       "import": "./src/message.tsx",
