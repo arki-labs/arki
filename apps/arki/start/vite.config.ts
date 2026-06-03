@@ -3,7 +3,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
-import { devServer } from '@arki/dev-certs';
+import { devServer, printLocalhostUrl } from '@arki/dev-certs';
 import { nitro } from 'nitro/vite';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { createPwaPlugin } from '@arki/tanstack-start/pwa';
@@ -51,6 +51,7 @@ export default defineConfig({
     ],
   },
   plugins: [
+    printLocalhostUrl(),
     paraglideVitePlugin({
       project: './project.inlang',
       outdir: './src/paraglide',
