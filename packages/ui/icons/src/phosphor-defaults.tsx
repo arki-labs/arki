@@ -26,6 +26,8 @@ export type PhosphorDefaults = {
  * Tune these to match the design system's character:
  *   - atelier  → editorial, warm, authored. Filled/duotone reads richer.
  *   - workbench → tool-first, calm utility. Regular reads quietest.
+ *   - tribunal → editorial-evidence "case file". Regular line icons,
+ *                inherited foreground — the chrome stays sober.
  */
 export const ATELIER_PHOSPHOR_DEFAULTS = {
   weight: 'duotone',
@@ -34,6 +36,12 @@ export const ATELIER_PHOSPHOR_DEFAULTS = {
 } satisfies PhosphorDefaults;
 
 export const WORKBENCH_PHOSPHOR_DEFAULTS = {
+  weight: 'regular',
+  size: 20,
+  color: 'currentColor',
+} satisfies PhosphorDefaults;
+
+export const TRIBUNAL_PHOSPHOR_DEFAULTS = {
   weight: 'regular',
   size: 20,
   color: 'currentColor',
@@ -59,6 +67,14 @@ export function AtelierIconDefaults({ children, overrides }: ProviderProps) {
 export function WorkbenchIconDefaults({ children, overrides }: ProviderProps) {
   return (
     <IconContext.Provider value={{ ...WORKBENCH_PHOSPHOR_DEFAULTS, ...overrides }}>
+      {children}
+    </IconContext.Provider>
+  );
+}
+
+export function TribunalIconDefaults({ children, overrides }: ProviderProps) {
+  return (
+    <IconContext.Provider value={{ ...TRIBUNAL_PHOSPHOR_DEFAULTS, ...overrides }}>
       {children}
     </IconContext.Provider>
   );
