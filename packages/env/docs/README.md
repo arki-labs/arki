@@ -24,13 +24,13 @@ import { z } from 'zod';
 
 export const env = createEnv({
   server: {
-    DB_URL: z.string().url(),
+    DB_URL: z.url(),
     API_KEY: z.string(),
     PORT: z.coerce.number().default(3000),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   },
   client: {
-    VITE_API_URL: z.string().url(),
+    VITE_API_URL: z.url(),
   },
   // PAIN POINT: Every variable must be manually mapped
   experimental__runtimeEnv: {
@@ -103,7 +103,7 @@ export const env = defineEnv({
     // Advanced contracts
     ENABLE_FEATURE_X: contracts.boolean(false),   // coerced boolean
     JSON_CONFIG: contracts.json(z.object({...})), // JSON string parser
-    ALLOWED_ORIGINS: contracts.csvArray(z.string().url()), // CSV parser
+    ALLOWED_ORIGINS: contracts.csvArray(z.url()), // CSV parser
   },
   client: {
     API_URL: contracts.url('https://api.example.com'),
@@ -339,7 +339,7 @@ import { z } from '@arki/contracts';
 
 export const urlContracts = {
   url: (defaultValue?: string) => {
-    const schema = z.string().url();
+    const schema = z.url();
     return defaultValue ? schema.default(defaultValue) : schema;
   },
 
@@ -603,7 +603,7 @@ export const env = defineEnv({
     ENABLE_ANALYTICS: contracts.boolean(false),
 
     // Complex configs
-    ALLOWED_ORIGINS: contracts.csvArray(z.string().url()),
+    ALLOWED_ORIGINS: contracts.csvArray(z.url()),
   },
   client: {
     API_URL: contracts.url('https://api.example.com'),
@@ -741,7 +741,7 @@ export const env = createEnv({
       .default('false'),
   },
   client: {
-    VITE_API_URL: z.string().url().default('https://api.example.com'),
+    VITE_API_URL: z.url().default('https://api.example.com'),
   },
   experimental__runtimeEnv: {
     DB_URL: process.env['DB_URL'],

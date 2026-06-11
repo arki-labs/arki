@@ -1,8 +1,7 @@
-import { debugEmails } from '../debug';
-import { quotaRouter } from '../providers/quota-router';
 import type { QuotaStore } from '../providers/quota-store';
 import type { EmailProvider, SendEmailPayload, SendEmailResult } from '../providers/types';
-
+import { debugEmails } from '../debug';
+import { quotaRouter } from '../providers/quota-router';
 import { EmailProcedure } from './email-procedure';
 
 type InitEmailsOptions = {
@@ -54,7 +53,7 @@ export type EmailClient = {
    *
    * ```ts
    * export const magicLink = emails.email
-   *   .input(z.object({ url: z.string().url() }))
+   *   .input(z.object({ url: z.url() }))
    *   .from('App <no-reply@app.com>')
    *   .subject('Your magic link')
    *   .text(({ url }) => `Sign in: ${url}`);
@@ -82,7 +81,7 @@ export type EmailClient = {
  *
  * // magic-link.ts
  * export const magicLink = emails.email
- *   .input(z.object({ url: z.string().url() }))
+ *   .input(z.object({ url: z.url() }))
  *   .from('App <no-reply@app.com>')
  *   .subject('Your magic link')
  *   .text(({ url }) => `Sign in: ${url}`);
@@ -96,9 +95,7 @@ export function initEmails(options: InitEmailsOptions): EmailClient {
   const isDev = options.isDev ?? process.env['NODE_ENV'] === 'development';
 
   const provider: EmailProvider =
-    options.providers.length === 1
-      ? options.providers[0]!
-      : quotaRouter(options.providers, { store: options.store });
+    options.providers.length === 1 ? options.providers[0]! : quotaRouter(options.providers, { store: options.store });
 
   const devProvider: EmailProvider = {
     name: 'dev',

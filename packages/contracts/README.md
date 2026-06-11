@@ -22,7 +22,7 @@ Peer-installs:
 
 `drizzle-zod`'s `createSelectSchema` walks Drizzle's `dataType` strings to infer Zod shapes. That mechanism loses three things:
 
-1. Branded ID types declared via `varchar('id').$type<\`usr_${string}\`>()` collapse to plain `string`.
+1. Branded ID types declared via `varchar('id').$type<\`usr\_${string}\`>()`collapse to plain`string`.
 2. `jsonb('col').$type<Shape>()` shapes collapse to `unknown`.
 3. Runtime validation schemas stashed on a column by an ID-factory side-channel are not applied automatically.
 
@@ -35,7 +35,7 @@ Peer-installs:
 ```ts
 import { z } from '@arki/contracts';
 
-const Email = z.string().email();
+const Email = z.email();
 ```
 
 The package re-exports everything from `zod/v4`, so you do not need a direct `zod` import alongside it.
@@ -54,8 +54,9 @@ const schema = formData.zfd.formData({
 ### Branded select / insert / update schemas
 
 ```ts
-import { pgTable, varchar, jsonb } from 'drizzle-orm/pg-core';
-import { createSelectSchema, createInsertSchema } from '@arki/contracts';
+import { jsonb, pgTable, varchar } from 'drizzle-orm/pg-core';
+
+import { createInsertSchema, createSelectSchema } from '@arki/contracts';
 
 const users = pgTable('users', {
   id: varchar('id').$type<`usr_${string}`>().primaryKey(),

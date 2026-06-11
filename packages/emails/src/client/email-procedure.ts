@@ -16,11 +16,7 @@ type EmailProcedureConfig<TInput> = {
   react?: Resolver<TInput, ReactElement>;
 };
 
-function resolve<TInput, TOut>(
-  fn: Resolver<TInput, TOut> | undefined,
-  input: TInput,
-  fallback: TOut,
-): TOut {
+function resolve<TInput, TOut>(fn: Resolver<TInput, TOut> | undefined, input: TInput, fallback: TOut): TOut {
   if (fn === undefined) return fallback;
   if (typeof fn === 'function') return (fn as (i: TInput) => TOut)(input);
   return fn;
@@ -55,7 +51,7 @@ type SendOptions<TInput> = [TInput] extends [never]
  *
  * ```ts
  * const magicLink = emails.email
- *   .input(z.object({ url: z.string().url() }))
+ *   .input(z.object({ url: z.url() }))
  *   .from('Acme <no-reply@example.com>')
  *   .subject('Your magic link')
  *   .react(({ url }) => <MagicLinkEmail url={url} />);
@@ -151,18 +147,12 @@ export class EmailProcedure<TInput = never> {
     }
 
     const from = (options as { from?: string }).from ?? resolve(this._config.from, callInput, '');
-    const subject =
-      (options as { subject?: string }).subject ?? resolve(this._config.subject, callInput, '');
+    const subject = (options as { subject?: string }).subject ?? resolve(this._config.subject, callInput, '');
 
-    let html: string | undefined =
-      resolve(this._config.html, callInput, undefined as unknown as string) || undefined;
+    let html: string | undefined = resolve(this._config.html, callInput, undefined as unknown as string) || undefined;
 
     // Render React Email component to HTML if provided and no static HTML set.
-    const reactEl = resolve(
-      this._config.react,
-      callInput,
-      undefined as unknown as ReactElement,
-    );
+    const reactEl = resolve(this._config.react, callInput, undefined as unknown as ReactElement);
     if (reactEl && !html) {
       const { render } = await import('@react-email/render');
       html = await render(reactEl);

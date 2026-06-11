@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const urlContracts = {
   url: (defaultValue?: string) => {
-    const schema = z.string().url();
+    const schema = z.url();
     return defaultValue ? schema.default(defaultValue) : schema;
   },
 
@@ -17,5 +17,8 @@ export const urlContracts = {
   redisUrl: () =>
     z
       .url()
-      .refine(url => url.startsWith('redis://') || url.startsWith('rediss://'), 'Redis URL must start with redis:// or rediss://'),
+      .refine(
+        url => url.startsWith('redis://') || url.startsWith('rediss://'),
+        'Redis URL must start with redis:// or rediss://',
+      ),
 };
