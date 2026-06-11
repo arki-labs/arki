@@ -4,10 +4,10 @@
  * Both hooks read from OfflineQueueProvider context.
  * useQueueStatus uses useSyncExternalStore for React 18+ correctness.
  */
-import { useSyncExternalStore, useCallback } from 'react';
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
 
-import { useOfflineQueue } from './OfflineQueueProvider.tsx';
 import type { QueueEvent } from './queue.ts';
+import { useOfflineQueue } from './OfflineQueueProvider.tsx';
 
 // ---------------------------------------------------------------------------
 // useQueueStatus
@@ -35,12 +35,19 @@ export function useQueueStatus(): QueueStatus {
     [queue],
   );
 
-  const getSnapshot = useCallback((): QueueStatus => {
-    return queue.status();
-  }, [queue]);
+  const getQueuedSnapshot = useCallback((): number => queue.status().queued, [queue]);
+  const getSendingSnapshot = useCallback((): boolean => queue.status().sending, [queue]);
+  const getDeadLetteredSnapshot = useCallback((): number => queue.status().deadLettered, [queue]);
 
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const queued = useSyncExternalStore(subscribe, getQueuedSnapshot, getServerZero);
+  const sending = useSyncExternalStore(subscribe, getSendingSnapshot, getServerFalse);
+  const deadLettered = useSyncExternalStore(subscribe, getDeadLetteredSnapshot, getServerZero);
+
+  return useMemo(() => ({ queued, sending, deadLettered }), [queued, sending, deadLettered]);
 }
+
+const getServerZero = (): number => 0;
+const getServerFalse = (): boolean => false;
 
 // ---------------------------------------------------------------------------
 // useOfflineMutation
