@@ -31,17 +31,70 @@
  *   chunks (ekuation main: ~2.5 MB) while still flagging genuine bloat.
  */
 
+import { copyFile, stat } from 'node:fs/promises';
+import path from 'node:path';
 import type { Plugin } from 'vite';
 import type { ManifestOptions } from 'vite-plugin-pwa';
 import { VitePWA } from 'vite-plugin-pwa';
 
 import { LAZY_CHUNK_IGNORES } from './lazy-ignores.js';
 
+const fileExists = async (path: string): Promise<boolean> => (await stat(path).catch(() => null)) !== null;
+
+/**
+ * Copy the compiled service worker into Nitro's served output.
+ *
+ * vite-plugin-pwa writes the built SW to Vite's `outDir` (`dist/`), but
+ * every TanStack Start app in this monorepo serves `.output/public/`
+ * (assembled by Nitro) — without this sync the SW registration 404s in
+ * production and the whole PWA layer (offline, push) silently never
+ * activates. Same impedance mismatch as the `globDirectory` note above.
+ *
+ * Runs as a sequential post `closeBundle` so it executes after
+ * vite-plugin-pwa's own SW build in the final build pass; earlier passes
+ * (before `.output/public` exists) no-op.
+ */
+function createSwOutputSyncPlugin(filename: string): Plugin {
+  const swFileName = filename.replace(/\.[cm]?[jt]sx?$/, '.js');
+  let root = '';
+  let outDir = 'dist';
+
+  return {
+    name: 'arki:pwa-sw-output-sync',
+    apply: 'build',
+    configResolved(config) {
+      root = config.root;
+      outDir = config.build.outDir;
+    },
+    closeBundle: {
+      sequential: true,
+      order: 'post',
+      async handler() {
+        const publicDir = path.resolve(root, '.output/public');
+        if (!(await fileExists(publicDir))) return;
+
+        // vite-plugin-pwa resolves the SW against the client build's outDir;
+        // check both the configured outDir and the conventional `dist/`.
+        const candidates = [path.resolve(root, outDir, swFileName), path.resolve(root, 'dist', swFileName)];
+        for (const source of candidates) {
+          if (!(await fileExists(source))) continue;
+          await copyFile(source, path.resolve(publicDir, swFileName));
+          const mapSource = `${source}.map`;
+          if (await fileExists(mapSource)) {
+            await copyFile(mapSource, path.resolve(publicDir, `${swFileName}.map`));
+          }
+          return;
+        }
+      },
+    },
+  };
+}
+
 type InjectManifestOverrides = {
   /**
    * Additional URLs to precache (e.g., the home route).
    */
-  additionalManifestEntries?: Array<string | { url: string; revision: string | null }>;
+  additionalManifestEntries?: (string | { url: string; revision: string | null })[];
 
   /**
    * Maximum size, in bytes, of a single file workbox will precache.
@@ -130,19 +183,22 @@ export function createPwaPlugin(options: CreatePwaPluginOptions = {}): Plugin[] 
     ...restInjectManifest
   } = injectManifest;
 
-  return VitePWA({
-    registerType: 'autoUpdate',
-    injectRegister: false,
-    strategies: 'injectManifest',
-    srcDir,
-    filename,
-    manifest,
-    injectManifest: {
-      globDirectory: '.output/public',
-      globPatterns,
-      globIgnores,
-      maximumFileSizeToCacheInBytes,
-      ...restInjectManifest,
-    },
-  });
+  return [
+    ...VitePWA({
+      registerType: 'autoUpdate',
+      injectRegister: false,
+      strategies: 'injectManifest',
+      srcDir,
+      filename,
+      manifest,
+      injectManifest: {
+        globDirectory: '.output/public',
+        globPatterns,
+        globIgnores,
+        maximumFileSizeToCacheInBytes,
+        ...restInjectManifest,
+      },
+    }),
+    createSwOutputSyncPlugin(filename),
+  ];
 }
