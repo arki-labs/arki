@@ -120,7 +120,9 @@
     "superjson": "catalog:utilities",
     "vite": "catalog:build-tools",
     "vite-plugin-pwa": "catalog:tanstack/start",
-    "workbox-precaching": "catalog:tanstack/start"
+    "workbox-precaching": "catalog:tanstack/start",
+    "workbox-routing": "catalog:tanstack/start",
+    "workbox-strategies": "catalog:tanstack/start"
   },
   "peerDependencies": {
     "@sentry/node": "catalog:",
