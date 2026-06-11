@@ -1,32 +1,29 @@
 /// <reference path="../query/vite-env.d.ts" />
-import type { ReactNode } from 'react';
 import type { DefaultOptions, QueryClient } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { createElement, Fragment } from 'react';
 
+import type { AnyRpcClient, OfflineMutationQueue } from '../mutations/queue.ts';
+import { OfflineDevPanel } from '../devtools/DevPanel.tsx';
+import { OfflineQueueProvider } from '../mutations/OfflineQueueProvider.tsx';
+import { createOfflineMutationQueue } from '../mutations/queue.ts';
 import { createPersistedQueryClient } from '../query/createPersistedQueryClient.ts';
 import { PersistedQueryClientProvider } from '../query/PersistedQueryClientProvider.tsx';
-import {
-  createOfflineMutationQueue,
-  type AnyRpcClient,
-  type OfflineMutationQueue,
-} from '../mutations/queue.ts';
-import { OfflineQueueProvider } from '../mutations/OfflineQueueProvider.tsx';
-import { OfflineDevPanel } from '../devtools/DevPanel.tsx';
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
-export interface CacheOnlyConfig {
+export type CacheOnlyConfig = {
   tier: 'cache-only';
   appId: string;
   buster?: string;
   devtools?: boolean;
   /** Forwarded to the underlying QueryClient — wire SuperJSON / staleTime / dehydration filters here. */
   queryDefaults?: DefaultOptions;
-}
+};
 
-export interface QueueConfig {
+export type QueueConfig = {
   tier: 'queue';
   appId: string;
   rpc: AnyRpcClient;
@@ -34,15 +31,15 @@ export interface QueueConfig {
   devtools?: boolean;
   /** Forwarded to the underlying QueryClient — wire SuperJSON / staleTime / dehydration filters here. */
   queryDefaults?: DefaultOptions;
-}
+};
 
 export type OfflineRuntimeConfig = CacheOnlyConfig | QueueConfig;
 
-export interface OfflineRuntime {
+export type OfflineRuntime = {
   queryClient: QueryClient;
   queue?: OfflineMutationQueue;
   Provider: (props: { children: ReactNode }) => ReactNode;
-}
+};
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -113,6 +110,12 @@ export function createOfflineRuntime(config: OfflineRuntimeConfig): OfflineRunti
   function Provider({ children }: { children: ReactNode }): ReactNode {
     let content: ReactNode = children;
 
+    // Dev panel floats visually, but must stay inside the queue provider when
+    // tier 'queue' is enabled so it can inspect queued/dead-lettered writes.
+    if (devtools) {
+      content = createElement(Fragment, null, content, createElement(OfflineDevPanel));
+    }
+
     // Innermost: queue provider (only in tier 'queue')
     if (queue) {
       content = createElement(OfflineQueueProvider, { queue, children: content });
@@ -126,11 +129,6 @@ export function createOfflineRuntime(config: OfflineRuntimeConfig): OfflineRunti
       buster,
       children: content,
     });
-
-    // Dev panel floats above everything
-    if (devtools) {
-      content = createElement(Fragment, null, content, createElement(OfflineDevPanel));
-    }
 
     return content;
   }
