@@ -12,7 +12,8 @@
  */
 import { timingSafeEqual } from 'node:crypto';
 
-import { FLEET_ENDPOINT_PATH, fleetSnapshotSchema, type FleetSnapshot } from './contract';
+import type { FleetSnapshot } from './contract';
+import { FLEET_ENDPOINT_PATH, fleetSnapshotSchema } from './contract';
 
 /** Constant-time string compare. Returns false fast on length mismatch. */
 function safeEqual(a: string, b: string): boolean {
@@ -33,7 +34,7 @@ function extractBearerToken(header: string | null): string | null {
 /** Produces the app's current {@link FleetSnapshot}. May be async (DB reads). */
 export type FleetSnapshotProvider = () => FleetSnapshot | Promise<FleetSnapshot>;
 
-export interface CreateFleetHandlerOptions {
+export type CreateFleetHandlerOptions = {
   /**
    * The shared secret Foreman presents. Read from the app's env (e.g.
    * `FOREMAN_TOKEN`). When undefined the endpoint is closed — every request is
@@ -42,7 +43,7 @@ export interface CreateFleetHandlerOptions {
   token: string | undefined;
   /** Computes the snapshot. Thrown errors become a 502 (app reachable, snapshot failed). */
   snapshot: FleetSnapshotProvider;
-}
+};
 
 /**
  * Build a `Request -> Response` handler for an app's fleet endpoint. Framework
@@ -68,10 +69,7 @@ export function createFleetHandler(options: CreateFleetHandlerOptions) {
 
     const parsed = fleetSnapshotSchema.safeParse(snapshot);
     if (!parsed.success) {
-      return Response.json(
-        { error: 'invalid_snapshot', issues: parsed.error.flatten() },
-        { status: 500 },
-      );
+      return Response.json({ error: 'invalid_snapshot', issues: parsed.error.flatten() }, { status: 500 });
     }
 
     return Response.json(parsed.data);
@@ -79,7 +77,7 @@ export function createFleetHandler(options: CreateFleetHandlerOptions) {
 }
 
 /** A registered app Foreman knows how to reach. `token`/`baseUrl` are server-only. */
-export interface FleetRegistryEntry {
+export type FleetRegistryEntry = {
   /** App slug, matches {@link FleetInfo.id}. */
   id: string;
   brand: string;
@@ -88,19 +86,19 @@ export interface FleetRegistryEntry {
   baseUrl: string;
   /** Shared secret for this app. */
   token: string;
-}
+};
 
 /** Result of one federated fetch — a discriminated union so callers handle failure explicitly. */
 export type FleetFetchResult =
   | { id: string; ok: true; snapshot: FleetSnapshot }
   | { id: string; ok: false; error: string };
 
-export interface FetchFleetSnapshotOptions {
+export type FetchFleetSnapshotOptions = {
   /** Override the global fetch (tests). */
   fetch?: typeof fetch;
   /** Per-request timeout; defaults to 5000ms. */
   timeoutMs?: number;
-}
+};
 
 /**
  * Fetch and validate one app's snapshot. Never throws — a network error, bad
