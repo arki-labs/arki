@@ -8,6 +8,7 @@ import { env as kvEnv } from '@arki/kv/env';
 export const env = createEnv({
   extends: [authEnv, dbEnv, kvEnv],
   server: {
+    FOREMAN_TOKEN: z.string().min(1).optional(),
     NODE_ENV: z.enum(['development', 'production']).default('development'),
     VITE_URL: z
       .url()

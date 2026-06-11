@@ -9,7 +9,8 @@
     "./auth": "./src/core/auth/index.ts",
     "./db": "./src/db.ts",
     "./env": "./src/env.ts",
-    "./api": "./src/api.ts"
+    "./api": "./src/api.ts",
+    "./fleet": "./src/features/fleet/handler.ts"
   },
   "scripts": {
     "clean": "git clean -xdf .cache .turbo node_modules",
@@ -24,6 +25,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/admin": "workspace:*",
     "@arki/assert": "workspace:*",
     "@arki/auth": "workspace:*",
     "@arki/contracts": "workspace:*",
