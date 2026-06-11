@@ -5,8 +5,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 const MEDIA = '(prefers-color-scheme: dark)';
 const STORAGE_KEY = 'theme';
 
-export type Theme = 'light' | 'dark' | 'system';
-export type ResolvedTheme = 'light' | 'dark';
+export type Theme = 'light' | 'dark' | 'system' | (string & {});
+export type ResolvedTheme = 'light' | 'dark' | (string & {});
 
 export type ThemeProviderProps = {
   children: React.ReactNode;
@@ -81,6 +81,12 @@ function storeTheme(key: string, theme: string): void {
   }
 }
 
+function normalizeTheme(theme: string | null, themes: readonly string[], defaultTheme: string): string {
+  if (theme && themes.includes(theme)) return theme;
+  if (themes.includes(defaultTheme)) return defaultTheme;
+  return themes[0] ?? defaultTheme;
+}
+
 /**
  * Apply theme to document
  */
@@ -89,6 +95,7 @@ function applyTheme(
   attribute: string,
   enableColorScheme: boolean,
   disableTransitionOnChange: boolean,
+  themes: readonly string[],
 ): void {
   if (typeof document === 'undefined') return;
 
@@ -115,15 +122,17 @@ function applyTheme(
 
   // Apply theme attribute
   if (attribute === 'class') {
-    root.classList.remove('light', 'dark');
+    root.classList.remove(...new Set([...themes.filter(value => value !== 'system'), 'light', 'dark']));
     root.classList.add(theme);
   } else {
     root.setAttribute(attribute, theme);
+    root.classList.toggle('dark', theme === 'dark');
   }
+  root.classList.toggle('is-dark', theme === 'dark');
 
   // Apply color-scheme
   if (enableColorScheme) {
-    root.style.colorScheme = theme;
+    root.style.colorScheme = theme === 'dark' ? 'dark' : 'light';
   }
 }
 
@@ -140,11 +149,11 @@ export function ThemeProvider({
 }: ThemeProviderProps) {
   const [theme, setThemeState] = useState<string>(() => {
     // During SSR, use default theme
-    if (typeof window === 'undefined') return defaultTheme;
+    if (typeof window === 'undefined') return normalizeTheme(defaultTheme, themes, defaultTheme);
 
     // On client, read from storage or use default
     const stored = getStoredTheme(storageKey);
-    return stored ?? defaultTheme;
+    return normalizeTheme(stored, themes, defaultTheme);
   });
 
   const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() => getSystemTheme());
@@ -152,7 +161,7 @@ export function ThemeProvider({
   // Calculate resolved theme
   const resolvedTheme = useMemo<ResolvedTheme>(() => {
     if (forcedTheme) {
-      return forcedTheme as ResolvedTheme;
+      return forcedTheme;
     }
 
     const themeToResolve = theme;
@@ -161,16 +170,17 @@ export function ThemeProvider({
       return systemTheme;
     }
 
-    return themeToResolve as ResolvedTheme;
+    return themeToResolve;
   }, [theme, systemTheme, enableSystem, forcedTheme]);
 
   // Set theme function
   const setTheme = useCallback(
     (newTheme: string) => {
-      setThemeState(newTheme);
-      storeTheme(storageKey, newTheme);
+      const nextTheme = normalizeTheme(newTheme, themes, defaultTheme);
+      setThemeState(nextTheme);
+      storeTheme(storageKey, nextTheme);
     },
-    [storageKey],
+    [defaultTheme, storageKey, themes],
   );
 
   // Listen for system theme changes
@@ -193,19 +203,19 @@ export function ThemeProvider({
 
   // Apply theme to document when it changes
   useEffect(() => {
-    applyTheme(resolvedTheme, attribute, enableColorScheme, disableTransitionOnChange);
-  }, [resolvedTheme, attribute, enableColorScheme, disableTransitionOnChange]);
+    applyTheme(resolvedTheme, attribute, enableColorScheme, disableTransitionOnChange, themes);
+  }, [resolvedTheme, attribute, enableColorScheme, disableTransitionOnChange, themes]);
 
   // Listen for storage changes (cross-tab sync)
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       if (e.key !== storageKey || !e.newValue) return;
-      setThemeState(e.newValue);
+      setThemeState(normalizeTheme(e.newValue, themes, defaultTheme));
     };
 
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
-  }, [storageKey]);
+  }, [defaultTheme, storageKey, themes]);
 
   const value = useMemo<UseThemeReturn>(
     () => ({

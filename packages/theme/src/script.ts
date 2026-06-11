@@ -19,6 +19,14 @@
 
 export const THEME_STORAGE_KEY = 'theme';
 
+export type ThemeDetectionOptions = {
+  storageKey?: string;
+  attribute?: 'class' | 'data-theme' | `data-${string}`;
+  defaultTheme?: string;
+  themes?: readonly string[];
+  enableSystem?: boolean;
+};
+
 /**
  * Generates an inline script string that detects and applies the theme
  * before React hydration, preventing FOUC.
@@ -28,15 +36,13 @@ export const THEME_STORAGE_KEY = 'theme';
  * @returns A string containing the inline JavaScript to execute
  */
 export function themeScript(
-  storageKey: string = THEME_STORAGE_KEY,
-  attribute: 'class' | 'data-theme' = 'class'
+  storageKeyOrOptions: string | ThemeDetectionOptions = THEME_STORAGE_KEY,
+  attribute: 'class' | 'data-theme' = 'class',
 ): string {
-  // The script is minified and self-executing
-  return `(function(){try{var t=localStorage.getItem("${storageKey}");var d=t==="dark"||((!t||t==="system")&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(d){${
-    attribute === 'class'
-      ? 'document.documentElement.classList.add("dark")'
-      : `document.documentElement.setAttribute("${attribute}","dark")`
-  }}document.documentElement.style.colorScheme=d?"dark":"light"}catch(e){}})()`;
+  const options =
+    typeof storageKeyOrOptions === 'string' ? { storageKey: storageKeyOrOptions, attribute } : storageKeyOrOptions;
+
+  return `(${themeDetectionFn.toString()})(${JSON.stringify(options)})`;
 }
 
 /**
@@ -50,15 +56,38 @@ export function themeScript(
  * </FunctionOnce>
  * ```
  */
-export function themeDetectionFn(storageKey: string): void {
+export function themeDetectionFn(input: string | ThemeDetectionOptions): void {
   try {
-    const theme = localStorage.getItem(storageKey);
-    const isDark =
-      theme === 'dark' ||
-      ((theme === null || theme === 'system') &&
-        window.matchMedia('(prefers-color-scheme: dark)').matches);
+    const options = typeof input === 'string' ? { storageKey: input } : input;
+    const storageKey = options.storageKey ?? 'theme';
+    const attribute = options.attribute ?? 'class';
+    const defaultTheme = options.defaultTheme ?? 'system';
+    const themes = options.themes ?? ['light', 'dark', 'system'];
+    const enableSystem = options.enableSystem ?? true;
 
-    if (isDark) {
+    const theme = localStorage.getItem(storageKey);
+    const storedTheme = theme !== null && themes.includes(theme) ? theme : defaultTheme;
+    const selectedTheme = themes.includes(storedTheme) ? storedTheme : (themes[0] ?? defaultTheme);
+    const resolvedTheme =
+      selectedTheme === 'system' && enableSystem
+        ? window.matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : 'light'
+        : selectedTheme;
+    const isDark = resolvedTheme === 'dark';
+
+    if (attribute === 'class') {
+      document.documentElement.classList.remove(
+        ...new Set([...themes.filter(value => value !== 'system'), 'light', 'dark']),
+      );
+      document.documentElement.classList.add(resolvedTheme);
+    } else {
+      document.documentElement.setAttribute(attribute, resolvedTheme);
+      document.documentElement.classList.toggle('dark', isDark);
+    }
+    document.documentElement.classList.toggle('is-dark', isDark);
+
+    if (isDark && attribute !== 'class') {
       document.documentElement.classList.add('dark');
     }
     document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
