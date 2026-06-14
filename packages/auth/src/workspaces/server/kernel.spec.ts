@@ -51,16 +51,16 @@ const personalCtx: WorkspaceContext = {
 };
 const adminCtx: WorkspaceContext = {
   userId: 'u1',
-  activeOrganizationId: 'org1',
+  activeOrganizationId: 'organization_1',
   activeTeamId: null,
-  memberTeamIds: ['teamA'],
+  memberTeamIds: ['team_a'],
   role: 'admin',
 };
 const memberCtx: WorkspaceContext = {
   userId: 'u2',
-  activeOrganizationId: 'org1',
-  activeTeamId: 'teamA',
-  memberTeamIds: ['teamA'],
+  activeOrganizationId: 'organization_1',
+  activeTeamId: 'team_a',
+  memberTeamIds: ['team_a'],
   role: 'member',
 };
 
@@ -78,43 +78,43 @@ describe('resolveWriteScope — the shared-write gate', () => {
 
   it('lets an admin create an org-wide row in the active org', () => {
     expect(
-      resolveWriteScope(sourceConfig, { organizationId: 'org1', teamId: null }, adminCtx),
-    ).toEqual({ organizationId: 'org1', teamId: null });
+      resolveWriteScope(sourceConfig, { organizationId: 'organization_1', teamId: null }, adminCtx),
+    ).toEqual({ organizationId: 'organization_1', teamId: null });
   });
 
   it('blocks a member from creating an org-wide row (shareRole = admin)', () => {
     expect(() =>
-      resolveWriteScope(sourceConfig, { organizationId: 'org1', teamId: null }, memberCtx),
+      resolveWriteScope(sourceConfig, { organizationId: 'organization_1', teamId: null }, memberCtx),
     ).toThrow(WorkspaceScopeError);
   });
 
   it('blocks writing into an organization other than the active one', () => {
     expect(() =>
-      resolveWriteScope(sourceConfig, { organizationId: 'org2', teamId: null }, adminCtx),
+      resolveWriteScope(sourceConfig, { organizationId: 'organization_2', teamId: null }, adminCtx),
     ).toThrow(/active one/i);
   });
 
   it('lets a team member create a team-scoped row', () => {
     expect(
-      resolveWriteScope(sourceConfig, { organizationId: 'org1', teamId: 'teamA' }, memberCtx),
-    ).toEqual({ organizationId: 'org1', teamId: 'teamA' });
+      resolveWriteScope(sourceConfig, { organizationId: 'organization_1', teamId: 'team_a' }, memberCtx),
+    ).toEqual({ organizationId: 'organization_1', teamId: 'team_a' });
   });
 
   it('blocks a non-member from writing into a team', () => {
     expect(() =>
-      resolveWriteScope(sourceConfig, { organizationId: 'org1', teamId: 'teamB' }, memberCtx),
+      resolveWriteScope(sourceConfig, { organizationId: 'organization_1', teamId: 'team_b' }, memberCtx),
     ).toThrow(/not a member/i);
   });
 
   it('rejects a team write on an org-only resource', () => {
     expect(() =>
-      resolveWriteScope(orgOnlyConfig, { organizationId: 'org1', teamId: 'teamA' }, adminCtx),
+      resolveWriteScope(orgOnlyConfig, { organizationId: 'organization_1', teamId: 'team_a' }, adminCtx),
     ).toThrow(/not team-scopable/i);
   });
 
   it('rejects the illegal team-without-org scope shape', () => {
     expect(() =>
-      resolveWriteScope(sourceConfig, { organizationId: null, teamId: 'teamA' }, adminCtx),
+      resolveWriteScope(sourceConfig, { organizationId: null, teamId: 'team_a' }, adminCtx),
     ).toThrow(/organization id/i);
   });
 });
@@ -149,16 +149,16 @@ describe('reassignScope — move + cascade (D-WS-009)', () => {
     const resolved = await reassignScope({
       config: { ...sourceConfig, onReassign },
       rowId: 'src_1',
-      target: { organizationId: 'org1', teamId: 'teamA' },
+      target: { organizationId: 'organization_1', teamId: 'team_a' },
       ctx: memberCtx,
       applyUpdate,
     });
 
-    expect(resolved).toEqual({ organizationId: 'org1', teamId: 'teamA' });
+    expect(resolved).toEqual({ organizationId: 'organization_1', teamId: 'team_a' });
     expect(calls).toEqual(['update', 'cascade']);
     expect(onReassign).toHaveBeenCalledWith(memberCtx, 'src_1', {
-      organizationId: 'org1',
-      teamId: 'teamA',
+      organizationId: 'organization_1',
+      teamId: 'team_a',
     });
   });
 
@@ -168,7 +168,7 @@ describe('reassignScope — move + cascade (D-WS-009)', () => {
       reassignScope({
         config: sourceConfig,
         rowId: 'src_1',
-        target: { organizationId: 'org1', teamId: null }, // org-wide
+        target: { organizationId: 'organization_1', teamId: null }, // org-wide
         ctx: memberCtx, // member < admin shareRole
         applyUpdate,
       }),

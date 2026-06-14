@@ -12,6 +12,13 @@ export { organizationPlugin } from './plugin';
 export type { WorkspacePluginOptions } from './plugin';
 
 export {
+  createWorkspaceForeignKeys,
+  organizationIdSchema,
+  teamIdSchema,
+} from './schema';
+export type { OrganizationId, TeamId } from './schema';
+
+export {
   registerWorkspaceResource,
   getWorkspaceResource,
   resetWorkspaceRegistry,

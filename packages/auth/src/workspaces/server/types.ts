@@ -1,5 +1,7 @@
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 
+import type { OrganizationId, TeamId } from './schema';
+
 /**
  * Workspace roles, highest privilege first. Mirrors Better Auth's default
  * organization roles. `rankRole` turns these into a comparable number so
@@ -27,10 +29,10 @@ export function roleAtLeast(role: WorkspaceRole | null, min: WorkspaceRole): boo
  */
 export type WorkspaceContext = {
   userId: string;
-  activeOrganizationId: string | null;
+  activeOrganizationId: OrganizationId | null;
   /** The session's active team within the active org (for team-scoped writes/UI). */
-  activeTeamId: string | null;
-  memberTeamIds: string[];
+  activeTeamId: TeamId | null;
+  memberTeamIds: TeamId[];
   role: WorkspaceRole | null;
 };
 
@@ -45,8 +47,8 @@ export type WorkspaceContext = {
  * `{ organizationId: null, teamId: <team> }` is illegal and rejected.
  */
 export type Scope = {
-  organizationId: string | null;
-  teamId: string | null;
+  organizationId: OrganizationId | null;
+  teamId: TeamId | null;
 };
 
 /** The three scope levels, named. */
