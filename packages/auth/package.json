@@ -15,6 +15,11 @@
       "import": "./src/tanstack-start/index.ts",
       "node": "./src/tanstack-start/index.ts"
     },
+    "./workspaces": {
+      "types": "./dist/src/workspaces/server/index.d.ts",
+      "import": "./src/workspaces/server/index.ts",
+      "node": "./src/workspaces/server/index.ts"
+    },
     "./security/*": {
       "types": "./dist/src/security/*.d.ts",
       "import": "./src/security/*.ts",

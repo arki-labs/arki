@@ -8,6 +8,8 @@ import { createPrefixedId } from '@arki/db/id';
 import { createLogger } from '@arki/log';
 
 import { betterAuth } from './create-auth';
+import { organizationPlugin } from './workspaces/server/plugin';
+import type { WorkspacePluginOptions } from './workspaces/server/plugin';
 
 const authLogger = createLogger('arki:auth');
 
@@ -81,12 +83,28 @@ export type DefineAuthBackendOptions = {
   account?: BetterAuthOptions['account'];
   trustedOrigins?: BetterAuthOptions['trustedOrigins'];
   extraPlugins?: BetterAuthPlugin[];
+
+  /**
+   * Team Workspaces (D-WS-001). When `enabled`, the Better Auth organization
+   * plugin is registered and the app must include the org tables
+   * (`organization`, `member`, `invitation`, plus `team`/`teamMember` when
+   * `teams`) in `schema`. The scoping kernel + flag wiring live in
+   * `@arki/auth/workspaces`. See
+   * `apps/avocabo/docs/features/team-workspaces/pilot-spec.md`.
+   */
+  organization?: { enabled: boolean } & WorkspacePluginOptions;
 };
 
 const defaultGenerateId: GenerateIdHook = ({ model }) => {
   const slug = String(model).replace(/s$/, '');
   return `${slug}_${crypto.randomUUID().replace(/-/g, '')}`;
 };
+
+/** Drop the `enabled` flag, leaving the plugin options for `organizationPlugin`. */
+function stripEnabled(o: { enabled: boolean } & WorkspacePluginOptions): WorkspacePluginOptions {
+  const { enabled: _enabled, ...rest } = o;
+  return rest;
+}
 
 type PrefixMap = {
   user?: string;
@@ -142,6 +160,7 @@ export function defineAuthBackend(options: DefineAuthBackendOptions) {
     account,
     trustedOrigins,
     extraPlugins = [],
+    organization,
   } = options;
 
   const cookiePrefix = `auth-${appKey}`;
@@ -162,6 +181,9 @@ export function defineAuthBackend(options: DefineAuthBackendOptions) {
             },
           }) as BetterAuthPlugin,
         ]
+      : []),
+    ...(organization?.enabled
+      ? [organizationPlugin(stripEnabled(organization))]
       : []),
     ...extraPlugins,
     tanstackStartCookies(),
