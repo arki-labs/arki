@@ -30,6 +30,7 @@ import type { z } from '@arki/contracts';
 import type { GenerateOptions, Message, StreamOptions, StructuredLLMProvider } from './types';
 import { env } from '../env';
 import { GenerationError, getErrorMessage } from '../errors';
+import { aiTelemetry } from './telemetry';
 
 // ── Per-provider model defaults ───────────────────────────────
 
@@ -126,6 +127,7 @@ class LanguageModelAdapter implements StructuredLLMProvider {
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
+        ...aiTelemetry(`${this.providerName}.generateStructuredData`),
       });
       return result.output as T;
     } catch (error) {
@@ -150,6 +152,7 @@ class LanguageModelAdapter implements StructuredLLMProvider {
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
+        ...aiTelemetry(`${this.providerName}.generateStructuredDataFromMessages`),
       });
       return result.output as T;
     } catch (error) {
@@ -169,6 +172,7 @@ class LanguageModelAdapter implements StructuredLLMProvider {
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
+        ...aiTelemetry(`${this.providerName}.generateText`),
       });
       return result.text;
     } catch (error) {
@@ -188,6 +192,7 @@ class LanguageModelAdapter implements StructuredLLMProvider {
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
+        ...aiTelemetry(`${this.providerName}.streamConversation`),
       });
 
       for await (const chunk of (await stream).textStream) {
