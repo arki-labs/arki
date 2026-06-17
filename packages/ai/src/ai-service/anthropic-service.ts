@@ -4,7 +4,7 @@
  */
 
 import { anthropic } from '@ai-sdk/anthropic';
-import { Output, generateText } from 'ai';
+import { Output, generateText, streamText } from 'ai';
 import type { ModelMessage, SystemModelMessage } from 'ai';
 import type { z } from '@arki/contracts';
 
@@ -191,6 +191,121 @@ export class AnthropicService {
       debugService('[Anthropic] Text generation failed: %s', getErrorMessage(error));
 
       throw new GenerationError(`Failed to generate text: ${getErrorMessage(error)}`, error);
+    }
+  }
+
+  /**
+   * Plain-text multi-turn generation. Sends the full conversation history and
+   * returns the model's natural-language reply (no JSON schema), preserving its
+   * own voice. The system prompt goes through {@link buildSystemParam} so an
+   * identical-every-turn prompt can be Anthropic prompt-cached.
+   */
+  async generateConversation(
+    messages: ChatMessage[],
+    options: {
+      temperature?: number;
+      maxRetries?: number;
+      systemPrompt?: string | SystemPart[];
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<string> {
+    debugService('[Anthropic] generateConversation (messages: %d)', messages.length);
+
+    const system = buildSystemParam(options.systemPrompt);
+
+    const result = await rateLimiters.anthropic.execute('generateConversation', async () => {
+      try {
+        const response = await generateText({
+          model: anthropic(this.model),
+          system,
+          messages,
+          maxRetries: options.maxRetries ?? this.defaultMaxRetries,
+          temperature: options.temperature ?? this.defaultTemperature,
+          abortSignal: options.signal,
+        });
+
+        return response.text;
+      } catch (error) {
+        debugService('[Anthropic] Conversation generation failed: %s', getErrorMessage(error));
+
+        throw new GenerationError(`Failed to generate conversation response: ${getErrorMessage(error)}`, error);
+      }
+    });
+
+    if (!result.success) {
+      debugService('[Anthropic] Rate limit exceeded (retry after: %dms)', result.retryAfterMs);
+
+      throw new RateLimitError(
+        `Anthropic rate limit exceeded: retry after ${result.retryAfterMs}ms`,
+        result.retryAfterMs,
+      );
+    }
+
+    return result.data;
+  }
+
+  /**
+   * Streaming variant of {@link generateConversation}. Consumes a rate-limit
+   * slot before streaming starts (so an over-limit caller fails fast rather than
+   * mid-stream), then yields each text delta for a typing-indicator UX.
+   */
+  async *streamConversation(
+    messages: ChatMessage[],
+    options: {
+      temperature?: number;
+      systemPrompt?: string | SystemPart[];
+      signal?: AbortSignal;
+      onStart?: () => void;
+      onToken?: (chunk: string) => void;
+      onComplete?: (text: string) => void;
+      onError?: (error: Error) => void;
+    } = {},
+  ): AsyncGenerator<string, void, unknown> {
+    const system = buildSystemParam(options.systemPrompt);
+
+    await this.consumeRateLimitSlot('streamConversation');
+
+    try {
+      options.onStart?.();
+
+      const result = await streamText({
+        model: anthropic(this.model),
+        system,
+        messages,
+        temperature: options.temperature ?? this.defaultTemperature,
+        abortSignal: options.signal,
+      });
+
+      let fullText = '';
+      for await (const chunk of result.textStream) {
+        fullText += chunk;
+        options.onToken?.(chunk);
+        yield chunk;
+      }
+
+      options.onComplete?.(fullText);
+    } catch (error) {
+      options.onError?.(error as Error);
+      debugService('[Anthropic] Stream conversation failed: %s', getErrorMessage(error));
+
+      throw new GenerationError(`Failed to stream conversation: ${getErrorMessage(error)}`, error);
+    }
+  }
+
+  /**
+   * Reserves a rate-limit slot without wrapping a function — used by streaming
+   * methods so the limit is checked before the generator starts yielding.
+   */
+  private async consumeRateLimitSlot(key: string): Promise<void> {
+    const result = await rateLimiters.anthropic.execute(key, async () => undefined);
+
+    if (!result.success) {
+      debugService('[Anthropic] Rate limit exceeded for %s (retry after: %dms)', key, result.retryAfterMs);
+
+      throw new RateLimitError(
+        `Anthropic rate limit exceeded: retry after ${result.retryAfterMs}ms`,
+        result.retryAfterMs,
+      );
     }
   }
 }

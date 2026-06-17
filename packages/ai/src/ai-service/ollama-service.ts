@@ -99,6 +99,18 @@ export type OllamaGenerationOptions = {
   signal?: AbortSignal;
 };
 
+/**
+ * Streaming options for {@link OllamaService.streamConversation}. Extends the
+ * base generation options with lifecycle callbacks that mirror
+ * `OpenAIService`'s stream surface, so the three providers stay interchangeable
+ * for streaming callers (e.g. a chat copilot endpoint).
+ */
+export type OllamaStreamOptions = OllamaGenerationOptions & {
+  onStart?: () => void;
+  onComplete?: (text: string) => void;
+  onError?: (error: Error) => void;
+};
+
 const DEFAULT_MODEL = 'gemma4';
 const DEFAULT_TEMPERATURE = 0.7;
 const DEFAULT_MAX_RETRIES = 1;
@@ -244,6 +256,106 @@ export class OllamaService {
       );
       throw new GenerationError(
         `Failed to generate structured data via Ollama (${this.model}): ${getErrorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Plain-text multi-turn generation. Sends the full conversation history to
+   * the model and returns its natural-language reply *without* forcing a JSON
+   * schema — unlike {@link generateStructuredDataFromMessages}, this preserves
+   * the model's own voice and formatting. The anti-leak / role system prompt is
+   * threaded via `options.systemPrompt`.
+   */
+  async generateConversation(
+    messages: ChatMessage[],
+    options: OllamaGenerationOptions = {},
+  ): Promise<string> {
+    const temperature = options.temperature ?? this.defaultTemperature;
+    const maxRetries = options.maxRetries ?? this.defaultMaxRetries;
+
+    debugService(
+      '[Ollama] generateConversation (model=%s, messages=%d, temperature=%d)',
+      this.model,
+      messages.length,
+      temperature,
+    );
+
+    try {
+      const result = await generateText({
+        model: this.buildModel(),
+        system: options.systemPrompt,
+        messages,
+        temperature,
+        maxRetries,
+        abortSignal: options.signal,
+      });
+
+      debugService('[Ollama] Conversation response generated (length: %d)', result.text.length);
+      return result.text;
+    } catch (error) {
+      debugService(
+        '[Ollama] Conversation generation failed (model=%s): %s',
+        this.model,
+        getErrorMessage(error),
+      );
+      throw new GenerationError(
+        `Failed to generate conversation via Ollama (${this.model}): ${getErrorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Streaming variant of {@link generateConversation}. Yields each text delta as
+   * the model emits it (for a typing-indicator UX) and invokes the optional
+   * lifecycle callbacks. The abort signal cancels both the stream and the
+   * upstream Ollama generation.
+   */
+  async *streamConversation(
+    messages: ChatMessage[],
+    options: OllamaStreamOptions = {},
+  ): AsyncGenerator<string, void, unknown> {
+    const temperature = options.temperature ?? this.defaultTemperature;
+    const maxRetries = options.maxRetries ?? this.defaultMaxRetries;
+
+    debugService(
+      '[Ollama] streamConversation (model=%s, messages=%d, temperature=%d)',
+      this.model,
+      messages.length,
+      temperature,
+    );
+
+    try {
+      options.onStart?.();
+
+      const result = await streamText({
+        model: this.buildModel(),
+        system: options.systemPrompt,
+        messages,
+        temperature,
+        maxRetries,
+        abortSignal: options.signal,
+      });
+
+      let fullText = '';
+      for await (const chunk of result.textStream) {
+        fullText += chunk;
+        options.onToken?.(chunk);
+        yield chunk;
+      }
+
+      options.onComplete?.(fullText);
+    } catch (error) {
+      options.onError?.(error as Error);
+      debugService(
+        '[Ollama] Stream conversation failed (model=%s): %s',
+        this.model,
+        getErrorMessage(error),
+      );
+      throw new GenerationError(
+        `Failed to stream conversation via Ollama (${this.model}): ${getErrorMessage(error)}`,
         error,
       );
     }

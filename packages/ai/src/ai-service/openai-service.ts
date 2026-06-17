@@ -195,6 +195,7 @@ export class OpenAIService {
       try {
         const result = await generateText({
           model: openai(this.model),
+          system: options.systemPrompt,
           messages: sanitizedMessages,
           temperature: options.temperature || this.defaultTemperature,
           maxRetries: options.maxRetries || this.defaultMaxRetries,
@@ -280,6 +281,7 @@ export class OpenAIService {
 
       const stream = await streamText({
         model: openai(this.model),
+        system: options.systemPrompt,
         messages: sanitizedMessages,
         temperature: options.temperature || this.defaultTemperature,
         abortSignal: options.signal,
