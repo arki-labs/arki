@@ -58,7 +58,16 @@ export type DefineAuthBackendOptions = {
   usePlural?: boolean;
 
   magicLink?: {
-    send: (args: { email: string; url: string; token: string }) => Promise<void> | void;
+    // `request` is the originating HTTP request (when available). Shared
+    // backends serving several brands use it to resolve which brand sent the
+    // sign-in (e.g. from the Origin/Host header). Optional and additive —
+    // single-brand callers can ignore it.
+    send: (args: {
+      email: string;
+      url: string;
+      token: string;
+      request?: Request;
+    }) => Promise<void> | void;
   };
 
   socialProviders?: {
@@ -176,8 +185,8 @@ export function defineAuthBackend(options: DefineAuthBackendOptions) {
     ...(magicLinkConfig
       ? [
           magicLink({
-            sendMagicLink: async ({ email, url, token }) => {
-              await magicLinkConfig.send({ email, url, token });
+            sendMagicLink: async ({ email, url, token }, ctx) => {
+              await magicLinkConfig.send({ email, url, token, request: ctx?.request });
             },
           }) as BetterAuthPlugin,
         ]
