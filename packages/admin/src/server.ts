@@ -49,6 +49,13 @@ export type CreateFleetHandlerOptions = {
  * Build a `Request -> Response` handler for an app's fleet endpoint. Framework
  * agnostic (plain web `Request`/`Response`), so it drops into a TanStack Start
  * server route, a Hono handler, or any fetch-style server.
+ *
+ * @remarks
+ * Onboarding a TanStack Start app to the fleet (`GET /api/fleet` → this handler)
+ * also requires adding `fleetVite()` from `@arki/tanstack-start/vite` to the
+ * app's `vite.config.ts` plugins. This module is published `node`-only; without
+ * the plugin, Vite's client dep-scan follows the route handler's import into
+ * `@arki/admin/server` and aborts ("Failed to run dependency scan").
  */
 export function createFleetHandler(options: CreateFleetHandlerOptions) {
   return async function fleetHandler(request: Request): Promise<Response> {

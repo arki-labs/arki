@@ -9,6 +9,6 @@
     "allowImportingTsExtensions": false,
     "tsBuildInfoFile": "${configDir}/.cache/tsbuildinfo.pwa.json"
   },
-  "include": ["src/pwa/index.ts"],
+  "include": ["src/pwa/index.ts", "src/vite.ts"],
   "exclude": ["node_modules"]
 }

@@ -13,6 +13,10 @@
       "import": "./src/app.config.ts",
       "node": "./src/app.config.ts"
     },
+    "./vite": {
+      "types": "./dist/src/vite.d.ts",
+      "default": "./dist/src/vite.js"
+    },
     "./server": {
       "types": "./dist/src/server.d.ts",
       "import": "./src/server.ts",
