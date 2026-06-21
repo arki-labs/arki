@@ -93,6 +93,16 @@ export default tseslint.config(
         { prefer: 'type-imports', fixStyle: 'separate-type-imports' },
       ],
       '@typescript-eslint/no-misused-promises': [2, { checksVoidReturn: { attributes: false } }],
+      /**
+       * TanStack Router uses `throw redirect()` / `throw notFound()` as control flow — the router
+       * intercepts these specific thrown values to drive navigation, so they are intentionally
+       * NOT Error subclasses. Allow exactly those two types (harmless for non-router code, which
+       * never imports them) while keeping the rule's protection against throwing strings/objects.
+       */
+      '@typescript-eslint/only-throw-error': [
+        'error',
+        { allow: [{ from: 'package', name: ['Redirect', 'NotFoundError'], package: '@tanstack/router-core' }] },
+      ],
       '@typescript-eslint/no-unnecessary-condition': [
         'warn',
         {
