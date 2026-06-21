@@ -93,29 +93,11 @@ export default tseslint.config(
         // intentional — the extracted key exists only to drop it from `rest`, not to be used.
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true },
       ],
-      /**
-       * drizzle/enforce-{delete,update}-with-where guard against `db.delete(table)` truncating a
-       * table. The rule otherwise matches ANY `.delete()` member call, so on frontend code it
-       * false-positives on Set/Map.delete() and oRPC client `.delete()`. Scope it to the real
-       * Drizzle handles (`db`, `tx`) so it only inspects actual queries.
-       */
-      'drizzle/enforce-delete-with-where': ['error', { drizzleObjectName: ['db', 'tx'] }],
-      'drizzle/enforce-update-with-where': ['error', { drizzleObjectName: ['db', 'tx'] }],
       '@typescript-eslint/consistent-type-imports': [
         'warn',
         { prefer: 'type-imports', fixStyle: 'separate-type-imports' },
       ],
       '@typescript-eslint/no-misused-promises': [2, { checksVoidReturn: { attributes: false } }],
-      /**
-       * TanStack Router uses `throw redirect()` / `throw notFound()` as control flow — the router
-       * intercepts these specific thrown values to drive navigation, so they are intentionally
-       * NOT Error subclasses. Allow exactly those two types (harmless for non-router code, which
-       * never imports them) while keeping the rule's protection against throwing strings/objects.
-       */
-      '@typescript-eslint/only-throw-error': [
-        'error',
-        { allow: [{ from: 'package', name: ['Redirect', 'NotFoundError'], package: '@tanstack/router-core' }] },
-      ],
       '@typescript-eslint/no-unnecessary-condition': [
         'warn',
         {
