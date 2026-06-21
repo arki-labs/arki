@@ -87,7 +87,20 @@ export default tseslint.config(
       ...regexpPlugin.configs.recommended.rules,
       ...unicornPlugin.configs.recommended.rules,
       ...turboPlugin.configs.recommended.rules,
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        // ignoreRestSiblings: the `const { omit, ...rest } = obj` omit-by-destructure pattern is
+        // intentional — the extracted key exists only to drop it from `rest`, not to be used.
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true },
+      ],
+      /**
+       * drizzle/enforce-{delete,update}-with-where guard against `db.delete(table)` truncating a
+       * table. The rule otherwise matches ANY `.delete()` member call, so on frontend code it
+       * false-positives on Set/Map.delete() and oRPC client `.delete()`. Scope it to the real
+       * Drizzle handles (`db`, `tx`) so it only inspects actual queries.
+       */
+      'drizzle/enforce-delete-with-where': ['error', { drizzleObjectName: ['db', 'tx'] }],
+      'drizzle/enforce-update-with-where': ['error', { drizzleObjectName: ['db', 'tx'] }],
       '@typescript-eslint/consistent-type-imports': [
         'warn',
         { prefer: 'type-imports', fixStyle: 'separate-type-imports' },
