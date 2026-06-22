@@ -119,6 +119,8 @@ export class WebhookSecurityService {
       paypal: ['173.0.80.0/20', '173.0.96.0/20', '173.0.112.0/20'],
       square: ['52.21.213.172', '35.174.233.25'],
       razorpay: [],
+      // RevenueCat authenticates webhooks via the Authorization header secret, not an IP allowlist.
+      revenuecat: [],
     };
 
     const allowedIps = [...this.config.allowedIps, ...(providerIpRanges[provider] || [])];

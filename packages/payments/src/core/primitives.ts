@@ -31,7 +31,7 @@ export const paymentIdFactory = paymentId;
 export const customerIdFactory = customerId;
 export const webhookIdFactory = webhookId;
 
-export const paymentProviderValues = ['stripe', 'paypal', 'square', 'razorpay'] as const;
+export const paymentProviderValues = ['stripe', 'paypal', 'square', 'razorpay', 'revenuecat'] as const;
 
 export const subscriptionStatusValues = [
   'active',
