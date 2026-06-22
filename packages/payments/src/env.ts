@@ -1,4 +1,4 @@
-import { createEnv } from '@t3-oss/env-core';
+import { defineEnv } from '@arki/env/core';
 
 import { z } from '@arki/contracts';
 
@@ -21,14 +21,8 @@ const optionalStripeKey = (prefix: string) =>
  * credentials** live here — app-specific configuration (e.g. which Stripe Price ID is "Pro")
  * belongs in the consuming app's own env, not the shared package.
  */
-export const env = createEnv({
-  onValidationError(issues) {
-    const message =
-      '❌ [@arki/payments] Invalid environment variables:\n' +
-      issues.map(i => `  ${(i.path ?? []).map(String).join('.')}: ${i.message}`).join('\n');
-    console.error(message);
-    throw new Error(message);
-  },
+export const env = defineEnv({
+  name: '@arki/payments',
   server: {
     /**
      * Stripe secret API key — `sk_test_…` in test mode, `sk_live_…` in production (restricted
@@ -53,14 +47,10 @@ export const env = createEnv({
   },
   client: {},
   clientPrefix: '',
-  /** Destructured so the vars aren't tree-shaken out of a bundled server. */
-  runtimeEnv: {
-    STRIPE_SECRET_KEY: process.env['STRIPE_SECRET_KEY'],
-    STRIPE_WEBHOOK_SECRET: process.env['STRIPE_WEBHOOK_SECRET'],
-    STRIPE_PUBLISHABLE_KEY: process.env['STRIPE_PUBLISHABLE_KEY'],
+  options: {
+    skipValidation:
+      !!process.env['CI'] ||
+      process.env['NODE_ENV'] === 'test' ||
+      process.env['npm_lifecycle_event'] === 'lint',
   },
-  skipValidation:
-    !!process.env['CI'] ||
-    process.env['NODE_ENV'] === 'test' ||
-    process.env['npm_lifecycle_event'] === 'lint',
 });

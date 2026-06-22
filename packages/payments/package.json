@@ -72,6 +72,7 @@
     "@arki/auth": "workspace:*",
     "@arki/contracts": "workspace:*",
     "@arki/db": "workspace:*",
+    "@arki/env": "workspace:*",
     "@arki/event-sourcing": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",

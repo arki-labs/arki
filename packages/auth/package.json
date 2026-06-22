@@ -56,6 +56,7 @@
     "@arki/contracts": "workspace:*",
     "@arki/db": "workspace:*",
     "@arki/emails": "workspace:*",
+    "@arki/env": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",
     "@auth/core": "catalog:",

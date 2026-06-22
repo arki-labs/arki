@@ -68,6 +68,7 @@
     "@ai-sdk/react": "catalog:ai",
     "@ai-sdk/ui-utils": "catalog:ai",
     "@arki/contracts": "workspace:*",
+    "@arki/env": "workspace:*",
     "@arki/log": "workspace:*",
     "@google/genai": "catalog:ai",
     "@openrouter/ai-sdk-provider": "catalog:ai",

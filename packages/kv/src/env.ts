@@ -1,8 +1,9 @@
-import { createEnv } from '@t3-oss/env-core';
+import { defineEnv } from '@arki/env/core';
 
 import { z } from '@arki/contracts';
 
-export const env = createEnv({
+export const env = defineEnv({
+  name: '@arki/kv',
   /**
    * Environment variables schema for key-value storage services (Redis/KV)
    */
@@ -42,27 +43,7 @@ export const env = createEnv({
   client: {},
   clientPrefix: '',
 
-  /**
-   * Destructure all variables from `process.env` to make sure they aren't tree-shaken away.
-   */
-  runtimeEnv: {
-    NODE_ENV: process.env['NODE_ENV'],
-    KV_URL: process.env['KV_URL'],
-    KV_NAMESPACE: process.env['KV_NAMESPACE'],
-    REDIS_HOST: process.env['REDIS_HOST'],
-    REDIS_PORT: process.env['REDIS_PORT'],
-    REDIS_USERNAME: process.env['REDIS_USERNAME'],
-    REDIS_PASSWORD: process.env['REDIS_PASSWORD'],
-    REDIS_DB: process.env['REDIS_DB'],
-    REDIS_TLS: process.env['REDIS_TLS'],
-    UPSTASH_REDIS_REST_URL: process.env['UPSTASH_REDIS_REST_URL'],
-    UPSTASH_REDIS_REST_TOKEN: process.env['UPSTASH_REDIS_REST_TOKEN'],
-    RATE_LIMIT_REDIS_URL: process.env['RATE_LIMIT_REDIS_URL'],
-    RATE_LIMIT_PREFIX: process.env['RATE_LIMIT_PREFIX'],
-    CACHE_TTL_DEFAULT: process.env['CACHE_TTL_DEFAULT'],
-    CACHE_TTL_LONG: process.env['CACHE_TTL_LONG'],
-    CACHE_TTL_SHORT: process.env['CACHE_TTL_SHORT'],
+  options: {
+    skipValidation: !!process.env['CI'] || process.env['NODE_ENV'] === 'test',
   },
-
-  skipValidation: !!process.env['CI'] || process.env['NODE_ENV'] === 'test',
 });

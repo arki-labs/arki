@@ -29,6 +29,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/contracts": "workspace:*",
+    "@arki/env": "workspace:*",
     "@aws-sdk/client-s3": "catalog:",
     "@aws-sdk/s3-request-presigner": "catalog:",
     "@flystorage/aws-s3": "catalog:",

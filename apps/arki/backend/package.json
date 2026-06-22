@@ -32,6 +32,7 @@
     "@arki/db": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/emails": "workspace:*",
+    "@arki/env": "workspace:*",
     "@arki/event-sourcing": "workspace:*",
     "@arki/fs": "workspace:*",
     "@arki/kv": "workspace:*",

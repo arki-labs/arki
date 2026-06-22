@@ -1,15 +1,9 @@
-import { createEnv } from '@t3-oss/env-core';
+import { defineEnv } from '@arki/env/core';
 
 import { z } from '@arki/contracts';
 
-export const env = createEnv({
-  onValidationError(issues) {
-    console.error(
-      '❌ [@arki/db] Invalid environment variables:\n' +
-        issues.map(i => `  ${(i.path ?? []).join('.')}: ${i.message}`).join('\n'),
-    );
-    throw new Error('Invalid environment variables');
-  },
+export const env = defineEnv({
+  name: '@arki/db',
   /**
    * Environment variables schema for database services (PostgreSQL)
    */
@@ -92,5 +86,8 @@ export const env = createEnv({
     DB_DROP_ON_START: process.env['DB_DROP_ON_START'],
   },
 
-  skipValidation: !!process.env['SKIP_ENV_VALIDATION'] || !!process.env['CI'] || process.env['NODE_ENV'] === 'test',
+  options: {
+    skipValidation:
+      !!process.env['SKIP_ENV_VALIDATION'] || !!process.env['CI'] || process.env['NODE_ENV'] === 'test',
+  },
 });

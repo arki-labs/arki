@@ -73,6 +73,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/contracts": "workspace:*",
+    "@arki/env": "workspace:*",
     "@arki/log": "workspace:*",
     "@keyv/redis": "catalog:backend",
     "@t3-oss/env-core": "catalog:env",

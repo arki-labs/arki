@@ -86,6 +86,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/contracts": "workspace:*",
+    "@arki/env": "workspace:*",
     "@arki/kv": "workspace:*",
     "@t3-oss/env-core": "catalog:env",
     "node-geocoder": "catalog:",

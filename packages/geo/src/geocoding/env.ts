@@ -1,7 +1,8 @@
-import { createEnv } from '@t3-oss/env-core';
+import { defineEnv } from '@arki/env/core';
 import { z } from 'zod';
 
-export const geocodingEnv = createEnv({
+export const geocodingEnv = defineEnv({
+  name: '@arki/geo',
   server: {
     // Primary provider configuration
     GEOCODING_PROVIDER: z
@@ -24,11 +25,12 @@ export const geocodingEnv = createEnv({
     GEOCODING_CACHE_TTL: z.coerce.number().default(2_592_000), // 30 days in seconds
     GEOCODING_CACHE_KEY_PREFIX: z.string().default('geo:'),
   },
-  runtimeEnv: process.env,
-  skipValidation:
-    !!process.env['CI'] ||
-    !!process.env['SKIP_ENV_VALIDATION'] ||
-    process.env['npm_lifecycle_event'] === 'lint',
+  options: {
+    skipValidation:
+      !!process.env['CI'] ||
+      !!process.env['SKIP_ENV_VALIDATION'] ||
+      process.env['npm_lifecycle_event'] === 'lint',
+  },
 });
 
 export type GeocodingEnv = typeof geocodingEnv;

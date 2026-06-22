@@ -1,11 +1,12 @@
-import { createEnv } from '@t3-oss/env-core';
+import { defineEnv } from '@arki/env/core';
 
 import { env as authEnv } from '@arki/auth/env';
 import { z } from '@arki/contracts';
 import { env as dbEnv } from '@arki/db/env';
 import { env as kvEnv } from '@arki/kv/env';
 
-export const env = createEnv({
+export const env = defineEnv({
+  name: '@arki/backend',
   extends: [authEnv, dbEnv, kvEnv],
   server: {
     FOREMAN_TOKEN: z.string().min(1).optional(),
@@ -17,6 +18,7 @@ export const env = createEnv({
       ),
     PRODUCTION_URL: z.url().default('https://arki.com').optional(),
   },
-  runtimeEnv: process.env,
-  skipValidation: !!process.env['CI'] || process.env['npm_lifecycle_event'] === 'lint',
+  options: {
+    skipValidation: !!process.env['CI'] || process.env['npm_lifecycle_event'] === 'lint',
+  },
 });

@@ -4,9 +4,10 @@
  */
 
 import { z } from '@arki/contracts';
-import { createEnv } from '@t3-oss/env-core';
+import { defineEnv } from '@arki/env/core';
 
-export const env = createEnv({
+export const env = defineEnv({
+  name: '@arki/ai',
   server: {
     // OpenAI
     OPENAI_API_KEY: z.string().optional(),
@@ -97,44 +98,7 @@ export const env = createEnv({
   },
   client: {},
   clientPrefix: '',
-  runtimeEnv: {
-    OPENAI_API_KEY: process.env['OPENAI_API_KEY'],
-    OPENAI_EMBEDDING_MODEL: process.env['OPENAI_EMBEDDING_MODEL'],
-    ANTHROPIC_API_KEY: process.env['ANTHROPIC_API_KEY'],
-    GROQ_API_KEY: process.env['GROQ_API_KEY'],
-    GOOGLE_GENERATIVE_AI_API_KEY: process.env['GOOGLE_GENERATIVE_AI_API_KEY'],
-    GOOGLE_API_KEYS: process.env['GOOGLE_API_KEYS'],
-    GOOGLE_EMBEDDING_MODEL: process.env['GOOGLE_EMBEDDING_MODEL'],
-    MISTRAL_API_KEY: process.env['MISTRAL_API_KEY'],
-    MISTRAL_EMBEDDING_MODEL: process.env['MISTRAL_EMBEDDING_MODEL'],
-    OPENROUTER_API_KEY: process.env['OPENROUTER_API_KEY'],
-    COHERE_API_KEY: process.env['COHERE_API_KEY'],
-    COHERE_EMBEDDING_MODEL: process.env['COHERE_EMBEDDING_MODEL'],
-    COHERE_RERANK_MODEL: process.env['COHERE_RERANK_MODEL'],
-    VOYAGE_API_KEY: process.env['VOYAGE_API_KEY'],
-    VOYAGE_EMBEDDING_MODEL: process.env['VOYAGE_EMBEDDING_MODEL'],
-    VOYAGE_RERANK_MODEL: process.env['VOYAGE_RERANK_MODEL'],
-    JINA_API_KEY: process.env['JINA_API_KEY'],
-    JINA_EMBEDDING_MODEL: process.env['JINA_EMBEDDING_MODEL'],
-    JINA_RERANK_MODEL: process.env['JINA_RERANK_MODEL'],
-    MXBAI_API_KEY: process.env['MXBAI_API_KEY'],
-    MXBAI_EMBEDDING_MODEL: process.env['MXBAI_EMBEDDING_MODEL'],
-    MXBAI_RERANK_MODEL: process.env['MXBAI_RERANK_MODEL'],
-    OLLAMA_BASE_URL: process.env['OLLAMA_BASE_URL'],
-    OLLAMA_EMBEDDING_MODEL: process.env['OLLAMA_EMBEDDING_MODEL'],
-    OPENAI_COMPATIBLE_BASE_URL: process.env['OPENAI_COMPATIBLE_BASE_URL'],
-    OPENAI_COMPATIBLE_API_KEY: process.env['OPENAI_COMPATIBLE_API_KEY'],
-    OPENAI_COMPATIBLE_MODEL: process.env['OPENAI_COMPATIBLE_MODEL'],
-    OPENAI_COMPATIBLE_DIMENSIONS: process.env['OPENAI_COMPATIBLE_DIMENSIONS'],
-    AWS_REGION: process.env['AWS_REGION'],
-    BEDROCK_EMBEDDING_MODEL: process.env['BEDROCK_EMBEDDING_MODEL'],
-    BEDROCK_RERANK_MODEL: process.env['BEDROCK_RERANK_MODEL'],
-    TRANSFORMERS_JS_MODEL: process.env['TRANSFORMERS_JS_MODEL'],
-    LLM_PROVIDER: process.env['LLM_PROVIDER'],
-    LLM_MODEL: process.env['LLM_MODEL'],
-    EMBEDDING_PROVIDER: process.env['EMBEDDING_PROVIDER'],
-    QDRANT_URL: process.env['QDRANT_URL'],
-    QDRANT_API_KEY: process.env['QDRANT_API_KEY'],
+  options: {
+    skipValidation: !!process.env['CI'] || process.env['NODE_ENV'] !== 'development',
   },
-  skipValidation: !!process.env['CI'] || process.env['NODE_ENV'] !== 'development',
 });
