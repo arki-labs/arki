@@ -15,6 +15,11 @@
       "import": "./src/core/index.ts",
       "node": "./src/core/index.ts"
     },
+    "./env": {
+      "types": "./dist/src/env.d.ts",
+      "import": "./src/env.ts",
+      "node": "./src/env.ts"
+    },
     "./dunning": {
       "types": "./dist/src/dunning/index.d.ts",
       "import": "./src/dunning/index.ts",
@@ -66,6 +71,7 @@
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",
     "@event-driven-io/emmett": "catalog:",
+    "@t3-oss/env-core": "catalog:env",
     "drizzle-orm": "catalog:drizzle",
     "stripe": "catalog:",
     "zod": "catalog:"

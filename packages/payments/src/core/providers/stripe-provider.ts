@@ -373,6 +373,56 @@ export class StripeProvider extends BasePaymentProvider {
     return { url: session.url };
   }
 
+  /**
+   * Create a Stripe Checkout Session for a subscription — the modern hosted subscribe flow.
+   *
+   * This is the path that actually starts a paid subscription: Stripe hosts the payment page and
+   * handles card entry, SCA/3DS, the free trial, tax, and promo codes, then emits
+   * `customer.subscription.*` webhooks that the billing preset projects into the `subscriptions`
+   * table. We deliberately use Checkout rather than the raw `subscriptions.create` API so we never
+   * touch card data (no PCI scope) and get trials + Stripe Tax for free.
+   */
+  async createCheckoutSession(params: {
+    /** Stripe Price ID for the plan being subscribed to. */
+    priceId: string;
+    successUrl: string;
+    cancelUrl: string;
+    /** Free-trial length; omit for no trial. */
+    trialPeriodDays?: number;
+    /** Existing Stripe customer to attach the subscription to, if we already created one. */
+    providerCustomerId?: string;
+    /** Used only when no `providerCustomerId` — Stripe links/creates a customer by email. */
+    customerEmail?: string;
+    /** Our internal user id, echoed onto the session + subscription for webhook correlation. */
+    clientReferenceId?: string;
+    metadata?: Record<string, string>;
+    /** Enable Stripe Tax (must be configured on the account) so EU VAT is calculated at checkout. */
+    automaticTax?: boolean;
+  }): Promise<{ url: string; sessionId: string }> {
+    const session = await this.stripe.checkout.sessions.create({
+      mode: 'subscription',
+      line_items: [{ price: params.priceId, quantity: 1 }],
+      // `customer` and `customer_email` are mutually exclusive in Checkout.
+      customer: params.providerCustomerId,
+      customer_email: params.providerCustomerId ? undefined : params.customerEmail,
+      client_reference_id: params.clientReferenceId,
+      success_url: params.successUrl,
+      cancel_url: params.cancelUrl,
+      allow_promotion_codes: true,
+      ...(params.automaticTax ? { automatic_tax: { enabled: true } } : {}),
+      subscription_data: {
+        ...(params.trialPeriodDays ? { trial_period_days: params.trialPeriodDays } : {}),
+        ...(params.metadata ? { metadata: params.metadata } : {}),
+      },
+      metadata: params.metadata,
+    });
+
+    if (!session.url) {
+      throw new Error('Stripe Checkout did not return a session URL');
+    }
+    return { url: session.url, sessionId: session.id };
+  }
+
   // Tax-related methods
   async calculateTax(params: {
     customerId: CustomerId;
