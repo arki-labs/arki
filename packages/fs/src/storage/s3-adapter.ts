@@ -4,33 +4,54 @@
  * Implements storage using AWS S3 (or compatible services)
  */
 
-import { S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl as presign } from '@aws-sdk/s3-request-presigner';
 import { AwsS3StorageAdapter } from '@flystorage/aws-s3';
 import { FileStorage } from '@flystorage/file-storage';
 import { env } from '../env';
-import type { S3StorageConfig, StorageAdapter, StoredFile, StoreOptions } from './types';
+import type {
+  S3StorageConfig,
+  SignedUrlOptions,
+  StorageAdapter,
+  StoredFile,
+  StoredFileMetadata,
+  StoreOptions,
+} from './types';
+
+function isNotFoundError(error: unknown): boolean {
+  if (error && typeof error === 'object' && 'name' in error) {
+    const name = (error as { name: string }).name;
+    return name === 'NotFound' || name === 'NoSuchKey';
+  }
+  return false;
+}
 
 export class S3StorageAdapter implements StorageAdapter {
   private storage: FileStorage;
   private config: S3StorageConfig;
+  private client: S3Client;
 
   constructor(config: S3StorageConfig) {
     this.config = config;
 
-    const client = new S3Client({
+    const accessKeyId = config.accessKeyId ?? env.AWS_ACCESS_KEY_ID;
+    const secretAccessKey = config.secretAccessKey ?? env.AWS_SECRET_ACCESS_KEY;
+    const endpoint = config.endpoint ?? env.AWS_ENDPOINT_URL;
+
+    this.client = new S3Client({
       region: config.region ?? env.AWS_REGION,
       credentials:
-        env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY
+        accessKeyId && secretAccessKey
           ? {
-              accessKeyId: env.AWS_ACCESS_KEY_ID,
-              secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+              accessKeyId,
+              secretAccessKey,
               ...(env.AWS_SESSION_TOKEN && { sessionToken: env.AWS_SESSION_TOKEN }),
             }
           : undefined,
-      ...(env.AWS_ENDPOINT_URL && { endpoint: env.AWS_ENDPOINT_URL }),
+      ...(endpoint && { endpoint }),
     });
 
-    const adapter = new AwsS3StorageAdapter(client, {
+    const adapter = new AwsS3StorageAdapter(this.client, {
       bucket: config.bucket,
       prefix: config.prefix ?? '',
       region: config.region ?? env.AWS_REGION,
@@ -45,6 +66,8 @@ export class S3StorageAdapter implements StorageAdapter {
     await this.storage.write(fullKey, data, {
       mimeType: options?.contentType,
       metadata: options?.metadata,
+      cacheControl: options?.cacheControl,
+      visibility: options?.visibility,
     });
 
     // Get file size
@@ -114,6 +137,46 @@ export class S3StorageAdapter implements StorageAdapter {
 
   getUrl(key: string): string {
     return `${this.config.baseUrl}/${key}`;
+  }
+
+  async getSignedUrl(key: string, options?: SignedUrlOptions): Promise<string> {
+    const Key = this.getFullKey(key);
+    const expiresIn = options?.expiresIn ?? 3600;
+
+    if (options?.operation === 'put') {
+      const command = new PutObjectCommand({ Bucket: this.config.bucket, Key });
+      return presign(this.client, command, { expiresIn });
+    }
+
+    const command = new GetObjectCommand({
+      Bucket: this.config.bucket,
+      Key,
+      ResponseContentDisposition: options?.disposition
+        ? `${options.disposition}${options.filename ? `; filename="${options.filename}"` : ''}`
+        : undefined,
+    });
+    return presign(this.client, command, { expiresIn });
+  }
+
+  async getMetadata(key: string): Promise<StoredFileMetadata | null> {
+    try {
+      const response = await this.client.send(
+        new HeadObjectCommand({ Bucket: this.config.bucket, Key: this.getFullKey(key) }),
+      );
+
+      return {
+        key,
+        size: response.ContentLength ?? 0,
+        contentType: response.ContentType ?? 'application/octet-stream',
+        lastModified: response.LastModified ?? new Date(),
+        etag: response.ETag ?? '',
+      };
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   async list(prefix: string): Promise<string[]> {

@@ -7,7 +7,26 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { glob } from '../local/glob';
-import type { LocalStorageConfig, StorageAdapter, StoredFile, StoreOptions } from './types';
+import type {
+  LocalStorageConfig,
+  SignedUrlOptions,
+  StorageAdapter,
+  StoredFile,
+  StoredFileMetadata,
+  StoreOptions,
+} from './types';
+
+const CONTENT_TYPE_BY_EXT: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.json': 'application/json',
+  '.txt': 'text/plain',
+  '.pdf': 'application/pdf',
+};
 
 export class LocalStorageAdapter implements StorageAdapter {
   constructor(private config: LocalStorageConfig) {}
@@ -73,6 +92,30 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   getUrl(key: string): string {
     return `${this.config.baseUrl}/${key}`;
+  }
+
+  // Local storage has no signing concept; the public URL is returned as-is.
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getSignedUrl(key: string, _options?: SignedUrlOptions): Promise<string> {
+    return this.getUrl(key);
+  }
+
+  async getMetadata(key: string): Promise<StoredFileMetadata | null> {
+    try {
+      const stats = await fs.stat(this.getFilePath(key));
+      return {
+        key,
+        size: stats.size,
+        contentType: CONTENT_TYPE_BY_EXT[path.extname(key).toLowerCase()] ?? 'application/octet-stream',
+        lastModified: stats.mtime,
+        etag: '',
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    }
   }
 
   async list(prefix: string): Promise<string[]> {

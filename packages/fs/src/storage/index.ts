@@ -8,6 +8,12 @@ import { createLocalStorageAdapter } from './local-adapter';
 import { createS3StorageAdapter } from './s3-adapter';
 import type { StorageAdapter, StorageConfig } from './types';
 
+export { createLocalStorageAdapter } from './local-adapter';
+export { createS3StorageAdapter } from './s3-adapter';
+export { createR2Storage } from './r2';
+export type { R2StorageConfig } from './r2';
+export type * from './types';
+
 /**
  * Create a storage instance based on the provided configuration
  *
