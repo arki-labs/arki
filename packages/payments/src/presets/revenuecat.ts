@@ -1,3 +1,5 @@
+import { timingSafeEqual } from 'node:crypto';
+
 import { z } from '@arki/contracts';
 
 import type { UserId } from '@arki/auth/ids';
@@ -49,11 +51,17 @@ export type RevenueCatEvent = RevenueCatWebhook['event'];
 
 /**
  * Verify a RevenueCat webhook. RevenueCat sends the exact `Authorization` header value you configure
- * on the webhook in its dashboard — so this is a shared-secret equality check (there is no HMAC
- * signature like Stripe's). Returns false on any mismatch or when no secret is configured.
+ * on the webhook in its dashboard — so this is a shared-secret comparison (there is no HMAC signature
+ * like Stripe's). Uses a constant-time compare so the secret can't be recovered via response timing.
+ * Returns false on any mismatch or when no secret is configured.
  */
 export function verifyRevenueCatAuth(authHeader: string | null, expectedSecret: string): boolean {
-  return expectedSecret.length > 0 && authHeader === expectedSecret;
+  if (expectedSecret.length === 0 || authHeader === null) return false;
+  const provided = Buffer.from(authHeader);
+  const expected = Buffer.from(expectedSecret);
+  // Lengths must match for timingSafeEqual (it throws otherwise) — the standard guard before compare.
+  if (provided.length !== expected.length) return false;
+  return timingSafeEqual(provided, expected);
 }
 
 /**
