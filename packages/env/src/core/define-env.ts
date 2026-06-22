@@ -67,7 +67,11 @@ export function defineEnv<
   runtimeEnv?: Record<string, string | boolean | number | undefined>;
   options?: {
     skipValidation?: boolean;
-    /** Treat empty-string env values as `undefined` so defaults apply (e.g. `PORT=` in `.env`). */
+    /**
+     * Treat empty-string env values as `undefined` so defaults apply (e.g. `PORT=` in `.env`, or a
+     * Docker arg baked as `X=""`). Defaults to `true` — set `false` only if an app intentionally
+     * accepts `""` as a valid required string.
+     */
     emptyStringAsUndefined?: boolean;
     onValidationError?: (issues: ValidationIssues) => never;
   };
@@ -116,7 +120,10 @@ export function defineEnv<
     clientPrefix: config.clientPrefix ?? '',
     runtimeEnv,
     skipValidation,
-    emptyStringAsUndefined: config.options?.emptyStringAsUndefined,
+    // Default ON: in containerized deploys an unset var is baked as "" (e.g. Docker `ENV X=${X}`
+    // with no build arg), not left absent. Treating "" as undefined lets `.default()`/`.optional()`
+    // apply as intended instead of failing format checks like `z.url()` on an empty string.
+    emptyStringAsUndefined: config.options?.emptyStringAsUndefined ?? true,
     onValidationError,
   } satisfies Record<string, unknown>;
 
