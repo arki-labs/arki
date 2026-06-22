@@ -1,5 +1,9 @@
 import type Stripe from 'stripe';
 
+import type { UserId } from '@arki/auth/ids';
+
+import { subscriptionStatusValues } from '../core/primitives';
+import type { StripeProvider } from '../core/providers/stripe-provider';
 import type { PaymentRepository } from '../core/repository';
 import type { NewSubscription, PlanId, SubscriptionStatus } from '../core/types';
 
@@ -64,4 +68,185 @@ export async function projectStripeSubscription(params: {
   } else {
     await repo.createSubscription(fields);
   }
+}
+
+/* ── status mapping ─────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Stripe's subscription status strings are identical to our `SubscriptionStatus` enum (the enum
+ * was modeled on them), so the "mapping" is a validated identity: confirm the incoming string is
+ * one we model, else throw loudly rather than silently coercing an unknown status into a default.
+ */
+const SUBSCRIPTION_STATUSES: readonly string[] = subscriptionStatusValues;
+
+function isSubscriptionStatus(value: string): value is SubscriptionStatus {
+  return SUBSCRIPTION_STATUSES.includes(value);
+}
+
+function toSubscriptionStatus(stripeStatus: string): SubscriptionStatus {
+  if (isSubscriptionStatus(stripeStatus)) return stripeStatus;
+  throw new Error(`[@arki/payments] unmapped Stripe subscription status: "${stripeStatus}"`);
+}
+
+/* ── entitlement ────────────────────────────────────────────────────────────────────────────── */
+
+/** What the app asks for: is this user Pro, and if so, the period/trial/cancel facts behind it. */
+export type Entitlement =
+  | { tier: 'free' }
+  | {
+      tier: 'pro';
+      status: SubscriptionStatus;
+      /** End of the current paid-or-trial period — when Pro renews or lapses. */
+      renews: Date;
+      /** Canceled but retains Pro until `renews`. */
+      cancelAtPeriodEnd: boolean;
+      /** Trial end if this subscription has/had a trial; null otherwise. */
+      trialEnd: Date | null;
+    };
+
+/**
+ * Statuses that grant Pro access. **`trialing` is included on purpose** — Stripe marks a
+ * free-trial subscription `trialing`, not `active`, so omitting it would lock users out of Pro
+ * during the exact trial window meant to sell them on it. `past_due` is deliberately excluded:
+ * granting access through a dunning/retry window is a separate policy decision, not the default.
+ */
+const PRO_GRANTING_STATUSES: ReadonlySet<SubscriptionStatus> = new Set<SubscriptionStatus>([
+  'active',
+  'trialing',
+]);
+
+/**
+ * Read a user's current entitlement straight from our own `subscriptions` table — the single
+ * source of truth. Both rails (web Stripe webhooks, native RevenueCat webhooks) project into this
+ * table, so this one read answers "is Pro?" regardless of where the purchase happened.
+ */
+export async function getEntitlement(
+  repo: PaymentRepository,
+  userId: UserId,
+): Promise<Entitlement> {
+  const subscriptions = await repo.findSubscriptionsByUserId(userId);
+  // findSubscriptionsByUserId returns newest-first; the first granting row is the live one.
+  const granting = subscriptions.find((s) => PRO_GRANTING_STATUSES.has(s.status));
+  if (!granting) return { tier: 'free' };
+  return {
+    tier: 'pro',
+    status: granting.status,
+    renews: granting.currentPeriodEnd,
+    cancelAtPeriodEnd: granting.cancelAtPeriodEnd,
+    trialEnd: granting.trialEnd,
+  };
+}
+
+/* ── billing preset ─────────────────────────────────────────────────────────────────────────── */
+
+/** A Stripe price wired to the local plan row it represents (monthly + yearly can share a plan). */
+export type PriceToPlan = { priceId: string; planId: PlanId };
+
+export type SubscriptionBillingConfig = {
+  provider: StripeProvider;
+  repo: PaymentRepository;
+  /** Every price the app sells, each mapped to its local plan row. */
+  prices: readonly PriceToPlan[];
+  /** Where Checkout sends the browser back to. */
+  urls: { success: string; cancel: string };
+  /** Free-trial length applied to new subscriptions; omit for no trial. */
+  trialDays?: number;
+  /** Enable Stripe Tax at checkout (EU VAT). Requires Stripe Tax configured on the account. */
+  automaticTax?: boolean;
+};
+
+export type SubscriptionBilling = {
+  /** Start a hosted Checkout subscribe flow; returns the URL to redirect the browser to. */
+  createCheckoutSession(params: {
+    userId: UserId;
+    email: string;
+    priceId: string;
+  }): Promise<{ url: string; sessionId: string }>;
+  /** Verify + project a Stripe webhook. Throws on a bad signature (map to HTTP 400). */
+  handleWebhook(
+    payload: string | Buffer,
+    signature: string,
+  ): Promise<{ handled: boolean; type: string }>;
+  /** Current Pro/free entitlement for a user, read from our table. */
+  getEntitlement(userId: UserId): Promise<Entitlement>;
+};
+
+/**
+ * The high-level subscription-billing preset: the whole web Stripe flow — checkout, webhook
+ * projection, entitlement — behind three methods, so a consuming app wires routes instead of
+ * re-implementing the Stripe dance.
+ *
+ * Customers are found-or-created at checkout: the `subscriptions` table's `customerId`/`planId`
+ * are NOT NULL, so a local customer row must exist *before* the subscription webhook arrives (the
+ * projection resolves the owning user via the Stripe customer id).
+ */
+export function createSubscriptionBilling(config: SubscriptionBillingConfig): SubscriptionBilling {
+  const { provider, repo, urls, trialDays, automaticTax } = config;
+  const planByPrice = new Map(config.prices.map((p) => [p.priceId, p.planId]));
+
+  return {
+    async createCheckoutSession({ userId, email, priceId }) {
+      if (!planByPrice.has(priceId)) {
+        throw new Error(`[@arki/payments] cannot checkout: price "${priceId}" is not configured`);
+      }
+
+      // Find-or-create the local customer so the subscription webhook can attribute the row to a
+      // user. `provider.createCustomer` also creates the Stripe-side customer.
+      let customer = await repo.findCustomerByUserId(userId);
+      if (!customer) {
+        const created = await provider.createCustomer({ userId, email });
+        customer = await repo.createCustomer(created);
+      }
+
+      return provider.createCheckoutSession({
+        priceId,
+        providerCustomerId: customer.providerCustomerId,
+        successUrl: urls.success,
+        cancelUrl: urls.cancel,
+        trialPeriodDays: trialDays,
+        clientReferenceId: userId,
+        metadata: { userId },
+        automaticTax,
+      });
+    },
+
+    async handleWebhook(payload, signature) {
+      const event = provider.constructWebhookEvent(payload, signature);
+
+      if (
+        event.type === 'customer.subscription.created' ||
+        event.type === 'customer.subscription.updated' ||
+        event.type === 'customer.subscription.deleted'
+      ) {
+        // Narrowed by Stripe's discriminated `Event` union — `data.object` is a
+        // `Stripe.Subscription` here with no cast.
+        const subscription = event.data.object;
+        const priceId = subscription.items.data[0]?.price.id;
+        if (!priceId) {
+          throw new Error(
+            `[@arki/payments] subscription ${subscription.id}: first line item has no price`,
+          );
+        }
+        const planId = planByPrice.get(priceId);
+        if (!planId) {
+          throw new Error(
+            `[@arki/payments] subscription ${subscription.id}: price "${priceId}" is not a configured plan`,
+          );
+        }
+        await projectStripeSubscription({
+          repo,
+          subscription,
+          planId,
+          mapStatus: toSubscriptionStatus,
+        });
+        return { handled: true, type: event.type };
+      }
+
+      return { handled: false, type: event.type };
+    },
+
+    getEntitlement(userId) {
+      return getEntitlement(repo, userId);
+    },
+  };
 }

@@ -15,6 +15,11 @@
       "import": "./src/core/index.ts",
       "node": "./src/core/index.ts"
     },
+    "./presets": {
+      "types": "./dist/src/presets/index.d.ts",
+      "import": "./src/presets/index.ts",
+      "node": "./src/presets/index.ts"
+    },
     "./env": {
       "types": "./dist/src/env.d.ts",
       "import": "./src/env.ts",

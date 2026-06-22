@@ -340,6 +340,19 @@ export class StripeProvider extends BasePaymentProvider {
     }
   }
 
+  /**
+   * Verify a webhook signature and return the **typed** Stripe event.
+   *
+   * `validateWebhook` (the provider-agnostic interface method) erases the event payload to
+   * `Record<string, unknown>`. The subscription billing preset instead needs the discriminated
+   * `Stripe.Event` so it can narrow on `event.type` and read `event.data.object` as a
+   * `Stripe.Subscription` with no unsafe cast. Throws `StripeSignatureVerificationError` on a bad
+   * signature — a webhook route should map that to HTTP 400.
+   */
+  constructWebhookEvent(payload: string | Buffer, signature: string): Stripe.Event {
+    return this.stripe.webhooks.constructEvent(payload, signature, this.config.webhookSecret);
+  }
+
   async createSetupIntent(_customerId: CustomerId): Promise<{
     clientSecret: string;
     setupIntentId: string;
