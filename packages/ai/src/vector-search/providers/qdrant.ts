@@ -3,12 +3,41 @@
  * Production-ready implementation with advanced features
  */
 
+import { createHash } from 'node:crypto';
+
 import type { QdrantClient, Schemas as QdrantSchemas } from '@qdrant/js-client-rest';
 
 import { debugVector } from '../../debug.ts';
 import type { EmbeddingProvider, VectorSearchProvider, VectorSearchResult } from '../../types';
 import { VectorSearchError, getErrorMessage } from '../../errors';
 import { TransactionManager } from '../../utils/transaction-manager';
+
+/**
+ * Qdrant only accepts point IDs that are an unsigned integer or a UUID. Callers, however, use
+ * arbitrary application IDs (e.g. prefixed IDs like `ps_ab12…`). Passing those straight through
+ * yields a silent `400 Bad Request` on upsert. We therefore normalize any non-int/non-UUID ID to a
+ * deterministic UUIDv5-style value (stable across runs, so re-indexing overwrites rather than
+ * duplicates) and stash the original under `SOURCE_ID_KEY` so reads return the caller's ID verbatim.
+ */
+const SOURCE_ID_KEY = '_sourceId';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function toPointId(id: string | number): string | number {
+  if (typeof id === 'number') return id;
+  if (/^\d+$/.test(id)) return Number(id);
+  if (UUID_RE.test(id)) return id;
+  // Deterministic UUIDv5-style derivation: SHA-1 the ID, then force the version (5) and RFC-4122
+  // variant nibbles into a well-formed UUID string. Qdrant validates the format, not v5 semantics.
+  const h = createHash('sha1').update(id).digest('hex'); // 40 hex chars
+  const variant = ((Number.parseInt(h.slice(16, 17), 16) & 0x3) | 0x8).toString(16);
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+/** Read the caller's original ID back from a Qdrant point (falling back to the point ID itself). */
+function sourceId(point: { id: string | number; payload?: Record<string, unknown> | null }): string {
+  const original = point.payload?.[SOURCE_ID_KEY];
+  return typeof original === 'string' ? original : String(point.id);
+}
 
 export type QdrantConfig = {
   url: string;
@@ -139,11 +168,12 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
 
     // Prepare point for indexing
     const point: QdrantSchemas['PointStruct'] = {
-      id,
+      id: toPointId(id),
       vector,
       payload: {
         text: text.slice(0, 1000), // Store preview of text
         ...metadata,
+        [SOURCE_ID_KEY]: id,
         indexedAt: new Date().toISOString(),
       },
     };
@@ -180,11 +210,12 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
 
       // Prepare points for batch indexing
       const points: QdrantSchemas['PointStruct'][] = documents.map((doc, i) => ({
-        id: doc.id,
+        id: toPointId(doc.id),
         vector: embeddings[i]!,
         payload: {
           text: doc.text.slice(0, 1000),
           ...doc.metadata,
+          [SOURCE_ID_KEY]: doc.id,
           indexedAt: new Date().toISOString(),
         },
       }));
@@ -273,7 +304,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
 
     // Transform results
     return searchResult.map((result) => ({
-      id: result.id as string,
+      id: sourceId(result),
       score: result.score,
       metadata: result.payload as TMetadata,
     }));
@@ -328,7 +359,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
       const combinedScore = semanticScore * (1 - keywordWeight) + keywordScore * keywordWeight;
 
       return {
-        id: result.id as string,
+        id: sourceId(result),
         score: combinedScore,
         metadata: result.payload as TMetadata,
       };
@@ -348,7 +379,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     const client = await this.getClient();
 
     await client.delete(this.collectionName, {
-      points: [id],
+      points: [toPointId(id)],
       wait: true,
     });
     debugVector('[Qdrant] Document deleted successfully: %s', id);
@@ -359,7 +390,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     const client = await this.getClient();
 
     await client.delete(this.collectionName, {
-      points: ids,
+      points: ids.map((id) => toPointId(id)),
       wait: true,
     });
     debugVector('[Qdrant] Batch deletion completed (count: %d)', ids.length);
@@ -486,7 +517,7 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
 
     try {
       const points = await client.retrieve(this.collectionName, {
-        ids: [id],
+        ids: [toPointId(id)],
         with_payload: true,
         with_vector: false,
       });
