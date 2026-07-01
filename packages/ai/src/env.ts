@@ -52,9 +52,12 @@ export const env = defineEnv({
     MXBAI_EMBEDDING_MODEL: z.string().default('mixedbread-ai/mxbai-embed-large-v1'),
     MXBAI_RERANK_MODEL: z.string().default('mixedbread-ai/mxbai-rerank-large-v1'),
 
-    // Ollama (local-first; preferred per workspace operating rules)
-    OLLAMA_BASE_URL: z.string().default('http://127.0.0.1:11434/api'),
-    OLLAMA_EMBEDDING_MODEL: z.string().default('nomic-embed-text'),
+    // Ollama (local-first; preferred per workspace operating rules).
+    // Default model: qwen3-embedding:0.6b — Apache 2.0, 1024-d, MTEB-Eng ~65 /
+    // MMTEB ~64. Bump to qwen3-embedding:4b (~8 GB VRAM, MMTEB ~69) or
+    // qwen3-embedding:8b (~16 GB VRAM, MMTEB 70.58 leader) when hardware allows.
+    OLLAMA_BASE_URL: z.string().default('http://127.0.0.1:11434'),
+    OLLAMA_EMBEDDING_MODEL: z.string().default('qwen3-embedding:0.6b'),
 
     // OpenAI-compatible (TEI, vLLM, SGLang, Groq, Anyscale, self-host)
     OPENAI_COMPATIBLE_BASE_URL: z.string().optional(),
