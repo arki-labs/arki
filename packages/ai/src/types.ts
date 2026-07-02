@@ -64,6 +64,25 @@ export type VectorSearchProvider<TMetadata = Record<string, unknown>> = {
   ): Promise<VectorSearchResult<TMetadata>[]>;
 
   /**
+   * Upsert a document by a PRECOMPUTED vector (no re-embedding).
+   * Use when the caller already holds the embedding (e.g. a batch cron that
+   * computes vectors once) or when the vector has no source text (e.g. a
+   * cluster centroid). Contrast with `indexDocument`, which embeds `text`.
+   */
+  upsertVector(id: string, vector: number[], metadata?: TMetadata): Promise<void>;
+
+  /**
+   * Search by a PRECOMPUTED query vector (no re-embedding).
+   * `filter` is a provider-agnostic payload filter (e.g. `{ userId, kind }`).
+   * Contrast with `searchSimilar`, which embeds the `query` string.
+   */
+  searchByVector(
+    vector: number[],
+    limit?: number,
+    filter?: Record<string, unknown>
+  ): Promise<VectorSearchResult<TMetadata>[]>;
+
+  /**
    * Delete a document from the index
    */
   deleteDocument(id: string): Promise<void>;

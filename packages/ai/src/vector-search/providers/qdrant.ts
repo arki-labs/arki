@@ -45,6 +45,19 @@ export type QdrantConfig = {
   collectionName: string;
   vectorSize?: number;
   createCollectionIfNotExists?: boolean;
+  /**
+   * Collection replication factor. Requires a Qdrant cluster with at least this
+   * many nodes; single-node deployments MUST leave this at 1 (the default) or
+   * collection creation degrades. Overridable per-deployment.
+   */
+  replicationFactor?: number;
+  /**
+   * Payload fields to create a `keyword` index on when the collection is
+   * ensured. Filtering on an unindexed payload field forces a full scan, so any
+   * field used in a `searchByVector` / `searchSimilar` filter belongs here
+   * (e.g. `['userId', 'kind']`). Idempotent — re-asserted on every startup.
+   */
+  payloadIndexes?: string[];
 }
 
 export type QdrantSearchFilter = {
@@ -74,6 +87,8 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
   private vectorSize: number;
   private embeddingProvider: EmbeddingProvider;
   private createIfNotExists: boolean;
+  private replicationFactor: number;
+  private payloadIndexes: string[];
 
   constructor(
     private config: QdrantConfig,
@@ -83,6 +98,8 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     this.vectorSize = config.vectorSize || embeddingProvider.getDimensions?.() || 1536;
     this.embeddingProvider = embeddingProvider;
     this.createIfNotExists = config.createCollectionIfNotExists !== false;
+    this.replicationFactor = config.replicationFactor ?? 1;
+    this.payloadIndexes = config.payloadIndexes ?? [];
 
     debugVector(
       '[Qdrant] Provider initialized (collection: %s, vectorSize: %d, autoCreate: %s, url: %s)',
@@ -141,29 +158,77 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
 
       if (exists) {
         debugVector('[Qdrant] Collection already exists: %s', this.collectionName);
+        // Fail loud on a dimension mismatch: a collection created for a
+        // different embedding model would silently reject every upsert/query.
+        await this.assertVectorSize();
       } else {
-        debugVector('[Qdrant] Collection does not exist, creating: %s (vectorSize: %d)', this.collectionName, this.vectorSize);
-        // Create collection with optimized settings for semantic search
-        await this.client.createCollection(this.collectionName, {
-          vectors: {
-            size: this.vectorSize,
-            distance: 'Cosine', // Best for normalized embeddings
-          },
-          optimizers_config: {
-            default_segment_number: 2,
-            indexing_threshold: 20_000,
-          },
-          replication_factor: 2,
-          write_consistency_factor: 1,
-        });
-        debugVector('[Qdrant] Collection created successfully: %s', this.collectionName);
+        debugVector('[Qdrant] Collection does not exist, creating: %s (vectorSize: %d, replication: %d)', this.collectionName, this.vectorSize, this.replicationFactor);
+        try {
+          // Create collection with optimized settings for semantic search
+          await this.client.createCollection(this.collectionName, {
+            vectors: {
+              size: this.vectorSize,
+              distance: 'Cosine', // Best for normalized embeddings
+            },
+            optimizers_config: {
+              default_segment_number: 2,
+              indexing_threshold: 20_000,
+            },
+            replication_factor: this.replicationFactor,
+            write_consistency_factor: 1,
+          });
+          debugVector('[Qdrant] Collection created successfully: %s', this.collectionName);
+        } catch (error) {
+          // Concurrent cold starts race on create — a lost race ("already
+          // exists") is benign; anything else is a real failure.
+          if (!/already exists/i.test(getErrorMessage(error))) throw error;
+          debugVector('[Qdrant] Create raced with a concurrent start (already exists): %s', this.collectionName);
+        }
       }
+
+      // Idempotent on EVERY path — a collection that pre-existed this process
+      // (or was created by a racing start) still needs its payload indexes.
+      await this.ensurePayloadIndexes();
     } catch (error) {
       debugVector('[Qdrant] Failed to ensure collection: %s', getErrorMessage(error));
       throw new VectorSearchError(
         `Failed to ensure QDrant collection: ${getErrorMessage(error)}`,
         error
       );
+    }
+  }
+
+  /** Fail loud when an existing collection's vector size differs from config. */
+  private async assertVectorSize(): Promise<void> {
+    if (!this.client) return;
+    const info = await this.client.getCollection(this.collectionName);
+    // Single unnamed vector config: params.vectors.size.
+    const vectors = info.config?.params?.vectors as { size?: number } | undefined;
+    const existing = typeof vectors?.size === 'number' ? vectors.size : undefined;
+    if (existing !== undefined && existing !== this.vectorSize) {
+      throw new VectorSearchError(
+        `Qdrant collection "${this.collectionName}" has vectorSize ${existing}, but this provider is configured for ${this.vectorSize}. ` +
+          `A model/dimension change requires a fresh collection + re-embed — refusing to read/write a mismatched collection.`,
+      );
+    }
+  }
+
+  /** Create keyword payload indexes for every configured field. Idempotent. */
+  private async ensurePayloadIndexes(): Promise<void> {
+    if (!this.client || this.payloadIndexes.length === 0) return;
+    for (const field of this.payloadIndexes) {
+      try {
+        await this.client.createPayloadIndex(this.collectionName, {
+          field_name: field,
+          field_schema: 'keyword',
+          wait: true,
+        });
+        debugVector('[Qdrant] Payload index ensured: %s.%s', this.collectionName, field);
+      } catch (error) {
+        // Re-asserting an existing index is a no-op we tolerate.
+        if (!/already exists/i.test(getErrorMessage(error))) throw error;
+        debugVector('[Qdrant] Payload index already present: %s.%s', this.collectionName, field);
+      }
     }
   }
 
@@ -316,6 +381,68 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     debugVector('[Qdrant] Search completed (results: %d)', searchResult.length);
 
     // Transform results
+    return searchResult.map((result) => ({
+      id: sourceId(result),
+      score: result.score,
+      metadata: result.payload as TMetadata,
+    }));
+  }
+
+  async upsertVector(id: string, vector: number[], metadata?: TMetadata): Promise<void> {
+    if (vector.length !== this.vectorSize) {
+      throw new VectorSearchError(
+        `upsertVector dimension mismatch for "${id}": got ${vector.length}, collection is ${this.vectorSize}.`,
+      );
+    }
+    debugVector('[Qdrant] Upserting precomputed vector (id: %s, dims: %d)', id, vector.length);
+    const client = await this.getClient();
+
+    const point: QdrantSchemas['PointStruct'] = {
+      id: toPointId(id),
+      vector,
+      payload: {
+        ...metadata,
+        [SOURCE_ID_KEY]: id,
+        indexedAt: new Date().toISOString(),
+      },
+    };
+    await client.upsert(this.collectionName, { points: [point], wait: true });
+    debugVector('[Qdrant] Vector upserted successfully: %s', id);
+  }
+
+  async searchByVector(
+    vector: number[],
+    limit = 10,
+    filter?: Record<string, unknown>,
+  ): Promise<VectorSearchResult<TMetadata>[]> {
+    if (vector.length !== this.vectorSize) {
+      throw new VectorSearchError(
+        `searchByVector dimension mismatch: got ${vector.length}, collection is ${this.vectorSize}.`,
+      );
+    }
+    debugVector('[Qdrant] Searching by precomputed vector (dims: %d, limit: %d, hasFilter: %s)', vector.length, limit, !!filter);
+    const client = await this.getClient();
+
+    // A plain `{ userId, kind }` filter maps to one `must` match-clause per key.
+    const qdrantFilter =
+      filter && Object.keys(filter).length > 0
+        ? this.buildQdrantFilter({
+            must: Object.entries(filter).map(([key, value]) => ({
+              key,
+              match: value as string | number | boolean | Record<string, unknown>,
+            })),
+          })
+        : undefined;
+
+    const searchResult = await client.search(this.collectionName, {
+      vector,
+      limit,
+      filter: qdrantFilter,
+      with_payload: true,
+      score_threshold: 0, // caller filters by score
+    });
+
+    debugVector('[Qdrant] searchByVector completed (results: %d)', searchResult.length);
     return searchResult.map((result) => ({
       id: sourceId(result),
       score: result.score,

@@ -71,6 +71,40 @@ export class MockVectorProvider<TMetadata = Record<string, unknown>> implements 
       .slice(0, limit);
   }
 
+  async upsertVector(id: string, vector: number[], metadata?: TMetadata): Promise<void> {
+    // No source text on the vector-in path (e.g. a centroid) — store empty text.
+    this.documents.set(id, { id, text: '', embedding: vector, metadata });
+  }
+
+  async searchByVector(
+    vector: number[],
+    limit = 10,
+    filter?: Record<string, unknown>,
+  ): Promise<VectorSearchResult<TMetadata>[]> {
+    const results: VectorSearchResult<TMetadata>[] = [];
+
+    for (const doc of this.documents.values()) {
+      if (!doc.embedding) continue;
+      // Payload filter: every key in `filter` must equal the doc's metadata.
+      // Mirrors Qdrant's `must` match-clauses — this is what enforces tenant
+      // isolation (userId) and kind scoping in tests.
+      if (filter && !this.matchesFilter(doc.metadata, filter)) continue;
+
+      results.push({
+        id: doc.id,
+        score: this.cosineSimilarity(vector, doc.embedding),
+        metadata: doc.metadata,
+      });
+    }
+
+    return results.sort((a, b) => b.score - a.score).slice(0, limit);
+  }
+
+  private matchesFilter(metadata: TMetadata | undefined, filter: Record<string, unknown>): boolean {
+    const meta = (metadata ?? {}) as Record<string, unknown>;
+    return Object.entries(filter).every(([key, value]) => meta[key] === value);
+  }
+
   async deleteDocument(id: string): Promise<void> {
     this.documents.delete(id);
   }
