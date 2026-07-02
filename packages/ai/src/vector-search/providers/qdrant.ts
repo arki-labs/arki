@@ -99,9 +99,22 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
       // Dynamic import to avoid loading if not needed
       const { QdrantClient } = await import('@qdrant/js-client-rest');
 
+      // The client defaults to port 6333 whenever the URL omits an explicit port — so a proxied
+      // `https://host` (Coolify/Traefik, Qdrant Cloud) silently becomes `https://host:6333`, which
+      // is firewalled → `fetch failed`. Pass the port explicitly (it overrides the 6333 default),
+      // derived from the URL's scheme so both the public-proxy (443) and internal-network (:6333)
+      // cases work with a clean, unmangled URL.
+      const parsedUrl = new URL(this.config.url);
+      const port = parsedUrl.port
+        ? Number(parsedUrl.port)
+        : parsedUrl.protocol === 'https:'
+          ? 443
+          : 6333;
+
       this.client = new QdrantClient({
         url: this.config.url,
         apiKey: this.config.apiKey,
+        port,
       });
 
       debugVector('[Qdrant] Client initialized successfully');
