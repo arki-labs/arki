@@ -47,6 +47,12 @@ export const env = defineEnv({
     JINA_EMBEDDING_MODEL: z.string().default('jina-embeddings-v3'),
     JINA_RERANK_MODEL: z.string().default('jina-reranker-v2-base-multilingual'),
 
+    // Nebius AI (Token Factory — OpenAI-compatible; serves Qwen3-Embedding-8B, 4096-d MMTEB leader)
+    NEBIUS_API_KEY: z.string().optional(),
+    NEBIUS_EMBEDDING_MODEL: z.string().default('Qwen/Qwen3-Embedding-8B'),
+    NEBIUS_EMBEDDING_DIMENSIONS: z.coerce.number().default(4096),
+    NEBIUS_BASE_URL: z.string().default('https://api.tokenfactory.nebius.com/v1'),
+
     // Mixedbread
     MXBAI_API_KEY: z.string().optional(),
     MXBAI_EMBEDDING_MODEL: z.string().default('mixedbread-ai/mxbai-embed-large-v1'),
@@ -91,6 +97,7 @@ export const env = defineEnv({
         'ollama',
         'voyage',
         'jina',
+        'nebius',
         'mixedbread',
         'transformers-js',
         'mock',

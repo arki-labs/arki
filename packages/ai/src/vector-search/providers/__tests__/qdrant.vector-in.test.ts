@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { QdrantVectorProvider } from '../qdrant';
+import type { EmbeddingProvider } from '../../../types';
 
 // ── Qdrant client mock ────────────────────────────────────────
 // One shared spy object so assertions can read the calls the provider made.
@@ -25,10 +26,11 @@ vi.mock('@qdrant/js-client-rest', () => ({
 }));
 
 // The embedding provider must NEVER be touched on the vector-in path.
+const getEmbedding = vi.fn();
 const embed = {
-  getEmbedding: vi.fn(),
+  getEmbedding,
   getDimensions: () => 4,
-} as never;
+} as unknown as EmbeddingProvider;
 
 const config = {
   url: 'http://qdrant.test',
@@ -81,7 +83,7 @@ describe('QdrantVectorProvider — vector-in methods', () => {
     const p = new QdrantVectorProvider(config, embed);
     await p.upsertVector('itm_a', [0.1, 0.2, 0.3, 0.4], { userId: 'u1', kind: 'item' });
 
-    expect(embed.getEmbedding).not.toHaveBeenCalled();
+    expect(getEmbedding).not.toHaveBeenCalled();
     expect(client.upsert).toHaveBeenCalledWith(
       'c',
       expect.objectContaining({
@@ -102,7 +104,7 @@ describe('QdrantVectorProvider — vector-in methods', () => {
     const p = new QdrantVectorProvider(config, embed);
     const hits = await p.searchByVector([0.1, 0.2, 0.3, 0.4], 5, { userId: 'u1', kind: 'item' });
 
-    expect(embed.getEmbedding).not.toHaveBeenCalled();
+    expect(getEmbedding).not.toHaveBeenCalled();
     expect(hits).toEqual([{ id: 'itm_a', score: 0.91, metadata: { _sourceId: 'itm_a', userId: 'u1' } }]);
     // Filter translated to must-clauses.
     const searchArgs = client.search.mock.calls[0]![1] as { filter?: unknown };

@@ -47,6 +47,10 @@ export {
   type JinaEmbeddingConfig,
 } from './providers/jina';
 export {
+  NebiusEmbeddingProvider,
+  type NebiusEmbeddingConfig,
+} from './providers/nebius';
+export {
   MixedbreadEmbeddingProvider,
   type MixedbreadEmbeddingConfig,
 } from './providers/mixedbread';

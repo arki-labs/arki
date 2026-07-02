@@ -21,6 +21,7 @@ import type { JinaEmbeddingConfig } from './providers/jina';
 import type { MistralEmbeddingConfig } from './providers/mistral';
 import type { MixedbreadEmbeddingConfig } from './providers/mixedbread';
 import type { MockEmbeddingConfig } from './providers/mock';
+import type { NebiusEmbeddingConfig } from './providers/nebius';
 import type { OllamaEmbeddingConfig } from './providers/ollama';
 import type { OpenAIEmbeddingConfig } from './providers/openai';
 import type { OpenAICompatibleEmbeddingConfig } from './providers/openai-compatible';
@@ -36,6 +37,7 @@ import { JinaEmbeddingProvider } from './providers/jina';
 import { MistralEmbeddingProvider } from './providers/mistral';
 import { MixedbreadEmbeddingProvider } from './providers/mixedbread';
 import { MockEmbeddingProvider } from './providers/mock';
+import { NebiusEmbeddingProvider } from './providers/nebius';
 import { OllamaEmbeddingProvider } from './providers/ollama';
 import { OpenAIEmbeddingProvider } from './providers/openai';
 import { OpenAICompatibleEmbeddingProvider } from './providers/openai-compatible';
@@ -52,6 +54,7 @@ export type EmbeddingProviderType =
   | 'ollama'
   | 'voyage'
   | 'jina'
+  | 'nebius'
   | 'mixedbread'
   | 'transformers-js'
   | 'mock';
@@ -66,6 +69,7 @@ export type EmbeddingProviderConfig =
   | { type: 'ollama'; config?: OllamaEmbeddingConfig }
   | { type: 'voyage'; config?: VoyageEmbeddingConfig }
   | { type: 'jina'; config?: JinaEmbeddingConfig }
+  | { type: 'nebius'; config?: NebiusEmbeddingConfig }
   | { type: 'mixedbread'; config?: MixedbreadEmbeddingConfig }
   | { type: 'transformers-js'; config?: TransformersJsEmbeddingConfig }
   | { type: 'mock'; config?: MockEmbeddingConfig };
@@ -102,6 +106,9 @@ export function createEmbeddingProvider(config: EmbeddingProviderConfig): Embedd
     }
     case 'jina': {
       return new JinaEmbeddingProvider(config.config);
+    }
+    case 'nebius': {
+      return new NebiusEmbeddingProvider(config.config);
     }
     case 'mixedbread': {
       return new MixedbreadEmbeddingProvider(config.config);
@@ -185,6 +192,14 @@ export function createEmbeddingProviderFromEnv(): EmbeddingProvider {
         model: env.JINA_EMBEDDING_MODEL,
       });
     }
+    case 'nebius': {
+      return new NebiusEmbeddingProvider({
+        apiKey: env.NEBIUS_API_KEY,
+        model: env.NEBIUS_EMBEDDING_MODEL,
+        dimensions: env.NEBIUS_EMBEDDING_DIMENSIONS,
+        baseURL: env.NEBIUS_BASE_URL,
+      });
+    }
     case 'mixedbread': {
       return new MixedbreadEmbeddingProvider({
         apiKey: env.MXBAI_API_KEY,
@@ -217,7 +232,7 @@ export function createEmbeddingProviderFromEnv(): EmbeddingProvider {
     }
     default: {
       throw new ConfigurationError(
-        `Unknown EMBEDDING_PROVIDER value: ${String(providerType)}. Set to one of: openai, openai-compatible, cohere, mistral, google, ollama, voyage, jina, mixedbread, transformers-js, mock. (Bedrock requires async construction — call createBedrockEmbeddingProvider() directly.)`,
+        `Unknown EMBEDDING_PROVIDER value: ${String(providerType)}. Set to one of: openai, openai-compatible, cohere, mistral, google, ollama, voyage, jina, nebius, mixedbread, transformers-js, mock. (Bedrock requires async construction — call createBedrockEmbeddingProvider() directly.)`,
       );
     }
   }
