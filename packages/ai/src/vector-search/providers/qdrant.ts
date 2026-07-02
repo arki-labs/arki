@@ -39,6 +39,18 @@ function sourceId(point: { id: string | number; payload?: Record<string, unknown
   return typeof original === 'string' ? original : String(point.id);
 }
 
+/** Numeric range condition accepted in flat `searchByVector` filters. */
+export type RangeCondition = { gt?: number; gte?: number; lt?: number; lte?: number };
+
+const RANGE_KEYS = new Set(['gt', 'gte', 'lt', 'lte']);
+
+/** True when a filter value is a `{gt|gte|lt|lte}` range object (numbers only). */
+function isRangeCondition(value: unknown): value is RangeCondition {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const entries = Object.entries(value);
+  return entries.length > 0 && entries.every(([k, v]) => RANGE_KEYS.has(k) && typeof v === 'number');
+}
+
 export type QdrantConfig = {
   url: string;
   apiKey?: string;
@@ -423,14 +435,22 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     debugVector('[Qdrant] Searching by precomputed vector (dims: %d, limit: %d, hasFilter: %s)', vector.length, limit, !!filter);
     const client = await this.getClient();
 
-    // A plain `{ userId, kind }` filter maps to one `must` match-clause per key.
+    // Flat provider-agnostic filter → Qdrant-native `must` clauses:
+    //   scalar          → match: { value }   (equality)
+    //   array           → match: { any }     (IN-semantics)
+    //   {gt|gte|lt|lte} → range              (numeric range)
     const qdrantFilter =
       filter && Object.keys(filter).length > 0
         ? this.buildQdrantFilter({
-            must: Object.entries(filter).map(([key, value]) => ({
-              key,
-              match: value as string | number | boolean | Record<string, unknown>,
-            })),
+            must: Object.entries(filter).map(([key, value]) => {
+              if (Array.isArray(value)) {
+                return { key, match: { any: value } };
+              }
+              if (isRangeCondition(value)) {
+                return { key, range: value };
+              }
+              return { key, match: { value } as Record<string, unknown> };
+            }),
           })
         : undefined;
 

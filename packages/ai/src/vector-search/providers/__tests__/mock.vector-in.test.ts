@@ -51,6 +51,21 @@ describe('MockVectorProvider vector-in', () => {
     expect(hits.map((h) => h.id)).toEqual(['chunk']);
   });
 
+  it('supports array filters (IN-semantics) and numeric range filters', async () => {
+    const p = new MockVectorProvider(embed);
+    await p.upsertVector('old', [1, 0, 0], { userId: 'u1', kind: 'chunk', itemDate: 100, sourceId: 'src_a' });
+    await p.upsertVector('new', [1, 0, 0], { userId: 'u1', kind: 'chunk', itemDate: 500, sourceId: 'src_b' });
+    await p.upsertVector('other-src', [1, 0, 0], { userId: 'u1', kind: 'chunk', itemDate: 500, sourceId: 'src_c' });
+
+    // Range: only points at/after itemDate 200.
+    const recent = await p.searchByVector([1, 0, 0], 10, { userId: 'u1', itemDate: { gte: 200 } });
+    expect(recent.map((h) => h.id).sort()).toEqual(['new', 'other-src']);
+
+    // Array: only points from the listed sources.
+    const bySource = await p.searchByVector([1, 0, 0], 10, { userId: 'u1', sourceId: ['src_a', 'src_b'] });
+    expect(bySource.map((h) => h.id).sort()).toEqual(['new', 'old']);
+  });
+
   it('upsertVector overwrites the same id (idempotent re-index)', async () => {
     const p = new MockVectorProvider(embed);
     await p.upsertVector('a', [1, 0, 0], { userId: 'u1', kind: 'item' });

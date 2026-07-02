@@ -115,4 +115,20 @@ describe('QdrantVectorProvider — vector-in methods', () => {
     const p = new QdrantVectorProvider(config, embed);
     await expect(p.upsertVector('a', [1, 2, 3], { userId: 'u1', kind: 'item' })).rejects.toThrow(/dimension mismatch/i);
   });
+
+  it('translates flat filters to Qdrant-native clauses (value / any / range)', async () => {
+    const p = new QdrantVectorProvider(config, embed);
+    await p.searchByVector([1, 0, 0, 0], 5, {
+      userId: 'u1',
+      sourceId: ['src_a', 'src_b'],
+      itemDate: { gte: 200 },
+    });
+
+    const searchArgs = client.search.mock.calls[0]![1] as { filter: { must: unknown[] } };
+    expect(searchArgs.filter.must).toEqual([
+      { key: 'userId', match: { value: 'u1' } },
+      { key: 'sourceId', match: { any: ['src_a', 'src_b'] } },
+      { key: 'itemDate', range: { gte: 200 } },
+    ]);
+  });
 });

@@ -102,7 +102,22 @@ export class MockVectorProvider<TMetadata = Record<string, unknown>> implements 
 
   private matchesFilter(metadata: TMetadata | undefined, filter: Record<string, unknown>): boolean {
     const meta = (metadata ?? {}) as Record<string, unknown>;
-    return Object.entries(filter).every(([key, value]) => meta[key] === value);
+    // Mirrors the Qdrant provider's flat-filter semantics:
+    //   scalar → equality, array → IN, {gt|gte|lt|lte} → numeric range.
+    return Object.entries(filter).every(([key, value]) => {
+      const actual = meta[key];
+      if (Array.isArray(value)) return value.includes(actual);
+      if (typeof value === 'object' && value !== null) {
+        if (typeof actual !== 'number') return false;
+        const range = value as { gt?: number; gte?: number; lt?: number; lte?: number };
+        if (range.gt !== undefined && !(actual > range.gt)) return false;
+        if (range.gte !== undefined && !(actual >= range.gte)) return false;
+        if (range.lt !== undefined && !(actual < range.lt)) return false;
+        if (range.lte !== undefined && !(actual <= range.lte)) return false;
+        return true;
+      }
+      return actual === value;
+    });
   }
 
   async deleteDocument(id: string): Promise<void> {
