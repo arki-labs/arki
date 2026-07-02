@@ -49,7 +49,9 @@
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
