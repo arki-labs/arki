@@ -1,8 +1,8 @@
 # @arki/dot
 
-## Unreleased
+## 0.1.1
 
-### v2 pip contract — typed dependency injection (BREAKING)
+### v2 pip contract — typed dependency injection (BREAKING on the experimental track)
 
 - **`pip(config)` replaces `defineDotPip`.** Pips declare consumed services
   as a `needs` shape of type witnesses (`service<T>()` app-local,
