@@ -1,0 +1,82 @@
+{
+  "name": "@arki/kv",
+  "version": "0.1.1",
+  "description": "Key-value store abstraction with pluggable adapters for ARKI — Redis-backed Keyv client and rate-limiter with TLS auto-detection and Upstash support.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "kv",
+    "key-value",
+    "redis",
+    "keyv",
+    "rate-limit",
+    "cache"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./env": {
+      "types": "./dist/env.d.ts",
+      "import": "./dist/env.js",
+      "default": "./dist/env.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "default": "./dist/errors.js"
+    },
+    "./instance": {
+      "types": "./dist/instance.d.ts",
+      "import": "./dist/instance.js",
+      "default": "./dist/instance.js"
+    },
+    "./dot": {
+      "types": "./dist/dot.d.ts",
+      "import": "./dist/dot.js",
+      "default": "./dist/dot.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@arki/contracts": "0.0.1",
+    "@arki/env": "0.0.2",
+    "@arki/log": "0.0.1",
+    "@keyv/redis": "5.1.6",
+    "@t3-oss/env-core": "^0.13.10",
+    "ioredis": "^5.9.2",
+    "keyv": "^5.6.0",
+    "rate-limiter-flexible": "^9.0.1",
+    "zod": "4.3.5"
+  },
+  "peerDependencies": {
+    "@arki/dot": "^0.1.1"
+  },
+  "peerDependenciesMeta": {
+    "@arki/dot": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
