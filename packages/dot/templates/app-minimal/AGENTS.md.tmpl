@@ -1,0 +1,66 @@
+# Agent Guidance — {{name}}
+
+## What this app is
+
+A DOT app composed via `defineApp(...).use(pip).boot()`. The runtime
+graph is statically inspectable via `app.manifest` and runtime-inspectable
+via `app.diagnostics`.
+
+## Verification commands
+
+After any change, run these in order:
+
+1. `{{pkgManager}} run typecheck` — TypeScript compilation must pass.
+2. `{{pkgManager}} run test` — vitest must pass (booting the app and
+   asserting manifest shape).
+3. `bunx dot explain --json` — inspect the static graph.
+4. `bunx dot doctor --json` — verify runtime health (5-array diagnostics
+   plus issues).
+
+Stop and surface any failure. Don't claim "done" until every verification
+command exits zero.
+
+## Local conventions
+
+- App entrypoint lives at `src/app.ts` and exports the booted `app`.
+- Env schema lives at `src/env.ts` — keep it narrow; one entry per env
+  key the app actually reads.
+- Tests live under `tests/` and import the app via the `src/` barrel.
+- Add new pips by wiring `.use(pip(options))` between
+  `defineApp('{{name}}')` and `.boot()` in `src/app.ts`.
+
+## Public / private boundaries
+
+- `src/app.ts` exports the booted `app` — consumers call `app.services.X`.
+- `src/env.ts` exports the env schema — keep narrow; only env keys this
+  app reads belong here.
+- Don't reach into `@arki/dot` internals (anything under
+  `@arki/dot/kernel`, `@arki/dot/legacy`, or `dist/` subpaths). Use the
+  public `defineApp` / `pip` API from `@arki/dot` and the
+  `pip` / `service` / `rename` symbols from `@arki/dot/pip`.
+
+## DOT artifact locations
+
+- Static graph: `app.manifest` (or `bunx dot explain --json`).
+- Runtime health: `app.diagnostics` (or `bunx dot doctor --json`).
+- Lifecycle state: `app.state` (`defined` -> `configured` -> `booted` ->
+  `started` -> `stopped` -> `disposed`).
+- Errors carry stable `code`, `severity`, `remediation`, `docsUrl`.
+
+## Adding a pip
+
+1. Install the adapter package: `{{pkgManager}} add @arki/<pkg>`.
+2. Import its DOT adapter: `import { <pip> } from '@arki/<pkg>/dot';`.
+3. Chain it into the builder before `.boot()`:
+   `.use(<pip>(options))`.
+4. Verify with `bunx dot explain --json` — the new pip should appear
+   under `.data.pips`.
+
+## Diagnostics triage
+
+When `dot doctor` reports issues:
+
+- Each `DiagnosticIssue` has a stable `code`, `severity`, `remediation`,
+  and `docsUrl`. Follow the `docsUrl`, then apply the `remediation`.
+- Re-run `bunx dot doctor --json` after each change; status flips to
+  `success` once every `error`-severity issue is resolved.

@@ -1,0 +1,25 @@
+import { beforeAll, expect, test } from 'vitest';
+
+import { app as appBuilder } from '../src/app.js';
+
+type BootedApp = Awaited<ReturnType<typeof appBuilder.boot>>;
+let booted: BootedApp;
+
+beforeAll(async () => {
+  booted = await appBuilder.boot();
+});
+
+test('app boots and exposes env service', () => {
+  expect(booted.state).toBe('booted');
+  expect(booted.services.env).toBeDefined();
+  expect(booted.manifest.services.map(s => s.name)).toContain('env');
+});
+
+test('diagnostics has all 5 arrays', () => {
+  const { diagnostics } = booted;
+  expect(diagnostics.pips).toBeDefined();
+  expect(diagnostics.routes).toBeDefined();
+  expect(diagnostics.services).toBeDefined();
+  expect(diagnostics.lifecycle).toBeDefined();
+  expect(diagnostics.issues).toBeDefined();
+});
