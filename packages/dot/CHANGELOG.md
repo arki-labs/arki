@@ -1,5 +1,15 @@
 # @arki/dot
 
+## 0.1.2
+
+### Patch Changes
+
+- Ship TypeScript source in the npm tarball (`src/**` added to `files`). npm installs and the read-only GitHub mirrors now carry the original `.ts` source alongside compiled `dist/` — better debuggability on the experimental track. No runtime changes.
+- Updated dependencies
+  - @arki/assert@0.0.2
+  - @arki/contracts@0.0.2
+  - @arki/log@0.0.2
+
 ## 0.1.1
 
 ### v2 pip contract — typed dependency injection (BREAKING on the experimental track)

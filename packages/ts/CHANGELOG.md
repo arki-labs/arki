@@ -1,5 +1,11 @@
 # @arki/ts
 
+## 0.0.2
+
+### Patch Changes
+
+- Ship TypeScript source in the npm tarball (`src/**` added to `files`). npm installs and the read-only GitHub mirrors now carry the original `.ts` source alongside compiled `dist/` — better debuggability on the experimental track. No runtime changes.
+
 ## 0.0.1
 
 ### Initial release

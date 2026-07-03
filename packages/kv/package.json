@@ -1,6 +1,6 @@
 {
   "name": "@arki/kv",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Key-value store abstraction with pluggable adapters for ARKI — Redis-backed Keyv client and rate-limiter with TLS auto-detection and Upstash support.",
   "license": "MIT",
   "type": "module",
@@ -57,6 +57,12 @@
   },
   "files": [
     "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
     "README.md",
     "LICENSE",
     "package.json"

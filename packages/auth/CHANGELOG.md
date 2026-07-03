@@ -1,5 +1,17 @@
 # @arki/auth
 
+## 0.1.3
+
+### Patch Changes
+
+- Updated dependencies
+  - @arki/contracts@0.0.2
+  - @arki/log@0.0.2
+  - @arki/env@0.0.3
+  - @arki/db@0.1.2
+  - @arki/kv@0.1.2
+  - @arki/emails@0.1.2
+
 ## 0.1.2
 
 ### Patch Changes

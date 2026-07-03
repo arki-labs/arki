@@ -1,6 +1,6 @@
 {
   "name": "@arki/date",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Date and time utilities for ARKI — thin wrappers and re-exports over date-fns with project-aligned formatters.",
   "license": "MIT",
   "type": "module",
@@ -40,6 +40,12 @@
   },
   "files": [
     "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
     "README.md",
     "LICENSE",
     "package.json"

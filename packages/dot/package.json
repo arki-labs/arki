@@ -1,6 +1,6 @@
 {
   "name": "@arki/dot",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "TypeScript-first application composition framework for the ARKI package family — lifecycle-aware pips, deterministic boot order, manifest/diagnostics envelopes, and an agent-native CLI. A DOT app is the sum of its pips.",
   "license": "MIT",
   "type": "module",
@@ -57,6 +57,12 @@
   },
   "files": [
     "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
     "templates/**",
     "README.md",
     "LICENSE",

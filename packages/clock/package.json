@@ -1,6 +1,6 @@
 {
   "name": "@arki/clock",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Clock abstraction for testable time-dependent code, with deterministic mock and system implementations.",
   "license": "MIT",
   "type": "module",
@@ -35,6 +35,12 @@
   },
   "files": [
     "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
     "README.md",
     "LICENSE",
     "package.json"

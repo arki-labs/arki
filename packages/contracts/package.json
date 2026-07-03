@@ -1,6 +1,6 @@
 {
   "name": "@arki/contracts",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Shared Zod schemas and Drizzle contract helpers — branded ID-aware select/insert/update schemas with auto-applied column refinements.",
   "license": "MIT",
   "type": "module",
@@ -41,6 +41,12 @@
   },
   "files": [
     "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
     "README.md",
     "LICENSE",
     "package.json"

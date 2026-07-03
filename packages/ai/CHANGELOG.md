@@ -1,5 +1,14 @@
 # @arki/ai
 
+## 0.1.3
+
+### Patch Changes
+
+- Updated dependencies
+  - @arki/contracts@0.0.2
+  - @arki/log@0.0.2
+  - @arki/env@0.0.3
+
 ## 0.1.2
 
 ### Patch Changes
