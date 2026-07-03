@@ -1,5 +1,45 @@
 # @arki/dot
 
+## Unreleased
+
+### v2 pip contract — typed dependency injection (BREAKING)
+
+- **`pip(config)` replaces `defineDotPip`.** Pips declare consumed services
+  as a `needs` shape of type witnesses (`service<T>()` app-local,
+  `token<T>()('key')` cross-package); hooks destructure them fully typed
+  (`async boot({ db, log })`). Provides are inferred from `boot`'s return
+  value — a plain record, no `{ services: ... }` wrapper, no generic
+  arguments.
+- **Compile-time wiring guard.** `.use(pip)` fails to typecheck when the
+  pip's needs aren't satisfied by earlier `.use()` calls or its provides
+  collide with an existing wire key. Declaration order IS boot order — the
+  topological sort and name-based `dependencies` array are gone
+  (`DOT_LIFECYCLE_E009`/`E010` retired; `E012` UnsatisfiedNeed and `E013`
+  ServiceCollision added for erased/dynamic composition).
+- **`rename(pip, map, name?)`** is the multi-instance primitive — mounting
+  two `db(...)` pips now either renames or fails loudly, instead of the
+  previous silent last-writer-wins overwrite of `app.services.db`. Adapter
+  `name` options were removed accordingly.
+- **Manifest dependency edges are observed**, not declared: the kernel
+  records which pip's published service satisfied which need during boot.
+- Hook contexts carry `$app` / `$pip` / `$config` kernel keys; `start` /
+  `stop` / `dispose` see the pip's own provides plus its needs (reverse
+  teardown keeps needs alive through `dispose`).
+- Adapters migrated: `@arki/env/dot`, `@arki/kv/dot`, `@arki/db/dot`,
+  `@arki/event-sourcing/dot`.
+- **`lazy(init, { dispose? })`** — deferred service initialization. Publish
+  `{ db: lazy(() => openDb(), { dispose: db => db.close() }) }` from `boot`;
+  the typed `Lazy<T>` handle initializes on first `get()` (memoized,
+  single-flight, failed attempts retry). Never-touched handles never
+  initialize; the kernel auto-disposes initialized handles in reverse
+  declaration order during `dispose()`/rollback — after the publishing
+  pip's own `dispose` hook, and without requiring one.
+- **`service.lazy<T>()`** — lifting needs witness. The consumer always
+  receives a `Lazy<T>` handle whether the provider published a plain `T`
+  (lifted into a pre-initialized wrapper via `lazyOf`, also exported) or a
+  `Lazy<T>` (passed through by identity) — consumers stop caring about the
+  provider's eager-vs-lazy strategy, and the wiring guard accepts both.
+
 ## 0.1.0
 
 ### Initial release

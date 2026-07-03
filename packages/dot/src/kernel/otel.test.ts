@@ -28,7 +28,7 @@ import { Logger } from '@arki/log';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { defineApp } from '../define-app.js';
-import { defineDotPip } from '../pip-contract.js';
+import { pip, service } from '../pip-contract.js';
 import { withPhaseSpan, withPipHookSpan } from './otel.js';
 
 let exporter: InMemorySpanExporter;
@@ -58,14 +58,14 @@ function spansByName(name: string): ReadableSpan[] {
 
 describe('@arki/dot OTel instrumentation', () => {
   it('emits a dot.app.configure root span and per-pip dot.pip.configure children', async () => {
-    const envPip = defineDotPip({
+    const envPip = pip({
       name: 'env',
       version: '0.1.0',
       configure(ctx) {
         ctx.registerService('env', 'env');
       },
     });
-    const dbPip = defineDotPip({
+    const dbPip = pip({
       name: 'db',
       version: '0.1.0',
       configure(ctx) {
@@ -95,14 +95,14 @@ describe('@arki/dot OTel instrumentation', () => {
   });
 
   it('emits a dot.app.boot root span and per-pip dot.pip.boot children', async () => {
-    const envPip = defineDotPip<{ env: { PORT: number } }>({
+    const envPip = pip({
       name: 'env',
       version: '0.1.0',
       configure(ctx) {
         ctx.registerService('env', 'env');
       },
       boot() {
-        return { services: { env: { PORT: 3000 } } };
+        return { env: { PORT: 3000 } };
       },
     });
 
@@ -127,31 +127,31 @@ describe('@arki/dot OTel instrumentation', () => {
 
   it('emits phase + per-pip spans for the full configure→boot→start→stop→dispose cascade', async () => {
     type Svc = { web: { listening: boolean } };
-    const envPip = defineDotPip<{ env: { PORT: number } }>({
+    const envPip = pip({
       name: 'env',
       version: '0.1.0',
       configure(ctx) {
         ctx.registerService('env', 'env');
       },
       boot() {
-        return { services: { env: { PORT: 3000 } } };
+        return { env: { PORT: 3000 } };
       },
     });
-    const webPip = defineDotPip<Svc>({
+    const webPip = pip({
       name: 'web',
       version: '0.2.0',
-      dependencies: ['env'],
+      needs: { env: service<{ PORT: number }>() },
       configure(ctx) {
         ctx.registerService('web', 'custom');
       },
-      boot() {
-        return { services: { web: { listening: false } } };
+      boot(): Svc {
+        return { web: { listening: false } };
       },
-      start(ctx) {
-        (ctx.services as Svc).web.listening = true;
+      start({ web }) {
+        web.listening = true;
       },
-      stop(ctx) {
-        (ctx.services as Svc).web.listening = false;
+      stop({ web }) {
+        web.listening = false;
       },
       dispose() {
         /* drain */
@@ -250,14 +250,14 @@ describe('@arki/dot OTel instrumentation', () => {
   });
 
   it('marks the failing pip span ERROR when boot throws', async () => {
-    const goodPip = defineDotPip({
+    const goodPip = pip({
       name: 'good',
       version: '0.1.0',
       boot() {
-        return { services: {} };
+        return {};
       },
     });
-    const badPip = defineDotPip({
+    const badPip = pip({
       name: 'bad',
       version: '0.1.0',
       boot() {

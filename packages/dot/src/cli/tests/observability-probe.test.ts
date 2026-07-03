@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runDoctor } from '../index.js';
 import { probeObservability } from '../observability-probe.js';
 import { defineApp } from '../../define-app.js';
-import { defineDotPip } from '../../pip-contract.js';
+import { pip } from '../../pip-contract.js';
 import { testApp } from '../../test-harness.js';
 
 describe('probeObservability — direct', () => {
@@ -61,7 +61,7 @@ describe('runDoctor — --observability flag', () => {
   });
 
   it('without --observability, no DOT_CLI_E007 issue appears in the envelope', async () => {
-    const p = defineDotPip({ name: 'p', boot: () => ({}) });
+    const p = pip({ name: 'p', boot: () => ({}) });
     const app = await testApp([p]).boot();
     try {
       let written = '';
@@ -79,7 +79,7 @@ describe('runDoctor — --observability flag', () => {
   });
 
   it('with --observability and no SDK, the envelope carries a DOT_CLI_E007 warning issue', async () => {
-    const p = defineDotPip({ name: 'p', boot: () => ({}) });
+    const p = pip({ name: 'p', boot: () => ({}) });
     const app = await testApp([p]).boot();
     try {
       const envelope = await runDoctor(app, {
@@ -101,7 +101,7 @@ describe('runDoctor — --observability flag', () => {
     const provider = new BasicTracerProvider();
     trace.setGlobalTracerProvider(provider);
     try {
-      const p = defineDotPip({ name: 'p', boot: () => ({}) });
+      const p = pip({ name: 'p', boot: () => ({}) });
       const app = await testApp([p]).boot();
       try {
         const envelope = await runDoctor(app, {
@@ -119,7 +119,7 @@ describe('runDoctor — --observability flag', () => {
   });
 
   it('with --observability and a boot failure, both the failure AND the OTel warning surface', async () => {
-    const bad = defineDotPip({
+    const bad = pip({
       name: 'bad',
       boot: () => {
         throw new Error('boot-boom');

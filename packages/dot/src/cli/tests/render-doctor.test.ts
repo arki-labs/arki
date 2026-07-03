@@ -9,7 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { defineApp } from '../../define-app.js';
-import { defineDotPip } from '../../pip-contract.js';
+import { pip } from '../../pip-contract.js';
 import { testApp } from '../../test-harness.js';
 import { runDoctor } from '../index.js';
 import { buildDoctorEnvelope, renderDoctor } from '../render-doctor.js';
@@ -18,7 +18,7 @@ const FROZEN_NOW = () => new Date('2026-01-01T00:00:00.000Z');
 
 describe('buildDoctorEnvelope', () => {
   it('emits a DotCliEnvelope with all 5 diagnostics arrays on success', async () => {
-    const p = defineDotPip({ name: 'p', boot: () => ({}) });
+    const p = pip({ name: 'p', boot: () => ({}) });
     const app = await testApp([p]).boot();
     const envelope = buildDoctorEnvelope({ diagnostics: app.diagnostics }, { json: true, now: FROZEN_NOW });
 
@@ -36,7 +36,7 @@ describe('buildDoctorEnvelope', () => {
   });
 
   it('clean-boot app yields status=success with no error-severity issues', async () => {
-    const p = defineDotPip({ name: 'p', boot: () => ({}) });
+    const p = pip({ name: 'p', boot: () => ({}) });
     const app = await testApp([p]).boot();
     const envelope = buildDoctorEnvelope({ diagnostics: app.diagnostics }, { json: true, now: FROZEN_NOW });
     expect(envelope.status).toBe('success');
@@ -45,7 +45,7 @@ describe('buildDoctorEnvelope', () => {
   });
 
   it('failed boot yields status=failure, failed pip status, structured issue', async () => {
-    const bad = defineDotPip({
+    const bad = pip({
       name: 'bad',
       boot: () => {
         throw new Error('boot-boom');
@@ -73,7 +73,7 @@ describe('buildDoctorEnvelope', () => {
 
 describe('renderDoctor', () => {
   it('JSON mode writes a parseable envelope', async () => {
-    const p = defineDotPip({ name: 'p', boot: () => ({}) });
+    const p = pip({ name: 'p', boot: () => ({}) });
     const app = await testApp([p]).boot();
 
     let written = '';
@@ -91,7 +91,7 @@ describe('renderDoctor', () => {
   });
 
   it('text mode includes per-pip status markers', async () => {
-    const p = defineDotPip({ name: 'p', boot: () => ({}) });
+    const p = pip({ name: 'p', boot: () => ({}) });
     const app = await testApp([p]).boot();
 
     let written = '';
@@ -110,7 +110,7 @@ describe('renderDoctor', () => {
 describe('runDoctor', () => {
   it('disposes the app after rendering when it booted from a builder', async () => {
     const disposeSpy = vi.fn();
-    const p = defineDotPip({
+    const p = pip({
       name: 'p',
       boot: () => ({}),
       dispose: () => {
@@ -133,7 +133,7 @@ describe('runDoctor', () => {
 
   it('does NOT dispose when caller passed an already-booted app', async () => {
     const disposeSpy = vi.fn();
-    const p = defineDotPip({
+    const p = pip({
       name: 'p',
       boot: () => ({}),
       dispose: () => {

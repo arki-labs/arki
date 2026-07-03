@@ -1,14 +1,15 @@
 /**
- * Manifest contract tests for the DOT kernel.
+ * Manifest contract tests for the DOT kernel (v2).
  *
  * The manifest exposes five top-level arrays — pips, routes, services,
- * lifecycle, dependencies — even on an empty app.
+ * lifecycle, dependencies — even on an empty app. Dependency edges are
+ * observed from actual service wiring at boot time.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '../define-app.js';
-import { defineDotPip } from '../pip-contract.js';
+import { pip, service } from '../pip-contract.js';
 
 describe('DOT manifest', () => {
   it('exposes all five arrays on an empty app', async () => {
@@ -25,7 +26,7 @@ describe('DOT manifest', () => {
   });
 
   it('reflects pip contributions: services + routes registered in configure', async () => {
-    const billing = defineDotPip({
+    const billing = pip({
       name: 'billing',
       version: '2.3.4',
       configure: ctx => {
@@ -55,7 +56,7 @@ describe('DOT manifest', () => {
     const noop = () => {
       // intentional no-op — we only care that the pip object exposes the hook.
     };
-    const p = defineDotPip({
+    const p = pip({
       name: 'p',
       configure: noop,
       boot: () => ({}),
@@ -74,10 +75,18 @@ describe('DOT manifest', () => {
     await app.dispose();
   });
 
-  it('dependency edges reflect pip.dependencies declarations', async () => {
-    const a = defineDotPip({ name: 'a' });
-    const b = defineDotPip({ name: 'b', dependencies: ['a'] });
-    const c = defineDotPip({ name: 'c', dependencies: ['b'] });
+  it('dependency edges are observed from service wiring at boot', async () => {
+    const a = pip({ name: 'a', boot: () => ({ alpha: 1 }) });
+    const b = pip({
+      name: 'b',
+      needs: { alpha: service<number>() },
+      boot: () => ({ beta: 2 }),
+    });
+    const c = pip({
+      name: 'c',
+      needs: { beta: service<number>() },
+      boot: () => ({}),
+    });
     const app = await defineApp('test').use(a).use(b).use(c).boot();
     expect(app.manifest.dependencies).toEqual(
       expect.arrayContaining([
@@ -86,11 +95,15 @@ describe('DOT manifest', () => {
       ]),
     );
     expect(app.manifest.dependencies).toHaveLength(2);
+    // The declarative per-pip view carries the wire keys.
+    expect(app.manifest.pips.find(p => p.name === 'b')?.dependencies).toEqual(['alpha']);
+    // Published wire keys surface in `provides`.
+    expect(app.manifest.pips.find(p => p.name === 'a')?.provides).toEqual(['alpha']);
     await app.dispose();
   });
 
   it('snapshot stability — same pips produce equal manifests across runs', async () => {
-    const p = defineDotPip({
+    const p = pip({
       name: 'p',
       configure: ctx => {
         ctx.registerService('logger', 'logger');

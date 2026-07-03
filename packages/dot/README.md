@@ -59,35 +59,34 @@ bun add @arki/dot
 ## Quick start
 
 ```ts
-import { defineApp, defineDotPip } from '@arki/dot';
+import { defineApp, pip, service } from '@arki/dot';
 
-const billingPip = defineDotPip({
+const billingPip = pip({
   name: 'billing',
   version: '1.0.0',
+  needs: { db: service<Db>() },     // typed injection — destructure in hooks
   configure(ctx) {
     // Validate config, register schemas, no I/O.
   },
-  async boot(ctx) {
-    // Open connections, register providers.
-    return { stripe: makeStripeClient() };
+  async boot({ db }) {
+    // Open connections. The return value IS what this pip provides.
+    return { stripe: makeStripeClient(db) };
   },
-  async start(ctx) {
+  async start({ stripe }) {
     // Begin processing — workers, subscriptions, schedulers.
   },
-  async stop() {
+  async stop({ stripe }) {
     // Stop processing — drain workers, unsubscribe.
   },
-  async dispose() {
+  async dispose({ stripe }) {
     // Close connections, free resources.
   },
 });
 
-const app = defineApp('acme')
-  .use(billingPip);
-
-await app.configure();
-await app.boot();
-await app.start();
+const app = await defineApp('acme')
+  .use(dbPip)          // providers before consumers — enforced at compile time
+  .use(billingPip)
+  .start();
 
 // app.manifest, app.diagnostics — agent-friendly envelopes.
 
@@ -97,20 +96,26 @@ await app.dispose();
 
 ## Pip authoring
 
-`defineDotPip(config)` accepts five lifecycle hooks. Each receives a
-phase-specific context with services contributed by earlier pips:
+`pip(config)` accepts a `needs` shape plus five lifecycle hooks. Hook
+contexts carry the needed services (typed, under your local aliases) and
+`$`-prefixed kernel keys (`$app`, `$pip`, `$config`):
 
-| Hook        | Purpose                                                          |
-| ----------- | ---------------------------------------------------------------- |
-| `configure` | Validate static config; declare schemas, routes, services. No I/O. |
-| `boot`      | Open connections; register providers; return a typed kit.       |
-| `start`     | Begin processing (workers, subscribers, schedulers).             |
-| `stop`      | Stop processing in reverse dependency order.                     |
-| `dispose`   | Free resources after `stop`.                                     |
+| Hook        | Purpose                                                             |
+| ----------- | ------------------------------------------------------------------- |
+| `configure` | Validate static config; declare schemas, routes, services. No I/O.  |
+| `boot`      | Open connections; the returned record is what the pip provides.     |
+| `start`     | Begin processing (workers, subscribers, schedulers).                |
+| `stop`      | Stop processing in reverse declaration order.                       |
+| `dispose`   | Free resources after `stop`.                                        |
 
-Pips can declare dependencies on others by name. The kernel computes a
-topological order and runs hooks deterministically — same input, same order,
-every time.
+Wiring is compile-time checked: `.use(pip)` fails to typecheck when the
+pip's needs aren't satisfied by earlier `.use()` calls, or when its
+provides collide with an existing wire key. `rename(pip, { db: 'reportsDb' })`
+mounts a second instance of an adapter without collision; `token<T>()('key')`
+shares a service contract across packages; `lazy(() => open(), { dispose })`
+defers an expensive open until first `get()` — never-touched services never
+initialize, and the kernel auto-disposes initialized ones. Declaration
+order is boot order — same input, same order, every time.
 
 ## Lifecycle
 
@@ -124,9 +129,9 @@ defined ──configure()──▶ configured ──boot()──▶ booted ─�
 ```
 
 `boot()` runs `configure()` implicitly if you skipped it. `start()` runs
-`boot()` implicitly. `stop()` and `dispose()` always run in reverse dependency
-order, even when an earlier hook failed — failure isolation is part of the
-contract.
+`boot()` implicitly. `stop()` and `dispose()` always run in reverse
+declaration order, even when an earlier hook failed — failure isolation is
+part of the contract.
 
 ## CLI
 

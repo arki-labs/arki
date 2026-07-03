@@ -1,35 +1,38 @@
 /**
  * Narrow public surface for pip authors.
  *
- * Exposes the new-kernel pip contract and the entry points a pip
- * author needs to author + test pips — `defineDotPip`, `defineApp`,
- * `testApp` / `bootTestApp`, plus lifecycle / manifest / diagnostics types.
+ * Exposes the pip contract and the entry points a pip author needs to
+ * author + test pips — `pip`, `service`, `token`, `provide`, `rename`,
+ * `defineApp`, `testApp` / `bootTestApp`, plus lifecycle / manifest /
+ * diagnostics types.
  *
- * Does NOT re-export the legacy `Dot` / `createDot` builder or the legacy
- * auth/db/event-sourcing modules. Adapter packages (e.g. `@arki/env/dot`,
- * `@arki/kv/dot`, `@arki/db/dot`) import from this subpath so their
- * `*.d.ts` graphs do not pull in the legacy surface — keeping their
- * compile times tight and decoupling adapters from the legacy retirement
- * schedule (Task 12).
+ * Adapter packages (e.g. `@arki/env/dot`, `@arki/kv/dot`, `@arki/db/dot`)
+ * import from this subpath so their `*.d.ts` graphs stay tight.
  *
  * @example
  * ```ts
- * import { defineDotPip, type DotPip } from '@arki/dot/pip';
+ * import { pip, service, type Pip } from '@arki/dot/pip';
  * ```
  */
 
-export { defineDotPip, DotPipError } from './pip-contract.js';
+export { isLazy, lazy, lazyOf, pip, provide, rename, service, token, DotPipError } from './pip-contract.js';
 export type {
-  AnyDotPip,
-  DotPip,
-  DotBootContext,
-  DotBootResult,
+  AnyPip,
+  CtxOf,
   DotConfigureContext,
-  DotDisposeContext,
-  DotManifestContext,
-  DotManifestContribution,
-  DotStartContext,
-  DotStopContext,
+  EmptyShape,
+  KernelCtx,
+  Lazy,
+  LazyService,
+  NeedsShape,
+  Pip,
+  PipNeeds,
+  PipProvides,
+  RenamedProvides,
+  Service,
+  ServiceRecord,
+  Token,
+  WireNeeds,
 } from './pip-contract.js';
 
 export { defineApp } from './define-app.js';

@@ -44,7 +44,7 @@ Terminal states require a fresh `defineApp(...)` to retry.
 
 ### `configure` — sync registration
 
-- Runs **synchronously** in topological order.
+- Runs **synchronously** in declaration order.
 - May validate options, declare schemas, register routes/services/jobs,
   contribute manifest entries.
 - **Must not** open sockets, connect to databases, start workers, perform
@@ -54,27 +54,28 @@ Terminal states require a fresh `defineApp(...)` to retry.
 
 ### `boot` — async open
 
-- Runs **async** in topological order.
+- Runs **async** in declaration order.
 - Opens resources, initialises clients, validates required runtime
   configuration.
 - Publishes services into `app.services` via the return value
-  (`{ services: { ... } }`).
-- Downstream pips receive these via `ctx.services`.
+  (a plain record of wire-keyed services).
+- Downstream pips receive them destructured in their hook context,
+  under the local aliases declared in `needs`.
 
 ### `start` — async activate
 
-- Runs **async** in topological order.
+- Runs **async** in declaration order.
 - Begins active work after every pip has booted: workers, schedulers,
   subscribers, listeners, long-running processes.
 
 ### `stop` — async halt
 
-- Runs **async** in **reverse**-topological order.
+- Runs **async** in **reverse** declaration order.
 - Halts active work while keeping booted resources available for cleanup.
 
 ### `dispose` — async release
 
-- Runs **async** in **reverse**-topological order.
+- Runs **async** in **reverse** declaration order.
 - Releases booted resources: connection pools, queues, file handles,
   telemetry exporters.
 
@@ -93,7 +94,7 @@ DOT cleans up exactly what was opened — no more, no less.
 
 - The throwing pip is **not** disposed (its `boot` did not complete).
 - Every pip whose `boot` already completed is disposed in
-  reverse-topological order.
+  reverse declaration order.
 - App transitions to `failed`.
 - Kernel throws `DotLifecycleError` with code `DOT_LIFECYCLE_E003`.
 
@@ -117,14 +118,14 @@ The kernel only disposes pips whose `boot` returned successfully.
 
 ### `start` failure
 
-- Every started pip's `stop` runs in reverse-topological order.
-- Then every booted pip's `dispose` runs in reverse-topological order.
+- Every started pip's `stop` runs in reverse declaration order.
+- Then every booted pip's `dispose` runs in reverse declaration order.
 - App transitions to `failed`.
 - Kernel throws `DotLifecycleError` with code `DOT_LIFECYCLE_E004`.
 
 ### `stop` / `dispose` failure
 
-- The reverse-topological pass **continues through individual failures**.
+- The reverse-order pass **continues through individual failures**.
 - The kernel collects per-pip failures and throws a single aggregate
   `DotLifecycleError` (`DOT_LIFECYCLE_E005` for stop, `DOT_LIFECYCLE_E006`
   for dispose).

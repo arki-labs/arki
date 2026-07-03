@@ -20,25 +20,15 @@ import type { DotLifecycleEvent, DotLifecycleObserver } from '../lifecycle-obser
 import type { DotLifecycleHook, DotLifecyclePipFailure, DotLifecycleState } from '../lifecycle.js';
 import type {
   DependencyEdge,
-  DependencyEdgeKind,
   DotAppManifest,
   LifecycleManifest,
   PipManifest,
   RouteManifest,
   ServiceManifest,
 } from '../manifest.js';
-import type {
-  AnyDotPip,
-  DotBootContext,
-  DotBootResult,
-  DotConfigureContext,
-  DotDisposeContext,
-  DotStartContext,
-  DotStopContext,
-} from '../pip-contract.js';
-import { buildDependencyEdges, topologicalSort } from '../dependency-graph.js';
+import type { AnyPip, DotConfigureContext, Lazy, ServiceRecord } from '../pip-contract.js';
 import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
-import { pipProvides } from '../pip-contract.js';
+import { isLazy, isLazyWitness, lazyOf } from '../pip-contract.js';
 import { withPhaseSpan, withPipHookSpan } from './otel.js';
 
 const debugKernel = createDebugLogger('arki:dot:kernel');
@@ -47,8 +37,8 @@ const DOCS_BASE = 'https://docs.arki.dev/dot/diagnostics';
 
 /** Per-pip mutable bookkeeping. */
 type PipRecord = {
-  pip: AnyDotPip;
-  /** Topological order (0-based). */
+  pip: AnyPip;
+  /** Declaration order (0-based) — v2 boot order IS declaration order. */
   order: number;
   /** Routes registered during `configure`. */
   routes: RouteManifest[];
@@ -56,12 +46,14 @@ type PipRecord = {
   services: ServiceManifest[];
   /** Lifecycle hooks the pip participates in. */
   hooks: Set<DotLifecycleHook>;
-  /** Provides declared during `configure` (joined with pip.provides). */
+  /** Provides capability strings declared during `configure`, joined with published wire keys. */
   provides: Set<string>;
-  /** Extra dependency edges declared during `configure`. */
-  extraDependencies: { to: string; kind: DependencyEdgeKind }[];
-  /** Services published by this pip (populated after `boot`). */
-  publishedServices: Record<string, unknown>;
+  /**
+   * Services published by this pip, keyed by LOCAL publish keys (pre-rename).
+   * The pip's own stop/dispose contexts read these; the app-facing service
+   * map uses the renamed wire keys.
+   */
+  publishedServices: ServiceRecord;
   /** Whether the pip's `boot` hook completed successfully. */
   booted: boolean;
   /** Whether the pip's `start` hook completed successfully. */
@@ -71,6 +63,13 @@ type PipRecord = {
   /** Per-hook diagnostic entries. */
   lifecycleDiagnostics: LifecycleDiagnostic[];
 };
+
+/** Resolve a needs-shape witness to its wire key. */
+function wireKeyOf(witness: object, alias: string): string {
+  return 'key' in witness && typeof (witness as { key: unknown }).key === 'string'
+    ? (witness as { key: string }).key
+    : alias;
+}
 
 /** Helper for stable issue construction. */
 function makeIssue(args: {
@@ -96,7 +95,7 @@ function makeIssue(args: {
 export type DotAppInternalConfig = {
   appName: string;
   appVersion?: string;
-  pips: readonly AnyDotPip[];
+  pips: readonly AnyPip[];
   /** Runtime config bag passed to every `boot` hook. */
   config?: Readonly<Record<string, unknown>>;
   /**
@@ -116,8 +115,8 @@ export class DotAppImpl {
   readonly #appVersion: string | undefined;
   readonly #config: Readonly<Record<string, unknown>>;
 
-  /** Pips in topological order (set after the constructor sorts them). */
-  readonly #ordered: readonly AnyDotPip[];
+  /** Pips in declaration order — v2 boot order IS declaration order. */
+  readonly #ordered: readonly AnyPip[];
   readonly #records: Map<string, PipRecord>;
 
   /** Macro-state of the app. */
@@ -126,10 +125,16 @@ export class DotAppImpl {
   /** Manifest finalised after `configure`. */
   #manifest: DotAppManifest;
 
-  /** Cached services map — populated as pips boot. */
+  /** Wire-keyed services map — populated as pips boot. */
   readonly #serviceMap = new Map<string, unknown>();
 
-  /** Cached merged services record for `start`/`stop`/`dispose` contexts. */
+  /** Which pip provided each wire key — feeds dependency edges + collisions. */
+  readonly #providerByWireKey = new Map<string, string>();
+
+  /** Dependency edges observed during boot (consumer → provider). */
+  readonly #wiringEdges: DependencyEdge[] = [];
+
+  /** Merged wire-keyed services record exposed as `app.services`. */
   #aggregatedServices: Record<string, unknown> = {};
 
   /** Configure has already happened (idempotent). */
@@ -168,21 +173,28 @@ export class DotAppImpl {
     this.#logger = new Logger('arki:dot:lifecycle', { 'dot.app.name': config.appName });
     this.#observers = new Set(config.observers);
 
-    // Topological sort happens up-front — surfaces cycle/dup/missing-dep errors
-    // at construction (the `configure` phase pseudo-time).
-    debugKernel('[%s] topologically sorting %d pip(s)', this.#appName, config.pips.length);
-    this.#ordered = topologicalSort(config.pips);
+    // Declaration order is boot order in v2. Duplicate names are surfaced at
+    // construction (the `configure` phase pseudo-time).
+    debugKernel('[%s] registering %d pip(s) in declaration order', this.#appName, config.pips.length);
+    this.#ordered = [...config.pips];
 
     this.#records = new Map();
     for (const [order, pip] of this.#ordered.entries()) {
+      if (this.#records.has(pip.name)) {
+        throw new DotLifecycleError({
+          code: DotLifecycleErrorCode.DuplicatePip,
+          phase: 'configure',
+          pip: pip.name,
+          message: `Pip "${pip.name}" is registered twice`,
+        });
+      }
       this.#records.set(pip.name, {
         pip,
         order,
         routes: [],
         services: [],
         hooks: new Set<DotLifecycleHook>(),
-        provides: new Set(pipProvides(pip)),
-        extraDependencies: [],
+        provides: new Set<string>(),
         publishedServices: {},
         booted: false,
         started: false,
@@ -392,7 +404,7 @@ export class DotAppImpl {
     for (const pip of this.#ordered) {
       const record = this.#records.get(pip.name)!;
       const pipLogger = phaseLogger.withAttribute('dot.pip.name', pip.name);
-      if (!pip.configure) {
+      if (!pip.hooks.configure) {
         pipLogger.debug('configure: skipped (no hook)');
         continue;
       }
@@ -413,9 +425,6 @@ export class DotAppImpl {
         declareProvides: (...caps) => {
           for (const cap of caps) record.provides.add(cap);
         },
-        declareDependency: (to, kind) => {
-          record.extraDependencies.push({ to, kind: kind ?? 'uses' });
-        },
       };
 
       const started = performance.now();
@@ -431,7 +440,7 @@ export class DotAppImpl {
             order: record.order,
             logger: pipLogger,
           },
-          () => pip.configure!(ctx),
+          () => pip.hooks.configure!(ctx),
         );
       } catch (error) {
         const durationMs = performance.now() - started;
@@ -512,10 +521,10 @@ export class DotAppImpl {
     // on the pip object, so the manifest reflects them.
     for (const pip of this.#ordered) {
       const record = this.#records.get(pip.name)!;
-      if (pip.boot) record.hooks.add('boot');
-      if (pip.start) record.hooks.add('start');
-      if (pip.stop) record.hooks.add('stop');
-      if (pip.dispose) record.hooks.add('dispose');
+      if (pip.hooks.boot) record.hooks.add('boot');
+      if (pip.hooks.start) record.hooks.add('start');
+      if (pip.hooks.stop) record.hooks.add('stop');
+      if (pip.hooks.dispose) record.hooks.add('dispose');
     }
 
     this.#configured = true;
@@ -562,6 +571,55 @@ export class DotAppImpl {
   }
 
   /**
+   * Resolve a pip's needs into a hook context (alias-keyed), joined with
+   * the `$`-prefixed kernel keys and — for post-boot hooks — the pip's own
+   * published services (local keys).
+   *
+   * @throws {DotLifecycleError} `DOT_LIFECYCLE_E012` when a need has no
+   *   provider among earlier-booted pips. Teardown hooks can never hit
+   *   this: the service map only grows, and reverse-order teardown keeps
+   *   providers alive until their consumers are done.
+   */
+  #buildHookCtx(record: PipRecord, phase: DotLifecycleHook, includeOwnProvides: boolean): Record<string, unknown> {
+    const ctx: Record<string, unknown> = {
+      $app: this.#appName,
+      $pip: record.pip.name,
+      $config: this.#config,
+    };
+    for (const [alias, witness] of Object.entries(record.pip.needs)) {
+      const wireKey = wireKeyOf(witness, alias);
+      if (!this.#serviceMap.has(wireKey)) {
+        throw new DotLifecycleError({
+          code: DotLifecycleErrorCode.UnsatisfiedNeed,
+          phase,
+          pip: record.pip.name,
+          message:
+            `Pip "${record.pip.name}" needs service "${wireKey}" but no earlier pip provides it. ` +
+            `Register a provider with .use() before this pip. Services flow strictly forward — ` +
+            `if a later pip provides "${wireKey}", move that provider earlier; if two pips need ` +
+            `each other's services, that is a cycle: merge them or extract the shared piece into ` +
+            `a third pip both consume.`,
+        });
+      }
+      const value = this.#serviceMap.get(wireKey);
+      // A lazy-lifting witness (`service.lazy<T>()`) always receives a
+      // handle: lazy provides pass through, eager provides are lifted into
+      // a pre-initialized wrapper. The wrapper is created per-injection and
+      // never published, so the kernel's auto-dispose does not touch it —
+      // the underlying value's lifecycle stays with its provider.
+      ctx[alias] = isLazyWitness(witness) && !isLazy(value) ? lazyOf(value) : value;
+      const provider = this.#providerByWireKey.get(wireKey);
+      if (provider !== undefined && !this.#wiringEdges.some(e => e.from === record.pip.name && e.to === provider)) {
+        this.#wiringEdges.push({ from: record.pip.name, to: provider, kind: 'requires' });
+      }
+    }
+    if (includeOwnProvides) {
+      Object.assign(ctx, record.publishedServices);
+    }
+    return ctx;
+  }
+
+  /**
    * Inner boot loop. Separated from `#runBoot` so the phase span wrapper
    * stays thin and the loop body — which orchestrates rollback on
    * partial failure — stays unindented.
@@ -569,10 +627,83 @@ export class DotAppImpl {
   async #runBootInner(phaseLogger: Logger): Promise<void> {
     const bootedRecords: PipRecord[] = [];
 
+    /** Shared failure path: mark diagnostics, roll back, throw. */
+    const fail = async (args: {
+      record: PipRecord;
+      code: (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];
+      message: string;
+      remediation: string;
+      docsAnchor: string;
+      durationMs: number;
+      cause?: unknown;
+      /** Records to dispose (reverse order applied here). */
+      rollback: readonly PipRecord[];
+    }): Promise<never> => {
+      const issue = makeIssue({
+        code: args.code,
+        pip: args.record.pip.name,
+        message: args.message,
+        remediation: args.remediation,
+        docsAnchor: args.docsAnchor,
+      });
+      args.record.issues.push(issue);
+      args.record.lifecycleDiagnostics.push({
+        pip: args.record.pip.name,
+        hook: 'boot',
+        state: 'failed',
+        order: args.record.order,
+        durationMs: args.durationMs,
+        issues: [issue],
+      });
+      this.#emitHook('boot', args.record.pip.name, args.record.order, 'failed', {
+        durationMs: args.durationMs,
+        error: args.cause ?? new Error(args.message),
+      });
+      phaseLogger.error('boot: FAILED — rolling back already-booted pips', {
+        'dot.pip.name': args.record.pip.name,
+        'dot.app.rollback.count': args.rollback.length,
+      });
+      const disposeFailures = await this.#runDisposeForRecords(reverseRecords(args.rollback), phaseLogger);
+      this.#state = 'failed';
+      this.#manifest = this.#buildManifest();
+      throw new DotLifecycleError({
+        code: args.code,
+        phase: 'boot',
+        pip: args.record.pip.name,
+        message: args.message,
+        cause: args.cause,
+        failures: disposeFailures.length > 0 ? disposeFailures : undefined,
+      });
+    };
+
     for (const pip of this.#ordered) {
       const record = this.#records.get(pip.name)!;
       const pipLogger = phaseLogger.withAttribute('dot.pip.name', pip.name);
-      if (!pip.boot) {
+      const started = performance.now();
+
+      // Resolve needs BEFORE invoking the hook — a pip with needs but no
+      // boot hook still fails fast when its wiring is unsatisfied.
+      let ctx: Record<string, unknown>;
+      try {
+        ctx = this.#buildHookCtx(record, 'boot', false);
+      } catch (error) {
+        const message = error instanceof DotLifecycleError ? error.message : stringifyError(error);
+        return fail({
+          record,
+          code: DotLifecycleErrorCode.UnsatisfiedNeed,
+          message,
+          remediation:
+            `Add a provider for the missing service with .use() before "${pip.name}", or rename an ` +
+            `existing provider's keys to match. If a later pip provides it, reorder — services flow ` +
+            `strictly forward. Mutual needs between two pips are a cycle: merge them or extract the ` +
+            `shared piece into a third pip both consume.`,
+          docsAnchor: 'unsatisfied-need',
+          durationMs: performance.now() - started,
+          rollback: bootedRecords,
+        });
+      }
+
+      if (!pip.hooks.boot) {
         record.booted = true;
         bootedRecords.push(record);
         pipLogger.debug('boot: skipped (no hook)');
@@ -580,18 +711,10 @@ export class DotAppImpl {
       }
       record.hooks.add('boot');
 
-      const ctx: DotBootContext = {
-        pipName: pip.name,
-        appName: this.#appName,
-        services: this.#serviceMap,
-        config: this.#config,
-      };
-
-      const started = performance.now();
       this.#emitHook('boot', pip.name, record.order, 'starting');
-      let result: DotBootResult<Record<string, unknown>>;
+      let result: ServiceRecord | void;
       try {
-        const maybeResult = await withPipHookSpan(
+        result = await withPipHookSpan(
           {
             appName: this.#appName,
             pipName: pip.name,
@@ -600,53 +723,47 @@ export class DotAppImpl {
             order: record.order,
             logger: pipLogger,
           },
-          () => pip.boot!(ctx),
+          // Erasure boundary: hooks are stored as `(ctx: never) => ...`;
+          // the kernel is the one caller allowed to cross it.
+          () => pip.hooks.boot!(ctx as never),
         );
-        result = maybeResult ?? {};
       } catch (error) {
-        const durationMs = performance.now() - started;
-        const issue = makeIssue({
+        return fail({
+          record,
           code: DotLifecycleErrorCode.BootFailed,
-          pip: pip.name,
           message: `boot hook threw for pip "${pip.name}": ${stringifyError(error)}`,
           remediation: `Fix the error in the boot() hook of "${pip.name}". If boot opens partial resources before throwing, clean them up locally — DOT only disposes pips whose boot completed.`,
           docsAnchor: 'boot-failed',
-        });
-        record.issues.push(issue);
-        record.lifecycleDiagnostics.push({
-          pip: pip.name,
-          hook: 'boot',
-          state: 'failed',
-          order: record.order,
-          durationMs,
-          issues: [issue],
-        });
-        this.#emitHook('boot', pip.name, record.order, 'failed', { durationMs, error });
-
-        pipLogger.error('boot: FAILED — rolling back already-booted pips', {
-          'dot.app.rollback.count': bootedRecords.length,
-        });
-        // Dispose already-booted pips in reverse-topological order.
-        const disposeFailures = await this.#runDisposeForRecords(reverseRecords(bootedRecords), phaseLogger);
-        this.#state = 'failed';
-        this.#manifest = this.#buildManifest();
-        throw new DotLifecycleError({
-          code: DotLifecycleErrorCode.BootFailed,
-          phase: 'boot',
-          pip: pip.name,
-          message: issue.message,
+          durationMs: performance.now() - started,
           cause: error,
-          failures: disposeFailures.length > 0 ? disposeFailures : undefined,
+          rollback: bootedRecords,
         });
       }
 
-      const publishedServices = result.services ?? {};
+      const publishedServices: ServiceRecord = result ?? {};
       record.publishedServices = publishedServices;
-      for (const [name, value] of Object.entries(publishedServices)) {
-        this.#serviceMap.set(name, value);
-      }
-      Object.assign(this.#aggregatedServices, publishedServices);
       record.booted = true;
+
+      for (const [localKey, value] of Object.entries(publishedServices)) {
+        const wireKey = pip.renames[localKey] ?? localKey;
+        if (this.#serviceMap.has(wireKey)) {
+          const owner = this.#providerByWireKey.get(wireKey) ?? 'unknown';
+          // The current pip HAS booted — include it in the rollback.
+          return fail({
+            record,
+            code: DotLifecycleErrorCode.ServiceCollision,
+            message: `Pip "${pip.name}" publishes service "${wireKey}" which pip "${owner}" already provides.`,
+            remediation: `Mount one of the two with rename(pip, { '${wireKey}': '<newKey>' }) to keep both instances, or remove the duplicate provider.`,
+            docsAnchor: 'service-collision',
+            durationMs: performance.now() - started,
+            rollback: [...bootedRecords, record],
+          });
+        }
+        this.#serviceMap.set(wireKey, value);
+        this.#providerByWireKey.set(wireKey, pip.name);
+        this.#aggregatedServices[wireKey] = value;
+        record.provides.add(wireKey);
+      }
       bootedRecords.push(record);
 
       const durationMs = performance.now() - started;
@@ -705,17 +822,13 @@ export class DotAppImpl {
     for (const pip of this.#ordered) {
       const record = this.#records.get(pip.name)!;
       const pipLogger = phaseLogger.withAttribute('dot.pip.name', pip.name);
-      if (!pip.start) {
+      if (!pip.hooks.start) {
         pipLogger.debug('start: skipped (no hook)');
         continue;
       }
       record.hooks.add('start');
 
-      const ctx: DotStartContext<Record<string, unknown>> = {
-        pipName: pip.name,
-        appName: this.#appName,
-        services: this.#aggregatedServices,
-      };
+      const ctx = this.#buildHookCtx(record, 'start', true);
 
       const startedAt = performance.now();
       this.#emitHook('start', pip.name, record.order, 'starting');
@@ -729,7 +842,7 @@ export class DotAppImpl {
             order: record.order,
             logger: pipLogger,
           },
-          () => pip.start!(ctx),
+          () => pip.hooks.start!(ctx as never),
         );
       } catch (error) {
         const durationMs = performance.now() - startedAt;
@@ -847,14 +960,10 @@ export class DotAppImpl {
   async #runStopForRecords(records: readonly PipRecord[], phaseLogger: Logger): Promise<DotLifecyclePipFailure[]> {
     const failures: DotLifecyclePipFailure[] = [];
     for (const record of records) {
-      if (!record.pip.stop) continue;
+      if (!record.pip.hooks.stop) continue;
       const pipLogger = phaseLogger.withAttribute('dot.pip.name', record.pip.name);
       record.hooks.add('stop');
-      const ctx: DotStopContext<Record<string, unknown>> = {
-        pipName: record.pip.name,
-        appName: this.#appName,
-        services: this.#aggregatedServices,
-      };
+      const ctx = this.#buildHookCtx(record, 'stop', true);
       const startedAt = performance.now();
       this.#emitHook('stop', record.pip.name, record.order, 'starting');
       try {
@@ -867,7 +976,7 @@ export class DotAppImpl {
             order: record.order,
             logger: pipLogger,
           },
-          () => record.pip.stop!(ctx),
+          () => record.pip.hooks.stop!(ctx as never),
         );
         record.started = false;
         const durationMs = performance.now() - startedAt;
@@ -998,17 +1107,50 @@ export class DotAppImpl {
   async #runDisposeForRecords(records: readonly PipRecord[], phaseLogger: Logger): Promise<DotLifecyclePipFailure[]> {
     const failures: DotLifecyclePipFailure[] = [];
     for (const record of records) {
-      if (!record.pip.dispose) {
+      const lazyPublishes = Object.entries(record.publishedServices).filter(
+        (entry): entry is [string, Lazy<unknown>] => isLazy(entry[1]),
+      );
+      const hasHook = record.pip.hooks.dispose !== undefined;
+      if (!hasHook && lazyPublishes.length === 0) {
         record.booted = false;
         continue;
       }
       const pipLogger = phaseLogger.withAttribute('dot.pip.name', record.pip.name);
+      if (hasHook) {
+        await this.#runDisposeHook(record, pipLogger, failures);
+      }
+      // Auto-dispose lazy service handles AFTER the pip's own dispose hook
+      // (the hook may still use them). Never-initialized handles no-op.
+      for (const [serviceKey, handle] of lazyPublishes) {
+        try {
+          await handle.dispose();
+        } catch (error) {
+          const issue = makeIssue({
+            code: DotLifecycleErrorCode.DisposeFailed,
+            pip: record.pip.name,
+            message: `lazy service "${serviceKey}" cleanup threw for pip "${record.pip.name}": ${stringifyError(error)}`,
+            remediation: `Fix the error in the dispose callback passed to lazy(...) for service "${serviceKey}". Dispose continues through individual failures and reports an aggregate error.`,
+            docsAnchor: 'dispose-failed',
+          });
+          record.issues.push(issue);
+          failures.push({ pip: record.pip.name, phase: 'dispose', error });
+          pipLogger.error('dispose: lazy service cleanup failed (continuing)', {
+            'dot.pip.service.key': serviceKey,
+            'dot.pip.error.message': stringifyError(error),
+          });
+        }
+      }
+      if (!hasHook) {
+        record.booted = false;
+      }
+    }
+    return failures;
+  }
+
+  /** Run a single pip's dispose hook with spans/events/diagnostics. */
+  async #runDisposeHook(record: PipRecord, pipLogger: Logger, failures: DotLifecyclePipFailure[]): Promise<void> {
       record.hooks.add('dispose');
-      const ctx: DotDisposeContext<Record<string, unknown>> = {
-        pipName: record.pip.name,
-        appName: this.#appName,
-        services: this.#aggregatedServices,
-      };
+      const ctx = this.#buildHookCtx(record, 'dispose', true);
       const startedAt = performance.now();
       this.#emitHook('dispose', record.pip.name, record.order, 'starting');
       try {
@@ -1021,7 +1163,7 @@ export class DotAppImpl {
             order: record.order,
             logger: pipLogger,
           },
-          () => record.pip.dispose!(ctx),
+          () => record.pip.hooks.dispose!(ctx as never),
         );
         record.booted = false;
         const durationMs = performance.now() - startedAt;
@@ -1059,8 +1201,6 @@ export class DotAppImpl {
           'dot.pip.error.message': stringifyError(error),
         });
       }
-    }
-    return failures;
   }
 
   #reuseError(phase: DotLifecycleHook): DotLifecycleError {
@@ -1079,14 +1219,18 @@ export class DotAppImpl {
     const routes: RouteManifest[] = [];
     const services: ServiceManifest[] = [];
     const lifecycle: LifecycleManifest[] = [];
-    const dependencies: DependencyEdge[] = buildDependencyEdges(this.#ordered).map(e => ({ ...e }));
+    // Edges are observed at boot time: consumer pip → the pip whose
+    // published wire key satisfied its need. Before boot, the per-pip
+    // `dependencies` array (wire-key strings) is the declarative view.
+    const dependencies: DependencyEdge[] = this.#wiringEdges.map(e => ({ ...e }));
 
     for (const pip of this.#ordered) {
       const record = this.#records.get(pip.name)!;
+      const needWireKeys = Object.entries(pip.needs).map(([alias, witness]) => wireKeyOf(witness, alias));
       pips.push({
         name: pip.name,
         version: pip.version,
-        dependencies: pip.dependencies ?? [],
+        dependencies: needWireKeys,
         provides: [...record.provides],
       });
       routes.push(...record.routes);
@@ -1095,35 +1239,6 @@ export class DotAppImpl {
         pip: pip.name,
         hooks: [...record.hooks],
       });
-      // Append extra dependency edges declared during configure.
-      for (const dep of record.extraDependencies) {
-        dependencies.push({ from: pip.name, to: dep.to, kind: dep.kind });
-      }
-
-      // Optional manifest contribution from the pip itself.
-      const contribution =
-        typeof pip.manifest === 'function'
-          ? pip.manifest({
-              pipName: pip.name,
-              services: this.#aggregatedServices as Readonly<Partial<Record<string, unknown>>>,
-            })
-          : pip.manifest;
-      if (contribution) {
-        for (const svc of contribution.services ?? []) {
-          services.push({ name: svc.name, pip: pip.name, kind: svc.kind });
-        }
-        for (const route of contribution.routes ?? []) {
-          routes.push({ ...route, pip: pip.name });
-        }
-        for (const cap of contribution.provides ?? []) {
-          if (!pips.at(-1)!.provides.includes(cap)) {
-            (pips.at(-1)!.provides as string[]).push(cap);
-          }
-        }
-        for (const dep of contribution.dependencies ?? []) {
-          dependencies.push({ from: pip.name, to: dep.to, kind: dep.kind ?? 'uses' });
-        }
-      }
     }
 
     return {
@@ -1223,4 +1338,4 @@ function reverseRecords(records: readonly PipRecord[]): readonly PipRecord[] {
 /** Re-export `ServiceKind` and `RouteTransport` for the kernel's internal use. */
 
 export { type RouteTransport, type ServiceKind } from '../manifest.js';
-export { type DotPip } from '../pip-contract.js';
+export { type Pip } from '../pip-contract.js';

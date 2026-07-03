@@ -23,16 +23,16 @@ const PLUGIN_CONTRACT_PATH = resolve(__dirname, '..', '..', 'pip-contract.ts');
 
 const BUILDER_SOURCE = `
 import { defineApp } from '${DEFINE_APP_PATH}';
-import { defineDotPip } from '${PLUGIN_CONTRACT_PATH}';
-const p = defineDotPip({ name: 'p', boot: () => ({}) });
+import { pip } from '${PLUGIN_CONTRACT_PATH}';
+const p = pip({ name: 'p', boot: () => ({}) });
 export default defineApp('discovered').use(p);
 `;
 
 const FACTORY_SOURCE = `
 import { defineApp } from '${DEFINE_APP_PATH}';
-import { defineDotPip } from '${PLUGIN_CONTRACT_PATH}';
+import { pip } from '${PLUGIN_CONTRACT_PATH}';
 export default async function makeApp() {
-  const p = defineDotPip({ name: 'p' });
+  const p = pip({ name: 'p' });
   return defineApp('factory').use(p);
 }
 `;

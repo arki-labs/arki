@@ -45,42 +45,39 @@ adapter only makes sense inside a DOT app.
 
 ## Function shape
 
-An adapter exports a factory function that returns a `DotPip`:
+An adapter exports a factory function that returns a `Pip`:
 
 ```ts
 // my-pkg/src/dot.ts
-import { defineDotPip, type DotPip } from '@arki/dot/pip';
+import { pip, type EmptyShape, type Pip } from '@arki/dot/pip';
 
 import { MyClient } from './index.js';
 
 export type MyPkgDotOptions = {
   readonly url: string;
-  readonly name?: string;
 };
 
 export type MyPkgServices = {
   readonly myClient: MyClient;
 };
 
-export function myPkg(options: MyPkgDotOptions): DotPip<MyPkgServices> {
-  const name = options.name ?? 'my-pkg';
-  return defineDotPip<MyPkgServices>({
-    name,
+export function myPkg(options: MyPkgDotOptions): Pip<EmptyShape, MyPkgServices> {
+  return pip({
+    name: 'my-pkg',
     version: '1.0.0',
-    provides: ['my-pkg'],
 
     configure(ctx) {
       ctx.registerService('myClient', 'custom');
     },
 
-    async boot() {
+    async boot(): Promise<MyPkgServices> {
       const myClient = new MyClient(options.url);
       await myClient.connect();
-      return { services: { myClient } };
+      return { myClient };
     },
 
-    async dispose({ services }) {
-      await services.myClient.close();
+    async dispose({ myClient }) {
+      await myClient.close();
     },
   });
 }
@@ -93,6 +90,16 @@ export function myPkg(options: MyPkgDotOptions): DotPip<MyPkgServices> {
 import { myPkg } from '@acme/my-pkg/dot';
 
 const app = await defineApp('billing').use(myPkg({ url: '...' })).boot();
+```
+
+Do NOT take a `name` option for multi-instance mounting — that's the app
+author's job via `rename`:
+
+```ts
+import { rename } from '@arki/dot';
+
+.use(myPkg({ url: primaryUrl }))
+.use(rename(myPkg({ url: replicaUrl }), { myClient: 'replicaClient' }, 'my-pkg-replica'))
 ```
 
 ## Service registration in `configure`
@@ -116,14 +123,14 @@ read this to know what services exist before the app boots.
 DI:
 
 ```ts
-async boot(ctx) {
+async boot({ $config }) {
   // Optional: read config injected by `defineApp(name, { config })`.
-  const timeoutMs = (ctx.config['MY_PKG_TIMEOUT_MS'] as number | undefined) ?? 5000;
+  const timeoutMs = ($config['MY_PKG_TIMEOUT_MS'] as number | undefined) ?? 5000;
 
   const myClient = new MyClient(options.url, { timeoutMs });
   await myClient.connect();
 
-  return { services: { myClient } };
+  return { myClient };
 }
 ```
 
@@ -136,7 +143,7 @@ async boot() {
   const a = await openA();
   try {
     const b = await openB();
-    return { services: { a, b } };
+    return { a, b };
   } catch (err) {
     await a.close();
     throw err;
@@ -144,13 +151,34 @@ async boot() {
 }
 ```
 
-## Cleanup in `dispose`
+## Consuming other services
 
-`dispose` runs in reverse-topological order. Close everything you opened:
+If your adapter needs a service from another pip (say, a logger), declare
+it in `needs` — the hook context delivers it typed, and the app builder
+refuses composition orders that can't satisfy it:
 
 ```ts
-async dispose({ services }) {
-  await services.myClient.close();
+import { pip, service } from '@arki/dot/pip';
+
+pip({
+  name: 'my-pkg',
+  needs: { log: service<Logger>() },
+  async boot({ log }) {
+    log.info('my-pkg booting');
+    return { myClient: await open() };
+  },
+});
+```
+
+## Cleanup in `dispose`
+
+`dispose` runs in reverse declaration order — your `needs` are still alive
+when it runs. The context carries your own published services plus your
+needs:
+
+```ts
+async dispose({ myClient }) {
+  await myClient.close();
 }
 ```
 
@@ -171,22 +199,11 @@ configure(ctx) {
     path: '/_health/my-pkg',
     transport: 'http',
   });
-  ctx.declareDependency('env', 'requires');
 }
 ```
 
-Or use the declarative `manifest` field on the pip object — it accepts a
-static value or a function that receives `services` and the pip name:
-
-```ts
-return defineDotPip<MyPkgServices>({
-  name,
-  manifest: {
-    routes: [{ id: 'health', path: '/_health/my-pkg', transport: 'http' }],
-  },
-  // ...
-});
-```
+Dependency edges are not declared — the kernel observes them from actual
+service wiring at boot time and writes them into `app.manifest.dependencies`.
 
 ## Diagnostics — stable codes and remediation
 
@@ -262,7 +279,7 @@ Adapters declare `@arki/dot` as an **optional peer** so that:
 ```
 
 Import the kernel from `@arki/dot/pip` (a narrow entry that exports
-`defineDotPip` and the pip types only — no `defineApp`, no CLI).
+`pip`, `service`, `token`, `rename`, and the pip types — no CLI).
 This minimises what the adapter pulls in.
 
 ## Canonical examples
@@ -278,7 +295,7 @@ combination of the hooks.
 
 ## See also
 
-- [Pip authoring](./pip-authoring.md) — the general `DotPip`
+- [Pip authoring](./pip-authoring.md) — the general `Pip`
   contract.
 - [Lifecycle](./lifecycle.md) — hook ordering and failure semantics.
 - [Diagnostics](./diagnostics.md) — emitting actionable issues.

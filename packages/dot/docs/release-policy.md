@@ -24,8 +24,10 @@ These are the **stable contracts** as of `0.1`:
 | -------------------------------- | ---------- |
 | `defineApp(name, options?)`      | stable     |
 | `.use(pip)` typed builder     | stable     |
-| `defineDotPip(config)`        | stable     |
-| `DotPip` shape (5 hooks)      | stable     |
+| `pip(config)`                 | stable     |
+| `service<T>()` / `token<T>()` | stable     |
+| `rename(pip, map, name?)`     | stable     |
+| `Pip` shape (5 hooks)         | stable     |
 | `DotLifecycleHook` enum          | stable     |
 | `DotLifecycleState` enum         | stable     |
 | `DotLifecycleError` shape        | stable     |
@@ -44,7 +46,7 @@ These are **experimental** in `0.x` and may change without a major bump:
 The pre-0.1 legacy surface (`createDot`, `definePip`, the
 `@arki/dot/legacy/*`, `@arki/dot/event-sourcing`, and
 `@arki/dot/presets/runtime-local` subpaths) has been **removed**. Use
-`defineApp`/`defineDotPip` for composition and `@arki/event-sourcing`
+`defineApp`/`pip` for composition and `@arki/event-sourcing`
 directly for event-sourcing helpers.
 
 ## Deprecation cycle

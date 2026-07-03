@@ -9,11 +9,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '../define-app.js';
-import { defineDotPip } from '../pip-contract.js';
+import { pip } from '../pip-contract.js';
 
 describe('DOT diagnostics', () => {
   it('pre-boot diagnostics include all five arrays', () => {
-    const p = defineDotPip({
+    const p = pip({
       name: 'p',
       configure: ctx => {
         ctx.registerService('logger', 'logger');
@@ -45,7 +45,7 @@ describe('DOT diagnostics', () => {
   });
 
   it('post-boot diagnostics include per-pip status', async () => {
-    const a = defineDotPip({ name: 'a', boot: () => ({}) });
+    const a = pip({ name: 'a', boot: () => ({}) });
     const app = await defineApp('test').use(a).boot();
     const snap = app.diagnostics;
     expect(snap.pips).toEqual([{ pip: 'a', status: 'ok', issues: [] }]);
@@ -54,7 +54,7 @@ describe('DOT diagnostics', () => {
   });
 
   it('boot failure surfaces a failed pip diagnostic with structured issue', async () => {
-    const bad = defineDotPip({
+    const bad = pip({
       name: 'bad',
       boot: () => {
         throw new Error('boot-boom');
@@ -88,7 +88,7 @@ describe('DOT diagnostics', () => {
     // Surfacing issues needs a configured app whose boot fails — the
     // configured() seam holds the underlying impl whose diagnostics we can
     // read after a boot throw.
-    const bootBad = defineDotPip({
+    const bootBad = pip({
       name: 'bootbad',
       boot: () => {
         throw new Error('boot-boom');

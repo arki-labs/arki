@@ -17,14 +17,14 @@ import { describe, expect, it } from 'vitest';
 
 import type { DotLifecycleEvent, DotLifecycleObserver } from './lifecycle-observer.js';
 import { defineApp } from './define-app.js';
-import { defineDotPip } from './pip-contract.js';
+import { pip } from './pip-contract.js';
 
 describe('DotLifecycleObserver — happy path', () => {
   it('emits configure phase + hook events when observer is passed at construction', () => {
     const events: DotLifecycleEvent[] = [];
     const observer: DotLifecycleObserver = e => events.push(e);
 
-    const pipA = defineDotPip({
+    const pipA = pip({
       name: 'a',
       configure() {
         /* sync */
@@ -69,13 +69,13 @@ describe('DotLifecycleObserver — happy path', () => {
   it('emits the full configure→boot→dispose event stream on a healthy app', async () => {
     const events: DotLifecycleEvent[] = [];
 
-    const pipA = defineDotPip({
+    const pipA = pip({
       name: 'a',
       configure() {
         /* sync */
       },
       boot() {
-        return { services: { a: { ok: true } } };
+        return { a: { ok: true } };
       },
       async dispose() {
         /* async no-op */
@@ -124,7 +124,7 @@ describe('DotLifecycleObserver — failure path', () => {
   it('emits hook-failed + phase-failed when a boot hook throws', async () => {
     const events: DotLifecycleEvent[] = [];
 
-    const badPip = defineDotPip({
+    const badPip = pip({
       name: 'bad',
       boot() {
         throw new Error('boot-broken');
@@ -160,7 +160,7 @@ describe('DotLifecycleObserver — failure path', () => {
 describe('DotLifecycleObserver — subscribe / unsubscribe', () => {
   it('subscribe() on a booted app sees subsequent events; unsubscribe stops the stream', async () => {
     const events: DotLifecycleEvent[] = [];
-    const pipA = defineDotPip({
+    const pipA = pip({
       name: 'a',
       boot() {
         return {};
@@ -202,7 +202,7 @@ describe('DotLifecycleObserver — fault isolation', () => {
       throw new Error('observer-misbehaved');
     };
 
-    const pipA = defineDotPip({
+    const pipA = pip({
       name: 'a',
       boot() {
         return {};
@@ -223,7 +223,7 @@ describe('DotLifecycleObserver — fault isolation', () => {
 
 describe('renderTimeline integration', () => {
   it('app.timeline() returns a non-empty ASCII waterfall after boot', async () => {
-    const pipA = defineDotPip({
+    const pipA = pip({
       name: 'a',
       configure() {
         /* */
@@ -232,7 +232,7 @@ describe('renderTimeline integration', () => {
         return {};
       },
     });
-    const pipB = defineDotPip({
+    const pipB = pip({
       name: 'b',
       configure() {
         /* */

@@ -1,66 +1,56 @@
 /**
- * Lifecycle behaviour tests for the DOT kernel.
+ * Lifecycle behaviour tests for the DOT kernel (v2).
  *
- * Tests enter through public boundaries only — `defineApp`, `defineDotPip`,
- * and the `DotApp` lifecycle methods. The internal scheduler is not tested
- * directly.
+ * Tests enter through public boundaries only — `defineApp`, `pip`, and the
+ * `DotApp` lifecycle methods. The internal scheduler is not tested directly.
+ *
+ * v2 note: declaration order IS boot order. Ordering across pips is
+ * asserted via `.use()` order; the old name-based `dependencies` array no
+ * longer exists.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '../define-app.js';
 import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
-import { defineDotPip } from '../pip-contract.js';
+import { pip, service } from '../pip-contract.js';
 
 type CallLog = {
   hook: 'configure' | 'boot' | 'start' | 'stop' | 'dispose';
   pip: string;
 };
 
+/** Build a pip that logs every hook invocation. */
+function loggingPip(name: string, calls: CallLog[], overrides: { failIn?: 'boot' | 'start' | 'stop' } = {}) {
+  return pip({
+    name,
+    configure: () => {
+      calls.push({ hook: 'configure', pip: name });
+    },
+    boot: () => {
+      calls.push({ hook: 'boot', pip: name });
+      if (overrides.failIn === 'boot') throw new Error(`boom-${name}`);
+      return {};
+    },
+    start: () => {
+      calls.push({ hook: 'start', pip: name });
+      if (overrides.failIn === 'start') throw new Error(`start-failed-${name}`);
+    },
+    stop: () => {
+      calls.push({ hook: 'stop', pip: name });
+      if (overrides.failIn === 'stop') throw new Error(`stop-broken-${name}`);
+    },
+    dispose: () => {
+      calls.push({ hook: 'dispose', pip: name });
+    },
+  });
+}
+
 describe('DOT lifecycle', () => {
-  it('runs all 5 hooks in topological order; stop/dispose run in reverse', async () => {
+  it('runs all 5 hooks in declaration order; stop/dispose run in reverse', async () => {
     const calls: CallLog[] = [];
-
-    const a = defineDotPip({
-      name: 'a',
-      configure: () => {
-        calls.push({ hook: 'configure', pip: 'a' });
-      },
-      boot: () => {
-        calls.push({ hook: 'boot', pip: 'a' });
-        return {};
-      },
-      start: () => {
-        calls.push({ hook: 'start', pip: 'a' });
-      },
-      stop: () => {
-        calls.push({ hook: 'stop', pip: 'a' });
-      },
-      dispose: () => {
-        calls.push({ hook: 'dispose', pip: 'a' });
-      },
-    });
-
-    const b = defineDotPip({
-      name: 'b',
-      dependencies: ['a'],
-      configure: () => {
-        calls.push({ hook: 'configure', pip: 'b' });
-      },
-      boot: () => {
-        calls.push({ hook: 'boot', pip: 'b' });
-        return {};
-      },
-      start: () => {
-        calls.push({ hook: 'start', pip: 'b' });
-      },
-      stop: () => {
-        calls.push({ hook: 'stop', pip: 'b' });
-      },
-      dispose: () => {
-        calls.push({ hook: 'dispose', pip: 'b' });
-      },
-    });
+    const a = loggingPip('a', calls);
+    const b = loggingPip('b', calls);
 
     const app = await defineApp('test').use(a).use(b).start();
     await app.dispose();
@@ -80,7 +70,7 @@ describe('DOT lifecycle', () => {
   });
 
   it('rejects an async configure hook', async () => {
-    const bad = defineDotPip({
+    const bad = pip({
       name: 'bad',
       // Intentional: a configure hook returning a Promise must be detected.
       configure: () => Promise.resolve() as unknown as void,
@@ -95,33 +85,14 @@ describe('DOT lifecycle', () => {
 
   it('disposes already-booted pips in reverse order when a later boot fails', async () => {
     const calls: CallLog[] = [];
-    const a = defineDotPip({
-      name: 'a',
-      boot: () => {
-        calls.push({ hook: 'boot', pip: 'a' });
-        return {};
-      },
-      dispose: () => {
-        calls.push({ hook: 'dispose', pip: 'a' });
-      },
-    });
-    const b = defineDotPip({
-      name: 'b',
-      dependencies: ['a'],
-      boot: () => {
-        calls.push({ hook: 'boot', pip: 'b' });
-        throw new Error('boom-b');
-      },
-      dispose: () => {
-        calls.push({ hook: 'dispose', pip: 'b' });
-      },
-    });
+    const a = loggingPip('a', calls);
+    const b = loggingPip('b', calls, { failIn: 'boot' });
 
     await expect(defineApp('test').use(a).use(b).boot()).rejects.toBeInstanceOf(DotLifecycleError);
 
     // Pip a booted, then b threw — a's dispose runs, b's dispose does NOT
     // (its boot never completed).
-    expect(calls).toEqual([
+    expect(calls.filter(c => c.hook !== 'configure')).toEqual([
       { hook: 'boot', pip: 'a' },
       { hook: 'boot', pip: 'b' },
       { hook: 'dispose', pip: 'a' },
@@ -131,19 +102,9 @@ describe('DOT lifecycle', () => {
   it('does not call dispose for a pip whose boot threw with partial resources', async () => {
     const calls: CallLog[] = [];
     let partialCleanup = false;
-    const a = defineDotPip({
-      name: 'a',
-      boot: () => {
-        calls.push({ hook: 'boot', pip: 'a' });
-        return {};
-      },
-      dispose: () => {
-        calls.push({ hook: 'dispose', pip: 'a' });
-      },
-    });
-    const partial = defineDotPip({
+    const a = loggingPip('a', calls);
+    const partial = pip({
       name: 'partial',
-      dependencies: ['a'],
       boot: () => {
         calls.push({ hook: 'boot', pip: 'partial' });
         // simulate partial resource setup, then failure — the pip cleans up itself
@@ -164,40 +125,8 @@ describe('DOT lifecycle', () => {
 
   it('on start failure stops started pips and disposes all booted pips (reverse order)', async () => {
     const calls: CallLog[] = [];
-    const a = defineDotPip({
-      name: 'a',
-      boot: () => {
-        calls.push({ hook: 'boot', pip: 'a' });
-        return {};
-      },
-      start: () => {
-        calls.push({ hook: 'start', pip: 'a' });
-      },
-      stop: () => {
-        calls.push({ hook: 'stop', pip: 'a' });
-      },
-      dispose: () => {
-        calls.push({ hook: 'dispose', pip: 'a' });
-      },
-    });
-    const b = defineDotPip({
-      name: 'b',
-      dependencies: ['a'],
-      boot: () => {
-        calls.push({ hook: 'boot', pip: 'b' });
-        return {};
-      },
-      start: () => {
-        calls.push({ hook: 'start', pip: 'b' });
-        throw new Error('start-failed');
-      },
-      stop: () => {
-        calls.push({ hook: 'stop', pip: 'b' });
-      },
-      dispose: () => {
-        calls.push({ hook: 'dispose', pip: 'b' });
-      },
-    });
+    const a = loggingPip('a', calls);
+    const b = loggingPip('b', calls, { failIn: 'start' });
 
     await expect(defineApp('test').use(a).use(b).start()).rejects.toMatchObject({
       code: DotLifecycleErrorCode.StartFailed,
@@ -205,7 +134,7 @@ describe('DOT lifecycle', () => {
 
     // a started, then b failed. a is stopped (reverse), then both are disposed (reverse).
     // b never started so b.stop is NOT called.
-    expect(calls).toEqual([
+    expect(calls.filter(c => c.hook !== 'configure')).toEqual([
       { hook: 'boot', pip: 'a' },
       { hook: 'boot', pip: 'b' },
       { hook: 'start', pip: 'a' },
@@ -218,43 +147,16 @@ describe('DOT lifecycle', () => {
 
   it('stop continues through individual pip failures with aggregate error', async () => {
     const calls: CallLog[] = [];
-    const a = defineDotPip({
-      name: 'a',
-      start: () => {
-        calls.push({ hook: 'start', pip: 'a' });
-      },
-      stop: () => {
-        calls.push({ hook: 'stop', pip: 'a' });
-      },
-    });
-    const b = defineDotPip({
-      name: 'b',
-      dependencies: ['a'],
-      start: () => {
-        calls.push({ hook: 'start', pip: 'b' });
-      },
-      stop: () => {
-        calls.push({ hook: 'stop', pip: 'b' });
-        throw new Error('stop-b-broken');
-      },
-    });
-    const c = defineDotPip({
-      name: 'c',
-      dependencies: ['b'],
-      start: () => {
-        calls.push({ hook: 'start', pip: 'c' });
-      },
-      stop: () => {
-        calls.push({ hook: 'stop', pip: 'c' });
-      },
-    });
+    const a = loggingPip('a', calls);
+    const b = loggingPip('b', calls, { failIn: 'stop' });
+    const c = loggingPip('c', calls);
 
     const app = await defineApp('test').use(a).use(b).use(c).start();
     await expect(app.stop()).rejects.toMatchObject({
       code: DotLifecycleErrorCode.StopFailed,
     });
 
-    expect(calls.filter(c => c.hook === 'stop')).toEqual([
+    expect(calls.filter(x => x.hook === 'stop')).toEqual([
       { hook: 'stop', pip: 'c' },
       { hook: 'stop', pip: 'b' },
       { hook: 'stop', pip: 'a' },
@@ -263,7 +165,7 @@ describe('DOT lifecycle', () => {
 
   it('boot() is idempotent while app is booted', async () => {
     let bootCalls = 0;
-    const p = defineDotPip({
+    const p = pip({
       name: 'p',
       boot: () => {
         bootCalls += 1;
@@ -287,7 +189,7 @@ describe('DOT lifecycle', () => {
       resolveBoot = r;
     });
 
-    const slow = defineDotPip({
+    const slow = pip({
       name: 'slow',
       boot: async () => {
         bootCalls += 1;
@@ -317,19 +219,7 @@ describe('DOT lifecycle', () => {
 
   it('start() from defined runs configure + boot first', async () => {
     const calls: CallLog[] = [];
-    const p = defineDotPip({
-      name: 'p',
-      configure: () => {
-        calls.push({ hook: 'configure', pip: 'p' });
-      },
-      boot: () => {
-        calls.push({ hook: 'boot', pip: 'p' });
-        return {};
-      },
-      start: () => {
-        calls.push({ hook: 'start', pip: 'p' });
-      },
-    });
+    const p = loggingPip('p', calls);
     const app = await defineApp('test').use(p).start();
     expect(calls.map(c => c.hook)).toEqual(['configure', 'boot', 'start']);
     expect(app.state).toBe('started');
@@ -338,7 +228,7 @@ describe('DOT lifecycle', () => {
 
   it('stop() on a booted-but-never-started app is a no-op', async () => {
     let stopCalls = 0;
-    const p = defineDotPip({
+    const p = pip({
       name: 'p',
       boot: () => ({}),
       stop: () => {
@@ -354,7 +244,7 @@ describe('DOT lifecycle', () => {
 
   it('dispose() from started runs stop then dispose', async () => {
     const calls: CallLog[] = [];
-    const p = defineDotPip({
+    const p = pip({
       name: 'p',
       start: () => {
         calls.push({ hook: 'start', pip: 'p' });
@@ -373,7 +263,7 @@ describe('DOT lifecycle', () => {
   });
 
   it('boot() after dispose throws DotLifecycleError with ReuseAfterDispose code', async () => {
-    const p = defineDotPip({ name: 'p', boot: () => ({}) });
+    const p = pip({ name: 'p', boot: () => ({}) });
     const app = await defineApp('test').use(p).boot();
     await app.dispose();
     await expect(app.start()).rejects.toMatchObject({
@@ -381,29 +271,98 @@ describe('DOT lifecycle', () => {
     });
   });
 
-  it('detects dependency cycles at configure time', () => {
-    const a = defineDotPip({ name: 'a', dependencies: ['b'] });
-    const b = defineDotPip({ name: 'b', dependencies: ['a'] });
-    expect(() => defineApp('test').use(a).use(b).configure()).toThrow(DotLifecycleError);
-    try {
-      defineApp('test').use(a).use(b).configure();
-    } catch (error) {
-      expect((error as DotLifecycleError).code).toBe(DotLifecycleErrorCode.DependencyCycle);
-    }
+  it('unsatisfied need fails boot with UnsatisfiedNeed and rolls back booted pips', async () => {
+    const calls: CallLog[] = [];
+    const a = loggingPip('a', calls);
+    const consumer = pip({
+      name: 'consumer',
+      needs: { db: service<{ query(): void }>() },
+      boot: ({ db }) => {
+        void db;
+        return {};
+      },
+    });
+
+    // The compile-time guard forbids this chain; the erased seam simulates
+    // dynamic composition, which the kernel must still validate.
+    // @ts-expect-error — `db` has no provider; intentionally invalid wiring
+    const builder = defineApp('test').use(a).use(consumer);
+    await expect(builder.boot()).rejects.toMatchObject({
+      code: DotLifecycleErrorCode.UnsatisfiedNeed,
+      phase: 'boot',
+      pip: 'consumer',
+    });
+    // Pip a booted before the failure — it must be rolled back.
+    expect(calls.filter(c => c.hook === 'dispose')).toEqual([{ hook: 'dispose', pip: 'a' }]);
   });
 
-  it('detects missing dependency at configure time', () => {
-    const a = defineDotPip({ name: 'a', dependencies: ['missing'] });
-    expect(() => defineApp('test').use(a).configure()).toThrow(DotLifecycleError);
-    try {
-      defineApp('test').use(a).configure();
-    } catch (error) {
-      expect((error as DotLifecycleError).code).toBe(DotLifecycleErrorCode.MissingDependency);
-    }
+  it('mutual needs between two pips (a cycle) surface the cycle hint in the E012 error', async () => {
+    const a = pip({
+      name: 'a',
+      needs: { beta: service<number>() },
+      boot: ({ beta }) => ({ alpha: beta + 1 }),
+    });
+    const b = pip({
+      name: 'b',
+      needs: { alpha: service<number>() },
+      boot: ({ alpha }) => ({ beta: alpha + 1 }),
+    });
+
+    // No ordering of these two pips typechecks — the cycle is unrepresentable
+    // at the type level. The erased seam simulates dynamic composition, which
+    // the kernel must still reject with actionable guidance.
+    // @ts-expect-error — a's need has no provider; intentionally cyclic wiring
+    const builder = defineApp('test').use(a).use(b);
+    const error = await builder.boot().then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(DotLifecycleError);
+    expect((error as DotLifecycleError).code).toBe(DotLifecycleErrorCode.UnsatisfiedNeed);
+    expect((error as DotLifecycleError).message).toMatch(/flow strictly forward/);
+    expect((error as DotLifecycleError).message).toMatch(/cycle: merge them or extract the shared piece/);
+  });
+
+  it('service collision fails boot with ServiceCollision and rolls back (incl. the colliding pip)', async () => {
+    const calls: CallLog[] = [];
+    const first = pip({
+      name: 'first',
+      boot: () => {
+        calls.push({ hook: 'boot', pip: 'first' });
+        return { db: { from: 'first' } };
+      },
+      dispose: () => {
+        calls.push({ hook: 'dispose', pip: 'first' });
+      },
+    });
+    const second = pip({
+      name: 'second',
+      boot: () => {
+        calls.push({ hook: 'boot', pip: 'second' });
+        return { db: { from: 'second' } };
+      },
+      dispose: () => {
+        calls.push({ hook: 'dispose', pip: 'second' });
+      },
+    });
+
+    // @ts-expect-error — both provide wire key `db`; intentionally invalid wiring
+    const builder = defineApp('test').use(first).use(second);
+    await expect(builder.boot()).rejects.toMatchObject({
+      code: DotLifecycleErrorCode.ServiceCollision,
+      phase: 'boot',
+      pip: 'second',
+    });
+    // Both pips completed boot before the collision surfaced — both roll back,
+    // in reverse order.
+    expect(calls.filter(c => c.hook === 'dispose')).toEqual([
+      { hook: 'dispose', pip: 'second' },
+      { hook: 'dispose', pip: 'first' },
+    ]);
   });
 
   it('detects duplicate pip registration', () => {
-    const a = defineDotPip({ name: 'a' });
+    const a = pip({ name: 'a' });
     expect(() => defineApp('test').use(a).use(a).configure()).toThrow(DotLifecycleError);
     try {
       defineApp('test').use(a).use(a).configure();

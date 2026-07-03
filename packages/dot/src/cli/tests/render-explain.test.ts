@@ -7,24 +7,24 @@
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '../../define-app.js';
-import { defineDotPip } from '../../pip-contract.js';
+import { pip, service } from '../../pip-contract.js';
 import { buildExplainEnvelope, renderExplain } from '../render-explain.js';
 
 const FROZEN_NOW = () => new Date('2026-01-01T00:00:00.000Z');
 
 function syntheticApp() {
-  const db = defineDotPip<{ db: { name: string } }>({
+  const db = pip({
     name: 'db',
     version: '1.0.0',
     configure: ctx => {
       ctx.registerService('db', 'db');
     },
-    boot: () => ({ services: { db: { name: 'primary' } } }),
+    boot: () => ({ db: { name: 'primary' } }),
   });
-  const api = defineDotPip({
+  const api = pip({
     name: 'api',
     version: '1.0.0',
-    dependencies: ['db'],
+    needs: { db: service<{ name: string }>() },
     configure: ctx => {
       ctx.registerRoute({ id: 'api.health', method: 'GET', path: '/health', transport: 'http' });
     },

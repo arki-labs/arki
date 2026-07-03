@@ -5,47 +5,57 @@
  * lifecycle behaviour, registration, and service publishing without dragging
  * in concrete framework dependencies.
  *
- * @example
- *   import { testApp, defineDotPip } from '@arki/dot';
+ * NOTE: `testApp` takes an erased pip array, so the compile-time wiring
+ * guard does not apply here — the kernel's runtime validation (unsatisfied
+ * needs, collisions) still does. Use `defineApp(...).use(...)` chains in
+ * tests that should exercise the type-level guard.
  *
- *   const myPip = defineDotPip<{ counter: { value: number } }>({
+ * @example
+ *   import { testApp, pip } from '@arki/dot';
+ *
+ *   const myPip = pip({
  *     name: 'counter',
- *     async boot() {
- *       return { services: { counter: { value: 0 } } };
- *     },
+ *     boot: () => ({ counter: { value: 0 } }),
  *   });
  *
  *   it('publishes a counter service', async () => {
- *     const app = await testApp([myPip]).boot();
+ *     const app = await bootTestApp<{ counter: { value: number } }>([myPip]);
  *     expect(app.services.counter.value).toBe(0);
  *     await app.dispose();
  *   });
  */
 
 import type { DotApp, DotAppBuilder } from './define-app.js';
-import type { AnyDotPip, DotPip } from './pip-contract.js';
+import type { AnyPip, EmptyShape, ServiceRecord } from './pip-contract.js';
 import { defineApp } from './define-app.js';
 
 export type TestAppOptions = {
   /** App name used in the manifest. Defaults to `'test-app'`. */
   name?: string;
-  /** Runtime config bag passed to every boot hook. */
+  /** Runtime config bag exposed to hooks as `$config`. */
   config?: Readonly<Record<string, unknown>>;
+};
+
+/**
+ * Guard-free view of the builder for erased pip arrays. The runtime `use`
+ * implementation accepts the missing guard argument (it is type-level
+ * only), so this seam is safe — the kernel still validates wiring at boot.
+ */
+type LooseBuilder = {
+  use(pip: AnyPip): LooseBuilder;
 };
 
 /**
  * Build a DOT app builder pre-populated with the given pips, ready to
  * `.configure()`, `.boot()` or `.start()` from a test.
  */
-export function testApp<TServices extends Record<string, unknown> = Record<string, never>>(
-  // Accept any pip shape — tests routinely mix services types. Internally
-  // we erase to `AnyDotPip` for the kernel.
-  pips: readonly DotPip<never>[] | readonly DotPip<Record<string, never>>[] | readonly AnyDotPip[] = [],
+export function testApp<TServices extends ServiceRecord = EmptyShape>(
+  pips: readonly AnyPip[] = [],
   options: TestAppOptions = {},
 ): DotAppBuilder<TServices> {
-  let builder = defineApp(options.name ?? 'test-app', { config: options.config });
-  for (const pip of pips) {
-    builder = builder.use(pip as DotPip<Record<string, unknown>>);
+  let builder: unknown = defineApp(options.name ?? 'test-app', { config: options.config });
+  for (const p of pips) {
+    builder = (builder as LooseBuilder).use(p);
   }
   return builder as DotAppBuilder<TServices>;
 }
@@ -54,8 +64,8 @@ export function testApp<TServices extends Record<string, unknown> = Record<strin
  * Convenience: build, boot, return the running app. Caller is responsible for
  * calling `app.dispose()` when finished.
  */
-export async function bootTestApp<TServices extends Record<string, unknown> = Record<string, never>>(
-  pips: readonly DotPip<never>[] | readonly DotPip<Record<string, never>>[] | readonly AnyDotPip[] = [],
+export async function bootTestApp<TServices extends ServiceRecord = EmptyShape>(
+  pips: readonly AnyPip[] = [],
   options: TestAppOptions = {},
 ): Promise<DotApp<TServices>> {
   return testApp<TServices>(pips, options).boot();
