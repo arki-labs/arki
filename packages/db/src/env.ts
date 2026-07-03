@@ -62,9 +62,8 @@ export const env = defineEnv({
     NODE_ENV: process.env['NODE_ENV'],
     // Resolve from `DB_URL` (canonical) first, falling back to `DATABASE_URL`
     // (PG/Coolify/12-factor standard) so deployments using the standard name
-    // still work. Closes the silent divergence between novelette/backend's
-    // DATABASE_URL schema and this package's DB_URL schema.
-    // Issue 13 AC 6 / cross-app-auth-prod-fix umbrella.
+    // still work. Closes the silent divergence between app schemas keyed on
+    // DATABASE_URL and this package's DB_URL schema.
     DB_URL: process.env['DB_URL'] ?? process.env['DATABASE_URL'],
     PGUSER: process.env['PGUSER'],
     PGPASSWORD: process.env['PGPASSWORD'],

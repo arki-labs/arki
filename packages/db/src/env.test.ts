@@ -1,12 +1,10 @@
 /**
  * @arki/db env-resolution tests — DATABASE_URL → DB_URL alias.
  *
- * Closes pass-2 Concern B (2026-05-29): the silent divergence between
- * `apps/novelette/backend/src/core/env.ts` (DATABASE_URL) and this package's
- * historical DB_URL schema blocked the production-mode smoke until both env
- * vars were set with the same value. Surfaced during novelette/authentication
- * issue 12 L3.rework iteration 2; also tracked at issue 13 AC 6 and the
- * cross-app-auth-prod-fix workspace umbrella.
+ * Closes pass-2 Concern B (2026-05-29): the silent divergence between an
+ * app env schema keyed on DATABASE_URL and this package's historical
+ * DB_URL schema blocked a production-mode smoke until both env vars were
+ * set with the same value.
  *
  * The fix is a runtime alias in `env.ts`: `DB_URL` resolves from EITHER
  * `process.env.DATABASE_URL` (preferred — PG/Coolify/12-factor standard) OR

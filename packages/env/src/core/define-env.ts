@@ -41,7 +41,7 @@ export function defineEnv<
   const TExtends extends Array<Record<string, unknown>> = [],
 >(config: {
   /**
-   * Label shown in validation-error logs, e.g. `'@everseek/backend'`. Without it a misconfigured
+   * Label shown in validation-error logs, e.g. `'@acme/backend'`. Without it a misconfigured
    * deploy logs a bare "Invalid environment variables" with no hint which env failed — exactly the
    * blind failure this wrapper exists to prevent.
    */
