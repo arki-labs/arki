@@ -11,7 +11,7 @@
  * `kv.get/set` in tests because that would require a real Redis instance.
  */
 
-import { defineApp, DotLifecycleError, DotPipError } from '@arki/dot/pip';
+import { defineApp, DotLifecycleError, DotPipError, rename } from '@arki/dot/pip';
 import { describe, expect, it } from 'vitest';
 
 import { KV } from './index.js';
@@ -71,18 +71,18 @@ describe('@arki/kv/dot', () => {
     }
   });
 
-  it('honors a custom pip name', () => {
-    const configured = defineApp('kv-named-test')
-      .use(
-        kv({
-          name: 'cache',
-          url: 'redis://localhost:6379',
-        }),
-      )
-      .configure();
-    expect(configured.manifest.pips.map(p => p.name)).toEqual(['cache']);
-    expect(configured.manifest.services).toEqual([
-      { name: 'kv', pip: 'cache', kind: 'kv' },
-    ]);
+  it('mounts a second KV scope via rename()', async () => {
+    const app = await defineApp('kv-named-test')
+      .use(kv({ url: 'redis://127.0.0.1:1', namespace: 'app' }))
+      .use(rename(kv({ url: 'redis://127.0.0.1:1', namespace: 'sessions' }), { kv: 'sessionsKv' }, 'sessions-kv'))
+      .boot();
+    try {
+      expect(app.manifest.pips.map(p => p.name)).toEqual(['kv', 'sessions-kv']);
+      expect(app.services.kv).toBeInstanceOf(KV);
+      expect(app.services.sessionsKv).toBeInstanceOf(KV);
+      expect(app.services.kv).not.toBe(app.services.sessionsKv);
+    } finally {
+      await app.dispose();
+    }
   });
 });

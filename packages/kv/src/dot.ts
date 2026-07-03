@@ -1,9 +1,9 @@
 /**
  * DOT adapter for `@arki/kv`.
  *
- * Wraps `KV` construction as a `DotPip`. The pip opens a Redis-backed
+ * Wraps `KV` construction as a DOT pip. The pip opens a Redis-backed
  * KV client in `boot`, publishes it as `services.kv`, and closes the client
- * in `dispose` (reverse-topological order).
+ * in `dispose` (reverse declaration order).
  *
  * @example
  * ```ts
@@ -18,12 +18,22 @@
  * await app.dispose();
  * ```
  *
+ * To mount a second KV scope in the same app, rename the published wire
+ * key at the mount site:
+ *
+ * ```ts
+ * import { rename } from '@arki/dot';
+ *
+ * .use(kv({ namespace: 'app' }))
+ * .use(rename(kv({ namespace: 'sessions' }), { kv: 'sessionsKv' }, 'sessions-kv'))
+ * ```
+ *
  * The `@arki/dot` package is an OPTIONAL peer of `@arki/kv`. Importing
  * this adapter without `@arki/dot` installed will fail at module load —
  * that is intentional: the adapter only makes sense in a DOT app.
  */
 
-import { defineDotPip, DotPipError, type DotPip } from '@arki/dot/pip';
+import { pip, DotPipError, type EmptyShape, type Pip } from '@arki/dot/pip';
 
 import { KV } from './index.js';
 
@@ -49,11 +59,6 @@ export type KvDotOptions = {
   readonly namespace?: string;
   /** Optional prefix for rate-limit keys (default `rl`). */
   readonly rateLimitPrefix?: string;
-  /**
-   * Pip name override. Defaults to `'kv'`. Use this only when composing
-   * multiple KV scopes inside the same app (rare).
-   */
-  readonly name?: string;
 };
 
 /** Services published by the kv adapter. */
@@ -65,14 +70,12 @@ export type KvServices = {
  * Build a DOT pip that opens a `KV` client and publishes it as a service.
  *
  * @param options - Connection + naming options.
- * @returns A `DotPip` that registers a `kv`-kind service.
+ * @returns A pip that publishes `services.kv`.
  */
-export function kv(options: KvDotOptions = {}): DotPip<KvServices> {
-  const name = options.name ?? 'kv';
-  return defineDotPip<KvServices>({
-    name,
+export function kv(options: KvDotOptions = {}): Pip<EmptyShape, KvServices> {
+  return pip({
+    name: 'kv',
     version: '0.1.0',
-    provides: ['kv'],
     configure(ctx) {
       ctx.registerService('kv', 'kv');
     },
@@ -81,17 +84,16 @@ export function kv(options: KvDotOptions = {}): DotPip<KvServices> {
       if (url === undefined || url === '') {
         throw new DotPipError({
           code: KV_PIP_ERROR_CODES.urlNotConfigured,
-          message: `[${name}] KV URL is not configured.`,
-          remediation:
-            'Pass options.url to kv(...) or set KV_URL in the environment before booting the app.',
+          message: '[kv] KV URL is not configured.',
+          remediation: 'Pass options.url to kv(...) or set KV_URL in the environment before booting the app.',
           docsUrl: 'https://arki.dev/dot/errors/kv-pip-e001',
         });
       }
       const client = new KV(url, options.namespace, options.rateLimitPrefix);
-      return { services: { kv: client } };
+      return { kv: client };
     },
-    async dispose({ services }) {
-      await services.kv.close();
+    async dispose({ kv: client }) {
+      await client.close();
     },
   });
 }

@@ -6,10 +6,10 @@
  *   - manifest contribution (one `db`-kind service entry)
  *   - boot opens a Drizzle handle, dispose closes the underlying PGlite
  *   - sanity-check round-trip query through the booted handle
- *   - custom pip-name override
+ *   - multi-instance mount via rename()
  */
 
-import { defineApp, DotLifecycleError, DotPipError } from '@arki/dot/pip';
+import { defineApp, DotLifecycleError, DotPipError, rename } from '@arki/dot/pip';
 import { defineRelations } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
@@ -96,20 +96,21 @@ describe('@arki/db/dot', () => {
     }
   });
 
-  it('honors a custom pip name', () => {
-    const configured = defineApp('db-named-test')
-      .use(
-        db({
-          driver: 'pglite',
-          memory: true,
-          relations,
-          name: 'primary-db',
-        }),
-      )
-      .configure();
-    expect(configured.manifest.pips.map(p => p.name)).toEqual(['primary-db']);
-    expect(configured.manifest.services).toEqual([
-      { name: 'db', pip: 'primary-db', kind: 'db' },
-    ]);
+  it('mounts a second db scope via rename()', async () => {
+    const app = await defineApp('db-named-test')
+      .use(db({ driver: 'pglite', memory: true, relations }))
+      .use(rename(db({ driver: 'pglite', memory: true, relations }), { db: 'reportsDb' }, 'reports-db'))
+      .boot();
+    try {
+      expect(app.manifest.pips.map(p => p.name)).toEqual(['db', 'reports-db']);
+      expect(app.services.db).toBeDefined();
+      expect(app.services.reportsDb).toBeDefined();
+      expect(app.services.db).not.toBe(app.services.reportsDb);
+      // The two instances are isolated databases.
+      await app.services.db.execute(`CREATE TABLE only_primary (id text PRIMARY KEY)`);
+      await expect(app.services.reportsDb.execute(`SELECT * FROM only_primary`)).rejects.toThrow();
+    } finally {
+      await app.dispose();
+    }
   });
 });
