@@ -33,7 +33,7 @@
  *   - `SCORE_E003` — no public-candidate packages found (nothing to score).
  */
 
-import { access, readdir } from 'node:fs/promises';
+import { access, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import debugFactory from 'debug';
@@ -51,7 +51,7 @@ import {
 import { runInventory, type InventoryItem } from './inventory';
 import { createEnvelope } from './json-output';
 import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
-import { auditPack, PACK_ERROR_CODES, type NpmPackRunner } from './pack';
+import { auditPack, isSourceDistributedManifest, PACK_ERROR_CODES, type NpmPackRunner } from './pack';
 import type {
   DotProbeResult,
   FixtureRun,
@@ -196,9 +196,15 @@ export async function runScorecard(
   for (const item of candidates) {
     const dir = path.dirname(path.join(opts.cwd, item.manifestPath));
     try {
+      // Source distribution is declared in the manifest itself: a `files`
+      // array carrying `src` opts the package into shipping raw `.ts`.
+      const rawManifest = JSON.parse(await readFile(path.join(dir, 'package.json'), 'utf8')) as Record<
+        string,
+        unknown
+      >;
       const result = await auditPack(dir, {
         manifest: { name: item.name, version: item.version },
-        isSourceDistributed: false,
+        isSourceDistributed: isSourceDistributedManifest(rawManifest),
         ...(opts.npmPackRunner !== undefined ? { runner: opts.npmPackRunner } : {}),
       });
       if (result.ok) {

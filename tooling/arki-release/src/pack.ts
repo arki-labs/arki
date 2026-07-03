@@ -307,6 +307,18 @@ function validateNpmPackOutput(raw: unknown): NpmPackResult {
 }
 
 /**
+ * A package is source-distributed when its manifest opts `src` into the
+ * npm tarball via the `files` array. Declaring `src/**` (or `src`) is the
+ * single opt-in signal — the `no-raw-ts` pack rule then permits raw `.ts`
+ * in the published output.
+ */
+export function isSourceDistributedManifest(manifest: Record<string, unknown>): boolean {
+  const files = manifest['files'];
+  if (!Array.isArray(files)) return false;
+  return files.some(entry => typeof entry === 'string' && (entry === 'src' || entry.startsWith('src/')));
+}
+
+/**
  * Apply the rule set to a single npm pack entry and produce a
  * {@link PackAuditResult}. Pure — no I/O.
  *

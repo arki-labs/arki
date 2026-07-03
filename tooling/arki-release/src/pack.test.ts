@@ -13,6 +13,7 @@ import {
   auditPack,
   auditPackEntry,
   DEFAULT_PACK_RULES,
+  isSourceDistributedManifest,
   runNpmPack,
 } from './pack';
 import type { NpmPackEntry, NpmPackFileEntry, PackAuditContext } from './types';
@@ -417,5 +418,20 @@ describe('DEFAULT_PACK_RULES contract', () => {
   it('all rules have unique ids', () => {
     const ids = DEFAULT_PACK_RULES.map(r => r.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe('isSourceDistributedManifest', () => {
+  it('is true when files opts src in (src or src/**)', () => {
+    expect(isSourceDistributedManifest({ files: ['dist/**', 'src/**'] })).toBe(true);
+    expect(isSourceDistributedManifest({ files: ['dist', 'src'] })).toBe(true);
+  });
+
+  it('is false for dist-only, missing, or malformed files fields', () => {
+    expect(isSourceDistributedManifest({ files: ['dist/**', 'README.md'] })).toBe(false);
+    expect(isSourceDistributedManifest({})).toBe(false);
+    expect(isSourceDistributedManifest({ files: 'src' })).toBe(false);
+    // Negation patterns alone don't opt a package in.
+    expect(isSourceDistributedManifest({ files: ['dist/**', '!src/**/*.test.*'] })).toBe(false);
   });
 });

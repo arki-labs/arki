@@ -7,6 +7,7 @@
  * subcommand is an honest stub that returns `status: 'pending'` — the real
  * logic lands in Tasks 2-7.
  */
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import debugFactory from 'debug';
@@ -22,7 +23,7 @@ import { renderHistoryText, runHistory } from './history';
 import { runInventory, type InventoryItem } from './inventory';
 import { createEnvelope, emitEnvelope } from './json-output';
 import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
-import { auditPack, PACK_ERROR_CODES } from './pack';
+import { auditPack, isSourceDistributedManifest, PACK_ERROR_CODES } from './pack';
 import { renderScorecardText, runScorecard } from './scorecard';
 import { renderSyncPackageReposText, runSyncPackageRepos } from './sync-package-repos';
 import type {
@@ -726,9 +727,15 @@ async function runPackHandler(args: ParsedCliArgs): Promise<number> {
       }
 
       const packageDir = path.dirname(path.join(cwd, item.manifestPath));
+      // Source distribution is declared in the manifest itself: a `files`
+      // array carrying `src` opts the package into shipping raw `.ts`.
+      const rawManifest = JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8')) as Record<
+        string,
+        unknown
+      >;
       const auditResult = await auditPack(packageDir, {
         manifest: { name: item.name, version: item.version },
-        isSourceDistributed: false,
+        isSourceDistributed: isSourceDistributedManifest(rawManifest),
       });
 
       if (!auditResult.ok) {
