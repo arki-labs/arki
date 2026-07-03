@@ -22,7 +22,7 @@ import { expect, vi } from 'vitest';
 
 import type { DefinedAuth } from '../define-auth-backend';
 
-const MUTATED_ENV_KEYS = ['NODE_ENV', 'DATABASE_URL', 'RESEND_API_KEY'] as const;
+const MUTATED_ENV_KEYS = ['NODE_ENV', 'DATABASE_URL', 'DB_URL', 'AUTH_SECRET', 'RESEND_API_KEY'] as const;
 
 /**
  * Prepare process.env so a dynamic auth-module import evaluates as a production
@@ -33,6 +33,11 @@ const MUTATED_ENV_KEYS = ['NODE_ENV', 'DATABASE_URL', 'RESEND_API_KEY'] as const
  * - Bridges DB_URL → DATABASE_URL (`@arki/testing` global setup sets DB_URL; app
  *   env schemas read DATABASE_URL — only strict production validation exposes it).
  * - Stubs RESEND_API_KEY so app env schemas that require it at import validate.
+ * - Stubs DB_URL + AUTH_SECRET for apps WITHOUT a testcontainer (D-09). Flipping to
+ *   production re-enables strict `@arki/db/env` (DB_URL) + `@arki/auth/env`
+ *   (AUTH_SECRET) validation that `NODE_ENV==='test'` was skipping; testcontainer
+ *   apps (novelette) set a real DB_URL that wins via `??=`. The fake DB_URL never
+ *   dials — pg-pool connects lazily on first query, and booting auth runs none.
  *
  * Restoring env AFTER the dynamic import is safe: the auth module is constructed
  * (and its `options` captured) at first import, then module-cached, so a later
@@ -45,6 +50,8 @@ export function applyProductionBootEnv(): () => void {
   }
   process.env.NODE_ENV = 'production';
   process.env.RESEND_API_KEY ??= 'test_resend_key';
+  process.env.DB_URL ??= 'postgres://user:pass@localhost:5432/prod_boot_test';
+  process.env.AUTH_SECRET ??= 'prod-boot-test-secret-at-least-32-characters-long';
   return () => {
     for (const [key, value] of previous) {
       if (value === undefined) delete process.env[key];
