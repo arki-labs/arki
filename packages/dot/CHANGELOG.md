@@ -1,8 +1,8 @@
 # @arki/dot
 
-## Unreleased
+## 0.1.3
 
-### Kernel hardening (external review findings)
+### Kernel hardening (external review findings) — 9871fce
 
 - **Lifecycle transitions are serialized.** `boot()` / `start()` / `stop()` /
   `dispose()` now run on a single transition queue: concurrent calls to the

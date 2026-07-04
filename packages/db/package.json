@@ -1,6 +1,6 @@
 {
   "name": "@arki/db",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Drizzle ORM repositories and database helpers for ARKI — Postgres + PGlite runtimes, projection builder, branded ID factory, and env-aware connection pooling.",
   "license": "MIT",
   "type": "module",
