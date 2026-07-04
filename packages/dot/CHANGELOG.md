@@ -1,5 +1,11 @@
 # @arki/dot
 
+## 0.1.4
+
+### Patch Changes
+
+- Docs-only release: README rewritten around the v2 dependency-injection model — needs-as-witnesses with inferred provides, the compile-time wiring guard, tokens (`token`/`provide`/`Token.instance`), multi-instance `rename()`, lazy services (`lazy`/`service.lazy`), the reserved `$` kernel namespace, a 12-pip commerce-platform walkthrough, and the E011–E014 runtime error-code table. No runtime changes.
+
 ## 0.1.3
 
 ### Kernel hardening (external review findings) — 9871fce
