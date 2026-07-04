@@ -1,5 +1,6 @@
 {
   "name": "@arki/tanstack-start",
+  "private": true,
   "version": "0.1.2",
   "type": "module",
   "exports": {

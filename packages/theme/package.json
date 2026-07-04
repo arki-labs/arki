@@ -1,5 +1,6 @@
 {
   "name": "@arki/theme",
+  "private": true,
   "version": "0.2.0",
   "sideEffects": false,
   "type": "module",
