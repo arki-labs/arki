@@ -80,7 +80,7 @@ git diff packages/<pkg>/package.json
 
 ## Watch points
 
-- **Cascade reach** — `updateInternalDependencies: "patch"` in `.changeset/config.json` means a Wave 1 bump auto-patch-bumps every consumer (apps, Wave 2-5 packages). That's ~80 file changes for a single Wave 1 patch. Expected and benign — all consumers are mostly private packages whose version doesn't affect npm.
+- **Cascade reach** — `updateInternalDependencies: "patch"` auto-patch-bumps wave-package consumers, but since 2026-07-04 the cascade stops at the wave boundary: `"privatePackages": { "version": false, "tag": false }` plus `private: true` on every app and non-wave package means `changeset version` touches ONLY wave packages. If an `apps/**` or non-wave manifest shows a bump, a `private: true` flag is missing somewhere — fix the flag and revert the bump (see SKILL.md hard rules). Before this fix a single Wave 1 patch dirtied ~130 app files that had to be hand-reverted every release.
 - **Peer-dep coupling** — `@arki/env` peer-depends on `@arki/dot`. When `@arki/dot` ships a new major, `@arki/env`'s peer constraint may need a manual bump in source. Check after every Wave 2 release.
 - **Scorecard re-run is mandatory** — bumping source touches the materialized tree's manifests; the scorecard catches surprises (regenerated `files` array, new leaks from updated docs, etc.).
 - **Source != tree != npm** — the source has `workspace:*`, the tree has `0.0.1`, npm has the tarball. All three must converge before "shipped" is true.

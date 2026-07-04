@@ -80,6 +80,7 @@ Patch bump (0.0.1 → 0.0.2): any change, breaking or not. Yes, this is anti-sem
 
 ## Hard rules
 
+- **Apps and non-wave packages are NEVER versioned or released** (founder rule, 2026-07-04). Enforced structurally: `.changeset/config.json` sets `"privatePackages": { "version": false, "tag": false }`, and every workspace package outside the release waves carries `"private": true`. The pre-approved release set is therefore machine-checkable: `private: false` ⟺ listed in `arki.release.config.ts` waves. If `changeset version` ever bumps an `apps/**` manifest or a non-wave package, a `private: true` flag is missing — fix the flag and revert the bump; do not commit it. Promoting a package to public = flipping its flag via [add-new-package.md](./add-new-package.md), never ad hoc.
 - **Never commit `.release/arki-public/`** — it's gitignored in the monorepo; the materializer regenerates it on demand.
 - **Never run `git add -A` inside `.release/arki-public/` without confirming a local `.git/` exists there** — git walks UP to find a parent `.git` and will pollute the monorepo's index with sibling agents' work. See [troubleshooting.md](./troubleshooting.md#the-git-add-a-parent-walk-trap).
 - **Force-push to `arki-labs/arki` is allowed** — the tree is deterministic. Just confirm with the user before destructive remote operations.
