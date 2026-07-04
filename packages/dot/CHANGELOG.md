@@ -1,5 +1,29 @@
 # @arki/dot
 
+## Unreleased
+
+### Kernel hardening (external review findings)
+
+- **Lifecycle transitions are serialized.** `boot()` / `start()` / `stop()` /
+  `dispose()` now run on a single transition queue: concurrent calls to the
+  same transition coalesce onto one in-flight promise (hooks never
+  double-run — this previously held for boot/stop/dispose but not `start`),
+  and calls to _different_ transitions wait their turn and re-check state at
+  the head of the queue. Previously a `dispose()` completing while `start()`
+  awaited a hook could be overwritten by the resuming start — the app ended
+  `started` after being disposed.
+- **Lazy auto-dispose tracks ownership.** A `Lazy<T>` handle republished by
+  a downstream pip (identity pass-through via `service.lazy`) is now cleaned
+  up only by its _first_ publisher, after that pip's own `dispose` hook.
+  Previously the republisher's record — disposed earlier under reverse
+  order — closed the handle out from under the provider's dispose hook.
+- **`$`-prefixed service keys are enforced as reserved**
+  (`DOT_LIFECYCLE_E014`). `pip()` now rejects `$`-prefixed needs aliases and
+  publish keys at compile time (constraint-level — no new unsafe casts), and
+  the kernel validates aliases, publish keys, and `rename()` targets at
+  runtime, so `$app` / `$pip` / `$config` can never be shadowed. Docs
+  previously claimed this; now the kernel guarantees it.
+
 ## 0.1.2
 
 ### Patch Changes

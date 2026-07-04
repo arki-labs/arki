@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '../define-app.js';
 import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
-import { pip, service } from '../pip-contract.js';
+import { pip, rename, service } from '../pip-contract.js';
 
 type CallLog = {
   hook: 'configure' | 'boot' | 'start' | 'stop' | 'dispose';
@@ -369,5 +369,140 @@ describe('DOT lifecycle', () => {
     } catch (error) {
       expect((error as DotLifecycleError).code).toBe(DotLifecycleErrorCode.DuplicatePip);
     }
+  });
+});
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(r => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+describe('lifecycle transition serialization', () => {
+  it('dispose() issued during a slow start() queues behind it — no resurrection', async () => {
+    const order: string[] = [];
+    const entered = deferred();
+    const gate = deferred();
+    const slow = pip({
+      name: 'slow',
+      boot: () => {
+        order.push('boot');
+        return {};
+      },
+      start: async () => {
+        order.push('start:begin');
+        entered.resolve();
+        await gate.promise;
+        order.push('start:end');
+      },
+      stop: () => void order.push('stop'),
+      dispose: () => void order.push('dispose'),
+    });
+
+    const app = await defineApp('race-start-dispose').use(slow).boot();
+    const starting = app.start();
+    await entered.promise; // start hook is mid-flight at its await point
+    const disposing = app.dispose();
+    await new Promise(r => setTimeout(r, 0)); // room for a mis-serialized dispose to interleave
+    expect(order).toEqual(['boot', 'start:begin']); // dispose queued, not interleaved
+
+    gate.resolve();
+    await Promise.all([starting, disposing]);
+    // Start completes first, THEN the queued dispose cascades stop+dispose.
+    expect(order).toEqual(['boot', 'start:begin', 'start:end', 'stop', 'dispose']);
+    expect(app.state).toBe('disposed'); // start must not stamp `started` over `disposed`
+  });
+
+  it('concurrent start() calls coalesce onto one in-flight transition', async () => {
+    let startRuns = 0;
+    const gate = deferred();
+    const p = pip({
+      name: 'once',
+      start: async () => {
+        startRuns += 1;
+        await gate.promise;
+      },
+    });
+
+    const app = await defineApp('race-double-start').use(p).boot();
+    const first = app.start();
+    const second = app.start();
+    gate.resolve();
+    await Promise.all([first, second]);
+    expect(startRuns).toBe(1);
+    expect(app.state).toBe('started');
+  });
+
+  it('start() issued while dispose() is in flight rejects — a disposed app cannot restart', async () => {
+    const entered = deferred();
+    const gate = deferred();
+    const p = pip({
+      name: 'p',
+      boot: () => ({}),
+      dispose: async () => {
+        entered.resolve();
+        await gate.promise;
+      },
+    });
+
+    const app = await defineApp('race-dispose-start').use(p).boot();
+    const disposing = app.dispose();
+    await entered.promise; // dispose hook is mid-flight
+    const starting = app.start();
+    gate.resolve();
+    await disposing;
+    await expect(starting).rejects.toMatchObject({
+      code: DotLifecycleErrorCode.ReuseAfterDispose,
+    });
+    expect(app.state).toBe('disposed');
+  });
+});
+
+describe('reserved $ keys (E014)', () => {
+  it('a boot hook publishing a $-prefixed key fails with ReservedServiceKey and rolls back', async () => {
+    const calls: CallLog[] = [];
+    const good = loggingPip('good', calls);
+    const bad = pip({
+      name: 'bad',
+      // @ts-expect-error — $-prefixed provide keys are reserved for kernel context
+      boot: () => ({ $app: 42 }),
+    });
+
+    await expect(defineApp('reserved-publish').use(good).use(bad).boot()).rejects.toMatchObject({
+      code: DotLifecycleErrorCode.ReservedServiceKey,
+    });
+    // The earlier pip had booted — it must roll back.
+    expect(calls.filter(c => c.hook === 'dispose')).toEqual([{ hook: 'dispose', pip: 'good' }]);
+  });
+
+  it('a $-prefixed needs alias throws ReservedServiceKey at construction', () => {
+    const bad = pip({
+      name: 'bad-needs',
+      // @ts-expect-error — $-prefixed needs aliases are reserved for kernel context
+      needs: { $db: service<number>() },
+    });
+
+    let thrown: unknown;
+    try {
+      defineApp('reserved-needs').use(bad).configure();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ code: DotLifecycleErrorCode.ReservedServiceKey });
+  });
+
+  it('rename() to a $-prefixed wire key throws ReservedServiceKey at construction', () => {
+    const provider = pip({ name: 'db', boot: () => ({ db: 1 }) });
+    const renamed = rename(provider, { db: '$db' });
+
+    let thrown: unknown;
+    try {
+      defineApp('reserved-rename').use(renamed).configure();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ code: DotLifecycleErrorCode.ReservedServiceKey });
   });
 });

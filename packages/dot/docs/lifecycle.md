@@ -137,16 +137,21 @@ The kernel only disposes pips whose `boot` returned successfully.
 | Call                  | From state                                | Behaviour                                      |
 | --------------------- | ----------------------------------------- | ---------------------------------------------- |
 | `boot()`              | `booted`, `started`, `stopped`            | No-op. Hooks do not re-run.                    |
-| `boot()` (concurrent) | any pre-`booted`                           | Concurrent callers share one in-flight promise. |
 | `start()`             | `defined` or `configured`                  | Boots first, then starts.                      |
 | `start()`             | `stopped`                                 | Re-runs **only** `start` hooks.                |
 | `start()`             | `started`                                 | No-op.                                         |
 | `stop()`              | `defined`, `configured`, `booted`, `stopped` | No-op (nothing started).                       |
-| `stop()` (concurrent) | `started`                                  | Concurrent callers share one in-flight promise. |
 | `dispose()`           | `started`                                 | Runs `stop` first, then `dispose`.             |
 | `dispose()`           | `booted` or `stopped`                      | Runs only `dispose`.                           |
 | `dispose()`           | `disposed`                                | No-op.                                         |
 | `boot()` / `start()`  | `failed` or `disposed`                     | Throws `DOT_LIFECYCLE_E007` or `E008`.         |
+
+Concurrent calls to the **same** transition share one in-flight promise
+(hooks never double-run). Calls to **different** transitions are
+serialized on a single queue: each waits for the in-flight transition to
+finish and re-checks state at the head of the queue. A `dispose()` issued
+while `start()` is mid-flight runs *after* start completes and wins —
+the app ends `disposed`, never resurrected.
 
 ## Error codes
 
@@ -162,9 +167,15 @@ The kernel emits stable, machine-readable error codes:
 | `DOT_LIFECYCLE_E006`  | One or more `dispose` hooks threw (aggregate).              |
 | `DOT_LIFECYCLE_E007`  | Reuse after `dispose()`.                                    |
 | `DOT_LIFECYCLE_E008`  | Reuse after a failed lifecycle.                             |
-| `DOT_LIFECYCLE_E009`  | Pip dependency graph contains a cycle.                   |
-| `DOT_LIFECYCLE_E010`  | Pip declared a dependency that is not registered.        |
-| `DOT_LIFECYCLE_E011`  | Pip registered twice.                                    |
+| `DOT_LIFECYCLE_E011`  | Pip registered twice.                                       |
+| `DOT_LIFECYCLE_E012`  | A `needs` entry has no provider among earlier pips.         |
+| `DOT_LIFECYCLE_E013`  | A published wire key collides with an earlier provider.     |
+| `DOT_LIFECYCLE_E014`  | A service key uses the reserved `$` (kernel) prefix.        |
+
+`E009` (dependency cycle) and `E010` (missing dependency) are **retired**
+with the v2 wiring model — declaration order is boot order, so cycles and
+name-based dependency declarations no longer exist. Codes are never
+reused.
 
 Every code surfaces as a `DiagnosticIssue` in `app.diagnostics.issues` with
 remediation guidance.
@@ -205,8 +216,10 @@ process.on('SIGTERM', () => shutdown(app));
 process.on('SIGINT', () => shutdown(app));
 ```
 
-The kernel coalesces concurrent `stop()` / `dispose()` calls onto a single
-in-flight promise, so a double-signal won't double-cleanup.
+The kernel coalesces concurrent calls to the same transition onto a single
+in-flight promise (a double-signal won't double-cleanup), and serializes
+different transitions on one queue — a `dispose()` racing a slow `start()`
+always runs after it and leaves the app `disposed`.
 
 ## See also
 

@@ -142,10 +142,21 @@ export class DotAppImpl {
 
   /** In-flight boot promise — used for concurrent boot() coalescing. */
   #bootInflight: Promise<void> | null = null;
+  /** In-flight start promise — used for concurrent start() coalescing. */
+  #startInflight: Promise<void> | null = null;
   /** In-flight stop promise — used for concurrent stop() coalescing. */
   #stopInflight: Promise<void> | null = null;
   /** In-flight dispose promise — used for concurrent dispose() coalescing. */
   #disposeInflight: Promise<void> | null = null;
+  /**
+   * Serializes lifecycle transitions. Each of boot/start/stop/dispose
+   * queues behind whatever transition is in flight and re-checks
+   * `#state` only once it reaches the head of the queue. Without this,
+   * phases interleave at await points — e.g. `dispose()` completes while
+   * `start()` awaits a hook, and the resuming start stamps `started`
+   * over `disposed`, resurrecting a dead app.
+   */
+  #transitionChain: Promise<unknown> = Promise.resolve();
 
   /**
    * Structured lifecycle logger. One per app instance; named so consumers
@@ -187,6 +198,33 @@ export class DotAppImpl {
           pip: pip.name,
           message: `Pip "${pip.name}" is registered twice`,
         });
+      }
+      // `$` is the kernel context namespace ($app/$pip/$config). The pip()
+      // constraint bans these at compile time; this is the runtime backstop
+      // for erased pips and rename() targets, which types cannot see.
+      for (const alias of Object.keys(pip.needs)) {
+        if (alias.startsWith('$')) {
+          throw new DotLifecycleError({
+            code: DotLifecycleErrorCode.ReservedServiceKey,
+            phase: 'configure',
+            pip: pip.name,
+            message:
+              `Pip "${pip.name}" declares needs alias "${alias}" — the "$" prefix is reserved ` +
+              `for kernel context keys ($app, $pip, $config). Rename the alias.`,
+          });
+        }
+      }
+      for (const [localKey, wireKey] of Object.entries(pip.renames)) {
+        if (wireKey.startsWith('$')) {
+          throw new DotLifecycleError({
+            code: DotLifecycleErrorCode.ReservedServiceKey,
+            phase: 'configure',
+            pip: pip.name,
+            message:
+              `Pip "${pip.name}" renames "${localKey}" to "${wireKey}" — the "$" prefix is ` +
+              `reserved for kernel context keys ($app, $pip, $config). Pick a different wire key.`,
+          });
+        }
       }
       this.#records.set(pip.name, {
         pip,
@@ -533,20 +571,38 @@ export class DotAppImpl {
     phaseLogger.debug('configure: complete', { 'dot.app.pip.count': this.#ordered.length });
   }
 
+  /**
+   * Run one lifecycle transition after all previously enqueued ones.
+   * The chain itself never rejects — each link swallows its error for
+   * the *next* link only; the caller still receives the original
+   * rejection through the returned promise.
+   */
+  #enqueueTransition<T>(run: () => Promise<T>): Promise<T> {
+    const result = this.#transitionChain.then(run);
+    // The chain link settles even when the transition fails — the caller
+    // still sees the original rejection through `result`.
+    this.#transitionChain = result.catch(() => null);
+    return result;
+  }
+
   /** Public boot() — idempotent + concurrent-safe. */
   async boot(): Promise<void> {
+    if (this.#bootInflight) return this.#bootInflight;
+    this.#bootInflight = this.#enqueueTransition(() => this.#bootTransition()).finally(() => {
+      this.#bootInflight = null;
+    });
+    return this.#bootInflight;
+  }
+
+  /** State checks + boot body. Runs at the head of the transition queue. */
+  async #bootTransition(): Promise<void> {
     if (this.#state === 'failed' || this.#state === 'disposed') {
       throw this.#reuseError('boot');
     }
     if (this.#state === 'booted' || this.#state === 'started' || this.#state === 'stopped') {
       return;
     }
-    if (this.#bootInflight) return this.#bootInflight;
-
-    this.#bootInflight = this.#runBoot().finally(() => {
-      this.#bootInflight = null;
-    });
-    return this.#bootInflight;
+    return this.#runBoot();
   }
 
   async #runBoot(): Promise<void> {
@@ -746,6 +802,22 @@ export class DotAppImpl {
 
       for (const [localKey, value] of Object.entries(publishedServices)) {
         const wireKey = pip.renames[localKey] ?? localKey;
+        if (localKey.startsWith('$') || wireKey.startsWith('$')) {
+          // The pip() constraint bans this at compile time; erased pips can
+          // still reach here. A `$` publish would shadow $app/$pip/$config
+          // in the pip's own post-boot hook contexts.
+          return fail({
+            record,
+            code: DotLifecycleErrorCode.ReservedServiceKey,
+            message:
+              `Pip "${pip.name}" publishes service "${wireKey}" — the "$" prefix is reserved ` +
+              `for kernel context keys ($app, $pip, $config).`,
+            remediation: `Rename the "${wireKey}" key returned from the boot() hook of "${pip.name}" — "$"-prefixed keys would shadow the kernel context.`,
+            docsAnchor: 'reserved-service-key',
+            durationMs: performance.now() - started,
+            rollback: [...bootedRecords, record],
+          });
+        }
         if (this.#serviceMap.has(wireKey)) {
           const owner = this.#providerByWireKey.get(wireKey) ?? 'unknown';
           // The current pip HAS booted — include it in the rollback.
@@ -787,14 +859,26 @@ export class DotAppImpl {
     phaseLogger.debug('boot: complete', { 'dot.app.pip.count': this.#ordered.length });
   }
 
-  /** Public start(). Boots first if needed. Idempotent. */
+  /** Public start(). Boots first if needed. Idempotent + concurrent-safe. */
   async start(): Promise<void> {
+    if (this.#startInflight) return this.#startInflight;
+    this.#startInflight = this.#enqueueTransition(() => this.#startTransition()).finally(() => {
+      this.#startInflight = null;
+    });
+    return this.#startInflight;
+  }
+
+  /** State checks + start body. Runs at the head of the transition queue. */
+  async #startTransition(): Promise<void> {
     if (this.#state === 'failed' || this.#state === 'disposed') {
       throw this.#reuseError('start');
     }
     if (this.#state === 'started') return;
     if (this.#state === 'defined' || this.#state === 'configured') {
-      await this.boot();
+      // Direct #runBoot — we already hold the head of the transition
+      // queue; going through public boot() would enqueue behind
+      // ourselves and deadlock.
+      await this.#runBoot();
     }
     // From booted or stopped, run start hooks.
     const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'start');
@@ -905,24 +989,26 @@ export class DotAppImpl {
 
   /** Public stop(). Idempotent + concurrent-safe. */
   async stop(): Promise<void> {
-    if (this.#state === 'failed' || this.#state === 'disposed') {
-      // stop() after dispose is a no-op (idempotent across terminal states only
-      // for `disposed`; `failed` was already cleaned up).
-      if (this.#state === 'disposed') return;
-      throw this.#reuseError('stop');
-    }
     if (this.#stopInflight) return this.#stopInflight;
+    this.#stopInflight = this.#enqueueTransition(() => this.#stopTransition()).finally(() => {
+      this.#stopInflight = null;
+    });
+    return this.#stopInflight;
+  }
+
+  /** State checks + stop body. Runs at the head of the transition queue. */
+  async #stopTransition(): Promise<void> {
+    // stop() after dispose is a no-op (idempotent across terminal states only
+    // for `disposed`; `failed` was already cleaned up).
+    if (this.#state === 'disposed') return;
+    if (this.#state === 'failed') throw this.#reuseError('stop');
     // For non-started states (defined/configured/booted/stopped): no-op.
     if (this.#state !== 'started') {
       // Mark booted as "stopped" for state-machine clarity.
       if (this.#state === 'booted') this.#state = 'stopped';
       return;
     }
-
-    this.#stopInflight = this.#runStop().finally(() => {
-      this.#stopInflight = null;
-    });
-    return this.#stopInflight;
+    return this.#runStop();
   }
 
   async #runStop(): Promise<void> {
@@ -1020,13 +1106,17 @@ export class DotAppImpl {
 
   /** Public dispose(). Idempotent + concurrent-safe. */
   async dispose(): Promise<void> {
-    if (this.#state === 'disposed') return;
     if (this.#disposeInflight) return this.#disposeInflight;
-
-    this.#disposeInflight = this.#runDispose().finally(() => {
+    this.#disposeInflight = this.#enqueueTransition(() => this.#disposeTransition()).finally(() => {
       this.#disposeInflight = null;
     });
     return this.#disposeInflight;
+  }
+
+  /** State check + dispose body. Runs at the head of the transition queue. */
+  async #disposeTransition(): Promise<void> {
+    if (this.#state === 'disposed') return;
+    return this.#runDispose();
   }
 
   async #runDispose(): Promise<void> {
@@ -1106,9 +1196,30 @@ export class DotAppImpl {
 
   async #runDisposeForRecords(records: readonly PipRecord[], phaseLogger: Logger): Promise<DotLifecyclePipFailure[]> {
     const failures: DotLifecyclePipFailure[] = [];
+
+    // A lazy handle can be published under several keys — a `service.lazy`
+    // consumer republishing its provider's handle passes it through by
+    // identity. Auto-dispose belongs to the handle's FIRST publisher
+    // (declaration order): dispose runs in reverse, so cleaning the handle
+    // with a republisher would kill it before the original provider's own
+    // dispose hook gets to use it. `records` arrives reversed, so plain
+    // overwrite leaves the earliest-declared pip as each handle's owner.
+    const ownerOf = new Map<Lazy<unknown>, PipRecord>();
     for (const record of records) {
+      for (const value of Object.values(record.publishedServices)) {
+        if (isLazy(value)) ownerOf.set(value, record);
+      }
+    }
+
+    for (const record of records) {
+      const seen = new Set<Lazy<unknown>>();
       const lazyPublishes = Object.entries(record.publishedServices).filter(
-        (entry): entry is [string, Lazy<unknown>] => isLazy(entry[1]),
+        (entry): entry is [string, Lazy<unknown>] => {
+          const value = entry[1];
+          if (!isLazy(value) || ownerOf.get(value) !== record || seen.has(value)) return false;
+          seen.add(value);
+          return true;
+        },
       );
       const hasHook = record.pip.hooks.dispose !== undefined;
       if (!hasHook && lazyPublishes.length === 0) {

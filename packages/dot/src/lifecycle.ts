@@ -74,6 +74,8 @@ export const DotLifecycleErrorCode = {
   UnsatisfiedNeed: 'DOT_LIFECYCLE_E012',
   /** A pip published a wire key that an earlier pip already provides. */
   ServiceCollision: 'DOT_LIFECYCLE_E013',
+  /** A needs alias, publish key, or rename target uses the reserved `$` prefix. */
+  ReservedServiceKey: 'DOT_LIFECYCLE_E014',
 } as const;
 
 export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];

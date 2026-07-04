@@ -105,11 +105,15 @@ export const billing = pip({
 Wiring is checked **at compile time**: `.use(billing)` is a type error
 until an earlier `.use(...)` provides a compatible `apiClient`. The kernel
 re-validates at runtime (coded errors `DOT_LIFECYCLE_E012` unsatisfied
-need, `DOT_LIFECYCLE_E013` collision) for erased/dynamic composition.
+need, `DOT_LIFECYCLE_E013` collision, `DOT_LIFECYCLE_E014` reserved key)
+for erased/dynamic composition.
 
 Hook contexts also carry `$`-prefixed kernel keys — `$app` (app name),
 `$pip` (pip name), `$config` (the `defineApp(name, { config })` bag). The
-prefix guarantees they never collide with service aliases.
+`$` prefix is a reserved namespace: `pip()` rejects `$`-prefixed needs
+aliases and publish keys at compile time, and the kernel enforces the same
+rule at runtime (`DOT_LIFECYCLE_E014`) for renames and erased pips — so
+kernel keys can never be shadowed.
 
 ## Declaration order is boot order
 

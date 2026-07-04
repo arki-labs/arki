@@ -271,6 +271,36 @@ describe('lazy services in the kernel', () => {
     expect(log).toEqual(['init', 'close']); // provider-side cleanup still owns it
   });
 
+  it('a republished handle is auto-disposed by its FIRST publisher — after that pip’s dispose hook', async () => {
+    const order: string[] = [];
+    const provider = pip({
+      name: 'db',
+      boot: () => ({
+        db: lazy((): Db => ({ id: 3, close: () => void order.push('lazy-cleanup') }), {
+          dispose: db => db.close(),
+        }),
+      }),
+      async dispose({ db }) {
+        // The provider's own teardown still needs the handle alive, even
+        // though a later pip republished it under another key. Reverse
+        // dispose order must not let the republisher close it first.
+        expect(await db.get()).toMatchObject({ id: 3 });
+        order.push('provider-hook');
+      },
+    });
+    const alias = pip({
+      name: 'alias',
+      needs: { db: service.lazy<Db>() },
+      boot: ({ db }) => ({ aliasDb: db }),
+      dispose: () => void order.push('alias-hook'),
+    });
+
+    const app = await defineApp('lazy-ownership').use(provider).use(alias).boot();
+    await app.services.aliasDb.get();
+    await app.dispose();
+    expect(order).toEqual(['alias-hook', 'provider-hook', 'lazy-cleanup']);
+  });
+
   it('the guard accepts eager or lazy providers for a service.lazy need — and still rejects wrong types', () => {
     const eagerProvider = pip({ name: 'db', boot: () => ({ db: { id: 1, close: () => undefined } as Db }) });
     const lazyProvider = makeLazyDbPip([]);

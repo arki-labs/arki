@@ -276,8 +276,22 @@ export type WireNeeds<S extends NeedsShape> = {
 };
 
 /**
+ * No `$`-prefixed keys — that prefix is the kernel context namespace
+ * ({@link KernelCtx}). Used as a constraint on needs shapes and provides
+ * records: a matching key makes the property type `never`, which no
+ * witness or service value satisfies, so the violation errors at the
+ * exact offending property. The kernel re-validates at runtime with
+ * `DOT_LIFECYCLE_E014` for paths the constraint cannot see (renames,
+ * erased pips).
+ */
+export type NoReservedKeys = Readonly<Record<`$${string}`, never>>;
+
+/**
  * Kernel-supplied context keys, present in every service-carrying hook
- * context. `$`-prefixed so they can never collide with service aliases.
+ * context. The `$` prefix is a reserved namespace: `pip()` rejects
+ * `$`-prefixed needs aliases and publish keys at compile time (via
+ * {@link NoReservedKeys}) and the kernel enforces it at runtime
+ * (`DOT_LIFECYCLE_E014`), so these keys can never be shadowed.
  */
 export type KernelCtx = {
   /** App name (passed to `defineApp`). */
@@ -379,7 +393,10 @@ export type AnyPip = Pip<ServiceRecord, ServiceRecord>;
  * });
  * ```
  */
-export function pip<TShape extends NeedsShape = EmptyShape, TProvides extends ServiceRecord = EmptyShape>(def: {
+export function pip<
+  TShape extends NeedsShape & NoReservedKeys = EmptyShape,
+  TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
+>(def: {
   readonly name: string;
   readonly version?: string;
   readonly needs?: TShape;
