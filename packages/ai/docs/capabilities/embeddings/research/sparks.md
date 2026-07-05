@@ -237,6 +237,48 @@ Sparks are **not** evidence-backed findings. They are threads to pull. The bar f
 
 ---
 
+## S-26 — DeepInfra's marketing pricing landing lags the API catalog
+
+**Source:** Screenshot of `deepinfra.com/pricing` (2026-07-04) shows only legacy models — BGE (base/large/m3/en-icl), GTE (base/large), E5 (base/large/multilingual), MiniLM (L6/L12), MPNet, text2vec-chinese — priced $0.005–$0.010/M. Newer models including `Qwen/Qwen3-Embedding-8B` are absent from the landing page, but present on the model-specific detail page (`deepinfra.com/Qwen/Qwen3-Embedding-8B/api`) at "$0.010 / 1M tokens" on what appears to be a standard pay-per-token endpoint.
+
+**Why interesting:** Two disjoint sources of truth on the same site — the marketing landing (curated, stale) vs. the model detail page (per-model, fresh). Downstream cost research that relies on the landing page systematically undercounts what's available; research that relies on model pages systematically overstates confidence because the pooled endpoint may not actually be live for newer models.
+
+**If true, this changes:** How we should structure cost research going forward. **Never trust a single-source vendor page for a price claim.** Cross-reference the pricing landing (marketing) with the model detail page (dev docs) with a smoke test (`curl`) against the actual endpoint. When the three agree, confidence is high; when they diverge, the actual answer requires a live call.
+
+**Verify:** Send a smoke request:
+
+```bash
+curl https://api.deepinfra.com/v1/openai/embeddings \
+  -H "Authorization: Bearer $DEEPINFRA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"Qwen/Qwen3-Embedding-8B","input":"hello"}'
+```
+
+If it returns embeddings, the pooled tier is live at the model-page price. If it returns 404 or "dedicated deployment required," DeepInfra should drop out of the cheap-Qwen3-8B list.
+
+---
+
+## S-27 — Fireworks AI lists Qwen3-Embedding-8B at $0.00/M for serverless (verify rate caps)
+
+**Source:** `fireworks.ai/models/fireworks/qwen3-embedding-8b` model page states "$0.00 Per 1M Tokens" for serverless deployment with 32K–40.9K context, dimensions 32–4096 configurable.
+
+**Why interesting:** If real (and not a display artifact where the true tier is hidden behind rate limits or account gating), Fireworks is the free-tier winner for prototyping Qwen3-Embedding-8B. Dedicated deployment cost is unlisted.
+
+**If true, this changes:** The prototype-to-production migration path — start on Fireworks for exploration, migrate to DeepInfra / OpenRouter / Nebius when volume triggers rate-limiting. Cheaper than self-host until the cutover.
+
+**Verify:** Send a smoke request with rate-limit headers observation:
+
+```bash
+curl -i https://api.fireworks.ai/inference/v1/embeddings \
+  -H "Authorization: Bearer $FIREWORKS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"accounts/fireworks/models/qwen3-embedding-8b","input":"hello"}'
+```
+
+Read the `x-ratelimit-*` headers; probe at 100 QPS to see when the free tier caps out.
+
+---
+
 ## Spark summary by category
 
 **Corporate/M&A signals (verify by reading 10-Ks):** S-01 (Voyage→MongoDB), S-02 (Jina→Elastic)
@@ -254,5 +296,7 @@ Sparks are **not** evidence-backed findings. They are threads to pull. The bar f
 **Long-tail conflicts:** S-07 (Anthropic→Voyage COI), S-16 (model upgrade re-embed tax)
 
 **Single-vendor unique features:** S-09 (Cohere v4 PDF-direct embed), S-10 (Qdrant ACORN)
+
+**Sourcing-methodology signals:** S-26 (DeepInfra pricing-landing/model-page conflict), S-27 (Fireworks $0.00 free-tier)
 
 **On-device:** S-20 (MLX throughput parity)

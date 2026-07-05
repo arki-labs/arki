@@ -339,6 +339,17 @@ See `next-research.md` for the prioritized roadmap.
 
 ---
 
+## Downstream — decisions taken 2026-05-17 to 2026-07-04
+
+The findings above drove concrete engineering decisions in `packages/ai/src/embeddings/`. See [../decisions.md](../decisions.md) for the full log. Highlights:
+
+- **D-EMB-01** — profile-based recommendation grid adopted (12 provider modules).
+- **D-EMB-07** — Ollama default → `qwen3-embedding:0.6b` (from `nomic-embed-text`) per B-01-01.
+- **D-EMB-08** — Nebius added as first-class hosted-Qwen3-8B route (raw fetch, mirrors `jina.ts` pattern).
+- **D-EMB-09** — sourcing-rigor policy: every $/M-token claim must reach at least "verified-model-page" tier before anchoring a production decision. This was written after a founder-caught failure: Nebius pricing was published in this repo as "$0.010/M" when the source was actually a search-result summary, not the Nebius pricing page. See NR-26 for the browser-verify remediation.
+
+---
+
 ## Inputs Snapshot
 
 | File | Modified | Read at digest |

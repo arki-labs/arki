@@ -11,6 +11,7 @@
 | Local default (all volumes)| `ollama` (Qwen3-Embedding-0.6B)         | `OllamaEmbeddingProvider`           | —                           |
 | Privacy-max (frontier)     | `ollama` (`qwen3-embedding:8b`)         | `OllamaEmbeddingProvider`           | —                           |
 | Privacy-max (via TEI)      | `openai-compatible` (TEI on RTX 4090)   | `OpenAICompatibleEmbeddingProvider` | —                           |
+| Hosted Qwen3-8B (cloud)    | `nebius` (Qwen3-Embedding-8B)           | `NebiusEmbeddingProvider`           | —                           |
 | Cost-min low volume        | `openai` (text-embedding-3-small Batch) | `OpenAIEmbeddingProvider`           | —                           |
 | Cost-min mid volume        | `bedrock` (Titan v2)                    | `createBedrockEmbeddingProvider`    | `@ai-sdk/amazon-bedrock`    |
 | Balanced                   | `voyage` (`voyage-4` w/ 200M free tier) | `VoyageEmbeddingProvider`           | `voyageai`                  |
@@ -93,6 +94,16 @@
 - **Default model:** `jina-embeddings-v3` (570M, 1024-d MRL, 8K ctx)
 - **Env:** `JINA_API_KEY`, `JINA_EMBEDDING_MODEL`
 - **Special:** supports `lateChunking: true` for long-doc retrieval (Jina v3-only feature; +1–3 NDCG@10 on LongEmbed). Jina v3/v4 open weights are CC-BY-NC — commercial use requires the hosted API.
+
+### `nebius`
+
+- **Library:** raw `fetch` to `api.tokenfactory.nebius.com/v1/embeddings` (no JS SDK); pattern mirrors `jina.ts`.
+- **Default model:** `Qwen/Qwen3-Embedding-8B` (4096-d, 32K ctx) — the cloud path to the current open-weights MMTEB leader (70.58) without self-hosting the 8B weights.
+- **Env:** `NEBIUS_API_KEY`, `NEBIUS_EMBEDDING_MODEL`, `NEBIUS_EMBEDDING_DIMENSIONS`, `NEBIUS_BASE_URL`
+- **Trade down to a smaller Qwen3 when cost or latency matters:**
+  - `Qwen/Qwen3-Embedding-4B` (2560-d)
+  - `Qwen/Qwen3-Embedding-0.6B` (1024-d)
+- **When:** cost-minimized hosted-OSS-frontier for a workload that wants Qwen3-Embedding-8B without operating the GPU. **Pricing verification pending** — see the sourcing-confidence table below and [decisions.md D-EMB-09](./decisions.md#d-emb-09--sourcing-rigor-hosted-price-claims-require-primary-source-verification-before-we-anchor-a-production-decision-on-them).
 
 ### `mixedbread`
 
@@ -289,6 +300,29 @@ const embedder = new AiSdkEmbeddingProvider({
   label: 'openrouter-bge-m3',
 });
 ```
+
+## Hosted Qwen3-Embedding-8B pricing — sourcing confidence
+
+The current-generation Qwen3-Embedding-8B (Apache 2.0, MMTEB 70.58 leader) is available on several hosted OSS marketplaces. Not every advertised price has been verified against a primary source — see [decisions.md D-EMB-09](./decisions.md#d-emb-09--sourcing-rigor-hosted-price-claims-require-primary-source-verification-before-we-anchor-a-production-decision-on-them) for the rigor policy.
+
+| Provider | Claimed $/M input | Confidence | Verified against | Verify before production |
+| --- | --- | --- | --- | --- |
+| **Fireworks AI** | $0.00 (serverless) | Verified-model-page | `fireworks.ai/models/fireworks/qwen3-embedding-8b` | Rate caps + real cost when limits hit |
+| **DeepInfra** | $0.010 | Verified-model-page, **conflicts with landing** | `deepinfra.com/Qwen/Qwen3-Embedding-8B/api` states $0.010; but `deepinfra.com/pricing` marketing landing omits Qwen3-8B entirely | Smoke-test the actual `POST /v1/openai/embeddings` endpoint |
+| **OpenRouter** | $0.010 | Verified-primary | `openrouter.ai/qwen/qwen3-embedding-8b` (static HTML) | Aggregator markup on top of underlying provider |
+| **Nebius Token Factory** | ~$0.010 (unverified) | **Search-snippet-unverified** | Two search summaries reference `tokenfactory.nebius.com`; pricing page is JS-rendered and could not be verified by WebFetch | Manually load `tokenfactory.nebius.com/prices` in a real browser |
+| **SiliconFlow** | $0.040 | Verified-model-page | `siliconflow.com/models/qwen-qwen3-embedding-8b` | — |
+| **Novita AI** | $0.070 | Verified-model-page | `blogs.novita.ai/qwen3-embedding-8b/` | Confirm free-tier / rate-limit story |
+
+**Confirmed-cheap DeepInfra pooled tier** (from the marketing landing page — models actually listed):
+
+| Model | Context | $/M |
+| --- | --- | --- |
+| bge-m3, bge-m3-multi, bge-en-icl | 8K | $0.010 |
+| bge-large-en-v1.5, gte-large, e5-large-v2, multilingual-e5-large, multilingual-e5-large-instruct | 512 | $0.010 |
+| bge-base-en-v1.5, gte-base, e5-base-v2, all-MiniLM-L6/L12-v2, all-mpnet-base-v2 | 512 | $0.005 |
+
+**`bge-m3` at $0.010/M is the safest verified cheap-multilingual choice** — same headline price as the (unverified) Qwen3-8B tier, MIT license, dense + sparse + multi-vector, 100+ languages, unambiguously live on DeepInfra's pooled endpoint.
 
 ## What's not included
 

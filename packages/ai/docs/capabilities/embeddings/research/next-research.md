@@ -260,14 +260,30 @@ The research-first principle (per `deep-research-digest` skill) applies: when a 
 - **Rooted in:** W-20
 - **Type:** monitoring; quick-experiment if a new MoE entrant appears
 
+### NR-26 — Browser-verify hosted `Qwen3-Embedding-8B` pricing across all 6 providers
+
+- **Status:** open (CRITICAL for any production commitment)
+- **Rooted in:** [decisions.md D-EMB-09](../decisions.md#d-emb-09--sourcing-rigor-hosted-price-claims-require-primary-source-verification-before-we-anchor-a-production-decision-on-them), S-26, S-27
+- **What we don't know:** Whether the advertised $0.010/M price on Nebius Token Factory, DeepInfra, and OpenRouter for `Qwen/Qwen3-Embedding-8B` reflects the actual production endpoint. Nebius pricing page is JS-rendered and unverifiable via WebFetch; DeepInfra's model detail page conflicts with its marketing landing page.
+- **Blocks:** Committing any workspace app to a hosted Qwen3-Embedding-8B provider — the persona-3 balanced or persona-2 cost-min recommendation collapses if the price is off by 5-10×.
+- **Approach:** Two parallel tracks.
+  1. **Manual browser verification.** For each of the six providers (Fireworks / DeepInfra / OpenRouter / Nebius / SiliconFlow / Novita), open the pricing page in a real browser (not WebFetch), locate the Qwen3-Embedding-8B line, and screenshot with URL + date. If the model isn't on the pricing page, take a screenshot of the omission for the record.
+  2. **Live smoke tests.** For each provider, issue one `POST /v1/embeddings` request via `curl` with model `Qwen/Qwen3-Embedding-8B` (or the provider's exact model id) and one 5-word input. Record: HTTP status, response size, and any `x-ratelimit-*` or usage-reporting headers. This is the ground truth — if the endpoint returns 404 or requires dedicated deployment, the pricing claim is void.
+- **Type:** desk-research + engineering-spike
+- **Effort:** 2 hours
+- **Depends on:** API keys for each provider (only spend where free credits exist).
+- **Unblocks:** Persona 2 (cost-min) hosted route + Persona 3 (balanced) alternate route + Persona 1 (privacy-max) hosted-with-EU-residency route via Nebius.
+- **Output:** Update the sourcing-confidence table in [PROVIDERS.md#hosted-qwen3-embedding-8b-pricing--sourcing-confidence](../PROVIDERS.md#hosted-qwen3-embedding-8b-pricing--sourcing-confidence) with verified numbers and demote any provider whose claim can't be substantiated.
+
 ---
 
 ## Recommended execution order (next 4–6 weeks of research budget)
 
 | Order | Item | Effort | Why first |
 |---|---|---|---|
-| 1 | NR-05 (Nemotron license) | 30 min | Cheap; could change Persona 1 default |
-| 2 | NR-09 (OSS marketplace pricing) | 1 hr | Cheap; opens cost-optimization paths |
+| 1 | NR-26 (browser-verify hosted Qwen3-8B pricing) | 2 hr | CRITICAL — every cost decision leaning on hosted Qwen3-8B currently rests on unverified numbers |
+| 2 | NR-05 (Nemotron license) | 30 min | Cheap; could change Persona 1 default |
+| 3 | NR-09 (OSS marketplace pricing) | 1 hr | Cheap; opens cost-optimization paths |
 | 3 | NR-12 (sub-processor lists) | 3–4 hr | Cheap; required for any B2B EU deployment |
 | 4 | NR-13 (Pinecone Serverless model) | 2 hr | Cheap; tightens Persona 3 cost claim |
 | 5 | NR-18 (Titan v2 MTEB-Code) | 1–2 hr | Cheap; closes Persona 2 code-workload gap |
@@ -287,3 +303,4 @@ Items 14–25 are deferred or monitoring-only; revisit when a kill condition tri
 ## Update log
 
 - **2026-05-17** — Generated from `/deep-research-digest` round 01 (5-source synthesis: ChatGPT, Claude, GLM, Qwen, Gemini). Created 25 items (NR-01..NR-25). Recommended execution order favors cheap-and-quick desk research first, then engineering spikes that unblock multiple downstream items.
+- **2026-07-04** — Added NR-26 (browser-verify hosted Qwen3-8B pricing) after a founder-caught sourcing failure during the `@arki/ai/embeddings` build-out — see [decisions.md D-EMB-09](../decisions.md#d-emb-09--sourcing-rigor-hosted-price-claims-require-primary-source-verification-before-we-anchor-a-production-decision-on-them). Bumped NR-26 to the top of the execution order because it gates every hosted-Qwen3-8B production decision.
