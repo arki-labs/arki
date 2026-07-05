@@ -104,6 +104,8 @@ export type DotAppInternalConfig = {
    * happen before there's a public seam to call `subscribe()` on.
    */
   observers?: readonly DotLifecycleObserver[];
+  /** Per-hook watchdog budget in ms — see `defineApp`'s option of the same name. */
+  hookTimeoutMs?: number;
 };
 
 /**
@@ -121,6 +123,9 @@ export class DotAppImpl {
 
   /** Macro-state of the app. */
   #state: DotLifecycleState = 'defined';
+
+  /** Per-hook watchdog budget (ms); `undefined` = no watchdog. */
+  readonly #hookTimeoutMs: number | undefined;
 
   /** Manifest finalised after `configure`. */
   #manifest: DotAppManifest;
@@ -180,6 +185,7 @@ export class DotAppImpl {
   constructor(config: DotAppInternalConfig) {
     this.#appName = config.appName;
     this.#appVersion = config.appVersion;
+    this.#hookTimeoutMs = config.hookTimeoutMs;
     this.#config = Object.freeze({ ...config.config });
     this.#logger = new Logger('arki:dot:lifecycle', { 'dot.app.name': config.appName });
     this.#observers = new Set(config.observers);
@@ -676,6 +682,44 @@ export class DotAppImpl {
   }
 
   /**
+   * Race one hook invocation against the app's `hookTimeoutMs` watchdog.
+   * No budget configured → plain pass-through. On timeout the returned
+   * promise rejects with `DOT_LIFECYCLE_E015` naming the pip and hook,
+   * and the call site's existing catch path applies the phase's normal
+   * failure rules (boot rollback, start cascade, teardown aggregation).
+   * The hook's own promise cannot be cancelled — the watchdog makes a
+   * hang visible and bounded; it does not kill the hung work.
+   */
+  async #withHookBudget<T>(pipName: string, hook: DotLifecycleHook, run: () => Promise<T> | T): Promise<T> {
+    const budget = this.#hookTimeoutMs;
+    if (budget === undefined) return run();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const watchdog = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          new DotLifecycleError({
+            code: DotLifecycleErrorCode.HookTimeout,
+            phase: hook,
+            pip: pipName,
+            message:
+              `${hook} hook of pip "${pipName}" exceeded the ${budget.toString()}ms hookTimeoutMs watchdog. ` +
+              `The kernel treats the hook as failed and applies its normal rollback/aggregation rules, but ` +
+              `cannot cancel the hook's promise — find the hang (a missing await? a connection that never ` +
+              `settles?) or raise the budget in defineApp(name, { hookTimeoutMs }).`,
+          }),
+        );
+      }, budget);
+      // A pending watchdog must never keep an otherwise-finished process alive.
+      timer.unref?.();
+    });
+    try {
+      return await Promise.race([Promise.resolve(run()), watchdog]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  /**
    * Inner boot loop. Separated from `#runBoot` so the phase span wrapper
    * stays thin and the loop body — which orchestrates rollback on
    * partial failure — stays unindented.
@@ -770,26 +814,33 @@ export class DotAppImpl {
       this.#emitHook('boot', pip.name, record.order, 'starting');
       let result: ServiceRecord | void;
       try {
-        result = await withPipHookSpan(
-          {
-            appName: this.#appName,
-            pipName: pip.name,
-            pipVersion: pip.version,
-            hook: 'boot',
-            order: record.order,
-            logger: pipLogger,
-          },
-          // Erasure boundary: hooks are stored as `(ctx: never) => ...`;
-          // the kernel is the one caller allowed to cross it.
-          () => pip.hooks.boot!(ctx as never),
+        result = await this.#withHookBudget(pip.name, 'boot', () =>
+          withPipHookSpan(
+            {
+              appName: this.#appName,
+              pipName: pip.name,
+              pipVersion: pip.version,
+              hook: 'boot',
+              order: record.order,
+              logger: pipLogger,
+            },
+            // Erasure boundary: hooks are stored as `(ctx: never) => ...`;
+            // the kernel is the one caller allowed to cross it.
+            () => pip.hooks.boot!(ctx as never),
+          ),
         );
       } catch (error) {
+        const timedOut = error instanceof DotLifecycleError && error.code === DotLifecycleErrorCode.HookTimeout;
         return fail({
           record,
-          code: DotLifecycleErrorCode.BootFailed,
-          message: `boot hook threw for pip "${pip.name}": ${stringifyError(error)}`,
-          remediation: `Fix the error in the boot() hook of "${pip.name}". If boot opens partial resources before throwing, clean them up locally — DOT only disposes pips whose boot completed.`,
-          docsAnchor: 'boot-failed',
+          code: timedOut ? DotLifecycleErrorCode.HookTimeout : DotLifecycleErrorCode.BootFailed,
+          message: timedOut
+            ? error.message
+            : `boot hook threw for pip "${pip.name}": ${stringifyError(error)}`,
+          remediation: timedOut
+            ? `Find the hang in the boot() hook of "${pip.name}" — a missing await or a connection that never settles — or raise defineApp's hookTimeoutMs.`
+            : `Fix the error in the boot() hook of "${pip.name}". If boot opens partial resources before throwing, clean them up locally — DOT only disposes pips whose boot completed.`,
+          docsAnchor: timedOut ? 'hook-timeout' : 'boot-failed',
           durationMs: performance.now() - started,
           cause: error,
           rollback: bootedRecords,
@@ -917,25 +968,32 @@ export class DotAppImpl {
       const startedAt = performance.now();
       this.#emitHook('start', pip.name, record.order, 'starting');
       try {
-        await withPipHookSpan(
-          {
-            appName: this.#appName,
-            pipName: pip.name,
-            pipVersion: pip.version,
-            hook: 'start',
-            order: record.order,
-            logger: pipLogger,
-          },
-          () => pip.hooks.start!(ctx as never),
+        await this.#withHookBudget(pip.name, 'start', () =>
+          withPipHookSpan(
+            {
+              appName: this.#appName,
+              pipName: pip.name,
+              pipVersion: pip.version,
+              hook: 'start',
+              order: record.order,
+              logger: pipLogger,
+            },
+            () => pip.hooks.start!(ctx as never),
+          ),
         );
       } catch (error) {
         const durationMs = performance.now() - startedAt;
+        const timedOut = error instanceof DotLifecycleError && error.code === DotLifecycleErrorCode.HookTimeout;
         const issue = makeIssue({
-          code: DotLifecycleErrorCode.StartFailed,
+          code: timedOut ? DotLifecycleErrorCode.HookTimeout : DotLifecycleErrorCode.StartFailed,
           pip: pip.name,
-          message: `start hook threw for pip "${pip.name}": ${stringifyError(error)}`,
-          remediation: `Fix the error in the start() hook of "${pip.name}". DOT will stop all already-started pips and dispose all booted pips in reverse order.`,
-          docsAnchor: 'start-failed',
+          message: timedOut
+            ? error.message
+            : `start hook threw for pip "${pip.name}": ${stringifyError(error)}`,
+          remediation: timedOut
+            ? `Find the hang in the start() hook of "${pip.name}" — or raise defineApp's hookTimeoutMs. DOT rolls back as for any start failure.`
+            : `Fix the error in the start() hook of "${pip.name}". DOT will stop all already-started pips and dispose all booted pips in reverse order.`,
+          docsAnchor: timedOut ? 'hook-timeout' : 'start-failed',
         });
         record.issues.push(issue);
         record.lifecycleDiagnostics.push({
@@ -958,7 +1016,7 @@ export class DotAppImpl {
         this.#manifest = this.#buildManifest();
         const failures = [...stopFailures, ...disposeFailures];
         throw new DotLifecycleError({
-          code: DotLifecycleErrorCode.StartFailed,
+          code: timedOut ? DotLifecycleErrorCode.HookTimeout : DotLifecycleErrorCode.StartFailed,
           phase: 'start',
           pip: pip.name,
           message: issue.message,
@@ -1053,16 +1111,18 @@ export class DotAppImpl {
       const startedAt = performance.now();
       this.#emitHook('stop', record.pip.name, record.order, 'starting');
       try {
-        await withPipHookSpan(
-          {
-            appName: this.#appName,
-            pipName: record.pip.name,
-            pipVersion: record.pip.version,
-            hook: 'stop',
-            order: record.order,
-            logger: pipLogger,
-          },
-          () => record.pip.hooks.stop!(ctx as never),
+        await this.#withHookBudget(record.pip.name, 'stop', () =>
+          withPipHookSpan(
+            {
+              appName: this.#appName,
+              pipName: record.pip.name,
+              pipVersion: record.pip.version,
+              hook: 'stop',
+              order: record.order,
+              logger: pipLogger,
+            },
+            () => record.pip.hooks.stop!(ctx as never),
+          ),
         );
         record.started = false;
         const durationMs = performance.now() - startedAt;
@@ -1265,16 +1325,18 @@ export class DotAppImpl {
       const startedAt = performance.now();
       this.#emitHook('dispose', record.pip.name, record.order, 'starting');
       try {
-        await withPipHookSpan(
-          {
-            appName: this.#appName,
-            pipName: record.pip.name,
-            pipVersion: record.pip.version,
-            hook: 'dispose',
-            order: record.order,
-            logger: pipLogger,
-          },
-          () => record.pip.hooks.dispose!(ctx as never),
+        await this.#withHookBudget(record.pip.name, 'dispose', () =>
+          withPipHookSpan(
+            {
+              appName: this.#appName,
+              pipName: record.pip.name,
+              pipVersion: record.pip.version,
+              hook: 'dispose',
+              order: record.order,
+              logger: pipLogger,
+            },
+            () => record.pip.hooks.dispose!(ctx as never),
+          ),
         );
         record.booted = false;
         const durationMs = performance.now() - startedAt;

@@ -176,6 +176,7 @@ type BuilderState = {
   pips: AnyPip[];
   config?: Readonly<Record<string, unknown>>;
   observers?: readonly DotLifecycleObserver[];
+  hookTimeoutMs?: number;
 };
 
 /**
@@ -204,6 +205,16 @@ export function defineApp(
      * `configured.subscribe(...)` or `app.subscribe(...)`.
      */
     observers?: readonly DotLifecycleObserver[];
+    /**
+     * Watchdog budget (ms) for each async hook invocation (`boot`, `start`,
+     * `stop`, `dispose` — `configure` is sync). A hook exceeding the budget
+     * fails with `DOT_LIFECYCLE_E015` naming the pip and hook, and the
+     * kernel applies its normal failure rules (boot rollback, teardown
+     * aggregation). The hook's promise itself cannot be cancelled — the
+     * watchdog makes the hang *visible*, it does not kill it. Default:
+     * no watchdog.
+     */
+    hookTimeoutMs?: number;
   } = {},
 ): DotAppBuilder<EmptyShape> {
   const state: BuilderState = {
@@ -212,6 +223,7 @@ export function defineApp(
     pips: [],
     config: options.config,
     observers: options.observers,
+    hookTimeoutMs: options.hookTimeoutMs,
   };
   return makeBuilder<EmptyShape>(state);
 }
@@ -223,6 +235,7 @@ function buildImpl(state: BuilderState): DotAppImpl {
     pips: state.pips,
     config: state.config,
     observers: state.observers,
+    hookTimeoutMs: state.hookTimeoutMs,
   });
 }
 

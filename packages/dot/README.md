@@ -425,6 +425,58 @@ queue, same-phase calls coalesce onto one in-flight promise, and a
 `dispose()` racing a slow `start()` always runs after it — the app ends
 `disposed`, never resurrected.
 
+## Testing pips
+
+`testPip` is the typed unit-test builder: satisfy a pip's needs directly
+with fakes — no real providers, no dependency chain — and the compiler
+holds the same line it holds in production. A missing fake means `boot()`
+does not compile; a fake of the wrong shape fails at the `.provide()`
+call site:
+
+```ts
+import { testPip } from '@arki/dot/test-harness';
+
+const app = await testPip(catalog)
+  .provide(Db, fakeDb)             // token need
+  .provide('cache', fakeKv)        // anonymous need — wire key is the alias
+  .boot();
+
+expect(app.services.catalog.list()).toEqual([]);
+await app.dispose();
+```
+
+The fakes are published by a synthetic first pip, so lifecycle semantics
+are the real kernel's — reverse-order teardown, lazy auto-dispose, and
+`$config` all behave exactly as in production. `service.lazy<T>()` needs
+accept a plain `T` fake (lifted automatically) or `lazyOf(value)`.
+
+For integration tests across several real pips, `testApp([...pips])`
+builds an app from an erased pip array (runtime validation only), and
+`bootTestApp` is the one-line boot-and-return variant.
+
+## Operations
+
+Two kernel helpers close the gap between "boots on my machine" and "runs
+under a process manager":
+
+```ts
+const app = await defineApp('shop', { hookTimeoutMs: 30_000 })
+  .use(/* ... */)
+  .start();
+
+hookSignals(app); // SIGTERM/SIGINT → stop() + dispose() → re-raise
+```
+
+- **`hookSignals(app, { timeoutMs? })`** — graceful shutdown wiring. The
+  first signal drains the app (bounded by `timeoutMs`, default 10 s) and
+  re-raises itself so the exit status keeps standard signal semantics; a
+  second signal falls through to the runtime default (immediate kill).
+  Returns an unhook function.
+- **`hookTimeoutMs`** — a per-hook watchdog. Any `boot`/`start`/`stop`/
+  `dispose` hook exceeding the budget fails with `DOT_LIFECYCLE_E015`
+  naming the pip and hook, and the kernel applies its normal rollback or
+  aggregation rules. Your app cannot hang silently at boot.
+
 ## Pip authoring
 
 `pip(config)` accepts a `needs` shape plus five lifecycle hooks. Hook
@@ -473,6 +525,7 @@ Runtime failures carry stable codes (`DotLifecycleError.code`):
 | `DOT_LIFECYCLE_E012` | A need has no provider among earlier pips.           |
 | `DOT_LIFECYCLE_E013` | A published wire key collides with an earlier one.   |
 | `DOT_LIFECYCLE_E014` | A service key uses the reserved `$` (kernel) prefix. |
+| `DOT_LIFECYCLE_E015` | A hook exceeded the `hookTimeoutMs` watchdog.        |
 
 (Full table including hook-failure codes: [docs/lifecycle.md](./docs/lifecycle.md).)
 
@@ -493,6 +546,10 @@ dot explain --app ./my-app.ts
 
 # Run boot-time diagnostics; non-zero exit if any check fails.
 dot doctor --app ./my-app.ts
+
+# Render the pip graph as Mermaid flowchart source. explain shows
+# declaration (= boot) order; doctor boots and shows the OBSERVED wiring.
+dot doctor --app ./my-app.ts --graph
 
 # Every command supports --json for agent-friendly output.
 dot explain --app ./my-app.ts --json | jq '.data.pips'

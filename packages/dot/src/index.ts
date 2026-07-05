@@ -80,8 +80,11 @@ export type {
 export { renderTimeline } from './timeline.js';
 export type { RenderTimelineOptions } from './timeline.js';
 
-export { testApp, bootTestApp } from './test-harness.js';
-export type { TestAppOptions } from './test-harness.js';
+export { testApp, bootTestApp, testPip } from './test-harness.js';
+export type { TestAppOptions, TestPipBuilder } from './test-harness.js';
+
+export { hookSignals } from './signals.js';
+export type { HookSignalsOptions, SignalTarget } from './signals.js';
 
 // Task 9b: CLI envelope type is exported so adapter packages can produce the
 // same shape from related tooling (release-tooling, pip scaffolds, etc.).

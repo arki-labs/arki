@@ -171,6 +171,7 @@ The kernel emits stable, machine-readable error codes:
 | `DOT_LIFECYCLE_E012`  | A `needs` entry has no provider among earlier pips.         |
 | `DOT_LIFECYCLE_E013`  | A published wire key collides with an earlier provider.     |
 | `DOT_LIFECYCLE_E014`  | A service key uses the reserved `$` (kernel) prefix.        |
+| `DOT_LIFECYCLE_E015`  | A hook exceeded the `hookTimeoutMs` watchdog budget.        |
 
 `E009` (dependency cycle) and `E010` (missing dependency) are **retired**
 with the v2 wiring model — declaration order is boot order, so cycles and

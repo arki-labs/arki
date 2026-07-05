@@ -460,6 +460,90 @@ describe('lifecycle transition serialization', () => {
   });
 });
 
+describe('hookTimeoutMs watchdog (E015)', () => {
+  const never = () =>
+    new Promise<void>(() => {
+      /* never settles — the watchdog must catch it */
+    });
+
+  it('a hanging boot hook fails with HookTimeout and rolls back earlier pips', async () => {
+    const calls: CallLog[] = [];
+    const good = loggingPip('good', calls);
+    const hung = pip({
+      name: 'hung',
+      boot: async () => {
+        await never();
+        return {};
+      },
+    });
+
+    await expect(
+      defineApp('watchdog-boot', { hookTimeoutMs: 30 }).use(good).use(hung).boot(),
+    ).rejects.toMatchObject({
+      code: DotLifecycleErrorCode.HookTimeout,
+      pip: 'hung',
+    });
+    expect(calls.filter(c => c.hook === 'dispose')).toEqual([{ hook: 'dispose', pip: 'good' }]);
+  });
+
+  it('a hanging start hook fails with HookTimeout and cascades the rollback', async () => {
+    const calls: CallLog[] = [];
+    const good = loggingPip('good', calls);
+    const hung = pip({
+      name: 'hung-start',
+      start: () => never(),
+    });
+
+    await expect(
+      defineApp('watchdog-start', { hookTimeoutMs: 30 }).use(good).use(hung).start(),
+    ).rejects.toMatchObject({
+      code: DotLifecycleErrorCode.HookTimeout,
+      pip: 'hung-start',
+    });
+    // Already-started pips stopped, booted pips disposed.
+    expect(calls.filter(c => c.hook === 'stop')).toEqual([{ hook: 'stop', pip: 'good' }]);
+    expect(calls.filter(c => c.hook === 'dispose')).toEqual([{ hook: 'dispose', pip: 'good' }]);
+  });
+
+  it('a hanging dispose hook is bounded — teardown aggregates the timeout and continues', async () => {
+    const order: string[] = [];
+    const hung = pip({
+      name: 'hung-dispose',
+      boot: () => ({}),
+      dispose: () => never(),
+    });
+    const tidy = pip({
+      name: 'tidy',
+      boot: () => ({}),
+      dispose: () => void order.push('tidy'),
+    });
+
+    const app = await defineApp('watchdog-dispose', { hookTimeoutMs: 30 }).use(tidy).use(hung).boot();
+    const error = await app.dispose().then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(DotLifecycleError);
+    expect((error as DotLifecycleError).failures).toEqual([
+      expect.objectContaining({ pip: 'hung-dispose', phase: 'dispose' }),
+    ]);
+    expect(order).toEqual(['tidy']); // reverse order continued past the hang
+  });
+
+  it('hooks under budget are untouched by the watchdog', async () => {
+    const quick = pip({
+      name: 'quick',
+      boot: async () => {
+        await new Promise(resolve => setTimeout(resolve, 5));
+        return { ok: true };
+      },
+    });
+    const app = await defineApp('watchdog-ok', { hookTimeoutMs: 1000 }).use(quick).boot();
+    expect(app.services.ok).toBe(true);
+    await app.dispose();
+  });
+});
+
 describe('reserved $ keys (E014)', () => {
   it('a boot hook publishing a $-prefixed key fails with ReservedServiceKey and rolls back', async () => {
     const calls: CallLog[] = [];

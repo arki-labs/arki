@@ -1,5 +1,30 @@
 # @arki/dot
 
+## Unreleased
+
+### Minor Changes
+
+- **`testPip` — typed unit-test builder.** Satisfy a pip's needs directly
+  with fakes; every `.provide()` is compile-checked (token or anonymous
+  key form) and `boot()` refuses to compile while needs remain unprovided.
+  Runs the real kernel underneath, so teardown order, lazy lifting, and
+  `$config` behave as in production. Exported from the package root and
+  `@arki/dot/test-harness` alongside the existing erased `testApp`.
+- **`hookSignals(app)` — graceful-shutdown wiring.** First SIGTERM/SIGINT
+  drains via `dispose()` (bounded by `timeoutMs`, default 10 s) and
+  re-raises the signal for standard exit semantics; a second signal falls
+  through to the runtime default. Returns an unhook function; the process
+  target is injectable for tests.
+- **`hookTimeoutMs` watchdog (`DOT_LIFECYCLE_E015`).**
+  `defineApp(name, { hookTimeoutMs })` bounds every async hook invocation;
+  a hook exceeding the budget fails with E015 naming the pip and hook, and
+  the kernel applies its normal boot-rollback / start-cascade / teardown-
+  aggregation rules. Off by default.
+- **`dot explain --graph` / `dot doctor --graph`.** Renders the pip graph
+  as Mermaid flowchart source — declaration-ordered nodes, observed
+  dependency edges (doctor boots; explain shows boot order). Composes
+  with `--json` (`data.source`).
+
 ## 0.1.4
 
 ### Patch Changes

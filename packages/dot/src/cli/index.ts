@@ -33,6 +33,7 @@ import { runNew } from './new.js';
 import { probeObservability } from './observability-probe.js';
 import { renderDoctor } from './render-doctor.js';
 import { renderExplain } from './render-explain.js';
+import { renderGraph } from './render-graph.js';
 
 const debugCli = createDebugLogger('arki:dot:cli');
 
@@ -57,6 +58,10 @@ Common options:
   --app <path>           Path to the app entry file (default: discovers
                          ./dot.config.ts, ./src/app.ts, or ./app.ts)
   --cwd <dir>            Working directory (default: current)
+  --graph                Emit the pip graph as Mermaid flowchart source
+                         instead of the standard output. explain shows
+                         declaration (= boot) order; doctor shows the
+                         wiring observed during boot. Composes with --json.
 
 \`doctor\` options:
   --observability        Also probe whether an OpenTelemetry SDK is
@@ -89,6 +94,8 @@ export type CliArgs = {
   force?: boolean;
   /** `--observability` (only honored by `doctor`). */
   observability?: boolean;
+  /** `--graph` (honored by `explain` and `doctor`). */
+  graph?: boolean;
 };
 
 /**
@@ -152,6 +159,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         'dry-run': { type: 'boolean', default: false },
         force: { type: 'boolean', default: false },
         observability: { type: 'boolean', default: false },
+        graph: { type: 'boolean', default: false },
       },
     });
   } catch (err) {
@@ -174,6 +182,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     'dry-run'?: boolean;
     force?: boolean;
     observability?: boolean;
+    graph?: boolean;
   };
 
   if (values.help) command = 'help';
@@ -205,6 +214,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     dryRun: values['dry-run'] ?? false,
     force: values.force ?? false,
     observability: values.observability ?? false,
+    graph: values.graph ?? false,
   };
 }
 
@@ -220,7 +230,7 @@ async function loadApp(args: CliArgs): Promise<DiscoveredApp> {
  */
 export async function runExplain(
   discovered: DiscoveredApp,
-  opts: { json: boolean; out?: (line: string) => void; now?: () => Date },
+  opts: { json: boolean; graph?: boolean; out?: (line: string) => void; now?: () => Date },
 ): Promise<DotCliEnvelope<unknown>> {
   let configured: DotApp<Record<string, unknown>> | DotAppConfigured<Record<string, unknown>>;
   try {
@@ -236,6 +246,12 @@ export async function runExplain(
     throw wrapLifecycleError(err, 'configure');
   }
 
+  if (opts.graph === true) {
+    return renderGraph(
+      { manifest: configured.manifest, command: 'explain' },
+      { json: opts.json, out: opts.out, now: opts.now },
+    );
+  }
   return renderExplain({ manifest: configured.manifest }, { json: opts.json, out: opts.out, now: opts.now });
 }
 
@@ -249,6 +265,8 @@ type DoctorRunOptions = {
    * present. Default `false`.
    */
   observability?: boolean;
+  /** When `true`, emit the pip graph (Mermaid) instead of diagnostics. */
+  graph?: boolean;
 };
 
 /**
@@ -268,6 +286,12 @@ export async function runDoctor(
   // Already-booted app: just read diagnostics, don't touch lifecycle.
   if (!guards.isDotAppBuilder(discovered) && !guards.isDotAppConfigured(discovered)) {
     const app = discovered as DotApp<Record<string, unknown>>;
+    if (opts.graph === true) {
+      return renderGraph(
+        { manifest: app.manifest, command: 'doctor' },
+        { json: opts.json, out: opts.out, now: opts.now },
+      );
+    }
     const diagnostics = applyObservabilityProbe(app.diagnostics, opts.observability ?? false);
     return renderDoctor({ diagnostics }, { json: opts.json, out: opts.out, now: opts.now });
   }
@@ -297,6 +321,16 @@ export async function runDoctor(
   }
 
   try {
+    if (opts.graph === true) {
+      // Post-boot manifest carries the observed wiring edges; after a boot
+      // failure it carries the edges recorded up to the failing pip.
+      const manifest = bootedApp ? bootedApp.manifest : configured.manifest;
+      const graphEnvelope = renderGraph(
+        { manifest, command: 'doctor' },
+        { json: opts.json, out: opts.out, now: opts.now },
+      );
+      return bootThrew ? { ...graphEnvelope, status: 'failure' } : graphEnvelope;
+    }
     const rawDiagnostics = bootedApp ? bootedApp.diagnostics : configured.diagnostics;
     const diagnostics = applyObservabilityProbe(rawDiagnostics, opts.observability ?? false);
     const envelope = renderDoctor({ diagnostics }, { json: opts.json, out: opts.out, now: opts.now });
@@ -450,7 +484,7 @@ export async function main(options: MainOptions): Promise<number> {
 
   try {
     const discovered = await loadApp(args);
-    const opts = { json: args.json, out: stdout, now: nowFactory };
+    const opts = { json: args.json, graph: args.graph, out: stdout, now: nowFactory };
     let envelope: DotCliEnvelope<unknown>;
 
     if (args.command === 'explain') {
