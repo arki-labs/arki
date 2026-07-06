@@ -450,7 +450,7 @@ the proposed **proving ground** (Phase 1 exit criterion).
 
 | Phase | Contents | Exit criterion | Status |
 | --- | --- | --- | --- |
-| 1 | `packages/http` (private): contracts, `routes()` builder, `derive`, `HttpError`, `toOpenApi`, SSE streaming, `http()` pip on Hono; 35 tests incl. real-socket drain + E005 watchdog | novelette (or games-platform) server runs on it in prod | **CODE SHIPPED 2026-07-06** — proving-ground migration still open |
+| 1 | `packages/http` (private): contracts, `routes()` builder, `derive`, `HttpError`, `toOpenApi`, SSE streaming, app-wide middleware, `http()` pip on Hono; 36 tests incl. real-socket drain + E005 watchdog | novelette (or games-platform) server runs on it in prod | **DONE 2026-07-06** — novelette server migrated + smoke-verified live under Bun (payload-faithful, CORS, degradation, signal drain). The migration surfaced and fixed two gaps: the missing middleware option, and a kernel provides-inference hole on void-returning boots (`InferredProvides`) |
 | 2 | dot 0.3.0: additive `registerRoute` schema fields + `dot explain --openapi` | OpenAPI doc generated from a real app's manifest, byte-stable across runs | **SHIPPED 2026-07-06** (changeset pending release) |
 | 3 | `@arki/http/context` (ALS entry) + auth deriver recipe in `@arki/auth` docs | one real guarded route in a shipped app | context entry **SHIPPED 2026-07-06**; auth recipe open |
 | 4 | Public promotion via `add-new-package.md` (LICENSE, README, wave entry, `private: false`) | scorecard OPEN, first npm publish at 0.0.x | open — LICENSE + README already in place |
