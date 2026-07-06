@@ -57,12 +57,19 @@ export class HttpError extends Error {
   readonly code: string;
   readonly remediation: string | undefined;
   readonly docsUrl: string | undefined;
+  /** Extra response headers — e.g. `www-authenticate` on a 401, `retry-after` on a 429. */
+  readonly headers: Readonly<Record<string, string>> | undefined;
 
   constructor(
     status: number,
     code: string,
     message: string,
-    options: { readonly remediation?: string; readonly docsUrl?: string; readonly cause?: unknown } = {},
+    options: {
+      readonly remediation?: string;
+      readonly docsUrl?: string;
+      readonly headers?: Readonly<Record<string, string>>;
+      readonly cause?: unknown;
+    } = {},
   ) {
     super(message, options.cause === undefined ? {} : { cause: options.cause });
     this.name = 'HttpError';
@@ -70,6 +77,7 @@ export class HttpError extends Error {
     this.code = code;
     this.remediation = options.remediation;
     this.docsUrl = options.docsUrl ?? docsUrlFor(code);
+    this.headers = options.headers;
   }
 }
 
@@ -121,6 +129,7 @@ export function toErrorResponse(error: unknown): Response {
     return errorResponse(error.status, error.code, error.message, {
       ...(error.remediation === undefined ? {} : { remediation: error.remediation }),
       ...(error.docsUrl === undefined ? {} : { docsUrl: error.docsUrl }),
+      ...(error.headers === undefined ? {} : { headers: error.headers }),
     });
   }
   return errorResponse(500, HTTP_ERROR_CODES.internal, describeInternalError(error));
@@ -131,7 +140,11 @@ export function errorResponse(
   status: number,
   code: string,
   message: string,
-  options: { readonly remediation?: string; readonly docsUrl?: string } = {},
+  options: {
+    readonly remediation?: string;
+    readonly docsUrl?: string;
+    readonly headers?: Readonly<Record<string, string>>;
+  } = {},
 ): Response {
   const envelope: HttpErrorEnvelope = {
     error: {
@@ -141,5 +154,5 @@ export function errorResponse(
       ...(options.docsUrl === undefined ? {} : { docsUrl: options.docsUrl }),
     },
   };
-  return Response.json(envelope, { status });
+  return Response.json(envelope, { status, ...(options.headers === undefined ? {} : { headers: options.headers }) });
 }

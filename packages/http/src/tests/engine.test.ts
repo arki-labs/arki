@@ -159,6 +159,27 @@ describe('buildEngine', () => {
     }
   });
 
+  it('carries HttpError headers onto the wire — the 401 challenge case', async () => {
+    const admin = route.get('/admin', { id: 'admin', output: z.object({ ok: z.boolean() }) });
+    const engine = buildEngine([
+      routes()
+        .derive('operator', req => {
+          if (req.headers.get('authorization') === null) {
+            throw new HttpError(401, HTTP_ERROR_CODES.unauthorized, 'credentials required', {
+              headers: { 'www-authenticate': 'Basic realm="admin"' },
+            });
+          }
+          return true;
+        })
+        .bind(admin, () => ({ ok: true })),
+    ]);
+
+    const challenged = await engine.fetch(new Request(`${BASE}/admin`));
+    expect(challenged.status).toBe(401);
+    expect(challenged.headers.get('www-authenticate')).toBe('Basic realm="admin"');
+    expect(challenged.headers.get('content-type')).toContain('application/json');
+  });
+
   it('composes middleware first-outermost, with thrown errors mapped to the envelope', async () => {
     const ping = route.get('/ping', { id: 'ping', output: z.object({ ok: z.boolean() }) });
     const engine = buildEngine([routes().bind(ping, () => ({ ok: true }))]);
