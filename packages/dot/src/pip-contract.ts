@@ -410,6 +410,17 @@ export type AnyPip = Pip<ServiceRecord, ServiceRecord>;
  * });
  * ```
  */
+/**
+ * A `boot` that returns `void` gives `TProvides` no inference candidate,
+ * and TypeScript then substitutes the CONSTRAINT (`ServiceRecord & …`,
+ * whose `keyof` is `string`) rather than the declared default. That wide
+ * record would poison the app builder's collision check for every later
+ * `.use()` — `keyof TAvail & string` is never empty. Detect the fallback
+ * by its tell (a full string index signature — no `pip()`-authored
+ * provides record has one) and collapse it to "provides nothing".
+ */
+export type InferredProvides<TP extends ServiceRecord> = string extends keyof TP ? EmptyShape : TP;
+
 export function pip<
   TShape extends NeedsShape & NoReservedKeys = EmptyShape,
   TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
@@ -422,7 +433,7 @@ export function pip<
   readonly start?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly stop?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly dispose?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
-}): Pip<WireNeeds<TShape>, TProvides> {
+}): Pip<WireNeeds<TShape>, InferredProvides<TProvides>> {
   return {
     name: def.name,
     ...(def.version === undefined ? {} : { version: def.version }),

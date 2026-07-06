@@ -21,6 +21,7 @@ export type {
   CtxOf,
   DotConfigureContext,
   EmptyShape,
+  InferredProvides,
   KernelCtx,
   Lazy,
   LazyService,

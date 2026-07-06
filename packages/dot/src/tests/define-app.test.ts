@@ -169,3 +169,29 @@ describe('defineApp', () => {
     await app.dispose();
   });
 });
+
+describe('void-boot provides inference (constraint-fallback regression)', () => {
+  it('a void-returning boot provides nothing — later pips still pass the guard', async () => {
+    const provider = pip({ name: 'p', boot: () => ({ thing: 42 }) });
+    const sideEffect = pip({
+      name: 'side',
+      needs: { thing: service<number>() },
+      boot({ thing }) {
+        // Returns void. Without InferredProvides, TS substituted the
+        // CONSTRAINT for TProvides (keyof = string), which collided with
+        // every accumulated wire key and broke all later .use() calls.
+        void thing;
+      },
+    });
+    const consumer = pip({
+      name: 'c',
+      needs: { thing: service<number>() },
+      boot: ({ thing }) => ({ doubled: thing * 2 }),
+    });
+
+    const app = await defineApp('void-boot').use(provider).use(sideEffect).use(consumer).boot();
+    expect(app.services.doubled).toBe(84);
+    expectTypeOf(app.services.doubled).toEqualTypeOf<number>();
+    await app.dispose();
+  });
+});
