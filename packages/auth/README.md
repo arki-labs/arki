@@ -167,6 +167,37 @@ export function UserProfile() {
 }
 ```
 
+### Guarding `@arki/http` routes (session deriver)
+
+In a DOT app serving HTTP through `@arki/http`, a guard is just a typed
+context deriver that resolves the session from the request cookies and
+throws the coded 401 when there is none. Later handlers in the bundle see
+`ctx.session` fully typed:
+
+```typescript
+import { derive, HTTP_ERROR_CODES, HttpError, routes } from '@arki/http';
+
+// Inside a pip's boot — `auth` is the app's better-auth instance
+// (injected as a need, or imported from the app's auth module).
+const withSession = derive('session', async req => {
+  const session = await auth.api.getSession({ headers: req.headers });
+  if (!session) {
+    throw new HttpError(401, HTTP_ERROR_CODES.unauthorized, 'sign-in required');
+  }
+  return session;
+});
+
+const bundle = routes()
+  .derive(withSession)
+  .derive('userId', (_req, ctx) => ctx.session.user.id)
+  .bind(getProfile, async (_input, ctx) => profileRepo.findByUserId(ctx.userId));
+```
+
+Role checks compose the same way — a second deriver that reads
+`ctx.session` and throws `403` (`HTTP_ERROR_CODES.forbidden`). Note that
+derivers do NOT run for `mount()`ed handlers (oRPC/tRPC routers own their
+per-request context) — this pattern is for `route.*` contract bindings.
+
 ## Features
 
 ### Supported Authentication Methods
