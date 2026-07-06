@@ -124,6 +124,21 @@ scopes. For code deep in a call stack you don't control, the fenced-off
 `@arki/http/context` entry exposes `requestContext()` (AsyncLocalStorage).
 It is a last resort; prefer the explicit `ctx`.
 
+## App-wide middleware
+
+For cross-cutting concerns that must see or touch the raw
+request/response — CORS, request logging — pass fetch-shaped middleware
+to `http()` (first = outermost). A middleware that throws `HttpError`
+short-circuits into the coded envelope:
+
+```ts
+http({ port: 3000, bundles: [OrdersRoutes], middleware: [requestLog(logger), cors(origins)] })
+```
+
+Middleware wraps the whole engine and is untyped by design; anything that
+produces a per-request *value* belongs in a deriver instead. Standalone
+users compose the same way with `composeMiddleware(engine.fetch, [...])`.
+
 ## Streaming
 
 **Typed SSE.** `route.sse` declares a `text/event-stream` contract; the

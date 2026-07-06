@@ -234,10 +234,11 @@ The published `httpServer` service is a small handle:
 ### Middleware, guards, and mounting foreign handlers
 
 - **Middleware** are fetch-shaped plain functions
-  (`(req, next) => Promise<Response>`), attachable per-bundle or on the
-  `http()` pip for app-wide concerns (CORS, logging). Hono-compatible
-  middleware works via a thin wrapper, but the documented surface is plain
-  functions.
+  (`(req, next) => Promise<Response>`), attachable on the `http()` pip for
+  app-wide concerns (CORS, logging) — first in the list runs outermost,
+  thrown errors map to the coded envelope. Per-bundle middleware is
+  deliberately NOT in v1: derivers cover the per-bundle cases that carry
+  values, and two attachment points for the same concept invites confusion.
 - **Guards** are just derivers (Part 2) that throw `HttpError(401, ...)`.
   No separate guard concept.
 - **`bind.mount(path, fetchHandler, { transport, id })`** mounts any

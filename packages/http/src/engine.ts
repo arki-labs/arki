@@ -14,7 +14,7 @@ import type { MountBinding, RouteBinding, RouteBundle } from './bundle.js';
 import type { ContractLike } from './contract.js';
 import { runWithRequestContext } from './context.js';
 import type { BaseRequestCtx } from './derive.js';
-import { describeInternalError, errorResponse, HTTP_ERROR_CODES, HttpConfigError, HttpError } from './error.js';
+import { describeInternalError, errorResponse, HTTP_ERROR_CODES, HttpConfigError, HttpError, toErrorResponse } from './error.js';
 import { sseResponse } from './sse.js';
 
 /** A built engine: the composed fetch handler plus its route inventory. */
@@ -205,12 +205,35 @@ function serializeOutput(contract: ContractLike, result: unknown): Response {
   return Response.json(validated);
 }
 
-function toErrorResponse(error: unknown): Response {
-  if (error instanceof HttpError) {
-    return errorResponse(error.status, error.code, error.message, {
-      ...(error.remediation === undefined ? {} : { remediation: error.remediation }),
-      ...(error.docsUrl === undefined ? {} : { docsUrl: error.docsUrl }),
-    });
+/**
+ * App-wide middleware: a fetch-shaped wrapper. The first middleware in a
+ * list runs outermost. Use for cross-cutting concerns that must see or
+ * touch the raw request/response — CORS, request logging, compression.
+ * For per-request *values* (auth principals, tenant handles), use
+ * derivers — they are typed into handler contexts; middleware is not.
+ */
+export type HttpMiddleware = (req: Request, next: (req: Request) => Promise<Response>) => Response | Promise<Response>;
+
+/**
+ * Wrap a fetch handler in middleware (first = outermost). A middleware
+ * that throws resolves to the coded error envelope — `HttpError` keeps
+ * its status, anything else is a 500.
+ */
+export function composeMiddleware(
+  fetch: (req: Request) => Promise<Response>,
+  middleware: readonly HttpMiddleware[],
+): (req: Request) => Promise<Response> {
+  let composed = fetch;
+  for (const layer of middleware.toReversed()) {
+    const next = composed;
+    composed = async req => await layer(req, next);
   }
-  return errorResponse(500, HTTP_ERROR_CODES.internal, describeInternalError(error));
+  const outermost = composed;
+  return async req => {
+    try {
+      return await outermost(req);
+    } catch (error) {
+      return toErrorResponse(error);
+    }
+  };
 }

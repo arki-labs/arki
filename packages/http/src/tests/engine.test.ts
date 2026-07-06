@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { routes } from '../bundle.js';
 import { route } from '../contract.js';
 import { requestContext } from '../context.js';
-import { buildEngine } from '../engine.js';
+import { buildEngine, composeMiddleware } from '../engine.js';
 import { HTTP_ERROR_CODES, HttpError } from '../error.js';
 
 const BASE = 'http://test.local';
@@ -157,6 +157,40 @@ describe('buildEngine', () => {
     } catch (error) {
       expect(error).toMatchObject({ code: HTTP_ERROR_CODES.duplicateRoute });
     }
+  });
+
+  it('composes middleware first-outermost, with thrown errors mapped to the envelope', async () => {
+    const ping = route.get('/ping', { id: 'ping', output: z.object({ ok: z.boolean() }) });
+    const engine = buildEngine([routes().bind(ping, () => ({ ok: true }))]);
+
+    const order: string[] = [];
+    const fetch = composeMiddleware(engine.fetch, [
+      async (req, next) => {
+        order.push('outer:in');
+        const res = await next(req);
+        order.push('outer:out');
+        const out = new Response(res.body, res);
+        out.headers.set('x-outer', '1');
+        return out;
+      },
+      async (req, next) => {
+        order.push('inner:in');
+        if (req.headers.get('x-block') !== null) {
+          throw new HttpError(403, HTTP_ERROR_CODES.forbidden, 'blocked by middleware');
+        }
+        return next(req);
+      },
+    ]);
+
+    const ok = await fetch(new Request(`${BASE}/ping`));
+    expect(await ok.json()).toEqual({ ok: true });
+    expect(ok.headers.get('x-outer')).toBe('1');
+    expect(order).toEqual(['outer:in', 'inner:in', 'outer:out']);
+
+    const blocked = await fetch(new Request(`${BASE}/ping`, { headers: { 'x-block': 'y' } }));
+    expect(blocked.status).toBe(403);
+    const blockedError = await envelopeOf(blocked);
+    expect(blockedError.code).toBe(HTTP_ERROR_CODES.forbidden);
   });
 
   it('honors inbound x-request-id and exposes the ambient request context', async () => {

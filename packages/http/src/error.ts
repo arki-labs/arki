@@ -112,6 +112,20 @@ export function describeInternalError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Map any thrown value to its wire envelope: {@link HttpError} keeps its
+ * status and fields; everything else is a redacted-in-production 500.
+ */
+export function toErrorResponse(error: unknown): Response {
+  if (error instanceof HttpError) {
+    return errorResponse(error.status, error.code, error.message, {
+      ...(error.remediation === undefined ? {} : { remediation: error.remediation }),
+      ...(error.docsUrl === undefined ? {} : { docsUrl: error.docsUrl }),
+    });
+  }
+  return errorResponse(500, HTTP_ERROR_CODES.internal, describeInternalError(error));
+}
+
 /** Build the envelope `Response` for a coded failure. */
 export function errorResponse(
   status: number,

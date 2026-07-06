@@ -39,8 +39,9 @@ import { DotPipError, pip } from '@arki/dot/pip';
 
 import type { RouteBundle } from './bundle.js';
 import type { ContractLike } from './contract.js';
+import type { HttpMiddleware } from './engine.js';
 import type { ListenHandle } from './listen.js';
-import { buildEngine } from './engine.js';
+import { buildEngine, composeMiddleware } from './engine.js';
 import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
 import { listen } from './listen.js';
 import { contractMeta } from './openapi.js';
@@ -76,6 +77,12 @@ export type HttpOptions<TBundles extends readonly BundleToken[]> = {
    * pip publishes it.
    */
   readonly bundles: TBundles;
+  /**
+   * App-wide fetch-shaped middleware (first = outermost): CORS, request
+   * logging, compression. For per-request values use bundle derivers —
+   * they are typed into handler contexts; middleware is not.
+   */
+  readonly middleware?: readonly HttpMiddleware[];
   /** Milliseconds `stop` waits for in-flight requests. Default 10 000. */
   readonly drainTimeoutMs?: number;
 };
@@ -180,10 +187,11 @@ export function http<const TBundles extends readonly BundleToken[]>(
       }
 
       const engine = buildEngine(bundles);
+      const composed = composeMiddleware(engine.fetch, options.middleware ?? []);
       const tracked = async (req: Request): Promise<Response> => {
         gauge.count += 1;
         try {
-          return await engine.fetch(req);
+          return await composed(req);
         } finally {
           gauge.count -= 1;
           if (gauge.count === 0) {

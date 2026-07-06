@@ -40,14 +40,14 @@ export type {
 export { BASE_CTX_KEYS, derive } from './derive.js';
 export type { BaseRequestCtx, Deriver, ErasedDeriver } from './derive.js';
 
-export { describeInternalError, errorResponse, HTTP_ERROR_CODES, HttpConfigError, HttpError } from './error.js';
+export { describeInternalError, errorResponse, HTTP_ERROR_CODES, HttpConfigError, HttpError, toErrorResponse } from './error.js';
 export type { HttpErrorEnvelope } from './error.js';
 
 export { contractMeta, toOpenApi } from './openapi.js';
 export type { OpenApiInfo, RouteMeta } from './openapi.js';
 
-export { buildEngine } from './engine.js';
-export type { Engine } from './engine.js';
+export { buildEngine, composeMiddleware } from './engine.js';
+export type { Engine, HttpMiddleware } from './engine.js';
 
 export { listen } from './listen.js';
 export type { ListenHandle, ListenOptions } from './listen.js';
