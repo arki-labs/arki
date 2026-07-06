@@ -451,9 +451,9 @@ the proposed **proving ground** (Phase 1 exit criterion).
 | Phase | Contents | Exit criterion | Status |
 | --- | --- | --- | --- |
 | 1 | `packages/http` (private): contracts, `routes()` builder, `derive`, `HttpError`, `toOpenApi`, SSE streaming, app-wide middleware, `http()` pip on Hono; 36 tests incl. real-socket drain + E005 watchdog | novelette (or games-platform) server runs on it in prod | **DONE 2026-07-06** — novelette server migrated + smoke-verified live under Bun (payload-faithful, CORS, degradation, signal drain). The migration surfaced and fixed two gaps: the missing middleware option, and a kernel provides-inference hole on void-returning boots (`InferredProvides`) |
-| 2 | dot 0.3.0: additive `registerRoute` schema fields + `dot explain --openapi` | OpenAPI doc generated from a real app's manifest, byte-stable across runs | **SHIPPED 2026-07-06** (changeset pending release) |
+| 2 | dot 0.3.0: additive `registerRoute` schema fields + `dot explain --openapi` | OpenAPI doc generated from a real app's manifest, byte-stable across runs | **SHIPPED 2026-07-06** (changeset consumed 2026-07-07 — 0.3.0 staged in the Phase 4 batch) |
 | 3 | `@arki/http/context` (ALS entry) + auth deriver recipe in `@arki/auth` docs | one real guarded route in a shipped app | **DONE 2026-07-07** — session-deriver recipe in `packages/auth/README.md`; novelette `/admin/queues/status` guarded live (basic-auth deriver, timing-safe, `WWW-Authenticate` challenge via the new `HttpError.headers`) |
-| 4 | Public promotion via `add-new-package.md` (LICENSE, README, wave entry, `private: false`) | scorecard OPEN, first npm publish at 0.0.x | open — LICENSE + README already in place |
+| 4 | Public promotion via `add-new-package.md` (LICENSE, README, wave entry, `private: false`) | scorecard OPEN, first npm publish at 0.0.x | **STAGED 2026-07-07** — Wave 3 entry, `private: false`, scorecard OPEN (15 pkgs, all 9 dimensions PASS), versions applied (http 0.0.1, dot 0.3.0, env 0.0.6, kv/db/es 0.1.5; changesets' peer-major-bump trap corrected by hand). Awaiting founder-run `npm publish` (OTP gate) + mirror sync |
 
 Versioning: experimental 0.0.x track per release doctrine. `@arki/dot` peer
 range `^0.3.0` (note: caret on 0.x means every dot minor forces an
