@@ -49,8 +49,10 @@ describe('testPip', () => {
       boot: ({ db }) => ({ rows: db.query('q') }),
     });
 
-    // @ts-expect-error — `cache` is still unprovided ("Expected 2 arguments")
-    void testPip(consumer).provide(Db, { query: () => [] }).boot();
+    // @ts-expect-error — `cache` is still unprovided ("Expected 2 arguments").
+    // The runtime boot really does reject (kernel E012) — swallow it so the
+    // compile-time demonstration doesn't leak an unhandled rejection.
+    void testPip(consumer).provide(Db, { query: () => [] }).boot().catch(() => null);
 
     // @ts-expect-error — a number is not a Db
     void testPip(consumer).provide(Db, 42);
