@@ -1,8 +1,8 @@
 # @arki/dot
 
-## Unreleased
+## 0.2.0
 
-### Minor Changes
+### Minor Changes — testing, operations, introspection (48a8733)
 
 - **`testPip` — typed unit-test builder.** Satisfy a pip's needs directly
   with fakes; every `.provide()` is compile-checked (token or anonymous
