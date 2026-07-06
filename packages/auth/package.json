@@ -72,12 +72,16 @@
     "zod": "catalog:"
   },
   "peerDependencies": {
+    "@playwright/test": "catalog:testing",
     "@tanstack/react-router": "catalog:tanstack/start",
     "@tanstack/react-start": "catalog:tanstack/start",
     "react": "catalog:react",
     "react-dom": "catalog:react"
   },
   "peerDependenciesMeta": {
+    "@playwright/test": {
+      "optional": true
+    },
     "@tanstack/react-router": {
       "optional": true
     },
@@ -90,6 +94,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@playwright/test": "catalog:testing",
     "@tanstack/react-router": "catalog:tanstack/start",
     "@tanstack/react-start": "catalog:tanstack/start",
     "@types/bcrypt": "catalog:types",

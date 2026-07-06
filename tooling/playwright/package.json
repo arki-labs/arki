@@ -6,9 +6,6 @@
   "exports": {
     ".": {
       "default": "./src/index.ts"
-    },
-    "./auth": {
-      "default": "./src/auth.ts"
     }
   },
   "scripts": {
