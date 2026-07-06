@@ -76,10 +76,11 @@ export const config: ReleaseConfig = {
       id: 'infrastructure-adapters',
       label: 'Wave 3 — Infrastructure Adapters',
       // Stable v1: the env + kv + db trio + event-sourcing — they pass every
-      // scorecard dimension and back the DOT fixture. `@arki/fs`,
+      // scorecard dimension and back the DOT fixture. `@arki/http` joined
+      // 2026-07-07 (typed HTTP + the DOT http() pip). `@arki/fs`,
       // `@arki/queue`, `@arki/auth`, `@arki/emails` rejoin this wave when
       // they ship dist+docs / drop `private: true`.
-      packages: ['@arki/db', '@arki/kv', '@arki/event-sourcing'],
+      packages: ['@arki/db', '@arki/kv', '@arki/event-sourcing', '@arki/http'],
     },
     {
       id: 'frontend',

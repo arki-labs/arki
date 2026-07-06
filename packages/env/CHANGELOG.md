@@ -1,5 +1,12 @@
 # @arki/env
 
+## 0.0.6
+
+### Patch Changes
+
+- Updated dependencies [4b1c59f]
+  - @arki/dot@0.3.0
+
 ## 0.0.5
 
 ### Patch Changes
