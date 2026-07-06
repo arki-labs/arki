@@ -71,6 +71,25 @@ export type RouteManifest = {
   method?: string;
   path?: string;
   transport: RouteTransport;
+  /** Human summary, rendered into docs/OpenAPI output. */
+  description?: string;
+  /**
+   * JSON Schema for the request inputs, keyed by location. Adapters
+   * convert their validation schemas (e.g. zod) at `configure` time so the
+   * manifest stays plain serializable data — `dot explain --openapi`
+   * renders straight from here without booting.
+   */
+  input?: {
+    readonly query?: Readonly<Record<string, unknown>>;
+    readonly body?: Readonly<Record<string, unknown>>;
+  };
+  /** JSON Schema for the success response (or per-event schema when `streaming`). */
+  output?: Readonly<Record<string, unknown>>;
+  /**
+   * The response is an open stream (e.g. `text/event-stream`) rather than
+   * a single JSON document.
+   */
+  streaming?: boolean;
 };
 
 /** Single service published by a pip. */

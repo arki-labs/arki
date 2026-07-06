@@ -313,8 +313,25 @@ export type DotConfigureContext = {
    * is returned from the `boot` hook.
    */
   registerService(name: string, kind: ServiceKind): void;
-  /** Register a route this pip exposes. */
-  registerRoute(route: { id: string; method?: string; path?: string; transport: RouteTransport }): void;
+  /**
+   * Register a route this pip exposes. The optional `description`,
+   * `input`/`output` JSON Schemas, and `streaming` flag flow into
+   * `manifest.routes` untouched — `dot explain --openapi` renders from
+   * them without booting the app.
+   */
+  registerRoute(route: {
+    id: string;
+    method?: string;
+    path?: string;
+    transport: RouteTransport;
+    description?: string;
+    input?: {
+      readonly query?: Readonly<Record<string, unknown>>;
+      readonly body?: Readonly<Record<string, unknown>>;
+    };
+    output?: Readonly<Record<string, unknown>>;
+    streaming?: boolean;
+  }): void;
   /** Mark the pip as participating in a lifecycle hook. */
   registerLifecycleHook(hook: 'configure' | 'boot' | 'start' | 'stop' | 'dispose'): void;
   /** Append `provides` capability strings (informational, manifest-only). */

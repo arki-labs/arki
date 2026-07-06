@@ -34,6 +34,7 @@ import { probeObservability } from './observability-probe.js';
 import { renderDoctor } from './render-doctor.js';
 import { renderExplain } from './render-explain.js';
 import { renderGraph } from './render-graph.js';
+import { renderOpenApi } from './render-openapi.js';
 
 const debugCli = createDebugLogger('arki:dot:cli');
 
@@ -62,6 +63,10 @@ Common options:
                          instead of the standard output. explain shows
                          declaration (= boot) order; doctor shows the
                          wiring observed during boot. Composes with --json.
+  --openapi              (explain only) Emit an OpenAPI 3.1 document built
+                         from the manifest's registered routes and their
+                         JSON Schemas — no boot required. Composes with
+                         --json.
 
 \`doctor\` options:
   --observability        Also probe whether an OpenTelemetry SDK is
@@ -96,6 +101,8 @@ export type CliArgs = {
   observability?: boolean;
   /** `--graph` (honored by `explain` and `doctor`). */
   graph?: boolean;
+  /** `--openapi` (honored by `explain` only). */
+  openapi?: boolean;
 };
 
 /**
@@ -160,6 +167,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         force: { type: 'boolean', default: false },
         observability: { type: 'boolean', default: false },
         graph: { type: 'boolean', default: false },
+        openapi: { type: 'boolean', default: false },
       },
     });
   } catch (err) {
@@ -183,12 +191,28 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     force?: boolean;
     observability?: boolean;
     graph?: boolean;
+    openapi?: boolean;
   };
 
   if (values.help) command = 'help';
   if (values.version) command = 'version';
 
   if (!command) command = 'help';
+
+  if (values.openapi === true && values.graph === true) {
+    throw new DotCliError({
+      code: DotCliErrorCode.InvalidArgs,
+      message: '--openapi and --graph are mutually exclusive.',
+      remediation: 'Pick one output format per invocation.',
+    });
+  }
+  if (values.openapi === true && command === 'doctor') {
+    throw new DotCliError({
+      code: DotCliErrorCode.InvalidArgs,
+      message: '--openapi is not supported by doctor.',
+      remediation: 'Use `dot explain --openapi` — the document renders from the static manifest, no boot needed.',
+    });
+  }
 
   let pm: CliArgs['pm'];
   if (values.pm !== undefined) {
@@ -215,6 +239,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     force: values.force ?? false,
     observability: values.observability ?? false,
     graph: values.graph ?? false,
+    openapi: values.openapi ?? false,
   };
 }
 
@@ -230,7 +255,7 @@ async function loadApp(args: CliArgs): Promise<DiscoveredApp> {
  */
 export async function runExplain(
   discovered: DiscoveredApp,
-  opts: { json: boolean; graph?: boolean; out?: (line: string) => void; now?: () => Date },
+  opts: { json: boolean; graph?: boolean; openapi?: boolean; out?: (line: string) => void; now?: () => Date },
 ): Promise<DotCliEnvelope<unknown>> {
   let configured: DotApp<Record<string, unknown>> | DotAppConfigured<Record<string, unknown>>;
   try {
@@ -246,6 +271,12 @@ export async function runExplain(
     throw wrapLifecycleError(err, 'configure');
   }
 
+  if (opts.openapi === true) {
+    return renderOpenApi(
+      { manifest: configured.manifest, command: 'explain' },
+      { json: opts.json, out: opts.out, now: opts.now },
+    );
+  }
   if (opts.graph === true) {
     return renderGraph(
       { manifest: configured.manifest, command: 'explain' },
@@ -488,7 +519,7 @@ export async function main(options: MainOptions): Promise<number> {
     let envelope: DotCliEnvelope<unknown>;
 
     if (args.command === 'explain') {
-      envelope = await runExplain(discovered, opts);
+      envelope = await runExplain(discovered, { ...opts, openapi: args.openapi });
     } else {
       envelope = await runDoctor(discovered, { ...opts, observability: args.observability });
     }
