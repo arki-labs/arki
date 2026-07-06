@@ -1,0 +1,74 @@
+{
+  "name": "@arki/dot",
+  "version": "0.2.0",
+  "description": "TypeScript-first application composition framework for the ARKI package family — lifecycle-aware pips, deterministic boot order, manifest/diagnostics envelopes, and an agent-native CLI. A DOT app is the sum of its pips.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev/dot",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "framework",
+    "pip",
+    "pips",
+    "lifecycle",
+    "diagnostics",
+    "manifest",
+    "agent-native",
+    "dot"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./pip": {
+      "types": "./dist/pip.d.ts",
+      "import": "./dist/pip.js",
+      "default": "./dist/pip.js"
+    },
+    "./package.json": "./package.json",
+    "./cli": {
+      "types": "./dist/cli/index.d.ts",
+      "import": "./src/cli/index.ts",
+      "default": "./dist/cli/index.js"
+    },
+    "./test-harness": {
+      "types": "./dist/test-harness.d.ts",
+      "import": "./src/test-harness.ts",
+      "default": "./dist/test-harness.js"
+    }
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "templates/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@arki/assert": "0.0.2",
+    "@arki/contracts": "0.0.2",
+    "@arki/log": "0.0.2",
+    "@opentelemetry/api": "^1.9.0",
+    "zod": "4.3.5"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
