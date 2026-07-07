@@ -57,7 +57,16 @@
     "pg-boss": "catalog:queue",
     "zod": "catalog:"
   },
+  "peerDependencies": {
+    "@arki/dot": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@arki/dot": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/testing": "workspace:*",

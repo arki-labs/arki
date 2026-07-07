@@ -1,16 +1,23 @@
-/**
- * DOT topology helpers for @arki/queue.
- *
- * These helpers are structural: they return objects with the same shape DOT's
- * `actions:` declaration accepts, without importing @arki/dot.
- */
+import type { CtxOf, EmptyShape, NeedsShape, Pip, WireNeeds } from '@arki/dot/pip';
+import { DotPipError, pip } from '@arki/dot/pip';
 
+import { debugWorker } from './debug.ts';
 import type { JobDefinition, JobOptions } from './types/job.ts';
 
 export const QUEUE_ACTION_META_SCHEMA = '@arki/queue/action-meta@1';
 
+export const QUEUE_PIP_ERROR_CODES = {
+  startupTimeout: 'ARKI_QUEUE_E001',
+  doubleStart: 'ARKI_QUEUE_E002',
+  stopBeforeStart: 'ARKI_QUEUE_E003',
+} as const;
+
+const QUEUE_RUNTIME_PIP_VERSION = '2.1.0';
+const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
+
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 type JsonObject = { [key: string]: JsonValue };
+type NoReservedKeys = Readonly<Record<`$${string}`, never>>;
 
 export type QueueDotAction = {
   readonly id: string;
@@ -22,7 +29,20 @@ export type QueueDotAction = {
   readonly meta: JsonObject;
 };
 
-type QueueRegistry = Record<string, unknown>;
+export type QueueRegistry = Record<string, unknown>;
+
+export type QueueRuntimeHandle = {
+  stop(): Promise<void>;
+};
+
+export type QueueRuntimeOptions<TNeeds extends NeedsShape & NoReservedKeys> = {
+  readonly name?: string;
+  readonly needs: TNeeds;
+  readonly registry: QueueRegistry;
+  readonly start: (services: CtxOf<TNeeds>) => Promise<QueueRuntimeHandle>;
+  readonly startupTimeoutMs?: number;
+  readonly blocking?: boolean;
+};
 
 function isJobDefinition(value: unknown): value is JobDefinition<unknown, unknown, unknown> {
   return (
@@ -86,4 +106,128 @@ export function queueConsumerActions(registry: QueueRegistry): readonly QueueDot
 
 export function queueProducerActions(registry: QueueRegistry): readonly QueueDotAction[] {
   return collectJobs(registry).map(job => actionForJob(job, 'out'));
+}
+
+function queuePipError(args: {
+  code: (typeof QUEUE_PIP_ERROR_CODES)[keyof typeof QUEUE_PIP_ERROR_CODES];
+  message: string;
+  remediation: string;
+  docsSlug: string;
+}): DotPipError {
+  return new DotPipError({
+    code: args.code,
+    message: args.message,
+    remediation: args.remediation,
+    docsUrl: `https://arki.dev/queue/errors/${args.docsSlug}`,
+  });
+}
+
+function timeoutAfter(ms: number, pipName: string): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        queuePipError({
+          code: QUEUE_PIP_ERROR_CODES.startupTimeout,
+          message: `[queue] runtime "${pipName}" startup timed out after ${String(ms)}ms.`,
+          remediation:
+            'Check Redis connectivity and worker dependency assembly, or raise startupTimeoutMs if the runtime intentionally needs more time.',
+          docsSlug: 'arki-queue-e001',
+        }),
+      );
+    }, ms);
+    timer.unref();
+  });
+}
+
+/**
+ * Build a DOT pip that owns queue worker lifecycle while the app keeps
+ * ownership of concrete runtime assembly.
+ */
+export function queueRuntime<TNeeds extends NeedsShape & NoReservedKeys>(
+  options: QueueRuntimeOptions<TNeeds>,
+): Pip<WireNeeds<TNeeds>, EmptyShape> {
+  const pipName = options.name ?? 'queue-runtime';
+  const startupTimeoutMs = options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
+  const blocking = options.blocking ?? false;
+
+  let started = false;
+  let handle: QueueRuntimeHandle | undefined;
+  let startup: Promise<QueueRuntimeHandle | undefined> | undefined;
+
+  const runStartup = async (ctx: CtxOf<TNeeds>): Promise<QueueRuntimeHandle> => {
+    const runtime = await Promise.race([options.start(ctx), timeoutAfter(startupTimeoutMs, pipName)]);
+    handle = runtime;
+    return runtime;
+  };
+
+  const inner = pip<TNeeds, EmptyShape>({
+    name: pipName,
+    version: QUEUE_RUNTIME_PIP_VERSION,
+    needs: options.needs,
+    actions: [...queueConsumerActions(options.registry), ...queueProducerActions(options.registry)],
+    configure(ctx) {
+      ctx.registerProjection({
+        format: 'queue-topology',
+        binding: 'queue',
+        module: '@arki/queue/projection',
+      });
+      ctx.declareProvides('queue-runtime');
+    },
+    async start(ctx) {
+      if (started || startup !== undefined) {
+        throw queuePipError({
+          code: QUEUE_PIP_ERROR_CODES.doubleStart,
+          message: `[queue] runtime "${pipName}" was started twice.`,
+          remediation: 'Call app.start() once, or call app.stop() before starting the queue runtime again.',
+          docsSlug: 'arki-queue-e002',
+        });
+      }
+
+      started = true;
+      if (blocking) {
+        startup = runStartup(ctx);
+        try {
+          await startup;
+        } catch (error) {
+          startup = undefined;
+          handle = undefined;
+          started = false;
+          throw error;
+        }
+        return;
+      }
+
+      startup = runStartup(ctx).catch((error: unknown) => {
+        debugWorker('[%s] Queue runtime startup failed: %s', pipName, error instanceof Error ? error.message : String(error));
+        started = false;
+        handle = undefined;
+        return undefined;
+      });
+    },
+    async stop() {
+      if (!started && startup === undefined && handle === undefined) {
+        throw queuePipError({
+          code: QUEUE_PIP_ERROR_CODES.stopBeforeStart,
+          message: `[queue] runtime "${pipName}" was stopped before it started.`,
+          remediation: 'Only call stop after a successful start, or let the DOT app lifecycle manage shutdown.',
+          docsSlug: 'arki-queue-e003',
+        });
+      }
+
+      const runtime = handle ?? (await startup);
+      startup = undefined;
+      handle = undefined;
+      started = false;
+      await runtime?.stop();
+    },
+    async dispose() {
+      const runtime = handle ?? (await startup);
+      startup = undefined;
+      handle = undefined;
+      started = false;
+      await runtime?.stop();
+    },
+  });
+
+  return inner as unknown as Pip<WireNeeds<TNeeds>, EmptyShape>;
 }
