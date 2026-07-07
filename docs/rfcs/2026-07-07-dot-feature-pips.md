@@ -50,7 +50,14 @@
   runtime-safe. Schedule context shipped as `ScheduleDef<TContext>`
   generics with token-derived intersection instead of the
   `initSchedule.context` factory — deviation blessed, see The schedule
-  seam.
+  seam. Rev 7 (2026-07-07): Phase 4 remainder shipped — RPC mounts as a
+  static contract (`rpcMount`, an ActionSource) bound in boot via
+  `routes().rpc(contract, { context, handle })` with derivers running
+  before dispatch (INSIDE the routes bundle, not a separate slice key —
+  see RPC mounts); `eventSourcing({ features })` collects `es` slices;
+  `adapter-authoring.md` gains the Feature slices chapter;
+  `packages/db/README.md` gains the schema-composition + drizzle-kit
+  glob + unit-of-work recipes.
 - **Date:** 2026-07-07
 - **Author:** Claude (session fbbe6be7), from the 2026-07-07 feature-pips
   design conversation
@@ -151,6 +158,7 @@ export const ordersPip = p.pip({
   needs: ['db', 'kv'],                   // keys of AppServices — typo = compile error
   actions: [
     listOrders, createOrder,             // http contracts — already ActionSources
+    ordersRpc,                           // rpc mount contract — static ActionSource (Rev 7)
     ...queueActions(ordersQueue),        // jobs + queue-schedules + flows, one spread
     ...scheduleActions(ordersSchedules), // already exported by @arki/schedule
   ],
@@ -161,11 +169,14 @@ export const ordersPip = p.pip({
       ...provide(Orders, {
         routes: routes()
           .bind(listOrders,   async ({ query }) => ordersService.list(query))
-          .bind(createOrder,  async ({ body })  => ordersService.create(body)),
+          .bind(createOrder,  async ({ body })  => ordersService.create(body))
+          .rpc(ordersRpc, {              // static contract; handlers bound here (Rev 7)
+            context: (req, ctx) => ({ orders: ordersService }),
+            handle:  (req, rpcCtx) => rpcHandler.handle(req, { context: rpcCtx }),
+          }),
         queue: ordersQueue,              // full static registry — jobs, queue-schedules, flows
         schedules: ordersSchedules,
-        rpc: [ordersRpcMount(ordersService)],  // oRPC router, boot-typed context (Rev 6)
-        es: ordersEs({ db }),                  // event-sourcing bundle (Rev 6)
+        es: ordersEs({ db }),            // event-sourcing bundle (Rev 6)
       }),
     };
   },
@@ -351,8 +362,7 @@ keys**:
 
 ```ts
 type OrdersSlice = {
-  routes?: RouteBundle;               // key owned by @arki/http
-  rpc?: readonly RpcMountDef[];       // key owned by @arki/http (Rev 6)
+  routes?: RouteBundle;               // key owned by @arki/http — rpc mounts ride INSIDE it (Rev 7)
   queue?: QueueRegistry;              // FULL registry: jobs + queue-schedules + flows (Rev 6; was `jobs`)
   schedules?: readonly ScheduleDef[]; // key owned by @arki/schedule
   es?: EsBundle;                      // key owned by @arki/event-sourcing (Rev 6)
@@ -369,7 +379,7 @@ rejection, and the boot-time erasure seam are all inherited verbatim from
 `http()`'s existing bundle handling.
 
 Slice-key governance mirrors the actions RFC's binding rules: well-known
-keys (`routes`, `rpc`, `queue`, `schedules`, `es`) are documented in
+keys (`routes`, `queue`, `schedules`, `es`) are documented in
 `adapter-authoring.md`; third-party adapters MUST package-qualify theirs
 (`'acme:bus'`).
 
@@ -555,34 +565,48 @@ Redis-less zero-dependency posture survives. Context resolves per fire
 (defensible for crons; assembly failures currently log as
 `handler-failed` — acceptable, noted).
 
-### The rpc slice (Rev 6, Codex C2)
+### RPC mounts (Rev 6, Codex C2; Rev 7 as-implemented)
 
 oRPC/tRPC routers are most features' primary API surface in this
 workspace, and raw `mount()` bypasses derivers and DOT context — which
-would leave the *main* interaction path outside the model. The `rpc`
-slice closes it:
+would leave the *main* interaction path outside the model.
+
+**As-implemented (Rev 7):** rpc is NOT a separate slice key — it rides
+**inside the routes bundle**, because derivers are a *bundle* capability
+(the engine walks `bundle.derivers`); a standalone slice could never
+deliver "derivers run before dispatch". And the API splits exactly like
+contracts do, because a fused def would be boot-created and therefore
+unlistable in the static `actions:` list:
 
 ```ts
-// in the feature's boot — context closes over typed DOT services
-rpc: [rpcMount({
-  id: 'orders.rpc',
-  path: '/rpc/orders',
-  router: ordersRouter,
-  context: (req, derived) => ({ session: derived.principal, orders: ordersService }),
-})],
+// module level — the STATIC half, an ActionSource:
+export const ordersRpc = rpcMount('/rpc/orders', { id: 'orders.rpc' }); // transport defaults to 'orpc'
+
+// boot — the handlers bind where services exist:
+routes()
+  .derive(sessionDeriver)
+  .rpc(ordersRpc, {
+    context: (req, ctx) => ({ session: ctx.session, orders: ordersService }), // ctx typed by the builder
+    handle:  (req, rpcCtx) => rpcHandler.handle(req, { context: rpcCtx }),    // RPCHandler built once at boot
+  });
 ```
 
 `http()` treats rpc mounts unlike raw mounts: **bundle derivers run
-before dispatch** (the derived ctx feeds the context factory), the
-adapter glue (oRPC's `RPCHandler`) is wrapped once at boot, and each
-mount lands in the manifest as an action (binding `'orpc'`/`'trpc'`,
-address = path, own metaSchema). Raw `mount()` survives for truly
-foreign handlers (static files, third-party fetch handlers).
+before dispatch**, typed into the context factory via the builder's
+accumulation; the mount claims the same path-prefix namespace as raw
+mounts (collision = boot error); a thrown error envelopes, but the rpc
+handler owns its subtree's own responses/error format. The contract's
+`toDotAction()` declares `{ binding: transport, direction: 'in',
+address: path, meta: { path, rpc: true } }`. Raw `mount()` survives for
+truly foreign handlers (static files, third-party fetch handlers).
 
-### The es slice (Rev 6, Codex C1)
+### The es slice (Rev 6, Codex C1; shipped Rev 7)
 
 `es?: EsBundle` — the es RFC's bundle rides the feature token like every
-other slice; `eventSourcing({ features })` collects it. The doctrine
+other slice; `eventSourcing({ features })` collects it (shipped: feature
+tokens merge into needs beside `bundles:`, a feature without an `es`
+slice contributes nothing with a debug line, missing tokens reuse the
+E003 coded error). The doctrine
 consequence matters more than the key: **read-model/projection factories
 become boot-time values built from DOT services.** Import-time singleton
 capture — kapodopera's `createProjectionWithRepos` closing over the
@@ -770,8 +794,8 @@ A. **`useAll(pips)` builder addition** — ~~defer~~ — **RESOLVED 2026-07-07
 | 1 | Authoring layer in `@arki/dot`: `initPips.context<AppServices>().create()` — `p.pip` (key-array `needs` → witness compile, `Pick`-typed hooks, provides schema-check, mixed witness record for lazy) + `p.needs` bridge + `useAll(tuple)` typed fold (Rev 6) — **prototype-first**: a type-test suite (key-array widening, collision, provides-overlap, guard parity: every wrong-key/wrong-type/wrong-order failure reproduces identically to the witness form; concrete types — a schema-typed drizzle instance — survive to hook contexts unwidened) gates the API before adoption | a feature pip authored with zero witness declarations; `typeof db` reaches `boot` intact; a 5-pip tuple `useAll` reproduces the guard's failures | SHIPPED 784165562c (incl. post-review probe: TProvides inference through mixed plain+spread-provide returns) |
 | 2 | Schema layer: `composeSchema()` in `@arki/db` (typed-identity spread, compile-time duplicate-key rejection **+ runtime duplicate check** — Rev 6, type-test suite proving zero type loss: `$inferSelect`/RQB inference identical to a hand-written object) + `createUnitOfWork()` in `@arki/db` (Rev 6: db.transaction + per-feature tx-scope instantiation, full inference) + drizzle-kit glob recipe + leaf-layering rule in docs | a two-feature test schema composes with full inference; a duplicate table key fails at compile AND dev runtime; `drizzle-kit generate` output identical to the monolithic entrypoint; a two-feature `uow` write commits/rolls back atomically with typed scopes | code SHIPPED 784165562c (uow test fixed post-review); drizzle-kit glob recipe + leaf-rule docs PENDING |
 | 3 | Queue seam: `queueActions()` covering **jobs + queue-schedules + flows** (Rev 6) + feature mode `queueRuntime({ q, features, needs, context })` (slice = full `QueueRegistry`; `context` factory statically checked against the builder's context type — new overload, Rev 6 — and run inside the guarded start; mode exclusivity vs `{ registry, start }`) + producer-service convention documented + tests (guarded start, degradation, context type-check, E016 non-collision, schedule/flow action derivation) | a feature pip contributes consumers, a queue-cron, and a flow with zero app-level runtime assembly; kapodopera-style job files compile unchanged; actions attribute to the feature in `dot explain` | SHIPPED 784165562c + same-day fix: context resolved once inside guarded start (regression test added) |
-| 4 | Slice protocol: `features:` on `http()` (routes + **rpc** slice with derivers-run mounts and boot-typed context — Rev 6), `schedule()` (+ `initSchedule.context` model — Rev 6), and `eventSourcing()` (**es slice** — Rev 6, boot-time projection factories); slice-key chapter in `adapter-authoring.md` (well-known keys incl. `rpc`/`queue`/`es`, package-qualification, activator-must-not-declare rule, partial-token semantics) | ONE feature token consumed by three activators in a test app; provide-site slice-type tests (typo/excess-key = compile error); empty-contribution debug log observed; an rpc mount receives derived ctx | PARTIAL — routes + schedules feature modes SHIPPED 784165562c (schedule context via ScheduleDef generics, deviation blessed); rpc slice, es slice, adapter-authoring chapter PENDING |
-| 5 | Proving ground: novelette — split `buildRuntimeConfig` into feature pips providing services (story-generation, image-pipeline), one `context` factory replaces `WorkerDependencies` assembly, delete `pips/queue-runtime.ts` scaffolding, i18n staleness schedule moves into its feature. Stretch (Rev 6): kapodopera swaps its hand-rolled worker bootstrap for `queueRuntime` feature mode (zero job-file diffs expected) AND deletes the `__setProjectionTarget` test hack via boot-time projection factories | `dot explain` renders novelette as a feature map; four degradation postures (Redis × R2 creds) byte-identical; e2e green | — |
+| 4 | Slice protocol: `features:` on `http()` (routes incl. **rpc mounts** — Rev 7: static `rpcMount` contract + boot-bound handlers, derivers run before dispatch), `schedule()` (context via `ScheduleDef` generics), and `eventSourcing()` (**es slice**); Feature-slices chapter in `adapter-authoring.md`; schema-composition + uow recipes in `packages/db/README.md` | ONE feature token consumed by three activators in a test app; provide-site slice-type tests (typo/excess-key = compile error); empty-contribution debug log observed; an rpc mount receives derived ctx | SHIPPED — 784165562c (routes/schedules) + this session (rpc mounts w/ 5 engine tests; `eventSourcing({features})` w/ skip-empty test; both docs). Remaining exit assertion (one token → three activators in a single test app) rides Phase 5's proving ground |
+| 5 | Proving ground: novelette — split `buildRuntimeConfig` into feature pips providing services (story-generation, image-pipeline), one `context` factory replaces `WorkerDependencies` assembly, delete `pips/queue-runtime.ts` scaffolding, i18n staleness schedule moves into its feature. Stretch (Rev 6): kapodopera swaps its hand-rolled worker bootstrap for `queueRuntime` feature mode (zero job-file diffs expected) AND deletes the `__setProjectionTarget` test hack via boot-time projection factories | `dot explain` renders novelette as a feature map; four degradation postures (Redis × R2 creds) byte-identical; e2e green | SHIPPED (novelette; this session): three feature pips (story-generation w/ `storyLifecycle` provide + kv need, image-pipeline w/ boot-safe factory export, i18n w/ schedules slice), `useAll` in the app file, `queueRuntime`/`schedule` feature modes live, backend lifecycle scaffolding deleted (jobs.ts −60 lines), 3 backend subpath exports added. Verified: `dot explain` = feature map (12 actions, all feature-attributed, activators declare zero); degraded posture live-proven (missing R2 creds → context factory throws INSIDE guarded start → HTTP-only, health 200 at ~2s, graceful SIGTERM drain — exact debug line captured); e2e 37/37 green (2 initial failures were the documented `NOVELETTE_ENABLE_E2E_AUTH_SEAMS` run requirement, not the migration). Remaining posture cells (Redis down ×2, creds present ×2) hold by construction + package regression tests, not re-run live. Kapodopera stretch NOT attempted — still open |
 | 6 | Template sync + docs: `turbo/generators/templates/application/` gains the feature-pip layout (`core/pips.ts`, `core/schema.ts` + one feature with `tables.ts` leaf); pips-RFC cross-references updated | new-app scaffold ships a feature pip example | — |
 
 Public promotion of the touched packages remains governed by the pips

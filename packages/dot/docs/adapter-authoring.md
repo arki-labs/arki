@@ -235,6 +235,44 @@ them app-relative.
 Dependency edges are not declared — the kernel observes them from actual
 service wiring at boot time and writes them into `app.manifest.dependencies`.
 
+## Feature slices
+
+Apps organize by **feature pips**: one pip per feature, its contributions
+published under a single token whose value is a plain object of
+adapter-owned **slice keys**. Activator pips (an HTTP server, a queue
+runtime, a scheduler) accept `features:` token lists and read only their
+own key — structurally, with no shared type between adapters.
+
+Well-known slice keys, each owned by the adapter that consumes it:
+
+| Key | Value | Consuming activator |
+| --- | --- | --- |
+| `routes` | an HTTP route bundle (bindings + derivers + rpc mounts) | `@arki/http` |
+| `queue` | a queue definition registry (jobs, queue-schedules, flows) | `@arki/queue` |
+| `schedules` | in-process schedule definitions | `@arki/schedule` |
+| `es` | an event-sourcing bundle (command handlers + read models) | `@arki/event-sourcing` |
+
+Third-party adapters MUST package-qualify their slice keys (`'acme:bus'`)
+— the same namespacing rule as bindings.
+
+Rules an adapter's `features:` option must follow:
+
+- **Partial tokens are accepted by design.** A feature with no slice for
+  your adapter contributes nothing; emit a **debug log** for the empty
+  contribution so wiring mistakes surface at boot. "Wrong token rejected
+  at the activator" is deliberately NOT a property of the protocol —
+  type safety lives at the feature's provide site.
+- **Do not declare actions for feature-contributed work.** The feature
+  declares its own actions (contracts, `queueActions(...)`,
+  `scheduleActions(...)`, rpc-mount defs) so manifest attribution stays
+  with the feature. Duplicate `(binding, id)` pairs are the kernel's
+  E016 backstop if both sides ever declare.
+- **A missing token key at boot is a coded error** (erased composition
+  only — the typed builder catches it at `.use()`).
+- **Resolve feature-derived context/config ONCE inside your guarded
+  start**, never per execution: assembly failure must degrade boot, not
+  every later dispatch.
+
 ## Diagnostics — stable codes and remediation
 
 When a hook throws, the kernel wraps the error into a `DiagnosticIssue`.

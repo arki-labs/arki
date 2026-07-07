@@ -23,7 +23,7 @@ export type {
   SseContract,
 } from './contract.js';
 
-export { routes } from './bundle.js';
+export { routes, rpcMount } from './bundle.js';
 export type {
   HandlerResult,
   MountBinding,
@@ -34,6 +34,11 @@ export type {
   RouteBundleBuilder,
   RouteHandler,
   RouteInput,
+  RpcActionMeta,
+  RpcBinding,
+  RpcMountContract,
+  RpcMountHandlers,
+  RpcMountOptions,
   SseHandler,
 } from './bundle.js';
 

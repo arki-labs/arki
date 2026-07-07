@@ -22,7 +22,7 @@ export type OpenApiInfo = {
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
 
-const HTTP_ACTION_META_SCHEMA = '@arki/http/action-meta@1';
+export const HTTP_ACTION_META_SCHEMA = '@arki/http/action-meta@1';
 
 /**
  * Convert a contract schema to JSON Schema. Schema erasure seam:

@@ -74,6 +74,69 @@ const idFactory = createIdFactory('post_');
 const postId = idFactory.next();
 ```
 
+## Feature-owned schema composition
+
+The schema has a different lifetime than runtime services: `drizzle-kit`
+imports tables statically, and `Db = typeof db` must exist before any DOT
+pip runs. Schema is therefore **module-composed, never runtime-contributed**.
+The layout:
+
+```text
+features/orders/tables.ts   — LEAF: pgTable/pgEnum definitions; imports nothing from core/
+core/schema.ts              — composeSchema(ordersTables, billingTables, …)
+core/relations.ts           — defineRelations(schema, …) — one app-level file, NOT sharded
+core/db.ts                  — type only: Db = ReturnType<typeof buildDb>['db']
+```
+
+```ts
+import { composeSchema } from '@arki/db';
+
+// Each feature exports a named record from its tables.ts leaf:
+export const ordersTables = { orders, orderItems, orderStatusEnum };
+
+// The app composes — a typed identity: runtime is Object.assign, the type
+// is the exact intersection. A duplicate table key is a COMPILE error
+// (the parameter type collapses to a named error object) AND a runtime
+// `DB_COMPOSITION_E001`, so drizzle sees a plain, collision-free object.
+export const schema = composeSchema(ordersTables, billingTables);
+```
+
+Point `drizzle-kit` at the leaves — no aggregation entrypoint needed, and
+enums are scanned per file (no aliased re-export tricks):
+
+```ts
+// drizzle.config.ts
+export default defineConfig({
+  schema: ['./src/features/**/tables.ts'],
+  // …
+});
+```
+
+The layering rule that keeps the module graph a DAG: `tables.ts` imports
+nothing from `core/`; `core/schema.ts` imports only leaves; feature code
+imports its own leaves plus the app's pip factory.
+
+### Cross-feature transactions: `createUnitOfWork`
+
+Feature services built at boot capture the singleton `db` — calling them
+inside a transaction would silently escape it. Cross-feature writes go
+through a typed unit of work instead:
+
+```ts
+import { createUnitOfWork } from '@arki/db';
+
+// Feature tx factories are STATIC exports: (tx: Database) => scoped repos.
+const uow = createUnitOfWork(db, {
+  orders: createOrdersTx,
+  billing: createBillingTx,
+});
+
+await uow(async tx => {
+  await tx.orders.create('ord_1');
+  await tx.billing.charge(500); // one transaction, both features, inferred types
+});
+```
+
 ## Subpath exports
 
 - `@arki/db` / `@arki/db/init` — `createDb`, `initDb`, `initDbWithOptions`. Under Bun, `./init` resolves to a Bun-native SQL driver.
