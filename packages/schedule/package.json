@@ -1,0 +1,58 @@
+{
+  "name": "@arki/schedule",
+  "version": "0.0.1",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./src/index.ts",
+      "node": "./src/index.ts"
+    },
+    "./dot": {
+      "types": "./dist/src/dot.d.ts",
+      "import": "./src/dot.ts",
+      "node": "./src/dot.ts"
+    },
+    "./projection": {
+      "types": "./dist/src/projection.d.ts",
+      "import": "./src/projection.ts",
+      "node": "./src/projection.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/log": "workspace:*",
+    "croner": "^10.0.1"
+  },
+  "peerDependencies": {
+    "@arki/dot": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@arki/dot": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@arki/dot": "workspace:*",
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@types/node": "catalog:node",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

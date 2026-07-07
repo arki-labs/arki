@@ -100,6 +100,22 @@ export class KV {
     return result;
   }
 
+  async setIfNotExists<T = unknown>(key: string, value: T, expirationSeconds: number): Promise<boolean> {
+    debugKV('[kv] Setting key if absent: %s (ttl: %ss)', key, expirationSeconds);
+    const namespacedKey = this.namespace ? `${this.namespace}:${key}` : key;
+    const serialized = JSON.stringify(value) ?? 'null';
+    const result = await this.#redisClient.set(
+      namespacedKey,
+      serialized,
+      'EX',
+      expirationSeconds,
+      'NX',
+    );
+    const acquired = result === 'OK';
+    debugKV('[kv] Set-if-absent result for key %s: %s', key, acquired ? 'acquired' : 'exists');
+    return acquired;
+  }
+
   async mset<T = unknown>(keyValuePairs: [string, T][], _expirationSeconds?: number): Promise<void> {
     debugKV('[kv] Setting multiple keys (count: %d)', keyValuePairs.length);
     const entries = keyValuePairs.map(([key, value]) => ({ key, value }));
