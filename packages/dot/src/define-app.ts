@@ -59,7 +59,7 @@ type CollisionError<TAvail, TProvides> = {
  * the accumulated record (`TAvail & never` = `never`). Such a pip provides
  * nothing — normalize to the empty shape.
  */
-type NormalizeProvides<TP extends ServiceRecord> = [TP] extends [never] ? EmptyShape : TP;
+export type NormalizeProvides<TP extends ServiceRecord> = [TP] extends [never] ? EmptyShape : TP;
 
 /**
  * Rest-tuple guard. Satisfied → `[]` (call `.use(pip)` with one argument).
@@ -75,6 +75,53 @@ export type UseGuard<
     ? []
     : [error: CollisionError<TAvail, TProvides>]
   : [error: NeedsError<TAvail, TNeeds>];
+
+type UseAllState<TAvail extends ServiceRecord, TPips extends readonly AnyPip[]> = TPips extends readonly [
+  infer Head,
+  ...infer Tail,
+]
+  ? Head extends Pip<infer TNeeds, infer TProvides>
+    ? UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>> extends []
+      ? UseAllState<TAvail & NormalizeProvides<TProvides>, Extract<Tail, readonly AnyPip[]>>
+      : {
+          readonly avail: TAvail;
+          readonly error: {
+            readonly 'DOT: useAll tuple contains a pip that cannot be used at this position': UseGuard<
+              TAvail,
+              TNeeds,
+              NormalizeProvides<TProvides>
+            >[0];
+          };
+        }
+    : {
+        readonly avail: TAvail;
+        readonly error: {
+          readonly 'DOT: useAll accepts only pips': Head;
+        };
+      }
+  : {
+      readonly avail: TAvail;
+      readonly error: never;
+    };
+
+export type UseAllAvail<TAvail extends ServiceRecord, TPips extends readonly AnyPip[]> = UseAllState<
+  TAvail,
+  TPips
+>['avail'];
+
+type UseAllTupleGuard<TPips extends readonly AnyPip[]> = number extends TPips['length']
+  ? [
+      error: {
+        readonly 'DOT: useAll requires a tuple; add `as const` or pass pips directly in declaration order': TPips;
+      },
+    ]
+  : [];
+
+export type UseAllGuard<TAvail extends ServiceRecord, TPips extends readonly AnyPip[]> = [
+  UseAllState<TAvail, TPips>['error'],
+] extends [never]
+  ? UseAllTupleGuard<TPips>
+  : [error: UseAllState<TAvail, TPips>['error']];
 
 /* ------------------------------------------------------------------ */
 /* Public app surface                                                  */
@@ -162,6 +209,15 @@ export type DotAppBuilder<TAvail extends ServiceRecord> = {
     pip: Pip<TNeeds, TProvides>,
     ...guard: UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>
   ): DotAppBuilder<TAvail & NormalizeProvides<TProvides>>;
+  /**
+   * Register a tuple of pips in declaration order. This is type-equivalent
+   * to calling `.use()` for each item and keeps the same ordering/collision
+   * guard across the whole tuple.
+   */
+  useAll<const TPips extends readonly AnyPip[]>(
+    pips: TPips,
+    ...guard: UseAllGuard<TAvail, TPips>
+  ): DotAppBuilder<UseAllAvail<TAvail, TPips>>;
   /** Run the configure phase synchronously. Throws on configure failure. */
   configure(): DotAppConfigured<TAvail>;
   /** Run configure + boot. Throws on configure or boot failure. */
@@ -248,6 +304,13 @@ function makeBuilder<TAvail extends ServiceRecord>(state: BuilderState): DotAppB
       const nextState: BuilderState = {
         ...state,
         pips: [...state.pips, pip],
+      };
+      return makeBuilder<ServiceRecord>(nextState);
+    },
+    useAll(pips: readonly AnyPip[], ..._guard: readonly unknown[]): DotAppBuilder<ServiceRecord> {
+      const nextState: BuilderState = {
+        ...state,
+        pips: [...state.pips, ...pips],
       };
       return makeBuilder<ServiceRecord>(nextState);
     },

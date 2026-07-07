@@ -12,11 +12,20 @@
 
 // #region Kernel — public surface
 export { defineApp } from './define-app.js';
-export type { DotApp, DotAppBuilder, DotAppConfigured, UseGuard } from './define-app.js';
+export type {
+  DotApp,
+  DotAppBuilder,
+  DotAppConfigured,
+  NormalizeProvides,
+  UseAllAvail,
+  UseAllGuard,
+  UseGuard,
+} from './define-app.js';
 
 export { isLazy, lazy, lazyOf, pip, provide, rename, service, token, DotPipError } from './pip-contract.js';
 export type {
   AnyPip,
+  ActionSource,
   CtxOf,
   DotConfigureContext,
   EmptyShape,
@@ -25,6 +34,7 @@ export type {
   Lazy,
   LazyService,
   NeedsShape,
+  NoReservedKeys,
   Pip,
   PipNeeds,
   PipProvides,
@@ -34,6 +44,9 @@ export type {
   Token,
   WireNeeds,
 } from './pip-contract.js';
+
+export { initPips } from './init-pips.js';
+export type { InitPipsFactory } from './init-pips.js';
 
 export {
   DotLifecycleError,

@@ -28,6 +28,7 @@ export type {
   Lazy,
   LazyService,
   NeedsShape,
+  NoReservedKeys,
   Pip,
   PipNeeds,
   PipProvides,
@@ -40,7 +41,18 @@ export type {
 } from './pip-contract.js';
 
 export { defineApp } from './define-app.js';
-export type { DotApp, DotAppBuilder, DotAppConfigured } from './define-app.js';
+export type {
+  DotApp,
+  DotAppBuilder,
+  DotAppConfigured,
+  NormalizeProvides,
+  UseAllAvail,
+  UseAllGuard,
+  UseGuard,
+} from './define-app.js';
+
+export { initPips } from './init-pips.js';
+export type { InitPipsFactory } from './init-pips.js';
 
 export { testApp, bootTestApp } from './test-harness.js';
 export type { TestAppOptions } from './test-harness.js';

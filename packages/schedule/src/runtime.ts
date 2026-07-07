@@ -1,3 +1,5 @@
+/* eslint-disable drizzle/enforce-delete-with-where */
+
 import { Cron } from 'croner';
 import { debug } from '@arki/log/debug';
 
@@ -14,11 +16,25 @@ export type KvLike = {
   setIfNotExists<T = unknown>(key: string, value: T, expirationSeconds: number): Promise<boolean>;
 };
 
-export type ScheduleRuntimeOptions = {
-  readonly schedules: readonly ScheduleDef[];
+type ScheduleRuntimeBaseOptions<TContext> = {
+  readonly schedules: readonly ScheduleDef<TContext>[];
   readonly lock?: KvLike;
   readonly jitterMs?: number;
 };
+
+type ScheduleRuntimeContextOptions<TContext> =
+  | {
+      readonly createContext: () => TContext | Promise<TContext>;
+    }
+  | ([TContext] extends [undefined]
+      ? {
+          readonly createContext?: () => TContext | Promise<TContext>;
+        }
+      : never);
+
+export type ScheduleRuntimeOptions<TContext = undefined> =
+  & ScheduleRuntimeBaseOptions<TContext>
+  & ScheduleRuntimeContextOptions<TContext>;
 
 export type ScheduleRunStatus = 'ran' | 'skipped-overlap' | 'skipped-lock' | 'handler-failed';
 
@@ -36,7 +52,7 @@ export type ScheduleRuntime = {
 };
 
 function hasUnref(value: TimerHandle): value is TimerHandle & UnrefHandle {
-  return typeof value === 'object' && value !== null && 'unref' in value;
+  return 'unref' in value;
 }
 
 function unref(timer: TimerHandle): void {
@@ -48,7 +64,11 @@ function randomDelay(max: number): number {
   return Math.floor(Math.random() * (max + 1));
 }
 
-function assertUniqueSchedules(schedules: readonly ScheduleDef[]): void {
+function ignorePromiseSettlement(): void {
+  return;
+}
+
+function assertUniqueSchedules<TContext>(schedules: readonly ScheduleDef<TContext>[]): void {
   const seen = new Set<string>();
   for (const schedule of schedules) {
     if (seen.has(schedule.name)) {
@@ -62,14 +82,14 @@ function assertUniqueSchedules(schedules: readonly ScheduleDef[]): void {
   }
 }
 
-function lockTtlSeconds(schedule: ScheduleDef): number {
+function lockTtlSeconds<TContext>(schedule: ScheduleDef<TContext>): number {
   if (schedule.every !== undefined) {
     return Math.max(1, Math.ceil(parseEveryInterval(schedule.every) / 1000));
   }
   return 60;
 }
 
-export function createScheduleRuntime(options: ScheduleRuntimeOptions): ScheduleRuntime {
+export function createScheduleRuntime<TContext = undefined>(options: ScheduleRuntimeOptions<TContext>): ScheduleRuntime {
   assertUniqueSchedules(options.schedules);
 
   const byName = new Map(options.schedules.map(schedule => [schedule.name, schedule]));
@@ -81,7 +101,7 @@ export function createScheduleRuntime(options: ScheduleRuntimeOptions): Schedule
   let handlerFailures = 0;
   let lockSkips = 0;
 
-  async function acquireLock(schedule: ScheduleDef): Promise<boolean> {
+  async function acquireLock(schedule: ScheduleDef<TContext>): Promise<boolean> {
     if (options.lock === undefined) return true;
 
     try {
@@ -103,7 +123,7 @@ export function createScheduleRuntime(options: ScheduleRuntimeOptions): Schedule
     }
   }
 
-  async function run(schedule: ScheduleDef): Promise<ScheduleRunResult> {
+  async function run(schedule: ScheduleDef<TContext>): Promise<ScheduleRunResult> {
     if (stopped) return { name: schedule.name, status: 'skipped-lock' };
 
     const active = running.get(schedule.name) ?? 0;
@@ -118,7 +138,8 @@ export function createScheduleRuntime(options: ScheduleRuntimeOptions): Schedule
 
     running.set(schedule.name, active + 1);
     try {
-      await schedule.handler();
+      const scheduleContext = options.createContext === undefined ? (undefined as TContext) : await options.createContext();
+      await schedule.handler(scheduleContext);
       return { name: schedule.name, status: 'ran' };
     } catch (error) {
       handlerFailures += 1;
@@ -140,8 +161,8 @@ export function createScheduleRuntime(options: ScheduleRuntimeOptions): Schedule
 
   function trackPromise<T>(promise: Promise<T>): Promise<T> {
     const drained = promise.then(
-      () => {},
-      () => {},
+      ignorePromiseSettlement,
+      ignorePromiseSettlement,
     );
     inflight.add(drained);
     void drained.finally(() => {
@@ -150,11 +171,11 @@ export function createScheduleRuntime(options: ScheduleRuntimeOptions): Schedule
     return promise;
   }
 
-  function track(schedule: ScheduleDef): void {
+  function track(schedule: ScheduleDef<TContext>): void {
     void trackPromise(run(schedule));
   }
 
-  function armEvery(schedule: ScheduleDef): void {
+  function armEvery(schedule: ScheduleDef<TContext>): void {
     const every = schedule.every;
     if (every === undefined) return;
     const intervalMs = parseEveryInterval(every);
@@ -174,30 +195,30 @@ export function createScheduleRuntime(options: ScheduleRuntimeOptions): Schedule
     start() {
       if (stopped) return;
       for (const schedule of options.schedules) {
-        if (schedule.cron !== undefined) {
-          cronJobs.push(
-            new Cron(
-              schedule.cron,
-              {
-                name: schedule.name,
-                timezone: schedule.timezone,
-                unref: true,
-              },
-              () => {
-                track(schedule);
-              },
-            ),
-          );
-        } else {
+        if (schedule.cron === undefined) {
           armEvery(schedule);
+          continue;
         }
+        cronJobs.push(
+          new Cron(
+            schedule.cron,
+            {
+              name: schedule.name,
+              timezone: schedule.timezone,
+              unref: true,
+            },
+            () => {
+              track(schedule);
+            },
+          ),
+        );
       }
     },
     async stop() {
       stopped = true;
       for (const job of cronJobs) job.stop();
       for (const timer of timers) clearTimeout(timer);
-      await Promise.allSettled([...inflight]);
+      await Promise.allSettled(inflight);
     },
     async trigger(name: string) {
       const schedule = byName.get(name);

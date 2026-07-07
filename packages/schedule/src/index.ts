@@ -9,26 +9,31 @@ type BaseScheduleOptions = {
   readonly name: string;
   readonly timezone?: string;
   readonly overlap?: ScheduleOverlap;
-  readonly handler: () => Promise<void>;
 };
 
-export type DefineScheduleOptions =
-  | (BaseScheduleOptions & {
+type ScheduleHandler<TContext> = (ctx: TContext) => Promise<void>;
+
+type BaseScheduleOptionsWithContext<TContext> = BaseScheduleOptions & {
+  readonly handler: ScheduleHandler<TContext>;
+};
+
+export type DefineScheduleOptions<TContext = undefined> =
+  | (BaseScheduleOptionsWithContext<TContext> & {
       readonly cron: string;
       readonly every?: never;
     })
-  | (BaseScheduleOptions & {
+  | (BaseScheduleOptionsWithContext<TContext> & {
       readonly every: ScheduleInterval;
       readonly cron?: never;
     });
 
-export type ScheduleDef = {
+export type ScheduleDef<TContext = undefined> = {
   readonly name: string;
   readonly cron?: string;
   readonly every?: ScheduleInterval;
   readonly timezone?: string;
   readonly overlap: ScheduleOverlap;
-  readonly handler: () => Promise<void>;
+  readonly handler: ScheduleHandler<TContext>;
 };
 
 function invalid(message: string, cause?: unknown): ScheduleError {
@@ -54,7 +59,7 @@ export function parseEveryInterval(value: ScheduleInterval): number {
   return amount * 3_600_000;
 }
 
-export function defineSchedule(options: DefineScheduleOptions): ScheduleDef {
+export function defineSchedule<TContext = undefined>(options: DefineScheduleOptions<TContext>): ScheduleDef<TContext> {
   const name = options.name.trim();
   if (name === '') {
     throw invalid('[schedule] schedule name must be a non-empty string.');
@@ -92,3 +97,24 @@ export function defineSchedule(options: DefineScheduleOptions): ScheduleDef {
 }
 
 export { ScheduleError, SCHEDULE_ERROR_CODES } from './errors.js';
+
+export type ScheduleBuilder<TContext> = {
+  define(options: DefineScheduleOptions<TContext>): ScheduleDef<TContext>;
+};
+
+export const initSchedule = {
+  context<TContext>() {
+    return {
+      create(): ScheduleBuilder<TContext> {
+        return {
+          define: defineSchedule<TContext>,
+        };
+      },
+    };
+  },
+  create(): ScheduleBuilder<undefined> {
+    return {
+      define: defineSchedule,
+    };
+  },
+};

@@ -1,8 +1,13 @@
-import type { CtxOf, EmptyShape, NeedsShape, Pip, WireNeeds } from '@arki/dot/pip';
+import type { CtxOf, EmptyShape, NeedsShape, Pip, Token, WireNeeds } from '@arki/dot/pip';
 import { DotPipError, pip } from '@arki/dot/pip';
 
 import { debugWorker } from './debug.ts';
+import type { InternalFlowDefinition } from './flow-builder.ts';
+import type { QueueInstanceOptions } from './create-queue.ts';
+import type { InternalScheduleDefinition } from './schedule-builder.ts';
+import type { FlowDefinition, QueueBuilder, QueueInstance, ScheduleDefinition } from './types/builder.ts';
 import type { JobDefinition, JobOptions } from './types/job.ts';
+import type { QueueMeta } from './types/queue.ts';
 
 export const QUEUE_ACTION_META_SCHEMA = '@arki/queue/action-meta@1';
 
@@ -10,12 +15,14 @@ export const QUEUE_PIP_ERROR_CODES = {
   startupTimeout: 'ARKI_QUEUE_E001',
   doubleStart: 'ARKI_QUEUE_E002',
   stopBeforeStart: 'ARKI_QUEUE_E003',
+  exclusiveModes: 'ARKI_QUEUE_E004',
+  featureMissing: 'ARKI_QUEUE_E005',
 } as const;
 
 const QUEUE_RUNTIME_PIP_VERSION = '2.1.0';
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
 
-type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 type JsonObject = { [key: string]: JsonValue };
 type NoReservedKeys = Readonly<Record<`$${string}`, never>>;
 
@@ -31,6 +38,8 @@ export type QueueDotAction = {
 
 export type QueueRegistry = Record<string, unknown>;
 
+export type QueueFeatureToken = Token<{ readonly queue?: QueueRegistry }, string>;
+
 export type QueueRuntimeHandle = {
   stop(): Promise<void>;
 };
@@ -44,6 +53,28 @@ export type QueueRuntimeOptions<TNeeds extends NeedsShape & NoReservedKeys> = {
   readonly blocking?: boolean;
 };
 
+export type QueueRuntimeFeatureOptions<
+  TNeeds extends NeedsShape & NoReservedKeys,
+  TContext,
+  TFeatures extends readonly QueueFeatureToken[],
+> = {
+  readonly name?: string;
+  readonly needs: TNeeds;
+  readonly q: QueueBuilder<TContext, QueueMeta>;
+  readonly features: TFeatures;
+  readonly context: (services: CtxOf<TNeeds>) => TContext | Promise<TContext>;
+  readonly connection: QueueInstanceOptions<TContext>['connection'];
+  readonly keyPrefix?: string;
+  readonly startupTimeoutMs?: number;
+  readonly blocking?: boolean;
+};
+
+export type QueueFeatureNeeds<TFeatures extends readonly QueueFeatureToken[]> = {
+  readonly [Tok in TFeatures[number] as Tok extends Token<unknown, infer K> ? K : never]: {
+    readonly queue?: QueueRegistry;
+  };
+};
+
 function isJobDefinition(value: unknown): value is JobDefinition<unknown, unknown, unknown> {
   return (
     typeof value === 'object' &&
@@ -55,17 +86,43 @@ function isJobDefinition(value: unknown): value is JobDefinition<unknown, unknow
   );
 }
 
-function collectJobs(registry: QueueRegistry, jobs: JobDefinition<unknown, unknown, unknown>[] = []): readonly JobDefinition<unknown, unknown, unknown>[] {
+function isScheduleDefinition(value: unknown): value is ScheduleDefinition {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    '_type' in value &&
+    (value as { _type?: unknown })._type === 'schedule'
+  );
+}
+
+function isFlowDefinition(value: unknown): value is FlowDefinition {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    '_type' in value &&
+    (value as { _type?: unknown })._type === 'flow'
+  );
+}
+
+type QueueDefinition =
+  | JobDefinition<unknown, unknown, unknown>
+  | ScheduleDefinition
+  | FlowDefinition;
+
+function collectQueueDefinitions(
+  registry: QueueRegistry,
+  definitions: QueueDefinition[] = [],
+): readonly QueueDefinition[] {
   for (const value of Object.values(registry)) {
-    if (isJobDefinition(value)) {
-      jobs.push(value);
+    if (isJobDefinition(value) || isScheduleDefinition(value) || isFlowDefinition(value)) {
+      definitions.push(value);
       continue;
     }
     if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      collectJobs(value as QueueRegistry, jobs);
+      collectQueueDefinitions(value as QueueRegistry, definitions);
     }
   }
-  return jobs;
+  return definitions;
 }
 
 function retryMeta(options: JobOptions | undefined): JsonObject | undefined {
@@ -100,12 +157,60 @@ function actionForJob(job: JobDefinition<unknown, unknown, unknown>, direction: 
   };
 }
 
+function actionForSchedule(schedule: ScheduleDefinition): QueueDotAction {
+  const internal = schedule._internal as InternalScheduleDefinition;
+  const meta: JsonObject = {
+    kind: 'schedule',
+    scheduleType: internal.type,
+    queue: internal.name,
+    value: typeof internal.value === 'number' ? internal.value : internal.value,
+    ...(internal.options?.timezone === undefined ? {} : { timezone: internal.options.timezone }),
+  };
+  return {
+    id: `${internal.name}.fire`,
+    binding: 'queue',
+    direction: 'in',
+    address: internal.name,
+    metaSchema: QUEUE_ACTION_META_SCHEMA,
+    meta,
+  };
+}
+
+function actionForFlow(flow: FlowDefinition, direction: 'in' | 'out'): QueueDotAction {
+  const internal = flow._internal as InternalFlowDefinition;
+  const meta: JsonObject = {
+    kind: 'flow',
+    queue: internal.name,
+    steps: internal.steps.length,
+  };
+  return {
+    id: `${internal.name}.${direction === 'in' ? 'consume' : 'produce'}`,
+    binding: 'queue',
+    direction,
+    address: internal.name,
+    metaSchema: QUEUE_ACTION_META_SCHEMA,
+    meta,
+  };
+}
+
 export function queueConsumerActions(registry: QueueRegistry): readonly QueueDotAction[] {
-  return collectJobs(registry).map(job => actionForJob(job, 'in'));
+  return collectQueueDefinitions(registry).flatMap(definition => {
+    if (isJobDefinition(definition)) return [actionForJob(definition, 'in')];
+    if (isScheduleDefinition(definition)) return [actionForSchedule(definition)];
+    return [actionForFlow(definition, 'in')];
+  });
 }
 
 export function queueProducerActions(registry: QueueRegistry): readonly QueueDotAction[] {
-  return collectJobs(registry).map(job => actionForJob(job, 'out'));
+  return collectQueueDefinitions(registry).flatMap(definition => {
+    if (isJobDefinition(definition)) return [actionForJob(definition, 'out')];
+    if (isFlowDefinition(definition)) return [actionForFlow(definition, 'out')];
+    return [];
+  });
+}
+
+export function queueActions(registry: QueueRegistry): readonly QueueDotAction[] {
+  return [...queueConsumerActions(registry), ...queueProducerActions(registry)];
 }
 
 function queuePipError(args: {
@@ -120,6 +225,44 @@ function queuePipError(args: {
     remediation: args.remediation,
     docsUrl: `https://arki.dev/queue/errors/${args.docsSlug}`,
   });
+}
+
+function assertExclusiveMode(options: QueueRuntimeOptions<NeedsShape & NoReservedKeys> | QueueRuntimeFeatureOptions<NeedsShape & NoReservedKeys, unknown, readonly QueueFeatureToken[]>): void {
+  const hasRegistry = 'registry' in options || 'start' in options;
+  const hasFeatures = 'features' in options || 'q' in options || 'context' in options;
+  if (hasRegistry && hasFeatures) {
+    throw queuePipError({
+      code: QUEUE_PIP_ERROR_CODES.exclusiveModes,
+      message: '[queue] queueRuntime options cannot mix registry/start mode with q/features/context mode.',
+      remediation: 'Use either queueRuntime({ registry, start, ... }) or queueRuntime({ q, features, context, connection, ... }).',
+      docsSlug: 'arki-queue-e004',
+    });
+  }
+}
+
+function featureRegistry(options: {
+  readonly features: readonly QueueFeatureToken[];
+  readonly record: Readonly<Record<string, { readonly queue?: QueueRegistry } | undefined>>;
+}): QueueRegistry {
+  const registry: QueueRegistry = {};
+  for (const feature of options.features) {
+    const slice = options.record[feature.key];
+    if (slice === undefined) {
+      throw queuePipError({
+        code: QUEUE_PIP_ERROR_CODES.featureMissing,
+        message: `[queue] feature token "${feature.key}" was not provided by any earlier pip.`,
+        remediation:
+          'Mount the feature pip that provides this token before queueRuntime(...). The typed builder catches this unless composition was erased.',
+        docsSlug: 'arki-queue-e005',
+      });
+    }
+    if (slice.queue !== undefined) {
+      registry[feature.key] = slice.queue;
+      continue;
+    }
+    debugWorker('[%s] Feature "%s" did not contribute a queue slice.', 'queue-runtime', feature.key);
+  }
+  return registry;
 }
 
 function timeoutAfter(ms: number, pipName: string): Promise<never> {
@@ -145,26 +288,69 @@ function timeoutAfter(ms: number, pipName: string): Promise<never> {
  */
 export function queueRuntime<TNeeds extends NeedsShape & NoReservedKeys>(
   options: QueueRuntimeOptions<TNeeds>,
+): Pip<WireNeeds<TNeeds>, EmptyShape>;
+export function queueRuntime<
+  TNeeds extends NeedsShape & NoReservedKeys,
+  TContext,
+  const TFeatures extends readonly QueueFeatureToken[],
+>(
+  options: QueueRuntimeFeatureOptions<TNeeds, TContext, TFeatures>,
+): Pip<WireNeeds<TNeeds> & QueueFeatureNeeds<TFeatures>, EmptyShape>;
+export function queueRuntime<
+  TNeeds extends NeedsShape & NoReservedKeys,
+  TContext,
+  const TFeatures extends readonly QueueFeatureToken[],
+>(
+  options: QueueRuntimeOptions<TNeeds> | QueueRuntimeFeatureOptions<TNeeds, TContext, TFeatures>,
 ): Pip<WireNeeds<TNeeds>, EmptyShape> {
+  assertExclusiveMode(options as QueueRuntimeOptions<NeedsShape & NoReservedKeys> | QueueRuntimeFeatureOptions<NeedsShape & NoReservedKeys, unknown, readonly QueueFeatureToken[]>);
   const pipName = options.name ?? 'queue-runtime';
   const startupTimeoutMs = options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
   const blocking = options.blocking ?? false;
+  const registry = 'registry' in options ? options.registry : {};
 
   let started = false;
   let handle: QueueRuntimeHandle | undefined;
-  let startup: Promise<QueueRuntimeHandle | undefined> | undefined;
+  let startup: Promise<QueueRuntimeHandle | void> | undefined;
 
-  const runStartup = async (ctx: CtxOf<TNeeds>): Promise<QueueRuntimeHandle> => {
-    const runtime = await Promise.race([options.start(ctx), timeoutAfter(startupTimeoutMs, pipName)]);
+  const runStartup = async (ctx: CtxOf<TNeeds> & Readonly<Record<string, unknown>>): Promise<QueueRuntimeHandle> => {
+    const start = async (): Promise<QueueRuntimeHandle> => {
+      if ('registry' in options) {
+        return options.start(ctx);
+      }
+
+      const features = featureRegistry({
+        features: options.features,
+        record: ctx as Readonly<Record<string, { readonly queue?: QueueRegistry } | undefined>>,
+      });
+      const queue: QueueInstance = options.q.createQueue({
+        connection: options.connection,
+        ...(options.keyPrefix === undefined ? {} : { keyPrefix: options.keyPrefix }),
+        createContext: () => options.context(ctx),
+      });
+      await queue.register(features);
+      await queue.start();
+      return queue;
+    };
+
+    const runtime = await Promise.race([start(), timeoutAfter(startupTimeoutMs, pipName)]);
     handle = runtime;
     return runtime;
   };
 
-  const inner = pip<TNeeds, EmptyShape>({
+  const needs =
+    'registry' in options
+      ? options.needs
+      : {
+          ...options.needs,
+          ...Object.fromEntries(options.features.map(feature => [feature.key, feature])),
+        };
+
+  const inner = pip<NeedsShape & NoReservedKeys, EmptyShape>({
     name: pipName,
     version: QUEUE_RUNTIME_PIP_VERSION,
-    needs: options.needs,
-    actions: [...queueConsumerActions(options.registry), ...queueProducerActions(options.registry)],
+    needs,
+    actions: 'registry' in options ? queueActions(registry) : [],
     configure(ctx) {
       ctx.registerProjection({
         format: 'queue-topology',
@@ -185,7 +371,7 @@ export function queueRuntime<TNeeds extends NeedsShape & NoReservedKeys>(
 
       started = true;
       if (blocking) {
-        startup = runStartup(ctx);
+        startup = runStartup(ctx as CtxOf<TNeeds> & Readonly<Record<string, unknown>>);
         try {
           await startup;
         } catch (error) {
@@ -197,11 +383,10 @@ export function queueRuntime<TNeeds extends NeedsShape & NoReservedKeys>(
         return;
       }
 
-      startup = runStartup(ctx).catch((error: unknown) => {
+      startup = runStartup(ctx as CtxOf<TNeeds> & Readonly<Record<string, unknown>>).catch((error: unknown) => {
         debugWorker('[%s] Queue runtime startup failed: %s', pipName, error instanceof Error ? error.message : String(error));
         started = false;
         handle = undefined;
-        return undefined;
       });
     },
     async stop() {

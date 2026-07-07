@@ -1,12 +1,13 @@
-import type { EmptyShape, Pip } from '@arki/dot/pip';
+import type { CtxOf, EmptyShape, NeedsShape, Pip, Token, WireNeeds } from '@arki/dot/pip';
 import { pip } from '@arki/dot/pip';
 
 import type { ScheduleDef } from './index.js';
-import { createScheduleRuntime, type KvLike, type ScheduleRuntime } from './runtime.js';
+import type { KvLike, ScheduleRuntime } from './runtime.js';
+import { createScheduleRuntime } from './runtime.js';
 
 export const SCHEDULE_ACTION_META_SCHEMA = '@arki/schedule/action-meta@1';
 
-type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 type JsonObject = { [key: string]: JsonValue };
 
 export type ScheduleDotAction = {
@@ -24,7 +25,90 @@ export type ScheduleDotOptions = {
   readonly jitterMs?: number;
 };
 
-function actionForSchedule(schedule: ScheduleDef, locked: boolean): ScheduleDotAction {
+type NoReservedKeys = Readonly<Record<`$${string}`, never>>;
+
+export type ScheduleFeatureToken<TContext = undefined> = Token<
+  { readonly schedules?: readonly ScheduleDef<TContext>[] },
+  string
+>;
+
+type AnyScheduleFeatureToken = Token<{ readonly schedules?: readonly ScheduleDef<never>[] }, string>;
+
+type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) extends (value: infer TIntersection) => void
+  ? TIntersection
+  : never;
+
+type ScheduleContextsFromSlice<TSlice> = TSlice extends {
+  readonly schedules?: readonly (infer TSchedule)[];
+}
+  ? TSchedule extends ScheduleDef<infer TContext>
+    ? TContext
+    : never
+  : undefined;
+
+type ScheduleContextFromUnion<TContext> = [Exclude<TContext, undefined>] extends [never]
+  ? undefined
+  : UnionToIntersection<Exclude<TContext, undefined>>;
+
+type ScheduleFeatureContext<TFeatures extends readonly AnyScheduleFeatureToken[]> = [
+  TFeatures[number],
+] extends [never]
+  ? undefined
+  : ScheduleContextFromUnion<
+      ScheduleContextsFromSlice<TFeatures[number] extends Token<infer TSlice, string> ? TSlice : never>
+    >;
+
+export type ScheduleFeatureNeeds<TFeatures extends readonly AnyScheduleFeatureToken[]> = {
+  readonly [Tok in TFeatures[number] as Tok extends Token<unknown, infer K> ? K : never]: Tok extends Token<
+    infer TSlice,
+    string
+  >
+    ? TSlice
+    : never;
+};
+
+type ScheduleBaseOptions<TContext> = {
+  readonly schedules: readonly ScheduleDef<TContext>[];
+  readonly lock?: KvLike;
+  readonly jitterMs?: number;
+};
+
+type ScheduleContextOption<TNeeds extends NeedsShape, TContext> =
+  | {
+      readonly context: (services: CtxOf<TNeeds>) => TContext | Promise<TContext>;
+    }
+  | ([TContext] extends [undefined]
+      ? {
+          readonly context?: (services: CtxOf<TNeeds>) => TContext | Promise<TContext>;
+        }
+      : never);
+
+export type ScheduleDirectOptions<TNeeds extends NeedsShape & NoReservedKeys, TContext> =
+  & ScheduleBaseOptions<TContext>
+  & ScheduleContextOption<TNeeds, TContext>
+  & {
+    readonly needs: TNeeds;
+  };
+
+export type ScheduleDirectNoNeedsOptions<TContext> =
+  & ScheduleBaseOptions<TContext>
+  & ScheduleContextOption<EmptyShape, TContext>
+  & {
+    readonly needs?: never;
+  };
+
+export type ScheduleFeatureOptions<
+  TNeeds extends NeedsShape & NoReservedKeys,
+  TFeatures extends readonly AnyScheduleFeatureToken[],
+> =
+  & Omit<ScheduleBaseOptions<ScheduleFeatureContext<TFeatures>>, 'schedules'>
+  & ScheduleContextOption<TNeeds, ScheduleFeatureContext<TFeatures>>
+  & {
+    readonly features: TFeatures;
+    readonly needs?: TNeeds;
+  };
+
+function actionForSchedule<TContext>(schedule: ScheduleDef<TContext>, locked: boolean): ScheduleDotAction {
   const kind = schedule.cron === undefined ? 'every' : 'cron';
   const address = schedule.cron ?? schedule.every ?? '';
   return {
@@ -44,20 +128,67 @@ function actionForSchedule(schedule: ScheduleDef, locked: boolean): ScheduleDotA
   };
 }
 
-export function scheduleActions(
-  schedules: readonly ScheduleDef[],
+export function scheduleActions<TContext>(
+  schedules: readonly ScheduleDef<TContext>[],
   options: { readonly locked?: boolean } = {},
 ): readonly ScheduleDotAction[] {
   return schedules.map(definition => actionForSchedule(definition, options.locked ?? false));
 }
 
-export function schedule(options: ScheduleDotOptions): Pip<EmptyShape, EmptyShape> {
+function collectFeatureSchedules<TContext>(
+  features: readonly AnyScheduleFeatureToken[],
+  record: Readonly<Record<string, { readonly schedules?: readonly ScheduleDef<TContext>[] } | undefined>>,
+): readonly ScheduleDef<TContext>[] {
+  const schedules: ScheduleDef<TContext>[] = [];
+  for (const feature of features) {
+    const slice = record[feature.key];
+    if (slice?.schedules !== undefined) {
+      schedules.push(...slice.schedules);
+    }
+  }
+  return schedules;
+}
+
+export function schedule<TContext = undefined>(
+  options: ScheduleDirectNoNeedsOptions<TContext>,
+): Pip<EmptyShape, EmptyShape>;
+export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext = undefined>(
+  options: ScheduleDirectOptions<TNeeds, TContext>,
+): Pip<WireNeeds<TNeeds>, EmptyShape>;
+export function schedule<
+  TNeeds extends NeedsShape & NoReservedKeys,
+  const TFeatures extends readonly AnyScheduleFeatureToken[],
+>(
+  options: ScheduleFeatureOptions<TNeeds, TFeatures>,
+): Pip<WireNeeds<TNeeds> & ScheduleFeatureNeeds<TFeatures>, EmptyShape>;
+export function schedule<
+  TNeeds extends NeedsShape & NoReservedKeys,
+  TContext,
+  const TFeatures extends readonly AnyScheduleFeatureToken[],
+>(
+  options:
+    | ScheduleDirectNoNeedsOptions<TContext>
+    | ScheduleDirectOptions<TNeeds, TContext>
+    | ScheduleFeatureOptions<TNeeds, TFeatures>,
+): Pip<WireNeeds<TNeeds>, EmptyShape> {
   let runtime: ScheduleRuntime | undefined;
+  const featureMode = 'features' in options;
+  const needs =
+    options.needs === undefined
+      ? {}
+      : options.needs;
+  const runtimeNeeds = featureMode
+    ? {
+        ...needs,
+        ...Object.fromEntries(options.features.map(feature => [feature.key, feature])),
+      }
+    : needs;
 
   return pip({
     name: 'schedule',
     version: '0.0.1',
-    actions: scheduleActions(options.schedules, { locked: options.lock !== undefined }),
+    needs: runtimeNeeds,
+    actions: featureMode ? [] : scheduleActions(options.schedules, { locked: options.lock !== undefined }),
     configure(ctx) {
       ctx.registerProjection({
         format: 'schedule-table',
@@ -66,8 +197,51 @@ export function schedule(options: ScheduleDotOptions): Pip<EmptyShape, EmptyShap
       });
       ctx.declareProvides('schedule-runtime');
     },
-    boot() {
-      runtime = createScheduleRuntime(options);
+    boot(ctx) {
+      if (featureMode) {
+        type FeatureContext = ScheduleFeatureContext<TFeatures>;
+        const schedules = collectFeatureSchedules<FeatureContext>(
+          options.features,
+          ctx as Readonly<Record<string, { readonly schedules?: readonly ScheduleDef<FeatureContext>[] } | undefined>>,
+        );
+        const context = options.context;
+        if (context === undefined) {
+          runtime = createScheduleRuntime({
+            // Erasure seam: public overloads only allow missing context for `TContext = undefined`.
+            schedules: schedules as readonly ScheduleDef<undefined>[],
+            ...(options.lock === undefined ? {} : { lock: options.lock }),
+            ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
+          });
+          return;
+        }
+
+        runtime = createScheduleRuntime<FeatureContext>({
+          schedules,
+          ...(options.lock === undefined ? {} : { lock: options.lock }),
+          ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
+          createContext: () => context(ctx as CtxOf<TNeeds>),
+        });
+        return;
+      }
+
+      const schedules = options.schedules;
+      const context = options.context;
+      if (context === undefined) {
+        runtime = createScheduleRuntime({
+          // Erasure seam: public overloads only allow missing context for `TContext = undefined`.
+          schedules: schedules as readonly ScheduleDef<undefined>[],
+          ...(options.lock === undefined ? {} : { lock: options.lock }),
+          ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
+        });
+        return;
+      }
+
+      runtime = createScheduleRuntime<TContext>({
+        schedules,
+        ...(options.lock === undefined ? {} : { lock: options.lock }),
+        ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
+        createContext: () => context(ctx as CtxOf<TNeeds>),
+      });
     },
     start() {
       runtime?.start();
@@ -79,7 +253,7 @@ export function schedule(options: ScheduleDotOptions): Pip<EmptyShape, EmptyShap
       await runtime?.stop();
       runtime = undefined;
     },
-  });
+  }) as unknown as Pip<WireNeeds<TNeeds>, EmptyShape>;
 }
 
 export type { KvLike, ScheduleRuntime } from './runtime.js';

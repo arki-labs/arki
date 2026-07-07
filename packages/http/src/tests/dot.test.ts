@@ -30,8 +30,21 @@ const progress = route.sse('/orders/:id/progress', {
 });
 
 const OrdersRoutes = token<RouteBundle>()('orders.routes');
+const OrdersFeature = token<{ readonly routes?: RouteBundle }>()('feature.orders');
 
 type OrdersDb = { list(): { id: string }[] };
+
+function resolveBeforeDeferredInitialization(): never {
+  throw new Error('deferred promise resolved before initialization');
+}
+
+function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
+  let resolvePromise: () => void = resolveBeforeDeferredInitialization;
+  const promise = new Promise<void>(resolve => {
+    resolvePromise = resolve;
+  });
+  return { promise, resolve: resolvePromise };
+}
 
 const ordersDbPip = pip({
   name: 'orders-db',
@@ -84,11 +97,36 @@ describe('http() pip', () => {
     await app.dispose();
   });
 
-  it('start listens on an ephemeral port; stop drains in-flight requests before returning', async () => {
-    let release: (() => void) | undefined;
-    const gate = new Promise<void>(resolve => {
-      release = resolve;
+  it('collects route bundles from feature tokens without declaring activator actions', async () => {
+    const featurePip = pip({
+      name: 'orders-feature',
+      needs: { ordersDb: service<OrdersDb>() },
+      actions: [listOrders],
+      boot: ({ ordersDb }) =>
+        provide(
+          OrdersFeature,
+          {
+            routes: routes().bind(listOrders, () => ordersDb.list()),
+          },
+        ),
     });
+
+    const app = await defineApp('http-feature-test')
+      .use(ordersDbPip)
+      .use(featurePip)
+      .use(http({ port: 0, features: [OrdersFeature] as const }))
+      .boot();
+
+    const res = await app.services.httpServer.fetch(new Request('http://in-process/orders'));
+    expect(await res.json()).toEqual([{ id: 'o1' }]);
+    expect(app.manifest.actions.map(action => `${action.pip}:${action.id}`)).toEqual(['orders-feature:orders.list']);
+
+    await app.dispose();
+  });
+
+  it('start listens on an ephemeral port; stop drains in-flight requests before returning', async () => {
+    const gate = deferred();
+    const entered = deferred();
     const slow = route.get('/slow', { id: 'slow', output: z.object({ done: z.boolean() }) });
     const SlowRoutes = token<RouteBundle>()('slow.routes');
     const slowPip = pip({
@@ -97,7 +135,8 @@ describe('http() pip', () => {
         provide(
           SlowRoutes,
           routes().bind(slow, async () => {
-            await gate;
+            entered.resolve();
+            await gate.promise;
             return { done: true };
           }),
         ),
@@ -114,13 +153,13 @@ describe('http() pip', () => {
 
     const inflight = fetch(`${url!}/slow`);
     // Wait until the request is actually being handled.
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await entered.promise;
     expect(app.services.httpServer.inflight()).toBe(1);
 
     const stopping = app.stop();
     // Give stop a beat to stop accepting; the in-flight request must still complete.
     await new Promise(resolve => setTimeout(resolve, 50));
-    release?.();
+    gate.resolve();
 
     const [res] = await Promise.all([inflight, stopping]);
     expect(await res.json()).toEqual({ done: true });
@@ -176,10 +215,25 @@ describe('http() pip', () => {
     void defineApp('http-guard').use(http({ port: 0, bundles: [Ghost] }));
   });
 
+  it('enforces feature token provision in the type system', () => {
+    const Ghost = token<{ readonly routes?: RouteBundle }>()('ghost.feature');
+    // @ts-expect-error — nothing provides ghost.feature, so the wiring guard rejects the composition
+    void defineApp('http-feature-guard').use(http({ port: 0, features: [Ghost] as const }));
+  });
+
   it('rejects the same bundle token listed twice', () => {
     try {
       http({ port: 0, bundles: [OrdersRoutes, OrdersRoutes] });
       expect.unreachable('duplicate bundle token must throw');
+    } catch (error) {
+      expect(error).toMatchObject({ code: HTTP_ERROR_CODES.duplicateRoute });
+    }
+  });
+
+  it('rejects the same feature token listed twice', () => {
+    try {
+      http({ port: 0, features: [OrdersFeature, OrdersFeature] as const });
+      expect.unreachable('duplicate feature token must throw');
     } catch (error) {
       expect(error).toMatchObject({ code: HTTP_ERROR_CODES.duplicateRoute });
     }

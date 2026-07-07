@@ -9,6 +9,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { DotApp } from '../define-app.js';
 import { defineApp } from '../define-app.js';
+import { initPips } from '../init-pips.js';
 import { pip, rename, service } from '../pip-contract.js';
 import { testApp } from '../test-harness.js';
 
@@ -195,5 +196,84 @@ describe('void-boot provides inference (constraint-fallback regression)', () => 
     expect(app.services.doubled).toBe(84);
     expectTypeOf(app.services.doubled).toEqualTypeOf<number>();
     await app.dispose();
+  });
+});
+
+describe('initPips.context', () => {
+  type AppServices = {
+    readonly db: DbService;
+    readonly auth: AuthService;
+    readonly ordersService: { readonly list: () => readonly string[] };
+  };
+
+  const p = initPips.context<AppServices>().create();
+
+  it('authors pips with key-array needs and preserves concrete hook types', async () => {
+    const dbPip = makeDbPip();
+    const ordersPip = p.pip({
+      name: 'orders',
+      needs: ['db'] as const,
+      boot({ db }) {
+        expectTypeOf(db).toEqualTypeOf<DbService>();
+        return {
+          ordersService: {
+            list: () => ['o1'],
+          },
+        };
+      },
+    });
+    const authPip = p.pip({
+      name: 'auth',
+      boot: () => ({
+        auth: { verify: (_token: string): boolean => true } satisfies AuthService,
+      }),
+    });
+
+    const app = await defineApp('feature-pips')
+      .useAll([dbPip, authPip, ordersPip] as const)
+      .boot();
+
+    expect(app.services.ordersService.list()).toEqual(['o1']);
+    expectTypeOf(app.services.db).toEqualTypeOf<DbService>();
+    expectTypeOf(app.services.auth).toMatchTypeOf<AuthService>();
+    expectTypeOf(app.services.ordersService).toMatchTypeOf<AppServices['ordersService']>();
+    await app.dispose();
+  });
+
+  it('bridges app service keys to witness records for adapter pips', async () => {
+    const dbPip = makeDbPip();
+    const consumer = pip({
+      name: 'consumer',
+      needs: p.needs('db'),
+      boot({ db }) {
+        expectTypeOf(db).toEqualTypeOf<DbService>();
+        return { rows: db.query('select 1') };
+      },
+    });
+
+    const app = await defineApp('bridge').use(dbPip).use(consumer).boot();
+    expect(app.services.rows).toBeInstanceOf(Promise);
+    await app.dispose();
+  });
+
+  it('keeps the same ordering and collision guard through useAll', () => {
+    const dbPip = makeDbPip();
+    const consumer = p.pip({
+      name: 'consumer',
+      needs: ['db'] as const,
+      boot: () => ({}),
+    });
+
+    // @ts-expect-error — useAll preserves the same unsatisfied-needs guard as chained .use()
+    defineApp('wrong-order').useAll([consumer, dbPip] as const);
+    const dynamicPips = [consumer, dbPip];
+    // @ts-expect-error — useAll requires a tuple so plain arrays cannot bypass declaration-order checks
+    defineApp('dynamic-wrong-order').useAll(dynamicPips);
+    // @ts-expect-error — "missing" is not an AppServices key
+    p.pip({ name: 'bad-key', needs: ['missing'] as const });
+    // @ts-expect-error — overlapping provides must satisfy the AppServices entry type
+    p.pip({ name: 'bad-provide', boot: () => ({ db: { nope: true } }) });
+
+    expect(true).toBe(true);
   });
 });

@@ -47,6 +47,7 @@ import { listen } from './listen.js';
 
 /** A token publishing a {@link RouteBundle} — what `options.bundles` lists. */
 export type BundleToken = Token<RouteBundle, string>;
+export type HttpFeatureToken = Token<{ readonly routes?: RouteBundle }, string>;
 
 /**
  * The service the `http()` pip publishes. `fetch` is the composed handler
@@ -66,7 +67,10 @@ export type HttpServices = {
   readonly httpServer: HttpServer;
 };
 
-export type HttpOptions<TBundles extends readonly BundleToken[]> = {
+export type HttpOptions<
+  TBundles extends readonly BundleToken[] = readonly [],
+  TFeatures extends readonly HttpFeatureToken[] = readonly [],
+> = {
   /** Port to listen on in `start`. `0` picks an ephemeral port. */
   readonly port: number;
   readonly hostname?: string;
@@ -75,7 +79,12 @@ export type HttpOptions<TBundles extends readonly BundleToken[]> = {
    * entry — the wiring guard rejects the composition unless an earlier
    * pip publishes it.
    */
-  readonly bundles: TBundles;
+  readonly bundles?: TBundles;
+  /**
+   * Feature tokens that may publish an HTTP `routes` slice. Missing slices
+   * are treated as empty so partial backend features stay zero-config.
+   */
+  readonly features?: TFeatures;
   /**
    * App-wide fetch-shaped middleware (first = outermost): CORS, request
    * logging, compression. For per-request values use bundle derivers —
@@ -91,12 +100,18 @@ export type BundleNeeds<TBundles extends readonly BundleToken[]> = {
   readonly [Tok in TBundles[number] as Tok extends Token<RouteBundle, infer K> ? K : never]: RouteBundle;
 };
 
+export type HttpFeatureNeeds<TFeatures extends readonly HttpFeatureToken[]> = {
+  readonly [Tok in TFeatures[number] as Tok extends Token<unknown, infer K> ? K : never]: {
+    readonly routes?: RouteBundle;
+  };
+};
+
 /**
  * Stable error codes thrown by the http pip beyond the engine's own.
  * Exported so consumers and coding agents can match against them.
  */
 export const HTTP_PIP_ERROR_CODES = {
-  /** A bundle token's service was missing from the boot context (erased composition only). */
+  /** A bundle or feature token's service was missing from the boot context (erased composition only). */
   bundleMissing: 'ARKI_HTTP_E008',
 } as const;
 
@@ -137,16 +152,31 @@ function displayHost(hostname: string): string {
  * Build the DOT pip that serves the given bundles. See the module docs
  * for the composition pattern and lifecycle mapping.
  */
-export function http<const TBundles extends readonly BundleToken[]>(
-  options: HttpOptions<TBundles>,
-): Pip<BundleNeeds<TBundles>, HttpServices> {
-  const needs: Record<string, BundleToken> = {};
-  for (const tok of options.bundles) {
+export function http<
+  const TBundles extends readonly BundleToken[] = readonly [],
+  const TFeatures extends readonly HttpFeatureToken[] = readonly [],
+>(
+  options: HttpOptions<TBundles, TFeatures>,
+): Pip<BundleNeeds<TBundles> & HttpFeatureNeeds<TFeatures>, HttpServices> {
+  const bundleTokens = options.bundles ?? ([] as unknown as TBundles);
+  const featureTokens = options.features ?? ([] as unknown as TFeatures);
+  const needs: Record<string, BundleToken | HttpFeatureToken> = {};
+  for (const tok of bundleTokens) {
     if (needs[tok.key] !== undefined) {
       throw new HttpConfigError({
         code: HTTP_ERROR_CODES.duplicateRoute,
         message: `[http] bundle token "${tok.key}" is listed twice in options.bundles.`,
         remediation: 'List each bundle token once. To mount one bundle at two places, rename the publishing pip.',
+      });
+    }
+    needs[tok.key] = tok;
+  }
+  for (const tok of featureTokens) {
+    if (needs[tok.key] !== undefined) {
+      throw new HttpConfigError({
+        code: HTTP_ERROR_CODES.duplicateRoute,
+        message: `[http] feature token "${tok.key}" is listed twice in options.features or duplicates a bundle token.`,
+        remediation: 'List each feature token once. To mount one feature twice, rename the publishing pip.',
       });
     }
     needs[tok.key] = tok;
@@ -172,7 +202,7 @@ export function http<const TBundles extends readonly BundleToken[]>(
       // typed hook context can't know the bundle keys — the tokens do.
       const record = ctx as unknown as Readonly<Record<string, RouteBundle | undefined>>;
       const bundles: RouteBundle[] = [];
-      for (const tok of options.bundles) {
+      for (const tok of bundleTokens) {
         const bundle = record[tok.key];
         if (bundle === undefined) {
           throw new DotPipError({
@@ -184,6 +214,21 @@ export function http<const TBundles extends readonly BundleToken[]>(
           });
         }
         bundles.push(bundle);
+      }
+      for (const tok of featureTokens) {
+        const slice = record[tok.key] as { readonly routes?: RouteBundle } | undefined;
+        if (slice === undefined) {
+          throw new DotPipError({
+            code: HTTP_PIP_ERROR_CODES.bundleMissing,
+            message: `[http] feature "${tok.key}" was not provided by any earlier pip.`,
+            remediation:
+              'Mount the feature pip that publishes this token before http(...). The typed builder enforces this; erased composition reaches this check.',
+            docsUrl: 'https://arki.dev/http/errors/arki-http-e008',
+          });
+        }
+        if (slice.routes !== undefined) {
+          bundles.push(slice.routes);
+        }
       }
 
       const engine = buildEngine(bundles);
@@ -263,7 +308,7 @@ export function http<const TBundles extends readonly BundleToken[]>(
   // was runtime-built; the cast re-attaches the token-derived needs so the
   // app builder's guard checks bundle provision. Same seam as rename()/
   // testPip() in the kernel.
-  return inner as unknown as Pip<BundleNeeds<TBundles>, HttpServices>;
+  return inner as unknown as Pip<BundleNeeds<TBundles> & HttpFeatureNeeds<TFeatures>, HttpServices>;
 }
 
 /**
