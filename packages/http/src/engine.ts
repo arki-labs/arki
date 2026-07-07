@@ -87,7 +87,11 @@ function registerRpc(app: Hono, claimed: Map<string, string>, bundle: RouteBundl
     });
   }
   claimed.set(key, rpc.id);
-  app.mount(rpc.path, req => executeRpc(bundle, rpc, req));
+  // `replaceRequest: false` — the bound handler must see the ORIGINAL
+  // request. oRPC/tRPC fetch adapters take the mount path as their own
+  // `prefix`/`endpoint` option, and derivers/`context` read `req.url`;
+  // Hono's default mount rewrite (prefix-stripped URL) breaks both.
+  app.mount(rpc.path, req => executeRpc(bundle, rpc, req), { replaceRequest: false });
 }
 
 async function executeRpc(bundle: RouteBundle, rpc: RpcBinding, req: Request): Promise<Response> {

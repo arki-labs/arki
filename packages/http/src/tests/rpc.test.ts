@@ -32,6 +32,27 @@ describe('rpc mounts', () => {
     expect(engine.routeIds).toEqual(['orders.rpc']);
   });
 
+  it('hands the ORIGINAL request to the handler — no Hono mount-path rewrite', async () => {
+    // oRPC/tRPC fetch adapters take the mount path as their own
+    // `prefix`/`endpoint` option; a prefix-stripped URL can never match it.
+    const apiRpc = rpcMount('/api/orpc', { id: 'api.rpc' });
+
+    const engine = buildEngine([
+      routes().rpc(apiRpc, {
+        context: req => ({ contextPath: new URL(req.url).pathname }),
+        handle: (req, ctx) =>
+          Response.json({ handlePath: new URL(req.url).pathname, contextPath: ctx.contextPath }),
+      }),
+    ]);
+
+    const res = await engine.fetch(new Request(`${BASE}/api/orpc/audience/detect`, { method: 'POST' }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      handlePath: '/api/orpc/audience/detect',
+      contextPath: '/api/orpc/audience/detect',
+    });
+  });
+
   it('envelopes a context-factory failure with its coded error', async () => {
     const guarded = rpcMount('/rpc/guarded', { id: 'guarded.rpc' });
 
