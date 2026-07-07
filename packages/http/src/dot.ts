@@ -44,7 +44,6 @@ import type { ListenHandle } from './listen.js';
 import { buildEngine, composeMiddleware } from './engine.js';
 import { HTTP_ERROR_CODES, HttpConfigError } from './error.js';
 import { listen } from './listen.js';
-import { contractMeta } from './openapi.js';
 
 /** A token publishing a {@link RouteBundle} — what `options.bundles` lists. */
 export type BundleToken = Token<RouteBundle, string>;
@@ -166,6 +165,7 @@ export function http<const TBundles extends readonly BundleToken[]>(
     needs,
     configure(ctx) {
       ctx.registerService('httpServer', 'custom');
+      ctx.registerProjection({ format: 'openapi', binding: 'http', module: '@arki/http/projection' });
     },
     boot(ctx) {
       // Erasure boundary: needs were declared dynamically above, so the
@@ -267,9 +267,10 @@ export function http<const TBundles extends readonly BundleToken[]>(
 }
 
 /**
- * Register contracts in the DOT manifest from a feature pip's `configure`
- * hook. Converts zod schemas to JSON Schema once, at configure time, so
- * `dot explain --openapi` renders without booting:
+ * Deprecated shim for registering contracts from a feature pip's `configure`
+ * hook. Prefer declaring contracts directly in `actions: [...]` on the pip.
+ * Converts zod schemas to JSON Schema once, at configure time, so
+ * `dot explain --as openapi` renders without booting:
  *
  * ```ts
  * configure(ctx) {
@@ -278,5 +279,5 @@ export function http<const TBundles extends readonly BundleToken[]>(
  * ```
  */
 export function registerRoutes(ctx: DotConfigureContext, contracts: readonly ContractLike[]): void {
-  for (const contract of contracts) ctx.registerRoute(contractMeta(contract));
+  for (const contract of contracts) ctx.registerAction(contract.toDotAction());
 }

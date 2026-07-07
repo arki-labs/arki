@@ -56,7 +56,7 @@ const ordersPip = pip({
 });
 
 describe('http() pip', () => {
-  it('collects bundles, serves via the socketless fetch seam, and registers manifest routes', async () => {
+  it('collects bundles, serves via the socketless fetch seam, and registers manifest actions', async () => {
     const app = await defineApp('http-test')
       .use(ordersDbPip)
       .use(ordersPip)
@@ -69,11 +69,17 @@ describe('http() pip', () => {
     const res = await httpServer.fetch(new Request('http://in-process/orders'));
     expect(await res.json()).toEqual([{ id: 'o1' }]);
 
-    const registered = app.manifest.routes.filter(r => r.pip === 'orders');
-    expect(registered.map(r => r.id)).toEqual(['orders.list', 'orders.progress']);
-    expect(registered[0]?.output).toMatchObject({ type: 'array' });
-    expect(registered[1]?.streaming).toBe(true);
+    const registered = app.manifest.actions.filter(action => action.pip === 'orders');
+    expect(registered.map(action => action.id)).toEqual(['orders.list', 'orders.progress']);
+    expect(registered[0]?.meta?.['output']).toMatchObject({ type: 'array' });
+    expect(registered[1]?.meta?.['streaming']).toBe(true);
     expect(app.manifest.services.some(s => s.name === 'httpServer' && s.pip === 'http')).toBe(true);
+    expect(app.manifest.projections).toContainEqual({
+      format: 'openapi',
+      binding: 'http',
+      module: '@arki/http/projection',
+      pip: 'http',
+    });
 
     await app.dispose();
   });
@@ -147,7 +153,8 @@ describe('http() pip', () => {
       .start();
 
     const url = app.services.httpServer.url();
-    const doomed = fetch(`${url!}/hang`).catch(() => 'severed');
+    const controller = new AbortController();
+    const doomed = fetch(`${url!}/hang`, { signal: controller.signal }).catch(() => 'severed');
     await new Promise(resolve => setTimeout(resolve, 50));
 
     let caught: unknown;
@@ -159,6 +166,7 @@ describe('http() pip', () => {
     expect(caught).toBeDefined();
     const failures = (caught as { failures?: { error: { code?: string } }[] }).failures ?? [];
     expect(failures.some(f => f.error.code === HTTP_ERROR_CODES.drainTimeout)).toBe(true);
+    controller.abort();
     expect(await doomed).toBe('severed');
   });
 

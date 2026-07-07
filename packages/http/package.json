@@ -38,6 +38,11 @@
       "import": "./dist/dot.js",
       "default": "./dist/dot.js"
     },
+    "./projection": {
+      "types": "./dist/projection.d.ts",
+      "import": "./dist/projection.js",
+      "default": "./dist/projection.js"
+    },
     "./context": {
       "types": "./dist/context.d.ts",
       "import": "./dist/context.js",

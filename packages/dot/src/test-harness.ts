@@ -182,6 +182,7 @@ function makeTestPipBuilder(state: TestPipState): TestPipBuilder<ServiceRecord, 
       pips.push({
         name: `test:fakes(${state.pip.name})`,
         needs: {},
+        actions: [],
         renames: {},
         hooks: { boot: () => fakes },
       });

@@ -26,8 +26,9 @@ describe('buildDoctorEnvelope', () => {
     expect(envelope.command).toBe('doctor');
     expect(envelope.generatedAt).toBe('2026-01-01T00:00:00.000Z');
 
+    expect(envelope.data.snapshotVersion).toBe(2);
     expect(envelope.data.pips).toBeInstanceOf(Array);
-    expect(envelope.data.routes).toBeInstanceOf(Array);
+    expect(envelope.data.actions).toBeInstanceOf(Array);
     expect(envelope.data.services).toBeInstanceOf(Array);
     expect(envelope.data.lifecycle).toBeInstanceOf(Array);
     expect(envelope.data.issues).toBeInstanceOf(Array);

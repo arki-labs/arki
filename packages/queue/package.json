@@ -20,6 +20,18 @@
       "import": "./src/runtime-local/index.ts",
       "node": "./src/runtime-local/index.ts"
     },
+    "./dot": {
+      "types": "./dist/src/dot.d.ts",
+      "import": "./src/dot.ts",
+      "node": "./src/dot.ts",
+      "default": "./dist/src/dot.js"
+    },
+    "./projection": {
+      "types": "./dist/src/projection.d.ts",
+      "import": "./src/projection.ts",
+      "node": "./src/projection.ts",
+      "default": "./dist/src/projection.js"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/src/index.d.ts",

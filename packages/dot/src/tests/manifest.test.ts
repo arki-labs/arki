@@ -1,37 +1,57 @@
 /**
  * Manifest contract tests for the DOT kernel (v2).
  *
- * The manifest exposes five top-level arrays — pips, routes, services,
- * lifecycle, dependencies — even on an empty app. Dependency edges are
- * observed from actual service wiring at boot time.
+ * The manifest exposes six top-level arrays — pips, actions, services,
+ * lifecycle, dependencies, projections — even on an empty app. Dependency
+ * edges are observed from actual service wiring at boot time.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '../define-app.js';
+import { DotLifecycleErrorCode } from '../lifecycle.js';
+import { toJsonObject } from '../manifest.js';
 import { pip, service } from '../pip-contract.js';
 
 describe('DOT manifest', () => {
-  it('exposes all five arrays on an empty app', async () => {
+  it('exposes all six arrays on an empty app', async () => {
     const app = await defineApp('empty-app', { version: '1.0.0' }).boot();
     expect(app.manifest).toEqual({
+      manifestVersion: 2,
       app: { name: 'empty-app', version: '1.0.0' },
       pips: [],
-      routes: [],
+      actions: [],
       services: [],
       lifecycle: [],
       dependencies: [],
+      projections: [],
     });
     await app.dispose();
   });
 
-  it('reflects pip contributions: services + routes registered in configure', async () => {
+  it('reflects pip contributions: services, actions, and projections registered in configure', async () => {
     const billing = pip({
       name: 'billing',
       version: '2.3.4',
       configure: ctx => {
         ctx.registerService('stripe', 'custom');
-        ctx.registerRoute({ id: 'billing.charge', method: 'POST', path: '/charge', transport: 'http' });
+        ctx.registerAction({
+          id: 'billing.charge',
+          binding: 'http',
+          direction: 'in',
+          address: 'POST /charge',
+          summary: 'Charge a customer',
+          metaSchema: '@arki/http/action-meta@1',
+          meta: {
+            method: 'POST',
+            path: '/charge',
+          },
+        });
+        ctx.registerProjection({
+          format: 'openapi',
+          binding: 'http',
+          module: '@arki/http/projection',
+        });
         ctx.declareProvides('payments');
       },
     });
@@ -39,17 +59,145 @@ describe('DOT manifest', () => {
     const app = await defineApp('test').use(billing).boot();
     const m = app.manifest;
     expect(m.pips).toEqual([{ name: 'billing', version: '2.3.4', dependencies: [], provides: ['payments'] }]);
-    expect(m.routes).toEqual([
+    expect(m.actions).toEqual([
       {
         id: 'billing.charge',
         pip: 'billing',
-        method: 'POST',
-        path: '/charge',
-        transport: 'http',
+        binding: 'http',
+        direction: 'in',
+        address: 'POST /charge',
+        summary: 'Charge a customer',
+        metaSchema: '@arki/http/action-meta@1',
+        meta: {
+          method: 'POST',
+          path: '/charge',
+        },
       },
+    ]);
+    expect(m.projections).toEqual([
+      { format: 'openapi', binding: 'http', module: '@arki/http/projection', pip: 'billing' },
     ]);
     expect(m.services).toEqual([{ name: 'stripe', pip: 'billing', kind: 'custom' }]);
     await app.dispose();
+  });
+
+  it('collects declarative actions from hook-less pips without adding configure lifecycle entries', () => {
+    const health = pip({
+      name: 'health',
+      actions: [
+        {
+          id: 'health.check',
+          binding: 'http',
+          direction: 'in',
+          address: 'GET /health',
+        },
+      ],
+    });
+
+    const configured = defineApp('test').use(health).configure();
+    expect(configured.manifest.actions).toEqual([
+      {
+        id: 'health.check',
+        pip: 'health',
+        binding: 'http',
+        direction: 'in',
+        address: 'GET /health',
+      },
+    ]);
+    expect(configured.manifest.lifecycle).toEqual([{ pip: 'health', hooks: [] }]);
+  });
+
+  it('keeps registerRoute as a lossless deprecated shim over registerAction', () => {
+    const legacy = pip({
+      name: 'legacy',
+      configure: ctx => {
+        ctx.registerRoute({
+          id: 'legacy.health',
+          method: 'GET',
+          path: '/health',
+          transport: 'http',
+          description: 'Health check',
+          input: { query: { type: 'object' } },
+          output: { type: 'object' },
+          streaming: true,
+        });
+      },
+    });
+
+    const configured = defineApp('test').use(legacy).configure();
+    expect(configured.manifest.actions).toEqual([
+      {
+        id: 'legacy.health',
+        pip: 'legacy',
+        binding: 'http',
+        direction: 'in',
+        address: 'GET /health',
+        summary: 'Health check',
+        meta: {
+          method: 'GET',
+          path: '/health',
+          input: { query: { type: 'object' } },
+          output: { type: 'object' },
+          streaming: true,
+        },
+      },
+    ]);
+  });
+
+  it('surfaces duplicate action ids within a binding as DOT_LIFECYCLE_E016 issues', () => {
+    const duplicate = pip({
+      name: 'dup',
+      actions: [
+        { id: 'same', binding: 'http', direction: 'in' },
+        { id: 'same', binding: 'http', direction: 'out' },
+        { id: 'same', binding: 'queue', direction: 'in' },
+      ],
+    });
+
+    const configured = defineApp('test').use(duplicate).configure();
+    expect(configured.manifest.actions.map(action => `${action.binding}:${action.id}`)).toEqual([
+      'http:same',
+      'http:same',
+      'queue:same',
+    ]);
+    const issue = configured.diagnostics.issues.find(i => i.code === DotLifecycleErrorCode.DuplicateAction);
+    expect(issue).toMatchObject({
+      severity: 'error',
+      pip: 'dup',
+      metadata: { binding: 'http', id: 'same' },
+    });
+  });
+
+  it('rejects non-JSON action metadata with DOT_LIFECYCLE_E017 diagnostics', () => {
+    const bad = pip({
+      name: 'bad-meta',
+      actions: [
+        {
+          id: 'bad.nan',
+          binding: 'http',
+          direction: 'in',
+          meta: { value: Number.NaN },
+        },
+      ],
+    });
+
+    const configured = defineApp('test').use(bad).configure();
+    expect(configured.diagnostics.issues).toContainEqual(
+      expect.objectContaining({
+        code: DotLifecycleErrorCode.ActionMetaNotJson,
+        severity: 'error',
+        pip: 'bad-meta',
+        metadata: expect.objectContaining({ actionId: 'bad.nan' }),
+      }),
+    );
+  });
+
+  it('narrows unknown values to JsonObject only after the JSON round-trip check passes', () => {
+    expect(toJsonObject({ type: 'object', properties: { id: { type: 'string' } } })).toEqual({
+      type: 'object',
+      properties: { id: { type: 'string' } },
+    });
+    expect(() => toJsonObject({ value: Number.POSITIVE_INFINITY })).toThrow(/JSON-serializable/);
   });
 
   it('lifecycle entries include every hook the pip participates in', async () => {
@@ -107,7 +255,7 @@ describe('DOT manifest', () => {
       name: 'p',
       configure: ctx => {
         ctx.registerService('logger', 'logger');
-        ctx.registerRoute({ id: 'p.ping', transport: 'orpc' });
+        ctx.registerAction({ id: 'p.ping', binding: 'orpc', direction: 'in' });
       },
     });
 

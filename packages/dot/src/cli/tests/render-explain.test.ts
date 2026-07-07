@@ -26,14 +26,20 @@ function syntheticApp() {
     version: '1.0.0',
     needs: { db: service<{ name: string }>() },
     configure: ctx => {
-      ctx.registerRoute({ id: 'api.health', method: 'GET', path: '/health', transport: 'http' });
+      ctx.registerAction({
+        id: 'api.health',
+        binding: 'http',
+        direction: 'in',
+        address: 'GET /health',
+      });
+      ctx.registerProjection({ format: 'openapi', binding: 'http', module: '@arki/http/projection' });
     },
   });
   return defineApp('synthetic').use(db).use(api);
 }
 
 describe('buildExplainEnvelope', () => {
-  it('emits a DotCliEnvelope with all 5 manifest arrays', () => {
+  it('emits a DotCliEnvelope with all 6 manifest arrays', () => {
     const configured = syntheticApp().configure();
     const envelope = buildExplainEnvelope({ manifest: configured.manifest }, { json: true, now: FROZEN_NOW });
 
@@ -42,18 +48,23 @@ describe('buildExplainEnvelope', () => {
     expect(envelope.generatedAt).toBe('2026-01-01T00:00:00.000Z');
     expect(envelope.errors).toEqual([]);
 
-    // 5-array contract (manifest has pips, routes, services, lifecycle, dependencies)
+    expect(envelope.data.manifestVersion).toBe(2);
+    // 6-array contract (manifest has pips, actions, services, lifecycle, dependencies, projections)
     expect(envelope.data.pips).toBeInstanceOf(Array);
-    expect(envelope.data.routes).toBeInstanceOf(Array);
+    expect(envelope.data.actions).toBeInstanceOf(Array);
     expect(envelope.data.services).toBeInstanceOf(Array);
     expect(envelope.data.lifecycle).toBeInstanceOf(Array);
     expect(envelope.data.dependencies).toBeInstanceOf(Array);
+    expect(envelope.data.projections).toBeInstanceOf(Array);
 
     // Substance
     expect(envelope.data.pips.map(p => p.name)).toEqual(['db', 'api']);
     expect(envelope.data.services).toEqual([{ name: 'db', pip: 'db', kind: 'db' }]);
-    expect(envelope.data.routes).toEqual([
-      { id: 'api.health', pip: 'api', method: 'GET', path: '/health', transport: 'http' },
+    expect(envelope.data.actions).toEqual([
+      { id: 'api.health', pip: 'api', binding: 'http', direction: 'in', address: 'GET /health' },
+    ]);
+    expect(envelope.data.projections).toEqual([
+      { format: 'openapi', binding: 'http', module: '@arki/http/projection', pip: 'api' },
     ]);
   });
 });
@@ -74,7 +85,7 @@ describe('renderExplain', () => {
     expect(parsed.data.app.name).toBe('synthetic');
   });
 
-  it('text mode includes pip names, service names, and route entries', () => {
+  it('text mode includes pip names, service names, actions, and projections', () => {
     const configured = syntheticApp().configure();
     let written = '';
     renderExplain({ manifest: configured.manifest }, { json: false, now: FROZEN_NOW, out: line => (written += line) });
@@ -82,8 +93,11 @@ describe('renderExplain', () => {
     expect(written).toContain('synthetic');
     expect(written).toContain('db');
     expect(written).toContain('api');
+    expect(written).toContain('Actions (1)');
     expect(written).toContain('api.health');
     expect(written).toContain('/health');
+    expect(written).toContain('Projections (1)');
+    expect(written).toContain('@arki/http/projection');
   });
 
   it('snapshot stability: same app → same JSON (no random ordering)', () => {

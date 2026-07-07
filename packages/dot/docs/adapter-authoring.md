@@ -188,19 +188,49 @@ failures into an aggregate `DotLifecycleError`.
 
 ## Manifest contribution beyond services
 
-For adapters that expose routes or jobs, use the registration helpers:
+For adapters that expose app-boundary interactions, declare **actions**.
+Actions are transport-neutral: HTTP routes, queue consumers/producers, CLI
+commands, cron ticks, and future bindings all share the same kernel shape.
 
 ```ts
 configure(ctx) {
   ctx.registerService('myClient', 'custom');
-  ctx.registerRoute({
+  ctx.registerAction({
     id: 'health',
-    method: 'GET',
-    path: '/_health/my-pkg',
-    transport: 'http',
+    binding: 'http',
+    direction: 'in',
+    address: 'GET /_health/my-pkg',
+    summary: 'Adapter health check',
+    metaSchema: '@acme/my-pkg/action-meta@1',
+    meta: {
+      method: 'GET',
+      path: '/_health/my-pkg',
+    },
   });
 }
 ```
+
+`binding` is an open string. Well-known bindings include `http`, `queue`,
+`cli`, `cron`, `orpc`, and `trpc`; third-party bindings should be
+package-qualified, for example `acme:bus`. Keep machine-readable adapter
+detail in `meta`, and version that layout with `metaSchema`.
+
+Adapters can also provide projections for `dot explain --as <format>`:
+
+```ts
+configure(ctx) {
+  ctx.registerProjection({
+    format: 'openapi',
+    binding: 'http',
+    module: '@acme/my-pkg/projection',
+  });
+}
+```
+
+Projection modules export `project(manifest)`. They must be pure and return
+JSON-round-trip-safe output. Package subpath exports for projection modules
+must include a `default` condition so the CLI's Node fallback can resolve
+them app-relative.
 
 Dependency edges are not declared — the kernel observes them from actual
 service wiring at boot time and writes them into `app.manifest.dependencies`.

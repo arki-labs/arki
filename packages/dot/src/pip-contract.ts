@@ -18,7 +18,7 @@
  *    through individual pip failures, reporting an aggregate error.
  */
 
-import type { RouteTransport, ServiceKind } from './manifest.js';
+import type { ActionManifest, ProjectionManifest, JsonObject, ServiceKind } from './manifest.js';
 
 declare const TypeOf: unique symbol;
 
@@ -303,6 +303,27 @@ export type KernelCtx = {
 };
 
 /** Context provided to a `configure` hook (sync registration only). */
+export type ActionDeclaration = Omit<ActionManifest, 'pip'>;
+
+/** Structural protocol for adapter-owned declarations. */
+export type ActionSource = ActionDeclaration | { toDotAction(): ActionDeclaration };
+
+export type ProjectionDeclaration = Omit<ProjectionManifest, 'pip'>;
+
+type LegacyRouteDeclaration = {
+  id: string;
+  method?: string;
+  path?: string;
+  transport: string;
+  description?: string;
+  input?: {
+    readonly query?: Readonly<JsonObject>;
+    readonly body?: Readonly<JsonObject>;
+  };
+  output?: Readonly<JsonObject>;
+  streaming?: boolean;
+};
+
 export type DotConfigureContext = {
   pipName: string;
   /** App name. */
@@ -313,25 +334,12 @@ export type DotConfigureContext = {
    * is returned from the `boot` hook.
    */
   registerService(name: string, kind: ServiceKind): void;
-  /**
-   * Register a route this pip exposes. The optional `description`,
-   * `input`/`output` JSON Schemas, and `streaming` flag flow into
-   * `manifest.routes` untouched — `dot explain --openapi` renders from
-   * them without booting the app.
-   */
-  registerRoute(route: {
-    id: string;
-    method?: string;
-    path?: string;
-    transport: RouteTransport;
-    description?: string;
-    input?: {
-      readonly query?: Readonly<Record<string, unknown>>;
-      readonly body?: Readonly<Record<string, unknown>>;
-    };
-    output?: Readonly<Record<string, unknown>>;
-    streaming?: boolean;
-  }): void;
+  /** Register an action this pip contributes at an app boundary. */
+  registerAction(action: ActionDeclaration): void;
+  /** Register a projection renderer this pip contributes. */
+  registerProjection(projection: ProjectionDeclaration): void;
+  /** @deprecated Use `registerAction`; removed in DOT 0.5.0. */
+  registerRoute(route: LegacyRouteDeclaration): void;
   /** Mark the pip as participating in a lifecycle hook. */
   registerLifecycleHook(hook: 'configure' | 'boot' | 'start' | 'stop' | 'dispose'): void;
   /** Append `provides` capability strings (informational, manifest-only). */
@@ -364,6 +372,7 @@ export type Pip<
   readonly version?: string;
   /** Runtime needs shape (local alias → witness). */
   readonly needs: NeedsShape;
+  readonly actions: readonly ActionSource[];
   /** Mount-time renames: publish key → new wire key (see {@link rename}). */
   readonly renames: Readonly<Record<string, string>>;
   readonly hooks: {
@@ -428,6 +437,7 @@ export function pip<
   readonly name: string;
   readonly version?: string;
   readonly needs?: TShape;
+  readonly actions?: readonly ActionSource[];
   readonly configure?: (ctx: DotConfigureContext) => void;
   readonly boot?: (ctx: CtxOf<TShape> & KernelCtx) => MaybePromise<TProvides | void>;
   readonly start?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
@@ -438,6 +448,7 @@ export function pip<
     name: def.name,
     ...(def.version === undefined ? {} : { version: def.version }),
     needs: def.needs ?? {},
+    actions: def.actions ?? [],
     renames: {},
     hooks: {
       ...(def.configure === undefined ? {} : { configure: def.configure }),
@@ -519,4 +530,4 @@ export class DotPipError extends Error {
 
 /** Re-exported for downstream typing. */
 
-export { type DotAppManifest, type PipManifest } from './manifest.js';
+export { type ActionManifest, type DotAppManifest, type PipManifest, type ProjectionManifest } from './manifest.js';

@@ -425,8 +425,8 @@ const apiPip = pip({
     admin: service<Admin>(),
   },
   configure: ctx => {
-    ctx.registerRoute({ id: 'api.checkout', method: 'POST', path: '/checkout', transport: 'http' });
-    ctx.registerRoute({ id: 'api.admin.stats', method: 'GET', path: '/admin/stats', transport: 'http' });
+    ctx.registerAction({ id: 'api.checkout', binding: 'http', direction: 'in', address: 'POST /checkout' });
+    ctx.registerAction({ id: 'api.admin.stats', binding: 'http', direction: 'in', address: 'GET /admin/stats' });
     ctx.registerService('api', 'custom');
   },
   boot: ({ auth, orders, admin }) => {
@@ -610,7 +610,7 @@ describe('stress: 28-pip commerce composition', () => {
     /* ---- manifest: observed wiring at scale ---- */
     const m = app.manifest;
     expect(m.pips.map(p => p.name)).toEqual([...DECLARATION_ORDER]);
-    expect(m.routes.map(r => r.id)).toEqual(['api.checkout', 'api.admin.stats']);
+    expect(m.actions.map(action => action.id)).toEqual(['api.checkout', 'api.admin.stats']);
     expect(m.dependencies).toEqual(
       expect.arrayContaining([
         { from: 'logger', to: 'env', kind: 'requires' },

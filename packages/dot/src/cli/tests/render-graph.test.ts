@@ -16,14 +16,16 @@ import { buildMermaidGraph, renderGraph } from '../render-graph.js';
 
 function manifestOf(overrides: Partial<DotAppManifest>): DotAppManifest {
   return {
+    manifestVersion: 2,
     app: { name: 'test' },
     pips: [],
     services: [],
-    routes: [],
+    actions: [],
     dependencies: [],
     lifecycle: [],
+    projections: [],
     ...overrides,
-  } as DotAppManifest;
+  };
 }
 
 describe('buildMermaidGraph', () => {

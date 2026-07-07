@@ -7,7 +7,7 @@
  * remediation guidance.
  *
  * CONTRACT: `DotDiagnosticsSnapshot` always exposes the same five arrays
- * (`pips`, `routes`, `services`, `lifecycle`, `issues`). Consumers must
+ * (`pips`, `actions`, `services`, `lifecycle`, `issues`). Consumers must
  * never see an omitted array — empty is empty, but never missing.
  * This is the "5 arrays" contract referenced by the kernel spec.
  */
@@ -17,16 +17,18 @@ import type { DotLifecycleHook, DotLifecycleState } from './lifecycle.js';
 /** Severity of a single diagnostic issue. */
 export type DiagnosticSeverity = 'info' | 'warning' | 'error';
 
-/** Status of a pip/route/service/lifecycle entry. */
+/** Status of a pip/action/service/lifecycle entry. */
 export type DiagnosticStatus = 'ok' | 'degraded' | 'failed' | 'skipped' | 'missing';
 
 /**
  * Single point-in-time diagnostic snapshot of a DotApp.
  *
- * Five top-level arrays — pips, routes, services, lifecycle, issues —
+ * Five top-level arrays — pips, actions, services, lifecycle, issues —
  * are guaranteed to be present even when empty.
  */
 export type DotDiagnosticsSnapshot = {
+  /** Diagnostic snapshot schema version. 2 = actions/projections era. */
+  snapshotVersion: 2;
   /** ISO-8601 timestamp at which the snapshot was generated. */
   generatedAt: string;
   app: {
@@ -34,7 +36,7 @@ export type DotDiagnosticsSnapshot = {
     state: DotLifecycleState;
   };
   pips: PipDiagnostic[];
-  routes: RouteDiagnostic[];
+  actions: ActionDiagnostic[];
   services: ServiceDiagnostic[];
   lifecycle: LifecycleDiagnostic[];
   issues: DiagnosticIssue[];
@@ -46,9 +48,11 @@ export type PipDiagnostic = {
   issues: DiagnosticIssue[];
 };
 
-export type RouteDiagnostic = {
+export type ActionDiagnostic = {
   id: string;
   pip: string;
+  binding: string;
+  /** Structural configure-phase health only; not runtime liveness. */
   status: Extract<DiagnosticStatus, 'ok' | 'degraded' | 'failed'>;
   issues: DiagnosticIssue[];
 };

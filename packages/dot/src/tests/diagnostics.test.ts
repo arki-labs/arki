@@ -1,7 +1,7 @@
 /**
  * Diagnostics contract tests for the DOT kernel.
  *
- * The snapshot exposes five top-level arrays — pips, routes, services,
+ * The snapshot exposes five top-level arrays — pips, actions, services,
  * lifecycle, issues — and every `DiagnosticIssue` carries code, severity,
  * message, remediation, and docsUrl.
  */
@@ -17,27 +17,29 @@ describe('DOT diagnostics', () => {
       name: 'p',
       configure: ctx => {
         ctx.registerService('logger', 'logger');
-        ctx.registerRoute({ id: 'p.ping', transport: 'orpc' });
+        ctx.registerAction({ id: 'p.ping', binding: 'orpc', direction: 'in' });
       },
     });
     const configured = defineApp('test').use(p).configure();
     const snap = configured.diagnostics;
+    expect(snap.snapshotVersion).toBe(2);
     expect(snap.generatedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
     expect(snap.app).toEqual({ name: 'test', state: 'configured' });
     expect(Array.isArray(snap.pips)).toBe(true);
-    expect(Array.isArray(snap.routes)).toBe(true);
+    expect(Array.isArray(snap.actions)).toBe(true);
     expect(Array.isArray(snap.services)).toBe(true);
     expect(Array.isArray(snap.lifecycle)).toBe(true);
     expect(Array.isArray(snap.issues)).toBe(true);
     expect(snap.pips).toHaveLength(1);
     expect(snap.pips[0]).toMatchObject({ pip: 'p', status: 'ok' });
+    expect(snap.actions).toEqual([{ id: 'p.ping', pip: 'p', binding: 'orpc', status: 'ok', issues: [] }]);
   });
 
   it('empty app still exposes all five arrays', async () => {
     const app = await defineApp('empty').boot();
     const snap = app.diagnostics;
     expect(snap.pips).toEqual([]);
-    expect(snap.routes).toEqual([]);
+    expect(snap.actions).toEqual([]);
     expect(snap.services).toEqual([]);
     expect(snap.lifecycle).toEqual([]);
     expect(snap.issues).toEqual([]);

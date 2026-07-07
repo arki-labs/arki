@@ -60,7 +60,7 @@ import { app } from './app.js'; // your already-defined builder
 
 const configured = (app as ReturnType<typeof defineApp>).configure();
 const pips = configured.manifest.pips.map(p => p.name);
-const routes = configured.manifest.routes;
+const actions = configured.manifest.actions;
 ```
 
 When invoking the CLI from an agent, prefer `spawn`/`execFile` on
@@ -155,13 +155,14 @@ single biggest correlate of broken commits.
 3. `npx dot doctor --json | jq '.data.diagnostics.issues'` — should be
    empty unless the env var is missing at runtime.
 
-### Add a route
+### Add an action
 
-1. Edit the pip that owns the route domain. Call `ctx.registerRoute({
-   id, method, path, transport })` from its `configure` hook.
-2. `npx dot explain --json | jq '.data.manifest.routes'` — confirm the
-   route appears with the right pip owner.
-3. `npx dot doctor --json | jq '.data.diagnostics.routes'` — confirm
+1. Edit the pip that owns the boundary domain. Prefer `actions: [...]`
+   on the pip definition, or call `ctx.registerAction({
+   id, binding, direction, address })` from `configure` for dynamic cases.
+2. `npx dot explain --json | jq '.data.manifest.actions'` — confirm the
+   action appears with the right pip owner.
+3. `npx dot doctor --json | jq '.data.diagnostics.actions'` — confirm
    `status: "ok"`.
 
 ### Add a pip

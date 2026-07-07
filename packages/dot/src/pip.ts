@@ -18,6 +18,8 @@
 export { isLazy, lazy, lazyOf, pip, provide, rename, service, token, DotPipError } from './pip-contract.js';
 export type {
   AnyPip,
+  ActionDeclaration,
+  ActionSource,
   CtxOf,
   DotConfigureContext,
   EmptyShape,
@@ -29,6 +31,7 @@ export type {
   Pip,
   PipNeeds,
   PipProvides,
+  ProjectionDeclaration,
   RenamedProvides,
   Service,
   ServiceRecord,
@@ -52,20 +55,24 @@ export { DotLifecycleError, DotLifecycleErrorCode, DOT_LIFECYCLE_HOOKS } from '.
 
 export type {
   DotAppManifest,
+  ActionDirection,
+  ActionManifest,
+  JsonObject,
+  JsonValue,
   PipManifest,
-  RouteManifest,
+  ProjectionManifest,
   ServiceManifest,
   LifecycleManifest,
   DependencyEdge,
   DependencyEdgeKind,
   ServiceKind,
-  RouteTransport,
 } from './manifest.js';
+export { toJsonObject } from './manifest.js';
 
 export type {
   DotDiagnosticsSnapshot,
   PipDiagnostic,
-  RouteDiagnostic,
+  ActionDiagnostic,
   ServiceDiagnostic,
   LifecycleDiagnostic,
   DiagnosticIssue,

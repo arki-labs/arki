@@ -24,7 +24,7 @@ import { createDebugLogger } from '@arki/log/debug';
 
 import type { DotApp, DotAppBuilder, DotAppConfigured } from '../define-app.js';
 import type { DiagnosticIssue } from '../diagnostics.js';
-import type { DiscoveredApp } from './discover.js';
+import type { DiscoveredApp, DiscoveryResult } from './discover.js';
 import type { DotCliEnvelope, DotCliEnvelopeStatus } from './render-explain.js';
 import { DotLifecycleError } from '../lifecycle.js';
 import { discoverApp, guards } from './discover.js';
@@ -34,7 +34,7 @@ import { probeObservability } from './observability-probe.js';
 import { renderDoctor } from './render-doctor.js';
 import { renderExplain } from './render-explain.js';
 import { renderGraph } from './render-graph.js';
-import { renderOpenApi } from './render-openapi.js';
+import { renderProjection } from './render-projection.js';
 
 const debugCli = createDebugLogger('arki:dot:cli');
 
@@ -63,10 +63,12 @@ Common options:
                          instead of the standard output. explain shows
                          declaration (= boot) order; doctor shows the
                          wiring observed during boot. Composes with --json.
-  --openapi              (explain only) Emit an OpenAPI 3.1 document built
-                         from the manifest's registered routes and their
-                         JSON Schemas — no boot required. Composes with
-                         --json.
+  --as <format>          (explain only) Render a registered projection format.
+                         Examples: openapi, asyncapi, help-text. Composes
+                         with --json.
+  --module <specifier>   (explain --as only) Override the registered
+                         projection module for one invocation.
+  --openapi              Deprecated alias for --as openapi.
 
 \`doctor\` options:
   --observability        Also probe whether an OpenTelemetry SDK is
@@ -101,7 +103,11 @@ export type CliArgs = {
   observability?: boolean;
   /** `--graph` (honored by `explain` and `doctor`). */
   graph?: boolean;
-  /** `--openapi` (honored by `explain` only). */
+  /** `--as` projection format (honored by `explain` only). */
+  as?: string;
+  /** `--module` projection override (honored by `explain --as` only). */
+  module?: string;
+  /** Deprecated `--openapi` alias for `--as openapi`. */
   openapi?: boolean;
 };
 
@@ -167,6 +173,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         force: { type: 'boolean', default: false },
         observability: { type: 'boolean', default: false },
         graph: { type: 'boolean', default: false },
+        as: { type: 'string' },
+        module: { type: 'string' },
         openapi: { type: 'boolean', default: false },
       },
     });
@@ -191,6 +199,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     force?: boolean;
     observability?: boolean;
     graph?: boolean;
+    as?: string;
+    module?: string;
     openapi?: boolean;
   };
 
@@ -199,18 +209,27 @@ export function parseArgs(argv: readonly string[]): CliArgs {
 
   if (!command) command = 'help';
 
-  if (values.openapi === true && values.graph === true) {
+  const projectionFormat = values.as ?? (values.openapi === true ? 'openapi' : undefined);
+
+  if (projectionFormat !== undefined && values.graph === true) {
     throw new DotCliError({
       code: DotCliErrorCode.InvalidArgs,
-      message: '--openapi and --graph are mutually exclusive.',
+      message: '--as/--openapi and --graph are mutually exclusive.',
       remediation: 'Pick one output format per invocation.',
     });
   }
-  if (values.openapi === true && command === 'doctor') {
+  if (projectionFormat !== undefined && command === 'doctor') {
     throw new DotCliError({
       code: DotCliErrorCode.InvalidArgs,
-      message: '--openapi is not supported by doctor.',
-      remediation: 'Use `dot explain --openapi` — the document renders from the static manifest, no boot needed.',
+      message: '--as is not supported by doctor.',
+      remediation: 'Use `dot explain --as <format>` — projections render from the static manifest, no boot needed.',
+    });
+  }
+  if (values.module !== undefined && projectionFormat === undefined) {
+    throw new DotCliError({
+      code: DotCliErrorCode.InvalidArgs,
+      message: '--module requires --as <format>.',
+      remediation: 'Pass a projection format with --as, or remove --module.',
     });
   }
 
@@ -239,14 +258,15 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     force: values.force ?? false,
     observability: values.observability ?? false,
     graph: values.graph ?? false,
+    as: projectionFormat,
+    module: values.module,
     openapi: values.openapi ?? false,
   };
 }
 
 /** Discovery wrapper — returns `null` for help/version commands. */
-async function loadApp(args: CliArgs): Promise<DiscoveredApp> {
-  const { app } = await discoverApp({ appPath: args.appPath, cwd: args.cwd });
-  return app;
+async function loadApp(args: CliArgs): Promise<DiscoveryResult> {
+  return discoverApp({ appPath: args.appPath, cwd: args.cwd });
 }
 
 /**
@@ -255,7 +275,16 @@ async function loadApp(args: CliArgs): Promise<DiscoveredApp> {
  */
 export async function runExplain(
   discovered: DiscoveredApp,
-  opts: { json: boolean; graph?: boolean; openapi?: boolean; out?: (line: string) => void; now?: () => Date },
+  opts: {
+    json: boolean;
+    graph?: boolean;
+    as?: string;
+    module?: string;
+    appFilePath?: string;
+    openapi?: boolean;
+    out?: (line: string) => void;
+    now?: () => Date;
+  },
 ): Promise<DotCliEnvelope<unknown>> {
   let configured: DotApp<Record<string, unknown>> | DotAppConfigured<Record<string, unknown>>;
   try {
@@ -271,9 +300,15 @@ export async function runExplain(
     throw wrapLifecycleError(err, 'configure');
   }
 
-  if (opts.openapi === true) {
-    return renderOpenApi(
-      { manifest: configured.manifest, command: 'explain' },
+  if (opts.as !== undefined) {
+    return renderProjection(
+      {
+        manifest: configured.manifest,
+        command: 'explain',
+        format: opts.as,
+        appFilePath: opts.appFilePath ?? process.cwd(),
+        ...(opts.module === undefined ? {} : { module: opts.module }),
+      },
       { json: opts.json, out: opts.out, now: opts.now },
     );
   }
@@ -519,9 +554,18 @@ export async function main(options: MainOptions): Promise<number> {
     let envelope: DotCliEnvelope<unknown>;
 
     if (args.command === 'explain') {
-      envelope = await runExplain(discovered, { ...opts, openapi: args.openapi });
+      if (args.openapi === true) {
+        stderr('dot: --openapi is deprecated; use --as openapi.\n');
+      }
+      envelope = await runExplain(discovered.app, {
+        ...opts,
+        as: args.as,
+        module: args.module,
+        appFilePath: discovered.filePath,
+        openapi: args.openapi,
+      });
     } else {
-      envelope = await runDoctor(discovered, { ...opts, observability: args.observability });
+      envelope = await runDoctor(discovered.app, { ...opts, observability: args.observability });
     }
 
     return envelopeExitCode(envelope.status);

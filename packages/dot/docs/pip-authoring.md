@@ -233,11 +233,11 @@ During `configure`, a pip registers what it exposes:
 ```ts
 configure(ctx) {
   ctx.registerService('billing', 'custom');
-  ctx.registerRoute({
+  ctx.registerAction({
     id: 'create-invoice',
-    method: 'POST',
-    path: '/invoices',
-    transport: 'http',
+    binding: 'http',
+    direction: 'in',
+    address: 'POST /invoices',
   });
   ctx.declareProvides('billing');
 }

@@ -8,7 +8,7 @@ import { z } from 'zod';
 
 import { route } from '../contract.js';
 import { HTTP_ERROR_CODES } from '../error.js';
-import { contractMeta, toOpenApi } from '../openapi.js';
+import { contractMeta, toOpenApi, toOpenApiFromManifest } from '../openapi.js';
 
 const getOrder = route.get('/orders/:id', {
   id: 'orders.get',
@@ -73,16 +73,50 @@ describe('toOpenApi', () => {
 describe('contractMeta', () => {
   it('converts schemas to JSON Schema without the $schema dialect header', () => {
     const meta = contractMeta(createOrder);
-    expect(meta).toMatchObject({ id: 'orders.create', method: 'POST', path: '/orders', transport: 'http' });
-    expect(meta.input?.body).toMatchObject({ type: 'object', properties: { sku: { type: 'string' } } });
-    expect(meta.input?.body?.['$schema']).toBeUndefined();
-    expect(meta.output).toMatchObject({ type: 'object' });
-    expect(meta.streaming).toBeUndefined();
+    expect(meta).toMatchObject({
+      id: 'orders.create',
+      binding: 'http',
+      direction: 'in',
+      address: 'POST /orders',
+      metaSchema: '@arki/http/action-meta@1',
+    });
+    expect(meta.meta).toMatchObject({
+      input: { body: { type: 'object', properties: { sku: { type: 'string' } } } },
+    });
+    expect(JSON.stringify(meta.meta)).not.toContain('$schema');
+    expect(meta.meta['output']).toMatchObject({ type: 'object' });
+    expect(meta.meta['streaming']).toBeUndefined();
   });
 
   it('marks sse contracts streaming and carries the event schema as output', () => {
     const meta = contractMeta(progress);
-    expect(meta.streaming).toBe(true);
-    expect(meta.output).toMatchObject({ type: 'object', properties: { step: { type: 'number' } } });
+    expect(meta.meta['streaming']).toBe(true);
+    expect(meta.meta['output']).toMatchObject({ type: 'object', properties: { step: { type: 'number' } } });
+  });
+
+  it('is exposed structurally through toDotAction on contracts', () => {
+    expect(createOrder.toDotAction()).toEqual(contractMeta(createOrder));
+  });
+});
+
+describe('toOpenApiFromManifest', () => {
+  it('renders OpenAPI from HTTP actions and skips other bindings', () => {
+    const document = toOpenApiFromManifest({
+      app: { name: 'shop-api', version: '1.0.0' },
+      actions: [
+        { ...getOrder.toDotAction(), pip: 'orders' },
+        { ...createOrder.toDotAction(), pip: 'orders' },
+        { id: 'jobs.run', pip: 'jobs', binding: 'queue', direction: 'in' },
+      ],
+    });
+
+    expect(document['openapi']).toBe('3.1.0');
+    const paths = document['paths'] as Record<string, Record<string, Record<string, unknown>>>;
+    expect(Object.keys(paths)).toEqual(['/orders/{id}', '/orders']);
+    expect(paths['/orders/{id}']!['get']!).toMatchObject({
+      operationId: 'orders.get',
+      tags: ['orders'],
+      summary: 'Fetch one order',
+    });
   });
 });

@@ -99,18 +99,36 @@ function renderTextManifest(manifest: DotAppManifest): string {
   }
   lines.push('');
 
-  // Routes
-  lines.push(`Routes (${manifest.routes.length})`);
-  if (manifest.routes.length === 0) {
+  // Actions
+  lines.push(`Actions (${manifest.actions.length})`);
+  if (manifest.actions.length === 0) {
     lines.push('  (none)');
   } else {
-    const widthId = Math.max(2, ...manifest.routes.map(r => r.id.length));
-    const widthMethod = Math.max(6, ...manifest.routes.map(r => (r.method ?? '-').length));
-    lines.push(`  ${pad('ID', widthId)}  ${pad('METHOD', widthMethod)}  PATH/TRANSPORT  PLUGIN`);
-    for (const r of manifest.routes) {
-      const method = r.method ?? '-';
-      const target = r.path ?? `(${r.transport})`;
-      lines.push(`  ${pad(r.id, widthId)}  ${pad(method, widthMethod)}  ${pad(target, 14)}  ${r.pip}`);
+    const widthId = Math.max(2, ...manifest.actions.map(action => action.id.length));
+    const widthBinding = Math.max(7, ...manifest.actions.map(action => action.binding.length));
+    const widthAddress = Math.max(7, ...manifest.actions.map(action => (action.address ?? '-').length));
+    lines.push(`  ${pad('ID', widthId)}  ${pad('BINDING', widthBinding)}  DIR  ${pad('ADDRESS', widthAddress)}  PIP`);
+    for (const action of manifest.actions) {
+      lines.push(
+        `  ${pad(action.id, widthId)}  ${pad(action.binding, widthBinding)}  ${pad(action.direction, 3)}  ${pad(action.address ?? '-', widthAddress)}  ${action.pip}`,
+      );
+    }
+  }
+  lines.push('');
+
+  // Projections
+  lines.push(`Projections (${manifest.projections.length})`);
+  if (manifest.projections.length === 0) {
+    lines.push('  (none)');
+  } else {
+    const widthFormat = Math.max(6, ...manifest.projections.map(projection => projection.format.length));
+    const widthBinding = Math.max(7, ...manifest.projections.map(projection => projection.binding.length));
+    const widthModule = Math.max(6, ...manifest.projections.map(projection => projection.module.length));
+    lines.push(`  ${pad('FORMAT', widthFormat)}  ${pad('BINDING', widthBinding)}  ${pad('MODULE', widthModule)}  PIP`);
+    for (const projection of manifest.projections) {
+      lines.push(
+        `  ${pad(projection.format, widthFormat)}  ${pad(projection.binding, widthBinding)}  ${pad(projection.module, widthModule)}  ${projection.pip}`,
+      );
     }
   }
   lines.push('');

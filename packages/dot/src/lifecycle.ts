@@ -78,6 +78,10 @@ export const DotLifecycleErrorCode = {
   ReservedServiceKey: 'DOT_LIFECYCLE_E014',
   /** A lifecycle hook exceeded the app's `hookTimeoutMs` watchdog. */
   HookTimeout: 'DOT_LIFECYCLE_E015',
+  /** Two actions in the same binding use the same id. */
+  DuplicateAction: 'DOT_LIFECYCLE_E016',
+  /** Action metadata is not JSON-round-trip safe. */
+  ActionMetaNotJson: 'DOT_LIFECYCLE_E017',
 } as const;
 
 export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];

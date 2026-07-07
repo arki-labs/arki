@@ -11,9 +11,7 @@
  * export const ordersPip = pip({
  *   name: 'orders',
  *   needs: { db: service<Db>() },
- *   configure(ctx) {
- *     registerRoutes(ctx, [listOrders, createOrder]); // from '@arki/http/dot'
- *   },
+ *   actions: [listOrders, createOrder],
  *   async boot({ db }) {
  *     return provide(
  *       OrdersRoutes,

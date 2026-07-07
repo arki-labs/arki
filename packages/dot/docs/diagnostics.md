@@ -15,18 +15,20 @@ The manifest is the declarative description of an app. It is finalised once
 
 ```ts
 type DotAppManifest = {
+  manifestVersion: 2;
   app: { name: string; version?: string };
   pips: PipManifest[];
-  routes: RouteManifest[];
+  actions: ActionManifest[];
   services: ServiceManifest[];
   lifecycle: LifecycleManifest[];
   dependencies: DependencyEdge[];
+  projections: ProjectionManifest[];
 };
 ```
 
-**Five-array contract.** The five top-level arrays (`pips`, `routes`,
-`services`, `lifecycle`, `dependencies`) are **always present**, even when
-empty. Consumers must never see an omitted array.
+**Six-array contract.** The six top-level arrays (`pips`, `actions`,
+`services`, `lifecycle`, `dependencies`, `projections`) are **always
+present**, even when empty. Consumers must never see an omitted array.
 
 ### Sub-shapes
 
@@ -38,12 +40,15 @@ type PipManifest = {
   provides: readonly string[];
 };
 
-type RouteManifest = {
+type ActionManifest = {
   id: string;
   pip: string;
-  method?: string;
-  path?: string;
-  transport: 'http' | 'orpc' | 'trpc' | 'rpc' | 'custom';
+  binding: string;
+  direction: 'in' | 'out';
+  address?: string;
+  summary?: string;
+  meta?: JsonObject;
+  metaSchema?: string;
 };
 
 type ServiceManifest = {
@@ -62,6 +67,13 @@ type DependencyEdge = {
   to: string;
   kind: 'requires' | 'provides' | 'uses';
 };
+
+type ProjectionManifest = {
+  format: string;
+  binding: string;
+  module: string;
+  pip: string;
+};
 ```
 
 ## `DotDiagnosticsSnapshot`
@@ -71,17 +83,18 @@ A diagnostics snapshot is a point-in-time record. Reading
 
 ```ts
 type DotDiagnosticsSnapshot = {
+  snapshotVersion: 2;
   generatedAt: string; // ISO-8601
   app: { name: string; state: DotLifecycleState };
   pips: PipDiagnostic[];
-  routes: RouteDiagnostic[];
+  actions: ActionDiagnostic[];
   services: ServiceDiagnostic[];
   lifecycle: LifecycleDiagnostic[];
   issues: DiagnosticIssue[];
 };
 ```
 
-**Five-array contract.** Same rule as the manifest — `pips`, `routes`,
+**Five-array contract.** Same rule as the manifest — `pips`, `actions`,
 `services`, `lifecycle`, `issues` are always present.
 
 ### `DiagnosticIssue`

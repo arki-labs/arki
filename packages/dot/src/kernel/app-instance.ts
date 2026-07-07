@@ -9,25 +9,28 @@ import { Logger } from '@arki/log';
 import { createDebugLogger } from '@arki/log/debug';
 
 import type {
+  ActionDiagnostic,
   DiagnosticIssue,
   DotDiagnosticsSnapshot,
   LifecycleDiagnostic,
   PipDiagnostic,
-  RouteDiagnostic,
   ServiceDiagnostic,
 } from '../diagnostics.js';
 import type { DotLifecycleEvent, DotLifecycleObserver } from '../lifecycle-observer.js';
 import type { DotLifecycleHook, DotLifecyclePipFailure, DotLifecycleState } from '../lifecycle.js';
 import type {
+  ActionManifest,
   DependencyEdge,
   DotAppManifest,
+  JsonObject,
   LifecycleManifest,
   PipManifest,
-  RouteManifest,
+  ProjectionManifest,
   ServiceManifest,
 } from '../manifest.js';
 import type { AnyPip, DotConfigureContext, Lazy, ServiceRecord } from '../pip-contract.js';
 import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
+import { toJsonObject } from '../manifest.js';
 import { isLazy, isLazyWitness, lazyOf } from '../pip-contract.js';
 import { withPhaseSpan, withPipHookSpan } from './otel.js';
 
@@ -40,8 +43,10 @@ type PipRecord = {
   pip: AnyPip;
   /** Declaration order (0-based) — v2 boot order IS declaration order. */
   order: number;
-  /** Routes registered during `configure`. */
-  routes: RouteManifest[];
+  /** Actions declared statically or registered during `configure`. */
+  actions: ActionManifest[];
+  /** Projection renderers registered during `configure`. */
+  projections: ProjectionManifest[];
   /** Services declared during `configure`. */
   services: ServiceManifest[];
   /** Lifecycle hooks the pip participates in. */
@@ -235,7 +240,8 @@ export class DotAppImpl {
       this.#records.set(pip.name, {
         pip,
         order,
-        routes: [],
+        actions: [],
+        projections: [],
         services: [],
         hooks: new Set<DotLifecycleHook>(),
         provides: new Set<string>(),
@@ -318,6 +324,96 @@ export class DotAppImpl {
       ...(opts?.error === undefined ? {} : { error: opts.error }),
     };
     this.#emit(event);
+  }
+
+  #registerAction(record: PipRecord, action: Omit<ActionManifest, 'pip'>): void {
+    let meta: Readonly<JsonObject> | undefined;
+    if (action.meta !== undefined) {
+      try {
+        meta = toJsonObject(action.meta);
+      } catch (error) {
+        const issue = makeIssue({
+          code: DotLifecycleErrorCode.ActionMetaNotJson,
+          pip: record.pip.name,
+          message:
+            `action "${action.id}" for binding "${action.binding}" has metadata that is not JSON-round-trip safe: ` +
+            stringifyError(error),
+          remediation:
+            'Only put JSON-serializable data in action meta. Convert Dates to strings, remove functions/undefined fields, and avoid NaN/Infinity.',
+          docsAnchor: 'action-meta-not-json',
+          metadata: { actionId: action.id, binding: action.binding },
+        });
+        record.issues.push(issue);
+      }
+    }
+
+    const stamped: ActionManifest = {
+      id: action.id,
+      pip: record.pip.name,
+      binding: action.binding,
+      direction: action.direction,
+      ...(action.address === undefined ? {} : { address: action.address }),
+      ...(action.summary === undefined ? {} : { summary: action.summary }),
+      ...(meta === undefined ? {} : { meta }),
+      ...(action.metaSchema === undefined ? {} : { metaSchema: action.metaSchema }),
+    };
+
+    for (const existingRecord of this.#records.values()) {
+      const duplicate = existingRecord.actions.find(
+        existing => existing.binding === stamped.binding && existing.id === stamped.id,
+      );
+      if (duplicate === undefined) continue;
+      const issue = makeIssue({
+        code: DotLifecycleErrorCode.DuplicateAction,
+        pip: record.pip.name,
+        message: `action "${stamped.id}" is registered more than once for binding "${stamped.binding}".`,
+        remediation:
+          'Action ids must be unique within a binding. Rename one action or move one of them to a different binding.',
+        docsAnchor: 'duplicate-action',
+        metadata: { binding: stamped.binding, id: stamped.id, firstPip: duplicate.pip },
+      });
+      record.issues.push(issue);
+      break;
+    }
+
+    record.actions.push(stamped);
+  }
+
+  #registerProjection(record: PipRecord, projection: Omit<ProjectionManifest, 'pip'>): void {
+    record.projections.push({ ...projection, pip: record.pip.name });
+  }
+
+  #registerRouteShim(
+    record: PipRecord,
+    route: Parameters<DotConfigureContext['registerRoute']>[0],
+  ): void {
+    const meta: JsonObject = {};
+    if (route.method !== undefined) meta['method'] = route.method;
+    if (route.path !== undefined) meta['path'] = route.path;
+    if (route.input !== undefined) {
+      const input: JsonObject = {};
+      if (route.input.query !== undefined) input['query'] = route.input.query;
+      if (route.input.body !== undefined) input['body'] = route.input.body;
+      if (Object.keys(input).length > 0) meta['input'] = input;
+    }
+    if (route.output !== undefined) meta['output'] = route.output;
+    if (route.streaming !== undefined) meta['streaming'] = route.streaming;
+
+    this.#registerAction(record, {
+      id: route.id,
+      binding: route.transport,
+      direction: 'in',
+      ...(route.path === undefined ? {} : { address: `${route.method ?? 'GET'} ${route.path}` }),
+      ...(route.description === undefined ? {} : { summary: route.description }),
+      ...(Object.keys(meta).length === 0 ? {} : { meta }),
+    });
+  }
+
+  #actionFromSource(source: AnyPip['actions'][number]): Omit<ActionManifest, 'pip'> {
+    if (hasToDotAction(source)) {
+      return source.toDotAction();
+    }
+    return source;
   }
 
   /**
@@ -448,6 +544,39 @@ export class DotAppImpl {
     for (const pip of this.#ordered) {
       const record = this.#records.get(pip.name)!;
       const pipLogger = phaseLogger.withAttribute('dot.pip.name', pip.name);
+      const declaredStarted = performance.now();
+      try {
+        for (const source of pip.actions) this.#registerAction(record, this.#actionFromSource(source));
+      } catch (error) {
+        const durationMs = performance.now() - declaredStarted;
+        const issue = makeIssue({
+          code: DotLifecycleErrorCode.ConfigureFailed,
+          pip: pip.name,
+          message: `action declaration threw for pip "${pip.name}": ${stringifyError(error)}`,
+          remediation: `Fix the action declarations of "${pip.name}". Declarative actions must be static and synchronous.`,
+          docsAnchor: 'configure-failed',
+        });
+        record.issues.push(issue);
+        record.lifecycleDiagnostics.push({
+          pip: pip.name,
+          hook: 'configure',
+          state: 'failed',
+          order: record.order,
+          durationMs,
+          issues: [issue],
+        });
+        this.#emitHook('configure', pip.name, record.order, 'failed', { durationMs, error });
+        this.#state = 'failed';
+        this.#manifest = this.#buildManifest();
+        throw new DotLifecycleError({
+          code: DotLifecycleErrorCode.ConfigureFailed,
+          phase: 'configure',
+          pip: pip.name,
+          message: issue.message,
+          cause: error,
+        });
+      }
+
       if (!pip.hooks.configure) {
         pipLogger.debug('configure: skipped (no hook)');
         continue;
@@ -460,9 +589,9 @@ export class DotAppImpl {
         registerService: (name, kind) => {
           record.services.push({ name, pip: pip.name, kind });
         },
-        registerRoute: route => {
-          record.routes.push({ ...route, pip: pip.name });
-        },
+        registerAction: action => this.#registerAction(record, action),
+        registerProjection: projection => this.#registerProjection(record, projection),
+        registerRoute: route => this.#registerRouteShim(record, route),
         registerLifecycleHook: hook => {
           record.hooks.add(hook);
         },
@@ -1389,9 +1518,10 @@ export class DotAppImpl {
 
   #buildManifest(): DotAppManifest {
     const pips: PipManifest[] = [];
-    const routes: RouteManifest[] = [];
+    const actions: ActionManifest[] = [];
     const services: ServiceManifest[] = [];
     const lifecycle: LifecycleManifest[] = [];
+    const projections: ProjectionManifest[] = [];
     // Edges are observed at boot time: consumer pip → the pip whose
     // published wire key satisfied its need. Before boot, the per-pip
     // `dependencies` array (wire-key strings) is the declarative view.
@@ -1406,8 +1536,9 @@ export class DotAppImpl {
         dependencies: needWireKeys,
         provides: [...record.provides],
       });
-      routes.push(...record.routes);
+      actions.push(...record.actions);
       services.push(...record.services);
+      projections.push(...record.projections);
       lifecycle.push({
         pip: pip.name,
         hooks: [...record.hooks],
@@ -1415,21 +1546,23 @@ export class DotAppImpl {
     }
 
     return {
+      manifestVersion: 2,
       app: {
         name: this.#appName,
         version: this.#appVersion,
       },
       pips,
-      routes,
+      actions,
       services,
       lifecycle,
       dependencies,
+      projections,
     };
   }
 
   #buildDiagnostics(): DotDiagnosticsSnapshot {
     const pipDiagnostics: PipDiagnostic[] = [];
-    const routeDiagnostics: RouteDiagnostic[] = [];
+    const actionDiagnostics: ActionDiagnostic[] = [];
     const serviceDiagnostics: ServiceDiagnostic[] = [];
     const lifecycleDiagnostics: LifecycleDiagnostic[] = [];
     const issues: DiagnosticIssue[] = [];
@@ -1445,10 +1578,11 @@ export class DotAppImpl {
         issues: [...record.issues],
       });
 
-      for (const route of record.routes) {
-        routeDiagnostics.push({
-          id: route.id,
+      for (const action of record.actions) {
+        actionDiagnostics.push({
+          id: action.id,
           pip: pip.name,
+          binding: action.binding,
           status: hasError ? 'failed' : 'ok',
           issues: [],
         });
@@ -1470,13 +1604,14 @@ export class DotAppImpl {
     }
 
     return {
+      snapshotVersion: 2,
       generatedAt: new Date().toISOString(),
       app: {
         name: this.#appName,
         state: this.#state,
       },
       pips: pipDiagnostics,
-      routes: routeDiagnostics,
+      actions: actionDiagnostics,
       services: serviceDiagnostics,
       lifecycle: lifecycleDiagnostics,
       issues,
@@ -1508,7 +1643,18 @@ function reverseRecords(records: readonly PipRecord[]): readonly PipRecord[] {
   return [...records].reverse();
 }
 
-/** Re-export `ServiceKind` and `RouteTransport` for the kernel's internal use. */
+function hasToDotAction(
+  source: AnyPip['actions'][number],
+): source is { toDotAction(): Omit<ActionManifest, 'pip'> } {
+  return (
+    typeof source === 'object' &&
+    source !== null &&
+    'toDotAction' in source &&
+    typeof source.toDotAction === 'function'
+  );
+}
 
-export { type RouteTransport, type ServiceKind } from '../manifest.js';
+/** Re-export `ServiceKind` for the kernel's internal use. */
+
+export { type ServiceKind } from '../manifest.js';
 export { type Pip } from '../pip-contract.js';

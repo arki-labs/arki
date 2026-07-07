@@ -28,7 +28,7 @@ function nowIso(opts: RenderOptions): string {
 
 /**
  * Walk every issue carried anywhere in the snapshot (top-level + per-pip +
- * per-route + per-service + per-lifecycle entry) and pick the worst severity.
+ * per-action + per-service + per-lifecycle entry) and pick the worst severity.
  */
 function worstSeverity(snap: DotDiagnosticsSnapshot): DotCliEnvelopeStatus {
   let hasWarning = false;
@@ -47,7 +47,7 @@ function worstSeverity(snap: DotDiagnosticsSnapshot): DotCliEnvelopeStatus {
   let hasError = false;
   collect(snap.issues);
   for (const p of snap.pips) collect(p.issues);
-  for (const r of snap.routes) collect(r.issues);
+  for (const action of snap.actions) collect(action.issues);
   for (const s of snap.services) collect(s.issues);
   for (const l of snap.lifecycle) collect(l.issues);
 
@@ -73,7 +73,7 @@ export function buildDoctorEnvelope(
   };
   collect(source.diagnostics.issues);
   for (const p of source.diagnostics.pips) collect(p.issues);
-  for (const r of source.diagnostics.routes) collect(r.issues);
+  for (const action of source.diagnostics.actions) collect(action.issues);
   for (const s of source.diagnostics.services) collect(s.issues);
   for (const l of source.diagnostics.lifecycle) collect(l.issues);
 
@@ -146,13 +146,13 @@ function renderTextDoctor(snap: DotDiagnosticsSnapshot, status: DotCliEnvelopeSt
     lines.push('');
   }
 
-  // Routes
-  if (snap.routes.length > 0) {
-    lines.push(`Routes (${snap.routes.length})`);
-    for (const r of snap.routes) {
-      lines.push(`  ${statusIcon(r.status)} ${r.id} (pip: ${r.pip})`);
-      if (r.issues.length > 0) {
-        lines.push(...renderIssueLines(r.issues, '    '));
+  // Actions
+  if (snap.actions.length > 0) {
+    lines.push(`Actions (${snap.actions.length})`);
+    for (const action of snap.actions) {
+      lines.push(`  ${statusIcon(action.status)} ${action.binding}:${action.id} (pip: ${action.pip})`);
+      if (action.issues.length > 0) {
+        lines.push(...renderIssueLines(action.issues, '    '));
       }
     }
     lines.push('');

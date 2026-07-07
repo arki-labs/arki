@@ -139,7 +139,7 @@ describe('defineApp', () => {
       needs: { db: service<{ name: string }>() },
       version: '1.0.0',
       configure: ctx => {
-        ctx.registerRoute({ id: 'api.health', method: 'GET', path: '/health', transport: 'http' });
+        ctx.registerAction({ id: 'api.health', binding: 'http', direction: 'in', address: 'GET /health' });
       },
       boot: ({ db }) => {
         expect(db.name).toBe('primary');
@@ -156,7 +156,9 @@ describe('defineApp', () => {
     expect(m.pips.map(p => p.name)).toEqual(['db', 'api']);
     expect(m.pips.find(p => p.name === 'api')?.dependencies).toEqual(['db']);
     expect(m.services).toEqual([{ name: 'db', pip: 'db', kind: 'db' }]);
-    expect(m.routes).toEqual([{ id: 'api.health', pip: 'api', method: 'GET', path: '/health', transport: 'http' }]);
+    expect(m.actions).toEqual([
+      { id: 'api.health', pip: 'api', binding: 'http', direction: 'in', address: 'GET /health' },
+    ]);
     // Edges are observed from actual wiring: api's `db` need was satisfied
     // by the `db` pip's published service.
     expect(m.dependencies).toEqual([{ from: 'api', to: 'db', kind: 'requires' }]);

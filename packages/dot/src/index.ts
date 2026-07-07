@@ -49,20 +49,24 @@ export type {
 
 export type {
   DotAppManifest,
+  ActionDirection,
+  ActionManifest,
+  JsonObject,
+  JsonValue,
   PipManifest,
-  RouteManifest,
+  ProjectionManifest,
   ServiceManifest,
   LifecycleManifest,
   DependencyEdge,
   DependencyEdgeKind,
   ServiceKind,
-  RouteTransport,
 } from './manifest.js';
+export { toJsonObject } from './manifest.js';
 
 export type {
   DotDiagnosticsSnapshot,
   PipDiagnostic,
-  RouteDiagnostic,
+  ActionDiagnostic,
   ServiceDiagnostic,
   LifecycleDiagnostic,
   DiagnosticIssue,
