@@ -76,8 +76,10 @@ describe('createUnitOfWork', () => {
     const result = await uow(tx => {
       type OrdersCreate = (typeof tx.orders)['create'];
       type BillingCharge = (typeof tx.billing)['charge'];
-      expectTypeOf<OrdersCreate>().parameter(0).toEqualTypeOf<string>();
-      expectTypeOf<BillingCharge>().parameter(0).toEqualTypeOf<number>();
+      // `.parameter(0)` is not runtime-callable under bun test; Parameters<>[0]
+      // is the same compile-time assertion through the runtime-safe method.
+      expectTypeOf<Parameters<OrdersCreate>[0]>().toEqualTypeOf<string>();
+      expectTypeOf<Parameters<BillingCharge>[0]>().toEqualTypeOf<number>();
       // @ts-expect-error — only declared feature scopes are available in the transaction callback
       void tx.inventory;
 

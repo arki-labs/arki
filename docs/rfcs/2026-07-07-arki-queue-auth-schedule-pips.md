@@ -1,9 +1,12 @@
 # RFC: `queue()` / `auth()` lifecycle pips + `@arki/schedule`
 
-- **Status:** DRAFT — decision C resolved 2026-07-07 (founder: **build the
-  small `@arki/schedule` anyway for the Redis-less case**, overriding the
-  no-package recommendation); A/B pending, recommendations stand unless
-  overridden
+- **Status:** DRAFT — all three decisions resolved 2026-07-07. C: founder —
+  **build the small `@arki/schedule` anyway for the Redis-less case**
+  (overriding the no-package recommendation). A: superseded by
+  `2026-07-07-dot-feature-pips.md` — the shipped registry+`start` factory
+  stays, an additive feature/bundle mode lands there. B: shipped per
+  recommendation (`{ auth }` only, a9bc6fcced). Phases 1–3 implemented by
+  sibling sessions (a0f82bb759, a9bc6fcced, d788e37f3b).
 - **Date:** 2026-07-07
 - **Author:** Claude (session fbbe6be7), distilling item 5 of the 2026-07-04
   "what it takes for `@arki/dot` to beat NestJS" investigation, which until
@@ -212,18 +215,22 @@ so `dot explain` renders an app's full recurring surface without booting.
 Bundles are deliberately **not** in v1: schedules are app-root concerns
 more often than feature-local ones; if feature-local contribution proves
 real, the http/es `bundles` pattern layers on without breakage.
+*(Revised 2026-07-07: the real consumer arrived — feature pips. The
+feature-local contribution mode is designed in
+`2026-07-07-dot-feature-pips.md`.)*
 
 ## Open questions (founder decisions)
 
-A. **Queue pip shape** — factory wrapping an app-supplied `start` (the
-   proposal — preserves novelette's assembly-inside-guard lesson) vs. full
-   inversion where `@arki/queue` owns worker construction from the
-   registry (bigger, touches the builder API, not needed by any app
-   today). Recommended: factory.
-B. **Auth pip surface** — provide only `{ auth }` (recommended: smallest
-   credible v1; consumers derive sessions via the README recipe) vs. also
-   providing pre-built derivers/route bundles for `@arki/http` (couples
-   auth to http; can layer on later without breakage).
+A. **Queue pip shape** — ~~factory wrapping an app-supplied `start` vs.
+   full inversion~~ — **RESOLVED 2026-07-07 by supersession**: the factory
+   shipped (a0f82bb759) and stays for monolithic apps; feature-local
+   contribution (feature slices of static job records + a pip-supplied
+   tRPC-style `context` factory on `queueRuntime({ features })`) is
+   designed in `2026-07-07-dot-feature-pips.md`, which arrived with the
+   real consumer (feature pips) the inversion was waiting for.
+B. **Auth pip surface** — ~~`{ auth }` only vs. bundled http derivers~~ —
+   **RESOLVED 2026-07-07: shipped per recommendation** (a9bc6fcced
+   provides `{ auth }` only; derivers stay a README recipe).
 C. **Schedule** — ~~no new package (recommended) vs. build small
    `@arki/schedule` anyway for the Redis-less case~~ — **RESOLVED
    2026-07-07: build it** (founder override; design in Pip 3 above).
@@ -232,9 +239,9 @@ C. **Schedule** — ~~no new package (recommended) vs. build small
 
 | Phase | Contents | Exit criterion | Status |
 | --- | --- | --- | --- |
-| 1 | `queueRuntime()` factory in `@arki/queue/dot` + tests (guarded start, timeout, degradation, stop, action derivation) | novelette's pip reduced to assembly-only; four degradation postures verified live | — |
-| 2 | `auth()` pip in `@arki/auth/dot` + `dot.config.ts` → `better-auth.config.ts` rename + tests | one shipped app boots auth through DOT; guarded session route live | — |
-| 3 | `packages/schedule`: `defineSchedule` + `schedule()` pip + `/projection` (`--as schedule-table`) + KV-lock guard + tests (arm/drain, overlap skip, lock contention, invalid-cron fail-fast) | one shipped app runs a real recurring task through `schedule()`; `dot explain --as schedule-table` renders it; queue-repeatable + Coolify paths documented alongside | — |
+| 1 | `queueRuntime()` factory in `@arki/queue/dot` + tests (guarded start, timeout, degradation, stop, action derivation) | novelette's pip reduced to assembly-only; four degradation postures verified live | SHIPPED a0f82bb759 (sibling session); novelette's `pips/queue-runtime.ts` consumes it |
+| 2 | `auth()` pip in `@arki/auth/dot` + `dot.config.ts` → `better-auth.config.ts` rename + tests | one shipped app boots auth through DOT; guarded session route live | SHIPPED a9bc6fcced (sibling session; rename included); app-adoption exit not yet verified |
+| 3 | `packages/schedule`: `defineSchedule` + `schedule()` pip + `/projection` (`--as schedule-table`) + KV-lock guard + tests (arm/drain, overlap skip, lock contention, invalid-cron fail-fast) | one shipped app runs a real recurring task through `schedule()`; `dot explain --as schedule-table` renders it; queue-repeatable + Coolify paths documented alongside | SHIPPED d788e37f3b (sibling session); novelette `pips/i18n-staleness-schedule.ts` consumes it |
 | 4 | *(conditional, separate work)* public promotion of `@arki/queue`/`@arki/auth`/`@arki/schedule` per `add-new-package.md` | scorecard OPEN | queue/auth blocked on the packages themselves (dist+docs, `private` flip); schedule is new so it only needs the standard promotion pass |
 
 Phase 4 watch point: all three packages peer-depend on `@arki/dot` once

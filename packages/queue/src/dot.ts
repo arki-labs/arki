@@ -323,10 +323,16 @@ export function queueRuntime<
         features: options.features,
         record: ctx as Readonly<Record<string, { readonly queue?: QueueRegistry } | undefined>>,
       });
+      // Context is assembled exactly ONCE, inside the guarded start: an
+      // assembly failure (missing creds) must degrade boot like any other
+      // startup failure instead of failing every job run, and expensive
+      // context graphs must not be rebuilt per execution. Per-run
+      // enrichment belongs to job middleware, not this factory.
+      const resolvedContext = await options.context(ctx);
       const queue: QueueInstance = options.q.createQueue({
         connection: options.connection,
         ...(options.keyPrefix === undefined ? {} : { keyPrefix: options.keyPrefix }),
-        createContext: () => options.context(ctx),
+        createContext: () => resolvedContext,
       });
       await queue.register(features);
       await queue.start();

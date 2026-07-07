@@ -164,6 +164,8 @@ describe('queue DOT topology actions', () => {
     let registered: Record<string, unknown> | undefined;
     let createContext: (() => QueueCtx | Promise<QueueCtx>) | undefined;
     let createdContext: QueueCtx | undefined;
+    let repeatedContext: QueueCtx | undefined;
+    let contextCalls = 0;
     let started = 0;
     let stopped = 0;
     const queue: QueueInstance = {
@@ -173,6 +175,7 @@ describe('queue DOT topology actions', () => {
       async start() {
         if (createContext !== undefined) {
           createdContext = await createContext();
+          repeatedContext = await createContext();
         }
         started += 1;
       },
@@ -203,7 +206,10 @@ describe('queue DOT topology actions', () => {
           needs: { dependency: service<Dependency>() },
           connection: 'redis://localhost:6379',
           blocking: true,
-          context: ({ dependency: dep }) => ({ dependencyName: dep.name }),
+          context: ({ dependency: dep }) => {
+            contextCalls += 1;
+            return { dependencyName: dep.name };
+          },
         }),
       )
       .start();
@@ -216,6 +222,11 @@ describe('queue DOT topology actions', () => {
       'image:resize.produce',
     ]);
     expect(createdContext).toEqual({ dependencyName: 'test-dependency' });
+    // Context is assembled once inside the guarded start: repeated
+    // createContext() calls (one per job execution in production) must
+    // return the SAME resolved object, never re-run the app factory.
+    expect(contextCalls).toBe(1);
+    expect(repeatedContext).toBe(createdContext);
     expect(registered).toEqual({ 'feature.orders': registry });
     expect(started).toBe(1);
 
