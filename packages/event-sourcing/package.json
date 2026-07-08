@@ -1,0 +1,111 @@
+{
+  "name": "@arki/event-sourcing",
+  "version": "0.2.1",
+  "description": "Event sourcing primitives — event store, message bus, projections, process managers — built on Emmett for ARKI.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "event-sourcing",
+    "cqrs",
+    "emmett",
+    "postgres",
+    "drizzle",
+    "process-manager",
+    "saga"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./builders": {
+      "types": "./dist/builders/index.d.ts",
+      "import": "./dist/builders/index.js",
+      "default": "./dist/builders/index.js"
+    },
+    "./bus": {
+      "types": "./dist/bus.d.ts",
+      "import": "./dist/bus.js",
+      "default": "./dist/bus.js"
+    },
+    "./command": {
+      "types": "./dist/command.d.ts",
+      "import": "./dist/command.js",
+      "default": "./dist/command.js"
+    },
+    "./command-flow": {
+      "types": "./dist/command-flow.d.ts",
+      "import": "./dist/command-flow.js",
+      "default": "./dist/command-flow.js"
+    },
+    "./decide": {
+      "types": "./dist/decide.d.ts",
+      "import": "./dist/decide.js",
+      "default": "./dist/decide.js"
+    },
+    "./dot": {
+      "types": "./dist/dot.d.ts",
+      "import": "./dist/dot.js",
+      "default": "./dist/dot.js"
+    },
+    "./projection": {
+      "types": "./dist/projection.d.ts",
+      "import": "./dist/projection.js",
+      "default": "./dist/projection.js"
+    },
+    "./event": {
+      "types": "./dist/event.d.ts",
+      "import": "./dist/event.js",
+      "default": "./dist/event.js"
+    },
+    "./store": {
+      "types": "./dist/store.d.ts",
+      "import": "./dist/store.js",
+      "default": "./dist/store.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@arki/contracts": "0.0.3",
+    "@arki/log": "0.0.2",
+    "@event-driven-io/emmett": "^0.41.0",
+    "@event-driven-io/emmett-postgresql": "^0.41.0",
+    "ansis": "^3.3.2",
+    "drizzle-orm": "1.0.0-rc.1"
+  },
+  "peerDependencies": {
+    "@arki/dot": "^0.4.0"
+  },
+  "peerDependenciesMeta": {
+    "@arki/dot": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

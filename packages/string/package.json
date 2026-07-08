@@ -1,0 +1,71 @@
+{
+  "name": "@arki/string",
+  "version": "0.0.2",
+  "description": "String manipulation utilities — case conversion, base64 encoding, character counting, and template builders.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "string",
+    "base64",
+    "case",
+    "utilities"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./base64": {
+      "types": "./dist/base64.d.ts",
+      "import": "./dist/base64.js",
+      "default": "./dist/base64.js"
+    },
+    "./count-characters": {
+      "types": "./dist/count/countCharacters.d.ts",
+      "import": "./dist/count/countCharacters.js",
+      "default": "./dist/count/countCharacters.js"
+    },
+    "./utils": {
+      "types": "./dist/utils.d.ts",
+      "import": "./dist/utils.js",
+      "default": "./dist/utils.js"
+    },
+    "./builder": {
+      "types": "./dist/builder.d.ts",
+      "import": "./dist/builder.js",
+      "default": "./dist/builder.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@poppinss/utils": "^6.10.1",
+    "voca": "^1.4.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

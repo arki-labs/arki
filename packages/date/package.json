@@ -1,0 +1,55 @@
+{
+  "name": "@arki/date",
+  "version": "0.0.2",
+  "description": "Date and time utilities for ARKI — thin wrappers and re-exports over date-fns with project-aligned formatters.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "date",
+    "date-fns",
+    "time",
+    "format"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "import": "./dist/format.js",
+      "default": "./dist/format.js"
+    },
+    "./parseISO": {
+      "types": "./dist/parseISO.d.ts",
+      "import": "./dist/parseISO.js",
+      "default": "./dist/parseISO.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "date-fns": "4.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
