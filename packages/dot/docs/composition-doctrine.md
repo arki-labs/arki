@@ -28,6 +28,15 @@ handler from a static router); *observation* is not.
   defer (`http`'s `bundles`/`features` tokens shape the plugin's needs),
   only the runtime fields thunk: `http({ port: () => env.PORT, ... })`.
   The vocabulary for this is `Lazy<T>`/`resolveLazy` from `@arki/ts`.
+- Client-facing declarations (contracts, enums, branded-id schemas) live in
+  modules that never import server code, published as universal exports;
+  server-only modules get `{ "types", "node" }`-conditioned exports so a
+  browser bundler cannot resolve them. Beware `export { type X } from 'm'` —
+  under `verbatimModuleSyntax` it keeps a RUNTIME import of `m`; use the
+  fully-erased statement form `export type { X } from 'm'` in client-safe
+  modules. Enforce with a browser-purity test: esbuild-bundle every
+  universal export with `platform: 'browser'` and fail on node builtins or
+  server-module fragments.
 - No module-scope singletons that touch the world: no
   `export const db = createDb(...)`, no top-level `await app.boot()`. If a
   library seam truly needs a shared instance, wrap it —
