@@ -242,6 +242,24 @@
   errors, env 3/3, kv 4/4, http 48/48, backend-test tsc 0 + 275/0,
   template tsc 0 + 3/3 + changed-files lint 0. New workspace deps
   declared: `@arki/ts` in env, kv, http, backend-test.
+  **PROMOTION EXECUTED (2026-07-08):** `backend-test` REPLACED
+  `apps/novelette/backend` (old backend deleted, dir moved, package
+  renamed `@novelette/backend`; `apps/*/backend-test` workspace glob
+  removed). The in-process seam the fork needed is `src/runtime.ts`:
+  module-LAZY singletons (`db`, `eventStore`, `repositories`, `auth`,
+  private `kv`) + `createContext`/`createRPCContext` assembling the
+  SAME `Context` shape the gateway assembles at boot — both worlds
+  fold from the single feature list, so they cannot drift. `./fleet`
+  re-exposed as a lazy `once()`-built `fleetHandler`
+  (features/fleet/handler.ts) for start's `/api/fleet` route; the
+  `./db` subpath stays types-only (three deep `{ db }` value imports
+  in start/server moved to the main entry). Import-purity test now
+  covers `index.ts` (the seam) alongside `app.ts`. Verified:
+  backend tsc 0 + 275/0, start tsc 0 + 6/6 unit + vite build +
+  **37/37 e2e** (auth incl. magic-link capture, CSRF, isolation,
+  broaden-personas; US-06 needs `NOVELETTE_ENABLE_E2E_AUTH_SEAMS=true`
+  in the harness env — pre-existing requirement, not a regression),
+  server tsc 0 + boot smoke (health + graceful dot drain).
 - **Date:** 2026-07-07
 - **Author:** Claude (session fbbe6be7), from the 2026-07-07 feature-pips
   design conversation
