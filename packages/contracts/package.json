@@ -29,11 +29,13 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "browser": "./dist/schema.browser.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./schema": {
       "types": "./dist/schema.d.ts",
+      "browser": "./dist/schema.browser.js",
       "import": "./dist/schema.js",
       "default": "./dist/schema.js"
     },
