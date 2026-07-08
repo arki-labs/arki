@@ -113,10 +113,10 @@ function selectProjection(manifest: DotAppManifest, format: string): ProjectionM
       code: DotCliErrorCode.ProjectionConflict,
       message: `Multiple projection modules are registered for format "${format}".`,
       remediation:
-        'Only one module may own a projection format. Remove one registration, or make both pips register the same module specifier.',
+        'Only one module may own a projection format. Remove one registration, or make both plugins register the same module specifier.',
       metadata: {
         format,
-        projections: projections.map(projection => ({ pip: projection.pip, module: projection.module })),
+        projections: projections.map(projection => ({ plugin: projection.plugin, module: projection.module })),
       },
     });
   }
@@ -148,7 +148,7 @@ function resolveProjectionSpecifier(specifier: string, appFilePath: string): str
 async function loadProjectionModule(
   specifier: string,
   appFilePath: string,
-  registeringPip: string,
+  registeringPlugin: string,
 ): Promise<{ module: ProjectionModule; resolved: string }> {
   let resolved: string;
   try {
@@ -159,7 +159,7 @@ async function loadProjectionModule(
       message: `Failed to resolve projection module "${specifier}".`,
       remediation:
         'Check that the projection module is installed and that package subpath exports include a default condition. Use --module <specifier> to debug with a replacement module.',
-      metadata: { specifier, appFilePath, registeringPip },
+      metadata: { specifier, appFilePath, registeringPlugin },
       cause: error,
     });
   }
@@ -173,7 +173,7 @@ async function loadProjectionModule(
       message: `Failed to import projection module "${specifier}".`,
       remediation:
         'Fix the projection module export, or use --module <specifier> to debug with a replacement module.',
-      metadata: { specifier, resolved, registeringPip },
+      metadata: { specifier, resolved, registeringPlugin },
       cause: error,
     });
   }
@@ -184,7 +184,7 @@ async function loadProjectionModule(
       message: `Projection module "${specifier}" does not export project(manifest).`,
       remediation:
         'Export a named `project(manifest)` function from the projection module. Use --module <specifier> to test a corrected module.',
-      metadata: { specifier, resolved, registeringPip },
+      metadata: { specifier, resolved, registeringPlugin },
     });
   }
 
@@ -202,7 +202,7 @@ export async function renderProjection(
 ): Promise<DotCliEnvelope<ProjectionData>> {
   const projection = selectProjection(source.manifest, source.format);
   const specifier = source.module ?? projection.module;
-  const { module } = await loadProjectionModule(specifier, source.appFilePath, projection.pip);
+  const { module } = await loadProjectionModule(specifier, source.appFilePath, projection.plugin);
 
   let document: JsonValue;
   try {
@@ -213,7 +213,7 @@ export async function renderProjection(
       message: `Projection "${source.format}" failed while rendering.`,
       remediation:
         'Fix the projection project(manifest) function so it is pure and returns JSON-round-trip-safe output.',
-      metadata: { format: source.format, specifier, registeringPip: projection.pip },
+      metadata: { format: source.format, specifier, registeringPlugin: projection.plugin },
       cause: error,
     });
   }

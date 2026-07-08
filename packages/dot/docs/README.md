@@ -12,7 +12,7 @@ do.
 ## For app authors
 
 - [Quickstart](./quickstart.md) — boot your first DOT app in five minutes.
-- [Pip authoring](./pip-authoring.md) — write your own `DotPip`.
+- [Plugin authoring](./plugin-authoring.md) — write your own `DotPlugin`.
 - [Lifecycle](./lifecycle.md) — the 5-hook contract, failure ordering,
   idempotency rules.
 - [Diagnostics](./diagnostics.md) — `app.manifest`, `app.diagnostics`, the
@@ -23,7 +23,7 @@ do.
 ## For package authors
 
 - [Adapter authoring](./adapter-authoring.md) — expose your package as a DOT
-  pip via a `./dot` subpath export.
+  plugin via a `./dot` subpath export.
 
 ## For agents
 

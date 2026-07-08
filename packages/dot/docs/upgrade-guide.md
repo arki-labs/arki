@@ -1,9 +1,9 @@
 # Upgrade Guide
 
 `@arki/dot` v0.1 is the first public release. The pre-0.1 legacy surface
-(`createDot`, `definePip`, the `@arki/dot/legacy/*` barrel,
+(`createDot`, `definePlugin`, the `@arki/dot/legacy/*` barrel,
 `@arki/dot/event-sourcing`, and `@arki/dot/presets/runtime-local`) is **not
-shipped** in v0.1. Use `defineApp` / `pip` for composition and
+shipped** in v0.1. Use `defineApp` / `plugin` for composition and
 import event-sourcing helpers directly from `@arki/event-sourcing` (the
 `eventSourcingFeatures` namespace and `createSimpleProcessManager` live
 there now).

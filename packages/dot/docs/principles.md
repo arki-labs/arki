@@ -23,7 +23,7 @@ and not committee-shaped.
 **Playful** does *not* mean cute, ironic, or whimsical for its own sake.
 It means *human*. A real developer wrote this. They cared. They had taste.
 
-**Precise** means every word is the *right* word. `pip` not "module." `boot`
+**Precise** means every word is the *right* word. `plugin` not "module." `boot`
 not "initialize." `dispose` not "cleanup." `dot doctor` not "validate." If
 a shorter, more accurate word exists, use it. If a longer word adds
 meaning, accept the length.
@@ -51,16 +51,16 @@ What this principle *forbids*:
 
 ---
 
-## 2. Pips ARE the app — no hidden core
+## 2. Plugins ARE the app — no hidden core
 
-There is no framework "underneath" the pips. Remove every pip and you
-remove the app. The kernel composes pips; it does not contain the app's
+There is no framework "underneath" the plugins. Remove every plugin and you
+remove the app. The kernel composes plugins; it does not contain the app's
 behavior.
 
 This means we:
 
 - Never add **framework-reserved service kinds** that "always work" without
-  a pip publishing them. If you want `services.logger`, a pip publishes it.
+  a plugin publishing them. If you want `services.logger`, a plugin publishes it.
 - Never add **hidden lifecycle hooks** that run outside the 5-hook
   sequence (`configure → boot → start → stop → dispose`).
 - Never put **app behavior in defaults**. Defaults can shape *config*; they
@@ -68,9 +68,9 @@ This means we:
 
 What this principle *forbids*:
 
-- A global "DOT context" that pips read from without declaring it.
+- A global "DOT context" that plugins read from without declaring it.
 - "Built-in" services that bypass the registration protocol.
-- Magic auto-loading of pips from the filesystem.
+- Magic auto-loading of plugins from the filesystem.
 
 ---
 
@@ -93,7 +93,7 @@ This means we:
 
 What this principle *forbids*:
 
-- "Eventual consistency" between pips during boot.
+- "Eventual consistency" between plugins during boot.
 - Race-prone boot sequences disguised as `Promise.all`.
 - Logs / diagnostics that include `new Date().toISOString()` inside the
   package body (it belongs at the envelope edge, once).

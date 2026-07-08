@@ -11,11 +11,11 @@
  * `kv.get/set` in tests because that would require a real Redis instance.
  */
 
-import { defineApp, DotLifecycleError, DotPipError, rename } from '@arki/dot/pip';
+import { defineApp, DotLifecycleError, DotPluginError, rename } from '@arki/dot/plugin';
 import { describe, expect, it } from 'vitest';
 
 import { KV } from './index.js';
-import { kv, KV_PIP_ERROR_CODES } from './dot.js';
+import { kv, KV_PLUGIN_ERROR_CODES } from './dot.js';
 
 describe('@arki/kv/dot', () => {
   it('contributes a kv-kind service to the manifest', () => {
@@ -24,12 +24,12 @@ describe('@arki/kv/dot', () => {
     );
     const configured = builder.configure();
     expect(configured.manifest.services).toEqual([
-      { name: 'kv', pip: 'kv', kind: 'kv' },
+      { name: 'kv', plugin: 'kv', kind: 'kv' },
     ]);
-    expect(configured.manifest.pips.map(p => p.name)).toEqual(['kv']);
+    expect(configured.manifest.plugins.map(p => p.name)).toEqual(['kv']);
   });
 
-  it('throws a coded DotPipError when no URL is configured', async () => {
+  it('throws a coded DotPluginError when no URL is configured', async () => {
     // The kernel wraps any throw from a boot hook in DotLifecycleError so
     // every boot failure has a uniform outer shape. The original throw is
     // preserved on `.cause` — that's what consumers and coding agents
@@ -43,13 +43,13 @@ describe('@arki/kv/dot', () => {
         .catch((e: unknown) => e);
       expect(caught).toBeInstanceOf(DotLifecycleError);
       const cause = (caught as DotLifecycleError).cause;
-      expect(cause).toBeInstanceOf(DotPipError);
-      const pipErr = cause as DotPipError;
-      expect(pipErr.code).toBe(KV_PIP_ERROR_CODES.urlNotConfigured);
-      expect(pipErr.code).toBe('KV_PIP_E001');
-      expect(pipErr.message).toMatch(/KV URL is not configured/);
-      expect(pipErr.remediation).toMatch(/options\.url|KV_URL/);
-      expect(pipErr.docsUrl).toMatch(/^https?:\/\//);
+      expect(cause).toBeInstanceOf(DotPluginError);
+      const pluginErr = cause as DotPluginError;
+      expect(pluginErr.code).toBe(KV_PLUGIN_ERROR_CODES.urlNotConfigured);
+      expect(pluginErr.code).toBe('KV_PLUGIN_E001');
+      expect(pluginErr.message).toMatch(/KV URL is not configured/);
+      expect(pluginErr.remediation).toMatch(/options\.url|KV_URL/);
+      expect(pluginErr.docsUrl).toMatch(/^https?:\/\//);
     } finally {
       if (previous !== undefined) process.env['KV_URL'] = previous;
     }
@@ -77,7 +77,7 @@ describe('@arki/kv/dot', () => {
       .use(rename(kv({ url: 'redis://127.0.0.1:1', namespace: 'sessions' }), { kv: 'sessionsKv' }, 'sessions-kv'))
       .boot();
     try {
-      expect(app.manifest.pips.map(p => p.name)).toEqual(['kv', 'sessions-kv']);
+      expect(app.manifest.plugins.map(p => p.name)).toEqual(['kv', 'sessions-kv']);
       expect(app.services.kv).toBeInstanceOf(KV);
       expect(app.services.sessionsKv).toBeInstanceOf(KV);
       expect(app.services.kv).not.toBe(app.services.sessionsKv);

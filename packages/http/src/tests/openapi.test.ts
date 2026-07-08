@@ -104,9 +104,9 @@ describe('toOpenApiFromManifest', () => {
     const document = toOpenApiFromManifest({
       app: { name: 'shop-api', version: '1.0.0' },
       actions: [
-        { ...getOrder.toDotAction(), pip: 'orders' },
-        { ...createOrder.toDotAction(), pip: 'orders' },
-        { id: 'jobs.run', pip: 'jobs', binding: 'queue', direction: 'in' },
+        { ...getOrder.toDotAction(), plugin: 'orders' },
+        { ...createOrder.toDotAction(), plugin: 'orders' },
+        { id: 'jobs.run', plugin: 'jobs', binding: 'queue', direction: 'in' },
       ],
     });
 

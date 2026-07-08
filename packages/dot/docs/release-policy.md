@@ -23,11 +23,11 @@ These are the **stable contracts** as of `0.1`:
 | Surface                          | Stability  |
 | -------------------------------- | ---------- |
 | `defineApp(name, options?)`      | stable     |
-| `.use(pip)` typed builder     | stable     |
-| `pip(config)`                 | stable     |
+| `.use(plugin)` typed builder     | stable     |
+| `plugin(config)`                 | stable     |
 | `service<T>()` / `token<T>()` | stable     |
-| `rename(pip, map, name?)`     | stable     |
-| `Pip` shape (5 hooks)         | stable     |
+| `rename(plugin, map, name?)`     | stable     |
+| `Plugin` shape (5 hooks)         | stable     |
 | `DotLifecycleHook` enum          | stable     |
 | `DotLifecycleState` enum         | stable     |
 | `DotLifecycleError` shape        | stable     |
@@ -43,10 +43,10 @@ These are **experimental** in `0.x` and may change without a major bump:
 - `dot new` and `dot add` (deferred to `0.x`/`1.1`).
 - Internal kernel modules (`@arki/dot/kernel/*`).
 
-The pre-0.1 legacy surface (`createDot`, `definePip`, the
+The pre-0.1 legacy surface (`createDot`, `definePlugin`, the
 `@arki/dot/legacy/*`, `@arki/dot/event-sourcing`, and
 `@arki/dot/presets/runtime-local` subpaths) has been **removed**. Use
-`defineApp`/`pip` for composition and `@arki/event-sourcing`
+`defineApp`/`plugin` for composition and `@arki/event-sourcing`
 directly for event-sourcing helpers.
 
 ## Deprecation cycle
@@ -73,7 +73,7 @@ Deprecations and removals are listed in the [upgrade guide](./upgrade-guide.md).
 | Import path              | Status                                                     |
 | ------------------------ | ---------------------------------------------------------- |
 | `@arki/dot`              | stable                                                     |
-| `@arki/dot/pip`       | stable                                                     |
+| `@arki/dot/plugin`       | stable                                                     |
 | `@arki/dot/test-harness` | stable                                                     |
 | `@arki/dot/cli`          | experimental — wraps the binary; use the `dot` CLI instead |
 | `@arki/dot/kernel/*`     | experimental — do not import directly                      |

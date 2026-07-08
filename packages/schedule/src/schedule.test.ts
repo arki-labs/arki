@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { defineApp, pip, provide, service, token } from '@arki/dot/pip';
+import { defineApp, plugin, provide, service, token } from '@arki/dot/plugin';
 
 import { schedule, scheduleActions } from './dot.js';
 import { ScheduleError, SCHEDULE_ERROR_CODES, defineSchedule, initSchedule } from './index.js';
@@ -69,7 +69,7 @@ describe('schedule DOT projection', () => {
     expect(app.manifest.actions).toEqual([
       {
         id: 'daily-maintenance.fire',
-        pip: 'schedule',
+        plugin: 'schedule',
         binding: 'schedule',
         direction: 'in',
         address: '0 2 * * *',
@@ -88,7 +88,7 @@ describe('schedule DOT projection', () => {
         format: 'schedule-table',
         binding: 'schedule',
         module: '@arki/schedule/projection',
-        pip: 'schedule',
+        plugin: 'schedule',
       },
     ]);
   });
@@ -99,7 +99,7 @@ describe('schedule DOT projection', () => {
     };
     const s = initSchedule.context<ScheduleCtx>().create();
     const Feature = token<{ readonly schedules?: readonly [ReturnType<typeof s.define>] }>()('feature.schedules');
-    const dependency = pip({
+    const dependency = plugin({
       name: 'dependency',
       boot: () => ({ dependency: { name: 'dep' } }),
     });
@@ -111,7 +111,7 @@ describe('schedule DOT projection', () => {
         calls.push(ctx.dependencyName);
       },
     });
-    const feature = pip({
+    const feature = plugin({
       name: 'feature',
       actions: scheduleActions([daily]),
       boot: () => provide(Feature, { schedules: [daily] }),
@@ -128,7 +128,7 @@ describe('schedule DOT projection', () => {
       )
       .boot();
 
-    expect(app.manifest.actions.map(action => `${action.pip}:${action.id}`)).toEqual(['feature:feature-daily.fire']);
+    expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual(['feature:feature-daily.fire']);
     await app.dispose();
     expect(calls).toEqual([]);
   });
@@ -140,7 +140,7 @@ describe('schedule DOT projection', () => {
       handler: async () => {},
     });
     const Feature = token<{ readonly schedules?: readonly [typeof daily] }>()('feature.plain-schedules');
-    const feature = pip({
+    const feature = plugin({
       name: 'plain-feature',
       actions: scheduleActions([daily]),
       boot: () => provide(Feature, { schedules: [daily] }),
@@ -150,7 +150,7 @@ describe('schedule DOT projection', () => {
       .use(schedule({ features: [Feature] as const }))
       .boot();
 
-    expect(app.manifest.actions.map(action => `${action.pip}:${action.id}`)).toEqual(['plain-feature:feature-plain.fire']);
+    expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual(['plain-feature:feature-plain.fire']);
     await app.dispose();
   });
 
@@ -186,7 +186,7 @@ describe('schedule DOT projection', () => {
       overlap: 'concurrent',
       handler: async () => {},
     });
-    const actions = scheduleActions([hourly]).map(action => ({ ...action, pip: 'schedule' }));
+    const actions = scheduleActions([hourly]).map(action => ({ ...action, plugin: 'schedule' }));
 
     expect(project({ app: { name: 'schedule-app' }, actions })).toEqual({
       format: 'schedule-table',
@@ -194,7 +194,7 @@ describe('schedule DOT projection', () => {
         {
           id: 'hourly-sync.fire',
           name: 'hourly-sync',
-          pip: 'schedule',
+          plugin: 'schedule',
           kind: 'every',
           address: '1h',
           overlap: 'concurrent',

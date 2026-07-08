@@ -27,7 +27,7 @@ export type Engine = {
 /**
  * Compose bundles into a single fetch handler. Throws
  * `ARKI_HTTP_E002`/`E006` on route collisions and malformed mounts —
- * callers (the `http()` pip's `boot`) let these bubble as boot failures.
+ * callers (the `http()` plugin's `boot`) let these bubble as boot failures.
  */
 export function buildEngine(bundles: readonly RouteBundle[]): Engine {
   const app = new Hono();

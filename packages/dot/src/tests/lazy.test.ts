@@ -6,15 +6,15 @@
  *      retry, dispose idempotency, get-after-dispose.
  *   2. Kernel integration — never-touched handles never initialize or clean
  *      up; initialized handles are auto-disposed in reverse order even when
- *      the publishing pip has no dispose hook; cleanup failures aggregate.
+ *      the publishing plugin has no dispose hook; cleanup failures aggregate.
  */
 
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { Lazy } from '../pip-contract.js';
+import type { Lazy } from '../plugin-contract.js';
 import { defineApp } from '../define-app.js';
 import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
-import { isLazy, lazy, pip, service } from '../pip-contract.js';
+import { isLazy, lazy, plugin, service } from '../plugin-contract.js';
 
 describe('lazy() handle semantics', () => {
   it('does not initialize until first get(); memoizes the value', async () => {
@@ -116,8 +116,8 @@ describe('lazy() handle semantics', () => {
 describe('lazy services in the kernel', () => {
   type Db = { readonly id: number; close(): void };
 
-  function makeLazyDbPip(log: string[]) {
-    return pip({
+  function makeLazyDbPlugin(log: string[]) {
+    return plugin({
       name: 'db',
       boot: () => ({
         db: lazy(
@@ -134,7 +134,7 @@ describe('lazy services in the kernel', () => {
 
   it('a never-accessed lazy service never initializes and never cleans up', async () => {
     const log: string[] = [];
-    const app = await defineApp('lazy-untouched').use(makeLazyDbPip(log)).boot();
+    const app = await defineApp('lazy-untouched').use(makeLazyDbPlugin(log)).boot();
     expect(log).toEqual([]);
     expect(app.services.db.initialized).toBe(false);
     await app.dispose();
@@ -143,7 +143,7 @@ describe('lazy services in the kernel', () => {
 
   it('an initialized lazy service is auto-disposed at app.dispose() without a dispose hook', async () => {
     const log: string[] = [];
-    const app = await defineApp('lazy-touched').use(makeLazyDbPip(log)).boot();
+    const app = await defineApp('lazy-touched').use(makeLazyDbPlugin(log)).boot();
     const db = await app.services.db.get();
     expect(db.id).toBe(1);
     expect(log).toEqual(['init']);
@@ -154,7 +154,7 @@ describe('lazy services in the kernel', () => {
   it('consumers receive the typed handle through needs and get() it on demand', async () => {
     const log: string[] = [];
     let seen: Db | undefined;
-    const consumer = pip({
+    const consumer = plugin({
       name: 'consumer',
       needs: { db: service<Lazy<Db>>() },
       boot: ({ db }) => {
@@ -167,39 +167,39 @@ describe('lazy services in the kernel', () => {
       },
     });
 
-    const app = await defineApp('lazy-consumer').use(makeLazyDbPip(log)).use(consumer).start();
+    const app = await defineApp('lazy-consumer').use(makeLazyDbPlugin(log)).use(consumer).start();
     expect(log).toEqual(['init']);
     expect(seen?.id).toBe(1);
     await app.dispose();
     expect(log).toEqual(['init', 'close']);
   });
 
-  it('boot rollback auto-disposes initialized lazy services of already-booted pips', async () => {
+  it('boot rollback auto-disposes initialized lazy services of already-booted plugins', async () => {
     const log: string[] = [];
-    const eager = pip({
+    const eager = plugin({
       name: 'eager',
       needs: { db: service<Lazy<Db>>() },
-      // Forces initialization during boot, then a later pip fails.
+      // Forces initialization during boot, then a later plugin fails.
       boot: async ({ db }) => {
         await db.get();
         return {};
       },
     });
-    const bomb = pip({
+    const bomb = plugin({
       name: 'bomb',
       boot: () => {
         throw new Error('boom');
       },
     });
 
-    await expect(defineApp('lazy-rollback').use(makeLazyDbPip(log)).use(eager).use(bomb).boot()).rejects.toThrow(
+    await expect(defineApp('lazy-rollback').use(makeLazyDbPlugin(log)).use(eager).use(bomb).boot()).rejects.toThrow(
       'boom',
     );
     expect(log).toEqual(['init', 'close']); // rollback cleaned the initialized handle
   });
 
-  it('lazy cleanup failures aggregate into the dispose error with the pip name', async () => {
-    const broken = pip({
+  it('lazy cleanup failures aggregate into the dispose error with the plugin name', async () => {
+    const broken = plugin({
       name: 'broken',
       boot: () => ({
         svc: lazy(() => 'value', {
@@ -219,15 +219,15 @@ describe('lazy services in the kernel', () => {
     expect(error).toBeInstanceOf(DotLifecycleError);
     expect((error as DotLifecycleError).code).toBe(DotLifecycleErrorCode.DisposeFailed);
     expect((error as DotLifecycleError).failures).toEqual([
-      expect.objectContaining({ pip: 'broken', phase: 'dispose' }),
+      expect.objectContaining({ plugin: 'broken', phase: 'dispose' }),
     ]);
   });
 
   it('service.lazy lifts an EAGER provider into a pre-initialized handle', async () => {
     const eagerDb: Db = { id: 7, close: () => undefined };
-    const provider = pip({ name: 'db', boot: () => ({ db: eagerDb }) });
+    const provider = plugin({ name: 'db', boot: () => ({ db: eagerDb }) });
     let handleSeen: Lazy<Db> | undefined;
-    const consumer = pip({
+    const consumer = plugin({
       name: 'consumer',
       needs: { db: service.lazy<Db>() },
       boot: async ({ db }) => {
@@ -252,7 +252,7 @@ describe('lazy services in the kernel', () => {
 
   it('service.lazy passes a LAZY provider handle through by identity', async () => {
     const log: string[] = [];
-    const consumer = pip({
+    const consumer = plugin({
       name: 'consumer',
       needs: { db: service.lazy<Db>() },
       boot: ({ db }) => {
@@ -262,7 +262,7 @@ describe('lazy services in the kernel', () => {
       },
     });
 
-    const app = await defineApp('lift-lazy').use(makeLazyDbPip(log)).use(consumer).boot();
+    const app = await defineApp('lift-lazy').use(makeLazyDbPlugin(log)).use(consumer).boot();
     expect(app.services.consumerDb).toBe(app.services.db); // same handle object
     expect(log).toEqual([]);
     await app.services.consumerDb.get();
@@ -271,9 +271,9 @@ describe('lazy services in the kernel', () => {
     expect(log).toEqual(['init', 'close']); // provider-side cleanup still owns it
   });
 
-  it('a republished handle is auto-disposed by its FIRST publisher — after that pip’s dispose hook', async () => {
+  it('a republished handle is auto-disposed by its FIRST publisher — after that plugin’s dispose hook', async () => {
     const order: string[] = [];
-    const provider = pip({
+    const provider = plugin({
       name: 'db',
       boot: () => ({
         db: lazy((): Db => ({ id: 3, close: () => void order.push('lazy-cleanup') }), {
@@ -282,13 +282,13 @@ describe('lazy services in the kernel', () => {
       }),
       async dispose({ db }) {
         // The provider's own teardown still needs the handle alive, even
-        // though a later pip republished it under another key. Reverse
+        // though a later plugin republished it under another key. Reverse
         // dispose order must not let the republisher close it first.
         expect(await db.get()).toMatchObject({ id: 3 });
         order.push('provider-hook');
       },
     });
-    const alias = pip({
+    const alias = plugin({
       name: 'alias',
       needs: { db: service.lazy<Db>() },
       boot: ({ db }) => ({ aliasDb: db }),
@@ -302,9 +302,9 @@ describe('lazy services in the kernel', () => {
   });
 
   it('the guard accepts eager or lazy providers for a service.lazy need — and still rejects wrong types', () => {
-    const eagerProvider = pip({ name: 'db', boot: () => ({ db: { id: 1, close: () => undefined } as Db }) });
-    const lazyProvider = makeLazyDbPip([]);
-    const consumer = pip({
+    const eagerProvider = plugin({ name: 'db', boot: () => ({ db: { id: 1, close: () => undefined } as Db }) });
+    const lazyProvider = makeLazyDbPlugin([]);
+    const consumer = plugin({
       name: 'consumer',
       needs: { db: service.lazy<Db>() },
       boot: ({ db }) => {
@@ -312,7 +312,7 @@ describe('lazy services in the kernel', () => {
         return {};
       },
     });
-    const wrongProvider = pip({ name: 'db', boot: () => ({ db: 42 }) });
+    const wrongProvider = plugin({ name: 'db', boot: () => ({ db: 42 }) });
 
     // Both provider strategies typecheck against the same consumer:
     defineApp('ok-eager').use(eagerProvider).use(consumer);
@@ -322,15 +322,15 @@ describe('lazy services in the kernel', () => {
     expect(true).toBe(true);
   });
 
-  it('runs the pip dispose hook BEFORE auto-disposing its lazy publishes', async () => {
+  it('runs the plugin dispose hook BEFORE auto-disposing its lazy publishes', async () => {
     const order: string[] = [];
-    const p = pip({
+    const p = plugin({
       name: 'ordered',
       boot: () => ({
         svc: lazy(() => 'value', { dispose: () => void order.push('lazy-cleanup') }),
       }),
       async dispose({ svc }) {
-        // The handle is still usable inside the pip's own dispose hook.
+        // The handle is still usable inside the plugin's own dispose hook.
         expect(await svc.get()).toBe('value');
         order.push('hook');
       },

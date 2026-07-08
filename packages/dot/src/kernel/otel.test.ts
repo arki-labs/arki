@@ -6,10 +6,10 @@
  *
  *   - Each public phase emits exactly one `dot.app.<phase>` root span
  *     (`configure`, `boot`, `start`, `stop`, `dispose`).
- *   - Each pip with a hook emits exactly one matching `dot.pip.<hook>`
- *     child span with stable attributes (`dot.app.name`, `dot.pip.name`,
- *     `dot.pip.version`, `dot.hook`, `dot.pip.order`).
- *   - On a failed boot, the failing pip's span is marked ERROR and an
+ *   - Each plugin with a hook emits exactly one matching `dot.plugin.<hook>`
+ *     child span with stable attributes (`dot.app.name`, `dot.plugin.name`,
+ *     `dot.plugin.version`, `dot.hook`, `dot.plugin.order`).
+ *   - On a failed boot, the failing plugin's span is marked ERROR and an
  *     `exception` event is recorded; the parent phase span is also ERROR.
  *
  * Tests do NOT depend on histogram/metrics output — the in-memory metrics
@@ -28,8 +28,8 @@ import { Logger } from '@arki/log';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { defineApp } from '../define-app.js';
-import { pip, service } from '../pip-contract.js';
-import { withPhaseSpan, withPipHookSpan } from './otel.js';
+import { plugin, service } from '../plugin-contract.js';
+import { withPhaseSpan, withPluginHookSpan } from './otel.js';
 
 let exporter: InMemorySpanExporter;
 let provider: BasicTracerProvider;
@@ -57,15 +57,15 @@ function spansByName(name: string): ReadableSpan[] {
 }
 
 describe('@arki/dot OTel instrumentation', () => {
-  it('emits a dot.app.configure root span and per-pip dot.pip.configure children', async () => {
-    const envPip = pip({
+  it('emits a dot.app.configure root span and per-plugin dot.plugin.configure children', async () => {
+    const envPlugin = plugin({
       name: 'env',
       version: '0.1.0',
       configure(ctx) {
         ctx.registerService('env', 'env');
       },
     });
-    const dbPip = pip({
+    const dbPlugin = plugin({
       name: 'db',
       version: '0.1.0',
       configure(ctx) {
@@ -73,29 +73,29 @@ describe('@arki/dot OTel instrumentation', () => {
       },
     });
 
-    await defineApp('otel-configure-test').use(envPip).use(dbPip).boot();
+    await defineApp('otel-configure-test').use(envPlugin).use(dbPlugin).boot();
 
     const phaseSpans = spansByName('dot.app.configure');
     expect(phaseSpans).toHaveLength(1);
     expect(phaseSpans[0]?.attributes['dot.app.name']).toBe('otel-configure-test');
-    expect(phaseSpans[0]?.attributes['dot.app.pip.count']).toBe(2);
+    expect(phaseSpans[0]?.attributes['dot.app.plugin.count']).toBe(2);
 
-    const pipSpans = spansByName('dot.pip.configure');
-    expect(pipSpans).toHaveLength(2);
-    const pipNames = pipSpans.map(s => s.attributes['dot.pip.name']).sort();
-    expect(pipNames).toEqual(['db', 'env']);
-    for (const span of pipSpans) {
+    const pluginSpans = spansByName('dot.plugin.configure');
+    expect(pluginSpans).toHaveLength(2);
+    const pluginNames = pluginSpans.map(s => s.attributes['dot.plugin.name']).sort();
+    expect(pluginNames).toEqual(['db', 'env']);
+    for (const span of pluginSpans) {
       expect(span.attributes['dot.hook']).toBe('configure');
       expect(span.attributes['dot.app.name']).toBe('otel-configure-test');
     }
-    // Note: parent-context linkage between phase and pip spans requires
+    // Note: parent-context linkage between phase and plugin spans requires
     // a context manager (e.g. AsyncLocalStorageContextManager from
     // @opentelemetry/context-async-hooks). Real consumers register one
     // via the OTel SDK; this test asserts shape only, not linkage.
   });
 
-  it('emits a dot.app.boot root span and per-pip dot.pip.boot children', async () => {
-    const envPip = pip({
+  it('emits a dot.app.boot root span and per-plugin dot.plugin.boot children', async () => {
+    const envPlugin = plugin({
       name: 'env',
       version: '0.1.0',
       configure(ctx) {
@@ -106,18 +106,18 @@ describe('@arki/dot OTel instrumentation', () => {
       },
     });
 
-    await defineApp('otel-boot-test').use(envPip).boot();
+    await defineApp('otel-boot-test').use(envPlugin).boot();
 
     const bootPhaseSpans = spansByName('dot.app.boot');
     expect(bootPhaseSpans).toHaveLength(1);
     expect(bootPhaseSpans[0]?.attributes['dot.app.name']).toBe('otel-boot-test');
 
-    const bootPipSpans = spansByName('dot.pip.boot');
-    expect(bootPipSpans).toHaveLength(1);
-    const envSpan = bootPipSpans[0]!;
-    expect(envSpan.attributes['dot.pip.name']).toBe('env');
+    const bootPluginSpans = spansByName('dot.plugin.boot');
+    expect(bootPluginSpans).toHaveLength(1);
+    const envSpan = bootPluginSpans[0]!;
+    expect(envSpan.attributes['dot.plugin.name']).toBe('env');
     expect(envSpan.attributes['dot.hook']).toBe('boot');
-    expect(envSpan.attributes['dot.pip.version']).toBe('0.1.0');
+    expect(envSpan.attributes['dot.plugin.version']).toBe('0.1.0');
     // Note: parent-context linkage across async/await boundaries requires
     // AsyncLocalStorageContextManager from @opentelemetry/context-async-hooks.
     // Without it, child spans in async paths are root spans rather than
@@ -125,9 +125,9 @@ describe('@arki/dot OTel instrumentation', () => {
     // manager via the OTel SDK; we don't pull that dep into the test.
   });
 
-  it('emits phase + per-pip spans for the full configure→boot→start→stop→dispose cascade', async () => {
+  it('emits phase + per-plugin spans for the full configure→boot→start→stop→dispose cascade', async () => {
     type Svc = { web: { listening: boolean } };
-    const envPip = pip({
+    const envPlugin = plugin({
       name: 'env',
       version: '0.1.0',
       configure(ctx) {
@@ -137,7 +137,7 @@ describe('@arki/dot OTel instrumentation', () => {
         return { env: { PORT: 3000 } };
       },
     });
-    const webPip = pip({
+    const webPlugin = plugin({
       name: 'web',
       version: '0.2.0',
       needs: { env: service<{ PORT: number }>() },
@@ -158,7 +158,7 @@ describe('@arki/dot OTel instrumentation', () => {
       },
     });
 
-    const app = await defineApp('otel-full-lifecycle-test').use(envPip).use(webPip).start();
+    const app = await defineApp('otel-full-lifecycle-test').use(envPlugin).use(webPlugin).start();
     await app.stop();
     await app.dispose();
 
@@ -171,19 +171,19 @@ describe('@arki/dot OTel instrumentation', () => {
       expect(phaseSpans[0]?.status.code).toBe(1); // OK
     }
 
-    // Per-pip hook spans: configure × 2, boot × 2, start × 1, stop × 1, dispose × 1.
+    // Per-plugin hook spans: configure × 2, boot × 2, start × 1, stop × 1, dispose × 1.
     // (only `web` declared start/stop/dispose; env has none of those hooks.)
-    expect(spansByName('dot.pip.configure')).toHaveLength(2);
-    expect(spansByName('dot.pip.boot')).toHaveLength(2);
-    expect(spansByName('dot.pip.start')).toHaveLength(1);
-    expect(spansByName('dot.pip.stop')).toHaveLength(1);
-    expect(spansByName('dot.pip.dispose')).toHaveLength(1);
+    expect(spansByName('dot.plugin.configure')).toHaveLength(2);
+    expect(spansByName('dot.plugin.boot')).toHaveLength(2);
+    expect(spansByName('dot.plugin.start')).toHaveLength(1);
+    expect(spansByName('dot.plugin.stop')).toHaveLength(1);
+    expect(spansByName('dot.plugin.dispose')).toHaveLength(1);
 
-    const webStart = spansByName('dot.pip.start')[0]!;
-    expect(webStart.attributes['dot.pip.name']).toBe('web');
-    expect(webStart.attributes['dot.pip.version']).toBe('0.2.0');
+    const webStart = spansByName('dot.plugin.start')[0]!;
+    expect(webStart.attributes['dot.plugin.name']).toBe('web');
+    expect(webStart.attributes['dot.plugin.version']).toBe('0.2.0');
     expect(webStart.attributes['dot.hook']).toBe('start');
-    expect(webStart.attributes['dot.pip.order']).toBe(1);
+    expect(webStart.attributes['dot.plugin.order']).toBe(1);
     expect(webStart.status.code).toBe(1); // OK
   });
 
@@ -211,7 +211,7 @@ describe('@arki/dot OTel instrumentation', () => {
     };
 
     withPhaseSpan(
-      { appName: 'trace-thread-test', phase: 'configure', pipCount: 0, logger },
+      { appName: 'trace-thread-test', phase: 'configure', pluginCount: 0, logger },
       () => {
         // Body runs with logger context already set; no assertion needed here.
       },
@@ -221,43 +221,43 @@ describe('@arki/dot OTel instrumentation', () => {
     expect(observedSpanId).toBeDefined();
     expect(observedSpanId).not.toBe('0000000000000000');
 
-    // Same wiring on the per-pip helper.
-    let pipTraceId: string | undefined;
-    let pipSpanId: string | undefined;
-    const pipLogger = new Logger('test-trace-thread:pip');
-    const originalPipSet = pipLogger.setTraceContext.bind(pipLogger);
-    pipLogger.setTraceContext = (t: string, s?: string) => {
-      pipTraceId = t;
-      pipSpanId = s;
-      originalPipSet(t, s);
+    // Same wiring on the per-plugin helper.
+    let pluginTraceId: string | undefined;
+    let pluginSpanId: string | undefined;
+    const pluginLogger = new Logger('test-trace-thread:plugin');
+    const originalPluginSet = pluginLogger.setTraceContext.bind(pluginLogger);
+    pluginLogger.setTraceContext = (t: string, s?: string) => {
+      pluginTraceId = t;
+      pluginSpanId = s;
+      originalPluginSet(t, s);
     };
-    withPipHookSpan(
+    withPluginHookSpan(
       {
         appName: 'trace-thread-test',
-        pipName: 'pip',
+        pluginName: 'plugin',
         hook: 'configure',
         order: 0,
-        logger: pipLogger,
+        logger: pluginLogger,
       },
       () => {
         /* noop */
       },
     );
-    expect(pipTraceId).toBeDefined();
-    expect(pipTraceId).not.toBe('00000000000000000000000000000000');
-    expect(pipSpanId).toBeDefined();
-    expect(pipSpanId).not.toBe('0000000000000000');
+    expect(pluginTraceId).toBeDefined();
+    expect(pluginTraceId).not.toBe('00000000000000000000000000000000');
+    expect(pluginSpanId).toBeDefined();
+    expect(pluginSpanId).not.toBe('0000000000000000');
   });
 
-  it('marks the failing pip span ERROR when boot throws', async () => {
-    const goodPip = pip({
+  it('marks the failing plugin span ERROR when boot throws', async () => {
+    const goodPlugin = plugin({
       name: 'good',
       version: '0.1.0',
       boot() {
         return {};
       },
     });
-    const badPip = pip({
+    const badPlugin = plugin({
       name: 'bad',
       version: '0.1.0',
       boot() {
@@ -266,13 +266,13 @@ describe('@arki/dot OTel instrumentation', () => {
     });
 
     await expect(
-      defineApp('otel-boot-fail-test').use(goodPip).use(badPip).boot(),
+      defineApp('otel-boot-fail-test').use(goodPlugin).use(badPlugin).boot(),
     ).rejects.toThrow();
 
-    const bootPipSpans = spansByName('dot.pip.boot');
-    expect(bootPipSpans).toHaveLength(2);
-    const goodSpan = bootPipSpans.find(s => s.attributes['dot.pip.name'] === 'good');
-    const badSpan = bootPipSpans.find(s => s.attributes['dot.pip.name'] === 'bad');
+    const bootPluginSpans = spansByName('dot.plugin.boot');
+    expect(bootPluginSpans).toHaveLength(2);
+    const goodSpan = bootPluginSpans.find(s => s.attributes['dot.plugin.name'] === 'good');
+    const badSpan = bootPluginSpans.find(s => s.attributes['dot.plugin.name'] === 'bad');
     // OK / unset = 0, ERROR = 2 per OTel SpanStatusCode.
     expect(goodSpan?.status.code).toBe(1); // OK
     expect(badSpan?.status.code).toBe(2);  // ERROR

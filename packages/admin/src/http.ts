@@ -1,6 +1,6 @@
 /**
  * `@arki/http` bundle adapter for the fleet endpoint — the declare-once
- * and bind-once halves of `GET /api/fleet`, so a DOT app's fleet pip is
+ * and bind-once halves of `GET /api/fleet`, so a DOT app's fleet plugin is
  * a three-liner instead of hand-wiring `createFleetHandler` into a
  * route binding.
  *
@@ -18,7 +18,7 @@ import { FLEET_ENDPOINT_PATH, fleetSnapshotSchema } from './contract';
 import { createFleetHandler } from './server';
 
 /**
- * The STATIC half — list this in the fleet pip's `actions:` so the
+ * The STATIC half — list this in the fleet plugin's `actions:` so the
  * endpoint attributes to the feature in `dot explain`. The output
  * schema documents the payload; enforcement stays in the handler
  * (which owns its 401/502 error formats and returns a raw `Response`).

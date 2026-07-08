@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { DotAppManifest } from '../../manifest.js';
 import { defineApp } from '../../define-app.js';
-import { pip } from '../../pip-contract.js';
+import { plugin } from '../../plugin-contract.js';
 import { DotCliErrorCode } from '../error-codes.js';
 import { parseArgs, runExplain } from '../index.js';
 import { renderProjection } from '../render-projection.js';
@@ -35,7 +35,7 @@ function manifestOf(overrides: Partial<DotAppManifest>): DotAppManifest {
   return {
     manifestVersion: 2,
     app: { name: 'shop-api', version: '1.0.0' },
-    pips: [],
+    plugins: [],
     actions: [],
     services: [],
     dependencies: [],
@@ -82,8 +82,8 @@ describe('renderProjection', () => {
     await writeFile(appFilePath, '');
     const manifest = manifestOf({
       projections: [
-        { format: 'openapi', binding: 'http', module: './a.ts', pip: 'a' },
-        { format: 'openapi', binding: 'http', module: './b.ts', pip: 'b' },
+        { format: 'openapi', binding: 'http', module: './a.ts', plugin: 'a' },
+        { format: 'openapi', binding: 'http', module: './b.ts', plugin: 'b' },
       ],
     });
 
@@ -106,8 +106,8 @@ export function project(manifest) {
     );
 
     const manifest = manifestOf({
-      actions: [{ id: 'health', pip: 'api', binding: 'http', direction: 'in', address: 'GET /health' }],
-      projections: [{ format: 'custom:doc', binding: 'http', module: './projection.ts', pip: 'api' }],
+      actions: [{ id: 'health', plugin: 'api', binding: 'http', direction: 'in', address: 'GET /health' }],
+      projections: [{ format: 'custom:doc', binding: 'http', module: './projection.ts', plugin: 'api' }],
     });
 
     let written = '';
@@ -139,7 +139,7 @@ export function project(manifest) {
 `,
     );
 
-    const api = pip({
+    const api = plugin({
       name: 'api',
       configure: ctx => {
         ctx.registerProjection({ format: 'help-text', binding: 'cli', module: './missing.ts' });

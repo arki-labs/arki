@@ -1,6 +1,6 @@
-# Pip Authoring
+# Plugin Authoring
 
-A pip is authored with `pip(config)` — a name, an optional `needs` shape,
+A plugin is authored with `plugin(config)` — a name, an optional `needs` shape,
 and up to five lifecycle hooks. The kernel runs the hooks in declaration
 order (`configure → boot → start`) and in reverse declaration order for
 cleanup (`stop → dispose`). See [Lifecycle](./lifecycle.md) for the full
@@ -9,9 +9,9 @@ contract.
 ## Anatomy
 
 ```ts
-import { pip, service } from '@arki/dot';
+import { plugin, service } from '@arki/dot';
 
-export const billing = pip({
+export const billing = plugin({
   name: 'billing',
   version: '1.0.0',
   needs: { db: service<Db>(), log: service<Logger>() },
@@ -36,18 +36,18 @@ export const billing = pip({
 ```
 
 Everything is inferred: the `needs` shape types the hook contexts, and the
-`boot` return type becomes the pip's provides — no generic arguments.
+`boot` return type becomes the plugin's provides — no generic arguments.
 
 ## Fields
 
 | Field       | Required | Meaning                                                              |
 | ----------- | -------- | -------------------------------------------------------------------- |
 | `name`      | yes      | Unique identifier inside an app.                                     |
-| `version`   | no       | Semver string. Surfaces in `PipManifest.version`.                    |
-| `needs`     | no       | Shape of service witnesses this pip consumes (see below).            |
+| `version`   | no       | Semver string. Surfaces in `PluginManifest.version`.                    |
+| `needs`     | no       | Shape of service witnesses this plugin consumes (see below).            |
 | `configure` | no       | Sync hook. Registers metadata. No I/O.                               |
 | `boot`      | no       | Async hook. Opens resources; its return value IS the provides.       |
-| `start`     | no       | Async hook. Begins active work after every pip has booted.           |
+| `start`     | no       | Async hook. Begins active work after every plugin has booted.           |
 | `stop`      | no       | Async hook. Reverse order. Halts active work.                        |
 | `dispose`   | no       | Async hook. Reverse order. Releases resources.                       |
 
@@ -56,7 +56,7 @@ Everything is inferred: the `needs` shape types the hook contexts, and the
 1. **`configure`** — sync registration. Validate options, register routes,
    declare provided services for the manifest. No async, no I/O.
 2. **`boot`** — async open. Connect clients, validate runtime config, return
-   a record of services for downstream pips to consume.
+   a record of services for downstream plugins to consume.
 3. **`start`** — async activate. Workers, schedulers, subscribers.
 4. **`stop`** — async halt. Drain workers, unsubscribe listeners.
 5. **`dispose`** — async release. Close connections, free file handles.
@@ -66,14 +66,14 @@ idempotency) is [`lifecycle.md`](./lifecycle.md).
 
 ## Services and dependency injection
 
-A pip **provides** services by returning them from `boot`:
+A plugin **provides** services by returning them from `boot`:
 
 ```ts
-import { pip } from '@arki/dot';
+import { plugin } from '@arki/dot';
 
 type Client = { ping(): Promise<void>; close(): Promise<void> };
 
-export const apiClient = pip({
+export const apiClient = plugin({
   name: 'api-client',
   async boot() {
     const client: Client = await openClient();
@@ -85,14 +85,14 @@ export const apiClient = pip({
 });
 ```
 
-A pip **consumes** services by declaring a `needs` shape of type
+A plugin **consumes** services by declaring a `needs` shape of type
 witnesses. The hook context delivers them fully typed — destructuring is
 the injection:
 
 ```ts
-import { pip, service } from '@arki/dot';
+import { plugin, service } from '@arki/dot';
 
-export const billing = pip({
+export const billing = plugin({
   name: 'billing',
   needs: { apiClient: service<Client>() },
   async boot({ apiClient }) {
@@ -109,10 +109,10 @@ need, `DOT_LIFECYCLE_E013` collision, `DOT_LIFECYCLE_E014` reserved key)
 for erased/dynamic composition.
 
 Hook contexts also carry `$`-prefixed kernel keys — `$app` (app name),
-`$pip` (pip name), `$config` (the `defineApp(name, { config })` bag). The
-`$` prefix is a reserved namespace: `pip()` rejects `$`-prefixed needs
+`$plugin` (plugin name), `$config` (the `defineApp(name, { config })` bag). The
+`$` prefix is a reserved namespace: `plugin()` rejects `$`-prefixed needs
 aliases and publish keys at compile time, and the kernel enforces the same
-rule at runtime (`DOT_LIFECYCLE_E014`) for renames and erased pips — so
+rule at runtime (`DOT_LIFECYCLE_E014`) for renames and erased plugins — so
 kernel keys can never be shadowed.
 
 ## Declaration order is boot order
@@ -120,12 +120,12 @@ kernel keys can never be shadowed.
 There is no dependency graph to declare. Providers are `.use()`d before
 their consumers; the builder's type-level guard makes any other order a
 compile error, and `stop`/`dispose` run in reverse. The manifest's
-dependency edges are *observed* from actual wiring at boot — which pip's
+dependency edges are *observed* from actual wiring at boot — which plugin's
 service satisfied which need.
 
 ## Multi-instance: `rename`
 
-Two pips publishing the same wire key is a collision (compile error at
+Two plugins publishing the same wire key is a collision (compile error at
 `.use()`, coded runtime error on erased paths). To mount a second
 instance of an adapter, rename its published keys at the mount site:
 
@@ -149,9 +149,9 @@ the initialization in `lazy()` — `boot` stays cheap and the resource opens
 on first use:
 
 ```ts
-import { lazy, pip } from '@arki/dot';
+import { lazy, plugin } from '@arki/dot';
 
-export const search = pip({
+export const search = plugin({
   name: 'search',
   boot: () => ({
     search: lazy(() => connectSearchCluster(), {
@@ -166,7 +166,7 @@ Laziness is visible in the type: the service is a `Lazy<SearchClient>`,
 and consumers acquire it explicitly:
 
 ```ts
-export const indexer = pip({
+export const indexer = plugin({
   name: 'indexer',
   needs: { search: service<Lazy<SearchClient>>() },
   async start({ search }) {
@@ -196,8 +196,8 @@ Semantics:
   callback never runs.
 - The kernel auto-disposes initialized handles in reverse declaration
   order during `dispose()` and boot rollback, **after** the publishing
-  pip's own `dispose` hook (so the hook can still use the handle). No
-  `dispose` hook is required for lazy-only pips.
+  plugin's own `dispose` hook (so the hook can still use the handle). No
+  `dispose` hook is required for lazy-only plugins.
 - `initialized` / `peek()` inspect without triggering initialization;
   `get()` after app disposal rejects.
 
@@ -213,10 +213,10 @@ a free choice:
 export const Kv = token<KvClient>()('acme.kv');
 
 // provider (in @acme/kv):
-pip({ name: 'kv', boot: () => provide(Kv, client) });
+plugin({ name: 'kv', boot: () => provide(Kv, client) });
 
 // any consumer, any alias:
-pip({
+plugin({
   name: 'cache',
   needs: { cache: Kv },       // wire key 'acme.kv', local alias `cache`
   async boot({ cache }) { /* typed KvClient */ },
@@ -228,7 +228,7 @@ const SessionsKv = Kv.instance('sessions'); // key 'acme.kv#sessions'
 
 ## Manifest contribution
 
-During `configure`, a pip registers what it exposes:
+During `configure`, a plugin registers what it exposes:
 
 ```ts
 configure(ctx) {
@@ -248,10 +248,10 @@ to understand what the app does without executing code.
 
 ## Diagnostics
 
-A pip contributes runtime status to `app.diagnostics`. The kernel
+A plugin contributes runtime status to `app.diagnostics`. The kernel
 automatically records lifecycle state. To emit a custom issue, throw a
 structured error from a hook — the kernel wraps it into a
-`DiagnosticIssue` with the pip name attached.
+`DiagnosticIssue` with the plugin name attached.
 
 ```ts
 async boot({ $config }) {
@@ -259,7 +259,7 @@ async boot({ $config }) {
   if (!key) {
     throw Object.assign(new Error('BILLING_KEY not set'), {
       code: 'BILLING_E001',
-      remediation: 'Set BILLING_KEY in your env or pass it to the billing pip.',
+      remediation: 'Set BILLING_KEY in your env or pass it to the billing plugin.',
       docsUrl: 'https://example.com/dot/docs/billing#config',
     });
   }
@@ -278,8 +278,8 @@ Provides are inferred from `boot` return types and accumulate through the
 builder:
 
 ```ts
-const a = pip({ name: 'a', boot: () => ({ a: 1 }) });
-const b = pip({ name: 'b', boot: () => ({ b: 'x' }) });
+const a = plugin({ name: 'a', boot: () => ({ a: 1 }) });
+const b = plugin({ name: 'b', boot: () => ({ b: 'x' }) });
 
 const app = await defineApp('demo').use(a).use(b).boot();
 app.services.a; // number
@@ -289,16 +289,16 @@ app.services.b; // string
 The builder type narrows on every `.use(...)` call. No casts needed —
 anywhere, including inside hooks.
 
-## When NOT to write a pip
+## When NOT to write a plugin
 
 If a module has nothing to do in `boot` — no connection to open, no
-resource whose teardown must be ordered — it does not need to be a pip.
+resource whose teardown must be ordered — it does not need to be a plugin.
 Plain ES module exports already compose static values (routers, schemas,
 factories) with perfect types. DOT's job is *runtime resources with
 ordered setup and guaranteed reverse-order teardown*; keep static
 composition in module space.
 
-## Testing your pip
+## Testing your plugin
 
 `@arki/dot` ships a small test harness:
 
@@ -306,9 +306,9 @@ composition in module space.
 import { testApp, bootTestApp } from '@arki/dot';
 import { describe, expect, it } from 'vitest';
 
-import { billing } from '../src/billing-pip.js';
+import { billing } from '../src/billing-plugin.js';
 
-describe('billing pip', () => {
+describe('billing plugin', () => {
   it('publishes a billing service', async () => {
     const app = await bootTestApp([apiClient, billing]);
     expect(app.services.billing).toBeDefined();
@@ -317,14 +317,14 @@ describe('billing pip', () => {
 
   it('declares its needs in the manifest', () => {
     const configured = testApp([apiClient, billing]).configure();
-    expect(configured.manifest.pips.find(p => p.name === 'billing')?.dependencies).toEqual(['apiClient']);
+    expect(configured.manifest.plugins.find(p => p.name === 'billing')?.dependencies).toEqual(['apiClient']);
   });
 });
 ```
 
 `testApp` returns a `DotAppBuilder` you can drive yourself; `bootTestApp`
 boots immediately. Both honour the same lifecycle as production apps.
-Note: `testApp` takes an erased pip array, so the compile-time guard does
+Note: `testApp` takes an erased plugin array, so the compile-time guard does
 not apply — the kernel's runtime validation still does.
 
 ## Next steps
@@ -332,4 +332,4 @@ not apply — the kernel's runtime validation still does.
 - [Lifecycle](./lifecycle.md) — hook contract, failure ordering, idempotency.
 - [Diagnostics](./diagnostics.md) — manifest + diagnostics shapes.
 - [Adapter authoring](./adapter-authoring.md) — expose your package as
-  a DOT pip.
+  a DOT plugin.

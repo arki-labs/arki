@@ -2,17 +2,17 @@
 
 > TypeScript-first application composition framework for the ARKI package family.
 
-`@arki/dot` is the kernel that wires **pips**, lifecycle hooks, dependency
+`@arki/dot` is the kernel that wires **plugins**, lifecycle hooks, dependency
 injection, and diagnostics into a deterministic application boot. It gives
 library authors a stable contract for declaring how their package
 participates in an app, and gives app developers a single place to wire
 those packages together — with the type checker verifying the wiring before
 anything runs.
 
-## What is a pip?
+## What is a plugin?
 
-A **pip** is the unit a DOT app is built from — one self-describing,
-lifecycle-aware piece of an application. Each pip:
+A **plugin** is the unit a DOT app is built from — one self-describing,
+lifecycle-aware piece of an application. Each plugin:
 
 - declares a **name**, **version**, and the services it **needs** as a shape
   of type witnesses;
@@ -20,38 +20,38 @@ lifecycle-aware piece of an application. Each pip:
   are *inferred from the return type*, never declared separately;
 - runs a **5-hook lifecycle** — `configure` → `boot` → `start` → `stop` → `dispose`;
 - **publishes typed services** to a shared, type-safe registry that later
-  pips can read from;
-- **composes deterministically** — pips boot in declaration order and
+  plugins can read from;
+- **composes deterministically** — plugins boot in declaration order and
   dispose in reverse.
 
 The name comes from the small dots on dice, dominoes, and music notation:
-each pip is one small mark, and the *combination* of pips is what gives the
-app its value. Two pips on a die make a value of two; six pips make six. The
-pips **are** the app — not optional add-ons to a hidden core.
+each plugin is one small mark, and the *combination* of plugins is what gives the
+app its value. Two plugins on a die make a value of two; six plugins make six. The
+plugins **are** the app — not optional add-ons to a hidden core.
 
 ```ts
 import { defineApp } from '@arki/dot';
-import { env } from '@arki/env/dot';      // env pip
-import { db } from '@arki/db/dot';        // db pip
-import { kv } from '@arki/kv/dot';        // kv pip
+import { env } from '@arki/env/dot';      // env plugin
+import { db } from '@arki/db/dot';        // db plugin
+import { kv } from '@arki/kv/dot';        // kv plugin
 
 const app = await defineApp('orders')
-  .use(env({ schema: { /* ... */ } }))     // 1st pip — provides services.env
-  .use(db({ relations }))                  // 2nd pip — provides services.db
-  .use(kv({ url: process.env.KV_URL! }))   // 3rd pip — provides services.kv
-  .boot();                                  // pips boot in declaration order
+  .use(env({ schema: { /* ... */ } }))     // 1st plugin — provides services.env
+  .use(db({ relations }))                  // 2nd plugin — provides services.db
+  .use(kv({ url: process.env.KV_URL! }))   // 3rd plugin — provides services.kv
+  .boot();                                  // plugins boot in declaration order
 
 await app.services.db.query(/* ... */);
-await app.dispose();                       // pips dispose in REVERSE order
+await app.dispose();                       // plugins dispose in REVERSE order
 ```
 
-Each `/dot` subpath exports a **pip** for that package. The subpath names
-the framework the adapter targets (DOT), not the unit (which is a pip).
+Each `/dot` subpath exports a **plugin** for that package. The subpath names
+the framework the adapter targets (DOT), not the unit (which is a plugin).
 
 > **Why not "plugin"?** Plugins suggest *optional add-ons* to a core. DOT's
-> reality is the opposite: there is no hidden core — the pips *are* the app.
-> "Pip" names that truth, and ties the framework to the DOT name etymologically
-> (a dot, a pip, a small mark that gains meaning by combining with others).
+> reality is the opposite: there is no hidden core — the plugins *are* the app.
+> "Plugin" names that truth, and ties the framework to the DOT name etymologically
+> (a dot, a plugin, a small mark that gains meaning by combining with others).
 
 ## Installation
 
@@ -64,11 +64,11 @@ bun add @arki/dot
 ## Quick start
 
 ```ts
-import { defineApp, pip, service } from '@arki/dot';
+import { defineApp, plugin, service } from '@arki/dot';
 
 type Db = { query(sql: string): Promise<unknown[]> };
 
-const dbPip = pip({
+const dbPlugin = plugin({
   name: 'database',
   async boot() {
     const db = await openDb(process.env.DATABASE_URL);
@@ -79,7 +79,7 @@ const dbPip = pip({
   },
 });
 
-const billingPip = pip({
+const billingPlugin = plugin({
   name: 'billing',
   version: '1.0.0',
   needs: { db: service<Db>() },     // typed injection — destructure in hooks
@@ -87,7 +87,7 @@ const billingPip = pip({
     // Validate config, register schemas, no I/O.
   },
   async boot({ db }) {
-    // Open connections. The return value IS what this pip provides.
+    // Open connections. The return value IS what this plugin provides.
     return { stripe: makeStripeClient(db) };
   },
   async start({ stripe }) {
@@ -102,8 +102,8 @@ const billingPip = pip({
 });
 
 const app = await defineApp('acme')
-  .use(dbPip)          // providers before consumers — enforced at compile time
-  .use(billingPip)
+  .use(dbPlugin)          // providers before consumers — enforced at compile time
+  .use(billingPlugin)
   .start();
 
 // app.manifest, app.diagnostics — agent-friendly envelopes.
@@ -125,21 +125,21 @@ carries `T` at the type level. The property name you give it is your local
 alias *and* (for anonymous witnesses) the wire key:
 
 ```ts
-const search = pip({
+const search = plugin({
   name: 'search',
   needs: {
     db: service<Db>(),                 // wire key 'db', local alias 'db'
     log: service<Logger>(),            // wire key 'log'
   },
-  async boot({ db, log, $app }) {      // $app/$pip/$config: kernel context
+  async boot({ db, log, $app }) {      // $app/$plugin/$config: kernel context
     log.info(`indexing for ${$app}`);
     return { search: await buildIndex(db) };
   },
 });
 ```
 
-`start`, `stop`, and `dispose` additionally receive the pip's **own
-provides** — and because teardown runs in reverse declaration order, a pip's
+`start`, `stop`, and `dispose` additionally receive the plugin's **own
+provides** — and because teardown runs in reverse declaration order, a plugin's
 needs are still alive in its `dispose`:
 
 ```ts
@@ -166,12 +166,12 @@ defineApp('shop')
 Reordering the first example — or `rename`-ing one provider in the second —
 makes both compile. The kernel re-validates at runtime with coded errors
 (`E012` unsatisfied need, `E013` collision, `E014` reserved key) for
-erased/dynamic composition, with full rollback of already-booted pips.
+erased/dynamic composition, with full rollback of already-booted plugins.
 
 There is no dependency graph to debug and **cycles are unrepresentable**:
-services flow strictly forward through the `.use()` chain. If two pips need
+services flow strictly forward through the `.use()` chain. If two plugins need
 each other's services, that's a design smell the type system surfaces
-immediately — merge them, or extract the shared piece into a third pip both
+immediately — merge them, or extract the shared piece into a third plugin both
 consume.
 
 ### Tokens — cross-package service contracts
@@ -185,7 +185,7 @@ alias becomes free choice:
 export const Db = token<NodePgDatabase<Schema>>()('arki.db');
 
 // A provider publishes under the token's key:
-const database = pip({
+const database = plugin({
   name: 'database',
   async boot() {
     return provide(Db, await connect());   // → { 'arki.db': NodePgDatabase }
@@ -193,7 +193,7 @@ const database = pip({
 });
 
 // Any consumer, any package, any local alias:
-const reports = pip({
+const reports = plugin({
   name: 'reports',
   needs: { warehouse: Db },                // wire key 'arki.db', alias yours
   async boot({ warehouse }) { /* ... */ },
@@ -214,9 +214,9 @@ const app = await defineApp('shop')
   .use(rename(
     database({ url: REPLICA_URL }),
     { 'arki.db': ReportsDb.key },          // republish under the derived key
-    'reports-db',                          // distinct pip name
+    'reports-db',                          // distinct plugin name
   ))
-  .use(pip({
+  .use(plugin({
     name: 'analytics',
     needs: { primary: Db, replica: ReportsDb },
     async boot({ primary, replica }) { /* two live instances, both typed */ },
@@ -233,10 +233,10 @@ checks see the final keys.
 resource. Initialization runs on first `get()` (memoized, single-flight;
 failed attempts retry). Never-touched handles never initialize — and the
 kernel auto-disposes initialized ones during teardown, *after* the
-publishing pip's own `dispose` hook, even if that pip has none:
+publishing plugin's own `dispose` hook, even if that plugin has none:
 
 ```ts
-const search = pip({
+const search = plugin({
   name: 'search',
   async boot() {
     return {
@@ -253,7 +253,7 @@ Consumers that shouldn't care whether a provider is eager or lazy declare a
 handle, wrapping eager provides and passing lazy ones through by identity:
 
 ```ts
-const suggestions = pip({
+const suggestions = plugin({
   name: 'suggestions',
   needs: { search: service.lazy<SearchClient>() },
   async start({ search }) {
@@ -268,20 +268,20 @@ consumer — the wiring guard accepts both shapes against the same witness.
 
 ### Kernel context — the reserved `$` namespace
 
-Every service-carrying hook context includes `$app` (app name), `$pip` (pip
+Every service-carrying hook context includes `$app` (app name), `$plugin` (plugin
 name), and `$config` (the `defineApp(name, { config })` bag). The `$` prefix
-is enforced as reserved: `pip()` rejects `$`-prefixed needs aliases and
+is enforced as reserved: `plugin()` rejects `$`-prefixed needs aliases and
 publish keys at compile time, and the kernel re-validates at runtime
 (`DOT_LIFECYCLE_E014`) — kernel keys can never be shadowed.
 
 ## A complex setup
 
 A distilled commerce platform showing everything above working together.
-(The package's stress-test suite boots a 28-pip version of this and asserts
+(The package's stress-test suite boots a 28-plugin version of this and asserts
 exact boot/teardown ordering.)
 
 ```ts
-import { defineApp, lazy, pip, provide, rename, service, token } from '@arki/dot';
+import { defineApp, lazy, plugin, provide, rename, service, token } from '@arki/dot';
 
 // ── contracts.ts — tokens owned by their respective packages ─────────
 export const Env = token<AppEnv>()('shop.env');
@@ -290,13 +290,13 @@ export const ReportsDb = Db.instance('reports');
 export const Cache = token<CacheHandle>()('shop.cache');
 export const Bus = token<MessageBus>()('shop.bus');
 
-// ── infrastructure pips ───────────────────────────────────────────────
-const env = pip({
+// ── infrastructure plugins ───────────────────────────────────────────────
+const env = plugin({
   name: 'env',
   boot: ({ $config }) => provide(Env, parseEnv($config)),
 });
 
-const telemetry = pip({
+const telemetry = plugin({
   name: 'telemetry',
   needs: { env: Env },
   boot: ({ env }) => ({ metrics: makeMetrics(env.OTEL_ENDPOINT) }),
@@ -304,7 +304,7 @@ const telemetry = pip({
 });
 
 const database = (url: string) =>
-  pip({
+  plugin({
     name: 'database',
     needs: { metrics: service<Metrics>() },
     async boot({ metrics }) {
@@ -315,14 +315,14 @@ const database = (url: string) =>
     },
   });
 
-const cache = pip({
+const cache = plugin({
   name: 'cache',
   needs: { env: Env },
   boot: ({ env }) => provide(Cache, connectRedis(env.REDIS_URL)),
   dispose: async ctx => ctx[Cache.key].quit(),
 });
 
-const searchCluster = pip({
+const searchCluster = plugin({
   name: 'search-cluster',
   needs: { env: Env },
   boot: ({ env }) => ({
@@ -333,13 +333,13 @@ const searchCluster = pip({
   }),
 });
 
-const bus = pip({
+const bus = plugin({
   name: 'bus',
   boot: () => provide(Bus, makeInMemoryBus()),
 });
 
-// ── domain pips ───────────────────────────────────────────────────────
-const catalog = pip({
+// ── domain plugins ───────────────────────────────────────────────────────
+const catalog = plugin({
   name: 'catalog',
   needs: {
     db: Db,
@@ -351,7 +351,7 @@ const catalog = pip({
   }),
 });
 
-const checkout = pip({
+const checkout = plugin({
   name: 'checkout',
   needs: { db: Db, bus: Bus, catalog: service<Catalog>() },
   boot: ({ db, bus, catalog }) => ({
@@ -359,14 +359,14 @@ const checkout = pip({
   }),
 });
 
-const reporting = pip({
+const reporting = plugin({
   name: 'reporting',
   needs: { replica: ReportsDb, catalog: service<Catalog>() },
   boot: ({ replica, catalog }) => ({ reporting: makeReporting(replica, catalog) }),
 });
 
-// ── process pips — real work happens in start/stop ───────────────────
-const outboxWorker = pip({
+// ── process plugins — real work happens in start/stop ───────────────────
+const outboxWorker = plugin({
   name: 'outbox-worker',
   needs: { db: Db, bus: Bus },
   boot: ({ db, bus }) => ({ outbox: makeOutbox(db, bus) }),
@@ -374,7 +374,7 @@ const outboxWorker = pip({
   stop: ({ outbox }) => outbox.drain(),      // stop processing, keep resources
 });
 
-const http = pip({
+const http = plugin({
   name: 'http',
   needs: {
     env: Env,
@@ -425,18 +425,18 @@ queue, same-phase calls coalesce onto one in-flight promise, and a
 `dispose()` racing a slow `start()` always runs after it — the app ends
 `disposed`, never resurrected.
 
-## Testing pips
+## Testing plugins
 
-`testPip` is the typed unit-test builder: satisfy a pip's needs directly
+`testPlugin` is the typed unit-test builder: satisfy a plugin's needs directly
 with fakes — no real providers, no dependency chain — and the compiler
 holds the same line it holds in production. A missing fake means `boot()`
 does not compile; a fake of the wrong shape fails at the `.provide()`
 call site:
 
 ```ts
-import { testPip } from '@arki/dot/test-harness';
+import { testPlugin } from '@arki/dot/test-harness';
 
-const app = await testPip(catalog)
+const app = await testPlugin(catalog)
   .provide(Db, fakeDb)             // token need
   .provide('cache', fakeKv)        // anonymous need — wire key is the alias
   .boot();
@@ -445,13 +445,13 @@ expect(app.services.catalog.list()).toEqual([]);
 await app.dispose();
 ```
 
-The fakes are published by a synthetic first pip, so lifecycle semantics
+The fakes are published by a synthetic first plugin, so lifecycle semantics
 are the real kernel's — reverse-order teardown, lazy auto-dispose, and
 `$config` all behave exactly as in production. `service.lazy<T>()` needs
 accept a plain `T` fake (lifted automatically) or `lazyOf(value)`.
 
-For integration tests across several real pips, `testApp([...pips])`
-builds an app from an erased pip array (runtime validation only), and
+For integration tests across several real plugins, `testApp([...plugins])`
+builds an app from an erased plugin array (runtime validation only), and
 `bootTestApp` is the one-line boot-and-return variant.
 
 ## Operations
@@ -474,26 +474,26 @@ hookSignals(app); // SIGTERM/SIGINT → stop() + dispose() → re-raise
   Returns an unhook function.
 - **`hookTimeoutMs`** — a per-hook watchdog. Any `boot`/`start`/`stop`/
   `dispose` hook exceeding the budget fails with `DOT_LIFECYCLE_E015`
-  naming the pip and hook, and the kernel applies its normal rollback or
+  naming the plugin and hook, and the kernel applies its normal rollback or
   aggregation rules. Your app cannot hang silently at boot.
 
-## Pip authoring
+## Plugin authoring
 
-`pip(config)` accepts a `needs` shape plus five lifecycle hooks. Hook
+`plugin(config)` accepts a `needs` shape plus five lifecycle hooks. Hook
 contexts carry the needed services (typed, under your local aliases) and
-`$`-prefixed kernel keys (`$app`, `$pip`, `$config`):
+`$`-prefixed kernel keys (`$app`, `$plugin`, `$config`):
 
 | Hook        | Purpose                                                             |
 | ----------- | ------------------------------------------------------------------- |
 | `configure` | Validate static config; declare schemas, routes, services. No I/O.  |
-| `boot`      | Open connections; the returned record is what the pip provides.     |
+| `boot`      | Open connections; the returned record is what the plugin provides.     |
 | `start`     | Begin processing (workers, subscribers, schedulers).                |
 | `stop`      | Stop processing in reverse declaration order.                       |
 | `dispose`   | Free resources after `stop`; lazy handles auto-clean afterwards.    |
 
-Wiring is compile-time checked: `.use(pip)` fails to typecheck when the
-pip's needs aren't satisfied by earlier `.use()` calls, or when its
-provides collide with an existing wire key. `rename(pip, { db: 'reportsDb' })`
+Wiring is compile-time checked: `.use(plugin)` fails to typecheck when the
+plugin's needs aren't satisfied by earlier `.use()` calls, or when its
+provides collide with an existing wire key. `rename(plugin, { db: 'reportsDb' })`
 mounts a second instance of an adapter without collision; `token<T>()('key')`
 shares a service contract across packages; `lazy(() => open(), { dispose })`
 defers an expensive open until first `get()` — never-touched services never
@@ -502,8 +502,8 @@ order is boot order — same input, same order, every time.
 
 ## Lifecycle
 
-`defineApp(name)` returns a builder. Calling `.use(pip)` accumulates
-pips. The lifecycle then flows:
+`defineApp(name)` returns a builder. Calling `.use(plugin)` accumulates
+plugins. The lifecycle then flows:
 
 ```text
 defined ──configure()──▶ configured ──boot()──▶ booted ──start()──▶ started
@@ -514,15 +514,15 @@ defined ──configure()──▶ configured ──boot()──▶ booted ─�
 `boot()` runs `configure()` implicitly if you skipped it. `start()` runs
 `boot()` implicitly. `stop()` and `dispose()` always run in reverse
 declaration order, even when an earlier hook failed — failure isolation is
-part of the contract. A boot failure rolls back every already-booted pip
+part of the contract. A boot failure rolls back every already-booted plugin
 before throwing.
 
 Runtime failures carry stable codes (`DotLifecycleError.code`):
 
 | Code                 | Meaning                                              |
 | -------------------- | ---------------------------------------------------- |
-| `DOT_LIFECYCLE_E011` | Pip registered twice.                                |
-| `DOT_LIFECYCLE_E012` | A need has no provider among earlier pips.           |
+| `DOT_LIFECYCLE_E011` | Plugin registered twice.                                |
+| `DOT_LIFECYCLE_E012` | A need has no provider among earlier plugins.           |
 | `DOT_LIFECYCLE_E013` | A published wire key collides with an earlier one.   |
 | `DOT_LIFECYCLE_E014` | A service key uses the reserved `$` (kernel) prefix. |
 | `DOT_LIFECYCLE_E015` | A hook exceeded the `hookTimeoutMs` watchdog.        |
@@ -547,18 +547,18 @@ dot explain --app ./my-app.ts
 # Run boot-time diagnostics; non-zero exit if any check fails.
 dot doctor --app ./my-app.ts
 
-# Render the pip graph as Mermaid flowchart source. explain shows
+# Render the plugin graph as Mermaid flowchart source. explain shows
 # declaration (= boot) order; doctor boots and shows the OBSERVED wiring.
 dot doctor --app ./my-app.ts --graph
 
 # Every command supports --json for agent-friendly output.
-dot explain --app ./my-app.ts --json | jq '.data.pips'
+dot explain --app ./my-app.ts --json | jq '.data.plugins'
 ```
 
 The CLI emits the same envelope shape as the in-process diagnostics snapshot
 (`app.diagnostics`), so the same downstream tools can consume either. The
 manifest's dependency edges are **observed, not declared** — the kernel
-records which pip's published service satisfied which need during boot.
+records which plugin's published service satisfied which need during boot.
 
 ### `dot new <app-name>`
 
@@ -576,7 +576,7 @@ ship with the published tarball.
 
 ## Architecture
 
-`@arki/dot` is intentionally small: it defines the contracts (pip shape,
+`@arki/dot` is intentionally small: it defines the contracts (plugin shape,
 lifecycle hooks, manifest schema, diagnostics envelope) and runs them. Adapters
 that bridge databases, queues, auth providers, and HTTP routers live in their
 own packages and consume `@arki/dot` as a peer dependency:
@@ -598,12 +598,12 @@ The full docs live in [`docs/`](./docs):
 - [Principles](./docs/principles.md) — **read first.** The five rules every
   API, error, and PR is measured against. Slightly playful, very precise.
 - [Quickstart](./docs/quickstart.md) — boot your first app in five minutes.
-- [Pip authoring](./docs/pip-authoring.md) — write your own pip.
+- [Plugin authoring](./docs/plugin-authoring.md) — write your own plugin.
 - [Lifecycle](./docs/lifecycle.md) — the 5-hook contract, idempotency, error codes.
 - [Diagnostics](./docs/diagnostics.md) — `app.manifest`, `app.diagnostics`,
   `dot explain`, `dot doctor`.
 - [Adapter authoring](./docs/adapter-authoring.md) — expose your package as
-  a DOT pip.
+  a DOT plugin.
 - [Agent guide](./docs/agent-guide.md) — how coding agents inspect, modify,
   and verify DOT apps.
 - [Release policy](./docs/release-policy.md) — SemVer and deprecation.

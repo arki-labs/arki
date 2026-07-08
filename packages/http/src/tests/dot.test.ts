@@ -1,5 +1,5 @@
 /**
- * The `http()` pip inside a real DOT app: token-collected bundles, the
+ * The `http()` plugin inside a real DOT app: token-collected bundles, the
  * socketless fetch seam, manifest registration with schemas, real
  * listening on an ephemeral port, drain-on-stop semantics, and the E005
  * drain-timeout watchdog.
@@ -9,7 +9,7 @@
  * socket layer.
  */
 
-import { defineApp, provide, service, token, pip } from '@arki/dot/pip';
+import { defineApp, provide, service, token, plugin } from '@arki/dot/plugin';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -46,12 +46,12 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
   return { promise, resolve: resolvePromise };
 }
 
-const ordersDbPip = pip({
+const ordersDbPlugin = plugin({
   name: 'orders-db',
   boot: () => ({ ordersDb: { list: () => [{ id: 'o1' }] } satisfies OrdersDb }),
 });
 
-const ordersPip = pip({
+const ordersPlugin = plugin({
   name: 'orders',
   needs: { ordersDb: service<OrdersDb>() },
   configure(ctx) {
@@ -68,11 +68,11 @@ const ordersPip = pip({
     ),
 });
 
-describe('http() pip', () => {
+describe('http() plugin', () => {
   it('collects bundles, serves via the socketless fetch seam, and registers manifest actions', async () => {
     const app = await defineApp('http-test')
-      .use(ordersDbPip)
-      .use(ordersPip)
+      .use(ordersDbPlugin)
+      .use(ordersPlugin)
       .use(http({ port: 0, bundles: [OrdersRoutes] }))
       .boot();
 
@@ -82,23 +82,23 @@ describe('http() pip', () => {
     const res = await httpServer.fetch(new Request('http://in-process/orders'));
     expect(await res.json()).toEqual([{ id: 'o1' }]);
 
-    const registered = app.manifest.actions.filter(action => action.pip === 'orders');
+    const registered = app.manifest.actions.filter(action => action.plugin === 'orders');
     expect(registered.map(action => action.id)).toEqual(['orders.list', 'orders.progress']);
     expect(registered[0]?.meta?.['output']).toMatchObject({ type: 'array' });
     expect(registered[1]?.meta?.['streaming']).toBe(true);
-    expect(app.manifest.services.some(s => s.name === 'httpServer' && s.pip === 'http')).toBe(true);
+    expect(app.manifest.services.some(s => s.name === 'httpServer' && s.plugin === 'http')).toBe(true);
     expect(app.manifest.projections).toContainEqual({
       format: 'openapi',
       binding: 'http',
       module: '@arki/http/projection',
-      pip: 'http',
+      plugin: 'http',
     });
 
     await app.dispose();
   });
 
   it('collects route bundles from feature tokens without declaring activator actions', async () => {
-    const featurePip = pip({
+    const featurePlugin = plugin({
       name: 'orders-feature',
       needs: { ordersDb: service<OrdersDb>() },
       actions: [listOrders],
@@ -112,14 +112,14 @@ describe('http() pip', () => {
     });
 
     const app = await defineApp('http-feature-test')
-      .use(ordersDbPip)
-      .use(featurePip)
+      .use(ordersDbPlugin)
+      .use(featurePlugin)
       .use(http({ port: 0, features: [OrdersFeature] as const }))
       .boot();
 
     const res = await app.services.httpServer.fetch(new Request('http://in-process/orders'));
     expect(await res.json()).toEqual([{ id: 'o1' }]);
-    expect(app.manifest.actions.map(action => `${action.pip}:${action.id}`)).toEqual(['orders-feature:orders.list']);
+    expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual(['orders-feature:orders.list']);
 
     await app.dispose();
   });
@@ -129,7 +129,7 @@ describe('http() pip', () => {
     const entered = deferred();
     const slow = route.get('/slow', { id: 'slow', output: z.object({ done: z.boolean() }) });
     const SlowRoutes = token<RouteBundle>()('slow.routes');
-    const slowPip = pip({
+    const slowPlugin = plugin({
       name: 'slow',
       boot: () =>
         provide(
@@ -143,7 +143,7 @@ describe('http() pip', () => {
     });
 
     const app = await defineApp('http-drain')
-      .use(slowPip)
+      .use(slowPlugin)
       .use(http({ port: 0, bundles: [SlowRoutes] }))
       .start();
 
@@ -172,7 +172,7 @@ describe('http() pip', () => {
   it('throws the E005 drain watchdog when handlers outlive the budget', async () => {
     const hang = route.get('/hang', { id: 'hang', output: z.object({ done: z.boolean() }) });
     const HangRoutes = token<RouteBundle>()('hang.routes');
-    const hangPip = pip({
+    const hangPlugin = plugin({
       name: 'hang',
       boot: () =>
         provide(
@@ -187,7 +187,7 @@ describe('http() pip', () => {
     });
 
     const app = await defineApp('http-hang')
-      .use(hangPip)
+      .use(hangPlugin)
       .use(http({ port: 0, bundles: [HangRoutes], drainTimeoutMs: 100 }))
       .start();
 

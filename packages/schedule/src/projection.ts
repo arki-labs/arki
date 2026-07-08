@@ -5,7 +5,7 @@ type JsonObject = { [key: string]: JsonValue };
 
 type ScheduleActionLike = {
   readonly id: string;
-  readonly pip: string;
+  readonly plugin: string;
   readonly binding: string;
   readonly direction: 'in' | 'out';
   readonly address?: string;
@@ -23,7 +23,7 @@ export type ScheduleTableDocument = {
   readonly schedules: readonly {
     readonly id: string;
     readonly name: string;
-    readonly pip: string;
+    readonly plugin: string;
     readonly kind: 'cron' | 'every';
     readonly address: string;
     readonly timezone?: string;
@@ -44,7 +44,7 @@ export function project(manifest: ManifestLike): ScheduleTableDocument {
       .map(action => ({
         id: action.id,
         name: scheduleName(action),
-        pip: action.pip,
+        plugin: action.plugin,
         kind: action.meta?.['kind'] === 'cron' ? 'cron' : 'every',
         address: action.address ?? '',
         ...(typeof action.meta?.['timezone'] === 'string' ? { timezone: action.meta['timezone'] } : {}),

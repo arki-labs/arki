@@ -8,7 +8,7 @@
  *
  * The framework-agnostic core lives here — {@link buildEngine} +
  * {@link listen} run a server without any framework. The DOT adapter (the
- * `http()` pip) lives at `@arki/http/dot`; the ambient request context —
+ * `http()` plugin) lives at `@arki/http/dot`; the ambient request context —
  * a deliberate last resort — at `@arki/http/context`.
  */
 
@@ -23,8 +23,9 @@ export type {
   SseContract,
 } from './contract.js';
 
-export { routes, rpcMount } from './bundle.js';
+export { endpoints, routes, rpcMount } from './bundle.js';
 export type {
+  EndpointsFeatureSlice,
   HandlerResult,
   MountBinding,
   MountMeta,

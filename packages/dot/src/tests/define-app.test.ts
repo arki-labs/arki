@@ -9,8 +9,8 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { DotApp } from '../define-app.js';
 import { defineApp } from '../define-app.js';
-import { initPips } from '../init-pips.js';
-import { pip, rename, service } from '../pip-contract.js';
+import { initPlugins } from '../init-plugins.js';
+import { plugin, rename, service } from '../plugin-contract.js';
 import { testApp } from '../test-harness.js';
 
 type DbService = {
@@ -20,8 +20,8 @@ type AuthService = {
   verify(token: string): boolean;
 };
 
-const makeDbPip = () =>
-  pip({
+const makeDbPlugin = () =>
+  plugin({
     name: 'db',
     boot: () => ({
       db: { query: async (_sql: string) => null } as DbService,
@@ -37,15 +37,15 @@ describe('defineApp', () => {
     expect(typeof builder.configure).toBe('function');
   });
 
-  it('builder.use() with a pip returns a new builder (immutable)', () => {
-    const p = pip({ name: 'p' });
+  it('builder.use() with a plugin returns a new builder (immutable)', () => {
+    const p = plugin({ name: 'p' });
     const b1 = defineApp('app');
     const b2 = b1.use(p);
     expect(b1).not.toBe(b2);
   });
 
   it('builder.boot() returns a DotApp with state=booted', async () => {
-    const p = pip({ name: 'p', boot: () => ({}) });
+    const p = plugin({ name: 'p', boot: () => ({}) });
     const app = await defineApp('app').use(p).boot();
     expect(app.state).toBe('booted');
     expect(app.name).toBe('app');
@@ -53,15 +53,15 @@ describe('defineApp', () => {
   });
 
   it('type-level: app.services is correctly typed from accumulated .use() calls', async () => {
-    const dbPip = makeDbPip();
-    const authPip = pip({
+    const dbPlugin = makeDbPlugin();
+    const authPlugin = plugin({
       name: 'auth',
       boot: () => ({
         auth: { verify: (_token: string) => true } as AuthService,
       }),
     });
 
-    const app = await defineApp('app').use(dbPip).use(authPip).boot();
+    const app = await defineApp('app').use(dbPlugin).use(authPlugin).boot();
     expectTypeOf(app.services).toMatchTypeOf<{ db: DbService; auth: AuthService }>();
     expect(app.services.db).toBeDefined();
     expect(app.services.auth).toBeDefined();
@@ -69,27 +69,27 @@ describe('defineApp', () => {
   });
 
   it('boot destructures typed services from the needs shape', async () => {
-    const dbPip = makeDbPip();
+    const dbPlugin = makeDbPlugin();
     let observed: DbService | undefined;
-    const consumer = pip({
+    const consumer = plugin({
       name: 'consumer',
       needs: { db: service<DbService>() },
-      boot: ({ db, $app, $pip }) => {
+      boot: ({ db, $app, $plugin }) => {
         expectTypeOf(db).toEqualTypeOf<DbService>();
         expect($app).toBe('app');
-        expect($pip).toBe('consumer');
+        expect($plugin).toBe('consumer');
         observed = db;
         return {};
       },
     });
 
-    const app = await defineApp('app').use(dbPip).use(consumer).boot();
+    const app = await defineApp('app').use(dbPlugin).use(consumer).boot();
     expect(observed).toBe(app.services.db);
     await app.dispose();
   });
 
   it('compile-time guard: unsatisfied needs fail .use() at the call site', () => {
-    const consumer = pip({
+    const consumer = plugin({
       name: 'consumer',
       needs: { db: service<DbService>() },
       boot: ({ db }) => {
@@ -101,17 +101,17 @@ describe('defineApp', () => {
     defineApp('app').use(consumer);
     // Wrong order is a compile error too (declaration order IS boot order):
     // @ts-expect-error — consumer used before its provider
-    defineApp('app').use(consumer).use(makeDbPip());
+    defineApp('app').use(consumer).use(makeDbPlugin());
     expect(true).toBe(true);
   });
 
   it('compile-time guard: wire-key collisions fail .use(); rename() resolves them', async () => {
-    const dbPip = makeDbPip();
+    const dbPlugin = makeDbPlugin();
     // @ts-expect-error — second provider of wire key `db`
-    defineApp('app').use(dbPip).use(makeDbPip());
+    defineApp('app').use(dbPlugin).use(makeDbPlugin());
 
-    const reportsPip = rename(makeDbPip(), { db: 'reportsDb' }, 'reports-db');
-    const app = await defineApp('app').use(dbPip).use(reportsPip).boot();
+    const reportsPlugin = rename(makeDbPlugin(), { db: 'reportsDb' }, 'reports-db');
+    const app = await defineApp('app').use(dbPlugin).use(reportsPlugin).boot();
     expectTypeOf(app.services.reportsDb).toEqualTypeOf<DbService>();
     expect(app.services.db).toBeDefined();
     expect(app.services.reportsDb).toBeDefined();
@@ -120,14 +120,14 @@ describe('defineApp', () => {
   });
 
   it('test harness produces a runnable builder', async () => {
-    const p = pip({ name: 'p', boot: () => ({}) });
+    const p = plugin({ name: 'p', boot: () => ({}) });
     const app = await testApp([p]).boot();
     expect(app.state).toBe('booted');
     await app.dispose();
   });
 
-  it('synthetic two-pip app surfaces manifest + diagnostics shape', async () => {
-    const db = pip({
+  it('synthetic two-plugin app surfaces manifest + diagnostics shape', async () => {
+    const db = plugin({
       name: 'db',
       version: '1.0.0',
       configure: ctx => {
@@ -135,7 +135,7 @@ describe('defineApp', () => {
       },
       boot: () => ({ db: { name: 'primary' } }),
     });
-    const api = pip({
+    const api = plugin({
       name: 'api',
       needs: { db: service<{ name: string }>() },
       version: '1.0.0',
@@ -154,29 +154,29 @@ describe('defineApp', () => {
 
     const m = app.manifest;
     expect(m.app.name).toBe('synthetic');
-    expect(m.pips.map(p => p.name)).toEqual(['db', 'api']);
-    expect(m.pips.find(p => p.name === 'api')?.dependencies).toEqual(['db']);
-    expect(m.services).toEqual([{ name: 'db', pip: 'db', kind: 'db' }]);
+    expect(m.plugins.map(p => p.name)).toEqual(['db', 'api']);
+    expect(m.plugins.find(p => p.name === 'api')?.dependencies).toEqual(['db']);
+    expect(m.services).toEqual([{ name: 'db', plugin: 'db', kind: 'db' }]);
     expect(m.actions).toEqual([
-      { id: 'api.health', pip: 'api', binding: 'http', direction: 'in', address: 'GET /health' },
+      { id: 'api.health', plugin: 'api', binding: 'http', direction: 'in', address: 'GET /health' },
     ]);
     // Edges are observed from actual wiring: api's `db` need was satisfied
-    // by the `db` pip's published service.
+    // by the `db` plugin's published service.
     expect(m.dependencies).toEqual([{ from: 'api', to: 'db', kind: 'requires' }]);
 
     const d = app.diagnostics;
     expect(d.app).toEqual({ name: 'synthetic', state: 'booted' });
-    expect(d.pips).toHaveLength(2);
-    expect(d.pips.every(p => p.status === 'ok')).toBe(true);
+    expect(d.plugins).toHaveLength(2);
+    expect(d.plugins.every(p => p.status === 'ok')).toBe(true);
 
     await app.dispose();
   });
 });
 
 describe('void-boot provides inference (constraint-fallback regression)', () => {
-  it('a void-returning boot provides nothing — later pips still pass the guard', async () => {
-    const provider = pip({ name: 'p', boot: () => ({ thing: 42 }) });
-    const sideEffect = pip({
+  it('a void-returning boot provides nothing — later plugins still pass the guard', async () => {
+    const provider = plugin({ name: 'p', boot: () => ({ thing: 42 }) });
+    const sideEffect = plugin({
       name: 'side',
       needs: { thing: service<number>() },
       boot({ thing }) {
@@ -186,7 +186,7 @@ describe('void-boot provides inference (constraint-fallback regression)', () => 
         void thing;
       },
     });
-    const consumer = pip({
+    const consumer = plugin({
       name: 'c',
       needs: { thing: service<number>() },
       boot: ({ thing }) => ({ doubled: thing * 2 }),
@@ -199,18 +199,18 @@ describe('void-boot provides inference (constraint-fallback regression)', () => 
   });
 });
 
-describe('initPips.context', () => {
+describe('initPlugins.context', () => {
   type AppServices = {
     readonly db: DbService;
     readonly auth: AuthService;
     readonly ordersService: { readonly list: () => readonly string[] };
   };
 
-  const p = initPips.context<AppServices>().create();
+  const p = initPlugins.context<AppServices>().create();
 
-  it('authors pips with key-array needs and preserves concrete hook types', async () => {
-    const dbPip = makeDbPip();
-    const ordersPip = p.pip({
+  it('authors plugins with key-array needs and preserves concrete hook types', async () => {
+    const dbPlugin = makeDbPlugin();
+    const ordersPlugin = p.plugin({
       name: 'orders',
       needs: ['db'] as const,
       boot({ db }) {
@@ -222,15 +222,15 @@ describe('initPips.context', () => {
         };
       },
     });
-    const authPip = p.pip({
+    const authPlugin = p.plugin({
       name: 'auth',
       boot: () => ({
         auth: { verify: (_token: string): boolean => true } satisfies AuthService,
       }),
     });
 
-    const app = await defineApp('feature-pips')
-      .useAll([dbPip, authPip, ordersPip] as const)
+    const app = await defineApp('feature-plugins')
+      .useAll([dbPlugin, authPlugin, ordersPlugin] as const)
       .boot();
 
     expect(app.services.ordersService.list()).toEqual(['o1']);
@@ -240,9 +240,9 @@ describe('initPips.context', () => {
     await app.dispose();
   });
 
-  it('bridges app service keys to witness records for adapter pips', async () => {
-    const dbPip = makeDbPip();
-    const consumer = pip({
+  it('bridges app service keys to witness records for adapter plugins', async () => {
+    const dbPlugin = makeDbPlugin();
+    const consumer = plugin({
       name: 'consumer',
       needs: p.needs('db'),
       boot({ db }) {
@@ -251,28 +251,28 @@ describe('initPips.context', () => {
       },
     });
 
-    const app = await defineApp('bridge').use(dbPip).use(consumer).boot();
+    const app = await defineApp('bridge').use(dbPlugin).use(consumer).boot();
     expect(app.services.rows).toBeInstanceOf(Promise);
     await app.dispose();
   });
 
   it('keeps the same ordering and collision guard through useAll', () => {
-    const dbPip = makeDbPip();
-    const consumer = p.pip({
+    const dbPlugin = makeDbPlugin();
+    const consumer = p.plugin({
       name: 'consumer',
       needs: ['db'] as const,
       boot: () => ({}),
     });
 
     // @ts-expect-error — useAll preserves the same unsatisfied-needs guard as chained .use()
-    defineApp('wrong-order').useAll([consumer, dbPip] as const);
-    const dynamicPips = [consumer, dbPip];
+    defineApp('wrong-order').useAll([consumer, dbPlugin] as const);
+    const dynamicPlugins = [consumer, dbPlugin];
     // @ts-expect-error — useAll requires a tuple so plain arrays cannot bypass declaration-order checks
-    defineApp('dynamic-wrong-order').useAll(dynamicPips);
+    defineApp('dynamic-wrong-order').useAll(dynamicPlugins);
     // @ts-expect-error — "missing" is not an AppServices key
-    p.pip({ name: 'bad-key', needs: ['missing'] as const });
+    p.plugin({ name: 'bad-key', needs: ['missing'] as const });
     // @ts-expect-error — overlapping provides must satisfy the AppServices entry type
-    p.pip({ name: 'bad-provide', boot: () => ({ db: { nope: true } }) });
+    p.plugin({ name: 'bad-provide', boot: () => ({ db: { nope: true } }) });
 
     expect(true).toBe(true);
   });

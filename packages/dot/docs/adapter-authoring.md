@@ -45,11 +45,11 @@ adapter only makes sense inside a DOT app.
 
 ## Function shape
 
-An adapter exports a factory function that returns a `Pip`:
+An adapter exports a factory function that returns a `Plugin`:
 
 ```ts
 // my-pkg/src/dot.ts
-import { pip, type EmptyShape, type Pip } from '@arki/dot/pip';
+import { plugin, type EmptyShape, type Plugin } from '@arki/dot/plugin';
 
 import { MyClient } from './index.js';
 
@@ -61,8 +61,8 @@ export type MyPkgServices = {
   readonly myClient: MyClient;
 };
 
-export function myPkg(options: MyPkgDotOptions): Pip<EmptyShape, MyPkgServices> {
-  return pip({
+export function myPkg(options: MyPkgDotOptions): Plugin<EmptyShape, MyPkgServices> {
+  return plugin({
     name: 'my-pkg',
     version: '1.0.0',
 
@@ -114,7 +114,7 @@ configure(ctx) {
 }
 ```
 
-The kernel merges every pip's registration into `app.manifest`. Agents
+The kernel merges every plugin's registration into `app.manifest`. Agents
 read this to know what services exist before the app boots.
 
 ## Resource opening in `boot`
@@ -135,7 +135,7 @@ async boot({ $config }) {
 ```
 
 If `boot` opens multiple resources and one of them fails, clean up the
-partial state yourself before throwing — the kernel only disposes pips
+partial state yourself before throwing — the kernel only disposes plugins
 whose `boot` returned successfully.
 
 ```ts
@@ -153,14 +153,14 @@ async boot() {
 
 ## Consuming other services
 
-If your adapter needs a service from another pip (say, a logger), declare
+If your adapter needs a service from another plugin (say, a logger), declare
 it in `needs` — the hook context delivers it typed, and the app builder
 refuses composition orders that can't satisfy it:
 
 ```ts
-import { pip, service } from '@arki/dot/pip';
+import { plugin, service } from '@arki/dot/plugin';
 
-pip({
+plugin({
   name: 'my-pkg',
   needs: { log: service<Logger>() },
   async boot({ log }) {
@@ -182,8 +182,8 @@ async dispose({ myClient }) {
 }
 ```
 
-`stop` runs first if the pip has active work (workers, subscribers).
-`dispose` runs even if `stop` failed — the kernel collects per-pip
+`stop` runs first if the plugin has active work (workers, subscribers).
+`dispose` runs even if `stop` failed — the kernel collects per-plugin
 failures into an aggregate `DotLifecycleError`.
 
 ## Manifest contribution beyond services
@@ -237,9 +237,9 @@ service wiring at boot time and writes them into `app.manifest.dependencies`.
 
 ## Feature slices
 
-Apps organize by **feature pips**: one pip per feature, its contributions
+Apps organize by **feature plugins**: one plugin per feature, its contributions
 published under a single token whose value is a plain object of
-adapter-owned **slice keys**. Activator pips (an HTTP server, a queue
+adapter-owned **slice keys**. Activator plugins (an HTTP server, a queue
 runtime, a scheduler) accept `features:` token lists and read only their
 own key — structurally, with no shared type between adapters.
 
@@ -346,8 +346,8 @@ Adapters declare `@arki/dot` as an **optional peer** so that:
 }
 ```
 
-Import the kernel from `@arki/dot/pip` (a narrow entry that exports
-`pip`, `service`, `token`, `rename`, and the pip types — no CLI).
+Import the kernel from `@arki/dot/plugin` (a narrow entry that exports
+`plugin`, `service`, `token`, `rename`, and the plugin types — no CLI).
 This minimises what the adapter pulls in.
 
 ## Canonical examples
@@ -363,7 +363,7 @@ combination of the hooks.
 
 ## See also
 
-- [Pip authoring](./pip-authoring.md) — the general `Pip`
+- [Plugin authoring](./plugin-authoring.md) — the general `Plugin`
   contract.
 - [Lifecycle](./lifecycle.md) — hook ordering and failure semantics.
 - [Diagnostics](./diagnostics.md) — emitting actionable issues.

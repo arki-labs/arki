@@ -5,7 +5,7 @@ type JsonObject = { [key: string]: JsonValue };
 
 type QueueActionLike = {
   readonly id: string;
-  readonly pip: string;
+  readonly plugin: string;
   readonly binding: string;
   readonly direction: 'in' | 'out';
   readonly address?: string;
@@ -22,15 +22,15 @@ export type QueueTopologyDocument = {
   readonly format: 'queue-topology';
   readonly queues: readonly {
     readonly name: string;
-    readonly consumers: readonly { readonly id: string; readonly pip: string }[];
-    readonly producers: readonly { readonly id: string; readonly pip: string }[];
+    readonly consumers: readonly { readonly id: string; readonly plugin: string }[];
+    readonly producers: readonly { readonly id: string; readonly plugin: string }[];
   }[];
 };
 
 type MutableQueueEntry = {
   name: string;
-  consumers: { id: string; pip: string }[];
-  producers: { id: string; pip: string }[];
+  consumers: { id: string; plugin: string }[];
+  producers: { id: string; plugin: string }[];
 };
 
 function queueNameFor(action: QueueActionLike): string | null {
@@ -48,9 +48,9 @@ export function project(manifest: ManifestLike): QueueTopologyDocument {
     if (queueName === null) continue;
     const entry = queues.get(queueName) ?? { name: queueName, consumers: [], producers: [] };
     if (action.direction === 'in') {
-      entry.consumers.push({ id: action.id, pip: action.pip });
+      entry.consumers.push({ id: action.id, plugin: action.plugin });
     } else {
-      entry.producers.push({ id: action.id, pip: action.pip });
+      entry.producers.push({ id: action.id, plugin: action.plugin });
     }
     queues.set(queueName, entry);
   }

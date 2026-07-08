@@ -1,14 +1,14 @@
 /**
  * Route bundles — the dynamic half of an HTTP surface.
  *
- * A bundle binds contracts to handlers. It is assembled inside a pip's
- * `boot` hook — where the pip's `needs` are already injected — so handlers
+ * A bundle binds contracts to handlers. It is assembled inside a plugin's
+ * `boot` hook — where the plugin's `needs` are already injected — so handlers
  * and derivers close over typed singletons:
  *
  * ```ts
  * export const OrdersRoutes = token<RouteBundle>()('orders.routes');
  *
- * export const ordersPip = pip({
+ * export const ordersPlugin = plugin({
  *   name: 'orders',
  *   needs: { db: service<Db>() },
  *   actions: [listOrders, createOrder],
@@ -112,7 +112,7 @@ export type RpcActionMeta = {
 
 /**
  * The STATIC half of an RPC mount — pure data plus `toDotAction()`, so a
- * feature pip lists it in `actions:` at module level (declare-once), and
+ * feature plugin lists it in `actions:` at module level (declare-once), and
  * binds `context`/`handle` in `boot` where its services exist
  * (bind-once) — the exact contract/handler split `route.get(...)` uses.
  */
@@ -179,7 +179,7 @@ export function rpcMount(path: string, options: RpcMountOptions): RpcMountContra
 
 /**
  * A plain value: derivers + bound contracts + mounts. Published as an
- * ordinary DOT service under a token and collected by the `http()` pip —
+ * ordinary DOT service under a token and collected by the `http()` plugin —
  * no new kernel concept.
  */
 export type RouteBundle = {
@@ -325,4 +325,23 @@ function makeBuilder(state: BundleState): RouteBundleBuilder {
 /** Start an empty bundle. See the module docs for the authoring pattern. */
 export function routes(): RouteBundleBuilder {
   return makeBuilder({ derivers: [], bindings: [], mounts: [], rpcs: [] });
+}
+
+/** The `@arki/feature` slice contract an `endpoints(...)` declaration produces. */
+export type EndpointsFeatureSlice<TServices> = {
+  readonly key: 'routes';
+  readonly actions: readonly never[];
+  readonly resolve: (services: TServices) => RouteBundle;
+};
+
+/**
+ * Declare a feature's HTTP surface as a boot-time slice
+ * (`defineFeature(..., { use: [endpoints(build)] })`). The builder runs
+ * once at boot with the feature's needed services; the bundle lands
+ * under `routes` in the feature's slice token — where
+ * `http({ features })` collects it. Route contracts stay in the
+ * feature's `actions` list.
+ */
+export function endpoints<TServices>(build: (services: TServices) => RouteBundle): EndpointsFeatureSlice<TServices> {
+  return { key: 'routes', actions: [], resolve: build };
 }

@@ -1,12 +1,12 @@
 /**
  * Public entry point for the DOT kernel (v2).
  *
- * `defineApp(name)` returns a `DotAppBuilder` that accumulates pips via
- * `.use(pip)`, then transitions through the 5-hook lifecycle:
+ * `defineApp(name)` returns a `DotAppBuilder` that accumulates plugins via
+ * `.use(plugin)`, then transitions through the 5-hook lifecycle:
  *
  *   defineApp -> use* -> configure() -> boot() -> start() -> stop() -> dispose()
  *
- * `.use()` is compile-time guarded: a pip whose `needs` are not satisfied
+ * `.use()` is compile-time guarded: a plugin whose `needs` are not satisfied
  * by services provided so far — or whose provides collide with existing
  * wire keys — fails to typecheck at the call site ("Expected 2 arguments,
  * but got 1", with the diagnostic embedded in the expected second
@@ -23,7 +23,7 @@ import type { DotDiagnosticsSnapshot } from './diagnostics.js';
 import type { DotLifecycleObserver } from './lifecycle-observer.js';
 import type { DotLifecycleState } from './lifecycle.js';
 import type { DotAppManifest } from './manifest.js';
-import type { AnyPip, EmptyShape, Pip, ServiceRecord } from './pip-contract.js';
+import type { AnyPlugin, EmptyShape, Plugin, ServiceRecord } from './plugin-contract.js';
 import { DotAppImpl } from './kernel/app-instance.js';
 import { renderTimeline } from './timeline.js';
 
@@ -43,26 +43,26 @@ type MismatchedKeys<TAvail, TNeeds> = {
 };
 
 type NeedsError<TAvail extends ServiceRecord, TNeeds extends ServiceRecord> = {
-  readonly 'DOT: pip needs services no earlier .use() provides': {
+  readonly 'DOT: plugin needs services no earlier .use() provides': {
     readonly missing: MissingKeys<TAvail, TNeeds>;
     readonly mismatched: MismatchedKeys<TAvail, TNeeds>;
   };
 };
 
 type CollisionError<TAvail, TProvides> = {
-  readonly 'DOT: pip provides wire keys already provided (use rename())': keyof TAvail & keyof TProvides;
+  readonly 'DOT: plugin provides wire keys already provided (use rename())': keyof TAvail & keyof TProvides;
 };
 
 /**
- * A pip whose `boot` always throws infers `TProvides = never`, which would
+ * A plugin whose `boot` always throws infers `TProvides = never`, which would
  * poison both the collision check (`keyof never` matches everything) and
- * the accumulated record (`TAvail & never` = `never`). Such a pip provides
+ * the accumulated record (`TAvail & never` = `never`). Such a plugin provides
  * nothing — normalize to the empty shape.
  */
 export type NormalizeProvides<TP extends ServiceRecord> = [TP] extends [never] ? EmptyShape : TP;
 
 /**
- * Rest-tuple guard. Satisfied → `[]` (call `.use(pip)` with one argument).
+ * Rest-tuple guard. Satisfied → `[]` (call `.use(plugin)` with one argument).
  * Violated → a required second argument of an unconstructible error type,
  * so the call site fails with the diagnostic embedded in the expected type.
  */
@@ -76,17 +76,17 @@ export type UseGuard<
     : [error: CollisionError<TAvail, TProvides>]
   : [error: NeedsError<TAvail, TNeeds>];
 
-type UseAllState<TAvail extends ServiceRecord, TPips extends readonly AnyPip[]> = TPips extends readonly [
+type UseAllState<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlugin[]> = TPlugins extends readonly [
   infer Head,
   ...infer Tail,
 ]
-  ? Head extends Pip<infer TNeeds, infer TProvides>
+  ? Head extends Plugin<infer TNeeds, infer TProvides>
     ? UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>> extends []
-      ? UseAllState<TAvail & NormalizeProvides<TProvides>, Extract<Tail, readonly AnyPip[]>>
+      ? UseAllState<TAvail & NormalizeProvides<TProvides>, Extract<Tail, readonly AnyPlugin[]>>
       : {
           readonly avail: TAvail;
           readonly error: {
-            readonly 'DOT: useAll tuple contains a pip that cannot be used at this position': UseGuard<
+            readonly 'DOT: useAll tuple contains a plugin that cannot be used at this position': UseGuard<
               TAvail,
               TNeeds,
               NormalizeProvides<TProvides>
@@ -96,7 +96,7 @@ type UseAllState<TAvail extends ServiceRecord, TPips extends readonly AnyPip[]> 
     : {
         readonly avail: TAvail;
         readonly error: {
-          readonly 'DOT: useAll accepts only pips': Head;
+          readonly 'DOT: useAll accepts only plugins': Head;
         };
       }
   : {
@@ -104,24 +104,24 @@ type UseAllState<TAvail extends ServiceRecord, TPips extends readonly AnyPip[]> 
       readonly error: never;
     };
 
-export type UseAllAvail<TAvail extends ServiceRecord, TPips extends readonly AnyPip[]> = UseAllState<
+export type UseAllAvail<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlugin[]> = UseAllState<
   TAvail,
-  TPips
+  TPlugins
 >['avail'];
 
-type UseAllTupleGuard<TPips extends readonly AnyPip[]> = number extends TPips['length']
+type UseAllTupleGuard<TPlugins extends readonly AnyPlugin[]> = number extends TPlugins['length']
   ? [
       error: {
-        readonly 'DOT: useAll requires a tuple; add `as const` or pass pips directly in declaration order': TPips;
+        readonly 'DOT: useAll requires a tuple; add `as const` or pass plugins directly in declaration order': TPlugins;
       },
     ]
   : [];
 
-export type UseAllGuard<TAvail extends ServiceRecord, TPips extends readonly AnyPip[]> = [
-  UseAllState<TAvail, TPips>['error'],
+export type UseAllGuard<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlugin[]> = [
+  UseAllState<TAvail, TPlugins>['error'],
 ] extends [never]
-  ? UseAllTupleGuard<TPips>
-  : [error: UseAllState<TAvail, TPips>['error']];
+  ? UseAllTupleGuard<TPlugins>
+  : [error: UseAllState<TAvail, TPlugins>['error']];
 
 /* ------------------------------------------------------------------ */
 /* Public app surface                                                  */
@@ -137,7 +137,7 @@ export type DotApp<TServices extends ServiceRecord> = {
   /** Current lifecycle state. */
   readonly state: DotLifecycleState;
   /**
-   * Services published by booted pips, keyed by wire key.
+   * Services published by booted plugins, keyed by wire key.
    * Empty before `boot()` succeeds.
    */
   readonly services: TServices;
@@ -196,28 +196,28 @@ export type DotAppConfigured<TServices extends ServiceRecord> = {
 /**
  * Builder produced by `defineApp(name)`.
  *
- * `.use(pip)` is type-tracking in both directions: the pip's `needs` must
+ * `.use(plugin)` is type-tracking in both directions: the plugin's `needs` must
  * be satisfied by the services accumulated so far, and its `provides`
  * merge into the accumulated record for the next `.use()`.
  */
 export type DotAppBuilder<TAvail extends ServiceRecord> = {
   /**
-   * Register a pip. Compile error when the pip's needs are unsatisfied
+   * Register a plugin. Compile error when the plugin's needs are unsatisfied
    * or its provides collide with existing wire keys.
    */
   use<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(
-    pip: Pip<TNeeds, TProvides>,
+    plugin: Plugin<TNeeds, TProvides>,
     ...guard: UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>
   ): DotAppBuilder<TAvail & NormalizeProvides<TProvides>>;
   /**
-   * Register a tuple of pips in declaration order. This is type-equivalent
+   * Register a tuple of plugins in declaration order. This is type-equivalent
    * to calling `.use()` for each item and keeps the same ordering/collision
    * guard across the whole tuple.
    */
-  useAll<const TPips extends readonly AnyPip[]>(
-    pips: TPips,
-    ...guard: UseAllGuard<TAvail, TPips>
-  ): DotAppBuilder<UseAllAvail<TAvail, TPips>>;
+  useAll<const TPlugins extends readonly AnyPlugin[]>(
+    plugins: TPlugins,
+    ...guard: UseAllGuard<TAvail, TPlugins>
+  ): DotAppBuilder<UseAllAvail<TAvail, TPlugins>>;
   /** Run the configure phase synchronously. Throws on configure failure. */
   configure(): DotAppConfigured<TAvail>;
   /** Run configure + boot. Throws on configure or boot failure. */
@@ -229,7 +229,7 @@ export type DotAppBuilder<TAvail extends ServiceRecord> = {
 type BuilderState = {
   appName: string;
   appVersion?: string;
-  pips: AnyPip[];
+  plugins: AnyPlugin[];
   config?: Readonly<Record<string, unknown>>;
   observers?: readonly DotLifecycleObserver[];
   hookTimeoutMs?: number;
@@ -240,8 +240,8 @@ type BuilderState = {
  *
  * @example
  * const app = await defineApp('my-app')
- *   .use(dbPip)
- *   .use(billingPip)   // billing's needs must be satisfied by now
+ *   .use(dbPlugin)
+ *   .use(billingPlugin)   // billing's needs must be satisfied by now
  *   .boot();
  *
  * await app.start();
@@ -264,7 +264,7 @@ export function defineApp(
     /**
      * Watchdog budget (ms) for each async hook invocation (`boot`, `start`,
      * `stop`, `dispose` — `configure` is sync). A hook exceeding the budget
-     * fails with `DOT_LIFECYCLE_E015` naming the pip and hook, and the
+     * fails with `DOT_LIFECYCLE_E015` naming the plugin and hook, and the
      * kernel applies its normal failure rules (boot rollback, teardown
      * aggregation). The hook's promise itself cannot be cancelled — the
      * watchdog makes the hang *visible*, it does not kill it. Default:
@@ -276,7 +276,7 @@ export function defineApp(
   const state: BuilderState = {
     appName: name,
     appVersion: options.version,
-    pips: [],
+    plugins: [],
     config: options.config,
     observers: options.observers,
     hookTimeoutMs: options.hookTimeoutMs,
@@ -288,7 +288,7 @@ function buildImpl(state: BuilderState): DotAppImpl {
   return new DotAppImpl({
     appName: state.appName,
     appVersion: state.appVersion,
-    pips: state.pips,
+    plugins: state.plugins,
     config: state.config,
     observers: state.observers,
     hookTimeoutMs: state.hookTimeoutMs,
@@ -300,17 +300,17 @@ function makeBuilder<TAvail extends ServiceRecord>(state: BuilderState): DotAppB
   // at the type level); the single cast below is the same kernel boundary
   // v1 crossed in its wrapApp helper.
   const impl = {
-    use(pip: AnyPip, ..._guard: readonly unknown[]): DotAppBuilder<ServiceRecord> {
+    use(plugin: AnyPlugin, ..._guard: readonly unknown[]): DotAppBuilder<ServiceRecord> {
       const nextState: BuilderState = {
         ...state,
-        pips: [...state.pips, pip],
+        plugins: [...state.plugins, plugin],
       };
       return makeBuilder<ServiceRecord>(nextState);
     },
-    useAll(pips: readonly AnyPip[], ..._guard: readonly unknown[]): DotAppBuilder<ServiceRecord> {
+    useAll(plugins: readonly AnyPlugin[], ..._guard: readonly unknown[]): DotAppBuilder<ServiceRecord> {
       const nextState: BuilderState = {
         ...state,
-        pips: [...state.pips, ...pips],
+        plugins: [...state.plugins, ...plugins],
       };
       return makeBuilder<ServiceRecord>(nextState);
     },

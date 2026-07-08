@@ -11,14 +11,14 @@ import { describe, expect, it } from 'vitest';
 
 import type { DotAppManifest } from '../../manifest.js';
 import { defineApp } from '../../define-app.js';
-import { pip, service } from '../../pip-contract.js';
+import { plugin, service } from '../../plugin-contract.js';
 import { buildMermaidGraph, renderGraph } from '../render-graph.js';
 
 function manifestOf(overrides: Partial<DotAppManifest>): DotAppManifest {
   return {
     manifestVersion: 2,
     app: { name: 'test' },
-    pips: [],
+    plugins: [],
     services: [],
     actions: [],
     dependencies: [],
@@ -31,7 +31,7 @@ function manifestOf(overrides: Partial<DotAppManifest>): DotAppManifest {
 describe('buildMermaidGraph', () => {
   it('renders declaration-ordered nodes and kind-labelled edges', () => {
     const manifest = manifestOf({
-      pips: [
+      plugins: [
         { name: 'db', version: '1.2.0', dependencies: [], provides: ['db'] },
         { name: 'billing', dependencies: ['db'], provides: [] },
       ],
@@ -43,9 +43,9 @@ describe('buildMermaidGraph', () => {
     );
   });
 
-  it('escapes double quotes in pip names and skips edges to unknown pips', () => {
+  it('escapes double quotes in plugin names and skips edges to unknown plugins', () => {
     const manifest = manifestOf({
-      pips: [{ name: 'we"ird', dependencies: [], provides: [] }],
+      plugins: [{ name: 'we"ird', dependencies: [], provides: [] }],
       dependencies: [{ from: 'we"ird', to: 'ghost', kind: 'requires' }],
     });
 
@@ -58,7 +58,7 @@ describe('buildMermaidGraph', () => {
 describe('renderGraph', () => {
   it('plain mode prints raw mermaid; --json wraps it in the standard envelope', () => {
     const manifest = manifestOf({
-      pips: [{ name: 'solo', dependencies: [], provides: [] }],
+      plugins: [{ name: 'solo', dependencies: [], provides: [] }],
     });
 
     const plainLines: string[] = [];
@@ -83,8 +83,8 @@ describe('renderGraph', () => {
   });
 
   it('a booted app renders its OBSERVED wiring edges', async () => {
-    const provider = pip({ name: 'db', boot: () => ({ db: { ok: true } }) });
-    const consumer = pip({
+    const provider = plugin({ name: 'db', boot: () => ({ db: { ok: true } }) });
+    const consumer = plugin({
       name: 'billing',
       needs: { db: service<{ ok: boolean }>() },
       boot: ({ db }) => ({ billing: db.ok }),

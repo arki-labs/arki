@@ -2,7 +2,7 @@
 
 ## What this app is
 
-A DOT app composed via `defineApp(...).use(pip).boot()`. The runtime
+A DOT app composed via `defineApp(...).use(plugin).boot()`. The runtime
 graph is statically inspectable via `app.manifest` and runtime-inspectable
 via `app.diagnostics`.
 
@@ -26,7 +26,7 @@ command exits zero.
 - Env schema lives at `src/env.ts` — keep it narrow; one entry per env
   key the app actually reads.
 - Tests live under `tests/` and import the app via the `src/` barrel.
-- Add new pips by wiring `.use(pip(options))` between
+- Add new plugins by wiring `.use(plugin(options))` between
   `defineApp('{{name}}')` and `.boot()` in `src/app.ts`.
 
 ## Public / private boundaries
@@ -36,8 +36,8 @@ command exits zero.
   app reads belong here.
 - Don't reach into `@arki/dot` internals (anything under
   `@arki/dot/kernel`, `@arki/dot/legacy`, or `dist/` subpaths). Use the
-  public `defineApp` / `pip` API from `@arki/dot` and the
-  `pip` / `service` / `rename` symbols from `@arki/dot/pip`.
+  public `defineApp` / `plugin` API from `@arki/dot` and the
+  `plugin` / `service` / `rename` symbols from `@arki/dot/plugin`.
 
 ## DOT artifact locations
 
@@ -47,14 +47,14 @@ command exits zero.
   `started` -> `stopped` -> `disposed`).
 - Errors carry stable `code`, `severity`, `remediation`, `docsUrl`.
 
-## Adding a pip
+## Adding a plugin
 
 1. Install the adapter package: `{{pkgManager}} add @arki/<pkg>`.
-2. Import its DOT adapter: `import { <pip> } from '@arki/<pkg>/dot';`.
+2. Import its DOT adapter: `import { <plugin> } from '@arki/<pkg>/dot';`.
 3. Chain it into the builder before `.boot()`:
-   `.use(<pip>(options))`.
-4. Verify with `bunx dot explain --json` — the new pip should appear
-   under `.data.pips`.
+   `.use(<plugin>(options))`.
+4. Verify with `bunx dot explain --json` — the new plugin should appear
+   under `.data.plugins`.
 
 ## Diagnostics triage
 

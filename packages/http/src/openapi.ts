@@ -170,7 +170,7 @@ function buildOperationFromAction(action: HttpActionForProjection): JsonObject {
 
   const operation: JsonObject = {
     operationId: action.id,
-    tags: [action.pip],
+    tags: [action.plugin],
   };
   if (action.summary !== undefined) operation['summary'] = action.summary;
   if (parameters.length > 0) operation['parameters'] = parameters;
@@ -237,7 +237,7 @@ export function toOpenApi(contracts: readonly ContractLike[], info: OpenApiInfo)
 
 type DotActionLike = {
   readonly id: string;
-  readonly pip: string;
+  readonly plugin: string;
   readonly binding: string;
   readonly direction: 'in' | 'out';
   readonly address?: string;
@@ -253,7 +253,7 @@ type DotManifestLike = {
 
 type HttpActionForProjection = {
   readonly id: string;
-  readonly pip: string;
+  readonly plugin: string;
   readonly method: string;
   readonly path: string;
   readonly summary?: string;
@@ -275,7 +275,7 @@ export type RouteMeta = {
 
 /**
  * Manifest metadata for a contract — what contract `toDotAction()` returns
- * for DOT pips and what `registerRoutes` feeds into `ctx.registerAction`
+ * for DOT plugins and what `registerRoutes` feeds into `ctx.registerAction`
  * during the shim window. SSE contracts mark `streaming` and carry the
  * per-event schema as `output`.
  */
@@ -344,7 +344,7 @@ function httpActionFromManifestAction(action: DotActionLike): HttpActionForProje
 
   return {
     id: action.id,
-    pip: action.pip,
+    plugin: action.plugin,
     method,
     path,
     ...(action.summary === undefined ? {} : { summary: action.summary }),

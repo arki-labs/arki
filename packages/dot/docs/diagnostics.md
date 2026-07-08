@@ -17,7 +17,7 @@ The manifest is the declarative description of an app. It is finalised once
 type DotAppManifest = {
   manifestVersion: 2;
   app: { name: string; version?: string };
-  pips: PipManifest[];
+  plugins: PluginManifest[];
   actions: ActionManifest[];
   services: ServiceManifest[];
   lifecycle: LifecycleManifest[];
@@ -26,14 +26,14 @@ type DotAppManifest = {
 };
 ```
 
-**Six-array contract.** The six top-level arrays (`pips`, `actions`,
+**Six-array contract.** The six top-level arrays (`plugins`, `actions`,
 `services`, `lifecycle`, `dependencies`, `projections`) are **always
 present**, even when empty. Consumers must never see an omitted array.
 
 ### Sub-shapes
 
 ```ts
-type PipManifest = {
+type PluginManifest = {
   name: string;
   version?: string;
   dependencies: readonly string[];
@@ -42,7 +42,7 @@ type PipManifest = {
 
 type ActionManifest = {
   id: string;
-  pip: string;
+  plugin: string;
   binding: string;
   direction: 'in' | 'out';
   address?: string;
@@ -53,12 +53,12 @@ type ActionManifest = {
 
 type ServiceManifest = {
   name: string;
-  pip: string;
+  plugin: string;
   kind: 'env' | 'db' | 'kv' | 'queue' | 'auth' | 'email' | 'logger' | 'custom';
 };
 
 type LifecycleManifest = {
-  pip: string;
+  plugin: string;
   hooks: readonly DotLifecycleHook[];
 };
 
@@ -72,7 +72,7 @@ type ProjectionManifest = {
   format: string;
   binding: string;
   module: string;
-  pip: string;
+  plugin: string;
 };
 ```
 
@@ -86,7 +86,7 @@ type DotDiagnosticsSnapshot = {
   snapshotVersion: 2;
   generatedAt: string; // ISO-8601
   app: { name: string; state: DotLifecycleState };
-  pips: PipDiagnostic[];
+  plugins: PluginDiagnostic[];
   actions: ActionDiagnostic[];
   services: ServiceDiagnostic[];
   lifecycle: LifecycleDiagnostic[];
@@ -94,7 +94,7 @@ type DotDiagnosticsSnapshot = {
 };
 ```
 
-**Five-array contract.** Same rule as the manifest — `pips`, `actions`,
+**Five-array contract.** Same rule as the manifest — `plugins`, `actions`,
 `services`, `lifecycle`, `issues` are always present.
 
 ### `DiagnosticIssue`
@@ -105,7 +105,7 @@ The single actionable record:
 type DiagnosticIssue = {
   code: string;          // stable machine-readable code, e.g. DOT_LIFECYCLE_E003
   severity: 'info' | 'warning' | 'error';
-  pip?: string;       // owning pip, when applicable
+  plugin?: string;       // owning plugin, when applicable
   message: string;       // human-readable summary
   remediation: string;   // what the developer (or agent) should do
   docsUrl: string;       // link to the relevant doc
@@ -125,7 +125,7 @@ import { defineApp } from '@arki/dot';
 const app = await defineApp('my-app').use(/* ... */).boot();
 
 // Static graph
-console.log(app.manifest.pips.map(p => p.name));
+console.log(app.manifest.plugins.map(p => p.name));
 console.log(app.manifest.dependencies);
 
 // Runtime snapshot
@@ -151,7 +151,7 @@ healthcheck loop is fine — no caching required by the caller.
 npx dot explain
 
 # JSON (for agents and CI)
-npx dot explain --json | jq '.data.manifest.pips'
+npx dot explain --json | jq '.data.manifest.plugins'
 ```
 
 The CLI **does not boot** the app — it only runs `configure`. This means
@@ -186,7 +186,7 @@ npx dot doctor --json | jq '.data.diagnostics.issues'
 ```
 
 If `boot()` throws, `dot doctor` **still emits a diagnostics envelope**
-populated with the per-pip issues from the configured seam. Boot failure
+populated with the per-plugin issues from the configured seam. Boot failure
 should be observable, not opaque.
 
 Exit codes:

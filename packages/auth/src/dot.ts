@@ -1,18 +1,18 @@
-import type { Pip } from '@arki/dot/pip';
-import { pip, service } from '@arki/dot/pip';
+import type { Plugin } from '@arki/dot/plugin';
+import { plugin, service } from '@arki/dot/plugin';
 
 import { initAuth } from './better-auth.config.js';
 
-export type AuthPipOptions = Parameters<typeof initAuth>[1];
+export type AuthPluginOptions = Parameters<typeof initAuth>[1];
 export type AuthDb = Parameters<typeof initAuth>[0];
 export type AuthService = ReturnType<typeof initAuth>;
 
-export type AuthPipServices = {
+export type AuthPluginServices = {
   readonly auth: AuthService;
 };
 
-export function auth(options: AuthPipOptions): Pip<{ readonly db: AuthDb }, AuthPipServices> {
-  return pip({
+export function auth(options: AuthPluginOptions): Plugin<{ readonly db: AuthDb }, AuthPluginServices> {
+  return plugin({
     name: 'auth',
     version: '0.1.4',
     needs: { db: service<AuthDb>() },

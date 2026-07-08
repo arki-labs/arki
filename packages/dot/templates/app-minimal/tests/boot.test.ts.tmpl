@@ -17,7 +17,7 @@ test('app boots and exposes env service', () => {
 
 test('diagnostics has all 5 arrays', () => {
   const { diagnostics } = booted;
-  expect(diagnostics.pips).toBeDefined();
+  expect(diagnostics.plugins).toBeDefined();
   expect(diagnostics.routes).toBeDefined();
   expect(diagnostics.services).toBeDefined();
   expect(diagnostics.lifecycle).toBeDefined();

@@ -70,14 +70,14 @@ function renderTextManifest(manifest: DotAppManifest): string {
   lines.push('='.repeat(title.length));
   lines.push('');
 
-  // Pips
-  lines.push(`Pips (${manifest.pips.length})`);
-  if (manifest.pips.length === 0) {
+  // Plugins
+  lines.push(`Plugins (${manifest.plugins.length})`);
+  if (manifest.plugins.length === 0) {
     lines.push('  (none)');
   } else {
-    const widthName = Math.max(6, ...manifest.pips.map(p => p.name.length));
+    const widthName = Math.max(6, ...manifest.plugins.map(p => p.name.length));
     lines.push(`  ${pad('NAME', widthName)}  VERSION  DEPENDENCIES`);
-    for (const p of manifest.pips) {
+    for (const p of manifest.plugins) {
       const version = p.version ?? '-';
       const deps = p.dependencies.length > 0 ? p.dependencies.join(', ') : '-';
       lines.push(`  ${pad(p.name, widthName)}  ${pad(version, 7)}  ${deps}`);
@@ -94,7 +94,7 @@ function renderTextManifest(manifest: DotAppManifest): string {
     const widthKind = Math.max(4, ...manifest.services.map(s => s.kind.length));
     lines.push(`  ${pad('NAME', widthName)}  ${pad('KIND', widthKind)}  PLUGIN`);
     for (const s of manifest.services) {
-      lines.push(`  ${pad(s.name, widthName)}  ${pad(s.kind, widthKind)}  ${s.pip}`);
+      lines.push(`  ${pad(s.name, widthName)}  ${pad(s.kind, widthKind)}  ${s.plugin}`);
     }
   }
   lines.push('');
@@ -107,10 +107,10 @@ function renderTextManifest(manifest: DotAppManifest): string {
     const widthId = Math.max(2, ...manifest.actions.map(action => action.id.length));
     const widthBinding = Math.max(7, ...manifest.actions.map(action => action.binding.length));
     const widthAddress = Math.max(7, ...manifest.actions.map(action => (action.address ?? '-').length));
-    lines.push(`  ${pad('ID', widthId)}  ${pad('BINDING', widthBinding)}  DIR  ${pad('ADDRESS', widthAddress)}  PIP`);
+    lines.push(`  ${pad('ID', widthId)}  ${pad('BINDING', widthBinding)}  DIR  ${pad('ADDRESS', widthAddress)}  PLUGIN`);
     for (const action of manifest.actions) {
       lines.push(
-        `  ${pad(action.id, widthId)}  ${pad(action.binding, widthBinding)}  ${pad(action.direction, 3)}  ${pad(action.address ?? '-', widthAddress)}  ${action.pip}`,
+        `  ${pad(action.id, widthId)}  ${pad(action.binding, widthBinding)}  ${pad(action.direction, 3)}  ${pad(action.address ?? '-', widthAddress)}  ${action.plugin}`,
       );
     }
   }
@@ -124,10 +124,10 @@ function renderTextManifest(manifest: DotAppManifest): string {
     const widthFormat = Math.max(6, ...manifest.projections.map(projection => projection.format.length));
     const widthBinding = Math.max(7, ...manifest.projections.map(projection => projection.binding.length));
     const widthModule = Math.max(6, ...manifest.projections.map(projection => projection.module.length));
-    lines.push(`  ${pad('FORMAT', widthFormat)}  ${pad('BINDING', widthBinding)}  ${pad('MODULE', widthModule)}  PIP`);
+    lines.push(`  ${pad('FORMAT', widthFormat)}  ${pad('BINDING', widthBinding)}  ${pad('MODULE', widthModule)}  PLUGIN`);
     for (const projection of manifest.projections) {
       lines.push(
-        `  ${pad(projection.format, widthFormat)}  ${pad(projection.binding, widthBinding)}  ${pad(projection.module, widthModule)}  ${projection.pip}`,
+        `  ${pad(projection.format, widthFormat)}  ${pad(projection.binding, widthBinding)}  ${pad(projection.module, widthModule)}  ${projection.plugin}`,
       );
     }
   }
@@ -149,11 +149,11 @@ function renderTextManifest(manifest: DotAppManifest): string {
   if (manifest.lifecycle.length === 0) {
     lines.push('  (none)');
   } else {
-    const widthPip = Math.max(6, ...manifest.lifecycle.map(l => l.pip.length));
-    lines.push(`  ${pad('PLUGIN', widthPip)}  HOOKS`);
+    const widthPlugin = Math.max(6, ...manifest.lifecycle.map(l => l.plugin.length));
+    lines.push(`  ${pad('PLUGIN', widthPlugin)}  HOOKS`);
     for (const l of manifest.lifecycle) {
       const hooks = l.hooks.length > 0 ? l.hooks.join(', ') : '-';
-      lines.push(`  ${pad(l.pip, widthPip)}  ${hooks}`);
+      lines.push(`  ${pad(l.plugin, widthPlugin)}  ${hooks}`);
     }
   }
   lines.push('');

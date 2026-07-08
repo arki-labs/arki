@@ -1,7 +1,7 @@
 /**
  * OpenTelemetry instrumentation for the DOT kernel.
  *
- * DOT is OTel-first: every lifecycle phase and every per-pip hook
+ * DOT is OTel-first: every lifecycle phase and every per-plugin hook
  * automatically emits a span and a duration histogram. When no SDK is
  * registered, the OTel API returns no-op implementations and the kernel
  * pays zero allocation per call — the discipline that makes "OTel-first"
@@ -15,11 +15,11 @@
  *   - Phase span: `dot.app.<phase>` — one root span per `configure()` /
  *     `boot()` / `start()` / `stop()` / `dispose()` call. Children
  *     auto-link via async-context.
- *   - Hook span:  `dot.pip.<hook>` — one child span per pip's hook
- *     execution. The pip name lives on `dot.pip.name`, not in the span
- *     name, so backends can aggregate by hook across pips.
- *   - Attributes (`dot.app.name`, `dot.pip.name`, `dot.pip.version`,
- *     `dot.hook`, `dot.pip.order`) follow the OTel convention of
+ *   - Hook span:  `dot.plugin.<hook>` — one child span per plugin's hook
+ *     execution. The plugin name lives on `dot.plugin.name`, not in the span
+ *     name, so backends can aggregate by hook across plugins.
+ *   - Attributes (`dot.app.name`, `dot.plugin.name`, `dot.plugin.version`,
+ *     `dot.hook`, `dot.plugin.order`) follow the OTel convention of
  *     namespacing under the library's prefix.
  *
  * @see packages/dot/docs/principles.md — principle 3 (deterministic) +
@@ -41,16 +41,16 @@ export const tracer = trace.getTracer(INSTRUMENTATION_NAME, INSTRUMENTATION_VERS
 export const meter = metrics.getMeter(INSTRUMENTATION_NAME, INSTRUMENTATION_VERSION);
 
 /**
- * Histogram recording per-pip per-hook execution duration in milliseconds.
+ * Histogram recording per-plugin per-hook execution duration in milliseconds.
  *
  * Attributes:
  *   - `dot.app.name` — app name
- *   - `dot.pip.name` — pip name
+ *   - `dot.plugin.name` — plugin name
  *   - `dot.hook`     — which lifecycle hook (`configure` | `boot` | ...)
  *   - `dot.status`   — `ok` | `failed`
  */
-export const hookDurationHistogram = meter.createHistogram('dot.pip.hook.duration', {
-  description: 'Wall-clock duration of a single pip lifecycle hook execution.',
+export const hookDurationHistogram = meter.createHistogram('dot.plugin.hook.duration', {
+  description: 'Wall-clock duration of a single plugin lifecycle hook execution.',
   unit: 'ms',
 });
 
@@ -95,44 +95,44 @@ function stringifyForSpan(value: unknown): string {
 }
 
 /**
- * Wrap a single pip-hook execution in a child span and record its
+ * Wrap a single plugin-hook execution in a child span and record its
  * duration in the histogram. The span auto-links to the active phase
  * span (set by {@link withPhaseSpan}) so traces show a clean parent-child
  * hierarchy:
  *
  *     dot.app.boot
- *     ├── dot.pip.boot   (dot.pip.name=env, dot.hook=boot)
- *     ├── dot.pip.boot   (dot.pip.name=db,  dot.hook=boot)
- *     └── dot.pip.boot   (dot.pip.name=kv,  dot.hook=boot)
+ *     ├── dot.plugin.boot   (dot.plugin.name=env, dot.hook=boot)
+ *     ├── dot.plugin.boot   (dot.plugin.name=db,  dot.hook=boot)
+ *     └── dot.plugin.boot   (dot.plugin.name=kv,  dot.hook=boot)
  *
  * Re-throws on failure after marking the span ERROR so the caller's
  * existing error-handling path stays intact.
  */
-export function withPipHookSpan<R>(
+export function withPluginHookSpan<R>(
   opts: {
     readonly appName: string;
-    readonly pipName: string;
-    readonly pipVersion?: string;
+    readonly pluginName: string;
+    readonly pluginVersion?: string;
     readonly hook: DotLifecycleHook;
     readonly order: number;
     /**
-     * Optional pip-scoped logger. When present, the helper threads the
+     * Optional plugin-scoped logger. When present, the helper threads the
      * span's `traceId` + `spanId` onto the logger via `setTraceContext`
      * before invoking the body — every log line emitted from within the
-     * pip's hook is automatically correlated with this span in the
+     * plugin's hook is automatically correlated with this span in the
      * `traceId`/`spanId` fields of `LogRecord`.
      */
     readonly logger?: Logger;
   },
   fn: (span: Span) => R,
 ): R {
-  const span = tracer.startSpan(`dot.pip.${opts.hook}`, {
+  const span = tracer.startSpan(`dot.plugin.${opts.hook}`, {
     attributes: attrs({
       'dot.app.name': opts.appName,
-      'dot.pip.name': opts.pipName,
-      'dot.pip.version': opts.pipVersion,
+      'dot.plugin.name': opts.pluginName,
+      'dot.plugin.version': opts.pluginVersion,
       'dot.hook': opts.hook,
-      'dot.pip.order': opts.order,
+      'dot.plugin.order': opts.order,
     }),
   });
   if (opts.logger) {
@@ -145,7 +145,7 @@ export function withPipHookSpan<R>(
     const durationMs = performance.now() - started;
     hookDurationHistogram.record(durationMs, {
       'dot.app.name': opts.appName,
-      'dot.pip.name': opts.pipName,
+      'dot.plugin.name': opts.pluginName,
       'dot.hook': opts.hook,
       'dot.status': status,
     });
@@ -183,7 +183,7 @@ export function withPipHookSpan<R>(
 
 /**
  * Wrap an entire app-level phase (`configure`/`boot`/`start`/`stop`/`dispose`)
- * in an active span. Children created by {@link withPipHookSpan} inherit
+ * in an active span. Children created by {@link withPluginHookSpan} inherit
  * this span as their parent via async-context.
  *
  * The callback's return value (sync or Promise) is propagated unchanged
@@ -194,7 +194,7 @@ export function withPhaseSpan<R>(
     readonly appName: string;
     readonly appVersion?: string;
     readonly phase: DotLifecycleHook;
-    readonly pipCount: number;
+    readonly pluginCount: number;
     /**
      * Optional phase-scoped logger. When present, the helper threads
      * the span's `traceId` + `spanId` onto the logger before invoking
@@ -213,7 +213,7 @@ export function withPhaseSpan<R>(
         'dot.app.name': opts.appName,
         'dot.app.version': opts.appVersion,
         'dot.app.phase': opts.phase,
-        'dot.app.pip.count': opts.pipCount,
+        'dot.app.plugin.count': opts.pluginCount,
       }),
     },
     (span): R => {

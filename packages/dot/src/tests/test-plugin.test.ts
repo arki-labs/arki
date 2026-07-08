@@ -1,5 +1,5 @@
 /**
- * Tests for `testPip` — the typed unit-test builder.
+ * Tests for `testPlugin` — the typed unit-test builder.
  *
  * Two layers:
  *   1. Type-level: `.provide()` is compile-checked (wrong shape, unknown
@@ -10,18 +10,18 @@
 
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { Lazy } from '../pip-contract.js';
-import { lazyOf, pip, service, token } from '../pip-contract.js';
-import { testPip } from '../test-harness.js';
+import type { Lazy } from '../plugin-contract.js';
+import { lazyOf, plugin, service, token } from '../plugin-contract.js';
+import { testPlugin } from '../test-harness.js';
 
 type Db = { query(sql: string): readonly string[] };
 type Cache = { get(key: string): string | undefined };
 
 const Db = token<Db>()('test.db');
 
-describe('testPip', () => {
+describe('testPlugin', () => {
   it('satisfies token and anonymous needs with typed fakes', async () => {
-    const consumer = pip({
+    const consumer = plugin({
       name: 'consumer',
       needs: { db: Db, cache: service<Cache>() },
       boot: ({ db, cache }) => ({
@@ -32,7 +32,7 @@ describe('testPip', () => {
     const fakeDb: Db = { query: () => ['row'] };
     const fakeCache: Cache = { get: () => 'hit' };
 
-    const app = await testPip(consumer)
+    const app = await testPlugin(consumer)
       .provide(Db, fakeDb) // token form
       .provide('cache', fakeCache) // anonymous form — wire key is the alias
       .boot();
@@ -43,7 +43,7 @@ describe('testPip', () => {
   });
 
   it('boot() does not compile until every need is provided; wrong shapes fail at provide()', () => {
-    const consumer = pip({
+    const consumer = plugin({
       name: 'consumer',
       needs: { db: Db, cache: service<Cache>() },
       boot: ({ db }) => ({ rows: db.query('q') }),
@@ -52,19 +52,19 @@ describe('testPip', () => {
     // @ts-expect-error — `cache` is still unprovided ("Expected 2 arguments").
     // The runtime boot really does reject (kernel E012) — swallow it so the
     // compile-time demonstration doesn't leak an unhandled rejection.
-    void testPip(consumer).provide(Db, { query: () => [] }).boot().catch(() => null);
+    void testPlugin(consumer).provide(Db, { query: () => [] }).boot().catch(() => null);
 
     // @ts-expect-error — a number is not a Db
-    void testPip(consumer).provide(Db, 42);
+    void testPlugin(consumer).provide(Db, 42);
 
-    // @ts-expect-error — `nope` is not one of this pip's needs
-    void testPip(consumer).provide('nope', 1);
+    // @ts-expect-error — `nope` is not one of this plugin's needs
+    void testPlugin(consumer).provide('nope', 1);
 
     expect(true).toBe(true);
   });
 
   it('lifts a plain fake for a service.lazy need; lazyOf works for pre-built handles', async () => {
-    const consumer = pip({
+    const consumer = plugin({
       name: 'lazy-consumer',
       needs: { db: service.lazy<Db>() },
       async boot({ db }) {
@@ -74,11 +74,11 @@ describe('testPip', () => {
       },
     });
 
-    const plain = await testPip(consumer).provide('db', { query: () => ['plain'] }).boot();
+    const plain = await testPlugin(consumer).provide('db', { query: () => ['plain'] }).boot();
     expect(plain.services.rows).toEqual(['plain']);
     await plain.dispose();
 
-    const handle = await testPip(consumer)
+    const handle = await testPlugin(consumer)
       .provide('db', lazyOf<Db>({ query: () => ['handle'] }))
       .boot();
     expect(handle.services.rows).toEqual(['handle']);
@@ -87,14 +87,14 @@ describe('testPip', () => {
 
   it('runs the real kernel: teardown order, own provides in dispose, $config', async () => {
     const order: string[] = [];
-    const consumer = pip({
+    const consumer = plugin({
       name: 'consumer',
       needs: { db: Db },
       boot: ({ db, $config }) => ({ rows: db.query('q'), flag: $config['flag'] }),
       dispose: ({ flag }) => void order.push(`consumer-dispose:${String(flag)}`),
     });
 
-    const app = await testPip(consumer, { config: { flag: 'on' } })
+    const app = await testPlugin(consumer, { config: { flag: 'on' } })
       .provide(Db, { query: () => [] })
       .start();
     expect(app.state).toBe('started');

@@ -6,13 +6,13 @@ import type {
   KernelCtx,
   NeedsShape,
   NoReservedKeys,
-  Pip,
+  Plugin,
   ActionSource,
   Service,
   ServiceRecord,
   WireNeeds,
-} from './pip-contract.js';
-import { pip as definePip, service } from './pip-contract.js';
+} from './plugin-contract.js';
+import { plugin as definePlugin, service } from './plugin-contract.js';
 
 type MaybePromise<T> = T | Promise<T>;
 type ServiceKey<TServices extends object> = Extract<keyof TServices, string>;
@@ -34,18 +34,18 @@ type SchemaCheckedProvides<TServices extends object, TProvides extends ServiceRe
     : TProvides[K];
 };
 
-type CommonPipDefinition = {
+type CommonPluginDefinition = {
   readonly name: string;
   readonly version?: string;
   readonly actions?: readonly ActionSource[];
   readonly configure?: (ctx: DotConfigureContext) => void;
 };
 
-type KeyArrayPipDefinition<
+type KeyArrayPluginDefinition<
   TServices extends object,
   TKeys extends ServiceKeys<TServices>,
   TProvides extends ServiceRecord & NoReservedKeys,
-> = CommonPipDefinition & {
+> = CommonPluginDefinition & {
   readonly needs?: TKeys;
   readonly boot?: (ctx: PickServices<TServices, TKeys> & KernelCtx) => MaybePromise<SchemaCheckedProvides<TServices, TProvides> | void>;
   readonly start?: (ctx: PickServices<TServices, TKeys> & TProvides & KernelCtx) => MaybePromise<void>;
@@ -53,11 +53,11 @@ type KeyArrayPipDefinition<
   readonly dispose?: (ctx: PickServices<TServices, TKeys> & TProvides & KernelCtx) => MaybePromise<void>;
 };
 
-type WitnessPipDefinition<
+type WitnessPluginDefinition<
   TServices extends object,
   TShape extends NeedsShape & NoReservedKeys,
   TProvides extends ServiceRecord & NoReservedKeys,
-> = CommonPipDefinition & {
+> = CommonPluginDefinition & {
   readonly needs: TShape;
   readonly boot?: (ctx: CtxOf<TShape> & KernelCtx) => MaybePromise<SchemaCheckedProvides<TServices, TProvides> | void>;
   readonly start?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
@@ -65,25 +65,25 @@ type WitnessPipDefinition<
   readonly dispose?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
 };
 
-export type InitPipsFactory<TServices extends object> = {
-  pip<
+export type InitPluginsFactory<TServices extends object> = {
+  plugin<
     const TKeys extends ServiceKeys<TServices> = readonly [],
     TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
   >(
-    def: KeyArrayPipDefinition<TServices, TKeys, TProvides>,
-  ): Pip<PickServices<TServices, TKeys>, InferredProvides<TProvides>>;
-  pip<TShape extends NeedsShape & NoReservedKeys, TProvides extends ServiceRecord & NoReservedKeys = EmptyShape>(
-    def: WitnessPipDefinition<TServices, TShape, TProvides>,
-  ): Pip<WireNeeds<TShape>, InferredProvides<TProvides>>;
+    def: KeyArrayPluginDefinition<TServices, TKeys, TProvides>,
+  ): Plugin<PickServices<TServices, TKeys>, InferredProvides<TProvides>>;
+  plugin<TShape extends NeedsShape & NoReservedKeys, TProvides extends ServiceRecord & NoReservedKeys = EmptyShape>(
+    def: WitnessPluginDefinition<TServices, TShape, TProvides>,
+  ): Plugin<WireNeeds<TShape>, InferredProvides<TProvides>>;
   needs<const TKeys extends ServiceKeys<TServices>>(...keys: TKeys): WitnessesFor<TServices, TKeys>;
 };
 
-type ErasedPipDefinition<TServices extends object> =
-  | KeyArrayPipDefinition<TServices, ServiceKeys<TServices>, ServiceRecord & NoReservedKeys>
-  | WitnessPipDefinition<TServices, NeedsShape & NoReservedKeys, ServiceRecord & NoReservedKeys>;
+type ErasedPluginDefinition<TServices extends object> =
+  | KeyArrayPluginDefinition<TServices, ServiceKeys<TServices>, ServiceRecord & NoReservedKeys>
+  | WitnessPluginDefinition<TServices, NeedsShape & NoReservedKeys, ServiceRecord & NoReservedKeys>;
 
-type KernelPipDefinition = Parameters<
-  typeof definePip<NeedsShape & NoReservedKeys, ServiceRecord & NoReservedKeys>
+type KernelPluginDefinition = Parameters<
+  typeof definePlugin<NeedsShape & NoReservedKeys, ServiceRecord & NoReservedKeys>
 >[0];
 
 function needsFor<TServices extends object, const TKeys extends ServiceKeys<TServices>>(
@@ -97,45 +97,45 @@ function needsFor<TServices extends object, const TKeys extends ServiceKeys<TSer
 }
 
 function isServiceKeyArray<TServices extends object>(
-  needs: ErasedPipDefinition<TServices>['needs'],
+  needs: ErasedPluginDefinition<TServices>['needs'],
 ): needs is ServiceKeys<TServices> {
   return Array.isArray(needs);
 }
 
-function createPipFactory<TServices extends object>(): InitPipsFactory<TServices> {
+function createPluginFactory<TServices extends object>(): InitPluginsFactory<TServices> {
   const factory = {
-    pip(def: ErasedPipDefinition<TServices>): Pip<ServiceRecord, ServiceRecord> {
+    plugin(def: ErasedPluginDefinition<TServices>): Plugin<ServiceRecord, ServiceRecord> {
       const rawNeeds = def.needs;
       const needs = isServiceKeyArray<TServices>(rawNeeds)
         ? needsFor<TServices, ServiceKeys<TServices>>(rawNeeds)
         : rawNeeds;
       // Factory seam: key-array authoring is runtime-compiled to the same
       // witness record that the kernel already understands.
-      const kernelDef: KernelPipDefinition = {
+      const kernelDef: KernelPluginDefinition = {
         name: def.name,
         ...(def.version === undefined ? {} : { version: def.version }),
         ...(needs === undefined ? {} : { needs }),
         ...(def.actions === undefined ? {} : { actions: def.actions }),
         ...(def.configure === undefined ? {} : { configure: def.configure }),
-        ...(def.boot === undefined ? {} : { boot: def.boot as KernelPipDefinition['boot'] }),
-        ...(def.start === undefined ? {} : { start: def.start as KernelPipDefinition['start'] }),
-        ...(def.stop === undefined ? {} : { stop: def.stop as KernelPipDefinition['stop'] }),
-        ...(def.dispose === undefined ? {} : { dispose: def.dispose as KernelPipDefinition['dispose'] }),
+        ...(def.boot === undefined ? {} : { boot: def.boot as KernelPluginDefinition['boot'] }),
+        ...(def.start === undefined ? {} : { start: def.start as KernelPluginDefinition['start'] }),
+        ...(def.stop === undefined ? {} : { stop: def.stop as KernelPluginDefinition['stop'] }),
+        ...(def.dispose === undefined ? {} : { dispose: def.dispose as KernelPluginDefinition['dispose'] }),
       };
-      return definePip(kernelDef) as unknown as Pip<ServiceRecord, ServiceRecord>;
+      return definePlugin(kernelDef) as unknown as Plugin<ServiceRecord, ServiceRecord>;
     },
     needs<const TKeys extends ServiceKeys<TServices>>(...keys: TKeys): WitnessesFor<TServices, TKeys> {
       return needsFor<TServices, typeof keys>(keys);
     },
   };
-  return factory as InitPipsFactory<TServices>;
+  return factory as InitPluginsFactory<TServices>;
 }
 
-export const initPips = {
+export const initPlugins = {
   context<TServices extends object>() {
     return {
-      create(): InitPipsFactory<TServices> {
-        return createPipFactory<TServices>();
+      create(): InitPluginsFactory<TServices> {
+        return createPluginFactory<TServices>();
       },
     };
   },

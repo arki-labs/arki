@@ -1,7 +1,7 @@
 /**
  * Manifest contract tests for the DOT kernel (v2).
  *
- * The manifest exposes six top-level arrays — pips, actions, services,
+ * The manifest exposes six top-level arrays — plugins, actions, services,
  * lifecycle, dependencies, projections — even on an empty app. Dependency
  * edges are observed from actual service wiring at boot time.
  */
@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { defineApp } from '../define-app.js';
 import { DotLifecycleErrorCode } from '../lifecycle.js';
 import { toJsonObject } from '../manifest.js';
-import { pip, service } from '../pip-contract.js';
+import { plugin, service } from '../plugin-contract.js';
 
 describe('DOT manifest', () => {
   it('exposes all six arrays on an empty app', async () => {
@@ -19,7 +19,7 @@ describe('DOT manifest', () => {
     expect(app.manifest).toEqual({
       manifestVersion: 2,
       app: { name: 'empty-app', version: '1.0.0' },
-      pips: [],
+      plugins: [],
       actions: [],
       services: [],
       lifecycle: [],
@@ -29,8 +29,8 @@ describe('DOT manifest', () => {
     await app.dispose();
   });
 
-  it('reflects pip contributions: services, actions, and projections registered in configure', async () => {
-    const billing = pip({
+  it('reflects plugin contributions: services, actions, and projections registered in configure', async () => {
+    const billing = plugin({
       name: 'billing',
       version: '2.3.4',
       configure: ctx => {
@@ -58,11 +58,11 @@ describe('DOT manifest', () => {
 
     const app = await defineApp('test').use(billing).boot();
     const m = app.manifest;
-    expect(m.pips).toEqual([{ name: 'billing', version: '2.3.4', dependencies: [], provides: ['payments'] }]);
+    expect(m.plugins).toEqual([{ name: 'billing', version: '2.3.4', dependencies: [], provides: ['payments'] }]);
     expect(m.actions).toEqual([
       {
         id: 'billing.charge',
-        pip: 'billing',
+        plugin: 'billing',
         binding: 'http',
         direction: 'in',
         address: 'POST /charge',
@@ -75,14 +75,14 @@ describe('DOT manifest', () => {
       },
     ]);
     expect(m.projections).toEqual([
-      { format: 'openapi', binding: 'http', module: '@arki/http/projection', pip: 'billing' },
+      { format: 'openapi', binding: 'http', module: '@arki/http/projection', plugin: 'billing' },
     ]);
-    expect(m.services).toEqual([{ name: 'stripe', pip: 'billing', kind: 'custom' }]);
+    expect(m.services).toEqual([{ name: 'stripe', plugin: 'billing', kind: 'custom' }]);
     await app.dispose();
   });
 
-  it('collects declarative actions from hook-less pips without adding configure lifecycle entries', () => {
-    const health = pip({
+  it('collects declarative actions from hook-less plugins without adding configure lifecycle entries', () => {
+    const health = plugin({
       name: 'health',
       actions: [
         {
@@ -98,17 +98,17 @@ describe('DOT manifest', () => {
     expect(configured.manifest.actions).toEqual([
       {
         id: 'health.check',
-        pip: 'health',
+        plugin: 'health',
         binding: 'http',
         direction: 'in',
         address: 'GET /health',
       },
     ]);
-    expect(configured.manifest.lifecycle).toEqual([{ pip: 'health', hooks: [] }]);
+    expect(configured.manifest.lifecycle).toEqual([{ plugin: 'health', hooks: [] }]);
   });
 
   it('keeps registerRoute as a lossless deprecated shim over registerAction', () => {
-    const legacy = pip({
+    const legacy = plugin({
       name: 'legacy',
       configure: ctx => {
         ctx.registerRoute({
@@ -128,7 +128,7 @@ describe('DOT manifest', () => {
     expect(configured.manifest.actions).toEqual([
       {
         id: 'legacy.health',
-        pip: 'legacy',
+        plugin: 'legacy',
         binding: 'http',
         direction: 'in',
         address: 'GET /health',
@@ -145,7 +145,7 @@ describe('DOT manifest', () => {
   });
 
   it('surfaces duplicate action ids within a binding as DOT_LIFECYCLE_E016 issues', () => {
-    const duplicate = pip({
+    const duplicate = plugin({
       name: 'dup',
       actions: [
         { id: 'same', binding: 'http', direction: 'in' },
@@ -163,13 +163,13 @@ describe('DOT manifest', () => {
     const issue = configured.diagnostics.issues.find(i => i.code === DotLifecycleErrorCode.DuplicateAction);
     expect(issue).toMatchObject({
       severity: 'error',
-      pip: 'dup',
+      plugin: 'dup',
       metadata: { binding: 'http', id: 'same' },
     });
   });
 
   it('rejects non-JSON action metadata with DOT_LIFECYCLE_E017 diagnostics', () => {
-    const bad = pip({
+    const bad = plugin({
       name: 'bad-meta',
       actions: [
         {
@@ -186,7 +186,7 @@ describe('DOT manifest', () => {
       expect.objectContaining({
         code: DotLifecycleErrorCode.ActionMetaNotJson,
         severity: 'error',
-        pip: 'bad-meta',
+        plugin: 'bad-meta',
         metadata: expect.objectContaining({ actionId: 'bad.nan' }),
       }),
     );
@@ -200,11 +200,11 @@ describe('DOT manifest', () => {
     expect(() => toJsonObject({ value: Number.POSITIVE_INFINITY })).toThrow(/JSON-serializable/);
   });
 
-  it('lifecycle entries include every hook the pip participates in', async () => {
+  it('lifecycle entries include every hook the plugin participates in', async () => {
     const noop = () => {
-      // intentional no-op — we only care that the pip object exposes the hook.
+      // intentional no-op — we only care that the plugin object exposes the hook.
     };
-    const p = pip({
+    const p = plugin({
       name: 'p',
       configure: noop,
       boot: () => ({}),
@@ -214,9 +214,9 @@ describe('DOT manifest', () => {
     });
     const app = await defineApp('test').use(p).start();
     expect(app.manifest.lifecycle).toEqual([
-      { pip: 'p', hooks: expect.arrayContaining(['configure', 'boot', 'start']) },
+      { plugin: 'p', hooks: expect.arrayContaining(['configure', 'boot', 'start']) },
     ]);
-    // Hooks are detected from the pip shape, so all five are included.
+    // Hooks are detected from the plugin shape, so all five are included.
     expect(app.manifest.lifecycle[0]!.hooks).toEqual(
       expect.arrayContaining(['configure', 'boot', 'start', 'stop', 'dispose']),
     );
@@ -224,13 +224,13 @@ describe('DOT manifest', () => {
   });
 
   it('dependency edges are observed from service wiring at boot', async () => {
-    const a = pip({ name: 'a', boot: () => ({ alpha: 1 }) });
-    const b = pip({
+    const a = plugin({ name: 'a', boot: () => ({ alpha: 1 }) });
+    const b = plugin({
       name: 'b',
       needs: { alpha: service<number>() },
       boot: () => ({ beta: 2 }),
     });
-    const c = pip({
+    const c = plugin({
       name: 'c',
       needs: { beta: service<number>() },
       boot: () => ({}),
@@ -243,15 +243,15 @@ describe('DOT manifest', () => {
       ]),
     );
     expect(app.manifest.dependencies).toHaveLength(2);
-    // The declarative per-pip view carries the wire keys.
-    expect(app.manifest.pips.find(p => p.name === 'b')?.dependencies).toEqual(['alpha']);
+    // The declarative per-plugin view carries the wire keys.
+    expect(app.manifest.plugins.find(p => p.name === 'b')?.dependencies).toEqual(['alpha']);
     // Published wire keys surface in `provides`.
-    expect(app.manifest.pips.find(p => p.name === 'a')?.provides).toEqual(['alpha']);
+    expect(app.manifest.plugins.find(p => p.name === 'a')?.provides).toEqual(['alpha']);
     await app.dispose();
   });
 
-  it('snapshot stability — same pips produce equal manifests across runs', async () => {
-    const p = pip({
+  it('snapshot stability — same plugins produce equal manifests across runs', async () => {
+    const p = plugin({
       name: 'p',
       configure: ctx => {
         ctx.registerService('logger', 'logger');

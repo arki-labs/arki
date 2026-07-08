@@ -2,12 +2,12 @@
  * Manifest types for the DOT kernel.
  *
  * A `DotAppManifest` is the static, declarative description of an app: which
- * pips are registered, what actions/services/projections they contribute, and how they
+ * plugins are registered, what actions/services/projections they contribute, and how they
  * depend on each other. It is built up during the `configure` phase from
  * registration calls and finalised once `configure` completes.
  *
  * CONTRACT: `DotAppManifest` always exposes the same six top-level arrays
- * (`pips`, `actions`, `services`, `lifecycle`, `dependencies`,
+ * (`plugins`, `actions`, `services`, `lifecycle`, `dependencies`,
  * `projections`). Consumers MUST NOT see an omitted array — empty is empty,
  * but never missing.
  */
@@ -87,11 +87,11 @@ export function toJsonObject(value: unknown): JsonObject {
 }
 
 /**
- * Kind of service that a pip can publish.
+ * Kind of service that a plugin can publish.
  *
  * Well-known kinds map 1:1 to the canonical `@arki/*` adapters. `custom`
- * is the escape hatch for pip-defined service kinds — use it whenever a
- * pip publishes something that does not fit a reserved shape.
+ * is the escape hatch for plugin-defined service kinds — use it whenever a
+ * plugin publishes something that does not fit a reserved shape.
  */
 export type ServiceKind =
   | 'env'
@@ -105,7 +105,7 @@ export type ServiceKind =
   | 'message-bus'
   | 'custom';
 
-/** Kind of dependency edge between two pips. */
+/** Kind of dependency edge between two plugins. */
 export type DependencyEdgeKind = 'requires' | 'provides' | 'uses';
 
 /** Direction of a boundary interaction, viewed from the app. */
@@ -115,7 +115,7 @@ export type ActionDirection = 'in' | 'out';
 export type ActionManifest = {
   /** Stable identifier, e.g. `orders.list` or `orders.created.consume`. */
   id: string;
-  pip: string;
+  plugin: string;
   /** Adapter-owned binding name: `http`, `queue`, `cli`, `cron`, etc. */
   binding: string;
   /** `in` = world invokes/feeds the app; `out` = app emits. */
@@ -138,8 +138,8 @@ export type ProjectionManifest = {
   binding: string;
   /** Import specifier for the projection module. */
   module: string;
-  /** Pip that registered this projection. */
-  pip: string;
+  /** Plugin that registered this projection. */
+  plugin: string;
 };
 
 /**
@@ -154,7 +154,7 @@ export type DotAppManifest = {
     name: string;
     version?: string;
   };
-  pips: PipManifest[];
+  plugins: PluginManifest[];
   actions: ActionManifest[];
   services: ServiceManifest[];
   lifecycle: LifecycleManifest[];
@@ -162,28 +162,28 @@ export type DotAppManifest = {
   projections: ProjectionManifest[];
 };
 
-/** Single pip's declarative metadata. */
-export type PipManifest = {
+/** Single plugin's declarative metadata. */
+export type PluginManifest = {
   name: string;
   version?: string;
   dependencies: readonly string[];
   provides: readonly string[];
 };
 
-/** Single service published by a pip. */
+/** Single service published by a plugin. */
 export type ServiceManifest = {
   name: string;
-  pip: string;
+  plugin: string;
   kind: ServiceKind;
 };
 
-/** Which lifecycle hooks a pip participates in. */
+/** Which lifecycle hooks a plugin participates in. */
 export type LifecycleManifest = {
-  pip: string;
+  plugin: string;
   hooks: readonly DotLifecycleHook[];
 };
 
-/** Directed edge in the pip dependency graph. */
+/** Directed edge in the plugin dependency graph. */
 export type DependencyEdge = {
   from: string;
   to: string;

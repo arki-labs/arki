@@ -1,7 +1,7 @@
 /**
  * ASCII waterfall renderer for DOT lifecycle diagnostics.
  *
- * Given a `DotDiagnosticsSnapshot`, builds a compact per-phase, per-pip
+ * Given a `DotDiagnosticsSnapshot`, builds a compact per-phase, per-plugin
  * duration chart suitable for printing in a terminal or embedding in a
  * `dot doctor` text report. No colour, no Unicode beyond `█` so the
  * output stays clean in log aggregators and CI.
@@ -38,7 +38,7 @@ export type RenderTimelineOptions = {
   /** Maximum bar width in characters (default `50`). */
   readonly barWidth?: number;
   /**
-   * When `true`, also emit any pip's diagnostic `issues[]` underneath
+   * When `true`, also emit any plugin's diagnostic `issues[]` underneath
    * the bar so failure reasons are visible in the timeline view.
    * Default `true`.
    */
@@ -78,8 +78,8 @@ export function renderTimeline(snapshot: DotDiagnosticsSnapshot, opts: RenderTim
   lines.push(title);
   lines.push('─'.repeat(title.length));
 
-  // Layout: 2-space indent, 10-char pip column, 8-char duration column, then bar.
-  const PIP_COL = 12;
+  // Layout: 2-space indent, 10-char plugin column, 8-char duration column, then bar.
+  const PLUGIN_COL = 12;
   const DUR_COL = 8;
   const indent = '  ';
 
@@ -94,9 +94,9 @@ export function renderTimeline(snapshot: DotDiagnosticsSnapshot, opts: RenderTim
       const durationMs = entry.durationMs ?? 0;
       const bar = makeBar(durationMs, maxDuration, barWidth);
       const failedMark = entry.state === 'failed' ? ' ✗' : '';
-      const pipCol = entry.pip.padEnd(PIP_COL);
+      const pluginCol = entry.plugin.padEnd(PLUGIN_COL);
       const durCol = formatDuration(durationMs).padStart(DUR_COL);
-      lines.push(`${indent}${pipCol}${durCol}  ${bar}${failedMark}`);
+      lines.push(`${indent}${pluginCol}${durCol}  ${bar}${failedMark}`);
       if (showIssues && entry.issues.length > 0) {
         for (const issue of entry.issues) {
           lines.push(`${indent}  └─ ${issue.code}: ${issue.message}`);

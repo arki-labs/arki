@@ -4,7 +4,7 @@
  * Verifies:
  *   - Configure-time events fire when observers are passed through
  *     `defineApp(name, { observers })` at construction.
- *   - Boot/start/stop/dispose phase + per-pip hook events fire in
+ *   - Boot/start/stop/dispose phase + per-plugin hook events fire in
  *     order, with correct `status`/`durationMs`/`error` fields.
  *   - `subscribe()` returns an unsubscribe function that actually works.
  *   - Observer exceptions are caught and don't break the lifecycle.
@@ -17,14 +17,14 @@ import { describe, expect, it } from 'vitest';
 
 import type { DotLifecycleEvent, DotLifecycleObserver } from './lifecycle-observer.js';
 import { defineApp } from './define-app.js';
-import { pip } from './pip-contract.js';
+import { plugin } from './plugin-contract.js';
 
 describe('DotLifecycleObserver — happy path', () => {
   it('emits configure phase + hook events when observer is passed at construction', () => {
     const events: DotLifecycleEvent[] = [];
     const observer: DotLifecycleObserver = e => events.push(e);
 
-    const pipA = pip({
+    const pluginA = plugin({
       name: 'a',
       configure() {
         /* sync */
@@ -32,14 +32,14 @@ describe('DotLifecycleObserver — happy path', () => {
     });
 
     defineApp('configure-events', { observers: [observer] })
-      .use(pipA)
+      .use(pluginA)
       .configure();
 
     // Expected sequence: phase-starting -> hook-starting -> hook-completed -> phase-completed
     expect(events.map(e => `${e.kind}:${e.status}`)).toEqual([
       'phase:starting',
-      'pip-hook:starting',
-      'pip-hook:completed',
+      'plugin-hook:starting',
+      'plugin-hook:completed',
       'phase:completed',
     ]);
 
@@ -53,9 +53,9 @@ describe('DotLifecycleObserver — happy path', () => {
     expect(phaseStart.timestamp).toBeGreaterThan(0);
 
     const hookComplete = events[2]!;
-    expect(hookComplete.kind).toBe('pip-hook');
-    if (hookComplete.kind === 'pip-hook') {
-      expect(hookComplete.pip).toBe('a');
+    expect(hookComplete.kind).toBe('plugin-hook');
+    if (hookComplete.kind === 'plugin-hook') {
+      expect(hookComplete.plugin).toBe('a');
       expect(hookComplete.phase).toBe('configure');
       expect(hookComplete.order).toBe(0);
       expect(hookComplete.durationMs).toBeGreaterThanOrEqual(0);
@@ -69,7 +69,7 @@ describe('DotLifecycleObserver — happy path', () => {
   it('emits the full configure→boot→dispose event stream on a healthy app', async () => {
     const events: DotLifecycleEvent[] = [];
 
-    const pipA = pip({
+    const pluginA = plugin({
       name: 'a',
       configure() {
         /* sync */
@@ -83,7 +83,7 @@ describe('DotLifecycleObserver — happy path', () => {
     });
 
     const app = await defineApp('full-lifecycle', { observers: [e => events.push(e)] })
-      .use(pipA)
+      .use(pluginA)
       .boot();
 
     await app.dispose();
@@ -94,16 +94,16 @@ describe('DotLifecycleObserver — happy path', () => {
     const tags = events.map(e => `${e.kind}:${e.status}`);
     expect(tags).toEqual([
       'phase:starting',
-      'pip-hook:starting',
-      'pip-hook:completed',
+      'plugin-hook:starting',
+      'plugin-hook:completed',
       'phase:completed',
       'phase:starting',
-      'pip-hook:starting',
-      'pip-hook:completed',
+      'plugin-hook:starting',
+      'plugin-hook:completed',
       'phase:completed',
       'phase:starting',
-      'pip-hook:starting',
-      'pip-hook:completed',
+      'plugin-hook:starting',
+      'plugin-hook:completed',
       'phase:completed',
     ]);
 
@@ -124,7 +124,7 @@ describe('DotLifecycleObserver — failure path', () => {
   it('emits hook-failed + phase-failed when a boot hook throws', async () => {
     const events: DotLifecycleEvent[] = [];
 
-    const badPip = pip({
+    const badPlugin = plugin({
       name: 'bad',
       boot() {
         throw new Error('boot-broken');
@@ -132,17 +132,17 @@ describe('DotLifecycleObserver — failure path', () => {
     });
 
     await defineApp('boot-fail', { observers: [e => events.push(e)] })
-      .use(badPip)
+      .use(badPlugin)
       .boot()
       .catch(() => undefined);
 
     // Find the boot-phase hook-failed event.
     const hookFailed = events.find(
-      (e): e is Extract<DotLifecycleEvent, { kind: 'pip-hook' }> =>
-        e.kind === 'pip-hook' && e.phase === 'boot' && e.status === 'failed',
+      (e): e is Extract<DotLifecycleEvent, { kind: 'plugin-hook' }> =>
+        e.kind === 'plugin-hook' && e.phase === 'boot' && e.status === 'failed',
     );
     expect(hookFailed).toBeDefined();
-    expect(hookFailed?.pip).toBe('bad');
+    expect(hookFailed?.plugin).toBe('bad');
     expect(hookFailed?.error).toBeInstanceOf(Error);
     expect((hookFailed?.error as Error).message).toBe('boot-broken');
     expect(hookFailed?.durationMs).toBeGreaterThanOrEqual(0);
@@ -160,7 +160,7 @@ describe('DotLifecycleObserver — failure path', () => {
 describe('DotLifecycleObserver — subscribe / unsubscribe', () => {
   it('subscribe() on a booted app sees subsequent events; unsubscribe stops the stream', async () => {
     const events: DotLifecycleEvent[] = [];
-    const pipA = pip({
+    const pluginA = plugin({
       name: 'a',
       boot() {
         return {};
@@ -174,7 +174,7 @@ describe('DotLifecycleObserver — subscribe / unsubscribe', () => {
     });
 
     const app = await defineApp('subscribe-test')
-      .use(pipA)
+      .use(pluginA)
       .start();
 
     // No observer was registered at construction — so events is empty so far.
@@ -202,7 +202,7 @@ describe('DotLifecycleObserver — fault isolation', () => {
       throw new Error('observer-misbehaved');
     };
 
-    const pipA = pip({
+    const pluginA = plugin({
       name: 'a',
       boot() {
         return {};
@@ -212,7 +212,7 @@ describe('DotLifecycleObserver — fault isolation', () => {
     // Bad observer registered FIRST — if it could break the chain, the
     // good observer would see zero events.
     await defineApp('isolated-observers', { observers: [badObserver, goodObserver] })
-      .use(pipA)
+      .use(pluginA)
       .boot();
 
     // The good observer must still have received the full event stream.
@@ -223,7 +223,7 @@ describe('DotLifecycleObserver — fault isolation', () => {
 
 describe('renderTimeline integration', () => {
   it('app.timeline() returns a non-empty ASCII waterfall after boot', async () => {
-    const pipA = pip({
+    const pluginA = plugin({
       name: 'a',
       configure() {
         /* */
@@ -232,7 +232,7 @@ describe('renderTimeline integration', () => {
         return {};
       },
     });
-    const pipB = pip({
+    const pluginB = plugin({
       name: 'b',
       configure() {
         /* */
@@ -242,7 +242,7 @@ describe('renderTimeline integration', () => {
       },
     });
 
-    const app = await defineApp('timeline-test').use(pipA).use(pipB).boot();
+    const app = await defineApp('timeline-test').use(pluginA).use(pluginB).boot();
     try {
       const timeline = app.timeline();
       // Header line is present
@@ -250,7 +250,7 @@ describe('renderTimeline integration', () => {
       // Both phases that ran are present
       expect(timeline).toContain('configure');
       expect(timeline).toContain('boot');
-      // Both pips are present
+      // Both plugins are present
       expect(timeline).toContain('a');
       expect(timeline).toContain('b');
       // At least one bar character is rendered

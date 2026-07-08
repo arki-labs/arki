@@ -1,9 +1,9 @@
 /**
- * Public pip contract for the DOT kernel (v2).
+ * Public plugin contract for the DOT kernel (v2).
  *
- * A pip declares what it **needs** as a shape of type witnesses and
+ * A plugin declares what it **needs** as a shape of type witnesses and
  * publishes what it **provides** from its `boot` hook. The kernel wires
- * services by key, injects them into hook contexts under the pip's local
+ * services by key, injects them into hook contexts under the plugin's local
  * aliases, and fails loudly (coded errors) on unsatisfied needs or key
  * collisions.
  *
@@ -15,7 +15,7 @@
  *    makes out-of-order composition a compile error; the kernel re-validates
  *    at runtime for erased/dynamic composition.
  *  - `stop` and `dispose` run in reverse declaration order and continue
- *    through individual pip failures, reporting an aggregate error.
+ *    through individual plugin failures, reporting an aggregate error.
  */
 
 import type { ActionManifest, ProjectionManifest, JsonObject, ServiceKind } from './manifest.js';
@@ -72,7 +72,7 @@ export function isLazyWitness(witness: object): boolean {
  * export const Db = token<NodePgDatabase<Schema>>()('arki.db');
  *
  * // any consumer, any local alias:
- * const reports = pip({
+ * const reports = plugin({
  *   name: 'reports',
  *   needs: { db: Db },
  *   async boot({ db }) { ... },
@@ -126,7 +126,7 @@ export const LazyTag: unique symbol = Symbol('dot.lazy');
  * Laziness is visible in the type — consumers declare
  * `needs: { db: service<Lazy<Db>>() }` and call `await db.get()`. The
  * kernel auto-disposes initialized handles in reverse declaration order
- * during `dispose` (and boot rollback), even when the publishing pip has
+ * during `dispose` (and boot rollback), even when the publishing plugin has
  * no `dispose` hook. A handle that was never `get()`ed never initializes
  * and never runs cleanup.
  */
@@ -226,7 +226,7 @@ export function isLazy(value: unknown): value is Lazy<unknown> {
 /**
  * Wrap an already-available value in a pre-initialized `Lazy<T>` handle.
  * Used by the kernel to lift eager provides for `service.lazy` consumers;
- * also handy for handing fakes to lazy-consuming pips in tests. The handle
+ * also handy for handing fakes to lazy-consuming plugins in tests. The handle
  * has no cleanup of its own — the underlying value's lifecycle belongs to
  * whoever created it.
  */
@@ -282,13 +282,13 @@ export type WireNeeds<S extends NeedsShape> = {
  * witness or service value satisfies, so the violation errors at the
  * exact offending property. The kernel re-validates at runtime with
  * `DOT_LIFECYCLE_E014` for paths the constraint cannot see (renames,
- * erased pips).
+ * erased plugins).
  */
 export type NoReservedKeys = Readonly<Record<`$${string}`, never>>;
 
 /**
  * Kernel-supplied context keys, present in every service-carrying hook
- * context. The `$` prefix is a reserved namespace: `pip()` rejects
+ * context. The `$` prefix is a reserved namespace: `plugin()` rejects
  * `$`-prefixed needs aliases and publish keys at compile time (via
  * {@link NoReservedKeys}) and the kernel enforces it at runtime
  * (`DOT_LIFECYCLE_E014`), so these keys can never be shadowed.
@@ -296,19 +296,19 @@ export type NoReservedKeys = Readonly<Record<`$${string}`, never>>;
 export type KernelCtx = {
   /** App name (passed to `defineApp`). */
   readonly $app: string;
-  /** This pip's name. */
-  readonly $pip: string;
+  /** This plugin's name. */
+  readonly $plugin: string;
   /** Read-only runtime config bag from `defineApp(name, { config })`. */
   readonly $config: Readonly<Record<string, unknown>>;
 };
 
 /** Context provided to a `configure` hook (sync registration only). */
-export type ActionDeclaration = Omit<ActionManifest, 'pip'>;
+export type ActionDeclaration = Omit<ActionManifest, 'plugin'>;
 
 /** Structural protocol for adapter-owned declarations. */
 export type ActionSource = ActionDeclaration | { toDotAction(): ActionDeclaration };
 
-export type ProjectionDeclaration = Omit<ProjectionManifest, 'pip'>;
+export type ProjectionDeclaration = Omit<ProjectionManifest, 'plugin'>;
 
 type LegacyRouteDeclaration = {
   id: string;
@@ -325,22 +325,22 @@ type LegacyRouteDeclaration = {
 };
 
 export type DotConfigureContext = {
-  pipName: string;
+  pluginName: string;
   /** App name. */
   appName: string;
   /**
-   * Register a service this pip publishes, for manifest/diagnostics
+   * Register a service this plugin publishes, for manifest/diagnostics
    * purposes. Registration is metadata-only — the actual service instance
    * is returned from the `boot` hook.
    */
   registerService(name: string, kind: ServiceKind): void;
-  /** Register an action this pip contributes at an app boundary. */
+  /** Register an action this plugin contributes at an app boundary. */
   registerAction(action: ActionDeclaration): void;
-  /** Register a projection renderer this pip contributes. */
+  /** Register a projection renderer this plugin contributes. */
   registerProjection(projection: ProjectionDeclaration): void;
   /** @deprecated Use `registerAction`; removed in DOT 0.5.0. */
   registerRoute(route: LegacyRouteDeclaration): void;
-  /** Mark the pip as participating in a lifecycle hook. */
+  /** Mark the plugin as participating in a lifecycle hook. */
   registerLifecycleHook(hook: 'configure' | 'boot' | 'start' | 'stop' | 'dispose'): void;
   /** Append `provides` capability strings (informational, manifest-only). */
   declareProvides(...capabilities: string[]): void;
@@ -352,21 +352,21 @@ declare const NeedsSym: unique symbol;
 declare const ProvidesSym: unique symbol;
 
 /**
- * The DOT pip (v2). Author through {@link pip} — never construct directly.
+ * The DOT plugin (v2). Author through {@link plugin} — never construct directly.
  *
  * Hook signatures are type-erased here (`ctx: never`): the typed view
- * lives on `pip()`'s parameter, and `(ctx: Typed) => R` is assignable to
+ * lives on `plugin()`'s parameter, and `(ctx: Typed) => R` is assignable to
  * `(ctx: never) => R` without casts (parameter contravariance from the
  * bottom type). The kernel crosses the erasure boundary at the call site.
  *
  * The phantom symbol properties carry `TNeeds` / `TProvides` for the app
  * builder's compile-time wiring check; they never exist at runtime.
  */
-export type Pip<
+export type Plugin<
   TNeeds extends ServiceRecord = ServiceRecord,
   TProvides extends ServiceRecord = ServiceRecord,
 > = {
-  /** Unique identifier for this pip within the app. */
+  /** Unique identifier for this plugin within the app. */
   readonly name: string;
   /** Optional semantic version string. */
   readonly version?: string;
@@ -386,28 +386,28 @@ export type Pip<
   readonly [ProvidesSym]?: TProvides;
 };
 
-/** Extract a pip's (wire-keyed) needs record. */
-export type PipNeeds<P> = P extends Pip<infer N, ServiceRecord> ? N : never;
-/** Extract a pip's (wire-keyed) provides record. */
-export type PipProvides<P> = P extends Pip<ServiceRecord, infer Pr> ? Pr : never;
+/** Extract a plugin's (wire-keyed) needs record. */
+export type PluginNeeds<P> = P extends Plugin<infer N, ServiceRecord> ? N : never;
+/** Extract a plugin's (wire-keyed) provides record. */
+export type PluginProvides<P> = P extends Plugin<ServiceRecord, infer Pr> ? Pr : never;
 
-/** Internal type alias used by the kernel to erase pip service generics. */
-export type AnyPip = Pip<ServiceRecord, ServiceRecord>;
+/** Internal type alias used by the kernel to erase plugin service generics. */
+export type AnyPlugin = Plugin<ServiceRecord, ServiceRecord>;
 
 /**
- * Author a DOT pip.
+ * Author a DOT plugin.
  *
  * - `TShape` is inferred from the `needs` object literal.
  * - `TProvides` is inferred from `boot`'s return type — no generic argument.
  * - `boot({ db, log, $app })` destructures typed services under the local
  *   aliases declared in `needs`, plus the `$`-prefixed kernel keys.
- * - `start` / `stop` / `dispose` additionally receive the pip's own
+ * - `start` / `stop` / `dispose` additionally receive the plugin's own
  *   provides. Reverse-order teardown guarantees needs are still alive in
  *   `dispose`.
  *
  * @example
  * ```ts
- * export const billing = pip({
+ * export const billing = plugin({
  *   name: 'billing',
  *   needs: { db: service<Db>(), log: service<Logger>() },
  *   async boot({ db, log }) {
@@ -425,12 +425,12 @@ export type AnyPip = Pip<ServiceRecord, ServiceRecord>;
  * whose `keyof` is `string`) rather than the declared default. That wide
  * record would poison the app builder's collision check for every later
  * `.use()` — `keyof TAvail & string` is never empty. Detect the fallback
- * by its tell (a full string index signature — no `pip()`-authored
+ * by its tell (a full string index signature — no `plugin()`-authored
  * provides record has one) and collapse it to "provides nothing".
  */
 export type InferredProvides<TP extends ServiceRecord> = string extends keyof TP ? EmptyShape : TP;
 
-export function pip<
+export function plugin<
   TShape extends NeedsShape & NoReservedKeys = EmptyShape,
   TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
 >(def: {
@@ -443,7 +443,7 @@ export function pip<
   readonly start?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly stop?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly dispose?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
-}): Pip<WireNeeds<TShape>, InferredProvides<TProvides>> {
+}): Plugin<WireNeeds<TShape>, InferredProvides<TProvides>> {
   return {
     name: def.name,
     ...(def.version === undefined ? {} : { version: def.version }),
@@ -460,13 +460,13 @@ export function pip<
   };
 }
 
-/** Rename a pip's published wire keys — the multi-instance primitive. */
+/** Rename a plugin's published wire keys — the multi-instance primitive. */
 export type RenamedProvides<TP, M> = {
   [K in keyof TP as K extends keyof M ? (M[K] extends string ? M[K] : K) : K]: TP[K];
 };
 
 /**
- * Mount-time rename. `rename(dbPip, { db: 'reportsDb' }, 'reports-db')`
+ * Mount-time rename. `rename(dbPlugin, { db: 'reportsDb' }, 'reports-db')`
  * publishes the same service under a different wire key, retyped
  * accordingly — the way to mount a second instance of an adapter without
  * a key collision. Renames compose: renaming an already-renamed key
@@ -476,7 +476,7 @@ export function rename<
   TN extends ServiceRecord,
   TP extends ServiceRecord,
   const M extends { readonly [K in keyof TP]?: string },
->(p: Pip<TN, TP>, map: M, newName?: string): Pip<TN, RenamedProvides<TP, M>> {
+>(p: Plugin<TN, TP>, map: M, newName?: string): Plugin<TN, RenamedProvides<TP, M>> {
   const renames: Record<string, string> = { ...p.renames };
   for (const [wireKey, next] of Object.entries(map)) {
     if (typeof next !== 'string') continue;
@@ -487,27 +487,27 @@ export function rename<
   }
   // Phantom-only cast: runtime fields are unchanged except `renames`/`name`;
   // only the [ProvidesSym] carrier retypes.
-  return { ...p, name: newName ?? p.name, renames } as Pip<TN, RenamedProvides<TP, M>>;
+  return { ...p, name: newName ?? p.name, renames } as Plugin<TN, RenamedProvides<TP, M>>;
 }
 
 /**
- * Stable error thrown by DOT pip adapters.
+ * Stable error thrown by DOT plugin adapters.
  *
- * Adapters MUST throw `DotPipError` (not raw `Error`) when surfacing a
+ * Adapters MUST throw `DotPluginError` (not raw `Error`) when surfacing a
  * misconfiguration, missing-input, or other fail-fast condition. Consumers
  * and coding agents can then match on a stable `code`, follow `docsUrl`,
  * and apply `remediation` without parsing the message.
  *
- * Codes are per-adapter. Recommended prefix is `<PKG>_PIP_E<NNN>` (e.g.
- * `KV_PIP_E001`, `DB_PIP_E001`). The kernel does not own the code
+ * Codes are per-adapter. Recommended prefix is `<PKG>_PLUGIN_E<NNN>` (e.g.
+ * `KV_PLUGIN_E001`, `DB_PLUGIN_E001`). The kernel does not own the code
  * namespace — each adapter defines its own constants and links them in
  * its README.
  *
  * @see packages/dot/docs/principles.md — principle 1.3 ("errors are part
  * of the API") and principle 4 ("agent-discoverable everywhere").
  */
-export class DotPipError extends Error {
-  /** Stable error code, e.g. `KV_PIP_E001`. */
+export class DotPluginError extends Error {
+  /** Stable error code, e.g. `KV_PLUGIN_E001`. */
   readonly code: string;
   /** One-sentence guidance on how to fix the underlying problem. */
   readonly remediation: string;
@@ -521,7 +521,7 @@ export class DotPipError extends Error {
     readonly docsUrl: string;
   }) {
     super(args.message);
-    this.name = 'DotPipError';
+    this.name = 'DotPluginError';
     this.code = args.code;
     this.remediation = args.remediation;
     this.docsUrl = args.docsUrl;
@@ -530,4 +530,4 @@ export class DotPipError extends Error {
 
 /** Re-exported for downstream typing. */
 
-export { type ActionManifest, type DotAppManifest, type PipManifest, type ProjectionManifest } from './manifest.js';
+export { type ActionManifest, type DotAppManifest, type PluginManifest, type ProjectionManifest } from './manifest.js';

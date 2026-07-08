@@ -2,15 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
-import { DotLifecycleErrorCode } from '@arki/dot/pip';
-import { pip, provide, service, token } from '@arki/dot/pip';
+import { DotLifecycleErrorCode } from '@arki/dot/plugin';
+import { plugin, provide, service, token } from '@arki/dot/plugin';
 
 import { initQueue } from './init.ts';
 import { project } from './projection.ts';
 import type { QueueBuilder, QueueInstance } from './types/builder.ts';
 import type { QueueMeta } from './types/queue.ts';
 import {
-  QUEUE_PIP_ERROR_CODES,
+  QUEUE_PLUGIN_ERROR_CODES,
   queueActions,
   queueConsumerActions,
   queueProducerActions,
@@ -58,7 +58,7 @@ type Dependency = {
   readonly name: string;
 };
 
-const dependency = pip({
+const dependency = plugin({
   name: 'dependency',
   boot: () => ({ dependency: { name: 'test-dependency' } satisfies Dependency }),
 });
@@ -96,7 +96,7 @@ describe('queue DOT topology actions', () => {
   it('projects queue topology by queue name', () => {
     const actions = [...queueConsumerActions(registry), ...queueProducerActions(registry)].map(action => ({
       ...action,
-      pip: 'queue-runtime',
+      plugin: 'queue-runtime',
     }));
 
     expect(
@@ -109,13 +109,13 @@ describe('queue DOT topology actions', () => {
       queues: [
         {
           name: 'email:send',
-          consumers: [{ id: 'email:send.consume', pip: 'queue-runtime' }],
-          producers: [{ id: 'email:send.produce', pip: 'queue-runtime' }],
+          consumers: [{ id: 'email:send.consume', plugin: 'queue-runtime' }],
+          producers: [{ id: 'email:send.produce', plugin: 'queue-runtime' }],
         },
         {
           name: 'image:resize',
-          consumers: [{ id: 'image:resize.consume', pip: 'queue-runtime' }],
-          producers: [{ id: 'image:resize.produce', pip: 'queue-runtime' }],
+          consumers: [{ id: 'image:resize.consume', plugin: 'queue-runtime' }],
+          producers: [{ id: 'image:resize.produce', plugin: 'queue-runtime' }],
         },
       ],
     });
@@ -144,7 +144,7 @@ describe('queue DOT topology actions', () => {
         format: 'queue-topology',
         binding: 'queue',
         module: '@arki/queue/projection',
-        pip: 'queue-runtime',
+        plugin: 'queue-runtime',
       },
     ]);
   });
@@ -155,7 +155,7 @@ describe('queue DOT topology actions', () => {
     };
 
     const Orders = token<{ readonly queue?: typeof registry }>()('feature.orders');
-    const ordersPip = pip({
+    const ordersPlugin = plugin({
       name: 'orders',
       actions: queueActions(registry),
       boot: () => provide(Orders, { queue: registry }),
@@ -198,7 +198,7 @@ describe('queue DOT topology actions', () => {
 
     const app = await defineApp('queue-feature-app')
       .use(dependency)
-      .use(ordersPip)
+      .use(ordersPlugin)
       .use(
         queueRuntime({
           q: fakeQ,
@@ -214,7 +214,7 @@ describe('queue DOT topology actions', () => {
       )
       .start();
 
-    expect(app.manifest.actions.every(action => action.pip === 'orders')).toBe(true);
+    expect(app.manifest.actions.every(action => action.plugin === 'orders')).toBe(true);
     expect(app.manifest.actions.map(action => action.id)).toEqual([
       'email:send.consume',
       'image:resize.consume',
@@ -299,7 +299,7 @@ describe('queue DOT topology actions', () => {
 
     await expect(starting).rejects.toMatchObject({
       code: DotLifecycleErrorCode.StartFailed,
-      cause: { code: QUEUE_PIP_ERROR_CODES.startupTimeout },
+      cause: { code: QUEUE_PLUGIN_ERROR_CODES.startupTimeout },
     });
   });
 

@@ -1,5 +1,5 @@
-import type { CtxOf, EmptyShape, NeedsShape, Pip, Token, WireNeeds } from '@arki/dot/pip';
-import { DotPipError, pip } from '@arki/dot/pip';
+import type { CtxOf, EmptyShape, NeedsShape, Plugin, Token, WireNeeds } from '@arki/dot/plugin';
+import { DotPluginError, plugin } from '@arki/dot/plugin';
 
 import { debugWorker } from './debug.ts';
 import type { InternalFlowDefinition } from './flow-builder.ts';
@@ -11,7 +11,7 @@ import type { QueueMeta } from './types/queue.ts';
 
 export const QUEUE_ACTION_META_SCHEMA = '@arki/queue/action-meta@1';
 
-export const QUEUE_PIP_ERROR_CODES = {
+export const QUEUE_PLUGIN_ERROR_CODES = {
   startupTimeout: 'ARKI_QUEUE_E001',
   doubleStart: 'ARKI_QUEUE_E002',
   stopBeforeStart: 'ARKI_QUEUE_E003',
@@ -19,7 +19,7 @@ export const QUEUE_PIP_ERROR_CODES = {
   featureMissing: 'ARKI_QUEUE_E005',
 } as const;
 
-const QUEUE_RUNTIME_PIP_VERSION = '2.1.0';
+const QUEUE_RUNTIME_PLUGIN_VERSION = '2.1.0';
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
 
 type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
@@ -38,7 +38,7 @@ export type QueueDotAction = {
 
 export type QueueRegistry = Record<string, unknown>;
 
-export type QueueFeatureToken = Token<{ readonly queue?: QueueRegistry }, string>;
+export type QueueFeatureToken = Token<object, string>;
 
 export type QueueRuntimeHandle = {
   stop(): Promise<void>;
@@ -70,9 +70,15 @@ export type QueueRuntimeFeatureOptions<
 };
 
 export type QueueFeatureNeeds<TFeatures extends readonly QueueFeatureToken[]> = {
-  readonly [Tok in TFeatures[number] as Tok extends Token<unknown, infer K> ? K : never]: {
-    readonly queue?: QueueRegistry;
-  };
+  // Value = the token's OWN payload type: the kernel guard then checks
+  // exactly what the feature plugin provides. A payload without `queue`
+  // simply contributes nothing at collection time.
+  readonly [Tok in TFeatures[number] as Tok extends Token<unknown, infer K> ? K : never]: Tok extends Token<
+    infer TPayload,
+    string
+  >
+    ? TPayload
+    : never;
 };
 
 function isJobDefinition(value: unknown): value is JobDefinition<unknown, unknown, unknown> {
@@ -213,13 +219,31 @@ export function queueActions(registry: QueueRegistry): readonly QueueDotAction[]
   return [...queueConsumerActions(registry), ...queueProducerActions(registry)];
 }
 
-function queuePipError(args: {
-  code: (typeof QUEUE_PIP_ERROR_CODES)[keyof typeof QUEUE_PIP_ERROR_CODES];
+/** The `@arki/feature` slice contract a `jobs(...)` declaration produces. */
+export type QueueFeatureSlice<TRegistry extends QueueRegistry> = {
+  readonly key: 'queue';
+  readonly actions: readonly QueueDotAction[];
+  readonly resolve: (services: unknown) => TRegistry;
+};
+
+/**
+ * Declare a feature's queue registry as a boot-time slice
+ * (`defineFeature(..., { use: [jobs(registry)] })`). The payload lands
+ * under `queue` in the feature's slice token — where
+ * `queueRuntime({ features })` collects it — and the derived actions
+ * join the feature's manifest.
+ */
+export function jobs<const TRegistry extends QueueRegistry>(registry: TRegistry): QueueFeatureSlice<TRegistry> {
+  return { key: 'queue', actions: queueActions(registry), resolve: () => registry };
+}
+
+function queuePluginError(args: {
+  code: (typeof QUEUE_PLUGIN_ERROR_CODES)[keyof typeof QUEUE_PLUGIN_ERROR_CODES];
   message: string;
   remediation: string;
   docsSlug: string;
-}): DotPipError {
-  return new DotPipError({
+}): DotPluginError {
+  return new DotPluginError({
     code: args.code,
     message: args.message,
     remediation: args.remediation,
@@ -231,8 +255,8 @@ function assertExclusiveMode(options: QueueRuntimeOptions<NeedsShape & NoReserve
   const hasRegistry = 'registry' in options || 'start' in options;
   const hasFeatures = 'features' in options || 'q' in options || 'context' in options;
   if (hasRegistry && hasFeatures) {
-    throw queuePipError({
-      code: QUEUE_PIP_ERROR_CODES.exclusiveModes,
+    throw queuePluginError({
+      code: QUEUE_PLUGIN_ERROR_CODES.exclusiveModes,
       message: '[queue] queueRuntime options cannot mix registry/start mode with q/features/context mode.',
       remediation: 'Use either queueRuntime({ registry, start, ... }) or queueRuntime({ q, features, context, connection, ... }).',
       docsSlug: 'arki-queue-e004',
@@ -248,11 +272,11 @@ function featureRegistry(options: {
   for (const feature of options.features) {
     const slice = options.record[feature.key];
     if (slice === undefined) {
-      throw queuePipError({
-        code: QUEUE_PIP_ERROR_CODES.featureMissing,
-        message: `[queue] feature token "${feature.key}" was not provided by any earlier pip.`,
+      throw queuePluginError({
+        code: QUEUE_PLUGIN_ERROR_CODES.featureMissing,
+        message: `[queue] feature token "${feature.key}" was not provided by any earlier plugin.`,
         remediation:
-          'Mount the feature pip that provides this token before queueRuntime(...). The typed builder catches this unless composition was erased.',
+          'Mount the feature plugin that provides this token before queueRuntime(...). The typed builder catches this unless composition was erased.',
         docsSlug: 'arki-queue-e005',
       });
     }
@@ -265,13 +289,13 @@ function featureRegistry(options: {
   return registry;
 }
 
-function timeoutAfter(ms: number, pipName: string): Promise<never> {
+function timeoutAfter(ms: number, pluginName: string): Promise<never> {
   return new Promise((_resolve, reject) => {
     const timer = setTimeout(() => {
       reject(
-        queuePipError({
-          code: QUEUE_PIP_ERROR_CODES.startupTimeout,
-          message: `[queue] runtime "${pipName}" startup timed out after ${String(ms)}ms.`,
+        queuePluginError({
+          code: QUEUE_PLUGIN_ERROR_CODES.startupTimeout,
+          message: `[queue] runtime "${pluginName}" startup timed out after ${String(ms)}ms.`,
           remediation:
             'Check Redis connectivity and worker dependency assembly, or raise startupTimeoutMs if the runtime intentionally needs more time.',
           docsSlug: 'arki-queue-e001',
@@ -283,28 +307,28 @@ function timeoutAfter(ms: number, pipName: string): Promise<never> {
 }
 
 /**
- * Build a DOT pip that owns queue worker lifecycle while the app keeps
+ * Build a DOT plugin that owns queue worker lifecycle while the app keeps
  * ownership of concrete runtime assembly.
  */
 export function queueRuntime<TNeeds extends NeedsShape & NoReservedKeys>(
   options: QueueRuntimeOptions<TNeeds>,
-): Pip<WireNeeds<TNeeds>, EmptyShape>;
+): Plugin<WireNeeds<TNeeds>, EmptyShape>;
 export function queueRuntime<
   TNeeds extends NeedsShape & NoReservedKeys,
   TContext,
   const TFeatures extends readonly QueueFeatureToken[],
 >(
   options: QueueRuntimeFeatureOptions<TNeeds, TContext, TFeatures>,
-): Pip<WireNeeds<TNeeds> & QueueFeatureNeeds<TFeatures>, EmptyShape>;
+): Plugin<WireNeeds<TNeeds> & QueueFeatureNeeds<TFeatures>, EmptyShape>;
 export function queueRuntime<
   TNeeds extends NeedsShape & NoReservedKeys,
   TContext,
   const TFeatures extends readonly QueueFeatureToken[],
 >(
   options: QueueRuntimeOptions<TNeeds> | QueueRuntimeFeatureOptions<TNeeds, TContext, TFeatures>,
-): Pip<WireNeeds<TNeeds>, EmptyShape> {
+): Plugin<WireNeeds<TNeeds>, EmptyShape> {
   assertExclusiveMode(options as QueueRuntimeOptions<NeedsShape & NoReservedKeys> | QueueRuntimeFeatureOptions<NeedsShape & NoReservedKeys, unknown, readonly QueueFeatureToken[]>);
-  const pipName = options.name ?? 'queue-runtime';
+  const pluginName = options.name ?? 'queue-runtime';
   const startupTimeoutMs = options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
   const blocking = options.blocking ?? false;
   const registry = 'registry' in options ? options.registry : {};
@@ -339,7 +363,7 @@ export function queueRuntime<
       return queue;
     };
 
-    const runtime = await Promise.race([start(), timeoutAfter(startupTimeoutMs, pipName)]);
+    const runtime = await Promise.race([start(), timeoutAfter(startupTimeoutMs, pluginName)]);
     handle = runtime;
     return runtime;
   };
@@ -352,9 +376,9 @@ export function queueRuntime<
           ...Object.fromEntries(options.features.map(feature => [feature.key, feature])),
         };
 
-  const inner = pip<NeedsShape & NoReservedKeys, EmptyShape>({
-    name: pipName,
-    version: QUEUE_RUNTIME_PIP_VERSION,
+  const inner = plugin<NeedsShape & NoReservedKeys, EmptyShape>({
+    name: pluginName,
+    version: QUEUE_RUNTIME_PLUGIN_VERSION,
     needs,
     actions: 'registry' in options ? queueActions(registry) : [],
     configure(ctx) {
@@ -367,9 +391,9 @@ export function queueRuntime<
     },
     async start(ctx) {
       if (started || startup !== undefined) {
-        throw queuePipError({
-          code: QUEUE_PIP_ERROR_CODES.doubleStart,
-          message: `[queue] runtime "${pipName}" was started twice.`,
+        throw queuePluginError({
+          code: QUEUE_PLUGIN_ERROR_CODES.doubleStart,
+          message: `[queue] runtime "${pluginName}" was started twice.`,
           remediation: 'Call app.start() once, or call app.stop() before starting the queue runtime again.',
           docsSlug: 'arki-queue-e002',
         });
@@ -390,16 +414,16 @@ export function queueRuntime<
       }
 
       startup = runStartup(ctx as CtxOf<TNeeds> & Readonly<Record<string, unknown>>).catch((error: unknown) => {
-        debugWorker('[%s] Queue runtime startup failed: %s', pipName, error instanceof Error ? error.message : String(error));
+        debugWorker('[%s] Queue runtime startup failed: %s', pluginName, error instanceof Error ? error.message : String(error));
         started = false;
         handle = undefined;
       });
     },
     async stop() {
       if (!started && startup === undefined && handle === undefined) {
-        throw queuePipError({
-          code: QUEUE_PIP_ERROR_CODES.stopBeforeStart,
-          message: `[queue] runtime "${pipName}" was stopped before it started.`,
+        throw queuePluginError({
+          code: QUEUE_PLUGIN_ERROR_CODES.stopBeforeStart,
+          message: `[queue] runtime "${pluginName}" was stopped before it started.`,
           remediation: 'Only call stop after a successful start, or let the DOT app lifecycle manage shutdown.',
           docsSlug: 'arki-queue-e003',
         });
@@ -420,5 +444,5 @@ export function queueRuntime<
     },
   });
 
-  return inner as unknown as Pip<WireNeeds<TNeeds>, EmptyShape>;
+  return inner as unknown as Plugin<WireNeeds<TNeeds>, EmptyShape>;
 }

@@ -1,8 +1,8 @@
 /**
  * DOT adapter for `@arki/env`.
  *
- * Wraps `defineEnv()` as a DOT pip so a DOT app can validate its
- * environment alongside any other services. The pip is sync (env
+ * Wraps `defineEnv()` as a DOT plugin so a DOT app can validate its
+ * environment alongside any other services. The plugin is sync (env
  * validation is sync), so the `boot` hook returns the validated env
  * object synchronously through the standard provides channel.
  *
@@ -34,7 +34,7 @@
  * that is intentional: the adapter only makes sense in a DOT app.
  */
 
-import { pip, type EmptyShape, type Pip } from '@arki/dot/pip';
+import { plugin, type EmptyShape, type Plugin } from '@arki/dot/plugin';
 import type { ZodType } from 'zod';
 
 import { defineEnv } from './core/define-env.js';
@@ -46,7 +46,7 @@ import { defineEnv } from './core/define-env.js';
  *   resulting `app.services.env` is typed from this.
  */
 export type EnvDotOptions<TSchema extends Record<string, ZodType>> = {
-  /** Zod schemas for each env var the pip validates. */
+  /** Zod schemas for each env var the plugin validates. */
   readonly schema: TSchema;
   /**
    * Forwarded to `defineEnv`. If `true`, the validator is skipped
@@ -62,15 +62,15 @@ export type EnvServices<TSchema extends Record<string, ZodType>> = {
 };
 
 /**
- * Build a DOT pip that validates and publishes a typed `env` service.
+ * Build a DOT plugin that validates and publishes a typed `env` service.
  *
  * @param options - Schema + optional config.
- * @returns A pip that publishes `services.env`.
+ * @returns A plugin that publishes `services.env`.
  */
 export function env<TSchema extends Record<string, ZodType>>(
   options: EnvDotOptions<TSchema>,
-): Pip<EmptyShape, EnvServices<TSchema>> {
-  return pip({
+): Plugin<EmptyShape, EnvServices<TSchema>> {
+  return plugin({
     name: 'env',
     version: '0.1.0',
     configure(ctx) {

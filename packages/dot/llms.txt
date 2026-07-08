@@ -1,6 +1,6 @@
 # @arki/dot
 
-> TypeScript-first application composition framework with typed pips, a 5-hook lifecycle (`configure` / `boot` / `start` / `stop` / `dispose`), structured manifest + diagnostics contracts, OTel-first observability, and an agent-readable CLI (`dot explain --json`, `dot doctor --json`).
+> TypeScript-first application composition framework with typed plugins, a 5-hook lifecycle (`configure` / `boot` / `start` / `stop` / `dispose`), structured manifest + diagnostics contracts, OTel-first observability, and an agent-readable CLI (`dot explain --json`, `dot doctor --json`).
 
 `@arki/dot` is the kernel. Package adapters (`@arki/env/dot`, `@arki/kv/dot`, `@arki/db/dot`) layer on top and are versioned independently.
 
@@ -10,11 +10,11 @@
 - [README](README.md): Overview, install, top-level concepts
 - [Quickstart example](docs/examples/quickstart.ts): Runnable code for the quickstart
 
-## Pips and lifecycle
+## Plugins and lifecycle
 
-- [Pip authoring](docs/pip-authoring.md): Write a `DotPip` — anatomy, hooks, DI, manifest contribution
+- [Plugin authoring](docs/plugin-authoring.md): Write a `DotPlugin` — anatomy, hooks, DI, manifest contribution
 - [Lifecycle](docs/lifecycle.md): The 5-hook contract — state machine, failure ordering, idempotency rules, error codes
-- [Adapter authoring](docs/adapter-authoring.md): Expose a package as a DOT pip via a `./dot` subpath export
+- [Adapter authoring](docs/adapter-authoring.md): Expose a package as a DOT plugin via a `./dot` subpath export
 
 ## Diagnostics & observability
 
@@ -24,7 +24,7 @@
 - [`DiagnosticIssue` shape](docs/diagnostics.md#diagnosticissue): Stable code, severity, remediation, docsUrl
 - [Observability](docs/observability.md): OTel-first traces + metrics + log correlation, `arki:dot:lifecycle` namespace, zero-cost-when-off discipline
 - [In-process observers](docs/observability.md#in-process-observers): `DotLifecycleObserver` + `defineApp({ observers })` + `app.subscribe(...)` for tests / CLI / ad-hoc inspection — peer of OTel, not layered under it
-- [ASCII timeline](docs/observability.md#ascii-timeline): `app.timeline()` / `renderTimeline(snapshot)` — per-phase, per-pip duration waterfall
+- [ASCII timeline](docs/observability.md#ascii-timeline): `app.timeline()` / `renderTimeline(snapshot)` — per-phase, per-plugin duration waterfall
 - [`dot doctor --observability`](docs/observability.md#verifying-sdk-registration): SDK-registration probe — emits coded warning issue (`DOT_CLI_E007`) when no OTel SDK is registered, with remediation pointing at the quick-reference
 
 ## For agents

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '@arki/dot';
-import { pip, type EmptyShape } from '@arki/dot/pip';
+import { plugin, type EmptyShape } from '@arki/dot/plugin';
 
 import { initAuth } from './better-auth.config.js';
 import { auth, type AuthDb } from './dot.js';
 import { initAuth as legacyInitAuth } from './dot.config.js';
 
-const dbProvider = pip<EmptyShape, { readonly db: AuthDb }>({
+const dbProvider = plugin<EmptyShape, { readonly db: AuthDb }>({
   name: 'db',
   configure(ctx) {
     ctx.registerService('db', 'db');
@@ -17,7 +17,7 @@ const dbProvider = pip<EmptyShape, { readonly db: AuthDb }>({
   },
 });
 
-describe('auth DOT pip', () => {
+describe('auth DOT plugin', () => {
   it('declares a db need and publishes the auth service', () => {
     const app = defineApp('auth-app')
       .use(dbProvider)
@@ -30,8 +30,8 @@ describe('auth DOT pip', () => {
       )
       .configure();
 
-    expect(app.manifest.services).toContainEqual({ name: 'db', pip: 'db', kind: 'db' });
-    expect(app.manifest.services).toContainEqual({ name: 'auth', pip: 'auth', kind: 'auth' });
+    expect(app.manifest.services).toContainEqual({ name: 'db', plugin: 'db', kind: 'db' });
+    expect(app.manifest.services).toContainEqual({ name: 'auth', plugin: 'auth', kind: 'auth' });
     expect(app.manifest.actions).toEqual([]);
   });
 

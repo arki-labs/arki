@@ -75,7 +75,7 @@ function assertUniqueSchedules<TContext>(schedules: readonly ScheduleDef<TContex
       throw new ScheduleError({
         code: SCHEDULE_ERROR_CODES.duplicateSchedule,
         message: `[schedule] schedule "${schedule.name}" is declared more than once.`,
-        remediation: 'Schedule names must be unique within one schedule(...) pip.',
+        remediation: 'Schedule names must be unique within one schedule(...) plugin.',
       });
     }
     seen.add(schedule.name);

@@ -1,5 +1,5 @@
-import type { CtxOf, EmptyShape, NeedsShape, Pip, Token, WireNeeds } from '@arki/dot/pip';
-import { pip } from '@arki/dot/pip';
+import type { CtxOf, EmptyShape, NeedsShape, Plugin, Token, WireNeeds } from '@arki/dot/plugin';
+import { plugin } from '@arki/dot/plugin';
 
 import type { ScheduleDef } from './index.js';
 import type { KvLike, ScheduleRuntime } from './runtime.js';
@@ -32,7 +32,7 @@ export type ScheduleFeatureToken<TContext = undefined> = Token<
   string
 >;
 
-type AnyScheduleFeatureToken = Token<{ readonly schedules?: readonly ScheduleDef<never>[] }, string>;
+type AnyScheduleFeatureToken = Token<object, string>;
 
 type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) extends (value: infer TIntersection) => void
   ? TIntersection
@@ -50,13 +50,17 @@ type ScheduleContextFromUnion<TContext> = [Exclude<TContext, undefined>] extends
   ? undefined
   : UnionToIntersection<Exclude<TContext, undefined>>;
 
+// Naked-parameter wrapper so payload extraction DISTRIBUTES over the
+// token union — tokens now carry per-feature payload types, and a
+// single non-distributive inference across differing payloads collapses
+// to a useless common supertype.
+type SliceOfToken<TTok> = TTok extends Token<infer TSlice, string> ? TSlice : never;
+
 type ScheduleFeatureContext<TFeatures extends readonly AnyScheduleFeatureToken[]> = [
   TFeatures[number],
 ] extends [never]
   ? undefined
-  : ScheduleContextFromUnion<
-      ScheduleContextsFromSlice<TFeatures[number] extends Token<infer TSlice, string> ? TSlice : never>
-    >;
+  : ScheduleContextFromUnion<ScheduleContextsFromSlice<SliceOfToken<TFeatures[number]>>>;
 
 export type ScheduleFeatureNeeds<TFeatures extends readonly AnyScheduleFeatureToken[]> = {
   readonly [Tok in TFeatures[number] as Tok extends Token<unknown, infer K> ? K : never]: Tok extends Token<
@@ -135,6 +139,24 @@ export function scheduleActions<TContext>(
   return schedules.map(definition => actionForSchedule(definition, options.locked ?? false));
 }
 
+/** The `@arki/feature` slice contract a `schedules(...)` declaration produces. */
+export type ScheduleFeatureSlice<TContext> = {
+  readonly key: 'schedules';
+  readonly actions: readonly ScheduleDotAction[];
+  readonly resolve: (services: unknown) => readonly ScheduleDef<TContext>[];
+};
+
+/**
+ * Declare a feature's in-process schedules as a boot-time slice
+ * (`defineFeature(..., { use: [schedules(defs)] })`). The payload lands
+ * under `schedules` in the feature's slice token — where
+ * `schedule({ features })` collects it — and the derived actions join
+ * the feature's manifest.
+ */
+export function schedules<TContext>(defs: readonly ScheduleDef<TContext>[]): ScheduleFeatureSlice<TContext> {
+  return { key: 'schedules', actions: scheduleActions(defs), resolve: () => defs };
+}
+
 function collectFeatureSchedules<TContext>(
   features: readonly AnyScheduleFeatureToken[],
   record: Readonly<Record<string, { readonly schedules?: readonly ScheduleDef<TContext>[] } | undefined>>,
@@ -151,16 +173,16 @@ function collectFeatureSchedules<TContext>(
 
 export function schedule<TContext = undefined>(
   options: ScheduleDirectNoNeedsOptions<TContext>,
-): Pip<EmptyShape, EmptyShape>;
+): Plugin<EmptyShape, EmptyShape>;
 export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext = undefined>(
   options: ScheduleDirectOptions<TNeeds, TContext>,
-): Pip<WireNeeds<TNeeds>, EmptyShape>;
+): Plugin<WireNeeds<TNeeds>, EmptyShape>;
 export function schedule<
   TNeeds extends NeedsShape & NoReservedKeys,
   const TFeatures extends readonly AnyScheduleFeatureToken[],
 >(
   options: ScheduleFeatureOptions<TNeeds, TFeatures>,
-): Pip<WireNeeds<TNeeds> & ScheduleFeatureNeeds<TFeatures>, EmptyShape>;
+): Plugin<WireNeeds<TNeeds> & ScheduleFeatureNeeds<TFeatures>, EmptyShape>;
 export function schedule<
   TNeeds extends NeedsShape & NoReservedKeys,
   TContext,
@@ -170,7 +192,7 @@ export function schedule<
     | ScheduleDirectNoNeedsOptions<TContext>
     | ScheduleDirectOptions<TNeeds, TContext>
     | ScheduleFeatureOptions<TNeeds, TFeatures>,
-): Pip<WireNeeds<TNeeds>, EmptyShape> {
+): Plugin<WireNeeds<TNeeds>, EmptyShape> {
   let runtime: ScheduleRuntime | undefined;
   const featureMode = 'features' in options;
   const needs =
@@ -184,7 +206,7 @@ export function schedule<
       }
     : needs;
 
-  return pip({
+  return plugin({
     name: 'schedule',
     version: '0.0.1',
     needs: runtimeNeeds,
@@ -253,7 +275,7 @@ export function schedule<
       await runtime?.stop();
       runtime = undefined;
     },
-  }) as unknown as Pip<WireNeeds<TNeeds>, EmptyShape>;
+  }) as unknown as Plugin<WireNeeds<TNeeds>, EmptyShape>;
 }
 
 export type { KvLike, ScheduleRuntime } from './runtime.js';

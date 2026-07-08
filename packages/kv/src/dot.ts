@@ -1,7 +1,7 @@
 /**
  * DOT adapter for `@arki/kv`.
  *
- * Wraps `KV` construction as a DOT pip. The pip opens a Redis-backed
+ * Wraps `KV` construction as a DOT plugin. The plugin opens a Redis-backed
  * KV client in `boot`, publishes it as `services.kv`, and closes the client
  * in `dispose` (reverse declaration order).
  *
@@ -33,17 +33,17 @@
  * that is intentional: the adapter only makes sense in a DOT app.
  */
 
-import { pip, DotPipError, type EmptyShape, type Pip } from '@arki/dot/pip';
+import { plugin, DotPluginError, type EmptyShape, type Plugin } from '@arki/dot/plugin';
 
 import { KV } from './index.js';
 
 /**
- * Stable error codes thrown by the kv pip. Exported so consumers and
+ * Stable error codes thrown by the kv plugin. Exported so consumers and
  * coding agents can match against them — never parse the message.
  */
-export const KV_PIP_ERROR_CODES = {
+export const KV_PLUGIN_ERROR_CODES = {
   /** boot was called without a configured URL. */
-  urlNotConfigured: 'KV_PIP_E001',
+  urlNotConfigured: 'KV_PLUGIN_E001',
 } as const;
 
 /**
@@ -51,7 +51,7 @@ export const KV_PIP_ERROR_CODES = {
  */
 export type KvDotOptions = {
   /**
-   * Redis/Keyv URL. Use `rediss://` for TLS. If omitted, the pip reads
+   * Redis/Keyv URL. Use `rediss://` for TLS. If omitted, the plugin reads
    * `KV_URL` from `process.env` (matching the `createKV` factory behaviour).
    */
   readonly url?: string;
@@ -67,13 +67,13 @@ export type KvServices = {
 };
 
 /**
- * Build a DOT pip that opens a `KV` client and publishes it as a service.
+ * Build a DOT plugin that opens a `KV` client and publishes it as a service.
  *
  * @param options - Connection + naming options.
- * @returns A pip that publishes `services.kv`.
+ * @returns A plugin that publishes `services.kv`.
  */
-export function kv(options: KvDotOptions = {}): Pip<EmptyShape, KvServices> {
-  return pip({
+export function kv(options: KvDotOptions = {}): Plugin<EmptyShape, KvServices> {
+  return plugin({
     name: 'kv',
     version: '0.1.0',
     configure(ctx) {
@@ -82,11 +82,11 @@ export function kv(options: KvDotOptions = {}): Pip<EmptyShape, KvServices> {
     boot() {
       const url = options.url ?? process.env['KV_URL'];
       if (url === undefined || url === '') {
-        throw new DotPipError({
-          code: KV_PIP_ERROR_CODES.urlNotConfigured,
+        throw new DotPluginError({
+          code: KV_PLUGIN_ERROR_CODES.urlNotConfigured,
           message: '[kv] KV URL is not configured.',
           remediation: 'Pass options.url to kv(...) or set KV_URL in the environment before booting the app.',
-          docsUrl: 'https://arki.dev/dot/errors/kv-pip-e001',
+          docsUrl: 'https://arki.dev/dot/errors/kv-plugin-e001',
         });
       }
       const client = new KV(url, options.namespace, options.rateLimitPrefix);

@@ -59,7 +59,7 @@ Common options:
   --app <path>           Path to the app entry file (default: discovers
                          ./dot.config.ts, ./src/app.ts, or ./app.ts)
   --cwd <dir>            Working directory (default: current)
-  --graph                Emit the pip graph as Mermaid flowchart source
+  --graph                Emit the plugin graph as Mermaid flowchart source
                          instead of the standard output. explain shows
                          declaration (= boot) order; doctor shows the
                          wiring observed during boot. Composes with --json.
@@ -331,7 +331,7 @@ type DoctorRunOptions = {
    * present. Default `false`.
    */
   observability?: boolean;
-  /** When `true`, emit the pip graph (Mermaid) instead of diagnostics. */
+  /** When `true`, emit the plugin graph (Mermaid) instead of diagnostics. */
   graph?: boolean;
 };
 
@@ -363,7 +363,7 @@ export async function runDoctor(
   }
 
   // Builder or configured seam: drive lifecycle ourselves. Boot failures fall
-  // back to the configured seam's diagnostics so per-pip issues stay
+  // back to the configured seam's diagnostics so per-plugin issues stay
   // visible.
   let configured: DotAppConfigured<Record<string, unknown>>;
   try {
@@ -380,7 +380,7 @@ export async function runDoctor(
     bootedApp = await configured.boot();
   } catch (err) {
     // Boot failed — surface diagnostics from the configured seam below.
-    // We deliberately swallow the throw so the user sees the per-pip
+    // We deliberately swallow the throw so the user sees the per-plugin
     // issues instead of an opaque wrapper error.
     bootThrew = true;
     debugCli('boot threw, falling back to configured diagnostics: %O', err);
@@ -389,7 +389,7 @@ export async function runDoctor(
   try {
     if (opts.graph === true) {
       // Post-boot manifest carries the observed wiring edges; after a boot
-      // failure it carries the edges recorded up to the failing pip.
+      // failure it carries the edges recorded up to the failing plugin.
       const manifest = bootedApp ? bootedApp.manifest : configured.manifest;
       const graphEnvelope = renderGraph(
         { manifest, command: 'doctor' },
@@ -445,8 +445,8 @@ function wrapLifecycleError(err: unknown, phase: 'configure' | 'boot'): DotCliEr
     message: `App ${phase} failed: ${message}`,
     remediation:
       phase === 'configure'
-        ? 'Check the pips registered in your app for a synchronous `configure` hook that throws or returns a Promise. Run `dot doctor` for per-pip diagnostics.'
-        : 'Run `dot doctor` to see per-pip diagnostics. The boot hook for one of your pips failed.',
+        ? 'Check the plugins registered in your app for a synchronous `configure` hook that throws or returns a Promise. Run `dot doctor` for per-plugin diagnostics.'
+        : 'Run `dot doctor` to see per-plugin diagnostics. The boot hook for one of your plugins failed.',
     metadata: { phase, underlyingCode: code },
     cause: err,
   });
@@ -631,11 +631,14 @@ const isMainModule = await (async () => {
     /* ignore */
   }
   // Node fallback: compare argv[1]'s resolved file URL with import.meta.url.
+  // argv[1] is the bin symlink (node_modules/.bin/dot) while Node resolves
+  // import.meta.url to the real file — realpath argv[1] so they can match.
   try {
     const entry = process.argv[1];
     if (typeof entry !== 'string') return false;
     const { pathToFileURL } = await import('node:url');
-    return pathToFileURL(entry).href === import.meta.url;
+    const { realpath } = await import('node:fs/promises');
+    return pathToFileURL(await realpath(entry)).href === import.meta.url;
   } catch {
     return false;
   }

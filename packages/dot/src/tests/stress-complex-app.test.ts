@@ -1,7 +1,7 @@
 /**
- * Stress test: a large, realistic pip composition.
+ * Stress test: a large, realistic plugin composition.
  *
- * 28 pips across 4 layers (infra → connections → domain → workers), wired
+ * 28 plugins across 4 layers (infra → connections → domain → workers), wired
  * with every v2 mechanism at once:
  *
  *   - deep needs chains (api ← admin ← reporting ← orders ← cart ← …)
@@ -21,9 +21,9 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { DotLifecycleEvent } from '../lifecycle-observer.js';
-import type { Lazy } from '../pip-contract.js';
+import type { Lazy } from '../plugin-contract.js';
 import { defineApp } from '../define-app.js';
-import { lazy, pip, provide, rename, service, token } from '../pip-contract.js';
+import { lazy, plugin, provide, rename, service, token } from '../plugin-contract.js';
 
 /* ------------------------------------------------------------------ */
 /* Domain types                                                        */
@@ -80,7 +80,7 @@ const mkKv = (ns: string): KvClient => ({ ns, store: new Map(), set(k, v) { this
 /* Layer 0 — infra                                                     */
 /* ------------------------------------------------------------------ */
 
-const envPip = pip({
+const envPlugin = plugin({
   name: 'env',
   boot: ({ $config }) => {
     ev('boot:env');
@@ -89,7 +89,7 @@ const envPip = pip({
   },
 });
 
-const clockPip = pip({
+const clockPlugin = plugin({
   name: 'clock',
   boot: () => {
     ev('boot:clock');
@@ -97,7 +97,7 @@ const clockPip = pip({
   },
 });
 
-const loggerPip = pip({
+const loggerPlugin = plugin({
   name: 'logger',
   needs: { env: service<Env>() },
   boot: ({ env }) => {
@@ -107,7 +107,7 @@ const loggerPip = pip({
   },
 });
 
-const metricsPip = pip({
+const metricsPlugin = plugin({
   name: 'metrics',
   needs: { env: service<Env>(), clock: service<Clock>() },
   boot: ({ clock }) => {
@@ -122,41 +122,41 @@ const metricsPip = pip({
 /* Layer 1 — connections (renames, tokens, lazies)                     */
 /* ------------------------------------------------------------------ */
 
-const dbPipFactory = (instance: string) =>
-  pip({
+const dbPluginFactory = (instance: string) =>
+  plugin({
     name: 'db',
     needs: { log: service<Log>() },
-    boot: ({ log, $pip }) => {
-      ev(`boot:${$pip}`);
+    boot: ({ log, $plugin }) => {
+      ev(`boot:${$plugin}`);
       log.info(`db ${instance} opening`);
       return { db: mkDb(instance) };
     },
-    dispose: ({ $pip }) => {
-      ev(`dispose:${$pip}`);
+    dispose: ({ $plugin }) => {
+      ev(`dispose:${$plugin}`);
     },
   });
 
-const dbPip = dbPipFactory('primary');
-const reportsDbPip = rename(dbPipFactory('reports'), { db: 'reportsDb' }, 'db-reports');
+const dbPlugin = dbPluginFactory('primary');
+const reportsDbPlugin = rename(dbPluginFactory('reports'), { db: 'reportsDb' }, 'db-reports');
 
-const kvPipFactory = (ns: string) =>
-  pip({
+const kvPluginFactory = (ns: string) =>
+  plugin({
     name: 'kv',
-    boot: ({ $pip }) => {
-      ev(`boot:${$pip}`);
+    boot: ({ $plugin }) => {
+      ev(`boot:${$plugin}`);
       return provide(Kv, mkKv(ns));
     },
-    dispose: ({ $pip }) => {
-      ev(`dispose:${$pip}`);
+    dispose: ({ $plugin }) => {
+      ev(`dispose:${$plugin}`);
     },
   });
 
-const kvPip = kvPipFactory('main');
+const kvPlugin = kvPluginFactory('main');
 // Rename the token's wire key to the DERIVED token's key — rename and
 // token.instance() composing is the multi-instance story for contracts.
-const sessionsKvPip = rename(kvPipFactory('sessions'), { 'stress.kv': SessionsKv.key }, 'kv-sessions');
+const sessionsKvPlugin = rename(kvPluginFactory('sessions'), { 'stress.kv': SessionsKv.key }, 'kv-sessions');
 
-const blobPip = pip({
+const blobPlugin = plugin({
   name: 'blob',
   boot: () => {
     ev('boot:blob');
@@ -172,7 +172,7 @@ const blobPip = pip({
   },
 });
 
-const searchPip = pip({
+const searchPlugin = plugin({
   name: 'search',
   boot: () => {
     ev('boot:search');
@@ -189,7 +189,7 @@ const searchPip = pip({
   },
 });
 
-const mailerPip = pip({
+const mailerPlugin = plugin({
   name: 'mailer',
   needs: { env: service<Env>() },
   boot: ({ env }) => {
@@ -207,7 +207,7 @@ const mailerPip = pip({
   },
 });
 
-const busPip = pip({
+const busPlugin = plugin({
   name: 'bus',
   boot: () => {
     ev('boot:bus');
@@ -234,7 +234,7 @@ const busPip = pip({
 /* Layer 2 — domain                                                    */
 /* ------------------------------------------------------------------ */
 
-const authPip = pip({
+const authPlugin = plugin({
   name: 'auth',
   needs: { db: service<Db>(), cache: Kv, log: service<Log>() }, // token under a free alias
   boot: ({ db, cache, log }) => {
@@ -245,7 +245,7 @@ const authPip = pip({
   },
 });
 
-const catalogPip = pip({
+const catalogPlugin = plugin({
   name: 'catalog',
   needs: { db: service<Db>(), search: service<Lazy<SearchClient>>(), log: service<Log>() },
   boot: ({ db, search }) => {
@@ -263,7 +263,7 @@ const catalogPip = pip({
   },
 });
 
-const pricingPip = pip({
+const pricingPlugin = plugin({
   name: 'pricing',
   needs: { catalog: service<Catalog>(), env: service<Env>(), clock: service<Clock>() },
   boot: ({ catalog }) => {
@@ -272,7 +272,7 @@ const pricingPip = pip({
   },
 });
 
-const inventoryPip = pip({
+const inventoryPlugin = plugin({
   name: 'inventory',
   needs: { db: service<Db>(), stock: Kv, metrics: service<Metrics>() },
   boot: ({ metrics }) => {
@@ -288,7 +288,7 @@ const inventoryPip = pip({
   },
 });
 
-const cartPip = pip({
+const cartPlugin = plugin({
   name: 'cart',
   // Consumes the DERIVED token — wired to the renamed second kv instance.
   needs: { pricing: service<Pricing>(), inventory: service<Inventory>(), sessions: SessionsKv },
@@ -308,7 +308,7 @@ const cartPip = pip({
   },
 });
 
-const paymentsPip = pip({
+const paymentsPlugin = plugin({
   name: 'payments',
   needs: { env: service<Env>(), mailer: service<Lazy<Mailer>>(), bus: service<Bus>() },
   boot: ({ bus }) => {
@@ -324,7 +324,7 @@ const paymentsPip = pip({
   },
 });
 
-const ordersPip = pip({
+const ordersPlugin = plugin({
   name: 'orders',
   needs: { db: service<Db>(), cart: service<Cart>(), payments: service<Payments>(), bus: service<Bus>() },
   boot: ({ cart, payments, bus }) => {
@@ -344,7 +344,7 @@ const ordersPip = pip({
   },
 });
 
-const shippingPip = pip({
+const shippingPlugin = plugin({
   name: 'shipping',
   // Declares the blob need but NEVER calls .get() — blob must stay cold.
   needs: { orders: service<Orders>(), blob: service<Lazy<BlobStore>>(), bus: service<Bus>() },
@@ -361,7 +361,7 @@ const shippingPip = pip({
   },
 });
 
-const notificationsPip = pip({
+const notificationsPlugin = plugin({
   name: 'notifications',
   needs: { mailer: service<Lazy<Mailer>>(), bus: service<Bus>(), auth: service<Auth>() },
   boot: ({ mailer }) => {
@@ -378,7 +378,7 @@ const notificationsPip = pip({
   stop: () => ev('stop:notifications'),
 });
 
-const analyticsPip = pip({
+const analyticsPlugin = plugin({
   name: 'analytics',
   needs: { reportsDb: service<Db>(), metrics: service<Metrics>(), bus: service<Bus>() },
   boot: ({ reportsDb, bus }) => {
@@ -392,7 +392,7 @@ const analyticsPip = pip({
   stop: () => ev('stop:analytics'),
 });
 
-const reportingPip = pip({
+const reportingPlugin = plugin({
   name: 'reporting',
   needs: { reportsDb: service<Db>(), catalog: service<Catalog>(), orders: service<Orders>() },
   boot: ({ reportsDb, catalog, orders }) => {
@@ -406,7 +406,7 @@ const reportingPip = pip({
   },
 });
 
-const adminPip = pip({
+const adminPlugin = plugin({
   name: 'admin',
   needs: { auth: service<Auth>(), reporting: service<Reporting>(), log: service<Log>() },
   boot: ({ reporting }) => {
@@ -415,7 +415,7 @@ const adminPip = pip({
   },
 });
 
-const apiPip = pip({
+const apiPlugin = plugin({
   name: 'api',
   needs: {
     auth: service<Auth>(),
@@ -448,7 +448,7 @@ const apiPip = pip({
 /* Layer 3 — workers                                                   */
 /* ------------------------------------------------------------------ */
 
-const indexerPip = pip({
+const indexerPlugin = plugin({
   name: 'worker-indexer',
   needs: { catalog: service<Catalog>(), search: service<Lazy<SearchClient>>(), bus: service<Bus>() },
   boot: () => {
@@ -463,7 +463,7 @@ const indexerPip = pip({
   stop: () => ev('stop:worker-indexer'),
 });
 
-const emailWorkerPip = pip({
+const emailWorkerPlugin = plugin({
   name: 'worker-emails',
   needs: { notifications: service<Notifications>(), bus: service<Bus>() },
   boot: () => {
@@ -477,7 +477,7 @@ const emailWorkerPip = pip({
   stop: () => ev('stop:worker-emails'),
 });
 
-const healthcheckPip = pip({
+const healthcheckPlugin = plugin({
   name: 'healthcheck',
   needs: { api: service<Api>(), db: service<Db>(), metrics: service<Metrics>() },
   boot: () => {
@@ -493,7 +493,7 @@ const healthcheckPip = pip({
 });
 
 /* ------------------------------------------------------------------ */
-/* The composition — 28 pips, one chain                                */
+/* The composition — 28 plugins, one chain                                */
 /* ------------------------------------------------------------------ */
 
 const DECLARATION_ORDER = [
@@ -529,37 +529,37 @@ const DECLARATION_ORDER = [
 
 function composeStressApp() {
   return defineApp('stress-commerce', { version: '9.9.9', config: { FEATURE_STRESS: true } })
-    .use(envPip)
-    .use(clockPip)
-    .use(loggerPip)
-    .use(metricsPip)
-    .use(dbPip)
-    .use(reportsDbPip)
-    .use(kvPip)
-    .use(sessionsKvPip)
-    .use(blobPip)
-    .use(searchPip)
-    .use(mailerPip)
-    .use(busPip)
-    .use(authPip)
-    .use(catalogPip)
-    .use(pricingPip)
-    .use(inventoryPip)
-    .use(cartPip)
-    .use(paymentsPip)
-    .use(ordersPip)
-    .use(shippingPip)
-    .use(notificationsPip)
-    .use(analyticsPip)
-    .use(reportingPip)
-    .use(adminPip)
-    .use(apiPip)
-    .use(indexerPip)
-    .use(emailWorkerPip)
-    .use(healthcheckPip);
+    .use(envPlugin)
+    .use(clockPlugin)
+    .use(loggerPlugin)
+    .use(metricsPlugin)
+    .use(dbPlugin)
+    .use(reportsDbPlugin)
+    .use(kvPlugin)
+    .use(sessionsKvPlugin)
+    .use(blobPlugin)
+    .use(searchPlugin)
+    .use(mailerPlugin)
+    .use(busPlugin)
+    .use(authPlugin)
+    .use(catalogPlugin)
+    .use(pricingPlugin)
+    .use(inventoryPlugin)
+    .use(cartPlugin)
+    .use(paymentsPlugin)
+    .use(ordersPlugin)
+    .use(shippingPlugin)
+    .use(notificationsPlugin)
+    .use(analyticsPlugin)
+    .use(reportingPlugin)
+    .use(adminPlugin)
+    .use(apiPlugin)
+    .use(indexerPlugin)
+    .use(emailWorkerPlugin)
+    .use(healthcheckPlugin);
 }
 
-describe('stress: 28-pip commerce composition', () => {
+describe('stress: 28-plugin commerce composition', () => {
   it('boots, runs, and tears down the full graph with exact ordering', async () => {
     events.length = 0;
     const observed: DotLifecycleEvent[] = [];
@@ -609,13 +609,13 @@ describe('stress: 28-pip commerce composition', () => {
 
     /* ---- manifest: observed wiring at scale ---- */
     const m = app.manifest;
-    expect(m.pips.map(p => p.name)).toEqual([...DECLARATION_ORDER]);
+    expect(m.plugins.map(p => p.name)).toEqual([...DECLARATION_ORDER]);
     expect(m.actions.map(action => action.id)).toEqual(['api.checkout', 'api.admin.stats']);
     expect(m.dependencies).toEqual(
       expect.arrayContaining([
         { from: 'logger', to: 'env', kind: 'requires' },
         { from: 'auth', to: 'kv', kind: 'requires' },
-        { from: 'cart', to: 'kv-sessions', kind: 'requires' }, // derived token → renamed pip
+        { from: 'cart', to: 'kv-sessions', kind: 'requires' }, // derived token → renamed plugin
         { from: 'analytics', to: 'db-reports', kind: 'requires' }, // renamed db instance
         { from: 'api', to: 'admin', kind: 'requires' },
         { from: 'healthcheck', to: 'api', kind: 'requires' },
@@ -625,12 +625,12 @@ describe('stress: 28-pip commerce composition', () => {
     for (const edge of m.dependencies) {
       const from = DECLARATION_ORDER.indexOf(edge.from as (typeof DECLARATION_ORDER)[number]);
       const to = DECLARATION_ORDER.indexOf(edge.to as (typeof DECLARATION_ORDER)[number]);
-      expect(to, `${edge.from} -> ${edge.to} must point to an earlier pip`).toBeLessThan(from);
+      expect(to, `${edge.from} -> ${edge.to} must point to an earlier plugin`).toBeLessThan(from);
     }
 
     /* ---- diagnostics + timeline ---- */
-    expect(app.diagnostics.pips).toHaveLength(28);
-    expect(app.diagnostics.pips.every(p => p.status === 'ok')).toBe(true);
+    expect(app.diagnostics.plugins).toHaveLength(28);
+    expect(app.diagnostics.plugins.every(p => p.status === 'ok')).toBe(true);
     expect(app.diagnostics.issues).toEqual([]);
     const timeline = app.timeline();
     expect(timeline).toContain('stress-commerce');
@@ -667,9 +667,9 @@ describe('stress: 28-pip commerce composition', () => {
 
   it('type-level: the guard still bites at depth', () => {
     // @ts-expect-error — api's five needs are all missing at position 1
-    defineApp('bad').use(apiPip);
+    defineApp('bad').use(apiPlugin);
     // @ts-expect-error — healthcheck before api (one missing need among many)
-    composeStressAppWithoutApi().use(healthcheckPip);
+    composeStressAppWithoutApi().use(healthcheckPlugin);
     expect(true).toBe(true);
   });
 });
@@ -677,28 +677,28 @@ describe('stress: 28-pip commerce composition', () => {
 /** Same chain as composeStressApp but stops before api — guard fixture. */
 function composeStressAppWithoutApi() {
   return defineApp('bad-stress')
-    .use(envPip)
-    .use(clockPip)
-    .use(loggerPip)
-    .use(metricsPip)
-    .use(dbPip)
-    .use(reportsDbPip)
-    .use(kvPip)
-    .use(sessionsKvPip)
-    .use(blobPip)
-    .use(searchPip)
-    .use(mailerPip)
-    .use(busPip)
-    .use(authPip)
-    .use(catalogPip)
-    .use(pricingPip)
-    .use(inventoryPip)
-    .use(cartPip)
-    .use(paymentsPip)
-    .use(ordersPip)
-    .use(shippingPip)
-    .use(notificationsPip)
-    .use(analyticsPip)
-    .use(reportingPip)
-    .use(adminPip);
+    .use(envPlugin)
+    .use(clockPlugin)
+    .use(loggerPlugin)
+    .use(metricsPlugin)
+    .use(dbPlugin)
+    .use(reportsDbPlugin)
+    .use(kvPlugin)
+    .use(sessionsKvPlugin)
+    .use(blobPlugin)
+    .use(searchPlugin)
+    .use(mailerPlugin)
+    .use(busPlugin)
+    .use(authPlugin)
+    .use(catalogPlugin)
+    .use(pricingPlugin)
+    .use(inventoryPlugin)
+    .use(cartPlugin)
+    .use(paymentsPlugin)
+    .use(ordersPlugin)
+    .use(shippingPlugin)
+    .use(notificationsPlugin)
+    .use(analyticsPlugin)
+    .use(reportingPlugin)
+    .use(adminPlugin);
 }

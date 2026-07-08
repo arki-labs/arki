@@ -6,9 +6,9 @@
  * single logger service is enough to exercise the 5-array manifest contract.
  */
 
-import { defineApp, pip } from '../../../index.js';
+import { defineApp, plugin } from '../../../index.js';
 
-const logger = pip({
+const logger = plugin({
   name: 'logger',
   version: '1.0.0',
   configure: ctx => {

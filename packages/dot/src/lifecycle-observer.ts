@@ -2,7 +2,7 @@
  * Lifecycle observer surface for the DOT kernel.
  *
  * `DotLifecycleObserver` is the in-process companion to the OTel signals
- * emitted by {@link withPhaseSpan} / {@link withPipHookSpan}. Where OTel
+ * emitted by {@link withPhaseSpan} / {@link withPluginHookSpan}. Where OTel
  * is the contract for cross-process tracing (consumers register an SDK
  * and ship spans to a backend), the observer is the contract for *local*
  * programmatic inspection — used by tests, CLI tooling, ASCII waterfalls,
@@ -24,7 +24,7 @@ import type { DotLifecycleHook } from './lifecycle.js';
  * observer. Discriminated by `kind`:
  *
  *   - `'phase'`     — boundary of a top-level lifecycle phase
- *   - `'pip-hook'`  — boundary of a single pip's hook execution
+ *   - `'plugin-hook'`  — boundary of a single plugin's hook execution
  *
  * Status discriminates the boundary itself:
  *
@@ -35,7 +35,7 @@ import type { DotLifecycleHook } from './lifecycle.js';
  * `starting` events never carry `durationMs` / `error`. `completed` events
  * carry `durationMs`. `failed` events carry both `durationMs` and `error`.
  */
-export type DotLifecycleEvent = DotPhaseLifecycleEvent | DotPipHookLifecycleEvent;
+export type DotLifecycleEvent = DotPhaseLifecycleEvent | DotPluginHookLifecycleEvent;
 
 /** Possible event statuses. See {@link DotLifecycleEvent}. */
 export type DotLifecycleEventStatus = 'starting' | 'completed' | 'failed';
@@ -56,14 +56,14 @@ export type DotPhaseLifecycleEvent = {
   readonly timestamp: number;
 };
 
-/** Boundary of a single pip's hook execution. */
-export type DotPipHookLifecycleEvent = {
-  readonly kind: 'pip-hook';
+/** Boundary of a single plugin's hook execution. */
+export type DotPluginHookLifecycleEvent = {
+  readonly kind: 'plugin-hook';
   /** The phase the hook belongs to. */
   readonly phase: DotLifecycleHook;
-  /** The pip whose hook is being executed. */
-  readonly pip: string;
-  /** Topological order of the pip within the phase (0-based). */
+  /** The plugin whose hook is being executed. */
+  readonly plugin: string;
+  /** Topological order of the plugin within the phase (0-based). */
   readonly order: number;
   readonly status: DotLifecycleEventStatus;
   readonly appName: string;
@@ -91,7 +91,7 @@ export type DotPipHookLifecycleEvent = {
  * const app = await defineApp('my-app', {
  *   observers: [(event) => events.push(event)],
  * })
- *   .use(myPip)
+ *   .use(myPlugin)
  *   .boot();
  *
  * // events now contains the full configure + boot event stream.

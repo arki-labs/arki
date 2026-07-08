@@ -1,7 +1,7 @@
 /**
  * Diagnostics contract tests for the DOT kernel.
  *
- * The snapshot exposes five top-level arrays — pips, actions, services,
+ * The snapshot exposes five top-level arrays — plugins, actions, services,
  * lifecycle, issues — and every `DiagnosticIssue` carries code, severity,
  * message, remediation, and docsUrl.
  */
@@ -9,11 +9,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { defineApp } from '../define-app.js';
-import { pip } from '../pip-contract.js';
+import { plugin } from '../plugin-contract.js';
 
 describe('DOT diagnostics', () => {
   it('pre-boot diagnostics include all five arrays', () => {
-    const p = pip({
+    const p = plugin({
       name: 'p',
       configure: ctx => {
         ctx.registerService('logger', 'logger');
@@ -25,20 +25,20 @@ describe('DOT diagnostics', () => {
     expect(snap.snapshotVersion).toBe(2);
     expect(snap.generatedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
     expect(snap.app).toEqual({ name: 'test', state: 'configured' });
-    expect(Array.isArray(snap.pips)).toBe(true);
+    expect(Array.isArray(snap.plugins)).toBe(true);
     expect(Array.isArray(snap.actions)).toBe(true);
     expect(Array.isArray(snap.services)).toBe(true);
     expect(Array.isArray(snap.lifecycle)).toBe(true);
     expect(Array.isArray(snap.issues)).toBe(true);
-    expect(snap.pips).toHaveLength(1);
-    expect(snap.pips[0]).toMatchObject({ pip: 'p', status: 'ok' });
-    expect(snap.actions).toEqual([{ id: 'p.ping', pip: 'p', binding: 'orpc', status: 'ok', issues: [] }]);
+    expect(snap.plugins).toHaveLength(1);
+    expect(snap.plugins[0]).toMatchObject({ plugin: 'p', status: 'ok' });
+    expect(snap.actions).toEqual([{ id: 'p.ping', plugin: 'p', binding: 'orpc', status: 'ok', issues: [] }]);
   });
 
   it('empty app still exposes all five arrays', async () => {
     const app = await defineApp('empty').boot();
     const snap = app.diagnostics;
-    expect(snap.pips).toEqual([]);
+    expect(snap.plugins).toEqual([]);
     expect(snap.actions).toEqual([]);
     expect(snap.services).toEqual([]);
     expect(snap.lifecycle).toEqual([]);
@@ -46,17 +46,17 @@ describe('DOT diagnostics', () => {
     await app.dispose();
   });
 
-  it('post-boot diagnostics include per-pip status', async () => {
-    const a = pip({ name: 'a', boot: () => ({}) });
+  it('post-boot diagnostics include per-plugin status', async () => {
+    const a = plugin({ name: 'a', boot: () => ({}) });
     const app = await defineApp('test').use(a).boot();
     const snap = app.diagnostics;
-    expect(snap.pips).toEqual([{ pip: 'a', status: 'ok', issues: [] }]);
-    expect(snap.lifecycle.some(l => l.hook === 'boot' && l.pip === 'a')).toBe(true);
+    expect(snap.plugins).toEqual([{ plugin: 'a', status: 'ok', issues: [] }]);
+    expect(snap.lifecycle.some(l => l.hook === 'boot' && l.plugin === 'a')).toBe(true);
     await app.dispose();
   });
 
-  it('boot failure surfaces a failed pip diagnostic with structured issue', async () => {
-    const bad = pip({
+  it('boot failure surfaces a failed plugin diagnostic with structured issue', async () => {
+    const bad = plugin({
       name: 'bad',
       boot: () => {
         throw new Error('boot-boom');
@@ -74,7 +74,7 @@ describe('DOT diagnostics', () => {
     }
     const bootedSnap = configured.diagnostics;
     expect(bootedSnap.app.state).toBe('failed');
-    const badDiag = bootedSnap.pips.find(p => p.pip === 'bad');
+    const badDiag = bootedSnap.plugins.find(p => p.plugin === 'bad');
     expect(badDiag?.status).toBe('failed');
     expect(badDiag?.issues.length).toBeGreaterThan(0);
 
@@ -90,7 +90,7 @@ describe('DOT diagnostics', () => {
     // Surfacing issues needs a configured app whose boot fails — the
     // configured() seam holds the underlying impl whose diagnostics we can
     // read after a boot throw.
-    const bootBad = pip({
+    const bootBad = plugin({
       name: 'bootbad',
       boot: () => {
         throw new Error('boot-boom');
