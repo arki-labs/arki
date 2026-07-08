@@ -159,7 +159,66 @@
   projections to boot through a dot graph that does not exist yet:
   that is a full backend-on-feature migration (bus.ts is a 280-line
   hand assembly) — its own lane, to be run on `@arki/feature` from
-  day one, after the red baseline is triaged.
+  day one, after the red baseline is triaged. Rev 10 addendum
+  (2026-07-08, founder: "a plugin, a feature and all the other objects
+  should be plain const values with no side effects, no?"): the
+  **import-purity doctrine** locked and enforced — importing any
+  module in the declaration layer must be observationally free (no
+  env observation, no I/O, no throws); the only effectful verbs are
+  `boot()` and downstream. Implementation: `defineEnv` in
+  `@arki/env/core` is now LAZY (a Proxy defers the `process.env`
+  snapshot + `createEnv` validation to FIRST property access,
+  memoized) — one change un-infects every package env module (db,
+  auth, kv, apps) at once, and was chosen over env-as-graph-service
+  because it achieves the same observed-at-use property without
+  threading `env` through `needs` in every job/service call stack;
+  `kv({ url })` and `http({ port })` accept THUNKS so the app
+  composition reads env at boot/start, not declaration; backend-test
+  had exactly ONE further leak (module-scope email client in
+  core/auth.ts → memoized function). Enforcement =
+  `import-purity.test.ts`: a subprocess with a scrubbed env
+  (PATH/HOME only + NODE_ENV=development so validation is NOT
+  skipped) imports `src/app.ts` and must exit clean — the drizzle-kit
+  property ("the app graph must render from a bare checkout") as a
+  regression test. Negative control verified: a WRONG value still
+  fails loudly on first access. `dot explain` now renders the full
+  16-unit graph with ZERO environment. Template `store.ts` (the last
+  module-load `await defineApp().boot()` in the scaffold) replaced
+  with a memoized `getStore()` booted on first request. Suites: env
+  3/3, kv 4/4, http 48/48, dot 160/160, auth 20/20, es 16/16,
+  schedule 13/13; backend-test 275/0 (+1 = the purity test), boot
+  smoke orpc 200 / fleet 401 / clean dispose. Conformance sweep
+  (founder: "make sure everything follows these"): the doctrine doc
+  moved to `packages/dot/docs/composition-doctrine.md` (public-safe;
+  workspace-conventions copy + AGENTS.md row reverted per founder).
+  The sweep CORRECTED the doctrine itself: cross-feature repo reads
+  through the composed context are pervasive (95× `repo.universe`
+  from story/style/image; admin reads story) and are the drizzle
+  `db.query` analog — routers consuming ANY repo via ctx is the
+  intended shape; §5 now says ACYCLICITY not rigid layering (the
+  context type is a spine artifact whose imports terminate in
+  repository leaves, never routers), and the earlier
+  narrow-per-feature-context prescription is explicitly rejected
+  (it would force lateral type imports between features — the real
+  violation). backend-test judged CONFORMANT as-is; the hand-pinned
+  `AppRepo` is the sanctioned cycle-cut, not debt. Template brought
+  into conformance: `lazyObject()` added to `@arki/ts` (memoized
+  construct-on-first-access Proxy; methods bound to the real instance
+  so private-field classes work) — `db`, `repositories`, `kv`
+  (startup ping + `process.exit(1)` ceremony DELETED — connectivity
+  checks belong in health endpoints), and `auth` keep identical value
+  exports but observe nothing at import; both template `env.ts` files
+  (backend + server) converted from raw eager `createEnv` to lazy
+  `defineEnv` (the backend one was found BY the new doctrine test at
+  collection time); server template's undeclared `@arki/contracts`
+  dep declared (+`@arki/env`). Template gains
+  `composition-doctrine.test.ts` = import-purity subprocess over all
+  five library surfaces + the `AppRepositories` pin — every scaffolded
+  app is born with the enforcement. Verified: template tsc 0 / lint 0
+  / 3-3 tests (incl. production-boot), backend-test 275/0.
+  Pre-existing, out of scope: template `server/src/index.ts`
+  typecheck errors (kapodopera-derived example jobs; predate this
+  work).
 - **Date:** 2026-07-07
 - **Author:** Claude (session fbbe6be7), from the 2026-07-07 feature-pips
   design conversation

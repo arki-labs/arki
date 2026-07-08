@@ -33,7 +33,8 @@
  * that is intentional: the adapter only makes sense in a DOT app.
  */
 
-import { plugin, DotPluginError, type EmptyShape, type Plugin } from '@arki/dot/plugin';
+import type { EmptyShape, Plugin } from '@arki/dot/plugin';
+import { DotPluginError, plugin } from '@arki/dot/plugin';
 
 import { KV } from './index.js';
 
@@ -53,8 +54,11 @@ export type KvDotOptions = {
   /**
    * Redis/Keyv URL. Use `rediss://` for TLS. If omitted, the plugin reads
    * `KV_URL` from `process.env` (matching the `createKV` factory behaviour).
+   * Pass a THUNK to defer the read to boot — declarations stay
+   * import-pure (no env observation at module load), e.g.
+   * `kv({ url: () => env.REDIS_URL })`.
    */
-  readonly url?: string;
+  readonly url?: string | (() => string | undefined);
   /** Optional namespace prefix for all keys (defaults to no prefix). */
   readonly namespace?: string;
   /** Optional prefix for rate-limit keys (default `rl`). */
@@ -80,7 +84,7 @@ export function kv(options: KvDotOptions = {}): Plugin<EmptyShape, KvServices> {
       ctx.registerService('kv', 'kv');
     },
     boot() {
-      const url = options.url ?? process.env['KV_URL'];
+      const url = (typeof options.url === 'function' ? options.url() : options.url) ?? process.env['KV_URL'];
       if (url === undefined || url === '') {
         throw new DotPluginError({
           code: KV_PLUGIN_ERROR_CODES.urlNotConfigured,

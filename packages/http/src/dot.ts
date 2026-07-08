@@ -71,8 +71,12 @@ export type HttpOptions<
   TBundles extends readonly BundleToken[] = readonly [],
   TFeatures extends readonly HttpFeatureToken[] = readonly [],
 > = {
-  /** Port to listen on in `start`. `0` picks an ephemeral port. */
-  readonly port: number;
+  /**
+   * Port to listen on in `start`. `0` picks an ephemeral port. Pass a
+   * THUNK to defer the read to `start` — declarations stay import-pure
+   * (no env observation at module load), e.g. `http({ port: () => env.PORT })`.
+   */
+  readonly port: number | (() => number);
   readonly hostname?: string;
   /**
    * Bundle tokens to serve, in route-table order. Each becomes a `needs`
@@ -277,7 +281,7 @@ export function http<
         });
       }
       state.handle = await listen(tracked, {
-        port: options.port,
+        port: typeof options.port === 'function' ? options.port() : options.port,
         ...(options.hostname === undefined ? {} : { hostname: options.hostname }),
       });
     },
