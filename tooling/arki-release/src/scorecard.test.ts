@@ -24,13 +24,13 @@ import type { ProcessResult, ProcessRunner } from './fixture';
 /**
  * Synthetic passing DOT probe for tests that want to exercise the gate
  * evaluators. Returns the narrow `DotProbeOk` shape so tests can spread it
- * and override individual fields (`{ ...passingDotProbe(), pipCount: 2 }`)
+ * and override individual fields (`{ ...passingDotProbe(), pluginCount: 2 }`)
  * without TypeScript losing the discriminant.
  */
 function passingDotProbe(): DotProbeOk {
   return {
     status: 'pass',
-    pipCount: 3,
+    pluginCount: 3,
     manifestArrays: 5,
     diagnosticsArrays: 5,
     explainEnvelopeOk: true,
@@ -544,7 +544,7 @@ describe('runScorecard — DOT + agent-native gate evaluation', () => {
       npmPackRunner: makeNpmPackRunner(),
       fixtureRunner: makeFixtureRunner(),
       fixtureTempRoot: path.join(tmp, 'fixture-temp'),
-      dotProbe: { ...probe, pipCount: 2 },
+      dotProbe: { ...probe, pluginCount: 2 },
     });
     const pkg = envelope.items[0];
     expect(pkg?.dimensions['dot-gates'].status).toBe('fail');

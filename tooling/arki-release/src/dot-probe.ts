@@ -128,7 +128,7 @@ function isDotProbeResult(value: unknown): value is DotProbeResult {
   if (v.status !== 'pass') return false;
   const ok = value as Partial<DotProbeOk>;
   return (
-    typeof ok.pipCount === 'number' &&
+    typeof ok.pluginCount === 'number' &&
     typeof ok.manifestArrays === 'number' &&
     typeof ok.diagnosticsArrays === 'number' &&
     typeof ok.explainEnvelopeOk === 'boolean' &&

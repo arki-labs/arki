@@ -1,5 +1,23 @@
 # @arki/dot
 
+## 0.4.0
+
+### Minor Changes
+
+- BREAKING: the composition unit is renamed pip → plugin across the kernel.
+
+  - `pip()` → `plugin()`, `Pip<>` → `Plugin<>`, `initPips` → `initPlugins`, `testPip` → `testPlugin`, `PipManifest` → `PluginManifest`, `DotPipError` → `DotPluginError`, `*_PIP_E*` error codes → `*_PLUGIN_E*`.
+  - Subpath export `@arki/dot/pip` → `@arki/dot/plugin`.
+  - CLI/OTel identifiers follow (`dot.plugin.*` spans, PLUGIN columns).
+  - Docs: composition doctrine (`docs/composition-doctrine.md`) — inert declarations, one-way dependencies, lazy singletons, deferred adapter config, client-surface rules, import-purity + browser-purity enforcement.
+
+  Migrate with a find/replace of the symbol names; runtime semantics are unchanged.
+
+### Patch Changes
+
+- Updated dependencies
+  - @arki/contracts@0.0.3
+
 ## 0.3.0
 
 ### Minor Changes

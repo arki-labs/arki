@@ -8,9 +8,9 @@
  * three-adapter DOT app, then:
  *
  *   - reads `app.manifest` and asserts the five contract arrays are
- *     present (pips, routes, services, lifecycle, dependencies)
+ *     present (plugins, actions, services, lifecycle, dependencies)
  *   - reads `app.diagnostics` and asserts the five contract arrays are
- *     present (pips, routes, services, lifecycle, issues)
+ *     present (plugins, actions, services, lifecycle, issues)
  *   - calls `runExplain(app, --json)` / `runDoctor(app, --json)` (the public
  *     CLI seams) and validates the `{ status, command, generatedAt, data,
  *     errors }` envelope shape
@@ -77,15 +77,15 @@ async function runProbe(): Promise<DotProbeResult> {
     const diagnostics = app.diagnostics;
 
     const manifestArrays =
-      Number(Array.isArray(manifest.pips)) +
-      Number(Array.isArray(manifest.routes)) +
+      Number(Array.isArray(manifest.plugins)) +
+      Number(Array.isArray(manifest.actions)) +
       Number(Array.isArray(manifest.services)) +
       Number(Array.isArray(manifest.lifecycle)) +
       Number(Array.isArray(manifest.dependencies));
 
     const diagnosticsArrays =
-      Number(Array.isArray(diagnostics.pips)) +
-      Number(Array.isArray(diagnostics.routes)) +
+      Number(Array.isArray(diagnostics.plugins)) +
+      Number(Array.isArray(diagnostics.actions)) +
       Number(Array.isArray(diagnostics.services)) +
       Number(Array.isArray(diagnostics.lifecycle)) +
       Number(Array.isArray(diagnostics.issues));
@@ -108,8 +108,8 @@ async function runProbe(): Promise<DotProbeResult> {
       explainData !== null &&
       typeof explainData.app === 'object' &&
       explainData.app.name === manifest.app.name &&
-      Array.isArray(explainData.pips) &&
-      Array.isArray(explainData.routes) &&
+      Array.isArray(explainData.plugins) &&
+      Array.isArray(explainData.actions) &&
       Array.isArray(explainData.services) &&
       Array.isArray(explainData.lifecycle) &&
       Array.isArray(explainData.dependencies) &&
@@ -126,8 +126,8 @@ async function runProbe(): Promise<DotProbeResult> {
       typeof doctorData.app === 'object' &&
       doctorData.app.name === diagnostics.app.name &&
       typeof doctorData.app.state === 'string' &&
-      Array.isArray(doctorData.pips) &&
-      Array.isArray(doctorData.routes) &&
+      Array.isArray(doctorData.plugins) &&
+      Array.isArray(doctorData.actions) &&
       Array.isArray(doctorData.services) &&
       Array.isArray(doctorData.lifecycle) &&
       Array.isArray(doctorData.issues) &&
@@ -162,7 +162,7 @@ async function runProbe(): Promise<DotProbeResult> {
 
     return {
       status: 'pass',
-      pipCount: manifest.pips.length,
+      pluginCount: manifest.plugins.length,
       manifestArrays,
       diagnosticsArrays,
       explainEnvelopeOk,

@@ -772,9 +772,9 @@ function evaluateDotGates(probe: DotProbeResult | undefined): ScorecardDimension
       remediation: 'Verify the env/kv/db adapters boot without throwing. Run the kernel test suite.',
     },
     {
-      ok: probe.pipCount >= 3,
+      ok: probe.pluginCount >= 3,
       code: DOT_GATE_ERROR_CODES.adapterCount,
-      label: `DOT fixture booted with ${probe.pipCount.toString()} adapter(s), expected >= 3`,
+      label: `DOT fixture booted with ${probe.pluginCount.toString()} adapter(s), expected >= 3`,
       remediation:
         'Stable v1 gate requires a 3-adapter boot (env + kv + db). Check the probe runner and adapter packages.',
     },
@@ -783,14 +783,14 @@ function evaluateDotGates(probe: DotProbeResult | undefined): ScorecardDimension
       code: DOT_GATE_ERROR_CODES.manifestShape,
       label: `DotAppManifest exposes ${probe.manifestArrays.toString()}/5 contract arrays`,
       remediation:
-        '`DotAppManifest` must always carry pips, routes, services, lifecycle, dependencies — even when empty.',
+        '`DotAppManifest` must always carry plugins, actions, services, lifecycle, dependencies — even when empty.',
     },
     {
       ok: probe.diagnosticsArrays === 5,
       code: DOT_GATE_ERROR_CODES.diagnosticsShape,
       label: `DotDiagnosticsSnapshot exposes ${probe.diagnosticsArrays.toString()}/5 contract arrays`,
       remediation:
-        '`DotDiagnosticsSnapshot` must always carry pips, routes, services, lifecycle, issues — even when empty.',
+        '`DotDiagnosticsSnapshot` must always carry plugins, actions, services, lifecycle, issues — even when empty.',
     },
     {
       ok: probe.explainEnvelopeOk,
@@ -812,7 +812,7 @@ function evaluateDotGates(probe: DotProbeResult | undefined): ScorecardDimension
   if (failed.length === 0) {
     return {
       status: 'pass',
-      details: `DOT contracts validated (${probe.pipCount.toString()} adapters booted, manifest+diagnostics 5/5 arrays, explain/doctor envelopes OK).`,
+      details: `DOT contracts validated (${probe.pluginCount.toString()} adapters booted, manifest+diagnostics 5/5 arrays, explain/doctor envelopes OK).`,
       evidence: [],
     };
   }

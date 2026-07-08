@@ -668,8 +668,8 @@ export type DotProbeResult = DotProbeOk | DotProbeFail;
 
 export type DotProbeOk = {
   readonly status: 'pass';
-  /** Number of pips booted in the probe app. Gate requires >= 3. */
-  readonly pipCount: number;
+  /** Number of plugins booted in the probe app. Gate requires >= 3. */
+  readonly pluginCount: number;
   /** Count of the five contract arrays present on the manifest. Gate requires 5. */
   readonly manifestArrays: number;
   /** Count of the five contract arrays present on diagnostics. Gate requires 5. */
