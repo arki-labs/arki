@@ -22,17 +22,26 @@ handler from a static router); *observation* is not.
 - Env is observed at **use**, never at import — `@arki/env`'s `defineEnv` is
   lazy by design (the `process.env` snapshot and validation fire on first
   property access).
-- Adapter config that comes from env is passed as a **thunk**:
-  `kv({ url: () => env.REDIS_URL })`, `http({ port: () => env.PORT })`.
+- Adapter config that comes from env is passed as a **thunk** — prefer
+  thunking the whole options object: `kv(() => ({ url: env.REDIS_URL }))`.
+  Where an adapter's options carry declaration-time wiring that cannot
+  defer (`http`'s `bundles`/`features` tokens shape the plugin's needs),
+  only the runtime fields thunk: `http({ port: () => env.PORT, ... })`.
+  The vocabulary for this is `Lazy<T>`/`resolveLazy` from `@arki/ts`.
 - No module-scope singletons that touch the world: no
   `export const db = createDb(...)`, no top-level `await app.boot()`. If a
-  library seam truly needs a shared instance, defer it behind a memoized
-  async factory booted on first use.
+  library seam truly needs a shared instance, wrap it —
+  `lazyObject(() => createDb(...))` for object handles (consumers keep
+  plain value semantics), `once(() => app.boot())` for anything else,
+  both from `@arki/ts`. `lazyObject` is `once` plus proxy transparency:
+  reads bind methods to the real instance, writes/deletes/`instanceof`
+  delegate to it, and construction happens on first property access.
 
 **Executable form:** the app graph must render from a bare checkout. Give
-every app an import-purity test: spawn a subprocess with a scrubbed
-environment (keep `PATH`/`HOME`; set `NODE_ENV=development` so env
-validation is NOT skipped), import the app module, and assert a clean exit.
+every app an import-purity test built on `expectImportPure` from
+`@arki/ts/testing`: it spawns a subprocess with a scrubbed environment
+(keeps `PATH`/`HOME`; sets `NODE_ENV=development` so env validation is NOT
+skipped), imports the given modules, and throws unless the exit is clean.
 Any module-scope side effect anywhere in the import chain fails it
 immediately. `dot explain` working with zero environment is the same
 property, interactively.

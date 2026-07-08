@@ -11,7 +11,9 @@
  * import { kv } from '@arki/kv/dot';
  *
  * const app = await defineApp('my-app')
- *   .use(kv({ url: process.env.KV_URL!, namespace: 'my-app' }))
+ *   // Whole-config thunk: env is read at boot, so the declaration stays
+ *   // import-pure (loadable from a bare checkout).
+ *   .use(kv(() => ({ url: env.KV_URL, namespace: 'my-app' })))
  *   .boot();
  *
  * await app.services.kv.set('hello', 'world', 60);
@@ -34,7 +36,9 @@
  */
 
 import type { EmptyShape, Plugin } from '@arki/dot/plugin';
+import type { Lazy } from '@arki/ts';
 import { DotPluginError, plugin } from '@arki/dot/plugin';
+import { resolveLazy } from '@arki/ts';
 
 import { KV } from './index.js';
 
@@ -54,9 +58,9 @@ export type KvDotOptions = {
   /**
    * Redis/Keyv URL. Use `rediss://` for TLS. If omitted, the plugin reads
    * `KV_URL` from `process.env` (matching the `createKV` factory behaviour).
-   * Pass a THUNK to defer the read to boot — declarations stay
-   * import-pure (no env observation at module load), e.g.
-   * `kv({ url: () => env.REDIS_URL })`.
+   * To defer an env read to boot, prefer thunking the WHOLE options object
+   * — `kv(() => ({ url: env.REDIS_URL }))` — over this per-field thunk
+   * (kept for backwards compatibility).
    */
   readonly url?: string | (() => string | undefined);
   /** Optional namespace prefix for all keys (defaults to no prefix). */
@@ -73,10 +77,13 @@ export type KvServices = {
 /**
  * Build a DOT plugin that opens a `KV` client and publishes it as a service.
  *
- * @param options - Connection + naming options.
+ * @param options - Connection + naming options, or a thunk producing them.
+ *   Thunk the whole object to keep the declaration import-pure — env is
+ *   then read at boot, not at module load:
+ *   `kv(() => ({ url: env.REDIS_URL, namespace: 'my-app' }))`.
  * @returns A plugin that publishes `services.kv`.
  */
-export function kv(options: KvDotOptions = {}): Plugin<EmptyShape, KvServices> {
+export function kv(options: Lazy<KvDotOptions> = {}): Plugin<EmptyShape, KvServices> {
   return plugin({
     name: 'kv',
     version: '0.1.0',
@@ -84,7 +91,8 @@ export function kv(options: KvDotOptions = {}): Plugin<EmptyShape, KvServices> {
       ctx.registerService('kv', 'kv');
     },
     boot() {
-      const url = (typeof options.url === 'function' ? options.url() : options.url) ?? process.env['KV_URL'];
+      const config = resolveLazy(options);
+      const url = (typeof config.url === 'function' ? config.url() : config.url) ?? process.env['KV_URL'];
       if (url === undefined || url === '') {
         throw new DotPluginError({
           code: KV_PLUGIN_ERROR_CODES.urlNotConfigured,
@@ -93,7 +101,7 @@ export function kv(options: KvDotOptions = {}): Plugin<EmptyShape, KvServices> {
           docsUrl: 'https://arki.dev/dot/errors/kv-plugin-e001',
         });
       }
-      const client = new KV(url, options.namespace, options.rateLimitPrefix);
+      const client = new KV(url, config.namespace, config.rateLimitPrefix);
       return { kv: client };
     },
     async dispose({ kv: client }) {

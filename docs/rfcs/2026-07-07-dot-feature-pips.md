@@ -219,6 +219,29 @@
   Pre-existing, out of scope: template `server/src/index.ts`
   typecheck errors (kapodopera-derived example jobs; predate this
   work).
+  **Laziness-ergonomics pass (2026-07-08):** the lazy machinery was
+  consolidated into a single layered family in `@arki/ts`: `once()`
+  (zero-arg memo, memoizes `undefined`, sync-throw retries, promise
+  memoized) → `lazyObject()` (= `once` + transparency traps; hardened
+  with `set`/`deleteProperty`/`getPrototypeOf` so writes land on the
+  real instance instead of silently vanishing on the proxy's dummy
+  target and `instanceof` answers truthfully) → `defineEnv` (now
+  literally `return lazyObject(build)` — its duplicate hand-rolled
+  proxy deleted). `Lazy<T>`/`resolveLazy` added as the deferred-config
+  vocabulary: `kv()` accepts a whole-options thunk
+  (`kv(() => ({ url: env.REDIS_URL }))`); `http()` documented as
+  NON-thunkable at the whole-config level because `bundles`/`features`
+  tokens are declaration-time wiring (only `port: Lazy<number>`
+  defers). The purity harness was extracted to
+  `@arki/ts/testing`'s `expectImportPure()` (framework-agnostic,
+  throws) and both purity tests (template + backend-test) adopted it.
+  Hand-rolled memos replaced by `once()` (backend-test `emailClient`,
+  template `store.ts`); template `db.ts` dropped the
+  `buildDb`/`ReturnType` dance (`type Db = typeof db`). `@arki/ts`
+  gained 10 doctrine-encoding tests. Verified: ts 10/10 + lint 0
+  errors, env 3/3, kv 4/4, http 48/48, backend-test tsc 0 + 275/0,
+  template tsc 0 + 3/3 + changed-files lint 0. New workspace deps
+  declared: `@arki/ts` in env, kv, http, backend-test.
 - **Date:** 2026-07-07
 - **Author:** Claude (session fbbe6be7), from the 2026-07-07 feature-pips
   design conversation

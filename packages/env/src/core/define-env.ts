@@ -1,5 +1,6 @@
 import { createEnv } from '@t3-oss/env-core';
 import type { CreateEnv, DefaultCombinedSchema } from '@t3-oss/env-core';
+import { lazyObject } from '@arki/ts';
 import type { ZodType } from 'zod';
 
 /** The issue shape t3-oss hands to `onValidationError`, derived so it stays in sync with the lib. */
@@ -140,16 +141,5 @@ export function defineEnv<
     return createEnv(options as Parameters<typeof createEnv>[0]) as Result;
   };
 
-  let built: Result | undefined;
-  const resolved = (): Result => {
-    built ??= build();
-    return built;
-  };
-
-  return new Proxy({} as object, {
-    get: (_target, property, receiver) => Reflect.get(resolved(), property, receiver),
-    has: (_target, property) => Reflect.has(resolved(), property),
-    ownKeys: () => Reflect.ownKeys(resolved()),
-    getOwnPropertyDescriptor: (_target, property) => Object.getOwnPropertyDescriptor(resolved(), property),
-  }) as Result;
+  return lazyObject(build);
 }

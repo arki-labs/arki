@@ -35,7 +35,9 @@
  */
 
 import type { DotConfigureContext, EmptyShape, Plugin, Token } from '@arki/dot/plugin';
+import type { Lazy } from '@arki/ts';
 import { DotPluginError, plugin } from '@arki/dot/plugin';
+import { resolveLazy } from '@arki/ts';
 
 import type { RouteBundle } from './bundle.js';
 import type { ContractLike } from './contract.js';
@@ -75,8 +77,12 @@ export type HttpOptions<
    * Port to listen on in `start`. `0` picks an ephemeral port. Pass a
    * THUNK to defer the read to `start` — declarations stay import-pure
    * (no env observation at module load), e.g. `http({ port: () => env.PORT })`.
+   *
+   * Unlike `kv()`, the whole options object cannot be thunked here:
+   * `bundles`/`features` are declaration-time wiring (they shape the
+   * plugin's needs), so only runtime settings like `port` defer.
    */
-  readonly port: number | (() => number);
+  readonly port: Lazy<number>;
   readonly hostname?: string;
   /**
    * Bundle tokens to serve, in route-table order. Each becomes a `needs`
@@ -281,7 +287,7 @@ export function http<
         });
       }
       state.handle = await listen(tracked, {
-        port: typeof options.port === 'function' ? options.port() : options.port,
+        port: resolveLazy(options.port),
         ...(options.hostname === undefined ? {} : { hostname: options.hostname }),
       });
     },
