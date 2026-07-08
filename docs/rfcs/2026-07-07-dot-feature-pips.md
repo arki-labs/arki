@@ -71,7 +71,95 @@
   request URL (prefix-stripped) before rpc dispatch, so the documented
   RPCHandler-with-prefix pattern could never match; the engine now
   mounts rpc bindings with `replaceRequest: false` (regression test
-  added, 48/48 green). See delivery plan row 5b.
+  added, 48/48 green). See delivery plan row 5b. Rev 9 (2026-07-08,
+  founder design review: "propose ways to simplify… retire pip if
+  needed… better names"): three decisions locked — (1) the kernel unit
+  renames **pip → plugin** (approved; executes as a separate
+  `@arki/dot` package pass, 0.0.x experimental track permits the
+  break); (2) **`feature()`** becomes the app-side authoring construct,
+  absorbing EVERYTHING a feature contributes: `router` + `repos`
+  (compile-time, folded by `composeRouter`/`composeRepos` — the
+  `composeSchema` verb family), `jobs`/`schedules`/`routes`
+  (boot-time slices — token, manifest actions, and boot-provide all
+  DERIVED; route bundles now ride the token's `routes` slice collected
+  by `http({ features })`), and `needs`/`boot` as the runtime escape
+  hatch; app authors never type `pip(` again — adapters (db/kv/http/
+  schedule/queueRuntime) are the only package-shipped graph nodes; (3)
+  proven in backend-test first. Result: a feature file is one
+  `feature()` call (story = 10 lines, was ~25 across pip+record), the
+  api serving pip renamed **gateway** ("where requests become
+  contexts"), `app.ts` reads adapters → features → gateway →
+  collectors. Implementation gotcha for the record: a hand-declared
+  `Pip<…>` type MUST use `WireNeeds<TNeeds>` in the first parameter —
+  `pip()` returns `Pip<WireNeeds<TShape>, …>` (unwrapped VALUE types;
+  the guard compares availability against values), and declaring the
+  witness record instead breaks `useAll` with the flip-flopping-arity
+  tell. Verified: typecheck 0 errors, full vitest 274/0, live boot
+  (orpc 200 / fleet 401 / clean dispose), `dot explain` = 16 units
+  with `feature.*` tokens visible on the collectors. Rev 10
+  (2026-07-08, founder: "Do these" + "feature in arki, not tied to
+  Dot… analyze first"): BOTH executed. (a) The **pip → plugin kernel
+  rename SHIPPED**: `@arki/dot` files/symbols/exports-map
+  (`./pip` → `./plugin`, `plugin()`, `Plugin<>`, `initPlugins`,
+  `testPlugin`, `PluginManifest`, `DotPluginError`, `*_PLUGIN_E*`
+  error codes, `dot.plugin.*` OTel attributes, CLI output, docs,
+  templates) plus a case-aware sweep over all 8 adapter packages and
+  every consumer app (kapodopera cinema plugins, novelette server
+  `pips/` → `plugins/`, backend-test); CHANGELOG left as history.
+  Kernel 160/160; the scaffolded-app boot canary caught the one real
+  break (stale adapter dists importing the dead subpath). Two bugs
+  found: the sweep minted `const plugin = plugin({...})`
+  (self-shadowing TDZ — bare-noun factories invite this), and a
+  PRE-EXISTING CLI guard bug (`bunx dot` exited silently:
+  `isMainModule` compared the `.bin` symlink `argv[1]` against Node's
+  realpath-resolved `import.meta.url`; fixed with `realpath`).
+  (b) **`@arki/feature` EXTRACTED** (analysis first — verdict:
+  dot-optional, not dot-free; the declaration is engine-neutral, the
+  `needs`/`boot` hatch is kernel vocabulary by definition): main entry
+  `defineFeature()` + `composeRouter`/`composeRepos` with ZERO runtime
+  imports (type-only `@arki/dot/plugin` peers), the DOT projection
+  isolated in `@arki/feature/dot` (`plug`/`plugs`/`tokens`/`tokenOf` —
+  tokens are key-string witnesses, so derivation needs no shared
+  state). Boot-time slices became **slice contracts** (founder-picked
+  over named keys): adapters export structural
+  `{ key, actions, resolve }` wrappers — `jobs()` in
+  `@arki/queue/dot`, `schedules()` in `@arki/schedule/dot`,
+  `endpoints()` in `@arki/http` — so dependencies follow USE, the
+  slice set is open, and `@arki/feature` imports no adapter.
+  Authoring: `use: [jobs(storyGenerationJobs)]`. Type work the
+  extraction forced (all now regression-anchored): per-feature payload
+  types broke the collectors' closed-shape token bounds → `http`/
+  `schedule`/`queue` feature tokens loosened to `Token<object, string>`
+  with needs values = the token's OWN payload (guard checks exactly
+  what's provided); schedule's context extraction inferred across the
+  token UNION non-distributively (worked only while every payload was
+  shape-identical) → naked-param `SliceOfToken` wrapper restores
+  distribution; `RepoDatabaseOf` intersected the MEMBERS of a single
+  factory's union param (`Db | Transaction` → `Db & Transaction`) →
+  signature-parameter-inference fold keeps unions intact (found by the
+  template, whose one-feature tuple exposed it); `AnyFeature.boot`
+  types its param `never` (contravariant top, same trick as
+  `RepoFactories`); `ProvidesOf` must split `undefined` off the
+  optional `boot` and map void-only boots to `{}` — a `never` arm
+  poisons the provides intersection. backend-test migrated
+  (core/feature.ts DELETED, 11 features + gateway on the package):
+  typecheck 0, vitest 274/0, `dot explain` byte-identical 16-unit
+  graph, live smoke orpc 200 / fleet 401 / clean dispose;
+  `@arki/feature` ships its own 8-test contract suite. Template sync
+  (Phase 6 row) shipped in the same pass. The **kapodopera stretch is
+  re-scoped**: the RFC's premise ("swap the hand-rolled worker
+  bootstrap") does not hold — kapodopera has NO dot app, its cinema
+  plugins are authored but never mounted, `src/jobs.ts` has no
+  consumer, and its vitest baseline is red (426 projection-context
+  failures in `_shared` verticals — `context.db` undefined at the
+  `__setProjectionTarget` seam — pre-existing, files untouched by this
+  session; same dependency-drift cluster as queue's BullMQ
+  colon-name/cron-padding failures and db's env-precedence failure).
+  Deleting `__setProjectionTarget` requires the event store + 40-odd
+  projections to boot through a dot graph that does not exist yet:
+  that is a full backend-on-feature migration (bus.ts is a 280-line
+  hand assembly) — its own lane, to be run on `@arki/feature` from
+  day one, after the red baseline is triaged.
 - **Date:** 2026-07-07
 - **Author:** Claude (session fbbe6be7), from the 2026-07-07 feature-pips
   design conversation
@@ -836,9 +924,9 @@ A. **`useAll(pips)` builder addition** — ~~defer~~ — **RESOLVED 2026-07-07
 | 2 | Schema layer: `composeSchema()` in `@arki/db` (typed-identity spread, compile-time duplicate-key rejection **+ runtime duplicate check** — Rev 6, type-test suite proving zero type loss: `$inferSelect`/RQB inference identical to a hand-written object) + `createUnitOfWork()` in `@arki/db` (Rev 6: db.transaction + per-feature tx-scope instantiation, full inference) + drizzle-kit glob recipe + leaf-layering rule in docs | a two-feature test schema composes with full inference; a duplicate table key fails at compile AND dev runtime; `drizzle-kit generate` output identical to the monolithic entrypoint; a two-feature `uow` write commits/rolls back atomically with typed scopes | code SHIPPED 784165562c (uow test fixed post-review); drizzle-kit glob recipe + leaf-rule docs PENDING |
 | 3 | Queue seam: `queueActions()` covering **jobs + queue-schedules + flows** (Rev 6) + feature mode `queueRuntime({ q, features, needs, context })` (slice = full `QueueRegistry`; `context` factory statically checked against the builder's context type — new overload, Rev 6 — and run inside the guarded start; mode exclusivity vs `{ registry, start }`) + producer-service convention documented + tests (guarded start, degradation, context type-check, E016 non-collision, schedule/flow action derivation) | a feature pip contributes consumers, a queue-cron, and a flow with zero app-level runtime assembly; kapodopera-style job files compile unchanged; actions attribute to the feature in `dot explain` | SHIPPED 784165562c + same-day fix: context resolved once inside guarded start (regression test added) |
 | 4 | Slice protocol: `features:` on `http()` (routes incl. **rpc mounts** — Rev 7: static `rpcMount` contract + boot-bound handlers, derivers run before dispatch), `schedule()` (context via `ScheduleDef` generics), and `eventSourcing()` (**es slice**); Feature-slices chapter in `adapter-authoring.md`; schema-composition + uow recipes in `packages/db/README.md` | ONE feature token consumed by three activators in a test app; provide-site slice-type tests (typo/excess-key = compile error); empty-contribution debug log observed; an rpc mount receives derived ctx | SHIPPED — 784165562c (routes/schedules) + this session (rpc mounts w/ 5 engine tests; `eventSourcing({features})` w/ skip-empty test; both docs). Remaining exit assertion (one token → three activators in a single test app) rides Phase 5's proving ground |
-| 5 | Proving ground: novelette — split `buildRuntimeConfig` into feature pips providing services (story-generation, image-pipeline), one `context` factory replaces `WorkerDependencies` assembly, delete `pips/queue-runtime.ts` scaffolding, i18n staleness schedule moves into its feature. Stretch (Rev 6): kapodopera swaps its hand-rolled worker bootstrap for `queueRuntime` feature mode (zero job-file diffs expected) AND deletes the `__setProjectionTarget` test hack via boot-time projection factories | `dot explain` renders novelette as a feature map; four degradation postures (Redis × R2 creds) byte-identical; e2e green | SHIPPED (novelette; this session): three feature pips (story-generation w/ `storyLifecycle` provide + kv need, image-pipeline w/ boot-safe factory export, i18n w/ schedules slice), `useAll` in the app file, `queueRuntime`/`schedule` feature modes live, backend lifecycle scaffolding deleted (jobs.ts −60 lines), 3 backend subpath exports added. Verified: `dot explain` = feature map (12 actions, all feature-attributed, activators declare zero); degraded posture live-proven (missing R2 creds → context factory throws INSIDE guarded start → HTTP-only, health 200 at ~2s, graceful SIGTERM drain — exact debug line captured); e2e 37/37 green (2 initial failures were the documented `NOVELETTE_ENABLE_E2E_AUTH_SEAMS` run requirement, not the migration). Remaining posture cells (Redis down ×2, creds present ×2) hold by construction + package regression tests, not re-run live. Kapodopera stretch NOT attempted — still open |
+| 5 | Proving ground: novelette — split `buildRuntimeConfig` into feature pips providing services (story-generation, image-pipeline), one `context` factory replaces `WorkerDependencies` assembly, delete `pips/queue-runtime.ts` scaffolding, i18n staleness schedule moves into its feature. Stretch (Rev 6): kapodopera swaps its hand-rolled worker bootstrap for `queueRuntime` feature mode (zero job-file diffs expected) AND deletes the `__setProjectionTarget` test hack via boot-time projection factories | `dot explain` renders novelette as a feature map; four degradation postures (Redis × R2 creds) byte-identical; e2e green | SHIPPED (novelette; this session): three feature pips (story-generation w/ `storyLifecycle` provide + kv need, image-pipeline w/ boot-safe factory export, i18n w/ schedules slice), `useAll` in the app file, `queueRuntime`/`schedule` feature modes live, backend lifecycle scaffolding deleted (jobs.ts −60 lines), 3 backend subpath exports added. Verified: `dot explain` = feature map (12 actions, all feature-attributed, activators declare zero); degraded posture live-proven (missing R2 creds → context factory throws INSIDE guarded start → HTTP-only, health 200 at ~2s, graceful SIGTERM drain — exact debug line captured); e2e 37/37 green (2 initial failures were the documented `NOVELETTE_ENABLE_E2E_AUTH_SEAMS` run requirement, not the migration). Remaining posture cells (Redis down ×2, creds present ×2) hold by construction + package regression tests, not re-run live. Kapodopera stretch RE-SCOPED in Rev 10: premise doesn't hold (no dot app exists; plugins unmounted; jobs.ts unconsumed; red vitest baseline at the exact `__setProjectionTarget` seam) — promoted to its own backend-on-feature migration lane |
 | 5b | Proving ground 2 (Rev 8, founder): `apps/novelette/backend-test` — the whole backend library rebuilt "entirely on pips": types-only `db.ts` (`Db = DbServices<typeof relations>['db']` — provider-anchored, no instance), `schema.ts` via `composeSchema` (8 slices), 9 feature pips (story/image/i18n/events/universe/style/consent/auth/fleet — fleet converts a start-app-mounted handler into a route-contributing pip), api pip serving the statically-merged `appRouter` via `rpcMount` with `createContext` assembled from graph services (`Context` shape preserved so routers need zero edits), `schedule({ features: [I18n] })` with context-typed `ScheduleDef`, integration tests ported from singleton dynamic-imports to a memoized test composition root (`core/__tests__/test-instances.ts`) | typecheck green with routers untouched; `dot explain` renders a feature map; a live boot round-trips a real procedure; full vitest suite green | SHIPPED (this session): typecheck green, ZERO router edits; `dot explain`: 14 pips, 11 actions all feature-attributed (image ×6, story ×2, i18n/fleet/api ×1), activators own nothing, api's needs list is the visible cross-feature seam; live smoke on :3998 — `audience.detect` 200 through engine → rpc binding → `createContext` (better-auth getSession on the pip db) → oRPC middleware → handler; fleet fail-closed 401 (FOREMAN_TOKEN unset); clean dispose; vitest 269 passed / 0 failed on real testcontainers; lint adds 0 findings over the copied 113-error baseline. Includes the `@arki/http` engine fix (rpc mounts pass the ORIGINAL request, `replaceRequest: false`) found by the live probe. Founder-review follow-ups, same day: the relations god object dissolved into feature-owned fragments (`relations.ts` beside each `tables.ts` leaf, typed via a derived `SchemaRelationsBuilder`, composed by ONE `defineRelations` call through `composeSchema` — duplicate table claims are compile errors; drizzle's `defineRelationsPart` investigated and REJECTED: each part runs its own `processRelations` pass and nothing recombines parts into the single graph `drizzle({relations})` mounts); and the fleet adapter seam extracted to **`@arki/admin/http`** (`fleetSnapshotRoute` static contract + `fleetRoutes({token, snapshot})` ready bundle; `@arki/http` optional peer per the /dot-adapter pattern) — the general-primitive rule applied, since that glue would otherwise be stamped into every DOT app's fleet pip. **Single-list membership (founder: "why define them again?"):** each feature's `pip.ts` exports a `FeatureRecord = { pip, rpc? }`; `src/features.ts` is the ONE membership tuple; `app.ts` derives `useAll(pips(features))` and `api.ts` derives `appRouter = mergeRpc(features)` — value AND `AppRouter` type from the same fold (fragments stay static, so oRPC client inference is exact; proven by per-key `toEqualTypeOf` tests), duplicate mount keys throw at module load; router-only features (admin, audience-segment) got metadata-only pips (kapodopera precedent) so they finally appear in `dot explain` (16 pips). Boot-collected fragments + `ServicesOf<typeof app>` type derivation was considered and rejected: still needs a static list for the type, risks the known oRPC TS7056 depth trap, and forces the tester to boot the app. **Request lifetime named:** `core/context.ts` is now types-only (like `db.ts`) — `Context` is the compile-time contract `os.$context<Context>()` needs; the per-request VALUE assembly (session lookup + services closure) moved into the api pip's rpc `context` callback, killing `createContext`/`ContextServices` exports. Three lifetimes, three homes: compile = modules, boot = pips, request = the api pip's context factory. **Repos leave the graph (Rev 5 revision, founder: "AppRepo same"):** repositories are pure products of the db handle — no lifecycle, so by the kernel's own boundary rule ("if it doesn't need boot, it doesn't need a pip") they were never services; `FeatureRecord` gains `repos: { story: createStoryRepository }` and `buildRepos(features, db)` folds them at the consumption seams (api pip boot + the tester's per-transaction re-fold — one source for both). Api pip needs shrink to `db, kv, auth, eventStore`; universe/style/consent pips become metadata-only; story/image/i18n keep only their slice provides. `AppRepo` itself CANNOT reference `BuiltRepos<typeof features>` (records carry router types → routers typed with `Context` → circular definition), so the derivation is enforced one module away: `expectTypeOf<BuiltRepos<typeof features>>().toEqualTypeOf<AppRepo>()` in the derivation test — drift in either direction fails the suite |
-| 6 | Template sync + docs: `turbo/generators/templates/application/` gains the feature-pip layout (`core/pips.ts`, `core/schema.ts` + one feature with `tables.ts` leaf); pips-RFC cross-references updated | new-app scaffold ships a feature pip example | — |
+| 6 | Template sync + docs: `turbo/generators/templates/application/` gains the feature-pip layout (`core/pips.ts`, `core/schema.ts` + one feature with `tables.ts` leaf); pips-RFC cross-references updated | new-app scaffold ships a feature pip example | SHIPPED (Rev 10 scope: the AUTHORING pattern, not the topology — the template backend stays a start-consumed library): `features/auth/feature.ts` (`defineFeature` example), `src/features.ts` single list, `api.ts` = `composeRouter(features)`, `db.ts` repos = `composeRepos(features, db)` with the hand-listed `AppRepositories` cutting the router↔context type cycle (same pin pattern as backend-test), `@arki/feature` dep added; template typechecks clean. Full dot-app topology for the template rides the promotion decision |
 
 Public promotion of the touched packages remains governed by the pips
 RFC's Phase 4 (peer-major-bump watch point included).
