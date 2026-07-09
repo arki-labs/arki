@@ -38,7 +38,7 @@ import { kv } from '@arki/kv/dot';        // kv plugin
 const app = await defineApp('orders')
   .use(env({ schema: { /* ... */ } }))     // 1st plugin — provides services.env
   .use(db({ relations }))                  // 2nd plugin — provides services.db
-  .use(kv({ url: process.env.KV_URL! }))   // 3rd plugin — provides services.kv
+  .use(kv(() => ({ url: process.env.KV_URL }))) // 3rd — services.kv; env read at boot, not import
   .boot();                                  // plugins boot in declaration order
 
 await app.services.db.query(/* ... */);

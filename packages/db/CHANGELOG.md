@@ -1,5 +1,11 @@
 # @arki/db
 
+## 0.1.7
+
+### Patch Changes
+
+- Docs-only: READMEs updated to the plugin() nomenclature (the pip → plugin rename shipped in @arki/dot 0.4.0); examples import from `@arki/dot/plugin`.
+
 ## 0.1.6
 
 ### Patch Changes

@@ -78,7 +78,7 @@ const postId = idFactory.next();
 
 The schema has a different lifetime than runtime services: `drizzle-kit`
 imports tables statically, and `Db = typeof db` must exist before any DOT
-pip runs. Schema is therefore **module-composed, never runtime-contributed**.
+plugin runs. Schema is therefore **module-composed, never runtime-contributed**.
 The layout:
 
 ```text
@@ -114,7 +114,7 @@ export default defineConfig({
 
 The layering rule that keeps the module graph a DAG: `tables.ts` imports
 nothing from `core/`; `core/schema.ts` imports only leaves; feature code
-imports its own leaves plus the app's pip factory.
+imports its own leaves plus the app's plugin factory.
 
 ### Cross-feature transactions: `createUnitOfWork`
 
