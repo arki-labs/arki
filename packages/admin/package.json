@@ -2,7 +2,7 @@
   "name": "@arki/admin",
   "private": true,
   "version": "0.0.2",
-  "description": "Fleet administration contract for ARKI apps \u2014 the shared snapshot schema, app-side request handler, and Foreman-side federation client behind admin.fork.works.",
+  "description": "Fleet administration contract for ARKI apps — the shared snapshot schema, app-side request handler, and Foreman-side federation client behind admin.fork.works.",
   "license": "MIT",
   "type": "module",
   "repository": {
