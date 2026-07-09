@@ -1,0 +1,54 @@
+{
+  "name": "@arki/slugify",
+  "version": "0.0.2",
+  "description": "URL-safe slug generation with multi-language transliteration rules — extends @sindresorhus/slugify with curated rule sets for Arabic, Armenian, Cyrillic, Greek, and 15+ other scripts.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "slug",
+    "slugify",
+    "url",
+    "transliteration",
+    "i18n"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@node-rs/jieba": "^2.0.1",
+    "@sindresorhus/slugify": "^3.0.0",
+    "pinyin": "4.0.0",
+    "segmentit": "^2.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

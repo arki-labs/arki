@@ -1,0 +1,51 @@
+{
+  "name": "@arki/feature",
+  "version": "0.0.1",
+  "description": "Feature declarations for ARKI backends — one defineFeature() call per domain module carrying its router fragments, repository factories, and boot-time slices; compile-time composition helpers; and a DOT seam that plugs features into a kernel app.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "feature",
+    "composition",
+    "dot"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./dot": {
+      "types": "./dist/dot.d.ts",
+      "import": "./dist/dot.js",
+      "default": "./dist/dot.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "peerDependencies": {
+    "@arki/dot": "^0.4.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
