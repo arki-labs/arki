@@ -1,5 +1,8 @@
 import { defineConfig, devices, type PlaywrightTestConfig } from '@playwright/test';
 
+/** A single `webServer` entry (as opposed to the array-of-entries variant). */
+type WebServerConfig = Exclude<PlaywrightTestConfig['webServer'], undefined | null | unknown[]>;
+
 /**
  * Options for customizing the shared Playwright configuration.
  * All fields are optional; sensible defaults are applied for every field.
@@ -37,6 +40,15 @@ interface PlaywrightConfigOptions {
    * These are spread last, allowing full escape-hatch customization.
    */
   overrides?: Omit<PlaywrightTestConfig, 'testDir' | 'use' | 'projects' | 'webServer'>;
+
+  /**
+   * Additional web servers (e.g. a background worker) started alongside the
+   * primary dev server. Appended after the primary entry; Playwright waits
+   * for each `url` before running tests. Defaults to `[]` — every existing
+   * consumer that omits this option keeps the identical single-object
+   * `webServer` behavior as before (zero behavior change).
+   */
+  extraWebServers?: WebServerConfig[];
 }
 
 /**
@@ -68,6 +80,7 @@ function createPlaywrightConfig(options: PlaywrightConfigOptions = {}) {
     extraProjects = [],
     use = {},
     overrides = {},
+    extraWebServers = [],
   } = options;
 
   const resolvedWebServerUrl = webServerUrl ?? baseURL;
@@ -92,12 +105,23 @@ function createPlaywrightConfig(options: PlaywrightConfigOptions = {}) {
       },
       ...extraProjects,
     ],
-    webServer: {
-      command: webServerCommand,
-      url: resolvedWebServerUrl,
-      reuseExistingServer: !process.env.CI,
-      timeout: webServerTimeout,
-    },
+    webServer:
+      extraWebServers.length > 0
+        ? [
+            {
+              command: webServerCommand,
+              url: resolvedWebServerUrl,
+              reuseExistingServer: !process.env.CI,
+              timeout: webServerTimeout,
+            },
+            ...extraWebServers,
+          ]
+        : {
+            command: webServerCommand,
+            url: resolvedWebServerUrl,
+            reuseExistingServer: !process.env.CI,
+            timeout: webServerTimeout,
+          },
     ...overrides,
   });
 }
