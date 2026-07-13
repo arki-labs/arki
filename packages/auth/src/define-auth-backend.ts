@@ -68,6 +68,13 @@ export type DefineAuthBackendOptions = {
       token: string;
       request?: Request;
     }) => Promise<void> | void;
+
+    /**
+     * When `true`, magic-link requests for a non-existent email are refused
+     * instead of auto-creating a user (magic-link becomes sign-in-only).
+     * Forwarded verbatim to Better Auth's `magicLink({ disableSignUp })`.
+     */
+    disableSignUp?: boolean;
   };
 
   socialProviders?: {
@@ -185,6 +192,7 @@ export function defineAuthBackend(options: DefineAuthBackendOptions) {
     ...(magicLinkConfig
       ? [
           magicLink({
+            disableSignUp: magicLinkConfig.disableSignUp,
             sendMagicLink: async ({ email, url, token }, ctx) => {
               await magicLinkConfig.send({ email, url, token, request: ctx?.request });
             },
