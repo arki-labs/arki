@@ -122,8 +122,8 @@ async function callCloudflareApi(
     const raw = await response.json().catch(() => null);
     const parseResult = raw != null ? CloudflareResponseSchema.safeParse(raw) : null;
 
-    if (!response.ok || !parseResult || !parseResult.success) {
-      // Either HTTP error, no body, or body didn't match expected shape.
+    if (!parseResult || !parseResult.success) {
+      // No body, non-JSON body, or a shape we don't recognize.
       const errorMessage = !response.ok
         ? `HTTP ${response.status}`
         : !parseResult
@@ -138,12 +138,47 @@ async function callCloudflareApi(
     const parsed = parseResult.data;
 
     if (parsed.success === false) {
+      // A CF-shaped error body is more precise than the bare HTTP status —
+      // callers classify retryability by CF error code (e.g. 10004 rate-limit).
       const errorMessage = parsed.errors[0]
-        ? `${parsed.errors[0].message} (code=${parsed.errors[0].code ?? 'unknown'})`
+        ? `${parsed.errors[0].message} (code=${parsed.errors[0].code})`
         : `HTTP ${response.status}`;
       return {
         data: null,
         error: { message: errorMessage, name: 'CloudflareEmailServiceError' },
+      };
+    }
+
+    if (!response.ok) {
+      // Defensive: HTTP error status with a success-shaped body.
+      return {
+        data: null,
+        error: { message: `HTTP ${response.status}`, name: 'CloudflareEmailServiceError' },
+      };
+    }
+
+    if (parsed.result.permanent_bounces.length > 0) {
+      debugEmails(
+        '[cloudflare-email-service] Permanent bounces: %o',
+        parsed.result.permanent_bounces,
+      );
+    }
+
+    // Every recipient permanently bounced and nothing was delivered or queued:
+    // the message went nowhere. Surface as an error so callers (send-digest,
+    // auth email throws) treat it as a failed send instead of logging a
+    // synthetic empty id as success.
+    if (
+      parsed.result.delivered.length === 0 &&
+      parsed.result.queued.length === 0 &&
+      parsed.result.permanent_bounces.length > 0
+    ) {
+      return {
+        data: null,
+        error: {
+          message: `permanent bounce: ${parsed.result.permanent_bounces.join(', ')}`,
+          name: 'CloudflareEmailServicePermanentBounce',
+        },
       };
     }
 
@@ -154,13 +189,6 @@ async function callCloudflareApi(
       : parsed.result.queued[0]
         ? `cf-queued:${parsed.result.queued[0]}`
         : '';
-
-    if (parsed.result.permanent_bounces.length > 0) {
-      debugEmails(
-        '[cloudflare-email-service] Permanent bounces: %o',
-        parsed.result.permanent_bounces,
-      );
-    }
 
     return { data: { id }, error: null };
   } catch (err) {
@@ -189,6 +217,13 @@ async function callCloudflareApi(
  *   downstream contract still has something to log.
  * - `reply_to` is a single address (not an array) per the docs.
  * - Attachments must be base64-encoded in the request body.
+ * - Per-recipient outcomes are NOT individually surfaced: a send that reached
+ *   AT LEAST ONE recipient (delivered or queued) returns success with the
+ *   first delivered/queued recipient's synthetic id; permanently bounced
+ *   recipients are debug-logged only (CF also suppresses them account-side).
+ *   Only when EVERY recipient permanently bounced does `send` return an
+ *   error (`CloudflareEmailServicePermanentBounce`). Callers that need
+ *   per-recipient delivery guarantees must send one recipient per call.
  *
  * @example
  * ```ts

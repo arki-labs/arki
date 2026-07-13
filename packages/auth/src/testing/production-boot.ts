@@ -22,7 +22,14 @@ import { expect, vi } from 'vitest';
 
 import type { DefinedAuth } from '../define-auth-backend';
 
-const MUTATED_ENV_KEYS = ['NODE_ENV', 'DATABASE_URL', 'DB_URL', 'AUTH_SECRET', 'RESEND_API_KEY'] as const;
+const MUTATED_ENV_KEYS = [
+  'NODE_ENV',
+  'DATABASE_URL',
+  'DB_URL',
+  'AUTH_SECRET',
+  'CLOUDFLARE_ACCOUNT_ID',
+  'CLOUDFLARE_EMAIL_API_TOKEN',
+] as const;
 
 /**
  * Prepare process.env so a dynamic auth-module import evaluates as a production
@@ -32,7 +39,10 @@ const MUTATED_ENV_KEYS = ['NODE_ENV', 'DATABASE_URL', 'DB_URL', 'AUTH_SECRET', '
  *   (`NODE_ENV !== 'production'`) does NOT fire.
  * - Bridges DB_URL → DATABASE_URL (`@arki/testing` global setup sets DB_URL; app
  *   env schemas read DATABASE_URL — only strict production validation exposes it).
- * - Stubs RESEND_API_KEY so app env schemas that require it at import validate.
+ * - Stubs CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_EMAIL_API_TOKEN so app env
+ *   schemas that require them at import validate (avocabo, D-ING-021). The
+ *   former RESEND_API_KEY stub was removed 2026-07-13 — no app env requires
+ *   it anymore.
  * - Stubs DB_URL + AUTH_SECRET for apps WITHOUT a testcontainer (D-09). Flipping to
  *   production re-enables strict `@arki/db/env` (DB_URL) + `@arki/auth/env`
  *   (AUTH_SECRET) validation that `NODE_ENV==='test'` was skipping; testcontainer
@@ -49,7 +59,8 @@ export function applyProductionBootEnv(): () => void {
     process.env.DATABASE_URL = process.env.DB_URL;
   }
   process.env.NODE_ENV = 'production';
-  process.env.RESEND_API_KEY ??= 'test_resend_key';
+  process.env.CLOUDFLARE_ACCOUNT_ID ??= 'test-cf-account-id';
+  process.env.CLOUDFLARE_EMAIL_API_TOKEN ??= 'test-cf-email-token';
   process.env.DB_URL ??= 'postgres://user:pass@localhost:5432/prod_boot_test';
   process.env.AUTH_SECRET ??= 'prod-boot-test-secret-at-least-32-characters-long';
   return () => {
