@@ -182,13 +182,25 @@ async function callCloudflareApi(
       };
     }
 
+    // Success response accounting for NO recipient at all (delivered, queued,
+    // AND permanent_bounces all empty — the bounce guard above already caught
+    // the bounced case): the outcome is unknown. Error instead of a synthetic
+    // empty-id success, per the JSDoc contract (L3.review M-2).
+    if (parsed.result.delivered.length === 0 && parsed.result.queued.length === 0) {
+      return {
+        data: null,
+        error: {
+          message: 'CF: success response with no delivered, queued, or bounced recipients',
+          name: 'CloudflareEmailServiceError',
+        },
+      };
+    }
+
     // CF Email Service returns per-recipient delivery status, not a message ID.
     // Synthesise an ID from delivered[0] so downstream consumers have something to log.
     const id = parsed.result.delivered[0]
       ? `cf:${parsed.result.delivered[0]}`
-      : parsed.result.queued[0]
-        ? `cf-queued:${parsed.result.queued[0]}`
-        : '';
+      : `cf-queued:${parsed.result.queued[0]}`;
 
     return { data: { id }, error: null };
   } catch (err) {

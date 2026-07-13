@@ -153,6 +153,29 @@ describe('cloudflareEmailServiceProvider.send', () => {
     expect(result).toEqual({ data: { id: 'cf:ok@example.com' }, error: null });
   });
 
+  it('all-empty result: delivered, queued, AND permanent_bounces empty → error (unknown outcome), never id:"" success', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse(200, {
+        success: true,
+        errors: [],
+        messages: [],
+        result: { delivered: [], permanent_bounces: [], queued: [] },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await provider.send(payload);
+
+    // WHY (L3.review M-2): CF reported success but accounted for no
+    // recipient at all — the outcome is unknown. Callers must not
+    // markAsSent on a synthetic empty id.
+    expect(result.data).toBeNull();
+    expect(result.error).toEqual({
+      message: 'CF: success response with no delivered, queued, or bounced recipients',
+      name: 'CloudflareEmailServiceError',
+    });
+  });
+
   it('rate limit: HTTP 429 with a CF error body surfaces code=10004 for retry classification', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       jsonResponse(429, {
