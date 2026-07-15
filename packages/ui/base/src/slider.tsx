@@ -25,6 +25,7 @@ function Slider({
   onValueChange,
   onValueCommitted,
   onValueCommit,
+  'aria-label': ariaLabel,
   ...props
 }: SliderProps) {
   const _values = React.useMemo(
@@ -60,6 +61,9 @@ function Slider({
           <SliderPrimitive.Thumb
             data-slot="slider-thumb"
             key={index}
+            // aria-label on the Root lands on a role-less div; the accessible
+            // name must reach the input BaseUI renders inside each thumb.
+            getAriaLabel={ariaLabel ? () => ariaLabel : undefined}
             className="border-primary bg-background ring-ring/20 block size-4 shrink-0 rounded-full border shadow-xs transition-[color,box-shadow] hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
           />
         ))}
