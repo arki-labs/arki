@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const debugEmailsMock = vi.hoisted(() => vi.fn());
+vi.mock('../debug', () => ({ debugEmails: debugEmailsMock }));
+
 // The schema is the load-bearing piece — if it doesn't accept real CF responses
 // and reject malformed ones, the safeParse layer in callCloudflareApi is decorative.
 import {
@@ -207,5 +210,53 @@ describe('cloudflareEmailServiceProvider.send', () => {
       message: 'fetch failed',
       name: 'CloudflareEmailServiceError',
     });
+  });
+});
+
+function successResponse(): Response {
+  return jsonResponse(200, {
+    success: true,
+    errors: [],
+    messages: [],
+    result: { delivered: ['reader@example.com'], permanent_bounces: [], queued: [] },
+  });
+}
+
+describe('cloudflareEmailServiceProvider dropped-field handling (issue 13 M1)', () => {
+  it('debug-logs the dropped-tag COUNT (never content — PII guard) and omits tags from the request body', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(successResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    debugEmailsMock.mockClear();
+
+    await provider.send({ ...payload, tags: [{ name: 'category', value: 'digest' }] });
+
+    expect(debugEmailsMock).toHaveBeenCalledWith(
+      expect.stringContaining('[cloudflare-email-service] %d tags dropped'),
+      1,
+    );
+    const bodyRaw = fetchMock.mock.calls[0]?.[1]?.body;
+    expect(typeof bodyRaw).toBe('string');
+    const body: unknown = JSON.parse(bodyRaw as string);
+    expect(Object.keys(body as Record<string, unknown>)).not.toContain('tags');
+  });
+
+  it('debug-logs dropped scheduledAt and react', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(successResponse());
+    vi.stubGlobal('fetch', fetchMock);
+    debugEmailsMock.mockClear();
+
+    await provider.send({
+      ...payload,
+      scheduledAt: '2026-08-01T09:00:00Z',
+      react: 'pretend-react-node',
+    });
+
+    expect(debugEmailsMock).toHaveBeenCalledWith(
+      expect.stringContaining('[cloudflare-email-service] scheduledAt dropped'),
+      '2026-08-01T09:00:00Z',
+    );
+    expect(debugEmailsMock).toHaveBeenCalledWith(
+      expect.stringContaining('[cloudflare-email-service] react dropped'),
+    );
   });
 });

@@ -269,6 +269,24 @@ export function cloudflareEmailServiceProvider(options: {
         payload.subject,
       );
 
+      // The CF Email Sending API has no tag, schedule, or react concept —
+      // make the drops visible in debug logs (issue 13 M1). Log the COUNT
+      // only, never tag content: `payload.tags` may carry PII from a future
+      // caller and this is a shared lib (plan-review gate fold 1). The
+      // length guard keeps an empty `[]` from emitting a misleading line.
+      if (payload.tags?.length) {
+        debugEmails('[cloudflare-email-service] %d tags dropped (no CF tag support)', payload.tags.length);
+      }
+      if (payload.scheduledAt !== undefined) {
+        debugEmails(
+          '[cloudflare-email-service] scheduledAt dropped (no CF scheduled delivery): %s',
+          payload.scheduledAt,
+        );
+      }
+      if (payload.react != null) {
+        debugEmails('[cloudflare-email-service] react dropped (pre-render to html; react is Resend-only)');
+      }
+
       const body: CloudflarePayload = {
         from: payload.from,
         to: payload.to,

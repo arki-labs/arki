@@ -82,6 +82,20 @@ export function sesProvider(options: {
         ? Object.entries(payload.headers).map(([Name, Value]) => ({ Name, Value }))
         : undefined;
 
+      // SES carries tags natively as EmailTags ({ Name, Value }[]). Names and
+      // values are constrained by SES to ASCII alphanumerics, `_`, `-` (≤ 256
+      // chars) — passed through unsanitized; a violating tag fails the send and
+      // surfaces via the existing catch below (issue 13 M1).
+      const emailTags = payload.tags?.map(({ name, value }) => ({ Name: name, Value: value }));
+
+      // Fields SES genuinely cannot carry — make the drop visible in debug logs.
+      if (payload.scheduledAt !== undefined) {
+        debugEmails('[ses] scheduledAt dropped (SES v2 SendEmail has no scheduled delivery): %s', payload.scheduledAt);
+      }
+      if (payload.react != null) {
+        debugEmails('[ses] react dropped (SES requires pre-rendered html)');
+      }
+
       const command = new SendEmailCommand({
         FromEmailAddress: payload.from,
         Destination: {
@@ -90,6 +104,7 @@ export function sesProvider(options: {
           BccAddresses: toAddresses(payload.bcc),
         },
         ReplyToAddresses: toAddresses(payload.replyTo),
+        ...(emailTags ? { EmailTags: emailTags } : {}),
         Content: {
           Simple: {
             Subject: { Data: payload.subject, Charset: 'UTF-8' },
