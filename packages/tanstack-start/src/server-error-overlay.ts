@@ -78,9 +78,13 @@ function errorResponse(request: Request, error: Error, kind: string): Response {
 
 function renderDevErrorPage(error: Error, request: Request, kind: string): string {
   const stack = error.stack ?? '(no stack)';
+  // Cause chains are arbitrary user data: they can be cyclic (e.cause === e)
+  // or unboundedly deep — walk them guarded.
   const causes: string[] = [];
+  const seen = new Set<Error>([error]);
   let current = (error as Error & { cause?: unknown }).cause;
-  while (current instanceof Error) {
+  while (current instanceof Error && !seen.has(current) && causes.length < 10) {
+    seen.add(current);
     causes.push(`${current.name}: ${escapeHtml(current.message)}\n${escapeHtml(current.stack ?? '')}`);
     current = (current as Error & { cause?: unknown }).cause;
   }

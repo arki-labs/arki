@@ -87,9 +87,13 @@ type NormalizedError = {
 
 function normalizeError(error: unknown): NormalizedError {
   if (error instanceof Error) {
+    // Cause chains are arbitrary user data: they can be cyclic (e.cause === e)
+    // or unboundedly deep, and this runs during SSR — walk them guarded.
     const causes: NormalizedError['causes'] = [];
+    const seen = new Set<Error>([error]);
     let current = (error as Error & { cause?: unknown }).cause;
-    while (current instanceof Error) {
+    while (current instanceof Error && !seen.has(current) && causes.length < 10) {
+      seen.add(current);
       causes.push({ name: current.name, message: current.message, stack: current.stack });
       current = (current as Error & { cause?: unknown }).cause;
     }
