@@ -30,10 +30,11 @@ export type GroqServiceConfig = {
  * Groq LLM Service
  *
  * Uses Groq's OpenAI-compatible API for fast inference on open models.
- * Recommended models:
- * - gemma2-9b-it (free tier)
- * - llama-3.1-8b-instant (free tier)
- * - mixtral-8x7b-32768 (free tier)
+ * Recommended models (Groq retired the Llama 3.x fleet — verify against
+ * https://api.groq.com/openai/v1/models before adding new ids):
+ * - openai/gpt-oss-20b (fast, cheap default)
+ * - openai/gpt-oss-120b (larger)
+ * - qwen/qwen3.6-27b
  */
 export class GroqService implements LLMProvider {
   readonly name = 'groq';

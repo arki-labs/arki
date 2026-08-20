@@ -12,7 +12,7 @@
  *
  * To switch providers at runtime, set:
  *   LLM_PROVIDER=anthropic   LLM_MODEL=claude-3-5-haiku-latest
- *   LLM_PROVIDER=groq         LLM_MODEL=llama-3.1-8b-instant
+ *   LLM_PROVIDER=groq         LLM_MODEL=openai/gpt-oss-20b
  *   LLM_PROVIDER=google       LLM_MODEL=gemini-2.0-flash
  *   LLM_PROVIDER=mistral      LLM_MODEL=mistral-small-latest
  */
@@ -37,7 +37,7 @@ import { aiTelemetry } from './telemetry';
 const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
   openai: 'gpt-4o-mini',
   anthropic: 'claude-3-5-haiku-latest',
-  groq: 'llama-3.1-8b-instant',
+  groq: 'openai/gpt-oss-20b',
   google: 'gemini-2.0-flash',
   mistral: 'mistral-small-latest',
 };

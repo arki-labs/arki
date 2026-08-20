@@ -158,6 +158,10 @@ export const LLM_PRICING: Record<string, ModelPricing> = {
     inputPer1k: 0.000_05,
     outputPer1k: 0.000_08,
   },
+  'openai/gpt-oss-20b': {
+    inputPer1k: 0.000_075,
+    outputPer1k: 0.000_3,
+  },
   'mixtral-8x7b-32768': {
     inputPer1k: 0.000_24,
     outputPer1k: 0.000_24,
