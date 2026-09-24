@@ -1,7 +1,7 @@
-import { Icon } from '~/components/icon';
-import { NativeOnlyAnimatedView } from '~/components/native-only-animated-view';
-import { TextClassContext } from '~/components/text';
-import { cn } from '~/lib/cn';
+import { Icon } from './icon';
+import { NativeOnlyAnimatedView } from './native-only-animated-view';
+import { TextClassContext } from './text';
+import { cn } from '../lib/cn';
 import * as MenubarPrimitive from '@rn-primitives/menubar';
 import { Portal } from '@rn-primitives/portal';
 import { Check, CaretDown, CaretRight, CaretUp } from 'phosphor-react-native';
@@ -43,7 +43,7 @@ function Menubar({
 
   function closeMenu() {
     if (onValueChangeProp) {
-      onValueChangeProp();
+      onValueChangeProp(undefined);
       return;
     }
     setValue(undefined);

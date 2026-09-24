@@ -1,6 +1,6 @@
-import { Icon } from '~/components/icon';
-import { NativeOnlyAnimatedView } from '~/components/native-only-animated-view';
-import { cn } from '~/lib/cn';
+import { Icon } from './icon';
+import { NativeOnlyAnimatedView } from './native-only-animated-view';
+import { cn } from '../lib/cn';
 import * as DialogPrimitive from '@rn-primitives/dialog';
 import { X } from 'phosphor-react-native';
 import * as React from 'react';

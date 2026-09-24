@@ -1,5 +1,5 @@
-import { Icon } from '~/components/icon';
-import { cn } from '~/lib/cn';
+import { Icon } from './icon';
+import { cn } from '../lib/cn';
 import * as CheckboxPrimitive from '@rn-primitives/checkbox';
 import { Check } from 'phosphor-react-native';
 import { Platform } from 'react-native';

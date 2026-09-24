@@ -1,7 +1,7 @@
-import { buttonTextVariants, buttonVariants } from '~/components/button';
-import { NativeOnlyAnimatedView } from '~/components/native-only-animated-view';
-import { TextClassContext } from '~/components/text';
-import { cn } from '~/lib/cn';
+import { buttonTextVariants, buttonVariants } from './button';
+import { NativeOnlyAnimatedView } from './native-only-animated-view';
+import { TextClassContext } from './text';
+import { cn } from '../lib/cn';
 import * as AlertDialogPrimitive from '@rn-primitives/alert-dialog';
 import * as React from 'react';
 import { Platform, View  } from 'react-native';

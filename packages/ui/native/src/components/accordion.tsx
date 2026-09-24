@@ -1,6 +1,6 @@
-import { Icon } from '~/components/icon';
-import { TextClassContext } from '~/components/text';
-import { cn } from '~/lib/cn';
+import { Icon } from './icon';
+import { TextClassContext } from './text';
+import { cn } from '../lib/cn';
 import * as AccordionPrimitive from '@rn-primitives/accordion';
 import { CaretDown } from 'phosphor-react-native';
 import { Platform, Pressable, View } from 'react-native';

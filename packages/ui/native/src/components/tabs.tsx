@@ -1,5 +1,5 @@
-import { TextClassContext } from '~/components/text';
-import { cn } from '~/lib/cn';
+import { TextClassContext } from './text';
+import { cn } from '../lib/cn';
 import * as TabsPrimitive from '@rn-primitives/tabs';
 import { Platform } from 'react-native';
 
