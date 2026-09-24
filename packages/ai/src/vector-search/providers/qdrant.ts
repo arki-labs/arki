@@ -382,13 +382,13 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
     const qdrantFilter = filter ? this.buildQdrantFilter(filter) : undefined;
 
     // Perform semantic search
-    const searchResult = await client.search(this.collectionName, {
-      vector: queryVector,
+    const searchResult = (await client.query(this.collectionName, {
+      query: queryVector,
       limit,
       filter: qdrantFilter,
       with_payload: true,
       score_threshold: 0, // Return all results, let caller filter by score
-    });
+    })).points;
 
     debugVector('[Qdrant] Search completed (results: %d)', searchResult.length);
 
@@ -454,13 +454,13 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
           })
         : undefined;
 
-    const searchResult = await client.search(this.collectionName, {
-      vector,
+    const searchResult = (await client.query(this.collectionName, {
+      query: vector,
       limit,
       filter: qdrantFilter,
       with_payload: true,
       score_threshold: 0, // caller filters by score
-    });
+    })).points;
 
     debugVector('[Qdrant] searchByVector completed (results: %d)', searchResult.length);
     return searchResult.map((result) => ({
@@ -500,12 +500,12 @@ export class QdrantVectorProvider<TMetadata = Record<string, unknown>> implement
 
     // Perform semantic search
     debugVector('[Qdrant] Performing semantic search (initial limit: %d)', limit * 2);
-    const searchResult = await client.search(this.collectionName, {
-      vector: queryVector,
+    const searchResult = (await client.query(this.collectionName, {
+      query: queryVector,
       limit: limit * 2, // Get more results for re-ranking
       filter: hybridFilter,
       with_payload: true,
-    });
+    })).points;
     debugVector('[Qdrant] Semantic search completed (results: %d)', searchResult.length);
 
     // Re-rank based on combined score (semantic + keyword match)
