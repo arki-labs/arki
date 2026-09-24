@@ -8,239 +8,239 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from './routes/__root'
-import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
-import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
-import { Route as ManifestDotwebmanifestRouteImport } from './routes/manifest[.]webmanifest'
-import { Route as MarketingRouteImport } from './routes/_marketing'
-import { Route as AppRouteImport } from './routes/_app'
-import { Route as PostsIndexRouteImport } from './routes/posts/index'
-import { Route as FeedbackIndexRouteImport } from './routes/feedback/index'
-import { Route as ChangelogIndexRouteImport } from './routes/changelog/index'
-import { Route as AboutIndexRouteImport } from './routes/about/index'
-import { Route as MarketingIndexRouteImport } from './routes/_marketing/index'
-import { Route as PostsFeedDotxmlRouteImport } from './routes/posts/feed[.]xml'
-import { Route as PostsSlugRouteImport } from './routes/posts/$slug'
-import { Route as LegalSlugRouteImport } from './routes/legal/$slug'
-import { Route as ChangelogFeedDotxmlRouteImport } from './routes/changelog/feed[.]xml'
-import { Route as ChangelogSlugRouteImport } from './routes/changelog/$slug'
-import { Route as BackofficeBackofficeRouteImport } from './routes/backoffice/_backoffice'
-import { Route as AuthPathnameRouteImport } from './routes/auth/$pathname'
-import { Route as ApiHealthRouteImport } from './routes/api/health'
-import { Route as ApiFleetRouteImport } from './routes/api/fleet'
-import { Route as BackofficeBackofficeIndexRouteImport } from './routes/backoffice/_backoffice/index'
-import { Route as AppProfileIndexRouteImport } from './routes/_app/profile/index'
-import { Route as ApiOrpcSplatRouteImport } from './routes/api/orpc.$'
-import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
-import { Route as BackofficeBackofficeEventSourcingIndexRouteImport } from './routes/backoffice/_backoffice/event-sourcing/index'
-import { Route as BackofficeBackofficeEventSourcingProjectionsRouteImport } from './routes/backoffice/_backoffice/event-sourcing/projections'
+import { Route as rootRouteImport } from './routes/__root';
+import { Route as AppRouteImport } from './routes/_app';
+import { Route as MarketingRouteImport } from './routes/_marketing';
+import { Route as ManifestDotwebmanifestRouteImport } from './routes/manifest[.]webmanifest';
+import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt';
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml';
+import { Route as MarketingIndexRouteImport } from './routes/_marketing/index';
+import { Route as AboutIndexRouteImport } from './routes/about/index';
+import { Route as ApiFleetRouteImport } from './routes/api/fleet';
+import { Route as ApiHealthRouteImport } from './routes/api/health';
+import { Route as AuthPathnameRouteImport } from './routes/auth/$pathname';
+import { Route as BackofficeBackofficeRouteImport } from './routes/backoffice/_backoffice';
+import { Route as ChangelogIndexRouteImport } from './routes/changelog/index';
+import { Route as ChangelogSlugRouteImport } from './routes/changelog/$slug';
+import { Route as ChangelogFeedDotxmlRouteImport } from './routes/changelog/feed[.]xml';
+import { Route as FeedbackIndexRouteImport } from './routes/feedback/index';
+import { Route as LegalSlugRouteImport } from './routes/legal/$slug';
+import { Route as PostsIndexRouteImport } from './routes/posts/index';
+import { Route as PostsSlugRouteImport } from './routes/posts/$slug';
+import { Route as PostsFeedDotxmlRouteImport } from './routes/posts/feed[.]xml';
+import { Route as AppProfileIndexRouteImport } from './routes/_app/profile/index';
+import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$';
+import { Route as ApiOrpcSplatRouteImport } from './routes/api/orpc.$';
+import { Route as BackofficeBackofficeIndexRouteImport } from './routes/backoffice/_backoffice/index';
+import { Route as BackofficeBackofficeEventSourcingIndexRouteImport } from './routes/backoffice/_backoffice/event-sourcing/index';
+import { Route as BackofficeBackofficeEventSourcingProjectionsRouteImport } from './routes/backoffice/_backoffice/event-sourcing/projections';
 
-const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
-  id: '/sitemap.xml',
-  path: '/sitemap.xml',
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
   getParentRoute: () => rootRouteImport,
-} as any)
-const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
-  id: '/robots.txt',
-  path: '/robots.txt',
+} as any);
+const MarketingRoute = MarketingRouteImport.update({
+  id: '/_marketing',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const ManifestDotwebmanifestRoute = ManifestDotwebmanifestRouteImport.update({
   id: '/manifest.webmanifest',
   path: '/manifest.webmanifest',
   getParentRoute: () => rootRouteImport,
-} as any)
-const MarketingRoute = MarketingRouteImport.update({
-  id: '/_marketing',
+} as any);
+const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
+  id: '/robots.txt',
+  path: '/robots.txt',
   getParentRoute: () => rootRouteImport,
-} as any)
-const AppRoute = AppRouteImport.update({
-  id: '/_app',
+} as any);
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
   getParentRoute: () => rootRouteImport,
-} as any)
-const PostsIndexRoute = PostsIndexRouteImport.update({
-  id: '/posts/',
-  path: '/posts/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const FeedbackIndexRoute = FeedbackIndexRouteImport.update({
-  id: '/feedback/',
-  path: '/feedback/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ChangelogIndexRoute = ChangelogIndexRouteImport.update({
-  id: '/changelog/',
-  path: '/changelog/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AboutIndexRoute = AboutIndexRouteImport.update({
-  id: '/about/',
-  path: '/about/',
-  getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const MarketingIndexRoute = MarketingIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => MarketingRoute,
-} as any)
-const PostsFeedDotxmlRoute = PostsFeedDotxmlRouteImport.update({
-  id: '/posts/feed.xml',
-  path: '/posts/feed.xml',
+} as any);
+const AboutIndexRoute = AboutIndexRouteImport.update({
+  id: '/about/',
+  path: '/about/',
   getParentRoute: () => rootRouteImport,
-} as any)
-const PostsSlugRoute = PostsSlugRouteImport.update({
-  id: '/posts/$slug',
-  path: '/posts/$slug',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LegalSlugRoute = LegalSlugRouteImport.update({
-  id: '/legal/$slug',
-  path: '/legal/$slug',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ChangelogFeedDotxmlRoute = ChangelogFeedDotxmlRouteImport.update({
-  id: '/changelog/feed.xml',
-  path: '/changelog/feed.xml',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ChangelogSlugRoute = ChangelogSlugRouteImport.update({
-  id: '/changelog/$slug',
-  path: '/changelog/$slug',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const BackofficeBackofficeRoute = BackofficeBackofficeRouteImport.update({
-  id: '/backoffice/_backoffice',
-  path: '/backoffice',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthPathnameRoute = AuthPathnameRouteImport.update({
-  id: '/auth/$pathname',
-  path: '/auth/$pathname',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiHealthRoute = ApiHealthRouteImport.update({
-  id: '/api/health',
-  path: '/api/health',
-  getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
 const ApiFleetRoute = ApiFleetRouteImport.update({
   id: '/api/fleet',
   path: '/api/fleet',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any);
+const ApiHealthRoute = ApiHealthRouteImport.update({
+  id: '/api/health',
+  path: '/api/health',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const AuthPathnameRoute = AuthPathnameRouteImport.update({
+  id: '/auth/$pathname',
+  path: '/auth/$pathname',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const BackofficeBackofficeRoute = BackofficeBackofficeRouteImport.update({
+  id: '/backoffice/_backoffice',
+  path: '/backoffice',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const ChangelogIndexRoute = ChangelogIndexRouteImport.update({
+  id: '/changelog/',
+  path: '/changelog/',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const ChangelogSlugRoute = ChangelogSlugRouteImport.update({
+  id: '/changelog/$slug',
+  path: '/changelog/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const ChangelogFeedDotxmlRoute = ChangelogFeedDotxmlRouteImport.update({
+  id: '/changelog/feed.xml',
+  path: '/changelog/feed.xml',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const FeedbackIndexRoute = FeedbackIndexRouteImport.update({
+  id: '/feedback/',
+  path: '/feedback/',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const LegalSlugRoute = LegalSlugRouteImport.update({
+  id: '/legal/$slug',
+  path: '/legal/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const PostsIndexRoute = PostsIndexRouteImport.update({
+  id: '/posts/',
+  path: '/posts/',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const PostsSlugRoute = PostsSlugRouteImport.update({
+  id: '/posts/$slug',
+  path: '/posts/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const PostsFeedDotxmlRoute = PostsFeedDotxmlRouteImport.update({
+  id: '/posts/feed.xml',
+  path: '/posts/feed.xml',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const AppProfileIndexRoute = AppProfileIndexRouteImport.update({
+  id: '/profile/',
+  path: '/profile/',
+  getParentRoute: () => AppRoute,
+} as any);
+const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
+  id: '/api/auth/$',
+  path: '/api/auth/$',
+  getParentRoute: () => rootRouteImport,
+} as any);
+const ApiOrpcSplatRoute = ApiOrpcSplatRouteImport.update({
+  id: '/api/orpc/$',
+  path: '/api/orpc/$',
+  getParentRoute: () => rootRouteImport,
+} as any);
 const BackofficeBackofficeIndexRoute =
   BackofficeBackofficeIndexRouteImport.update({
     id: '/',
     path: '/',
     getParentRoute: () => BackofficeBackofficeRoute,
-  } as any)
-const AppProfileIndexRoute = AppProfileIndexRouteImport.update({
-  id: '/profile/',
-  path: '/profile/',
-  getParentRoute: () => AppRoute,
-} as any)
-const ApiOrpcSplatRoute = ApiOrpcSplatRouteImport.update({
-  id: '/api/orpc/$',
-  path: '/api/orpc/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
-  id: '/api/auth/$',
-  path: '/api/auth/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
+  } as any);
 const BackofficeBackofficeEventSourcingIndexRoute =
   BackofficeBackofficeEventSourcingIndexRouteImport.update({
     id: '/event-sourcing/',
     path: '/event-sourcing/',
     getParentRoute: () => BackofficeBackofficeRoute,
-  } as any)
+  } as any);
 const BackofficeBackofficeEventSourcingProjectionsRoute =
   BackofficeBackofficeEventSourcingProjectionsRouteImport.update({
     id: '/event-sourcing/projections',
     path: '/event-sourcing/projections',
     getParentRoute: () => BackofficeBackofficeRoute,
-  } as any)
+  } as any);
 
 export interface FileRoutesByFullPath {
-  '/': typeof MarketingIndexRoute
-  '/manifest.webmanifest': typeof ManifestDotwebmanifestRoute
-  '/robots.txt': typeof RobotsDottxtRoute
-  '/sitemap.xml': typeof SitemapDotxmlRoute
-  '/api/fleet': typeof ApiFleetRoute
-  '/api/health': typeof ApiHealthRoute
-  '/auth/$pathname': typeof AuthPathnameRoute
-  '/backoffice': typeof BackofficeBackofficeRouteWithChildren
-  '/changelog/$slug': typeof ChangelogSlugRoute
-  '/changelog/feed.xml': typeof ChangelogFeedDotxmlRoute
-  '/legal/$slug': typeof LegalSlugRoute
-  '/posts/$slug': typeof PostsSlugRoute
-  '/posts/feed.xml': typeof PostsFeedDotxmlRoute
-  '/about/': typeof AboutIndexRoute
-  '/changelog/': typeof ChangelogIndexRoute
-  '/feedback/': typeof FeedbackIndexRoute
-  '/posts/': typeof PostsIndexRoute
-  '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/orpc/$': typeof ApiOrpcSplatRoute
-  '/profile/': typeof AppProfileIndexRoute
-  '/backoffice/': typeof BackofficeBackofficeIndexRoute
-  '/backoffice/event-sourcing/projections': typeof BackofficeBackofficeEventSourcingProjectionsRoute
-  '/backoffice/event-sourcing/': typeof BackofficeBackofficeEventSourcingIndexRoute
+  '/': typeof MarketingIndexRoute;
+  '/manifest.webmanifest': typeof ManifestDotwebmanifestRoute;
+  '/robots.txt': typeof RobotsDottxtRoute;
+  '/sitemap.xml': typeof SitemapDotxmlRoute;
+  '/api/fleet': typeof ApiFleetRoute;
+  '/api/health': typeof ApiHealthRoute;
+  '/auth/$pathname': typeof AuthPathnameRoute;
+  '/backoffice': typeof BackofficeBackofficeRouteWithChildren;
+  '/changelog/$slug': typeof ChangelogSlugRoute;
+  '/changelog/feed.xml': typeof ChangelogFeedDotxmlRoute;
+  '/legal/$slug': typeof LegalSlugRoute;
+  '/posts/$slug': typeof PostsSlugRoute;
+  '/posts/feed.xml': typeof PostsFeedDotxmlRoute;
+  '/about/': typeof AboutIndexRoute;
+  '/changelog/': typeof ChangelogIndexRoute;
+  '/feedback/': typeof FeedbackIndexRoute;
+  '/posts/': typeof PostsIndexRoute;
+  '/api/auth/$': typeof ApiAuthSplatRoute;
+  '/api/orpc/$': typeof ApiOrpcSplatRoute;
+  '/profile/': typeof AppProfileIndexRoute;
+  '/backoffice/': typeof BackofficeBackofficeIndexRoute;
+  '/backoffice/event-sourcing/projections': typeof BackofficeBackofficeEventSourcingProjectionsRoute;
+  '/backoffice/event-sourcing/': typeof BackofficeBackofficeEventSourcingIndexRoute;
 }
 export interface FileRoutesByTo {
-  '/': typeof MarketingIndexRoute
-  '/manifest.webmanifest': typeof ManifestDotwebmanifestRoute
-  '/robots.txt': typeof RobotsDottxtRoute
-  '/sitemap.xml': typeof SitemapDotxmlRoute
-  '/api/fleet': typeof ApiFleetRoute
-  '/api/health': typeof ApiHealthRoute
-  '/auth/$pathname': typeof AuthPathnameRoute
-  '/changelog/$slug': typeof ChangelogSlugRoute
-  '/changelog/feed.xml': typeof ChangelogFeedDotxmlRoute
-  '/legal/$slug': typeof LegalSlugRoute
-  '/posts/$slug': typeof PostsSlugRoute
-  '/posts/feed.xml': typeof PostsFeedDotxmlRoute
-  '/about': typeof AboutIndexRoute
-  '/changelog': typeof ChangelogIndexRoute
-  '/feedback': typeof FeedbackIndexRoute
-  '/posts': typeof PostsIndexRoute
-  '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/orpc/$': typeof ApiOrpcSplatRoute
-  '/profile': typeof AppProfileIndexRoute
-  '/backoffice': typeof BackofficeBackofficeIndexRoute
-  '/backoffice/event-sourcing/projections': typeof BackofficeBackofficeEventSourcingProjectionsRoute
-  '/backoffice/event-sourcing': typeof BackofficeBackofficeEventSourcingIndexRoute
+  '/': typeof MarketingIndexRoute;
+  '/manifest.webmanifest': typeof ManifestDotwebmanifestRoute;
+  '/robots.txt': typeof RobotsDottxtRoute;
+  '/sitemap.xml': typeof SitemapDotxmlRoute;
+  '/api/fleet': typeof ApiFleetRoute;
+  '/api/health': typeof ApiHealthRoute;
+  '/auth/$pathname': typeof AuthPathnameRoute;
+  '/changelog/$slug': typeof ChangelogSlugRoute;
+  '/changelog/feed.xml': typeof ChangelogFeedDotxmlRoute;
+  '/legal/$slug': typeof LegalSlugRoute;
+  '/posts/$slug': typeof PostsSlugRoute;
+  '/posts/feed.xml': typeof PostsFeedDotxmlRoute;
+  '/about': typeof AboutIndexRoute;
+  '/changelog': typeof ChangelogIndexRoute;
+  '/feedback': typeof FeedbackIndexRoute;
+  '/posts': typeof PostsIndexRoute;
+  '/api/auth/$': typeof ApiAuthSplatRoute;
+  '/api/orpc/$': typeof ApiOrpcSplatRoute;
+  '/profile': typeof AppProfileIndexRoute;
+  '/backoffice': typeof BackofficeBackofficeIndexRoute;
+  '/backoffice/event-sourcing/projections': typeof BackofficeBackofficeEventSourcingProjectionsRoute;
+  '/backoffice/event-sourcing': typeof BackofficeBackofficeEventSourcingIndexRoute;
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport
-  '/_app': typeof AppRouteWithChildren
-  '/_marketing': typeof MarketingRouteWithChildren
-  '/manifest.webmanifest': typeof ManifestDotwebmanifestRoute
-  '/robots.txt': typeof RobotsDottxtRoute
-  '/sitemap.xml': typeof SitemapDotxmlRoute
-  '/api/fleet': typeof ApiFleetRoute
-  '/api/health': typeof ApiHealthRoute
-  '/auth/$pathname': typeof AuthPathnameRoute
-  '/backoffice/_backoffice': typeof BackofficeBackofficeRouteWithChildren
-  '/changelog/$slug': typeof ChangelogSlugRoute
-  '/changelog/feed.xml': typeof ChangelogFeedDotxmlRoute
-  '/legal/$slug': typeof LegalSlugRoute
-  '/posts/$slug': typeof PostsSlugRoute
-  '/posts/feed.xml': typeof PostsFeedDotxmlRoute
-  '/_marketing/': typeof MarketingIndexRoute
-  '/about/': typeof AboutIndexRoute
-  '/changelog/': typeof ChangelogIndexRoute
-  '/feedback/': typeof FeedbackIndexRoute
-  '/posts/': typeof PostsIndexRoute
-  '/api/auth/$': typeof ApiAuthSplatRoute
-  '/api/orpc/$': typeof ApiOrpcSplatRoute
-  '/_app/profile/': typeof AppProfileIndexRoute
-  '/backoffice/_backoffice/': typeof BackofficeBackofficeIndexRoute
-  '/backoffice/_backoffice/event-sourcing/projections': typeof BackofficeBackofficeEventSourcingProjectionsRoute
-  '/backoffice/_backoffice/event-sourcing/': typeof BackofficeBackofficeEventSourcingIndexRoute
+  __root__: typeof rootRouteImport;
+  '/_app': typeof AppRouteWithChildren;
+  '/_marketing': typeof MarketingRouteWithChildren;
+  '/manifest.webmanifest': typeof ManifestDotwebmanifestRoute;
+  '/robots.txt': typeof RobotsDottxtRoute;
+  '/sitemap.xml': typeof SitemapDotxmlRoute;
+  '/api/fleet': typeof ApiFleetRoute;
+  '/api/health': typeof ApiHealthRoute;
+  '/auth/$pathname': typeof AuthPathnameRoute;
+  '/backoffice/_backoffice': typeof BackofficeBackofficeRouteWithChildren;
+  '/changelog/$slug': typeof ChangelogSlugRoute;
+  '/changelog/feed.xml': typeof ChangelogFeedDotxmlRoute;
+  '/legal/$slug': typeof LegalSlugRoute;
+  '/posts/$slug': typeof PostsSlugRoute;
+  '/posts/feed.xml': typeof PostsFeedDotxmlRoute;
+  '/_marketing/': typeof MarketingIndexRoute;
+  '/about/': typeof AboutIndexRoute;
+  '/changelog/': typeof ChangelogIndexRoute;
+  '/feedback/': typeof FeedbackIndexRoute;
+  '/posts/': typeof PostsIndexRoute;
+  '/api/auth/$': typeof ApiAuthSplatRoute;
+  '/api/orpc/$': typeof ApiOrpcSplatRoute;
+  '/_app/profile/': typeof AppProfileIndexRoute;
+  '/backoffice/_backoffice/': typeof BackofficeBackofficeIndexRoute;
+  '/backoffice/_backoffice/event-sourcing/projections': typeof BackofficeBackofficeEventSourcingProjectionsRoute;
+  '/backoffice/_backoffice/event-sourcing/': typeof BackofficeBackofficeEventSourcingIndexRoute;
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath
+  fileRoutesByFullPath: FileRoutesByFullPath;
   fullPaths:
     | '/'
     | '/manifest.webmanifest'
@@ -264,8 +264,8 @@ export interface FileRouteTypes {
     | '/profile/'
     | '/backoffice/'
     | '/backoffice/event-sourcing/projections'
-    | '/backoffice/event-sourcing/'
-  fileRoutesByTo: FileRoutesByTo
+    | '/backoffice/event-sourcing/';
+  fileRoutesByTo: FileRoutesByTo;
   to:
     | '/'
     | '/manifest.webmanifest'
@@ -288,7 +288,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/backoffice'
     | '/backoffice/event-sourcing/projections'
-    | '/backoffice/event-sourcing'
+    | '/backoffice/event-sourcing';
   id:
     | '__root__'
     | '/_app'
@@ -315,238 +315,238 @@ export interface FileRouteTypes {
     | '/_app/profile/'
     | '/backoffice/_backoffice/'
     | '/backoffice/_backoffice/event-sourcing/projections'
-    | '/backoffice/_backoffice/event-sourcing/'
-  fileRoutesById: FileRoutesById
+    | '/backoffice/_backoffice/event-sourcing/';
+  fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
-  AppRoute: typeof AppRouteWithChildren
-  MarketingRoute: typeof MarketingRouteWithChildren
-  ManifestDotwebmanifestRoute: typeof ManifestDotwebmanifestRoute
-  RobotsDottxtRoute: typeof RobotsDottxtRoute
-  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
-  ApiFleetRoute: typeof ApiFleetRoute
-  ApiHealthRoute: typeof ApiHealthRoute
-  AuthPathnameRoute: typeof AuthPathnameRoute
-  BackofficeBackofficeRoute: typeof BackofficeBackofficeRouteWithChildren
-  ChangelogSlugRoute: typeof ChangelogSlugRoute
-  ChangelogFeedDotxmlRoute: typeof ChangelogFeedDotxmlRoute
-  LegalSlugRoute: typeof LegalSlugRoute
-  PostsSlugRoute: typeof PostsSlugRoute
-  PostsFeedDotxmlRoute: typeof PostsFeedDotxmlRoute
-  AboutIndexRoute: typeof AboutIndexRoute
-  ChangelogIndexRoute: typeof ChangelogIndexRoute
-  FeedbackIndexRoute: typeof FeedbackIndexRoute
-  PostsIndexRoute: typeof PostsIndexRoute
-  ApiAuthSplatRoute: typeof ApiAuthSplatRoute
-  ApiOrpcSplatRoute: typeof ApiOrpcSplatRoute
+  AppRoute: typeof AppRouteWithChildren;
+  MarketingRoute: typeof MarketingRouteWithChildren;
+  ManifestDotwebmanifestRoute: typeof ManifestDotwebmanifestRoute;
+  RobotsDottxtRoute: typeof RobotsDottxtRoute;
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute;
+  ApiFleetRoute: typeof ApiFleetRoute;
+  ApiHealthRoute: typeof ApiHealthRoute;
+  AuthPathnameRoute: typeof AuthPathnameRoute;
+  BackofficeBackofficeRoute: typeof BackofficeBackofficeRouteWithChildren;
+  ChangelogSlugRoute: typeof ChangelogSlugRoute;
+  ChangelogFeedDotxmlRoute: typeof ChangelogFeedDotxmlRoute;
+  LegalSlugRoute: typeof LegalSlugRoute;
+  PostsSlugRoute: typeof PostsSlugRoute;
+  PostsFeedDotxmlRoute: typeof PostsFeedDotxmlRoute;
+  AboutIndexRoute: typeof AboutIndexRoute;
+  ChangelogIndexRoute: typeof ChangelogIndexRoute;
+  FeedbackIndexRoute: typeof FeedbackIndexRoute;
+  PostsIndexRoute: typeof PostsIndexRoute;
+  ApiAuthSplatRoute: typeof ApiAuthSplatRoute;
+  ApiOrpcSplatRoute: typeof ApiOrpcSplatRoute;
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/sitemap.xml': {
-      id: '/sitemap.xml'
-      path: '/sitemap.xml'
-      fullPath: '/sitemap.xml'
-      preLoaderRoute: typeof SitemapDotxmlRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/robots.txt': {
-      id: '/robots.txt'
-      path: '/robots.txt'
-      fullPath: '/robots.txt'
-      preLoaderRoute: typeof RobotsDottxtRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/manifest.webmanifest': {
-      id: '/manifest.webmanifest'
-      path: '/manifest.webmanifest'
-      fullPath: '/manifest.webmanifest'
-      preLoaderRoute: typeof ManifestDotwebmanifestRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_marketing': {
-      id: '/_marketing'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof MarketingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/_app': {
-      id: '/_app'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AppRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/posts/': {
-      id: '/posts/'
-      path: '/posts'
-      fullPath: '/posts/'
-      preLoaderRoute: typeof PostsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/feedback/': {
-      id: '/feedback/'
-      path: '/feedback'
-      fullPath: '/feedback/'
-      preLoaderRoute: typeof FeedbackIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/changelog/': {
-      id: '/changelog/'
-      path: '/changelog'
-      fullPath: '/changelog/'
-      preLoaderRoute: typeof ChangelogIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/about/': {
-      id: '/about/'
-      path: '/about'
-      fullPath: '/about/'
-      preLoaderRoute: typeof AboutIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/_app';
+      path: '';
+      fullPath: '/';
+      preLoaderRoute: typeof AppRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/_marketing': {
+      id: '/_marketing';
+      path: '';
+      fullPath: '/';
+      preLoaderRoute: typeof MarketingRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/manifest.webmanifest': {
+      id: '/manifest.webmanifest';
+      path: '/manifest.webmanifest';
+      fullPath: '/manifest.webmanifest';
+      preLoaderRoute: typeof ManifestDotwebmanifestRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/robots.txt': {
+      id: '/robots.txt';
+      path: '/robots.txt';
+      fullPath: '/robots.txt';
+      preLoaderRoute: typeof RobotsDottxtRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/sitemap.xml': {
+      id: '/sitemap.xml';
+      path: '/sitemap.xml';
+      fullPath: '/sitemap.xml';
+      preLoaderRoute: typeof SitemapDotxmlRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/_marketing/': {
-      id: '/_marketing/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof MarketingIndexRouteImport
-      parentRoute: typeof MarketingRoute
-    }
-    '/posts/feed.xml': {
-      id: '/posts/feed.xml'
-      path: '/posts/feed.xml'
-      fullPath: '/posts/feed.xml'
-      preLoaderRoute: typeof PostsFeedDotxmlRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/posts/$slug': {
-      id: '/posts/$slug'
-      path: '/posts/$slug'
-      fullPath: '/posts/$slug'
-      preLoaderRoute: typeof PostsSlugRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/legal/$slug': {
-      id: '/legal/$slug'
-      path: '/legal/$slug'
-      fullPath: '/legal/$slug'
-      preLoaderRoute: typeof LegalSlugRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/changelog/feed.xml': {
-      id: '/changelog/feed.xml'
-      path: '/changelog/feed.xml'
-      fullPath: '/changelog/feed.xml'
-      preLoaderRoute: typeof ChangelogFeedDotxmlRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/changelog/$slug': {
-      id: '/changelog/$slug'
-      path: '/changelog/$slug'
-      fullPath: '/changelog/$slug'
-      preLoaderRoute: typeof ChangelogSlugRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/backoffice/_backoffice': {
-      id: '/backoffice/_backoffice'
-      path: '/backoffice'
-      fullPath: '/backoffice'
-      preLoaderRoute: typeof BackofficeBackofficeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/auth/$pathname': {
-      id: '/auth/$pathname'
-      path: '/auth/$pathname'
-      fullPath: '/auth/$pathname'
-      preLoaderRoute: typeof AuthPathnameRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/health': {
-      id: '/api/health'
-      path: '/api/health'
-      fullPath: '/api/health'
-      preLoaderRoute: typeof ApiHealthRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/_marketing/';
+      path: '/';
+      fullPath: '/';
+      preLoaderRoute: typeof MarketingIndexRouteImport;
+      parentRoute: typeof MarketingRoute;
+    };
+    '/about/': {
+      id: '/about/';
+      path: '/about';
+      fullPath: '/about/';
+      preLoaderRoute: typeof AboutIndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/api/fleet': {
-      id: '/api/fleet'
-      path: '/api/fleet'
-      fullPath: '/api/fleet'
-      preLoaderRoute: typeof ApiFleetRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/backoffice/_backoffice/': {
-      id: '/backoffice/_backoffice/'
-      path: '/'
-      fullPath: '/backoffice/'
-      preLoaderRoute: typeof BackofficeBackofficeIndexRouteImport
-      parentRoute: typeof BackofficeBackofficeRoute
-    }
+      id: '/api/fleet';
+      path: '/api/fleet';
+      fullPath: '/api/fleet';
+      preLoaderRoute: typeof ApiFleetRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/api/health': {
+      id: '/api/health';
+      path: '/api/health';
+      fullPath: '/api/health';
+      preLoaderRoute: typeof ApiHealthRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/auth/$pathname': {
+      id: '/auth/$pathname';
+      path: '/auth/$pathname';
+      fullPath: '/auth/$pathname';
+      preLoaderRoute: typeof AuthPathnameRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/backoffice/_backoffice': {
+      id: '/backoffice/_backoffice';
+      path: '/backoffice';
+      fullPath: '/backoffice';
+      preLoaderRoute: typeof BackofficeBackofficeRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/changelog/': {
+      id: '/changelog/';
+      path: '/changelog';
+      fullPath: '/changelog/';
+      preLoaderRoute: typeof ChangelogIndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/changelog/$slug': {
+      id: '/changelog/$slug';
+      path: '/changelog/$slug';
+      fullPath: '/changelog/$slug';
+      preLoaderRoute: typeof ChangelogSlugRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/changelog/feed.xml': {
+      id: '/changelog/feed.xml';
+      path: '/changelog/feed.xml';
+      fullPath: '/changelog/feed.xml';
+      preLoaderRoute: typeof ChangelogFeedDotxmlRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/feedback/': {
+      id: '/feedback/';
+      path: '/feedback';
+      fullPath: '/feedback/';
+      preLoaderRoute: typeof FeedbackIndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/legal/$slug': {
+      id: '/legal/$slug';
+      path: '/legal/$slug';
+      fullPath: '/legal/$slug';
+      preLoaderRoute: typeof LegalSlugRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/posts/': {
+      id: '/posts/';
+      path: '/posts';
+      fullPath: '/posts/';
+      preLoaderRoute: typeof PostsIndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/posts/$slug': {
+      id: '/posts/$slug';
+      path: '/posts/$slug';
+      fullPath: '/posts/$slug';
+      preLoaderRoute: typeof PostsSlugRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/posts/feed.xml': {
+      id: '/posts/feed.xml';
+      path: '/posts/feed.xml';
+      fullPath: '/posts/feed.xml';
+      preLoaderRoute: typeof PostsFeedDotxmlRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     '/_app/profile/': {
-      id: '/_app/profile/'
-      path: '/profile'
-      fullPath: '/profile/'
-      preLoaderRoute: typeof AppProfileIndexRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/api/orpc/$': {
-      id: '/api/orpc/$'
-      path: '/api/orpc/$'
-      fullPath: '/api/orpc/$'
-      preLoaderRoute: typeof ApiOrpcSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/_app/profile/';
+      path: '/profile';
+      fullPath: '/profile/';
+      preLoaderRoute: typeof AppProfileIndexRouteImport;
+      parentRoute: typeof AppRoute;
+    };
     '/api/auth/$': {
-      id: '/api/auth/$'
-      path: '/api/auth/$'
-      fullPath: '/api/auth/$'
-      preLoaderRoute: typeof ApiAuthSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
+      id: '/api/auth/$';
+      path: '/api/auth/$';
+      fullPath: '/api/auth/$';
+      preLoaderRoute: typeof ApiAuthSplatRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/api/orpc/$': {
+      id: '/api/orpc/$';
+      path: '/api/orpc/$';
+      fullPath: '/api/orpc/$';
+      preLoaderRoute: typeof ApiOrpcSplatRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    '/backoffice/_backoffice/': {
+      id: '/backoffice/_backoffice/';
+      path: '/';
+      fullPath: '/backoffice/';
+      preLoaderRoute: typeof BackofficeBackofficeIndexRouteImport;
+      parentRoute: typeof BackofficeBackofficeRoute;
+    };
     '/backoffice/_backoffice/event-sourcing/': {
-      id: '/backoffice/_backoffice/event-sourcing/'
-      path: '/event-sourcing'
-      fullPath: '/backoffice/event-sourcing/'
-      preLoaderRoute: typeof BackofficeBackofficeEventSourcingIndexRouteImport
-      parentRoute: typeof BackofficeBackofficeRoute
-    }
+      id: '/backoffice/_backoffice/event-sourcing/';
+      path: '/event-sourcing';
+      fullPath: '/backoffice/event-sourcing/';
+      preLoaderRoute: typeof BackofficeBackofficeEventSourcingIndexRouteImport;
+      parentRoute: typeof BackofficeBackofficeRoute;
+    };
     '/backoffice/_backoffice/event-sourcing/projections': {
-      id: '/backoffice/_backoffice/event-sourcing/projections'
-      path: '/event-sourcing/projections'
-      fullPath: '/backoffice/event-sourcing/projections'
-      preLoaderRoute: typeof BackofficeBackofficeEventSourcingProjectionsRouteImport
-      parentRoute: typeof BackofficeBackofficeRoute
-    }
+      id: '/backoffice/_backoffice/event-sourcing/projections';
+      path: '/event-sourcing/projections';
+      fullPath: '/backoffice/event-sourcing/projections';
+      preLoaderRoute: typeof BackofficeBackofficeEventSourcingProjectionsRouteImport;
+      parentRoute: typeof BackofficeBackofficeRoute;
+    };
   }
 }
 
 interface AppRouteChildren {
-  AppProfileIndexRoute: typeof AppProfileIndexRoute
+  AppProfileIndexRoute: typeof AppProfileIndexRoute;
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppProfileIndexRoute: AppProfileIndexRoute,
-}
+};
 
-const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren);
 
 interface MarketingRouteChildren {
-  MarketingIndexRoute: typeof MarketingIndexRoute
+  MarketingIndexRoute: typeof MarketingIndexRoute;
 }
 
 const MarketingRouteChildren: MarketingRouteChildren = {
   MarketingIndexRoute: MarketingIndexRoute,
-}
+};
 
 const MarketingRouteWithChildren = MarketingRoute._addFileChildren(
   MarketingRouteChildren,
-)
+);
 
 interface BackofficeBackofficeRouteChildren {
-  BackofficeBackofficeIndexRoute: typeof BackofficeBackofficeIndexRoute
-  BackofficeBackofficeEventSourcingProjectionsRoute: typeof BackofficeBackofficeEventSourcingProjectionsRoute
-  BackofficeBackofficeEventSourcingIndexRoute: typeof BackofficeBackofficeEventSourcingIndexRoute
+  BackofficeBackofficeIndexRoute: typeof BackofficeBackofficeIndexRoute;
+  BackofficeBackofficeEventSourcingProjectionsRoute: typeof BackofficeBackofficeEventSourcingProjectionsRoute;
+  BackofficeBackofficeEventSourcingIndexRoute: typeof BackofficeBackofficeEventSourcingIndexRoute;
 }
 
 const BackofficeBackofficeRouteChildren: BackofficeBackofficeRouteChildren = {
@@ -555,10 +555,10 @@ const BackofficeBackofficeRouteChildren: BackofficeBackofficeRouteChildren = {
     BackofficeBackofficeEventSourcingProjectionsRoute,
   BackofficeBackofficeEventSourcingIndexRoute:
     BackofficeBackofficeEventSourcingIndexRoute,
-}
+};
 
 const BackofficeBackofficeRouteWithChildren =
-  BackofficeBackofficeRoute._addFileChildren(BackofficeBackofficeRouteChildren)
+  BackofficeBackofficeRoute._addFileChildren(BackofficeBackofficeRouteChildren);
 
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
@@ -581,7 +581,16 @@ const rootRouteChildren: RootRouteChildren = {
   PostsIndexRoute: PostsIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiOrpcSplatRoute: ApiOrpcSplatRoute,
-}
+};
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>()
+  ._addFileTypes<FileRouteTypes>();
+
+import type { getRouter } from './router.tsx';
+import type { createStart } from '@tanstack/react-start';
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true;
+    router: Awaited<ReturnType<typeof getRouter>>;
+  }
+}
