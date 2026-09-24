@@ -27,6 +27,6 @@
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
-    "react-native-purchases": "^8.11.0"
+    "react-native-purchases": "catalog:"
   }
 }

@@ -10,12 +10,12 @@
     "boot": "node --experimental-strip-types src/app.ts"
   },
   "dependencies": {
-    "@arki/db": "^0.1.0",
-    "@arki/dot": "^0.1.0",
+    "@arki/db": "^0.1.7",
+    "@arki/dot": "^0.1.4",
     "@arki/env": "^0.1.0",
-    "@arki/kv": "^0.1.0",
+    "@arki/kv": "^0.1.6",
     "drizzle-orm": "^1.0.0",
-    "zod": "^4.0.0"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "typescript": "^5",

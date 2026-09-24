@@ -120,7 +120,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@mastra/core": "1.37.1",
+    "@mastra/core": "catalog:",
     "typescript": "catalog:"
   },
   "types": "./dist/src/index.d.ts",

@@ -74,7 +74,7 @@
   "dependencies": {
     "@arki/log": "workspace:*",
     "@arki/ts": "workspace:*",
-    "@hono/node-server": "^2.0.8",
+    "@hono/node-server": "catalog:",
     "hono": "catalog:backend",
     "zod": "catalog:"
   },

@@ -127,7 +127,7 @@
     "@arki/contracts": "workspace:*",
     "@arki/env": "workspace:*",
     "@arki/log": "workspace:*",
-    "@electric-sql/pglite": "^0.4.5",
+    "@electric-sql/pglite": "catalog:",
     "@paralleldrive/cuid2": "catalog:utilities",
     "@t3-oss/env-core": "catalog:env",
     "drizzle-orm": "catalog:drizzle",

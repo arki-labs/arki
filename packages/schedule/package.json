@@ -35,7 +35,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/log": "workspace:*",
-    "croner": "^10.0.1"
+    "croner": "catalog:"
   },
   "peerDependencies": {
     "@arki/dot": "workspace:*"
