@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { z } from 'zod';
 
 import { GenerationError } from '../errors';
 
@@ -19,7 +20,7 @@ vi.mock('ai', () => ({
   Output: { object: vi.fn((opts: unknown) => ({ __outputObject: opts })) },
 }));
 
-const { generateText, streamText } = await import('ai-sdk-ollama');
+const { generateText, streamText, createOllama } = await import('ai-sdk-ollama');
 const mockedGenerateText = vi.mocked(generateText);
 const mockedStreamText = vi.mocked(streamText);
 
@@ -121,5 +122,15 @@ describe('OllamaService — conversation', () => {
       await expect(gen.next()).rejects.toThrow(GenerationError);
       expect(captured).toBeInstanceOf(Error);
     });
+  });
+});
+
+describe('Ollama structured configuration', () => {
+  it('passes latency and residency settings to non-streaming generation', async () => {
+    mockedGenerateText.mockRejectedValueOnce(new Error('stop after recording model options'));
+    const service = new OllamaService({ model: 'qwen3.6', think: false, keepAlive: '2m' });
+    await expect(service.generateStructuredData('extract', z.object({ title: z.string() }))).rejects.toThrow();
+    const factory = vi.mocked(createOllama).mock.results.at(-1)?.value;
+    expect(factory).toHaveBeenCalledWith('qwen3.6', { think: false, keep_alive: '2m' });
   });
 });

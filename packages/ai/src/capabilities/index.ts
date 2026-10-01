@@ -35,3 +35,5 @@ export {
   type ConnectionClassification,
   type ConnectionType,
 } from './connection-classification';
+
+export { selectPodHopMoments, type HopSelection, type HopTranscript } from './podhop';

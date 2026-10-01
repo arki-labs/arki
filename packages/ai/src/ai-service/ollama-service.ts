@@ -41,6 +41,8 @@ import { GenerationError, getErrorMessage } from '../errors';
 type ChatMessage = ModelMessage;
 
 export type OllamaServiceConfig = {
+  /** Disable extended reasoning for latency-sensitive structured extraction. */
+  think?: boolean;
   /** Model tag, e.g. `gemma4`, `qwen3.6`, `llama3.2-vision:11b`. */
   model?: string;
   /**
@@ -140,12 +142,14 @@ export class OllamaService {
   private readonly defaultTemperature: number;
   private readonly defaultMaxRetries: number;
   private readonly keepAlive: string | number | undefined;
+  private readonly think: boolean | undefined;
 
   constructor(config: OllamaServiceConfig = {}) {
     this.model = config.model ?? DEFAULT_MODEL;
     this.defaultTemperature = config.temperature ?? DEFAULT_TEMPERATURE;
     this.defaultMaxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.keepAlive = config.keepAlive;
+    this.think = config.think;
 
     const host = resolveHost(config.host);
     this.provider = createOllama({ baseURL: host });
@@ -166,9 +170,10 @@ export class OllamaService {
    * the model between calls (default Ollama unload is 5 min idle).
    */
   private buildModel() {
-    return this.keepAlive !== undefined
-      ? this.provider(this.model, { keep_alive: this.keepAlive })
-      : this.provider(this.model);
+    return this.provider(this.model, {
+      ...(this.keepAlive !== undefined ? { keep_alive: this.keepAlive } : {}),
+      ...(this.think !== undefined ? { think: this.think } : {}),
+    });
   }
 
   /**
@@ -237,7 +242,7 @@ export class OllamaService {
       // Non-streaming path — single round-trip, full structured output
       // arrives in `result.output`.
       const result = await generateText({
-        model: this.provider(this.model),
+        model: this.buildModel(),
         system: options.systemPrompt,
         messages,
         output,

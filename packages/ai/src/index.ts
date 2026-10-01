@@ -245,3 +245,5 @@ export {
   getSupportedModels,
   getModelsByProvider,
 } from './cost';
+
+export { selectPodHopMoments, type HopSelection, type HopTranscript } from './capabilities/podhop';
