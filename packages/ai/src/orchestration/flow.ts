@@ -11,7 +11,7 @@ export type FlowEvent<State> =
 export type FlowNode<State, Context> = {
   id: string;
   description?: string;
-  run: (state: State, ctx: Context) => Promise<Partial<State> | void>;
+  run: (state: State, ctx: Context, signal?: AbortSignal) => Promise<Partial<State> | void>;
   next?: string | ((state: State, ctx: Context) => string | null | undefined);
   retries?: number;
   retryDelayMs?: number;
@@ -31,7 +31,7 @@ export type FlowConfig<State, Context> = {
    * Unlike {@link FlowConfig.onEvent} (fire-and-forget), this is `await`ed — so a
    * consumer can park the flow on a resumable promise to implement pause/resume/step
    * without ever interrupting an in-flight node. The sibling of {@link FlowConfig.signal}:
-   * `signal` aborts between nodes, `onCheckpoint` can hold between nodes.
+   * `signal` aborts running nodes cooperatively, `onCheckpoint` can hold between nodes.
    */
   onCheckpoint?: (nodeId: string, state: State) => Promise<void>;
 };
@@ -58,24 +58,47 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function withTimeout<T>(
-  promise: Promise<T>,
+class FlowInterruptedError extends FlowError {}
+
+/** Bound the attempt on interruption; never retry work that may still be stopping. */
+async function runAttempt<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  signal?: AbortSignal,
   timeoutMs?: number,
   nodeId?: string,
 ): Promise<T> {
-  if (!timeoutMs) return promise;
-
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new FlowError(`Flow node timed out after ${timeoutMs}ms`, { nodeId }));
-    }, timeoutMs);
+  const controller = new AbortController();
+  const interrupted = new Promise<never>((_, reject) => {
+    controller.signal.addEventListener('abort', () => {
+      const reason: unknown = controller.signal.reason;
+      reject(reason instanceof Error ? reason : new FlowInterruptedError('Flow aborted by signal', { nodeId }));
+    }, { once: true });
   });
+  const abort = () => controller.abort(new FlowInterruptedError('Flow aborted by signal', { nodeId }));
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
+  const timer = timeoutMs ? setTimeout(() => {
+    controller.abort(new FlowInterruptedError(`Flow node timed out after ${timeoutMs}ms`, { nodeId }));
+  }, timeoutMs) : undefined;
 
   try {
-    return await Promise.race([promise, timeoutPromise]);
+    try {
+      const result = await Promise.race([
+        interrupted,
+        (async () => {
+          controller.signal.throwIfAborted();
+          return operation(controller.signal);
+        })(),
+      ]);
+      controller.signal.throwIfAborted();
+      return result;
+    } catch (error) {
+      controller.signal.throwIfAborted();
+      throw error;
+    }
   } finally {
     if (timer) clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
   }
 }
 
@@ -157,7 +180,7 @@ export class Flow<State, Context> {
         this.emit({ type: 'node:start', nodeId: node.id, attempt, state, timestamp: Date.now() });
 
         try {
-          patch = await withTimeout(node.run(state, ctx), node.timeoutMs, node.id);
+          patch = await runAttempt(signal => node.run(state, ctx, signal), this.signal, node.timeoutMs, node.id);
 
           if (patch && typeof patch === 'object') {
             state = this.mergeState(state, patch);
@@ -180,7 +203,7 @@ export class Flow<State, Context> {
           debugOrchestration('[Flow] Node error (node: %s, attempt: %d): %s', node.id, attempt, err.message);
           this.emit({ type: 'node:error', nodeId: node.id, attempt, error: err, timestamp: Date.now() });
 
-          if (attempt >= maxAttempts) {
+          if (err instanceof FlowInterruptedError || this.signal?.aborted || attempt >= maxAttempts) {
             const flowError = new FlowError(`Flow node failed: ${node.id}`, {
               nodeId: node.id,
               attempt,
