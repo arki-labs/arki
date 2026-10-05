@@ -38,6 +38,13 @@ export type CreateE2EHandlerOptions = {
   testPassword?: string;
   /** Display name for the test user (visible on the profile). */
   testUserName?: string;
+  /**
+   * Emails this endpoint may act on. The handler deletes and re-creates the account it is given, so any
+   * address it accepts can be reset by whoever reaches a non-production server. Restrict it to reserved
+   * test addresses, for example `email => email.endsWith('@myapp.test')`. Refused addresses get a 403
+   * before any account is looked up. Omitted: every address is accepted.
+   */
+  allowEmail?: (email: string) => boolean;
 };
 
 type CreateSessionBody = { email?: string };
@@ -92,6 +99,7 @@ export function createE2EHandler({
   defaultEmail,
   testPassword = DEFAULT_TEST_PASSWORD,
   testUserName = DEFAULT_TEST_USER_NAME,
+  allowEmail,
 }: CreateE2EHandlerOptions) {
   return async ({ request }: { request: Request }): Promise<Response> => {
     if (process.env['NODE_ENV'] === 'production') {
@@ -100,6 +108,10 @@ export function createE2EHandler({
 
     const body = (await request.json().catch(() => ({}))) as CreateSessionBody;
     const email = typeof body.email === 'string' && body.email.length > 0 ? body.email : defaultEmail;
+    if (allowEmail && !allowEmail(email)) {
+      log.warn('refused e2e session for an address outside the allowed test addresses');
+      return Response.json({ error: 'This address cannot be used for test sessions.' }, { status: 403 });
+    }
 
     // Idempotency: nuke any prior test user so we can guarantee a fresh
     // credential account. Test runs from before this handler existed may have
