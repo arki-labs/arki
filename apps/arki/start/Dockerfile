@@ -1,7 +1,7 @@
 ARG application_name=arki
 
 # Bun binary source for package management in build stages
-FROM oven/bun:latest AS bun-base
+FROM oven/bun:1-alpine AS bun-base
 
 FROM node:22.14.0-alpine AS base
 
