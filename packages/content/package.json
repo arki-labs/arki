@@ -64,6 +64,7 @@
     "rehype-slug": "catalog:content",
     "remark-gfm": "catalog:content",
     "schema-dts": "catalog:",
+    "sharp": "catalog:image-processing",
     "unified": "catalog:"
   },
   "devDependencies": {
