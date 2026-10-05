@@ -76,6 +76,8 @@
     "@arki/ts": "workspace:*",
     "@hono/node-server": "catalog:",
     "hono": "catalog:backend",
+    "ipaddr.js": "^2.5.0",
+    "undici": "^8.11.2",
     "zod": "catalog:"
   },
   "peerDependencies": {
