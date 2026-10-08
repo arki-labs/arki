@@ -48,7 +48,12 @@
       "import": "./dist/context.js",
       "default": "./dist/context.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./public-fetch": {
+      "types": "./dist/public-fetch.d.ts",
+      "import": "./dist/public-fetch.js",
+      "default": "./dist/public-fetch.js"
+    }
   },
   "files": [
     "dist/**",
