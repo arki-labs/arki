@@ -1,5 +1,11 @@
 # @arki/env
 
+## 0.0.8
+
+### Patch Changes
+
+- Dependency refresh: `@t3-oss/env-core` ^0.13.11, `zod` 4.6.5. No API changes.
+
 ## 0.0.7
 
 ### Patch Changes

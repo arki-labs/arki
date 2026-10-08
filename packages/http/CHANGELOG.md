@@ -1,5 +1,11 @@
 # @arki/http
 
+## 0.0.4
+
+### Patch Changes
+
+- New `@arki/http/public-fetch` subpath: `validatePublicURL`, `isPublicAddress`, `safeFetchBytes` — fetch that only reaches public unicast addresses (DNS-pinned via an undici Agent), with size and timeout caps. Adds `ipaddr.js` and `undici` dependencies. Dependency refresh: `hono` ^4.13.13, `@hono/node-server` ^2.1.4, `zod` 4.6.5; internal `@arki/log` pin updated.
+
 ## 0.0.3
 
 ### Patch Changes

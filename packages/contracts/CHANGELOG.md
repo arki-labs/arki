@@ -1,5 +1,11 @@
 # @arki/contracts
 
+## 0.0.4
+
+### Patch Changes
+
+- Dependency refresh: `drizzle-orm` 1.0.0-rc.4, `zod` 4.6.5, `zod-form-data` ^3.0.3. No API changes.
+
 ## 0.0.3
 
 ### Patch Changes

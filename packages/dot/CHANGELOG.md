@@ -1,5 +1,11 @@
 # @arki/dot
 
+## 0.4.1
+
+### Patch Changes
+
+- Dependency refresh: `@opentelemetry/api` ^1.9.1, `zod` 4.6.5; internal `@arki/assert`, `@arki/contracts`, `@arki/log` pins updated. No API changes.
+
 ## 0.4.0
 
 ### Minor Changes

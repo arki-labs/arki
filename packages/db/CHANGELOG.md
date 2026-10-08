@@ -1,5 +1,11 @@
 # @arki/db
 
+## 0.1.8
+
+### Patch Changes
+
+- Dependency refresh: `drizzle-orm` 1.0.0-rc.4, `zod` 4.6.5, `pg` 8.23.1, `postgres` ^3.4.9, `@electric-sql/pglite` ^0.4.6, `@t3-oss/env-core` ^0.13.11; internal `@arki/*` pins updated. No API changes.
+
 ## 0.1.7
 
 ### Patch Changes

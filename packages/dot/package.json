@@ -1,6 +1,6 @@
 {
   "name": "@arki/dot",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "TypeScript-first application composition framework for the ARKI package family — lifecycle-aware plugins, deterministic boot order, manifest/diagnostics envelopes, and an agent-native CLI. A DOT app is the sum of its plugins.",
   "license": "MIT",
   "type": "module",

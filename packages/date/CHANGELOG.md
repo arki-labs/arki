@@ -1,5 +1,11 @@
 # @arki/date
 
+## 0.0.3
+
+### Patch Changes
+
+- Dependency refresh: `date-fns` 4.4.0. No API changes.
+
 ## 0.0.2
 
 ### Patch Changes

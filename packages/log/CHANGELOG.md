@@ -1,5 +1,11 @@
 # @arki/log
 
+## 0.0.3
+
+### Patch Changes
+
+- Dependency refresh: `pino` ^10.4.0. No API changes.
+
 ## 0.0.2
 
 ### Patch Changes

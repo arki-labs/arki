@@ -1,5 +1,11 @@
 # @arki/kv
 
+## 0.1.7
+
+### Patch Changes
+
+- Dependency refresh: `ioredis` ^5.11.1, `rate-limiter-flexible` ^9.1.1, `@t3-oss/env-core` ^0.13.11, `zod` 4.6.5; internal `@arki/*` pins updated. No API changes.
+
 ## 0.1.6
 
 ### Patch Changes
