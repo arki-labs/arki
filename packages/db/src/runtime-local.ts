@@ -1,4 +1,4 @@
-import type { AnyRelations } from 'drizzle-orm';
+import type { AnyRelations, Logger } from 'drizzle-orm';
 import { PGlite, type Extension } from '@electric-sql/pglite';
 import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite';
 
@@ -27,7 +27,11 @@ export type PgliteInitOptions = {
  */
 export async function initDbRuntimeLocal<TRelations extends AnyRelations>(
   options: PgliteInitOptions,
-  config: { relations: TRelations },
+  config: {
+    relations: TRelations;
+    /** Drizzle logger override — `true`/`false` or a custom `Logger`, same as the pg driver. */
+    logger?: boolean | Logger | undefined;
+  },
 ): Promise<{ db: PgliteDatabase<TRelations>; pglite: PGlite }> {
   const url = options.memory === true ? 'memory://' : (options.dataDir ?? './.local/db');
   debugInit('[runtime-local] Initializing PGlite at: %s', url);
@@ -41,6 +45,7 @@ export async function initDbRuntimeLocal<TRelations extends AnyRelations>(
   const db = drizzle({
     client: pglite,
     relations: config.relations,
+    ...(config.logger === undefined ? {} : { logger: config.logger }),
   }) as PgliteDatabase<TRelations>;
 
   debugInit('[runtime-local] Drizzle database initialized');

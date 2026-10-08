@@ -98,6 +98,11 @@
       "import": "./dist/dot.js",
       "default": "./dist/dot.js"
     },
+    "./migrate": {
+      "types": "./dist/migrate.d.ts",
+      "import": "./dist/migrate.js",
+      "default": "./dist/migrate.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
