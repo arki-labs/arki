@@ -126,7 +126,7 @@ export class AnthropicService {
 
         const response = await generateText({
           model: anthropic(this.model),
-          system,
+          instructions: system,
           messages,
           output: Output.object({ schema: schema as z.ZodSchema }),
           maxRetries: options.maxRetries ?? this.defaultMaxRetries,
@@ -177,7 +177,7 @@ export class AnthropicService {
     try {
       const result = await generateText({
         model: anthropic(this.model),
-        system: options.systemPrompt,
+        instructions: options.systemPrompt,
         prompt,
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
@@ -217,7 +217,7 @@ export class AnthropicService {
       try {
         const response = await generateText({
           model: anthropic(this.model),
-          system,
+          instructions: system,
           messages,
           maxRetries: options.maxRetries ?? this.defaultMaxRetries,
           temperature: options.temperature ?? this.defaultTemperature,
@@ -270,7 +270,7 @@ export class AnthropicService {
 
       const result = await streamText({
         model: anthropic(this.model),
-        system,
+        instructions: system,
         messages,
         temperature: options.temperature ?? this.defaultTemperature,
         abortSignal: options.signal,

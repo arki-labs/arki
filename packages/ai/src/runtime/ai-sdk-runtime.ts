@@ -1,4 +1,4 @@
-import { stepCountIs, streamText, tool, type LanguageModel, type ToolSet } from 'ai';
+import { isStepCount, streamText, tool, type LanguageModel, type ToolSet } from 'ai';
 
 import { debugRuntime } from '../debug';
 import type { AgentRuntime, AgentTool, RuntimeEvent, ToolLoopInput } from './types';
@@ -51,13 +51,13 @@ export function createAiSdkRuntime(options: AiSdkRuntimeOptions): AgentRuntime {
       try {
         const result = streamText({
           model: options.model,
-          system: input.system,
+          instructions: input.system,
           prompt: input.prompt,
           tools: toAiSdkToolSet(input.tools),
-          stopWhen: stepCountIs(maxSteps),
+          stopWhen: isStepCount(maxSteps),
         });
 
-        for await (const part of result.fullStream) {
+        for await (const part of result.stream) {
           switch (part.type) {
             case 'text-delta':
               yield { type: 'text:delta', delta: part.text };
@@ -79,7 +79,7 @@ export function createAiSdkRuntime(options: AiSdkRuntimeOptions): AgentRuntime {
           }
         }
 
-        const [text, usage] = await Promise.all([result.text, result.totalUsage]);
+        const [text, usage] = await Promise.all([result.text, result.usage]);
         debugRuntime('runToolLoop finish (chars=%d, totalTokens=%o)', text.length, usage.totalTokens);
         yield {
           type: 'run:finish',

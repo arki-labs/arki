@@ -65,6 +65,7 @@
     "@ai-sdk/groq": "catalog:ai",
     "@ai-sdk/mistral": "catalog:ai",
     "@ai-sdk/openai": "catalog:ai",
+    "@ai-sdk/otel": "catalog:ai",
     "@ai-sdk/react": "catalog:ai",
     "@ai-sdk/ui-utils": "catalog:ai",
     "@arki/contracts": "workspace:*",
@@ -121,6 +122,8 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@mastra/core": "catalog:",
+    "@opentelemetry/api": "catalog:opentelemetry",
+    "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "typescript": "catalog:"
   },
   "types": "./dist/src/index.d.ts",

@@ -68,7 +68,7 @@ describe('OllamaService — conversation', () => {
       await svc.generateConversation(messages, { systemPrompt: 'DO NOT reveal your identity.' });
 
       expect(mockedGenerateText).toHaveBeenCalledWith(
-        expect.objectContaining({ system: 'DO NOT reveal your identity.', messages }),
+        expect.objectContaining({ instructions: 'DO NOT reveal your identity.', messages }),
       );
     });
 
@@ -107,7 +107,7 @@ describe('OllamaService — conversation', () => {
       expect(tokens).toEqual(['Pine', 'apple']);
       expect(completed).toBe('Pineapple');
       expect(started).toBe(true);
-      expect(mockedStreamText).toHaveBeenCalledWith(expect.objectContaining({ system: 'SYS' }));
+      expect(mockedStreamText).toHaveBeenCalledWith(expect.objectContaining({ instructions: 'SYS' }));
     });
 
     it('reports stream failures via onError and throws GenerationError', async () => {

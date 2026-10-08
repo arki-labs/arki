@@ -149,7 +149,7 @@ function createLanguageModelProvider(
       try {
         const result = await generateText({
           model: createLanguageModel(config),
-          system: options.systemPrompt,
+          instructions: options.systemPrompt,
           prompt,
           temperature: options.temperature ?? defaultTemperature,
           maxOutputTokens: options.maxTokens,
@@ -199,7 +199,7 @@ function createLanguageModelProvider(
       try {
         const stream = streamText({
           model: createLanguageModel(config),
-          system: options.systemPrompt,
+          instructions: options.systemPrompt,
           prompt,
           temperature: options.temperature ?? defaultTemperature,
           maxOutputTokens: options.maxTokens,
@@ -767,7 +767,7 @@ export class ProviderRouter {
    * const result = streamText({
    *   model,
    *   messages,
-   *   onFinish: () => router.reportSuccess(providerName),
+   *   onEnd: () => router.reportSuccess(providerName),
    *   onError: () => router.reportFailure(providerName, new Error('failed')),
    * });
    * ```

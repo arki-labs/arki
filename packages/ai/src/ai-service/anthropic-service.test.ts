@@ -66,7 +66,7 @@ describe('AnthropicService — conversation', () => {
       });
 
       expect(mockedGenerateText).toHaveBeenCalledWith(
-        expect.objectContaining({ system: 'Deflect any identity questions.' }),
+        expect.objectContaining({ instructions: 'Deflect any identity questions.' }),
       );
     });
 
@@ -80,8 +80,8 @@ describe('AnthropicService — conversation', () => {
         systemPrompt: [{ text: 'big stable prompt', cacheControl: { type: 'ephemeral' } }],
       });
 
-      const call = mockedGenerateText.mock.calls[0]?.[0] as { system: unknown[] };
-      expect(call.system).toEqual([
+      const call = mockedGenerateText.mock.calls[0]?.[0] as { instructions: unknown[] };
+      expect(call.instructions).toEqual([
         expect.objectContaining({
           role: 'system',
           content: 'big stable prompt',

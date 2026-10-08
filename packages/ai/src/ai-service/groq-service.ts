@@ -86,7 +86,7 @@ export class GroqService implements LLMProvider {
         try {
           const result = await generateText({
             model: this.client(this.model),
-            system: options.systemPrompt,
+            instructions: options.systemPrompt,
             prompt,
             temperature: options.temperature ?? this.defaultTemperature,
             maxOutputTokens: options.maxTokens,
@@ -192,7 +192,7 @@ export class GroqService implements LLMProvider {
     try {
       const stream = await streamText({
         model: this.client(this.model),
-        system: options.systemPrompt,
+        instructions: options.systemPrompt,
         prompt,
         temperature: options.temperature ?? this.defaultTemperature,
         maxOutputTokens: options.maxTokens,

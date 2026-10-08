@@ -10,8 +10,8 @@
  * `ChatMessage[]` shape and provide a local `input` state that the SDK no
  * longer ships in v3.
  *
- * Server pairing: the API route must end with `result.toUIMessageStreamResponse()`,
- * NOT `result.toTextStreamResponse()`.
+ * Server pairing: the API route must return a UI message stream response
+ * (`createUIMessageStreamResponse` over `toUIMessageStream`), NOT a text stream response.
  */
 
 import { useCallback, useMemo, useState } from 'react';

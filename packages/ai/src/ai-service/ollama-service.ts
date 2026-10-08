@@ -222,7 +222,7 @@ export class OllamaService {
       if (options.onToken) {
         const result = await streamText({
           model: this.buildModel(),
-          system: options.systemPrompt,
+          instructions: options.systemPrompt,
           messages,
           output,
           temperature,
@@ -243,7 +243,7 @@ export class OllamaService {
       // arrives in `result.output`.
       const result = await generateText({
         model: this.buildModel(),
-        system: options.systemPrompt,
+        instructions: options.systemPrompt,
         messages,
         output,
         temperature,
@@ -290,7 +290,7 @@ export class OllamaService {
     try {
       const result = await generateText({
         model: this.buildModel(),
-        system: options.systemPrompt,
+        instructions: options.systemPrompt,
         messages,
         temperature,
         maxRetries,
@@ -337,7 +337,7 @@ export class OllamaService {
 
       const result = await streamText({
         model: this.buildModel(),
-        system: options.systemPrompt,
+        instructions: options.systemPrompt,
         messages,
         temperature,
         maxRetries,

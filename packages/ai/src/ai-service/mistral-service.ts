@@ -81,7 +81,7 @@ export class MistralService implements LLMProvider {
         try {
           const result = await generateText({
             model: mistral(this.model),
-            system: options.systemPrompt,
+            instructions: options.systemPrompt,
             prompt,
             temperature: options.temperature ?? this.defaultTemperature,
             maxOutputTokens: options.maxTokens,
@@ -187,7 +187,7 @@ export class MistralService implements LLMProvider {
     try {
       const stream = await streamText({
         model: mistral(this.model),
-        system: options.systemPrompt,
+        instructions: options.systemPrompt,
         prompt,
         temperature: options.temperature ?? this.defaultTemperature,
         maxOutputTokens: options.maxTokens,

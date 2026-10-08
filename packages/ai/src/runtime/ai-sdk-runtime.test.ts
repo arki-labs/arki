@@ -1,6 +1,6 @@
-import type { LanguageModelV3StreamPart } from '@ai-sdk/provider';
+import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import { simulateReadableStream } from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { MockLanguageModelV4 } from 'ai/test';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -15,8 +15,8 @@ async function collect(stream: AsyncIterable<RuntimeEvent>): Promise<RuntimeEven
 }
 
 /** A mock model that streams two text chunks then finishes with usage. */
-function textOnlyModel(): MockLanguageModelV3 {
-  const chunks: LanguageModelV3StreamPart[] = [
+function textOnlyModel(): MockLanguageModelV4 {
+  const chunks: LanguageModelV4StreamPart[] = [
     { type: 'stream-start', warnings: [] },
     { type: 'text-start', id: '1' },
     { type: 'text-delta', id: '1', delta: 'Lumora ' },
@@ -32,7 +32,7 @@ function textOnlyModel(): MockLanguageModelV3 {
       },
     },
   ];
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async () => ({ stream: simulateReadableStream({ chunks }) }),
   });
 }

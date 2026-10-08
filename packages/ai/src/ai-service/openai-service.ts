@@ -124,7 +124,7 @@ export class OpenAIService {
 
         const result = await generateText({
           model: openai(this.model),
-          system: options.systemPrompt,
+          instructions: options.systemPrompt,
           messages: sanitizedMessages,
           output: Output.object({ schema: schema as z.ZodSchema }),
           maxRetries: options.maxRetries || this.defaultMaxRetries,
@@ -161,7 +161,7 @@ export class OpenAIService {
       try {
         const result = await generateText({
           model: openai(this.model),
-          system: options.systemPrompt,
+          instructions: options.systemPrompt,
           prompt: sanitizedPrompt,
           temperature: options.temperature || this.defaultTemperature,
           maxRetries: options.maxRetries || this.defaultMaxRetries,
@@ -195,7 +195,7 @@ export class OpenAIService {
       try {
         const result = await generateText({
           model: openai(this.model),
-          system: options.systemPrompt,
+          instructions: options.systemPrompt,
           messages: sanitizedMessages,
           temperature: options.temperature || this.defaultTemperature,
           maxRetries: options.maxRetries || this.defaultMaxRetries,
@@ -231,7 +231,7 @@ export class OpenAIService {
 
       const stream = await streamText({
         model: openai(this.model),
-        system: options.systemPrompt,
+        instructions: options.systemPrompt,
         prompt: sanitizedPrompt,
         temperature: options.temperature || this.defaultTemperature,
         abortSignal: options.signal,
@@ -281,7 +281,7 @@ export class OpenAIService {
 
       const stream = await streamText({
         model: openai(this.model),
-        system: options.systemPrompt,
+        instructions: options.systemPrompt,
         messages: sanitizedMessages,
         temperature: options.temperature || this.defaultTemperature,
         abortSignal: options.signal,
@@ -320,7 +320,7 @@ export class OpenAIService {
 
     return streamText({
       model: openai(this.model),
-      system: systemPrompt,
+      instructions: systemPrompt,
       prompt: sanitizedPrompt,
       temperature: this.defaultTemperature,
     });
@@ -385,7 +385,7 @@ Content: "${text}"`;
       return await this.withRateLimit('moderateContent', async () => {
         const result = await generateText({
           model: openai(this.model),
-          system: 'You are a content moderation assistant. Analyze text for safety.',
+          instructions: 'You are a content moderation assistant. Analyze text for safety.',
           messages: [{ role: 'user', content: prompt }],
           output: Output.object({ schema: moderationSchema }),
           maxRetries: this.defaultMaxRetries,
