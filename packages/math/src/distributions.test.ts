@@ -350,7 +350,7 @@ describe('errors', () => {
 });
 
 // Differential check against jstat, which is only present in the monorepo's
-// hoisted node_modules (an @a consumer app dependency). Skipped when it is absent.
+// hoisted node_modules (a consumer app's dependency, not ours). Skipped when it is absent.
 type Fn = (...args: number[]) => number;
 type Dist = { cdf: Fn; inv?: Fn };
 type JStat = { studentt: Dist; chisquare: Dist; centralF: Dist; normal: Dist; noncentralt: Dist };
