@@ -114,3 +114,38 @@ describe('UAX #29 fallback scanner', () => {
     }
   });
 });
+
+describe('fallback scanner agrees with Intl.Segmenter on emoji sequences', () => {
+  const native = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  const nativeBoundaries = (text: string): number[] => [...[...native.segment(text)].map(s => s.index), text.length];
+
+  it.each([
+    ['England flag (tag sequence)', '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}'],
+    ['tag character after a letter', 'a\u{E0067}b'],
+    ['double ZWJ breaks the ZWJ sequence', '\u{1F469}‍‍\u{1F469}'],
+    ['ZWJ sequence with skin tone', '\u{1F469}\u{1F3FD}‍\u{1F4BB}x'],
+  ])('%s', (_name, text) => {
+    expect(fallbackBoundaries(text)).toEqual(nativeBoundaries(text));
+  });
+
+  it('follows Unicode 18 GB9c where ICU (Unicode 17) still splits a leading virama', () => {
+    // GraphemeBreakTest-18.0.0 line 179: ÷ 094D × 0915 ÷
+    expect(fallbackBoundaries('्क')).toEqual([0, 2]);
+  });
+});
+
+describe('streaming positional access', () => {
+  it('at/slice/take/chunk agree with the boundary array on mixed text', () => {
+    const text = 'áb\u{1F468}‍\u{1F469}‍\u{1F467}c\r\nd';
+    expect(at(text, 0)).toBe('á');
+    expect(at(text, 2)).toBe('\u{1F468}‍\u{1F469}‍\u{1F467}');
+    expect(at(text, 4)).toBe('\r\n');
+    expect(at(text, 6)).toBeUndefined();
+    expect(slice(text, 1, 3)).toBe('b\u{1F468}‍\u{1F469}‍\u{1F467}');
+    expect(slice(text, 4)).toBe('\r\nd');
+    expect(slice(text, 9)).toBe('');
+    expect(take(text, 2)).toBe('áb');
+    expect(chunk(text, 4)).toEqual(['áb\u{1F468}‍\u{1F469}‍\u{1F467}c', '\r\nd']);
+    expect(chunk('', 3)).toEqual([]);
+  });
+});

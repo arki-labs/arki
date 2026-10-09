@@ -3,9 +3,9 @@
  */
 
 import { graphemeBoundaries } from './internal/graphemes.js';
-import { findLiteral } from './internal/search.js';
+import { assertNeedle, findLiteral } from './internal/search.js';
 import { lines } from './segment.js';
-import { at, chunk, length, slice, take } from './unicode.js';
+import { at, chunk, length, take } from './unicode.js';
 
 export type TruncateOptions = Readonly<{
   /** Marker appended when text is cut. Defaults to `…`. Counts toward `maxLength`. */
@@ -73,7 +73,8 @@ export function truncate(text: string, maxLength: number, options: TruncateOptio
     throw new RangeError(`maxLength must be a non-negative integer, got ${String(maxLength)}`);
   }
   if (maxLength === 0) return '';
-  const total = length(text);
+  const boundaries = graphemeBoundaries(text);
+  const total = boundaries.length - 1;
   if (total <= maxLength) return text;
 
   const ellipsis = options.ellipsis ?? '…';
@@ -81,10 +82,10 @@ export function truncate(text: string, maxLength: number, options: TruncateOptio
   if (ellipsisLength >= maxLength) return take(ellipsis, maxLength);
 
   const budget = maxLength - ellipsisLength;
-  let cut = take(text, budget);
+  let cut = text.slice(0, boundaries[budget]);
 
   if (options.boundary === 'word-before') {
-    const next = at(text, budget) ?? '';
+    const next = text.slice(boundaries[budget], boundaries[budget + 1]);
     if (!/^\s$/u.test(next)) {
       const lastSpace = cut.search(/\s+\S*$/u);
       if (lastSpace > 0) cut = cut.slice(0, lastSpace);
@@ -101,10 +102,11 @@ export function excerpt(text: string, needle: string, options: ExcerptOptions = 
   if (!Number.isInteger(radius) || radius < 0) {
     throw new RangeError(`radius must be a non-negative integer, got ${String(radius)}`);
   }
-  const index = findLiteral(text, needle);
-  if (index === -1) return undefined;
-
+  assertNeedle(needle);
+  if (!text.includes(needle)) return undefined;
   const boundaries = graphemeBoundaries(text);
+  const index = findLiteral(text, needle, { boundaries: new Set(boundaries) });
+  if (index === -1) return undefined;
   const count = boundaries.length - 1;
   const startGrapheme = boundaries.indexOf(index);
   const endGrapheme = boundaries.indexOf(index + needle.length);
@@ -112,7 +114,7 @@ export function excerpt(text: string, needle: string, options: ExcerptOptions = 
   const to = Math.min(endGrapheme + radius, count);
   const ellipsis = options.ellipsis ?? '…';
 
-  return (from > 0 ? ellipsis : '') + slice(text, from, to) + (to < count ? ellipsis : '');
+  return (from > 0 ? ellipsis : '') + text.slice(boundaries[from], boundaries[to]) + (to < count ? ellipsis : '');
 }
 
 function wrapLine(line: string, width: number, breakWords: boolean): string[] {

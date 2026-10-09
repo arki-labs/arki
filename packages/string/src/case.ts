@@ -5,8 +5,8 @@
  * `locale` is passed explicitly.
  */
 
+import { boundaryAt } from './internal/graphemes.js';
 import { lower, upper } from './internal/locale.js';
-import { at, slice } from './unicode.js';
 
 export type CaseOptions = Readonly<{ locale?: string }>;
 
@@ -33,16 +33,16 @@ export function caseWords(text: string): string[] {
 
 /** Uppercases the first grapheme and leaves the rest untouched. */
 export function capitalize(text: string, options: CaseOptions = {}): string {
-  const first = at(text, 0);
-  if (first === undefined) return text;
-  return upper(first, options.locale) + slice(text, 1);
+  const end = boundaryAt(text, 1);
+  if (end === undefined) return text;
+  return upper(text.slice(0, end), options.locale) + text.slice(end);
 }
 
 /** Lowercases the first grapheme and leaves the rest untouched. */
 export function uncapitalize(text: string, options: CaseOptions = {}): string {
-  const first = at(text, 0);
-  if (first === undefined) return text;
-  return lower(first, options.locale) + slice(text, 1);
+  const end = boundaryAt(text, 1);
+  if (end === undefined) return text;
+  return lower(text.slice(0, end), options.locale) + text.slice(end);
 }
 
 function capitalizedToken(token: string, locale: string | undefined): string {

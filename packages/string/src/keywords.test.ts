@@ -36,3 +36,17 @@ describe('keywords', () => {
     expect(() => keywords(TEXT, { length: 0 })).toThrow(RangeError);
   });
 });
+
+describe('tokenization follows words()', () => {
+  it('never spans a comma glued to a word and keeps decomposed accents', () => {
+    expect(keywords('alpha,beta gamma', { length: 2 })).toEqual([
+      { keyword: 'beta gamma', occurrences: 1, percentage: 100 },
+    ]);
+    expect(keywords('café café')).toEqual([{ keyword: 'café', occurrences: 2, percentage: 100 }]);
+    expect(keywords("don't stop", { minWordLength: 4 })).toEqual([
+      { keyword: "don't", occurrences: 1, percentage: 50 },
+      { keyword: 'stop', occurrences: 1, percentage: 50 },
+    ]);
+    expect(() => keywords('a', { limit: 0 })).toThrow(RangeError);
+  });
+});

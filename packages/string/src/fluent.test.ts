@@ -100,3 +100,21 @@ describe('str()', () => {
     expect(str('Привет').transliterate().value()).toBe('Privet');
   });
 });
+
+describe('literal searches are grapheme-aligned', () => {
+  it('includes, startsWith, endsWith and replaceAll never match inside a grapheme', () => {
+    const decomposed = str('é');
+    expect(decomposed.includes('e')).toBe(false);
+    expect(decomposed.startsWith('e')).toBe(false);
+    expect(str('aé').endsWith('́')).toBe(false);
+    expect(str('x').includes('')).toBe(true);
+    expect(str('a-b').replaceAll('-', '$&').value()).toBe('a$&b');
+    expect(str('ée').replaceAll('e', 'X').value()).toBe('éX');
+  });
+
+  it('length is cached on the immutable value', () => {
+    const value = str('\u{1F468}‍\u{1F469}abc');
+    expect(value.length).toBe(4);
+    expect(value.length).toBe(4);
+  });
+});

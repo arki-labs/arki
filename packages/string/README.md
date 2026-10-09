@@ -38,7 +38,9 @@ str('/articles/hello.md').after('/articles/').trimSuffix('.md').value(); // 'hel
 str(' Ada@Example.COM ').trim().lower().value(); // 'ada@example.com'
 ```
 
-Every method returns a new `StringValue`; nothing mutates. Extract with
+Every method returns a new `StringValue`; nothing mutates. Literal searches
+(`includes`, `startsWith`, `endsWith`, `replaceAll`, …) are grapheme-aligned
+like the plain functions, and replacement strings are literal (`$&` stays `$&`). Extract with
 `.value()` (or `toString()`, template literals, `JSON.stringify`). Note that
 `Boolean(str(''))` is `true` like any object, so use `.isEmpty()`.
 
@@ -78,7 +80,7 @@ decomposed form.
 | `/format`      | `collapseWhitespace`, `squish`, `initials`, `truncate`, `excerpt`, `wrapText`                                                                                                                                         |
 | `/segment`     | `lines`, `words`, `wordCount`, `sentences`, `sentenceCount`, `paragraphs`, `paragraphCount`                                                                                                                           |
 | `/search`      | `before`, `after`, `between`, `containsAny`, `indexOf`                                                                                                                                                                |
-| `/edit`        | `replaceFirst`, `replaceLast`, `replaceStart`, `replaceEnd`, `ensureStart`, `ensureEnd`, `trimPrefix`, `trimSuffix`, `swap`, `deduplicate`, `wrap`, `unwrap`, `mask`, `padStart`, `padEnd`, `padBoth`                 |
+| `/edit`        | `replaceFirst`, `replaceLast`, `replaceAll`, `replaceStart`, `replaceEnd`, `ensureStart`, `ensureEnd`, `trimPrefix`, `trimSuffix`, `swap`, `deduplicate`, `wrap`, `unwrap`, `mask`, `padStart`, `padEnd`, `padBoth`   |
 | `/escape`      | `escapeHtml`, `escapeRegExp`                                                                                                                                                                                          |
 | `/interpolate` | `interpolate`                                                                                                                                                                                                         |
 | `/slug`        | `slugify`, `transliterate`, `rulesets` (per-language rule sets)                                                                                                                                                       |
@@ -163,7 +165,9 @@ textMetrics(article); // every count, score, and statistic in one object
 Node 24+, Bun, Deno, every evergreen browser, and React Native (Hermes). The
 library uses only ECMAScript 2022 plus Unicode property escapes: no `Buffer`,
 `atob`, `TextEncoder`, `node:` imports, or ES2023 array-copy methods. The one
-feature check is `Intl.Segmenter`, with an in-house fallback. A lint rule and a
+feature check is `Intl.Segmenter`, with an in-house fallback that follows
+Unicode 18 (ICU engines through Unicode 17 still split a leading Indic
+virama from the consonant after it). A lint rule and a
 test (`src/runtime.test.ts`) fail the build if any of that changes.
 
 ### Base64 and UTF-8

@@ -34,3 +34,16 @@ describe('textMetrics', () => {
     expect(metrics.keyPhrases).toEqual([{ keyword: 'deep learning', occurrences: 3, percentage: 60 }]);
   });
 });
+
+describe('robustness', () => {
+  it('counts non-whitespace graphemes without merging flag halves across spaces', () => {
+    expect(textMetrics('\u{1F1F7} \u{1F1F4}').charactersWithoutSpaces).toBe(2);
+  });
+
+  it('handles more sentences than the engine argument limit', { timeout: 30_000 }, () => {
+    const metrics = textMetrics('Go. '.repeat(200_000));
+    expect(metrics.sentences).toBe(200_000);
+    expect(metrics.longestSentenceWords).toBe(1);
+    expect(metrics.shortestSentenceWords).toBe(1);
+  });
+});

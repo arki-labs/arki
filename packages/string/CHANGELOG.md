@@ -1,5 +1,21 @@
 # @arki/string
 
+## 0.1.1
+
+### Patch Changes
+
+- Performance and correctness pass after an independent review (Astra).
+  - Grapheme fallback (Hermes): emoji tag sequences such as the England flag are one grapheme (tag characters were classed as controls), and a second ZWJ no longer joins two pictographs, matching `Intl.Segmenter`. GB9c follows Unicode 18 (a linker joins the next consonant even without a preceding consonant), which ICU through Unicode 17 does not yet do.
+  - `length`, `at`, `slice`, `take`, `chunk`, `capitalize`, and prefix/suffix checks scan only as far as needed instead of materializing every boundary: `at(text, 5)` on 100k characters went from 5.9 ms to 0.05 ms.
+  - `sentences()` is linear: 16k consecutive terminal marks went from 1.1 s to 0.03 ms.
+  - `slugify`/`transliterate` compile a user replacement table once per array instance (20 calls with the Chinese table: 136 ms → 6 ms).
+  - `textMetrics` analyzes the text once (10k words: 341 ms → 104 ms) and no longer hits the engine argument limit on very long texts.
+  - `str().length` is cached; `excerpt` and literal searches short-circuit on a native miss.
+  - Replacement strings are literal everywhere: `deduplicate` and `slugify({ separator })` no longer interpret `$&`.
+  - `keywords` tokenizes with `words()`: `alpha,beta` never forms a phrase across the comma, decomposed accents are kept, and `length`, `limit`, `minWordLength`, `minOccurrences` must be positive integers.
+  - `padStart`/`padEnd`/`padBoth` throw `RangeError` when the fill would merge into neighbouring graphemes (combining marks, lone flag halves); `mask` rejects a glyph that starts with a combining mark. `readingTime`/`speakingTime` reject non-finite rates.
+  - **Changed:** `str().includes`, `startsWith`, `endsWith`, and `replaceAll` are literal and grapheme-aligned like the rest of the package (`str('é').includes('e')` is `false` in decomposed form; `$&` stays literal). New `replaceAll(text, search, replacement)` in `/edit`.
+
 ## 0.1.0
 
 ### Minor Changes

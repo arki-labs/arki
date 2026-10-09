@@ -49,3 +49,17 @@ describe('paragraphs / paragraphCount', () => {
     expect(paragraphCount('\n\n  \n')).toBe(0);
   });
 });
+
+describe('sentences stays linear on long punctuation runs', () => {
+  it('handles 50k terminal marks without backtracking', () => {
+    const text = '!'.repeat(50_000) + 'x';
+    const started = performance.now();
+    expect(sentences(text)).toEqual([text]);
+    expect(performance.now() - started).toBeLessThan(250);
+  });
+
+  it('keeps closing quotes with the sentence and needs whitespace after them', () => {
+    expect(sentences('He said "stop." She left.')).toEqual(['He said "stop."', 'She left.']);
+    expect(sentences('v1.2.3 shipped')).toEqual(['v1.2.3 shipped']);
+  });
+});

@@ -1,9 +1,11 @@
 /**
- * Keyword and key-phrase frequency for SEO-style analysis. Phrases are built from whitespace
- * tokens so they never cross clause punctuation; stop words and short words never take part.
+ * Keyword and key-phrase frequency for SEO-style analysis. Words come from the package's one
+ * word definition (`words()`), phrases never cross clause punctuation, and stop words or short
+ * words never take part.
  */
 
 import { lower } from './internal/locale.js';
+import { wordSpans } from './internal/words.js';
 import { length } from './unicode.js';
 
 export type Keyword = Readonly<{
@@ -162,36 +164,51 @@ export const ENGLISH_STOP_WORDS: readonly string[] = Object.freeze([
   'yours',
 ]);
 
-const TOKEN = /\S+/gu;
-const EDGE_PUNCTUATION = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
-const ENDS_CLAUSE = /[.!?…,;:][\p{Pf}\p{Pe}"']*$/u;
+/** Text between two words that ends a clause, so no phrase may span it. */
+const CLAUSE_BREAK = /[.!?…,;:()[\]{}"“”„]|\s[-–—]\s|\n/u;
+
+function positiveInteger(value: number | undefined, fallback: number, name: string): number {
+  const resolved = value ?? fallback;
+  if (!Number.isInteger(resolved) || resolved < 1) {
+    throw new RangeError(`${name} must be a positive integer, got ${String(resolved)}`);
+  }
+  return resolved;
+}
 
 /**
  * Most frequent words or phrases (`length` words each), lowercased, most frequent first; ties sort
  * alphabetically. `percentage` is the share among all candidate phrases of that length.
  */
 export function keywords(text: string, options: KeywordOptions = {}): Keyword[] {
-  const phraseLength = options.length ?? 1;
-  if (!Number.isInteger(phraseLength) || phraseLength < 1) {
-    throw new RangeError(`length must be a positive integer, got ${String(phraseLength)}`);
-  }
-  const minWordLength = options.minWordLength ?? 3;
-  const minOccurrences = options.minOccurrences ?? 1;
+  const phraseLength = positiveInteger(options.length, 1, 'length');
+  const minWordLength = positiveInteger(options.minWordLength, 3, 'minWordLength');
+  const minOccurrences = positiveInteger(options.minOccurrences, 1, 'minOccurrences');
+  const limit = options.limit === undefined ? undefined : positiveInteger(options.limit, 1, 'limit');
   const stopWords = new Set(options.stopWords === undefined ? ENGLISH_STOP_WORDS : (options.stopWords ?? []));
 
-  const tokens = [...lower(text, options.locale).matchAll(TOKEN)].map(match => {
-    const word = match[0].replaceAll(EDGE_PUNCTUATION, '');
-    const usable = word !== '' && length(word) >= minWordLength && !stopWords.has(word);
-    return { word, usable, endsClause: ENDS_CLAUSE.test(match[0]) };
+  const lowered = lower(text, options.locale);
+  const spans = wordSpans(lowered);
+  const usable = spans.map(({ word }) => length(word) >= minWordLength && !stopWords.has(word));
+  /** `breakAfter[i]`: clause punctuation separates word `i` from word `i + 1` (or `i` is the last word). */
+  const breakAfter = spans.map((span, index) => {
+    const next = spans[index + 1];
+    return next === undefined || CLAUSE_BREAK.test(lowered.slice(span.end, next.start));
   });
 
   const counts = new Map<string, number>();
   let total = 0;
-  for (let start = 0; start + phraseLength <= tokens.length; start += 1) {
-    const span = tokens.slice(start, start + phraseLength);
-    if (!span.every(token => token.usable)) continue;
-    if (span.slice(0, -1).some(token => token.endsClause)) continue;
-    const phrase = span.map(token => token.word).join(' ');
+  for (let start = 0; start + phraseLength <= spans.length; start += 1) {
+    let valid = true;
+    for (let offset = 0; offset < phraseLength && valid; offset += 1) {
+      const index = start + offset;
+      const lastInPhrase = offset === phraseLength - 1;
+      if (!(usable[index] ?? false) || (!lastInPhrase && (breakAfter[index] ?? true))) valid = false;
+    }
+    if (!valid) continue;
+    const phrase = spans
+      .slice(start, start + phraseLength)
+      .map(span => span.word)
+      .join(' ');
     counts.set(phrase, (counts.get(phrase) ?? 0) + 1);
     total += 1;
   }
@@ -201,5 +218,5 @@ export function keywords(text: string, options: KeywordOptions = {}): Keyword[] 
     .map(([keyword, occurrences]) => ({ keyword, occurrences, percentage: (occurrences / total) * 100 }))
     // eslint-disable-next-line unicorn/no-array-sort -- the array is freshly built; no ES2023 toSorted for older engines
     .sort((a, b) => b.occurrences - a.occurrences || (a.keyword < b.keyword ? -1 : 1));
-  return options.limit === undefined ? result : result.slice(0, options.limit);
+  return limit === undefined ? result : result.slice(0, limit);
 }

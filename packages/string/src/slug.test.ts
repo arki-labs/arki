@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import type { Replacements } from './slug.js';
 import { rulesets, slugify, transliterate } from './slug.js';
 import { chinese } from './slug/rules-cjk.js';
 
@@ -111,5 +112,14 @@ describe('transliterate', () => {
     expect(transliterate('é')).toBe('e');
     expect(transliterate('Straße', { locale: 'de' })).toBe('Strasse');
     expect(transliterate('🎉')).toBe('🎉');
+  });
+});
+
+describe('separator is literal', () => {
+  it('keeps $& as a separator and reuses compiled user tables', () => {
+    expect(slugify('a b', { separator: '$&' })).toBe('a$&b');
+    const table: Replacements = [['x', 'y']];
+    expect(slugify('x x', { replacements: table })).toBe('y-y');
+    expect(slugify('x', { replacements: table })).toBe('y');
   });
 });

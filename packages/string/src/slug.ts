@@ -113,6 +113,17 @@ function localeRules(locale: string | undefined): Compiled | undefined {
 }
 const localeCache = new Map<string, Compiled>();
 
+/** User tables (the opt-in CJK sets have thousands of entries) compile once per array instance. */
+const userCache = new WeakMap<Replacements, Compiled>();
+function userRules(entries: Replacements): Compiled {
+  let compiled = userCache.get(entries);
+  if (compiled === undefined) {
+    compiled = compile(entries);
+    userCache.set(entries, compiled);
+  }
+  return compiled;
+}
+
 function normalizeLocale(locale: string | undefined): string | undefined {
   if (locale === undefined || locale === '') return undefined;
   const normalized = locale.toLowerCase().replace(/^no(?=-|$)/u, 'nb');
@@ -125,7 +136,7 @@ function normalizeLocale(locale: string | undefined): string | undefined {
 export function transliterate(text: string, options: TransliterateOptions = {}): string {
   let output = text.normalize();
   if (options.replacements !== undefined && options.replacements.length > 0) {
-    output = apply(output, compile(options.replacements));
+    output = apply(output, userRules(options.replacements));
   }
   const locale = localeRules(options.locale);
   if (locale !== undefined) output = apply(output, locale);
@@ -166,12 +177,12 @@ export function slugify(text: string, options: SlugifyOptions = {}): string {
   output = output.replaceAll(/([a-z\d])['’]([ts])(?![a-z\d])/giu, '$1$2');
 
   const allowed = `a-z\\d${lowercase ? '' : 'A-Z'}${preserve.map(char => escapeRegExp(char)).join('')}`;
-  output = output.replaceAll(new RegExp(`[^${allowed}]+`, 'gu'), separator).replaceAll('\\', '');
+  output = output.replaceAll(new RegExp(`[^${allowed}]+`, 'gu'), () => separator).replaceAll('\\', '');
 
   if (separator !== '') {
     const escaped = escapeRegExp(separator);
     output = output
-      .replaceAll(new RegExp(`(?:${escaped}){2,}`, 'gu'), separator)
+      .replaceAll(new RegExp(`(?:${escaped}){2,}`, 'gu'), () => separator)
       .replaceAll(new RegExp(`^(?:${escaped})|(?:${escaped})$`, 'gu'), '');
   }
 

@@ -6,6 +6,9 @@
  * property escapes, so the engine's own Unicode tables supply the character data
  * and nothing is pinned in this package. The fallback exists for Hermes (React
  * Native), which has no `Intl.Segmenter`.
+ *
+ * Every entry point streams: callers that only need a count, one offset, or a
+ * prefix never materialize the full boundary array.
  */
 
 const CR = 0x0d;
@@ -26,6 +29,7 @@ const HangulT = 8;
 const HangulLV = 9;
 const HangulLVT = 10;
 const ExtendedPictographic = 11;
+const Zwj = 12;
 
 type BreakClass =
   | typeof Other
@@ -39,9 +43,11 @@ type BreakClass =
   | typeof HangulT
   | typeof HangulLV
   | typeof HangulLVT
-  | typeof ExtendedPictographic;
+  | typeof ExtendedPictographic
+  | typeof Zwj;
 
 const CONTROL_RE = /[\p{Cc}\p{Zl}\p{Zp}\p{Cf}\p{Cs}]/u;
+/** Grapheme_Extend covers the emoji tag characters (U+E0020–E007F) and ZWNJ, which are also `Cf`. */
 const EXTEND_RE = /[\p{Grapheme_Extend}\p{Emoji_Modifier}]/u;
 const REGIONAL_INDICATOR_RE = /\p{Regional_Indicator}/u;
 const SPACING_MARK_RE = /\p{Mc}/u;
@@ -74,9 +80,6 @@ const PREPEND_CHARACTERS = new Set([
   0x1_1a_88, 0x1_1a_89, 0x1_1d_46, 0x1_1f_02,
 ]);
 
-/** Format characters that UAX #29 excludes from Control. */
-const CONTROL_EXCEPTIONS = new Set([ZWNJ, ZWJ]);
-
 function hangulClass(cp: number): BreakClass | undefined {
   if ((cp >= 0x11_00 && cp <= 0x11_5f) || (cp >= 0xa9_60 && cp <= 0xa9_7c)) return HangulL;
   if ((cp >= 0x11_60 && cp <= 0x11_a7) || (cp >= 0xd7_b0 && cp <= 0xd7_c6)) return HangulV;
@@ -85,13 +88,15 @@ function hangulClass(cp: number): BreakClass | undefined {
   return undefined;
 }
 
+/** Order matters: Prepend and Extend contain `Cf` characters that Control would otherwise claim. */
 function classify(cp: number): BreakClass {
+  if (cp < 0x80) return cp < 0x20 || cp === 0x7f ? Control : Other;
+  if (cp === ZWJ) return Zwj;
   const ch = String.fromCodePoint(cp);
-  if (cp === ZWJ) return Extend;
   if (REGIONAL_INDICATOR_RE.test(ch)) return RegionalIndicator;
   if (PREPEND_CHARACTERS.has(cp)) return Prepend;
-  if (CONTROL_RE.test(ch) && !CONTROL_EXCEPTIONS.has(cp)) return Control;
   if (EXTEND_RE.test(ch)) return Extend;
+  if (CONTROL_RE.test(ch)) return Control;
   if (SPACING_MARK_ADDITIONS.has(cp) || (SPACING_MARK_RE.test(ch) && !SPACING_MARK_EXCEPTIONS.has(cp))) {
     return SpacingMark;
   }
@@ -102,33 +107,41 @@ function classify(cp: number): BreakClass {
 }
 
 function isIndicConsonant(cp: number): boolean {
+  if (cp < 0x09_00) return false;
   const ch = String.fromCodePoint(cp);
   return INDIC_CONSONANT_RE.test(ch) && LETTER_RE.test(ch);
 }
 
+/** GB11 state: nothing, `ExtPict Extend*`, or that followed by exactly one ZWJ. */
+const NoPictographic = 0;
+const PictographicRun = 1;
+const PictographicZwj = 2;
+
+/** GB9c state: nothing, a consonant (with trailing Extend/Linker), or a linker (Unicode 18 needs no leading consonant). */
+const NoConjunct = 0;
+const ConjunctConsonant = 1;
+const ConjunctLinker = 2;
+
 /**
- * Boundary offsets (UTF-16 code-unit indices) produced by the in-house UAX #29
- * scanner. Exported for tests that must exercise the fallback regardless of the
- * host engine; application code should use `graphemeBoundaries`.
+ * Boundary offsets after position 0 produced by the in-house UAX #29 scanner,
+ * ending with `text.length`. Exported for tests that must exercise the fallback
+ * regardless of the host engine; application code should use `graphemeBreaks`.
  */
-export function fallbackBoundaries(text: string): number[] {
-  const boundaries: number[] = [0];
-  if (text.length === 0) return boundaries;
+export function* fallbackBreaks(text: string): Generator<number, void, undefined> {
+  if (text.length === 0) return;
 
   let index = 0;
   let previousCp = -1;
   let previous: BreakClass = Other;
   let regionalIndicatorRun = 0;
-  /** GB11: an Extended_Pictographic followed only by Extend characters. */
-  let pictographicRun = false;
-  /** GB9c: a Linker followed only by Extend/Linker characters. */
-  let indicLinkerSeen = false;
+  let pictographic = NoPictographic;
+  let conjunct = NoConjunct;
 
   while (index < text.length) {
-    const cp = text.codePointAt(index);
-    if (cp === undefined) break;
+    const cp = text.codePointAt(index) ?? 0;
     const width = cp > 0xff_ff ? 2 : 1;
     const current = classify(cp);
+    const consonant = conjunct === ConjunctLinker && isIndicConsonant(cp);
 
     if (index > 0) {
       let breakHere = true;
@@ -148,40 +161,55 @@ export function fallbackBoundaries(text: string): number[] {
         breakHere = false; // GB7
       } else if ((previous === HangulLVT || previous === HangulT) && current === HangulT) {
         breakHere = false; // GB8
-      } else if (current === Extend) {
-        breakHere = false; // GB9 (Extend | ZWJ)
+      } else if (current === Extend || current === Zwj) {
+        breakHere = false; // GB9
       } else if (current === SpacingMark) {
         breakHere = false; // GB9a
       } else if (previous === Prepend) {
         breakHere = false; // GB9b
-      } else if (indicLinkerSeen && isIndicConsonant(cp)) {
+      } else if (consonant) {
         breakHere = false; // GB9c
-      } else if (pictographicRun && previousCp === ZWJ && current === ExtendedPictographic) {
+      } else if (pictographic === PictographicZwj && current === ExtendedPictographic) {
         breakHere = false; // GB11
       } else if (previous === RegionalIndicator && current === RegionalIndicator && regionalIndicatorRun % 2 === 1) {
         breakHere = false; // GB12 / GB13
       }
 
-      if (breakHere) boundaries.push(index);
+      if (breakHere) yield index;
     }
 
-    // Update run state for the rules that look further back than one character.
-    if (current === RegionalIndicator) {
-      regionalIndicatorRun += 1;
-    } else {
-      regionalIndicatorRun = 0;
-    }
+    // Update the run state for the rules that look further back than one character.
+    regionalIndicatorRun = current === RegionalIndicator ? regionalIndicatorRun + 1 : 0;
 
-    if (current === ExtendedPictographic) {
-      pictographicRun = true;
-    } else if (current !== Extend) {
-      pictographicRun = false;
+    switch (current) {
+      case ExtendedPictographic: {
+        pictographic = PictographicRun;
+
+        break;
+      }
+      case Extend: {
+        if (pictographic !== PictographicRun) pictographic = NoPictographic;
+
+        break;
+      }
+      case Zwj: {
+        pictographic = pictographic === PictographicRun ? PictographicZwj : NoPictographic;
+
+        break;
+      }
+      default: {
+        pictographic = NoPictographic;
+      }
     }
 
     if (INDIC_LINKERS.has(cp)) {
-      indicLinkerSeen = true;
-    } else if (current !== Extend || cp === ZWNJ) {
-      indicLinkerSeen = false; // ZWNJ extends graphemes but is not an InCB=Extend character
+      // Unicode 18 GB9c: a linker joins the next consonant even without a preceding consonant
+      // (GraphemeBreakTest 18.0 line `÷ 094D × 0915 ÷`); ICU through Unicode 17 still splits there.
+      conjunct = ConjunctLinker;
+    } else if (isIndicConsonant(cp)) {
+      conjunct = ConjunctConsonant;
+    } else if ((current !== Extend && current !== Zwj) || cp === ZWNJ) {
+      conjunct = NoConjunct; // ZWNJ extends graphemes but is not an InCB=Extend character
     }
 
     previousCp = cp;
@@ -189,8 +217,12 @@ export function fallbackBoundaries(text: string): number[] {
     index += width;
   }
 
-  boundaries.push(text.length);
-  return boundaries;
+  yield text.length;
+}
+
+/** Full boundary array from the fallback scanner: `[0, …, text.length]`. */
+export function fallbackBoundaries(text: string): number[] {
+  return [0, ...fallbackBreaks(text)];
 }
 
 let nativeSegmenter: Intl.Segmenter | null | undefined;
@@ -205,10 +237,19 @@ function getNativeSegmenter(): Intl.Segmenter | null {
   return nativeSegmenter;
 }
 
-/**
- * Boundary offsets (UTF-16 code-unit indices) of every grapheme cluster in
- * `text`, always starting with `0` and ending with `text.length`.
- */
+function* nativeBreaks(text: string, segmenter: Intl.Segmenter): Generator<number, void, undefined> {
+  if (text.length === 0) return;
+  for (const segment of segmenter.segment(text)) if (segment.index > 0) yield segment.index;
+  yield text.length;
+}
+
+/** Boundary offsets (UTF-16 code-unit indices) after position 0, ending with `text.length`; nothing for `''`. */
+export function graphemeBreaks(text: string): Generator<number, void, undefined> {
+  const segmenter = getNativeSegmenter();
+  return segmenter === null ? fallbackBreaks(text) : nativeBreaks(text, segmenter);
+}
+
+/** Every boundary offset of `text`, always starting with `0` and ending with `text.length`. */
 export function graphemeBoundaries(text: string): number[] {
   const segmenter = getNativeSegmenter();
   if (segmenter === null) return fallbackBoundaries(text);
@@ -218,13 +259,49 @@ export function graphemeBoundaries(text: string): number[] {
   return boundaries;
 }
 
+/** Number of grapheme clusters, without materializing offsets. */
+export function graphemeCount(text: string): number {
+  const segmenter = getNativeSegmenter();
+  let count = 0;
+  if (segmenter === null) {
+    for (const _ of fallbackBreaks(text)) count += 1;
+  } else {
+    for (const _ of segmenter.segment(text)) count += 1;
+  }
+  return count;
+}
+
+/**
+ * UTF-16 offset of boundary number `position` (0 is the start, the count is the end), scanning
+ * only as far as needed. `undefined` when `position` exceeds the grapheme count.
+ */
+export function boundaryAt(text: string, position: number): number | undefined {
+  if (position === 0) return 0;
+  let seen = 0;
+  for (const offset of graphemeBreaks(text)) {
+    seen += 1;
+    if (seen === position) return offset;
+  }
+  return undefined;
+}
+
+/** Whether `offset` falls on a grapheme boundary, scanning only up to `offset`. */
+export function isGraphemeBoundary(text: string, offset: number): boolean {
+  if (offset <= 0 || offset >= text.length) return offset === 0 || offset === text.length;
+  for (const boundary of graphemeBreaks(text)) {
+    if (boundary >= offset) return boundary === offset;
+  }
+  return false;
+}
+
 /** Iterates the grapheme clusters of `text`, in order. */
 export function* segmentGraphemes(text: string): IterableIterator<string> {
   const segmenter = getNativeSegmenter();
   if (segmenter === null) {
-    const boundaries = fallbackBoundaries(text);
-    for (let i = 1; i < boundaries.length; i += 1) {
-      yield text.slice(boundaries[i - 1], boundaries[i]);
+    let start = 0;
+    for (const end of fallbackBreaks(text)) {
+      yield text.slice(start, end);
+      start = end;
     }
     return;
   }

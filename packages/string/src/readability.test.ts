@@ -128,3 +128,10 @@ describe('readingTime / speakingTime', () => {
     expect(() => readingTime(text, { wordsPerMinute: 0 })).toThrow(RangeError);
   });
 });
+
+describe('option validation', () => {
+  it('rejects non-finite reading speeds', () => {
+    expect(() => readingTime('a b', { wordsPerMinute: Number.POSITIVE_INFINITY })).toThrow(RangeError);
+    expect(() => speakingTime('a b', { wordsPerMinute: Number.NaN })).toThrow(RangeError);
+  });
+});

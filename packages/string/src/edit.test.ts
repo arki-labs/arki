@@ -8,6 +8,7 @@ import {
   padBoth,
   padEnd,
   padStart,
+  replaceAll,
   replaceEnd,
   replaceFirst,
   replaceLast,
@@ -136,5 +137,25 @@ describe('affixes', () => {
     expect(trimSuffix('a.md', '.md')).toBe('a');
     expect(trimSuffix('a.md', '.txt')).toBe('a.md');
     expect(trimPrefix('x', '')).toBe('x');
+  });
+});
+
+describe('replacement strings are literal', () => {
+  it('deduplicate keeps $& literal and replaceAll is grapheme-aligned', () => {
+    expect(deduplicate('$&$&', '$&')).toBe('$&');
+    expect(replaceAll('a-b-c', '-', '$&')).toBe('a$&b$&c');
+    expect(replaceAll('é e', 'e', 'X')).toBe('é X');
+    expect(replaceAll('aaa', 'aa', 'b')).toBe('ba');
+    expect(replaceAll('abc', 'z', 'y')).toBe('abc');
+    expect(() => replaceAll('abc', '', 'y')).toThrow(TypeError);
+  });
+});
+
+describe('padding and mask keep their grapheme contract', () => {
+  it('rejects fills that merge into neighbours', () => {
+    expect(() => padEnd('a', 3, '́')).toThrow(RangeError);
+    expect(() => padStart('a', 3, '\u{1F1F7}')).toThrow(RangeError);
+    expect(padEnd('a', 3, '\u{1F1F7}\u{1F1F4}')).toBe('a\u{1F1F7}\u{1F1F4}\u{1F1F7}\u{1F1F4}');
+    expect(() => mask('abc', { glyph: '́' })).toThrow(RangeError);
   });
 });
