@@ -83,24 +83,8 @@
     "@arki/contracts": "workspace:*",
     "@arki/log": "workspace:*",
     "@aws-sdk/client-sesv2": "catalog:",
-    "@react-email/body": "catalog:react-email",
-    "@react-email/button": "catalog:react-email",
-    "@react-email/column": "catalog:react-email",
-    "@react-email/container": "catalog:react-email",
-    "@react-email/font": "catalog:react-email",
-    "@react-email/head": "catalog:react-email",
-    "@react-email/heading": "catalog:react-email",
-    "@react-email/hr": "catalog:react-email",
-    "@react-email/html": "catalog:react-email",
-    "@react-email/img": "catalog:react-email",
-    "@react-email/link": "catalog:react-email",
-    "@react-email/markdown": "catalog:react-email",
-    "@react-email/preview": "catalog:react-email",
     "@react-email/render": "catalog:react-email",
-    "@react-email/row": "catalog:react-email",
-    "@react-email/section": "catalog:react-email",
-    "@react-email/tailwind": "catalog:react-email",
-    "@react-email/text": "catalog:react-email",
+    "react-email": "catalog:",
     "resend": "catalog:"
   },
   "devDependencies": {
@@ -108,8 +92,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/node": "catalog:node",
-    "react-email": "catalog:"
+    "@types/node": "catalog:node"
   },
   "module:jsx": "src"
 }

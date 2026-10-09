@@ -1,15 +1,4 @@
-import { Body } from '@react-email/body';
-import { Button } from '@react-email/button';
-import { Container } from '@react-email/container';
-import { Head } from '@react-email/head';
-import { Hr } from '@react-email/hr';
-import { Html } from '@react-email/html';
-import { Img } from '@react-email/img';
-import { Link } from '@react-email/link';
-import { Preview } from '@react-email/preview';
-import { Section } from '@react-email/section';
-import { Tailwind } from '@react-email/tailwind';
-import { Text } from '@react-email/text';
+import { Body, Button, Container, Head, Hr, Html, Img, Link, Preview, Section, Tailwind, Text } from 'react-email';
 
 const baseUrl = process.env['VERCEL_URL'] ? `https://${process.env['VERCEL_URL']}` : '';
 
