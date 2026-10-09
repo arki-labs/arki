@@ -262,7 +262,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
       });
     } else {
       // Cron or Interval: repeating execution
-      const repeatOptions: RepeatOptions =
+      const repeatOptions: Omit<RepeatOptions, 'key'> =
         internal.type === 'cron'
           ? {
               pattern: internal.value as string,
@@ -272,11 +272,21 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
               every: internal.value as number,
             };
 
+      const schedulerId = `schedule:${internal.name}`;
+
+      // This queue holds exactly one schedule, so any other scheduler entry is
+      // stale. BullMQ 5 `queue.add(..., { repeat })` stored the schedule under
+      // an md5 key; BullMQ 6 keeps running such an entry next to the new one,
+      // so without this every tick would execute twice.
+      for (const scheduler of await queue.getJobSchedulers()) {
+        if (scheduler.key !== schedulerId) {
+          debugSchedule('[%s] Removing stale scheduler entry: %s', internal.name, scheduler.key);
+          await queue.removeJobScheduler(scheduler.key);
+        }
+      }
+
       debugSchedule('[%s] Configuring %s schedule with value: %s', internal.name, internal.type, internal.value);
-      await queue.add('scheduled-job', scheduleData, {
-        repeat: repeatOptions,
-        jobId: `schedule:${internal.name}`,
-      });
+      await queue.upsertJobScheduler(schedulerId, repeatOptions, { name: 'scheduled-job', data: scheduleData });
     }
 
     queues.push(queue);

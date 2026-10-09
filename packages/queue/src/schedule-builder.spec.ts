@@ -10,6 +10,7 @@
  * - Middleware integration
  */
 import type { StartedTestContainer } from 'testcontainers';
+import { Queue } from 'bullmq';
 import { GenericContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -339,6 +340,58 @@ describe('INTERVAL Schedules', () => {
     expect(executions.length).toBeGreaterThanOrEqual(3);
 
     await queue.stop();
+  }, 20000);
+
+  // BullMQ 5 stored a schedule under an md5 key. BullMQ 6 keeps running such an
+  // entry next to the one registered now, so every tick would execute twice.
+  it('should replace a stale scheduler entry instead of running twice', async () => {
+    const q = initQueue.context<TestContext>().create();
+
+    const name = 'test-stale-interval';
+    const executions: number[] = [];
+
+    const schedule = q.schedule
+      .interval(1000)
+      .name(name)
+      .input(z.object({}))
+      .handler(async () => {
+        executions.push(Date.now());
+        return { processed: true };
+      });
+
+    const url = new URL(redisUrl);
+    const bullQueue = new Queue(name, {
+      connection: { host: url.hostname, port: Number(url.port) },
+      prefix: 'queue:',
+    });
+    await bullQueue.upsertJobScheduler(
+      '244d59fa5664c944701f2c64517e3a19',
+      { every: 1000 },
+      { name: 'scheduled-job', data: {} },
+    );
+
+    const queue = q.createQueue({
+      connection: redisUrl,
+      createContext: () => ({
+        userId: 'test-user-123',
+        timestamp: new Date(),
+      }),
+    });
+
+    await queue.register(q.registry({ schedule }));
+    await queue.start();
+
+    await new Promise(resolve => setTimeout(resolve, 3500));
+
+    const schedulers = await bullQueue.getJobSchedulers();
+    expect(schedulers.map(scheduler => scheduler.key)).toEqual([`schedule:${name}`]);
+
+    // One run per second for 3.5s. A surviving stale entry would double this.
+    expect(executions.length).toBeGreaterThanOrEqual(3);
+    expect(executions.length).toBeLessThanOrEqual(5);
+
+    await queue.stop();
+    await bullQueue.close();
   }, 20000);
 
   it('should handle fast intervals correctly', async () => {
