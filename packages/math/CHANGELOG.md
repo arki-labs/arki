@@ -6,7 +6,7 @@
   F, exponential, uniform, binomial, Poisson (`pdf`/`pmf`, `cdf`, `inv`,
   `mean`, `variance`) plus `erf`, `erfc`, `erfInv`, `gammaLn`,
   `regularizedGammaP`, `regularizedBeta`. Verified against jstat and numerical
-  integration; ekuation no longer depends on jstat.
+  integration.
 - `@arki/math/decimal-math` — correctly rounded `sqrt`, `cbrt`, `nthRoot`,
   `exp`, `ln`, `log10`, `log2`, `log`, fractional `pow`, `PI(scale)`,
   `E(scale)` on `Decimal`, differential-tested against decimal.js.
