@@ -40,7 +40,7 @@ export class StripeProvider extends BasePaymentProvider {
   constructor(config: PaymentProviderConfig) {
     super(config);
     this.stripe = new Stripe(config.apiKey, {
-      apiVersion: '2026-02-25.clover',
+      apiVersion: '2026-09-30.endive',
       typescript: true,
     });
   }
