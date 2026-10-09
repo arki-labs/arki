@@ -31,6 +31,8 @@ Subpaths:
 | `@arki/icons/flags` | Country flags |
 | `@arki/icons/brands` | Brand marks (Simple Icons) |
 
+Every other file under `src/` is reachable as `@arki/icons/<file>` too. One of them, `@arki/icons/home`, uses an `unplugin-icons` virtual import (`~icons/...`) and only works in a bundler configured with that plugin.
+
 ## License
 
 MIT. Icon sets keep their own licenses (Phosphor MIT, Iconify collections per set, Simple Icons CC0, flag-icons MIT).

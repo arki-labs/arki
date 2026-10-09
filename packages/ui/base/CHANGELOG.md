@@ -1,5 +1,13 @@
 # @arki/ui
 
+## 0.1.4
+
+### Patch Changes
+
+- Declare `class-variance-authority` and `debug` as dependencies. Both were imported but undeclared; inside the monorepo hoisting hid it, and the first external install (Drop Studio, clean clone) failed to resolve `class-variance-authority` from `button.tsx`.
+- Updated dependencies [d06e5a7]
+  - @arki/date@0.1.0
+
 ## 0.1.3
 
 ### Patch Changes

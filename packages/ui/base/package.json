@@ -1,6 +1,6 @@
 {
   "name": "@arki/ui",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "React component library for ARKI apps — Base UI primitives styled with Tailwind v4 semantic tokens: forms, overlays, navigation, data display and charts.",
   "license": "MIT",
   "repository": {
@@ -612,9 +612,11 @@
     "@arki/theme": "workspace:*",
     "@base-ui/react": "catalog:",
     "@hookform/resolvers": "catalog:validation",
+    "class-variance-authority": "catalog:styling",
     "clsx": "catalog:styling",
     "cmdk": "catalog:",
     "colord": "catalog:styling",
+    "debug": "catalog:",
     "embla-carousel-react": "catalog:",
     "input-otp": "catalog:",
     "katex": "catalog:",
@@ -636,6 +638,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@types/debug": "catalog:",
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react"
   },
