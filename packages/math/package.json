@@ -1,58 +1,132 @@
 {
   "name": "@arki/math",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
+  "description": "Zero-dependency math toolkit — exact Decimal and Rational arithmetic on bigint, explicit rounding modes, float helpers that round what you typed, descriptive statistics, Intl-backed locale formatting and parsing, seeded random, and a fluent number wrapper.",
+  "keywords": [
+    "arki",
+    "typescript",
+    "math",
+    "decimal",
+    "bigdecimal",
+    "rational",
+    "fraction",
+    "bigint",
+    "rounding",
+    "money",
+    "statistics",
+    "format",
+    "intl",
+    "locale",
+    "parse",
+    "random",
+    "fluent"
+  ],
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/math"
+  },
+  "license": "MIT",
+  "sideEffects": false,
   "type": "module",
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "default": "./dist/errors.js"
+    },
+    "./rounding": {
+      "types": "./dist/rounding.d.ts",
+      "import": "./dist/rounding.js",
+      "default": "./dist/rounding.js"
+    },
     "./number": {
-      "types": "./dist/src/number.d.ts",
-      "import": "./src/number.ts",
-      "node": "./src/number.ts"
+      "types": "./dist/number.d.ts",
+      "import": "./dist/number.js",
+      "default": "./dist/number.js"
     },
-    "./fractions": {
-      "types": "./dist/src/fractions.d.ts",
-      "import": "./src/fractions.ts",
-      "node": "./src/fractions.ts"
+    "./integer": {
+      "types": "./dist/integer.d.ts",
+      "import": "./dist/integer.js",
+      "default": "./dist/integer.js"
     },
-    "./stat": {
-      "types": "./dist/src/stat.d.ts",
-      "import": "./src/stat.ts",
-      "node": "./src/stat.ts"
+    "./decimal": {
+      "types": "./dist/decimal.d.ts",
+      "import": "./dist/decimal.js",
+      "default": "./dist/decimal.js"
+    },
+    "./rational": {
+      "types": "./dist/rational.d.ts",
+      "import": "./dist/rational.js",
+      "default": "./dist/rational.js"
+    },
+    "./stats": {
+      "types": "./dist/stats.d.ts",
+      "import": "./dist/stats.js",
+      "default": "./dist/stats.js"
+    },
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "import": "./dist/format.js",
+      "default": "./dist/format.js"
+    },
+    "./parse": {
+      "types": "./dist/parse.d.ts",
+      "import": "./dist/parse.js",
+      "default": "./dist/parse.js"
+    },
+    "./random": {
+      "types": "./dist/random.d.ts",
+      "import": "./dist/random.js",
+      "default": "./dist/random.js"
+    },
+    "./fluent": {
+      "types": "./dist/fluent.d.ts",
+      "import": "./dist/fluent.js",
+      "default": "./dist/fluent.js"
     },
     "./package.json": "./package.json"
   },
-  "typesVersions": {
-    "*": {
-      "*": [
-        "./src/*"
-      ]
-    }
-  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "test": "vitest run",
+    "test:runtimes": "bun run build && node scripts/smoke.mjs && bun scripts/smoke.mjs && if command -v deno >/dev/null; then deno run --no-config scripts/smoke.mjs; else echo 'deno not installed: skipped'; fi && bun build scripts/smoke.mjs --target=browser --outdir=.cache/browser-check && node scripts/smoke-browser.mjs",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
-  "dependencies": {
-    "big.js": "catalog:",
-    "bignumber.js": "catalog:",
-    "decimal.js": "catalog:",
-    "jstat": "catalog:",
-    "mathjs": "catalog:",
-    "recharts": "catalog:",
-    "simple-statistics": "catalog:"
-  },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/big.js": "catalog:types",
-    "@types/katex": "catalog:types"
+    "@types/node": "catalog:node",
+    "decimal.js": "catalog:"
   },
-  "sideEffects": false
+  "publishConfig": {
+    "access": "public"
+  }
 }
