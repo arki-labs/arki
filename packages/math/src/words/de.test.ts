@@ -77,3 +77,16 @@ describe('de ordinals', () => {
     expect(formatOrdinal(21, { locale: de, gender: 'feminine' })).toBe('21.');
   });
 });
+
+describe('de oversized integers', () => {
+  it('rejects a 100 000-digit integer quickly', () => {
+    const huge = 10n ** 100_000n - 1n;
+    // spellNumber reads through Decimal, which already caps input at 10 000 digits.
+    const maxDecimal = 10n ** 9999n;
+    for (const run of [() => spellNumber(maxDecimal, { locale: de }), () => spellOrdinal(huge, { locale: de })]) {
+      const start = Date.now();
+      expect(run).toThrow(NumericRangeError);
+      expect(Date.now() - start).toBeLessThan(50);
+    }
+  });
+});

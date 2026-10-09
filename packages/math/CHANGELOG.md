@@ -1,5 +1,42 @@
 # @arki/math
 
+## 0.0.3
+
+Correctness and performance pass after an independent review.
+
+Fixed:
+
+- Distribution quantiles converge on probability, not on an absolute `x`
+  tolerance: `chiSquare(0.1).cdf(inv(0.05))` is `0.05` again (was `0.175`).
+  Discrete `inv(p)` is exactly "smallest `k` with `cdf(k) ≥ p`".
+- Non-central t: density no longer cancels to `0` near `x = 0`; the far tail
+  (`cdf(1e200)`) is `1`, not `Φ(−1)`.
+- `Rational#toNumber()` rounds in binary to the nearest double (ties to
+  even), including subnormals; it used to round through 20 decimal digits.
+- `divmod` on large safe integers is exact (the intermediate product could
+  exceed 2^53).
+- `mean`/`percentile`/`variance` no longer overflow to `NaN`/`Infinity` for
+  values near `1e308` when the result is representable.
+- Digit limits can no longer be bypassed through exponents, bigint inputs or
+  `times`; `pow10` memory is bounded.
+- `formatNumber` of a Decimal beyond Intl's range throws `NumericRangeError`
+  instead of printing `∞`; the exact-string Intl probe now discriminates.
+- `spellNumber` thresholds return the value intact (`'0.0001'`, not `'0'`);
+  oversized inputs are rejected before any work; Spanish `dosmilésimo`.
+- `num()` validates operands (`num(2).dividedBy(Infinity)` throws).
+- `decimal-math`: `log` of a padded exact power no longer exhausts guard
+  digits; convergence errors name the operation and scale.
+
+Added: `Decimal.compare` (sort comparator), `quantile(values, q)` on 0–1,
+`.quantile(p)` and `.sf(x)` on distributions, `NumberWordsLocale.maxGroups`.
+Renamed with deprecated aliases: `SpreadOptions` → `VarianceOptions`,
+`PrecisionOptions` → `DecimalMathOptions`.
+
+Faster: `Decimal.sum` (single accumulator), `Rational` add/multiply
+(Knuth GCD / cross-cancellation), `sum()` (no copies), `formatCurrency`
+(~4×, bound formatters ~8×), `parseNumber` (~9×). `scripts/bench.mjs`
+tracks 30 cases.
+
 ## 0.0.2
 
 - `@arki/math/distributions` — normal, Student t, non-central t, chi-square,

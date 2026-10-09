@@ -153,6 +153,7 @@ export const ro: NumberWordsLocale = {
   code: 'ro-RO',
   negative: 'minus',
   decimalSeparator: 'virgulă',
+  maxGroups: 5,
   spell: roSpell,
   spellOrdinal: roSpellOrdinal,
   ordinal: roOrdinal,

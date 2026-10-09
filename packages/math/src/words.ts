@@ -22,6 +22,11 @@ export type WordsContext = {
 /**
  * The contract a locale implements. All inputs are non-negative integers;
  * the core handles sign, fractions and thresholds.
+ *
+ * Locales are objects you import (`import { ro } from '@arki/math/words/ro'`),
+ * not Intl-style strings (`'ro'`). A string would need a registry that holds
+ * every language's grammar, so every app would bundle all of them. An imported
+ * object lets the bundler keep only the languages you actually reference.
  */
 export type NumberWordsLocale = {
   /** BCP 47 tag, also used for digit formatting. */
@@ -30,6 +35,12 @@ export type NumberWordsLocale = {
   readonly negative: string;
   /** The word read for the decimal separator: `point`, `virgulă`, `Komma`. */
   readonly decimalSeparator: string;
+  /**
+   * How many base-1000 groups the locale can spell (`en`: 12, up to 10^36 − 1).
+   * The core rejects longer integers with `NumericRangeError` by digit count,
+   * before any grouping work is done.
+   */
+  readonly maxGroups: number;
   /** Cardinal words for `n ≥ 0`. Throws `NumericRangeError` beyond the locale's largest scale word. */
   spell(n: bigint, context: WordsContext): string;
   /** Ordinal words for `n ≥ 1`: `twenty-first`, `al douăzeci și unulea`. */
@@ -41,9 +52,13 @@ export type NumberWordsLocale = {
 export type SpellOptions = {
   locale?: NumberWordsLocale;
   gender?: Gender;
-  /** Spell only numbers up to and including this value; larger ones are returned as formatted digits. */
+  /**
+   * Numbers are spelled when `after < |value| ≤ until`; the rest come back as
+   * formatted digits that keep the exact value (every fraction digit is kept).
+   * `until` is the inclusive upper bound of the spelled range.
+   */
   until?: number;
-  /** Spell only numbers strictly greater than this value; smaller ones are returned as formatted digits. */
+  /** The exclusive lower bound of the spelled range (see `until`). */
   after?: number;
 };
 
@@ -61,10 +76,31 @@ export function thousandsGroups(n: bigint): number[] {
   if (n === 0n) return [0];
   const groups: number[] = [];
   while (n > 0n) {
-    groups.unshift(Number(n % 1000n));
+    groups.push(Number(n % 1000n));
     n /= 1000n;
   }
-  return groups;
+  return groups.toReversed();
+}
+
+/** Rejects an integer too long for the locale before any grouping work is done. */
+function assertFits(n: bigint, locale: NumberWordsLocale): void {
+  const limit = locale.maxGroups * 3;
+  // Comparing against 10^limit is O(1) for a big input (the limit is tiny); no digit string is built.
+  if (n >= 10n ** BigInt(limit)) {
+    throw new NumericRangeError(
+      `The number has more than ${limit} digits, beyond what the ${locale.code} words can spell`,
+    );
+  }
+}
+
+/** The number as digits, exactly: every fraction digit is kept (Intl allows at most 100). */
+function digitsOf(d: Decimal, locale: NumberWordsLocale): string {
+  const fractionDigits = Math.min(d.scale, 100);
+  return formatNumber(d, {
+    locale: locale.code,
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  });
 }
 
 function toInteger(value: DecimalInput | bigint, name: string): bigint {
@@ -85,10 +121,11 @@ export function spellNumber(value: DecimalInput, options: SpellOptions = {}): st
   const context: WordsContext = { gender: options.gender };
   const d = Decimal.from(value).trim();
   const magnitude = d.abs();
-  if (options.until !== undefined && magnitude.gt(options.until)) return formatNumber(d, { locale: locale.code });
-  if (options.after !== undefined && magnitude.lte(options.after)) return formatNumber(d, { locale: locale.code });
+  if (options.until !== undefined && magnitude.gt(options.until)) return digitsOf(d, locale);
+  if (options.after !== undefined && magnitude.lte(options.after)) return digitsOf(d, locale);
 
   const integer = magnitude.toScale(0, 'down').toBigInt();
+  assertFits(integer, locale);
   const words = [locale.spell(integer, context)];
   if (magnitude.scale > 0) {
     const text = magnitude.toString();
@@ -103,7 +140,9 @@ export function spellNumber(value: DecimalInput, options: SpellOptions = {}): st
 export function spellOrdinal(value: DecimalInput, options: OrdinalOptions = {}): string {
   const n = toInteger(value, 'value');
   if (n < 1n) throw new InvalidArgumentError(`Ordinals start at 1, got ${n}`);
-  return (options.locale ?? en).spellOrdinal(n, { gender: options.gender });
+  const locale = options.locale ?? en;
+  assertFits(n, locale);
+  return locale.spellOrdinal(n, { gender: options.gender });
 }
 
 /** `formatOrdinal(21)` → `'21st'`; `formatOrdinal(1000)` → `'1,000th'`. Positive integers only. */
@@ -231,6 +270,7 @@ export const en: NumberWordsLocale = {
   code: 'en-US',
   negative: 'minus',
   decimalSeparator: 'point',
+  maxGroups: 12,
   spell: n => enSpell(n, false),
   spellOrdinal: n => enSpellOrdinal(n, false),
   ordinal: (n, digits) => enOrdinal(n, digits),
@@ -241,6 +281,7 @@ export const enGB: NumberWordsLocale = {
   code: 'en-GB',
   negative: 'minus',
   decimalSeparator: 'point',
+  maxGroups: 12,
   spell: n => enSpell(n, true),
   spellOrdinal: n => enSpellOrdinal(n, true),
   ordinal: (n, digits) => enOrdinal(n, digits),

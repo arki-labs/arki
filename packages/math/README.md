@@ -139,14 +139,21 @@ d.toRational().toString(); // '11/10'
 JSON.stringify({ d }); // '{"d":"1.10"}'
 `${d}`; // '1.10'
 d + 1; // throws TypeError — a Decimal never silently becomes a float
++d; // throws, and so does '' + d; only `${d}` and String(d) work
 
 Decimal.sum(['0.1', '0.2', '0.3']).toString(); // '0.6'
 Decimal.max('1.5', 2, '0.7').toString(); // '2'
+prices.sort(Decimal.compare); // comparator for sorting
 ```
 
 Scale is **retained** through `plus`/`minus` (larger of the two) and `times`
 (sum of both). `dividedBy` without a scale returns the shortest exact
-decimal; `'10.00' ÷ 4` is `'2.5'`.
+decimal; `'10.00' ÷ 4` is `'2.5'`. When a division does not terminate you
+have two honest options: round it (`dividedBy(3, { scale, rounding })`) or
+keep it exact as a fraction (`d.toRational().dividedBy(3)`).
+
+Note that `Decimal#round(places)` takes `places ≥ 0` (it sets the scale),
+while the float helper `round(x, -2)` rounds to hundreds.
 
 ## Rational
 
@@ -185,11 +192,12 @@ interpolation (Excel `PERCENTILE.INC`, numpy's default). Empty input throws
 `EmptyDataError`; a non-finite element throws `InvalidArgumentError`.
 
 ```ts
-import { linearRegression, mean, median, percentile, stddev } from '@arki/math/stats';
+import { linearRegression, mean, median, percentile, quantile, stddev } from '@arki/math/stats';
 
 mean([1, 2, 3, 4]); // 2.5
 median([3, 1, 2]); // 2
-percentile([1, 2, 3, 4], 25); // 1.75
+percentile([1, 2, 3, 4], 25); // 1.75   p on 0–100
+quantile([1, 2, 3, 4], 0.25); // 1.75   same thing, q on 0–1
 stddev([2, 4, 4, 4, 5, 5, 7, 9], { ddof: 0 }); // 2
 linearRegression([1, 2, 3], [2, 4, 6]); // { slope: 2, intercept: 0 }
 ```
@@ -308,6 +316,12 @@ binomial(10, 0.5).pmf(5); // 0.24609375
 poisson(3).cdf(2); // 0.42319008112684353
 ```
 
+`quantile(p)` is the long name of `inv(p)`; use whichever reads better.
+For p-values, use the survival function instead of `1 - cdf(x)` — the
+subtraction loses the tail: `1 - normal().cdf(9)` is `0`, while
+`normal().sf(9)` is `1.13e-19`. Discrete `inv(p)` is exactly "the smallest
+`k` with `cdf(k) ≥ p`".
+
 The special functions underneath — `erf`, `erfc`, `erfInv`, `gammaLn`,
 `regularizedGammaP`, `regularizedBeta` — are exported too. Accuracy: `cdf`
 ≈ 1e-15 for the normal, ≤ 1e-9 round-trip for t/χ²/F quantiles, 5e-13 for
@@ -316,7 +330,8 @@ the non-central t (verified by numerical integration).
 ## Decimal math
 
 Transcendental results are never exact, so these take an explicit `scale`
-and round **correctly** — the result is the true value rounded once at that
+(`DecimalMathOptions`: **fraction digits**, not significant digits) and
+round **correctly** — the result is the true value rounded once at that
 scale, computed with guard digits and bigint arithmetic. Default rounding
 here is `halfEven`. `sqrt`, `cbrt` and `nthRoot` without options stay
 exact-or-throw like the rest of `Decimal`.
@@ -363,7 +378,14 @@ spellNumber(21000, { locale: es }); // 'veintiún mil'
 
 Available: `en` (American), `enGB` (British "and"), `ro`, `de`, `fr`, `es`,
 `it`. Each locale object implements `NumberWordsLocale`; adding a language is
-one file against that contract.
+one file against that contract. Locales are objects you import rather than
+`Intl`-style strings so that a bundle only carries the languages it uses.
+
+Thresholds: a number is spelled when `after < |value| ≤ until`; outside
+that window it comes back as locale-formatted digits with its value intact
+(`spellNumber('0.0001', { after: 1 })` → `'0.0001'`). Each locale has a
+magnitude limit (`maxGroups`, in base-1000 groups) beyond which it throws
+`NumericRangeError` before doing any work.
 
 ## Errors
 

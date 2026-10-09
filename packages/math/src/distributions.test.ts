@@ -235,8 +235,16 @@ describe('binomial', () => {
 
   it('inv returns the smallest k with cdf(k) >= p', () => {
     const d = binomial(10, 0.5);
-    expect(d.inv(0.623_046_875)).toBe(5);
+    // The contract is exact against this object's own cdf: cdf(5) is 0.623046875 to within
+    // an ulp (here it rounds just below), so the anchor is cdf(5) itself, not the exact
+    // rational 638/1024, which would only pass if inv fudged p downward.
+    expect(d.inv(d.cdf(5))).toBe(5);
+    expect(d.inv(d.cdf(5) + 1e-15)).toBe(6);
     expect(d.inv(0.6231)).toBe(6);
+    for (let k = 0; k < 10; k++) expect(d.inv(d.cdf(k))).toBe(k);
+    // A p just above cdf(0) = 0.5 must not be rounded down to it.
+    expect(binomial(1, 0.5).inv(0.500_000_000_000_1)).toBe(1);
+    expect(d.quantile(0.6231)).toBe(d.inv(0.6231));
     expect(d.inv(0)).toBe(0);
     expect(d.inv(1)).toBe(10);
   });
@@ -256,6 +264,8 @@ describe('poisson', () => {
 
   it('inv returns the smallest k with cdf(k) >= p', () => {
     expect(poisson(3).inv(0.423_190_081_126_843_53)).toBe(2);
+    expect(poisson(3).inv(poisson(3).cdf(2))).toBe(2);
+    expect(poisson(3).inv(poisson(3).cdf(2) + 1e-15)).toBe(3);
     expect(poisson(3).inv(0.4232)).toBe(3);
     expect(poisson(3).inv(0)).toBe(0);
     expect(poisson(3).inv(1)).toBe(Infinity);
@@ -278,6 +288,10 @@ describe('round trips and monotonicity', () => {
     it(`${name}: cdf(inv(p)) = p`, () => {
       for (const p of [0.001, 0.05, 0.5, 0.95, 0.999]) expect(Math.abs(d.cdf(d.inv(p)) - p)).toBeLessThan(1e-9);
     });
+    it(`${name}: quantile is inv, and sf complements cdf`, () => {
+      for (const p of [0.001, 0.3, 0.999]) expect(d.quantile(p)).toBe(d.inv(p));
+      for (let i = -12; i <= 24; i++) expect(Math.abs(d.sf(i / 2) + d.cdf(i / 2) - 1)).toBeLessThan(1e-14);
+    });
     it(`${name}: cdf is monotonic`, () => {
       let prev = -1;
       for (let i = -40; i <= 80; i++) {
@@ -289,6 +303,97 @@ describe('round trips and monotonicity', () => {
       }
     });
   }
+});
+
+describe('quantile convergence is judged in probability, not x', () => {
+  // An absolute x tolerance is meaningless when the quantile itself is tiny:
+  // chiSquare(0.1).inv(0.05) is about 1.1e-26, and stopping at |Δx| ≤ 1e-15
+  // returned a point whose cdf was 0.1754.
+  const cases: [string, ContinuousDistribution][] = [
+    ['chiSquare(0.1)', chiSquare(0.1)],
+    ['chiSquare(0.5)', chiSquare(0.5)],
+    ['studentT(0.5)', studentT(0.5)],
+    ['fisherF(0.5, 0.5)', fisherF(0.5, 0.5)],
+    ['noncentralT(3, 2)', noncentralT(3, 2)],
+  ];
+  for (const [name, d] of cases) {
+    it(`${name}: cdf(inv(p)) = p across tails and centre`, () => {
+      for (const p of [1e-6, 0.05, 0.5, 0.95, 1 - 1e-6]) {
+        expect(Math.abs(d.cdf(d.inv(p)) - p)).toBeLessThanOrEqual(1e-9 * Math.max(p, 1 - p));
+      }
+    });
+  }
+
+  it('chiSquare(0.1).inv(0.05) lands on a point whose cdf is 0.05', () => {
+    const d = chiSquare(0.1);
+    expect(d.cdf(d.inv(0.05))).toBeCloseTo(0.05, 12);
+  });
+});
+
+describe('noncentralT density near 0 and in the tails', () => {
+  const d = noncentralT(10, 1);
+
+  it('is continuous at 0 (no cancellation in a cdf difference over a tiny x)', () => {
+    expect(d.pdf(0)).toBeCloseTo(0.236_006_164_826_634_5, 12);
+    expect(Math.abs(d.pdf(1e-15) - d.pdf(0))).toBeLessThan(1e-9);
+    expect(Math.abs(d.pdf(-1e-15) - d.pdf(0))).toBeLessThan(1e-9);
+  });
+
+  it('integrates to 1 (Simpson over [-40, 40])', () => {
+    const n = 8000;
+    const h = 80 / n;
+    let sum = d.pdf(-40) + d.pdf(40);
+    for (let i = 1; i < n; i++) sum += (i % 2 === 1 ? 4 : 2) * d.pdf(-40 + i * h);
+    expect(Math.abs((sum * h) / 3 - 1)).toBeLessThan(1e-6);
+  });
+
+  it('matches the central difference of the cdf on both pdf branches', () => {
+    const h = 1e-5;
+    for (const x of [-1, 0.3, 2.5]) {
+      expect(Math.abs(d.pdf(x) - (d.cdf(x + h) - d.cdf(x - h)) / (2 * h))).toBeLessThan(1e-6);
+    }
+  });
+
+  it('keeps relative accuracy where the density is tiny', () => {
+    // Reference: 400 000-point Simpson integration of φ(x·√(v/df) − ncp)·√(v/df) over v ~ χ²(df).
+    expect(Math.abs(noncentralT(50, 30).pdf(5) / 6.715_022_238_089_095e-104 - 1)).toBeLessThan(1e-9);
+    expect(Math.abs(noncentralT(10, 8).pdf(0.3) / 6.281_062_435_708_11e-14 - 1)).toBeLessThan(1e-9);
+  });
+
+  it('cdf reaches its limits for huge |x|', () => {
+    expect(d.cdf(1e200)).toBe(1);
+    expect(d.cdf(-1e200)).toBe(0);
+    expect(Math.abs(d.cdf(1e8) - 1)).toBeLessThan(1e-12);
+    expect(noncentralT(1e7, 1).cdf(1e200)).toBe(1);
+    expect(noncentralT(1e7, 1).cdf(-1e200)).toBe(0);
+  });
+});
+
+describe('survival function', () => {
+  it('keeps the far upper tail that 1 - cdf rounds away', () => {
+    expect(1 - normal().cdf(9)).toBe(0);
+    expect(normal().sf(9)).toBeGreaterThan(0);
+    expect(normal().sf(9) / 1.128_588_405_953_84e-19 - 1).toBeLessThan(1e-12);
+    expect(1 - chiSquare(3).cdf(200)).toBe(0);
+    expect(chiSquare(3).sf(200)).toBeGreaterThan(4.2e-43);
+    expect(exponential(1).sf(50)).toBe(Math.exp(-50));
+    expect(poisson(3).sf(40)).toBeGreaterThan(0);
+    expect(binomial(100, 0.5).sf(95)).toBeGreaterThan(0);
+  });
+
+  it('uses symmetry for the t distribution', () => {
+    expect(studentT(10).sf(2)).toBe(studentT(10).cdf(-2));
+    expect(studentT(10).sf(-Infinity)).toBe(1);
+  });
+
+  it('discrete sf complements cdf', () => {
+    const b = binomial(40, 0.35);
+    const pois = poisson(7);
+    for (let k = -1; k <= 41; k++) {
+      expect(Math.abs(b.sf(k) + b.cdf(k) - 1)).toBeLessThan(1e-14);
+      expect(Math.abs(pois.sf(k) + pois.cdf(k) - 1)).toBeLessThan(1e-14);
+    }
+  });
 });
 
 describe('errors', () => {

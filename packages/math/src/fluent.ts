@@ -8,9 +8,15 @@
 import type { CompactOptions, CurrencyOptions, FormatOptions } from './format.js';
 import type { Bounds } from './number.js';
 import type { RoundingMode } from './rounding.js';
+import { DivisionByZeroError, NumericRangeError } from './errors.js';
 import { formatCompact, formatCurrency, formatNumber, formatPercent } from './format.js';
 import { Decimal, Rational } from './internal/exact.js';
 import { approxEqual, assertFinite, clamp, inRange, lerp, remap, round, roundTo } from './number.js';
+
+function finiteResult(value: number): number {
+  if (!Number.isFinite(value)) throw new NumericRangeError('result is too large to represent');
+  return value;
+}
 
 export class NumberValue {
   readonly #value: number;
@@ -23,19 +29,24 @@ export class NumberValue {
   // Float arithmetic ---------------------------------------------------------
 
   plus(other: number): NumberValue {
-    return num(this.#value + other);
+    assertFinite(other, 'other');
+    return num(finiteResult(this.#value + other));
   }
 
   minus(other: number): NumberValue {
-    return num(this.#value - other);
+    assertFinite(other, 'other');
+    return num(finiteResult(this.#value - other));
   }
 
   times(other: number): NumberValue {
-    return num(this.#value * other);
+    assertFinite(other, 'other');
+    return num(finiteResult(this.#value * other));
   }
 
   dividedBy(other: number): NumberValue {
-    return num(this.#value / other);
+    assertFinite(other, 'other');
+    if (other === 0) throw new DivisionByZeroError('Division by zero');
+    return num(finiteResult(this.#value / other));
   }
 
   abs(): NumberValue {

@@ -157,6 +157,7 @@ export const it: NumberWordsLocale = {
   code: 'it-IT',
   negative: 'meno',
   decimalSeparator: 'virgola',
+  maxGroups: 5,
   spell: itSpell,
   spellOrdinal: itSpellOrdinal,
   ordinal: itOrdinal,

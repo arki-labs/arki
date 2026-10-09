@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { decimal } from './decimal.js';
-import { InvalidArgumentError, NumberFormatError } from './errors.js';
+import { InvalidArgumentError, NumberFormatError, NumericRangeError } from './errors.js';
 import {
   createFormatter,
   formatCompact,
@@ -119,5 +119,39 @@ describe('createFormatter', () => {
 
   it('throws when no currency is available', () => {
     expect(() => createFormatter({ locale: 'en-US' }).formatCurrency(1)).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('exact-string range and probe', () => {
+  it('throws NumericRangeError instead of printing ∞ for values beyond Intl range', () => {
+    expect(() => formatNumber(decimal('1'.repeat(400)))).toThrow(NumericRangeError);
+    expect(() => formatNumber('9'.repeat(400))).toThrow(NumericRangeError);
+    expect(() => formatNumber(10n ** 400n)).toThrow(NumericRangeError);
+  });
+
+  it('still formats a 30-digit Decimal exactly', () => {
+    expect(formatNumber(decimal('1'.repeat(30)), { useGrouping: false })).toBe('1'.repeat(30));
+  });
+
+  it('keeps digits past 2^53 that a Number coercion would destroy', () => {
+    expect(formatNumber('9007199254740993', { useGrouping: false })).toBe('9007199254740993');
+  });
+});
+
+describe('createFormatter snapshot', () => {
+  it('ignores later mutation of the defaults object', () => {
+    const defaults = { locale: 'de-DE', currency: 'EUR' };
+    const fmt = createFormatter(defaults);
+    defaults.locale = 'en-US';
+    defaults.currency = 'USD';
+    expect(fmt.formatCurrency(1234.5)).toBe(formatCurrency(1234.5, 'EUR', { locale: 'de-DE' }));
+    expect(fmt.formatNumber(1234.5)).toBe('1.234,5');
+  });
+
+  it('bound calls with and without options agree', () => {
+    const fmt = createFormatter({ locale: 'de-DE', currency: 'EUR' });
+    expect(fmt.formatPercent(0.125)).toBe(fmt.formatPercent(0.125, {}));
+    expect(fmt.formatCompact(1_230_000)).toBe(fmt.formatCompact(1_230_000, {}));
+    expect(fmt.formatFileSize(1536)).toBe(fmt.formatFileSize(1536, {}));
   });
 });

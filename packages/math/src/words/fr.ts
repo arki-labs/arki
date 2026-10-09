@@ -124,6 +124,7 @@ export const fr: NumberWordsLocale = {
   code: 'fr-FR',
   negative: 'moins',
   decimalSeparator: 'virgule',
+  maxGroups: 5,
   spell: (n, context) => spell(n, context.gender === 'feminine', false),
   spellOrdinal: (n, context) => {
     assertInRange(n);

@@ -1,5 +1,5 @@
 import { NumberFormatError, NumericRangeError } from '../errors.js';
-import { pow10 } from './bigint.js';
+import { digitCount, pow10 } from './bigint.js';
 import { assertDigitLimit, assertScaleLimit } from './limits.js';
 
 /** A finite decimal as `coefficient × 10^-scale`, scale ≥ 0. */
@@ -25,7 +25,9 @@ export function parseDecimalString(input: string): DecimalParts {
   const exponentText = match[4];
   if (exponentText !== undefined) assertScaleLimit(Number(exponentText), 'Exponent');
   const exponent = exponentText === undefined ? 0 : Number(exponentText);
-  assertDigitLimit(integerDigits.length + fractionDigits.length, `"${input.slice(0, 20)}…"`);
+  // A positive exponent beyond the fraction digits pads the coefficient with zeros; count those too.
+  const paddedDigits = Math.max(0, exponent - fractionDigits.length);
+  assertDigitLimit(integerDigits.length + fractionDigits.length + paddedDigits, `"${input.slice(0, 20)}…"`);
 
   let coefficient = BigInt(integerDigits + fractionDigits || '0');
   if (match[1] === '-') coefficient = -coefficient;
@@ -55,5 +57,6 @@ export function partsFromNumber(value: number): DecimalParts {
 }
 
 export function partsFromBigInt(value: bigint): DecimalParts {
+  assertDigitLimit(digitCount(value), 'bigint input');
   return { coefficient: value, scale: 0 };
 }

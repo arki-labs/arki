@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { EmptyDataError, InvalidArgumentError } from './errors.js';
+import type { SpreadOptions, VarianceOptions } from './stats.js';
+import { EmptyDataError, InvalidArgumentError, NumericRangeError } from './errors.js';
 import {
   correlation,
   linearRegression,
@@ -9,6 +10,7 @@ import {
   minMax,
   mode,
   percentile,
+  quantile,
   stddev,
   sum,
   variance,
@@ -216,5 +218,74 @@ describe('linearRegression', () => {
   });
   it('rejects non-finite values', () => {
     expect(() => linearRegression([1, 2], [1, Infinity])).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('overflow safety', () => {
+  it('mean of values whose sum overflows is still representable', () => {
+    expect(mean([1e308, 1e308])).toBe(1e308);
+    expect(mean([-1e308, -1e308, -1e308])).toBe(-1e308);
+  });
+
+  it('percentile interpolates across a span that overflows', () => {
+    expect(percentile([-1e308, 1e308], 50)).toBe(0);
+    expect(quantile([-1e308, 1e308], 0.5)).toBe(0);
+  });
+
+  it('variance of identical huge values is 0, not NaN', () => {
+    expect(variance([1e308, 1e308])).toBe(0);
+  });
+
+  it('throws NumericRangeError when the result genuinely overflows', () => {
+    expect(() => sum([1e308, 1e308])).toThrow(NumericRangeError);
+    expect(() => variance([-1e308, 1e308])).toThrow(NumericRangeError);
+  });
+
+  it('correlation and regression survive squares that overflow', () => {
+    const x = [1e154, 2e154, 3e154, 4e154];
+    const y = [2e154, 4e154, 6e154, 8e154];
+    expect(correlation(x, y)).toBeCloseTo(1, 12);
+    const fit = linearRegression(x, y);
+    expect(fit.slope).toBeCloseTo(2, 12);
+    expect(fit.intercept).toBeCloseTo(0, 12);
+  });
+
+  it('regression keeps the true slope when x is tiny relative to y', () => {
+    const fit = linearRegression([1e-3, 2e-3, 3e-3], [1e300, 2e300, 3e300]);
+    expect(fit.slope / 1e303).toBeCloseTo(1, 12);
+  });
+
+  it('regression throws NumericRangeError when the slope is unrepresentable', () => {
+    expect(() => linearRegression([0, 1e-300], [0, 1e300])).toThrow(NumericRangeError);
+  });
+});
+
+describe('quantile', () => {
+  it('interpolates like percentile', () => {
+    expect(quantile([1, 2, 3, 4], 0)).toBe(1);
+    expect(quantile([1, 2, 3, 4], 0.5)).toBe(2.5);
+    expect(quantile([1, 2, 3, 4], 1)).toBe(4);
+    expect(quantile([15, 20, 35, 40, 50], 0.4)).toBeCloseTo(29, 12);
+  });
+
+  it('equals percentile(values, q * 100) exactly', () => {
+    const data = [9, 1, 4, 7, 3, 12, 5];
+    for (const p of [0, 1, 10, 25, 33.3, 50, 66.6, 90, 99, 100]) {
+      expect(percentile(data, p)).toBe(quantile(data, p / 100));
+    }
+  });
+
+  it('rejects an out-of-range q and empty data', () => {
+    expect(() => quantile([1], -0.1)).toThrow(InvalidArgumentError);
+    expect(() => quantile([1], 1.1)).toThrow(InvalidArgumentError);
+    expect(() => quantile([], 0.5)).toThrow(EmptyDataError);
+  });
+});
+
+describe('SpreadOptions (deprecated alias)', () => {
+  it('is still assignable to and from VarianceOptions', () => {
+    const o: SpreadOptions = { ddof: 0 };
+    const v: VarianceOptions = o;
+    expect(variance([1, 3], v)).toBe(1);
   });
 });

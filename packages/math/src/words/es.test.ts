@@ -78,8 +78,14 @@ describe('es ordinals', () => {
     [200, 'ducentésimo'],
     [900, 'noningentésimo'],
     [1000, 'milésimo'],
-    [2000, 'dos milésimo'],
+    [2000, 'dosmilésimo'],
+    [3000, 'tresmilésimo'],
+    [10_000, 'diezmilésimo'],
+    [22_000, 'veintidosmilésimo'],
+    [100_000, 'cienmilésimo'],
+    [2034, 'dosmilésimo trigésimo cuarto'],
     [1_000_000, 'millonésimo'],
+    [2_000_000, 'dosmillonésimo'],
   ])('spells ordinal %s as %s', (n, words) => {
     expect(spellOrdinal(n, { locale: es })).toBe(words);
   });
@@ -89,11 +95,24 @@ describe('es ordinals', () => {
     expect(spellOrdinal(21, { locale: es, gender: 'feminine' })).toBe('vigésima primera');
     expect(spellOrdinal(1, { locale: es, gender: 'neuter' })).toBe('primero');
     // Only the ordinal word agrees, not the count before it.
-    expect(spellOrdinal(4000, { locale: es, gender: 'feminine' })).toBe('cuatro milésima');
+    expect(spellOrdinal(4000, { locale: es, gender: 'feminine' })).toBe('cuatromilésima');
   });
 
   it('writes digit ordinals with º / ª', () => {
     expect(formatOrdinal(21, { locale: es })).toBe('21.º');
     expect(formatOrdinal(21, { locale: es, gender: 'feminine' })).toBe('21.ª');
+  });
+});
+
+describe('es oversized integers', () => {
+  it('rejects a 100 000-digit integer quickly', () => {
+    const huge = 10n ** 100_000n - 1n;
+    // spellNumber reads through Decimal, which already caps input at 10 000 digits.
+    const maxDecimal = 10n ** 9999n;
+    for (const run of [() => spellNumber(maxDecimal, { locale: es }), () => spellOrdinal(huge, { locale: es })]) {
+      const start = Date.now();
+      expect(run).toThrow(NumericRangeError);
+      expect(Date.now() - start).toBeLessThan(50);
+    }
   });
 });

@@ -138,3 +138,32 @@ describe('locale object shape', () => {
     expect(en.ordinal(2n, '2', { gender: undefined })).toBe('2nd');
   });
 });
+
+describe('thresholds keep the value', () => {
+  it('spells only when after < |value| <= until and never changes the digits', () => {
+    expect(spellNumber('0.0001', { after: 1 })).toBe('0.0001');
+    expect(spellNumber('-0.00012345', { after: 1 })).toBe('-0.00012345');
+    const big = '1234567890123456789012345';
+    expect(spellNumber(big, { until: 10 })).toBe('1,234,567,890,123,456,789,012,345');
+    expect(spellNumber(1, { after: 1 })).toBe('1');
+    expect(spellNumber(2, { after: 1, until: 2 })).toBe('two');
+  });
+});
+
+describe('oversized integers are rejected before any grouping work', () => {
+  const huge = 10n ** 100_000n - 1n;
+  // spellNumber reads through Decimal, which already caps input at 10 000 digits.
+  const maxDecimal = 10n ** 9999n;
+  it('thousandsGroups builds groups in order', () => {
+    expect(thousandsGroups(1_000_000n)).toEqual([1, 0, 0]);
+  });
+  it('en and enGB reject a 100 000-digit integer quickly', () => {
+    for (const locale of [en, enGB]) {
+      for (const run of [() => spellNumber(maxDecimal, { locale }), () => spellOrdinal(huge, { locale })]) {
+        const start = Date.now();
+        expect(run).toThrow(NumericRangeError);
+        expect(Date.now() - start).toBeLessThan(50);
+      }
+    }
+  });
+});

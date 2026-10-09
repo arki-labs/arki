@@ -234,3 +234,14 @@ describe('performance', () => {
     expect([floor.toString(), ceiling.toString()]).toContain(root.toString());
   });
 });
+
+describe('trailing zeros do not inflate the work', () => {
+  it('log of an exactly-representable result with a 5000-zero input', () => {
+    const padded = `2.${'0'.repeat(5000)}`;
+    expect(log(padded, 16, { scale: 2, rounding: 'ceiling' }).toString()).toBe('0.25');
+    expect(ln(`1.5${'0'.repeat(5000)}`, { scale: 5 }).toString()).toBe(ln('1.5', { scale: 5 }).toString());
+    expect(exp(`1${'0'.repeat(5000)}e-5000`, { scale: 5 }).toString()).toBe(exp(1, { scale: 5 }).toString());
+    expect(pow(`2.${'0'.repeat(5000)}`, '0.5', { scale: 5 }).toString()).toBe(pow(2, '0.5', { scale: 5 }).toString());
+    expect(sqrt(`2.${'0'.repeat(5000)}`, { scale: 5 }).toString()).toBe('1.41421');
+  });
+});

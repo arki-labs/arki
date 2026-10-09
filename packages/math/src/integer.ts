@@ -75,7 +75,11 @@ export function divmod(
   assertSafeInteger(a, 'a');
   assertSafeInteger(bn, 'b');
   if (bn === 0) throw new DivisionByZeroError('Division by zero');
-  const quotient = Math.floor(a / bn);
-  const remainder = a - quotient * bn;
+  // `%` on doubles is exact; correct its sign to follow the divisor.
+  let remainder = a % bn;
+  if (remainder !== 0 && remainder < 0 !== bn < 0) remainder += bn;
+  const rest = a - remainder;
+  // `rest` is an exact multiple of `bn`, but can leave the safe range by up to |bn|; then divide in bigint.
+  const quotient = Number.isSafeInteger(rest) ? rest / bn : Number(floorDiv(BigInt(a), BigInt(bn)));
   return [quotient === 0 ? 0 : quotient, remainder === 0 ? 0 : remainder];
 }

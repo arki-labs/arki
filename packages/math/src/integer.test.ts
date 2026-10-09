@@ -76,3 +76,33 @@ describe('divmod', () => {
     expect(() => divmod(1.5, 2)).toThrow(InvalidArgumentError);
   });
 });
+
+describe('divmod with huge safe integers', () => {
+  const MAX = Number.MAX_SAFE_INTEGER;
+
+  it('keeps the remainder exact when quotient * b would be unsafe', () => {
+    expect(divmod(-MAX, 4_503_599_627_370_495)).toEqual([-3, 4_503_599_627_370_494]);
+  });
+
+  it('handles every sign combination at large magnitude', () => {
+    expect(divmod(MAX, 4_503_599_627_370_495)).toEqual([2, 1]);
+    expect(divmod(MAX, -4_503_599_627_370_495)).toEqual([-3, -4_503_599_627_370_494]);
+    expect(divmod(-MAX, -4_503_599_627_370_495)).toEqual([2, -1]);
+  });
+
+  it('matches the bigint overload on 200 pseudo-random cases', () => {
+    let seed = 12_345;
+    const next = (): number => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    for (let i = 0; i < 200; i++) {
+      const a = Math.trunc((next() * 2 - 1) * MAX);
+      let b = Math.trunc((next() * 2 - 1) * (i % 2 === 0 ? MAX : 1e6));
+      if (b === 0) b = 3;
+      const [q, r] = divmod(a, b);
+      const [bq, br] = divmod(BigInt(a), BigInt(b));
+      expect([BigInt(q), BigInt(r)]).toEqual([bq, br]);
+    }
+  });
+});

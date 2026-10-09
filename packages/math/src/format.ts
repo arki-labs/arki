@@ -11,7 +11,7 @@
 import type { Decimal } from './decimal.js';
 import type { RoundingMode } from './rounding.js';
 import { isDecimal } from './decimal.js';
-import { InvalidArgumentError, NumberFormatError, UnsupportedFeatureError } from './errors.js';
+import { InvalidArgumentError, NumberFormatError, NumericRangeError, UnsupportedFeatureError } from './errors.js';
 import { assertFinite } from './number.js';
 
 /** A formattable value. A string must be a number in plain decimal syntax (`'-1234.50'`). */
@@ -59,9 +59,9 @@ const INTL_ROUNDING = {
 const MAX_CACHE_ENTRIES = 256;
 const formatterCache = new Map<string, Intl.NumberFormat>();
 
-function cacheKey(locale: string, options: Intl.NumberFormatOptions): string {
-  const sorted = Object.entries(options).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return `${locale}|${JSON.stringify(sorted)}`;
+/** Builds the cache key by plain concatenation of the known option fields in a fixed order (no sorting, no JSON). */
+function cacheKey(locale: string, o: Intl.NumberFormatOptions): string {
+  return `${locale}|${o.style ?? ''}|${o.currency ?? ''}|${o.currencyDisplay ?? ''}|${o.currencySign ?? ''}|${o.notation ?? ''}|${o.compactDisplay ?? ''}|${o.minimumFractionDigits ?? ''}|${o.maximumFractionDigits ?? ''}|${String(o.useGrouping ?? '')}|${o.signDisplay ?? ''}|${o.roundingMode ?? ''}`;
 }
 
 function getNumberFormat(locale: string, options: Intl.NumberFormatOptions): Intl.NumberFormat {
@@ -84,13 +84,24 @@ function getNumberFormat(locale: string, options: Intl.NumberFormatOptions): Int
 
 let exactStringsSupported: boolean | undefined;
 
+/** Probes lazily, once. 2^53 + 1 cannot survive a trip through `Number`, so an Intl that coerces fails. */
 function assertExactStringSupport(): void {
   exactStringsSupported ??=
-    new Intl.NumberFormat('en-US', { maximumFractionDigits: 20, useGrouping: false }).format('0.30000000000000004') ===
-    '0.30000000000000004';
+    new Intl.NumberFormat('en-US', { useGrouping: false }).format('9007199254740993') === '9007199254740993';
   if (!exactStringsSupported) {
     throw new UnsupportedFeatureError(
-      'This runtime cannot format decimal strings exactly (Intl.NumberFormat v3 is missing); pass a number or bigint instead.',
+      'This runtime cannot format decimal strings exactly (Intl.NumberFormat v3 is missing); pass a number or bigint instead, or print the value with Decimal#toString().',
+    );
+  }
+}
+
+// Intl.NumberFormat caps its mathematical value near the double range and prints larger values as '∞'.
+const MAX_INTL_INTEGER_DIGITS = 308;
+
+function assertIntlRange(integerDigits: number): void {
+  if (integerDigits > MAX_INTL_INTEGER_DIGITS) {
+    throw new NumericRangeError(
+      `Value has ${integerDigits} integer digits, which exceeds what Intl.NumberFormat can represent (about ${MAX_INTL_INTEGER_DIGITS}); format it as a string with Decimal#toString().`,
     );
   }
 }
@@ -101,17 +112,36 @@ function isNumericString(value: string): value is `${number}` {
   return PLAIN_DECIMAL.test(value);
 }
 
+const MAX_SAFE_BIGINT_FAST = 10n ** 300n;
+
+function integerDigitCount(text: string): number {
+  let start = text[0] === '+' || text[0] === '-' ? 1 : 0;
+  while (start < text.length - 1 && text[start] === '0') start += 1;
+  const dot = text.indexOf('.', start);
+  return (dot === -1 ? text.length : dot) - start;
+}
+
 function toIntlInput(value: FormatValue): number | bigint | `${number}` {
   if (typeof value === 'number') {
     assertFinite(value, 'value');
     return value;
   }
-  if (typeof value === 'bigint') return value;
-  const text = isDecimal(value) ? value.toString() : value;
-  if (typeof text !== 'string') throw new TypeError('value must be a number, bigint, Decimal or string');
-  if (!isNumericString(text)) {
-    throw new NumberFormatError(`Cannot format '${text}': not a plain decimal number`);
+  if (typeof value === 'bigint') {
+    // A bigint below 2^1024 has at most 309 digits; only longer-looking ones need the exact count.
+    if (value > MAX_SAFE_BIGINT_FAST || value < -MAX_SAFE_BIGINT_FAST) {
+      assertIntlRange(value.toString().replace('-', '').length);
+    }
+    return value;
   }
+  const text = isDecimal(value) ? value.toString() : value;
+  if (typeof text !== 'string')
+    throw new TypeError('value must be a number, bigint, Decimal or string; convert other types first');
+  if (!isNumericString(text)) {
+    throw new NumberFormatError(
+      `Cannot format '${text}': not a plain decimal number; pass digits with an optional sign and '.' (e.g. '-1234.50'), or use parseDecimal for locale-formatted text`,
+    );
+  }
+  assertIntlRange(integerDigitCount(text));
   assertExactStringSupport();
   return text;
 }
@@ -145,6 +175,24 @@ function run(value: FormatValue, options: FormatOptions, intlOptions: Intl.Numbe
   return getNumberFormat(options.locale ?? DEFAULT_LOCALE, intlOptions).format(input);
 }
 
+const percentOptions = (options: FormatOptions): Intl.NumberFormatOptions => ({
+  ...baseOptions(options, { min: 0, max: 2 }),
+  style: 'percent',
+});
+
+const compactOptions = (options: CompactOptions): Intl.NumberFormatOptions => ({
+  ...baseOptions(options, { min: 0, max: 1 }),
+  notation: 'compact',
+  compactDisplay: options.display ?? 'short',
+});
+
+const currencyOptions = (currency: string, options: CurrencyOptions): Intl.NumberFormatOptions => {
+  const intlOptions: Intl.NumberFormatOptions = { ...baseOptions(options), style: 'currency', currency };
+  if (options.currencyDisplay !== undefined) intlOptions.currencyDisplay = options.currencyDisplay;
+  if (options.accounting) intlOptions.currencySign = 'accounting';
+  return intlOptions;
+};
+
 /** Formats a number for display: `formatNumber(1234.5)` → `'1,234.5'`. Intl defaults: 0–3 fraction digits. */
 export function formatNumber(value: FormatValue, options: FormatOptions = {}): string {
   return run(value, options, baseOptions(options));
@@ -155,24 +203,21 @@ export function formatNumber(value: FormatValue, options: FormatOptions = {}): s
  * unless overridden: `formatCurrency(1234.5, 'EUR', { locale: 'de-DE' })` → `'1.234,50 €'`.
  */
 export function formatCurrency(value: FormatValue, currency: string, options: CurrencyOptions = {}): string {
-  const intlOptions: Intl.NumberFormatOptions = { ...baseOptions(options), style: 'currency', currency };
-  if (options.currencyDisplay !== undefined) intlOptions.currencyDisplay = options.currencyDisplay;
-  if (options.accounting) intlOptions.currencySign = 'accounting';
-  return run(value, options, intlOptions);
+  return run(value, options, currencyOptions(currency, options));
 }
 
-/** Formats a FRACTION as a percent: `formatPercent(0.125)` → `'12.5%'`. Default 0–2 fraction digits. */
+/**
+ * Formats a FRACTION as a percent. The input is a fraction, NOT a percentage:
+ * `formatPercent(0.125)` → `'12.5%'`, while `formatPercent(12.5)` → `'1,250%'`.
+ * Default 0–2 fraction digits.
+ */
 export function formatPercent(fraction: FormatValue, options: FormatOptions = {}): string {
-  return run(fraction, options, { ...baseOptions(options, { min: 0, max: 2 }), style: 'percent' });
+  return run(fraction, options, percentOptions(options));
 }
 
 /** Short or long compact form: `formatCompact(1230000)` → `'1.2M'`. Default max 1 fraction digit. */
 export function formatCompact(value: FormatValue, options: CompactOptions = {}): string {
-  return run(value, options, {
-    ...baseOptions(options, { min: 0, max: 1 }),
-    notation: 'compact',
-    compactDisplay: options.display ?? 'short',
-  });
+  return run(value, options, compactOptions(options));
 }
 
 const FILE_UNITS = {
@@ -188,18 +233,25 @@ const FILE_UNITS = {
  * Rounding can show `'1000 kB'` for 999999 bytes; it does not promote to MB.
  */
 export function formatFileSize(bytes: number | bigint, options: FileSizeOptions = {}): string {
+  const nf = getNumberFormat(options.locale ?? DEFAULT_LOCALE, baseOptions(options, { min: 0, max: 1 }));
+  return fileSizeWith(bytes, options.system ?? 'si', nf);
+}
+
+function fileSizeWith(bytes: number | bigint, system: 'si' | 'iec', nf: Intl.NumberFormat): string {
   const amount = typeof bytes === 'bigint' ? Number(bytes) : bytes;
   assertFinite(amount, 'bytes');
-  if (amount < 0) throw new InvalidArgumentError(`bytes must be non-negative, got ${bytes}`);
-  const { base, labels } = FILE_UNITS[options.system ?? 'si'];
+  if (amount < 0)
+    throw new InvalidArgumentError(
+      `bytes must be non-negative, got ${bytes}; pass Math.abs(bytes) and add the sign yourself`,
+    );
+  const { base, labels } = FILE_UNITS[system];
   let index = 0;
   let scaled = amount;
   while (index < labels.length - 1 && scaled >= base) {
     scaled /= base;
     index += 1;
   }
-  const text = run(scaled, options, baseOptions(options, { min: 0, max: 1 }));
-  return `${text} ${labels[index]}`;
+  return `${nf.format(scaled)} ${labels[index]}`;
 }
 
 export type Formatter = {
@@ -214,16 +266,34 @@ export type Formatter = {
 };
 
 /**
- * Binds a default locale (and optionally a currency) once. Per-call `locale`
- * overrides the default; an explicit currency overrides the bound one.
+ * Binds a default locale (and optionally a currency) once. The defaults are
+ * copied at creation, so later changes to the caller's object have no effect.
+ * Per-call `locale` overrides the default; an explicit currency overrides the
+ * bound one. Calls without per-call options reuse a pre-resolved
+ * `Intl.NumberFormat` and skip cache-key building.
  * `formatCurrency` with no currency anywhere throws `InvalidArgumentError`.
  */
 export function createFormatter(defaults: { locale?: string; currency?: string }): Formatter {
+  const locale = defaults.locale;
+  const currency = defaults.currency;
+  const resolvedLocale = locale ?? DEFAULT_LOCALE;
+
   const withLocale = <T extends FormatOptions>(options: T | undefined): T =>
     ({
       ...options,
-      locale: options?.locale ?? defaults.locale,
+      locale: options?.locale ?? locale,
     }) as T;
+
+  // Resolved on first use, then reused for every call without per-call options.
+  const lazy = (build: () => Intl.NumberFormatOptions): (() => Intl.NumberFormat) => {
+    let resolved: Intl.NumberFormat | undefined;
+    return () => (resolved ??= getNumberFormat(resolvedLocale, build()));
+  };
+  const plain = lazy(() => baseOptions({}));
+  const percent = lazy(() => percentOptions({}));
+  const compact = lazy(() => compactOptions({}));
+  const fileSize = lazy(() => baseOptions({}, { min: 0, max: 1 }));
+  const money = lazy(() => (currency === undefined ? {} : currencyOptions(currency, {})));
 
   function boundCurrency(
     value: FormatValue,
@@ -232,18 +302,23 @@ export function createFormatter(defaults: { locale?: string; currency?: string }
   ): string {
     const explicit = typeof currencyOrOptions === 'string' ? currencyOrOptions : undefined;
     const options = typeof currencyOrOptions === 'string' ? maybeOptions : currencyOrOptions;
-    const currency = explicit ?? defaults.currency;
-    if (currency === undefined) {
+    const chosen = explicit ?? currency;
+    if (chosen === undefined) {
       throw new InvalidArgumentError('No currency: pass one or bind it with createFormatter({ currency })');
     }
-    return formatCurrency(value, currency, withLocale(options));
+    if (explicit === undefined && options === undefined) return money().format(toIntlInput(value));
+    return formatCurrency(value, chosen, withLocale(options));
   }
 
   return {
-    formatNumber: (value, options) => formatNumber(value, withLocale(options)),
-    formatPercent: (value, options) => formatPercent(value, withLocale(options)),
-    formatCompact: (value, options) => formatCompact(value, withLocale(options)),
-    formatFileSize: (bytes, options) => formatFileSize(bytes, withLocale(options)),
+    formatNumber: (value, options) =>
+      options === undefined ? plain().format(toIntlInput(value)) : formatNumber(value, withLocale(options)),
+    formatPercent: (value, options) =>
+      options === undefined ? percent().format(toIntlInput(value)) : formatPercent(value, withLocale(options)),
+    formatCompact: (value, options) =>
+      options === undefined ? compact().format(toIntlInput(value)) : formatCompact(value, withLocale(options)),
+    formatFileSize: (bytes, options) =>
+      options === undefined ? fileSizeWith(bytes, 'si', fileSize()) : formatFileSize(bytes, withLocale(options)),
     formatCurrency: boundCurrency,
   };
 }

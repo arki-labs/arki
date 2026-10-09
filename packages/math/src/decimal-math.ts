@@ -40,7 +40,10 @@ import { MAX_DIGITS } from './internal/limits.js';
  * Transcendental results are never exact, so rounding defaults to
  * `'halfEven'` here (unlike Decimal's own `'unnecessary'`).
  */
-export type PrecisionOptions = { scale: number; rounding?: RoundingMode };
+export type DecimalMathOptions = { scale: number; rounding?: RoundingMode };
+
+/** @deprecated Renamed to `DecimalMathOptions`: `scale` counts fraction digits, not significant digits. */
+export type PrecisionOptions = DecimalMathOptions;
 
 type Resolved = { scale: number; rounding: RoundingMode };
 
@@ -61,12 +64,21 @@ function zeroAt(scale: number): Decimal {
   return Decimal.fromParts({ coefficient: 0n, scale });
 }
 
-function resolve(options: PrecisionOptions | undefined, name: string): Resolved {
+function resolve(options: DecimalMathOptions | undefined, name: string): Resolved {
   if (options === undefined) {
     throw new InvalidArgumentError(`${name} has no exact result; pass { scale } (and optionally rounding)`);
   }
   assertScale(options.scale);
   return { scale: options.scale, rounding: options.rounding ?? 'halfEven' };
+}
+
+/** `ln(2.5)` for error messages; long values are cut so a huge input cannot flood the message. */
+function label(name: string, ...args: Decimal[]): string {
+  const shown = args.map(a => {
+    const text = a.toString();
+    return text.length > 40 ? `${text.slice(0, 37)}...` : text;
+  });
+  return `${name}(${shown.join(', ')})`;
 }
 
 function inexact(): RoundingNecessaryError {
@@ -111,6 +123,7 @@ function belowHalfUnit(scale: number, rounding: RoundingMode): Decimal {
 function roundApproximation(
   approximateAt: (precision: number) => bigint,
   { scale, rounding }: Resolved,
+  operation: string,
   isExact?: (candidate: Decimal) => boolean,
 ): Decimal {
   if (rounding === 'unnecessary' && !isExact) throw inexact();
@@ -133,7 +146,7 @@ function roundApproximation(
     }
   }
   throw new ResourceLimitError(
-    `Could not decide the rounding of the last digit within ${MAX_GUARD_DIGITS} guard digits`,
+    `${operation} could not be rounded correctly at scale ${scale} within ${MAX_GUARD_DIGITS} guard digits`,
   );
 }
 
@@ -182,7 +195,7 @@ function exactRoot(x: Decimal, n: number): Decimal | undefined {
   return Decimal.fromParts({ coefficient: x.coefficient < 0n ? -root : root, scale: paddedScale / n });
 }
 
-function rootOf(value: DecimalInput, n: number, options: PrecisionOptions | undefined, name: string): Decimal {
+function rootOf(value: DecimalInput, n: number, options: DecimalMathOptions | undefined, name: string): Decimal {
   if (!Number.isSafeInteger(n) || n < 1) {
     throw new InvalidArgumentError(`The root degree must be a positive safe integer, got ${n}`);
   }
@@ -200,10 +213,12 @@ function rootOf(value: DecimalInput, n: number, options: PrecisionOptions | unde
     return root;
   }
   const { scale, rounding } = resolve(options, name);
-  const magnitude = abs(x.coefficient);
+  // Trailing zeros carry no value; trimming keeps them from inflating the work estimate.
+  const trimmed = x.trim();
+  const magnitude = abs(trimmed.coefficient);
   // One digit past `scale`, so a "sticky" digit can stand in for everything cut off.
-  const working = Math.max(scale + 1, Math.ceil(x.scale / n));
-  const shift = n * working - x.scale;
+  const working = Math.max(scale + 1, Math.ceil(trimmed.scale / n));
+  const shift = n * working - trimmed.scale;
   assertRadicandSize(digitCount(magnitude) + shift);
   const radicand = magnitude * pow10(shift);
   const root = integerRoot(radicand, n);
@@ -424,7 +439,7 @@ function assertResultDigits(integerDigits: number, scale: number, what: string):
  * rounding `'halfEven'`): `sqrt(2, { scale: 3, rounding: 'floor' })` → `1.414`.
  * Negative input throws `InvalidArgumentError`.
  */
-export function sqrt(value: DecimalInput, options?: PrecisionOptions): Decimal {
+export function sqrt(value: DecimalInput, options?: DecimalMathOptions): Decimal {
   return rootOf(value, 2, options, 'sqrt');
 }
 
@@ -433,7 +448,7 @@ export function sqrt(value: DecimalInput, options?: PrecisionOptions): Decimal {
  * as `sqrt` (scale s padded up to a multiple of 3, then divided by 3):
  * `cbrt('-27')` → `-3`, `cbrt(2, { scale: 5 })` → `1.25992`.
  */
-export function cbrt(value: DecimalInput, options?: PrecisionOptions): Decimal {
+export function cbrt(value: DecimalInput, options?: DecimalMathOptions): Decimal {
   return rootOf(value, 3, options, 'cbrt');
 }
 
@@ -444,7 +459,7 @@ export function cbrt(value: DecimalInput, options?: PrecisionOptions): Decimal {
  * `InvalidArgumentError`; odd roots keep the sign. Intermediates are capped at
  * 200 000 digits (`ResourceLimitError`), which bounds `n × scale`.
  */
-export function nthRoot(value: DecimalInput, n: number, options?: PrecisionOptions): Decimal {
+export function nthRoot(value: DecimalInput, n: number, options?: DecimalMathOptions): Decimal {
   return rootOf(value, n, options, 'nthRoot');
 }
 
@@ -455,14 +470,14 @@ export function nthRoot(value: DecimalInput, n: number, options?: PrecisionOptio
  * x > 23 000 at small scales) throw `ResourceLimitError`. Very negative x
  * rounds to zero (or one unit for `'up'`/`'ceiling'`).
  */
-export function exp(value: DecimalInput, options: PrecisionOptions): Decimal {
-  const x = Decimal.from(value);
+export function exp(value: DecimalInput, options: DecimalMathOptions): Decimal {
+  const x = Decimal.from(value).trim();
   const resolved = resolve(options, 'exp');
   if (x.isZero()) return ONE.toScale(resolved.scale);
   const log10Result = approximate(x) * Math.LOG10E;
   assertResultDigits(Math.floor(log10Result) + 1, resolved.scale, `exp(${x.toString()})`);
   if (log10Result < -(resolved.scale + 3)) return belowHalfUnit(resolved.scale, resolved.rounding);
-  return roundApproximation(precision => expFixed(x.coefficient, x.scale, precision), resolved);
+  return roundApproximation(precision => expFixed(x.coefficient, x.scale, precision), resolved, label('exp', x));
 }
 
 /**
@@ -470,12 +485,12 @@ export function exp(value: DecimalInput, options: PrecisionOptions): Decimal {
  * `ln(1)` is exactly 0; values ≤ 0 throw `InvalidArgumentError`.
  * `ln 2` and `ln 10` are computed once per precision and reused.
  */
-export function ln(value: DecimalInput, options: PrecisionOptions): Decimal {
-  const x = Decimal.from(value);
+export function ln(value: DecimalInput, options: DecimalMathOptions): Decimal {
+  const x = Decimal.from(value).trim();
   const resolved = resolve(options, 'ln');
   if (!x.isPositive()) throw new InvalidArgumentError(`ln is defined for positive values, got ${x.toString()}`);
   if (x.eq(ONE)) return zeroAt(resolved.scale);
-  return roundApproximation(precision => lnFixed(x, precision), resolved);
+  return roundApproximation(precision => lnFixed(x, precision), resolved, label('ln', x));
 }
 
 /**
@@ -483,9 +498,9 @@ export function ln(value: DecimalInput, options: PrecisionOptions): Decimal {
  * fraction digits. Exact results are detected — `log(8, 2)` → `3`,
  * `log(8, 4)` → `1.5` — so `rounding: 'unnecessary'` accepts them.
  */
-export function log(value: DecimalInput, base: DecimalInput, options: PrecisionOptions): Decimal {
-  const x = Decimal.from(value);
-  const b = Decimal.from(base);
+export function log(value: DecimalInput, base: DecimalInput, options: DecimalMathOptions): Decimal {
+  const x = Decimal.from(value).trim();
+  const b = Decimal.from(base).trim();
   const resolved = resolve(options, 'log');
   if (!x.isPositive()) throw new InvalidArgumentError(`log is defined for positive values, got ${x.toString()}`);
   if (!b.isPositive() || b.eq(ONE)) {
@@ -495,17 +510,18 @@ export function log(value: DecimalInput, base: DecimalInput, options: PrecisionO
   return roundApproximation(
     precision => logFixed(x, b, precision),
     resolved,
+    label('log', x, b),
     candidate => isExactLogarithm(x, b, candidate),
   );
 }
 
 /** Base-10 logarithm, correctly rounded: `log10(1000, { scale: 5 })` → `3.00000`. */
-export function log10(value: DecimalInput, options: PrecisionOptions): Decimal {
+export function log10(value: DecimalInput, options: DecimalMathOptions): Decimal {
   return log(value, 10, options);
 }
 
 /** Base-2 logarithm, correctly rounded: `log2(1024, { scale: 5 })` → `10.00000`. */
-export function log2(value: DecimalInput, options: PrecisionOptions): Decimal {
+export function log2(value: DecimalInput, options: DecimalMathOptions): Decimal {
   return log(value, 2, options);
 }
 
@@ -522,17 +538,20 @@ export function log2(value: DecimalInput, options: PrecisionOptions): Decimal {
  *   cases are detected: `pow(4, '0.5', { scale: 2 })` → `2.00`.
  * - Results over 10 000 digits throw `ResourceLimitError`.
  */
-export function pow(base: DecimalInput, exponent: DecimalInput, options?: PrecisionOptions): Decimal {
-  const x = Decimal.from(base);
-  const y = Decimal.from(exponent);
+export function pow(base: DecimalInput, exponent: DecimalInput, options?: DecimalMathOptions): Decimal {
+  const rawBase = Decimal.from(base);
+  const rawExponent = Decimal.from(exponent);
 
-  if (y.isInteger()) {
-    const n = Number(y.toBigInt());
-    if (options === undefined) return x.pow(n);
+  if (rawExponent.isInteger()) {
+    const n = Number(rawExponent.toBigInt());
+    if (options === undefined) return rawBase.pow(n);
     const { scale, rounding } = resolve(options, 'pow');
-    if (n < 0 && !x.isZero()) return ONE.dividedBy(x.pow(-n), { scale, rounding });
-    return x.pow(n).toScale(scale, rounding);
+    if (n < 0 && !rawBase.isZero()) return ONE.dividedBy(rawBase.pow(-n), { scale, rounding });
+    return rawBase.pow(n).toScale(scale, rounding);
   }
+  // Trailing zeros carry no value; trimming keeps them from inflating the work estimate.
+  const x = rawBase.trim();
+  const y = rawExponent.trim();
 
   const resolved = resolve(options, `pow with the non-integer exponent ${y.toString()}`);
   const { scale, rounding } = resolved;
@@ -566,23 +585,27 @@ export function pow(base: DecimalInput, exponent: DecimalInput, options?: Precis
   if (log10Result < -(scale + 3)) return belowHalfUnit(scale, rounding);
   const integerDigits = Math.max(0, Math.ceil(log10Result)) + 1;
   const exponentDigits = digitCount(abs(y.coefficient) / pow10(y.scale)) + 1;
-  return roundApproximation(precision => {
-    // t = y·ln(x) to `exponentPrecision` digits: an error δ in t is a relative error δ in the result.
-    const exponentPrecision = precision + integerDigits + 10;
-    const lnBase = lnFixed(x, exponentPrecision + exponentDigits);
-    const t = (y.coefficient * lnBase) / pow10(y.scale + exponentDigits);
-    return expFixed(t, exponentPrecision, precision);
-  }, resolved);
+  return roundApproximation(
+    precision => {
+      // t = y·ln(x) to `exponentPrecision` digits: an error δ in t is a relative error δ in the result.
+      const exponentPrecision = precision + integerDigits + 10;
+      const lnBase = lnFixed(x, exponentPrecision + exponentDigits);
+      const t = (y.coefficient * lnBase) / pow10(y.scale + exponentDigits);
+      return expFixed(t, exponentPrecision, precision);
+    },
+    resolved,
+    label('pow', x, y),
+  );
 }
 
 /** π to `scale` fraction digits, rounded half-even. Machin's formula, cached per precision. */
 export function PI(scale: number): Decimal {
   assertScale(scale);
-  return roundApproximation(piFixed, { scale, rounding: 'halfEven' });
+  return roundApproximation(piFixed, { scale, rounding: 'halfEven' }, 'PI');
 }
 
 /** e to `scale` fraction digits, rounded half-even. Σ 1/k!, cached per precision. */
 export function E(scale: number): Decimal {
   assertScale(scale);
-  return roundApproximation(eFixed, { scale, rounding: 'halfEven' });
+  return roundApproximation(eFixed, { scale, rounding: 'halfEven' }, 'E');
 }
