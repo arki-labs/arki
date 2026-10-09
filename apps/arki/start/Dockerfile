@@ -3,7 +3,7 @@ ARG application_name=arki
 # Bun binary source for package management in build stages
 FROM oven/bun:1-alpine AS bun-base
 
-FROM node:22.14.0-alpine AS base
+FROM node:26.11.1-alpine AS base
 
 ARG SYSTEM_PACKAGES="libc6-compat python3 make g++ bash postgresql-dev git"
 
