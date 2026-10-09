@@ -13,7 +13,8 @@ import type { Interval } from './interval.js';
 import type { Civil, PlainDate, Weekday } from './types.js';
 import { dayOfWeek } from './calendar.js';
 import { plainDate } from './core.js';
-import { add } from './math.js';
+import { epochDay, epochDayKey, weekdayOfEpochDay } from './internal/days.js';
+import { sameKind } from './internal/kind.js';
 import { Temporal } from './types.js';
 
 /**
@@ -69,14 +70,44 @@ function assertCount(count: number, operation: string): void {
     throw new RangeError(`${operation}: count must be a safe integer, received ${String(count)}`);
 }
 
+/**
+ * Walks whole days as epoch-day integers (weekday by arithmetic, holidays by
+ * ISO key) and materializes a Temporal value only at the end: a `with` of the
+ * final year/month/day keeps a zoned value's wall-clock time exactly as
+ * repeated calendar `add`s would.
+ */
 function walk<T extends Civil>(value: T, count: number, calendar: BusinessCalendar): T {
-  const step = Temporal.Duration.from({ days: Math.sign(count) });
-  let cursor = value;
-  for (let remaining = Math.abs(count); remaining > 0;) {
-    cursor = add(cursor, step);
-    if (isBusinessDay(cursor, calendar)) remaining--;
+  if (count === 0) return value;
+  const direction = Math.sign(count);
+  const hasHolidays = calendar.holidays.size > 0;
+  let day = epochDay(plainDate(value));
+  let remaining = Math.abs(count);
+  if (!hasHolidays) {
+    // Every full week holds the same number of business days: jump them, but
+    // leave at least one day to walk so the result lands on a business day.
+    const perWeek = 7 - calendar.weekend.length;
+    const weeks = Math.floor((remaining - 1) / perWeek);
+    day += weeks * 7 * direction;
+    remaining -= weeks * perWeek;
   }
-  return cursor;
+  for (;;) {
+    while (remaining > 0) {
+      day += direction;
+      const off =
+        calendar.weekend.includes(weekdayOfEpochDay(day)) || (hasHolidays && calendar.holidays.has(epochDayKey(day)));
+      if (!off) remaining--;
+    }
+    const target = new Date(day * 86_400_000);
+    const landed = sameKind(
+      value,
+      value.with({ year: target.getUTCFullYear(), month: target.getUTCMonth() + 1, day: target.getUTCDate() }),
+    );
+    if (epochDay(plainDate(landed)) === day) return landed;
+    // A zone can skip a whole calendar day (Samoa, 2011-12-30): the value then
+    // resolves onto a neighbouring date, so the counted day was not a business
+    // day in this zone. Keep walking past it.
+    remaining = 1;
+  }
 }
 
 /**

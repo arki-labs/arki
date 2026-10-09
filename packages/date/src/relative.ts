@@ -4,19 +4,20 @@
  * Policies:
  * - Under 24 elapsed hours the unit comes from exact elapsed time (second,
  *   minute, hour), truncated toward zero.
- * - From 24 hours on, both moments are projected into one zone and compared
- *   by calendar day, so "tomorrow" means the next calendar day even across DST.
+ * - From 24 hours on, both moments are projected to calendar dates in one
+ *   zone and compared as dates, so "tomorrow" means the next calendar day even across DST.
  * - Positive values mean `target` is later than `reference`.
  * - Text defaults to the `'en-US'` locale so server and client render the same.
  */
 
 import type { Clock } from '@arki/clock';
 
-import type { Timeline, ZonedDateTime } from './types.js';
+import type { PlainDate, Timeline } from './types.js';
 import { now } from './clock.js';
 import { instant } from './core.js';
+import { relativeTimeFormat } from './internal/intl.js';
 import { systemTimeZone } from './interop.js';
-import { diff, startOf } from './math.js';
+import { diff } from './math.js';
 import { isZonedDateTime } from './types.js';
 
 export type RelativeUnit = 'year' | 'quarter' | 'month' | 'week' | 'day' | 'hour' | 'minute' | 'second';
@@ -44,8 +45,8 @@ function exactValue(elapsed: bigint, unit: 'second' | 'minute' | 'hour'): Relati
   return { unit, value: Number(elapsed / size) };
 }
 
-function startOfDayIn(value: Timeline | Date, timeZone: string): ZonedDateTime {
-  return startOf(instant(value).toZonedDateTimeISO(timeZone), 'day');
+function dateIn(value: Timeline | Date, timeZone: string): PlainDate {
+  return instant(value).toZonedDateTimeISO(timeZone).toPlainDate();
 }
 
 function zoneFor(target: Timeline | Date, options: RelativeOptions | undefined): string {
@@ -75,8 +76,9 @@ export function relativeUnit(
   }
 
   const zone = zoneFor(target, options);
-  const from = startOfDayIn(reference, zone);
-  const to = startOfDayIn(target, zone);
+  // Calendar distance is measured between the two civil dates, so DST never shifts a day.
+  const from = dateIn(reference, zone);
+  const to = dateIn(target, zone);
   if (forced !== undefined) return { unit: forced, value: diff(from, to, forced) };
 
   const dayCount = diff(from, to, 'day');
@@ -89,22 +91,12 @@ export function relativeUnit(
   return { unit: 'year', value: diff(from, to, 'year') };
 }
 
-const FORMAT_CACHE_LIMIT = 50;
-const formatCache = new Map<string, Intl.RelativeTimeFormat>();
-
-/** One formatter per locale + options; the cache is emptied when it reaches the limit. */
 function formatterFor(
   locale: string,
   numeric: 'always' | 'auto',
   style: 'long' | 'short' | 'narrow',
 ): Intl.RelativeTimeFormat {
-  const key = `${locale}|${numeric}|${style}`;
-  const cached = formatCache.get(key);
-  if (cached) return cached;
-  const formatter = new Intl.RelativeTimeFormat(locale, { numeric, style });
-  if (formatCache.size >= FORMAT_CACHE_LIMIT) formatCache.clear();
-  formatCache.set(key, formatter);
-  return formatter;
+  return relativeTimeFormat(locale, { numeric, style });
 }
 
 /** Locale text for `target` seen from `reference`: "in 3 days", "3 days ago", or "tomorrow" with `numeric: 'auto'`. */

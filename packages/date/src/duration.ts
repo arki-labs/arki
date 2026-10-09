@@ -23,6 +23,7 @@ import type {
   ZonedDateTime,
 } from './types.js';
 import { toDuration } from './internal/amount.js';
+import { listFormat, numberFormat } from './internal/intl.js';
 import { isPlainDate, Temporal } from './types.js';
 
 /** The anchor Temporal needs to measure calendar units (months have 28–31 days, days 23–25 hours). */
@@ -112,7 +113,8 @@ function combine(a: Duration, b: Duration, direction: 1 | -1, operation: string)
   if (signs.some(s => s !== signs[0])) {
     throw new RangeError(
       `${operation} produced fields with mixed signs (${a.toString()} ${direction === 1 ? '+' : '−'} ${b.toString()}). ` +
-        'Converting between months, days and hours needs an anchor — use normalizeDuration(..., { relativeTo }).',
+        'Converting between months, days and hours needs an anchor. Recipe: ' +
+        'addDuration(normalizeDuration(a, { relativeTo: date }), normalizeDuration(b, { relativeTo: date })), or add both to the date and diff.',
     );
   }
 
@@ -373,7 +375,7 @@ const HUMANIZE_UNITS: readonly DurationUnit[] = ['year', 'month', 'week', 'day',
 
 function joinList(locale: string, pieces: readonly string[]): string {
   if (!('ListFormat' in Intl)) return pieces.join(', ');
-  return new Intl.ListFormat(locale, { type: 'conjunction' }).format(pieces);
+  return listFormat(locale, { type: 'conjunction' }).format(pieces);
 }
 
 /**
@@ -396,8 +398,9 @@ export function humanizeDuration(d: Duration, options?: HumanizeOptions): string
   const kept = maximumUnits === undefined ? nonzero : nonzero.slice(0, maximumUnits);
   const smallest = units.at(-1) ?? 'second';
   const entries = kept.length > 0 ? kept : [{ unit: smallest, value: 0 }];
+  const unitDisplay = options?.style ?? 'long';
   const pieces = entries.map(({ unit, value }) =>
-    new Intl.NumberFormat(locale, { style: 'unit', unit, unitDisplay: options?.style ?? 'long' }).format(value),
+    numberFormat(locale, { style: 'unit', unit, unitDisplay }).format(value),
   );
   const text = joinList(locale, pieces);
   return d.sign < 0 && kept.length > 0 ? `-${text}` : text;

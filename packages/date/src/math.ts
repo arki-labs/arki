@@ -32,9 +32,12 @@ import type {
   WeekRules,
 } from './types.js';
 import { instant } from './core.js';
-import { toDuration } from './internal/amount.js';
+import { negateDurationInput, toDurationInput } from './internal/amount.js';
+import { daysBetween } from './internal/days.js';
 import { sameKind } from './internal/kind.js';
-import { isInstant, ISO_WEEK, isPlainDate, isPlainDateTime, isZonedDateTime, Temporal } from './types.js';
+import { addPoint, comparePoints, isCalendarUnit } from './internal/point.js';
+import { startOfWeekDate } from './internal/week.js';
+import { isInstant, ISO_WEEK, isPlainDate, isPlainDateTime, isZonedDateTime } from './types.js';
 
 export type ArithmeticOptions = Readonly<{ overflow?: Overflow }>;
 export type SetOptions = Readonly<{ overflow?: Overflow; disambiguation?: Disambiguation }>;
@@ -43,19 +46,26 @@ export type WeekOptions = Readonly<{ week?: WeekRules }>;
 // ---------------------------------------------------------------------------
 // add / sub
 
-function addPoint(value: Point, duration: Duration, options?: ArithmeticOptions): Point {
-  if (isInstant(value)) return value.add(duration);
-  return value.add(duration, options);
-}
-
 /** `value + amount`. Calendar amounts are rejected on an `Instant` (project it into a zone first). */
-export function add<T extends Point>(value: T, amount: AmountFor<T> | Duration, options?: ArithmeticOptions): T {
-  return sameKind(value, addPoint(value, toDuration(amount), options));
+export function add<T extends Civil>(value: T, amount: Amount | Duration, options?: ArithmeticOptions): T;
+export function add<T extends Point>(
+  value: T,
+  amount: AmountFor<NoInfer<T>> | Duration,
+  options?: ArithmeticOptions,
+): T;
+export function add(value: Point, amount: Amount | Duration, options?: ArithmeticOptions): Point {
+  return sameKind(value, addPoint(value, toDurationInput(amount), options));
 }
 
 /** `value − amount`. Not always the inverse of `add` (Jan 31 + 1 month − 1 month = Feb 28 − 1 month = Jan 28). */
-export function sub<T extends Point>(value: T, amount: AmountFor<T> | Duration, options?: ArithmeticOptions): T {
-  return sameKind(value, addPoint(value, toDuration(amount).negated(), options));
+export function sub<T extends Civil>(value: T, amount: Amount | Duration, options?: ArithmeticOptions): T;
+export function sub<T extends Point>(
+  value: T,
+  amount: AmountFor<NoInfer<T>> | Duration,
+  options?: ArithmeticOptions,
+): T;
+export function sub(value: Point, amount: Amount | Duration, options?: ArithmeticOptions): Point {
+  return sameKind(value, addPoint(value, negateDurationInput(toDurationInput(amount)), options));
 }
 
 // ---------------------------------------------------------------------------
@@ -94,11 +104,6 @@ export function set<T extends Civil>(value: T, patch: Partial<PartsFor<NoInfer<T
 // ---------------------------------------------------------------------------
 // boundaries
 
-function startOfWeekDate(date: PlainDate, rules: WeekRules): PlainDate {
-  const back = (date.dayOfWeek - rules.startsOn + 7) % 7;
-  return back === 0 ? date : date.subtract({ days: back });
-}
-
 function startOfDate(date: PlainDate, unit: CalendarUnit, rules: WeekRules): PlainDate {
   switch (unit) {
     case 'day': {
@@ -119,10 +124,6 @@ function startOfDate(date: PlainDate, unit: CalendarUnit, rules: WeekRules): Pla
   }
 }
 
-function isCalendarUnit(unit: Unit): unit is CalendarUnit {
-  return unit === 'year' || unit === 'quarter' || unit === 'month' || unit === 'week' || unit === 'day';
-}
-
 function startOfPoint(value: Point, unit: Unit, rules: WeekRules): Point {
   if (isCalendarUnit(unit)) {
     if (isInstant(value))
@@ -137,7 +138,9 @@ function startOfPoint(value: Point, unit: Unit, rules: WeekRules): Point {
 }
 
 /** The first moment of the unit containing `value` (week per `options.week`, ISO by default). */
-export function startOf<T extends Point>(value: T, unit: UnitFor<NoInfer<T>>, options?: WeekOptions): T {
+export function startOf<T extends Civil>(value: T, unit: CalendarUnit, options?: WeekOptions): T;
+export function startOf<T extends Point>(value: T, unit: UnitFor<NoInfer<T>>, options?: WeekOptions): T;
+export function startOf(value: Point, unit: Unit, options?: WeekOptions): Point {
   return sameKind(value, startOfPoint(value, unit, options?.week ?? ISO_WEEK));
 }
 
@@ -179,12 +182,32 @@ function oneUnit(unit: Unit): Amount {
   }
 }
 
-/** The start of the unit after the one containing `value` — the exclusive end of `startOf(value, unit)`. */
-export function nextBoundary<T extends Point>(value: T, unit: UnitFor<NoInfer<T>>, options?: WeekOptions): T {
-  const rules = options?.week ?? ISO_WEEK;
-  const start = startOfPoint(value, unit, rules);
-  const next = addPoint(start, toDuration(oneUnit(unit)));
-  return sameKind(value, startOfPoint(next, unit, rules));
+function nextBoundaryPoint(value: Point, unit: Unit, rules: WeekRules): Point {
+  if (isCalendarUnit(unit) || isPlainDate(value)) {
+    const next = addPoint(startOfPoint(value, unit, rules), oneUnit(unit));
+    return isZonedDateTime(next) ? startOfPoint(next, unit, rules) : next;
+  }
+  // The next `:00` on the clock. Temporal resolves a DST gap forward, so this
+  // is also the start of a shortened unit (Lord Howe 02:30 after a 02:00 → 02:30 jump).
+  const wall = value.round({ smallestUnit: unit, roundingMode: 'ceil' });
+  if (!isZonedDateTime(value)) return comparePoints(wall, value) > 0 ? wall : addPoint(wall, oneUnit(unit));
+  // A fall-back fold repeats wall-clock time: the clock never shows the repeated
+  // hour as "next", and a unit may last longer than itself (Lord Howe 01:00–02:00
+  // spans 90 minutes). Step in exact time until the landed unit starts after `value`.
+  let exact: Point = value;
+  let exactStart: Point;
+  do {
+    exact = addPoint(exact, oneUnit(unit));
+    exactStart = startOfPoint(exact, unit, rules);
+  } while (comparePoints(exactStart, value) <= 0);
+  return comparePoints(wall, value) > 0 && comparePoints(wall, exactStart) < 0 ? wall : exactStart;
+}
+
+/** The start of the unit after the one containing `value` — the exclusive end of `startOf(value, unit)`. Always after `value`. */
+export function nextBoundary<T extends Civil>(value: T, unit: CalendarUnit, options?: WeekOptions): T;
+export function nextBoundary<T extends Point>(value: T, unit: UnitFor<NoInfer<T>>, options?: WeekOptions): T;
+export function nextBoundary(value: Point, unit: Unit, options?: WeekOptions): Point {
+  return sameKind(value, nextBoundaryPoint(value, unit, options?.week ?? ISO_WEEK));
 }
 
 /**
@@ -192,10 +215,12 @@ export function nextBoundary<T extends Point>(value: T, unit: UnitFor<NoInfer<T>
  * for a `PlainDate`, minus one nanosecond otherwise. Prefer `[startOf, nextBoundary)`
  * for range queries; `endOf` exists for display and inclusive APIs.
  */
-export function endOf<T extends Point>(value: T, unit: UnitFor<NoInfer<T>>, options?: WeekOptions): T {
-  const next = nextBoundary(value, unit, options);
-  const step: Amount = isPlainDate(next) ? { days: 1 } : { nanoseconds: 1 };
-  return sameKind(value, addPoint(next, toDuration(step).negated()));
+export function endOf<T extends Civil>(value: T, unit: CalendarUnit, options?: WeekOptions): T;
+export function endOf<T extends Point>(value: T, unit: UnitFor<NoInfer<T>>, options?: WeekOptions): T;
+export function endOf(value: Point, unit: Unit, options?: WeekOptions): Point {
+  const next = nextBoundaryPoint(value, unit, options?.week ?? ISO_WEEK);
+  const step: Amount = isPlainDate(next) ? { days: -1 } : { nanoseconds: -1 };
+  return sameKind(value, addPoint(next, step));
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +266,7 @@ function roundPoint(
   assertCalendarIncrement(unit, increment);
   const start = startOfPoint(value, unit, rules);
   if (mode === 'floor') return start;
-  const next = startOfPoint(addPoint(start, toDuration(oneUnit(unit))), unit, rules);
+  const next = nextBoundaryPoint(value, unit, rules);
   if (comparePoints(value, start) === 0) return start;
   if (mode === 'ceil') return next;
   const toStart = spanNanoseconds(start, value);
@@ -255,9 +280,7 @@ function roundPoint(
 function spanNanoseconds(from: Point, to: Point): bigint {
   if (isInstant(from) && isInstant(to)) return to.epochNanoseconds - from.epochNanoseconds;
   if (isZonedDateTime(from) && isZonedDateTime(to)) return to.epochNanoseconds - from.epochNanoseconds;
-  if (isPlainDate(from) && isPlainDate(to)) {
-    return BigInt(from.until(to, { largestUnit: 'day' }).days) * 86_400_000_000_000n;
-  }
+  if (isPlainDate(from) && isPlainDate(to)) return BigInt(daysBetween(from, to)) * 86_400_000_000_000n;
   if (isPlainDateTime(from) && isPlainDateTime(to)) {
     const d = from.until(to, { largestUnit: 'hour' });
     return (
@@ -272,26 +295,24 @@ function spanNanoseconds(from: Point, to: Point): bigint {
   throw new TypeError('spanNanoseconds needs two values of the same kind');
 }
 
-function comparePoints(a: Point, b: Point): number {
-  if (isPlainDate(a) && isPlainDate(b)) return Temporal.PlainDate.compare(a, b);
-  if (isPlainDateTime(a) && isPlainDateTime(b)) return Temporal.PlainDateTime.compare(a, b);
-  if (isZonedDateTime(a) && isZonedDateTime(b)) return Temporal.ZonedDateTime.compare(a, b);
-  if (isInstant(a) && isInstant(b)) return Temporal.Instant.compare(a, b);
-  throw new TypeError('compare needs two values of the same kind');
-}
-
 /** Round down to the unit (or to a multiple of it via `increment`). Same as `startOf` for calendar units. */
-export function floor<T extends Point>(value: T, unit: UnitFor<NoInfer<T>>, options?: RoundOptions): T {
+export function floor<T extends Civil>(value: T, unit: CalendarUnit, options?: RoundOptions): T;
+export function floor<T extends Point>(value: T, unit: UnitFor<NoInfer<T>>, options?: RoundOptions): T;
+export function floor(value: Point, unit: Unit, options?: RoundOptions): Point {
   return sameKind(value, roundPoint(value, unit, options, 'floor'));
 }
 
 /** Round up to the unit; a value already on the boundary is returned unchanged. */
-export function ceil<T extends Point>(value: T, unit: UnitFor<NoInfer<T>>, options?: RoundOptions): T {
+export function ceil<T extends Civil>(value: T, unit: CalendarUnit, options?: RoundOptions): T;
+export function ceil<T extends Point>(value: T, unit: UnitFor<NoInfer<T>>, options?: RoundOptions): T;
+export function ceil(value: Point, unit: Unit, options?: RoundOptions): Point {
   return sameKind(value, roundPoint(value, unit, options, 'ceil'));
 }
 
 /** Round to the nearest unit boundary; ties go to the later boundary unless `tie: 'earlier'`. */
-export function round<T extends Point>(value: T, unit: UnitFor<NoInfer<T>>, options?: RoundOptions): T {
+export function round<T extends Civil>(value: T, unit: CalendarUnit, options?: RoundOptions): T;
+export function round<T extends Point>(value: T, unit: UnitFor<NoInfer<T>>, options?: RoundOptions): T;
+export function round(value: Point, unit: Unit, options?: RoundOptions): Point {
   return sameKind(value, roundPoint(value, unit, options, 'round'));
 }
 
@@ -367,17 +388,34 @@ function durationField(duration: Duration, unit: DurationUnit): number {
 }
 
 /**
- * `to − from` in whole units (truncated toward zero), or the exact fractional
- * total with `{ fractional: true }`. Calendar units are anchored at `from`:
- * `diff(Jan 31, Feb 28, 'month')` is 1, the reverse is `-28/31`.
- * Zoned values must share a zone for calendar units.
+ * `to − from` as a number of units. Positive when `to` is later.
+ *
+ * - Default: the whole-unit field of the balanced difference, truncated toward
+ *   zero. Calendar units count completed steps from `from`, so
+ *   `diff(Jan 31, Feb 28, 'month')` is `0` (Feb 31 does not exist) while
+ *   `diff(Jan 31, Mar 1, 'month')` is `1`.
+ * - `{ fractional: true }`: the exact total in that unit, anchored at `from`;
+ *   `diff(Jan 31, Feb 28, 'month', { fractional: true })` is `1` because the
+ *   constrained month step lands exactly on Feb 28, and the reverse is `-28/31`.
+ *
+ * Use `until` for a balanced `Duration` and `diffElapsed` for exact elapsed
+ * time. Zoned values must share a zone for calendar units.
  */
+export function diff<T extends Civil>(from: T, to: NoInfer<T>, unit: CalendarUnit, options?: DiffOptions): number;
 export function diff<T extends Point>(
   from: T,
   to: NoInfer<T>,
   unit: UnitFor<NoInfer<T>>,
   options?: DiffOptions,
-): number {
+): number;
+export function diff(from: Point, to: Point, unit: Unit, options?: DiffOptions): number {
+  if (isPlainDate(from) && isPlainDate(to) && (unit === 'day' || unit === 'week')) {
+    // Whole days between two calendar dates is integer arithmetic; no need
+    // for Temporal's general (and, on the polyfill, slow) `until`.
+    const days = daysBetween(from, to);
+    if (unit === 'day') return days;
+    return options?.fractional ? days / 7 : Math.trunc(days / 7);
+  }
   const largestUnit: DurationUnit = unit === 'quarter' ? 'month' : unit;
   const duration = untilPoint(from, to, largestUnit);
   const relativeTo = anchorOf(from);
@@ -393,8 +431,22 @@ export type UntilOptions<T extends Point> = Readonly<{
   roundingMode?: RoundingMode;
 }>;
 
+type AnyUntilOptions = Readonly<{
+  largestUnit: DurationUnit;
+  smallestUnit?: DurationUnit;
+  roundingMode?: RoundingMode;
+}>;
+
+export type CalendarUntilOptions = Readonly<{
+  largestUnit: Exclude<CalendarUnit, 'quarter'>;
+  smallestUnit?: Exclude<CalendarUnit, 'quarter'>;
+  roundingMode?: RoundingMode;
+}>;
+
 /** `to − from` as a balanced `Duration` (e.g. 1 month 3 days 4 hours). */
-export function until<T extends Point>(from: T, to: NoInfer<T>, options: UntilOptions<NoInfer<T>>): Duration {
+export function until<T extends Civil>(from: T, to: NoInfer<T>, options: CalendarUntilOptions): Duration;
+export function until<T extends Point>(from: T, to: NoInfer<T>, options: UntilOptions<NoInfer<T>>): Duration;
+export function until(from: Point, to: Point, options: AnyUntilOptions): Duration {
   const base = untilPoint(from, to, options.largestUnit);
   if (!options.smallestUnit && !options.roundingMode) return base;
   const relativeTo = anchorOf(from);
@@ -436,8 +488,5 @@ export function diffElapsed(
   if (options?.fractional) return Number(ns) / Number(NS[unit]);
   return Number(ns / NS[unit]);
 }
-
-/** @internal re-exported for sibling modules */
-export const internal = { startOfWeekDate, comparePoints, isCalendarUnit, oneUnit };
 
 export { type Instant, type ZonedDateTime } from './types.js';

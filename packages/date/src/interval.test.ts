@@ -212,7 +212,7 @@ describe('each / range', () => {
     expect(() => each(span, { days: -1 })).toThrow(RangeError);
     expect(() => each(span, { days: 1.5 })).toThrow(RangeError);
     expect(() => range(t('2026-01-01T00:00Z'), t('2026-01-01T01:00Z'), { nanoseconds: 0 })).toThrow(RangeError);
-    // @ts-expect-error — a time amount cannot advance a PlainDate; the runtime guard catches it too
+    // an hour cannot advance a PlainDate (it balances to 0 days); the no-progress guard throws
     expect(() => [...each(span, { hours: 1 })]).toThrow(RangeError);
   });
 

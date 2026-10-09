@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
+import type { Civil } from './types.js';
 import { instant, plainDate, plainDateTime, zoned } from './core.js';
 import { add, ceil, diff, diffElapsed, endOf, floor, nextBoundary, round, set, startOf, sub, until } from './math.js';
-import { SUNDAY_WEEK } from './types.js';
+import { SUNDAY_WEEK, Temporal } from './types.js';
 
 const BUC = 'Europe/Bucharest';
 
@@ -163,5 +164,68 @@ describe('diff / until / diffElapsed', () => {
       roundingMode: 'halfExpand',
     });
     expect(r.toString()).toBe('P2M4D');
+  });
+});
+
+describe('nextBoundary across half-hour DST shifts (Lord Howe)', () => {
+  it('always lands strictly after the input', () => {
+    // Lord Howe shifts by 30 minutes: 02:00 → 02:30 on 2026-10-04, 02:00 → 01:30 on 2026-04-05.
+    // Bucharest shifts by an hour: 03:00 → 04:00 on 2026-03-29, 04:00 → 03:00 on 2026-10-25.
+    const sweeps = [
+      ['2026-10-03T23:00:00Z', 'Australia/Lord_Howe'],
+      ['2026-04-04T13:00:00Z', 'Australia/Lord_Howe'],
+      ['2026-03-28T23:30:00Z', 'Europe/Bucharest'],
+      ['2026-10-24T22:30:00Z', 'Europe/Bucharest'],
+    ] as const;
+    for (const [start, zone] of sweeps) {
+      let cursor = zoned(instant(start), zone);
+      for (let step = 0; step < 16; step++) {
+        for (const unit of ['minute', 'hour', 'day'] as const) {
+          const next = nextBoundary(cursor, unit);
+          expect(Temporal.ZonedDateTime.compare(next, cursor)).toBe(1);
+          expect(startOf(next, unit).equals(next)).toBe(true); // a boundary is its own start
+        }
+        cursor = cursor.add({ minutes: 15 });
+      }
+    }
+  });
+
+  it('visits the repeated hour of a fall-back fold', () => {
+    const chain: string[] = [];
+    let cursor = zoned('2026-10-25T02:30[Europe/Bucharest]');
+    for (let i = 0; i < 3; i++) {
+      cursor = nextBoundary(cursor, 'hour');
+      chain.push(cursor.toString());
+    }
+    expect(chain).toEqual([
+      '2026-10-25T03:00:00+03:00[Europe/Bucharest]',
+      '2026-10-25T03:00:00+02:00[Europe/Bucharest]',
+      '2026-10-25T04:00:00+02:00[Europe/Bucharest]',
+    ]);
+    expect(nextBoundary(zoned('2026-04-05T01:00+11:00[Australia/Lord_Howe]'), 'hour').toString()).toBe(
+      '2026-04-05T02:00:00+10:30[Australia/Lord_Howe]',
+    );
+  });
+});
+
+describe('day arithmetic in years 0–99', () => {
+  it('counts the leap day of year 0', () => {
+    expect(diff(plainDate('0000-02-28'), plainDate('0000-03-01'), 'day')).toBe(2);
+    expect(add(plainDate('0000-02-28'), { days: 1 }).toString()).toBe('0000-02-29');
+  });
+});
+
+// Compile-time check: calendar units on a `T extends Civil` return `T`.
+function monthBounds<T extends Civil>(value: T): readonly [T, T] {
+  return [startOf(value, 'month'), endOf(value, 'month')];
+}
+
+describe('generic civil helpers', () => {
+  it('return the input kind', () => {
+    const [first, last] = monthBounds(plainDate('2026-05-20'));
+    expect(first.toString()).toBe('2026-05-01');
+    expect(last.toString()).toBe('2026-05-31');
+    const [zFirst] = monthBounds(zoned('2026-05-20T10:00[Europe/Bucharest]'));
+    expect(zFirst.toString()).toBe('2026-05-01T00:00:00+03:00[Europe/Bucharest]');
   });
 });

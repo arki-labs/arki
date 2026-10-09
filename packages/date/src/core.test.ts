@@ -63,8 +63,22 @@ describe('zoned', () => {
     expect(zoned(plainDateTime('2026-05-20T10:00'), 'America/New_York').offset).toBe('-04:00');
   });
 
+  it('projects exact strings and zoned values into an explicit zone, and reads wall-clock strings in it', () => {
+    expect(zoned('2026-03-29T00:30:00Z', 'Europe/Bucharest').toString()).toBe(
+      '2026-03-29T02:30:00+02:00[Europe/Bucharest]',
+    );
+    expect(zoned('2026-05-20T10:00:00+03:00', 'UTC').hour).toBe(7);
+    expect(zoned('2026-05-20T10:00:00+03:00[Europe/Bucharest]', 'UTC').hour).toBe(7);
+    expect(zoned(zoned('2026-05-20T10:00:00+03:00[Europe/Bucharest]'), 'UTC').hour).toBe(7);
+    // No offset, no annotation: a wall-clock time in the zone (DST gap → compatible rule).
+    expect(zoned('2026-03-29T03:30', 'Europe/Bucharest').toString()).toBe(
+      '2026-03-29T04:30:00+03:00[Europe/Bucharest]',
+    );
+    expect(() => zoned('2026-03-29T03:30', 'Europe/Bucharest', { disambiguation: 'reject' })).toThrow(RangeError);
+  });
+
   it('rejects strings without a zone annotation and parts without a zone', () => {
-    expect(() => zoned('2026-05-20T10:00:00+03:00')).toThrow(/annotation/);
+    expect(() => zoned('2026-05-20T10:00:00+03:00')).toThrow(/second argument/);
     // @ts-expect-error — parts need a zone
     expect(() => zoned({ year: 2026, month: 5, day: 20 })).toThrow(TypeError);
   });

@@ -44,6 +44,16 @@ describe('fromPickerDate / toPickerDate', () => {
   });
 });
 
+describe('toPickerDate for years 0–99', () => {
+  // `new Date(y, …)` and `Date.UTC(y, …)` map 0–99 onto 1900–1999; the setters do not.
+  it('keeps the year and the leap day', () => {
+    const utc = toPickerDate(plainDate('0000-02-29'), { basis: 'utc' });
+    expect([utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate()]).toEqual([0, 1, 29]);
+    const local = toPickerDate(plainDate('0099-12-31'), { basis: 'local' });
+    expect([local.getFullYear(), local.getMonth(), local.getDate()]).toEqual([99, 11, 31]);
+  });
+});
+
 describe('systemTimeZone', () => {
   it('returns an IANA id the runtime accepts', () => {
     expect(() => zoned(instant('2026-01-01T00:00Z'), systemTimeZone())).not.toThrow();

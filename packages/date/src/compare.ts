@@ -5,10 +5,22 @@
  * compares the zone.
  */
 
-import type { Bounds, CalendarUnit, Civil, Ordering, PlainDate, Point, Timeline, Unit, WeekRules } from './types.js';
-import { instant } from './core.js';
+import type {
+  Bounds,
+  CalendarUnit,
+  Civil,
+  Instant,
+  Ordering,
+  PlainDate,
+  Point,
+  Timeline,
+  Unit,
+  WeekRules,
+} from './types.js';
+import { instant, plainDate } from './core.js';
 import { assertSameKind } from './internal/kind.js';
-import { internal, startOf } from './math.js';
+import { comparePoints, isCalendarUnit } from './internal/point.js';
+import { startOf } from './math.js';
 import { isInstant, isPlainDate, isPlainDateTime, isZonedDateTime } from './types.js';
 
 function equalsPoint(a: Point, b: Point): boolean {
@@ -36,27 +48,27 @@ function sign(n: number): Ordering {
 
 /** `-1` when `a` is earlier, `1` when later, `0` when equal. Usable directly as an `Array#sort` comparator. */
 export function compareAsc<T extends Point>(a: T, b: NoInfer<T>): Ordering {
-  return sign(internal.comparePoints(a, b));
+  return sign(comparePoints(a, b));
 }
 
 export function compareDesc<T extends Point>(a: T, b: NoInfer<T>): Ordering {
-  return sign(internal.comparePoints(b, a));
+  return sign(comparePoints(b, a));
 }
 
 export function isBefore<T extends Point>(a: T, b: NoInfer<T>): boolean {
-  return internal.comparePoints(a, b) < 0;
+  return comparePoints(a, b) < 0;
 }
 
 export function isAfter<T extends Point>(a: T, b: NoInfer<T>): boolean {
-  return internal.comparePoints(a, b) > 0;
+  return comparePoints(a, b) > 0;
 }
 
 export function isSameOrBefore<T extends Point>(a: T, b: NoInfer<T>): boolean {
-  return internal.comparePoints(a, b) <= 0;
+  return comparePoints(a, b) <= 0;
 }
 
 export function isSameOrAfter<T extends Point>(a: T, b: NoInfer<T>): boolean {
-  return internal.comparePoints(a, b) >= 0;
+  return comparePoints(a, b) >= 0;
 }
 
 export type SameOptions = Readonly<{
@@ -75,15 +87,23 @@ function toBucketable(value: Point, timeZone: string | undefined, unit: string):
 }
 
 /** Units a value can be bucketed by: instants may use calendar units once projected into `timeZone`. */
-export type BucketUnitFor<T extends Point> = T extends PlainDate ? CalendarUnit : Unit;
+export type BucketUnitFor<T extends Point> = PlainDate extends T ? CalendarUnit : Unit;
 
 /** Do both values fall in the same calendar unit (day, ISO week, month, quarter, year, hour…)? */
+export function isSame<T extends Civil>(
+  a: T,
+  b: NoInfer<T>,
+  unit: BucketUnitFor<NoInfer<T>>,
+  options?: SameOptions,
+): boolean;
+export function isSame(a: Instant, b: Instant, unit: Unit, options: SameOptions & { timeZone: string }): boolean;
 export function isSame<T extends Point>(
   a: T,
   b: NoInfer<T>,
   unit: BucketUnitFor<NoInfer<T>>,
   options?: SameOptions,
-): boolean {
+): boolean;
+export function isSame(a: Point, b: Point, unit: Unit, options?: SameOptions): boolean {
   assertSameKind(a, b, 'isSame');
   const left = toBucketable(a, options?.timeZone, unit);
   const right = toBucketable(b, options?.timeZone, unit);
@@ -92,22 +112,28 @@ export function isSame<T extends Point>(
       `isSame(${unit}) across zones ${left.timeZoneId} and ${right.timeZoneId} needs an explicit timeZone option`,
     );
   }
+  if (isCalendarUnit(unit)) {
+    // Calendar buckets depend only on the date, and PlainDate boundaries are
+    // far cheaper than rebuilding zoned midnights.
+    return startOf(plainDate(left), unit, options).equals(startOf(plainDate(right), unit, options));
+  }
+  if (isPlainDate(left) || isPlainDate(right)) throw new RangeError(`isSame(${unit}) is not defined for a PlainDate`);
   return equalsPoint(startOf(left, unit, options), startOf(right, unit, options));
 }
 
-export function isSameDay(a: Civil, b: Civil, options?: SameOptions): boolean {
+export function isSameDay<T extends Civil>(a: T, b: NoInfer<T>, options?: SameOptions): boolean {
   return isSame(a, b, 'day', options);
 }
-export function isSameWeek(a: Civil, b: Civil, options?: SameOptions): boolean {
+export function isSameWeek<T extends Civil>(a: T, b: NoInfer<T>, options?: SameOptions): boolean {
   return isSame(a, b, 'week', options);
 }
-export function isSameMonth(a: Civil, b: Civil, options?: SameOptions): boolean {
+export function isSameMonth<T extends Civil>(a: T, b: NoInfer<T>, options?: SameOptions): boolean {
   return isSame(a, b, 'month', options);
 }
-export function isSameQuarter(a: Civil, b: Civil, options?: SameOptions): boolean {
+export function isSameQuarter<T extends Civil>(a: T, b: NoInfer<T>, options?: SameOptions): boolean {
   return isSame(a, b, 'quarter', options);
 }
-export function isSameYear(a: Civil, b: Civil, options?: SameOptions): boolean {
+export function isSameYear<T extends Civil>(a: T, b: NoInfer<T>, options?: SameOptions): boolean {
   return isSame(a, b, 'year', options);
 }
 
@@ -118,10 +144,10 @@ export function isBetween<T extends Point>(
   end: NoInfer<T>,
   options?: Readonly<{ bounds?: Bounds }>,
 ): boolean {
-  if (internal.comparePoints(start, end) > 0) throw new RangeError('isBetween: start is after end');
+  if (comparePoints(start, end) > 0) throw new RangeError('isBetween: start is after end');
   const bounds = options?.bounds ?? '[)';
-  const lower = internal.comparePoints(value, start);
-  const upper = internal.comparePoints(value, end);
+  const lower = comparePoints(value, start);
+  const upper = comparePoints(value, end);
   const lowerOk = bounds.startsWith('[') ? lower >= 0 : lower > 0;
   const upperOk = bounds.endsWith(']') ? upper <= 0 : upper < 0;
   return lowerOk && upperOk;
@@ -129,18 +155,18 @@ export function isBetween<T extends Point>(
 
 /** The earliest of the given values (one of the inputs, not a copy). */
 export function min<T extends Point>(values: readonly [T, ...T[]]): T {
-  return values.reduce((best, candidate) => (internal.comparePoints(candidate, best) < 0 ? candidate : best));
+  return values.reduce((best, candidate) => (comparePoints(candidate, best) < 0 ? candidate : best));
 }
 
 /** The latest of the given values. */
 export function max<T extends Point>(values: readonly [T, ...T[]]): T {
-  return values.reduce((best, candidate) => (internal.comparePoints(candidate, best) > 0 ? candidate : best));
+  return values.reduce((best, candidate) => (comparePoints(candidate, best) > 0 ? candidate : best));
 }
 
 /** `value` limited to `[minimum, maximum]`. */
 export function clamp<T extends Point>(value: T, minimum: NoInfer<T>, maximum: NoInfer<T>): T {
-  if (internal.comparePoints(minimum, maximum) > 0) throw new RangeError('clamp: minimum is after maximum');
-  if (internal.comparePoints(value, minimum) < 0) return minimum;
-  if (internal.comparePoints(value, maximum) > 0) return maximum;
+  if (comparePoints(minimum, maximum) > 0) throw new RangeError('clamp: minimum is after maximum');
+  if (comparePoints(value, minimum) < 0) return minimum;
+  if (comparePoints(value, maximum) > 0) return maximum;
   return value;
 }

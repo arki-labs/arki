@@ -121,6 +121,7 @@
     "package.json"
   ],
   "scripts": {
+    "bench": "node scripts/bench.mjs",
     "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc -p tsconfig.build.json --watch",

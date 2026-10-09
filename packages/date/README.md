@@ -68,6 +68,50 @@ date('2026-01-31T10:00:00Z', { timeZone: 'Europe/Bucharest' })
 
 Two ways to use it: **pure functions** (tree-shakeable, one subpath per module) and the **fluent `date()` wrapper** over `ZonedDateTime` for chains. The fluent form imports everything it delegates to; browser code that needs two operations should import those two.
 
+## Which constructor, and where the zone comes from
+
+| You have                                  | Call                                            | Result                                       |
+| ----------------------------------------- | ----------------------------------------------- | -------------------------------------------- |
+| `'2026-05-20'`                            | `plainDate(text)`                               | `PlainDate` — no time, no zone               |
+| `'2026-05-20T09:30'`                      | `plainDateTime(text)`                           | `PlainDateTime` — wall clock, no zone        |
+| `'2026-05-20T09:30'` + a zone             | `zoned(text, 'Europe/Bucharest')`               | that wall clock in that zone                 |
+| `'…T06:30:00Z'` or `'…+03:00'`            | `instant(text)`                                 | `Instant` — exact time, no zone              |
+| `'…T06:30:00Z'` + a zone                  | `zoned(text, 'Europe/Bucharest')`               | that exact time shown in that zone           |
+| `'…+03:00[Europe/Bucharest]'`             | `zoned(text)`                                   | `ZonedDateTime` (zone from the annotation)   |
+| a `Date`                                  | `instant(d)` / `zoned(d, zone)` / `fromDate(d)` | exact time; `zoned` adds the zone to show it |
+| a `Date` from a picker                    | `fromPickerDate(d, { basis: 'local' })`         | the calendar fields the picker showed        |
+| `{ year, month, day, hour }` parts + zone | `zoned(parts, zone, { disambiguation? })`       | DST gaps/folds resolved by `'compatible'`    |
+
+A zone-less string is never guessed into a zone: `zoned('2026-05-20T09:30')` throws and tells you to pass one. `format`/`formatIntl` on an `Instant` or `Date` use `options.timeZone ?? systemTimeZone()`; on a `ZonedDateTime` they use its own zone.
+
+**Server rendering:** never let the server's zone leak into output. Resolve the user's zone and locale once per request and pass them everywhere, or bind them: `const dates = createDateContext({ timeZone: user.timeZone, locale: user.locale })`. `systemTimeZone()` is for client-side code that wants the browser's zone.
+
+## Common tasks
+
+```ts
+// Deadline in business days, skipping Romanian public holidays
+const calendar = businessCalendar({ holidays: ['2026-12-01', '2026-12-25'] });
+addBusinessDays(plainDate('2026-11-27'), 3, calendar); // 2026-12-03
+
+// Is it overdue? (clock-driven, test with MockClock)
+isPast(zoned(order.dueAt, 'Europe/Bucharest'), clock);
+
+// Age today
+age(plainDate(user.birthDate), today({ clock, timeZone: 'Europe/Bucharest' }));
+
+// A month grid (Monday-first weeks)
+[...each(interval(startOf(month, 'week'), endOf(month, 'week')), { days: 1 })];
+
+// "May 20 – 24, 2026"
+formatRange(stay.start, stay.end, { dateStyle: 'medium' });
+
+// "09:00 in Tokyo" as seen from Bucharest
+inZone(zoned('2026-05-20T09:00', 'Asia/Tokyo'), 'Europe/Bucharest'); // 03:00+03:00
+
+// Countdown text: "in 3 days" / "tomorrow"
+relativeToNow(launch, { numeric: 'auto', clock });
+```
+
 ## Policies (the whole package follows the same rules)
 
 - **Overflow clamps.** `add`, `sub` and `set` constrain out-of-range fields (`Jan 31 + 1 month = Feb 28`). Pass `{ overflow: 'reject' }` to throw instead. Subtraction is therefore not always the inverse of addition.
@@ -96,7 +140,7 @@ Every module is also a subpath: `@arki/date/math`, `@arki/date/interval`, …
 | `duration` | `duration` `years…milliseconds` `addDuration` `subDuration` `multiplyDuration` `negateDuration` `absDuration` `normalizeDuration` `totalDuration` `toUnits` `compareDurations` `isZeroDuration` `isNegativeDuration` `formatDurationISO` `humanizeDuration` |
 | `interval` | `interval` `contains` `overlaps` `abuts` `intersection` `union` `gap` `subtract` `symmetricDifference` `mergeIntervals` `gapsBetween` `intervalLength` `splitByUnit` `each` `range` `toISOInterval`                                                         |
 | `business` | `businessCalendar` `isBusinessDay` `addBusinessDays` `subBusinessDays` `nextBusinessDay` `previousBusinessDay` `businessDaysBetween` `businessDaysIn`                                                                                                       |
-| `format`   | `format` (date-fns-compatible tokens) `formatIntl` (`Intl.DateTimeFormat`) `formatISO` `toHumanReadableDate`                                                                                                                                                |
+| `format`   | `format` (date-fns-compatible tokens) `formatIntl` `formatRange` (`Intl.DateTimeFormat`) `formatISO` `toHumanReadableDate`                                                                                                                                  |
 | `relative` | `relative` `relativeToNow` `relativeUnit` — "3 days ago" via `Intl.RelativeTimeFormat`                                                                                                                                                                      |
 | `clock`    | `now` `nowIn` `today` `isToday` `isTomorrow` `isYesterday` `isThisWeek` `isThisMonth` `isThisYear` `isPast` `isFuture`                                                                                                                                      |
 | `fluent`   | `date` `DateValue` `createDateContext`                                                                                                                                                                                                                      |
@@ -131,6 +175,21 @@ deadline.isPast(); // true
 ```
 
 There is no package-level `setTestNow`: a global test clock leaks across tests and requests. Pass a clock.
+
+### Format tokens
+
+`format(value, pattern)` takes the date-fns v4 Unicode tokens (same output, en-US):
+
+| Field      | Tokens                                          | Field        | Tokens                                    |
+| ---------- | ----------------------------------------------- | ------------ | ----------------------------------------- |
+| year       | `y` `yy` `yyyy` `yo`, ISO week-year `R` `RRRR`  | hour         | `h` `hh` `H` `HH` `K` `k` (+ `o`)         |
+| quarter    | `Q` `QQ` `QQQ` `QQQQ` `Qo`                      | minute / sec | `m` `mm` `s` `ss` (+ `o`)                 |
+| month      | `M` `MM` `MMM` `MMMM` `Mo`, stand-alone `L…`    | fraction     | `S` `SS` `SSS` (truncated)                |
+| week / day | ISO week `I` `II`, day `d` `dd` `do`, `D` `DDD` | AM/PM        | `a` `aaa` `aaaa` `b` (noon/midnight)      |
+| weekday    | `E` `EEEE` `EEEEE`, ISO `i` `iiii` `io`         | zone         | `X` `XX` `XXX` `x…` `O` `OOOO` `z` `zzzz` |
+| presets    | `P` `PP` `PPP` `PPPP` `p` `pp` `Pp` `PPpp`      | literal      | `'text'`, `''` for a quote                |
+
+Any other letter throws. Time tokens on a `PlainDate`, and zone tokens on a value without a zone, throw too. For locale-native output use `formatIntl(value, { dateStyle: 'long', locale })`.
 
 ### Pickers and `Date`
 

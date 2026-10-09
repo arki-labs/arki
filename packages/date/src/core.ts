@@ -75,7 +75,9 @@ export type ZonedOptions = Readonly<{ disambiguation?: Disambiguation }>;
 /**
  * An exact moment in a named zone.
  *
- * - `zoned('2026-03-29T03:30+03:00[Europe/Bucharest]')` — string must carry a `[Zone]` annotation.
+ * - `zoned('2026-03-29T03:30+03:00[Europe/Bucharest]')` — a string with a `[Zone]` annotation.
+ * - `zoned('2026-03-29T00:30:00Z', 'Europe/Bucharest')` — an exact timestamp shown in a zone;
+ *   `zoned('2026-03-29T03:30', 'Europe/Bucharest')` — a wall-clock time in that zone.
  * - `zoned({ year, month, day, hour, minute }, 'Europe/Bucharest')` — wall-clock fields in a zone.
  * - `zoned(plainDate, zone)` — first valid time of that day; `zoned(instant | Date, zone)` — projection.
  *
@@ -83,7 +85,7 @@ export type ZonedOptions = Readonly<{ disambiguation?: Disambiguation }>;
  */
 export function zoned(input: string | ZonedDateTime, options?: ZonedOptions): ZonedDateTime;
 export function zoned(
-  input: WallInput | PlainDateTime | PlainDate | Instant | Date,
+  input: string | WallInput | PlainDateTime | PlainDate | Instant | ZonedDateTime | Date,
   timeZone: string,
   options?: ZonedOptions,
 ): ZonedDateTime;
@@ -92,15 +94,23 @@ export function zoned(
   timeZoneOrOptions?: string | ZonedOptions,
   maybeOptions?: ZonedOptions,
 ): ZonedDateTime {
+  if (typeof timeZoneOrOptions === 'string' && (typeof input === 'string' || isZonedDateTime(input))) {
+    // Explicit zone: an exact string/zoned value is projected into it; a
+    // zone-less wall-clock string is read as local time in that zone.
+    const timeZone = timeZoneOrOptions;
+    if (isZonedDateTime(input)) return input.withTimeZone(timeZone);
+    if (HAS_ZONE_ANNOTATION.test(input)) return Temporal.ZonedDateTime.from(input, maybeOptions).withTimeZone(timeZone);
+    if (HAS_OFFSET_OR_ZONE.test(input)) return Temporal.Instant.from(input).toZonedDateTimeISO(timeZone);
+    return Temporal.PlainDateTime.from(input).toZonedDateTime(timeZone, maybeOptions);
+  }
   if (typeof input === 'string' || isZonedDateTime(input)) {
-    const options = typeof timeZoneOrOptions === 'string' ? maybeOptions : timeZoneOrOptions;
     if (typeof input === 'string') {
       if (!HAS_ZONE_ANNOTATION.test(input)) {
         throw new RangeError(
-          `zoned() expects an ISO string with a [TimeZone] annotation, received "${input}". Pass the zone as the second argument to project an instant.`,
+          `zoned() needs a zone for "${input}": either a [TimeZone] annotation in the string or a second argument, e.g. zoned(text, 'Europe/Bucharest')`,
         );
       }
-      return Temporal.ZonedDateTime.from(input, options);
+      return Temporal.ZonedDateTime.from(input, typeof timeZoneOrOptions === 'string' ? undefined : timeZoneOrOptions);
     }
     return input;
   }

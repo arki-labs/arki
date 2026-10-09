@@ -20,6 +20,7 @@
 import type { Duration, PlainDate, PlainDateTime, Point, ZonedDateTime } from './types.js';
 import { dayOfYear, isoWeek, quarter } from './calendar.js';
 import { toISO } from './core.js';
+import { remember } from './internal/cache.js';
 import { dateTimeFormat } from './internal/intl.js';
 import { systemTimeZone } from './interop.js';
 import { isInstant, isPlainDate, isPlainDateTime, isZonedDateTime, Temporal } from './types.js';
@@ -392,6 +393,23 @@ function expandPresets(pattern: string): string {
     .join('');
 }
 
+/** A pattern split once into literal text and field tokens; the split is reused across calls. */
+type PatternPiece = string | Readonly<{ token: string }>;
+
+const PATTERN_CACHE_LIMIT = 200;
+const patterns = new Map<string, readonly PatternPiece[]>();
+
+function compilePattern(pattern: string): readonly PatternPiece[] {
+  return remember(patterns, pattern, PATTERN_CACHE_LIMIT, () =>
+    (expandPresets(pattern).match(TOKENS) ?? []).map((token): PatternPiece => {
+      if (token === "''") return "'";
+      const head = token.charAt(0);
+      if (head === "'") return unquote(token);
+      return LATIN_LETTER.test(head) ? { token } : token;
+    }),
+  );
+}
+
 function unquote(chunk: string): string {
   const inner = ESCAPED.exec(chunk)?.[1];
   return inner === undefined ? chunk : inner.replaceAll(DOUBLE_QUOTE, "'");
@@ -417,15 +435,11 @@ function unquote(chunk: string): string {
 export function format(value: Point | Date, pattern: string, options?: FormatOptions): string {
   const locale = options?.locale ?? DEFAULT_LOCALE;
   const subject = toSubject(value, options?.timeZone, 'format');
-  return (expandPresets(pattern).match(TOKENS) ?? [])
-    .map(token => {
-      if (token === "''") return "'";
-      const head = token.charAt(0);
-      if (head === "'") return unquote(token);
-      if (LATIN_LETTER.test(head)) return formatToken(token, subject, locale);
-      return token;
-    })
-    .join('');
+  let text = '';
+  for (const piece of compilePattern(pattern)) {
+    text += typeof piece === 'string' ? piece : formatToken(piece.token, subject, locale);
+  }
+  return text;
 }
 
 /** `May 20, 2026` — `format(value, 'LLL dd, y')`, the legacy `@arki/date/format` helper. */
@@ -474,4 +488,40 @@ export function formatIntl(value: Point | Date, options?: FormatIntlOptions): st
   }
   // Plain values: render their fields as a UTC wall clock so no zone shifts them.
   return dateTimeFormat(locale, { ...intl, timeZone: 'UTC' }).format(subject.toZonedDateTime('UTC').epochMilliseconds);
+}
+
+/**
+ * Locale text for a span, through `Intl.DateTimeFormat#formatRange`:
+ * `formatRange(plainDate('2026-05-20'), plainDate('2026-05-24'), { dateStyle: 'medium' })`
+ * → `May 20 – 24, 2026`. Both ends follow the same rules as `formatIntl`
+ * and must be the same kind of value; the end may precede the start.
+ */
+export function formatRange(start: Point | Date, end: Point | Date, options?: FormatIntlOptions): string {
+  const { locale = DEFAULT_LOCALE, timeZone, ...intl } = options ?? {};
+  const from = toSubject(start, timeZone, 'formatRange');
+  const to = toSubject(end, timeZone, 'formatRange');
+  if (isZonedDateTime(from) && isZonedDateTime(to)) {
+    if (from.timeZoneId !== to.timeZoneId) {
+      throw new RangeError(`formatRange: both ends must share a zone (${from.timeZoneId} vs ${to.timeZoneId})`);
+    }
+    return dateTimeFormat(locale, { ...intl, timeZone: from.timeZoneId }).formatRange(
+      from.epochMilliseconds,
+      to.epochMilliseconds,
+    );
+  }
+  if (isZonedDateTime(from) || isZonedDateTime(to) || isPlainDate(from) !== isPlainDate(to)) {
+    throw new RangeError('formatRange: both ends must be the same kind of value');
+  }
+  if (isPlainDate(from)) {
+    const timeOption = TIME_OPTIONS.find(key => intl[key] !== undefined);
+    if (timeOption !== undefined) {
+      throw new RangeError(`formatRange: a PlainDate has no time of day; drop the "${timeOption}" option`);
+    }
+  } else if (intl.timeZoneName !== undefined) {
+    throw new RangeError('formatRange: a PlainDateTime has no time zone; drop the "timeZoneName" option');
+  }
+  return dateTimeFormat(locale, { ...intl, timeZone: 'UTC' }).formatRange(
+    from.toZonedDateTime('UTC').epochMilliseconds,
+    to.toZonedDateTime('UTC').epochMilliseconds,
+  );
 }

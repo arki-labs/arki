@@ -2,7 +2,7 @@ import { format as fnsFormat } from 'date-fns/format';
 import { describe, expect, it } from 'vitest';
 
 import { instant, plainDate, plainDateTime, zoned } from './core.js';
-import { format, formatIntl, formatISO, toHumanReadableDate } from './format.js';
+import { format, formatIntl, formatISO, formatRange, toHumanReadableDate } from './format.js';
 import { dateTimeFormat, INTL_CACHE_LIMIT, intlCacheSize } from './internal/intl.js';
 import { Temporal } from './types.js';
 
@@ -262,5 +262,41 @@ describe('Intl formatter cache', () => {
     expect(intlCacheSize()).toBeLessThanOrEqual(INTL_CACHE_LIMIT);
     const options = { timeZone: offsetZone(INTL_CACHE_LIMIT + 49), hour: 'numeric' } as const;
     expect(dateTimeFormat('en-US', options)).toBe(dateTimeFormat('en-US', options));
+  });
+});
+
+describe('formatRange', () => {
+  it('prints a locale span for dates, wall clocks and zoned moments', () => {
+    expect(formatRange(plainDate('2026-05-20'), plainDate('2026-05-24'), { dateStyle: 'medium' })).toMatch(
+      /^May 20\s*–\s*24, 2026$/,
+    );
+    expect(
+      formatRange(zoned('2026-05-20T09:00[Europe/Bucharest]'), zoned('2026-05-20T17:30[Europe/Bucharest]'), {
+        timeStyle: 'short',
+      }),
+    ).toMatch(/^9:00\sAM\s*–\s*5:30\sPM$/);
+    expect(
+      formatRange(plainDateTime('2026-05-20T09:00'), plainDateTime('2026-05-21T09:00'), {
+        dateStyle: 'short',
+        timeStyle: 'short',
+      }),
+    ).toMatch(/5\/20\/26.+5\/21\/26/);
+  });
+
+  it('rejects mixed kinds, mixed zones and time options on dates', () => {
+    expect(() => formatRange(plainDate('2026-05-20'), plainDateTime('2026-05-21T09:00'))).toThrow(/same kind/);
+    expect(() =>
+      formatRange(zoned('2026-05-20T09:00[Europe/Bucharest]'), zoned('2026-05-20T09:00[Asia/Tokyo]')),
+    ).toThrow(/share a zone/);
+    expect(() => formatRange(plainDate('2026-05-20'), plainDate('2026-05-21'), { hour: 'numeric' })).toThrow(/hour/);
+  });
+});
+
+describe('format pattern reuse', () => {
+  it('gives the same text on repeated calls with the same pattern', () => {
+    const value = zoned('2026-05-20T09:05:07.123[Europe/Bucharest]');
+    const first = format(value, "yyyy-MM-dd 'at' HH:mm:ss.SSS xxx 'it''s'");
+    for (let i = 0; i < 3; i++) expect(format(value, "yyyy-MM-dd 'at' HH:mm:ss.SSS xxx 'it''s'")).toBe(first);
+    expect(first).toBe("2026-05-20 at 09:05:07.123 +03:00 it's");
   });
 });

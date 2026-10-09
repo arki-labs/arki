@@ -4,7 +4,8 @@
  * `reinterpretZone` keeps the wall clock and changes the instant.
  */
 
-import type { Disambiguation, PlainDate, Timeline, TimeParts, ZonedDateTime } from './types.js';
+import type { ZonedOptions } from './core.js';
+import type { PlainDate, Timeline, TimeParts, ZonedDateTime } from './types.js';
 import { instant, plainDateTime } from './core.js';
 import { Temporal } from './types.js';
 
@@ -19,11 +20,7 @@ export function toUTC(value: Timeline | Date): ZonedDateTime {
 }
 
 /** The same wall-clock fields, read as if they were in another zone (the instant changes). */
-export function reinterpretZone(
-  value: ZonedDateTime,
-  timeZone: string,
-  options?: Readonly<{ disambiguation?: Disambiguation }>,
-): ZonedDateTime {
+export function reinterpretZone(value: ZonedDateTime, timeZone: string, options?: ZonedOptions): ZonedDateTime {
   return value.toPlainDateTime().toZonedDateTime(timeZone, options);
 }
 
@@ -32,7 +29,7 @@ export function atTime(
   date: PlainDate,
   time: Partial<TimeParts>,
   timeZone: string,
-  options?: Readonly<{ disambiguation?: Disambiguation }>,
+  options?: ZonedOptions,
 ): ZonedDateTime {
   return plainDateTime({ year: date.year, month: date.month, day: date.day, ...time }).toZonedDateTime(
     timeZone,

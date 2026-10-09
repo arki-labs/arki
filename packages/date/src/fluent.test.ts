@@ -84,6 +84,15 @@ describe('date()', () => {
   });
 });
 
+describe('zone changes travel with the value', () => {
+  it('resolves later arguments in the new zone', () => {
+    const tokyo = date('2026-10-09T10:00[Europe/Bucharest]').inZone('Asia/Tokyo'); // 16:00 in Tokyo
+    const lateInTokyo = new Date('2026-10-09T16:00:00Z'); // 01:00 Oct 10 in Tokyo, 19:00 Oct 9 in Bucharest
+    expect(tokyo.isSame(lateInTokyo, 'day')).toBe(false);
+    expect(tokyo.add({ days: 1 }).startOf('day').toString()).toBe('2026-10-10T00:00:00+09:00[Asia/Tokyo]');
+  });
+});
+
 describe('createDateContext', () => {
   const clock = new MockClock(new Date('2026-10-09T09:00:00Z'));
   const ctx = createDateContext({ clock, timeZone: BUC, locale: 'ro-RO' });
@@ -94,6 +103,9 @@ describe('createDateContext', () => {
     expect(ctx.date('2026-10-09T00:30:00Z').isToday()).toBe(true);
     expect(ctx.isToday(instant('2026-10-08T21:30:00Z'))).toBe(true); // 00:30 Oct 9 in Bucharest
     expect(ctx.isToday(plainDate('2026-10-09'))).toBe(true);
+    // A zoned value is judged in the context zone, like `isToday(value, { timeZone })` from `clock`.
+    expect(ctx.isToday(zoned('2026-10-10T00:30[Asia/Tokyo]'))).toBe(true); // 18:30 Oct 9 in Bucharest
+    expect(ctx.isToday(zoned('2026-10-10T07:30[Asia/Tokyo]'))).toBe(false); // 01:30 Oct 10 in Bucharest
     expect(ctx.now().locale).toBe('ro-RO');
   });
 

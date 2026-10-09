@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import type { BusinessCalendar } from './business.js';
+import type { PlainDate } from './types.js';
 import {
   addBusinessDays,
   businessCalendar,
@@ -118,6 +120,45 @@ describe('businessDaysBetween / businessDaysIn', () => {
         // Moving n business days from a business day lands on the (n+1)-th business day of the range.
         const landed = addBusinessDays(from, expected - 1, XMAS);
         expect(businessDaysBetween(from, landed.add({ days: 1 }), XMAS)).toBe(expected);
+      }
+    }
+  });
+});
+
+describe('zones that skip a calendar day', () => {
+  // Samoa jumped from 2011-12-29 straight to 2011-12-31: Friday the 30th never happened.
+  it('walks past the missing day in both directions', () => {
+    expect(addBusinessDays(zoned('2011-12-29T09:00[Pacific/Apia]'), 1).toString()).toBe(
+      '2012-01-02T09:00:00+14:00[Pacific/Apia]',
+    );
+    expect(addBusinessDays(zoned('2012-01-03T09:00[Pacific/Apia]'), -2).toString()).toBe(
+      '2011-12-29T09:00:00-10:00[Pacific/Apia]',
+    );
+  });
+});
+
+function walkDays(start: PlainDate, count: number, calendar: BusinessCalendar): PlainDate {
+  let cursor = start;
+  for (let left = Math.abs(count); left > 0;) {
+    cursor = cursor.add({ days: Math.sign(count) });
+    if (isBusinessDay(cursor, calendar)) left--;
+  }
+  return cursor;
+}
+
+describe('week jumps agree with a day-by-day walk', () => {
+  const calendars = [
+    businessCalendar(),
+    businessCalendar({ weekend: [5, 6] }),
+    businessCalendar({ weekend: [7] }),
+    businessCalendar({ weekend: [1, 2, 3, 4, 5, 6] }),
+    businessCalendar({ holidays: ['2026-05-01', '2026-06-01', '2026-06-08'] }),
+  ];
+  it.each([-61, -14, -1, 0, 1, 5, 13, 30, 61, 200])('for %d business days', count => {
+    for (const calendar of calendars) {
+      for (let offset = 0; offset < 7; offset++) {
+        const start = plainDate('2026-04-27').add({ days: offset });
+        expect(addBusinessDays(start, count, calendar).toString()).toBe(walkDays(start, count, calendar).toString());
       }
     }
   });

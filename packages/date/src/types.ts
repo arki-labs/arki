@@ -38,8 +38,18 @@ export type Unit = CalendarUnit | TimeUnit;
 /** Units a `Duration` can carry (Temporal has no quarter field; quarters expand to 3 months). */
 export type DurationUnit = Exclude<Unit, 'quarter'>;
 
-/** The units that make sense for a given point type. */
-export type UnitFor<T extends Point> = T extends PlainDate ? CalendarUnit : T extends Instant ? TimeUnit : Unit;
+/**
+ * The units a point type supports. For a union this is the intersection of
+ * its members' capabilities (`PlainDate | Instant` supports none — narrow
+ * first); for a generic `T extends Civil` use the calendar-unit overloads.
+ */
+export type UnitFor<T extends Point> = Instant extends T
+  ? PlainDate extends T
+    ? never
+    : TimeUnit
+  : PlainDate extends T
+    ? CalendarUnit
+    : Unit;
 
 /** ISO weekday: Monday = 1 … Sunday = 7 (same numbering as `Temporal.PlainDate#dayOfWeek`). */
 export type Weekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
@@ -88,8 +98,12 @@ export type TimeAmount = Readonly<{
 }>;
 export type Amount = CalendarAmount & TimeAmount;
 
-/** The amounts that can be added to a given point type. */
-export type AmountFor<T extends Point> = T extends PlainDate ? CalendarAmount : T extends Instant ? TimeAmount : Amount;
+/**
+ * The amounts a point type accepts: anything for civil values (a `PlainDate`
+ * balances time fields into whole days, as Temporal does), time only for an
+ * `Instant` or a union containing one.
+ */
+export type AmountFor<T extends Point> = Instant extends T ? TimeAmount : Amount;
 
 /** What to do when a field is out of range: clamp (Jan 31 + 1 month = Feb 28) or throw. */
 export type Overflow = 'constrain' | 'reject';

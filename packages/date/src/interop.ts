@@ -53,13 +53,13 @@ export function toPickerDate(value: PlainDate, basis: DateBasis = LOCAL): Date {
   let result: Date;
   switch (basis.basis) {
     case 'local': {
-      result = new Date(value.year, value.month - 1, value.day, 0, 0, 0, 0);
-      if (value.year >= 0 && value.year < 100) result.setFullYear(value.year);
+      result = new Date(2000, 0, 1, 0, 0, 0, 0);
+      result.setFullYear(value.year, value.month - 1, value.day);
       break;
     }
     case 'utc': {
-      result = new Date(Date.UTC(value.year, value.month - 1, value.day));
-      if (value.year >= 0 && value.year < 100) result.setUTCFullYear(value.year);
+      result = new Date(0);
+      result.setUTCFullYear(value.year, value.month - 1, value.day);
       break;
     }
     case 'zone': {
@@ -73,7 +73,21 @@ export function toPickerDate(value: PlainDate, basis: DateBasis = LOCAL): Date {
   return result;
 }
 
-/** The runtime's current IANA time zone (e.g. `Europe/Bucharest`). */
+let systemZone: string | undefined;
+let systemZoneCheckedAt = 0;
+const SYSTEM_ZONE_TTL_MS = 1000;
+
+/**
+ * The runtime's IANA time zone (e.g. `Europe/Bucharest`). The lookup costs
+ * ~0.2 ms on the polyfill, so the answer is reused for one second; the zone
+ * can change at runtime (`process.env.TZ`, a travelling laptop) and a change
+ * shows up within that second.
+ */
 export function systemTimeZone(): string {
-  return Temporal.Now.timeZoneId();
+  const now = Date.now();
+  if (systemZone === undefined || now - systemZoneCheckedAt > SYSTEM_ZONE_TTL_MS) {
+    systemZone = Temporal.Now.timeZoneId();
+    systemZoneCheckedAt = now;
+  }
+  return systemZone;
 }

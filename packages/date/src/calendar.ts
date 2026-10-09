@@ -5,7 +5,8 @@
 
 import type { Civil, PlainDate, Weekday, WeekRules } from './types.js';
 import { plainDate } from './core.js';
-import { internal } from './math.js';
+import { daysBetween } from './internal/days.js';
+import { startOfWeekDate } from './internal/week.js';
 import { ISO_WEEK, Temporal } from './types.js';
 
 function isWeekdayNumber(n: number): n is Weekday {
@@ -50,11 +51,7 @@ export function isWeekday(value: Civil, weekend: readonly Weekday[] = DEFAULT_WE
 export type WeekInfo = Readonly<{ week: number; weekYear: number }>;
 
 function week1Start(year: number, rules: WeekRules): PlainDate {
-  return internal.startOfWeekDate(Temporal.PlainDate.from({ year, month: 1, day: rules.minimalDays }), rules);
-}
-
-function daysBetween(from: PlainDate, to: PlainDate): number {
-  return from.until(to, { largestUnit: 'day' }).days;
+  return startOfWeekDate(Temporal.PlainDate.from({ year, month: 1, day: rules.minimalDays }), rules);
 }
 
 /**
@@ -64,7 +61,7 @@ function daysBetween(from: PlainDate, to: PlainDate): number {
  */
 export function weekOf(value: Civil, rules: WeekRules = ISO_WEEK): WeekInfo {
   const date = plainDate(value);
-  const weekStart = internal.startOfWeekDate(date, rules);
+  const weekStart = startOfWeekDate(date, rules);
   let weekYear = date.year + 1;
   let first = week1Start(weekYear, rules);
   if (Temporal.PlainDate.compare(weekStart, first) < 0) {
