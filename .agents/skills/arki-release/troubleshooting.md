@@ -283,3 +283,24 @@ json.dump(d, open(path, 'w'), indent=2, ensure_ascii=False)
 **Fix:** Wait 60 seconds, then re-run with `--package` flags for just the packages that didn't finish (look at the `failed` items in the envelope). The sync is fully resumable — successful packages skip on the next run because they're now `in-sync`.
 
 **Prevention:** For the first bulk-create of all 14 packages, expect this and plan two passes 60 seconds apart. Subsequent incremental syncs (one new version on one package) won't hit the limit.
+
+## External install fails on a dependency the package never declared
+
+**Symptom (2026-10-09, `@arki/ui` 0.1.3):** a clean clone of an external consumer
+installs from npm, then `vite build` dies with
+`Rolldown failed to resolve import "class-variance-authority" from node_modules/@arki/ui/src/button.tsx`.
+Inside the monorepo the import works because the hoisted `node_modules` happens
+to contain the package through some other workspace.
+
+**Why the scorecard let it through:** the `dependencies` dimension checks that
+*declared* deps resolve (no private `@arki/*`, no unresolved `catalog:`). It does
+not compare the imports in `src/` against the manifest.
+
+**Fix:** declare the dependency (same `catalog:` spec the siblings use), changeset,
+republish. **Before promoting a package, run the undeclared-import scan** (compare
+every bare specifier in `src/**/*.{ts,tsx,css}` with `dependencies` +
+`peerDependencies`; `~icons/*` and doc-comment imports are false positives).
+Candidate for a scorecard dimension (`imports`); not implemented yet.
+
+**The real gate is a clean clone outside the workspace** installing from the
+registry: it is the only check that cannot see the monorepo's `node_modules`.
