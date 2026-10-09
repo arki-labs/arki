@@ -1,7 +1,6 @@
 import { db, repositories } from '../db';
 import type { UserModel } from '../features/auth';
 import { kv } from '../kv';
-import { eventStore } from '../store';
 import type { Auth } from './auth/config';
 
 /**
@@ -30,7 +29,6 @@ export const createRPCContext = async (opts: { headers: Headers; auth: Auth }) =
     runInTransaction: db.transaction.bind(db),
     session,
     repo: repositories,
-    eventStore,
     kv,
   };
 };
