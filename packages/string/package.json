@@ -1,0 +1,147 @@
+{
+  "name": "@arki/string",
+  "version": "0.1.0",
+  "description": "Zero-dependency string toolkit — grapheme-aware slicing and truncation, case conversion, whitespace and word helpers, literal search and editing, HTML/RegExp escaping, templating, strict universal base64, multi-script slugs, and an immutable fluent wrapper.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "string",
+    "unicode",
+    "grapheme",
+    "case",
+    "camelcase",
+    "truncate",
+    "base64",
+    "utf8",
+    "escape",
+    "fluent",
+    "utilities",
+    "slug",
+    "slugify",
+    "transliteration"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./unicode": {
+      "types": "./dist/unicode.d.ts",
+      "import": "./dist/unicode.js",
+      "default": "./dist/unicode.js"
+    },
+    "./case": {
+      "types": "./dist/case.d.ts",
+      "import": "./dist/case.js",
+      "default": "./dist/case.js"
+    },
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "import": "./dist/format.js",
+      "default": "./dist/format.js"
+    },
+    "./segment": {
+      "types": "./dist/segment.d.ts",
+      "import": "./dist/segment.js",
+      "default": "./dist/segment.js"
+    },
+    "./search": {
+      "types": "./dist/search.d.ts",
+      "import": "./dist/search.js",
+      "default": "./dist/search.js"
+    },
+    "./edit": {
+      "types": "./dist/edit.d.ts",
+      "import": "./dist/edit.js",
+      "default": "./dist/edit.js"
+    },
+    "./escape": {
+      "types": "./dist/escape.d.ts",
+      "import": "./dist/escape.js",
+      "default": "./dist/escape.js"
+    },
+    "./interpolate": {
+      "types": "./dist/interpolate.d.ts",
+      "import": "./dist/interpolate.js",
+      "default": "./dist/interpolate.js"
+    },
+    "./base64": {
+      "types": "./dist/base64.d.ts",
+      "import": "./dist/base64.js",
+      "default": "./dist/base64.js"
+    },
+    "./slug": {
+      "types": "./dist/slug.d.ts",
+      "import": "./dist/slug.js",
+      "default": "./dist/slug.js"
+    },
+    "./slug-cjk": {
+      "types": "./dist/slug/rules-cjk.d.ts",
+      "import": "./dist/slug/rules-cjk.js",
+      "default": "./dist/slug/rules-cjk.js"
+    },
+    "./readability": {
+      "types": "./dist/readability.d.ts",
+      "import": "./dist/readability.js",
+      "default": "./dist/readability.js"
+    },
+    "./keywords": {
+      "types": "./dist/keywords.d.ts",
+      "import": "./dist/keywords.js",
+      "default": "./dist/keywords.js"
+    },
+    "./vocabulary": {
+      "types": "./dist/vocabulary.d.ts",
+      "import": "./dist/vocabulary.js",
+      "default": "./dist/vocabulary.js"
+    },
+    "./metrics": {
+      "types": "./dist/metrics.d.ts",
+      "import": "./dist/metrics.js",
+      "default": "./dist/metrics.js"
+    },
+    "./hash": {
+      "types": "./dist/hash.d.ts",
+      "import": "./dist/hash.js",
+      "default": "./dist/hash.js"
+    },
+    "./fluent": {
+      "types": "./dist/fluent.d.ts",
+      "import": "./dist/fluent.js",
+      "default": "./dist/fluent.js"
+    },
+    "./count-characters": {
+      "types": "./dist/count/countCharacters.d.ts",
+      "import": "./dist/count/countCharacters.js",
+      "default": "./dist/count/countCharacters.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,31 @@
+@font-face {
+  font-family: 'Gentium Plus';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('./GentiumPlus-Regular.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Gentium Plus';
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+  src: url('./GentiumPlus-Italic.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Gentium Plus';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('./GentiumPlus-Bold.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Gentium Plus';
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+  src: url('./GentiumPlus-BoldItalic.ttf') format('truetype');
+}

@@ -1,0 +1,221 @@
+/* ═══════════════════════════════════════════════════════════════
+   TRIBUNAL DESIGN SYSTEM — Tokens
+   "The case file" — editorial, evidence-first, sober. The register
+   of an experienced strategist delivering a verdict, not a SaaS
+   dashboard and not an "AI-powered ✨" toy.
+
+   Authored in Claude Design (Fresh-mode synthesis, 2026-06-03) from
+   apps/brandability/design-prototypes/styles.css. Values are kept
+   in OKLCH verbatim — the palette was authored perceptually and
+   Tailwind v4 resolves oklch() natively, so there is zero
+   round-trip loss. The hex equivalents live in
+   apps/brandability/DESIGN.md (the design.md spec mandates hex in
+   YAML) and in the conversion log.
+
+   Palettes: cream (light / :root) · ink (dark / .dark). A third
+   "paper" near-white variant exists in the source prototype; it is
+   the `system` palette label and folds into light for token
+   purposes.
+
+   Border radius: tight editorial ladder (4 / 6 / 10 / 14px) — the
+   case-file character is crisper than atelier's warmer 12px+.
+
+   Depth strategy: near-flat. Cards earn separation from a 1px
+   hairline border, not shadow. Shadow tokens exist for overlays
+   (popover, sheet) only and stay subtle.
+   ═══════════════════════════════════════════════════════════════ */
+
+@import './fonts.css';
+
+/* ─── LIGHT MODE — Cream paper, ink primary ─── */
+:root {
+  --heading-font: 'Spectral', 'Newsreader Variable', Georgia, serif;
+  --font-display: 'Spectral', 'Newsreader Variable', Georgia, serif;
+  --font-serif: 'Newsreader Variable', 'Spectral', Georgia, serif;
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Handwritten emphasis — one key word marked "in the brand's hand". */
+  --font-emphasis: 'Shadows Into Light', 'Segoe Script', cursive;
+
+  --background: oklch(0.965 0.012 80);
+  --foreground: oklch(0.22 0.018 60);
+  --card: oklch(0.99 0.006 80);
+  --card-foreground: oklch(0.22 0.018 60);
+  --popover: oklch(0.985 0.008 80);
+  --popover-foreground: oklch(0.22 0.018 60);
+  /* Recessed surface, one step below card — inset wells, sunken rails,
+     code blocks. Not in the base shadcn contract; the editorial console
+     leans on it (37 prototype uses) so it earns a first-class token. */
+  --sunken: oklch(0.93 0.015 80);
+  --primary: oklch(0.22 0.018 60);
+  --primary-foreground: oklch(0.97 0.01 80);
+  --secondary: oklch(0.945 0.014 80);
+  --secondary-foreground: oklch(0.22 0.018 60);
+  --muted: oklch(0.945 0.014 80);
+  --muted-foreground: oklch(0.46 0.018 65);
+  /* Third text tier, softer than muted-foreground — timestamps, queued
+     states, placeholders, metadata. The base contract stops at two text
+     tiers; the editorial surfaces need three (232 prototype uses). */
+  --foreground-soft: oklch(0.62 0.015 70);
+  --accent: oklch(0.945 0.014 80);
+  --accent-foreground: oklch(0.22 0.018 60);
+  --destructive: oklch(0.52 0.16 27);
+  --destructive-foreground: oklch(0.97 0.01 80);
+  --success: oklch(0.52 0.1 145);
+  --warning: oklch(0.62 0.13 75);
+  --border: oklch(0.88 0.015 75);
+  /* A darker hairline for inputs, secondary buttons, hover edges and rules. */
+  --border-strong: oklch(0.78 0.018 70);
+  --input: oklch(0.88 0.015 75);
+  /* Focus ring — magenta "you are here" accent (see --focus below). */
+  --ring: var(--focus);
+
+  /* Categorical data viz — editorial earth tones */
+  --chart-1: oklch(0.55 0.1 200);
+  --chart-2: oklch(0.58 0.1 30);
+  --chart-3: oklch(0.62 0.1 145);
+  --chart-4: oklch(0.6 0.1 80);
+  --chart-5: oklch(0.55 0.1 300);
+
+  /* Verdict band surfaces (tinted backgrounds behind GO/CAUTION/REWORK) */
+  --success-surface: oklch(0.93 0.04 145);
+  --warning-surface: oklch(0.94 0.05 80);
+  --destructive-surface: oklch(0.93 0.04 27);
+
+  /* ── Stage palette ──────────────────────────────────────────────
+     Signature token group. The five letters of "Brand" color-code
+     the five run stages; magenta "?" marks open decision points.
+     Readable-on-cream variants. Used to color-code stages across
+     every War Room / agent-console flow. */
+  --stage-1: oklch(0.57 0.21 27); /* B · Plan       — red    */
+  --stage-2: oklch(0.64 0.16 55); /* r · Evidence   — orange */
+  --stage-3: oklch(0.58 0.15 150); /* a · Evaluation — green  */
+  --stage-4: oklch(0.56 0.13 232); /* n · Synthesis  — blue   */
+  --stage-5: oklch(0.53 0.21 300); /* d · Reporting  — violet */
+  --stage-q: oklch(0.57 0.24 350); /* ? · Decisions  — magenta */
+
+  /* Pure-bright stage hues — the wordmark only. The "Can I Brand It?"
+     logo colors the five letters of "Brand" + the magenta "?" at full
+     chroma (brighter than the readable-on-cream --stage-* above, which
+     are tuned for text). Consumed by the BrandLogo component via inline
+     var(); not exposed as Tailwind utilities. */
+  --logo-1: oklch(0.58 0.25 27); /* B */
+  --logo-2: oklch(0.7 0.2 55); /* r */
+  --logo-3: oklch(0.82 0.22 130); /* a */
+  --logo-4: oklch(0.78 0.15 205); /* n */
+  --logo-5: oklch(0.52 0.27 300); /* d */
+  --logo-q: oklch(0.62 0.27 350); /* ? */
+
+  /* ── Dimension accents ──────────────────────────────────────────
+     The six scoring dimensions each own one of the brand hues —
+     the same spectrum the run stages use, reused on a second axis.
+     Aliases (not new colours) so they track light/dark via --stage-*.
+     Use playfully — accents, list markers, focus rings, ticks, hovers
+     — never as large fills. Exposed as bg-dim-* / text-dim-* / etc. */
+  --dim-legal: var(--stage-1); /* red     · Ownability      */
+  --dim-sound: var(--stage-2); /* orange  · Sound           */
+  --dim-distinct: var(--stage-3); /* green   · Distinctiveness */
+  --dim-cultural: var(--stage-4); /* blue    · Culture         */
+  --dim-strategic: var(--stage-5); /* violet  · Positioning     */
+  --dim-digital: var(--stage-q); /* magenta · Discoverability  */
+
+  /* The full spectrum as a single sweep — hairline rules, underlines,
+     featured accents. Wraps red → magenta across the six dimensions. */
+  --spectrum: linear-gradient(
+    90deg,
+    var(--stage-1) 0%,
+    var(--stage-2) 20%,
+    var(--stage-3) 40%,
+    var(--stage-4) 60%,
+    var(--stage-5) 80%,
+    var(--stage-q) 100%
+  );
+
+  /* Magenta — the brand "?" — is the single interactive accent: focus
+     rings, active states, the live caret. One colour for "you are here".
+     --ring (the shadcn focus token) is repointed here so every component's
+     focus ring inherits it. */
+  --focus: var(--stage-q);
+  --focus-ring: color-mix(in oklab, var(--focus) 26%, transparent);
+
+  --radius: 0.625rem; /* 10px — the card/lg rung */
+
+  /* Near-flat depth — overlays only; cards use the hairline border */
+  --shadow-sm: 0 1px 2px 0 oklch(0.22 0.018 60 / 0.04);
+  --shadow-md:
+    0 1px 2px oklch(0.22 0.018 60 / 0.04), 0 4px 12px oklch(0.22 0.018 60 / 0.06);
+  --shadow-lg:
+    0 1px 2px oklch(0.22 0.018 60 / 0.04), 0 4px 12px oklch(0.22 0.018 60 / 0.06),
+    0 12px 32px oklch(0.22 0.018 60 / 0.08);
+
+  --sidebar-background: oklch(0.945 0.014 80);
+  --sidebar-foreground: oklch(0.22 0.018 60);
+  --sidebar-primary: oklch(0.22 0.018 60);
+  --sidebar-primary-foreground: oklch(0.97 0.01 80);
+  --sidebar-accent: oklch(0.99 0.006 80);
+  --sidebar-accent-foreground: oklch(0.22 0.018 60);
+  --sidebar-border: oklch(0.88 0.015 75);
+  --sidebar-ring: oklch(0.78 0.018 70);
+}
+
+/* ─── DARK MODE — Ink, warm-neutral ─── */
+.dark {
+  --background: oklch(0.16 0.012 60);
+  --foreground: oklch(0.94 0.012 80);
+  --card: oklch(0.2 0.014 60);
+  --card-foreground: oklch(0.94 0.012 80);
+  --popover: oklch(0.23 0.014 60);
+  --popover-foreground: oklch(0.94 0.012 80);
+  --sunken: oklch(0.13 0.012 60);
+  --primary: oklch(0.94 0.012 80);
+  --primary-foreground: oklch(0.16 0.012 60);
+  --secondary: oklch(0.18 0.012 60);
+  --secondary-foreground: oklch(0.94 0.012 80);
+  --muted: oklch(0.18 0.012 60);
+  --muted-foreground: oklch(0.72 0.015 75);
+  --foreground-soft: oklch(0.55 0.018 70);
+  --accent: oklch(0.18 0.012 60);
+  --accent-foreground: oklch(0.94 0.012 80);
+  --destructive: oklch(0.7 0.16 27);
+  --destructive-foreground: oklch(0.16 0.012 60);
+  --success: oklch(0.72 0.14 145);
+  --warning: oklch(0.78 0.14 80);
+  --border: oklch(0.3 0.014 60);
+  --border-strong: oklch(0.42 0.016 60);
+  --input: oklch(0.3 0.014 60);
+  /* Focus ring — magenta accent; --focus/--stage-q resolve to the dark hue. */
+  --ring: var(--focus);
+
+  --chart-1: oklch(0.62 0.11 200);
+  --chart-2: oklch(0.66 0.11 30);
+  --chart-3: oklch(0.7 0.11 145);
+  --chart-4: oklch(0.68 0.11 80);
+  --chart-5: oklch(0.64 0.12 300);
+
+  --success-surface: oklch(0.3 0.06 145);
+  --warning-surface: oklch(0.3 0.06 80);
+  --destructive-surface: oklch(0.3 0.08 27);
+
+  /* brighter stage hues for the dark ground */
+  --stage-1: oklch(0.7 0.19 27);
+  --stage-2: oklch(0.76 0.15 65);
+  --stage-3: oklch(0.74 0.16 150);
+  --stage-4: oklch(0.72 0.13 228);
+  --stage-5: oklch(0.7 0.2 300);
+  --stage-q: oklch(0.72 0.22 350);
+
+  --shadow-sm: 0 1px 2px 0 oklch(0 0 0 / 0.3);
+  --shadow-md: 0 1px 2px oklch(0 0 0 / 0.3), 0 4px 12px oklch(0 0 0 / 0.36);
+  --shadow-lg:
+    0 1px 2px oklch(0 0 0 / 0.3), 0 4px 12px oklch(0 0 0 / 0.36),
+    0 12px 32px oklch(0 0 0 / 0.42);
+
+  --sidebar-background: oklch(0.18 0.012 60);
+  --sidebar-foreground: oklch(0.94 0.012 80);
+  --sidebar-primary: oklch(0.94 0.012 80);
+  --sidebar-primary-foreground: oklch(0.16 0.012 60);
+  --sidebar-accent: oklch(0.2 0.014 60);
+  --sidebar-accent-foreground: oklch(0.94 0.012 80);
+  --sidebar-border: oklch(0.3 0.014 60);
+  --sidebar-ring: oklch(0.42 0.016 60);
+}

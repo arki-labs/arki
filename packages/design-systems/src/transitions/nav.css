@@ -1,0 +1,55 @@
+/* ═══════════════════════════════════════════════════════════════
+   SHARED PAGE NAVIGATION TRANSITION
+
+   Subtle browser-native crossfade applied to every route navigation.
+   Apps activate it from their TanStack Router config via
+   `defaultViewTransition: { types: ['nav'] }`, then import this file
+   from their `global.css`:
+
+       @import '@arki/design-systems/transitions/nav.css';
+
+   The CSS is scoped to `:active-view-transition-type(nav)` so it does
+   not collide with the cursor-origin ripple injected at runtime by
+   `useThemeTransition` (which targets `::view-transition-new(root)`
+   without a type scope). The pseudo-class adds (0,1,0) of specificity
+   on top of the unscoped theme rule, so the navigation fade wins on
+   route changes while the theme ripple continues to win on theme
+   toggles.
+
+   Graceful fallbacks:
+   - Browsers without View Transitions (Firefox today): instant swap;
+     `@supports` block is inert.
+   - `prefers-reduced-motion: reduce`: keyframes disabled, instant swap.
+   ═══════════════════════════════════════════════════════════════ */
+
+@supports (view-transition-name: root) {
+  :active-view-transition-type(nav)::view-transition-old(root) {
+    animation: arki-nav-fade-out 160ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    mix-blend-mode: normal;
+  }
+  :active-view-transition-type(nav)::view-transition-new(root) {
+    animation: arki-nav-fade-in 220ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+    mix-blend-mode: normal;
+  }
+  @keyframes arki-nav-fade-out {
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes arki-nav-fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(3px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :active-view-transition-type(nav)::view-transition-old(root),
+    :active-view-transition-type(nav)::view-transition-new(root) {
+      animation: none;
+    }
+  }
+}

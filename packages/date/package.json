@@ -1,0 +1,129 @@
+{
+  "name": "@arki/date",
+  "version": "0.1.0",
+  "description": "Date and time math for ARKI — Temporal-based calendar dates, instants, zoned date-times, durations and interval algebra with a small, explicit API. Runs on Node, Bun, Deno, browsers and edge runtimes.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "date",
+    "time",
+    "temporal",
+    "duration",
+    "interval",
+    "timezone",
+    "format"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js",
+      "default": "./dist/types.js"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js",
+      "default": "./dist/core.js"
+    },
+    "./interop": {
+      "types": "./dist/interop.d.ts",
+      "import": "./dist/interop.js",
+      "default": "./dist/interop.js"
+    },
+    "./math": {
+      "types": "./dist/math.d.ts",
+      "import": "./dist/math.js",
+      "default": "./dist/math.js"
+    },
+    "./calendar": {
+      "types": "./dist/calendar.d.ts",
+      "import": "./dist/calendar.js",
+      "default": "./dist/calendar.js"
+    },
+    "./compare": {
+      "types": "./dist/compare.d.ts",
+      "import": "./dist/compare.js",
+      "default": "./dist/compare.js"
+    },
+    "./zone": {
+      "types": "./dist/zone.d.ts",
+      "import": "./dist/zone.js",
+      "default": "./dist/zone.js"
+    },
+    "./duration": {
+      "types": "./dist/duration.d.ts",
+      "import": "./dist/duration.js",
+      "default": "./dist/duration.js"
+    },
+    "./interval": {
+      "types": "./dist/interval.d.ts",
+      "import": "./dist/interval.js",
+      "default": "./dist/interval.js"
+    },
+    "./business": {
+      "types": "./dist/business.d.ts",
+      "import": "./dist/business.js",
+      "default": "./dist/business.js"
+    },
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "import": "./dist/format.js",
+      "default": "./dist/format.js"
+    },
+    "./relative": {
+      "types": "./dist/relative.d.ts",
+      "import": "./dist/relative.js",
+      "default": "./dist/relative.js"
+    },
+    "./clock": {
+      "types": "./dist/clock.d.ts",
+      "import": "./dist/clock.js",
+      "default": "./dist/clock.js"
+    },
+    "./fluent": {
+      "types": "./dist/fluent.d.ts",
+      "import": "./dist/fluent.js",
+      "default": "./dist/fluent.js"
+    },
+    "./parseISO": {
+      "types": "./dist/parseISO.d.ts",
+      "import": "./dist/parseISO.js",
+      "default": "./dist/parseISO.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@arki/clock": "0.0.2",
+    "temporal-polyfill": "1.0.5"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

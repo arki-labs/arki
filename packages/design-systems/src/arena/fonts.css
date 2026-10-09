@@ -1,0 +1,20 @@
+/* ─── ARENA — Web Fonts ────────────────────────────────────────
+   Loaded via @fontsource-variable (self-hosted, no CDN).
+   Import this file before tokens.css in your global stylesheet.
+
+   Sans-led — Arena is a UI system; the chrome stays calm and
+   character lives in the game itself. No display serif.
+   ─────────────────────────────────────────────────────────────── */
+
+/* Body text & UI — clean, neutral, optical sizing */
+@import '@fontsource-variable/inter';
+
+/* Code, scores, timers — tabular figures, technical precision */
+@import '@fontsource-variable/jetbrains-mono';
+
+/* ─── CSS Custom Properties ─── */
+:root {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-serif: ui-serif, Georgia, 'Times New Roman', serif;
+}

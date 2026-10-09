@@ -1,0 +1,28 @@
+/* ─── ATELIER — Web Fonts ──────────────────────────────────────
+   Loaded via @fontsource-variable (self-hosted, no CDN).
+   Import this file before tokens.css in your global stylesheet.
+   ─────────────────────────────────────────────────────────────── */
+
+/* Body text — humanist variable sans with optical sizing */
+@import '@fontsource-variable/plus-jakarta-sans';
+
+/* Code — monospaced variable font with ligatures */
+@import '@fontsource-variable/jetbrains-mono';
+
+/* Headlines — warm variable serif with optical & grade axes */
+@import '@fontsource-variable/fraunces';
+
+/* Lazy-loadable variants for the Tweaks panel typography roster.
+   Two of these are NON-variable upstream (instrument-serif, gentium-plus);
+   the other two ship variable builds. Mix is intentional per D16. */
+@import '@fontsource/instrument-serif';
+@import '@fontsource-variable/cormorant-garamond';
+@import '@fontsource-variable/playfair-display';
+@import '@fontsource/gentium-plus';
+
+/* ─── CSS Custom Properties ─── */
+:root {
+  --font-sans: 'Plus Jakarta Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-serif: 'Fraunces Variable', ui-serif, Georgia, serif;
+}

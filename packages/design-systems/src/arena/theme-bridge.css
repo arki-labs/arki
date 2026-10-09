@@ -1,0 +1,200 @@
+/* ═══════════════════════════════════════════════════════════════
+   ARENA DESIGN SYSTEM — Tailwind v4 Theme Bridge
+
+   Maps CSS custom properties to Tailwind's --color-* and --shadow-*
+   namespaces so semantic classes (bg-primary, text-muted-foreground,
+   shadow-md, bg-win, text-score-positive, etc.) resolve correctly.
+   Import this in your app's global.css after importing tailwindcss.
+   ═══════════════════════════════════════════════════════════════ */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* Game-specific status colors — bg-win, text-lose, bg-hint, etc. */
+  --color-win: var(--win);
+  --color-win-foreground: var(--win-foreground);
+  --color-lose: var(--lose);
+  --color-lose-foreground: var(--lose-foreground);
+  --color-hint: var(--hint);
+  --color-hint-foreground: var(--hint-foreground);
+
+  /* Score display colors — text-score-positive, text-score-negative, text-score-neutral */
+  --color-score-positive: var(--score-positive);
+  --color-score-negative: var(--score-negative);
+  --color-score-neutral: var(--score-neutral);
+
+  /* Game surface colors — bg-game-board, bg-game-piece */
+  --color-game-board: var(--game-board);
+  --color-game-piece: var(--game-piece);
+
+  --color-sidebar: var(--sidebar-background);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* Shadow tokens — Arena uses neutral cool layered shadows; pieces lift from the table */
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+
+  --font-family-sans: var(--font-sans);
+  --font-family-mono: var(--font-mono);
+  --font-family-serif: var(--font-serif);
+
+  /* Arena animations — accordion stays snappy (200ms); celebration uses spring easing */
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  /* Game-specific celebrations — Tier 3 motion (spring permitted) */
+  --animate-pulse-win: pulse-win 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  --animate-shake-error: shake-error 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) forwards;
+  --animate-deal-card: deal-card 0.3s cubic-bezier(0.0, 0.0, 0.2, 1) forwards;
+  --animate-flip-piece: flip-piece 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+
+  /* Win pulse — celebratory scale + glow on victory state */
+  @keyframes pulse-win {
+    0% {
+      transform: scale(1);
+      box-shadow: 0 0 0 0 var(--win);
+    }
+    50% {
+      transform: scale(1.06);
+      box-shadow: 0 0 0 12px hsl(from var(--win) h s l / 0);
+    }
+    100% {
+      transform: scale(1);
+      box-shadow: 0 0 0 0 hsl(from var(--win) h s l / 0);
+    }
+  }
+
+  /* Shake error — wrong-answer feedback */
+  @keyframes shake-error {
+    10%, 90% {
+      transform: translateX(-1px);
+    }
+    20%, 80% {
+      transform: translateX(2px);
+    }
+    30%, 50%, 70% {
+      transform: translateX(-3px);
+    }
+    40%, 60% {
+      transform: translateX(3px);
+    }
+  }
+
+  /* Deal card — for card games (solitaire, etc.) */
+  @keyframes deal-card {
+    from {
+      opacity: 0;
+      transform: translateY(-12px) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  /* Flip piece — for board games where pieces flip (Othello/Reversi pattern) */
+  @keyframes flip-piece {
+    from {
+      transform: rotateY(0deg) scale(1);
+    }
+    50% {
+      transform: rotateY(90deg) scale(0.94);
+    }
+    to {
+      transform: rotateY(0deg) scale(1);
+    }
+  }
+}
+
+/* ─── Reduced-motion guarantee ─────────────────────────────────
+   Hard-rule per workspace accessibility contract: any surface
+   importing this design system honors prefers-reduced-motion.
+   Arena's celebration animations (pulse-win, shake-error, etc.)
+   are silenced too — they're delightful, not load-bearing.
+   ─────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ─── Scrollbar styling ────────────────────────────────────────
+   Workspace-wide thin, theme-aware scrollbar. Uses --border so
+   it follows light/dark mode automatically. Sits in @layer base
+   so any unlayered per-app override wins via cascade.
+   ─────────────────────────────────────────────────────────────── */
+@layer base {
+  ::-webkit-scrollbar {
+    width: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 5px;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+}

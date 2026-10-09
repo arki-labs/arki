@@ -1,0 +1,131 @@
+{
+  "name": "@arki/math",
+  "version": "0.0.2",
+  "description": "Zero-dependency math toolkit — exact Decimal and Rational arithmetic on bigint, explicit rounding modes, float helpers that round what you typed, descriptive statistics, Intl-backed locale formatting and parsing, seeded random, and a fluent number wrapper.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "math",
+    "decimal",
+    "bigdecimal",
+    "rational",
+    "fraction",
+    "bigint",
+    "rounding",
+    "money",
+    "statistics",
+    "format",
+    "intl",
+    "locale",
+    "parse",
+    "random",
+    "fluent"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "default": "./dist/errors.js"
+    },
+    "./rounding": {
+      "types": "./dist/rounding.d.ts",
+      "import": "./dist/rounding.js",
+      "default": "./dist/rounding.js"
+    },
+    "./number": {
+      "types": "./dist/number.d.ts",
+      "import": "./dist/number.js",
+      "default": "./dist/number.js"
+    },
+    "./integer": {
+      "types": "./dist/integer.d.ts",
+      "import": "./dist/integer.js",
+      "default": "./dist/integer.js"
+    },
+    "./decimal": {
+      "types": "./dist/decimal.d.ts",
+      "import": "./dist/decimal.js",
+      "default": "./dist/decimal.js"
+    },
+    "./decimal-math": {
+      "types": "./dist/decimal-math.d.ts",
+      "import": "./dist/decimal-math.js",
+      "default": "./dist/decimal-math.js"
+    },
+    "./rational": {
+      "types": "./dist/rational.d.ts",
+      "import": "./dist/rational.js",
+      "default": "./dist/rational.js"
+    },
+    "./stats": {
+      "types": "./dist/stats.d.ts",
+      "import": "./dist/stats.js",
+      "default": "./dist/stats.js"
+    },
+    "./distributions": {
+      "types": "./dist/distributions.d.ts",
+      "import": "./dist/distributions.js",
+      "default": "./dist/distributions.js"
+    },
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "import": "./dist/format.js",
+      "default": "./dist/format.js"
+    },
+    "./parse": {
+      "types": "./dist/parse.d.ts",
+      "import": "./dist/parse.js",
+      "default": "./dist/parse.js"
+    },
+    "./random": {
+      "types": "./dist/random.d.ts",
+      "import": "./dist/random.js",
+      "default": "./dist/random.js"
+    },
+    "./fluent": {
+      "types": "./dist/fluent.d.ts",
+      "import": "./dist/fluent.js",
+      "default": "./dist/fluent.js"
+    },
+    "./words": {
+      "types": "./dist/words.d.ts",
+      "import": "./dist/words.js",
+      "default": "./dist/words.js"
+    },
+    "./words/*": {
+      "types": "./dist/words/*.d.ts",
+      "import": "./dist/words/*.js",
+      "default": "./dist/words/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,24 @@
+# {{name}}
+
+A DOT-composed application.
+
+## Quickstart
+
+```bash
+{{pkgManager}} install
+{{pkgManager}} run test
+{{pkgManager}} run boot
+```
+
+## Inspect
+
+```bash
+bunx dot explain --json
+bunx dot doctor --json
+```
+
+`dot explain` prints the static graph (plugins, services, routes, dependencies,
+lifecycle hooks). `dot doctor` boots the app and prints the runtime
+diagnostics envelope (the same five arrays, plus issues).
+
+See [AGENTS.md](./AGENTS.md) for agent-readable conventions.

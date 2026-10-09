@@ -1,0 +1,45 @@
+/* ─── TRIBUNAL — Web Fonts ─────────────────────────────────────
+   Loaded via @fontsource (self-hosted, no CDN).
+   Import this file before tokens.css in your global stylesheet.
+
+   Editorial-evidence pairing (Claude Design "editorial" default):
+   Spectral display + Newsreader serif body + Geist UI sans +
+   JetBrains Mono for scores/data. The serif carries the
+   "experienced strategist / case file" register; Geist keeps the
+   chrome neutral and legible; the mono is for tabular verdict data.
+   ─────────────────────────────────────────────────────────────── */
+
+/* Display — high-contrast serif for headlines and the verdict number */
+@import '@fontsource/spectral/400.css';
+@import '@fontsource/spectral/500.css';
+@import '@fontsource/spectral/600.css';
+
+/* Serif body — conversational rail, prose, evidence copy */
+@import '@fontsource-variable/newsreader';
+
+/* UI sans — chrome: nav, controls, table headers, captions */
+@import '@fontsource-variable/geist';
+
+/* Mono — scores, tabular data, agent-stage labels, timestamps */
+@import '@fontsource-variable/jetbrains-mono';
+
+/* Logo — the "Brand" letters + "?" of the "Can I Brand It?" wordmark.
+   A high-contrast display serif, italic only (the wordmark is always
+   italic). Deliberately distinct from the Spectral headline face — the
+   wordmark reads as a masthead, not a heading. */
+@import '@fontsource/dm-serif-display/400-italic.css';
+
+/* Emphasis — a single key word marked "in the brand's hand". A locked
+   handwritten accent (never a body face). Used sparingly to underline one
+   word in a heading or lede; surfaced as the `font-emphasis` Tailwind utility. */
+@import '@fontsource/shadows-into-light/400.css';
+
+/* ─── CSS Custom Properties ─── */
+:root {
+  --font-display: 'Spectral', 'Newsreader Variable', Georgia, serif;
+  --font-serif: 'Newsreader Variable', 'Spectral', Georgia, serif;
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-logo: 'DM Serif Display', 'Spectral', Georgia, serif;
+  --font-emphasis: 'Shadows Into Light', 'Segoe Script', cursive;
+}

@@ -1,0 +1,174 @@
+/* ═══════════════════════════════════════════════════════════════
+   ARENA DESIGN SYSTEM — Tokens
+   "The game arena" — calm chrome, amplified status, achievement-rewarding
+
+   Cool-neutral foundations (game-table feel), monochromatic chrome that
+   stays out of the way, and AMPLIFIED status colors — wins, losses, hints,
+   and scores read as the emotional moments of the game. The chrome is
+   quiet so the game itself can pop.
+
+   Type scale: inherits Tailwind v4 defaults (16px base; ratios are
+   pragmatic). Sans-led; serif used minimally if at all (game titles).
+
+   Border radius: 0.625rem (10px) — between atelier (12px, soft) and
+   workbench (6px, sharp). Friendlier than utility, less editorial than
+   reading. Game-piece appropriate.
+
+   Depth strategy: layered shadows with neutral cool tint — game pieces
+   feel like physical objects on a table, lifting from the surface with
+   weight. Not as warm as atelier; not as flat as workbench.
+
+   Scale-bound minimums (raised from workspace floor):
+     - Touch targets: 48×48px floor (instead of 44×44 default) for game
+       pieces, cells, board interactions. Stays on the 4px grid.
+     - Animation tier: Tier 3 permitted — spring/bouncy easing allowed
+       for celebrations, longer durations for win states. Stays inside
+       the workspace 100/150/200/250/300/400/500ms scale; no values off
+       the scale.
+
+   Game-specific tokens (not present in atelier or workbench):
+     --win, --win-foreground          (celebratory green for victories)
+     --lose, --lose-foreground        (dramatic red for failures)
+     --hint, --hint-foreground        (warm amber for help/warnings)
+     --score-positive, --score-negative, --score-neutral
+     --game-board                     (surface for the game itself)
+     --game-piece                     (surface for individual pieces)
+   ═══════════════════════════════════════════════════════════════ */
+
+@import './fonts.css';
+
+/* ─── LIGHT MODE — Cool game-table neutrals with amplified status ─── */
+:root {
+  --heading-font: 'Sora Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-serif: ui-serif, Georgia, 'Times New Roman', serif;
+  --background: hsl(220 12% 96%);
+  --foreground: hsl(220 14% 14%);
+  --card: hsl(220 14% 99%);
+  --card-foreground: hsl(220 14% 14%);
+  --popover: hsl(220 14% 99%);
+  --popover-foreground: hsl(220 14% 14%);
+  --primary: hsl(220 14% 14%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(220 10% 92%);
+  --secondary-foreground: hsl(220 14% 18%);
+  --muted: hsl(220 8% 90%);
+  --muted-foreground: hsl(220 6% 44%);
+  --accent: hsl(220 10% 92%);
+  --accent-foreground: hsl(220 14% 14%);
+  --destructive: hsl(0 78% 52%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --border: hsl(220 8% 84%);
+  --input: hsl(220 8% 84%);
+  --ring: hsl(220 14% 14%);
+
+  /* Charts — vibrant set for game data, scoring overlays, leaderboards */
+  --chart-1: hsl(142 71% 38%);
+  --chart-2: hsl(38 92% 55%);
+  --chart-3: hsl(220 76% 52%);
+  --chart-4: hsl(280 68% 60%);
+  --chart-5: hsl(0 78% 52%);
+
+  --radius: 0.625rem;
+
+  /* Arena depth — neutral cool layered shadows; pieces lift from the table */
+  --shadow-sm: 0 1px 2px 0 hsl(220 14% 14% / 0.05);
+  --shadow-md:
+    0 1px 2px hsl(220 14% 14% / 0.05),
+    0 4px 12px hsl(220 14% 14% / 0.06);
+  --shadow-lg:
+    0 1px 2px hsl(220 14% 14% / 0.05),
+    0 4px 12px hsl(220 14% 14% / 0.06),
+    0 12px 32px hsl(220 14% 14% / 0.08);
+
+  /* Game-specific status tokens — AMPLIFIED for emotional moments */
+  --win: hsl(142 76% 38%);
+  --win-foreground: hsl(0 0% 100%);
+  --lose: hsl(0 78% 52%);
+  --lose-foreground: hsl(0 0% 100%);
+  --hint: hsl(38 92% 55%);
+  --hint-foreground: hsl(220 14% 14%);
+
+  /* Score display tokens — for tabular numeric output */
+  --score-positive: hsl(142 76% 38%);
+  --score-negative: hsl(0 78% 52%);
+  --score-neutral: hsl(220 14% 14%);
+
+  /* Game surface tokens — board and individual pieces */
+  --game-board: hsl(220 12% 94%);
+  --game-piece: hsl(220 14% 99%);
+
+  /* Sidebar — same calm chrome */
+  --sidebar-background: hsl(220 12% 95%);
+  --sidebar-foreground: hsl(220 14% 14%);
+  --sidebar-primary: hsl(220 14% 14%);
+  --sidebar-primary-foreground: hsl(0 0% 100%);
+  --sidebar-accent: hsl(220 10% 92%);
+  --sidebar-accent-foreground: hsl(220 14% 14%);
+  --sidebar-border: hsl(220 8% 86%);
+  --sidebar-ring: hsl(220 14% 14%);
+}
+
+/* ─── DARK MODE — Deep cool table; status stays VIVID (not desaturated) ─── */
+.dark {
+  --background: hsl(220 14% 7%);
+  --foreground: hsl(220 14% 92%);
+  --card: hsl(220 14% 10%);
+  --card-foreground: hsl(220 14% 92%);
+  --popover: hsl(220 14% 10%);
+  --popover-foreground: hsl(220 14% 92%);
+  --primary: hsl(220 14% 92%);
+  --primary-foreground: hsl(220 14% 10%);
+  --secondary: hsl(220 12% 16%);
+  --secondary-foreground: hsl(220 14% 92%);
+  --muted: hsl(220 10% 16%);
+  --muted-foreground: hsl(220 6% 64%);
+  --accent: hsl(220 12% 16%);
+  --accent-foreground: hsl(220 14% 92%);
+  --destructive: hsl(0 78% 58%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --border: hsl(220 10% 22%);
+  --input: hsl(220 10% 22%);
+  --ring: hsl(220 14% 92%);
+
+  --chart-1: hsl(142 70% 50%);
+  --chart-2: hsl(38 92% 62%);
+  --chart-3: hsl(220 80% 64%);
+  --chart-4: hsl(280 70% 70%);
+  --chart-5: hsl(0 78% 60%);
+
+  /* Dark-mode depth — neutral black falloff for table-piece feel */
+  --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.32);
+  --shadow-md:
+    0 1px 2px hsl(0 0% 0% / 0.32),
+    0 4px 12px hsl(0 0% 0% / 0.40);
+  --shadow-lg:
+    0 1px 2px hsl(0 0% 0% / 0.32),
+    0 4px 12px hsl(0 0% 0% / 0.40),
+    0 12px 32px hsl(0 0% 0% / 0.46);
+
+  /* Status colors stay VIVID in dark mode — celebration shouldn't dull */
+  --win: hsl(142 70% 50%);
+  --win-foreground: hsl(0 0% 100%);
+  --lose: hsl(0 78% 58%);
+  --lose-foreground: hsl(0 0% 100%);
+  --hint: hsl(38 92% 62%);
+  --hint-foreground: hsl(220 14% 10%);
+
+  --score-positive: hsl(142 70% 50%);
+  --score-negative: hsl(0 78% 58%);
+  --score-neutral: hsl(220 14% 92%);
+
+  --game-board: hsl(220 14% 9%);
+  --game-piece: hsl(220 14% 12%);
+
+  --sidebar-background: hsl(220 14% 7%);
+  --sidebar-foreground: hsl(220 14% 92%);
+  --sidebar-primary: hsl(220 14% 92%);
+  --sidebar-primary-foreground: hsl(220 14% 10%);
+  --sidebar-accent: hsl(220 12% 16%);
+  --sidebar-accent-foreground: hsl(220 14% 92%);
+  --sidebar-border: hsl(220 10% 22%);
+  --sidebar-ring: hsl(220 14% 92%);
+}

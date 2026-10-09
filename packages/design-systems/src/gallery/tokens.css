@@ -1,0 +1,218 @@
+/* ═══════════════════════════════════════════════════════════════
+   GALLERY DESIGN SYSTEM — Tokens
+
+   "The museum entrance." One masterpiece a day on a quiet gallery wall.
+   The artwork carries the color; the chrome stays a warm plaster wall
+   and disappears. One ownable accent — cinnabar vermilion — for the
+   few interactive/meaningful moments.
+
+   Three first-class themes: light (day gallery), dark (warm dimmed
+   night gallery — never #000), sepia (aged reading-room paper).
+
+   Type: Newsreader (editorial display serif) + Hanken Grotesk
+   (engraved-label sans) + IBM Plex Mono. Radius: 0.75rem (12px).
+
+   Values transcribed from
+   apps/dailycanvas/docs/design-prototypes/_ds/.../tokens/colors.css.
+   ═══════════════════════════════════════════════════════════════ */
+
+@import './fonts.css';
+
+/* ─── LIGHT — day gallery (warm plaster wall, warm ink) ─── */
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
+  --font-sans: 'Hanken Grotesk Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Newsreader Variable', ui-serif, Georgia, 'Times New Roman', serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --background: #f1ede6;
+  --foreground: #221e19;
+  --card: #fbfaf6;
+  --card-foreground: #221e19;
+  --popover: #ffffff;
+  --popover-foreground: #221e19;
+  --primary: #c2331b;
+  --primary-foreground: #fbf7f0;
+  --secondary: #e7e1d7;
+  --secondary-foreground: #221e19;
+  --muted: #e7e1d7;
+  --muted-foreground: #645b51;
+  --accent: #efd6cb;
+  --accent-foreground: #221e19;
+  --destructive: #8a3b2c;
+  --destructive-foreground: #fbf7f0;
+  --border: #ded7cb;
+  --input: #ded7cb;
+  --ring: #c2331b;
+  --radius: 0.75rem;
+
+  --chart-1: #c2331b;
+  --chart-2: #4f6b43;
+  --chart-3: #9a6b1e;
+  --chart-4: #8c8377;
+  --chart-5: #645b51;
+
+  --sidebar-background: #fbfaf6;
+  --sidebar-foreground: #221e19;
+  --sidebar-primary: #c2331b;
+  --sidebar-primary-foreground: #fbf7f0;
+  --sidebar-accent: #efd6cb;
+  --sidebar-accent-foreground: #221e19;
+  --sidebar-border: #ded7cb;
+  --sidebar-ring: #c2331b;
+
+  /* ── GALLERY EXTENSIONS (bespoke, first-class) ── */
+  --canvas-bg: #f1ede6;
+  --canvas-surface: #fbfaf6;
+  --canvas-raised: #ffffff;
+  --canvas-sunken: #e7e1d7;
+  --ink: #221e19;
+  --ink-muted: #645b51;
+  --ink-faint: #8c8377;
+  --ink-inverse: #f6f2ea;
+  --accent-strong: #a6240f;
+  --accent-soft: #efd6cb;
+  --accent-contrast: #fbf7f0;
+  --line: #ded7cb;
+  --line-strong: #ccc2b2;
+  --line-faint: #eae4da;
+  --good: #4f6b43;
+  --caution: #9a6b1e;
+  --danger: #8a3b2c;
+  --mat: #f7f4ed;
+  --mat-bevel: #e4ddd0;
+  --frame: #d8cfbf;
+  --wall-grain: rgba(120, 96, 60, 0.05);
+  --shadow-art: 0 2px 6px rgba(34, 24, 12, 0.1), 0 26px 50px -16px rgba(34, 24, 12, 0.38);
+  --ease-gallery: cubic-bezier(0.22, 0.61, 0.18, 1);
+}
+
+/* ─── DARK — warm dimmed night gallery (works glow; never #000) ─── */
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --background: #1b1714;
+  --foreground: #ece5d9;
+  --card: #221e19;
+  --card-foreground: #ece5d9;
+  --popover: #2a251f;
+  --popover-foreground: #ece5d9;
+  --primary: #ee6a4a;
+  --primary-foreground: #1b1714;
+  --secondary: #141110;
+  --secondary-foreground: #ece5d9;
+  --muted: #141110;
+  --muted-foreground: #a99e8d;
+  --accent: #3e251c;
+  --accent-foreground: #ece5d9;
+  --destructive: #ce7665;
+  --destructive-foreground: #1b1714;
+  --border: #332d26;
+  --input: #332d26;
+  --ring: #ee6a4a;
+
+  --chart-1: #ee6a4a;
+  --chart-2: #8fae7e;
+  --chart-3: #cfa15a;
+  --chart-4: #7b7163;
+  --chart-5: #a99e8d;
+
+  --sidebar-background: #221e19;
+  --sidebar-foreground: #ece5d9;
+  --sidebar-primary: #ee6a4a;
+  --sidebar-primary-foreground: #1b1714;
+  --sidebar-accent: #3e251c;
+  --sidebar-accent-foreground: #ece5d9;
+  --sidebar-border: #332d26;
+  --sidebar-ring: #ee6a4a;
+
+  --canvas-bg: #1b1714;
+  --canvas-surface: #221e19;
+  --canvas-raised: #2a251f;
+  --canvas-sunken: #141110;
+  --ink: #ece5d9;
+  --ink-muted: #a99e8d;
+  --ink-faint: #7b7163;
+  --ink-inverse: #1b1714;
+  --accent-strong: #fb7e5e;
+  --accent-soft: #3e251c;
+  --accent-contrast: #1b1714;
+  --line: #332d26;
+  --line-strong: #463f35;
+  --line-faint: #272118;
+  --good: #8fae7e;
+  --caution: #cfa15a;
+  --danger: #ce7665;
+  --mat: #2e2920;
+  --mat-bevel: #3c352a;
+  --frame: #43392c;
+  --wall-grain: rgba(0, 0, 0, 0.18);
+  --shadow-art: 0 2px 8px rgba(0, 0, 0, 0.5), 0 34px 64px -18px rgba(0, 0, 0, 0.74);
+  --ease-gallery: cubic-bezier(0.22, 0.61, 0.18, 1);
+}
+
+/* ─── SEPIA — aged reading-room paper ─── */
+[data-theme='sepia'] {
+  color-scheme: light;
+
+  --background: #e9dec9;
+  --foreground: #3b3020;
+  --card: #f2e9d6;
+  --card-foreground: #3b3020;
+  --popover: #f8f1e1;
+  --popover-foreground: #3b3020;
+  --primary: #b2361a;
+  --primary-foreground: #f4ecd9;
+  --secondary: #ddd0b5;
+  --secondary-foreground: #3b3020;
+  --muted: #ddd0b5;
+  --muted-foreground: #6f5e42;
+  --accent: #e8cfbc;
+  --accent-foreground: #3b3020;
+  --destructive: #8a3b2c;
+  --destructive-foreground: #f4ecd9;
+  --border: #d6c6a8;
+  --input: #d6c6a8;
+  --ring: #b2361a;
+
+  --chart-1: #b2361a;
+  --chart-2: #5c6b3c;
+  --chart-3: #8e6516;
+  --chart-4: #9a8a6a;
+  --chart-5: #6f5e42;
+
+  --sidebar-background: #f2e9d6;
+  --sidebar-foreground: #3b3020;
+  --sidebar-primary: #b2361a;
+  --sidebar-primary-foreground: #f4ecd9;
+  --sidebar-accent: #e8cfbc;
+  --sidebar-accent-foreground: #3b3020;
+  --sidebar-border: #d6c6a8;
+  --sidebar-ring: #b2361a;
+
+  --canvas-bg: #e9dec9;
+  --canvas-surface: #f2e9d6;
+  --canvas-raised: #f8f1e1;
+  --canvas-sunken: #ddd0b5;
+  --ink: #3b3020;
+  --ink-muted: #6f5e42;
+  --ink-faint: #9a8a6a;
+  --ink-inverse: #f4ecd9;
+  --accent-strong: #962a11;
+  --accent-soft: #e8cfbc;
+  --accent-contrast: #f4ecd9;
+  --line: #d6c6a8;
+  --line-strong: #c2b08e;
+  --line-faint: #e0d3b8;
+  --good: #5c6b3c;
+  --caution: #8e6516;
+  --danger: #8a3b2c;
+  --mat: #f4ecda;
+  --mat-bevel: #e2d6bc;
+  --frame: #cdbc9a;
+  --wall-grain: rgba(120, 86, 40, 0.06);
+  --shadow-art: 0 2px 6px rgba(70, 48, 18, 0.12), 0 26px 50px -16px rgba(70, 48, 18, 0.34);
+  --ease-gallery: cubic-bezier(0.22, 0.61, 0.18, 1);
+}
