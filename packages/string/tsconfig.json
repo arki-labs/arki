@@ -11,8 +11,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "rootDir": "./src",
-    "outDir": "./dist",
-    "tsBuildInfoFile": "./.cache/tsbuildinfo.json"
+    "outDir": "./dist"
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"]

@@ -10,10 +10,12 @@
     "resolveJsonModule": true,
     "moduleDetection": "force",
     "isolatedModules": true,
-    /** Keep TSC performant in monorepos */
-    "incremental": true,
+    /**
+     * No incremental builds: TypeScript 7.0 reuses a stale .tsbuildinfo after a dependency
+     * upgrade and reports no errors where a clean run reports them. A full check is fast enough.
+     */
+    "incremental": false,
     "disableSourceOfProjectReferenceRedirect": true,
-    "tsBuildInfoFile": "${configDir}/.cache/tsbuildinfo.json",
     /** Strictness */
     "strict": true,
     "noUncheckedIndexedAccess": true,

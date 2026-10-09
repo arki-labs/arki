@@ -6,8 +6,7 @@
     "declaration": false,
     "declarationMap": false,
     "sourceMap": false,
-    "allowImportingTsExtensions": false,
-    "tsBuildInfoFile": "${configDir}/.cache/tsbuildinfo.pwa.json"
+    "allowImportingTsExtensions": false
   },
   "include": ["src/pwa/index.ts", "src/vite.ts"],
   "exclude": ["node_modules"]

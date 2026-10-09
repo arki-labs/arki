@@ -8,8 +8,7 @@
     "allowImportingTsExtensions": false,
     "sourceMap": true,
     "rootDir": "./src",
-    "outDir": "./dist",
-    "tsBuildInfoFile": "./.cache/tsbuildinfo-build.json"
+    "outDir": "./dist"
   },
   "exclude": [
     "node_modules",
