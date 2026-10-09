@@ -1,6 +1,6 @@
 {
   "name": "@arki/math",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": false,
   "description": "Zero-dependency math toolkit — exact Decimal and Rational arithmetic on bigint, explicit rounding modes, float helpers that round what you typed, descriptive statistics, Intl-backed locale formatting and parsing, seeded random, and a fluent number wrapper.",
   "keywords": [
@@ -65,6 +65,11 @@
       "import": "./dist/decimal.js",
       "default": "./dist/decimal.js"
     },
+    "./decimal-math": {
+      "types": "./dist/decimal-math.d.ts",
+      "import": "./dist/decimal-math.js",
+      "default": "./dist/decimal-math.js"
+    },
     "./rational": {
       "types": "./dist/rational.d.ts",
       "import": "./dist/rational.js",
@@ -74,6 +79,11 @@
       "types": "./dist/stats.d.ts",
       "import": "./dist/stats.js",
       "default": "./dist/stats.js"
+    },
+    "./distributions": {
+      "types": "./dist/distributions.d.ts",
+      "import": "./dist/distributions.js",
+      "default": "./dist/distributions.js"
     },
     "./format": {
       "types": "./dist/format.d.ts",
@@ -94,6 +104,16 @@
       "types": "./dist/fluent.d.ts",
       "import": "./dist/fluent.js",
       "default": "./dist/fluent.js"
+    },
+    "./words": {
+      "types": "./dist/words.d.ts",
+      "import": "./dist/words.js",
+      "default": "./dist/words.js"
+    },
+    "./words/*": {
+      "types": "./dist/words/*.d.ts",
+      "import": "./dist/words/*.js",
+      "default": "./dist/words/*.js"
     },
     "./package.json": "./package.json"
   },

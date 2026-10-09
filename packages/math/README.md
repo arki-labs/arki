@@ -57,24 +57,26 @@ throw `TypeError`.
 Everything is a subpath import, tree-shakeable by concern. The root
 `@arki/math` re-exports it all.
 
-| Import                | What it gives you                                                                                                |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `@arki/math/decimal`  | `decimal()`, `Decimal` — exact decimals with retained scale                                                      |
-| `@arki/math/rational` | `ratio()`, `Rational` — exact fractions on `bigint`                                                              |
-| `@arki/math/number`   | `clamp`, `lerp`, `inverseLerp`, `remap`, `inRange`, `round`, `roundTo`, `approxEqual`                            |
-| `@arki/math/integer`  | `gcd`, `lcm`, `divmod` — `number` and `bigint` overloads                                                         |
-| `@arki/math/stats`    | `sum`, `mean`, `median`, `mode`, `percentile`, `variance`, `stddev`, `minMax`, `correlation`, `linearRegression` |
-| `@arki/math/format`   | `formatNumber`, `formatCurrency`, `formatPercent`, `formatCompact`, `formatFileSize`, `createFormatter`          |
-| `@arki/math/parse`    | `parseNumber`, `parseDecimal` — locale-aware, the parser `Intl` never shipped                                    |
-| `@arki/math/random`   | `createRandom(seed)`, `randomInt`, `shuffle`, `sample`, `pick`, …                                                |
-| `@arki/math/fluent`   | `num()` — immutable fluent wrapper for plain numbers                                                             |
-| `@arki/math/rounding` | `RoundingMode`, `ROUNDING_MODES`, `isRoundingMode`                                                               |
-| `@arki/math/errors`   | `MathError` and its subclasses                                                                                   |
+| Import                     | What it gives you                                                                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@arki/math/decimal`       | `decimal()`, `Decimal` — exact decimals with retained scale                                                                                 |
+| `@arki/math/rational`      | `ratio()`, `Rational` — exact fractions on `bigint`                                                                                         |
+| `@arki/math/number`        | `clamp`, `lerp`, `inverseLerp`, `remap`, `inRange`, `round`, `roundTo`, `approxEqual`                                                       |
+| `@arki/math/integer`       | `gcd`, `lcm`, `divmod` — `number` and `bigint` overloads                                                                                    |
+| `@arki/math/stats`         | `sum`, `mean`, `median`, `mode`, `percentile`, `variance`, `stddev`, `minMax`, `correlation`, `linearRegression`                            |
+| `@arki/math/distributions` | `normal`, `studentT`, `noncentralT`, `chiSquare`, `fisherF`, `exponential`, `uniform`, `binomial`, `poisson`, `erf`, `erfInv`, `gammaLn`, … |
+| `@arki/math/decimal-math`  | `sqrt`, `cbrt`, `nthRoot`, `exp`, `ln`, `log10`, `log2`, `log`, `pow`, `PI`, `E` — correctly rounded, on `Decimal`                          |
+| `@arki/math/words`         | `spellNumber`, `spellOrdinal`, `formatOrdinal`; locales `en`, `enGB` built in, `words/ro`, `/de`, `/fr`, `/es`, `/it` opt-in                |
+| `@arki/math/format`        | `formatNumber`, `formatCurrency`, `formatPercent`, `formatCompact`, `formatFileSize`, `createFormatter`                                     |
+| `@arki/math/parse`         | `parseNumber`, `parseDecimal` — locale-aware, the parser `Intl` never shipped                                                               |
+| `@arki/math/random`        | `createRandom(seed)`, `randomInt`, `shuffle`, `sample`, `pick`, …                                                                           |
+| `@arki/math/fluent`        | `num()` — immutable fluent wrapper for plain numbers                                                                                        |
+| `@arki/math/rounding`      | `RoundingMode`, `ROUNDING_MODES`, `isRoundingMode`                                                                                          |
+| `@arki/math/errors`        | `MathError` and its subclasses                                                                                                              |
 
 Deliberately **not** here: expression parsing, symbolic algebra, matrices,
-complex numbers, units, probability distributions, and arbitrary-precision
-`ln`/`exp`/trig. Those need their own engines; reach for mathjs or a
-numerics library.
+complex numbers, units, and arbitrary-precision trigonometry. Those need
+their own engines; reach for mathjs or a numerics library.
 
 ## Rounding
 
@@ -285,6 +287,83 @@ num(127.3).clamp(0, 100).roundTo(5).value(); // 100
 num(1234.5678).round(2).formatCurrency('EUR'); // '€1,234.57'
 num(0.1).toDecimal().plus('0.2').toString(); // '0.3'
 ```
+
+## Distributions
+
+Each factory returns an immutable object with `cdf`, `inv` (the quantile)
+and `pdf` or `pmf`, plus `mean` and `variance` (`undefined` where the moment
+does not exist, `Infinity` where it diverges). Parameters are validated up
+front; nothing returns `NaN`.
+
+```ts
+import { binomial, chiSquare, fisherF, noncentralT, normal, poisson, studentT } from '@arki/math/distributions';
+
+normal().inv(0.975); // 1.959963984540054
+normal(100, 15).cdf(130); // 0.9772498680518208
+studentT(10).inv(0.975); // 2.2281388519862744
+chiSquare(1).inv(0.95); // 3.841458820694124
+fisherF(3, 10).cdf(3.708265); // ≈ 0.95
+noncentralT(10, 1).cdf(2); // 0.8076115625 — power analysis without jstat
+binomial(10, 0.5).pmf(5); // 0.24609375
+poisson(3).cdf(2); // 0.42319008112684353
+```
+
+The special functions underneath — `erf`, `erfc`, `erfInv`, `gammaLn`,
+`regularizedGammaP`, `regularizedBeta` — are exported too. Accuracy: `cdf`
+≈ 1e-15 for the normal, ≤ 1e-9 round-trip for t/χ²/F quantiles, 5e-13 for
+the non-central t (verified by numerical integration).
+
+## Decimal math
+
+Transcendental results are never exact, so these take an explicit `scale`
+and round **correctly** — the result is the true value rounded once at that
+scale, computed with guard digits and bigint arithmetic. Default rounding
+here is `halfEven`. `sqrt`, `cbrt` and `nthRoot` without options stay
+exact-or-throw like the rest of `Decimal`.
+
+```ts
+import { exp, ln, log10, PI, pow, sqrt } from '@arki/math/decimal-math';
+
+sqrt('2.25').toString(); // '1.5'        exact
+sqrt(2); // throws RoundingNecessaryError
+sqrt(2, { scale: 30 }).toString(); // '1.414213562373095048801688724210'
+exp(1, { scale: 20 }).toString(); // '2.71828182845904523536'
+ln(10, { scale: 15 }).toString(); // '2.302585092994046'
+pow(2, '0.5', { scale: 10 }).toString(); // '1.4142135624'
+pow('1.5', 2).toString(); // '2.25'      integer exponents stay exact
+PI(50).toString(); // '3.14159265358979323846264338327950288419716939937511'
+```
+
+## Words
+
+Numbers as words and ordinals, with real grammar per language. English is
+built in; other languages are separate subpaths so you bundle only what you
+use. Pass the rule object — there is no global locale.
+
+```ts
+import { enGB, formatOrdinal, spellNumber, spellOrdinal } from '@arki/math/words';
+import { es } from '@arki/math/words/es';
+import { fr } from '@arki/math/words/fr';
+import { ro } from '@arki/math/words/ro';
+
+spellNumber(1234); // 'one thousand two hundred thirty-four'
+spellNumber(102, { locale: enGB }); // 'one hundred and two'
+spellNumber('3.14'); // 'three point one four'
+spellNumber(11, { until: 10 }); // '11'   Laravel-style thresholds
+spellOrdinal(21); // 'twenty-first'
+formatOrdinal(1001); // '1,001st'
+
+spellNumber(21000, { locale: ro }); // 'douăzeci și una de mii'
+spellNumber(2, { locale: ro, gender: 'feminine' }); // 'două'
+spellOrdinal(2, { locale: ro, gender: 'feminine' }); // 'a doua'
+formatOrdinal(21, { locale: ro }); // 'al 21-lea'
+spellNumber(81, { locale: fr }); // 'quatre-vingt-un'
+spellNumber(21000, { locale: es }); // 'veintiún mil'
+```
+
+Available: `en` (American), `enGB` (British "and"), `ro`, `de`, `fr`, `es`,
+`it`. Each locale object implements `NumberWordsLocale`; adding a language is
+one file against that contract.
 
 ## Errors
 

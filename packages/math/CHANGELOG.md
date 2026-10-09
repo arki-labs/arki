@@ -1,5 +1,21 @@
 # @arki/math
 
+## 0.0.2
+
+- `@arki/math/distributions` — normal, Student t, non-central t, chi-square,
+  F, exponential, uniform, binomial, Poisson (`pdf`/`pmf`, `cdf`, `inv`,
+  `mean`, `variance`) plus `erf`, `erfc`, `erfInv`, `gammaLn`,
+  `regularizedGammaP`, `regularizedBeta`. Verified against jstat and numerical
+  integration; ekuation no longer depends on jstat.
+- `@arki/math/decimal-math` — correctly rounded `sqrt`, `cbrt`, `nthRoot`,
+  `exp`, `ln`, `log10`, `log2`, `log`, fractional `pow`, `PI(scale)`,
+  `E(scale)` on `Decimal`, differential-tested against decimal.js.
+- `@arki/math/words` — `spellNumber`, `spellOrdinal`, `formatOrdinal` with
+  English built in (`en`, `enGB`) and opt-in locales `@arki/math/words/ro`,
+  `/de`, `/fr`, `/es`, `/it` carrying real grammar (gender agreement,
+  Romanian `de`, French `soixante-dix`, Spanish apocope, Italian and German
+  single-word compounds).
+
 ## 0.0.1
 
 Rebuilt from scratch as a zero-dependency library. The previous `./number`,

@@ -10,12 +10,17 @@ import {
   formatPercent,
   gcd,
   mean,
+  normal,
   num,
   parseNumber,
   ratio,
   round,
+  spellNumber,
+  spellOrdinal,
+  sqrt,
   stddev,
 } from '../dist/index.js';
+import { ro } from '../dist/words/ro.js';
 
 const checks = [
   ['decimal exact', decimal('0.1').plus('0.2').toString(), '0.3'],
@@ -35,6 +40,10 @@ const checks = [
   ['parse de-DE', parseNumber('1.234,56', { locale: 'de-DE' }), 1234.56],
   ['seeded random', createRandom(42).int(1, 6), createRandom(42).int(1, 6)],
   ['fluent', num(127.3).clamp(0, 100).roundTo(5).value(), 100],
+  ['distributions', round(normal().inv(0.975), 6), 1.959964],
+  ['decimal-math', sqrt(2, { scale: 10 }).toString(), '1.4142135624'],
+  ['words', spellOrdinal(21), 'twenty-first'],
+  ['words locale subpath', spellNumber(21_000, { locale: ro }), 'douăzeci și una de mii'],
 ];
 
 const runtime =
