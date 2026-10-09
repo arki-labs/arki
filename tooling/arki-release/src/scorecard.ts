@@ -65,6 +65,7 @@ import type {
   ScorecardPackageResult,
   ScorecardStatus,
   ScorecardSummary,
+  WaveBuildOutput,
 } from './types';
 
 const debug = debugFactory('arki:release:scorecard');
@@ -278,6 +279,7 @@ export async function runScorecard(
       fixtureRuns: fixtureRunsByPackage.get(item.name) ?? [],
       fullFixtureMatrix: opts.fullFixtureMatrix === true,
       dotProbe,
+      buildOutput: opts.config.waves.find(wave => wave.id === item.wave)?.buildOutput ?? 'dist',
     });
     results.push(result);
   }
@@ -322,6 +324,8 @@ async function evaluatePackage(input: {
   readonly fixtureRuns: readonly FixtureRun[];
   readonly fullFixtureMatrix: boolean;
   readonly dotProbe: DotProbeResult | undefined;
+  /** From the package's wave; decides what `build-output` requires. */
+  readonly buildOutput: WaveBuildOutput;
 }): Promise<ScorecardPackageResult> {
   const packageDir = path.dirname(path.join(input.cwd, input.item.manifestPath));
 
@@ -329,7 +333,7 @@ async function evaluatePackage(input: {
     metadata: evaluateMetadata(input.item.name, input.materializationErrors),
     privacy: evaluatePrivacy(input.item.name, input.leakHits),
     dependencies: evaluateDependencies(input.item.name, input.materializationErrors),
-    'build-output': await evaluateBuildOutput(input.item.name, packageDir),
+    'build-output': await evaluateBuildOutput(input.item.name, packageDir, input.buildOutput),
     packlist: evaluatePacklist(input.item.name, input.packResult, input.packError),
     docs: await evaluateDocs(input.item.name, packageDir),
     fixtures: evaluateFixtures(input.item.name, input.fixtureRuns, input.fullFixtureMatrix),
@@ -447,7 +451,11 @@ function evaluateDependencies(packageName: string, mErrors: readonly ReleaseErro
  * compiled `.d.ts` from `dist/`. Future Task 8 may relax this when a
  * package opts into source-only distribution.
  */
-async function evaluateBuildOutput(packageName: string, packageDir: string): Promise<ScorecardDimensionResult> {
+async function evaluateBuildOutput(
+  packageName: string,
+  packageDir: string,
+  mode: WaveBuildOutput = 'dist',
+): Promise<ScorecardDimensionResult> {
   const distDir = path.join(packageDir, 'dist');
   let files: readonly string[] = [];
   try {
@@ -484,7 +492,7 @@ async function evaluateBuildOutput(packageName: string, packageDir: string): Pro
       ],
     };
   }
-  if (!hasJs) {
+  if (!hasJs && mode === 'dist') {
     return {
       status: 'fail',
       details: 'dist/ has .d.ts but no compiled .js files.',
@@ -516,7 +524,10 @@ async function evaluateBuildOutput(packageName: string, packageDir: string): Pro
   }
   return {
     status: 'pass',
-    details: 'dist/ contains both compiled JavaScript and TypeScript declarations.',
+    details:
+      mode === 'source'
+        ? 'source-first wave: dist/ has TypeScript declarations; the shipped src/ files are the runtime entries (bundler required).'
+        : 'dist/ contains both compiled JavaScript and TypeScript declarations.',
     evidence: [],
   };
 }

@@ -1,9 +1,46 @@
 {
   "name": "@arki/ui",
-  "private": true,
-  "version": "0.1.2",
-  "sideEffects": false,
+  "version": "0.1.3",
+  "description": "React component library for ARKI apps — Base UI primitives styled with Tailwind v4 semantic tokens: forms, overlays, navigation, data display and charts.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/ui/base"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "react",
+    "ui",
+    "components",
+    "base-ui",
+    "tailwind"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
+  "private": false,
+  "files": [
+    "dist/**",
+    "!dist/**/*.spec.*",
+    "!dist/**/*.test.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
@@ -602,5 +639,9 @@
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react"
   },
-  "module:jsx": "src"
+  "module:jsx": "src",
+  "peerDependencies": {
+    "react": "catalog:react",
+    "react-dom": "catalog:react"
+  }
 }

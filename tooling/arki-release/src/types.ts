@@ -143,6 +143,15 @@ export type ReleaseWaveId = 'foundation' | 'dot-kernel' | 'infrastructure-adapte
  * A single release wave — a labelled allowlist of `@arki/*` package names
  * that the release pipeline is expected to publish together.
  */
+/**
+ * Publication shape of a wave's packages.
+ * - `dist` (default): compiled JavaScript + declarations in `dist/`.
+ * - `source`: declarations in `dist/`, TypeScript source as the runtime
+ *   entry (`exports` point at `src/`). Consumers need a bundler; the
+ *   package README must say so.
+ */
+export type WaveBuildOutput = 'dist' | 'source';
+
 export type ReleaseWave = {
   /** Stable identifier, e.g. `'foundation'`. */
   readonly id: ReleaseWaveId;
@@ -150,6 +159,8 @@ export type ReleaseWave = {
   readonly label: string;
   /** Ordered list of `@arki/*` package names belonging to this wave. */
   readonly packages: readonly string[];
+  /** How the packages ship; see {@link WaveBuildOutput}. Defaults to `dist`. */
+  readonly buildOutput?: WaveBuildOutput;
 };
 
 /**

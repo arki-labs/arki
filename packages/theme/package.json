@@ -1,9 +1,44 @@
 {
   "name": "@arki/theme",
-  "private": true,
-  "version": "0.2.0",
-  "sideEffects": false,
+  "version": "0.2.1",
+  "description": "Light / dark / system theme provider and no-flash init script for ARKI React apps.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/theme"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "react",
+    "theme",
+    "dark-mode"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
+  "private": false,
+  "files": [
+    "dist/**",
+    "!dist/**/*.spec.*",
+    "!dist/**/*.test.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",

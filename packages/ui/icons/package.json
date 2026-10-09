@@ -1,8 +1,44 @@
 {
   "name": "@arki/icons",
-  "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "description": "Icon sets for ARKI apps — Iconify, Phosphor, Simple Icons and flag packs behind one React entry point.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/ui/icons"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "react",
+    "icons",
+    "iconify",
+    "phosphor"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
+  "private": false,
+  "files": [
+    "dist/**",
+    "!dist/**/*.spec.*",
+    "!dist/**/*.test.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
@@ -78,5 +114,8 @@
   },
   "module:jsx": "src",
   "types": "./dist/src/index.d.ts",
-  "sideEffects": false
+  "sideEffects": false,
+  "peerDependencies": {
+    "react": "catalog:react"
+  }
 }

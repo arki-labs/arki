@@ -322,7 +322,14 @@ function validateWaves(raw: unknown): readonly ReleaseWave[] {
       }
       seenPackages.set(pkg, id);
     }
-    result.push({ id, label, packages: narrowed });
+    const buildOutput = rec['buildOutput'];
+    if (buildOutput !== undefined && buildOutput !== 'dist' && buildOutput !== 'source') {
+      throw new ReleaseConfigError(
+        CONFIG_ERROR_CODES.invalidShape,
+        `Wave \`${id}\` buildOutput must be 'dist' or 'source'.`,
+      );
+    }
+    result.push({ id, label, packages: narrowed, ...(buildOutput === undefined ? {} : { buildOutput }) });
   }
   return result;
 }

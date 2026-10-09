@@ -87,12 +87,15 @@ export const config: ReleaseConfig = {
     {
       id: 'frontend',
       label: 'Wave 4 — Frontend',
-      // Empty for v1.0 — every Wave 4 candidate (`@arki/design-systems`,
-      // `@arki/theme`, `@arki/icons`, `@arki/react-hooks`, `@arki/ui`)
-      // currently fails build-output / docs / privacy or depends on the
-      // still-private `@arki/react-hooks`. They are tracked here as a
-      // wave anchor; concrete promotion lands in v1.1.
-      packages: [],
+      // Promoted 2026-10-09 for the Drop Studio demo (external consumer of
+      // the storefront stack). Leaves first: theme / icons / react-hooks /
+      // design-systems have no @arki deps; `@arki/ui` depends on all four
+      // plus `@arki/date` (Wave 1).
+      packages: ['@arki/theme', '@arki/icons', '@arki/react-hooks', '@arki/design-systems', '@arki/ui'],
+      // Source-first: these ship TypeScript source as the runtime entry plus
+      // d.ts; every consumer is a bundler (Vite / Next / Start / Bun). Their
+      // READMEs say so. Compiled dist output is a later, separate decision.
+      buildOutput: 'source',
     },
     {
       id: 'specialized',
