@@ -5,6 +5,7 @@
 
 import type { z } from '@arki/contracts';
 
+import type { QueueConnection } from '../redis-connection.ts';
 import type { JobContext, JobDefinition, JobOptions } from './job.ts';
 import type { JobMiddleware, MiddlewareFunction } from './middleware.ts';
 import type { QueueConfig, QueueMeta } from './queue.ts';
@@ -57,7 +58,7 @@ export type QueueBuilder<TContext, TMeta extends QueueMeta = QueueMeta> = {
    * Create a queue instance that can register and run jobs
    */
   createQueue: (options: {
-    connection: string | { host: string; port: number; password?: string };
+    connection: QueueConnection;
     keyPrefix?: string;
     createContext: () => TContext | Promise<TContext>;
   }) => QueueInstance;

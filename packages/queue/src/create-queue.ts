@@ -15,12 +15,14 @@ import { FlowProducer, Queue, Worker } from 'bullmq';
 import type { z } from '@arki/contracts';
 
 import type { InternalFlowDefinition } from './flow-builder.ts';
+import type { QueueConnection } from './redis-connection.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
 import type { FlowDefinition, QueueInstance, ScheduleDefinition } from './types/builder.ts';
 import type { JobDefinition, JobHandler } from './types/job.ts';
 import type { QueueMeta } from './types/queue.ts';
 import { debugFlow, debugJob, debugRegister, debugSchedule, debugWorker } from './debug.ts';
 import { createJobContext, executeMiddlewareChain } from './middleware.ts';
+import { parseRedisConnection } from './redis-connection.ts';
 import { getWorkerBackoffStrategy, toBullMQBackoff } from './retry-strategies.ts';
 
 /**
@@ -35,7 +37,7 @@ type Registry = {
  * Queue instance options
  */
 export type QueueInstanceOptions<TContext> = {
-  connection: string | { host: string; port: number; password?: string };
+  connection: QueueConnection;
   keyPrefix?: string;
   createContext: () => TContext | Promise<TContext>;
 };
@@ -49,20 +51,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
 
   debugRegister('Creating queue instance with keyPrefix: %s', keyPrefix);
 
-  // Parse connection string or use connection object
-  const connectionConfig =
-    typeof connection === 'string'
-      ? (() => {
-          // Simple parsing of redis://host:port format
-          const url = new URL(connection);
-          debugRegister('Parsed Redis connection: %s:%d', url.hostname, Number.parseInt(url.port) || 6379);
-          return {
-            host: url.hostname,
-            port: Number.parseInt(url.port) || 6379,
-            password: url.password || undefined,
-          };
-        })()
-      : connection;
+  const connectionConfig = parseRedisConnection(connection);
 
   // Track registered items
   const registeredJobs = new Map<string, JobDefinition<unknown, unknown, TContext>>();
