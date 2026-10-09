@@ -1,12 +1,12 @@
 /// <reference types="./types.d.ts" />
 
 import * as path from 'node:path';
+import eslintCommentsPlugin from '@eslint-community/eslint-plugin-eslint-comments';
 import { includeIgnoreFile } from '@eslint/compat';
 import eslint from '@eslint/js';
 import checkFilePlugin from 'eslint-plugin-check-file';
 import drizzlePlugin from 'eslint-plugin-drizzle';
-import eslintCommentsPlugin from 'eslint-plugin-eslint-comments';
-import importPlugin from 'eslint-plugin-import';
+import importPlugin from 'eslint-plugin-import-x';
 import regexpPlugin from 'eslint-plugin-regexp';
 import tsdocPlugin from 'eslint-plugin-tsdoc';
 import turboPlugin from 'eslint-plugin-turbo';

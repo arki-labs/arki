@@ -78,4 +78,3 @@ declare module 'eslint-plugin-turbo' {
 
 declare module 'eslint-plugin-check-file';
 declare module 'eslint-plugin-drizzle';
-declare module 'eslint-plugin-eslint-comments';
