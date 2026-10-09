@@ -65,6 +65,7 @@ export const config: ReleaseConfig = {
         '@arki/string',
         '@arki/slugify',
         '@arki/clock',
+        '@arki/math',
       ],
     },
     {
