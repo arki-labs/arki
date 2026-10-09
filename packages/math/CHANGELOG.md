@@ -1,6 +1,6 @@
 # @arki/math
 
-## 0.1.0
+## 0.0.1
 
 Rebuilt from scratch as a zero-dependency library. The previous `./number`,
 `./fractions` and `./stat` entry points (thin re-exports of mathjs) are gone.
