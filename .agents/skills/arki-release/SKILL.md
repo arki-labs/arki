@@ -96,8 +96,8 @@ Patch bump (0.0.1 → 0.0.2): any change, breaking or not. Yes, this is anti-sem
 bun tooling/arki-release/src/cli.ts scorecard | tail -20
 
 # Compare source versions to what's on npm
-for p in assert clock contracts date env log resilience slugify string ts; do
-  s=$(python3 -c "import json; print(json.load(open('packages/$p/package.json' if '$p' != 'slugify' else 'packages/text/slugify/package.json'))['version'])")
+for p in assert clock contracts date env log resilience string ts; do
+  s=$(python3 -c "import json; print(json.load(open('packages/$p/package.json'))['version'])")
   n=$(npm view @arki/$p version 2>&1 | head -1)
   printf "%-25s source=%s  npm=%s\n" "@arki/$p" "$s" "$n"
 done

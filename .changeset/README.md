@@ -17,7 +17,7 @@ for the source of truth; trimmed for stable v1 per the doctrine
 
 1. **foundation** — `@arki/assert`, `@arki/contracts`, `@arki/log`,
    `@arki/env`, `@arki/ts`, `@arki/resilience`, `@arki/date`,
-   `@arki/string`, `@arki/slugify`, `@arki/clock`
+   `@arki/string`, `@arki/clock`
 2. **dot-kernel** — `@arki/dot`
 3. **infrastructure-adapters** — `@arki/db`, `@arki/kv`,
    `@arki/event-sourcing`, `@arki/http` (`fs`/`queue`/`auth`/`emails`

@@ -38,7 +38,6 @@
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/meter": "workspace:*",
-    "@arki/slugify": "workspace:*",
     "@better-auth/expo": "catalog:better-auth",
     "@orpc/server": "catalog:backend",
     "@trigger.dev/sdk": "catalog:trigger",

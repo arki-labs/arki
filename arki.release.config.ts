@@ -63,7 +63,6 @@ export const config: ReleaseConfig = {
         '@arki/resilience',
         '@arki/date',
         '@arki/string',
-        '@arki/slugify',
         '@arki/clock',
         '@arki/math',
       ],
