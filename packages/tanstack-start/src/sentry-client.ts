@@ -16,6 +16,7 @@ import type { Integration } from '@sentry/core';
 import * as Sentry from '@sentry/react';
 
 import { registerSentryCapture } from './sentry-bridge';
+import { sentryDataCollection } from './sentry-data-collection';
 
 export type InitSentryClientOptions = {
   /**
@@ -85,7 +86,7 @@ export function initSentryClient(options: InitSentryClientOptions): void {
       tracesSampleRate,
       replaysSessionSampleRate,
       replaysOnErrorSampleRate,
-      sendDefaultPii: false,
+      dataCollection: sentryDataCollection,
     });
   } catch (error) {
     // Malformed DSN or other init failure — stay off rather than crash the app.

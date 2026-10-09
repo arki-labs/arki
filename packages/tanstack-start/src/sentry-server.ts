@@ -22,6 +22,7 @@ import type { Integration } from '@sentry/core';
 import * as Sentry from '@sentry/node';
 
 import { registerSentryCapture } from './sentry-bridge';
+import { sentryDataCollection } from './sentry-data-collection';
 
 export type InitSentryServerOptions = {
   /**
@@ -59,7 +60,7 @@ export function initSentryServer(options: InitSentryServerOptions): void {
       release,
       integrations: [...extraIntegrations],
       tracesSampleRate,
-      sendDefaultPii: false,
+      dataCollection: sentryDataCollection,
     });
   } catch (error) {
     // Malformed DSN or other init failure — stay off rather than crash boot.
