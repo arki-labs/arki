@@ -1,0 +1,59 @@
+/**
+ * Shared fixture for the package tests: an in-memory PGlite, the journal
+ * tables, and a small `orders` domain. Excluded from the build.
+ */
+import { PGlite } from '@electric-sql/pglite';
+import { pushSchema } from 'drizzle-kit/api-postgres';
+import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
+import { drizzle } from 'drizzle-orm/pglite';
+import { z } from 'zod';
+
+import { initJournal } from './journal.js';
+import { journalTables } from './pg.js';
+
+export type OrderId = `ord_${string}`;
+export const orderId = (n: number): OrderId => `ord_${n}`;
+
+export const orders = pgTable('orders', {
+  id: varchar('id', { length: 256 }).primaryKey().$type<OrderId>(),
+  customerId: varchar('customer_id', { length: 256 }).notNull(),
+  total: integer('total').notNull(),
+  status: varchar('status', { enum: ['placed', 'paid', 'cancelled'] }).notNull(),
+  note: varchar('note', { length: 256 }).notNull().default('none'),
+  version: integer('version').notNull().default(0),
+});
+
+export const customerOrderCounts = pgTable('customer_order_counts', {
+  customerId: varchar('customer_id', { length: 256 }).primaryKey(),
+  placed: integer('placed').notNull().default(0),
+});
+
+export const tables = journalTables();
+
+export const j = initJournal({ meta: z.object({ actorId: z.string().min(1) }) });
+
+export const OrderPlaced = j.event('OrderPlaced', z.object({ customerId: z.string().min(1), total: z.int().positive() }));
+export const OrderPaid = j.event('OrderPaid', z.object({ amount: z.int().positive() }));
+export const OrderNoted = j.event('OrderNoted', z.object({ note: z.string().min(1) }));
+export const OrderCancelled = j.event('OrderCancelled', z.object({ reason: z.string().min(1) }));
+export const Unrelated = j.event('Unrelated', z.object({}));
+
+export const order = j
+  .entity('order', orders)
+  .create(OrderPlaced, e => ({ customerId: e.data.customerId, total: e.data.total, status: 'placed' }))
+  // Spread style: still allowed, the patch is merged onto the state.
+  .on(OrderPaid, row => ({ ...row, status: 'paid' }))
+  // Patch style: only the column that changed.
+  .on(OrderNoted, (_row, e) => ({ note: e.data.note }))
+  .on(OrderCancelled, () => null);
+
+export async function openDb() {
+  const client = new PGlite('memory://');
+  await client.waitReady;
+  const db = drizzle({ client });
+  const { apply } = await pushSchema({ ...tables, orders, customerOrderCounts }, db);
+  await apply();
+  return { db, client };
+}
+
+export const meta = { actorId: 'usr_test' };

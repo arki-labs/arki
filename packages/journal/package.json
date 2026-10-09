@@ -1,0 +1,98 @@
+{
+  "name": "@arki/journal",
+  "version": "0.1.0",
+  "private": false,
+  "description": "A journal for Drizzle entities: every change is an immutable event row, the current state is a normal table row, and both are written in one transaction. Inline projections run in the same transaction; effects run after commit from a job table.",
+  "keywords": [
+    "arki",
+    "typescript",
+    "journal",
+    "events",
+    "event-log",
+    "drizzle",
+    "postgres",
+    "projection",
+    "jobs"
+  ],
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/journal"
+  },
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./pg": {
+      "types": "./dist/pg.d.ts",
+      "import": "./dist/pg.js",
+      "default": "./dist/pg.js"
+    },
+    "./dot": {
+      "types": "./dist/dot.d.ts",
+      "import": "./dist/dot.js",
+      "default": "./dist/dot.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:runtimes": "bun run build && node scripts/smoke.mjs && bun scripts/smoke.mjs && bun build scripts/smoke.mjs --target=browser --outdir=.cache/browser-check && if command -v deno >/dev/null; then deno run --no-config --allow-env=DEBUG .cache/browser-check/smoke.js; else echo 'deno not installed: skipped'; fi && node scripts/smoke-browser.mjs",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/log": "workspace:*",
+    "@paralleldrive/cuid2": "catalog:utilities",
+    "drizzle-orm": "catalog:drizzle",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "@arki/dot": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@arki/dot": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@arki/dot": "workspace:*",
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@electric-sql/pglite": "catalog:",
+    "@testcontainers/postgresql": "catalog:testing",
+    "@types/node": "catalog:node",
+    "@types/pg": "catalog:drizzle",
+    "drizzle-kit": "catalog:drizzle",
+    "pg": "catalog:drizzle"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
