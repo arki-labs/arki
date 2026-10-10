@@ -20,6 +20,8 @@ import { journalTables } from '@arki/journal/pg';
 export const j = initJournal({ meta: z.object({ actorId: z.string() }) });
 // Or, to type `tx` everywhere with the app's own Drizzle transaction type:
 // export const j = initJournal.tx<AppTx>().create({ meta: ... });
+// And to type `db` inside effects with the app's own database type:
+// export const j = initJournal.tx<AppTx>().db<AppDb>().create({ meta: ... });
 
 // src/features/orders/tables.ts — a normal table with `id` and `version`.
 // A table keyed by another column: j.entity('profile', profiles, { id: 'accountId' }).
@@ -66,7 +68,8 @@ export const customerStats = j.projection('customer-stats', order, {
       }),
 });
 
-// Async lane: after commit, at least once. Dependencies come in by closure.
+// Async lane: after commit, at least once. The context also has `db`, the root database.
+// Other dependencies come in by closure.
 export const orderMail = (mailer: Mailer) =>
   j.effect('order-mail', order, {
     OrderPaid: (e, { jobId }) => mailer.send({ template: 'order-paid', orderId: e.entityId, idempotencyKey: jobId }),
@@ -83,6 +86,7 @@ export const pay = protectedProcedure
   .handler(({ context, input }) => journal.run(db, payOrder, input, { actorId: context.user.id }));
 
 // Boot. One worker per process runs the async lane. Root database only, never a transaction.
+// `journal.run(db, ...)` wakes it after each commit that queued a job.
 const worker = journal.worker(db);
 await worker.start();
 ```
@@ -173,7 +177,7 @@ Savepoints are a stack. Two `write` or `run` calls open on one transaction at th
 
 ### The app's transaction type
 
-`initJournal({ meta })` types the command's `tx`, `write`'s `tx`, `events`' `{ tx }` and projection handlers' `tx` with the structural `Db`. To use the app's own Drizzle transaction type instead, so repositories typed against it fit, declare it once: `initJournal.tx<AppTx>().create({ meta })`. `tx` is a type-only step. `run` and `rerun` then take any database that opens `AppTx` transactions; `drain` and `worker` keep taking the root database.
+`initJournal({ meta })` types the command's `tx`, `write`'s `tx`, `events`' `{ tx }` and projection handlers' `tx` with the structural `Db`. To use the app's own Drizzle transaction type instead, so repositories typed against it fit, declare it once: `initJournal.tx<AppTx>().create({ meta })`. `tx` is a type-only step. `run` and `rerun` then take any database that opens `AppTx` transactions; `drain` and `worker` keep taking the root database. To name the root database type as well, see Effects.
 
 ### Reducers
 
@@ -204,6 +208,34 @@ So changing how an existing event is reduced changes what `repair` writes for ex
 For a new meaning, add a new event type. Leave the old reducer as it is.
 
 Adding an optional field, or one with a default, is safe. Old rows still parse.
+
+## Effects
+
+An effect runs after the commit, at least once, from a row in `journal_jobs`. A handler gets the event and a context: `(e, { jobId, signal, db })`.
+
+- `jobId` stays the same across retries. Pass it on as an idempotency key.
+- `signal` is the `signal` given to `drain`.
+- `db` is the root database given to `drain` or `worker`: the same object. Use it to read committed rows. The effect needs no closure for the database.
+
+`db` has the library's `RootDb` type unless the app names its own database type once: `initJournal.db<AppDb>().create({ meta })`. Then `ctx.db.query.orders` is typed, and `drain` and `worker` need an `AppDb`. They still refuse a transaction. `.tx<AppTx>()` and `.db<AppDb>()` are both optional type-only steps and chain in either order: `initJournal.tx<AppTx>().db<AppDb>().create({ meta })`.
+
+## The worker
+
+`journal.worker(db, { pollMs, limit })` is a loop around `drain`. When a pass finds no job it sleeps `pollMs` (1000 by default). `stop()` finishes the current batch. A wake ends the sleep, so an effect does not wait for the next poll:
+
+- `journal.run(db, ...)` on the root database wakes by itself. The library committed the transaction, so it knows when. It wakes only when the command queued a job.
+- With your own transaction (`journal.run(tx, ...)` or `journal.write(tx, ...)`) nothing wakes. The library cannot see your commit. Call `journal.wake()` after you commit.
+- `journal.wake()` wakes every running worker this journal started in this process. `worker.wake()` wakes one worker. With no running worker a wake does nothing.
+- A wake that arrives while a pass is running is not lost: one more pass runs right after. Many wakes make one extra pass.
+- The wake works inside one process only. Other processes pick jobs up by polling.
+
+```ts
+await db.transaction(async tx => {
+  await journal.run(tx, payOrder, input, meta);
+  await tx.insert(auditLog).values(entry);
+});
+journal.wake(); // after the commit
+```
 
 ## Tables
 

@@ -455,7 +455,7 @@ describe('write', () => {
       meta,
       recordedAt: new Date(),
     };
-    await expect(silent.run(event, { jobId: 'job_x', signal: new AbortController().signal })).rejects.toThrow(
+    await expect(silent.run(event, { jobId: 'job_x', signal: new AbortController().signal, db })).rejects.toThrow(
       'no handler for "toString"',
     );
     await expect(noop.run(db, event)).resolves.toBeUndefined();

@@ -96,7 +96,7 @@ export type VerifyResult<Tbl extends EntityTable, Key extends string = 'id'> =
   | { readonly ok: true }
   | { readonly ok: false; readonly expected: Replayed<Tbl, Key> | null; readonly actual: Row<Tbl> | null };
 
-export type Journal<Meta extends z.ZodObject, Tx extends Transaction<Tx> = Db> = {
+export type Journal<Meta extends z.ZodObject, Tx extends Transaction<Tx> = Db, AppDb extends RootDb = RootDb> = {
   /** Append events, run reducers, save the row, run projections, queue jobs. All inside `tx`. */
   write<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     tx: Tx,
@@ -108,6 +108,7 @@ export type Journal<Meta extends z.ZodObject, Tx extends Transaction<Tx> = Db> =
    * Parse `input` and `meta`, then call the command's handler inside one
    * transaction of `source`. A root database opens a transaction; a transaction
    * opens a savepoint. Returns what the handler returns. Errors pass through.
+   * On a root database, a run that queued a job calls `wake()` after the commit.
    */
   run<S extends z.ZodType, R>(
     source: Transaction<Tx>,
@@ -141,9 +142,14 @@ export type Journal<Meta extends z.ZodObject, Tx extends Transaction<Tx> = Db> =
     opts?: { readonly from?: number; readonly batch?: number },
   ): Promise<{ readonly events: number }>;
   /** Run one batch of due jobs. Returns how many jobs were claimed. Root database only. */
-  drain(db: RootDb, opts?: { readonly limit?: number; readonly signal?: AbortSignal }): Promise<number>;
+  drain(db: AppDb & RootDb, opts?: { readonly limit?: number; readonly signal?: AbortSignal }): Promise<number>;
   /** A loop around `drain`. `stop()` finishes the current batch. Root database only. */
-  worker(db: RootDb, opts?: { readonly pollMs?: number; readonly limit?: number }): Worker;
+  worker(db: AppDb & RootDb, opts?: { readonly pollMs?: number; readonly limit?: number }): Worker;
+  /**
+   * Wake every running worker this journal started in this process. Call it
+   * after committing a transaction of your own that ran commands. No worker: nothing happens.
+   */
+  wake(): void;
   readonly catalog: {
     readonly entities: readonly EntityInfo[];
     readonly projections: readonly string[];
@@ -151,7 +157,7 @@ export type Journal<Meta extends z.ZodObject, Tx extends Transaction<Tx> = Db> =
   };
 };
 
-export type JournalInit<Meta extends z.ZodObject, Tx extends Transaction<Tx> = Db> = {
+export type JournalInit<Meta extends z.ZodObject, Tx extends Transaction<Tx> = Db, AppDb extends RootDb = RootDb> = {
   event<T extends string, S extends z.ZodType>(type: T, schema: S): EventDef<T, S>;
   /** The key column is `id`. */
   entity<K extends string, Tbl extends IdTable>(
@@ -186,13 +192,13 @@ export type JournalInit<Meta extends z.ZodObject, Tx extends Transaction<Tx> = D
   effect<E extends AnyEntity<z.output<Meta>>>(
     name: string,
     entity: E | readonly E[],
-    on: NoInfer<EffectHandlers<E, z.output<Meta>>>,
-  ): Effect<z.output<Meta>>;
+    on: NoInfer<EffectHandlers<E, z.output<Meta>, AppDb>>,
+  ): Effect<z.output<Meta>, AppDb>;
   create(config: {
     readonly tables: JournalTables;
     readonly projections?: readonly Projection<z.output<Meta>, Tx>[];
-    readonly effects?: readonly Effect<z.output<Meta>>[];
-  }): Journal<Meta, Tx>;
+    readonly effects?: readonly Effect<z.output<Meta>, AppDb>[];
+  }): Journal<Meta, Tx, AppDb>;
 };
 
 const emptyMeta = z.object({});
@@ -205,13 +211,15 @@ const BACKOFF_CAP_MS = 300_000;
 const DEFAULT_POLL_MS = 1000;
 const PG_UNIQUE_VIOLATION = '23505';
 
-function initFor<Tx extends Transaction<Tx>>() {
-  function init(): JournalInit<EmptyMeta, Tx>;
-  function init<Meta extends z.ZodObject>(options: { readonly meta: Meta }): JournalInit<Meta, Tx>;
+function initFor<Tx extends Transaction<Tx>, AppDb extends RootDb>() {
+  function init(): JournalInit<EmptyMeta, Tx, AppDb>;
+  function init<Meta extends z.ZodObject>(options: { readonly meta: Meta }): JournalInit<Meta, Tx, AppDb>;
   function init<Meta extends z.ZodObject>(options?: {
     readonly meta?: Meta;
-  }): JournalInit<Meta, Tx> | JournalInit<EmptyMeta, Tx> {
-    return options?.meta === undefined ? createInit<EmptyMeta, Tx>(emptyMeta) : createInit<Meta, Tx>(options.meta);
+  }): JournalInit<Meta, Tx, AppDb> | JournalInit<EmptyMeta, Tx, AppDb> {
+    return options?.meta === undefined
+      ? createInit<EmptyMeta, Tx, AppDb>(emptyMeta)
+      : createInit<Meta, Tx, AppDb>(options.meta);
   }
   return init;
 }
@@ -220,10 +228,19 @@ function initFor<Tx extends Transaction<Tx>>() {
  * `initJournal({ meta })` types `write`'s `tx`, `events`' `{ tx }` and
  * projection handlers with the structural `Db`. `initJournal.tx<AppTx>()
  * .create({ meta })` uses the app's own Drizzle transaction type instead, so
- * repositories typed against it fit. `tx` is a type-only step.
+ * repositories typed against it fit. `initJournal.db<AppDb>()` names the
+ * app's root database type: effects get it as `ctx.db`, and `drain` and
+ * `worker` then need it. Both are type-only steps and chain in either order.
  */
-export const initJournal = Object.assign(initFor<Db>(), {
-  tx: <Tx extends Transaction<Tx>>() => ({ create: initFor<Tx>() }),
+export const initJournal = Object.assign(initFor<Db, RootDb>(), {
+  tx: <Tx extends Transaction<Tx>>() => ({
+    create: initFor<Tx, RootDb>(),
+    db: <AppDb extends RootDb>() => ({ create: initFor<Tx, AppDb>() }),
+  }),
+  db: <AppDb extends RootDb>() => ({
+    create: initFor<Db, AppDb>(),
+    tx: <Tx extends Transaction<Tx>>() => ({ create: initFor<Tx, AppDb>() }),
+  }),
 });
 
 /** A table with a column called `id`. The check is real; the guard narrows to `IdTable`. */
@@ -232,7 +249,9 @@ function hasIdColumn<Tbl extends EntityTable>(table: Tbl): table is Tbl & IdTabl
   return is(columns.id, PgColumn);
 }
 
-function createInit<Meta extends z.ZodObject, Tx extends Transaction<Tx>>(metaSchema: Meta): JournalInit<Meta, Tx> {
+function createInit<Meta extends z.ZodObject, Tx extends Transaction<Tx>, AppDb extends RootDb>(
+  metaSchema: Meta,
+): JournalInit<Meta, Tx, AppDb> {
   type MetaOut = z.output<Meta>;
   function entity<K extends string, Tbl extends IdTable>(
     kind: K,
@@ -261,7 +280,7 @@ function createInit<Meta extends z.ZodObject, Tx extends Transaction<Tx>>(metaSc
     projection: (name, entity, on) => defineProjection(name, entity, on),
     effect: (name, entity, on) => defineEffect(name, entity, on),
     create: config =>
-      createJournal<Meta, Tx>(metaSchema, config.tables, config.projections ?? [], config.effects ?? []),
+      createJournal<Meta, Tx, AppDb>(metaSchema, config.tables, config.projections ?? [], config.effects ?? []),
   };
 }
 
@@ -571,15 +590,17 @@ export function sortedByVersion<Row extends { readonly version: number }>(rows: 
   return rows.toSorted((a, b) => a.version - b.version);
 }
 
-function createJournal<Meta extends z.ZodObject, Tx extends Transaction<Tx>>(
+function createJournal<Meta extends z.ZodObject, Tx extends Transaction<Tx>, AppDb extends RootDb>(
   metaSchema: Meta,
   tables: JournalTables,
   projections: readonly Projection<z.output<Meta>, Tx>[],
-  effects: readonly Effect<z.output<Meta>>[],
-): Journal<Meta, Tx> {
+  effects: readonly Effect<z.output<Meta>, AppDb>[],
+): Journal<Meta, Tx, AppDb> {
   type MetaOut = z.output<Meta>;
   type Rec = Recorded<string, unknown, MetaOut>;
   const { events: eventsTable, jobs: jobsTable } = tables;
+  /** One wake function per running worker this journal started. */
+  const wakers = new Set<() => void>();
 
   assertUniqueNames('effect', effects);
   assertUniqueNames('projection', projections);
@@ -755,6 +776,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends Transaction<Tx>>(
     id: EntityId<Tbl, Key>,
     metaOf: () => MetaOut,
     events: WriteEvents<Tbl, E, Tx>,
+    onJobs?: (count: number) => void,
   ): Promise<WriteResult<Tbl, E, MetaOut, Key>> => {
     return oneAtATime(tx, `write to ${entity.kind} ${id}`, async () => {
       assertExactId(entity, id);
@@ -898,7 +920,10 @@ function createJournal<Meta extends z.ZodObject, Tx extends Transaction<Tx>>(
             .filter(effect => effect.types.has(event.type) && effect.entities.some(e => e.kind === entity.kind))
             .map(effect => ({ id: jobId(), eventSeq: event.seq, effect: effect.name })),
         );
-        if (jobs.length > 0) await sp.insert(jobsTable).values(jobs);
+        if (jobs.length > 0) {
+          await sp.insert(jobsTable).values(jobs);
+          onJobs?.(jobs.length);
+        }
 
         debugWrite(
           '%s %s: v%d -> v%d, %d events, %d jobs',
@@ -918,12 +943,14 @@ function createJournal<Meta extends z.ZodObject, Tx extends Transaction<Tx>>(
    * `journal.run` and `context.run` share this. `metaOf` gives the parsed meta:
    * the root call parses it, a child inherits it. It runs inside the one-at-a-time
    * guard, so a bad meta on a busy transaction waits like any other rejection.
+   * `onJobs` hears how many jobs each write queued, in this command and its children.
    */
   const runCommand = <S extends z.ZodType, R>(
     source: Transaction<Tx>,
     command: Command<S, R, MetaOut, Tx>,
     input: z.input<S>,
     metaOf: () => Promise<MetaOut>,
+    onJobs: (count: number) => void,
   ): Promise<Awaited<R>> =>
     oneAtATime(source, `command "${command.name}"`, async (): Promise<Awaited<R>> => {
       const meta = await metaOf();
@@ -946,8 +973,8 @@ function createJournal<Meta extends z.ZodObject, Tx extends Transaction<Tx>>(
         const context: CommandContext<MetaOut, Tx> = {
           tx,
           meta,
-          write: (entity, id, events) => track(writeWith(tx, entity, id, () => meta, events)),
-          run: (child, childInput) => track(runCommand(tx, child, childInput, () => Promise.resolve(meta))),
+          write: (entity, id, events) => track(writeWith(tx, entity, id, () => meta, events, onJobs)),
+          run: (child, childInput) => track(runCommand(tx, child, childInput, () => Promise.resolve(meta), onJobs)),
         };
         let result: Awaited<R>;
         try {
@@ -969,7 +996,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends Transaction<Tx>>(
       });
     });
 
-  const journal: Journal<Meta, Tx> = {
+  const journal: Journal<Meta, Tx, AppDb> = {
     write(tx, entity, id, input) {
       return writeWith(
         tx,
@@ -985,11 +1012,25 @@ function createJournal<Meta extends z.ZodObject, Tx extends Transaction<Tx>>(
     },
 
     run(source, command, input, meta) {
-      return runCommand(source, command, input, async () => {
-        const parsed = await metaSchema.parseAsync(meta);
-        // No entity yet: the error names the command instead.
-        assertRoundTrips(metaSchema, parsed, 'command', command.name, 'meta');
-        return parsed;
+      let queued = 0;
+      return runCommand(
+        source,
+        command,
+        input,
+        async () => {
+          const parsed = await metaSchema.parseAsync(meta);
+          // No entity yet: the error names the command instead.
+          assertRoundTrips(metaSchema, parsed, 'command', command.name, 'meta');
+          return parsed;
+        },
+        count => {
+          queued += count;
+        },
+      ).then(result => {
+        // The root database has committed by now. Inside a caller's transaction
+        // only the caller knows when the commit happens, so the caller wakes.
+        if (queued > 0 && !is(source, PgAsyncTransaction)) journal.wake();
+        return result;
       });
     },
 
@@ -1124,7 +1165,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends Transaction<Tx>>(
           if (effect === undefined) throw new Error(`effect "${job.effect}" is not registered`);
           if (eventRow === undefined) throw new Error(`event seq ${job.eventSeq} not found`);
           const event = decode(eventRow, schemaFor(effect.entities, eventRow.kind, eventRow.type), eventRow.entityId);
-          await effect.run(event, { jobId: job.id, signal });
+          await effect.run(event, { jobId: job.id, signal, db });
           await db
             .delete(jobsTable)
             .where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
@@ -1158,47 +1199,65 @@ function createJournal<Meta extends z.ZodObject, Tx extends Transaction<Tx>>(
       const pollMs = opts?.pollMs ?? DEFAULT_POLL_MS;
       let running = false;
       let loop: Promise<void> = Promise.resolve();
-      let wake: (() => void) | undefined;
+      let endSleep: (() => void) | undefined;
+      // A wake that arrived during a pass. That pass may have looked before the
+      // commit that caused the wake, so one more pass follows it.
+      let woken = false;
       const sleep = () =>
         new Promise<void>(resolve => {
           const timer = setTimeout(() => {
-            wake = undefined;
+            endSleep = undefined;
             resolve();
           }, pollMs);
-          wake = () => {
+          endSleep = () => {
             clearTimeout(timer);
-            wake = undefined;
+            endSleep = undefined;
             resolve();
           };
         });
-      // `stop()` flips `running` from another call while `run` is awaiting.
+      // `stop()` and `wake()` flip these from another call while `run` is awaiting.
       const isRunning = () => running;
+      const isWoken = () => woken;
       const run = async () => {
         while (isRunning()) {
+          woken = false;
           let processed = 0;
           try {
             processed = await journal.drain(db, { limit: opts?.limit });
           } catch (error) {
             debugWorker('drain failed: %s', errorText(error));
           }
-          if (isRunning() && processed === 0) await sleep();
+          if (isRunning() && processed === 0 && !isWoken()) await sleep();
         }
+      };
+      const wake = () => {
+        if (!running) return;
+        woken = true;
+        endSleep?.();
       };
       return {
         async start() {
           if (running) return;
           running = true;
+          wakers.add(wake);
           debugWorker('start (poll %dms)', pollMs);
           loop = run();
           await Promise.resolve();
         },
         async stop() {
           running = false;
-          wake?.();
+          // eslint-disable-next-line drizzle/enforce-delete-with-where -- Set#delete, not a Drizzle query
+          wakers.delete(wake);
+          endSleep?.();
           await loop;
           debugWorker('stopped');
         },
+        wake,
       };
+    },
+
+    wake() {
+      for (const wake of wakers) wake();
     },
 
     catalog: {

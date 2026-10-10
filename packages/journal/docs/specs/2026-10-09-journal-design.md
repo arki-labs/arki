@@ -57,6 +57,7 @@ import { initJournal } from '@arki/journal';
 
 export const j = initJournal({ meta: z.object({ actorId: userId.schema }) });
 // Or: initJournal.tx<AppTx>().create({ meta }) — types `tx` everywhere with the app's transaction type.
+// Or: initJournal.tx<AppTx>().db<AppDb>().create({ meta }) — also types `db` inside effects.
 
 // src/features/orders/tables.ts — a normal table with `id` and `version`.
 // A table keyed by another column: j.entity('profile', profiles, { id: 'accountId' }).
@@ -91,7 +92,8 @@ export const customerStats = j.projection('customer-stats', order, {
       }),
 });
 
-// Async lane: after commit, at least once. Dependencies come in by closure.
+// Async lane: after commit, at least once. The context also has `db`, the root database.
+// Other dependencies come in by closure.
 export const orderMail = (mailer: Mailer) =>
   j.effect('order-mail', order, {
     OrderPaid: (e, { jobId }) => mailer.send({ template: 'order-paid', orderId: e.entityId, idempotencyKey: jobId }),
@@ -136,6 +138,9 @@ Export paths: `.` (portable core), `./pg` (table definitions only), `./dot` (opt
 function initJournal<Meta extends z.ZodObject>(options?: { meta?: Meta }): JournalInit<Meta, Db>;
 // Type-only step: the app's Drizzle transaction type. `Tx` is `Db` without it.
 initJournal.tx<Tx>().create<Meta>(options?: { meta?: Meta }): JournalInit<Meta, Tx>;
+// Type-only step: the app's root database type. Effects get it as `ctx.db`; `drain` and `worker` need it. `AppDb` is `RootDb` without it.
+initJournal.db<AppDb>().create<Meta>(options?: { meta?: Meta }): JournalInit<Meta, Db, AppDb>;
+// The two steps chain in either order: initJournal.tx<Tx>().db<AppDb>().create({ meta }).
 
 type JournalInit<Meta, Tx> = {
   event<T extends string, D extends z.ZodType>(type: T, data: D): EventDef<T, D>;
@@ -171,6 +176,7 @@ type OnRow<Tbl, Key, Created> = Replayed<Tbl, Key> & Required<Pick<NewRow<Tbl, K
 type Patch<Tbl, Key> = Partial<NewRow<Tbl, Key>>; // merged onto the state; a key set to undefined is unchanged
 type RootDb = Db & { rollback?: undefined }; // the database, never a transaction
 type Transaction<Tx> = Db & { transaction<T>(run: (tx: Tx) => Promise<T>): Promise<T> }; // opens `Tx` transactions
+type EffectContext<AppDb> = { jobId: string; signal: AbortSignal; db: AppDb }; // `db` is the object given to drain or worker
 
 type WriteEvents<Tbl, E, Tx> = (row: Row<Tbl> | null, ctx: { tx: Tx }) => Pending[] | Promise<Pending[]>; // looks at the locked row, checks the rules, returns the events
 type Command<S, R, MetaOut, Tx> = { name: string; input: S; handler: (input: z.output<S>, context: CommandContext<MetaOut, Tx>) => R }; // from j.command(name, schema, handler)
@@ -180,15 +186,16 @@ type CommandContext<MetaOut, Tx> = {
   run(child: Command, input: z.input<S>): Promise<Awaited<R>>; // a savepoint of tx, same meta
 };
 
-type Journal<Meta, Tx> = {
-  run(source: Transaction<Tx>, command: Command<S, R, z.output<Meta>, Tx>, input: z.input<S>, meta: z.input<Meta>): Promise<Awaited<R>>; // parse, then the handler in one transaction (root db) or savepoint (tx)
+type Journal<Meta, Tx, AppDb> = {
+  run(source: Transaction<Tx>, command: Command<S, R, z.output<Meta>, Tx>, input: z.input<S>, meta: z.input<Meta>): Promise<Awaited<R>>; // parse, then the handler in one transaction (root db) or savepoint (tx); on the root db, wakes after a commit that queued a job
   write(tx: Tx, entity, id: EntityId, input: { meta: z.input<Meta>; events: WriteEvents }): Promise<{ row: Row | null; events: Recorded[] }>;
   replay(db, entity, id: EntityId, opts?: { upTo?: number }): Promise<{ row: Replayed | null; events: Recorded[] }>;
   verify(db, entity, id: EntityId): Promise<{ ok: true } | { ok: false; expected: Replayed | null; actual: Row | null }>;
   repair(db, entity, id: EntityId): Promise<Row | null>;
   rerun(db: Transaction<Tx>, projection, opts?: { from?: number; batch?: number }): Promise<{ events: number }>;
-  drain(db: RootDb, opts?: { limit?: number; signal?: AbortSignal }): Promise<number>; // one batch of jobs
-  worker(db: RootDb, opts?: { pollMs?: number; limit?: number }): { start(): Promise<void>; stop(): Promise<void> };
+  drain(db: AppDb & RootDb, opts?: { limit?: number; signal?: AbortSignal }): Promise<number>; // one batch of jobs
+  worker(db: AppDb & RootDb, opts?: { pollMs?: number; limit?: number }): { start(): Promise<void>; stop(): Promise<void>; wake(): void };
+  wake(): void; // wakes every running worker this journal started in this process
   catalog: { entities: EntityInfo[]; projections: string[]; effects: string[] };
 };
 
@@ -356,8 +363,9 @@ pending. A rollback leaves neither events nor jobs.
 
 1. In a short transaction, claim due rows with `FOR UPDATE SKIP LOCKED`. Set a fresh
    `lease_token`, set `lease_until = now() + 60s`, bump `attempts`. Commit.
-2. Run each handler outside any transaction, with `(event, { jobId, signal })`. A
-   claimed job whose effect has no handler for the event type fails like any handler error.
+2. Run each handler outside any transaction, with `(event, { jobId, signal, db })`. `db` is
+   the root database given to `drain` or `worker`: the same object. A claimed job whose
+   effect has no handler for the event type fails like any handler error.
 3. Success: delete the row, matching on `lease_token`.
 4. Failure: store `last_error`, set `available_at` to now plus backoff (doubling with
    jitter, capped at 5 minutes). After 8 attempts set `dead_at` instead.
@@ -371,6 +379,19 @@ does not know stays pending; it is never dropped silently.
 
 `worker` is a loop around `drain` with a poll delay. `stop()` finishes the current batch.
 The library installs no signal handlers and never calls `process.exit`.
+
+A wake ends the poll delay, so an effect starts right after the commit:
+
+- `journal.run(db, ...)` on the root database wakes by itself after its commit, and only
+  when the command queued a job. A run that rolls back does not wake.
+- With your own transaction (`journal.run(tx, ...)`, `journal.write(tx, ...)`) nothing
+  wakes: the library cannot see your commit. Call `journal.wake()` after you commit.
+- `journal.wake()` wakes every running worker this journal started in this process.
+  `worker.wake()` wakes one. With no running worker a wake does nothing.
+- A wake during a running pass is kept: one more pass runs right after it, because the
+  running pass may have looked before the commit. Many wakes make one extra pass.
+- The wake is in-process only: plain promises and timers, no `LISTEN/NOTIFY`. Other
+  processes pick jobs up by polling.
 
 Effects must be safe to run twice. Use `jobId` as the idempotency key for outside calls.
 An effect that needs order should read the current row instead of trusting the event.

@@ -3,7 +3,7 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, tables } from './test-support.js';
+import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, orders, tables } from './test-support.js';
 
 let db: PgliteDatabase;
 let client: PGlite;
@@ -183,5 +183,28 @@ describe('worker', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(await jobById(later.id)).not.toBeNull();
     await worker.stop();
+  });
+});
+
+describe('effect context', () => {
+  it('gives the handler the root database passed to drain, so an effect reads committed rows without a closure', async () => {
+    const seen: { db?: unknown; status?: string } = {};
+    const audit = j.effect('order-audit', order, {
+      OrderPaid: async (e, ctx) => {
+        seen.db = ctx.db;
+        const [row] = await ctx.db.select().from(orders).where(eq(orders.id, e.entityId));
+        seen.status = row?.status;
+      },
+    });
+    // Its own journal: a job names its effect, so the tests above never see this one.
+    const auditJournal = j.create({ tables, effects: [audit] });
+    const id = orderId(++next);
+    await db.transaction(tx =>
+      auditJournal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    );
+    await db.transaction(tx => auditJournal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }));
+    expect(await auditJournal.drain(db)).toBe(1);
+    expect(seen.db).toBe(db);
+    expect(seen.status).toBe('paid');
   });
 });

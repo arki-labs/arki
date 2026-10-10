@@ -50,14 +50,15 @@ export function defineProjection<E extends AnyEntity<Meta>, Meta, Tx extends Db>
   };
 }
 
-export function defineEffect<E extends AnyEntity<Meta>, Meta>(
+export function defineEffect<E extends AnyEntity<Meta>, Meta, AppDb>(
   name: string,
   entity: E | readonly E[],
-  on: NoInfer<EffectHandlers<E, Meta>>,
-): Effect<Meta> {
+  on: NoInfer<EffectHandlers<E, Meta, AppDb>>,
+): Effect<Meta, AppDb> {
   assertStoredName('effect name', name);
-  const handlers: Partial<Record<string, Fn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext], unknown>>> =
-    on;
+  const handlers: Partial<
+    Record<string, Fn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb>], unknown>>
+  > = on;
   return {
     name,
     entities: toList(entity),

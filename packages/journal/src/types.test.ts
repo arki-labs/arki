@@ -283,6 +283,54 @@ expectTypeOf(onFirst).not.toHaveProperty('create');
 
 // A PGlite database and its transaction both fit `Db`, with no relations.
 // Only the database fits `RootDb`: `drain` and `worker` must not run inside a transaction.
+// --- The app names its root database type: effects get it, drain and worker need it
+
+const jd = initJournal
+  .tx<AppTx>()
+  .db<PgliteDatabase>()
+  .create({ meta: z.object({ actorId: z.string() }) });
+const dbOrder = jd
+  .entity('db-order', orders)
+  .create(OrderPlaced, e => ({ total: e.data.total, status: 'placed' }))
+  .on(OrderPaid, () => ({ status: 'paid' }));
+const dbEffect = jd.effect('db-typed', dbOrder, {
+  OrderPaid: (_e, ctx) => {
+    expectTypeOf(ctx.db).toEqualTypeOf<PgliteDatabase>();
+    // The app type has what the structural `RootDb` lacks, such as the relational `query`.
+    expectTypeOf(ctx.db.query).toEqualTypeOf<PgliteDatabase['query']>();
+  },
+});
+// Either order names the same two types.
+const jdSwapped = initJournal
+  .db<PgliteDatabase>()
+  .tx<AppTx>()
+  .create({ meta: z.object({ actorId: z.string() }) });
+expectTypeOf(jdSwapped).toEqualTypeOf<typeof jd>();
+// Without `.db<…>()` an effect sees the library's `RootDb`.
+const plainEffect = jt.effect('plain-db', txOrder, {
+  OrderPaid: (_e, ctx) => {
+    expectTypeOf(ctx.db).toEqualTypeOf<RootDb>();
+  },
+});
+async function typedDb(db: PgliteDatabase, tx: AppTx, structural: RootDb) {
+  const journal = jd.create({ tables, effects: [dbEffect] });
+  await journal.drain(db);
+  journal.worker(db);
+  // @ts-expect-error -- a transaction is not the root database
+  await journal.drain(tx);
+  // @ts-expect-error -- a transaction is not the root database
+  journal.worker(tx);
+  // @ts-expect-error -- the structural `RootDb` is not the app's database type: `ctx.db.query` would be missing
+  await journal.drain(structural);
+  // @ts-expect-error -- the structural `RootDb` is not the app's database type
+  journal.worker(structural);
+  // A journal without `.db<…>()` still takes any root database.
+  const plain = jt.create({ tables, effects: [plainEffect] });
+  await plain.drain(db);
+  await plain.drain(structural);
+}
+void typedDb;
+
 async function dbFits() {
   const db = drizzle({ client: new PGlite('memory://') });
   const asDb: Db = db;

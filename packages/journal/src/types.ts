@@ -211,9 +211,9 @@ export type EntityIdOf<E> = E extends {
 export type ProjectionHandlers<E, Meta, Tx = Db> = {
   readonly [D in EventsOf<E> as D['type']]?: Fn<[tx: Tx, event: RecordedOf<D, Meta, EntityIdOf<E>>], unknown>;
 };
-export type EffectHandlers<E, Meta> = {
+export type EffectHandlers<E, Meta, AppDb = RootDb> = {
   readonly [D in EventsOf<E> as D['type']]?: Fn<
-    [event: RecordedOf<D, Meta, EntityIdOf<E>>, ctx: EffectContext],
+    [event: RecordedOf<D, Meta, EntityIdOf<E>>, ctx: EffectContext<AppDb>],
     unknown
   >;
 };
@@ -226,16 +226,22 @@ export type Projection<Meta = unknown, Tx = Db> = {
   readonly run: Fn<[tx: Tx, event: Recorded<string, unknown, Meta>], Promise<void>>;
 };
 
-export type EffectContext = { readonly jobId: string; readonly signal: AbortSignal };
+/** `db` is the root database that was given to `drain` or `worker`: the same object. */
+export type EffectContext<AppDb = RootDb> = {
+  readonly jobId: string;
+  readonly signal: AbortSignal;
+  readonly db: AppDb;
+};
 
 /** Async handler. Runs after commit, at least once. */
-export type Effect<Meta = unknown> = {
+export type Effect<Meta = unknown, AppDb = RootDb> = {
   readonly name: string;
   readonly entities: readonly AnyEntity<Meta>[];
   readonly types: ReadonlySet<string>;
-  readonly run: Fn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext], Promise<void>>;
+  readonly run: Fn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb>], Promise<void>>;
 };
 
 export type EntityInfo = { readonly kind: string; readonly table: string; readonly events: readonly string[] };
 
-export type Worker = { start(): Promise<void>; stop(): Promise<void> };
+/** `wake()` runs a drain pass now instead of at the next poll. It does nothing unless the worker is running. */
+export type Worker = { start(): Promise<void>; stop(): Promise<void>; wake(): void };
