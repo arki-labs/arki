@@ -3,7 +3,8 @@
 A journal keeps two things and writes them together.
 Every change is one immutable row in `journal_events`.
 Each entity also has a normal row in its own Drizzle table.
-One call, `journal.write`, validates the event data, appends the events, runs the reducers, saves the row, runs inline projections and queues jobs for async effects, all inside the caller's Drizzle transaction.
+A command is the way to write: `j.command` defines one, `journal.run` runs it.
+Inside the command, `write` validates the event data, appends the events, runs the reducers, saves the row, runs inline projections and queues jobs for async effects, all in one transaction.
 Reads are plain Drizzle queries. Replay exists for checks and repair, not for reading.
 
 Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions), `@arki/journal/dot` (optional `@arki/dot` plugin).
@@ -13,9 +14,15 @@ Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions)
 ```ts
 // src/journal.ts — once per app. `meta` is the app-wide metadata schema.
 import { initJournal } from '@arki/journal';
+// src/schema.ts — the two journal tables live in the app's schema.
+import { journalTables } from '@arki/journal/pg';
+
 export const j = initJournal({ meta: z.object({ actorId: z.string() }) });
+// Or, to type `tx` everywhere with the app's own Drizzle transaction type:
+// export const j = initJournal.tx<AppTx>().create({ meta: ... });
 
 // src/features/orders/tables.ts — a normal table with `id` and `version`.
+// A table keyed by another column: j.entity('profile', profiles, { id: 'accountId' }).
 export const orders = pgTable('orders', {
   id: varchar('id', { length: 256 }).primaryKey().$type<OrderId>(),
   customerId: varchar('customer_id', { length: 256 }).notNull(),
@@ -24,7 +31,7 @@ export const orders = pgTable('orders', {
   version: integer('version').notNull().default(0),
 });
 
-// src/features/orders/order.ts
+// src/features/orders/order.ts — events and the entity.
 export const OrderPlaced = j.event('OrderPlaced', z.object({ customerId: z.string(), total: z.int().positive() }));
 export const OrderPaid = j.event('OrderPaid', z.object({ amount: z.int().positive() }));
 export const OrderCancelled = j.event('OrderCancelled', z.object({ reason: z.string().min(1) }));
@@ -35,13 +42,28 @@ export const order = j
   .on(OrderPaid, () => ({ status: 'paid' })) // a patch: only the columns that change
   .on(OrderCancelled, () => null); // null deletes the row; the events stay
 
+// src/features/orders/commands.ts — a command needs only `j`, entities and events.
+export const payOrder = j.command(
+  'payOrder',
+  z.object({ orderId: orderIdSchema, amount: z.int().positive() }),
+  (input, { write }) =>
+    write(order, input.orderId, row => {
+      if (!row) throw new NotFoundError('order', input.orderId);
+      if (row.status !== 'placed') throw new InvalidStateError(`order ${input.orderId} is ${row.status}`);
+      return [OrderPaid({ amount: input.amount })]; // [] means: write nothing
+    }),
+);
+
 // Inline lane: exact read model, same transaction.
 export const customerStats = j.projection('customer-stats', order, {
   OrderPlaced: (tx, e) =>
     tx
       .insert(customerOrderCounts)
       .values({ customerId: e.data.customerId, placed: 1 })
-      .onConflictDoUpdate({ target: customerOrderCounts.customerId, set: { placed: sql`${customerOrderCounts.placed} + 1` } }),
+      .onConflictDoUpdate({
+        target: customerOrderCounts.customerId,
+        set: { placed: sql`${customerOrderCounts.placed} + 1` },
+      }),
 });
 
 // Async lane: after commit, at least once. Dependencies come in by closure.
@@ -50,43 +72,138 @@ export const orderMail = (mailer: Mailer) =>
     OrderPaid: (e, { jobId }) => mailer.send({ template: 'order-paid', orderId: e.entityId, idempotencyKey: jobId }),
   });
 
-// src/features/orders/commands.ts — a command is a plain function.
-export const payOrder = (tx: Db, id: OrderId, amount: number, actorId: string) =>
-  journal.write(tx, order, id, {
-    meta: { actorId },
-    decide: row => {
-      if (!row) throw new NotFoundError('order', id);
-      if (row.status !== 'placed') throw new InvalidStateError(`order ${id} is ${row.status}`);
-      return [OrderPaid({ amount })]; // [] means: write nothing
-    },
-  });
-
-// src/schema.ts — the two journal tables live in the app's schema.
-import { journalTables } from '@arki/journal/pg';
 export const journal_ = journalTables(); // or journalTables(pgSchema('app'))
 
 // src/journal.root.ts — the one place that lists handlers.
 export const journal = j.create({ tables: journal_, projections: [customerStats], effects: [orderMail(mailer)] });
 
-// A procedure. The app owns the transaction.
-await db.transaction(tx => payOrder(tx, input.id, input.amount, ctx.user.id));
+// A procedure. The schema is reused, the actor comes from the session.
+export const pay = protectedProcedure
+  .input(payOrder.input.pick({ orderId: true, amount: true }))
+  .handler(({ context, input }) => journal.run(db, payOrder, input, { actorId: context.user.id }));
 
 // Boot. One worker per process runs the async lane. Root database only, never a transaction.
 const worker = journal.worker(db);
 await worker.start();
 ```
 
-`decide` only accepts events declared on the entity. The row type, the id type and the event data types are all inferred.
+## Commands
 
-An `.on` reducer receives the reducer-shaped state (`Replayed<Tbl>`: the insert shape plus `id` and `version`; columns with database defaults may be absent) and returns a patch, `Partial<NewRow<Tbl>> | null`. The patch is merged onto the state. A key set to `undefined` means unchanged. `decide(row)` still receives the stored `Row<Tbl> | null`.
+`j.command(name, inputSchema, handler)` returns a plain value with `name`, `input` (the schema, so a procedure can reuse or `.pick` it) and the handler. Nothing is registered anywhere. The handler gets the parsed input and a context:
 
-Database defaults are not journal state. `write` folds from the stored row, where a default-filled column has its value. `replay` folds from nothing, where that column is `undefined`. That is why such columns are optional in the `.on` row type. The rule: a reducer must set every column that any reducer later reads. In a `.create` result, a key set to `undefined` is stripped and the default applies. `verify` compares only the columns reducers set.
+- `tx`: the command's transaction. Use it for reads, or for writes outside any entity.
+- `meta`: the parsed metadata. Every `write` in the command records it.
+- `write(entity, id, events)`: `journal.write` bound to `tx` and `meta`. `events` is `(row, { tx }) => pending events`, sync or async.
+- `run(child, input)`: run another command in a savepoint of the same transaction, with the same `meta`.
 
-`write` parses every event's data with its schema, even for a hand-built `{ type, data }`. The schema must accept its own stored output unchanged, because replay parses stored data again; otherwise `write` throws `UNSTABLE_SCHEMA`. The same rule applies to `meta`.
+`journal.run(source, command, input, meta)` parses `input` with the command's schema (`parseAsync`; a `ZodError` passes through) and `meta` with the app schema, then calls the handler inside `source.transaction(...)`. The root database opens a transaction. A transaction opens a savepoint, so the caller still decides the commit. It returns what the handler returns. Errors pass through unchanged.
+
+Await every `write` and `run` before the handler returns. `run` waits for any operation still running, then fails the command and rolls back, because a transaction must not close with work in flight. If the handler threw, the handler's own error is reported. The low-level `journal.write` inside your own `db.transaction(...)` has no such guard: await every journal call before your transaction callback returns.
+
+Inside a command, an uncaught failure anywhere rolls back everything the command did. A child failure the parent catches rolls back only that child. A command may touch no entity, one, or several; it may return any value. Command input is not stored, so it may hold Dates and transforms. Event data and `meta` keep the storage rules below.
+
+The types are all inferred: the handler's `input` from the schema, `journal.run`'s `input` as the schema's input type, the return type from the handler, `row`, id and events in `write` from the entity, `tx` from `initJournal.tx<AppTx>()`, `meta` from the meta schema.
+
+### Where commands run from
+
+The same `journal.run` serves every trigger. Checking who the caller is stays application code; business rules live in the command.
+
+| Trigger   | Call                                                              | Notes                                                       |
+| --------- | ----------------------------------------------------------------- | ----------------------------------------------------------- |
+| Procedure | `journal.run(db, command, input, { actorId: user.id })`           | Bind the actor once, in request context.                    |
+| Job       | `journal.run(db, command, payload, job.meta)`                     | The queue owns retries.                                     |
+| Schedule  | `journal.run(db, command, input, { actorId: 'system' })`          | A clear system actor; `meta` keeps its schema.              |
+| Webhook   | `journal.run(db, command, mappedInput, trustedMeta)`              | The adapter verifies the signature and maps the payload.    |
+| Effect    | `run(command, input)`, a closure the app passes to the effect     | See below. An effect never imports the journal root.        |
+| Script    | `journal.run(db, command, input, { actorId: 'script:backfill' })` | One call per item; each is its own transaction.             |
+| Test      | `journal.run(db, command, input, meta)`                           | No procedure, no HTTP. The same validation and transaction. |
+
+An effect that needs to write runs a command through a closure the app builds at composition time:
+
+```ts
+// src/features/orders/effects.ts
+export const closeAfterPayment = (
+  run: <S extends z.ZodType, R>(c: Command<S, R, Meta>, i: z.input<S>) => Promise<Awaited<R>>,
+) =>
+  j.effect('close-after-payment', order, {
+    OrderPaid: e => run(closeOrder, { orderId: e.entityId }),
+  });
+
+// src/journal.root.ts
+const runAsSystem = <S extends z.ZodType, R>(c: Command<S, R, Meta>, i: z.input<S>) =>
+  journal.run(db, c, i, { actorId: 'system' });
+export const journal = j.create({ tables, effects: [closeAfterPayment(runAsSystem)] });
+```
+
+## The low-level write
+
+`journal.write(tx, entity, id, { meta, events })` is what a command's `write` calls. Use it directly only when there is no command: a one-off migration step, or a test that needs a specific `meta` per write. `events` is the function that looks at the locked row, checks the rules, and returns the events to append. It runs after the row is locked, inside the write's savepoint, and receives that savepoint as `{ tx }`, so it can read related rows under the lock. It may be async. It only accepts events declared on the entity; the row type, the id type and the event data types are all inferred.
+
+`write` returns `{ row, events }`: the stored row after the write (`null` after a delete) and the recorded events, each with `seq`, `id`, `entityId`, `version`, `meta` and `recordedAt`. An entity can be created again after a delete; its version continues from the last event.
+
+### Rows that existed before the journal
+
+A row the journal creates gets version 1 from its create event. A row that was there first (stored `version` 0, no events in the log) can still be written to, but its history starts at version 2: the first write treats the row as version 1 and records its event as version 2. Version 1 therefore always means "created from nothing". `replay`, `verify` and `repair` need a history that starts at version 1 and throw `NO_HISTORY` otherwise, because folding a partial history from nothing would pick the wrong reducers and build the wrong row.
+
+### A row removed outside the journal
+
+If a row is deleted by hand while its log says it exists, the next write that would create it throws `CONFLICT`. Write would apply `.create` where replay applies `.on`, and the two would disagree. Run `repair` to restore the row from the log, then write again. A row the journal deleted is fine: its log ends with the delete, and a create continues the version sequence.
+
+### The key column
+
+Names are non-empty and well-formed text: at most 64 characters for an entity kind, and 128 for an event type or an effect name. `j.entity`, `j.event` and `j.effect` throw otherwise.
+
+The key column is `id` unless the entity names another one by its property name: `j.entity('profile', profiles, { id: 'accountId' })`. The name is checked against the table's columns at the type level and must be one property name, not a union. The column must hold a string, be `notNull`, and be the primary key or unique, either on the column (`.primaryKey()`, `.unique()`) or at table level as a single-column `unique()`, `uniqueIndex()` or `primaryKey()`. A `uniqueIndex` with a `where` does not count: it is unique only inside that subset. `j.entity` checks this and throws otherwise. The id argument of `write`, `replay`, `verify` and `repair`, the key on the `.on` row, and `entityId` on every recorded event all have that column's own type (for example a branded `AccountId`). `journal_events.entity_id` stores the string.
+
+The journal compares keys as exact strings, so the key column must not treat two different strings as one key. Four rules:
+
+- `text` and `varchar` (with or without a length) are allowed, with the database's default, exact comparison. Do not give them a case-insensitive collation. `varchar(256).$type<Branded>()` is fine.
+- An id is at most 256 characters, or the column's own length if that is smaller, counted in Unicode code points. It must not be empty. `write`, `replay`, `verify` and `repair` refuse any other id with `ID_MISMATCH`, before they touch the database. Nothing is trimmed or cut for you.
+- An id must be well-formed text. An id with an unpaired surrogate (such as `"x\uD800"`) is refused with `ID_MISMATCH`, before the database is touched. The driver would store it as U+FFFD and it would reach the history of another id. Nothing is replaced for you.
+- `uuid` is allowed, but ids must be lower-case and hyphenated. `write`, `replay`, `verify` and `repair` refuse any other spelling with `ID_MISMATCH`, before they touch the database. Nothing is lower-cased for you.
+- Every other type (`citext`, `char(n)`, numbers) is refused when the entity is defined. So is a custom column type (`customType`), even one that reports `text` or `varchar(n)`, because its mapping can change the string.
+
+Why: if the database sees two spellings as one key but the log sees two, one entity gets two histories, and `repair` could replay only half. `NewRow<Tbl, Key>` omits the key column and `version`.
+
+The id you pass must be exactly the key the database stores. Some columns treat two spellings as one key, such as a `uuid` (upper and lower case) or case-insensitive text. The journal logs events under the string you pass, so a second spelling would split one history in two. It refuses any id that differs from the stored key with `ID_MISMATCH`, and writes nothing. For `uuid` keys, pass the lower-case form.
+
+### One operation at a time per transaction
+
+Savepoints are a stack. Two `write` or `run` calls open on one transaction at the same time would release each other's savepoint, so a caught failure of one could erase what the other wrote. A transaction therefore holds one journal operation at a time: await each `write` and `run` before starting the next on the same transaction. A second one started early waits for the first to settle, then rejects with an error naming the command or entity. A child command runs on its own savepoint, so a `run` inside a `run` is fine, and so are operations on the root database, which get separate transactions.
+
+### The app's transaction type
+
+`initJournal({ meta })` types the command's `tx`, `write`'s `tx`, `events`' `{ tx }` and projection handlers' `tx` with the structural `Db`. To use the app's own Drizzle transaction type instead, so repositories typed against it fit, declare it once: `initJournal.tx<AppTx>().create({ meta })`. `tx` is a type-only step. `run` and `rerun` then take any database that opens `AppTx` transactions; `drain` and `worker` keep taking the root database.
+
+### Reducers
+
+Events are read-only. A reducer, projection or effect that tries to change `e.data` or `e.meta` gets a `TypeError`. Copy first: `[...e.data.items].sort()`.
+
+An `.on` reducer receives the reducer-shaped state (`Replayed<Tbl, Key>`: the insert shape plus the key column and `version`) and returns a patch, `Partial<NewRow<Tbl, Key>> | null`. The patch is merged onto the state. A key set to `undefined` means unchanged. `events(row, { tx })` still receives the stored `Row<Tbl> | null`.
+
+Columns that every `.create` reducer sets are required on the `.on` row. A column one create leaves to its database default, sets on one branch only, or may set to `undefined`, stays optional. The rule: every `.create` comes before the first `.on`. After the first `.on` the builder has no `.create`, and calling one anyway throws, because a later create could leave out a column the `.on` was promised. An `.on` declared before any `.create` sees the plain insert shape.
+
+One event may have both a `.create` and an `.on` reducer, for an event that may open an entity or update it (a grant, a flag). The fold picks by state: no row runs the create reducer, a row runs the on reducer. An event with only a create reducer on an existing row is `ROW_EXISTS`; an event with only an on reducer and no row is `NO_ROW`. Declaring the same event twice in the same mode throws at definition time.
+
+A reducer must produce each value in the form the database stores. If the database would round or trim it, the write is refused with `VALUE_MISMATCH`. The message names the entity, id and column, and shows both values. For a `numeric(10,2)` column, a reducer that returns `"1.234"` is refused, because the database stores `1.23`. Return `"1.23"` instead. Why: `replay` and `repair` recompute the row from reducer output. Later reducers read the stored row. If the two differ, a correct balance drifts. For a JSON column, a reducer may produce plain objects, full arrays, strings, numbers, booleans and `null`. A `Map`, a `Set` or an array with holes is refused, because JSON storage would lose its contents. The check covers the columns a reducer set in this write. `repair` makes the same check and leaves the row as it was.
+
+Database defaults are not journal state. `write` folds from the stored row, where a default-filled column has its value. `replay` folds from nothing, where that column is `undefined`. That is why such columns are optional in the `.on` row type unless a create sets them. The rule: a reducer must set every column that any reducer later reads. In a `.create` result, a key set to `undefined` is stripped and the default applies. `verify` compares only the columns reducers set.
+
+`write` parses every event's data with its schema, even for a hand-built `{ type, data }`. The schema must accept its own stored output unchanged, because replay parses stored data again; otherwise `write` throws `UNSTABLE_SCHEMA`. The same rule applies to `meta`. An optional key holding `undefined` in event data is not stored: JSON drops it, so the stored event, the reducers and replay all see the key as absent. The check allows this, because absent and `undefined` read the same way. Leaving the key out is the same thing.
 
 Errors are `JournalError` with a `code`: `CONFLICT`, `NO_ROW`, `ROW_EXISTS`, `UNKNOWN_EVENT`, `VERSION_MISMATCH`, `NO_HISTORY`, `REPLAY_FAILED`, `UNSTABLE_SCHEMA`.
 
 Other verbs: `replay(db, entity, id, { upTo })` (returns the reducer-shaped row), `verify(db, entity, id)`, `repair(db, entity, id)`, `rerun(db, projection, { from, batch })`, `drain(db, { limit, signal })`. `drain` and `worker` take the root database (`RootDb`), never a transaction: effects must run after commit. Lease and retry times use the database clock.
+
+### Changing reducers later
+
+`replay`, `verify` and `repair` use today's reducers and today's event schemas. They do not remember the code that ran when the event was written.
+
+So changing how an existing event is reduced changes what `repair` writes for existing rows. `verify` will report those rows as drifted.
+
+For a new meaning, add a new event type. Leave the old reducer as it is.
+
+Adding an optional field, or one with a default, is safe. Old rows still parse.
 
 ## Tables
 
@@ -121,8 +238,8 @@ journal_jobs
 
 A job row is deleted when its handler succeeds. The table holds only pending and dead work. The event row is the lasting record.
 
-An entity table needs `id` (string primary key) and `version integer not null default 0`.
+An entity table needs a string key column that is primary or unique (`id` by default) and `version integer not null default 0`.
 
 ## Debugging
 
-`DEBUG=arki:journal:*` prints writes, replays, drains and worker ticks.
+`DEBUG=arki:journal:*` prints commands, writes, replays, drains and worker ticks.

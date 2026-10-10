@@ -3,16 +3,18 @@
  * `.on` chain and the Drizzle table and transaction types compose without a
  * cast. `tsc` checks this file; the single runtime test keeps Vitest happy.
  */
+import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
 import { expect, expectTypeOf, it } from 'vitest';
-import type { z } from 'zod';
+import { z } from 'zod';
 
-import { j, OrderPaid, OrderPlaced, tables } from './test-support.js';
-import type { order } from './test-support.js';
+import type { WriteResult } from './journal.js';
+import type { AccountId, order } from './test-support.js';
 import type {
+  AnyEntity,
   Db,
   EntityId,
   EntityTable,
@@ -26,6 +28,19 @@ import type {
   RootDb,
   Row,
 } from './types.js';
+import { initJournal } from './journal.js';
+import {
+  j,
+  meta,
+  OrderNoted,
+  OrderPaid,
+  OrderPlaced,
+  profile,
+  ProfileMoved,
+  ProfileOpened,
+  profiles,
+  tables,
+} from './test-support.js';
 
 // --- Chain inference --------------------------------------------------------
 
@@ -38,8 +53,10 @@ expectTypeOf<keyof ProjectionHandlers<typeof order, Meta>>().toEqualTypeOf<
 expectTypeOf<RecordedOf<typeof OrderPaid, Meta>['data']>().toEqualTypeOf<{ amount: number }>();
 expectTypeOf<RecordedOf<typeof OrderPaid, Meta>['meta']>().toEqualTypeOf<Meta>();
 expectTypeOf<PendingOf<typeof OrderPlaced>['data']>().toEqualTypeOf<{ customerId: string; total: number }>();
-// `decide` may only return declared events: Unrelated is not in the union.
-expectTypeOf<PendingOf<OrderEvents>['type']>().toEqualTypeOf<'OrderPlaced' | 'OrderPaid' | 'OrderNoted' | 'OrderCancelled'>();
+// `events` may only return declared events: Unrelated is not in the union.
+expectTypeOf<PendingOf<OrderEvents>['type']>().toEqualTypeOf<
+  'OrderPlaced' | 'OrderPaid' | 'OrderNoted' | 'OrderCancelled'
+>();
 
 type OrderId = `ord_${string}`;
 
@@ -61,6 +78,21 @@ expectTypeOf<Row<typeof orders>>().toEqualTypeOf<typeof orders.$inferSelect>();
 expectTypeOf<NewRow<typeof orders>>().toEqualTypeOf<{ total: number; status: 'placed' | 'paid' }>();
 expectTypeOf<EntityId<typeof orders>>().toEqualTypeOf<OrderId>();
 
+// The key option must be one property name. A union would make `NewRow` omit several
+// required columns, so a `.create` could return `{}` and an `.on` could read a column
+// that was never set.
+const twoKeys = pgTable('two_keys', {
+  accountId: varchar('account_id').notNull().unique(),
+  other: varchar('other').notNull().unique(),
+  version: integer('version').notNull().default(0),
+});
+expectTypeOf<NewRow<typeof twoKeys, 'accountId'>>().toEqualTypeOf<{ other: string }>();
+const oneKey = (key: 'accountId') => j.entity('one-key', twoKeys, { id: key });
+void oneKey;
+// @ts-expect-error -- a union of key names is not one key
+const unionKey = (key: 'accountId' | 'other') => j.entity('union-key', twoKeys, { id: key });
+void unionKey;
+
 // A table without `version` is rejected.
 const noVersion = pgTable('no_version', { id: varchar('id').primaryKey() });
 // @ts-expect-error -- `version` column is missing
@@ -75,10 +107,177 @@ const typed = j
   .entity('typed', orders)
   .create(OrderPlaced, e => ({ total: e.data.total, status: 'placed' }))
   .on(OrderPaid, row => {
-    expectTypeOf(row).toEqualTypeOf<Replayed<typeof orders>>();
+    expectTypeOf(row).toMatchTypeOf<Replayed<typeof orders>>();
+    expectTypeOf(row.id).toEqualTypeOf<OrderId>();
     return { status: 'paid' };
   });
 void typed;
+
+// --- Change 1: the key column is named, and its type flows everywhere -------
+
+// `profiles` has no `id`. Its key is `accountId`, a branded string.
+expectTypeOf<(typeof profile)['key']>().toEqualTypeOf<'accountId'>();
+expectTypeOf<EntityId<typeof profiles, 'accountId'>>().toEqualTypeOf<AccountId>();
+// NewRow omits the key column and `version`.
+expectTypeOf<NewRow<typeof profiles, 'accountId'>>().toEqualTypeOf<{ nick: string; moveCount?: number }>();
+// Recorded events carry the branded id, in `write` results and in handlers.
+type ProfileWrite = WriteResult<typeof profiles, EventsOf<typeof profile>, Meta, 'accountId'>;
+expectTypeOf<ProfileWrite['events'][number]['entityId']>().toEqualTypeOf<AccountId>();
+expectTypeOf<ProfileWrite['row']>().toEqualTypeOf<Row<typeof profiles> | null>();
+// Both rejected at the type level; both also throw at runtime, so they stay uncalled.
+function badKeys() {
+  // A table without `id` must name its key.
+  // @ts-expect-error -- `profiles` has no `id` column
+  j.entity('bare', profiles);
+  // The named column must be a non-null string column of the table.
+  // @ts-expect-error -- `moveCount` is an integer column
+  j.entity('numeric-key', profiles, { id: 'moveCount' });
+  // @ts-expect-error -- not a column of `profiles`
+  j.entity('no-such-key', profiles, { id: 'nope' });
+}
+void badKeys;
+// Reducers see the key under its own name, and the event's entity id with the column's type.
+const keyed = j
+  .entity('keyed', profiles, { id: 'accountId' })
+  .create(ProfileOpened, e => {
+    expectTypeOf(e.entityId).toEqualTypeOf<AccountId>();
+    return { nick: e.data.nick, moveCount: 0 };
+  })
+  .on(ProfileMoved, (row, e) => {
+    expectTypeOf(row.accountId).toEqualTypeOf<AccountId>();
+    expectTypeOf(e.entityId).toEqualTypeOf<AccountId>();
+    // Every create sets `moveCount`, so it is required here.
+    expectTypeOf(row.moveCount).toEqualTypeOf<number>();
+    return { moveCount: row.moveCount + 1 };
+  });
+void keyed;
+// A create that sets a column on one branch only does not promise it: the `.on` row keeps it optional.
+const conditional = j
+  .entity('conditional', profiles, { id: 'accountId' })
+  .create(ProfileOpened, e => (e.data.nick === 'counted' ? { nick: e.data.nick, moveCount: 1 } : { nick: e.data.nick }))
+  .on(ProfileMoved, row => {
+    expectTypeOf(row.nick).toEqualTypeOf<string>();
+    expectTypeOf(row.moveCount).toEqualTypeOf<number | undefined>();
+    return {};
+  });
+void conditional;
+// After the first `.on`, `.create` is gone: a later create could leave out a column the `.on` was promised.
+function createAfterOn() {
+  const sealed = j.entity('sealed', profiles, { id: 'accountId' }).on(ProfileMoved, () => ({}));
+  // @ts-expect-error -- `.create` is not available after `.on`
+  sealed.create(ProfileOpened, e => ({ nick: e.data.nick }));
+}
+void createAfterOn;
+const keyedProjection = j.projection('keyed-ids', profile, {
+  ProfileOpened: (_tx, e) => {
+    expectTypeOf(e.entityId).toEqualTypeOf<AccountId>();
+  },
+});
+void keyedProjection;
+async function keyedIds(db: Db) {
+  const journal = j.create({ tables });
+  await journal.write(db, profile, 'acc_1', { meta, events: () => [] });
+  await journal.replay(db, profile, 'acc_1');
+  // @ts-expect-error -- the id must be an AccountId, not any string
+  await journal.write(db, profile, 'ord_1', { meta, events: () => [] });
+}
+void keyedIds;
+
+// --- Change 2: events gets the transaction; the app names its transaction type
+
+type AppTx = Parameters<Parameters<PgliteDatabase['transaction']>[0]>[0];
+const jt = initJournal.tx<AppTx>().create({ meta: z.object({ actorId: z.string() }) });
+const txOrder = jt
+  .entity('tx-order', orders)
+  .create(OrderPlaced, e => ({ total: e.data.total, status: 'placed' }))
+  .on(OrderPaid, () => ({ status: 'paid' }));
+const txProjection = jt.projection('tx-typed', txOrder, {
+  OrderPlaced: tx => {
+    expectTypeOf(tx).toEqualTypeOf<AppTx>();
+  },
+});
+async function typedTx(db: PgliteDatabase, tx: AppTx) {
+  const journal = jt.create({ tables, projections: [txProjection] });
+  await journal.write(tx, txOrder, 'ord_1', {
+    meta: { actorId: 'a' },
+    events: (row, ctx) => {
+      expectTypeOf(row).toEqualTypeOf<Row<typeof orders> | null>();
+      expectTypeOf(ctx.tx).toEqualTypeOf<AppTx>();
+      return [];
+    },
+  });
+  // `rerun` opens app transactions from the root database.
+  await journal.rerun(db, txProjection);
+  // @ts-expect-error -- the root database is not the app's transaction type
+  await journal.write(db, txOrder, 'ord_1', { meta: { actorId: 'a' }, events: () => [] });
+  // A plain `initJournal` keeps the structural `Db`, so a one-argument `events` still fits.
+  const plain = j.create({ tables });
+  await plain.write(db, typed, 'ord_1', { meta, events: () => [] });
+}
+void typedTx;
+
+// --- Change 3: one event may have both a create and an on reducer ----------
+
+const dual = j
+  .entity('dual', orders)
+  .create(OrderNoted, () => ({ total: 1, status: 'placed' }))
+  .on(OrderNoted, () => ({ status: 'paid' }));
+expectTypeOf<EventsOf<typeof dual>['type']>().toEqualTypeOf<'OrderNoted'>();
+void dual;
+
+// --- Change 4: columns every create reducer sets are required in `.on` -----
+
+const withNote = pgTable('with_note', {
+  id: varchar('id', { length: 256 }).primaryKey().$type<OrderId>(),
+  total: integer('total').notNull(),
+  note: varchar('note', { length: 256 }).notNull().default('none'),
+  version: integer('version').notNull().default(0),
+});
+// Set by the create reducer: required.
+const noteSet = j
+  .entity('note-set', withNote)
+  .create(OrderPlaced, e => ({ total: e.data.total, note: 'none' }))
+  .on(OrderPaid, row => {
+    expectTypeOf(row.note).toEqualTypeOf<string>();
+    expectTypeOf(row.total).toEqualTypeOf<number>();
+    return {};
+  });
+void noteSet;
+// Left to the database default: still optional.
+const noteDefault = j
+  .entity('note-default', withNote)
+  .create(OrderPlaced, e => ({ total: e.data.total }))
+  .on(OrderPaid, row => {
+    expectTypeOf(row.note).toEqualTypeOf<string | undefined>();
+    return {};
+  });
+void noteDefault;
+// Two create reducers: only the keys both set are required.
+const noteMixed = j
+  .entity('note-mixed', withNote)
+  .create(OrderPlaced, e => ({ total: e.data.total, note: 'placed' }))
+  .create(OrderNoted, () => ({ total: 0 }))
+  .on(OrderPaid, row => {
+    expectTypeOf(row.note).toEqualTypeOf<string | undefined>();
+    expectTypeOf(row.total).toEqualTypeOf<number>();
+    return {};
+  });
+void noteMixed;
+// A value that may be `undefined` is stripped at runtime, so it is not required.
+const noteMaybe = j
+  .entity('note-maybe', withNote)
+  .create(OrderPlaced, e => ({ total: e.data.total, note: e.data.total > 1 ? 'big' : undefined }))
+  .on(OrderPaid, row => {
+    expectTypeOf(row.note).toEqualTypeOf<string | undefined>();
+    return {};
+  });
+void noteMaybe;
+// `.on` declared before any `.create` sees the plain insert shape, and no `.create` can follow it.
+const onFirst = j.entity('on-first', withNote).on(OrderPaid, row => {
+  expectTypeOf(row.note).toEqualTypeOf<string | undefined>();
+  return {};
+});
+expectTypeOf(onFirst).not.toHaveProperty('create');
 
 // --- Db constraint ----------------------------------------------------------
 
@@ -106,22 +305,22 @@ void dbFits;
 
 // --- Statements against the erased table type -----------------------------
 
-// The journal runs its statements against `EntityTable`. Extra runtime
-// columns flow through the spread; the type only promises `id` and `version`.
-async function statements(db: Db, table: EntityTable, id: string, patch: object) {
-  const loaded = await db.select().from(table).where(eq(table.id, id)).for('update');
-  expectTypeOf(loaded[0]).toEqualTypeOf<{ id: string; version: number } | undefined>();
+// The journal runs its statements against `EntityTable` and the entity's key
+// column. Extra runtime columns flow through the spread; the type only promises `version`.
+async function statements(db: Db, entity: Pick<AnyEntity, 'table' | 'keyColumn'>, id: string, patch: object) {
+  const loaded = await db.select().from(entity.table).where(eq(entity.keyColumn, id)).for('update');
+  expectTypeOf(loaded[0]).toEqualTypeOf<{ version: number } | undefined>();
   const inserted = await db
-    .insert(table)
-    .values({ ...patch, id, version: 1 })
+    .insert(entity.table)
+    .values({ ...patch, version: 1 })
     .returning();
-  expectTypeOf(inserted[0]).toEqualTypeOf<{ id: string; version: number } | undefined>();
+  expectTypeOf(inserted[0]).toEqualTypeOf<{ version: number } | undefined>();
   await db
-    .update(table)
+    .update(entity.table)
     .set({ ...patch, version: 2 })
-    .where(eq(table.id, id))
+    .where(eq(entity.keyColumn, id))
     .returning();
-  await db.delete(table).where(eq(table.id, id));
+  await db.delete(entity.table).where(eq(entity.keyColumn, id));
 }
 void statements;
 

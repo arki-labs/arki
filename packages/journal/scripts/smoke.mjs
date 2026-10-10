@@ -4,10 +4,10 @@
 // imports through package.json and cannot read `catalog:` versions.
 // No database here: it proves the core module loads and the pure parts work.
 
-import { z } from 'zod';
 import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
+import { z } from 'zod';
 
-import { initJournal, JournalError, isJournalError } from '../dist/index.js';
+import { initJournal, isJournalError, JournalError } from '../dist/index.js';
 import { journalTables } from '../dist/pg.js';
 
 const j = initJournal({ meta: z.object({ actorId: z.string() }) });
@@ -42,7 +42,11 @@ const checks = [
   ['event rejects bad data', rejected, true],
   ['entity declares events', [...order.events.keys()].join(','), 'OrderPlaced,OrderPaid'],
   ['effect declares types', [...mail.types].join(','), 'OrderPaid'],
-  ['catalog', JSON.stringify(journal.catalog.entities[0]), '{"kind":"order","table":"orders","events":["OrderPlaced","OrderPaid"]}'],
+  [
+    'catalog',
+    JSON.stringify(journal.catalog.entities[0]),
+    '{"kind":"order","table":"orders","events":["OrderPlaced","OrderPaid"]}',
+  ],
   ['error code', isJournalError(new JournalError('NO_ROW', 'order', 'x'), 'NO_ROW'), true],
   ['tables', Object.keys(journalTables()).join(','), 'events,jobs'],
 ];

@@ -6,7 +6,9 @@ export type JournalErrorCode =
   | 'VERSION_MISMATCH'
   | 'NO_HISTORY'
   | 'REPLAY_FAILED'
-  | 'UNSTABLE_SCHEMA';
+  | 'UNSTABLE_SCHEMA'
+  | 'ID_MISMATCH'
+  | 'VALUE_MISMATCH';
 
 const MESSAGES: Record<JournalErrorCode, string> = {
   CONFLICT: 'another writer appended to this entity first',
@@ -14,9 +16,11 @@ const MESSAGES: Record<JournalErrorCode, string> = {
   ROW_EXISTS: 'the entity already has a row, so a create event is not allowed',
   UNKNOWN_EVENT: 'the entity does not declare this event',
   VERSION_MISMATCH: 'the row version changed between lock and save',
-  NO_HISTORY: 'the row exists but the log has no events for it',
+  NO_HISTORY: 'the history does not start at version 1: the row existed before the journal',
   REPLAY_FAILED: 'the stored events could not be replayed',
   UNSTABLE_SCHEMA: 'the schema must accept its own stored output unchanged, because replay parses stored data again',
+  ID_MISMATCH: 'the id is not the exact key the database stores',
+  VALUE_MISMATCH: 'the database stored a different value than the reducer produced',
 };
 
 /** Every error the journal raises on purpose. Match on `code`, never on the message. */

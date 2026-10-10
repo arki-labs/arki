@@ -5,8 +5,9 @@
  *
  * `@arki/dot` is an optional peer. Import this module only inside a DOT app.
  */
-import { plugin, service } from '@arki/dot/plugin';
 import type { z } from 'zod';
+
+import { plugin, service } from '@arki/dot/plugin';
 
 import type { Journal } from './journal.js';
 import type { Db, Worker } from './types.js';

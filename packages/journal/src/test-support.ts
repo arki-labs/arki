@@ -28,11 +28,25 @@ export const customerOrderCounts = pgTable('customer_order_counts', {
   placed: integer('placed').notNull().default(0),
 });
 
+/** A table whose key is not called `id`. */
+export type AccountId = `acc_${string}`;
+export const accountId = (n: number): AccountId => `acc_${n}`;
+
+export const profiles = pgTable('profiles', {
+  accountId: varchar('account_id', { length: 256 }).primaryKey().$type<AccountId>(),
+  nick: varchar('nick', { length: 64 }).notNull(),
+  moveCount: integer('move_count').notNull().default(0),
+  version: integer('version').notNull().default(0),
+});
+
 export const tables = journalTables();
 
 export const j = initJournal({ meta: z.object({ actorId: z.string().min(1) }) });
 
-export const OrderPlaced = j.event('OrderPlaced', z.object({ customerId: z.string().min(1), total: z.int().positive() }));
+export const OrderPlaced = j.event(
+  'OrderPlaced',
+  z.object({ customerId: z.string().min(1), total: z.int().positive() }),
+);
 export const OrderPaid = j.event('OrderPaid', z.object({ amount: z.int().positive() }));
 export const OrderNoted = j.event('OrderNoted', z.object({ note: z.string().min(1) }));
 export const OrderCancelled = j.event('OrderCancelled', z.object({ reason: z.string().min(1) }));
@@ -47,11 +61,26 @@ export const order = j
   .on(OrderNoted, (_row, e) => ({ note: e.data.note }))
   .on(OrderCancelled, () => null);
 
+export const ProfileOpened = j.event('ProfileOpened', z.object({ nick: z.string().min(1) }));
+export const ProfileMoved = j.event('ProfileMoved', z.object({}));
+export const ProfileClosed = j.event('ProfileClosed', z.object({}));
+/** May be the first event of a profile or a later one. */
+export const ProfileFlagged = j.event('ProfileFlagged', z.object({ nick: z.string().min(1) }));
+
+export const profile = j
+  .entity('profile', profiles, { id: 'accountId' })
+  .create(ProfileOpened, e => ({ nick: e.data.nick, moveCount: 0 }))
+  .create(ProfileFlagged, e => ({ nick: e.data.nick, moveCount: 0 }))
+  // Every create sets `moveCount`, so it is a number here: no `?? 0`.
+  .on(ProfileMoved, row => ({ moveCount: row.moveCount + 1 }))
+  .on(ProfileFlagged, (_row, e) => ({ nick: e.data.nick }))
+  .on(ProfileClosed, () => null);
+
 export async function openDb() {
   const client = new PGlite('memory://');
   await client.waitReady;
   const db = drizzle({ client });
-  const { apply } = await pushSchema({ ...tables, orders, customerOrderCounts }, db);
+  const { apply } = await pushSchema({ ...tables, orders, customerOrderCounts, profiles }, db);
   await apply();
   return { db, client };
 }

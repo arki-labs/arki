@@ -1,6 +1,6 @@
 import type { PGlite } from '@electric-sql/pglite';
-import { eq } from 'drizzle-orm';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, tables } from './test-support.js';
@@ -31,8 +31,12 @@ afterAll(async () => {
 
 const placeAndPay = async () => {
   const id = orderId(++next);
-  await db.transaction(tx => journal.write(tx, order, id, { meta, decide: () => [OrderPlaced({ customerId: 'c', total: 1 })] }));
-  const paid = await db.transaction(tx => journal.write(tx, order, id, { meta, decide: () => [OrderPaid({ amount: 1 })] }));
+  await db.transaction(tx =>
+    journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+  );
+  const paid = await db.transaction(tx =>
+    journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }),
+  );
   const seq = paid.events[0]?.seq ?? -1;
   const [job] = await db.select().from(tables.jobs).where(eq(tables.jobs.eventSeq, seq));
   if (job === undefined) throw new Error('no job row');
@@ -67,7 +71,10 @@ describe('drain', () => {
     expect(await journal.drain(db)).toBe(0);
 
     // Once the backoff passes, the job runs again and succeeds.
-    await db.update(tables.jobs).set({ availableAt: new Date(0) }).where(eq(tables.jobs.id, job.id));
+    await db
+      .update(tables.jobs)
+      .set({ availableAt: new Date(0) })
+      .where(eq(tables.jobs.id, job.id));
     expect(await journal.drain(db)).toBe(1);
     expect(await jobById(job.id)).toBeNull();
   });
@@ -95,7 +102,10 @@ describe('drain', () => {
       .set({ leaseToken: 'stale', leaseUntil: new Date(Date.now() + 60_000), attempts: 1 })
       .where(eq(tables.jobs.id, job.id));
     expect(await journal.drain(db)).toBe(0);
-    await db.update(tables.jobs).set({ leaseUntil: new Date(Date.now() - 1) }).where(eq(tables.jobs.id, job.id));
+    await db
+      .update(tables.jobs)
+      .set({ leaseUntil: new Date(Date.now() - 1) })
+      .where(eq(tables.jobs.id, job.id));
     expect(await journal.drain(db)).toBe(1);
     expect(await jobById(job.id)).toBeNull();
   });
@@ -126,7 +136,10 @@ describe('drain', () => {
     expect(after).toMatchObject({ attempts: 1, leaseToken: null, deadAt: null });
     expect(after?.lastError).toContain('OrderPaid');
     // A deploy that brings the handler back finishes the job.
-    await db.update(tables.jobs).set({ availableAt: new Date(0) }).where(eq(tables.jobs.id, job.id));
+    await db
+      .update(tables.jobs)
+      .set({ availableAt: new Date(0) })
+      .where(eq(tables.jobs.id, job.id));
     expect(await journal.drain(db)).toBe(1);
     expect(await jobById(job.id)).toBeNull();
   });

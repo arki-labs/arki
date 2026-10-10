@@ -71,14 +71,6 @@
     "drizzle-orm": "catalog:drizzle",
     "zod": "catalog:"
   },
-  "peerDependencies": {
-    "@arki/dot": "workspace:*"
-  },
-  "peerDependenciesMeta": {
-    "@arki/dot": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
@@ -91,6 +83,14 @@
     "@types/pg": "catalog:drizzle",
     "drizzle-kit": "catalog:drizzle",
     "pg": "catalog:drizzle"
+  },
+  "peerDependencies": {
+    "@arki/dot": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@arki/dot": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"

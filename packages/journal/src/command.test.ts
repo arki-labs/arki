@@ -1,0 +1,525 @@
+/**
+ * Commands: `j.command` defines one, `journal.run` runs it. These tests pin
+ * what every trigger path (procedure, job, schedule, webhook, script, test)
+ * relies on: input is parsed before anything runs, meta is parsed once and
+ * inherited by every write, and all writes of one command live or die together.
+ * The type-level block proves the inference without a cast; `tsc` checks it.
+ */
+import type { PGlite } from '@electric-sql/pglite';
+import type { PgliteDatabase } from 'drizzle-orm/pglite';
+import { eq, inArray, sql } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
+import { z } from 'zod';
+
+import type { OrderId } from './test-support.js';
+import type { Db, Row } from './types.js';
+import { initJournal } from './journal.js';
+import {
+  accountId,
+  customerOrderCounts,
+  j,
+  meta,
+  openDb,
+  order,
+  orderId,
+  OrderNoted,
+  OrderPaid,
+  OrderPlaced,
+  orders,
+  profile,
+  ProfileOpened,
+  profiles,
+  tables,
+} from './test-support.js';
+
+let db: PgliteDatabase;
+let client: PGlite;
+let journal: ReturnType<typeof j.create>;
+let next = 0;
+
+const customerStats = j.projection('customer-stats', order, {
+  OrderPlaced: (tx, e) =>
+    tx
+      .insert(customerOrderCounts)
+      .values({ customerId: e.data.customerId, placed: 1 })
+      .onConflictDoUpdate({
+        target: customerOrderCounts.customerId,
+        set: { placed: sql`${customerOrderCounts.placed} + 1` },
+      }),
+});
+const mail = j.effect('order-mail', order, {
+  OrderPaid: () => {
+    /* never drained here: the job row is what these tests compare */
+  },
+});
+
+const orderIdSchema = z.templateLiteral(['ord_', z.string()]);
+const accountIdSchema = z.templateLiteral(['acc_', z.string()]);
+
+const placeOrder = j.command(
+  'placeOrder',
+  z.object({ orderId: orderIdSchema, customerId: z.string().min(1), total: z.int().positive() }),
+  (input, { write }) =>
+    write(order, input.orderId, row =>
+      row ? [] : [OrderPlaced({ customerId: input.customerId, total: input.total })],
+    ),
+);
+
+const payOrder = j.command(
+  'payOrder',
+  z.object({ orderId: orderIdSchema, amount: z.int().positive() }),
+  (input, { write }) =>
+    write(order, input.orderId, (row, { tx }) => {
+      expectTypeOf(row).toEqualTypeOf<Row<typeof orders> | null>();
+      expectTypeOf(tx).toEqualTypeOf<Db>();
+      if (!row) throw new Error('order not found');
+      if (row.status !== 'placed') throw new Error(`order is ${row.status}`);
+      return [OrderPaid({ amount: input.amount })];
+    }),
+);
+
+/** The bound callback reads related rows through `tx` and sees the locked row. */
+const inspectOrder = j.command('inspectOrder', z.object({ orderId: orderIdSchema }), (input, { write }) =>
+  write(order, input.orderId, async (row, { tx }) => {
+    const same = await tx.select({ id: orders.id }).from(orders).where(eq(orders.id, input.orderId));
+    return row === null ? [] : [OrderNoted({ note: `row v${row.version}, tx saw ${same.length}` })];
+  }),
+);
+
+/** Two entities in one command. The second write fails on purpose when `nick` is 'boom'. */
+const openBoth = j.command(
+  'openBoth',
+  z.object({ orderId: orderIdSchema, accountId: accountIdSchema, nick: z.string().min(1) }),
+  async (input, { write }) => {
+    await write(order, input.orderId, () => [OrderPlaced({ customerId: 'both', total: 1 })]);
+    return write(profile, input.accountId, () => {
+      if (input.nick === 'boom') throw new Error('second write boom');
+      return [ProfileOpened({ nick: input.nick })];
+    });
+  },
+);
+
+/** No entity: a plain query through `tx`, returning a number. */
+const countOrders = j.command('countOrders', z.object({ customerId: z.string() }), async (input, { tx }) => {
+  const rows = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(orders)
+    .where(eq(orders.customerId, input.customerId));
+  return rows[0]?.n ?? 0;
+});
+
+/**
+ * A child that notes the parent's order, then places and pays a second order
+ * (a projection row and a job row), then fails when the note is 'boom'. The
+ * failure comes after its writes on purpose.
+ */
+const noteOrder = j.command(
+  'noteOrder',
+  z.object({ orderId: orderIdSchema, childOrderId: orderIdSchema, note: z.string().min(1) }),
+  async (input, { write }) => {
+    await write(order, input.orderId, () => [OrderNoted({ note: input.note })]);
+    await write(order, input.childOrderId, () => [
+      OrderPlaced({ customerId: `child-of-${input.orderId}`, total: 1 }),
+      OrderPaid({ amount: 1 }),
+    ]);
+    if (input.note === 'boom') throw new Error('child boom');
+  },
+);
+
+/** A parent that writes first, then runs the child. `catchChild` says whether it swallows a child failure. */
+const placeThenNote = j.command(
+  'placeThenNote',
+  z.object({
+    orderId: orderIdSchema,
+    childOrderId: orderIdSchema,
+    note: z.string().min(1),
+    catchChild: z.boolean(),
+  }),
+  async (input, { write, run }) => {
+    await write(order, input.orderId, () => [OrderPlaced({ customerId: 'nested', total: 1 })]);
+    const child = run(noteOrder, { orderId: input.orderId, childOrderId: input.childOrderId, note: input.note });
+    if (input.catchChild) await child.catch(() => 'child rolled back');
+    else await child;
+    return 'done' as const;
+  },
+);
+
+/** A grandparent: a child inside a child, each on its own savepoint. */
+const placeViaChildren = j.command(
+  'placeViaChildren',
+  z.object({ orderId: orderIdSchema, childOrderId: orderIdSchema }),
+  (input, { run }) => run(placeThenNote, { ...input, note: 'deep', catchChild: false }),
+);
+
+const twoIds = z.object({ a: orderIdSchema, b: orderIdSchema });
+const placeBoth = (a: OrderId, b: OrderId, run: HandlerArgs<typeof placeOrder>[1]['run']) => [
+  run(placeOrder, { orderId: a, customerId: 'pair', total: 1 }),
+  run(placeOrder, { orderId: b, customerId: 'pair', total: 1 }),
+];
+/** Two children started without awaiting each in turn. */
+const twoAtOnce = j.command('twoAtOnce', twoIds, async (input, { run }) => {
+  await Promise.all(placeBoth(input.a, input.b, run));
+});
+const placePair = () => [OrderPlaced({ customerId: 'pair', total: 1 })];
+/** Two writes started without awaiting each in turn. */
+const twoWritesAtOnce = j.command('twoWritesAtOnce', twoIds, async (input, { write }) => {
+  await Promise.all([write(order, input.a, placePair), write(order, input.b, placePair)]);
+});
+/** Starts a write, does not await it, and throws. The write is still running when the handler leaves. */
+const throwsWithWriteRunning = j.command('throwsWithWriteRunning', twoIds, (input, { write }) => {
+  void write(order, input.a, placePair);
+  throw new Error('handler boom');
+});
+/** Starts a write, does not await it, and returns. */
+const returnsWithWriteRunning = j.command('returnsWithWriteRunning', twoIds, (input, { write }) => {
+  void write(order, input.a, placePair);
+  return Promise.resolve();
+});
+/** The same two children, awaited one at a time. */
+const twoInTurn = j.command('twoInTurn', twoIds, async (input, { run }) => {
+  await run(placeOrder, { orderId: input.a, customerId: 'pair', total: 1 });
+  await run(placeOrder, { orderId: input.b, customerId: 'pair', total: 1 });
+});
+
+// --- Types ------------------------------------------------------------------
+// The handler's input is the schema output; `run` takes the schema input.
+type HandlerArgs<C> = C extends { readonly handler: (...args: infer Args) => unknown } ? Args : never;
+const dated = j.command('dated', z.object({ at: z.string().transform(s => new Date(s)) }), input => {
+  expectTypeOf(input.at).toEqualTypeOf<Date>();
+  return input.at.getTime();
+});
+expectTypeOf(dated.name).toEqualTypeOf<string>();
+expectTypeOf(dated.input).toEqualTypeOf<z.ZodObject<{ at: z.ZodPipe<z.ZodString, z.ZodTransform<Date, string>> }>>();
+expectTypeOf<HandlerArgs<typeof placeOrder>[0]>().toEqualTypeOf<{
+  orderId: OrderId;
+  customerId: string;
+  total: number;
+}>();
+expectTypeOf<HandlerArgs<typeof placeOrder>[1]['tx']>().toEqualTypeOf<Db>();
+expectTypeOf<HandlerArgs<typeof placeOrder>[1]['meta']>().toEqualTypeOf<{ actorId: string }>();
+
+const foreignEvents = () => [ProfileOpened({ nick: 'a' })];
+const otherJ = initJournal({ meta: z.object({ tenant: z.string() }) });
+const foreignCommand = otherJ.command('foreign', z.object({}), () => 1);
+function typeChecks(): void {
+  void journal.run(db, dated, { at: '2026-01-01' }, meta);
+  // @ts-expect-error `run` takes the schema input, not the output.
+  void journal.run(db, dated, { at: new Date() }, meta);
+  // @ts-expect-error wrong input to `run`.
+  void journal.run(db, placeOrder, { orderId: 'ord_1', customerId: 1, total: 1 }, meta);
+  // @ts-expect-error meta must match the journal's meta schema.
+  void journal.run(db, countOrders, { customerId: 'c' }, { actorId: 1 });
+  // @ts-expect-error a command defined for another meta schema cannot run on this journal.
+  void journal.run(db, foreignCommand, {}, meta);
+  void j.command('nested', z.object({}), (_input, { run }) =>
+    run(placeOrder, { orderId: 'ord_1', customerId: 'c', total: 1 }),
+  );
+  // @ts-expect-error the child's input is checked too.
+  void j.command('nested-bad', z.object({}), (_input, { run }) => run(placeOrder, { orderId: 'ord_1' }));
+  // @ts-expect-error an event the entity does not declare.
+  void j.command('bad-event', z.object({}), (_input, { write }) => write(order, orderId(1), foreignEvents));
+  // @ts-expect-error the id must be the entity's key type.
+  void j.command('bad-id', z.object({}), (_input, { write }) => write(order, accountId(1), () => []));
+}
+void typeChecks;
+
+// --- Runtime ----------------------------------------------------------------
+beforeAll(async () => {
+  ({ db, client } = await openDb());
+  journal = j.create({ tables, projections: [customerStats], effects: [mail] });
+});
+
+afterAll(async () => {
+  await client.close();
+});
+
+const rowsOf = (id: OrderId) => db.select().from(orders).where(eq(orders.id, id));
+const eventsOf = (id: string) =>
+  db.select().from(tables.events).where(eq(tables.events.entityId, id)).orderBy(tables.events.version);
+const shape = (events: { type: string; data: unknown; meta: unknown; version: number }[]) =>
+  events.map(e => ({ type: e.type, data: e.data, meta: e.meta, version: e.version }));
+/** What a `noteOrder` child leaves behind for its second order: row, events, projection row, job rows. */
+const childTraces = async (parentId: OrderId, childId: OrderId) => {
+  const events = await eventsOf(childId);
+  const counts = await db
+    .select()
+    .from(customerOrderCounts)
+    .where(eq(customerOrderCounts.customerId, `child-of-${parentId}`));
+  const jobs =
+    events.length === 0
+      ? []
+      : await db
+          .select()
+          .from(tables.jobs)
+          .where(
+            inArray(
+              tables.jobs.eventSeq,
+              events.map(e => e.seq),
+            ),
+          );
+  const rows = await rowsOf(childId);
+  return { rows: rows.length, events: events.length, counts: counts.length, jobs: jobs.length };
+};
+
+describe('journal.run', () => {
+  it('parses the input before anything runs: bad input writes nothing', async () => {
+    // Why: jobs, webhooks and scripts rely on `run` as the one validation gate.
+    const id = orderId(++next);
+    await expect(journal.run(db, placeOrder, { orderId: id, customerId: '', total: 1 }, meta)).rejects.toBeInstanceOf(
+      z.ZodError,
+    );
+    expect(await rowsOf(id)).toEqual([]);
+    expect(await eventsOf(id)).toEqual([]);
+  });
+
+  it('parses meta once and every write records that parsed meta', async () => {
+    // Why: a command with several writes must not re-run meta transforms per write.
+    // Only the caller's raw value (lowercase) counts: the storage round-trip check and
+    // the decoding of each stored event parse the already-transformed value.
+    let parses = 0;
+    const loud = initJournal({
+      meta: z.object({
+        actorId: z.string().transform(v => {
+          if (v !== v.toUpperCase()) parses += 1;
+          return v.toUpperCase();
+        }),
+      }),
+    });
+    const twice = loud.command('twice', z.object({ orderId: orderIdSchema }), async (input, { write, meta }) => {
+      await write(order, input.orderId, () => [OrderPlaced({ customerId: 'twice', total: 1 })]);
+      await write(order, input.orderId, () => [OrderPaid({ amount: 1 })]);
+      return meta;
+    });
+    const id = orderId(++next);
+    const seen = await loud.create({ tables }).run(db, twice, { orderId: id }, { actorId: 'usr_x' });
+    expect(parses).toBe(1);
+    expect(seen).toEqual({ actorId: 'USR_X' });
+    const stored = await eventsOf(id);
+    expect(stored.map(e => e.meta)).toEqual([{ actorId: 'USR_X' }, { actorId: 'USR_X' }]);
+  });
+
+  it('two entities: a throw in the second write leaves neither written', async () => {
+    // Why: a command is one unit of work; a half-applied command is the bug this exists to prevent.
+    const id = orderId(++next);
+    const acc = accountId(++next);
+    await expect(journal.run(db, openBoth, { orderId: id, accountId: acc, nick: 'boom' }, meta)).rejects.toThrow(
+      'second write boom',
+    );
+    expect(await rowsOf(id)).toEqual([]);
+    expect(await db.select().from(profiles).where(eq(profiles.accountId, acc))).toEqual([]);
+    expect(await eventsOf(id)).toEqual([]);
+    expect(await eventsOf(acc)).toEqual([]);
+  });
+
+  it('given a transaction, runs in a savepoint: the caller can still roll it back', async () => {
+    // Why: a procedure that owns the transaction must stay in charge of the commit.
+    const id = orderId(++next);
+    await db
+      .transaction(async tx => {
+        await journal.run(tx, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
+        expect(await tx.select().from(orders).where(eq(orders.id, id))).toHaveLength(1);
+        tx.rollback();
+      })
+      .catch(() => 'rolled back');
+    expect(await rowsOf(id)).toEqual([]);
+    expect(await eventsOf(id)).toEqual([]);
+  });
+
+  it('nested run: a child that succeeds leaves its projection row and job row, so the rollback tests below can fail', async () => {
+    const id = orderId(++next);
+    const childId = orderId(++next);
+    await journal.run(db, placeThenNote, { orderId: id, childOrderId: childId, note: 'fine', catchChild: false }, meta);
+    expect(await childTraces(id, childId)).toEqual({ rows: 1, events: 2, counts: 1, jobs: 1 });
+  });
+
+  it('nested run: an uncaught child failure rolls back the parent too', async () => {
+    // Why: a parent that does not handle a child's failure must not keep its own half.
+    const id = orderId(++next);
+    const childId = orderId(++next);
+    await expect(
+      journal.run(db, placeThenNote, { orderId: id, childOrderId: childId, note: 'boom', catchChild: false }, meta),
+    ).rejects.toThrow('child boom');
+    expect(await rowsOf(id)).toEqual([]);
+    expect(await eventsOf(id)).toEqual([]);
+    expect(await childTraces(id, childId)).toEqual({ rows: 0, events: 0, counts: 0, jobs: 0 });
+  });
+
+  it('nested run: a caught child failure keeps the parent write and drops the whole child', async () => {
+    // Why: the child ran in its own savepoint, so its writes, its projection rows and its
+    // job rows all go, even though they happened before the throw.
+    const id = orderId(++next);
+    const childId = orderId(++next);
+    const result = await journal.run(
+      db,
+      placeThenNote,
+      { orderId: id, childOrderId: childId, note: 'boom', catchChild: true },
+      meta,
+    );
+    expect(result).toBe('done');
+    const [row] = await rowsOf(id);
+    expect(row).toMatchObject({ status: 'placed', note: 'none', version: 1 });
+    const stored = await eventsOf(id);
+    expect(stored.map(e => e.type)).toEqual(['OrderPlaced']);
+    expect(await childTraces(id, childId)).toEqual({ rows: 0, events: 0, counts: 0, jobs: 0 });
+  });
+
+  it('nested run: a child inside a child runs on its own savepoint and commits with the rest', async () => {
+    const id = orderId(++next);
+    const childId = orderId(++next);
+    await journal.run(db, placeViaChildren, { orderId: id, childOrderId: childId }, meta);
+    const [deep] = await rowsOf(id);
+    expect(deep).toMatchObject({ note: 'deep', version: 2 });
+    expect(await childTraces(id, childId)).toEqual({ rows: 1, events: 2, counts: 1, jobs: 1 });
+  });
+
+  it('two children started together are refused, and nothing from the command is committed', async () => {
+    // Why: savepoints are a stack. Two open at once release each other's work, so a caught
+    // failure of the second could erase what the first wrote. The second must not start.
+    const a = orderId(++next);
+    const b = orderId(++next);
+    await expect(journal.run(db, twoAtOnce, { a, b }, meta)).rejects.toThrow(
+      'journal: command "placeOrder" started on a transaction that already has a journal operation in flight; await operations on one transaction one at a time',
+    );
+    expect(await rowsOf(a)).toEqual([]);
+    expect(await rowsOf(b)).toEqual([]);
+    expect(await eventsOf(a)).toEqual([]);
+    expect(await eventsOf(b)).toEqual([]);
+  });
+
+  it('two bound writes started together are refused the same way', async () => {
+    const a = orderId(++next);
+    const b = orderId(++next);
+    await expect(journal.run(db, twoWritesAtOnce, { a, b }, meta)).rejects.toThrow(
+      `journal: write to order ${b} started on a transaction that already has a journal operation in flight`,
+    );
+    expect(await rowsOf(a)).toEqual([]);
+    expect(await rowsOf(b)).toEqual([]);
+  });
+
+  it('two low-level writes started together on one transaction are refused too', async () => {
+    const a = orderId(++next);
+    const b = orderId(++next);
+    await expect(
+      db.transaction(tx =>
+        Promise.all([
+          journal.write(tx, order, a, { meta, events: placePair }),
+          journal.write(tx, order, b, { meta, events: placePair }),
+        ]),
+      ),
+    ).rejects.toThrow(`journal: write to order ${b} started on a transaction`);
+    expect(await rowsOf(a)).toEqual([]);
+    expect(await rowsOf(b)).toEqual([]);
+  });
+
+  it('a handler that throws with a write still running: the write settles inside the transaction, then the handler error wins', async () => {
+    // Why: if the transaction closed while the write ran, the write's row and event would land
+    // after the rollback, outside any transaction, although the command failed.
+    const a = orderId(++next);
+    const b = orderId(++next);
+    await expect(journal.run(db, throwsWithWriteRunning, { a, b }, meta)).rejects.toThrow('handler boom');
+    expect(await rowsOf(a)).toEqual([]);
+    expect(await eventsOf(a)).toEqual([]);
+  });
+
+  it('a handler that returns with a write still running fails the command and rolls back', async () => {
+    // Why: "done" must mean every write of the command is in the transaction that commits.
+    const a = orderId(++next);
+    const b = orderId(++next);
+    await expect(journal.run(db, returnsWithWriteRunning, { a, b }, meta)).rejects.toThrow(
+      'journal: command "returnsWithWriteRunning" returned with 1 journal operation still running; await every write and run before the handler returns',
+    );
+    expect(await rowsOf(a)).toEqual([]);
+    expect(await eventsOf(a)).toEqual([]);
+  });
+
+  it('a second write with bad meta waits for the first write to settle before it rejects', async () => {
+    // Why: a rejection that jumps the queue makes the caller roll back while the first write
+    // is still running, so that write's rows land after the rollback.
+    const a = orderId(++next);
+    const b = orderId(++next);
+    await expect(
+      db.transaction(tx =>
+        Promise.all([
+          journal.write(tx, order, a, { meta, events: placePair }),
+          journal.write(tx, order, b, { meta: { actorId: '' }, events: placePair }),
+        ]),
+      ),
+    ).rejects.toThrow(`journal: write to order ${b} started on a transaction`);
+    expect(await rowsOf(a)).toEqual([]);
+    expect(await eventsOf(a)).toEqual([]);
+  });
+
+  it('a second run with bad meta waits the same way', async () => {
+    const a = orderId(++next);
+    const b = orderId(++next);
+    await expect(
+      db.transaction(tx =>
+        Promise.all([
+          journal.write(tx, order, a, { meta, events: placePair }),
+          journal.run(tx, placeOrder, { orderId: b, customerId: 'pair', total: 1 }, { actorId: '' }),
+        ]),
+      ),
+    ).rejects.toThrow('journal: command "placeOrder" started on a transaction');
+    expect(await rowsOf(a)).toEqual([]);
+    expect(await eventsOf(a)).toEqual([]);
+  });
+
+  it('two children awaited one at a time both commit', async () => {
+    const a = orderId(++next);
+    const b = orderId(++next);
+    await journal.run(db, twoInTurn, { a, b }, meta);
+    expect(await rowsOf(a)).toHaveLength(1);
+    expect(await rowsOf(b)).toHaveLength(1);
+  });
+
+  it('a command with no entity returns its value', async () => {
+    // Why: a command is the unit of validated, transactional work, even when no entity is involved.
+    await journal.run(db, placeOrder, { orderId: orderId(++next), customerId: 'counted', total: 1 }, meta);
+    await journal.run(db, placeOrder, { orderId: orderId(++next), customerId: 'counted', total: 2 }, meta);
+    const count = await journal.run(db, countOrders, { customerId: 'counted' }, meta);
+    expectTypeOf(count).toEqualTypeOf<number>();
+    expect(count).toBe(2);
+  });
+
+  it("a command's write produces the same row, events, projection and job rows as journal.write", async () => {
+    // Why: commands are a binding over `write`, not a second write path that could drift.
+    const viaCommand = orderId(++next);
+    const viaWrite = orderId(++next);
+    await journal.run(db, placeOrder, { orderId: viaCommand, customerId: 'cmp_a', total: 7 }, meta);
+    const paidByCommand = await journal.run(db, payOrder, { orderId: viaCommand, amount: 7 }, meta);
+    await db.transaction(tx =>
+      journal.write(tx, order, viaWrite, { meta, events: () => [OrderPlaced({ customerId: 'cmp_b', total: 7 })] }),
+    );
+    const paidByWrite = await db.transaction(tx =>
+      journal.write(tx, order, viaWrite, { meta, events: () => [OrderPaid({ amount: 7 })] }),
+    );
+
+    const { id: _a, customerId: _ca, ...rowA } = paidByCommand.row ?? {};
+    const { id: _b, customerId: _cb, ...rowB } = paidByWrite.row ?? {};
+    expect(rowA).toEqual(rowB);
+    const storedA = await eventsOf(viaCommand);
+    const storedB = await eventsOf(viaWrite);
+    expect(shape(storedA)).toEqual(
+      shape(storedB).map(e => (e.type === 'OrderPlaced' ? { ...e, data: { customerId: 'cmp_a', total: 7 } } : e)),
+    );
+    const counts = await db
+      .select()
+      .from(customerOrderCounts)
+      .where(inArray(customerOrderCounts.customerId, ['cmp_a', 'cmp_b']));
+    expect(counts.map(c => c.placed)).toEqual([1, 1]);
+    const jobsFor = (seqs: number[]) =>
+      db.select({ effect: tables.jobs.effect }).from(tables.jobs).where(inArray(tables.jobs.eventSeq, seqs));
+    expect(await jobsFor(storedA.map(e => e.seq))).toEqual([{ effect: 'order-mail' }]);
+    expect(await jobsFor(storedB.map(e => e.seq))).toEqual([{ effect: 'order-mail' }]);
+  });
+
+  it('the bound write callback receives the locked row and the write transaction', async () => {
+    // Why: rules read the row and related rows under the lock; the callback shape must match `journal.write`.
+    const id = orderId(++next);
+    const first = await journal.run(db, inspectOrder, { orderId: id }, meta);
+    expect(first).toEqual({ row: null, events: [] });
+    await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
+    const second = await journal.run(db, inspectOrder, { orderId: id }, meta);
+    expect(second.row?.note).toBe('row v1, tx saw 1');
+  });
+});

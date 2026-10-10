@@ -1,6 +1,17 @@
-import { sql } from 'drizzle-orm';
-import { bigint, bigserial, index, integer, jsonb, pgTable, text, timestamp, unique, varchar } from 'drizzle-orm/pg-core';
 import type { PgSchema, PgTableFn } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import {
+  bigint,
+  bigserial,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  varchar,
+} from 'drizzle-orm/pg-core';
 
 /**
  * The two journal tables. Call this once in the app's schema module so

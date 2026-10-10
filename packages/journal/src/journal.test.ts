@@ -1,21 +1,22 @@
 import type { PGlite } from '@electric-sql/pglite';
+import type { PgInsertValue, PgTable } from 'drizzle-orm/pg-core';
+import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq, sql } from 'drizzle-orm';
 import { integer, jsonb, pgTable, varchar } from 'drizzle-orm/pg-core';
-import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
+import type { Db, PendingOf } from './types.js';
 import { isJournalError, JournalError } from './errors.js';
 import { initJournal, sortedByVersion } from './journal.js';
-import type { PendingOf } from './types.js';
 import {
   customerOrderCounts,
   j,
   meta,
   openDb,
   order,
-  orderId,
   OrderCancelled,
+  orderId,
   OrderNoted,
   OrderPaid,
   OrderPlaced,
@@ -53,9 +54,17 @@ const mail = j.effect('order-mail', order, {
   },
 });
 
+/** The notes in the order the projection saw them. */
+const noted: string[] = [];
+const noteLog = j.projection('note-log', order, {
+  OrderNoted: (_tx, e) => {
+    noted.push(e.data.note);
+  },
+});
+
 beforeAll(async () => {
   ({ db, client } = await openDb());
-  journal = j.create({ tables, projections: [customerStats, flaky], effects: [mail] });
+  journal = j.create({ tables, projections: [customerStats, flaky, noteLog], effects: [mail] });
 });
 
 afterAll(async () => {
@@ -63,15 +72,13 @@ afterAll(async () => {
 });
 
 const place = (id: ReturnType<typeof orderId>, customerId = 'cus_1') =>
-  db.transaction(tx =>
-    journal.write(tx, order, id, { meta, decide: () => [OrderPlaced({ customerId, total: 100 })] }),
-  );
+  db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId, total: 100 })] }));
 
 const pay = (id: ReturnType<typeof orderId>) =>
-  db.transaction(tx => journal.write(tx, order, id, { meta, decide: () => [OrderPaid({ amount: 100 })] }));
+  db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 100 })] }));
 
 const cancel = (id: ReturnType<typeof orderId>) =>
-  db.transaction(tx => journal.write(tx, order, id, { meta, decide: () => [OrderCancelled({ reason: 'x' })] }));
+  db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderCancelled({ reason: 'x' })] }));
 
 const history = (id: string) =>
   db.select().from(tables.events).where(eq(tables.events.entityId, id)).orderBy(tables.events.version);
@@ -99,7 +106,9 @@ describe('write', () => {
     expect(result.events).toHaveLength(1);
     expect(result.events[0]).toMatchObject({ type: 'OrderPlaced', version: 1, entityId: id, kind: 'order', meta });
     expect(result.events[0]?.id).toMatch(/^evt_/);
-    expectTypeOf(result.events[0]?.type).toEqualTypeOf<'OrderPlaced' | 'OrderPaid' | 'OrderNoted' | 'OrderCancelled' | undefined>();
+    expectTypeOf(result.events[0]?.type).toEqualTypeOf<
+      'OrderPlaced' | 'OrderPaid' | 'OrderNoted' | 'OrderCancelled' | undefined
+    >();
     expect(await rowOf(id)).toMatchObject({ status: 'placed', version: 1 });
   });
 
@@ -125,17 +134,19 @@ describe('write', () => {
     const result = await db.transaction(tx =>
       journal.write(tx, order, id, {
         meta,
-        decide: () => [OrderPlaced({ customerId: 'cus_2', total: 5 }), OrderPaid({ amount: 5 })],
+        events: () => [OrderPlaced({ customerId: 'cus_2', total: 5 }), OrderPaid({ amount: 5 })],
       }),
     );
     expect(result.row).toMatchObject({ status: 'paid', version: 2 });
     expect(result.events.map(e => e.version)).toEqual([1, 2]);
   });
 
-  it('decide returning [] writes nothing and returns the current row', async () => {
+  it('events returning [] writes nothing and returns the current row', async () => {
     const id = orderId(++next);
     await place(id);
-    const result = await db.transaction(tx => journal.write(tx, order, id, { meta, decide: row => (row?.status === 'placed' ? [] : [])}));
+    const result = await db.transaction(tx =>
+      journal.write(tx, order, id, { meta, events: row => (row?.status === 'placed' ? [] : []) }),
+    );
     expect(result.events).toEqual([]);
     expect(result.row).toMatchObject({ version: 1 });
     expect(await countRows(history(id))).toBe(1);
@@ -149,7 +160,7 @@ describe('write', () => {
           meta,
           // The type system blocks this; the runtime check is what the log relies on.
           // @ts-expect-error -- Unrelated is not declared on `order`
-          decide: () => [Unrelated({})],
+          events: () => [Unrelated({})],
         }),
       ),
     ).rejects.toMatchObject({ code: 'UNKNOWN_EVENT' });
@@ -166,7 +177,7 @@ describe('write', () => {
   it('rejects bad meta before touching the database', async () => {
     const id = orderId(++next);
     await expect(
-      db.transaction(tx => journal.write(tx, order, id, { meta: { actorId: '' }, decide: () => [] })),
+      db.transaction(tx => journal.write(tx, order, id, { meta: { actorId: '' }, events: () => [] })),
     ).rejects.toThrow();
   });
 
@@ -205,8 +216,8 @@ describe('write', () => {
     failProjection = true;
     try {
       await db.transaction(async tx => {
-        await journal.write(tx, order, id, { meta, decide: () => [OrderPaid({ amount: 100 })] }).catch(() => null);
-        await journal.write(tx, order, other, { meta, decide: () => [OrderPlaced({ customerId: 'cus_3', total: 1 })] });
+        await journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 100 })] }).catch(() => null);
+        await journal.write(tx, order, other, { meta, events: () => [OrderPlaced({ customerId: 'cus_3', total: 1 })] });
       });
     } finally {
       failProjection = false;
@@ -228,8 +239,14 @@ describe('write', () => {
     const id = orderId(++next);
     const placed = await place(id);
     const paid = await pay(id);
-    const forPlaced = await db.select().from(tables.jobs).where(eq(tables.jobs.eventSeq, placed.events[0]?.seq ?? -1));
-    const forPaid = await db.select().from(tables.jobs).where(eq(tables.jobs.eventSeq, paid.events[0]?.seq ?? -1));
+    const forPlaced = await db
+      .select()
+      .from(tables.jobs)
+      .where(eq(tables.jobs.eventSeq, placed.events[0]?.seq ?? -1));
+    const forPaid = await db
+      .select()
+      .from(tables.jobs)
+      .where(eq(tables.jobs.eventSeq, paid.events[0]?.seq ?? -1));
     expect(forPlaced).toHaveLength(0);
     expect(forPaid).toHaveLength(1);
     expect(forPaid[0]).toMatchObject({ effect: 'order-mail', attempts: 0 });
@@ -241,7 +258,7 @@ describe('write', () => {
     // differ, repair would silently rewrite data. The OrderNoted reducer sets only `note`.
     const id = orderId(++next);
     await place(id, 'cus_same');
-    await db.transaction(tx => journal.write(tx, order, id, { meta, decide: () => [OrderNoted({ note: 'gift' })] }));
+    await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderNoted({ note: 'gift' })] }));
     const written = await pay(id);
     const replayed = await journal.replay(db, order, id);
     expect(written.row).toMatchObject({ customerId: 'cus_same', total: 100, status: 'paid', note: 'gift', version: 3 });
@@ -258,8 +275,8 @@ describe('write', () => {
       .on(Touched, () => ({ status: undefined, note: 'touched' }));
     const bare = j.create({ tables });
     const id = orderId(++next);
-    await db.transaction(tx => bare.write(tx, touchy, id, { meta, decide: () => [Opened({})] }));
-    const result = await db.transaction(tx => bare.write(tx, touchy, id, { meta, decide: () => [Touched({})] }));
+    await db.transaction(tx => bare.write(tx, touchy, id, { meta, events: () => [Opened({})] }));
+    const result = await db.transaction(tx => bare.write(tx, touchy, id, { meta, events: () => [Touched({})] }));
     expect(result.row).toMatchObject({ status: 'placed', note: 'touched' });
     const replayed = await bare.replay(db, touchy, id);
     expect(replayed.row).toEqual({ id, version: 2, customerId: 'c', total: 1, status: 'placed', note: 'touched' });
@@ -272,14 +289,14 @@ describe('write', () => {
     const oneStepId = orderId(++next);
     for (const id of [twoStepId, oneStepId]) {
       await place(id);
-      await db.transaction(tx => journal.write(tx, order, id, { meta, decide: () => [OrderNoted({ note: 'gift' })] }));
+      await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderNoted({ note: 'gift' })] }));
     }
     await cancel(twoStepId);
     const twoStep = await place(twoStepId, 'cus_again');
     const oneStep = await db.transaction(tx =>
       journal.write(tx, order, oneStepId, {
         meta,
-        decide: () => [OrderCancelled({ reason: 'x' }), OrderPlaced({ customerId: 'cus_again', total: 100 })],
+        events: () => [OrderCancelled({ reason: 'x' }), OrderPlaced({ customerId: 'cus_again', total: 100 })],
       }),
     );
     expect(twoStep.row).toMatchObject({ note: 'none', customerId: 'cus_again', version: 4 });
@@ -294,18 +311,20 @@ describe('write', () => {
     await place(id);
     const handBuilt: PendingOf<typeof OrderPaid> = { type: 'OrderPaid', data: { amount: -1 } };
     await expect(
-      db.transaction(tx => journal.write(tx, order, id, { meta, decide: () => [handBuilt] })),
+      db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [handBuilt] })),
     ).rejects.toBeInstanceOf(z.ZodError);
     expect(await versions(id)).toEqual([1]);
   });
 
   it('a schema that changes its own output is UNSTABLE_SCHEMA, because replay would read a different value', async () => {
     const Bumped = j.event('Bumped', z.object({ n: z.number().transform(n => n + 1) }));
-    const shaky = j.entity('shaky', orders).create(Bumped, e => ({ customerId: 'c', total: e.data.n, status: 'placed' }));
+    const shaky = j
+      .entity('shaky', orders)
+      .create(Bumped, e => ({ customerId: 'c', total: e.data.n, status: 'placed' }));
     const bare = j.create({ tables });
     const id = orderId(++next);
     await expect(
-      db.transaction(tx => bare.write(tx, shaky, id, { meta, decide: () => [Bumped({ n: 1 })] })),
+      db.transaction(tx => bare.write(tx, shaky, id, { meta, events: () => [Bumped({ n: 1 })] })),
     ).rejects.toMatchObject({ code: 'UNSTABLE_SCHEMA', message: expect.stringContaining('Bumped') });
     expect(await history(id)).toHaveLength(0);
   });
@@ -316,7 +335,9 @@ describe('write', () => {
     const pinged = dated.entity('pinged', orders).create(Ping, () => ({ customerId: 'c', total: 1, status: 'placed' }));
     const bare = dated.create({ tables });
     await expect(
-      db.transaction(tx => bare.write(tx, pinged, orderId(++next), { meta: { at: new Date() }, decide: () => [Ping({})] })),
+      db.transaction(tx =>
+        bare.write(tx, pinged, orderId(++next), { meta: { at: new Date() }, events: () => [Ping({})] }),
+      ),
     ).rejects.toMatchObject({ code: 'UNSTABLE_SCHEMA' });
   });
 
@@ -332,7 +353,7 @@ describe('write', () => {
     for (const bag of [new Set(['a']), new Map([['k', 1]]), new Box()]) {
       const id = orderId(++next);
       await expect(
-        db.transaction(tx => bare.write(tx, loose, id, { meta, decide: () => [Loose({ bag })] })),
+        db.transaction(tx => bare.write(tx, loose, id, { meta, events: () => [Loose({ bag })] })),
       ).rejects.toMatchObject({ code: 'UNSTABLE_SCHEMA' });
       expect(await history(id)).toHaveLength(0);
     }
@@ -344,7 +365,7 @@ describe('write', () => {
     const bare = j.create({ tables });
     const id = orderId(++next);
     const failure: unknown = await db
-      .transaction(tx => bare.write(tx, big, id, { meta, decide: () => [Big({ n: 1n })] }))
+      .transaction(tx => bare.write(tx, big, id, { meta, events: () => [Big({ n: 1n })] }))
       .catch((error: unknown) => error);
     if (!isJournalError(failure)) throw new Error(`expected a JournalError, got ${String(failure)}`);
     expect(failure.code).toBe('UNSTABLE_SCHEMA');
@@ -367,10 +388,13 @@ describe('write', () => {
     const bare = j.create({ tables, projections: [keyCount] });
     const data = { n: 1, bonus: 10 };
     const handBuilt: PendingOf<typeof Counted> = { type: 'Counted', data };
-    const written = await db.transaction(tx => bare.write(tx, counted, id, { meta, decide: () => [handBuilt] }));
+    const written = await db.transaction(tx => bare.write(tx, counted, id, { meta, events: () => [handBuilt] }));
     expect(written.row?.total).toBe(1);
     expect(written.events.map(e => e.data)).toStrictEqual([{ n: 1 }]);
-    const [count] = await db.select().from(customerOrderCounts).where(eq(customerOrderCounts.customerId, `keys_${id}`));
+    const [count] = await db
+      .select()
+      .from(customerOrderCounts)
+      .where(eq(customerOrderCounts.customerId, `keys_${id}`));
     expect(count?.placed).toBe(1);
     const replayedCount = await bare.replay(db, counted, id);
     expect(replayedCount.row?.total).toBe(1);
@@ -384,7 +408,7 @@ describe('write', () => {
       .create(Opened, () => ({ customerId: 'c', total: 1, status: 'placed', note: undefined }));
     const bare = j.create({ tables });
     const id = orderId(++next);
-    const written = await db.transaction(tx => bare.write(tx, blank, id, { meta, decide: () => [Opened({})] }));
+    const written = await db.transaction(tx => bare.write(tx, blank, id, { meta, events: () => [Opened({})] }));
     expect(written.row?.note).toBe('none');
     const replayed = await bare.replay(db, blank, id);
     expect(replayed.row).toStrictEqual({ id, version: 1, customerId: 'c', total: 1, status: 'placed' });
@@ -403,8 +427,8 @@ describe('write', () => {
       .on(Copied, row => ({ customerId: row.note ?? 'absent' }));
     const bare = j.create({ tables });
     const id = orderId(++next);
-    await db.transaction(tx => bare.write(tx, leaky, id, { meta, decide: () => [Opened({})] }));
-    const written = await db.transaction(tx => bare.write(tx, leaky, id, { meta, decide: () => [Copied({})] }));
+    await db.transaction(tx => bare.write(tx, leaky, id, { meta, events: () => [Opened({})] }));
+    const written = await db.transaction(tx => bare.write(tx, leaky, id, { meta, events: () => [Copied({})] }));
     expect(written.row?.customerId).toBe('none');
     const replayedLeaky = await bare.replay(db, leaky, id);
     expect(replayedLeaky.row?.customerId).toBe('absent');
@@ -452,7 +476,7 @@ describe('write', () => {
     await db.insert(orders).values({ id, customerId: 'cus_x', total: 1, status: 'placed', version: 1 });
     await db.update(orders).set({ version: 0 }).where(eq(orders.id, id));
     await expect(
-      db.transaction(tx => journal.write(tx, order, id, { meta, decide: () => [OrderPaid({ amount: 1 })] })),
+      db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] })),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 });
@@ -504,9 +528,21 @@ describe('replay, verify, repair', () => {
     await expect(journal.replay(db, order, id)).rejects.toMatchObject({ code: 'NO_HISTORY' });
     await expect(journal.verify(db, order, id)).rejects.toMatchObject({ code: 'NO_HISTORY' });
     await expect(journal.repair(db, order, id)).rejects.toSatisfy((e: unknown) => isJournalError(e, 'NO_HISTORY'));
+    // Its history starts at version 2: version 1 is reserved for a real create.
     const paid = await pay(id);
-    expect(paid.row).toMatchObject({ status: 'paid', version: 1 });
-    expect(await versions(id)).toEqual([1]);
+    expect(paid.row).toMatchObject({ status: 'paid', version: 2 });
+    expect(await versions(id)).toEqual([2]);
+  });
+
+  it('upTo cannot hide NO_HISTORY: a history that starts at version 2 is incomplete at any cut', async () => {
+    // Why: `upTo: 1` on a log that starts at 2 would select nothing and read as "no entity",
+    // when the truth is "an entity whose history cannot be replayed". The row is deleted
+    // through the journal so that no stored row gives the game away.
+    const id = orderId(++next);
+    await db.insert(orders).values({ id, customerId: 'legacy', total: 7, status: 'placed' });
+    await cancel(id);
+    expect(await versions(id)).toEqual([2]);
+    await expect(journal.replay(db, order, id, { upTo: 1 })).rejects.toMatchObject({ code: 'NO_HISTORY' });
   });
 
   it('replay of an entity with no row and no events is an empty result, not an error', async () => {
@@ -529,8 +565,10 @@ describe('replay, verify, repair', () => {
 
   it('catalog lists entities, projections and effects', () => {
     expect(journal.catalog).toEqual({
-      entities: [{ kind: 'order', table: 'orders', events: ['OrderPlaced', 'OrderPaid', 'OrderNoted', 'OrderCancelled'] }],
-      projections: ['customer-stats', 'flaky'],
+      entities: [
+        { kind: 'order', table: 'orders', events: ['OrderPlaced', 'OrderPaid', 'OrderNoted', 'OrderCancelled'] },
+      ],
+      projections: ['customer-stats', 'flaky', 'note-log'],
       effects: ['order-mail'],
     });
   });
@@ -542,8 +580,57 @@ describe('replay, verify, repair', () => {
   });
 });
 
+/**
+ * A transaction whose insert into the events table stores the rows in reverse,
+ * so RETURNING hands them back in reverse. Savepoints it opens are wrapped too.
+ */
+const reversing = (tx: Db): Db =>
+  new Proxy(tx, {
+    get(target, prop, receiver) {
+      if (prop === 'transaction') {
+        return <T>(run: (sp: Db) => Promise<T>) => target.transaction(sp => run(reversing(sp)));
+      }
+      if (prop === 'insert') {
+        return (table: PgTable) => {
+          if (table !== tables.events) return target.insert(table);
+          const builder = target.insert(tables.events);
+          return new Proxy(builder, {
+            get(inner, name, innerReceiver) {
+              if (name !== 'values') return Reflect.get(inner, name, innerReceiver);
+              return (rows: PgInsertValue<typeof tables.events>[]) => inner.values(rows.toReversed());
+            },
+          });
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+
 describe('rows returned by the events insert', () => {
-  it('are put back in ascending version order, whatever order Postgres returned them in', () => {
+  it('are folded, returned and projected in version order even when the insert returns them reversed', async () => {
+    // Why: Postgres does not promise the order of RETURNING. OrderNoted keeps the last note,
+    // so a fold in returned order would keep the first one and disagree with replay.
+    const id = orderId(++next);
+    await place(id);
+    noted.length = 0;
+    const result = await db.transaction(tx =>
+      journal.write(reversing(tx), order, id, {
+        meta,
+        events: () => [OrderNoted({ note: 'a' }), OrderNoted({ note: 'b' }), OrderNoted({ note: 'c' })],
+      }),
+    );
+    expect(result.row).toMatchObject({ note: 'c', version: 4 });
+    expect(result.events.map(e => [e.version, e.data])).toEqual([
+      [2, { note: 'a' }],
+      [3, { note: 'b' }],
+      [4, { note: 'c' }],
+    ]);
+    expect(noted).toEqual(['a', 'b', 'c']);
+    expect(await journal.replay(db, order, id)).toMatchObject({ row: { note: 'c', version: 4 } });
+    expect(await journal.verify(db, order, id)).toEqual({ ok: true });
+  });
+
+  it('sortedByVersion sorts a copy', () => {
     const returned = [{ version: 3 }, { version: 1 }, { version: 2 }];
     expect(sortedByVersion(returned).map(row => row.version)).toEqual([1, 2, 3]);
     expect(returned.map(row => row.version)).toEqual([3, 1, 2]);
@@ -552,22 +639,30 @@ describe('rows returned by the events insert', () => {
 
 describe('duplicate handler names', () => {
   it('two effects with the same name are rejected, naming the duplicate', () => {
-    const first = j.effect('mail', order, { OrderPaid: () => {
-      /* handler body is irrelevant */
-    } });
-    const second = j.effect('mail', order, { OrderPlaced: () => {
-      /* handler body is irrelevant */
-    } });
+    const first = j.effect('mail', order, {
+      OrderPaid: () => {
+        /* handler body is irrelevant */
+      },
+    });
+    const second = j.effect('mail', order, {
+      OrderPlaced: () => {
+        /* handler body is irrelevant */
+      },
+    });
     expect(() => j.create({ tables, effects: [first, second] })).toThrow(/effect.*"mail"/);
   });
 
   it('two projections with the same name are rejected, naming the duplicate', () => {
-    const first = j.projection('stats', order, { OrderPaid: () => {
-      /* handler body is irrelevant */
-    } });
-    const second = j.projection('stats', order, { OrderPlaced: () => {
-      /* handler body is irrelevant */
-    } });
+    const first = j.projection('stats', order, {
+      OrderPaid: () => {
+        /* handler body is irrelevant */
+      },
+    });
+    const second = j.projection('stats', order, {
+      OrderPlaced: () => {
+        /* handler body is irrelevant */
+      },
+    });
     expect(() => j.create({ tables, projections: [first, second] })).toThrow(/projection.*"stats"/);
   });
 });
@@ -582,10 +677,12 @@ describe('verify on JSON columns', () => {
   const doc = j.entity('doc', docs).create(Opened, () => ({ payload: {} }));
 
   it('an object turned into an array by hand is reported as drift', async () => {
-    await db.execute(sql`create table docs (id varchar(256) primary key, payload jsonb not null, version integer not null default 0)`);
+    await db.execute(
+      sql`create table docs (id varchar(256) primary key, payload jsonb not null, version integer not null default 0)`,
+    );
     const bare = j.create({ tables });
     const id = `doc_${++next}`;
-    await db.transaction(tx => bare.write(tx, doc, id, { meta, decide: () => [Opened({})] }));
+    await db.transaction(tx => bare.write(tx, doc, id, { meta, events: () => [Opened({})] }));
     expect(await bare.verify(db, doc, id)).toEqual({ ok: true });
     await db.update(docs).set({ payload: [] }).where(eq(docs.id, id));
     expect(await bare.verify(db, doc, id)).toMatchObject({ ok: false });

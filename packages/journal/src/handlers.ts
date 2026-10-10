@@ -9,8 +9,11 @@ import type {
   ProjectionHandlers,
   Recorded,
 } from './types.js';
+import { assertStoredName } from './id.js';
 
-type Erased<Meta, Args extends unknown[]> = Partial<Record<string, Fn<[...Args, event: Recorded<string, unknown, Meta>], unknown>>>;
+type Erased<Meta, Args extends unknown[]> = Partial<
+  Record<string, Fn<[...Args, event: Recorded<string, unknown, Meta>], unknown>>
+>;
 
 /** An entity has a `kind`; an array of entities does not. */
 function toList<E extends { readonly kind: string }>(entity: E | readonly E[]): readonly E[] {
@@ -30,12 +33,12 @@ function declaredTypes(handlers: Partial<Record<string, unknown>>): ReadonlySet<
   return new Set(Object.keys(handlers).filter(key => ownHandler(handlers, key) !== undefined));
 }
 
-export function defineProjection<E extends AnyEntity<Meta>, Meta>(
+export function defineProjection<E extends AnyEntity<Meta>, Meta, Tx extends Db>(
   name: string,
   entity: E | readonly E[],
-  on: NoInfer<ProjectionHandlers<E, Meta>>,
-): Projection<Meta> {
-  const handlers: Erased<Meta, [tx: Db]> = on;
+  on: NoInfer<ProjectionHandlers<E, Meta, Tx>>,
+): Projection<Meta, Tx> {
+  const handlers: Erased<Meta, [tx: Tx]> = on;
   return {
     name,
     entities: toList(entity),
@@ -52,6 +55,7 @@ export function defineEffect<E extends AnyEntity<Meta>, Meta>(
   entity: E | readonly E[],
   on: NoInfer<EffectHandlers<E, Meta>>,
 ): Effect<Meta> {
+  assertStoredName('effect name', name);
   const handlers: Partial<Record<string, Fn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext], unknown>>> =
     on;
   return {
