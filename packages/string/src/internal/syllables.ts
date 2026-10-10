@@ -36,3 +36,48 @@ export function wordSyllables(word: string): number {
 
   return Math.max(1, w.match(VOWEL_GROUP)?.length ?? 0);
 }
+
+export type SyllableLanguage = 'en' | 'es' | 'de';
+
+const ES_LETTERS_ONLY = /[^a-záéíóúüñ]/g;
+/** Silent `u` in `que`, `qui`, `gue`, `gui`. */
+const ES_SILENT_U = /([qg])u(?=[eéií])/g;
+/** `y` is a vowel unless a vowel follows it (`hoy`, `rey` vs `yo`). */
+const ES_VOWEL_Y = /y(?![aeiouáéíóú])/g;
+const ES_VOWEL_GROUP = /[aeiouáéíóúü]+/g;
+/** Strong vowels, plus accented weak ones, which break a diphthong (`río`, `país`). */
+const ES_STRONG = /[aeoáéóíú]/;
+
+/** Spanish: vowel groups, split at hiatus (two strong vowels, or an accented `i`/`u`). */
+export function spanishSyllables(word: string): number {
+  const w = word
+    .toLowerCase()
+    .replaceAll(ES_LETTERS_ONLY, '')
+    .replaceAll(ES_SILENT_U, '$1')
+    .replaceAll(ES_VOWEL_Y, 'i');
+  if (w.length === 0) return 0;
+  let count = 0;
+  for (const group of w.match(ES_VOWEL_GROUP) ?? []) {
+    count += 1;
+    for (let i = 1; i < group.length; i += 1) {
+      if (ES_STRONG.test(group.charAt(i - 1)) && ES_STRONG.test(group.charAt(i))) count += 1;
+    }
+  }
+  return Math.max(1, count);
+}
+
+const DE_LETTERS_ONLY = /[^a-zäöüß]/g;
+const DE_VOWEL_GROUP = /[aeiouyäöü]+/g;
+
+/** German: one syllable per vowel group (`ei`, `eu`, `äu`, `ie` are single sounds). */
+export function germanSyllables(word: string): number {
+  const w = word.toLowerCase().replaceAll(DE_LETTERS_ONLY, '');
+  if (w.length === 0) return 0;
+  return Math.max(1, w.match(DE_VOWEL_GROUP)?.length ?? 0);
+}
+
+export function syllableCounter(language: SyllableLanguage): (word: string) => number {
+  if (language === 'es') return spanishSyllables;
+  if (language === 'de') return germanSyllables;
+  return wordSyllables;
+}

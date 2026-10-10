@@ -3,6 +3,7 @@
 import type { TextAnalysis } from './analysis.js';
 import { length } from '../unicode.js';
 import { sum } from './math.js';
+import { germanSyllables, spanishSyllables } from './syllables.js';
 
 export type ReadabilityLevel =
   'Very Easy' | 'Easy' | 'Fairly Easy' | 'Standard' | 'Fairly Difficult' | 'Difficult' | 'Very Confusing';
@@ -108,4 +109,44 @@ export function readabilityOf(a: TextAnalysis): ReadabilityScores {
     lix: lixOf(a),
     fleschReadingEaseLevel: fleschReadingEaseLevel(flesch),
   };
+}
+
+function clamp100(score: number): number {
+  return Math.min(100, Math.max(0, score));
+}
+
+/** Spanish Flesch adaptation (Fernández Huerta, 1959): 206.84 − 60·syllables/word − 1.02·words/sentence. */
+export function fernandezHuertaOf(a: TextAnalysis): number {
+  if (isEmpty(a)) return 100;
+  const syllables = sum(a.words.map(word => Math.max(1, spanishSyllables(word)))) / a.words.length;
+  return clamp100(206.84 - 60 * syllables - 1.02 * wordsPerSentence(a));
+}
+
+/** Spanish INFLESZ scale (Szigriszt Pazos, 1993): 206.835 − 62.3·syllables/word − words/sentence. */
+export function szigrisztPazosOf(a: TextAnalysis): number {
+  if (isEmpty(a)) return 100;
+  const syllables = sum(a.words.map(word => Math.max(1, spanishSyllables(word)))) / a.words.length;
+  return clamp100(206.835 - 62.3 * syllables - wordsPerSentence(a));
+}
+
+/** German Flesch adaptation (Amstad, 1978): 180 − words/sentence − 58.5·syllables/word. */
+export function fleschAmstadOf(a: TextAnalysis): number {
+  if (isEmpty(a)) return 100;
+  const syllables = sum(a.words.map(word => Math.max(1, germanSyllables(word)))) / a.words.length;
+  return clamp100(180 - wordsPerSentence(a) - 58.5 * syllables);
+}
+
+/**
+ * First Wiener Sachtextformel (Bamberger & Vanecek, 1984), a German school grade:
+ * 0.1935·MS + 0.1672·SL + 0.1297·IW − 0.0327·ES − 0.875, with MS = % words of 3+ syllables,
+ * SL = words per sentence, IW = % words over six letters, ES = % one-syllable words.
+ */
+export function wienerSachtextformelOf(a: TextAnalysis): number {
+  if (isEmpty(a)) return 0;
+  const syllables = a.words.map(word => Math.max(1, germanSyllables(word)));
+  const total = a.words.length;
+  const ms = (syllables.filter(count => count >= 3).length / total) * 100;
+  const iw = (a.words.filter(word => length(word) > 6).length / total) * 100;
+  const es = (syllables.filter(count => count === 1).length / total) * 100;
+  return Math.max(0, 0.1935 * ms + 0.1672 * wordsPerSentence(a) + 0.1297 * iw - 0.0327 * es - 0.875);
 }

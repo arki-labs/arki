@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   automatedReadabilityIndex,
   colemanLiauIndex,
+  fernandezHuerta,
+  fleschAmstad,
   fleschKincaidGrade,
   fleschReadingEase,
   fleschReadingEaseLevel,
@@ -13,6 +15,8 @@ import {
   smogIndex,
   speakingTime,
   syllableCount,
+  szigrisztPazos,
+  wienerSachtextformel,
 } from './readability.js';
 
 const EASY =
@@ -133,5 +137,53 @@ describe('option validation', () => {
   it('rejects non-finite reading speeds', () => {
     expect(() => readingTime('a b', { wordsPerMinute: Number.POSITIVE_INFINITY })).toThrow(RangeError);
     expect(() => speakingTime('a b', { wordsPerMinute: Number.NaN })).toThrow(RangeError);
+  });
+});
+
+describe('Spanish and German', () => {
+  it.each([
+    ['casa', 2],
+    ['árbol', 2],
+    ['murciélago', 4],
+    ['río', 2],
+    ['país', 2],
+    ['guerra', 2],
+    ['que', 1],
+    ['hoy', 1],
+    ['poeta', 3],
+    ['ciudad', 2],
+    ['aéreo', 4],
+    ['Universidad', 5],
+  ])('es: %s → %i', (word, expected) => {
+    expect(syllableCount(word, { language: 'es' })).toBe(expected);
+  });
+
+  it.each([
+    ['Haus', 1],
+    ['Lesbarkeit', 3],
+    ['Straße', 2],
+    ['Universität', 5],
+    ['Mädchen', 2],
+    ['Europa', 3],
+    ['Bäume', 2],
+    ['Familie', 3],
+    ['schnell', 1],
+  ])('de: %s → %i', (word, expected) => {
+    expect(syllableCount(word, { language: 'de' })).toBe(expected);
+  });
+
+  it('rates simple prose easier than academic prose in each language', () => {
+    const esEasy = 'El perro corre. El gato duerme. Hoy hace sol.';
+    const esHard =
+      'La implementación de metodologías interdisciplinarias requiere una evaluación exhaustiva de las consideraciones epistemológicas correspondientes.';
+    expect(fernandezHuerta(esEasy)).toBeGreaterThan(fernandezHuerta(esHard));
+    expect(szigrisztPazos(esEasy)).toBeGreaterThan(szigrisztPazos(esHard));
+    const deEasy = 'Der Hund läuft. Die Katze schläft. Heute ist es warm.';
+    const deHard =
+      'Die Berücksichtigung wissenschaftstheoretischer Grundsatzfragen erfordert eine interdisziplinäre Herangehensweise an die Problemstellung.';
+    expect(fleschAmstad(deEasy)).toBeGreaterThan(fleschAmstad(deHard));
+    expect(wienerSachtextformel(deEasy)).toBeLessThan(wienerSachtextformel(deHard));
+    expect(fernandezHuerta('')).toBe(100);
+    expect(wienerSachtextformel('')).toBe(0);
   });
 });

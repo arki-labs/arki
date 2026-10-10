@@ -73,25 +73,25 @@ decomposed form.
 
 ## API by concern
 
-| Subpath        | Functions                                                                                                                                                                                                             |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/unicode`     | `graphemes`, `length`, `at`, `slice`, `take`, `reverse`, `splice`, `chunk`, `graphemeBoundaries`                                                                                                                      |
-| `/case`        | `caseWords`, `camelCase`, `pascalCase`, `snakeCase`, `kebabCase`, `constantCase`, `dotCase`, `pathCase`, `titleCase`, `sentenceCase`, `capitalize`, `uncapitalize`                                                    |
-| `/format`      | `collapseWhitespace`, `squish`, `initials`, `truncate`, `excerpt`, `wrapText`                                                                                                                                         |
-| `/segment`     | `lines`, `words`, `wordCount`, `sentences`, `sentenceCount`, `paragraphs`, `paragraphCount`                                                                                                                           |
-| `/search`      | `before`, `after`, `between`, `containsAny`, `indexOf`                                                                                                                                                                |
-| `/edit`        | `replaceFirst`, `replaceLast`, `replaceAll`, `replaceStart`, `replaceEnd`, `ensureStart`, `ensureEnd`, `trimPrefix`, `trimSuffix`, `swap`, `deduplicate`, `wrap`, `unwrap`, `mask`, `padStart`, `padEnd`, `padBoth`   |
-| `/escape`      | `escapeHtml`, `escapeRegExp`                                                                                                                                                                                          |
-| `/interpolate` | `interpolate`                                                                                                                                                                                                         |
-| `/slug`        | `slugify`, `transliterate`, `rulesets` (per-language rule sets)                                                                                                                                                       |
-| `/slug-cjk`    | `chinese`, `korean` opt-in rule sets                                                                                                                                                                                  |
-| `/base64`      | `toBase64`, `fromBase64`, `tryFromBase64`, `bytesToBase64`, `base64ToBytes`, `utf8Encode`, `utf8Decode`, `byteLength`, `base64` (compat object)                                                                       |
-| `/readability` | `syllableCount`, `fleschReadingEase`, `fleschKincaidGrade`, `gunningFog`, `smogIndex`, `colemanLiauIndex`, `automatedReadabilityIndex`, `lix`, `fleschReadingEaseLevel`, `readability`, `readingTime`, `speakingTime` |
-| `/keywords`    | `keywords`, `ENGLISH_STOP_WORDS`                                                                                                                                                                                      |
-| `/vocabulary`  | `uniqueWordCount`, `wordFrequencies`, `lexicalDiversity`, `yulesK`, `simpsonsDiversityIndex`, `wordLengthStats`                                                                                                       |
-| `/metrics`     | `textMetrics` (everything above in one object)                                                                                                                                                                        |
-| `/hash`        | `hashCode`                                                                                                                                                                                                            |
-| `/fluent`      | `str`, `StringValue`                                                                                                                                                                                                  |
+| Subpath        | Functions                                                                                                                                                                                                                                                                                          |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/unicode`     | `graphemes`, `length`, `at`, `slice`, `take`, `reverse`, `splice`, `chunk`, `graphemeBoundaries`                                                                                                                                                                                                   |
+| `/case`        | `caseWords`, `camelCase`, `pascalCase`, `snakeCase`, `kebabCase`, `constantCase`, `dotCase`, `pathCase`, `titleCase`, `sentenceCase`, `capitalize`, `uncapitalize`                                                                                                                                 |
+| `/format`      | `collapseWhitespace`, `squish`, `initials`, `truncate`, `excerpt`, `wrapText`                                                                                                                                                                                                                      |
+| `/segment`     | `lines`, `words`, `wordCount`, `sentences`, `sentenceCount`, `paragraphs`, `paragraphCount`                                                                                                                                                                                                        |
+| `/search`      | `before`, `after`, `between`, `containsAny`, `indexOf`                                                                                                                                                                                                                                             |
+| `/edit`        | `replaceFirst`, `replaceLast`, `replaceAll`, `replaceStart`, `replaceEnd`, `ensureStart`, `ensureEnd`, `trimPrefix`, `trimSuffix`, `swap`, `deduplicate`, `wrap`, `unwrap`, `mask`, `padStart`, `padEnd`, `padBoth`                                                                                |
+| `/escape`      | `escapeHtml`, `escapeRegExp`                                                                                                                                                                                                                                                                       |
+| `/interpolate` | `interpolate`                                                                                                                                                                                                                                                                                      |
+| `/slug`        | `slugify`, `transliterate`, `rulesets` (per-language rule sets)                                                                                                                                                                                                                                    |
+| `/slug-cjk`    | `chinese`, `korean` opt-in rule sets                                                                                                                                                                                                                                                               |
+| `/base64`      | `toBase64`, `fromBase64`, `tryFromBase64`, `bytesToBase64`, `base64ToBytes`, `utf8Encode`, `utf8Decode`, `byteLength`, `base64` (compat object)                                                                                                                                                    |
+| `/readability` | `syllableCount`, `fleschReadingEase`, `fleschKincaidGrade`, `gunningFog`, `smogIndex`, `colemanLiauIndex`, `automatedReadabilityIndex`, `lix`, `fleschReadingEaseLevel`, `readability`, `fernandezHuerta`, `szigrisztPazos`, `fleschAmstad`, `wienerSachtextformel`, `readingTime`, `speakingTime` |
+| `/keywords`    | `keywords`, `STOP_WORDS`, `ENGLISH_STOP_WORDS`                                                                                                                                                                                                                                                     |
+| `/vocabulary`  | `uniqueWordCount`, `wordFrequencies`, `lexicalDiversity`, `yulesK`, `simpsonsDiversityIndex`, `wordLengthStats`                                                                                                                                                                                    |
+| `/metrics`     | `textMetrics` (everything above in one object)                                                                                                                                                                                                                                                     |
+| `/hash`        | `hashCode`                                                                                                                                                                                                                                                                                         |
+| `/fluent`      | `str`, `StringValue`                                                                                                                                                                                                                                                                               |
 
 ### Case conversion
 
@@ -149,12 +149,20 @@ textMetrics(article); // every count, score, and statistic in one object
 
 - Syllables use an English heuristic (vowel groups with silent-`e`, `-ed`,
   `-es`, `-le` and hiatus rules). It is meant for readability grades, not for
-  hyphenation; words without Latin letters count 0.
-- Readability formulas are English-calibrated. Flesch Reading Ease is clamped to
-  0–100 and text without words scores 100; the grade indexes return 0.
+  hyphenation; words without Latin letters count 0. `syllableCount(text,
+{ language: 'es' | 'de' })` switches to Spanish (diphthong/hiatus rules,
+  silent `u` in `que`/`gui`) or German (one syllable per vowel group) counting.
+- `readability()` and its individual formulas are English-calibrated. Flesch
+  Reading Ease is clamped to 0–100 and text without words scores 100; the grade
+  indexes return 0. Spanish texts have `fernandezHuerta` and `szigrisztPazos`
+  (0–100, higher is easier); German texts have `fleschAmstad` (0–100) and
+  `wienerSachtextformel` (a school grade). Each uses its language's syllable
+  counter.
 - `keywords` builds 1-, 2-, or 3-word phrases that never cross clause
-  punctuation and never contain a stop word (`ENGLISH_STOP_WORDS` by default,
-  `stopWords: null` to disable) or a word under `minWordLength` graphemes.
+  punctuation and never contain a stop word or a word under `minWordLength`
+  graphemes. The stop-word list follows `language` (`'en'` default, `'es'`,
+  `'de'`, `'fr'`, `'ro'`; all lists are in `STOP_WORDS`); pass your own
+  `stopWords` or `stopWords: null` to disable.
 - Vocabulary functions compare words lowercased; pass `{ locale }` for
   locale-sensitive lowercasing.
 - `hashCode` (in `/hash`) is the non-negative Java `String.hashCode` over
@@ -169,6 +177,21 @@ feature check is `Intl.Segmenter`, with an in-house fallback that follows
 Unicode 18 (ICU engines through Unicode 17 still split a leading Indic
 virama from the consonant after it). A lint rule and a
 test (`src/runtime.test.ts`) fail the build if any of that changes.
+
+Three more checks keep the claim honest:
+
+- `bun run smoke` builds nothing itself; after `bun run build` it imports
+  `dist/` under Node, Node with `Intl.Segmenter` deleted (the Hermes path),
+  Bun, and Deno, and runs one check per subpath on each.
+- `src/internal/graphemes.fuzz.test.ts` compares the fallback scanner with the
+  engine's `Intl.Segmenter` on 3000 seeded random strings built from the hard
+  cases (ZWJ sequences, flags, tags, Hangul jamo, Indic conjuncts, CR LF).
+- `src/performance.test.ts` guards the paths that used to be quadratic by
+  comparing a large input against a small one, so a regression fails the
+  suite on any machine.
+
+With `Intl.Segmenter`, the native path segments a growing prefix instead of
+the whole string, so `at(text, 5)` costs the same on 10k and 100k characters.
 
 ### Base64 and UTF-8
 

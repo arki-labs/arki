@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ENGLISH_STOP_WORDS, keywords } from './keywords.js';
+import { ENGLISH_STOP_WORDS, keywords, STOP_WORDS } from './keywords.js';
 
 const TEXT = 'Machine learning is fun. Machine learning, deep learning: learning machines.';
 
@@ -48,5 +48,15 @@ describe('tokenization follows words()', () => {
       { keyword: 'stop', occurrences: 1, percentage: 50 },
     ]);
     expect(() => keywords('a', { limit: 0 })).toThrow(RangeError);
+  });
+});
+
+describe('languages', () => {
+  it('uses the stop-word list of the chosen language', () => {
+    // `pentru` ("for") is a Romanian function word; the English list does not know it.
+    expect(keywords('casa pentru masă', { language: 'ro' }).map(entry => entry.keyword)).toEqual(['casa', 'masă']);
+    expect(keywords('casa pentru masă').map(entry => entry.keyword)).toContain('pentru');
+    expect(STOP_WORDS.de).toContain('und');
+    expect(ENGLISH_STOP_WORDS).toBe(STOP_WORDS.en);
   });
 });

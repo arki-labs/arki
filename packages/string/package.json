@@ -148,7 +148,9 @@
     "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
+    "smoke": "node scripts/smoke.mjs && node scripts/smoke.mjs --no-intl-segmenter && bun scripts/smoke.mjs && deno run --config scripts/deno.json --allow-read --allow-env scripts/smoke.mjs",
     "test": "vitest run",
+    "test:bun": "bun --bun vitest run",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",

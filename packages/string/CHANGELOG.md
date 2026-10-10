@@ -15,6 +15,11 @@
   - `keywords` tokenizes with `words()`: `alpha,beta` never forms a phrase across the comma, decomposed accents are kept, and `length`, `limit`, `minWordLength`, `minOccurrences` must be positive integers.
   - `padStart`/`padEnd`/`padBoth` throw `RangeError` when the fill would merge into neighbouring graphemes (combining marks, lone flag halves); `mask` rejects a glyph that starts with a combining mark. `readingTime`/`speakingTime` reject non-finite rates.
   - **Changed:** `str().includes`, `startsWith`, `endsWith`, and `replaceAll` are literal and grapheme-aligned like the rest of the package (`str('é').includes('e')` is `false` in decomposed form; `$&` stays literal). New `replaceAll(text, search, replacement)` in `/edit`.
+  - Native grapheme lookups segment a growing prefix of the text instead of all of it (`Intl.Segmenter.segment` copies the whole string per call): `at`/`take` near the start now cost the same on 10k and 100k characters.
+  - Fallback scanner: a keycap, tag, or variation selector between an Indic linker and the next consonant no longer joins them (matches `Intl.Segmenter`).
+  - **New:** Spanish and German readability. `syllableCount(text, { language: 'es' | 'de' })`, `fernandezHuerta`, `szigrisztPazos`, `fleschAmstad`, `wienerSachtextformel` in `/readability`.
+  - **New:** `keywords(text, { language: 'es' | 'de' | 'fr' | 'ro' })` picks that language's stop words; every list is exported as `STOP_WORDS`.
+  - Cross-runtime smoke script (`bun run smoke`: Node, Node without `Intl.Segmenter`, Bun, Deno), a seeded fuzz test of the fallback scanner against `Intl.Segmenter`, and ratio-based performance guards.
 
 ## 0.1.0
 

@@ -4,9 +4,14 @@
  * words never take part.
  */
 
+import type { KeywordLanguage } from './internal/stop-words.js';
 import { lower } from './internal/locale.js';
+import { STOP_WORDS } from './internal/stop-words.js';
 import { wordSpans } from './internal/words.js';
 import { length } from './unicode.js';
+
+export type { KeywordLanguage } from './internal/stop-words.js';
+export { STOP_WORDS } from './internal/stop-words.js';
 
 export type Keyword = Readonly<{
   /** Lowercased word or phrase. */
@@ -25,144 +30,16 @@ export type KeywordOptions = Readonly<{
   minWordLength?: number;
   /** Phrases seen fewer times than this are dropped. Default `1`. */
   minOccurrences?: number;
-  /** Lowercased words that never form keywords. Default `ENGLISH_STOP_WORDS`; pass `null` to disable. */
+  /** Which built-in stop-word list to use. Default `'en'`. */
+  language?: KeywordLanguage;
+  /** Lowercased words that never form keywords. Default: the `language` list; pass `null` to disable. */
   stopWords?: Iterable<string> | null;
   /** BCP 47 tag for lowercasing. Default: locale-independent. */
   locale?: string;
 }>;
 
-/** English function words that never form keywords. */
-export const ENGLISH_STOP_WORDS: readonly string[] = Object.freeze([
-  'a',
-  'about',
-  'above',
-  'after',
-  'all',
-  'also',
-  'am',
-  'an',
-  'and',
-  'any',
-  'are',
-  'as',
-  'at',
-  'be',
-  'because',
-  'been',
-  'before',
-  'being',
-  'below',
-  'between',
-  'both',
-  'but',
-  'by',
-  'can',
-  'could',
-  'did',
-  'do',
-  'does',
-  'down',
-  'during',
-  'each',
-  'either',
-  'every',
-  'few',
-  'for',
-  'from',
-  'get',
-  'got',
-  'had',
-  'has',
-  'have',
-  'he',
-  'her',
-  'hers',
-  'him',
-  'his',
-  'how',
-  'i',
-  'if',
-  'in',
-  'into',
-  'is',
-  'it',
-  'its',
-  'just',
-  'least',
-  'less',
-  'like',
-  'many',
-  'may',
-  'me',
-  'might',
-  'mine',
-  'more',
-  'most',
-  'much',
-  'must',
-  'neither',
-  'no',
-  'not',
-  'of',
-  'off',
-  'on',
-  'one',
-  'only',
-  'onto',
-  'or',
-  'other',
-  'our',
-  'ours',
-  'out',
-  'over',
-  'several',
-  'shall',
-  'she',
-  'should',
-  'so',
-  'some',
-  'such',
-  'than',
-  'that',
-  'the',
-  'their',
-  'theirs',
-  'them',
-  'then',
-  'there',
-  'these',
-  'they',
-  'this',
-  'those',
-  'through',
-  'to',
-  'too',
-  'under',
-  'up',
-  'upon',
-  'us',
-  'very',
-  'was',
-  'we',
-  'were',
-  'what',
-  'when',
-  'where',
-  'which',
-  'while',
-  'who',
-  'whom',
-  'why',
-  'will',
-  'with',
-  'within',
-  'without',
-  'would',
-  'yes',
-  'you',
-  'your',
-  'yours',
-]);
+/** English function words that never form keywords; `STOP_WORDS` has the other languages. */
+export const ENGLISH_STOP_WORDS: readonly string[] = STOP_WORDS.en;
 
 /** Text between two words that ends a clause, so no phrase may span it. */
 const CLAUSE_BREAK = /[.!?…,;:()[\]{}"“”„]|\s[-–—]\s|\n/u;
@@ -184,7 +61,9 @@ export function keywords(text: string, options: KeywordOptions = {}): Keyword[] 
   const minWordLength = positiveInteger(options.minWordLength, 3, 'minWordLength');
   const minOccurrences = positiveInteger(options.minOccurrences, 1, 'minOccurrences');
   const limit = options.limit === undefined ? undefined : positiveInteger(options.limit, 1, 'limit');
-  const stopWords = new Set(options.stopWords === undefined ? ENGLISH_STOP_WORDS : (options.stopWords ?? []));
+  const stopWords = new Set(
+    options.stopWords === undefined ? STOP_WORDS[options.language ?? 'en'] : (options.stopWords ?? []),
+  );
 
   const lowered = lower(text, options.locale);
   const spans = wordSpans(lowered);

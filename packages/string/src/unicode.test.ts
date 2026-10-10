@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import { fallbackBoundaries } from './internal/graphemes.js';
+import { boundaryAt, fallbackBoundaries, graphemeBoundaries } from './internal/graphemes.js';
 import { at, chunk, graphemes, length, reverse, slice, splice, take } from './unicode.js';
 
 const FAMILY = '👨‍👩‍👧‍👦';
@@ -147,5 +147,40 @@ describe('streaming positional access', () => {
     expect(take(text, 2)).toBe('áb');
     expect(chunk(text, 4)).toEqual(['áb\u{1F468}‍\u{1F469}‍\u{1F467}c', '\r\nd']);
     expect(chunk('', 3)).toEqual([]);
+  });
+});
+
+const pad = (units: number): string => 'x'.repeat(units);
+const range = (from: number, to: number): number[] => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+
+describe('native windowed scan', () => {
+  // The native path segments a 256-unit prefix first and grows it. Put hard cases right on that
+  // edge so a boundary decided by lookbehind (ZWJ chain, flag pairs, surrogate pair) stays exact.
+  it('does not break a ZWJ family straddling the first window', () => {
+    const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}'; // 11 code units at 250
+    const text = pad(250) + family + pad(300);
+    expect(graphemeBoundaries(text)).toEqual([...range(0, 250), ...range(261, 561)]);
+    expect(boundaryAt(text, 251)).toBe(261);
+    expect(at(text, 250)).toBe(family);
+  });
+
+  it('keeps flag pairs aligned across the window edge', () => {
+    const flags = '\u{1F1F7}\u{1F1F4}'.repeat(3); // three flags, 12 code units, starting at 255
+    const text = pad(255) + flags + pad(400);
+    expect(graphemeBoundaries(text).slice(254, 260)).toEqual([254, 255, 259, 263, 267, 268]);
+  });
+
+  it('never cuts a surrogate pair at the window', () => {
+    const text = pad(255) + '\u{1F600}' + pad(400); // the astral code point occupies units 255-256
+    expect(graphemeBoundaries(text).slice(254, 258)).toEqual([254, 255, 257, 258]);
+    expect(at(text, 255)).toBe('\u{1F600}');
+  });
+
+  it('streams the same boundaries as a one-shot segmentation on long text', () => {
+    const text = 'The quick brown fox \u{1F469}\u200D\u{1F4BB} jumps é. '.repeat(100);
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    const expected = [...[...segmenter.segment(text)].map(s => s.index), text.length];
+    expect(graphemeBoundaries(text)).toEqual(expected);
+    expect(take(text, 2000)).toBe(text.slice(0, expected[2000]));
   });
 });

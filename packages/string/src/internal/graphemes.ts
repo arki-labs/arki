@@ -14,7 +14,6 @@
 const CR = 0x0d;
 const LF = 0x0a;
 const ZWJ = 0x20_0d;
-const ZWNJ = 0x20_0c;
 
 /** Grapheme_Cluster_Break property values used by the fallback scanner. */
 const Other = 0;
@@ -63,6 +62,22 @@ const INDIC_LINKERS = new Set([
   0x09_4d, 0x09_cd, 0x0a_4d, 0x0a_cd, 0x0b_4d, 0x0c_4d, 0x0c_cd, 0x0d_4d, 0x10_39, 0x17_d2, 0x1b_44, 0x1c_f5, 0x1c_f6,
 ]);
 const LETTER_RE = /\p{L}/u;
+/**
+ * `InCB=Extend` approximation: ZWJ, or a non-spacing mark with a non-zero combining class. JS has
+ * no `ccc` property escape, so this takes Inherited-script marks (combining diacriticals, stress
+ * signs) and the Indic nuktas, and leaves out the ccc=0 ones (variation selectors, CGJ).
+ */
+const INHERITED_NONSPACING_RE = /\p{Script=Inherited}/u;
+const NONSPACING_RE = /\p{Mn}/u;
+const NUKTAS = new Set([0x09_3c, 0x09_bc, 0x0a_3c, 0x0a_bc, 0x0b_3c, 0x0c_3c, 0x0c_bc, 0x1b_34]);
+function isConjunctExtend(cp: number): boolean {
+  if (cp === ZWJ) return true;
+  if (cp === 0x03_4f || (cp >= 0xfe_00 && cp <= 0xfe_0f) || (cp >= 0x18_0b && cp <= 0x18_0d)) return false;
+  if (cp >= 0xe_01_00 && cp <= 0xe_01_ef) return false;
+  if (NUKTAS.has(cp)) return true;
+  const ch = String.fromCodePoint(cp);
+  return NONSPACING_RE.test(ch) && INHERITED_NONSPACING_RE.test(ch);
+}
 
 /** Mc characters that UAX #29 excludes from SpacingMark. */
 const SPACING_MARK_EXCEPTIONS = new Set([
@@ -208,8 +223,8 @@ export function* fallbackBreaks(text: string): Generator<number, void, undefined
       conjunct = ConjunctLinker;
     } else if (isIndicConsonant(cp)) {
       conjunct = ConjunctConsonant;
-    } else if ((current !== Extend && current !== Zwj) || cp === ZWNJ) {
-      conjunct = NoConjunct; // ZWNJ extends graphemes but is not an InCB=Extend character
+    } else if (!isConjunctExtend(cp)) {
+      conjunct = NoConjunct; // anything that is not InCB=Extend (ZWNJ, tags, keycaps, vowel signs) ends the chain
     }
 
     previousCp = cp;
@@ -237,10 +252,42 @@ function getNativeSegmenter(): Intl.Segmenter | null {
   return nativeSegmenter;
 }
 
+/** Below this length the whole text is segmented in one call. */
+const NATIVE_WINDOW = 256;
+
+/**
+ * Streams boundaries from the engine's segmenter. `segment(text)` copies the whole string on
+ * every call, so a lookup near the start of a long text would still pay for all of it. Instead a
+ * prefix is segmented first and grown geometrically when the caller keeps pulling. A boundary
+ * inside a prefix is final: UAX #29 rules look backward and at most one code point ahead, so
+ * only the prefix's own end is uncertain. Each round restarts from offset 0 and skips what was
+ * already yielded; with the window growing 4× per round the total work stays linear in the
+ * furthest offset pulled.
+ */
 function* nativeBreaks(text: string, segmenter: Intl.Segmenter): Generator<number, void, undefined> {
   if (text.length === 0) return;
-  for (const segment of segmenter.segment(text)) if (segment.index > 0) yield segment.index;
+  let window = NATIVE_WINDOW;
+  let last = 0;
+  while (window < text.length) {
+    // Never split a surrogate pair; the prefix must end on a code point boundary.
+    // At a high surrogate `codePointAt` yields the full (non-surrogate) code point, so only a
+    // lone low surrogate at the cut means a pair is being split.
+    const cut = isLowSurrogate(text.codePointAt(window) ?? 0) ? window + 1 : window;
+    for (const segment of segmenter.segment(text.slice(0, cut))) {
+      const offset = segment.index;
+      if (offset <= last) continue;
+      if (offset >= cut) break;
+      last = offset;
+      yield offset;
+    }
+    window *= 4;
+  }
+  for (const segment of segmenter.segment(text)) if (segment.index > last) yield segment.index;
   yield text.length;
+}
+
+function isLowSurrogate(unit: number): boolean {
+  return unit >= 0xdc_00 && unit <= 0xdf_ff;
 }
 
 /** Boundary offsets (UTF-16 code-unit indices) after position 0, ending with `text.length`; nothing for `''`. */
