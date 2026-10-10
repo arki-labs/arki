@@ -47,6 +47,7 @@
     "@arki/date": "workspace:*",
     "@arki/icons": "workspace:*",
     "@arki/intl": "workspace:*",
+    "@arki/math": "workspace:*",
     "@arki/react-hooks": "workspace:*",
     "@arki/rss": "workspace:*",
     "@arki/ui": "workspace:*",

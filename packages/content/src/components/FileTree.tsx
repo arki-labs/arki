@@ -1,3 +1,4 @@
+import { formatFileSize } from '@arki/math/format';
 import { cn } from '@arki/ui/cn';
 import { ArrowBendDownRight, File, FolderOpen } from '@arki/icons/phosphor';
 
@@ -28,11 +29,6 @@ const isFile = (node: TreeNode): node is FileNode => {
   return node.type === 'file';
 };
 
-const humanFileSize = (size: number) => {
-  const i: number = size == 0 ? 0 : Math.floor(Math.log(size) / Math.log(1024));
-  return (size / Math.pow(1024, i)).toFixed(2) + ' ' + ['B', 'kB', 'MB', 'GB', 'TB'][i];
-};
-
 type FileSizeProps = {
   size?: number;
 };
@@ -41,7 +37,7 @@ const FileSize = ({ size }: FileSizeProps) => {
   if (size === undefined || size === null) {
     return null;
   }
-  return <span className="mr-2">({humanFileSize(size)})</span>;
+  return <span className="mr-2">({formatFileSize(size)})</span>;
 };
 
 type NodeProps = {

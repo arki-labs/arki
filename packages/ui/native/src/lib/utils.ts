@@ -2,6 +2,9 @@
  * Utility functions for React Native UI components
  */
 
+export { truncate } from '@arki/string/format';
+export { formatFileSize } from '@arki/math/format';
+
 /**
  * Generates initials from a name string
  * @param name - Full name string
@@ -15,30 +18,6 @@ export function getInitials(name: string): string {
   const first = parts[0]!.charAt(0);
   const last = parts.at(-1)!.charAt(0);
   return (first + last).toUpperCase();
-}
-
-/**
- * Truncates text to a specified length with ellipsis
- * @param text - Text to truncate
- * @param maxLength - Maximum length before truncation
- * @returns Truncated text
- */
-export function truncate(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  return text.slice(0, Math.max(0, maxLength - 3)) + '...';
-}
-
-/**
- * Formats a file size in bytes to human-readable format
- * @param bytes - File size in bytes
- * @returns Formatted size string
- */
-export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${Math.round(bytes / Math.pow(k, i) * 100) / 100} ${sizes[i]}`;
 }
 
 /**

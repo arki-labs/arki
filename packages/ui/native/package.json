@@ -34,6 +34,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@arki/math": "workspace:*",
+    "@arki/string": "workspace:*",
     "@rn-primitives/accordion": "catalog:expo",
     "@rn-primitives/alert-dialog": "catalog:expo",
     "@rn-primitives/aspect-ratio": "catalog:expo",
