@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { analyze } from './metrics.js';
 import {
   automatedReadabilityIndex,
   colemanLiauIndex,
@@ -185,5 +186,33 @@ describe('Spanish and German', () => {
     expect(wienerSachtextformel(deEasy)).toBeLessThan(wienerSachtextformel(deHard));
     expect(fernandezHuerta('')).toBe(100);
     expect(wienerSachtextformel('')).toBe(0);
+  });
+});
+
+describe('readability by language and shared analysis', () => {
+  const es = 'El perro corre. El gato duerme.';
+  const de = 'Der Hund läuft. Die Katze schläft.';
+
+  it('returns the score set of the requested language', () => {
+    expect(readability(es, { language: 'es' })).toEqual({
+      fernandezHuerta: fernandezHuerta(es),
+      szigrisztPazos: szigrisztPazos(es),
+    });
+    expect(readability(de, { language: 'de' })).toEqual({
+      fleschAmstad: fleschAmstad(de),
+      wienerSachtextformel: wienerSachtextformel(de),
+    });
+    expect(readability(es, { language: 'en' })).toEqual(readability(es));
+  });
+
+  it('accepts an analysis so several formulas share one tokenization, and custom formulas can use it', () => {
+    const text = 'Short words win. Long explanations rarely do.';
+    const analysis = analyze(text);
+    expect(fleschReadingEase(analysis)).toBe(fleschReadingEase(text));
+    expect(readingTime(analysis)).toEqual(readingTime(text));
+    expect(syllableCount(analysis, { language: 'es' })).toBe(syllableCount(text, { language: 'es' }));
+    // A custom formula: average syllables per word, straight from the analysis record.
+    const average = analysis.syllables.reduce((a, b) => a + b, 0) / analysis.words.length;
+    expect(average).toBeGreaterThan(1);
   });
 });

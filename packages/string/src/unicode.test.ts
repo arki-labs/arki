@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { boundaryAt, fallbackBoundaries, graphemeBoundaries } from './internal/graphemes.js';
-import { at, chunk, graphemes, length, reverse, slice, splice, take } from './unicode.js';
+import { at, chunk, fold, graphemes, length, reverse, slice, splice, take } from './unicode.js';
 
 const FAMILY = '👨‍👩‍👧‍👦';
 const FLAG = '🇷🇴';
@@ -182,5 +182,20 @@ describe('native windowed scan', () => {
     const expected = [...[...segmenter.segment(text)].map(s => s.index), text.length];
     expect(graphemeBoundaries(text)).toEqual(expected);
     expect(take(text, 2000)).toBe(text.slice(0, expected[2000]));
+  });
+});
+
+describe('fold', () => {
+  it('lowercases, strips marks, and spells out undecomposable letters', () => {
+    expect(fold('Émile Zola')).toBe('emile zola');
+    expect(fold('Straße in Łódź')).toBe('strasse in lodz');
+    expect(fold('Ærøskøbing')).toBe('aeroskobing');
+    expect(fold('café')).toBe('cafe'); // decomposed input
+    expect(fold('İstanbul')).toBe('istanbul');
+    expect(fold('İstanbul', { locale: 'tr' })).toBe('istanbul');
+  });
+
+  it('keeps non-Latin scripts and emoji intact', () => {
+    expect(fold('Привет 👋')).toBe('привет 👋');
   });
 });

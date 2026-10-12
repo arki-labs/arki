@@ -1,8 +1,8 @@
 # @arki/string
 
-## 0.1.1
+## 0.2.0
 
-### Patch Changes
+### Minor Changes
 
 - Performance and correctness pass after an independent review (Astra).
   - Grapheme fallback (Hermes): emoji tag sequences such as the England flag are one grapheme (tag characters were classed as controls), and a second ZWJ no longer joins two pictographs, matching `Intl.Segmenter`. GB9c follows Unicode 18 (a linker joins the next consonant even without a preceding consonant), which ICU through Unicode 17 does not yet do.
@@ -20,6 +20,10 @@
   - **New:** Spanish and German readability. `syllableCount(text, { language: 'es' | 'de' })`, `fernandezHuerta`, `szigrisztPazos`, `fleschAmstad`, `wienerSachtextformel` in `/readability`.
   - **New:** `keywords(text, { language: 'es' | 'de' | 'fr' | 'ro' })` picks that language's stop words; every list is exported as `STOP_WORDS`.
   - Cross-runtime smoke script (`bun run smoke`: Node, Node without `Intl.Segmenter`, Bun, Deno), a seeded fuzz test of the fallback scanner against `Intl.Segmenter`, and ratio-based performance guards.
+  - **New:** `readability(text, { language: 'es' | 'de' })` returns that language's score set; `analyze(text)` (in `/metrics`) is public and every readability, vocabulary and metrics function accepts the analysis in place of the string, so one tokenization serves many scores and custom formulas.
+  - **New:** `truncate` and `excerpt` take `boundary: 'sentence'`; `excerpt` also takes `'word'`. Edges snap inward and never cross the match. `truncate` always drops whitespace before the ellipsis.
+  - **New:** `fold` in `/unicode` (search-key form: lowercase, marks stripped, `ß`/`ø`/`ł`… spelled out), `/distance` with `levenshtein`, `diceCoefficient`, `jaroWinkler` measured in graphemes, `dedent` in `/format` (function or template tag), `initials(text, { singleWord })`. `str()` gains `fold()` and `dedent()`.
+  - **Deprecated:** `ENGLISH_STOP_WORDS`; use `STOP_WORDS.en`. Removed in 1.0.
 
 ## 0.1.0
 

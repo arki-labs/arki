@@ -38,7 +38,7 @@ export type KeywordOptions = Readonly<{
   locale?: string;
 }>;
 
-/** English function words that never form keywords; `STOP_WORDS` has the other languages. */
+/** @deprecated Use `STOP_WORDS.en`; this alias goes away in 1.0. */
 export const ENGLISH_STOP_WORDS: readonly string[] = STOP_WORDS.en;
 
 /** Text between two words that ends a clause, so no phrase may span it. */

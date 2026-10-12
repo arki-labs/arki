@@ -11,6 +11,7 @@ import type { ExcerptOptions, InitialsOptions, TruncateOptions, WrapTextOptions 
 import type { InterpolateOptions, TemplateValues } from './interpolate.js';
 import type { Occurrence } from './search.js';
 import type { SlugifyOptions, TransliterateOptions } from './slug.js';
+import type { FoldOptions } from './unicode.js';
 import { fromBase64, toBase64 } from './base64.js';
 import {
   camelCase,
@@ -46,13 +47,13 @@ import {
   wrap,
 } from './edit.js';
 import { escapeHtml, escapeRegExp } from './escape.js';
-import { collapseWhitespace, excerpt, initials, squish, truncate, wrapText } from './format.js';
+import { collapseWhitespace, dedent, excerpt, initials, squish, truncate, wrapText } from './format.js';
 import { findLiteral, hasPrefix, hasSuffix } from './internal/search.js';
 import { interpolate } from './interpolate.js';
 import { after, before, between, containsAny, indexOf } from './search.js';
 import { lines, paragraphs, sentences, wordCount, words } from './segment.js';
 import { slugify, transliterate } from './slug.js';
-import { at, chunk, graphemes, length, reverse, slice, splice, take } from './unicode.js';
+import { at, chunk, fold, graphemes, length, reverse, slice, splice, take } from './unicode.js';
 
 export type NormalizationForm = 'NFC' | 'NFD' | 'NFKC' | 'NFKD';
 export type Transform = (value: StringValue) => StringValue;
@@ -108,6 +109,10 @@ export class StringValue {
   }
   splice(start: number, deleteCount: number, insert?: string): StringValue {
     return str(splice(this.#value, start, deleteCount, insert));
+  }
+  /** Search-key form: lowercased, marks stripped, `ß`/`ø`/`ł`… spelled out. */
+  fold(options?: FoldOptions): StringValue {
+    return str(fold(this.#value, options));
   }
   chunk(size: number): string[] {
     return chunk(this.#value, size);
@@ -272,6 +277,9 @@ export class StringValue {
   }
   wrapText(width: number, options?: WrapTextOptions): StringValue {
     return str(wrapText(this.#value, width, options));
+  }
+  dedent(): StringValue {
+    return str(dedent(this.#value));
   }
 
   // Search and affixes

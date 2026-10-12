@@ -3,13 +3,11 @@
  * results are identical in every runtime and never depend on the machine locale.
  */
 
+import { sentenceEnds } from './internal/sentences.js';
 import { WORD } from './internal/words.js';
 
 const LINE_BREAK = /\r\n|[\n\r\u0085\u2028\u2029]/u;
 /** A run of terminal punctuation; what follows is inspected by hand, so long runs stay linear. */
-const SENTENCE_PUNCTUATION = /[.!?…]+/gu;
-const CLOSERS = new Set(['"', "'", '”', '’', ')', ']']);
-const WHITESPACE = /\s/u;
 const HAS_WORD_CHARACTER = /[\p{L}\p{N}]/u;
 
 /** Splits on CRLF, LF, CR, NEL, LS, and PS. `lines('')` is `['']`; trailing empty lines are kept. */
@@ -38,13 +36,9 @@ export function wordCount(text: string): number {
 export function sentences(text: string): string[] {
   const result: string[] = [];
   let start = 0;
-  for (const match of text.matchAll(SENTENCE_PUNCTUATION)) {
-    let end = match.index + match[0].length;
-    while (end < text.length && CLOSERS.has(text.charAt(end))) end += 1;
-    if (end < text.length && !WHITESPACE.test(text.charAt(end))) continue;
-    while (end < text.length && WHITESPACE.test(text.charAt(end))) end += 1;
-    pushSentence(result, text.slice(start, end));
-    start = end;
+  for (const { next } of sentenceEnds(text)) {
+    pushSentence(result, text.slice(start, next));
+    start = next;
   }
   pushSentence(result, text.slice(start));
   return result;

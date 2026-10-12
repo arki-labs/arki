@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { collapseWhitespace, excerpt, initials, squish, truncate, wrapText } from './format.js';
+import { collapseWhitespace, dedent, excerpt, initials, squish, truncate, wrapText } from './format.js';
 
 describe('whitespace', () => {
   it('collapseWhitespace keeps one leading/trailing space', () => {
@@ -68,5 +68,86 @@ describe('wrapText', () => {
     expect(wrapText('supercalifragilistic', 5, { breakWords: true })).toBe('super\ncalif\nragil\nistic');
     expect(wrapText('a b', 1, { newline: '<br>' })).toBe('a<br>b');
     expect(() => wrapText('x', 0)).toThrow(RangeError);
+  });
+});
+
+describe('truncate boundaries', () => {
+  const text = 'First one. Second two! Third "three?" Fourth four and more.';
+
+  it('never leaves whitespace before the ellipsis', () => {
+    expect(truncate('hello world', 7)).toBe('hello…'); // grapheme cut would give "hello …"
+    expect(truncate('hello world', 7, { ellipsis: '...' })).toBe('hell...');
+  });
+
+  it('sentence: backs up to the last sentence end that fits, closers included', () => {
+    expect(truncate(text, 30, { boundary: 'sentence' })).toBe('First one. Second two!…');
+    expect(truncate(text, 42, { boundary: 'sentence' })).toBe('First one. Second two! Third "three?"…');
+  });
+
+  it('sentence: falls back to a word boundary when no sentence end fits', () => {
+    expect(truncate(text, 8, { boundary: 'sentence' })).toBe('First…');
+    expect(truncate('3.14 is pi and more words here', 12, { boundary: 'sentence' })).toBe('3.14 is pi…');
+  });
+});
+
+describe('excerpt boundaries', () => {
+  const text = 'The cat sat. A quick brown fox jumps over the lazy dog. The end is near.';
+
+  it('word: pulls both edges inward to word boundaries', () => {
+    expect(excerpt(text, 'fox', { radius: 9, boundary: 'word' })).toBe('…brown fox jumps…');
+    expect(excerpt(text, 'fox', { radius: 9 })).toBe('…ck brown fox jumps ov…');
+  });
+
+  it('sentence: snaps to the sentence containing the match when the radius allows', () => {
+    // from = 2 and to = 55 in code units; the sentence runs 13..55.
+    expect(excerpt(text, 'fox', { radius: 25, boundary: 'sentence' })).toBe(
+      '…A quick brown fox jumps over the lazy dog.…',
+    );
+    expect(excerpt(text, 'fox', { radius: 60, boundary: 'sentence' })).toBe(text);
+  });
+
+  it('sentence: an edge with no sentence boundary in reach falls back to a word boundary', () => {
+    // from = 7 → sentence start 13; to = 50 has no sentence end at or after the match → word end (50).
+    expect(excerpt(text, 'fox', { radius: 20, boundary: 'sentence' })).toBe('…A quick brown fox jumps over the lazy…');
+  });
+
+  it('never moves an edge past the match', () => {
+    expect(excerpt(text, 'fox', { radius: 1, boundary: 'sentence' })).toBe('…fox…'); // word fallback
+    expect(excerpt(text, 'fox', { radius: 1, boundary: 'word' })).toBe('…fox…');
+  });
+});
+
+describe('initials for a single word', () => {
+  it('takes leading graphemes when asked', () => {
+    expect(initials('Alex', { singleWord: 2 })).toBe('AL');
+    expect(initials('émile', { singleWord: 2 })).toBe('ÉM');
+    expect(initials('Alex Lee', { singleWord: 2 })).toBe('AL'); // two words: unchanged rule
+    expect(initials('Alex')).toBe('A');
+    expect(() => initials('Alex', { singleWord: 0 })).toThrow(RangeError);
+  });
+});
+
+describe('dedent', () => {
+  it('removes the shared indent and the surrounding blank lines', () => {
+    const sql = dedent(`
+      SELECT *
+        FROM poems
+       WHERE id = 1
+    `);
+    expect(sql).toBe('SELECT *\n  FROM poems\n WHERE id = 1');
+  });
+
+  it('works as a tag and keeps interior blank lines', () => {
+    const name = 'Ada';
+    expect(dedent`
+      Hello ${name}
+
+      Bye
+    `).toBe('Hello Ada\n\nBye');
+  });
+
+  it('leaves text without indentation alone', () => {
+    expect(dedent('a\nb')).toBe('a\nb');
+    expect(dedent('')).toBe('');
   });
 });

@@ -42,6 +42,10 @@ check('keywords', s.keywords('deep learning, deep learning', { length: 2 })[0]?.
 check('vocabulary', s.uniqueWordCount('The the cat'), 2);
 check('metrics', s.textMetrics('Hi there. Bye.').sentences, 2);
 check('hash', s.hashCode('hello'), 99_162_322);
+check('distance', s.levenshtein('kitten', 'sitting'), 3);
+check('unicode fold', s.fold('Émile Łódź'), 'emile lodz');
+check('format dedent', s.dedent('\n  a\n    b\n'), 'a\n  b');
+check('readability es', typeof s.readability('Hola mundo.', { language: 'es' }).fernandezHuerta, 'number');
 check('fluent', s.str('  XML_http_request  ').squish().titleCase().value(), 'Xml Http Request');
 
 const failed = checks.filter(c => !c.ok);

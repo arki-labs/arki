@@ -128,3 +128,40 @@ export function chunk(text: string, size: number): string[] {
   if (start < text.length) chunks.push(text.slice(start));
   return chunks;
 }
+
+export type FoldOptions = Readonly<{
+  /** BCP 47 tag for lowercasing (`'tr'` keeps dotless i). Default: locale-independent. */
+  locale?: string;
+}>;
+
+/** Latin letters that have no canonical decomposition, so stripping marks leaves them alone. */
+const UNDECOMPOSABLE = new Map([
+  ['ß', 'ss'],
+  ['æ', 'ae'],
+  ['œ', 'oe'],
+  ['ø', 'o'],
+  ['đ', 'd'],
+  ['ł', 'l'],
+  ['ı', 'i'],
+  ['ħ', 'h'],
+  ['ŧ', 't'],
+  ['ð', 'd'],
+  ['þ', 'th'],
+]);
+const UNDECOMPOSABLE_RE = /[ßæœøđłıħŧðþ]/gu;
+const MARKS = /\p{M}/gu;
+
+/**
+ * Search-key form of `text`: lowercased, accents and other combining marks removed, and the few
+ * Latin letters without a decomposition (`ß`, `ø`, `ł`, …) spelled out. `fold('Émile Zola')` is
+ * `'emile zola'`. Lighter than `transliterate` (no script conversion) and meant for matching, not
+ * display.
+ */
+export function fold(text: string, options: FoldOptions = {}): string {
+  const lowered = options.locale === undefined ? text.toLowerCase() : text.toLocaleLowerCase(options.locale);
+  return lowered
+    .normalize('NFD')
+    .replaceAll(MARKS, '')
+    .normalize('NFC')
+    .replaceAll(UNDECOMPOSABLE_RE, letter => UNDECOMPOSABLE.get(letter) ?? letter);
+}

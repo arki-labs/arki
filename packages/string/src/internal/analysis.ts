@@ -71,6 +71,14 @@ export function analyze(text: string, locale?: string): TextAnalysis {
   return new TextAnalysis(text, locale);
 }
 
+/** A text to analyze, or an analysis already made so several functions share one tokenization. */
+export type TextInput = string | TextAnalysis;
+
+/** An existing analysis is used as is; its own locale wins over `locale`. */
+export function toAnalysis(input: TextInput, locale?: string): TextAnalysis {
+  return typeof input === 'string' ? analyze(input, locale) : input;
+}
+
 export function countItems<T>(items: readonly T[]): Map<T, number> {
   const counts = new Map<T, number>();
   for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1);

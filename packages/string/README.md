@@ -75,9 +75,9 @@ decomposed form.
 
 | Subpath        | Functions                                                                                                                                                                                                                                                                                          |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/unicode`     | `graphemes`, `length`, `at`, `slice`, `take`, `reverse`, `splice`, `chunk`, `graphemeBoundaries`                                                                                                                                                                                                   |
+| `/unicode`     | `graphemes`, `length`, `at`, `slice`, `take`, `reverse`, `splice`, `chunk`, `fold`, `graphemeBoundaries`                                                                                                                                                                                           |
 | `/case`        | `caseWords`, `camelCase`, `pascalCase`, `snakeCase`, `kebabCase`, `constantCase`, `dotCase`, `pathCase`, `titleCase`, `sentenceCase`, `capitalize`, `uncapitalize`                                                                                                                                 |
-| `/format`      | `collapseWhitespace`, `squish`, `initials`, `truncate`, `excerpt`, `wrapText`                                                                                                                                                                                                                      |
+| `/format`      | `collapseWhitespace`, `squish`, `initials`, `truncate`, `excerpt`, `wrapText`, `dedent`                                                                                                                                                                                                            |
 | `/segment`     | `lines`, `words`, `wordCount`, `sentences`, `sentenceCount`, `paragraphs`, `paragraphCount`                                                                                                                                                                                                        |
 | `/search`      | `before`, `after`, `between`, `containsAny`, `indexOf`                                                                                                                                                                                                                                             |
 | `/edit`        | `replaceFirst`, `replaceLast`, `replaceAll`, `replaceStart`, `replaceEnd`, `ensureStart`, `ensureEnd`, `trimPrefix`, `trimSuffix`, `swap`, `deduplicate`, `wrap`, `unwrap`, `mask`, `padStart`, `padEnd`, `padBoth`                                                                                |
@@ -89,7 +89,8 @@ decomposed form.
 | `/readability` | `syllableCount`, `fleschReadingEase`, `fleschKincaidGrade`, `gunningFog`, `smogIndex`, `colemanLiauIndex`, `automatedReadabilityIndex`, `lix`, `fleschReadingEaseLevel`, `readability`, `fernandezHuerta`, `szigrisztPazos`, `fleschAmstad`, `wienerSachtextformel`, `readingTime`, `speakingTime` |
 | `/keywords`    | `keywords`, `STOP_WORDS`, `ENGLISH_STOP_WORDS`                                                                                                                                                                                                                                                     |
 | `/vocabulary`  | `uniqueWordCount`, `wordFrequencies`, `lexicalDiversity`, `yulesK`, `simpsonsDiversityIndex`, `wordLengthStats`                                                                                                                                                                                    |
-| `/metrics`     | `textMetrics` (everything above in one object)                                                                                                                                                                                                                                                     |
+| `/metrics`     | `textMetrics` (everything above in one object), `analyze`                                                                                                                                                                                                                                          |
+| `/distance`    | `levenshtein`, `diceCoefficient`, `jaroWinkler`                                                                                                                                                                                                                                                    |
 | `/hash`        | `hashCode`                                                                                                                                                                                                                                                                                         |
 | `/fluent`      | `str`, `StringValue`                                                                                                                                                                                                                                                                               |
 
@@ -115,10 +116,34 @@ and discard punctuation; `capitalize` only touches the first grapheme.
 ### Format
 
 - `truncate(text, max, { ellipsis, boundary })` enforces a total grapheme budget
-  that includes the ellipsis (`…` by default). `boundary: 'word-before'` backs up
-  to the previous word.
-- `initials('Ada King Lovelace')` is `'AL'`; `{ pick: 'first' }` gives `'AK'`.
+  that includes the ellipsis (`…` by default) and never leaves whitespace before
+  it. `boundary: 'word-before'` backs up to the previous word; `'sentence'`
+  backs up to the last sentence end that fits, or to a word when none does.
+- `excerpt(text, needle, { radius, boundary })` returns the context around the
+  first match. `boundary: 'word' | 'sentence'` pulls each edge inward to the
+  nearest boundary without crossing the match, so `radius` stays a hard maximum;
+  a sentence edge out of reach degrades to a word edge on that side.
+- `initials('Ada King Lovelace')` is `'AL'`; `{ pick: 'first' }` gives `'AK'`;
+  `{ singleWord: 2 }` turns a lone `'Alex'` into `'AL'`.
+- `dedent` strips the shared indentation and one surrounding blank line, as a
+  function or a template tag, for SQL and prompt templates.
 - `squish` is `collapseWhitespace` plus a trim.
+
+### Unicode folding and similarity
+
+```ts
+import { jaroWinkler, levenshtein } from '@arki/string/distance';
+import { fold } from '@arki/string/unicode';
+
+fold('Émile Zola'); // 'emile zola' — lowercase, marks stripped, ß/ø/ł spelled out
+levenshtein('kitten', 'sitting'); // 3, counted in graphemes
+jaroWinkler(fold('Émile Zola'), fold('emile zola')); // 1
+```
+
+- `fold` is the search-key form: compare `fold(a) === fold(b)` or feed both sides
+  to a distance. It does no script conversion; that is `transliterate` in `/slug`.
+- `levenshtein`, `diceCoefficient` (grapheme bigrams) and `jaroWinkler` (name
+  matching, prefix-boosted) are all measured in graphemes.
 
 ### Segment
 
@@ -142,6 +167,7 @@ import { readability, readingTime, syllableCount } from '@arki/string/readabilit
 import { lexicalDiversity, wordFrequencies } from '@arki/string/vocabulary';
 
 readability(article).fleschKincaidGrade; // 8.4
+readability(articulo, { language: 'es' }).fernandezHuerta; // Spanish score set
 readingTime(article); // { words: 1200, seconds: 302.5, minutes: 5.04 }
 keywords(article, { length: 2, limit: 5 }); // [{ keyword: 'machine learning', occurrences: 7, percentage: 1.9 }, …]
 textMetrics(article); // every count, score, and statistic in one object
@@ -152,12 +178,27 @@ textMetrics(article); // every count, score, and statistic in one object
   hyphenation; words without Latin letters count 0. `syllableCount(text,
 { language: 'es' | 'de' })` switches to Spanish (diphthong/hiatus rules,
   silent `u` in `que`/`gui`) or German (one syllable per vowel group) counting.
-- `readability()` and its individual formulas are English-calibrated. Flesch
-  Reading Ease is clamped to 0–100 and text without words scores 100; the grade
-  indexes return 0. Spanish texts have `fernandezHuerta` and `szigrisztPazos`
-  (0–100, higher is easier); German texts have `fleschAmstad` (0–100) and
-  `wienerSachtextformel` (a school grade). Each uses its language's syllable
-  counter.
+- `readability(text)` is the English score set (Flesch Reading Ease clamped to
+  0–100, 100 for text without words; grade indexes return 0).
+  `readability(text, { language: 'es' })` returns `fernandezHuerta` and
+  `szigrisztPazos` (0–100, higher is easier); `'de'` returns `fleschAmstad`
+  (0–100) and `wienerSachtextformel` (a school grade). Each language uses its
+  own syllable counter, and every formula is also exported on its own.
+- Every readability, vocabulary and metrics function accepts a string or a
+  `TextAnalysis` from `analyze(text)` (in `/metrics`). Analyze once, pass it to
+  several functions, or write your own formula against its `words`,
+  `sentences`, `syllables` and letter counts:
+
+  ```ts
+  import { analyze } from '@arki/string/metrics';
+  import { fleschKincaidGrade, lix } from '@arki/string/readability';
+
+  const a = analyze(text);
+  const grade = fleschKincaidGrade(a);
+  const lixScore = lix(a);
+  const longWordShare = a.words.filter(w => w.length > 6).length / a.words.length;
+  ```
+
 - `keywords` builds 1-, 2-, or 3-word phrases that never cross clause
   punctuation and never contain a stop word or a word under `minWordLength`
   graphemes. The stop-word list follows `language` (`'en'` default, `'es'`,
