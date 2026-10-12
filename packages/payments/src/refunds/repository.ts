@@ -7,7 +7,7 @@ import type { UserId } from '@arki/auth/ids';
 import type { PaymentId } from '../core/primitives';
 import type { RefundId, RefundReason, RefundStatus } from './primitives';
 import type { RefundsTables } from './tables';
-import type { NewRefund, Refund, UpdateRefund } from './types';
+import type { Refund } from './types';
 
 /**
  * Structural database type for the refunds repository. Only uses
@@ -26,14 +26,6 @@ export class RefundRepository {
   constructor(db: RefundsDatabase, tables: Pick<RefundsTables, 'refunds'>) {
     this.db = db;
     this.refunds = tables.refunds;
-  }
-
-  async create(data: NewRefund): Promise<Refund> {
-    const [refund] = await this.db.insert(this.refunds).values(data).returning();
-    if (!refund) {
-      throw new Error('Failed to create refund');
-    }
-    return refund as Refund;
   }
 
   async findById(refundId: RefundId): Promise<Refund | null> {
@@ -71,66 +63,6 @@ export class RefundRepository {
       .from(this.refunds)
       .where(eq(this.refunds.requestedBy, userId))
       .orderBy(desc(this.refunds.createdAt)) as Promise<Refund[]>;
-  }
-
-  async update(refundId: RefundId, data: UpdateRefund): Promise<Refund> {
-    const [updated] = await this.db
-      .update(this.refunds)
-      .set({
-        ...data,
-        updatedAt: new Date(),
-      })
-      .where(eq(this.refunds.id, refundId))
-      .returning();
-
-    if (!updated) {
-      throw new Error(`Refund ${refundId} not found`);
-    }
-
-    return updated as Refund;
-  }
-
-  async approve(refundId: RefundId, approvedBy: UserId): Promise<Refund> {
-    return this.update(refundId, {
-      status: 'approved',
-      approvedBy,
-      approvedAt: new Date(),
-    });
-  }
-
-  async reject(refundId: RefundId, rejectedBy: UserId, reason: string): Promise<Refund> {
-    return this.update(refundId, {
-      status: 'rejected',
-      rejectedBy,
-      rejectionReason: reason,
-    });
-  }
-
-  async markAsProcessing(refundId: RefundId): Promise<Refund> {
-    return this.update(refundId, {
-      status: 'processing',
-      processedAt: new Date(),
-    });
-  }
-
-  async markAsCompleted(
-    refundId: RefundId,
-    providerRefundId: string,
-    providerResponse?: string,
-  ): Promise<Refund> {
-    return this.update(refundId, {
-      status: 'completed',
-      providerRefundId,
-      providerResponse,
-      completedAt: new Date(),
-    });
-  }
-
-  async markAsFailed(refundId: RefundId, error: string): Promise<Refund> {
-    return this.update(refundId, {
-      status: 'failed',
-      providerResponse: JSON.stringify({ error }),
-    });
   }
 
   async getTotalRefundedAmount(paymentId: PaymentId): Promise<number> {

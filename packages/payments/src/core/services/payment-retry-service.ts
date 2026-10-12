@@ -1,3 +1,4 @@
+import type { CoreWrites } from '../journal';
 import type { BasePaymentProvider } from '../providers/base-provider';
 import type { PaymentRepository } from '../repository';
 import type { Payment, PaymentId, PlanId, Subscription, SubscriptionId } from '../types';
@@ -85,13 +86,24 @@ const DEFAULT_RETRY_STRATEGIES: RetryStrategy[] = [
   },
 ];
 
+/** The provider call a retry makes. A `BasePaymentProvider` fits. */
+type RetryProvider = Pick<BasePaymentProvider, 'confirmPayment'>;
+
+/** The repository reads a retry makes. A `PaymentRepository` fits. */
+type RetryReads = Pick<PaymentRepository, 'findPaymentById' | 'findSubscriptionById'>;
+
+/**
+ * The retry schedule lives in memory. Every change of a `subscriptions` row
+ * goes through `writes`: one journal command each.
+ */
 export class PaymentRetryService {
   private retryAttempts = new Map<string, RetryAttempt>();
   private strategies: RetryStrategy[];
 
   constructor(
-    private readonly paymentProvider: BasePaymentProvider,
-    private readonly paymentRepository: PaymentRepository,
+    private readonly paymentProvider: RetryProvider,
+    private readonly paymentRepository: RetryReads,
+    private readonly writes: CoreWrites,
     strategies: RetryStrategy[] = DEFAULT_RETRY_STRATEGIES,
   ) {
     this.strategies = strategies;
@@ -226,7 +238,7 @@ export class PaymentRetryService {
         await this.cancelRetries(attempt.paymentId, attempt.id);
 
         if (subscription.status === 'past_due') {
-          await this.paymentRepository.updateSubscription(subscription.id, { status: 'active' });
+          await this.writes.activateSubscription({ subscriptionId: subscription.id });
         }
 
         console.log(`Retry attempt ${attempt.id} succeeded - payment recovered`);
@@ -312,7 +324,7 @@ export class PaymentRetryService {
   ): Promise<void> {
     console.log(`All retry attempts exhausted for payment ${paymentId}`);
 
-    await this.paymentRepository.updateSubscription(subscriptionId, { status: 'past_due' });
+    await this.writes.markSubscriptionPastDue({ subscriptionId });
   }
 
   async cancelRetries(paymentId: PaymentId, excludeId?: string): Promise<void> {
@@ -422,7 +434,8 @@ export class PaymentRetryService {
 export function createPaymentRetryService(
   paymentProvider: BasePaymentProvider,
   paymentRepository: PaymentRepository,
+  writes: CoreWrites,
   strategies?: RetryStrategy[],
 ): PaymentRetryService {
-  return new PaymentRetryService(paymentProvider, paymentRepository, strategies);
+  return new PaymentRetryService(paymentProvider, paymentRepository, writes, strategies);
 }

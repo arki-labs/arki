@@ -1,5 +1,6 @@
 import type { UserId } from '@arki/auth/ids';
 
+import type { CoreWrites } from '../journal';
 import type { BasePaymentProvider } from '../providers/base-provider';
 import type { PaymentRepository } from '../repository';
 import type {
@@ -57,10 +58,42 @@ export type SubscriptionAnalytics = {
   subscriptionsByStatus: Record<SubscriptionStatus, number>;
 }
 
+/** The provider calls the manager makes. A `BasePaymentProvider` fits. */
+type SubscriptionProvider = Pick<
+  BasePaymentProvider,
+  | 'createSubscription'
+  | 'updateSubscription'
+  | 'cancelSubscription'
+  | 'reactivateSubscription'
+  | 'pauseSubscription'
+  | 'resumeSubscription'
+  | 'getSubscription'
+  | 'previewSubscriptionChange'
+>;
+
+/** The repository reads the manager makes. A `PaymentRepository` fits. */
+type SubscriptionReads = Pick<
+  PaymentRepository,
+  | 'findCustomerByUserId'
+  | 'findPlanById'
+  | 'findActiveSubscriptionByUserId'
+  | 'findSubscriptionById'
+  | 'findSubscriptionsByUserId'
+  | 'findSubscriptionsEndingInRange'
+  | 'findSubscriptionsByStatus'
+  | 'getSubscriptionStats'
+  | 'getPaymentStats'
+>;
+
+/**
+ * Reads come from the repository. Every change of a `subscriptions` row goes
+ * through `writes`: one journal command each, so each change leaves an event.
+ */
 export class SubscriptionManager {
   constructor(
-    private readonly paymentProvider: BasePaymentProvider,
-    private readonly paymentRepository: PaymentRepository,
+    private readonly paymentProvider: SubscriptionProvider,
+    private readonly paymentRepository: SubscriptionReads,
+    private readonly writes: CoreWrites,
   ) {}
 
   async createSubscription(
@@ -173,7 +206,8 @@ export class SubscriptionManager {
       });
 
       // Update our database
-      await this.paymentRepository.updateSubscription(subscriptionId, {
+      await this.writes.cancelSubscription({
+        subscriptionId,
         status: canceledSubscription.status,
         canceledAt: canceledSubscription.canceledAt,
         cancelAtPeriodEnd: canceledSubscription.cancelAtPeriodEnd,
@@ -202,12 +236,8 @@ export class SubscriptionManager {
       // Reactivate with the payment provider
       const reactivatedSubscription = await this.paymentProvider.reactivateSubscription(subscriptionId);
 
-      // Update our database
-      await this.paymentRepository.updateSubscription(subscriptionId, {
-        status: reactivatedSubscription.status,
-        canceledAt: null,
-        cancelAtPeriodEnd: false,
-      });
+      // Update our database. The event clears the cancellation.
+      await this.writes.reactivateSubscription({ subscriptionId, status: reactivatedSubscription.status });
 
       return reactivatedSubscription;
     } catch (error) {
@@ -233,9 +263,7 @@ export class SubscriptionManager {
       const pausedSubscription = await this.paymentProvider.pauseSubscription(subscriptionId);
 
       // Update our database
-      await this.paymentRepository.updateSubscription(subscriptionId, {
-        status: pausedSubscription.status,
-      });
+      await this.writes.pauseSubscription({ subscriptionId, status: pausedSubscription.status });
 
       return pausedSubscription;
     } catch (error) {
@@ -261,9 +289,7 @@ export class SubscriptionManager {
       const resumedSubscription = await this.paymentProvider.resumeSubscription(subscriptionId);
 
       // Update our database
-      await this.paymentRepository.updateSubscription(subscriptionId, {
-        status: resumedSubscription.status,
-      });
+      await this.writes.resumeSubscription({ subscriptionId, status: resumedSubscription.status });
 
       return resumedSubscription;
     } catch (error) {
@@ -447,8 +473,12 @@ export class SubscriptionManager {
         throw new Error('Subscription not found in payment provider');
       }
 
-      // Update our database with the provider data
-      const updatedSubscription = await this.paymentRepository.updateSubscription(subscriptionId, {
+      // Update our database with the provider data. An answer that changes nothing writes no event.
+      const updatedSubscription = await this.writes.syncSubscription({
+        userId: localSubscription.userId,
+        planId: localSubscription.planId,
+        customerId: localSubscription.customerId,
+        providerSubscriptionId: localSubscription.providerSubscriptionId,
         status: providerSubscription.status,
         currentPeriodStart: providerSubscription.currentPeriodStart,
         currentPeriodEnd: providerSubscription.currentPeriodEnd,
@@ -528,6 +558,7 @@ export class SubscriptionManager {
 export function createSubscriptionManager(
   paymentProvider: BasePaymentProvider,
   paymentRepository: PaymentRepository,
+  writes: CoreWrites,
 ) {
-  return new SubscriptionManager(paymentProvider, paymentRepository);
+  return new SubscriptionManager(paymentProvider, paymentRepository, writes);
 }

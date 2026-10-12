@@ -1,3 +1,4 @@
+import type { CoreWrites } from '../journal';
 import type { BasePaymentProvider } from '../providers/base-provider';
 import type { PaymentRepository } from '../repository';
 import type {
@@ -148,13 +149,27 @@ const DEFAULT_DUNNING_CONFIG: DunningConfiguration = {
   ],
 };
 
+/** The provider calls dunning makes. A `BasePaymentProvider` fits. */
+type DunningProvider = Pick<BasePaymentProvider, 'confirmPayment' | 'pauseSubscription' | 'cancelSubscription'>;
+
+/** The repository reads dunning makes. A `PaymentRepository` fits. */
+type DunningReads = Pick<
+  PaymentRepository,
+  'findPaymentById' | 'findSubscriptionById' | 'getPaymentStats' | 'getSubscriptionStats'
+>;
+
+/**
+ * The schedule of dunning steps lives in memory. Every change of a
+ * `subscriptions` row goes through `writes`: one journal command each.
+ */
 export class DunningService {
   private config: DunningConfiguration;
   private dunningEvents = new Map<string, DunningEvent>();
 
   constructor(
-    private readonly paymentProvider: BasePaymentProvider,
-    private readonly paymentRepository: PaymentRepository,
+    private readonly paymentProvider: DunningProvider,
+    private readonly paymentRepository: DunningReads,
+    private readonly writes: CoreWrites,
     config: Partial<DunningConfiguration> = {},
   ) {
     this.config = { ...DEFAULT_DUNNING_CONFIG, ...config };
@@ -203,9 +218,7 @@ export class DunningService {
       }
 
       // Update subscription status to past_due
-      await this.paymentRepository.updateSubscription(subscriptionId, {
-        status: 'past_due',
-      });
+      await this.writes.markSubscriptionPastDue({ subscriptionId });
 
       console.log(`Initiated dunning process for payment ${paymentId} on subscription ${subscriptionId}`);
     } catch (error) {
@@ -312,10 +325,9 @@ export class DunningService {
       const retryResult = await this.paymentProvider.confirmPayment(event.paymentId);
 
       if (retryResult.status === 'succeeded') {
-        // Payment recovered - update subscription status
-        await this.paymentRepository.updateSubscription(event.subscriptionId, {
-          status: 'active',
-        });
+        // Payment recovered - update subscription status.
+        // A canceled subscription stays canceled: the command rejects and the catch below logs it.
+        await this.writes.activateSubscription({ subscriptionId: event.subscriptionId });
 
         // Remove remaining dunning events for this subscription
         this.cancelDunningEventsForSubscription(event.subscriptionId);
@@ -337,9 +349,7 @@ export class DunningService {
       await this.paymentProvider.pauseSubscription(event.subscriptionId);
 
       // Update local database
-      await this.paymentRepository.updateSubscription(event.subscriptionId, {
-        status: 'paused',
-      });
+      await this.writes.pauseSubscription({ subscriptionId: event.subscriptionId });
 
       console.log(`Paused subscription ${event.subscriptionId} due to payment failure`);
     } catch (error) {
@@ -358,7 +368,8 @@ export class DunningService {
       });
 
       // Update local database
-      await this.paymentRepository.updateSubscription(event.subscriptionId, {
+      await this.writes.cancelSubscription({
+        subscriptionId: event.subscriptionId,
         status: 'canceled',
         canceledAt: new Date(),
       });
@@ -397,10 +408,8 @@ export class DunningService {
     // Cancel remaining dunning events
     this.cancelDunningEventsForSubscription(subscriptionId);
 
-    // Update subscription status
-    await this.paymentRepository.updateSubscription(subscriptionId, {
-      status: 'active',
-    });
+    // Update subscription status. A canceled subscription is not brought back: the command rejects.
+    await this.writes.activateSubscription({ subscriptionId });
 
     // Create recovery event for analytics
     const recoveryEvent: DunningEvent = {
@@ -480,7 +489,8 @@ export class DunningService {
 export function createDunningService(
   paymentProvider: BasePaymentProvider,
   paymentRepository: PaymentRepository,
+  writes: CoreWrites,
   config?: Partial<DunningConfiguration>,
 ) {
-  return new DunningService(paymentProvider, paymentRepository, config);
+  return new DunningService(paymentProvider, paymentRepository, writes, config);
 }

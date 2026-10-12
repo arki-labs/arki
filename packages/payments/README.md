@@ -6,7 +6,7 @@ Payment processing library for `@arki/*` apps.
 
 ## Scope
 
-Provider abstraction, domain types and primitives, table factories, repositories, services, event-sourcing domain pieces, and a notifications adapter. Routers stay in each consuming app so apps own their oRPC context and authz policy.
+Provider abstraction, domain types and primitives, table factories, repositories, services, journal entities and commands (`@arki/journal`), and a notifications adapter. Routers stay in each consuming app so apps own their oRPC context and authz policy.
 
 ## Subpath exports
 

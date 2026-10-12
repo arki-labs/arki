@@ -9,7 +9,6 @@ import type {
   Customer,
   CustomerId,
   NewCustomer,
-  NewPayment,
   NewPlan,
   NewSubscription,
   NewWebhookEvent,
@@ -27,7 +26,6 @@ import type {
   SubscriptionWithPlan,
   SubscriptionWithRelations,
   UpdateCustomer,
-  UpdatePayment,
   UpdatePlan,
   UpdateSubscription,
   UpdateWebhookEvent,
@@ -140,7 +138,6 @@ export class PaymentRepository {
   private readonly plans: CoreTables['plans'];
   private readonly customers: CoreTables['customers'];
   private readonly subscriptions: CoreTables['subscriptions'];
-  private readonly payments: CoreTables['payments'];
   private readonly webhookEvents: CoreTables['webhookEvents'];
 
   constructor(
@@ -159,7 +156,6 @@ export class PaymentRepository {
     this.plans = tables.plans;
     this.customers = tables.customers;
     this.subscriptions = tables.subscriptions;
-    this.payments = tables.payments;
     this.webhookEvents = tables.webhookEvents;
   }
 
@@ -270,6 +266,8 @@ export class PaymentRepository {
   }
 
   // Subscription methods
+  // `createSubscription` and `updateSubscription` stay for the presets (`presets/subscription.ts`,
+  // `presets/revenuecat.ts`), which still write directly. Every other writer uses the journal commands.
   async createSubscription(data: NewSubscription): Promise<Subscription> {
     const result = await this.db.insert(this.subscriptions).values(data).returning();
     const row = result[0];
@@ -349,33 +347,11 @@ export class PaymentRepository {
     return row as Subscription;
   }
 
-  async cancelSubscription(id: SubscriptionId, canceledAt: Date = new Date()): Promise<Subscription> {
-    const result = await this.db
-      .update(this.subscriptions)
-      .set({ status: 'canceled', canceledAt, updatedAt: new Date() })
-      .where(eq(this.subscriptions.id, id))
-      .returning();
-    const row = result[0];
-    if (!row) {
-      throw new Error('Failed to cancel subscription or subscription not found');
-    }
-    return row as Subscription;
-  }
-
   async getSubscription(id: SubscriptionId): Promise<Subscription | null> {
     return this.findSubscriptionById(id);
   }
 
   // Payment methods
-  async createPayment(data: NewPayment): Promise<Payment> {
-    const result = await this.db.insert(this.payments).values(data).returning();
-    const row = result[0];
-    if (!row) {
-      throw new Error('Failed to create payment');
-    }
-    return row as Payment;
-  }
-
   async findPaymentById(id: PaymentId): Promise<Payment | null> {
     const payment = await this.q.payments.findFirst({
       where: { id },
@@ -430,19 +406,6 @@ export class PaymentRepository {
       },
       orderBy: (t, { desc }) => [desc(t.createdAt)],
     });
-  }
-
-  async updatePayment(id: PaymentId, data: UpdatePayment): Promise<Payment> {
-    const result = await this.db
-      .update(this.payments)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(this.payments.id, id))
-      .returning();
-    const row = result[0];
-    if (!row) {
-      throw new Error('Failed to update payment or payment not found');
-    }
-    return row as Payment;
   }
 
   // Webhook event methods

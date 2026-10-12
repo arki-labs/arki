@@ -4,7 +4,7 @@ import type { NotificationService } from '../core/notifications/service';
 import type { StripeProvider } from '../core/providers/stripe-provider';
 import type { PaymentRepository } from '../core/repository';
 import type { PaymentId } from '../core/types';
-import { createRefundId } from './primitives';
+import type { RefundWrites } from './journal';
 import {
   type RefundsDatabase,
   type RefundRepository,
@@ -25,20 +25,34 @@ export type RefundServiceConfig = {
   refundWindowMs?: number;
 };
 
+/** The refund reads the service makes. A `RefundRepository` fits. */
+type RefundReads = Pick<
+  RefundRepository,
+  'findById' | 'findByPaymentId' | 'getRefundMetrics' | 'getAverageProcessingTime' | 'searchRefunds'
+>;
+
+/** The provider call the service makes. A `StripeProvider` fits. */
+type RefundProvider = Pick<StripeProvider, 'refundPayment'>;
+
+/** The payment read the service makes. A `PaymentRepository` fits. */
+type PaymentReads = Pick<PaymentRepository, 'findPaymentById'>;
+
+/**
+ * Reads come from the repositories. Every change of a `refunds` row goes
+ * through `writes`: one journal command per step, so each step leaves an event.
+ */
 export class RefundService {
-  private refundRepository: RefundRepository;
   private readonly refundWindow: number;
   private readonly systemUserId: UserId | string;
 
   constructor(
-    db: RefundsDatabase,
-    tables: Pick<RefundsTables, 'refunds'>,
-    private readonly paymentProvider: StripeProvider,
-    private readonly paymentRepository: PaymentRepository,
+    private readonly refundRepository: RefundReads,
+    private readonly writes: RefundWrites,
+    private readonly paymentProvider: RefundProvider,
+    private readonly paymentRepository: PaymentReads,
     config: RefundServiceConfig,
     private readonly notificationService?: NotificationService,
   ) {
-    this.refundRepository = createRefundRepository(db, tables);
     this.refundWindow = config.refundWindowMs ?? 90 * 24 * 60 * 60 * 1000;
     this.systemUserId = config.systemUserId;
   }
@@ -46,14 +60,12 @@ export class RefundService {
   async requestRefund(data: RefundRequestData): Promise<Refund> {
     await this.validateRefundEligibility(data.paymentId, data.amount);
 
-    const refund = await this.refundRepository.create({
-      id: createRefundId(),
+    const refund = await this.writes.requestRefund({
       paymentId: data.paymentId,
-      originalAmount: String(data.amount),
-      refundAmount: String(data.amount),
+      originalAmount: data.amount,
+      refundAmount: data.amount,
       currency: 'USD',
       reason: data.reason,
-      status: 'pending',
       requestedBy: data.requestedBy,
       customerNote: data.customerNote,
       internalNotes: data.internalNotes,
@@ -77,7 +89,7 @@ export class RefundService {
       throw new Error(`Invalid refund state for ${data.refundId}`);
     }
 
-    const approvedRefund = await this.refundRepository.approve(data.refundId, data.approvedBy);
+    const approvedRefund = await this.writes.approveRefund({ refundId: data.refundId, approvedBy: data.approvedBy });
 
     return this.processRefund(approvedRefund);
   }
@@ -88,11 +100,11 @@ export class RefundService {
       throw new Error(`Invalid refund state for ${data.refundId}`);
     }
 
-    const rejectedRefund = await this.refundRepository.reject(
-      data.refundId,
-      data.rejectedBy,
-      data.reason,
-    );
+    const rejectedRefund = await this.writes.rejectRefund({
+      refundId: data.refundId,
+      rejectedBy: data.rejectedBy,
+      rejectionReason: data.reason,
+    });
 
     if (this.notificationService) {
       await this.notifyCustomer(rejectedRefund, 'rejected');
@@ -102,9 +114,10 @@ export class RefundService {
   }
 
   private async processRefund(refund: Refund): Promise<Refund> {
-    try {
-      await this.refundRepository.markAsProcessing(refund.id);
+    // Outside the `try`: a refund that could not start has nothing to mark as failed
+    await this.writes.processRefund({ refundId: refund.id });
 
+    try {
       const payment = await this.paymentRepository.findPaymentById(refund.paymentId as PaymentId);
       if (!payment) {
         throw new Error(`Payment ${refund.paymentId} not found`);
@@ -121,11 +134,11 @@ export class RefundService {
         },
       });
 
-      const completedRefund = await this.refundRepository.markAsCompleted(
-        refund.id,
-        providerResult.id,
-        JSON.stringify(providerResult),
-      );
+      const completedRefund = await this.writes.completeRefund({
+        refundId: refund.id,
+        providerRefundId: providerResult.id,
+        providerResponse: JSON.stringify(providerResult),
+      });
 
       if (this.notificationService) {
         await this.notifyCustomer(completedRefund, 'completed');
@@ -133,10 +146,10 @@ export class RefundService {
 
       return completedRefund;
     } catch (error) {
-      await this.refundRepository.markAsFailed(
-        refund.id,
-        error instanceof Error ? error.message : 'Unknown error',
-      );
+      await this.writes.failRefund({
+        refundId: refund.id,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      });
 
       if (this.notificationService) {
         await this.notifySupportTeam(refund, error);
@@ -219,10 +232,18 @@ export class RefundService {
 export function createRefundService(
   db: RefundsDatabase,
   tables: Pick<RefundsTables, 'refunds'>,
+  writes: RefundWrites,
   paymentProvider: StripeProvider,
   paymentRepository: PaymentRepository,
   config: RefundServiceConfig,
   notificationService?: NotificationService,
 ) {
-  return new RefundService(db, tables, paymentProvider, paymentRepository, config, notificationService);
+  return new RefundService(
+    createRefundRepository(db, tables),
+    writes,
+    paymentProvider,
+    paymentRepository,
+    config,
+    notificationService,
+  );
 }
