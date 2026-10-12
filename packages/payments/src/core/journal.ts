@@ -57,9 +57,6 @@ export {
   resumeSubscriptionInputSchema,
   syncSubscriptionInputSchema,
 } from './journal/subscription';
-// Temporary alias: `apps/kapodopera/backend/src/core/run-command.ts` still imports this name.
-// It goes when kapodopera switches to `CommandError` from `@arki/journal`.
-export { CommandError as PaymentsCommandError } from '@arki/journal';
 export type {
   CancelPaymentInput,
   CompletePaymentInput,
