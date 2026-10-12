@@ -51,6 +51,8 @@
     "!src/**/*.spec.*",
     "!src/**/__tests__/**",
     "README.md",
+    "llms.txt",
+    "docs/agent-guide.md",
     "LICENSE",
     "package.json"
   ],
