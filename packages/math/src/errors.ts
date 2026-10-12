@@ -36,3 +36,6 @@ export class ResourceLimitError extends MathError {}
 
 /** The runtime lacks an `Intl` feature this call depends on. */
 export class UnsupportedFeatureError extends MathError {}
+
+/** Two `Money` values in different currencies were combined. */
+export class CurrencyMismatchError extends MathError {}

@@ -226,6 +226,13 @@ export class Decimal {
     return this.toScale(places, rounding);
   }
 
+  /** Rounds to the nearest multiple of `step`: `decimal('1.23').roundTo('0.05')` → `1.25`. Default half-up. */
+  roundTo(step: DecimalInput, rounding: RoundingMode = 'halfUp'): Decimal {
+    const unit = Decimal.from(step);
+    if (!unit.isPositive()) throw new InvalidArgumentError(`roundTo needs a positive step, got ${unit.toString()}`);
+    return this.dividedBy(unit, { scale: 0, rounding }).times(unit);
+  }
+
   /** Drops trailing zeros: `1.500` → `1.5`, `2.00` → `2`. */
   trim(): Decimal {
     let { coefficient, scale } = this;
@@ -327,6 +334,16 @@ export class Decimal {
     return this.toString();
   }
 
+  /** Console display in Node and Bun: `Decimal(1.5)`. */
+  [Symbol.for('nodejs.util.inspect.custom')](): string {
+    return `Decimal(${this.toString()})`;
+  }
+
+  /** Console display in Deno. */
+  [Symbol.for('Deno.customInspect')](): string {
+    return `Decimal(${this.toString()})`;
+  }
+
   /** Throws. A `Decimal` never silently becomes a float. */
   valueOf(): never {
     return refuseCoercion('Decimal');
@@ -361,6 +378,7 @@ export function isDecimal(value: unknown): value is Decimal {
 
 const RATIO_SYNTAX = /^([+-]?\d+)\s*\/\s*([+-]?\d+)$/;
 const REPEATING_SYNTAX = /^([+-]?)(\d*)\.(\d*)\((\d+)\)$/;
+const MIXED_SYNTAX = /^([+-]?)(\d+)\s+(\d+)\s*\/\s*(\d+)$/;
 
 /** A mixed number: `7/2` is `{ whole: 3n, fraction: 1/2 }`. The fraction carries the sign of the value. */
 export type MixedNumber = {
@@ -615,6 +633,16 @@ export class Rational {
     return this.toString();
   }
 
+  /** Console display in Node and Bun: `Rational(1/3)`. */
+  [Symbol.for('nodejs.util.inspect.custom')](): string {
+    return `Rational(${this.toString()})`;
+  }
+
+  /** Console display in Deno. */
+  [Symbol.for('Deno.customInspect')](): string {
+    return `Rational(${this.toString()})`;
+  }
+
   /** Throws. A `Rational` never silently becomes a float. */
   valueOf(): never {
     return refuseCoercion('Rational');
@@ -627,8 +655,16 @@ export class Rational {
   readonly [Symbol.toStringTag] = 'Rational';
 }
 
-/** Accepts `'3/4'`, `'0.(3)'`, `'1.2(34)'` and any plain decimal string. */
+/** Accepts `'3/4'`, `'4 1/2'` (mixed), `'0.(3)'`, `'1.2(34)'` and any plain decimal string. */
 function parseRational(input: string): Rational {
+  const mixed = MIXED_SYNTAX.exec(input);
+  if (mixed) {
+    const [, signText, whole, numeratorText, denominatorText] = mixed;
+    const denominator = toBigIntInput(denominatorText!, 'denominator');
+    const numerator =
+      toBigIntInput(whole!, 'whole part') * denominator + toBigIntInput(numeratorText!, 'numerator');
+    return Rational.fromParts(signText === '-' ? -numerator : numerator, denominator);
+  }
   const ratioMatch = RATIO_SYNTAX.exec(input);
   if (ratioMatch) {
     return Rational.fromParts(toBigIntInput(ratioMatch[1]!, 'numerator'), toBigIntInput(ratioMatch[2]!, 'denominator'));

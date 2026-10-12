@@ -7,13 +7,14 @@
  */
 
 import type { RoundingMode } from './rounding.js';
-import { InvalidArgumentError } from './errors.js';
+import { InvalidArgumentError, ResourceLimitError } from './errors.js';
 import { divideRounded, pow10 } from './internal/bigint.js';
 import { partsFromNumber } from './internal/parse.js';
 
 /** Interval notation: `[` / `]` include the bound, `(` / `)` exclude it. */
 export type Bounds = '[]' | '[)' | '(]' | '()';
 
+/** @internal Shared argument guard; not part of the public API. */
 export function assertFinite(value: number, name: string): void {
   if (typeof value !== 'number') throw new TypeError(`${name} must be a number`);
   if (!Number.isFinite(value)) throw new InvalidArgumentError(`${name} must be finite, got ${value}`);
@@ -27,6 +28,74 @@ function assertOrdered(min: number, max: number): void {
 
 function noNegativeZero(value: number): number {
   return value === 0 ? 0 : value;
+}
+
+/** Longest sequence `range` or `linspace` will build; keeps `range(0, 1e12)` from exhausting memory. */
+const MAX_SEQUENCE_LENGTH = 10_000_000;
+
+function assertSequenceLength(length: number): void {
+  if (length > MAX_SEQUENCE_LENGTH) {
+    throw new ResourceLimitError(`sequence of ${length} numbers exceeds the limit of ${MAX_SEQUENCE_LENGTH}`);
+  }
+}
+
+/**
+ * Numbers from `start` up to but excluding `end`, `step` apart (default 1):
+ * `range(5)` → `[0, 1, 2, 3, 4]`, `range(0, 1, 0.25)` → `[0, 0.25, 0.5, 0.75]`.
+ * A negative `step` counts down (`range(3, 0, -1)` → `[3, 2, 1]`). Each element
+ * is `start + i * step`, so fractional steps do not drift. A step pointing away
+ * from `end` gives `[]`. Throws `InvalidArgumentError` for a zero or non-finite
+ * step and `ResourceLimitError` past 10,000,000 elements.
+ */
+export function range(end: number): number[];
+export function range(start: number, end: number, step?: number): number[];
+export function range(first: number, second?: number, step = 1): number[] {
+  const start = second === undefined ? 0 : first;
+  const end = second === undefined ? first : second;
+  assertFinite(start, 'start');
+  assertFinite(end, 'end');
+  assertFinite(step, 'step');
+  if (step === 0) throw new InvalidArgumentError('step must be non-zero');
+  let length = Math.max(0, Math.ceil((end - start) / step));
+  if (!Number.isFinite(length)) throw new ResourceLimitError('sequence is too long to build');
+  // The quotient can round up past a whole count (0.3 / 0.1 → 3.0000000000000004), which would add an element at `end`.
+  if (length > 0) {
+    const last = start + (length - 1) * step;
+    if (step > 0 ? last >= end : last <= end) length--;
+  }
+  assertSequenceLength(length);
+  const out: number[] = [];
+  for (let i = 0; i < length; i++) out.push(noNegativeZero(start + i * step));
+  return out;
+}
+
+/**
+ * `count` evenly spaced numbers from `start` to `end`, both included:
+ * `linspace(0, 1, 5)` → `[0, 0.25, 0.5, 0.75, 1]`. `count` 1 gives `[start]`,
+ * 0 gives `[]`. The first element is exactly `start` and the last exactly `end`;
+ * the span may exceed the float range (`linspace(-1e308, 1e308, 3)` works). Throws `InvalidArgumentError`
+ * unless `count` is a non-negative safe integer and `ResourceLimitError` past
+ * 10,000,000 elements.
+ */
+export function linspace(start: number, end: number, count: number): number[] {
+  assertFinite(start, 'start');
+  assertFinite(end, 'end');
+  assertFinite(count, 'count');
+  if (!Number.isSafeInteger(count) || count < 0) {
+    throw new InvalidArgumentError(`count must be a non-negative safe integer, got ${count}`);
+  }
+  assertSequenceLength(count);
+  if (count === 0) return [];
+  if (count === 1) return [noNegativeZero(start)];
+  const last = count - 1;
+  const out: number[] = [noNegativeZero(start)];
+  // Weighted form, not `start + (end - start) * t`: the span can overflow (-1e308 to 1e308) where the weights cannot.
+  for (let i = 1; i < last; i++) {
+    const t = i / last;
+    out.push(noNegativeZero(start * (1 - t) + end * t));
+  }
+  out.push(noNegativeZero(end));
+  return out;
 }
 
 /** Limits `x` to `[min, max]`, both ends included. */

@@ -61,9 +61,12 @@ Everything is a subpath import, tree-shakeable by concern. The root
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@arki/math/decimal`       | `decimal()`, `Decimal` — exact decimals with retained scale                                                                                 |
 | `@arki/math/rational`      | `ratio()`, `Rational` — exact fractions on `bigint`                                                                                         |
-| `@arki/math/number`        | `clamp`, `lerp`, `inverseLerp`, `remap`, `inRange`, `round`, `roundTo`, `approxEqual`                                                       |
-| `@arki/math/integer`       | `gcd`, `lcm`, `divmod` — `number` and `bigint` overloads                                                                                    |
-| `@arki/math/stats`         | `sum`, `mean`, `median`, `mode`, `percentile`, `variance`, `stddev`, `minMax`, `correlation`, `linearRegression`                            |
+| `@arki/math/number`        | `clamp`, `lerp`, `inverseLerp`, `remap`, `inRange`, `round`, `roundTo`, `approxEqual`, `range`, `linspace`                                  |
+| `@arki/math/integer`       | `gcd`, `lcm`, `divmod`, `factorial`, `combinations`, `permutations`, `isPrime`, `primeFactors`, `divisors`, `modPow`, `modInverse`, `fibonacci` |
+| `@arki/math/stats`         | `sum`, `mean`, `median`, `mode`, `percentile`, `variance`, `stddev`, `minMax`, `correlation`, `linearRegression`; `mean`…`stddev` exact on `Decimal[]` |
+| `@arki/math/money`         | `money()`, `Money` — currency-scaled `Decimal` with lossless `allocate`                                                                      |
+| `@arki/math/units`         | `convert`, `convertExact`, `formatUnit` — 11 categories, exact ratios                                                                        |
+| `@arki/math/finance`       | `payment`, `amortizationSchedule`, `futureValue`, `netPresentValue`, `internalRateOfReturn`, … — on `Decimal`                               |
 | `@arki/math/distributions` | `normal`, `studentT`, `noncentralT`, `chiSquare`, `fisherF`, `exponential`, `uniform`, `binomial`, `poisson`, `erf`, `erfInv`, `gammaLn`, … |
 | `@arki/math/decimal-math`  | `sqrt`, `cbrt`, `nthRoot`, `exp`, `ln`, `log10`, `log2`, `log`, `pow`, `PI`, `E` — correctly rounded, on `Decimal`                          |
 | `@arki/math/words`         | `spellNumber`, `spellOrdinal`, `formatOrdinal`; locales `en`, `enGB` built in, `words/ro`, `/de`, `/fr`, `/es`, `/it` opt-in                |
@@ -75,8 +78,8 @@ Everything is a subpath import, tree-shakeable by concern. The root
 | `@arki/math/errors`        | `MathError` and its subclasses                                                                                                              |
 
 Deliberately **not** here: expression parsing, symbolic algebra, matrices,
-complex numbers, units, and arbitrary-precision trigonometry. Those need
-their own engines; reach for mathjs or a numerics library.
+complex numbers, and arbitrary-precision trigonometry. Those need their own
+engines; reach for mathjs or a numerics library.
 
 ## Rounding
 
@@ -121,11 +124,13 @@ d.pow(2).toString(); // '1.2100'
 d.pow(-1); // throws RoundingNecessaryError (1 / 1.1 does not terminate)
 
 d.toScale(3).toString(); // '1.100'   adding digits is always allowed
-d.toScale(1); // throws — would drop a non-zero digit
+decimal('1.15').toScale(1); // throws — would drop a non-zero digit
 d.toScale(1, 'halfUp').toString(); // '1.1'
 d.round(1).toString(); // '1.1'      round() = toScale() with halfUp default
 d.toFixed(0); // '1'
 d.trim().toString(); // '1.1'
+d.roundTo('0.25').toString(); // '1.00'   nearest multiple of a step
+formatNumber(d, { locale: 'de-DE' }); // '1,1'   display goes through @arki/math/format
 
 d.eq('1.1'); // true — equality is numeric, scale does not matter
 d.compareTo(2); // -1
@@ -162,6 +167,7 @@ zero is always `0/1`.
 
 ```ts
 ratio(6, 4).toString(); // '3/2'
+ratio('4 1/2').toString(); // '9/2'   mixed numbers parse too
 ratio('7/2').toMixed(); // { whole: 3n, fraction: 1/2 }
 ratio('0.1(6)').toString(); // '1/6'
 ratio(0.75).toString(); // '3/4'
@@ -183,9 +189,14 @@ denominator — the "0.333 → ⅓" step every calculator needs.
 
 ## Statistics
 
-Over plain numbers; inputs may be any iterable and are never mutated.
+Inputs may be any iterable and are never mutated. Over plain numbers,
 `sum` uses compensated (Neumaier) summation, so `sum([0.1, 0.2, 0.3])` is
-exactly `0.6`. `variance`/`stddev` default to the **sample** statistic
+exactly `0.6`. Give `mean`, `median`, `minMax`, `variance` or `stddev` an
+iterable of `Decimal` and you get an exact `Decimal` back
+(`mean([decimal('0.1'), decimal('0.2')])` is `0.15`; a mean that does not
+terminate needs `{ scale, rounding }`, like division; `stddev` is correctly
+rounded at the scale you ask for). `sum` is number-only — `Decimal.sum` is
+the exact sum, and an empty list has no way to say which kind it wanted. `variance`/`stddev` default to the **sample** statistic
 (`ddof: 1`, like Python and Excel's `STDEV`); pass `{ ddof: 0 }` for
 population. `percentile(values, p)` takes `p` in `0–100` and uses R‑7 linear
 interpolation (Excel `PERCENTILE.INC`, numpy's default). Empty input throws
@@ -298,7 +309,7 @@ num(0.1).toDecimal().plus('0.2').toString(); // '0.3'
 
 ## Distributions
 
-Each factory returns an immutable object with `cdf`, `inv` (the quantile)
+Each factory returns an immutable object with `cdf`, `quantile`
 and `pdf` or `pmf`, plus `mean` and `variance` (`undefined` where the moment
 does not exist, `Infinity` where it diverges). Parameters are validated up
 front; nothing returns `NaN`.
@@ -306,21 +317,20 @@ front; nothing returns `NaN`.
 ```ts
 import { binomial, chiSquare, fisherF, noncentralT, normal, poisson, studentT } from '@arki/math/distributions';
 
-normal().inv(0.975); // 1.959963984540054
+normal().quantile(0.975); // 1.959963984540054
 normal(100, 15).cdf(130); // 0.9772498680518208
-studentT(10).inv(0.975); // 2.2281388519862744
-chiSquare(1).inv(0.95); // 3.841458820694124
+studentT(10).quantile(0.975); // 2.2281388519862744
+chiSquare(1).quantile(0.95); // 3.841458820694124
 fisherF(3, 10).cdf(3.708265); // ≈ 0.95
 noncentralT(10, 1).cdf(2); // 0.8076115625 — power analysis without jstat
 binomial(10, 0.5).pmf(5); // 0.24609375
 poisson(3).cdf(2); // 0.42319008112684353
 ```
 
-`quantile(p)` is the long name of `inv(p)`; use whichever reads better.
 For p-values, use the survival function instead of `1 - cdf(x)` — the
 subtraction loses the tail: `1 - normal().cdf(9)` is `0`, while
-`normal().sf(9)` is `1.13e-19`. Discrete `inv(p)` is exactly "the smallest
-`k` with `cdf(k) ≥ p`".
+`normal().sf(9)` is `1.13e-19`. Discrete `quantile(p)` is exactly "the
+smallest `k` with `cdf(k) ≥ p`".
 
 The special functions underneath — `erf`, `erfc`, `erfInv`, `gammaLn`,
 `regularizedGammaP`, `regularizedBeta` — are exported too. Accuracy: `cdf`
@@ -330,7 +340,7 @@ the non-central t (verified by numerical integration).
 ## Decimal math
 
 Transcendental results are never exact, so these take an explicit `scale`
-(`DecimalMathOptions`: **fraction digits**, not significant digits) and
+(the same `ScaleOptions` as `Decimal#dividedBy`: **fraction digits**, not significant digits) and
 round **correctly** — the result is the true value rounded once at that
 scale, computed with guard digits and bigint arithmetic. Default rounding
 here is `halfEven`. `sqrt`, `cbrt` and `nthRoot` without options stay
@@ -387,6 +397,81 @@ that window it comes back as locale-formatted digits with its value intact
 magnitude limit (`maxGroups`, in base-1000 groups) beyond which it throws
 `NumericRangeError` before doing any work.
 
+## Money
+
+A `Money` is a `Decimal` pinned to its currency's minor-unit scale (2 for
+EUR, 0 for JPY, 3 for BHD — read from `Intl`). Construction never loses
+cents silently: `money('1.005', 'EUR')` throws unless you pass a rounding
+mode. Multiplication and division round to the currency scale with
+banker's rounding by default; `allocate` splits an amount so the parts add
+back to the whole exactly, largest-remainder first.
+
+```ts
+import { money, Money } from '@arki/math/money';
+
+const price = money('19.99', 'EUR');
+price.times('1.19').toString(); // '23.79 EUR'
+price.dividedBy(3).toString(); // '6.66 EUR'   halfEven; { rounding: 'up' } → 6.67
+money(100, 'EUR').allocate([1, 1, 1]).map(String); // ['33.34 EUR', '33.33 EUR', '33.33 EUR']
+price.plus(money(1, 'USD')); // throws CurrencyMismatchError
+price.toMinorUnits(); // 1999n
+price.format({ locale: 'de-DE' }); // '19,99 €'
+Money.sum([price, price]).toString(); // '39.98 EUR'
+Money.parse('EUR 5').toJSON(); // { amount: '5.00', currency: 'EUR' }
+```
+
+## Units
+
+Eleven categories (length, mass, area, volume, temperature, time, speed,
+data, energy, pressure, angle) with every factor stored as an exact
+rational, so `convert(1, 'in', 'cm')` is exactly `2.54` and
+`convert(100, 'C', 'F')` is exactly `212`. `convertExact` returns the
+`Rational`; only conversions through π (radians) refuse to be exact.
+
+```ts
+import { convert, convertExact, formatUnit, unitsOf } from '@arki/math/units';
+
+convert(5, 'km', 'mi'); // 3.1068559611866697
+convert(1, 'GiB', 'GB'); // 1.073741824
+convertExact(1, 'mi', 'km').toString(); // '25146/15625'
+convert(1, 'm', 'kg'); // throws InvalidArgumentError: length → mass
+formatUnit(5, 'km', { display: 'long' }); // '5 kilometers'
+unitsOf('pressure'); // ['Pa', 'kPa', 'bar', 'atm', 'psi', 'mmHg']
+```
+
+## Finance
+
+Spreadsheet-shaped (Excel `PMT`, `NPV`, `IRR`, `FV`, `PV`, `EFFECT`,
+`NOMINAL`) but exact on `Decimal`: rates are per-period fractions, every
+intermediate stays exact and the result is rounded once at the scale you
+ask for. `payment` returns a positive number for a positive loan.
+
+```ts
+import { amortizationSchedule, futureValue, netPresentValue, payment } from '@arki/math/finance';
+
+payment(200_000, 0.005, 360, { scale: 2, rounding: 'halfEven' }).toString(); // '1199.10'
+futureValue(1000, 0.05, 10).toString(); // exact: '1628.89462677744140625000'
+netPresentValue(0.1, [100, 100, 100], { scale: 2 }).toString(); // '248.69'
+amortizationSchedule(1000, 0.01, 12, { scale: 2 }).at(-1)?.balance.toString(); // '0.00'
+```
+
+## Integers
+
+Number theory with `number` and `bigint` overloads; the `number` form throws
+`NumericRangeError` the moment a result leaves the safe range, so switch to
+`bigint` for big values. `isPrime` is deterministic Miller–Rabin below
+2⁶⁴; `primeFactors` adds Pollard's rho for large cofactors.
+
+```ts
+import { combinations, fibonacci, isPrime, modPow, primeFactors } from '@arki/math/integer';
+
+combinations(52, 5); // 2598960
+isPrime(9_007_199_254_740_881); // true
+primeFactors(360); // [2, 2, 2, 3, 3, 5]
+modPow(2n, 10n, 1000n); // 24n
+fibonacci(90); // 2880067194370816120n
+```
+
 ## Errors
 
 ```ts
@@ -414,6 +499,7 @@ try {
 | `EmptyDataError`          | a statistic of an empty (or too small) data set         |
 | `ResourceLimitError`      | more than 10 000 digits, or an exponent beyond ±10 000  |
 | `UnsupportedFeatureError` | the runtime's `Intl` lacks a feature the call relies on |
+| `CurrencyMismatchError`   | two `Money` values in different currencies were combined |
 
 ## Runtime support
 
@@ -430,8 +516,10 @@ try {
 ## Limits
 
 Inputs and intermediate results are capped at 10 000 digits and an exponent
-magnitude of 10 000 (`ResourceLimitError`). These are resource guards against
-hostile input, not precision settings — well within them, arithmetic is exact.
+magnitude of 10 000 (`ResourceLimitError`); `bigint` results from the integer
+module (`factorial`, `combinations`, `permutations`, `fibonacci`) honour the
+same digit cap. These are resource guards against hostile input, not
+precision settings — well within them, arithmetic is exact.
 
 ## License
 

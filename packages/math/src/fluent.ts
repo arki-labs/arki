@@ -157,6 +157,16 @@ export class NumberValue {
     throw new TypeError('A NumberValue cannot be used as a number; call .value()');
   }
 
+  /** Console display in Node and Bun: `NumberValue(3)`. */
+  [Symbol.for('nodejs.util.inspect.custom')](): string {
+    return `NumberValue(${this.toString()})`;
+  }
+
+  /** Console display in Deno. */
+  [Symbol.for('Deno.customInspect')](): string {
+    return `NumberValue(${this.toString()})`;
+  }
+
   readonly [Symbol.toStringTag] = 'NumberValue';
 }
 

@@ -21,10 +21,8 @@ export type ContinuousDistribution = {
   sf(x: number): number;
   /**
    * Quantile: the x with cdf(x) = p, p in (0, 1), solved until |cdf(x) − p| ≤ 1e-12·max(p, 1 − p);
-   * p = 0 / 1 return the support bounds (±Infinity where unbounded). Short form of `quantile`.
+   * p = 0 / 1 return the support bounds (±Infinity where unbounded).
    */
-  inv(p: number): number;
-  /** Quantile function; identical to `inv`. */
   quantile(p: number): number;
   /** Expected value, or `undefined` when the distribution has none. */
   readonly mean: number | undefined;
@@ -42,11 +40,8 @@ export type DiscreteDistribution = {
   sf(k: number): number;
   /**
    * Quantile: exactly the smallest integer k with `cdf(k) >= p`, using this object's own `cdf`
-   * (no tolerance), so `inv(cdf(k)) === k`. p = 0 gives 0; p = 1 gives the support's upper bound.
-   * Short form of `quantile`.
+   * (no tolerance), so `quantile(cdf(k)) === k`. p = 0 gives 0; p = 1 gives the support's upper bound.
    */
-  inv(p: number): number;
-  /** Quantile function; identical to `inv`. */
   quantile(p: number): number;
   /** Expected value. */
   readonly mean: number;
@@ -421,7 +416,7 @@ export function normal(mean = 0, stddev = 1): ContinuousDistribution {
   assertPositive(stddev, 'stddev');
   const pdfNorm = stddev * SQRT_2PI;
   const erfcScale = stddev * SQRT2;
-  const inv = (p: number): number => solveQuantile(p, -Infinity, Infinity, () => mean + stddev * normalQuantile(p));
+  const quantile = (p: number): number => solveQuantile(p, -Infinity, Infinity, () => mean + stddev * normalQuantile(p));
   return {
     pdf(x) {
       assertPoint(x, 'x');
@@ -436,8 +431,7 @@ export function normal(mean = 0, stddev = 1): ContinuousDistribution {
       assertPoint(x, 'x');
       return noNegativeZero(0.5 * erfcRaw((x - mean) / erfcScale));
     },
-    inv,
-    quantile: inv,
+    quantile,
     mean,
     variance: stddev * stddev,
   };
@@ -470,7 +464,7 @@ export function studentT(df: number): ContinuousDistribution {
   const lnNorm = studentTLnNorm(df);
   const cdf = (x: number): number => studentTCdf(x, df, lnB);
   const pdf = (x: number): number => studentTPdf(x, df, lnNorm);
-  const inv = (p: number): number =>
+  const quantile = (p: number): number =>
     solveQuantile(p, -Infinity, Infinity, () =>
       p === 0.5 ? 0 : invertCdf(cdf, p, { lo: -1, hi: 1, loFixed: false }, pdf),
     );
@@ -487,8 +481,7 @@ export function studentT(df: number): ContinuousDistribution {
       assertPoint(x, 'x');
       return noNegativeZero(cdf(-x));
     },
-    inv,
-    quantile: inv,
+    quantile,
     mean: df > 1 ? 0 : undefined,
     variance: df > 2 ? df / (df - 2) : df > 1 ? Infinity : undefined,
   };
@@ -640,7 +633,7 @@ const NCT_POSITIVE_SERIES_LIMIT = 400;
  * 0 on the other side; elsewhere it uses the identity
  * f(x) = df/x · [F(x·√(1+2/df); df+2) − F(x; df)], where the cdf difference no
  * longer cancels (accurate to ~1e-15 absolute, so relative accuracy fades only
- * where the density itself is below ~1e-13). `inv` is the safeguarded Newton solver.
+ * where the density itself is below ~1e-13). `quantile` is the safeguarded Newton solver.
  * With `ncp = 0` it equals `studentT(df)`.
  */
 export function noncentralT(df: number, ncp: number): ContinuousDistribution {
@@ -669,7 +662,7 @@ export function noncentralT(df: number, ncp: number): ContinuousDistribution {
     if (w >= -NCT_SERIES_LIMIT && w <= NCT_POSITIVE_SERIES_LIMIT) return nctPdfSeries(x, df, lnC, gammaRatio, z);
     return Math.max(0, (df / x) * (nctCdfFrom(kernelPlus2, x * stretch) - cdf(x)));
   };
-  const inv = (p: number): number =>
+  const quantile = (p: number): number =>
     solveQuantile(p, -Infinity, Infinity, () => invertCdf(cdf, p, { lo: -1, hi: 1, loFixed: false }, pdf));
   return {
     pdf(x) {
@@ -684,8 +677,7 @@ export function noncentralT(df: number, ncp: number): ContinuousDistribution {
       assertPoint(x, 'x');
       return noNegativeZero(nctSfFrom(kernel, x));
     },
-    inv,
-    quantile: inv,
+    quantile,
     mean,
     variance,
   };
@@ -707,7 +699,7 @@ export function chiSquare(df: number): ContinuousDistribution {
     if (x === 0) return df < 2 ? Infinity : df === 2 ? 0.5 : 0;
     return Math.exp((k - 1) * Math.log(x) - x / 2 - lnNorm);
   };
-  const inv = (p: number): number =>
+  const quantile = (p: number): number =>
     solveQuantile(p, 0, Infinity, () => invertCdf(cdf, p, { lo: 0, hi: Math.max(1, df), loFixed: true }, pdf));
   return {
     pdf(x) {
@@ -724,8 +716,7 @@ export function chiSquare(df: number): ContinuousDistribution {
       if (x === Infinity) return 0;
       return noNegativeZero(gammaPQ(k, x / 2, gln).q);
     },
-    inv,
-    quantile: inv,
+    quantile,
     mean: df,
     variance: 2 * df,
   };
@@ -751,7 +742,7 @@ export function fisherF(df1: number, df2: number): ContinuousDistribution {
     const lnNum = 0.5 * (df1 * Math.log(df1 * x) - (df1 + df2) * Math.log(df1 * x + df2));
     return Math.exp(lnNum + lnPdfConst - Math.log(x));
   };
-  const inv = (p: number): number =>
+  const quantile = (p: number): number =>
     solveQuantile(p, 0, Infinity, () => invertCdf(cdf, p, { lo: 0, hi: 1, loFixed: true }, pdf));
   return {
     pdf(x) {
@@ -770,8 +761,7 @@ export function fisherF(df1: number, df2: number): ContinuousDistribution {
       // 1 − I_u(a, b) = I_{1−u}(b, a), evaluated on its own accurate side.
       return noNegativeZero(betaI(df2 / d, (df1 * x) / d, b, a, lnB));
     },
-    inv,
-    quantile: inv,
+    quantile,
     mean: df2 > 2 ? df2 / (df2 - 2) : undefined,
     variance:
       df2 > 4
@@ -785,7 +775,7 @@ export function fisherF(df1: number, df2: number): ContinuousDistribution {
 /** Exponential distribution with `rate > 0`. */
 export function exponential(rate: number): ContinuousDistribution {
   assertPositive(rate, 'rate');
-  const inv = (p: number): number => solveQuantile(p, 0, Infinity, () => -Math.log1p(-p) / rate);
+  const quantile = (p: number): number => solveQuantile(p, 0, Infinity, () => -Math.log1p(-p) / rate);
   return {
     pdf(x) {
       assertPoint(x, 'x');
@@ -799,8 +789,7 @@ export function exponential(rate: number): ContinuousDistribution {
       assertPoint(x, 'x');
       return x <= 0 ? 1 : noNegativeZero(Math.exp(-rate * x));
     },
-    inv,
-    quantile: inv,
+    quantile,
     mean: 1 / rate,
     variance: 1 / (rate * rate),
   };
@@ -812,7 +801,7 @@ export function uniform(min: number, max: number): ContinuousDistribution {
   assertFinite(max, 'max');
   if (!(min < max)) throw new InvalidArgumentError(`min (${min}) must be less than max (${max})`);
   const width = max - min;
-  const inv = (p: number): number => solveQuantile(p, min, max, () => min + p * width);
+  const quantile = (p: number): number => solveQuantile(p, min, max, () => min + p * width);
   return {
     pdf(x) {
       assertPoint(x, 'x');
@@ -826,8 +815,7 @@ export function uniform(min: number, max: number): ContinuousDistribution {
       assertPoint(x, 'x');
       return x <= min ? 1 : x >= max ? 0 : noNegativeZero((max - x) / width);
     },
-    inv,
-    quantile: inv,
+    quantile,
     mean: (min + max) / 2,
     variance: (width * width) / 12,
   };
@@ -865,7 +853,7 @@ export function binomial(n: number, p: number): DiscreteDistribution {
     const f = Math.floor(k);
     return betaI(1 - p, p, n - f, f + 1);
   };
-  const inv = (q: number): number => {
+  const quantile = (q: number): number => {
     assertProbability(q);
     if (q === 0) return 0;
     if (q === 1) return n;
@@ -891,8 +879,7 @@ export function binomial(n: number, p: number): DiscreteDistribution {
       // P(X > f) = I_p(f + 1, n − f), the complement of the cdf's I_{1−p}(n − f, f + 1).
       return noNegativeZero(betaI(p, 1 - p, f + 1, n - f));
     },
-    inv,
-    quantile: inv,
+    quantile,
     mean: n * p,
     variance: n * p * (1 - p),
   };
@@ -907,7 +894,7 @@ export function poisson(lambda: number): DiscreteDistribution {
     if (k === Infinity) return 1;
     return gammaPQ(Math.floor(k) + 1, lambda).q;
   };
-  const inv = (q: number): number => {
+  const quantile = (q: number): number => {
     assertProbability(q);
     if (q === 0) return 0;
     if (q === 1) return Infinity;
@@ -931,8 +918,7 @@ export function poisson(lambda: number): DiscreteDistribution {
       if (k === Infinity) return 0;
       return noNegativeZero(gammaPQ(Math.floor(k) + 1, lambda).p);
     },
-    inv,
-    quantile: inv,
+    quantile,
     mean: lambda,
     variance: lambda,
   };

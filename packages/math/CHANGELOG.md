@@ -1,5 +1,30 @@
 # @arki/math
 
+## 0.0.4
+
+Coherence pass plus four new modules. The 0.0.x track carries no
+compatibility promise; renames below are not aliased.
+
+Added:
+
+- `@arki/math/money` — `Money`/`money()`: a `Decimal` pinned to the currency's `Intl` minor-unit scale; exact-or-throw construction, banker's rounding for `times`/`dividedBy`, lossless `allocate`, `toMinorUnits`, `parse`/`toString` round-trip, `format` via `formatCurrency`, `CurrencyMismatchError`; unknown ISO codes are rejected via `Intl.supportedValuesOf`.
+- `@arki/math/units` — `convert`, `convertExact` (returns `Rational`), `formatUnit`, `unitCategory`, `unitsOf`, `isUnit` over 11 categories with exact rational factors.
+- `@arki/math/finance` — `payment`, `amortizationSchedule`, `futureValue`, `presentValue`, `netPresentValue`, `internalRateOfReturn`, `effectiveRate`, `nominalRate`, `compoundInterest`, `simpleInterest`, `periodsToReach` on `Decimal`, exact intermediates rounded once at the requested scale (integer periods only; `nominalRate` carries a guard-digit caveat).
+- `@arki/math/integer` — `factorial`, `combinations`, `permutations`, `isPrime` (deterministic below 2⁶⁴), `primeFactors` (trial division + Pollard's rho), `divisors`, `modPow`, `modInverse`, `isEven`, `isOdd`, `digitSum`, `fibonacci`.
+- `@arki/math/stats` — `mean`, `median`, `minMax`, `variance`, `stddev` accept `Iterable<Decimal>` and return exact `Decimal` results (`stddev` is correctly rounded at the requested scale); `sum` stays number-only — use `Decimal.sum`. Mixed inputs throw `TypeError`.
+- `@arki/math/number` — `range(start, end, step)` and `linspace(start, end, count)` computed without accumulation drift; capped at 10 million elements.
+- `Decimal#roundTo(step, rounding)`.
+- Integer results (`factorial`, `combinations`, `permutations`, `fibonacci`) honour the 10,000-digit limit like `Decimal` and `Rational`.
+- `ratio('4 1/2')` parses mixed numbers.
+- `Decimal`, `Rational`, `NumberValue` and `Money` print as `Decimal(1.5)` etc. in Node, Bun and Deno consoles.
+
+Changed:
+
+- One options type: `ScaleOptions` (`{ scale, rounding }`) everywhere, including decimal-math. `DecimalMathOptions` and `PrecisionOptions` are gone.
+- Distributions: `quantile(p)` is the one name; the `inv(p)` alias is gone.
+- `SpreadOptions` is gone; use `VarianceOptions`.
+- `assertFinite` is no longer exported from `@arki/math/number`.
+
 ## 0.0.3
 
 Correctness and performance pass after an independent review.

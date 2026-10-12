@@ -1,6 +1,6 @@
 {
   "name": "@arki/math",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "private": false,
   "description": "Zero-dependency math toolkit — exact Decimal and Rational arithmetic on bigint, explicit rounding modes, float helpers that round what you typed, descriptive statistics, Intl-backed locale formatting and parsing, seeded random, and a fluent number wrapper.",
   "keywords": [
@@ -114,6 +114,18 @@
       "types": "./dist/words/*.d.ts",
       "import": "./dist/words/*.js",
       "default": "./dist/words/*.js"
+    },
+    "./money": {
+      "types": "./dist/money.d.ts",
+      "default": "./dist/money.js"
+    },
+    "./units": {
+      "types": "./dist/units.d.ts",
+      "default": "./dist/units.js"
+    },
+    "./finance": {
+      "types": "./dist/finance.d.ts",
+      "default": "./dist/finance.js"
     },
     "./package.json": "./package.json"
   },

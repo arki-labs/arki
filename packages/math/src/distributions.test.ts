@@ -60,9 +60,9 @@ describe('special functions', () => {
 describe('normal', () => {
   it('matches known values', () => {
     expect(normal().cdf(1.96)).toBeCloseTo(0.975_002_104_851_779_5, 12);
-    expect(normal().inv(0.975)).toBeCloseTo(1.959_963_984_540_054, 10);
-    expect(normal().inv(0.5)).toBe(0);
-    expect(normal(100, 15).inv(0.9)).toBeCloseTo(119.223_27, 4);
+    expect(normal().quantile(0.975)).toBeCloseTo(1.959_963_984_540_054, 10);
+    expect(normal().quantile(0.5)).toBe(0);
+    expect(normal(100, 15).quantile(0.9)).toBeCloseTo(119.223_27, 4);
     expect(normal().pdf(0)).toBeCloseTo(0.398_942_280_401_432_7, 12);
     expect(normal(5, 2).mean).toBe(5);
     expect(normal(5, 2).variance).toBe(4);
@@ -73,9 +73,9 @@ describe('normal', () => {
   });
 
   it('resolves far tails', () => {
-    expect(normal().inv(1e-12)).toBeCloseTo(-7.034_483_825_301_131, 8);
-    expect(normal().inv(0)).toBe(-Infinity);
-    expect(normal().inv(1)).toBe(Infinity);
+    expect(normal().quantile(1e-12)).toBeCloseTo(-7.034_483_825_301_131, 8);
+    expect(normal().quantile(0)).toBe(-Infinity);
+    expect(normal().quantile(1)).toBe(Infinity);
     expect(normal().cdf(Infinity)).toBe(1);
     expect(normal().cdf(-Infinity)).toBe(0);
   });
@@ -83,10 +83,10 @@ describe('normal', () => {
 
 describe('studentT', () => {
   it('matches known values', () => {
-    expect(studentT(10).inv(0.975)).toBeCloseTo(2.228_138_851_986_274_4, 9);
+    expect(studentT(10).quantile(0.975)).toBeCloseTo(2.228_138_851_986_274_4, 9);
     expect(studentT(10).cdf(2.228_138_851_986_274_4)).toBeCloseTo(0.975, 10);
     expect(studentT(1).cdf(1)).toBeCloseTo(0.75, 12);
-    expect(studentT(1e6).inv(0.975)).toBeCloseTo(1.959_964, 5);
+    expect(studentT(1e6).quantile(0.975)).toBeCloseTo(1.959_964, 5);
     expect(studentT(5).cdf(0)).toBe(0.5);
     expect(studentT(1).pdf(0)).toBeCloseTo(1 / Math.PI, 12);
   });
@@ -101,9 +101,9 @@ describe('studentT', () => {
 
 describe('chiSquare', () => {
   it('matches known values', () => {
-    expect(chiSquare(1).inv(0.95)).toBeCloseTo(3.841_458_820_694_124, 9);
+    expect(chiSquare(1).quantile(0.95)).toBeCloseTo(3.841_458_820_694_124, 9);
     for (const x of [0.5, 1, 3]) expect(chiSquare(2).cdf(x)).toBeCloseTo(1 - Math.exp(-x / 2), 12);
-    expect(chiSquare(10).inv(0.5)).toBeCloseTo(9.341_818, 5);
+    expect(chiSquare(10).quantile(0.5)).toBeCloseTo(9.341_818, 5);
     expect(chiSquare(2).pdf(0)).toBe(0.5);
     expect(chiSquare(1).pdf(0)).toBe(Infinity);
     expect(chiSquare(4).pdf(-1)).toBe(0);
@@ -114,9 +114,9 @@ describe('chiSquare', () => {
 
 describe('fisherF', () => {
   it('matches known values', () => {
-    expect(fisherF(3, 10).inv(0.95)).toBeCloseTo(3.708_265, 5);
-    expect(fisherF(3, 10).cdf(fisherF(3, 10).inv(0.95))).toBeCloseTo(0.95, 8);
-    expect(fisherF(5, 2).inv(0.9)).toBeCloseTo(9.292_626, 4);
+    expect(fisherF(3, 10).quantile(0.95)).toBeCloseTo(3.708_265, 5);
+    expect(fisherF(3, 10).cdf(fisherF(3, 10).quantile(0.95))).toBeCloseTo(0.95, 8);
+    expect(fisherF(5, 2).quantile(0.9)).toBeCloseTo(9.292_626, 4);
     expect(fisherF(2, 5).pdf(0)).toBe(1);
     expect(fisherF(3, 10).mean).toBeCloseTo(1.25, 14);
     expect(fisherF(3, 3).variance).toBe(Infinity);
@@ -148,9 +148,9 @@ describe('noncentralT', () => {
 
   it('inv inverts cdf', () => {
     const d = noncentralT(10, 1);
-    for (const x of [-3, -0.5, 0, 1, 2, 5]) expect(d.inv(d.cdf(x))).toBeCloseTo(x, 7);
+    for (const x of [-3, -0.5, 0, 1, 2, 5]) expect(d.quantile(d.cdf(x))).toBeCloseTo(x, 7);
     const neg = noncentralT(7, -2);
-    for (const x of [-6, -2, 0, 1]) expect(neg.inv(neg.cdf(x))).toBeCloseTo(x, 7);
+    for (const x of [-6, -2, 0, 1]) expect(neg.quantile(neg.cdf(x))).toBeCloseTo(x, 7);
   });
 
   it('pdf integrates like a density and matches its cdf slope', () => {
@@ -183,23 +183,23 @@ describe('exponential and uniform', () => {
     const d = exponential(2);
     expect(d.cdf(1)).toBeCloseTo(1 - Math.exp(-2), 14);
     expect(d.pdf(0)).toBe(2);
-    expect(d.inv(d.cdf(0.7))).toBeCloseTo(0.7, 12);
+    expect(d.quantile(d.cdf(0.7))).toBeCloseTo(0.7, 12);
     expect(d.mean).toBe(0.5);
     expect(d.variance).toBe(0.25);
     expect(d.cdf(-1)).toBe(0);
-    expect(d.inv(1)).toBe(Infinity);
+    expect(d.quantile(1)).toBe(Infinity);
   });
 
   it('uniform', () => {
     const d = uniform(0, 10);
-    expect(d.inv(0.25)).toBe(2.5);
+    expect(d.quantile(0.25)).toBe(2.5);
     expect(d.cdf(5)).toBe(0.5);
     expect(d.pdf(3)).toBe(0.1);
     expect(d.pdf(11)).toBe(0);
     expect(d.mean).toBe(5);
     expect(d.variance).toBeCloseTo(100 / 12, 12);
-    expect(d.inv(0)).toBe(0);
-    expect(d.inv(1)).toBe(10);
+    expect(d.quantile(0)).toBe(0);
+    expect(d.quantile(1)).toBe(10);
   });
 });
 
@@ -238,15 +238,15 @@ describe('binomial', () => {
     // The contract is exact against this object's own cdf: cdf(5) is 0.623046875 to within
     // an ulp (here it rounds just below), so the anchor is cdf(5) itself, not the exact
     // rational 638/1024, which would only pass if inv fudged p downward.
-    expect(d.inv(d.cdf(5))).toBe(5);
-    expect(d.inv(d.cdf(5) + 1e-15)).toBe(6);
-    expect(d.inv(0.6231)).toBe(6);
-    for (let k = 0; k < 10; k++) expect(d.inv(d.cdf(k))).toBe(k);
+    expect(d.quantile(d.cdf(5))).toBe(5);
+    expect(d.quantile(d.cdf(5) + 1e-15)).toBe(6);
+    expect(d.quantile(0.6231)).toBe(6);
+    for (let k = 0; k < 10; k++) expect(d.quantile(d.cdf(k))).toBe(k);
     // A p just above cdf(0) = 0.5 must not be rounded down to it.
-    expect(binomial(1, 0.5).inv(0.500_000_000_000_1)).toBe(1);
-    expect(d.quantile(0.6231)).toBe(d.inv(0.6231));
-    expect(d.inv(0)).toBe(0);
-    expect(d.inv(1)).toBe(10);
+    expect(binomial(1, 0.5).quantile(0.500_000_000_000_1)).toBe(1);
+    expect(d.quantile(0.6231)).toBe(d.quantile(0.6231));
+    expect(d.quantile(0)).toBe(0);
+    expect(d.quantile(1)).toBe(10);
   });
 });
 
@@ -263,13 +263,13 @@ describe('poisson', () => {
   });
 
   it('inv returns the smallest k with cdf(k) >= p', () => {
-    expect(poisson(3).inv(0.423_190_081_126_843_53)).toBe(2);
-    expect(poisson(3).inv(poisson(3).cdf(2))).toBe(2);
-    expect(poisson(3).inv(poisson(3).cdf(2) + 1e-15)).toBe(3);
-    expect(poisson(3).inv(0.4232)).toBe(3);
-    expect(poisson(3).inv(0)).toBe(0);
-    expect(poisson(3).inv(1)).toBe(Infinity);
-    expect(poisson(1000).inv(0.5)).toBe(1000);
+    expect(poisson(3).quantile(0.423_190_081_126_843_53)).toBe(2);
+    expect(poisson(3).quantile(poisson(3).cdf(2))).toBe(2);
+    expect(poisson(3).quantile(poisson(3).cdf(2) + 1e-15)).toBe(3);
+    expect(poisson(3).quantile(0.4232)).toBe(3);
+    expect(poisson(3).quantile(0)).toBe(0);
+    expect(poisson(3).quantile(1)).toBe(Infinity);
+    expect(poisson(1000).quantile(0.5)).toBe(1000);
   });
 });
 
@@ -286,10 +286,10 @@ describe('round trips and monotonicity', () => {
   ];
   for (const [name, d] of cases) {
     it(`${name}: cdf(inv(p)) = p`, () => {
-      for (const p of [0.001, 0.05, 0.5, 0.95, 0.999]) expect(Math.abs(d.cdf(d.inv(p)) - p)).toBeLessThan(1e-9);
+      for (const p of [0.001, 0.05, 0.5, 0.95, 0.999]) expect(Math.abs(d.cdf(d.quantile(p)) - p)).toBeLessThan(1e-9);
     });
     it(`${name}: quantile is inv, and sf complements cdf`, () => {
-      for (const p of [0.001, 0.3, 0.999]) expect(d.quantile(p)).toBe(d.inv(p));
+      for (const p of [0.001, 0.3, 0.999]) expect(d.quantile(p)).toBe(d.quantile(p));
       for (let i = -12; i <= 24; i++) expect(Math.abs(d.sf(i / 2) + d.cdf(i / 2) - 1)).toBeLessThan(1e-14);
     });
     it(`${name}: cdf is monotonic`, () => {
@@ -307,7 +307,7 @@ describe('round trips and monotonicity', () => {
 
 describe('quantile convergence is judged in probability, not x', () => {
   // An absolute x tolerance is meaningless when the quantile itself is tiny:
-  // chiSquare(0.1).inv(0.05) is about 1.1e-26, and stopping at |Δx| ≤ 1e-15
+  // chiSquare(0.1).quantile(0.05) is about 1.1e-26, and stopping at |Δx| ≤ 1e-15
   // returned a point whose cdf was 0.1754.
   const cases: [string, ContinuousDistribution][] = [
     ['chiSquare(0.1)', chiSquare(0.1)],
@@ -319,14 +319,14 @@ describe('quantile convergence is judged in probability, not x', () => {
   for (const [name, d] of cases) {
     it(`${name}: cdf(inv(p)) = p across tails and centre`, () => {
       for (const p of [1e-6, 0.05, 0.5, 0.95, 1 - 1e-6]) {
-        expect(Math.abs(d.cdf(d.inv(p)) - p)).toBeLessThanOrEqual(1e-9 * Math.max(p, 1 - p));
+        expect(Math.abs(d.cdf(d.quantile(p)) - p)).toBeLessThanOrEqual(1e-9 * Math.max(p, 1 - p));
       }
     });
   }
 
-  it('chiSquare(0.1).inv(0.05) lands on a point whose cdf is 0.05', () => {
+  it('chiSquare(0.1).quantile(0.05) lands on a point whose cdf is 0.05', () => {
     const d = chiSquare(0.1);
-    expect(d.cdf(d.inv(0.05))).toBeCloseTo(0.05, 12);
+    expect(d.cdf(d.quantile(0.05))).toBeCloseTo(0.05, 12);
   });
 });
 
@@ -431,14 +431,14 @@ describe('errors', () => {
       exponential(1),
       uniform(0, 1),
     ]) {
-      expect(() => d.inv(-0.1)).toThrow(InvalidArgumentError);
-      expect(() => d.inv(1.1)).toThrow(InvalidArgumentError);
-      expect(() => d.inv(Number.NaN)).toThrow(InvalidArgumentError);
+      expect(() => d.quantile(-0.1)).toThrow(InvalidArgumentError);
+      expect(() => d.quantile(1.1)).toThrow(InvalidArgumentError);
+      expect(() => d.quantile(Number.NaN)).toThrow(InvalidArgumentError);
       expect(() => d.cdf(Number.NaN)).toThrow(InvalidArgumentError);
       expect(() => d.pdf(Number.NaN)).toThrow(InvalidArgumentError);
     }
-    expect(() => binomial(5, 0.5).inv(2)).toThrow(InvalidArgumentError);
-    expect(() => poisson(2).inv(-1)).toThrow(InvalidArgumentError);
+    expect(() => binomial(5, 0.5).quantile(2)).toThrow(InvalidArgumentError);
+    expect(() => poisson(2).quantile(-1)).toThrow(InvalidArgumentError);
     expect(() => poisson(2).cdf(Number.NaN)).toThrow(InvalidArgumentError);
     expect(() => binomial(5, 0.5).pmf(Number.NaN)).toThrow(InvalidArgumentError);
     expect(() => erf(Infinity)).toThrow(InvalidArgumentError);
@@ -507,7 +507,7 @@ describe.skipIf(!jstat)('differential vs jstat', () => {
     if (!jstat) return;
     for (const x of xs) expect(Math.abs(normal(1, 2).cdf(x) - jstat.normal.cdf(x, 1, 2))).toBeLessThan(tol);
     for (const p of ps)
-      expect(Math.abs(normal(1, 2).inv(p) - (jstat.normal.inv?.(p, 1, 2) ?? Number.NaN))).toBeLessThan(tol);
+      expect(Math.abs(normal(1, 2).quantile(p) - (jstat.normal.inv?.(p, 1, 2) ?? Number.NaN))).toBeLessThan(tol);
   });
 
   it('studentT', () => {
@@ -515,7 +515,7 @@ describe.skipIf(!jstat)('differential vs jstat', () => {
     for (const df of [2, 5, 30]) {
       for (const x of xs) expect(Math.abs(studentT(df).cdf(x) - jstat.studentt.cdf(x, df))).toBeLessThan(tol);
       for (const p of ps)
-        expect(Math.abs(studentT(df).inv(p) - (jstat.studentt.inv?.(p, df) ?? Number.NaN))).toBeLessThan(tol);
+        expect(Math.abs(studentT(df).quantile(p) - (jstat.studentt.inv?.(p, df) ?? Number.NaN))).toBeLessThan(tol);
     }
   });
 
@@ -525,7 +525,7 @@ describe.skipIf(!jstat)('differential vs jstat', () => {
       for (const x of [0.5, 2, 6, 15])
         expect(Math.abs(chiSquare(df).cdf(x) - jstat.chisquare.cdf(x, df))).toBeLessThan(tol);
       for (const p of ps)
-        expect(Math.abs(chiSquare(df).inv(p) - (jstat.chisquare.inv?.(p, df) ?? Number.NaN))).toBeLessThan(tol);
+        expect(Math.abs(chiSquare(df).quantile(p) - (jstat.chisquare.inv?.(p, df) ?? Number.NaN))).toBeLessThan(tol);
     }
   });
 
@@ -539,7 +539,7 @@ describe.skipIf(!jstat)('differential vs jstat', () => {
       for (const x of [0.3, 1, 3, 8])
         expect(Math.abs(fisherF(d1, d2).cdf(x) - jstat.centralF.cdf(x, d1, d2))).toBeLessThan(tol);
       for (const p of ps)
-        expect(Math.abs(fisherF(d1, d2).inv(p) / (jstat.centralF.inv?.(p, d1, d2) ?? Number.NaN) - 1)).toBeLessThan(
+        expect(Math.abs(fisherF(d1, d2).quantile(p) / (jstat.centralF.inv?.(p, d1, d2) ?? Number.NaN) - 1)).toBeLessThan(
           tol,
         );
     }

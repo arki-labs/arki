@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import type { SpreadOptions, VarianceOptions } from './stats.js';
-import { EmptyDataError, InvalidArgumentError, NumericRangeError } from './errors.js';
+import type { VarianceOptions } from './stats.js';
+import { Decimal, decimal } from './decimal.js';
+import { EmptyDataError, InvalidArgumentError, NumericRangeError, RoundingNecessaryError } from './errors.js';
 import {
   correlation,
   linearRegression,
@@ -282,10 +283,130 @@ describe('quantile', () => {
   });
 });
 
-describe('SpreadOptions (deprecated alias)', () => {
+describe('VarianceOptions (deprecated alias)', () => {
   it('is still assignable to and from VarianceOptions', () => {
-    const o: SpreadOptions = { ddof: 0 };
+    const o: VarianceOptions = { ddof: 0 };
     const v: VarianceOptions = o;
     expect(variance([1, 3], v)).toBe(1);
+  });
+});
+
+const ds = (...values: string[]) => values.map((v) => decimal(v));
+
+function* oneShotDecimals(): Generator<Decimal> {
+  yield decimal('0.1');
+  yield decimal('0.25');
+}
+
+function* decimalThenNumber(): Generator<Decimal | number> {
+  yield decimal('1');
+  yield 2;
+}
+
+describe('Decimal overloads', () => {
+  it('sum has no Decimal overload: an empty Decimal[] cannot say which zero to return', () => {
+    // Reviewer repro: `const xs: Decimal[] = []; sum(xs)` returned the number 0 typed as a Decimal.
+    const xs: Decimal[] = [];
+    // @ts-expect-error sum is number-only; Decimal.sum is the exact total
+    expect(sum(xs)).toBe(0);
+    expect(Decimal.sum(xs).toString()).toBe('0');
+    // @ts-expect-error sum is number-only
+    expect(() => sum(ds('0.1', '0.2'))).toThrow(/Decimal\.sum/);
+    expect(Decimal.sum(ds('0.1', '0.2')).toString()).toBe('0.3');
+  });
+  it('mean reads a one-shot iterable once, without a copy, and still rejects mixed input', () => {
+    expect(mean(oneShotDecimals()).toString()).toBe('0.175');
+    expect(() => mean(decimalThenNumber() as Iterable<Decimal>)).toThrow(/mixed number and Decimal/);
+  });
+  it('mean is exact when the result terminates', () => {
+    expect(mean(ds('0.1', '0.2')).toString()).toBe('0.15');
+    expect(mean(ds('1', '2')).toString()).toBe('1.5');
+  });
+  it('mean throws when it does not terminate, unless a scale is given', () => {
+    expect(() => mean(ds('1', '1', '2'))).toThrow(RoundingNecessaryError);
+    expect(mean(ds('1', '1', '2'), { scale: 3, rounding: 'halfEven' }).toString()).toBe('1.333');
+  });
+  it('median picks the middle, or the exact midpoint of two middles', () => {
+    expect(median(ds('3', '1', '2')).toString()).toBe('2');
+    expect(median(ds('4', '1', '3', '2')).toString()).toBe('2.5');
+    expect(median(ds('0.1', '0.2', '0.4', '0.7')).toString()).toBe('0.3');
+  });
+  it('median does not mutate the input', () => {
+    const input = ds('3', '1', '2');
+    median(input);
+    expect(input.map(String)).toEqual(['3', '1', '2']);
+  });
+  it('minMax finds both ends', () => {
+    const { min, max } = minMax(ds('2.5', '-1', '10', '3'));
+    expect(min.toString()).toBe('-1');
+    expect(max.toString()).toBe('10');
+  });
+  it('variance is exact: population variance of 1..4 is 1.25', () => {
+    expect(variance(ds('1', '2', '3', '4'), { ddof: 0 }).toString()).toBe('1.25');
+  });
+  it('variance defaults to the sample variance', () => {
+    expect(variance(ds('1', '2', '3')).toString()).toBe('1');
+  });
+  it('variance throws when it does not terminate, and says how to fix it', () => {
+    expect(() => variance(ds('1', '1', '2'))).toThrow(RoundingNecessaryError);
+    expect(() => variance(ds('1', '1', '2'))).toThrow(/scale, rounding/);
+    expect(variance(ds('1', '1', '2'), { scale: 4, rounding: 'halfEven' }).toString()).toBe('0.3333');
+  });
+  it('variance needs more than ddof values', () => {
+    expect(() => variance(ds('1'))).toThrow(EmptyDataError);
+    expect(variance(ds('5'), { ddof: 0 }).toString()).toBe('0');
+  });
+  it('stddev takes the square root at the requested scale', () => {
+    const result = stddev(ds('1', '2', '3', '4'), { ddof: 0, scale: 10, rounding: 'halfEven' });
+    expect(result.toString()).toBe('1.1180339887');
+  });
+  it('stddev is exact when the variance is a perfect square', () => {
+    expect(stddev(ds('1', '3'), { scale: 5 }).toString()).toBe('1.41421');
+    expect(stddev(ds('2', '4', '4', '4', '5', '5', '7', '9'), { ddof: 0, scale: 2 }).toString()).toBe('2.00');
+  });
+  it('stddev rounds a tiny variance correctly instead of to zero', () => {
+    // Exact variance 1e-40; the old fixed 12 guard digits rounded it to 0 at scale 32.
+    const result = stddev([decimal(0), decimal('2e-20')], { ddof: 0, scale: 20 });
+    expect(result.toString()).toBe('0.00000000000000000001');
+  });
+  it('stddev never creates a false tie by rounding the variance first', () => {
+    // Exact root is 0.50000000000001, just above the half, so halfEven must give 1, not the tie answer 0.
+    expect(stddev([decimal(0), decimal('1.0000000000002')], { ddof: 0, scale: 0 }).toString()).toBe('1');
+  });
+  it('stddev rounds exact half roots by the mode, and irrational roots in every mode', () => {
+    // population stddev of [0, 1] is exactly 0.5: a real tie
+    expect(stddev(ds('0', '1'), { ddof: 0, scale: 0, rounding: 'halfEven' }).toString()).toBe('0');
+    expect(stddev(ds('0', '1'), { ddof: 0, scale: 0, rounding: 'halfUp' }).toString()).toBe('1');
+    expect(stddev(ds('0', '1'), { ddof: 0, scale: 0, rounding: 'halfDown' }).toString()).toBe('0');
+    expect(() => stddev(ds('0', '1'), { ddof: 0, scale: 0, rounding: 'unnecessary' })).toThrow(RoundingNecessaryError);
+    expect(stddev(ds('0', '1'), { ddof: 0, scale: 1, rounding: 'unnecessary' }).toString()).toBe('0.5');
+    // sample stddev of [1, 3] is sqrt(2) = 1.41421356...
+    expect(stddev(ds('1', '3'), { scale: 4, rounding: 'down' }).toString()).toBe('1.4142');
+    expect(stddev(ds('1', '3'), { scale: 4, rounding: 'up' }).toString()).toBe('1.4143');
+    expect(stddev(ds('1', '3'), { scale: 4, rounding: 'floor' }).toString()).toBe('1.4142');
+    expect(stddev(ds('1', '3'), { scale: 4, rounding: 'ceiling' }).toString()).toBe('1.4143');
+    expect(stddev(ds('1', '3'), { scale: 6, rounding: 'halfEven' }).toString()).toBe('1.414214');
+    expect(() => stddev(ds('1', '3'), { scale: 4, rounding: 'unnecessary' })).toThrow(RoundingNecessaryError);
+    expect(stddev(ds('7', '7', '7'), { scale: 2, rounding: 'unnecessary' }).toString()).toBe('0.00');
+  });
+  it('stddev validates ddof on the Decimal path like variance does', () => {
+    const bad = { ddof: -1 } as unknown as VarianceOptions;
+    expect(() => stddev(ds('1', '3'), { ...bad, scale: 4 })).toThrow(InvalidArgumentError);
+    expect(() => variance(ds('1', '3'), bad)).toThrow(InvalidArgumentError);
+    expect(() => stddev([1, 3], bad)).toThrow(InvalidArgumentError);
+    expect(() => stddev(ds('1'), { scale: 4 })).toThrow(EmptyDataError);
+  });
+  it('rejects mixed number and Decimal input in either order', () => {
+    expect(() => sum([1, decimal('2')] as never)).toThrow(/mixed number and Decimal/);
+    expect(() => mean([decimal('2'), 1] as never)).toThrow(/mixed number and Decimal/);
+    expect(() => median([1, decimal('2')] as never)).toThrow(/mixed number and Decimal/);
+  });
+  it('treats an empty input as empty data', () => {
+    expect(() => mean([])).toThrow(EmptyDataError);
+    expect(() => median([])).toThrow(EmptyDataError);
+    expect(() => minMax([])).toThrow(EmptyDataError);
+  });
+  it('accepts any iterable of Decimals', () => {
+    expect(mean(new Set(ds('1', '2', '3'))).toString()).toBe('2');
   });
 });

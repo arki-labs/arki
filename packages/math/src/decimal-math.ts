@@ -27,7 +27,7 @@
  * logarithm at 10 000.
  */
 
-import type { DecimalInput } from './decimal.js';
+import type { DecimalInput, ScaleOptions } from './decimal.js';
 import type { RoundingMode } from './rounding.js';
 import { Decimal } from './decimal.js';
 import { DivisionByZeroError, InvalidArgumentError, ResourceLimitError, RoundingNecessaryError } from './errors.js';
@@ -40,10 +40,6 @@ import { MAX_DIGITS } from './internal/limits.js';
  * Transcendental results are never exact, so rounding defaults to
  * `'halfEven'` here (unlike Decimal's own `'unnecessary'`).
  */
-export type DecimalMathOptions = { scale: number; rounding?: RoundingMode };
-
-/** @deprecated Renamed to `DecimalMathOptions`: `scale` counts fraction digits, not significant digits. */
-export type PrecisionOptions = DecimalMathOptions;
 
 type Resolved = { scale: number; rounding: RoundingMode };
 
@@ -64,7 +60,7 @@ function zeroAt(scale: number): Decimal {
   return Decimal.fromParts({ coefficient: 0n, scale });
 }
 
-function resolve(options: DecimalMathOptions | undefined, name: string): Resolved {
+function resolve(options: ScaleOptions | undefined, name: string): Resolved {
   if (options === undefined) {
     throw new InvalidArgumentError(`${name} has no exact result; pass { scale } (and optionally rounding)`);
   }
@@ -195,7 +191,7 @@ function exactRoot(x: Decimal, n: number): Decimal | undefined {
   return Decimal.fromParts({ coefficient: x.coefficient < 0n ? -root : root, scale: paddedScale / n });
 }
 
-function rootOf(value: DecimalInput, n: number, options: DecimalMathOptions | undefined, name: string): Decimal {
+function rootOf(value: DecimalInput, n: number, options: ScaleOptions | undefined, name: string): Decimal {
   if (!Number.isSafeInteger(n) || n < 1) {
     throw new InvalidArgumentError(`The root degree must be a positive safe integer, got ${n}`);
   }
@@ -439,7 +435,7 @@ function assertResultDigits(integerDigits: number, scale: number, what: string):
  * rounding `'halfEven'`): `sqrt(2, { scale: 3, rounding: 'floor' })` → `1.414`.
  * Negative input throws `InvalidArgumentError`.
  */
-export function sqrt(value: DecimalInput, options?: DecimalMathOptions): Decimal {
+export function sqrt(value: DecimalInput, options?: ScaleOptions): Decimal {
   return rootOf(value, 2, options, 'sqrt');
 }
 
@@ -448,7 +444,7 @@ export function sqrt(value: DecimalInput, options?: DecimalMathOptions): Decimal
  * as `sqrt` (scale s padded up to a multiple of 3, then divided by 3):
  * `cbrt('-27')` → `-3`, `cbrt(2, { scale: 5 })` → `1.25992`.
  */
-export function cbrt(value: DecimalInput, options?: DecimalMathOptions): Decimal {
+export function cbrt(value: DecimalInput, options?: ScaleOptions): Decimal {
   return rootOf(value, 3, options, 'cbrt');
 }
 
@@ -459,7 +455,7 @@ export function cbrt(value: DecimalInput, options?: DecimalMathOptions): Decimal
  * `InvalidArgumentError`; odd roots keep the sign. Intermediates are capped at
  * 200 000 digits (`ResourceLimitError`), which bounds `n × scale`.
  */
-export function nthRoot(value: DecimalInput, n: number, options?: DecimalMathOptions): Decimal {
+export function nthRoot(value: DecimalInput, n: number, options?: ScaleOptions): Decimal {
   return rootOf(value, n, options, 'nthRoot');
 }
 
@@ -470,7 +466,7 @@ export function nthRoot(value: DecimalInput, n: number, options?: DecimalMathOpt
  * x > 23 000 at small scales) throw `ResourceLimitError`. Very negative x
  * rounds to zero (or one unit for `'up'`/`'ceiling'`).
  */
-export function exp(value: DecimalInput, options: DecimalMathOptions): Decimal {
+export function exp(value: DecimalInput, options: ScaleOptions): Decimal {
   const x = Decimal.from(value).trim();
   const resolved = resolve(options, 'exp');
   if (x.isZero()) return ONE.toScale(resolved.scale);
@@ -485,7 +481,7 @@ export function exp(value: DecimalInput, options: DecimalMathOptions): Decimal {
  * `ln(1)` is exactly 0; values ≤ 0 throw `InvalidArgumentError`.
  * `ln 2` and `ln 10` are computed once per precision and reused.
  */
-export function ln(value: DecimalInput, options: DecimalMathOptions): Decimal {
+export function ln(value: DecimalInput, options: ScaleOptions): Decimal {
   const x = Decimal.from(value).trim();
   const resolved = resolve(options, 'ln');
   if (!x.isPositive()) throw new InvalidArgumentError(`ln is defined for positive values, got ${x.toString()}`);
@@ -498,7 +494,7 @@ export function ln(value: DecimalInput, options: DecimalMathOptions): Decimal {
  * fraction digits. Exact results are detected — `log(8, 2)` → `3`,
  * `log(8, 4)` → `1.5` — so `rounding: 'unnecessary'` accepts them.
  */
-export function log(value: DecimalInput, base: DecimalInput, options: DecimalMathOptions): Decimal {
+export function log(value: DecimalInput, base: DecimalInput, options: ScaleOptions): Decimal {
   const x = Decimal.from(value).trim();
   const b = Decimal.from(base).trim();
   const resolved = resolve(options, 'log');
@@ -516,12 +512,12 @@ export function log(value: DecimalInput, base: DecimalInput, options: DecimalMat
 }
 
 /** Base-10 logarithm, correctly rounded: `log10(1000, { scale: 5 })` → `3.00000`. */
-export function log10(value: DecimalInput, options: DecimalMathOptions): Decimal {
+export function log10(value: DecimalInput, options: ScaleOptions): Decimal {
   return log(value, 10, options);
 }
 
 /** Base-2 logarithm, correctly rounded: `log2(1024, { scale: 5 })` → `10.00000`. */
-export function log2(value: DecimalInput, options: DecimalMathOptions): Decimal {
+export function log2(value: DecimalInput, options: ScaleOptions): Decimal {
   return log(value, 2, options);
 }
 
@@ -538,7 +534,7 @@ export function log2(value: DecimalInput, options: DecimalMathOptions): Decimal 
  *   cases are detected: `pow(4, '0.5', { scale: 2 })` → `2.00`.
  * - Results over 10 000 digits throw `ResourceLimitError`.
  */
-export function pow(base: DecimalInput, exponent: DecimalInput, options?: DecimalMathOptions): Decimal {
+export function pow(base: DecimalInput, exponent: DecimalInput, options?: ScaleOptions): Decimal {
   const rawBase = Decimal.from(base);
   const rawExponent = Decimal.from(exponent);
 
