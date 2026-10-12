@@ -7,7 +7,22 @@ A command is the way to write: `j.command` defines one, `journal.run` runs it.
 Inside the command, `write` validates the event data, appends the events, runs the reducers, saves the row, runs inline projections and queues jobs for async effects, all in one transaction.
 Reads are plain Drizzle queries. Replay exists for checks and repair, not for reading.
 
-Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions), `@arki/journal/dot` (optional `@arki/dot` plugin).
+Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions), `@arki/journal/dot` (optional `@arki/dot` plugin and feature slice, see Dot).
+
+**Agents: start at [`llms.txt`](llms.txt).** Then open the part of the [agent guide](docs/agent-guide.md) that fits the task:
+
+| Task                                                                            | Read                                                                                                                       |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Understand the model and the three objects (`j`, the entity builder, `journal`) | [The model](docs/agent-guide.md#the-model), [Three objects](docs/agent-guide.md#three-objects)                             |
+| Set the journal up in an app                                                    | [Setup](docs/agent-guide.md#setup)                                                                                         |
+| Add an event and react to it in the same transaction                            | [Add an event](docs/agent-guide.md#add-an-event-and-react-in-the-same-transaction)                                         |
+| Add an entity, with create and delete                                           | [Add an entity](docs/agent-guide.md#add-an-entity-with-create-and-delete)                                                  |
+| Add an effect that runs after commit                                            | [Add an effect](docs/agent-guide.md#add-an-effect-that-runs-after-commit)                                                  |
+| Add a command and run it from a request or a job                                | [Add a command](docs/agent-guide.md#add-a-command-and-run-it)                                                              |
+| Find out why a write failed                                                     | [Find out why](docs/agent-guide.md#find-out-why-a-write-failed), [Errors](docs/agent-guide.md#errors)                      |
+| Check or repair a row, rebuild a read model                                     | [Recovery verbs](docs/agent-guide.md#recovery-verbs)                                                                       |
+| Wire it in a Dot app, or ship journal pieces from a package                     | [Dot](docs/agent-guide.md#dot), [Shared packages](docs/agent-guide.md#shared-packages)                                     |
+| Change code inside this package                                                 | [Rules that bite](docs/agent-guide.md#rules-that-bite), [Do not clean these up](docs/agent-guide.md#do-not-clean-these-up) |
 
 ## Example
 
@@ -24,7 +39,7 @@ export const j = initJournal({ meta: z.object({ actorId: z.string() }) });
 // export const j = initJournal.tx<AppTx>().db<AppDb>().create({ meta: ... });
 
 // src/features/orders/tables.ts — a normal table with `id` and `version`.
-// A table keyed by another column: j.entity('profile', profiles, { id: 'accountId' }).
+// A table keyed by another column: j.entity('profile', profiles, { key: 'accountId' }).
 export const orders = pgTable('orders', {
   id: varchar('id', { length: 256 }).primaryKey().$type<OrderId>(),
   customerId: varchar('customer_id', { length: 256 }).notNull(),
@@ -75,10 +90,10 @@ export const orderMail = (mailer: Mailer) =>
     OrderPaid: (e, { jobId }) => mailer.send({ template: 'order-paid', orderId: e.entityId, idempotencyKey: jobId }),
   });
 
-export const journal_ = journalTables(); // or journalTables(pgSchema('app'))
+export const tables = journalTables(); // or journalTables(pgSchema('app'))
 
 // src/journal.root.ts — the one place that lists handlers.
-export const journal = j.create({ tables: journal_, projections: [customerStats], effects: [orderMail(mailer)] });
+export const journal = j.compose({ tables, projections: [customerStats], effects: [orderMail(mailer)] });
 
 // A procedure. The schema is reused, the actor comes from the session.
 export const pay = protectedProcedure
@@ -136,7 +151,7 @@ export const closeAfterPayment = (
 // src/journal.root.ts
 const runAsSystem = <S extends z.ZodType, R>(c: Command<S, R, Meta>, i: z.input<S>) =>
   journal.run(db, c, i, { actorId: 'system' });
-export const journal = j.create({ tables, effects: [closeAfterPayment(runAsSystem)] });
+export const journal = j.compose({ tables, effects: [closeAfterPayment(runAsSystem)] });
 ```
 
 ## The low-level write
@@ -157,7 +172,7 @@ If a row is deleted by hand while its log says it exists, the next write that wo
 
 Names are non-empty and well-formed text: at most 64 characters for an entity kind, and 128 for an event type or an effect name. `j.entity`, `j.event` and `j.effect` throw otherwise.
 
-The key column is `id` unless the entity names another one by its property name: `j.entity('profile', profiles, { id: 'accountId' })`. The name is checked against the table's columns at the type level and must be one property name, not a union. The column must hold a string, be `notNull`, and be the primary key or unique, either on the column (`.primaryKey()`, `.unique()`) or at table level as a single-column `unique()`, `uniqueIndex()` or `primaryKey()`. A `uniqueIndex` with a `where` does not count: it is unique only inside that subset. `j.entity` checks this and throws otherwise. The id argument of `write`, `replay`, `verify` and `repair`, the key on the `.on` row, and `entityId` on every recorded event all have that column's own type (for example a branded `AccountId`). `journal_events.entity_id` stores the string.
+The key column is `id` unless the entity names another one by its property name: `j.entity('profile', profiles, { key: 'accountId' })`. The name is checked against the table's columns at the type level and must be one property name, not a union. The column must hold a string, be `notNull`, and be the primary key or unique, either on the column (`.primaryKey()`, `.unique()`) or at table level as a single-column `unique()`, `uniqueIndex()` or `primaryKey()`. A `uniqueIndex` with a `where` does not count: it is unique only inside that subset. `j.entity` checks this and throws otherwise. The id argument of `write`, `replay`, `verify` and `repair`, the key on the `.on` row, and `entityId` on every recorded event all have that column's own type (for example a branded `AccountId`). `journal_events.entity_id` stores the string.
 
 The journal compares keys as exact strings, so the key column must not treat two different strings as one key. Four rules:
 
@@ -167,7 +182,7 @@ The journal compares keys as exact strings, so the key column must not treat two
 - `uuid` is allowed, but ids must be lower-case and hyphenated. `write`, `replay`, `verify` and `repair` refuse any other spelling with `ID_MISMATCH`, before they touch the database. Nothing is lower-cased for you.
 - Every other type (`citext`, `char(n)`, numbers) is refused when the entity is defined. So is a custom column type (`customType`), even one that reports `text` or `varchar(n)`, because its mapping can change the string.
 
-Why: if the database sees two spellings as one key but the log sees two, one entity gets two histories, and `repair` could replay only half. `NewRow<Tbl, Key>` omits the key column and `version`.
+Why: if the database sees two spellings as one key but the log sees two, one entity gets two histories, and `repair` could replay only half. `ReducerValues<Tbl, Key>` omits the key column and `version`.
 
 The id you pass must be exactly the key the database stores. Some columns treat two spellings as one key, such as a `uuid` (upper and lower case) or case-insensitive text. The journal logs events under the string you pass, so a second spelling would split one history in two. It refuses any id that differs from the stored key with `ID_MISMATCH`, and writes nothing. For `uuid` keys, pass the lower-case form.
 
@@ -177,13 +192,13 @@ Savepoints are a stack. Two `write` or `run` calls open on one transaction at th
 
 ### The app's transaction type
 
-`initJournal({ meta })` types the command's `tx`, `write`'s `tx`, `events`' `{ tx }` and projection handlers' `tx` with the structural `Db`. To use the app's own Drizzle transaction type instead, so repositories typed against it fit, declare it once: `initJournal.tx<AppTx>().create({ meta })`. `tx` is a type-only step. `run` and `rerun` then take any database that opens `AppTx` transactions; `drain` and `worker` keep taking the root database. To name the root database type as well, see Effects.
+`initJournal({ meta })` types the command's `tx`, `write`'s `tx`, `events`' `{ tx }` and projection handlers' `tx` with the structural `DbHandle`. To use the app's own Drizzle transaction type instead, so repositories typed against it fit, declare it once: `initJournal.tx<AppTx>().create({ meta })`. `tx` is a type-only step. `run` and `rerun` then take any database that opens `AppTx` transactions; `drain` and `worker` keep taking the root database. To name the root database type as well, see Effects.
 
 ### Reducers
 
 Events are read-only. A reducer, projection or effect that tries to change `e.data` or `e.meta` gets a `TypeError`. Copy first: `[...e.data.items].sort()`.
 
-An `.on` reducer receives the reducer-shaped state (`Replayed<Tbl, Key>`: the insert shape plus the key column and `version`) and returns a patch, `Partial<NewRow<Tbl, Key>> | null`. The patch is merged onto the state. A key set to `undefined` means unchanged. `events(row, { tx })` still receives the stored `Row<Tbl> | null`.
+An `.on` reducer receives the reducer-shaped state (`ReducerRow<Tbl, Key>`: the insert shape plus the key column and `version`) and returns a patch, `Partial<ReducerValues<Tbl, Key>> | null`. The patch is merged onto the state. A key set to `undefined` means unchanged. `events(row, { tx })` still receives the stored `Row<Tbl> | null`.
 
 Columns that every `.create` reducer sets are required on the `.on` row. A column one create leaves to its database default, sets on one branch only, or may set to `undefined`, stays optional. The rule: every `.create` comes before the first `.on`. After the first `.on` the builder has no `.create`, and calling one anyway throws, because a later create could leave out a column the `.on` was promised. An `.on` declared before any `.create` sees the plain insert shape.
 
@@ -195,9 +210,13 @@ Database defaults are not journal state. `write` folds from the stored row, wher
 
 `write` parses every event's data with its schema, even for a hand-built `{ type, data }`. The schema must accept its own stored output unchanged, because replay parses stored data again; otherwise `write` throws `UNSTABLE_SCHEMA`. The same rule applies to `meta`. An optional key holding `undefined` in event data is not stored: JSON drops it, so the stored event, the reducers and replay all see the key as absent. The check allows this, because absent and `undefined` read the same way. Leaving the key out is the same thing.
 
-Errors are `JournalError` with a `code`: `CONFLICT`, `NO_ROW`, `ROW_EXISTS`, `UNKNOWN_EVENT`, `VERSION_MISMATCH`, `NO_HISTORY`, `REPLAY_FAILED`, `UNSTABLE_SCHEMA`.
+An error about one entity's row or history is a `JournalError` with a `code`. Match on the code, never on the message. The message names the entity kind and id, adds the event type and version when the journal knows them, and ends with the next step.
 
-Other verbs: `replay(db, entity, id, { upTo })` (returns the reducer-shaped row), `verify(db, entity, id)`, `repair(db, entity, id)`, `rerun(db, projection, { from, batch })`, `drain(db, { limit, signal })`. `drain` and `worker` take the root database (`RootDb`), never a transaction: effects must run after commit. Lease and retry times use the database clock.
+The ten codes, the usual cause of each and what to do are in one table: [agent guide, Errors](docs/agent-guide.md#errors).
+
+Other errors are not `JournalError`. A wrong definition or a misuse is a plain `Error` whose message starts with `journal:`. Input, event data or `meta` that fails its schema is a `ZodError`. An error thrown by a command handler, an `events` function, a reducer or a projection passes through unchanged.
+
+Other verbs: `replay(db, entity, id, { throughVersion })` (returns the reducer-shaped row), `verify(db, entity, id)`, `repair(db, entity, id)`, `rerun(db, projection, { afterSeq, batchSize })`, `drain(db, { batchSize, signal })`. `drain` and `worker` take the root database (`RootDb`), never a transaction: effects must run after commit. Lease and retry times use the database clock.
 
 ### Changing reducers later
 
@@ -221,7 +240,7 @@ An effect runs after the commit, at least once, from a row in `journal_jobs`. A 
 
 ## The worker
 
-`journal.worker(db, { pollMs, limit })` is a loop around `drain`. When a pass finds no job it sleeps `pollMs` (1000 by default). `stop()` finishes the current batch. A wake ends the sleep, so an effect does not wait for the next poll:
+`journal.worker(db, { pollMs, batchSize })` is a loop around `drain`. When a pass finds no job it sleeps `pollMs` (1000 by default). `stop()` finishes the current batch. A wake ends the sleep, so an effect does not wait for the next poll:
 
 - `journal.run(db, ...)` on the root database wakes by itself. The library committed the transaction, so it knows when. It wakes only when the command queued a job.
 - With your own transaction (`journal.run(tx, ...)` or `journal.write(tx, ...)`) nothing wakes. The library cannot see your commit. Call `journal.wake()` after you commit.
@@ -236,6 +255,59 @@ await db.transaction(async tx => {
 });
 journal.wake(); // after the commit
 ```
+
+## Dot
+
+`@arki/journal/dot` connects the journal to an `@arki/dot` app. It exports the plugin `journal(...)` and the feature slice `journalHandlers(...)`. `@arki/dot` is an optional peer. The core entry never imports it.
+
+**Not a Dot app.** List the handlers in one `journal.root.ts`. Start and stop the worker yourself.
+
+```ts
+// src/journal.root.ts — the one place that lists handlers.
+export const journal = j.compose({ tables, projections: [customerStats], effects: [orderMail(mailer)] });
+
+// src/server.ts
+const worker = journal.worker(db);
+await worker.start();
+// On shutdown:
+await worker.stop();
+```
+
+**Dot app.** Each feature lists its own handlers with `journalHandlers`. The plugin builds the journal from the feature list. There is no root file: `features.ts` is the only list.
+
+```ts
+// src/features/orders/feature.ts
+export const orders = defineFeature('orders', {
+  needs: { mailer: service<Mailer>() },
+  use: [
+    journalHandlers({
+      projections: [customerStats],
+      effects: (services: { readonly mailer: Mailer }) => [orderMail(services.mailer)],
+    }),
+  ],
+});
+
+// src/app.ts
+export const app = defineApp('shop')
+  .use(db())
+  .use(mailer())
+  .useAll(plugs(features))
+  .use(journal({ j, tables: journalTables(), features: tokens(features) }));
+
+// A procedure reads the journal from the services.
+await services.journal.run(services.db, payOrder, input, { actorId: user.id });
+```
+
+- `journal(...)` publishes `services.journal`. It needs the root database under the `db` key. A transaction there is a compile error.
+- It starts one worker on `start` and stops it on `stop`. Options: `worker: false` (no worker in this process), `pollMs`, `batchSize`.
+- `effects` is a list, or a function of the feature's booted services. Annotate the function's parameter. The feature must declare those services in `needs`, or it does not compile.
+- An effect in a list is an action in the app manifest (`binding: 'journal'`, id `<name>.run`). Effects from a function are not listed: their names exist only after boot. Projections are never listed: they run inside the write.
+- Two features with the same projection name or the same effect name fail the boot. The message names the duplicate and both features.
+- A feature without `journalHandlers` adds nothing. That is allowed.
+- The feature tokens are needs at run time only. A feature mounted after `journal(...)`, or not mounted, fails at boot and not at compile time.
+- An app that composed its journal itself passes it: `journal({ journal })`.
+- A second journal uses Dot's `rename`: `rename(journal({ journal: reports }), { journal: 'reportsJournal' }, 'reports-journal')`.
+- Limit: in feature mode an effect cannot run a command yet. The journal does not exist when the slices resolve, so the `run` closure from "Where commands run from" has nothing to close over. Use `journal({ journal })` for such an effect.
 
 ## Tables
 

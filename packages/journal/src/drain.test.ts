@@ -19,7 +19,7 @@ const mail = j.effect('order-mail', order, {
   },
 });
 
-const journal = j.create({ tables, effects: [mail] });
+const journal = j.compose({ tables, effects: [mail] });
 
 beforeAll(async () => {
   ({ db, client } = await openDb());
@@ -121,7 +121,7 @@ describe('drain', () => {
     // A deploy can narrow an effect while jobs for the old type are still queued.
     // Dropping them would lose the side effect for good.
     const job = await placeAndPay();
-    const narrowed = j.create({
+    const narrowed = j.compose({
       tables,
       effects: [
         j.effect('order-mail', order, {
@@ -160,12 +160,12 @@ describe('drain', () => {
     await placeAndPay();
     await placeAndPay();
     await placeAndPay();
-    expect(await journal.drain(db, { limit: 2 })).toBe(2);
-    expect(await journal.drain(db, { limit: 2 })).toBe(1);
+    expect(await journal.drain(db, { batchSize: 2 })).toBe(2);
+    expect(await journal.drain(db, { batchSize: 2 })).toBe(1);
   });
 
   it('a journal without effects drains nothing', async () => {
-    const bare = j.create({ tables });
+    const bare = j.compose({ tables });
     expect(await bare.drain(db)).toBe(0);
   });
 });
@@ -197,7 +197,7 @@ describe('effect context', () => {
       },
     });
     // Its own journal: a job names its effect, so the tests above never see this one.
-    const auditJournal = j.create({ tables, effects: [audit] });
+    const auditJournal = j.compose({ tables, effects: [audit] });
     const id = orderId(++next);
     await db.transaction(tx =>
       auditJournal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),

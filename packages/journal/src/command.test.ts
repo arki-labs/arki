@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest'
 import { z } from 'zod';
 
 import type { OrderId } from './test-support.js';
-import type { Db, Row } from './types.js';
+import type { DbHandle, Row } from './types.js';
 import { initJournal } from './journal.js';
 import {
   accountId,
@@ -34,7 +34,7 @@ import {
 
 let db: PgliteDatabase;
 let client: PGlite;
-let journal: ReturnType<typeof j.create>;
+let journal: ReturnType<typeof j.compose>;
 let next = 0;
 
 const customerStats = j.projection('customer-stats', order, {
@@ -71,7 +71,7 @@ const payOrder = j.command(
   (input, { write }) =>
     write(order, input.orderId, (row, { tx }) => {
       expectTypeOf(row).toEqualTypeOf<Row<typeof orders> | null>();
-      expectTypeOf(tx).toEqualTypeOf<Db>();
+      expectTypeOf(tx).toEqualTypeOf<DbHandle>();
       if (!row) throw new Error('order not found');
       if (row.status !== 'placed') throw new Error(`order is ${row.status}`);
       return [OrderPaid({ amount: input.amount })];
@@ -195,7 +195,7 @@ expectTypeOf<HandlerArgs<typeof placeOrder>[0]>().toEqualTypeOf<{
   customerId: string;
   total: number;
 }>();
-expectTypeOf<HandlerArgs<typeof placeOrder>[1]['tx']>().toEqualTypeOf<Db>();
+expectTypeOf<HandlerArgs<typeof placeOrder>[1]['tx']>().toEqualTypeOf<DbHandle>();
 expectTypeOf<HandlerArgs<typeof placeOrder>[1]['meta']>().toEqualTypeOf<{ actorId: string }>();
 
 const foreignEvents = () => [ProfileOpened({ nick: 'a' })];
@@ -226,7 +226,7 @@ void typeChecks;
 // --- Runtime ----------------------------------------------------------------
 beforeAll(async () => {
   ({ db, client } = await openDb());
-  journal = j.create({ tables, projections: [customerStats], effects: [mail] });
+  journal = j.compose({ tables, projections: [customerStats], effects: [mail] });
 });
 
 afterAll(async () => {
@@ -291,7 +291,7 @@ describe('journal.run', () => {
       return meta;
     });
     const id = orderId(++next);
-    const seen = await loud.create({ tables }).run(db, twice, { orderId: id }, { actorId: 'usr_x' });
+    const seen = await loud.compose({ tables }).run(db, twice, { orderId: id }, { actorId: 'usr_x' });
     expect(parses).toBe(1);
     expect(seen).toEqual({ actorId: 'USR_X' });
     const stored = await eventsOf(id);

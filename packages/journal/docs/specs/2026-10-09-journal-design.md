@@ -1,5 +1,7 @@
 # `@arki/journal` — design
 
+This document explains intent. Its type blocks are sketches. The current signatures are in `src/api.ts` and `src/entity.ts`.
+
 Date: 2026-10-09. Status: approved by the founder for build.
 Replaces `@arki/event-sourcing` and removes `@event-driven-io/emmett` and
 `@event-driven-io/emmett-postgresql` from the monorepo.
@@ -60,7 +62,7 @@ export const j = initJournal({ meta: z.object({ actorId: userId.schema }) });
 // Or: initJournal.tx<AppTx>().db<AppDb>().create({ meta }) — also types `db` inside effects.
 
 // src/features/orders/tables.ts — a normal table with `id` and `version`.
-// A table keyed by another column: j.entity('profile', profiles, { id: 'accountId' }).
+// A table keyed by another column: j.entity('profile', profiles, { key: 'accountId' }).
 export const orders = schema.table('orders', {
   id: orderId.primaryColumn(),
   customerId: userForeignKeys.required('customer_id'),
@@ -112,7 +114,7 @@ export const payOrder = j.command(
 );
 
 // src/journal.root.ts — the one place that lists handlers.
-export const journal = j.create({
+export const journal = j.compose({
   tables: journalTables(schema),
   projections: [customerStats],
   effects: [orderMail(mailer)],
@@ -134,21 +136,25 @@ await worker.start();
 Export paths: `.` (portable core), `./pg` (table definitions only), `./dot` (optional
 `@arki/dot` plugin). No Node-only imports anywhere.
 
+Sketch of intent. The current signatures are in `src/api.ts`.
+
 ```ts
-function initJournal<Meta extends z.ZodObject>(options?: { meta?: Meta }): JournalInit<Meta, Db>;
-// Type-only step: the app's Drizzle transaction type. `Tx` is `Db` without it.
-initJournal.tx<Tx>().create<Meta>(options?: { meta?: Meta }): JournalInit<Meta, Tx>;
+function initJournal<Meta extends z.ZodObject>(options?: { meta?: Meta }): JournalDefinitions<Meta, DbHandle, RootDb>;
+// Type-only step: the app's Drizzle transaction type. `Tx` is `DbHandle` without it.
+initJournal.tx<Tx>().create<Meta>(options?: { meta?: Meta }): JournalDefinitions<Meta, Tx, RootDb>;
 // Type-only step: the app's root database type. Effects get it as `ctx.db`; `drain` and `worker` need it. `AppDb` is `RootDb` without it.
-initJournal.db<AppDb>().create<Meta>(options?: { meta?: Meta }): JournalInit<Meta, Db, AppDb>;
+initJournal.db<AppDb>().create<Meta>(options?: { meta?: Meta }): JournalDefinitions<Meta, DbHandle, AppDb>;
 // The two steps chain in either order: initJournal.tx<Tx>().db<AppDb>().create({ meta }).
 
-type JournalInit<Meta, Tx> = {
-  event<T extends string, D extends z.ZodType>(type: T, data: D): EventDef<T, D>;
-  entity<K extends string, Tbl extends IdTable>(kind: K, table: Tbl): EntityBuilder<K, Tbl, never, 'id'>; // key column `id`
-  entity<K extends string, Tbl extends EntityTable, Key extends KeyName<Tbl>>(kind: K, table: Tbl, options: { id: Key }): EntityBuilder<K, Tbl, never, Key>; // Key: a property name of a non-null string column
-  projection<E extends AnyEntity>(name: string, entity: E | E[], on: Handlers<E, [tx: Tx]>): Projection<Tx>;
-  effect<E extends AnyEntity>(name: string, entity: E | E[], on: EffectHandlers<E>): Effect;
-  create(config: { tables: JournalTables; projections?: Projection<Tx>[]; effects?: Effect[] }): Journal<Meta, Tx>;
+// `MetaOut` below is `z.output<Meta>`.
+type JournalDefinitions<Meta, Tx = DbHandle, AppDb = RootDb> = {
+  event<T extends string, S extends z.ZodType>(type: T, schema: S): EventDef<T, S>;
+  entity<K extends string, Tbl extends IdTable>(kind: K, table: Tbl): EntityBuilder<K, Tbl, never, MetaOut, 'id'>; // key column `id`
+  entity<K extends string, Tbl extends EntityTable, Key extends KeyName<Tbl>>(kind: K, table: Tbl, options: { key: Key & SingleKey<Key> }): EntityBuilder<K, Tbl, never, MetaOut, Key>; // Key: one property name of a non-null string column
+  command<S extends z.ZodType, R>(name: string, input: S, handler: (input: z.output<S>, context: CommandContext<MetaOut, Tx>) => R): Command<S, R, MetaOut, Tx>;
+  projection<E extends AnyEntity<MetaOut>>(name: string, entity: E | readonly E[], on: ProjectionHandlers<E, MetaOut, Tx>): Projection<MetaOut, Tx>;
+  effect<E extends AnyEntity<MetaOut>>(name: string, entity: E | readonly E[], on: EffectHandlers<E, MetaOut, AppDb>): Effect<MetaOut, AppDb>;
+  compose(config: { tables: JournalTables; projections?: readonly Projection<MetaOut, Tx>[]; effects?: readonly Effect<MetaOut, AppDb>[] }): Journal<Meta, Tx, AppDb>;
 };
 
 // Calling an event definition validates the data and returns a pending event.
@@ -164,37 +170,40 @@ type Recorded<T, Data, Meta, Id extends string = string> = {
 
 // A table qualifies when it has an integer `version` and a string key column that is primary or unique.
 // `Key` is the key column's property name, `id` by default. `Created` collects the `.create` return types.
-type EntityBuilder<K, Tbl, E, Key, Created = never> = EntityDef<K, Tbl, E, Key> & {
-  create<D extends AnyEventDef, R extends NewRow<Tbl, Key>>(event: D, reduce: (e: RecordedOf<D, EntityId<Tbl, Key>>) => R): EntityBuilder<K, Tbl, E | D, Key, Created | R>;
-  on<D extends AnyEventDef>(event: D, reduce: (row: OnRow<Tbl, Key, Created>, e: RecordedOf<D, EntityId<Tbl, Key>>) => Patch<Tbl, Key> | null): EntityBuilder<K, Tbl, E | D, Key, Created>;
+// Every `.create` comes before the first `.on`. After the first `.on` the builder is `OnOnlyEntityBuilder`, which has no `.create`.
+type EntityBuilder<K, Tbl, E, Meta, Key = 'id', Created = never> = OnOnlyEntityBuilder<K, Tbl, E, Meta, Key, Created> & {
+  create<D extends AnyEventDef, R extends ReducerValues<Tbl, Key>>(event: D, reduce: (e: RecordedOf<D, Meta, EntityId<Tbl, Key>>) => R): EntityBuilder<K, Tbl, E | D, Meta, Key, Created | R>;
+};
+type OnOnlyEntityBuilder<K, Tbl, E, Meta, Key = 'id', Created = never> = EntityDef<K, Tbl, E, Meta, Key> & {
+  on<D extends AnyEventDef>(event: D, reduce: (row: OnReducerRow<Tbl, Key, Created>, e: RecordedOf<D, Meta, EntityId<Tbl, Key>>) => Patch<Tbl, Key> | null): OnOnlyEntityBuilder<K, Tbl, E | D, Meta, Key, Created>;
 };
 type Row<Tbl> = Tbl['$inferSelect'];
 type EntityId<Tbl, Key> = Row<Tbl>[Key]; // the key column's own type
-type NewRow<Tbl, Key> = Omit<Tbl['$inferInsert'], Key | 'version'>; // the library sets the key and version
-type Replayed<Tbl, Key> = NewRow<Tbl, Key> & Record<Key, EntityId<Tbl, Key>> & { version: number }; // reducer-shaped state; columns with defaults may be absent
-type OnRow<Tbl, Key, Created> = Replayed<Tbl, Key> & Required<Pick<NewRow<Tbl, Key>, CreatedKeys<Created>>>; // keys every create sets are required
-type Patch<Tbl, Key> = Partial<NewRow<Tbl, Key>>; // merged onto the state; a key set to undefined is unchanged
-type RootDb = Db & { rollback?: undefined }; // the database, never a transaction
-type Transaction<Tx> = Db & { transaction<T>(run: (tx: Tx) => Promise<T>): Promise<T> }; // opens `Tx` transactions
+type ReducerValues<Tbl, Key> = Omit<Tbl['$inferInsert'], Key | 'version'>; // the library sets the key and version
+type ReducerRow<Tbl, Key> = ReducerValues<Tbl, Key> & Record<Key, EntityId<Tbl, Key>> & { version: number }; // reducer-shaped state; columns with defaults may be absent
+type OnReducerRow<Tbl, Key, Created> = ReducerRow<Tbl, Key> & Required<Pick<ReducerValues<Tbl, Key>, GuaranteedCreateKeys<Created>>>; // keys every create sets are required
+type Patch<Tbl, Key> = Partial<ReducerValues<Tbl, Key>>; // merged onto the state; a key set to undefined is unchanged
+type RootDb = DbHandle & { rollback?: undefined }; // the database, never a transaction
+type TransactionSource<Tx> = DbHandle & { transaction<T>(run: (tx: Tx) => Promise<T>): Promise<T> }; // opens `Tx` transactions
 type EffectContext<AppDb> = { jobId: string; signal: AbortSignal; db: AppDb }; // `db` is the object given to drain or worker
 
-type WriteEvents<Tbl, E, Tx> = (row: Row<Tbl> | null, ctx: { tx: Tx }) => Pending[] | Promise<Pending[]>; // looks at the locked row, checks the rules, returns the events
+type NextEvents<Tbl, E, Tx> = (row: Row<Tbl> | null, ctx: { tx: Tx }) => Pending[] | Promise<Pending[]>; // looks at the locked row, checks the rules, returns the events
 type Command<S, R, MetaOut, Tx> = { name: string; input: S; handler: (input: z.output<S>, context: CommandContext<MetaOut, Tx>) => R }; // from j.command(name, schema, handler)
 type CommandContext<MetaOut, Tx> = {
   tx: Tx; meta: MetaOut;
-  write(entity, id: EntityId, events: WriteEvents): Promise<{ row: Row | null; events: Recorded[] }>; // bound to tx and meta
+  write(entity, id: EntityId, events: NextEvents): Promise<{ row: Row | null; events: Recorded[] }>; // bound to tx and meta
   run(child: Command, input: z.input<S>): Promise<Awaited<R>>; // a savepoint of tx, same meta
 };
 
 type Journal<Meta, Tx, AppDb> = {
-  run(source: Transaction<Tx>, command: Command<S, R, z.output<Meta>, Tx>, input: z.input<S>, meta: z.input<Meta>): Promise<Awaited<R>>; // parse, then the handler in one transaction (root db) or savepoint (tx); on the root db, wakes after a commit that queued a job
-  write(tx: Tx, entity, id: EntityId, input: { meta: z.input<Meta>; events: WriteEvents }): Promise<{ row: Row | null; events: Recorded[] }>;
-  replay(db, entity, id: EntityId, opts?: { upTo?: number }): Promise<{ row: Replayed | null; events: Recorded[] }>;
-  verify(db, entity, id: EntityId): Promise<{ ok: true } | { ok: false; expected: Replayed | null; actual: Row | null }>;
+  run(source: TransactionSource<Tx>, command: Command<S, R, z.output<Meta>, Tx>, input: z.input<S>, meta: z.input<Meta>): Promise<Awaited<R>>; // parse, then the handler in one transaction (root db) or savepoint (tx); on the root db, wakes after a commit that queued a job
+  write(tx: Tx, entity, id: EntityId, input: { meta: z.input<Meta>; events: NextEvents }): Promise<{ row: Row | null; events: Recorded[] }>;
+  replay(db, entity, id: EntityId, opts?: { throughVersion?: number }): Promise<{ row: ReducerRow | null; events: Recorded[] }>;
+  verify(db, entity, id: EntityId): Promise<{ ok: true } | { ok: false; expected: ReducerRow | null; actual: Row | null }>;
   repair(db, entity, id: EntityId): Promise<Row | null>;
-  rerun(db: Transaction<Tx>, projection, opts?: { from?: number; batch?: number }): Promise<{ events: number }>;
-  drain(db: AppDb & RootDb, opts?: { limit?: number; signal?: AbortSignal }): Promise<number>; // one batch of jobs
-  worker(db: AppDb & RootDb, opts?: { pollMs?: number; limit?: number }): { start(): Promise<void>; stop(): Promise<void>; wake(): void };
+  rerun(db: TransactionSource<Tx>, projection, opts?: { afterSeq?: number; batchSize?: number }): Promise<{ events: number }>;
+  drain(db: AppDb & RootDb, opts?: { batchSize?: number; signal?: AbortSignal }): Promise<number>; // one batch of jobs
+  worker(db: AppDb & RootDb, opts?: { pollMs?: number; batchSize?: number }): { start(): Promise<void>; stop(): Promise<void>; wake(): void };
   wake(): void; // wakes every running worker this journal started in this process
   catalog: { entities: EntityInfo[]; projections: string[]; effects: string[] };
 };
@@ -207,10 +216,17 @@ class JournalError extends Error {
 // ./pg
 function journalTables(schema?: PgSchema): { events: PgTable; jobs: PgTable };
 // ./dot
-function journalPlugin(options: { journal: Journal; worker?: boolean }): Plugin;
+// Direct mode: the app composed the journal. Publishes `services.journal`, needs the root `db`,
+// runs one worker between `start` and `stop` unless `worker: false`.
+function journal(options: { journal: Journal; worker?: boolean; pollMs?: number; batchSize?: number }): Plugin;
+// Feature mode: composes the journal at boot from the features' `journalHandlers` slices. No `journal.root.ts`.
+function journal(options: { j: JournalDefinitions; tables: JournalTables; features: Token[]; worker?: boolean; pollMs?: number; batchSize?: number }): Plugin;
+// The feature slice. `actions` holds one manifest action per effect in a list; none for an effects function.
+function journalHandlers(handlers: { projections?: Projection[]; effects?: Effect[] | ((services) => Effect[]) }):
+  { key: 'journal'; actions: Action[]; resolve(services): { projections: Projection[]; effects: Effect[] } };
 ```
 
-`Db` is a structural type. Both a Drizzle database and a Drizzle transaction fit it.
+`DbHandle` is a structural type. Both a Drizzle database and a Drizzle transaction fit it.
 `RootDb` fits the database only. `drain` and `worker` take `RootDb`, and also check at
 runtime: inside a transaction the claim would be a savepoint, and handlers would run
 before the outer transaction commits.
@@ -228,8 +244,8 @@ What is inferred:
 
 Events are read-only at runtime: `decode` deep-freezes each one, so a reducer, projection or effect that changes `e.data` or `e.meta` gets a `TypeError`.
 
-A `.create` reducer receives no row and returns the full `NewRow`. An `.on` reducer
-always receives the reducer-shaped state, `Replayed<Tbl, Key>`: the insert shape plus
+A `.create` reducer receives no row and returns the full `ReducerValues`. An `.on` reducer
+always receives the reducer-shaped state, `ReducerRow<Tbl, Key>`: the insert shape plus
 the key column and `version`. Columns with database defaults may be absent, because
 replay has no database. So reducers never check for a missing row. An `.on` reducer
 returns a patch: the columns that changed. The patch is merged onto the state. `null`
@@ -239,7 +255,7 @@ nullable column, return `null` for it. `events(row, { tx })` still receives the 
 
 The key column is `id` unless `j.entity` names another by its property name,
 `{ id: 'accountId' }`. The name is typed as the table's non-null string column names,
-and must be one name: a union is rejected, because `NewRow` would omit every member.
+and must be one name: a union is rejected, because `ReducerValues` would omit every member.
 The column must be not null and the primary key or unique, on the column or as a
 single-column table-level constraint or unique index without a `where` (a partial
 index is unique only inside its subset); `j.entity` checks and throws otherwise. The id argument, the key on the `.on` row and `entityId` on recorded events
@@ -249,7 +265,7 @@ all have the column's own type.
 - An id must be well-formed UTF-16. An id with an unpaired surrogate is refused with `ID_MISMATCH` before any database access, because the driver would store it as U+FFFD and it would reach the history of another id. Nothing is replaced or stripped.
 - The key column must be a plain `text`, `varchar` or `uuid` column, not a custom column type, because a custom type's mapping can change the string. `j.entity` refuses any other (`citext`, `char(n)`, numbers) because it can treat two different strings as one key. An id is at most 256 characters, or the column's own limit if smaller, and not empty; `write`, `replay`, `verify` and `repair` refuse any other with `ID_MISMATCH`. A `text` or `varchar` key must use the database's default, exact comparison, not a case-insensitive collation. A `uuid` id must be lower-case and hyphenated; `write`, `replay`, `verify` and `repair` refuse another spelling with `ID_MISMATCH` before any database access.
 
-Columns that every `.create` reducer sets are required on the `.on` row (`OnRow`).
+Columns that every `.create` reducer sets are required on the `.on` row (`OnReducerRow`).
 Sound because a patch cannot unset a key and `undefined` values are stripped. A
 column one create leaves out, sets on one branch only, or may set to `undefined` stays
 optional. Every `.create` comes before the first `.on`: after it the builder type has
@@ -400,8 +416,8 @@ BullMQ is not required. An effect may enqueue a job: `OrderPaid: e => queue.add(
 ## 9. Replay, repair, and changing events
 
 - `replay` reads the entity's events in version order, parses each with its current
-  schema, and folds the reducers. It returns the reducer-shaped row (`Replayed`): no
-  database defaults. `upTo` gives the state at an earlier version.
+  schema, and folds the reducers. It returns the reducer-shaped row (`ReducerRow`): no
+  database defaults. `throughVersion` gives the state at an earlier version.
 - `verify` replays and compares with the stored row, on the columns reducers produce.
   A column filled only by a database default is not compared: it is not journal state
   (section 5). A reducer that reads such a column sees the default during `write` and

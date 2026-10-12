@@ -31,14 +31,14 @@ let poolB: pg.Pool;
 let dbA: NodePgDatabase;
 let dbB: NodePgDatabase;
 let next = 100;
-const journal = j.create({ tables });
+const journal = j.compose({ tables });
 
 /** The test swaps this to script the effect handler per scenario. */
 let onPaid: (jobId: string) => Promise<void> | void = () => {
   /* the default handler does nothing */
 };
 const mail = j.effect('order-mail', order, { OrderPaid: (_e, ctx) => onPaid(ctx.jobId) });
-const withJobs = j.create({ tables, effects: [mail] });
+const withJobs = j.compose({ tables, effects: [mail] });
 
 const placeAndPay = async () => {
   const id = orderId(++next);
@@ -172,7 +172,7 @@ describe('two writers on real Postgres', () => {
       const replayed = await journal.replay(dbB, order, id);
       expect(replayed.row).toBeNull();
       expect(replayed.events.map(e => e.type)).toEqual(['OrderPlaced', 'OrderPaid', 'OrderCancelled']);
-      const early = await journal.replay(dbB, order, id, { upTo: 2 });
+      const early = await journal.replay(dbB, order, id, { throughVersion: 2 });
       expect(early.row).toMatchObject({ id, status: 'paid', version: 2 });
     } finally {
       release.resolve();
@@ -218,7 +218,7 @@ describe('two writers on real Postgres', () => {
 });
 
 /**
- * Worker A claims the job and its handler stalls. The lease runs out. Worker B
+ * JournalWorker A claims the job and its handler stalls. The lease runs out. JournalWorker B
  * reclaims, runs the handler, and records `bOutcome`. Then A's handler ends with
  * `aOutcome`. Returns the job row after B and after A.
  */
@@ -282,7 +282,7 @@ describe('two workers on real Postgres', () => {
     try {
       await dbA.transaction(async tx => {
         await tx.select({ id: tables.jobs.id }).from(tables.jobs).where(eq(tables.jobs.id, locked.id)).for('update');
-        const drained = withJobs.drain(dbB, { limit: 5 });
+        const drained = withJobs.drain(dbB, { batchSize: 5 });
         settle.push(drained);
         expect(await withDeadline(drained, 5000, 'the drain waited on the locked job instead of skipping it')).toBe(1);
         expect(seen).toEqual([free.id]);
@@ -290,7 +290,7 @@ describe('two workers on real Postgres', () => {
     } finally {
       await Promise.allSettled(settle);
     }
-    expect(await withJobs.drain(dbB, { limit: 5 })).toBe(1);
+    expect(await withJobs.drain(dbB, { batchSize: 5 })).toBe(1);
     expect(seen).toEqual([free.id, locked.id]);
     expect(
       await dbA

@@ -77,7 +77,7 @@ afterAll(async () => {
 });
 
 const write = (
-  journal: ReturnType<typeof j.create>,
+  journal: ReturnType<typeof j.compose>,
   entity: typeof tagged | typeof reassigns | typeof mutatesNested,
   id: ReturnType<typeof orderId>,
   items: string[],
@@ -98,14 +98,14 @@ const expectFrozen = (e: { data: { items: string[] }; meta: object }) => {
 
 describe('read-only events', () => {
   it('one handler must not be able to change what another handler or a later rerun sees: a mutating projection refuses the write', async () => {
-    const journal = j.create({ tables, projections: [sortsInPlace, readsOrder] });
+    const journal = j.compose({ tables, projections: [sortsInPlace, readsOrder] });
     const id = orderId(++next);
     await expect(write(journal, tagged, id, ['b', 'a'])).rejects.toBeInstanceOf(TypeError);
     expect(await rowCounts(id)).toEqual({ events: 0, rows: 0 });
   });
 
   it('a projection that sorts a copy works and the next projection still sees the original order', async () => {
-    const journal = j.create({ tables, projections: [sortsCopy, readsOrder] });
+    const journal = j.compose({ tables, projections: [sortsCopy, readsOrder] });
     seen.length = 0;
     await write(journal, tagged, orderId(++next), ['b', 'a']);
     expect(seen).toEqual([
@@ -115,7 +115,7 @@ describe('read-only events', () => {
   });
 
   it('a reducer that assigns to e.data throws, and so does one that changes a nested field', async () => {
-    const journal = j.create({ tables });
+    const journal = j.compose({ tables });
     const id = orderId(++next);
     await expect(write(journal, reassigns, id, ['a'])).rejects.toBeInstanceOf(TypeError);
     await expect(write(journal, mutatesNested, orderId(++next), ['a'])).rejects.toBeInstanceOf(TypeError);
@@ -123,7 +123,7 @@ describe('read-only events', () => {
   });
 
   it('the events returned by write and by replay are frozen all the way down', async () => {
-    const journal = j.create({ tables });
+    const journal = j.compose({ tables });
     const id = orderId(++next);
     const written = await write(journal, tagged, id, ['b', 'a']);
     for (const e of written.events) expectFrozen(e);
@@ -133,7 +133,7 @@ describe('read-only events', () => {
   });
 
   it('an effect receives a frozen event; one that mutates it fails and the job is retried like any handler failure', async () => {
-    const journal = j.create({ tables, effects: [watcher] });
+    const journal = j.compose({ tables, effects: [watcher] });
     const id = orderId(++next);
     const written = await write(journal, tagged, id, ['a']);
     const [job] = await db

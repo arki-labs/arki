@@ -6,9 +6,9 @@ import { integer, jsonb, pgTable, varchar } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { Db, PendingOf } from './types.js';
+import type { DbHandle, PendingOf } from './types.js';
 import { isJournalError, JournalError } from './errors.js';
-import { initJournal, sortedByVersion } from './journal.js';
+import { initJournal } from './journal.js';
 import {
   customerOrderCounts,
   j,
@@ -24,10 +24,11 @@ import {
   tables,
   Unrelated,
 } from './test-support.js';
+import { sortedByVersion } from './write.js';
 
 let db: PgliteDatabase;
 let client: PGlite;
-let journal: ReturnType<typeof j.create>;
+let journal: ReturnType<typeof j.compose>;
 let next = 0;
 
 const customerStats = j.projection('customer-stats', order, {
@@ -64,7 +65,7 @@ const noteLog = j.projection('note-log', order, {
 
 beforeAll(async () => {
   ({ db, client } = await openDb());
-  journal = j.create({ tables, projections: [customerStats, flaky, noteLog], effects: [mail] });
+  journal = j.compose({ tables, projections: [customerStats, flaky, noteLog], effects: [mail] });
 });
 
 afterAll(async () => {
@@ -273,7 +274,7 @@ describe('write', () => {
       .entity('touchy', orders)
       .create(Opened, () => ({ customerId: 'c', total: 1, status: 'placed' }))
       .on(Touched, () => ({ status: undefined, note: 'touched' }));
-    const bare = j.create({ tables });
+    const bare = j.compose({ tables });
     const id = orderId(++next);
     await db.transaction(tx => bare.write(tx, touchy, id, { meta, events: () => [Opened({})] }));
     const result = await db.transaction(tx => bare.write(tx, touchy, id, { meta, events: () => [Touched({})] }));
@@ -321,7 +322,7 @@ describe('write', () => {
     const shaky = j
       .entity('shaky', orders)
       .create(Bumped, e => ({ customerId: 'c', total: e.data.n, status: 'placed' }));
-    const bare = j.create({ tables });
+    const bare = j.compose({ tables });
     const id = orderId(++next);
     await expect(
       db.transaction(tx => bare.write(tx, shaky, id, { meta, events: () => [Bumped({ n: 1 })] })),
@@ -333,7 +334,7 @@ describe('write', () => {
     const dated = initJournal({ meta: z.object({ at: z.date() }) });
     const Ping = dated.event('Ping', z.object({}));
     const pinged = dated.entity('pinged', orders).create(Ping, () => ({ customerId: 'c', total: 1, status: 'placed' }));
-    const bare = dated.create({ tables });
+    const bare = dated.compose({ tables });
     await expect(
       db.transaction(tx =>
         bare.write(tx, pinged, orderId(++next), { meta: { at: new Date() }, events: () => [Ping({})] }),
@@ -346,7 +347,7 @@ describe('write', () => {
     // would call that equal. Only primitives, arrays and plain objects survive JSON.
     const Loose = j.event('Loose', z.object({ bag: z.unknown() }));
     const loose = j.entity('loose', orders).create(Loose, () => ({ customerId: 'c', total: 1, status: 'placed' }));
-    const bare = j.create({ tables });
+    const bare = j.compose({ tables });
     class Box {
       readonly value = 1;
     }
@@ -362,7 +363,7 @@ describe('write', () => {
   it('data JSON cannot serialize (a bigint) is UNSTABLE_SCHEMA with the serializer error as cause, not a raw TypeError', async () => {
     const Big = j.event('Big', z.object({ n: z.bigint() }));
     const big = j.entity('big', orders).create(Big, () => ({ customerId: 'c', total: 1, status: 'placed' }));
-    const bare = j.create({ tables });
+    const bare = j.compose({ tables });
     const id = orderId(++next);
     const failure: unknown = await db
       .transaction(tx => bare.write(tx, big, id, { meta, events: () => [Big({ n: 1n })] }))
@@ -385,7 +386,7 @@ describe('write', () => {
       Counted: (tx, e) =>
         tx.insert(customerOrderCounts).values({ customerId: `keys_${id}`, placed: Object.keys(e.data).length }),
     });
-    const bare = j.create({ tables, projections: [keyCount] });
+    const bare = j.compose({ tables, projections: [keyCount] });
     const data = { n: 1, bonus: 10 };
     const handBuilt: PendingOf<typeof Counted> = { type: 'Counted', data };
     const written = await db.transaction(tx => bare.write(tx, counted, id, { meta, events: () => [handBuilt] }));
@@ -406,7 +407,7 @@ describe('write', () => {
     const blank = j
       .entity('blank', orders)
       .create(Opened, () => ({ customerId: 'c', total: 1, status: 'placed', note: undefined }));
-    const bare = j.create({ tables });
+    const bare = j.compose({ tables });
     const id = orderId(++next);
     const written = await db.transaction(tx => bare.write(tx, blank, id, { meta, events: () => [Opened({})] }));
     expect(written.row?.note).toBe('none');
@@ -425,7 +426,7 @@ describe('write', () => {
       .entity('leaky', orders)
       .create(Opened, () => ({ customerId: 'c', total: 1, status: 'placed' }))
       .on(Copied, row => ({ customerId: row.note ?? 'absent' }));
-    const bare = j.create({ tables });
+    const bare = j.compose({ tables });
     const id = orderId(++next);
     await db.transaction(tx => bare.write(tx, leaky, id, { meta, events: () => [Opened({})] }));
     const written = await db.transaction(tx => bare.write(tx, leaky, id, { meta, events: () => [Copied({})] }));
@@ -482,14 +483,14 @@ describe('write', () => {
 });
 
 describe('replay, verify, repair', () => {
-  it('replay folds the log; upTo gives an earlier state', async () => {
+  it('replay folds the log; throughVersion gives an earlier state', async () => {
     const id = orderId(++next);
     await place(id);
     await pay(id);
     const full = await journal.replay(db, order, id);
     expect(full.row).toMatchObject({ status: 'paid', version: 2 });
     expect(full.events.map(e => e.type)).toEqual(['OrderPlaced', 'OrderPaid']);
-    const early = await journal.replay(db, order, id, { upTo: 1 });
+    const early = await journal.replay(db, order, id, { throughVersion: 1 });
     expect(early.row).toMatchObject({ status: 'placed', version: 1 });
   });
 
@@ -534,15 +535,15 @@ describe('replay, verify, repair', () => {
     expect(await versions(id)).toEqual([2]);
   });
 
-  it('upTo cannot hide NO_HISTORY: a history that starts at version 2 is incomplete at any cut', async () => {
-    // Why: `upTo: 1` on a log that starts at 2 would select nothing and read as "no entity",
+  it('throughVersion cannot hide NO_HISTORY: a history that starts at version 2 is incomplete at any cut', async () => {
+    // Why: `throughVersion: 1` on a log that starts at 2 would select nothing and read as "no entity",
     // when the truth is "an entity whose history cannot be replayed". The row is deleted
     // through the journal so that no stored row gives the game away.
     const id = orderId(++next);
     await db.insert(orders).values({ id, customerId: 'legacy', total: 7, status: 'placed' });
     await cancel(id);
     expect(await versions(id)).toEqual([2]);
-    await expect(journal.replay(db, order, id, { upTo: 1 })).rejects.toMatchObject({ code: 'NO_HISTORY' });
+    await expect(journal.replay(db, order, id, { throughVersion: 1 })).rejects.toMatchObject({ code: 'NO_HISTORY' });
   });
 
   it('replay of an entity with no row and no events is an empty result, not an error', async () => {
@@ -557,7 +558,7 @@ describe('replay, verify, repair', () => {
     await place(orderId(++next), customerId);
     await db.delete(customerOrderCounts).where(sql`true`);
     const total = await countRows(db.select().from(tables.events).where(eq(tables.events.type, 'OrderPlaced')));
-    const result = await journal.rerun(db, customerStats, { batch: 2 });
+    const result = await journal.rerun(db, customerStats, { batchSize: 2 });
     expect(result.events).toBe(total);
     const [count] = await db.select().from(customerOrderCounts).where(eq(customerOrderCounts.customerId, customerId));
     expect(count?.placed).toBe(3);
@@ -584,11 +585,11 @@ describe('replay, verify, repair', () => {
  * A transaction whose insert into the events table stores the rows in reverse,
  * so RETURNING hands them back in reverse. Savepoints it opens are wrapped too.
  */
-const reversing = (tx: Db): Db =>
+const reversing = (tx: DbHandle): DbHandle =>
   new Proxy(tx, {
     get(target, prop, receiver) {
       if (prop === 'transaction') {
-        return <T>(run: (sp: Db) => Promise<T>) => target.transaction(sp => run(reversing(sp)));
+        return <T>(run: (sp: DbHandle) => Promise<T>) => target.transaction(sp => run(reversing(sp)));
       }
       if (prop === 'insert') {
         return (table: PgTable) => {
@@ -649,7 +650,7 @@ describe('duplicate handler names', () => {
         /* handler body is irrelevant */
       },
     });
-    expect(() => j.create({ tables, effects: [first, second] })).toThrow(/effect.*"mail"/);
+    expect(() => j.compose({ tables, effects: [first, second] })).toThrow(/effect.*"mail"/);
   });
 
   it('two projections with the same name are rejected, naming the duplicate', () => {
@@ -663,7 +664,7 @@ describe('duplicate handler names', () => {
         /* handler body is irrelevant */
       },
     });
-    expect(() => j.create({ tables, projections: [first, second] })).toThrow(/projection.*"stats"/);
+    expect(() => j.compose({ tables, projections: [first, second] })).toThrow(/projection.*"stats"/);
   });
 });
 
@@ -680,7 +681,7 @@ describe('verify on JSON columns', () => {
     await db.execute(
       sql`create table docs (id varchar(256) primary key, payload jsonb not null, version integer not null default 0)`,
     );
-    const bare = j.create({ tables });
+    const bare = j.compose({ tables });
     const id = `doc_${++next}`;
     await db.transaction(tx => bare.write(tx, doc, id, { meta, events: () => [Opened({})] }));
     expect(await bare.verify(db, doc, id)).toEqual({ ok: true });

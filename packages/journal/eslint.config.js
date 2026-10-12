@@ -1,5 +1,18 @@
 import baseConfig from '@arki/eslint-config/base';
 
+const runtimeOnly = [
+  { group: ['node:*'], message: 'Node builtins are not available in browsers or Deno.' },
+  { group: ['bun', 'bun:*'], message: 'Bun builtins are not available elsewhere.' },
+];
+const dotOnlyInBridge = {
+  group: ['@arki/dot', '@arki/dot/*'],
+  message: '`@arki/dot` is an optional peer. Only `src/dot.ts` may import it, so the core entry loads without it.',
+};
+const noFeaturePackage = {
+  group: ['@arki/feature', '@arki/feature/*'],
+  message: 'Feature slices are read by shape. `@arki/feature` must not become a dependency of the journal.',
+};
+
 /** @type {import('typescript-eslint').Config} */
 export default [
   {
@@ -15,10 +28,7 @@ export default [
       'no-restricted-imports': [
         'error',
         {
-          patterns: [
-            { group: ['node:*'], message: 'Node builtins are not available in browsers or Deno.' },
-            { group: ['bun', 'bun:*'], message: 'Bun builtins are not available elsewhere.' },
-          ],
+          patterns: [...runtimeOnly, dotOnlyInBridge, noFeaturePackage],
         },
       ],
       'no-restricted-globals': [
@@ -28,6 +38,13 @@ export default [
         { name: 'require', message: 'ESM only.' },
         { name: '__dirname', message: 'ESM only.' },
       ],
+    },
+  },
+  {
+    // The Dot bridge is the one file that may import `@arki/dot`.
+    files: ['src/dot.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [...runtimeOnly, noFeaturePackage] }],
     },
   },
 ];

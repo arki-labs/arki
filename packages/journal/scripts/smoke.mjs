@@ -28,7 +28,7 @@ const mail = j.effect('order-mail', order, {
     /* smoke only */
   },
 });
-const journal = j.create({ tables: journalTables(), effects: [mail] });
+const journal = j.compose({ tables: journalTables(), effects: [mail] });
 
 let rejected = false;
 try {

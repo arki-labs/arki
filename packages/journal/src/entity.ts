@@ -8,82 +8,86 @@ import type {
   EntityTable,
   KeyColumn,
   KeyLimit,
-  NewRow,
   Patch,
   Recorded,
   RecordedOf,
+  ReducerRow,
   Reducers,
-  Replayed,
+  ReducerValues,
   Row,
 } from './types.js';
 import { assertStoredName } from './id.js';
 
 /**
  * The keys that every `.create` reducer so far returns with a type that
- * excludes `undefined`. `Created` is the union of their return types, so a key
+ * excludes `undefined`. `CreateResults` is the union of their return types, so a key
  * one of them leaves out, or may set to `undefined`, is not in the set. With
  * no `.create` yet, the set is empty.
  *
- * `keyof Created & string` keeps the mapped type from distributing over the
- * union: `keyof (A | B)` is the keys both have, and `Created[P]` is the union
+ * `keyof CreateResults & string` keeps the mapped type from distributing over the
+ * union: `keyof (A | B)` is the keys both have, and `CreateResults[P]` is the union
  * of what each branch holds there. A create returning `cond ? { note } : {}`
  * therefore promises nothing.
  */
-export type CreatedKeys<Created> = [Created] extends [never]
+export type GuaranteedCreateKeys<CreateResults> = [CreateResults] extends [never]
   ? never
-  : { [P in keyof Created & string]: undefined extends Created[P] ? never : P }[keyof Created & string];
+  : { [P in keyof CreateResults & string]: undefined extends CreateResults[P] ? never : P }[keyof CreateResults &
+      string];
 
 /**
  * The state an `.on` reducer receives: the reducer-shaped row, with the keys
  * every `.create` reducer sets made required. A patch cannot unset a key and
  * `undefined` values are stripped, so a key a create sets stays set.
  */
-export type OnRow<Tbl extends EntityTable, Key extends string, Created> = Replayed<Tbl, Key> &
-  Required<Pick<NewRow<Tbl, Key>, CreatedKeys<Created> & keyof NewRow<Tbl, Key>>>;
+export type OnReducerRow<Tbl extends EntityTable, Key extends string, CreateResults> = ReducerRow<Tbl, Key> &
+  Required<Pick<ReducerValues<Tbl, Key>, GuaranteedCreateKeys<CreateResults> & keyof ReducerValues<Tbl, Key>>>;
 
 /**
  * An entity under construction. Each `.create` / `.on` adds the event to the
  * union the entity accepts, so `events` cannot return an undeclared event.
- * `Created` collects what the `.create` reducers return; see `OnRow`.
+ * `CreateResults` collects what the `.create` reducers return; see `OnReducerRow`.
  *
  * The rule: every `.create` comes before the first `.on`. After the first
- * `.on` the builder is `SealedEntityBuilder`, which has no `.create`: a later
+ * `.on` the builder is `OnOnlyEntityBuilder`, which has no `.create`: a later
  * create could leave out a column that `.on` was promised.
  */
 export type EntityBuilder<
-  K extends string,
+  Kind extends string,
   Tbl extends EntityTable,
-  E extends AnyEventDef,
+  EventDefs extends AnyEventDef,
   Meta,
   Key extends string = 'id',
-  Created = never,
-> = SealedEntityBuilder<K, Tbl, E, Meta, Key, Created> & {
+  CreateResults = never,
+> = OnOnlyEntityBuilder<Kind, Tbl, EventDefs, Meta, Key, CreateResults> & {
   /** A create reducer receives no row. It builds the first row from the event. */
-  create<D extends AnyEventDef, R extends NewRow<Tbl, Key>>(
-    event: D,
-    reduce: (event: RecordedOf<D, Meta, EntityId<Tbl, Key>>) => R,
-  ): EntityBuilder<K, Tbl, E | D, Meta, Key, Created | R>;
+  create<AddedEvent extends AnyEventDef, CreateResult extends ReducerValues<Tbl, Key>>(
+    event: AddedEvent,
+    reduce: (event: RecordedOf<AddedEvent, Meta, EntityId<Tbl, Key>>) => CreateResult,
+  ): EntityBuilder<Kind, Tbl, EventDefs | AddedEvent, Meta, Key, CreateResults | CreateResult>;
 };
 
 /** An entity after its first `.on`: only more `.on` reducers may follow. */
-export type SealedEntityBuilder<
-  K extends string,
+export type OnOnlyEntityBuilder<
+  Kind extends string,
   Tbl extends EntityTable,
-  E extends AnyEventDef,
+  EventDefs extends AnyEventDef,
   Meta,
   Key extends string = 'id',
-  Created = never,
-> = EntityDef<K, Tbl, E, Meta, Key> & {
+  CreateResults = never,
+> = EntityDef<Kind, Tbl, EventDefs, Meta, Key> & {
   /**
    * An `.on` reducer always receives the reducer-shaped state: the insert shape plus
    * the key column and `version`. Columns with database defaults may be absent unless
    * every `.create` reducer sets them. It returns a patch that is merged onto the
    * state. Returning `null` deletes the row; the events stay.
    */
-  on<D extends AnyEventDef>(
-    event: D,
-    reduce: (row: OnRow<Tbl, Key, Created>, event: RecordedOf<D, Meta, EntityId<Tbl, Key>>) => Patch<Tbl, Key> | null,
-  ): SealedEntityBuilder<K, Tbl, E | D, Meta, Key, Created>;
+  on<AddedEvent extends AnyEventDef>(
+    event: AddedEvent,
+    reduce: (
+      row: OnReducerRow<Tbl, Key, CreateResults>,
+      event: RecordedOf<AddedEvent, Meta, EntityId<Tbl, Key>>,
+    ) => Patch<Tbl, Key> | null,
+  ): OnOnlyEntityBuilder<Kind, Tbl, EventDefs | AddedEvent, Meta, Key, CreateResults>;
 };
 
 /** The two facts `KeyColumn` states: the column holds a string and is not null. */
@@ -92,7 +96,11 @@ function isKeyColumn(column: PgColumn): column is KeyColumn {
   return dataType === 'string' && column.notNull;
 }
 
-/** The SQL types whose equality is exact string equality: `text`, `varchar`, `varchar(n)` and `uuid`. */
+/**
+ * The supported key types: `text`, `varchar`, `varchar(n)` and `uuid`. The first three compare
+ * as exact strings. A `uuid` ignores case, so its ids must also use the canonical spelling
+ * (lower-case, hyphenated); `assertExactId` checks that on every call.
+ */
 const EXACT_KEY_TYPE = /^(?:text|uuid|varchar(?:\s*\(\s*\d+\s*\))?)$/;
 
 /** A column's SQL type in comparable form: trimmed and lower-case. */
@@ -155,38 +163,38 @@ function keyColumnOf(kind: string, table: EntityTable, key: string): KeyColumn {
   if (dataType !== 'custom' && !isKeyColumn(column)) {
     throw new Error(
       dataType === 'string'
-        ? `journal: entity "${kind}": id column "${key}" must be not null`
-        : `journal: entity "${kind}": id column "${key}" must hold a string, it holds ${column.dataType}`,
+        ? `journal: entity "${kind}": key column "${key}" must be not null`
+        : `journal: entity "${kind}": key column "${key}" must hold a string, it holds ${column.dataType}`,
     );
   }
   if (!EXACT_KEY_TYPE.test(sqlType)) {
     throw new Error(
-      `journal: entity "${kind}": id column "${key}" has SQL type "${sqlType}"; the key must be text, varchar or uuid, because other types can treat two different strings as the same key`,
+      `journal: entity "${kind}": key column "${key}" has SQL type "${sqlType}"; the key must be text, varchar or uuid, because other types can treat two different strings as the same key`,
     );
   }
   if (!isKeyColumn(column)) {
     throw new Error(
-      `journal: entity "${kind}": id column "${key}" is a custom column type; a key must be a plain text, varchar or uuid column, because a custom type's mapping can change the string`,
+      `journal: entity "${kind}": key column "${key}" is a custom column type; a key must be a plain text, varchar or uuid column, because a custom type's mapping can change the string`,
     );
   }
   if (!isUniqueOn(table, column)) {
     throw new Error(
-      `journal: entity "${kind}": id column "${key}" must be the primary key or carry a unique constraint`,
+      `journal: entity "${kind}": key column "${key}" must be the primary key or carry a unique constraint`,
     );
   }
   return column;
 }
 
-export function defineEntity<K extends string, Tbl extends EntityTable, Meta, Key extends string>(
-  kind: K,
+export function defineEntity<Kind extends string, Tbl extends EntityTable, Meta, Key extends string>(
+  kind: Kind,
   table: Tbl,
   key: Key,
-): EntityBuilder<K, Tbl, never, Meta, Key> {
+): EntityBuilder<Kind, Tbl, never, Meta, Key> {
   assertStoredName('entity kind', kind);
   const keyColumn = keyColumnOf(kind, table, key);
   const uuidKey = sqlTypeOf(keyColumn) === 'uuid';
   const keyLimit = keyLimitOf(keyColumn);
-  return builder<K, Tbl, never, Meta, Key, never>(
+  return builder<Kind, Tbl, never, Meta, Key, never>(
     kind,
     table,
     key,
@@ -199,8 +207,15 @@ export function defineEntity<K extends string, Tbl extends EntityTable, Meta, Ke
   );
 }
 
-function builder<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Meta, Key extends string, Created>(
-  kind: K,
+function builder<
+  Kind extends string,
+  Tbl extends EntityTable,
+  EventDefs extends AnyEventDef,
+  Meta,
+  Key extends string,
+  CreateResults,
+>(
+  kind: Kind,
   table: Tbl,
   key: Key,
   keyColumn: KeyColumn,
@@ -210,13 +225,13 @@ function builder<K extends string, Tbl extends EntityTable, E extends AnyEventDe
   reducers: ReadonlyMap<string, Reducers<Tbl, Meta, Key>>,
   /** The first `.on` event type, once one is declared. `.create` is refused after it. */
   firstOn: string | null,
-): EntityBuilder<K, Tbl, E, Meta, Key, Created> {
-  const declare = <D extends AnyEventDef, Next>(
-    event: D,
+): EntityBuilder<Kind, Tbl, EventDefs, Meta, Key, CreateResults> {
+  const declare = <AddedEvent extends AnyEventDef, Next>(
+    event: AddedEvent,
     next: Reducers<Tbl, Meta, Key>,
     sealedBy: string | null,
-  ): EntityBuilder<K, Tbl, E | D, Meta, Key, Next> =>
-    builder<K, Tbl, E | D, Meta, Key, Next>(
+  ): EntityBuilder<Kind, Tbl, EventDefs | AddedEvent, Meta, Key, Next> =>
+    builder<Kind, Tbl, EventDefs | AddedEvent, Meta, Key, Next>(
       kind,
       table,
       key,
@@ -227,10 +242,10 @@ function builder<K extends string, Tbl extends EntityTable, E extends AnyEventDe
       new Map([...reducers, [event.type, next]]),
       sealedBy,
     );
-  const create = <D extends AnyEventDef, R extends NewRow<Tbl, Key>>(
-    event: D,
-    reduce: (event: RecordedOf<D, Meta, EntityId<Tbl, Key>>) => R,
-  ): EntityBuilder<K, Tbl, E | D, Meta, Key, Created | R> => {
+  const create = <AddedEvent extends AnyEventDef, CreateResult extends ReducerValues<Tbl, Key>>(
+    event: AddedEvent,
+    reduce: (event: RecordedOf<AddedEvent, Meta, EntityId<Tbl, Key>>) => CreateResult,
+  ): EntityBuilder<Kind, Tbl, EventDefs | AddedEvent, Meta, Key, CreateResults | CreateResult> => {
     if (firstOn !== null) {
       throw new Error(
         `journal: entity "${kind}": declare .create(${event.type}) before any .on; .on(${firstOn}) came first`,
@@ -240,17 +255,20 @@ function builder<K extends string, Tbl extends EntityTable, E extends AnyEventDe
     if (current.create !== undefined) {
       throw new Error(`journal: entity "${kind}" already declares a create reducer for "${event.type}"`);
     }
-    return declare<D, Created | R>(event, { ...current, create: reduce }, null);
+    return declare<AddedEvent, CreateResults | CreateResult>(event, { ...current, create: reduce }, null);
   };
-  const on = <D extends AnyEventDef>(
-    event: D,
-    reduce: (row: OnRow<Tbl, Key, Created>, event: RecordedOf<D, Meta, EntityId<Tbl, Key>>) => Patch<Tbl, Key> | null,
-  ): SealedEntityBuilder<K, Tbl, E | D, Meta, Key, Created> => {
+  const on = <AddedEvent extends AnyEventDef>(
+    event: AddedEvent,
+    reduce: (
+      row: OnReducerRow<Tbl, Key, CreateResults>,
+      event: RecordedOf<AddedEvent, Meta, EntityId<Tbl, Key>>,
+    ) => Patch<Tbl, Key> | null,
+  ): OnOnlyEntityBuilder<Kind, Tbl, EventDefs | AddedEvent, Meta, Key, CreateResults> => {
     const current = reducers.get(event.type) ?? {};
     if (current.on !== undefined) {
       throw new Error(`journal: entity "${kind}" already declares an on reducer for "${event.type}"`);
     }
-    return declare<D, Created>(event, { ...current, on: reduce }, firstOn ?? event.type);
+    return declare<AddedEvent, CreateResults>(event, { ...current, on: reduce }, firstOn ?? event.type);
   };
   return { kind, table, key, keyColumn, uuidKey, keyLimit, events, reducers, create, on };
 }
@@ -283,46 +301,46 @@ function keyed<K extends string, Id>(key: K, id: Id): Record<K, Id> {
 }
 
 /** The reducer-shaped row: a state plus the key column and `version`. */
-export function replayed<Tbl extends EntityTable, Key extends string>(
+export function withEntityIdentity<Tbl extends EntityTable, Key extends string>(
   entity: EntityDef<string, Tbl, AnyEventDef, unknown, Key>,
-  state: Row<Tbl> | NewRow<Tbl, Key>,
+  state: Row<Tbl> | ReducerValues<Tbl, Key>,
   id: EntityId<Tbl, Key>,
   version: number,
-): Replayed<Tbl, Key> {
+): ReducerRow<Tbl, Key> {
   return { ...state, ...keyed(entity.key, id), version };
 }
 
 /**
  * Fold one event onto the in-memory state. Shared by write and replay, so
  * both produce the same value for every column a reducer set. The caller has
- * checked that a reducer exists for the event in this state. `touched`, when
+ * checked that a reducer exists for the event in this state. `reducerColumns`, when
  * given, collects the columns the reducers set: a create starts it afresh, a
  * patch adds its keys, a delete empties it.
  */
 export function reduceOne<Tbl extends EntityTable, Meta, Key extends string>(
   entity: EntityDef<string, Tbl, AnyEventDef, Meta, Key>,
-  state: Row<Tbl> | NewRow<Tbl, Key> | null,
+  state: Row<Tbl> | ReducerValues<Tbl, Key> | null,
   id: EntityId<Tbl, Key>,
   event: Recorded<string, unknown, Meta>,
-  touched?: Set<string>,
-): NewRow<Tbl, Key> | null {
+  reducerColumns?: Set<string>,
+): ReducerValues<Tbl, Key> | null {
   const reducers = entity.reducers.get(event.type);
   if (state === null) {
     if (reducers?.create === undefined)
       throw new Error(`journal: entity "${entity.kind}" has no create reducer for "${event.type}"`);
     const created = definedOnly(reducers.create(event));
-    touched?.clear();
-    for (const key of Object.keys(created)) touched?.add(key);
+    reducerColumns?.clear();
+    for (const key of Object.keys(created)) reducerColumns?.add(key);
     return created;
   }
   if (reducers?.on === undefined)
     throw new Error(`journal: entity "${entity.kind}" has no on reducer for "${event.type}"`);
-  const patch = reducers.on(replayed(entity, state, id, event.version - 1), event);
+  const patch = reducers.on(withEntityIdentity(entity, state, id, event.version - 1), event);
   if (patch === null) {
-    touched?.clear();
+    reducerColumns?.clear();
     return null;
   }
   const defined = definedOnly(patch);
-  for (const key of Object.keys(defined)) touched?.add(key);
+  for (const key of Object.keys(defined)) reducerColumns?.add(key);
   return { ...state, ...defined };
 }

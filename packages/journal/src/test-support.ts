@@ -68,7 +68,7 @@ export const ProfileClosed = j.event('ProfileClosed', z.object({}));
 export const ProfileFlagged = j.event('ProfileFlagged', z.object({ nick: z.string().min(1) }));
 
 export const profile = j
-  .entity('profile', profiles, { id: 'accountId' })
+  .entity('profile', profiles, { key: 'accountId' })
   .create(ProfileOpened, e => ({ nick: e.data.nick, moveCount: 0 }))
   .create(ProfileFlagged, e => ({ nick: e.data.nick, moveCount: 0 }))
   // Every create sets `moveCount`, so it is a number here: no `?? 0`.

@@ -32,7 +32,7 @@ const notify = j.effect('order-notify', order, {
   },
 });
 
-const journal = j.create({ tables, effects: [notify] });
+const journal = j.compose({ tables, effects: [notify] });
 
 const orderIdSchema = z.templateLiteral(['ord_', z.string()]);
 

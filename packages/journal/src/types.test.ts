@@ -11,20 +11,20 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { WriteResult } from './journal.js';
+import type { WriteResult } from './api.js';
 import type { AccountId, order } from './test-support.js';
 import type {
   AnyEntity,
-  Db,
+  DbHandle,
   EntityId,
   EntityTable,
   EventsOf,
-  NewRow,
   PendingOf,
   ProjectionHandlers,
   Recorded,
   RecordedOf,
-  Replayed,
+  ReducerRow,
+  ReducerValues,
   RootDb,
   Row,
 } from './types.js';
@@ -73,12 +73,12 @@ const orders = pgTable('orders', {
 const asEntityTable: EntityTable = orders;
 void asEntityTable;
 
-// Row and NewRow are inferred from the table.
+// Row and ReducerValues are inferred from the table.
 expectTypeOf<Row<typeof orders>>().toEqualTypeOf<typeof orders.$inferSelect>();
-expectTypeOf<NewRow<typeof orders>>().toEqualTypeOf<{ total: number; status: 'placed' | 'paid' }>();
+expectTypeOf<ReducerValues<typeof orders>>().toEqualTypeOf<{ total: number; status: 'placed' | 'paid' }>();
 expectTypeOf<EntityId<typeof orders>>().toEqualTypeOf<OrderId>();
 
-// The key option must be one property name. A union would make `NewRow` omit several
+// The key option must be one property name. A union would make `ReducerValues` omit several
 // required columns, so a `.create` could return `{}` and an `.on` could read a column
 // that was never set.
 const twoKeys = pgTable('two_keys', {
@@ -86,11 +86,11 @@ const twoKeys = pgTable('two_keys', {
   other: varchar('other').notNull().unique(),
   version: integer('version').notNull().default(0),
 });
-expectTypeOf<NewRow<typeof twoKeys, 'accountId'>>().toEqualTypeOf<{ other: string }>();
-const oneKey = (key: 'accountId') => j.entity('one-key', twoKeys, { id: key });
+expectTypeOf<ReducerValues<typeof twoKeys, 'accountId'>>().toEqualTypeOf<{ other: string }>();
+const oneKey = (key: 'accountId') => j.entity('one-key', twoKeys, { key });
 void oneKey;
 // @ts-expect-error -- a union of key names is not one key
-const unionKey = (key: 'accountId' | 'other') => j.entity('union-key', twoKeys, { id: key });
+const unionKey = (key: 'accountId' | 'other') => j.entity('union-key', twoKeys, { key });
 void unionKey;
 
 // A table without `version` is rejected.
@@ -107,7 +107,7 @@ const typed = j
   .entity('typed', orders)
   .create(OrderPlaced, e => ({ total: e.data.total, status: 'placed' }))
   .on(OrderPaid, row => {
-    expectTypeOf(row).toMatchTypeOf<Replayed<typeof orders>>();
+    expectTypeOf(row).toMatchTypeOf<ReducerRow<typeof orders>>();
     expectTypeOf(row.id).toEqualTypeOf<OrderId>();
     return { status: 'paid' };
   });
@@ -118,8 +118,8 @@ void typed;
 // `profiles` has no `id`. Its key is `accountId`, a branded string.
 expectTypeOf<(typeof profile)['key']>().toEqualTypeOf<'accountId'>();
 expectTypeOf<EntityId<typeof profiles, 'accountId'>>().toEqualTypeOf<AccountId>();
-// NewRow omits the key column and `version`.
-expectTypeOf<NewRow<typeof profiles, 'accountId'>>().toEqualTypeOf<{ nick: string; moveCount?: number }>();
+// ReducerValues omits the key column and `version`.
+expectTypeOf<ReducerValues<typeof profiles, 'accountId'>>().toEqualTypeOf<{ nick: string; moveCount?: number }>();
 // Recorded events carry the branded id, in `write` results and in handlers.
 type ProfileWrite = WriteResult<typeof profiles, EventsOf<typeof profile>, Meta, 'accountId'>;
 expectTypeOf<ProfileWrite['events'][number]['entityId']>().toEqualTypeOf<AccountId>();
@@ -131,14 +131,14 @@ function badKeys() {
   j.entity('bare', profiles);
   // The named column must be a non-null string column of the table.
   // @ts-expect-error -- `moveCount` is an integer column
-  j.entity('numeric-key', profiles, { id: 'moveCount' });
+  j.entity('numeric-key', profiles, { key: 'moveCount' });
   // @ts-expect-error -- not a column of `profiles`
-  j.entity('no-such-key', profiles, { id: 'nope' });
+  j.entity('no-such-key', profiles, { key: 'nope' });
 }
 void badKeys;
 // Reducers see the key under its own name, and the event's entity id with the column's type.
 const keyed = j
-  .entity('keyed', profiles, { id: 'accountId' })
+  .entity('keyed', profiles, { key: 'accountId' })
   .create(ProfileOpened, e => {
     expectTypeOf(e.entityId).toEqualTypeOf<AccountId>();
     return { nick: e.data.nick, moveCount: 0 };
@@ -153,7 +153,7 @@ const keyed = j
 void keyed;
 // A create that sets a column on one branch only does not promise it: the `.on` row keeps it optional.
 const conditional = j
-  .entity('conditional', profiles, { id: 'accountId' })
+  .entity('conditional', profiles, { key: 'accountId' })
   .create(ProfileOpened, e => (e.data.nick === 'counted' ? { nick: e.data.nick, moveCount: 1 } : { nick: e.data.nick }))
   .on(ProfileMoved, row => {
     expectTypeOf(row.nick).toEqualTypeOf<string>();
@@ -163,7 +163,7 @@ const conditional = j
 void conditional;
 // After the first `.on`, `.create` is gone: a later create could leave out a column the `.on` was promised.
 function createAfterOn() {
-  const sealed = j.entity('sealed', profiles, { id: 'accountId' }).on(ProfileMoved, () => ({}));
+  const sealed = j.entity('sealed', profiles, { key: 'accountId' }).on(ProfileMoved, () => ({}));
   // @ts-expect-error -- `.create` is not available after `.on`
   sealed.create(ProfileOpened, e => ({ nick: e.data.nick }));
 }
@@ -174,8 +174,8 @@ const keyedProjection = j.projection('keyed-ids', profile, {
   },
 });
 void keyedProjection;
-async function keyedIds(db: Db) {
-  const journal = j.create({ tables });
+async function keyedIds(db: DbHandle) {
+  const journal = j.compose({ tables });
   await journal.write(db, profile, 'acc_1', { meta, events: () => [] });
   await journal.replay(db, profile, 'acc_1');
   // @ts-expect-error -- the id must be an AccountId, not any string
@@ -197,7 +197,7 @@ const txProjection = jt.projection('tx-typed', txOrder, {
   },
 });
 async function typedTx(db: PgliteDatabase, tx: AppTx) {
-  const journal = jt.create({ tables, projections: [txProjection] });
+  const journal = jt.compose({ tables, projections: [txProjection] });
   await journal.write(tx, txOrder, 'ord_1', {
     meta: { actorId: 'a' },
     events: (row, ctx) => {
@@ -210,8 +210,8 @@ async function typedTx(db: PgliteDatabase, tx: AppTx) {
   await journal.rerun(db, txProjection);
   // @ts-expect-error -- the root database is not the app's transaction type
   await journal.write(db, txOrder, 'ord_1', { meta: { actorId: 'a' }, events: () => [] });
-  // A plain `initJournal` keeps the structural `Db`, so a one-argument `events` still fits.
-  const plain = j.create({ tables });
+  // A plain `initJournal` keeps the structural `DbHandle`, so a one-argument `events` still fits.
+  const plain = j.compose({ tables });
   await plain.write(db, typed, 'ord_1', { meta, events: () => [] });
 }
 void typedTx;
@@ -279,9 +279,9 @@ const onFirst = j.entity('on-first', withNote).on(OrderPaid, row => {
 });
 expectTypeOf(onFirst).not.toHaveProperty('create');
 
-// --- Db constraint ----------------------------------------------------------
+// --- DbHandle constraint ----------------------------------------------------------
 
-// A PGlite database and its transaction both fit `Db`, with no relations.
+// A PGlite database and its transaction both fit `DbHandle`, with no relations.
 // Only the database fits `RootDb`: `drain` and `worker` must not run inside a transaction.
 // --- The app names its root database type: effects get it, drain and worker need it
 
@@ -313,7 +313,7 @@ const plainEffect = jt.effect('plain-db', txOrder, {
   },
 });
 async function typedDb(db: PgliteDatabase, tx: AppTx, structural: RootDb) {
-  const journal = jd.create({ tables, effects: [dbEffect] });
+  const journal = jd.compose({ tables, effects: [dbEffect] });
   await journal.drain(db);
   journal.worker(db);
   // @ts-expect-error -- a transaction is not the root database
@@ -325,7 +325,7 @@ async function typedDb(db: PgliteDatabase, tx: AppTx, structural: RootDb) {
   // @ts-expect-error -- the structural `RootDb` is not the app's database type
   journal.worker(structural);
   // A journal without `.db<…>()` still takes any root database.
-  const plain = jt.create({ tables, effects: [plainEffect] });
+  const plain = jt.compose({ tables, effects: [plainEffect] });
   await plain.drain(db);
   await plain.drain(structural);
 }
@@ -333,17 +333,17 @@ void typedDb;
 
 async function dbFits() {
   const db = drizzle({ client: new PGlite('memory://') });
-  const asDb: Db = db;
+  const asDb: DbHandle = db;
   const asRoot: RootDb = db;
   void asRoot;
-  const journal = j.create({ tables });
+  const journal = j.compose({ tables });
   await asDb.transaction(tx => {
-    const inner: Db = tx;
+    const inner: DbHandle = tx;
     void inner;
     return Promise.resolve();
   });
   await db.transaction(tx => {
-    const inner: Db = tx;
+    const inner: DbHandle = tx;
     void inner;
     // @ts-expect-error -- a transaction is not the root database
     return journal.drain(tx);
@@ -355,7 +355,7 @@ void dbFits;
 
 // The journal runs its statements against `EntityTable` and the entity's key
 // column. Extra runtime columns flow through the spread; the type only promises `version`.
-async function statements(db: Db, entity: Pick<AnyEntity, 'table' | 'keyColumn'>, id: string, patch: object) {
+async function statements(db: DbHandle, entity: Pick<AnyEntity, 'table' | 'keyColumn'>, id: string, patch: object) {
   const loaded = await db.select().from(entity.table).where(eq(entity.keyColumn, id)).for('update');
   expectTypeOf(loaded[0]).toEqualTypeOf<{ version: number } | undefined>();
   const inserted = await db

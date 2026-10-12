@@ -23,7 +23,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import type { Db } from './types.js';
+import type { DbHandle } from './types.js';
 import { isJournalError } from './errors.js';
 import {
   accountId,
@@ -45,12 +45,12 @@ import {
 
 let db: PgliteDatabase;
 let client: PGlite;
-let journal: ReturnType<typeof j.create>;
+let journal: ReturnType<typeof j.compose>;
 let next = 100;
 
 beforeAll(async () => {
   ({ db, client } = await openDb());
-  journal = j.create({ tables });
+  journal = j.compose({ tables });
 });
 
 afterAll(async () => {
@@ -97,16 +97,16 @@ describe('a named key column', () => {
       count: integer('count').notNull(),
       version: integer('version').notNull().default(0),
     });
-    expect(() => j.entity('loose', loose, { id: 'code' })).toThrow(
-      'journal: entity "loose": id column "code" must be the primary key or carry a unique constraint',
+    expect(() => j.entity('loose', loose, { key: 'code' })).toThrow(
+      'journal: entity "loose": key column "code" must be the primary key or carry a unique constraint',
     );
     // The type already rejects these; the runtime checks back it up for untyped callers.
     // @ts-expect-error -- `count` is an integer column
-    expect(() => j.entity('loose', loose, { id: 'count' })).toThrow(
-      'journal: entity "loose": id column "count" must hold a string',
+    expect(() => j.entity('loose', loose, { key: 'count' })).toThrow(
+      'journal: entity "loose": key column "count" must hold a string',
     );
     // @ts-expect-error -- not a column of `loose`
-    expect(() => j.entity('loose', loose, { id: 'nope' })).toThrow(
+    expect(() => j.entity('loose', loose, { key: 'nope' })).toThrow(
       'journal: entity "loose": table "loose" has no column "nope"',
     );
   });
@@ -121,11 +121,11 @@ describe('a named key column', () => {
     const byConstraint = pgTable('by_constraint', columns, t => [unique().on(t.code)]);
     const byIndex = pgTable('by_index', columns, t => [uniqueIndex('by_index_code').on(t.code)]);
     const byPair = pgTable('by_pair', columns, t => [unique().on(t.code, t.other)]);
-    expect(j.entity('by-constraint', byConstraint, { id: 'code' }).key).toBe('code');
-    expect(j.entity('by-index', byIndex, { id: 'code' }).key).toBe('code');
+    expect(j.entity('by-constraint', byConstraint, { key: 'code' }).key).toBe('code');
+    expect(j.entity('by-index', byIndex, { key: 'code' }).key).toBe('code');
     // Two columns together identify a row; one of them alone does not.
-    expect(() => j.entity('by-pair', byPair, { id: 'code' })).toThrow(
-      'journal: entity "by-pair": id column "code" must be the primary key or carry a unique constraint',
+    expect(() => j.entity('by-pair', byPair, { key: 'code' })).toThrow(
+      'journal: entity "by-pair": key column "code" must be the primary key or carry a unique constraint',
     );
   });
 
@@ -145,8 +145,8 @@ describe('a named key column', () => {
           .where(sql`${t.active} = 1`),
       ],
     );
-    expect(() => j.entity('partial', partial, { id: 'code' })).toThrow(
-      'journal: entity "partial": id column "code" must be the primary key or carry a unique constraint',
+    expect(() => j.entity('partial', partial, { key: 'code' })).toThrow(
+      'journal: entity "partial": key column "code" must be the primary key or carry a unique constraint',
     );
   });
 
@@ -156,8 +156,8 @@ describe('a named key column', () => {
       version: integer('version').notNull().default(0),
     });
     // @ts-expect-error -- `code` may be null
-    expect(() => j.entity('nullable', nullable, { id: 'code' })).toThrow(
-      'journal: entity "nullable": id column "code" must be not null',
+    expect(() => j.entity('nullable', nullable, { key: 'code' })).toThrow(
+      'journal: entity "nullable": key column "code" must be not null',
     );
   });
 });
@@ -228,7 +228,7 @@ describe('rows that existed before the journal', () => {
 describe('the order of .create and .on', () => {
   it('rejects a .create declared after an .on, because the .on was promised every column the creates so far set', () => {
     const sealed = j
-      .entity('late', profiles, { id: 'accountId' })
+      .entity('late', profiles, { key: 'accountId' })
       .create(ProfileOpened, e => ({ nick: e.data.nick, moveCount: 0 }))
       .on(ProfileMoved, row => ({ moveCount: row.moveCount + 1 }));
     expect(() =>
@@ -280,7 +280,7 @@ describe('one event with a create and an on reducer', () => {
   });
 
   it('rejects a second reducer of the same mode for one event at definition time', () => {
-    const base = j.entity('twice', profiles, { id: 'accountId' });
+    const base = j.entity('twice', profiles, { key: 'accountId' });
     expect(() =>
       base.create(ProfileOpened, e => ({ nick: e.data.nick })).create(ProfileOpened, e => ({ nick: e.data.nick })),
     ).toThrow('journal: entity "twice" already declares a create reducer for "ProfileOpened"');
@@ -396,11 +396,11 @@ describe('a uuid key column', () => {
 const typed = (sqlType: string) => customType<{ data: string; driverData: string }>({ dataType: () => sqlType });
 
 // Wraps a transaction so the events insert reads back another entity_id than the one stored.
-const changing = (tx: Db): Db =>
+const changing = (tx: DbHandle): DbHandle =>
   new Proxy(tx, {
     get(target, prop, receiver) {
       if (prop === 'transaction') {
-        return <T>(run: (sp: Db) => Promise<T>) => target.transaction(sp => run(changing(sp)));
+        return <T>(run: (sp: DbHandle) => Promise<T>) => target.transaction(sp => run(changing(sp)));
       }
       if (prop === 'insert') {
         return (table: PgTable) => {
@@ -444,7 +444,7 @@ describe('the key column type', () => {
 
   it('refuses a citext key and names the entity, column and type', () => {
     expect(() => j.entity('folded', tableWith('folded', 'citext'))).toThrow(
-      'journal: entity "folded": id column "id" has SQL type "citext"; the key must be text, varchar or uuid, because other types can treat two different strings as the same key',
+      'journal: entity "folded": key column "id" has SQL type "citext"; the key must be text, varchar or uuid, because other types can treat two different strings as the same key',
     );
   });
 
@@ -453,7 +453,7 @@ describe('the key column type', () => {
       id: char('id', { length: 36 }).primaryKey(),
       version: integer('version').notNull(),
     });
-    expect(() => j.entity('padded', padded)).toThrow(/entity "padded": id column "id" has SQL type "char\(36\)"/);
+    expect(() => j.entity('padded', padded)).toThrow(/entity "padded": key column "id" has SQL type "char\(36\)"/);
   });
 
   it('accepts text, varchar, varchar(n) and a branded varchar(256), because these are native string columns', () => {
@@ -481,7 +481,7 @@ describe('the key column type', () => {
     });
     const lowered = pgTable('lowered', { id: lowering('id').primaryKey(), version: integer('version').notNull() });
     const message =
-      'journal: entity "lowered": id column "id" is a custom column type; a key must be a plain text, varchar or uuid column, because a custom type\'s mapping can change the string';
+      'journal: entity "lowered": key column "id" is a custom column type; a key must be a plain text, varchar or uuid column, because a custom type\'s mapping can change the string';
     expect(() => j.entity('lowered', lowered)).toThrow(message);
     expect(() => j.entity('brand-varchar', tableWith('brand_varchar', 'varchar(256)'))).toThrow(/custom column type/);
     expect(() => j.entity('brand-text', tableWith('brand_text', ' TEXT '))).toThrow(/custom column type/);

@@ -2,22 +2,23 @@ export { initJournal } from './journal.js';
 export type {
   Command,
   CommandContext,
+  CommandRunner,
   Journal,
-  JournalInit,
+  JournalDefinitions,
   ReplayResult,
   VerifyResult,
-  WriteEvents,
+  NextEvents,
   WriteInput,
   WriteResult,
-} from './journal.js';
+} from './api.js';
 export { JournalError, isJournalError } from './errors.js';
 export type { JournalErrorCode } from './errors.js';
-export type { CreatedKeys, EntityBuilder, OnRow, SealedEntityBuilder } from './entity.js';
+export type { GuaranteedCreateKeys, EntityBuilder, OnReducerRow, OnOnlyEntityBuilder } from './entity.js';
 export type {
   AnyEntity,
   AnyEventDef,
   CreateReducer,
-  Db,
+  DbHandle,
   Effect,
   EffectContext,
   EffectHandlers,
@@ -30,7 +31,7 @@ export type {
   EventsOf,
   IdTable,
   KeyColumn,
-  NewRow,
+  ReducerValues,
   OnReducer,
   Patch,
   Pending,
@@ -40,10 +41,10 @@ export type {
   Recorded,
   RecordedOf,
   Reducers,
-  Replayed,
+  ReducerRow,
   RootDb,
   Row,
-  Transaction,
-  Worker,
+  TransactionSource,
+  JournalWorker,
 } from './types.js';
 export type { JournalTables } from './pg.js';

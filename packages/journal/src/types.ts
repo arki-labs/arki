@@ -10,25 +10,25 @@ import type { z } from 'zod';
  * function type. This is how a registry can hold handlers written for one
  * event type under a common `Recorded` parameter without a cast.
  */
-export type Fn<Args extends unknown[], R> = { bivarianceHack(...args: Args): R }['bivarianceHack'];
+export type BivariantFn<Args extends unknown[], R> = { bivarianceHack(...args: Args): R }['bivarianceHack'];
 
 type AnyDb = PgAsyncDatabase<PgQueryResultHKT, AnyRelations>;
+
+/** A key's longest id, and whether the key column or the journal's own `entity_id` column sets it. */
+export type KeyLimit = { readonly max: number; readonly source: 'column' | 'journal' };
 
 /**
  * The Drizzle surface the journal needs. Structural: a Drizzle database and a
  * Drizzle transaction both fit. The journal never touches `db.query`, so the
  * app's relations do not matter here.
  */
-/** A key's longest id, and whether the key column or the journal's own `entity_id` column sets it. */
-export type KeyLimit = { readonly max: number; readonly source: 'column' | 'journal' };
-
-export type Db = {
+export type DbHandle = {
   readonly select: AnyDb['select'];
   readonly insert: AnyDb['insert'];
   readonly update: AnyDb['update'];
   readonly delete: AnyDb['delete'];
   readonly execute: AnyDb['execute'];
-  transaction<T>(run: (tx: Db) => Promise<T>): Promise<T>;
+  transaction<T>(run: (tx: DbHandle) => Promise<T>): Promise<T>;
 };
 
 /**
@@ -36,15 +36,15 @@ export type Db = {
  * not fit. `drain` and `worker` need this: inside a transaction their claim
  * would be a savepoint and handlers would run before the outer commit.
  */
-export type RootDb = Db & { readonly rollback?: undefined };
+export type RootDb = DbHandle & { readonly rollback?: undefined };
 
 /**
  * A database or transaction whose nested transactions have type `Tx`. The
- * app's Drizzle transaction type fits `Transaction<itself>`: a savepoint has
- * the same type as its parent. The root database fits `Transaction<AppTx>`.
- * `Db` fits `Transaction<Db>`, which is the default everywhere.
+ * app's Drizzle transaction type fits `TransactionSource<itself>`: a savepoint has
+ * the same type as its parent. The root database fits `TransactionSource<AppTx>`.
+ * `DbHandle` fits `TransactionSource<DbHandle>`, which is the default everywhere.
  */
-export type Transaction<Tx> = { transaction<T>(run: (tx: Tx) => Promise<T>): Promise<T> } & Db;
+export type TransactionSource<Tx> = { transaction<T>(run: (tx: Tx) => Promise<T>): Promise<T> } & DbHandle;
 
 /** A column that can hold an entity's key: a non-null string column. */
 export type KeyColumn = AnyPgColumn<{ data: string; notNull: true }>;
@@ -85,14 +85,17 @@ export type KeyName<Tbl extends EntityTable> = string &
 type IsUnion<T, U = T> = T extends unknown ? ([U] extends [T] ? false : true) : never;
 /**
  * `Key` when it is one property name, `never` for a union. A union key would make
- * `NewRow` omit every member, so a reducer could leave required columns unset.
+ * `ReducerValues` omit every member, so a reducer could leave required columns unset.
  */
-export type OneKey<Key extends string> = IsUnion<Key> extends true ? never : Key;
+export type SingleKey<Key extends string> = IsUnion<Key> extends true ? never : Key;
 
 /** The current state of one entity. A plain Drizzle select row. */
 export type Row<Tbl extends EntityTable> = Tbl['$inferSelect'];
 /** What reducers return. The library sets the key column and `version`. */
-export type NewRow<Tbl extends EntityTable, Key extends string = 'id'> = Omit<Tbl['$inferInsert'], Key | 'version'>;
+export type ReducerValues<Tbl extends EntityTable, Key extends string = 'id'> = Omit<
+  Tbl['$inferInsert'],
+  Key | 'version'
+>;
 /** The key type of an entity table, as the key column declares it. */
 export type EntityId<Tbl extends EntityTable, Key extends string = 'id'> = Extract<
   Row<Tbl>[Key & keyof Row<Tbl>],
@@ -103,7 +106,7 @@ export type EntityId<Tbl extends EntityTable, Key extends string = 'id'> = Extra
  * and `version`. Columns a reducer leaves out are absent here even when the
  * database would fill them with a default.
  */
-export type Replayed<Tbl extends EntityTable, Key extends string = 'id'> = NewRow<Tbl, Key> &
+export type ReducerRow<Tbl extends EntityTable, Key extends string = 'id'> = ReducerValues<Tbl, Key> &
   Readonly<Record<Key, EntityId<Tbl, Key>>> & { readonly version: number };
 
 /** A validated event that has not been written yet. */
@@ -134,7 +137,10 @@ export type Recorded<T extends string = string, Data = unknown, Meta = unknown, 
  * An event definition. Calling it validates the data and returns a pending
  * event. `type` and `schema` are read by the entity builder and by replay.
  */
-export type EventDef<T extends string, S extends z.ZodType> = Fn<[data: z.input<S>], Pending<T, z.output<S>>> & {
+export type EventDef<T extends string, S extends z.ZodType> = BivariantFn<
+  [data: z.input<S>],
+  Pending<T, z.output<S>>
+> & {
   readonly type: T;
   readonly schema: S;
 };
@@ -149,21 +155,21 @@ export type RecordedOf<D, Meta, Id extends string = string> = PendingOf<D> & Rec
  * What an `.on` reducer returns: the columns that changed. `null` deletes the
  * row. A key set to `undefined` means "unchanged".
  */
-export type Patch<Tbl extends EntityTable, Key extends string = 'id'> = Partial<NewRow<Tbl, Key>>;
+export type Patch<Tbl extends EntityTable, Key extends string = 'id'> = Partial<ReducerValues<Tbl, Key>>;
 
 /** A create reducer receives no row. It builds the first row from the event. */
-export type CreateReducer<Tbl extends EntityTable, Meta, Key extends string = 'id'> = Fn<
+export type CreateReducer<Tbl extends EntityTable, Meta, Key extends string = 'id'> = BivariantFn<
   [event: Recorded<string, unknown, Meta>],
-  NewRow<Tbl, Key>
+  ReducerValues<Tbl, Key>
 >;
 /**
  * An `.on` reducer may receive a row loaded from the table or a row rebuilt in
  * memory by an earlier reducer in the same write or replay. Both are
- * `Replayed` at runtime; the union is here because TypeScript cannot relate a
+ * `ReducerRow` at runtime; the union is here because TypeScript cannot relate a
  * generic select row to the insert shape.
  */
-export type OnReducer<Tbl extends EntityTable, Meta, Key extends string = 'id'> = Fn<
-  [row: Row<Tbl> | Replayed<Tbl, Key>, event: Recorded<string, unknown, Meta>],
+export type OnReducer<Tbl extends EntityTable, Meta, Key extends string = 'id'> = BivariantFn<
+  [row: Row<Tbl> | ReducerRow<Tbl, Key>, event: Recorded<string, unknown, Meta>],
   Patch<Tbl, Key> | null
 >;
 /** The reducers declared for one event type. Both may be set: the fold picks by state. */
@@ -208,22 +214,22 @@ export type EntityIdOf<E> = E extends {
   : never;
 
 /** Keys are event types; each handler sees the event typed for that key. */
-export type ProjectionHandlers<E, Meta, Tx = Db> = {
-  readonly [D in EventsOf<E> as D['type']]?: Fn<[tx: Tx, event: RecordedOf<D, Meta, EntityIdOf<E>>], unknown>;
+export type ProjectionHandlers<E, Meta, Tx = DbHandle> = {
+  readonly [D in EventsOf<E> as D['type']]?: BivariantFn<[tx: Tx, event: RecordedOf<D, Meta, EntityIdOf<E>>], unknown>;
 };
 export type EffectHandlers<E, Meta, AppDb = RootDb> = {
-  readonly [D in EventsOf<E> as D['type']]?: Fn<
+  readonly [D in EventsOf<E> as D['type']]?: BivariantFn<
     [event: RecordedOf<D, Meta, EntityIdOf<E>>, ctx: EffectContext<AppDb>],
     unknown
   >;
 };
 
 /** Inline handler. Runs inside the write's transaction. */
-export type Projection<Meta = unknown, Tx = Db> = {
+export type Projection<Meta = unknown, Tx = DbHandle> = {
   readonly name: string;
   readonly entities: readonly AnyEntity<Meta>[];
   readonly types: ReadonlySet<string>;
-  readonly run: Fn<[tx: Tx, event: Recorded<string, unknown, Meta>], Promise<void>>;
+  readonly run: BivariantFn<[tx: Tx, event: Recorded<string, unknown, Meta>], Promise<void>>;
 };
 
 /** `db` is the root database that was given to `drain` or `worker`: the same object. */
@@ -238,10 +244,10 @@ export type Effect<Meta = unknown, AppDb = RootDb> = {
   readonly name: string;
   readonly entities: readonly AnyEntity<Meta>[];
   readonly types: ReadonlySet<string>;
-  readonly run: Fn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb>], Promise<void>>;
+  readonly run: BivariantFn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb>], Promise<void>>;
 };
 
 export type EntityInfo = { readonly kind: string; readonly table: string; readonly events: readonly string[] };
 
 /** `wake()` runs a drain pass now instead of at the next poll. It does nothing unless the worker is running. */
-export type Worker = { start(): Promise<void>; stop(): Promise<void>; wake(): void };
+export type JournalWorker = { start(): Promise<void>; stop(): Promise<void>; wake(): void };
