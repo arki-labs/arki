@@ -201,3 +201,23 @@ export function parseNumber(value: number): Parsed {
 export function assertNonZero(value: Units): void {
   if (value === 0 || value === 0n) throw new DivisionByZeroError('Division by zero');
 }
+
+/** Greatest common divisor of two non-negative values, in canonical form. */
+export function gcdUnits(a: Units, b: Units): Units {
+  if (typeof a === 'number' && typeof b === 'number') {
+    let x = a;
+    let y = b;
+    while (y !== 0) [x, y] = [y, x % y];
+    return x;
+  }
+  let x = BigInt(a);
+  let y = BigInt(b);
+  while (y !== 0n) [x, y] = [y, x % y];
+  return canon(x);
+}
+
+/** `a / b` for a `b` known to divide `a` exactly. */
+export function divExact(a: Units, b: Units): Units {
+  if (typeof a === 'number' && typeof b === 'number') return a / b + 0;
+  return canon(BigInt(a) / BigInt(b));
+}

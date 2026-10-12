@@ -12,13 +12,22 @@ import Big from 'big.js';
 import currency from 'currency.js';
 import Dinero from 'dinero.js';
 
+import { createConverter, ratesFrom } from '../dist/exchange.js';
 import { formatMoney } from '../dist/format.js';
 import * as m from '../dist/index.js';
+import { createMoneyParser } from '../dist/parse.js';
+import { toStripeAmount } from '../dist/stripe.js';
 
 const a = m.money('1234.56', 'EUR');
 const b = m.money('98.76', 'EUR');
 const vat = m.factor('1.0825');
 const huge = m.Money.fromMinor(2n ** 60n, 'EUR');
+const converter = createConverter(ratesFrom({ base: 'EUR', rates: { USD: '1.0832', GBP: '0.8571' } }), {
+  inverse: true,
+  via: 'EUR',
+});
+const usd = m.money('1234.56', 'USD');
+const deParser = createMoneyParser('EUR', { locale: 'de-DE' });
 const prices = Array.from({ length: 1000 }, (_, i) => m.Money.fromMinor(i * 7 + 1, 'EUR'));
 
 const da = Dinero({ amount: 123_456, currency: 'EUR' });
@@ -80,6 +89,20 @@ const groups = [
     [
       ['@arki/money sum()', () => m.sum(prices)],
       ['@arki/money reduce(plus)', () => prices.reduce((acc, p) => acc.plus(p))],
+    ],
+  ],
+  [
+    'convert and round once',
+    [
+      ['@arki/money direct EUR→USD', () => converter.convert(a, 'USD', { rounding: 'halfEven' })],
+      ['@arki/money cross USD→GBP via EUR', () => converter.convert(usd, 'GBP', { rounding: 'halfEven' })],
+    ],
+  ],
+  [
+    'parse and payment units',
+    [
+      ['@arki/money parse de-DE (bound parser)', () => deParser.parse('1.234,56 €')],
+      ['@arki/money toStripeAmount', () => toStripeAmount(a)],
     ],
   ],
   [

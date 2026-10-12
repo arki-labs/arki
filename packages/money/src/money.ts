@@ -684,3 +684,9 @@ export function max<const C extends string>(first: Money<C>, ...rest: Money<C>[]
   for (const item of rest) if (item.gt(best)) best = item;
   return best;
 }
+
+/** @internal Reads an amount or factor as an exact fraction whose denominator is positive. */
+export function toFraction(value: FactorInput): [numerator: Units, denominator: Units] {
+  read(value);
+  return [num, den];
+}

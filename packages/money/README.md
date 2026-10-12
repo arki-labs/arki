@@ -96,9 +96,55 @@ const de = createMoneyFormatter({ locale: 'de-DE' }); // binds options once, for
 
 Formatting passes the amount to `Intl` as exact text, so digits past 2^53 survive. If the runtime lacks a feature you asked for (Hermes on iOS lacks some), it throws `UnsupportedFeatureError` instead of printing something else.
 
+## Reading what people type
+
+```ts
+import { createMoneyParser, parseMoney } from '@arki/money/parse';
+
+parseMoney('1.234,56 €', 'EUR', { locale: 'de-DE' }); // 1234.56 EUR
+parseMoney('₹1,23,456.78', 'INR', { locale: 'en-IN' }); // 123456.78 INR
+parseMoney('($1,234.56)', 'USD'); // -1234.56 USD
+parseMoney('$10', 'CAD'); // 10.00 CAD — you say which currency, so '$' is never guessed
+parseMoney('1,23,4', 'USD'); // throws NumberFormatError: grouping does not match the locale
+
+const form = createMoneyParser('EUR', { locale: 'de-DE' }); // reads the locale once
+form.tryParse('12,505 €'); // undefined — too many decimals, for form validation
+```
+
+Separators, digits, minus sign and currency symbols come from `Intl` for the locale. Parsing is strict: wrong grouping, the other locale's decimal separator, two signs, mixed digit scripts or a different currency's symbol throw instead of being guessed. Text without grouping (`'1234.5'`) is always accepted. On runtimes without `formatToParts` (Hermes on iOS), pass `symbols: { decimal: ',', group: '.' }` instead of a locale.
+
+## Converting currencies
+
+```ts
+import { convert, createConverter, exchangeRate, ratesFrom } from '@arki/money/exchange';
+
+const rates = ratesFrom({ base: 'EUR', rates: { USD: '1.0832', GBP: '0.8571' } });
+const fx = createConverter(rates, { inverse: true, via: 'EUR' });
+fx.convert(money('1234.56', 'USD'), 'GBP', { rounding: 'halfEven' }); // 976.87 GBP, USD → EUR → GBP rounded once
+fx.rate('USD', 'GBP').toString(); // 'USD/GBP 8571/10832'
+
+convert(money(100, 'EUR'), exchangeRate('EUR', 'USD', '1.0832')); // 108.32 USD
+```
+
+Rates are exact fractions, never floats, so inverse and cross rates add no error. A conversion rounds once, at the end; converting in two rounded steps above would give 976.86. Reversed rates (`inverse`) and routing through a base currency (`via`) are opt-in, because a bid rate reversed is not an ask rate. There is no network code: fetch rates from wherever you trust and pass them in.
+
+## Payment providers
+
+```ts
+import { fromStripeAmount, toStripe, toStripeAmount } from '@arki/money/stripe';
+
+toStripe(money('10.99', 'EUR')); // { amount: 1099, currency: 'eur' }
+toStripeAmount(money(5, 'ISK')); // 500 — Stripe sends ISK with two decimals that are always 00
+toStripeAmount(money('10.50', 'MGA')); // throws ProviderAmountError — MGA is zero-decimal at Stripe
+toStripeAmount(money('10.45', 'HUF'), 'payout'); // throws — HUF payouts must be whole forints
+fromStripeAmount(1099, 'usd'); // 10.99 USD
+```
+
+Rules come from docs.stripe.com/currencies, checked on 2026-10-12 (`STRIPE_RULES_VERSION`). Stripe documents no rule for currencies with 3 or 4 decimals, so those throw instead of being guessed. For other providers, describe their units with `toProviderUnits(money, { scale, step })` and `fromProviderUnits` from `@arki/money/provider`.
+
 ## Errors
 
-Every deliberate failure extends `MathError` from `@arki/math`, so one `instanceof` catches both libraries. Money-only errors extend `MoneyError`: `CurrencyMismatchError`, `UnknownCurrencyError`. Shared ones: `RoundingNecessaryError`, `DivisionByZeroError`, `InvalidArgumentError`, `NumberFormatError`, `NumericRangeError`, `ResourceLimitError`, `EmptyDataError`, `UnsupportedFeatureError`.
+Every deliberate failure extends `MathError` from `@arki/math`, so one `instanceof` catches both libraries. Money-only errors extend `MoneyError`: `CurrencyMismatchError`, `UnknownCurrencyError`, `ExchangeRateError`, `ProviderAmountError`. Shared ones: `RoundingNecessaryError`, `DivisionByZeroError`, `InvalidArgumentError`, `NumberFormatError`, `NumericRangeError`, `ResourceLimitError`, `EmptyDataError`, `UnsupportedFeatureError`.
 
 ## Entry points
 
@@ -109,6 +155,10 @@ Every deliberate failure extends `MathError` from `@arki/math`, so one `instance
 | `@arki/money/format`   | `formatMoney`, `formatMoneyToParts`, `createMoneyFormatter`                    |
 | `@arki/money/exact`    | `toDecimal`, `toRational` bridges to `@arki/math`                              |
 | `@arki/money/errors`   | Error classes                                                                  |
+| `@arki/money/parse`    | `parseMoney`, `createMoneyParser`                                              |
+| `@arki/money/exchange` | `exchangeRate`, `ratesFrom`, `convert`, `createConverter`, `Converter`         |
+| `@arki/money/provider` | `toProviderUnits`, `fromProviderUnits`                                         |
+| `@arki/money/stripe`   | `toStripe`, `toStripeAmount`, `fromStripeAmount`, `stripeRule`                 |
 
 ## Performance
 
@@ -122,7 +172,7 @@ Every deliberate failure extends `MathError` from `@arki/math`, so one `instance
 | compare                                     |         5.7 |         11.8 |           — |   13.6 |
 | format en-US                                |         557 |        20725 |         674 |      — |
 
-Amounts past 2^53 switch to `bigint` and stay exact; adding them costs about 29 ns.
+Amounts past 2^53 switch to `bigint` and stay exact; adding them costs about 29 ns. Converting with a cached rate takes about 170 ns, parsing German input about 1.1 µs, and `toStripeAmount` about 80 ns.
 
 ## Runtime support
 

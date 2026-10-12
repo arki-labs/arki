@@ -53,3 +53,9 @@ export class UnknownCurrencyError extends MoneyError {
     this.code = code;
   }
 }
+
+/** No exchange rate is known for the pair, or a rate is invalid (zero, negative, conflicting). */
+export class ExchangeRateError extends MoneyError {}
+
+/** An amount cannot be expressed in a payment provider's units (fraction it does not accept, wrong step, unsupported currency). */
+export class ProviderAmountError extends MoneyError {}
