@@ -64,7 +64,8 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
  *   operations at once on one transaction, `drain` inside a transaction).
  * - Command input, event data or `meta` that fails its schema is a `ZodError`.
  * - An error thrown by a command handler, an `events` function, a reducer or a
- *   projection passes through unchanged.
+ *   projection passes through unchanged. A rejected business rule is one of
+ *   these: a `CommandError`, below.
  * An error thrown by an effect is caught by `drain` and stored on the job.
  */
 export class JournalError extends Error {
@@ -87,4 +88,36 @@ export class JournalError extends Error {
 
 export function isJournalError(error: unknown, code?: JournalErrorCode): error is JournalError {
   return error instanceof JournalError && (code === undefined || error.code === code);
+}
+
+/** The kind of answer a rejected request gets. The names are the usual HTTP ones: 404, 400, 403, 409. */
+export type CommandErrorCode = 'NOT_FOUND' | 'BAD_REQUEST' | 'FORBIDDEN' | 'CONFLICT';
+
+/**
+ * A business rule rejected the request. App code throws it: a command handler,
+ * or the `events` function of a `write`. The code names the kind of answer and
+ * the message is written for the client.
+ *
+ * It is NOT a `JournalError`. A `JournalError` is the library's own failure: a
+ * row or a history it refuses. A `CommandError` is the app's rule saying no.
+ * The library never throws one and never changes one: like every error thrown
+ * by app code, it leaves `journal.run` as the same instance, after the
+ * command's transaction rolled back.
+ *
+ * Nothing here knows HTTP. The host maps the code to its own transport:
+ * `@arki/journal/orpc` does it for oRPC, and any other host matches on the
+ * code with `isCommandError`.
+ */
+export class CommandError extends Error {
+  readonly code: CommandErrorCode;
+
+  constructor(code: CommandErrorCode, message: string) {
+    super(message);
+    this.name = 'CommandError';
+    this.code = code;
+  }
+}
+
+export function isCommandError(error: unknown, code?: CommandErrorCode): error is CommandError {
+  return error instanceof CommandError && (code === undefined || error.code === code);
 }

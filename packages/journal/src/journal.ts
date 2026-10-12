@@ -132,7 +132,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
   }
 
   // `journal.drain`, `journal.wake` and `journal.run` are read from the journal object on each
-  // call, so the worker loop, `run` and an effect's `ctx.run` always use the methods the object holds.
+  // call, so the worker loop, `run`, a bound runner and an effect's `ctx.run` always use the methods the object holds.
   const history = createHistory<Meta>({ metaSchema, tables });
   const { write, writeWithValidatedMeta } = createWriter<Meta, Tx>({
     metaSchema,
@@ -155,6 +155,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
   const journal: Journal<Meta, Tx, AppDb> = {
     write: (tx, entity, id, input) => write(tx, entity, id, input),
     run: (source, command, input, meta) => run(source, command, input, meta),
+    bind: (source, meta) => (command, input) => journal.run(source, command, input, meta),
     replay: (db, entity, id, opts) => history.replay(db, entity, id, opts),
     verify: (db, entity, id) => history.verify(db, entity, id),
     repair: (db, entity, id) => history.repair(db, entity, id),

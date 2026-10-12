@@ -12,8 +12,8 @@ export type {
   WriteInput,
   WriteResult,
 } from './api.js';
-export { JournalError, isJournalError } from './errors.js';
-export type { JournalErrorCode } from './errors.js';
+export { CommandError, JournalError, isCommandError, isJournalError } from './errors.js';
+export type { CommandErrorCode, JournalErrorCode } from './errors.js';
 export type { GuaranteedCreateKeys, EntityBuilder, OnReducerRow, OnOnlyEntityBuilder } from './entity.js';
 export type {
   AnyEntity,

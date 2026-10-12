@@ -1,0 +1,56 @@
+/**
+ * `@orpc/server` adapter: what an oRPC client sees when a command fails.
+ *
+ * - `toORPCError(error)` maps one error.
+ * - `commandErrors()` is the middleware that maps whatever a procedure throws.
+ *
+ * `@orpc/server` is an optional peer. Import this module only in an app that
+ * serves oRPC. May import `errors` only; this is the one file that may import
+ * `@orpc/server`.
+ */
+import { ORPCError, os } from '@orpc/server';
+
+import { CommandError, isJournalError } from './errors.js';
+
+/**
+ * Two requests changed the same entity at the same time and this one lost.
+ * Nothing was written, so the client can send the request again. The journal's
+ * own message names the entity kind and id; the client does not get those.
+ */
+const CONFLICT_MESSAGE = 'This was changed by another request at the same time. Please try again.';
+
+/**
+ * - A `CommandError` becomes the `ORPCError` with the same code and message.
+ * - A `JournalError` with code `CONFLICT` becomes an `ORPCError('CONFLICT')`, a 409 the client can retry.
+ * - Anything else is returned unchanged: the app decides what it means.
+ *
+ * The original error is kept as `cause`, for the server's logs. oRPC does not send `cause` to the client.
+ */
+export function toORPCError(error: unknown): unknown {
+  if (error instanceof CommandError) {
+    return new ORPCError(error.code, { message: error.message, cause: error });
+  }
+  if (isJournalError(error, 'CONFLICT')) {
+    return new ORPCError('CONFLICT', { message: CONFLICT_MESSAGE, cause: error });
+  }
+  return error;
+}
+
+/**
+ * The middleware form of `toORPCError`. Add it once to the app's procedure
+ * builders, and no procedure needs a try/catch around a command.
+ *
+ * Order: put it INSIDE the app's own error middleware, so after it in the
+ * chain: `os.use(appErrors).use(commandErrors())`. A rejected rule is then
+ * already an `ORPCError` when the app's middleware sees it, and passes. Placed
+ * before it, the app's middleware sees a plain error first and answers 500.
+ */
+export function commandErrors() {
+  return os.middleware(async ({ next }) => {
+    try {
+      return await next();
+    } catch (error) {
+      throw toORPCError(error);
+    }
+  });
+}

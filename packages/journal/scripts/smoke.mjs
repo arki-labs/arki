@@ -7,7 +7,7 @@
 import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
-import { initJournal, isJournalError, JournalError } from '../dist/index.js';
+import { CommandError, initJournal, isCommandError, isJournalError, JournalError } from '../dist/index.js';
 import { journalTables } from '../dist/pg.js';
 
 const j = initJournal({ meta: z.object({ actorId: z.string() }) });
@@ -48,6 +48,8 @@ const checks = [
     '{"kind":"order","table":"orders","events":["OrderPlaced","OrderPaid"]}',
   ],
   ['error code', isJournalError(new JournalError('NO_ROW', 'order', 'x'), 'NO_ROW'), true],
+  ['rejected rule code', isCommandError(new CommandError('NOT_FOUND', 'x'), 'NOT_FOUND'), true],
+  ['the door binds without a database call', typeof journal.bind({}, { actorId: 'system' }), 'function'],
   ['tables', Object.keys(journalTables()).join(','), 'events,jobs'],
 ];
 

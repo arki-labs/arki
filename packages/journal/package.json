@@ -42,6 +42,11 @@
       "import": "./dist/dot.js",
       "default": "./dist/dot.js"
     },
+    "./orpc": {
+      "types": "./dist/orpc.d.ts",
+      "import": "./dist/orpc.js",
+      "default": "./dist/orpc.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -80,6 +85,7 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@electric-sql/pglite": "catalog:",
+    "@orpc/server": "catalog:backend",
     "@testcontainers/postgresql": "catalog:testing",
     "@types/node": "catalog:node",
     "@types/pg": "catalog:drizzle",
@@ -87,10 +93,14 @@
     "pg": "catalog:drizzle"
   },
   "peerDependencies": {
-    "@arki/dot": "workspace:*"
+    "@arki/dot": "workspace:*",
+    "@orpc/server": "catalog:backend"
   },
   "peerDependenciesMeta": {
     "@arki/dot": {
+      "optional": true
+    },
+    "@orpc/server": {
       "optional": true
     }
   },

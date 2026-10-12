@@ -4,10 +4,11 @@ A journal keeps two things and writes them together.
 Every change is one immutable row in `journal_events`.
 Each entity also has a normal row in its own Drizzle table.
 A command is the way to write: `j.command` defines one, `journal.run` runs it.
+`journal.bind` is the door for a request or a job: it fixes the database and the actor once.
 Inside the command, `write` validates the event data, appends the events, runs the reducers, saves the row, runs inline projections and queues jobs for async effects, all in one transaction.
 Reads are plain Drizzle queries. Replay exists for checks and repair, not for reading.
 
-Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions), `@arki/journal/dot` (optional `@arki/dot` plugin and feature slice, see Dot).
+Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions), `@arki/journal/dot` (optional `@arki/dot` plugin and feature slice, see Dot), `@arki/journal/orpc` (optional oRPC error mapping, see Rejected rules).
 
 **Agents: start at [`llms.txt`](llms.txt).** Then open the part of the [agent guide](docs/agent-guide.md) that fits the task:
 
@@ -65,8 +66,8 @@ export const payOrder = j.command(
   z.object({ orderId: orderIdSchema, amount: z.int().positive() }),
   (input, { write }) =>
     write(order, input.orderId, row => {
-      if (!row) throw new NotFoundError('order', input.orderId);
-      if (row.status !== 'placed') throw new InvalidStateError(`order ${input.orderId} is ${row.status}`);
+      if (!row) throw new CommandError('NOT_FOUND', 'Order not found');
+      if (row.status !== 'placed') throw new CommandError('CONFLICT', `Order is already ${row.status}`);
       return [OrderPaid({ amount: input.amount })]; // [] means: write nothing
     }),
 );
@@ -95,10 +96,14 @@ export const tables = journalTables(); // or journalTables(pgSchema('app'))
 // src/journal.root.ts — the one place that lists handlers.
 export const journal = j.compose({ tables, projections: [customerStats], effects: [orderMail(mailer)] });
 
-// A procedure. The schema is reused, the actor comes from the session.
+// The request context binds the door once: the database and the signed-in actor.
+export const createContext = (user: User) => ({ user, runCommand: journal.bind(db, { actorId: user.id }) });
+
+// A procedure. The schema is reused. A rule that rejects the request throws `CommandError`;
+// `commandErrors()` from `@arki/journal/orpc`, on the builder, answers the client with its code.
 export const pay = protectedProcedure
   .input(payOrder.input.pick({ orderId: true, amount: true }))
-  .handler(({ context, input }) => journal.run(db, payOrder, input, { actorId: context.user.id }));
+  .handler(({ context, input }) => context.runCommand(payOrder, input));
 
 // Boot. One worker per process runs the async lane. Root database only, never a transaction.
 // `journal.run(db, ...)` wakes it after each commit that queued a job.
@@ -117,6 +122,8 @@ await worker.start();
 
 `journal.run(source, command, input, meta)` parses `input` with the command's schema (`parseAsync`; a `ZodError` passes through) and `meta` with the app schema, then calls the handler inside `source.transaction(...)`. The root database opens a transaction. A transaction opens a savepoint, so the caller still decides the commit. It returns what the handler returns. Errors pass through unchanged.
 
+`journal.bind(source, meta)` is the door. It returns `(command, input) => journal.run(source, command, input, meta)`, so a request context or a job fixes the database and the actor once, and every call site passes only the command and its input. The caller still gives `meta`: the library never picks an actor. `source` follows the rules of `run`: a root database commits and wakes, a transaction joins and leaves the commit to the caller. `meta` is parsed on every call, not once at bind time. A bound runner is then exactly `journal.run`: a default in the meta schema is new for each command, and a bad `meta` rejects the call. The runner has the type `CommandRunner`, the type of a command context's `run`, so it can be passed to code that takes one.
+
 Await every `write` and `run` before the handler returns. `run` waits for any operation still running, then fails the command and rolls back, because a transaction must not close with work in flight. If the handler threw, the handler's own error is reported. The low-level `journal.write` inside your own `db.transaction(...)` has no such guard: await every journal call before your transaction callback returns.
 
 Inside a command, an uncaught failure anywhere rolls back everything the command did. A child failure the parent catches rolls back only that child. A command may touch no entity, one, or several; it may return any value. Command input is not stored, so it may hold Dates and transforms. Event data and `meta` keep the storage rules below.
@@ -125,17 +132,17 @@ The types are all inferred: the handler's `input` from the schema, `journal.run`
 
 ### Where commands run from
 
-The same `journal.run` serves every trigger. Checking who the caller is stays application code; business rules live in the command.
+The same `journal.run` serves every trigger. `journal.bind(db, meta)` is the same call with `db` and `meta` fixed. Checking who the caller is stays application code; business rules live in the command.
 
-| Trigger   | Call                                                              | Notes                                                       |
-| --------- | ----------------------------------------------------------------- | ----------------------------------------------------------- |
-| Procedure | `journal.run(db, command, input, { actorId: user.id })`           | Bind the actor once, in request context.                    |
-| Job       | `journal.run(db, command, payload, job.meta)`                     | The queue owns retries.                                     |
-| Schedule  | `journal.run(db, command, input, { actorId: 'system' })`          | A clear system actor; `meta` keeps its schema.              |
-| Webhook   | `journal.run(db, command, mappedInput, trustedMeta)`              | The adapter verifies the signature and maps the payload.    |
-| Effect    | `ctx.run(command, input, { actorId: 'system' })`                  | See below. An effect never imports the journal root.        |
-| Script    | `journal.run(db, command, input, { actorId: 'script:backfill' })` | One call per item; each is its own transaction.             |
-| Test      | `journal.run(db, command, input, meta)`                           | No procedure, no HTTP. The same validation and transaction. |
+| Trigger   | Call                                                              | Notes                                                                     |
+| --------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Procedure | `context.runCommand(command, input)`                              | The request context binds once: `journal.bind(db, { actorId: user.id })`. |
+| Job       | `journal.run(db, command, payload, job.meta)`                     | The queue owns retries.                                                   |
+| Schedule  | `journal.run(db, command, input, { actorId: 'system' })`          | A clear system actor; `meta` keeps its schema.                            |
+| Webhook   | `journal.run(db, command, mappedInput, trustedMeta)`              | The adapter verifies the signature and maps the payload.                  |
+| Effect    | `ctx.run(command, input, { actorId: 'system' })`                  | See below. An effect never imports the journal root.                      |
+| Script    | `journal.run(db, command, input, { actorId: 'script:backfill' })` | One call per item; each is its own transaction.                           |
+| Test      | `journal.run(db, command, input, meta)`                           | No procedure, no HTTP. The same validation and transaction.               |
 
 An effect that needs to write runs a command with `run` from its context:
 
@@ -217,6 +224,22 @@ The ten codes, the usual cause of each and what to do are in one table: [agent g
 
 Other errors are not `JournalError`. A wrong definition or a misuse is a plain `Error` whose message starts with `journal:`. Input, event data or `meta` that fails its schema is a `ZodError`. An error thrown by a command handler, an `events` function, a reducer or a projection passes through unchanged.
 
+### Rejected rules
+
+A rule of the app that rejects a request throws `new CommandError(code, message)`. The code is `NOT_FOUND`, `BAD_REQUEST`, `FORBIDDEN` or `CONFLICT`. The message is written for the client. It is not a `JournalError`: a `JournalError` is the library's own failure, a `CommandError` is the app saying no. The command rolls back and the caller gets the same error. `isCommandError(error, code?)` matches it.
+
+An oRPC app maps it once, with `@arki/journal/orpc`. `@orpc/server` is an optional peer. The core entry never imports it.
+
+```ts
+// src/core/orpc.ts
+import { commandErrors } from '@arki/journal/orpc';
+
+// After the app's own error middleware, so a rejected rule is already an `ORPCError` when that one sees it.
+export const publicProcedure = os.use(appErrors).use(commandErrors());
+```
+
+`commandErrors()` answers a `CommandError` with the `ORPCError` of the same code and message, and a `JournalError` with code `CONFLICT` with a 409 that asks the client to try again. Every other error passes unchanged. `toORPCError(error)` is the same mapping as a function. A host without oRPC writes its own few lines with `isCommandError`. The codes and their HTTP meaning are in the [agent guide](docs/agent-guide.md#rejected-rules-commanderror).
+
 Other verbs: `replay(db, entity, id, { throughVersion })` (returns the reducer-shaped row), `verify(db, entity, id)`, `repair(db, entity, id)`, `rerun(db, projection, { afterSeq, batchSize })`, `drain(db, { batchSize, signal })`. `drain` and `worker` take the root database (`RootDb`), never a transaction: effects must run after commit. Lease and retry times use the database clock.
 
 ### Changing reducers later
@@ -296,8 +319,9 @@ export const app = defineApp('shop')
   .useAll(plugs(features))
   .use(journal({ j, tables: journalTables(), features: tokens(features) }));
 
-// A procedure reads the journal from the services.
-await services.journal.run(services.db, payOrder, input, { actorId: user.id });
+// The gateway binds the door once per request, in its context factory. A procedure calls `context.run`.
+const run = services.journal.bind(services.db, { actorId: user.id });
+await run(payOrder, input);
 ```
 
 - `journal(...)` publishes `services.journal`. It needs the root database under the `db` key. A transaction there is a compile error.

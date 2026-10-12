@@ -8,6 +8,10 @@ const dotOnlyInBridge = {
   group: ['@arki/dot', '@arki/dot/*'],
   message: '`@arki/dot` is an optional peer. Only `src/dot.ts` may import it, so the core entry loads without it.',
 };
+const orpcOnlyInAdapter = {
+  group: ['@orpc/*'],
+  message: '`@orpc/server` is an optional peer. Only `src/orpc.ts` may import it, so the core entry loads without it.',
+};
 const noFeaturePackage = {
   group: ['@arki/feature', '@arki/feature/*'],
   message: 'Feature slices are read by shape. `@arki/feature` must not become a dependency of the journal.',
@@ -28,7 +32,7 @@ export default [
       'no-restricted-imports': [
         'error',
         {
-          patterns: [...runtimeOnly, dotOnlyInBridge, noFeaturePackage],
+          patterns: [...runtimeOnly, dotOnlyInBridge, orpcOnlyInAdapter, noFeaturePackage],
         },
       ],
       'no-restricted-globals': [
@@ -44,7 +48,14 @@ export default [
     // The Dot bridge is the one file that may import `@arki/dot`.
     files: ['src/dot.ts'],
     rules: {
-      'no-restricted-imports': ['error', { patterns: [...runtimeOnly, noFeaturePackage] }],
+      'no-restricted-imports': ['error', { patterns: [...runtimeOnly, orpcOnlyInAdapter, noFeaturePackage] }],
+    },
+  },
+  {
+    // The oRPC adapter is the one file that may import `@orpc/server`.
+    files: ['src/orpc.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [...runtimeOnly, dotOnlyInBridge, noFeaturePackage] }],
     },
   },
 ];

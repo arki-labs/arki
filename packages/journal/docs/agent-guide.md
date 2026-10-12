@@ -9,7 +9,7 @@ Paths that start with `src/` are files of this package. App files are named from
 1. An entity is a normal row in its own Drizzle table. The table has a string key and a `version` column.
 2. Every change is also one row in `journal_events`. Event rows are never changed or deleted.
 3. One transaction writes the event rows and the entity row together.
-4. A command is the way to write. `j.command` defines one. `journal.run` runs it.
+4. A command is the way to write. `j.command` defines one. `journal.run` runs it. `journal.bind` is the door: it fixes the database and the actor once and returns a runner.
 5. Inside a command, `write(entity, id, events)` locks the row and calls your `events` function with it. That function checks the rules and returns the new events.
 6. A reducer turns each event into the next row. `.create` builds the first row. `.on` returns a patch.
 7. Lane one is the projection. It runs inside the same transaction. If it throws, the write rolls back.
@@ -23,7 +23,7 @@ Paths that start with `src/` are files of this package. App files are named from
 | --------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
 | `j`, the definitions  | `initJournal` (see Setup)                     | Declares things: `j.event`, `j.entity`, `j.command`, `j.projection`, `j.effect`. It never touches a database. | `journal.ts`                         |
 | The entity builder    | `j.entity(kind, table)`                       | A chain of `.create(Event, reducer)` and `.on(Event, reducer)`. The result is the entity you pass to `write`. | `features/<name>/<entity>.ts`        |
-| `journal`, the runner | `j.compose({ tables, projections, effects })` | Does the work: `run`, `write`, `replay`, `verify`, `repair`, `rerun`, `drain`, `worker`, `wake`.              | `journal.root.ts`, or the Dot plugin |
+| `journal`, the runner | `j.compose({ tables, projections, effects })` | Does the work: `run`, `bind`, `write`, `replay`, `verify`, `repair`, `rerun`, `drain`, `worker`, `wake`.      | `journal.root.ts`, or the Dot plugin |
 
 How to tell them apart: only `journal` takes a database. Events, entities, commands, projections and effects need only `j`. They must never import the composed `journal`.
 
@@ -121,35 +121,49 @@ export const closeAfterPayment = j.effect('close-after-payment', order, {
 
 ### Add a command and run it
 
-Library files: `src/api.ts` (`Command`, `CommandContext`), `src/command.ts` (how `journal.run` runs one).
+Library files: `src/api.ts` (`Command`, `CommandContext`, `bind`), `src/command.ts` (how `journal.run` runs one), `src/errors.ts` (`CommandError`), `src/orpc.ts` (the oRPC error mapping).
 
 ```ts
 // features/orders/commands.ts
+import { CommandError } from '@arki/journal';
+// core/orpc.ts, in an oRPC app: once, after the app's own error middleware.
+import { commandErrors } from '@arki/journal/orpc';
+
 export const payOrder = j.command(
   'payOrder',
   z.object({ orderId: orderIdSchema, amount: z.int().positive() }),
   (input, { write }) =>
     write(order, input.orderId, row => {
-      if (!row) throw new Error(`order ${input.orderId} not found`);
-      if (row.status !== 'placed') throw new Error(`order ${input.orderId} is ${row.status}`);
+      if (!row) throw new CommandError('NOT_FOUND', 'Order not found');
+      if (row.status !== 'placed') throw new CommandError('CONFLICT', `Order is already ${row.status}`);
       return [OrderPaid({ amount: input.amount })]; // [] means: write nothing
     }),
 );
 
-// From a request. The actor comes from the session.
-await journal.run(db, payOrder, { orderId: id, amount: 10 }, { actorId: user.id });
-// From a job or a schedule. Use a clear system actor.
-await journal.run(db, payOrder, { orderId: id, amount: 10 }, { actorId: 'system' });
+// The door. Bind the database and the actor once, then pass only the command and its input.
+// A request: the actor comes from the session. Put the bound runner on the request context.
+const runCommand = journal.bind(db, { actorId: user.id });
+await runCommand(payOrder, { orderId: id, amount: 10 });
+// A job, a schedule, a script or a seed: use a clear system actor.
+const runSystemCommand = journal.bind(db, { actorId: 'system' });
+await runSystemCommand(payOrder, { orderId: id, amount: 10 });
+
+export const publicProcedure = os.use(appErrors).use(commandErrors());
 ```
 
 - The handler context is `{ tx, meta, write, run }`. `run(child, input)` runs another command in a savepoint.
+- `journal.bind(source, meta)` is the door. It returns `(command, input) => journal.run(source, command, input, meta)`. You still give `meta`: the library never picks an actor. `meta` is parsed on every call, as in `journal.run`, so a default in the meta schema is new for each command.
+- `source` is the root database or a transaction, with the rules of `journal.run`. On the root database each call commits and wakes the worker. On a transaction the call joins it; the caller commits and then calls `journal.wake()`.
+- A bound runner has the type `CommandRunner`, the type of a command context's `run`. Pass it to code that takes one, for example `paymentsJournal.writes(runCommand)` of `@arki/payments`.
+- A rule that rejects the request throws `new CommandError(code, message)`. The command rolls back and the caller gets the same error. The four codes are in [Rejected rules](#rejected-rules-commanderror).
+- An oRPC app adds `commandErrors()` to its procedure builders once. Procedures then need no try/catch around a command. Any other host matches with `isCommandError(error, code?)`.
+- `journal.run(source, command, input, meta)` is the long form. It parses the input and `meta`, opens the transaction, and returns what the handler returns.
 - From an effect, call `ctx.run(command, input, meta)`. It is `journal.run` on the worker's root database.
-- `journal.run` parses the input and `meta`, opens the transaction, and returns what the handler returns.
-- In the games-platform backend, requests call `context.runCommand` and jobs call `runSystemCommand`. Both are in `core/run-command.ts`. Do not call `journal.run` from a procedure there.
+- In the games-platform backend, procedures call `context.runCommand`. `core/context.ts` binds it to the signed-in user. A job or a schedule binds its own runner: `journal.bind(db, { actorId: null })`. Do not call `journal.run` from a procedure there.
 
 ### Find out why a write failed
 
-1. Check the kind of error. `isJournalError(error)` is true: go to step 2. A `ZodError`: input, event data or `meta` failed its schema. A plain `Error` that starts with `journal:`: a wrong definition or a misuse; search `src/` for the message. Anything else was thrown by app code and passed through unchanged.
+1. Check the kind of error. `isJournalError(error)` is true: go to step 2. `isCommandError(error)` is true: a rule of the app rejected the request; read its `code` and `message`, and find the `throw` in the command. A `ZodError`: input, event data or `meta` failed its schema. A plain `Error` that starts with `journal:`: a wrong definition or a misuse; search `src/` for the message. Anything else was thrown by app code and passed through unchanged.
 2. Read `error.code`, `error.kind` and `error.entityId`. Match on the code, for example `isJournalError(error, 'CONFLICT')`. Never match on the message. The message reads `CODE: what happened (kind id): detail. What to do next.`
 3. Find the code in the [error table](#errors). To see the exact check, search for the code in the file the table names.
 4. Run again with `DEBUG=arki:journal:*`. It prints commands, writes, replays, drains and worker ticks.
@@ -177,7 +191,12 @@ await journal.run(db, payOrder, { orderId: id, amount: 10 }, { actorId: 'system'
 
 ## Errors
 
-A `JournalError` is about one entity's row or history. It has `code`, `kind` and `entityId`. This is the only copy of this table. The message texts are in `src/errors.ts`. An error thrown by an effect never reaches the caller: `drain` stores it on the job row.
+Two kinds of error have a code.
+
+- A `JournalError` is the library's own failure. It is about one entity's row or history. It has `code`, `kind` and `entityId`. Its ten codes are in the table below.
+- A `CommandError` is a rule of the app that rejects a request. App code throws it; the library never does. It is not a `JournalError`. Its four codes are in [Rejected rules](#rejected-rules-commanderror).
+
+This is the only copy of this table. The message texts are in `src/errors.ts`. An error thrown by an effect never reaches the caller: `drain` stores it on the job row.
 
 | Code               | What it means                                                                                                                                                                                                                       | Usual cause                                                                                        | What to do                                                                                                                                                                             | Thrown in                        |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
@@ -191,6 +210,24 @@ A `JournalError` is about one entity's row or history. It has `code`, `kind` and
 | `UNSTABLE_SCHEMA`  | Event data or `meta` changes, or fails, across JSON storage and a second parse.                                                                                                                                                     | A `Date` or a transform in an event schema or in the `meta` schema.                                | Return JSON-compatible data that the schema accepts unchanged.                                                                                                                         | `src/storage.ts`                 |
 | `ID_MISMATCH`      | The id is empty, malformed, too long, or spelled differently from the stored key.                                                                                                                                                   | An upper-case `uuid`, an empty string, or an id longer than the key column.                        | Pass the id exactly as stored. A `uuid` must be lower-case and hyphenated.                                                                                                             | `src/storage.ts`, `src/write.ts` |
 | `VALUE_MISMATCH`   | The database stored a different value than the reducer produced. The write was rolled back.                                                                                                                                         | A `numeric` value with more decimals than the column keeps, such as `"1.234"` for `numeric(10,2)`. | Make the reducer produce the value in the form the column stores.                                                                                                                      | `src/storage.ts`                 |
+
+### Rejected rules: `CommandError`
+
+`new CommandError(code, message)` is thrown by a command handler or by an `events` function. The command rolls back, and `journal.run` lets the same error out. `isCommandError(error, code?)` matches it. The message is written for the client.
+
+| Code          | HTTP | Use it when                                                                  |
+| ------------- | ---- | ---------------------------------------------------------------------------- |
+| `NOT_FOUND`   | 404  | The thing the request names does not exist.                                  |
+| `BAD_REQUEST` | 400  | The input has the right shape, but a rule refuses it. An end before a start. |
+| `FORBIDDEN`   | 403  | This actor may not do this to this entity.                                   |
+| `CONFLICT`    | 409  | The current state does not allow it. Already paid. A name that is taken.     |
+
+`@arki/journal/orpc` maps these for an oRPC app. The code is in `src/orpc.ts`. `@orpc/server` is an optional peer, and the core entry never imports it.
+
+- `toORPCError(error)` turns a `CommandError` into an `ORPCError` with the same code and message.
+- It turns a `JournalError` with code `CONFLICT` into an `ORPCError('CONFLICT')` with the message `This was changed by another request at the same time. Please try again.` The client can send the request again.
+- It returns every other error unchanged.
+- `commandErrors()` is the same mapping as a middleware. Put it after the app's own error middleware: `os.use(appErrors).use(commandErrors())`. Put before it, the app's middleware sees a plain error first and answers 500.
 
 ### Dot boot errors
 
@@ -217,7 +254,11 @@ A `JournalError` is about one entity's row or history. It has `code`, `kind` and
 | Who builds the journal    | Your code.                                            | The plugin: `journal({ j, tables, features })`. It publishes `services.journal`. |
 | Who runs the worker       | Your code: `journal.worker(db)`, `start()`, `stop()`. | The plugin, between `start` and `stop`. Pass `worker: false` to turn it off.     |
 
+| Where the door is bound | The request context: `journal.bind(db, { actorId })`. | The gateway's context factory: `services.journal.bind(services.db, { actorId })`. |
+
 The code for both wirings is in the [README, Dot](../README.md#dot).
+
+The gateway binds the door once per request. Its context factory reads the session and puts `run: services.journal.bind(services.db, { actorId })` on the context. A procedure then calls `context.run(command, input)`. The plugin does not bind for you: only the app knows the actor.
 
 An effect runs a command with `ctx.run` in both wirings. In feature mode the journal is built after the features, and that is fine: the journal hands `run` to the effect when the job runs.
 

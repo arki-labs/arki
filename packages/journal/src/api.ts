@@ -133,6 +133,18 @@ export type Journal<
     input: NoInfer<z.input<S>>,
     meta: z.input<Meta>,
   ): Promise<Awaited<R>>;
+  /**
+   * The command door: `run` with `source` and `meta` fixed. It returns
+   * `(command, input) => journal.run(source, command, input, meta)`. A request
+   * context binds it once with the signed-in actor; a job binds it with a
+   * system actor. The caller still gives `meta`: the library never picks an actor.
+   * `source` follows the rules of `run`: a root database commits and wakes, a
+   * transaction joins and leaves the commit to the caller.
+   * `meta` is parsed on every call, not once here, so a bound runner is exactly
+   * `run`: a default in the meta schema gives each command its own value, and
+   * a bad `meta` rejects the call, inside the transaction guard, as `run` does.
+   */
+  bind(source: TransactionSource<Tx>, meta: z.input<Meta>): CommandRunner<z.output<Meta>, Tx>;
   /** Rebuild the row from the log in memory. `throughVersion` is the last version applied. */
   replay<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,

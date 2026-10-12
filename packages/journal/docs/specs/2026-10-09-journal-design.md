@@ -134,7 +134,8 @@ await worker.start();
 ## 5. Public API
 
 Export paths: `.` (portable core), `./pg` (table definitions only), `./dot` (optional
-`@arki/dot` plugin). No Node-only imports anywhere.
+`@arki/dot` plugin), `./orpc` (optional `@orpc/server` error mapping). No Node-only
+imports anywhere.
 
 Sketch of intent. The current signatures are in `src/api.ts`.
 
@@ -198,6 +199,7 @@ type CommandContext<MetaOut, Tx> = {
 
 type Journal<Meta, Tx, AppDb> = {
   run(source: TransactionSource<Tx>, command: Command<S, R, z.output<Meta>, Tx>, input: z.input<S>, meta: z.input<Meta>): Promise<Awaited<R>>; // parse, then the handler in one transaction (root db) or savepoint (tx); on the root db, wakes after a commit that queued a job
+  bind(source: TransactionSource<Tx>, meta: z.input<Meta>): CommandContext<z.output<Meta>, Tx>['run']; // the door: `run` with `source` and `meta` fixed; `meta` is parsed on every call, as in `run`
   write(tx: Tx, entity, id: EntityId, input: { meta: z.input<Meta>; events: NextEvents }): Promise<{ row: Row | null; events: Recorded[] }>;
   replay(db, entity, id: EntityId, opts?: { throughVersion?: number }): Promise<{ row: ReducerRow | null; events: Recorded[] }>;
   verify(db, entity, id: EntityId): Promise<{ ok: true } | { ok: false; expected: ReducerRow | null; actual: Row | null }>;
@@ -213,6 +215,15 @@ class JournalError extends Error {
   code: 'CONFLICT' | 'NO_ROW' | 'ROW_EXISTS' | 'UNKNOWN_EVENT' | 'VERSION_MISMATCH' | 'NO_HISTORY' | 'REPLAY_FAILED' | 'UNSTABLE_SCHEMA' | 'VALUE_MISMATCH' | 'ID_MISMATCH';
   kind: string; entityId: string;
 }
+// A rule of the app that rejects a request. App code throws it; the library never does. Not a JournalError.
+class CommandError extends Error {
+  constructor(code: 'NOT_FOUND' | 'BAD_REQUEST' | 'FORBIDDEN' | 'CONFLICT', message: string);
+}
+function isCommandError(error: unknown, code?: CommandError['code']): error is CommandError;
+
+// ./orpc
+function toORPCError(error: unknown): unknown; // CommandError -> ORPCError(same code, same message); JournalError CONFLICT -> ORPCError('CONFLICT'); anything else unchanged
+function commandErrors(): Middleware; // `toORPCError` on what the procedure throws; goes after the app's own error middleware
 
 // ./pg
 function journalTables(schema?: PgSchema): { events: PgTable; jobs: PgTable };
