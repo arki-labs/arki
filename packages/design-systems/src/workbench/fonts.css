@@ -1,0 +1,23 @@
+/* ─── WORKBENCH — Web Fonts ────────────────────────────────────
+   Loaded via @fontsource (self-hosted, no CDN).
+   Import this file before tokens.css in your global stylesheet.
+   ─────────────────────────────────────────────────────────────── */
+
+/* Body text — calm, modern variable sans for product UI */
+@import '@fontsource-variable/work-sans';
+
+/* Code — technical monospace with tabular figures */
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+@import '@fontsource/ibm-plex-mono/700.css';
+
+/* Display — high-contrast editorial serif, used intentionally */
+@import '@fontsource/instrument-serif/400.css';
+@import '@fontsource/instrument-serif/400-italic.css';
+
+/* ─── CSS Custom Properties ─── */
+:root {
+  --font-sans: 'Work Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-serif: 'Instrument Serif', ui-serif, Georgia, serif;
+}

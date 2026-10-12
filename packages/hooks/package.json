@@ -1,0 +1,57 @@
+{
+  "name": "@arki/react-hooks",
+  "version": "0.1.1",
+  "description": "Curated React hooks for ARKI apps — Mantine, usehooks-ts, hotkeys and local-storage hooks under one import.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "react",
+    "hooks"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./*": {
+      "types": "./dist/src/*.d.ts",
+      "import": "./src/*.tsx",
+      "browser": "./src/*.tsx"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "!dist/**/*.spec.*",
+    "!dist/**/*.test.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@mantine/hooks": "9.7.1",
+    "@reecelucas/react-use-hotkeys": "^2.0.0",
+    "@rehooks/local-storage": "^2.4.5",
+    "react-hotkeys-hook": "^5.3.3",
+    "usehooks-ts": "^3.1.1"
+  },
+  "peerDependencies": {
+    "react": "19.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

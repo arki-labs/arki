@@ -1,0 +1,15 @@
+@font-face {
+  font-family: 'Cabin';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url('./Cabin-Medium.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Cabin';
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url('./Cabin-SemiBold.ttf') format('truetype');
+}

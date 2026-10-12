@@ -1,0 +1,189 @@
+{
+  "name": "@arki/design-systems",
+  "version": "0.1.1",
+  "description": "Shared visual foundations for ARKI web apps — semantic colour tokens, Tailwind v4 theme bridges and the atelier / workbench / arena design systems with bundled fonts.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "design-system",
+    "design-tokens",
+    "tailwind",
+    "css"
+  ],
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "exports": {
+    "./atelier/tokens.css": "./src/atelier/tokens.css",
+    "./atelier/theme-bridge.css": "./src/atelier/theme-bridge.css",
+    "./atelier/fonts.css": "./src/atelier/fonts.css",
+    "./atelier/fonts": {
+      "types": "./dist/src/atelier/fonts.d.ts",
+      "import": "./src/atelier/fonts.ts"
+    },
+    "./atelier": {
+      "types": "./dist/src/atelier/index.d.ts",
+      "import": "./src/atelier/index.ts"
+    },
+    "./workbench/tokens.css": "./src/workbench/tokens.css",
+    "./workbench/theme-bridge.css": "./src/workbench/theme-bridge.css",
+    "./workbench/fonts.css": "./src/workbench/fonts.css",
+    "./workbench/fonts": {
+      "types": "./dist/src/workbench/fonts.d.ts",
+      "import": "./src/workbench/fonts.ts"
+    },
+    "./workbench": {
+      "types": "./dist/src/workbench/index.d.ts",
+      "import": "./src/workbench/index.ts"
+    },
+    "./arena/tokens.css": "./src/arena/tokens.css",
+    "./arena/theme-bridge.css": "./src/arena/theme-bridge.css",
+    "./arena/fonts.css": "./src/arena/fonts.css",
+    "./arena/fonts": {
+      "types": "./dist/src/arena/fonts.d.ts",
+      "import": "./src/arena/fonts.ts"
+    },
+    "./arena": {
+      "types": "./dist/src/arena/index.d.ts",
+      "import": "./src/arena/index.ts"
+    },
+    "./tribunal/tokens.css": "./src/tribunal/tokens.css",
+    "./tribunal/theme-bridge.css": "./src/tribunal/theme-bridge.css",
+    "./tribunal/fonts.css": "./src/tribunal/fonts.css",
+    "./tribunal/fonts": {
+      "types": "./dist/src/tribunal/fonts.d.ts",
+      "import": "./src/tribunal/fonts.ts"
+    },
+    "./tribunal": {
+      "types": "./dist/src/tribunal/index.d.ts",
+      "import": "./src/tribunal/index.ts"
+    },
+    "./gallery/tokens.css": "./src/gallery/tokens.css",
+    "./gallery/theme-bridge.css": "./src/gallery/theme-bridge.css",
+    "./gallery/fonts.css": "./src/gallery/fonts.css",
+    "./gallery/fonts": {
+      "types": "./dist/src/gallery/fonts.d.ts",
+      "import": "./src/gallery/fonts.ts"
+    },
+    "./gallery": {
+      "types": "./dist/src/gallery/index.d.ts",
+      "import": "./src/gallery/index.ts"
+    },
+    "./transitions/nav.css": "./src/transitions/nav.css",
+    "./fonts": {
+      "types": "./dist/src/fonts/index.d.ts",
+      "import": "./src/fonts/index.ts"
+    },
+    "./fonts/cabin": {
+      "types": "./dist/src/fonts/cabin/cabin.d.ts",
+      "import": "./src/fonts/cabin/cabin.ts"
+    },
+    "./fonts/cabin/cabin.css": "./src/fonts/cabin/cabin.css",
+    "./fonts/gentium-plus": {
+      "types": "./dist/src/fonts/gentium-plus/gentium-plus.d.ts",
+      "import": "./src/fonts/gentium-plus/gentium-plus.ts"
+    },
+    "./fonts/gentium-plus/gentium-plus.css": "./src/fonts/gentium-plus/gentium-plus.css",
+    "./fonts/raleway": {
+      "types": "./dist/src/fonts/raleway/raleway.d.ts",
+      "import": "./src/fonts/raleway/raleway.ts"
+    },
+    "./fonts/raleway/raleway.css": "./src/fonts/raleway/raleway.css",
+    "./fonts/sentient": {
+      "types": "./dist/src/fonts/sentient/sentient.d.ts",
+      "import": "./src/fonts/sentient/sentient.ts"
+    },
+    "./fonts/sentient/sentient.css": "./src/fonts/sentient/sentient.css",
+    "./typography": {
+      "types": "./dist/src/typography.d.ts",
+      "import": "./src/typography.ts"
+    },
+    "./palette-labels": {
+      "types": "./dist/src/palette-labels.d.ts",
+      "import": "./src/palette-labels.ts"
+    },
+    "./atelier/typography": {
+      "types": "./dist/src/atelier/typography.d.ts",
+      "import": "./src/atelier/typography.ts"
+    },
+    "./workbench/typography": {
+      "types": "./dist/src/workbench/typography.d.ts",
+      "import": "./src/workbench/typography.ts"
+    },
+    "./arena/typography": {
+      "types": "./dist/src/arena/typography.d.ts",
+      "import": "./src/arena/typography.ts"
+    },
+    "./atelier/palette-labels": {
+      "types": "./dist/src/atelier/palette-labels.d.ts",
+      "import": "./src/atelier/palette-labels.ts"
+    },
+    "./workbench/palette-labels": {
+      "types": "./dist/src/workbench/palette-labels.d.ts",
+      "import": "./src/workbench/palette-labels.ts"
+    },
+    "./arena/palette-labels": {
+      "types": "./dist/src/arena/palette-labels.d.ts",
+      "import": "./src/arena/palette-labels.ts"
+    },
+    "./tribunal/typography": {
+      "types": "./dist/src/tribunal/typography.d.ts",
+      "import": "./src/tribunal/typography.ts"
+    },
+    "./tribunal/palette-labels": {
+      "types": "./dist/src/tribunal/palette-labels.d.ts",
+      "import": "./src/tribunal/palette-labels.ts"
+    },
+    "./registry": {
+      "types": "./dist/src/registry.d.ts",
+      "import": "./src/registry.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "!dist/**/*.spec.*",
+    "!dist/**/*.test.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@fontsource-variable/cormorant-garamond": "^5.3.0",
+    "@fontsource-variable/fraunces": "^5.3.0",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/hanken-grotesk": "^5.3.0",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/newsreader": "^5.3.0",
+    "@fontsource-variable/playfair-display": "^5.3.0",
+    "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
+    "@fontsource-variable/work-sans": "^5.3.0",
+    "@fontsource/dm-serif-display": "^5.3.0",
+    "@fontsource/gentium-plus": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/instrument-serif": "^5.3.0",
+    "@fontsource/shadows-into-light": "^5.3.0",
+    "@fontsource/spectral": "^5.3.0",
+    "zod": "4.6.5"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
