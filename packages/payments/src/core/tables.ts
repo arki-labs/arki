@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, integer, jsonb, type PgColumn, type PgSchema, real, text, timestamp, varchar } from 'drizzle-orm/pg-core';
+import { boolean, check, integer, jsonb, type PgColumn, type PgSchema, real, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
 
 import type { UserId } from '@arki/auth/ids';
 import { createIdFactory } from '@arki/db/id-factory';
@@ -82,23 +82,29 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   });
 
-  const subscriptions = schema.table('subscriptions', {
-    id: subscriptionIdFactory.primaryColumn(),
-    userId: userFk.required('user_id', { onDelete: 'cascade' }),
-    planId: planIdFactory.foreignKey('plan_id', () => plans.id, { onDelete: 'restrict' }),
-    customerId: customerIdFactory.foreignKey('customer_id', () => customers.id, { onDelete: 'cascade' }),
-    providerSubscriptionId: varchar('provider_subscription_id', { length: 255 }).notNull(),
-    status: subscriptionStatusEnum('status').$type<SubscriptionStatus>().notNull().default('incomplete'),
-    currentPeriodStart: timestamp('current_period_start', { withTimezone: true }).notNull(),
-    currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }).notNull(),
-    trialStart: timestamp('trial_start', { withTimezone: true }),
-    trialEnd: timestamp('trial_end', { withTimezone: true }),
-    canceledAt: timestamp('canceled_at', { withTimezone: true }),
-    cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
-    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  });
+  const subscriptions = schema.table(
+    'subscriptions',
+    {
+      id: subscriptionIdFactory.primaryColumn(),
+      userId: userFk.required('user_id', { onDelete: 'cascade' }),
+      planId: planIdFactory.foreignKey('plan_id', () => plans.id, { onDelete: 'restrict' }),
+      customerId: customerIdFactory.foreignKey('customer_id', () => customers.id, { onDelete: 'cascade' }),
+      providerSubscriptionId: varchar('provider_subscription_id', { length: 255 }).notNull(),
+      status: subscriptionStatusEnum('status').$type<SubscriptionStatus>().notNull().default('incomplete'),
+      currentPeriodStart: timestamp('current_period_start', { withTimezone: true }).notNull(),
+      currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }).notNull(),
+      trialStart: timestamp('trial_start', { withTimezone: true }),
+      trialEnd: timestamp('trial_end', { withTimezone: true }),
+      canceledAt: timestamp('canceled_at', { withTimezone: true }),
+      cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
+      metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+      createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+      updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+      /** Set by `@arki/journal`. 0 means: this row was written before the journal. */
+      version: integer('version').notNull().default(0),
+    },
+    (table) => [uniqueIndex('subscriptions_provider_subscription_id_idx').on(table.providerSubscriptionId)],
+  );
 
   const payments = schema.table(
     'payments',
@@ -122,6 +128,8 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
       metadata: jsonb('metadata').$type<Record<string, unknown>>(),
       createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
       updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+      /** Set by `@arki/journal`. 0 means: this row was written before the journal. */
+      version: integer('version').notNull().default(0),
     },
     (_table) => [
       check('payments_amount_positive', sql`"amount" >= 0`),
@@ -130,21 +138,25 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
     ],
   );
 
-  const webhookEvents = schema.table('webhook_events', {
-    id: webhookIdFactory.primaryColumn(),
-    provider: paymentProviderEnum('provider').$type<PaymentProviderType>().notNull(),
-    eventType: webhookEventTypeEnum('event_type').$type<WebhookEventType>().notNull(),
-    providerEventId: varchar('provider_event_id', { length: 255 }).notNull(),
-    data: jsonb('data').$type<Record<string, unknown>>().notNull(),
-    processed: boolean('processed').notNull().default(false),
-    processedAt: timestamp('processed_at', { withTimezone: true }),
-    attempts: integer('attempts').notNull().default(0),
-    lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
-    errorMessage: text('error_message'),
-    sourceIp: varchar('source_ip', { length: 45 }),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  });
+  const webhookEvents = schema.table(
+    'webhook_events',
+    {
+      id: webhookIdFactory.primaryColumn(),
+      provider: paymentProviderEnum('provider').$type<PaymentProviderType>().notNull(),
+      eventType: webhookEventTypeEnum('event_type').$type<WebhookEventType>().notNull(),
+      providerEventId: varchar('provider_event_id', { length: 255 }).notNull(),
+      data: jsonb('data').$type<Record<string, unknown>>().notNull(),
+      processed: boolean('processed').notNull().default(false),
+      processedAt: timestamp('processed_at', { withTimezone: true }),
+      attempts: integer('attempts').notNull().default(0),
+      lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+      errorMessage: text('error_message'),
+      sourceIp: varchar('source_ip', { length: 45 }),
+      createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+      updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => [uniqueIndex('webhook_events_provider_event_id_idx').on(table.providerEventId)],
+  );
 
   const planForeignKeys = planIdFactory.createForeignKeyFactory(() => plans.id);
   const subscriptionForeignKeys = subscriptionIdFactory.createForeignKeyFactory(() => subscriptions.id);

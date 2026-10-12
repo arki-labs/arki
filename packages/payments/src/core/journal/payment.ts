@@ -1,0 +1,187 @@
+/**
+ * Payment on the journal: its events, the entity and the commands
+ *
+ * One `payments` row is the current state of a payment, keyed by its id.
+ * A payment starts `pending` and ends `succeeded`, `failed` or `canceled`.
+ *
+ * `amount` is a `real` column: a 4-byte float. The event keeps the amount as
+ * it was given. The reducer returns the number the column will hold (see
+ * `storedReal`), because the journal compares the two.
+ */
+
+import type { JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
+import { userIdSchema } from '@arki/auth/ids';
+import { z } from '@arki/contracts';
+
+import type { CoreTables } from '../tables';
+import {
+  createPaymentId,
+  customerIdSchema,
+  paymentIdSchema,
+  paymentMethodTypeValues,
+  subscriptionIdSchema,
+} from '../primitives';
+import { PaymentsCommandError, storedReal } from './support';
+
+type PaymentRow = CoreTables['payments']['$inferSelect'];
+
+const paymentMethodSchema = z.enum(paymentMethodTypeValues);
+const metadataSchema = z.record(z.string(), z.unknown());
+
+export const initiatePaymentInputSchema = z.object({
+  /** Left out: the command makes a new id */
+  paymentId: paymentIdSchema.optional(),
+  subscriptionId: subscriptionIdSchema.nullable().optional(),
+  userId: userIdSchema,
+  customerId: customerIdSchema,
+  providerPaymentId: z.string().min(1).max(255),
+  amount: z.number().nonnegative(),
+  currency: z.string().length(3).default('USD'),
+  paymentMethod: paymentMethodSchema.default('card'),
+  description: z.string().nullable().optional(),
+  metadata: metadataSchema.nullable().optional(),
+});
+
+export const completePaymentInputSchema = z.object({
+  paymentId: paymentIdSchema,
+  receiptUrl: z.string().nullable().optional(),
+});
+
+export const failPaymentInputSchema = z.object({ paymentId: paymentIdSchema, failureReason: z.string() });
+
+export const cancelPaymentInputSchema = z.object({ paymentId: paymentIdSchema });
+
+export type InitiatePaymentInput = z.input<typeof initiatePaymentInputSchema>;
+export type CompletePaymentInput = z.input<typeof completePaymentInputSchema>;
+export type FailPaymentInput = z.input<typeof failPaymentInputSchema>;
+export type CancelPaymentInput = z.input<typeof cancelPaymentInputSchema>;
+
+function requirePayment(row: PaymentRow | null, paymentId: string): PaymentRow {
+  if (!row) {
+    throw new PaymentsCommandError('NOT_FOUND', `Payment ${paymentId} not found`);
+  }
+
+  return row;
+}
+
+export function createPaymentJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
+  j: JournalDefinitions<Meta, Tx, AppDb>,
+  payments: CoreTables['payments'],
+) {
+  /** A payment was started with the provider. It is `pending`. */
+  const PaymentInitiated = j.event(
+    'PaymentInitiated',
+    z.object({
+      subscriptionId: subscriptionIdSchema.nullable(),
+      userId: userIdSchema,
+      customerId: customerIdSchema,
+      providerPaymentId: z.string(),
+      amount: z.number(),
+      currency: z.string(),
+      paymentMethod: paymentMethodSchema,
+      description: z.string().nullable(),
+      metadata: metadataSchema.nullable(),
+    }),
+  );
+  const PaymentCompleted = j.event('PaymentCompleted', z.object({ receiptUrl: z.string().nullable() }));
+  const PaymentFailed = j.event('PaymentFailed', z.object({ failureReason: z.string() }));
+  const PaymentCanceled = j.event('PaymentCanceled', z.object({}));
+
+  const payment = j
+    .entity('payment', payments)
+    .create(PaymentInitiated, e => ({
+      subscriptionId: e.data.subscriptionId,
+      userId: e.data.userId,
+      customerId: e.data.customerId,
+      providerPaymentId: e.data.providerPaymentId,
+      amount: storedReal(e.data.amount),
+      currency: e.data.currency,
+      status: 'pending',
+      paymentMethod: e.data.paymentMethod,
+      description: e.data.description,
+      failureReason: null,
+      receiptUrl: null,
+      refunded: false,
+      refundedAmount: 0,
+      metadata: e.data.metadata,
+      createdAt: e.recordedAt,
+      updatedAt: e.recordedAt,
+    }))
+    .on(PaymentCompleted, (_row, e) => ({
+      status: 'succeeded',
+      receiptUrl: e.data.receiptUrl,
+      updatedAt: e.recordedAt,
+    }))
+    .on(PaymentFailed, (_row, e) => ({
+      status: 'failed',
+      failureReason: e.data.failureReason,
+      updatedAt: e.recordedAt,
+    }))
+    .on(PaymentCanceled, (_row, e) => ({ status: 'canceled', updatedAt: e.recordedAt }));
+
+  const initiatePayment = j.command('initiatePayment', initiatePaymentInputSchema, (input, { write }) => {
+    const paymentId = input.paymentId ?? createPaymentId();
+
+    return write(payment, paymentId, row => {
+      if (row) {
+        throw new PaymentsCommandError('CONFLICT', `Payment ${paymentId} already exists with status ${row.status}`);
+      }
+
+      return [
+        PaymentInitiated({
+          subscriptionId: input.subscriptionId ?? null,
+          userId: input.userId,
+          customerId: input.customerId,
+          providerPaymentId: input.providerPaymentId,
+          amount: input.amount,
+          currency: input.currency,
+          paymentMethod: input.paymentMethod,
+          description: input.description ?? null,
+          metadata: input.metadata ?? null,
+        }),
+      ];
+    });
+  });
+
+  const completePayment = j.command('completePayment', completePaymentInputSchema, (input, { write }) =>
+    write(payment, input.paymentId, row => {
+      const current = requirePayment(row, input.paymentId);
+
+      if (current.status !== 'pending' && current.status !== 'processing') {
+        throw new PaymentsCommandError('CONFLICT', `Cannot complete payment with status ${current.status}`);
+      }
+
+      return [PaymentCompleted({ receiptUrl: input.receiptUrl ?? null })];
+    }),
+  );
+
+  const failPayment = j.command('failPayment', failPaymentInputSchema, (input, { write }) =>
+    write(payment, input.paymentId, row => {
+      const current = requirePayment(row, input.paymentId);
+
+      if (current.status !== 'pending' && current.status !== 'processing') {
+        throw new PaymentsCommandError('CONFLICT', `Cannot fail payment with status ${current.status}`);
+      }
+
+      return [PaymentFailed({ failureReason: input.failureReason })];
+    }),
+  );
+
+  const cancelPayment = j.command('cancelPayment', cancelPaymentInputSchema, (input, { write }) =>
+    write(payment, input.paymentId, row => {
+      const current = requirePayment(row, input.paymentId);
+
+      if (current.status === 'succeeded' || current.status === 'failed' || current.status === 'canceled') {
+        throw new PaymentsCommandError('CONFLICT', `Cannot cancel payment with status ${current.status}`);
+      }
+
+      return [PaymentCanceled({})];
+    }),
+  );
+
+  return {
+    payment,
+    events: { PaymentInitiated, PaymentCompleted, PaymentFailed, PaymentCanceled },
+    commands: { initiatePayment, completePayment, failPayment, cancelPayment },
+  };
+}

@@ -1,5 +1,5 @@
 import type { PgColumn, PgSchema } from 'drizzle-orm/pg-core';
-import { decimal, text, timestamp, varchar } from 'drizzle-orm/pg-core';
+import { decimal, integer, text, timestamp, varchar } from 'drizzle-orm/pg-core';
 
 import type { UserId } from '@arki/auth/ids';
 import { createIdFactory } from '@arki/db/id-factory';
@@ -49,6 +49,8 @@ export function createRefundsTables({ schema, paymentIdRef, userIdRef }: CreateR
     metadata: text('metadata'),
     createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow(),
     updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).defaultNow(),
+    /** Set by `@arki/journal`. 0 means: this row was written before the journal. */
+    version: integer('version').notNull().default(0),
   });
 
   const refundForeignKeys = refundIdFactory.createForeignKeyFactory(() => refunds.id);

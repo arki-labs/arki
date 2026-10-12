@@ -1,0 +1,423 @@
+/**
+ * Refunds on the journal
+ *
+ * Flow: RefundService → writes(run) → command rules → journal event →
+ *       `refunds` row, in one transaction.
+ *
+ * A refund moves money back, so its path is strict: requested → approved or
+ * rejected → processing → completed or failed. These tests pin that a step out
+ * of order is rejected and writes nothing, that amounts are stored the way the
+ * `decimal(10,2)` column holds them, and that the provider's refund id arrives
+ * with completion (the live service has it only then).
+ *
+ * This file runs on the typed journal, `initJournal.tx<AppTx>().db<AppDb>()`,
+ * the form an app uses.
+ */
+import type { PGlite } from '@electric-sql/pglite';
+import { eq } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
+
+import type { CommandRunner } from '@arki/journal';
+
+import type { PaymentId } from '../core/types';
+import type { AppDb, AppTx } from '../test-support';
+import type { RefundWrites } from './journal';
+import type { RefundId } from './primitives';
+import { createPaymentId } from '../core/primitives';
+import {
+  adminId,
+  countEvents,
+  customerId,
+  eventTypesOf,
+  meta,
+  openDb,
+  plain,
+  refundsTables,
+  rejectionOf,
+  schema,
+  typed,
+  userId,
+} from '../test-support';
+import { createRefundsJournal, PaymentsCommandError } from './journal';
+import { createRefundId, refundIdFactory } from './primitives';
+
+const { refunds } = refundsTables;
+const { journal } = typed;
+const { commands, entities } = typed.refunds;
+
+let db: AppDb;
+let client: PGlite;
+let paymentId: PaymentId;
+
+/** The app's command runner, as the service gets it: here it runs on the test database. */
+const run: Parameters<typeof typed.refunds.writes>[0] = (command, input) => journal.run(db, command, input, meta);
+
+function request(overrides: { originalAmount?: number; refundAmount?: number } = {}) {
+  return {
+    paymentId,
+    originalAmount: 100,
+    refundAmount: 25.5,
+    reason: 'customer_request' as const,
+    requestedBy: userId,
+    ...overrides,
+  };
+}
+
+/** A refund moved along its path up to the given status. */
+async function seed(status: 'pending' | 'approved' | 'processing' | 'completed' | 'rejected'): Promise<RefundId> {
+  const refundId = createRefundId();
+  await journal.run(db, commands.requestRefund, { refundId, ...request() }, meta);
+
+  if (status === 'rejected') {
+    await journal.run(db, commands.rejectRefund, { refundId, rejectedBy: adminId, rejectionReason: 'no' }, meta);
+  }
+  if (status === 'approved' || status === 'processing' || status === 'completed') {
+    await journal.run(db, commands.approveRefund, { refundId, approvedBy: adminId }, meta);
+  }
+  if (status === 'processing' || status === 'completed') {
+    await journal.run(db, commands.processRefund, { refundId }, meta);
+  }
+  if (status === 'completed') {
+    await journal.run(db, commands.completeRefund, { refundId, providerRefundId: 're_seed' }, meta);
+  }
+
+  return refundId;
+}
+
+async function rowOf(refundId: RefundId) {
+  const [row] = await db.select().from(refunds).where(eq(refunds.id, refundId));
+
+  return row;
+}
+
+/** The command must be rejected with this code and message, and must leave the journal and the row alone. */
+async function expectRejected(
+  attempt: () => Promise<unknown>,
+  code: PaymentsCommandError['code'],
+  message: string,
+  refundId?: RefundId,
+) {
+  const eventsBefore = await countEvents(db);
+  const rowBefore = refundId ? await rowOf(refundId) : undefined;
+
+  const error = await rejectionOf(attempt());
+
+  expect(error).toBeInstanceOf(PaymentsCommandError);
+  expect(error).toMatchObject({ code, message });
+  expect(await countEvents(db)).toBe(eventsBefore);
+  if (refundId) {
+    expect(await rowOf(refundId)).toEqual(rowBefore);
+  }
+}
+
+beforeAll(async () => {
+  ({ db, client } = await openDb());
+  paymentId = createPaymentId();
+  await journal.run(
+    db,
+    typed.core.commands.initiatePayment,
+    { paymentId, userId, customerId, providerPaymentId: 'pi_refunds', amount: 100 },
+    meta,
+  );
+});
+
+afterAll(async () => {
+  await client.close();
+});
+
+describe('requestRefund', () => {
+  it('stores a pending refund with amounts in the two-decimal form the column holds', async () => {
+    const refundId = createRefundId();
+
+    const result = await journal.run(
+      db,
+      commands.requestRefund,
+      { refundId, ...request(), customerNote: 'Changed my mind', metadata: '{}' },
+      meta,
+    );
+
+    expect(result.events.map(event => event.type)).toEqual(['RefundRequested']);
+    const row = await rowOf(refundId);
+    expect(row).toMatchObject({
+      id: refundId,
+      paymentId,
+      originalAmount: '100.00',
+      refundAmount: '25.50',
+      currency: 'USD',
+      reason: 'customer_request',
+      status: 'pending',
+      providerRefundId: null,
+      providerResponse: null,
+      requestedBy: userId,
+      approvedBy: null,
+      rejectedBy: null,
+      customerNote: 'Changed my mind',
+      internalNotes: null,
+      metadata: '{}',
+      version: 1,
+    });
+    expect(row?.requestedAt).toEqual(result.events[0]?.recordedAt);
+  });
+
+  it('makes an id when the caller has none', async () => {
+    const result = await journal.run(db, commands.requestRefund, request(), meta);
+
+    expect(result.row?.id).toMatch(/^rfnd/);
+  });
+
+  it('rejects a second request with the same id', async () => {
+    const refundId = await seed('pending');
+
+    await expectRejected(
+      () => journal.run(db, commands.requestRefund, { refundId, ...request() }, meta),
+      'CONFLICT',
+      `Refund ${refundId} already exists`,
+      refundId,
+    );
+  });
+
+  it('rejects a refund larger than the payment, so no more money goes back than came in', async () => {
+    await expectRejected(
+      () => journal.run(db, commands.requestRefund, request({ originalAmount: 100, refundAmount: 100.01 }), meta),
+      'BAD_REQUEST',
+      'Refund amount (100.01) cannot exceed original amount (100)',
+    );
+  });
+
+  it('rejects a refund of zero or less', async () => {
+    await expectRejected(
+      () => journal.run(db, commands.requestRefund, request({ refundAmount: 0 }), meta),
+      'BAD_REQUEST',
+      'Refund amount must be positive',
+    );
+  });
+});
+
+describe('approveRefund and rejectRefund', () => {
+  it('approves a pending refund and records who approved it and when', async () => {
+    const refundId = await seed('pending');
+
+    const result = await journal.run(db, commands.approveRefund, { refundId, approvedBy: adminId }, meta);
+
+    expect(result.events.map(event => event.type)).toEqual(['RefundApproved']);
+    const row = await rowOf(refundId);
+    expect(row).toMatchObject({ status: 'approved', approvedBy: adminId, version: 2 });
+    expect(row?.approvedAt).toEqual(result.events[0]?.recordedAt);
+  });
+
+  it('rejects approving a refund twice, so the provider is not asked to refund twice', async () => {
+    const refundId = await seed('approved');
+
+    await expectRejected(
+      () => journal.run(db, commands.approveRefund, { refundId, approvedBy: adminId }, meta),
+      'CONFLICT',
+      'Cannot approve refund with status approved',
+      refundId,
+    );
+  });
+
+  it('rejects a pending refund and records who rejected it and why', async () => {
+    const refundId = await seed('pending');
+
+    const result = await journal.run(
+      db,
+      commands.rejectRefund,
+      { refundId, rejectedBy: adminId, rejectionReason: 'Outside the refund window' },
+      meta,
+    );
+
+    expect(result.events.map(event => event.type)).toEqual(['RefundRejected']);
+    expect(await rowOf(refundId)).toMatchObject({
+      status: 'rejected',
+      rejectedBy: adminId,
+      rejectionReason: 'Outside the refund window',
+      version: 2,
+    });
+  });
+
+  it('rejects rejecting a refund that was already approved', async () => {
+    const refundId = await seed('approved');
+
+    await expectRejected(
+      () => journal.run(db, commands.rejectRefund, { refundId, rejectedBy: adminId, rejectionReason: 'late' }, meta),
+      'CONFLICT',
+      'Cannot reject refund with status approved',
+      refundId,
+    );
+  });
+});
+
+describe('processRefund, completeRefund and failRefund', () => {
+  it('starts processing an approved refund without a provider refund id (the provider has not answered yet)', async () => {
+    const refundId = await seed('approved');
+
+    const result = await journal.run(db, commands.processRefund, { refundId }, meta);
+
+    expect(result.events.map(event => event.type)).toEqual(['RefundProcessed']);
+    const row = await rowOf(refundId);
+    expect(row).toMatchObject({ status: 'processing', providerRefundId: null, version: 3 });
+    expect(row?.processedAt).toEqual(result.events[0]?.recordedAt);
+  });
+
+  it('rejects processing a refund nobody approved', async () => {
+    const refundId = await seed('pending');
+
+    await expectRejected(
+      () => journal.run(db, commands.processRefund, { refundId }, meta),
+      'CONFLICT',
+      'Cannot process refund with status pending. Must be approved first.',
+      refundId,
+    );
+  });
+
+  it('completes a processing refund and stores the provider refund id that arrives with completion', async () => {
+    const refundId = await seed('processing');
+
+    const result = await journal.run(
+      db,
+      commands.completeRefund,
+      { refundId, providerRefundId: 're_123', providerResponse: '{"id":"re_123"}' },
+      meta,
+    );
+
+    expect(result.events.map(event => event.type)).toEqual(['RefundCompleted']);
+    const row = await rowOf(refundId);
+    expect(row).toMatchObject({
+      status: 'completed',
+      providerRefundId: 're_123',
+      providerResponse: '{"id":"re_123"}',
+      version: 4,
+    });
+    expect(row?.completedAt).toEqual(result.events[0]?.recordedAt);
+  });
+
+  it('rejects completing a refund that is not being processed', async () => {
+    const refundId = await seed('approved');
+
+    await expectRejected(
+      () => journal.run(db, commands.completeRefund, { refundId, providerRefundId: 're_1' }, meta),
+      'CONFLICT',
+      'Cannot complete refund with status approved. Must be processing first.',
+      refundId,
+    );
+  });
+
+  it('fails a processing refund and keeps the error as the JSON the service stored before the journal', async () => {
+    const refundId = await seed('processing');
+
+    const result = await journal.run(db, commands.failRefund, { refundId, errorMessage: 'charge_disputed' }, meta);
+
+    expect(result.events.map(event => event.type)).toEqual(['RefundFailed']);
+    expect(await rowOf(refundId)).toMatchObject({
+      status: 'failed',
+      providerResponse: '{"error":"charge_disputed"}',
+      version: 4,
+    });
+  });
+
+  it('rejects failing a refund that already completed: the money went back', async () => {
+    const refundId = await seed('completed');
+
+    await expectRejected(
+      () => journal.run(db, commands.failRefund, { refundId, errorMessage: 'late' }, meta),
+      'CONFLICT',
+      'Cannot fail refund with status completed. Must be processing first.',
+      refundId,
+    );
+  });
+
+  it.each(['approveRefund', 'rejectRefund', 'processRefund', 'completeRefund', 'failRefund'] as const)(
+    '%s rejects a refund that is not there',
+    async name => {
+      const refundId = createRefundId();
+      const attempts = {
+        approveRefund: () => journal.run(db, commands.approveRefund, { refundId, approvedBy: adminId }, meta),
+        rejectRefund: () =>
+          journal.run(db, commands.rejectRefund, { refundId, rejectedBy: adminId, rejectionReason: 'x' }, meta),
+        processRefund: () => journal.run(db, commands.processRefund, { refundId }, meta),
+        completeRefund: () => journal.run(db, commands.completeRefund, { refundId, providerRefundId: 're_1' }, meta),
+        failRefund: () => journal.run(db, commands.failRefund, { refundId, errorMessage: 'x' }, meta),
+      };
+
+      await expectRejected(attempts[name], 'NOT_FOUND', `Refund ${refundId} not found`);
+    },
+  );
+});
+
+describe('writes(run): what RefundService calls', () => {
+  it('runs a whole refund, one event per step, and the row replays from its events', async () => {
+    const writes = typed.refunds.writes(run);
+    const refundId = createRefundId();
+
+    const requested = await writes.requestRefund({ refundId, ...request() });
+    expect(requested).toMatchObject({ id: refundId, status: 'pending', refundAmount: '25.50' });
+    expect(requested).not.toHaveProperty('version');
+
+    expect(await writes.approveRefund({ refundId, approvedBy: adminId })).toMatchObject({ status: 'approved' });
+    expect(await writes.processRefund({ refundId })).toMatchObject({ status: 'processing' });
+    expect(await writes.completeRefund({ refundId, providerRefundId: 're_life' })).toMatchObject({
+      status: 'completed',
+      providerRefundId: 're_life',
+    });
+
+    expect(await eventTypesOf(db, 'refund', refundId)).toEqual([
+      'RefundRequested',
+      'RefundApproved',
+      'RefundProcessed',
+      'RefundCompleted',
+    ]);
+    expect(await journal.verify(db, entities.refund, refundId)).toEqual({ ok: true });
+  });
+
+  it('runs the reject and the fail commands too', async () => {
+    const writes = typed.refunds.writes(run);
+    const rejected = await seed('pending');
+    const failed = await seed('processing');
+
+    expect(await writes.rejectRefund({ refundId: rejected, rejectedBy: adminId, rejectionReason: 'no' })).toMatchObject(
+      { status: 'rejected' },
+    );
+    expect(await writes.failRefund({ refundId: failed, errorMessage: 'boom' })).toMatchObject({ status: 'failed' });
+    expect(await eventTypesOf(db, 'refund', rejected)).toEqual(['RefundRequested', 'RefundRejected']);
+    expect(await eventTypesOf(db, 'refund', failed)).toEqual([
+      'RefundRequested',
+      'RefundApproved',
+      'RefundProcessed',
+      'RefundFailed',
+    ]);
+    expect(await journal.verify(db, entities.refund, failed)).toEqual({ ok: true });
+  });
+
+  it('lets a rejected rule reach the service as a `PaymentsCommandError`, so the app can map it to an API answer', async () => {
+    const writes = typed.refunds.writes(run);
+    const refundId = await seed('pending');
+
+    const error = await rejectionOf(writes.processRefund({ refundId }));
+
+    expect(error).toBeInstanceOf(PaymentsCommandError);
+    expect(error).toMatchObject({ code: 'CONFLICT' });
+  });
+});
+
+describe('types', () => {
+  it('takes the journal definitions of an app (its own transaction and database types) and the untyped form', () => {
+    // Both journals are built in `test-support.ts`; `tsc` checks that the factory accepts each `j`.
+    expectTypeOf(typed.refunds.writes).parameter(0).toEqualTypeOf<CommandRunner<{ actorId: string }, AppTx>>();
+    expectTypeOf(plain.refunds.writes).parameter(0).toEqualTypeOf<CommandRunner<{ actorId: string }>>();
+    expectTypeOf(typed.refunds.writes).returns.toEqualTypeOf<RefundWrites>();
+  });
+
+  it('keeps `version` out of the rows the service gets', () => {
+    expectTypeOf<Awaited<ReturnType<RefundWrites['requestRefund']>>>().not.toHaveProperty('version');
+  });
+});
+
+/** A table shaped like the one an app had before the journal: no `version` column. */
+const legacyRefunds = schema.table('legacy_refunds', { id: refundIdFactory.primaryColumn() });
+
+/** Never called: `tsc` checks it. An app that forgot the schema change must fail to compile, not fail at run time. */
+function rejectsATableWithoutVersion() {
+  // @ts-expect-error -- a table without the `version` column cannot hold a journal entity
+  createRefundsJournal(plain.j, { refunds: legacyRefunds });
+}
+void rejectsATableWithoutVersion;

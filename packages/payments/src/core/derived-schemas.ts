@@ -35,17 +35,18 @@ export function createCoreDerivedSchemas({
   });
   const customerUpdateSchema = customerInsertSchema.partial().omit({ id: true, userId: true });
 
-  const subscriptionSelectSchema = createSelectSchema(subscriptions);
+  // `version` belongs to the journal: it is not part of what the API reads or writes
+  const subscriptionSelectSchema = createSelectSchema(subscriptions).omit({ version: true });
   const subscriptionInsertSchema = createInsertSchema(subscriptions, {
     currentPeriodStart: z.date(),
     currentPeriodEnd: z.date(),
     trialStart: z.date().optional(),
     trialEnd: z.date().optional(),
     canceledAt: z.date().optional(),
-  });
+  }).omit({ version: true });
   const subscriptionUpdateSchema = subscriptionInsertSchema.partial().omit({ id: true, userId: true });
 
-  const paymentSelectSchema = createSelectSchema(payments);
+  const paymentSelectSchema = createSelectSchema(payments).omit({ version: true });
   const paymentInsertSchema = createInsertSchema(payments, {
     amount: z.number().positive().max(999_999.99),
     currency: z.string().length(3).toUpperCase(),
@@ -53,7 +54,7 @@ export function createCoreDerivedSchemas({
     failureReason: z.string().max(1000).optional(),
     receiptUrl: z.url().optional(),
     refundedAmount: z.number().min(0).max(999_999.99).default(0),
-  });
+  }).omit({ version: true });
   const paymentUpdateSchema = paymentInsertSchema.partial().omit({ id: true, userId: true });
 
   const webhookEventSelectSchema = createSelectSchema(webhookEvents);

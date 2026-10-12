@@ -6,8 +6,9 @@ import type { PaymentId } from '../core/primitives';
 import type { RefundId, RefundReason } from './primitives';
 import type { RefundsTables } from './tables';
 
-export type Refund = InferSelectModel<RefundsTables['refunds']>;
-export type NewRefund = InferInsertModel<RefundsTables['refunds']>;
+// `version` belongs to the journal: rows leave the package without it, and no caller sets it
+export type Refund = Omit<InferSelectModel<RefundsTables['refunds']>, 'version'>;
+export type NewRefund = Omit<InferInsertModel<RefundsTables['refunds']>, 'version'>;
 export type UpdateRefund = Partial<Omit<NewRefund, 'id'>>;
 
 export type RefundRequestData = {

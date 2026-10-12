@@ -42,8 +42,9 @@ export type Customer = InferSelectModel<CoreTables['customers']>;
 export type NewCustomer = InferInsertModel<CoreTables['customers']>;
 export type UpdateCustomer = Partial<Omit<NewCustomer, 'id' | 'createdAt' | 'updatedAt'>>;
 
-export type Subscription = InferSelectModel<CoreTables['subscriptions']>;
-export type NewSubscription = InferInsertModel<CoreTables['subscriptions']>;
+// `version` belongs to the journal: rows leave the package without it, and no caller sets it
+export type Subscription = Omit<InferSelectModel<CoreTables['subscriptions']>, 'version'>;
+export type NewSubscription = Omit<InferInsertModel<CoreTables['subscriptions']>, 'version'>;
 export type UpdateSubscription = Partial<Omit<NewSubscription, 'id' | 'createdAt' | 'updatedAt'>>;
 
 export type SubscriptionWithPlan = Subscription & {
@@ -56,8 +57,8 @@ export type SubscriptionWithRelations = Subscription & {
   customer?: Customer;
 };
 
-export type Payment = InferSelectModel<CoreTables['payments']>;
-export type NewPayment = InferInsertModel<CoreTables['payments']>;
+export type Payment = Omit<InferSelectModel<CoreTables['payments']>, 'version'>;
+export type NewPayment = Omit<InferInsertModel<CoreTables['payments']>, 'version'>;
 export type UpdatePayment = Partial<Omit<NewPayment, 'id' | 'createdAt' | 'updatedAt'>>;
 
 export type PaymentWithRelations = Payment & {

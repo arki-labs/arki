@@ -65,6 +65,7 @@
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
@@ -84,8 +85,12 @@
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
+    "@arki/journal": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*"
+    "@arki/vitest-config": "workspace:*",
+    "@electric-sql/pglite": "catalog:",
+    "drizzle-kit": "catalog:drizzle",
+    "vitest": "catalog:"
   }
 }
