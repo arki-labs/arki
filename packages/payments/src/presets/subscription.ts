@@ -2,10 +2,14 @@ import type Stripe from 'stripe';
 
 import type { UserId } from '@arki/auth/ids';
 
+import type { CoreWrites } from '../core/journal';
 import { subscriptionStatusValues } from '../core/primitives';
 import type { StripeProvider } from '../core/providers/stripe-provider';
 import type { PaymentRepository } from '../core/repository';
-import type { NewSubscription, PlanId, SubscriptionStatus } from '../core/types';
+import type { PlanId, SubscriptionStatus } from '../core/types';
+
+/** The one journal write a webhook preset makes. A `CoreWrites` fits. */
+type SubscriptionSync = Pick<CoreWrites, 'syncSubscription'>;
 
 /**
  * Project a Stripe Subscription object onto our `subscriptions` table.
@@ -13,21 +17,25 @@ import type { NewSubscription, PlanId, SubscriptionStatus } from '../core/types'
  * This is the "webhook in" half of the subscription preset: Stripe Checkout creates the
  * subscription on Stripe's side, then `customer.subscription.{created,updated,deleted}` webhooks
  * carry the truth back here. We resolve our local customer row (created at checkout) by the Stripe
- * customer id, map the Stripe fields onto the table, and **upsert by `providerSubscriptionId`** so
- * repeated or out-of-order webhook deliveries converge to one row rather than duplicating.
+ * customer id, map the Stripe fields to a provider snapshot, and hand it to the journal command
+ * `syncSubscription`. The command **upserts by `providerSubscriptionId`**, so repeated or
+ * out-of-order webhook deliveries converge to one row, and a delivery that changes nothing
+ * writes no event.
  *
  * Cancellation needs no special case: a deleted/canceled subscription arrives with
  * `status: 'canceled'`, which the status map carries straight through.
  */
 export async function projectStripeSubscription(params: {
-  repo: PaymentRepository;
+  repo: Pick<PaymentRepository, 'findCustomerByProviderCustomerId'>;
+  /** The app's journal writes: `paymentsJournal.writes(run)`. */
+  writes: SubscriptionSync;
   subscription: Stripe.Subscription;
   /** Our plan-row id for the price this subscription is on (resolved from the preset config). */
   planId: PlanId;
   /** Provider status → our `SubscriptionStatus` (pass `provider.mapSubscriptionStatus`). */
   mapStatus: (providerStatus: string) => SubscriptionStatus;
 }): Promise<void> {
-  const { repo, subscription: sub, planId, mapStatus } = params;
+  const { repo, writes, subscription: sub, planId, mapStatus } = params;
 
   const stripeCustomerId = typeof sub.customer === 'string' ? sub.customer : sub.customer.id;
   const customer = await repo.findCustomerByProviderCustomerId(stripeCustomerId, 'stripe');
@@ -47,7 +55,7 @@ export async function projectStripeSubscription(params: {
     throw new Error(`[@arki/payments] subscription ${sub.id}: no line items to read the period from`);
   }
 
-  const fields: NewSubscription = {
+  await writes.syncSubscription({
     userId: customer.userId,
     customerId: customer.id,
     planId,
@@ -59,15 +67,8 @@ export async function projectStripeSubscription(params: {
     trialEnd: sub.trial_end ? new Date(sub.trial_end * 1000) : null,
     cancelAtPeriodEnd: sub.cancel_at_period_end,
     canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000) : null,
-    metadata: sub.metadata as Record<string, unknown>,
-  };
-
-  const existing = await repo.findSubscriptionByProviderSubscriptionId(sub.id);
-  if (existing) {
-    await repo.updateSubscription(existing.id, fields);
-  } else {
-    await repo.createSubscription(fields);
-  }
+    metadata: sub.metadata,
+  });
 }
 
 /* ── status mapping ─────────────────────────────────────────────────────────────────────────── */
@@ -121,7 +122,7 @@ const PRO_GRANTING_STATUSES: ReadonlySet<SubscriptionStatus> = new Set<Subscript
  * table, so this one read answers "is Pro?" regardless of where the purchase happened.
  */
 export async function getEntitlement(
-  repo: PaymentRepository,
+  repo: Pick<PaymentRepository, 'findSubscriptionsByUserId'>,
   userId: UserId,
 ): Promise<Entitlement> {
   const subscriptions = await repo.findSubscriptionsByUserId(userId);
@@ -144,7 +145,13 @@ export type PriceToPlan = { priceId: string; planId: PlanId };
 
 export type SubscriptionBillingConfig = {
   provider: StripeProvider;
-  repo: PaymentRepository;
+  /** Reads, and the customer row made at checkout. A `PaymentRepository` fits. */
+  repo: Pick<
+    PaymentRepository,
+    'findCustomerByUserId' | 'createCustomer' | 'findCustomerByProviderCustomerId' | 'findSubscriptionsByUserId'
+  >;
+  /** Every change of a `subscriptions` row goes through the journal: `paymentsJournal.writes(run)`. */
+  writes: SubscriptionSync;
   /** Every price the app sells, each mapped to its local plan row. */
   prices: readonly PriceToPlan[];
   /** Where Checkout sends the browser back to. */
@@ -181,7 +188,7 @@ export type SubscriptionBilling = {
  * projection resolves the owning user via the Stripe customer id).
  */
 export function createSubscriptionBilling(config: SubscriptionBillingConfig): SubscriptionBilling {
-  const { provider, repo, urls, trialDays, automaticTax } = config;
+  const { provider, repo, writes, urls, trialDays, automaticTax } = config;
   const planByPrice = new Map(config.prices.map((p) => [p.priceId, p.planId]));
 
   return {
@@ -235,6 +242,7 @@ export function createSubscriptionBilling(config: SubscriptionBillingConfig): Su
         }
         await projectStripeSubscription({
           repo,
+          writes,
           subscription,
           planId,
           mapStatus: toSubscriptionStatus,

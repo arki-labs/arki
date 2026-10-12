@@ -10,7 +10,6 @@ import type {
   CustomerId,
   NewCustomer,
   NewPlan,
-  NewSubscription,
   NewWebhookEvent,
   Payment,
   PaymentId,
@@ -27,7 +26,6 @@ import type {
   SubscriptionWithRelations,
   UpdateCustomer,
   UpdatePlan,
-  UpdateSubscription,
   UpdateWebhookEvent,
   WebhookEvent,
   WebhookEventType,
@@ -266,17 +264,6 @@ export class PaymentRepository {
   }
 
   // Subscription methods
-  // `createSubscription` and `updateSubscription` stay for the presets (`presets/subscription.ts`,
-  // `presets/revenuecat.ts`), which still write directly. Every other writer uses the journal commands.
-  async createSubscription(data: NewSubscription): Promise<Subscription> {
-    const result = await this.db.insert(this.subscriptions).values(data).returning();
-    const row = result[0];
-    if (!row) {
-      throw new Error('Failed to create subscription');
-    }
-    return row as Subscription;
-  }
-
   async findSubscriptionById(id: SubscriptionId): Promise<SubscriptionWithPlan | null> {
     const subscription = await this.q.subscriptions.findFirst({
       where: { id },
@@ -332,19 +319,6 @@ export class PaymentRepository {
       with: { plan: true, customer: true },
       orderBy: (t) => [t.currentPeriodEnd],
     });
-  }
-
-  async updateSubscription(id: SubscriptionId, data: UpdateSubscription): Promise<Subscription> {
-    const result = await this.db
-      .update(this.subscriptions)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(this.subscriptions.id, id))
-      .returning();
-    const row = result[0];
-    if (!row) {
-      throw new Error('Failed to update subscription or subscription not found');
-    }
-    return row as Subscription;
   }
 
   async getSubscription(id: SubscriptionId): Promise<Subscription | null> {

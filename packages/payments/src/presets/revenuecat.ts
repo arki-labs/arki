@@ -4,8 +4,8 @@ import { z } from '@arki/contracts';
 
 import type { UserId } from '@arki/auth/ids';
 
-import type { PaymentRepository } from '../core/repository';
-import type { CustomerId, NewSubscription, PlanId, SubscriptionStatus } from '../core/types';
+import type { CoreWrites } from '../core/journal';
+import type { CustomerId, PlanId, SubscriptionStatus } from '../core/types';
 
 /**
  * RevenueCat → our `subscriptions` table — the "native in" half of the cross-platform entitlement
@@ -101,19 +101,24 @@ function mapRevenueCatStatus(
 const NON_EXPIRING_MS = 100 * 365 * 24 * 60 * 60 * 1000;
 
 /**
- * Project a (validated) RevenueCat event onto our `subscriptions` table, upserting by
- * `original_transaction_id`. `customer` and `planId` are resolved by the consuming app (the customer
- * find-or-created from its user table, the plan mapped from `product_id`).
+ * Project a (validated) RevenueCat event onto our `subscriptions` table through the journal command
+ * `syncSubscription`, which upserts by `original_transaction_id`. `customer` and `planId` are
+ * resolved by the consuming app (the customer find-or-created from its user table, the plan mapped
+ * from `product_id`).
+ *
+ * A repeated delivery writes no event. RevenueCat sends no cancel time, so `canceledAt` is "now" on
+ * every `EXPIRATION`; the command keeps the time of the first one once the row is canceled.
  *
  * Returns `{ handled: false }` for event types that aren't a subscription-state change.
  */
 export async function projectRevenueCatEvent(params: {
-  repo: PaymentRepository;
+  /** The app's journal writes: `paymentsJournal.writes(run)`. */
+  writes: Pick<CoreWrites, 'syncSubscription'>;
   event: RevenueCatEvent;
   customer: { id: CustomerId; userId: UserId };
   planId: PlanId;
 }): Promise<{ handled: boolean }> {
-  const { repo, event, customer, planId } = params;
+  const { writes, event, customer, planId } = params;
 
   const mapped = mapRevenueCatStatus(event.type, event.period_type);
   if (!mapped) return { handled: false };
@@ -129,7 +134,7 @@ export async function projectRevenueCatEvent(params: {
     : new Date(periodStart.getTime() + NON_EXPIRING_MS);
   const isTrial = event.period_type === 'TRIAL';
 
-  const fields: NewSubscription = {
+  await writes.syncSubscription({
     userId: customer.userId,
     customerId: customer.id,
     planId,
@@ -142,13 +147,6 @@ export async function projectRevenueCatEvent(params: {
     cancelAtPeriodEnd: mapped.cancelAtPeriodEnd,
     canceledAt: mapped.status === 'canceled' ? new Date() : null,
     metadata: { provider: 'revenuecat', store: event.store ?? null, environment: event.environment ?? null },
-  };
-
-  const existing = await repo.findSubscriptionByProviderSubscriptionId(providerSubscriptionId);
-  if (existing) {
-    await repo.updateSubscription(existing.id, fields);
-  } else {
-    await repo.createSubscription(fields);
-  }
+  });
   return { handled: true };
 }
