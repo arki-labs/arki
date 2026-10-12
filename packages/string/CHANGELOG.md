@@ -23,7 +23,7 @@
   - **New:** `readability(text, { language: 'es' | 'de' })` returns that language's score set; `analyze(text)` (in `/metrics`) is public and every readability, vocabulary and metrics function accepts the analysis in place of the string, so one tokenization serves many scores and custom formulas.
   - **New:** `truncate` and `excerpt` take `boundary: 'sentence'`; `excerpt` also takes `'word'`. Edges snap inward and never cross the match. `truncate` always drops whitespace before the ellipsis.
   - **New:** `fold` in `/unicode` (search-key form: lowercase, marks stripped, `ß`/`ø`/`ł`… spelled out), `/distance` with `levenshtein`, `diceCoefficient`, `jaroWinkler` measured in graphemes, `dedent` in `/format` (function or template tag), `initials(text, { singleWord })`. `str()` gains `fold()` and `dedent()`.
-  - **Deprecated:** `ENGLISH_STOP_WORDS`; use `STOP_WORDS.en`. Removed in 1.0.
+  - **Removed** (no compatibility shims before 1.0): `ENGLISH_STOP_WORDS` (use `STOP_WORDS.en`), the `base64` object (use `toBase64`/`tryFromBase64` with `{ alphabet: 'url' }` for the URL variants), and `countCharacters` with its `/count-characters` subpath (use `length()` for graphemes or native `.length` for UTF-16 units).
 
 ## 0.1.0
 

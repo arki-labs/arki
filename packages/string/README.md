@@ -85,9 +85,9 @@ decomposed form.
 | `/interpolate` | `interpolate`                                                                                                                                                                                                                                                                                      |
 | `/slug`        | `slugify`, `transliterate`, `rulesets` (per-language rule sets)                                                                                                                                                                                                                                    |
 | `/slug-cjk`    | `chinese`, `korean` opt-in rule sets                                                                                                                                                                                                                                                               |
-| `/base64`      | `toBase64`, `fromBase64`, `tryFromBase64`, `bytesToBase64`, `base64ToBytes`, `utf8Encode`, `utf8Decode`, `byteLength`, `base64` (compat object)                                                                                                                                                    |
+| `/base64`      | `toBase64`, `fromBase64`, `tryFromBase64`, `bytesToBase64`, `base64ToBytes`, `utf8Encode`, `utf8Decode`, `byteLength`                                                                                                                                                                              |
 | `/readability` | `syllableCount`, `fleschReadingEase`, `fleschKincaidGrade`, `gunningFog`, `smogIndex`, `colemanLiauIndex`, `automatedReadabilityIndex`, `lix`, `fleschReadingEaseLevel`, `readability`, `fernandezHuerta`, `szigrisztPazos`, `fleschAmstad`, `wienerSachtextformel`, `readingTime`, `speakingTime` |
-| `/keywords`    | `keywords`, `STOP_WORDS`, `ENGLISH_STOP_WORDS`                                                                                                                                                                                                                                                     |
+| `/keywords`    | `keywords`, `STOP_WORDS`                                                                                                                                                                                                                                                                           |
 | `/vocabulary`  | `uniqueWordCount`, `wordFrequencies`, `lexicalDiversity`, `yulesK`, `simpsonsDiversityIndex`, `wordLengthStats`                                                                                                                                                                                    |
 | `/metrics`     | `textMetrics` (everything above in one object), `analyze`                                                                                                                                                                                                                                          |
 | `/distance`    | `levenshtein`, `diceCoefficient`, `jaroWinkler`                                                                                                                                                                                                                                                    |
@@ -247,9 +247,6 @@ toBase64('f', { alphabet: 'url' }); // 'Zg'  (url defaults to no padding)
 base64ToBytes('/w=='); // Uint8Array [255]
 fromBase64('/w=='); // throws TypeError: not UTF-8
 ```
-
-The `base64` object (`encode`, `decode`, `urlEncode`, `urlDecode`) is kept for
-existing consumers; its decoders return `null` on malformed input.
 
 ### Slugs
 

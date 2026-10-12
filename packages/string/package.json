@@ -128,11 +128,6 @@
       "import": "./dist/fluent.js",
       "default": "./dist/fluent.js"
     },
-    "./count-characters": {
-      "types": "./dist/count/countCharacters.d.ts",
-      "import": "./dist/count/countCharacters.js",
-      "default": "./dist/count/countCharacters.js"
-    },
     "./package.json": "./package.json"
   },
   "files": [

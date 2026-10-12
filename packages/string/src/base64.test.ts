@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  base64,
   base64ToBytes,
   byteLength,
   bytesToBase64,
@@ -117,18 +116,5 @@ describe('strict decoding', () => {
     [[0xff], 'invalid lead'],
   ])('utf8Decode rejects %j (%s)', bytes => {
     expect(() => utf8Decode(new Uint8Array(bytes))).toThrow(TypeError);
-  });
-});
-
-describe('compatibility object', () => {
-  it('keeps the encode/decode/urlEncode/urlDecode shape', () => {
-    expect(base64.encode('hello')).toBe('aGVsbG8=');
-    expect(base64.decode('aGVsbG8=')).toBe('hello');
-    expect(base64.decode('aGVsbG8')).toBeNull();
-    expect(base64.urlEncode('hello?world=1')).toBe('aGVsbG8_d29ybGQ9MQ');
-    expect(base64.urlDecode('aGVsbG8_d29ybGQ9MQ')).toBe('hello?world=1');
-    expect(base64.urlDecode('not base64!')).toBeNull();
-    expect(base64.encode(new Uint8Array([1, 2, 3]))).toBe('AQID');
-    expect(base64.encode(new Uint8Array([1, 2, 3]).buffer)).toBe('AQID');
   });
 });

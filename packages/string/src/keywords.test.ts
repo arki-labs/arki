@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ENGLISH_STOP_WORDS, keywords, STOP_WORDS } from './keywords.js';
+import { keywords, STOP_WORDS } from './keywords.js';
 
 const TEXT = 'Machine learning is fun. Machine learning, deep learning: learning machines.';
 
@@ -31,7 +31,7 @@ describe('keywords', () => {
       { keyword: 'it', occurrences: 1, percentage: (1 / 3) * 100 },
     ]);
     expect(keywords('İstanbul istanbul', { locale: 'tr' })).toHaveLength(1);
-    expect(ENGLISH_STOP_WORDS.includes('the')).toBe(true);
+    expect(STOP_WORDS.en.includes('the')).toBe(true);
     expect(keywords('')).toEqual([]);
     expect(() => keywords(TEXT, { length: 0 })).toThrow(RangeError);
   });
@@ -57,6 +57,5 @@ describe('languages', () => {
     expect(keywords('casa pentru masă', { language: 'ro' }).map(entry => entry.keyword)).toEqual(['casa', 'masă']);
     expect(keywords('casa pentru masă').map(entry => entry.keyword)).toContain('pentru');
     expect(STOP_WORDS.de).toContain('und');
-    expect(ENGLISH_STOP_WORDS).toBe(STOP_WORDS.en);
   });
 });

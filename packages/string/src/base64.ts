@@ -201,27 +201,3 @@ export function tryFromBase64(encoded: string, options: Base64Options = {}): str
     throw error;
   }
 }
-
-function toBytes(data: string | Uint8Array | ArrayBuffer): Uint8Array {
-  if (typeof data === 'string') return utf8Encode(data);
-  return data instanceof Uint8Array ? data : new Uint8Array(data);
-}
-
-/**
- * Object-style API kept for existing consumers. `decode`/`urlDecode` return
- * `null` for malformed input; use `fromBase64` when you want an exception.
- */
-export const base64 = {
-  encode(data: string | Uint8Array | ArrayBuffer): string {
-    return bytesToBase64(toBytes(data));
-  },
-  urlEncode(data: string | Uint8Array | ArrayBuffer): string {
-    return bytesToBase64(toBytes(data), { alphabet: 'url' });
-  },
-  decode(encoded: string): string | null {
-    return tryFromBase64(encoded);
-  },
-  urlDecode(encoded: string): string | null {
-    return tryFromBase64(encoded, { alphabet: 'url' });
-  },
-} as const;
