@@ -1,0 +1,60 @@
+// Cross-runtime smoke test. Runs the BUILT package (dist/) under Node, Bun and
+// Deno via `bun run test:runtimes`, and is bundled for the browser target.
+// One call per feature, plus one past 2^53; the unit tests cover the details.
+
+import { toRational } from '../dist/exact.js';
+import { formatMoney } from '../dist/format.js';
+import { Currency, factor, Money, money, sum } from '../dist/index.js';
+
+const plain = text => text.replaceAll(/[\u00A0\u202F]/g, ' ');
+const vat = factor('0.19');
+
+const checks = [
+  ['parse and print', money('19.99', 'EUR').toString(), '19.99 EUR'],
+  ['exact add', money('0.10', 'EUR').plus(money('0.20', 'EUR')).toString(), '0.30 EUR'],
+  ['times with rounding', money('9.99', 'EUR').times(vat, 'halfEven').toString(), '1.90 EUR'],
+  ['allocate', money(100, 'EUR').allocate([1, 1, 1]).map(String).join(','), '33.34 EUR,33.33 EUR,33.33 EUR'],
+  ['ISO scale', `${money(1, 'KWD')}`, '1.000 KWD'],
+  [
+    'unknown code rejected',
+    (() => {
+      try {
+        Currency.of('ZZZ');
+        return 'accepted';
+      } catch (e) {
+        return e.name;
+      }
+    })(),
+    'UnknownCurrencyError',
+  ],
+  [
+    'past 2^53',
+    sum([Money.fromMinor(2n ** 60n, 'USD'), money('0.01', 'USD')])
+      .toMinorBigInt()
+      .toString(),
+    String(2n ** 60n + 1n),
+  ],
+  ['JSON', JSON.stringify(money('1.5', 'EUR')), '{"amount":"1.50","currency":"EUR"}'],
+  ['rational bridge', toRational(money('19.90', 'EUR')).toString(), '199/10'],
+  ['format de-DE', plain(formatMoney(money('1234.5', 'EUR'), { locale: 'de-DE' })), '1.234,50 €'],
+];
+
+let failed = 0;
+for (const [name, actual, expected] of checks) {
+  if (actual === expected) continue;
+  failed++;
+  console.log(`FAIL ${name}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+}
+const runtime =
+  typeof Deno !== 'undefined'
+    ? 'deno'
+    : typeof Bun !== 'undefined'
+      ? 'bun'
+      : typeof window !== 'undefined'
+        ? 'browser'
+        : 'node';
+if (failed > 0) {
+  console.log(`${runtime}: ${failed} smoke checks FAILED`);
+  throw new Error('smoke failed');
+}
+console.log(`${runtime}: ${checks.length} smoke checks passed`);

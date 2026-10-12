@@ -1,0 +1,99 @@
+{
+  "name": "@arki/money",
+  "version": "0.0.1",
+  "private": false,
+  "description": "Exact, fast money for every JavaScript runtime — amounts kept as whole units (plain numbers, bigint only when huge), a shipped ISO 4217 currency table, exact-or-throw rounding, fair allocation, and currencies checked by the type system.",
+  "keywords": [
+    "arki",
+    "typescript",
+    "money",
+    "currency",
+    "iso4217",
+    "monetary",
+    "decimal",
+    "rounding",
+    "allocate",
+    "bigint",
+    "finance",
+    "price"
+  ],
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/money"
+  },
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./currency": {
+      "types": "./dist/currency.d.ts",
+      "import": "./dist/currency.js",
+      "default": "./dist/currency.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "default": "./dist/errors.js"
+    },
+    "./exact": {
+      "types": "./dist/exact.d.ts",
+      "import": "./dist/exact.js",
+      "default": "./dist/exact.js"
+    },
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "import": "./dist/format.js",
+      "default": "./dist/format.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "scripts": {
+    "bench": "bun run build && node scripts/bench.mjs",
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "generate:iso4217": "node scripts/generate-iso4217.mjs",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:runtimes": "bun run build && node scripts/smoke.mjs && bun scripts/smoke.mjs && if command -v deno >/dev/null; then deno run --no-config --node-modules-dir=manual scripts/smoke.mjs; else echo 'deno not installed: skipped'; fi && bun build scripts/smoke.mjs --target=browser --outdir=.cache/browser-check && node scripts/smoke-browser.mjs",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/math": "workspace:*"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@types/node": "catalog:node",
+    "big.js": "catalog:",
+    "currency.js": "^2.0.4",
+    "dinero.js": "1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
