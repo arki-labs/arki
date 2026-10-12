@@ -2,11 +2,13 @@
 // Deno via `bun run test:runtimes`, and is bundled for the browser target.
 // One call per feature, plus one past 2^53; the unit tests cover the details.
 
+import { MoneyBag } from '../dist/bag.js';
 import { toRational } from '../dist/exact.js';
 import { createConverter, ratesFrom } from '../dist/exchange.js';
 import { formatMoney } from '../dist/format.js';
 import { Currency, factor, Money, money, sum } from '../dist/index.js';
 import { parseMoney } from '../dist/parse.js';
+import { RationalMoney } from '../dist/rational.js';
 import { toStripeAmount } from '../dist/stripe.js';
 
 const plain = text => text.replaceAll(/[\u00A0\u202F]/g, ' ');
@@ -60,6 +62,14 @@ const checks = [
     'convert via base',
     converter.convert(money('1234.56', 'USD'), 'GBP', { rounding: 'halfEven' }).toString(),
     '976.87 GBP',
+  ],
+  ['rational thirds', RationalMoney.of(100, 'EUR').dividedBy(3).times(3).toMoney().toString(), '100.00 EUR'],
+  [
+    'bag rounds once',
+    MoneyBag.of(money('1.07', 'USD'), money('1.06', 'GBP'))
+      .convert(converter, 'EUR', { rounding: 'halfEven' })
+      .toString(),
+    '2.22 EUR',
   ],
   ['stripe ISK', toStripeAmount(money(5, 'ISK')), 500],
   ['format de-DE', plain(formatMoney(money('1234.5', 'EUR'), { locale: 'de-DE' })), '1.234,50 €'],

@@ -1,6 +1,6 @@
 {
   "name": "@arki/money",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": false,
   "description": "Exact, fast money for every JavaScript runtime — amounts kept as whole units (plain numbers, bigint only when huge), a shipped ISO 4217 currency table, exact-or-throw rounding, fair allocation, and currencies checked by the type system.",
   "keywords": [
@@ -78,6 +78,26 @@
       "import": "./dist/stripe.js",
       "default": "./dist/stripe.js"
     },
+    "./rational": {
+      "types": "./dist/rational.d.ts",
+      "import": "./dist/rational.js",
+      "default": "./dist/rational.js"
+    },
+    "./bag": {
+      "types": "./dist/bag.d.ts",
+      "import": "./dist/bag.js",
+      "default": "./dist/bag.js"
+    },
+    "./zod": {
+      "types": "./dist/zod.d.ts",
+      "import": "./dist/zod.js",
+      "default": "./dist/zod.js"
+    },
+    "./drizzle": {
+      "types": "./dist/drizzle.d.ts",
+      "import": "./dist/drizzle.js",
+      "default": "./dist/drizzle.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -98,6 +118,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "generate:iso4217": "node scripts/generate-iso4217.mjs",
     "lint": "eslint .",
+    "size": "bun run build && bun scripts/size.mjs",
     "test": "vitest run",
     "test:runtimes": "bun run build && node scripts/smoke.mjs && bun scripts/smoke.mjs && if command -v deno >/dev/null; then deno run --no-config --node-modules-dir=manual scripts/smoke.mjs; else echo 'deno not installed: skipped'; fi && bun build scripts/smoke.mjs --target=browser --outdir=.cache/browser-check && node scripts/smoke-browser.mjs",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
@@ -111,10 +132,25 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@electric-sql/pglite": "catalog:",
     "@types/node": "catalog:node",
     "big.js": "catalog:",
     "currency.js": "^2.0.4",
-    "dinero.js": "1"
+    "dinero.js": "1",
+    "drizzle-orm": "catalog:drizzle",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "drizzle-orm": ">=1.0.0-rc.4 <2",
+    "zod": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "drizzle-orm": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"

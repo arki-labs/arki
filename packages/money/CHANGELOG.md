@@ -1,5 +1,15 @@
 # @arki/money
 
+## 0.0.3
+
+Added:
+
+- `@arki/money/rational` — `RationalMoney`: an exact fraction of major units that keeps its currency; mixes with `Money`; `toMoney()` rounds once.
+- `@arki/money/bag` — `MoneyBag`: one exact balance per currency, zeros dropped; `convert()` converts every balance exactly and rounds the total once.
+- `@arki/money/zod` — `moneySchema(currency)` (typed `Money<C>`), `anyMoneySchema()`, `moneyInputSchema()` for locale form text, `currencyCodeSchema`. Optional peer `zod` 4.
+- `@arki/money/drizzle` — Postgres columns `moneyMinor` (bigint ↔ `Money<C>`), `moneyDecimal` (numeric), `moneyJson` (jsonb, any currency); text codecs, no floats; wrong currency or needed rounding throws on write. Optional peer `drizzle-orm` 1.x. Round trip tested on PGlite, including 2^62.
+- `bun run size`: per-entry gzip budgets.
+
 ## 0.0.2
 
 Added:

@@ -142,6 +142,44 @@ fromStripeAmount(1099, 'usd'); // 10.99 USD
 
 Rules come from docs.stripe.com/currencies, checked on 2026-10-12 (`STRIPE_RULES_VERSION`). Stripe documents no rule for currencies with 3 or 4 decimals, so those throw instead of being guessed. For other providers, describe their units with `toProviderUnits(money, { scale, step })` and `fromProviderUnits` from `@arki/money/provider`.
 
+## Exact steps and several currencies
+
+```ts
+import { MoneyBag } from '@arki/money/bag';
+import { RationalMoney } from '@arki/money/rational';
+
+const third = RationalMoney.of(100, 'EUR').dividedBy(3); // '100/3 EUR', no rounding yet
+third.plus(third).plus(third).toMoney(); // 100.00 EUR — three rounded thirds would give 99.99
+third.times('1.19').toMoney({ rounding: 'halfEven' }); // 39.67 EUR, rounded once
+
+const wallet = MoneyBag.of(money('1.07', 'USD'), money('1.06', 'GBP')); // two balances, never one fake total
+wallet.convert(fx, 'EUR', { rounding: 'halfEven' }); // 2.22 EUR; rounding each balance first gives 2.23
+```
+
+A `RationalMoney` is an exact fraction of major units that keeps its currency, so EUR and USD still cannot mix halfway through a calculation. A `MoneyBag` holds one exact balance per currency and drops zeros.
+
+## Validation and databases
+
+```ts
+import { anyMoneySchema, moneyInputSchema, moneySchema } from '@arki/money/zod';
+
+const order = z.object({ total: moneySchema('EUR', { min: money(0, 'EUR') }) });
+order.parse({ total: { amount: '19.99', currency: 'EUR' } }).total; // Money<'EUR'>
+moneyInputSchema('EUR', { locale: 'de-DE' }).parse('1.234,56 €'); // form field
+```
+
+```ts
+import { moneyDecimal, moneyJson, moneyMinor } from '@arki/money/drizzle';
+
+const prices = pgTable('prices', {
+  total: moneyMinor('total', { currency: 'EUR' }), // bigint of cents ↔ Money<'EUR'>
+  unit: moneyDecimal('unit', { currency: 'EUR', scale: 4 }), // numeric(19, 4)
+  price: moneyJson('price'), // jsonb { amount, currency } ↔ Money in any currency
+});
+```
+
+The schemas take the JSON shape as input, so tRPC and oRPC clients infer what to send. The columns read text from every driver, so no value passes through a float, and writing another currency or a value that needs rounding throws. `zod` (4.x) and `drizzle-orm` (1.x) are optional peer dependencies, used only by their subpaths.
+
 ## Errors
 
 Every deliberate failure extends `MathError` from `@arki/math`, so one `instanceof` catches both libraries. Money-only errors extend `MoneyError`: `CurrencyMismatchError`, `UnknownCurrencyError`, `ExchangeRateError`, `ProviderAmountError`. Shared ones: `RoundingNecessaryError`, `DivisionByZeroError`, `InvalidArgumentError`, `NumberFormatError`, `NumericRangeError`, `ResourceLimitError`, `EmptyDataError`, `UnsupportedFeatureError`.
@@ -158,6 +196,10 @@ Every deliberate failure extends `MathError` from `@arki/math`, so one `instance
 | `@arki/money/parse`    | `parseMoney`, `createMoneyParser`                                              |
 | `@arki/money/exchange` | `exchangeRate`, `ratesFrom`, `convert`, `createConverter`, `Converter`         |
 | `@arki/money/provider` | `toProviderUnits`, `fromProviderUnits`                                         |
+| `@arki/money/rational` | `RationalMoney`, `isRationalMoney`                                             |
+| `@arki/money/bag`      | `MoneyBag`                                                                     |
+| `@arki/money/zod`      | `moneySchema`, `anyMoneySchema`, `moneyInputSchema`, `currencyCodeSchema`      |
+| `@arki/money/drizzle`  | `moneyMinor`, `moneyDecimal`, `moneyJson` (Postgres)                           |
 | `@arki/money/stripe`   | `toStripe`, `toStripeAmount`, `fromStripeAmount`, `stripeRule`                 |
 
 ## Performance
@@ -173,6 +215,10 @@ Every deliberate failure extends `MathError` from `@arki/math`, so one `instance
 | format en-US                                |         557 |        20725 |         674 |      — |
 
 Amounts past 2^53 switch to `bigint` and stay exact; adding them costs about 29 ns. Converting with a cached rate takes about 170 ns, parsing German input about 1.1 µs, and `toStripeAmount` about 80 ns.
+
+## Size
+
+`bun run size` bundles each entry point as an app would (minified, gzipped, `@arki/math` included) and fails past its budget. The core (`Money`, `Currency` with the full ISO table, errors) is 6.3 KB. Parsing adds 0.9 KB, conversion 0.6 KB, Stripe 0.1 KB, and `RationalMoney` 3.2 KB (the exact `Rational` type from `@arki/math`).
 
 ## Runtime support
 
