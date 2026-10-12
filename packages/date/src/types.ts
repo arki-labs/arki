@@ -42,6 +42,12 @@ export type DurationUnit = Exclude<Unit, 'quarter'>;
  * The units a point type supports. For a union this is the intersection of
  * its members' capabilities (`PlainDate | Instant` supports none — narrow
  * first); for a generic `T extends Civil` use the calendar-unit overloads.
+ *
+ * @example
+ * type A = UnitFor<PlainDate>; // CalendarUnit
+ * type B = UnitFor<Instant>; // TimeUnit
+ * type C = UnitFor<ZonedDateTime>; // Unit
+ * type D = UnitFor<PlainDate | Instant>; // never
  */
 export type UnitFor<T extends Point> = Instant extends T
   ? PlainDate extends T
@@ -102,6 +108,11 @@ export type Amount = CalendarAmount & TimeAmount;
  * The amounts a point type accepts: anything for civil values (a `PlainDate`
  * balances time fields into whole days, as Temporal does), time only for an
  * `Instant` or a union containing one.
+ *
+ * @example
+ * type A = AmountFor<PlainDate>; // Amount (calendar + time fields)
+ * type B = AmountFor<Instant>; // TimeAmount
+ * type C = AmountFor<ZonedDateTime | Instant>; // TimeAmount
  */
 export type AmountFor<T extends Point> = Instant extends T ? TimeAmount : Amount;
 

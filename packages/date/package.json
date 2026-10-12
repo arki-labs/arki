@@ -86,6 +86,11 @@
       "import": "./dist/format.js",
       "default": "./dist/format.js"
     },
+    "./parse": {
+      "types": "./dist/parse.d.ts",
+      "import": "./dist/parse.js",
+      "default": "./dist/parse.js"
+    },
     "./relative": {
       "types": "./dist/relative.d.ts",
       "import": "./dist/relative.js",
@@ -101,10 +106,15 @@
       "import": "./dist/fluent.js",
       "default": "./dist/fluent.js"
     },
-    "./parseISO": {
-      "types": "./dist/parseISO.d.ts",
-      "import": "./dist/parseISO.js",
-      "default": "./dist/parseISO.js"
+    "./zod": {
+      "types": "./dist/zod.d.ts",
+      "import": "./dist/zod.js",
+      "default": "./dist/zod.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js",
+      "default": "./dist/react.js"
     },
     "./package.json": "./package.json"
   },
@@ -142,7 +152,25 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "date-fns": "catalog:utilities"
+    "@testing-library/react": "catalog:testing",
+    "@types/react": "catalog:react",
+    "date-fns": "catalog:utilities",
+    "jsdom": "catalog:text-processing",
+    "react": "catalog:react",
+    "react-dom": "catalog:react",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:react",
+    "zod": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"

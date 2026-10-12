@@ -2,7 +2,7 @@ import { format as fnsFormat } from 'date-fns/format';
 import { describe, expect, it } from 'vitest';
 
 import { instant, plainDate, plainDateTime, zoned } from './core.js';
-import { format, formatIntl, formatISO, formatRange, toHumanReadableDate } from './format.js';
+import { format, formatIntl, formatISO, formatRange } from './format.js';
 import { dateTimeFormat, INTL_CACHE_LIMIT, intlCacheSize } from './internal/intl.js';
 import { Temporal } from './types.js';
 
@@ -181,12 +181,7 @@ describe('format — Temporal inputs', () => {
   });
 });
 
-describe('toHumanReadableDate / formatISO', () => {
-  it('keeps the legacy "LLL dd, y" output for Date and PlainDate', () => {
-    expect(toHumanReadableDate(new Date(2026, 4, 20, 23, 59))).toBe('May 20, 2026');
-    expect(toHumanReadableDate(plainDate('2026-05-02'))).toBe('May 02, 2026');
-  });
-
+describe('formatISO', () => {
   it('is toString() for every value kind', () => {
     expect(formatISO(plainDate('2026-05-20'))).toBe('2026-05-20');
     expect(formatISO(zoned('2026-10-09T15:37:48+03:00[Europe/Bucharest]'))).toBe(

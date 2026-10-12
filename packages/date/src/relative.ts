@@ -10,8 +10,7 @@
  * - Text defaults to the `'en-US'` locale so server and client render the same.
  */
 
-import type { Clock } from '@arki/clock';
-
+import type { ClockOptions } from './clock.js';
 import type { PlainDate, Timeline } from './types.js';
 import { now } from './clock.js';
 import { instant } from './core.js';
@@ -106,10 +105,7 @@ export function relative(target: Timeline | Date, reference: Timeline | Date, op
   return formatter.format(value, unit);
 }
 
-/** `relative(target, now(clock))`. Pass a `MockClock` for deterministic output. */
-export function relativeToNow(
-  target: Timeline | Date,
-  options?: RelativeOptions & Readonly<{ clock?: Clock }>,
-): string {
-  return relative(target, now(options?.clock), options);
+/** `relative(target, now({ clock }))`. Pass a `MockClock` for deterministic output. */
+export function relativeToNow(target: Timeline | Date, options?: RelativeOptions & ClockOptions): string {
+  return relative(target, now(options), options);
 }

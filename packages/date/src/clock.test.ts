@@ -23,12 +23,14 @@ const utc = { clock, timeZone: 'UTC' };
 
 describe('now / today', () => {
   it('reads the injected clock once and never leaks a Date', () => {
-    expect(now(clock).toString()).toBe('2026-10-09T22:30:00Z');
-    expect(nowIn('Europe/Bucharest', clock).toString()).toBe('2026-10-10T01:30:00+03:00[Europe/Bucharest]');
+    expect(now({ clock }).toString()).toBe('2026-10-09T22:30:00Z');
+    expect(nowIn({ timeZone: 'Europe/Bucharest', clock }).toString()).toBe(
+      '2026-10-10T01:30:00+03:00[Europe/Bucharest]',
+    );
     expect(today(buc).toString()).toBe('2026-10-10');
     expect(today(utc).toString()).toBe('2026-10-09');
     clock.advance(60_000);
-    expect(now(clock).toString()).toBe('2026-10-09T22:31:00Z');
+    expect(now({ clock }).toString()).toBe('2026-10-09T22:31:00Z');
     clock.setNow(new Date('2026-10-09T22:30:00Z'));
     expect(() => now()).not.toThrow();
   });
@@ -64,9 +66,9 @@ describe('current-period predicates', () => {
   });
 
   it('isPast / isFuture are strict', () => {
-    expect(isPast(instant('2026-10-09T22:29:59Z'), clock)).toBe(true);
-    expect(isPast(instant('2026-10-09T22:30:00Z'), clock)).toBe(false);
-    expect(isFuture(instant('2026-10-09T22:30:00Z'), clock)).toBe(false);
-    expect(isFuture(new Date('2026-10-09T22:30:01Z'), clock)).toBe(true);
+    expect(isPast(instant('2026-10-09T22:29:59Z'), { clock })).toBe(true);
+    expect(isPast(instant('2026-10-09T22:30:00Z'), { clock })).toBe(false);
+    expect(isFuture(instant('2026-10-09T22:30:00Z'), { clock })).toBe(false);
+    expect(isFuture(new Date('2026-10-09T22:30:01Z'), { clock })).toBe(true);
   });
 });

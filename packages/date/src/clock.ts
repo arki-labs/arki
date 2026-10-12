@@ -19,25 +19,28 @@ import { isInstant, isZonedDateTime, Temporal } from './types.js';
 
 const systemClock: Clock = new SystemClock();
 
+/** Which clock to read. Default: the system clock. */
+export type ClockOptions = Readonly<{ clock?: Clock }>;
+
+export type CurrentOptions = ClockOptions &
+  Readonly<{
+    timeZone?: string;
+    week?: WeekRules;
+  }>;
+
 /** The current instant. */
-export function now(clock: Clock = systemClock): Instant {
-  return instant(clock.now());
+export function now(options?: ClockOptions): Instant {
+  return instant((options?.clock ?? systemClock).now());
 }
 
 /** The current moment in a zone (runtime zone by default). */
-export function nowIn(timeZone: string = systemTimeZone(), clock: Clock = systemClock): ZonedDateTime {
-  return now(clock).toZonedDateTimeISO(timeZone);
+export function nowIn(options?: CurrentOptions): ZonedDateTime {
+  return now(options).toZonedDateTimeISO(options?.timeZone ?? systemTimeZone());
 }
-
-export type CurrentOptions = Readonly<{
-  timeZone?: string;
-  clock?: Clock;
-  week?: WeekRules;
-}>;
 
 /** Today's calendar date in a zone (runtime zone by default). */
 export function today(options?: CurrentOptions): PlainDate {
-  return nowIn(options?.timeZone, options?.clock).toPlainDate();
+  return nowIn(options).toPlainDate();
 }
 
 /**
@@ -86,11 +89,11 @@ export function isThisYear(value: Point, options?: CurrentOptions): boolean {
 }
 
 /** Strictly before now. */
-export function isPast(value: Timeline | Date, clock: Clock = systemClock): boolean {
-  return Temporal.Instant.compare(instant(value), now(clock)) < 0;
+export function isPast(value: Timeline | Date, options?: ClockOptions): boolean {
+  return Temporal.Instant.compare(instant(value), now(options)) < 0;
 }
 
 /** Strictly after now. */
-export function isFuture(value: Timeline | Date, clock: Clock = systemClock): boolean {
-  return Temporal.Instant.compare(instant(value), now(clock)) > 0;
+export function isFuture(value: Timeline | Date, options?: ClockOptions): boolean {
+  return Temporal.Instant.compare(instant(value), now(options)) > 0;
 }

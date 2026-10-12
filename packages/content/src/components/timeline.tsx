@@ -1,5 +1,5 @@
 import type { LinkComponent } from '@arki/intl/types';
-import { toHumanReadableDate } from '@arki/date/format';
+import { format } from '@arki/date/format';
 
 type TimelineProps = {
   title: string;
@@ -42,7 +42,7 @@ function Article({ publishedAt, imageSrc, title, children, href, Link }: Article
       <div className="relative row-span-2">
         <div className="sticky top-20">
           <time className="text-muted-foreground order-2 font-mono text-sm md:order-1 md:col-span-1">
-            {toHumanReadableDate(publishedAt)}
+            {format(publishedAt, 'LLL dd, y')}
           </time>
         </div>
       </div>

@@ -1,10 +1,10 @@
 import { parseISO as fnsParseISO } from 'date-fns/parseISO';
 import { describe, expect, it } from 'vitest';
 
-import { parseISO } from './parseISO.js';
+import { parseISO, toMillis, tryParse } from './core.js';
 
-// Every form date-fns accepts, its quirks, and the inputs it rejects. Equal getTime() (NaN === NaN counts as equal).
-const INPUTS = [
+// Every form date-fns accepts and its quirks: same instant as date-fns `parseISO` (local zone for zone-less text).
+const VALID = [
   '2026-05-20',
   '2026-05',
   '2026',
@@ -45,7 +45,10 @@ const INPUTS = [
   '2026-03-29T03:30',
   '2026-10-25T03:30',
   '2026-11-01T02:30',
-  // invalid
+];
+
+// Inputs date-fns turns into an Invalid Date: we throw instead.
+const INVALID = [
   '',
   'not a date',
   '10:30',
@@ -67,22 +70,27 @@ const INPUTS = [
 ];
 
 describe('parseISO — differential against date-fns v4', () => {
-  it.each(INPUTS)('%j matches date-fns', text => {
-    const ours = parseISO(text);
-    expect(ours).toBeInstanceOf(Date);
-    expect(ours.getTime()).toBe(fnsParseISO(text).getTime());
+  it.each(VALID)('%j matches date-fns', text => {
+    expect(toMillis(parseISO(text))).toBe(fnsParseISO(text).getTime());
+  });
+
+  it.each(INVALID)('%j is rejected like date-fns', text => {
+    expect(Number.isNaN(fnsParseISO(text).getTime())).toBe(true);
+    expect(() => parseISO(text)).toThrow(RangeError);
   });
 });
 
 describe('parseISO — semantics', () => {
-  it('reads zone-less text as local time and offset text as exact', () => {
-    expect(parseISO('2026-05-20T10:30').getTime()).toBe(new Date(2026, 4, 20, 10, 30).getTime());
-    expect(parseISO('2026-05-20').getTime()).toBe(new Date(2026, 4, 20).getTime());
-    expect(parseISO('2026-05-20T10:30:00+03:00').toISOString()).toBe('2026-05-20T07:30:00.000Z');
+  it('reads zone-less text in the given zone and offset text as exact', () => {
+    expect(parseISO('2026-05-20T10:30', { timeZone: 'Europe/Bucharest' }).toString()).toBe('2026-05-20T07:30:00Z');
+    expect(parseISO('2026-05-20', { timeZone: 'UTC' }).toString()).toBe('2026-05-20T00:00:00Z');
+    expect(parseISO('2026-05-20T10:30:00+03:00').toString()).toBe('2026-05-20T07:30:00Z');
+    // DST gap in Bucharest: 03:30 does not exist, the compatible rule moves forward.
+    expect(parseISO('2026-03-29T03:30', { timeZone: 'Europe/Bucharest' }).toString()).toBe('2026-03-29T01:30:00Z');
   });
 
-  it('returns an Invalid Date instead of throwing', () => {
-    expect(Number.isNaN(parseISO('2026-02-30').getTime())).toBe(true);
-    expect(Number.isNaN(parseISO('+999999-01-01').getTime())).toBe(true);
+  it('is available through tryParse', () => {
+    expect(tryParse('2026-W41-5', 'iso').ok).toBe(true);
+    expect(tryParse('2026-02-30', 'iso').ok).toBe(false);
   });
 });

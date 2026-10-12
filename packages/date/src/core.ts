@@ -18,6 +18,8 @@ import type {
   WallInput,
   ZonedDateTime,
 } from './types.js';
+import { readLenientISO } from './internal/iso.js';
+import { systemTimeZone } from './internal/system-zone.js';
 import { isInstant, isPlainDate, isPlainDateTime, isZonedDateTime, Temporal } from './types.js';
 
 const DATE_ONLY = /^[+-]?\d{4,6}-\d{2}-\d{2}$/;
@@ -164,12 +166,36 @@ export function toISO(value: Point | Duration): string {
   return value.toString();
 }
 
+export type ParseISOOptions = Readonly<{
+  /** Zone for text without an offset. Default: the runtime zone. */
+  timeZone?: string;
+}>;
+
+/**
+ * Read lenient ISO 8601 text — everything `instant()` accepts plus the forms
+ * people actually send: `2026-05-20` (midnight), `2026-05`, `2026`, basic
+ * `20260520T1030`, week dates `2026-W41-5`, ordinal dates `2026-283`, a
+ * fraction on the last time unit, `24:00`, `±HH` offsets.
+ *
+ * Text without an offset is a wall-clock reading in `options.timeZone`
+ * (default: the runtime zone), resolved with the `'compatible'` DST rule.
+ * Anything else is a `RangeError`. For strict RFC 9557 text use `instant()`
+ * or `zoned()`; for a calendar date use `plainDate()`.
+ */
+export function parseISO(text: string, options?: ParseISOOptions): Instant {
+  const result = readLenientISO(text, options?.timeZone ?? systemTimeZone());
+  if (result === undefined) throw new RangeError(`parseISO: "${text}" is not ISO 8601 date/time text`);
+  return result;
+}
+
 export type ParseKinds = {
   plainDate: PlainDate;
   plainDateTime: PlainDateTime;
   zoned: ZonedDateTime;
   instant: Instant;
   duration: Duration;
+  /** Lenient ISO text via `parseISO`. */
+  iso: Instant;
 };
 
 export type ParseResult<T> =
@@ -191,6 +217,7 @@ function parseKind<K extends keyof ParseKinds>(text: string, kind: K): ParseKind
     zoned: input => zoned(input),
     instant,
     duration: input => Temporal.Duration.from(input),
+    iso: input => parseISO(input),
   };
   return parsers[kind](text);
 }

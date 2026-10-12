@@ -3,7 +3,7 @@ import { createParser, createSearchParamsCache, parseAsInteger } from 'nuqs/serv
 import type { LinkComponent } from '@arki/intl/types';
 import { Button } from '@arki/ui/button';
 import { Pagination, PaginationContent, PaginationLink } from '@arki/ui/pagination';
-import { toHumanReadableDate } from '@arki/date/format';
+import { format } from '@arki/date/format';
 import { CaretLeft, CaretRight, Rss } from '@arki/icons/phosphor';
 import { useTranslations } from 'use-intl';
 
@@ -131,7 +131,7 @@ export function ChangelogCard({ post }: { post: Changelog }) {
   return (
     <article className="relative mx-auto flex max-w-prose flex-col gap-8">
       <div className="grid w-full gap-3">
-        <p className="text-muted-foreground font-mono text-sm">{toHumanReadableDate(new Date(post.publishedAt))}</p>
+        <p className="text-muted-foreground font-mono text-sm">{format(new Date(post.publishedAt), 'LLL dd, y')}</p>
         <h1 className="font-cal mb-5 text-3xl">{post.title}</h1>
         <div className="border-border relative aspect-video w-full overflow-hidden rounded-lg border">
           <img

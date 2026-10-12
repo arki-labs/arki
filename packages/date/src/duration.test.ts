@@ -7,6 +7,7 @@ import {
   compareDurations,
   days,
   duration,
+  formatDurationIntl,
   formatDurationISO,
   hours,
   humanizeDuration,
@@ -25,6 +26,7 @@ import {
   weeks,
   years,
 } from './duration.js';
+import { hasDurationFormat } from './internal/intl.js';
 
 const d = (text: string) => duration(text);
 
@@ -205,5 +207,12 @@ describe('humanizeDuration', () => {
   it('refuses to turn months into days without an anchor', () => {
     expect(() => humanizeDuration(d('P1M'), { units: ['day'] })).toThrow(RangeError);
     expect(() => humanizeDuration(d('PT1H'), { maximumUnits: 0 })).toThrow(RangeError);
+  });
+});
+
+describe('formatDurationIntl', () => {
+  it.skipIf(!hasDurationFormat())('prints locale text through Intl.DurationFormat', () => {
+    expect(formatDurationIntl(d('PT1H30M'), { style: 'short' })).toMatch(/1 hr.*30 min/);
+    expect(formatDurationIntl(d('P1DT2H'), { locale: 'ro-RO' })).toMatch(/1 zi.*2 ore/);
   });
 });

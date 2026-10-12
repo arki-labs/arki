@@ -1,21 +1,8 @@
 /**
- * `parseISO` — a drop-in for date-fns `parseISO`, built on Temporal.
- *
- * Semantics (identical to date-fns v4 with its default `additionalDigits: 2`):
- * - A date or date-time with no offset is read as LOCAL time in the runtime
- *   zone (`systemTimeZone()`); a skipped DST time moves forward, a repeated
- *   one takes the earlier instant (Temporal `'compatible'`, same as `Date`).
- * - `Z` or a `±HH`, `±HHMM`, `±HH:MM` suffix makes the result exact.
- * - Accepted dates: `YYYY`, `YY` (century), `YYYY-MM`, `YYYY-MM-DD`,
- *   `YYYYMMDD`, `±YYYYYY…` extended years, week dates (`2026-W41`,
- *   `2026-W41-5`, `2026W415`) and ordinal dates (`2026-283`, `2026283`).
- * - Accepted times (after `T` or a space): `HH`, `HH:mm`, `HH:mm:ss`, basic
- *   `HHmmss`, a decimal fraction (`.` or `,`) on the last unit, and `24:00`.
- * - Invalid input returns `new Date(NaN)`; it never throws for a string.
+ * Lenient ISO 8601 text, shared by `parseISO` in core.
  */
 
-import { systemTimeZone } from './interop.js';
-import { Temporal } from './types.js';
+import { Temporal } from '../types.js';
 
 const DATE_TIME_DELIMITER = /[T ]/;
 const TIME_ZONE_DELIMITER = /[Z ]/i;
@@ -72,7 +59,7 @@ function dateUnit(value: string | undefined): number {
   return value === undefined ? 1 : Number.parseInt(value, 10);
 }
 
-function parseDate(rest: string, year: number): Temporal.PlainDate | undefined {
+function parseIsoDate(rest: string, year: number): Temporal.PlainDate | undefined {
   const captures = DATE.exec(rest);
   if (captures === null || Number.isNaN(year)) return undefined;
   const dayOfYear = dateUnit(captures[1]);
@@ -125,44 +112,42 @@ function parseOffset(text: string): number {
   return sign * (hours * MS_PER_HOUR + minutes * MS_PER_MINUTE);
 }
 
-function parseMillis(text: string): number {
+/**
+ * Lenient ISO 8601 reader (the date-fns `parseISO` grammar): calendar, week
+ * and ordinal dates, basic and extended forms, fractional last time unit,
+ * `24:00`, `Z`/`±HH[:MM]` offsets. Zone-less text is a wall-clock reading in
+ * `timeZone`. Returns `undefined` for text the grammar rejects.
+ */
+export function readLenientISO(text: string, timeZone: string): Temporal.Instant | undefined {
   const pieces = splitText(text);
-  if (pieces.date === undefined || pieces.date === '') return Number.NaN;
+  if (pieces.date === undefined || pieces.date === '') return undefined;
   const { year, rest } = parseYear(pieces.date);
-  const date = parseDate(rest, year);
-  if (date === undefined) return Number.NaN;
+  let date: Temporal.PlainDate | undefined;
+  try {
+    date = parseIsoDate(rest, year);
+  } catch (error) {
+    // Temporal rejects years outside ±271821 with a RangeError: not ISO text we can represent.
+    if (error instanceof RangeError) return undefined;
+    throw error;
+  }
+  if (date === undefined) return undefined;
 
   const timestamp = date.toZonedDateTime('UTC').epochMilliseconds;
   let time = 0;
   if (pieces.time !== undefined && pieces.time !== '') {
     time = parseTime(pieces.time);
-    if (Number.isNaN(time)) return Number.NaN;
+    if (Number.isNaN(time)) return undefined;
   }
 
   if (pieces.zone !== undefined) {
     const offset = parseOffset(pieces.zone);
-    if (Number.isNaN(offset)) return Number.NaN;
-    return Temporal.Instant.fromEpochMilliseconds(Math.trunc(timestamp + time + offset)).epochMilliseconds;
+    if (Number.isNaN(offset)) return undefined;
+    return Temporal.Instant.fromEpochMilliseconds(Math.trunc(timestamp + time + offset));
   }
 
-  // Zone-less: the fields are a wall-clock reading in the runtime zone.
+  // Zone-less: the fields are a wall-clock reading in `timeZone`.
   const wall = Temporal.Instant.fromEpochMilliseconds(Math.trunc(timestamp + time))
     .toZonedDateTimeISO('UTC')
     .toPlainDateTime();
-  return wall.toZonedDateTime(systemTimeZone()).epochMilliseconds;
-}
-
-/**
- * Parse ISO 8601 text into a `Date`, exactly as date-fns `parseISO` does.
- * Zone-less text is local time; `Z`/offset text is exact; invalid text gives
- * an Invalid Date (`getTime()` is `NaN`) instead of throwing.
- */
-export function parseISO(text: string): Date {
-  try {
-    return new Date(parseMillis(text));
-  } catch (error) {
-    // Temporal signals out-of-range years and dates with RangeError; date-fns returns an Invalid Date there.
-    if (error instanceof RangeError) return new Date(Number.NaN);
-    throw error;
-  }
+  return wall.toZonedDateTime(timeZone).toInstant();
 }

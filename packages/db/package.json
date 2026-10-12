@@ -2,17 +2,6 @@
   "name": "@arki/db",
   "version": "0.1.9",
   "description": "Drizzle ORM repositories and database helpers for ARKI — Postgres + PGlite runtimes, projection builder, branded ID factory, and env-aware connection pooling.",
-  "license": "MIT",
-  "type": "module",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/arki-labs/arki.git",
-    "directory": "packages/db"
-  },
-  "homepage": "https://arki.dev",
-  "bugs": {
-    "url": "https://github.com/arki-labs/arki/issues"
-  },
   "keywords": [
     "arki",
     "typescript",
@@ -23,10 +12,18 @@
     "orm",
     "projections"
   ],
-  "publishConfig": {
-    "access": "public"
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/db"
+  },
+  "license": "MIT",
   "sideEffects": false,
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/init.d.ts",
@@ -39,12 +36,12 @@
       "default": "./dist/env.js"
     },
     "./init": {
+      "types": "./dist/init.d.ts",
       "bun": {
         "types": "./dist/init.bun.d.ts",
         "import": "./dist/init.bun.js",
         "default": "./dist/init.bun.js"
       },
-      "types": "./dist/init.d.ts",
       "import": "./dist/init.js",
       "default": "./dist/init.js"
     },
@@ -88,6 +85,11 @@
       "import": "./dist/pg.js",
       "default": "./dist/pg.js"
     },
+    "./temporal": {
+      "types": "./dist/temporal.d.ts",
+      "import": "./dist/temporal.js",
+      "default": "./dist/temporal.js"
+    },
     "./bun": {
       "types": "./dist/bun.d.ts",
       "import": "./dist/bun.js",
@@ -130,6 +132,7 @@
   "dependencies": {
     "@arki/assert": "workspace:*",
     "@arki/contracts": "workspace:*",
+    "@arki/date": "workspace:*",
     "@arki/env": "workspace:*",
     "@arki/log": "workspace:*",
     "@electric-sql/pglite": "catalog:",
@@ -139,14 +142,6 @@
     "pg": "catalog:drizzle",
     "postgres": "catalog:drizzle",
     "zod": "catalog:"
-  },
-  "peerDependencies": {
-    "@arki/dot": "workspace:*"
-  },
-  "peerDependenciesMeta": {
-    "@arki/dot": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "@arki/dot": "workspace:*",
@@ -158,5 +153,16 @@
     "@types/node": "catalog:node",
     "@types/pg": "catalog:drizzle",
     "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "@arki/dot": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@arki/dot": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

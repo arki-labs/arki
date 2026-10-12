@@ -1,5 +1,5 @@
 import { format } from '@arki/date/format';
-import { parseISO } from '@arki/date/parseISO';
+import { parseISO } from '@arki/date/core';
 
 type Props = {
   value: string;

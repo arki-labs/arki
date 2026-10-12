@@ -23,7 +23,7 @@ import type {
   ZonedDateTime,
 } from './types.js';
 import { toDuration } from './internal/amount.js';
-import { listFormat, numberFormat } from './internal/intl.js';
+import { durationFormat, hasDurationFormat, listFormat, numberFormat } from './internal/intl.js';
 import { isPlainDate, Temporal } from './types.js';
 
 /** The anchor Temporal needs to measure calendar units (months have 28–31 days, days 23–25 hours). */
@@ -404,4 +404,34 @@ export function humanizeDuration(d: Duration, options?: HumanizeOptions): string
   );
   const text = joinList(locale, pieces);
   return d.sign < 0 && kept.length > 0 ? `-${text}` : text;
+}
+
+export type DurationIntlOptions = Readonly<{ locale?: string }> & Readonly<Intl.DurationFormatOptions>;
+
+/**
+ * Locale-native duration text through `Intl.DurationFormat`: `formatDurationIntl(d, { style: 'short' })`
+ * → `1 hr, 30 min` (en-US), with proper plurals in every locale. Unlike `humanizeDuration`
+ * the text depends on the runtime's ICU data, and engines without `Intl.DurationFormat`
+ * (Hermes, Node ≤ 22) throw a `RangeError` — use `humanizeDuration` when every runtime
+ * must print the same text.
+ */
+export function formatDurationIntl(d: Duration, options?: DurationIntlOptions): string {
+  if (!hasDurationFormat()) {
+    throw new RangeError(
+      'formatDurationIntl: Intl.DurationFormat is not available in this runtime; use humanizeDuration',
+    );
+  }
+  const { locale = 'en-US', ...intl } = options ?? {};
+  return durationFormat(locale, intl).format({
+    years: d.years,
+    months: d.months,
+    weeks: d.weeks,
+    days: d.days,
+    hours: d.hours,
+    minutes: d.minutes,
+    seconds: d.seconds,
+    milliseconds: d.milliseconds,
+    microseconds: d.microseconds,
+    nanoseconds: d.nanoseconds,
+  });
 }

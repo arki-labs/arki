@@ -15,6 +15,7 @@ const dateTimeFormats = new Map<string, Intl.DateTimeFormat>();
 const numberFormats = new Map<string, Intl.NumberFormat>();
 const listFormats = new Map<string, Intl.ListFormat>();
 const relativeTimeFormats = new Map<string, Intl.RelativeTimeFormat>();
+const durationFormats = new Map<string, Intl.DurationFormat>();
 
 export function dateTimeFormat(locale: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
   return remember(
@@ -49,6 +50,20 @@ export function relativeTimeFormat(locale: string, options: Intl.RelativeTimeFor
     `${locale}:${JSON.stringify(options)}`,
     INTL_CACHE_LIMIT,
     () => new Intl.RelativeTimeFormat(locale, options),
+  );
+}
+
+/** `Intl.DurationFormat` is missing on some engines (Hermes, Node ≤ 22): callers check `hasDurationFormat()` first. */
+export function hasDurationFormat(): boolean {
+  return typeof Intl.DurationFormat === 'function';
+}
+
+export function durationFormat(locale: string, options: Intl.DurationFormatOptions): Intl.DurationFormat {
+  return remember(
+    durationFormats,
+    `${locale}:${JSON.stringify(options)}`,
+    INTL_CACHE_LIMIT,
+    () => new Intl.DurationFormat(locale, options),
   );
 }
 

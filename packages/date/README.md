@@ -94,7 +94,7 @@ const calendar = businessCalendar({ holidays: ['2026-12-01', '2026-12-25'] });
 addBusinessDays(plainDate('2026-11-27'), 3, calendar); // 2026-12-03
 
 // Is it overdue? (clock-driven, test with MockClock)
-isPast(zoned(order.dueAt, 'Europe/Bucharest'), clock);
+isPast(zoned(order.dueAt, 'Europe/Bucharest'), { clock });
 
 // Age today
 age(plainDate(user.birthDate), today({ clock, timeZone: 'Europe/Bucharest' }));
@@ -128,23 +128,26 @@ relativeToNow(launch, { numeric: 'auto', clock });
 
 Every module is also a subpath: `@arki/date/math`, `@arki/date/interval`, …
 
-| Subpath    | Contents                                                                                                                                                                                                                                                    |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `types`    | the value-type aliases, `Point`/`Civil`/`Timeline` unions, unit and option types, `ISO_WEEK` `SUNDAY_WEEK`, `isPlainDate`… guards, `kindOf`                                                                                                                 |
-| `core`     | `plainDate` `plainDateTime` `zoned` `instant` `fromUnix` `fromMillis` `toUnix` `toMillis` `toInstant` `toPlainDate` `toISO` `tryParse`                                                                                                                      |
-| `interop`  | `fromDate` `toDate` `fromPickerDate` `toPickerDate` `systemTimeZone`                                                                                                                                                                                        |
-| `math`     | `add` `sub` `set` `parts` `startOf` `endOf` `nextBoundary` `floor` `ceil` `round` `diff` `until` `diffElapsed` `elapsedNanoseconds`                                                                                                                         |
-| `calendar` | `dayOfWeek` `dayOfYear` `daysInMonth` `daysInYear` `isLeapYear` `isWeekend` `isWeekday` `isoWeek` `weekOf` `weeksInYear` `quarter` `calendarDaysBetween` `age`                                                                                              |
-| `compare`  | `equals` `sameInstant` `compareAsc` `compareDesc` `isBefore` `isAfter` `isSameOrBefore` `isSameOrAfter` `isSame` `isSameDay/Week/Month/Quarter/Year` `isBetween` `min` `max` `clamp`                                                                        |
-| `zone`     | `inZone` (same instant) `reinterpretZone` (same wall clock) `atTime` `toUTC` `offset` `offsetMinutes` `isValidTimeZone`                                                                                                                                     |
-| `duration` | `duration` `years…milliseconds` `addDuration` `subDuration` `multiplyDuration` `negateDuration` `absDuration` `normalizeDuration` `totalDuration` `toUnits` `compareDurations` `isZeroDuration` `isNegativeDuration` `formatDurationISO` `humanizeDuration` |
-| `interval` | `interval` `contains` `overlaps` `abuts` `intersection` `union` `gap` `subtract` `symmetricDifference` `mergeIntervals` `gapsBetween` `intervalLength` `splitByUnit` `each` `range` `toISOInterval`                                                         |
-| `business` | `businessCalendar` `isBusinessDay` `addBusinessDays` `subBusinessDays` `nextBusinessDay` `previousBusinessDay` `businessDaysBetween` `businessDaysIn`                                                                                                       |
-| `format`   | `format` (date-fns-compatible tokens) `formatIntl` `formatRange` (`Intl.DateTimeFormat`) `formatISO` `toHumanReadableDate`                                                                                                                                  |
-| `relative` | `relative` `relativeToNow` `relativeUnit` — "3 days ago" via `Intl.RelativeTimeFormat`                                                                                                                                                                      |
-| `clock`    | `now` `nowIn` `today` `isToday` `isTomorrow` `isYesterday` `isThisWeek` `isThisMonth` `isThisYear` `isPast` `isFuture`                                                                                                                                      |
-| `fluent`   | `date` `DateValue` `createDateContext`                                                                                                                                                                                                                      |
-| `parseISO` | `parseISO(text): Date` — legacy, date-fns semantics (zone-less text is local time)                                                                                                                                                                          |
+| Subpath    | Contents                                                                                                                                                                                                                                                                         |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `types`    | the value-type aliases, `Point`/`Civil`/`Timeline` unions, unit and option types, `ISO_WEEK` `SUNDAY_WEEK`, `isPlainDate`… guards, `kindOf`                                                                                                                                      |
+| `core`     | `plainDate` `plainDateTime` `zoned` `instant` `fromUnix` `fromMillis` `toUnix` `toMillis` `toInstant` `toPlainDate` `toISO` `tryParse` `parseISO` `tryParse`                                                                                                                     |
+| `interop`  | `fromDate` `toDate` `fromPickerDate` `toPickerDate` `systemTimeZone`                                                                                                                                                                                                             |
+| `math`     | `add` `sub` `set` `parts` `startOf` `endOf` `nextBoundary` `floor` `ceil` `round` `diff` `until` `diffElapsed` `elapsedNanoseconds`                                                                                                                                              |
+| `calendar` | `dayOfWeek` `dayOfYear` `daysInMonth` `daysInYear` `isLeapYear` `isWeekend` `isWeekday` `isoWeek` `weekOf` `weeksInYear` `quarter` `calendarDaysBetween` `age` `nthWeekdayOfMonth` `lastWeekdayOfMonth` `easter` `weekRulesFor`                                                  |
+| `compare`  | `equals` `sameInstant` `compareAsc` `compareDesc` `isBefore` `isAfter` `isSameOrBefore` `isSameOrAfter` `isSame` `isSameDay/Week/Month/Quarter/Year` `isBetween` `min` `max` `clamp`                                                                                             |
+| `zone`     | `inZone` (same instant) `reinterpretZone` (same wall clock) `atTime` `toUTC` `offset` `offsetMinutes` `isValidTimeZone`                                                                                                                                                          |
+| `duration` | `duration` `years…milliseconds` `addDuration` `subDuration` `multiplyDuration` `negateDuration` `absDuration` `normalizeDuration` `totalDuration` `toUnits` `compareDurations` `isZeroDuration` `isNegativeDuration` `formatDurationISO` `humanizeDuration` `formatDurationIntl` |
+| `interval` | `interval` `contains` `overlaps` `abuts` `intersection` `union` `gap` `subtract` `symmetricDifference` `mergeIntervals` `gapsBetween` `intervalLength` `splitByUnit` `each` `range` `toISOInterval`                                                                              |
+| `business` | `businessCalendar` `isBusinessDay` `addBusinessDays` `subBusinessDays` `nextBusinessDay` `previousBusinessDay` `businessDaysBetween` `businessDaysIn`                                                                                                                            |
+| `format`   | `format` (date-fns-compatible tokens) `formatIntl` `formatRange` (`Intl.DateTimeFormat`) `formatISO` `toHumanReadableDate`                                                                                                                                                       |
+| `relative` | `relative` `relativeToNow` `relativeUnit` — "3 days ago" via `Intl.RelativeTimeFormat`                                                                                                                                                                                           |
+| `clock`    | `now` `nowIn` `today` `isToday` `isTomorrow` `isYesterday` `isThisWeek` `isThisMonth` `isThisYear` `isPast` `isFuture`                                                                                                                                                           |
+| `fluent`   | `date` `DateValue` `createDateContext`                                                                                                                                                                                                                                           |
+| `parse`    | `parseDate` `parseDateTime` `parseZoned` `tryParseDate` `tryParseDateTime` `tryParseZoned` (inverse of `format`)                                                                                                                                                                 |
+| `zod`      | optional, needs `zod`: `plainDateSchema` `plainDateTimeSchema` `instantSchema` `zonedDateTimeSchema` `durationSchema` `timeZoneSchema` `intervalSchema`                                                                                                                          |
+| `react`    | optional, needs `react`: `useNow` `useToday` `useRelativeTime`                                                                                                                                                                                                                   |
+| `parseISO` | `parseISO(text): Date` — legacy, date-fns semantics (zone-less text is local time)                                                                                                                                                                                               |
 
 ### Durations
 
@@ -191,6 +194,51 @@ There is no package-level `setTestNow`: a global test clock leaks across tests a
 
 Any other letter throws. Time tokens on a `PlainDate`, and zone tokens on a value without a zone, throw too. For locale-native output use `formatIntl(value, { dateStyle: 'long', locale })`.
 
+### Parsing text
+
+`parse` is the inverse of `format` for the same tokens (no ordinals or presets): the whole text must match, names are matched case-insensitively in the pattern's locale, and impossible dates throw.
+
+```ts
+parseDate('20 May 2026', 'd MMMM yyyy'); // PlainDate 2026-05-20
+parseDateTime('2026-05-20 09:30 PM', 'yyyy-MM-dd hh:mm a'); // PlainDateTime
+parseZoned('20/05/2026 09:30', 'dd/MM/yyyy HH:mm', 'Europe/Bucharest'); // wall clock in that zone
+parseZoned('2026-05-20T09:30+03:00', "yyyy-MM-dd'T'HH:mmxxx", 'UTC'); // exact, shown in UTC
+tryParseDate('nope', 'yyyy-MM-dd'); // undefined
+```
+
+For lenient ISO text (`2026-05-20`, `2026-W41-5`, `20260520T1030`) use `parseISO`, which returns an `Instant` and reads zone-less text in `options.timeZone` (runtime zone by default).
+
+### Validating input (`@arki/date/zod`)
+
+Schemas take an ISO string or an already-built value and output the Temporal value, so router inputs infer `string | PlainDate` and handlers receive a `PlainDate`:
+
+```ts
+import { z } from 'zod';
+
+import { instantSchema, intervalSchema, plainDateSchema, timeZoneSchema } from '@arki/date/zod';
+
+const input = z.object({
+  day: plainDateSchema(),
+  stay: intervalSchema(plainDateSchema()),
+  seenAt: instantSchema(),
+  timeZone: timeZoneSchema(), // canonical IANA id
+});
+```
+
+`zod` is an optional peer dependency; the subpath is not re-exported from the package root.
+
+### React (`@arki/date/react`)
+
+```ts
+import { useNow, useRelativeTime, useToday } from '@arki/date/react';
+
+const now = useNow({ every: 1000 }); // Instant, re-read every second
+const today = useToday({ timeZone: user.timeZone }); // PlainDate, re-renders only when the date changes
+const label = useRelativeTime(post.publishedAt, { numeric: 'auto' }); // "yesterday", refreshed each minute
+```
+
+Every hook takes `clock` so tests can drive it with a `MockClock`. The first render reads the clock synchronously, so server and client agree. `react` is an optional peer dependency.
+
 ### Pickers and `Date`
 
 `fromDate(d)` keeps the **instant**. `fromPickerDate(d, { basis: 'local' })` keeps the **calendar fields** the picker showed (`new Date(2026, 0, 31)` → `2026-01-31`). They are different on purpose; `toPickerDate` round-trips and throws for a day the zone skipped.
@@ -201,7 +249,7 @@ Recurrence rules (RRULE), natural-language parsing, a holiday database, non-ISO 
 
 ## Verification
 
-`bun run test` (vitest, Node), `bun run test:bun` (same suite under Bun), `bun run build && bun run smoke` (one check per module under `node`, `bun` and `deno`). The token formatter and `parseISO` are differential-tested against date-fns for every pattern used in the monorepo.
+`bun run test` (vitest, Node), `bun run test:bun` (same suite under Bun; the React hooks run in happy-dom), `bun run build && bun run smoke` (one check per module under `node`, `bun` and `deno`). The token formatter and `parseISO` are differential-tested against date-fns for every pattern used in the monorepo.
 
 ## License
 

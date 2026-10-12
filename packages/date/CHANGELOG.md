@@ -31,6 +31,19 @@
   value, `createDateContext().isToday` matches `clock`'s, and years 0–99
   round-trip through `Date`.
 
+  API cleanup (no backward compatibility before 1.0): every clock reader takes
+  one options shape (`now({ clock })`, `nowIn({ timeZone, clock })`,
+  `isPast(value, { clock })`); the `@arki/date/parseISO` subpath and
+  `toHumanReadableDate` are gone — `parseISO` now lives in core, returns an
+  `Instant` and throws on invalid text, and `format(value, 'LLL dd, y')`
+  replaces the helper; the fluent `date()` reads zone-less text in its zone.
+  New: `parse` module (`parseDate`/`parseDateTime`/`parseZoned` and `try…`
+  variants, the inverse of `format`), `@arki/date/zod` schemas,
+  `@arki/date/react` hooks (`useNow`, `useToday`, `useRelativeTime`),
+  `nthWeekdayOfMonth`/`lastWeekdayOfMonth`, `easter` (western and orthodox),
+  `weekRulesFor(locale)`, `formatDurationIntl`, and type tests pinning
+  `UnitFor`/`AmountFor`/`BucketUnitFor`.
+
 ## 0.0.3
 
 ### Patch Changes

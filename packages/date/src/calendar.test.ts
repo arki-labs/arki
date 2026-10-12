@@ -7,16 +7,20 @@ import {
   dayOfYear,
   daysInMonth,
   daysInYear,
+  easter,
   isLeapYear,
   isoWeek,
   isWeekday,
   isWeekend,
+  lastWeekdayOfMonth,
+  nthWeekdayOfMonth,
   quarter,
   weekOf,
+  weekRulesFor,
   weeksInYear,
 } from './calendar.js';
 import { plainDate, zoned } from './core.js';
-import { SUNDAY_WEEK } from './types.js';
+import { ISO_WEEK, SUNDAY_WEEK } from './types.js';
 
 describe('calendar facts', () => {
   it('reports weekday, day of year, month/year lengths and leap years', () => {
@@ -76,5 +80,57 @@ describe('calendarDaysBetween / age', () => {
     expect(age(plainDate('2000-02-29'), plainDate('2026-03-01'), { leapDay: 'mar1' })).toBe(26);
     expect(age(plainDate('2000-02-29'), plainDate('2024-02-29'))).toBe(24);
     expect(() => age(plainDate('2026-01-01'), plainDate('2025-12-31'))).toThrow(RangeError);
+  });
+});
+
+describe('nthWeekdayOfMonth / lastWeekdayOfMonth', () => {
+  it('counts from the start and from the end', () => {
+    expect(nthWeekdayOfMonth(2026, 5, 1, 5).toString()).toBe('2026-05-01'); // May 1 2026 is a Friday
+    expect(nthWeekdayOfMonth(2026, 5, 2, 5).toString()).toBe('2026-05-08');
+    expect(nthWeekdayOfMonth(2026, 5, 1, 1).toString()).toBe('2026-05-04');
+    expect(nthWeekdayOfMonth(2026, 5, -1, 7).toString()).toBe('2026-05-31');
+    expect(lastWeekdayOfMonth(2026, 2, 5).toString()).toBe('2026-02-27');
+    expect(nthWeekdayOfMonth(2026, 5, 5, 5).toString()).toBe('2026-05-29'); // five Fridays in May 2026
+  });
+
+  it('rejects a weekday the month does not have that many of', () => {
+    expect(() => nthWeekdayOfMonth(2026, 5, 5, 1)).toThrow(/no weekday 1 number 5/);
+    expect(() => nthWeekdayOfMonth(2026, 13, 1, 1)).toThrow(RangeError);
+    expect(() => nthWeekdayOfMonth(2026, 5, 0, 1)).toThrow(RangeError);
+  });
+});
+
+describe('easter', () => {
+  it.each([
+    [2024, '2024-03-31', '2024-05-05'],
+    [2025, '2025-04-20', '2025-04-20'],
+    [2026, '2026-04-05', '2026-04-12'],
+    [2027, '2027-03-28', '2027-05-02'],
+    [2030, '2030-04-21', '2030-04-28'],
+    [2100, '2100-03-28', '2100-05-02'],
+  ])('%d: western %s, orthodox %s', (year, western, orthodox) => {
+    expect(easter(year).toString()).toBe(western);
+    expect(easter(year, 'orthodox').toString()).toBe(orthodox);
+  });
+
+  it('rejects years before the Gregorian reform', () => {
+    expect(() => easter(1500)).toThrow(RangeError);
+  });
+});
+
+describe('weekRulesFor', () => {
+  it('reads Intl week info and falls back for unknown runtimes', () => {
+    const us = weekRulesFor('en-US');
+    const de = weekRulesFor('de-DE');
+    // Engines with week info agree on these two; without it both are the fallback.
+    const hasWeekInfo =
+      typeof new Intl.Locale('en-US').getWeekInfo === 'function' || 'weekInfo' in new Intl.Locale('en-US');
+    if (hasWeekInfo) {
+      expect(us).toEqual({ startsOn: 7, minimalDays: 1 });
+      expect(de).toEqual({ startsOn: 1, minimalDays: 4 });
+    } else {
+      expect(us).toBe(ISO_WEEK);
+    }
+    expect(weekRulesFor('en-US', SUNDAY_WEEK).startsOn).toBe(7);
   });
 });

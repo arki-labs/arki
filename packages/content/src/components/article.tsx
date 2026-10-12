@@ -1,5 +1,5 @@
 
-import { toHumanReadableDate } from '@arki/date/format';
+import { format } from '@arki/date/format';
 import { Avatar, AvatarFallback, AvatarImage } from '@arki/ui/avatar';
 import { Badge } from '@arki/ui/badge';
 import { ScrollToTop } from '@arki/ui/scroll-to-top';
@@ -41,7 +41,7 @@ export function Article({ post }: { post: Post }) {
               {post.author.name}
             </a>
             <div className="flex flex-wrap items-center gap-1.5">
-              <time className="font-mono">{toHumanReadableDate(post.publishedAt)}</time>
+              <time className="font-mono">{format(post.publishedAt, 'LLL dd, y')}</time>
               <span className="text-muted-foreground/70">&bull;</span>
               <span className="font-mono">{post.readingTime}</span>
               <span className="text-muted-foreground/70">&bull;</span>

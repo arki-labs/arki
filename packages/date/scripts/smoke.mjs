@@ -23,6 +23,13 @@ check(
 );
 check('isoWeek', date.isoWeek(date.plainDate('2027-01-01')).week, 53);
 check('format tokens', date.format(d, 'LLL dd, y'), 'Jan 31, 2026');
+check('parseDate', date.parseDate('May 20, 2026', 'MMMM d, yyyy').toString(), '2026-05-20');
+check('parseISO', date.parseISO('2026-W41-5T10:30Z').toString(), '2026-10-09T10:30:00Z');
+check('easter', date.easter(2026, 'orthodox').toString(), '2026-04-12');
+check('nthWeekdayOfMonth', date.nthWeekdayOfMonth(2026, 5, -1, 5).toString(), '2026-05-29');
+check('weekRulesFor', typeof date.weekRulesFor('en-US').startsOn, 'number');
+check('formatRange', date.formatRange(d, date.plainDate('2026-02-02'), { dateStyle: 'medium' }).length > 10, true);
+check('now options', typeof date.now({ clock: { now: () => new Date(0) } }).epochMilliseconds, 'number');
 check('format intl', date.formatIntl(d, { dateStyle: 'medium', locale: 'en-US' }), 'Jan 31, 2026');
 check(
   'relative',
@@ -39,7 +46,6 @@ check(
   true,
 );
 check('business', date.addBusinessDays(date.plainDate('2026-10-09'), 1).toString(), '2026-10-12');
-check('parseISO legacy', date.parseISO('2026-05-20T10:00:00Z').getTime(), Date.UTC(2026, 4, 20, 10));
 check(
   'fluent',
   date.date('2026-01-31T10:00:00Z', { timeZone: 'Europe/Bucharest' }).add({ months: 1 }).startOf('day').toString(),

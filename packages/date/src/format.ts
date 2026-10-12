@@ -442,11 +442,6 @@ export function format(value: Point | Date, pattern: string, options?: FormatOpt
   return text;
 }
 
-/** `May 20, 2026` — `format(value, 'LLL dd, y')`, the legacy `@arki/date/format` helper. */
-export function toHumanReadableDate(value: Point | Date, options?: FormatOptions): string {
-  return format(value, 'LLL dd, y', options);
-}
-
 /** ISO 8601 / RFC 9557 text: the value's `toString()` (`2026-05-20`, `PT1H30M`, `…+03:00[Europe/Bucharest]`). */
 export function formatISO(value: Point | Duration): string {
   return toISO(value);
