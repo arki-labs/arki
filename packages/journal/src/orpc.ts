@@ -24,14 +24,16 @@ const CONFLICT_MESSAGE = 'This was changed by another request at the same time. 
  * - A `JournalError` with code `CONFLICT` becomes an `ORPCError('CONFLICT')`, a 409 the client can retry.
  * - Anything else is returned unchanged: the app decides what it means.
  *
- * The original error is kept as `cause`, for the server's logs. oRPC does not send `cause` to the client.
+ * The original error is NOT attached as `cause`. The journal's message names the entity kind and
+ * id, and a host may log or serialize a cause. A host that wants the original logs it itself,
+ * in a middleware placed inside this one.
  */
 export function toORPCError(error: unknown): unknown {
   if (error instanceof CommandError) {
-    return new ORPCError(error.code, { message: error.message, cause: error });
+    return new ORPCError(error.code, { message: error.message });
   }
   if (isJournalError(error, 'CONFLICT')) {
-    return new ORPCError('CONFLICT', { message: CONFLICT_MESSAGE, cause: error });
+    return new ORPCError('CONFLICT', { message: CONFLICT_MESSAGE });
   }
   return error;
 }

@@ -56,6 +56,17 @@ describe('toORPCError', () => {
     expect(mapped).toMatchObject({ code: 'CONFLICT', status: 409, message: RETRY_MESSAGE });
   });
 
+  it('does not carry the original error along, because a host may log or serialize `cause` and the journal message names the entity id', () => {
+    const lost = new JournalError('CONFLICT', 'order', 'ord_secret', 'version 3 already exists');
+    const rejected = new CommandError('FORBIDDEN', 'Not your order');
+
+    const causeOf = (mapped: unknown) => (mapped instanceof Error ? mapped.cause : 'not an error');
+
+    expect(causeOf(toORPCError(lost))).toBeUndefined();
+    expect(causeOf(toORPCError(rejected))).toBeUndefined();
+    expect(JSON.stringify(toORPCError(lost))).not.toContain('ord_secret');
+  });
+
   it('returns anything else unchanged, so the app decides what an unknown failure means', () => {
     const boom = new Error('database is down');
     const noRow = new JournalError('NO_ROW', 'order', 'ord_1');
