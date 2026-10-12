@@ -12,6 +12,7 @@
 import type { JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import { userIdSchema } from '@arki/auth/ids';
 import { z } from '@arki/contracts';
+import { CommandError } from '@arki/journal';
 
 import type { CoreTables } from '../tables';
 import {
@@ -21,7 +22,7 @@ import {
   paymentMethodTypeValues,
   subscriptionIdSchema,
 } from '../primitives';
-import { PaymentsCommandError, storedReal } from './support';
+import { storedReal } from './support';
 
 type PaymentRow = CoreTables['payments']['$inferSelect'];
 
@@ -58,7 +59,7 @@ export type CancelPaymentInput = z.input<typeof cancelPaymentInputSchema>;
 
 function requirePayment(row: PaymentRow | null, paymentId: string): PaymentRow {
   if (!row) {
-    throw new PaymentsCommandError('NOT_FOUND', `Payment ${paymentId} not found`);
+    throw new CommandError('NOT_FOUND', `Payment ${paymentId} not found`);
   }
 
   return row;
@@ -124,7 +125,7 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
 
     return write(payment, paymentId, row => {
       if (row) {
-        throw new PaymentsCommandError('CONFLICT', `Payment ${paymentId} already exists with status ${row.status}`);
+        throw new CommandError('CONFLICT', `Payment ${paymentId} already exists with status ${row.status}`);
       }
 
       return [
@@ -148,7 +149,7 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
       const current = requirePayment(row, input.paymentId);
 
       if (current.status !== 'pending' && current.status !== 'processing') {
-        throw new PaymentsCommandError('CONFLICT', `Cannot complete payment with status ${current.status}`);
+        throw new CommandError('CONFLICT', `Cannot complete payment with status ${current.status}`);
       }
 
       return [PaymentCompleted({ receiptUrl: input.receiptUrl ?? null })];
@@ -160,7 +161,7 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
       const current = requirePayment(row, input.paymentId);
 
       if (current.status !== 'pending' && current.status !== 'processing') {
-        throw new PaymentsCommandError('CONFLICT', `Cannot fail payment with status ${current.status}`);
+        throw new CommandError('CONFLICT', `Cannot fail payment with status ${current.status}`);
       }
 
       return [PaymentFailed({ failureReason: input.failureReason })];
@@ -172,7 +173,7 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
       const current = requirePayment(row, input.paymentId);
 
       if (current.status === 'succeeded' || current.status === 'failed' || current.status === 'canceled') {
-        throw new PaymentsCommandError('CONFLICT', `Cannot cancel payment with status ${current.status}`);
+        throw new CommandError('CONFLICT', `Cannot cancel payment with status ${current.status}`);
       }
 
       return [PaymentCanceled({})];

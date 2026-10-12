@@ -14,7 +14,8 @@ import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { CommandRunner } from '@arki/journal';
+import type { CommandErrorCode, CommandRunner } from '@arki/journal';
+import { CommandError } from '@arki/journal';
 
 import type { AppDb, AppTx } from '../test-support';
 import type { CoreWrites } from './journal';
@@ -33,7 +34,7 @@ import {
   typed,
   userId,
 } from '../test-support';
-import { createCoreJournal, PaymentsCommandError } from './journal';
+import { createCoreJournal } from './journal';
 import { storedReal } from './journal/support';
 import { createPaymentId, createSubscriptionId, paymentIdFactory, subscriptionIdFactory } from './primitives';
 
@@ -70,7 +71,7 @@ async function rowOf(paymentId: PaymentId) {
 /** The command must be rejected with this code and message, and must leave the journal and the row alone. */
 async function expectRejected(
   attempt: () => Promise<unknown>,
-  code: PaymentsCommandError['code'],
+  code: CommandErrorCode,
   message: string,
   paymentId?: PaymentId,
 ) {
@@ -79,7 +80,7 @@ async function expectRejected(
 
   const error = await rejectionOf(attempt());
 
-  expect(error).toBeInstanceOf(PaymentsCommandError);
+  expect(error).toBeInstanceOf(CommandError);
   expect(error).toMatchObject({ code, message });
   expect(await countEvents(db)).toBe(eventsBefore);
   if (paymentId) {
@@ -335,13 +336,13 @@ describe('writes(run): what the services call', () => {
     ]);
   });
 
-  it('lets a rejected rule reach the service as a `PaymentsCommandError`, so the app can map it to an API answer', async () => {
+  it('lets a rejected rule reach the service as a `CommandError`, so the app can map it to an API answer', async () => {
     const writes = plain.core.writes(run);
     const paymentId = createPaymentId();
 
     const error = await rejectionOf(writes.completePayment({ paymentId }));
 
-    expect(error).toBeInstanceOf(PaymentsCommandError);
+    expect(error).toBeInstanceOf(CommandError);
     expect(error).toMatchObject({ code: 'NOT_FOUND', message: `Payment ${paymentId} not found` });
   });
 });

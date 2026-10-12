@@ -13,6 +13,8 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { CommandError } from '@arki/journal';
+
 import type { AppDb } from '../../test-support';
 import type { CoreWrites } from '../journal';
 import type { Payment, PaymentStatus } from '../types';
@@ -27,7 +29,6 @@ import {
 } from '../../service-test-support';
 import { countEvents, eventTypesOf, openDb, rejectionOf, typed } from '../../test-support';
 import { createPaymentId } from '../primitives';
-import { PaymentsCommandError } from '../journal';
 import { DunningService } from './dunning-service';
 
 type Provider = ConstructorParameters<typeof DunningService>[0];
@@ -227,7 +228,7 @@ describe('handleSubscriptionRecovery', () => {
 
     const error = await rejectionOf(service.handleSubscriptionRecovery(id));
 
-    expect(error).toBeInstanceOf(PaymentsCommandError);
+    expect(error).toBeInstanceOf(CommandError);
     expect(error).toMatchObject({ code: 'CONFLICT', message: `Cannot activate canceled subscription ${id}` });
     expect(await countEvents(db)).toBe(eventsBefore);
     expect(await subscriptionRow(db, id)).toMatchObject({ status: 'canceled' });

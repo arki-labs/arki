@@ -19,15 +19,13 @@
 import type { CommandRunner, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import { userIdSchema } from '@arki/auth/ids';
 import { z } from '@arki/contracts';
+import { CommandError } from '@arki/journal';
 
 import type { RefundsTables } from './tables';
 import type { Refund } from './types';
-import { PaymentsCommandError, writtenRow } from '../core/journal/support';
+import { writtenRow } from '../core/journal/support';
 import { paymentIdSchema } from '../core/primitives';
 import { createRefundId, refundIdSchema, refundReasonValues } from './primitives';
-
-export { PaymentsCommandError } from '../core/journal/support';
-export type { PaymentsCommandErrorCode } from '../core/journal/support';
 
 type RefundRow = RefundsTables['refunds']['$inferSelect'];
 
@@ -89,7 +87,7 @@ export type RefundWrites = {
 
 function requireRefund(row: RefundRow | null, refundId: string): RefundRow {
   if (!row) {
-    throw new PaymentsCommandError('NOT_FOUND', `Refund ${refundId} not found`);
+    throw new CommandError('NOT_FOUND', `Refund ${refundId} not found`);
   }
 
   return row;
@@ -180,18 +178,18 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
 
     return write(refund, refundId, row => {
       if (row) {
-        throw new PaymentsCommandError('CONFLICT', `Refund ${refundId} already exists`);
+        throw new CommandError('CONFLICT', `Refund ${refundId} already exists`);
       }
 
       if (input.refundAmount > input.originalAmount) {
-        throw new PaymentsCommandError(
+        throw new CommandError(
           'BAD_REQUEST',
           `Refund amount (${input.refundAmount}) cannot exceed original amount (${input.originalAmount})`,
         );
       }
 
       if (input.refundAmount <= 0) {
-        throw new PaymentsCommandError('BAD_REQUEST', 'Refund amount must be positive');
+        throw new CommandError('BAD_REQUEST', 'Refund amount must be positive');
       }
 
       return [
@@ -215,7 +213,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
       const current = requireRefund(row, input.refundId);
 
       if (current.status !== 'pending') {
-        throw new PaymentsCommandError('CONFLICT', `Cannot approve refund with status ${current.status}`);
+        throw new CommandError('CONFLICT', `Cannot approve refund with status ${current.status}`);
       }
 
       return [RefundApproved({ approvedBy: input.approvedBy })];
@@ -227,7 +225,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
       const current = requireRefund(row, input.refundId);
 
       if (current.status !== 'pending') {
-        throw new PaymentsCommandError('CONFLICT', `Cannot reject refund with status ${current.status}`);
+        throw new CommandError('CONFLICT', `Cannot reject refund with status ${current.status}`);
       }
 
       return [RefundRejected({ rejectedBy: input.rejectedBy, rejectionReason: input.rejectionReason })];
@@ -239,7 +237,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
       const current = requireRefund(row, input.refundId);
 
       if (current.status !== 'approved') {
-        throw new PaymentsCommandError(
+        throw new CommandError(
           'CONFLICT',
           `Cannot process refund with status ${current.status}. Must be approved first.`,
         );
@@ -254,7 +252,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
       const current = requireRefund(row, input.refundId);
 
       if (current.status !== 'processing') {
-        throw new PaymentsCommandError(
+        throw new CommandError(
           'CONFLICT',
           `Cannot complete refund with status ${current.status}. Must be processing first.`,
         );
@@ -274,7 +272,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
       const current = requireRefund(row, input.refundId);
 
       if (current.status !== 'processing') {
-        throw new PaymentsCommandError(
+        throw new CommandError(
           'CONFLICT',
           `Cannot fail refund with status ${current.status}. Must be processing first.`,
         );

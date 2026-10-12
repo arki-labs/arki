@@ -13,7 +13,7 @@
  *   new SubscriptionManager(provider, repo, paymentsJournal.writes(context.runCommand));
  *
  * Every write of `payments` and `subscriptions` goes through one of these
- * commands. A rejected rule throws a `PaymentsCommandError`.
+ * commands. A rejected rule throws the `CommandError` of `@arki/journal`.
  */
 
 import type { z } from '@arki/contracts';
@@ -57,8 +57,9 @@ export {
   resumeSubscriptionInputSchema,
   syncSubscriptionInputSchema,
 } from './journal/subscription';
-export { PaymentsCommandError } from './journal/support';
-export type { PaymentsCommandErrorCode } from './journal/support';
+// Temporary alias: `apps/kapodopera/backend/src/core/run-command.ts` still imports this name.
+// It goes when kapodopera switches to `CommandError` from `@arki/journal`.
+export { CommandError as PaymentsCommandError } from '@arki/journal';
 export type {
   CancelPaymentInput,
   CompletePaymentInput,

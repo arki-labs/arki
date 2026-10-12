@@ -12,6 +12,9 @@ import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import type { CommandErrorCode } from '@arki/journal';
+import { CommandError } from '@arki/journal';
+
 import type { AppDb } from '../test-support';
 import type { SyncSubscriptionInput } from './journal';
 import type { SubscriptionId, SubscriptionStatus } from './types';
@@ -27,7 +30,6 @@ import {
   rejectionOf,
   userId,
 } from '../test-support';
-import { PaymentsCommandError } from './journal';
 import { createSubscriptionId } from './primitives';
 
 const { subscriptions } = core;
@@ -81,7 +83,7 @@ async function rowsOfProvider(providerSubscriptionId: string) {
 /** The command must be rejected with this code and message, and must leave the journal and the row alone. */
 async function expectRejected(
   attempt: () => Promise<unknown>,
-  code: PaymentsCommandError['code'],
+  code: CommandErrorCode,
   message: string,
   subscriptionId?: SubscriptionId,
 ) {
@@ -90,7 +92,7 @@ async function expectRejected(
 
   const error = await rejectionOf(attempt());
 
-  expect(error).toBeInstanceOf(PaymentsCommandError);
+  expect(error).toBeInstanceOf(CommandError);
   expect(error).toMatchObject({ code, message });
   expect(await countEvents(db)).toBe(eventsBefore);
   if (subscriptionId) {

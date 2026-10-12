@@ -18,6 +18,7 @@ import { eq } from 'drizzle-orm';
 import type { JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import { userIdSchema } from '@arki/auth/ids';
 import { z } from '@arki/contracts';
+import { CommandError } from '@arki/journal';
 
 import type { CoreTables } from '../tables';
 import {
@@ -27,7 +28,7 @@ import {
   subscriptionIdSchema,
   subscriptionStatusValues,
 } from '../primitives';
-import { PaymentsCommandError, sameJson, toDate, toIso, toNullableDate } from './support';
+import { sameJson, toDate, toIso, toNullableDate } from './support';
 
 type SubscriptionRow = CoreTables['subscriptions']['$inferSelect'];
 
@@ -167,7 +168,7 @@ function snapshotOfDelivery(
 
 function requireSubscription(row: SubscriptionRow | null, subscriptionId: string): SubscriptionRow {
   if (!row) {
-    throw new PaymentsCommandError('NOT_FOUND', `Subscription ${subscriptionId} not found`);
+    throw new CommandError('NOT_FOUND', `Subscription ${subscriptionId} not found`);
   }
 
   return row;
@@ -249,7 +250,7 @@ export function createSubscriptionJournal<
 
     return write(subscription, subscriptionId, row => {
       if (row) {
-        throw new PaymentsCommandError('CONFLICT', `Subscription ${subscriptionId} already exists`);
+        throw new CommandError('CONFLICT', `Subscription ${subscriptionId} already exists`);
       }
 
       return [
@@ -292,7 +293,7 @@ export function createSubscriptionJournal<
       const current = requireSubscription(row, input.subscriptionId);
 
       if (current.status === 'canceled') {
-        throw new PaymentsCommandError('CONFLICT', `Subscription ${input.subscriptionId} is already canceled`);
+        throw new CommandError('CONFLICT', `Subscription ${input.subscriptionId} is already canceled`);
       }
 
       return [
@@ -313,7 +314,7 @@ export function createSubscriptionJournal<
         const current = requireSubscription(row, input.subscriptionId);
 
         if (current.status !== 'canceled' && current.status !== 'past_due') {
-          throw new PaymentsCommandError('CONFLICT', 'Only canceled or past due subscriptions can be reactivated');
+          throw new CommandError('CONFLICT', 'Only canceled or past due subscriptions can be reactivated');
         }
 
         return [SubscriptionReactivated({ status: input.status })];
@@ -326,7 +327,7 @@ export function createSubscriptionJournal<
       const current = requireSubscription(row, input.subscriptionId);
 
       if (current.status !== 'active' && current.status !== 'past_due') {
-        throw new PaymentsCommandError('CONFLICT', 'Only active or past due subscriptions can be paused');
+        throw new CommandError('CONFLICT', 'Only active or past due subscriptions can be paused');
       }
 
       return [SubscriptionPaused({ status: input.status })];
@@ -338,7 +339,7 @@ export function createSubscriptionJournal<
       const current = requireSubscription(row, input.subscriptionId);
 
       if (current.status !== 'paused') {
-        throw new PaymentsCommandError('CONFLICT', 'Only paused subscriptions can be resumed');
+        throw new CommandError('CONFLICT', 'Only paused subscriptions can be resumed');
       }
 
       return [SubscriptionResumed({ status: input.status })];
@@ -363,7 +364,7 @@ export function createSubscriptionJournal<
       const current = requireSubscription(row, input.subscriptionId);
 
       if (current.status === 'canceled') {
-        throw new PaymentsCommandError('CONFLICT', `Cannot activate canceled subscription ${input.subscriptionId}`);
+        throw new CommandError('CONFLICT', `Cannot activate canceled subscription ${input.subscriptionId}`);
       }
 
       return current.status === 'active' ? [] : [SubscriptionActivated({})];

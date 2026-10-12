@@ -17,7 +17,8 @@ import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { CommandRunner } from '@arki/journal';
+import type { CommandErrorCode, CommandRunner } from '@arki/journal';
+import { CommandError } from '@arki/journal';
 
 import type { PaymentId } from '../core/types';
 import type { AppDb, AppTx } from '../test-support';
@@ -38,7 +39,7 @@ import {
   typed,
   userId,
 } from '../test-support';
-import { createRefundsJournal, PaymentsCommandError } from './journal';
+import { createRefundsJournal } from './journal';
 import { createRefundId, refundIdFactory } from './primitives';
 
 const { refunds } = refundsTables;
@@ -93,7 +94,7 @@ async function rowOf(refundId: RefundId) {
 /** The command must be rejected with this code and message, and must leave the journal and the row alone. */
 async function expectRejected(
   attempt: () => Promise<unknown>,
-  code: PaymentsCommandError['code'],
+  code: CommandErrorCode,
   message: string,
   refundId?: RefundId,
 ) {
@@ -102,7 +103,7 @@ async function expectRejected(
 
   const error = await rejectionOf(attempt());
 
-  expect(error).toBeInstanceOf(PaymentsCommandError);
+  expect(error).toBeInstanceOf(CommandError);
   expect(error).toMatchObject({ code, message });
   expect(await countEvents(db)).toBe(eventsBefore);
   if (refundId) {
@@ -388,13 +389,13 @@ describe('writes(run): what RefundService calls', () => {
     expect(await journal.verify(db, entities.refund, failed)).toEqual({ ok: true });
   });
 
-  it('lets a rejected rule reach the service as a `PaymentsCommandError`, so the app can map it to an API answer', async () => {
+  it('lets a rejected rule reach the service as a `CommandError`, so the app can map it to an API answer', async () => {
     const writes = typed.refunds.writes(run);
     const refundId = await seed('pending');
 
     const error = await rejectionOf(writes.processRefund({ refundId }));
 
-    expect(error).toBeInstanceOf(PaymentsCommandError);
+    expect(error).toBeInstanceOf(CommandError);
     expect(error).toMatchObject({ code: 'CONFLICT' });
   });
 });

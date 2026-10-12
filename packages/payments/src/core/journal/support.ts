@@ -5,25 +5,6 @@
  * Plain TypeScript only: this file runs on Node, Bun, Deno, browsers and Hermes.
  */
 
-export type PaymentsCommandErrorCode = 'NOT_FOUND' | 'BAD_REQUEST' | 'FORBIDDEN' | 'CONFLICT';
-
-/**
- * Thrown by a command when a business rule rejects the request.
- *
- * The code names the kind of API answer; the message is for the client. The
- * host app maps it to its own transport error (for example an `ORPCError`).
- * The package never imports an app's error class.
- */
-export class PaymentsCommandError extends Error {
-  readonly code: PaymentsCommandErrorCode;
-
-  constructor(code: PaymentsCommandErrorCode, message: string) {
-    super(message);
-    this.name = 'PaymentsCommandError';
-    this.code = code;
-  }
-}
-
 /** Event data is stored as JSON, so a time travels as an ISO string. */
 export function toIso(value: Date): string {
   return value.toISOString();
