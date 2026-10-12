@@ -26,7 +26,7 @@ import type {
 import { createCommandRunner } from './command.js';
 import { defineEntity } from './entity.js';
 import { defineEvent } from './event.js';
-import { defineEffect, defineProjection } from './handlers.js';
+import { bindEffect, defineProjection, effectFor } from './handlers.js';
 import { createHistory } from './history.js';
 import { createDrain, createWorkers } from './worker.js';
 import { createWriter } from './write.js';
@@ -101,9 +101,11 @@ function createInit<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, 
     entity,
     command: (name, input, handler) => ({ name, input, handler }),
     projection: (name, entity, on) => defineProjection(name, entity, on),
-    effect: (name, entity, on) => defineEffect(name, entity, on),
-    compose: config =>
-      createJournal<Meta, Tx, AppDb>(metaSchema, config.tables, config.projections ?? [], config.effects ?? []),
+    effect: effectFor<MetaOut, AppDb, RootCommandRunner<Meta, Tx>>(),
+    compose: config => {
+      const effects = (config.effects ?? []).map(effect => bindEffect(effect, config.services ?? {}));
+      return createJournal<Meta, Tx, AppDb>(metaSchema, config.tables, config.projections ?? [], effects);
+    },
   };
 }
 

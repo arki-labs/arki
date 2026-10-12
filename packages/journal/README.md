@@ -29,7 +29,7 @@ Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions)
 
 ```ts
 // src/journal.ts — once per app. `meta` is the app-wide metadata schema.
-import { initJournal } from '@arki/journal';
+import { initJournal, need } from '@arki/journal';
 // src/schema.ts — the two journal tables live in the app's schema.
 import { journalTables } from '@arki/journal/pg';
 
@@ -85,16 +85,21 @@ export const customerStats = j.projection('customer-stats', order, {
 });
 
 // Async lane: after commit, at least once. The context also has `db`, the root database,
-// and `run`, which runs a command. Other dependencies come in by closure.
-export const orderMail = (mailer: Mailer) =>
-  j.effect('order-mail', order, {
-    OrderPaid: (e, { jobId }) => mailer.send({ template: 'order-paid', orderId: e.entityId, idempotencyKey: jobId }),
-  });
+// and `run`, which runs a command. An effect lists what else it needs and gets it in the context.
+export const orderMail = j.effect(
+  'order-mail',
+  order,
+  { mailer: need<Mailer>() },
+  {
+    OrderPaid: (e, { jobId, mailer }) =>
+      mailer.send({ template: 'order-paid', orderId: e.entityId, idempotencyKey: jobId }),
+  },
+);
 
 export const tables = journalTables(); // or journalTables(pgSchema('app'))
 
 // src/journal.root.ts — the one place that lists handlers.
-export const journal = j.compose({ tables, projections: [customerStats], effects: [orderMail(mailer)] });
+export const journal = j.compose({ tables, projections: [customerStats], effects: [orderMail], services: { mailer } });
 
 // The request context binds the door once: the database and the signed-in actor.
 export const createContext = (user: User) => ({ user, runCommand: journal.bind(db, { actorId: user.id }) });
@@ -261,6 +266,29 @@ An effect runs after the commit, at least once, from a row in `journal_jobs`. A 
 - `db` is the root database given to `drain` or `worker`: the same object. Use it to read committed rows. The effect needs no closure for the database.
 - `run` runs a command on that database: `run(command, input, meta)`. See [Where commands run from](#where-commands-run-from).
 
+An effect that needs a service (a mailer, an in-process emitter) lists it. The list is the third argument:
+
+```ts
+export const orderMail = j.effect(
+  'order-mail',
+  order,
+  { mailer: need<Mailer>() },
+  {
+    OrderPaid: (e, { jobId, mailer }) =>
+      mailer.send({ template: 'order-paid', orderId: e.entityId, idempotencyKey: jobId }),
+  },
+);
+
+export const journal = j.compose({ tables, effects: [orderMail], services: { mailer } });
+```
+
+- `need<Mailer>()` comes from `@arki/journal`. It is a marker: it holds the type and no value.
+- Each handler gets the service in its context, under the name of the need, with its type.
+- The app gives the real services once, in `services`. Every need of every listed effect must be there. A missing one is a compile error, and `compose` throws: `journal: effect "order-mail" needs "mailer", but no service with that name was given; ...`.
+- Two effects that use the same name get the same service.
+- A need cannot be named `jobId`, `signal`, `db` or `run`. `j.effect` throws.
+- An effect that needs nothing has three arguments: `j.effect(name, entity, on)`.
+
 `db` has the library's `RootDb` type unless the app names its own database type once: `initJournal.db<AppDb>().create({ meta })`. Then `ctx.db.query.orders` is typed, and `drain` and `worker` need an `AppDb`. They still refuse a transaction. With `.tx<AppTx>()` they also need a database that opens `AppTx` transactions, because effects run commands on it. The app's own Drizzle database does. `.tx<AppTx>()` and `.db<AppDb>()` are both optional type-only steps and chain in either order: `initJournal.tx<AppTx>().db<AppDb>().create({ meta })`.
 
 ## The worker
@@ -289,7 +317,7 @@ journal.wake(); // after the commit
 
 ```ts
 // src/journal.root.ts — the one place that lists handlers.
-export const journal = j.compose({ tables, projections: [customerStats], effects: [orderMail(mailer)] });
+export const journal = j.compose({ tables, projections: [customerStats], effects: [orderMail], services: { mailer } });
 
 // src/server.ts
 const worker = journal.worker(db);
@@ -304,12 +332,7 @@ await worker.stop();
 // src/features/orders/feature.ts
 export const orders = defineFeature('orders', {
   needs: { mailer: service<Mailer>() },
-  use: [
-    journalHandlers({
-      projections: [customerStats],
-      effects: (services: { readonly mailer: Mailer }) => [orderMail(services.mailer)],
-    }),
-  ],
+  use: [journalHandlers({ projections: [customerStats], effects: [orderMail] })],
 });
 
 // src/app.ts
@@ -326,8 +349,9 @@ await run(payOrder, input);
 
 - `journal(...)` publishes `services.journal`. It needs the root database under the `db` key. A transaction there is a compile error.
 - It starts one worker on `start` and stops it on `stop`. Options: `worker: false` (no worker in this process), `pollMs`, `batchSize`.
-- `effects` is a list, or a function of the feature's booted services. Annotate the function's parameter. The feature must declare those services in `needs`, or it does not compile.
-- An effect in a list is an action in the app manifest (`binding: 'journal'`, id `<name>.run`). Effects from a function are not listed: their names exist only after boot. Projections are never listed: they run inside the write.
+- `effects` is a list. An effect with needs gets them from the booted services of the feature that lists it, by name. The feature must declare each one in its own `needs`, or it does not compile.
+- Two features may use the same need name for two different services. Each effect gets the service of its own feature.
+- Every effect is an action in the app manifest (`binding: 'journal'`, id `<name>.run`). Projections are never listed: they run inside the write.
 - Two features with the same projection name or the same effect name fail the boot. The message names the duplicate and both features.
 - A feature without `journalHandlers` adds nothing. That is allowed.
 - The feature tokens are needs at run time only. A feature mounted after `journal(...)`, or not mounted, fails at boot and not at compile time.

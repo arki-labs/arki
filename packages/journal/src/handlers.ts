@@ -5,9 +5,13 @@ import type {
   Effect,
   EffectContext,
   EffectHandlers,
+  Need,
+  Needed,
+  Needs,
   Projection,
   ProjectionHandlers,
   Recorded,
+  Services,
 } from './types.js';
 import { assertStoredName } from './id.js';
 
@@ -46,19 +50,36 @@ export function defineProjection<E extends AnyEntity<Meta>, Meta, Tx extends DbH
   };
 }
 
-export function defineEffect<E extends AnyEntity<Meta>, Meta, AppDb, Run>(
+/** Every effect handler gets these. A need must not take one of their names. */
+const builtInContext = new Set(['jobId', 'signal', 'db', 'run']);
+
+/** Declare one thing an effect needs: `j.effect('order-mail', order, { mailer: need<Mailer>() }, { ... })`. */
+export const need = <T>(): Need<T> => ({});
+
+function defineEffect<E extends AnyEntity<Meta>, Meta, AppDb, Run, N extends Needs>(
   name: string,
   entity: E | readonly E[],
-  on: NoInfer<EffectHandlers<E, Meta, AppDb, Run>>,
-): Effect<Meta, AppDb, Run> {
+  needs: N,
+  on: EffectHandlers<E, Meta, AppDb, Run, N>,
+): Effect<Meta, AppDb, Run, N> {
   assertStoredName('effect name', name);
+  for (const key of Object.keys(needs)) {
+    if (builtInContext.has(key))
+      throw new Error(
+        `journal: effect "${name}" has a need named "${key}", but the handler context already has "jobId", "signal", "db" and "run"; give the need another name`,
+      );
+  }
   const handlers: Partial<
-    Record<string, BivariantFn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb, Run>], unknown>>
+    Record<
+      string,
+      BivariantFn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb, Run> & Needed<N>], unknown>
+    >
   > = on;
   return {
     name,
     entities: toList(entity),
     types: declaredTypes(handlers),
+    needs,
     async run(event, ctx) {
       const handler = ownHandler(handlers, event.type);
       // A job was queued for this type. Running nothing would acknowledge it silently.
@@ -69,4 +90,49 @@ export function defineEffect<E extends AnyEntity<Meta>, Meta, AppDb, Run>(
       await handler(event, ctx);
     },
   };
+}
+
+/** `j.effect` for one journal. Three arguments: the effect needs nothing. Four: the third lists its needs. */
+export function effectFor<Meta, AppDb, Run>() {
+  function effect<E extends AnyEntity<Meta>>(
+    name: string,
+    entity: E | readonly E[],
+    on: NoInfer<EffectHandlers<E, Meta, AppDb, Run>>,
+  ): Effect<Meta, AppDb, Run>;
+  function effect<E extends AnyEntity<Meta>, N extends Needs>(
+    name: string,
+    entity: E | readonly E[],
+    needs: N,
+    on: NoInfer<EffectHandlers<E, Meta, AppDb, Run, N>>,
+  ): Effect<Meta, AppDb, Run, N>;
+  function effect<E extends AnyEntity<Meta>, N extends Needs>(
+    name: string,
+    entity: E | readonly E[],
+    ...rest: [on: EffectHandlers<E, Meta, AppDb, Run>] | [needs: N, on: EffectHandlers<E, Meta, AppDb, Run, N>]
+  ) {
+    return rest.length === 1 ? defineEffect(name, entity, {}, rest[0]) : defineEffect(name, entity, rest[0], rest[1]);
+  }
+  return effect;
+}
+
+/**
+ * Give one effect its services. The result needs nothing more, so the worker can run it.
+ * `services` may hold more than this effect needs: each need is read by its name.
+ * This is the only place a need meets its value. `j.compose` calls it with the app's
+ * `services`; the Dot bridge calls it with the services of the feature that lists the effect.
+ */
+export function bindEffect<Meta, AppDb, Run>(
+  effect: Effect<Meta, AppDb, Run, Needs>,
+  services: Services,
+): Effect<Meta, AppDb, Run> {
+  const given: Record<string, unknown> = {};
+  for (const key of Object.keys(effect.needs)) {
+    // Without this check the effect would start, and every job would fail on `undefined`.
+    if (!Object.hasOwn(services, key) || services[key] === undefined)
+      throw new Error(
+        `journal: effect "${effect.name}" needs "${key}", but no service with that name was given; pass it as j.compose({ services: { ${key} } }), or in a Dot app add it to the \`needs\` of the feature that lists this effect`,
+      );
+    given[key] = services[key];
+  }
+  return { ...effect, needs: {}, run: (event, ctx) => effect.run(event, { ...given, ...ctx }) };
 }

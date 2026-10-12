@@ -37,7 +37,7 @@ The word `create` has two meanings. Neither one builds the journal. `j.compose(.
 ## Setup
 
 ```ts
-import { initJournal } from '@arki/journal';
+import { initJournal, need } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
 
 // journal.ts: once per app. `meta` is the schema of the metadata every event records.
@@ -50,7 +50,8 @@ export const j = initJournal
 export const tables = journalTables(); // or journalTables(pgSchema('app'))
 
 // journal.root.ts: the one place that lists handlers.
-export const journal = j.compose({ tables, projections: [customerStats], effects: [orderMail(mailer)] });
+// `services` gives each effect what it needs, by name.
+export const journal = j.compose({ tables, projections: [customerStats], effects: [orderMail], services: { mailer } });
 ```
 
 `.tx<AppTx>()` types `tx` in commands and projections. `.db<AppDb>()` types `db` in effects. Both steps are optional and type-only. `initJournal({ meta })` alone also returns `j`. `AppDb` is the app's Drizzle database type. `AppTx` is its transaction type: `Parameters<Parameters<AppDb['transaction']>[0]>[0]`.
@@ -90,18 +91,22 @@ export const order = j
 
 ### Add an effect that runs after commit
 
-Library files: `src/handlers.ts` (`defineEffect`), `src/worker.ts` (claims, retries, `drain`, the loop, `wake`), `src/journal.ts` (`createJournal` gives the worker `runOn`, which makes `ctx.run`).
+Library files: `src/handlers.ts` (`effectFor` is `j.effect`, `need`, and `bindEffect`, which gives an effect its services), `src/worker.ts` (claims, retries, `drain`, the loop, `wake`), `src/journal.ts` (`createJournal` gives the worker `runOn`, which makes `ctx.run`).
 
 ```ts
-// features/orders/effects.ts: a factory, so the mailer comes in as an argument.
-export const orderMail = (mailer: Mailer) =>
-  j.effect('order-mail', order, {
-    OrderPaid: async (e, { jobId, db }) => {
+// features/orders/effects.ts: the effect lists what it needs. Each handler gets it in the context.
+export const orderMail = j.effect(
+  'order-mail',
+  order,
+  { mailer: need<Mailer>() },
+  {
+    OrderPaid: async (e, { jobId, db, mailer }) => {
       const [row] = await db.select().from(orders).where(eq(orders.id, e.entityId));
       if (!row) return;
       await mailer.send({ template: 'order-paid', orderId: e.entityId, total: row.total, idempotencyKey: jobId });
     },
-  });
+  },
+);
 
 // An effect that writes runs a command. It needs no closure over the journal.
 export const closeAfterPayment = j.effect('close-after-payment', order, {
@@ -110,6 +115,9 @@ export const closeAfterPayment = j.effect('close-after-payment', order, {
 ```
 
 - The handler gets `(e, { jobId, signal, db, run })`. `db` is the root database given to `drain` or `worker`. Read committed rows with it.
+- An effect that needs nothing has three arguments. An effect that needs a service has four: the third is `{ mailer: need<Mailer>() }`, with `need` from `@arki/journal`. The handler then reads `mailer` from its context, typed. Do not wrap an effect in a function to pass a service in.
+- Where the service comes from: a plain app gives it once, in `j.compose({ ..., services: { mailer } })`. In a Dot app it is a service of the feature that lists the effect, and the feature declares it in `needs`. A missing service is a compile error. `j.compose` and the Dot boot also throw, and the message names the effect and the need.
+- A need cannot be named `jobId`, `signal`, `db` or `run`. `j.effect` throws when the effect is defined.
 - `run(command, input, meta)` is `journal.run` on that same database: its own transaction, committed before it returns. `meta` is required, and the library never picks an actor. It works the same in a plain app and in a Dot app.
 - If the command throws, the effect fails: nothing of the command is committed and the job is retried. If the effect fails after `run` returned, the command stays committed and runs again on the retry. Make the command safe to run twice. The usual key is `jobId`.
 - `jobId` is the same on every retry. An effect can run more than once, so pass `jobId` on as an idempotency key.
@@ -233,6 +241,8 @@ This is the only copy of this table. The message texts are in `src/errors.ts`. A
 
 - `JOURNAL_PLUGIN_E001`, a `DotPluginError`: a feature token holds a `journal` slice that `journalHandlers` did not make. Declare the slice with `journalHandlers({ projections, effects })`.
 - `journal: duplicate effect name "x" (features "feature.orders" and "feature.billing")`: two features list a handler with the same name. Rename one. Projections get the same message with `projection`.
+- `journal: effect "x" needs "mailer", but no service with that name was given; ...`: thrown by `j.compose` in a plain app and at boot in a Dot app. Plain app: add `mailer` to `services` in `j.compose`. Dot app: add it to the `needs` of the feature that lists the effect.
+- `journal: effect "x" has a need named "db", ...`: thrown by `j.effect`. The names `jobId`, `signal`, `db` and `run` are taken. Give the need another name.
 
 ## Recovery verbs
 
@@ -253,6 +263,7 @@ This is the only copy of this table. The message texts are in `src/errors.ts`. A
 | Where handlers are listed | One `journal.root.ts` calls `j.compose(...)`.         | Each feature lists its own with `journalHandlers(...)`. There is no root file.   |
 | Who builds the journal    | Your code.                                            | The plugin: `journal({ j, tables, features })`. It publishes `services.journal`. |
 | Who runs the worker       | Your code: `journal.worker(db)`, `start()`, `stop()`. | The plugin, between `start` and `stop`. Pass `worker: false` to turn it off.     |
+| What an effect needs      | `services` in `j.compose(...)`, once for the app.     | The services of the feature that lists the effect. It declares them in `needs`.  |
 
 | Where the door is bound | The request context: `journal.bind(db, { actorId })`. | The gateway's context factory: `services.journal.bind(services.db, { actorId })`. |
 
@@ -264,7 +275,7 @@ An effect runs a command with `ctx.run` in both wirings. In feature mode the jou
 
 ## Shared packages
 
-This is the pattern to follow. No code in this repo uses it yet. A package that ships journal pieces exports a factory. The factory takes the app's `j` and the tables. It returns entities, commands, projections and effect factories. The package never owns a database, a composed journal or a worker. The app adds the tables to its schema. It calls `billingJournal(j, billingTables())` and lists the returned handlers in its own `j.compose(...)`. `billingTables()` is the package's own table factory, shaped like `journalTables()`: it returns `{ invoices }`, a table with a string `id` and a `version` column.
+This is the pattern to follow. No code in this repo uses it yet. A package that ships journal pieces exports a factory. The factory takes the app's `j` and the tables. It returns entities, commands, projections and effects. An effect that needs a service lists it with `need<T>()`, and the app gives the service in its own `j.compose({ services })`. The package never owns a database, a composed journal or a worker. The app adds the tables to its schema. It calls `billingJournal(j, billingTables())` and lists the returned handlers in its own `j.compose(...)`. `billingTables()` is the package's own table factory, shaped like `journalTables()`: it returns `{ invoices }`, a table with a string `id` and a `version` column.
 
 ```ts
 export function billingJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
@@ -278,8 +289,12 @@ export function billingJournal<Meta extends z.ZodObject, Tx extends TransactionS
     z.object({ invoiceId: z.string().min(1), amount: z.int().positive() }),
     (input, { write }) => write(invoice, input.invoiceId, () => [InvoiceIssued({ amount: input.amount })]),
   );
-  const invoiceMail = (send: (invoiceId: string, idempotencyKey: string) => Promise<void>) =>
-    j.effect('invoice-mail', invoice, { InvoiceIssued: (e, { jobId }) => send(e.entityId, jobId) });
+  const invoiceMail = j.effect(
+    'invoice-mail',
+    invoice,
+    { sendInvoiceMail: need<(invoiceId: string, idempotencyKey: string) => Promise<void>>() },
+    { InvoiceIssued: (e, { jobId, sendInvoiceMail }) => sendInvoiceMail(e.entityId, jobId) },
+  );
   return { entities: { invoice }, events: { InvoiceIssued }, commands: { issueInvoice }, effects: { invoiceMail } };
 }
 ```
@@ -289,6 +304,9 @@ export function billingJournal<Meta extends z.ZodObject, Tx extends TransactionS
 These look odd. Each one is needed.
 
 - `ownHandler` with `Object.hasOwn` in `src/handlers.ts`: an event type named `toString` must not find a handler on the prototype.
+- `bindEffect` in `src/handlers.ts` runs for every effect, also for one without needs, and a Dot app runs it twice (the bridge, then `j.compose`): it is the one place where a need gets its service and where a missing service is caught.
+- `need<T>()` is the journal's own marker, not Dot's `service<T>()`: the core must load and type-check without `@arki/dot`, and Dot keeps the key of its marker private.
+- `const E` on `compose` (`src/api.ts`) and `journalHandlers` (`src/dot.ts`): without it TypeScript reads `[plainEffect, effectWithNeeds]` as a list of plain effects, and a missing service is no longer a compile error.
 - The module-scoped `WeakMap` in `src/transaction-guard.ts`: two journals on one transaction share its savepoint stack, so they must share this guard.
 - `assertRoundTrips` in `src/storage.ts` uses `JSON.stringify`, not `structuredClone`: it checks what JSON storage does to the value.
 - Delete, then insert, when a row is deleted and created again in one write (`src/write.ts`): columns the create leaves out must get their defaults, not the old values.

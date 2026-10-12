@@ -14,10 +14,11 @@ import { z } from 'zod';
 
 import type { ActionSource } from '@arki/dot/plugin';
 import { bootTestApp, defineApp, rename } from '@arki/dot';
-import { plugin, provide, service, token } from '@arki/dot/plugin';
+import { plugin, provide, token } from '@arki/dot/plugin';
 
 import type { OrderId } from './test-support.js';
 import { journal, journalHandlers } from './dot.js';
+import { need } from './handlers.js';
 import { initJournal } from './journal.js';
 import {
   customerOrderCounts,
@@ -353,78 +354,105 @@ describe('journal(...) in feature mode', () => {
     ]);
   });
 
-  it('gives an effects function the booted services, so an effect can use a boot-time service such as a realtime emitter', async () => {
-    type Emitter = { emit(id: OrderId): void };
-    const emitted: OrderId[] = [];
-    const announced = signal();
-    const emitter = plugin({
-      name: 'emitter',
-      boot: (): { emitter: Emitter } => ({
-        emitter: {
-          emit: id => {
-            emitted.push(id);
-            announced.open();
-          },
-        },
-      }),
-    });
+  type Emitter = { emit(id: OrderId): void };
+  /** An effect that needs an emitter. It does not say which one: the feature that lists it does. */
+  const announce = (name: string) =>
+    j.effect(
+      `dot-${name}-announce`,
+      order,
+      { emitter: need<Emitter>() },
+      { OrderPlaced: (e, { emitter }) => emitter.emit(e.entityId) },
+    );
 
-    const slice = journalHandlers({
-      effects: (services: { readonly emitter: Emitter }) => [
-        j.effect('dot-announce', order, { OrderPlaced: e => services.emitter.emit(e.entityId) }),
-      ],
-    });
-    // The names are not known before boot, so the manifest cannot list these effects.
-    expect(slice.actions).toEqual([]);
-
-    const Announce = token<{ readonly journal: ReturnType<typeof slice.resolve> }>()('feature.announce');
-    const announce = plugin({
-      name: 'announce',
-      needs: { emitter: service<Emitter>() },
-      boot: ctx => provide(Announce, { journal: slice.resolve(ctx) }),
-    });
+  it('gives each effect the services of the feature that listed it, so two features can use one need name for two different services', async () => {
+    const heard: { orders: OrderId[]; billing: OrderId[] } = { orders: [], billing: [] };
+    const told = { orders: signal(), billing: signal() };
+    /** One emitter plugin and one feature that wires it to its own `emitter` need. */
+    const emitterFeature = (name: 'orders' | 'billing') => {
+      const EmitterToken = token<Emitter>()(`${name}.emitter`);
+      const emitter = plugin({
+        name: `${name}-emitter`,
+        boot: () =>
+          provide(EmitterToken, {
+            emit: id => {
+              heard[name].push(id);
+              told[name].open();
+            },
+          }),
+      });
+      const slice = journalHandlers({ effects: [announce(name)] });
+      const Feature = token<{ readonly journal: ReturnType<typeof slice.resolve> }>()(`feature.${name}`);
+      const feature = plugin({
+        name,
+        needs: { emitter: EmitterToken },
+        actions: slice.actions,
+        boot: ctx => provide(Feature, { journal: slice.resolve(ctx) }),
+      });
+      return { emitter, feature, token: Feature };
+    };
+    const orders = emitterFeature('orders');
+    const billing = emitterFeature('billing');
 
     const app = track(
       await bootTestApp<{ journal: TestJournal }>([
         dbPlugin(),
-        emitter,
-        announce,
-        journal({ j, tables, features: [Announce], pollMs: POLL_MS }),
+        orders.emitter,
+        billing.emitter,
+        orders.feature,
+        billing.feature,
+        journal({ j, tables, features: [orders.token, billing.token], pollMs: POLL_MS }),
       ]),
     );
     await app.start();
 
     const id = orderId(++next);
     await app.services.journal.run(db, placeOrder, { id }, meta);
-    await announced.opened;
-    expect(emitted).toEqual([id]);
+    await Promise.all([told.orders.opened, told.billing.opened]);
+    expect(heard).toEqual({ orders: [id], billing: [id] });
   });
 
-  it.each([
-    { form: 'a list', wrap: <T>(effects: T) => effects },
-    {
-      form: 'a function',
-      wrap:
-        <T>(effects: T) =>
-        () =>
-          effects,
-    },
-  ])(
-    'fails the boot and names the effect and both features when two features declare the same effect name as $form, so a job never has two owners and nobody has to search for the second one',
-    async ({ wrap }) => {
-      const first = feature('first', journalHandlers({ effects: wrap([recorder('dot-twice').effect]) }));
-      const second = feature('second', journalHandlers({ effects: wrap([recorder('dot-twice').effect]) }));
+  it('lists an effect with needs in the feature manifest like any other, so `dot explain` never misses async work', () => {
+    expect(journalHandlers({ effects: [announce('listed')] }).actions).toEqual([
+      {
+        id: 'dot-listed-announce.run',
+        binding: 'journal',
+        direction: 'in',
+        address: 'dot-listed-announce',
+        metaSchema: '@arki/journal/action-meta@1',
+        meta: { entities: ['order'], events: ['OrderPlaced'] },
+      },
+    ]);
+  });
 
-      await expect(
-        bootTestApp([
-          dbPlugin(),
-          first.plugin,
-          second.plugin,
-          journal({ j, tables, features: [first.token, second.token], worker: false }),
-        ]),
-      ).rejects.toThrow('duplicate effect name "dot-twice" (features "feature.first" and "feature.second")');
-    },
-  );
+  it('makes the feature declare what its effects need, so a forgotten service is a compile error, and a boot error when the types were bypassed', () => {
+    const slice = journalHandlers({ effects: [recorder('dot-needs-nothing').effect, announce('typed')] });
+    expectTypeOf(slice.resolve).parameter(0).toEqualTypeOf<{ readonly emitter: Emitter }>();
+    // A feature whose effects need nothing asks its services for nothing.
+    expectTypeOf(journalHandlers({ effects: [recorder('dot-plain').effect] }).resolve)
+      .parameter(0)
+      .toBeUnknown();
+
+    expect(() =>
+      // @ts-expect-error -- type test: these services have no `emitter`, so they do not fit the slice
+      slice.resolve({}),
+    ).toThrow(
+      'journal: effect "dot-typed-announce" needs "emitter", but no service with that name was given; pass it as j.compose({ services: { emitter } }), or in a Dot app add it to the `needs` of the feature that lists this effect',
+    );
+  });
+
+  it('fails the boot and names the effect and both features when two features declare the same effect name, so a job never has two owners and nobody has to search for the second one', async () => {
+    const first = feature('first', journalHandlers({ effects: [recorder('dot-twice').effect] }));
+    const second = feature('second', journalHandlers({ effects: [recorder('dot-twice').effect] }));
+
+    await expect(
+      bootTestApp([
+        dbPlugin(),
+        first.plugin,
+        second.plugin,
+        journal({ j, tables, features: [first.token, second.token], worker: false }),
+      ]),
+    ).rejects.toThrow('duplicate effect name "dot-twice" (features "feature.first" and "feature.second")');
+  });
 
   it('fails the boot and names both features when two features declare the same projection name, so one read model is never written by two handlers', async () => {
     const first = feature('first', journalHandlers({ projections: [countPlaced('dot-count-twice', 'first')] }));

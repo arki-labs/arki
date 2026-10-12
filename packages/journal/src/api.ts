@@ -21,6 +21,7 @@ import type {
   IdTable,
   JournalWorker,
   KeyName,
+  Needs,
   PendingOf,
   Projection,
   ProjectionHandlers,
@@ -28,6 +29,8 @@ import type {
   ReducerRow,
   RootDb,
   Row,
+  Services,
+  ServicesFor,
   SingleKey,
   TransactionSource,
 } from './types.js';
@@ -240,10 +243,28 @@ export type JournalDefinitions<
     entity: E | readonly E[],
     on: NoInfer<EffectHandlers<E, z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>>>,
   ): Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>>;
-  /** Build the runtime journal from the tables and the handlers. */
-  compose(config: {
-    readonly tables: JournalTables;
-    readonly projections?: readonly Projection<z.output<Meta>, Tx>[];
-    readonly effects?: readonly Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>>[];
-  }): Journal<Meta, Tx, AppDb>;
+  /**
+   * An effect that needs a service: `needs` is `{ mailer: need<Mailer>() }`, and each
+   * handler then gets `mailer` in its context, next to `jobId`, `signal`, `db` and `run`.
+   */
+  effect<E extends AnyEntity<z.output<Meta>>, N extends Needs>(
+    name: string,
+    entity: E | readonly E[],
+    needs: N,
+    on: NoInfer<EffectHandlers<E, z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>, N>>,
+  ): Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>, N>;
+  /**
+   * Build the runtime journal from the tables and the handlers. `services` holds one
+   * value for every need of every listed effect, by name. A need without a value throws here.
+   * `const`: the list is read as a tuple, so an effect with needs keeps them next to one without.
+   */
+  compose<const E extends readonly Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[] = readonly []>(
+    config: {
+      readonly tables: JournalTables;
+      readonly projections?: readonly Projection<z.output<Meta>, Tx>[];
+      readonly effects?: E;
+    } & ServicesOption<ServicesFor<E>>,
+  ): Journal<Meta, Tx, AppDb>;
 };
+/** `services` is required as soon as one listed effect has a need. */
+type ServicesOption<S> = unknown extends S ? { readonly services?: Services } : { readonly services: S & Services };

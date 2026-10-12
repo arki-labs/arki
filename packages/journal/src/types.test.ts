@@ -27,7 +27,9 @@ import type {
   ReducerValues,
   RootDb,
   Row,
+  ServicesFor,
 } from './types.js';
+import { need } from './handlers.js';
 import { initJournal } from './journal.js';
 import {
   j,
@@ -370,6 +372,54 @@ const plainRuns = j.effect('plain-runs', typed, {
 // The same journal that types `run` composes these effects.
 void jd.compose({ tables, effects: [dbRuns] });
 void j.compose({ tables, effects: [plainRuns] });
+
+// --- An effect's needs reach its handlers, and `compose` asks for a service for each one
+
+type Mailer = { send(to: string): Promise<void> };
+type Clock = { now(): Date };
+const needsMail = jd.effect(
+  'needs-mail',
+  dbOrder,
+  { mailer: need<Mailer>() },
+  {
+    OrderPaid: (_e, ctx) => {
+      expectTypeOf(ctx.mailer).toEqualTypeOf<Mailer>();
+      // The built-in context is still there, typed as before.
+      expectTypeOf(ctx.db).toEqualTypeOf<PgliteDatabase>();
+      expectTypeOf(ctx.jobId).toEqualTypeOf<string>();
+      expectTypeOf(ctx.signal).toEqualTypeOf<AbortSignal>();
+      expectTypeOf(ctx.run).toEqualTypeOf<RootCommandRunner<z.ZodObject<{ actorId: z.ZodString }>, AppTx>>();
+      // @ts-expect-error -- `clock` is not a need of this effect, so its handlers must not see one
+      void ctx.clock;
+    },
+  },
+);
+const needsClock = jd.effect(
+  'needs-clock',
+  dbOrder,
+  { clock: need<Clock>() },
+  { OrderPaid: (_e, { clock }) => clock.now() },
+);
+function needsFit(mailer: Mailer, clock: Clock) {
+  // One `services` object covers every effect in the list. Effects without needs sit next to them.
+  void jd.compose({ tables, effects: [dbRuns, needsMail, needsClock], services: { mailer, clock } });
+  // @ts-expect-error -- `needsClock` needs `clock`: every need of every listed effect must be given
+  void jd.compose({ tables, effects: [needsMail, needsClock], services: { mailer } });
+  // @ts-expect-error -- an effect in the list has a need, so `services` is required
+  void jd.compose({ tables, effects: [needsMail] });
+  // @ts-expect-error -- an effect without needs next to it must not hide the need
+  void jd.compose({ tables, effects: [dbRuns, needsMail] });
+  // @ts-expect-error -- a service must have the type its need names
+  void jd.compose({ tables, effects: [needsMail], services: { mailer: clock } });
+  // @ts-expect-error -- an effect is typed for its own journal: this one reads `ctx.db` as a `PgliteDatabase` with `AppTx` commands
+  void tenants.compose({ tables, effects: [needsMail], services: { mailer } });
+}
+void needsFit;
+type Both = ServicesFor<[typeof needsMail, typeof dbRuns, typeof needsClock]>;
+expectTypeOf<Both['mailer']>().toEqualTypeOf<Mailer>();
+expectTypeOf<Both['clock']>().toEqualTypeOf<Clock>();
+// No effect needs anything: there is nothing to ask for.
+expectTypeOf<ServicesFor<[typeof dbRuns]>>().toBeUnknown();
 
 async function dbFits() {
   const db = drizzle({ client: new PGlite('memory://') });

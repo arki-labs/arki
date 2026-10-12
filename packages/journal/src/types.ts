@@ -217,9 +217,10 @@ export type EntityIdOf<E> = E extends {
 export type ProjectionHandlers<E, Meta, Tx = DbHandle> = {
   readonly [D in EventsOf<E> as D['type']]?: BivariantFn<[tx: Tx, event: RecordedOf<D, Meta, EntityIdOf<E>>], unknown>;
 };
-export type EffectHandlers<E, Meta, AppDb = RootDb, Run = unknown> = {
+/** An effect handler also gets one value for each of the effect's needs `N`, under the need's name. */
+export type EffectHandlers<E, Meta, AppDb = RootDb, Run = unknown, N extends Needs = NoNeeds> = {
   readonly [D in EventsOf<E> as D['type']]?: BivariantFn<
-    [event: RecordedOf<D, Meta, EntityIdOf<E>>, ctx: EffectContext<AppDb, Run>],
+    [event: RecordedOf<D, Meta, EntityIdOf<E>>, ctx: EffectContext<AppDb, Run> & Needed<N>],
     unknown
   >;
 };
@@ -244,12 +245,49 @@ export type EffectContext<AppDb = RootDb, Run = unknown> = {
   readonly run: Run;
 };
 
+declare const needType: unique symbol;
+/**
+ * A marker for one thing an effect needs, such as a mailer. `need<Mailer>()` makes one.
+ * It holds the type only. The real value comes later: from `services` in `j.compose`,
+ * or from the services of the Dot feature that lists the effect.
+ */
+export type Need<T> = { readonly [needType]?: T };
+/** The needs of one effect, by the name its handlers read them under. */
+export type Needs = Readonly<Record<string, Need<unknown>>>;
+export type NoNeeds = Readonly<Record<never, Need<unknown>>>;
+/** What the handlers get for the needs `N`: one value per name. */
+export type Needed<N extends Needs> = { readonly [K in keyof N]: N[K] extends Need<infer T> ? T : never };
+/** Real services by name, as an app or a Dot feature hands them over. */
+export type Services = Readonly<Record<string, unknown>>;
+
+type UnionToIntersection<U> = (U extends unknown ? (member: U) => void : never) extends (all: infer I) => void
+  ? I
+  : never;
+/** The needs of each effect in a union. An effect that needs nothing adds nothing. */
+type DeclaredNeeds<E> = E extends { readonly needs: infer N extends Needs }
+  ? keyof N extends never
+    ? never
+    : N
+  : never;
+/**
+ * Every need of every effect in a list, as one object of services. Two effects that
+ * use the same name get the same service. `unknown` when no effect needs anything.
+ */
+export type ServicesFor<E extends readonly { readonly needs: Needs }[]> = UnionToIntersection<
+  Needed<DeclaredNeeds<E[number]>>
+>;
+
 /** Async handler. Runs after commit, at least once. */
-export type Effect<Meta = unknown, AppDb = RootDb, Run = unknown> = {
+export type Effect<Meta = unknown, AppDb = RootDb, Run = unknown, N extends Needs = NoNeeds> = {
   readonly name: string;
   readonly entities: readonly AnyEntity<Meta>[];
   readonly types: ReadonlySet<string>;
-  readonly run: BivariantFn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb, Run>], Promise<void>>;
+  /** What the handlers need on top of `EffectContext`. Empty for an effect that already has its services. */
+  readonly needs: N;
+  readonly run: BivariantFn<
+    [event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb, Run> & Needed<N>],
+    Promise<void>
+  >;
 };
 
 export type EntityInfo = { readonly kind: string; readonly table: string; readonly events: readonly string[] };

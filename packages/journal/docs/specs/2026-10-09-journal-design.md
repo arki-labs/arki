@@ -55,7 +55,7 @@ bus, stream, aggregate.
 
 ```ts
 // src/journal.ts — once per app. `meta` is the app-wide metadata schema.
-import { initJournal } from '@arki/journal';
+import { initJournal, need } from '@arki/journal';
 
 export const j = initJournal({ meta: z.object({ actorId: userId.schema }) });
 // Or: initJournal.tx<AppTx>().create({ meta }) — types `tx` everywhere with the app's transaction type.
@@ -95,11 +95,16 @@ export const customerStats = j.projection('customer-stats', order, {
 });
 
 // Async lane: after commit, at least once. The context also has `db`, the root database,
-// and `run`, which runs a command. Other dependencies come in by closure.
-export const orderMail = (mailer: Mailer) =>
-  j.effect('order-mail', order, {
-    OrderPaid: (e, { jobId }) => mailer.send({ template: 'order-paid', orderId: e.entityId, idempotencyKey: jobId }),
-  });
+// and `run`, which runs a command. An effect lists what else it needs and gets it in the context.
+export const orderMail = j.effect(
+  'order-mail',
+  order,
+  { mailer: need<Mailer>() },
+  {
+    OrderPaid: (e, { jobId, mailer }) =>
+      mailer.send({ template: 'order-paid', orderId: e.entityId, idempotencyKey: jobId }),
+  },
+);
 
 // src/features/orders/commands.ts — a command needs only `j`, entities and events.
 export const payOrder = j.command(
@@ -117,7 +122,8 @@ export const payOrder = j.command(
 export const journal = j.compose({
   tables: journalTables(schema),
   projections: [customerStats],
-  effects: [orderMail(mailer)],
+  effects: [orderMail],
+  services: { mailer }, // one value for each need of each effect
 });
 
 // A procedure. The schema is reused; the actor comes from the session.
@@ -155,7 +161,10 @@ type JournalDefinitions<Meta, Tx = DbHandle, AppDb = RootDb> = {
   command<S extends z.ZodType, R>(name: string, input: S, handler: (input: z.output<S>, context: CommandContext<MetaOut, Tx>) => R): Command<S, R, MetaOut, Tx>;
   projection<E extends AnyEntity<MetaOut>>(name: string, entity: E | readonly E[], on: ProjectionHandlers<E, MetaOut, Tx>): Projection<MetaOut, Tx>;
   effect<E extends AnyEntity<MetaOut>>(name: string, entity: E | readonly E[], on: EffectHandlers<E, MetaOut, AppDb>): Effect<MetaOut, AppDb>;
-  compose(config: { tables: JournalTables; projections?: readonly Projection<MetaOut, Tx>[]; effects?: readonly Effect<MetaOut, AppDb>[] }): Journal<Meta, Tx, AppDb>;
+  // With needs: `needs` is `{ mailer: need<Mailer>() }`, and each handler also gets `mailer` in its context.
+  effect<E extends AnyEntity<MetaOut>, N extends Needs>(name: string, entity: E | readonly E[], needs: N, on: EffectHandlers<E, MetaOut, AppDb, Run, N>): Effect<MetaOut, AppDb, Run, N>;
+  // `services`: one value per need of every listed effect. Required when an effect has a need. A need without a value throws.
+  compose<E extends readonly Effect<MetaOut, AppDb, Run, Needs>[]>(config: { tables: JournalTables; projections?: readonly Projection<MetaOut, Tx>[]; effects?: E; services?: ServicesFor<E> }): Journal<Meta, Tx, AppDb>;
 };
 
 // Calling an event definition validates the data and returns a pending event.
@@ -220,6 +229,7 @@ class CommandError extends Error {
   constructor(code: 'NOT_FOUND' | 'BAD_REQUEST' | 'FORBIDDEN' | 'CONFLICT', message: string);
 }
 function isCommandError(error: unknown, code?: CommandError['code']): error is CommandError;
+function need<T>(): Need<T>; // a marker for one service an effect needs. It holds the type only.
 
 // ./orpc
 function toORPCError(error: unknown): unknown; // CommandError -> ORPCError(same code, same message); JournalError CONFLICT -> ORPCError('CONFLICT'); anything else unchanged
@@ -233,9 +243,10 @@ function journalTables(schema?: PgSchema): { events: PgTable; jobs: PgTable };
 function journal(options: { journal: Journal; worker?: boolean; pollMs?: number; batchSize?: number }): Plugin;
 // Feature mode: composes the journal at boot from the features' `journalHandlers` slices. No `journal.root.ts`.
 function journal(options: { j: JournalDefinitions; tables: JournalTables; features: Token[]; worker?: boolean; pollMs?: number; batchSize?: number }): Plugin;
-// The feature slice. `actions` holds one manifest action per effect in a list; none for an effects function.
-function journalHandlers(handlers: { projections?: Projection[]; effects?: Effect[] | ((services) => Effect[]) }):
-  { key: 'journal'; actions: Action[]; resolve(services): { projections: Projection[]; effects: Effect[] } };
+// The feature slice. `actions` holds one manifest action per effect. `resolve` gives each effect the
+// services it needs from the feature's booted services, by name. Its parameter type makes the feature declare them in `needs`.
+function journalHandlers<E extends readonly Effect[]>(handlers: { projections?: Projection[]; effects?: E }):
+  { key: 'journal'; actions: Action[]; resolve(services: ServicesFor<E>): { projections: Projection[]; effects: Effect[] } };
 ```
 
 `DbHandle` is a structural type. Both a Drizzle database and a Drizzle transaction fit it.

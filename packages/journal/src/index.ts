@@ -1,4 +1,5 @@
 export { initJournal } from './journal.js';
+export { need } from './handlers.js';
 export type {
   Command,
   CommandContext,
@@ -32,6 +33,9 @@ export type {
   EventsOf,
   IdTable,
   KeyColumn,
+  Need,
+  Needed,
+  Needs,
   ReducerValues,
   OnReducer,
   Patch,
@@ -45,6 +49,8 @@ export type {
   ReducerRow,
   RootDb,
   Row,
+  Services,
+  ServicesFor,
   TransactionSource,
   JournalWorker,
 } from './types.js';

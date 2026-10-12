@@ -7,7 +7,7 @@
 import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
-import { CommandError, initJournal, isCommandError, isJournalError, JournalError } from '../dist/index.js';
+import { CommandError, initJournal, isCommandError, isJournalError, JournalError, need } from '../dist/index.js';
 import { journalTables } from '../dist/pg.js';
 
 const j = initJournal({ meta: z.object({ actorId: z.string() }) });
@@ -28,7 +28,20 @@ const mail = j.effect('order-mail', order, {
     /* smoke only */
   },
 });
-const journal = j.compose({ tables: journalTables(), effects: [mail] });
+const pushed = [];
+const push = j.effect(
+  'order-push',
+  order,
+  { push: need() },
+  {
+    OrderPaid: (e, ctx) => ctx.push(e.entityId),
+  },
+);
+const journal = j.compose({
+  tables: journalTables(),
+  effects: [mail, push],
+  services: { push: id => pushed.push(id) },
+});
 
 let rejected = false;
 try {
@@ -42,6 +55,8 @@ const checks = [
   ['event rejects bad data', rejected, true],
   ['entity declares events', [...order.events.keys()].join(','), 'OrderPlaced,OrderPaid'],
   ['effect declares types', [...mail.types].join(','), 'OrderPaid'],
+  ['effect declares needs', Object.keys(push.needs).join(','), 'push'],
+  ['journal lists both effects', journal.catalog.effects.join(','), 'order-mail,order-push'],
   [
     'catalog',
     JSON.stringify(journal.catalog.entities[0]),

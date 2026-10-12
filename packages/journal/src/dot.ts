@@ -18,8 +18,19 @@ import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
 import type { Journal, JournalDefinitions } from './api.js';
 import type { JournalTables } from './pg.js';
-import type { DbHandle, Effect, JournalWorker, Projection, RootDb, TransactionSource } from './types.js';
+import type {
+  DbHandle,
+  Effect,
+  JournalWorker,
+  Needs,
+  Projection,
+  RootDb,
+  Services,
+  ServicesFor,
+  TransactionSource,
+} from './types.js';
 import { debugWorker } from './debug.js';
+import { bindEffect } from './handlers.js';
 
 export const JOURNAL_ACTION_META_SCHEMA = '@arki/journal/action-meta@1';
 
@@ -35,13 +46,16 @@ export type JournalDotAction = {
   readonly meta: { readonly entities: string[]; readonly events: string[] };
 };
 
-/** What one feature hands to the journal. */
+/** What one feature hands to the journal. Its effects already hold the feature's services. */
 export type JournalHandlers<Meta = unknown, Tx = DbHandle, AppDb = RootDb> = {
   readonly projections: readonly Projection<Meta, Tx>[];
   readonly effects: readonly Effect<Meta, AppDb>[];
 };
 
-/** The `@arki/feature` slice contract a `journalHandlers(...)` declaration produces. */
+/**
+ * The `@arki/feature` slice contract a `journalHandlers(...)` declaration produces.
+ * `TServices` is what the feature's effects need: the feature must declare it in `needs`.
+ */
 export type JournalFeatureSlice<Meta = unknown, Tx = DbHandle, AppDb = RootDb, TServices = unknown> = {
   readonly key: 'journal';
   readonly actions: readonly JournalDotAction[];
@@ -69,28 +83,36 @@ function effectAction(effect: {
  * The payload lands under `journal` in the feature's slice token, where
  * `journal({ j, tables, features })` collects it.
  *
- * `effects` may be a function of the feature's booted services, for effects that
- * need one (a realtime emitter, a mailer). Annotate its parameter: the feature
- * must then declare those services in `needs`.
+ * An effect with needs (`j.effect(name, entity, { mailer: need<Mailer>() }, on)`) gets
+ * them from the booted services of this feature, by name. The feature must declare
+ * each one in its own `needs`: the slice's `resolve` does not type-check otherwise.
+ * Two features may use the same need name for two different services.
  *
- * Actions: one per effect in a list. Projections add none: they run inside the
- * write, not at an app boundary.
+ * Actions: one per effect. Projections add none: they run inside the write, not
+ * at an app boundary.
  */
-export function journalHandlers<Meta = unknown, Tx = DbHandle, AppDb = RootDb, TServices = unknown>(handlers: {
+export function journalHandlers<
+  Meta = unknown,
+  Tx = DbHandle,
+  AppDb = RootDb,
+  const E extends readonly Effect<Meta, AppDb, unknown, Needs>[] = readonly [],
+>(handlers: {
   readonly projections?: readonly Projection<Meta, Tx>[];
-  readonly effects?: readonly Effect<Meta, AppDb>[] | ((services: TServices) => readonly Effect<Meta, AppDb>[]);
-}): JournalFeatureSlice<Meta, Tx, AppDb, TServices> {
+  readonly effects?: E;
+}): JournalFeatureSlice<Meta, Tx, AppDb, ServicesFor<E>> {
   const { projections = [], effects = [] } = handlers;
-  if (typeof effects === 'function') {
-    // No actions: the manifest is built before boot, and these effects' names exist only after it.
-    return { key: 'journal', actions: [], resolve: services => ({ projections, effects: effects(services) }) };
-  }
   return {
     key: 'journal',
     actions: effects.map(effect => effectAction(effect)),
-    resolve: () => ({ projections, effects }),
+    // The kernel hands the feature's services over untyped, so they are read by name here.
+    resolve: (services: unknown) => ({
+      projections,
+      effects: effects.map(effect => bindEffect(effect, isServices(services) ? services : {})),
+    }),
   };
 }
+
+const isServices = (value: unknown): value is Services => typeof value === 'object' && value !== null;
 
 type WorkerOptions = {
   /** Run the async lane in this process. Default `true`. */
