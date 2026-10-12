@@ -19,7 +19,18 @@ import { plugin, provide, service, token } from '@arki/dot/plugin';
 import type { OrderId } from './test-support.js';
 import { journal, journalHandlers } from './dot.js';
 import { initJournal } from './journal.js';
-import { customerOrderCounts, j, meta, openDb, order, orderId, OrderPlaced, tables } from './test-support.js';
+import {
+  customerOrderCounts,
+  j,
+  meta,
+  openDb,
+  order,
+  orderId,
+  OrderPaid,
+  OrderPlaced,
+  orders as ordersTable,
+  tables,
+} from './test-support.js';
 
 type AppTx = Parameters<Parameters<PgliteDatabase['transaction']>[0]>[0];
 type TestJournal = ReturnType<typeof j.compose>;
@@ -282,6 +293,47 @@ describe('journal(...) in feature mode', () => {
     await Promise.all([ordersMail.seen(id), billingMail.seen(id)]);
     expect(ordersMail.handled).toEqual([id]);
     expect(billingMail.handled).toEqual([id]);
+  });
+
+  it('lets an effect declared with `journalHandlers` run a command of another feature through `ctx.run`, so no feature needs the journal that is built after it', async () => {
+    // Billing owns the command and hears the payment. Ordering only reacts to its own event.
+    const payOrder = j.command(
+      'payOrder',
+      z.object({ id: z.templateLiteral(['ord_', z.string()]) }),
+      (input, { write }) => write(order, input.id, () => [OrderPaid({ amount: 1 })]),
+    );
+    const paid = signal();
+    const ordering = feature(
+      'ordering',
+      journalHandlers({
+        effects: [
+          j.effect('dot-pay-on-place', order, {
+            OrderPlaced: (e, { run }) => run(payOrder, { id: e.entityId }, { actorId: 'system' }),
+          }),
+        ],
+      }),
+    );
+    const billing = feature(
+      'billing',
+      journalHandlers({ effects: [j.effect('dot-paid-receipt', order, { OrderPaid: () => paid.open() })] }),
+    );
+    const app = track(
+      await bootTestApp<{ journal: TestJournal }>([
+        dbPlugin(),
+        ordering.plugin,
+        billing.plugin,
+        journal({ j, tables, features: [ordering.token, billing.token], pollMs: POLL_MS }),
+      ]),
+    );
+    await app.start();
+
+    const id = orderId(++next);
+    await app.services.journal.run(db, placeOrder, { id }, meta);
+    await paid.opened;
+    const [row] = await db.select().from(ordersTable).where(eq(ordersTable.id, id));
+    expect(row?.status).toBe('paid');
+    const events = await db.select().from(tables.events).where(eq(tables.events.entityId, id));
+    expect(events.find(event => event.type === 'OrderPaid')?.meta).toEqual({ actorId: 'system' });
   });
 
   it('lists an effect in the feature manifest, so `dot explain` shows which feature owns the async work', () => {

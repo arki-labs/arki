@@ -35,14 +35,16 @@ function backoffSeconds(attempts: number): number {
 /** Database time plus `seconds`. The worker's clock never decides a lease or a retry. */
 const dbNowPlus = (seconds: number) => sql`now() + make_interval(secs => ${seconds})`;
 
-/** What `drain` needs from the journal. */
-export type DrainDeps<Meta extends z.ZodObject, AppDb extends RootDb> = {
+/** What `drain` needs from the journal. `Run` is the type of an effect's `ctx.run`. */
+export type DrainDeps<Meta extends z.ZodObject, AppDb extends RootDb, Run> = {
   readonly tables: JournalTables;
-  readonly effects: readonly Effect<z.output<Meta>, AppDb>[];
+  readonly effects: readonly Effect<z.output<Meta>, AppDb, Run>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
+  /** Makes an effect's `ctx.run`: the journal's `run`, bound to the root database this drain was given. */
+  readonly runOn: (db: AppDb & RootDb) => Run;
 };
 
-export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb>(deps: DrainDeps<Meta, AppDb>) {
+export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>(deps: DrainDeps<Meta, AppDb, Run>) {
   const { events: eventsTable, jobs: jobsTable } = deps.tables;
   const { decodeStoredEvent } = deps.history;
   const effectsByName = new Map(deps.effects.map(effect => [effect.name, effect]));
@@ -115,7 +117,7 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb>(deps
           findEventDefinition(effect.entities, eventRow.kind, eventRow.type),
           eventRow.entityId,
         );
-        await effect.run(event, { jobId: job.id, signal, db });
+        await effect.run(event, { jobId: job.id, signal, db, run: deps.runOn(db) });
         await db.delete(jobsTable).where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
         debugDrain('%s %s: done', job.effect, job.id);
       } catch (error) {

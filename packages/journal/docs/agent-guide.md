@@ -90,7 +90,7 @@ export const order = j
 
 ### Add an effect that runs after commit
 
-Library files: `src/handlers.ts` (`defineEffect`), `src/worker.ts` (claims, retries, `drain`, the loop, `wake`).
+Library files: `src/handlers.ts` (`defineEffect`), `src/worker.ts` (claims, retries, `drain`, the loop, `wake`), `src/journal.ts` (`createJournal` gives the worker `runOn`, which makes `ctx.run`).
 
 ```ts
 // features/orders/effects.ts: a factory, so the mailer comes in as an argument.
@@ -102,9 +102,16 @@ export const orderMail = (mailer: Mailer) =>
       await mailer.send({ template: 'order-paid', orderId: e.entityId, total: row.total, idempotencyKey: jobId });
     },
   });
+
+// An effect that writes runs a command. It needs no closure over the journal.
+export const closeAfterPayment = j.effect('close-after-payment', order, {
+  OrderPaid: (e, { run }) => run(closeOrder, { orderId: e.entityId }, { actorId: 'system' }),
+});
 ```
 
-- The handler gets `(e, { jobId, signal, db })`. `db` is the root database given to `drain` or `worker`. Read committed rows with it.
+- The handler gets `(e, { jobId, signal, db, run })`. `db` is the root database given to `drain` or `worker`. Read committed rows with it.
+- `run(command, input, meta)` is `journal.run` on that same database: its own transaction, committed before it returns. `meta` is required, and the library never picks an actor. It works the same in a plain app and in a Dot app.
+- If the command throws, the effect fails: nothing of the command is committed and the job is retried. If the effect fails after `run` returned, the command stays committed and runs again on the retry. Make the command safe to run twice. The usual key is `jobId`.
 - `jobId` is the same on every retry. An effect can run more than once, so pass `jobId` on as an idempotency key.
 - Where it is registered: under `effects` in `journal.root.ts`, or in the feature's `journalHandlers` in a Dot app. Effect names are unique per journal.
 - Who runs the worker: a plain app calls `journal.worker(db).start()` once per process and `stop()` on shutdown. In a Dot app the `journal(...)` plugin does both.
@@ -136,6 +143,7 @@ await journal.run(db, payOrder, { orderId: id, amount: 10 }, { actorId: 'system'
 ```
 
 - The handler context is `{ tx, meta, write, run }`. `run(child, input)` runs another command in a savepoint.
+- From an effect, call `ctx.run(command, input, meta)`. It is `journal.run` on the worker's root database.
 - `journal.run` parses the input and `meta`, opens the transaction, and returns what the handler returns.
 - In the games-platform backend, requests call `context.runCommand` and jobs call `runSystemCommand`. Both are in `core/run-command.ts`. Do not call `journal.run` from a procedure there.
 
@@ -211,7 +219,7 @@ A `JournalError` is about one entity's row or history. It has `code`, `kind` and
 
 The code for both wirings is in the [README, Dot](../README.md#dot).
 
-Known limit: in feature mode an effect cannot run a command yet. The journal does not exist when the slices resolve, so the effect has no `run` to call. For such an effect, compose the journal yourself and pass it: `journal({ journal })`.
+An effect runs a command with `ctx.run` in both wirings. In feature mode the journal is built after the features, and that is fine: the journal hands `run` to the effect when the job runs.
 
 ## Shared packages
 

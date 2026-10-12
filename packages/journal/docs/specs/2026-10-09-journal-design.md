@@ -94,8 +94,8 @@ export const customerStats = j.projection('customer-stats', order, {
       }),
 });
 
-// Async lane: after commit, at least once. The context also has `db`, the root database.
-// Other dependencies come in by closure.
+// Async lane: after commit, at least once. The context also has `db`, the root database,
+// and `run`, which runs a command. Other dependencies come in by closure.
 export const orderMail = (mailer: Mailer) =>
   j.effect('order-mail', order, {
     OrderPaid: (e, { jobId }) => mailer.send({ template: 'order-paid', orderId: e.entityId, idempotencyKey: jobId }),
@@ -185,7 +185,8 @@ type OnReducerRow<Tbl, Key, Created> = ReducerRow<Tbl, Key> & Required<Pick<Redu
 type Patch<Tbl, Key> = Partial<ReducerValues<Tbl, Key>>; // merged onto the state; a key set to undefined is unchanged
 type RootDb = DbHandle & { rollback?: undefined }; // the database, never a transaction
 type TransactionSource<Tx> = DbHandle & { transaction<T>(run: (tx: Tx) => Promise<T>): Promise<T> }; // opens `Tx` transactions
-type EffectContext<AppDb> = { jobId: string; signal: AbortSignal; db: AppDb }; // `db` is the object given to drain or worker
+type EffectContext<AppDb, Run> = { jobId: string; signal: AbortSignal; db: AppDb; run: Run }; // `db` is the object given to drain or worker
+type RootCommandRunner<Meta, Tx> = (command, input, meta) => Promise<Result>; // an effect's `run`: `journal.run` on that `db`
 
 type NextEvents<Tbl, E, Tx> = (row: Row<Tbl> | null, ctx: { tx: Tx }) => Pending[] | Promise<Pending[]>; // looks at the locked row, checks the rules, returns the events
 type Command<S, R, MetaOut, Tx> = { name: string; input: S; handler: (input: z.output<S>, context: CommandContext<MetaOut, Tx>) => R }; // from j.command(name, schema, handler)
@@ -202,8 +203,8 @@ type Journal<Meta, Tx, AppDb> = {
   verify(db, entity, id: EntityId): Promise<{ ok: true } | { ok: false; expected: ReducerRow | null; actual: Row | null }>;
   repair(db, entity, id: EntityId): Promise<Row | null>;
   rerun(db: TransactionSource<Tx>, projection, opts?: { afterSeq?: number; batchSize?: number }): Promise<{ events: number }>;
-  drain(db: AppDb & RootDb, opts?: { batchSize?: number; signal?: AbortSignal }): Promise<number>; // one batch of jobs
-  worker(db: AppDb & RootDb, opts?: { pollMs?: number; batchSize?: number }): { start(): Promise<void>; stop(): Promise<void>; wake(): void };
+  drain(db: AppDb & RootDb & TransactionSource<Tx>, opts?: { batchSize?: number; signal?: AbortSignal }): Promise<number>; // one batch of jobs
+  worker(db: AppDb & RootDb & TransactionSource<Tx>, opts?: { pollMs?: number; batchSize?: number }): { start(): Promise<void>; stop(): Promise<void>; wake(): void };
   wake(): void; // wakes every running worker this journal started in this process
   catalog: { entities: EntityInfo[]; projections: string[]; effects: string[] };
 };
@@ -379,8 +380,9 @@ pending. A rollback leaves neither events nor jobs.
 
 1. In a short transaction, claim due rows with `FOR UPDATE SKIP LOCKED`. Set a fresh
    `lease_token`, set `lease_until = now() + 60s`, bump `attempts`. Commit.
-2. Run each handler outside any transaction, with `(event, { jobId, signal, db })`. `db` is
-   the root database given to `drain` or `worker`: the same object. A claimed job whose
+2. Run each handler outside any transaction, with `(event, { jobId, signal, db, run })`. `db` is
+   the root database given to `drain` or `worker`: the same object. `run(command, input, meta)`
+   is `journal.run` on it: its own transaction, committed before it returns. A claimed job whose
    effect has no handler for the event type fails like any handler error.
 3. Success: delete the row, matching on `lease_token`.
 4. Failure: store `last_error`, set `available_at` to now plus backoff (doubling with
@@ -410,6 +412,7 @@ A wake ends the poll delay, so an effect starts right after the commit:
   processes pick jobs up by polling.
 
 Effects must be safe to run twice. Use `jobId` as the idempotency key for outside calls.
+A command that an effect runs commits before the effect ends, so a retry runs it again: the same key applies.
 An effect that needs order should read the current row instead of trusting the event.
 BullMQ is not required. An effect may enqueue a job: `OrderPaid: e => queue.add(...)`.
 

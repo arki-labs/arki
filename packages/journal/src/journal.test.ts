@@ -456,9 +456,13 @@ describe('write', () => {
       meta,
       recordedAt: new Date(),
     };
-    await expect(silent.run(event, { jobId: 'job_x', signal: new AbortController().signal, db })).rejects.toThrow(
-      'no handler for "toString"',
-    );
+    const ctx = {
+      jobId: 'job_x',
+      signal: new AbortController().signal,
+      db,
+      run: () => Promise.reject(new Error('no handler runs, so no command does')),
+    };
+    await expect(silent.run(event, ctx)).rejects.toThrow('no handler for "toString"');
     await expect(noop.run(db, event)).resolves.toBeUndefined();
   });
 

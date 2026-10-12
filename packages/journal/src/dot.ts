@@ -118,9 +118,12 @@ export type JournalFeatureOptions<
   readonly features: readonly Token<object, string>[];
 };
 
-/** `RootDb` again on purpose: a Drizzle transaction fits `AppDb` by shape, and must not fit here. */
+/**
+ * `RootDb` again on purpose: a Drizzle transaction fits `AppDb` by shape, and must not fit here.
+ * `TransactionSource<Tx>`: the worker's database runs the commands of effects, so it opens `Tx`.
+ */
 export type JournalPlugin<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb> = Plugin<
-  { db: AppDb & RootDb },
+  { db: AppDb & RootDb & TransactionSource<Tx> },
   { journal: Journal<Meta, Tx, AppDb> }
 >;
 
@@ -208,9 +211,9 @@ export function journal<Meta extends z.ZodObject, Tx extends TransactionSource<T
   let worker: JournalWorker | undefined;
   // Each feature token is a need, so the kernel boots the features first and refuses a missing one.
   const featureNeeds = 'features' in options ? options.features.map(feature => [feature.key, feature]) : [];
-  const needs: { readonly db: Service<AppDb & RootDb> } = {
+  const needs: { readonly db: Service<AppDb & RootDb & TransactionSource<Tx>> } = {
     ...Object.fromEntries(featureNeeds),
-    db: service<AppDb & RootDb>(),
+    db: service<AppDb & RootDb & TransactionSource<Tx>>(),
   };
 
   return plugin({

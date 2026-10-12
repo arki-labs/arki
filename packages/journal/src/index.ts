@@ -6,6 +6,7 @@ export type {
   Journal,
   JournalDefinitions,
   ReplayResult,
+  RootCommandRunner,
   VerifyResult,
   NextEvents,
   WriteInput,

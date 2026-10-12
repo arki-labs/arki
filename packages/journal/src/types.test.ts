@@ -11,7 +11,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { WriteResult } from './api.js';
+import type { RootCommandRunner, WriteResult } from './api.js';
 import type { AccountId, order } from './test-support.js';
 import type {
   AnyEntity,
@@ -324,12 +324,52 @@ async function typedDb(db: PgliteDatabase, tx: AppTx, structural: RootDb) {
   await journal.drain(structural);
   // @ts-expect-error -- the structural `RootDb` is not the app's database type
   journal.worker(structural);
-  // A journal without `.db<…>()` still takes any root database.
+  // A journal without `.db<…>()` takes any root database that opens its transaction type.
   const plain = jt.compose({ tables, effects: [plainEffect] });
   await plain.drain(db);
+  // @ts-expect-error -- the structural `RootDb` opens `DbHandle` transactions: a command run by an effect needs an `AppTx`
   await plain.drain(structural);
+  // Without `.tx<…>()` too, every root database fits.
+  await j.compose({ tables }).drain(structural);
 }
 void typedDb;
+
+// --- An effect's `run` takes the commands `journal.run` takes, and no others
+
+const dbPay = jd.command('pay', z.object({ id: z.string() }), (input, { tx }) => {
+  expectTypeOf(tx).toEqualTypeOf<AppTx>();
+  return input.id.length;
+});
+// Written for the structural transaction: any journal with this meta can run it.
+const plainPay = j.command('pay', z.object({ id: z.string() }), input => input.id.length);
+const tenants = initJournal({ meta: z.object({ tenantId: z.string() }) });
+const tenantPay = tenants.command('pay', z.object({ id: z.string() }), input => input.id.length);
+
+const dbRuns = jd.effect('db-runs', dbOrder, {
+  OrderPaid: async (e, { run }) => {
+    expectTypeOf(run).toEqualTypeOf<RootCommandRunner<z.ZodObject<{ actorId: z.ZodString }>, AppTx>>();
+    expectTypeOf(await run(dbPay, { id: e.entityId }, { actorId: 'system' })).toEqualTypeOf<number>();
+    await run(plainPay, { id: e.entityId }, { actorId: 'system' });
+    // @ts-expect-error -- `meta` is required: the library never invents an actor
+    await run(dbPay, { id: e.entityId });
+    // @ts-expect-error -- not the meta of this journal
+    await run(dbPay, { id: e.entityId }, { tenantId: 't' });
+    // @ts-expect-error -- the input is checked against the command's schema
+    await run(dbPay, { id: 1 }, { actorId: 'system' });
+    // @ts-expect-error -- a command for another meta shape: its handler would read `meta.tenantId`
+    await run(tenantPay, { id: e.entityId }, { actorId: 'system' });
+  },
+});
+const plainRuns = j.effect('plain-runs', typed, {
+  OrderPaid: async (e, { run }) => {
+    await run(plainPay, { id: e.entityId }, meta);
+    // @ts-expect-error -- a command for the app's transaction type: this journal would hand it a plain `DbHandle`
+    await run(dbPay, { id: e.entityId }, meta);
+  },
+});
+// The same journal that types `run` composes these effects.
+void jd.compose({ tables, effects: [dbRuns] });
+void j.compose({ tables, effects: [plainRuns] });
 
 async function dbFits() {
   const db = drizzle({ client: new PGlite('memory://') });

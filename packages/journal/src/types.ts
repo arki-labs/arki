@@ -217,9 +217,9 @@ export type EntityIdOf<E> = E extends {
 export type ProjectionHandlers<E, Meta, Tx = DbHandle> = {
   readonly [D in EventsOf<E> as D['type']]?: BivariantFn<[tx: Tx, event: RecordedOf<D, Meta, EntityIdOf<E>>], unknown>;
 };
-export type EffectHandlers<E, Meta, AppDb = RootDb> = {
+export type EffectHandlers<E, Meta, AppDb = RootDb, Run = unknown> = {
   readonly [D in EventsOf<E> as D['type']]?: BivariantFn<
-    [event: RecordedOf<D, Meta, EntityIdOf<E>>, ctx: EffectContext<AppDb>],
+    [event: RecordedOf<D, Meta, EntityIdOf<E>>, ctx: EffectContext<AppDb, Run>],
     unknown
   >;
 };
@@ -232,19 +232,24 @@ export type Projection<Meta = unknown, Tx = DbHandle> = {
   readonly run: BivariantFn<[tx: Tx, event: Recorded<string, unknown, Meta>], Promise<void>>;
 };
 
-/** `db` is the root database that was given to `drain` or `worker`: the same object. */
-export type EffectContext<AppDb = RootDb> = {
+/**
+ * `db` is the root database that was given to `drain` or `worker`: the same object.
+ * `run` is `journal.run` on that database. A journal types it as `RootCommandRunner`
+ * (in `api.ts`). This file cannot name a command, so the type comes in as `Run`.
+ */
+export type EffectContext<AppDb = RootDb, Run = unknown> = {
   readonly jobId: string;
   readonly signal: AbortSignal;
   readonly db: AppDb;
+  readonly run: Run;
 };
 
 /** Async handler. Runs after commit, at least once. */
-export type Effect<Meta = unknown, AppDb = RootDb> = {
+export type Effect<Meta = unknown, AppDb = RootDb, Run = unknown> = {
   readonly name: string;
   readonly entities: readonly AnyEntity<Meta>[];
   readonly types: ReadonlySet<string>;
-  readonly run: BivariantFn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb>], Promise<void>>;
+  readonly run: BivariantFn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb, Run>], Promise<void>>;
 };
 
 export type EntityInfo = { readonly kind: string; readonly table: string; readonly events: readonly string[] };

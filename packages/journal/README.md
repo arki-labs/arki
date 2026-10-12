@@ -83,8 +83,8 @@ export const customerStats = j.projection('customer-stats', order, {
       }),
 });
 
-// Async lane: after commit, at least once. The context also has `db`, the root database.
-// Other dependencies come in by closure.
+// Async lane: after commit, at least once. The context also has `db`, the root database,
+// and `run`, which runs a command. Other dependencies come in by closure.
 export const orderMail = (mailer: Mailer) =>
   j.effect('order-mail', order, {
     OrderPaid: (e, { jobId }) => mailer.send({ template: 'order-paid', orderId: e.entityId, idempotencyKey: jobId }),
@@ -133,26 +133,27 @@ The same `journal.run` serves every trigger. Checking who the caller is stays ap
 | Job       | `journal.run(db, command, payload, job.meta)`                     | The queue owns retries.                                     |
 | Schedule  | `journal.run(db, command, input, { actorId: 'system' })`          | A clear system actor; `meta` keeps its schema.              |
 | Webhook   | `journal.run(db, command, mappedInput, trustedMeta)`              | The adapter verifies the signature and maps the payload.    |
-| Effect    | `run(command, input)`, a closure the app passes to the effect     | See below. An effect never imports the journal root.        |
+| Effect    | `ctx.run(command, input, { actorId: 'system' })`                  | See below. An effect never imports the journal root.        |
 | Script    | `journal.run(db, command, input, { actorId: 'script:backfill' })` | One call per item; each is its own transaction.             |
 | Test      | `journal.run(db, command, input, meta)`                           | No procedure, no HTTP. The same validation and transaction. |
 
-An effect that needs to write runs a command through a closure the app builds at composition time:
+An effect that needs to write runs a command with `run` from its context:
 
 ```ts
 // src/features/orders/effects.ts
-export const closeAfterPayment = (
-  run: <S extends z.ZodType, R>(c: Command<S, R, Meta>, i: z.input<S>) => Promise<Awaited<R>>,
-) =>
-  j.effect('close-after-payment', order, {
-    OrderPaid: e => run(closeOrder, { orderId: e.entityId }),
-  });
+export const closeAfterPayment = j.effect('close-after-payment', order, {
+  OrderPaid: (e, { run }) => run(closeOrder, { orderId: e.entityId }, { actorId: 'system' }),
+});
 
 // src/journal.root.ts
-const runAsSystem = <S extends z.ZodType, R>(c: Command<S, R, Meta>, i: z.input<S>) =>
-  journal.run(db, c, i, { actorId: 'system' });
-export const journal = j.compose({ tables, effects: [closeAfterPayment(runAsSystem)] });
+export const journal = j.compose({ tables, effects: [closeAfterPayment] });
 ```
+
+- `run(command, input, meta)` is `journal.run` on the root database that the worker or `drain` was given. It opens its own transaction and commits before it returns.
+- `meta` is required. The library never picks an actor. An app may still wrap `run` in one small helper, so the system actor is written in one place.
+- If the command throws, the effect fails. Nothing of the command is committed. The job is retried with backoff.
+- If the effect fails after `run` returned, the command stays committed and the job runs again. So the command can run twice. Make it safe: check the row and return `[]`, or pass `jobId` in the input and store it as the key. `jobId` is the same on every retry.
+- A command that queues a job wakes the worker. A chain of effects does not wait for the poll.
 
 ## The low-level write
 
@@ -230,13 +231,14 @@ Adding an optional field, or one with a default, is safe. Old rows still parse.
 
 ## Effects
 
-An effect runs after the commit, at least once, from a row in `journal_jobs`. A handler gets the event and a context: `(e, { jobId, signal, db })`.
+An effect runs after the commit, at least once, from a row in `journal_jobs`. A handler gets the event and a context: `(e, { jobId, signal, db, run })`.
 
 - `jobId` stays the same across retries. Pass it on as an idempotency key.
 - `signal` is the `signal` given to `drain`.
 - `db` is the root database given to `drain` or `worker`: the same object. Use it to read committed rows. The effect needs no closure for the database.
+- `run` runs a command on that database: `run(command, input, meta)`. See [Where commands run from](#where-commands-run-from).
 
-`db` has the library's `RootDb` type unless the app names its own database type once: `initJournal.db<AppDb>().create({ meta })`. Then `ctx.db.query.orders` is typed, and `drain` and `worker` need an `AppDb`. They still refuse a transaction. `.tx<AppTx>()` and `.db<AppDb>()` are both optional type-only steps and chain in either order: `initJournal.tx<AppTx>().db<AppDb>().create({ meta })`.
+`db` has the library's `RootDb` type unless the app names its own database type once: `initJournal.db<AppDb>().create({ meta })`. Then `ctx.db.query.orders` is typed, and `drain` and `worker` need an `AppDb`. They still refuse a transaction. With `.tx<AppTx>()` they also need a database that opens `AppTx` transactions, because effects run commands on it. The app's own Drizzle database does. `.tx<AppTx>()` and `.db<AppDb>()` are both optional type-only steps and chain in either order: `initJournal.tx<AppTx>().db<AppDb>().create({ meta })`.
 
 ## The worker
 
@@ -307,7 +309,7 @@ await services.journal.run(services.db, payOrder, input, { actorId: user.id });
 - The feature tokens are needs at run time only. A feature mounted after `journal(...)`, or not mounted, fails at boot and not at compile time.
 - An app that composed its journal itself passes it: `journal({ journal })`.
 - A second journal uses Dot's `rename`: `rename(journal({ journal: reports }), { journal: 'reportsJournal' }, 'reports-journal')`.
-- Limit: in feature mode an effect cannot run a command yet. The journal does not exist when the slices resolve, so the `run` closure from "Where commands run from" has nothing to close over. Use `journal({ journal })` for such an effect.
+- An effect runs a command with `ctx.run` in both modes. It needs no closure over the journal.
 
 ## Tables
 

@@ -8,7 +8,7 @@ import { getTableColumns, getTableName, is } from 'drizzle-orm';
 import { PgColumn } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
-import type { Journal, JournalDefinitions } from './api.js';
+import type { Journal, JournalDefinitions, RootCommandRunner } from './api.js';
 import type { EntityBuilder } from './entity.js';
 import type { JournalTables } from './pg.js';
 import type {
@@ -120,7 +120,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
   metaSchema: Meta,
   tables: JournalTables,
   projections: readonly Projection<z.output<Meta>, Tx>[],
-  effects: readonly Effect<z.output<Meta>, AppDb>[],
+  effects: readonly Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>>[],
 ): Journal<Meta, Tx, AppDb> {
   type MetaOut = z.output<Meta>;
 
@@ -131,8 +131,8 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     for (const entity of handler.entities) entitiesByKind.set(entity.kind, entity);
   }
 
-  // `journal.drain` and `journal.wake` are read from the journal object on each
-  // call, so the worker loop and `run` always use the methods the object holds.
+  // `journal.drain`, `journal.wake` and `journal.run` are read from the journal object on each
+  // call, so the worker loop, `run` and an effect's `ctx.run` always use the methods the object holds.
   const history = createHistory<Meta>({ metaSchema, tables });
   const { write, writeWithValidatedMeta } = createWriter<Meta, Tx>({
     metaSchema,
@@ -142,8 +142,15 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     history,
   });
   const run = createCommandRunner<Meta, Tx>({ metaSchema, writeWithValidatedMeta, wake: () => journal.wake() });
-  const drain = createDrain<Meta, AppDb>({ tables, effects, history });
-  const workers = createWorkers<AppDb>({ drain: (db, opts) => journal.drain(db, opts) });
+  // The worker's database is also the source of every command an effect runs, so it opens `Tx`.
+  type WorkerDb = AppDb & TransactionSource<Tx>;
+  const drain = createDrain<Meta, WorkerDb, RootCommandRunner<Meta, Tx>>({
+    tables,
+    effects,
+    history,
+    runOn: db => (command, input, meta) => journal.run(db, command, input, meta),
+  });
+  const workers = createWorkers<WorkerDb>({ drain: (db, opts) => journal.drain(db, opts) });
 
   const journal: Journal<Meta, Tx, AppDb> = {
     write: (tx, entity, id, input) => write(tx, entity, id, input),

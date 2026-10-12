@@ -84,6 +84,19 @@ export type CommandContext<out MetaOut, out Tx extends TransactionSource<Tx> = D
  * generic signature is not repeated there.
  */
 export type CommandRunner<MetaOut, Tx extends TransactionSource<Tx> = DbHandle> = CommandContext<MetaOut, Tx>['run'];
+/**
+ * The type of an effect's `ctx.run`: `journal.run` without `source`. It runs on the
+ * root database the worker or `drain` was given, in its own transaction. `meta`
+ * is required, as in `journal.run`: the library never picks an actor.
+ */
+export type RootCommandRunner<Meta extends z.ZodObject, Tx extends TransactionSource<Tx> = DbHandle> = <
+  S extends z.ZodType,
+  R,
+>(
+  command: Command<S, R, z.output<Meta>, Tx>,
+  input: NoInfer<z.input<S>>,
+  meta: z.input<Meta>,
+) => Promise<Awaited<R>>;
 export type WriteResult<Tbl extends EntityTable, E extends AnyEventDef, MetaOut, Key extends string = 'id'> = {
   readonly row: Row<Tbl> | null;
   readonly events: RecordedOf<E, MetaOut, EntityId<Tbl, Key>>[];
@@ -145,10 +158,19 @@ export type Journal<
     projection: Projection<z.output<Meta>, Tx>,
     opts?: { readonly afterSeq?: number; readonly batchSize?: number },
   ): Promise<{ readonly events: number }>;
-  /** Run one batch of due jobs. Returns how many jobs were claimed. Root database only. */
-  drain(db: AppDb & RootDb, opts?: { readonly batchSize?: number; readonly signal?: AbortSignal }): Promise<number>;
-  /** A loop around `drain`. `stop()` finishes the current batch. Root database only. */
-  worker(db: AppDb & RootDb, opts?: { readonly pollMs?: number; readonly batchSize?: number }): JournalWorker;
+  /**
+   * Run one batch of due jobs. Returns how many jobs were claimed. Root database only.
+   * It must open the journal's transaction type: an effect runs commands on it.
+   */
+  drain(
+    db: AppDb & RootDb & TransactionSource<Tx>,
+    opts?: { readonly batchSize?: number; readonly signal?: AbortSignal },
+  ): Promise<number>;
+  /** A loop around `drain`. `stop()` finishes the current batch. The same database as `drain`. */
+  worker(
+    db: AppDb & RootDb & TransactionSource<Tx>,
+    opts?: { readonly pollMs?: number; readonly batchSize?: number },
+  ): JournalWorker;
   /**
    * Wake every running worker this journal started in this process. Call it
    * after committing a transaction of your own that ran commands. No worker: nothing happens.
@@ -204,12 +226,12 @@ export type JournalDefinitions<
   effect<E extends AnyEntity<z.output<Meta>>>(
     name: string,
     entity: E | readonly E[],
-    on: NoInfer<EffectHandlers<E, z.output<Meta>, AppDb>>,
-  ): Effect<z.output<Meta>, AppDb>;
+    on: NoInfer<EffectHandlers<E, z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>>>,
+  ): Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>>;
   /** Build the runtime journal from the tables and the handlers. */
   compose(config: {
     readonly tables: JournalTables;
     readonly projections?: readonly Projection<z.output<Meta>, Tx>[];
-    readonly effects?: readonly Effect<z.output<Meta>, AppDb>[];
+    readonly effects?: readonly Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>>[];
   }): Journal<Meta, Tx, AppDb>;
 };
