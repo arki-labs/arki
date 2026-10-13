@@ -407,7 +407,10 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
             signal: stopping.signal,
             leaseSeconds: opts?.leaseSeconds,
           });
-          if (isRunning()) processed += (await deps.catchUp(db)).scanned;
+          if (isRunning()) {
+            const caught = await deps.catchUp(db);
+            processed += caught.scanned;
+          }
         } catch (error) {
           debugWorker('drain failed: %s', errorText(error));
         }
