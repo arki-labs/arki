@@ -3,9 +3,8 @@
  *
  * `@arki/schedule` declares the port (`DurableScheduler`) and must not
  * depend on BullMQ, so this module restates the port's shape structurally.
- * The app builder checks the two shapes against each other where
- * `durableScheduler()` provides the service and `schedule({ durable })`
- * needs it.
+ * `packages/schedule/src/durable-port.test.ts` wires `durableScheduler()` into
+ * `schedule({ durable })`, so the typecheck fails if the two shapes drift apart.
  */
 
 import type { Job } from 'bullmq';

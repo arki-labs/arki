@@ -57,6 +57,29 @@ Where each mistake is caught:
 | A durable name that contains `:` (BullMQ forbids it in queue names) | `ScheduleError` `ARKI_SCHEDULE_E001` from `defineSchedule` |
 | A `durable: true` schedule but no `durable` option on `schedule()` | `ScheduleError` `ARKI_SCHEDULE_E005` at boot, naming the schedule |
 
+### Without Dot
+
+A process that does not boot through Dot builds the runtime itself, from
+`@arki/schedule/runtime`. The main entry does not export it, so importing
+`@arki/schedule` stays free of the logger and timers.
+
+```ts
+import { createDurableScheduler } from '@arki/queue';
+import { createScheduleRuntime } from '@arki/schedule/runtime';
+
+const runtime = createScheduleRuntime({
+  schedules: [nightly, warmCache],
+  durable: createDurableScheduler({ connection: process.env.REDIS_URL ?? '', keyPrefix: 'billing:' }),
+});
+
+runtime.start(); // durable schedules go to BullMQ, the rest run in process
+// On shutdown:
+await runtime.stop();
+```
+
+A `durable: true` schedule with no `durable` option makes `start()` throw
+`ARKI_SCHEDULE_E005`.
+
 ### What happens to missed ticks
 
 Checked against BullMQ 6.3 (`node_modules/bullmq/dist/esm`):

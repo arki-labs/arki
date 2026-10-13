@@ -134,3 +134,7 @@ export type { DayOfWeek } from './cron-patterns.ts';
 
 // Retry strategies
 export { COMMON_RETRY_CONFIGS, createBackoffStrategy } from './retry-strategies.ts';
+
+// Durable backend for @arki/schedule, for processes that do not boot through Dot
+export { createDurableScheduler } from './durable-scheduler.ts';
+export type { DurableScheduler, DurableSchedulerOptions } from './durable-scheduler.ts';
