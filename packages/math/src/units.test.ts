@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Unit, UnitCategory } from './units.js';
 import { InvalidArgumentError, RoundingNecessaryError } from './errors.js';
 import { ratio } from './rational.js';
-import { convert, convertExact, formatUnit, isUnit, unitCategory, unitsOf } from './units.js';
+import { convert, convertExact, formatUnit, isUnit, joinUnits, splitUnits, unitCategory, unitsOf } from './units.js';
 
 const CATEGORIES: readonly UnitCategory[] = [
   'length',
@@ -100,7 +100,7 @@ describe('convert', () => {
 
   it('lists the known side when one unit is unknown', () => {
     const bad = 'furlong' as Unit;
-    expect(() => convert(1, 'm', bad)).toThrow(/furlong.*length units are: nm, µm, mm, cm, m/);
+    expect(() => convert(1, 'm', bad)).toThrow(/furlong.*length units are: nm, µm, mm, cm, dm, m/);
     expect(() => convert(1, bad, 'kg')).toThrow(/mass units are/);
     expect(() => convert(1, bad, bad)).toThrow(InvalidArgumentError);
   });
@@ -151,7 +151,24 @@ describe('convertExact', () => {
 
 describe('unit registry', () => {
   it('lists units per category', () => {
-    expect(unitsOf('length')).toEqual(['nm', 'µm', 'mm', 'cm', 'm', 'km', 'in', 'ft', 'yd', 'mi', 'nmi', 'au', 'ly']);
+    expect(unitsOf('length')).toEqual([
+      'nm',
+      'µm',
+      'mm',
+      'cm',
+      'dm',
+      'm',
+      'km',
+      'in',
+      'ft',
+      'yd',
+      'fathom',
+      'mi',
+      'nmi',
+      'au',
+      'ly',
+      'pc',
+    ]);
     expect(unitsOf('temperature')).toEqual(['C', 'F', 'K']);
     expect(unitsOf('angle')).toEqual(['deg', 'rad', 'grad', 'turn', 'arcmin', 'arcsec']);
   });
@@ -393,5 +410,169 @@ describe('new categories', () => {
     expect(formatUnit(2, 'deg2')).toBe('2 deg²');
     expect(formatUnit(3, 'gal_imp')).toBe('3 gal (imp)');
     expect(formatUnit(3, 'A')).toBe('3 A');
+  });
+});
+
+describe('new units', () => {
+  it('has the exact definitions people look up', () => {
+    expect(convert(1, 'dm', 'cm')).toBe(10);
+    expect(convert(1, 'fathom', 'ft')).toBe(6);
+    expect(convert(1, 'ton_us', 'lb')).toBe(2000);
+    expect(convert(1, 'ton_uk', 'lb')).toBe(2240);
+    expect(convert(5, 'ct', 'g')).toBe(1);
+    expect(convert(1, 't', 'kg')).toBe(1000);
+    expect(convert(1, 'GJ', 'MJ')).toBe(1000);
+    expect(convert(1, 'kcal/h', 'W')).toBeCloseTo(1.162_222_222, 8);
+    expect(convert(1, 'kcal/h', 'W')).toBe(convert(1, 'kcal', 'J') / 3600);
+    expect(convert(1, 'ft*lbf', 'J')).toBeCloseTo(1.355_817_948_331_4, 12);
+    expect(convert(1, 'PB', 'TB')).toBe(1000);
+    expect(convert(1, 'EB', 'PB')).toBe(1000);
+    expect(convert(1, 'PiB', 'TiB')).toBe(1024);
+    expect(convert(1, 'EiB', 'PiB')).toBe(1024);
+  });
+
+  it('keeps ft*lbf exact as a rational', () => {
+    expect(convertExact(1, 'ft*lbf', 'J').eq(ratio('0.3048').times('0.45359237').times('9.80665'))).toBe(true);
+    expect(convertExact(1, 'ft*lbf', 'J').toString()).toBe('3389544870828501/2500000000000000');
+  });
+
+  it('treats the parsec like radians: it needs π', () => {
+    expect(convert(1, 'pc', 'au')).toBeCloseTo(206_264.806_247_096_36, 6);
+    expect(convert(1, 'pc', 'ly')).toBeCloseTo(3.261_563_777, 8);
+    expect(() => convertExact(1, 'pc', 'au')).toThrow(RoundingNecessaryError);
+    expect(convertExact(2, 'pc', 'pc').toNumber()).toBe(2);
+    expect(convertExact(1, 'au', 'm').toNumber()).toBe(149_597_870_700);
+  });
+
+  it('formats new units', () => {
+    expect(formatUnit(3, 'PB', { locale: 'en' })).toBe('3 PB');
+    expect(formatUnit(3, 'ft*lbf', { locale: 'en' })).toBe('3 ft·lbf');
+    expect(formatUnit(3, 'ton_us', { locale: 'en' })).toBe('3 ton (US)');
+  });
+});
+
+describe('splitUnits and joinUnits', () => {
+  it('splits a height into feet and inches', () => {
+    expect(splitUnits(67, 'in', ['ft', 'in'])).toEqual([
+      { unit: 'ft', value: 5 },
+      { unit: 'in', value: 7 },
+    ]);
+    expect(splitUnits(1.7, 'm', ['ft', 'in'], { scale: 1 })).toEqual([
+      { unit: 'ft', value: 5 },
+      { unit: 'in', value: 6.9 },
+    ]);
+  });
+
+  it('handles durations and weights from another unit', () => {
+    expect(splitUnits(90, 'min', ['h', 'min'])).toEqual([
+      { unit: 'h', value: 1 },
+      { unit: 'min', value: 30 },
+    ]);
+    expect(splitUnits(52, 'oz', ['lb', 'oz'])).toEqual([
+      { unit: 'lb', value: 3 },
+      { unit: 'oz', value: 4 },
+    ]);
+    expect(splitUnits(100_000, 's', ['d', 'h', 'min', 's'])).toEqual([
+      { unit: 'd', value: 1 },
+      { unit: 'h', value: 3 },
+      { unit: 'min', value: 46 },
+      { unit: 's', value: 40 },
+    ]);
+  });
+
+  it('carries a rounded-up remainder into the larger part', () => {
+    // 5 ft 11.99 in rounds to 12 in, which is 6 ft 0 in, never "5 ft 12 in".
+    const total = joinUnits(
+      [
+        { unit: 'ft', value: 5 },
+        { unit: 'in', value: 11.99 },
+      ],
+      'in',
+    );
+    expect(splitUnits(total, 'in', ['ft', 'in'], { scale: 0 })).toEqual([
+      { unit: 'ft', value: 6 },
+      { unit: 'in', value: 0 },
+    ]);
+    expect(splitUnits(59.5, 'min', ['h', 'min'], { scale: 0 })).toEqual([
+      { unit: 'h', value: 1 },
+      { unit: 'min', value: 0 },
+    ]);
+  });
+
+  it('honours the rounding mode', () => {
+    const down = splitUnits(71.9, 'in', ['ft', 'in'], { scale: 0, rounding: 'down' });
+    expect(down).toEqual([
+      { unit: 'ft', value: 5 },
+      { unit: 'in', value: 11 },
+    ]);
+  });
+
+  it('puts the sign on the first non-zero part only', () => {
+    expect(splitUnits(-67, 'in', ['ft', 'in'])).toEqual([
+      { unit: 'ft', value: -5 },
+      { unit: 'in', value: 7 },
+    ]);
+    // First part is zero, so the sign moves to the part that carries the value.
+    expect(splitUnits(-7, 'in', ['ft', 'in'])).toEqual([
+      { unit: 'ft', value: 0 },
+      { unit: 'in', value: -7 },
+    ]);
+    expect(Object.is(splitUnits(0, 'in', ['ft', 'in'])[0]?.value, 0)).toBe(true);
+  });
+
+  it('parts add back to the input exactly, even when a double would drift', () => {
+    const parts = splitUnits(0.3, 'h', ['h', 'min', 's']);
+    expect(parts).toEqual([
+      { unit: 'h', value: 0 },
+      { unit: 'min', value: 18 },
+      { unit: 's', value: 0 },
+    ]);
+    expect(joinUnits(parts, 'h')).toBe(0.3);
+    const odd = splitUnits(123.456, 'lb', ['st', 'lb', 'oz']);
+    expect(joinUnits(odd, 'lb')).toBeCloseTo(123.456, 12);
+    expect(joinUnits(splitUnits(-67, 'in', ['ft', 'in']), 'in')).toBe(-67);
+  });
+
+  it('works with a single unit and with exact inputs', () => {
+    expect(splitUnits(5, 'km', ['m'])).toEqual([{ unit: 'm', value: 5000 }]);
+    expect(splitUnits(ratio(1, 3), 'h', ['h', 'min'])).toEqual([
+      { unit: 'h', value: 0 },
+      { unit: 'min', value: 20 },
+    ]);
+  });
+
+  it('joins in any order and into any unit of the category', () => {
+    expect(
+      joinUnits(
+        [
+          { unit: 'in', value: 7 },
+          { unit: 'ft', value: 5 },
+        ],
+        'cm',
+      ),
+    ).toBeCloseTo(170.18, 10);
+  });
+
+  it('rejects input that cannot be split or joined', () => {
+    expect(() => splitUnits(1, 'in', [])).toThrow(InvalidArgumentError);
+    expect(() => splitUnits(1, 'in', ['in', 'ft'])).toThrow(InvalidArgumentError); // smallest first
+    expect(() => splitUnits(1, 'in', ['ft', 'ft'])).toThrow(InvalidArgumentError);
+    expect(() => splitUnits(1, 'in', ['ft', 'lb'])).toThrow(InvalidArgumentError);
+    expect(() => splitUnits(1, 'kg', ['ft', 'in'])).toThrow(InvalidArgumentError);
+    expect(() => splitUnits(1, 'C', ['C'])).toThrow(InvalidArgumentError);
+    expect(() => splitUnits(1, 'mpg', ['mpg'])).toThrow(InvalidArgumentError);
+    expect(() => splitUnits(Number.NaN, 'in', ['ft', 'in'])).toThrow();
+    expect(() => splitUnits(1, 'deg', ['deg', 'rad'])).toThrow(RoundingNecessaryError);
+    expect(() => joinUnits([], 'in')).toThrow(InvalidArgumentError);
+    expect(() => joinUnits([{ unit: 'kg', value: 1 }], 'in')).toThrow(InvalidArgumentError);
+    expect(() => joinUnits([{ unit: 'C', value: 1 }], 'C')).toThrow(InvalidArgumentError);
+  });
+
+  it('splits angles in degrees, minutes and seconds', () => {
+    expect(splitUnits(12.5, 'deg', ['deg', 'arcmin', 'arcsec'])).toEqual([
+      { unit: 'deg', value: 12 },
+      { unit: 'arcmin', value: 30 },
+      { unit: 'arcsec', value: 0 },
+    ]);
   });
 });

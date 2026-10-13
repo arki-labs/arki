@@ -9,6 +9,11 @@
  * once, correctly, so `convert(1, 'in', 'cm') === 2.54`. `convertExact` keeps
  * the rational and never rounds.
  *
+ * `pc` is the IAU 2015 parsec, 648000/π au: it involves π, so like `rad` it converts
+ * with `convert` and makes `convertExact` throw. `fathom` is 6 ft, `ct` the metric
+ * carat (0.2 g), `ton_us` the short ton (2000 lb) and `ton_uk` the long ton (2240 lb).
+ * `kcal/h` uses the thermochemical kilocalorie, like `kcal`; `ft*lbf` is foot-pound-force.
+ *
  * Unit symbols are the public identifiers and are case sensitive. Temperature
  * uses plain `'C' | 'F' | 'K'` (no `'°C'` aliases), area and volume powers are
  * written `m2`, `m3`. Volumes beyond `l`, `ml`, `cl`, `m3` are US customary.
@@ -33,13 +38,15 @@
  */
 
 import type { RationalInput } from './rational.js';
+import type { RoundingMode } from './rounding.js';
 import { InvalidArgumentError, RoundingNecessaryError } from './errors.js';
 import { ratio } from './internal/exact.js';
 import { assertFinite } from './number.js';
 import { Rational } from './rational.js';
 
-export type LengthUnit = 'nm' | 'µm' | 'mm' | 'cm' | 'm' | 'km' | 'in' | 'ft' | 'yd' | 'mi' | 'nmi' | 'au' | 'ly';
-export type MassUnit = 'mg' | 'g' | 'kg' | 't' | 'oz' | 'lb' | 'st';
+export type LengthUnit =
+  'nm' | 'µm' | 'mm' | 'cm' | 'dm' | 'm' | 'km' | 'in' | 'ft' | 'yd' | 'fathom' | 'mi' | 'nmi' | 'au' | 'ly' | 'pc';
+export type MassUnit = 'mg' | 'ct' | 'g' | 'kg' | 't' | 'oz' | 'lb' | 'st' | 'ton_us' | 'ton_uk';
 export type AreaUnit = 'mm2' | 'cm2' | 'm2' | 'ha' | 'km2' | 'in2' | 'ft2' | 'yd2' | 'ac' | 'mi2';
 export type VolumeUnit =
   | 'ml'
@@ -70,10 +77,14 @@ export type DataUnit =
   | 'MB'
   | 'GB'
   | 'TB'
+  | 'PB'
+  | 'EB'
   | 'KiB'
   | 'MiB'
   | 'GiB'
   | 'TiB'
+  | 'PiB'
+  | 'EiB'
   | 'bit'
   | 'kbit'
   | 'Mbit'
@@ -81,11 +92,11 @@ export type DataUnit =
   | 'Kibit'
   | 'Mibit'
   | 'Gibit';
-export type EnergyUnit = 'J' | 'kJ' | 'cal' | 'kcal' | 'Wh' | 'kWh' | 'MJ' | 'BTU' | 'eV';
+export type EnergyUnit = 'J' | 'kJ' | 'cal' | 'kcal' | 'Wh' | 'kWh' | 'MJ' | 'GJ' | 'BTU' | 'eV' | 'ft*lbf';
 export type PressureUnit = 'Pa' | 'kPa' | 'MPa' | 'bar' | 'atm' | 'psi' | 'mmHg' | 'Torr';
 export type AngleUnit = 'deg' | 'rad' | 'grad' | 'turn' | 'arcmin' | 'arcsec';
 export type SolidAngleUnit = 'sr' | 'deg2';
-export type PowerUnit = 'W' | 'kW' | 'MW' | 'hp' | 'hp_metric' | 'BTU/h';
+export type PowerUnit = 'W' | 'kW' | 'MW' | 'hp' | 'hp_metric' | 'BTU/h' | 'kcal/h';
 export type FrequencyUnit = 'Hz' | 'kHz' | 'MHz' | 'GHz' | 'rpm';
 export type ForceUnit = 'N' | 'kN' | 'lbf' | 'kgf' | 'dyn';
 export type TorqueUnit = 'N*m' | 'lbf*ft' | 'kgf*m';
@@ -157,8 +168,8 @@ export type FormatUnitOptions = {
 };
 
 const UNITS_BY_CATEGORY: Record<UnitCategory, readonly Unit[]> = {
-  length: ['nm', 'µm', 'mm', 'cm', 'm', 'km', 'in', 'ft', 'yd', 'mi', 'nmi', 'au', 'ly'],
-  mass: ['mg', 'g', 'kg', 't', 'oz', 'lb', 'st'],
+  length: ['nm', 'µm', 'mm', 'cm', 'dm', 'm', 'km', 'in', 'ft', 'yd', 'fathom', 'mi', 'nmi', 'au', 'ly', 'pc'],
+  mass: ['mg', 'ct', 'g', 'kg', 't', 'oz', 'lb', 'st', 'ton_us', 'ton_uk'],
   area: ['mm2', 'cm2', 'm2', 'ha', 'km2', 'in2', 'ft2', 'yd2', 'ac', 'mi2'],
   volume: [
     'ml',
@@ -190,10 +201,14 @@ const UNITS_BY_CATEGORY: Record<UnitCategory, readonly Unit[]> = {
     'MB',
     'GB',
     'TB',
+    'PB',
+    'EB',
     'KiB',
     'MiB',
     'GiB',
     'TiB',
+    'PiB',
+    'EiB',
     'bit',
     'kbit',
     'Mbit',
@@ -202,11 +217,11 @@ const UNITS_BY_CATEGORY: Record<UnitCategory, readonly Unit[]> = {
     'Mibit',
     'Gibit',
   ],
-  energy: ['J', 'kJ', 'cal', 'kcal', 'Wh', 'kWh', 'MJ', 'BTU', 'eV'],
+  energy: ['J', 'kJ', 'cal', 'kcal', 'Wh', 'kWh', 'MJ', 'GJ', 'BTU', 'eV', 'ft*lbf'],
   pressure: ['Pa', 'kPa', 'MPa', 'bar', 'atm', 'psi', 'mmHg', 'Torr'],
   angle: ['deg', 'rad', 'grad', 'turn', 'arcmin', 'arcsec'],
   solidAngle: ['sr', 'deg2'],
-  power: ['W', 'kW', 'MW', 'hp', 'hp_metric', 'BTU/h'],
+  power: ['W', 'kW', 'MW', 'hp', 'hp_metric', 'BTU/h', 'kcal/h'],
   frequency: ['Hz', 'kHz', 'MHz', 'GHz', 'rpm'],
   force: ['N', 'kN', 'lbf', 'kgf', 'dyn'],
   torque: ['N*m', 'lbf*ft', 'kgf*m'],
@@ -225,8 +240,11 @@ const CATEGORY_OF: ReadonlyMap<string, UnitCategory> = new Map(
   ),
 );
 
-/** A unit's size in its category's base unit: `r * π^pi`. Only angles (`pi: 1`) and solid angles (`pi: 2`) use π. */
-type Factor = { readonly r: Rational; readonly pi: 0 | 1 | 2 };
+/**
+ * A unit's size in its category's base unit: `r * π^pi`. Only angles (`pi: 1`), solid angles (`pi: 2`)
+ * and the parsec (`pi: -1`, it is 648000/π au) use π.
+ */
+type Factor = { readonly r: Rational; readonly pi: -1 | 0 | 1 | 2 };
 
 const lin = (r: Rational): Factor => ({ r, pi: 0 });
 
@@ -260,6 +278,7 @@ const L_PER_QT_IMP = L_PER_GAL_IMP.dividedBy(4);
 const L_PER_PT_IMP = L_PER_QT_IMP.dividedBy(2);
 const L_PER_FLOZ_IMP = L_PER_PT_IMP.dividedBy(20); // imperial pint = 20 imperial fluid ounces
 const J_PER_EV = ratio('1.602176634e-19'); // electron-volt, exact since SI 2019 (e = 1.602176634e-19 C)
+const KG_PER_CT = ratio('0.0002'); // metric carat, 200 mg exactly
 const BQ_PER_CI = ratio('3.7e10'); // curie, exact by definition
 
 function lengthFactors(): Record<LengthUnit, Factor> {
@@ -268,27 +287,33 @@ function lengthFactors(): Record<LengthUnit, Factor> {
     µm: lin(ratio(1, 1_000_000)),
     mm: lin(ratio(1, 1000)),
     cm: lin(ratio(1, 100)),
+    dm: lin(ratio(1, 10)),
     m: lin(ratio(1)),
     km: lin(ratio(1000)),
     in: lin(M_PER_IN),
     ft: lin(M_PER_FT),
     yd: lin(M_PER_YD),
+    fathom: lin(M_PER_FT.times(6)), // 6 international feet exactly
     mi: lin(M_PER_MI),
     nmi: lin(M_PER_NMI),
     au: lin(M_PER_AU),
     ly: lin(M_PER_LY),
+    pc: { r: M_PER_AU.times(648_000), pi: -1 }, // IAU 2015 Resolution B2: 648000/π au
   };
 }
 
 function massFactors(): Record<MassUnit, Factor> {
   return {
     mg: lin(ratio(1, 1_000_000)),
+    ct: lin(KG_PER_CT),
     g: lin(ratio(1, 1000)),
     kg: lin(ratio(1)),
     t: lin(ratio(1000)),
     oz: lin(KG_PER_LB.dividedBy(16)),
     lb: lin(KG_PER_LB),
     st: lin(KG_PER_LB.times(14)),
+    ton_us: lin(KG_PER_LB.times(2000)), // short ton
+    ton_uk: lin(KG_PER_LB.times(2240)), // long ton
   };
 }
 
@@ -362,10 +387,14 @@ function dataFactors(): Record<DataUnit, Factor> {
     MB: lin(ratio(1000).pow(2)),
     GB: lin(ratio(1000).pow(3)),
     TB: lin(ratio(1000).pow(4)),
+    PB: lin(ratio(1000).pow(5)),
+    EB: lin(ratio(1000).pow(6)),
     KiB: lin(ratio(1024)),
     MiB: lin(ratio(1024).pow(2)),
     GiB: lin(ratio(1024).pow(3)),
     TiB: lin(ratio(1024).pow(4)),
+    PiB: lin(ratio(1024).pow(5)),
+    EiB: lin(ratio(1024).pow(6)),
     bit: lin(ratio(1, 8)),
     kbit: lin(ratio(1000, 8)),
     Mbit: lin(ratio(1_000_000, 8)),
@@ -386,8 +415,10 @@ function energyFactors(): Record<EnergyUnit, Factor> {
     Wh: lin(SECONDS_PER_HOUR),
     kWh: lin(SECONDS_PER_HOUR.times(1000)),
     MJ: lin(ratio(1_000_000)),
+    GJ: lin(ratio(1_000_000_000)),
     BTU: lin(J_PER_BTU),
     eV: lin(J_PER_EV),
+    'ft*lbf': lin(M_PER_FT.times(N_PER_LBF)), // 1.3558179483314004 J, exact: 0.3048 m × 0.45359237 kg × 9.80665 m/s²
   };
 }
 
@@ -484,6 +515,7 @@ function powerFactors(): Record<PowerUnit, Factor> {
     // Metric horsepower (PS, CV) = 75 kgf·m/s = 735.49875 W (exact).
     hp_metric: lin(ratio(75).times(N_PER_KGF)),
     'BTU/h': lin(J_PER_BTU.dividedBy(SECONDS_PER_HOUR)),
+    'kcal/h': lin(ratio('4184').dividedBy(SECONDS_PER_HOUR)), // thermochemical kilocalorie, as `kcal`
   };
 }
 
@@ -748,6 +780,124 @@ export function convertExact(value: RationalInput, from: Unit, to: Unit): Ration
   return input.times(f.r).dividedBy(t.r);
 }
 
+// Composite values: splitUnits / joinUnits -----------------------------------------
+
+/** One part of a composite value, such as the `7 in` of "5 ft 7 in". */
+export type UnitPart = { readonly unit: Unit; readonly value: number };
+
+export type SplitUnitsOptions = {
+  /**
+   * Fraction digits kept on the last part. Leave it out to keep the exact remainder
+   * (as a double). The value is rounded once, in the last unit, before it is split,
+   * so a rounded-up remainder carries into the larger parts: 5 ft 11.6 in at
+   * `scale: 0` is 6 ft 0 in, never 5 ft 12 in.
+   */
+  scale?: number;
+  /** How to round to `scale`. Defaults to `'halfUp'`. Ignored without `scale`. */
+  rounding?: RoundingMode;
+};
+
+/** Rejects units that are not a plain multiple of a base unit, so that parts can be added. */
+function assertSplittable(category: UnitCategory): void {
+  if (category === 'temperature' || category === 'fuelEconomy') {
+    throw new InvalidArgumentError(`${category} units are not additive and cannot be split or joined`);
+  }
+}
+
+/**
+ * Splits a value into whole parts of larger units plus a remainder, for display like
+ * "5 ft 7 in", "1 h 30 min" or "3 lb 4 oz". `units` go largest first and share one
+ * category: `splitUnits(67, 'in', ['ft', 'in'])` is `[{ unit: 'ft', value: 5 }, { unit: 'in', value: 7 }]`.
+ *
+ * Every part but the last is an integer; the last holds the remainder. The parts add up
+ * to the input exactly (`joinUnits` is the inverse), because the arithmetic uses the exact
+ * rational factors, not doubles. A negative value puts its sign on the first non-zero
+ * part only, so `-67 in` is `-5 ft` and `7 in`, meaning minus (5 ft + 7 in); `joinUnits` reads it back the same way.
+ *
+ * Throws `InvalidArgumentError` for an empty list, unknown or mixed categories, units not
+ * strictly largest-first, temperature and fuel economy (not additive), or a non-finite
+ * `value`; `RoundingNecessaryError` for units that mix π (such as `rad` with `deg`).
+ */
+export function splitUnits(
+  value: RationalInput,
+  from: Unit,
+  units: readonly Unit[],
+  options: SplitUnitsOptions = {},
+): UnitPart[] {
+  if (typeof value === 'number') assertFinite(value, 'value');
+  const last = units.at(-1);
+  if (last === undefined) throw new InvalidArgumentError('splitUnits needs at least one unit');
+  assertSplittable(sharedCategory(from, last));
+  // Size of every unit in the last (smallest) unit; also checks the category and π.
+  const sizes = units.map(unit => convertExact(1, unit, last));
+  for (let i = 1; i < sizes.length; i++) {
+    const previous = sizes[i - 1];
+    const current = sizes[i];
+    if (previous === undefined || current === undefined || !previous.gt(current)) {
+      throw new InvalidArgumentError(`Units must be given largest first without repeats: "${units.join('", "')}"`);
+    }
+  }
+
+  let remaining = convertExact(value, from, last);
+  if (options.scale !== undefined) {
+    remaining = Rational.from(remaining.toDecimal({ scale: options.scale, rounding: options.rounding ?? 'halfUp' }));
+  }
+  const negative = remaining.isNegative();
+  remaining = remaining.abs();
+
+  const out: UnitPart[] = [];
+  let signPending = negative;
+  for (const [index, unit] of units.entries()) {
+    const size = sizes[index];
+    if (size === undefined) continue;
+    let magnitude: number;
+    if (index === units.length - 1) {
+      magnitude = remaining.toNumber();
+    } else {
+      // `remaining` is non-negative, so integer division is the floor.
+      const quotient = remaining.dividedBy(size);
+      const whole = quotient.numerator / quotient.denominator;
+      remaining = remaining.minus(size.times(whole));
+      magnitude = Number(whole);
+    }
+    const carriesSign = signPending && magnitude !== 0;
+    if (carriesSign) signPending = false;
+    out.push({ unit, value: carriesSign ? -magnitude : magnitude });
+  }
+  return out;
+}
+
+/**
+ * Adds composite parts back into one number in `to`: `joinUnits([{ unit: 'ft', value: 5 },
+ * { unit: 'in', value: 7 }], 'in')` is `67`. Parts may come in any order and may be fractional.
+ * It reads parts the way `splitUnits` writes them: the sign of the first non-zero part applies
+ * to the whole value, so `-5 ft 7 in` is minus (5 ft + 7 in), `-67 in`. Later parts must not
+ * be negative (`InvalidArgumentError`); that would be ambiguous. The sum is exact, rounded to
+ * a double once at the end.
+ */
+export function joinUnits(parts: readonly UnitPart[], to: Unit): number {
+  if (parts.length === 0) throw new InvalidArgumentError('joinUnits needs at least one part');
+  let total = ratio(0);
+  let negative = false;
+  let seenNonZero = false;
+  for (const part of parts) {
+    assertSplittable(sharedCategory(part.unit, to));
+    assertFinite(part.value, 'value');
+    if (part.value !== 0) {
+      if (!seenNonZero) negative = part.value < 0;
+      else if (part.value < 0) {
+        throw new InvalidArgumentError(
+          'Only the first non-zero part may be negative; its sign applies to the whole value',
+        );
+      }
+      seenNonZero = true;
+    }
+    total = total.plus(convertExact(Math.abs(part.value), part.unit, to));
+  }
+  const sum = total.toNumber();
+  return negative ? -sum : sum;
+}
+
 // formatUnit -------------------------------------------------------------------
 
 /** Our symbols mapped to the identifiers `Intl.NumberFormat` accepts for `style: 'unit'`. */
@@ -789,6 +939,7 @@ const INTL_UNITS: Partial<Record<Unit, string>> = {
   MB: 'megabyte',
   GB: 'gigabyte',
   TB: 'terabyte',
+  PB: 'petabyte',
   bit: 'bit',
   kbit: 'kilobit',
   Mbit: 'megabit',
@@ -807,6 +958,9 @@ const SYMBOLS: Partial<Record<Unit, string>> = {
   pt_imp: 'pt (imp)',
   qt_imp: 'qt (imp)',
   gal_imp: 'gal (imp)',
+  ton_us: 'ton (US)',
+  ton_uk: 'ton (UK)',
+  'ft*lbf': 'ft·lbf',
   deg2: 'deg²',
   'Pa*s': 'Pa·s',
   'mPa*s': 'mPa·s',
