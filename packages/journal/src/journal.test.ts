@@ -1,7 +1,7 @@
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgInsertValue, PgTable } from 'drizzle-orm/pg-core';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { integer, jsonb, pgTable, varchar } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
@@ -548,6 +548,35 @@ describe('replay, verify, repair', () => {
     await cancel(id);
     expect(await versions(id)).toEqual([2]);
     await expect(journal.replay(db, order, id, { throughVersion: 1 })).rejects.toMatchObject({ code: 'NO_HISTORY' });
+  });
+
+  it('HISTORY_GAP: a missing middle version is refused by replay, verify and repair, and the row is left alone', async () => {
+    // Why: version 1 alone does not prove the log is complete. With version 2 gone, folding [1, 3]
+    // would build a row the real history never produced, and repair would save it over a correct row.
+    const id = orderId(++next);
+    await place(id);
+    await db.transaction(tx => journal.write(tx, order, id, { meta, events: () => [OrderNoted({ note: 'gap' })] }));
+    await pay(id);
+    await db.delete(tables.events).where(and(eq(tables.events.entityId, id), eq(tables.events.version, 2)));
+    expect(await versions(id)).toEqual([1, 3]);
+    await expect(journal.replay(db, order, id)).rejects.toMatchObject({ code: 'HISTORY_GAP' });
+    await expect(journal.verify(db, order, id)).rejects.toMatchObject({ code: 'HISTORY_GAP' });
+    await expect(journal.repair(db, order, id)).rejects.toSatisfy((e: unknown) => isJournalError(e, 'HISTORY_GAP'));
+    expect(await rowOf(id)).toMatchObject({ status: 'paid', note: 'gap', version: 3 });
+  });
+
+  it('HISTORY_GAP: a row ahead of its log is refused too, so repair cannot roll a row back to an older state', async () => {
+    // Why: the log [1, 2] folds cleanly, but the row says version 3. The last event was lost, not never
+    // written. Repair would quietly undo it; refusing makes the loss visible.
+    const id = orderId(++next);
+    await place(id);
+    await pay(id);
+    await cancel(id);
+    await db.insert(orders).values({ id, customerId: 'cus_1', total: 100, status: 'cancelled', version: 3 });
+    await db.delete(tables.events).where(and(eq(tables.events.entityId, id), eq(tables.events.version, 3)));
+    await expect(journal.replay(db, order, id)).rejects.toMatchObject({ code: 'HISTORY_GAP' });
+    await expect(journal.repair(db, order, id)).rejects.toMatchObject({ code: 'HISTORY_GAP' });
+    expect(await rowOf(id)).toMatchObject({ status: 'cancelled', version: 3 });
   });
 
   it('replay of an entity with no row and no events is an empty result, not an error', async () => {

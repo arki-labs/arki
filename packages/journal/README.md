@@ -175,7 +175,7 @@ export const journal = j.compose({ tables, effects: [closeAfterPayment] });
 
 ### Rows that existed before the journal
 
-A row the journal creates gets version 1 from its create event. A row that was there first (stored `version` 0, no events in the log) can still be written to, but its history starts at version 2: the first write treats the row as version 1 and records its event as version 2. Version 1 therefore always means "created from nothing". `replay`, `verify` and `repair` need a history that starts at version 1 and throw `NO_HISTORY` otherwise, because folding a partial history from nothing would pick the wrong reducers and build the wrong row.
+A row the journal creates gets version 1 from its create event. A row that was there first (stored `version` 0, no events in the log) can still be written to, but its history starts at version 2: the first write treats the row as version 1 and records its event as version 2. Version 1 therefore always means "created from nothing". `replay`, `verify` and `repair` need a history that starts at version 1 and throw `NO_HISTORY` otherwise, because folding a partial history from nothing would pick the wrong reducers and build the wrong row. They also need every version up to the top, and a live row no newer than its log, and throw `HISTORY_GAP` otherwise: an event lost after it was written must be restored, not folded around.
 
 ### A row removed outside the journal
 
@@ -225,7 +225,7 @@ Database defaults are not journal state. `write` folds from the stored row, wher
 
 An error about one entity's row or history is a `JournalError` with a `code`. Match on the code, never on the message. The message names the entity kind and id, adds the event type and version when the journal knows them, and ends with the next step.
 
-The ten codes, the usual cause of each and what to do are in one table: [agent guide, Errors](docs/agent-guide.md#errors).
+The twelve codes, the usual cause of each and what to do are in one table: [agent guide, Errors](docs/agent-guide.md#errors).
 
 Other errors are not `JournalError`. A wrong definition or a misuse is a plain `Error` whose message starts with `journal:`. Input, event data or `meta` that fails its schema is a `ZodError`. An error thrown by a command handler, an `events` function, a reducer or a projection passes through unchanged.
 

@@ -5,6 +5,7 @@ export type JournalErrorCode =
   | 'UNKNOWN_EVENT'
   | 'VERSION_MISMATCH'
   | 'NO_HISTORY'
+  | 'HISTORY_GAP'
   | 'REPLAY_FAILED'
   | 'UNSTABLE_SCHEMA'
   | 'ID_MISMATCH'
@@ -36,6 +37,10 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
   NO_HISTORY: {
     what: 'a complete history that starts at version 1 is not available',
     next: 'Replay and repair cannot rebuild this row. Check whether the row existed before the journal, or restore the missing events',
+  },
+  HISTORY_GAP: {
+    what: 'the log has a hole, or the row is newer than a log that says it is alive',
+    next: 'An event was lost after it was written. Replay and repair refuse to build a row the real history never produced. Restore the missing event from a backup, or accept the row as it is',
   },
   REPLAY_FAILED: {
     what: 'a stored event cannot be decoded or applied',

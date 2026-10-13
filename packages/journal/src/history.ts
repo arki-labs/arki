@@ -41,6 +41,43 @@ export type HistoryDeps<Meta extends z.ZodObject> = {
   readonly tables: JournalTables;
 };
 
+/**
+ * Every version from 1 to the top must be stored. A hole means an event was lost
+ * after it was written. Folding around it would build a row the real history never
+ * produced, and `repair` would save it. The rows come ordered by version, and the
+ * unique index allows one row per version, so position and version must agree.
+ */
+function assertNoHoles(kind: string, id: string, rows: readonly { readonly version: number }[]): void {
+  for (const [index, row] of rows.entries()) {
+    if (row.version !== index + 1) {
+      throw new JournalError(
+        'HISTORY_GAP',
+        kind,
+        id,
+        `version ${index + 1} is missing from the log; the next stored version is ${row.version}`,
+      );
+    }
+  }
+}
+
+/**
+ * A stored row newer than a log that says the entity is alive lost its last events.
+ * Repair would quietly roll the row back, so replay refuses instead. When the log
+ * says the entity is gone, a row at any version was placed outside the journal and
+ * repair removes it: see `assertLogSaysGone`.
+ */
+function assertRowNotAhead(kind: string, id: string, folded: object | null, top: number, current: object | null): void {
+  if (folded === null || current === null) return;
+  if ('version' in current && typeof current.version === 'number' && current.version > top) {
+    throw new JournalError(
+      'HISTORY_GAP',
+      kind,
+      id,
+      `the row is at version ${current.version} but the log ends at version ${top}`,
+    );
+  }
+}
+
 export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>) {
   type MetaOut = z.output<Meta>;
   const { metaSchema } = deps;
@@ -130,13 +167,14 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
     if (first !== undefined && first.version !== 1) {
       throw new JournalError('NO_HISTORY', entity.kind, id, `the first stored version is ${first.version}`);
     }
-    const events = decodeHistory(
-      entity,
-      id,
-      throughVersion === undefined ? rows : rows.filter(row => row.version <= throughVersion),
-    );
+    assertNoHoles(entity.kind, id, rows);
+    const all = decodeHistory(entity, id, rows);
+    // The whole history decides whether the entity is alive, whatever `throughVersion` says.
+    const full = fold(entity, null, id, all, 'replay').row;
+    assertRowNotAhead(entity.kind, id, full, rows.at(-1)?.version ?? 0, current);
+    const events = throughVersion === undefined ? all : all.filter(event => event.version <= throughVersion);
     debugReplay('%s %s: %d events', entity.kind, id, events.length);
-    return { row: fold(entity, null, id, events, 'replay').row, events };
+    return { row: throughVersion === undefined ? full : fold(entity, null, id, events, 'replay').row, events };
   };
 
   /** Decodes every row. The filter only narrows the type and drops nothing: see `hasDeclaredEventType`. */
