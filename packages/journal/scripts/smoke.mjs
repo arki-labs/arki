@@ -65,7 +65,7 @@ const checks = [
   ['error code', isJournalError(new JournalError('NO_ROW', 'order', 'x'), 'NO_ROW'), true],
   ['rejected rule code', isCommandError(new CommandError('NOT_FOUND', 'x'), 'NOT_FOUND'), true],
   ['the door binds without a database call', typeof journal.bind({}, { actorId: 'system' }), 'function'],
-  ['tables', Object.keys(journalTables()).join(','), 'events,jobs'],
+  ['tables', Object.keys(journalTables()).join(','), 'events,jobs,receipts,cursors'],
 ];
 
 let failed = 0;
