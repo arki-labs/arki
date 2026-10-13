@@ -54,7 +54,9 @@ function makeJobShim(id: string, name: string, data: unknown, attemptsMade = 0):
     data,
     attemptsMade,
     updateProgress: async () => {},
-    log: async msg => console.log(`[${name}] ${msg}`),
+    log: async msg => {
+      debugJob.info('[{job}] {message}', { job: name, message: msg });
+    },
   };
 }
 
@@ -100,7 +102,6 @@ export function createRuntimeLocalQueueInstance<TContext>(
 
     jobDefs.set(name, def);
     debugRegister.debug('[runtime-local] registered job: {job}', { job: name });
-    console.log(`✓ Registered job: ${name} (runtime-local)`);
   }
 
   function registerScheduleDef(def: ScheduleDefinition): void {
@@ -108,17 +109,19 @@ export function createRuntimeLocalQueueInstance<TContext>(
     if (scheduleDefs.has(internal.name)) throw duplicateScheduleError(internal.name);
 
     if (internal.type === 'interval') {
-      console.warn(
-        `[runtime-local] schedule "${internal.name}" uses interval type — not supported on pg-boss. ` +
-          `Convert to a cron pattern or handle it manually.`,
+      debugSchedule.warn(
+        '[runtime-local] schedule {schedule} uses interval type — not supported on pg-boss. ' +
+          'Convert to a cron pattern or handle it manually.',
+        { schedule: internal.name },
       );
       return;
     }
 
     if (internal.type === 'timeout') {
-      console.warn(
-        `[runtime-local] schedule "${internal.name}" uses timeout type — not natively supported on pg-boss. ` +
-          `Use boss.sendAfter() directly or send a delayed job via trigger().`,
+      debugSchedule.warn(
+        '[runtime-local] schedule {schedule} uses timeout type — not natively supported on pg-boss. ' +
+          'Use boss.sendAfter() directly or send a delayed job via trigger().',
+        { schedule: internal.name },
       );
       return;
     }
@@ -132,7 +135,6 @@ export function createRuntimeLocalQueueInstance<TContext>(
       schedule: internal.name,
       internalValue: internal.value,
     });
-    console.log(`✓ Registered schedule: ${internal.name} (runtime-local, cron: ${internal.value})`);
   }
 
   async function traverseRegistry(registry: Registry): Promise<void> {
@@ -144,7 +146,7 @@ export function createRuntimeLocalQueueInstance<TContext>(
           } else if ((value as { _type: string })._type === 'schedule') {
             registerScheduleDef(value as ScheduleDefinition);
           } else if ((value as { _type: string })._type === 'flow') {
-            console.warn('[runtime-local] flow definitions are not supported — skipping.');
+            debugRegister.warn('[runtime-local] flow definitions are not supported — skipping');
           }
         } else if (!Array.isArray(value)) {
           await traverseRegistry(value as Registry);
@@ -200,7 +202,6 @@ export function createRuntimeLocalQueueInstance<TContext>(
   async function register(registry: Registry): Promise<void> {
     debugRegister.debug('[runtime-local] traversing registry');
     await traverseRegistry(registry);
-    console.log('✓ Registration complete (runtime-local)');
   }
 
   async function start(): Promise<void> {
@@ -239,9 +240,12 @@ export function createRuntimeLocalQueueInstance<TContext>(
           if (!pgBossJob) return;
           try {
             await runJobHandler(def, pgBossJob);
-          } catch (err) {
-            console.error(`[runtime-local] Job ${name} failed:`, err);
-            throw err; // let pg-boss mark the job as failed for retry
+          } catch (error) {
+            debugJob.error('[runtime-local] Job {job} failed', {
+              job: name,
+              error: error instanceof Error ? error : new Error(String(error)),
+            });
+            throw error; // let pg-boss mark the job as failed for retry
           }
         },
       );
@@ -287,9 +291,10 @@ export function createRuntimeLocalQueueInstance<TContext>(
       }
     }
 
-    console.log('✓ Queue infrastructure started (runtime-local)');
-    console.log(`  - ${jobDefs.size} job(s) registered`);
-    console.log(`  - ${scheduleDefs.size} schedule(s) registered`);
+    debugRegister.debug('queue infrastructure started (runtime-local): {jobs} jobs, {schedules} schedules', {
+      jobs: jobDefs.size,
+      schedules: scheduleDefs.size,
+    });
   }
 
   async function stop(): Promise<void> {
@@ -298,7 +303,6 @@ export function createRuntimeLocalQueueInstance<TContext>(
       await boss.stop({ graceful: true });
       boss = null;
     }
-    console.log('✓ Queue infrastructure shut down (runtime-local)');
   }
 
   return { register, start, stop };

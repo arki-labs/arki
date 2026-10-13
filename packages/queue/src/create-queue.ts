@@ -76,8 +76,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
 
     const existing = registeredJobs.get(internal.name);
     if (existing) {
-      debugRegister.debug('[{internalName}] Job already registered, skipping', { internalName: internal.name });
-      console.warn(`Job "${internal.name}" is already registered, skipping`);
+      debugRegister.warn('Job {job} is already registered, skipping', { job: internal.name });
       return existing.queue;
     }
 
@@ -157,14 +156,10 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
 
     // Error handling
     worker.on('failed', (job: BullMQJob | undefined, error: Error) => {
-      debugJob.debug('[{internalName}] Job {value2} failed: {failed}', {
-        internalName: internal.name,
-        value2: job?.id ?? 'unknown',
-        failed: error.message,
-      });
-      console.error(`Job ${internal.name} failed:`, error);
+      const jobId = job?.id ?? 'unknown';
+      debugJob.error('Job {job} failed (job id {jobId})', { job: internal.name, jobId, error });
       if (job) {
-        console.error(`Job ID: ${job.id}, Data:`, job.data);
+        debugJob.debug('failed job {jobId} data', () => ({ jobId, data: JSON.stringify(job.data) }));
       }
     });
 
@@ -178,7 +173,6 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     registeredJobs.set(internal.name, { definition: definition as JobDefinition<unknown, unknown, TContext>, queue });
 
     debugRegister.debug('[{internalName}] Job registered successfully', { internalName: internal.name });
-    console.log(`✓ Registered job: ${internal.name}`);
     return queue;
   }
 
@@ -260,7 +254,6 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     registeredSchedules.set(internal.name, internal);
 
     debugSchedule.debug('[{internalName}] Schedule registered successfully', { internalName: internal.name });
-    console.log(`✓ Registered schedule: ${internal.name} (${internal.type})`);
   }
 
   /**
@@ -308,8 +301,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     });
 
     if (registeredFlows.has(internal.name)) {
-      debugFlow.debug('[{internalName}] Flow already registered, skipping', { internalName: internal.name });
-      console.warn(`Flow "${internal.name}" is already registered, skipping`);
+      debugFlow.warn('Flow {flow} is already registered, skipping', { flow: internal.name });
       return;
     }
 
@@ -339,7 +331,6 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     registeredFlows.set(internal.name, internal);
 
     debugFlow.debug('[{internalName}] Flow registered successfully', { internalName: internal.name });
-    console.log(`✓ Registered flow: ${internal.name} (${internal.steps.length} steps)`);
   }
 
   /**
@@ -382,10 +373,8 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
    */
   async function register(registry: Registry): Promise<void> {
     debugRegister.debug('Starting registry traversal');
-    console.log('Registering queue items...');
     await traverseRegistry(registry);
     debugRegister.debug('Registry traversal complete');
-    console.log('✓ Registration complete');
   }
 
   /**
@@ -407,16 +396,17 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
         startedWorkers.add(worker);
         // Worker.run() resolves when worker stops, so fire-and-forget here.
         void worker.run().catch(error => {
-          console.error(`Worker ${worker.name} stopped unexpectedly:`, error);
+          debugWorker.error('Worker {worker} stopped unexpectedly', { worker: worker.name, error });
         });
       }
       await worker.waitUntilReady();
     }
 
-    console.log('✓ Queue infrastructure started');
-    console.log(`  - ${registeredJobs.size} job(s) registered`);
-    console.log(`  - ${registeredSchedules.size} schedule(s) registered`);
-    console.log(`  - ${registeredFlows.size} flow(s) registered`);
+    debugRegister.debug('queue infrastructure started: {jobs} jobs, {schedules} schedules, {flows} flows', {
+      jobs: registeredJobs.size,
+      schedules: registeredSchedules.size,
+      flows: registeredFlows.size,
+    });
   }
 
   /**
@@ -424,7 +414,6 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
    */
   async function stop(): Promise<void> {
     debugWorker.debug('Shutting down queue infrastructure');
-    console.log('Shutting down queue infrastructure...');
 
     // Close all workers
     debugWorker.debug('Closing {workersLength} workers', { workersLength: workers.length });
@@ -453,7 +442,6 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     );
 
     debugWorker.debug('Queue infrastructure shut down successfully');
-    console.log('✓ Queue infrastructure shut down');
   }
 
   return {

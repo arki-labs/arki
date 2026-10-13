@@ -8,6 +8,7 @@ export const LOG_ERROR_CODES = {
   unknownChannel: 'ARKI_LOG_E002',
   invalidLevel: 'ARKI_LOG_E003',
   fakeActive: 'ARKI_LOG_E004',
+  staleHandle: 'ARKI_LOG_E005',
 } as const;
 
 export type LogErrorCode = (typeof LOG_ERROR_CODES)[keyof typeof LOG_ERROR_CODES];
@@ -58,5 +59,14 @@ export function fakeActiveError(): LogError {
     code: LOG_ERROR_CODES.fakeActive,
     message: 'A fakeLog() is active on this Logging.',
     remediation: 'Restore the active fake first (restore() or `using`). One fake at a time.',
+  });
+}
+
+/** `reconfigure()` was called on a handle whose configuration is no longer the active one. */
+export function staleHandleError(): LogError {
+  return new LogError({
+    code: LOG_ERROR_CODES.staleHandle,
+    message: 'This logging handle no longer owns the configuration: it was closed, or configure() ran again.',
+    remediation: 'Use the handle returned by the latest configure() call.',
   });
 }

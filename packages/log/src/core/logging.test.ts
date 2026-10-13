@@ -188,6 +188,23 @@ describe('configure()', () => {
     expect(codeOf(() => logging.configure(config))).toBe(LOG_ERROR_CODES.alreadyConfigured);
   });
 
+  it('a stale handle never closes or replaces a newer configuration', async () => {
+    // Vite dev reload: the old module's handle can be closed again after the
+    // reloaded module has configured. That late close must be a no-op.
+    const logging = createLogging();
+    const first = capture();
+    const second = capture();
+    const old = logging.configure({ channels: { out: first.sink }, default: { level: 'info', channels: ['out'] } });
+    await old.close();
+    logging.configure({ channels: { out: second.sink }, default: { level: 'info', channels: ['out'] } });
+    await old.close();
+    logging.getLogger('app').info('still logging');
+    expect(second.records).toHaveLength(1);
+    await expect(
+      old.reconfigure({ channels: { out: first.sink }, default: { level: 'info', channels: ['out'] } }),
+    ).rejects.toMatchObject({ code: LOG_ERROR_CODES.staleHandle });
+  });
+
   it('keeps createLogging() instances independent', () => {
     const one = createLogging();
     const two = createLogging();

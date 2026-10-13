@@ -14,7 +14,7 @@ import type {
   TraceSource,
   Value,
 } from './types.js';
-import { alreadyConfiguredError, fakeActiveError, unknownChannelError } from './errors.js';
+import { alreadyConfiguredError, fakeActiveError, staleHandleError, unknownChannelError } from './errors.js';
 import { Level, toLevel } from './levels.js';
 import { deliver, syncContext } from './pipeline.js';
 import { EMPTY_FIELDS, LogEntry } from './record.js';
@@ -201,10 +201,19 @@ class LoggingImpl implements InternalLogging {
     if (this.fake !== undefined) throw fakeActiveError();
     if (this.state !== undefined) throw alreadyConfiguredError();
     this.install(config);
+    // A handle acts only on the configuration it created. In dev, Vite can
+    // close an old module's handle after the reloaded module has configured
+    // again; that late close must not shut the new setup down.
+    let owned = this.state;
     return {
       flush: () => this.flush(),
-      close: options => this.close(options?.timeoutMs),
-      reconfigure: next => drainAndClose(this.install(next)),
+      close: options => (this.state === owned ? this.close(options?.timeoutMs) : Promise.resolve()),
+      reconfigure: next => {
+        if (this.state !== owned) return Promise.reject(staleHandleError());
+        const retired = this.install(next);
+        owned = this.state;
+        return drainAndClose(retired);
+      },
     };
   }
 
