@@ -558,11 +558,19 @@ const receiptOf = async (key: string) => {
   const rows = await db.select().from(tables.receipts).where(eq(tables.receipts.key, key));
   return rows[0] ?? null;
 };
+/** Commands run with a key return plain data: a `WriteResult` holds Dates, which JSON cannot keep. */
 const justNote = j.command(
   'justNote',
   z.object({ orderId: orderIdSchema, note: z.string().min(1) }),
-  (input, { write }) => write(order, input.orderId, () => [OrderNoted({ note: input.note })]),
+  async (input, { write }) => {
+    const { row } = await write(order, input.orderId, () => [OrderNoted({ note: input.note })]);
+    return { version: row?.version ?? 0 };
+  },
 );
+const placePlain = j.command('placePlain', z.object({ orderId: orderIdSchema }), async (input, { write }) => {
+  const { row } = await write(order, input.orderId, row => (row ? [] : [OrderPlaced({ customerId: 'c', total: 1 })]));
+  return { version: row?.version ?? 0 };
+});
 
 describe('idempotency receipts', () => {
   it('a repeat with the same key and input returns the first result without running the handler again', async () => {
@@ -647,8 +655,8 @@ describe('idempotency receipts', () => {
   it('a bound runner takes a key per call, and pruneReceipts drops old ones', async () => {
     const id = orderId(++next);
     const runAs = journal.bind(db, meta);
-    await runAs(placeOrder, { orderId: id, customerId: 'c', total: 1 }, { idempotencyKey: `k_bound_${next}` });
-    await runAs(placeOrder, { orderId: id, customerId: 'c', total: 1 }, { idempotencyKey: `k_bound_${next}` });
+    expect(await runAs(placePlain, { orderId: id }, { idempotencyKey: `k_bound_${next}` })).toEqual({ version: 1 });
+    expect(await runAs(placePlain, { orderId: id }, { idempotencyKey: `k_bound_${next}` })).toEqual({ version: 1 });
     expect(await receiptOf(`k_bound_${next}`)).not.toBeNull();
     expect(await journal.pruneReceipts(db, { before: new Date(Date.now() - 60_000) })).toBe(0);
     const pruned = await journal.pruneReceipts(db, { before: new Date(Date.now() + 60_000) });
