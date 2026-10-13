@@ -116,6 +116,11 @@
       "import": "./dist/react.js",
       "default": "./dist/react.js"
     },
+    "./serialize": {
+      "types": "./dist/serialize.d.ts",
+      "import": "./dist/serialize.js",
+      "default": "./dist/serialize.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -152,20 +157,31 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@orpc/client": "catalog:backend",
+    "@orpc/server": "catalog:backend",
     "@testing-library/react": "catalog:testing",
     "@types/react": "catalog:react",
     "date-fns": "catalog:utilities",
     "jsdom": "catalog:text-processing",
     "react": "catalog:react",
     "react-dom": "catalog:react",
+    "superjson": "catalog:utilities",
     "zod": "catalog:"
   },
   "peerDependencies": {
+    "@orpc/client": "catalog:backend",
     "react": "catalog:react",
+    "superjson": "catalog:utilities",
     "zod": "catalog:"
   },
   "peerDependenciesMeta": {
+    "@orpc/client": {
+      "optional": true
+    },
     "react": {
+      "optional": true
+    },
+    "superjson": {
       "optional": true
     },
     "zod": {

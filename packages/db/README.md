@@ -24,6 +24,7 @@ pnpm add @arki/db
 ```ts
 import { createDb } from '@arki/db/init';
 import { defineRelations } from '@arki/db/orm';
+
 import { schema } from './schema';
 
 export const db = createDb({
@@ -41,10 +42,7 @@ export const db = createDb({
 ```ts
 import { initDbRuntimeLocal } from '@arki/db/runtime-local';
 
-const { db, pglite } = await initDbRuntimeLocal(
-  { dataDir: './.local/db' },
-  { relations },
-);
+const { db, pglite } = await initDbRuntimeLocal({ dataDir: './.local/db' }, { relations });
 ```
 
 ### Projections (event sourcing read models)
@@ -52,9 +50,7 @@ const { db, pglite } = await initDbRuntimeLocal(
 ```ts
 import { initDb } from '@arki/db/builder';
 
-const d = initDb
-  .schema(schema)
-  .create({ connectionString: env.DB_URL, isDev: true });
+const d = initDb.schema(schema).create({ connectionString: env.DB_URL, isDev: true });
 
 const userProjection = d.projection
   .named('user-projection')
@@ -67,12 +63,34 @@ const userProjection = d.projection
 ### Branded IDs
 
 ```ts
-import { createPrefixedId, createIdFactory } from '@arki/db/id';
+import { createIdFactory, createPrefixedId } from '@arki/db/id';
 
 const userId = createPrefixedId('usr_'); // 'usr_…'
 const idFactory = createIdFactory('post_');
 const postId = idFactory.next();
 ```
+
+### Temporal columns
+
+`@arki/db/temporal` maps Postgres dates and timestamps to `@arki/date` values:
+
+```ts
+import { now } from '@arki/date/clock';
+import { instant, plainDate } from '@arki/db/temporal';
+
+export const bookings = schema.table('bookings', {
+  day: plainDate('day').notNull(), // date ↔ PlainDate
+  confirmedAt: instant('confirmed_at'), // timestamp with time zone ↔ Instant
+  createdAt: instant('created_at', { withTimezone: false }) // an existing `timestamp` column, read as UTC
+    .$defaultFn(() => now())
+    .notNull(),
+});
+```
+
+- The SQL types are exactly Drizzle's own, so switching an existing `timestamp(name)` column to `instant(name, { withTimezone: false })` changes the TypeScript type and nothing in the database. Diff `drizzle-kit export` before and after to confirm.
+- Both columns ask Drizzle for Postgres text on every driver (node-postgres, postgres.js, PGlite, Bun SQL), so one strict parser reads them all. `infinity` and BC values throw instead of becoming a wrong date.
+- There is no zoned column: Postgres stores no zone. Store the zone in a `text` column and read with `zoned(instant, zone)`.
+- Tables owned by an auth library (Better Auth) keep `Date` columns: the library writes and reads them itself.
 
 ## Feature-owned schema composition
 
@@ -147,20 +165,21 @@ await uow(async tx => {
 - `@arki/db/id`, `@arki/db/id-factory` — CUID-based prefixed-ID helpers.
 - `@arki/db/orm` — re-exports of `drizzle-orm` + `drizzle-orm/zod` schema helpers.
 - `@arki/db/pg` — re-export of `drizzle-orm/pg-core`.
+- `@arki/db/temporal` — `plainDate` and `instant` columns that hold `@arki/date` values instead of `Date`.
 - `@arki/db/bun` — Bun-SQL driver entry (also routed via the `bun` condition on `./init`).
 - `@arki/db/client` — types-only client surface reserved for future Tier-3 sync work.
 
 ## Environment variables
 
-| Variable                                | Purpose                                                       |
-| --------------------------------------- | ------------------------------------------------------------- |
-| `DB_URL`                                | Primary Postgres connection URL.                              |
-| `PGHOST`, `PGPORT`, `PGUSER`, …         | Individual params when `DB_URL` is not used.                  |
-| `DB_POOL_MIN`, `DB_POOL_MAX`            | Connection pool sizing (default `2` / `20`).                  |
-| `DB_POOL_IDLE_TIMEOUT`                  | Idle pool timeout in ms (default `30000`).                    |
-| `DB_POOL_CONNECTION_TIMEOUT`            | Acquire timeout in ms (default `2000`).                       |
-| `DB_LOGGING`                            | Enable Drizzle logger when truthy.                            |
-| `DB_STATEMENT_TIMEOUT`, `DB_QUERY_TIMEOUT` | Per-statement / per-query timeouts in ms.                  |
+| Variable                                   | Purpose                                      |
+| ------------------------------------------ | -------------------------------------------- |
+| `DB_URL`                                   | Primary Postgres connection URL.             |
+| `PGHOST`, `PGPORT`, `PGUSER`, …            | Individual params when `DB_URL` is not used. |
+| `DB_POOL_MIN`, `DB_POOL_MAX`               | Connection pool sizing (default `2` / `20`). |
+| `DB_POOL_IDLE_TIMEOUT`                     | Idle pool timeout in ms (default `30000`).   |
+| `DB_POOL_CONNECTION_TIMEOUT`               | Acquire timeout in ms (default `2000`).      |
+| `DB_LOGGING`                               | Enable Drizzle logger when truthy.           |
+| `DB_STATEMENT_TIMEOUT`, `DB_QUERY_TIMEOUT` | Per-statement / per-query timeouts in ms.    |
 
 ## Documentation
 
