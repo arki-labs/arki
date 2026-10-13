@@ -22,10 +22,14 @@ import { assertFinite } from './number.js';
 /** Coefficients, highest degree first. */
 export type Coefficients = readonly number[];
 
-/** Two real roots in ascending order (a double root is listed twice), or a conjugate pair (positive imaginary part first). */
+/**
+ * Two real roots in ascending order (a double root is listed twice), or a
+ * conjugate pair (positive imaginary part first). `discriminant` is `b² - 4ac`;
+ * its sign is what chose `kind` (`>= 0` real, `< 0` complex).
+ */
 export type QuadraticRoots =
-  | { readonly kind: 'real'; readonly roots: readonly [number, number] }
-  | { readonly kind: 'complex'; readonly roots: readonly [Complex, Complex] };
+  | { readonly kind: 'real'; readonly roots: readonly [number, number]; readonly discriminant: number }
+  | { readonly kind: 'complex'; readonly roots: readonly [Complex, Complex]; readonly discriminant: number };
 
 /**
  * Three real roots in ascending order (repeated roots listed by multiplicity),
@@ -165,7 +169,14 @@ function discriminant(a: number, b: number, c: number): number {
  * Roots of `ax² + bx + c` (`a ≠ 0`). Uses `q = -(b + sign(b)·√D) / 2`,
  * then `q / a` and `c / q`, so neither root suffers cancellation — the small
  * root of `x² - 1e8·x + 1` comes out to full precision. The discriminant is
- * computed with exact products, so near-double roots stay accurate.
+ * computed with exact products, so near-double roots stay accurate: for
+ * Kahan's `94906265.625x² - 189812534x + 94906268.375` it is the exact `7.5625`
+ * where the plain float formula gives `0` (a false double root).
+ *
+ * The returned `discriminant` is that same value, and its sign decides `kind`.
+ * It is formed on the coefficients rescaled by a power of two (exact), so the
+ * decision is right even when `b² - 4ac` itself is out of range; only then does
+ * the reported value overflow to `±Infinity` or underflow to `0`.
  */
 export function quadraticRoots(a: number, b: number, c: number): QuadraticRoots {
   assertFinite(a, 'a');
@@ -177,16 +188,18 @@ export function quadraticRoots(a: number, b: number, c: number): QuadraticRoots 
   const sb = b * scale;
   const sc = c * scale;
   const d = discriminant(sa, sb, sc);
+  // Undo the rescaling: d = scale² · (b² - 4ac), and dividing by a power of two is exact.
+  const unscaled = d / scale / scale + 0;
   if (d < 0) {
     const re = -sb / (2 * sa) + 0;
     const im = Math.sqrt(-d) / (2 * Math.abs(sa));
-    return { kind: 'complex', roots: [Complex.fromParts(re, im), Complex.fromParts(re, -im)] };
+    return { kind: 'complex', roots: [Complex.fromParts(re, im), Complex.fromParts(re, -im)], discriminant: unscaled };
   }
   const q = -(sb + (sb < 0 ? -1 : 1) * Math.sqrt(d)) / 2;
-  if (q === 0) return { kind: 'real', roots: [0, 0] };
+  if (q === 0) return { kind: 'real', roots: [0, 0], discriminant: unscaled };
   const x1 = q / sa + 0;
   const x2 = sc / q + 0;
-  return { kind: 'real', roots: x1 <= x2 ? [x1, x2] : [x2, x1] };
+  return { kind: 'real', roots: x1 <= x2 ? [x1, x2] : [x2, x1], discriminant: unscaled };
 }
 
 /** `a + b` as an unevaluated sum `sum + error`, exactly (Knuth). */

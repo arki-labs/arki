@@ -93,6 +93,22 @@ describe('quadraticRoots', () => {
     if (result.kind !== 'real') return;
     expect(result.roots[0]).toBe(1);
     expect(relativeError(result.roots[1], 1.000_000_028_975_958)).toBeLessThan(1e-15);
+    // Exactly 121 / 16 (the coefficients are multiples of 1/8); the plain formula says 0, a false double root.
+    expect(result.discriminant).toBe(7.5625);
+    expect(189_812_534 ** 2 - 4 * 94_906_265.625 * 94_906_268.375).toBe(0);
+  });
+
+  it('reports the discriminant whose sign chose the kind', () => {
+    expect(quadraticRoots(1, -3, 2).discriminant).toBe(1);
+    expect(quadraticRoots(1, 2, 5).discriminant).toBe(-16);
+    // A hair past a double root: b² - 4ac = -4·2^-52, so the pair is complex, not a repeated 1.
+    const near = quadraticRoots(1, -2, 1 + Number.EPSILON);
+    expect(near.kind).toBe('complex');
+    expect(near.discriminant).toBe(-4 * Number.EPSILON);
+    // Out of range as a double, yet the rescaled sign still picks the right kind: x² + 1 has ±i.
+    const tiny = quadraticRoots(1e-200, 0, 1e-200);
+    expect(tiny.kind).toBe('complex');
+    expect(tiny.discriminant).toBe(0);
   });
 
   it('returns a conjugate pair, tagged, when the discriminant is negative', () => {
@@ -104,11 +120,15 @@ describe('quadraticRoots', () => {
   });
 
   it('handles double roots, zero roots and huge coefficients', () => {
-    expect(quadraticRoots(1, -2, 1)).toEqual({ kind: 'real', roots: [1, 1] });
-    expect(quadraticRoots(2, -6, 0)).toEqual({ kind: 'real', roots: [0, 3] });
-    expect(quadraticRoots(1, 0, 0)).toEqual({ kind: 'real', roots: [0, 0] });
-    // b² = 9e600 would overflow without the power-of-two rescaling.
-    expect(quadraticRoots(1e300, -3e300, 2e300)).toEqual({ kind: 'real', roots: [1, 2] });
+    expect(quadraticRoots(1, -2, 1)).toEqual({ kind: 'real', roots: [1, 1], discriminant: 0 });
+    expect(quadraticRoots(2, -6, 0)).toEqual({ kind: 'real', roots: [0, 3], discriminant: 36 });
+    expect(quadraticRoots(1, 0, 0)).toEqual({ kind: 'real', roots: [0, 0], discriminant: 0 });
+    // b² = 9e600 would overflow without the power-of-two rescaling; only the reported discriminant does.
+    expect(quadraticRoots(1e300, -3e300, 2e300)).toEqual({
+      kind: 'real',
+      roots: [1, 2],
+      discriminant: Number.POSITIVE_INFINITY,
+    });
   });
 
   it('refuses a = 0 instead of silently solving a linear equation', () => {
