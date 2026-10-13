@@ -250,7 +250,7 @@ Well-known slice keys, each owned by the adapter that consumes it:
 | `routes` | an HTTP route bundle (bindings + derivers + rpc mounts) | `@arki/http` |
 | `queue` | a queue definition registry (jobs, queue-schedules, flows) | `@arki/queue` |
 | `schedules` | in-process schedule definitions | `@arki/schedule` |
-| `es` | an event-sourcing bundle (command handlers + read models) | `@arki/event-sourcing` |
+| `journal` | a journal bundle (projections + effects, from `journalHandlers(...)`) | `@arki/journal` |
 
 Third-party adapters MUST package-qualify their slice keys (`'acme:bus'`)
 — the same namespacing rule as bindings.

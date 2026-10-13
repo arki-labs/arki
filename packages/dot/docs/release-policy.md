@@ -46,8 +46,8 @@ These are **experimental** in `0.x` and may change without a major bump:
 The pre-0.1 legacy surface (`createDot`, `definePlugin`, the
 `@arki/dot/legacy/*`, `@arki/dot/event-sourcing`, and
 `@arki/dot/presets/runtime-local` subpaths) has been **removed**. Use
-`defineApp`/`plugin` for composition and `@arki/event-sourcing`
-directly for event-sourcing helpers.
+`defineApp`/`plugin` for composition and `@arki/journal` for
+event-sourced writes (its `@arki/journal/dot` plugin connects it to a Dot app).
 
 ## Deprecation cycle
 

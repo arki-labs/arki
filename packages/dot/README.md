@@ -585,7 +585,7 @@ own packages and consume `@arki/dot` as a peer dependency:
 import { env } from '@arki/env/dot';
 import { db } from '@arki/db/dot';
 import { kv } from '@arki/kv/dot';
-import { eventSourcing } from '@arki/event-sourcing/dot';
+import { journal } from '@arki/journal/dot';
 ```
 
 This keeps the kernel free of optional dependencies and lets each adapter
