@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { decimal } from './decimal.js';
-import { InvalidArgumentError, NumberFormatError, ResourceLimitError } from './errors.js';
+import { InvalidArgumentError, NumberFormatError, NumericRangeError, ResourceLimitError } from './errors.js';
 import { roundExact, roundToExact } from './internal/round.js';
 import {
   approxEqual,
@@ -404,7 +404,35 @@ describe('roundToSignificant', () => {
     expect(Object.is(roundToSignificant(-0, 3), 0)).toBe(true);
   });
 
+  it('works on any finite double, not only safe integers', () => {
+    // Past 2^53 the digits are still the shortest text you typed: 6.02214076e23 keeps "602214076".
+    expect(roundToSignificant(6.022_140_76e23, 3)).toBe(6.02e23);
+    expect(roundToSignificant(-6.022_140_76e23, 4)).toBe(-6.022e23);
+    expect(roundToSignificant(2 ** 60, 2)).toBe(1.2e18);
+    expect(roundToSignificant(1e300, 2)).toBe(1e300);
+    expect(roundToSignificant(1.234_567e300, 3)).toBe(1.23e300);
+    expect(roundToSignificant(1.5e-300, 1)).toBe(2e-300);
+    expect(roundToSignificant(1.5e-300, 2)).toBe(1.5e-300);
+    expect(roundToSignificant(Number.MIN_VALUE, 1)).toBe(Number.MIN_VALUE);
+  });
+
+  it('breaks ties by the mode at any magnitude', () => {
+    expect(roundToSignificant(2.5e300, 1, 'halfUp')).toBe(3e300);
+    expect(roundToSignificant(2.5e300, 1, 'halfEven')).toBe(2e300);
+    expect(roundToSignificant(-2.5e300, 1, 'halfDown')).toBe(-2e300);
+    expect(roundToSignificant(3.5e-300, 1, 'halfEven')).toBe(4e-300);
+    expect(roundToSignificant(3.5e-300, 1, 'halfDown')).toBe(3e-300);
+    expect(roundToSignificant(1.25e22, 2, 'halfEven')).toBe(1.2e22);
+    expect(roundToSignificant(1.25e22, 2, 'ceiling')).toBe(1.3e22);
+  });
+
+  it('refuses to round past the largest double', () => {
+    expect(roundToSignificant(Number.MAX_VALUE, 16, 'down')).toBe(1.797_693_134_862_315e308);
+    expect(() => roundToSignificant(Number.MAX_VALUE, 1)).toThrow(NumericRangeError);
+  });
+
   it('validates its input', () => {
+    expect(() => roundToSignificant(Number.POSITIVE_INFINITY, 2)).toThrow(InvalidArgumentError);
     expect(() => roundToSignificant(1, 0)).toThrow(InvalidArgumentError);
     expect(() => roundToSignificant(1, 1.5)).toThrow(InvalidArgumentError);
     expect(() => roundToSignificant(Number.NaN, 2)).toThrow(InvalidArgumentError);

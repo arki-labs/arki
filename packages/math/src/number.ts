@@ -8,9 +8,9 @@
 
 import type { Decimal } from './internal/exact.js';
 import type { RoundingMode } from './rounding.js';
-import { InvalidArgumentError, NumberFormatError, ResourceLimitError } from './errors.js';
+import { InvalidArgumentError, NumberFormatError, NumericRangeError, ResourceLimitError } from './errors.js';
 import { abs, digitCount, divideRounded, pow10 } from './internal/bigint.js';
-import { partsFromNumber } from './internal/parse.js';
+import { parseDecimalString } from './internal/parse.js';
 import { roundExact, roundToExact } from './internal/round.js';
 
 /** Interval notation: `[` / `]` include the bound, `(` / `)` exclude it. */
@@ -279,17 +279,26 @@ export function roundTo(x: number, step: number, mode: RoundingMode = 'halfUp'):
  * Rounds to `digits` significant figures, on the number you typed:
  * `roundToSignificant(123_456, 2)` is `120000`, `roundToSignificant(0.012_345, 3)`
  * is `0.0123`. A number with fewer digits is returned as is (nothing is padded).
+ * Works for every finite double, from subnormals to `6.02214076e23` and beyond:
+ * the digits are those of the number's shortest decimal text, `String(x)`.
+ * Throws `NumericRangeError` only when rounding up past the largest double
+ * (`roundToSignificant(1.7976931348623157e308, 1)` would be `2e308`).
  */
 export function roundToSignificant(x: number, digits: number, mode: RoundingMode = 'halfUp'): number {
   assertFinite(x, 'x');
   if (!Number.isSafeInteger(digits) || digits < 1 || digits > 1000) {
     throw new InvalidArgumentError(`digits must be an integer from 1 to 1000, got ${digits}`);
   }
-  const { coefficient, scale } = partsFromNumber(x);
+  if (x === 0) return 0;
+  // The shortest text, not `partsFromNumber`: past 2^53 its digits are still the number you typed.
+  const { coefficient, scale } = parseDecimalString(String(x));
   const drop = digitCount(abs(coefficient)) - digits;
-  if (coefficient === 0n || drop <= 0) return noNegativeZero(x);
+  if (drop <= 0) return x;
   const rounded = divideRounded(coefficient, pow10(drop), mode);
-  return noNegativeZero(Number(`${rounded}e${drop - scale}`));
+  const result = Number(`${rounded}e${drop - scale}`);
+  if (!Number.isFinite(result))
+    throw new NumericRangeError(`${x} rounded to ${digits} digits is too large to represent`);
+  return noNegativeZero(result);
 }
 
 const PLAIN_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
