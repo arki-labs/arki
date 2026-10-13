@@ -1,4 +1,3 @@
-/* eslint-disable drizzle/enforce-delete-with-where */
 /**
  * Flow builder implementation
  * Provides chainable API for creating multi-step workflows
