@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
-import { InvalidArgumentError, ResourceLimitError } from './errors.js';
-import { approxEqual, clamp, inRange, inverseLerp, lerp, linspace, range, remap, round, roundTo } from './number.js';
+import { decimal } from './decimal.js';
+import { InvalidArgumentError, NumberFormatError, ResourceLimitError } from './errors.js';
+import {
+  approxEqual,
+  clamp,
+  inRange,
+  inverseLerp,
+  lerp,
+  linspace,
+  range,
+  remap,
+  round,
+  roundTo,
+  roundToSignificant,
+  significantDigits,
+} from './number.js';
 import { ROUNDING_MODES } from './rounding.js';
 
 describe('round', () => {
@@ -208,7 +222,7 @@ describe('linspace', () => {
   it('does not overflow when the span exceeds the float range', () => {
     // Reviewer repro: `end - start` overflowed to Infinity and gave [NaN, Infinity, 1e308].
     expect(linspace(-1e308, 1e308, 3)).toEqual([-1e308, 0, 1e308]);
-    expect(linspace(0, 1e308, 4).every((x) => Number.isFinite(x))).toBe(true);
+    expect(linspace(0, 1e308, 4).every(x => Number.isFinite(x))).toBe(true);
     expect(linspace(0, 1e308, 4)[2]).toBeCloseTo((2 / 3) * 1e308, -300);
   });
   it('gives exact 0 (never -0 or residue) at the middle of a symmetric span', () => {
@@ -238,5 +252,115 @@ describe('linspace', () => {
   });
   it('caps the length', () => {
     expect(() => linspace(0, 1, 10_000_001)).toThrow(ResourceLimitError);
+  });
+});
+
+describe('roundToSignificant', () => {
+  it('keeps the leading digits whatever the magnitude', () => {
+    expect(roundToSignificant(123_456, 2)).toBe(120_000);
+    expect(roundToSignificant(0.012_345, 3)).toBe(0.0123);
+    expect(roundToSignificant(-9876.5, 3)).toBe(-9880);
+    expect(roundToSignificant(1e-7 * 1.5555, 2)).toBe(1.6e-7);
+  });
+
+  it('rounds the number you typed, like round()', () => {
+    expect(roundToSignificant(1.005, 3)).toBe(1.01);
+    expect(roundToSignificant(2.5, 1)).toBe(3);
+  });
+
+  it('carries into a new digit', () => {
+    expect(roundToSignificant(999.9, 3)).toBe(1000);
+    expect(roundToSignificant(0.9996, 3)).toBe(1);
+  });
+
+  it('honours the rounding mode', () => {
+    expect(roundToSignificant(1250, 2, 'halfEven')).toBe(1200);
+    expect(roundToSignificant(1250, 2, 'halfUp')).toBe(1300);
+    expect(roundToSignificant(1201, 2, 'up')).toBe(1300);
+    expect(roundToSignificant(-1299, 2, 'down')).toBe(-1200);
+    expect(roundToSignificant(-1201, 2, 'floor')).toBe(-1300);
+    expect(() => roundToSignificant(1201, 2, 'unnecessary')).toThrow();
+    expect(roundToSignificant(1200, 2, 'unnecessary')).toBe(1200);
+  });
+
+  it('returns shorter numbers and zero unchanged, never -0', () => {
+    expect(roundToSignificant(12, 5)).toBe(12);
+    expect(roundToSignificant(0, 3)).toBe(0);
+    expect(Object.is(roundToSignificant(-0.0001, 1, 'halfUp'), -0.0001)).toBe(true);
+    expect(Object.is(roundToSignificant(-0, 3), 0)).toBe(true);
+  });
+
+  it('validates its input', () => {
+    expect(() => roundToSignificant(1, 0)).toThrow(InvalidArgumentError);
+    expect(() => roundToSignificant(1, 1.5)).toThrow(InvalidArgumentError);
+    expect(() => roundToSignificant(Number.NaN, 2)).toThrow(InvalidArgumentError);
+  });
+
+  it('matches Decimal#roundToSignificant', () => {
+    for (const [x, d] of [
+      [123_456, 2],
+      [0.012_345, 3],
+      [-9876.5, 3],
+      [999.9, 3],
+    ] as const) {
+      expect(decimal(x).roundToSignificant(d).toNumber()).toBe(roundToSignificant(x, d));
+    }
+  });
+});
+
+describe('Decimal#roundToSignificant', () => {
+  it('rounds exactly, past what a double holds', () => {
+    expect(decimal('123456789012345678901234567890').roundToSignificant(3).toString()).toBe(
+      '123000000000000000000000000000',
+    );
+    expect(decimal('0.0123456789').roundToSignificant(4).toString()).toBe('0.01235');
+  });
+
+  it('keeps trailing zeros that the scale shows, and never pads', () => {
+    expect(decimal('1.2000').roundToSignificant(2).toString()).toBe('1.2');
+    expect(decimal('1.5').roundToSignificant(4).toString()).toBe('1.5');
+    expect(decimal('999.9').roundToSignificant(3).toString()).toBe('1000');
+  });
+
+  it('honours the mode and validates digits', () => {
+    expect(decimal('2.5').roundToSignificant(1, 'halfEven').toString()).toBe('2');
+    expect(decimal('-2.5').roundToSignificant(1).toString()).toBe('-3');
+    expect(() => decimal('1').roundToSignificant(0)).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('significantDigits', () => {
+  it('follows the textbook rules', () => {
+    expect(significantDigits('1200')).toBe(2);
+    expect(significantDigits('1200.')).toBe(4);
+    expect(significantDigits('0.00120')).toBe(3);
+    expect(significantDigits('1002')).toBe(4);
+    expect(significantDigits('120.0')).toBe(4);
+    expect(significantDigits('0.0012')).toBe(2);
+    expect(significantDigits('-3.14')).toBe(3);
+    expect(significantDigits('+007')).toBe(1);
+  });
+
+  it('ignores the exponent', () => {
+    expect(significantDigits('1.20e3')).toBe(3);
+    expect(significantDigits('1200e-2')).toBe(2);
+  });
+
+  it('counts the written zeros of zero', () => {
+    expect(significantDigits('0')).toBe(1);
+    expect(significantDigits('0.00')).toBe(2);
+    expect(significantDigits('0.')).toBe(1);
+  });
+
+  it('reads a Decimal by its scale, so 1.20 differs from 1.2', () => {
+    expect(significantDigits(decimal('1.20'))).toBe(3);
+    expect(significantDigits(decimal('1.2'))).toBe(2);
+    expect(significantDigits(decimal('1200'))).toBe(2);
+  });
+
+  it('rejects text that is not a plain number', () => {
+    for (const text of ['', '.', 'abc', '1,200', '1 2', 'NaN', '1e', '--1']) {
+      expect(() => significantDigits(text)).toThrow(NumberFormatError);
+    }
   });
 });

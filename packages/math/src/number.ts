@@ -6,9 +6,10 @@
  * Results never carry `-0`.
  */
 
+import type { Decimal } from './internal/exact.js';
 import type { RoundingMode } from './rounding.js';
-import { InvalidArgumentError, ResourceLimitError } from './errors.js';
-import { divideRounded, pow10 } from './internal/bigint.js';
+import { InvalidArgumentError, NumberFormatError, ResourceLimitError } from './errors.js';
+import { abs, digitCount, divideRounded, pow10 } from './internal/bigint.js';
 import { partsFromNumber } from './internal/parse.js';
 
 /** Interval notation: `[` / `]` include the bound, `(` / `)` exclude it. */
@@ -161,6 +162,45 @@ export function roundTo(x: number, step: number, mode: RoundingMode = 'halfUp'):
   const unit = partsFromNumber(step);
   const multiple = divideRounded(value.coefficient * pow10(unit.scale), unit.coefficient * pow10(value.scale), mode);
   return noNegativeZero(Number(`${multiple * unit.coefficient}e${-unit.scale}`));
+}
+
+/**
+ * Rounds to `digits` significant figures, on the number you typed:
+ * `roundToSignificant(123_456, 2)` is `120000`, `roundToSignificant(0.012_345, 3)`
+ * is `0.0123`. A number with fewer digits is returned as is (nothing is padded).
+ */
+export function roundToSignificant(x: number, digits: number, mode: RoundingMode = 'halfUp'): number {
+  assertFinite(x, 'x');
+  if (!Number.isSafeInteger(digits) || digits < 1 || digits > 1000) {
+    throw new InvalidArgumentError(`digits must be an integer from 1 to 1000, got ${digits}`);
+  }
+  const { coefficient, scale } = partsFromNumber(x);
+  const drop = digitCount(abs(coefficient)) - digits;
+  if (coefficient === 0n || drop <= 0) return noNegativeZero(x);
+  const rounded = divideRounded(coefficient, pow10(drop), mode);
+  return noNegativeZero(Number(`${rounded}e${drop - scale}`));
+}
+
+const PLAIN_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
+
+/**
+ * Counts the significant figures in a written number by the textbook rules:
+ * leading zeros never count, zeros between digits always count, and trailing
+ * zeros count only when there is a decimal point.
+ * `'1200'` → 2, `'1200.'` → 4, `'0.00120'` → 3, `'1.20e3'` → 3. The exponent
+ * is ignored. Zero counts its written zeros after the point (`'0'` → 1, `'0.00'` → 2).
+ * Pass the text (or a `Decimal`, whose scale is its written precision):
+ * a JS number cannot tell `1.20` from `1.2`. Anything else throws `NumberFormatError`.
+ */
+export function significantDigits(value: string | Decimal): number {
+  const text = typeof value === 'string' ? value.trim() : value.toString();
+  if (!PLAIN_NUMBER.test(text)) throw new NumberFormatError(`"${text}" is not a plain decimal number`);
+  const mantissa = text.replace(/^[+-]/, '').split(/e/i)[0] ?? '';
+  const point = mantissa.indexOf('.');
+  const digits = mantissa.replace('.', '');
+  const significant = digits.replace(/^0+/, '');
+  if (significant === '') return point === -1 ? 1 : Math.max(1, mantissa.length - point - 1);
+  return point === -1 ? significant.replace(/0+$/, '').length : significant.length;
 }
 
 /**

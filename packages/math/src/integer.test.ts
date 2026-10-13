@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DivisionByZeroError,
   InvalidArgumentError,
+  NumberFormatError,
   NumericRangeError,
   ResourceLimitError,
 } from './errors.js';
@@ -13,6 +14,7 @@ import {
   divmod,
   factorial,
   fibonacci,
+  fromBase,
   gcd,
   isEven,
   isOdd,
@@ -22,6 +24,7 @@ import {
   modPow,
   permutations,
   primeFactors,
+  toBase,
 } from './integer.js';
 
 describe('gcd', () => {
@@ -323,5 +326,61 @@ describe('fibonacci', () => {
     expect(() => combinations(10n ** 1000n, 100n)).toThrow(ResourceLimitError);
     expect(() => permutations(10n ** 1000n, 100n)).toThrow(ResourceLimitError);
     expect(() => modPow(2n, undefined as never, 7n)).toThrow(TypeError);
+  });
+});
+
+describe('toBase / fromBase', () => {
+  it('writes and reads the usual bases', () => {
+    expect(toBase(255, 16)).toBe('ff');
+    expect(toBase(10, 2)).toBe('1010');
+    expect(toBase(35, 36)).toBe('z');
+    expect(fromBase('ff', 16)).toBe(255n);
+    expect(fromBase('FF', 16)).toBe(255n);
+    expect(fromBase('z', 36)).toBe(35n);
+  });
+
+  it('handles negatives, zero and an explicit plus', () => {
+    expect(toBase(-10, 2)).toBe('-1010');
+    expect(toBase(0, 7)).toBe('0');
+    expect(fromBase('-1010', 2)).toBe(-10n);
+    expect(fromBase('+17', 8)).toBe(15n);
+    expect(fromBase('-0', 10)).toBe(0n);
+  });
+
+  it('stays exact beyond 2^53, where number loses digits', () => {
+    const big = 2n ** 100n + 12_345n;
+    for (const base of [2, 3, 16, 36]) expect(fromBase(toBase(big, base), base)).toBe(big);
+    expect(fromBase('ffffffffffffffffffff', 16)).toBe(2n ** 80n - 1n);
+    expect(toBase(-(2n ** 64n), 16)).toBe('-10000000000000000');
+  });
+
+  it('round-trips every base for safe integers', () => {
+    for (let base = 2; base <= 36; base++) {
+      for (const n of [0, 1, -1, 12_345, -987_654_321, Number.MAX_SAFE_INTEGER]) {
+        expect(fromBase(toBase(n, base), base)).toBe(BigInt(n));
+      }
+    }
+  });
+
+  it('rejects a digit that does not exist in the base instead of guessing', () => {
+    expect(() => fromBase('12', 2)).toThrow(NumberFormatError);
+    expect(() => fromBase('g', 16)).toThrow(NumberFormatError);
+    expect(() => fromBase('1_000', 10)).toThrow(NumberFormatError);
+    expect(() => fromBase('0xff', 16)).toThrow(NumberFormatError);
+    expect(() => fromBase(' 1', 10)).toThrow(NumberFormatError);
+    expect(() => fromBase('1.5', 10)).toThrow(NumberFormatError);
+  });
+
+  it('rejects empty text and sign-only text', () => {
+    for (const text of ['', '-', '+']) expect(() => fromBase(text, 10)).toThrow(NumberFormatError);
+  });
+
+  it('rejects bases outside 2-36 and unsafe numbers', () => {
+    for (const base of [1, 37, 0, 2.5, Number.NaN]) {
+      expect(() => toBase(5, base)).toThrow(InvalidArgumentError);
+      expect(() => fromBase('1', base)).toThrow(InvalidArgumentError);
+    }
+    expect(() => toBase(2 ** 53, 2)).toThrow(InvalidArgumentError);
+    expect(() => toBase(1.5, 2)).toThrow(InvalidArgumentError);
   });
 });

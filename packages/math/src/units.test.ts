@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { InvalidArgumentError, RoundingNecessaryError } from './errors.js';
 import type { Unit, UnitCategory } from './units.js';
+import { InvalidArgumentError, RoundingNecessaryError } from './errors.js';
+import { ratio } from './rational.js';
 import { convert, convertExact, formatUnit, isUnit, unitCategory, unitsOf } from './units.js';
 
 const CATEGORIES: readonly UnitCategory[] = [
@@ -16,6 +17,12 @@ const CATEGORIES: readonly UnitCategory[] = [
   'energy',
   'pressure',
   'angle',
+  'power',
+  'frequency',
+  'force',
+  'torque',
+  'fuelEconomy',
+  'dataRate',
 ];
 
 describe('convert', () => {
@@ -194,5 +201,88 @@ describe('review regressions', () => {
   });
   it('convertExact accepts its own output', () => {
     expect(convertExact(convertExact(1, 'mi', 'km'), 'km', 'mi').toString()).toBe('1');
+  });
+});
+
+describe('power, frequency, force, torque and data rate', () => {
+  it('defines mechanical horsepower as 550 ft·lbf/s and metric horsepower as 75 kgf·m/s', () => {
+    expect(convert(1, 'hp', 'W')).toBe(745.699_871_582_270_2);
+    expect(convertExact(1, 'hp', 'W').eq('745.69987158227022')).toBe(true);
+    expect(convertExact(1, 'hp_metric', 'W').eq('735.49875')).toBe(true);
+    expect(convert(1, 'hp_metric', 'W')).toBe(735.498_75);
+    expect(convert(1, 'hp', 'hp_metric')).toBeCloseTo(1.013_869_665, 9);
+  });
+
+  it('converts BTU/h through the International Table BTU', () => {
+    expect(convert(1, 'kW', 'BTU/h')).toBeCloseTo(3412.141_633, 5);
+    expect(convertExact(3600, 'BTU/h', 'W').eq('1055.05585262')).toBe(true);
+  });
+
+  it('keeps SI prefixes exact and rpm as 1/60 Hz', () => {
+    expect(convert(1, 'GHz', 'MHz')).toBe(1000);
+    expect(convert(120, 'rpm', 'Hz')).toBe(2);
+    expect(convertExact(1, 'rpm', 'Hz').eq(ratio(1, 60))).toBe(true);
+  });
+
+  it('derives pound-force and kilogram-force from standard gravity', () => {
+    expect(convert(1, 'kgf', 'N')).toBe(9.806_65);
+    expect(convert(1, 'lbf', 'N')).toBeCloseTo(4.448_221_615, 9);
+    expect(convert(1, 'N', 'dyn')).toBe(100_000);
+    expect(convert(1, 'kN', 'N')).toBe(1000);
+  });
+
+  it('builds torque from force times length', () => {
+    expect(convert(1, 'kgf*m', 'N*m')).toBe(9.806_65);
+    expect(convert(1, 'lbf*ft', 'N*m')).toBeCloseTo(1.355_817_948, 9);
+  });
+
+  it('separates bits from bytes and decimal from binary in data rates', () => {
+    expect(convert(1, 'B/s', 'bit/s')).toBe(8);
+    expect(convert(100, 'Mbit/s', 'MB/s')).toBe(12.5);
+    expect(convert(1, 'MiB/s', 'B/s')).toBe(1_048_576);
+    expect(convert(1, 'Gbit/s', 'Mbit/s')).toBe(1000);
+  });
+
+  it('formats units Intl cannot name with readable symbols', () => {
+    expect(formatUnit(100, 'hp_metric', { locale: 'en' })).toBe('100 PS');
+    expect(formatUnit(50, 'N*m', { locale: 'en' })).toBe('50 N·m');
+    expect(formatUnit(60, 'kW', { locale: 'en' })).toBe('60 kW');
+  });
+});
+
+describe('fuel economy', () => {
+  it('treats l/100km as the reciprocal of km/l, not a scale factor', () => {
+    expect(convert(10, 'km/l', 'l/100km')).toBe(10);
+    expect(convert(5, 'km/l', 'l/100km')).toBe(20);
+    expect(convert(20, 'l/100km', 'km/l')).toBe(5);
+    // Doubling the economy halves the consumption: a linear factor could not do this.
+    expect(convert(40, 'mpg', 'l/100km')).toBeCloseTo(convert(20, 'mpg', 'l/100km') / 2, 12);
+  });
+
+  it('round-trips through the reciprocal', () => {
+    for (const unit of ['km/l', 'mpg', 'mpg_imp'] as const) {
+      expect(convert(convert(7.4, 'l/100km', unit), unit, 'l/100km')).toBeCloseTo(7.4, 12);
+    }
+  });
+
+  it('knows an imperial gallon is bigger than a US one, so mpg_imp is a bigger number for the same car', () => {
+    expect(convert(30, 'mpg', 'l/100km')).toBeCloseTo(7.840_486, 5);
+    expect(convert(30, 'mpg_imp', 'l/100km')).toBeCloseTo(9.416_031, 5);
+    expect(convert(1, 'mpg_imp', 'mpg')).toBeCloseTo(0.832_674_185, 9);
+  });
+
+  it('stays exact through the reciprocal', () => {
+    expect(convertExact(10, 'l/100km', 'km/l').eq(10)).toBe(true);
+    expect(convertExact(4, 'km/l', 'l/100km').eq(25)).toBe(true);
+    const back = convertExact(convertExact(7, 'l/100km', 'mpg'), 'mpg', 'l/100km');
+    expect(back.eq(7)).toBe(true);
+  });
+
+  it('refuses zero, whose reciprocal is infinite', () => {
+    expect(() => convert(0, 'l/100km', 'mpg')).toThrow(InvalidArgumentError);
+    expect(() => convert(0, 'mpg', 'l/100km')).toThrow(InvalidArgumentError);
+    expect(() => convertExact(0, 'l/100km', 'km/l')).toThrow(InvalidArgumentError);
+    expect(() => convertExact(0, 'km/l', 'l/100km')).toThrow(InvalidArgumentError);
+    expect(convert(0, 'mpg', 'km/l')).toBe(0);
   });
 });

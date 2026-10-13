@@ -7,6 +7,7 @@
 import {
   DivisionByZeroError,
   InvalidArgumentError,
+  NumberFormatError,
   NumericRangeError,
   ResourceLimitError,
 } from './errors.js';
@@ -425,7 +426,7 @@ function divisorsBigInt(n: bigint): bigint[] {
   if (n < 1n) throw new InvalidArgumentError('divisors requires n >= 1');
   let result: bigint[] = [1n];
   const factors = primeFactorsBigInt(n);
-  for (let i = 0; i < factors.length; ) {
+  for (let i = 0; i < factors.length;) {
     const p = factors[i] as bigint;
     let j = i;
     while (j < factors.length && factors[j] === p) j++;
@@ -464,6 +465,52 @@ export function digitSum(n: number | bigint): number {
   let sum = 0;
   for (const ch of digits) sum += Number(ch);
   return sum;
+}
+
+function assertBase(base: number): void {
+  if (!Number.isInteger(base) || base < 2 || base > 36) {
+    throw new InvalidArgumentError(`base must be an integer from 2 to 36, got ${base}`);
+  }
+}
+
+/**
+ * Writes an integer in `base` 2 to 36 with lowercase digits: `toBase(255, 16)`
+ * is `'ff'`, `toBase(-10, 2)` is `'-1010'`. A `number` must be a safe integer;
+ * a `bigint` is exact at any size. No prefix (`0x`) is added.
+ */
+export function toBase(value: number | bigint, base: number): string {
+  assertBase(base);
+  if (typeof value === 'number') assertSafeInteger(value, 'value');
+  return value.toString(base);
+}
+
+/**
+ * Reads an integer written in `base` 2 to 36 into a `bigint`: `fromBase('ff', 16)`
+ * is `255n`. An optional leading `-` or `+` is allowed and digits are case
+ * insensitive. Anything else (spaces, `_`, a `0x` prefix, a digit too large for
+ * the base, empty text) throws `NumberFormatError`.
+ */
+export function fromBase(text: string, base: number): bigint {
+  assertBase(base);
+  const negative = text.startsWith('-');
+  const start = negative || text.startsWith('+') ? 1 : 0;
+  if (text.length - start === 0) throw new NumberFormatError(`"${text}" has no digits`);
+  assertDigitLimit(text.length - start, 'fromBase input');
+  const radix = BigInt(base);
+  let result = 0n;
+  for (let i = start; i < text.length; i++) {
+    const code = text.codePointAt(i) ?? -1;
+    // '0'-'9' → 0-9, 'a'-'z' / 'A'-'Z' → 10-35; anything else is out of range.
+    let digit = 99;
+    if (code >= 48 && code <= 57) digit = code - 48;
+    else if (code >= 97 && code <= 122) digit = code - 87;
+    else if (code >= 65 && code <= 90) digit = code - 55;
+    if (digit >= base) {
+      throw new NumberFormatError(`"${text.charAt(i)}" is not a valid base ${base} digit (in "${text}")`);
+    }
+    result = result * radix + BigInt(digit);
+  }
+  return negative ? -result : result;
 }
 
 function fibonacciPair(n: number): [bigint, bigint] {

@@ -1,6 +1,7 @@
 /**
- * Unit conversion across eleven categories: length, mass, area, volume,
- * temperature, time, speed, data, energy, pressure and angle.
+ * Unit conversion across seventeen categories: length, mass, area, volume,
+ * temperature, time, speed, data, energy, pressure, angle, power, frequency,
+ * force, torque, fuel economy and data rate.
  *
  * Every factor is stored as an exact `Rational` (`1 in = 0.0254 m`,
  * `1 lb = 0.45359237 kg`, ...). `convert` rounds each pair's factor to a double
@@ -13,14 +14,19 @@
  * Pounds, ounces and stones are avoirdupois. `cal` is the thermochemical
  * calorie (4.184 J). `kB`, `MB`, ... are decimal; `KiB`, `MiB`, ... are binary.
  *
+ * `hp` is the mechanical (imperial) horsepower and `hp_metric` the metric one
+ * (PS). `mpg` is the US miles per US gallon, `mpg_imp` miles per imperial gallon.
+ * Fuel economy is the one reciprocal category: `l/100km` is litres per distance,
+ * so it converts to the others by `100 / x`, and zero has no counterpart.
+ *
  * Every numeric input must be finite; `NaN` and `±Infinity` throw.
  */
 
+import type { RationalInput } from './rational.js';
 import { InvalidArgumentError, RoundingNecessaryError } from './errors.js';
 import { ratio } from './internal/exact.js';
 import { assertFinite } from './number.js';
 import { Rational } from './rational.js';
-import type { RationalInput } from './rational.js';
 
 export type LengthUnit = 'mm' | 'cm' | 'm' | 'km' | 'in' | 'ft' | 'yd' | 'mi' | 'nmi';
 export type MassUnit = 'mg' | 'g' | 'kg' | 't' | 'oz' | 'lb' | 'st';
@@ -33,6 +39,12 @@ export type DataUnit = 'B' | 'kB' | 'MB' | 'GB' | 'TB' | 'KiB' | 'MiB' | 'GiB' |
 export type EnergyUnit = 'J' | 'kJ' | 'cal' | 'kcal' | 'Wh' | 'kWh';
 export type PressureUnit = 'Pa' | 'kPa' | 'bar' | 'atm' | 'psi' | 'mmHg';
 export type AngleUnit = 'deg' | 'rad' | 'grad' | 'turn';
+export type PowerUnit = 'W' | 'kW' | 'MW' | 'hp' | 'hp_metric' | 'BTU/h';
+export type FrequencyUnit = 'Hz' | 'kHz' | 'MHz' | 'GHz' | 'rpm';
+export type ForceUnit = 'N' | 'kN' | 'lbf' | 'kgf' | 'dyn';
+export type TorqueUnit = 'N*m' | 'lbf*ft' | 'kgf*m';
+export type FuelEconomyUnit = 'km/l' | 'l/100km' | 'mpg' | 'mpg_imp';
+export type DataRateUnit = 'bit/s' | 'kbit/s' | 'Mbit/s' | 'Gbit/s' | 'B/s' | 'kB/s' | 'MB/s' | 'GB/s' | 'MiB/s';
 
 export type UnitCategory =
   | 'length'
@@ -45,7 +57,13 @@ export type UnitCategory =
   | 'data'
   | 'energy'
   | 'pressure'
-  | 'angle';
+  | 'angle'
+  | 'power'
+  | 'frequency'
+  | 'force'
+  | 'torque'
+  | 'fuelEconomy'
+  | 'dataRate';
 
 /** Every supported unit symbol. */
 export type Unit =
@@ -59,7 +77,13 @@ export type Unit =
   | DataUnit
   | EnergyUnit
   | PressureUnit
-  | AngleUnit;
+  | AngleUnit
+  | PowerUnit
+  | FrequencyUnit
+  | ForceUnit
+  | TorqueUnit
+  | FuelEconomyUnit
+  | DataRateUnit;
 
 export type FormatUnitOptions = {
   /** BCP 47 locale; defaults to the runtime's. */
@@ -81,6 +105,12 @@ const UNITS_BY_CATEGORY: Record<UnitCategory, readonly Unit[]> = {
   energy: ['J', 'kJ', 'cal', 'kcal', 'Wh', 'kWh'],
   pressure: ['Pa', 'kPa', 'bar', 'atm', 'psi', 'mmHg'],
   angle: ['deg', 'rad', 'grad', 'turn'],
+  power: ['W', 'kW', 'MW', 'hp', 'hp_metric', 'BTU/h'],
+  frequency: ['Hz', 'kHz', 'MHz', 'GHz', 'rpm'],
+  force: ['N', 'kN', 'lbf', 'kgf', 'dyn'],
+  torque: ['N*m', 'lbf*ft', 'kgf*m'],
+  fuelEconomy: ['km/l', 'l/100km', 'mpg', 'mpg_imp'],
+  dataRate: ['bit/s', 'kbit/s', 'Mbit/s', 'Gbit/s', 'B/s', 'kB/s', 'MB/s', 'GB/s', 'MiB/s'],
 };
 
 const CATEGORY_OF: ReadonlyMap<string, UnitCategory> = new Map(
@@ -113,6 +143,10 @@ const L_PER_TBSP = L_PER_FLOZ.dividedBy(2);
 const L_PER_TSP = L_PER_TBSP.dividedBy(3);
 const PA_PER_ATM = ratio(101_325); // standard atmosphere, exact by definition
 const SECONDS_PER_HOUR = ratio(3600);
+const N_PER_LBF = KG_PER_LB.times(G_STANDARD); // pound-force = 1 lb × standard gravity
+const N_PER_KGF = G_STANDARD; // kilogram-force = 1 kg × standard gravity
+const L_PER_GAL_IMP = ratio('4.54609'); // imperial gallon, exact by the UK Weights and Measures Act 1985
+const J_PER_BTU = ratio('1055.05585262'); // International Table BTU (IT, 1956 Steam Tables conference)
 
 function lengthFactors(): Record<LengthUnit, Factor> {
   return {
@@ -241,7 +275,80 @@ function angleFactors(): Record<AngleUnit, Factor> {
   };
 }
 
-const FACTOR_BUILDERS: Record<Exclude<UnitCategory, 'temperature'>, () => Readonly<Record<string, Factor>>> = {
+function powerFactors(): Record<PowerUnit, Factor> {
+  return {
+    W: lin(ratio(1)),
+    kW: lin(ratio(1000)),
+    MW: lin(ratio(1_000_000)),
+    // Mechanical horsepower = 550 ft·lbf/s = 745.69987158227022 W (exact).
+    hp: lin(ratio(550).times(M_PER_FT).times(N_PER_LBF)),
+    // Metric horsepower (PS, CV) = 75 kgf·m/s = 735.49875 W (exact).
+    hp_metric: lin(ratio(75).times(N_PER_KGF)),
+    'BTU/h': lin(J_PER_BTU.dividedBy(SECONDS_PER_HOUR)),
+  };
+}
+
+function frequencyFactors(): Record<FrequencyUnit, Factor> {
+  return {
+    Hz: lin(ratio(1)),
+    kHz: lin(ratio(1000)),
+    MHz: lin(ratio(1_000_000)),
+    GHz: lin(ratio(1_000_000_000)),
+    rpm: lin(ratio(1, 60)),
+  };
+}
+
+function forceFactors(): Record<ForceUnit, Factor> {
+  return {
+    N: lin(ratio(1)),
+    kN: lin(ratio(1000)),
+    lbf: lin(N_PER_LBF),
+    kgf: lin(N_PER_KGF),
+    dyn: lin(ratio(1, 100_000)), // 1 dyn = 1 g·cm/s² = 10⁻⁵ N
+  };
+}
+
+function torqueFactors(): Record<TorqueUnit, Factor> {
+  return {
+    'N*m': lin(ratio(1)),
+    'lbf*ft': lin(N_PER_LBF.times(M_PER_FT)),
+    'kgf*m': lin(N_PER_KGF),
+  };
+}
+
+/**
+ * Base unit is km/l. `l/100km` is not here: it is the reciprocal of this scale
+ * (`l/100km = 100 / (km/l)`), handled beside temperature, not as a factor.
+ */
+function fuelEconomyFactors(): Record<Exclude<FuelEconomyUnit, 'l/100km'>, Factor> {
+  const kmPerMile = M_PER_MI.dividedBy(1000);
+  return {
+    'km/l': lin(ratio(1)),
+    mpg: lin(kmPerMile.dividedBy(L_PER_GAL)),
+    mpg_imp: lin(kmPerMile.dividedBy(L_PER_GAL_IMP)),
+  };
+}
+
+/** Base unit is the bit per second; a byte is 8 bits, `kB`/`MB`/`GB` are decimal, `MiB` is binary. */
+function dataRateFactors(): Record<DataRateUnit, Factor> {
+  const byte = 8;
+  return {
+    'bit/s': lin(ratio(1)),
+    'kbit/s': lin(ratio(1000)),
+    'Mbit/s': lin(ratio(1_000_000)),
+    'Gbit/s': lin(ratio(1_000_000_000)),
+    'B/s': lin(ratio(byte)),
+    'kB/s': lin(ratio(byte * 1000)),
+    'MB/s': lin(ratio(byte * 1_000_000)),
+    'GB/s': lin(ratio(byte * 1_000_000_000)),
+    'MiB/s': lin(ratio(1024).pow(2).times(byte)),
+  };
+}
+
+/** Categories converted by one multiplication. Temperature is affine and `l/100km` reciprocal. */
+type LinearCategory = Exclude<UnitCategory, 'temperature'>;
+
+const FACTOR_BUILDERS: Record<LinearCategory, () => Readonly<Record<string, Factor>>> = {
   length: lengthFactors,
   mass: massFactors,
   area: areaFactors,
@@ -252,12 +359,18 @@ const FACTOR_BUILDERS: Record<Exclude<UnitCategory, 'temperature'>, () => Readon
   energy: energyFactors,
   pressure: pressureFactors,
   angle: angleFactors,
+  power: powerFactors,
+  frequency: frequencyFactors,
+  force: forceFactors,
+  torque: torqueFactors,
+  fuelEconomy: fuelEconomyFactors,
+  dataRate: dataRateFactors,
 };
 
 // Tables are built on first use of their category, so importing the module costs nothing.
 const factorTables = new Map<UnitCategory, Readonly<Record<string, Factor>>>();
 
-function factorOf(category: Exclude<UnitCategory, 'temperature'>, unit: Unit): Factor {
+function factorOf(category: LinearCategory, unit: Unit): Factor {
   let table = factorTables.get(category);
   if (table === undefined) {
     table = FACTOR_BUILDERS[category]();
@@ -298,6 +411,42 @@ function fromCelsius(celsius: number, to: TemperatureUnit): number {
   return celsius * 1.8 + 32;
 }
 
+// Fuel economy: l/100km is the reciprocal of km/l ---------------------------------
+
+const L_PER_100_KM = 'l/100km';
+
+function reciprocalOfZero(unit: Unit): never {
+  throw new InvalidArgumentError(`0 ${unit} has no fuel-economy counterpart: its reciprocal is infinite`);
+}
+
+/** Converts in doubles; at most one side is `l/100km`, so at most one reciprocal is taken. */
+function convertFuelEconomy(value: number, from: Unit, to: Unit): number {
+  if (from === L_PER_100_KM) {
+    if (value === 0) return reciprocalOfZero(from);
+    return (100 / value) * pairFactor('fuelEconomy', 'km/l', to);
+  }
+  if (to === L_PER_100_KM) {
+    const kmPerLitre = value * pairFactor('fuelEconomy', from, 'km/l');
+    if (kmPerLitre === 0) return reciprocalOfZero(from);
+    return 100 / kmPerLitre;
+  }
+  return value * pairFactor('fuelEconomy', from, to);
+}
+
+function convertFuelEconomyExact(value: Rational, from: Unit, to: Unit): Rational {
+  if (from === L_PER_100_KM) {
+    if (value.isZero()) return reciprocalOfZero(from);
+    return ratio(100)
+      .dividedBy(value)
+      .times(factorOf('fuelEconomy', 'km/l').r)
+      .dividedBy(factorOf('fuelEconomy', to).r);
+  }
+  const kmPerLitre = value.times(factorOf('fuelEconomy', from).r).dividedBy(factorOf('fuelEconomy', 'km/l').r);
+  if (to !== L_PER_100_KM) return kmPerLitre.dividedBy(factorOf('fuelEconomy', to).r);
+  if (kmPerLitre.isZero()) return reciprocalOfZero(from);
+  return ratio(100).dividedBy(kmPerLitre);
+}
+
 // Public API -------------------------------------------------------------------
 
 /** True when `value` is one of the supported unit symbols (case sensitive). */
@@ -330,9 +479,7 @@ function sharedCategory(from: Unit, to: Unit): UnitCategory {
     throw new InvalidArgumentError(`Unknown unit "${bad}"; ${known} units are: ${unitsOf(known).join(', ')}`);
   }
   if (fromCategory !== toCategory) {
-    throw new InvalidArgumentError(
-      `Cannot convert ${fromCategory} ("${from}") to ${toCategory} ("${to}")`,
-    );
+    throw new InvalidArgumentError(`Cannot convert ${fromCategory} ("${from}") to ${toCategory} ("${to}")`);
   }
   return fromCategory;
 }
@@ -340,7 +487,7 @@ function sharedCategory(from: Unit, to: Unit): UnitCategory {
 // Rounded once per (from, to) pair; a conversion is then a single multiply.
 const pairFactors = new Map<string, number>();
 
-function pairFactor(category: Exclude<UnitCategory, 'temperature'>, from: Unit, to: Unit): number {
+function pairFactor(category: LinearCategory, from: Unit, to: Unit): number {
   const key = `${from}\u0000${to}`;
   const cached = pairFactors.get(key);
   if (cached !== undefined) return cached;
@@ -356,7 +503,8 @@ function pairFactor(category: Exclude<UnitCategory, 'temperature'>, from: Unit, 
 /**
  * Converts `value` between two units of the same category, in doubles.
  * `convert(1, 'in', 'cm')` is exactly `2.54`; `convert(100, 'C', 'F')` is `212`.
- * Throws `InvalidArgumentError` for unknown units or units of different categories.
+ * Throws `InvalidArgumentError` for unknown units or units of different categories,
+ * and for `0` to or from `l/100km` (zero fuel use or zero distance per litre is infinite).
  */
 export function convert(value: number, from: Unit, to: Unit): number {
   assertFinite(value, 'value');
@@ -365,13 +513,15 @@ export function convert(value: number, from: Unit, to: Unit): number {
   if (category === 'temperature') {
     return fromCelsius(toCelsius(value, from as TemperatureUnit), to as TemperatureUnit);
   }
+  if (category === 'fuelEconomy') return convertFuelEconomy(value, from, to);
   return value * pairFactor(category, from, to);
 }
 
 /**
  * Converts exactly, returning a `Rational`. Linear categories multiply by an
  * exact ratio; temperature applies its exact affine formulas
- * (`°F = °C × 9/5 + 32`, `K = °C + 273.15`).
+ * (`°F = °C × 9/5 + 32`, `K = °C + 273.15`); `l/100km` takes the exact
+ * reciprocal (`mpg` → `l/100km` is `100 / km-per-litre`).
  *
  * Angles between `deg`, `grad` and `turn` are exact. Any conversion between
  * `rad` and another angle unit needs π and throws `RoundingNecessaryError`
@@ -384,6 +534,7 @@ export function convertExact(value: RationalInput, from: Unit, to: Unit): Ration
   if (category === 'temperature') {
     return fromCelsiusExact(toCelsiusExact(input, from as TemperatureUnit), to as TemperatureUnit);
   }
+  if (category === 'fuelEconomy') return convertFuelEconomyExact(input, from, to);
   const f = factorOf(category, from);
   const t = factorOf(category, to);
   if (f.pi !== t.pi) {
@@ -435,6 +586,15 @@ const INTL_UNITS: Partial<Record<Unit, string>> = {
   deg: 'degree',
 };
 
+/** Display symbols for units whose key is not how people write them (used when Intl has no name). */
+const SYMBOLS: Partial<Record<Unit, string>> = {
+  hp_metric: 'PS',
+  mpg_imp: 'mpg (imp)',
+  'N*m': 'N·m',
+  'lbf*ft': 'lbf·ft',
+  'kgf*m': 'kgf·m',
+};
+
 const MAX_FORMATTERS = 256;
 const formatters = new Map<string, Intl.NumberFormat>();
 
@@ -465,7 +625,9 @@ function getFormatter(
  * Formats `value` with its unit through `Intl.NumberFormat`: `formatUnit(5, 'km')`
  * is `'5 km'`, and with `{ display: 'long' }` it is `'5 kilometers'`. Units Intl
  * has no name for (`nmi`, `psi`, `rad`, `K`, ...) print as the number, a space and
- * the symbol; `display` does not apply to them.
+ * the symbol; `display` does not apply to them. Power, frequency, force, torque,
+ * fuel economy and data rates all take this path (`Intl` names none of them),
+ * with `hp_metric` shown as `PS` and `N*m` as `N·m`.
  */
 export function formatUnit(value: number, unit: Unit, options: FormatUnitOptions = {}): string {
   assertFinite(value, 'value');
@@ -474,7 +636,7 @@ export function formatUnit(value: number, unit: Unit, options: FormatUnitOptions
   const intlUnit = INTL_UNITS[unit];
   if (intlUnit === undefined) {
     const number = getFormatter(locale, undefined, 'short', maximumFractionDigits).format(value);
-    return `${number} ${unit}`;
+    return `${number} ${SYMBOLS[unit] ?? unit}`;
   }
   return getFormatter(locale, intlUnit, display, maximumFractionDigits).format(value);
 }
