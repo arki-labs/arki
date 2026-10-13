@@ -403,6 +403,10 @@ The rules, all enforced:
 - Hooks run in registration order, the first one outermost. Command hooks run inside the transaction, around the handler, so a throw rolls the command back cleanly; a child run is wrapped again, with its own `commandId` and the same `correlationId`. Effect hooks run inside the lease, around the handler, so a throw fails the job like a handler failure: it is retried with backoff and recorded on the job row.
 - Registration is frozen once the journal has run a command, a drain or a worker. A later `around` throws `BAD_DEFINITION`. In a Dot app, a plugin that needs the journal attaches in `boot`, which runs before the worker starts.
 
+## Operating the jobs
+
+`journal.jobs(db, { status, effect, limit })` lists job rows: `pending` (the default) is everything not dead, due, delayed and leased alike; `dead` is what the worker gave up on after 8 attempts, with `lastError`. `journal.retry(db, jobId)` brings a dead job back: attempts and lease cleared, due now, workers woken. `journal.discard(db, jobId)` deletes a dead job. Both refuse a job that is not dead: retrying a live one would run it twice, and deleting a live one would not stop its work, only lose the record of it. `journal.strandedJobs(db)` finds pending jobs whose effect this journal no longer has.
+
 ## Dot
 
 `@arki/journal/dot` connects the journal to an `@arki/dot` app. It exports the plugin `journal(...)` and the feature slice `journalHandlers(...)`. `@arki/dot` is an optional peer. The core entry never imports it.

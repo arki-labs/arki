@@ -6,7 +6,7 @@
  * Must not import `journal`, `api`, `write` or `command`.
  */
 import type { z } from 'zod';
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, max, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, max, notInArray, or, sql } from 'drizzle-orm';
 
 import type { History } from './history.js';
 import type { HookPointInternal } from './hooks.js';
@@ -50,7 +50,7 @@ function backoffSeconds(attempts: number): number {
 /** Database time plus `seconds`. The worker's clock never decides a lease or a retry. */
 const dbNowPlus = (seconds: number) => sql`now() + make_interval(secs => ${seconds})`;
 
-type JobRow = JournalTables['jobs']['$inferSelect'];
+export type JobRow = JournalTables['jobs']['$inferSelect'];
 
 /** What `drain` needs from the journal. `Run` is the type of an effect's `ctx.run`. */
 export type DrainDeps<Meta extends z.ZodObject, AppDb extends RootDb, Run> = {
@@ -234,6 +234,53 @@ export function createStrandedJobs(deps: { readonly tables: JournalTables; reado
       )
       .groupBy(jobsTable.effect)
       .orderBy(asc(jobsTable.effect));
+}
+
+/** The job verbs an operator uses: list, retry a dead job, discard a dead job. */
+export function createAdmin(deps: { readonly tables: JournalTables; readonly wake: () => void }) {
+  const { jobs: jobsTable } = deps.tables;
+
+  const jobs = (
+    db: DbHandle,
+    opts?: { readonly status?: 'pending' | 'dead' | 'all'; readonly effect?: string; readonly limit?: number },
+  ): Promise<JobRow[]> => {
+    const status = opts?.status ?? 'pending';
+    return db
+      .select()
+      .from(jobsTable)
+      .where(
+        and(
+          status === 'pending' ? isNull(jobsTable.deadAt) : status === 'dead' ? isNotNull(jobsTable.deadAt) : undefined,
+          opts?.effect === undefined ? undefined : eq(jobsTable.effect, opts.effect),
+        ),
+      )
+      .orderBy(asc(jobsTable.availableAt))
+      .limit(opts?.limit ?? 100);
+  };
+
+  /** Dead to pending, in one statement: attempts and lease cleared, due now. Wakes the workers. */
+  const retry = async (db: DbHandle, jobId: string): Promise<void> => {
+    const rows = await db
+      .update(jobsTable)
+      .set({ deadAt: null, attempts: 0, lastError: null, leaseToken: null, leaseUntil: null, availableAt: sql`now()` })
+      .where(and(eq(jobsTable.id, jobId), isNotNull(jobsTable.deadAt)))
+      .returning({ id: jobsTable.id });
+    if (rows.length === 0)
+      throw new Error(`journal: job ${JSON.stringify(jobId)} is not a dead job; only a dead job is retried`);
+    deps.wake();
+  };
+
+  /** Delete a dead job. A live one is never deleted here: that would not stop its work, only lose the record of it. */
+  const discard = async (db: DbHandle, jobId: string): Promise<void> => {
+    const rows = await db
+      .delete(jobsTable)
+      .where(and(eq(jobsTable.id, jobId), isNotNull(jobsTable.deadAt)))
+      .returning({ id: jobsTable.id });
+    if (rows.length === 0)
+      throw new Error(`journal: job ${JSON.stringify(jobId)} is not a dead job; only a dead job is discarded`);
+  };
+
+  return { jobs, retry, discard };
 }
 
 /** What the worker loop needs from the journal. */

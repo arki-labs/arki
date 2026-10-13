@@ -33,7 +33,14 @@ import { defineEvent } from './event.js';
 import { bindEffect, bindTap, defineProjection, effectFor, tapFor } from './handlers.js';
 import { createHistory } from './history.js';
 import { createHookPoint } from './hooks.js';
-import { createCatchUp, createDrain, createStrandedJobs, createTapDispatch, createWorkers } from './worker.js';
+import {
+  createAdmin,
+  createCatchUp,
+  createDrain,
+  createStrandedJobs,
+  createTapDispatch,
+  createWorkers,
+} from './worker.js';
 import { createWriter } from './write.js';
 
 const emptyMeta = z.object({});
@@ -192,6 +199,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     tapNames: taps.map(tap => tap.name),
   });
   const strandedJobs = createStrandedJobs({ tables, effectNames: effects.map(effect => effect.name) });
+  const admin = createAdmin({ tables, wake: () => journal.wake() });
 
   const journal: Journal<Meta, Tx, AppDb> = {
     write: (tx, entity, id, input) => write(tx, entity, id, input),
@@ -227,6 +235,9 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     worker: (db, opts) => workers.worker(db, opts),
     wake: () => workers.wakeAll(),
     strandedJobs: db => strandedJobs(db),
+    jobs: (db, opts) => admin.jobs(db, opts),
+    retry: (db, jobId) => admin.retry(db, jobId),
+    discard: (db, jobId) => admin.discard(db, jobId),
     wakeChannel,
     hooks: { command: commandHooks.point, effect: effectHooks.point },
     catalog: {

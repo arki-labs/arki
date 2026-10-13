@@ -340,6 +340,18 @@ export type Journal<
    */
   strandedJobs(db: DbHandle): Promise<readonly StrandedJobs[]>;
   /**
+   * List job rows. `pending` (the default) is everything not dead: due, delayed and leased
+   * alike. `dead` is what the worker gave up on. Oldest due first, `limit` 100.
+   */
+  jobs(
+    db: DbHandle,
+    opts?: { readonly status?: 'pending' | 'dead' | 'all'; readonly effect?: string; readonly limit?: number },
+  ): Promise<JournalTables['jobs']['$inferSelect'][]>;
+  /** A dead job back to pending: attempts and lease cleared, due now, workers woken. A job that is not dead throws. */
+  retry(db: DbHandle, jobId: string): Promise<void>;
+  /** Delete a dead job. A job that is not dead throws: deleting a live one would not stop its work. */
+  discard(db: DbHandle, jobId: string): Promise<void>;
+  /**
    * The one way to extend a run from outside: a wrapper that receives the context and
    * `next`. Command hooks run inside the transaction, around the handler; effect hooks run
    * inside the lease, around the handler. Rules: call `next` exactly once, or throw before
