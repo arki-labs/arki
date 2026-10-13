@@ -38,8 +38,15 @@ export type AngleOptions = {
 };
 
 /** A half turn (π radians) in each angle unit. */
-const HALF_TURN: Record<AngleUnit, number> = { deg: 180, rad: Math.PI, grad: 200, turn: 0.5 };
-const ANGLE_UNITS: ReadonlySet<string> = new Set<AngleUnit>(['deg', 'rad', 'grad', 'turn']);
+const HALF_TURN: Record<AngleUnit, number> = {
+  deg: 180,
+  rad: Math.PI,
+  grad: 200,
+  turn: 0.5,
+  arcmin: 10_800,
+  arcsec: 648_000,
+};
+const ANGLE_UNITS: ReadonlySet<string> = new Set<AngleUnit>(['deg', 'rad', 'grad', 'turn', 'arcmin', 'arcsec']);
 
 function angleUnitOf(options: AngleOptions | undefined): AngleUnit {
   const unit = options?.angleUnit ?? 'rad';

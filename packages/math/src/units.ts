@@ -1,7 +1,8 @@
 /**
- * Unit conversion across seventeen categories: length, mass, area, volume,
- * temperature, time, speed, data, energy, pressure, angle, power, frequency,
- * force, torque, fuel economy and data rate.
+ * Unit conversion across twenty-two categories: length, mass, area, volume,
+ * temperature, time, speed, data, energy, pressure, angle, solid angle, power,
+ * frequency, force, torque, fuel economy, data rate, electric current,
+ * illuminance, radioactivity, dynamic viscosity and kinematic viscosity.
  *
  * Every factor is stored as an exact `Rational` (`1 in = 0.0254 m`,
  * `1 lb = 0.45359237 kg`, ...). `convert` rounds each pair's factor to a double
@@ -19,6 +20,15 @@
  * Fuel economy is the one reciprocal category: `l/100km` is litres per distance,
  * so it converts to the others by `100 / x`, and zero has no counterpart.
  *
+ * `µ` is the micro sign U+00B5 (`µm`, `µA`, `µCi`). `month` and `year` follow the
+ * convention of most unit converters: the Julian year of 365.25 days (31 557 600 s)
+ * and a month of one twelfth of it (30.4375 days); calendar months and years vary,
+ * so use a date library for those. `au` is the IAU 2012 value, `ly` the light year
+ * of one Julian year at c. `gal_imp`, `qt_imp`, `pt_imp`, `floz_imp` are imperial;
+ * `Torr` is 101325/760 Pa. `fc` (foot-candle) is one lumen per square foot, `Ci`
+ * (curie) is 3.7e10 Bq. Dynamic viscosity (`Pa*s`, `P`) and kinematic viscosity
+ * (`m2/s`, `St`) are different quantities and separate categories.
+ *
  * Every numeric input must be finite; `NaN` and `±Infinity` throw.
  */
 
@@ -28,23 +38,64 @@ import { ratio } from './internal/exact.js';
 import { assertFinite } from './number.js';
 import { Rational } from './rational.js';
 
-export type LengthUnit = 'mm' | 'cm' | 'm' | 'km' | 'in' | 'ft' | 'yd' | 'mi' | 'nmi';
+export type LengthUnit = 'nm' | 'µm' | 'mm' | 'cm' | 'm' | 'km' | 'in' | 'ft' | 'yd' | 'mi' | 'nmi' | 'au' | 'ly';
 export type MassUnit = 'mg' | 'g' | 'kg' | 't' | 'oz' | 'lb' | 'st';
 export type AreaUnit = 'mm2' | 'cm2' | 'm2' | 'ha' | 'km2' | 'in2' | 'ft2' | 'yd2' | 'ac' | 'mi2';
-export type VolumeUnit = 'ml' | 'cl' | 'l' | 'm3' | 'tsp' | 'tbsp' | 'floz' | 'cup' | 'pt' | 'qt' | 'gal';
+export type VolumeUnit =
+  | 'ml'
+  | 'cl'
+  | 'l'
+  | 'cm3'
+  | 'm3'
+  | 'in3'
+  | 'ft3'
+  | 'yd3'
+  | 'tsp'
+  | 'tbsp'
+  | 'floz'
+  | 'cup'
+  | 'pt'
+  | 'qt'
+  | 'gal'
+  | 'floz_imp'
+  | 'pt_imp'
+  | 'qt_imp'
+  | 'gal_imp';
 export type TemperatureUnit = 'C' | 'F' | 'K';
-export type TimeUnit = 'ms' | 's' | 'min' | 'h' | 'd' | 'wk';
-export type SpeedUnit = 'm/s' | 'km/h' | 'mph' | 'kn';
-export type DataUnit = 'B' | 'kB' | 'MB' | 'GB' | 'TB' | 'KiB' | 'MiB' | 'GiB' | 'TiB' | 'bit';
-export type EnergyUnit = 'J' | 'kJ' | 'cal' | 'kcal' | 'Wh' | 'kWh';
-export type PressureUnit = 'Pa' | 'kPa' | 'bar' | 'atm' | 'psi' | 'mmHg';
-export type AngleUnit = 'deg' | 'rad' | 'grad' | 'turn';
+export type TimeUnit = 'ms' | 's' | 'min' | 'h' | 'd' | 'wk' | 'month' | 'year';
+export type SpeedUnit = 'm/s' | 'km/h' | 'mph' | 'kn' | 'ft/s';
+export type DataUnit =
+  | 'B'
+  | 'kB'
+  | 'MB'
+  | 'GB'
+  | 'TB'
+  | 'KiB'
+  | 'MiB'
+  | 'GiB'
+  | 'TiB'
+  | 'bit'
+  | 'kbit'
+  | 'Mbit'
+  | 'Gbit'
+  | 'Kibit'
+  | 'Mibit'
+  | 'Gibit';
+export type EnergyUnit = 'J' | 'kJ' | 'cal' | 'kcal' | 'Wh' | 'kWh' | 'MJ' | 'BTU' | 'eV';
+export type PressureUnit = 'Pa' | 'kPa' | 'MPa' | 'bar' | 'atm' | 'psi' | 'mmHg' | 'Torr';
+export type AngleUnit = 'deg' | 'rad' | 'grad' | 'turn' | 'arcmin' | 'arcsec';
+export type SolidAngleUnit = 'sr' | 'deg2';
 export type PowerUnit = 'W' | 'kW' | 'MW' | 'hp' | 'hp_metric' | 'BTU/h';
 export type FrequencyUnit = 'Hz' | 'kHz' | 'MHz' | 'GHz' | 'rpm';
 export type ForceUnit = 'N' | 'kN' | 'lbf' | 'kgf' | 'dyn';
 export type TorqueUnit = 'N*m' | 'lbf*ft' | 'kgf*m';
 export type FuelEconomyUnit = 'km/l' | 'l/100km' | 'mpg' | 'mpg_imp';
 export type DataRateUnit = 'bit/s' | 'kbit/s' | 'Mbit/s' | 'Gbit/s' | 'B/s' | 'kB/s' | 'MB/s' | 'GB/s' | 'MiB/s';
+export type ElectricCurrentUnit = 'µA' | 'mA' | 'A' | 'kA';
+export type IlluminanceUnit = 'lx' | 'fc';
+export type RadioactivityUnit = 'Bq' | 'kBq' | 'MBq' | 'µCi' | 'mCi' | 'Ci';
+export type DynamicViscosityUnit = 'Pa*s' | 'mPa*s' | 'P' | 'cP';
+export type KinematicViscosityUnit = 'm2/s' | 'cSt' | 'St';
 
 export type UnitCategory =
   | 'length'
@@ -58,12 +109,18 @@ export type UnitCategory =
   | 'energy'
   | 'pressure'
   | 'angle'
+  | 'solidAngle'
   | 'power'
   | 'frequency'
   | 'force'
   | 'torque'
   | 'fuelEconomy'
-  | 'dataRate';
+  | 'dataRate'
+  | 'electricCurrent'
+  | 'illuminance'
+  | 'radioactivity'
+  | 'dynamicViscosity'
+  | 'kinematicViscosity';
 
 /** Every supported unit symbol. */
 export type Unit =
@@ -78,12 +135,18 @@ export type Unit =
   | EnergyUnit
   | PressureUnit
   | AngleUnit
+  | SolidAngleUnit
   | PowerUnit
   | FrequencyUnit
   | ForceUnit
   | TorqueUnit
   | FuelEconomyUnit
-  | DataRateUnit;
+  | DataRateUnit
+  | ElectricCurrentUnit
+  | IlluminanceUnit
+  | RadioactivityUnit
+  | DynamicViscosityUnit
+  | KinematicViscosityUnit;
 
 export type FormatUnitOptions = {
   /** BCP 47 locale; defaults to the runtime's. */
@@ -94,23 +157,66 @@ export type FormatUnitOptions = {
 };
 
 const UNITS_BY_CATEGORY: Record<UnitCategory, readonly Unit[]> = {
-  length: ['mm', 'cm', 'm', 'km', 'in', 'ft', 'yd', 'mi', 'nmi'],
+  length: ['nm', 'µm', 'mm', 'cm', 'm', 'km', 'in', 'ft', 'yd', 'mi', 'nmi', 'au', 'ly'],
   mass: ['mg', 'g', 'kg', 't', 'oz', 'lb', 'st'],
   area: ['mm2', 'cm2', 'm2', 'ha', 'km2', 'in2', 'ft2', 'yd2', 'ac', 'mi2'],
-  volume: ['ml', 'cl', 'l', 'm3', 'tsp', 'tbsp', 'floz', 'cup', 'pt', 'qt', 'gal'],
+  volume: [
+    'ml',
+    'cl',
+    'l',
+    'cm3',
+    'm3',
+    'in3',
+    'ft3',
+    'yd3',
+    'tsp',
+    'tbsp',
+    'floz',
+    'cup',
+    'pt',
+    'qt',
+    'gal',
+    'floz_imp',
+    'pt_imp',
+    'qt_imp',
+    'gal_imp',
+  ],
   temperature: ['C', 'F', 'K'],
-  time: ['ms', 's', 'min', 'h', 'd', 'wk'],
-  speed: ['m/s', 'km/h', 'mph', 'kn'],
-  data: ['B', 'kB', 'MB', 'GB', 'TB', 'KiB', 'MiB', 'GiB', 'TiB', 'bit'],
-  energy: ['J', 'kJ', 'cal', 'kcal', 'Wh', 'kWh'],
-  pressure: ['Pa', 'kPa', 'bar', 'atm', 'psi', 'mmHg'],
-  angle: ['deg', 'rad', 'grad', 'turn'],
+  time: ['ms', 's', 'min', 'h', 'd', 'wk', 'month', 'year'],
+  speed: ['m/s', 'km/h', 'mph', 'kn', 'ft/s'],
+  data: [
+    'B',
+    'kB',
+    'MB',
+    'GB',
+    'TB',
+    'KiB',
+    'MiB',
+    'GiB',
+    'TiB',
+    'bit',
+    'kbit',
+    'Mbit',
+    'Gbit',
+    'Kibit',
+    'Mibit',
+    'Gibit',
+  ],
+  energy: ['J', 'kJ', 'cal', 'kcal', 'Wh', 'kWh', 'MJ', 'BTU', 'eV'],
+  pressure: ['Pa', 'kPa', 'MPa', 'bar', 'atm', 'psi', 'mmHg', 'Torr'],
+  angle: ['deg', 'rad', 'grad', 'turn', 'arcmin', 'arcsec'],
+  solidAngle: ['sr', 'deg2'],
   power: ['W', 'kW', 'MW', 'hp', 'hp_metric', 'BTU/h'],
   frequency: ['Hz', 'kHz', 'MHz', 'GHz', 'rpm'],
   force: ['N', 'kN', 'lbf', 'kgf', 'dyn'],
   torque: ['N*m', 'lbf*ft', 'kgf*m'],
   fuelEconomy: ['km/l', 'l/100km', 'mpg', 'mpg_imp'],
   dataRate: ['bit/s', 'kbit/s', 'Mbit/s', 'Gbit/s', 'B/s', 'kB/s', 'MB/s', 'GB/s', 'MiB/s'],
+  electricCurrent: ['µA', 'mA', 'A', 'kA'],
+  illuminance: ['lx', 'fc'],
+  radioactivity: ['Bq', 'kBq', 'MBq', 'µCi', 'mCi', 'Ci'],
+  dynamicViscosity: ['Pa*s', 'mPa*s', 'P', 'cP'],
+  kinematicViscosity: ['m2/s', 'cSt', 'St'],
 };
 
 const CATEGORY_OF: ReadonlyMap<string, UnitCategory> = new Map(
@@ -119,8 +225,8 @@ const CATEGORY_OF: ReadonlyMap<string, UnitCategory> = new Map(
   ),
 );
 
-/** A unit's size in its category's base unit: `r * π^pi`. Only angles use `pi: 1`. */
-type Factor = { readonly r: Rational; readonly pi: 0 | 1 };
+/** A unit's size in its category's base unit: `r * π^pi`. Only angles (`pi: 1`) and solid angles (`pi: 2`) use π. */
+type Factor = { readonly r: Rational; readonly pi: 0 | 1 | 2 };
 
 const lin = (r: Rational): Factor => ({ r, pi: 0 });
 
@@ -147,9 +253,19 @@ const N_PER_LBF = KG_PER_LB.times(G_STANDARD); // pound-force = 1 lb × standard
 const N_PER_KGF = G_STANDARD; // kilogram-force = 1 kg × standard gravity
 const L_PER_GAL_IMP = ratio('4.54609'); // imperial gallon, exact by the UK Weights and Measures Act 1985
 const J_PER_BTU = ratio('1055.05585262'); // International Table BTU (IT, 1956 Steam Tables conference)
+const M_PER_AU = ratio('149597870700'); // astronomical unit, IAU 2012 Resolution B2, exact
+const SECONDS_PER_JULIAN_YEAR = ratio(86_400).times(ratio('365.25')); // IAU Julian year = 365.25 d
+const M_PER_LY = ratio(299_792_458).times(SECONDS_PER_JULIAN_YEAR); // c × 1 Julian year = 9 460 730 472 580 800 m
+const L_PER_QT_IMP = L_PER_GAL_IMP.dividedBy(4);
+const L_PER_PT_IMP = L_PER_QT_IMP.dividedBy(2);
+const L_PER_FLOZ_IMP = L_PER_PT_IMP.dividedBy(20); // imperial pint = 20 imperial fluid ounces
+const J_PER_EV = ratio('1.602176634e-19'); // electron-volt, exact since SI 2019 (e = 1.602176634e-19 C)
+const BQ_PER_CI = ratio('3.7e10'); // curie, exact by definition
 
 function lengthFactors(): Record<LengthUnit, Factor> {
   return {
+    nm: lin(ratio(1, 1_000_000_000)),
+    µm: lin(ratio(1, 1_000_000)),
     mm: lin(ratio(1, 1000)),
     cm: lin(ratio(1, 100)),
     m: lin(ratio(1)),
@@ -159,6 +275,8 @@ function lengthFactors(): Record<LengthUnit, Factor> {
     yd: lin(M_PER_YD),
     mi: lin(M_PER_MI),
     nmi: lin(M_PER_NMI),
+    au: lin(M_PER_AU),
+    ly: lin(M_PER_LY),
   };
 }
 
@@ -195,7 +313,11 @@ function volumeFactors(): Record<VolumeUnit, Factor> {
     ml: lin(ratio(1, 1000)),
     cl: lin(ratio(1, 100)),
     l: lin(ratio(1)),
+    cm3: lin(ratio(1, 1000)),
     m3: lin(ratio(1000)),
+    in3: lin(L_PER_IN3),
+    ft3: lin(L_PER_IN3.times(1728)),
+    yd3: lin(L_PER_IN3.times(46_656)),
     tsp: lin(L_PER_TSP),
     tbsp: lin(L_PER_TBSP),
     floz: lin(L_PER_FLOZ),
@@ -203,6 +325,10 @@ function volumeFactors(): Record<VolumeUnit, Factor> {
     pt: lin(L_PER_PT),
     qt: lin(L_PER_QT),
     gal: lin(L_PER_GAL),
+    floz_imp: lin(L_PER_FLOZ_IMP),
+    pt_imp: lin(L_PER_PT_IMP),
+    qt_imp: lin(L_PER_QT_IMP),
+    gal_imp: lin(L_PER_GAL_IMP),
   };
 }
 
@@ -214,6 +340,8 @@ function timeFactors(): Record<TimeUnit, Factor> {
     h: lin(SECONDS_PER_HOUR),
     d: lin(ratio(86_400)),
     wk: lin(ratio(604_800)),
+    month: lin(SECONDS_PER_JULIAN_YEAR.dividedBy(12)),
+    year: lin(SECONDS_PER_JULIAN_YEAR),
   };
 }
 
@@ -223,6 +351,7 @@ function speedFactors(): Record<SpeedUnit, Factor> {
     'km/h': lin(ratio(1000).dividedBy(SECONDS_PER_HOUR)),
     mph: lin(M_PER_MI.dividedBy(SECONDS_PER_HOUR)),
     kn: lin(M_PER_NMI.dividedBy(SECONDS_PER_HOUR)),
+    'ft/s': lin(M_PER_FT),
   };
 }
 
@@ -238,6 +367,12 @@ function dataFactors(): Record<DataUnit, Factor> {
     GiB: lin(ratio(1024).pow(3)),
     TiB: lin(ratio(1024).pow(4)),
     bit: lin(ratio(1, 8)),
+    kbit: lin(ratio(1000, 8)),
+    Mbit: lin(ratio(1_000_000, 8)),
+    Gbit: lin(ratio(1_000_000_000, 8)),
+    Kibit: lin(ratio(1024, 8)),
+    Mibit: lin(ratio(1024 ** 2, 8)),
+    Gibit: lin(ratio(1024 ** 3, 8)),
   };
 }
 
@@ -250,6 +385,9 @@ function energyFactors(): Record<EnergyUnit, Factor> {
     kcal: lin(calorie.times(1000)),
     Wh: lin(SECONDS_PER_HOUR),
     kWh: lin(SECONDS_PER_HOUR.times(1000)),
+    MJ: lin(ratio(1_000_000)),
+    BTU: lin(J_PER_BTU),
+    eV: lin(J_PER_EV),
   };
 }
 
@@ -257,11 +395,13 @@ function pressureFactors(): Record<PressureUnit, Factor> {
   return {
     Pa: lin(ratio(1)),
     kPa: lin(ratio(1000)),
+    MPa: lin(ratio(1_000_000)),
     bar: lin(ratio(100_000)),
     atm: lin(PA_PER_ATM),
     // 1 psi = 1 lbf / 1 in², with 1 lbf = 1 lb × standard gravity.
     psi: lin(KG_PER_LB.times(G_STANDARD).dividedBy(M_PER_IN.pow(2))),
     mmHg: lin(PA_PER_ATM.dividedBy(760)),
+    Torr: lin(PA_PER_ATM.dividedBy(760)), // defined as 1/760 atm
   };
 }
 
@@ -272,6 +412,65 @@ function angleFactors(): Record<AngleUnit, Factor> {
     rad: { r: ratio(1), pi: 0 },
     grad: { r: ratio(1, 200), pi: 1 },
     turn: { r: ratio(2), pi: 1 },
+    arcmin: { r: ratio(1, 10_800), pi: 1 }, // 1/60 deg
+    arcsec: { r: ratio(1, 648_000), pi: 1 }, // 1/3600 deg
+  };
+}
+
+/** Base unit is the steradian: `deg2 = (π/180)²`, the solid angle of a 1° × 1° square. */
+function solidAngleFactors(): Record<SolidAngleUnit, Factor> {
+  return {
+    sr: { r: ratio(1), pi: 0 },
+    deg2: { r: ratio(1, 32_400), pi: 2 },
+  };
+}
+
+/** Base unit is the ampere. */
+function electricCurrentFactors(): Record<ElectricCurrentUnit, Factor> {
+  return {
+    µA: lin(ratio(1, 1_000_000)),
+    mA: lin(ratio(1, 1000)),
+    A: lin(ratio(1)),
+    kA: lin(ratio(1000)),
+  };
+}
+
+/** Base unit is the lux (lm/m²). A foot-candle is one lumen per square foot. */
+function illuminanceFactors(): Record<IlluminanceUnit, Factor> {
+  return {
+    lx: lin(ratio(1)),
+    fc: lin(ratio(1).dividedBy(M_PER_FT.pow(2))),
+  };
+}
+
+/** Base unit is the becquerel (1/s). */
+function radioactivityFactors(): Record<RadioactivityUnit, Factor> {
+  return {
+    Bq: lin(ratio(1)),
+    kBq: lin(ratio(1000)),
+    MBq: lin(ratio(1_000_000)),
+    µCi: lin(BQ_PER_CI.dividedBy(1_000_000)),
+    mCi: lin(BQ_PER_CI.dividedBy(1000)),
+    Ci: lin(BQ_PER_CI),
+  };
+}
+
+/** Base unit is the pascal second. 1 P (poise) = 0.1 Pa·s; 1 cP = 1 mPa·s. */
+function dynamicViscosityFactors(): Record<DynamicViscosityUnit, Factor> {
+  return {
+    'Pa*s': lin(ratio(1)),
+    'mPa*s': lin(ratio(1, 1000)),
+    P: lin(ratio(1, 10)),
+    cP: lin(ratio(1, 1000)),
+  };
+}
+
+/** Base unit is m²/s. 1 St (stokes) = 1 cm²/s = 10⁻⁴ m²/s; 1 cSt = 10⁻⁶ m²/s. */
+function kinematicViscosityFactors(): Record<KinematicViscosityUnit, Factor> {
+  return {
+    'm2/s': lin(ratio(1)),
+    cSt: lin(ratio(1, 1_000_000)),
+    St: lin(ratio(1, 10_000)),
   };
 }
 
@@ -359,12 +558,18 @@ const FACTOR_BUILDERS: Record<LinearCategory, () => Readonly<Record<string, Fact
   energy: energyFactors,
   pressure: pressureFactors,
   angle: angleFactors,
+  solidAngle: solidAngleFactors,
   power: powerFactors,
   frequency: frequencyFactors,
   force: forceFactors,
   torque: torqueFactors,
   fuelEconomy: fuelEconomyFactors,
   dataRate: dataRateFactors,
+  electricCurrent: electricCurrentFactors,
+  illuminance: illuminanceFactors,
+  radioactivity: radioactivityFactors,
+  dynamicViscosity: dynamicViscosityFactors,
+  kinematicViscosity: kinematicViscosityFactors,
 };
 
 // Tables are built on first use of their category, so importing the module costs nothing.
@@ -495,7 +700,7 @@ function pairFactor(category: LinearCategory, from: Unit, to: Unit): number {
   const t = factorOf(category, to);
   const exact = f.r.dividedBy(t.r).toNumber();
   const power = f.pi - t.pi;
-  const factor = power === 0 ? exact : power > 0 ? exact * Math.PI : exact / Math.PI;
+  const factor = power === 0 ? exact : power > 0 ? exact * Math.PI ** power : exact / Math.PI ** -power;
   pairFactors.set(key, factor);
   return factor;
 }
@@ -523,8 +728,8 @@ export function convert(value: number, from: Unit, to: Unit): number {
  * (`°F = °C × 9/5 + 32`, `K = °C + 273.15`); `l/100km` takes the exact
  * reciprocal (`mpg` → `l/100km` is `100 / km-per-litre`).
  *
- * Angles between `deg`, `grad` and `turn` are exact. Any conversion between
- * `rad` and another angle unit needs π and throws `RoundingNecessaryError`
+ * Angles between `deg`, `grad`, `turn`, `arcmin` and `arcsec` are exact; so are `sr` to `sr` and `deg2` to `deg2`. Any conversion between
+ * `rad` and another angle unit (or `sr` and `deg2`) needs π and throws `RoundingNecessaryError`
  * (`rad` to `rad` is fine). Use `convert` for those.
  */
 export function convertExact(value: RationalInput, from: Unit, to: Unit): Rational {
@@ -574,6 +779,8 @@ const INTL_UNITS: Partial<Record<Unit, string>> = {
   h: 'hour',
   d: 'day',
   wk: 'week',
+  month: 'month',
+  year: 'year',
   'm/s': 'meter-per-second',
   'km/h': 'kilometer-per-hour',
   mph: 'mile-per-hour',
@@ -583,12 +790,27 @@ const INTL_UNITS: Partial<Record<Unit, string>> = {
   GB: 'gigabyte',
   TB: 'terabyte',
   bit: 'bit',
+  kbit: 'kilobit',
+  Mbit: 'megabit',
+  Gbit: 'gigabit',
   deg: 'degree',
 };
 
 /** Display symbols for units whose key is not how people write them (used when Intl has no name). */
 const SYMBOLS: Partial<Record<Unit, string>> = {
   hp_metric: 'PS',
+  cm3: 'cm³',
+  in3: 'in³',
+  ft3: 'ft³',
+  yd3: 'yd³',
+  floz_imp: 'fl oz (imp)',
+  pt_imp: 'pt (imp)',
+  qt_imp: 'qt (imp)',
+  gal_imp: 'gal (imp)',
+  deg2: 'deg²',
+  'Pa*s': 'Pa·s',
+  'mPa*s': 'mPa·s',
+  'm2/s': 'm²/s',
   mpg_imp: 'mpg (imp)',
   'N*m': 'N·m',
   'lbf*ft': 'lbf·ft',

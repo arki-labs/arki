@@ -23,6 +23,12 @@ const CATEGORIES: readonly UnitCategory[] = [
   'torque',
   'fuelEconomy',
   'dataRate',
+  'solidAngle',
+  'electricCurrent',
+  'illuminance',
+  'radioactivity',
+  'dynamicViscosity',
+  'kinematicViscosity',
 ];
 
 describe('convert', () => {
@@ -94,7 +100,7 @@ describe('convert', () => {
 
   it('lists the known side when one unit is unknown', () => {
     const bad = 'furlong' as Unit;
-    expect(() => convert(1, 'm', bad)).toThrow(/furlong.*length units are: mm, cm, m/);
+    expect(() => convert(1, 'm', bad)).toThrow(/furlong.*length units are: nm, µm, mm, cm, m/);
     expect(() => convert(1, bad, 'kg')).toThrow(/mass units are/);
     expect(() => convert(1, bad, bad)).toThrow(InvalidArgumentError);
   });
@@ -145,9 +151,9 @@ describe('convertExact', () => {
 
 describe('unit registry', () => {
   it('lists units per category', () => {
-    expect(unitsOf('length')).toEqual(['mm', 'cm', 'm', 'km', 'in', 'ft', 'yd', 'mi', 'nmi']);
+    expect(unitsOf('length')).toEqual(['nm', 'µm', 'mm', 'cm', 'm', 'km', 'in', 'ft', 'yd', 'mi', 'nmi', 'au', 'ly']);
     expect(unitsOf('temperature')).toEqual(['C', 'F', 'K']);
-    expect(unitsOf('angle')).toEqual(['deg', 'rad', 'grad', 'turn']);
+    expect(unitsOf('angle')).toEqual(['deg', 'rad', 'grad', 'turn', 'arcmin', 'arcsec']);
   });
 
   it('maps every listed unit back to its category', () => {
@@ -284,5 +290,108 @@ describe('fuel economy', () => {
     expect(() => convertExact(0, 'l/100km', 'km/l')).toThrow(InvalidArgumentError);
     expect(() => convertExact(0, 'km/l', 'l/100km')).toThrow(InvalidArgumentError);
     expect(convert(0, 'mpg', 'km/l')).toBe(0);
+  });
+});
+
+describe('units added to existing categories', () => {
+  it('uses exact definitions for astronomy and SI 2019', () => {
+    // IAU 2012 fixed the astronomical unit; the IAU light year is c × one Julian year.
+    expect(convertExact(1, 'au', 'm').eq(ratio('149597870700'))).toBe(true);
+    expect(convertExact(1, 'ly', 'm').eq(ratio('9460730472580800'))).toBe(true);
+    expect(convertExact(1, 'ly', 'au').eq(ratio('94607304725808/1495978707'))).toBe(true);
+    // The eV is exact since SI 2019 fixed the elementary charge.
+    expect(convertExact(1, 'eV', 'J').eq(ratio(1_602_176_634, 10n ** 28n))).toBe(true);
+    expect(convertExact(1, 'nm', 'µm').eq(ratio('1/1000'))).toBe(true);
+  });
+
+  it('defines month and year as the Julian year, 365.25 days', () => {
+    expect(convertExact(1, 'year', 'd').eq(ratio('1461/4'))).toBe(true);
+    expect(convertExact(12, 'month', 'year').eq(ratio('1'))).toBe(true);
+    expect(convertExact(1, 'month', 'd').eq(ratio('487/16'))).toBe(true);
+  });
+
+  it('derives cubic and imperial volumes from the inch and the 1985 gallon', () => {
+    expect(convertExact(1, 'ft3', 'in3').eq(ratio('1728'))).toBe(true);
+    expect(convertExact(1, 'yd3', 'ft3').eq(ratio('27'))).toBe(true);
+    expect(convertExact(1, 'm3', 'cm3').eq(ratio('1000000'))).toBe(true);
+    expect(convertExact(1, 'gal_imp', 'l').eq(ratio('454609/100000'))).toBe(true);
+    expect(convertExact(1, 'gal_imp', 'qt_imp').eq(ratio('4'))).toBe(true);
+    expect(convertExact(1, 'qt_imp', 'pt_imp').eq(ratio('2'))).toBe(true);
+    expect(convertExact(1, 'pt_imp', 'floz_imp').eq(ratio('20'))).toBe(true);
+    expect(convertExact(1, 'gal', 'in3').eq(ratio('231'))).toBe(true);
+  });
+
+  it('keeps US and imperial pints apart', () => {
+    expect(convert(1, 'pt_imp', 'pt')).toBeCloseTo(1.200_949_9, 6);
+  });
+
+  it('adds speed, energy, pressure, angle and bit units with exact ratios', () => {
+    expect(convertExact(1, 'ft/s', 'm/s').eq(ratio('381/1250'))).toBe(true);
+    expect(convertExact(1, 'MJ', 'kJ').eq(ratio('1000'))).toBe(true);
+    expect(convertExact(1, 'BTU', 'J').eq(ratio('105505585262/100000000'))).toBe(true);
+    expect(convertExact(1, 'MPa', 'kPa').eq(ratio('1000'))).toBe(true);
+    expect(convertExact(760, 'Torr', 'Pa').eq(ratio('101325'))).toBe(true);
+    expect(convertExact(1, 'deg', 'arcmin').eq(ratio('60'))).toBe(true);
+    expect(convertExact(1, 'arcmin', 'arcsec').eq(ratio('60'))).toBe(true);
+    expect(convertExact(1, 'turn', 'arcsec').eq(ratio('1296000'))).toBe(true);
+    expect(convertExact(1, 'Mbit', 'kbit').eq(ratio('1000'))).toBe(true);
+    expect(convertExact(1, 'Kibit', 'bit').eq(ratio('1024'))).toBe(true);
+    expect(convertExact(1, 'Gbit', 'B').eq(ratio('125000000'))).toBe(true);
+  });
+
+  it('still needs π for rad and arc units', () => {
+    expect(convert(1, 'arcsec', 'rad')).toBeCloseTo(4.848_136_811e-6, 14);
+    expect(() => convertExact(1, 'arcmin', 'rad')).toThrow(RoundingNecessaryError);
+  });
+});
+
+describe('new categories', () => {
+  it('converts electric current by SI prefixes', () => {
+    expect(convertExact(1, 'kA', 'mA').eq(ratio('1000000'))).toBe(true);
+    expect(convertExact(1, 'A', 'µA').eq(ratio('1000000'))).toBe(true);
+  });
+
+  it('defines the foot-candle as one lumen per square foot', () => {
+    // 1 / 0.3048² = 10.7639104167…, kept as a rational
+    expect(convertExact(1, 'fc', 'lx').eq(ratio('1562500/145161'))).toBe(true);
+    expect(convert(1, 'fc', 'lx')).toBeCloseTo(10.763_910_416_7, 9);
+  });
+
+  it('defines the curie as exactly 3.7e10 becquerel', () => {
+    expect(convertExact(1, 'Ci', 'Bq').eq(ratio('37000000000'))).toBe(true);
+    expect(convertExact(1, 'mCi', 'MBq').eq(ratio('37'))).toBe(true);
+    expect(convertExact(1, 'µCi', 'kBq').eq(ratio('37'))).toBe(true);
+  });
+
+  it('keeps dynamic and kinematic viscosity as two quantities', () => {
+    expect(convertExact(1, 'P', 'Pa*s').eq(ratio('1/10'))).toBe(true);
+    expect(convertExact(1, 'cP', 'mPa*s').eq(ratio('1'))).toBe(true);
+    expect(convertExact(1, 'St', 'cSt').eq(ratio('100'))).toBe(true);
+    expect(convertExact(1, 'cSt', 'm2/s').eq(ratio('1/1000000'))).toBe(true);
+    expect(() => convert(1, 'cP', 'cSt')).toThrow(/dynamicViscosity.*kinematicViscosity/);
+  });
+
+  it('treats solid angle like angle: deg2 is (π/180)² sr', () => {
+    expect(convert(1, 'deg2', 'sr')).toBeCloseTo((Math.PI / 180) ** 2, 15);
+    expect(convert(1, 'sr', 'deg2')).toBeCloseTo((180 / Math.PI) ** 2, 8);
+    // the whole sphere is 4π sr ≈ 41253 square degrees
+    expect(convert(4 * Math.PI, 'sr', 'deg2')).toBeCloseTo(41_252.96, 1);
+    expect(() => convertExact(1, 'sr', 'deg2')).toThrow(RoundingNecessaryError);
+    expect(convertExact(3, 'deg2', 'deg2').eq(ratio('3'))).toBe(true);
+  });
+
+  it('registers the units under their categories', () => {
+    expect(unitCategory('µCi')).toBe('radioactivity');
+    expect(unitCategory('fc')).toBe('illuminance');
+    expect(unitCategory('St')).toBe('kinematicViscosity');
+    expect(unitCategory('deg2')).toBe('solidAngle');
+    expect(isUnit('µA')).toBe(true);
+  });
+
+  it('formats the new symbols readably', () => {
+    expect(formatUnit(2, 'Pa*s')).toBe('2 Pa·s');
+    expect(formatUnit(2, 'deg2')).toBe('2 deg²');
+    expect(formatUnit(3, 'gal_imp')).toBe('3 gal (imp)');
+    expect(formatUnit(3, 'A')).toBe('3 A');
   });
 });
