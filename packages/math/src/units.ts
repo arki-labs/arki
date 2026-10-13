@@ -990,7 +990,6 @@ function getFormatter(
       : new Intl.NumberFormat(locale, { style: 'unit', unit: intlUnit, unitDisplay: display, maximumFractionDigits });
   if (formatters.size >= MAX_FORMATTERS) {
     const oldest = formatters.keys().next();
-    // eslint-disable-next-line drizzle/enforce-delete-with-where -- Map.delete, not a SQL delete
     if (!oldest.done) formatters.delete(oldest.value);
   }
   formatters.set(key, created);
