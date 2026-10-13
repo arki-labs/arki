@@ -49,7 +49,21 @@ export type NextEvents<Tbl extends EntityTable, E extends AnyEventDef, Tx = DbHa
   row: Row<Tbl> | null,
   ctx: { readonly tx: Tx },
 ) => readonly PendingOf<E>[] | Promise<readonly PendingOf<E>[]>;
-export type WriteInput<Tbl extends EntityTable, E extends AnyEventDef, Meta extends z.ZodObject, Tx = DbHandle> = {
+/** Options of a write, from `journal.write` or a command's `write`. */
+export type WriteOptions = {
+  /**
+   * The row version the caller saw. If the stored version differs (0 for no row), the
+   * write is refused with `CONFLICT` before `events` runs, so a client that edited a
+   * stale copy learns it instead of overwriting a newer one.
+   */
+  readonly expectedVersion?: number;
+};
+export type WriteInput<
+  Tbl extends EntityTable,
+  E extends AnyEventDef,
+  Meta extends z.ZodObject,
+  Tx = DbHandle,
+> = WriteOptions & {
   readonly meta: z.input<Meta>;
   readonly events: NextEvents<Tbl, E, Tx>;
 };
@@ -92,6 +106,7 @@ export type CommandContext<out MetaOut, out Tx extends TransactionSource<Tx> = D
     entity: EntityDef<K, Tbl, E, MetaOut, Key>,
     id: EntityId<Tbl, Key>,
     events: NextEvents<Tbl, E, Tx>,
+    opts?: WriteOptions,
   ) => Promise<WriteResult<Tbl, E, MetaOut, Key>>;
   /** Run another command in a savepoint of this transaction, with the same metadata. Safe to destructure. */
   readonly run: <S extends z.ZodType, R>(

@@ -116,6 +116,37 @@ describe('write', () => {
     expect(await rowOf(id)).toMatchObject({ status: 'placed', version: 1 });
   });
 
+  it('expectedVersion: a stale caller is refused with CONFLICT before the rules run; a current one goes through', async () => {
+    // Why: a client that edited a copy at version 1 must not overwrite a version 2 it never saw.
+    // The check is the library's, so no command has to compare versions by hand.
+    const id = orderId(++next);
+    await place(id);
+    await pay(id);
+    let rulesRan = false;
+    const stale = db.transaction(tx =>
+      journal.write(tx, order, id, {
+        meta,
+        expectedVersion: 1,
+        events: () => {
+          rulesRan = true;
+          return [OrderNoted({ note: 'late' })];
+        },
+      }),
+    );
+    await expect(stale).rejects.toMatchObject({ code: 'CONFLICT' });
+    await expect(stale).rejects.toThrow('expected version 1 but the row is at version 2');
+    expect(rulesRan).toBe(false);
+    const current = await db.transaction(tx =>
+      journal.write(tx, order, id, { meta, expectedVersion: 2, events: () => [OrderNoted({ note: 'on time' })] }),
+    );
+    expect(current.row).toMatchObject({ note: 'on time', version: 3 });
+    // No row is version 0: a create that expects nothing there.
+    const fresh = orderId(++next);
+    await expect(
+      db.transaction(tx => journal.write(tx, order, fresh, { meta, expectedVersion: 1, events: () => [] })),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
   it('update: the reducer sees the stored row and the version moves to 2', async () => {
     const id = orderId(++next);
     await place(id);

@@ -98,9 +98,10 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
     events: NextEvents<Tbl, E, Tx>,
     trace: Trace,
     onJobs?: (count: number) => void,
-    mode: 'write' | 'adopt' = 'write',
+    opts?: { readonly mode?: 'write' | 'adopt'; readonly expectedVersion?: number },
   ): Promise<WriteResult<Tbl, E, MetaOut, Key>> => {
-    const adopting = mode === 'adopt';
+    const adopting = opts?.mode === 'adopt';
+    const expectedVersion = opts?.expectedVersion;
     return oneAtATime(tx, `${adopting ? 'adopt' : 'write to'} ${entity.kind} ${id}`, async () => {
       assertExactId(entity, id);
       const meta = getValidatedMeta();
@@ -116,6 +117,15 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
         }
         assertStoredId(entity, loaded, id);
         const row = loaded;
+        // Before the rules run: a stale caller gets the answer without doing any work.
+        if (expectedVersion !== undefined && (row?.version ?? 0) !== expectedVersion) {
+          throw new JournalError(
+            'CONFLICT',
+            entity.kind,
+            id,
+            `expected version ${expectedVersion} but the row is at version ${row?.version ?? 0}`,
+          );
+        }
         const pending = await events(row, { tx: sp });
         if (pending.length === 0) {
           debugWrite('%s %s: events returned nothing', entity.kind, id);
@@ -347,6 +357,8 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
       input.events,
       // No command and no cause. A fresh chain, so every recorded event has a correlation id.
       { commandId: null, causeSeq: null, correlationId: correlationId() },
+      undefined,
+      { expectedVersion: input.expectedVersion },
     );
 
   /** `journal.adopt`: `write` in adopt mode, with `meta` parsed for this one call. */
@@ -368,7 +380,7 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
       input.events,
       { commandId: null, causeSeq: null, correlationId: correlationId() },
       undefined,
-      'adopt',
+      { mode: 'adopt' },
     );
 
   return { write, adopt, writeWithValidatedMeta };

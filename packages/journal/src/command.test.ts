@@ -534,6 +534,26 @@ const stamps = async (id: OrderId) => {
   }));
 };
 
+describe('expectedVersion from a command', () => {
+  it("a command's write takes the client's version and refuses a stale one with CONFLICT", async () => {
+    const noteAt = j.command(
+      'noteAt',
+      z.object({ orderId: orderIdSchema, version: z.int(), note: z.string() }),
+      (input, { write }) =>
+        write(order, input.orderId, () => [OrderNoted({ note: input.note })], { expectedVersion: input.version }),
+    );
+    const id = orderId(++next);
+    await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
+    await journal.run(db, payOrder, { orderId: id, amount: 1 }, meta);
+    await expect(journal.run(db, noteAt, { orderId: id, version: 1, note: 'stale' }, meta)).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+    await expect(journal.run(db, noteAt, { orderId: id, version: 2, note: 'fresh' }, meta)).resolves.toMatchObject({
+      row: { note: 'fresh', version: 3 },
+    });
+  });
+});
+
 describe('trace', () => {
   it('a run stamps its own command id and a new correlation id on every event it writes', async () => {
     // Why: a reader of the log must be able to answer "which command wrote this?" without the app

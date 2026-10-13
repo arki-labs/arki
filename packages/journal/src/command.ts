@@ -75,8 +75,8 @@ export function createCommandRunner<Meta extends z.ZodObject, Tx extends Transac
           meta,
           commandId: own,
           correlationId: trace.correlationId,
-          write: (entity, id, events) =>
-            track(writeWithValidatedMeta(tx, entity, id, () => meta, events, trace, onJobs)),
+          write: (entity, id, events, opts) =>
+            track(writeWithValidatedMeta(tx, entity, id, () => meta, events, trace, onJobs, opts)),
           run: (child, childInput) =>
             track(runCommand(tx, child, childInput, () => Promise.resolve(meta), onJobs, trace)),
         };

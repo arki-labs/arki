@@ -13,6 +13,7 @@ export type {
   ForgetResult,
   NextEvents,
   WriteInput,
+  WriteOptions,
   WriteResult,
 } from './api.js';
 export { CommandError, JournalError, isCommandError, isJournalError } from './errors.js';
