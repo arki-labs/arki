@@ -11,6 +11,7 @@ import type {
   Needs,
   Projection,
   ProjectionHandlers,
+  ProjectionOptions,
   Recorded,
   Services,
 } from './types.js';
@@ -39,12 +40,15 @@ export function defineProjection<E extends AnyEntity<Meta>, Meta, Tx extends DbH
   name: string,
   entity: E | readonly E[],
   on: NoInfer<ProjectionHandlers<E, Meta, Tx>>,
+  opts?: ProjectionOptions,
 ): Projection<Meta, Tx> {
   const handlers: Partial<Record<string, BivariantFn<[tx: Tx, event: Recorded<string, unknown, Meta>], unknown>>> = on;
+  if (opts?.lane === 'async') assertStoredName('effect name', name);
   return {
     name,
     entities: toList(entity),
     types: declaredTypes(handlers),
+    lane: opts?.lane ?? 'inline',
     async run(tx, event) {
       const handler = ownHandler(handlers, event.type);
       if (handler !== undefined) await handler(tx, event);

@@ -261,8 +261,17 @@ export type Projection<Meta = unknown, Tx = DbHandle> = {
   readonly name: string;
   readonly entities: readonly AnyEntity<Meta>[];
   readonly types: ReadonlySet<string>;
+  /**
+   * `inline`: runs inside the write's transaction, so the read model is exact. `async`: the
+   * worker applies it later, in batches, with a cursor in `journal_cursors` committed in the
+   * same transaction as the handlers; exactly once for database writes, eventually consistent.
+   */
+  readonly lane: 'inline' | 'async';
   readonly run: BivariantFn<[tx: Tx, event: Recorded<string, unknown, Meta>], Promise<void>>;
 };
+
+/** The fourth argument of `j.projection`. */
+export type ProjectionOptions = { readonly lane?: 'inline' | 'async' };
 
 /**
  * `db` is the root database that was given to `drain` or `worker`: the same object.

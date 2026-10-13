@@ -6,13 +6,23 @@
  * Must not import `journal`, `api`, `write` or `command`.
  */
 import type { z } from 'zod';
-import { and, asc, desc, eq, inArray, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lte, max, notInArray, or, sql } from 'drizzle-orm';
 
 import type { History } from './history.js';
 import type { HookPointInternal } from './hooks.js';
 import type { JournalTables } from './pg.js';
-import type { DbHandle, Effect, EffectHookContext, JournalWorker, RootDb, StrandedJobs } from './types.js';
+import type {
+  DbHandle,
+  Effect,
+  EffectHookContext,
+  JournalWorker,
+  Projection,
+  RootDb,
+  StrandedJobs,
+  TransactionSource,
+} from './types.js';
 import { debugDrain, debugWorker } from './debug.js';
+import { JournalError } from './errors.js';
 import { findEventDefinition } from './fold.js';
 import { leaseToken } from './id.js';
 import { assertRootDb } from './storage.js';
@@ -230,7 +240,128 @@ export type WorkerDeps<AppDb extends RootDb> = {
     db: AppDb & RootDb,
     opts?: { readonly batchSize?: number; readonly signal?: AbortSignal; readonly leaseSeconds?: number },
   ) => Promise<number>;
+  /** One batch per async projection. Returns how many events were scanned. */
+  readonly catchUp: (
+    db: AppDb & RootDb,
+    opts?: { readonly batchSize?: number },
+  ) => Promise<{ readonly scanned: number }>;
 };
+
+/** What the async lane of projections needs from the journal. */
+export type CatchUpDeps<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>> = {
+  readonly tables: JournalTables;
+  readonly projections: readonly Projection<z.output<Meta>, Tx>[];
+  readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
+};
+
+const DEFAULT_CATCH_UP_BATCH = 100;
+
+export function createCatchUp<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>>(deps: CatchUpDeps<Meta, Tx>) {
+  const { events: eventsTable, cursors: cursorsTable } = deps.tables;
+  const { decodeStoredEvent } = deps.history;
+  const byName = new Map(deps.projections.map(projection => [projection.name, projection]));
+
+  /** The cursor row, created at 0 if missing, locked for this transaction. */
+  const lockCursor = async (tx: DbHandle, name: string): Promise<number> => {
+    await tx.insert(cursorsTable).values({ name, seq: 0 }).onConflictDoNothing();
+    const [row] = await tx
+      .select({ seq: cursorsTable.seq })
+      .from(cursorsTable)
+      .where(eq(cursorsTable.name, name))
+      .for('update');
+    if (row === undefined) throw new Error(`journal: cursor "${name}" vanished while locked`);
+    return row.seq;
+  };
+
+  /**
+   * One batch for one projection: lock its cursor, scan the next events in seq order,
+   * apply the matching ones, move the cursor to the last event scanned, commit. The
+   * cursor is global scan progress, so lag reaches zero and two workers cannot apply
+   * one batch twice: the second waits on the row lock and starts after the first moved it.
+   */
+  const batchFor = async (db: TransactionSource<Tx>, projection: Projection<z.output<Meta>, Tx>, batchSize: number) =>
+    db.transaction(async tx => {
+      const from = await lockCursor(tx, projection.name);
+      const rows = await tx
+        .select()
+        .from(eventsTable)
+        .where(gt(eventsTable.seq, from))
+        .orderBy(asc(eventsTable.seq))
+        .limit(batchSize);
+      const last = rows.at(-1);
+      if (last === undefined) return 0;
+      const kinds = new Set(projection.entities.map(entity => entity.kind));
+      for (const row of rows) {
+        if (!kinds.has(row.kind) || !projection.types.has(row.type)) continue;
+        await projection.run(
+          tx,
+          decodeStoredEvent(row, findEventDefinition(projection.entities, row.kind, row.type), row.entityId),
+        );
+      }
+      await tx
+        .update(cursorsTable)
+        .set({ seq: last.seq, updatedAt: sql`now()` })
+        .where(eq(cursorsTable.name, projection.name));
+      return rows.length;
+    });
+
+  const catchUp = async (
+    db: RootDb & TransactionSource<Tx>,
+    opts?: { readonly batchSize?: number },
+  ): Promise<{ readonly scanned: number }> => {
+    assertRootDb(db, 'catchUp');
+    const batchSize = opts?.batchSize ?? DEFAULT_CATCH_UP_BATCH;
+    let scanned = 0;
+    for (const projection of deps.projections) {
+      // One projection's failure leaves the others running; its batch rolled back and runs again next pass.
+      try {
+        scanned += await batchFor(db, projection, batchSize);
+      } catch (error) {
+        debugDrain('projection %s: batch failed: %s', projection.name, errorText(error));
+      }
+    }
+    return { scanned };
+  };
+
+  const reset = async (
+    db: RootDb & TransactionSource<Tx>,
+    projection: Projection<z.output<Meta>, Tx>,
+    clear?: (tx: Tx) => Promise<void>,
+  ): Promise<void> => {
+    assertRootDb(db, 'reset');
+    if (!byName.has(projection.name))
+      throw new JournalError(
+        'BAD_DEFINITION',
+        'projection',
+        projection.name,
+        `journal: "${projection.name}" is not an async projection of this journal`,
+      );
+    await db.transaction(async (tx: Tx) => {
+      // The lock first, so no batch lands between the clearing and the rewind.
+      await lockCursor(tx, projection.name);
+      await clear?.(tx);
+      await tx
+        .update(cursorsTable)
+        .set({ seq: 0, updatedAt: sql`now()` })
+        .where(eq(cursorsTable.name, projection.name));
+    });
+  };
+
+  const cursors = async (
+    db: DbHandle,
+  ): Promise<readonly { readonly name: string; readonly seq: number; readonly lag: number }[]> => {
+    const [top] = await db.select({ seq: max(eventsTable.seq) }).from(eventsTable);
+    const latest = top?.seq ?? 0;
+    const rows = await db.select().from(cursorsTable);
+    const stored = new Map(rows.map(row => [row.name, row.seq]));
+    return deps.projections.map(projection => {
+      const seq = stored.get(projection.name) ?? 0;
+      return { name: projection.name, seq, lag: Math.max(0, latest - seq) };
+    });
+  };
+
+  return { catchUp, reset, cursors };
+}
 
 export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
   /** One wake function per running worker this journal started. */
@@ -276,6 +407,7 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
             signal: stopping.signal,
             leaseSeconds: opts?.leaseSeconds,
           });
+          if (isRunning()) processed += (await deps.catchUp(db)).scanned;
         } catch (error) {
           debugWorker('drain failed: %s', errorText(error));
         }

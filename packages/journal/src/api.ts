@@ -29,6 +29,7 @@ import type {
   PendingOf,
   Projection,
   ProjectionHandlers,
+  ProjectionOptions,
   RecordedOf,
   ReducerRow,
   RootDb,
@@ -254,7 +255,31 @@ export type Journal<
     entity: EntityDef<K, Tbl, E, z.output<Meta>, Key>,
     id: EntityId<Tbl, Key>,
   ): Promise<Row<Tbl> | null>;
-  /** Walk the log after sequence number `afterSeq` and call one projection's handlers, a batch per transaction. */
+  /**
+   * The async lane of projections: one batch per async projection. Each batch locks the
+   * projection's cursor, scans the next `batchSize` events in commit order, applies the
+   * matching ones on that transaction, and moves the cursor to the last event scanned.
+   * The worker calls it after every drain; call it yourself in tests or one-off scripts.
+   * A projection whose batch throws is skipped this pass and tried again next pass.
+   */
+  catchUp(
+    db: RootDb & TransactionSource<Tx>,
+    opts?: { readonly batchSize?: number },
+  ): Promise<{ readonly scanned: number }>;
+  /**
+   * Rewind an async projection to the start. `clear` runs on the same transaction, after the
+   * cursor is locked and before it is rewound, so the read model is emptied and refilled with
+   * no batch landing in between. To rebuild without downtime, deploy the projection under a
+   * new name into a new table instead, wait for `cursors` to show lag 0, then switch reads.
+   */
+  reset(
+    db: RootDb & TransactionSource<Tx>,
+    projection: Projection<z.output<Meta>, Tx>,
+    clear?: (tx: Tx) => Promise<void>,
+  ): Promise<void>;
+  /** Per async projection: its cursor and how far behind the newest event it is, in seqs. */
+  cursors(db: DbHandle): Promise<readonly { readonly name: string; readonly seq: number; readonly lag: number }[]>;
+  /** Walk the log after sequence number `afterSeq` and call one inline projection's handlers, a batch per transaction. Async projections use `reset` and `catchUp`. */
   rerun(
     db: TransactionSource<Tx>,
     projection: Projection<z.output<Meta>, Tx>,
@@ -352,6 +377,7 @@ export type JournalDefinitions<
     name: string,
     entity: E | readonly E[],
     on: NoInfer<ProjectionHandlers<E, z.output<Meta>, Tx>>,
+    opts?: ProjectionOptions,
   ): Projection<z.output<Meta>, Tx>;
   effect<E extends AnyEntity<z.output<Meta>>>(
     name: string,

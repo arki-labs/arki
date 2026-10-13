@@ -35,6 +35,7 @@ export type {
   EntityTable,
   EventDef,
   EventOptions,
+  ProjectionOptions,
   CommandHookContext,
   EffectHookContext,
   EventsOf,

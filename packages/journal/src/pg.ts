@@ -91,7 +91,15 @@ export function journalTables(schema?: PgSchema) {
     recordedAt: timestamp('recorded_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   });
 
-  return { events, jobs, receipts };
+  const cursors = table('journal_cursors', {
+    /** The async projection's name. */
+    name: varchar('name', { length: 128 }).primaryKey(),
+    /** Global scan progress: every event with a seq at or below this was looked at, matching or not. */
+    seq: bigint('seq', { mode: 'number' }).notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  });
+
+  return { events, jobs, receipts, cursors };
 }
 
 export type JournalTables = ReturnType<typeof journalTables>;

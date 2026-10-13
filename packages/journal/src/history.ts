@@ -273,8 +273,10 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
   ): Promise<ForgetResult<Tbl>> => {
     assertExactId(entity, id);
     return db.transaction(async tx => {
-      // The row lock first, so no write lands between the rewrite and the repair.
+      // The row lock first, so no write lands between the rewrite and the repair. Then every
+      // async cursor, so no projection batch in flight commits the data after it was erased.
       await loadRow(tx, entity, id, true);
+      await tx.select({ name: deps.tables.cursors.name }).from(deps.tables.cursors).for('update');
       const rows = await loadHistory(tx, entity.kind, id);
       let erased = 0;
       for (const row of rows) {

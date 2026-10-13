@@ -32,7 +32,7 @@ import { defineEvent } from './event.js';
 import { bindEffect, defineProjection, effectFor } from './handlers.js';
 import { createHistory } from './history.js';
 import { createHookPoint } from './hooks.js';
-import { createDrain, createStrandedJobs, createWorkers } from './worker.js';
+import { createCatchUp, createDrain, createStrandedJobs, createWorkers } from './worker.js';
 import { createWriter } from './write.js';
 
 const emptyMeta = z.object({});
@@ -107,7 +107,7 @@ function createInit<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, 
     event: defineEvent,
     entity,
     command: (name, input, handler) => ({ name, input, handler }),
-    projection: (name, entity, on) => defineProjection(name, entity, on),
+    projection: (name, entity, on, opts) => defineProjection(name, entity, on, opts),
     effect: effectFor<MetaOut, AppDb, RootCommandRunner<Meta, Tx>>(),
     compose: config => {
       const effects = (config.effects ?? []).map(effect => bindEffect(effect, config.services ?? {}));
@@ -144,10 +144,13 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
   // `journal.drain`, `journal.wake` and `journal.run` are read from the journal object on each
   // call, so the worker loop, `run`, a bound runner and an effect's `ctx.run` always use the methods the object holds.
   const history = createHistory<Meta>({ metaSchema, tables });
+  const inlineProjections = projections.filter(projection => projection.lane === 'inline');
+  const asyncProjections = projections.filter(projection => projection.lane === 'async');
   const { write, adopt, writeWithValidatedMeta } = createWriter<Meta, Tx>({
     metaSchema,
     tables,
-    projections,
+    projections: inlineProjections,
+    asyncProjections,
     effects,
     history,
   });
@@ -169,7 +172,11 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     history,
     runOn: (db, cause) => (command, input, meta, call) => run(db, command, input, meta, call, cause),
   });
-  const workers = createWorkers<WorkerDb>({ drain: (db, opts) => journal.drain(db, opts) });
+  const catching = createCatchUp<Meta, Tx>({ tables, projections: asyncProjections, history });
+  const workers = createWorkers<WorkerDb>({
+    drain: (db, opts) => journal.drain(db, opts),
+    catchUp: (db, opts) => journal.catchUp(db, opts),
+  });
   const strandedJobs = createStrandedJobs({ tables, effectNames: effects.map(effect => effect.name) });
 
   const journal: Journal<Meta, Tx, AppDb> = {
@@ -189,7 +196,19 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
         .returning({ key: tables.receipts.key });
       return gone.length;
     },
-    rerun: (db, projection, opts) => history.rerun(db, projection, opts),
+    rerun: (db, projection, opts) => {
+      if (projection.lane === 'async')
+        throw new JournalError(
+          'BAD_DEFINITION',
+          'projection',
+          projection.name,
+          `journal: projection "${projection.name}" is async; use reset and catchUp instead of rerun`,
+        );
+      return history.rerun(db, projection, opts);
+    },
+    catchUp: (db, opts) => catching.catchUp(db, opts),
+    reset: (db, projection, clear) => catching.reset(db, projection, clear),
+    cursors: db => catching.cursors(db),
     drain: (db, opts) => drain(db, opts),
     worker: (db, opts) => workers.worker(db, opts),
     wake: () => workers.wakeAll(),

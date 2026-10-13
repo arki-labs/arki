@@ -94,7 +94,10 @@ export function sortedByVersion<Row extends { readonly version: number }>(rows: 
 export type WriteDeps<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>> = {
   readonly metaSchema: Meta;
   readonly tables: JournalTables;
+  /** Inline projections only: they run inside the write. */
   readonly projections: readonly Projection<z.output<Meta>, Tx>[];
+  /** Async projections: the write only wakes the worker when a recorded event matches one. */
+  readonly asyncProjections: readonly Pick<Projection, 'types' | 'entities'>[];
   /** A write only queues one job per matching effect. It never runs an effect, so the effect's database type does not matter here. */
   readonly effects: readonly Pick<Effect<z.output<Meta>>, 'name' | 'types' | 'entities' | 'schedule'>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent' | 'highestVersion' | 'assertLogSaysGone'>;
@@ -102,7 +105,7 @@ export type WriteDeps<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>
 
 export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>>(deps: WriteDeps<Meta, Tx>) {
   type MetaOut = z.output<Meta>;
-  const { metaSchema, projections, effects } = deps;
+  const { metaSchema, projections, asyncProjections, effects } = deps;
   const { events: eventsTable, jobs: jobsTable } = deps.tables;
   const { decodeStoredEvent, highestVersion, assertLogSaysGone } = deps.history;
 
@@ -349,10 +352,12 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
               ...dueAt(effect, event),
             })),
         );
-        if (jobs.length > 0) {
-          await sp.insert(jobsTable).values(jobs);
-          onJobs?.(jobs.length);
-        }
+        if (jobs.length > 0) await sp.insert(jobsTable).values(jobs);
+        // Work for the worker: jobs, plus an async projection that wants one of these events.
+        const forAsync = recorded.some(event =>
+          asyncProjections.some(p => p.types.has(event.type) && p.entities.some(e => e.kind === entity.kind)),
+        );
+        if (jobs.length > 0 || forAsync) onJobs?.(jobs.length + (forAsync ? 1 : 0));
 
         debugWrite(
           '%s %s: v%d -> v%d, %d events, %d jobs',

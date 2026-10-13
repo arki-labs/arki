@@ -297,6 +297,12 @@ For a new meaning, add a new event type. Leave the old reducer as it is.
 
 Adding an optional field, or one with a default, is safe. Old rows still parse.
 
+### Async projections
+
+A projection runs inline by default: inside the write's transaction, so the read model is exact. A slow or large one can run later instead: `j.projection('leaderboard', game, handlers, { lane: 'async' })`. The write then only wakes the worker. The worker, after every drain pass, gives each async projection one batch: it locks the projection's row in `journal_cursors`, scans the next `batchSize` events in commit order, applies the matching ones on that same transaction, and moves the cursor to the last event scanned. Progress and the read model's writes commit together, so a crash cannot apply a batch twice or skip one. The cursor counts every event, matching or not, so `journal.cursors(db)` reports an honest `lag` in seqs, and lag 0 means caught up. A projection whose batch throws is skipped that pass and tried again next pass; the others go on.
+
+`journal.catchUp(db, { batchSize })` runs one batch per async projection by hand, for tests and scripts. `journal.reset(db, projection, async tx => { await tx.delete(table) })` empties the read model and rewinds the cursor in one transaction, with the cursor locked first, so no batch lands in between. To rebuild with no downtime, deploy the projection under a new name into a new table, wait for lag 0, switch reads, then drop the old one. `rerun` is for inline projections only. `forget` locks every async cursor before it rewrites, so a batch in flight cannot commit erased data after it.
+
 ## Effects
 
 An effect runs after the commit, at least once, from a row in `journal_jobs`. A handler gets the event and a context: `(e, { jobId, signal, db, run })`.
@@ -470,6 +476,11 @@ journal_receipts
   result        jsonb                     -- { value } when finished; {} for no value; null while running
   command_id    varchar not null
   recorded_at   timestamptz not null default now()
+
+journal_cursors
+  name          varchar(128) primary key  -- the async projection
+  seq           bigint not null default 0 -- global scan progress
+  updated_at    timestamptz not null default now()
 
 journal_jobs
   id            varchar primary key       -- job_xxx; pass it on as an idempotency key
