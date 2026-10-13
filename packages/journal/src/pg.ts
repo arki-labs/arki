@@ -45,6 +45,8 @@ export function journalTables(schema?: PgSchema) {
       correlationId: varchar('correlation_id'),
       /** Set by `forget` when `data` was rewritten to the event's erased form. */
       erasedAt: timestamp('erased_at', { withTimezone: true, mode: 'date' }),
+      /** The event's schema version when `data` was written. Older rows are upcast on read. */
+      schemaVersion: integer('schema_version').notNull().default(1),
     },
     t => [
       unique('journal_events_kind_entity_id_version_unique').on(t.kind, t.entityId, t.version),

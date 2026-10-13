@@ -295,7 +295,30 @@ So changing how an existing event is reduced changes what `repair` writes for ex
 
 For a new meaning, add a new event type. Leave the old reducer as it is.
 
+### Changing events later
+
 Adding an optional field, or one with a default, is safe. Old rows still parse.
+
+For any other change to an event's data, such as a rename, a new required field, or a new structure, keep the old schema and add an upcaster:
+
+```ts
+const NoteSetV1 = z.object({ text: z.string() });
+
+const NoteSet = j.event('NoteSet', z.object({ note: z.string(), by: z.string() }), {
+  upcasters: [{ from: NoteSetV1, up: v1 => ({ note: v1.text, by: 'unknown' }) }],
+});
+```
+
+Each upcaster lifts data one version up. `upcasters[0]` takes version 1 to 2, the next takes 2 to 3, and so on. The event's version is one more than the number of upcasters. New rows store it in `schema_version`, and old rows keep the version they were written at.
+
+Every reader goes through the same decoder: `replay`, `verify`, `repair`, `forget`, `rerun`, async projections, effects and taps. It parses an old row with each step's `from` schema, calls `up`, and parses the result with the current schema. Each `up` gets the typed output of its own `from`. Readers only ever see the current shape. The stored row is never rewritten, except by `forget`, which stores the erased form at the current version.
+
+The rules:
+
+- Append a step for each change. Never edit or remove a step, because rows at that version still exist.
+- An upcaster is a pure function of the old data. It must not read the clock, the database or the row.
+- A row from a newer release than the reader is `REPLAY_FAILED`, so old code never guesses at a new shape. Deploy readers before the first write of a new version if old and new code run side by side.
+- A row that does not fit its version's schema, or an upcaster that throws, is `REPLAY_FAILED` and names the version.
 
 ### Async projections
 
@@ -478,6 +501,7 @@ journal_events
   cause_seq       bigint                  -- the event whose effect ran that command; else null
   correlation_id  varchar                 -- one per chain; see Tracing
   erased_at       timestamptz             -- set by forget; data holds the erased form
+  schema_version  integer not null default 1  -- the event's version when data was written
   unique (kind, entity_id, version)
   index (correlation_id)
 

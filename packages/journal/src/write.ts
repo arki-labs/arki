@@ -205,7 +205,7 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
             );
           const data: unknown = def.schema.parse(event.data);
           assertRoundTrips(def.schema, data, entity.kind, id, `event "${event.type}"`);
-          return data;
+          return { data, schemaVersion: def.version };
         });
         const firstType = pending[0]?.type ?? '';
         const firstAt = `event "${firstType}" at version ${baseVersion + 1}`;
@@ -229,7 +229,8 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
               entityId: id,
               version: baseVersion + index + 1,
               type: event.type,
-              data: validated[index],
+              data: validated[index]?.data,
+              schemaVersion: validated[index]?.schemaVersion,
               meta,
               commandId: trace.commandId,
               causeSeq: trace.causeSeq,

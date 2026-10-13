@@ -35,6 +35,8 @@ export type {
   EntityTable,
   EventDef,
   EventOptions,
+  Upcaster,
+  UpcasterSteps,
   ProjectionOptions,
   Tap,
   TapContext,

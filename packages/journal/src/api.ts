@@ -381,7 +381,11 @@ export type JournalDefinitions<
   Tx extends TransactionSource<Tx> = DbHandle,
   AppDb extends RootDb = RootDb,
 > = {
-  event<T extends string, S extends z.ZodType>(type: T, schema: S, opts?: EventOptions<S>): EventDef<T, S>;
+  event<T extends string, S extends z.ZodType, const U extends readonly z.ZodType[] = readonly []>(
+    type: T,
+    schema: S,
+    opts?: EventOptions<S, U>,
+  ): EventDef<T, S>;
   /** The key column is `id`. */
   entity<K extends string, Tbl extends IdTable>(
     kind: K,

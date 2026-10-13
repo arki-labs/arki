@@ -168,12 +168,40 @@ export type EventDef<T extends string, S extends z.ZodType> = BivariantFn<
    * A method signature, so every `EventDef` is an `AnyEventDef`; see `BivariantFn`.
    */
   erased?(data: z.output<S>): z.input<S>;
+  /**
+   * The schema version new events are stored at: one more than the number of upcasters.
+   * Rows record it in `schema_version`; a row at an older version is upcast on read.
+   */
+  readonly version: number;
+  /** Lifts stored data one version up. `upcasters[0]` takes version 1 to 2. Empty for most events. */
+  readonly upcasters: readonly Upcaster[];
+};
+
+/**
+ * One step of an event's history: the schema its data had at one version, and how to
+ * lift that data to the next. Replay parses with `from` first, so `up` sees valid old data.
+ * `up` is a method signature, so a typed step is an `Upcaster`; see `BivariantFn`.
+ */
+export type Upcaster = {
+  readonly from: z.ZodType;
+  up(data: unknown): unknown;
+};
+
+/** Typed upcaster steps: each `up` receives the output of its own `from`. */
+export type UpcasterSteps<U extends readonly z.ZodType[]> = {
+  readonly [K in keyof U]: { readonly from: U[K]; readonly up: (data: z.output<U[K]>) => unknown };
 };
 
 /** The third argument of `j.event`. */
-export type EventOptions<S extends z.ZodType> = {
+export type EventOptions<S extends z.ZodType, U extends readonly z.ZodType[] = readonly []> = {
   /** See `EventDef.erased`. */
   readonly erased?: (data: z.output<S>) => z.input<S>;
+  /**
+   * Older shapes of this event, oldest first: `{ from: schemaV1, up: v1 => v2 }`, then
+   * `{ from: schemaV2, up: v2 => v3 }`. The last step's result must fit the current schema.
+   * Append a step when the event's data changes incompatibly; never edit or remove one.
+   */
+  readonly upcasters?: UpcasterSteps<U>;
 };
 export type AnyEventDef = EventDef<string, z.ZodType>;
 

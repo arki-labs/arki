@@ -87,6 +87,35 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
    * Turn a stored log row into a recorded event, parsing data and meta with
    * their current schemas. `id` is the row's entity id as the caller types it.
    */
+  /**
+   * Lift a row's data from the schema version it was written at to the event's current
+   * one, one step at a time. Each step parses with its own `from` schema first, so a bad
+   * row names the version it failed at. Data already at the current version is returned as is.
+   */
+  const upcast = (row: typeof eventsTable.$inferSelect, def: AnyEventDef, at: string): unknown => {
+    const fail = (why: string): never => {
+      throw new JournalError('REPLAY_FAILED', row.kind, row.entityId, `${at}: ${why}`);
+    };
+    if (row.schemaVersion > def.version) {
+      return fail(`written at schema version ${row.schemaVersion}, but the event declares version ${def.version}`);
+    }
+    let value: unknown = row.data;
+    for (let version = row.schemaVersion; version < def.version; version += 1) {
+      const step = def.upcasters[version - 1];
+      if (step === undefined) return fail(`no upcaster for schema version ${version}`);
+      const old = step.from.safeParse(value);
+      if (!old.success) return fail(`the data does not fit schema version ${version}: ${old.error.message}`);
+      try {
+        value = step.up(old.data);
+      } catch (error) {
+        return fail(
+          `the upcaster from version ${version} threw: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return value;
+  };
+
   const decodeStoredEvent = <Id extends string>(
     row: typeof eventsTable.$inferSelect,
     def: AnyEventDef | undefined,
@@ -101,13 +130,14 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
         `${at}: the entity declares no event of this type`,
       );
     }
-    const data = def.schema.safeParse(row.data);
+    const data = def.schema.safeParse(upcast(row, def, at));
     if (!data.success) {
+      const after = row.schemaVersion < def.version ? ` after upcasting from version ${row.schemaVersion}` : '';
       throw new JournalError(
         'REPLAY_FAILED',
         row.kind,
         row.entityId,
-        `${at}: the data does not fit the current schema: ${data.error.message}`,
+        `${at}: the data does not fit the current schema${after}: ${data.error.message}`,
       );
     }
     const meta = metaSchema.safeParse(row.meta);
@@ -299,7 +329,11 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
         }
         await tx
           .update(eventsTable)
-          .set({ data: form.data, erasedAt: sql`coalesce(${eventsTable.erasedAt}, now())` })
+          .set({
+            data: form.data,
+            schemaVersion: def.version,
+            erasedAt: sql`coalesce(${eventsTable.erasedAt}, now())`,
+          })
           .where(eq(eventsTable.seq, row.seq));
         erased += 1;
       }
