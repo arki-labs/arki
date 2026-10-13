@@ -1,0 +1,424 @@
+{
+  "name": "@arki/ui",
+  "version": "0.1.4",
+  "description": "React component library for ARKI apps — Base UI primitives styled with Tailwind v4 semantic tokens: forms, overlays, navigation, data display and charts.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "react",
+    "ui",
+    "components",
+    "base-ui",
+    "tailwind"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./src/index.ts",
+      "browser": "./src/index.ts"
+    },
+    "./utils": {
+      "types": "./dist/src/cn.d.ts",
+      "import": "./src/cn.ts",
+      "browser": "./src/cn.ts"
+    },
+    "./cn": {
+      "types": "./dist/src/cn.d.ts",
+      "import": "./src/cn.ts",
+      "browser": "./src/cn.ts"
+    },
+    "./toast": {
+      "types": "./dist/src/toast/index.d.ts",
+      "import": "./src/toast/index.ts",
+      "browser": "./src/toast/index.ts"
+    },
+    "./design-system": {
+      "types": "./dist/src/design-system.d.ts",
+      "import": "./src/design-system.ts",
+      "browser": "./src/design-system.ts"
+    },
+    "./accordion": {
+      "types": "./dist/src/accordion.d.ts",
+      "import": "./src/accordion.tsx",
+      "browser": "./src/accordion.tsx"
+    },
+    "./alert": {
+      "types": "./dist/src/alert.d.ts",
+      "import": "./src/alert.tsx",
+      "browser": "./src/alert.tsx"
+    },
+    "./alert-dialog": {
+      "types": "./dist/src/alert-dialog.d.ts",
+      "import": "./src/alert-dialog.tsx",
+      "browser": "./src/alert-dialog.tsx"
+    },
+    "./aspect-ratio": {
+      "types": "./dist/src/aspect-ratio.d.ts",
+      "import": "./src/aspect-ratio.tsx",
+      "browser": "./src/aspect-ratio.tsx"
+    },
+    "./avatar": {
+      "types": "./dist/src/avatar.d.ts",
+      "import": "./src/avatar.tsx",
+      "browser": "./src/avatar.tsx"
+    },
+    "./badge": {
+      "types": "./dist/src/badge.d.ts",
+      "import": "./src/badge.tsx",
+      "browser": "./src/badge.tsx"
+    },
+    "./breadcrumb": {
+      "types": "./dist/src/breadcrumb.d.ts",
+      "import": "./src/breadcrumb.tsx",
+      "browser": "./src/breadcrumb.tsx"
+    },
+    "./button": {
+      "types": "./dist/src/button.d.ts",
+      "import": "./src/button.tsx",
+      "browser": "./src/button.tsx"
+    },
+    "./calendar": {
+      "types": "./dist/src/calendar.d.ts",
+      "import": "./src/calendar.tsx",
+      "browser": "./src/calendar.tsx"
+    },
+    "./callout": {
+      "types": "./dist/src/callout.d.ts",
+      "import": "./src/callout.tsx",
+      "browser": "./src/callout.tsx"
+    },
+    "./card": {
+      "types": "./dist/src/card.d.ts",
+      "import": "./src/card.tsx",
+      "browser": "./src/card.tsx"
+    },
+    "./carousel": {
+      "types": "./dist/src/carousel.d.ts",
+      "import": "./src/carousel.tsx",
+      "browser": "./src/carousel.tsx"
+    },
+    "./chart": {
+      "types": "./dist/src/chart.d.ts",
+      "import": "./src/chart.tsx",
+      "browser": "./src/chart.tsx"
+    },
+    "./checkbox": {
+      "types": "./dist/src/checkbox.d.ts",
+      "import": "./src/checkbox.tsx",
+      "browser": "./src/checkbox.tsx"
+    },
+    "./collapsible": {
+      "types": "./dist/src/collapsible.d.ts",
+      "import": "./src/collapsible.tsx",
+      "browser": "./src/collapsible.tsx"
+    },
+    "./color-picker": {
+      "types": "./dist/src/color-picker.d.ts",
+      "import": "./src/color-picker.tsx",
+      "browser": "./src/color-picker.tsx"
+    },
+    "./command": {
+      "types": "./dist/src/command.d.ts",
+      "import": "./src/command.tsx",
+      "browser": "./src/command.tsx"
+    },
+    "./context-menu": {
+      "types": "./dist/src/context-menu.d.ts",
+      "import": "./src/context-menu.tsx",
+      "browser": "./src/context-menu.tsx"
+    },
+    "./control-group": {
+      "types": "./dist/src/control-group.d.ts",
+      "import": "./src/control-group.tsx",
+      "browser": "./src/control-group.tsx"
+    },
+    "./date-picker": {
+      "types": "./dist/src/date-picker.d.ts",
+      "import": "./src/date-picker.tsx",
+      "browser": "./src/date-picker.tsx"
+    },
+    "./dialog": {
+      "types": "./dist/src/dialog.d.ts",
+      "import": "./src/dialog.tsx",
+      "browser": "./src/dialog.tsx"
+    },
+    "./drawer": {
+      "types": "./dist/src/drawer.d.ts",
+      "import": "./src/drawer.tsx",
+      "browser": "./src/drawer.tsx"
+    },
+    "./dropdown-menu": {
+      "types": "./dist/src/dropdown-menu.d.ts",
+      "import": "./src/dropdown-menu.tsx",
+      "browser": "./src/dropdown-menu.tsx"
+    },
+    "./form": {
+      "types": "./dist/src/form.d.ts",
+      "import": "./src/form.tsx",
+      "browser": "./src/form.tsx"
+    },
+    "./glass-card": {
+      "types": "./dist/src/glass-card.d.ts",
+      "import": "./src/glass-card.tsx",
+      "browser": "./src/glass-card.tsx"
+    },
+    "./hover-card": {
+      "types": "./dist/src/hover-card.d.ts",
+      "import": "./src/hover-card.tsx",
+      "browser": "./src/hover-card.tsx"
+    },
+    "./input": {
+      "types": "./dist/src/input.d.ts",
+      "import": "./src/input.tsx",
+      "browser": "./src/input.tsx"
+    },
+    "./input-base": {
+      "types": "./dist/src/input-base.d.ts",
+      "import": "./src/input-base.tsx",
+      "browser": "./src/input-base.tsx"
+    },
+    "./input-otp": {
+      "types": "./dist/src/input-otp.d.ts",
+      "import": "./src/input-otp.tsx",
+      "browser": "./src/input-otp.tsx"
+    },
+    "./katex": {
+      "types": "./dist/src/katex.d.ts",
+      "import": "./src/katex.tsx",
+      "browser": "./src/katex.tsx"
+    },
+    "./label": {
+      "types": "./dist/src/label.d.ts",
+      "import": "./src/label.tsx",
+      "browser": "./src/label.tsx"
+    },
+    "./math-input": {
+      "types": "./dist/src/math-input/index.d.ts",
+      "import": "./src/math-input/index.tsx",
+      "browser": "./src/math-input/index.tsx"
+    },
+    "./complex-input": {
+      "types": "./dist/src/math-input/complex-input.d.ts",
+      "import": "./src/math-input/complex-input.tsx",
+      "browser": "./src/math-input/complex-input.tsx"
+    },
+    "./menubar": {
+      "types": "./dist/src/menubar.d.ts",
+      "import": "./src/menubar.tsx",
+      "browser": "./src/menubar.tsx"
+    },
+    "./navigation-menu": {
+      "types": "./dist/src/navigation-menu.d.ts",
+      "import": "./src/navigation-menu.tsx",
+      "browser": "./src/navigation-menu.tsx"
+    },
+    "./pagination": {
+      "types": "./dist/src/pagination.d.ts",
+      "import": "./src/pagination.tsx",
+      "browser": "./src/pagination.tsx"
+    },
+    "./panel": {
+      "types": "./dist/src/panel.d.ts",
+      "import": "./src/panel.tsx",
+      "browser": "./src/panel.tsx"
+    },
+    "./popover": {
+      "types": "./dist/src/popover.d.ts",
+      "import": "./src/popover.tsx",
+      "browser": "./src/popover.tsx"
+    },
+    "./progress": {
+      "types": "./dist/src/progress.d.ts",
+      "import": "./src/progress.tsx",
+      "browser": "./src/progress.tsx"
+    },
+    "./radio-group": {
+      "types": "./dist/src/radio-group.d.ts",
+      "import": "./src/radio-group.tsx",
+      "browser": "./src/radio-group.tsx"
+    },
+    "./resizable": {
+      "types": "./dist/src/resizable.d.ts",
+      "import": "./src/resizable.tsx",
+      "browser": "./src/resizable.tsx"
+    },
+    "./scroll-area": {
+      "types": "./dist/src/scroll-area.d.ts",
+      "import": "./src/scroll-area.tsx",
+      "browser": "./src/scroll-area.tsx"
+    },
+    "./scroll-to-top": {
+      "types": "./dist/src/scroll-to-top.d.ts",
+      "import": "./src/scroll-to-top.tsx",
+      "browser": "./src/scroll-to-top.tsx"
+    },
+    "./select": {
+      "types": "./dist/src/select.d.ts",
+      "import": "./src/select.tsx",
+      "browser": "./src/select.tsx"
+    },
+    "./separator": {
+      "types": "./dist/src/separator.d.ts",
+      "import": "./src/separator.tsx",
+      "browser": "./src/separator.tsx"
+    },
+    "./sheet": {
+      "types": "./dist/src/sheet.d.ts",
+      "import": "./src/sheet.tsx",
+      "browser": "./src/sheet.tsx"
+    },
+    "./sidebar": {
+      "types": "./dist/src/sidebar.d.ts",
+      "import": "./src/sidebar.tsx",
+      "browser": "./src/sidebar.tsx"
+    },
+    "./skeleton": {
+      "types": "./dist/src/skeleton.d.ts",
+      "import": "./src/skeleton.tsx",
+      "browser": "./src/skeleton.tsx"
+    },
+    "./slider": {
+      "types": "./dist/src/slider.d.ts",
+      "import": "./src/slider.tsx",
+      "browser": "./src/slider.tsx"
+    },
+    "./sonner": {
+      "types": "./dist/src/sonner.d.ts",
+      "import": "./src/sonner.tsx",
+      "browser": "./src/sonner.tsx"
+    },
+    "./spinners": {
+      "types": "./dist/src/spinners.d.ts",
+      "import": "./src/spinners.tsx",
+      "browser": "./src/spinners.tsx"
+    },
+    "./surface": {
+      "types": "./dist/src/surface.d.ts",
+      "import": "./src/surface.tsx",
+      "browser": "./src/surface.tsx"
+    },
+    "./switch": {
+      "types": "./dist/src/switch.d.ts",
+      "import": "./src/switch.tsx",
+      "browser": "./src/switch.tsx"
+    },
+    "./table": {
+      "types": "./dist/src/table.d.ts",
+      "import": "./src/table.tsx",
+      "browser": "./src/table.tsx"
+    },
+    "./tabs": {
+      "types": "./dist/src/tabs.d.ts",
+      "import": "./src/tabs.tsx",
+      "browser": "./src/tabs.tsx"
+    },
+    "./textarea": {
+      "types": "./dist/src/textarea.d.ts",
+      "import": "./src/textarea.tsx",
+      "browser": "./src/textarea.tsx"
+    },
+    "./textarea-with-autosize": {
+      "types": "./dist/src/textarea-with-autosize.d.ts",
+      "import": "./src/textarea-with-autosize.tsx",
+      "browser": "./src/textarea-with-autosize.tsx"
+    },
+    "./timeline": {
+      "types": "./dist/src/timeline.d.ts",
+      "import": "./src/timeline.tsx",
+      "browser": "./src/timeline.tsx"
+    },
+    "./toggle": {
+      "types": "./dist/src/toggle.d.ts",
+      "import": "./src/toggle.tsx",
+      "browser": "./src/toggle.tsx"
+    },
+    "./toggle-group": {
+      "types": "./dist/src/toggle-group.d.ts",
+      "import": "./src/toggle-group.tsx",
+      "browser": "./src/toggle-group.tsx"
+    },
+    "./tool-panels": {
+      "types": "./dist/src/tool-panels.d.ts",
+      "import": "./src/tool-panels.tsx",
+      "browser": "./src/tool-panels.tsx"
+    },
+    "./toolbar": {
+      "types": "./dist/src/toolbar.d.ts",
+      "import": "./src/toolbar.tsx",
+      "browser": "./src/toolbar.tsx"
+    },
+    "./tooltip": {
+      "types": "./dist/src/tooltip.d.ts",
+      "import": "./src/tooltip.tsx",
+      "browser": "./src/tooltip.tsx"
+    },
+    "./styles/animations.css": "./src/styles/animations.css",
+    "./*": {
+      "types": "./dist/src/*.d.ts",
+      "import": "./src/*.tsx",
+      "browser": "./src/*.tsx"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "!dist/**/*.spec.*",
+    "!dist/**/*.test.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@arki/date": "0.1.0",
+    "@arki/design-systems": "0.1.1",
+    "@arki/icons": "0.1.1",
+    "@arki/react-hooks": "0.1.1",
+    "@arki/theme": "0.2.1",
+    "@base-ui/react": "^1.8.0",
+    "@hookform/resolvers": "^5.9.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "colord": "^2.10.0",
+    "debug": "^4.4.3",
+    "embla-carousel-react": "^8.6.0",
+    "input-otp": "^1.5.0",
+    "katex": "^0.19.0",
+    "react-colorful": "^5.8.1",
+    "react-day-picker": "9.14.0",
+    "react-hook-form": "^7.89.0",
+    "react-resizable-panels": "^2.1.9",
+    "react-spinners": "^0.17.1",
+    "react-spring": "^10.0.4",
+    "react-textarea-autosize": "8.5.9",
+    "react-tweet": "^3.3.1",
+    "recharts": "^3.10.1",
+    "sonner": "^2.0.8",
+    "tailwind-merge": "^3.7.0",
+    "vaul": "^1.1.2"
+  },
+  "peerDependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

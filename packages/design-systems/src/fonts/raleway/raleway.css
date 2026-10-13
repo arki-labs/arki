@@ -1,0 +1,7 @@
+@font-face {
+  font-family: 'Raleway';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('./Raleway-Bold.ttf') format('truetype');
+}

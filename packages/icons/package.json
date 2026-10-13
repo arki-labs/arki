@@ -1,0 +1,96 @@
+{
+  "name": "@arki/icons",
+  "version": "0.1.1",
+  "description": "Icon sets for ARKI apps — Iconify, Phosphor, Simple Icons and flag packs behind one React entry point.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "react",
+    "icons",
+    "iconify",
+    "phosphor"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./src/index.ts",
+      "browser": "./src/index.ts"
+    },
+    "./flags": {
+      "types": "./dist/src/flags/index.d.ts",
+      "import": "./src/flags/index.tsx",
+      "browser": "./src/flags/index.tsx"
+    },
+    "./brands": {
+      "types": "./dist/src/brands/index.d.ts",
+      "import": "./src/brands/index.ts",
+      "browser": "./src/brands/index.ts"
+    },
+    "./phosphor": {
+      "types": "./dist/src/phosphor.d.ts",
+      "import": "./src/phosphor.ts",
+      "browser": "./src/phosphor.ts"
+    },
+    "./phosphor/ssr": {
+      "types": "./dist/src/phosphor-ssr.d.ts",
+      "import": "./src/phosphor-ssr.ts",
+      "browser": "./src/phosphor-ssr.ts"
+    },
+    "./phosphor/defaults": {
+      "types": "./dist/src/phosphor-defaults.d.ts",
+      "import": "./src/phosphor-defaults.tsx",
+      "browser": "./src/phosphor-defaults.tsx"
+    },
+    "./*": {
+      "types": "./dist/src/*.d.ts",
+      "import": "./src/*.ts",
+      "browser": "./src/*.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/src/index.d.ts",
+  "files": [
+    "dist/**",
+    "!dist/**/*.spec.*",
+    "!dist/**/*.test.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@iconify-icon/react": "^3.0.4",
+    "@iconify/json": "^2.2.540",
+    "@iconify/react": "^6.0.2",
+    "@iconify/tailwind4": "^1.2.3",
+    "@phosphor-icons/react": "^2.1.10",
+    "flag-icons": "^7.5.0",
+    "flagpack-core": "^2.1.0",
+    "react-flagpack": "^2.0.6",
+    "react-icons": "^5.7.0",
+    "simple-icons": "^16.34.0",
+    "unplugin-icons": "^24.0.0"
+  },
+  "peerDependencies": {
+    "react": "19.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

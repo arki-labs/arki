@@ -1,0 +1,120 @@
+/* ═══════════════════════════════════════════════════════════════
+   ATELIER DESIGN SYSTEM — Tokens
+   "The workshop/studio" — hand-crafted, warm, scholarly aesthetic
+
+   Warm ivory foundations, serif headlines, pastel accents,
+   generous whitespace, layered warm-tinted depth. Professional
+   yet approachable.
+
+   Type scale: inherits Tailwind v4 defaults (16px base; ratios
+   are pragmatic, not strict 1.25×). Future systems may opt into
+   stricter mathematical scales via overrides.
+
+   Border radius: 0.75rem (12px) — softer than workbench's 6px,
+   matching the warmer scholarly character.
+
+   Depth strategy: warm-tinted layered shadows. The primary hue
+   (24, amber-orange) bleeds into shadow color so depth feels of
+   the same family as the surface above it.
+   ═══════════════════════════════════════════════════════════════ */
+
+@import './fonts.css';
+
+/* ─── LIGHT MODE — Warm ivory with amber accent ─── */
+:root {
+  --heading-font: 'Instrument Serif Variable', 'Fraunces Variable', serif;
+  --font-sans: 'Plus Jakarta Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-serif: 'Fraunces Variable', ui-serif, Georgia, serif;
+  --background: hsl(36 33% 97%);
+  --foreground: hsl(24 10% 12%);
+  --card: hsl(36 30% 99%);
+  --card-foreground: hsl(24 10% 12%);
+  --popover: hsl(36 30% 99%);
+  --popover-foreground: hsl(24 10% 12%);
+  --primary: hsl(24 90% 48%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(36 25% 94%);
+  --secondary-foreground: hsl(24 10% 12%);
+  --muted: hsl(36 20% 93%);
+  --muted-foreground: hsl(24 8% 48%);
+  --accent: hsl(36 25% 94%);
+  --accent-foreground: hsl(24 10% 12%);
+  --destructive: hsl(0 72% 51%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --border: hsl(36 15% 88%);
+  --input: hsl(36 15% 88%);
+  --ring: hsl(24 90% 48%);
+  --chart-1: hsl(24 90% 48%);
+  --chart-2: hsl(173 50% 38%);
+  --chart-3: hsl(220 50% 45%);
+  --chart-4: hsl(43 80% 55%);
+  --chart-5: hsl(340 60% 52%);
+  --radius: 0.75rem;
+
+  /* Atelier depth — warm-tinted, layered for scholarly elevation */
+  --shadow-sm: 0 1px 2px 0 hsl(24 30% 20% / 0.04);
+  --shadow-md:
+    0 1px 2px hsl(24 30% 20% / 0.04),
+    0 4px 12px hsl(24 30% 20% / 0.06);
+  --shadow-lg:
+    0 1px 2px hsl(24 30% 20% / 0.04),
+    0 4px 12px hsl(24 30% 20% / 0.06),
+    0 12px 32px hsl(24 30% 20% / 0.08);
+
+  --sidebar-background: hsl(36 30% 98%);
+  --sidebar-foreground: hsl(24 10% 12%);
+  --sidebar-primary: hsl(24 90% 48%);
+  --sidebar-primary-foreground: hsl(0 0% 100%);
+  --sidebar-accent: hsl(36 25% 94%);
+  --sidebar-accent-foreground: hsl(24 10% 12%);
+  --sidebar-border: hsl(36 15% 90%);
+  --sidebar-ring: hsl(24 90% 48%);
+}
+
+/* ─── DARK MODE — Warm charcoal with bright amber ─── */
+.dark {
+  --background: hsl(24 8% 7%);
+  --foreground: hsl(36 20% 90%);
+  --card: hsl(24 8% 10%);
+  --card-foreground: hsl(36 20% 90%);
+  --popover: hsl(24 8% 10%);
+  --popover-foreground: hsl(36 20% 90%);
+  --primary: hsl(24 95% 58%);
+  --primary-foreground: hsl(24 10% 7%);
+  --secondary: hsl(24 6% 14%);
+  --secondary-foreground: hsl(36 20% 90%);
+  --muted: hsl(24 6% 14%);
+  --muted-foreground: hsl(24 8% 55%);
+  --accent: hsl(24 6% 14%);
+  --accent-foreground: hsl(36 20% 90%);
+  --destructive: hsl(0 62% 40%);
+  --destructive-foreground: hsl(0 0% 98%);
+  --border: hsl(24 6% 18%);
+  --input: hsl(24 6% 18%);
+  --ring: hsl(24 95% 58%);
+  --chart-1: hsl(24 95% 58%);
+  --chart-2: hsl(160 55% 48%);
+  --chart-3: hsl(220 60% 60%);
+  --chart-4: hsl(43 80% 62%);
+  --chart-5: hsl(340 65% 60%);
+
+  /* Dark-mode depth — pure black falloff (warm tints don't read against dark backgrounds) */
+  --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.30);
+  --shadow-md:
+    0 1px 2px hsl(0 0% 0% / 0.30),
+    0 4px 12px hsl(0 0% 0% / 0.36);
+  --shadow-lg:
+    0 1px 2px hsl(0 0% 0% / 0.30),
+    0 4px 12px hsl(0 0% 0% / 0.36),
+    0 12px 32px hsl(0 0% 0% / 0.42);
+
+  --sidebar-background: hsl(24 8% 7%);
+  --sidebar-foreground: hsl(36 20% 90%);
+  --sidebar-primary: hsl(24 95% 58%);
+  --sidebar-primary-foreground: hsl(24 10% 7%);
+  --sidebar-accent: hsl(24 6% 14%);
+  --sidebar-accent-foreground: hsl(36 20% 90%);
+  --sidebar-border: hsl(24 6% 18%);
+  --sidebar-ring: hsl(24 95% 58%);
+}

@@ -1,0 +1,20 @@
+import { defineApp } from '@arki/dot';
+import { env } from '@arki/env/dot';
+
+import { envSchema } from './env.js';
+
+/**
+ * App builder. Exported as both `app` (for tests that want to boot
+ * synchronously inside a `test(...)` block) and as the module default
+ * (so `dot explain` / `dot doctor` can discover it via the CLI).
+ */
+export const app = defineApp('{{name}}').use(env({ schema: envSchema }));
+
+export default app;
+
+if ((import.meta as { main?: boolean }).main) {
+  const booted = await app.boot();
+  // Intentional console use — this branch only runs as a script.
+  // eslint-disable-next-line no-console
+  console.log(JSON.stringify(booted.manifest, null, 2));
+}

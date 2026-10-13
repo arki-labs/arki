@@ -1,0 +1,9 @@
+{
+  "name": "arki-public",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Generated public ARKI package tree — do not edit by hand. Regenerate with `bun release:arki export-public`.",
+  "workspaces": [
+    "packages/*"
+  ]
+}
