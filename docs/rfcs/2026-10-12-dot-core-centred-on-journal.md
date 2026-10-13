@@ -528,3 +528,39 @@ reasons given.
 One commit and one changeset per item. Items 2 and 3 are the only schema
 changes; both are additive nullable columns. `@arki/journal` stays 0.x, so
 each is a minor changeset.
+
+## 9. The "when an app asks" list, built (2026-10-13)
+
+The founder asked for the section 8.2 list to be built too, "as simple as
+possible, but powerful". Fable drafted seven designs; Astra reviewed them
+(`2026-10-12-dot-core-centred-on-journal/` has no copy; the review is
+summarised here). Astra kept all seven and corrected five protocols. The
+corrections were adopted. What was built, per item:
+
+| Item | Built as | Astra's correction, adopted |
+|---|---|---|
+| Lease heartbeat | Automatic: the worker renews `lease_until` every half lease under its token; zero rows renewed aborts the effect's `ctx.signal`. `leaseSeconds` on `drain` and `worker`. | Renewals never overlap; no abort after the job finished; the ack and the failure update already check the token. Delivery stays at least once; a hung handler stays leased, so timeouts are the effect's job. |
+| Idempotency receipts | `{ idempotencyKey }` on `run`, `bind` (per call), a command's `run` and an effect's `ctx.run`. Table `journal_receipts`. `pruneReceipts(db, { before })`. | Store and compare the parsed input, not only the command name. Run inside the hooks, so a replay is seen. Refuse a key reused inside its own run. Results must survive JSON. Receipts may hold personal data, so prune; `forget` does not touch them. Keys from outside are scoped by the app. |
+| Async projections | `j.projection(..., { lane: 'async' })`. Table `journal_cursors`. `catchUp`, `reset(db, p, clear)`, `cursors`. The worker runs one batch per projection after each drain. | Lock the cursor row before selecting events, apply and advance in that transaction. The cursor is global scan progress, so lag reaches zero. Reset clears and rewinds under the lock. `forget` locks every cursor first. One projection's failure leaves the others running. |
+| Priority and delay | `j.effect(...).withSchedule({ priority, delaySeconds, runAt })`. Column `priority` and a new due index. | Validate once at declaration. `runAt` takes an absolute time from the app's clock; `delaySeconds` counts from the transaction's `now()`, documented. Strict priority can starve; documented. |
+| Expected version | `expectedVersion` on `write` and a command's `write`; `CONFLICT` before `events` runs. | Validated as a whole number. The oRPC 409 message now says reload first: the same request fails again. |
+| Wake channel and taps | Every nonempty append runs `pg_notify(wakeChannel, { from, to })`. `worker(db, { listen })`. `j.tap(name, entity, [needs,] handlers)`; `compose({ taps })`; `journalHandlers({ taps })`. | Notify every append, not only when a local tap matches. A bounded range, never the event list. No local fallback: taps fire only from the channel, once per process, and a journal with taps refuses a worker without `listen` unless `{ taps: false }`. Polling stays. |
+| Admin, errors, testing | `jobs`, `retry`, `discard`. `@arki/journal/errors`. `@arki/journal/testing` with `openJournalDb(schema)`. | `retry` and `discard` accept only dead jobs, atomically. `pending` includes delayed and leased jobs. |
+
+Two things were decided against Astra's advice, both small: the `erased`
+and `runAt` callbacks are method signatures on their types, so an event or
+effect of one meta type stays assignable to the untyped form; and a tap's
+context is `{ db }` with the no-writes rule stated as a contract, not a
+restricted interface.
+
+Schema changes in this wave, all additive: tables `journal_receipts` and
+`journal_cursors`; column `priority` on `journal_jobs` and the due index
+`(priority desc, available_at) where dead_at is null` replacing the old one.
+Each app that owns journal tables exports all four from its
+`journal.tables.ts` and composes with that object. Migrations were generated
+for games-platform and kapodopera. Everseek still has no migration for its
+journal tables at all.
+
+One cast remains in the library, in `command.ts`: the stored receipt result is
+returned as the command's result type. It is the JSON form the first run was
+checked against, so the shape is the command's own.
