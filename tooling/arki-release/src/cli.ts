@@ -25,6 +25,7 @@ import { createEnvelope, emitEnvelope } from './json-output';
 import { DEFAULT_LEAK_PATTERNS, LEAK_ERROR_CODES, scanDirectory } from './leaks';
 import { auditPack, isSourceDistributedManifest, PACK_ERROR_CODES } from './pack';
 import { renderScorecardText, runScorecard } from './scorecard';
+import { createSourceSnapshot, type SourceSnapshot } from './snapshot';
 import { renderSyncPackageReposText, runSyncPackageRepos } from './sync-package-repos';
 import type {
   ExportItem,
@@ -828,6 +829,14 @@ async function runPackHandler(args: ParsedCliArgs): Promise<number> {
  *                               mangles standalone publishes. Default
  *                               keeps the field (dev-friendly for
  *                               `arki-labs/arki` cloners).
+ *   --from-working-tree         Read uncommitted files too. Default reads a
+ *                               snapshot of HEAD (packages, root
+ *                               package.json, release config), so a
+ *                               sibling session's unfinished edits never
+ *                               reach the public tree. `dist/` is taken
+ *                               from the working tree only for packages
+ *                               that match HEAD; the others are listed as
+ *                               EXPORT_E006 warnings.
  *
  * Exit codes:
  *   - 0 when every candidate exports successfully.
@@ -835,22 +844,34 @@ async function runPackHandler(args: ParsedCliArgs): Promise<number> {
  */
 async function runExportPublicHandler(args: ParsedCliArgs): Promise<number> {
   const cwd = process.cwd();
-  const configPath = defaultConfigPath(cwd);
   const outputOverride = extractOption(args.rest, 'output');
   const leakScan = !args.rest.includes('--no-leak-scan');
   const includeBlockedByLeak = args.rest.includes('--include-blocked-by-leak');
   const skipWorkspacesRoot = args.rest.includes('--no-workspaces-root');
+  const fromWorkingTree = args.rest.includes('--from-working-tree');
 
+  let snapshot: SourceSnapshot | undefined;
   try {
-    const config = await loadConfig(configPath);
+    snapshot = fromWorkingTree ? undefined : await createSourceSnapshot({ rootCwd: cwd });
+    const sourceRoot = snapshot?.dir ?? cwd;
+    const config = await loadConfig(defaultConfigPath(sourceRoot));
     const envelope = await exportPublicTree({
       rootCwd: cwd,
+      sourceRoot,
       config,
       ...(outputOverride !== null ? { outputPath: outputOverride } : {}),
       leakScan,
       includeBlockedByLeak,
       skipWorkspacesRoot,
     });
+    if (snapshot !== undefined) {
+      envelope.summary = {
+        ...envelope.summary,
+        message: `${envelope.summary.message} Source: commit ${snapshot.commit.slice(0, 10)}.`,
+      };
+      const exported = new Set(envelope.items.map(item => item.sourcePath));
+      envelope.errors.push(...uncommittedSourceWarnings(snapshot, exported));
+    }
     emitEnvelope(envelope, { json: args.json });
     return envelope.status === 'failure' ? 1 : 0;
   } catch (cause) {
@@ -885,7 +906,21 @@ async function runExportPublicHandler(args: ParsedCliArgs): Promise<number> {
     });
     emitEnvelope(envelope, { json: args.json });
     return 1;
+  } finally {
+    await snapshot?.cleanup();
   }
+}
+
+/** One warning per exported package that differs from the snapshot commit. */
+function uncommittedSourceWarnings(snapshot: SourceSnapshot, exported: ReadonlySet<string>): ReleaseError[] {
+  return snapshot.dirtyPackages
+    .filter(dir => exported.has(dir))
+    .map(dir => ({
+      code: EXPORT_ERROR_CODES.uncommittedSource,
+      severity: 'warning' as const,
+      message: `${dir} has uncommitted changes; exported as of commit ${snapshot.commit.slice(0, 10)}, without dist/.`,
+      remediation: `Commit ${dir} (and rebuild) to release its current state, or leave it out of this release.`,
+    }));
 }
 
 /**

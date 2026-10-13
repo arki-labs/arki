@@ -80,6 +80,8 @@ export const EXPORT_ERROR_CODES = {
   leakGateDisabled: 'EXPORT_E004',
   /** Source manifest could not be re-read (I/O failure). */
   manifestReadFailed: 'EXPORT_E005',
+  /** A package differs from the exported commit; it was exported without its `dist/`. */
+  uncommittedSource: 'EXPORT_E006',
 } as const;
 
 /**
@@ -123,6 +125,7 @@ export async function exportPublicTree(
   options: ExportOptions,
 ): Promise<ReleaseCommandEnvelope<ExportItem, ExportSummary>> {
   const { rootCwd, config } = options;
+  const sourceRoot = options.sourceRoot ?? rootCwd;
   const leakScan = options.leakScan !== false;
   const includeBlockedByLeak = options.includeBlockedByLeak === true;
 
@@ -174,7 +177,7 @@ export async function exportPublicTree(
   }
 
   // 3. Discover candidates via the inventory.
-  const inventoryEnv = await runInventory({ cwd: rootCwd, config });
+  const inventoryEnv = await runInventory({ cwd: sourceRoot, config });
   const candidates = inventoryEnv.items.filter(item => {
     if (item.classification === 'public-candidate') return true;
     if (includeBlockedByLeak && item.classification === 'blocked-by-leak') return true;
@@ -184,7 +187,7 @@ export async function exportPublicTree(
   debug('inventory: %d items, %d candidates', inventoryEnv.items.length, candidates.length);
 
   // 4. Catalogs + workspace/version maps.
-  const rootManifest = await loadRootManifest(rootCwd);
+  const rootManifest = await loadRootManifest(sourceRoot);
   const catalogs = loadCatalogs(rootManifest);
   const workspaceVersions = new Map<string, string>(
     inventoryEnv.items.map(item => [item.name, item.version]),
@@ -208,6 +211,7 @@ export async function exportPublicTree(
     const result = await exportSinglePackage({
       item,
       rootCwd,
+      sourceRoot,
       outputPath,
       catalogs,
       workspaceVersions,
@@ -255,6 +259,8 @@ export async function exportPublicTree(
 interface ExportSingleOptions {
   readonly item: InventoryItem;
   readonly rootCwd: string;
+  /** Where package sources are read from; `rootCwd` unless exporting a snapshot. */
+  readonly sourceRoot: string;
   readonly outputPath: string;
   readonly catalogs: CatalogTables;
   readonly workspaceVersions: ReadonlyMap<string, string>;
@@ -277,7 +283,7 @@ interface ExportSingleResult {
  * keeps going so the operator gets one cohesive report.
  */
 async function exportSinglePackage(opts: ExportSingleOptions): Promise<ExportSingleResult> {
-  const sourceManifestPath = path.resolve(opts.rootCwd, opts.item.manifestPath);
+  const sourceManifestPath = path.resolve(opts.sourceRoot, opts.item.manifestPath);
   const packageSourceDir = path.dirname(sourceManifestPath);
   const packageDirName = path.basename(packageSourceDir);
   const packageDestDir = path.join(opts.outputPath, 'packages', packageDirName);
@@ -285,7 +291,7 @@ async function exportSinglePackage(opts: ExportSingleOptions): Promise<ExportSin
   const baseItem = {
     name: opts.item.name,
     version: opts.item.version,
-    sourcePath: path.relative(opts.rootCwd, packageSourceDir),
+    sourcePath: path.relative(opts.sourceRoot, packageSourceDir),
     destPath: path.relative(opts.rootCwd, packageDestDir),
   };
 

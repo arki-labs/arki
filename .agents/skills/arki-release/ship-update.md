@@ -33,6 +33,9 @@ git diff --stat packages/
 #    break). Re-run WITHOUT the flag before the GitHub mirror sync,
 #    so cloners of arki-labs/arki can still `bun install` from the root.
 bun tooling/arki-release/src/cli.ts export-public --no-workspaces-root
+#    It exports HEAD. Commit the bump and build first: a package with
+#    uncommitted non-Markdown changes is exported WITHOUT dist/ and listed as
+#    an EXPORT_E006 warning — never publish a package that has that warning.
 
 # 5. Run the scorecard — must report `Stable release gate: OPEN`
 bun tooling/arki-release/src/cli.ts scorecard | tail -20

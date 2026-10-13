@@ -458,6 +458,13 @@ export type MaterializationResult = {
  */
 export type ExportOptions = {
   readonly rootCwd: string;
+  /**
+   * Directory to read package sources and the root `package.json` (catalogs)
+   * from. Default `rootCwd`. The CLI points it at a committed snapshot
+   * (see `snapshot.ts`) so uncommitted work never reaches the public tree.
+   * The output path is still resolved and guarded against `rootCwd`.
+   */
+  readonly sourceRoot?: string;
   readonly outputPath?: string;
   readonly config: ReleaseConfig;
   readonly leakScan?: boolean;

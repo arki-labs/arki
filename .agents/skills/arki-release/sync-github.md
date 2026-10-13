@@ -61,11 +61,11 @@ cd /Users/afurculita/Developer/workspace
 
 If `git add -A` stages nothing, the public tree did not change since the last sync — skip the commit.
 
-## Check the diff before committing — the export reads the working tree
+## Check the diff before committing
 
-`export-public` reads uncommitted files, including `arki.release.config.ts`. A sibling session's unfinished work (a version bump not yet on npm, a package dropped from a wave) therefore lands in the export and would go public. After step 4, read `git diff --cached --stat` and confirm every changed package is part of this release.
+`export-public` reads a snapshot of **HEAD** by default (since 2026-10-13): packages, the root `package.json` and `arki.release.config.ts` come from the last commit, so a sibling session's uncommitted work never reaches the export. `dist/` comes from the working tree only for packages whose non-Markdown files match HEAD; the others are exported without it and listed as `EXPORT_E006` warnings. `--from-working-tree` restores the old behaviour.
 
-If other packages show up, commit only yours with a temporary index, on top of `origin/main` (seen 2026-10-13: the money release would otherwise have deleted `packages/event-sourcing` and published an unreleased `resilience` bump):
+Committed-but-unreleased work still exports (e.g. a version bump committed before its npm publish). After step 4, read `git diff --cached --stat` and confirm every changed package is part of this release. If other packages show up, commit only yours with a temporary index, on top of `origin/main` (seen 2026-10-13: the money release would otherwise have deleted `packages/event-sourcing` and published an unreleased `resilience` bump):
 
 ```bash
 cd /Users/afurculita/Developer/workspace/.release/arki-mirror
