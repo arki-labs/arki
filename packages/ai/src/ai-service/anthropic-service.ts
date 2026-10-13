@@ -3,17 +3,18 @@
  * Provides helper methods for structured data generation
  */
 
-import { anthropic } from '@ai-sdk/anthropic';
-import { Output, generateText, streamText } from 'ai';
 import type { ModelMessage, SystemModelMessage } from 'ai';
+import { anthropic } from '@ai-sdk/anthropic';
+import { generateText, Output, streamText } from 'ai';
+
 import type { z } from '@arki/contracts';
 
-type ChatMessage = ModelMessage;
-
 import { debugService } from '../debug.ts';
-import { GenerationError, RateLimitError, getErrorMessage } from '../errors';
-import { validateInput, aiServiceConfigSchema } from '../validation';
+import { GenerationError, getErrorMessage, RateLimitError } from '../errors';
 import { rateLimiters } from '../utils/rate-limiter';
+import { aiServiceConfigSchema, validateInput } from '../validation';
+
+type ChatMessage = ModelMessage;
 
 /**
  * A system prompt part that can optionally be cached via Anthropic's prompt caching.
@@ -29,25 +30,21 @@ export type AnthropicServiceConfig = {
   model?: string;
   temperature?: number;
   maxRetries?: number;
-}
+};
 
 /**
  * Converts a system prompt (string or SystemPart[]) into the format expected by
  * the Vercel AI SDK. When parts have `cacheControl`, they are passed via
  * `providerOptions.anthropic.cacheControl` for Anthropic's prompt caching.
  */
-function buildSystemParam(
-  systemPrompt: string | SystemPart[] | undefined,
-): string | SystemModelMessage[] | undefined {
+function buildSystemParam(systemPrompt: string | SystemPart[] | undefined): string | SystemModelMessage[] | undefined {
   if (!systemPrompt) return undefined;
   if (typeof systemPrompt === 'string') return systemPrompt;
 
   return systemPrompt.map((part): SystemModelMessage => ({
     role: 'system',
     content: part.text,
-    providerOptions: part.cacheControl
-      ? { anthropic: { cacheControl: part.cacheControl } }
-      : undefined,
+    providerOptions: part.cacheControl ? { anthropic: { cacheControl: part.cacheControl } } : undefined,
   }));
 }
 
@@ -66,11 +63,9 @@ export class AnthropicService {
     this.defaultTemperature = validConfig.temperature ?? 0.2;
     this.defaultMaxRetries = validConfig.maxRetries ?? 2;
 
-    debugService(
-      '[Anthropic] Service initialized (model: %s, temperature: %d, maxRetries: %d)',
-      this.model,
-      this.defaultTemperature,
-      this.defaultMaxRetries,
+    debugService.debug(
+      '[Anthropic] Service initialized (model: {model}, temperature: {temperature}, maxRetries: {maxRetries})',
+      { model: this.model, temperature: this.defaultTemperature, maxRetries: this.defaultMaxRetries },
     );
   }
 
@@ -92,11 +87,7 @@ export class AnthropicService {
       signal?: AbortSignal;
     } = {},
   ): Promise<T> {
-    return this.generateStructuredDataFromMessages(
-      [{ role: 'user', content: prompt }],
-      schema,
-      options,
-    );
+    return this.generateStructuredDataFromMessages([{ role: 'user', content: prompt }], schema, options);
   }
 
   /**
@@ -112,17 +103,16 @@ export class AnthropicService {
       signal?: AbortSignal;
     } = {},
   ): Promise<T> {
-    debugService(
-      '[Anthropic] Generating structured data (messages: %d, temperature: %d)',
-      messages.length,
-      options.temperature ?? this.defaultTemperature,
-    );
+    debugService.debug('[Anthropic] Generating structured data (messages: {messages}, temperature: {temperature})', {
+      messages: messages.length,
+      temperature: options.temperature ?? this.defaultTemperature,
+    });
 
     const system = buildSystemParam(options.systemPrompt);
 
     const result = await rateLimiters.anthropic.execute('generateStructuredDataFromMessages', async () => {
       try {
-        debugService('[Anthropic] Calling Anthropic API for structured generation');
+        debugService.debug('[Anthropic] Calling Anthropic API for structured generation');
 
         const response = await generateText({
           model: anthropic(this.model),
@@ -134,22 +124,27 @@ export class AnthropicService {
           abortSignal: options.signal,
         });
 
-        debugService(
-          '[Anthropic] Structured data generated successfully (cache: creation=%d, read=%d)',
-          (response.providerMetadata?.anthropic as Record<string, number> | undefined)?.cacheCreationInputTokens ?? 0,
-          (response.providerMetadata?.anthropic as Record<string, number> | undefined)?.cacheReadInputTokens ?? 0,
+        debugService.debug(
+          '[Anthropic] Structured data generated successfully (cache: creation={creation}, read={read})',
+          {
+            creation:
+              (response.providerMetadata?.anthropic as Record<string, number> | undefined)?.cacheCreationInputTokens ??
+              0,
+            read:
+              (response.providerMetadata?.anthropic as Record<string, number> | undefined)?.cacheReadInputTokens ?? 0,
+          },
         );
 
         return response.output as T;
       } catch (error) {
-        debugService('[Anthropic] Structured generation failed: %s', getErrorMessage(error));
+        debugService.debug('[Anthropic] Structured generation failed: {failed}', { failed: getErrorMessage(error) });
 
         throw new GenerationError(`Failed to generate structured data: ${getErrorMessage(error)}`, error);
       }
     });
 
     if (!result.success) {
-      debugService('[Anthropic] Rate limit exceeded (retry after: %dms)', result.retryAfterMs);
+      debugService.debug('[Anthropic] Rate limit exceeded (retry after: {after}ms)', { after: result.retryAfterMs });
 
       throw new RateLimitError(
         `Anthropic rate limit exceeded: retry after ${result.retryAfterMs}ms`,
@@ -172,7 +167,7 @@ export class AnthropicService {
       signal?: AbortSignal;
     } = {},
   ) {
-    debugService('[Anthropic] Generating text (prompt length: %d)', prompt.length);
+    debugService.debug('[Anthropic] Generating text (prompt length: {length})', { length: prompt.length });
 
     try {
       const result = await generateText({
@@ -184,11 +179,11 @@ export class AnthropicService {
         abortSignal: options.signal,
       });
 
-      debugService('[Anthropic] Text generated successfully (length: %d)', result.text.length);
+      debugService.debug('[Anthropic] Text generated successfully (length: {length})', { length: result.text.length });
 
       return result.text;
     } catch (error) {
-      debugService('[Anthropic] Text generation failed: %s', getErrorMessage(error));
+      debugService.debug('[Anthropic] Text generation failed: {failed}', { failed: getErrorMessage(error) });
 
       throw new GenerationError(`Failed to generate text: ${getErrorMessage(error)}`, error);
     }
@@ -209,7 +204,7 @@ export class AnthropicService {
       signal?: AbortSignal;
     } = {},
   ): Promise<string> {
-    debugService('[Anthropic] generateConversation (messages: %d)', messages.length);
+    debugService.debug('[Anthropic] generateConversation (messages: {messages})', { messages: messages.length });
 
     const system = buildSystemParam(options.systemPrompt);
 
@@ -226,14 +221,14 @@ export class AnthropicService {
 
         return response.text;
       } catch (error) {
-        debugService('[Anthropic] Conversation generation failed: %s', getErrorMessage(error));
+        debugService.debug('[Anthropic] Conversation generation failed: {failed}', { failed: getErrorMessage(error) });
 
         throw new GenerationError(`Failed to generate conversation response: ${getErrorMessage(error)}`, error);
       }
     });
 
     if (!result.success) {
-      debugService('[Anthropic] Rate limit exceeded (retry after: %dms)', result.retryAfterMs);
+      debugService.debug('[Anthropic] Rate limit exceeded (retry after: {after}ms)', { after: result.retryAfterMs });
 
       throw new RateLimitError(
         `Anthropic rate limit exceeded: retry after ${result.retryAfterMs}ms`,
@@ -286,7 +281,7 @@ export class AnthropicService {
       options.onComplete?.(fullText);
     } catch (error) {
       options.onError?.(error as Error);
-      debugService('[Anthropic] Stream conversation failed: %s', getErrorMessage(error));
+      debugService.debug('[Anthropic] Stream conversation failed: {failed}', { failed: getErrorMessage(error) });
 
       throw new GenerationError(`Failed to stream conversation: ${getErrorMessage(error)}`, error);
     }
@@ -300,7 +295,10 @@ export class AnthropicService {
     const result = await rateLimiters.anthropic.execute(key, async () => undefined);
 
     if (!result.success) {
-      debugService('[Anthropic] Rate limit exceeded for %s (retry after: %dms)', key, result.retryAfterMs);
+      debugService.debug('[Anthropic] Rate limit exceeded for {key} (retry after: {after}ms)', {
+        key,
+        after: result.retryAfterMs,
+      });
 
       throw new RateLimitError(
         `Anthropic rate limit exceeded: retry after ${result.retryAfterMs}ms`,

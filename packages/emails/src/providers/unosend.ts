@@ -1,6 +1,5 @@
-import { debugEmails } from '../debug';
-
 import type { EmailProvider, SendEmailPayload, SendEmailResult } from './types';
+import { debugEmails } from '../debug';
 
 const UNOSEND_API_URL = 'https://www.unosend.com/api/v1/emails';
 
@@ -20,10 +19,7 @@ type UnosendPayload = {
 type UnosendSuccessResponse = { id: string };
 type UnosendErrorResponse = { message: string; code?: string };
 
-async function callUnosendApi(
-  apiKey: string,
-  body: UnosendPayload,
-): Promise<SendEmailResult> {
+async function callUnosendApi(apiKey: string, body: UnosendPayload): Promise<SendEmailResult> {
   try {
     const response = await fetch(UNOSEND_API_URL, {
       method: 'POST',
@@ -81,7 +77,7 @@ export function unosendProvider(options: {
     quotaPerMonth: options.quotaPerMonth,
 
     async send(payload: SendEmailPayload): Promise<SendEmailResult> {
-      debugEmails('[unosend] Sending to=%s subject="%s"', payload.to, payload.subject);
+      debugEmails.debug('[unosend] Sending to={to} subject="{subject}"', { to: payload.to, subject: payload.subject });
 
       const body: UnosendPayload = {
         from: payload.from,
@@ -89,21 +85,9 @@ export function unosendProvider(options: {
         subject: payload.subject,
         html: payload.html,
         text: payload.text,
-        cc: payload.cc
-          ? Array.isArray(payload.cc)
-            ? payload.cc
-            : [payload.cc]
-          : undefined,
-        bcc: payload.bcc
-          ? Array.isArray(payload.bcc)
-            ? payload.bcc
-            : [payload.bcc]
-          : undefined,
-        reply_to: payload.replyTo
-          ? Array.isArray(payload.replyTo)
-            ? payload.replyTo
-            : [payload.replyTo]
-          : undefined,
+        cc: payload.cc ? (Array.isArray(payload.cc) ? payload.cc : [payload.cc]) : undefined,
+        bcc: payload.bcc ? (Array.isArray(payload.bcc) ? payload.bcc : [payload.bcc]) : undefined,
+        reply_to: payload.replyTo ? (Array.isArray(payload.replyTo) ? payload.replyTo : [payload.replyTo]) : undefined,
         headers: payload.headers,
         scheduled_at: payload.scheduledAt,
       };
@@ -111,9 +95,9 @@ export function unosendProvider(options: {
       const result = await callUnosendApi(options.apiKey, body);
 
       if (result.error) {
-        debugEmails('[unosend] Send failed: %s', result.error.message);
+        debugEmails.debug('[unosend] Send failed: {failed}', { failed: result.error.message });
       } else {
-        debugEmails('[unosend] Sent ok id=%s', result.data?.id);
+        debugEmails.debug('[unosend] Sent ok id={id}', { id: result.data?.id });
       }
 
       return result;

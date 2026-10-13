@@ -10,8 +10,11 @@ import { debugToken } from './debug';
  * @returns A hex-encoded random token string.
  */
 export const generateSecureToken = (length = 32): string => {
-  debugToken('[generateSecureToken] Generating secure token (length: %d bytes -> %d hex chars)', length, length * 2);
+  debugToken.debug('[generateSecureToken] Generating secure token (length: {length} bytes -> {value2} hex chars)', {
+    length,
+    value2: length * 2,
+  });
   const token = randomBytes(length).toString('hex');
-  debugToken('[generateSecureToken] Token generated successfully');
+  debugToken.debug('[generateSecureToken] Token generated successfully');
   return token;
 };

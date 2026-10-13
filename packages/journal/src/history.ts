@@ -177,7 +177,7 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
     const full = fold(entity, null, id, all, 'replay').row;
     assertRowNotAhead(entity.kind, id, full, rows.at(-1)?.version ?? 0, current);
     const events = throughVersion === undefined ? all : all.filter(event => event.version <= throughVersion);
-    debugReplay('%s %s: %d events', entity.kind, id, events.length);
+    debugReplay.debug('{kind} {id}: {eventsLength} events', { kind: entity.kind, id, eventsLength: events.length });
     return { row: throughVersion === undefined ? full : fold(entity, null, id, events, 'replay').row, events };
   };
 
@@ -258,7 +258,11 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
       const current = await loadRow(tx, entity, id, true);
       assertStoredId(entity, current, id);
       const { row: expected } = await replayFrom(tx, entity, id, current);
-      debugReplay('%s %s: repair -> %s', entity.kind, id, expected === null ? 'delete' : `v${expected.version}`);
+      debugReplay.debug('{kind} {id}: repair -> {value3}', {
+        kind: entity.kind,
+        id,
+        value3: expected === null ? 'delete' : `v${expected.version}`,
+      });
       const saved = await saveReplayed(tx, entity, id, current, expected);
       // Throwing rolls the transaction back, so the row stays as it was.
       if (saved !== null && expected !== null) assertStoredValues(entity, id, expected, saved, Object.keys(expected));
@@ -301,7 +305,7 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
       }
       // The row must match the history it now has. Repair on `tx` is a savepoint.
       const row = await repair(tx, entity, id);
-      debugReplay('%s %s: forget -> %d events erased', entity.kind, id, erased);
+      debugReplay.debug('{kind} {id}: forget -> {erased} events erased', { kind: entity.kind, id, erased });
       return { erased, row };
     });
   };
@@ -342,7 +346,7 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
       cursor = rows.at(-1)?.seq ?? cursor;
       if (rows.length < batchSize) break;
     }
-    debugReplay('rerun %s: %d events', projection.name, count);
+    debugReplay.debug('rerun {projectionName}: {count} events', { projectionName: projection.name, count });
     return { events: count };
   };
 

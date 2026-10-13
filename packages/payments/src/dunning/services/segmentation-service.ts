@@ -1,20 +1,12 @@
 import { and, eq, sql } from 'drizzle-orm';
 
-import { createLogger } from '@arki/log';
+import { getLogger } from '@arki/log';
 
 import type { CoreTables } from '../../core/tables';
 import type { Customer, CustomerId } from '../../core/types';
-import type {
-  CreateCustomerSegmentInput,
-  ListCustomerSegmentsQuery,
-  UpdateCustomerSegmentInput,
-} from '../contracts';
+import type { CreateCustomerSegmentInput, ListCustomerSegmentsQuery, UpdateCustomerSegmentInput } from '../contracts';
 import type { CustomerSegmentId } from '../primitives';
-import {
-  type DunningDatabase,
-  createCustomerRiskProfileRepository,
-  createCustomerSegmentRepository,
-} from '../repository';
+import type { DunningDatabase } from '../repository';
 import type { DunningTables } from '../tables';
 import type {
   CustomerRiskProfile,
@@ -25,8 +17,9 @@ import type {
   SegmentCriteria,
   SubscriptionHistoryData,
 } from '../types';
+import { createCustomerRiskProfileRepository, createCustomerSegmentRepository } from '../repository';
 
-const logger = createLogger('dunning.segmentation');
+const logger = getLogger('dunning.segmentation');
 
 // Utility functions removed in favor of Drizzle types
 
@@ -35,10 +28,7 @@ const logger = createLogger('dunning.segmentation');
  * Handles segment management, customer classification, and risk assessment
  */
 export type SegmentationCoreTables = Pick<CoreTables, 'customers' | 'payments' | 'subscriptions'>;
-export type SegmentationDunningTables = Pick<
-  DunningTables,
-  'customerSegments' | 'customerRiskProfiles'
->;
+export type SegmentationDunningTables = Pick<DunningTables, 'customerSegments' | 'customerRiskProfiles'>;
 
 export class CustomerSegmentationService {
   private segmentRepo;
@@ -489,7 +479,9 @@ export class CustomerSegmentationService {
         failureCount: sql<number>`COUNT(CASE WHEN status = 'failed' THEN 1 END)`,
       })
       .from(this.payments)
-      .where(and(sql`${this.payments.customerId} = ${customerId}`, sql`${this.payments.createdAt} >= ${twelveMonthsAgo}`))
+      .where(
+        and(sql`${this.payments.customerId} = ${customerId}`, sql`${this.payments.createdAt} >= ${twelveMonthsAgo}`),
+      )
       .groupBy(sql`DATE_TRUNC('month', created_at)`)
       .orderBy(sql`DATE_TRUNC('month', created_at)`);
 
@@ -547,7 +539,9 @@ export class CustomerSegmentationService {
         avgAmount: sql<number>`AVG(amount)`,
       })
       .from(this.payments)
-      .where(and(sql`${this.payments.customerId} = ${customerId}`, sql`${this.payments.createdAt} >= ${thirtyDaysAgo}`));
+      .where(
+        and(sql`${this.payments.customerId} = ${customerId}`, sql`${this.payments.createdAt} >= ${thirtyDaysAgo}`),
+      );
 
     const olderPayments = await this.db
       .select({
@@ -759,7 +753,9 @@ export class CustomerSegmentationService {
         successRate: sql<number>`ROUND((COUNT(CASE WHEN status = 'succeeded' THEN 1 END) * 100.0 / COUNT(*)), 2)`,
       })
       .from(this.payments)
-      .where(and(sql`${this.payments.customerId} = ${customerId}`, sql`${this.payments.createdAt} >= ${thirtyDaysAgo}`));
+      .where(
+        and(sql`${this.payments.customerId} = ${customerId}`, sql`${this.payments.createdAt} >= ${thirtyDaysAgo}`),
+      );
 
     const paymentActivity = recentPaymentActivity[0] || {
       paymentCount: 0,

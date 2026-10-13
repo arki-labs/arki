@@ -14,32 +14,36 @@ import { initDbWithOptions } from './init.js';
  *
  * @throws Error if DB_URL is not configured.
  */
-export function createDb<TRelations extends AnyRelations>(
-  config: {
-    relations: TRelations;
-    logger?: boolean | Logger | undefined;
-  },
-) {
-  debugFactory('[factory] Creating database from environment configuration');
+export function createDb<TRelations extends AnyRelations>(config: {
+  relations: TRelations;
+  logger?: boolean | Logger | undefined;
+}) {
+  debugFactory.debug('[factory] Creating database from environment configuration');
 
   const connectionUrl = env.DB_URL;
   if (!connectionUrl) {
-    debugFactory('[factory] Database creation failed: DB_URL not configured');
+    debugFactory.debug('[factory] Database creation failed: DB_URL not configured');
     throw new Error('Database URL is not configured. Please set DB_URL environment variable.');
   }
 
   const connectionOptions = getDbConnectionOptions();
 
-  debugFactory('[factory] Connection options (min: %d, max: %d, idleTimeout: %dms, connTimeout: %dms)',
-    connectionOptions.min, connectionOptions.max,
-    connectionOptions.idleTimeoutMillis, connectionOptions.connectionTimeoutMillis);
+  debugFactory.debug(
+    '[factory] Connection options (min: {min}, max: {max}, idleTimeout: {idleTimeoutMillis}ms, connTimeout: {connectionTimeoutMillis}ms)',
+    {
+      min: connectionOptions.min,
+      max: connectionOptions.max,
+      idleTimeoutMillis: connectionOptions.idleTimeoutMillis,
+      connectionTimeoutMillis: connectionOptions.connectionTimeoutMillis,
+    },
+  );
 
   const db = initDbWithOptions<TRelations>(connectionOptions, {
     ...config,
     logger: config.logger ?? (env.DB_LOGGING || env.NODE_ENV === 'development'),
   });
 
-  debugFactory('[factory] Database created successfully');
+  debugFactory.debug('[factory] Database created successfully');
 
   return db;
 }

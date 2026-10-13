@@ -1,6 +1,6 @@
-import { createLogger } from '@arki/log';
+import { getLogger } from '@arki/log';
 
-const log = createLogger('arki:auth:e2e');
+const log = getLogger('arki:auth:e2e');
 
 type InternalAdapter = {
   findUserByEmail: (

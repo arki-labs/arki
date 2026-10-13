@@ -1,15 +1,15 @@
 /* eslint-disable drizzle/enforce-delete-with-where */
 
 import { Cron } from 'croner';
-import { createLogger } from '@arki/log';
-import { debug } from '@arki/log/debug';
+
+import { getLogger } from '@arki/log';
 
 import type { ScheduleDef } from './index.js';
+import { SCHEDULE_ERROR_CODES, ScheduleError } from './errors.js';
 import { parseEveryInterval } from './index.js';
-import { ScheduleError, SCHEDULE_ERROR_CODES } from './errors.js';
 
-const debugSchedule = debug('arki:schedule');
-const log = createLogger('arki:schedule');
+const debugSchedule = getLogger('arki:schedule');
+const log = getLogger('arki:schedule');
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 type UnrefHandle = { unref(): void };
@@ -64,9 +64,8 @@ type ScheduleRuntimeContextOptions<TContext> =
         }
       : never);
 
-export type ScheduleRuntimeOptions<TContext = undefined> =
-  & ScheduleRuntimeBaseOptions<TContext>
-  & ScheduleRuntimeContextOptions<TContext>;
+export type ScheduleRuntimeOptions<TContext = undefined> = ScheduleRuntimeBaseOptions<TContext> &
+  ScheduleRuntimeContextOptions<TContext>;
 
 export type ScheduleRunStatus = 'ran' | 'skipped-overlap' | 'skipped-lock' | 'lock-failed' | 'handler-failed';
 
@@ -141,7 +140,9 @@ function lockTtlSeconds<TContext>(schedule: ScheduleDef<TContext>): number {
   return 60;
 }
 
-export function createScheduleRuntime<TContext = undefined>(options: ScheduleRuntimeOptions<TContext>): ScheduleRuntime {
+export function createScheduleRuntime<TContext = undefined>(
+  options: ScheduleRuntimeOptions<TContext>,
+): ScheduleRuntime {
   assertUniqueSchedules(options.schedules);
 
   const byName = new Map(options.schedules.map(schedule => [schedule.name, schedule]));
@@ -171,7 +172,10 @@ export function createScheduleRuntime<TContext = undefined>(options: ScheduleRun
     } catch (error) {
       lockErrors += 1;
       const message = error instanceof Error ? error.message : String(error);
-      debugSchedule('[%s] lock acquire failed: %s', schedule.name, message);
+      debugSchedule.debug('[{scheduleName}] lock acquire failed: {failed}', {
+        scheduleName: schedule.name,
+        failed: message,
+      });
       log.error('schedule lock acquire failed', { schedule: schedule.name, error: message });
       return 'failed';
     }
@@ -195,13 +199,17 @@ export function createScheduleRuntime<TContext = undefined>(options: ScheduleRun
 
     running.set(schedule.name, active + 1);
     try {
-      const scheduleContext = options.createContext === undefined ? (undefined as TContext) : await options.createContext();
+      const scheduleContext =
+        options.createContext === undefined ? (undefined as TContext) : await options.createContext();
       await schedule.handler(scheduleContext);
       return { name: schedule.name, status: 'ran' };
     } catch (error) {
       handlerFailures += 1;
       const message = error instanceof Error ? error.message : String(error);
-      debugSchedule('[%s] handler failed: %s', schedule.name, message);
+      debugSchedule.debug('[{scheduleName}] handler failed: {failed}', {
+        scheduleName: schedule.name,
+        failed: message,
+      });
       log.error('schedule handler failed', { schedule: schedule.name, error: message });
       return { name: schedule.name, status: 'handler-failed' };
     } finally {
@@ -215,10 +223,7 @@ export function createScheduleRuntime<TContext = undefined>(options: ScheduleRun
   }
 
   function trackPromise<T>(promise: Promise<T>): Promise<T> {
-    const drained = promise.then(
-      ignorePromiseSettlement,
-      ignorePromiseSettlement,
-    );
+    const drained = promise.then(ignorePromiseSettlement, ignorePromiseSettlement);
     inflight.add(drained);
     void drained.finally(() => {
       inflight.delete(drained);
@@ -236,10 +241,13 @@ export function createScheduleRuntime<TContext = undefined>(options: ScheduleRun
     const intervalMs = parseEveryInterval(every);
     const armNext = (): void => {
       if (stopped) return;
-      const timer = setTimeout(() => {
-        track(schedule);
-        armNext();
-      }, intervalMs + randomDelay(options.jitterMs ?? 0));
+      const timer = setTimeout(
+        () => {
+          track(schedule);
+          armNext();
+        },
+        intervalMs + randomDelay(options.jitterMs ?? 0),
+      );
       unref(timer);
       timers.push(timer);
     };
@@ -266,14 +274,16 @@ export function createScheduleRuntime<TContext = undefined>(options: ScheduleRun
 
   function startDurable(durable: DurableScheduler, schedules: readonly ScheduleDef<TContext>[]): void {
     durableStarted = true;
-    void trackPromise(durable.start(schedules.flatMap(schedule => durableRegistration(schedule)))).catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      debugSchedule('durable registration failed: %s', message);
-      log.error('schedule durable registration failed', {
-        schedules: schedules.map(schedule => schedule.name).join(','),
-        error: message,
-      });
-    });
+    void trackPromise(durable.start(schedules.flatMap(schedule => durableRegistration(schedule)))).catch(
+      (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        debugSchedule.debug('durable registration failed: {failed}', { failed: message });
+        log.error('schedule durable registration failed', {
+          schedules: schedules.map(schedule => schedule.name).join(','),
+          error: message,
+        });
+      },
+    );
   }
 
   return {

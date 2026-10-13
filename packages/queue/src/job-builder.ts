@@ -5,12 +5,12 @@
 
 import type { z } from '@arki/contracts';
 
-import { debugBuilder } from './debug.ts';
-import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
 import type { JobBuilderChain, JobBuilderDef } from './types/builder.ts';
 import type { JobDefinition, JobHandler, JobOptions } from './types/job.ts';
 import type { JobMiddleware } from './types/middleware.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
+import { debugBuilder } from './debug.ts';
+import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
 
 /**
  * Internal state for job builder
@@ -31,11 +31,13 @@ export function createJobBuilder<TContext, TContextOut, TMeta extends QueueMeta>
   config: QueueConfig;
   middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[];
 }): JobBuilderDef<TContext, TContextOut, TMeta> {
-  debugBuilder('Creating job builder with %d middleware', params.middlewares.length);
+  debugBuilder.debug('Creating job builder with {middlewaresLength} middleware', {
+    middlewaresLength: params.middlewares.length,
+  });
 
   return {
     use<TContextOut2>(middleware: JobMiddleware<TContextOut, TContextOut2, TMeta>) {
-      debugBuilder('Adding middleware to job builder (total: %d)', params.middlewares.length + 1);
+      debugBuilder.debug('Adding middleware to job builder (total: {total})', { total: params.middlewares.length + 1 });
 
       // Type safety: middleware transforms TContextOut -> TContextOut2
       // Runtime: store as unknown array for execution
@@ -46,7 +48,7 @@ export function createJobBuilder<TContext, TContextOut, TMeta extends QueueMeta>
     },
 
     name(name: string) {
-      debugBuilder('Setting job name: %s', name);
+      debugBuilder.debug('Setting job name: {name}', { name });
 
       // One runtime object serves both typestates: the JobBuilderNeedsInput
       // type hides `.handler()` until `.input()` runs; the throw below backs it up.
@@ -68,7 +70,7 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
 ): JobBuilderChain<TContext, TContextOut, TMeta, TInput, TOutput> {
   return {
     input<TNewInput>(schema: z.ZodType<TNewInput>) {
-      debugBuilder('[%s] Setting input schema', state.name ?? 'unnamed');
+      debugBuilder.debug('[{value1}] Setting input schema', { value1: state.name ?? 'unnamed' });
 
       return createJobBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>({
         ...state,
@@ -78,11 +80,13 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
     },
 
     options(options: JobOptions) {
-      debugBuilder(
-        '[%s] Setting job options (retry attempts: %d, maxParallelism: %d)',
-        state.name ?? 'unnamed',
-        options.retry?.attempts ?? 3,
-        options.maxParallelism ?? 5,
+      debugBuilder.debug(
+        '[{value1}] Setting job options (retry attempts: {attempts}, maxParallelism: {maxParallelism})',
+        {
+          value1: state.name ?? 'unnamed',
+          attempts: options.retry?.attempts ?? 3,
+          maxParallelism: options.maxParallelism ?? 5,
+        },
       );
 
       return createJobBuilderChain<TContext, TContextOut, TMeta, TInput, TOutput>({
@@ -117,11 +121,10 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
         });
       }
 
-      debugBuilder(
-        '[%s] Creating job definition with %d middleware',
-        state.name,
-        state.middlewares.length,
-      );
+      debugBuilder.debug('[{stateName}] Creating job definition with {middlewaresLength} middleware', {
+        stateName: state.name,
+        middlewaresLength: state.middlewares.length,
+      });
 
       type ActualInput = THandlerInput extends never ? TInput : THandlerInput;
       type ActualOutput = THandlerOutput extends never ? TOutput : THandlerOutput;
@@ -142,12 +145,14 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
           const queue = definition._internal._queue;
           if (!queue) {
             throw new Error(
-              `Job "${jobName}" is not registered with a queue. ` +
-                `Call queue.register() before calling trigger().`,
+              `Job "${jobName}" is not registered with a queue. ` + `Call queue.register() before calling trigger().`,
             );
           }
 
-          debugBuilder('[%s] Triggering job with options: %o', jobName, options);
+          debugBuilder.debug('[{jobName}] Triggering job with options: {options}', () => ({
+            jobName,
+            options: JSON.stringify(options),
+          }));
 
           const job = await queue.add(jobName, data, {
             priority: options?.priority,
@@ -156,7 +161,7 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
             ...options?.bullmqOptions,
           });
 
-          debugBuilder('[%s] Job triggered with ID: %s', jobName, job.id);
+          debugBuilder.debug('[{jobName}] Job triggered with ID: {ID}', { jobName, ID: job.id });
           return job.id ?? '';
         },
       };

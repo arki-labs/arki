@@ -1,27 +1,25 @@
-import { createLogger } from '@arki/log';
 import { eq } from 'drizzle-orm';
 
 import type { UserId } from '@arki/auth/ids';
+import { getLogger } from '@arki/log';
 
 import type { PaymentRetryService } from '../../core/services/payment-retry-service';
 import type { CoreTables } from '../../core/tables';
 import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types';
-import { type DunningDatabase } from '../repository';
-import type { DunningTables } from '../tables';
 import type { DunningCampaignId } from '../primitives';
+import type { DunningTables } from '../tables';
 import type {
   CampaignWithTrigger,
   DunningCampaign as DunningCampaignRow,
   DunningExecution as DunningExecutionRow,
 } from '../types';
-import {
-  type CommunicationOrchestrationConfig,
-  createCommunicationOrchestrationService,
-} from './communication-service';
+import type { CommunicationOrchestrationConfig } from './communication-service';
+import { type DunningDatabase } from '../repository';
 import { createDunningCampaignService } from './campaign-service';
+import { createCommunicationOrchestrationService } from './communication-service';
 import { createCustomerSegmentationService } from './segmentation-service';
 
-const logger = createLogger('dunning.integration');
+const logger = getLogger('dunning.integration');
 
 /**
  * Events that trigger dunning campaigns
@@ -33,7 +31,7 @@ export type DunningTriggerEvent = {
   paymentId?: PaymentId;
   metadata: Record<string, unknown>;
   timestamp: Date;
-}
+};
 
 /**
  * Service that integrates dunning management with existing payment systems
@@ -46,10 +44,7 @@ export type DunningIntegrationConfig = {
   communication?: CommunicationOrchestrationConfig;
 };
 
-export type DunningIntegrationCoreTables = Pick<
-  CoreTables,
-  'customers' | 'payments' | 'subscriptions'
->;
+export type DunningIntegrationCoreTables = Pick<CoreTables, 'customers' | 'payments' | 'subscriptions'>;
 
 export type DunningIntegrationDunningTables = Pick<
   DunningTables,
@@ -97,14 +92,10 @@ export class DunningIntegrationService {
       paymentRetryService,
     );
 
-    this.segmentationService = createCustomerSegmentationService(
-      db,
-      coreTables,
-      {
-        customerSegments: dunningTables.customerSegments,
-        customerRiskProfiles: dunningTables.customerRiskProfiles,
-      },
-    );
+    this.segmentationService = createCustomerSegmentationService(db, coreTables, {
+      customerSegments: dunningTables.customerSegments,
+      customerRiskProfiles: dunningTables.customerRiskProfiles,
+    });
   }
 
   /**
@@ -124,7 +115,7 @@ export class DunningIntegrationService {
       customerId: event.customerId,
       paymentId: event.paymentId,
       failureReason: event.failureReason,
-      failureCount: event.failureCount
+      failureCount: event.failureCount,
     });
 
     // First, let the payment retry service handle technical retries (if available)
@@ -155,7 +146,7 @@ export class DunningIntegrationService {
         logger.error('Failed to execute campaign for payment failure', {
           campaignId: campaign.id,
           customerId: event.customerId,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         });
       }
     }
@@ -175,7 +166,7 @@ export class DunningIntegrationService {
       customerId: event.customerId,
       subscriptionId: event.subscriptionId,
       oldStatus: event.oldStatus,
-      newStatus: event.newStatus
+      newStatus: event.newStatus,
     });
 
     // Update customer risk profile
@@ -205,7 +196,7 @@ export class DunningIntegrationService {
       customerId: event.customerId,
       subscriptionId: event.subscriptionId,
       daysUntilEnd: event.daysUntilEnd,
-      trialEndDate: event.trialEndDate.toISOString()
+      trialEndDate: event.trialEndDate.toISOString(),
     });
 
     const customerSegments = await this.segmentationService.getCustomerSegments(event.customerId);
@@ -232,7 +223,7 @@ export class DunningIntegrationService {
         logger.error('Failed to execute trial ending campaign', {
           campaignId: campaign.id,
           customerId: event.customerId,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         });
       }
     }
@@ -253,7 +244,7 @@ export class DunningIntegrationService {
       customerId: event.customerId,
       paymentId: event.paymentId,
       amount: event.amount,
-      currency: event.currency
+      currency: event.currency,
     });
 
     // Update customer risk profile with successful payment
@@ -323,7 +314,7 @@ export class DunningIntegrationService {
         logger.error('Failed to execute past due campaign', {
           campaignId: campaign.id,
           customerId: event.customerId,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         });
       }
     }
@@ -346,7 +337,7 @@ export class DunningIntegrationService {
     // Could trigger win-back campaigns (different from dunning)
     logger.info('Subscription canceled, stopping dunning campaigns', {
       subscriptionId: event.subscriptionId,
-      customerId: event.customerId
+      customerId: event.customerId,
     });
   }
 
@@ -370,7 +361,7 @@ export class DunningIntegrationService {
       subscriptionId: event.subscriptionId,
       customerId: event.customerId,
       oldStatus: event.oldStatus,
-      newStatus: event.newStatus
+      newStatus: event.newStatus,
     });
   }
 
@@ -423,18 +414,18 @@ export class DunningIntegrationService {
                 },
               },
             })
-            .where(eq(this.dunningExecutions.id, (execution).id));
+            .where(eq(this.dunningExecutions.id, execution.id));
 
           logger.info('Stopped dunning execution due to payment success', {
-            executionId: (execution).id,
+            executionId: execution.id,
             customerId: customerId,
-            campaignId: execution.campaign?.id
+            campaignId: execution.campaign?.id,
           });
         } catch (error) {
           logger.error('Failed to stop dunning execution', {
-            executionId: (execution).id,
+            executionId: execution.id,
             customerId: customerId,
-            error: error instanceof Error ? error.message : String(error)
+            error: error instanceof Error ? error.message : String(error),
           });
         }
       }
@@ -506,7 +497,9 @@ export class DunningIntegrationService {
     try {
       await this.campaignService.processScheduledExecutions();
     } catch (error) {
-      logger.error('Failed to process scheduled executions', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to process scheduled executions', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -517,7 +510,9 @@ export class DunningIntegrationService {
     try {
       await this.communicationService.processPendingCommunications();
     } catch (error) {
-      logger.error('Failed to process pending communications', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to process pending communications', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -528,7 +523,9 @@ export class DunningIntegrationService {
     try {
       await this.campaignService.retryFailedExecutions();
     } catch (error) {
-      logger.error('Failed to retry failed executions', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to retry failed executions', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -550,7 +547,9 @@ export class DunningIntegrationService {
     try {
       await this.segmentationService.processAutoUpdateSegments();
     } catch (error) {
-      logger.error('Failed to process auto-update segments', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to process auto-update segments', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -629,11 +628,5 @@ export function createDunningIntegrationService(
   config: DunningIntegrationConfig,
   paymentRetryService?: PaymentRetryService,
 ) {
-  return new DunningIntegrationService(
-    db,
-    coreTables,
-    dunningTables,
-    config,
-    paymentRetryService,
-  );
+  return new DunningIntegrationService(db, coreTables, dunningTables, config, paymentRetryService);
 }

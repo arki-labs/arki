@@ -1,16 +1,13 @@
-import { createLogger } from '@arki/log';
+import { getLogger } from '@arki/log';
 
+import type { ListCommunicationsQuery, UpdateCommunicationStatusInput } from '../contracts';
 import type {
-  ListCommunicationsQuery,
-  UpdateCommunicationStatusInput,
-} from '../contracts';
-import type {
-  CommunicationChannel,
   CommunicationStatus as CommStatus,
+  CommunicationChannel,
   DunningCommunicationId,
   DunningExecutionId,
 } from '../primitives';
-import { type DunningDatabase, createDunningCommunicationRepository } from '../repository';
+import type { DunningDatabase } from '../repository';
 import type { DunningTables } from '../tables';
 import type {
   CommunicationTemplate,
@@ -20,6 +17,7 @@ import type {
   DunningExecution,
   DunningTemplate,
 } from '../types';
+import { createDunningCommunicationRepository } from '../repository';
 
 /**
  * Interface for communication providers (email, SMS, etc.)
@@ -29,7 +27,7 @@ export type CommunicationProvider = {
   send(communication: CommunicationRequest): Promise<CommunicationResult>;
   validateConfiguration(): Promise<boolean>;
   getDeliveryStatus?(messageId: string): Promise<CommunicationDeliveryStatus>;
-}
+};
 
 export type CommunicationRequest = {
   recipient: string;
@@ -38,22 +36,22 @@ export type CommunicationRequest = {
   template: CommunicationTemplate;
   personalizations: Record<string, string>;
   trackingData?: Record<string, unknown>;
-}
+};
 
 export type CommunicationResult = {
   success: boolean;
   messageId?: string;
   errorMessage?: string;
   providerResponse?: Record<string, unknown>;
-}
+};
 
 export type CommunicationDeliveryStatus = {
   status: CommStatus;
   timestamp: Date;
   metadata?: Record<string, unknown>;
-}
+};
 
-const logger = createLogger('dunning.communication');
+const logger = getLogger('dunning.communication');
 
 /**
  * Email communication provider with Resend integration
@@ -61,23 +59,27 @@ const logger = createLogger('dunning.communication');
 export class EmailProvider implements CommunicationProvider {
   readonly channel = 'email' as const;
 
-  constructor(private config: {
-    apiKey: string;
-    fromEmail: string;
-    fromName: string;
-  }) {}
+  constructor(
+    private config: {
+      apiKey: string;
+      fromEmail: string;
+      fromName: string;
+    },
+  ) {}
 
   async send(request: CommunicationRequest): Promise<CommunicationResult> {
     try {
       // Process template variables
       const processedContent = this.processTemplate(request.content, request.personalizations);
-      const processedSubject = request.subject ? this.processTemplate(request.subject, request.personalizations) : 'Payment Notice';
+      const processedSubject = request.subject
+        ? this.processTemplate(request.subject, request.personalizations)
+        : 'Payment Notice';
 
       // Send email via Resend API
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.config.apiKey}`,
+          Authorization: `Bearer ${this.config.apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -130,7 +132,7 @@ export class EmailProvider implements CommunicationProvider {
       const response = await fetch('https://api.resend.com/domains', {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${this.config.apiKey}`,
+          Authorization: `Bearer ${this.config.apiKey}`,
         },
       });
 
@@ -145,7 +147,7 @@ export class EmailProvider implements CommunicationProvider {
       // Query Resend API for email status
       const response = await fetch(`https://api.resend.com/emails/${messageId}`, {
         headers: {
-          'Authorization': `Bearer ${this.config.apiKey}`,
+          Authorization: `Bearer ${this.config.apiKey}`,
         },
       });
 
@@ -158,7 +160,9 @@ export class EmailProvider implements CommunicationProvider {
         };
       }
     } catch (error) {
-      logger.error('Failed to get email delivery status', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to get email delivery status', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     // Fallback status
@@ -186,11 +190,13 @@ export class EmailProvider implements CommunicationProvider {
 export class SMSProvider implements CommunicationProvider {
   readonly channel = 'sms' as const;
 
-  constructor(private config: {
-    accountSid: string;
-    authToken: string;
-    fromNumber: string;
-  }) {}
+  constructor(
+    private config: {
+      accountSid: string;
+      authToken: string;
+      fromNumber: string;
+    },
+  ) {}
 
   async send(request: CommunicationRequest): Promise<CommunicationResult> {
     try {
@@ -198,26 +204,27 @@ export class SMSProvider implements CommunicationProvider {
       const processedContent = this.processTemplate(request.content, request.personalizations);
 
       // Truncate SMS content to 160 characters for standard SMS
-      const smsContent = processedContent.length > 160
-        ? processedContent.slice(0, 157) + '...'
-        : processedContent;
+      const smsContent = processedContent.length > 160 ? processedContent.slice(0, 157) + '...' : processedContent;
 
       // Send SMS via Twilio API
       const auth = Buffer.from(`${this.config.accountSid}:${this.config.authToken}`).toString('base64');
 
-      const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${this.config.accountSid}/Messages.json`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${auth}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
+      const response = await fetch(
+        `https://api.twilio.com/2010-04-01/Accounts/${this.config.accountSid}/Messages.json`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            From: this.config.fromNumber,
+            To: request.recipient,
+            Body: smsContent,
+            StatusCallback: '', // Would be webhook URL for status updates
+          }),
         },
-        body: new URLSearchParams({
-          From: this.config.fromNumber,
-          To: request.recipient,
-          Body: smsContent,
-          StatusCallback: '', // Would be webhook URL for status updates
-        }),
-      });
+      );
 
       if (!response.ok) {
         const errorData = (await response.json().catch(() => ({}))) as { message?: string };
@@ -255,7 +262,7 @@ export class SMSProvider implements CommunicationProvider {
       const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${this.config.accountSid}.json`, {
         method: 'GET',
         headers: {
-          'Authorization': `Basic ${auth}`,
+          Authorization: `Basic ${auth}`,
         },
       });
 
@@ -270,11 +277,14 @@ export class SMSProvider implements CommunicationProvider {
       // Query Twilio API for SMS status
       const auth = Buffer.from(`${this.config.accountSid}:${this.config.authToken}`).toString('base64');
 
-      const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${this.config.accountSid}/Messages/${messageId}.json`, {
-        headers: {
-          'Authorization': `Basic ${auth}`,
+      const response = await fetch(
+        `https://api.twilio.com/2010-04-01/Accounts/${this.config.accountSid}/Messages/${messageId}.json`,
+        {
+          headers: {
+            Authorization: `Basic ${auth}`,
+          },
         },
-      });
+      );
 
       if (response.ok) {
         const data = (await response.json()) as {
@@ -301,7 +311,9 @@ export class SMSProvider implements CommunicationProvider {
         };
       }
     } catch (error) {
-      logger.error('Failed to get SMS delivery status', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to get SMS delivery status', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     // Fallback status
@@ -339,7 +351,9 @@ export class InAppProvider implements CommunicationProvider {
   async send(request: CommunicationRequest): Promise<CommunicationResult> {
     try {
       const processedContent = this.processTemplate(request.content, request.personalizations);
-      const processedSubject = request.subject ? this.processTemplate(request.subject, request.personalizations) : 'Payment Notice';
+      const processedSubject = request.subject
+        ? this.processTemplate(request.subject, request.personalizations)
+        : 'Payment Notice';
 
       // Store notification in database (assuming notifications table exists)
       const notificationId = `inapp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
@@ -353,7 +367,7 @@ export class InAppProvider implements CommunicationProvider {
       logger.info('Creating in-app notification', {
         userId: request.recipient,
         subject: processedSubject,
-        contentPreview: processedContent.slice(0, 100)
+        contentPreview: processedContent.slice(0, 100),
       });
 
       // Here you would typically:
@@ -382,7 +396,9 @@ export class InAppProvider implements CommunicationProvider {
         },
       };
     } catch (error) {
-      logger.error('In-app notification creation failed', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('In-app notification creation failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return {
         success: false,
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
@@ -417,7 +433,9 @@ export class InAppProvider implements CommunicationProvider {
         },
       };
     } catch (error) {
-      logger.error('Failed to get in-app notification status', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to get in-app notification status', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return {
         status: 'delivered',
         timestamp: new Date(),
@@ -443,10 +461,12 @@ export class InAppProvider implements CommunicationProvider {
 export class WebhookProvider implements CommunicationProvider {
   readonly channel = 'webhook' as const;
 
-  constructor(private config: {
-    defaultHeaders: Record<string, string>;
-    timeout: number;
-  }) {}
+  constructor(
+    private config: {
+      defaultHeaders: Record<string, string>;
+      timeout: number;
+    },
+  ) {}
 
   async send(request: CommunicationRequest): Promise<CommunicationResult> {
     try {
@@ -500,7 +520,9 @@ export class WebhookProvider implements CommunicationProvider {
       }
 
       const responseHeaders: Record<string, string> = {};
-      for (const [key, value] of response.headers.entries()) { responseHeaders[key] = value; }
+      for (const [key, value] of response.headers.entries()) {
+        responseHeaders[key] = value;
+      }
 
       return {
         success: true,
@@ -708,7 +730,7 @@ export class CommunicationOrchestrationService {
       } catch (error) {
         logger.error('Failed to process communication', {
           communicationId: communication.id,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         });
         await this.communicationRepo.updateStatus(communication.id, 'failed', {
           failureReason: error instanceof Error ? error.message : 'Unknown error',
@@ -816,7 +838,10 @@ export class CommunicationOrchestrationService {
       try {
         results[channel] = await provider.validateConfiguration();
       } catch (error) {
-        logger.error('Provider validation failed', { channel, error: error instanceof Error ? error.message : String(error) });
+        logger.error('Provider validation failed', {
+          channel,
+          error: error instanceof Error ? error.message : String(error),
+        });
         results[channel] = false;
       }
     }
@@ -841,7 +866,10 @@ export class CommunicationOrchestrationService {
     try {
       return await provider.getDeliveryStatus(communication.providerMessageId);
     } catch (error) {
-      logger.error('Failed to get delivery status', { communicationId, error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to get delivery status', {
+        communicationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }
@@ -865,7 +893,7 @@ export class CommunicationOrchestrationService {
       } catch (error) {
         logger.error('Failed to retry communication', {
           communicationId: communication.id,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         });
       }
     }

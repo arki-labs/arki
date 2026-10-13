@@ -10,13 +10,13 @@
 import type { Job } from 'bullmq';
 import { Queue, Worker } from 'bullmq';
 
-import { createLogger } from '@arki/log';
+import { getLogger } from '@arki/log';
 
 import type { QueueConnection } from './redis-connection.ts';
 import { debugSchedule } from './debug.ts';
 import { parseRedisConnection } from './redis-connection.ts';
 
-const log = createLogger('arki:queue:durable-scheduler');
+const log = getLogger('arki:queue:durable-scheduler');
 
 /** What one durable tick reports back (`@arki/schedule`'s `ScheduleRunResult`). */
 export type DurableRunResult = {
@@ -82,10 +82,12 @@ async function ensureScheduler(queue: Queue, schedule: DurableScheduleRegistrati
       ? existing.pattern === repeat.pattern && existing.tz === repeat.tz
       : existing.every === repeat.every);
   if (unchanged) {
-    debugSchedule('[%s] Durable scheduler unchanged, keeping its pending tick', schedule.name);
+    debugSchedule.debug('[{scheduleName}] Durable scheduler unchanged, keeping its pending tick', {
+      scheduleName: schedule.name,
+    });
     return;
   }
-  debugSchedule('[%s] Upserting durable scheduler', schedule.name);
+  debugSchedule.debug('[{scheduleName}] Upserting durable scheduler', { scheduleName: schedule.name });
   await queue.upsertJobScheduler(schedule.name, repeat, {
     name: schedule.name,
     data: {},
@@ -114,7 +116,10 @@ export function createDurableScheduler(options: DurableSchedulerOptions): Durabl
     const worker = new Worker(
       name,
       async (job: Job) => {
-        debugSchedule('[%s] Durable tick %s started', schedule.name, job.id);
+        debugSchedule.debug('[{scheduleName}] Durable tick {jobId} started', {
+          scheduleName: schedule.name,
+          jobId: job.id,
+        });
         const result = await schedule.run();
         if (result.status === 'handler-failed') {
           // Fail the BullMQ job so the failure shows in the board and events.

@@ -8,17 +8,11 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { generateText, streamText } from 'ai';
 
+import type { GenerateOptions, LLMProvider, Message, StreamOptions } from './types.ts';
 import { debugService } from '../debug.ts';
 import { env } from '../env.ts';
-import { GenerationError, RateLimitError, getErrorMessage } from '../errors.ts';
+import { GenerationError, getErrorMessage, RateLimitError } from '../errors.ts';
 import { rateLimiters } from '../utils/rate-limiter.ts';
-
-import type {
-  GenerateOptions,
-  LLMProvider,
-  Message,
-  StreamOptions,
-} from './types.ts';
 
 export type OpenRouterServiceConfig = {
   model?: string;
@@ -28,7 +22,7 @@ export type OpenRouterServiceConfig = {
   siteUrl?: string;
   /** Site name for OpenRouter attribution (optional) */
   siteName?: string;
-}
+};
 
 /**
  * OpenRouter LLM Service
@@ -64,11 +58,10 @@ export class OpenRouterService implements LLMProvider {
       },
     });
 
-    debugService(
-      '[OpenRouter] Service initialized (model: %s, temperature: %d)',
-      this.model,
-      this.defaultTemperature,
-    );
+    debugService.debug('[OpenRouter] Service initialized (model: {model}, temperature: {temperature})', {
+      model: this.model,
+      temperature: this.defaultTemperature,
+    });
   }
 
   /**
@@ -81,44 +74,34 @@ export class OpenRouterService implements LLMProvider {
   /**
    * Generate text from a single prompt
    */
-  async generateText(
-    prompt: string,
-    options: GenerateOptions = {},
-  ): Promise<string> {
+  async generateText(prompt: string, options: GenerateOptions = {}): Promise<string> {
     if (!this.isAvailable()) {
       throw new GenerationError('OpenRouter API key not configured');
     }
 
-    debugService('[OpenRouter] Generating text (prompt length: %d)', prompt.length);
+    debugService.debug('[OpenRouter] Generating text (prompt length: {length})', { length: prompt.length });
 
-    const rateLimitResult = await rateLimiters.openrouter.execute(
-      'generateText',
-      async () => {
-        try {
-          const result = await generateText({
-            model: this.client(this.model),
-            instructions: options.systemPrompt,
-            prompt,
-            temperature: options.temperature ?? this.defaultTemperature,
-            maxOutputTokens: options.maxTokens,
-            maxRetries: options.maxRetries ?? this.defaultMaxRetries,
-          });
+    const rateLimitResult = await rateLimiters.openrouter.execute('generateText', async () => {
+      try {
+        const result = await generateText({
+          model: this.client(this.model),
+          instructions: options.systemPrompt,
+          prompt,
+          temperature: options.temperature ?? this.defaultTemperature,
+          maxOutputTokens: options.maxTokens,
+          maxRetries: options.maxRetries ?? this.defaultMaxRetries,
+        });
 
-          debugService(
-            '[OpenRouter] Text generated successfully (length: %d)',
-            result.text.length,
-          );
+        debugService.debug('[OpenRouter] Text generated successfully (length: {length})', {
+          length: result.text.length,
+        });
 
-          return result.text;
-        } catch (error) {
-          debugService('[OpenRouter] Text generation failed: %s', getErrorMessage(error));
-          throw new GenerationError(
-            `Failed to generate text: ${getErrorMessage(error)}`,
-            error,
-          );
-        }
-      },
-    );
+        return result.text;
+      } catch (error) {
+        debugService.debug('[OpenRouter] Text generation failed: {failed}', { failed: getErrorMessage(error) });
+        throw new GenerationError(`Failed to generate text: ${getErrorMessage(error)}`, error);
+      }
+    });
 
     if (!rateLimitResult.success) {
       throw new RateLimitError(
@@ -133,49 +116,36 @@ export class OpenRouterService implements LLMProvider {
   /**
    * Generate text from conversation messages
    */
-  async generateConversation(
-    messages: Message[],
-    options: GenerateOptions = {},
-  ): Promise<string> {
+  async generateConversation(messages: Message[], options: GenerateOptions = {}): Promise<string> {
     if (!this.isAvailable()) {
       throw new GenerationError('OpenRouter API key not configured');
     }
 
-    debugService('[OpenRouter] Generating conversation (messages: %d)', messages.length);
+    debugService.debug('[OpenRouter] Generating conversation (messages: {messages})', { messages: messages.length });
 
-    const rateLimitResult = await rateLimiters.openrouter.execute(
-      'generateConversation',
-      async () => {
-        try {
-          const result = await generateText({
-            model: this.client(this.model),
-            messages: messages.map((msg) => ({
-              role: msg.role,
-              content: msg.content,
-            })),
-            temperature: options.temperature ?? this.defaultTemperature,
-            maxOutputTokens: options.maxTokens,
-            maxRetries: options.maxRetries ?? this.defaultMaxRetries,
-          });
+    const rateLimitResult = await rateLimiters.openrouter.execute('generateConversation', async () => {
+      try {
+        const result = await generateText({
+          model: this.client(this.model),
+          messages: messages.map(msg => ({
+            role: msg.role,
+            content: msg.content,
+          })),
+          temperature: options.temperature ?? this.defaultTemperature,
+          maxOutputTokens: options.maxTokens,
+          maxRetries: options.maxRetries ?? this.defaultMaxRetries,
+        });
 
-          debugService(
-            '[OpenRouter] Conversation generated successfully (length: %d)',
-            result.text.length,
-          );
+        debugService.debug('[OpenRouter] Conversation generated successfully (length: {length})', {
+          length: result.text.length,
+        });
 
-          return result.text;
-        } catch (error) {
-          debugService(
-            '[OpenRouter] Conversation generation failed: %s',
-            getErrorMessage(error),
-          );
-          throw new GenerationError(
-            `Failed to generate conversation: ${getErrorMessage(error)}`,
-            error,
-          );
-        }
-      },
-    );
+        return result.text;
+      } catch (error) {
+        debugService.debug('[OpenRouter] Conversation generation failed: {failed}', { failed: getErrorMessage(error) });
+        throw new GenerationError(`Failed to generate conversation: ${getErrorMessage(error)}`, error);
+      }
+    });
 
     if (!rateLimitResult.success) {
       throw new RateLimitError(
@@ -190,15 +160,12 @@ export class OpenRouterService implements LLMProvider {
   /**
    * Stream text generation from a prompt
    */
-  async *streamText(
-    prompt: string,
-    options: StreamOptions = {},
-  ): AsyncGenerator<string, void, unknown> {
+  async *streamText(prompt: string, options: StreamOptions = {}): AsyncGenerator<string, void, unknown> {
     if (!this.isAvailable()) {
       throw new GenerationError('OpenRouter API key not configured');
     }
 
-    debugService('[OpenRouter] Streaming text (prompt length: %d)', prompt.length);
+    debugService.debug('[OpenRouter] Streaming text (prompt length: {length})', { length: prompt.length });
 
     try {
       const stream = await streamText({
@@ -222,36 +189,30 @@ export class OpenRouterService implements LLMProvider {
         options.onComplete(fullText);
       }
 
-      debugService('[OpenRouter] Stream completed (total length: %d)', fullText.length);
+      debugService.debug('[OpenRouter] Stream completed (total length: {length})', { length: fullText.length });
     } catch (error) {
-      debugService('[OpenRouter] Stream failed: %s', getErrorMessage(error));
+      debugService.debug('[OpenRouter] Stream failed: {failed}', { failed: getErrorMessage(error) });
       if (options.onError) {
         options.onError(error as Error);
       }
-      throw new GenerationError(
-        `Failed to stream text: ${getErrorMessage(error)}`,
-        error,
-      );
+      throw new GenerationError(`Failed to stream text: ${getErrorMessage(error)}`, error);
     }
   }
 
   /**
    * Stream conversation generation
    */
-  async *streamConversation(
-    messages: Message[],
-    options: StreamOptions = {},
-  ): AsyncGenerator<string, void, unknown> {
+  async *streamConversation(messages: Message[], options: StreamOptions = {}): AsyncGenerator<string, void, unknown> {
     if (!this.isAvailable()) {
       throw new GenerationError('OpenRouter API key not configured');
     }
 
-    debugService('[OpenRouter] Streaming conversation (messages: %d)', messages.length);
+    debugService.debug('[OpenRouter] Streaming conversation (messages: {messages})', { messages: messages.length });
 
     try {
       const stream = await streamText({
         model: this.client(this.model),
-        messages: messages.map((msg) => ({
+        messages: messages.map(msg => ({
           role: msg.role,
           content: msg.content,
         })),
@@ -272,19 +233,15 @@ export class OpenRouterService implements LLMProvider {
         options.onComplete(fullText);
       }
 
-      debugService(
-        '[OpenRouter] Conversation stream completed (total length: %d)',
-        fullText.length,
-      );
+      debugService.debug('[OpenRouter] Conversation stream completed (total length: {length})', {
+        length: fullText.length,
+      });
     } catch (error) {
-      debugService('[OpenRouter] Conversation stream failed: %s', getErrorMessage(error));
+      debugService.debug('[OpenRouter] Conversation stream failed: {failed}', { failed: getErrorMessage(error) });
       if (options.onError) {
         options.onError(error as Error);
       }
-      throw new GenerationError(
-        `Failed to stream conversation: ${getErrorMessage(error)}`,
-        error,
-      );
+      throw new GenerationError(`Failed to stream conversation: ${getErrorMessage(error)}`, error);
     }
   }
 }
@@ -292,8 +249,6 @@ export class OpenRouterService implements LLMProvider {
 /**
  * Factory function for creating OpenRouter service instances
  */
-export function createOpenRouterService(
-  config?: OpenRouterServiceConfig,
-): OpenRouterService {
+export function createOpenRouterService(config?: OpenRouterServiceConfig): OpenRouterService {
   return new OpenRouterService(config);
 }

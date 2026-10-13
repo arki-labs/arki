@@ -5,22 +5,14 @@
  * between multiple LLM providers.
  */
 
+import type { LanguageModel } from 'ai';
 import { anthropic, createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI, google } from '@ai-sdk/google';
 import { createGroq } from '@ai-sdk/groq';
 import { createMistral, mistral } from '@ai-sdk/mistral';
 import { createOpenAI, openai } from '@ai-sdk/openai';
 import { generateText, streamText } from 'ai';
-import type { LanguageModel } from 'ai';
 
-import { debugService } from '../debug.ts';
-import { env } from '../env.ts';
-import { GenerationError, getErrorMessage } from '../errors.ts';
-
-import { createGoogleService } from './google-service.ts';
-import { createGroqService } from './groq-service.ts';
-import { createMistralService } from './mistral-service.ts';
-import { createOpenRouterService } from './openrouter-service.ts';
 import type {
   GenerateOptions,
   LLMProvider,
@@ -30,6 +22,13 @@ import type {
   ProviderResult,
   StreamOptions,
 } from './types.ts';
+import { debugService } from '../debug.ts';
+import { env } from '../env.ts';
+import { GenerationError, getErrorMessage } from '../errors.ts';
+import { createGoogleService } from './google-service.ts';
+import { createGroqService } from './groq-service.ts';
+import { createMistralService } from './mistral-service.ts';
+import { createOpenRouterService } from './openrouter-service.ts';
 
 /**
  * Default models for each provider (free tier compatible)
@@ -130,10 +129,7 @@ function createLanguageModel(config: ProviderConfig): LanguageModel {
   }
 }
 
-function createLanguageModelProvider(
-  config: ProviderConfig,
-  defaultTemperature: number,
-): LLMProvider {
+function createLanguageModelProvider(config: ProviderConfig, defaultTemperature: number): LLMProvider {
   const model = resolveModel(config);
   const maxRetries = 2;
 
@@ -159,10 +155,7 @@ function createLanguageModelProvider(
 
         return result.text;
       } catch (error) {
-        throw new GenerationError(
-          `Failed to generate text with ${config.name}: ${getErrorMessage(error)}`,
-          error,
-        );
+        throw new GenerationError(`Failed to generate text with ${config.name}: ${getErrorMessage(error)}`, error);
       }
     },
     generateConversation: async (messages, options = {}) => {
@@ -173,7 +166,7 @@ function createLanguageModelProvider(
       try {
         const result = await generateText({
           model: createLanguageModel(config),
-          messages: messages.map((msg) => ({
+          messages: messages.map(msg => ({
             role: msg.role,
             content: msg.content,
           })),
@@ -223,10 +216,7 @@ function createLanguageModelProvider(
           options.onError(error as Error);
         }
 
-        throw new GenerationError(
-          `Failed to stream text with ${config.name}: ${getErrorMessage(error)}`,
-          error,
-        );
+        throw new GenerationError(`Failed to stream text with ${config.name}: ${getErrorMessage(error)}`, error);
       }
     },
     streamConversation: async function* (messages, options = {}) {
@@ -237,7 +227,7 @@ function createLanguageModelProvider(
       try {
         const stream = streamText({
           model: createLanguageModel(config),
-          messages: messages.map((msg) => ({
+          messages: messages.map(msg => ({
             role: msg.role,
             content: msg.content,
           })),
@@ -294,7 +284,7 @@ export type ProviderRouterConfig = {
   healthCheckIntervalMs?: number;
   /** Default temperature for all providers */
   defaultTemperature?: number;
-}
+};
 
 /**
  * Provider Router
@@ -314,16 +304,13 @@ export class ProviderRouter {
   private totalWeight = 0;
 
   constructor(config: ProviderRouterConfig) {
-    this.configs = config.providers.filter((p) => p.enabled !== false);
+    this.configs = config.providers.filter(p => p.enabled !== false);
     this.maxConsecutiveFailures = config.maxConsecutiveFailures ?? 3;
     this.healthCheckIntervalMs = config.healthCheckIntervalMs ?? 60_000;
 
     // Initialize providers
     for (const providerConfig of this.configs) {
-      const provider = this.createProvider(
-        providerConfig,
-        config.defaultTemperature,
-      );
+      const provider = this.createProvider(providerConfig, config.defaultTemperature);
 
       if (provider && provider.isAvailable()) {
         this.providers.set(providerConfig.name, provider);
@@ -333,40 +320,32 @@ export class ProviderRouter {
         });
         this.totalWeight += providerConfig.weight ?? 1;
 
-        debugService(
-          '[ProviderRouter] Registered provider: %s (model: %s, weight: %d)',
-          providerConfig.name,
-          providerConfig.model,
-          providerConfig.weight ?? 1,
-        );
+        debugService.debug('[ProviderRouter] Registered provider: {provider} (model: {model}, weight: {weight})', {
+          provider: providerConfig.name,
+          model: providerConfig.model,
+          weight: providerConfig.weight ?? 1,
+        });
       } else {
-        debugService(
-          '[ProviderRouter] Skipping unavailable provider: %s',
-          providerConfig.name,
-        );
+        debugService.debug('[ProviderRouter] Skipping unavailable provider: {provider}', {
+          provider: providerConfig.name,
+        });
       }
     }
 
     if (this.providers.size === 0) {
-      throw new GenerationError(
-        'No LLM providers available. Please configure at least one provider API key.',
-      );
+      throw new GenerationError('No LLM providers available. Please configure at least one provider API key.');
     }
 
-    debugService(
-      '[ProviderRouter] Initialized with %d providers (total weight: %d)',
-      this.providers.size,
-      this.totalWeight,
-    );
+    debugService.debug('[ProviderRouter] Initialized with {providersSize} providers (total weight: {weight})', {
+      providersSize: this.providers.size,
+      weight: this.totalWeight,
+    });
   }
 
   /**
    * Create a provider instance based on config
    */
-  private createProvider(
-    config: ProviderConfig,
-    defaultTemperature?: number,
-  ): LLMProvider | null {
+  private createProvider(config: ProviderConfig, defaultTemperature?: number): LLMProvider | null {
     const model = resolveModel(config);
     const temperature = defaultTemperature ?? 0.7;
 
@@ -400,9 +379,7 @@ export class ProviderRouter {
    */
   private getHealthyConfigs(): ProviderConfig[] {
     return this.configs.filter(
-      (config) =>
-        this.providers.has(config.name) &&
-        this.healthStatus.get(config.name)?.isHealthy !== false,
+      config => this.providers.has(config.name) && this.healthStatus.get(config.name)?.isHealthy !== false,
     );
   }
 
@@ -414,7 +391,7 @@ export class ProviderRouter {
       return null;
     }
 
-    const normalized = configs.map((config) => ({
+    const normalized = configs.map(config => ({
       config,
       weight: Math.max(1, config.weight ?? 1),
     }));
@@ -461,7 +438,7 @@ export class ProviderRouter {
     }
 
     const provider = this.providers.get(config.name);
-    debugService('[ProviderRouter] Selected provider: %s', config.name);
+    debugService.debug('[ProviderRouter] Selected provider: {provider}', { provider: config.name });
 
     return provider ?? null;
   }
@@ -473,15 +450,8 @@ export class ProviderRouter {
     const now = Date.now();
 
     for (const [name, health] of this.healthStatus) {
-      if (
-        !health.isHealthy &&
-        health.lastFailure &&
-        now - health.lastFailure.getTime() > this.healthCheckIntervalMs
-      ) {
-        debugService(
-          '[ProviderRouter] Attempting to recover provider: %s',
-          name,
-        );
+      if (!health.isHealthy && health.lastFailure && now - health.lastFailure.getTime() > this.healthCheckIntervalMs) {
+        debugService.debug('[ProviderRouter] Attempting to recover provider: {provider}', { provider: name });
 
         // Reset health status for retry
         this.healthStatus.set(name, {
@@ -516,11 +486,10 @@ export class ProviderRouter {
     });
 
     if (!isHealthy) {
-      debugService(
-        '[ProviderRouter] Provider marked unhealthy: %s (failures: %d)',
-        providerName,
-        newFailures,
-      );
+      debugService.debug('[ProviderRouter] Provider marked unhealthy: {unhealthy} (failures: {failures})', {
+        unhealthy: providerName,
+        failures: newFailures,
+      });
     }
   }
 
@@ -541,9 +510,7 @@ export class ProviderRouter {
   /**
    * Execute an operation with automatic failover
    */
-  async executeWithFallback<T>(
-    operation: (provider: LLMProvider) => Promise<T>,
-  ): Promise<ProviderResult<T>> {
+  async executeWithFallback<T>(operation: (provider: LLMProvider) => Promise<T>): Promise<ProviderResult<T>> {
     const startTime = Date.now();
     const triedProviders = new Set<string>();
 
@@ -564,10 +531,9 @@ export class ProviderRouter {
       triedProviders.add(provider.name);
 
       try {
-        debugService(
-          '[ProviderRouter] Attempting operation with provider: %s',
-          provider.name,
-        );
+        debugService.debug('[ProviderRouter] Attempting operation with provider: {provider}', {
+          provider: provider.name,
+        });
 
         const data = await operation(provider);
         this.reportSuccess(provider.name);
@@ -578,21 +544,17 @@ export class ProviderRouter {
           durationMs: Date.now() - startTime,
         };
       } catch (error) {
-        debugService(
-          '[ProviderRouter] Provider %s failed: %s',
-          provider.name,
-          getErrorMessage(error),
-        );
+        debugService.debug('[ProviderRouter] Provider {providerName} failed: {failed}', {
+          providerName: provider.name,
+          failed: getErrorMessage(error),
+        });
 
         this.reportFailure(provider.name, error as Error);
         // Continue to next provider
       }
     }
 
-    throw new GenerationError(
-      'All providers failed',
-      new Error(`Tried providers: ${[...triedProviders].join(', ')}`),
-    );
+    throw new GenerationError('All providers failed', new Error(`Tried providers: ${[...triedProviders].join(', ')}`));
   }
 
   /**
@@ -623,10 +585,7 @@ export class ProviderRouter {
       triedProviders.add(provider.name);
 
       try {
-        debugService(
-          '[ProviderRouter] Attempting stream with provider: %s',
-          provider.name,
-        );
+        debugService.debug('[ProviderRouter] Attempting stream with provider: {provider}', { provider: provider.name });
 
         const stream = operation(provider);
 
@@ -639,69 +598,45 @@ export class ProviderRouter {
         this.reportSuccess(provider.name);
         return;
       } catch (error) {
-        debugService(
-          '[ProviderRouter] Provider %s stream failed: %s',
-          provider.name,
-          getErrorMessage(error),
-        );
+        debugService.debug('[ProviderRouter] Provider {providerName} stream failed: {failed}', {
+          providerName: provider.name,
+          failed: getErrorMessage(error),
+        });
 
         this.reportFailure(provider.name, error as Error);
         // Continue to next provider
       }
     }
 
-    throw new GenerationError(
-      'All providers failed',
-      new Error(`Tried providers: ${[...triedProviders].join(', ')}`),
-    );
+    throw new GenerationError('All providers failed', new Error(`Tried providers: ${[...triedProviders].join(', ')}`));
   }
 
   /**
    * Convenience method: Generate text with automatic failover
    */
-  async generateText(
-    prompt: string,
-    options?: GenerateOptions,
-  ): Promise<ProviderResult<string>> {
-    return this.executeWithFallback((provider) =>
-      provider.generateText(prompt, options),
-    );
+  async generateText(prompt: string, options?: GenerateOptions): Promise<ProviderResult<string>> {
+    return this.executeWithFallback(provider => provider.generateText(prompt, options));
   }
 
   /**
    * Convenience method: Generate conversation with automatic failover
    */
-  async generateConversation(
-    messages: Message[],
-    options?: GenerateOptions,
-  ): Promise<ProviderResult<string>> {
-    return this.executeWithFallback((provider) =>
-      provider.generateConversation(messages, options),
-    );
+  async generateConversation(messages: Message[], options?: GenerateOptions): Promise<ProviderResult<string>> {
+    return this.executeWithFallback(provider => provider.generateConversation(messages, options));
   }
 
   /**
    * Convenience method: Stream text with automatic failover
    */
-  async *streamText(
-    prompt: string,
-    options?: StreamOptions,
-  ): AsyncGenerator<string, void, unknown> {
-    yield* this.streamWithFallback((provider) =>
-      provider.streamText(prompt, options),
-    );
+  async *streamText(prompt: string, options?: StreamOptions): AsyncGenerator<string, void, unknown> {
+    yield* this.streamWithFallback(provider => provider.streamText(prompt, options));
   }
 
   /**
    * Convenience method: Stream conversation with automatic failover
    */
-  async *streamConversation(
-    messages: Message[],
-    options?: StreamOptions,
-  ): AsyncGenerator<string, void, unknown> {
-    yield* this.streamWithFallback((provider) =>
-      provider.streamConversation(messages, options),
-    );
+  async *streamConversation(messages: Message[], options?: StreamOptions): AsyncGenerator<string, void, unknown> {
+    yield* this.streamWithFallback(provider => provider.streamConversation(messages, options));
   }
 
   /**
@@ -722,9 +657,7 @@ export class ProviderRouter {
    * Get list of healthy provider names
    */
   getHealthyProviderNames(): string[] {
-    return [...this.healthStatus.entries()]
-      .filter(([, health]) => health.isHealthy)
-      .map(([name]) => name);
+    return [...this.healthStatus.entries()].filter(([, health]) => health.isHealthy).map(([name]) => name);
   }
 
   /**
@@ -736,7 +669,7 @@ export class ProviderRouter {
         isHealthy: true,
         consecutiveFailures: 0,
       });
-      debugService('[ProviderRouter] Reset health for provider: %s', providerName);
+      debugService.debug('[ProviderRouter] Reset health for provider: {provider}', { provider: providerName });
     }
   }
 
@@ -779,21 +712,18 @@ export class ProviderRouter {
       // Attempt recovery before giving up
       const recovered = this.tryRecoverProvider();
       if (recovered) {
-        const config = this.configs.find((c) => c.name === recovered.name);
+        const config = this.configs.find(c => c.name === recovered.name);
         if (config) {
           const model = createLanguageModel(config);
-          debugService(
-            '[ProviderRouter] Resolved recovered AI SDK model: %s (%s)',
-            config.name,
-            config.model,
-          );
+          debugService.debug('[ProviderRouter] Resolved recovered AI SDK model: {model} ({model2})', {
+            model: config.name,
+            model2: config.model,
+          });
           return { model, providerName: config.name };
         }
       }
 
-      throw new GenerationError(
-        'No healthy LLM provider available. Configure at least one provider API key.',
-      );
+      throw new GenerationError('No healthy LLM provider available. Configure at least one provider API key.');
     }
 
     const config = this.selectNextWeightedConfig(healthyConfigs);
@@ -803,11 +733,10 @@ export class ProviderRouter {
 
     const model = createLanguageModel(config);
 
-    debugService(
-      '[ProviderRouter] Resolved AI SDK model: %s (%s)',
-      config.name,
-      config.model,
-    );
+    debugService.debug('[ProviderRouter] Resolved AI SDK model: {model} ({model2})', {
+      model: config.name,
+      model2: config.model,
+    });
 
     return { model, providerName: config.name };
   }
@@ -816,9 +745,7 @@ export class ProviderRouter {
 /**
  * Factory function for creating a ProviderRouter
  */
-export function createProviderRouter(
-  config: ProviderRouterConfig,
-): ProviderRouter {
+export function createProviderRouter(config: ProviderRouterConfig): ProviderRouter {
   return new ProviderRouter(config);
 }
 
@@ -827,9 +754,7 @@ export function createProviderRouter(
  *
  * Automatically enables providers that have API keys configured.
  */
-export function createDefaultProviderRouter(options?: {
-  defaultTemperature?: number;
-}): ProviderRouter {
+export function createDefaultProviderRouter(options?: { defaultTemperature?: number }): ProviderRouter {
   return new ProviderRouter({
     providers: [
       { name: 'groq', model: 'gemma2-9b-it', weight: 3, enabled: true },

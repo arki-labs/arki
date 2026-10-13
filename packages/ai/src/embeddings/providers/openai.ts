@@ -16,7 +16,7 @@ export type OpenAIEmbeddingConfig = {
   dimensions?: number;
   batchSize?: number;
   cacheEnabled?: boolean;
-}
+};
 
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private model: string;
@@ -43,16 +43,15 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     this.cacheEnabled = validConfig.cacheEnabled !== false;
 
     if (!this.apiKey) {
-      debugEmbeddings('[OpenAI] API key not provided');
-      throw new EmbeddingError('OpenAI API key not provided. Set OPENAI_API_KEY environment variable or pass it in config.');
+      debugEmbeddings.debug('[OpenAI] API key not provided');
+      throw new EmbeddingError(
+        'OpenAI API key not provided. Set OPENAI_API_KEY environment variable or pass it in config.',
+      );
     }
 
-    debugEmbeddings(
-      '[OpenAI] Provider initialized (model: %s, dimensions: %d, batchSize: %d, cacheEnabled: %s)',
-      this.model,
-      this.dimensions,
-      this.batchSize,
-      this.cacheEnabled,
+    debugEmbeddings.debug(
+      '[OpenAI] Provider initialized (model: {model}, dimensions: {dimensions}, batchSize: {batchSize}, cacheEnabled: {cacheEnabled})',
+      { model: this.model, dimensions: this.dimensions, batchSize: this.batchSize, cacheEnabled: this.cacheEnabled },
     );
   }
 
@@ -61,12 +60,14 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     if (this.cacheEnabled) {
       const cached = this.cache.get(text);
       if (cached) {
-        debugEmbeddings('[OpenAI] Cache hit for embedding (length: %d)', text.length);
+        debugEmbeddings.debug('[OpenAI] Cache hit for embedding (length: {length})', { length: text.length });
         return cached;
       }
     }
 
-    debugEmbeddings('[OpenAI] Cache miss, queuing for batch processing (text length: %d)', text.length);
+    debugEmbeddings.debug('[OpenAI] Cache miss, queuing for batch processing (text length: {length})', {
+      length: text.length,
+    });
 
     // Normalize text
     const normalizedText = this.normalizeText(text);
@@ -74,21 +75,21 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     // For single embeddings, use batch processing with delay for efficiency
     return new Promise((resolve, reject) => {
       this.batchQueue.push({ text: normalizedText, resolve, reject });
-      debugEmbeddings('[OpenAI] Added to batch queue (queue size: %d)', this.batchQueue.length);
+      debugEmbeddings.debug('[OpenAI] Added to batch queue (queue size: {size})', { size: this.batchQueue.length });
       this.scheduleBatchProcessing();
     });
   }
 
   async getEmbeddings(texts: string[]): Promise<number[][]> {
-    debugEmbeddings('[OpenAI] Getting embeddings for %d texts', texts.length);
+    debugEmbeddings.debug('[OpenAI] Getting embeddings for {textsLength} texts', { textsLength: texts.length });
 
     // Process multiple texts in a single API call
-    const normalizedTexts = texts.map((t) => this.normalizeText(t));
+    const normalizedTexts = texts.map(t => this.normalizeText(t));
 
     // Check cache and identify missing embeddings
     const results: (number[] | null)[] = this.cacheEnabled
-      ? normalizedTexts.map((text) => this.cache.get(text) || null)
-      : Array.from<number[] | null>({length: texts.length}).fill(null);
+      ? normalizedTexts.map(text => this.cache.get(text) || null)
+      : Array.from<number[] | null>({ length: texts.length }).fill(null);
 
     const missingIndices: number[] = [];
     const missingTexts: string[] = [];
@@ -101,12 +102,18 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     }
 
     const cacheHits = texts.length - missingTexts.length;
-    debugEmbeddings('[OpenAI] Cache hits: %d/%d, fetching: %d', cacheHits, texts.length, missingTexts.length);
+    debugEmbeddings.debug('[OpenAI] Cache hits: {hits}/{textsLength}, fetching: {fetching}', {
+      hits: cacheHits,
+      textsLength: texts.length,
+      fetching: missingTexts.length,
+    });
 
     if (missingTexts.length > 0) {
       const embeddings = await this.fetchEmbeddings(missingTexts);
 
-      debugEmbeddings('[OpenAI] Fetched %d embeddings, updating cache', embeddings.length);
+      debugEmbeddings.debug('[OpenAI] Fetched {embeddingsLength} embeddings, updating cache', {
+        embeddingsLength: embeddings.length,
+      });
 
       // Update cache and results
       for (const [i, index] of missingIndices.entries()) {
@@ -121,7 +128,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       }
     }
 
-    debugEmbeddings('[OpenAI] Returning %d embeddings', results.length);
+    debugEmbeddings.debug('[OpenAI] Returning {resultsLength} embeddings', { resultsLength: results.length });
     return results as number[][];
   }
 
@@ -132,12 +139,12 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   clearCache(): void {
     const oldSize = this.cache.size;
     this.cache.clear();
-    debugEmbeddings('[OpenAI] Cache cleared (was %d entries)', oldSize);
+    debugEmbeddings.debug('[OpenAI] Cache cleared (was {oldSize} entries)', { oldSize });
   }
 
   getCacheSize(): number {
     const size = this.cache.size;
-    debugEmbeddings('[OpenAI] Cache size queried: %d entries', size);
+    debugEmbeddings.debug('[OpenAI] Cache size queried: {queried} entries', { queried: size });
     return size;
   }
 
@@ -152,7 +159,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private async processBatch(): Promise<void> {
     if (this.batchQueue.length === 0) {
       this.batchTimer = null;
-      debugEmbeddings('[OpenAI] Batch processing skipped - queue is empty');
+      debugEmbeddings.debug('[OpenAI] Batch processing skipped - queue is empty');
       return;
     }
 
@@ -160,13 +167,18 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     const batch = this.batchQueue.splice(0, this.batchSize);
     this.batchTimer = null;
 
-    debugEmbeddings('[OpenAI] Processing batch of %d items (remaining queue: %d)', batch.length, this.batchQueue.length);
+    debugEmbeddings.debug('[OpenAI] Processing batch of {batchLength} items (remaining queue: {queue})', {
+      batchLength: batch.length,
+      queue: this.batchQueue.length,
+    });
 
     try {
-      const texts = batch.map((item) => item.text);
+      const texts = batch.map(item => item.text);
       const embeddings = await this.fetchEmbeddings(texts);
 
-      debugEmbeddings('[OpenAI] Batch processed successfully, resolving %d promises', batch.length);
+      debugEmbeddings.debug('[OpenAI] Batch processed successfully, resolving {batchLength} promises', {
+        batchLength: batch.length,
+      });
 
       // Resolve promises and update cache
       for (const [i, item] of batch.entries()) {
@@ -179,7 +191,9 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         item.resolve(embedding);
       }
     } catch (error) {
-      debugEmbeddings('[OpenAI] Batch processing failed: %s', error instanceof Error ? error.message : 'Unknown error');
+      debugEmbeddings.debug('[OpenAI] Batch processing failed', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
       // Reject all promises in the batch
       const err = error instanceof Error ? error : new Error('Failed to fetch embeddings');
       for (const item of batch) item.reject(err);
@@ -187,31 +201,36 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
     // Process remaining items if any
     if (this.batchQueue.length > 0) {
-      debugEmbeddings('[OpenAI] Scheduling next batch (%d items remaining)', this.batchQueue.length);
+      debugEmbeddings.debug('[OpenAI] Scheduling next batch ({batchQueueLength} items remaining)', {
+        batchQueueLength: this.batchQueue.length,
+      });
       this.scheduleBatchProcessing();
     }
   }
 
   private async fetchEmbeddings(texts: string[]): Promise<number[][]> {
     if (!this.apiKey) {
-      debugEmbeddings('[OpenAI] API key missing');
+      debugEmbeddings.debug('[OpenAI] API key missing');
       throw new Error('OpenAI API key is required for embeddings');
     }
 
     const maxRetries = 3;
     const baseDelay = 1000;
 
-    debugEmbeddings('[OpenAI] Fetching embeddings for %d texts (model: %s, dimensions: %d)', texts.length, this.model, this.dimensions);
+    debugEmbeddings.debug(
+      '[OpenAI] Fetching embeddings for {textsLength} texts (model: {model}, dimensions: {dimensions})',
+      { textsLength: texts.length, model: this.model, dimensions: this.dimensions },
+    );
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        debugEmbeddings('[OpenAI] API call attempt %d/%d', attempt + 1, maxRetries);
+        debugEmbeddings.debug('[OpenAI] API call attempt {value1}/{maxRetries}', { value1: attempt + 1, maxRetries });
 
         const response = await fetch(`${this.baseUrl}/embeddings`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.apiKey}`,
+            Authorization: `Bearer ${this.apiKey}`,
           },
           body: JSON.stringify({
             model: this.model,
@@ -224,14 +243,17 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         if (!response.ok) {
           const error = await response.json().catch(() => ({ error: { message: response.statusText } }));
 
-          debugEmbeddings('[OpenAI] API error (status: %d): %s', response.status, (error as {error?: {message?: string}})['error']?.message || response.statusText);
+          debugEmbeddings.debug('[OpenAI] API error (status: {status}): {value2}', {
+            status: response.status,
+            value2: (error as { error?: { message?: string } })['error']?.message || response.statusText,
+          });
 
           // Handle rate limiting
           if (response.status === 429) {
             const retryAfter = response.headers.get('retry-after');
             const delay = retryAfter ? Number.parseInt(retryAfter) * 1000 : baseDelay * Math.pow(2, attempt);
 
-            debugEmbeddings('[OpenAI] Rate limited, waiting %dms before retry', delay);
+            debugEmbeddings.debug('[OpenAI] Rate limited, waiting {delay}ms before retry', { delay });
 
             if (attempt < maxRetries - 1) {
               await new Promise(resolve => setTimeout(resolve, delay));
@@ -239,29 +261,38 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
             }
           }
 
-          throw new EmbeddingError(`OpenAI API error: ${(error as {error?: {message?: string}})['error']?.message || response.statusText}`);
+          throw new EmbeddingError(
+            `OpenAI API error: ${(error as { error?: { message?: string } })['error']?.message || response.statusText}`,
+          );
         }
 
-        const data = await response.json() as { data: { embedding: number[] }[] };
-        debugEmbeddings('[OpenAI] Successfully fetched %d embeddings', data.data.length);
-        return data.data.map((item) => item['embedding']);
+        const data = (await response.json()) as { data: { embedding: number[] }[] };
+        debugEmbeddings.debug('[OpenAI] Successfully fetched {dataLength} embeddings', {
+          dataLength: data.data.length,
+        });
+        return data.data.map(item => item['embedding']);
       } catch (error) {
         if (attempt === maxRetries - 1) {
-          debugEmbeddings('[OpenAI] All retry attempts exhausted: %s', getErrorMessage(error));
+          debugEmbeddings.debug('[OpenAI] All retry attempts exhausted: {exhausted}', {
+            exhausted: getErrorMessage(error),
+          });
           throw new EmbeddingError(
             `Failed to fetch OpenAI embeddings after ${maxRetries} attempts: ${getErrorMessage(error)}`,
-            error
+            error,
           );
         }
 
         const delay = baseDelay * Math.pow(2, attempt);
-        debugEmbeddings('[OpenAI] Network error, retrying after %dms: %s', delay, getErrorMessage(error));
+        debugEmbeddings.debug('[OpenAI] Network error, retrying after {delay}ms: {dms}', {
+          delay,
+          dms: getErrorMessage(error),
+        });
         // Exponential backoff for network errors
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
 
-    debugEmbeddings('[OpenAI] Failed to fetch embeddings after max retries');
+    debugEmbeddings.debug('[OpenAI] Failed to fetch embeddings after max retries');
     throw new EmbeddingError('Failed to fetch embeddings after max retries');
   }
 
@@ -287,26 +318,33 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   async getEmbeddingForLongText(text: string, maxTokens = 8000): Promise<number[]> {
     const estimatedTokens = this.estimateTokens(text);
 
-    debugEmbeddings('[OpenAI] Processing long text (length: %d, estimated tokens: %d)', text.length, estimatedTokens);
+    debugEmbeddings.debug('[OpenAI] Processing long text (length: {length}, estimated tokens: {tokens})', {
+      length: text.length,
+      tokens: estimatedTokens,
+    });
 
     if (estimatedTokens <= maxTokens) {
-      debugEmbeddings('[OpenAI] Text within token limit, processing directly');
+      debugEmbeddings.debug('[OpenAI] Text within token limit, processing directly');
       return this.getEmbedding(text);
     }
 
     // Split text into chunks and average embeddings
-    const chunkSize = Math.floor((maxTokens * 4) * 0.9); // 90% to be safe
+    const chunkSize = Math.floor(maxTokens * 4 * 0.9); // 90% to be safe
     const chunks: string[] = [];
 
     for (let i = 0; i < text.length; i += chunkSize) {
       chunks.push(text.slice(i, i + chunkSize));
     }
 
-    debugEmbeddings('[OpenAI] Text exceeds token limit, split into %d chunks', chunks.length);
+    debugEmbeddings.debug('[OpenAI] Text exceeds token limit, split into {chunksLength} chunks', {
+      chunksLength: chunks.length,
+    });
 
     const embeddings = await this.getEmbeddings(chunks);
 
-    debugEmbeddings('[OpenAI] Averaging %d chunk embeddings', embeddings.length);
+    debugEmbeddings.debug('[OpenAI] Averaging {embeddingsLength} chunk embeddings', {
+      embeddingsLength: embeddings.length,
+    });
 
     // Average the embeddings
     const avgEmbedding = new Array(this.dimensions).fill(0);
@@ -321,7 +359,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     const magnitude = Math.sqrt(avgEmbedding.reduce((sum, val) => sum + val * val, 0));
     const normalized = avgEmbedding.map(val => val / (magnitude || 1));
 
-    debugEmbeddings('[OpenAI] Long text embedding complete (magnitude: %f)', magnitude);
+    debugEmbeddings.debug('[OpenAI] Long text embedding complete (magnitude: {magnitude})', { magnitude });
 
     return normalized;
   }

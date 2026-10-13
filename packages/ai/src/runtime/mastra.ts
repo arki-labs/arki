@@ -1,9 +1,9 @@
-import { Agent } from '@mastra/core/agent';
 import type { MastraModelConfig } from '@mastra/core/llm';
+import { Agent } from '@mastra/core/agent';
 import { createTool } from '@mastra/core/tools';
 
-import { debugRuntime } from '../debug';
 import type { AgentRuntime, AgentTool, RuntimeEvent, RuntimeUsage, ToolLoopInput } from './types';
+import { debugRuntime } from '../debug';
 
 /**
  * Mastra-backed runtime (P1). Implements the SAME `AgentRuntime` contract as the AI-SDK
@@ -35,7 +35,9 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function toMastraTools(tools: ReadonlyArray<AgentTool> | undefined): Record<string, ReturnType<typeof createTool>> {
+export function toMastraTools(
+  tools: ReadonlyArray<AgentTool> | undefined,
+): Record<string, ReturnType<typeof createTool>> {
   const out: Record<string, ReturnType<typeof createTool>> = {};
   for (const agentTool of tools ?? []) {
     out[agentTool.name] = createTool({
@@ -55,7 +57,10 @@ export function createMastraRuntime(options: MastraRuntimeOptions): AgentRuntime
   return {
     async *runToolLoop(input: ToolLoopInput): AsyncIterable<RuntimeEvent> {
       const maxSteps = input.maxSteps ?? defaultMaxSteps;
-      debugRuntime('mastra runToolLoop start (maxSteps=%d, tools=%d)', maxSteps, input.tools?.length ?? 0);
+      debugRuntime.debug('mastra runToolLoop start (maxSteps={maxSteps}, tools={tools})', {
+        maxSteps,
+        tools: input.tools?.length ?? 0,
+      });
       yield { type: 'run:start' };
 
       try {
@@ -109,10 +114,13 @@ export function createMastraRuntime(options: MastraRuntimeOptions): AgentRuntime
           }
         }
 
-        debugRuntime('mastra runToolLoop finish (chars=%d, totalTokens=%o)', text.length, usage?.totalTokens);
+        debugRuntime.debug('mastra runToolLoop finish (chars={chars}, totalTokens={totalTokens})', {
+          chars: text.length,
+          totalTokens: usage?.totalTokens,
+        });
         yield { type: 'run:finish', text, usage };
       } catch (error) {
-        debugRuntime('mastra runToolLoop error: %s', errorMessage(error));
+        debugRuntime.debug('mastra runToolLoop error', { error: errorMessage(error) });
         yield { type: 'run:error', error: errorMessage(error) };
       }
     },

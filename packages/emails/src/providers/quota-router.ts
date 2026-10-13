@@ -1,8 +1,7 @@
-import { debugEmails } from '../debug';
-
-import { inMemoryQuotaStore } from './quota-store';
 import type { QuotaStore } from './quota-store';
 import type { EmailProvider, SendEmailPayload, SendEmailResult } from './types';
+import { debugEmails } from '../debug';
+import { inMemoryQuotaStore } from './quota-store';
 
 export type { QuotaStore };
 
@@ -53,10 +52,7 @@ function deduplicateNames(providers: EmailProvider[]): string[] {
  * const router = quotaRouter([...providers], { store: kvQuotaStore(redisClient) });
  * ```
  */
-export function quotaRouter(
-  providers: EmailProvider[],
-  options?: { store?: QuotaStore },
-): EmailProvider {
+export function quotaRouter(providers: EmailProvider[], options?: { store?: QuotaStore }): EmailProvider {
   if (providers.length === 0) {
     throw new Error('[arki/emails] quotaRouter requires at least one provider');
   }
@@ -74,31 +70,28 @@ export function quotaRouter(
       const sent = await store.getSent(name, month);
 
       if (quota === undefined || sent < quota) {
-        debugEmails(
-          '[quota-router] Selected provider=%s (sent=%d, quota=%s)',
-          name,
+        debugEmails.debug('[quota-router] Selected provider={provider} (sent={sent}, quota={quota})', {
+          provider: name,
           sent,
-          quota ?? 'unlimited',
-        );
+          quota: quota ?? 'unlimited',
+        });
         return { provider, resolvedName: name };
       }
 
-      debugEmails(
-        '[quota-router] Provider=%s quota exhausted (sent=%d/%d) — skipping',
-        name,
+      debugEmails.debug('[quota-router] Provider={Provider} quota exhausted (sent={sent}/{quota}) — skipping', {
+        Provider: name,
         sent,
         quota,
-      );
+      });
     }
 
     // All quotas exhausted — fall through to last provider (fail-open)
     const fallbackIdx = providers.length - 1;
     const fallback = providers[fallbackIdx]!;
     const fallbackName = names[fallbackIdx]!;
-    debugEmails(
-      '[quota-router] All quotas exhausted — using fallback provider=%s',
-      fallbackName,
-    );
+    debugEmails.debug('[quota-router] All quotas exhausted — using fallback provider={provider}', {
+      provider: fallbackName,
+    });
     return { provider: fallback, resolvedName: fallbackName };
   }
 

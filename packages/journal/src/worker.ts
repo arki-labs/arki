@@ -127,7 +127,13 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
             lost.abort(new Error(`journal: the lease on job ${job.id} was lost; another worker holds it now`));
           }
         })
-        .catch((error: unknown) => debugDrain('%s %s: lease renewal failed: %s', job.effect, job.id, errorText(error)))
+        .catch((error: unknown) =>
+          debugDrain.debug('{effect} {jobId}: lease renewal failed: {failed}', {
+            effect: job.effect,
+            jobId: job.id,
+            failed: errorText(error),
+          }),
+        )
         .finally(() => {
           inFlight = false;
         });
@@ -162,7 +168,7 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
         effect.run(event, { jobId: job.id, signal: ownSignal, db, run: deps.runOn(db, event) }),
       );
       await db.delete(jobsTable).where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
-      debugDrain('%s %s: done', job.effect, job.id);
+      debugDrain.debug('{effect} {jobId}: done', { effect: job.effect, jobId: job.id });
     } catch (error) {
       const dead = job.attempts >= MAX_ATTEMPTS;
       await db
@@ -174,14 +180,13 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
           ...(dead ? { deadAt: sql`now()` } : { availableAt: dbNowPlus(backoffSeconds(job.attempts)) }),
         })
         .where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
-      debugDrain(
-        '%s %s: attempt %d failed%s: %s',
-        job.effect,
-        job.id,
-        job.attempts,
-        dead ? ', dead' : '',
-        errorText(error),
-      );
+      debugDrain.debug('{effect} {jobId}: attempt {attempts} failed{value4}: {value5}', {
+        effect: job.effect,
+        jobId: job.id,
+        attempts: job.attempts,
+        value4: dead ? ', dead' : '',
+        value5: errorText(error),
+      });
     } finally {
       stopRenewing();
     }
@@ -370,7 +375,10 @@ export function createCatchUp<Meta extends z.ZodObject, Tx extends TransactionSo
       try {
         scanned += await batchFor(db, projection, batchSize);
       } catch (error) {
-        debugDrain('projection %s: batch failed: %s', projection.name, errorText(error));
+        debugDrain.debug('projection {projectionName}: batch failed: {failed}', {
+          projectionName: projection.name,
+          failed: errorText(error),
+        });
       }
     }
     return { scanned };
@@ -470,7 +478,12 @@ export function createTapDispatch<Meta extends z.ZodObject, AppDb extends RootDb
           );
           await tap.run(event, { db });
         } catch (error) {
-          debugDrain('tap %s: %s %s failed: %s', tap.name, row.type, row.entityId, errorText(error));
+          debugDrain.debug('tap {tapName}: {rowType} {entityId} failed: {failed}', {
+            tapName: tap.name,
+            rowType: row.type,
+            entityId: row.entityId,
+            failed: errorText(error),
+          });
         }
       }
     }
@@ -544,7 +557,7 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
             processed += caught.scanned;
           }
         } catch (error) {
-          debugWorker('drain failed: %s', errorText(error));
+          debugWorker.debug('drain failed: {failed}', { failed: errorText(error) });
         }
         if (isRunning() && processed === 0 && !isWoken()) await sleep();
       }
@@ -567,7 +580,10 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
             dispatching = dispatching.then(() => deps.dispatch(db, payload)).catch(quiet);
           });
         }
-        debugWorker('start (poll %dms%s)', pollMs, unlisten === undefined ? '' : ', listening');
+        debugWorker.debug('start (poll {pollMs}ms{value2})', {
+          pollMs,
+          value2: unlisten === undefined ? '' : ', listening',
+        });
         loop = run();
       },
       async stop() {
@@ -580,7 +596,7 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
         unlisten = undefined;
         await dispatching;
         await loop;
-        debugWorker('stopped');
+        debugWorker.debug('stopped');
       },
       wake,
     };

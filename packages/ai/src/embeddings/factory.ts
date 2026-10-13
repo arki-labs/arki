@@ -80,7 +80,7 @@ export type EmbeddingProviderConfig =
  * `createBedrockEmbeddingProvider` directly.
  */
 export function createEmbeddingProvider(config: EmbeddingProviderConfig): EmbeddingProvider {
-  debugEmbeddings('[Factory] creating embedding provider (type: %s)', config.type);
+  debugEmbeddings.debug('[Factory] creating embedding provider (type: {type})', { type: config.type });
 
   switch (config.type) {
     case 'openai': {
@@ -147,7 +147,7 @@ export async function createEmbeddingProviderAsync(config: EmbeddingProviderConf
  */
 export function createEmbeddingProviderFromEnv(): EmbeddingProvider {
   const providerType = env.EMBEDDING_PROVIDER;
-  debugEmbeddings('[Factory] creating from env (type: %s)', providerType);
+  debugEmbeddings.debug('[Factory] creating from env (type: {type})', { type: providerType });
 
   switch (providerType) {
     case 'openai': {

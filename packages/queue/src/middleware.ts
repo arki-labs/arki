@@ -5,10 +5,10 @@
 
 import type { Job as BullMQJob } from 'bullmq';
 
-import { debugMiddleware } from './debug.ts';
 import type { JobContext } from './types/job.ts';
 import type { JobMiddleware, MiddlewareResult } from './types/middleware.ts';
 import type { QueueMeta } from './types/queue.ts';
+import { debugMiddleware } from './debug.ts';
 
 /**
  * Run a job's middleware chain around its handler (onion order).
@@ -35,7 +35,10 @@ export async function executeMiddlewareChain<TContext, TContextOut, TOutput>(
   meta: QueueMeta,
   handler: (ctx: TContextOut) => Promise<TOutput>,
 ): Promise<TOutput | undefined> {
-  debugMiddleware('[Job %s] Starting middleware chain with %d middleware', job.id, middlewares.length);
+  debugMiddleware.debug('[Job {jobId}] Starting middleware chain with {middlewaresLength} middleware', {
+    jobId: job.id,
+    middlewaresLength: middlewares.length,
+  });
 
   let output: TOutput | undefined;
 
@@ -47,7 +50,7 @@ export async function executeMiddlewareChain<TContext, TContextOut, TOutput>(
 
       // Past the last middleware: run the handler inside every middleware's next()
       if (index >= middlewares.length) {
-        debugMiddleware('[Job %s] Reached end of middleware chain, running handler', job.id);
+        debugMiddleware.debug('[Job {jobId}] Reached end of middleware chain, running handler', { jobId: job.id });
         output = await handler(currentContext as TContextOut);
         return { ctx: currentContext, output };
       }
@@ -55,7 +58,11 @@ export async function executeMiddlewareChain<TContext, TContextOut, TOutput>(
       // Execute the next middleware in the chain
       const middleware = middlewares[index]!;
 
-      debugMiddleware('[Job %s] Executing middleware %d/%d', job.id, index + 1, middlewares.length);
+      debugMiddleware.debug('[Job {jobId}] Executing middleware {value2}/{middlewaresLength}', {
+        jobId: job.id,
+        value2: index + 1,
+        middlewaresLength: middlewares.length,
+      });
 
       const result = await middleware._fn({
         ctx: currentContext,
@@ -65,14 +72,18 @@ export async function executeMiddlewareChain<TContext, TContextOut, TOutput>(
         next: createNext(index + 1, currentContext),
       });
 
-      debugMiddleware('[Job %s] Middleware %d/%d completed', job.id, index + 1, middlewares.length);
+      debugMiddleware.debug('[Job {jobId}] Middleware {value2}/{middlewaresLength} completed', {
+        jobId: job.id,
+        value2: index + 1,
+        middlewaresLength: middlewares.length,
+      });
 
       return result;
     };
   };
 
   await createNext(0, initialContext)();
-  debugMiddleware('[Job %s] Middleware chain completed successfully', job.id);
+  debugMiddleware.debug('[Job {jobId}] Middleware chain completed successfully', { jobId: job.id });
   return output;
 }
 
@@ -85,16 +96,16 @@ export async function executeMiddlewareChain<TContext, TContextOut, TOutput>(
  * @returns JobContext with utility methods
  */
 export function createJobContext<TContext>(baseContext: TContext, job: BullMQJob): JobContext<TContext> {
-  debugMiddleware('[Job %s] Creating job context with utility methods', job.id);
+  debugMiddleware.debug('[Job {jobId}] Creating job context with utility methods', { jobId: job.id });
 
   return {
     ...baseContext,
     updateProgress: async (progress: number) => {
-      debugMiddleware('[Job %s] Updating progress to %d%%', job.id, progress);
+      debugMiddleware.debug('[Job {jobId}] Updating progress to {progress}%', { jobId: job.id, progress });
       await job.updateProgress(progress);
     },
     log: async (message: string) => {
-      debugMiddleware('[Job %s] Logging message: %s', job.id, message);
+      debugMiddleware.debug('[Job {jobId}] Logging message: {message}', { jobId: job.id, message });
       await job.log(message);
     },
     job,

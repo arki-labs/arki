@@ -3,14 +3,10 @@
  * Provides advanced search capabilities with caching, analytics, and hybrid search
  */
 
-import { debugSemantic } from '../debug.ts';
-import type {
-  SearchOptions as BaseSearchOptions,
-  SearchMode,
-  VectorSearchProvider
-} from '../types';
-import { SearchAnalyticsCollector } from './analytics';
+import type { SearchOptions as BaseSearchOptions, SearchMode, VectorSearchProvider } from '../types';
 import type { SearchCache } from './cache';
+import { debugSemantic } from '../debug.ts';
+import { SearchAnalyticsCollector } from './analytics';
 import { InMemorySearchCache } from './cache';
 
 export type SemanticSearchConfig = {
@@ -19,7 +15,7 @@ export type SemanticSearchConfig = {
   analytics?: SearchAnalyticsCollector;
   enableCache?: boolean;
   cacheTTL?: number;
-}
+};
 
 export type SearchOptions = {
   query: string;
@@ -30,7 +26,7 @@ export type SearchOptions = {
   filters?: Record<string, unknown>;
   highlightTerms?: boolean;
   includeMetadata?: boolean;
-} & BaseSearchOptions
+} & BaseSearchOptions;
 
 export type SearchResult<TMetadata = Record<string, unknown>> = {
   id: string;
@@ -39,11 +35,11 @@ export type SearchResult<TMetadata = Record<string, unknown>> = {
   score: number;
   highlights?: string[];
   metadata?: TMetadata;
-}
+};
 
 export type KeywordSearchProvider<TMetadata = Record<string, unknown>> = {
   search(query: string, options?: SearchOptions): Promise<SearchResult<TMetadata>[]>;
-}
+};
 
 export class SemanticSearchService<TMetadata = Record<string, unknown>> {
   private cache: SearchCache;
@@ -51,16 +47,18 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
 
   constructor(
     private config: SemanticSearchConfig,
-    private keywordProvider?: KeywordSearchProvider<TMetadata>
+    private keywordProvider?: KeywordSearchProvider<TMetadata>,
   ) {
     this.cache = config.cache || new InMemorySearchCache(config.cacheTTL || 3600);
     this.analytics = config.analytics || new SearchAnalyticsCollector();
 
-    debugSemantic(
-      '[SearchService] Service initialized (cacheEnabled: %s, cacheTTL: %ds, hasKeywordProvider: %s)',
-      config.enableCache !== false,
-      config.cacheTTL || 3600,
-      !!keywordProvider,
+    debugSemantic.debug(
+      '[SearchService] Service initialized (cacheEnabled: {cacheEnabled}, cacheTTL: {cacheTTL}s, hasKeywordProvider: {hasKeywordProvider})',
+      {
+        cacheEnabled: config.enableCache !== false,
+        cacheTTL: config.cacheTTL || 3600,
+        hasKeywordProvider: !!keywordProvider,
+      },
     );
   }
 
@@ -68,12 +66,11 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
    * Perform advanced search with multiple strategies
    */
   async search(options: SearchOptions): Promise<SearchResult<TMetadata>[]> {
-    debugSemantic(
-      '[SearchService] Performing search (query: "%s", mode: %s, limit: %d)',
-      options.query,
-      options.mode || 'semantic',
-      options.limit || 20,
-    );
+    debugSemantic.debug('[SearchService] Performing search (query: "{query}", mode: {mode}, limit: {limit})', {
+      query: options.query,
+      mode: options.mode || 'semantic',
+      limit: options.limit || 20,
+    });
 
     const startTime = Date.now();
     const cacheKey = this.generateCacheKey(options);
@@ -82,11 +79,14 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
     if (this.config.enableCache !== false) {
       const cached = await this.cache.get<SearchResult<TMetadata>[]>(cacheKey);
       if (cached) {
-        debugSemantic('[SearchService] Cache hit (query: "%s", results: %d)', options.query, cached.length);
+        debugSemantic.debug('[SearchService] Cache hit (query: "{query}", results: {results})', {
+          query: options.query,
+          results: cached.length,
+        });
         this.analytics.recordCacheHit(options.query);
         return cached;
       }
-      debugSemantic('[SearchService] Cache miss for query: "%s"', options.query);
+      debugSemantic.debug('[SearchService] Cache miss for query: "{query}"', { query: options.query });
     }
 
     let results: SearchResult<TMetadata>[] = [];
@@ -94,40 +94,42 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
 
     // Perform search based on mode
     if (mode === 'semantic' || mode === 'hybrid') {
-      debugSemantic('[SearchService] Performing vector search');
+      debugSemantic.debug('[SearchService] Performing vector search');
       results = await this.performVectorSearch(options);
-      debugSemantic('[SearchService] Vector search completed (results: %d)', results.length);
+      debugSemantic.debug('[SearchService] Vector search completed (results: {results})', { results: results.length });
     }
 
     if (mode === 'keyword' || mode === 'hybrid') {
       if (this.keywordProvider) {
-        debugSemantic('[SearchService] Performing keyword search');
+        debugSemantic.debug('[SearchService] Performing keyword search');
         const keywordResults = await this.performKeywordSearch(options);
-        debugSemantic('[SearchService] Keyword search completed (results: %d)', keywordResults.length);
+        debugSemantic.debug('[SearchService] Keyword search completed (results: {results})', {
+          results: keywordResults.length,
+        });
 
         if (mode === 'hybrid') {
-          debugSemantic('[SearchService] Merging semantic and keyword results');
+          debugSemantic.debug('[SearchService] Merging semantic and keyword results');
           results = this.mergeResults(results, keywordResults);
         } else {
           results = keywordResults;
         }
       } else {
         if (mode === 'keyword') {
-          debugSemantic('[SearchService] Keyword search requested but no keyword provider configured');
+          debugSemantic.debug('[SearchService] Keyword search requested but no keyword provider configured');
           throw new Error('Keyword search provider not configured');
         }
-        debugSemantic('[SearchService] No keyword provider, continuing with semantic results only');
+        debugSemantic.debug('[SearchService] No keyword provider, continuing with semantic results only');
       }
     }
 
     // Apply post-processing
-    debugSemantic('[SearchService] Post-processing results (count: %d)', results.length);
+    debugSemantic.debug('[SearchService] Post-processing results (count: {count})', { count: results.length });
     results = this.postProcessResults(results, options);
 
     // Cache results
     if (this.config.enableCache !== false) {
       await this.cache.set(cacheKey, results);
-      debugSemantic('[SearchService] Results cached');
+      debugSemantic.debug('[SearchService] Results cached');
     }
 
     // Record analytics
@@ -141,11 +143,9 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
       timestamp: new Date(),
     });
 
-    debugSemantic(
-      '[SearchService] Search completed (query: "%s", results: %d, responseTime: %dms)',
-      options.query,
-      results.length,
-      responseTime,
+    debugSemantic.debug(
+      '[SearchService] Search completed (query: "{query}", results: {results}, responseTime: {responseTime}ms)',
+      { query: options.query, results: results.length, responseTime },
     );
 
     return results;
@@ -154,28 +154,27 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
   /**
    * Perform vector-based semantic search
    */
-  private async performVectorSearch(
-    options: SearchOptions
-  ): Promise<SearchResult<TMetadata>[]> {
+  private async performVectorSearch(options: SearchOptions): Promise<SearchResult<TMetadata>[]> {
     const vectorResults = await this.config.vectorProvider.searchSimilar(
       options.query,
       options.limit || 20,
-      options.filters
+      options.filters,
     );
 
-    debugSemantic('[SearchService] Vector provider returned %d results', vectorResults.length);
+    debugSemantic.debug('[SearchService] Vector provider returned {vectorResultsLength} results', {
+      vectorResultsLength: vectorResults.length,
+    });
 
     // Filter by score threshold if specified
-    const filtered = options.scoreThreshold === undefined
-      ? vectorResults
-      : vectorResults.filter(r => r.score >= options.scoreThreshold!);
+    const filtered =
+      options.scoreThreshold === undefined
+        ? vectorResults
+        : vectorResults.filter(r => r.score >= options.scoreThreshold!);
 
     if (options.scoreThreshold !== undefined && filtered.length !== vectorResults.length) {
-      debugSemantic(
-        '[SearchService] Filtered by score threshold %f (before: %d, after: %d)',
-        options.scoreThreshold,
-        vectorResults.length,
-        filtered.length,
+      debugSemantic.debug(
+        '[SearchService] Filtered by score threshold {scoreThreshold} (before: {before}, after: {after})',
+        { scoreThreshold: options.scoreThreshold, before: vectorResults.length, after: filtered.length },
       );
     }
 
@@ -185,13 +184,17 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
       score: vResult.score,
       metadata: vResult.metadata as TMetadata,
       preview: this.createPreview(
-        (vResult.metadata && 'text' in vResult.metadata && typeof vResult.metadata['text'] === 'string' ? vResult.metadata['text'] : ''),
-        options.query
+        vResult.metadata && 'text' in vResult.metadata && typeof vResult.metadata['text'] === 'string'
+          ? vResult.metadata['text']
+          : '',
+        options.query,
       ),
       highlights: options.highlightTerms
         ? this.highlightText(
-            (vResult.metadata && 'text' in vResult.metadata && typeof vResult.metadata['text'] === 'string' ? vResult.metadata['text'] : ''),
-            options.query
+            vResult.metadata && 'text' in vResult.metadata && typeof vResult.metadata['text'] === 'string'
+              ? vResult.metadata['text']
+              : '',
+            options.query,
           )
         : undefined,
     }));
@@ -200,9 +203,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
   /**
    * Perform keyword search using provided provider
    */
-  private async performKeywordSearch(
-    options: SearchOptions
-  ): Promise<SearchResult<TMetadata>[]> {
+  private async performKeywordSearch(options: SearchOptions): Promise<SearchResult<TMetadata>[]> {
     if (!this.keywordProvider) {
       return [];
     }
@@ -217,14 +218,11 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
     semanticResults: SearchResult<TMetadata>[],
     keywordResults: SearchResult<TMetadata>[],
     semanticWeight = 0.7,
-    keywordWeight = 0.3
+    keywordWeight = 0.3,
   ): SearchResult<TMetadata>[] {
-    debugSemantic(
-      '[SearchService] Merging results (semantic: %d, keyword: %d, weights: %f/%f)',
-      semanticResults.length,
-      keywordResults.length,
-      semanticWeight,
-      keywordWeight,
+    debugSemantic.debug(
+      '[SearchService] Merging results (semantic: {semantic}, keyword: {keyword}, weights: {weights}/{keywordWeight})',
+      { semantic: semanticResults.length, keyword: keywordResults.length, weights: semanticWeight, keywordWeight },
     );
 
     const merged = new Map<string, SearchResult<TMetadata>>();
@@ -257,11 +255,10 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
       }
     }
 
-    debugSemantic(
-      '[SearchService] Merge completed (total: %d, overlapping: %d)',
-      merged.size,
-      overlappingResults,
-    );
+    debugSemantic.debug('[SearchService] Merge completed (total: {total}, overlapping: {overlapping})', {
+      total: merged.size,
+      overlapping: overlappingResults,
+    });
 
     // Sort by combined score
     return [...merged.values()].sort((a, b) => b.score - a.score);
@@ -270,10 +267,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
   /**
    * Post-process results
    */
-  private postProcessResults(
-    results: SearchResult<TMetadata>[],
-    options: SearchOptions
-  ): SearchResult<TMetadata>[] {
+  private postProcessResults(results: SearchResult<TMetadata>[], options: SearchOptions): SearchResult<TMetadata>[] {
     // Apply limit if not already applied
     if (options.limit && results.length > options.limit) {
       results = results.slice(0, options.limit);
@@ -326,9 +320,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
     }
 
     if (bestIndex === -1) {
-      return text.length > maxLength
-        ? text.slice(0, Math.max(0, maxLength)) + '...'
-        : text;
+      return text.length > maxLength ? text.slice(0, Math.max(0, maxLength)) + '...' : text;
     }
 
     // Extract preview around best match
@@ -396,9 +388,12 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
       text: string;
       metadata?: TMetadata;
     }[],
-    batchSize = 100
+    batchSize = 100,
   ): Promise<{ success: boolean; count: number }> {
-    debugSemantic('[SearchService] Indexing documents (total: %d, batchSize: %d)', documents.length, batchSize);
+    debugSemantic.debug('[SearchService] Indexing documents (total: {total}, batchSize: {batchSize})', {
+      total: documents.length,
+      batchSize,
+    });
 
     let indexed = 0;
     const numBatches = Math.ceil(documents.length / batchSize);
@@ -408,20 +403,24 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
       const batch = documents.slice(i, i + batchSize);
       const batchNum = Math.floor(i / batchSize) + 1;
 
-      debugSemantic('[SearchService] Indexing batch %d/%d (documents: %d)', batchNum, numBatches, batch.length);
+      debugSemantic.debug('[SearchService] Indexing batch {batchNum}/{numBatches} (documents: {documents})', {
+        batchNum,
+        numBatches,
+        documents: batch.length,
+      });
 
-      await this.config.vectorProvider.indexDocumentsBatch?.(
+      (await this.config.vectorProvider.indexDocumentsBatch?.(
         batch.map(doc => ({
           id: doc.id,
           text: doc.text,
           metadata: doc.metadata as Record<string, unknown>,
-        }))
-      ) || Promise.resolve();
+        })),
+      )) || Promise.resolve();
 
       indexed += batch.length;
     }
 
-    debugSemantic('[SearchService] Indexing completed (total indexed: %d)', indexed);
+    debugSemantic.debug('[SearchService] Indexing completed (total indexed: {indexed})', { indexed });
     return { success: true, count: indexed };
   }
 
@@ -429,7 +428,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
    * Clear the search cache
    */
   clearCache(): void {
-    debugSemantic('[SearchService] Clearing search cache');
+    debugSemantic.debug('[SearchService] Clearing search cache');
     this.cache.clear();
   }
 
@@ -444,7 +443,7 @@ export class SemanticSearchService<TMetadata = Record<string, unknown>> {
    * Destroy the service and clean up resources
    */
   destroy(): void {
-    debugSemantic('[SearchService] Destroying search service and cleaning up resources');
+    debugSemantic.debug('[SearchService] Destroying search service and cleaning up resources');
     this.cache.destroy();
   }
 }

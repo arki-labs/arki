@@ -1,8 +1,8 @@
-import { debug } from '@arki/log/debug';
+import { getLogger } from '@arki/log';
 
 /** Enable with `DEBUG=arki:journal:*`. */
-export const debugWrite = debug('arki:journal:write');
-export const debugCommand = debug('arki:journal:command');
-export const debugReplay = debug('arki:journal:replay');
-export const debugDrain = debug('arki:journal:drain');
-export const debugWorker = debug('arki:journal:worker');
+export const debugWrite = getLogger('arki:journal:write');
+export const debugCommand = getLogger('arki:journal:command');
+export const debugReplay = getLogger('arki:journal:replay');
+export const debugDrain = getLogger('arki:journal:drain');
+export const debugWorker = getLogger('arki:journal:worker');

@@ -1,8 +1,7 @@
 import { z } from '@arki/contracts';
 
-import { debugEmails } from '../debug';
-
 import type { EmailProvider, SendEmailPayload, SendEmailResult } from './types';
+import { debugEmails } from '../debug';
 
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
 
@@ -80,14 +79,9 @@ export const CloudflareResponseSchema = z.union([CloudflareSuccessSchema, Cloudf
 // apart, the assignment below produces a TS error. This catches the case where
 // the executor wrote a schema stricter or looser than the existing type alias
 // (plan-eng-review F4, 2026-05-29).
-type Equals<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
-type _CheckCloudflareResponseSchemaMatchesType = Equals<
-  z.infer<typeof CloudflareResponseSchema>,
-  CloudflareResponse
-> extends true
-  ? true
-  : never;
+type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+type _CheckCloudflareResponseSchemaMatchesType =
+  Equals<z.infer<typeof CloudflareResponseSchema>, CloudflareResponse> extends true ? true : never;
 const _checkCloudflareResponseSchemaMatchesType: _CheckCloudflareResponseSchemaMatchesType = true;
 void _checkCloudflareResponseSchemaMatchesType;
 
@@ -107,17 +101,14 @@ async function callCloudflareApi(
   body: CloudflarePayload,
 ): Promise<SendEmailResult> {
   try {
-    const response = await fetch(
-      `${CLOUDFLARE_API_BASE}/accounts/${accountId}/email/sending/send`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiToken}`,
-        },
-        body: JSON.stringify(body),
+    const response = await fetch(`${CLOUDFLARE_API_BASE}/accounts/${accountId}/email/sending/send`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiToken}`,
       },
-    );
+      body: JSON.stringify(body),
+    });
 
     const raw = await response.json().catch(() => null);
     const parseResult = raw != null ? CloudflareResponseSchema.safeParse(raw) : null;
@@ -158,10 +149,9 @@ async function callCloudflareApi(
     }
 
     if (parsed.result.permanent_bounces.length > 0) {
-      debugEmails(
-        '[cloudflare-email-service] Permanent bounces: %o',
-        parsed.result.permanent_bounces,
-      );
+      debugEmails.debug('[cloudflare-email-service] Permanent bounces: {bounces}', {
+        bounces: parsed.result.permanent_bounces,
+      });
     }
 
     // Every recipient permanently bounced and nothing was delivered or queued:
@@ -198,9 +188,7 @@ async function callCloudflareApi(
 
     // CF Email Service returns per-recipient delivery status, not a message ID.
     // Synthesise an ID from delivered[0] so downstream consumers have something to log.
-    const id = parsed.result.delivered[0]
-      ? `cf:${parsed.result.delivered[0]}`
-      : `cf-queued:${parsed.result.queued[0]}`;
+    const id = parsed.result.delivered[0] ? `cf:${parsed.result.delivered[0]}` : `cf-queued:${parsed.result.queued[0]}`;
 
     return { data: { id }, error: null };
   } catch (err) {
@@ -263,11 +251,10 @@ export function cloudflareEmailServiceProvider(options: {
     quotaPerMonth: options.quotaPerMonth,
 
     async send(payload: SendEmailPayload): Promise<SendEmailResult> {
-      debugEmails(
-        '[cloudflare-email-service] Sending to=%s subject="%s"',
-        payload.to,
-        payload.subject,
-      );
+      debugEmails.debug('[cloudflare-email-service] Sending to={to} subject="{subject}"', {
+        to: payload.to,
+        subject: payload.subject,
+      });
 
       // The CF Email Sending API has no tag, schedule, or react concept —
       // make the drops visible in debug logs (issue 13 M1). Log the COUNT
@@ -275,16 +262,17 @@ export function cloudflareEmailServiceProvider(options: {
       // caller and this is a shared lib (plan-review gate fold 1). The
       // length guard keeps an empty `[]` from emitting a misleading line.
       if (payload.tags?.length) {
-        debugEmails('[cloudflare-email-service] %d tags dropped (no CF tag support)', payload.tags.length);
+        debugEmails.debug('[cloudflare-email-service] {tagsLength} tags dropped (no CF tag support)', {
+          tagsLength: payload.tags.length,
+        });
       }
       if (payload.scheduledAt !== undefined) {
-        debugEmails(
-          '[cloudflare-email-service] scheduledAt dropped (no CF scheduled delivery): %s',
-          payload.scheduledAt,
-        );
+        debugEmails.debug('[cloudflare-email-service] scheduledAt dropped (no CF scheduled delivery): {scheduledAt}', {
+          scheduledAt: payload.scheduledAt,
+        });
       }
       if (payload.react != null) {
-        debugEmails('[cloudflare-email-service] react dropped (pre-render to html; react is Resend-only)');
+        debugEmails.debug('[cloudflare-email-service] react dropped (pre-render to html; react is Resend-only)');
       }
 
       const body: CloudflarePayload = {
@@ -302,9 +290,9 @@ export function cloudflareEmailServiceProvider(options: {
       const result = await callCloudflareApi(options.accountId, options.apiToken, body);
 
       if (result.error) {
-        debugEmails('[cloudflare-email-service] Send failed: %s', result.error.message);
+        debugEmails.debug('[cloudflare-email-service] Send failed: {failed}', { failed: result.error.message });
       } else {
-        debugEmails('[cloudflare-email-service] Sent ok id=%s', result.data?.id);
+        debugEmails.debug('[cloudflare-email-service] Sent ok id={id}', { id: result.data?.id });
       }
 
       return result;

@@ -1,8 +1,7 @@
 import { Resend } from 'resend';
 
-import { debugEmails } from '../debug';
-
 import type { EmailProvider } from './types';
+import { debugEmails } from '../debug';
 
 /**
  * Creates an email provider backed by the Resend SDK.
@@ -29,7 +28,7 @@ export function resendProvider(options: {
     quotaPerMonth: options.quotaPerMonth,
 
     async send(payload) {
-      debugEmails('[resend] Sending to=%s subject="%s"', payload.to, payload.subject);
+      debugEmails.debug('[resend] Sending to={to} subject="{subject}"', { to: payload.to, subject: payload.subject });
 
       const { data, error } = await client.emails.send({
         to: payload.to,
@@ -47,11 +46,11 @@ export function resendProvider(options: {
       });
 
       if (error) {
-        debugEmails('[resend] Send failed: %s', error.message);
+        debugEmails.debug('[resend] Send failed: {failed}', { failed: error.message });
         return { data: null, error: { message: error.message, name: 'ResendError' } };
       }
 
-      debugEmails('[resend] Sent ok id=%s', data?.id);
+      debugEmails.debug('[resend] Sent ok id={id}', { id: data?.id });
       return { data: { id: data?.id ?? '' }, error: null };
     },
   };

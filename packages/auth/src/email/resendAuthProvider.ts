@@ -1,4 +1,5 @@
 import type { EmailConfig, EmailUserConfig } from '@auth/core/providers/email';
+
 import { createEmailClientFromEnv } from '@arki/emails';
 
 import { debugAuth } from '../debug';
@@ -9,10 +10,9 @@ export function ResendProvider(
   config: EmailUserConfig,
   sendVerificationRequestTemplate?: (conf: { loginUrl: string }) => React.ReactElement | React.ReactNode,
 ): EmailConfig & { from: string } {
-  debugAuth(
-    '[ResendProvider] Initializing Resend email provider (hasApiKey: %s, hasTemplate: %s)',
-    !!apiKey,
-    !!sendVerificationRequestTemplate,
+  debugAuth.debug(
+    '[ResendProvider] Initializing Resend email provider (hasApiKey: {hasApiKey}, hasTemplate: {hasTemplate})',
+    { hasApiKey: !!apiKey, hasTemplate: !!sendVerificationRequestTemplate },
   );
 
   const emailClient = createEmailClientFromEnv({ resendApiKey: apiKey });
@@ -28,7 +28,10 @@ export function ResendProvider(
     options: config,
   };
 
-  debugAuth('[ResendProvider] Resend provider initialized (from: %s, maxAge: %ds)', provider.from, provider.maxAge);
+  debugAuth.debug('[ResendProvider] Resend provider initialized (from: {from}, maxAge: {maxAge}s)', {
+    from: provider.from,
+    maxAge: provider.maxAge,
+  });
 
   return provider;
 }

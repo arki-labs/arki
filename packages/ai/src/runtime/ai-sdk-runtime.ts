@@ -1,7 +1,8 @@
-import { isStepCount, streamText, tool, type LanguageModel, type ToolSet } from 'ai';
+import type { LanguageModel, ToolSet } from 'ai';
+import { isStepCount, streamText, tool } from 'ai';
 
-import { debugRuntime } from '../debug';
 import type { AgentRuntime, AgentTool, RuntimeEvent, ToolLoopInput } from './types';
+import { debugRuntime } from '../debug';
 
 /**
  * AI-SDK-backed runtime — the P0 default. Zero new dependencies: `@arki/ai` already wraps the
@@ -45,7 +46,10 @@ export function createAiSdkRuntime(options: AiSdkRuntimeOptions): AgentRuntime {
   return {
     async *runToolLoop(input: ToolLoopInput): AsyncIterable<RuntimeEvent> {
       const maxSteps = input.maxSteps ?? defaultMaxSteps;
-      debugRuntime('runToolLoop start (maxSteps=%d, tools=%d)', maxSteps, input.tools?.length ?? 0);
+      debugRuntime.debug('runToolLoop start (maxSteps={maxSteps}, tools={tools})', {
+        maxSteps,
+        tools: input.tools?.length ?? 0,
+      });
       yield { type: 'run:start' };
 
       try {
@@ -80,7 +84,10 @@ export function createAiSdkRuntime(options: AiSdkRuntimeOptions): AgentRuntime {
         }
 
         const [text, usage] = await Promise.all([result.text, result.usage]);
-        debugRuntime('runToolLoop finish (chars=%d, totalTokens=%o)', text.length, usage.totalTokens);
+        debugRuntime.debug('runToolLoop finish (chars={chars}, totalTokens={totalTokens})', {
+          chars: text.length,
+          totalTokens: usage.totalTokens,
+        });
         yield {
           type: 'run:finish',
           text,
@@ -91,7 +98,7 @@ export function createAiSdkRuntime(options: AiSdkRuntimeOptions): AgentRuntime {
           },
         };
       } catch (error) {
-        debugRuntime('runToolLoop error: %s', errorMessage(error));
+        debugRuntime.debug('runToolLoop error', { error: errorMessage(error) });
         yield { type: 'run:error', error: errorMessage(error) };
       }
     },

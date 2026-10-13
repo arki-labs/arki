@@ -100,7 +100,10 @@ export function initEmails(options: InitEmailsOptions): EmailClient {
   const devProvider: EmailProvider = {
     name: 'dev',
     async send(payload) {
-      debugEmails('[dev] Skipping delivery — to=%s subject="%s"', payload.to, payload.subject);
+      debugEmails.debug('[dev] Skipping delivery — to={to} subject="{subject}"', {
+        to: payload.to,
+        subject: payload.subject,
+      });
       return { data: { id: `dev-${Date.now()}` }, error: null };
     },
   };

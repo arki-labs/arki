@@ -32,8 +32,6 @@
  * ```
  */
 
-
-
 import { debugFactories } from './debug';
 
 /**
@@ -84,7 +82,7 @@ export type Factory<T> = {
    * Start builder chain (builder pattern)
    */
   (): FactoryBuilder<T>;
-}
+};
 
 /**
  * Create a factory function with dual API support
@@ -232,7 +230,7 @@ export class FactoryRegistry {
    * Register a factory
    */
   register<T>(name: string, factory: Factory<T>): void {
-    debugFactories('[factories] Registering factory (name: %s)', name);
+    debugFactories.debug('[factories] Registering factory (name: {name})', { name });
     this.factories.set(name, factory);
   }
 
@@ -241,7 +239,7 @@ export class FactoryRegistry {
    */
   has(name: string): boolean {
     const exists = this.factories.has(name);
-    debugFactories('[factories] Checking factory exists (name: %s, exists: %s)', name, exists);
+    debugFactories.debug('[factories] Checking factory exists (name: {name}, exists: {exists})', { name, exists });
     return exists;
   }
 
@@ -250,7 +248,7 @@ export class FactoryRegistry {
    */
   get<T>(name: string): Factory<T> | undefined {
     const factory = this.factories.get(name);
-    debugFactories('[factories] Getting factory (name: %s, found: %s)', name, !!factory);
+    debugFactories.debug('[factories] Getting factory (name: {name}, found: {found})', { name, found: !!factory });
     return factory;
   }
 
@@ -258,14 +256,17 @@ export class FactoryRegistry {
    * Create an instance using a registered factory
    */
   create<T>(name: string, overrides?: Partial<T>): T {
-    debugFactories('[factories] Creating instance (name: %s, hasOverrides: %s)', name, !!overrides);
+    debugFactories.debug('[factories] Creating instance (name: {name}, hasOverrides: {hasOverrides})', {
+      name,
+      hasOverrides: !!overrides,
+    });
     const factory = this.factories.get(name);
     if (!factory) {
-      debugFactories('[factories] Factory not found: %s', name);
+      debugFactories.debug('[factories] Factory not found: {found}', { found: name });
       throw new Error(`Factory '${name}' not registered`);
     }
     const instance = factory(overrides);
-    debugFactories('[factories] Instance created (name: %s)', name);
+    debugFactories.debug('[factories] Instance created (name: {name})', { name });
     return instance;
   }
 
@@ -273,14 +274,17 @@ export class FactoryRegistry {
    * Create multiple instances using a registered factory
    */
   createMany<T>(name: string, count: number, overrides?: Partial<T> | ((index: number) => Partial<T>)): T[] {
-    debugFactories('[factories] Creating multiple instances (name: %s, count: %d)', name, count);
+    debugFactories.debug('[factories] Creating multiple instances (name: {name}, count: {count})', { name, count });
     const factory = this.factories.get(name);
     if (!factory) {
-      debugFactories('[factories] Factory not found: %s', name);
+      debugFactories.debug('[factories] Factory not found: {found}', { found: name });
       throw new Error(`Factory '${name}' not registered`);
     }
     const instances = createMany(factory, count, overrides);
-    debugFactories('[factories] %d instances created (name: %s)', instances.length, name);
+    debugFactories.debug('[factories] {instancesLength} instances created (name: {name})', {
+      instancesLength: instances.length,
+      name,
+    });
     return instances;
   }
 
@@ -289,9 +293,9 @@ export class FactoryRegistry {
    */
   clear(): void {
     const count = this.factories.size;
-    debugFactories('[factories] Clearing all factories (count: %d)', count);
+    debugFactories.debug('[factories] Clearing all factories (count: {count})', { count });
     this.factories.clear();
-    debugFactories('[factories] All factories cleared');
+    debugFactories.debug('[factories] All factories cleared');
   }
 }
 
@@ -399,5 +403,4 @@ export function createFactories<TFactories extends Record<string, Factory<any> |
  * Export faker instance for convenience
  */
 
-
-export {faker} from '@faker-js/faker';
+export { faker } from '@faker-js/faker';

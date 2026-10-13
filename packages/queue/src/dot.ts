@@ -1,15 +1,15 @@
 import type { CtxOf, EmptyShape, NeedsShape, Plugin, Token, WireNeeds } from '@arki/dot/plugin';
 import { DotPluginError, plugin } from '@arki/dot/plugin';
 
-import { debugWorker } from './debug.ts';
-import type { DurableScheduler, DurableSchedulerOptions } from './durable-scheduler.ts';
-import { createDurableScheduler } from './durable-scheduler.ts';
-import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { QueueInstanceOptions } from './create-queue.ts';
+import type { DurableScheduler, DurableSchedulerOptions } from './durable-scheduler.ts';
+import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
 import type { FlowDefinition, QueueBuilder, QueueInstance, ScheduleDefinition } from './types/builder.ts';
 import type { JobDefinition, JobOptions } from './types/job.ts';
 import type { QueueMeta } from './types/queue.ts';
+import { debugWorker } from './debug.ts';
+import { createDurableScheduler } from './durable-scheduler.ts';
 
 export const QUEUE_ACTION_META_SCHEMA = '@arki/queue/action-meta@1';
 
@@ -105,17 +105,11 @@ function isScheduleDefinition(value: unknown): value is ScheduleDefinition {
 
 function isFlowDefinition(value: unknown): value is FlowDefinition {
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    '_type' in value &&
-    (value as { _type?: unknown })._type === 'flow'
+    typeof value === 'object' && value !== null && '_type' in value && (value as { _type?: unknown })._type === 'flow'
   );
 }
 
-type QueueDefinition =
-  | JobDefinition<unknown, unknown, unknown>
-  | ScheduleDefinition
-  | FlowDefinition;
+type QueueDefinition = JobDefinition<unknown, unknown, unknown> | ScheduleDefinition | FlowDefinition;
 
 function collectQueueDefinitions(
   registry: QueueRegistry,
@@ -255,14 +249,19 @@ function queuePluginError(args: {
   });
 }
 
-function assertExclusiveMode(options: QueueRuntimeOptions<NeedsShape & NoReservedKeys> | QueueRuntimeFeatureOptions<NeedsShape & NoReservedKeys, unknown, readonly QueueFeatureToken[]>): void {
+function assertExclusiveMode(
+  options:
+    | QueueRuntimeOptions<NeedsShape & NoReservedKeys>
+    | QueueRuntimeFeatureOptions<NeedsShape & NoReservedKeys, unknown, readonly QueueFeatureToken[]>,
+): void {
   const hasRegistry = 'registry' in options || 'start' in options;
   const hasFeatures = 'features' in options || 'q' in options || 'context' in options;
   if (hasRegistry && hasFeatures) {
     throw queuePluginError({
       code: QUEUE_PLUGIN_ERROR_CODES.exclusiveModes,
       message: '[queue] queueRuntime options cannot mix registry/start mode with q/features/context mode.',
-      remediation: 'Use either queueRuntime({ registry, start, ... }) or queueRuntime({ q, features, context, connection, ... }).',
+      remediation:
+        'Use either queueRuntime({ registry, start, ... }) or queueRuntime({ q, features, context, connection, ... }).',
       docsSlug: 'arki-queue-e004',
     });
   }
@@ -288,7 +287,10 @@ function featureRegistry(options: {
       registry[feature.key] = slice.queue;
       continue;
     }
-    debugWorker('[%s] Feature "%s" did not contribute a queue slice.', 'queue-runtime', feature.key);
+    debugWorker.debug('[{value1}] Feature "{featureKey}" did not contribute a queue slice.', {
+      value1: 'queue-runtime',
+      featureKey: feature.key,
+    });
   }
   return registry;
 }
@@ -368,7 +370,11 @@ export function queueRuntime<
 >(
   options: QueueRuntimeOptions<TNeeds> | QueueRuntimeFeatureOptions<TNeeds, TContext, TFeatures>,
 ): Plugin<WireNeeds<TNeeds>, EmptyShape> {
-  assertExclusiveMode(options as QueueRuntimeOptions<NeedsShape & NoReservedKeys> | QueueRuntimeFeatureOptions<NeedsShape & NoReservedKeys, unknown, readonly QueueFeatureToken[]>);
+  assertExclusiveMode(
+    options as
+      | QueueRuntimeOptions<NeedsShape & NoReservedKeys>
+      | QueueRuntimeFeatureOptions<NeedsShape & NoReservedKeys, unknown, readonly QueueFeatureToken[]>,
+  );
   const pluginName = options.name ?? 'queue-runtime';
   const startupTimeoutMs = options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
   const blocking = options.blocking ?? false;
@@ -455,7 +461,10 @@ export function queueRuntime<
       }
 
       startup = runStartup(ctx as CtxOf<TNeeds> & Readonly<Record<string, unknown>>).catch((error: unknown) => {
-        debugWorker('[%s] Queue runtime startup failed: %s', pluginName, error instanceof Error ? error.message : String(error));
+        debugWorker.debug('[{pluginName}] Queue runtime startup failed', {
+          pluginName,
+          error: error instanceof Error ? error.message : String(error),
+        });
         started = false;
         handle = undefined;
       });

@@ -4,7 +4,7 @@
  * Provides debugging helpers for inspecting database state,
  * queries, and test execution.
  *
- * Also provides runtime debug logging using @arki/log/debug:
+ * Also provides runtime debug logging using @arki/log (`fromEnv()` reads DEBUG):
  * - DEBUG=testing:tester - Main tester lifecycle and operations
  * - DEBUG=testing:containers - Container startup and management
  * - DEBUG=testing:factories - Factory operations and data generation
@@ -15,22 +15,22 @@ import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { sql } from 'drizzle-orm';
 
-import { createDebugLogger } from '@arki/log/debug';
+import { getLogger } from '@arki/log';
 
 /**
  * Runtime debug logger for main tester operations
  */
-export const debugTester = createDebugLogger('testing:tester');
+export const debugTester = getLogger('testing:tester');
 
 /**
  * Runtime debug logger for container operations
  */
-export const debugContainers = createDebugLogger('testing:containers');
+export const debugContainers = getLogger('testing:containers');
 
 /**
  * Runtime debug logger for factory operations
  */
-export const debugFactories = createDebugLogger('testing:factories');
+export const debugFactories = getLogger('testing:factories');
 
 /**
  * Options for debug logging
@@ -47,7 +47,7 @@ export type DebugOptions = {
    * @default console.log
    */
   logger?: (message: string, ...args: any[]) => void;
-}
+};
 
 let debugEnabled = process.env.DEBUG_TESTS === 'true';
 let debugLogger: (message: string, ...args: any[]) => void = console.log;
@@ -147,9 +147,7 @@ export function logState(label: string, state: any): void {
  * // - sessions: 25 rows
  * ```
  */
-export async function dumpDatabase<TSchema extends AnyRelations>(
-  db: NodePgDatabase<TSchema>,
-): Promise<void> {
+export async function dumpDatabase<TSchema extends AnyRelations>(db: NodePgDatabase<TSchema>): Promise<void> {
   if (!debugEnabled) return;
 
   try {

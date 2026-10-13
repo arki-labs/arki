@@ -79,7 +79,7 @@ Do not promise completeness, a fixed duration or number of moments.`,
     },
   );
   if (!review.faithful || !review.sameLanguage || !review.preservesContext) {
-    debugService('PodHop narration review rejected: %s', review.reason);
+    debugService.debug('PodHop narration review rejected: {rejected}', { rejected: review.reason });
     throw new Error('The narration needs another review against the original recording. Please retry.');
   }
   return hopSelectionSchema.parse(result);

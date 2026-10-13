@@ -58,7 +58,7 @@ export function listenOnPool(pool: ListenPool, channel: string, opts?: { readonl
         if (message.channel === channel && message.payload !== undefined) onMessage(message.payload);
       });
       client.on('error', error => {
-        debugWorker('listen %s: connection lost: %s', channel, error.message);
+        debugWorker.debug('listen {channel}: connection lost: {lost}', { channel, lost: error.message });
         drop(error);
         schedule();
       });
@@ -73,7 +73,7 @@ export function listenOnPool(pool: ListenPool, channel: string, opts?: { readonl
         return;
       }
       current = client;
-      debugWorker('listen %s: connected', channel);
+      debugWorker.debug('listen {channel}: connected', { channel });
     };
 
     const schedule = (): void => {
@@ -81,11 +81,10 @@ export function listenOnPool(pool: ListenPool, channel: string, opts?: { readonl
       timer = setTimeout(() => {
         timer = undefined;
         connect().catch((error: unknown) => {
-          debugWorker(
-            'listen %s: reconnect failed: %s',
+          debugWorker.debug('listen {channel}: reconnect failed', {
             channel,
-            error instanceof Error ? error.message : String(error),
-          );
+            error: error instanceof Error ? error.message : String(error),
+          });
           schedule();
         });
       }, retryMs);

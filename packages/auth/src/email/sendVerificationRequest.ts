@@ -1,6 +1,7 @@
 import type { EmailConfig } from '@auth/core/providers/email';
 import type { Theme } from '@auth/core/types';
 import { createId } from '@paralleldrive/cuid2';
+
 import type { EmailClient } from '@arki/emails';
 
 import { debugEmail } from '../debug';
@@ -20,16 +21,20 @@ export const sendVerificationRequest = (
   emailClient: EmailClient,
   template?: ({ loginUrl }: { loginUrl: string }) => React.ReactElement | React.ReactNode,
 ) => {
-  debugEmail('[sendVerificationRequest] Creating verification email sender (hasTemplate: %s)', !!template);
+  debugEmail.debug('[sendVerificationRequest] Creating verification email sender (hasTemplate: {hasTemplate})', {
+    hasTemplate: !!template,
+  });
 
   return async (params: SendVerificationRequestParams) => {
     const { identifier, url, provider } = params;
 
-    debugEmail('[sendVerificationRequest] Sending verification email (to: %s, hasFrom: %s)',
-      identifier, !!provider.from);
+    debugEmail.debug('[sendVerificationRequest] Sending verification email (to: {to}, hasFrom: {hasFrom})', {
+      to: identifier,
+      hasFrom: !!provider.from,
+    });
 
     if (!provider.from) {
-      debugEmail('[sendVerificationRequest] Error: from address is required');
+      debugEmail.debug('[sendVerificationRequest] Error: from address is required');
       throw new Error('from is required');
     }
 
@@ -38,8 +43,10 @@ export const sendVerificationRequest = (
     const isDevOrStaging = env.NODE_ENV === 'development';
     const to = isDevOrStaging ? 'delivered@resend.dev' : identifier;
 
-    debugEmail('[sendVerificationRequest] Email configuration (host: %s, isDev: %s, recipient: %s)',
-      host, isDevOrStaging, to);
+    debugEmail.debug(
+      '[sendVerificationRequest] Email configuration (host: {host}, isDev: {isDev}, recipient: {recipient})',
+      { host, isDev: isDevOrStaging, recipient: to },
+    );
 
     const { error } = await emailClient.send({
       to,
@@ -52,11 +59,11 @@ export const sendVerificationRequest = (
     });
 
     if (error) {
-      debugEmail('[sendVerificationRequest] Error sending verification email: %s', error.message);
+      debugEmail.debug('[sendVerificationRequest] Error sending verification email: {email}', { email: error.message });
       throw new Error(`Verification request email to ${identifier} can't be sent`);
     }
 
-    debugEmail('[sendVerificationRequest] Verification email sent successfully to %s', to);
+    debugEmail.debug('[sendVerificationRequest] Verification email sent successfully to {to}', { to });
   };
 };
 

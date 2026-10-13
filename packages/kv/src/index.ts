@@ -18,19 +18,18 @@ export class KV {
     private readonly namespace?: string, // Keyv namespace
     private readonly rateLimitPrefix = 'rl', // Prefix for rate limiter keys
   ) {
-    debugKV(
-      '[kv] Initializing KV instance (namespace: %s, rateLimitPrefix: %s)',
-      namespace || 'default',
+    debugKV.debug('[kv] Initializing KV instance (namespace: {namespace}, rateLimitPrefix: {rateLimitPrefix})', {
+      namespace: namespace || 'default',
       rateLimitPrefix,
-    );
+    });
 
     // Parse Redis URL and determine if TLS is needed
     const isTLS = redisUrl.startsWith('rediss://');
-    debugKV('[kv] Detected TLS: %s', isTLS);
+    debugKV.debug('[kv] Detected TLS: {tls}', { tls: isTLS });
     const tlsOptions = isTLS ? { rejectUnauthorized: false } : undefined;
 
     // Keyv setup
-    debugKV('[kv] Setting up Keyv store with namespace: %s', this.namespace || 'none');
+    debugKV.debug('[kv] Setting up Keyv store with namespace: {namespace}', { namespace: this.namespace || 'none' });
     const store = new KeyvRedis(redisUrl, {
       namespace: this.namespace,
       ...(tlsOptions && { socket: { tls: true, rejectUnauthorized: false } }),
@@ -47,122 +46,137 @@ export class KV {
       // Any other Keyv error is genuinely unexpected and still loud.
       const isTransientSocketClose = err instanceof Error && err.name === 'SocketClosedUnexpectedlyError';
       if (isTransientSocketClose) {
-        debugKV('[kv] Keyv socket closed (transient): %s', err.message);
+        debugKV.debug('[kv] Keyv socket closed (transient): {errMessage}', { errMessage: err.message });
         return;
       }
-      debugKV('[kv] Keyv connection error: %s', err.message);
+      debugKV.debug('[kv] Keyv connection error', { error: err.message });
       console.error('Keyv connection error:', err);
     });
-    debugKV('[kv] Keyv store initialized');
+    debugKV.debug('[kv] Keyv store initialized');
 
     // ioredis setup for rate limiter
-    debugLimiter('[kv] Setting up ioredis client for rate limiting');
+    debugLimiter.debug('[kv] Setting up ioredis client for rate limiting');
     this.#redisClient = new Redis(redisUrl, {
       enableOfflineQueue: false,
       maxRetriesPerRequest: 1,
       retryStrategy(times: number) {
         if (times > 10) {
-          debugLimiter('[kv] Rate limiter Redis: giving up after %d retries', times);
+          debugLimiter.debug('[kv] Rate limiter Redis: giving up after {times} retries', { times });
           // Return null to stop retrying — the in-memory fallback will handle rate limiting
           return null;
         }
         // Exponential backoff capped at 5 seconds
         const delay = Math.min(times * 500, 5000);
-        debugLimiter('[kv] Rate limiter Redis: retry %d in %dms', times, delay);
+        debugLimiter.debug('[kv] Rate limiter Redis: retry {times} in {delay}ms', { times, delay });
         return delay;
       },
       ...(tlsOptions && { tls: tlsOptions }),
     });
 
     this.#redisClient.on('error', (err: Error) => {
-      debugLimiter('[kv] Rate limiter Redis client error: %s', err.message);
+      debugLimiter.debug('[kv] Rate limiter Redis client error', { error: err.message });
       this.#isRateLimiterReady = false;
     });
 
     this.#redisClient.on('ready', () => {
-      debugLimiter('[kv] Rate limiter Redis client ready');
+      debugLimiter.debug('[kv] Rate limiter Redis client ready');
       this.#isRateLimiterReady = true;
     });
 
-    debugKV('[kv] KV instance initialization complete');
+    debugKV.debug('[kv] KV instance initialization complete');
   }
 
   // --- Standard Key-Value Methods (using Keyv) ---
 
   async get<T = unknown>(key: string): Promise<T | undefined> {
-    debugKV('[kv] Getting key: %s', key);
+    debugKV.debug('[kv] Getting key: {key}', { key });
     const result = await this.#keyv.get(key);
-    debugKV('[kv] Get result for key %s: %s', key, result === undefined ? 'not found' : 'found');
+    debugKV.debug('[kv] Get result for key {key}: {outcome}', {
+      key,
+      outcome: result === undefined ? 'not found' : 'found',
+    });
     return result;
   }
 
   async set<T = unknown>(key: string, value: T, expirationSeconds?: number): Promise<boolean> {
-    debugKV('[kv] Setting key: %s (ttl: %s)', key, expirationSeconds ? `${expirationSeconds}s` : 'none');
+    debugKV.debug('[kv] Setting key: {key} (ttl: {ttl})', {
+      key,
+      ttl: expirationSeconds ? `${expirationSeconds}s` : 'none',
+    });
     const ttl = expirationSeconds ? expirationSeconds * 1000 : undefined;
     const result = await this.#keyv.set(key, value, ttl);
-    debugKV('[kv] Set result for key %s: %s', key, result ? 'success' : 'failed');
+    debugKV.debug('[kv] Set result for key {key}: {outcome}', { key, outcome: result ? 'success' : 'failed' });
     return result;
   }
 
   async setIfNotExists<T = unknown>(key: string, value: T, expirationSeconds: number): Promise<boolean> {
-    debugKV('[kv] Setting key if absent: %s (ttl: %ss)', key, expirationSeconds);
+    debugKV.debug('[kv] Setting key if absent: {key} (ttl: {ttl}s)', { key, ttl: expirationSeconds });
     const namespacedKey = this.namespace ? `${this.namespace}:${key}` : key;
     const serialized = JSON.stringify(value) ?? 'null';
     const result = await this.#redisClient.set(namespacedKey, serialized, 'EX', expirationSeconds, 'NX');
     const acquired = result === 'OK';
-    debugKV('[kv] Set-if-absent result for key %s: %s', key, acquired ? 'acquired' : 'exists');
+    debugKV.debug('[kv] Set-if-absent result for key {key}: {outcome}', {
+      key,
+      outcome: acquired ? 'acquired' : 'exists',
+    });
     return acquired;
   }
 
   async mset<T = unknown>(keyValuePairs: [string, T][], _expirationSeconds?: number): Promise<void> {
-    debugKV('[kv] Setting multiple keys (count: %d)', keyValuePairs.length);
+    debugKV.debug('[kv] Setting multiple keys (count: {count})', { count: keyValuePairs.length });
     const entries = keyValuePairs.map(([key, value]) => ({ key, value }));
     await this.#keyv.setMany(entries);
-    debugKV('[kv] Multiple keys set successfully (count: %d)', keyValuePairs.length);
+    debugKV.debug('[kv] Multiple keys set successfully (count: {count})', { count: keyValuePairs.length });
   }
 
   async mget<T = unknown>(keys: string[]): Promise<(T | undefined)[]> {
-    debugKV('[kv] Getting multiple keys (count: %d)', keys.length);
+    debugKV.debug('[kv] Getting multiple keys (count: {count})', { count: keys.length });
     const results = await this.#keyv.getMany(keys);
     const foundCount = results.filter(r => r !== undefined).length;
-    debugKV('[kv] Got multiple keys (requested: %d, found: %d)', keys.length, foundCount);
+    debugKV.debug('[kv] Got multiple keys (requested: {requested}, found: {found})', {
+      requested: keys.length,
+      found: foundCount,
+    });
     return results;
   }
 
   async exists(key: string): Promise<boolean> {
-    debugKV('[kv] Checking existence of key: %s', key);
+    debugKV.debug('[kv] Checking existence of key: {key}', { key });
     const value = await this.#keyv.get<unknown>(key);
     const exists = value !== undefined;
-    debugKV('[kv] Key %s exists: %s', key, exists);
+    debugKV.debug('[kv] Key {key} exists: {exists}', { key, exists });
     return exists;
   }
 
   async delete(key: string): Promise<boolean> {
-    debugKV('[kv] Deleting key: %s', key);
+    debugKV.debug('[kv] Deleting key: {key}', { key });
     const result = await this.#keyv.delete(key);
-    debugKV('[kv] Delete result for key %s: %s', key, result ? 'deleted' : 'not found');
+    debugKV.debug('[kv] Delete result for key {key}: {outcome}', { key, outcome: result ? 'deleted' : 'not found' });
     return result;
   }
 
   async deleteMany(keys: string[]): Promise<boolean> {
-    debugKV('[kv] Deleting multiple keys (count: %d)', keys.length);
+    debugKV.debug('[kv] Deleting multiple keys (count: {count})', { count: keys.length });
     const result = await this.#keyv.deleteMany(keys);
-    debugKV('[kv] Delete many result: %s', result ? 'success' : 'failed');
+    debugKV.debug('[kv] Delete many result: {result}', { result: result ? 'success' : 'failed' });
     return result;
   }
 
   async clear(): Promise<void> {
-    debugKV('[kv] Clearing all keys');
+    debugKV.debug('[kv] Clearing all keys');
     await this.#keyv.clear();
-    debugKV('[kv] All keys cleared');
+    debugKV.debug('[kv] All keys cleared');
   }
 
   // --- Redis Pub/Sub Methods ---
 
   async publish(channel: string, message: string): Promise<number> {
-    debugKV('[kv] Publishing to channel: %s (message length: %d)', channel, message.length);
+    debugKV.debug('[kv] Publishing to channel: {channel} (message length: {length})', {
+      channel,
+      length: message.length,
+    });
     const result = await this.#redisClient.publish(channel, message);
-    debugKV('[kv] Publish result for channel %s: %d subscriber(s)', channel, result);
+    debugKV.debug('[kv] Publish result for channel {channel}: {result} subscriber(s)', { channel, result });
     return result;
   }
 
@@ -189,11 +203,9 @@ export class KV {
       if (cached) return cached;
     }
 
-    debugLimiter(
-      '[limiter] No cached rate limiter, creating one (id: %s, points: %d, duration: %ds)',
-      id,
-      options.points ?? 10,
-      options.duration ?? 60,
+    debugLimiter.debug(
+      '[limiter] No cached rate limiter, creating one (id: {id}, points: {points}, duration: {duration}s)',
+      { id, points: options.points ?? 10, duration: options.duration ?? 60 },
     );
 
     // Use Redis limiter if the client is ready, otherwise fallback to in-memory
@@ -202,7 +214,10 @@ export class KV {
     const keyPrefix = `${this.namespace ? this.namespace + ':' : ''}${this.rateLimitPrefix}:${id}`;
 
     if (this.#isRateLimiterReady && this.#redisClient.status === 'ready') {
-      debugLimiter('[limiter] Creating Redis rate limiter (id: %s, prefix: %s)', id, keyPrefix);
+      debugLimiter.debug('[limiter] Creating Redis rate limiter (id: {id}, prefix: {prefix})', {
+        id,
+        prefix: keyPrefix,
+      });
       console.log(`Creating Redis Rate Limiter: ${id}`);
       limiter = new RateLimiterRedis({
         storeClient: this.#redisClient,
@@ -212,11 +227,9 @@ export class KV {
         ...options, // Allow overriding defaults and adding other options
       });
     } else {
-      debugLimiter(
-        '[limiter] Redis not ready - creating in-memory rate limiter (id: %s, redisReady: %s, redisStatus: %s)',
-        id,
-        this.#isRateLimiterReady,
-        this.#redisClient.status,
+      debugLimiter.debug(
+        '[limiter] Redis not ready - creating in-memory rate limiter (id: {id}, redisReady: {redisReady}, redisStatus: {redisStatus})',
+        { id, redisReady: this.#isRateLimiterReady, redisStatus: this.#redisClient.status },
       );
       console.warn(`Redis client not ready. Creating In-Memory Rate Limiter (non-persistent): ${id}`);
       limiter = new RateLimiterMemory({
@@ -227,7 +240,7 @@ export class KV {
       });
     }
 
-    debugLimiter('[limiter] Rate limiter created and cached for id: %s', id);
+    debugLimiter.debug('[limiter] Rate limiter created and cached for id: {id}', { id });
     const entry: LimiterEntry = { json: JSON.stringify(options), fields: primitiveFields(options), limiter };
     if (entries) {
       entries.push(entry);
@@ -241,41 +254,42 @@ export class KV {
    * Disconnects both Keyv and the Rate Limiter Redis client.
    */
   async close(): Promise<void> {
-    debugKV('[kv] Closing KV instance');
+    debugKV.debug('[kv] Closing KV instance');
 
     // Disconnect Keyv store
     const store = this.#keyv.opts.store;
 
     try {
-      debugKV('[kv] Disconnecting Keyv store');
+      debugKV.debug('[kv] Disconnecting Keyv store');
       await store.disconnect?.();
-      debugKV('[kv] Keyv store disconnected');
+      debugKV.debug('[kv] Keyv store disconnected');
     } catch (error) {
-      debugKV('[kv] Error disconnecting Keyv store: %s', error instanceof Error ? error.message : 'unknown error');
+      debugKV.debug('[kv] Error disconnecting Keyv store: {reason}', {
+        reason: error instanceof Error ? error.message : 'unknown error',
+      });
       console.error('Error disconnecting Keyv store:', error);
     }
 
     // Disconnect Rate Limiter Redis client
 
     try {
-      debugLimiter('[kv] Disconnecting rate limiter Redis client');
+      debugLimiter.debug('[kv] Disconnecting rate limiter Redis client');
       await this.#redisClient.quit();
-      debugLimiter('[kv] Rate limiter Redis client disconnected');
+      debugLimiter.debug('[kv] Rate limiter Redis client disconnected');
     } catch (error) {
-      debugLimiter(
-        '[kv] Error disconnecting rate limiter Redis client: %s',
-        error instanceof Error ? error.message : 'unknown error',
-      );
+      debugLimiter.debug('[kv] Error disconnecting rate limiter Redis client: {reason}', {
+        reason: error instanceof Error ? error.message : 'unknown error',
+      });
       console.error('Error disconnecting Rate Limiter Redis client:', error);
     }
 
-    if (debugLimiter.enabled) {
+    if (debugLimiter.isEnabled('debug')) {
       let count = 0;
       for (const entries of this.#limiterInstances.values()) count += entries.length;
-      debugLimiter('[kv] Clearing %d cached rate limiter instance(s)', count);
+      debugLimiter.debug('[kv] Clearing {count} cached rate limiter instance(s)', { count });
     }
     this.#limiterInstances.clear();
-    debugKV('[kv] KV instance closed successfully');
+    debugKV.debug('[kv] KV instance closed successfully');
   }
 }
 

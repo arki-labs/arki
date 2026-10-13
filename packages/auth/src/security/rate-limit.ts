@@ -7,8 +7,10 @@ export const ensureRateLimitNotExceeded = async (kv: KV, key: string, limit?: nu
   const effectiveLimit = limit ?? 10;
   const effectiveWindow = windowSeconds ?? 60;
 
-  debugRateLimit('[ensureRateLimitNotExceeded] Checking rate limit (key: %s, limit: %d, window: %ds)',
-    key, effectiveLimit, effectiveWindow);
+  debugRateLimit.debug(
+    '[ensureRateLimitNotExceeded] Checking rate limit (key: {key}, limit: {limit}, window: {window}s)',
+    { key, limit: effectiveLimit, window: effectiveWindow },
+  );
 
   const limiter = kv.getRateLimiter(`login-attempt:${key}`, {
     points: effectiveLimit,
@@ -16,11 +18,13 @@ export const ensureRateLimitNotExceeded = async (kv: KV, key: string, limit?: nu
   });
   const result = await limiter.consume(1);
 
-  debugRateLimit('[ensureRateLimitNotExceeded] Rate limit check result (remaining: %d/%d)',
-    result.remainingPoints, effectiveLimit);
+  debugRateLimit.debug(
+    '[ensureRateLimitNotExceeded] Rate limit check result (remaining: {remaining}/{effectiveLimit})',
+    { remaining: result.remainingPoints, effectiveLimit },
+  );
 
   if (result.remainingPoints === 0) {
-    debugRateLimit('[ensureRateLimitNotExceeded] Rate limit exceeded for key: %s', key);
+    debugRateLimit.debug('[ensureRateLimitNotExceeded] Rate limit exceeded for key: {key}', { key });
     throw new RateLimitExceededError('Rate limit exceeded', result);
   }
 };

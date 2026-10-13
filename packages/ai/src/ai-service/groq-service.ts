@@ -8,23 +8,17 @@
 import { createGroq } from '@ai-sdk/groq';
 import { generateText, streamText } from 'ai';
 
+import type { GenerateOptions, LLMProvider, Message, StreamOptions } from './types.ts';
 import { debugService } from '../debug.ts';
 import { env } from '../env.ts';
-import { GenerationError, RateLimitError, getErrorMessage } from '../errors.ts';
+import { GenerationError, getErrorMessage, RateLimitError } from '../errors.ts';
 import { rateLimiters } from '../utils/rate-limiter.ts';
-
-import type {
-  GenerateOptions,
-  LLMProvider,
-  Message,
-  StreamOptions,
-} from './types.ts';
 
 export type GroqServiceConfig = {
   model?: string;
   temperature?: number;
   maxRetries?: number;
-}
+};
 
 /**
  * Groq LLM Service
@@ -53,11 +47,10 @@ export class GroqService implements LLMProvider {
       apiKey: env.GROQ_API_KEY ?? '',
     });
 
-    debugService(
-      '[Groq] Service initialized (model: %s, temperature: %d)',
-      this.model,
-      this.defaultTemperature,
-    );
+    debugService.debug('[Groq] Service initialized (model: {model}, temperature: {temperature})', {
+      model: this.model,
+      temperature: this.defaultTemperature,
+    });
   }
 
   /**
@@ -70,44 +63,32 @@ export class GroqService implements LLMProvider {
   /**
    * Generate text from a single prompt
    */
-  async generateText(
-    prompt: string,
-    options: GenerateOptions = {},
-  ): Promise<string> {
+  async generateText(prompt: string, options: GenerateOptions = {}): Promise<string> {
     if (!this.isAvailable()) {
       throw new GenerationError('Groq API key not configured');
     }
 
-    debugService('[Groq] Generating text (prompt length: %d)', prompt.length);
+    debugService.debug('[Groq] Generating text (prompt length: {length})', { length: prompt.length });
 
-    const rateLimitResult = await rateLimiters.groq.execute(
-      'generateText',
-      async () => {
-        try {
-          const result = await generateText({
-            model: this.client(this.model),
-            instructions: options.systemPrompt,
-            prompt,
-            temperature: options.temperature ?? this.defaultTemperature,
-            maxOutputTokens: options.maxTokens,
-            maxRetries: options.maxRetries ?? this.defaultMaxRetries,
-          });
+    const rateLimitResult = await rateLimiters.groq.execute('generateText', async () => {
+      try {
+        const result = await generateText({
+          model: this.client(this.model),
+          instructions: options.systemPrompt,
+          prompt,
+          temperature: options.temperature ?? this.defaultTemperature,
+          maxOutputTokens: options.maxTokens,
+          maxRetries: options.maxRetries ?? this.defaultMaxRetries,
+        });
 
-          debugService(
-            '[Groq] Text generated successfully (length: %d)',
-            result.text.length,
-          );
+        debugService.debug('[Groq] Text generated successfully (length: {length})', { length: result.text.length });
 
-          return result.text;
-        } catch (error) {
-          debugService('[Groq] Text generation failed: %s', getErrorMessage(error));
-          throw new GenerationError(
-            `Failed to generate text: ${getErrorMessage(error)}`,
-            error,
-          );
-        }
-      },
-    );
+        return result.text;
+      } catch (error) {
+        debugService.debug('[Groq] Text generation failed: {failed}', { failed: getErrorMessage(error) });
+        throw new GenerationError(`Failed to generate text: ${getErrorMessage(error)}`, error);
+      }
+    });
 
     if (!rateLimitResult.success) {
       throw new RateLimitError(
@@ -122,49 +103,36 @@ export class GroqService implements LLMProvider {
   /**
    * Generate text from conversation messages
    */
-  async generateConversation(
-    messages: Message[],
-    options: GenerateOptions = {},
-  ): Promise<string> {
+  async generateConversation(messages: Message[], options: GenerateOptions = {}): Promise<string> {
     if (!this.isAvailable()) {
       throw new GenerationError('Groq API key not configured');
     }
 
-    debugService('[Groq] Generating conversation (messages: %d)', messages.length);
+    debugService.debug('[Groq] Generating conversation (messages: {messages})', { messages: messages.length });
 
-    const rateLimitResult = await rateLimiters.groq.execute(
-      'generateConversation',
-      async () => {
-        try {
-          const result = await generateText({
-            model: this.client(this.model),
-            messages: messages.map((msg) => ({
-              role: msg.role,
-              content: msg.content,
-            })),
-            temperature: options.temperature ?? this.defaultTemperature,
-            maxOutputTokens: options.maxTokens,
-            maxRetries: options.maxRetries ?? this.defaultMaxRetries,
-          });
+    const rateLimitResult = await rateLimiters.groq.execute('generateConversation', async () => {
+      try {
+        const result = await generateText({
+          model: this.client(this.model),
+          messages: messages.map(msg => ({
+            role: msg.role,
+            content: msg.content,
+          })),
+          temperature: options.temperature ?? this.defaultTemperature,
+          maxOutputTokens: options.maxTokens,
+          maxRetries: options.maxRetries ?? this.defaultMaxRetries,
+        });
 
-          debugService(
-            '[Groq] Conversation generated successfully (length: %d)',
-            result.text.length,
-          );
+        debugService.debug('[Groq] Conversation generated successfully (length: {length})', {
+          length: result.text.length,
+        });
 
-          return result.text;
-        } catch (error) {
-          debugService(
-            '[Groq] Conversation generation failed: %s',
-            getErrorMessage(error),
-          );
-          throw new GenerationError(
-            `Failed to generate conversation: ${getErrorMessage(error)}`,
-            error,
-          );
-        }
-      },
-    );
+        return result.text;
+      } catch (error) {
+        debugService.debug('[Groq] Conversation generation failed: {failed}', { failed: getErrorMessage(error) });
+        throw new GenerationError(`Failed to generate conversation: ${getErrorMessage(error)}`, error);
+      }
+    });
 
     if (!rateLimitResult.success) {
       throw new RateLimitError(
@@ -179,15 +147,12 @@ export class GroqService implements LLMProvider {
   /**
    * Stream text generation from a prompt
    */
-  async *streamText(
-    prompt: string,
-    options: StreamOptions = {},
-  ): AsyncGenerator<string, void, unknown> {
+  async *streamText(prompt: string, options: StreamOptions = {}): AsyncGenerator<string, void, unknown> {
     if (!this.isAvailable()) {
       throw new GenerationError('Groq API key not configured');
     }
 
-    debugService('[Groq] Streaming text (prompt length: %d)', prompt.length);
+    debugService.debug('[Groq] Streaming text (prompt length: {length})', { length: prompt.length });
 
     try {
       const stream = await streamText({
@@ -211,34 +176,28 @@ export class GroqService implements LLMProvider {
         options.onComplete(fullText);
       }
 
-      debugService('[Groq] Stream completed (total length: %d)', fullText.length);
+      debugService.debug('[Groq] Stream completed (total length: {length})', { length: fullText.length });
     } catch (error) {
-      debugService('[Groq] Stream failed: %s', getErrorMessage(error));
+      debugService.debug('[Groq] Stream failed: {failed}', { failed: getErrorMessage(error) });
       if (options.onError) {
         options.onError(error as Error);
       }
-      throw new GenerationError(
-        `Failed to stream text: ${getErrorMessage(error)}`,
-        error,
-      );
+      throw new GenerationError(`Failed to stream text: ${getErrorMessage(error)}`, error);
     }
   }
 
   /**
    * Stream conversation generation
    */
-  async *streamConversation(
-    messages: Message[],
-    options: StreamOptions = {},
-  ): AsyncGenerator<string, void, unknown> {
+  async *streamConversation(messages: Message[], options: StreamOptions = {}): AsyncGenerator<string, void, unknown> {
     if (!this.isAvailable()) {
       throw new GenerationError('Groq API key not configured');
     }
 
-    debugService('[Groq] Streaming conversation (messages: %d)', messages.length);
+    debugService.debug('[Groq] Streaming conversation (messages: {messages})', { messages: messages.length });
 
     // Map messages to the format expected by the API
-    const mappedMessages = messages.map((msg) => ({
+    const mappedMessages = messages.map(msg => ({
       role: msg.role,
       content: msg.content,
     }));
@@ -254,9 +213,10 @@ export class GroqService implements LLMProvider {
         role: m.role,
         contentType: typeof m.content,
         contentLength: typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content).length,
-        contentPreview: typeof m.content === 'string'
-          ? m.content.slice(0, 200) + (m.content.length > 200 ? '...' : '')
-          : JSON.stringify(m.content).slice(0, 200),
+        contentPreview:
+          typeof m.content === 'string'
+            ? m.content.slice(0, 200) + (m.content.length > 200 ? '...' : '')
+            : JSON.stringify(m.content).slice(0, 200),
         // Check for any unexpected properties
         originalMessageKeys: Object.keys(messages[i] ?? {}),
       })),
@@ -283,19 +243,13 @@ export class GroqService implements LLMProvider {
         options.onComplete(fullText);
       }
 
-      debugService(
-        '[Groq] Conversation stream completed (total length: %d)',
-        fullText.length,
-      );
+      debugService.debug('[Groq] Conversation stream completed (total length: {length})', { length: fullText.length });
     } catch (error) {
-      debugService('[Groq] Conversation stream failed: %s', getErrorMessage(error));
+      debugService.debug('[Groq] Conversation stream failed: {failed}', { failed: getErrorMessage(error) });
       if (options.onError) {
         options.onError(error as Error);
       }
-      throw new GenerationError(
-        `Failed to stream conversation: ${getErrorMessage(error)}`,
-        error,
-      );
+      throw new GenerationError(`Failed to stream conversation: ${getErrorMessage(error)}`, error);
     }
   }
 }

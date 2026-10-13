@@ -124,7 +124,11 @@ export function createCommandRunner<Meta extends z.ZodObject, Tx extends Transac
       const parsed = await command.input.parseAsync(input);
       const own = commandId();
       const trace: Trace = { ...parent, commandId: own };
-      debugCommand('%s: input ok (%s, %s)', command.name, own, trace.correlationId);
+      debugCommand.debug('{commandName}: input ok ({own}, {correlationId})', {
+        commandName: command.name,
+        own,
+        correlationId: trace.correlationId,
+      });
       return source.transaction(async (tx): Promise<Awaited<R>> => {
         // Every operation the handler starts through this context. The transaction
         // must not close while one is still running: its work would land outside.
@@ -167,7 +171,7 @@ export function createCommandRunner<Meta extends z.ZodObject, Tx extends Transac
               if (key === undefined) return await command.handler(parsed, context);
               const held = await claimReceipt(tx, key, command.name, parsed, own);
               if (held !== undefined) {
-                debugCommand('%s: replayed from receipt %s', command.name, key);
+                debugCommand.debug('{commandName}: replayed from receipt {key}', { commandName: command.name, key });
                 // The receipt holds what this same command returned earlier, in the JSON form
                 // `storeReceipt` checked against the live value. This is the one cast in the library.
                 return held.replay as Awaited<R>;
@@ -189,7 +193,7 @@ export function createCommandRunner<Meta extends z.ZodObject, Tx extends Transac
             `journal: command "${command.name}" returned with ${count} journal operation${count === 1 ? '' : 's'} still running; await every write and run before the handler returns`,
           );
         }
-        debugCommand('%s: done', command.name);
+        debugCommand.debug('{commandName}: done', { commandName: command.name });
         return result;
       });
     });

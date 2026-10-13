@@ -55,22 +55,28 @@ export abstract class BaseEmbeddingProvider implements EmbeddingProvider {
     if (this.cacheEnabled) {
       const cached = this.cache.get(normalized);
       if (cached) {
-        debugEmbeddings('[%s] cache hit (text length: %d)', this.providerLabel, text.length);
+        debugEmbeddings.debug('[{providerLabel}] cache hit (text length: {length})', {
+          providerLabel: this.providerLabel,
+          length: text.length,
+        });
         return cached;
       }
     }
 
     return new Promise<number[]>((resolve, reject) => {
       this.batchQueue.push({ text: normalized, resolve, reject });
-      debugEmbeddings('[%s] queued (queue size: %d)', this.providerLabel, this.batchQueue.length);
+      debugEmbeddings.debug('[{providerLabel}] queued (queue size: {size})', {
+        providerLabel: this.providerLabel,
+        size: this.batchQueue.length,
+      });
       this.scheduleBatchFlush();
     });
   }
 
   async getEmbeddings(texts: string[]): Promise<number[][]> {
-    const normalized = texts.map((t) => this.normalizeText(t));
+    const normalized = texts.map(t => this.normalizeText(t));
     const results: (number[] | null)[] = this.cacheEnabled
-      ? normalized.map((t) => this.cache.get(t) ?? null)
+      ? normalized.map(t => this.cache.get(t) ?? null)
       : Array.from<number[] | null>({ length: texts.length }).fill(null);
 
     const missingIndices: number[] = [];
@@ -82,13 +88,12 @@ export abstract class BaseEmbeddingProvider implements EmbeddingProvider {
       }
     }
 
-    debugEmbeddings(
-      '[%s] batch: %d total, %d cached, %d to fetch',
-      this.providerLabel,
-      texts.length,
-      texts.length - missingTexts.length,
-      missingTexts.length,
-    );
+    debugEmbeddings.debug('[{providerLabel}] batch: {batch} total, {value3} cached, {missingTextsLength} to fetch', {
+      providerLabel: this.providerLabel,
+      batch: texts.length,
+      value3: texts.length - missingTexts.length,
+      missingTextsLength: missingTexts.length,
+    });
 
     if (missingTexts.length === 0) return results as number[][];
 
@@ -111,7 +116,10 @@ export abstract class BaseEmbeddingProvider implements EmbeddingProvider {
   clearCache(): void {
     const oldSize = this.cache.size;
     this.cache.clear();
-    debugEmbeddings('[%s] cache cleared (was %d entries)', this.providerLabel, oldSize);
+    debugEmbeddings.debug('[{providerLabel}] cache cleared (was {oldSize} entries)', {
+      providerLabel: this.providerLabel,
+      oldSize,
+    });
   }
 
   getCacheSize(): number {
@@ -134,15 +142,14 @@ export abstract class BaseEmbeddingProvider implements EmbeddingProvider {
     if (this.batchQueue.length === 0) return;
 
     const batch = this.batchQueue.splice(0, this.batchSize);
-    debugEmbeddings(
-      '[%s] flushing batch (size: %d, remaining queue: %d)',
-      this.providerLabel,
-      batch.length,
-      this.batchQueue.length,
-    );
+    debugEmbeddings.debug('[{providerLabel}] flushing batch (size: {size}, remaining queue: {queue})', {
+      providerLabel: this.providerLabel,
+      size: batch.length,
+      queue: this.batchQueue.length,
+    });
 
     try {
-      const embeddings = await this.fetchEmbeddings(batch.map((item) => item.text));
+      const embeddings = await this.fetchEmbeddings(batch.map(item => item.text));
       for (const [i, item] of batch.entries()) {
         const emb = embeddings[i]!;
         if (this.cacheEnabled) this.cache.set(item.text, emb);

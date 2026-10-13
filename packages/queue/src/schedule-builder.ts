@@ -50,9 +50,6 @@
 
 import type { z } from '@arki/contracts';
 
-import { debugBuilder } from './debug.ts';
-import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
-import { createJobBuilder } from './job-builder.ts';
 import type {
   ScheduleBuilderChain,
   ScheduleBuilderDef,
@@ -63,6 +60,9 @@ import type {
 import type { AnyJobDefinition, JobDefinition } from './types/job.ts';
 import type { JobMiddleware } from './types/middleware.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
+import { debugBuilder } from './debug.ts';
+import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
+import { createJobBuilder } from './job-builder.ts';
 
 /**
  * Schedule type
@@ -145,12 +145,11 @@ export function createScheduleBuilder<TContext, TContextOut, TMeta extends Queue
   config: QueueConfig,
   middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[],
 ): ScheduleBuilderDef<TContext, TContextOut, TMeta> {
-  debugBuilder(
-    'Creating schedule builder (type: %s, value: %s, middleware: %d)',
-    scheduleType,
-    scheduleValue,
-    middlewares.length,
-  );
+  debugBuilder.debug('Creating schedule builder (type: {type}, value: {value}, middleware: {middleware})', {
+    type: scheduleType,
+    value: scheduleValue,
+    middleware: middlewares.length,
+  });
 
   const state: ScheduleBuilderState<never> = {
     config,
@@ -162,7 +161,7 @@ export function createScheduleBuilder<TContext, TContextOut, TMeta extends Queue
 
   return {
     use<TContextOut2>(middleware: JobMiddleware<TContextOut, TContextOut2, TMeta>) {
-      debugBuilder('Adding middleware to schedule (total: %d)', middlewares.length + 1);
+      debugBuilder.debug('Adding middleware to schedule (total: {total})', { total: middlewares.length + 1 });
 
       // One runtime object serves both typestates: the ScheduleBuilderWithMiddleware
       // type hides `.job()` after `.use()`; the throw in scheduleJob() backs it up.
@@ -180,7 +179,7 @@ export function createScheduleBuilder<TContext, TContextOut, TMeta extends Queue
     },
 
     name(name: string) {
-      debugBuilder('Setting schedule name: %s', name);
+      debugBuilder.debug('Setting schedule name: {name}', { name });
 
       // One runtime object serves every named typestate: ScheduleBuilderNamed
       // offers `.job()` and `.input()`, ScheduleBuilderNeedsInput hides `.job()`
@@ -206,23 +205,23 @@ function scheduleJob<TInput>(
     throw new QueueDefinitionError({
       code: QUEUE_DEFINITION_ERROR_CODES.scheduleMiddlewareWithJob,
       message: `A schedule that wraps a job has no middleware of its own. Remove .use() before .job(${job._internal.name}).`,
-      remediation: 'Add the middleware to the job instead (q.job.use(mw)...); its worker runs it on every scheduled run.',
+      remediation:
+        'Add the middleware to the job instead (q.job.use(mw)...); its worker runs it on every scheduled run.',
     });
   }
 
-  debugBuilder('Wrapping existing job: %s', job._internal.name);
+  debugBuilder.debug('Wrapping existing job: {job}', { job: job._internal.name });
 
   return {
     data(data: TInput): ScheduleDefinition {
       // Generate name from job if not explicitly set
       const scheduleName = state.name ?? `${job._internal.name}-schedule`;
 
-      debugBuilder(
-        '[%s] Creating schedule definition (type: %s, triggers: %s)',
+      debugBuilder.debug('[{scheduleName}] Creating schedule definition (type: {type}, triggers: {triggers})', {
         scheduleName,
-        state.scheduleType,
-        job._internal.name,
-      );
+        type: state.scheduleType,
+        triggers: job._internal.name,
+      });
 
       const internal: InternalScheduleDefinition<AnyJobDefinition> = {
         type: state.scheduleType,
@@ -257,7 +256,7 @@ function createScheduleBuilderChain<TContext, TContextOut, TMeta extends QueueMe
     },
 
     input<TNewInput>(schema: z.ZodType<TNewInput>) {
-      debugBuilder('[%s] Setting input schema for schedule', state.name ?? 'unnamed');
+      debugBuilder.debug('[{value1}] Setting input schema for schedule', { value1: state.name ?? 'unnamed' });
 
       return createScheduleBuilderChain<TContext, TContextOut, TMeta, TNewInput, TOutput>({
         ...state,
@@ -287,12 +286,14 @@ function createScheduleBuilderChain<TContext, TContextOut, TMeta extends QueueMe
         });
       }
 
-      debugBuilder(
-        '[%s] Creating inline schedule definition (type: %s, value: %s, middleware: %d)',
-        state.name,
-        state.scheduleType,
-        state.scheduleValue,
-        state.middlewares.length,
+      debugBuilder.debug(
+        '[{stateName}] Creating inline schedule definition (type: {type}, value: {value}, middleware: {middleware})',
+        {
+          stateName: state.name,
+          type: state.scheduleType,
+          value: state.scheduleValue,
+          middleware: state.middlewares.length,
+        },
       );
 
       // An inline schedule is an anonymous job named after the schedule: its

@@ -157,7 +157,7 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
         }
         const pending = await events(row, { tx: sp });
         if (pending.length === 0) {
-          debugWrite('%s %s: events returned nothing', entity.kind, id);
+          debugWrite.debug('{kind} {id}: events returned nothing', { kind: entity.kind, id });
           return { row, events: [] };
         }
         // The version the next event follows. No row: the log's top (0 for a new entity,
@@ -367,15 +367,14 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
         );
         if (jobs.length > 0 || forAsync) onJobs?.(jobs.length + (forAsync ? 1 : 0));
 
-        debugWrite(
-          '%s %s: v%d -> v%d, %d events, %d jobs',
-          entity.kind,
+        debugWrite.debug('{kind} {id}: v{baseVersion} -> v{finalVersion}, {recordedLength} events, {jobsLength} jobs', {
+          kind: entity.kind,
           id,
           baseVersion,
           finalVersion,
-          recorded.length,
-          jobs.length,
-        );
+          recordedLength: recorded.length,
+          jobsLength: jobs.length,
+        });
         return { row: saved, events: recorded };
       });
     });

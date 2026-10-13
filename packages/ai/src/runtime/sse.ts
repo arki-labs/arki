@@ -1,5 +1,5 @@
-import { debugRuntime } from '../debug';
 import type { RuntimeEvent } from './types';
+import { debugRuntime } from '../debug';
 
 /**
  * SSE transport for the agent-runtime adapter (P2 completion). Completes the wire:
@@ -14,10 +14,7 @@ import type { RuntimeEvent } from './types';
 const DONE = '[DONE]';
 
 /** Server: serialize a RuntimeEvent stream as an SSE `Response`. */
-export function toRuntimeEventStreamResponse(
-  events: AsyncIterable<RuntimeEvent>,
-  init?: ResponseInit,
-): Response {
+export function toRuntimeEventStreamResponse(events: AsyncIterable<RuntimeEvent>, init?: ResponseInit): Response {
   const encoder = new TextEncoder();
   const frame = (event: RuntimeEvent) => encoder.encode(`data: ${JSON.stringify(event)}\n\n`);
 
@@ -76,7 +73,7 @@ export async function* readRuntimeEventStream(
         try {
           yield JSON.parse(dataLine) as RuntimeEvent;
         } catch {
-          debugRuntime('readRuntimeEventStream: skipping malformed SSE frame');
+          debugRuntime.debug('readRuntimeEventStream: skipping malformed SSE frame');
         }
       }
     }

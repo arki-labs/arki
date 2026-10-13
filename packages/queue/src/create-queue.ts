@@ -50,7 +50,7 @@ export type QueueInstanceOptions<TContext> = {
 export function createQueueInstance<TContext>(options: QueueInstanceOptions<TContext>): QueueInstance {
   const { connection, keyPrefix = 'queue:', createContext } = options;
 
-  debugRegister('Creating queue instance with keyPrefix: %s', keyPrefix);
+  debugRegister.debug('Creating queue instance with keyPrefix: {keyPrefix}', { keyPrefix });
 
   const connectionConfig = parseRedisConnection(connection);
 
@@ -72,17 +72,20 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
   function registerJobDefinition<TInput, TOutput>(definition: JobDefinition<TInput, TOutput, TContext>): Queue {
     const internal = definition._internal;
 
-    debugRegister('[%s] Registering job definition', internal.name);
+    debugRegister.debug('[{internalName}] Registering job definition', { internalName: internal.name });
 
     const existing = registeredJobs.get(internal.name);
     if (existing) {
-      debugRegister('[%s] Job already registered, skipping', internal.name);
+      debugRegister.debug('[{internalName}] Job already registered, skipping', { internalName: internal.name });
       console.warn(`Job "${internal.name}" is already registered, skipping`);
       return existing.queue;
     }
 
     // Create BullMQ queue
-    debugRegister('[%s] Creating BullMQ queue with %d retry attempts', internal.name, internal.options?.retry?.attempts ?? 3);
+    debugRegister.debug('[{internalName}] Creating BullMQ queue with {value2} retry attempts', {
+      internalName: internal.name,
+      value2: internal.options?.retry?.attempts ?? 3,
+    });
     const queue = new Queue(internal.name, {
       connection: connectionConfig,
       prefix: keyPrefix,
@@ -97,23 +100,30 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     const backoffStrategy = getWorkerBackoffStrategy(internal.options?.retry);
 
     // Create BullMQ worker
-    debugWorker('[%s] Creating worker with concurrency: %d', internal.name, internal.options?.maxParallelism ?? 5);
+    debugWorker.debug('[{internalName}] Creating worker with concurrency: {concurrency}', {
+      internalName: internal.name,
+      concurrency: internal.options?.maxParallelism ?? 5,
+    });
     const worker = new Worker(
       internal.name,
       async (job: BullMQJob<TInput, TOutput | undefined>) => {
-        debugJob('[%s] Job %s started', internal.name, job.id);
+        debugJob.debug('[{internalName}] Job {jobId} started', { internalName: internal.name, jobId: job.id });
 
         // Validate input
-        debugJob('[%s] Job %s validating input', internal.name, job.id);
+        debugJob.debug('[{internalName}] Job {jobId} validating input', { internalName: internal.name, jobId: job.id });
         const validatedData = internal.inputSchema.parse(job.data);
-        debugJob('[%s] Job %s input validated', internal.name, job.id);
+        debugJob.debug('[{internalName}] Job {jobId} input validated', { internalName: internal.name, jobId: job.id });
 
         // Create base context
         const baseContext = await createContext();
         const jobContext = createJobContext(baseContext, job);
 
         // Execute middleware chain around the handler (onion)
-        debugJob('[%s] Job %s executing middleware chain (%d middleware)', internal.name, job.id, internal.middlewares.length);
+        debugJob.debug('[{internalName}] Job {jobId} executing middleware chain ({middlewaresLength} middleware)', {
+          internalName: internal.name,
+          jobId: job.id,
+          middlewaresLength: internal.middlewares.length,
+        });
         const handlerResult = await executeMiddlewareChain<typeof jobContext, typeof jobContext, TOutput>(
           internal.middlewares,
           jobContext,
@@ -122,7 +132,10 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
           {}, // Meta will be populated by middleware if needed
           ctx => internal.handler(validatedData, ctx),
         );
-        debugJob('[%s] Job %s completed successfully', internal.name, job.id);
+        debugJob.debug('[{internalName}] Job {jobId} completed successfully', {
+          internalName: internal.name,
+          jobId: job.id,
+        });
         return handlerResult;
       },
       {
@@ -144,7 +157,11 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
 
     // Error handling
     worker.on('failed', (job: BullMQJob | undefined, error: Error) => {
-      debugJob('[%s] Job %s failed: %s', internal.name, job?.id ?? 'unknown', error.message);
+      debugJob.debug('[{internalName}] Job {value2} failed: {failed}', {
+        internalName: internal.name,
+        value2: job?.id ?? 'unknown',
+        failed: error.message,
+      });
       console.error(`Job ${internal.name} failed:`, error);
       if (job) {
         console.error(`Job ID: ${job.id}, Data:`, job.data);
@@ -160,7 +177,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     workers.push(worker);
     registeredJobs.set(internal.name, { definition: definition as JobDefinition<unknown, unknown, TContext>, queue });
 
-    debugRegister('[%s] Job registered successfully', internal.name);
+    debugRegister.debug('[{internalName}] Job registered successfully', { internalName: internal.name });
     console.log(`✓ Registered job: ${internal.name}`);
     return queue;
   }
@@ -176,7 +193,11 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     const internal = definition._internal as InternalScheduleDefinition;
     const jobName = internal.job._internal.name;
 
-    debugSchedule('[%s] Registering schedule definition (type: %s, job: %s)', internal.name, internal.type, jobName);
+    debugSchedule.debug('[{internalName}] Registering schedule definition (type: {type}, job: {job})', {
+      internalName: internal.name,
+      type: internal.type,
+      job: jobName,
+    });
 
     if (registeredSchedules.has(internal.name)) {
       throw duplicateScheduleError(internal.name);
@@ -187,7 +208,10 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
 
     if (internal.type === 'timeout') {
       // Timeout: one-time execution after delay
-      debugSchedule('[%s] Configuring timeout schedule with delay: %dms', internal.name, internal.value);
+      debugSchedule.debug('[{internalName}] Configuring timeout schedule with delay: {delay}ms', {
+        internalName: internal.name,
+        delay: internal.value,
+      });
       await queue.add(jobName, internal.data, {
         delay: internal.value as number,
         // BullMQ refuses a custom id with one `:` ("Custom Id cannot contain :")
@@ -215,20 +239,27 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
       if (internal.inline) {
         for (const scheduler of await queue.getJobSchedulers()) {
           if (!scheduler.key.startsWith(SCHEDULER_ID_PREFIX)) {
-            debugSchedule('[%s] Removing legacy scheduler entry: %s', internal.name, scheduler.key);
+            debugSchedule.debug('[{internalName}] Removing legacy scheduler entry: {entry}', {
+              internalName: internal.name,
+              entry: scheduler.key,
+            });
             await queue.removeJobScheduler(scheduler.key);
           }
         }
       }
 
       const schedulerId = `${SCHEDULER_ID_PREFIX}${internal.name}`;
-      debugSchedule('[%s] Configuring %s schedule with value: %s', internal.name, internal.type, internal.value);
+      debugSchedule.debug('[{internalName}] Configuring {internalType} schedule with value: {value}', {
+        internalName: internal.name,
+        internalType: internal.type,
+        value: internal.value,
+      });
       await queue.upsertJobScheduler(schedulerId, repeatOptions, { name: jobName, data: internal.data });
     }
 
     registeredSchedules.set(internal.name, internal);
 
-    debugSchedule('[%s] Schedule registered successfully', internal.name);
+    debugSchedule.debug('[{internalName}] Schedule registered successfully', { internalName: internal.name });
     console.log(`✓ Registered schedule: ${internal.name} (${internal.type})`);
   }
 
@@ -255,7 +286,10 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
       const live = liveIds.get(jobName);
       for (const scheduler of await queue.getJobSchedulers()) {
         if (scheduler.key.startsWith(SCHEDULER_ID_PREFIX) && !live?.has(scheduler.key)) {
-          debugSchedule('[%s] Removing scheduler of a schedule no longer registered: %s', jobName, scheduler.key);
+          debugSchedule.debug('[{jobName}] Removing scheduler of a schedule no longer registered: {registered}', {
+            jobName,
+            registered: scheduler.key,
+          });
           await queue.removeJobScheduler(scheduler.key);
         }
       }
@@ -268,25 +302,34 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
   function registerFlowDefinition(definition: FlowDefinition): void {
     const internal = definition._internal as InternalFlowDefinition;
 
-    debugFlow('[%s] Registering flow definition with %d steps', internal.name, internal.steps.length);
+    debugFlow.debug('[{internalName}] Registering flow definition with {stepsLength} steps', {
+      internalName: internal.name,
+      stepsLength: internal.steps.length,
+    });
 
     if (registeredFlows.has(internal.name)) {
-      debugFlow('[%s] Flow already registered, skipping', internal.name);
+      debugFlow.debug('[{internalName}] Flow already registered, skipping', { internalName: internal.name });
       console.warn(`Flow "${internal.name}" is already registered, skipping`);
       return;
     }
 
     // Register all jobs used in the flow
-    debugFlow('[%s] Registering %d jobs for flow steps', internal.name, internal.steps.length);
+    debugFlow.debug('[{internalName}] Registering {stepsLength} jobs for flow steps', {
+      internalName: internal.name,
+      stepsLength: internal.steps.length,
+    });
     for (const step of internal.steps) {
       if (!registeredJobs.has(step.job._internal.name)) {
-        debugFlow('[%s] Registering job for step: %s', internal.name, step.job._internal.name);
+        debugFlow.debug('[{internalName}] Registering job for step: {step}', {
+          internalName: internal.name,
+          step: step.job._internal.name,
+        });
         registerJobDefinition(step.job);
       }
     }
 
     // Create FlowProducer
-    debugFlow('[%s] Creating FlowProducer', internal.name);
+    debugFlow.debug('[{internalName}] Creating FlowProducer', { internalName: internal.name });
     const flowProducer = new FlowProducer({
       connection: connectionConfig,
       prefix: keyPrefix,
@@ -295,7 +338,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     flowProducers.push(flowProducer);
     registeredFlows.set(internal.name, internal);
 
-    debugFlow('[%s] Flow registered successfully', internal.name);
+    debugFlow.debug('[{internalName}] Flow registered successfully', { internalName: internal.name });
     console.log(`✓ Registered flow: ${internal.name} (${internal.steps.length} steps)`);
   }
 
@@ -338,10 +381,10 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
    * Register a registry of jobs, schedules, and flows
    */
   async function register(registry: Registry): Promise<void> {
-    debugRegister('Starting registry traversal');
+    debugRegister.debug('Starting registry traversal');
     console.log('Registering queue items...');
     await traverseRegistry(registry);
-    debugRegister('Registry traversal complete');
+    debugRegister.debug('Registry traversal complete');
     console.log('✓ Registration complete');
   }
 
@@ -349,12 +392,12 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
    * Start all workers
    */
   async function start(): Promise<void> {
-    debugWorker('Starting queue infrastructure');
-    debugWorker('Jobs registered: %d', registeredJobs.size);
-    debugWorker('Schedules registered: %d', registeredSchedules.size);
-    debugWorker('Flows registered: %d', registeredFlows.size);
-    debugWorker('Workers created: %d', workers.length);
-    debugWorker('Queues created: %d', queues.length);
+    debugWorker.debug('Starting queue infrastructure');
+    debugWorker.debug('Jobs registered: {registered}', { registered: registeredJobs.size });
+    debugWorker.debug('Schedules registered: {registered}', { registered: registeredSchedules.size });
+    debugWorker.debug('Flows registered: {registered}', { registered: registeredFlows.size });
+    debugWorker.debug('Workers created: {created}', { created: workers.length });
+    debugWorker.debug('Queues created: {created}', { created: queues.length });
 
     // Every schedule is registered by now; drop schedulers left by removed ones before any tick runs
     await pruneStaleSchedulers();
@@ -380,20 +423,20 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
    * Stop all workers and close connections
    */
   async function stop(): Promise<void> {
-    debugWorker('Shutting down queue infrastructure');
+    debugWorker.debug('Shutting down queue infrastructure');
     console.log('Shutting down queue infrastructure...');
 
     // Close all workers
-    debugWorker('Closing %d workers', workers.length);
+    debugWorker.debug('Closing {workersLength} workers', { workersLength: workers.length });
     await Promise.all(
       workers.map(async worker => {
-        debugWorker('Closing worker: %s', worker.name);
+        debugWorker.debug('Closing worker: {worker}', { worker: worker.name });
         await worker.close();
       }),
     );
 
     // Close all flow producers
-    debugWorker('Closing %d flow producers', flowProducers.length);
+    debugWorker.debug('Closing {flowProducersLength} flow producers', { flowProducersLength: flowProducers.length });
     await Promise.all(
       flowProducers.map(async flowProducer => {
         await flowProducer.close();
@@ -401,15 +444,15 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     );
 
     // Close all queues
-    debugWorker('Closing %d queues', queues.length);
+    debugWorker.debug('Closing {queuesLength} queues', { queuesLength: queues.length });
     await Promise.all(
       queues.map(async queue => {
-        debugWorker('Closing queue: %s', queue.name);
+        debugWorker.debug('Closing queue: {queue}', { queue: queue.name });
         await queue.close();
       }),
     );
 
-    debugWorker('Queue infrastructure shut down successfully');
+    debugWorker.debug('Queue infrastructure shut down successfully');
     console.log('✓ Queue infrastructure shut down');
   }
 

@@ -93,7 +93,7 @@ export const initQueue = {
  * @internal
  */
 function createQueueBuilder<TContext, TMeta extends QueueMeta>(config: QueueConfig): QueueBuilder<TContext, TMeta> {
-  debugBuilder('Creating queue builder');
+  debugBuilder.debug('Creating queue builder');
 
   // Create base job builder with empty middleware
   // Output context is JobContext<TContext> because runtime wraps user context with framework utilities
@@ -107,7 +107,7 @@ function createQueueBuilder<TContext, TMeta extends QueueMeta>(config: QueueConf
   const middlewareFactory = <TContextIn = JobContext<TContext>, TContextOut = TContextIn>(
     fn: MiddlewareFunction<TContextIn, TContextOut, TMeta>,
   ): JobMiddleware<TContextIn, TContextOut, TMeta> => {
-    debugBuilder('Creating middleware');
+    debugBuilder.debug('Creating middleware');
 
     return {
       _type: 'middleware',
@@ -117,7 +117,7 @@ function createQueueBuilder<TContext, TMeta extends QueueMeta>(config: QueueConf
 
   // Registry factory (simple pass-through for now)
   const registryFactory = <TRegistry extends Record<string, unknown>>(jobs: TRegistry): TRegistry => {
-    debugBuilder('Creating registry with %d jobs', Object.keys(jobs).length);
+    debugBuilder.debug('Creating registry with {value1} jobs', { value1: Object.keys(jobs).length });
 
     return jobs;
   };

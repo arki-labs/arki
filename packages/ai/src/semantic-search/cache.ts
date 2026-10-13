@@ -4,19 +4,14 @@
 
 import { debugCache } from '../debug.ts';
 
-export type CacheableValue =
-  | string
-  | number
-  | boolean
-  | Record<string, unknown>
-  | unknown[];
+export type CacheableValue = string | number | boolean | Record<string, unknown> | unknown[];
 
 export type SearchCache = {
   get<T extends CacheableValue = CacheableValue>(key: string): Promise<T | null>;
   set<T extends CacheableValue>(key: string, value: T): Promise<void>;
   clear(): void;
   destroy(): void;
-}
+};
 
 /**
  * In-memory cache implementation
@@ -28,23 +23,23 @@ export class InMemorySearchCache implements SearchCache {
   constructor(private ttl = 3600) {
     // Cleanup expired entries every minute
     this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
-    debugCache('[InMemorySearchCache] Initialized with TTL: %ds', ttl);
+    debugCache.debug('[InMemorySearchCache] Initialized with TTL: {TTL}s', { TTL: ttl });
   }
 
   async get<T extends CacheableValue = CacheableValue>(key: string): Promise<T | null> {
     const entry = this.cache.get(key);
     if (!entry) {
-      debugCache('[InMemorySearchCache] Cache miss for key: %s', key);
+      debugCache.debug('[InMemorySearchCache] Cache miss for key: {key}', { key });
       return null;
     }
 
     if (Date.now() > entry.expires) {
-      debugCache('[InMemorySearchCache] Cache entry expired for key: %s', key);
+      debugCache.debug('[InMemorySearchCache] Cache entry expired for key: {key}', { key });
       this.cache.delete(key);
       return null;
     }
 
-    debugCache('[InMemorySearchCache] Cache hit for key: %s', key);
+    debugCache.debug('[InMemorySearchCache] Cache hit for key: {key}', { key });
     return entry.value as T;
   }
 
@@ -53,7 +48,7 @@ export class InMemorySearchCache implements SearchCache {
       value,
       expires: Date.now() + this.ttl * 1000,
     });
-    debugCache('[InMemorySearchCache] Cached value for key: %s (TTL: %ds)', key, this.ttl);
+    debugCache.debug('[InMemorySearchCache] Cached value for key: {key} (TTL: {TTL}s)', { key, TTL: this.ttl });
   }
 
   cleanup(): void {
@@ -66,18 +61,18 @@ export class InMemorySearchCache implements SearchCache {
       }
     }
     if (removed > 0) {
-      debugCache('[InMemorySearchCache] Cleanup removed %d expired entries', removed);
+      debugCache.debug('[InMemorySearchCache] Cleanup removed {removed} expired entries', { removed });
     }
   }
 
   clear(): void {
     const size = this.cache.size;
     this.cache.clear();
-    debugCache('[InMemorySearchCache] Cache cleared (removed %d entries)', size);
+    debugCache.debug('[InMemorySearchCache] Cache cleared (removed {size} entries)', { size });
   }
 
   destroy(): void {
-    debugCache('[InMemorySearchCache] Destroying cache and stopping cleanup interval');
+    debugCache.debug('[InMemorySearchCache] Destroying cache and stopping cleanup interval');
     clearInterval(this.cleanupInterval);
     this.clear();
   }
@@ -90,7 +85,10 @@ export class InMemorySearchCache implements SearchCache {
       size: this.cache.size,
       ttl: this.ttl,
     };
-    debugCache('[InMemorySearchCache] Stats retrieved (size: %d, TTL: %ds)', stats.size, stats.ttl);
+    debugCache.debug('[InMemorySearchCache] Stats retrieved (size: {size}, TTL: {TTL}s)', {
+      size: stats.size,
+      TTL: stats.ttl,
+    });
     return stats;
   }
 }
@@ -101,22 +99,22 @@ export class InMemorySearchCache implements SearchCache {
 export class RedisSearchCache implements SearchCache {
   constructor(
     private redisClient: unknown, // Redis client instance
-    private ttl = 3600
+    private ttl = 3600,
   ) {
-    debugCache('[RedisSearchCache] Initialized with TTL: %ds', ttl);
+    debugCache.debug('[RedisSearchCache] Initialized with TTL: {TTL}s', { TTL: ttl });
   }
 
   async get<T extends CacheableValue = CacheableValue>(key: string): Promise<T | null> {
     const client = this.redisClient as {
-      get: (key: string) => Promise<string | null>
+      get: (key: string) => Promise<string | null>;
     };
     const value = await client.get(key);
     if (!value) {
-      debugCache('[RedisSearchCache] Cache miss for key: %s', key);
+      debugCache.debug('[RedisSearchCache] Cache miss for key: {key}', { key });
       return null;
     }
 
-    debugCache('[RedisSearchCache] Cache hit for key: %s', key);
+    debugCache.debug('[RedisSearchCache] Cache hit for key: {key}', { key });
     try {
       return JSON.parse(value) as T;
     } catch {
@@ -126,25 +124,25 @@ export class RedisSearchCache implements SearchCache {
 
   async set<T extends CacheableValue>(key: string, value: T): Promise<void> {
     const client = this.redisClient as {
-      setex: (key: string, ttl: number, value: string) => Promise<void>
+      setex: (key: string, ttl: number, value: string) => Promise<void>;
     };
     const serialized = typeof value === 'string' ? value : JSON.stringify(value);
     await client.setex(key, this.ttl, serialized);
-    debugCache('[RedisSearchCache] Cached value for key: %s (TTL: %ds)', key, this.ttl);
+    debugCache.debug('[RedisSearchCache] Cached value for key: {key} (TTL: {TTL}s)', { key, TTL: this.ttl });
   }
 
   async clear(): Promise<void> {
     // Clear all keys with a pattern (requires pattern or flush)
-    debugCache('[RedisSearchCache] Clearing cache (flushing database)');
+    debugCache.debug('[RedisSearchCache] Clearing cache (flushing database)');
     const client = this.redisClient as {
-      flushdb: () => Promise<void>
+      flushdb: () => Promise<void>;
     };
     await client.flushdb();
-    debugCache('[RedisSearchCache] Cache cleared successfully');
+    debugCache.debug('[RedisSearchCache] Cache cleared successfully');
   }
 
   destroy(): void {
-    debugCache('[RedisSearchCache] Destroying cache');
+    debugCache.debug('[RedisSearchCache] Destroying cache');
     // Cleanup if needed
   }
 }

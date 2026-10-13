@@ -1,17 +1,18 @@
+import type { BetterAuthOptions, BetterAuthPlugin } from 'better-auth';
+import type { DB } from 'better-auth/adapters/drizzle';
 import { expo } from '@better-auth/expo';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import type { DB } from 'better-auth/adapters/drizzle';
 import { magicLink, oAuthProxy } from 'better-auth/plugins';
 import { tanstackStartCookies } from 'better-auth/tanstack-start';
-import type { BetterAuthOptions, BetterAuthPlugin } from 'better-auth';
-import { createPrefixedId } from '@arki/db/id';
-import { createLogger } from '@arki/log';
 
+import { createPrefixedId } from '@arki/db/id';
+import { getLogger } from '@arki/log';
+
+import type { WorkspacePluginOptions } from './workspaces/server/plugin';
 import { betterAuth } from './create-auth';
 import { organizationPlugin } from './workspaces/server/plugin';
-import type { WorkspacePluginOptions } from './workspaces/server/plugin';
 
-const authLogger = createLogger('arki:auth');
+const authLogger = getLogger('arki:auth');
 
 type Provider = { clientId: string; clientSecret: string };
 type AppleProvider = Provider & { appBundleIdentifier?: string };
@@ -24,9 +25,7 @@ type AuthSchema = {
   [key: string]: unknown;
 };
 
-export type GenerateIdHook = NonNullable<
-  NonNullable<BetterAuthOptions['advanced']>['database']
->['generateId'];
+export type GenerateIdHook = NonNullable<NonNullable<BetterAuthOptions['advanced']>['database']>['generateId'];
 
 export type DefineAuthBackendOptions = {
   db: DB;
@@ -62,12 +61,7 @@ export type DefineAuthBackendOptions = {
     // backends serving several brands use it to resolve which brand sent the
     // sign-in (e.g. from the Origin/Host header). Optional and additive —
     // single-brand callers can ignore it.
-    send: (args: {
-      email: string;
-      url: string;
-      token: string;
-      request?: Request;
-    }) => Promise<void> | void;
+    send: (args: { email: string; url: string; token: string; request?: Request }) => Promise<void> | void;
 
     /**
      * When `true`, magic-link requests for a non-existent email are refused
@@ -183,8 +177,7 @@ export function defineAuthBackend(options: DefineAuthBackendOptions) {
   const isDevOrTest = process.env['NODE_ENV'] !== 'production';
   // Caller-provided emailAndPassword always wins. Otherwise auto-enable in
   // dev/test (so `createE2EHandler` works without per-app opt-in).
-  const shouldAutoEnableEmailAndPassword =
-    !emailAndPassword && (enableEmailAndPassword ?? isDevOrTest);
+  const shouldAutoEnableEmailAndPassword = !emailAndPassword && (enableEmailAndPassword ?? isDevOrTest);
 
   const plugins: BetterAuthPlugin[] = [
     oAuthProxy({ currentURL: baseUrl, productionURL: productionUrl }) as BetterAuthPlugin,
@@ -199,9 +192,7 @@ export function defineAuthBackend(options: DefineAuthBackendOptions) {
           }) as BetterAuthPlugin,
         ]
       : []),
-    ...(organization?.enabled
-      ? [organizationPlugin(stripEnabled(organization))]
-      : []),
+    ...(organization?.enabled ? [organizationPlugin(stripEnabled(organization))] : []),
     ...extraPlugins,
     tanstackStartCookies(),
   ];

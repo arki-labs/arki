@@ -6,15 +6,13 @@
 import { debugRetry } from '../debug.ts';
 
 export type RateLimiterConfig = {
-  maxRequests: number;      // Maximum requests allowed
-  windowMs: number;          // Time window in milliseconds
-  maxRetries?: number;       // Maximum retry attempts
-  retryDelayMs?: number;     // Base delay between retries
-}
+  maxRequests: number; // Maximum requests allowed
+  windowMs: number; // Time window in milliseconds
+  maxRetries?: number; // Maximum retry attempts
+  retryDelayMs?: number; // Base delay between retries
+};
 
-export type RateLimitResult<T> =
-  | { success: true; data: T }
-  | { success: false; error: Error; retryAfterMs: number };
+export type RateLimitResult<T> = { success: true; data: T } | { success: false; error: Error; retryAfterMs: number };
 
 export class RateLimiter {
   private requests = new Map<string, number[]>();
@@ -28,42 +26,48 @@ export class RateLimiter {
       retryDelayMs: config.retryDelayMs ?? 1000,
     };
 
-    debugRetry(
-      '[RateLimiter] Initialized (maxRequests: %d, windowMs: %dms, maxRetries: %d, retryDelayMs: %dms)',
-      this.config.maxRequests,
-      this.config.windowMs,
-      this.config.maxRetries,
-      this.config.retryDelayMs,
+    debugRetry.debug(
+      '[RateLimiter] Initialized (maxRequests: {maxRequests}, windowMs: {windowMs}ms, maxRetries: {maxRetries}, retryDelayMs: {retryDelayMs}ms)',
+      {
+        maxRequests: this.config.maxRequests,
+        windowMs: this.config.windowMs,
+        maxRetries: this.config.maxRetries,
+        retryDelayMs: this.config.retryDelayMs,
+      },
     );
   }
 
   /**
    * Execute a function with rate limiting
    */
-  async execute<T>(
-    key: string,
-    fn: () => Promise<T>
-  ): Promise<RateLimitResult<T>> {
-    debugRetry('[RateLimiter] Executing function for key: %s', key);
+  async execute<T>(key: string, fn: () => Promise<T>): Promise<RateLimitResult<T>> {
+    debugRetry.debug('[RateLimiter] Executing function for key: {key}', { key });
     let attempts = 0;
 
     while (attempts < this.config.maxRetries) {
       const canProceed = this.checkLimit(key);
 
       if (canProceed) {
-        debugRetry('[RateLimiter] Rate limit check passed for key: %s (attempt %d/%d)', key, attempts + 1, this.config.maxRetries);
+        debugRetry.debug('[RateLimiter] Rate limit check passed for key: {key} (attempt {value2}/{maxRetries})', {
+          key,
+          value2: attempts + 1,
+          maxRetries: this.config.maxRetries,
+        });
         const data = await fn();
-        debugRetry('[RateLimiter] Function executed successfully for key: %s', key);
+        debugRetry.debug('[RateLimiter] Function executed successfully for key: {key}', { key });
         return { success: true, data };
       }
 
       // Rate limited, calculate retry delay
       const retryAfterMs = this.getRetryAfterMs(key);
-      debugRetry('[RateLimiter] Rate limit hit for key: %s (attempt %d/%d, retry after %dms)', key, attempts + 1, this.config.maxRetries, retryAfterMs);
+      debugRetry.debug(
+        '[RateLimiter] Rate limit hit for key: {key} (attempt {value2}/{maxRetries}, retry after {retryAfterMs}ms)',
+        { key, value2: attempts + 1, maxRetries: this.config.maxRetries, retryAfterMs },
+      );
 
       if (attempts === this.config.maxRetries - 1) {
         // Last attempt failed
-        debugRetry('[RateLimiter] Max retries reached for key: %s', key);
+        debugRetry.debug('[RateLimiter] Max retries reached for key: {key}', { key });
         return {
           success: false,
           error: new Error(`Rate limit exceeded for ${key}`),
@@ -72,12 +76,12 @@ export class RateLimiter {
       }
 
       // Wait before retrying
-      debugRetry('[RateLimiter] Waiting %dms before retry for key: %s', retryAfterMs, key);
+      debugRetry.debug('[RateLimiter] Waiting {retryAfterMs}ms before retry for key: {key}', { retryAfterMs, key });
       await this.delay(retryAfterMs);
       attempts++;
     }
 
-    debugRetry('[RateLimiter] All retry attempts exhausted for key: %s', key);
+    debugRetry.debug('[RateLimiter] All retry attempts exhausted for key: {key}', { key });
     return {
       success: false,
       error: new Error(`Max retry attempts reached for ${key}`),
@@ -93,28 +97,29 @@ export class RateLimiter {
     const requests = this.requests.get(key) || [];
 
     // Remove old requests outside the window
-    const validRequests = requests.filter(
-      timestamp => now - timestamp < this.config.windowMs
-    );
+    const validRequests = requests.filter(timestamp => now - timestamp < this.config.windowMs);
 
-    debugRetry(
-      '[RateLimiter] Checking rate limit for key: %s (valid requests: %d/%d)',
+    debugRetry.debug('[RateLimiter] Checking rate limit for key: {key} (valid requests: {requests}/{maxRequests})', {
       key,
-      validRequests.length,
-      this.config.maxRequests,
-    );
+      requests: validRequests.length,
+      maxRequests: this.config.maxRequests,
+    });
 
     if (validRequests.length >= this.config.maxRequests) {
       // Update the map with cleaned requests
       this.requests.set(key, validRequests);
-      debugRetry('[RateLimiter] Rate limit exceeded for key: %s', key);
+      debugRetry.debug('[RateLimiter] Rate limit exceeded for key: {key}', { key });
       return false;
     }
 
     // Add current request
     validRequests.push(now);
     this.requests.set(key, validRequests);
-    debugRetry('[RateLimiter] Request allowed for key: %s (used: %d/%d)', key, validRequests.length, this.config.maxRequests);
+    debugRetry.debug('[RateLimiter] Request allowed for key: {key} (used: {used}/{maxRequests})', {
+      key,
+      used: validRequests.length,
+      maxRequests: this.config.maxRequests,
+    });
     return true;
   }
 
@@ -125,17 +130,17 @@ export class RateLimiter {
     const requests = this.requests.get(key) || [];
 
     if (requests.length === 0) {
-      debugRetry('[RateLimiter] No requests tracked for key: %s, retry delay: 0ms', key);
+      debugRetry.debug('[RateLimiter] No requests tracked for key: {key}, retry delay: 0ms', { key });
       return 0;
     }
 
     // Find the oldest request that would need to expire
     const oldestRequest = Math.min(...requests);
     const now = Date.now();
-    const timeUntilExpiry = (oldestRequest + this.config.windowMs) - now;
+    const timeUntilExpiry = oldestRequest + this.config.windowMs - now;
     const retryDelay = Math.max(0, timeUntilExpiry);
 
-    debugRetry('[RateLimiter] Calculated retry delay for key: %s - %dms', key, retryDelay);
+    debugRetry.debug('[RateLimiter] Calculated retry delay for key: {key} - {retryDelay}ms', { key, retryDelay });
 
     return retryDelay;
   }
@@ -151,7 +156,7 @@ export class RateLimiter {
    * Reset rate limit for a specific key
    */
   reset(key: string): void {
-    debugRetry('[RateLimiter] Resetting rate limit for key: %s', key);
+    debugRetry.debug('[RateLimiter] Resetting rate limit for key: {key}', { key });
     this.requests.delete(key);
   }
 
@@ -160,7 +165,7 @@ export class RateLimiter {
    */
   resetAll(): void {
     const keyCount = this.requests.size;
-    debugRetry('[RateLimiter] Resetting all rate limits (%d keys)', keyCount);
+    debugRetry.debug('[RateLimiter] Resetting all rate limits ({keyCount} keys)', { keyCount });
     this.requests.clear();
   }
 
@@ -171,26 +176,18 @@ export class RateLimiter {
     const now = Date.now();
     const requests = this.requests.get(key) || [];
 
-    const validRequests = requests.filter(
-      timestamp => now - timestamp < this.config.windowMs
-    );
+    const validRequests = requests.filter(timestamp => now - timestamp < this.config.windowMs);
 
     const used = validRequests.length;
     const remaining = Math.max(0, this.config.maxRequests - used);
 
-    const oldestRequest = validRequests.length > 0
-      ? Math.min(...validRequests)
-      : now;
+    const oldestRequest = validRequests.length > 0 ? Math.min(...validRequests) : now;
 
-    const resetInMs = Math.max(0, (oldestRequest + this.config.windowMs) - now);
+    const resetInMs = Math.max(0, oldestRequest + this.config.windowMs - now);
 
-    debugRetry(
-      '[RateLimiter] Usage for key: %s (used: %d/%d, remaining: %d, reset in: %dms)',
-      key,
-      used,
-      this.config.maxRequests,
-      remaining,
-      resetInMs,
+    debugRetry.debug(
+      '[RateLimiter] Usage for key: {key} (used: {used}/{maxRequests}, remaining: {remaining}, reset in: {in}ms)',
+      { key, used, maxRequests: this.config.maxRequests, remaining, in: resetInMs },
     );
 
     return { used, remaining, resetInMs };
@@ -202,12 +199,12 @@ export class RateLimiter {
  */
 export function createRateLimitedFunction<TArgs extends unknown[], TResult>(
   fn: (...args: TArgs) => Promise<TResult>,
-  config: RateLimiterConfig
+  config: RateLimiterConfig,
 ): (...args: TArgs) => Promise<TResult> {
   const limiter = new RateLimiter(config);
   const functionKey = fn.name || 'anonymous';
 
-  debugRetry('[RateLimiter] Created rate-limited wrapper for function: %s', functionKey);
+  debugRetry.debug('[RateLimiter] Created rate-limited wrapper for function: {function}', { function: functionKey });
 
   return async (...args: TArgs): Promise<TResult> => {
     // Use a stable key for this function
@@ -226,7 +223,7 @@ export function createRateLimitedFunction<TArgs extends unknown[], TResult>(
 /**
  * Global rate limiter instances for different services
  */
-debugRetry('[RateLimiter] Initializing global rate limiter instances');
+debugRetry.debug('[RateLimiter] Initializing global rate limiter instances');
 
 export const rateLimiters = {
   // OpenAI: 60 RPM on most tiers
@@ -294,4 +291,6 @@ export const rateLimiters = {
   }),
 };
 
-debugRetry('[RateLimiter] Global rate limiter instances initialized (openai, anthropic, groq, google, mistral, openrouter, embedding, vectorSearch)');
+debugRetry.debug(
+  '[RateLimiter] Global rate limiter instances initialized (openai, anthropic, groq, google, mistral, openrouter, embedding, vectorSearch)',
+);

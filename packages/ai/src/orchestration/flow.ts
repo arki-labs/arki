@@ -3,7 +3,15 @@ import { debugOrchestration } from '../debug';
 export type FlowEvent<State> =
   | { type: 'flow:start'; state: State; timestamp: number }
   | { type: 'node:start'; nodeId: string; attempt: number; state: State; timestamp: number }
-  | { type: 'node:success'; nodeId: string; attempt: number; durationMs: number; state: State; patch?: Partial<State>; timestamp: number }
+  | {
+      type: 'node:success';
+      nodeId: string;
+      attempt: number;
+      durationMs: number;
+      state: State;
+      patch?: Partial<State>;
+      timestamp: number;
+    }
   | { type: 'node:error'; nodeId: string; attempt: number; error: Error; timestamp: number }
   | { type: 'flow:complete'; state: State; steps: number; timestamp: number }
   | { type: 'flow:failed'; nodeId: string; error: Error; steps: number; timestamp: number };
@@ -69,17 +77,23 @@ async function runAttempt<T>(
 ): Promise<T> {
   const controller = new AbortController();
   const interrupted = new Promise<never>((_, reject) => {
-    controller.signal.addEventListener('abort', () => {
-      const reason: unknown = controller.signal.reason;
-      reject(reason instanceof Error ? reason : new FlowInterruptedError('Flow aborted by signal', { nodeId }));
-    }, { once: true });
+    controller.signal.addEventListener(
+      'abort',
+      () => {
+        const reason: unknown = controller.signal.reason;
+        reject(reason instanceof Error ? reason : new FlowInterruptedError('Flow aborted by signal', { nodeId }));
+      },
+      { once: true },
+    );
   });
   const abort = () => controller.abort(new FlowInterruptedError('Flow aborted by signal', { nodeId }));
   signal?.addEventListener('abort', abort, { once: true });
   if (signal?.aborted) abort();
-  const timer = timeoutMs ? setTimeout(() => {
-    controller.abort(new FlowInterruptedError(`Flow node timed out after ${timeoutMs}ms`, { nodeId }));
-  }, timeoutMs) : undefined;
+  const timer = timeoutMs
+    ? setTimeout(() => {
+        controller.abort(new FlowInterruptedError(`Flow node timed out after ${timeoutMs}ms`, { nodeId }));
+      }, timeoutMs)
+    : undefined;
 
   try {
     try {
@@ -134,7 +148,7 @@ export class Flow<State, Context> {
     let current = this.start;
     let steps = 0;
 
-    debugOrchestration('[Flow] Starting (start: %s)', current);
+    debugOrchestration.debug('[Flow] Starting (start: {start})', { start: current });
     this.emit({ type: 'flow:start', state, timestamp: Date.now() });
 
     while (current) {
@@ -176,7 +190,7 @@ export class Flow<State, Context> {
       while (attempt < maxAttempts) {
         attempt += 1;
         const startTime = Date.now();
-        debugOrchestration('[Flow] Node start (node: %s, attempt: %d)', node.id, attempt);
+        debugOrchestration.debug('[Flow] Node start (node: {node}, attempt: {attempt})', { node: node.id, attempt });
         this.emit({ type: 'node:start', nodeId: node.id, attempt, state, timestamp: Date.now() });
 
         try {
@@ -187,7 +201,10 @@ export class Flow<State, Context> {
           }
 
           const durationMs = Date.now() - startTime;
-          debugOrchestration('[Flow] Node success (node: %s, duration: %dms)', node.id, durationMs);
+          debugOrchestration.debug('[Flow] Node success (node: {node}, duration: {duration}ms)', {
+            node: node.id,
+            duration: durationMs,
+          });
           this.emit({
             type: 'node:success',
             nodeId: node.id,
@@ -200,7 +217,11 @@ export class Flow<State, Context> {
           break;
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
-          debugOrchestration('[Flow] Node error (node: %s, attempt: %d): %s', node.id, attempt, err.message);
+          debugOrchestration.debug('[Flow] Node error (node: {node}, attempt: {attempt}): {errMessage}', {
+            node: node.id,
+            attempt,
+            errMessage: err.message,
+          });
           this.emit({ type: 'node:error', nodeId: node.id, attempt, error: err, timestamp: Date.now() });
 
           if (err instanceof FlowInterruptedError || this.signal?.aborted || attempt >= maxAttempts) {
@@ -213,8 +234,9 @@ export class Flow<State, Context> {
             throw flowError;
           }
 
-          const delay = (node.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS)
-            * Math.pow(node.retryBackoffFactor ?? DEFAULT_RETRY_BACKOFF, attempt - 1);
+          const delay =
+            (node.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS) *
+            Math.pow(node.retryBackoffFactor ?? DEFAULT_RETRY_BACKOFF, attempt - 1);
           await sleep(delay);
         }
       }
@@ -223,7 +245,7 @@ export class Flow<State, Context> {
       current = next ?? '';
     }
 
-    debugOrchestration('[Flow] Completed (steps: %d)', steps);
+    debugOrchestration.debug('[Flow] Completed (steps: {steps})', { steps });
     this.emit({ type: 'flow:complete', state, steps, timestamp: Date.now() });
     return state;
   }

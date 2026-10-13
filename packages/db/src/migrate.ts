@@ -30,14 +30,14 @@ import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { migrate } from 'drizzle-orm/pg-core';
 
-import { plugin, service, type Plugin } from '@arki/dot/plugin';
+import type { Plugin } from '@arki/dot/plugin';
+import { plugin, service } from '@arki/dot/plugin';
 
 import { debugInit } from './debug.js';
 
 /** Any handle the `db` plugin publishes. */
 export type MigratableDb<TRelations extends AnyRelations = AnyRelations> =
-  | NodePgDatabase<TRelations>
-  | PgliteDatabase<TRelations>;
+  NodePgDatabase<TRelations> | PgliteDatabase<TRelations>;
 
 /** One migration as drizzle's migrator consumes it. Re-exported so apps can type a generated module. */
 export type { MigrationMeta };
@@ -77,7 +77,7 @@ export async function migrateDb<TRelations extends AnyRelations>(
 ): Promise<void> {
   const migrations =
     options.migrations === undefined ? readMigrations(options.migrationsFolder) : [...options.migrations];
-  debugInit('[migrate] applying %d migration(s)', migrations.length);
+  debugInit.debug('[migrate] applying {migrationsLength} migration(s)', { migrationsLength: migrations.length });
   await migrate(migrations, db, {
     // Drizzle's config type requires the folder even though this step only
     // reads the table/schema names; the list above is already in memory.
@@ -85,7 +85,7 @@ export async function migrateDb<TRelations extends AnyRelations>(
     migrationsTable: options.migrationsTable ?? '__drizzle_migrations',
     migrationsSchema: options.migrationsSchema ?? 'drizzle',
   });
-  debugInit('[migrate] migrations applied');
+  debugInit.debug('[migrate] migrations applied');
 }
 
 /**

@@ -1,6 +1,5 @@
-import { debugEmails } from '../debug';
-
 import type { QuotaStore } from './quota-store';
+import { debugEmails } from '../debug';
 
 /**
  * Minimal KV interface required by `kvQuotaStore`.
@@ -46,7 +45,11 @@ export function kvQuotaStore(kv: KVLike): QuotaStore {
     async getSent(provider, month): Promise<number> {
       const k = key(provider, month);
       const value = await kv.get<number>(k);
-      debugEmails('[kv-quota-store] getSent provider=%s month=%s → %d', provider, month, value ?? 0);
+      debugEmails.debug('[kv-quota-store] getSent provider={provider} month={month} → {value3}', {
+        provider,
+        month,
+        value3: value ?? 0,
+      });
       return value ?? 0;
     },
 
@@ -54,13 +57,12 @@ export function kvQuotaStore(kv: KVLike): QuotaStore {
       const k = key(provider, month);
       const current = (await kv.get<number>(k)) ?? 0;
       await kv.set(k, current + 1, TTL_SECONDS);
-      debugEmails(
-        '[kv-quota-store] increment provider=%s month=%s: %d → %d',
+      debugEmails.debug('[kv-quota-store] increment provider={provider} month={month}: {current} → {value4}', {
         provider,
         month,
         current,
-        current + 1,
-      );
+        value4: current + 1,
+      });
     },
   };
 }

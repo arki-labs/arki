@@ -1,8 +1,7 @@
 import { SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
 
-import { debugEmails } from '../debug';
-
 import type { EmailProvider, SendEmailPayload, SendEmailResult } from './types';
+import { debugEmails } from '../debug';
 
 function toAddresses(value: string | string[] | undefined): string[] | undefined {
   if (value === undefined) return undefined;
@@ -68,7 +67,7 @@ export function sesProvider(options: {
     quotaPerMonth: options.quotaPerMonth,
 
     async send(payload: SendEmailPayload): Promise<SendEmailResult> {
-      debugEmails('[ses] Sending to=%s subject="%s"', payload.to, payload.subject);
+      debugEmails.debug('[ses] Sending to={to} subject="{subject}"', { to: payload.to, subject: payload.subject });
 
       const toAddrs = toAddresses(payload.to);
       if (!toAddrs || toAddrs.length === 0) {
@@ -90,10 +89,12 @@ export function sesProvider(options: {
 
       // Fields SES genuinely cannot carry — make the drop visible in debug logs.
       if (payload.scheduledAt !== undefined) {
-        debugEmails('[ses] scheduledAt dropped (SES v2 SendEmail has no scheduled delivery): %s', payload.scheduledAt);
+        debugEmails.debug('[ses] scheduledAt dropped (SES v2 SendEmail has no scheduled delivery): {scheduledAt}', {
+          scheduledAt: payload.scheduledAt,
+        });
       }
       if (payload.react != null) {
-        debugEmails('[ses] react dropped (SES requires pre-rendered html)');
+        debugEmails.debug('[ses] react dropped (SES requires pre-rendered html)');
       }
 
       const command = new SendEmailCommand({
@@ -109,12 +110,8 @@ export function sesProvider(options: {
           Simple: {
             Subject: { Data: payload.subject, Charset: 'UTF-8' },
             Body: {
-              Html: payload.html
-                ? { Data: payload.html, Charset: 'UTF-8' }
-                : undefined,
-              Text: payload.text
-                ? { Data: payload.text, Charset: 'UTF-8' }
-                : undefined,
+              Html: payload.html ? { Data: payload.html, Charset: 'UTF-8' } : undefined,
+              Text: payload.text ? { Data: payload.text, Charset: 'UTF-8' } : undefined,
             },
             Headers: headers,
           },
@@ -125,13 +122,13 @@ export function sesProvider(options: {
       try {
         const response = await client.send(command);
         const id = response.MessageId ?? '';
-        debugEmails('[ses] Sent ok id=%s', id);
+        debugEmails.debug('[ses] Sent ok id={id}', { id });
         return { data: { id }, error: null };
       } catch (err) {
         const error = err as { name?: string; message?: string };
         const name = error.name ?? 'SESError';
         const message = error.message ?? 'SES send failed';
-        debugEmails('[ses] Send failed: %s (%s)', message, name);
+        debugEmails.debug('[ses] Send failed: {failed} ({name})', { failed: message, name });
         return { data: null, error: { message, name } };
       }
     },

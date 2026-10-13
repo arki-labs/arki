@@ -30,9 +30,10 @@
  * providers are explicit fall-throughs.
  */
 
-import { createOllama, generateText, streamText } from 'ai-sdk-ollama';
-import { Output } from 'ai';
 import type { ModelMessage } from 'ai';
+import { Output } from 'ai';
+import { createOllama, generateText, streamText } from 'ai-sdk-ollama';
+
 import { z } from '@arki/contracts';
 
 import { debugService } from '../debug.ts';
@@ -126,8 +127,7 @@ const DEFAULT_MAX_RETRIES = 1;
  * That way operators can keep one env var across both call paths.
  */
 function resolveHost(explicit?: string): string {
-  const raw =
-    explicit ?? process.env['OLLAMA_HOST'] ?? process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434';
+  const raw = explicit ?? process.env['OLLAMA_HOST'] ?? process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434';
   return raw.replace(/\/v1\/?$/, '');
 }
 
@@ -154,13 +154,15 @@ export class OllamaService {
     const host = resolveHost(config.host);
     this.provider = createOllama({ baseURL: host });
 
-    debugService(
-      '[Ollama] Service initialized (model: %s, host: %s, temperature: %d, maxRetries: %d, keepAlive: %s)',
-      this.model,
-      host,
-      this.defaultTemperature,
-      this.defaultMaxRetries,
-      this.keepAlive ?? 'default',
+    debugService.debug(
+      '[Ollama] Service initialized (model: {model}, host: {host}, temperature: {temperature}, maxRetries: {maxRetries}, keepAlive: {keepAlive})',
+      {
+        model: this.model,
+        host,
+        temperature: this.defaultTemperature,
+        maxRetries: this.defaultMaxRetries,
+        keepAlive: this.keepAlive ?? 'default',
+      },
     );
   }
 
@@ -185,11 +187,7 @@ export class OllamaService {
     schema: z.ZodSchema<T>,
     options: OllamaGenerationOptions = {},
   ): Promise<T> {
-    return this.generateStructuredDataFromMessages(
-      [{ role: 'user', content: prompt }],
-      schema,
-      options,
-    );
+    return this.generateStructuredDataFromMessages([{ role: 'user', content: prompt }], schema, options);
   }
 
   /**
@@ -208,12 +206,9 @@ export class OllamaService {
     const maxRetries = options.maxRetries ?? this.defaultMaxRetries;
     const output = Output.object({ schema: schema as z.ZodSchema });
 
-    debugService(
-      '[Ollama] generateText (model=%s, messages=%d, temperature=%d, stream=%s)',
-      this.model,
-      messages.length,
-      temperature,
-      !!options.onToken,
+    debugService.debug(
+      '[Ollama] generateText (model={model}, messages={messages}, temperature={temperature}, stream={stream})',
+      { model: this.model, messages: messages.length, temperature, stream: !!options.onToken },
     );
 
     try {
@@ -235,7 +230,7 @@ export class OllamaService {
         }
 
         const obj = await result.output;
-        debugService('[Ollama] Structured data generated successfully (streamed)');
+        debugService.debug('[Ollama] Structured data generated successfully (streamed)');
         return obj as T;
       }
 
@@ -251,14 +246,13 @@ export class OllamaService {
         abortSignal: options.signal,
       });
 
-      debugService('[Ollama] Structured data generated successfully');
+      debugService.debug('[Ollama] Structured data generated successfully');
       return result.output as T;
     } catch (error) {
-      debugService(
-        '[Ollama] Structured generation failed (model=%s): %s',
-        this.model,
-        getErrorMessage(error),
-      );
+      debugService.debug('[Ollama] Structured generation failed (model={model}): {value2}', {
+        model: this.model,
+        value2: getErrorMessage(error),
+      });
       throw new GenerationError(
         `Failed to generate structured data via Ollama (${this.model}): ${getErrorMessage(error)}`,
         error,
@@ -273,18 +267,13 @@ export class OllamaService {
    * the model's own voice and formatting. The anti-leak / role system prompt is
    * threaded via `options.systemPrompt`.
    */
-  async generateConversation(
-    messages: ChatMessage[],
-    options: OllamaGenerationOptions = {},
-  ): Promise<string> {
+  async generateConversation(messages: ChatMessage[], options: OllamaGenerationOptions = {}): Promise<string> {
     const temperature = options.temperature ?? this.defaultTemperature;
     const maxRetries = options.maxRetries ?? this.defaultMaxRetries;
 
-    debugService(
-      '[Ollama] generateConversation (model=%s, messages=%d, temperature=%d)',
-      this.model,
-      messages.length,
-      temperature,
+    debugService.debug(
+      '[Ollama] generateConversation (model={model}, messages={messages}, temperature={temperature})',
+      { model: this.model, messages: messages.length, temperature },
     );
 
     try {
@@ -297,14 +286,13 @@ export class OllamaService {
         abortSignal: options.signal,
       });
 
-      debugService('[Ollama] Conversation response generated (length: %d)', result.text.length);
+      debugService.debug('[Ollama] Conversation response generated (length: {length})', { length: result.text.length });
       return result.text;
     } catch (error) {
-      debugService(
-        '[Ollama] Conversation generation failed (model=%s): %s',
-        this.model,
-        getErrorMessage(error),
-      );
+      debugService.debug('[Ollama] Conversation generation failed (model={model}): {value2}', {
+        model: this.model,
+        value2: getErrorMessage(error),
+      });
       throw new GenerationError(
         `Failed to generate conversation via Ollama (${this.model}): ${getErrorMessage(error)}`,
         error,
@@ -325,12 +313,11 @@ export class OllamaService {
     const temperature = options.temperature ?? this.defaultTemperature;
     const maxRetries = options.maxRetries ?? this.defaultMaxRetries;
 
-    debugService(
-      '[Ollama] streamConversation (model=%s, messages=%d, temperature=%d)',
-      this.model,
-      messages.length,
+    debugService.debug('[Ollama] streamConversation (model={model}, messages={messages}, temperature={temperature})', {
+      model: this.model,
+      messages: messages.length,
       temperature,
-    );
+    });
 
     try {
       options.onStart?.();
@@ -354,11 +341,10 @@ export class OllamaService {
       options.onComplete?.(fullText);
     } catch (error) {
       options.onError?.(error as Error);
-      debugService(
-        '[Ollama] Stream conversation failed (model=%s): %s',
-        this.model,
-        getErrorMessage(error),
-      );
+      debugService.debug('[Ollama] Stream conversation failed (model={model}): {value2}', {
+        model: this.model,
+        value2: getErrorMessage(error),
+      });
       throw new GenerationError(
         `Failed to stream conversation via Ollama (${this.model}): ${getErrorMessage(error)}`,
         error,

@@ -14,15 +14,14 @@
  */
 import type { PGlite } from '@electric-sql/pglite';
 import type { Job as BullMQJob } from 'bullmq';
-import { PgBoss, getConstructionPlans } from 'pg-boss';
+import { getConstructionPlans, PgBoss } from 'pg-boss';
 
 import type { InternalScheduleDefinition } from '../schedule-builder.ts';
-import type { QueueInstance } from '../types/builder.ts';
+import type { QueueInstance, ScheduleDefinition } from '../types/builder.ts';
 import type { JobContext, JobDefinition } from '../types/job.ts';
-import type { ScheduleDefinition } from '../types/builder.ts';
-import { executeMiddlewareChain } from '../middleware.ts';
 import { debugJob, debugRegister, debugSchedule, debugWorker } from '../debug.ts';
 import { duplicateScheduleError } from '../errors.ts';
+import { executeMiddlewareChain } from '../middleware.ts';
 import { buildPgBossAdapter } from './adapter.ts';
 
 const POLL_INTERVAL_SECONDS = 0.5;
@@ -55,7 +54,7 @@ function makeJobShim(id: string, name: string, data: unknown, attemptsMade = 0):
     data,
     attemptsMade,
     updateProgress: async () => {},
-    log: async (msg) => console.log(`[${name}] ${msg}`),
+    log: async msg => console.log(`[${name}] ${msg}`),
   };
 }
 
@@ -76,11 +75,7 @@ export function createRuntimeLocalQueueInstance<TContext>(
   // We install a duck-typed shim that routes that call to boss.send().
   function makeQueueShim(jobName: string) {
     return {
-      add: async (
-        _name: string,
-        data: unknown,
-        opts?: { priority?: number; delay?: number; jobId?: string },
-      ) => {
+      add: async (_name: string, data: unknown, opts?: { priority?: number; delay?: number; jobId?: string }) => {
         if (!boss) throw new Error(`Queue not started — call queue.start() first`);
         const id = await boss.send(jobName, data as object, {
           // pg-boss rejects `priority: undefined` ("priority must be an integer").
@@ -104,7 +99,7 @@ export function createRuntimeLocalQueueInstance<TContext>(
     (def._internal as { _queue?: unknown })._queue = makeQueueShim(name);
 
     jobDefs.set(name, def);
-    debugRegister('[runtime-local] registered job: %s', name);
+    debugRegister.debug('[runtime-local] registered job: {job}', { job: name });
     console.log(`✓ Registered job: ${name} (runtime-local)`);
   }
 
@@ -133,7 +128,10 @@ export function createRuntimeLocalQueueInstance<TContext>(
     registerJobDef(internal.job);
 
     scheduleDefs.set(internal.name, internal);
-    debugSchedule('[runtime-local] registered schedule: %s (%s)', internal.name, internal.value);
+    debugSchedule.debug('[runtime-local] registered schedule: {schedule} ({internalValue})', {
+      schedule: internal.name,
+      internalValue: internal.value,
+    });
     console.log(`✓ Registered schedule: ${internal.name} (runtime-local, cron: ${internal.value})`);
   }
 
@@ -165,12 +163,7 @@ export function createRuntimeLocalQueueInstance<TContext>(
     const validatedData = internal.inputSchema.parse(pgBossJob.data);
     const baseContext = await createContext();
 
-    const shim = makeJobShim(
-      pgBossJob.id,
-      pgBossJob.name,
-      pgBossJob.data,
-      pgBossJob.retrycount ?? 0,
-    );
+    const shim = makeJobShim(pgBossJob.id, pgBossJob.name, pgBossJob.data, pgBossJob.retrycount ?? 0);
 
     // Build the initial job context that mirrors what createJobContext() produces
     // in the BullMQ path. Cast the shim to satisfy the BullMQ type signature
@@ -182,7 +175,10 @@ export function createRuntimeLocalQueueInstance<TContext>(
       job: shim,
     };
 
-    debugJob('[runtime-local] [%s] executing handler (job %s)', internal.name, shim.id);
+    debugJob.debug('[runtime-local] [{internalName}] executing handler (job {shimId})', {
+      internalName: internal.name,
+      shimId: shim.id,
+    });
 
     // Same onion as the BullMQ path: the handler runs inside every middleware's next().
     // The handler signature in @arki/queue's type system expects JobContext<TDeps>
@@ -202,20 +198,22 @@ export function createRuntimeLocalQueueInstance<TContext>(
   // ── Public QueueInstance ───────────────────────────────────────────────
 
   async function register(registry: Registry): Promise<void> {
-    debugRegister('[runtime-local] traversing registry');
+    debugRegister.debug('[runtime-local] traversing registry');
     await traverseRegistry(registry);
     console.log('✓ Registration complete (runtime-local)');
   }
 
   async function start(): Promise<void> {
-    debugWorker('[runtime-local] bootstrapping pg-boss schema: %s', schema);
+    debugWorker.debug('[runtime-local] bootstrapping pg-boss schema: {schema}', { schema });
 
     // Pre-run the schema DDL via the multi-statement runner before PgBoss is constructed.
     // This is required because PgBoss's bootstrap is a multi-statement block that only
     // the Simple Query Protocol can execute (see adapter.ts for full explanation).
     // Only on a fresh database: the plan is not idempotent ("type job_state
     // already exists"), so a restart on a persisted PGlite would fail here.
-    const installed = await pglite.query<{ name: string | null }>('select to_regclass($1)::text as name', [`${schema}.version`]);
+    const installed = await pglite.query<{ name: string | null }>('select to_regclass($1)::text as name', [
+      `${schema}.version`,
+    ]);
     if (!installed.rows[0]?.name) {
       await pglite.exec(getConstructionPlans(schema));
     }
@@ -224,12 +222,12 @@ export function createRuntimeLocalQueueInstance<TContext>(
       db: buildPgBossAdapter(pglite),
       schema,
       createSchema: false, // schema already bootstrapped above
-      migrate: false,      // same
+      migrate: false, // same
       superviseIntervalSeconds: 60,
       maintenanceIntervalSeconds: 60,
     });
     await boss.start();
-    debugWorker('[runtime-local] pg-boss started');
+    debugWorker.debug('[runtime-local] pg-boss started');
 
     // Register a boss.work() handler for every job.
     for (const [name, def] of jobDefs.entries()) {
@@ -247,7 +245,7 @@ export function createRuntimeLocalQueueInstance<TContext>(
           }
         },
       );
-      debugWorker('[runtime-local] worker started for: %s', name);
+      debugWorker.debug('[runtime-local] worker started for: {for}', { for: name });
     }
 
     // Register cron schedules. A schedule is a trigger: boss.schedule sends its
@@ -262,7 +260,11 @@ export function createRuntimeLocalQueueInstance<TContext>(
         key: name,
       });
 
-      debugSchedule('[runtime-local] schedule registered: %s -> %s (cron: %s)', name, jobName, pattern);
+      debugSchedule.debug('[runtime-local] schedule registered: {registered} -> {jobName} (cron: {cron})', {
+        registered: name,
+        jobName,
+        cron: pattern,
+      });
     }
 
     // Drop schedules no longer in code. Each schedule is keyed by its name on
@@ -276,7 +278,10 @@ export function createRuntimeLocalQueueInstance<TContext>(
     for (const jobName of jobDefs.keys()) {
       for (const stale of await boss.getSchedules(jobName)) {
         if (stale.key !== '' && !liveKeys.get(jobName)?.has(stale.key)) {
-          debugSchedule('[runtime-local] removing schedule no longer registered: %s (key %s)', jobName, stale.key);
+          debugSchedule.debug('[runtime-local] removing schedule no longer registered: {registered} (key {staleKey})', {
+            registered: jobName,
+            staleKey: stale.key,
+          });
           await boss.unschedule(jobName, stale.key);
         }
       }
@@ -288,7 +293,7 @@ export function createRuntimeLocalQueueInstance<TContext>(
   }
 
   async function stop(): Promise<void> {
-    debugWorker('[runtime-local] shutting down');
+    debugWorker.debug('[runtime-local] shutting down');
     if (boss) {
       await boss.stop({ graceful: true });
       boss = null;

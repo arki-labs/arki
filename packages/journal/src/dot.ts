@@ -222,7 +222,9 @@ function collectHandlers(
     const slices = services[feature.key];
     const slice = typeof slices === 'object' && slices !== null && 'journal' in slices ? slices.journal : undefined;
     if (slice === undefined) {
-      debugWorker('[journal] feature "%s" did not contribute a journal slice', feature.key);
+      debugWorker.debug('[journal] feature "{featureKey}" did not contribute a journal slice', {
+        featureKey: feature.key,
+      });
       continue;
     }
     if (!isJournalHandlers(slice)) {

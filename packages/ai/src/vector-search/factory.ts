@@ -3,9 +3,9 @@
  */
 
 import type { EmbeddingProvider, VectorSearchProvider } from '../types';
+import type { QdrantConfig } from '../validation';
 import { debugVector } from '../debug.ts';
 import { MockVectorProvider } from './providers/mock';
-import type { QdrantConfig } from '../validation';
 import { QdrantVectorProvider } from './providers/qdrant';
 
 export type VectorProviderType = 'mock' | 'qdrant';
@@ -14,17 +14,17 @@ export type VectorProviderConfig = {
   type: VectorProviderType;
   embeddingProvider: EmbeddingProvider;
   config?: unknown; // Provider-specific config
-}
+};
 
 export type QdrantProviderConfig = {
   type: 'qdrant';
   config: QdrantConfig;
-} & VectorProviderConfig
+} & VectorProviderConfig;
 
 export type MockProviderConfig = {
   type: 'mock';
   config?: never;
-} & VectorProviderConfig
+} & VectorProviderConfig;
 
 export type ProviderConfig = QdrantProviderConfig | MockProviderConfig;
 
@@ -32,25 +32,22 @@ export type ProviderConfig = QdrantProviderConfig | MockProviderConfig;
  * Factory function to create vector search providers
  */
 export function createVectorProvider<TMetadata = Record<string, unknown>>(
-  config: ProviderConfig
+  config: ProviderConfig,
 ): VectorSearchProvider<TMetadata> {
-  debugVector('[Factory] Creating vector search provider (type: %s)', config.type);
+  debugVector.debug('[Factory] Creating vector search provider (type: {type})', { type: config.type });
 
   switch (config.type) {
     case 'qdrant': {
       if (!config.config) {
-        debugVector('[Factory] Qdrant provider requires configuration');
+        debugVector.debug('[Factory] Qdrant provider requires configuration');
         throw new Error('Qdrant provider requires configuration');
       }
-      debugVector('[Factory] Initializing Qdrant provider');
-      return new QdrantVectorProvider<TMetadata>(
-        config.config,
-        config.embeddingProvider
-      );
+      debugVector.debug('[Factory] Initializing Qdrant provider');
+      return new QdrantVectorProvider<TMetadata>(config.config, config.embeddingProvider);
     }
 
     case 'mock': {
-      debugVector('[Factory] Initializing Mock provider');
+      debugVector.debug('[Factory] Initializing Mock provider');
       return new MockVectorProvider<TMetadata>(config.embeddingProvider);
     }
 
@@ -58,7 +55,7 @@ export function createVectorProvider<TMetadata = Record<string, unknown>>(
       // Type-safe exhaustive check
       const _exhaustive: never = config;
       void _exhaustive; // Mark as used
-      debugVector('[Factory] Unknown provider type');
+      debugVector.debug('[Factory] Unknown provider type');
       throw new Error(`Unknown provider type`);
     }
   }
@@ -69,9 +66,9 @@ export function createVectorProvider<TMetadata = Record<string, unknown>>(
  */
 export function createQdrantProvider<TMetadata = Record<string, unknown>>(
   config: QdrantConfig,
-  embeddingProvider: EmbeddingProvider
+  embeddingProvider: EmbeddingProvider,
 ): QdrantVectorProvider<TMetadata> {
-  debugVector('[Factory] Creating Qdrant provider via helper function');
+  debugVector.debug('[Factory] Creating Qdrant provider via helper function');
   return new QdrantVectorProvider<TMetadata>(config, embeddingProvider);
 }
 
@@ -79,8 +76,8 @@ export function createQdrantProvider<TMetadata = Record<string, unknown>>(
  * Helper function to create a Mock provider for testing
  */
 export function createMockProvider<TMetadata = Record<string, unknown>>(
-  embeddingProvider: EmbeddingProvider
+  embeddingProvider: EmbeddingProvider,
 ): MockVectorProvider<TMetadata> {
-  debugVector('[Factory] Creating Mock provider via helper function');
+  debugVector.debug('[Factory] Creating Mock provider via helper function');
   return new MockVectorProvider<TMetadata>(embeddingProvider);
 }

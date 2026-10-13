@@ -1,5 +1,6 @@
-import { createLogger } from '@arki/log';
 import { sql } from 'drizzle-orm';
+
+import { getLogger } from '@arki/log';
 
 import type { PaymentRetryService } from '../../core/services/payment-retry-service';
 import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types';
@@ -9,16 +10,8 @@ import type {
   ListDunningCampaignsQuery,
   UpdateDunningCampaignInput,
 } from '../contracts';
-import type {
-  DunningCampaignId,
-  DunningCampaignStatus,
-} from '../primitives';
-import {
-  type DunningDatabase,
-  createDunningCampaignRepository,
-  createDunningExecutionRepository,
-  createDunningTemplateRepository,
-} from '../repository';
+import type { DunningCampaignId, DunningCampaignStatus } from '../primitives';
+import type { DunningDatabase } from '../repository';
 import type { DunningTables } from '../tables';
 import type {
   CampaignExecutionFilters,
@@ -32,6 +25,11 @@ import type {
   TimeBasedConditions,
 } from '../types';
 import type { CommunicationOrchestrationService } from './communication-service';
+import {
+  createDunningCampaignRepository,
+  createDunningExecutionRepository,
+  createDunningTemplateRepository,
+} from '../repository';
 
 // Define eligible customer type for campaign execution
 type EligibleCustomer = {
@@ -41,7 +39,7 @@ type EligibleCustomer = {
   triggerData?: Record<string, unknown>;
 };
 
-const logger = createLogger('dunning.campaign');
+const logger = getLogger('dunning.campaign');
 
 /**
  * Service for managing dunning campaigns
@@ -245,7 +243,7 @@ export class DunningCampaignService {
 
     logger.info('Created campaign executions', {
       executionCount: executions.length,
-      campaignId: input.campaignId
+      campaignId: input.campaignId,
     });
     return executions;
   }
@@ -288,11 +286,7 @@ export class DunningCampaignService {
     conditions: PaymentFailureConditions,
     customFilters?: CampaignExecutionFilters,
   ): Promise<EligibleCustomer[]> {
-    const {
-      paymentFailureCount = 1,
-      daysSinceFailure = 7,
-      daysSinceLastPayment = 30,
-    } = conditions;
+    const { paymentFailureCount = 1, daysSinceFailure = 7, daysSinceLastPayment = 30 } = conditions;
 
     const sinceFailure = new Date();
     sinceFailure.setDate(sinceFailure.getDate() - daysSinceFailure);
@@ -351,7 +345,7 @@ export class DunningCampaignService {
     `);
 
     const customers = (result.rows || []) as unknown as CustomerQueryRow[];
-    return customers.map((row) => ({
+    return customers.map(row => ({
       id: row.customer_id as CustomerId,
       subscriptionId: row.subscription_id as SubscriptionId,
       paymentId: row.payment_id as PaymentId,
@@ -387,7 +381,7 @@ export class DunningCampaignService {
     `);
 
     const customers = (result.rows || []) as unknown as CustomerQueryRow[];
-    return customers.map((row) => ({
+    return customers.map(row => ({
       id: row.customer_id as CustomerId,
       subscriptionId: row.subscription_id as SubscriptionId,
       paymentId: row.payment_id as PaymentId,
@@ -428,7 +422,7 @@ export class DunningCampaignService {
     `);
 
     const customers = (result.rows || []) as unknown as CustomerQueryRow[];
-    return customers.map((row) => ({
+    return customers.map(row => ({
       id: row.customer_id as CustomerId,
       subscriptionId: row.subscription_id as SubscriptionId,
       paymentId: row.payment_id as PaymentId,
@@ -449,7 +443,7 @@ export class DunningCampaignService {
       } catch (error) {
         logger.error('Failed to execute campaign', {
           executionId: executionDb.id,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         });
         await this.executionRepo.updateStatus(
           executionDb.id,
@@ -477,13 +471,16 @@ export class DunningCampaignService {
     }
 
     // Check business hours and allowed days if configured
-    if (campaign.settings.businessHoursOnly && !this.isBusinessHours(campaign.settings.timezone, campaign.settings.allowedDays)) {
+    if (
+      campaign.settings.businessHoursOnly &&
+      !this.isBusinessHours(campaign.settings.timezone, campaign.settings.allowedDays)
+    ) {
       // Reschedule for next business hour
       const nextBusinessHour = this.getNextBusinessHour(campaign.settings.timezone, campaign.settings.allowedDays);
 
       logger.info('Execution rescheduled to next business hour', {
         executionId: execution.id,
-        scheduledAt: nextBusinessHour.toISOString()
+        scheduledAt: nextBusinessHour.toISOString(),
       });
 
       // Update the execution to be scheduled for the next business hour
@@ -507,7 +504,11 @@ export class DunningCampaignService {
   /**
    * Execute communication for an execution
    */
-  private async executeCommunication(execution: DunningExecution, template: DunningTemplate, campaign: DunningCampaign) {
+  private async executeCommunication(
+    execution: DunningExecution,
+    template: DunningTemplate,
+    campaign: DunningCampaign,
+  ) {
     const startTime = Date.now();
     const errors: { customerId: CustomerId; error: string; timestamp: Date }[] = [];
 
@@ -531,7 +532,7 @@ export class DunningCampaignService {
       // Check if customer has unsubscribed from this channel
       if (campaign.settings.respectUnsubscribe && communicationPrefs.unsubscribed) {
         logger.info('Customer has unsubscribed from communications', {
-          customerId: execution.customerId
+          customerId: execution.customerId,
         });
         return {
           customersProcessed: 1,
@@ -544,7 +545,7 @@ export class DunningCampaignService {
       if (communicationPrefs.unsubscribed_channels?.includes(template.communication.channel)) {
         logger.info('Customer has unsubscribed from channel', {
           customerId: execution.customerId,
-          channel: template.communication.channel
+          channel: template.communication.channel,
         });
         return {
           customersProcessed: 1,
@@ -562,7 +563,7 @@ export class DunningCampaignService {
         customer_name: customer.name || 'Customer',
         customer_email: customer.email || '',
         campaign_name: campaign.name,
-        ...execution.triggerData as Record<string, string>,
+        ...(execution.triggerData as Record<string, string>),
       };
 
       // Send communication using the correct service interface
@@ -570,7 +571,7 @@ export class DunningCampaignService {
         execution,
         template,
         customer,
-        personalizations
+        personalizations,
       );
 
       // Update analytics
@@ -585,17 +586,20 @@ export class DunningCampaignService {
       return {
         customersProcessed: 1,
         communicationsSent: wasSuccessful ? 1 : 0,
-        errors: wasSuccessful ? [] : [{
-          customerId: execution.customerId,
-          error: communicationResult.failureReason || 'Communication failed',
-          timestamp: new Date(),
-        }],
+        errors: wasSuccessful
+          ? []
+          : [
+              {
+                customerId: execution.customerId,
+                error: communicationResult.failureReason || 'Communication failed',
+                timestamp: new Date(),
+              },
+            ],
         performance: {
           processingTime: Date.now() - startTime,
           successRate: wasSuccessful ? 1 : 0,
         },
       };
-
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       errors.push({
@@ -650,7 +654,8 @@ export class DunningCampaignService {
         }
       } else {
         // Default: only weekdays (Monday-Friday)
-        if (dayOfWeek === 0 || dayOfWeek === 6) { // Sunday or Saturday
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+          // Sunday or Saturday
           return false;
         }
       }
@@ -708,7 +713,9 @@ export class DunningCampaignService {
 
       return next;
     } catch (error) {
-      logger.error('Error calculating next business hour', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Error calculating next business hour', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       // Fallback implementation
       next.setHours(9, 0, 0, 0);
       if (new Date().getHours() >= 17) {
@@ -750,21 +757,24 @@ export class DunningCampaignService {
     const recentSuccessfulPayments = paymentResult.rows || [];
     if (recentSuccessfulPayments.length > 0) {
       logger.info('Payment success detected, stopping dunning campaign', {
-        customerId: execution.customerId
+        customerId: execution.customerId,
       });
 
       // Cancel future scheduled executions for this customer and campaign
       const scheduledExecutions = await this.executionRepo.findScheduledExecutions(100);
 
       for (const scheduledExec of scheduledExecutions) {
-        if (scheduledExec.customerId === execution.customerId &&
-            scheduledExec.campaignId === execution.campaignId &&
-            scheduledExec.scheduledAt && scheduledExec.scheduledAt > new Date()) {
+        if (
+          scheduledExec.customerId === execution.customerId &&
+          scheduledExec.campaignId === execution.campaignId &&
+          scheduledExec.scheduledAt &&
+          scheduledExec.scheduledAt > new Date()
+        ) {
           await this.executionRepo.updateStatus(
             scheduledExec.id,
             'cancelled',
             undefined,
-            'Cancelled due to successful payment'
+            'Cancelled due to successful payment',
           );
         }
       }
@@ -781,13 +791,16 @@ export class DunningCampaignService {
   /**
    * Update campaign analytics with new metrics
    */
-  private async updateCampaignAnalytics(campaignId: DunningCampaignId, metrics: {
-    paymentsRecovered?: number;
-    revenueRecovered?: number;
-    executions?: number;
-    customersReached?: number;
-    communicationsSent?: number;
-  }): Promise<void> {
+  private async updateCampaignAnalytics(
+    campaignId: DunningCampaignId,
+    metrics: {
+      paymentsRecovered?: number;
+      revenueRecovered?: number;
+      executions?: number;
+      customersReached?: number;
+      communicationsSent?: number;
+    },
+  ): Promise<void> {
     const today = new Date().toISOString().split('T')[0];
     const analyticsId = `${campaignId}-${today}`;
 
@@ -845,17 +858,12 @@ export class DunningCampaignService {
       } catch (error) {
         logger.error('Retry failed for execution', {
           executionId: executionDb.id,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         });
 
         // If max retries reached, mark as permanently failed
         if (executionDb.retryCount >= 3) {
-          await this.executionRepo.updateStatus(
-            executionDb.id,
-            'failed',
-            undefined,
-            'Max retries exceeded',
-          );
+          await this.executionRepo.updateStatus(executionDb.id, 'failed', undefined, 'Max retries exceeded');
         } else {
           // Schedule next retry with exponential backoff
           const nextRetry = new Date();

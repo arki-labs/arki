@@ -4,17 +4,18 @@
  * rate limiting and optional input sanitization.
  */
 
-import { openai } from '@ai-sdk/openai';
-import { Output, streamText, generateText } from 'ai';
 import type { ModelMessage } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { generateText, Output, streamText } from 'ai';
+
 import { z } from '@arki/contracts';
 
-import { debugService } from '../debug.ts';
-import { GenerationError, RateLimitError, getErrorMessage } from '../errors';
-import { BaseInputSanitizer } from '../safety/input-sanitizer';
 import type { SanitizerConfig } from '../safety/types';
-import { validateInput, aiServiceConfigSchema } from '../validation';
+import { debugService } from '../debug.ts';
+import { GenerationError, getErrorMessage, RateLimitError } from '../errors';
+import { BaseInputSanitizer } from '../safety/input-sanitizer';
 import { rateLimiters } from '../utils/rate-limiter';
+import { aiServiceConfigSchema, validateInput } from '../validation';
 
 type ChatMessage = ModelMessage;
 
@@ -25,7 +26,7 @@ export type OpenAIServiceConfig = {
   maxRetries?: number;
   /** Enable input sanitization. `true` uses defaults; pass config object for customization. */
   sanitize?: boolean | SanitizerConfig;
-}
+};
 
 export type GenerationOptions = {
   temperature?: number;
@@ -38,14 +39,14 @@ export type GenerationOptions = {
    * timeouts to actually stop work upstream.
    */
   signal?: AbortSignal;
-}
+};
 
 export type OpenAIStreamOptions = {
   onStart?: () => void;
   onToken?: (token: string) => void;
   onComplete?: (text: string) => void;
   onError?: (error: Error) => void;
-} & GenerationOptions
+} & GenerationOptions;
 
 /**
  * Generic OpenAI Service for various AI tasks.
@@ -68,37 +69,29 @@ export class OpenAIService {
 
     // Initialize sanitizer if enabled
     if (validConfig.sanitize) {
-      const sanitizerConfig = typeof validConfig.sanitize === 'object'
-        ? validConfig.sanitize
-        : undefined;
+      const sanitizerConfig = typeof validConfig.sanitize === 'object' ? validConfig.sanitize : undefined;
       this.sanitizer = new BaseInputSanitizer(sanitizerConfig);
-      debugService('[OpenAI] Input sanitization enabled');
+      debugService.debug('[OpenAI] Input sanitization enabled');
     } else {
       this.sanitizer = null;
     }
 
-    debugService(
-      '[OpenAI] Service initialized (model: %s, temperature: %d, maxRetries: %d, sanitize: %s)',
-      this.model,
-      this.defaultTemperature,
-      this.defaultMaxRetries,
-      !!this.sanitizer,
+    debugService.debug(
+      '[OpenAI] Service initialized (model: {model}, temperature: {temperature}, maxRetries: {maxRetries}, sanitize: {sanitize})',
+      {
+        model: this.model,
+        temperature: this.defaultTemperature,
+        maxRetries: this.defaultMaxRetries,
+        sanitize: !!this.sanitizer,
+      },
     );
   }
 
   /**
    * Generate structured data from a prompt.
    */
-  async generateStructuredData<T>(
-    prompt: string,
-    schema: z.ZodSchema<T>,
-    options: GenerationOptions = {}
-  ): Promise<T> {
-    return this.generateStructuredDataFromMessages(
-      [{ role: 'user', content: prompt }],
-      schema,
-      options,
-    );
+  async generateStructuredData<T>(prompt: string, schema: z.ZodSchema<T>, options: GenerationOptions = {}): Promise<T> {
+    return this.generateStructuredDataFromMessages([{ role: 'user', content: prompt }], schema, options);
   }
 
   /**
@@ -108,19 +101,18 @@ export class OpenAIService {
   async generateStructuredDataFromMessages<T>(
     messages: ChatMessage[],
     schema: z.ZodSchema<T>,
-    options: GenerationOptions = {}
+    options: GenerationOptions = {},
   ): Promise<T> {
     const sanitizedMessages = this.sanitizeMessages(messages);
 
-    debugService(
-      '[OpenAI] Generating structured data (messages: %d, temperature: %d)',
-      sanitizedMessages.length,
-      options.temperature || this.defaultTemperature,
-    );
+    debugService.debug('[OpenAI] Generating structured data (messages: {messages}, temperature: {temperature})', {
+      messages: sanitizedMessages.length,
+      temperature: options.temperature || this.defaultTemperature,
+    });
 
     return this.withRateLimit('generateStructuredData', async () => {
       try {
-        debugService('[OpenAI] Calling OpenAI API for structured generation');
+        debugService.debug('[OpenAI] Calling OpenAI API for structured generation');
 
         const result = await generateText({
           model: openai(this.model),
@@ -132,16 +124,13 @@ export class OpenAIService {
           abortSignal: options.signal,
         });
 
-        debugService('[OpenAI] Structured data generated successfully');
+        debugService.debug('[OpenAI] Structured data generated successfully');
 
         return result.output as T;
       } catch (error) {
-        debugService('[OpenAI] Structured generation failed: %s', getErrorMessage(error));
+        debugService.debug('[OpenAI] Structured generation failed: {failed}', { failed: getErrorMessage(error) });
 
-        throw new GenerationError(
-          `Failed to generate structured data: ${getErrorMessage(error)}`,
-          error,
-        );
+        throw new GenerationError(`Failed to generate structured data: ${getErrorMessage(error)}`, error);
       }
     });
   }
@@ -149,13 +138,10 @@ export class OpenAIService {
   /**
    * Generate text completion.
    */
-  async generateText(
-    prompt: string,
-    options: GenerationOptions = {}
-  ): Promise<string> {
+  async generateText(prompt: string, options: GenerationOptions = {}): Promise<string> {
     const sanitizedPrompt = this.sanitizeInput(prompt);
 
-    debugService('[OpenAI] Generating text (prompt length: %d)', sanitizedPrompt.length);
+    debugService.debug('[OpenAI] Generating text (prompt length: {length})', { length: sanitizedPrompt.length });
 
     return this.withRateLimit('generateText', async () => {
       try {
@@ -168,16 +154,13 @@ export class OpenAIService {
           abortSignal: options.signal,
         });
 
-        debugService('[OpenAI] Text generated successfully (length: %d)', result.text.length);
+        debugService.debug('[OpenAI] Text generated successfully (length: {length})', { length: result.text.length });
 
         return result.text;
       } catch (error) {
-        debugService('[OpenAI] Text generation failed: %s', getErrorMessage(error));
+        debugService.debug('[OpenAI] Text generation failed: {failed}', { failed: getErrorMessage(error) });
 
-        throw new GenerationError(
-          `Failed to generate text: ${getErrorMessage(error)}`,
-          error,
-        );
+        throw new GenerationError(`Failed to generate text: ${getErrorMessage(error)}`, error);
       }
     });
   }
@@ -185,10 +168,7 @@ export class OpenAIService {
   /**
    * Generate text with conversation context.
    */
-  async generateConversation(
-    messages: ChatMessage[],
-    options: GenerationOptions = {}
-  ): Promise<string> {
+  async generateConversation(messages: ChatMessage[], options: GenerationOptions = {}): Promise<string> {
     const sanitizedMessages = this.sanitizeMessages(messages);
 
     return this.withRateLimit('generateConversation', async () => {
@@ -204,10 +184,7 @@ export class OpenAIService {
 
         return result.text;
       } catch (error) {
-        throw new GenerationError(
-          `Failed to generate conversation response: ${getErrorMessage(error)}`,
-          error,
-        );
+        throw new GenerationError(`Failed to generate conversation response: ${getErrorMessage(error)}`, error);
       }
     });
   }
@@ -215,10 +192,7 @@ export class OpenAIService {
   /**
    * Stream text generation.
    */
-  async *streamText(
-    prompt: string,
-    options: OpenAIStreamOptions = {}
-  ): AsyncGenerator<string, void, unknown> {
+  async *streamText(prompt: string, options: OpenAIStreamOptions = {}): AsyncGenerator<string, void, unknown> {
     const sanitizedPrompt = this.sanitizeInput(prompt);
 
     // Register rate limit slot before starting the stream
@@ -255,10 +229,7 @@ export class OpenAIService {
       if (options.onError) {
         options.onError(error as Error);
       }
-      throw new GenerationError(
-        `Failed to stream text: ${getErrorMessage(error)}`,
-        error,
-      );
+      throw new GenerationError(`Failed to stream text: ${getErrorMessage(error)}`, error);
     }
   }
 
@@ -267,7 +238,7 @@ export class OpenAIService {
    */
   async *streamConversation(
     messages: ChatMessage[],
-    options: OpenAIStreamOptions = {}
+    options: OpenAIStreamOptions = {},
   ): AsyncGenerator<string, void, unknown> {
     const sanitizedMessages = this.sanitizeMessages(messages);
 
@@ -305,10 +276,7 @@ export class OpenAIService {
       if (options.onError) {
         options.onError(error as Error);
       }
-      throw new GenerationError(
-        `Failed to stream conversation: ${getErrorMessage(error)}`,
-        error,
-      );
+      throw new GenerationError(`Failed to stream conversation: ${getErrorMessage(error)}`, error);
     }
   }
 
@@ -332,29 +300,30 @@ export class OpenAIService {
   async batchGenerate<T>(
     prompts: string[],
     schema?: z.ZodSchema<T>,
-    options: GenerationOptions = {}
+    options: GenerationOptions = {},
   ): Promise<(T | string)[]> {
-    debugService('[OpenAI] Batch generating %d prompts (structured: %s)', prompts.length, !!schema);
+    debugService.debug('[OpenAI] Batch generating {promptsLength} prompts (structured: {structured})', {
+      promptsLength: prompts.length,
+      structured: !!schema,
+    });
 
     const results = await Promise.allSettled(
       prompts.map(prompt =>
-        schema
-          ? this.generateStructuredData(prompt, schema, options)
-          : this.generateText(prompt, options)
-      )
+        schema ? this.generateStructuredData(prompt, schema, options) : this.generateText(prompt, options),
+      ),
     );
 
     const successCount = results.filter(r => r.status === 'fulfilled').length;
-    debugService('[OpenAI] Batch generation complete (%d/%d successful)', successCount, prompts.length);
+    debugService.debug('[OpenAI] Batch generation complete ({successCount}/{promptsLength} successful)', {
+      successCount,
+      promptsLength: prompts.length,
+    });
 
     return results.map((result, index) => {
       if (result.status === 'fulfilled') {
         return result.value;
       } else {
-        throw new GenerationError(
-          `Failed to generate for prompt ${index}`,
-          result.reason,
-        );
+        throw new GenerationError(`Failed to generate for prompt ${index}`, result.reason);
       }
     });
   }
@@ -395,10 +364,7 @@ Content: "${text}"`;
         return result.output;
       });
     } catch (error) {
-      throw new GenerationError(
-        `Failed to moderate content: ${getErrorMessage(error)}`,
-        error,
-      );
+      throw new GenerationError(`Failed to moderate content: ${getErrorMessage(error)}`, error);
     }
   }
 
@@ -411,7 +377,10 @@ Content: "${text}"`;
     const result = await rateLimiters.openai.execute(key, fn);
 
     if (!result.success) {
-      debugService('[OpenAI] Rate limit exceeded for %s (retry after: %dms)', key, result.retryAfterMs);
+      debugService.debug('[OpenAI] Rate limit exceeded for {key} (retry after: {after}ms)', {
+        key,
+        after: result.retryAfterMs,
+      });
 
       throw new RateLimitError(
         `Rate limit exceeded for ${key}: retry after ${result.retryAfterMs}ms`,
@@ -445,17 +414,14 @@ Content: "${text}"`;
     const report = this.sanitizer.sanitize(text);
 
     if (report.result === 'blocked') {
-      debugService('[OpenAI] Input blocked by sanitizer: %s', report.blockedReason);
-      throw new GenerationError(
-        `Input blocked: ${report.blockedReason}`,
-      );
+      debugService.debug('[OpenAI] Input blocked by sanitizer: {sanitizer}', { sanitizer: report.blockedReason });
+      throw new GenerationError(`Input blocked: ${report.blockedReason}`);
     }
 
     if (report.result === 'sanitized' && report.sanitizedInput) {
-      debugService(
-        '[OpenAI] Input sanitized (%d issues found)',
-        report.issuesFound.length,
-      );
+      debugService.debug('[OpenAI] Input sanitized ({issuesFoundLength} issues found)', {
+        issuesFoundLength: report.issuesFound.length,
+      });
       return report.sanitizedInput;
     }
 
