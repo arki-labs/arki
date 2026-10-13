@@ -34,7 +34,6 @@ export function oneAtATime<T>(handle: object, what: string, work: () => Promise<
       );
     });
   }
-  // eslint-disable-next-line drizzle/enforce-delete-with-where -- WeakMap#delete, not a Drizzle query
   const running = work().finally(() => inFlight.delete(handle));
   inFlight.set(handle, running);
   return running;
