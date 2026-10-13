@@ -3,8 +3,11 @@ import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 
 import type { UserId } from '@arki/auth/ids';
+import type { Money } from '@arki/money';
+import { MoneyBag } from '@arki/money/bag';
 
 import type { PaymentId } from '../core/primitives';
+import { fromDecimalColumn } from '../core/money';
 import type { RefundId, RefundReason, RefundStatus } from './primitives';
 import type { RefundsTables } from './tables';
 import type { Refund } from './types';
@@ -15,6 +18,11 @@ import type { Refund } from './types';
  * the host needs to register the `refunds` table in its schema but no
  * specific relations graph is required.
  */
+/** A refund row's amount: `decimal(10,2)` and a currency that defaults to USD, as the column does. */
+export function refundAmountOf(refund: Pick<Refund, 'refundAmount' | 'currency'>): Money {
+  return fromDecimalColumn(refund.refundAmount, refund.currency ?? 'USD');
+}
+
 export type RefundsDatabase =
   | NodePgDatabase<AnyRelations>
   | NodePgTransaction<AnyRelations>;
@@ -65,15 +73,23 @@ export class RefundRepository {
       .orderBy(desc(this.refunds.createdAt)) as Promise<Refund[]>;
   }
 
-  async getTotalRefundedAmount(paymentId: PaymentId): Promise<number> {
+  /** Completed refunds of a payment, in the payment's currency. */
+  async getTotalRefundedAmount(paymentId: PaymentId, currency: string): Promise<Money> {
     const result = await this.db
       .select({
-        total: sql<number>`SUM(CAST(${this.refunds.refundAmount} AS DECIMAL))`,
+        // A `decimal` sum: Postgres sends it as text, exact
+        total: sql<string | null>`SUM(${this.refunds.refundAmount})`,
       })
       .from(this.refunds)
-      .where(and(eq(this.refunds.paymentId, paymentId), eq(this.refunds.status, 'completed')));
+      .where(
+        and(
+          eq(this.refunds.paymentId, paymentId),
+          eq(this.refunds.status, 'completed'),
+          eq(this.refunds.currency, currency.toUpperCase()),
+        ),
+      );
 
-    return result[0]?.total ?? 0;
+    return fromDecimalColumn(result[0]?.total ?? '0', currency);
   }
 
   async getRefundMetrics(
@@ -81,7 +97,8 @@ export class RefundRepository {
     endDate?: Date,
   ): Promise<{
     totalCount: number;
-    totalAmount: number;
+    /** One exact total per currency: refunds in USD and EUR do not add up to one number */
+    totalAmount: MoneyBag;
     byStatus: Record<string, number>;
     byReason: Record<string, number>;
   }> {
@@ -102,7 +119,7 @@ export class RefundRepository {
 
     const metrics = {
       totalCount: allRefunds.length,
-      totalAmount: allRefunds.reduce((sum, r) => sum + Number.parseFloat(r.refundAmount || '0'), 0),
+      totalAmount: MoneyBag.empty().plus(...allRefunds.map(refund => refundAmountOf(refund))),
       byStatus: {} as Record<string, number>,
       byReason: {} as Record<string, number>,
     };
@@ -143,8 +160,9 @@ export class RefundRepository {
     userId?: UserId;
     startDate?: Date;
     endDate?: Date;
-    minAmount?: number;
-    maxAmount?: number;
+    /** Bounds also select their currency: refunds in another currency are left out */
+    minAmount?: Money;
+    maxAmount?: Money;
   }): Promise<Refund[]> {
     const conditions = [];
 
@@ -164,10 +182,16 @@ export class RefundRepository {
       conditions.push(lte(this.refunds.createdAt, filters.endDate));
     }
     if (filters.minAmount !== undefined) {
-      conditions.push(sql`CAST(${this.refunds.refundAmount} AS DECIMAL) >= ${filters.minAmount}`);
+      conditions.push(
+        eq(this.refunds.currency, filters.minAmount.currency.code),
+        gte(this.refunds.refundAmount, filters.minAmount.toDecimalString()),
+      );
     }
     if (filters.maxAmount !== undefined) {
-      conditions.push(sql`CAST(${this.refunds.refundAmount} AS DECIMAL) <= ${filters.maxAmount}`);
+      conditions.push(
+        eq(this.refunds.currency, filters.maxAmount.currency.code),
+        lte(this.refunds.refundAmount, filters.maxAmount.toDecimalString()),
+      );
     }
 
     return this.db

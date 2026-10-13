@@ -139,7 +139,8 @@ export function seedSubscription(writes: CoreWrites, status: SubscriptionStatus)
 export function seedPayment(
   writes: CoreWrites,
   subscriptionId: SubscriptionId | null,
-  amount = 25,
+  amount = '25',
+  currency = 'USD',
 ): Promise<Payment> {
   next += 1;
 
@@ -148,7 +149,7 @@ export function seedPayment(
     userId,
     customerId,
     providerPaymentId: `pi_service_${next}`,
-    amount,
+    amount: { amount, currency },
   });
 }
 

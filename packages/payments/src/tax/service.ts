@@ -1,3 +1,5 @@
+import { Money, sum } from '@arki/money';
+
 import type { StripeProvider } from '../core/providers/stripe-provider';
 import type { CustomerId, PaymentId, SubscriptionId } from '../core/types';
 
@@ -6,8 +8,9 @@ import type { CustomerId, PaymentId, SubscriptionId } from '../core/types';
  */
 export type TaxCalculationInput = {
   customerId: CustomerId;
+  /** Every line item is in `currency` */
   lineItems: {
-    amount: number;
+    amount: Money;
     description: string;
     reference: string;
     taxCode?: string;
@@ -31,17 +34,18 @@ export type TaxCalculationInput = {
 }
 
 /**
- * Tax calculation result with detailed breakdown
+ * Tax calculation result with detailed breakdown.
+ * Stripe Tax computes and rounds the tax; the amounts here are its, exactly.
  */
 export type TaxCalculationResult = {
-  subtotal: number;
-  taxAmount: number;
-  total: number;
+  subtotal: Money;
+  taxAmount: Money;
+  total: Money;
   taxInclusive: boolean;
   breakdown: {
     jurisdiction: string;
     rate: number;
-    amount: number;
+    amount: Money;
     taxCode?: string;
   }[];
   applicableTaxIds: string[];
@@ -54,9 +58,8 @@ export type TaxTransaction = {
   id: string;
   reference: string;
   type: 'sale' | 'refund';
-  amount: number;
-  taxAmount: number;
-  currency: string;
+  amount: Money;
+  taxAmount: Money;
   customerId?: CustomerId;
   paymentId?: PaymentId;
   subscriptionId?: SubscriptionId;
@@ -98,10 +101,10 @@ export class TaxService {
       });
 
       return {
-        subtotal: result.amountTotal - result.taxAmountExclusive,
+        subtotal: result.amountTotal.minus(result.taxAmountExclusive),
         taxAmount: result.taxAmountExclusive,
         total: result.amountTotal,
-        taxInclusive: result.taxAmountInclusive > 0,
+        taxInclusive: result.taxAmountInclusive.isPositive(),
         breakdown: result.taxBreakdown.map(breakdown => ({
           jurisdiction: breakdown.jurisdiction,
           rate: breakdown.rate,
@@ -113,11 +116,15 @@ export class TaxService {
     } catch (error) {
       console.error('Tax calculation failed:', error);
 
-      // Fallback: return zero tax if calculation fails
-      const subtotal = input.lineItems.reduce((sum, item) => sum + item.amount, 0);
+      // Fallback: return zero tax if calculation fails. `sum` is exact and throws on a line item in another currency
+      const currency = input.currency.toUpperCase();
+      const subtotal = sum(
+        input.lineItems.map(item => Money.of(item.amount, currency)),
+        currency,
+      );
       return {
         subtotal,
-        taxAmount: 0,
+        taxAmount: Money.zero(currency),
         total: subtotal,
         taxInclusive: false,
         breakdown: [],
@@ -136,8 +143,9 @@ export class TaxService {
     customerId?: CustomerId;
     paymentId?: PaymentId;
     subscriptionId?: SubscriptionId;
+    /** Every line item is in `currency` */
     lineItems: {
-      amount: number;
+      amount: Money;
       description: string;
       reference: string;
       taxCode?: string;
@@ -169,7 +177,6 @@ export class TaxService {
         type: params.type,
         amount: transaction.amountTotal,
         taxAmount: transaction.taxAmountExclusive,
-        currency: params.currency,
         customerId: params.customerId,
         paymentId: params.paymentId,
         subscriptionId: params.subscriptionId,
@@ -207,9 +214,8 @@ export class TaxService {
    */
   async calculateSubscriptionTax(params: {
     customerId: CustomerId;
-    planAmount: number;
+    planAmount: Money;
     planInterval: 'monthly' | 'yearly' | 'weekly' | 'daily';
-    currency: string;
     taxCode?: string;
     customerDetails?: TaxCalculationInput['customerDetails'];
   }): Promise<TaxCalculationResult> {
@@ -221,7 +227,7 @@ export class TaxService {
         reference: `subscription_${params.planInterval}`,
         taxCode: params.taxCode || 'txcd_10103000', // Software-as-a-Service tax code
       }],
-      currency: params.currency,
+      currency: params.planAmount.currency.code,
       customerDetails: params.customerDetails,
     });
   }
@@ -232,9 +238,8 @@ export class TaxService {
    */
   async calculateOneTimeTax(params: {
     customerId: CustomerId;
-    amount: number;
+    amount: Money;
     description: string;
-    currency: string;
     taxCode?: string;
     customerDetails?: TaxCalculationInput['customerDetails'];
   }): Promise<TaxCalculationResult> {
@@ -246,7 +251,7 @@ export class TaxService {
         reference: `onetime_${Date.now()}`,
         taxCode: params.taxCode || 'txcd_10000000', // General tax code
       }],
-      currency: params.currency,
+      currency: params.amount.currency.code,
       customerDetails: params.customerDetails,
     });
   }
@@ -316,12 +321,11 @@ export class TaxService {
     customerId: CustomerId;
     year: number;
   }): Promise<{
-    totalTaxPaid: number;
+    totalTaxPaid: Money;
     totalTransactions: number;
-    currency: string;
     breakdown: {
       jurisdiction: string;
-      taxAmount: number;
+      taxAmount: Money;
       transactionCount: number;
     }[];
   }> {
@@ -329,9 +333,8 @@ export class TaxService {
     // For now, we'll return a placeholder
 
     return {
-      totalTaxPaid: 0,
+      totalTaxPaid: Money.zero('USD'),
       totalTransactions: 0,
-      currency: 'USD',
       breakdown: [],
     };
   }
@@ -385,9 +388,8 @@ export function createTaxService(stripeProvider: StripeProvider): TaxService {
  * // Calculate tax for a subscription
  * const taxResult = await taxService.calculateSubscriptionTax({
  *   customerId: 'cus_123',
- *   planAmount: 2999, // $29.99
+ *   planAmount: money('29.99', 'USD'),
  *   planInterval: 'monthly',
- *   currency: 'USD',
  *   customerDetails: {
  *     address: {
  *       country: 'US',
@@ -397,8 +399,8 @@ export function createTaxService(stripeProvider: StripeProvider): TaxService {
  *   },
  * });
  *
- * console.log(`Subtotal: $${taxResult.subtotal}`);
- * console.log(`Tax: $${taxResult.taxAmount}`);
- * console.log(`Total: $${taxResult.total}`);
+ * formatMoney(taxResult.subtotal); // '$29.99'
+ * formatMoney(taxResult.taxAmount);
+ * formatMoney(taxResult.total);
  * ```
  */

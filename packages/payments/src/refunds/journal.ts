@@ -11,19 +11,23 @@
  * Who approved, rejected or requested is command input, not journal metadata:
  * the metadata belongs to the app, and these are columns of the row anyway.
  *
- * Event data is plain JSON. Times come from `e.recordedAt`. Amounts are
- * numbers in events; the `decimal(10,2)` columns hold strings, so reducers
- * return `amount.toFixed(2)`.
+ * Event data is plain JSON. Times come from `e.recordedAt`. Commands take
+ * amounts as `Money` JSON (`{ amount: '25.50', currency: 'EUR' }`) and check
+ * them exactly. Events keep amounts as numbers, the format already stored;
+ * the `decimal(10,2)` columns hold strings, so reducers return
+ * `amount.toFixed(2)`.
  */
 
 import type { CommandRunner, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import { userIdSchema } from '@arki/auth/ids';
 import { z } from '@arki/contracts';
 import { CommandError } from '@arki/journal';
+import { anyMoneySchema } from '@arki/money/zod';
 
 import type { RefundsTables } from './tables';
 import type { Refund } from './types';
 import { writtenRow } from '../core/journal/support';
+import { toStoredNumber } from '../core/money';
 import { paymentIdSchema } from '../core/primitives';
 import { createRefundId, refundIdSchema, refundReasonValues } from './primitives';
 
@@ -35,9 +39,9 @@ export const requestRefundInputSchema = z.object({
   /** Left out: the command makes a new id */
   refundId: refundIdSchema.optional(),
   paymentId: paymentIdSchema,
-  originalAmount: z.number(),
-  refundAmount: z.number(),
-  currency: z.string().length(3).default('USD'),
+  /** The two amounts share one currency, which is the refund's */
+  originalAmount: anyMoneySchema(),
+  refundAmount: anyMoneySchema(),
   reason: reasonSchema,
   customerNote: z.string().nullable().optional(),
   internalNotes: z.string().nullable().optional(),
@@ -181,23 +185,30 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
         throw new CommandError('CONFLICT', `Refund ${refundId} already exists`);
       }
 
-      if (input.refundAmount > input.originalAmount) {
+      if (!input.refundAmount.hasSameCurrency(input.originalAmount)) {
         throw new CommandError(
           'BAD_REQUEST',
-          `Refund amount (${input.refundAmount}) cannot exceed original amount (${input.originalAmount})`,
+          `Refund currency (${input.refundAmount.currency.code}) differs from the original currency (${input.originalAmount.currency.code})`,
         );
       }
 
-      if (input.refundAmount <= 0) {
+      if (input.refundAmount.gt(input.originalAmount)) {
+        throw new CommandError(
+          'BAD_REQUEST',
+          `Refund amount (${input.refundAmount.toString()}) cannot exceed original amount (${input.originalAmount.toString()})`,
+        );
+      }
+
+      if (!input.refundAmount.isPositive()) {
         throw new CommandError('BAD_REQUEST', 'Refund amount must be positive');
       }
 
       return [
         RefundRequested({
           paymentId: input.paymentId,
-          originalAmount: input.originalAmount,
-          refundAmount: input.refundAmount,
-          currency: input.currency,
+          originalAmount: toStoredNumber(input.originalAmount),
+          refundAmount: toStoredNumber(input.refundAmount),
+          currency: input.refundAmount.currency.code,
           reason: input.reason,
           customerNote: input.customerNote ?? null,
           internalNotes: input.internalNotes ?? null,

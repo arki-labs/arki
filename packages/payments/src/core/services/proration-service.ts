@@ -1,5 +1,9 @@
+import { Money, max } from '@arki/money';
+import { formatMoney } from '@arki/money/format';
+
 import type { PaymentRepository } from '../repository';
 import type { Plan, PlanId, Subscription, SubscriptionId, SubscriptionPreview } from '../types';
+import { planPrice } from '../money';
 
 type PlanLike = Partial<Plan> & Pick<Plan, 'id' | 'name' | 'price' | 'interval' | 'intervalCount' | 'isActive'>;
 type SubscriptionLike = Partial<Subscription> &
@@ -29,17 +33,25 @@ export type ProrationCalculation = {
   currentPlan: Plan;
   newPlan: Plan;
   subscription: Subscription;
-  remainingTime: {
-    days: number;
-    percentage: number;
-  };
-  costs: {
-    unusedCredit: number;
-    newPlanProrated: number;
-    immediateCharge: number;
-    nextInvoiceTotal: number;
-  };
+  remainingTime: RemainingTime;
+  costs: ProrationCosts;
   effectiveDate: Date;
+};
+
+/** What is left of the current period. `percentage` is for display; costs use the exact milliseconds. */
+type RemainingTime = {
+  days: number;
+  percentage: number;
+  remainingMs: number;
+  totalPeriodMs: number;
+};
+
+/** All in the plans' currency. Plans in two currencies throw `CurrencyMismatchError`. */
+export type ProrationCosts = {
+  unusedCredit: Money;
+  newPlanProrated: Money;
+  immediateCharge: Money;
+  nextInvoiceTotal: Money;
 };
 
 export type ProrationOptions = {
@@ -48,8 +60,11 @@ export type ProrationOptions = {
   previewOnly?: boolean;
 };
 
+/** The reads the service makes. A `PaymentRepository` fits. */
+type ProrationReads = Pick<PaymentRepository, 'findSubscriptionById' | 'findPlanById'>;
+
 export class ProrationService {
-  constructor(private readonly paymentRepository: PaymentRepository) {}
+  constructor(private readonly paymentRepository: ProrationReads) {}
 
   async calculateProration(
     subscriptionId: SubscriptionId,
@@ -107,9 +122,9 @@ export class ProrationService {
     return {
       planId: newPlanId,
       proration: {
-        immediateTotal: proration.costs.immediateCharge,
-        nextInvoiceTotal: proration.costs.nextInvoiceTotal,
-        creditApplied: proration.costs.unusedCredit,
+        immediateTotal: proration.costs.immediateCharge.toJSON(),
+        nextInvoiceTotal: proration.costs.nextInvoiceTotal.toJSON(),
+        creditApplied: proration.costs.unusedCredit.toJSON(),
       },
       trialEnd: proration.subscription.trialEnd ?? undefined,
       nextBillingDate,
@@ -143,7 +158,7 @@ export class ProrationService {
     recommendations: {
       bestOption: 'immediate' | 'next_cycle';
       reason: string;
-      savings?: number;
+      savings?: Money;
     };
   }> {
     const immediate = await this.calculateProration(subscriptionId, newPlanId, {
@@ -163,25 +178,24 @@ export class ProrationService {
 
     let bestOption: 'immediate' | 'next_cycle' = 'immediate';
     let reason = 'Immediate change provides better value';
-    let savings: number | undefined;
+    let savings: Money | undefined;
 
     const immediateCost = immediate.costs.immediateCharge;
     const nextCycleCost = nextBillingCycle.costs.nextInvoiceTotal;
+    const newPrice = planPrice(immediate.newPlan);
+    const currentPrice = planPrice(immediate.currentPlan);
 
-    if (nextCycleCost < immediateCost) {
+    if (nextCycleCost.lt(immediateCost)) {
       bestOption = 'next_cycle';
       reason = 'Waiting until next billing cycle saves money';
-      savings = immediateCost - nextCycleCost;
-    } else if (immediate.newPlan.price < immediate.currentPlan.price) {
+      savings = immediateCost.minus(nextCycleCost);
+    } else if (newPrice.lt(currentPrice)) {
       bestOption = 'immediate';
       reason = 'Start saving immediately with lower-tier plan';
-    } else if (
-      immediate.newPlan.price > immediate.currentPlan.price &&
-      immediateCost > immediate.newPlan.price
-    ) {
+    } else if (newPrice.gt(currentPrice) && immediateCost.gt(newPrice)) {
       bestOption = 'next_cycle';
       reason = 'Avoid double-billing by waiting for next cycle';
-      savings = immediateCost - nextCycleCost;
+      savings = immediateCost.minus(nextCycleCost);
     }
 
     return {
@@ -195,10 +209,7 @@ export class ProrationService {
     };
   }
 
-  private calculateRemainingTime(
-    subscription: Subscription,
-    effectiveDate: Date,
-  ): { days: number; percentage: number } {
+  private calculateRemainingTime(subscription: Subscription, effectiveDate: Date): RemainingTime {
     const currentPeriodStart = new Date(subscription.currentPeriodStart);
     const currentPeriodEnd = new Date(subscription.currentPeriodEnd);
     const effective = new Date(effectiveDate);
@@ -217,52 +228,58 @@ export class ProrationService {
     const days = Math.ceil(remainingMs / (1000 * 60 * 60 * 24));
     const percentage = (remainingMs / totalPeriodMs) * 100;
 
-    return { days, percentage: Math.round(percentage * 100) / 100 };
+    return { days, percentage: Math.round(percentage * 100) / 100, remainingMs, totalPeriodMs };
+  }
+
+  /**
+   * The part of `price` for the time left, split by `allocate`: the part left
+   * and the part used always add up to the price exactly, so a credit never
+   * gives back a cent more or less than was paid for the period.
+   */
+  private remainingShare(price: Money, remainingTime: RemainingTime): Money {
+    const [remaining] = price.allocate([
+      remainingTime.remainingMs,
+      remainingTime.totalPeriodMs - remainingTime.remainingMs,
+    ]);
+    if (!remaining) {
+      throw new Error('allocate returned no parts');
+    }
+    return remaining;
   }
 
   private calculateProrationCosts(
     currentPlan: Plan,
     newPlan: Plan,
-    remainingTime: { days: number; percentage: number },
+    remainingTime: RemainingTime,
     prorationBehavior: 'create_prorations' | 'none' | 'always_invoice',
-  ): {
-    unusedCredit: number;
-    newPlanProrated: number;
-    immediateCharge: number;
-    nextInvoiceTotal: number;
-  } {
-    const currentPlanProrated = (currentPlan.price * remainingTime.percentage) / 100;
-    const newPlanProrated = (newPlan.price * remainingTime.percentage) / 100;
+  ): ProrationCosts {
+    const currentPrice = planPrice(currentPlan);
+    const newPrice = planPrice(newPlan);
+    // Plans in two currencies throw CurrencyMismatchError where a credit meets a charge
+    const zero = Money.zero(newPrice.currency);
+    const currentPlanProrated = this.remainingShare(currentPrice, remainingTime);
+    const newPlanProrated = this.remainingShare(newPrice, remainingTime);
 
-    let unusedCredit = 0;
-    let immediateCharge = 0;
-    let nextInvoiceTotal = newPlan.price;
+    let unusedCredit = zero;
+    let immediateCharge = zero;
+    const nextInvoiceTotal = newPrice;
 
     switch (prorationBehavior) {
       case 'create_prorations': {
         unusedCredit = currentPlanProrated;
-        immediateCharge = Math.max(0, newPlanProrated - unusedCredit);
+        immediateCharge = max(zero, newPlanProrated.minus(unusedCredit));
         break;
       }
       case 'none': {
-        unusedCredit = 0;
-        immediateCharge = 0;
-        nextInvoiceTotal = newPlan.price;
         break;
       }
       case 'always_invoice': {
-        unusedCredit = 0;
         immediateCharge = newPlanProrated;
         break;
       }
     }
 
-    return {
-      unusedCredit: Math.round(unusedCredit * 100) / 100,
-      newPlanProrated: Math.round(newPlanProrated * 100) / 100,
-      immediateCharge: Math.round(immediateCharge * 100) / 100,
-      nextInvoiceTotal: Math.round(nextInvoiceTotal * 100) / 100,
-    };
+    return { unusedCredit, newPlanProrated, immediateCharge, nextInvoiceTotal };
   }
 
   private calculateNextBillingDate(
@@ -310,46 +327,47 @@ export class ProrationService {
     description: string;
     breakdown: {
       label: string;
-      amount: number;
+      amount: Money;
       description?: string;
     }[];
-    totalChange: number;
+    totalChange: Money;
     effectiveDate: string;
   }> {
     const proration = await this.calculateProration(subscriptionId, newPlanId, options);
+    const newPrice = planPrice(proration.newPlan);
 
-    const isUpgrade = proration.newPlan.price > proration.currentPlan.price;
+    const isUpgrade = newPrice.gt(planPrice(proration.currentPlan));
     const title = isUpgrade ? 'Plan Upgrade' : 'Plan Downgrade';
 
     const breakdown: {
       label: string;
-      amount: number;
+      amount: Money;
       description?: string;
     }[] = [];
 
-    if (proration.costs.unusedCredit > 0) {
+    if (proration.costs.unusedCredit.isPositive()) {
       breakdown.push({
         label: 'Unused credit from current plan',
-        amount: -proration.costs.unusedCredit,
+        amount: proration.costs.unusedCredit.negated(),
         description: `${proration.remainingTime.days} days remaining on ${proration.currentPlan.name}`,
       });
     }
 
-    if (proration.costs.newPlanProrated > 0) {
+    if (proration.costs.newPlanProrated.isPositive()) {
       breakdown.push({
         label: `Prorated charge for ${proration.newPlan.name}`,
         amount: proration.costs.newPlanProrated,
-        description: `${proration.remainingTime.days} days at $${proration.newPlan.price}/${proration.newPlan.interval}`,
+        description: `${proration.remainingTime.days} days at ${formatMoney(newPrice)}/${proration.newPlan.interval}`,
       });
     }
 
     const totalChange = proration.costs.immediateCharge;
 
     let description = `Your plan will change from ${proration.currentPlan.name} to ${proration.newPlan.name}`;
-    if (totalChange > 0) {
-      description += ` with an immediate charge of $${totalChange.toFixed(2)}.`;
-    } else if (totalChange < 0) {
-      description += ` with a credit of $${Math.abs(totalChange).toFixed(2)}.`;
+    if (totalChange.isPositive()) {
+      description += ` with an immediate charge of ${formatMoney(totalChange)}.`;
+    } else if (totalChange.isNegative()) {
+      description += ` with a credit of ${formatMoney(totalChange.abs())}.`;
     } else {
       description += ' with no immediate charge.';
     }
@@ -364,6 +382,6 @@ export class ProrationService {
   }
 }
 
-export function createProrationService(paymentRepository: PaymentRepository): ProrationService {
+export function createProrationService(paymentRepository: ProrationReads): ProrationService {
   return new ProrationService(paymentRepository);
 }

@@ -1,6 +1,9 @@
 import Stripe from 'stripe';
 
 import type { UserId } from '@arki/auth/ids';
+import { Money, sum } from '@arki/money';
+import { fromStripeAmount, toStripeAmount } from '@arki/money/stripe';
+import { toStoredNumber } from '../money';
 import {
   createCustomerId,
   createPlanId
@@ -99,8 +102,7 @@ export class StripeProvider extends BasePaymentProvider {
 
   async createPlan(params: {
     name: string;
-    amount: number;
-    currency: string;
+    amount: Money;
     interval: BillingInterval;
     intervalCount?: number;
     trialPeriodDays?: number;
@@ -113,8 +115,8 @@ export class StripeProvider extends BasePaymentProvider {
 
     const stripePrice = await this.stripe.prices.create({
       product: stripeProduct.id,
-      unit_amount: this.formatAmount(params.amount),
-      currency: params.currency,
+      unit_amount: toStripeAmount(params.amount),
+      currency: params.amount.currency.code,
       recurring: {
         interval: this.mapBillingIntervalToStripe(params.interval),
         interval_count: params.intervalCount || 1,
@@ -127,8 +129,8 @@ export class StripeProvider extends BasePaymentProvider {
       name: params.name,
       description: '',
       tier: 'basic', // Would be determined by business logic
-      price: params.amount,
-      currency: params.currency,
+      price: toStoredNumber(params.amount),
+      currency: params.amount.currency.code,
       interval: params.interval,
       intervalCount: params.intervalCount || 1,
       features: [], // Would be populated from metadata or separate config
@@ -227,8 +229,7 @@ export class StripeProvider extends BasePaymentProvider {
 
   async createPayment(_params: {
     customerId: CustomerId;
-    amount: number;
-    currency: string;
+    amount: Money;
     paymentMethodId: string;
     description?: string;
     metadata?: Record<string, unknown>;
@@ -254,16 +255,19 @@ export class StripeProvider extends BasePaymentProvider {
 
   async refundPayment(
     paymentId: PaymentId,
-    params: { amount?: number; reason?: string; metadata?: Record<string, unknown> },
+    params: { amount?: Money; reason?: string; metadata?: Record<string, unknown> },
   ): Promise<Payment> {
     // For the refund service, we need to refund using the Stripe payment intent ID
     // This assumes paymentId is the Stripe payment intent ID
     const refund = await this.stripe.refunds.create({
       payment_intent: paymentId,
-      amount: params.amount ? this.formatAmount(params.amount) : undefined,
+      // Stripe's own units: JPY is sent as yen, not yen × 100
+      amount: params.amount === undefined ? undefined : toStripeAmount(params.amount),
       reason: this.mapRefundReasonToStripe(params.reason),
       metadata: params.metadata as Stripe.MetadataParam,
     });
+
+    const refunded = fromStripeAmount(refund.amount, refund.currency);
 
     // Return a simplified Payment object for the refund
     // In a real implementation, this would create a proper Payment record
@@ -273,15 +277,15 @@ export class StripeProvider extends BasePaymentProvider {
       customerId: 'cust_placeholder' as CustomerId,
       subscriptionId: null,
       providerPaymentId: refund.id,
-      amount: refund.amount / 100, // Convert back from cents
-      currency: refund.currency || 'usd',
+      amount: toStoredNumber(refunded),
+      currency: refunded.currency.code,
       status: refund.status === 'succeeded' ? 'succeeded' : 'failed',
       paymentMethod: 'card', // Default
       description: `Refund for ${paymentId}`,
       failureReason: null,
       receiptUrl: null,
       refunded: true,
-      refundedAmount: refund.amount / 100,
+      refundedAmount: toStoredNumber(refunded),
       metadata: refund.metadata ? Object.fromEntries(
         Object.entries(refund.metadata).map(([k, v]) => [k, v ?? null])
       ) as Record<string, unknown> : null,
@@ -363,8 +367,7 @@ export class StripeProvider extends BasePaymentProvider {
 
   async createPaymentIntent(_params: {
     customerId: CustomerId;
-    amount: number;
-    currency: string;
+    amount: Money;
     paymentMethodId?: string;
     automatic: boolean;
   }): Promise<{
@@ -439,8 +442,9 @@ export class StripeProvider extends BasePaymentProvider {
   // Tax-related methods
   async calculateTax(params: {
     customerId: CustomerId;
+    /** Every line item is in `currency`: one calculation has one currency. */
     lineItems: {
-      amount: number;
+      amount: Money;
       reference: string;
       taxCode?: string;
     }[];
@@ -460,11 +464,11 @@ export class StripeProvider extends BasePaymentProvider {
       }[];
     };
   }): Promise<{
-    amountTotal: number;
-    taxAmountExclusive: number;
-    taxAmountInclusive: number;
+    amountTotal: Money;
+    taxAmountExclusive: Money;
+    taxAmountInclusive: Money;
     taxBreakdown: {
-      amount: number;
+      amount: Money;
       rate: number;
       jurisdiction: string;
       taxCode?: string;
@@ -473,7 +477,8 @@ export class StripeProvider extends BasePaymentProvider {
     const calculation = await this.stripe.tax.calculations.create({
       currency: params.currency,
       line_items: params.lineItems.map(item => ({
-        amount: this.formatAmount(item.amount),
+        // Throws CurrencyMismatchError for a line item in another currency
+        amount: toStripeAmount(Money.of(item.amount, params.currency.toUpperCase())),
         reference: item.reference,
         tax_code: item.taxCode || 'txcd_10000000', // General tax code
       })),
@@ -492,12 +497,12 @@ export class StripeProvider extends BasePaymentProvider {
     });
 
     return {
-      amountTotal: calculation.amount_total / 100,
-      taxAmountExclusive: calculation.tax_amount_exclusive / 100,
-      taxAmountInclusive: calculation.tax_amount_inclusive / 100,
+      amountTotal: fromStripeAmount(calculation.amount_total, calculation.currency),
+      taxAmountExclusive: fromStripeAmount(calculation.tax_amount_exclusive, calculation.currency),
+      taxAmountInclusive: fromStripeAmount(calculation.tax_amount_inclusive, calculation.currency),
       taxBreakdown: calculation.line_items?.data?.flatMap((item: Stripe.Tax.CalculationLineItem) =>
         item.tax_breakdown?.map((breakdown: Stripe.Tax.CalculationLineItem.TaxBreakdown) => ({
-          amount: breakdown.amount / 100,
+          amount: fromStripeAmount(breakdown.amount, calculation.currency),
           rate: typeof breakdown.tax_rate_details?.percentage_decimal === 'number'
             ? breakdown.tax_rate_details.percentage_decimal
             : Number.parseFloat(String(breakdown.tax_rate_details?.percentage_decimal || 0)),
@@ -511,8 +516,9 @@ export class StripeProvider extends BasePaymentProvider {
   async createTaxTransaction(params: {
     reference: string;
     type: 'sale' | 'refund';
+    /** Every line item is in `currency`. */
     lineItems: {
-      amount: number;
+      amount: Money;
       quantity?: number;
       reference: string;
       taxCode?: string;
@@ -535,16 +541,20 @@ export class StripeProvider extends BasePaymentProvider {
     };
   }): Promise<{
     id: string;
-    amountTotal: number;
-    taxAmountExclusive: number;
-    taxAmountInclusive: number;
+    amountTotal: Money;
+    taxAmountExclusive: Money;
+    taxAmountInclusive: Money;
   }> {
     // For now, we'll simulate a tax transaction since Stripe's Tax API
     // may have different endpoints for transaction recording
 
     // In production, this would integrate with Stripe's actual tax recording API
     const transactionId = `txn_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-    const totalAmount = params.lineItems.reduce((sum, item) => sum + (item.amount * (item.quantity || 1)), 0);
+    // A whole quantity times an amount is exact: no rounding mode needed
+    const totalAmount = sum(
+      params.lineItems.map(item => Money.of(item.amount, params.currency.toUpperCase()).times(item.quantity || 1)),
+      params.currency.toUpperCase(),
+    );
 
     // This would typically call Stripe's tax transaction API
     // await this.stripe.tax.transactions.createFromCalculation(...)
@@ -552,8 +562,8 @@ export class StripeProvider extends BasePaymentProvider {
     return {
       id: transactionId,
       amountTotal: totalAmount,
-      taxAmountExclusive: 0, // Would be calculated by Stripe
-      taxAmountInclusive: 0, // Would be calculated by Stripe
+      taxAmountExclusive: Money.zero(params.currency.toUpperCase()), // Would be calculated by Stripe
+      taxAmountInclusive: Money.zero(params.currency.toUpperCase()), // Would be calculated by Stripe
     };
   }
 

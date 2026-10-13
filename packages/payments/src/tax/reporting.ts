@@ -1,3 +1,6 @@
+import { money, sum } from '@arki/money';
+import type { Money } from '@arki/money';
+
 import type { StripeProvider } from '../core/providers/stripe-provider';
 
 /**
@@ -19,11 +22,10 @@ export type TaxComplianceReport = {
   reportType: 'sales_and_use_tax' | 'vat' | 'gst';
   period: ReportingPeriod;
   jurisdiction: string;
-  totalSales: number;
-  totalTaxCollected: number;
-  exemptSales: number;
+  totalSales: Money;
+  totalTaxCollected: Money;
+  exemptSales: Money;
   transactions: number;
-  currency: string;
   generatedAt: Date;
   status: 'pending' | 'completed' | 'failed';
   downloadUrl?: string;
@@ -33,8 +35,8 @@ export type TaxComplianceReport = {
     averageTaxRate: number;
     topTaxCategories: {
       category: string;
-      sales: number;
-      tax: number;
+      sales: Money;
+      tax: Money;
     }[];
   };
 }
@@ -45,20 +47,19 @@ export type TaxComplianceReport = {
 export type CustomerTaxSummary = {
   customerId: string;
   year: number;
-  totalPaid: number;
-  totalTax: number;
-  currency: string;
+  totalPaid: Money;
+  totalTax: Money;
   transactions: {
     id: string;
     date: Date;
-    amount: number;
-    tax: number;
+    amount: Money;
+    tax: Money;
     type: 'subscription' | 'one_time';
     description: string;
   }[];
   exemptions: {
     type: string;
-    amount: number;
+    amount: Money;
     reason: string;
   }[];
 }
@@ -114,7 +115,8 @@ export class TaxReportingService {
       const summary = {
         taxableTransactions: localSummary.taxableCount,
         exemptTransactions: localSummary.exemptCount,
-        averageTaxRate: localSummary.totalTax / localSummary.totalSales || 0,
+        // A display ratio of two amounts in one currency, not an amount
+        averageTaxRate: localSummary.totalTax.toMinorNumber() / localSummary.totalSales.toMinorNumber() || 0,
         topTaxCategories: localSummary.categories,
       };
 
@@ -127,7 +129,6 @@ export class TaxReportingService {
         totalTaxCollected: localSummary.totalTax,
         exemptSales: localSummary.exemptSales,
         transactions: localSummary.transactionCount,
-        currency: 'USD', // Would be configurable
         generatedAt: new Date(),
         status: stripeReport.status as any,
         downloadUrl: stripeReport.downloadUrl,
@@ -156,15 +157,15 @@ export class TaxReportingService {
       const transactions = await this.getCustomerTransactions(customerId, startDate, endDate);
       const exemptions = await this.getCustomerExemptions(customerId, year);
 
-      const totalPaid = transactions.reduce((sum, t) => sum + t.amount, 0);
-      const totalTax = transactions.reduce((sum, t) => sum + t.tax, 0);
+      // Exact sums; a transaction in another currency throws CurrencyMismatchError
+      const totalPaid = sum(transactions.map(t => t.amount), 'USD');
+      const totalTax = sum(transactions.map(t => t.tax), 'USD');
 
       return {
         customerId,
         year,
         totalPaid,
         totalTax,
-        currency: 'USD',
         transactions,
         exemptions,
       };
@@ -314,15 +315,15 @@ export class TaxReportingService {
     // This would perform complex database aggregations
     // For now, return placeholder data
     return {
-      totalSales: 50_000,
-      totalTax: 4500,
-      exemptSales: 2000,
+      totalSales: money(50_000, 'USD'),
+      totalTax: money(4500, 'USD'),
+      exemptSales: money(2000, 'USD'),
       taxableCount: 150,
       exemptCount: 10,
       transactionCount: 160,
       categories: [
-        { category: 'SaaS Subscriptions', sales: 40_000, tax: 3600 },
-        { category: 'One-time Payments', sales: 10_000, tax: 900 },
+        { category: 'SaaS Subscriptions', sales: money(40_000, 'USD'), tax: money(3600, 'USD') },
+        { category: 'One-time Payments', sales: money(10_000, 'USD'), tax: money(900, 'USD') },
       ],
     };
   }
@@ -334,8 +335,8 @@ export class TaxReportingService {
       {
         id: 'pay_123',
         date: new Date('2024-01-15'),
-        amount: 2999,
-        tax: 270,
+        amount: money('29.99', 'USD'),
+        tax: money('2.70', 'USD'),
         type: 'subscription' as const,
         description: 'Pro Plan - Monthly',
       },

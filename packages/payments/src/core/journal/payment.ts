@@ -4,9 +4,11 @@
  * One `payments` row is the current state of a payment, keyed by its id.
  * A payment starts `pending` and ends `succeeded`, `failed` or `canceled`.
  *
- * `amount` is a `real` column: a 4-byte float. The event keeps the amount as
- * it was given. The reducer returns the number the column will hold (see
- * `storedReal`), because the journal compares the two.
+ * The command takes the amount as `Money` JSON (`{ amount: '19.99',
+ * currency: 'USD' }`). `amount` is a `real` column: a 4-byte float. The event
+ * keeps the amount as a number, the format already stored. The reducer returns
+ * the number the column will hold (see `storedReal`), because the journal
+ * compares the two.
  */
 
 import type { JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
@@ -22,6 +24,7 @@ import {
   paymentMethodTypeValues,
   subscriptionIdSchema,
 } from '../primitives';
+import { nonNegativeMoneySchema, toStoredNumber } from '../money';
 import { storedReal } from './support';
 
 type PaymentRow = CoreTables['payments']['$inferSelect'];
@@ -36,8 +39,7 @@ export const initiatePaymentInputSchema = z.object({
   userId: userIdSchema,
   customerId: customerIdSchema,
   providerPaymentId: z.string().min(1).max(255),
-  amount: z.number().nonnegative(),
-  currency: z.string().length(3).default('USD'),
+  amount: nonNegativeMoneySchema,
   paymentMethod: paymentMethodSchema.default('card'),
   description: z.string().nullable().optional(),
   metadata: metadataSchema.nullable().optional(),
@@ -134,8 +136,8 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
           userId: input.userId,
           customerId: input.customerId,
           providerPaymentId: input.providerPaymentId,
-          amount: input.amount,
-          currency: input.currency,
+          amount: toStoredNumber(input.amount),
+          currency: input.amount.currency.code,
           paymentMethod: input.paymentMethod,
           description: input.description ?? null,
           metadata: input.metadata ?? null,

@@ -13,9 +13,13 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import type { Money } from '@arki/money';
+import { money } from '@arki/money';
+
 import type { CoreWrites } from '../core/journal';
 import type { AppDb } from '../test-support';
 import type { RefundWrites } from './journal';
+import { toStoredNumber } from '../core/money';
 import { createPaymentId } from '../core/primitives';
 import { coreReads, refundReads, refundRow, runnerOn, seedPayment } from '../service-test-support';
 import { adminId, countEvents, customerId, eventTypesOf, openDb, rejectionOf, typed, userId } from '../test-support';
@@ -32,28 +36,35 @@ let writes: RefundWrites;
 const refundedAs = createPaymentId();
 const refundedOn = new Date('2026-01-10T00:00:00.000Z');
 
+/** Every amount the provider was asked to pay back, in order. */
+const askedToRefund: (Money | undefined)[] = [];
+
 /** A provider that pays the refund back. */
 const providerThatRefunds: Provider = {
-  refundPayment: (providerPaymentId, params) =>
-    Promise.resolve({
+  refundPayment: (providerPaymentId, params) => {
+    askedToRefund.push(params.amount);
+    const refunded = params.amount ?? money(0, 'USD');
+
+    return Promise.resolve({
       id: refundedAs,
       userId,
       customerId,
       subscriptionId: null,
       providerPaymentId: 're_test',
-      amount: params.amount ?? 0,
-      currency: 'usd',
+      amount: toStoredNumber(refunded),
+      currency: refunded.currency.code,
       status: 'succeeded',
       paymentMethod: 'card',
       description: `Refund for ${providerPaymentId}`,
       failureReason: null,
       receiptUrl: null,
       refunded: true,
-      refundedAmount: params.amount ?? 0,
+      refundedAmount: toStoredNumber(refunded),
       metadata: null,
       createdAt: refundedOn,
       updatedAt: refundedOn,
-    }),
+    });
+  },
 };
 
 const providerThatRefuses: Provider = {
@@ -65,8 +76,8 @@ function serviceWith(provider: Provider) {
 }
 
 /** A request above the auto-approve limit, for a reason that needs a person to approve. */
-async function pendingRefund(service: RefundService, amount = 40) {
-  const payment = await seedPayment(coreWrites, null, 100);
+async function pendingRefund(service: RefundService, amount = money(40, 'USD')) {
+  const payment = await seedPayment(coreWrites, null, '100');
 
   return service.requestRefund({ paymentId: payment.id, amount, reason: 'customer_request', requestedBy: userId });
 }
@@ -91,11 +102,11 @@ describe('requestRefund', () => {
   });
 
   it('a small refund is approved by the system and paid back at once: four steps, four events', async () => {
-    const payment = await seedPayment(coreWrites, null, 100);
+    const payment = await seedPayment(coreWrites, null, '100');
 
     const refund = await serviceWith(providerThatRefunds).requestRefund({
       paymentId: payment.id,
-      amount: 5,
+      amount: money(5, 'USD'),
       reason: 'customer_request',
       requestedBy: userId,
     });
@@ -116,7 +127,7 @@ describe('requestRefund', () => {
     const error = await rejectionOf(
       serviceWith(providerThatRefunds).requestRefund({
         paymentId: createPaymentId(),
-        amount: 5,
+        amount: money(5, 'USD'),
         reason: 'customer_request',
         requestedBy: userId,
       }),
@@ -127,13 +138,13 @@ describe('requestRefund', () => {
   });
 
   it('a refund above what was paid is turned down and writes nothing', async () => {
-    const payment = await seedPayment(coreWrites, null, 30);
+    const payment = await seedPayment(coreWrites, null, '30');
     const eventsBefore = await countEvents(db);
 
     const error = await rejectionOf(
       serviceWith(providerThatRefunds).requestRefund({
         paymentId: payment.id,
-        amount: 31,
+        amount: money('30.01', 'USD'),
         reason: 'customer_request',
         requestedBy: userId,
       }),
@@ -141,6 +152,69 @@ describe('requestRefund', () => {
 
     expect(error).toMatchObject({ message: 'Refund amount exceeds payment amount' });
     expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  it('refunds add up exactly: 0.10 then 0.20 of a 0.30 payment is all of it, not a cent over by float drift', async () => {
+    const service = serviceWith(providerThatRefunds);
+    const payment = await seedPayment(coreWrites, null, '0.30');
+
+    await service.requestRefund({
+      paymentId: payment.id,
+      amount: money('0.10', 'USD'),
+      reason: 'billing_error',
+      requestedBy: userId,
+    });
+    const second = await service.requestRefund({
+      paymentId: payment.id,
+      amount: money('0.20', 'USD'),
+      reason: 'billing_error',
+      requestedBy: userId,
+    });
+
+    expect(second).toMatchObject({ status: 'completed' });
+  });
+
+  it("a refund keeps the payment's currency: a EUR payment is refunded in EUR, not stored as USD", async () => {
+    const payment = await seedPayment(coreWrites, null, '50', 'EUR');
+
+    const eurRefund = await serviceWith(providerThatRefunds).requestRefund({
+      paymentId: payment.id,
+      amount: money(40, 'EUR'),
+      reason: 'customer_request',
+      requestedBy: userId,
+    });
+
+    expect(eurRefund).toMatchObject({ currency: 'EUR', refundAmount: '40.00', originalAmount: '40.00' });
+  });
+
+  it('a refund in another currency than the payment is turned down and writes nothing', async () => {
+    const payment = await seedPayment(coreWrites, null, '50', 'EUR');
+    const eventsBefore = await countEvents(db);
+
+    const error = await rejectionOf(
+      serviceWith(providerThatRefunds).requestRefund({
+        paymentId: payment.id,
+        amount: money(40, 'USD'),
+        reason: 'customer_request',
+        requestedBy: userId,
+      }),
+    );
+
+    expect(error).toMatchObject({ message: 'Refund currency USD differs from the payment currency EUR' });
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  it('a JPY refund reaches the provider as 1500 JPY, never divided by 100', async () => {
+    const payment = await seedPayment(coreWrites, null, '5000', 'JPY');
+
+    await serviceWith(providerThatRefunds).requestRefund({
+      paymentId: payment.id,
+      amount: money(1500, 'JPY'),
+      reason: 'billing_error',
+      requestedBy: userId,
+    });
+
+    expect(askedToRefund.at(-1)?.toString()).toBe('1500 JPY');
   });
 });
 

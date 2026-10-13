@@ -1,4 +1,5 @@
 import type { KV } from '@arki/kv';
+import type { Money } from '@arki/money';
 
 // AlertingService interface - to be implemented or imported from a shared location
 type AlertingService = {
@@ -22,8 +23,7 @@ type PaymentResult = {
   success: boolean;
   status: string;
   processingTime: number;
-  amount?: number;
-  currency?: string;
+  amount?: Money;
   provider?: string;
   errorCode?: string;
 }
@@ -123,9 +123,10 @@ export class PaymentMonitoringService {
     }
 
     // Record revenue metrics
+    // A metric is a float gauge per currency: the one place an amount is meant to become a number
     if (result.success && result.amount) {
-      await this.recordMetric('revenue_processed', result.amount, {
-        currency: result.currency ?? 'unknown',
+      await this.recordMetric('revenue_processed', result.amount.toNumber(), {
+        currency: result.amount.currency.code,
         provider: result.provider ?? 'unknown',
       });
     }
@@ -151,9 +152,9 @@ export class PaymentMonitoringService {
     }
   }
 
-  async recordRefund(amount: number, reason: string): Promise<void> {
+  async recordRefund(amount: Money, reason: string): Promise<void> {
     await this.recordMetric('refunds_total', 1, { reason });
-    await this.recordMetric('refund_amount_total', amount);
+    await this.recordMetric('refund_amount_total', amount.toNumber(), { currency: amount.currency.code });
     await this.checkRefundRate();
   }
 

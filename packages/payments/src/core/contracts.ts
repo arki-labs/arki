@@ -2,6 +2,7 @@ import { userIdSchema } from '@arki/auth/ids';
 import { z } from '@arki/contracts';
 
 import { refundIdSchema } from '../refunds/primitives';
+import { moneyJsonSchema, positiveMoneySchema, priceSchema } from './money';
 import {
   billingIntervalValues,
   paymentIdSchema,
@@ -30,8 +31,8 @@ export const createPlanInputSchema = z.object({
   name: z.string().min(1).max(255),
   description: z.string().max(1000).optional(),
   tier: planTierSchema,
-  price: z.number().positive().max(999_999.99),
-  currency: z.string().length(3).toUpperCase().default('USD'),
+  /** A free plan costs zero */
+  price: priceSchema,
   interval: billingIntervalSchema,
   intervalCount: z.number().positive().max(365).default(1),
   features: z.array(z.string()).default([]),
@@ -100,22 +101,20 @@ export const cancelSubscriptionInputSchema = z.object({
 export const createPaymentInputSchema = z.object({
   subscriptionId: subscriptionIdSchema.optional(),
   userId: userIdSchema,
-  amount: z.number().positive().max(999_999.99),
-  currency: z.string().length(3).toUpperCase().default('USD'),
+  amount: positiveMoneySchema,
   paymentMethodId: z.string().min(1),
   description: z.string().max(500).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const refundPaymentInputSchema = z.object({
-  amount: z.number().positive().max(999_999.99).optional(),
+  amount: positiveMoneySchema.optional(),
   reason: z.string().max(500).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const createPaymentIntentInputSchema = z.object({
-  amount: z.number().positive().max(999_999.99),
-  currency: z.string().length(3).toUpperCase().default('USD'),
+  amount: positiveMoneySchema,
   paymentMethodId: z.string().optional(),
   automatic: z.boolean().default(true),
   description: z.string().optional(),
@@ -194,9 +193,9 @@ export const paymentAnalyticsSchema = analyticsQuerySchema.extend({
 export const subscriptionPreviewSchema = z.object({
   planId: planIdSchema,
   proration: z.object({
-    immediateTotal: z.number(),
-    nextInvoiceTotal: z.number(),
-    creditApplied: z.number(),
+    immediateTotal: moneyJsonSchema,
+    nextInvoiceTotal: moneyJsonSchema,
+    creditApplied: moneyJsonSchema,
   }),
   trialEnd: z.date().optional(),
   nextBillingDate: z.date(),
@@ -309,8 +308,7 @@ export const paymentPreviewInputSchema = z.object({
 });
 
 export const paymentPreviewTaxInputSchema = z.object({
-  amount: z.number().positive(),
-  currency: z.string().length(3).default('USD'),
+  amount: positiveMoneySchema,
   description: z.string().optional(),
   taxCode: z.string().optional(),
   customerDetails: customerDetailsSchema,
@@ -319,7 +317,8 @@ export const paymentPreviewTaxInputSchema = z.object({
 // Refunds router
 export const requestRefundInputSchema = z.object({
   paymentId: paymentIdSchema,
-  amount: z.number().positive(),
+  /** In the payment's currency */
+  amount: positiveMoneySchema,
   reason: z.enum([
     'customer_request',
     'duplicate_charge',

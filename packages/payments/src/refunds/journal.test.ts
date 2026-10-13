@@ -53,11 +53,19 @@ let paymentId: PaymentId;
 /** The app's command runner, as the service gets it: here it runs on the test database. */
 const run: Parameters<typeof typed.refunds.writes>[0] = (command, input) => journal.run(db, command, input, meta);
 
-function request(overrides: { originalAmount?: number; refundAmount?: number } = {}) {
+/** Amounts go in as `Money` JSON: exact text with a currency. */
+const usd = (amount: string) => ({ amount, currency: 'USD' });
+
+function request(
+  overrides: {
+    originalAmount?: { amount: string; currency: string };
+    refundAmount?: { amount: string; currency: string };
+  } = {},
+) {
   return {
     paymentId,
-    originalAmount: 100,
-    refundAmount: 25.5,
+    originalAmount: usd('100'),
+    refundAmount: usd('25.50'),
     reason: 'customer_request' as const,
     requestedBy: userId,
     ...overrides,
@@ -117,7 +125,7 @@ beforeAll(async () => {
   await journal.run(
     db,
     typed.core.commands.initiatePayment,
-    { paymentId, userId, customerId, providerPaymentId: 'pi_refunds', amount: 100 },
+    { paymentId, userId, customerId, providerPaymentId: 'pi_refunds', amount: usd('100') },
     meta,
   );
 });
@@ -179,18 +187,55 @@ describe('requestRefund', () => {
 
   it('rejects a refund larger than the payment, so no more money goes back than came in', async () => {
     await expectRejected(
-      () => journal.run(db, commands.requestRefund, request({ originalAmount: 100, refundAmount: 100.01 }), meta),
+      () =>
+        journal.run(
+          db,
+          commands.requestRefund,
+          request({ originalAmount: usd('100'), refundAmount: usd('100.01') }),
+          meta,
+        ),
       'BAD_REQUEST',
-      'Refund amount (100.01) cannot exceed original amount (100)',
+      'Refund amount (100.01 USD) cannot exceed original amount (100.00 USD)',
     );
   });
 
   it('rejects a refund of zero or less', async () => {
     await expectRejected(
-      () => journal.run(db, commands.requestRefund, request({ refundAmount: 0 }), meta),
+      () => journal.run(db, commands.requestRefund, request({ refundAmount: usd('0') }), meta),
       'BAD_REQUEST',
       'Refund amount must be positive',
     );
+  });
+
+  it('rejects a refund in another currency than the original: 25 EUR is not a part of 100 USD', async () => {
+    await expectRejected(
+      () => journal.run(db, commands.requestRefund, request({ refundAmount: { amount: '25', currency: 'EUR' } }), meta),
+      'BAD_REQUEST',
+      'Refund currency (EUR) differs from the original currency (USD)',
+    );
+  });
+
+  it("stores a JPY refund in yen with the column's two decimals, never divided by 100", async () => {
+    const refundId = createRefundId();
+
+    await journal.run(
+      db,
+      commands.requestRefund,
+      {
+        refundId,
+        ...request({
+          originalAmount: { amount: '5000', currency: 'JPY' },
+          refundAmount: { amount: '1500', currency: 'JPY' },
+        }),
+      },
+      meta,
+    );
+
+    expect(await rowOf(refundId)).toMatchObject({
+      originalAmount: '5000.00',
+      refundAmount: '1500.00',
+      currency: 'JPY',
+    });
   });
 });
 

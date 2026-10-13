@@ -1,3 +1,5 @@
+import type { Money } from '@arki/money';
+
 import type {
   BillingInterval,
   Customer,
@@ -56,8 +58,7 @@ export abstract class BasePaymentProvider {
   // Plan Management
   abstract createPlan(params: {
     name: string;
-    amount: number;
-    currency: string;
+    amount: Money;
     interval: BillingInterval;
     intervalCount?: number;
     trialPeriodDays?: number;
@@ -122,8 +123,7 @@ export abstract class BasePaymentProvider {
   // Payment Management
   abstract createPayment(params: {
     customerId: CustomerId;
-    amount: number;
-    currency: string;
+    amount: Money;
     paymentMethodId: string;
     description?: string;
     metadata?: Record<string, unknown>;
@@ -138,7 +138,8 @@ export abstract class BasePaymentProvider {
   abstract refundPayment(
     paymentId: PaymentId,
     params: {
-      amount?: number;
+      /** Left out: the whole payment. */
+      amount?: Money;
       reason?: string;
       metadata?: Record<string, unknown>;
     },
@@ -175,8 +176,7 @@ export abstract class BasePaymentProvider {
 
   abstract createPaymentIntent(params: {
     customerId: CustomerId;
-    amount: number;
-    currency: string;
+    amount: Money;
     paymentMethodId?: string;
     automatic: boolean;
   }): Promise<{
@@ -188,16 +188,6 @@ export abstract class BasePaymentProvider {
   abstract healthCheck(): Promise<{ status: 'healthy' | 'degraded' | 'unhealthy'; details?: string }>;
 
   // Helper Methods
-  protected formatAmount(amount: number): number {
-    // Convert cents to dollars or handle currency formatting
-    return Math.round(amount * 100);
-  }
-
-  protected parseAmount(amount: number): number {
-    // Convert provider amount back to our format
-    return amount / 100;
-  }
-
   protected mapSubscriptionStatus(providerStatus: string): SubscriptionStatus {
     // Default implementation - providers can override
     switch (providerStatus.toLowerCase()) {

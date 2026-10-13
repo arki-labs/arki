@@ -49,10 +49,11 @@ let next = 0;
 /** The app's command runner, as a service gets it: here it runs on the test database. */
 const run: Parameters<typeof plain.core.writes>[0] = (command, input) => journal.run(db, command, input, meta);
 
-function intent(amount = 19.99) {
+/** Commands take `Money` JSON: the amount as exact text, with its currency. */
+function intent(amount = '19.99', currency = 'USD') {
   next += 1;
 
-  return { userId, customerId, providerPaymentId: `pi_${next}`, amount };
+  return { userId, customerId, providerPaymentId: `pi_${next}`, amount: { amount, currency } };
 }
 
 async function seed(): Promise<PaymentId> {
@@ -158,7 +159,7 @@ describe('money in a `real` column', () => {
   it('round-trips 19.99 exactly, and the payment replays to the stored row', async () => {
     const paymentId = createPaymentId();
 
-    await journal.run(db, commands.initiatePayment, { paymentId, ...intent(19.99) }, meta);
+    await journal.run(db, commands.initiatePayment, { paymentId, ...intent('19.99') }, meta);
 
     const row = await rowOf(paymentId);
     expect(row?.amount).toBe(19.99);
@@ -168,12 +169,30 @@ describe('money in a `real` column', () => {
   it('accepts 1234567.89: the column keeps 1234567.9 (a 4-byte float), the event keeps the amount as given', async () => {
     const paymentId = createPaymentId();
 
-    const result = await journal.run(db, commands.initiatePayment, { paymentId, ...intent(1_234_567.89) }, meta);
+    const result = await journal.run(db, commands.initiatePayment, { paymentId, ...intent('1234567.89') }, meta);
 
     expect(result.events[0]?.data).toMatchObject({ amount: 1_234_567.89 });
     const row = await rowOf(paymentId);
     expect(row?.amount).toBe(1_234_567.9);
     expect(await journal.verify(db, entities.payment, paymentId)).toEqual({ ok: true });
+  });
+});
+
+describe('money with its currency', () => {
+  it('stores a JPY payment in yen: 1000 JPY is 1000, not 10 or 100000', async () => {
+    const paymentId = createPaymentId();
+
+    const result = await journal.run(db, commands.initiatePayment, { paymentId, ...intent('1000', 'JPY') }, meta);
+
+    expect(result.events[0]?.data).toMatchObject({ amount: 1000, currency: 'JPY' });
+    expect(await rowOf(paymentId)).toMatchObject({ amount: 1000, currency: 'JPY' });
+  });
+
+  it('rejects a negative amount and writes nothing: a payment never moves money backwards', async () => {
+    const paymentId = createPaymentId();
+
+    await expect(journal.run(db, commands.initiatePayment, { paymentId, ...intent('-1') }, meta)).rejects.toThrow();
+    expect(await rowOf(paymentId)).toBeUndefined();
   });
 });
 

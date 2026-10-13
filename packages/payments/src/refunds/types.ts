@@ -1,6 +1,7 @@
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 
 import type { UserId } from '@arki/auth/ids';
+import type { Money } from '@arki/money';
 
 import type { PaymentId } from '../core/primitives';
 import type { RefundId, RefundReason } from './primitives';
@@ -13,7 +14,8 @@ export type UpdateRefund = Partial<Omit<NewRefund, 'id'>>;
 
 export type RefundRequestData = {
   paymentId: PaymentId;
-  amount: number;
+  /** In the payment's currency */
+  amount: Money;
   reason: RefundReason;
   customerNote?: string;
   internalNotes?: string;

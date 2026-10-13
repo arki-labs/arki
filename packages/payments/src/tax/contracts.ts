@@ -1,5 +1,6 @@
 import { z } from '@arki/contracts';
 
+import { positiveMoneySchema } from '../core/money';
 import {
   exemptionStatusValues,
   exemptionTypeValues,
@@ -161,14 +162,15 @@ export const taxCalculationInputSchema = z.object({
   customerId: z.string(),
   lineItems: z.array(
     z.object({
-      amount: z.number().positive(),
+      /** In `currency` */
+      amount: positiveMoneySchema,
       description: z.string(),
       reference: z.string(),
       taxCode: z.string().optional(),
       planId: z.string().optional(),
     }),
   ),
-  currency: z.string().length(3),
+  currency: z.string().length(3).toUpperCase(),
   customerDetails: z
     .object({
       address: z
@@ -195,9 +197,8 @@ export const taxCalculationInputSchema = z.object({
 
 export const calculateSubscriptionTaxInputSchema = z.object({
   customerId: z.string(),
-  planAmount: z.number().positive(),
+  planAmount: positiveMoneySchema,
   planInterval: z.enum(['monthly', 'yearly']),
-  currency: z.string().length(3),
   taxCode: z.string().optional(),
   customerDetails: taxCalculationInputSchema.shape.customerDetails.optional(),
 });

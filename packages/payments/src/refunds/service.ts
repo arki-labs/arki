@@ -1,14 +1,18 @@
 import type { UserId } from '@arki/auth/ids';
+import { money, sum } from '@arki/money';
+import type { Money } from '@arki/money';
 
 import type { NotificationService } from '../core/notifications/service';
 import type { StripeProvider } from '../core/providers/stripe-provider';
 import type { PaymentRepository } from '../core/repository';
 import type { PaymentId } from '../core/types';
+import { paymentAmount } from '../core/money';
 import type { RefundWrites } from './journal';
 import {
   type RefundsDatabase,
   type RefundRepository,
   createRefundRepository,
+  refundAmountOf,
 } from './repository';
 import type { RefundsTables } from './tables';
 import type {
@@ -62,9 +66,8 @@ export class RefundService {
 
     const refund = await this.writes.requestRefund({
       paymentId: data.paymentId,
-      originalAmount: data.amount,
-      refundAmount: data.amount,
-      currency: 'USD',
+      originalAmount: data.amount.toJSON(),
+      refundAmount: data.amount.toJSON(),
       reason: data.reason,
       requestedBy: data.requestedBy,
       customerNote: data.customerNote,
@@ -126,7 +129,7 @@ export class RefundService {
       const providerPaymentId = payment.providerPaymentId || payment.id;
 
       const providerResult = await this.paymentProvider.refundPayment(providerPaymentId as PaymentId, {
-        amount: Number.parseFloat(refund.refundAmount || '0'),
+        amount: refundAmountOf(refund),
         reason: refund.reason,
         metadata: {
           refundId: refund.id,
@@ -159,10 +162,15 @@ export class RefundService {
     }
   }
 
-  private async validateRefundEligibility(paymentId: PaymentId, amount: number): Promise<void> {
+  private async validateRefundEligibility(paymentId: PaymentId, amount: Money): Promise<void> {
     const payment = await this.paymentRepository.findPaymentById(paymentId);
     if (!payment) {
       throw new Error('Payment not found');
+    }
+
+    const paid = paymentAmount(payment);
+    if (!amount.hasSameCurrency(paid)) {
+      throw new Error(`Refund currency ${amount.currency.code} differs from the payment currency ${paid.currency.code}`);
     }
 
     if (payment.createdAt && Date.now() - payment.createdAt.getTime() > this.refundWindow) {
@@ -170,17 +178,20 @@ export class RefundService {
     }
 
     const existingRefunds = await this.refundRepository.findByPaymentId(paymentId);
-    const totalRefunded = existingRefunds
-      .filter((r) => r.status === 'completed')
-      .reduce((sum, r) => sum + Number.parseFloat(r.refundAmount || '0'), 0);
+    const totalRefunded = sum(
+      existingRefunds.filter((r) => r.status === 'completed').map(refund => refundAmountOf(refund)),
+      paid.currency,
+    );
 
-    if (totalRefunded + amount > Number.parseFloat(String(payment.amount || '0'))) {
+    if (totalRefunded.plus(amount).gt(paid)) {
       throw new Error('Refund amount exceeds payment amount');
     }
   }
 
   private async shouldAutoApprove(refund: Refund): Promise<boolean> {
-    if (Number.parseFloat(refund.refundAmount || '0') <= 10) return true;
+    // 10 whole units of the refund's currency, as before amounts carried one: 10 USD, but also 10 JPY
+    const amount = refundAmountOf(refund);
+    if (amount.lte(money(10, amount.currency))) return true;
     if (['billing_error', 'technical_issue'].includes(refund.reason)) return true;
     return false;
   }
