@@ -69,6 +69,8 @@ const selectProbes: readonly Probe[] = [
   { name: 'fraction in an integer', row: { ...validRow, score: 1.5 }, expected: 'error:score' },
   { name: 'text for a boolean', row: { ...validRow, active: 'yes' }, expected: 'error:active' },
   { name: 'nullable columns set', row: { ...validRow, bio: 'hi', age: null, updatedAt: new Date(1) }, expected: 'ok' },
+  { name: 'integer out of 32-bit range', row: { ...validRow, score: 2 ** 31 }, expected: 'error:score' },
+  { name: 'non-JSON value in a jsonb column', row: { ...validRow, profile: new Map() }, expected: 'error:profile' },
 ];
 
 const requiredOnly: Row = Object.fromEntries(
@@ -81,7 +83,18 @@ const insertProbes: readonly Probe[] = [
   { name: 'wrong id prefix', row: { ...validRow, id: 'org_abc123' }, expected: 'error:id' },
   { name: 'required column missing', row: { ...requiredOnly, name: undefined }, expected: 'error:name' },
   { name: 'fraction in an integer', row: { ...requiredOnly, score: 2.5 }, expected: 'error:score' },
+  { name: 'integer out of 32-bit range', row: { ...requiredOnly, age: 2 ** 31 }, expected: 'error:age' },
+  { name: 'non-JSON value in a jsonb column', row: { ...requiredOnly, profile: new Map() }, expected: 'error:profile' },
 ];
+
+// The same rules the table implies: a Postgres `integer` is 32-bit, and a `jsonb`
+// column holds a JSON value (a literal, a plain object or an array), not anything.
+const int32 = () => z.number().int().gte(-2_147_483_648).lte(2_147_483_647);
+const jsonValue = z.union([
+  z.union([z.string(), z.number(), z.boolean(), z.null()]),
+  z.record(z.string(), z.any()),
+  z.array(z.any()),
+]);
 
 const handSelect = () =>
   z.object({
@@ -89,15 +102,15 @@ const handSelect = () =>
     email: z.string().max(320),
     name: z.string(),
     bio: z.string().nullable(),
-    age: z.number().int().nullable(),
-    score: z.number().int(),
+    age: int32().nullable(),
+    score: int32(),
     active: z.boolean(),
     verified: z.boolean(),
     role: z.string(),
     plan: z.string(),
     locale: z.string().max(16),
     avatar: z.string().nullable(),
-    profile: z.unknown().nullable(),
+    profile: jsonValue.nullable(),
     createdAt: z.date(),
     updatedAt: z.date().nullable(),
   });
@@ -108,15 +121,15 @@ const handInsert = () =>
     email: z.string().max(320),
     name: z.string(),
     bio: z.string().nullable().optional(),
-    age: z.number().int().nullable().optional(),
-    score: z.number().int(),
+    age: int32().nullable().optional(),
+    score: int32(),
     active: z.boolean(),
     verified: z.boolean(),
     role: z.string(),
     plan: z.string(),
     locale: z.string().max(16),
     avatar: z.string().nullable().optional(),
-    profile: z.unknown().nullable().optional(),
+    profile: jsonValue.nullable().optional(),
     createdAt: z.date(),
     updatedAt: z.date().nullable().optional(),
   });
@@ -150,7 +163,7 @@ export default defineSuite({
     'Building and using Zod schemas from a 15-column Drizzle table with `@arki/contracts`, against `drizzle-orm/zod` (which it wraps) and a hand-written Zod object. Each table only ranks code that gave the same answer on every checked row.',
   notes: [
     '`@arki/contracts` calls `drizzle-orm/zod`, then adds the per-column runtime schemas that ID factories stash on a column. Its extra work is the ID prefix check; plain `drizzle-orm/zod` does not do it, so it is shown without a ratio.',
-    'The hand-written object checks the prefix too, but it never reads the table: it shows the floor for building and parsing, not a replacement that stays in sync with the table.',
+    'The hand-written object checks the prefix too, and the same rules the table implies (32-bit integers, a JSON value in the `jsonb` column), but it never reads the table: it shows the floor for building and parsing, not a replacement that stays in sync with the table.',
     'Building usually happens once at startup; parsing happens on every row.',
   ],
   groups: [
