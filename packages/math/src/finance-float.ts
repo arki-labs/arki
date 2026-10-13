@@ -387,23 +387,63 @@ export function internalRateOfReturn(
 }
 
 /**
- * Periods needed for `principal` to grow to `target` at `rate` per period:
- * `ln(target ÷ principal) ÷ ln(1 + rate)`. Approximate and possibly
- * fractional; the result can be passed straight back to `futureValue`.
- * Throws when the target is unreachable.
+ * Periods until the balance goes from `principal` to `target` at `rate` per
+ * period: the `periods` that makes `futureValue(principal, rate, periods,
+ * options)` equal `target`. Approximate and possibly fractional; round up
+ * yourself for whole months. The result can be passed straight back to
+ * `futureValue`.
+ *
+ * Without a payment it is `ln(target ÷ principal) ÷ ln(1 + rate)`, and
+ * `principal` and `target` must be positive and `rate` non-zero.
+ *
+ * With `{ payment, timing }` it is Excel `NPER(rate, payment, principal,
+ * -target, type)`, under the balance sign rule: paying off a card of 5000 at
+ * 200 a month is `periodsToReach(5000, 0, 0.18 / 12, { payment: -200 })`, and
+ * saving 100 a month from 0 to 10 000 is `periodsToReach(0, 10_000, 0.005,
+ * { payment: 100 })`. At rate 0 it is exactly `(target − principal) ÷ payment`.
+ *
+ * Throws `InvalidArgumentError` when the target is never reached, including
+ * a payment that only covers (or does not cover) the interest.
  *
  * The same function is exported from `@arki/math/finance`.
  */
-export function periodsToReach(principal: number, target: number, rate: number): number {
+export function periodsToReach(principal: number, target: number, rate: number, options: AnnuityOptions = {}): number {
   assertFinite(principal, 'principal');
   assertFinite(target, 'target');
   assertFinite(rate, 'rate');
+  if (rate <= -1) throw new InvalidArgumentError(`rate must be greater than -1, got ${rate}`);
+  const { payment, timing } = readAnnuity(options);
+  if (payment !== 0) return periodsWithPayment(principal, target, rate, payment * timingFactor(rate, timing));
   if (principal <= 0) throw new InvalidArgumentError(`principal must be positive, got ${principal}`);
   if (target <= 0) throw new InvalidArgumentError(`target must be positive, got ${target}`);
-  if (rate <= -1) throw new InvalidArgumentError(`rate must be greater than -1, got ${rate}`);
   if (rate === 0) throw new InvalidArgumentError('rate must not be 0: the balance never changes');
   // Difference of logs, not log of the ratio: target ÷ principal can overflow to Infinity.
   const periods = (Math.log(target) - Math.log(principal)) / Math.log1p(rate);
   if (periods < 0) throw new InvalidArgumentError('target cannot be reached at this rate');
   return periods;
+}
+
+/**
+ * Solves `P·g + p·(g − 1) ÷ r = T` for `g = (1 + r)^n`, where `p` already
+ * includes the timing factor. Written as `ln g = log1p((T − P)·r ÷ d)` with
+ * `d = P·r + p` (the balance's change in the first period) rather than
+ * `ln((T + p/r) ÷ (P + p/r))`, which cancels catastrophically at tiny rates.
+ */
+function periodsWithPayment(principal: number, target: number, rate: number, perPeriod: number): number {
+  if (rate === 0) return nonNegativePeriods((target - principal) / perPeriod);
+  const change = principal * rate + perPeriod;
+  if (change === 0) {
+    if (target === principal) return 0;
+    throw new InvalidArgumentError('target cannot be reached: the payment exactly matches the interest');
+  }
+  const ratio = ((target - principal) * rate) / change;
+  if (ratio <= -1) {
+    throw new InvalidArgumentError('target cannot be reached: the payment does not outpace the interest');
+  }
+  return nonNegativePeriods(finiteResult(Math.log1p(ratio) / Math.log1p(rate), 'periodsToReach'));
+}
+
+function nonNegativePeriods(periods: number): number {
+  if (periods < 0) throw new InvalidArgumentError('target cannot be reached at this rate and payment');
+  return periods === 0 ? 0 : periods;
 }

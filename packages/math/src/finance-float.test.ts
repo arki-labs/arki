@@ -151,6 +151,46 @@ describe('agreement with the exact layer', () => {
   });
 });
 
+describe('periodsToReach with a payment (Excel NPER)', () => {
+  // NPER(0.18/12, -200, 5000) = 31.567993958000777: a 5000 card at 18 % paid 200 a month.
+  it('counts the months to pay off a balance', () => {
+    expect(relativeError(periodsToReach(5000, 0, 0.18 / 12, { payment: -200 }), 31.567_993_958_000_777)).toBeLessThan(
+      1e-13,
+    );
+  });
+  // NPER(0.005, -100, 0, 10000) = 81.29558565291866
+  it('counts the months to save up to a target from zero', () => {
+    expect(relativeError(periodsToReach(0, 10_000, 0.005, { payment: 100 }), 81.295_585_652_918_66)).toBeLessThan(
+      1e-13,
+    );
+  });
+  // NPER(0.01, -100, 1000, 0, 1) = 10.47814508511682
+  it('follows payment timing like Excel type 1', () => {
+    expect(
+      relativeError(periodsToReach(1000, 0, 0.01, { payment: -100, timing: 'begin' }), 10.478_145_085_116_82),
+    ).toBeLessThan(1e-13);
+  });
+  it('round-trips with futureValue', () => {
+    const periods = periodsToReach(5000, 0, 0.015, { payment: -200 });
+    expect(Math.abs(futureValue(5000, 0.015, periods, { payment: -200 }))).toBeLessThan(1e-9);
+  });
+  it('is exactly balance ÷ payment at rate 0', () => {
+    expect(periodsToReach(5000, 0, 0, { payment: -200 })).toBe(25);
+  });
+  // ln((T + p/r) ÷ (P + p/r)) at r = 1e-12 would lose most digits to cancellation.
+  it('keeps full precision at a tiny rate', () => {
+    // 1000 paid down by 10 a period at 1e-12: 100.00000000505
+    expect(relativeError(periodsToReach(1000, 0, 1e-12, { payment: -10 }), 100.000_000_005_05)).toBeLessThan(1e-14);
+  });
+  // A payment at or below the interest never pays the debt off; Excel returns #NUM!.
+  it('throws instead of returning Infinity or NaN when the payment never wins', () => {
+    expect(() => periodsToReach(5000, 0, 0.015, { payment: -75 })).toThrow(InvalidArgumentError);
+    expect(() => periodsToReach(5000, 0, 0.015, { payment: -50 })).toThrow(InvalidArgumentError);
+    expect(() => periodsToReach(5000, 0, 0, { payment: 200 })).toThrow(InvalidArgumentError);
+    expect(() => periodsToReach(5000, 0, 0.015, { payment: Number.NaN })).toThrow(InvalidArgumentError);
+  });
+});
+
 describe('compoundInterest', () => {
   // principal × (1 + r)^n − principal cancels to 0 in floats when r is tiny; expm1 does not.
   it('keeps tiny interest that subtraction would cancel away', () => {

@@ -26,7 +26,9 @@
  * `'halfEven'` (banker's rounding). `nominalRate` needs an n-th root, which it
  * computes with guard digits (see its doc for the one caveat).
  * `internalRateOfReturn` and `periodsToReach` are float functions, approximate
- * by nature; they are re-exported from the float layer.
+ * by nature (a root and a logarithm, which no exact type holds); they are
+ * re-exported from the float layer. `periodsToReach` with `{ payment }` is
+ * Excel `NPER`.
  */
 
 import type { DecimalInput, ScaleOptions } from './decimal.js';
