@@ -23,6 +23,7 @@ import { toMinorColumn } from '../core/money';
 import { createPaymentId } from '../core/primitives';
 import { coreReads, refundReads, refundRow, runnerOn, seedPayment } from '../service-test-support';
 import { adminId, countEvents, customerId, eventTypesOf, openDb, rejectionOf, typed, userId } from '../test-support';
+import type { RefundAutoApproveLimits } from './service';
 import { RefundService } from './service';
 
 type Provider = ConstructorParameters<typeof RefundService>[2];
@@ -71,8 +72,23 @@ const providerThatRefuses: Provider = {
   refundPayment: () => Promise.reject(new Error('charge already refunded')),
 };
 
-function serviceWith(provider: Provider) {
-  return new RefundService(refundReads(db), writes, provider, coreReads(db), { systemUserId: adminId });
+function serviceWith(provider: Provider, autoApproveLimits?: RefundAutoApproveLimits) {
+  return new RefundService(refundReads(db), writes, provider, coreReads(db), {
+    systemUserId: adminId,
+    ...(autoApproveLimits === undefined ? {} : { autoApproveLimits }),
+  });
+}
+
+/** A customer asks for `amount` back from a payment of 5000 in the same currency. */
+async function askFor(amount: Money, autoApproveLimits?: RefundAutoApproveLimits) {
+  const payment = await seedPayment(coreWrites, null, '5000', amount.currency.code);
+
+  return serviceWith(providerThatRefunds, autoApproveLimits).requestRefund({
+    paymentId: payment.id,
+    amount,
+    reason: 'customer_request',
+    requestedBy: userId,
+  });
 }
 
 /** A request above the auto-approve limit, for a reason that needs a person to approve. */
@@ -215,6 +231,43 @@ describe('requestRefund', () => {
     });
 
     expect(askedToRefund.at(-1)?.toString()).toBe('1500 JPY');
+  });
+});
+
+/**
+ * Small refunds skip the person, but "small" depends on the currency: 10 USD is
+ * small, 10 KWD is about 32 USD, and 10 JPY is a few cents. So each currency has
+ * its own configured limit, and a currency without one always waits for a person.
+ */
+describe('auto-approval limits per currency', () => {
+  it.each([
+    ['10.00', 'USD', 'completed'],
+    ['10.01', 'USD', 'pending'],
+    ['1500', 'JPY', 'completed'],
+    ['1501', 'JPY', 'pending'],
+  ])('under the default limits, %s %s ends %s: at the limit is small, a unit above is not', async (amount, currency, status) => {
+    const refund = await askFor(money(amount, currency));
+
+    expect(refund.status).toBe(status);
+  });
+
+  it('10 JPY waits for a person when JPY has no limit: "10" no longer means 10 of any currency', async () => {
+    const refund = await askFor(money(10, 'JPY'), { USD: '10.00' });
+
+    expect(refund.status).toBe('pending');
+    expect(refund.approvedBy).toBeNull();
+  });
+
+  it('a currency without a limit is never approved by the system, however small: 0.01 GBP', async () => {
+    const refund = await askFor(money('0.01', 'GBP'));
+
+    expect(refund.status).toBe('pending');
+    expect(await eventTypesOf(db, 'refund', refund.id)).toEqual(['RefundRequestedV2']);
+  });
+
+  it('turns down a limit that is not an amount of its currency when the service is built, not on a refund', () => {
+    expect(() => serviceWith(providerThatRefunds, { USD: '10.001' })).toThrow();
+    expect(() => serviceWith(providerThatRefunds, { NOPE: '10' })).toThrow();
   });
 });
 

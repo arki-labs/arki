@@ -1,12 +1,14 @@
 import type { UserId } from '@arki/auth/ids';
-import { money, sum } from '@arki/money';
+import { z } from '@arki/contracts';
+import { sum } from '@arki/money';
 import type { Money } from '@arki/money';
+import { currencyCodeSchema } from '@arki/money/zod';
 
 import type { NotificationService } from '../core/notifications/service';
 import type { StripeProvider } from '../core/providers/stripe-provider';
 import type { PaymentRepository } from '../core/repository';
 import type { PaymentId } from '../core/types';
-import { paymentAmount } from '../core/money';
+import { nonNegativeMoneySchema, paymentAmount } from '../core/money';
 import type { RefundWrites } from './journal';
 import {
   type RefundsDatabase,
@@ -22,11 +24,46 @@ import type {
   RefundRequestData,
 } from './types';
 
+/**
+ * The largest refund approved without a person, per currency: `{ USD: '10.00', JPY: '1500' }`.
+ * Each amount is exact text in its own currency, so 10 USD and 1500 JPY are both "small".
+ * A currency missing here has no small-refund rule: its refunds wait for a person.
+ * Parsed once when the service is built; a bad code or amount throws there, not on a refund.
+ */
+export const refundAutoApproveLimitsSchema = z
+  .record(currencyCodeSchema, z.string())
+  .transform((limits, ctx) => {
+    const parsed = new Map<string, Money>();
+
+    for (const [currency, amount] of Object.entries(limits)) {
+      const limit = nonNegativeMoneySchema.safeParse({ amount, currency });
+
+      if (limit.success) {
+        parsed.set(currency, limit.data);
+      } else {
+        ctx.addIssue({ code: 'custom', path: [currency], message: `Not a ${currency} amount: ${amount}` });
+      }
+    }
+
+    return parsed;
+  });
+
+export type RefundAutoApproveLimits = z.input<typeof refundAutoApproveLimitsSchema>;
+
+/** About ten dollars' worth where it is set; other currencies wait for a person. */
+export const DEFAULT_REFUND_AUTO_APPROVE_LIMITS: RefundAutoApproveLimits = {
+  USD: '10.00',
+  EUR: '10.00',
+  JPY: '1500',
+};
+
 export type RefundServiceConfig = {
   /** User ID attributed for system-driven auto-approvals (e.g. small-amount refunds). */
   systemUserId: UserId | string;
   /** Refund window in milliseconds. Defaults to 90 days. */
   refundWindowMs?: number;
+  /** Small refunds approved without a person. Defaults to `DEFAULT_REFUND_AUTO_APPROVE_LIMITS`. */
+  autoApproveLimits?: RefundAutoApproveLimits;
 };
 
 /** The refund reads the service makes. A `RefundRepository` fits. */
@@ -48,6 +85,7 @@ type PaymentReads = Pick<PaymentRepository, 'findPaymentById'>;
 export class RefundService {
   private readonly refundWindow: number;
   private readonly systemUserId: UserId | string;
+  private readonly autoApproveLimits: ReadonlyMap<string, Money>;
 
   constructor(
     private readonly refundRepository: RefundReads,
@@ -59,6 +97,9 @@ export class RefundService {
   ) {
     this.refundWindow = config.refundWindowMs ?? 90 * 24 * 60 * 60 * 1000;
     this.systemUserId = config.systemUserId;
+    this.autoApproveLimits = refundAutoApproveLimitsSchema.parse(
+      config.autoApproveLimits ?? DEFAULT_REFUND_AUTO_APPROVE_LIMITS,
+    );
   }
 
   async requestRefund(data: RefundRequestData): Promise<Refund> {
@@ -189,9 +230,9 @@ export class RefundService {
   }
 
   private async shouldAutoApprove(refund: Refund): Promise<boolean> {
-    // 10 whole units of the refund's currency, as before amounts carried one: 10 USD, but also 10 JPY
     const amount = refundAmountOf(refund);
-    if (amount.lte(money(10, amount.currency))) return true;
+    const limit = this.autoApproveLimits.get(amount.currency.code);
+    if (limit !== undefined && amount.lte(limit)) return true;
     if (['billing_error', 'technical_issue'].includes(refund.reason)) return true;
     return false;
   }
