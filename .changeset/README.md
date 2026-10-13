@@ -19,9 +19,9 @@ for the source of truth; trimmed for stable v1 per the doctrine
    `@arki/env`, `@arki/ts`, `@arki/resilience`, `@arki/date`,
    `@arki/string`, `@arki/clock`
 2. **dot-kernel** — `@arki/dot`
-3. **infrastructure-adapters** — `@arki/db`, `@arki/kv`,
-   `@arki/event-sourcing`, `@arki/http` (`fs`/`queue`/`auth`/`emails`
-   rejoin once they ship dist+docs / drop `private: true`)
+3. **infrastructure-adapters** — `@arki/db`, `@arki/kv`, `@arki/http`
+   (`fs`/`queue`/`auth`/`emails` rejoin once they ship dist+docs / drop
+   `private: true`)
 4. **frontend** — _empty for v1.0_; every Wave 4 candidate still
    fails build-output / docs / privacy or depends on the
    still-private `@arki/react-hooks`. Targeted for v1.1.
