@@ -306,8 +306,74 @@ export function graphemeBoundaries(text: string): number[] {
   return boundaries;
 }
 
+/**
+ * Below U+0300 nothing joins a neighbour: combining marks, ZWJ, variation selectors, Hangul,
+ * regional indicators, prepended and Indic characters, and surrogates all sit higher. So there is
+ * always a boundary between two code units below this limit, except inside CR LF.
+ */
+const SIMPLE_LIMIT = 0x03_00;
+
+/**
+ * The boundary after `offset` (itself a boundary) when it can be read without segmenting, or `-1`.
+ * It can when `offset` holds the last code unit, or when the code units at `offset` and after it
+ * are both below `SIMPLE_LIMIT`. A boundary found this way follows a character no rule looks back
+ * through (no Prepend, Extend, ZWJ, regional indicator or Indic letter), so segmenting the rest of
+ * the text from there gives the same boundaries as segmenting the whole text.
+ */
+function simpleNext(text: string, offset: number): number {
+  const next = offset + 1;
+  if (next === text.length) return next;
+  const unit = text.codePointAt(offset) ?? 0;
+  if (unit >= SIMPLE_LIMIT) return -1;
+  const following = text.codePointAt(next) ?? 0;
+  if (following >= SIMPLE_LIMIT) return -1;
+  return unit === CR && following === LF ? next + 1 : next;
+}
+
+/** `graphemeBreaks` of the text after `start`, a boundary reached through `simpleNext`, relative to `start`. */
+function breaksAfter(text: string, start: number): Generator<number, void, undefined> {
+  return graphemeBreaks(start === 0 ? text : text.slice(start));
+}
+
+/**
+ * Offset of boundary number `position` when `text` has more than `limit` graphemes, else
+ * `undefined` (`position <= limit`). One pass that stops after `limit + 1` graphemes.
+ */
+export function boundaryIfLonger(text: string, position: number, limit: number): number | undefined {
+  let seen = 0;
+  let offset = 0;
+  let found = 0;
+  while (offset < text.length) {
+    const end = simpleNext(text, offset);
+    if (end === -1) break;
+    offset = end;
+    seen += 1;
+    if (seen === position) found = offset;
+    if (seen > limit) return found;
+  }
+  if (offset === text.length) return undefined;
+  for (const end of breaksAfter(text, offset)) {
+    seen += 1;
+    if (seen === position) found = offset + end;
+    if (seen > limit) return found;
+  }
+  return undefined;
+}
+
 /** Number of grapheme clusters, without materializing offsets. */
 export function graphemeCount(text: string): number {
+  let count = 0;
+  let offset = 0;
+  while (offset < text.length) {
+    const end = simpleNext(text, offset);
+    if (end === -1) return count + segmentedCount(offset === 0 ? text : text.slice(offset));
+    offset = end;
+    count += 1;
+  }
+  return count;
+}
+
+function segmentedCount(text: string): number {
   const segmenter = getNativeSegmenter();
   let count = 0;
   if (segmenter === null) {
@@ -325,9 +391,18 @@ export function graphemeCount(text: string): number {
 export function boundaryAt(text: string, position: number): number | undefined {
   if (position === 0) return 0;
   let seen = 0;
-  for (const offset of graphemeBreaks(text)) {
+  let offset = 0;
+  while (offset < text.length) {
+    const end = simpleNext(text, offset);
+    if (end === -1) break;
+    offset = end;
     seen += 1;
     if (seen === position) return offset;
+  }
+  if (offset === text.length) return undefined;
+  for (const end of breaksAfter(text, offset)) {
+    seen += 1;
+    if (seen === position) return offset + end;
   }
   return undefined;
 }

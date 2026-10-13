@@ -2,7 +2,7 @@
  * Whitespace cleanup and display formatting: initials, truncation, excerpts, wrapping.
  */
 
-import { graphemeBoundaries } from './internal/graphemes.js';
+import { boundaryIfLonger, graphemeBoundaries } from './internal/graphemes.js';
 import { assertNeedle, findLiteral } from './internal/search.js';
 import { sentenceEnds } from './internal/sentences.js';
 import { wordSpans } from './internal/words.js';
@@ -96,16 +96,17 @@ export function truncate(text: string, maxLength: number, options: TruncateOptio
     throw new RangeError(`maxLength must be a non-negative integer, got ${String(maxLength)}`);
   }
   if (maxLength === 0) return '';
-  const boundaries = graphemeBoundaries(text);
-  const total = boundaries.length - 1;
-  if (total <= maxLength) return text;
+  // Every grapheme is at least one code unit.
+  if (text.length <= maxLength) return text;
 
   const ellipsis = options.ellipsis ?? '…';
   const ellipsisLength = length(ellipsis);
+  const budget = Math.max(maxLength - ellipsisLength, 0);
+  // Reads only the first `maxLength + 1` graphemes, not the whole text.
+  const cutOffset = boundaryIfLonger(text, budget, maxLength);
+  if (cutOffset === undefined) return text;
   if (ellipsisLength >= maxLength) return take(ellipsis, maxLength);
 
-  const budget = maxLength - ellipsisLength;
-  const cutOffset = boundaries[budget] ?? text.length;
   let cut = text.slice(0, cutOffset);
 
   if (options.boundary === 'sentence') {
