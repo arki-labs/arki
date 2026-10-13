@@ -77,6 +77,20 @@ describe('QueueStorage', () => {
     expect(restoredInput.createdAt.toISOString()).toBe('2024-01-15T10:00:00.000Z');
   });
 
+  // A mutation queued offline is replayed later through oRPC. Its input must
+  // still be a Temporal value then, or the procedure's input schema rejects it.
+  it('preserves Temporal values in queued mutation input', async () => {
+    const { Temporal } = await import('@arki/date/types');
+    const storage = createQueueStorage('test-temporal');
+    const dueAt = Temporal.Instant.from('2026-10-13T06:00:00Z');
+    await storage.write([makeMutation({ input: { dueAt } })]);
+
+    const result = await storage.read();
+    const restored = (result[0]?.input as { dueAt: unknown }).dueAt;
+    expect(restored).toBeInstanceOf(Temporal.Instant);
+    expect((restored as typeof dueAt).equals(dueAt)).toBe(true);
+  });
+
   it('preserves enqueuedAt timestamp exactly', async () => {
     const storage = createQueueStorage('test-timestamps');
     const mutation = makeMutation({ enqueuedAt: 1_700_000_123_456 });

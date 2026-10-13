@@ -2,12 +2,13 @@
  * IDB-backed queue storage for OfflineMutationQueue.
  *
  * Wraps idb-keyval with a single key holding the full FIFO array.
- * Uses superjson for serialization to preserve Date, Map, BigInt, etc.
+ * Uses the package serializer (SuperJSON + Temporal) to preserve Date, Map, BigInt and Temporal values.
  */
 import { get, set, del } from 'idb-keyval';
-import superjson from 'superjson';
 
 import type { QueuedMutation } from './queue.ts';
+
+import { offlineSerializer } from '../serializer.ts';
 
 export interface QueueStorage {
   read(): Promise<QueuedMutation[]>;
@@ -21,7 +22,7 @@ export function createQueueStorage(storageKey: string): QueueStorage {
       const raw = await get<string>(storageKey);
       if (!raw) return [];
       try {
-        return superjson.parse<QueuedMutation[]>(raw);
+        return offlineSerializer.parse<QueuedMutation[]>(raw);
       } catch {
         // Corrupted storage — return empty to self-heal
         return [];
@@ -29,7 +30,7 @@ export function createQueueStorage(storageKey: string): QueueStorage {
     },
 
     async write(entries: QueuedMutation[]): Promise<void> {
-      await set(storageKey, superjson.stringify(entries));
+      await set(storageKey, offlineSerializer.stringify(entries));
     },
 
     async clear(): Promise<void> {

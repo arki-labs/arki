@@ -19,6 +19,7 @@ vi.mock('idb-keyval', () => ({
 const { createIdbPersister } = await import(
   '../../src/query/idb-persister.ts'
 );
+const { Temporal } = await import('@arki/date/types');
 
 describe('createIdbPersister', () => {
   beforeEach(() => {
@@ -73,5 +74,61 @@ describe('createIdbPersister', () => {
     expect(restoredA?.buster).toBe('a');
     expect(restoredB?.buster).toBe('b');
     expect(restoredA?.timestamp).not.toBe(restoredB?.timestamp);
+  });
+
+  // A restored cache is read by components before any refetch. If dates came
+  // back as strings, `instant.epochMilliseconds` or `toDate(instant)` in render
+  // code would throw on every reload made while offline.
+  it('restores Temporal values and Dates with their real types', async () => {
+    const persister = createIdbPersister({ storageKey: 'typed' });
+    const createdAt = Temporal.Instant.from('2026-10-13T06:00:00.123Z');
+    const day = Temporal.PlainDate.from('2026-10-13');
+    const legacy = new Date('2026-01-02T03:04:05.000Z');
+
+    await persister.persistClient({
+      timestamp: 4,
+      buster: '',
+      clientState: {
+        mutations: [],
+        queries: [
+          {
+            queryKey: ['story'],
+            queryHash: '["story"]',
+            state: {
+              data: { createdAt, day, legacy },
+              dataUpdateCount: 1,
+              dataUpdatedAt: 4,
+              error: null,
+              errorUpdateCount: 0,
+              errorUpdatedAt: 0,
+              fetchFailureCount: 0,
+              fetchFailureReason: null,
+              fetchMeta: null,
+              isInvalidated: false,
+              status: 'success',
+              fetchStatus: 'idle',
+            },
+          },
+        ],
+      },
+    });
+
+    const restored = await persister.restoreClient();
+    const data = restored?.clientState.queries[0]?.state.data as Record<string, unknown>;
+    expect(data.createdAt).toBeInstanceOf(Temporal.Instant);
+    expect((data.createdAt as typeof createdAt).equals(createdAt)).toBe(true);
+    expect(data.day).toBeInstanceOf(Temporal.PlainDate);
+    expect((data.day as typeof day).equals(day)).toBe(true);
+    expect(data.legacy).toBeInstanceOf(Date);
+    expect((data.legacy as Date).getTime()).toBe(legacy.getTime());
+  });
+
+  // Caches written before the switch to SuperJSON are plain JSON. They must not
+  // restore half-typed data; restoring nothing makes the app refetch instead.
+  it('restores nothing from a cache written as plain JSON', async () => {
+    store['old'] = JSON.stringify({ timestamp: 5, buster: '', clientState: { queries: [], mutations: [] } });
+    const persister = createIdbPersister({ storageKey: 'old' });
+
+    expect(await persister.restoreClient()).toBeUndefined();
   });
 });

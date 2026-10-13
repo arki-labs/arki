@@ -5,9 +5,10 @@
  * Supports subscribe() so React hooks can re-render on changes.
  */
 import { get, set } from 'idb-keyval';
-import superjson from 'superjson';
 
 import type { QueuedMutation } from './queue.ts';
+
+import { offlineSerializer } from '../serializer.ts';
 
 export interface DeadLetterEntry {
   mutation: QueuedMutation;
@@ -35,14 +36,14 @@ export function createDeadLetterStore(storageKey: string): DeadLetterStore {
     const raw = await get<string>(storageKey);
     if (!raw) return [];
     try {
-      return superjson.parse<DeadLetterEntry[]>(raw);
+      return offlineSerializer.parse<DeadLetterEntry[]>(raw);
     } catch {
       return [];
     }
   }
 
   async function writeAll(entries: DeadLetterEntry[]): Promise<void> {
-    await set(storageKey, superjson.stringify(entries));
+    await set(storageKey, offlineSerializer.stringify(entries));
   }
 
   return {
