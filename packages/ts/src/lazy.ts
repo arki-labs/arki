@@ -60,17 +60,20 @@ export function resolveLazy<T>(value: Lazy<T>): T {
 export function lazyObject<T extends object>(build: () => T): T {
   const resolved = once(build);
 
-  return new Proxy({} as object, {
-    get: (_target, property) => {
-      const instance = resolved();
-      const value = Reflect.get(instance, property, instance);
-      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(instance) : value;
+  return new Proxy(
+    {},
+    {
+      get: (_target, property) => {
+        const instance = resolved();
+        const value = Reflect.get(instance, property, instance);
+        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(instance) : value;
+      },
+      set: (_target, property, value) => Reflect.set(resolved(), property, value),
+      deleteProperty: (_target, property) => Reflect.deleteProperty(resolved(), property),
+      getPrototypeOf: () => Reflect.getPrototypeOf(resolved()),
+      has: (_target, property) => Reflect.has(resolved(), property),
+      ownKeys: () => Reflect.ownKeys(resolved()),
+      getOwnPropertyDescriptor: (_target, property) => Object.getOwnPropertyDescriptor(resolved(), property),
     },
-    set: (_target, property, value) => Reflect.set(resolved(), property, value),
-    deleteProperty: (_target, property) => Reflect.deleteProperty(resolved(), property),
-    getPrototypeOf: () => Reflect.getPrototypeOf(resolved()),
-    has: (_target, property) => Reflect.has(resolved(), property),
-    ownKeys: () => Reflect.ownKeys(resolved()),
-    getOwnPropertyDescriptor: (_target, property) => Object.getOwnPropertyDescriptor(resolved(), property),
-  }) as T;
+  ) as T;
 }
