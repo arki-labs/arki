@@ -130,6 +130,8 @@ export type RecordedStamp<Meta = unknown, Id extends string = string> = {
   readonly causeSeq: number | null;
   /** Shared by every event of one chain. Null only on rows older than the column. */
   readonly correlationId: string | null;
+  /** When `forget` rewrote `data` to the event's erased form. Null if it never did. */
+  readonly erasedAt: Date | null;
 };
 
 /**
@@ -160,6 +162,18 @@ export type EventDef<T extends string, S extends z.ZodType> = BivariantFn<
 > & {
   readonly type: T;
   readonly schema: S;
+  /**
+   * The event's erased form, for `forget`: the same data with the personal parts
+   * removed. It must still fit `schema`. Absent on an event that holds no personal data.
+   * A method signature, so every `EventDef` is an `AnyEventDef`; see `BivariantFn`.
+   */
+  erased?(data: z.output<S>): z.input<S>;
+};
+
+/** The third argument of `j.event`. */
+export type EventOptions<S extends z.ZodType> = {
+  /** See `EventDef.erased`. */
+  readonly erased?: (data: z.output<S>) => z.input<S>;
 };
 export type AnyEventDef = EventDef<string, z.ZodType>;
 

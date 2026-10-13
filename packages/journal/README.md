@@ -181,7 +181,7 @@ export const journal = j.compose({ tables, effects: [closeAfterPayment] });
 
 `journal.write(tx, entity, id, { meta, events })` is what a command's `write` calls. Use it directly only when there is no command: a one-off migration step, or a test that needs a specific `meta` per write. `events` is the function that looks at the locked row, checks the rules, and returns the events to append. It runs after the row is locked, inside the write's savepoint, and receives that savepoint as `{ tx }`, so it can read related rows under the lock. It may be async. It only accepts events declared on the entity; the row type, the id type and the event data types are all inferred.
 
-`write` returns `{ row, events }`: the stored row after the write (`null` after a delete) and the recorded events, each with `seq`, `id`, `entityId`, `version`, `meta`, `recordedAt` and the trace: `commandId`, `causeSeq`, `correlationId` (see Tracing). An entity can be created again after a delete; its version continues from the last event.
+`write` returns `{ row, events }`: the stored row after the write (`null` after a delete) and the recorded events, each with `seq`, `id`, `entityId`, `version`, `meta`, `recordedAt` the trace `commandId`, `causeSeq`, `correlationId` (see Tracing), and `erasedAt` (see Erasure). An entity can be created again after a delete; its version continues from the last event.
 
 ### Rows that existed before the journal
 
@@ -197,6 +197,14 @@ await db.transaction(tx =>
   }),
 );
 ```
+
+### Erasure
+
+Personal data written into an event stays in the log until the log forgets it. An event that can hold personal data declares its erased form: `j.event('MessageSent', schema, { erased: data => ({ ...data, content: '' }) })`. The erased form keeps everything that is not personal and must still fit the event's own schema. An event without one holds no personal data and is never touched.
+
+`journal.forget(db, entity, id)` rewrites every stored event of that entity that has an erased form to it, sets `erased_at` on those rows, and then repairs the row from the rewritten log, so the row and its history agree. All in one transaction. An erased form the schema rejects is `BAD_DEFINITION` and nothing changes. A history replay cannot rebuild, such as a legacy row that was never adopted, is `NO_HISTORY` and nothing changes: adopt it first. Running it twice is safe; the first erased time is kept. It returns `{ erased, row }`.
+
+Projections are not rerun and no job is queued: the app owns its read models and forgets them itself, in the same request. Recorded events carry `erasedAt`, so a projection that is rerun later can tell an erased event from a live one.
 
 ### A row removed outside the journal
 
@@ -407,6 +415,7 @@ journal_events
   command_id      varchar                 -- cmd_xxx, the run that wrote it; null for a bare write
   cause_seq       bigint                  -- the event whose effect ran that command; else null
   correlation_id  varchar                 -- one per chain; see Tracing
+  erased_at       timestamptz             -- set by forget; data holds the erased form
   unique (kind, entity_id, version)
   index (correlation_id)
 

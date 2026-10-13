@@ -48,7 +48,10 @@ export const OrderPlaced = j.event(
   z.object({ customerId: z.string().min(1), total: z.int().positive() }),
 );
 export const OrderPaid = j.event('OrderPaid', z.object({ amount: z.int().positive() }));
-export const OrderNoted = j.event('OrderNoted', z.object({ note: z.string().min(1) }));
+/** A note is free text a person wrote, so it has an erased form. */
+export const OrderNoted = j.event('OrderNoted', z.object({ note: z.string().min(1) }), {
+  erased: () => ({ note: '[erased]' }),
+});
 export const OrderCancelled = j.event('OrderCancelled', z.object({ reason: z.string().min(1) }));
 export const Unrelated = j.event('Unrelated', z.object({}));
 

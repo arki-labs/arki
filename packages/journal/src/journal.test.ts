@@ -461,6 +461,7 @@ describe('write', () => {
       commandId: null,
       causeSeq: null,
       correlationId: null,
+      erasedAt: null,
     };
     const ctx = {
       jobId: 'job_x',
@@ -608,6 +609,69 @@ describe('replay, verify, repair', () => {
     );
     await expect(noCreate).rejects.toThrow('has no .create reducer');
     expect(await versions(id)).toEqual([]);
+  });
+
+  it('forget rewrites the events that have an erased form, stamps them, and repairs the row to match', async () => {
+    // Why: personal data lives in event rows, and a status flip on the row does not remove it.
+    // The log must be able to forget while staying replayable, so the erased form must fit the
+    // schema and the row must be rebuilt from it.
+    const id = orderId(++next);
+    await place(id);
+    await db.transaction(tx =>
+      journal.write(tx, order, id, { meta, events: () => [OrderNoted({ note: 'call me at 555-0100' })] }),
+    );
+    await pay(id);
+    const before = await history(id);
+    const result = await journal.forget(db, order, id);
+    expect(result.erased).toBe(1);
+    expect(result.row).toMatchObject({ status: 'paid', note: '[erased]', version: 3 });
+    const after = await history(id);
+    expect(after.map(e => [e.type, e.data, e.erasedAt === null])).toEqual([
+      ['OrderPlaced', before[0]?.data, true],
+      ['OrderNoted', { note: '[erased]' }, false],
+      ['OrderPaid', before[2]?.data, true],
+    ]);
+    expect(await rowOf(id)).toMatchObject({ note: '[erased]' });
+    expect(await journal.verify(db, order, id)).toEqual({ ok: true });
+    // Running it again rewrites the same events and keeps the first erased time.
+    const stamp = after[1]?.erasedAt;
+    expect(await journal.forget(db, order, id)).toMatchObject({ erased: 1 });
+    const again = await history(id);
+    expect(again[1]?.erasedAt).toEqual(stamp);
+  });
+
+  it('forget refuses an erased form the schema rejects, and a history it cannot replay, and leaves everything untouched', async () => {
+    const leaky = j.event('LeakyNoted', z.object({ note: z.string().min(1) }), { erased: () => ({ note: '' }) });
+    // Its own create event, so the counts other tests take over `OrderPlaced` rows stay true.
+    const leakyPlaced = j.event('LeakyPlaced', z.object({ customerId: z.string(), total: z.int() }));
+    const leakyOrder = j
+      .entity('leaky', orders)
+      .create(leakyPlaced, e => ({ customerId: e.data.customerId, total: e.data.total, status: 'placed' }))
+      .on(leaky, (_row, e) => ({ note: e.data.note }));
+    const leakyJournal = j.compose({ tables });
+    const id = orderId(++next);
+    await db.transaction(tx =>
+      leakyJournal.write(tx, leakyOrder, id, { meta, events: () => [leakyPlaced({ customerId: 'c', total: 1 })] }),
+    );
+    await db.transaction(tx =>
+      leakyJournal.write(tx, leakyOrder, id, { meta, events: () => [leaky({ note: 'secret' })] }),
+    );
+    await expect(leakyJournal.forget(db, leakyOrder, id)).rejects.toMatchObject({ code: 'BAD_DEFINITION' });
+    const kept = await history(id);
+    expect(kept.map(e => [e.data, e.erasedAt])).toEqual([
+      [{ customerId: 'c', total: 1 }, null],
+      [{ note: 'secret' }, null],
+    ]);
+
+    // A legacy row that was never adopted cannot be repaired, so it cannot be forgotten either.
+    const legacy = orderId(++next);
+    await db.insert(orders).values({ id: legacy, customerId: 'legacy', total: 7, status: 'placed' });
+    await db.transaction(tx =>
+      journal.write(tx, order, legacy, { meta, events: () => [OrderNoted({ note: 'private' })] }),
+    );
+    await expect(journal.forget(db, order, legacy)).rejects.toMatchObject({ code: 'NO_HISTORY' });
+    const legacyEvents = await history(legacy);
+    expect(legacyEvents.map(e => [e.data, e.erasedAt])).toEqual([[{ note: 'private' }, null]]);
   });
 
   it('throughVersion cannot hide NO_HISTORY: a history that starts at version 2 is incomplete at any cut', async () => {

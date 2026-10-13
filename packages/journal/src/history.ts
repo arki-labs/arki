@@ -5,9 +5,9 @@
  * Must not import `journal`, `write`, `command` or `worker`.
  */
 import type { z } from 'zod';
-import { and, asc, eq, gt, inArray, max } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, max, sql } from 'drizzle-orm';
 
-import type { ReplayResult, VerifyResult } from './api.js';
+import type { ForgetResult, ReplayResult, VerifyResult } from './api.js';
 import type { JournalTables } from './pg.js';
 import type {
   AnyEventDef,
@@ -133,6 +133,7 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
       commandId: row.commandId,
       causeSeq: row.causeSeq,
       correlationId: row.correlationId,
+      erasedAt: row.erasedAt,
     });
   };
 
@@ -265,6 +266,44 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
     });
   };
 
+  const forget = async <Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
+    db: DbHandle,
+    entity: EntityDef<string, Tbl, E, MetaOut, Key>,
+    id: EntityId<Tbl, Key>,
+  ): Promise<ForgetResult<Tbl>> => {
+    assertExactId(entity, id);
+    return db.transaction(async tx => {
+      // The row lock first, so no write lands between the rewrite and the repair.
+      await loadRow(tx, entity, id, true);
+      const rows = await loadHistory(tx, entity.kind, id);
+      let erased = 0;
+      for (const row of rows) {
+        const def = entity.events.get(row.type);
+        if (def?.erased === undefined) continue;
+        // Decode as replay does, so the erased form starts from data the schema accepts.
+        const event = decodeStoredEvent(row, def, id);
+        const form = def.schema.safeParse(def.erased(event.data));
+        if (!form.success) {
+          throw new JournalError(
+            'BAD_DEFINITION',
+            entity.kind,
+            id,
+            `event "${row.type}": its erased form does not fit its own schema: ${form.error.message}`,
+          );
+        }
+        await tx
+          .update(eventsTable)
+          .set({ data: form.data, erasedAt: sql`coalesce(${eventsTable.erasedAt}, now())` })
+          .where(eq(eventsTable.seq, row.seq));
+        erased += 1;
+      }
+      // The row must match the history it now has. Repair on `tx` is a savepoint.
+      const row = await repair(tx, entity, id);
+      debugReplay('%s %s: forget -> %d events erased', entity.kind, id, erased);
+      return { erased, row };
+    });
+  };
+
   const rerun = async <Tx extends TransactionSource<Tx>>(
     db: TransactionSource<Tx>,
     projection: Projection<MetaOut, Tx>,
@@ -305,7 +344,7 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
     return { events: count };
   };
 
-  return { decodeStoredEvent, highestVersion, assertLogSaysGone, replay, verify, repair, rerun };
+  return { decodeStoredEvent, highestVersion, assertLogSaysGone, replay, verify, repair, forget, rerun };
 }
 
 export type History<Meta extends z.ZodObject> = ReturnType<typeof createHistory<Meta>>;

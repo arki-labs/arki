@@ -18,6 +18,7 @@ import type {
   EntityInfo,
   EntityTable,
   EventDef,
+  EventOptions,
   IdTable,
   JournalWorker,
   KeyName,
@@ -117,6 +118,12 @@ export type WriteResult<Tbl extends EntityTable, E extends AnyEventDef, MetaOut,
   readonly row: Row<Tbl> | null;
   readonly events: RecordedOf<E, MetaOut, EntityId<Tbl, Key>>[];
 };
+export type ForgetResult<Tbl extends EntityTable> = {
+  /** How many events were rewritten in this call. Already-erased events count again: the rewrite is the same. */
+  readonly erased: number;
+  /** The row after repair from the erased log, or `null` if the log says the entity is gone. */
+  readonly row: Row<Tbl> | null;
+};
 export type ReplayResult<Tbl extends EntityTable, E extends AnyEventDef, MetaOut, Key extends string = 'id'> = {
   readonly row: ReducerRow<Tbl, Key> | null;
   readonly events: RecordedOf<E, MetaOut, EntityId<Tbl, Key>>[];
@@ -190,6 +197,20 @@ export type Journal<
     entity: EntityDef<K, Tbl, E, z.output<Meta>, Key>,
     id: EntityId<Tbl, Key>,
   ): Promise<VerifyResult<Tbl, Key>>;
+  /**
+   * Remove personal data from one entity's history. Every stored event whose definition
+   * has an `erased` form gets its `data` rewritten to that form and `erased_at` set; events
+   * without one are left alone. Then the row is repaired from the rewritten log, so the row
+   * and its history agree. All in one transaction: an erased form the schema rejects is
+   * `BAD_DEFINITION` and nothing changes; a history replay cannot rebuild (a legacy row that
+   * was never adopted) is `NO_HISTORY` and nothing changes. Projections are not rerun, and no
+   * job is queued: the app owns its read models. Running it twice is safe.
+   */
+  forget<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
+    db: DbHandle,
+    entity: EntityDef<K, Tbl, E, z.output<Meta>, Key>,
+    id: EntityId<Tbl, Key>,
+  ): Promise<ForgetResult<Tbl>>;
   /** Lock the row, replay, save the result. Writes no event, runs no projection, creates no job. */
   repair<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,
@@ -249,7 +270,7 @@ export type JournalDefinitions<
   Tx extends TransactionSource<Tx> = DbHandle,
   AppDb extends RootDb = RootDb,
 > = {
-  event<T extends string, S extends z.ZodType>(type: T, schema: S): EventDef<T, S>;
+  event<T extends string, S extends z.ZodType>(type: T, schema: S, opts?: EventOptions<S>): EventDef<T, S>;
   /** The key column is `id`. */
   entity<K extends string, Tbl extends IdTable>(
     kind: K,

@@ -43,6 +43,8 @@ export function journalTables(schema?: PgSchema) {
       causeSeq: bigint('cause_seq', { mode: 'number' }),
       /** Shared by every event of one chain: inherited from the cause event or the parent run, else new per root run. */
       correlationId: varchar('correlation_id'),
+      /** Set by `forget` when `data` was rewritten to the event's erased form. */
+      erasedAt: timestamp('erased_at', { withTimezone: true, mode: 'date' }),
     },
     t => [
       unique('journal_events_kind_entity_id_version_unique').on(t.kind, t.entityId, t.version),

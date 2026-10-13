@@ -168,6 +168,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     replay: (db, entity, id, opts) => history.replay(db, entity, id, opts),
     verify: (db, entity, id) => history.verify(db, entity, id),
     repair: (db, entity, id) => history.repair(db, entity, id),
+    forget: (db, entity, id) => history.forget(db, entity, id),
     rerun: (db, projection, opts) => history.rerun(db, projection, opts),
     drain: (db, opts) => drain(db, opts),
     worker: (db, opts) => workers.worker(db, opts),
