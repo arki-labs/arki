@@ -558,9 +558,69 @@ Schema changes in this wave, all additive: tables `journal_receipts` and
 `(priority desc, available_at) where dead_at is null` replacing the old one.
 Each app that owns journal tables exports all four from its
 `journal.tables.ts` and composes with that object. Migrations were generated
-for games-platform and kapodopera. Everseek still has no migration for its
-journal tables at all.
+for games-platform and kapodopera. Everseek got its first journal migration
+later the same day (`20261013110824_journal`), together with a catch-up
+migration for tables that push had created without one. Everseek applies its
+schema with push in production; the migrations are its history.
+
+Games Platform then moved its four realtime handlers from effects to taps. Each
+`start` instance runs a worker that listens through `listenOnPool`, so every
+instance tells its own sockets. A migration deleted the job rows the four old
+effects had left behind.
 
 One cast remains in the library, in `command.ts`: the stored receipt result is
 returned as the command's result type. It is the JSON form the first run was
 checked against, so the shape is the command's own.
+
+## 10. Versioned events with upcasters, built (2026-10-13)
+
+The last row of the 8.2 list. It was built ahead of its trigger, the first
+incompatible change to a stored event, at the founder's request.
+
+An event declares its older shapes, oldest first:
+
+```ts
+j.event('NoteSet', schemaV3, {
+  upcasters: [
+    { from: schemaV1, up: v1 => v2 },
+    { from: schemaV2, up: v2 => v3 },
+  ],
+});
+```
+
+- **Version.** An event's version is one more than its number of upcasters.
+  The new column `journal_events.schema_version`, an integer that defaults to
+  1, records it. Every row written before the column existed is version 1,
+  which is true.
+- **Writing.** `write`, `adopt` and `forget` store the current version.
+  `forget` builds the erased form from today's shape, so it stores today's
+  version.
+- **Reading.** One decoder serves every reader: `replay`, `verify`, `repair`,
+  `forget`, `rerun`, async projections, effects and taps. It parses an old
+  row with each step's `from`, calls `up`, and parses the result with the
+  current schema. Readers only ever see the current shape. Stored rows are
+  never rewritten on read.
+- **Types.** Each `up` receives the typed output of its own `from`. The tuple
+  is inferred, so no helper function is needed.
+- **Failures.** All of these are `REPLAY_FAILED`, and each names the row and
+  the version:
+  - a row from a newer release than the reader
+  - a row that does not fit its version's schema
+  - an upcaster that throws
+  Old code never guesses at a new shape.
+
+Left out on purpose:
+
+- **A command that rewrites old rows to the current version.** Reading through
+  the steps is cheap, and rewriting history is what `forget` exists for.
+- **Typed links between steps.** One step's `up` result is checked against the
+  next step's `from` at run time, not by the compiler. Expressing the chain in
+  types would cost more than the run-time parse that already catches it.
+- **Down-casting for old readers during a rolling deploy.** The rule is to
+  deploy readers before the first write of a new version.
+
+Migrations: everseek and games-platform each have
+`<timestamp>_journal_schema_version`, one `ADD COLUMN` with a constant
+default. Postgres applies that without rewriting the table. Kapodopera still
+needs the same migration. Another session had uncommitted schema changes and
+migrations there, so generating it then would have mixed the two.
