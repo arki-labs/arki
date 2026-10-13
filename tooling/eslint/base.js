@@ -87,6 +87,11 @@ export default tseslint.config(
       ...regexpPlugin.configs.recommended.rules,
       ...unicornPlugin.configs.recommended.rules,
       ...turboPlugin.configs.recommended.rules,
+      // Only check Drizzle handles: without a name list the rule also flags Set/Map/storage `.delete()`.
+      'drizzle/enforce-delete-with-where': [
+        'error',
+        { drizzleObjectName: ['db', 'tx', 'dbOrTx', 'database', 'appDb', '_db', 'currentDb', 'dbClient', 'dbA'] },
+      ],
       '@typescript-eslint/no-unused-vars': [
         'error',
         // ignoreRestSiblings: the `const { omit, ...rest } = obj` omit-by-destructure pattern is
