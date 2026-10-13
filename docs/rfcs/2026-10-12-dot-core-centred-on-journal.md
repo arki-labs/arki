@@ -156,8 +156,8 @@ Everything else is an in-memory wrapper.
 
 | Stage | What | Size | Risk |
 |---|---|---|---|
-| 0 | Fix the template server: remove the Kapodopera imports. | Small | Low |
-| 1 | Repair the journal worker (faults 1-3, DONE 2026-10-12) and the schedule lock outcome (plan 009, open). | Medium | High on correctness, few users today |
+| 0 | Fix the template server: remove the Kapodopera imports. DONE 2026-10-13. | Small | Low |
+| 1 | Repair the journal worker (faults 1-3, DONE 2026-10-12) and the schedule lock outcome (plan 009, DONE 2026-10-13). | Medium | High on correctness, few users today |
 | 2 | Pure logger core, a `log()` Dot plugin, kernel moves onto it, import test on `@arki/dot`. Fix the `NODE_ENV` read in queue. | Large | Medium: every server logs |
 | 3 | The hook helper. Hooks on journal commands, writes and jobs, on cron runs, and on log records. Astra's rules. | Medium | Low: additive |
 | 4 | `@arki/telemetry` split out of meter, with a bridge from hooks to OpenTelemetry. | Medium | Low: 3 apps |
@@ -174,7 +174,7 @@ Everything else is an in-memory wrapper.
 | 1 | App shape | **Core plugins.** No `@arki/app` preset now. | None. Revisit a preset after stage 6. |
 | 2 | Node logging startup | **Explicit.** Dot apps get it from `log()`; other apps add one startup line. | Plan 010 is replaced. Plan 007 is revised: each app owns its logger, no shared mutable settings. |
 | 3 | Where declarations check for mistakes | **The ladder (option C) with refactors R1-R6** (section 6a): types first, then a coded throw at import, then boot for anything that depends on the world. | Doctrine §1 states the ladder. R1-R6 done 2026-10-13. |
-| 4 | What a cron promises | **Each cron chooses.** `defineSchedule({ ..., durable: true })` is backed by a BullMQ repeatable job; the default (`durable: false`) runs in process and skips ticks missed while down. A durable cron with no queue plugin fails boot with a coded error. | `@arki/schedule` gains a durable mode that hands the cron to `@arki/queue`. The queue's cron support stays: it becomes that backend. |
+| 4 | What a cron promises | **Each cron chooses.** `defineSchedule({ ..., durable: true })` is backed by a BullMQ repeatable job; the default (`durable: false`) runs in process and skips ticks missed while down. A durable cron with no queue plugin fails boot with a coded error. | `@arki/schedule` gains a durable mode that hands the cron to `@arki/queue`. The queue's cron support stays: it becomes that backend.  DONE 2026-10-13: `durable: true` + `durableScheduler()` in `@arki/queue/dot`; checked against a real Redis (one run per tick across two replicas). |
 | 5 | Default "run later" path | **BullMQ stays the default.** Journal effects are for consequences of committed business events. | The template keeps Redis and `@arki/queue`. Stage 7 no longer slims the queue's cron or job features. |
 
 The original options and recommendations, kept for the record:
@@ -296,3 +296,227 @@ which breaks a consumer that matches on `instanceof Error` plus a message.
   confirmed (9 found with a narrow search).
 - The uncommitted journal work in the tree was read as it stood on
   2026-10-12 and may have moved since.
+
+## 8. What the journal is still missing (2026-10-13)
+
+Two reviewers, blind to each other, answered "what is `@arki/journal` missing?"
+Fable's list and Astra's list overlapped on most points. Every Astra finding
+below was opened in the code before it was adopted. The yardstick for "now"
+is: it touches the two tables, an invariant, or history that cannot be
+backfilled. Everything else waits for the first app that asks.
+
+Status of this section: **PROPOSED**. The founder chose "build all six now"
+on 2026-10-13. Implementation starts after the founder approves the designs
+below.
+
+### 8.0 The name stays `journal`
+
+Both reviewers were asked whether `journal` is the right name, or whether
+`event bus` or `bus` fits better. Both said keep `journal`, for the same
+reason. The package is a persistence layer: it records changes durably and
+in the same transaction as the entity row. "Journal" names that. "Bus" names
+routing between producers and consumers, which the package does not do:
+handlers are fixed at compose time, nothing subscribes at runtime, and the
+transaction is the delivery. Akka calls the same component a journal. Marten
+and Emmett, the family this package replaced, pair event appends with inline
+projections in the same way.
+
+Proposed README opener, to stop the question coming back:
+
+> `@arki/journal` is a transactional journal for Drizzle entities: it
+> atomically records immutable domain events, updates entity rows and inline
+> projections, and queues durable effects for execution after commit.
+
+### 8.1 Build now
+
+| # | Gap | Found by | Why now |
+|---|---|---|---|
+| 1 | Commit-order safety for `seq` | both | Every checkpoint ever taken is suspect until fixed |
+| 2 | Causation and correlation ids | both | History cannot be backfilled |
+| 3 | Erasure contract | Astra | Personal data is already in event rows; the schema rule is hard to retrofit |
+| 4 | Baseline for rows older than the journal | Astra | Original values are lost after the first write; Kapodopera is mid-migration |
+| 5 | Gap detection in replay | Astra | Correctness bug: repair can save a wrong row |
+| 6 | Around-hooks on commands and effects | Fable | Section 5 committed to it; telemetry and log plugins block on it |
+
+**1. Commit-order safety.** `seq` is a `bigserial`
+(`packages/journal/src/pg.ts:28`, checked). Postgres assigns it at insert,
+not at commit. Transaction A takes seq 1, transaction B takes seq 2 and
+commits first, a reader checkpoints at 2, A commits, and A's event is never
+read. `rerun` has this hole today (`history.ts:243`, checked), and every
+future async projection or subscriber would inherit it.
+
+Design: `write` takes `pg_advisory_xact_lock(<fixed key>)` at its start,
+before the row lock, so every journal transaction takes its locks in the
+same order and two commands writing two entities cannot deadlock. The lock
+is re-entrant inside a transaction and held until commit, so seq order
+equals commit order. Cost: event appends across the app are
+serialised, one committing transaction at a time. That is fine for these
+apps and is the simplest correct protocol. The alternative, xid8 visibility
+tracking as Marten does, was rejected as too much machinery. PGlite supports
+advisory locks, and it is single-connection anyway. Test: on real Postgres,
+two overlapping transactions; the one that commits later has the higher seq.
+
+**2. Causation and correlation ids.** Today `meta` carries only what the app
+puts in, and a child command inherits the parent's meta unchanged
+(`command.ts:67`, checked). Nothing records which command wrote an event or
+which job caused that command. Payment chains are the first need: webhook,
+then subscription, then entitlement.
+
+Design: three nullable columns on `journal_events`, all stamped by the
+library, never by the app:
+
+- `command_id`: a new `cmd_` id per `run`, nested runs included.
+- `cause_seq`: inside an effect's `ctx.run`, the seq of the event the job
+  was for. Null for a top-level run.
+- `correlation_id`: inherited from the cause event, else from the parent
+  run, else a new `cor_` id. `run` and `bind` accept an optional
+  `correlationId` so a request id can seed it.
+
+Exposed on every recorded event as `event.commandId`, `event.causeSeq`,
+`event.correlationId`. Astra proposed putting these in the app's meta JSON
+instead. Columns were chosen because the library already knows the chain,
+an app should not thread it by hand, and columns can be indexed. Migration:
+additive, three nullable columns, in the three apps and the payments
+package that own journal tables.
+
+**3. Erasure contract.** Kapodopera stores message content inside event
+rows (`apps/kapodopera/backend/src/features/_shared/messaging/conversation.ts:27`,
+checked), and delete only flips a status. There is no way for personal data
+to leave the log.
+
+Design: `j.event(type, schema, { erased: data => data' })` lets an event
+declare its erased form from its data, so the non-personal parts can stay.
+Because it takes the data, it cannot be checked at import; `forget` parses
+the form with the schema and refuses with `BAD_DEFINITION`, rolling back,
+if it does not fit. A new verb `journal.forget(db, entity, id)` locks the
+row, rewrites `data` of every event of that entity that has an erased form,
+stamps `erased_at`, then runs `repair` so the row matches the erased
+history. Events without an erased
+form are left alone: they hold no personal data. Projections are not rerun;
+the app owns its read models and the README says so. Column: `erased_at
+timestamptz null` on `journal_events`. Crypto-shredding was rejected: it
+needs a key per entity from day one and the apps are too small to pay for
+it.
+
+**4. Baseline for rows older than the journal.** A pre-journal row starts
+its history at version 2, and replay, verify and repair refuse it by design
+(`write.ts:103`, `entity.test.ts:166`, checked). After the first journal
+write the original values exist only in the row, and the next write
+overwrites them.
+
+Design, revised during implementation: `journal.adopt(tx, entity, id, {
+meta, events })` locks the row, requires version 0 and an empty log, and
+calls `events(row)` for exactly one create event built from the stored
+row. Its `.create` reducer must rebuild the row exactly, column by column,
+or `VALUE_MISMATCH` and nothing changes. The event is recorded as version 1
+and the row moves to version 1. Projections run and effects are queued as
+for any write. The reserved `$adopted` event first proposed was dropped:
+row values such as dates and numerics do not survive a JSON round trip, and
+only the entity's own create reducer knows how to build a row from JSON, so
+the library cannot write a generic snapshot event. The start-at-2 behaviour
+stays for rows nobody adopted, so nothing breaks. No schema change.
+
+**5. Gap detection in replay.** Replay checks only that the first version
+is 1 (`history.ts:130`, checked). A missing middle version folds silently
+into a wrong row, and `repair` would save it. Astra reproduced this on
+PGlite by deleting version 2 of a three-event history.
+
+Design: after loading, replay requires versions 1..n with no holes, and
+requires the stored row's version to be at most n. A hole throws a new
+`JournalError` code `HISTORY_GAP`, naming the first missing version.
+`verify` reports it, `repair` refuses it. No schema change.
+
+**6. Around-hooks on commands and effects.** Section 5 decided the one
+extension mechanism is a typed wrapper on the service
+(`journal.hooks.command.around(fn)`). Nothing is built yet (grep for
+`hooks` in `packages/journal/src` finds nothing, checked). The telemetry
+and log plugins of section 5 cannot start without it.
+
+Design, Astra's rules on Fable's mechanism:
+
+- `journal.hooks.command.around(fn)` and `journal.hooks.effect.around(fn)`.
+  `fn(ctx, next)`. The command context carries `name`, `input`, `meta`,
+  `commandId`, `correlationId`; the effect context carries `name`, `event`,
+  `jobId`, `attempt`.
+- `next` at most once; a second call throws. A wrapper may not rewrite
+  `input`. If `next` rejects, the wrapper's promise rejects: a wrapper
+  cannot turn a failure into a success.
+- Command wrappers run inside the transaction, so an error anywhere rolls
+  back cleanly. Effect wrappers run inside the lease.
+- Registration is frozen at the first `run`, `drain` or `worker.start()`.
+  A later registration throws `BAD_DEFINITION`.
+- Wrappers run in registration order, first one outermost.
+
+Hooks on `write` are left out for now. They are additive and no plugin
+needs them yet.
+
+### 8.2 Build when an app asks
+
+Each of these is additive: a new table, a new column, or a new option. None
+changes an existing row, an invariant, or an API.
+
+| Gap | Trigger | Shape |
+|---|---|---|
+| Lease heartbeat for effects over 60 s | Avocabo moves AI summarisation into effects | `ctx.heartbeat()` or auto-renew; `lease_until` and `lease_token` already exist |
+| Idempotency receipts for commands | EverSeek's RevenueCat webhook retries; today it passes no delivery key | A receipts table keyed by delivery key, written in the command's transaction |
+| Checkpointed async projections | A slow leaderboard or report | A cursor table; reset, catch-up, cutover. Needs 8.1 item 1 first |
+| Run-at and priority for jobs | Delayed notifications | `available_at` exists; priority is one column and an index |
+| Expected version from the client | Games Platform hand-checks stale moves today | One optional argument to `write` |
+| After-commit tap and cross-process wake | A second Games Platform instance; its `journal.root.ts` comment already names the loss | A non-durable effect mode, `durable: false`, that may not call `run`; a `LISTEN/NOTIFY` adapter for wake |
+| Admin verbs | The founder has to retry a dead payment job | List jobs, retry a dead job, discard a job |
+| Browser-safe errors subpath | A web client wants `isCommandError` | `@arki/journal/errors` with no Drizzle import |
+| Public test helpers | A fourth adopter | Export the fixture in `test-support.ts` |
+| Versioned event payloads with upcasters | The first incompatible change to an existing event | `schema_version` column with default 1, plus an upcaster per event. Until then: new meaning, new event type |
+
+### 8.3 Never
+
+Each of these was proposed in the brief. Both reviewers said no, for the
+reasons given.
+
+- **A mandatory tenant column.** The identity of an event is
+  `kind + entity_id + version`, and entity ids are globally unique. A
+  tenant column would force every app, most of them single-tenant, to carry
+  it, and it would change the unique constraint. Tenant-local ids would
+  break the id uniqueness that replay and repair rely on. A tenant belongs
+  in `meta` and on the entity row. An index on `meta->>'tenantId'` can come
+  later without touching the model.
+- **Snapshots.** The entity row is the snapshot, rebuilt on every write.
+  Reads never replay. Replay exists for verify and repair, and nobody has
+  measured a history long enough to make it slow. A snapshot table would be
+  a second copy of the row with its own drift. If a measurement ever shows
+  the need, a snapshot table is additive.
+- **A multi-entity batch API.** One transaction already holds any number of
+  writes, run one after another, and a command can run child commands on
+  their own savepoints (`command.ts:49`, checked). A batch abstraction
+  would duplicate the savepoint stack and give a second way to do the same
+  thing.
+- **Runtime-attached handlers.** A job row names its effect by a string. A
+  worker in another process that never saw a handler attached at runtime
+  leaves the job pending forever, and `strandedJobs` would report it as a
+  rename. The catalog that lists effects would be false. Rolling deploys
+  assume the set of effects is fixed per build. The thing that comes and
+  goes at runtime is a connection, not a handler; connections belong in an
+  app hub fed by one static effect, which is what Games Platform does
+  today.
+- **Renaming to `bus`, `event bus`, `event store` or `event log`.** See
+  8.0. Each of those promises something the package does not do: routing,
+  runtime subscription, a storage backend without state maintenance, or a
+  diagnostic log.
+- **Storing commands, rpc calls, cron ticks, log lines or spans as events.**
+  Already decided in section 1, item 3. Only a fact about business data is
+  a journal event.
+
+### 8.4 Order of work
+
+1. Item 5, gap detection. Smallest, pure correctness, unblocks trust in
+   replay for the rest.
+2. Item 1, commit order. One lock call and one Postgres test.
+3. Item 2, ids. Columns, stamping, migrations in the four owners.
+4. Item 4, adopt. Needed by Kapodopera before its next table moves.
+5. Item 3, forget. Needs item 4's reserved-type rule and item 5's gap check.
+6. Item 6, hooks. Last, because items 2 and 3 add context fields the hooks
+   expose.
+
+One commit and one changeset per item. Items 2 and 3 are the only schema
+changes; both are additive nullable columns. `@arki/journal` stays 0.x, so
+each is a minor changeset.
