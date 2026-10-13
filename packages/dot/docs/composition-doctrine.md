@@ -19,12 +19,25 @@ free**: no env observation, no I/O, no connections, no throws that depend on
 the world, no global mutation. Pure *computation* at import is fine (deriving
 actions, building a handler from a static router); *observation* is not.
 
-- A declaration **may throw on a mistake in the code itself**, such as a
-  duplicate key in a compose fold (§4) or an invalid cron string. Such a throw
-  depends only on the source, so it fails on every import, in every
-  environment, the same way: it behaves like a type error the compiler could
-  not catch. A throw that depends on env, files, the network or the clock is
-  never allowed at import.
+- **Mistakes are caught on the earliest step that can see them** (the
+  ladder):
+  1. **Types**, when TypeScript can express the check: a duplicate key in a
+     compose fold (§4), a builder method called too early, a mount path
+     without a leading `/`. `tsc` reports every one at once, before any code
+     runs.
+  2. **A coded throw at import**, when the check depends only on the source
+     but types cannot express it: a cron string that does not parse, a key
+     column that is nullable. It fails at the line of the mistake, in every
+     environment, every time. The error carries a `code` and a
+     `remediation`; `dot explain` shows both when the import fails.
+  3. **Boot**, for anything that depends on the world: env, files, the
+     network, the clock. Never at import.
+- **Never move a check down the ladder.** Many consumers never boot through
+  Dot: a router from `composeRouter` goes straight to oRPC. A check deferred
+  to boot would never run for them, and a loud mistake would become a silent
+  one.
+- **Every type check keeps a runtime throw behind it.** Plain JavaScript and
+  casts skip the types; the coded throw is the backstop.
 
 - Env is observed at **use**, never at import — `@arki/env`'s `defineEnv` is
   lazy by design (the `process.env` snapshot and validation fire on first
@@ -100,7 +113,8 @@ use; the slice set stays open; `@arki/feature` imports no adapter.
 `plugs(features)`, `tokens(features)`, `composeRouter(features)`,
 `composeRepos(features, db)`, `composeSchema(...)`. Folds are typed
 identities: runtime merge + exact intersection type + duplicate-key
-rejection that throws at module load. There is never a second list to
+rejection, as a compile error first and a coded throw at module load behind
+it. There is never a second list to
 forget.
 
 ## 5. Dependencies point one way (the drizzle-relations rule)
@@ -199,6 +213,6 @@ cross-feature aggregation point (requests → contexts).
 | --- | --- |
 | Import purity | scrubbed-env subprocess imports the app module |
 | Fold ↔ contract exactness | derivation tests: per-key `toEqualTypeOf`, `ComposedRepos` pin |
-| Duplicate membership | compose folds throw at module load |
+| Duplicate membership | compile error in compose folds; coded throw at module load behind it |
 | Graph shape | `dot explain` from a bare checkout; feature-attributed actions |
 | Boot behavior | package suites + a live boot smoke (a real round-trip, a fail-closed guard, clean dispose) |

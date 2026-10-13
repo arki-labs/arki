@@ -114,6 +114,27 @@ describe('loadAppFromFile', () => {
       code: DotCliErrorCode.AppInvalidExport,
     });
   });
+
+  it('surfaces the code and fix of a declaration that rejected a mistake at import', async () => {
+    // Declarations throw a coded error for a mistake in the code. The import
+    // fails, and the developer needs that code and its fix, not only "import failed".
+    const file = join(workDir, 'app.ts');
+    await writeFile(
+      file,
+      `const error = Object.assign(new Error('[feature] router mount key "orders" is contributed by more than one feature.'), {
+  code: 'FEATURE_E001',
+  remediation: 'Give each feature its own router mount key.',
+});
+throw error;
+`,
+    );
+    await expect(loadAppFromFile(file)).rejects.toMatchObject({
+      code: DotCliErrorCode.AppImportFailed,
+      message: expect.stringContaining('[FEATURE_E001] [feature] router mount key "orders"'),
+      remediation: 'Give each feature its own router mount key.',
+      metadata: { filePath: file, causeCode: 'FEATURE_E001' },
+    });
+  });
 });
 
 describe('discoverApp', () => {

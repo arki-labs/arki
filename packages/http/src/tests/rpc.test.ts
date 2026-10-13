@@ -101,6 +101,7 @@ describe('rpc mounts', () => {
     const contract = rpcMount('/rpc', { id: 'default.rpc' });
     expect(contract.toDotAction().binding).toBe('orpc');
 
+    // @ts-expect-error -- a mount path must start with "/"
     expect(() => rpcMount('rpc without slash', { id: 'bad.rpc' })).toThrow(HttpConfigError);
   });
 });

@@ -1,17 +1,23 @@
 export const DB_COMPOSITION_ERROR_CODES = {
   duplicateSchemaKey: 'DB_COMPOSITION_E001',
+  projectionNameMissing: 'DB_COMPOSITION_E002',
+  projectionEventsMissing: 'DB_COMPOSITION_E003',
 } as const;
 
 export class DbCompositionError extends Error {
   readonly code: (typeof DB_COMPOSITION_ERROR_CODES)[keyof typeof DB_COMPOSITION_ERROR_CODES];
+  /** How to fix the declaration. Shown by `dot explain` when the import fails. */
+  readonly remediation: string | undefined;
 
   constructor(args: {
     readonly code: (typeof DB_COMPOSITION_ERROR_CODES)[keyof typeof DB_COMPOSITION_ERROR_CODES];
     readonly message: string;
+    readonly remediation?: string;
   }) {
     super(args.message);
     this.name = 'DbCompositionError';
     this.code = args.code;
+    this.remediation = args.remediation;
   }
 }
 
@@ -50,6 +56,7 @@ export function composeSchema<const TSlices extends readonly SchemaSlice[]>(
         throw new DbCompositionError({
           code: DB_COMPOSITION_ERROR_CODES.duplicateSchemaKey,
           message: `[db] schema key "${key}" is provided by more than one schema slice.`,
+          remediation: 'Rename the table in one slice, or remove the slice that repeats it.',
         });
       }
       seen.add(key);

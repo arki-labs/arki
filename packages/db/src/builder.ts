@@ -3,6 +3,7 @@ import { defineRelations } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PoolConfig } from 'pg';
 
+import { DB_COMPOSITION_ERROR_CODES, DbCompositionError } from './composition.js';
 import { debugProjection } from './debug.js';
 import { initDbWithOptions } from './init.js';
 
@@ -201,11 +202,19 @@ class ProjectionBuilderImpl<
   handle(handler: ProjectionHandler<TEvent, TRepos, TRelations>): ProjectionDefinition<TName> {
     if (!this._name) {
       debugProjection('[builder] Error: Projection name is required');
-      throw new Error('Projection name is required. Call .named() first.');
+      throw new DbCompositionError({
+        code: DB_COMPOSITION_ERROR_CODES.projectionNameMissing,
+        message: 'Projection name is required. Call .named() first.',
+        remediation: 'Call .named("...") before .handle().',
+      });
     }
     if (!this._eventTypes) {
       debugProjection('[builder] Error: Event types are required');
-      throw new Error('Event types are required. Call .on() first.');
+      throw new DbCompositionError({
+        code: DB_COMPOSITION_ERROR_CODES.projectionEventsMissing,
+        message: 'Event types are required. Call .on() first.',
+        remediation: 'Call .on(...) with the event types before .handle().',
+      });
     }
 
     const name = this._name as TName;

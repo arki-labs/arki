@@ -54,6 +54,7 @@ describe('routes() builder', () => {
 
   it('rejects malformed mount paths', () => {
     try {
+      // @ts-expect-error -- a mount path must start with "/"
       routes().mount('rpc', () => new Response('x'), { id: 'rpc' });
       expect.unreachable('relative mount path must throw');
     } catch (error) {
