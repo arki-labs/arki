@@ -34,8 +34,10 @@
  * that is intentional: the adapter only makes sense in a DOT app.
  */
 
-import { plugin, type EmptyShape, type Plugin } from '@arki/dot/plugin';
 import type { ZodType } from 'zod';
+
+import type { EmptyShape, Plugin } from '@arki/dot/plugin';
+import { plugin } from '@arki/dot/plugin';
 
 import { defineEnv } from './core/define-env.js';
 
@@ -79,10 +81,7 @@ export function env<TSchema extends Record<string, ZodType>>(
     boot() {
       const validated = defineEnv({
         server: options.schema,
-        options:
-          options.skipValidation !== undefined
-            ? { skipValidation: options.skipValidation }
-            : undefined,
+        options: options.skipValidation === undefined ? undefined : { skipValidation: options.skipValidation },
       });
       // `defineEnv` returns a Proxy from `@t3-oss/env-core`; we narrow it
       // to the schema-derived shape so downstream typing flows through.

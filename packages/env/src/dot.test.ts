@@ -7,14 +7,16 @@
  *   - boots/disposes through the standard DOT lifecycle
  */
 
-import { defineApp, rename } from '@arki/dot/plugin';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+
+import { defineApp, rename } from '@arki/dot/plugin';
 
 import { env } from './dot.js';
 
 describe('@arki/env/dot', () => {
   it('boots and exposes the validated env service', async () => {
+    // eslint-disable-next-line turbo/no-undeclared-env-vars -- test-only variable, set and removed by this test
     process.env['ADAPTER_TEST_PORT'] = '4242';
     const app = await defineApp('env-test')
       .use(
@@ -29,6 +31,7 @@ describe('@arki/env/dot', () => {
     try {
       expect(app.services.env.ADAPTER_TEST_PORT).toBe(4242);
     } finally {
+      // eslint-disable-next-line turbo/no-undeclared-env-vars -- test-only variable, set and removed by this test
       delete process.env['ADAPTER_TEST_PORT'];
       await app.dispose();
     }
@@ -46,9 +49,7 @@ describe('@arki/env/dot', () => {
       )
       .boot();
     try {
-      expect(app.manifest.services).toEqual([
-        { name: 'env', plugin: 'env', kind: 'env' },
-      ]);
+      expect(app.manifest.services).toEqual([{ name: 'env', plugin: 'env', kind: 'env' }]);
       expect(app.manifest.plugins.map(p => p.name)).toEqual(['env']);
     } finally {
       await app.dispose();
