@@ -1,0 +1,101 @@
+{
+  "name": "@arki/journal",
+  "version": "0.1.0",
+  "description": "A journal for Drizzle entities: every change is an immutable event row, the current state is a normal table row, and both are written in one transaction. Inline projections run in the same transaction; effects run after commit from a job table.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "journal",
+    "events",
+    "event-log",
+    "drizzle",
+    "postgres",
+    "projection",
+    "jobs"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./pg": {
+      "types": "./dist/pg.d.ts",
+      "import": "./dist/pg.js",
+      "default": "./dist/pg.js"
+    },
+    "./dot": {
+      "types": "./dist/dot.d.ts",
+      "import": "./dist/dot.js",
+      "default": "./dist/dot.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "default": "./dist/errors.js"
+    },
+    "./orpc": {
+      "types": "./dist/orpc.d.ts",
+      "import": "./dist/orpc.js",
+      "default": "./dist/orpc.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "default": "./dist/testing.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/__tests__/**",
+    "README.md",
+    "llms.txt",
+    "docs/agent-guide.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@arki/log": "0.0.3",
+    "@paralleldrive/cuid2": "^3.3.0",
+    "drizzle-orm": "1.0.0-rc.4",
+    "zod": "4.6.5"
+  },
+  "peerDependencies": {
+    "@arki/dot": "^0.4.1",
+    "@electric-sql/pglite": "^0.4.6",
+    "@orpc/server": "^1.15.5",
+    "drizzle-kit": "1.0.0-rc.4"
+  },
+  "peerDependenciesMeta": {
+    "@arki/dot": {
+      "optional": true
+    },
+    "@electric-sql/pglite": {
+      "optional": true
+    },
+    "@orpc/server": {
+      "optional": true
+    },
+    "drizzle-kit": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
