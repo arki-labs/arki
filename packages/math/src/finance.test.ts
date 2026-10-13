@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { Decimal } from './decimal.js';
+import { InvalidArgumentError, ResourceLimitError, RoundingNecessaryError } from './errors.js';
 import {
   amortizationSchedule,
   compoundInterest,
@@ -13,8 +15,6 @@ import {
   presentValue,
   simpleInterest,
 } from './finance.js';
-import { Decimal } from './decimal.js';
-import { InvalidArgumentError, ResourceLimitError, RoundingNecessaryError } from './errors.js';
 
 const cents = { scale: 2, rounding: 'halfEven' } as const;
 
@@ -78,12 +78,37 @@ describe('futureValue / presentValue', () => {
   });
 });
 
+describe('futureValue / presentValue with a payment', () => {
+  // Excel FV(0.06/12, 120, -100, -1000, 0) = 18207.33: the same deposits, read as a balance.
+  it('adds each payment grown to the end, as Excel FV does', () => {
+    expect(futureValue(1000, '0.005', 120, { payment: 100, scale: 2 }).toString()).toBe('18207.33');
+  });
+  // ((1 + r)^n − 1) ÷ r is the polynomial Σ (1 + r)^k, so no rounding is needed.
+  it('stays exact without a scale', () => {
+    expect(futureValue(0, '0.1', 2, { payment: 100 }).eq(210)).toBe(true);
+    expect(futureValue(0, '0.1', 2, { payment: 100, timing: 'begin' }).eq(231)).toBe(true);
+    expect(futureValue(0, 0, 12, { payment: 50 }).eq(600)).toBe(true);
+  });
+  it('pays a loan off to zero with a negative payment', () => {
+    expect(futureValue(100, '0.1', 2, { payment: '-57.619047619047619047619', scale: 10 }).isZero()).toBe(true);
+  });
+  // PV(0.0075, 60, -250, -5000, 1) = 15327.1669485566
+  it('discounts the payments and the amount with one rounding, as Excel PV does', () => {
+    expect(presentValue(5000, '0.0075', 60, { payment: 250, timing: 'begin', scale: 2 }).toString()).toBe('15327.17');
+    expect(presentValue(0, 0, 12, { payment: 50, scale: 2 }).toString()).toBe('600.00');
+  });
+});
+
 describe('netPresentValue', () => {
   it('discounts flows from t = 1', () => {
     expect(netPresentValue(0.1, [100, 100, 100], cents).toString()).toBe('248.69');
   });
   it('lets the caller add the t = 0 flow', () => {
-    expect(Decimal.from(-250).plus(netPresentValue(0.1, [100, 100, 100], cents)).toString()).toBe('-1.31');
+    expect(
+      Decimal.from(-250)
+        .plus(netPresentValue(0.1, [100, 100, 100], cents))
+        .toString(),
+    ).toBe('-1.31');
   });
   it('rejects empty flows', () => {
     expect(() => netPresentValue(0.1, [], cents)).toThrow(InvalidArgumentError);
