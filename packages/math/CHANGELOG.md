@@ -1,5 +1,25 @@
 # @arki/math
 
+## 0.0.7
+
+What the ekuation calculators needed after their first migration.
+
+Added:
+
+- `@arki/math/finance/float` — the finance functions on `number` with the same names and sign rules: fractional and negative periods, no digit limit, fast in loops; `log1p`/`expm1` keep tiny rates accurate.
+- `finance` — `futureValue`/`presentValue` take `{ payment, timing }` (Excel `FV`/`PV` with a payment); `periodsToReach` takes `{ payment, timing }` (Excel `NPER`).
+- `stats` — `quantile`/`percentile` `{ method }` for all nine Hyndman–Fan definitions (NumPy names, `QUANTILE_METHODS`); `quartiles` (incl. Tukey hinges); `percentileRank`; `pooledVariance`, `pooledStddev`; the linear fit reports `adjustedR2`, `residualStandardError`, `slopeStandardError`, `interceptStandardError`, the polynomial fit `adjustedR2`, `residualStandardError`.
+- `distributions` — `gamma`, `beta`, `betaLn`.
+- `units` — electric current, illuminance, radioactivity, dynamic and kinematic viscosity, solid angle (22 categories); `nm`, `µm`, `au`, `ly`, `cm3`, `in3`, `ft3`, `yd3`, imperial volumes, `month`, `year` (Julian), `ft/s`, `MJ`, `BTU`, `eV`, `MPa`, `Torr`, `arcmin`, `arcsec`, `kbit`…`Gibit`.
+- `format` — `formatCompact` takes `currency`; `locale: 'default'` (`RUNTIME_LOCALE`) formats in the runtime's locale.
+
+Changed:
+
+- `round`/`roundTo` are about 15–20× faster through a float fast path; results are identical (checked against the exact path on 1.6M seeded cases in all rounding modes).
+- Bigint `factorial`, `permutations` and `combinations` allow results up to 100 000 digits (was 10 000); `factorial` and `permutations` use product splitting.
+- `quantile` treats a position within 4 ulps of a whole number as whole, as R does.
+- `AngleUnit`, `UnitCategory` and `Unit` gained members, so exhaustive `Record<AngleUnit, …>` code must add them.
+
 ## 0.0.6
 
 Four new modules and the general math a calculator site needs.

@@ -65,9 +65,9 @@ Everything is a subpath import, tree-shakeable by concern. The root
 | `@arki/math/number`         | `clamp`, `lerp`, `inverseLerp`, `remap`, `inRange`, `round`, `roundTo`, `roundToSignificant`, `significantDigits`, `approxEqual`, `range`, `linspace`                                                                                        |
 | `@arki/math/integer`        | `gcd`, `lcm`, `divmod`, `factorial`, `combinations`, `permutations`, `isPrime`, `primeFactors`, `divisors`, `modPow`, `modInverse`, `fibonacci`, `toBase`, `fromBase`                                                                        |
 | `@arki/math/stats`          | `sum`, `mean`, `median`, `mode`, `percentile`, `variance`, `stddev`, `minMax`, `correlation`, `zScore`, `confidenceInterval`, `sampleSize`, linear/exponential/logarithmic/power/polynomial regression; `mean`…`stddev` exact on `Decimal[]` |
-| `@arki/math/units`          | `convert`, `convertExact`, `formatUnit` — 17 categories, exact ratios                                                                                                                                                                        |
-| `@arki/math/finance`        | `payment`, `amortizationSchedule`, `futureValue`, `netPresentValue`, `internalRateOfReturn`, … — on `Decimal`                                                                                                                                |
-| `@arki/math/distributions`  | `normal`, `studentT`, `noncentralT`, `chiSquare`, `fisherF`, `exponential`, `uniform`, `binomial`, `poisson`, `erf`, `erfInv`, `gammaLn`, …                                                                                                  |
+| `@arki/math/units`          | `convert`, `convertExact`, `formatUnit` — 22 categories, exact ratios                                                                                                                                                                        |
+| `@arki/math/finance`        | `payment`, `amortizationSchedule`, `futureValue`, `netPresentValue`, `internalRateOfReturn`, … — on `Decimal`; `finance/float` has the same verbs on `number`                                                                                |
+| `@arki/math/distributions`  | `normal`, `studentT`, `noncentralT`, `chiSquare`, `fisherF`, `exponential`, `uniform`, `binomial`, `poisson`, `erf`, `erfInv`, `gamma`, `gammaLn`, `beta`, …                                                                                 |
 | `@arki/math/geometry`       | `solveTriangle(s)`, `circle`, `circleSector`, `ellipse`, `regularPolygon`, solids, `distance`, `polygonArea`, `pythagoreanTriples`                                                                                                           |
 | `@arki/math/linear-algebra` | `dot`, `cross`, `norm`, `multiply`, `transpose`, `determinant`, `solve`, `inverse`, `rank`, `luDecompose` — on plain arrays (subpath only)                                                                                                   |
 | `@arki/math/complex`        | `complex()`, `Complex` — arithmetic, polar form, `exp`, `ln`, `sqrt`, `pow`, `nthRoots`                                                                                                                                                      |
@@ -209,15 +209,35 @@ interpolation (Excel `PERCENTILE.INC`, numpy's default). Empty input throws
 `EmptyDataError`; a non-finite element throws `InvalidArgumentError`.
 
 ```ts
-import { linearRegression, mean, median, percentile, quantile, stddev } from '@arki/math/stats';
+import {
+  linearRegression,
+  mean,
+  median,
+  percentile,
+  percentileRank,
+  quantile,
+  quartiles,
+  stddev,
+} from '@arki/math/stats';
 
 mean([1, 2, 3, 4]); // 2.5
 median([3, 1, 2]); // 2
 percentile([1, 2, 3, 4], 25); // 1.75   p on 0–100
 quantile([1, 2, 3, 4], 0.25); // 1.75   same thing, q on 0–1
+quantile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 0.25, { method: 'weibull' }); // 2.75   Excel PERCENTILE.EXC
+quartiles([1, 2, 3, 4, 5, 6, 7, 8], { method: 'tukey' }); // { q1: 2.5, q2: 4.5, q3: 6.5 }   box-plot hinges
+percentileRank([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 7); // 65
 stddev([2, 4, 4, 4, 5, 5, 7, 9], { ddof: 0 }); // 2
 linearRegression([1, 2, 3], [2, 4, 6]).slope; // 2
 ```
+
+`quantile` and `percentile` take `{ method }` for all nine Hyndman–Fan
+definitions (R types 1–9, named as in NumPy: `'inverseCdf'` is nearest rank,
+`'weibull'` is Excel `PERCENTILE.EXC`, `'linear'` the default). `quartiles`
+adds Tukey's hinges (R `fivenum`). `pooledVariance`/`pooledStddev` combine
+groups. The linear fit also reports `adjustedR2`, `residualStandardError` and
+the slope/intercept standard errors; these are `undefined` when no degrees of
+freedom are left (a line through two points).
 
 Inference uses exact critical values from `distributions` (Student t by
 default, `method: 'z'` for the normal). `sampleSize` rounds up.
@@ -261,6 +281,7 @@ formatCurrency(decimal('0.1').plus('0.2'), 'USD'); // '$0.30' — exact in, exac
 formatPercent(0.125); // '12.5%'  — input is a fraction, as in Intl
 formatCompact(1230000); // '1.2M'
 formatCompact(1230000, { display: 'long' }); // '1.2 million'
+formatCompact(1_250_000, { currency: 'USD' }); // '$1.3M'
 formatFileSize(1536); // '1.5 kB'
 formatFileSize(1536, { system: 'iec' }); // '1.5 KiB'
 formatFileSize(1536, { system: 'jedec' }); // '1.5 KB'  — powers of 1024, KB/MB/GB labels
@@ -273,7 +294,9 @@ ro.formatPercent(0.07); // '7 %'
 There is no global "current locale": the default is `en-US`, every call
 takes `{ locale }`, and `createFormatter` binds defaults for an app or a
 request without mutating shared state. That keeps SSR, tests, and
-concurrent requests honest.
+concurrent requests honest. To format like `toLocaleString()` does, in the
+runtime's own locale, ask for it by name: `{ locale: 'default' }` (exported as
+`RUNTIME_LOCALE`). A missing locale never means the runtime's.
 
 Ordinals and number‑to‑words are not included — `Intl` has no style for
 them, and English suffix tables would be wrong everywhere else.
@@ -357,7 +380,7 @@ subtraction loses the tail: `1 - normal().cdf(9)` is `0`, while
 `normal().sf(9)` is `1.13e-19`. Discrete `quantile(p)` is exactly "the
 smallest `k` with `cdf(k) ≥ p`".
 
-The special functions underneath — `erf`, `erfc`, `erfInv`, `gammaLn`,
+The special functions underneath — `erf`, `erfc`, `erfInv`, `gamma`, `gammaLn`, `beta`, `betaLn`,
 `regularizedGammaP`, `regularizedBeta` — are exported too. Accuracy: `cdf`
 ≈ 1e-15 for the normal, ≤ 1e-9 round-trip for t/χ²/F quantiles, 5e-13 for
 the non-central t (verified by numerical integration).
@@ -430,9 +453,10 @@ this one: same rounding modes, same error family, and it accepts `Decimal` and
 
 ## Units
 
-Seventeen categories (length, mass, area, volume, temperature, time, speed,
+Twenty-two categories (length, mass, area, volume, temperature, time, speed,
 data, energy, pressure, angle, power, frequency, force, torque, fuel economy,
-data rate) with every factor stored as an exact
+data rate, electric current, illuminance, radioactivity, dynamic and kinematic
+viscosity, solid angle) with every factor stored as an exact
 rational, so `convert(1, 'in', 'cm')` is exactly `2.54` and
 `convert(100, 'C', 'F')` is exactly `212`. `convertExact` returns the
 `Rational`; only conversions through π (radians) refuse to be exact. Fuel
@@ -467,6 +491,25 @@ netPresentValue(0.1, [100, 100, 100], { scale: 2 }).toString(); // '248.69'
 amortizationSchedule(1000, 0.01, 12, { scale: 2 }).at(-1)?.balance.toString(); // '0.00'
 ```
 
+`futureValue` and `presentValue` take `{ payment, timing }` for annuities
+(Excel `FV`/`PV` with a payment, `timing: 'begin'` for type 1). Results are
+balances, so `futureValue(pv, r, n, { payment })` is `-FV(r, n, payment, pv)`.
+
+`@arki/math/finance/float` has the same functions, names and sign rules on
+`number`, for what the exact layer cannot do: fractional or negative periods,
+horizons whose exact powers pass the digit limit, and tight loops. `(1+r)^n`
+goes through `log1p`/`expm1`, so tiny rates stay accurate and rate `0` is
+exact. `periodsToReach` (in both paths; it needs a logarithm, so it is always
+float) takes `{ payment }` like Excel `NPER`.
+
+```ts
+import { futureValue, payment, periodsToReach } from '@arki/math/finance/float';
+
+payment(200_000, 0.05 / 12, 360); // 1073.6432460242777
+futureValue(1000, 0.05, 7.5); // 1441.8488753719537   fractional periods
+periodsToReach(5000, 0, 0.18 / 12, { payment: -200 }); // 31.56…   months to pay off a card
+```
+
 ## Integers
 
 Number theory with `number` and `bigint` overloads; the `number` form throws
@@ -485,6 +528,11 @@ fibonacci(90); // 2880067194370816120n
 toBase(255, 16); // 'ff'
 fromBase('zz', 36); // 1295n   always bigint, exact past 2^53
 ```
+
+Bigint `factorial`, `permutations` and `combinations` allow results up to
+100 000 digits (`factorial` up to n = 25 205; 10 000! takes about 1.5 ms).
+For a float factorial past the safe range, use `gamma(n + 1)` from
+`distributions`.
 
 ## Geometry
 

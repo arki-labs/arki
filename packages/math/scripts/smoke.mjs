@@ -2,10 +2,12 @@
 // Deno via `bun run test:runtimes`, and is bundled for the browser target.
 // It exercises one call per module; the unit tests cover the details.
 
+import * as floatFinance from '../dist/finance-float.js';
 import {
   complex,
   confidenceInterval,
   convert,
+  convertExact,
   createRandom,
   cubicRoots,
   decimal,
@@ -14,6 +16,7 @@ import {
   formatNumber,
   formatPercent,
   fromBase,
+  gamma,
   gcd,
   isPrime,
   mean,
@@ -21,6 +24,7 @@ import {
   num,
   parseNumber,
   payment,
+  quartiles,
   ratio,
   round,
   roundToSignificant,
@@ -123,6 +127,12 @@ const checks = [
   ],
   ['complex', complex(1, 1).pow(2).toString(), '2i'],
   ['polynomial', cubicRoots(1, -6, 11, -6).roots.join(), '1,2,3'],
+  ['float finance fractional periods', round(floatFinance.futureValue(1000, 0.05, 7.5), 6), 1441.848875],
+  ['NPER with payment', round(floatFinance.periodsToReach(5000, 0, 0.18 / 12, { payment: -200 }), 6), 31.567994],
+  ['gamma', round(gamma(0.5) ** 2, 12), round(Math.PI, 12)],
+  ['tukey hinges', Object.values(quartiles([1, 2, 3, 4, 5, 6, 7, 8], { method: 'tukey' })).join(), '2.5,4.5,6.5'],
+  ['light-year exact', convertExact(1, 'ly', 'm').toString(), '9460730472580800'],
+  ['round fast path agrees', round(2.675, 2), 2.68],
 ];
 
 const runtime =
