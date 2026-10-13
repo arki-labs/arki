@@ -235,7 +235,7 @@ This is the only copy of this table. The message texts are in `src/errors.ts`. A
 `@arki/journal/orpc` maps these for an oRPC app. The code is in `src/orpc.ts`. `@orpc/server` is an optional peer, and the core entry never imports it.
 
 - `toORPCError(error)` turns a `CommandError` into an `ORPCError` with the same code and message.
-- It turns a `JournalError` with code `CONFLICT` into an `ORPCError('CONFLICT')` with the message `This was changed by another request at the same time. Please try again.` The client can send the request again.
+- It turns a `JournalError` with code `CONFLICT` into an `ORPCError('CONFLICT')` with the message `This was changed by another request. Reload the current state and try again.` The client reloads first: with an `expectedVersion`, the same request fails again.
 - It returns every other error unchanged.
 - `commandErrors()` is the same mapping as a middleware. Put it after the app's own error middleware: `os.use(appErrors).use(commandErrors())`. Put before it, the app's middleware sees a plain error first and answers 500.
 

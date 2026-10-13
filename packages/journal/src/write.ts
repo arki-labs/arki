@@ -17,6 +17,7 @@ import type {
   EntityId,
   EntityTable,
   Projection,
+  Recorded,
   Row,
   Trace,
   TransactionSource,
@@ -63,6 +64,27 @@ function isUniqueViolation(error: unknown): boolean {
   return false;
 }
 
+/**
+ * When a job is due, from the effect's schedule. A delay counts from the transaction's
+ * `now()`, so a long transaction can use part of it before commit. `runAt` is the app's
+ * clock, as the event names it; a date in the past is due at once.
+ */
+function dueAt(
+  effect: Pick<Effect, 'name' | 'schedule'>,
+  event: Recorded,
+): { readonly availableAt?: Date | ReturnType<typeof sql> } {
+  const { delaySeconds } = effect.schedule;
+  if (effect.schedule.runAt !== undefined) {
+    const at = effect.schedule.runAt(event);
+    if (!(at instanceof Date) || Number.isNaN(at.getTime()))
+      throw new Error(`journal: effect "${effect.name}": runAt must return a valid Date, got ${String(at)}`);
+    return { availableAt: at };
+  }
+  if (delaySeconds !== undefined && delaySeconds > 0)
+    return { availableAt: sql`now() + make_interval(secs => ${delaySeconds})` };
+  return {};
+}
+
 /** Insert order is the version order. `RETURNING` does not promise it, so restore it. */
 export function sortedByVersion<Row extends { readonly version: number }>(rows: readonly Row[]): Row[] {
   return rows.toSorted((a, b) => a.version - b.version);
@@ -74,7 +96,7 @@ export type WriteDeps<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>
   readonly tables: JournalTables;
   readonly projections: readonly Projection<z.output<Meta>, Tx>[];
   /** A write only queues one job per matching effect. It never runs an effect, so the effect's database type does not matter here. */
-  readonly effects: readonly Pick<Effect<z.output<Meta>>, 'name' | 'types' | 'entities'>[];
+  readonly effects: readonly Pick<Effect<z.output<Meta>>, 'name' | 'types' | 'entities' | 'schedule'>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent' | 'highestVersion' | 'assertLogSaysGone'>;
 };
 
@@ -102,6 +124,8 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
   ): Promise<WriteResult<Tbl, E, MetaOut, Key>> => {
     const adopting = opts?.mode === 'adopt';
     const expectedVersion = opts?.expectedVersion;
+    if (expectedVersion !== undefined && (!Number.isInteger(expectedVersion) || expectedVersion < 0))
+      throw new Error(`journal: expectedVersion must be a whole number, zero or more, got ${String(expectedVersion)}`);
     return oneAtATime(tx, `${adopting ? 'adopt' : 'write to'} ${entity.kind} ${id}`, async () => {
       assertExactId(entity, id);
       const meta = getValidatedMeta();
@@ -317,7 +341,13 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
         const jobs = recorded.flatMap(event =>
           effects
             .filter(effect => effect.types.has(event.type) && effect.entities.some(e => e.kind === entity.kind))
-            .map(effect => ({ id: jobId(), eventSeq: event.seq, effect: effect.name })),
+            .map(effect => ({
+              id: jobId(),
+              eventSeq: event.seq,
+              effect: effect.name,
+              priority: effect.schedule.priority ?? 0,
+              ...dueAt(effect, event),
+            })),
         );
         if (jobs.length > 0) {
           await sp.insert(jobsTable).values(jobs);

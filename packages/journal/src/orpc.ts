@@ -13,11 +13,12 @@ import { ORPCError, os } from '@orpc/server';
 import { CommandError, isJournalError } from './errors.js';
 
 /**
- * Two requests changed the same entity at the same time and this one lost.
- * Nothing was written, so the client can send the request again. The journal's
- * own message names the entity kind and id; the client does not get those.
+ * Another request changed the same entity first, or the client's `expectedVersion`
+ * is behind. Nothing was written. Repeating the same request as it stands fails
+ * again when a version was given, so the client reloads first. The journal's own
+ * message names the entity kind and id; the client does not get those.
  */
-const CONFLICT_MESSAGE = 'This was changed by another request at the same time. Please try again.';
+const CONFLICT_MESSAGE = 'This was changed by another request. Reload the current state and try again.';
 
 /**
  * - A `CommandError` becomes the `ORPCError` with the same code and message.

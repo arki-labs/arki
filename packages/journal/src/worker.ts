@@ -6,7 +6,7 @@
  * Must not import `journal`, `api`, `write` or `command`.
  */
 import type { z } from 'zod';
-import { and, asc, eq, inArray, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
 
 import type { History } from './history.js';
 import type { HookPointInternal } from './hooks.js';
@@ -72,7 +72,7 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
             inArray(jobsTable.effect, known),
           ),
         )
-        .orderBy(asc(jobsTable.availableAt))
+        .orderBy(desc(jobsTable.priority), asc(jobsTable.availableAt))
         .limit(1)
         .for('update', { skipLocked: true });
       const first = due[0];
@@ -98,22 +98,32 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
    */
   const renewWhile = (db: AppDb & RootDb, job: JobRow, leaseSeconds: number, lost: AbortController) => {
     const token = job.leaseToken ?? '';
+    let inFlight = false;
+    let finished = false;
     const timer = setInterval(() => {
+      if (inFlight) return;
+      inFlight = true;
       void db
         .update(jobsTable)
         .set({ leaseUntil: dbNowPlus(leaseSeconds) })
         .where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, token)))
         .returning({ id: jobsTable.id })
         .then(rows => {
-          if (rows.length === 0) {
+          if (rows.length === 0 && !finished) {
             clearInterval(timer);
             lost.abort(new Error(`journal: the lease on job ${job.id} was lost; another worker holds it now`));
           }
         })
-        .catch((error: unknown) => debugDrain('%s %s: lease renewal failed: %s', job.effect, job.id, errorText(error)));
+        .catch((error: unknown) => debugDrain('%s %s: lease renewal failed: %s', job.effect, job.id, errorText(error)))
+        .finally(() => {
+          inFlight = false;
+        });
     }, leaseSeconds * 500);
-    timer.unref?.();
-    return () => clearInterval(timer);
+    timer.unref();
+    return () => {
+      finished = true;
+      clearInterval(timer);
+    };
   };
 
   const runJob = async (db: AppDb & RootDb, job: JobRow, signal: AbortSignal, leaseSeconds: number): Promise<void> => {

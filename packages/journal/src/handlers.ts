@@ -5,6 +5,7 @@ import type {
   Effect,
   EffectContext,
   EffectHandlers,
+  EffectSchedule,
   Need,
   Needed,
   Needs,
@@ -79,20 +80,59 @@ function defineEffect<E extends AnyEntity<Meta>, Meta, AppDb, Run, N extends Nee
       BivariantFn<[event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb, Run> & Needed<N>], unknown>
     >
   > = on;
-  return {
-    name,
-    entities: toList(entity),
-    types: declaredTypes(handlers),
-    needs,
-    async run(event, ctx) {
-      const handler = ownHandler(handlers, event.type);
-      // A job was queued for this type. Running nothing would acknowledge it silently.
-      if (handler === undefined)
-        throw new Error(
-          `effect "${name}" has no handler for "${event.type}", but a job was queued for it; add a handler for this event to the effect, or delete the job if the event is no longer handled`,
-        );
-      await handler(event, ctx);
+  return withSchedule(
+    {
+      name,
+      entities: toList(entity),
+      types: declaredTypes(handlers),
+      needs,
+      async run(event, ctx) {
+        const handler = ownHandler(handlers, event.type);
+        // A job was queued for this type. Running nothing would acknowledge it silently.
+        if (handler === undefined)
+          throw new Error(
+            `effect "${name}" has no handler for "${event.type}", but a job was queued for it; add a handler for this event to the effect, or delete the job if the event is no longer handled`,
+          );
+        await handler(event, ctx);
+      },
     },
+    {},
+  );
+}
+
+const INT4_MAX = 2_147_483_647;
+
+/** Attach a schedule to an effect, checked once: a job row must be able to hold it. */
+export function withSchedule<Meta, AppDb, Run, N extends Needs>(
+  effect: Omit<Effect<Meta, AppDb, Run, N>, 'schedule' | 'withSchedule'>,
+  schedule: EffectSchedule<Meta>,
+): Effect<Meta, AppDb, Run, N> {
+  const { priority = 0, delaySeconds = 0 } = schedule;
+  if (!Number.isInteger(priority) || Math.abs(priority) > INT4_MAX)
+    throw new JournalError(
+      'BAD_DEFINITION',
+      'effect',
+      effect.name,
+      `journal: effect "${effect.name}": priority must be an integer within 32 bits, got ${String(priority)}`,
+    );
+  if (!Number.isFinite(delaySeconds) || delaySeconds < 0)
+    throw new JournalError(
+      'BAD_DEFINITION',
+      'effect',
+      effect.name,
+      `journal: effect "${effect.name}": delaySeconds must be a finite number of seconds, zero or more, got ${String(delaySeconds)}`,
+    );
+  if (schedule.delaySeconds !== undefined && schedule.runAt !== undefined)
+    throw new JournalError(
+      'BAD_DEFINITION',
+      'effect',
+      effect.name,
+      `journal: effect "${effect.name}": give delaySeconds or runAt, not both`,
+    );
+  return {
+    ...effect,
+    schedule,
+    withSchedule: next => withSchedule(effect, next),
   };
 }
 
@@ -141,5 +181,8 @@ export function bindEffect<Meta, AppDb, Run>(
       );
     given[key] = services[key];
   }
-  return { ...effect, needs: {}, run: (event, ctx) => effect.run(event, { ...given, ...ctx }) };
+  return withSchedule(
+    { ...effect, needs: {}, run: (event, ctx) => effect.run(event, { ...given, ...ctx }) },
+    effect.schedule,
+  );
 }

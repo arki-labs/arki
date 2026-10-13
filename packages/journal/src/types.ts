@@ -309,12 +309,28 @@ export type ServicesFor<E extends readonly { readonly needs: Needs }[]> = UnionT
 >;
 
 /** Async handler. Runs after commit, at least once. */
+/**
+ * When an effect's jobs run. `priority`: higher first among due jobs; strict, so a
+ * steady stream of high-priority jobs can starve lower ones. `delaySeconds`: due that
+ * long after the write's transaction started (`now()` in Postgres). `runAt`: due at the
+ * time the event names, from the app's clock. Retries keep their backoff and priority.
+ */
+export type EffectSchedule<Meta = unknown> = {
+  readonly priority?: number;
+  readonly delaySeconds?: number;
+  /** A method signature, so an effect of one meta type is still an `Effect<unknown>`; see `BivariantFn`. */
+  runAt?(event: Recorded<string, unknown, Meta>): Date;
+};
+
 export type Effect<Meta = unknown, AppDb = RootDb, Run = unknown, N extends Needs = NoNeeds> = {
   readonly name: string;
   readonly entities: readonly AnyEntity<Meta>[];
   readonly types: ReadonlySet<string>;
   /** What the handlers need on top of `EffectContext`. Empty for an effect that already has its services. */
   readonly needs: N;
+  readonly schedule: EffectSchedule<Meta>;
+  /** The same effect with this schedule. `j.effect('mail', order, handlers).withSchedule({ priority: 5 })`. */
+  withSchedule(schedule: EffectSchedule<Meta>): Effect<Meta, AppDb, Run, N>;
   readonly run: BivariantFn<
     [event: Recorded<string, unknown, Meta>, ctx: EffectContext<AppDb, Run> & Needed<N>],
     Promise<void>

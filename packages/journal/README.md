@@ -323,6 +323,10 @@ export const journal = j.compose({ tables, effects: [orderMail], services: { mai
 
 `db` has the library's `RootDb` type unless the app names its own database type once: `initJournal.db<AppDb>().create({ meta })`. Then `ctx.db.query.orders` is typed, and `drain` and `worker` need an `AppDb`. They still refuse a transaction. With `.tx<AppTx>()` they also need a database that opens `AppTx` transactions, because effects run commands on it. The app's own Drizzle database does. `.tx<AppTx>()` and `.db<AppDb>()` are both optional type-only steps and chain in either order: `initJournal.tx<AppTx>().db<AppDb>().create({ meta })`.
 
+### When a job runs
+
+An effect can carry a schedule: `j.effect('receipt', order, handlers).withSchedule({ priority: 10 })`. `priority` (an integer, default 0): among due jobs the higher one is claimed first. It is strict, so a steady stream of high-priority jobs can starve lower ones; use a few levels, not a score. `delaySeconds`: the job is due that long after the write's transaction started (Postgres `now()`), so a long transaction uses part of the delay before commit. `runAt: event => Date`: the job is due at the time the event names, from the app's clock; a time in the past is due at once. Give `delaySeconds` or `runAt`, not both. Retries keep their backoff and their priority. A bad value throws `BAD_DEFINITION` where the schedule is declared.
+
 ## The worker
 
 `journal.worker(db, { pollMs, batchSize })` is a loop around `drain`. When a pass finds no job it sleeps `pollMs` (1000 by default).
@@ -455,6 +459,7 @@ journal_jobs
   id            varchar primary key       -- job_xxx; pass it on as an idempotency key
   event_seq     bigint not null references journal_events(seq)
   effect        varchar(128) not null
+  priority      integer not null default 0 -- from the effect's schedule; higher first
   attempts      integer not null default 0
   available_at  timestamptz not null default now()
   lease_until   timestamptz
@@ -462,7 +467,7 @@ journal_jobs
   last_error    text
   dead_at       timestamptz               -- set after 8 failed attempts
   unique (event_seq, effect)
-  index (available_at) where dead_at is null
+  index (priority desc, available_at) where dead_at is null
 ```
 
 A job row is deleted when its handler succeeds. The table holds only pending and dead work. The event row is the lasting record.

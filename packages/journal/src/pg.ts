@@ -61,6 +61,8 @@ export function journalTables(schema?: PgSchema) {
         .notNull()
         .references(() => events.seq),
       effect: varchar('effect', { length: 128 }).notNull(),
+      /** Higher runs first among due jobs. From the effect's schedule. */
+      priority: integer('priority').notNull().default(0),
       attempts: integer('attempts').notNull().default(0),
       availableAt: timestamp('available_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
       leaseUntil: timestamp('lease_until', { withTimezone: true, mode: 'date' }),
@@ -71,8 +73,8 @@ export function journalTables(schema?: PgSchema) {
     },
     t => [
       unique('journal_jobs_event_seq_effect_unique').on(t.eventSeq, t.effect),
-      index('journal_jobs_available_at_idx')
-        .on(t.availableAt)
+      index('journal_jobs_due_idx')
+        .on(t.priority.desc(), t.availableAt)
         .where(sql`${t.deadAt} is null`),
     ],
   );

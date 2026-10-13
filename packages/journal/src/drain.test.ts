@@ -1,6 +1,6 @@
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
@@ -168,6 +168,65 @@ describe('drain', () => {
     expect(await leaseOf('slow-mail')).toMatchObject({ leaseToken: 'other-worker' });
     await db.delete(tables.jobs).where(eq(tables.jobs.effect, 'slow-mail'));
   }, 15_000);
+
+  it('priority: among due jobs the higher priority runs first; delaySeconds and runAt hold a job back until it is due', async () => {
+    // Why: a payment receipt must go out before a weekly digest, and a reminder is sent at the
+    // time the event names. The effect declares it once; every job of it follows.
+    const order_: string[] = [];
+    const urgent = j
+      .effect('urgent', order, {
+        OrderPaid: e => {
+          order_.push(`urgent:${e.entityId}`);
+        },
+      })
+      .withSchedule({ priority: 10 });
+    const lazy = j.effect('lazy', order, {
+      OrderPaid: e => {
+        order_.push(`lazy:${e.entityId}`);
+      },
+    });
+    const later = j
+      .effect('later', order, {
+        OrderPaid: e => {
+          order_.push(`later:${e.entityId}`);
+        },
+      })
+      .withSchedule({ delaySeconds: 1 });
+    const at = j
+      .effect('at', order, {
+        OrderPaid: e => {
+          order_.push(`at:${e.entityId}`);
+        },
+      })
+      .withSchedule({ runAt: e => new Date(e.recordedAt.getTime() + 1000) });
+    const scheduled = j.compose({ tables, effects: [lazy, urgent, later, at] });
+    const id = orderId(++next);
+    await db.transaction(tx =>
+      scheduled.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+    );
+    await db.transaction(tx => scheduled.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }));
+    const rows = await db
+      .select()
+      .from(tables.jobs)
+      .where(inArray(tables.jobs.effect, ['at', 'later', 'lazy', 'urgent']))
+      .orderBy(asc(tables.jobs.effect));
+    expect(rows.map(r => [r.effect, r.priority])).toEqual([
+      ['at', 0],
+      ['later', 0],
+      ['lazy', 0],
+      ['urgent', 10],
+    ]);
+    // Only the two due jobs run now, the urgent one first.
+    expect(await scheduled.drain(db)).toBe(2);
+    expect(order_).toEqual([`urgent:${id}`, `lazy:${id}`]);
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    expect(await scheduled.drain(db)).toBe(2);
+    expect(order_.slice(2).toSorted()).toEqual([`at:${id}`, `later:${id}`]);
+    expect(() => urgent.withSchedule({ priority: 1.5 })).toThrow(expect.objectContaining({ code: 'BAD_DEFINITION' }));
+    expect(() => urgent.withSchedule({ delaySeconds: -1 })).toThrow(
+      expect.objectContaining({ code: 'BAD_DEFINITION' }),
+    );
+  });
 
   it('leaves a job for an unknown effect pending and untouched', async () => {
     const job = await placeAndPay();

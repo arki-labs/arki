@@ -11,7 +11,7 @@ import type { CommandErrorCode } from './errors.js';
 import { CommandError, JournalError } from './errors.js';
 import { commandErrors, toORPCError } from './orpc.js';
 
-const RETRY_MESSAGE = 'This was changed by another request at the same time. Please try again.';
+const RETRY_MESSAGE = 'This was changed by another request. Reload the current state and try again.';
 
 const STATUS: Record<CommandErrorCode, number> = { BAD_REQUEST: 400, FORBIDDEN: 403, NOT_FOUND: 404, CONFLICT: 409 };
 
