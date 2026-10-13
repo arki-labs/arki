@@ -1,0 +1,245 @@
+import { describe, expect, it } from 'vitest';
+
+import { Complex, complex, isComplex } from './complex.js';
+import { DivisionByZeroError, InvalidArgumentError, NumberFormatError, NumericRangeError } from './errors.js';
+
+const close = (actual: Complex, expected: Complex | number, tolerance = 1e-14): void => {
+  expect(actual.approxEqual(expected, tolerance), `${actual.toString()} ≉ ${String(expected)}`).toBe(true);
+};
+
+// Node's `util.inspect` and Deno's console both look these symbols up on the object.
+function inspectWith(value: object, hook: symbol): unknown {
+  return Reflect.apply(Reflect.get(value, hook) as () => string, value, []);
+}
+
+describe('construction and parsing', () => {
+  it('builds from parts, numbers and existing values', () => {
+    const z = complex(3, 4);
+    expect([z.re, z.im]).toEqual([3, 4]);
+    expect(complex(5).isReal()).toBe(true);
+    expect(complex(z)).toBe(z);
+    expect(isComplex(z)).toBe(true);
+    expect(isComplex(3)).toBe(false);
+  });
+
+  it('never stores -0, so the principal branch cut is unambiguous', () => {
+    const z = complex(-0, -0);
+    expect(Object.is(z.re, 0) && Object.is(z.im, 0)).toBe(true);
+    // With a stored -0 imaginary part, arg(-1) would be -π and ln(-1) would be -πi.
+    expect(complex(-1, -0).arg()).toBe(Math.PI);
+  });
+
+  it('parses every form toString prints, with or without spaces', () => {
+    const cases: [string, number, number][] = [
+      ['3+4i', 3, 4],
+      ['3 - 4i', 3, -4],
+      ['-2i', 0, -2],
+      ['5', 5, 0],
+      ['i', 0, 1],
+      ['-i', 0, -1],
+      ['+i', 0, 1],
+      ['3 + i', 3, 1],
+      ['-.5e1-2.5e-3i', -5, -0.0025],
+      ['  1e-7i ', 0, 1e-7],
+      ['1e+21 + 1.5i', 1e21, 1.5],
+    ];
+    for (const [text, re, im] of cases) {
+      const z = complex(text);
+      expect([z.re, z.im], text).toEqual([re, im]);
+    }
+  });
+
+  it('rejects junk with a typed error instead of NaN', () => {
+    for (const junk of ['', 'i4', '3 + -4i', '3+4j', 'NaN', 'Infinity', '3 4i', '++3', '3+4i5', 'ii', '1,5']) {
+      expect(() => complex(junk), junk).toThrow(NumberFormatError);
+    }
+    expect(() => complex('1e400')).toThrow(NumericRangeError);
+    expect(() => complex(Number.NaN, 1)).toThrow(InvalidArgumentError);
+    expect(() => complex(1, Number.POSITIVE_INFINITY)).toThrow(InvalidArgumentError);
+  });
+
+  it('round-trips through toString exactly', () => {
+    const values = [
+      complex(3, 4),
+      complex(3, -4),
+      complex(0, -2),
+      complex(5),
+      complex(0, 1),
+      complex(0.1, 1e-7),
+      complex(1e21, -1),
+      complex(Math.PI, Math.E),
+      Complex.ZERO,
+    ];
+    for (const z of values) expect(Complex.from(z.toString()).eq(z), z.toString()).toBe(true);
+  });
+});
+
+describe('display and coercion', () => {
+  it('prints the documented format', () => {
+    expect(complex(3, 4).toString()).toBe('3 + 4i');
+    expect(complex(3, -4).toString()).toBe('3 - 4i');
+    expect(complex(0, -2).toString()).toBe('-2i');
+    expect(complex(5).toString()).toBe('5');
+    expect(complex(3, -1).toString()).toBe('3 - i');
+    expect(Complex.I.toString()).toBe('i');
+    expect(Complex.ZERO.toString()).toBe('0');
+  });
+
+  it('serializes as text and shows its kind in consoles', () => {
+    expect(JSON.stringify({ z: complex(3, 4) })).toBe('{"z":"3 + 4i"}');
+    // eslint-disable-next-line @typescript-eslint/restrict-template-expressions -- toPrimitive('string') is the point
+    expect(`${complex(1, -1)}`).toBe('1 - i');
+    expect(inspectWith(complex(3, 4), Symbol.for('nodejs.util.inspect.custom'))).toBe('Complex(3 + 4i)');
+    expect(inspectWith(complex(3, 4), Symbol.for('Deno.customInspect'))).toBe('Complex(3 + 4i)');
+    expect(Object.prototype.toString.call(complex(1))).toBe('[object Complex]');
+  });
+
+  it('refuses to become a float silently, like Decimal', () => {
+    // A complex value has no single numeric value; `+z` dropping im would be a silent bug.
+    expect(() => +complex(1, 2)).toThrow(TypeError);
+    expect(() => complex(1).valueOf()).toThrow(TypeError);
+  });
+});
+
+describe('arithmetic', () => {
+  it('follows the field rules with exact results for exact inputs', () => {
+    expect(complex(1, 2).plus(complex(3, -5)).eq(complex(4, -3))).toBe(true);
+    expect(complex(1, 2).minus('1+2i').isZero()).toBe(true);
+    expect(complex(3, 4).times(complex(3, -4)).eq(25)).toBe(true);
+    expect(Complex.I.times(Complex.I).eq(-1)).toBe(true);
+    expect(complex(1, 2).dividedBy(complex(3, 4)).eq(complex(0.44, 0.08))).toBe(true);
+    expect(complex(1, 2).negated().eq(complex(-1, -2))).toBe(true);
+    expect(complex(1, 2).conjugate().eq(complex(1, -2))).toBe(true);
+    close(complex(2, 0).inverse(), 0.5);
+  });
+
+  it('divides without overflowing |divisor|² (Smith)', () => {
+    // The textbook formula forms c² + d² = 2e600, which is Infinity.
+    expect(complex(1e300, 1e300).dividedBy(complex(1e300, 1e300)).eq(1)).toBe(true);
+  });
+
+  it('throws on division by zero rather than returning NaN or Infinity', () => {
+    expect(() => complex(1, 1).dividedBy(0)).toThrow(DivisionByZeroError);
+    expect(() => Complex.ZERO.inverse()).toThrow(DivisionByZeroError);
+  });
+
+  it('throws NumericRangeError when a result overflows', () => {
+    expect(() => complex(1e308, 0).times(10)).toThrow(NumericRangeError);
+    expect(() => complex(1000).exp()).toThrow(NumericRangeError);
+  });
+});
+
+describe('modulus, argument and polar form', () => {
+  it('measures modulus with hypot so large parts do not overflow', () => {
+    expect(complex(3, 4).abs()).toBe(5);
+    expect(complex(1e200, 1e200).abs()).toBeCloseTo(Math.SQRT2 * 1e200, -186);
+  });
+
+  it('keeps the argument in (-π, π]', () => {
+    expect(complex(-1).arg()).toBe(Math.PI);
+    expect(complex(0, -1).arg()).toBe(-Math.PI / 2);
+    expect(Complex.ZERO.arg()).toBe(0);
+  });
+
+  it('round-trips through polar form', () => {
+    const { r, theta } = complex(-3, 4).toPolar();
+    expect(r).toBe(5);
+    close(Complex.fromPolar(r, theta), complex(-3, 4));
+    expect(() => Complex.fromPolar(-1, 0)).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('exp, ln, log', () => {
+  it("satisfies Euler's identity e^(iπ) = -1", () => {
+    close(complex(0, Math.PI).exp(), -1);
+    expect(complex(2).exp().eq(Math.exp(2))).toBe(true);
+  });
+
+  it('takes the principal logarithm', () => {
+    expect(complex(-1).ln().eq(complex(0, Math.PI))).toBe(true);
+    close(Complex.I.ln(), complex(0, Math.PI / 2));
+    const z = complex(-2.5, 0.75);
+    close(z.ln().exp(), z);
+    expect(() => Complex.ZERO.ln()).toThrow(InvalidArgumentError);
+  });
+
+  it('takes logarithms in any base except 0 and 1', () => {
+    close(complex(8).log(2), 3);
+    close(complex(-8).log(2), complex(3, Math.PI / Math.LN2));
+    expect(() => complex(8).log(1)).toThrow(InvalidArgumentError);
+    expect(() => complex(8).log(0)).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('roots and powers', () => {
+  it('takes the principal square root exactly where it can', () => {
+    expect(complex(-4).sqrt().eq(complex(0, 2))).toBe(true);
+    expect(complex(3, 4).sqrt().eq(complex(2, 1))).toBe(true);
+    expect(complex(-3, -4).sqrt().eq(complex(1, -2))).toBe(true);
+    expect(Complex.ZERO.sqrt().isZero()).toBe(true);
+  });
+
+  it('square roots square back and stay in the right half-plane', () => {
+    for (const z of [complex(-1e-300, 1e-300), complex(1e300, -1e300), complex(-7, -0.001), complex(0.5, 9)]) {
+      const root = z.sqrt();
+      expect(root.re).toBeGreaterThanOrEqual(0);
+      close(root.times(root), z, 1e-13);
+    }
+  });
+
+  it('keeps integer powers exact: (1+i)² = 2i', () => {
+    expect(complex(1, 1).pow(2).eq(complex(0, 2))).toBe(true);
+    expect(Complex.I.pow(4).eq(1)).toBe(true);
+    expect(complex(1, 1).pow(-2).eq(complex(0, -0.5))).toBe(true);
+    expect(complex(2, 3).pow(0).eq(1)).toBe(true);
+  });
+
+  it('raises to real and complex exponents on the principal branch', () => {
+    expect(complex(4).pow(0.5).eq(2)).toBe(true);
+    // i^i = e^(-π/2): a complex power with a real value.
+    close(Complex.I.pow(Complex.I), Math.exp(-Math.PI / 2));
+    // (-8)^(1/3) is the principal root 1 + √3·i, not the real root -2.
+    close(complex(-8).pow(1 / 3), complex(1, Math.sqrt(3)));
+  });
+
+  it('defines 0^w as 1, 0, or an error', () => {
+    expect(Complex.ZERO.pow(0).eq(1)).toBe(true);
+    expect(Complex.ZERO.pow(complex(0.5, 3)).isZero()).toBe(true);
+    expect(() => Complex.ZERO.pow(-1)).toThrow(DivisionByZeroError);
+    expect(() => Complex.ZERO.pow(Complex.I)).toThrow(DivisionByZeroError);
+  });
+
+  it('finds all n-th roots: the cube roots of unity', () => {
+    const roots = complex(1).nthRoots(3);
+    expect(roots[0]!.eq(1)).toBe(true);
+    close(roots[1]!, complex(-0.5, Math.sqrt(3) / 2));
+    close(roots[2]!, complex(-0.5, -Math.sqrt(3) / 2));
+    for (const root of roots) close(root.pow(3), 1);
+  });
+
+  it('lists roots counter-clockwise from the principal root', () => {
+    const roots = complex(-16).nthRoots(4);
+    close(roots[0]!, complex(-16).pow(0.25));
+    const expected = [
+      complex(Math.SQRT2, Math.SQRT2),
+      complex(-Math.SQRT2, Math.SQRT2),
+      complex(-Math.SQRT2, -Math.SQRT2),
+      complex(Math.SQRT2, -Math.SQRT2),
+    ];
+    for (const [k, root] of roots.entries()) close(root, expected[k]!);
+    expect(Complex.ZERO.nthRoots(3).every(root => root.isZero())).toBe(true);
+    expect(() => complex(1).nthRoots(0)).toThrow(InvalidArgumentError);
+    expect(() => complex(1).nthRoots(2.5)).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('comparison', () => {
+  it('separates exact from approximate equality', () => {
+    const sum = complex(0.1, 0.2).plus(complex(0.2, 0.1));
+    expect(sum.eq(complex(0.3, 0.3))).toBe(false);
+    expect(sum.approxEqual(complex(0.3, 0.3))).toBe(true);
+    expect(complex(1e12, 0).approxEqual(complex(1e12 + 1, 0))).toBe(true); // relative for large values
+    expect(complex(1e-3, 0).approxEqual(0)).toBe(false); // absolute near zero
+    expect(() => sum.approxEqual(0, -1)).toThrow(InvalidArgumentError);
+  });
+});
