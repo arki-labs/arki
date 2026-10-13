@@ -85,7 +85,6 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@arki/assert": "workspace:*",
     "@arki/contracts": "workspace:*",
     "@arki/log": "workspace:*",
     "@opentelemetry/api": "catalog:opentelemetry",

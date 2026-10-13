@@ -26,7 +26,6 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/admin": "workspace:*",
-    "@arki/assert": "workspace:*",
     "@arki/auth": "workspace:*",
     "@arki/contracts": "workspace:*",
     "@arki/db": "workspace:*",

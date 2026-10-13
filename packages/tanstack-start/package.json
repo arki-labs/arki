@@ -104,11 +104,11 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@arki/content": "workspace:*",
     "@arki/icons": "workspace:*",
     "@arki/intl": "workspace:*",
     "@arki/meter": "workspace:*",
     "@arki/ts": "workspace:*",
+    "@arki/ui": "workspace:*",
     "@orpc/client": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@orpc/tanstack-query": "catalog:backend",

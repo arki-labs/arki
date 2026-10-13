@@ -42,8 +42,6 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "all-iso-language-codes": "catalog:",
-    "cldr-core": "catalog:",
-    "full-icu": "catalog:",
     "use-intl": "catalog:"
   },
   "devDependencies": {
