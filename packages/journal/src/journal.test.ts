@@ -770,6 +770,7 @@ describe('replay, verify, repair', () => {
       ],
       projections: ['customer-stats', 'flaky', 'note-log'],
       effects: ['order-mail'],
+      taps: [],
     });
   });
 

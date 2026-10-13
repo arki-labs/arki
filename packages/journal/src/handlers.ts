@@ -14,6 +14,9 @@ import type {
   ProjectionOptions,
   Recorded,
   Services,
+  Tap,
+  TapContext,
+  TapHandlers,
 } from './types.js';
 import { JournalError } from './errors.js';
 import { assertStoredName } from './id.js';
@@ -161,6 +164,73 @@ export function effectFor<Meta, AppDb, Run>() {
     return rest.length === 1 ? defineEffect(name, entity, {}, rest[0]) : defineEffect(name, entity, rest[0], rest[1]);
   }
   return effect;
+}
+
+function defineTap<E extends AnyEntity<Meta>, Meta, AppDb, N extends Needs>(
+  name: string,
+  entity: E | readonly E[],
+  needs: N,
+  on: TapHandlers<E, Meta, AppDb, N>,
+): Tap<Meta, AppDb, N> {
+  assertStoredName('effect name', name);
+  if (Object.hasOwn(needs, 'db'))
+    throw new JournalError(
+      'BAD_DEFINITION',
+      'tap',
+      name,
+      `journal: tap "${name}" has a need named "db", but the handler context already has "db"; give the need another name`,
+    );
+  const handlers: Partial<
+    Record<string, BivariantFn<[event: Recorded<string, unknown, Meta>, ctx: TapContext<AppDb> & Needed<N>], unknown>>
+  > = on;
+  return {
+    name,
+    entities: toList(entity),
+    types: declaredTypes(handlers),
+    needs,
+    async run(event, ctx) {
+      await ownHandler(handlers, event.type)?.(event, ctx);
+    },
+  };
+}
+
+/** `j.tap` for one journal. Three arguments: the tap needs nothing. Four: the third lists its needs. */
+export function tapFor<Meta, AppDb>() {
+  function tap<E extends AnyEntity<Meta>>(
+    name: string,
+    entity: E | readonly E[],
+    on: NoInfer<TapHandlers<E, Meta, AppDb>>,
+  ): Tap<Meta, AppDb>;
+  function tap<E extends AnyEntity<Meta>, N extends Needs>(
+    name: string,
+    entity: E | readonly E[],
+    needs: N,
+    on: NoInfer<TapHandlers<E, Meta, AppDb, N>>,
+  ): Tap<Meta, AppDb, N>;
+  function tap<E extends AnyEntity<Meta>, N extends Needs>(
+    name: string,
+    entity: E | readonly E[],
+    ...rest: [on: TapHandlers<E, Meta, AppDb>] | [needs: N, on: TapHandlers<E, Meta, AppDb, N>]
+  ) {
+    return rest.length === 1 ? defineTap(name, entity, {}, rest[0]) : defineTap(name, entity, rest[0], rest[1]);
+  }
+  return tap;
+}
+
+/** Give one tap its services, as `bindEffect` does for an effect. */
+export function bindTap<Meta, AppDb>(tap: Tap<Meta, AppDb, Needs>, services: Services): Tap<Meta, AppDb> {
+  const given: Record<string, unknown> = {};
+  for (const key of Object.keys(tap.needs)) {
+    if (!Object.hasOwn(services, key) || services[key] === undefined)
+      throw new JournalError(
+        'BAD_DEFINITION',
+        'tap',
+        tap.name,
+        `journal: tap "${tap.name}" needs "${key}", but no service with that name was given; pass it as j.compose({ services: { ${key} } }), or in a Dot app add it to the \`needs\` of the feature that lists this tap`,
+      );
+    given[key] = services[key];
+  }
+  return { ...tap, needs: {}, run: (event, ctx) => tap.run(event, { ...given, ...ctx }) };
 }
 
 /**

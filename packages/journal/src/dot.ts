@@ -27,11 +27,13 @@ import type {
   RootDb,
   Services,
   ServicesFor,
+  Tap,
   TransactionSource,
+  WakeListener,
 } from './types.js';
 import { debugWorker } from './debug.js';
 import { JournalError } from './errors.js';
-import { bindEffect } from './handlers.js';
+import { bindEffect, bindTap } from './handlers.js';
 
 export const JOURNAL_ACTION_META_SCHEMA = '@arki/journal/action-meta@1';
 
@@ -51,6 +53,7 @@ export type JournalDotAction = {
 export type JournalHandlers<Meta = unknown, Tx = DbHandle, AppDb = RootDb> = {
   readonly projections: readonly Projection<Meta, Tx>[];
   readonly effects: readonly Effect<Meta, AppDb>[];
+  readonly taps: readonly Tap<Meta, AppDb>[];
 };
 
 /**
@@ -97,11 +100,13 @@ export function journalHandlers<
   Tx = DbHandle,
   AppDb = RootDb,
   const E extends readonly Effect<Meta, AppDb, unknown, Needs>[] = readonly [],
+  const T extends readonly Tap<Meta, AppDb, Needs>[] = readonly [],
 >(handlers: {
   readonly projections?: readonly Projection<Meta, Tx>[];
   readonly effects?: E;
-}): JournalFeatureSlice<Meta, Tx, AppDb, ServicesFor<E>> {
-  const { projections = [], effects = [] } = handlers;
+  readonly taps?: T;
+}): JournalFeatureSlice<Meta, Tx, AppDb, ServicesFor<E> & ServicesFor<T>> {
+  const { projections = [], effects = [], taps = [] } = handlers;
   return {
     key: 'journal',
     actions: effects.map(effect => effectAction(effect)),
@@ -109,6 +114,7 @@ export function journalHandlers<
     resolve: (services: unknown) => ({
       projections,
       effects: effects.map(effect => bindEffect(effect, isServices(services) ? services : {})),
+      taps: taps.map(tap => bindTap(tap, isServices(services) ? services : {})),
     }),
   };
 }
@@ -120,6 +126,10 @@ type WorkerOptions = {
   readonly worker?: boolean;
   readonly pollMs?: number;
   readonly batchSize?: number;
+  readonly leaseSeconds?: number;
+  /** See `journal.worker`: required when the journal has taps, unless `taps: false`. */
+  readonly listen?: WakeListener;
+  readonly taps?: boolean;
 };
 
 /** Direct mode: the app composed the journal itself. */
@@ -168,7 +178,10 @@ function isJournalHandlers(value: unknown): value is JournalHandlers {
     value.projections.every(item => isHandler(item)) &&
     'effects' in value &&
     Array.isArray(value.effects) &&
-    value.effects.every(item => isHandler(item))
+    value.effects.every(item => isHandler(item)) &&
+    'taps' in value &&
+    Array.isArray(value.taps) &&
+    value.taps.every(item => isHandler(item))
   );
 }
 
@@ -177,7 +190,12 @@ function isJournalHandlers(value: unknown): value is JournalHandlers {
  * feature tokens that hold the two. `j.compose` makes the same check, but it gets
  * one flat list and cannot say which feature a handler came from.
  */
-function claimName(kind: 'effect' | 'projection', owners: Map<string, string>, name: string, feature: string): void {
+function claimName(
+  kind: 'effect' | 'projection' | 'tap',
+  owners: Map<string, string>,
+  name: string,
+  feature: string,
+): void {
   const owner = owners.get(name);
   if (owner !== undefined) {
     const where = owner === feature ? `feature "${feature}", twice` : `features "${owner}" and "${feature}"`;
@@ -196,8 +214,10 @@ function collectHandlers(
 ): JournalHandlers {
   const projections: Projection[] = [];
   const effects: Effect[] = [];
+  const taps: Tap[] = [];
   const projectionOwners = new Map<string, string>();
   const effectOwners = new Map<string, string>();
+  const tapOwners = new Map<string, string>();
   for (const feature of features) {
     const slices = services[feature.key];
     const slice = typeof slices === 'object' && slices !== null && 'journal' in slices ? slices.journal : undefined;
@@ -208,17 +228,19 @@ function collectHandlers(
     if (!isJournalHandlers(slice)) {
       throw new DotPluginError({
         code: JOURNAL_PLUGIN_ERROR_CODES.badSlice,
-        message: `[journal] feature token "${feature.key}" holds a \`journal\` slice that is not a list of projections and a list of effects.`,
-        remediation: 'Declare the slice with journalHandlers({ projections, effects }) from @arki/journal/dot.',
+        message: `[journal] feature token "${feature.key}" holds a \`journal\` slice that is not lists of projections, effects and taps.`,
+        remediation: 'Declare the slice with journalHandlers({ projections, effects, taps }) from @arki/journal/dot.',
         docsUrl: 'https://github.com/arki-labs/arki/blob/HEAD/packages/journal/docs/agent-guide.md#dot-boot-errors',
       });
     }
     for (const { name } of slice.projections) claimName('projection', projectionOwners, name, feature.key);
     for (const { name } of slice.effects) claimName('effect', effectOwners, name, feature.key);
+    for (const { name } of slice.taps) claimName('tap', tapOwners, name, feature.key);
     projections.push(...slice.projections);
     effects.push(...slice.effects);
+    taps.push(...slice.taps);
   }
-  return { projections, effects };
+  return { projections, effects, taps };
 }
 
 export function journal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
@@ -255,7 +277,13 @@ export function journal<Meta extends z.ZodObject, Tx extends TransactionSource<T
     },
     async start({ db }) {
       if (options.worker === false) return;
-      worker = composed?.worker(db, { pollMs: options.pollMs, batchSize: options.batchSize });
+      worker = composed?.worker(db, {
+        pollMs: options.pollMs,
+        batchSize: options.batchSize,
+        leaseSeconds: options.leaseSeconds,
+        listen: options.listen,
+        taps: options.taps,
+      });
       await worker?.start();
     },
     async stop() {

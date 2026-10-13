@@ -5,7 +5,7 @@
  * May import every other file. No implementation file may import this one.
  */
 import { getTableColumns, getTableName, is, lt } from 'drizzle-orm';
-import { PgColumn } from 'drizzle-orm/pg-core';
+import { getTableConfig, PgColumn } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
 import type { Journal, JournalDefinitions, RootCommandRunner } from './api.js';
@@ -23,16 +23,17 @@ import type {
   Projection,
   RootDb,
   SingleKey,
+  Tap,
   TransactionSource,
 } from './types.js';
 import { createCommandRunner } from './command.js';
 import { defineEntity } from './entity.js';
 import { JournalError } from './errors.js';
 import { defineEvent } from './event.js';
-import { bindEffect, defineProjection, effectFor } from './handlers.js';
+import { bindEffect, bindTap, defineProjection, effectFor, tapFor } from './handlers.js';
 import { createHistory } from './history.js';
 import { createHookPoint } from './hooks.js';
-import { createCatchUp, createDrain, createStrandedJobs, createWorkers } from './worker.js';
+import { createCatchUp, createDrain, createStrandedJobs, createTapDispatch, createWorkers } from './worker.js';
 import { createWriter } from './write.js';
 
 const emptyMeta = z.object({});
@@ -109,15 +110,20 @@ function createInit<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, 
     command: (name, input, handler) => ({ name, input, handler }),
     projection: (name, entity, on, opts) => defineProjection(name, entity, on, opts),
     effect: effectFor<MetaOut, AppDb, RootCommandRunner<Meta, Tx>>(),
+    tap: tapFor<MetaOut, AppDb>(),
     compose: config => {
       const effects = (config.effects ?? []).map(effect => bindEffect(effect, config.services ?? {}));
-      return createJournal<Meta, Tx, AppDb>(metaSchema, config.tables, config.projections ?? [], effects);
+      const taps = (config.taps ?? []).map(tap => bindTap(tap, config.services ?? {}));
+      return createJournal<Meta, Tx, AppDb>(metaSchema, config.tables, config.projections ?? [], effects, taps);
     },
   };
 }
 
 /** Throws when two handlers of one kind share a name: the second would silently replace the first. */
-function assertUniqueNames(kind: 'effect' | 'projection', handlers: readonly { readonly name: string }[]): void {
+function assertUniqueNames(
+  kind: 'effect' | 'projection' | 'tap',
+  handlers: readonly { readonly name: string }[],
+): void {
   const seen = new Set<string>();
   for (const { name } of handlers) {
     if (seen.has(name))
@@ -131,7 +137,11 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
   tables: JournalTables,
   projections: readonly Projection<z.output<Meta>, Tx>[],
   effects: readonly Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>>[],
+  taps: readonly Tap<z.output<Meta>, AppDb>[] = [],
 ): Journal<Meta, Tx, AppDb> {
+  assertUniqueNames('tap', taps);
+  const eventsSchema = getTableConfig(tables.events).schema;
+  const wakeChannel = eventsSchema === undefined ? 'journal_wake' : `${eventsSchema}_journal_wake`;
   type MetaOut = z.output<Meta>;
 
   assertUniqueNames('effect', effects);
@@ -153,6 +163,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     asyncProjections,
     effects,
     history,
+    wakeChannel,
   });
   const commandHooks = createHookPoint<CommandHookContext<z.output<Meta>>>('command');
   const effectHooks = createHookPoint<EffectHookContext<z.output<Meta>>>('effect');
@@ -173,9 +184,12 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     runOn: (db, cause) => (command, input, meta, call) => run(db, command, input, meta, call, cause),
   });
   const catching = createCatchUp<Meta, Tx>({ tables, projections: asyncProjections, history });
+  const dispatch = createTapDispatch<Meta, WorkerDb>({ tables, taps, history });
   const workers = createWorkers<WorkerDb>({
     drain: (db, opts) => journal.drain(db, opts),
     catchUp: (db, opts) => journal.catchUp(db, opts),
+    dispatch,
+    tapNames: taps.map(tap => tap.name),
   });
   const strandedJobs = createStrandedJobs({ tables, effectNames: effects.map(effect => effect.name) });
 
@@ -213,6 +227,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     worker: (db, opts) => workers.worker(db, opts),
     wake: () => workers.wakeAll(),
     strandedJobs: db => strandedJobs(db),
+    wakeChannel,
     hooks: { command: commandHooks.point, effect: effectHooks.point },
     catalog: {
       entities: [...entitiesByKind.values()].map(entity => ({
@@ -222,6 +237,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
       })),
       projections: projections.map(projection => projection.name),
       effects: effects.map(effect => effect.name),
+      taps: taps.map(tap => tap.name),
     },
   };
 

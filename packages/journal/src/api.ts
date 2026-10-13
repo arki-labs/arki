@@ -38,7 +38,10 @@ import type {
   ServicesFor,
   SingleKey,
   StrandedJobs,
+  Tap,
+  TapHandlers,
   TransactionSource,
+  WakeListener,
 } from './types.js';
 
 /**
@@ -303,8 +306,26 @@ export type Journal<
    */
   worker(
     db: AppDb & RootDb & TransactionSource<Tx>,
-    opts?: { readonly pollMs?: number; readonly batchSize?: number; readonly leaseSeconds?: number },
+    opts?: {
+      readonly pollMs?: number;
+      readonly batchSize?: number;
+      readonly leaseSeconds?: number;
+      /**
+       * Hear the wake channel (`journal.wakeChannel`): a commit that recorded events wakes this
+       * worker at once, from any process, and the journal's taps fire here for those events.
+       * Required when the journal has taps, unless `taps: false` says this worker runs jobs only.
+       */
+      readonly listen?: WakeListener;
+      /** `false`: a jobs-only worker in a journal that has taps. Another process must listen. */
+      readonly taps?: boolean;
+    },
   ): JournalWorker;
+  /**
+   * The Postgres channel every commit that recorded events notifies, with the seq range as
+   * JSON `{ "from": n, "to": m }`. `journal_wake`, or `<schema>_journal_wake` for tables in a
+   * schema. Payloads are small and bounded; a listener loads what it needs by seq.
+   */
+  readonly wakeChannel: string;
   /**
    * Wake every running worker this journal started in this process. Call it
    * after committing a transaction of your own that ran commands. No worker: nothing happens.
@@ -339,6 +360,7 @@ export type Journal<
     readonly entities: readonly EntityInfo[];
     readonly projections: readonly string[];
     readonly effects: readonly string[];
+    readonly taps: readonly string[];
   };
 };
 
@@ -399,12 +421,28 @@ export type JournalDefinitions<
    * value for every need of every listed effect, by name. A need without a value throws here.
    * `const`: the list is read as a tuple, so an effect with needs keeps them next to one without.
    */
-  compose<const E extends readonly Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[] = readonly []>(
+  /** A tap: in-process, after commit, lossy. See `Tap`. Same shapes as `effect`. */
+  tap<E extends AnyEntity<z.output<Meta>>>(
+    name: string,
+    entity: E | readonly E[],
+    on: NoInfer<TapHandlers<E, z.output<Meta>, AppDb>>,
+  ): Tap<z.output<Meta>, AppDb>;
+  tap<E extends AnyEntity<z.output<Meta>>, N extends Needs>(
+    name: string,
+    entity: E | readonly E[],
+    needs: N,
+    on: NoInfer<TapHandlers<E, z.output<Meta>, AppDb, N>>,
+  ): Tap<z.output<Meta>, AppDb, N>;
+  compose<
+    const E extends readonly Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[] = readonly [],
+    const T extends readonly Tap<z.output<Meta>, AppDb, Needs>[] = readonly [],
+  >(
     config: {
       readonly tables: JournalTables;
       readonly projections?: readonly Projection<z.output<Meta>, Tx>[];
       readonly effects?: E;
-    } & ServicesOption<ServicesFor<E>>,
+      readonly taps?: T;
+    } & ServicesOption<ServicesFor<E> & ServicesFor<T>>,
   ): Journal<Meta, Tx, AppDb>;
 };
 /** `services` is required as soon as one listed effect has a need. */

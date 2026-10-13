@@ -366,6 +366,14 @@ await db.transaction(async tx => {
 journal.wake(); // after the commit
 ```
 
+## Taps and the wake channel
+
+Every commit that recorded events notifies a Postgres channel, `journal.wakeChannel` (`journal_wake`, or `<schema>_journal_wake` for tables in a schema), with the seq range as JSON: `{ "from": 12, "to": 14 }`. Postgres delivers `NOTIFY` at commit, so a listener hears exactly the commits that happened, in every process, including commits of transactions the caller manages, where `journal.wake()` cannot help. The payload is small and bounded; a listener loads what it needs by seq.
+
+A worker hears it through `listen`: `journal.worker(db, { listen })`, where `listen` is `onMessage => unlisten`. The app wires its own client, because `LISTEN` needs a dedicated connection: with `pg`, a client that runs `LISTEN <channel>` and forwards each notification's payload; with PGlite, `client => client.listen(channel, onMessage)`. `LISTEN` hears only what is sent after it ran, and a connection can drop, so the worker keeps polling (`pollMs`); the channel makes it prompt, not correct. A listening worker drains at once on every commit.
+
+A tap is a handler that fires from that channel: in-process, after commit, lossy. No job row, no retry, no order promised across entities. `j.tap('live-orders', order, { OrderPlaced: (e, { db }) => hub.publish(e) })`, with needs like an effect: `j.tap(name, entity, { hub: need<Hub>() }, handlers)`, given in `compose({ taps, services })`. It fires in every process whose worker listens, for every event in the announced range that it names, in seq order, with the root database and no `run`: a tap may not issue commands, because a lost notification must never mean lost writes. An error in a tap is logged and swallowed; the command already committed. Taps are not wrapped by effect hooks. A journal with taps refuses a worker without `listen`, unless `{ taps: false }` says that worker runs jobs only and another process listens. For a live page, a cache, a metric. For work that must happen, write an effect.
+
 ## Hooks
 
 The one way to watch or stop a run from outside is a hook: a wrapper that receives the context and `next`. Register at boot, before any work.

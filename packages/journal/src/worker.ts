@@ -6,7 +6,7 @@
  * Must not import `journal`, `api`, `write` or `command`.
  */
 import type { z } from 'zod';
-import { and, asc, desc, eq, gt, inArray, isNull, lte, max, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, max, notInArray, or, sql } from 'drizzle-orm';
 
 import type { History } from './history.js';
 import type { HookPointInternal } from './hooks.js';
@@ -19,7 +19,10 @@ import type {
   Projection,
   RootDb,
   StrandedJobs,
+  Tap,
   TransactionSource,
+  Unlisten,
+  WakeListener,
 } from './types.js';
 import { debugDrain, debugWorker } from './debug.js';
 import { JournalError } from './errors.js';
@@ -245,6 +248,9 @@ export type WorkerDeps<AppDb extends RootDb> = {
     db: AppDb & RootDb,
     opts?: { readonly batchSize?: number },
   ) => Promise<{ readonly scanned: number }>;
+  /** Fire the taps for one wake payload. */
+  readonly dispatch: (db: AppDb & RootDb, payload: string) => Promise<void>;
+  readonly tapNames: readonly string[];
 };
 
 /** What the async lane of projections needs from the journal. */
@@ -363,16 +369,95 @@ export function createCatchUp<Meta extends z.ZodObject, Tx extends TransactionSo
   return { catchUp, reset, cursors };
 }
 
+/** What tap dispatch needs from the journal. */
+export type TapDispatchDeps<Meta extends z.ZodObject, AppDb extends RootDb> = {
+  readonly tables: Pick<JournalTables, 'events'>;
+  readonly taps: readonly Tap<z.output<Meta>, AppDb>[];
+  readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
+};
+
+/** A wake payload: the seq range one commit recorded. Anything else is ignored. */
+const parseRange = (payload: string): { readonly from: number; readonly to: number } | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(payload);
+    if (typeof parsed !== 'object' || parsed === null || !('from' in parsed) || !('to' in parsed)) return undefined;
+    const { from, to } = parsed;
+    if (typeof from !== 'number' || typeof to !== 'number' || !Number.isInteger(from) || !Number.isInteger(to))
+      return undefined;
+    return from <= to ? { from, to } : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+export function createTapDispatch<Meta extends z.ZodObject, AppDb extends RootDb>(deps: TapDispatchDeps<Meta, AppDb>) {
+  const eventsTable = deps.tables.events;
+  const kinds = [...new Set(deps.taps.flatMap(tap => tap.entities.map(entity => entity.kind)))];
+  const types = [...new Set(deps.taps.flatMap(tap => [...tap.types]))];
+
+  /** Load the committed events in the range that some tap wants, and run each matching tap. Errors are logged, never thrown. */
+  const dispatch = async (db: AppDb & RootDb, payload: string): Promise<void> => {
+    if (deps.taps.length === 0) return;
+    const range = parseRange(payload);
+    if (range === undefined) return;
+    const rows = await db
+      .select()
+      .from(eventsTable)
+      .where(
+        and(
+          gte(eventsTable.seq, range.from),
+          lte(eventsTable.seq, range.to),
+          inArray(eventsTable.kind, kinds),
+          inArray(eventsTable.type, types),
+        ),
+      )
+      .orderBy(asc(eventsTable.seq));
+    for (const row of rows) {
+      for (const tap of deps.taps) {
+        if (!tap.types.has(row.type) || !tap.entities.some(entity => entity.kind === row.kind)) continue;
+        try {
+          const event = deps.history.decodeStoredEvent(
+            row,
+            findEventDefinition(tap.entities, row.kind, row.type),
+            row.entityId,
+          );
+          await tap.run(event, { db });
+        } catch (error) {
+          debugDrain('tap %s: %s %s failed: %s', tap.name, row.type, row.entityId, errorText(error));
+        }
+      }
+    }
+  };
+  return dispatch;
+}
+
+const quiet = (): void => {
+  /* a dispatch failure was logged where it happened */
+};
+
 export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
   /** One wake function per running worker this journal started. */
   const wakers = new Set<() => void>();
 
   const worker = (
     db: AppDb & RootDb,
-    opts?: { readonly pollMs?: number; readonly batchSize?: number; readonly leaseSeconds?: number },
+    opts?: {
+      readonly pollMs?: number;
+      readonly batchSize?: number;
+      readonly leaseSeconds?: number;
+      readonly listen?: WakeListener;
+      readonly taps?: boolean;
+    },
   ): JournalWorker => {
     assertRootDb(db, 'worker');
+    if (deps.tapNames.length > 0 && opts?.listen === undefined && opts?.taps !== false)
+      throw new Error(
+        `journal: this journal has taps (${deps.tapNames.join(', ')}) but the worker has no \`listen\`; taps fire only from the wake channel. Wire LISTEN on journal.wakeChannel, or pass { taps: false } for a worker that runs jobs only`,
+      );
     const pollMs = opts?.pollMs ?? DEFAULT_POLL_MS;
+    let unlisten: Unlisten | undefined;
+    // Wake payloads dispatch one after another, in the order they arrived.
+    let dispatching: Promise<void> = Promise.resolve();
     let running = false;
     let loop: Promise<void> = Promise.resolve();
     // Aborted by `stop()`. It reaches the running effect as `ctx.signal`, and
@@ -423,14 +508,20 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
       endSleep?.();
     };
     return {
-      start() {
-        if (running) return Promise.resolve();
+      async start() {
+        if (running) return;
         running = true;
         stopping = new AbortController();
         wakers.add(wake);
-        debugWorker('start (poll %dms)', pollMs);
+        if (opts?.listen !== undefined) {
+          unlisten = await opts.listen(payload => {
+            wake();
+            if (opts.taps === false) return;
+            dispatching = dispatching.then(() => deps.dispatch(db, payload)).catch(quiet);
+          });
+        }
+        debugWorker('start (poll %dms%s)', pollMs, unlisten === undefined ? '' : ', listening');
         loop = run();
-        return Promise.resolve();
       },
       async stop() {
         running = false;
@@ -438,6 +529,9 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
         // eslint-disable-next-line drizzle/enforce-delete-with-where -- Set#delete, not a Drizzle query
         wakers.delete(wake);
         endSleep?.();
+        await unlisten?.();
+        unlisten = undefined;
+        await dispatching;
         await loop;
         debugWorker('stopped');
       },

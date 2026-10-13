@@ -101,6 +101,8 @@ export type WriteDeps<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>
   /** A write only queues one job per matching effect. It never runs an effect, so the effect's database type does not matter here. */
   readonly effects: readonly Pick<Effect<z.output<Meta>>, 'name' | 'types' | 'entities' | 'schedule'>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent' | 'highestVersion' | 'assertLogSaysGone'>;
+  /** Notified at commit with the seq range of every nonempty append. */
+  readonly wakeChannel: string;
 };
 
 export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>>(deps: WriteDeps<Meta, Tx>) {
@@ -353,6 +355,12 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
             })),
         );
         if (jobs.length > 0) await sp.insert(jobsTable).values(jobs);
+        // Postgres delivers NOTIFY at commit, so every listening worker in every process hears
+        // exactly the commits that happened, with the seq range to read. Never the events themselves.
+        const seqs = recorded.map(event => event.seq);
+        await sp.execute(
+          sql`select pg_notify(${deps.wakeChannel}, ${JSON.stringify({ from: Math.min(...seqs), to: Math.max(...seqs) })})`,
+        );
         // Work for the worker: jobs, plus an async projection that wants one of these events.
         const forAsync = recorded.some(event =>
           asyncProjections.some(p => p.types.has(event.type) && p.entities.some(e => e.kind === entity.kind)),

@@ -348,6 +348,43 @@ export type Effect<Meta = unknown, AppDb = RootDb, Run = unknown, N extends Need
 
 export type EntityInfo = { readonly kind: string; readonly table: string; readonly events: readonly string[] };
 
+/** What a tap handler gets: the root database, plus its needs. No `run`: a tap may not issue commands. */
+export type TapContext<AppDb = RootDb> = { readonly db: AppDb };
+
+export type TapHandlers<E, Meta, AppDb = RootDb, N extends Needs = NoNeeds> = {
+  readonly [D in EventsOf<E> as D['type']]?: BivariantFn<
+    [event: RecordedOf<D, Meta, EntityIdOf<E>>, ctx: TapContext<AppDb> & Needed<N>],
+    unknown
+  >;
+};
+
+/**
+ * A tap: in-process, after commit, lossy. No job row, no retry, no ordering promise across
+ * entities. It fires in every process whose worker listens on the wake channel, from the
+ * seq range the commit announced. For a live page, a cache, a metric. Never for work that
+ * must happen: that is an effect.
+ */
+export type Tap<Meta = unknown, AppDb = RootDb, N extends Needs = NoNeeds> = {
+  readonly name: string;
+  readonly entities: readonly AnyEntity<Meta>[];
+  readonly types: ReadonlySet<string>;
+  readonly needs: N;
+  readonly run: BivariantFn<
+    [event: Recorded<string, unknown, Meta>, ctx: TapContext<AppDb> & Needed<N>],
+    Promise<void>
+  >;
+};
+
+/** Stops listening. May be async. */
+export type Unlisten = () => void | Promise<void>;
+/**
+ * How a worker hears the wake channel. The app wires its own client: for `pg`, a dedicated
+ * client that runs `LISTEN <channel>` and calls `onMessage(payload)` on each notification; for
+ * PGlite, `client.listen(channel, onMessage)`. Start it before `worker.start()` resolves work
+ * you care about: `LISTEN` only hears what is sent after it ran, and the worker still polls.
+ */
+export type WakeListener = (onMessage: (payload: string) => void) => Unlisten | Promise<Unlisten>;
+
 /** `wake()` runs a drain pass now instead of at the next poll. It does nothing unless the worker is running. */
 export type JournalWorker = { start(): Promise<void>; stop(): Promise<void>; wake(): void };
 
