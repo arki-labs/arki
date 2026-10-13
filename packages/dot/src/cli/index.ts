@@ -17,10 +17,9 @@
  * Exit codes: `0` on success/warning envelopes (doctor warnings still mean the
  * app booted), `1` on `failure` envelopes and on every structured CLI error.
  */
-
 import { parseArgs as nodeParseArgs } from 'node:util';
 
-import { createDebugLogger } from '@arki/log/debug';
+import { getLogger } from '@arki/log';
 
 import type { DotApp, DotAppBuilder, DotAppConfigured } from '../define-app.js';
 import type { DiagnosticIssue } from '../diagnostics.js';
@@ -28,7 +27,7 @@ import type { DiscoveredApp, DiscoveryResult } from './discover.js';
 import type { DotCliEnvelope, DotCliEnvelopeStatus } from './render-explain.js';
 import { DotLifecycleError } from '../lifecycle.js';
 import { discoverApp, guards } from './discover.js';
-import { DotCliError, DotCliErrorCode, dotCliDocsUrl } from './error-codes.js';
+import { dotCliDocsUrl, DotCliError, DotCliErrorCode } from './error-codes.js';
 import { runNew } from './new.js';
 import { probeObservability } from './observability-probe.js';
 import { renderDoctor } from './render-doctor.js';
@@ -36,7 +35,7 @@ import { renderExplain } from './render-explain.js';
 import { renderGraph } from './render-graph.js';
 import { renderProjection } from './render-projection.js';
 
-const debugCli = createDebugLogger('arki:dot:cli');
+const debugCli = getLogger('arki:dot:cli');
 
 const VERSION = '0.1.0';
 
@@ -292,9 +291,7 @@ export async function runExplain(
       // explain never boots — just configure.
       configured = (discovered as DotAppBuilder<Record<string, unknown>>).configure();
     } else {
-      configured = discovered as
-        | DotApp<Record<string, unknown>>
-        | DotAppConfigured<Record<string, unknown>>;
+      configured = discovered as DotApp<Record<string, unknown>> | DotAppConfigured<Record<string, unknown>>;
     }
   } catch (err) {
     throw wrapLifecycleError(err, 'configure');
@@ -345,10 +342,7 @@ type DoctorRunOptions = {
  * even after a boot throw. This is the whole point of `doctor`: failure
  * should be observable, not opaque.
  */
-export async function runDoctor(
-  discovered: DiscoveredApp,
-  opts: DoctorRunOptions,
-): Promise<DotCliEnvelope<unknown>> {
+export async function runDoctor(discovered: DiscoveredApp, opts: DoctorRunOptions): Promise<DotCliEnvelope<unknown>> {
   // Already-booted app: just read diagnostics, don't touch lifecycle.
   if (!guards.isDotAppBuilder(discovered) && !guards.isDotAppConfigured(discovered)) {
     const app = discovered as DotApp<Record<string, unknown>>;
@@ -383,7 +377,9 @@ export async function runDoctor(
     // We deliberately swallow the throw so the user sees the per-plugin
     // issues instead of an opaque wrapper error.
     bootThrew = true;
-    debugCli('boot threw, falling back to configured diagnostics: %O', err);
+    debugCli.debug('boot threw, falling back to configured diagnostics', {
+      error: err instanceof Error ? err : String(err),
+    });
   }
 
   try {
@@ -412,7 +408,7 @@ export async function runDoctor(
       try {
         await bootedApp.dispose();
       } catch (err) {
-        debugCli('dispose threw: %O', err);
+        debugCli.debug('dispose threw', { error: err instanceof Error ? err : String(err) });
       }
     }
   }
@@ -603,12 +599,9 @@ function envelopeExitCode(status: DotCliEnvelopeStatus): number {
 }
 
 function formatErrorText(err: DotCliError): string {
-  return [
-    `dot: ${err.code} ${err.message}`,
-    `  remediation: ${err.remediation}`,
-    `  docs: ${err.docsUrl}`,
-    '',
-  ].join('\n');
+  return [`dot: ${err.code} ${err.message}`, `  remediation: ${err.remediation}`, `  docs: ${err.docsUrl}`, ''].join(
+    '\n',
+  );
 }
 
 /**

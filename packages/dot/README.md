@@ -425,6 +425,40 @@ queue, same-phase calls coalesce onto one in-flight promise, and a
 `dispose()` racing a slow `start()` always runs after it — the app ends
 `disposed`, never resurrected.
 
+## Logging
+
+Dot logs through [`@arki/log`](../log). The kernel's own records go to the
+`arki:dot:lifecycle` category. Importing Dot switches nothing on: the app
+does, with `log()` from `@arki/dot/log` as its **first** `.use(...)`.
+
+```ts
+import { defineApp } from '@arki/dot';
+import { log } from '@arki/dot/log';
+import { asyncContext, fromEnv, stdout } from '@arki/log/node';
+
+const app = await defineApp('checkout')
+  .use(log(() => ({ ...fromEnv(), context: asyncContext(), channels: { stdout: stdout() }, default: { level: 'info', channels: ['stdout'] } })))
+  .boot();
+```
+
+- The config is a thunk. It runs when the app boots, never at import.
+- `resource['service.name']` defaults to the app name.
+- The `configure()` handle is published as the `logging` service
+  (`needs: { logging: service<Configured<'stdout'>>() }`).
+- `log()` reads no env on its own (spread `fromEnv()`), installs no
+  OpenTelemetry SDK and does not patch `console`.
+
+`log()` fills Dot's **logging slot**. Any plugin can fill it with
+`plugin({ name, logging: ({ appName }) => handle })`, where `handle` has
+`close(): Promise<void>`. The kernel calls the factory before its first
+lifecycle record (`configure: starting`) and closes the handle after its
+last one (`dispose: complete`). On a failed `configure`, `boot` or `start`,
+the failure is written first and logging closes last. An app has at most one
+logging plugin: two is `DOT_LIFECYCLE_E018`.
+
+Without a logging plugin, `@arki/log` keeps only the first 64 records at
+`warn` and above, and writes nothing else.
+
 ## Testing plugins
 
 `testPlugin` is the typed unit-test builder: satisfy a plugin's needs directly

@@ -14,12 +14,12 @@ import { stat } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { createDebugLogger } from '@arki/log/debug';
+import { getLogger } from '@arki/log';
 
 import type { DotApp, DotAppBuilder, DotAppConfigured } from '../define-app.js';
 import { DotCliError, DotCliErrorCode } from './error-codes.js';
 
-const debugDiscover = createDebugLogger('arki:dot:cli:discover');
+const debugDiscover = getLogger('arki:dot:cli:discover');
 
 /**
  * Default file names probed at cwd, in priority order.
@@ -34,7 +34,8 @@ const DEFAULT_APP_PATHS: readonly string[] = ['dot.config', 'src/app', 'app'];
  */
 const SUPPORTED_EXTENSIONS: readonly string[] = ['.ts', '.mts', '.mjs', '.js'];
 
-export type DiscoveredApp = DotApp<Record<string, unknown>> | DotAppBuilder<Record<string, unknown>> | DotAppConfigured<Record<string, unknown>>;
+export type DiscoveredApp =
+  DotApp<Record<string, unknown>> | DotAppBuilder<Record<string, unknown>> | DotAppConfigured<Record<string, unknown>>;
 
 export type DiscoveryOptions = {
   /** Explicit app file path. When set, takes precedence over the search list. */
@@ -73,7 +74,7 @@ export async function resolveAppFile(options: DiscoveryOptions = {}): Promise<st
 
   if (options.appPath) {
     const absolute = isAbsolute(options.appPath) ? options.appPath : resolve(cwd, options.appPath);
-    debugDiscover('explicit app path: %s', absolute);
+    debugDiscover.debug('explicit app path: {path}', { path: absolute });
     return absolute;
   }
 
@@ -81,13 +82,13 @@ export async function resolveAppFile(options: DiscoveryOptions = {}): Promise<st
     for (const ext of SUPPORTED_EXTENSIONS) {
       const candidate = resolve(cwd, `${base}${ext}`);
       if (await fileExists(candidate)) {
-        debugDiscover('discovered app file: %s', candidate);
+        debugDiscover.debug('discovered app file: {file}', { file: candidate });
         return candidate;
       }
     }
   }
 
-  debugDiscover('no app file found at %s', cwd);
+  debugDiscover.debug('no app file found at {cwd}', { cwd });
   return null;
 }
 
@@ -201,7 +202,7 @@ export async function loadAppFromFile(filePath: string): Promise<DiscoveredApp> 
   }
 
   if (isDotApp(candidate) || isDotAppBuilder(candidate) || isDotAppConfigured(candidate)) {
-    debugDiscover('loaded app from %s', filePath);
+    debugDiscover.debug('loaded app from {filePath}', { filePath });
     return candidate;
   }
 

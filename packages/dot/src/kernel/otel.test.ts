@@ -17,19 +17,18 @@
  * assertion for this commit.
  */
 
-import { context, trace } from '@opentelemetry/api';
-import {
-  BasicTracerProvider,
-  InMemorySpanExporter,
-  SimpleSpanProcessor,
-  type ReadableSpan,
-} from '@opentelemetry/sdk-trace-base';
-import { Logger } from '@arki/log';
+import type { Context, ContextManager } from '@opentelemetry/api';
+import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
+import { context, ROOT_CONTEXT, trace } from '@opentelemetry/api';
+import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+
+import { configure, getLogger, memorySink } from '@arki/log';
+import { otelTrace } from '@arki/log/otel';
+import { fakeLog } from '@arki/log/testing';
 
 import { defineApp } from '../define-app.js';
 import { plugin, service } from '../plugin-contract.js';
-import { withPhaseSpan, withPluginHookSpan } from './otel.js';
 
 let exporter: InMemorySpanExporter;
 let provider: BasicTracerProvider;
@@ -50,6 +49,27 @@ afterAll(async () => {
   await provider.shutdown();
   trace.disable();
 });
+
+/** A synchronous context manager: makes a span active inside `context.with` (enough for `configure`). */
+function syncContextManager(): ContextManager {
+  let current: Context = ROOT_CONTEXT;
+  const manager: ContextManager = {
+    active: () => current,
+    with: (next, fn, thisArg, ...args) => {
+      const previous = current;
+      current = next;
+      try {
+        return fn.apply(thisArg, args);
+      } finally {
+        current = previous;
+      }
+    },
+    bind: (_context, target) => target,
+    enable: () => manager,
+    disable: () => manager,
+  };
+  return manager;
+}
 
 /** Find spans by name. Order is insertion order from the in-memory exporter. */
 function spansByName(name: string): ReadableSpan[] {
@@ -187,66 +207,52 @@ describe('@arki/dot OTel instrumentation', () => {
     expect(webStart.status.code).toBe(1); // OK
   });
 
-  it('threads the active span context onto the passed Logger via setTraceContext', () => {
-    // Use the span helpers directly with an isolated logger instance — we
-    // want to assert the wiring contract (`setTraceContext` is called with
-    // span's trace + span IDs), independent of the kernel's call sites.
-    const logger = new Logger('test-trace-thread');
-    // Read internal trace context via emitting a record and inspecting it.
-    // The Logger doesn't expose its fields publicly, so we sniff via a
-    // captured log record — log a single trace-level line and read the
-    // resulting LogRecord through pino's internals. Simpler: emit at INFO
-    // (which writes via pino) and assert by mocking? That's too invasive.
-    // Instead: subclass-monkey-patch buildRecord through a spy. The easiest
-    // path is calling the helper, then reading back via traceId getter —
-    // but there's no getter. So we round-trip through `buildRecord` via
-    // protected access: cast and call.
-    let observedTraceId: string | undefined;
-    let observedSpanId: string | undefined;
-    const originalSetTraceContext = logger.setTraceContext.bind(logger);
-    logger.setTraceContext = (traceId: string, spanId?: string) => {
-      observedTraceId = traceId;
-      observedSpanId = spanId;
-      originalSetTraceContext(traceId, spanId);
-    };
+  it('stamps the phase span and each plugin hook span on the kernel lifecycle records', async () => {
+    using log = fakeLog();
+    const app = await defineApp('trace-thread-test')
+      .use(plugin({ name: 'p', boot: () => ({}) }))
+      .boot();
+    await app.dispose();
 
-    withPhaseSpan(
-      { appName: 'trace-thread-test', phase: 'configure', pluginCount: 0, logger },
-      () => {
-        // Body runs with logger context already set; no assertion needed here.
-      },
-    );
-    expect(observedTraceId).toBeDefined();
-    expect(observedTraceId).not.toBe('00000000000000000000000000000000');
-    expect(observedSpanId).toBeDefined();
-    expect(observedSpanId).not.toBe('0000000000000000');
+    const phase = spansByName('dot.app.boot')[0]?.spanContext();
+    const hook = spansByName('dot.plugin.boot')[0]?.spanContext();
+    const complete = log.records.find(record => record.template === 'boot: complete');
+    const done = log.records.find(record => record.template === 'boot: done');
+    expect(phase?.traceId).toMatch(/^[0-9a-f]{32}$/);
+    expect(complete).toMatchObject({ traceId: phase?.traceId, spanId: phase?.spanId });
+    // Records written after a plugin's hook keep that hook's span, so they group with it.
+    expect(done).toMatchObject({ traceId: hook?.traceId, spanId: hook?.spanId });
+  });
 
-    // Same wiring on the per-plugin helper.
-    let pluginTraceId: string | undefined;
-    let pluginSpanId: string | undefined;
-    const pluginLogger = new Logger('test-trace-thread:plugin');
-    const originalPluginSet = pluginLogger.setTraceContext.bind(pluginLogger);
-    pluginLogger.setTraceContext = (t: string, s?: string) => {
-      pluginTraceId = t;
-      pluginSpanId = s;
-      originalPluginSet(t, s);
-    };
-    withPluginHookSpan(
-      {
-        appName: 'trace-thread-test',
-        pluginName: 'plugin',
-        hook: 'configure',
-        order: 0,
-        logger: pluginLogger,
-      },
-      () => {
-        /* noop */
-      },
-    );
-    expect(pluginTraceId).toBeDefined();
-    expect(pluginTraceId).not.toBe('00000000000000000000000000000000');
-    expect(pluginSpanId).toBeDefined();
-    expect(pluginSpanId).not.toBe('0000000000000000');
+  it('a hook inside an active span logs with its traceId when logging reads the trace from OTel', () => {
+    context.setGlobalContextManager(syncContextManager());
+    const sink = memorySink();
+    try {
+      defineApp('active-span-test')
+        .use(
+          plugin({
+            name: 'logging',
+            logging: () =>
+              configure({ channels: { mem: sink }, default: { level: 'info', channels: ['mem'] }, trace: otelTrace() }),
+          }),
+        )
+        .use(
+          plugin({
+            name: 'web',
+            configure: () => {
+              getLogger('test:web').info('registering routes');
+            },
+          }),
+        )
+        .configure();
+    } finally {
+      context.disable();
+    }
+
+    const phase = spansByName('dot.app.configure')[0]?.spanContext();
+    const record = sink.records.find(entry => entry.template === 'registering routes');
+    expect(phase?.traceId).toMatch(/^[0-9a-f]{32}$/);
+    expect(record?.traceId).toBe(phase?.traceId);
   });
 
   it('marks the failing plugin span ERROR when boot throws', async () => {
@@ -265,9 +271,7 @@ describe('@arki/dot OTel instrumentation', () => {
       },
     });
 
-    await expect(
-      defineApp('otel-boot-fail-test').use(goodPlugin).use(badPlugin).boot(),
-    ).rejects.toThrow();
+    await expect(defineApp('otel-boot-fail-test').use(goodPlugin).use(badPlugin).boot()).rejects.toThrow();
 
     const bootPluginSpans = spansByName('dot.plugin.boot');
     expect(bootPluginSpans).toHaveLength(2);
@@ -275,7 +279,7 @@ describe('@arki/dot OTel instrumentation', () => {
     const badSpan = bootPluginSpans.find(s => s.attributes['dot.plugin.name'] === 'bad');
     // OK / unset = 0, ERROR = 2 per OTel SpanStatusCode.
     expect(goodSpan?.status.code).toBe(1); // OK
-    expect(badSpan?.status.code).toBe(2);  // ERROR
+    expect(badSpan?.status.code).toBe(2); // ERROR
     expect(badSpan?.events.some(e => e.name === 'exception')).toBe(true);
 
     const bootPhaseSpans = spansByName('dot.app.boot');
@@ -283,6 +287,3 @@ describe('@arki/dot OTel instrumentation', () => {
     expect(bootPhaseSpans[0]?.status.code).toBe(2); // ERROR
   });
 });
-
-/** Touch `context` so the import isn't elided in case future tests need it. */
-void context;

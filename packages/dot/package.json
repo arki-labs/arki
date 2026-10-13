@@ -49,6 +49,11 @@
       "import": "./src/cli/index.ts",
       "default": "./dist/cli/index.js"
     },
+    "./log": {
+      "types": "./dist/log.d.ts",
+      "import": "./src/log.ts",
+      "default": "./dist/log.js"
+    },
     "./test-harness": {
       "types": "./dist/test-harness.d.ts",
       "import": "./src/test-harness.ts",

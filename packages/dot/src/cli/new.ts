@@ -21,14 +21,15 @@
  * `dot migrate`) are deliberately NOT surfaced here.
  */
 
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { createDebugLogger } from '@arki/log/debug';
+import { getLogger } from '@arki/log';
 
 import type { DiagnosticIssue } from '../diagnostics.js';
 import type { FileOperation } from './files.js';
 import type { DotNewEnvelope } from './json.js';
+import { DotCliError, DotCliErrorCode } from './error-codes.js';
 import {
   collectTemplateFiles,
   directoryIsNonEmpty,
@@ -38,10 +39,9 @@ import {
   utf8ByteLength,
   writeFileEnsuringDir,
 } from './files.js';
-import { DotCliError, DotCliErrorCode } from './error-codes.js';
 import { toPublicOperation } from './json.js';
 
-const debugNew = createDebugLogger('arki:dot:cli:new');
+const debugNew = getLogger('arki:dot:cli:new');
 
 /**
  * Package manager the generated README + AGENTS.md will reference.
@@ -110,8 +110,7 @@ const FILE_REASONS: Record<string, string> = {
   'package.json': 'Package manifest with @arki/dot + @arki/env dependencies',
   'tsconfig.json': 'TypeScript config for ESM + NodeNext + strict mode',
   'README.md': 'Quickstart and inspection commands',
-  'AGENTS.md':
-    'Agent-readable conventions (verification commands, public/private boundaries, DOT artifact locations)',
+  'AGENTS.md': 'Agent-readable conventions (verification commands, public/private boundaries, DOT artifact locations)',
   '.gitignore': 'Standard ignores for node_modules, dist, env files',
   'src/app.ts': 'App entrypoint composing defineApp + env adapter',
   'src/env.ts': 'Env schema (zod) consumed by @arki/env/dot',
@@ -369,7 +368,7 @@ export async function runNew(opts: RunNewOptions): Promise<DotNewEnvelope> {
       // either created or overwritten with the planned content.
       written.push({ ...op, action: op.action === 'skip' ? 'create' : op.action });
     } catch (error) {
-      debugNew('write failed for %s: %O', dest, error);
+      debugNew.debug('write failed for {dest}', { dest, error: error instanceof Error ? error : String(error) });
       errors.push({
         code: DotCliErrorCode.AppLifecycleFailed,
         severity: 'error',
