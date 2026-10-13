@@ -80,7 +80,7 @@ describe('refundPayment', () => {
     const refund = await provider.refundPayment(createPaymentId(), { amount: money(1500, 'JPY') });
 
     expect(sent.refunds[0]?.amount).toBe(1500);
-    expect(refund).toMatchObject({ amount: 1500, refundedAmount: 1500, currency: 'JPY' });
+    expect(refund).toMatchObject({ amountMinor: 1500, refundedAmountMinor: 1500, currency: 'JPY' });
   });
 
   it('sends a USD refund in cents: 12.34 USD is 1234', async () => {

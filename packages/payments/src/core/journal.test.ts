@@ -5,8 +5,9 @@
  *       row, in one transaction.
  *
  * These tests pin three things. A payment moves only along its allowed path
- * and a rejected request writes nothing. Money in a `real` column comes back
- * the way the reducer said it would, so replay and the table agree. And the
+ * and a rejected request writes nothing. Money is stored as exact minor units,
+ * and payments recorded before minor units (`PaymentInitiated`, a float) still
+ * replay to the row the column migration wrote. And the
  * plain functions the services call run the right command and never leak the
  * journal's `version` column.
  */
@@ -35,7 +36,6 @@ import {
   userId,
 } from '../test-support';
 import { createCoreJournal } from './journal';
-import { storedReal } from './journal/support';
 import { createPaymentId, createSubscriptionId, paymentIdFactory, subscriptionIdFactory } from './primitives';
 
 const { payments } = core;
@@ -104,14 +104,14 @@ describe('initiatePayment', () => {
 
     const result = await journal.run(db, commands.initiatePayment, { paymentId, ...input }, meta);
 
-    expect(result.events.map(event => event.type)).toEqual(['PaymentInitiated']);
+    expect(result.events.map(event => event.type)).toEqual(['PaymentInitiatedV2']);
     expect(await rowOf(paymentId)).toMatchObject({
       id: paymentId,
       subscriptionId: null,
       userId,
       customerId,
       providerPaymentId: input.providerPaymentId,
-      amount: 19.99,
+      amountMinor: 1999,
       currency: 'USD',
       status: 'pending',
       paymentMethod: 'card',
@@ -119,7 +119,7 @@ describe('initiatePayment', () => {
       failureReason: null,
       receiptUrl: null,
       refunded: false,
-      refundedAmount: 0,
+      refundedAmountMinor: 0,
       metadata: { taxAmount: 3.8, paymentIntentId: 'pi_x' },
       version: 1,
     });
@@ -143,37 +143,76 @@ describe('initiatePayment', () => {
   });
 });
 
-describe('money in a `real` column', () => {
-  it.each([0, 0.1, 19.99, 99_999.99, 999_999.99, 1_234_567.89, 16_777_217])(
-    'storedReal(%d) is the number Postgres gives back, so the reducer and the table agree',
-    async amount => {
-      const [row] = await db
-        .insert(payments)
-        .values({ userId, customerId, providerPaymentId: `pi_real_${amount}`, amount })
-        .returning({ amount: payments.amount });
-
-      expect(storedReal(amount)).toBe(row?.amount);
-    },
-  );
-
-  it('round-trips 19.99 exactly, and the payment replays to the stored row', async () => {
+describe('money in minor-unit columns', () => {
+  it('stores 19.99 USD as 1999 and the event keeps the exact text, so replay lands on the same row', async () => {
     const paymentId = createPaymentId();
 
-    await journal.run(db, commands.initiatePayment, { paymentId, ...intent('19.99') }, meta);
+    const result = await journal.run(db, commands.initiatePayment, { paymentId, ...intent('19.99') }, meta);
 
-    const row = await rowOf(paymentId);
-    expect(row?.amount).toBe(19.99);
+    expect(result.events[0]?.data).toMatchObject({ amount: { amount: '19.99', currency: 'USD' } });
+    expect(await rowOf(paymentId)).toMatchObject({ amountMinor: 1999, currency: 'USD' });
     expect(await journal.verify(db, entities.payment, paymentId)).toEqual({ ok: true });
   });
 
-  it('accepts 1234567.89: the column keeps 1234567.9 (a 4-byte float), the event keeps the amount as given', async () => {
+  it('keeps 1234567.89 to the cent: a 4-byte float column kept only 1234567.9', async () => {
     const paymentId = createPaymentId();
 
-    const result = await journal.run(db, commands.initiatePayment, { paymentId, ...intent('1234567.89') }, meta);
+    await journal.run(db, commands.initiatePayment, { paymentId, ...intent('1234567.89') }, meta);
 
-    expect(result.events[0]?.data).toMatchObject({ amount: 1_234_567.89 });
-    const row = await rowOf(paymentId);
-    expect(row?.amount).toBe(1_234_567.9);
+    expect(await rowOf(paymentId)).toMatchObject({ amountMinor: 123_456_789 });
+    expect(await journal.verify(db, entities.payment, paymentId)).toEqual({ ok: true });
+  });
+});
+
+/** Records a payment the way the code before minor units did: a `PaymentInitiated` event with a float amount. */
+async function recordOld(amount: number, currency: string): Promise<PaymentId> {
+  const paymentId = createPaymentId();
+  next += 1;
+  const old = plain.core.events.PaymentInitiated({
+    subscriptionId: null,
+    userId,
+    customerId,
+    providerPaymentId: `pi_old_${next}`,
+    amount,
+    currency,
+    paymentMethod: 'card',
+    description: null,
+    metadata: null,
+  });
+  await journal.write(db, entities.payment, paymentId, { meta, events: () => [old] });
+
+  return paymentId;
+}
+
+/**
+ * Payments recorded before minor units have a `PaymentInitiated` event whose
+ * amount is a float of major units. Replay and repair run today's reducers on
+ * them, so the old event must still decode and land on the row the column
+ * migration wrote: the `real` value, rounded half-even to the currency.
+ */
+describe('a payment recorded before minor units (`PaymentInitiated`)', () => {
+  it.each([
+    [19.99, 'USD', 1999],
+    [1000, 'JPY', 1000],
+    [1.234, 'BHD', 1234],
+    // The `real` column held 1234567.9, and the migration converted that
+    [1_234_567.89, 'USD', 123_456_790],
+    // Lower case from older rows still reads
+    [5, 'eur', 500],
+  ])('%d %s reduces to %d minor units and replays to the stored row', async (amount, currency, minor) => {
+    const paymentId = await recordOld(amount, currency);
+
+    expect(await rowOf(paymentId)).toMatchObject({ amountMinor: minor, currency, refundedAmountMinor: 0 });
+    expect(await eventTypesOf(db, 'payment', paymentId)).toEqual(['PaymentInitiated']);
+    expect(await journal.verify(db, entities.payment, paymentId)).toEqual({ ok: true });
+  });
+
+  it('keeps moving along its path after the change: an old payment can still complete', async () => {
+    const paymentId = await recordOld(19.99, 'USD');
+
+    await journal.run(db, commands.completePayment, { paymentId, receiptUrl: null }, meta);
+
+    expect(await rowOf(paymentId)).toMatchObject({ amountMinor: 1999, status: 'succeeded' });
     expect(await journal.verify(db, entities.payment, paymentId)).toEqual({ ok: true });
   });
 });
@@ -184,8 +223,8 @@ describe('money with its currency', () => {
 
     const result = await journal.run(db, commands.initiatePayment, { paymentId, ...intent('1000', 'JPY') }, meta);
 
-    expect(result.events[0]?.data).toMatchObject({ amount: 1000, currency: 'JPY' });
-    expect(await rowOf(paymentId)).toMatchObject({ amount: 1000, currency: 'JPY' });
+    expect(result.events[0]?.data).toMatchObject({ amount: { amount: '1000', currency: 'JPY' } });
+    expect(await rowOf(paymentId)).toMatchObject({ amountMinor: 1000, currency: 'JPY' });
   });
 
   it('rejects a negative amount and writes nothing: a payment never moves money backwards', async () => {
@@ -303,9 +342,9 @@ describe('writes(run): what the services call', () => {
       failureReason: 'card_declined',
     });
     expect(await writes.cancelPayment({ paymentId: canceled })).toMatchObject({ status: 'canceled' });
-    expect(await eventTypesOf(db, 'payment', completed)).toEqual(['PaymentInitiated', 'PaymentCompleted']);
-    expect(await eventTypesOf(db, 'payment', failed)).toEqual(['PaymentInitiated', 'PaymentFailed']);
-    expect(await eventTypesOf(db, 'payment', canceled)).toEqual(['PaymentInitiated', 'PaymentCanceled']);
+    expect(await eventTypesOf(db, 'payment', completed)).toEqual(['PaymentInitiatedV2', 'PaymentCompleted']);
+    expect(await eventTypesOf(db, 'payment', failed)).toEqual(['PaymentInitiatedV2', 'PaymentFailed']);
+    expect(await eventTypesOf(db, 'payment', canceled)).toEqual(['PaymentInitiatedV2', 'PaymentCanceled']);
   });
 
   it('runs the subscription commands, one event per call, in the order the services call them', async () => {

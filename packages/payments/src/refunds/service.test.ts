@@ -19,7 +19,7 @@ import { money } from '@arki/money';
 import type { CoreWrites } from '../core/journal';
 import type { AppDb } from '../test-support';
 import type { RefundWrites } from './journal';
-import { toStoredNumber } from '../core/money';
+import { toMinorColumn } from '../core/money';
 import { createPaymentId } from '../core/primitives';
 import { coreReads, refundReads, refundRow, runnerOn, seedPayment } from '../service-test-support';
 import { adminId, countEvents, customerId, eventTypesOf, openDb, rejectionOf, typed, userId } from '../test-support';
@@ -51,7 +51,7 @@ const providerThatRefunds: Provider = {
       customerId,
       subscriptionId: null,
       providerPaymentId: 're_test',
-      amount: toStoredNumber(refunded),
+      amountMinor: toMinorColumn(refunded),
       currency: refunded.currency.code,
       status: 'succeeded',
       paymentMethod: 'card',
@@ -59,7 +59,7 @@ const providerThatRefunds: Provider = {
       failureReason: null,
       receiptUrl: null,
       refunded: true,
-      refundedAmount: toStoredNumber(refunded),
+      refundedAmountMinor: toMinorColumn(refunded),
       metadata: null,
       createdAt: refundedOn,
       updatedAt: refundedOn,
@@ -96,9 +96,9 @@ describe('requestRefund', () => {
   it('a request that needs approval is stored as pending, with its event', async () => {
     const refund = await pendingRefund(serviceWith(providerThatRefunds));
 
-    expect(refund).toMatchObject({ status: 'pending', refundAmount: '40.00', requestedBy: userId });
-    expect(await refundRow(db, refund.id)).toMatchObject({ status: 'pending', refundAmount: '40.00' });
-    expect(await eventTypesOf(db, 'refund', refund.id)).toEqual(['RefundRequested']);
+    expect(refund).toMatchObject({ status: 'pending', refundAmountMinor: 4000, requestedBy: userId });
+    expect(await refundRow(db, refund.id)).toMatchObject({ status: 'pending', refundAmountMinor: 4000 });
+    expect(await eventTypesOf(db, 'refund', refund.id)).toEqual(['RefundRequestedV2']);
   });
 
   it('a small refund is approved by the system and paid back at once: four steps, four events', async () => {
@@ -114,7 +114,7 @@ describe('requestRefund', () => {
     expect(refund).toMatchObject({ status: 'completed', approvedBy: adminId });
     expect(refund.providerRefundId).toBe(refundedAs);
     expect(await eventTypesOf(db, 'refund', refund.id)).toEqual([
-      'RefundRequested',
+      'RefundRequestedV2',
       'RefundApproved',
       'RefundProcessed',
       'RefundCompleted',
@@ -184,7 +184,7 @@ describe('requestRefund', () => {
       requestedBy: userId,
     });
 
-    expect(eurRefund).toMatchObject({ currency: 'EUR', refundAmount: '40.00', originalAmount: '40.00' });
+    expect(eurRefund).toMatchObject({ currency: 'EUR', refundAmountMinor: 4000, originalAmountMinor: 4000 });
   });
 
   it('a refund in another currency than the payment is turned down and writes nothing', async () => {
@@ -229,7 +229,7 @@ describe('approveRefund', () => {
     expect(refund.completedAt).toBeInstanceOf(Date);
     expect(await refundRow(db, pending.id)).toMatchObject({ status: 'completed', approvedBy: adminId });
     expect(await eventTypesOf(db, 'refund', pending.id)).toEqual([
-      'RefundRequested',
+      'RefundRequestedV2',
       'RefundApproved',
       'RefundProcessed',
       'RefundCompleted',
@@ -248,7 +248,7 @@ describe('approveRefund', () => {
       providerResponse: JSON.stringify({ error: 'charge already refunded' }),
     });
     expect(await eventTypesOf(db, 'refund', pending.id)).toEqual([
-      'RefundRequested',
+      'RefundRequestedV2',
       'RefundApproved',
       'RefundProcessed',
       'RefundFailed',
@@ -277,6 +277,6 @@ describe('rejectRefund', () => {
     const refund = await service.rejectRefund({ refundId: pending.id, rejectedBy: adminId, reason: 'outside policy' });
 
     expect(refund).toMatchObject({ status: 'rejected', rejectedBy: adminId, rejectionReason: 'outside policy' });
-    expect(await eventTypesOf(db, 'refund', pending.id)).toEqual(['RefundRequested', 'RefundRejected']);
+    expect(await eventTypesOf(db, 'refund', pending.id)).toEqual(['RefundRequestedV2', 'RefundRejected']);
   });
 });

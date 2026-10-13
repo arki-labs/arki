@@ -11,6 +11,7 @@ import type {
   SubscriptionPreview,
   SubscriptionStatus,
 } from '../types';
+import { paymentAmount } from '../money';
 
 // Utility functions to convert between database and domain types
 function convertSubscriptionToDomain(dbSubscription: any): Subscription {
@@ -398,7 +399,7 @@ export class SubscriptionManager {
 
       // Calculate revenue metrics
       const successfulPayments = payments.filter(payment => payment.status === 'succeeded');
-      const totalRevenue = successfulPayments.reduce((sum, payment) => sum + payment.amount, 0);
+      const totalRevenue = successfulPayments.reduce((sum, payment) => sum + paymentAmount(payment).toNumber(), 0);
       const averageRevenuePerUser = activeSubscriptions > 0 ? totalRevenue / activeSubscriptions : 0;
 
       // Calculate MRR and ARR (simplified)
@@ -407,14 +408,14 @@ export class SubscriptionManager {
           const subscription = payment.subscription as { plan?: Plan } | undefined;
           return subscription?.plan?.interval === 'monthly';
         })
-        .reduce((sum, payment) => sum + payment.amount, 0);
+        .reduce((sum, payment) => sum + paymentAmount(payment).toNumber(), 0);
 
       const yearlyRevenue = successfulPayments
         .filter(payment => {
           const subscription = payment.subscription as { plan?: Plan } | undefined;
           return subscription?.plan?.interval === 'yearly';
         })
-        .reduce((sum, payment) => sum + payment.amount, 0);
+        .reduce((sum, payment) => sum + paymentAmount(payment).toNumber(), 0);
 
       const monthlyRecurringRevenue = monthlyRevenue + yearlyRevenue / 12;
       const annualRecurringRevenue = monthlyRecurringRevenue * 12;

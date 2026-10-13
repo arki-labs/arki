@@ -7,7 +7,7 @@ import type { Money } from '@arki/money';
 import { MoneyBag } from '@arki/money/bag';
 
 import type { PaymentId } from '../core/primitives';
-import { fromDecimalColumn } from '../core/money';
+import { fromMinorColumn, toMinorColumn } from '../core/money';
 import type { RefundId, RefundReason, RefundStatus } from './primitives';
 import type { RefundsTables } from './tables';
 import type { Refund } from './types';
@@ -18,9 +18,9 @@ import type { Refund } from './types';
  * the host needs to register the `refunds` table in its schema but no
  * specific relations graph is required.
  */
-/** A refund row's amount: `decimal(10,2)` and a currency that defaults to USD, as the column does. */
-export function refundAmountOf(refund: Pick<Refund, 'refundAmount' | 'currency'>): Money {
-  return fromDecimalColumn(refund.refundAmount, refund.currency ?? 'USD');
+/** A refund row's amount: whole minor units and a currency that defaults to USD, as the column does. */
+export function refundAmountOf(refund: Pick<Refund, 'refundAmountMinor' | 'currency'>): Money {
+  return fromMinorColumn(refund.refundAmountMinor, refund.currency ?? 'USD');
 }
 
 export type RefundsDatabase =
@@ -77,8 +77,8 @@ export class RefundRepository {
   async getTotalRefundedAmount(paymentId: PaymentId, currency: string): Promise<Money> {
     const result = await this.db
       .select({
-        // A `decimal` sum: Postgres sends it as text, exact
-        total: sql<string | null>`SUM(${this.refunds.refundAmount})`,
+        // A `bigint` sum is `numeric`: Postgres sends it as text, exact
+        total: sql<string | null>`SUM(${this.refunds.refundAmountMinor})`,
       })
       .from(this.refunds)
       .where(
@@ -89,7 +89,7 @@ export class RefundRepository {
         ),
       );
 
-    return fromDecimalColumn(result[0]?.total ?? '0', currency);
+    return fromMinorColumn(result[0]?.total ?? '0', currency);
   }
 
   async getRefundMetrics(
@@ -184,13 +184,13 @@ export class RefundRepository {
     if (filters.minAmount !== undefined) {
       conditions.push(
         eq(this.refunds.currency, filters.minAmount.currency.code),
-        gte(this.refunds.refundAmount, filters.minAmount.toDecimalString()),
+        gte(this.refunds.refundAmountMinor, toMinorColumn(filters.minAmount)),
       );
     }
     if (filters.maxAmount !== undefined) {
       conditions.push(
         eq(this.refunds.currency, filters.maxAmount.currency.code),
-        lte(this.refunds.refundAmount, filters.maxAmount.toDecimalString()),
+        lte(this.refunds.refundAmountMinor, toMinorColumn(filters.maxAmount)),
       );
     }
 

@@ -5,6 +5,7 @@ import type {
   PaymentId,
   SubscriptionId,
 } from '../types';
+import { paymentAmount } from '../money';
 
 export type DunningRule = {
   id: string;
@@ -445,7 +446,7 @@ export class DunningService {
     const recoveredPayments = recoveryEvents.length;
     const recoveryRate = totalFailedPayments > 0 ? (recoveredPayments / totalFailedPayments) * 100 : 0;
 
-    const revenueAtRisk = failedPayments.reduce((sum, p) => sum + p.amount, 0);
+    const revenueAtRisk = failedPayments.reduce((sum, p) => sum + paymentAmount(p).toNumber(), 0);
     const revenueRecovered = recoveredPayments * (revenueAtRisk / totalFailedPayments || 0);
 
     // Calculate average recovery time (simplified)

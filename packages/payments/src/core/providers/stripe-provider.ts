@@ -3,7 +3,7 @@ import Stripe from 'stripe';
 import type { UserId } from '@arki/auth/ids';
 import { Money, sum } from '@arki/money';
 import { fromStripeAmount, toStripeAmount } from '@arki/money/stripe';
-import { toStoredNumber } from '../money';
+import { toMinorColumn } from '../money';
 import {
   createCustomerId,
   createPlanId
@@ -129,7 +129,7 @@ export class StripeProvider extends BasePaymentProvider {
       name: params.name,
       description: '',
       tier: 'basic', // Would be determined by business logic
-      price: toStoredNumber(params.amount),
+      priceMinor: toMinorColumn(params.amount),
       currency: params.amount.currency.code,
       interval: params.interval,
       intervalCount: params.intervalCount || 1,
@@ -277,7 +277,7 @@ export class StripeProvider extends BasePaymentProvider {
       customerId: 'cust_placeholder' as CustomerId,
       subscriptionId: null,
       providerPaymentId: refund.id,
-      amount: toStoredNumber(refunded),
+      amountMinor: toMinorColumn(refunded),
       currency: refunded.currency.code,
       status: refund.status === 'succeeded' ? 'succeeded' : 'failed',
       paymentMethod: 'card', // Default
@@ -285,7 +285,7 @@ export class StripeProvider extends BasePaymentProvider {
       failureReason: null,
       receiptUrl: null,
       refunded: true,
-      refundedAmount: toStoredNumber(refunded),
+      refundedAmountMinor: toMinorColumn(refunded),
       metadata: refund.metadata ? Object.fromEntries(
         Object.entries(refund.metadata).map(([k, v]) => [k, v ?? null])
       ) as Record<string, unknown> : null,

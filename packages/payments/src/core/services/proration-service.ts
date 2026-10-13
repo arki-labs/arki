@@ -5,7 +5,7 @@ import type { PaymentRepository } from '../repository';
 import type { Plan, PlanId, Subscription, SubscriptionId, SubscriptionPreview } from '../types';
 import { planPrice } from '../money';
 
-type PlanLike = Partial<Plan> & Pick<Plan, 'id' | 'name' | 'price' | 'interval' | 'intervalCount' | 'isActive'>;
+type PlanLike = Partial<Plan> & Pick<Plan, 'id' | 'name' | 'priceMinor' | 'interval' | 'intervalCount' | 'isActive'>;
 type SubscriptionLike = Partial<Subscription> &
   Pick<Subscription, 'id' | 'currentPeriodStart' | 'currentPeriodEnd' | 'status'>;
 

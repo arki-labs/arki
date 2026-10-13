@@ -5,16 +5,21 @@
  * A payment starts `pending` and ends `succeeded`, `failed` or `canceled`.
  *
  * The command takes the amount as `Money` JSON (`{ amount: '19.99',
- * currency: 'USD' }`). `amount` is a `real` column: a 4-byte float. The event
- * keeps the amount as a number, the format already stored. The reducer returns
- * the number the column will hold (see `storedReal`), because the journal
- * compares the two.
+ * currency: 'USD' }`), and `PaymentInitiatedV2` keeps it in that form, exact.
+ * The row holds it as whole minor units (`amount_minor`) beside `currency`.
+ *
+ * `PaymentInitiated` is the event written while `amount` was a `real` column:
+ * a JS number of major units. No command writes it any more; it stays declared
+ * so stored payments still replay. Its reducer rebuilds what the column
+ * migration wrote: the `real` value (see `storedReal`), rounded half-even to
+ * the currency's minor units.
  */
 
 import type { JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import { userIdSchema } from '@arki/auth/ids';
 import { z } from '@arki/contracts';
 import { CommandError } from '@arki/journal';
+import { Money } from '@arki/money';
 
 import type { CoreTables } from '../tables';
 import {
@@ -24,7 +29,7 @@ import {
   paymentMethodTypeValues,
   subscriptionIdSchema,
 } from '../primitives';
-import { nonNegativeMoneySchema, toStoredNumber } from '../money';
+import { fromStoredNumber, moneyJsonSchema, nonNegativeMoneySchema, toMinorColumn } from '../money';
 import { storedReal } from './support';
 
 type PaymentRow = CoreTables['payments']['$inferSelect'];
@@ -71,45 +76,60 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
   j: JournalDefinitions<Meta, Tx, AppDb>,
   payments: CoreTables['payments'],
 ) {
-  /** A payment was started with the provider. It is `pending`. */
+  const paymentStart = {
+    subscriptionId: subscriptionIdSchema.nullable(),
+    userId: userIdSchema,
+    customerId: customerIdSchema,
+    providerPaymentId: z.string(),
+    paymentMethod: paymentMethodSchema,
+    description: z.string().nullable(),
+    metadata: metadataSchema.nullable(),
+  };
+  /** Before minor units: a payment was started, its amount a JS number of major units. Replay only. */
   const PaymentInitiated = j.event(
     'PaymentInitiated',
-    z.object({
-      subscriptionId: subscriptionIdSchema.nullable(),
-      userId: userIdSchema,
-      customerId: customerIdSchema,
-      providerPaymentId: z.string(),
-      amount: z.number(),
-      currency: z.string(),
-      paymentMethod: paymentMethodSchema,
-      description: z.string().nullable(),
-      metadata: metadataSchema.nullable(),
-    }),
+    z.object({ ...paymentStart, amount: z.number(), currency: z.string() }),
   );
+  /** A payment was started with the provider. It is `pending`. The amount is exact `Money` JSON. */
+  const PaymentInitiatedV2 = j.event('PaymentInitiatedV2', z.object({ ...paymentStart, amount: moneyJsonSchema }));
   const PaymentCompleted = j.event('PaymentCompleted', z.object({ receiptUrl: z.string().nullable() }));
   const PaymentFailed = j.event('PaymentFailed', z.object({ failureReason: z.string() }));
   const PaymentCanceled = j.event('PaymentCanceled', z.object({}));
 
-  const payment = j
-    .entity('payment', payments)
-    .create(PaymentInitiated, e => ({
-      subscriptionId: e.data.subscriptionId,
-      userId: e.data.userId,
-      customerId: e.data.customerId,
-      providerPaymentId: e.data.providerPaymentId,
-      amount: storedReal(e.data.amount),
-      currency: e.data.currency,
-      status: 'pending',
-      paymentMethod: e.data.paymentMethod,
-      description: e.data.description,
+  type StartData = z.output<typeof PaymentInitiatedV2.schema>;
+  const started = (data: Omit<StartData, 'amount'>, amountMinor: number, currency: string, at: Date) =>
+    ({
+      subscriptionId: data.subscriptionId,
+      userId: data.userId,
+      customerId: data.customerId,
+      providerPaymentId: data.providerPaymentId,
+      amountMinor,
+      currency,
+      status: 'pending' as const,
+      paymentMethod: data.paymentMethod,
+      description: data.description,
       failureReason: null,
       receiptUrl: null,
       refunded: false,
-      refundedAmount: 0,
-      metadata: e.data.metadata,
-      createdAt: e.recordedAt,
-      updatedAt: e.recordedAt,
-    }))
+      refundedAmountMinor: 0,
+      metadata: data.metadata,
+      createdAt: at,
+      updatedAt: at,
+    });
+
+  const payment = j
+    .entity('payment', payments)
+    .create(PaymentInitiated, e =>
+      started(
+        e.data,
+        toMinorColumn(fromStoredNumber(storedReal(e.data.amount), e.data.currency)),
+        e.data.currency,
+        e.recordedAt,
+      ),
+    )
+    .create(PaymentInitiatedV2, e =>
+      started(e.data, toMinorColumn(Money.fromJSON(e.data.amount)), e.data.amount.currency, e.recordedAt),
+    )
     .on(PaymentCompleted, (_row, e) => ({
       status: 'succeeded',
       receiptUrl: e.data.receiptUrl,
@@ -131,13 +151,12 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
       }
 
       return [
-        PaymentInitiated({
+        PaymentInitiatedV2({
           subscriptionId: input.subscriptionId ?? null,
           userId: input.userId,
           customerId: input.customerId,
           providerPaymentId: input.providerPaymentId,
-          amount: toStoredNumber(input.amount),
-          currency: input.amount.currency.code,
+          amount: input.amount.toJSON(),
           paymentMethod: input.paymentMethod,
           description: input.description ?? null,
           metadata: input.metadata ?? null,
@@ -184,7 +203,7 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
 
   return {
     payment,
-    events: { PaymentInitiated, PaymentCompleted, PaymentFailed, PaymentCanceled },
+    events: { PaymentInitiated, PaymentInitiatedV2, PaymentCompleted, PaymentFailed, PaymentCanceled },
     commands: { initiatePayment, completePayment, failPayment, cancelPayment },
   };
 }

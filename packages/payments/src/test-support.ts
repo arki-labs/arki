@@ -91,7 +91,7 @@ export async function openDb() {
   await apply();
 
   await db.insert(users).values([{ id: userId }, { id: adminId }]);
-  await db.insert(core.plans).values({ id: planId, name: 'Pro', price: 10 });
+  await db.insert(core.plans).values({ id: planId, name: 'Pro', priceMinor: 1000 });
   await db
     .insert(core.customers)
     .values({ id: customerId, userId, providerCustomerId: 'cus_test', email: 'buyer@example.com' });

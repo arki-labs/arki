@@ -10,6 +10,7 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { money } from '@arki/money';
 import { CurrencyMismatchError } from '@arki/money/errors';
 
 import type { AppDb } from '../../test-support';
@@ -27,9 +28,10 @@ let writes: CoreWrites;
 /** The subscription runs 2026-01-01 → 2026-02-01 (31 days) on the 10.00 USD test plan; 21 days are left. */
 const effectiveDate = new Date('2026-01-11T00:00:00.000Z');
 
-async function planAt(price: number, currency: string): Promise<PlanId> {
+async function planAt(price: string, currency: string): Promise<PlanId> {
   const id = createPlanId();
-  await db.insert(core.plans).values({ id, name: `Plan ${price} ${currency}`, price, currency });
+  const priceMinor = money(price, currency).toMinorNumber();
+  await db.insert(core.plans).values({ id, name: `Plan ${price} ${currency}`, priceMinor, currency });
 
   return id;
 }
@@ -46,7 +48,7 @@ afterAll(async () => {
 describe('calculateProration', () => {
   it('charges the exact 21/31 of 999.99 USD (677.41), not 67.74% of it (677.39)', async () => {
     const subscription = await seedSubscription(writes, 'active');
-    const newPlanId = await planAt(999.99, 'USD');
+    const newPlanId = await planAt('999.99', 'USD');
 
     const { costs } = await new ProrationService(coreReads(db)).calculateProration(subscription.id, newPlanId, {
       prorationBehavior: 'create_prorations',
@@ -61,7 +63,7 @@ describe('calculateProration', () => {
 
   it('splits a JPY price in whole yen: 21/31 of 1000 JPY is 677 JPY, never 6.77', async () => {
     const subscription = await seedSubscription(writes, 'active');
-    const newPlanId = await planAt(1000, 'JPY');
+    const newPlanId = await planAt('1000', 'JPY');
 
     const { costs } = await new ProrationService(coreReads(db)).calculateProration(subscription.id, newPlanId, {
       prorationBehavior: 'always_invoice',
@@ -73,7 +75,7 @@ describe('calculateProration', () => {
 
   it('refuses to credit a USD plan against a EUR plan instead of subtracting unlike amounts', async () => {
     const subscription = await seedSubscription(writes, 'active');
-    const newPlanId = await planAt(10, 'EUR');
+    const newPlanId = await planAt('10', 'EUR');
 
     await expect(
       new ProrationService(coreReads(db)).calculateProration(subscription.id, newPlanId, {

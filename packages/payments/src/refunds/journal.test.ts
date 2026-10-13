@@ -6,9 +6,10 @@
  *
  * A refund moves money back, so its path is strict: requested → approved or
  * rejected → processing → completed or failed. These tests pin that a step out
- * of order is rejected and writes nothing, that amounts are stored the way the
- * `decimal(10,2)` column holds them, and that the provider's refund id arrives
- * with completion (the live service has it only then).
+ * of order is rejected and writes nothing, that amounts are stored as exact
+ * minor units of the refund's currency (and refunds recorded before that still
+ * replay), and that the provider's refund id arrives with completion (the live
+ * service has it only then).
  *
  * This file runs on the typed journal, `initJournal.tx<AppTx>().db<AppDb>()`,
  * the form an app uses.
@@ -55,6 +56,7 @@ const run: Parameters<typeof typed.refunds.writes>[0] = (command, input) => jour
 
 /** Amounts go in as `Money` JSON: exact text with a currency. */
 const usd = (amount: string) => ({ amount, currency: 'USD' });
+const kwd = (amount: string) => ({ amount, currency: 'KWD' });
 
 function request(
   overrides: {
@@ -135,7 +137,7 @@ afterAll(async () => {
 });
 
 describe('requestRefund', () => {
-  it('stores a pending refund with amounts in the two-decimal form the column holds', async () => {
+  it('stores a pending refund with amounts in minor units of its currency', async () => {
     const refundId = createRefundId();
 
     const result = await journal.run(
@@ -145,13 +147,13 @@ describe('requestRefund', () => {
       meta,
     );
 
-    expect(result.events.map(event => event.type)).toEqual(['RefundRequested']);
+    expect(result.events.map(event => event.type)).toEqual(['RefundRequestedV2']);
     const row = await rowOf(refundId);
     expect(row).toMatchObject({
       id: refundId,
       paymentId,
-      originalAmount: '100.00',
-      refundAmount: '25.50',
+      originalAmountMinor: 10_000,
+      refundAmountMinor: 2550,
       currency: 'USD',
       reason: 'customer_request',
       status: 'pending',
@@ -215,7 +217,7 @@ describe('requestRefund', () => {
     );
   });
 
-  it("stores a JPY refund in yen with the column's two decimals, never divided by 100", async () => {
+  it('stores a JPY refund in yen, never multiplied or divided by 100', async () => {
     const refundId = createRefundId();
 
     await journal.run(
@@ -232,10 +234,63 @@ describe('requestRefund', () => {
     );
 
     expect(await rowOf(refundId)).toMatchObject({
-      originalAmount: '5000.00',
-      refundAmount: '1500.00',
+      originalAmountMinor: 5000,
+      refundAmountMinor: 1500,
       currency: 'JPY',
     });
+  });
+
+  it('stores a KWD refund to the fils: three decimals, which a two-decimal column used to cut', async () => {
+    const refundId = createRefundId();
+
+    await journal.run(
+      db,
+      commands.requestRefund,
+      { refundId, ...request({ originalAmount: kwd('10.000'), refundAmount: kwd('1.234') }) },
+      meta,
+    );
+
+    expect(await rowOf(refundId)).toMatchObject({ originalAmountMinor: 10_000, refundAmountMinor: 1234 });
+    expect(await journal.verify(db, entities.refund, refundId)).toEqual({ ok: true });
+  });
+});
+
+/**
+ * Refunds recorded before minor units have a `RefundRequested` event with
+ * float amounts, reduced then to a `decimal(10,2)` column. Replay runs today's
+ * reducers, so the old event must still decode and land on what the column
+ * migration wrote: the two-decimal value, in minor units of the currency.
+ */
+describe('a refund recorded before minor units (`RefundRequested`)', () => {
+  it.each([
+    [100, 25.5, 'USD', 10_000, 2550],
+    [5000, 1500, 'JPY', 5000, 1500],
+    // The column kept two decimals, so 1.234 KWD had become 1.23
+    [10, 1.234, 'KWD', 10_000, 1230],
+  ])('%d / %d %s replays to %d / %d minor units', async (original, refunded, currency, originalMinor, refundMinor) => {
+    const refundId = createRefundId();
+    const old = typed.refunds.events.RefundRequested({
+      paymentId,
+      originalAmount: original,
+      refundAmount: refunded,
+      currency,
+      reason: 'customer_request',
+      customerNote: null,
+      internalNotes: null,
+      requestedBy: userId,
+      metadata: null,
+    });
+
+    // The typed journal writes inside the app's own transaction
+    await db.transaction(tx => journal.write(tx, entities.refund, refundId, { meta, events: () => [old] }));
+
+    expect(await rowOf(refundId)).toMatchObject({
+      originalAmountMinor: originalMinor,
+      refundAmountMinor: refundMinor,
+      currency,
+      status: 'pending',
+    });
+    expect(await journal.verify(db, entities.refund, refundId)).toEqual({ ok: true });
   });
 });
 
@@ -396,7 +451,7 @@ describe('writes(run): what RefundService calls', () => {
     const refundId = createRefundId();
 
     const requested = await writes.requestRefund({ refundId, ...request() });
-    expect(requested).toMatchObject({ id: refundId, status: 'pending', refundAmount: '25.50' });
+    expect(requested).toMatchObject({ id: refundId, status: 'pending', refundAmountMinor: 2550 });
     expect(requested).not.toHaveProperty('version');
 
     expect(await writes.approveRefund({ refundId, approvedBy: adminId })).toMatchObject({ status: 'approved' });
@@ -407,7 +462,7 @@ describe('writes(run): what RefundService calls', () => {
     });
 
     expect(await eventTypesOf(db, 'refund', refundId)).toEqual([
-      'RefundRequested',
+      'RefundRequestedV2',
       'RefundApproved',
       'RefundProcessed',
       'RefundCompleted',
@@ -424,9 +479,9 @@ describe('writes(run): what RefundService calls', () => {
       { status: 'rejected' },
     );
     expect(await writes.failRefund({ refundId: failed, errorMessage: 'boom' })).toMatchObject({ status: 'failed' });
-    expect(await eventTypesOf(db, 'refund', rejected)).toEqual(['RefundRequested', 'RefundRejected']);
+    expect(await eventTypesOf(db, 'refund', rejected)).toEqual(['RefundRequestedV2', 'RefundRejected']);
     expect(await eventTypesOf(db, 'refund', failed)).toEqual([
-      'RefundRequested',
+      'RefundRequestedV2',
       'RefundApproved',
       'RefundProcessed',
       'RefundFailed',

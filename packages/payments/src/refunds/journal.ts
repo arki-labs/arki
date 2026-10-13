@@ -13,21 +13,27 @@
  *
  * Event data is plain JSON. Times come from `e.recordedAt`. Commands take
  * amounts as `Money` JSON (`{ amount: '25.50', currency: 'EUR' }`) and check
- * them exactly. Events keep amounts as numbers, the format already stored;
- * the `decimal(10,2)` columns hold strings, so reducers return
- * `amount.toFixed(2)`.
+ * them exactly. `RefundRequestedV2` keeps them in that form; the row holds
+ * whole minor units (`*_amount_minor`) beside `currency`.
+ *
+ * `RefundRequested` is the event written while the amounts were
+ * `decimal(10,2)` columns: JS numbers of major units. No command writes it any
+ * more; it stays declared so stored refunds still replay. Its reducer rebuilds
+ * what the column migration wrote: the two-decimal text the column held,
+ * rounded half-even to the currency's minor units.
  */
 
 import type { CommandRunner, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import { userIdSchema } from '@arki/auth/ids';
 import { z } from '@arki/contracts';
 import { CommandError } from '@arki/journal';
+import { Money } from '@arki/money';
 import { anyMoneySchema } from '@arki/money/zod';
 
 import type { RefundsTables } from './tables';
 import type { Refund } from './types';
 import { writtenRow } from '../core/journal/support';
-import { toStoredNumber } from '../core/money';
+import { fromStoredNumber, moneyJsonSchema, toMinorColumn } from '../core/money';
 import { paymentIdSchema } from '../core/primitives';
 import { createRefundId, refundIdSchema, refundReasonValues } from './primitives';
 
@@ -97,23 +103,32 @@ function requireRefund(row: RefundRow | null, refundId: string): RefundRow {
   return row;
 }
 
+/** What a `decimal(10,2)` column held for a legacy amount, in minor units of `currency`. */
+function legacyMinor(amount: number, currency: string): number {
+  return toMinorColumn(fromStoredNumber(Number(amount.toFixed(2)), currency));
+}
+
 export function createRefundsJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
   j: JournalDefinitions<Meta, Tx, AppDb>,
   tables: Pick<RefundsTables, 'refunds'>,
 ) {
+  const refundRequest = {
+    paymentId: paymentIdSchema,
+    reason: reasonSchema,
+    customerNote: z.string().nullable(),
+    internalNotes: z.string().nullable(),
+    requestedBy: userIdSchema,
+    metadata: z.string().nullable(),
+  };
+  /** Before minor units: a refund was asked for, its amounts JS numbers of major units. Replay only. */
   const RefundRequested = j.event(
     'RefundRequested',
-    z.object({
-      paymentId: paymentIdSchema,
-      originalAmount: z.number(),
-      refundAmount: z.number(),
-      currency: z.string(),
-      reason: reasonSchema,
-      customerNote: z.string().nullable(),
-      internalNotes: z.string().nullable(),
-      requestedBy: userIdSchema,
-      metadata: z.string().nullable(),
-    }),
+    z.object({ ...refundRequest, originalAmount: z.number(), refundAmount: z.number(), currency: z.string() }),
+  );
+  /** A refund was asked for. It is `pending`. Both amounts are exact `Money` JSON in the refund's currency. */
+  const RefundRequestedV2 = j.event(
+    'RefundRequestedV2',
+    z.object({ ...refundRequest, originalAmount: moneyJsonSchema, refundAmount: moneyJsonSchema }),
   );
   const RefundApproved = j.event('RefundApproved', z.object({ approvedBy: userIdSchema }));
   const RefundRejected = j.event('RefundRejected', z.object({ rejectedBy: userIdSchema, rejectionReason: z.string() }));
@@ -125,31 +140,57 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
   );
   const RefundFailed = j.event('RefundFailed', z.object({ errorMessage: z.string() }));
 
+  type RequestData = Pick<z.output<typeof RefundRequestedV2.schema>, keyof typeof refundRequest>;
+  const requested = (
+    data: RequestData,
+    originalAmountMinor: number,
+    refundAmountMinor: number,
+    currency: string,
+    at: Date,
+  ) => ({
+    paymentId: data.paymentId,
+    originalAmountMinor,
+    refundAmountMinor,
+    currency,
+    reason: data.reason,
+    status: 'pending' as const,
+    providerRefundId: null,
+    providerResponse: null,
+    requestedBy: data.requestedBy,
+    approvedBy: null,
+    rejectedBy: null,
+    rejectionReason: null,
+    requestedAt: at,
+    approvedAt: null,
+    processedAt: null,
+    completedAt: null,
+    internalNotes: data.internalNotes,
+    customerNote: data.customerNote,
+    metadata: data.metadata,
+    createdAt: at,
+    updatedAt: at,
+  });
+
   const refund = j
     .entity('refund', tables.refunds)
-    .create(RefundRequested, e => ({
-      paymentId: e.data.paymentId,
-      originalAmount: e.data.originalAmount.toFixed(2),
-      refundAmount: e.data.refundAmount.toFixed(2),
-      currency: e.data.currency,
-      reason: e.data.reason,
-      status: 'pending',
-      providerRefundId: null,
-      providerResponse: null,
-      requestedBy: e.data.requestedBy,
-      approvedBy: null,
-      rejectedBy: null,
-      rejectionReason: null,
-      requestedAt: e.recordedAt,
-      approvedAt: null,
-      processedAt: null,
-      completedAt: null,
-      internalNotes: e.data.internalNotes,
-      customerNote: e.data.customerNote,
-      metadata: e.data.metadata,
-      createdAt: e.recordedAt,
-      updatedAt: e.recordedAt,
-    }))
+    .create(RefundRequested, e =>
+      requested(
+        e.data,
+        legacyMinor(e.data.originalAmount, e.data.currency),
+        legacyMinor(e.data.refundAmount, e.data.currency),
+        e.data.currency,
+        e.recordedAt,
+      ),
+    )
+    .create(RefundRequestedV2, e =>
+      requested(
+        e.data,
+        toMinorColumn(Money.fromJSON(e.data.originalAmount)),
+        toMinorColumn(Money.fromJSON(e.data.refundAmount)),
+        e.data.refundAmount.currency,
+        e.recordedAt,
+      ),
+    )
     .on(RefundApproved, (_row, e) => ({
       status: 'approved',
       approvedBy: e.data.approvedBy,
@@ -204,11 +245,10 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
       }
 
       return [
-        RefundRequested({
+        RefundRequestedV2({
           paymentId: input.paymentId,
-          originalAmount: toStoredNumber(input.originalAmount),
-          refundAmount: toStoredNumber(input.refundAmount),
-          currency: input.refundAmount.currency.code,
+          originalAmount: input.originalAmount.toJSON(),
+          refundAmount: input.refundAmount.toJSON(),
           reason: input.reason,
           customerNote: input.customerNote ?? null,
           internalNotes: input.internalNotes ?? null,
@@ -297,7 +337,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
 
   return {
     entities: { refund },
-    events: { RefundRequested, RefundApproved, RefundRejected, RefundProcessed, RefundCompleted, RefundFailed },
+    events: { RefundRequested, RefundRequestedV2, RefundApproved, RefundRejected, RefundProcessed, RefundCompleted, RefundFailed },
     commands,
     /** `run` is the app's command runner: `context.runCommand` in a request, `ctx.run` inside a command. */
     writes: (run: CommandRunner<z.output<Meta>, Tx>): RefundWrites => ({

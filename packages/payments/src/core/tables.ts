@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, integer, jsonb, type PgColumn, type PgSchema, real, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
+import type { PgColumn, PgSchema } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, integer, jsonb, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
 
 import type { UserId } from '@arki/auth/ids';
 import { createIdFactory } from '@arki/db/id-factory';
@@ -55,7 +56,8 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
       name: varchar('name', { length: 255 }).notNull(),
       description: text('description'),
       tier: planTierEnum('tier').$type<PlanTier>().notNull().default('basic'),
-      price: real('price').notNull(),
+      /** Whole minor units of `currency`: 1999 is 19.99 USD, 1500 is 1500 JPY. Read and write through `core/money.ts`. */
+      priceMinor: bigint('price_minor', { mode: 'number' }).notNull(),
       currency: varchar('currency', { length: 3 }).notNull().default('USD'),
       interval: billingIntervalEnum('interval').$type<BillingInterval>().notNull().default('monthly'),
       intervalCount: integer('interval_count').notNull().default(1),
@@ -66,7 +68,7 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
       createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
       updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     },
-    (_table) => [check('plans_price_positive', sql`"price" >= 0`)],
+    (_table) => [check('plans_price_minor_not_negative', sql`"price_minor" >= 0`)],
   );
 
   const customers = schema.table('customers', {
@@ -116,7 +118,8 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
       userId: userFk.required('user_id', { onDelete: 'cascade' }),
       customerId: customerIdFactory.foreignKey('customer_id', () => customers.id, { onDelete: 'cascade' }),
       providerPaymentId: varchar('provider_payment_id', { length: 255 }).notNull(),
-      amount: real('amount').notNull(),
+      /** Whole minor units of `currency`, like `plans.price_minor`. */
+      amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
       currency: varchar('currency', { length: 3 }).notNull().default('USD'),
       status: paymentStatusEnum('status').$type<PaymentStatus>().notNull().default('pending'),
       paymentMethod: paymentMethodTypeEnum('payment_method').$type<PaymentMethodType>().notNull().default('card'),
@@ -124,7 +127,7 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
       failureReason: text('failure_reason'),
       receiptUrl: text('receipt_url'),
       refunded: boolean('refunded').notNull().default(false),
-      refundedAmount: real('refunded_amount').notNull().default(0),
+      refundedAmountMinor: bigint('refunded_amount_minor', { mode: 'number' }).notNull().default(0),
       metadata: jsonb('metadata').$type<Record<string, unknown>>(),
       createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
       updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -132,9 +135,9 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
       version: integer('version').notNull().default(0),
     },
     (_table) => [
-      check('payments_amount_positive', sql`"amount" >= 0`),
-      check('payments_refunded_amount_positive', sql`"refunded_amount" >= 0`),
-      check('payments_refunded_amount_lte_amount', sql`"refunded_amount" <= "amount"`),
+      check('payments_amount_minor_not_negative', sql`"amount_minor" >= 0`),
+      check('payments_refunded_amount_minor_not_negative', sql`"refunded_amount_minor" >= 0`),
+      check('payments_refunded_amount_minor_lte_amount_minor', sql`"refunded_amount_minor" <= "amount_minor"`),
     ],
   );
 

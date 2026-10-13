@@ -1,4 +1,5 @@
 import type { Refund } from '../../refunds/types';
+import { refundAmountOf } from '../../refunds/repository';
 
 /**
  * Notification Service Interface
@@ -23,7 +24,7 @@ export class EmailNotificationService implements NotificationService {
       to: this.emailConfig.adminEmails,
       subject: `Refund Request Pending Approval - ${refund.id}`,
       refundId: refund.id,
-      amount: refund.refundAmount,
+      amount: refundAmountOf(refund).toString(),
       reason: refund.reason,
       requestedBy: refund.requestedBy,
     });
@@ -51,7 +52,7 @@ export class EmailNotificationService implements NotificationService {
       subject: `Refund ${status.toUpperCase()} - ${refund.id}`,
       status,
       refundId: refund.id,
-      amount: refund.refundAmount,
+      amount: refundAmountOf(refund).toString(),
     });
 
     // Example integration:
@@ -121,7 +122,7 @@ export class SlackNotificationService implements NotificationService {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `*Refund ID:* ${refund.id}\n*Amount:* $${refund.refundAmount}\n*Reason:* ${refund.reason}\n*Customer Note:* ${refund.customerNote || 'None'}`,
+            text: `*Refund ID:* ${refund.id}\n*Amount:* ${refundAmountOf(refund).toString()}\n*Reason:* ${refund.reason}\n*Customer Note:* ${refund.customerNote || 'None'}`,
           },
         },
         {
@@ -172,7 +173,7 @@ export class SlackNotificationService implements NotificationService {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `*Refund ID:* ${refund.id}\n*Amount:* $${refund.refundAmount}\n*Error:* ${error instanceof Error ? error.message : 'Unknown error'}\n*Failed At:* ${new Date().toISOString()}`,
+            text: `*Refund ID:* ${refund.id}\n*Amount:* ${refundAmountOf(refund).toString()}\n*Error:* ${error instanceof Error ? error.message : 'Unknown error'}\n*Failed At:* ${new Date().toISOString()}`,
           },
         },
       ],

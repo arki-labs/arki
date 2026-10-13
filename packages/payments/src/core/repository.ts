@@ -175,14 +175,14 @@ export class PaymentRepository {
   async findPlansByTier(tier: PlanTier): Promise<Plan[]> {
     return this.q.plans.findMany({
       where: { tier, isActive: true },
-      orderBy: (t) => [t.price],
+      orderBy: (t) => [t.priceMinor],
     });
   }
 
   async findActivePlans(): Promise<Plan[]> {
     return this.q.plans.findMany({
       where: { isActive: true },
-      orderBy: (t) => [t.tier, t.price],
+      orderBy: (t) => [t.tier, t.priceMinor],
     });
   }
 

@@ -20,7 +20,8 @@ export function createCoreDerivedSchemas({
 }: Pick<CoreTables, 'plans' | 'customers' | 'subscriptions' | 'payments' | 'webhookEvents'>) {
   const planSelectSchema = createSelectSchema(plans);
   const planInsertSchema = createInsertSchema(plans, {
-    price: z.number().positive().max(999_999.99),
+    // Whole minor units, at most Stripe's 8 digits (99,999,999), as in `core/money.ts`
+    priceMinor: z.number().int().positive().max(99_999_999),
     currency: z.string().length(3).toUpperCase(),
     intervalCount: z.number().positive().max(365),
     features: z.array(z.string()).default([]),
@@ -48,12 +49,12 @@ export function createCoreDerivedSchemas({
 
   const paymentSelectSchema = createSelectSchema(payments).omit({ version: true });
   const paymentInsertSchema = createInsertSchema(payments, {
-    amount: z.number().positive().max(999_999.99),
+    amountMinor: z.number().int().positive().max(99_999_999),
     currency: z.string().length(3).toUpperCase(),
     description: z.string().max(500).optional(),
     failureReason: z.string().max(1000).optional(),
     receiptUrl: z.url().optional(),
-    refundedAmount: z.number().min(0).max(999_999.99).default(0),
+    refundedAmountMinor: z.number().int().min(0).max(99_999_999).default(0),
   }).omit({ version: true });
   const paymentUpdateSchema = paymentInsertSchema.partial().omit({ id: true, userId: true });
 

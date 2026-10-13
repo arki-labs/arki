@@ -1,5 +1,5 @@
 import type { PgColumn, PgSchema } from 'drizzle-orm/pg-core';
-import { decimal, integer, text, timestamp, varchar } from 'drizzle-orm/pg-core';
+import { bigint, integer, text, timestamp, varchar } from 'drizzle-orm/pg-core';
 
 import type { UserId } from '@arki/auth/ids';
 import { createIdFactory } from '@arki/db/id-factory';
@@ -29,8 +29,9 @@ export function createRefundsTables({ schema, paymentIdRef, userIdRef }: CreateR
   const refunds = schema.table('refunds', {
     id: refundIdFactory.primaryColumn(),
     paymentId: paymentFk.required('payment_id'),
-    originalAmount: decimal('original_amount', { precision: 10, scale: 2 }).notNull(),
-    refundAmount: decimal('refund_amount', { precision: 10, scale: 2 }).notNull(),
+    /** Whole minor units of `currency`: 2550 is 25.50 EUR, 1500 is 1500 JPY. Read and write through `core/money.ts`. */
+    originalAmountMinor: bigint('original_amount_minor', { mode: 'number' }).notNull(),
+    refundAmountMinor: bigint('refund_amount_minor', { mode: 'number' }).notNull(),
     currency: varchar('currency', { length: 3 }).default('USD'),
     reason: refundReasonEnum('reason').$type<RefundReason>().notNull(),
     status: refundStatusEnum('status').$type<RefundStatus>().default('pending'),
