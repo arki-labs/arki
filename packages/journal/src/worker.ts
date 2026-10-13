@@ -9,8 +9,9 @@ import type { z } from 'zod';
 import { and, asc, eq, inArray, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
 
 import type { History } from './history.js';
+import type { HookPointInternal } from './hooks.js';
 import type { JournalTables } from './pg.js';
-import type { DbHandle, Effect, JournalWorker, RootDb, StrandedJobs } from './types.js';
+import type { DbHandle, Effect, EffectHookContext, JournalWorker, RootDb, StrandedJobs } from './types.js';
 import { debugDrain, debugWorker } from './debug.js';
 import { findEventDefinition } from './fold.js';
 import { leaseToken } from './id.js';
@@ -41,6 +42,8 @@ type JobRow = JournalTables['jobs']['$inferSelect'];
 /** What `drain` needs from the journal. `Run` is the type of an effect's `ctx.run`. */
 export type DrainDeps<Meta extends z.ZodObject, AppDb extends RootDb, Run> = {
   readonly tables: JournalTables;
+  /** The effect hooks. Frozen by the first drain. */
+  readonly hooks: HookPointInternal<EffectHookContext<z.output<Meta>>>;
   readonly effects: readonly Effect<z.output<Meta>, AppDb, Run>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
   /** Makes an effect's `ctx.run`: the journal's `run`, bound to the root database this drain was given and to the event the job is for. */
@@ -97,7 +100,10 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
         findEventDefinition(effect.entities, eventRow.kind, eventRow.type),
         eventRow.entityId,
       );
-      await effect.run(event, { jobId: job.id, signal, db, run: deps.runOn(db, event) });
+      // Inside the lease: a hook that throws fails the job like a handler failure.
+      await deps.hooks.run({ name: job.effect, event, jobId: job.id, attempt: job.attempts }, () =>
+        effect.run(event, { jobId: job.id, signal, db, run: deps.runOn(db, event) }),
+      );
       await db.delete(jobsTable).where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
       debugDrain('%s %s: done', job.effect, job.id);
     } catch (error) {
@@ -127,6 +133,7 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
     opts?: { readonly batchSize?: number; readonly signal?: AbortSignal },
   ): Promise<number> => {
     assertRootDb(db, 'drain');
+    deps.hooks.freeze();
     const batchSize = opts?.batchSize ?? 20;
     const signal = opts?.signal ?? new AbortController().signal;
     if (known.length === 0) return 0;

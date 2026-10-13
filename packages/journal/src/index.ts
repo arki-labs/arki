@@ -33,6 +33,8 @@ export type {
   EntityTable,
   EventDef,
   EventOptions,
+  CommandHookContext,
+  EffectHookContext,
   EventsOf,
   IdTable,
   KeyColumn,
@@ -59,3 +61,4 @@ export type {
   StrandedJobs,
 } from './types.js';
 export type { JournalTables } from './pg.js';
+export type { Around, HookPoint } from './hooks.js';

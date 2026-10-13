@@ -13,8 +13,10 @@ import type { EntityBuilder } from './entity.js';
 import type { JournalTables } from './pg.js';
 import type {
   AnyEntity,
+  CommandHookContext,
   DbHandle,
   Effect,
+  EffectHookContext,
   EntityTable,
   IdTable,
   KeyName,
@@ -29,6 +31,7 @@ import { JournalError } from './errors.js';
 import { defineEvent } from './event.js';
 import { bindEffect, defineProjection, effectFor } from './handlers.js';
 import { createHistory } from './history.js';
+import { createHookPoint } from './hooks.js';
 import { createDrain, createStrandedJobs, createWorkers } from './worker.js';
 import { createWriter } from './write.js';
 
@@ -148,11 +151,19 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     effects,
     history,
   });
-  const run = createCommandRunner<Meta, Tx>({ metaSchema, writeWithValidatedMeta, wake: () => journal.wake() });
+  const commandHooks = createHookPoint<CommandHookContext<z.output<Meta>>>('command');
+  const effectHooks = createHookPoint<EffectHookContext<z.output<Meta>>>('effect');
+  const run = createCommandRunner<Meta, Tx>({
+    metaSchema,
+    writeWithValidatedMeta,
+    wake: () => journal.wake(),
+    hooks: commandHooks,
+  });
   // The worker's database is also the source of every command an effect runs, so it opens `Tx`.
   type WorkerDb = AppDb & TransactionSource<Tx>;
   const drain = createDrain<Meta, WorkerDb, RootCommandRunner<Meta, Tx>>({
     tables,
+    hooks: effectHooks,
     effects,
     history,
     runOn: (db, cause) => (command, input, meta) => run(db, command, input, meta, undefined, cause),
@@ -174,6 +185,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     worker: (db, opts) => workers.worker(db, opts),
     wake: () => workers.wakeAll(),
     strandedJobs: db => strandedJobs(db),
+    hooks: { command: commandHooks.point, effect: effectHooks.point },
     catalog: {
       entities: [...entitiesByKind.values()].map(entity => ({
         kind: entity.kind,

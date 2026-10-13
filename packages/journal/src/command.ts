@@ -9,7 +9,8 @@ import { is } from 'drizzle-orm';
 import { PgAsyncTransaction } from 'drizzle-orm/pg-core';
 
 import type { Command, CommandContext, RunOptions } from './api.js';
-import type { Trace, TransactionSource } from './types.js';
+import type { HookPointInternal } from './hooks.js';
+import type { CommandHookContext, Trace, TransactionSource } from './types.js';
 import type { Writer } from './write.js';
 import { debugCommand } from './debug.js';
 import { commandId, correlationId } from './id.js';
@@ -22,13 +23,15 @@ export type CommandDeps<Meta extends z.ZodObject, Tx extends TransactionSource<T
   readonly writeWithValidatedMeta: Writer<Meta, Tx>['writeWithValidatedMeta'];
   /** Wakes this journal's workers. Called after a root-database run that queued a job. */
   readonly wake: () => void;
+  /** The command hooks. Frozen by the first run. */
+  readonly hooks: HookPointInternal<CommandHookContext<z.output<Meta>>>;
 };
 
 export function createCommandRunner<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>>(
   deps: CommandDeps<Meta, Tx>,
 ) {
   type MetaOut = z.output<Meta>;
-  const { metaSchema, writeWithValidatedMeta } = deps;
+  const { metaSchema, writeWithValidatedMeta, hooks } = deps;
 
   /**
    * `journal.run` and `context.run` share this. `getValidatedMeta` gives the parsed meta:
@@ -47,6 +50,7 @@ export function createCommandRunner<Meta extends z.ZodObject, Tx extends Transac
     parent: Omit<Trace, 'commandId'>,
   ): Promise<Awaited<R>> =>
     oneAtATime(source, `command "${command.name}"`, async (): Promise<Awaited<R>> => {
+      hooks.freeze();
       const meta = await getValidatedMeta();
       const parsed = await command.input.parseAsync(input);
       const own = commandId();
@@ -78,7 +82,11 @@ export function createCommandRunner<Meta extends z.ZodObject, Tx extends Transac
         };
         let result: Awaited<R>;
         try {
-          result = await command.handler(parsed, context);
+          // Inside the transaction: a hook that throws rolls the command back cleanly.
+          result = await hooks.run(
+            { name: command.name, input: parsed, meta, commandId: own, correlationId: trace.correlationId },
+            () => Promise.resolve(command.handler(parsed, context)),
+          );
         } catch (error) {
           // The handler's own error is the one to report; the rollback undoes the rest.
           await Promise.allSettled(started);

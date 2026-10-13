@@ -12,18 +12,19 @@ Exports: `@arki/journal` (portable core), `@arki/journal/pg` (table definitions)
 
 **Agents: start at [`llms.txt`](llms.txt).** Then open the part of the [agent guide](docs/agent-guide.md) that fits the task:
 
-| Task                                                                            | Read                                                                                                                       |
-| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Understand the model and the three objects (`j`, the entity builder, `journal`) | [The model](docs/agent-guide.md#the-model), [Three objects](docs/agent-guide.md#three-objects)                             |
-| Set the journal up in an app                                                    | [Setup](docs/agent-guide.md#setup)                                                                                         |
-| Add an event and react to it in the same transaction                            | [Add an event](docs/agent-guide.md#add-an-event-and-react-in-the-same-transaction)                                         |
-| Add an entity, with create and delete                                           | [Add an entity](docs/agent-guide.md#add-an-entity-with-create-and-delete)                                                  |
-| Add an effect that runs after commit                                            | [Add an effect](docs/agent-guide.md#add-an-effect-that-runs-after-commit)                                                  |
-| Add a command and run it from a request or a job                                | [Add a command](docs/agent-guide.md#add-a-command-and-run-it)                                                              |
-| Find out why a write failed                                                     | [Find out why](docs/agent-guide.md#find-out-why-a-write-failed), [Errors](docs/agent-guide.md#errors)                      |
-| Check or repair a row, rebuild a read model                                     | [Recovery verbs](docs/agent-guide.md#recovery-verbs)                                                                       |
-| Wire it in a Dot app, or ship journal pieces from a package                     | [Dot](docs/agent-guide.md#dot), [Shared packages](docs/agent-guide.md#shared-packages)                                     |
-| Change code inside this package                                                 | [Rules that bite](docs/agent-guide.md#rules-that-bite), [Do not clean these up](docs/agent-guide.md#do-not-clean-these-up) |
+| Task                                                                                          | Read                                                                                                                       |
+| --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Understand the model and the three objects (`j`, the entity builder, `journal`)               | [The model](docs/agent-guide.md#the-model), [Three objects](docs/agent-guide.md#three-objects)                             |
+| Set the journal up in an app                                                                  | [Setup](docs/agent-guide.md#setup)                                                                                         |
+| Add an event and react to it in the same transaction                                          | [Add an event](docs/agent-guide.md#add-an-event-and-react-in-the-same-transaction)                                         |
+| Add an entity, with create and delete                                                         | [Add an entity](docs/agent-guide.md#add-an-entity-with-create-and-delete)                                                  |
+| Add an effect that runs after commit                                                          | [Add an effect](docs/agent-guide.md#add-an-effect-that-runs-after-commit)                                                  |
+| Add a command and run it from a request or a job                                              | [Add a command](docs/agent-guide.md#add-a-command-and-run-it)                                                              |
+| Find out why a write failed                                                                   | [Find out why](docs/agent-guide.md#find-out-why-a-write-failed), [Errors](docs/agent-guide.md#errors)                      |
+| Check or repair a row, rebuild a read model                                                   | [Recovery verbs](docs/agent-guide.md#recovery-verbs)                                                                       |
+| Wire it in a Dot app, or ship journal pieces from a package                                   | [Dot](docs/agent-guide.md#dot), [Shared packages](docs/agent-guide.md#shared-packages)                                     |
+| Watch or stop every command or effect run from a plugin (tracing, logging, a circuit breaker) | [Hooks](#hooks): `journal.hooks.command.around`, `journal.hooks.effect.around`                                             |
+| Change code inside this package                                                               | [Rules that bite](docs/agent-guide.md#rules-that-bite), [Do not clean these up](docs/agent-guide.md#do-not-clean-these-up) |
 
 ## Example
 
@@ -344,6 +345,35 @@ await db.transaction(async tx => {
 });
 journal.wake(); // after the commit
 ```
+
+## Hooks
+
+The one way to watch or stop a run from outside is a hook: a wrapper that receives the context and `next`. Register at boot, before any work.
+
+```ts
+journal.hooks.command.around(async (ctx, next) => {
+  // ctx: { name, input, meta, commandId, correlationId }, frozen
+  const span = tracer.startSpan(`command ${ctx.name}`, { attributes: { 'journal.correlation_id': ctx.correlationId } });
+  try {
+    await next();
+  } finally {
+    span.end();
+  }
+});
+journal.hooks.effect.around(async (ctx, next) => {
+  // ctx: { name, event, jobId, attempt }, frozen
+  log.debug('effect %s attempt %d for %s', ctx.name, ctx.attempt, ctx.event.id);
+  await next();
+});
+```
+
+The rules, all enforced:
+
+- Call `next` exactly once. A second call throws. Returning without calling it throws: throw before `next` to stop the run instead.
+- A rejection of `next` is the hook's rejection too. A hook that catches it and returns still fails, with the original error: a rolled-back command cannot look like a success to the caller.
+- The context is frozen, and the result is the handler's own. A hook cannot change the input or the result.
+- Hooks run in registration order, the first one outermost. Command hooks run inside the transaction, around the handler, so a throw rolls the command back cleanly; a child run is wrapped again, with its own `commandId` and the same `correlationId`. Effect hooks run inside the lease, around the handler, so a throw fails the job like a handler failure: it is retried with backoff and recorded on the job row.
+- Registration is frozen once the journal has run a command, a drain or a worker. A later `around` throws `BAD_DEFINITION`. In a Dot app, a plugin that needs the journal attaches in `boot`, which runs before the worker starts.
 
 ## Dot
 

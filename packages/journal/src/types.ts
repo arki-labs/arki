@@ -326,5 +326,22 @@ export type EntityInfo = { readonly kind: string; readonly table: string; readon
 /** `wake()` runs a drain pass now instead of at the next poll. It does nothing unless the worker is running. */
 export type JournalWorker = { start(): Promise<void>; stop(): Promise<void>; wake(): void };
 
+/** What a command hook sees. Frozen. `input` is the parsed input; a hook may read it, not change it. */
+export type CommandHookContext<MetaOut = unknown> = {
+  readonly name: string;
+  readonly input: unknown;
+  readonly meta: MetaOut;
+  readonly commandId: string;
+  readonly correlationId: string;
+};
+
+/** What an effect hook sees. Frozen. `attempt` counts from 1. */
+export type EffectHookContext<Meta = unknown> = {
+  readonly name: string;
+  readonly event: Recorded<string, unknown, Meta>;
+  readonly jobId: string;
+  readonly attempt: number;
+};
+
 /** Pending jobs for one effect name that the journal has no effect for. */
 export type StrandedJobs = { readonly effect: string; readonly jobs: number };

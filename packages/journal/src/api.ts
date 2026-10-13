@@ -6,13 +6,16 @@
 import type { z } from 'zod';
 
 import type { EntityBuilder } from './entity.js';
+import type { HookPoint } from './hooks.js';
 import type { JournalTables } from './pg.js';
 import type {
   AnyEntity,
   AnyEventDef,
+  CommandHookContext,
   DbHandle,
   Effect,
   EffectHandlers,
+  EffectHookContext,
   EntityDef,
   EntityId,
   EntityInfo,
@@ -254,6 +257,19 @@ export type Journal<
    * the count is zero, or delete those job rows on purpose.
    */
   strandedJobs(db: DbHandle): Promise<readonly StrandedJobs[]>;
+  /**
+   * The one way to extend a run from outside: a wrapper that receives the context and
+   * `next`. Command hooks run inside the transaction, around the handler; effect hooks run
+   * inside the lease, around the handler. Rules: call `next` exactly once, or throw before
+   * it to stop; a rejection of `next` is the hook's rejection too; the context is frozen
+   * and the result cannot be changed; hooks run in registration order, the first outermost.
+   * Register at boot: once the journal has run a command, a drain or a worker, `around`
+   * throws `BAD_DEFINITION`.
+   */
+  readonly hooks: {
+    readonly command: HookPoint<CommandHookContext<z.output<Meta>>>;
+    readonly effect: HookPoint<EffectHookContext<z.output<Meta>>>;
+  };
   readonly catalog: {
     /**
      * Only the entities that a projection or an effect of this journal names. An

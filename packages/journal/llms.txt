@@ -20,7 +20,7 @@
 - [Wire it in a Dot app](docs/agent-guide.md#dot), or [ship journal pieces from a shared package](docs/agent-guide.md#shared-packages)
 
 ## Files
-- Public surface: `src/index.ts` (the exports), `src/api.ts` (every public signature), `src/types.ts` (row, event, handler and database types), `src/errors.ts` (the twelve codes and their messages, and `CommandError`).
+- Public surface: `src/index.ts` (the exports), `src/api.ts` (every public signature), `src/types.ts` (row, event, handler and database types), `src/errors.ts` (the twelve codes and their messages, and `CommandError`), `src/hooks.ts` (around-hooks on command and effect runs).
 - Definitions: `src/journal.ts` (`initJournal`, `j`, `j.compose`), `src/entity.ts` (entity builder, reducers, key checks), `src/event.ts` (`j.event`), `src/handlers.ts` (`j.projection`, `j.effect`, `need`, and `bindEffect`, which gives an effect its services).
 - Write path: `src/command.ts` (`journal.run`), `src/journal.ts` (`journal.bind`),`src/write.ts` (the write steps), `src/fold.ts` (apply events to a row), `src/storage.ts` (load and save the row, id and value checks), `src/transaction-guard.ts` (one operation per transaction).
 - After commit and repair: `src/worker.ts` (`drain`, the worker loop, `wake`, `strandedJobs`), `src/history.ts` (`replay`, `verify`, `repair`, `rerun`).
