@@ -36,7 +36,8 @@ M=/Users/afurculita/Developer/workspace/.release/arki-mirror
 cd "$M"
 test "$(git rev-parse --show-toplevel)" = "$PWD" || { echo "not the mirror checkout — STOP"; exit 1; }
 git fetch origin --tags
-git checkout -B main origin/main
+git checkout -f -B main origin/main   # -f: leftovers from an aborted sync would block a plain checkout;
+                                      # the clone is disposable and step 4 rebuilds every file
 
 # 4. Replace the files with the fresh export (removes files that left the tree)
 rsync -a --delete --exclude .git ../arki-public/ ./
