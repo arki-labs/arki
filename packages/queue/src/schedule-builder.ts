@@ -48,6 +48,7 @@
 import type { z } from '@arki/contracts';
 
 import { debugBuilder } from './debug.ts';
+import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
 import type {
   ScheduleBuilderChain,
   ScheduleBuilderDef,
@@ -206,6 +207,8 @@ export function createScheduleBuilder<TContext, TContextOut, TMeta extends Queue
     name(name: string) {
       debugBuilder('Setting schedule name: %s', name);
 
+      // One runtime object serves both typestates: the ScheduleBuilderNeedsInput
+      // type hides `.handler()` until `.input()` runs; the throw below backs it up.
       return createScheduleBuilderChain<TContext, TContextOut, TMeta, never, never>({
         ...state,
         name,
@@ -238,11 +241,19 @@ function createScheduleBuilderChain<TContext, TContextOut, TMeta extends QueueMe
       ) => Promise<THandlerOutput extends never ? TOutput : THandlerOutput>,
     ): ScheduleDefinition {
       if (!state.name) {
-        throw new Error('Schedule name is required. Call .name() first.');
+        throw new QueueDefinitionError({
+          code: QUEUE_DEFINITION_ERROR_CODES.missingName,
+          message: 'Schedule name is required. Call .name() first.',
+          remediation: 'Call .name("feature:task") on the schedule before .handler().',
+        });
       }
 
       if (!state.inputSchema) {
-        throw new Error('Input schema is required. Call .input() before .handler().');
+        throw new QueueDefinitionError({
+          code: QUEUE_DEFINITION_ERROR_CODES.missingInput,
+          message: 'Input schema is required. Call .input() before .handler().',
+          remediation: 'Add .input(schema) before .handler(); use z.object({}) for a schedule that takes no data.',
+        });
       }
 
       debugBuilder(

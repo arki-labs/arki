@@ -1,5 +1,6 @@
 {
   "extends": "@arki/tsconfig/internal-package.json",
   "include": ["src"],
+  "files": ["src/builder-guards.spec.ts"],
   "exclude": ["node_modules", "**/*.spec.ts", "**/*.test.ts"]
 }

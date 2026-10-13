@@ -39,6 +39,19 @@
  * @module cron-patterns
  */
 
+import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
+
+/**
+ * Build the coded error for an out-of-range cron helper argument
+ */
+function invalidCronValue(message: string): QueueDefinitionError {
+  return new QueueDefinitionError({
+    code: QUEUE_DEFINITION_ERROR_CODES.invalidCronValue,
+    message,
+    remediation: 'Pass a value inside the range named in the message (time strings use 24-hour HH:mm).',
+  });
+}
+
 /**
  * Day of week mapping
  */
@@ -67,11 +80,11 @@ function parseTime(time: string): { hours: string; minutes: string } {
   const m = Number.parseInt(minutes);
 
   if (Number.isNaN(h) || h < 0 || h > 23) {
-    throw new Error(`Invalid hours: ${hours}. Must be 0-23`);
+    throw invalidCronValue(`Invalid hours: ${hours}. Must be 0-23`);
   }
 
   if (Number.isNaN(m) || m < 0 || m > 59) {
-    throw new Error(`Invalid minutes: ${minutes}. Must be 0-59`);
+    throw invalidCronValue(`Invalid minutes: ${minutes}. Must be 0-59`);
   }
 
   return { hours, minutes };
@@ -88,7 +101,7 @@ export const CronPatterns = {
    */
   everySeconds: (n: number): string => {
     if (n <= 0 || n > 59) {
-      throw new Error('Seconds must be between 1 and 59');
+      throw invalidCronValue('Seconds must be between 1 and 59');
     }
     return `*/${n} * * * * *`;
   },
@@ -100,7 +113,7 @@ export const CronPatterns = {
    */
   everyMinutes: (n: number): string => {
     if (n <= 0 || n > 59) {
-      throw new Error('Minutes must be between 1 and 59');
+      throw invalidCronValue('Minutes must be between 1 and 59');
     }
     return `*/${n} * * * *`;
   },
@@ -112,7 +125,7 @@ export const CronPatterns = {
    */
   everyHours: (n: number): string => {
     if (n <= 0 || n > 23) {
-      throw new Error('Hours must be between 1 and 23');
+      throw invalidCronValue('Hours must be between 1 and 23');
     }
     return `0 0-23/${n} * * *`;
   },
@@ -123,7 +136,7 @@ export const CronPatterns = {
    */
   everyDays: (n: number, time: string): string => {
     if (n <= 0 || n > 31) {
-      throw new Error('Days must be between 1 and 31');
+      throw invalidCronValue('Days must be between 1 and 31');
     }
     const { hours, minutes } = parseTime(time);
     return `${minutes} ${hours} */${n} * *`;
@@ -178,7 +191,7 @@ export const CronPatterns = {
    */
   monthly: (day: number, time: string): string => {
     if (day < 1 || day > 31) {
-      throw new Error('Day of month must be between 1 and 31');
+      throw invalidCronValue('Day of month must be between 1 and 31');
     }
     const { hours, minutes } = parseTime(time);
     return `${minutes} ${hours} ${day} * *`;

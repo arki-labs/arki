@@ -107,6 +107,7 @@ export type {
   FlowDefinition,
   JobBuilderChain,
   JobBuilderDef,
+  JobBuilderNeedsInput,
   JobContext,
   JobDefinition,
   JobHandler,
@@ -123,6 +124,9 @@ export type {
 
 // Constants
 export { QUEUE_PRIORITIES } from './types/index.ts';
+
+// Coded errors for declaration mistakes
+export { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
 
 // Cron pattern helpers
 export { CronPatterns } from './cron-patterns.ts';

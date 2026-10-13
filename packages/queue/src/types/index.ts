@@ -5,16 +5,19 @@
 // Builder types
 export type {
   FlowBuilderFactory,
+  FlowBuilderNeedsStep,
   FlowBuilderStart,
   FlowBuilderWithInput,
   FlowDefinition,
   JobBuilderChain,
   JobBuilderDef,
+  JobBuilderNeedsInput,
   QueueBuilder,
   QueueInstance,
   ScheduleBuilderChain,
   ScheduleBuilderDef,
   ScheduleBuilderFactory,
+  ScheduleBuilderNeedsInput,
   ScheduleDefinition,
   ScheduleJobWrapper,
 } from './builder.ts';

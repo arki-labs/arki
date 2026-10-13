@@ -6,6 +6,7 @@
 import type { z } from '@arki/contracts';
 
 import { debugBuilder } from './debug.ts';
+import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
 import type { JobBuilderChain, JobBuilderDef } from './types/builder.ts';
 import type { JobDefinition, JobHandler, JobOptions } from './types/job.ts';
 import type { JobMiddleware } from './types/middleware.ts';
@@ -47,6 +48,8 @@ export function createJobBuilder<TContext, TContextOut, TMeta extends QueueMeta>
     name(name: string) {
       debugBuilder('Setting job name: %s', name);
 
+      // One runtime object serves both typestates: the JobBuilderNeedsInput
+      // type hides `.handler()` until `.input()` runs; the throw below backs it up.
       return createJobBuilderChain<TContext, TContextOut, TMeta, never, never>({
         config: params.config,
         middlewares: params.middlewares,
@@ -99,11 +102,19 @@ function createJobBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, T
       TContextOut
     > {
       if (!state.name) {
-        throw new Error('Job name is required. Call .name() first.');
+        throw new QueueDefinitionError({
+          code: QUEUE_DEFINITION_ERROR_CODES.missingName,
+          message: 'Job name is required. Call .name() first.',
+          remediation: 'Start the job with q.job.name("feature:action") before .handler().',
+        });
       }
 
       if (!state.inputSchema) {
-        throw new Error('Input schema is required. Call .input() before .handler().');
+        throw new QueueDefinitionError({
+          code: QUEUE_DEFINITION_ERROR_CODES.missingInput,
+          message: 'Input schema is required. Call .input() before .handler().',
+          remediation: 'Add .input(schema) before .handler(); use z.object({}) for a job that takes no data.',
+        });
       }
 
       debugBuilder(

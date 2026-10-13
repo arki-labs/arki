@@ -30,7 +30,8 @@
 import type { z } from '@arki/contracts';
 
 import { debugBuilder } from './debug.ts';
-import type { FlowBuilderStart, FlowBuilderWithInput, FlowDefinition } from './types/builder.ts';
+import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
+import type { FlowBuilderNeedsStep, FlowBuilderStart, FlowBuilderWithInput, FlowDefinition } from './types/builder.ts';
 import type { JobDefinition } from './types/job.ts';
 import type { JobMiddleware } from './types/middleware.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
@@ -107,10 +108,13 @@ function validateFlowDependencies(steps: readonly FlowStepInternal[]): void {
     for (const dependency of step.dependsOn) {
       if (!stepIds.has(dependency)) {
         debugBuilder('[%s] Invalid dependency detected: %s', step.id, dependency);
-        throw new Error(
-          `Step "${step.id}" depends on "${dependency}", but no step with that ID exists. ` +
+        throw new QueueDefinitionError({
+          code: QUEUE_DEFINITION_ERROR_CODES.unknownStepDependency,
+          message:
+            `Step "${step.id}" depends on "${dependency}", but no step with that ID exists. ` +
             `Available step IDs: ${[...stepIds].join(', ')}`,
-        );
+          remediation: 'Fix the id in dependsOn, or add the missing .step() to the flow.',
+        });
       }
     }
   }
@@ -158,7 +162,11 @@ function detectCircularDependencies(steps: readonly FlowStepInternal[]): void {
 
   for (const step of steps) {
     if (!visited.has(step.id) && hasCycle(step.id)) {
-      throw new Error(`Circular dependency detected in flow steps starting from step "${step.id}"`);
+      throw new QueueDefinitionError({
+        code: QUEUE_DEFINITION_ERROR_CODES.circularStepDependency,
+        message: `Circular dependency detected in flow steps starting from step "${step.id}"`,
+        remediation: 'Remove one dependsOn entry so the steps form a chain with no loop.',
+      });
     }
   }
 
@@ -176,9 +184,11 @@ export function createFlowBuilder<TContext, TMeta extends QueueMeta>(
   debugBuilder('[%s] Creating flow builder', name);
 
   return {
-    input<TInput>(schema: z.ZodType<TInput>): FlowBuilderWithInput<TContext, TMeta, TInput> {
+    input<TInput>(schema: z.ZodType<TInput>): FlowBuilderNeedsStep<TContext, TMeta, TInput> {
       debugBuilder('[%s] Setting input schema for flow', name);
 
+      // One runtime object serves both typestates: the FlowBuilderNeedsStep
+      // type hides `.build()` until the first `.step()`; the throw below backs it up.
       return createFlowBuilderWithInput<TContext, TMeta, TInput>({
         config,
         name,
@@ -242,11 +252,19 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
 
     build(): FlowDefinition {
       if (!state.inputSchema) {
-        throw new Error('Input schema is required. Call .input() first.');
+        throw new QueueDefinitionError({
+          code: QUEUE_DEFINITION_ERROR_CODES.missingInput,
+          message: 'Input schema is required. Call .input() first.',
+          remediation: 'Add .input(schema) right after q.flow.name(...).',
+        });
       }
 
       if (state.steps.length === 0) {
-        throw new Error('At least one step is required. Call .step() before .build().');
+        throw new QueueDefinitionError({
+          code: QUEUE_DEFINITION_ERROR_CODES.missingSteps,
+          message: 'At least one step is required. Call .step() before .build().',
+          remediation: 'Add at least one .step(id, { job, data }) before .build().',
+        });
       }
 
       debugBuilder(

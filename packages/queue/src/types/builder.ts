@@ -84,11 +84,31 @@ export type JobBuilderDef<TContext, TContextOut, TMeta extends QueueMeta> = {
   /**
    * Set the job name (starts the chainable builder)
    */
-  name(name: string): JobBuilderChain<TContext, TContextOut, TMeta, never, never>;
+  name(name: string): JobBuilderNeedsInput<TContext, TContextOut, TMeta>;
 };
 
 /**
- * Job builder chain - after name is set
+ * Job builder after name is set, before input is set.
+ * Has no `.handler()`: calling it here is a compile error ("Call .input() first").
+ *
+ * @template TContext - The base context type provided by createContext
+ * @template TContextOut - The current output context type (after middleware chain)
+ * @template TMeta - Metadata type for the queue
+ */
+export type JobBuilderNeedsInput<TContext, TContextOut, TMeta extends QueueMeta> = {
+  /**
+   * Set input schema (unlocks `.handler()`)
+   */
+  input<TNewInput>(schema: z.ZodType<TNewInput>): JobBuilderChain<TContext, TContextOut, TMeta, TNewInput, never>;
+
+  /**
+   * Set job options
+   */
+  options(options: JobOptions): JobBuilderNeedsInput<TContext, TContextOut, TMeta>;
+};
+
+/**
+ * Job builder chain - after name and input are set
  *
  * @template TContext - The base context type provided by createContext
  * @template TContextOut - The current output context type (after middleware chain)
@@ -285,7 +305,20 @@ export type ScheduleBuilderDef<TContext, TContextOut, TMeta extends QueueMeta> =
   /**
    * Set name for inline handler
    */
-  name(name: string): ScheduleBuilderChain<TContext, TContextOut, TMeta, never, never>;
+  name(name: string): ScheduleBuilderNeedsInput<TContext, TContextOut, TMeta>;
+};
+
+/**
+ * Schedule builder after name is set, before input is set.
+ * Has no `.handler()`: calling it here is a compile error ("Call .input() first").
+ */
+export type ScheduleBuilderNeedsInput<TContext, TContextOut, TMeta extends QueueMeta> = {
+  /**
+   * Set input schema (unlocks `.handler()`)
+   */
+  input<TNewInput>(
+    schema: z.ZodType<TNewInput>,
+  ): ScheduleBuilderChain<TContext, TContextOut, TMeta, TNewInput, never>;
 };
 
 /**
@@ -299,7 +332,7 @@ export type ScheduleJobWrapper<TInput> = {
 };
 
 /**
- * Schedule builder chain - after name is set
+ * Schedule builder chain - after name and input are set
  */
 export type ScheduleBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, TInput, TOutput> = {
   /**
@@ -345,11 +378,36 @@ export type FlowBuilderStart<TContext, TMeta extends QueueMeta> = {
   /**
    * Set input schema
    */
-  input<TInput>(schema: z.ZodType<TInput>): FlowBuilderWithInput<TContext, TMeta, TInput>;
+  input<TInput>(schema: z.ZodType<TInput>): FlowBuilderNeedsStep<TContext, TMeta, TInput>;
 };
 
 /**
- * Flow builder with input - can add middleware and steps
+ * Flow builder after input is set, before the first step.
+ * Has no `.build()`: building a flow with no steps is a compile error.
+ */
+export type FlowBuilderNeedsStep<TContext, TMeta extends QueueMeta, TInput> = {
+  /**
+   * Add middleware to all steps
+   */
+  use(middleware: JobMiddleware<unknown, unknown, TMeta>): FlowBuilderNeedsStep<TContext, TMeta, TInput>;
+
+  /**
+   * Add the first step to the flow (unlocks `.build()`)
+   */
+  step<const TId extends string>(
+    id: TId,
+    config: {
+      job: JobDefinition<unknown, unknown, unknown>;
+      data: (input: TInput) => unknown;
+      queueName?: string;
+      opts?: unknown;
+      dependsOn?: readonly string[];
+    },
+  ): FlowBuilderWithInput<TContext, TMeta, TInput>;
+};
+
+/**
+ * Flow builder with input and at least one step - can add middleware, steps, and build
  */
 export type FlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput> = {
   /**

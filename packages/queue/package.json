@@ -1,6 +1,6 @@
 {
   "name": "@arki/queue",
-  "version": "2.0.2",
+  "version": "0.1.0",
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -36,9 +36,9 @@
   },
   "types": "./dist/src/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "dev": "tsc",
+    "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "lint": "eslint .",
     "test": "vitest run",
