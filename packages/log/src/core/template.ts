@@ -54,7 +54,6 @@ export function parseTemplate(template: string): ParsedTemplate {
   const parsed = parse(template);
   if (cache.size >= MAX_CACHED_TEMPLATES) {
     const oldest = cache.keys().next();
-    // eslint-disable-next-line drizzle/enforce-delete-with-where -- Map#delete, not a Drizzle query
     if (oldest.done !== true) cache.delete(oldest.value);
   }
   cache.set(template, parsed);

@@ -35,7 +35,6 @@ function walkError(error: Error, depth: number, seen: Set<object>): Fields {
   if (cause !== undefined) out.cause = toValue(cause, depth + 1, seen);
   const errors = ownData(error, 'errors');
   if (Array.isArray(errors)) out.errors = toValue(errors, depth + 1, seen);
-  // eslint-disable-next-line drizzle/enforce-delete-with-where -- Set#delete, not a Drizzle query
   seen.delete(error);
   return out;
 }
@@ -80,7 +79,6 @@ export function toValue(value: unknown, depth: number, seen: Set<object>): Value
     }
     out = object;
   }
-  // eslint-disable-next-line drizzle/enforce-delete-with-where -- Set#delete, not a Drizzle query
   seen.delete(value);
   return out;
 }

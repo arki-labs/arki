@@ -130,7 +130,6 @@ export function deduplicate(
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const close = (key: string, window: Window, now: number): void => {
-    // eslint-disable-next-line drizzle/enforce-delete-with-where -- Map#delete, not a Drizzle query
     windows.delete(key);
     if (window.suppressed === 0) return;
     deliver(
