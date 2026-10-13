@@ -539,9 +539,9 @@ describe.skipIf(!jstat)('differential vs jstat', () => {
       for (const x of [0.3, 1, 3, 8])
         expect(Math.abs(fisherF(d1, d2).cdf(x) - jstat.centralF.cdf(x, d1, d2))).toBeLessThan(tol);
       for (const p of ps)
-        expect(Math.abs(fisherF(d1, d2).quantile(p) / (jstat.centralF.inv?.(p, d1, d2) ?? Number.NaN) - 1)).toBeLessThan(
-          tol,
-        );
+        expect(
+          Math.abs(fisherF(d1, d2).quantile(p) / (jstat.centralF.inv?.(p, d1, d2) ?? Number.NaN) - 1),
+        ).toBeLessThan(tol);
     }
   });
 
@@ -555,5 +555,36 @@ describe.skipIf(!jstat)('differential vs jstat', () => {
       for (const x of [-2, 0.5, 2, 4])
         expect(Math.abs(noncentralT(df, ncp).cdf(x) - jstat.noncentralt.cdf(x, df, ncp))).toBeLessThan(tol);
     }
+  });
+});
+
+describe('erf and erfc across the approximation ranges', () => {
+  // Reference values (20-digit tables), rounded to the nearest double.
+  const erfcTable: readonly (readonly [number, number])[] = [
+    [0.1, 0.887_537_083_981_715],
+    [1, 0.157_299_207_050_285_13],
+    [2, 0.004_677_734_981_047_266],
+    [4, 1.541_725_790_028_002e-8],
+    [5, 1.537_459_794_428_034_7e-12],
+    [10, 2.088_487_583_762_544_6e-45],
+    [20, 5.395_865_611_607_901e-176],
+  ];
+
+  it('erfc is accurate to about 1e-15 relative, far tail included', () => {
+    for (const [x, expected] of erfcTable) {
+      expect(Math.abs(erfc(x) / expected - 1)).toBeLessThan(2e-15);
+      expect(Math.abs(erfc(-x) - (2 - expected))).toBeLessThan(4e-16);
+    }
+    expect(erfc(27)).toBe(0);
+  });
+
+  it('erf is odd and continuous where the approximation switches range', () => {
+    for (const edge of [0.468_75, 4]) {
+      const below = erf(edge - 1e-12);
+      const above = erf(edge + 1e-12);
+      expect(Math.abs(above - below)).toBeLessThan(1e-11);
+      expect(erf(-edge)).toBe(-erf(edge));
+    }
+    expect(erf(1e-20)).toBeCloseTo(1.128_379_167_095_512_7e-20, 34);
   });
 });

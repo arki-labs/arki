@@ -128,7 +128,7 @@ export default defineSuite({
     '`@arki/math` Decimal keeps the scale it was given (`1.50` stays `1.50`); the other libraries drop trailing zeros. Results are compared after dropping trailing zeros.',
     'Rational and fraction.js are exact and reduce to lowest terms; results are compared as `numerator/denominator`.',
     'Statistics run on five data sets of 1,000 numbers (a sine wave, values near 1e9, negatives, a constant, random cents) and are compared to 12 significant digits, because compensated and plain summation can differ in the last bits.',
-    'Statistics in `@arki/math` check that every element is a finite number, never modify the input, use compensated summation, and sort a full copy for percentiles. simple-statistics also uses compensated summation and copies for quantiles, but selects the percentile with quickselect instead of sorting; jstat sorts like `@arki/math`.',
+    'Statistics in `@arki/math` check that every element is a finite number, never modify the input, use compensated summation, and select percentiles with quickselect on a checked copy (falling back to a sort when selection stalls). simple-statistics also uses compensated summation and quickselect on a copy; jstat sorts a full copy.',
     'Distribution values are compared to 9 significant digits, with values below 1e-12 counted as 0.',
   ],
   groups: [

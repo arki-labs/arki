@@ -8,7 +8,23 @@ export type DecimalParts = {
   scale: number;
 };
 
-const DECIMAL_SYNTAX = /^([+-]?)(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i;
+const EXPONENT_SYNTAX = /^[+-]?\d+$/;
+
+/** Digits a JS number holds exactly (every 15-digit integer is below 2^53). */
+const EXACT_NUMBER_DIGITS = 15;
+
+function isDigit(code: number | undefined): boolean {
+  return code !== undefined && code >= 48 && code <= 57;
+}
+
+/** The value of the ASCII digit at `index` (the caller has checked it is one). */
+function digitAt(input: string, index: number): number {
+  return (input.codePointAt(index) ?? 48) - 48;
+}
+
+function notADecimal(input: string): NumberFormatError {
+  return new NumberFormatError(`"${input}" is not a decimal number`);
+}
 
 /**
  * Strict ASCII decimal syntax: optional sign, digits, optional fraction,
@@ -16,22 +32,53 @@ const DECIMAL_SYNTAX = /^([+-]?)(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i;
  * `Infinity` or `NaN` — those belong to `@arki/math/parse`.
  */
 export function parseDecimalString(input: string): DecimalParts {
-  const match = DECIMAL_SYNTAX.exec(input);
-  const integerDigits = match?.[2] ?? '';
-  const fractionDigits = match?.[3] ?? '';
-  if (!match || (integerDigits === '' && fractionDigits === '')) {
-    throw new NumberFormatError(`"${input}" is not a decimal number`);
+  // One scan over the characters: [sign] digits [. digits] [e|E [sign] digits].
+  const length = input.length;
+  let index = 0;
+  const first = input.codePointAt(0);
+  if (first === 43 /* + */ || first === 45 /* - */) index = 1;
+  const integerStart = index;
+  while (index < length && isDigit(input.codePointAt(index))) index++;
+  const integerEnd = index;
+  let fractionStart = index;
+  let fractionEnd = index;
+  if (index < length && input.codePointAt(index) === 46 /* . */) {
+    fractionStart = ++index;
+    while (index < length && isDigit(input.codePointAt(index))) index++;
+    fractionEnd = index;
   }
-  const exponentText = match[4];
-  if (exponentText !== undefined) assertScaleLimit(Number(exponentText), 'Exponent');
-  const exponent = exponentText === undefined ? 0 : Number(exponentText);
+  const integerDigits = integerEnd - integerStart;
+  const fractionDigits = fractionEnd - fractionStart;
+  let exponent = 0;
+  if (index < length) {
+    const marker = input.codePointAt(index);
+    const exponentText = input.slice(index + 1);
+    const isExponentMarker = marker === 101 /* e */ || marker === 69; /* E */
+    if (!isExponentMarker || !EXPONENT_SYNTAX.test(exponentText)) {
+      throw notADecimal(input);
+    }
+    if (integerDigits + fractionDigits === 0) throw notADecimal(input);
+    exponent = Number(exponentText);
+    assertScaleLimit(exponent, 'Exponent');
+  } else if (integerDigits + fractionDigits === 0) {
+    throw notADecimal(input);
+  }
   // A positive exponent beyond the fraction digits pads the coefficient with zeros; count those too.
-  const paddedDigits = Math.max(0, exponent - fractionDigits.length);
-  assertDigitLimit(integerDigits.length + fractionDigits.length + paddedDigits, `"${input.slice(0, 20)}…"`);
+  const paddedDigits = Math.max(0, exponent - fractionDigits);
+  assertDigitLimit(integerDigits + fractionDigits + paddedDigits, `"${input.slice(0, 20)}…"`);
 
-  let coefficient = BigInt(integerDigits + fractionDigits || '0');
-  if (match[1] === '-') coefficient = -coefficient;
-  let scale = fractionDigits.length - exponent;
+  let coefficient: bigint;
+  if (integerDigits + fractionDigits <= EXACT_NUMBER_DIGITS) {
+    // Short coefficients are built exactly as a number: much cheaper than BigInt(text).
+    let digits = 0;
+    for (let i = integerStart; i < integerEnd; i++) digits = digits * 10 + digitAt(input, i);
+    for (let i = fractionStart; i < fractionEnd; i++) digits = digits * 10 + digitAt(input, i);
+    coefficient = BigInt(digits);
+  } else {
+    coefficient = BigInt(input.slice(integerStart, integerEnd) + input.slice(fractionStart, fractionEnd));
+  }
+  if (first === 45) coefficient = -coefficient;
+  let scale = fractionDigits - exponent;
   if (scale < 0) {
     coefficient *= pow10(-scale);
     scale = 0;

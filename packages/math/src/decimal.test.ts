@@ -323,3 +323,77 @@ describe('differential vs decimal.js', () => {
     }
   });
 });
+
+describe('string parsing matches the documented syntax', () => {
+  // The grammar the hand-written scanner implements: [sign] digits [. digits] [e|E [sign] digits].
+  const SYNTAX = /^([+-]?)(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i;
+
+  /** Reference parse straight from the grammar, with BigInt on the digit text. */
+  function reference(text: string): { coefficient: bigint; scale: number } | undefined {
+    const match = SYNTAX.exec(text);
+    const digits = (match?.[2] ?? '') + (match?.[3] ?? '');
+    if (!match || digits === '') return undefined;
+    const exponent = Number(match[4] ?? 0);
+    let coefficient = BigInt(digits);
+    if (match[1] === '-') coefficient = -coefficient;
+    let scale = (match[3] ?? '').length - exponent;
+    if (scale < 0) {
+      coefficient *= 10n ** BigInt(-scale);
+      scale = 0;
+    }
+    return { coefficient, scale };
+  }
+
+  const inputs = [
+    '0',
+    '-0',
+    '+0',
+    '007.50',
+    '1.',
+    '.5',
+    '-.5',
+    '+1.25',
+    '123456789012345',
+    '1234567890123456',
+    '999999999999999.9',
+    '-98765.4321',
+    '0.000000000000000000001',
+    '123456789012345678901234567890.123456789',
+    '1e3',
+    '1E3',
+    '1.5e-3',
+    '-2.5E+2',
+    '1e0',
+    '1e-0',
+    '0.0e5',
+    '12.34e1',
+    '',
+    '-',
+    '+',
+    '.',
+    'e5',
+    '.e5',
+    '1e',
+    '1e+',
+    '1.2.3',
+    '1,5',
+    ' 1',
+    '1 ',
+    'abc',
+    '0x10',
+    'Infinity',
+    'NaN',
+    '1e5.5',
+    '--1',
+  ];
+
+  it.each(inputs)('%j', text => {
+    const expected = reference(text);
+    if (expected === undefined) {
+      expect(() => decimal(text)).toThrow(NumberFormatError);
+      return;
+    }
+    const value = decimal(text);
+    expect({ coefficient: value.coefficient, scale: value.scale }).toEqual(expected);
+  });
+});

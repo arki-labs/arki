@@ -291,7 +291,7 @@ describe('VarianceOptions (deprecated alias)', () => {
   });
 });
 
-const ds = (...values: string[]) => values.map((v) => decimal(v));
+const ds = (...values: string[]) => values.map(v => decimal(v));
 
 function* oneShotDecimals(): Generator<Decimal> {
   yield decimal('0.1');
@@ -408,5 +408,91 @@ describe('Decimal overloads', () => {
   });
   it('accepts any iterable of Decimals', () => {
     expect(mean(new Set(ds('1', '2', '3'))).toString()).toBe('2');
+  });
+});
+
+describe('fast paths give the same answers as the plain definitions', () => {
+  /** Deterministic data with many duplicates, negatives and zeros. */
+  function sample(length: number, seed: number): number[] {
+    let state = seed;
+    return Array.from({ length }, () => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return Math.round((state / 2_147_483_648 - 0.5) * 20) / 2;
+    });
+  }
+
+  /** R-7 percentile from a full sort: the definition the quickselect path must match. */
+  function sortedPercentile(values: readonly number[], p: number): number {
+    const sorted = values.toSorted((a, b) => a - b);
+    const rank = (sorted.length - 1) * (p / 100);
+    const lower = Math.floor(rank);
+    const fraction = rank - lower;
+    const low = sorted[lower]!;
+    const result = fraction === 0 ? low : low + (sorted[lower + 1]! - low) * fraction;
+    return result === 0 ? 0 : result;
+  }
+
+  it('percentile selects the same ranks as a full sort, duplicates and all', () => {
+    for (let length = 1; length <= 60; length++) {
+      const data = sample(length, length * 7919);
+      for (const p of [0, 1, 10, 25, 50, 73.5, 90, 99, 100]) {
+        expect(percentile(data, p)).toBe(sortedPercentile(data, p));
+      }
+    }
+    const constant = Array.from({ length: 1000 }, () => 42.5);
+    expect(percentile(constant, 90)).toBe(42.5);
+    const ascending = Array.from({ length: 1000 }, (_, index) => index);
+    expect(percentile(ascending, 90)).toBe(sortedPercentile(ascending, 90));
+    expect(percentile(ascending.toReversed(), 90)).toBe(sortedPercentile(ascending, 90));
+  });
+
+  it('percentile reports the first bad element, wherever it is', () => {
+    expect(() => percentile([1, 2, Number.NaN, 'x' as unknown as number], 50)).toThrow('values[2] must be finite');
+    expect(() => percentile([1, 'x' as unknown as number, Number.NaN], 50)).toThrow('values[1] must be a number');
+  });
+
+  it('mean and sum agree on odd and even lengths and stay compensated', () => {
+    expect(sum([1e100, 1, -1e100, 1])).toBe(2);
+    expect(sum([1, 1e100, 1, -1e100, 1])).toBe(3);
+    expect(mean([0.1, 0.2, 0.3])).toBeCloseTo(0.2, 15);
+    // Sequential Neumaier summation: the paired fast path must be as accurate, on odd and even lengths.
+    const neumaier = (values: readonly number[]): number => {
+      let total = 0;
+      let compensation = 0;
+      for (const value of values) {
+        const next = total + value;
+        compensation += Math.abs(total) >= Math.abs(value) ? total - next + value : value - next + total;
+        total = next;
+      }
+      return total + compensation;
+    };
+    for (let length = 1; length <= 40; length++) {
+      const data = sample(length, length * 31).map((value, index) => value * 10 ** (index % 7) + 0.1);
+      const expected = neumaier(data);
+      expect(Math.abs(sum(data) - expected)).toBeLessThanOrEqual(Number.EPSILON * Math.abs(expected));
+      expect(Math.abs(mean(data) - expected / length)).toBeLessThanOrEqual(
+        Number.EPSILON * Math.abs(expected / length),
+      );
+    }
+  });
+
+  it('mean, sum and variance name a non-number before an earlier non-finite value', () => {
+    expect(() => mean([Number.NaN, decimal(1)] as unknown as number[])).toThrow(/mixed number and Decimal/);
+    expect(() => sum([Number.POSITIVE_INFINITY, 'x' as unknown as number])).toThrow('values[1] must be a number');
+    expect(() => variance([1, 2, Number.NEGATIVE_INFINITY])).toThrow('values[2] must be finite');
+    expect(() => mean([1, Number.NaN, 3])).toThrow('values[1] must be finite');
+  });
+
+  it('mean and sum still handle sums that overflow', () => {
+    expect(mean([1.5e308, 1.5e308, -1e308])).toBeCloseTo(6.666_666_666_666_667e307, -293);
+    expect(() => sum([1.5e308, 1.5e308])).toThrow(NumericRangeError);
+  });
+
+  it('variance matches the textbook formula on shifted data', () => {
+    const data = sample(1001, 3).map(value => 1e9 + value);
+    const average = data.reduce((total, value) => total + (value - 1e9), 0) / data.length;
+    const expected = data.reduce((total, value) => total + (value - 1e9 - average) ** 2, 0) / data.length;
+    expect(variance(data, { ddof: 0 })).toBeCloseTo(expected, 9);
+    expect(stddev(data, { ddof: 0 })).toBeCloseTo(Math.sqrt(expected), 9);
   });
 });

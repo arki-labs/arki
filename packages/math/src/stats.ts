@@ -53,7 +53,10 @@ function materialize(values: Iterable<number | Decimal>): readonly (number | Dec
  * sequence for a single pass. Nothing is copied; a one-shot iterable (a
  * generator) is resumed rather than restarted.
  */
-function peek(values: Iterable<number | Decimal>): { first: number | Decimal | undefined; all: Iterable<number | Decimal> } {
+function peek(values: Iterable<number | Decimal>): {
+  first: number | Decimal | undefined;
+  all: Iterable<number | Decimal>;
+} {
   if (Array.isArray(values)) return { first: values[0], all: values };
   const iterator = values[Symbol.iterator]();
   const head = iterator.next();
@@ -75,9 +78,7 @@ function ddofOf(options: VarianceOptions): 0 | 1 {
 /** The number path's entry: rejects any `Decimal` element, then validates as before. */
 function numbersFrom(items: readonly (number | Decimal)[], name: string): readonly number[] {
   if (items.every((item): item is number => typeof item === 'number')) return toNumbers(items, name);
-  const index = items.findIndex((item) => typeof item !== 'number');
-  if (isDecimal(items[index])) throw mixedInputs();
-  throw new TypeError(`${name}[${index}] must be a number`);
+  throw invalidElement(items, name);
 }
 
 function decimalsFrom(items: readonly (number | Decimal)[]): readonly Decimal[] {
@@ -91,7 +92,9 @@ function decimalsFrom(items: readonly (number | Decimal)[]): readonly Decimal[] 
 
 function scaleOptionsOf(options: Partial<ScaleOptions> | undefined): ScaleOptions | undefined {
   if (options?.scale === undefined) return undefined;
-  return options.rounding === undefined ? { scale: options.scale } : { scale: options.scale, rounding: options.rounding };
+  return options.rounding === undefined
+    ? { scale: options.scale }
+    : { scale: options.scale, rounding: options.rounding };
 }
 
 function noNegativeZero(value: number): number {
@@ -114,10 +117,79 @@ function toNumbers(values: Iterable<number>, name: string): readonly number[] {
   return out;
 }
 
-function sumOf(values: readonly number[]): number {
+/**
+ * The error the number path throws for the first bad element of `items`:
+ * a non-number (a mixed-in `Decimal`, or anything else) is reported before a
+ * non-finite number, wherever each sits.
+ */
+function invalidElement(items: readonly unknown[], name: string): Error {
+  const index = items.findIndex(item => typeof item !== 'number');
+  if (index !== -1) return isDecimal(items[index]) ? mixedInputs() : elementError(items[index], `${name}[${index}]`);
+  const bad = items.findIndex(item => !Number.isFinite(item));
+  return elementError(items[bad], `${name}[${bad}]`);
+}
+
+/** The error `assertFinite` throws for an element that is not a finite number. */
+function elementError(value: unknown, at: string): Error {
+  return typeof value === 'number'
+    ? new InvalidArgumentError(`${at} must be finite, got ${value}`)
+    : new TypeError(`${at} must be a number`);
+}
+
+/**
+ * Compensated sum of number elements, or a non-finite value when an element
+ * is not finite or the sum overflows (a non-finite element makes the running
+ * total non-finite for good, so no per-element check is needed). Two
+ * interleaved streams each keep the exact error of every addition (Knuth's
+ * TwoSum) and are merged exactly at the end: as accurate as one Neumaier
+ * pass, with two independent dependency chains instead of one.
+ */
+function pairedSum(items: readonly unknown[], name: string): number {
+  let total0 = 0;
+  let error0 = 0;
+  let total1 = 0;
+  let error1 = 0;
+  const length = items.length;
+  let i = 0;
+  for (; i + 1 < length; i += 2) {
+    const a = items[i];
+    const b = items[i + 1];
+    if (typeof a !== 'number' || typeof b !== 'number') throw invalidElement(items, name);
+    const next0 = total0 + a;
+    const part0 = next0 - total0;
+    error0 += total0 - (next0 - part0) + (a - part0);
+    total0 = next0;
+    const next1 = total1 + b;
+    const part1 = next1 - total1;
+    error1 += total1 - (next1 - part1) + (b - part1);
+    total1 = next1;
+  }
+  if (i < length) {
+    const a = items[i];
+    if (typeof a !== 'number') throw invalidElement(items, name);
+    const next0 = total0 + a;
+    const part0 = next0 - total0;
+    error0 += total0 - (next0 - part0) + (a - part0);
+    total0 = next0;
+  }
+  const total = total0 + total1;
+  const part = total - total0;
+  return total + (error0 + error1 + (total0 - (total - part)) + (total1 - part));
+}
+
+/**
+ * Compensated sum of the elements, each checked to be a finite number
+ * (`invalidElement` decides the error). The fast paired pass covers every
+ * finite sum; otherwise one sequential Neumaier pass checks each element and
+ * returns the overflowed total for the caller to handle.
+ */
+function checkedSum(items: readonly unknown[], name: string): number {
+  const fast = pairedSum(items, name);
+  if (Number.isFinite(fast)) return fast;
   let total = 0;
   let compensation = 0;
-  for (const value of values) {
+  for (const value of items) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) throw invalidElement(items, name);
     const next = total + value;
     compensation += Math.abs(total) >= Math.abs(value) ? total - next + value : value - next + total;
     total = next;
@@ -135,13 +207,14 @@ function assertRepresentable(value: number, what: string): number {
  * when the sum itself overflows, the sum of the values each divided by the
  * count (the mean of finite numbers is always finite).
  */
-function meanOf(values: readonly number[]): number {
+function meanOf(values: readonly unknown[], name = 'values'): number {
   const n = values.length;
-  const total = sumOf(values);
+  const total = checkedSum(values, name);
   if (Number.isFinite(total)) return total / n;
   let scaled = 0;
   let compensation = 0;
   for (const value of values) {
+    if (typeof value !== 'number') continue; // unreachable: checkedSum validated every element
     const part = value / n;
     const next = scaled + part;
     compensation += Math.abs(scaled) >= Math.abs(part) ? scaled - next + part : part - next + scaled;
@@ -158,6 +231,46 @@ function interpolate(low: number, high: number, fraction: number): number {
 
 function sortedCopy(values: readonly number[]): number[] {
   return [...values].sort((a, b) => a - b);
+}
+
+/**
+ * Reorders `data` so `data[k]` holds the value a full sort would put there,
+ * with nothing larger before it and nothing smaller after it. Quickselect
+ * with a Hoare partition around a median-of-three pivot, so runs of equal
+ * values split evenly; a range that keeps resisting partitioning is sorted
+ * outright, which bounds the worst case at O(n log n).
+ */
+function selectInPlace(data: Float64Array, k: number): void {
+  let left = 0;
+  let right = data.length - 1;
+  let budget = 2 * Math.ceil(Math.log2(data.length + 1)) + 4;
+  while (left < right) {
+    if (budget-- === 0) {
+      data.subarray(left, right + 1).sort();
+      return;
+    }
+    const a = data[left]!;
+    const b = data[(left + right) >>> 1]!;
+    const c = data[right]!;
+    const pivot = Math.max(Math.min(a, b), Math.min(Math.max(a, b), c)); // median of three
+    let i = left;
+    let j = right;
+    while (i <= j) {
+      while (data[i]! < pivot) i++;
+      while (data[j]! > pivot) j--;
+      if (i <= j) {
+        const swap = data[i]!;
+        data[i] = data[j]!;
+        data[j] = swap;
+        i++;
+        j--;
+      }
+    }
+    // Now data[left..j] <= pivot <= data[i..right], and everything between equals the pivot.
+    if (k <= j) right = j;
+    else if (k >= i) left = i;
+    else return;
+  }
 }
 
 function pairs(x: Iterable<number>, y: Iterable<number>): { xs: readonly number[]; ys: readonly number[] } {
@@ -288,36 +401,82 @@ function decimalStddev(values: readonly Decimal[], ddof: 0 | 1, target: ScaleOpt
   return Decimal.fromParts({ coefficient, scale: target.scale });
 }
 
-/** Welford's one-pass variance of validated numbers. */
-function numberVariance(data: readonly number[], ddof: 0 | 1): number {
-  if (data.length <= ddof) {
-    throw new EmptyDataError(`variance needs more than ${ddof} value(s), got ${data.length}`);
+/**
+ * Mean for the variance's first pass, validating every element: a plain
+ * paired sum, because the corrected second pass cancels the mean's rounding
+ * error to first order. A sum that is not finite (a bad element, or an
+ * overflow) goes through `meanOf`, which reports or handles it.
+ */
+function centerOf(items: readonly unknown[]): number {
+  let total0 = 0;
+  let total1 = 0;
+  const length = items.length;
+  let i = 0;
+  for (; i + 1 < length; i += 2) {
+    const a = items[i];
+    const b = items[i + 1];
+    if (typeof a !== 'number' || typeof b !== 'number') throw invalidElement(items, 'values');
+    total0 += a;
+    total1 += b;
   }
-  let count = 0;
-  let runningMean = 0;
-  let m2 = 0;
-  for (const value of data) {
-    count++;
-    const delta = value - runningMean;
-    runningMean += delta / count;
-    m2 += delta * (value - runningMean);
+  if (i < length) {
+    const a = items[i];
+    if (typeof a !== 'number') throw invalidElement(items, 'values');
+    total0 += a;
   }
-  return noNegativeZero(assertRepresentable(m2 / (count - ddof), 'variance'));
+  const total = total0 + total1;
+  return Number.isFinite(total) ? total / length : meanOf(items);
+}
+
+/**
+ * Two-pass variance of the number path's elements, validating them first: the
+ * mean, then the sum of squared deviations less the rounding correction
+ * (sum of deviations)² / n (the corrected two-pass algorithm of Chan, Golub
+ * and LeVeque, more accurate than a one-pass update).
+ */
+function numberVariance(items: readonly unknown[], ddof: 0 | 1): number {
+  const n = items.length;
+  const mean = centerOf(items);
+  if (n <= ddof) throw new EmptyDataError(`variance needs more than ${ddof} value(s), got ${n}`);
+  // Two accumulators per sum, so consecutive additions do not wait on each other.
+  let squares0 = 0;
+  let squares1 = 0;
+  let deviations0 = 0;
+  let deviations1 = 0;
+  let i = 0;
+  for (; i + 1 < n; i += 2) {
+    const a = items[i];
+    const b = items[i + 1];
+    if (typeof a !== 'number' || typeof b !== 'number') continue; // unreachable: centerOf validated every element
+    const da = a - mean;
+    const db = b - mean;
+    squares0 += da * da;
+    squares1 += db * db;
+    deviations0 += da;
+    deviations1 += db;
+  }
+  const last = items[i];
+  if (i < n && typeof last === 'number') {
+    const deviation = last - mean;
+    squares0 += deviation * deviation;
+    deviations0 += deviation;
+  }
+  const deviations = deviations0 + deviations1;
+  const m2 = Math.max(0, squares0 + squares1 - (deviations * deviations) / n);
+  return noNegativeZero(assertRepresentable(m2 / (n - ddof), 'variance'));
 }
 
 function decimalVariance(values: readonly Decimal[], ddof: number, options: ScaleOptions | undefined): Decimal {
   const n = values.length;
   if (n <= ddof) throw new EmptyDataError(`variance needs more than ${ddof} value(s), got ${n}`);
   const total = Decimal.sum(values);
-  const squares = Decimal.sum(values.map((value) => value.times(value)));
+  const squares = Decimal.sum(values.map(value => value.times(value)));
   const numerator = squares.times(n).minus(total.times(total));
   try {
     return numerator.dividedBy(n * (n - ddof), options);
   } catch (error) {
     if (error instanceof RoundingNecessaryError && options === undefined) {
-      throw new RoundingNecessaryError(
-        'variance does not terminate in decimal; pass { scale, rounding } to round it',
-      );
+      throw new RoundingNecessaryError('variance does not terminate in decimal; pass { scale, rounding } to round it');
     }
     throw error;
   }
@@ -331,7 +490,7 @@ function decimalVariance(values: readonly Decimal[], ddof: number, options: Scal
 export function sum(values: Iterable<number>): number {
   const items = materialize(values);
   if (isDecimal(items[0])) throw new TypeError('sum takes numbers; use Decimal.sum for Decimal values');
-  return noNegativeZero(assertRepresentable(sumOf(numbersFrom(items, 'values')), 'sum'));
+  return noNegativeZero(assertRepresentable(checkedSum(items, 'values'), 'sum'));
 }
 
 /** Arithmetic mean (compensated sum divided by the count). Throws `EmptyDataError` when empty. */
@@ -348,7 +507,7 @@ export function mean(values: NumericValues, options?: ScaleOptions): number | De
     const { total, count } = decimalTotal(all);
     return total.dividedBy(count, options);
   }
-  const data = numbersFrom(materialize(all), 'values');
+  const data = materialize(all);
   if (data.length === 0) throw new EmptyDataError('mean of an empty data set');
   return noNegativeZero(meanOf(data));
 }
@@ -410,19 +569,30 @@ export function quantile(values: Iterable<number>, q: number): number {
 }
 
 function quantileOf(values: Iterable<number>, q: number, label: string): number {
-  const sorted = sortedCopy(toNumbers(values, 'values'));
-  const n = sorted.length;
+  const items: readonly unknown[] = Array.isArray(values) ? values : [...values];
+  const n = items.length;
+  // Validate into an unboxed copy, then select the two ranks needed instead of sorting everything.
+  const data = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const value = items[i];
+    if (typeof value !== 'number' || !Number.isFinite(value)) throw elementError(value, `values[${i}]`);
+    data[i] = value;
+  }
   if (n === 0) throw new EmptyDataError(`${label} of an empty data set`);
   const rank = (n - 1) * q;
   const lower = Math.floor(rank);
   const fraction = rank - lower;
-  const low = sorted[lower]!;
+  selectInPlace(data, lower);
+  const low = data[lower]!;
   if (fraction === 0) return noNegativeZero(low);
-  return noNegativeZero(interpolate(low, sorted[lower + 1]!, fraction));
+  // Everything after `lower` is at least `low`; the next rank is the smallest of those.
+  let high = data[lower + 1]!;
+  for (let i = lower + 2; i < n; i++) if (data[i]! < high) high = data[i]!;
+  return noNegativeZero(interpolate(low, high, fraction));
 }
 
 /**
- * Variance by Welford's one-pass algorithm. Sample (`ddof: 1`, divide by n - 1)
+ * Variance by the corrected two-pass algorithm. Sample (`ddof: 1`, divide by n - 1)
  * by default; `ddof: 0` gives the population variance (divide by n).
  * Throws `EmptyDataError` unless there are more than `ddof` values.
  */
@@ -435,11 +605,14 @@ export function variance(values: Iterable<number>, options?: VarianceOptions): n
  * `{ scale, rounding }`.
  */
 export function variance(values: Iterable<Decimal>, options?: VarianceOptions & Partial<ScaleOptions>): Decimal;
-export function variance(values: NumericValues, options: VarianceOptions & Partial<ScaleOptions> = {}): number | Decimal {
+export function variance(
+  values: NumericValues,
+  options: VarianceOptions & Partial<ScaleOptions> = {},
+): number | Decimal {
   const ddof = ddofOf(options);
   const items = materialize(values);
   if (isDecimal(items[0])) return decimalVariance(decimalsFrom(items), ddof, scaleOptionsOf(options));
-  return numberVariance(numbersFrom(items, 'values'), ddof);
+  return numberVariance(items, ddof);
 }
 
 /** Square root of `variance`, with the same `ddof` convention (sample by default). */
@@ -459,7 +632,7 @@ export function stddev(values: NumericValues, options: VarianceOptions & Partial
     if (target === undefined) throw new InvalidArgumentError('stddev of Decimal values needs { scale, rounding }');
     return decimalStddev(decimalsFrom(items), ddof, target);
   }
-  return noNegativeZero(Math.sqrt(numberVariance(numbersFrom(items, 'values'), ddof)));
+  return noNegativeZero(Math.sqrt(numberVariance(items, ddof)));
 }
 
 /** Smallest and largest value in a single pass. Throws `EmptyDataError` when empty. */
