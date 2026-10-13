@@ -13,6 +13,7 @@ import type {
   Recorded,
   Services,
 } from './types.js';
+import { JournalError } from './errors.js';
 import { assertStoredName } from './id.js';
 
 /** An entity has a `kind`; an array of entities does not. */
@@ -65,7 +66,10 @@ function defineEffect<E extends AnyEntity<Meta>, Meta, AppDb, Run, N extends Nee
   assertStoredName('effect name', name);
   for (const key of Object.keys(needs)) {
     if (builtInContext.has(key))
-      throw new Error(
+      throw new JournalError(
+        'BAD_DEFINITION',
+        'effect',
+        name,
         `journal: effect "${name}" has a need named "${key}", but the handler context already has "jobId", "signal", "db" and "run"; give the need another name`,
       );
   }
@@ -129,7 +133,10 @@ export function bindEffect<Meta, AppDb, Run>(
   for (const key of Object.keys(effect.needs)) {
     // Without this check the effect would start, and every job would fail on `undefined`.
     if (!Object.hasOwn(services, key) || services[key] === undefined)
-      throw new Error(
+      throw new JournalError(
+        'BAD_DEFINITION',
+        'effect',
+        effect.name,
         `journal: effect "${effect.name}" needs "${key}", but no service with that name was given; pass it as j.compose({ services: { ${key} } }), or in a Dot app add it to the \`needs\` of the feature that lists this effect`,
       );
     given[key] = services[key];

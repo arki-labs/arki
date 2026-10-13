@@ -1,5 +1,7 @@
 import { createId } from '@paralleldrive/cuid2';
 
+import { JournalError } from './errors.js';
+
 /**
  * Same shape as `createPrefixedId` in `@arki/db/id`. That module is not
  * imported because its value export pulls `drizzle-orm/pg-core` and
@@ -25,16 +27,26 @@ const NAME_KINDS = {
 export function assertStoredName(what: keyof typeof NAME_KINDS, name: string): void {
   const limit = NAME_KINDS[what];
   const shown = JSON.stringify(name);
-  if (name === '') throw new Error(`journal: ${what} must not be empty`);
+  if (name === '') throw new JournalError('BAD_DEFINITION', what, shown, `journal: ${what} must not be empty`);
   let length = 0;
   for (const ch of name) {
     const point = ch.codePointAt(0);
     if (point !== undefined && point >= 55_296 && point <= 57_343) {
-      throw new Error(`journal: ${what} ${shown} has an unpaired surrogate; the database would store it as U+FFFD`);
+      throw new JournalError(
+        'BAD_DEFINITION',
+        what,
+        shown,
+        `journal: ${what} ${shown} has an unpaired surrogate; the database would store it as U+FFFD`,
+      );
     }
     length++;
   }
   if (length > limit) {
-    throw new Error(`journal: ${what} ${shown} is ${length} characters; the limit is ${limit}`);
+    throw new JournalError(
+      'BAD_DEFINITION',
+      what,
+      shown,
+      `journal: ${what} ${shown} is ${length} characters; the limit is ${limit}`,
+    );
   }
 }

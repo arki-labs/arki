@@ -8,11 +8,13 @@ import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import type { JournalError } from './errors.js';
 import type { OrderId } from './test-support.js';
 import type { DbHandle } from './types.js';
 import { isJournalError } from './errors.js';
+import { need } from './handlers.js';
 import { j, meta, openDb, order, orderId, OrderPaid, OrderPlaced, orders, tables, Unrelated } from './test-support.js';
 
 let db: PgliteDatabase;
@@ -143,5 +145,45 @@ describe('JournalError detail', () => {
     const error = await refusal(journal.replay(db, order, id));
     expect(error.code).toBe('REPLAY_FAILED');
     expect(error.message).toMatch(/"OrderPlaced" at version 1\b/);
+  });
+});
+
+const expectBadDefinition = (declare: () => unknown, detail: string) => {
+  let thrown: unknown;
+  try {
+    declare();
+  } catch (error) {
+    thrown = error;
+  }
+  expect(isJournalError(thrown, 'BAD_DEFINITION')).toBe(true);
+  expect(thrown instanceof Error ? thrown.message : '').toContain(detail);
+};
+
+describe('BAD_DEFINITION', () => {
+  // Tooling such as `dot explain` shows the code and a fix, so every declaration
+  // mistake must carry it. A plain Error would show nothing to match on.
+  it('a bad event name carries the code', () => {
+    expectBadDefinition(() => j.event('', z.object({})), 'journal: event type must not be empty');
+  });
+
+  it('a second `.create` for one event carries the code', () => {
+    expectBadDefinition(
+      () =>
+        j
+          .entity('Twice', orders)
+          .create(OrderPlaced, e => ({ customerId: e.data.customerId, total: e.data.total, status: 'placed' }))
+          .create(OrderPlaced, e => ({ customerId: e.data.customerId, total: e.data.total, status: 'placed' })),
+      'already declares a create reducer for "OrderPlaced"',
+    );
+  });
+
+  it('a need with a reserved name carries the code', () => {
+    expectBadDefinition(() => j.effect('reserved-need', order, { db: need<number>() }, {}), 'has a need named "db"');
+  });
+
+  it('a duplicate effect name carries the code', () => {
+    const first = j.effect('same-name', order, {});
+    const second = j.effect('same-name', order, {});
+    expectBadDefinition(() => j.compose({ tables, effects: [first, second] }), 'duplicate effect name "same-name"');
   });
 });

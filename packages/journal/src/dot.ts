@@ -30,6 +30,7 @@ import type {
   TransactionSource,
 } from './types.js';
 import { debugWorker } from './debug.js';
+import { JournalError } from './errors.js';
 import { bindEffect } from './handlers.js';
 
 export const JOURNAL_ACTION_META_SCHEMA = '@arki/journal/action-meta@1';
@@ -180,7 +181,7 @@ function claimName(kind: 'effect' | 'projection', owners: Map<string, string>, n
   const owner = owners.get(name);
   if (owner !== undefined) {
     const where = owner === feature ? `feature "${feature}", twice` : `features "${owner}" and "${feature}"`;
-    throw new Error(`journal: duplicate ${kind} name "${name}" (${where})`);
+    throw new JournalError('BAD_DEFINITION', kind, name, `journal: duplicate ${kind} name "${name}" (${where})`);
   }
   owners.set(name, feature);
 }

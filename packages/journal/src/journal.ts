@@ -25,6 +25,7 @@ import type {
 } from './types.js';
 import { createCommandRunner } from './command.js';
 import { defineEntity } from './entity.js';
+import { JournalError } from './errors.js';
 import { defineEvent } from './event.js';
 import { bindEffect, defineProjection, effectFor } from './handlers.js';
 import { createHistory } from './history.js';
@@ -90,7 +91,10 @@ function createInit<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, 
       return defineEntity<K, Tbl, MetaOut, string>(kind, table, options.key);
     }
     if (!hasIdColumn(table)) {
-      throw new Error(
+      throw new JournalError(
+        'BAD_DEFINITION',
+        'entity',
+        kind,
         `journal: entity "${kind}": table "${getTableName(table)}" has no "id" column; pass { key: 'columnName' }`,
       );
     }
@@ -113,7 +117,8 @@ function createInit<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, 
 function assertUniqueNames(kind: 'effect' | 'projection', handlers: readonly { readonly name: string }[]): void {
   const seen = new Set<string>();
   for (const { name } of handlers) {
-    if (seen.has(name)) throw new Error(`journal: duplicate ${kind} name "${name}"`);
+    if (seen.has(name))
+      throw new JournalError('BAD_DEFINITION', kind, name, `journal: duplicate ${kind} name "${name}"`);
     seen.add(name);
   }
 }

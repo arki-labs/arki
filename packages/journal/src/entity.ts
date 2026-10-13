@@ -16,6 +16,7 @@ import type {
   ReducerValues,
   Row,
 } from './types.js';
+import { JournalError } from './errors.js';
 import { assertStoredName } from './id.js';
 
 /**
@@ -156,29 +157,46 @@ function keyColumnOf(kind: string, table: EntityTable, key: string): KeyColumn {
   const columns: Record<string, unknown> = getTableColumns(table);
   const column = columns[key];
   if (!(column instanceof PgColumn)) {
-    throw new TypeError(`journal: entity "${kind}": table "${getTableName(table)}" has no column "${key}"`);
+    throw new JournalError(
+      'BAD_DEFINITION',
+      'entity',
+      kind,
+      `journal: entity "${kind}": table "${getTableName(table)}" has no column "${key}"`,
+    );
   }
   const [dataType] = column.dataType.split(' ');
   const sqlType = sqlTypeOf(column);
   if (dataType !== 'custom' && !isKeyColumn(column)) {
-    throw new Error(
+    throw new JournalError(
+      'BAD_DEFINITION',
+      'entity',
+      kind,
       dataType === 'string'
         ? `journal: entity "${kind}": key column "${key}" must be not null`
         : `journal: entity "${kind}": key column "${key}" must hold a string, it holds ${column.dataType}`,
     );
   }
   if (!EXACT_KEY_TYPE.test(sqlType)) {
-    throw new Error(
+    throw new JournalError(
+      'BAD_DEFINITION',
+      'entity',
+      kind,
       `journal: entity "${kind}": key column "${key}" has SQL type "${sqlType}"; the key must be text, varchar or uuid, because other types can treat two different strings as the same key`,
     );
   }
   if (!isKeyColumn(column)) {
-    throw new Error(
+    throw new JournalError(
+      'BAD_DEFINITION',
+      'entity',
+      kind,
       `journal: entity "${kind}": key column "${key}" is a custom column type; a key must be a plain text, varchar or uuid column, because a custom type's mapping can change the string`,
     );
   }
   if (!isUniqueOn(table, column)) {
-    throw new Error(
+    throw new JournalError(
+      'BAD_DEFINITION',
+      'entity',
+      kind,
       `journal: entity "${kind}": key column "${key}" must be the primary key or carry a unique constraint`,
     );
   }
@@ -247,13 +265,21 @@ function builder<
     reduce: (event: RecordedOf<AddedEvent, Meta, EntityId<Tbl, Key>>) => CreateResult,
   ): EntityBuilder<Kind, Tbl, EventDefs | AddedEvent, Meta, Key, CreateResults | CreateResult> => {
     if (firstOn !== null) {
-      throw new Error(
+      throw new JournalError(
+        'BAD_DEFINITION',
+        'entity',
+        kind,
         `journal: entity "${kind}": declare .create(${event.type}) before any .on; .on(${firstOn}) came first`,
       );
     }
     const current = reducers.get(event.type) ?? {};
     if (current.create !== undefined) {
-      throw new Error(`journal: entity "${kind}" already declares a create reducer for "${event.type}"`);
+      throw new JournalError(
+        'BAD_DEFINITION',
+        'entity',
+        kind,
+        `journal: entity "${kind}" already declares a create reducer for "${event.type}"`,
+      );
     }
     return declare<AddedEvent, CreateResults | CreateResult>(event, { ...current, create: reduce }, null);
   };
@@ -266,7 +292,12 @@ function builder<
   ): OnOnlyEntityBuilder<Kind, Tbl, EventDefs | AddedEvent, Meta, Key, CreateResults> => {
     const current = reducers.get(event.type) ?? {};
     if (current.on !== undefined) {
-      throw new Error(`journal: entity "${kind}" already declares an on reducer for "${event.type}"`);
+      throw new JournalError(
+        'BAD_DEFINITION',
+        'entity',
+        kind,
+        `journal: entity "${kind}" already declares an on reducer for "${event.type}"`,
+      );
     }
     return declare<AddedEvent, CreateResults>(event, { ...current, on: reduce }, firstOn ?? event.type);
   };

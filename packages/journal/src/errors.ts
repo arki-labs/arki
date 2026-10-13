@@ -8,7 +8,8 @@ export type JournalErrorCode =
   | 'REPLAY_FAILED'
   | 'UNSTABLE_SCHEMA'
   | 'ID_MISMATCH'
-  | 'VALUE_MISMATCH';
+  | 'VALUE_MISMATCH'
+  | 'BAD_DEFINITION';
 
 /** Per code: what happened, and what to do next. The throw site adds the detail (event type, version, column). */
 const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next: string }> = {
@@ -52,6 +53,10 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
     what: 'the database stored a different value than the reducer produced',
     next: 'The write was rolled back. Make the reducer produce the value in the form the column stores',
   },
+  BAD_DEFINITION: {
+    what: 'a declaration is wrong',
+    next: 'Fix the declaration named in the detail. It is thrown when the module that declares it loads, so no data was touched',
+  },
 };
 
 /**
@@ -59,8 +64,9 @@ const MESSAGES: Record<JournalErrorCode, { readonly what: string; readonly next:
  * that the journal refuses. Match on `code`, never on the message.
  *
  * Not every error the journal lets out is a `JournalError`:
- * - A wrong definition or a misuse is a plain `Error` or `TypeError` whose message
- *   starts with `journal:` (a bad key column, a duplicate handler name, two
+ * - A wrong definition is a `JournalError` with code `BAD_DEFINITION`, thrown when the
+ *   declaration runs (a bad name, a bad key column, a duplicate reducer or handler name).
+ * - A misuse at run time is a plain `Error` whose message starts with `journal:` (two
  *   operations at once on one transaction, `drain` inside a transaction).
  * - Command input, event data or `meta` that fails its schema is a `ZodError`.
  * - An error thrown by a command handler, an `events` function, a reducer or a
