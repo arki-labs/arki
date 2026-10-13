@@ -1,7 +1,7 @@
+import type { IRateLimiterOptions, RateLimiterAbstract } from 'rate-limiter-flexible';
 import KeyvRedis from '@keyv/redis';
 import { Redis } from 'ioredis'; // Import ioredis for rate limiter
 import Keyv from 'keyv';
-import type { IRateLimiterOptions, RateLimiterAbstract } from 'rate-limiter-flexible';
 import { RateLimiterMemory, RateLimiterRedis } from 'rate-limiter-flexible';
 
 import { debugKV, debugLimiter } from './debug.js';
@@ -9,7 +9,8 @@ import { debugKV, debugLimiter } from './debug.js';
 export class KV {
   readonly #keyv: Keyv;
   readonly #redisClient: Redis; // Dedicated Redis client for rate limiter
-  readonly #limiterInstances = new Map<string, RateLimiterAbstract>();
+  /** Limiters by id. One id can hold several, one per distinct options (compared as JSON). */
+  readonly #limiterInstances = new Map<string, LimiterEntry[]>();
   #isRateLimiterReady = false;
 
   constructor(
@@ -17,7 +18,11 @@ export class KV {
     private readonly namespace?: string, // Keyv namespace
     private readonly rateLimitPrefix = 'rl', // Prefix for rate limiter keys
   ) {
-    debugKV('[kv] Initializing KV instance (namespace: %s, rateLimitPrefix: %s)', namespace || 'default', rateLimitPrefix);
+    debugKV(
+      '[kv] Initializing KV instance (namespace: %s, rateLimitPrefix: %s)',
+      namespace || 'default',
+      rateLimitPrefix,
+    );
 
     // Parse Redis URL and determine if TLS is needed
     const isTLS = redisUrl.startsWith('rediss://');
@@ -40,8 +45,7 @@ export class KV {
       // with a meaningful stack). Keep the noise at debug level.
       //
       // Any other Keyv error is genuinely unexpected and still loud.
-      const isTransientSocketClose =
-        err instanceof Error && err.name === 'SocketClosedUnexpectedlyError';
+      const isTransientSocketClose = err instanceof Error && err.name === 'SocketClosedUnexpectedlyError';
       if (isTransientSocketClose) {
         debugKV('[kv] Keyv socket closed (transient): %s', err.message);
         return;
@@ -63,7 +67,7 @@ export class KV {
           return null;
         }
         // Exponential backoff capped at 5 seconds
-        const delay = Math.min(times * 500, 5_000);
+        const delay = Math.min(times * 500, 5000);
         debugLimiter('[kv] Rate limiter Redis: retry %d in %dms', times, delay);
         return delay;
       },
@@ -104,13 +108,7 @@ export class KV {
     debugKV('[kv] Setting key if absent: %s (ttl: %ss)', key, expirationSeconds);
     const namespacedKey = this.namespace ? `${this.namespace}:${key}` : key;
     const serialized = JSON.stringify(value) ?? 'null';
-    const result = await this.#redisClient.set(
-      namespacedKey,
-      serialized,
-      'EX',
-      expirationSeconds,
-      'NX',
-    );
+    const result = await this.#redisClient.set(namespacedKey, serialized, 'EX', expirationSeconds, 'NX');
     const acquired = result === 'OK';
     debugKV('[kv] Set-if-absent result for key %s: %s', key, acquired ? 'acquired' : 'exists');
     return acquired;
@@ -181,15 +179,22 @@ export class KV {
    *          Returns a RateLimiterMemory instance if Redis client is not ready.
    */
   getRateLimiter(id: string, options: Partial<IRateLimiterOptions>): RateLimiterAbstract {
-    debugLimiter('[limiter] Getting rate limiter (id: %s, points: %d, duration: %ds)', id, options.points ?? 10, options.duration ?? 60);
-
-    const instanceKey = `${id}-${JSON.stringify(options)}`; // Simple key based on id + options
-
-    const existingLimiter = this.#limiterInstances.get(instanceKey);
-    if (existingLimiter) {
-      debugLimiter('[limiter] Returning cached rate limiter for id: %s', id);
-      return existingLimiter;
+    // A limiter is reused when `id` and `JSON.stringify(options)` both match. Most options hold
+    // only primitives, so they are first compared field by field, which gives the same answer
+    // without serialising the options on every call. JSON is the fallback for anything else.
+    // This is the per-request path, so it logs nothing; creating a limiter does.
+    const entries = this.#limiterInstances.get(id);
+    if (entries) {
+      const cached = findLimiter(entries, options);
+      if (cached) return cached;
     }
+
+    debugLimiter(
+      '[limiter] No cached rate limiter, creating one (id: %s, points: %d, duration: %ds)',
+      id,
+      options.points ?? 10,
+      options.duration ?? 60,
+    );
 
     // Use Redis limiter if the client is ready, otherwise fallback to in-memory
     // This fallback prevents application failure but loses persistence during Redis downtime.
@@ -207,8 +212,12 @@ export class KV {
         ...options, // Allow overriding defaults and adding other options
       });
     } else {
-      debugLimiter('[limiter] Redis not ready - creating in-memory rate limiter (id: %s, redisReady: %s, redisStatus: %s)',
-        id, this.#isRateLimiterReady, this.#redisClient.status);
+      debugLimiter(
+        '[limiter] Redis not ready - creating in-memory rate limiter (id: %s, redisReady: %s, redisStatus: %s)',
+        id,
+        this.#isRateLimiterReady,
+        this.#redisClient.status,
+      );
       console.warn(`Redis client not ready. Creating In-Memory Rate Limiter (non-persistent): ${id}`);
       limiter = new RateLimiterMemory({
         keyPrefix,
@@ -219,7 +228,12 @@ export class KV {
     }
 
     debugLimiter('[limiter] Rate limiter created and cached for id: %s', id);
-    this.#limiterInstances.set(instanceKey, limiter);
+    const entry: LimiterEntry = { json: JSON.stringify(options), fields: primitiveFields(options), limiter };
+    if (entries) {
+      entries.push(entry);
+    } else {
+      this.#limiterInstances.set(id, [entry]);
+    }
     return limiter;
   }
 
@@ -248,14 +262,84 @@ export class KV {
       await this.#redisClient.quit();
       debugLimiter('[kv] Rate limiter Redis client disconnected');
     } catch (error) {
-      debugLimiter('[kv] Error disconnecting rate limiter Redis client: %s', error instanceof Error ? error.message : 'unknown error');
+      debugLimiter(
+        '[kv] Error disconnecting rate limiter Redis client: %s',
+        error instanceof Error ? error.message : 'unknown error',
+      );
       console.error('Error disconnecting Rate Limiter Redis client:', error);
     }
 
-    debugLimiter('[kv] Clearing %d cached rate limiter instance(s)', this.#limiterInstances.size);
+    if (debugLimiter.enabled) {
+      let count = 0;
+      for (const entries of this.#limiterInstances.values()) count += entries.length;
+      debugLimiter('[kv] Clearing %d cached rate limiter instance(s)', count);
+    }
     this.#limiterInstances.clear();
     debugKV('[kv] KV instance closed successfully');
   }
+}
+
+/** A cached limiter and the options it was built from: their JSON, and their fields when all are primitive. */
+type LimiterEntry = {
+  readonly json: string;
+  readonly fields: readonly unknown[] | undefined;
+  readonly limiter: RateLimiterAbstract;
+};
+
+const hasOwn = (object: object, key: string): boolean => Object.prototype.hasOwnProperty.call(object, key);
+
+/** `JSON.stringify` drops these values (and their keys) from an object. */
+const isDroppedByJson = (value: unknown): boolean =>
+  value === undefined || typeof value === 'function' || typeof value === 'symbol';
+
+/** Options whose JSON is not just their own fields: a `toJSON` method rewrites it. */
+const hasToJson = (options: object): boolean => typeof (options as { toJSON?: unknown }).toJSON === 'function';
+
+/**
+ * The options as a flat `[key, value, ...]` list of the fields `JSON.stringify` keeps, in its order.
+ * `undefined` when a field holds an object or the options define `toJSON`: then only JSON compares.
+ */
+function primitiveFields(options: object): unknown[] | undefined {
+  if (hasToJson(options)) return undefined;
+  const fields: unknown[] = [];
+  for (const key in options) {
+    if (!hasOwn(options, key)) continue;
+    const value: unknown = options[key as keyof typeof options];
+    if (isDroppedByJson(value)) continue;
+    if (typeof value === 'object' && value !== null) return undefined;
+    fields.push(key, value);
+  }
+  return fields;
+}
+
+/**
+ * Whether `options` has exactly these primitive fields, in the same order. `true` implies the two
+ * serialise to the same JSON; `false` may still be equal JSON (e.g. `NaN` and `null`), which the
+ * caller settles by comparing JSON.
+ */
+function sameFields(fields: readonly unknown[], options: object): boolean {
+  if (hasToJson(options)) return false;
+  let index = 0;
+  for (const key in options) {
+    if (!hasOwn(options, key)) continue;
+    const value: unknown = options[key as keyof typeof options];
+    if (isDroppedByJson(value)) continue;
+    if (fields[index] !== key || fields[index + 1] !== value) return false;
+    index += 2;
+  }
+  return index === fields.length;
+}
+
+/** The cached limiter whose options serialise to the same JSON as `options`, if any. */
+function findLimiter(entries: readonly LimiterEntry[], options: object): RateLimiterAbstract | undefined {
+  for (const entry of entries) {
+    if (entry.fields !== undefined && sameFields(entry.fields, options)) return entry.limiter;
+  }
+  const json = JSON.stringify(options);
+  for (const entry of entries) {
+    if (entry.json === json) return entry.limiter;
+  }
+  return undefined;
 }
 
 // Re-export factory functions

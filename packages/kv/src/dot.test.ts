@@ -11,11 +11,12 @@
  * `kv.get/set` in tests because that would require a real Redis instance.
  */
 
-import { defineApp, DotLifecycleError, DotPluginError, rename } from '@arki/dot/plugin';
 import { describe, expect, it } from 'vitest';
 
-import { KV } from './index.js';
+import { defineApp, DotLifecycleError, DotPluginError, rename } from '@arki/dot/plugin';
+
 import { kv, KV_PLUGIN_ERROR_CODES } from './dot.js';
+import { KV } from './index.js';
 
 describe('@arki/kv/dot', () => {
   it('contributes a kv-kind service to the manifest', () => {
@@ -23,9 +24,7 @@ describe('@arki/kv/dot', () => {
       kv({ url: 'redis://localhost:6379', namespace: 'manifest-test' }),
     );
     const configured = builder.configure();
-    expect(configured.manifest.services).toEqual([
-      { name: 'kv', plugin: 'kv', kind: 'kv' },
-    ]);
+    expect(configured.manifest.services).toEqual([{ name: 'kv', plugin: 'kv', kind: 'kv' }]);
     expect(configured.manifest.plugins.map(p => p.name)).toEqual(['kv']);
   });
 
@@ -40,7 +39,7 @@ describe('@arki/kv/dot', () => {
       const caught = await defineApp('kv-missing-url')
         .use(kv())
         .boot()
-        .catch((e: unknown) => e);
+        .catch((error: unknown) => error);
       expect(caught).toBeInstanceOf(DotLifecycleError);
       const cause = (caught as DotLifecycleError).cause;
       expect(cause).toBeInstanceOf(DotPluginError);
