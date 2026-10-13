@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import { defineApp, plugin, provide, service, token } from '@arki/dot/plugin';
 
-import { schedule, scheduleActions } from './dot.js';
+import { DurableSchedules, schedule, scheduleActions } from './dot.js';
 import { ScheduleError, SCHEDULE_ERROR_CODES, defineSchedule, initSchedule } from './index.js';
 import { project } from './projection.js';
-import { createScheduleRuntime, type KvLike } from './runtime.js';
+import {
+  createScheduleRuntime,
+  type DurableScheduleRegistration,
+  type DurableScheduler,
+  type KvLike,
+} from './runtime.js';
 
 function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
   let resolve: () => void = () => {};
@@ -80,6 +85,7 @@ describe('schedule DOT projection', () => {
           timezone: 'UTC',
           overlap: 'skip',
           locked: true,
+          durable: false,
         },
       },
     ]);
@@ -199,6 +205,7 @@ describe('schedule DOT projection', () => {
           address: '1h',
           overlap: 'concurrent',
           locked: false,
+          durable: false,
         },
       ],
     });
@@ -249,6 +256,29 @@ describe('schedule runtime', () => {
 
     await expect(runtime.trigger('locked')).resolves.toEqual({ name: 'locked', status: 'skipped-lock' });
     expect(runtime.lockSkips).toBe(1);
+    expect(runtime.lockErrors).toBe(0);
+    expect(calls).toEqual([]);
+  });
+
+  it('reports a broken lock store as lock-failed, not as a held lock', async () => {
+    const calls: string[] = [];
+    const locked = defineSchedule({
+      name: 'locked',
+      every: '1h',
+      handler: async () => {
+        calls.push('handler');
+      },
+    });
+    const brokenLock: KvLike = {
+      async setIfNotExists() {
+        throw new Error('redis down');
+      },
+    };
+    const runtime = createScheduleRuntime({ schedules: [locked], lock: brokenLock });
+
+    await expect(runtime.trigger('locked')).resolves.toEqual({ name: 'locked', status: 'lock-failed' });
+    expect(runtime.lockErrors).toBe(1);
+    expect(runtime.lockSkips).toBe(0);
     expect(calls).toEqual([]);
   });
 
@@ -305,3 +335,186 @@ function lockThat(acquired: boolean): KvLike {
     },
   };
 }
+
+type FakeDurableScheduler = DurableScheduler & {
+  readonly registered: DurableScheduleRegistration[];
+  readonly stops: number;
+};
+
+// In-memory stand-in for the BullMQ backend: records what the runtime hands
+// over so a test can fire a tick by calling the registration's `run`.
+function fakeDurableScheduler(): FakeDurableScheduler {
+  const registered: DurableScheduleRegistration[] = [];
+  let stops = 0;
+  return {
+    registered,
+    get stops() {
+      return stops;
+    },
+    async start(schedules) {
+      registered.push(...schedules);
+    },
+    async stop() {
+      stops += 1;
+    },
+  };
+}
+
+function registration(fake: FakeDurableScheduler, name: string): DurableScheduleRegistration {
+  const found = fake.registered.find(entry => entry.name === name);
+  if (found === undefined) throw new Error(`Expected durable schedule "${name}" to be registered.`);
+  return found;
+}
+
+describe('durable schedules', () => {
+  it('defaults to in-process and records durable: true on the definition', () => {
+    const plain = defineSchedule({ name: 'plain', every: '1h', handler: async () => {} });
+    const durable = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
+
+    expect(plain.durable).toBe(false);
+    expect(durable.durable).toBe(true);
+  });
+
+  it('rejects a durable name with ":" at declaration, because the backend uses it as a queue name', () => {
+    try {
+      defineSchedule({ name: 'billing:nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
+      throw new Error('Expected a durable name with ":" to throw.');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ScheduleError);
+      expect((error as ScheduleError).code).toBe(SCHEDULE_ERROR_CODES.invalidDefinition);
+    }
+    expect(() => defineSchedule({ name: 'billing:nightly', cron: '0 3 * * *', handler: async () => {} })).not.toThrow();
+  });
+
+  it('hands durable schedules to the backend and keeps the rest on in-process timers', async () => {
+    const fake = fakeDurableScheduler();
+    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', timezone: 'UTC', durable: true, handler: async () => {} });
+    const sweep = defineSchedule({ name: 'sweep', every: '5m', durable: true, handler: async () => {} });
+    const local = defineSchedule({ name: 'local', every: '1h', handler: async () => {} });
+    const runtime = createScheduleRuntime({ schedules: [nightly, sweep, local], durable: fake });
+
+    runtime.start();
+    await runtime.stop();
+
+    expect(fake.registered.map(({ run: _run, ...rest }) => rest)).toEqual([
+      { name: 'nightly', cron: '0 3 * * *', timezone: 'UTC' },
+      { name: 'sweep', everyMs: 300_000 },
+    ]);
+    expect(fake.stops).toBe(1);
+  });
+
+  it('a durable tick runs the handler with the schedule context and skips the lock', async () => {
+    const fake = fakeDurableScheduler();
+    const seen: string[] = [];
+    const s = initSchedule.context<{ readonly tenant: string }>().create();
+    const nightly = s.define({
+      name: 'nightly',
+      cron: '0 3 * * *',
+      durable: true,
+      handler: async ctx => {
+        seen.push(ctx.tenant);
+      },
+    });
+    // A held lock would skip an in-process run; durable runs never ask for it.
+    const runtime = createScheduleRuntime({
+      schedules: [nightly],
+      durable: fake,
+      lock: lockThat(false),
+      createContext: () => ({ tenant: 'acme' }),
+    });
+
+    runtime.start();
+    await expect(registration(fake, 'nightly').run()).resolves.toEqual({ name: 'nightly', status: 'ran' });
+    expect(seen).toEqual(['acme']);
+    expect(runtime.lockSkips).toBe(0);
+    await runtime.stop();
+  });
+
+  it('a failing durable handler reports handler-failed like an in-process run', async () => {
+    const fake = fakeDurableScheduler();
+    const failing = defineSchedule({
+      name: 'failing',
+      every: '1m',
+      durable: true,
+      handler: async () => {
+        throw new Error('boom');
+      },
+    });
+    const runtime = createScheduleRuntime({ schedules: [failing], durable: fake });
+
+    runtime.start();
+    await expect(registration(fake, 'failing').run()).resolves.toEqual({ name: 'failing', status: 'handler-failed' });
+    expect(runtime.handlerFailures).toBe(1);
+    await runtime.stop();
+  });
+
+  it('a bare runtime with a durable schedule and no backend fails at start with a coded error', () => {
+    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
+    const runtime = createScheduleRuntime({ schedules: [nightly] });
+
+    try {
+      runtime.start();
+      throw new Error('Expected start to throw.');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ScheduleError);
+      expect((error as ScheduleError).code).toBe(SCHEDULE_ERROR_CODES.durableBackendMissing);
+      expect((error as ScheduleError).message).toContain('"nightly"');
+      expect((error as ScheduleError).remediation).toContain('durableScheduler');
+    }
+  });
+
+  it('the Dot plugin fails boot with a coded error when a durable schedule has no backend', async () => {
+    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
+
+    await expect(defineApp('durable-missing').use(schedule({ schedules: [nightly] })).boot()).rejects.toMatchObject({
+      cause: { code: SCHEDULE_ERROR_CODES.durableBackendMissing },
+    });
+  });
+
+  it('the Dot plugin fails boot in feature mode too, naming the schedule', async () => {
+    const nightly = defineSchedule({ name: 'feature-nightly', every: '1h', durable: true, handler: async () => {} });
+    const Feature = token<{ readonly schedules?: readonly [typeof nightly] }>()('feature.durable');
+    const feature = plugin({ name: 'durable-feature', boot: () => provide(Feature, { schedules: [nightly] }) });
+
+    await expect(
+      defineApp('durable-missing-feature').use(feature).use(schedule({ features: [Feature] as const })).boot(),
+    ).rejects.toMatchObject({
+      cause: { code: SCHEDULE_ERROR_CODES.durableBackendMissing, message: expect.stringContaining('"feature-nightly"') },
+    });
+  });
+
+  it('the Dot plugin takes the backend as a typed need and hands it the durable schedules at start', async () => {
+    const fake = fakeDurableScheduler();
+    const backend = plugin({ name: 'durable-backend', boot: () => provide(DurableSchedules, fake) });
+    const calls: string[] = [];
+    const nightly = defineSchedule({
+      name: 'nightly',
+      cron: '0 3 * * *',
+      durable: true,
+      handler: async () => {
+        calls.push('nightly');
+      },
+    });
+    const app = await defineApp('durable-app')
+      .use(backend)
+      .use(schedule({ schedules: [nightly], durable: DurableSchedules }))
+      .boot();
+
+    await app.start();
+    await expect(registration(fake, 'nightly').run()).resolves.toEqual({ name: 'nightly', status: 'ran' });
+    expect(calls).toEqual(['nightly']);
+    expect(app.manifest.actions[0]?.meta).toMatchObject({ durable: true });
+    await app.stop();
+    expect(fake.stops).toBe(1);
+    await app.dispose();
+  });
+
+  it('requires a mounted backend at the type level once durable is passed', () => {
+    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
+
+    // @ts-expect-error schedule({ durable: DurableSchedules }) needs a plugin that provides DurableSchedules.
+    defineApp('durable-no-backend').use(schedule({ schedules: [nightly], durable: DurableSchedules }));
+    // @ts-expect-error durable takes the DurableSchedules token, not a boolean.
+    schedule({ schedules: [nightly], durable: true });
+  });
+});

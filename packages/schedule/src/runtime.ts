@@ -1,6 +1,7 @@
 /* eslint-disable drizzle/enforce-delete-with-where */
 
 import { Cron } from 'croner';
+import { createLogger } from '@arki/log';
 import { debug } from '@arki/log/debug';
 
 import type { ScheduleDef } from './index.js';
@@ -8,6 +9,7 @@ import { parseEveryInterval } from './index.js';
 import { ScheduleError, SCHEDULE_ERROR_CODES } from './errors.js';
 
 const debugSchedule = debug('arki:schedule');
+const log = createLogger('arki:schedule');
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 type UnrefHandle = { unref(): void };
@@ -16,10 +18,40 @@ export type KvLike = {
   setIfNotExists<T = unknown>(key: string, value: T, expirationSeconds: number): Promise<boolean>;
 };
 
+/**
+ * One durable schedule handed to a {@link DurableScheduler}. Exactly one of
+ * `cron` or `everyMs` is set. `run` executes the handler with the schedule's
+ * context and resolves the same result `trigger` reports.
+ */
+export type DurableScheduleRegistration =
+  | {
+      readonly name: string;
+      readonly cron: string;
+      readonly timezone?: string;
+      readonly run: () => Promise<ScheduleRunResult>;
+    }
+  | {
+      readonly name: string;
+      readonly everyMs: number;
+      readonly run: () => Promise<ScheduleRunResult>;
+    };
+
+/**
+ * The port a durable backend implements (`@arki/queue` ships the BullMQ one).
+ * `start` registers every durable schedule and begins running them; `stop`
+ * stops running them and must be safe to call more than once.
+ */
+export type DurableScheduler = {
+  readonly start: (schedules: readonly DurableScheduleRegistration[]) => Promise<void>;
+  readonly stop: () => Promise<void>;
+};
+
 type ScheduleRuntimeBaseOptions<TContext> = {
   readonly schedules: readonly ScheduleDef<TContext>[];
   readonly lock?: KvLike;
   readonly jitterMs?: number;
+  /** Backend for schedules declared with `durable: true`. Required when any exists. */
+  readonly durable?: DurableScheduler;
 };
 
 type ScheduleRuntimeContextOptions<TContext> =
@@ -36,7 +68,7 @@ export type ScheduleRuntimeOptions<TContext = undefined> =
   & ScheduleRuntimeBaseOptions<TContext>
   & ScheduleRuntimeContextOptions<TContext>;
 
-export type ScheduleRunStatus = 'ran' | 'skipped-overlap' | 'skipped-lock' | 'handler-failed';
+export type ScheduleRunStatus = 'ran' | 'skipped-overlap' | 'skipped-lock' | 'lock-failed' | 'handler-failed';
 
 export type ScheduleRunResult = {
   readonly name: string;
@@ -49,6 +81,7 @@ export type ScheduleRuntime = {
   trigger(name: string): Promise<ScheduleRunResult>;
   readonly handlerFailures: number;
   readonly lockSkips: number;
+  readonly lockErrors: number;
 };
 
 function hasUnref(value: TimerHandle): value is TimerHandle & UnrefHandle {
@@ -82,6 +115,25 @@ function assertUniqueSchedules<TContext>(schedules: readonly ScheduleDef<TContex
   }
 }
 
+/**
+ * A durable schedule needs a durable backend. Thrown at Dot boot by the
+ * `schedule()` plugin and at `start()` by a bare runtime.
+ */
+export function assertDurableBackend<TContext>(
+  schedules: readonly ScheduleDef<TContext>[],
+  durable: DurableScheduler | undefined,
+): void {
+  if (durable !== undefined) return;
+  const first = schedules.find(schedule => schedule.durable);
+  if (first === undefined) return;
+  throw new ScheduleError({
+    code: SCHEDULE_ERROR_CODES.durableBackendMissing,
+    message: `[schedule] schedule "${first.name}" is durable, but no durable backend is available.`,
+    remediation:
+      'Mount durableScheduler({ connection }) from @arki/queue/dot before schedule(...) and pass durable: DurableSchedules to schedule(...), or drop durable: true from the schedule.',
+  });
+}
+
 function lockTtlSeconds<TContext>(schedule: ScheduleDef<TContext>): number {
   if (schedule.every !== undefined) {
     return Math.max(1, Math.ceil(parseEveryInterval(schedule.every) / 1000));
@@ -100,9 +152,12 @@ export function createScheduleRuntime<TContext = undefined>(options: ScheduleRun
   let stopped = false;
   let handlerFailures = 0;
   let lockSkips = 0;
+  let lockErrors = 0;
+  let durableStarted = false;
 
-  async function acquireLock(schedule: ScheduleDef<TContext>): Promise<boolean> {
-    if (options.lock === undefined) return true;
+  async function acquireLock(schedule: ScheduleDef<TContext>): Promise<'acquired' | 'held' | 'failed'> {
+    // Durable runs need no lock: the backend hands each tick to one worker.
+    if (options.lock === undefined || schedule.durable) return 'acquired';
 
     try {
       const acquired = await options.lock.setIfNotExists(
@@ -110,16 +165,15 @@ export function createScheduleRuntime<TContext = undefined>(options: ScheduleRun
         { acquiredAt: new Date().toISOString() },
         lockTtlSeconds(schedule),
       );
-      if (!acquired) lockSkips += 1;
-      return acquired;
-    } catch (error) {
+      if (acquired) return 'acquired';
       lockSkips += 1;
-      debugSchedule(
-        '[%s] lock acquire failed: %s',
-        schedule.name,
-        error instanceof Error ? error.message : String(error),
-      );
-      return false;
+      return 'held';
+    } catch (error) {
+      lockErrors += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      debugSchedule('[%s] lock acquire failed: %s', schedule.name, message);
+      log.error('schedule lock acquire failed', { schedule: schedule.name, error: message });
+      return 'failed';
     }
   }
 
@@ -131,9 +185,12 @@ export function createScheduleRuntime<TContext = undefined>(options: ScheduleRun
       return { name: schedule.name, status: 'skipped-overlap' };
     }
 
-    const acquired = await acquireLock(schedule);
-    if (!acquired) {
+    const lock = await acquireLock(schedule);
+    if (lock === 'held') {
       return { name: schedule.name, status: 'skipped-lock' };
+    }
+    if (lock === 'failed') {
+      return { name: schedule.name, status: 'lock-failed' };
     }
 
     running.set(schedule.name, active + 1);
@@ -143,11 +200,9 @@ export function createScheduleRuntime<TContext = undefined>(options: ScheduleRun
       return { name: schedule.name, status: 'ran' };
     } catch (error) {
       handlerFailures += 1;
-      debugSchedule(
-        '[%s] handler failed: %s',
-        schedule.name,
-        error instanceof Error ? error.message : String(error),
-      );
+      const message = error instanceof Error ? error.message : String(error);
+      debugSchedule('[%s] handler failed: %s', schedule.name, message);
+      log.error('schedule handler failed', { schedule: schedule.name, error: message });
       return { name: schedule.name, status: 'handler-failed' };
     } finally {
       const nextActive = (running.get(schedule.name) ?? 1) - 1;
@@ -191,10 +246,46 @@ export function createScheduleRuntime<TContext = undefined>(options: ScheduleRun
     armNext();
   }
 
+  function durableRegistration(schedule: ScheduleDef<TContext>): readonly DurableScheduleRegistration[] {
+    const runOnce = (): Promise<ScheduleRunResult> => trackPromise(run(schedule));
+    if (schedule.cron !== undefined) {
+      return [
+        {
+          name: schedule.name,
+          cron: schedule.cron,
+          ...(schedule.timezone === undefined ? {} : { timezone: schedule.timezone }),
+          run: runOnce,
+        },
+      ];
+    }
+    if (schedule.every !== undefined) {
+      return [{ name: schedule.name, everyMs: parseEveryInterval(schedule.every), run: runOnce }];
+    }
+    return [];
+  }
+
+  function startDurable(durable: DurableScheduler, schedules: readonly ScheduleDef<TContext>[]): void {
+    durableStarted = true;
+    void trackPromise(durable.start(schedules.flatMap(schedule => durableRegistration(schedule)))).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      debugSchedule('durable registration failed: %s', message);
+      log.error('schedule durable registration failed', {
+        schedules: schedules.map(schedule => schedule.name).join(','),
+        error: message,
+      });
+    });
+  }
+
   return {
     start() {
       if (stopped) return;
+      assertDurableBackend(options.schedules, options.durable);
+      const durableSchedules = options.schedules.filter(schedule => schedule.durable);
+      if (options.durable !== undefined && durableSchedules.length > 0) {
+        startDurable(options.durable, durableSchedules);
+      }
       for (const schedule of options.schedules) {
+        if (schedule.durable) continue;
         if (schedule.cron === undefined) {
           armEvery(schedule);
           continue;
@@ -218,6 +309,9 @@ export function createScheduleRuntime<TContext = undefined>(options: ScheduleRun
       stopped = true;
       for (const job of cronJobs) job.stop();
       for (const timer of timers) clearTimeout(timer);
+      // Closing the backend waits for an active durable run and cancels a
+      // registration still waiting on the store, so inflight can drain.
+      if (durableStarted) await options.durable?.stop();
       await Promise.allSettled(inflight);
     },
     async trigger(name: string) {
@@ -236,6 +330,9 @@ export function createScheduleRuntime<TContext = undefined>(options: ScheduleRun
     },
     get lockSkips() {
       return lockSkips;
+    },
+    get lockErrors() {
+      return lockErrors;
     },
   };
 }

@@ -206,6 +206,28 @@ const hourlySync = q.schedule
   });
 ```
 
+### Durable backend for `@arki/schedule`
+
+`durableScheduler()` from `@arki/queue/dot` runs `@arki/schedule` schedules
+declared with `durable: true` on BullMQ job schedulers. Mount it before the
+schedule plugin:
+
+```typescript
+import { durableScheduler } from '@arki/queue/dot';
+import { DurableSchedules, schedule } from '@arki/schedule/dot';
+
+defineApp('billing')
+  .use(durableScheduler({ connection: env.REDIS_URL, keyPrefix: 'billing:' }))
+  .use(schedule({ schedules: [nightly], durable: DurableSchedules }));
+```
+
+It provides the service under `DURABLE_SCHEDULES_KEY` (`'arki.schedule.durable'`).
+Boot opens no connection. When the schedule plugin starts, each durable
+schedule gets a queue named `schedule.<name>` with one job scheduler and one
+worker (concurrency 1). Each tick runs once across replicas. The last 100
+completed and 100 failed tick jobs are kept. For what happens to ticks missed
+while no worker runs, see the `@arki/schedule` README.
+
 ### Flows (Multi-Step Workflows)
 
 Flows define complex workflows with dependencies:

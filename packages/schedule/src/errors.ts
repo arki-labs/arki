@@ -3,6 +3,7 @@ export const SCHEDULE_ERROR_CODES = {
   duplicateSchedule: 'ARKI_SCHEDULE_E002',
   handlerFailure: 'ARKI_SCHEDULE_E003',
   lockAcquireFailure: 'ARKI_SCHEDULE_E004',
+  durableBackendMissing: 'ARKI_SCHEDULE_E005',
 } as const;
 
 export class ScheduleError extends Error {

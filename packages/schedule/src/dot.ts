@@ -1,9 +1,9 @@
 import type { CtxOf, EmptyShape, NeedsShape, Plugin, Token, WireNeeds } from '@arki/dot/plugin';
-import { plugin } from '@arki/dot/plugin';
+import { plugin, token } from '@arki/dot/plugin';
 
 import type { ScheduleDef } from './index.js';
-import type { KvLike, ScheduleRuntime } from './runtime.js';
-import { createScheduleRuntime } from './runtime.js';
+import type { DurableScheduler, KvLike, ScheduleRuntime } from './runtime.js';
+import { assertDurableBackend, createScheduleRuntime } from './runtime.js';
 
 export const SCHEDULE_ACTION_META_SCHEMA = '@arki/schedule/action-meta@1';
 
@@ -26,6 +26,39 @@ export type ScheduleDotOptions = {
 };
 
 type NoReservedKeys = Readonly<Record<`$${string}`, never>>;
+
+/**
+ * The durable backend service. `durableScheduler()` from `@arki/queue/dot`
+ * provides it under this key; `schedule({ durable: DurableSchedules })`
+ * needs it, so the app builder rejects the app when no provider is mounted.
+ */
+export const DurableSchedules = token<DurableScheduler>()('arki.schedule.durable');
+
+export type DurableSchedulesToken = typeof DurableSchedules;
+
+type DurableNeeds<TDurable extends DurableSchedulesToken | undefined> = [TDurable] extends [DurableSchedulesToken]
+  ? WireNeeds<{ readonly durable: DurableSchedulesToken }>
+  : EmptyShape;
+
+// Local alias for the durable need. Dotted so it cannot clash with a
+// caller's own `needs` alias.
+const DURABLE_ALIAS = 'schedule.durable';
+
+function isDurableScheduler(value: unknown): value is DurableScheduler {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'start' in value &&
+    typeof value.start === 'function' &&
+    'stop' in value &&
+    typeof value.stop === 'function'
+  );
+}
+
+function durableBackend(services: Readonly<Record<string, unknown>>): DurableScheduler | undefined {
+  const value = services[DURABLE_ALIAS];
+  return isDurableScheduler(value) ? value : undefined;
+}
 
 export type ScheduleFeatureToken<TContext = undefined> = Token<
   { readonly schedules?: readonly ScheduleDef<TContext>[] },
@@ -77,6 +110,11 @@ type ScheduleBaseOptions<TContext> = {
   readonly jitterMs?: number;
 };
 
+type ScheduleDurableOption<TDurable extends DurableSchedulesToken | undefined> = {
+  /** Pass `DurableSchedules` to run `durable: true` schedules on the mounted durable backend. */
+  readonly durable?: TDurable;
+};
+
 type ScheduleContextOption<TNeeds extends NeedsShape, TContext> =
   | {
       readonly context: (services: CtxOf<TNeeds>) => TContext | Promise<TContext>;
@@ -87,16 +125,22 @@ type ScheduleContextOption<TNeeds extends NeedsShape, TContext> =
         }
       : never);
 
-export type ScheduleDirectOptions<TNeeds extends NeedsShape & NoReservedKeys, TContext> =
+export type ScheduleDirectOptions<
+  TNeeds extends NeedsShape & NoReservedKeys,
+  TContext,
+  TDurable extends DurableSchedulesToken | undefined = undefined,
+> =
   & ScheduleBaseOptions<TContext>
   & ScheduleContextOption<TNeeds, TContext>
+  & ScheduleDurableOption<TDurable>
   & {
     readonly needs: TNeeds;
   };
 
-export type ScheduleDirectNoNeedsOptions<TContext> =
+export type ScheduleDirectNoNeedsOptions<TContext, TDurable extends DurableSchedulesToken | undefined = undefined> =
   & ScheduleBaseOptions<TContext>
   & ScheduleContextOption<EmptyShape, TContext>
+  & ScheduleDurableOption<TDurable>
   & {
     readonly needs?: never;
   };
@@ -104,9 +148,11 @@ export type ScheduleDirectNoNeedsOptions<TContext> =
 export type ScheduleFeatureOptions<
   TNeeds extends NeedsShape & NoReservedKeys,
   TFeatures extends readonly AnyScheduleFeatureToken[],
+  TDurable extends DurableSchedulesToken | undefined = undefined,
 > =
   & Omit<ScheduleBaseOptions<ScheduleFeatureContext<TFeatures>>, 'schedules'>
   & ScheduleContextOption<TNeeds, ScheduleFeatureContext<TFeatures>>
+  & ScheduleDurableOption<TDurable>
   & {
     readonly features: TFeatures;
     readonly needs?: TNeeds;
@@ -128,6 +174,7 @@ function actionForSchedule<TContext>(schedule: ScheduleDef<TContext>, locked: bo
       ...(schedule.timezone === undefined ? {} : { timezone: schedule.timezone }),
       overlap: schedule.overlap,
       locked,
+      durable: schedule.durable,
     },
   };
 }
@@ -171,27 +218,32 @@ function collectFeatureSchedules<TContext>(
   return schedules;
 }
 
-export function schedule<TContext = undefined>(
-  options: ScheduleDirectNoNeedsOptions<TContext>,
-): Plugin<EmptyShape, EmptyShape>;
-export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext = undefined>(
-  options: ScheduleDirectOptions<TNeeds, TContext>,
-): Plugin<WireNeeds<TNeeds>, EmptyShape>;
+export function schedule<TContext = undefined, TDurable extends DurableSchedulesToken | undefined = undefined>(
+  options: ScheduleDirectNoNeedsOptions<TContext, TDurable>,
+): Plugin<DurableNeeds<TDurable>, EmptyShape>;
+export function schedule<
+  TNeeds extends NeedsShape & NoReservedKeys,
+  TContext = undefined,
+  TDurable extends DurableSchedulesToken | undefined = undefined,
+>(
+  options: ScheduleDirectOptions<TNeeds, TContext, TDurable>,
+): Plugin<WireNeeds<TNeeds> & DurableNeeds<TDurable>, EmptyShape>;
 export function schedule<
   TNeeds extends NeedsShape & NoReservedKeys,
   const TFeatures extends readonly AnyScheduleFeatureToken[],
+  TDurable extends DurableSchedulesToken | undefined = undefined,
 >(
-  options: ScheduleFeatureOptions<TNeeds, TFeatures>,
-): Plugin<WireNeeds<TNeeds> & ScheduleFeatureNeeds<TFeatures>, EmptyShape>;
+  options: ScheduleFeatureOptions<TNeeds, TFeatures, TDurable>,
+): Plugin<WireNeeds<TNeeds> & ScheduleFeatureNeeds<TFeatures> & DurableNeeds<TDurable>, EmptyShape>;
 export function schedule<
   TNeeds extends NeedsShape & NoReservedKeys,
   TContext,
   const TFeatures extends readonly AnyScheduleFeatureToken[],
 >(
   options:
-    | ScheduleDirectNoNeedsOptions<TContext>
-    | ScheduleDirectOptions<TNeeds, TContext>
-    | ScheduleFeatureOptions<TNeeds, TFeatures>,
+    | ScheduleDirectNoNeedsOptions<TContext, DurableSchedulesToken | undefined>
+    | ScheduleDirectOptions<TNeeds, TContext, DurableSchedulesToken | undefined>
+    | ScheduleFeatureOptions<TNeeds, TFeatures, DurableSchedulesToken | undefined>,
 ): Plugin<WireNeeds<TNeeds>, EmptyShape> {
   let runtime: ScheduleRuntime | undefined;
   const featureMode = 'features' in options;
@@ -199,12 +251,14 @@ export function schedule<
     options.needs === undefined
       ? {}
       : options.needs;
+  const durableNeeds: NeedsShape = options.durable === undefined ? {} : { [DURABLE_ALIAS]: options.durable };
   const runtimeNeeds = featureMode
     ? {
         ...needs,
+        ...durableNeeds,
         ...Object.fromEntries(options.features.map(feature => [feature.key, feature])),
       }
-    : needs;
+    : { ...needs, ...durableNeeds };
 
   return plugin({
     name: 'schedule',
@@ -220,12 +274,14 @@ export function schedule<
       ctx.declareProvides('schedule-runtime');
     },
     boot(ctx) {
+      const durable = durableBackend(ctx);
       if (featureMode) {
         type FeatureContext = ScheduleFeatureContext<TFeatures>;
         const schedules = collectFeatureSchedules<FeatureContext>(
           options.features,
           ctx as Readonly<Record<string, { readonly schedules?: readonly ScheduleDef<FeatureContext>[] } | undefined>>,
         );
+        assertDurableBackend(schedules, durable);
         const context = options.context;
         if (context === undefined) {
           runtime = createScheduleRuntime({
@@ -233,6 +289,7 @@ export function schedule<
             schedules: schedules as readonly ScheduleDef<undefined>[],
             ...(options.lock === undefined ? {} : { lock: options.lock }),
             ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
+            ...(durable === undefined ? {} : { durable }),
           });
           return;
         }
@@ -241,12 +298,14 @@ export function schedule<
           schedules,
           ...(options.lock === undefined ? {} : { lock: options.lock }),
           ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
+          ...(durable === undefined ? {} : { durable }),
           createContext: () => context(ctx as CtxOf<TNeeds>),
         });
         return;
       }
 
       const schedules = options.schedules;
+      assertDurableBackend(schedules, durable);
       const context = options.context;
       if (context === undefined) {
         runtime = createScheduleRuntime({
@@ -254,6 +313,7 @@ export function schedule<
           schedules: schedules as readonly ScheduleDef<undefined>[],
           ...(options.lock === undefined ? {} : { lock: options.lock }),
           ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
+          ...(durable === undefined ? {} : { durable }),
         });
         return;
       }
@@ -262,6 +322,7 @@ export function schedule<
         schedules,
         ...(options.lock === undefined ? {} : { lock: options.lock }),
         ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
+        ...(durable === undefined ? {} : { durable }),
         createContext: () => context(ctx as CtxOf<TNeeds>),
       });
     },

@@ -2,6 +2,8 @@ import type { CtxOf, EmptyShape, NeedsShape, Plugin, Token, WireNeeds } from '@a
 import { DotPluginError, plugin } from '@arki/dot/plugin';
 
 import { debugWorker } from './debug.ts';
+import type { DurableScheduler, DurableSchedulerOptions } from './durable-scheduler.ts';
+import { createDurableScheduler } from './durable-scheduler.ts';
 import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { QueueInstanceOptions } from './create-queue.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
@@ -303,6 +305,43 @@ function timeoutAfter(ms: number, pluginName: string): Promise<never> {
       );
     }, ms);
     timer.unref();
+  });
+}
+
+/**
+ * Wire key of `@arki/schedule`'s `DurableSchedules` token. Kept as a plain
+ * string so `@arki/queue` does not depend on `@arki/schedule`; the app
+ * builder checks that the provided service fits what `schedule()` needs.
+ */
+export const DURABLE_SCHEDULES_KEY = 'arki.schedule.durable';
+
+export type DurableSchedulerPluginOptions = DurableSchedulerOptions & {
+  readonly name?: string;
+};
+
+/**
+ * Provide the BullMQ durable backend for `@arki/schedule`. Mount it before
+ * `schedule({ ..., durable: DurableSchedules })`. Boot only builds the
+ * backend; Redis is touched when the schedule plugin starts it.
+ */
+export function durableScheduler(
+  options: DurableSchedulerPluginOptions,
+): Plugin<EmptyShape, { readonly [DURABLE_SCHEDULES_KEY]: DurableScheduler }> {
+  return plugin({
+    name: options.name ?? 'durable-scheduler',
+    version: QUEUE_RUNTIME_PLUGIN_VERSION,
+    configure(ctx) {
+      ctx.declareProvides('durable-scheduler');
+    },
+    boot: () => ({ [DURABLE_SCHEDULES_KEY]: createDurableScheduler(options) }),
+    // The schedule plugin stops the backend first; stop() is idempotent, so
+    // this only matters when nothing else stopped it.
+    async stop(ctx) {
+      await ctx[DURABLE_SCHEDULES_KEY].stop();
+    },
+    async dispose(ctx) {
+      await ctx[DURABLE_SCHEDULES_KEY].stop();
+    },
   });
 }
 

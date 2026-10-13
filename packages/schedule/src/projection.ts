@@ -29,6 +29,7 @@ export type ScheduleTableDocument = {
     readonly timezone?: string;
     readonly overlap: string;
     readonly locked: boolean;
+    readonly durable: boolean;
   }[];
 };
 
@@ -50,6 +51,7 @@ export function project(manifest: ManifestLike): ScheduleTableDocument {
         ...(typeof action.meta?.['timezone'] === 'string' ? { timezone: action.meta['timezone'] } : {}),
         overlap: typeof action.meta?.['overlap'] === 'string' ? action.meta['overlap'] : 'skip',
         locked: action.meta?.['locked'] === true,
+        durable: action.meta?.['durable'] === true,
       })),
   };
 }

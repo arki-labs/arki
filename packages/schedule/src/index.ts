@@ -9,6 +9,13 @@ type BaseScheduleOptions = {
   readonly name: string;
   readonly timezone?: string;
   readonly overlap?: ScheduleOverlap;
+  /**
+   * `true` hands this schedule to a durable backend (a BullMQ job scheduler
+   * through `@arki/queue`): each tick runs once across replicas, and a tick
+   * that fell due while no worker ran still runs once when one comes back.
+   * Default `false`: an in-process timer that skips ticks missed while down.
+   */
+  readonly durable?: boolean;
 };
 
 type ScheduleHandler<TContext> = (ctx: TContext) => Promise<void>;
@@ -33,6 +40,7 @@ export type ScheduleDef<TContext = undefined> = {
   readonly every?: ScheduleInterval;
   readonly timezone?: string;
   readonly overlap: ScheduleOverlap;
+  readonly durable: boolean;
   readonly handler: ScheduleHandler<TContext>;
 };
 
@@ -65,6 +73,15 @@ export function defineSchedule<TContext = undefined>(options: DefineScheduleOpti
     throw invalid('[schedule] schedule name must be a non-empty string.');
   }
 
+  const durable = options.durable ?? false;
+  if (durable && name.includes(':')) {
+    throw new ScheduleError({
+      code: SCHEDULE_ERROR_CODES.invalidDefinition,
+      message: `[schedule] durable schedule "${name}" cannot contain ":" in its name.`,
+      remediation: 'Rename the schedule without ":" (use "." or "-"). The durable backend uses the name as a queue name.',
+    });
+  }
+
   const hasCron = 'cron' in options && options.cron !== undefined;
   const hasEvery = 'every' in options && options.every !== undefined;
   if (hasCron === hasEvery) {
@@ -82,6 +99,7 @@ export function defineSchedule<TContext = undefined>(options: DefineScheduleOpti
       cron: options.cron,
       ...(options.timezone === undefined ? {} : { timezone: options.timezone }),
       overlap: options.overlap ?? 'skip',
+      durable,
       handler: options.handler,
     };
   }
@@ -92,11 +110,19 @@ export function defineSchedule<TContext = undefined>(options: DefineScheduleOpti
     every: options.every,
     ...(options.timezone === undefined ? {} : { timezone: options.timezone }),
     overlap: options.overlap ?? 'skip',
+    durable,
     handler: options.handler,
   };
 }
 
 export { ScheduleError, SCHEDULE_ERROR_CODES } from './errors.js';
+export type {
+  DurableScheduleRegistration,
+  DurableScheduler,
+  KvLike,
+  ScheduleRunResult,
+  ScheduleRunStatus,
+} from './runtime.js';
 
 export type ScheduleBuilder<TContext> = {
   define(options: DefineScheduleOptions<TContext>): ScheduleDef<TContext>;
