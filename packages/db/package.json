@@ -120,6 +120,7 @@
     "package.json"
   ],
   "scripts": {
+    "bench": "bun run build && arki-bench",
     "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc -p tsconfig.build.json --watch",
@@ -144,6 +145,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@arki/bench": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
@@ -152,7 +154,9 @@
     "@types/bun": "catalog:",
     "@types/node": "catalog:node",
     "@types/pg": "catalog:drizzle",
-    "typescript": "catalog:"
+    "nanoid": "^6.0.2",
+    "typescript": "catalog:",
+    "uuid": "^14.0.3"
   },
   "peerDependencies": {
     "@arki/dot": "workspace:*"

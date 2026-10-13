@@ -85,6 +85,7 @@
     }
   },
   "scripts": {
+    "bench": "bun run build && arki-bench",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
@@ -107,6 +108,7 @@
     "unplugin-icons": "catalog:"
   },
   "devDependencies": {
+    "@arki/bench": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",

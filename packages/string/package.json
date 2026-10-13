@@ -143,6 +143,7 @@
     "package.json"
   ],
   "scripts": {
+    "bench": "bun run build && arki-bench",
     "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc -p tsconfig.build.json --watch",
@@ -155,11 +156,16 @@
   },
   "prettier": "@arki/prettier-config",
   "devDependencies": {
+    "@arki/bench": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/node": "catalog:node"
+    "@types/node": "catalog:node",
+    "change-case": "^5.4.4",
+    "escape-html": "^1.0.3",
+    "lodash-es": "^4.18.1",
+    "slugify": "catalog:"
   },
   "publishConfig": {
     "access": "public"

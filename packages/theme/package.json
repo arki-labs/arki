@@ -53,6 +53,7 @@
   },
   "types": "./dist/src/index.d.ts",
   "scripts": {
+    "bench": "bun run build && arki-bench",
     "build": "tsc",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
@@ -65,6 +66,7 @@
     "react": "catalog:react"
   },
   "devDependencies": {
+    "@arki/bench": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",

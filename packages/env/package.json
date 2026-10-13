@@ -62,6 +62,7 @@
     "package.json"
   ],
   "scripts": {
+    "bench": "bun run build && arki-bench",
     "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc -p tsconfig.build.json --watch",
@@ -85,12 +86,14 @@
     }
   },
   "devDependencies": {
+    "@arki/bench": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@types/node": "catalog:node",
+    "envalid": "^8.2.0",
     "typescript": "catalog:"
   }
 }

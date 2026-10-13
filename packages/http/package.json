@@ -68,6 +68,7 @@
     "package.json"
   ],
   "scripts": {
+    "bench": "bun run build && arki-bench",
     "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc -p tsconfig.build.json --watch",
@@ -94,12 +95,15 @@
     }
   },
   "devDependencies": {
+    "@arki/bench": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@hono/zod-validator": "^0.9.1",
     "@types/node": "catalog:node",
+    "itty-router": "^5.0.24",
     "typescript": "catalog:"
   },
   "prettier": "@arki/prettier-config"
