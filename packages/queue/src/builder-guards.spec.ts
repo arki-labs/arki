@@ -15,7 +15,6 @@ import { z } from '@arki/contracts';
 import { CronPatterns } from './cron-patterns.ts';
 import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
 import { initQueue } from './init.ts';
-import type { JobDefinition } from './types/job.ts';
 
 type TestContext = { userId: string };
 
@@ -37,20 +36,11 @@ function expectCode(error: unknown, code: QueueDefinitionError['code']): void {
   expect(error instanceof QueueDefinitionError && error.remediation.length > 0).toBe(true);
 }
 
-/**
- * A flow step job. Real jobs carry a typed context, which flow steps do not
- * accept yet; this literal satisfies the step contract without a cast.
- */
-const stepJob: JobDefinition<unknown, unknown, unknown> = {
-  _type: 'job',
-  _internal: {
-    name: 'guards:step',
-    inputSchema: z.unknown(),
-    handler: () => Promise.resolve(),
-    middlewares: [],
-  },
-  trigger: () => Promise.resolve('job-id'),
-};
+/** A flow step job. */
+const stepJob = q.job
+  .name('guards:step')
+  .input(z.object({}))
+  .handler(() => Promise.resolve());
 
 describe('job builder guards', () => {
   it('.handler() before .input() is a compile error and throws missingInput', () => {

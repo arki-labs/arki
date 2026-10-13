@@ -298,9 +298,11 @@ export type ScheduleBuilderDef<TContext, TContextOut, TMeta extends QueueMeta> =
   ): ScheduleBuilderDef<TContext, TContextOut2, TMeta>;
 
   /**
-   * Wrap an existing job
+   * Wrap an existing job. The schedule worker runs the schedule's own
+   * middleware, not the job's, and hands the result to the job's handler; so
+   * the job's context must be one this schedule provides (`TContextOut`).
    */
-  job<TInput>(job: JobDefinition<TInput, unknown, unknown>): ScheduleJobWrapper<TInput>;
+  job<TInput>(job: JobDefinition<TInput, unknown, TContextOut>): ScheduleJobWrapper<TInput>;
 
   /**
    * Set name for inline handler
@@ -394,11 +396,13 @@ export type FlowBuilderNeedsStep<TContext, TMeta extends QueueMeta, TInput> = {
   /**
    * Add the first step to the flow (unlocks `.build()`)
    */
-  step<const TId extends string>(
+  step<const TId extends string, TStepInput>(
     id: TId,
     config: {
-      job: JobDefinition<unknown, unknown, unknown>;
-      data: (input: TInput) => unknown;
+      /** Any built job: a step job runs on its own worker, with its own middleware and context. */
+      job: JobDefinition<TStepInput, unknown, never>;
+      /** Maps the flow input to the step job's input. */
+      data: (input: TInput) => NoInfer<TStepInput>;
       queueName?: string;
       opts?: unknown;
       dependsOn?: readonly string[];
@@ -418,11 +422,13 @@ export type FlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput> = {
   /**
    * Add a step to the flow
    */
-  step<const TId extends string>(
+  step<const TId extends string, TStepInput>(
     id: TId,
     config: {
-      job: JobDefinition<unknown, unknown, unknown>;
-      data: (input: TInput) => unknown;
+      /** Any built job: a step job runs on its own worker, with its own middleware and context. */
+      job: JobDefinition<TStepInput, unknown, never>;
+      /** Maps the flow input to the step job's input. */
+      data: (input: TInput) => NoInfer<TStepInput>;
       queueName?: string;
       opts?: unknown;
       dependsOn?: readonly string[];

@@ -32,16 +32,20 @@ import type { z } from '@arki/contracts';
 import { debugBuilder } from './debug.ts';
 import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
 import type { FlowBuilderNeedsStep, FlowBuilderStart, FlowBuilderWithInput, FlowDefinition } from './types/builder.ts';
-import type { JobDefinition } from './types/job.ts';
+import type { AnyJobDefinition, JobDefinition } from './types/job.ts';
 import type { JobMiddleware } from './types/middleware.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
 
 /**
- * Internal step representation
+ * Internal step representation.
+ *
+ * The builder stores each step's job as `AnyJobDefinition` (steps have
+ * different job types); the queue reads `_internal` back with the default
+ * `TJob`, the same erasure boundary schedules use.
  */
-type FlowStepInternal = {
+type FlowStepInternal<TJob = JobDefinition<unknown, unknown, unknown>> = {
   id: string;
-  job: JobDefinition<unknown, unknown, unknown>;
+  job: TJob;
   data: (input: unknown) => unknown;
   queueName?: string;
   opts?: unknown;
@@ -52,7 +56,7 @@ type FlowStepInternal = {
  * Internal flow definition structure
  * This is what gets stored in FlowDefinition._internal
  */
-export type InternalFlowDefinition<TInput = unknown> = {
+export type InternalFlowDefinition<TInput = unknown, TJob = JobDefinition<unknown, unknown, unknown>> = {
   /**
    * Flow name
    */
@@ -66,7 +70,7 @@ export type InternalFlowDefinition<TInput = unknown> = {
   /**
    * Steps in the flow
    */
-  steps: readonly FlowStepInternal[];
+  steps: readonly FlowStepInternal<TJob>[];
 
   /**
    * Middleware chain applied to all steps
@@ -87,7 +91,7 @@ type FlowBuilderState<TInput> = {
   name: string;
   inputSchema?: z.ZodType<TInput>;
   middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[];
-  steps: FlowStepInternal[];
+  steps: FlowStepInternal<AnyJobDefinition>[];
 };
 
 /**
@@ -95,7 +99,7 @@ type FlowBuilderState<TInput> = {
  * Ensures all step dependencies reference valid step IDs
  * @internal
  */
-function validateFlowDependencies(steps: readonly FlowStepInternal[]): void {
+function validateFlowDependencies(steps: readonly FlowStepInternal<AnyJobDefinition>[]): void {
   debugBuilder('Validating flow dependencies for %d steps', steps.length);
 
   const stepIds = new Set(steps.map(step => step.id));
@@ -128,7 +132,7 @@ function validateFlowDependencies(steps: readonly FlowStepInternal[]): void {
  * Detect circular dependencies in flow steps
  * @internal
  */
-function detectCircularDependencies(steps: readonly FlowStepInternal[]): void {
+function detectCircularDependencies(steps: readonly FlowStepInternal<AnyJobDefinition>[]): void {
   debugBuilder('Checking for circular dependencies in flow');
 
   const graph = new Map<string, Set<string>>();
@@ -217,11 +221,11 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
       });
     },
 
-    step<const TId extends string>(
+    step<const TId extends string, TStepInput>(
       id: TId,
       config: {
-        job: JobDefinition<unknown, unknown, unknown>;
-        data: (input: TInput) => unknown;
+        job: JobDefinition<TStepInput, unknown, never>;
+        data: (input: TInput) => NoInfer<TStepInput>;
         queueName?: string;
         opts?: unknown;
         dependsOn?: readonly string[];
@@ -235,7 +239,7 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
         config.dependsOn?.join(', ') ?? 'none',
       );
 
-      const newStep: FlowStepInternal = {
+      const newStep: FlowStepInternal<AnyJobDefinition> = {
         id,
         job: config.job,
         data: config.data as (input: unknown) => unknown,
@@ -277,7 +281,7 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
       // Validate step dependencies
       validateFlowDependencies(state.steps);
 
-      const internal: InternalFlowDefinition<TInput> = {
+      const internal: InternalFlowDefinition<TInput, AnyJobDefinition> = {
         name: state.name,
         inputSchema: state.inputSchema,
         steps: state.steps,

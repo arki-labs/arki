@@ -255,6 +255,22 @@ export type JobDefinition<TInput, TOutput, TDeps = Record<string, never>> = {
 };
 
 /**
+ * Any job definition, whatever its input, output and context types.
+ *
+ * Input and context sit in parameter positions, so `JobDefinition<I, O, C>` is
+ * not assignable to `JobDefinition<unknown, unknown, unknown>`. Typing those
+ * parameters `never` makes every built job assignable here; use it to store
+ * jobs of different types side by side (e.g. flow steps), never to call them.
+ */
+export type AnyJobDefinition = {
+  _type: 'job';
+  _internal: Omit<InternalJobDefinition<unknown, unknown>, 'handler'> & {
+    handler: (data: never, ctx: never) => Promise<unknown>;
+  };
+  trigger: (data: never, options?: TriggerOptions) => Promise<string>;
+};
+
+/**
  * Standard priority levels for jobs
  */
 export const QUEUE_PRIORITIES = {

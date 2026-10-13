@@ -167,7 +167,7 @@ export function createScheduleBuilder<TContext, TContextOut, TMeta extends Queue
       );
     },
 
-    job<TInput>(job: JobDefinition<TInput, unknown, unknown>): ScheduleJobWrapper<TInput> {
+    job<TInput>(job: JobDefinition<TInput, unknown, TContextOut>): ScheduleJobWrapper<TInput> {
       debugBuilder('Wrapping existing job: %s', job._internal.name);
 
       return {
