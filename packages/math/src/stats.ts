@@ -17,6 +17,7 @@
 import type { ScaleOptions } from './decimal.js';
 import type { RoundingMode } from './rounding.js';
 import { Decimal, isDecimal } from './decimal.js';
+import { normal, studentT } from './distributions.js';
 import { EmptyDataError, InvalidArgumentError, NumericRangeError, RoundingNecessaryError } from './errors.js';
 import { divideRounded, pow10 } from './internal/bigint.js';
 import { assertScale } from './internal/fraction.js';
@@ -36,6 +37,54 @@ export type LinearFit = {
   slope: number;
   intercept: number;
 };
+
+/** Confidence-interval method: `'z'` (normal critical value) or `'t'` (Student's t, for estimated spread). */
+export type IntervalMethod = 'z' | 't';
+
+export type ConfidenceIntervalOptions = VarianceOptions & {
+  /** Confidence level in (0, 1). Default 0.95. */
+  level?: number;
+  /** Default `'t'` with `n - 1` degrees of freedom. */
+  method?: IntervalMethod;
+};
+
+export type ConfidenceInterval = {
+  mean: number;
+  lower: number;
+  upper: number;
+  marginOfError: number;
+  level: number;
+};
+
+export type MarginOfErrorInput = {
+  /** Standard deviation of the data (sample, unless you know the population value). */
+  stddev: number;
+  /** Number of observations. */
+  n: number;
+  level?: number;
+  method?: IntervalMethod;
+};
+
+/** Sample size for estimating a mean to within `marginOfError`, given the spread `stddev`. */
+export type MeanSampleSizeInput = { marginOfError: number; stddev: number; level?: number; proportion?: never };
+/** Sample size for estimating a proportion; `proportion` defaults to 0.5, the worst case. */
+export type ProportionSampleSizeInput = { marginOfError: number; proportion?: number; level?: number; stddev?: never };
+
+/** A fitted curve: its fit quality and a function to evaluate it. */
+type Fit = {
+  /** Coefficient of determination `1 - SSres / SStot`, measured on the original y values. */
+  r2: number;
+  predict(x: number): number;
+};
+
+/** `y = a * e^(b * x)`. */
+export type ExponentialFit = Fit & { a: number; b: number };
+/** `y = a + b * ln(x)`. */
+export type LogarithmicFit = Fit & { a: number; b: number };
+/** `y = a * x^b`. */
+export type PowerFit = Fit & { a: number; b: number };
+/** `y = c[0] + c[1] * x + c[2] * x^2 + ...`, lowest degree first. */
+export type PolynomialFit = Fit & { coefficients: readonly number[] };
 
 type NumericValues = Iterable<number> | Iterable<Decimal>;
 
@@ -687,4 +736,315 @@ export function linearRegression(x: Iterable<number>, y: Iterable<number>): Line
   const slope = assertRepresentable(((sxy / sxx) * ky) / kx, 'slope');
   const intercept = assertRepresentable(meanY - slope * meanX, 'intercept');
   return { slope: noNegativeZero(slope), intercept: noNegativeZero(intercept) };
+}
+
+// ---------------------------------------------------------------------------
+// Inference
+// ---------------------------------------------------------------------------
+
+function assertLevel(level: number): number {
+  assertFinite(level, 'level');
+  if (level <= 0 || level >= 1) throw new InvalidArgumentError(`level must be within (0, 1), got ${level}`);
+  return level;
+}
+
+function assertSpread(value: number, name: string): number {
+  assertFinite(value, name);
+  if (value < 0) throw new InvalidArgumentError(`${name} must be >= 0, got ${value}`);
+  return value;
+}
+
+function assertCount(n: number, min: number): number {
+  assertFinite(n, 'n');
+  if (!Number.isInteger(n) || n < min) throw new InvalidArgumentError(`n must be an integer >= ${min}, got ${n}`);
+  return n;
+}
+
+/** Two-sided critical value for `level`: z, or t with `n - 1` degrees of freedom. */
+function criticalValue(level: number, method: IntervalMethod, n: number): number {
+  if (method !== 'z' && method !== 't')
+    throw new InvalidArgumentError(`method must be 'z' or 't', got ${String(method)}`);
+  const upper = 1 - (1 - level) / 2;
+  if (method === 'z') return normal().quantile(upper);
+  if (n < 2) throw new InvalidArgumentError('a t interval needs n >= 2');
+  return studentT(n - 1).quantile(upper);
+}
+
+/**
+ * How many standard deviations `value` lies from `mean`: `(value - mean) / stddev`.
+ * Throws `InvalidArgumentError` unless `stddev` is positive.
+ */
+export function zScore(value: number, mean: number, stddev: number): number {
+  assertFinite(value, 'value');
+  assertFinite(mean, 'mean');
+  assertFinite(stddev, 'stddev');
+  if (stddev <= 0) throw new InvalidArgumentError(`stddev must be positive, got ${stddev}`);
+  return noNegativeZero(assertRepresentable((value - mean) / stddev, 'z-score'));
+}
+
+/**
+ * Standard error of the mean, `stddev / sqrt(n)`. Pass the data (its `stddev`
+ * uses `ddof`, sample by default) or a known `{ stddev, n }`.
+ * Throws `EmptyDataError` when the data has too few values.
+ */
+export function standardError(
+  values: Iterable<number> | { stddev: number; n: number },
+  options?: VarianceOptions,
+): number {
+  if (Symbol.iterator in values) {
+    const data = toNumbers(values, 'values');
+    return noNegativeZero(stddev(data, options) / Math.sqrt(data.length));
+  }
+  return noNegativeZero(assertSpread(values.stddev, 'stddev') / Math.sqrt(assertCount(values.n, 1)));
+}
+
+/**
+ * Half-width of a confidence interval for a mean: critical value times the
+ * standard error. `method` is `'t'` by default (needs `n >= 2`), `level` 0.95.
+ */
+export function marginOfError({ stddev: spread, n, level = 0.95, method = 't' }: MarginOfErrorInput): number {
+  assertLevel(level);
+  const se = standardError({ stddev: spread, n });
+  return noNegativeZero(criticalValue(level, method, n) * se);
+}
+
+/**
+ * Confidence interval for the mean of `values`, from the exact critical value
+ * of the normal (`'z'`) or Student t with `n - 1` degrees of freedom (`'t'`,
+ * the default). The spread is the sample standard deviation (`ddof` 1) unless
+ * you pass `ddof: 0`. Needs at least 2 values.
+ */
+export function confidenceInterval(
+  values: Iterable<number>,
+  options: ConfidenceIntervalOptions = {},
+): ConfidenceInterval {
+  const { level = 0.95, method = 't' } = options;
+  assertLevel(level);
+  const data = toNumbers(values, 'values');
+  if (data.length < 2) throw new EmptyDataError(`confidence interval needs at least 2 values, got ${data.length}`);
+  const center = noNegativeZero(meanOf(data));
+  const margin = criticalValue(level, method, data.length) * standardError(data, options);
+  assertRepresentable(margin, 'margin of error');
+  return { mean: center, lower: center - margin, upper: center + margin, marginOfError: margin, level };
+}
+
+/**
+ * Smallest sample size, rounded up, that keeps the margin of error at or below
+ * `marginOfError` with the given `level` (default 0.95), using the normal
+ * critical value `z`. For a mean pass `stddev`: `n = (z * stddev / E)^2`. For a
+ * proportion pass `proportion` (default 0.5, the worst case):
+ * `n = z^2 * p * (1 - p) / E^2`.
+ */
+export function sampleSize(input: MeanSampleSizeInput | ProportionSampleSizeInput): number {
+  const { marginOfError: margin, level = 0.95 } = input;
+  assertFinite(margin, 'marginOfError');
+  if (margin <= 0) throw new InvalidArgumentError(`marginOfError must be positive, got ${margin}`);
+  assertLevel(level);
+  const z = normal().quantile(1 - (1 - level) / 2);
+  let spread: number;
+  if (input.stddev === undefined) {
+    const p = input.proportion ?? 0.5;
+    assertFinite(p, 'proportion');
+    if (p < 0 || p > 1) throw new InvalidArgumentError(`proportion must be within [0, 1], got ${p}`);
+    spread = p * (1 - p);
+  } else {
+    if (input.proportion !== undefined) throw new InvalidArgumentError('pass stddev or proportion, not both');
+    spread = assertSpread(input.stddev, 'stddev') ** 2;
+  }
+  // Tiny rounding noise must not push an exact integer (e.g. 100) up to 101.
+  const n = Math.ceil((z * z * spread) / (margin * margin) - 1e-9);
+  return Math.max(1, assertRepresentable(n, 'sample size'));
+}
+
+// ---------------------------------------------------------------------------
+// Curve fits
+// ---------------------------------------------------------------------------
+
+/** `r2` on the original scale; a constant y is explained perfectly only by a perfect fit. */
+function rSquared(ys: readonly number[], predicted: readonly number[]): number {
+  const center = meanOf(ys);
+  let residual = 0;
+  let total = 0;
+  for (const [i, y] of ys.entries()) {
+    const miss = y - (predicted[i] ?? 0);
+    residual += miss * miss;
+    total += (y - center) * (y - center);
+  }
+  if (total === 0) return residual === 0 ? 1 : 0;
+  return noNegativeZero(Math.min(1, 1 - residual / total));
+}
+
+function assertAllPositive(values: readonly number[], name: string): void {
+  const index = values.findIndex(value => value <= 0);
+  if (index !== -1) throw new InvalidArgumentError(`${name}[${index}] must be positive, got ${values[index]}`);
+}
+
+/**
+ * Exponential fit `y = a * e^(b * x)`, by least squares on `ln y` against x
+ * (so large y weigh less than in a direct fit). `r2` is measured on the original y.
+ * Throws `InvalidArgumentError` unless every y is positive, plus `linearRegression`'s conditions.
+ */
+export function exponentialRegression(x: Iterable<number>, y: Iterable<number>): ExponentialFit {
+  const { xs, ys } = pairs(x, y);
+  assertAllPositive(ys, 'y');
+  const line = linearRegression(
+    xs,
+    ys.map(v => Math.log(v)),
+  );
+  const a = assertRepresentable(Math.exp(line.intercept), 'a');
+  const b = line.slope;
+  const predict = (at: number): number => a * Math.exp(b * at);
+  return {
+    a,
+    b,
+    r2: rSquared(
+      ys,
+      xs.map(v => predict(v)),
+    ),
+    predict,
+  };
+}
+
+/**
+ * Logarithmic fit `y = a + b * ln(x)`, by least squares on `ln x`. `r2` is
+ * measured on the original y. Throws `InvalidArgumentError` unless every x is
+ * positive; `predict` does too.
+ */
+export function logarithmicRegression(x: Iterable<number>, y: Iterable<number>): LogarithmicFit {
+  const { xs, ys } = pairs(x, y);
+  assertAllPositive(xs, 'x');
+  const line = linearRegression(
+    xs.map(v => Math.log(v)),
+    ys,
+  );
+  const { intercept: a, slope: b } = line;
+  const predict = (at: number): number => {
+    assertFinite(at, 'x');
+    if (at <= 0) throw new InvalidArgumentError(`x must be positive, got ${at}`);
+    return a + b * Math.log(at);
+  };
+  return {
+    a,
+    b,
+    r2: rSquared(
+      ys,
+      xs.map(v => predict(v)),
+    ),
+    predict,
+  };
+}
+
+/**
+ * Power fit `y = a * x^b`, by least squares on `ln y` against `ln x`. `r2` is
+ * measured on the original y. Throws `InvalidArgumentError` unless every x and
+ * y is positive; `predict` needs a positive x.
+ */
+export function powerRegression(x: Iterable<number>, y: Iterable<number>): PowerFit {
+  const { xs, ys } = pairs(x, y);
+  assertAllPositive(xs, 'x');
+  assertAllPositive(ys, 'y');
+  const line = linearRegression(
+    xs.map(v => Math.log(v)),
+    ys.map(v => Math.log(v)),
+  );
+  const a = assertRepresentable(Math.exp(line.intercept), 'a');
+  const b = line.slope;
+  const predict = (at: number): number => {
+    assertFinite(at, 'x');
+    if (at <= 0) throw new InvalidArgumentError(`x must be positive, got ${at}`);
+    return a * Math.pow(at, b);
+  };
+  return {
+    a,
+    b,
+    r2: rSquared(
+      ys,
+      xs.map(v => predict(v)),
+    ),
+    predict,
+  };
+}
+
+/**
+ * Solves `matrix * solution = rhs` (square, modified in place) by Gaussian
+ * elimination with partial pivoting. A pivot that is tiny next to the largest
+ * entry means the system is numerically singular.
+ */
+function solveLinearSystem(matrix: number[][], rhs: number[]): number[] {
+  const size = rhs.length;
+  let largest = 0;
+  for (const row of matrix) for (const value of row) largest = Math.max(largest, Math.abs(value));
+  for (let col = 0; col < size; col++) {
+    let pivotRow = col;
+    for (let r = col + 1; r < size; r++) {
+      if (Math.abs(matrix[r]![col]!) > Math.abs(matrix[pivotRow]![col]!)) pivotRow = r;
+    }
+    if (Math.abs(matrix[pivotRow]![col]!) <= largest * 1e-13) {
+      throw new NumericRangeError('polynomial fit is ill-conditioned; lower the degree or rescale x');
+    }
+    [matrix[col], matrix[pivotRow]] = [matrix[pivotRow]!, matrix[col]!];
+    [rhs[col], rhs[pivotRow]] = [rhs[pivotRow]!, rhs[col]!];
+    for (let r = col + 1; r < size; r++) {
+      const factor = matrix[r]![col]! / matrix[col]![col]!;
+      for (let c = col; c < size; c++) matrix[r]![c]! -= factor * matrix[col]![c]!;
+      rhs[r]! -= factor * rhs[col]!;
+    }
+  }
+  const solution: number[] = Array.from<number>({ length: size }).fill(0);
+  for (let r = size - 1; r >= 0; r--) {
+    let acc = rhs[r]!;
+    for (let c = r + 1; c < size; c++) acc -= matrix[r]![c]! * solution[c]!;
+    solution[r] = acc / matrix[r]![r]!;
+  }
+  return solution;
+}
+
+/**
+ * Least-squares polynomial of the given `degree`, by the normal equations.
+ * Coefficients are lowest degree first (`[c0, c1, ...]`); `r2` is measured on
+ * the original y. x is scaled by its largest magnitude while solving, which
+ * keeps the system well conditioned for moderate degrees.
+ * Throws `InvalidArgumentError` for a non-integer or negative degree, or fewer
+ * distinct x values than `degree + 1`, and `NumericRangeError` when the system
+ * is numerically singular.
+ */
+export function polynomialRegression(x: Iterable<number>, y: Iterable<number>, degree: number): PolynomialFit {
+  if (!Number.isInteger(degree) || degree < 0) {
+    throw new InvalidArgumentError(`degree must be a non-negative integer, got ${degree}`);
+  }
+  const { xs, ys } = pairs(x, y);
+  if (new Set(xs).size < degree + 1) {
+    throw new InvalidArgumentError(`degree ${degree} needs at least ${degree + 1} distinct x values`);
+  }
+  const scale = xs.reduce((m, v) => Math.max(m, Math.abs(v)), 0) || 1;
+  const size = degree + 1;
+  // powerSums[k] = sum(u^k), moments[k] = sum(u^k * y), with u = x / scale.
+  const powerSums: number[] = Array.from<number>({ length: 2 * degree + 1 }).fill(0);
+  const moments: number[] = Array.from<number>({ length: size }).fill(0);
+  for (const [i, value] of xs.entries()) {
+    const u = value / scale;
+    let power = 1;
+    for (let k = 0; k <= 2 * degree; k++) {
+      powerSums[k]! += power;
+      if (k < size) moments[k]! += power * (ys[i] ?? 0);
+      power *= u;
+    }
+  }
+  const matrix = Array.from({ length: size }, (_, r) => Array.from({ length: size }, (_, c) => powerSums[r + c]!));
+  const scaled = solveLinearSystem(matrix, moments);
+  const coefficients = scaled.map((c, k) => assertRepresentable(noNegativeZero(c / scale ** k), 'coefficient'));
+  const predict = (at: number): number => {
+    assertFinite(at, 'x');
+    let result = 0;
+    for (let k = coefficients.length - 1; k >= 0; k--) result = result * at + coefficients[k]!;
+    return result;
+  };
+  return {
+    coefficients,
+    r2: rSquared(
+      ys,
+      xs.map(v => predict(v)),
+    ),
+    predict,
+  };
 }

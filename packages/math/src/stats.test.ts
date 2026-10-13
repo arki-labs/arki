@@ -4,17 +4,26 @@ import type { VarianceOptions } from './stats.js';
 import { Decimal, decimal } from './decimal.js';
 import { EmptyDataError, InvalidArgumentError, NumericRangeError, RoundingNecessaryError } from './errors.js';
 import {
+  confidenceInterval,
   correlation,
+  exponentialRegression,
   linearRegression,
+  logarithmicRegression,
+  marginOfError,
   mean,
   median,
   minMax,
   mode,
   percentile,
+  polynomialRegression,
+  powerRegression,
   quantile,
+  sampleSize,
+  standardError,
   stddev,
   sum,
   variance,
+  zScore,
 } from './stats.js';
 
 describe('sum', () => {
@@ -494,5 +503,192 @@ describe('fast paths give the same answers as the plain definitions', () => {
     const expected = data.reduce((total, value) => total + (value - 1e9 - average) ** 2, 0) / data.length;
     expect(variance(data, { ddof: 0 })).toBeCloseTo(expected, 9);
     expect(stddev(data, { ddof: 0 })).toBeCloseTo(Math.sqrt(expected), 9);
+  });
+});
+
+describe('zScore', () => {
+  it('counts standard deviations from the mean', () => {
+    expect(zScore(130, 100, 15)).toBe(2);
+    expect(zScore(85, 100, 15)).toBe(-1);
+  });
+  it('rejects a non-positive spread, where the score is undefined', () => {
+    expect(() => zScore(1, 0, 0)).toThrow(InvalidArgumentError);
+    expect(() => zScore(1, 0, -1)).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('standardError', () => {
+  it('is stddev / sqrt(n) for data (sample stddev by default)', () => {
+    // [2,4,4,4,5,5,7,9]: population sd = 2, sample sd = sqrt(32/7)
+    const data = [2, 4, 4, 4, 5, 5, 7, 9];
+    expect(standardError(data, { ddof: 0 })).toBeCloseTo(2 / Math.sqrt(8), 12);
+    expect(standardError(data)).toBeCloseTo(Math.sqrt(32 / 7) / Math.sqrt(8), 12);
+  });
+  it('accepts a known stddev and n', () => {
+    expect(standardError({ stddev: 10, n: 25 })).toBe(2);
+  });
+  it('rejects a bad count or too little data', () => {
+    expect(() => standardError({ stddev: 1, n: 0 })).toThrow(InvalidArgumentError);
+    expect(() => standardError([1])).toThrow(EmptyDataError);
+  });
+});
+
+describe('marginOfError and confidenceInterval', () => {
+  // Reference: z(0.975) = 1.959_963_984_540_054; t(0.975, df = 9) = 2.262_157_162_740_992 (R: qt(0.975, 9)).
+  it('uses the exact z critical value', () => {
+    expect(marginOfError({ stddev: 10, n: 100, method: 'z' })).toBeCloseTo(1.959_963_984_540_054, 9);
+  });
+  it('uses the exact t critical value by default', () => {
+    expect(marginOfError({ stddev: 10, n: 10 })).toBeCloseTo((2.262_157_162_740_992 * 10) / Math.sqrt(10), 9);
+  });
+  it('builds an interval around the mean (R: t.test(1:10)$conf.int is 3.334149 7.665851)', () => {
+    const ci = confidenceInterval([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(ci.mean).toBe(5.5);
+    expect(ci.level).toBe(0.95);
+    expect(ci.lower).toBeCloseTo(3.334_149, 6);
+    expect(ci.upper).toBeCloseTo(7.665_851, 6);
+    expect(ci.marginOfError).toBeCloseTo(2.165_851, 6);
+  });
+  it('is narrower with z than with t, and wider at higher levels', () => {
+    const data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    expect(confidenceInterval(data, { method: 'z' }).marginOfError).toBeLessThan(
+      confidenceInterval(data).marginOfError,
+    );
+    expect(confidenceInterval(data, { level: 0.99 }).marginOfError).toBeGreaterThan(
+      confidenceInterval(data).marginOfError,
+    );
+  });
+  it('rejects bad levels, too little data and a t interval from one observation', () => {
+    expect(() => confidenceInterval([1, 2, 3], { level: 1 })).toThrow(InvalidArgumentError);
+    expect(() => confidenceInterval([1])).toThrow(EmptyDataError);
+    expect(() => marginOfError({ stddev: 1, n: 1 })).toThrow(InvalidArgumentError);
+    expect(marginOfError({ stddev: 1, n: 1, method: 'z' })).toBeCloseTo(1.959_963_984_540_054, 9);
+  });
+});
+
+describe('sampleSize', () => {
+  it('sizes a poll for a +-3% margin at 95% (the classic 1068)', () => {
+    expect(sampleSize({ marginOfError: 0.03 })).toBe(1068);
+  });
+  it('sizes a mean: (z * sd / E)^2 rounded up', () => {
+    // (1.959_963_984_540_054 * 15 / 2)^2 = 216.09 -> 217
+    expect(sampleSize({ marginOfError: 2, stddev: 15 })).toBe(217);
+  });
+  it('uses the given proportion', () => {
+    // 1.959964^2 * 0.2 * 0.8 / 0.05^2 = 245.86 -> 246
+    expect(sampleSize({ marginOfError: 0.05, proportion: 0.2 })).toBe(246);
+  });
+  it('does not round an exact integer up', () => {
+    // z = 1 would need level 0.6826894921370859; use sd = E / z * 10 style: E = 1.959_963_984_540_054, sd = 1 -> n = 1
+    expect(sampleSize({ marginOfError: 1.959_963_984_540_054, stddev: 1 })).toBe(1);
+  });
+  it('rejects a non-positive margin or both spreads', () => {
+    expect(() => sampleSize({ marginOfError: 0 })).toThrow(InvalidArgumentError);
+    expect(() => sampleSize({ marginOfError: 0.1, proportion: 2 })).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('exponentialRegression', () => {
+  it('recovers y = 2 e^(0.5 x) exactly', () => {
+    const xs = [0, 1, 2, 3, 4];
+    const fit = exponentialRegression(
+      xs,
+      xs.map(v => 2 * Math.exp(0.5 * v)),
+    );
+    expect(fit.a).toBeCloseTo(2, 10);
+    expect(fit.b).toBeCloseTo(0.5, 10);
+    expect(fit.r2).toBeCloseTo(1, 10);
+    expect(fit.predict(5)).toBeCloseTo(2 * Math.exp(2.5), 8);
+  });
+  it('matches the log-linear least squares on noisy data (NumPy polyfit(x, log(y), 1))', () => {
+    // x = 1..4, y = 2, 5, 11, 30: ln y = .6931, 1.6094, 2.3979, 3.4012 -> slope 0.8913, intercept -0.2029 (hand-checked)
+    const fit = exponentialRegression([1, 2, 3, 4], [2, 5, 11, 30]);
+    expect(fit.b).toBeCloseTo(0.8913, 3);
+    expect(Math.log(fit.a)).toBeCloseTo(-0.2029, 3);
+    expect(fit.r2).toBeGreaterThan(0.95);
+    expect(fit.r2).toBeLessThanOrEqual(1);
+  });
+  it('rejects non-positive y, where ln is undefined', () => {
+    expect(() => exponentialRegression([1, 2, 3], [1, 0, 2])).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('logarithmicRegression', () => {
+  it('recovers y = 1 + 2 ln x', () => {
+    const xs = [1, 2, 4, 8];
+    const fit = logarithmicRegression(
+      xs,
+      xs.map(v => 1 + 2 * Math.log(v)),
+    );
+    expect(fit.a).toBeCloseTo(1, 10);
+    expect(fit.b).toBeCloseTo(2, 10);
+    expect(fit.r2).toBeCloseTo(1, 10);
+    expect(fit.predict(16)).toBeCloseTo(1 + 2 * Math.log(16), 10);
+  });
+  it('rejects non-positive x in the data and in predict', () => {
+    expect(() => logarithmicRegression([0, 1, 2], [1, 2, 3])).toThrow(InvalidArgumentError);
+    expect(() => logarithmicRegression([1, 2, 3], [1, 2, 3]).predict(0)).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('powerRegression', () => {
+  it('recovers y = 3 x^2', () => {
+    const xs = [1, 2, 3, 4, 5];
+    const fit = powerRegression(
+      xs,
+      xs.map(v => 3 * v * v),
+    );
+    expect(fit.a).toBeCloseTo(3, 10);
+    expect(fit.b).toBeCloseTo(2, 10);
+    expect(fit.r2).toBeCloseTo(1, 10);
+    expect(fit.predict(10)).toBeCloseTo(300, 7);
+  });
+  it('rejects non-positive x or y', () => {
+    expect(() => powerRegression([1, 2, 3], [1, -2, 3])).toThrow(InvalidArgumentError);
+    expect(() => powerRegression([0, 2, 3], [1, 2, 3])).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('polynomialRegression', () => {
+  it('recovers an exact quadratic, lowest degree first', () => {
+    const xs = [-2, -1, 0, 1, 2, 3];
+    const fit = polynomialRegression(
+      xs,
+      xs.map(v => 1 - 2 * v + 0.5 * v * v),
+      2,
+    );
+    expect(fit.coefficients[0]).toBeCloseTo(1, 10);
+    expect(fit.coefficients[1]).toBeCloseTo(-2, 10);
+    expect(fit.coefficients[2]).toBeCloseTo(0.5, 10);
+    expect(fit.r2).toBeCloseTo(1, 10);
+    expect(fit.predict(4)).toBeCloseTo(1 - 8 + 8, 9);
+  });
+  it('degree 1 agrees with linearRegression', () => {
+    const x = [1, 2, 3, 4, 5];
+    const y = [2, 1, 4, 3, 5];
+    const fit = polynomialRegression(x, y, 1);
+    expect(fit.coefficients[0]).toBeCloseTo(0.6, 12);
+    expect(fit.coefficients[1]).toBeCloseTo(0.8, 12);
+    // r2 of the line = correlation^2: sxy^2 / (sxx * syy) = 64 / (10 * 10)
+    expect(fit.r2).toBeCloseTo(0.64, 12);
+  });
+  it('fits a cubic on large x without losing the leading terms', () => {
+    const xs = [100, 200, 300, 400, 500, 600];
+    const fit = polynomialRegression(
+      xs,
+      xs.map(v => 5 + 0.1 * v - 1e-4 * v ** 3),
+      3,
+    );
+    expect(fit.coefficients[3]).toBeCloseTo(-1e-4, 12);
+    expect(fit.predict(350)).toBeCloseTo(5 + 35 - 1e-4 * 350 ** 3, 4);
+  });
+  it('rejects insufficient distinct x and bad degrees', () => {
+    expect(() => polynomialRegression([1, 1, 2], [1, 2, 3], 2)).toThrow(InvalidArgumentError);
+    expect(() => polynomialRegression([1, 2, 3], [1, 2, 3], 1.5)).toThrow(InvalidArgumentError);
+    expect(() => polynomialRegression([1, 2, 3], [1, 2, 3], -1)).toThrow(InvalidArgumentError);
+  });
+  it('reports a numerically singular system as a typed error', () => {
+    const xs = Array.from({ length: 30 }, (_, i) => i + 1);
+    expect(() => polynomialRegression(xs, xs, 25)).toThrow(NumericRangeError);
   });
 });
