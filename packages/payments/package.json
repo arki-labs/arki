@@ -1,0 +1,103 @@
+{
+  "name": "@arki/payments",
+  "version": "0.2.0",
+  "description": "Payments for ARKI apps — Stripe provider, plans, customers, subscriptions, payments, refunds, dunning and tax, as Drizzle table factories, repositories, services and @arki/journal commands.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "payments",
+    "stripe",
+    "subscriptions",
+    "billing",
+    "refunds",
+    "dunning",
+    "drizzle"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "default": "./dist/core/index.js"
+    },
+    "./presets": {
+      "types": "./dist/presets/index.d.ts",
+      "import": "./dist/presets/index.js",
+      "default": "./dist/presets/index.js"
+    },
+    "./env": {
+      "types": "./dist/env.d.ts",
+      "import": "./dist/env.js",
+      "default": "./dist/env.js"
+    },
+    "./dunning": {
+      "types": "./dist/dunning/index.d.ts",
+      "import": "./dist/dunning/index.js",
+      "default": "./dist/dunning/index.js"
+    },
+    "./tax": {
+      "types": "./dist/tax/index.d.ts",
+      "import": "./dist/tax/index.js",
+      "default": "./dist/tax/index.js"
+    },
+    "./refunds": {
+      "types": "./dist/refunds/index.d.ts",
+      "import": "./dist/refunds/index.js",
+      "default": "./dist/refunds/index.js"
+    },
+    "./repositories": {
+      "types": "./dist/repositories.d.ts",
+      "import": "./dist/repositories.js",
+      "default": "./dist/repositories.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js",
+      "default": "./dist/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/__tests__/**",
+    "!src/**/*test-support.ts",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@arki/contracts": "0.0.5",
+    "@arki/date": "0.1.0",
+    "@arki/db": "0.1.9",
+    "@arki/env": "0.0.8",
+    "@arki/journal": "0.1.0",
+    "@arki/kv": "0.1.7",
+    "@arki/log": "0.0.3",
+    "@arki/money": "0.0.4",
+    "@t3-oss/env-core": "^0.13.11",
+    "drizzle-orm": "1.0.0-rc.4",
+    "stripe": "23.0.0",
+    "zod": "4.6.5"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

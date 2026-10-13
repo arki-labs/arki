@@ -16,3 +16,5 @@ export * from 'zod/v4';
  * only TAGS or READS schema metadata keeps working in the browser.
  */
 export const COLUMN_ZOD_SCHEMA: unique symbol = Symbol.for('@arki/contracts/columnZodSchema') as never;
+
+export * from './ids.js';

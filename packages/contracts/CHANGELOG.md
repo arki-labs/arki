@@ -1,5 +1,11 @@
 # @arki/contracts
 
+## 0.0.5
+
+### Patch Changes
+
+- Add `UserId`, the `` `usr_${string}` `` id of a user, and `userIdSchema` to validate one. Packages that refer to a user (such as `@arki/payments` and `@arki/auth`) share this one type through contracts instead of depending on each other.
+
 ## 0.0.4
 
 ### Patch Changes
