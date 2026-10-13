@@ -11,6 +11,7 @@ import type { RoundingMode } from './rounding.js';
 import { InvalidArgumentError, NumberFormatError, ResourceLimitError } from './errors.js';
 import { abs, digitCount, divideRounded, pow10 } from './internal/bigint.js';
 import { partsFromNumber } from './internal/parse.js';
+import { roundExact, roundToExact } from './internal/round.js';
 
 /** Interval notation: `[` / `]` include the bound, `(` / `)` exclude it. */
 export type Bounds = '[]' | '[)' | '(]' | '()';
@@ -137,20 +138,116 @@ export function inRange(x: number, min: number, max: number, bounds: Bounds = '[
   return lowOk && highOk;
 }
 
+/** `10 ** k` for k = 0..22: every one is a double with no rounding error. */
+const EXACT_POW10: readonly number[] = (() => {
+  const out = [1];
+  for (let k = 1; k <= 22; k++) out.push(out[k - 1]! * 10);
+  return out;
+})();
+const MAX_EXACT_POW10 = EXACT_POW10.length - 1;
+
+/** The float fast path only handles quotients below 2^50 (see `roundedQuotient`). */
+const FAST_LIMIT = 2 ** 50;
+/** Relative error budget of a fast-path quotient: 2^-50, four times the worst case (2^-52). */
+const FAST_MARGIN = 2 ** -50;
+
+/*
+ * Why the fast path agrees with the exact one (`internal/round.ts`).
+ *
+ * `round` works on D, the shortest decimal text of `x` (`String(x)`). D is within
+ * half an ulp of x, so |D − x| ≤ |x|·2^-53 for every normal double. The fast path
+ * computes q = fl(|x| · 10^p) (or a quotient with at most one more rounding), so
+ * |q − |D|·10^p| ≤ q·3·2^-53 < q·2^-50 (FAST_MARGIN). With q < 2^50 the integer
+ * and fractional parts of q are exact, so when the fraction is farther than the
+ * margin from every boundary the mode cares about (½ for the half modes, 0 and 1
+ * for the directed ones) the true value sits strictly on the same side and the
+ * rounded integer is known. The result n / 10^p (or n · 10^p) of two exact doubles
+ * is correctly rounded, which is what the exact path's `Number(n + "e" + -p)` returns.
+ * Subnormal x only reach quotients far below ½, so only their sign matters.
+ *
+ * Near a boundary the fast path proves "nothing to round" or gives up: if the
+ * candidate integer n converts back to |x| exactly, then n·10^-p is the only
+ * p-place decimal that rounds to x (the gap 10^-p is over four ulps wide when
+ * |x|·10^p < 2^50), and the shortest text D has no more places than it, so D is
+ * that decimal and x is already rounded. Anything else, including ties and
+ * 'unnecessary', goes to the exact path.
+ */
+
+/**
+ * The rounded integer for a non-negative float quotient `scaled` that is within
+ * `scaled · 2^-52` of the true one, or `undefined` when the true quotient may lie
+ * on either side of a rounding boundary.
+ */
+function roundedQuotient(scaled: number, negative: boolean, mode: RoundingMode): number | undefined {
+  const whole = Math.trunc(scaled);
+  const fraction = scaled - whole;
+  const margin = scaled * FAST_MARGIN;
+  switch (mode) {
+    case 'halfUp':
+    case 'halfDown':
+    case 'halfEven': {
+      if (Math.abs(fraction - 0.5) <= margin) return undefined;
+      return fraction < 0.5 ? whole : whole + 1;
+    }
+    case 'unnecessary': {
+      return undefined;
+    }
+    default: {
+      if (fraction <= margin || fraction >= 1 - margin) return undefined;
+      const away = mode === 'up' || (mode === 'ceiling' && !negative) || (mode === 'floor' && negative);
+      return away ? whole + 1 : whole;
+    }
+  }
+}
+
+function assertPlaces(places: number): void {
+  if (!Number.isSafeInteger(places) || Math.abs(places) > 1000) {
+    throw new InvalidArgumentError(`places must be an integer within ±1000, got ${places}`);
+  }
+}
+
 /**
  * Rounds the number you typed, not its binary approximation:
  * `round(1.005, 2)` is `1.01` (plain `Math.round(1.005 * 100) / 100` gives `1`).
  * Negative `places` round to tens, hundreds, ...
+ *
+ * Most calls take a float fast path that is proven to give the same result as
+ * exact decimal rounding; only values within a few ulps of a tie (or of a whole
+ * unit, for the directed modes) pay for the exact path.
  */
 export function round(x: number, places = 0, mode: RoundingMode = 'halfUp'): number {
   assertFinite(x, 'x');
-  if (!Number.isSafeInteger(places) || Math.abs(places) > 1000) {
-    throw new InvalidArgumentError(`places must be an integer within ±1000, got ${places}`);
+  assertPlaces(places);
+  const magnitude = Math.abs(x);
+  if (Math.abs(places) <= MAX_EXACT_POW10 && magnitude <= Number.MAX_SAFE_INTEGER) {
+    const unit = EXACT_POW10[Math.abs(places)]!;
+    const scaled = places >= 0 ? magnitude * unit : magnitude / unit;
+    if (scaled < FAST_LIMIT) {
+      const rounded = roundedQuotient(scaled, x < 0, mode);
+      if (rounded !== undefined) {
+        const result = places >= 0 ? rounded / unit : rounded * unit;
+        return noNegativeZero(x < 0 ? -result : result);
+      }
+      const candidate = Math.round(scaled);
+      if ((places >= 0 ? candidate / unit : candidate * unit) === magnitude) return noNegativeZero(x);
+    }
   }
-  const { coefficient, scale } = partsFromNumber(x);
-  if (places >= scale) return noNegativeZero(x);
-  const rounded = divideRounded(coefficient, pow10(scale - places), mode);
-  return noNegativeZero(Number(`${rounded}e${-places}`));
+  return roundExact(x, places, mode);
+}
+
+/**
+ * `step` as `coefficient / 10^exponent` with both small enough for the fast path,
+ * or `undefined`. The first exponent whose candidate converts back to `step` gives
+ * its shortest decimal text (the same argument as for `round`).
+ */
+function decimalStep(step: number): { coefficient: number; exponent: number } | undefined {
+  for (let exponent = 0; exponent <= MAX_EXACT_POW10; exponent++) {
+    const power = EXACT_POW10[exponent]!;
+    const coefficient = Math.round(step * power);
+    if (coefficient >= FAST_LIMIT) return undefined;
+    if (coefficient / power === step) return { coefficient, exponent };
+  }
+  return undefined;
 }
 
 /** Rounds to the nearest multiple of `step`, measured from zero: `roundTo(127.3, 5)` → `125`. */
@@ -158,10 +255,24 @@ export function roundTo(x: number, step: number, mode: RoundingMode = 'halfUp'):
   assertFinite(x, 'x');
   assertFinite(step, 'step');
   if (step <= 0) throw new InvalidArgumentError(`step must be positive, got ${step}`);
-  const value = partsFromNumber(x);
-  const unit = partsFromNumber(step);
-  const multiple = divideRounded(value.coefficient * pow10(unit.scale), unit.coefficient * pow10(value.scale), mode);
-  return noNegativeZero(Number(`${multiple * unit.coefficient}e${-unit.scale}`));
+  const magnitude = Math.abs(x);
+  const unit = magnitude <= Number.MAX_SAFE_INTEGER ? decimalStep(step) : undefined;
+  if (unit !== undefined) {
+    const power = EXACT_POW10[unit.exponent]!;
+    const scaled = magnitude / step;
+    if (scaled < FAST_LIMIT) {
+      const multiple = roundedQuotient(scaled, x < 0, mode);
+      if (multiple === undefined) {
+        const digits = Math.round(scaled) * unit.coefficient;
+        if (digits < FAST_LIMIT && digits / power === magnitude) return noNegativeZero(x);
+      } else {
+        // An exact integer product below 2^53 divided by an exact power of ten: correctly rounded.
+        const digits = multiple * unit.coefficient;
+        if (digits <= Number.MAX_SAFE_INTEGER) return noNegativeZero((x < 0 ? -digits : digits) / power);
+      }
+    }
+  }
+  return roundToExact(x, step, mode);
 }
 
 /**

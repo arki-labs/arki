@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { decimal } from './decimal.js';
 import { InvalidArgumentError, NumberFormatError, ResourceLimitError } from './errors.js';
+import { roundExact, roundToExact } from './internal/round.js';
 import {
   approxEqual,
   clamp,
@@ -81,6 +82,119 @@ describe('roundTo', () => {
   it('rejects zero or negative steps', () => {
     expect(() => roundTo(1, 0)).toThrow(InvalidArgumentError);
     expect(() => roundTo(1, -1)).toThrow(InvalidArgumentError);
+  });
+});
+
+function rng(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 1_831_565_813) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+const view = new DataView(new ArrayBuffer(8));
+function nextUp(value: number): number {
+  if (value === 0) return Number.MIN_VALUE;
+  view.setFloat64(0, value);
+  view.setBigUint64(0, view.getBigUint64(0) + (value > 0 ? 1n : -1n));
+  return view.getFloat64(0);
+}
+function nextDown(value: number): number {
+  return -nextUp(-value);
+}
+
+function outcome(run: () => number): number | string {
+  try {
+    return run();
+  } catch (error) {
+    return error instanceof Error ? error.constructor.name : 'unknown';
+  }
+}
+
+function expectSame(actual: number | string, expected: number | string, label: string): void {
+  // Object.is so that a -0 from either side would fail.
+  if (!Object.is(actual, expected)) expect({ label, actual }).toEqual({ label, actual: expected });
+}
+
+/**
+ * The float fast path in `round` / `roundTo` must be indistinguishable from exact decimal
+ * rounding (`internal/round.ts`, the pre-fast-path implementation). A divergence would mean
+ * a calculator shows a different last digit than the user expects, so the oracle compares
+ * every mode on a seeded mix that over-samples the hard cases: typed ties (`x.xx5`), values
+ * already at the requested precision, near-integers, huge and tiny magnitudes.
+ */
+describe('round / roundTo fast path matches exact decimal rounding', () => {
+  const random = rng(20_261_013);
+  const int = (n: number): number => Math.floor(random() * n);
+
+  function sample(): number {
+    const sign = random() < 0.5 ? -1 : 1;
+    switch (int(6)) {
+      case 0: {
+        // Any double across 30 decades.
+        return sign * random() * 10 ** (int(30) - 12);
+      }
+      case 1: {
+        // A typed tie at some precision: 1.005, 2.675, 0.125, 12345.5 ...
+        return sign * Number(`${int(1_000_000)}5e-${1 + int(12)}`);
+      }
+      case 2: {
+        // Already short: 1.5, 0.07, 1234.
+        return sign * Number(`${int(100_000)}e-${int(8)}`);
+      }
+      case 3: {
+        // A value a few ulps from a typed tie or a whole unit.
+        const base = Number(`${int(100_000_000)}${random() < 0.5 ? '5' : ''}e-${int(10)}`);
+        let value = base;
+        for (let steps = int(4); steps > 0; steps--) value = random() < 0.5 ? nextUp(value) : nextDown(value);
+        return sign * value;
+      }
+      case 4: {
+        // Large values near the edge of the fast path and of the safe range.
+        return sign * Math.floor(random() * 2 ** (40 + int(14)));
+      }
+      default: {
+        // Many digits: 17 significant figures.
+        return (
+          sign *
+          Number(
+            `${int(9) + 1}.${String(int(1e8)).padStart(8, '0')}${String(int(1e8)).padStart(8, '0')}e${int(20) - 10}`,
+          )
+        );
+      }
+    }
+  }
+
+  it('round: 100,000 values × digits 0–10 (and -3 to -1) × every mode', () => {
+    for (let i = 0; i < 100_000; i++) {
+      const x = sample();
+      const places = random() < 0.9 ? int(11) : -1 - int(3);
+      for (const mode of ROUNDING_MODES) {
+        expectSame(
+          outcome(() => round(x, places, mode)),
+          outcome(() => roundExact(x, places, mode)),
+          `round(${x}, ${places}, ${mode})`,
+        );
+      }
+    }
+  });
+
+  it('roundTo: 100,000 values × common and odd steps × every mode', () => {
+    const steps = [1, 5, 10, 0.5, 0.25, 0.1, 0.05, 0.01, 0.001, 0.125, 0.3, 2.5, 7, 1e-7, 0.0625, 1234.5];
+    for (let i = 0; i < 100_000; i++) {
+      const x = sample();
+      const step = steps[int(steps.length)] ?? 1;
+      for (const mode of ROUNDING_MODES) {
+        expectSame(
+          outcome(() => roundTo(x, step, mode)),
+          outcome(() => roundToExact(x, step, mode)),
+          `roundTo(${x}, ${step}, ${mode})`,
+        );
+      }
+    }
   });
 });
 
