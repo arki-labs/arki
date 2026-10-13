@@ -28,7 +28,7 @@ import { defineEntity } from './entity.js';
 import { defineEvent } from './event.js';
 import { bindEffect, defineProjection, effectFor } from './handlers.js';
 import { createHistory } from './history.js';
-import { createDrain, createWorkers } from './worker.js';
+import { createDrain, createStrandedJobs, createWorkers } from './worker.js';
 import { createWriter } from './write.js';
 
 const emptyMeta = z.object({});
@@ -153,6 +153,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     runOn: db => (command, input, meta) => journal.run(db, command, input, meta),
   });
   const workers = createWorkers<WorkerDb>({ drain: (db, opts) => journal.drain(db, opts) });
+  const strandedJobs = createStrandedJobs({ tables, effectNames: effects.map(effect => effect.name) });
 
   const journal: Journal<Meta, Tx, AppDb> = {
     write: (tx, entity, id, input) => write(tx, entity, id, input),
@@ -165,6 +166,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     drain: (db, opts) => drain(db, opts),
     worker: (db, opts) => workers.worker(db, opts),
     wake: () => workers.wakeAll(),
+    strandedJobs: db => strandedJobs(db),
     catalog: {
       entities: [...entitiesByKind.values()].map(entity => ({
         kind: entity.kind,

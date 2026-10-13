@@ -274,12 +274,18 @@ describe('effect context: run', () => {
     ]);
   });
 
-  it('queues a job for the command it ran and a later pass runs it, so one reaction can start the next', async () => {
+  it('queues a job for the command it ran and the next claim runs it, so one reaction can start the next', async () => {
     const id = await place(chain);
-    expect(await chain.drain(db)).toBe(1);
-    // The receipt job did not exist when this pass claimed its batch.
+    expect(await chain.drain(db, { batchSize: 1 })).toBe(1);
+    // The receipt job was queued by the job this pass ran, so it waits for the next claim.
     expect(receipts).not.toContain(id);
-    expect(await chain.drain(db)).toBe(1);
+    expect(await chain.drain(db, { batchSize: 1 })).toBe(1);
+    expect(receipts).toContain(id);
+  });
+
+  it('claims a job queued during the pass in the same pass, because each job is claimed just before it runs', async () => {
+    const id = await place(chain);
+    expect(await chain.drain(db)).toBe(2);
     expect(receipts).toContain(id);
   });
 
@@ -295,8 +301,9 @@ describe('effect context: run', () => {
       const done = new Promise<void>(resolve => {
         waiting.set(id, resolve);
       });
-      // This pass runs the paying effect by hand. The worker hears only the wake.
-      expect(await chain.drain(db)).toBe(1);
+      // This pass runs the paying effect by hand and claims nothing more, so the
+      // receipt job is left for the worker, which hears only the wake.
+      expect(await chain.drain(db, { batchSize: 1 })).toBe(1);
       await done;
       expect(receipts).toContain(id);
     } finally {
@@ -343,5 +350,103 @@ describe('effect context: run', () => {
     expect(job).toMatchObject({ attempts: 1, leaseToken: null, deadAt: null });
     expect(job?.lastError).toContain('mail down after the payment');
     expect(await statusOf(id)).toBe('paid');
+  });
+});
+
+const placeOn = async (target: typeof journal) => {
+  const id = orderId(++next);
+  await db.transaction(tx =>
+    target.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+  );
+};
+const jobsOf = (effect: string) => db.select().from(tables.jobs).where(eq(tables.jobs.effect, effect));
+
+describe('claiming, stopping and stranded jobs', () => {
+  it('claims each job right before it runs, so a slow first job cannot let the lease of a later one run out', async () => {
+    // A batch claimed up front starts every lease at once. If the first jobs
+    // are slow, the last leases expire before those jobs start, and a second
+    // worker takes them: the side effect would happen twice.
+    const othersClaimed: boolean[] = [];
+    const probe = j.compose({
+      tables,
+      effects: [
+        j.effect('lease-probe', order, {
+          OrderPlaced: async (_e, { jobId }) => {
+            const rows = await jobsOf('lease-probe');
+            othersClaimed.push(rows.some(row => row.id !== jobId && row.leaseToken !== null));
+          },
+        }),
+      ],
+    });
+    await placeOn(probe);
+    await placeOn(probe);
+    expect(await probe.drain(db)).toBe(2);
+    expect(othersClaimed).toEqual([false, false]);
+  });
+
+  it('claims no further job once the signal is aborted; the running job still finishes and sees the abort', async () => {
+    const controller = new AbortController();
+    const seen: boolean[] = [];
+    const probe = j.compose({
+      tables,
+      effects: [
+        j.effect('abort-probe', order, {
+          OrderPlaced: (_e, { signal }) => {
+            controller.abort();
+            seen.push(signal.aborted);
+          },
+        }),
+      ],
+    });
+    await placeOn(probe);
+    await placeOn(probe);
+    expect(await probe.drain(db, { signal: controller.signal })).toBe(1);
+    expect(seen).toEqual([true]);
+    const left = await jobsOf('abort-probe');
+    expect(left).toHaveLength(1);
+    expect(left[0]).toMatchObject({ attempts: 0, leaseToken: null });
+    // Untouched, so the next drain takes it.
+    expect(await probe.drain(db)).toBe(1);
+  });
+
+  it('worker.stop() aborts the running effect’s signal and waits for it, so a long effect can end early on shutdown', async () => {
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>(resolve => {
+      markStarted = resolve;
+    });
+    const slow = j.compose({
+      tables,
+      effects: [
+        j.effect('slow-effect', order, {
+          OrderPlaced: (_e, { signal }) =>
+            new Promise<void>(resolve => {
+              markStarted?.();
+              signal.addEventListener('abort', () => resolve(), { once: true });
+            }),
+        }),
+      ],
+    });
+    await placeOn(slow);
+    const worker = slow.worker(db, { pollMs: 10 });
+    await worker.start();
+    await started;
+    // Without the abort this never resolves: the effect waits for the signal.
+    await worker.stop();
+    expect(await jobsOf('slow-effect')).toEqual([]);
+  });
+
+  it('strandedJobs lists pending jobs whose effect the journal does not have, so a renamed effect is visible', async () => {
+    // The jobs stay unclaimed on purpose (an older worker may still have the
+    // effect during a rolling deploy), so a count is the only way to see them.
+    const oldName = j.compose({
+      tables,
+      effects: [j.effect('old-effect-name', order, { OrderPlaced: () => Promise.resolve() })],
+    });
+    await placeOn(oldName);
+    const stranded = await journal.strandedJobs(db);
+    expect(stranded).toContainEqual({ effect: 'old-effect-name', jobs: 1 });
+    expect(stranded.map(row => row.effect)).not.toContain('order-mail');
+    const strandedForOwner = await oldName.strandedJobs(db);
+    expect(strandedForOwner.map(row => row.effect)).not.toContain('old-effect-name');
   });
 });

@@ -32,6 +32,7 @@ import type {
   Services,
   ServicesFor,
   SingleKey,
+  StrandedJobs,
   TransactionSource,
 } from './types.js';
 
@@ -174,14 +175,19 @@ export type Journal<
     opts?: { readonly afterSeq?: number; readonly batchSize?: number },
   ): Promise<{ readonly events: number }>;
   /**
-   * Run one batch of due jobs. Returns how many jobs were claimed. Root database only.
+   * Run up to `batchSize` due jobs. Returns how many jobs were claimed. Root database only.
    * It must open the journal's transaction type: an effect runs commands on it.
+   * Each job is claimed right before it runs, so its lease covers only its own work.
+   * Once `signal` is aborted no further job is claimed; the running one sees it as `ctx.signal`.
    */
   drain(
     db: AppDb & RootDb & TransactionSource<Tx>,
     opts?: { readonly batchSize?: number; readonly signal?: AbortSignal },
   ): Promise<number>;
-  /** A loop around `drain`. `stop()` finishes the current batch. The same database as `drain`. */
+  /**
+   * A loop around `drain`. The same database as `drain`. `stop()` aborts the running
+   * effect's `ctx.signal`, claims nothing more, and resolves when that effect returns.
+   */
   worker(
     db: AppDb & RootDb & TransactionSource<Tx>,
     opts?: { readonly pollMs?: number; readonly batchSize?: number },
@@ -191,6 +197,14 @@ export type Journal<
    * after committing a transaction of your own that ran commands. No worker: nothing happens.
    */
   wake(): void;
+  /**
+   * Pending jobs whose effect this journal does not have, counted per effect name.
+   * `drain` leaves them alone, because during a rolling deploy an older worker may
+   * still have that effect. After the deploy, a non-empty list means an effect was
+   * renamed or removed while it had jobs: bring it back under its old name until
+   * the count is zero, or delete those job rows on purpose.
+   */
+  strandedJobs(db: DbHandle): Promise<readonly StrandedJobs[]>;
   readonly catalog: {
     /**
      * Only the entities that a projection or an effect of this journal names. An

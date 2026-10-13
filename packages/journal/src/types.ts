@@ -294,3 +294,6 @@ export type EntityInfo = { readonly kind: string; readonly table: string; readon
 
 /** `wake()` runs a drain pass now instead of at the next poll. It does nothing unless the worker is running. */
 export type JournalWorker = { start(): Promise<void>; stop(): Promise<void>; wake(): void };
+
+/** Pending jobs for one effect name that the journal has no effect for. */
+export type StrandedJobs = { readonly effect: string; readonly jobs: number };

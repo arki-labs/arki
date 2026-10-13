@@ -1,15 +1,16 @@
 /**
  * The async lane: job claims under a lease, the retry policy, `drain` (one batch),
- * the worker loop around it, and waking sleeping workers.
+ * the worker loop around it, waking sleeping workers, and counting jobs no
+ * effect of this journal can claim.
  * May import `fold`, `history`, `storage` and leaf files.
  * Must not import `journal`, `api`, `write` or `command`.
  */
 import type { z } from 'zod';
-import { and, asc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
 
 import type { History } from './history.js';
 import type { JournalTables } from './pg.js';
-import type { Effect, JournalWorker, RootDb } from './types.js';
+import type { DbHandle, Effect, JournalWorker, RootDb, StrandedJobs } from './types.js';
 import { debugDrain, debugWorker } from './debug.js';
 import { findEventDefinition } from './fold.js';
 import { leaseToken } from './id.js';
@@ -35,6 +36,8 @@ function backoffSeconds(attempts: number): number {
 /** Database time plus `seconds`. The worker's clock never decides a lease or a retry. */
 const dbNowPlus = (seconds: number) => sql`now() + make_interval(secs => ${seconds})`;
 
+type JobRow = JournalTables['jobs']['$inferSelect'];
+
 /** What `drain` needs from the journal. `Run` is the type of an effect's `ctx.run`. */
 export type DrainDeps<Meta extends z.ZodObject, AppDb extends RootDb, Run> = {
   readonly tables: JournalTables;
@@ -49,19 +52,12 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
   const { decodeStoredEvent } = deps.history;
   const effectsByName = new Map(deps.effects.map(effect => [effect.name, effect]));
 
-  return async (
-    db: AppDb & RootDb,
-    opts?: { readonly batchSize?: number; readonly signal?: AbortSignal },
-  ): Promise<number> => {
-    assertRootDb(db, 'drain');
-    const batchSize = opts?.batchSize ?? 20;
-    const signal = opts?.signal ?? new AbortController().signal;
-    const known = [...effectsByName.keys()];
-    if (known.length === 0) return 0;
+  const known = [...effectsByName.keys()];
 
-    // Every time here is database time, so a worker with a skewed clock
-    // cannot take a live lease or push a retry into the far future.
-    const claimed = await db.transaction(async tx => {
+  // Every time here is database time, so a worker with a skewed clock
+  // cannot take a live lease or push a retry into the far future.
+  const claimOne = (db: AppDb & RootDb): Promise<JobRow | undefined> =>
+    db.transaction(async (tx): Promise<JobRow | undefined> => {
       const due = await tx
         .select({ id: jobsTable.id })
         .from(jobsTable)
@@ -74,81 +70,112 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
           ),
         )
         .orderBy(asc(jobsTable.availableAt))
-        .limit(batchSize)
+        .limit(1)
         .for('update', { skipLocked: true });
-      if (due.length === 0) return [];
-      const token = leaseToken();
-      return tx
+      const first = due[0];
+      if (first === undefined) return;
+      const [claimed] = await tx
         .update(jobsTable)
         .set({
-          leaseToken: token,
+          leaseToken: leaseToken(),
           leaseUntil: dbNowPlus(LEASE_SECONDS),
           attempts: sql`${jobsTable.attempts} + 1`,
         })
-        .where(
-          inArray(
-            jobsTable.id,
-            due.map(job => job.id),
-          ),
-        )
+        .where(eq(jobsTable.id, first.id))
         .returning();
+      return claimed;
     });
-    if (claimed.length === 0) return 0;
 
-    const eventRows = await db
-      .select()
-      .from(eventsTable)
-      .where(
-        inArray(
-          eventsTable.seq,
-          claimed.map(job => job.eventSeq),
-        ),
+  const runJob = async (db: AppDb & RootDb, job: JobRow, signal: AbortSignal): Promise<void> => {
+    const effect = effectsByName.get(job.effect);
+    try {
+      if (effect === undefined) throw new Error(`effect "${job.effect}" is not registered`);
+      const [eventRow] = await db.select().from(eventsTable).where(eq(eventsTable.seq, job.eventSeq));
+      if (eventRow === undefined) throw new Error(`event seq ${job.eventSeq} not found`);
+      const event = decodeStoredEvent(
+        eventRow,
+        findEventDefinition(effect.entities, eventRow.kind, eventRow.type),
+        eventRow.entityId,
       );
-    const eventBySeq = new Map(eventRows.map(row => [row.seq, row]));
-
-    for (const job of claimed) {
-      const effect = effectsByName.get(job.effect);
-      const eventRow = eventBySeq.get(job.eventSeq);
-      try {
-        if (effect === undefined) throw new Error(`effect "${job.effect}" is not registered`);
-        if (eventRow === undefined) throw new Error(`event seq ${job.eventSeq} not found`);
-        const event = decodeStoredEvent(
-          eventRow,
-          findEventDefinition(effect.entities, eventRow.kind, eventRow.type),
-          eventRow.entityId,
-        );
-        await effect.run(event, { jobId: job.id, signal, db, run: deps.runOn(db) });
-        await db.delete(jobsTable).where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
-        debugDrain('%s %s: done', job.effect, job.id);
-      } catch (error) {
-        const dead = job.attempts >= MAX_ATTEMPTS;
-        await db
-          .update(jobsTable)
-          .set({
-            lastError: errorText(error),
-            leaseToken: null,
-            leaseUntil: null,
-            ...(dead ? { deadAt: sql`now()` } : { availableAt: dbNowPlus(backoffSeconds(job.attempts)) }),
-          })
-          .where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
-        debugDrain(
-          '%s %s: attempt %d failed%s: %s',
-          job.effect,
-          job.id,
-          job.attempts,
-          dead ? ', dead' : '',
-          errorText(error),
-        );
-      }
+      await effect.run(event, { jobId: job.id, signal, db, run: deps.runOn(db) });
+      await db.delete(jobsTable).where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
+      debugDrain('%s %s: done', job.effect, job.id);
+    } catch (error) {
+      const dead = job.attempts >= MAX_ATTEMPTS;
+      await db
+        .update(jobsTable)
+        .set({
+          lastError: errorText(error),
+          leaseToken: null,
+          leaseUntil: null,
+          ...(dead ? { deadAt: sql`now()` } : { availableAt: dbNowPlus(backoffSeconds(job.attempts)) }),
+        })
+        .where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
+      debugDrain(
+        '%s %s: attempt %d failed%s: %s',
+        job.effect,
+        job.id,
+        job.attempts,
+        dead ? ', dead' : '',
+        errorText(error),
+      );
     }
-    return claimed.length;
   };
+
+  return async (
+    db: AppDb & RootDb,
+    opts?: { readonly batchSize?: number; readonly signal?: AbortSignal },
+  ): Promise<number> => {
+    assertRootDb(db, 'drain');
+    const batchSize = opts?.batchSize ?? 20;
+    const signal = opts?.signal ?? new AbortController().signal;
+    if (known.length === 0) return 0;
+
+    // One job is claimed at a time, right before it runs, so its lease starts
+    // when its work starts. Claiming the whole batch up front would start every
+    // lease at once: while the first jobs ran, the leases of the last ones
+    // could run out, and another worker would take them and run them twice.
+    // An aborted signal stops the claiming; the job already running finishes.
+    let claimed = 0;
+    while (claimed < batchSize && !signal.aborted) {
+      const job = await claimOne(db);
+      if (job === undefined) break;
+      claimed += 1;
+      await runJob(db, job, signal);
+    }
+    return claimed;
+  };
+}
+
+/**
+ * Counts pending jobs whose effect this journal does not have. `drain` never
+ * claims them, on purpose: during a rolling deploy an older worker may still
+ * have that effect. But once every worker runs the new code, a renamed or
+ * removed effect leaves its jobs here for good, so they must be visible.
+ */
+export function createStrandedJobs(deps: { readonly tables: JournalTables; readonly effectNames: readonly string[] }) {
+  const { jobs: jobsTable } = deps.tables;
+  return async (db: DbHandle): Promise<readonly StrandedJobs[]> =>
+    db
+      .select({ effect: jobsTable.effect, jobs: sql<number>`count(*)::int` })
+      .from(jobsTable)
+      .where(
+        and(
+          isNull(jobsTable.deadAt),
+          deps.effectNames.length > 0 ? notInArray(jobsTable.effect, [...deps.effectNames]) : undefined,
+        ),
+      )
+      .groupBy(jobsTable.effect)
+      .orderBy(asc(jobsTable.effect));
 }
 
 /** What the worker loop needs from the journal. */
 export type WorkerDeps<AppDb extends RootDb> = {
   /** Runs one batch. The journal passes its own `drain` method, looked up on each call. */
-  readonly drain: (db: AppDb & RootDb, opts?: { readonly batchSize?: number }) => Promise<number>;
+  readonly drain: (
+    db: AppDb & RootDb,
+    opts?: { readonly batchSize?: number; readonly signal?: AbortSignal },
+  ) => Promise<number>;
 };
 
 export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
@@ -163,6 +190,9 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
     const pollMs = opts?.pollMs ?? DEFAULT_POLL_MS;
     let running = false;
     let loop: Promise<void> = Promise.resolve();
+    // Aborted by `stop()`. It reaches the running effect as `ctx.signal`, and
+    // `drain` claims no further job once it is aborted.
+    let stopping = new AbortController();
     let endSleep: (() => void) | undefined;
     // A wake that arrived during a pass. That pass may have looked before the
     // commit that caused the wake, so one more pass follows it.
@@ -187,7 +217,7 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
         woken = false;
         let processed = 0;
         try {
-          processed = await deps.drain(db, { batchSize: opts?.batchSize });
+          processed = await deps.drain(db, { batchSize: opts?.batchSize, signal: stopping.signal });
         } catch (error) {
           debugWorker('drain failed: %s', errorText(error));
         }
@@ -203,6 +233,7 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
       start() {
         if (running) return Promise.resolve();
         running = true;
+        stopping = new AbortController();
         wakers.add(wake);
         debugWorker('start (poll %dms)', pollMs);
         loop = run();
@@ -210,6 +241,7 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
       },
       async stop() {
         running = false;
+        stopping.abort();
         // eslint-disable-next-line drizzle/enforce-delete-with-where -- Set#delete, not a Drizzle query
         wakers.delete(wake);
         endSleep?.();

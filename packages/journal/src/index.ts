@@ -53,5 +53,6 @@ export type {
   ServicesFor,
   TransactionSource,
   JournalWorker,
+  StrandedJobs,
 } from './types.js';
 export type { JournalTables } from './pg.js';

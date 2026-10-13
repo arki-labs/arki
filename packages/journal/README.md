@@ -293,7 +293,14 @@ export const journal = j.compose({ tables, effects: [orderMail], services: { mai
 
 ## The worker
 
-`journal.worker(db, { pollMs, batchSize })` is a loop around `drain`. When a pass finds no job it sleeps `pollMs` (1000 by default). `stop()` finishes the current batch. A wake ends the sleep, so an effect does not wait for the next poll:
+`journal.worker(db, { pollMs, batchSize })` is a loop around `drain`. When a pass finds no job it sleeps `pollMs` (1000 by default).
+
+- A pass claims one job at a time, right before it runs it, up to `batchSize` jobs. So each job's 60-second lease covers its own work only, and a slow job cannot let the lease of a later one run out. A job queued during the pass can run in the same pass.
+- `stop()` aborts the running effect's `ctx.signal`, claims no further job, and resolves when that effect returns. An effect that does long work should pass `ctx.signal` on (for example to `fetch`) so shutdown does not wait for it.
+- A job longer than the 60-second lease can still be claimed by a second worker. Keep effects short, or split the work.
+- `drain` and the worker never claim a job whose effect this journal does not have. During a rolling deploy an older worker may still have it. After the deploy, `journal.strandedJobs(db)` lists what is left, counted per effect name. A non-empty list means an effect was renamed or removed while it had jobs: bring it back under its old name until the count is zero, or delete those rows on purpose.
+
+A wake ends the sleep, so an effect does not wait for the next poll:
 
 - `journal.run(db, ...)` on the root database wakes by itself. The library committed the transaction, so it knows when. It wakes only when the command queued a job.
 - With your own transaction (`journal.run(tx, ...)` or `journal.write(tx, ...)`) nothing wakes. The library cannot see your commit. Call `journal.wake()` after you commit.
