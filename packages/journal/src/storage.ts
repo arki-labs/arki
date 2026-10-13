@@ -204,7 +204,9 @@ function sameArray(a: readonly unknown[], b: readonly unknown[], same: (x: unkno
 
 /**
  * Deep equality for stored rows: `verify` compares what replay produced with what the table holds.
- * Strict: primitives, `Date`, arrays and plain objects only. A `Map`, `Set`, class instance or typed
+ * Strict: primitives, `Date`, value objects, arrays and plain objects only. A value object is a class
+ * instance with an `equals` method, such as a Temporal value from a custom column: it equals another
+ * instance of the same class when its `equals` says so. A `Map`, `Set`, other class instance or typed
  * array is never equal to anything, because JSON storage would lose its contents.
  */
 export function sameValue(a: unknown, b: unknown): boolean {
@@ -212,8 +214,18 @@ export function sameValue(a: unknown, b: unknown): boolean {
   if (typeof a !== 'object' || a === null) return Object.is(a, b);
   if (a instanceof Date) return b instanceof Date && a.getTime() === b.getTime();
   if (Array.isArray(a)) return Array.isArray(b) && sameArray(a, b, sameValue);
+  if (isValueObject(a)) return Object.getPrototypeOf(a) === Object.getPrototypeOf(b) && a.equals(b) === true;
   if (isPlainObject(a) && isPlainObject(b)) return sameKeys(a, b, sameValue);
   return false;
+}
+
+/**
+ * A class instance that defines its own equality, like Temporal's `Instant` or `PlainDate`. A column
+ * whose driver rebuilds the same class on read round-trips it; a lossy column hands back another type
+ * or another value, and `equals` then reports the difference.
+ */
+function isValueObject(value: object): value is { equals(other: unknown): unknown } {
+  return !isPlainObject(value) && 'equals' in value && typeof value.equals === 'function';
 }
 
 /**

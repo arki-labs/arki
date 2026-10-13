@@ -817,3 +817,49 @@ describe('names the journal stores', () => {
     expect(() => j.effect('mail-\u{1F4E7}', entityOf('named'), {})).not.toThrow();
   });
 });
+
+describe('value objects in custom columns', () => {
+  // Why: apps hold dates as Temporal values (`Instant`, `PlainDate`) through custom columns whose
+  // driver rebuilds the same class on read. The write check must accept a value that round-trips
+  // exactly, and still refuse one the database altered. `Amount` stands in for any such class.
+  class Amount {
+    constructor(readonly text: string) {}
+    equals(other: unknown): boolean {
+      return other instanceof Amount && other.text === this.text;
+    }
+  }
+  const amount = customType<{ data: Amount; driverData: string }>({
+    dataType: () => 'numeric(10,2)',
+    toDriver: value => value.text,
+    fromDriver: text => new Amount(text),
+  });
+  const Funded = j.event('TillFunded', z.object({ amount: z.string() }));
+  const tills = pgTable('tills', {
+    id: text('id').primaryKey(),
+    balance: amount('balance'),
+    version: integer('version').notNull().default(0),
+  });
+  const till = j.entity('till', tills).create(Funded, e => ({ balance: new Amount(e.data.amount) }));
+  const fund = (id: string, value: string) =>
+    journal.write(db, till, id, { meta, events: () => [Funded({ amount: value })] });
+
+  beforeAll(async () => {
+    await client.exec(
+      'create table tills (id text primary key, balance numeric(10,2), version integer not null default 0)',
+    );
+  });
+
+  it('a value the column keeps exactly writes, and replay and verify agree, because equal instances compare by equals', async () => {
+    const id = 't-exact';
+    const written = await fund(id, '1.23');
+    expect(written.row?.balance).toEqual(new Amount('1.23'));
+    expect(await journal.verify(db, till, id)).toEqual({ ok: true });
+  });
+
+  it('a value the column would round is refused, because equals sees the stored value differ', async () => {
+    const id = 't-round';
+    const error = await fund(id, '1.234').catch((error_: unknown) => error_);
+    expect(code(error)).toBe('VALUE_MISMATCH');
+    expect(await eventsFor(id)).toEqual([]);
+  });
+});
