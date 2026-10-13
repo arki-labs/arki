@@ -47,7 +47,6 @@ export async function initializeKV(namespace?: string): Promise<KV | null> {
     const testKey = 'startup-test';
     await instance.set(testKey, 'ok', 5); // Set with short TTL
     const result = await instance.get(testKey);
-    // eslint-disable-next-line drizzle/enforce-delete-with-where -- a KV key delete, not a drizzle query
     await instance.delete(testKey);
 
     if (result !== 'ok') {
