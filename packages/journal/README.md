@@ -146,6 +146,14 @@ Every recorded event says where it came from. The library stamps three columns; 
 
 The command context exposes `commandId` and `correlationId` for logs. To read a chain: `select * from journal_events where correlation_id = $1 order by seq`. Rows written before these columns existed have `null` in all three.
 
+### Idempotent commands
+
+A webhook or a retried request can run the same command twice. `journal.run(db, cmd, input, meta, { idempotencyKey })` makes the second run answer like the first and write nothing. The first run records the key, the command name, the parsed input and its result in `journal_receipts`, inside its own transaction, so a receipt exists exactly when the run committed. A later run with the same key and the same input returns the stored result without running the handler; hooks still run and see `ctx.idempotencyKey`. The same key with another input, or with another command, is `CONFLICT`. A concurrent repeat waits for the first to commit, then replays it. A key cannot be reused inside its own run.
+
+The result must survive JSON, because the replay returns the stored form; a result with a `Date` or a class instance fails the first run with `UNSTABLE_SCHEMA`. Return plain data: an id, a status, a version. A key from outside is scoped by the app: `${tenant}:${eventId}`, never the bare client value. A bound runner and an effect's `ctx.run` take the key per call: `runAs(cmd, input, { idempotencyKey })`.
+
+Receipts hold inputs and results, so they can hold personal data, and `forget` does not touch them. An app that keys personal flows prunes on a schedule: `journal.pruneReceipts(db, { before })`.
+
 ### Where commands run from
 
 The same `journal.run` serves every trigger. `journal.bind(db, meta)` is the same call with `db` and `meta` fixed. Checking who the caller is stays application code; business rules live in the command.
@@ -454,6 +462,14 @@ journal_events
   erased_at       timestamptz             -- set by forget; data holds the erased form
   unique (kind, entity_id, version)
   index (correlation_id)
+
+journal_receipts
+  key           varchar(256) primary key  -- the app's idempotency key
+  command       varchar(128) not null
+  input         jsonb not null            -- the parsed input, after JSON
+  result        jsonb                     -- { value } when finished; {} for no value; null while running
+  command_id    varchar not null
+  recorded_at   timestamptz not null default now()
 
 journal_jobs
   id            varchar primary key       -- job_xxx; pass it on as an idempotency key

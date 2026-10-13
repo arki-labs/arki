@@ -554,6 +554,109 @@ describe('expectedVersion from a command', () => {
   });
 });
 
+const receiptOf = async (key: string) => {
+  const rows = await db.select().from(tables.receipts).where(eq(tables.receipts.key, key));
+  return rows[0] ?? null;
+};
+const justNote = j.command(
+  'justNote',
+  z.object({ orderId: orderIdSchema, note: z.string().min(1) }),
+  (input, { write }) => write(order, input.orderId, () => [OrderNoted({ note: input.note })]),
+);
+
+describe('idempotency receipts', () => {
+  it('a repeat with the same key and input returns the first result without running the handler again', async () => {
+    // Why: a webhook is delivered at least once. The second delivery must answer like the first
+    // and write nothing, even after other writes changed the entity in between.
+    let runs = 0;
+    const settle = j.command('settle', z.object({ orderId: orderIdSchema }), async (input, { write }) => {
+      runs += 1;
+      const { row } = await write(order, input.orderId, row => (row ? [OrderPaid({ amount: 1 })] : []));
+      return { paidVersion: row?.version ?? 0 };
+    });
+    const id = orderId(++next);
+    await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
+    const key = `stripe:evt_${next}`;
+    const first = await journal.run(db, settle, { orderId: id }, meta, { idempotencyKey: key });
+    expect(first).toEqual({ paidVersion: 2 });
+    await journal.run(db, justNote, { orderId: id, note: 'in between' }, meta);
+    const again = await journal.run(db, settle, { orderId: id }, meta, { idempotencyKey: key });
+    expect(again).toEqual({ paidVersion: 2 });
+    expect(runs).toBe(1);
+    const events = await eventsOf(id);
+    expect(events.map(e => e.type)).toEqual(['OrderPlaced', 'OrderPaid', 'OrderNoted']);
+    expect(await receiptOf(key)).toMatchObject({
+      command: 'settle',
+      input: { orderId: id },
+      result: { value: { paidVersion: 2 } },
+    });
+  });
+
+  it('the same key with another input or another command is CONFLICT; a result that cannot be stored fails the first run', async () => {
+    const id = orderId(++next);
+    await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
+    const key = `k_${next}`;
+    await journal.run(db, justNote, { orderId: id, note: 'one' }, meta, { idempotencyKey: key });
+    await expect(
+      journal.run(db, justNote, { orderId: id, note: 'two' }, meta, { idempotencyKey: key }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    await expect(journal.run(db, inspectOrder, { orderId: id }, meta, { idempotencyKey: key })).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+    // A Date does not survive JSON, so the replay could not return what the first call returned.
+    const datedResult = j.command('datedResult', z.object({ orderId: orderIdSchema }), async (input, { write }) => {
+      await write(order, input.orderId, () => [OrderNoted({ note: 'dated' })]);
+      return { at: new Date() };
+    });
+    const unstable = `k_unstable_${next}`;
+    await expect(
+      journal.run(db, datedResult, { orderId: id }, meta, { idempotencyKey: unstable }),
+    ).rejects.toMatchObject({
+      code: 'UNSTABLE_SCHEMA',
+    });
+    expect(await receiptOf(unstable), 'rolled back with the write').toBeNull();
+    const events = await eventsOf(id);
+    expect(events.map(e => e.type)).toEqual(['OrderPlaced', 'OrderNoted']);
+  });
+
+  it('a command that returns nothing replays as nothing; hooks see the replay; a key cannot be reused inside its own run', async () => {
+    const hooked = j.compose({ tables });
+    const seen: (string | null)[] = [];
+    hooked.hooks.command.around(async (ctx, next) => {
+      seen.push(ctx.idempotencyKey);
+      await next();
+    });
+    const nothing = j.command('nothing', z.object({}), () => {
+      /* returns nothing */
+    });
+    const key = `k_nothing_${next}`;
+    expect(await hooked.run(db, nothing, {}, meta, { idempotencyKey: key })).toBeUndefined();
+    expect(await hooked.run(db, nothing, {}, meta, { idempotencyKey: key })).toBeUndefined();
+    expect(seen).toEqual([key, key]);
+    expect(await receiptOf(key)).toMatchObject({ result: {} });
+
+    const nested = j.command('nestedKey', z.object({}), (_input, { run }) =>
+      run(nothing, {}, { idempotencyKey: `k_nested_${next}` }),
+    );
+    await expect(hooked.run(db, nested, {}, meta, { idempotencyKey: `k_nested_${next}` })).rejects.toThrow(
+      'has not finished',
+    );
+    expect(await receiptOf(`k_nested_${next}`), 'the whole run rolled back').toBeNull();
+  });
+
+  it('a bound runner takes a key per call, and pruneReceipts drops old ones', async () => {
+    const id = orderId(++next);
+    const runAs = journal.bind(db, meta);
+    await runAs(placeOrder, { orderId: id, customerId: 'c', total: 1 }, { idempotencyKey: `k_bound_${next}` });
+    await runAs(placeOrder, { orderId: id, customerId: 'c', total: 1 }, { idempotencyKey: `k_bound_${next}` });
+    expect(await receiptOf(`k_bound_${next}`)).not.toBeNull();
+    expect(await journal.pruneReceipts(db, { before: new Date(Date.now() - 60_000) })).toBe(0);
+    const pruned = await journal.pruneReceipts(db, { before: new Date(Date.now() + 60_000) });
+    expect(pruned).toBeGreaterThan(0);
+    expect(await receiptOf(`k_bound_${next}`)).toBeNull();
+  });
+});
+
 describe('trace', () => {
   it('a run stamps its own command id and a new correlation id on every event it writes', async () => {
     // Why: a reader of the log must be able to answer "which command wrote this?" without the app

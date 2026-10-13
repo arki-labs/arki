@@ -4,7 +4,7 @@
  * dependencies and wires the public methods.
  * May import every other file. No implementation file may import this one.
  */
-import { getTableColumns, getTableName, is } from 'drizzle-orm';
+import { getTableColumns, getTableName, is, lt } from 'drizzle-orm';
 import { PgColumn } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 
@@ -158,6 +158,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     writeWithValidatedMeta,
     wake: () => journal.wake(),
     hooks: commandHooks,
+    tables,
   });
   // The worker's database is also the source of every command an effect runs, so it opens `Tx`.
   type WorkerDb = AppDb & TransactionSource<Tx>;
@@ -166,7 +167,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     hooks: effectHooks,
     effects,
     history,
-    runOn: (db, cause) => (command, input, meta) => run(db, command, input, meta, undefined, cause),
+    runOn: (db, cause) => (command, input, meta, call) => run(db, command, input, meta, call, cause),
   });
   const workers = createWorkers<WorkerDb>({ drain: (db, opts) => journal.drain(db, opts) });
   const strandedJobs = createStrandedJobs({ tables, effectNames: effects.map(effect => effect.name) });
@@ -175,11 +176,19 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     write: (tx, entity, id, input) => write(tx, entity, id, input),
     adopt: (tx, entity, id, input) => adopt(tx, entity, id, input),
     run: (source, command, input, meta, opts) => run(source, command, input, meta, opts),
-    bind: (source, meta, opts) => (command, input) => journal.run(source, command, input, meta, opts),
+    bind: (source, meta, opts) => (command, input, call) =>
+      journal.run(source, command, input, meta, { ...opts, ...call }),
     replay: (db, entity, id, opts) => history.replay(db, entity, id, opts),
     verify: (db, entity, id) => history.verify(db, entity, id),
     repair: (db, entity, id) => history.repair(db, entity, id),
     forget: (db, entity, id) => history.forget(db, entity, id),
+    pruneReceipts: async (db, opts) => {
+      const gone = await db
+        .delete(tables.receipts)
+        .where(lt(tables.receipts.recordedAt, opts.before))
+        .returning({ key: tables.receipts.key });
+      return gone.length;
+    },
     rerun: (db, projection, opts) => history.rerun(db, projection, opts),
     drain: (db, opts) => drain(db, opts),
     worker: (db, opts) => workers.worker(db, opts),

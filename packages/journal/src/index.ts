@@ -9,6 +9,7 @@ export type {
   ReplayResult,
   RootCommandRunner,
   RunOptions,
+  CallOptions,
   VerifyResult,
   ForgetResult,
   NextEvents,

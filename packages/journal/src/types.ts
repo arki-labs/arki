@@ -349,6 +349,8 @@ export type CommandHookContext<MetaOut = unknown> = {
   readonly meta: MetaOut;
   readonly commandId: string;
   readonly correlationId: string;
+  /** The idempotency key of this call, or null. A hook sees a replayed call too: its handler does not run. */
+  readonly idempotencyKey: string | null;
 };
 
 /** What an effect hook sees. Frozen. `attempt` counts from 1. */

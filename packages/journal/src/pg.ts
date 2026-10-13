@@ -79,7 +79,19 @@ export function journalTables(schema?: PgSchema) {
     ],
   );
 
-  return { events, jobs };
+  const receipts = table('journal_receipts', {
+    /** The app's idempotency key. Scope it to the caller when it comes from outside (tenant, actor, source). */
+    key: varchar('key', { length: 256 }).primaryKey(),
+    command: varchar('command', { length: 128 }).notNull(),
+    /** The parsed input, after a JSON round trip. A repeat with another input is a conflict. */
+    input: jsonb('input').notNull(),
+    /** `{ value }` once the run finished; `{}` for a command that returned nothing; null while it runs. */
+    result: jsonb('result').$type<{ readonly value?: unknown }>(),
+    commandId: varchar('command_id').notNull(),
+    recordedAt: timestamp('recorded_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  });
+
+  return { events, jobs, receipts };
 }
 
 export type JournalTables = ReturnType<typeof journalTables>;

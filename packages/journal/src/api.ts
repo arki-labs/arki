@@ -84,8 +84,19 @@ export type Command<S extends z.ZodType, R, in MetaOut, in Tx extends Transactio
  * needed: the two types refer to each other, and TypeScript cannot measure the
  * variance of such a pair on its own.
  */
+/** Options of one call: `journal.run`, a bound runner, a command's `run`, an effect's `ctx.run`. */
+export type CallOptions = {
+  /**
+   * Makes the call idempotent. The first run with this key records its result in
+   * `journal_receipts`, in its own transaction. A later run with the same key and the same
+   * input returns that result without running the handler; the same key with another input
+   * or another command is `CONFLICT`. The result must survive JSON storage, or the first run
+   * fails with `UNSTABLE_SCHEMA`. Scope a key from outside to its caller: `${tenant}:${id}`.
+   */
+  readonly idempotencyKey?: string;
+};
 /** Options of `journal.run` and `journal.bind`. */
-export type RunOptions = {
+export type RunOptions = CallOptions & {
   /**
    * Seeds the chain's correlation id, for example with the request id. Without it, a run
    * from an effect continues the cause event's chain, and any other run starts a new one.
@@ -112,6 +123,7 @@ export type CommandContext<out MetaOut, out Tx extends TransactionSource<Tx> = D
   readonly run: <S extends z.ZodType, R>(
     command: Command<S, R, MetaOut, Tx>,
     input: NoInfer<z.input<S>>,
+    opts?: CallOptions,
   ) => Promise<Awaited<R>>;
 };
 /**
@@ -131,6 +143,7 @@ export type RootCommandRunner<Meta extends z.ZodObject, Tx extends TransactionSo
   command: Command<S, R, z.output<Meta>, Tx>,
   input: NoInfer<z.input<S>>,
   meta: z.input<Meta>,
+  opts?: CallOptions,
 ) => Promise<Awaited<R>>;
 export type WriteResult<Tbl extends EntityTable, E extends AnyEventDef, MetaOut, Key extends string = 'id'> = {
   readonly row: Row<Tbl> | null;
@@ -229,6 +242,12 @@ export type Journal<
     entity: EntityDef<K, Tbl, E, z.output<Meta>, Key>,
     id: EntityId<Tbl, Key>,
   ): Promise<ForgetResult<Tbl>>;
+  /**
+   * Delete receipts recorded before `before`. Receipts hold inputs and results, which may
+   * carry personal data; `forget` does not touch them, so an app that keys personal flows
+   * prunes on a schedule. Returns how many were deleted.
+   */
+  pruneReceipts(db: DbHandle, opts: { readonly before: Date }): Promise<number>;
   /** Lock the row, replay, save the result. Writes no event, runs no projection, creates no job. */
   repair<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,

@@ -119,7 +119,11 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
           inFlight = false;
         });
     }, leaseSeconds * 500);
-    timer.unref();
+    // Node and Bun return a handle with unref(); browsers and Deno return a number.
+    const handle: unknown = timer;
+    if (typeof handle === 'object' && handle !== null && 'unref' in handle && typeof handle.unref === 'function') {
+      handle.unref();
+    }
     return () => {
       finished = true;
       clearInterval(timer);
