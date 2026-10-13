@@ -20,6 +20,12 @@ import {
 import { ROUNDING_MODES } from './rounding.js';
 
 describe('round', () => {
+  it('rounds floats past 2^53 as typed, because a calculator result can be that large', () => {
+    expect(round(1e20, 2)).toBe(1e20);
+    expect(round(-1e17, 1)).toBe(-1e17);
+    expect(round(1e300, -2)).toBe(1e300);
+    expect(round(123_456_789_012_345_680_000, -5)).toBe(123_456_789_012_345_700_000);
+  });
   it('rounds the number you typed', () => {
     expect(round(1.005, 2)).toBe(1.01);
     expect(round(-1.005, 2)).toBe(-1.01);
@@ -65,6 +71,10 @@ describe('round', () => {
 });
 
 describe('roundTo', () => {
+  it('rounds floats past 2^53 to a step, as typed', () => {
+    expect(roundTo(1e20, 0.5)).toBe(1e20);
+    expect(roundTo(123_456_789_012_345_680_000, 1e6)).toBe(123_456_789_012_346_000_000);
+  });
   it('rounds to multiples of step', () => {
     expect(roundTo(127.3, 5)).toBe(125);
     expect(roundTo(0.1 + 0.2, 0.1)).toBe(0.3);

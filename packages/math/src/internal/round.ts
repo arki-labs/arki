@@ -7,16 +7,23 @@
  */
 
 import type { RoundingMode } from '../rounding.js';
+import type { DecimalParts } from './parse.js';
 import { divideRounded, pow10 } from './bigint.js';
-import { partsFromNumber } from './parse.js';
+import { parseDecimalString } from './parse.js';
 
 function noNegativeZero(value: number): number {
   return value === 0 ? 0 : value;
 }
 
+// The shortest text, not `partsFromNumber`: that guard stops `decimal(1e20)` from
+// pretending to be exact, but a float past 2^53 still rounds as the number you typed.
+function shortestParts(value: number): DecimalParts {
+  return parseDecimalString(String(value));
+}
+
 /** `round(x, places, mode)` on the shortest decimal text of `x`. Arguments are already validated. */
 export function roundExact(x: number, places: number, mode: RoundingMode): number {
-  const { coefficient, scale } = partsFromNumber(x);
+  const { coefficient, scale } = shortestParts(x);
   if (places >= scale) return noNegativeZero(x);
   const rounded = divideRounded(coefficient, pow10(scale - places), mode);
   return noNegativeZero(Number(`${rounded}e${-places}`));
@@ -24,8 +31,8 @@ export function roundExact(x: number, places: number, mode: RoundingMode): numbe
 
 /** `roundTo(x, step, mode)` on the shortest decimal text of both. Arguments are already validated. */
 export function roundToExact(x: number, step: number, mode: RoundingMode): number {
-  const value = partsFromNumber(x);
-  const unit = partsFromNumber(step);
+  const value = shortestParts(x);
+  const unit = shortestParts(step);
   const multiple = divideRounded(value.coefficient * pow10(unit.scale), unit.coefficient * pow10(value.scale), mode);
   return noNegativeZero(Number(`${multiple * unit.coefficient}e${-unit.scale}`));
 }
