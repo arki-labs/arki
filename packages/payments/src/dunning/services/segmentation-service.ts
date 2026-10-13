@@ -1,6 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 
 import { getLogger } from '@arki/log';
+import { Money } from '@arki/money';
 
 import type { CoreTables } from '../../core/tables';
 import type { Customer, CustomerId } from '../../core/types';
@@ -17,6 +18,7 @@ import type {
   SegmentCriteria,
   SubscriptionHistoryData,
 } from '../types';
+import { toMinorColumn } from '../../core/money';
 import { createCustomerRiskProfileRepository, createCustomerSegmentRepository } from '../repository';
 
 const logger = getLogger('dunning.segmentation');
@@ -205,31 +207,39 @@ export class CustomerSegmentationService {
   private buildSegmentConditions(criteria: SegmentCriteria): any[] {
     const conditions = [];
 
-    // Total spent criteria
-    if (criteria.totalSpent) {
+    // Total spent criteria: only payments in the range's currency count, compared in minor units
+    // (summing USD and EUR into one number would be meaningless).
+    const spendBound = criteria.totalSpent?.min ?? criteria.totalSpent?.max;
+    if (criteria.totalSpent && spendBound) {
+      const { min, max } = criteria.totalSpent;
       const totalSpentSubquery = this.db
-        .select({ customerId: this.payments.customerId, total: sql<number>`SUM(${this.payments.amount})` })
+        .select({ customerId: this.payments.customerId, total: sql<string>`SUM(${this.payments.amountMinor})` })
         .from(this.payments)
-        .where(eq(this.payments.status, 'succeeded'))
+        .where(
+          and(
+            eq(this.payments.status, 'succeeded'),
+            eq(this.payments.currency, Money.fromJSON(spendBound).currency.code),
+          ),
+        )
         .groupBy(this.payments.customerId);
 
-      if (criteria.totalSpent.min !== undefined) {
+      if (min !== undefined) {
         conditions.push(
           sql`
             ${this.customers.id} IN (
                         SELECT customer_id FROM (${totalSpentSubquery}) AS totals
-                        WHERE total >= ${criteria.totalSpent.min}
+                        WHERE total >= ${toMinorColumn(Money.fromJSON(min))}
                       )
           `,
         );
       }
 
-      if (criteria.totalSpent.max !== undefined) {
+      if (max !== undefined) {
         conditions.push(
           sql`
             ${this.customers.id} IN (
                         SELECT customer_id FROM (${totalSpentSubquery}) AS totals
-                        WHERE total <= ${criteria.totalSpent.max}
+                        WHERE total <= ${toMinorColumn(Money.fromJSON(max))}
                       )
           `,
         );

@@ -1,6 +1,8 @@
 import { userIdSchema } from '@arki/auth/ids';
 import { z } from '@arki/contracts';
 
+import type { SpendRange } from './types';
+import { nonNegativeMoneySchema } from '../core/money';
 import { customerIdSchema } from '../core/primitives';
 import {
   communicationChannelValues,
@@ -17,6 +19,22 @@ import {
 } from './primitives';
 
 // Base validation schemas for enums
+
+/**
+ * Money spent, `{ min?, max? }` as `{ amount, currency }` in one currency.
+ * Kept as JSON because segment criteria are stored in a jsonb column.
+ */
+const spendRangeSchema = z
+  .object({ min: nonNegativeMoneySchema.optional(), max: nonNegativeMoneySchema.optional() })
+  .refine(
+    ({ min, max }) => min === undefined || max === undefined || min.currency.code === max.currency.code,
+    'min and max must use the same currency',
+  )
+  .transform(({ min, max }): SpendRange => ({
+    ...(min === undefined ? {} : { min: min.toJSON() }),
+    ...(max === undefined ? {} : { max: max.toJSON() }),
+  }));
+
 export const dunningCampaignTypeSchema = z.enum(dunningCampaignTypeValues);
 
 export const dunningCampaignStatusSchema = z.enum(dunningCampaignStatusValues);
@@ -52,12 +70,7 @@ export const campaignTriggerSchema = z.object({
           max: z.number().int().min(0).optional(),
         })
         .optional(),
-      totalSpent: z
-        .object({
-          min: z.number().min(0).optional(),
-          max: z.number().min(0).optional(),
-        })
-        .optional(),
+      totalSpent: spendRangeSchema.optional(),
     })
     .optional(),
 });
@@ -90,12 +103,7 @@ export const communicationTemplateSchema = z.object({
 });
 
 export const segmentCriteriaSchema = z.object({
-  totalSpent: z
-    .object({
-      min: z.number().min(0).optional(),
-      max: z.number().min(0).optional(),
-    })
-    .optional(),
+  totalSpent: spendRangeSchema.optional(),
   subscriptionDuration: z
     .object({
       min: z.number().int().min(0).optional(), // months

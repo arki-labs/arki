@@ -1,5 +1,7 @@
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 
+import type { MoneyJSON } from '@arki/money';
+
 import type { CustomerId, PaymentId, SubscriptionId } from '../core/primitives';
 import type {
   CommunicationChannel,
@@ -27,7 +29,7 @@ export type CampaignTrigger = {
     customerSegments?: CustomerSegmentId[];
     planTiers?: string[];
     subscriptionAge?: { min?: number; max?: number };
-    totalSpent?: { min?: number; max?: number };
+    totalSpent?: SpendRange;
   };
 };
 
@@ -56,8 +58,14 @@ export type CommunicationTemplate = {
   };
 };
 
+/**
+ * A range of money spent, kept as JSON because criteria live in a jsonb
+ * column. Both bounds share one currency; only payments in it count.
+ */
+export type SpendRange = { min?: MoneyJSON; max?: MoneyJSON };
+
 export type SegmentCriteria = {
-  totalSpent?: { min?: number; max?: number };
+  totalSpent?: SpendRange;
   subscriptionDuration?: { min?: number; max?: number }; // months
   paymentFailureHistory?: { count: number; timeframe: number }; // failures in days
   planTier?: string[];
@@ -418,7 +426,7 @@ export type CampaignWithTrigger = {
       customerSegments?: string[]; // Raw DB format, not typed IDs
       planTiers?: string[];
       subscriptionAge?: { min?: number; max?: number };
-      totalSpent?: { min?: number; max?: number };
+      totalSpent?: SpendRange;
     };
   };
 };

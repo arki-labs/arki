@@ -9,6 +9,7 @@ import type {
   DunningCampaignType,
   ExecutionStatus,
 } from './primitives';
+import type { SpendRange } from './types';
 import { customerIdFactory, paymentIdFactory, subscriptionIdFactory } from '../core/primitives';
 import {
   communicationChannelValues,
@@ -84,7 +85,7 @@ export function createDunningTables({
           customerSegments?: string[];
           planTiers?: string[];
           subscriptionAge?: { min?: number; max?: number };
-          totalSpent?: { min?: number; max?: number };
+          totalSpent?: SpendRange;
         };
       }>()
       .notNull(),
@@ -193,7 +194,7 @@ export function createDunningTables({
     type: customerSegmentTypeEnum('type').$type<CustomerSegmentType>().notNull(),
     criteria: jsonb('criteria')
       .$type<{
-        totalSpent?: { min?: number; max?: number };
+        totalSpent?: SpendRange;
         subscriptionDuration?: { min?: number; max?: number };
         paymentFailureHistory?: { count: number; timeframe: number };
         planTier?: string[];

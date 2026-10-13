@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 
 import type { UserId } from '@arki/auth/ids';
 import { getLogger } from '@arki/log';
+import { Money } from '@arki/money';
 
 import type { PaymentRetryService } from '../../core/services/payment-retry-service';
 import type { CoreTables } from '../../core/tables';
@@ -106,8 +107,7 @@ export class DunningIntegrationService {
     customerId: CustomerId;
     subscriptionId?: SubscriptionId;
     failureReason: string;
-    amount: number;
-    currency: string;
+    amount: Money;
     failureCount: number;
     metadata?: Record<string, unknown>;
   }): Promise<void> {
@@ -236,15 +236,13 @@ export class DunningIntegrationService {
     paymentId: PaymentId;
     customerId: CustomerId;
     subscriptionId?: SubscriptionId;
-    amount: number;
-    currency: string;
+    amount: Money;
     metadata?: Record<string, unknown>;
   }): Promise<void> {
     logger.info('Processing successful payment', {
       customerId: event.customerId,
       paymentId: event.paymentId,
-      amount: event.amount,
-      currency: event.currency,
+      amount: event.amount.toString(),
     });
 
     // Update customer risk profile with successful payment
@@ -442,8 +440,7 @@ export class DunningIntegrationService {
       customerId: CustomerId;
       subscriptionId?: SubscriptionId;
       failureReason: string;
-      amount: number;
-      currency: string;
+      amount: Money;
       failureCount: number;
       metadata?: Record<string, unknown>;
     },
@@ -456,10 +453,13 @@ export class DunningIntegrationService {
     }
 
     // Check amount filters if specified
-    if (campaign.trigger.filters?.totalSpent) {
-      const { min, max } = campaign.trigger.filters.totalSpent;
-      if (min && event.amount < min) return false;
-      if (max && event.amount > max) return false;
+    // A range in another currency says nothing about this payment, so the campaign does not apply.
+    const range = campaign.trigger.filters?.totalSpent;
+    const bound = range?.min ?? range?.max;
+    if (range && bound) {
+      if (event.amount.currency.code !== Money.fromJSON(bound).currency.code) return false;
+      if (range.min && event.amount.lt(Money.fromJSON(range.min))) return false;
+      if (range.max && event.amount.gt(Money.fromJSON(range.max))) return false;
     }
 
     // Add more condition evaluations as needed
