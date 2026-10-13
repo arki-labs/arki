@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { VarianceOptions } from './stats.js';
+import type { QuantileMethod, VarianceOptions } from './stats.js';
 import { Decimal, decimal } from './decimal.js';
 import { EmptyDataError, InvalidArgumentError, NumericRangeError, RoundingNecessaryError } from './errors.js';
 import {
@@ -15,9 +15,14 @@ import {
   minMax,
   mode,
   percentile,
+  percentileRank,
   polynomialRegression,
+  pooledStddev,
+  pooledVariance,
   powerRegression,
   quantile,
+  QUANTILE_METHODS,
+  quartiles,
   sampleSize,
   standardError,
   stddev,
@@ -697,5 +702,183 @@ describe('polynomialRegression', () => {
   it('reports a numerically singular system as a typed error', () => {
     const xs = Array.from({ length: 30 }, (_, i) => i + 1);
     expect(() => polynomialRegression(xs, xs, 25)).toThrow(NumericRangeError);
+  });
+});
+
+describe('quantile methods (Hyndman & Fan R-1 to R-9)', () => {
+  // x = 1..10 makes the quantile equal its 1-based position. Expected values are
+  // hand-derived from Hyndman & Fan's definitions (the same as R's
+  // quantile(1:10, q, type = k)); e.g. q = 0.25: R-1 ceil(2.5) = 3, R-3 nearest
+  // even order statistic to 2 = 2, R-6 (n + 1)q = 2.75 (Excel PERCENTILE.EXC),
+  // R-7 1 + (n - 1)q = 3.25 (Excel PERCENTILE.INC), R-8 (n + 1/3)q + 1/3, R-9 (n + 1/4)q + 3/8.
+  const data = [7, 3, 10, 1, 9, 2, 8, 6, 5, 4];
+  const expected: Record<QuantileMethod, readonly [number, number, number, number]> = {
+    //                       q = 0.05, 0.25, 0.5, 0.9
+    inverseCdf: [1, 3, 5, 9],
+    averagedInverseCdf: [1, 3, 5.5, 9.5],
+    closestObservation: [1, 2, 5, 9],
+    interpolatedInverseCdf: [1, 2.5, 5, 9],
+    hazen: [1, 3, 5.5, 9.5],
+    weibull: [1, 2.75, 5.5, 9.9],
+    linear: [1.45, 3.25, 5.5, 9.1],
+    medianUnbiased: [1, 2 + 11 / 12, 5.5, 9 + 19 / 30],
+    normalUnbiased: [1, 2.9375, 5.5, 9.6],
+  };
+  it.each(QUANTILE_METHODS)('%s matches the definition at q = 0.05, 0.25, 0.5, 0.9', method => {
+    const got = [0.05, 0.25, 0.5, 0.9].map(q => quantile(data, q, { method }));
+    const want = expected[method];
+    for (const [i, value] of got.entries()) expect(value).toBeCloseTo(want[i]!, 12);
+  });
+  it('every method returns the minimum at q = 0 and the maximum at q = 1', () => {
+    for (const method of QUANTILE_METHODS) {
+      expect(quantile(data, 0, { method })).toBe(1);
+      expect(quantile(data, 1, { method })).toBe(10);
+    }
+  });
+  it('R-3 breaks a tie toward the even order statistic', () => {
+    // nq - 1/2 = 3 (odd) picks x_4; at q = 0.25 it is 2 (even) and picks x_2.
+    expect(quantile(data, 0.35, { method: 'closestObservation' })).toBe(4);
+    expect(quantile(data, 0.25, { method: 'closestObservation' })).toBe(2);
+  });
+  it('a position that is whole up to rounding counts as whole', () => {
+    // 10 * 0.3 is 3.0000000000000004 in floats; the nearest-rank answer is still x_3.
+    expect(quantile(data, 0.3, { method: 'inverseCdf' })).toBe(3);
+    expect(quantile(data, 0.3, { method: 'averagedInverseCdf' })).toBe(3.5);
+  });
+  it('percentile takes the same methods', () => {
+    for (const method of QUANTILE_METHODS) {
+      expect(percentile(data, 37, { method })).toBe(quantile(data, 0.37, { method }));
+    }
+  });
+  it('rejects an unknown method', () => {
+    expect(() => quantile(data, 0.5, { method: 'excel' as QuantileMethod })).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('quartiles', () => {
+  it('uses R-7 by default, like quantile', () => {
+    expect(quartiles([7, 3, 10, 1, 9, 2, 8, 6, 5, 4])).toEqual({ q1: 3.25, q2: 5.5, q3: 7.75 });
+  });
+  it('weibull gives Excel QUARTILE.EXC', () => {
+    expect(quartiles([7, 3, 10, 1, 9, 2, 8, 6, 5, 4], { method: 'weibull' })).toEqual({ q1: 2.75, q2: 5.5, q3: 8.25 });
+  });
+  it("'tukey' gives the box-plot hinges of R fivenum", () => {
+    // fivenum(1:10) = 1, 3, 5.5, 8, 10; fivenum(1:9) = 1, 3, 5, 7, 9; fivenum(1:8) = 1, 2.5, 4.5, 6.5, 8;
+    // fivenum(1:7) = 1, 2.5, 4, 5.5, 7 (odd n: the median belongs to both halves).
+    expect(quartiles([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], { method: 'tukey' })).toEqual({ q1: 3, q2: 5.5, q3: 8 });
+    expect(quartiles([9, 1, 8, 2, 7, 3, 6, 4, 5], { method: 'tukey' })).toEqual({ q1: 3, q2: 5, q3: 7 });
+    expect(quartiles([1, 2, 3, 4, 5, 6, 7, 8], { method: 'tukey' })).toEqual({ q1: 2.5, q2: 4.5, q3: 6.5 });
+    expect(quartiles([1, 2, 3, 4, 5, 6, 7], { method: 'tukey' })).toEqual({ q1: 2.5, q2: 4, q3: 5.5 });
+    expect(quartiles([4], { method: 'tukey' })).toEqual({ q1: 4, q2: 4, q3: 4 });
+  });
+  it('rejects empty data and unknown methods', () => {
+    expect(() => quartiles([])).toThrow(EmptyDataError);
+    expect(() => quartiles([1, 2], { method: 'hinge' as QuantileMethod })).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('percentileRank', () => {
+  // SciPy docs: percentileofscore([1, 2, 3, 3, 4], 3, kind) = 70 (rank), 80 (weak), 40 (strict), 60 (mean).
+  it('matches scipy percentileofscore for every kind', () => {
+    const data = [1, 2, 3, 3, 4];
+    expect(percentileRank(data, 3, { kind: 'rank' })).toBeCloseTo(70, 12);
+    expect(percentileRank(data, 3, { kind: 'weak' })).toBeCloseTo(80, 12);
+    expect(percentileRank(data, 3, { kind: 'strict' })).toBeCloseTo(40, 12);
+    expect(percentileRank(data, 3, { kind: 'mean' })).toBeCloseTo(60, 12);
+    // percentileofscore([1, 2, 3, 4], 3) = 75 (rank); 'mean' is 62.5.
+    expect(percentileRank([1, 2, 3, 4], 3, { kind: 'rank' })).toBe(75);
+    expect(percentileRank([1, 2, 3, 4], 3)).toBe(62.5);
+  });
+  it('defaults to mean: the median of distinct values ranks 50', () => {
+    expect(percentileRank([5, 1, 3], 3)).toBe(50);
+  });
+  it('ranks scores between and beyond the values', () => {
+    for (const kind of ['strict', 'weak', 'mean', 'rank'] as const) {
+      expect(percentileRank([1, 2, 3, 4], 2.5, { kind })).toBe(50);
+      expect(percentileRank([1, 2, 3, 4], 0, { kind })).toBe(0);
+      expect(percentileRank([1, 2, 3, 4], 9, { kind })).toBe(100);
+    }
+  });
+  it('rejects empty data, a bad score and an unknown kind', () => {
+    expect(() => percentileRank([], 1)).toThrow(EmptyDataError);
+    expect(() => percentileRank([1], Number.NaN)).toThrow(InvalidArgumentError);
+    expect(() => percentileRank([1], 1, { kind: 'average' as 'mean' })).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('pooledVariance and pooledStddev', () => {
+  // [2, 4, 6]: s^2 = 4 (SS 8); [1, 3]: s^2 = 2 (SS 2). Pooled: (2 * 4 + 1 * 2) / (2 + 1) = 10 / 3.
+  const groups = [
+    [2, 4, 6],
+    [1, 3],
+  ];
+  it('weights each group variance by its degrees of freedom', () => {
+    expect(pooledVariance(groups)).toBeCloseTo(10 / 3, 12);
+    expect(pooledStddev(groups)).toBeCloseTo(Math.sqrt(10 / 3), 12);
+  });
+  it('ddof 0 divides the within-group sum of squares by N', () => {
+    expect(pooledVariance(groups, { ddof: 0 })).toBeCloseTo(2, 12);
+  });
+  it('equals the plain variance for one group', () => {
+    expect(pooledVariance([[2, 4, 4, 4, 5, 5, 7, 9]])).toBeCloseTo(32 / 7, 12);
+  });
+  it('lets a single-value group add nothing', () => {
+    expect(pooledVariance([[2, 4, 6], [100]])).toBeCloseTo(4, 12);
+  });
+  it('rejects no groups, empty groups and no degrees of freedom', () => {
+    expect(() => pooledVariance([])).toThrow(EmptyDataError);
+    expect(() => pooledVariance([[1, 2], []])).toThrow(EmptyDataError);
+    expect(() => pooledVariance([[1], [2]])).toThrow(EmptyDataError);
+    expect(() => pooledVariance([[1, Number.NaN]])).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('regression diagnostics', () => {
+  // x = 1..5, y = 2, 4, 5, 4, 5: slope 0.6, intercept 2.2, SSres 2.4, SStot 6, Sxx 10, n - 2 = 3.
+  // R summary(lm(y ~ x)): residual standard error sqrt(0.8) on 3 df, R^2 0.6, adjusted R^2 0.4667,
+  // Std. Error slope sqrt(0.8 / 10), intercept sqrt(0.8 * (1/5 + 3^2/10)).
+  it('linearRegression reports adjusted r2 and standard errors on n - 2 df', () => {
+    const fit = linearRegression([1, 2, 3, 4, 5], [2, 4, 5, 4, 5]);
+    expect(fit.r2).toBeCloseTo(0.6, 12);
+    expect(fit.adjustedR2).toBeCloseTo(1 - (0.4 * 4) / 3, 12);
+    expect(fit.residualStandardError).toBeCloseTo(Math.sqrt(0.8), 12);
+    expect(fit.slopeStandardError).toBeCloseTo(Math.sqrt(0.08), 12);
+    expect(fit.interceptStandardError).toBeCloseTo(Math.sqrt(0.88), 12);
+  });
+  it('leaves them undefined for two points, where no residual freedom is left', () => {
+    const fit = linearRegression([1, 2], [3, 5]);
+    expect([fit.adjustedR2, fit.residualStandardError, fit.slopeStandardError, fit.interceptStandardError]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+  it('a perfect line has zero standard errors', () => {
+    const fit = linearRegression([0, 1, 2, 3], [1, 3, 5, 7]);
+    expect(fit.residualStandardError).toBeCloseTo(0, 12);
+    expect(fit.adjustedR2).toBeCloseTo(1, 12);
+  });
+  it('polynomialRegression uses n - degree - 1 df', () => {
+    // x = -2..2 is symmetric, so 1, x and x^2 - 2 are orthogonal: b = sum(x y) / 10 = -0.05,
+    // c = sum((x^2 - 2) y) / 14 = 13.9 / 14. SStot = 13.94; SSres = 13.94 - 10 b^2 - 14 c^2; df = 2.
+    const fit = polynomialRegression([-2, -1, 0, 1, 2], [4.2, 0.8, 0.1, 1.1, 3.8], 2);
+    const residual = 13.94 - 10 * 0.05 ** 2 - (13.9 * 13.9) / 14;
+    expect(fit.r2).toBeCloseTo(1 - residual / 13.94, 12);
+    expect(fit.adjustedR2).toBeCloseTo(1 - (residual / 13.94) * (4 / 2), 12);
+    expect(fit.residualStandardError).toBeCloseTo(Math.sqrt(residual / 2), 12);
+  });
+  it('polynomialRegression of degree 1 has the same diagnostics as linearRegression', () => {
+    const x = [1, 2, 3, 4, 5];
+    const y = [2, 4, 5, 4, 5];
+    const line = linearRegression(x, y);
+    const poly = polynomialRegression(x, y, 1);
+    expect(poly.adjustedR2).toBeCloseTo(line.adjustedR2!, 12);
+    expect(poly.residualStandardError).toBeCloseTo(line.residualStandardError!, 12);
+  });
+  it('polynomialRegression through exactly degree + 1 points has no diagnostics', () => {
+    const fit = polynomialRegression([0, 1, 2], [1, 2, 5], 2);
+    expect(fit.adjustedR2).toBeUndefined();
+    expect(fit.residualStandardError).toBeUndefined();
   });
 });

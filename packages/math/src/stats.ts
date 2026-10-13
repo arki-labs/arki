@@ -33,10 +33,89 @@ export type MinMax = {
   max: number;
 };
 
-/** `y = intercept + slope * x`. */
-export type LinearFit = Fit & {
-  slope: number;
-  intercept: number;
+/**
+ * `y = intercept + slope * x`, with the usual least-squares diagnostics. They use
+ * n - 2 residual degrees of freedom (n - k - 1 with k = 1 predictor) and are
+ * `undefined` for exactly two points, where no residual freedom is left.
+ */
+export type LinearFit = Fit &
+  FitDiagnostics & {
+    slope: number;
+    intercept: number;
+    /** Standard error of the slope: `residualStandardError / sqrt(sum((x - mean x)^2))`. */
+    slopeStandardError: number | undefined;
+    /** Standard error of the intercept: `residualStandardError * sqrt(1/n + mean(x)^2 / sum((x - mean x)^2))`. */
+    interceptStandardError: number | undefined;
+  };
+
+/**
+ * Hyndman & Fan's nine sample-quantile definitions (Amer. Statistician 50(4), 1996),
+ * by NumPy's names; R's `quantile(x, type = k)` is the R-k column.
+ *
+ * | method                     | R   | also known as                                        |
+ * | -------------------------- | --- | ---------------------------------------------------- |
+ * | `'inverseCdf'`             | R-1 | nearest-rank method, SAS 3                           |
+ * | `'averagedInverseCdf'`     | R-2 | SAS 5; averages at the jumps (the median rule)       |
+ * | `'closestObservation'`     | R-3 | SAS 2; nearest order statistic, ties to the even one |
+ * | `'interpolatedInverseCdf'` | R-4 | SAS 1; linear in the empirical CDF                   |
+ * | `'hazen'`                  | R-5 | piecewise linear through the midpoints               |
+ * | `'weibull'`                | R-6 | Excel `PERCENTILE.EXC` / `QUARTILE.EXC`, Minitab, SPSS |
+ * | `'linear'` (default)       | R-7 | Excel `PERCENTILE.INC`, NumPy and R default          |
+ * | `'medianUnbiased'`         | R-8 | Hyndman & Fan's recommendation                       |
+ * | `'normalUnbiased'`         | R-9 | Blom; unbiased for normal data                       |
+ *
+ * R-1 to R-3 always return a data value; R-4 to R-9 interpolate. Positions
+ * outside the data clamp to the smallest or largest value (so R-6's `q = 0.01`
+ * of ten values is the minimum, where Excel's `PERCENTILE.EXC` errors).
+ */
+export const QUANTILE_METHODS = [
+  'inverseCdf',
+  'averagedInverseCdf',
+  'closestObservation',
+  'interpolatedInverseCdf',
+  'hazen',
+  'weibull',
+  'linear',
+  'medianUnbiased',
+  'normalUnbiased',
+] as const;
+
+export type QuantileMethod = (typeof QUANTILE_METHODS)[number];
+
+export type QuantileOptions = {
+  /** Sample-quantile definition; default `'linear'` (R-7). */
+  method?: QuantileMethod;
+};
+
+/** A quantile method, or `'tukey'`: Tukey's hinges, the medians of the lower and upper halves (R `fivenum`). */
+export type QuartileMethod = QuantileMethod | 'tukey';
+
+export type QuartileOptions = {
+  /** Default `'linear'` (R-7), like `quantile`. */
+  method?: QuartileMethod;
+};
+
+export type Quartiles = {
+  /** First quartile (or lower hinge). */
+  q1: number;
+  /** The median. */
+  q2: number;
+  /** Third quartile (or upper hinge). */
+  q3: number;
+};
+
+/**
+ * How `percentileRank` counts values equal to the score (the `kind` of SciPy's
+ * `percentileofscore`); with B values below and E equal, out of N:
+ * - `'strict'`: B / N, the share strictly below.
+ * - `'weak'`: (B + E) / N, the share at or below (the empirical CDF).
+ * - `'mean'` (default): (B + E / 2) / N, the textbook percentile rank: half of the ties count as below.
+ * - `'rank'`: SciPy's default, the average of the ranks the ties would take: (B + (E + 1) / 2) / N when E > 0, else B / N.
+ */
+export type PercentileRankKind = 'strict' | 'weak' | 'mean' | 'rank';
+
+export type PercentileRankOptions = {
+  kind?: PercentileRankKind;
 };
 
 /** Confidence-interval method: `'z'` (normal critical value) or `'t'` (Student's t, for estimated spread). */
@@ -78,14 +157,29 @@ type Fit = {
   predict(x: number): number;
 };
 
+/**
+ * Least-squares diagnostics with k predictors and n points, on df = n - k - 1
+ * residual degrees of freedom. Both are `undefined` when df is 0 (the fit
+ * passes through every point, so the scatter around it cannot be estimated).
+ */
+type FitDiagnostics = {
+  /** `1 - (1 - r2) * (n - 1) / (n - k - 1)`: r2 penalised for the number of predictors. */
+  adjustedR2: number | undefined;
+  /** Standard error of the estimate (R's "residual standard error", Excel `STEYX`): `sqrt(SSres / (n - k - 1))`. */
+  residualStandardError: number | undefined;
+};
+
 /** `y = a * e^(b * x)`. */
 export type ExponentialFit = Fit & { a: number; b: number };
 /** `y = a + b * ln(x)`. */
 export type LogarithmicFit = Fit & { a: number; b: number };
 /** `y = a * x^b`. */
 export type PowerFit = Fit & { a: number; b: number };
-/** `y = c[0] + c[1] * x + c[2] * x^2 + ...`, lowest degree first. */
-export type PolynomialFit = Fit & { coefficients: readonly number[] };
+/**
+ * `y = c[0] + c[1] * x + c[2] * x^2 + ...`, lowest degree first. Diagnostics use
+ * k = degree predictors, so n - degree - 1 residual degrees of freedom.
+ */
+export type PolynomialFit = Fit & FitDiagnostics & { coefficients: readonly number[] };
 
 type NumericValues = Iterable<number> | Iterable<Decimal>;
 
@@ -596,29 +690,103 @@ export function mode(values: Iterable<number>): number[] {
 }
 
 /**
- * The `p`-th percentile, `p` in `[0, 100]`, by linear interpolation between
- * closest ranks (R-7: Excel `PERCENTILE.INC`, NumPy default). Equal to
- * `quantile(values, p / 100)`.
+ * The `p`-th percentile, `p` in `[0, 100]`. By default linear interpolation
+ * between closest ranks (R-7: Excel `PERCENTILE.INC`, NumPy default); pass
+ * `{ method }` for any other Hyndman–Fan definition (see `QUANTILE_METHODS`).
+ * Equal to `quantile(values, p / 100, options)`.
  * Throws `EmptyDataError` when empty and `InvalidArgumentError` when `p` is out of range.
  */
-export function percentile(values: Iterable<number>, p: number): number {
+export function percentile(values: Iterable<number>, p: number, options: QuantileOptions = {}): number {
   assertFinite(p, 'p');
   if (p < 0 || p > 100) throw new InvalidArgumentError(`p must be within [0, 100], got ${p}`);
-  return quantileOf(values, p / 100, 'percentile');
+  return quantileOf(values, p / 100, quantileMethodOf(options.method), 'percentile');
 }
 
 /**
- * The `q`-th quantile, `q` in `[0, 1]`, with the same R-7 interpolation as
- * `percentile`: `quantile(values, 0.9)` equals `percentile(values, 90)`.
+ * The `q`-th quantile, `q` in `[0, 1]`, with the same methods as `percentile`
+ * (default R-7): `quantile(values, 0.9)` equals `percentile(values, 90)`.
  * Throws `EmptyDataError` when empty and `InvalidArgumentError` when `q` is out of range.
  */
-export function quantile(values: Iterable<number>, q: number): number {
+export function quantile(values: Iterable<number>, q: number, options: QuantileOptions = {}): number {
   assertFinite(q, 'q');
   if (q < 0 || q > 1) throw new InvalidArgumentError(`q must be within [0, 1], got ${q}`);
-  return quantileOf(values, q, 'quantile');
+  return quantileOf(values, q, quantileMethodOf(options.method), 'quantile');
 }
 
-function quantileOf(values: Iterable<number>, q: number, label: string): number {
+function isQuantileMethod(value: unknown): value is QuantileMethod {
+  return typeof value === 'string' && (QUANTILE_METHODS as readonly string[]).includes(value);
+}
+
+function quantileMethodOf(method: unknown): QuantileMethod {
+  if (method === undefined) return 'linear';
+  if (isQuantileMethod(method)) return method;
+  const shown = typeof method === 'string' ? method : typeof method;
+  throw new InvalidArgumentError(`method must be one of ${QUANTILE_METHODS.join(', ')}; got ${shown}`);
+}
+
+/** A position this close to a whole number is taken as whole: R's `4 * .Machine$double.eps`. */
+const POSITION_FUZZ = 4 * Number.EPSILON;
+
+/**
+ * Where the `q`-th quantile of `n` sorted values sits: between the 0-based
+ * indexes `lower` and `lower + 1` (either may fall outside the data and is then
+ * clamped), `fraction` of the way. This is R's `quantile.default`, step for step.
+ */
+function quantilePosition(n: number, q: number, method: QuantileMethod): { lower: number; fraction: number } {
+  switch (method) {
+    case 'inverseCdf':
+    case 'averagedInverseCdf':
+    case 'closestObservation': {
+      // 1-based: j = floor(nq + m), m = 0 (R-1, R-2) or -1/2 (R-3); then pick x_j, x_{j+1} or their mean.
+      const position = method === 'closestObservation' ? n * q - 0.5 : n * q;
+      const j = Math.floor(position + POSITION_FUZZ);
+      // Within the fuzz of a whole number counts as on it: 10 * 0.3 is 3.0000000000000004, but nq is 3.
+      const past = position - j > POSITION_FUZZ;
+      let fraction: number;
+      if (method === 'inverseCdf') fraction = past ? 1 : 0;
+      else if (method === 'averagedInverseCdf') fraction = past ? 1 : 0.5;
+      else fraction = past || Math.abs(j % 2) === 1 ? 1 : 0;
+      return { lower: j - 1, fraction };
+    }
+    default: {
+      // Continuous types: 1-based position a + q(n + 1 - a - b), here shifted to 0-based.
+      const [a, b] = PLOTTING_POSITIONS[method];
+      const position = a - 1 + q * (n + 1 - a - b);
+      const lower = Math.floor(position + POSITION_FUZZ);
+      const fraction = position - lower;
+      return { lower, fraction: Math.abs(fraction) < POSITION_FUZZ ? 0 : fraction };
+    }
+  }
+}
+
+/** Hyndman & Fan's (alpha, beta) for the continuous definitions R-4 to R-9. */
+const PLOTTING_POSITIONS: Record<
+  Exclude<QuantileMethod, 'inverseCdf' | 'averagedInverseCdf' | 'closestObservation'>,
+  readonly [number, number]
+> = {
+  interpolatedInverseCdf: [0, 1],
+  hazen: [0.5, 0.5],
+  weibull: [0, 0],
+  linear: [1, 1],
+  medianUnbiased: [1 / 3, 1 / 3],
+  normalUnbiased: [3 / 8, 3 / 8],
+};
+
+function clampIndex(index: number, n: number): number {
+  return Math.min(n - 1, Math.max(0, index));
+}
+
+/** The quantile at `position` of `sorted` (ascending). */
+function quantileFromSorted(sorted: readonly number[], position: { lower: number; fraction: number }): number {
+  const n = sorted.length;
+  const low = sorted[clampIndex(position.lower, n)]!;
+  if (position.fraction === 0) return noNegativeZero(low);
+  const high = sorted[clampIndex(position.lower + 1, n)]!;
+  if (position.fraction === 1) return noNegativeZero(high);
+  return noNegativeZero(interpolate(low, high, position.fraction));
+}
+
+function quantileOf(values: Iterable<number>, q: number, method: QuantileMethod, label: string): number {
   const items: readonly unknown[] = Array.isArray(values) ? values : [...values];
   const n = items.length;
   // Validate into an unboxed copy, then select the two ranks needed instead of sorting everything.
@@ -629,16 +797,91 @@ function quantileOf(values: Iterable<number>, q: number, label: string): number 
     data[i] = value;
   }
   if (n === 0) throw new EmptyDataError(`${label} of an empty data set`);
-  const rank = (n - 1) * q;
-  const lower = Math.floor(rank);
-  const fraction = rank - lower;
-  selectInPlace(data, lower);
-  const low = data[lower]!;
-  if (fraction === 0) return noNegativeZero(low);
-  // Everything after `lower` is at least `low`; the next rank is the smallest of those.
-  let high = data[lower + 1]!;
-  for (let i = lower + 2; i < n; i++) if (data[i]! < high) high = data[i]!;
+  const { lower, fraction } = quantilePosition(n, q, method);
+  const lowIndex = clampIndex(lower, n);
+  const highIndex = clampIndex(lower + 1, n);
+  if (fraction === 1) {
+    selectInPlace(data, highIndex);
+    return noNegativeZero(data[highIndex]!);
+  }
+  selectInPlace(data, lowIndex);
+  const low = data[lowIndex]!;
+  if (fraction === 0 || highIndex === lowIndex) return noNegativeZero(low);
+  // Everything after `lowIndex` is at least `low`; the next rank is the smallest of those.
+  let high = data[lowIndex + 1]!;
+  for (let i = lowIndex + 2; i < n; i++) if (data[i]! < high) high = data[i]!;
   return noNegativeZero(interpolate(low, high, fraction));
+}
+
+/**
+ * The three quartiles in one sort. `method` is any `quantile` method (default
+ * `'linear'`, R-7) or `'tukey'`: Tukey's hinges, the medians of the lower and
+ * upper halves with the middle value in both halves when the count is odd —
+ * the box-plot quartiles of R's `fivenum` and `boxplot.stats`.
+ * Throws `EmptyDataError` when empty.
+ */
+export function quartiles(values: Iterable<number>, options: QuartileOptions = {}): Quartiles {
+  const tukey = options.method === 'tukey';
+  const method = tukey ? 'linear' : quantileMethodOf(options.method);
+  const sorted = sortedCopy(toNumbers(values, 'values'));
+  const n = sorted.length;
+  if (n === 0) throw new EmptyDataError('quartiles of an empty data set');
+  if (tukey) {
+    // R fivenum: hinge depth d = floor((n + 3) / 2) / 2 (1-based), averaging x[floor(d)] and x[ceiling(d)].
+    const depth = Math.floor((n + 3) / 2) / 2;
+    const at = (d: number): number => {
+      const low = sorted[Math.floor(d) - 1]!;
+      const high = sorted[Math.ceil(d) - 1]!;
+      return noNegativeZero(low === high ? low : low / 2 + high / 2);
+    };
+    return { q1: at(depth), q2: at((n + 1) / 2), q3: at(n + 1 - depth) };
+  }
+  const at = (q: number): number => quantileFromSorted(sorted, quantilePosition(n, q, method));
+  return { q1: at(0.25), q2: at(0.5), q3: at(0.75) };
+}
+
+/**
+ * Where `score` falls in `values`, as a percentage in `[0, 100]` — the inverse
+ * of `percentile`. `kind` says how values equal to the score count (see
+ * `PercentileRankKind`); the default `'mean'` counts half of them, so the
+ * median of distinct values ranks 50. `score` need not be one of the values.
+ * Matches SciPy's `percentileofscore(values, score, kind)`.
+ * Throws `EmptyDataError` when empty.
+ */
+export function percentileRank(values: Iterable<number>, score: number, options: PercentileRankOptions = {}): number {
+  assertFinite(score, 'score');
+  const kind: unknown = options.kind ?? 'mean';
+  if (kind !== 'strict' && kind !== 'weak' && kind !== 'mean' && kind !== 'rank') {
+    throw new InvalidArgumentError(`kind must be 'strict', 'weak', 'mean' or 'rank', got ${String(kind)}`);
+  }
+  const data = toNumbers(values, 'values');
+  const n = data.length;
+  if (n === 0) throw new EmptyDataError('percentileRank of an empty data set');
+  let below = 0;
+  let equal = 0;
+  for (const value of data) {
+    if (value < score) below++;
+    else if (value === score) equal++;
+  }
+  let count: number;
+  switch (kind) {
+    case 'strict': {
+      count = below;
+      break;
+    }
+    case 'weak': {
+      count = below + equal;
+      break;
+    }
+    case 'mean': {
+      count = below + equal / 2;
+      break;
+    }
+    default: {
+      count = equal === 0 ? below : below + (equal + 1) / 2;
+    }
+  }
+  return (count / n) * 100;
 }
 
 /**
@@ -683,6 +926,40 @@ export function stddev(values: NumericValues, options: VarianceOptions & Partial
     return decimalStddev(decimalsFrom(items), ddof, target);
   }
   return noNegativeZero(Math.sqrt(numberVariance(items, ddof)));
+}
+
+/**
+ * Pooled variance of two or more groups that share one spread: the within-group
+ * sums of squared deviations, added, over the pooled degrees of freedom,
+ * `sum(SS_i) / (N - g * ddof)` for g groups of N values in all. The default
+ * `ddof: 1` is the textbook pooled sample variance
+ * `sum((n_i - 1) * s_i^2) / sum(n_i - 1)` (the two-sample t-test's s_p^2, ANOVA's
+ * mean square within); `ddof: 0` divides by N. A group of one value adds no
+ * spread and, with `ddof: 1`, no degrees of freedom. Throws `EmptyDataError`
+ * for no groups, an empty group, or no degrees of freedom left.
+ */
+export function pooledVariance(samples: Iterable<Iterable<number>>, options: VarianceOptions = {}): number {
+  const ddof = ddofOf(options);
+  let squares = 0;
+  let freedom = 0;
+  let groups = 0;
+  for (const sample of samples) {
+    const items = materialize(sample);
+    const n = items.length;
+    if (n === 0) throw new EmptyDataError(`samples[${groups}] is empty`);
+    // A population variance times n is the group's sum of squared deviations.
+    squares += numberVariance(items, 0) * n;
+    freedom += n - ddof;
+    groups++;
+  }
+  if (groups === 0) throw new EmptyDataError('pooledVariance of no samples');
+  if (freedom <= 0) throw new EmptyDataError('pooledVariance needs more values than groups');
+  return noNegativeZero(assertRepresentable(squares / freedom, 'variance'));
+}
+
+/** Square root of `pooledVariance`, with the same `ddof` convention (sample by default). */
+export function pooledStddev(samples: Iterable<Iterable<number>>, options: VarianceOptions = {}): number {
+  return Math.sqrt(pooledVariance(samples, options));
 }
 
 /** Smallest and largest value in a single pass. Throws `EmptyDataError` when empty. */
@@ -738,12 +1015,23 @@ export function linearRegression(x: Iterable<number>, y: Iterable<number>): Line
   const intercept = assertRepresentable(meanY - slope * meanX, 'intercept');
   const fit = { slope: noNegativeZero(slope), intercept: noNegativeZero(intercept) };
   const predict = (at: number): number => fit.intercept + fit.slope * at;
+  const quality = diagnostics(
+    ys,
+    xs.map(v => predict(v)),
+    1,
+  );
+  const scatter = quality.residualStandardError;
+  // sum((x - mean x)^2) is sxx * kx^2; keep the scale factor out of the square.
+  const spreadX = Math.sqrt(sxx) * kx;
+  const centerX = meanX / kx;
   return {
     ...fit,
-    r2: rSquared(
-      ys,
-      xs.map(v => predict(v)),
-    ),
+    ...quality,
+    slopeStandardError: scatter === undefined ? undefined : noNegativeZero(scatter / spreadX),
+    interceptStandardError:
+      scatter === undefined
+        ? undefined
+        : noNegativeZero(scatter * Math.sqrt(1 / xs.length + (centerX * centerX) / sxx)),
     predict,
   };
 }
@@ -870,8 +1158,8 @@ export function sampleSize(input: MeanSampleSizeInput | ProportionSampleSizeInpu
 // Curve fits
 // ---------------------------------------------------------------------------
 
-/** `r2` on the original scale; a constant y is explained perfectly only by a perfect fit. */
-function rSquared(ys: readonly number[], predicted: readonly number[]): number {
+/** Residual and total sums of squares of a fit, on the original y. */
+function sumsOfSquares(ys: readonly number[], predicted: readonly number[]): { residual: number; total: number } {
   const center = meanOf(ys);
   let residual = 0;
   let total = 0;
@@ -880,8 +1168,36 @@ function rSquared(ys: readonly number[], predicted: readonly number[]): number {
     residual += miss * miss;
     total += (y - center) * (y - center);
   }
+  return { residual, total };
+}
+
+/** `r2` from the sums of squares; a constant y is explained perfectly only by a perfect fit. */
+function r2Of({ residual, total }: { residual: number; total: number }): number {
   if (total === 0) return residual === 0 ? 1 : 0;
   return noNegativeZero(Math.min(1, 1 - residual / total));
+}
+
+/** `r2` on the original scale. */
+function rSquared(ys: readonly number[], predicted: readonly number[]): number {
+  return r2Of(sumsOfSquares(ys, predicted));
+}
+
+/** `r2` plus the diagnostics of a least-squares fit with `predictors` terms besides the intercept. */
+function diagnostics(
+  ys: readonly number[],
+  predicted: readonly number[],
+  predictors: number,
+): { r2: number } & FitDiagnostics {
+  const sums = sumsOfSquares(ys, predicted);
+  const r2 = r2Of(sums);
+  const n = ys.length;
+  const freedom = n - predictors - 1;
+  if (freedom <= 0) return { r2, adjustedR2: undefined, residualStandardError: undefined };
+  return {
+    r2,
+    adjustedR2: noNegativeZero(1 - ((1 - r2) * (n - 1)) / freedom),
+    residualStandardError: noNegativeZero(Math.sqrt(sums.residual / freedom)),
+  };
 }
 
 function assertAllPositive(values: readonly number[], name: string): void {
@@ -1051,9 +1367,10 @@ export function polynomialRegression(x: Iterable<number>, y: Iterable<number>, d
   };
   return {
     coefficients,
-    r2: rSquared(
+    ...diagnostics(
       ys,
       xs.map(v => predict(v)),
+      degree,
     ),
     predict,
   };
