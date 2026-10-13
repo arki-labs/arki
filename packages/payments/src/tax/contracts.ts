@@ -1,6 +1,8 @@
 import { z } from '@arki/contracts';
 
-import { positiveMoneySchema } from '../core/money';
+import type { TaxComplianceReport } from './reporting';
+import type { TaxCalculationResult, TaxService } from './service';
+import { moneyJsonSchema, positiveMoneySchema } from '../core/money';
 import {
   exemptionStatusValues,
   exemptionTypeValues,
@@ -242,6 +244,106 @@ export const getCustomerAnnualSummaryInputSchema = z.object({
   customerId: z.string(),
   year: z.number().min(2000).max(2100),
 });
+
+// Responses. Amounts go out as `Money` JSON (`{ amount: '19.99', currency: 'EUR' }`), so each
+// schema below says what the wire holds and the RPC client's type matches it. A handler turns
+// the service's `Money` values into that form with the `*Json` function next to the schema.
+
+const reportTypeSchema = z.enum(['sales_and_use_tax', 'vat', 'gst']);
+
+/** What `calculateTax` and `calculateSubscriptionTax` answer. */
+export const taxCalculationResultSchema = z.object({
+  subtotal: moneyJsonSchema,
+  taxAmount: moneyJsonSchema,
+  total: moneyJsonSchema,
+  taxInclusive: z.boolean(),
+  breakdown: z.array(
+    z.object({
+      jurisdiction: z.string(),
+      rate: z.number(),
+      amount: moneyJsonSchema,
+      taxCode: z.string().optional(),
+    }),
+  ),
+  applicableTaxIds: z.array(z.string()),
+});
+
+export function taxCalculationResultJson(result: TaxCalculationResult): z.input<typeof taxCalculationResultSchema> {
+  return {
+    ...result,
+    subtotal: result.subtotal.toJSON(),
+    taxAmount: result.taxAmount.toJSON(),
+    total: result.total.toJSON(),
+    breakdown: result.breakdown.map(line => ({ ...line, amount: line.amount.toJSON() })),
+  };
+}
+
+/** What `TaxService.getCustomerTaxSummary` answers. */
+export const customerTaxSummarySchema = z.object({
+  totalTaxPaid: moneyJsonSchema,
+  totalTransactions: z.number(),
+  breakdown: z.array(
+    z.object({
+      jurisdiction: z.string(),
+      taxAmount: moneyJsonSchema,
+      transactionCount: z.number(),
+    }),
+  ),
+});
+
+export function customerTaxSummaryJson(
+  summary: Awaited<ReturnType<TaxService['getCustomerTaxSummary']>>,
+): z.input<typeof customerTaxSummarySchema> {
+  return {
+    ...summary,
+    totalTaxPaid: summary.totalTaxPaid.toJSON(),
+    breakdown: summary.breakdown.map(line => ({ ...line, taxAmount: line.taxAmount.toJSON() })),
+  };
+}
+
+/** What `generateComplianceReport` answers. */
+export const taxComplianceReportSchema = z.object({
+  id: z.string(),
+  reportType: reportTypeSchema,
+  period: z.object({
+    year: z.number(),
+    quarter: z.number().optional(),
+    month: z.number().optional(),
+    startDate: z.date(),
+    endDate: z.date(),
+  }),
+  jurisdiction: z.string(),
+  totalSales: moneyJsonSchema,
+  totalTaxCollected: moneyJsonSchema,
+  exemptSales: moneyJsonSchema,
+  transactions: z.number(),
+  generatedAt: z.date(),
+  status: z.enum(['pending', 'completed', 'failed']),
+  downloadUrl: z.string().optional(),
+  summary: z.object({
+    taxableTransactions: z.number(),
+    exemptTransactions: z.number(),
+    averageTaxRate: z.number(),
+    topTaxCategories: z.array(z.object({ category: z.string(), sales: moneyJsonSchema, tax: moneyJsonSchema })),
+  }),
+});
+
+export function taxComplianceReportJson(report: TaxComplianceReport): z.input<typeof taxComplianceReportSchema> {
+  return {
+    ...report,
+    totalSales: report.totalSales.toJSON(),
+    totalTaxCollected: report.totalTaxCollected.toJSON(),
+    exemptSales: report.exemptSales.toJSON(),
+    summary: {
+      ...report.summary,
+      topTaxCategories: report.summary.topTaxCategories.map(category => ({
+        ...category,
+        sales: category.sales.toJSON(),
+        tax: category.tax.toJSON(),
+      })),
+    },
+  };
+}
 
 // Inferred type exports
 export type CreateTaxConfig = z.infer<typeof createTaxConfigSchema>;
