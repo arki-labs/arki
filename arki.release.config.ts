@@ -81,8 +81,10 @@ export const config: ReleaseConfig = {
       // scorecard dimension and back the DOT fixture. `@arki/http` joined
       // 2026-07-07 (typed HTTP + the DOT http() pip). `@arki/fs`,
       // `@arki/queue`, `@arki/auth`, `@arki/emails` rejoin this wave when
-      // they ship dist+docs / drop `private: true`.
-      packages: ['@arki/db', '@arki/kv', '@arki/http'],
+      // they ship dist+docs / drop `private: true`. `@arki/journal` joined
+      // 2026-10-13 (Drizzle entity journal; depends on `@arki/log`, optional
+      // `@arki/dot` peer).
+      packages: ['@arki/db', '@arki/kv', '@arki/http', '@arki/journal'],
     },
     {
       id: 'frontend',

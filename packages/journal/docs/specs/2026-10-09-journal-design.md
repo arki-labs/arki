@@ -496,8 +496,8 @@ Changing an event:
 ## 11. Migration order
 
 1. Build `packages/journal` with PGlite tests.
-2. Template (`turbo/generators/templates/application/backend`) and `apps/sudoku`.
-3. `apps/games-platform`.
+2. Template (`turbo/generators/templates/application/backend`) and a first pilot app.
+3. A second, larger app.
 4. `packages/payments`.
 5. `apps/kapodopera`, feature by feature. Emmett and the journal can run side by side
    until the last feature moves.
