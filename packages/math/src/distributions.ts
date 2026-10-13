@@ -102,7 +102,7 @@ export function gammaLn(x: number): number {
   return noNegativeZero(lnGamma(x));
 }
 
-const MAX_GAMMA_ARG = 171.624_376_956_302_72; // Γ(x) overflows a double just above this
+const MAX_GAMMA_ARG = 171.624_376_956_302_7; // Γ(x) overflows a double just above this
 
 function positiveGamma(x: number): number {
   // x >= 0.5. Same Lanczos sum as lnGamma, but exponentiated directly (no ln/exp round trip)
