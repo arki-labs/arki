@@ -100,10 +100,11 @@ export const config: ReleaseConfig = {
     {
       id: 'specialized',
       label: 'Wave 5 — Specialized',
-      // Empty for v1.0 — every Wave 5 candidate (`@arki/ai`,
-      // `@arki/rich-text`, `@arki/images`, `@arki/diff-engine`) is still
-      // `private: true`. They join the wave once their internals stabilise.
-      packages: [],
+      // `@arki/money` joined 2026-10-13 (exact money on `@arki/math`, so not
+      // Foundation). Other candidates (`@arki/ai`, `@arki/rich-text`,
+      // `@arki/images`, `@arki/diff-engine`) are still `private: true`; they
+      // join once their internals stabilise.
+      packages: ['@arki/money'],
     },
   ],
 };
