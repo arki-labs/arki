@@ -492,6 +492,9 @@ describe('write', () => {
   });
 });
 
+/** One create event for a legacy row, built from values the test knows. */
+const legacyEvent = (customerId: string, total: number) => () => [OrderPlaced({ customerId, total })];
+
 describe('replay, verify, repair', () => {
   it('replay folds the log; throughVersion gives an earlier state', async () => {
     const id = orderId(++next);
@@ -543,6 +546,68 @@ describe('replay, verify, repair', () => {
     const paid = await pay(id);
     expect(paid.row).toMatchObject({ status: 'paid', version: 2 });
     expect(await versions(id)).toEqual([2]);
+  });
+
+  it('adopt brings a pre-journal row in: its create event becomes version 1, and replay, verify and repair work from then on', async () => {
+    // Why: the first ordinary write to a legacy row starts its history at 2 and the original values
+    // are gone after that. Adopt records a create that rebuilds the row as it is, so the history is
+    // complete from version 1 and the row is never lost to a later write.
+    const id = orderId(++next);
+    const customerId = `cus_adopt_${next}`;
+    await db.insert(orders).values({ id, customerId, total: 7, status: 'placed' });
+    const adopted = await db.transaction(tx =>
+      journal.adopt(tx, order, id, {
+        meta,
+        events: row => [OrderPlaced({ customerId: row?.customerId ?? '', total: row?.total ?? 0 })],
+      }),
+    );
+    expect(adopted.row).toMatchObject({ customerId, total: 7, status: 'placed', version: 1, note: 'none' });
+    expect(adopted.events.map(e => [e.type, e.version])).toEqual([['OrderPlaced', 1]]);
+    expect(await journal.verify(db, order, id)).toEqual({ ok: true });
+    // The event is the app's own: projections ran for it.
+    const counts = await db.select().from(customerOrderCounts).where(eq(customerOrderCounts.customerId, customerId));
+    expect(counts.map(c => c.placed)).toEqual([1]);
+    // Ordinary writes continue from 1, and repair rebuilds the whole row from the log.
+    await pay(id);
+    expect(await versions(id)).toEqual([1, 2]);
+    await db.update(orders).set({ total: 999 }).where(eq(orders.id, id));
+    expect(await journal.repair(db, order, id)).toMatchObject({ total: 7, status: 'paid', version: 2 });
+  });
+
+  it('adopt refuses a row the journal already knows, a missing row, and a legacy row that was written to', async () => {
+    const known = orderId(++next);
+    await place(known);
+    await expect(
+      db.transaction(tx => journal.adopt(tx, order, known, { meta, events: legacyEvent('cus_1', 100) })),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    await expect(
+      db.transaction(tx => journal.adopt(tx, order, orderId(++next), { meta, events: legacyEvent('x', 1) })),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    const written = orderId(++next);
+    await db.insert(orders).values({ id: written, customerId: 'legacy', total: 7, status: 'placed' });
+    await pay(written);
+    await expect(
+      db.transaction(tx => journal.adopt(tx, order, written, { meta, events: legacyEvent('legacy', 7) })),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('adopt refuses an event whose create reducer does not rebuild the row, and leaves the row and the log untouched', async () => {
+    // Why: replay folds from nothing. If the adopted event built a different row, verify would report
+    // drift on day one and repair would overwrite real data with the event's version of it.
+    const id = orderId(++next);
+    await db.insert(orders).values({ id, customerId: 'legacy', total: 7, status: 'placed' });
+    const wrong = db.transaction(tx =>
+      journal.adopt(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'legacy', total: 8 })] }),
+    );
+    await expect(wrong).rejects.toMatchObject({ code: 'VALUE_MISMATCH' });
+    await expect(wrong).rejects.toThrow('column "total"');
+    expect(await rowOf(id)).toMatchObject({ total: 7, version: 0 });
+    expect(await versions(id)).toEqual([]);
+    const noCreate = db.transaction(tx =>
+      journal.adopt(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }),
+    );
+    await expect(noCreate).rejects.toThrow('has no .create reducer');
+    expect(await versions(id)).toEqual([]);
   });
 
   it('throughVersion cannot hide NO_HISTORY: a history that starts at version 2 is incomplete at any cut', async () => {

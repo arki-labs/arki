@@ -162,6 +162,21 @@ export type Journal<
    * a bad `meta` rejects the call, inside the transaction guard, as `run` does.
    */
   bind(source: TransactionSource<Tx>, meta: z.input<Meta>, opts?: RunOptions): CommandRunner<z.output<Meta>, Tx>;
+  /**
+   * Bring a row that existed before the journal into it. The row must be at version 0
+   * with no history, or `CONFLICT`. `events` builds exactly one create event from the
+   * stored row. Its `.create` reducer must rebuild that row exactly, column by column,
+   * or `VALUE_MISMATCH` and nothing changes: replay folds from nothing and must land on
+   * the row as it is. The event is recorded as version 1 and the row moves to version 1,
+   * so `replay`, `verify` and `repair` work from then on. Projections run and effects
+   * are queued as for any write, because the event is the app's own.
+   */
+  adopt<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
+    tx: Tx,
+    entity: EntityDef<K, Tbl, E, z.output<Meta>, Key>,
+    id: EntityId<Tbl, Key>,
+    input: WriteInput<Tbl, E, Meta, Tx>,
+  ): Promise<WriteResult<Tbl, E, z.output<Meta>, Key>>;
   /** Rebuild the row from the log in memory. `throughVersion` is the last version applied. */
   replay<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,

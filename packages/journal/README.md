@@ -187,6 +187,17 @@ export const journal = j.compose({ tables, effects: [closeAfterPayment] });
 
 A row the journal creates gets version 1 from its create event. A row that was there first (stored `version` 0, no events in the log) can still be written to, but its history starts at version 2: the first write treats the row as version 1 and records its event as version 2. Version 1 therefore always means "created from nothing". `replay`, `verify` and `repair` need a history that starts at version 1 and throw `NO_HISTORY` otherwise, because folding a partial history from nothing would pick the wrong reducers and build the wrong row. They also need every version up to the top, and a live row no newer than its log, and throw `HISTORY_GAP` otherwise: an event lost after it was written must be restored, not folded around.
 
+To bring such a row in properly, adopt it before its first write. `journal.adopt(tx, entity, id, { meta, events })` takes the row at version 0 with no history, calls `events(row)` for exactly one create event built from the stored row, and checks that the event's `.create` reducer rebuilds the row exactly, column by column. If it does, the event is recorded as version 1 and the row moves to version 1: the history is complete, and `replay`, `verify` and `repair` work from then on. If it does not, `VALUE_MISMATCH` names the column and nothing changes. A row the journal already knows, a missing row, or a legacy row that was already written to is `CONFLICT`. Projections run and effects are queued as for any write, because the event is the app's own. Run it once per legacy row, in a migration or a one-off script, before the app writes to the row.
+
+```ts
+await db.transaction(tx =>
+  journal.adopt(tx, order, id, {
+    meta: { actorId: 'migration' },
+    events: row => [OrderPlaced({ customerId: row.customerId, total: row.total })],
+  }),
+);
+```
+
 ### A row removed outside the journal
 
 If a row is deleted by hand while its log says it exists, the next write that would create it throws `CONFLICT`. Write would apply `.create` where replay applies `.on`, and the two would disagree. Run `repair` to restore the row from the log, then write again. A row the journal deleted is fine: its log ends with the delete, and a create continues the version sequence.

@@ -32,7 +32,10 @@ import {
   assertStoredValues,
   isRowOf,
   loadRow,
+  sameValue,
   saveReplayed,
+  showValue,
+  toRecord,
 } from './storage.js';
 import { oneAtATime } from './transaction-guard.js';
 
@@ -95,8 +98,10 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
     events: NextEvents<Tbl, E, Tx>,
     trace: Trace,
     onJobs?: (count: number) => void,
+    mode: 'write' | 'adopt' = 'write',
   ): Promise<WriteResult<Tbl, E, MetaOut, Key>> => {
-    return oneAtATime(tx, `write to ${entity.kind} ${id}`, async () => {
+    const adopting = mode === 'adopt';
+    return oneAtATime(tx, `${adopting ? 'adopt' : 'write to'} ${entity.kind} ${id}`, async () => {
       assertExactId(entity, id);
       const meta = getValidatedMeta();
       return tx.transaction(async sp => {
@@ -131,7 +136,19 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
             `the row is at version 0 but its log already holds version ${latestLogVersion}`,
           );
         }
-        const baseVersion = row === null ? latestLogVersion : stored === 0 ? 1 : stored;
+        if (adopting && (row === null || stored !== 0 || latestLogVersion > 0)) {
+          throw new JournalError(
+            'CONFLICT',
+            entity.kind,
+            id,
+            `adopt needs a row at version 0 with no history, but found ${row === null ? 'no row' : `the row at version ${stored}`} and a log ending at version ${latestLogVersion}`,
+          );
+        }
+        if (adopting && pending.length !== 1) {
+          throw new Error(`journal: adopt ${entity.kind} ${id} needs exactly one create event, got ${pending.length}`);
+        }
+        // Adopt records the create as version 1, so the history is complete from then on.
+        const baseVersion = adopting ? 0 : row === null ? latestLogVersion : stored === 0 ? 1 : stored;
         if (row === null && latestLogVersion > 0) await assertLogSaysGone(sp, entity, id, latestLogVersion);
 
         // Cheap checks before touching the log. The fold below catches the rest
@@ -154,7 +171,10 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
         const firstType = pending[0]?.type ?? '';
         const firstAt = `event "${firstType}" at version ${baseVersion + 1}`;
         const first = entity.reducers.get(firstType);
-        if (first !== undefined && row !== null && first.on === undefined) {
+        if (adopting && first?.create === undefined) {
+          throw new Error(`journal: adopt ${entity.kind} ${id}: event "${firstType}" has no .create reducer`);
+        }
+        if (!adopting && first !== undefined && row !== null && first.on === undefined) {
           throw new JournalError('ROW_EXISTS', entity.kind, id, firstAt);
         }
         if (first !== undefined && row === null && first.create === undefined) {
@@ -214,11 +234,32 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
           throw new Error(`journal: insert returned ${recorded.length} of ${pending.length} events`);
         }
 
-        const { row: next, recreated, reducerColumns } = fold(entity, row, id, recorded, 'write');
+        // Adopt folds from nothing, as replay will, and must land on the stored row.
+        const { row: next, recreated, reducerColumns } = fold(entity, adopting ? null : row, id, recorded, 'write');
         const finalVersion = baseVersion + recorded.length;
         const atBase = and(eq(entity.keyColumn, id), eq(erased.version, stored));
         let saved: Row<typeof entity.table> | null = null;
-        if (row === null && next !== null) {
+        if (adopting && row !== null && next !== null) {
+          const want = toRecord(next);
+          const have = toRecord(row);
+          for (const column of reducerColumns) {
+            if (column === entity.key || column === 'version' || sameValue(want[column], have[column])) continue;
+            throw new JournalError(
+              'VALUE_MISMATCH',
+              entity.kind,
+              id,
+              `adopt: the create reducer builds column "${column}" as ${showValue(want[column])} but the row holds ${showValue(have[column])}; the event must rebuild the stored row exactly, or replay would build a different row`,
+            );
+          }
+          // Only the version moves. The values are the row's own, checked above.
+          const updated = await sp.update(erased).set({ version: finalVersion }).where(atBase).returning();
+          const updatedRow = updated[0];
+          if (updatedRow === undefined)
+            throw new JournalError('VERSION_MISMATCH', entity.kind, id, `expected row version ${stored}`);
+          if (!isRowOf(entity.table, updatedRow))
+            throw new Error(`journal: ${entity.kind} ${id} update returned a partial row`);
+          saved = updatedRow;
+        } else if (row === null && next !== null) {
           saved = await saveReplayed(sp, entity, id, null, next);
         } else if (row !== null && next !== null && recreated) {
           // A reducer deleted the row and a create followed in the same write. Delete
@@ -308,7 +349,29 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
       { commandId: null, causeSeq: null, correlationId: correlationId() },
     );
 
-  return { write, writeWithValidatedMeta };
+  /** `journal.adopt`: `write` in adopt mode, with `meta` parsed for this one call. */
+  const adopt = <Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
+    tx: Tx,
+    entity: EntityDef<string, Tbl, E, MetaOut, Key>,
+    id: EntityId<Tbl, Key>,
+    input: WriteInput<Tbl, E, Meta, Tx>,
+  ): Promise<WriteResult<Tbl, E, MetaOut, Key>> =>
+    writeWithValidatedMeta(
+      tx,
+      entity,
+      id,
+      () => {
+        const meta = metaSchema.parse(input.meta);
+        assertRoundTrips(metaSchema, meta, entity.kind, id, 'meta');
+        return meta;
+      },
+      input.events,
+      { commandId: null, causeSeq: null, correlationId: correlationId() },
+      undefined,
+      'adopt',
+    );
+
+  return { write, adopt, writeWithValidatedMeta };
 }
 
 export type Writer<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>> = ReturnType<

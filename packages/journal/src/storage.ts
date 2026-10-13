@@ -118,7 +118,7 @@ export function toRecord(value: object): Record<string, unknown> {
   return { ...value };
 }
 
-function showValue(value: unknown): string {
+export function showValue(value: unknown): string {
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? 'Invalid Date' : value.toISOString();
   if (typeof value === 'bigint') return `${value}n`;
   if (typeof value === 'object' && value !== null) {
