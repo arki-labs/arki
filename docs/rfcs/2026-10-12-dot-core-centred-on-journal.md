@@ -305,9 +305,13 @@ below was opened in the code before it was adopted. The yardstick for "now"
 is: it touches the two tables, an invariant, or history that cannot be
 backfilled. Everything else waits for the first app that asks.
 
-Status of this section: **PROPOSED**. The founder chose "build all six now"
-on 2026-10-13. Implementation starts after the founder approves the designs
-below.
+Status of this section: **IMPLEMENTED 2026-10-13**. The founder chose
+"build all six now" and approved the designs below the same day. Each item
+is one commit and one changeset in `@arki/journal`; items 2 and 3 also
+carry a migration in games-platform and kapodopera. Everseek owns journal
+tables too but has no migration for them at all (it was set up by push), so
+it got none here; its schema file carries the columns. Item 4's design
+changed during implementation; see its paragraph.
 
 ### 8.0 The name stays `journal`
 
@@ -448,7 +452,11 @@ Design, Astra's rules on Fable's mechanism:
 - Wrappers run in registration order, first one outermost.
 
 Hooks on `write` are left out for now. They are additive and no plugin
-needs them yet.
+needs them yet. Implemented as `journal.hooks.command.around` and
+`journal.hooks.effect.around`, in `packages/journal/src/hooks.ts`. One
+rule was tightened: a hook's return value is ignored and `next` gives no
+result, so a hook cannot replace the result either; it can only watch or
+stop.
 
 ### 8.2 Build when an app asks
 
