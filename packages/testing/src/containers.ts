@@ -38,8 +38,13 @@ export async function startRedisContainer(image = 'redis:7-alpine'): Promise<Sta
   return container;
 }
 
+function readGlobalString(key: string): string | undefined {
+  const value: unknown = Reflect.get(globalThis, key);
+  return typeof value === 'string' ? value : undefined;
+}
+
 export function getGlobalPostgresConnectionString(): string | undefined {
-  const connectionString = (global as any)[POSTGRES_GLOBAL_KEY];
+  const connectionString = readGlobalString(POSTGRES_GLOBAL_KEY);
   debugContainers.debug('[containers] Getting global Postgres connection (exists: {exists})', {
     exists: !!connectionString,
   });
@@ -47,7 +52,7 @@ export function getGlobalPostgresConnectionString(): string | undefined {
 }
 
 export function getGlobalRedisConnectionString(): string | undefined {
-  const connectionString = (global as any)[REDIS_GLOBAL_KEY];
+  const connectionString = readGlobalString(REDIS_GLOBAL_KEY);
   debugContainers.debug('[containers] Getting global Redis connection (exists: {exists})', {
     exists: !!connectionString,
   });
@@ -71,7 +76,7 @@ export async function setupGlobalTestContainers(options?: SharedContainerOptions
   const pgStart = Date.now();
   sharedPostgresContainer = await startPostgresContainer(options?.postgresImage);
   const postgresUri = sharedPostgresContainer.getConnectionUri();
-  (global as any)[POSTGRES_GLOBAL_KEY] = postgresUri;
+  Reflect.set(globalThis, POSTGRES_GLOBAL_KEY, postgresUri);
 
   // Set database environment variables
   debugContainers.debug('[containers] Setting database environment variables');
@@ -88,7 +93,7 @@ export async function setupGlobalTestContainers(options?: SharedContainerOptions
   const redisHost = sharedRedisContainer.getHost();
   const redisPort = sharedRedisContainer.getMappedPort(6379);
   const redisUrl = `redis://${redisHost}:${redisPort}`;
-  (global as any)[REDIS_GLOBAL_KEY] = redisUrl;
+  Reflect.set(globalThis, REDIS_GLOBAL_KEY, redisUrl);
 
   // Set Redis environment variables
   debugContainers.debug('[containers] Setting Redis environment variables');
@@ -137,7 +142,7 @@ export async function teardownGlobalTestContainers(): Promise<void> {
   }
 
   debugContainers.debug('[containers] Clearing global connection strings');
-  delete (global as any)[POSTGRES_GLOBAL_KEY];
-  delete (global as any)[REDIS_GLOBAL_KEY];
+  Reflect.deleteProperty(globalThis, POSTGRES_GLOBAL_KEY);
+  Reflect.deleteProperty(globalThis, REDIS_GLOBAL_KEY);
   debugContainers.debug('[containers] Teardown complete');
 }

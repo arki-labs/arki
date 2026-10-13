@@ -2,9 +2,9 @@ import crypto from 'node:crypto';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
-import type { PgTable } from 'drizzle-orm/pg-core';
+import { PgTable } from 'drizzle-orm/pg-core';
 import type { StartedTestContainer } from 'testcontainers';
-import { sql } from 'drizzle-orm';
+import { is, sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 
 import type { UserId } from '@arki/auth';
@@ -40,6 +40,45 @@ type CallerCollection<TCaller> = {
   moderator: TCaller;
   admin: TCaller;
 };
+
+/**
+ * `drizzle(...)` puts the connection on `$client`, but the `NodePgDatabase` type does not declare it.
+ * These guards check for it at runtime instead of casting.
+ */
+type Endable = { end(): Promise<void> };
+type Releasable = { release(): void | Promise<void> };
+
+function isObjectWith<K extends string>(value: unknown, key: K): value is Record<K, unknown> {
+  return typeof value === 'object' && value !== null && key in value;
+}
+
+function isEndable(value: unknown): value is Endable {
+  return isObjectWith(value, 'end') && typeof value.end === 'function';
+}
+
+function isReleasable(value: unknown): value is Releasable {
+  return isObjectWith(value, 'release') && typeof value.release === 'function';
+}
+
+/**
+ * Close the connection pool (or release the client) that backs a drizzle database.
+ * Returns which action ran, or `null` when the database has no `$client`.
+ */
+async function closeDatabaseClient(db: object): Promise<'ended' | 'released' | null> {
+  if (!isObjectWith(db, '$client') || !db.$client) {
+    return null;
+  }
+  const client = db.$client;
+  if (isEndable(client)) {
+    await client.end();
+    return 'ended';
+  }
+  if (isReleasable(client)) {
+    await client.release();
+    return 'released';
+  }
+  return null;
+}
 
 /**
  * Integration testing helper class providing comprehensive utilities for testing
@@ -165,6 +204,8 @@ export class IntegrationTester<
     if (useTransaction) {
       debugTester.debug('[tester] getCurrentDb: Using transaction context');
     }
+    // Cast needed: a Drizzle transaction has the database's methods but is a separate class, so it
+    // is not assignable to the generic TDatabase (TS2322 on the unioned return).
     return (this.currentTransaction ?? this._db) as TDatabase;
   }
 
@@ -207,6 +248,7 @@ export class IntegrationTester<
   get factory(): TFactories {
     if (!this._factoryRegistry) {
       // Fallback for backward compatibility
+      // Cast needed: this fallback is only correct when TFactories is its default (FactoryRegistry).
       this._factoryRegistry = new FactoryRegistry() as TFactories;
       this.registerBaseFactories();
     }
@@ -224,7 +266,7 @@ export class IntegrationTester<
    * ```
    */
   setFactoryRegistry<T extends TFactories>(registry: T): void {
-    this._factoryRegistry = registry as TFactories;
+    this._factoryRegistry = registry;
   }
 
   getUser(role: 'user' | 'moderator' | 'admin'): TestUser {
@@ -277,14 +319,7 @@ export class IntegrationTester<
       } finally {
         // Close the admin connection after creating the database
         try {
-          const dbWithClient = adminDb as any;
-          if (dbWithClient.$client) {
-            if (typeof dbWithClient.$client.end === 'function') {
-              await dbWithClient.$client.end();
-            } else if (typeof dbWithClient.$client.release === 'function') {
-              await dbWithClient.$client.release();
-            }
-          }
+          await closeDatabaseClient(adminDb);
           debugTester.debug('[tester] Admin database connection closed after setup');
         } catch (closeError) {
           debugTester.debug('[tester] Error closing admin connection during setup: {setup}', {
@@ -297,7 +332,7 @@ export class IntegrationTester<
     debugTester.debug('[tester] Creating database connection and running migrations');
     const database = this.createDatabaseConnection(connectionString);
     this._db = database;
-    await migrate(this._db as any, { migrationsFolder: this.config.migrationsFolder });
+    await migrate(this._db, { migrationsFolder: this.config.migrationsFolder });
     debugTester.debug('[tester] Migrations completed');
 
     debugTester.debug('[tester] Creating repositories');
@@ -366,7 +401,7 @@ export class IntegrationTester<
     if (contextForCleanup && 'closeEventStore' in contextForCleanup) {
       debugTester.debug('[tester] Closing event store connection via cleanup function');
       try {
-        const closeEventStore = (contextForCleanup as any).closeEventStore;
+        const closeEventStore = contextForCleanup.closeEventStore;
         if (typeof closeEventStore === 'function') {
           await closeEventStore();
           debugTester.debug('[tester] Event store connection closed successfully');
@@ -390,8 +425,8 @@ export class IntegrationTester<
       // Fallback: try old method if closeEventStore function doesn't exist
       debugTester.debug('[tester] No closeEventStore function found, attempting direct close');
       try {
-        const eventStore = (contextForCleanup as any).eventStore;
-        if (eventStore && typeof eventStore.close === 'function') {
+        const eventStore = contextForCleanup.eventStore;
+        if (isObjectWith(eventStore, 'close') && typeof eventStore.close === 'function') {
           await eventStore.close();
           debugTester.debug('[tester] Event store connection closed via direct method');
         }
@@ -406,17 +441,11 @@ export class IntegrationTester<
     if (this._db) {
       debugTester.debug('[tester] Closing database connection');
       try {
-        const dbWithClient = this._db as any;
-        if (dbWithClient.$client) {
-          if (typeof dbWithClient.$client.end === 'function') {
-            debugTester.debug('[tester] Ending database pool');
-            await dbWithClient.$client.end();
-            debugTester.debug('[tester] Database pool ended successfully');
-          } else if (typeof dbWithClient.$client.release === 'function') {
-            debugTester.debug('[tester] Releasing database client');
-            await dbWithClient.$client.release();
-            debugTester.debug('[tester] Database client released successfully');
-          }
+        const closed = await closeDatabaseClient(this._db);
+        if (closed === 'ended') {
+          debugTester.debug('[tester] Database pool ended successfully');
+        } else if (closed === 'released') {
+          debugTester.debug('[tester] Database client released successfully');
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -491,14 +520,7 @@ export class IntegrationTester<
         // Close the admin connection
         if (adminDb) {
           try {
-            const dbWithClient = adminDb as any;
-            if (dbWithClient.$client) {
-              if (typeof dbWithClient.$client.end === 'function') {
-                await dbWithClient.$client.end();
-              } else if (typeof dbWithClient.$client.release === 'function') {
-                await dbWithClient.$client.release();
-              }
-            }
+            await closeDatabaseClient(adminDb);
             debugTester.debug('[tester] Admin database connection closed');
           } catch (closeError) {
             const errorMessage = closeError instanceof Error ? closeError.message : String(closeError);
@@ -597,10 +619,8 @@ export class IntegrationTester<
     const regex = typeof pattern === 'string' ? new RegExp(pattern) : pattern;
 
     const tables = Object.entries(this.config.schema)
-      .filter(([name, value]) => {
-        return regex.test(name) && typeof value === 'object' && value !== null;
-      })
-      .map(([, table]) => table as PgTable);
+      .filter((entry): entry is [string, PgTable] => regex.test(entry[0]) && is(entry[1], PgTable))
+      .map(([, table]) => table);
 
     for (const table of tables) {
       await this._db.delete(table);
@@ -625,7 +645,7 @@ export class IntegrationTester<
 
     const exceptSet = new Set(exceptTables);
     const tables = Object.values(this.config.schema).filter(
-      (value): value is PgTable => typeof value === 'object' && value !== null && !exceptSet.has(value as PgTable),
+      (value): value is PgTable => is(value, PgTable) && !exceptSet.has(value),
     );
 
     for (const table of tables) {
@@ -647,7 +667,7 @@ export class IntegrationTester<
    * });
    * ```
    */
-  async seed<T extends Record<string, any[]>>(data: T): Promise<void> {
+  async seed<T extends Record<string, readonly object[]>>(data: T): Promise<void> {
     if (!this._db) {
       throw new Error('Tester not initialized. Call setup() first.');
     }
@@ -655,8 +675,8 @@ export class IntegrationTester<
     for (const [tableName, records] of Object.entries(data)) {
       if (records.length === 0) continue;
 
-      const table = (this.config.schema as any)[tableName];
-      if (!table) {
+      const table = this.config.schema[tableName];
+      if (!is(table, PgTable)) {
         throw new Error(`Table '${tableName}' not found in schema`);
       }
 
@@ -944,7 +964,7 @@ export class IntegrationTester<
    * });
    * ```
    */
-  async withTransaction<T>(callback: () => Promise<T>): Promise<T> {
+  async withTransaction(callback: () => Promise<unknown>): Promise<void> {
     if (!this._db) {
       throw new Error('Tester not initialized. Call setup() first.');
     }
@@ -961,7 +981,7 @@ export class IntegrationTester<
         } catch (error) {
           if (error instanceof Error && error.message === '__ROLLBACK__') {
             debugTester.debug('[tester] Transaction rolled back successfully');
-            return undefined as T;
+            return;
           }
           debugTester.debug('[tester] Error in transaction callback', {
             error: error instanceof Error ? error.message : 'unknown error',
@@ -980,7 +1000,7 @@ export class IntegrationTester<
           error.message.includes('connection is closed'))
       ) {
         debugTester.debug('[tester] Connection closed during rollback (expected)');
-        return undefined as T;
+        return;
       }
       throw error;
     }
@@ -1069,8 +1089,7 @@ export class IntegrationTester<
       throw new Error('Expected paginated response to be an object');
     }
 
-    const resp = response as any;
-    if (!Array.isArray(resp.items)) {
+    if (!('items' in response) || !Array.isArray(response.items)) {
       throw new TypeError('Expected paginated response to have items array');
     }
   }
@@ -1363,21 +1382,14 @@ export class IntegrationTester<
     // When running inside a transaction, reuse heavy resources (event store, message bus)
     // from the base context while swapping in the transactional db/repositories.
     if (this._baseContext && this.currentTransaction) {
-      const clonedContext: any = {
-        ...(this._baseContext as any),
+      const baseContext = this._baseContext;
+      return {
+        ...baseContext,
         db: currentDb,
         repo: repositories,
+        ...('kv' in baseContext && this._kv ? { kv: this._kv } : {}),
+        ...('runInTransaction' in baseContext ? { runInTransaction: currentDb.transaction.bind(currentDb) } : {}),
       };
-
-      if ('kv' in clonedContext && this._kv) {
-        clonedContext.kv = this._kv;
-      }
-
-      if ('runInTransaction' in clonedContext && typeof (currentDb as any).transaction === 'function') {
-        clonedContext.runInTransaction = (currentDb as any).transaction.bind(currentDb);
-      }
-
-      return clonedContext as TContext;
     }
 
     const context = this.config.createContext({
@@ -1394,6 +1406,9 @@ export class IntegrationTester<
     return context;
   }
 
+  // Cast needed (TS2352 on a direct `as TDatabase`): initDb builds the database with relations derived from
+  // `config.schema`, while TDatabase is whatever subtype the app's `createRepositories` asks for. TypeScript
+  // cannot prove the two agree, so the app must keep its database type consistent with its schema.
   protected createDatabaseConnection(connectionString: string): TDatabase {
     return initDb.schema(this.config.schema).create({
       connectionString,

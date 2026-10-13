@@ -46,11 +46,11 @@ export type DebugOptions = {
    * Function to use for logging
    * @default console.log
    */
-  logger?: (message: string, ...args: any[]) => void;
+  logger?: (message: string, ...args: unknown[]) => void;
 };
 
 let debugEnabled = process.env.DEBUG_TESTS === 'true';
-let debugLogger: (message: string, ...args: any[]) => void = console.log;
+let debugLogger: (message: string, ...args: unknown[]) => void = console.log;
 
 /**
  * Configure debug options globally
@@ -89,7 +89,7 @@ export function isDebugEnabled(): boolean {
  * logDebug('Creating test user', { email: 'test@example.com' });
  * ```
  */
-export function logDebug(message: string, ...args: any[]): void {
+export function logDebug(message: string, ...args: unknown[]): void {
   if (debugEnabled) {
     debugLogger(`[DEBUG] ${message}`, ...args);
   }
@@ -106,7 +106,7 @@ export function logDebug(message: string, ...args: any[]): void {
  * logQuery('SELECT * FROM users WHERE id = $1', ['usr_123']);
  * ```
  */
-export function logQuery(query: string, params?: any[]): void {
+export function logQuery(query: string, params?: readonly unknown[]): void {
   if (debugEnabled) {
     debugLogger(`[SQL] ${query}`);
     if (params && params.length > 0) {
@@ -126,7 +126,7 @@ export function logQuery(query: string, params?: any[]): void {
  * logState('User after update', user);
  * ```
  */
-export function logState(label: string, state: any): void {
+export function logState(label: string, state: unknown): void {
   if (debugEnabled) {
     debugLogger(`[STATE] ${label}:`, JSON.stringify(state, null, 2));
   }
@@ -262,12 +262,12 @@ export function logSection(label: string): void {
  */
 export function createDebugContext(context: string) {
   return {
-    log: (message: string, ...args: any[]) => {
+    log: (message: string, ...args: unknown[]) => {
       if (debugEnabled) {
         debugLogger(`[DEBUG] [${context}] ${message}`, ...args);
       }
     },
-    query: (query: string, params?: any[]) => {
+    query: (query: string, params?: readonly unknown[]) => {
       if (debugEnabled) {
         debugLogger(`[SQL] [${context}] ${query}`);
         if (params && params.length > 0) {
@@ -275,7 +275,7 @@ export function createDebugContext(context: string) {
         }
       }
     },
-    state: (label: string, state: any) => {
+    state: (label: string, state: unknown) => {
       if (debugEnabled) {
         debugLogger(`[STATE] [${context}] ${label}:`, JSON.stringify(state, null, 2));
       }

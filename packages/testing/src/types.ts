@@ -51,7 +51,7 @@ export type IntegrationTesterConfig<
   createCaller(args: CreateCallerArgs<TContext>): TCaller;
   createRepositories(db: TDatabase): TRepositories;
   defaultUsers: TesterUsers;
-  baseFactories?: Record<string, Factory<any>>;
+  baseFactories?: Record<string, Factory<unknown>>;
 
   /**
    * Optional hook called after a test user is created.

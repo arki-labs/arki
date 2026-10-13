@@ -44,32 +44,36 @@ export function assertPaginationValid(
     throw new Error('Expected paginated response to be an object');
   }
 
-  const resp = response as any;
-
-  if (!Array.isArray(resp.items)) {
+  if (!('items' in response) || !Array.isArray(response.items)) {
     throw new TypeError('Expected paginated response to have items array');
   }
+  const items: unknown[] = response.items;
 
-  if (options?.itemsCount !== undefined && resp.items.length !== options.itemsCount) {
-    throw new Error(`Expected items array to have length ${options.itemsCount}, got ${resp.items.length}`);
+  if (options?.itemsCount !== undefined && items.length !== options.itemsCount) {
+    throw new Error(`Expected items array to have length ${options.itemsCount}, got ${items.length}`);
   }
 
   if (options?.total !== undefined) {
-    if (typeof resp.total !== 'number') {
-      throw new TypeError(`Expected total to be a number, got ${typeof resp.total}`);
+    const total: unknown = 'total' in response ? response.total : undefined;
+    if (typeof total !== 'number') {
+      throw new TypeError(`Expected total to be a number, got ${typeof total}`);
     }
-    if (resp.total !== options.total) {
-      throw new Error(`Expected total to be ${options.total}, got ${resp.total}`);
+    if (total !== options.total) {
+      throw new Error(`Expected total to be ${options.total}, got ${total}`);
     }
   }
 
-  if (options?.hasMore !== undefined && resp.hasMore !== options.hasMore) {
-    throw new Error(`Expected hasMore to be ${options.hasMore}, got ${resp.hasMore}`);
+  if (options?.hasMore !== undefined) {
+    const hasMore: unknown = 'hasMore' in response ? response.hasMore : undefined;
+    if (hasMore !== options.hasMore) {
+      throw new Error(`Expected hasMore to be ${options.hasMore}, got ${String(hasMore)}`);
+    }
   }
 
-  if (options?.itemSchema) {
-    resp.items.forEach((item: unknown, index: number) => {
-      const result = options.itemSchema!.safeParse(item);
+  const itemSchema = options?.itemSchema;
+  if (itemSchema) {
+    items.forEach((item, index) => {
+      const result = itemSchema.safeParse(item);
       if (!result.success) {
         throw new Error(`Item at index ${index} failed validation: ${result.error.message}`);
       }
@@ -126,14 +130,12 @@ export function assertTimestampRecent(
  * assertContainsId(games.items, 'game_123');
  * ```
  */
-export function assertContainsId<T extends Record<string, any>>(
-  items: T[],
-  id: string,
-  idField: keyof T = 'id' as keyof T,
-): void {
-  const found = items.some(item => item[idField] === id);
+export function assertContainsId<T extends { id: unknown }>(items: T[], id: string): void;
+export function assertContainsId<T extends object>(items: T[], id: string, idField: keyof T): void;
+export function assertContainsId(items: readonly object[], id: string, idField: PropertyKey = 'id'): void {
+  const found = items.some(item => Reflect.get(item, idField) === id);
   if (!found) {
-    const ids = items.map(item => item[idField]);
+    const ids = items.map(item => String(Reflect.get(item, idField)));
     throw new Error(`Expected array to contain item with ${String(idField)}='${id}', but found: [${ids.join(', ')}]`);
   }
 }
@@ -151,12 +153,10 @@ export function assertContainsId<T extends Record<string, any>>(
  * assertNotContainsId(games.items, 'game_deleted');
  * ```
  */
-export function assertNotContainsId<T extends Record<string, any>>(
-  items: T[],
-  id: string,
-  idField: keyof T = 'id' as keyof T,
-): void {
-  const found = items.some(item => item[idField] === id);
+export function assertNotContainsId<T extends { id: unknown }>(items: T[], id: string): void;
+export function assertNotContainsId<T extends object>(items: T[], id: string, idField: keyof T): void;
+export function assertNotContainsId(items: readonly object[], id: string, idField: PropertyKey = 'id'): void {
+  const found = items.some(item => Reflect.get(item, idField) === id);
   if (found) {
     throw new Error(`Expected array to NOT contain item with ${String(idField)}='${id}', but found it`);
   }
@@ -177,7 +177,7 @@ export function assertNotContainsId<T extends Record<string, any>>(
  * ```
  */
 export async function assertErrorThrown(
-  callback: () => Promise<any>,
+  callback: () => Promise<unknown>,
   expectedMessage?: string | RegExp,
 ): Promise<Error> {
   let error: Error | null = null;
@@ -185,7 +185,7 @@ export async function assertErrorThrown(
   try {
     await callback();
   } catch (error_) {
-    error = error_ as Error;
+    error = error_ instanceof Error ? error_ : new Error(String(error_));
   }
 
   if (!error) {
@@ -219,11 +219,13 @@ export async function assertErrorThrown(
  * );
  * ```
  */
-export async function assertNoError(callback: () => Promise<any>): Promise<void> {
+export async function assertNoError(callback: () => Promise<unknown>): Promise<void> {
   try {
     await callback();
   } catch (error) {
-    throw new Error(`Expected function not to throw an error, but it threw: ${(error as Error).message}`);
+    throw new Error(
+      `Expected function not to throw an error, but it threw: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -299,21 +301,30 @@ export function assertArrayEmpty(array: unknown[], label = 'array'): void {
  * });
  * ```
  */
-export function assertDeepPartialMatch(actual: any, expected: any, label = 'object', path: string[] = []): void {
+export function assertDeepPartialMatch(
+  actual: unknown,
+  expected: unknown,
+  label = 'object',
+  path: string[] = [],
+): void {
+  if (typeof expected !== 'object' || expected === null) {
+    return;
+  }
+
   for (const key in expected) {
     const currentPath = [...path, key];
     const pathStr = currentPath.join('.');
 
-    if (!(key in actual)) {
+    if (typeof actual !== 'object' || actual === null || !(key in actual)) {
       throw new Error(`Expected ${label} to have property '${pathStr}'`);
     }
 
-    const actualValue = actual[key];
-    const expectedValue = expected[key];
+    const actualValue: unknown = Reflect.get(actual, key);
+    const expectedValue: unknown = Reflect.get(expected, key);
 
     if (expectedValue === null) {
       if (actualValue !== null) {
-        throw new Error(`Expected ${label}.${pathStr} to be null, got ${actualValue}`);
+        throw new Error(`Expected ${label}.${pathStr} to be null, got ${JSON.stringify(actualValue)}`);
       }
     } else if (typeof expectedValue === 'object' && !Array.isArray(expectedValue)) {
       assertDeepPartialMatch(actualValue, expectedValue, label, currentPath);
@@ -338,29 +349,39 @@ export function assertDeepPartialMatch(actual: any, expected: any, label = 'obje
  * assertArraySorted(games.items, 'name', 'asc');
  * ```
  */
-export function assertArraySorted<T extends Record<string, any>>(
-  array: T[],
-  field: keyof T,
-  order: 'asc' | 'desc' = 'asc',
-): void {
+export function assertArraySorted<T extends object>(array: T[], field: keyof T, order: 'asc' | 'desc' = 'asc'): void {
   for (let i = 1; i < array.length; i++) {
-    const prev = array[i - 1]![field];
-    const current = array[i]![field];
+    const prev: unknown = array[i - 1]![field];
+    const current: unknown = array[i]![field];
+    const comparison = compareValues(prev, current, field);
 
     if (order === 'asc') {
-      if (prev > current) {
+      if (comparison > 0) {
         throw new Error(
-          `Expected array to be sorted by '${String(field)}' in ascending order, but found ${prev} > ${current} at index ${i}`,
+          `Expected array to be sorted by '${String(field)}' in ascending order, but found ${String(prev)} > ${String(current)} at index ${i}`,
         );
       }
     } else {
-      if (prev < current) {
+      if (comparison < 0) {
         throw new Error(
-          `Expected array to be sorted by '${String(field)}' in descending order, but found ${prev} < ${current} at index ${i}`,
+          `Expected array to be sorted by '${String(field)}' in descending order, but found ${String(prev)} < ${String(current)} at index ${i}`,
         );
       }
     }
   }
+}
+
+/**
+ * Compare two sort-field values: numbers, strings, bigints and dates, each with its own kind.
+ */
+function compareValues(a: unknown, b: unknown, field: PropertyKey): number {
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  if (typeof a === 'bigint' && typeof b === 'bigint') return a > b ? 1 : a < b ? -1 : 0;
+  if (typeof a === 'string' && typeof b === 'string') return a > b ? 1 : a < b ? -1 : 0;
+  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime();
+  throw new TypeError(
+    `Cannot compare values of '${String(field)}': expected two numbers, bigints, strings or dates, got ${a === null ? 'null' : typeof a} and ${b === null ? 'null' : typeof b}`,
+  );
 }
 
 /**

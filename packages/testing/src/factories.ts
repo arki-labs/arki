@@ -113,7 +113,9 @@ export type Factory<T> = {
  * ```
  */
 export function createFactory<T>(generator: () => T, defaults?: Partial<T>): Factory<T> {
-  const factory = (overridesOrNothing?: Partial<T>): T | FactoryBuilder<T> => {
+  function factory(): FactoryBuilder<T>;
+  function factory(overrides?: Partial<T>): T;
+  function factory(overridesOrNothing?: Partial<T>): T | FactoryBuilder<T> {
     // If called with no arguments, return builder
     if (overridesOrNothing === undefined && arguments.length === 0) {
       return new FactoryBuilder<T>(() => ({
@@ -128,9 +130,9 @@ export function createFactory<T>(generator: () => T, defaults?: Partial<T>): Fac
       ...defaults,
       ...overridesOrNothing,
     };
-  };
+  }
 
-  return factory as Factory<T>;
+  return factory;
 }
 
 /**
@@ -196,12 +198,11 @@ export function createSequence<T, K extends keyof T>(
   values: T[K][],
   baseOverrides?: Partial<T>,
 ): T[] {
-  return values.map(value =>
-    factory({
-      ...baseOverrides,
-      [field]: value,
-    } as Partial<T>),
-  );
+  return values.map(value => {
+    const overrides: Partial<T> = Object.assign({}, baseOverrides);
+    overrides[field] = value;
+    return factory(overrides);
+  });
 }
 
 /**
@@ -224,7 +225,18 @@ export function createSequence<T, K extends keyof T>(
  * ```
  */
 export class FactoryRegistry {
-  private factories = new Map<string, Factory<any>>();
+  private factories = new Map<string, Factory<unknown>>();
+
+  /**
+   * Read a factory back as the type the caller names.
+   *
+   * Cast needed (TS2322: 'unknown' is not assignable to 'T'): the registry stores factories of many
+   * different types under string names, so the type is only known to the caller. Registering a
+   * `Factory<User>` under a name and reading it as `Factory<Post>` is not caught by the compiler.
+   */
+  private lookup<T>(name: string): Factory<T> | undefined {
+    return this.factories.get(name) as Factory<T> | undefined;
+  }
 
   /**
    * Register a factory
@@ -247,7 +259,7 @@ export class FactoryRegistry {
    * Get a registered factory
    */
   get<T>(name: string): Factory<T> | undefined {
-    const factory = this.factories.get(name);
+    const factory = this.lookup<T>(name);
     debugFactories.debug('[factories] Getting factory (name: {name}, found: {found})', { name, found: !!factory });
     return factory;
   }
@@ -260,7 +272,7 @@ export class FactoryRegistry {
       name,
       hasOverrides: !!overrides,
     });
-    const factory = this.factories.get(name);
+    const factory = this.lookup<T>(name);
     if (!factory) {
       debugFactories.debug('[factories] Factory not found: {found}', { found: name });
       throw new Error(`Factory '${name}' not registered`);
@@ -275,7 +287,7 @@ export class FactoryRegistry {
    */
   createMany<T>(name: string, count: number, overrides?: Partial<T> | ((index: number) => Partial<T>)): T[] {
     debugFactories.debug('[factories] Creating multiple instances (name: {name}, count: {count})', { name, count });
-    const factory = this.factories.get(name);
+    const factory = this.lookup<T>(name);
     if (!factory) {
       debugFactories.debug('[factories] Factory not found: {found}', { found: name });
       throw new Error(`Factory '${name}' not registered`);
@@ -331,32 +343,32 @@ export class FactoryRegistry {
  * ```
  */
 export class TypedFactoryRegistry<
-  TFactories extends Record<string, Record<string, Factory<any>>>,
+  TFactories extends Record<string, Record<string, Factory<unknown>>>,
 > extends FactoryRegistry {
-  [K: string]: any;
+  [K: string]: unknown;
 
   constructor(typedFactories: TFactories) {
     super();
     // Expose typed factories as properties for direct access
     for (const [namespace, factories] of Object.entries(typedFactories)) {
-      (this as any)[namespace] = factories;
+      this[namespace] = factories;
     }
   }
 }
 
 // Helper type to merge FactoryRegistry base with TFactories
-export type TypedFactoryRegistryInstance<TFactories extends Record<string, Record<string, Factory<any>>>> =
+export type TypedFactoryRegistryInstance<TFactories extends Record<string, Record<string, Factory<unknown>>>> =
   TypedFactoryRegistry<TFactories> & TFactories;
 
 /**
  * Helper type to extract the return type of a factory
  */
-export type FactoryOutput<T extends Factory<any>> = ReturnType<T>;
+export type FactoryOutput<T extends Factory<unknown>> = ReturnType<T>;
 
 /**
  * Helper type to extract all factory outputs from a factories object
  */
-export type FactoriesOutput<T extends Record<string, Factory<any>>> = {
+export type FactoriesOutput<T extends Record<string, Factory<unknown>>> = {
   [K in keyof T]: FactoryOutput<T[K]>;
 };
 
@@ -393,7 +405,7 @@ export type FactoriesOutput<T extends Record<string, Factory<any>>> = {
  * const mode = gameRegistryFactories.gameMode(); // Type: GameMode
  * ```
  */
-export function createFactories<TFactories extends Record<string, Factory<any> | Record<string, any>>>(
+export function createFactories<TFactories extends Record<string, Factory<unknown> | Record<string, unknown>>>(
   factories: TFactories,
 ): TFactories {
   return factories;

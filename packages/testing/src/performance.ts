@@ -199,7 +199,7 @@ export async function benchmarkQuery<T>(
  * // Shows ranked results with percentage differences
  * ```
  */
-export async function comparePerformance<T extends Record<string, () => Promise<any>>>(
+export async function comparePerformance<T extends Record<string, () => Promise<unknown>>>(
   operations: T,
   iterations = 10,
 ): Promise<
