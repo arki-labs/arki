@@ -1,10 +1,10 @@
-import { userIdSchema } from '@arki/auth/ids';
+import { userIdSchema } from '../core/user-id.js';
 import { z } from '@arki/contracts';
 import { instantSchema } from '@arki/date/zod';
 
-import type { SpendRange } from './types';
-import { nonNegativeMoneySchema } from '../core/money';
-import { customerIdSchema } from '../core/primitives';
+import type { SpendRange } from './types.js';
+import { nonNegativeMoneySchema } from '../core/money.js';
+import { customerIdSchema } from '../core/primitives.js';
 import {
   communicationChannelValues,
   communicationStatusValues,
@@ -17,7 +17,7 @@ import {
   dunningExecutionIdSchema,
   executionStatusValues,
   riskCategoryValues,
-} from './primitives';
+} from './primitives.js';
 
 // Base validation schemas for enums
 
@@ -539,4 +539,4 @@ export {
   dunningCampaignTypeValues,
   executionStatusValues,
   riskCategoryValues,
-} from './primitives';
+} from './primitives.js';

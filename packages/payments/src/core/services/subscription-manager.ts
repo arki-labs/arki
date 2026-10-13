@@ -1,12 +1,12 @@
-import type { UserId } from '@arki/auth/ids';
+import type { UserId } from '../user-id.js';
 import type { Instant } from '@arki/date';
 import { fromDate } from '@arki/date';
 
-import type { CoreWrites } from '../journal';
-import type { BasePaymentProvider } from '../providers/base-provider';
-import type { PaymentRepository } from '../repository';
-import type { Plan, PlanId, Subscription, SubscriptionId, SubscriptionPreview, SubscriptionStatus } from '../types';
-import { paymentAmount } from '../money';
+import type { CoreWrites } from '../journal.js';
+import type { BasePaymentProvider } from '../providers/base-provider.js';
+import type { PaymentRepository } from '../repository.js';
+import type { Plan, PlanId, Subscription, SubscriptionId, SubscriptionPreview, SubscriptionStatus } from '../types.js';
+import { paymentAmount } from '../money.js';
 
 // Utility functions to convert between database and domain types
 function convertSubscriptionToDomain(dbSubscription: any): Subscription {

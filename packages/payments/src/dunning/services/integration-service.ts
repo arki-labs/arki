@@ -1,26 +1,26 @@
 import { eq } from 'drizzle-orm';
 
-import type { UserId } from '@arki/auth/ids';
+import type { UserId } from '../../core/user-id.js';
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
 import { getLogger } from '@arki/log';
 import { Money } from '@arki/money';
 
-import type { PaymentRetryService } from '../../core/services/payment-retry-service';
-import type { CoreTables } from '../../core/tables';
-import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types';
-import type { DunningCampaignId } from '../primitives';
-import type { DunningTables } from '../tables';
+import type { PaymentRetryService } from '../../core/services/payment-retry-service.js';
+import type { CoreTables } from '../../core/tables.js';
+import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types.js';
+import type { DunningCampaignId } from '../primitives.js';
+import type { DunningTables } from '../tables.js';
 import type {
   CampaignWithTrigger,
   DunningCampaign as DunningCampaignRow,
   DunningExecution as DunningExecutionRow,
-} from '../types';
-import type { CommunicationOrchestrationConfig } from './communication-service';
-import { type DunningDatabase } from '../repository';
-import { createDunningCampaignService } from './campaign-service';
-import { createCommunicationOrchestrationService } from './communication-service';
-import { createCustomerSegmentationService } from './segmentation-service';
+} from '../types.js';
+import type { CommunicationOrchestrationConfig } from './communication-service.js';
+import { type DunningDatabase } from '../repository.js';
+import { createDunningCampaignService } from './campaign-service.js';
+import { createCommunicationOrchestrationService } from './communication-service.js';
+import { createCustomerSegmentationService } from './segmentation-service.js';
 
 const logger = getLogger('dunning.integration');
 

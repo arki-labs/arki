@@ -1,9 +1,9 @@
 import { z } from '@arki/contracts';
 import { instantSchema } from '@arki/date/zod';
 
-import type { TaxComplianceReport } from './reporting';
-import type { TaxCalculationResult, TaxService } from './service';
-import { moneyJsonSchema, positiveMoneySchema } from '../core/money';
+import type { TaxComplianceReport } from './reporting.js';
+import type { TaxCalculationResult, TaxService } from './service.js';
+import { moneyJsonSchema, positiveMoneySchema } from '../core/money.js';
 import {
   exemptionStatusValues,
   exemptionTypeValues,
@@ -14,7 +14,7 @@ import {
   taxConfigStatusValues,
   taxExemptionIdSchema,
   taxJurisdictionIdSchema,
-} from './primitives';
+} from './primitives.js';
 
 // Enum schemas
 export const taxConfigStatusSchema = z.enum(taxConfigStatusValues);

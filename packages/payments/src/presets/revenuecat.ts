@@ -1,11 +1,11 @@
 import { timingSafeEqual } from 'node:crypto';
 
-import type { UserId } from '@arki/auth/ids';
+import type { UserId } from '../core/user-id.js';
 import { z } from '@arki/contracts';
 import { fromMillis, now, toMillis } from '@arki/date';
 
-import type { CoreWrites } from '../core/journal';
-import type { CustomerId, PlanId, SubscriptionStatus } from '../core/types';
+import type { CoreWrites } from '../core/journal.js';
+import type { CustomerId, PlanId, SubscriptionStatus } from '../core/types.js';
 
 /**
  * RevenueCat → our `subscriptions` table — the "native in" half of the cross-platform entitlement

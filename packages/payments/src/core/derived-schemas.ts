@@ -1,7 +1,7 @@
 import { createInsertSchema, createSelectSchema, z } from '@arki/contracts';
 import { instantSchema } from '@arki/date/zod';
 
-import type { CoreTables } from './tables';
+import type { CoreTables } from './tables.js';
 
 /**
  * Factory for the Drizzle-table-derived Zod schemas. The host app calls this

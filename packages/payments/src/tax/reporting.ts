@@ -3,7 +3,7 @@ import type { Money } from '@arki/money';
 import { fromDate, instant, now } from '@arki/date';
 import { money, sum } from '@arki/money';
 
-import type { StripeProvider } from '../core/providers/stripe-provider';
+import type { StripeProvider } from '../core/providers/stripe-provider.js';
 
 /**
  * Tax compliance and reporting periods

@@ -6,17 +6,17 @@ import { z } from '@arki/contracts';
 import { add, fromDate, isAfter, now } from '@arki/date';
 import { getLogger } from '@arki/log';
 
-import type { PaymentRetryService } from '../../core/services/payment-retry-service';
-import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types';
+import type { PaymentRetryService } from '../../core/services/payment-retry-service.js';
+import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types.js';
 import type {
   CreateDunningCampaignInput,
   ExecuteCampaignInput,
   ListDunningCampaignsQuery,
   UpdateDunningCampaignInput,
-} from '../contracts';
-import type { DunningCampaignId, DunningCampaignStatus } from '../primitives';
-import type { DunningDatabase } from '../repository';
-import type { DunningTables } from '../tables';
+} from '../contracts.js';
+import type { DunningCampaignId, DunningCampaignStatus } from '../primitives.js';
+import type { DunningDatabase } from '../repository.js';
+import type { DunningTables } from '../tables.js';
 import type {
   CampaignExecutionFilters,
   CustomerData,
@@ -27,15 +27,15 @@ import type {
   PaymentFailureConditions,
   SubscriptionStatusConditions,
   TimeBasedConditions,
-} from '../types';
-import type { CommunicationOrchestrationService } from './communication-service';
-import { fromMinorColumn, toMinorColumn } from '../../core/money';
-import { analyticsRowId, DEFAULT_ANALYTICS_CURRENCY } from '../analytics-money';
+} from '../types.js';
+import type { CommunicationOrchestrationService } from './communication-service.js';
+import { fromMinorColumn, toMinorColumn } from '../../core/money.js';
+import { analyticsRowId, DEFAULT_ANALYTICS_CURRENCY } from '../analytics-money.js';
 import {
   createDunningCampaignRepository,
   createDunningExecutionRepository,
   createDunningTemplateRepository,
-} from '../repository';
+} from '../repository.js';
 
 // Define eligible customer type for campaign execution
 type EligibleCustomer = {

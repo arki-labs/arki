@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { segmentCriteriaSchema } from './contracts';
+import { segmentCriteriaSchema } from './contracts.js';
 
 describe('segmentCriteriaSchema totalSpent', () => {
   it('keeps the range as { amount, currency } JSON, because criteria are stored in a jsonb column', () => {

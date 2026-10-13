@@ -11,8 +11,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { money } from '@arki/money';
 import { CurrencyMismatchError } from '@arki/money/errors';
 
-import { createCustomerId, createPaymentId } from '../primitives';
-import { StripeProvider } from './stripe-provider';
+import { createCustomerId, createPaymentId } from '../primitives.js';
+import { StripeProvider } from './stripe-provider.js';
 
 const sent = vi.hoisted(() => ({
   refunds: [] as { amount?: number }[],

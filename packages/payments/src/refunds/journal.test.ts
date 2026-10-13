@@ -23,11 +23,11 @@ import type { CommandErrorCode, CommandRunner } from '@arki/journal';
 import { fromDate } from '@arki/date';
 import { CommandError } from '@arki/journal';
 
-import type { PaymentId } from '../core/types';
-import type { AppDb, AppTx } from '../test-support';
-import type { RefundWrites } from './journal';
-import type { RefundId } from './primitives';
-import { createPaymentId } from '../core/primitives';
+import type { PaymentId } from '../core/types.js';
+import type { AppDb, AppTx } from '../test-support.js';
+import type { RefundWrites } from './journal.js';
+import type { RefundId } from './primitives.js';
+import { createPaymentId } from '../core/primitives.js';
 import {
   adminId,
   countEvents,
@@ -41,9 +41,9 @@ import {
   schema,
   typed,
   userId,
-} from '../test-support';
-import { createRefundsJournal } from './journal';
-import { createRefundId, refundIdFactory } from './primitives';
+} from '../test-support.js';
+import { createRefundsJournal } from './journal.js';
+import { createRefundId, refundIdFactory } from './primitives.js';
 
 const { refunds } = refundsTables;
 const { journal } = typed;

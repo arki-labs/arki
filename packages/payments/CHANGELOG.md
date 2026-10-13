@@ -1,5 +1,11 @@
 # @arki/payments
 
+## 0.2.0
+
+### Minor Changes
+
+- First public release. The package now compiles to `dist/` and owns its user id: `UserId`, `userIdSchema` and `userIdFactory` come from `@arki/payments/core` instead of `@arki/auth`, with the same `usr_` shape, so apps on `@arki/auth` pass their ids through unchanged and the package no longer depends on `@arki/auth`.
+
 ## 0.1.3
 
 ### Patch Changes

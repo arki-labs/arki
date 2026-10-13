@@ -3,9 +3,9 @@ import { fromDate, isAfter, isBefore, now, toDate, toMillis } from '@arki/date';
 import { max, Money } from '@arki/money';
 import { formatMoney } from '@arki/money/format';
 
-import type { PaymentRepository } from '../repository';
-import type { Plan, PlanId, Subscription, SubscriptionId, SubscriptionPreview } from '../types';
-import { planPrice } from '../money';
+import type { PaymentRepository } from '../repository.js';
+import type { Plan, PlanId, Subscription, SubscriptionId, SubscriptionPreview } from '../types.js';
+import { planPrice } from '../money.js';
 
 type PlanLike = Partial<Plan> & Pick<Plan, 'id' | 'name' | 'priceMinor' | 'interval' | 'intervalCount' | 'isActive'>;
 type SubscriptionLike = Partial<Subscription> &

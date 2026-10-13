@@ -1,11 +1,11 @@
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 
-import type { UserId } from '@arki/auth/ids';
+import type { UserId } from '../core/user-id.js';
 import type { Money } from '@arki/money';
 
-import type { PaymentId } from '../core/primitives';
-import type { RefundId, RefundReason } from './primitives';
-import type { RefundsTables } from './tables';
+import type { PaymentId } from '../core/primitives.js';
+import type { RefundId, RefundReason } from './primitives.js';
+import type { RefundsTables } from './tables.js';
 
 // `version` belongs to the journal: rows leave the package without it, and no caller sets it
 export type Refund = Omit<InferSelectModel<RefundsTables['refunds']>, 'version'>;

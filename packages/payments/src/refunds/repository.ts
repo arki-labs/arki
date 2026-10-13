@@ -2,17 +2,17 @@ import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 
-import type { UserId } from '@arki/auth/ids';
+import type { UserId } from '../core/user-id.js';
 import type { Instant } from '@arki/date';
 import type { Money } from '@arki/money';
 import { toMillis } from '@arki/date';
 import { MoneyBag } from '@arki/money/bag';
 
-import type { PaymentId } from '../core/primitives';
-import type { RefundId, RefundReason, RefundStatus } from './primitives';
-import type { RefundsTables } from './tables';
-import type { Refund } from './types';
-import { fromMinorColumn, toMinorColumn } from '../core/money';
+import type { PaymentId } from '../core/primitives.js';
+import type { RefundId, RefundReason, RefundStatus } from './primitives.js';
+import type { RefundsTables } from './tables.js';
+import type { Refund } from './types.js';
+import { fromMinorColumn, toMinorColumn } from '../core/money.js';
 
 /**
  * Structural database type for the refunds repository. Only uses

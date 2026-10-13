@@ -17,16 +17,16 @@ import type { Money } from '@arki/money';
 import { instant, isInstant } from '@arki/date';
 import { money } from '@arki/money';
 
-import type { CoreWrites } from '../core/journal';
-import type { AppDb } from '../test-support';
-import type { RefundWrites } from './journal';
-import type { RefundReason } from './primitives';
-import type { RefundAutoApproveLimits } from './service';
-import { toMinorColumn } from '../core/money';
-import { createPaymentId } from '../core/primitives';
-import { coreReads, refundReads, refundRow, runnerOn, seedPayment } from '../service-test-support';
-import { adminId, countEvents, customerId, eventTypesOf, openDb, rejectionOf, typed, userId } from '../test-support';
-import { RefundService } from './service';
+import type { CoreWrites } from '../core/journal.js';
+import type { AppDb } from '../test-support.js';
+import type { RefundWrites } from './journal.js';
+import type { RefundReason } from './primitives.js';
+import type { RefundAutoApproveLimits } from './service.js';
+import { toMinorColumn } from '../core/money.js';
+import { createPaymentId } from '../core/primitives.js';
+import { coreReads, refundReads, refundRow, runnerOn, seedPayment } from '../service-test-support.js';
+import { adminId, countEvents, customerId, eventTypesOf, openDb, rejectionOf, typed, userId } from '../test-support.js';
+import { RefundService } from './service.js';
 
 type Provider = ConstructorParameters<typeof RefundService>[2];
 

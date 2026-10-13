@@ -14,13 +14,13 @@ import { instant } from '@arki/date';
 import { money } from '@arki/money';
 import { CurrencyMismatchError } from '@arki/money/errors';
 
-import type { AppDb } from '../../test-support';
-import type { CoreWrites } from '../journal';
-import type { PlanId } from '../primitives';
-import { coreReads, runnerOn, seedSubscription } from '../../service-test-support';
-import { core, openDb, typed } from '../../test-support';
-import { createPlanId } from '../primitives';
-import { ProrationService } from './proration-service';
+import type { AppDb } from '../../test-support.js';
+import type { CoreWrites } from '../journal.js';
+import type { PlanId } from '../primitives.js';
+import { coreReads, runnerOn, seedSubscription } from '../../service-test-support.js';
+import { core, openDb, typed } from '../../test-support.js';
+import { createPlanId } from '../primitives.js';
+import { ProrationService } from './proration-service.js';
 
 let db: AppDb;
 let client: PGlite;

@@ -2,15 +2,15 @@ import type { Instant } from '@arki/date';
 import { fromDate, now, toDate } from '@arki/date';
 import { getLogger } from '@arki/log';
 
-import type { ListCommunicationsQuery, UpdateCommunicationStatusInput } from '../contracts';
+import type { ListCommunicationsQuery, UpdateCommunicationStatusInput } from '../contracts.js';
 import type {
   CommunicationStatus as CommStatus,
   CommunicationChannel,
   DunningCommunicationId,
   DunningExecutionId,
-} from '../primitives';
-import type { DunningDatabase } from '../repository';
-import type { DunningTables } from '../tables';
+} from '../primitives.js';
+import type { DunningDatabase } from '../repository.js';
+import type { DunningTables } from '../tables.js';
 import type {
   CommunicationTemplate,
   CommunicationUpdateData,
@@ -18,8 +18,8 @@ import type {
   DunningCommunication,
   DunningExecution,
   DunningTemplate,
-} from '../types';
-import { createDunningCommunicationRepository } from '../repository';
+} from '../types.js';
+import { createDunningCommunicationRepository } from '../repository.js';
 
 /**
  * Interface for communication providers (email, SMS, etc.)

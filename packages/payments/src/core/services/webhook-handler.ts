@@ -2,10 +2,10 @@ import { EventEmitter } from 'node:events';
 
 import { now } from '@arki/date';
 
-import type { PaymentRepository } from '../repository';
-import type { PaymentProviderType, WebhookEventType, WebhookId } from '../types';
-import type { WebhookSecurityService } from './webhook-security';
-import { createWebhookId } from '../primitives';
+import type { PaymentRepository } from '../repository.js';
+import type { PaymentProviderType, WebhookEventType, WebhookId } from '../types.js';
+import type { WebhookSecurityService } from './webhook-security.js';
+import { createWebhookId } from '../primitives.js';
 
 export type WebhookProcessingResult = {
   success: boolean;

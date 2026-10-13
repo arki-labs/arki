@@ -9,15 +9,15 @@
  */
 import { and, eq, gte, lte } from 'drizzle-orm';
 
-import type { UserId } from '@arki/auth/ids';
+import type { UserId } from './core/user-id.js';
 import type { Instant } from '@arki/date';
 import { instant } from '@arki/date';
 
-import type { CoreWrites } from './core/journal';
-import type { Payment, PaymentId, PlanId, Subscription, SubscriptionId, SubscriptionStatus } from './core/types';
-import type { RefundId } from './refunds/primitives';
-import type { AppDb } from './test-support';
-import { core, customerId, meta, planId, refundsTables, typed, userId } from './test-support';
+import type { CoreWrites } from './core/journal.js';
+import type { Payment, PaymentId, PlanId, Subscription, SubscriptionId, SubscriptionStatus } from './core/types.js';
+import type { RefundId } from './refunds/primitives.js';
+import type { AppDb } from './test-support.js';
+import { core, customerId, meta, planId, refundsTables, typed, userId } from './test-support.js';
 
 const { customers, payments, plans, subscriptions } = core;
 const { refunds } = refundsTables;

@@ -16,13 +16,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 
 import { fromMillis, fromUnix, instant, toDate } from '@arki/date';
 
-import type { CoreWrites } from '../core/journal';
-import type { PaymentProviderType } from '../core/types';
-import type { AppDb } from '../test-support';
-import type { RevenueCatEvent } from './revenuecat';
-import type { SubscriptionBilling } from './subscription';
-import { StripeProvider } from '../core/providers/stripe-provider';
-import { coreReads, runnerOn } from '../service-test-support';
+import type { CoreWrites } from '../core/journal.js';
+import type { PaymentProviderType } from '../core/types.js';
+import type { AppDb } from '../test-support.js';
+import type { RevenueCatEvent } from './revenuecat.js';
+import type { SubscriptionBilling } from './subscription.js';
+import { StripeProvider } from '../core/providers/stripe-provider.js';
+import { coreReads, runnerOn } from '../service-test-support.js';
 import {
   core,
   countEvents,
@@ -33,9 +33,9 @@ import {
   rejectionOf,
   typed,
   userId,
-} from '../test-support';
-import { projectRevenueCatEvent } from './revenuecat';
-import { createSubscriptionBilling } from './subscription';
+} from '../test-support.js';
+import { projectRevenueCatEvent } from './revenuecat.js';
+import { createSubscriptionBilling } from './subscription.js';
 
 const { customers, subscriptions } = core;
 

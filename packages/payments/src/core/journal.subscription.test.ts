@@ -16,9 +16,9 @@ import type { CommandErrorCode } from '@arki/journal';
 import { instant } from '@arki/date';
 import { CommandError } from '@arki/journal';
 
-import type { AppDb } from '../test-support';
-import type { SyncSubscriptionInput } from './journal';
-import type { SubscriptionId, SubscriptionStatus } from './types';
+import type { AppDb } from '../test-support.js';
+import type { SyncSubscriptionInput } from './journal.js';
+import type { SubscriptionId, SubscriptionStatus } from './types.js';
 import {
   core,
   countEvents,
@@ -30,8 +30,8 @@ import {
   planId,
   rejectionOf,
   userId,
-} from '../test-support';
-import { createSubscriptionId } from './primitives';
+} from '../test-support.js';
+import { createSubscriptionId } from './primitives.js';
 
 const { subscriptions } = core;
 const { journal } = plain;

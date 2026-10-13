@@ -1,7 +1,7 @@
 import { now } from '@arki/date';
 
-import type { Refund } from '../../refunds/types';
-import { refundAmountOf } from '../../refunds/repository';
+import type { Refund } from '../../refunds/types.js';
+import { refundAmountOf } from '../../refunds/repository.js';
 
 /**
  * Notification Service Interface

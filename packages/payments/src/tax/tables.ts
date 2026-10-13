@@ -11,7 +11,7 @@ import type {
   TaxBusinessType,
   TaxCalculationMode,
   TaxConfigStatus,
-} from './primitives';
+} from './primitives.js';
 import {
   exemptionStatusValues,
   exemptionTypeValues,
@@ -22,7 +22,7 @@ import {
   taxConfigStatusValues,
   taxExemptionIdFactory,
   taxJurisdictionIdFactory,
-} from './primitives';
+} from './primitives.js';
 
 export type CreateTaxTablesDeps = {
   schema: PgSchema;

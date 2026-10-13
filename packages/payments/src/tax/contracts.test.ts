@@ -13,8 +13,8 @@ import { describe, expect, it } from 'vitest';
 import { instant } from '@arki/date';
 import { money } from '@arki/money';
 
-import type { TaxComplianceReport } from './reporting';
-import type { TaxCalculationResult } from './service';
+import type { TaxComplianceReport } from './reporting.js';
+import type { TaxCalculationResult } from './service.js';
 import {
   customerTaxSummaryJson,
   customerTaxSummarySchema,
@@ -22,7 +22,7 @@ import {
   taxCalculationResultSchema,
   taxComplianceReportJson,
   taxComplianceReportSchema,
-} from './contracts';
+} from './contracts.js';
 
 const calculation: TaxCalculationResult = {
   subtotal: money('1500', 'JPY'),

@@ -12,9 +12,9 @@ import type {
   DunningCampaignStatus,
   DunningCampaignType,
   ExecutionStatus,
-} from './primitives';
-import type { SpendRange } from './types';
-import { customerIdFactory, paymentIdFactory, subscriptionIdFactory } from '../core/primitives';
+} from './primitives.js';
+import type { SpendRange } from './types.js';
+import { customerIdFactory, paymentIdFactory, subscriptionIdFactory } from '../core/primitives.js';
 import {
   communicationChannelValues,
   communicationStatusValues,
@@ -29,7 +29,7 @@ import {
   dunningTemplateIdFactory,
   executionStatusValues,
   riskCategoryValues,
-} from './primitives';
+} from './primitives.js';
 
 export type CreateDunningTablesDeps = {
   schema: PgSchema;

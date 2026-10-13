@@ -1,10 +1,10 @@
 import type { Instant } from '@arki/date';
 import { add, isSameOrBefore, now, toMillis } from '@arki/date';
 
-import type { CoreWrites } from '../journal';
-import type { BasePaymentProvider } from '../providers/base-provider';
-import type { PaymentRepository } from '../repository';
-import type { Payment, PaymentId, PlanId, Subscription, SubscriptionId } from '../types';
+import type { CoreWrites } from '../journal.js';
+import type { BasePaymentProvider } from '../providers/base-provider.js';
+import type { PaymentRepository } from '../repository.js';
+import type { Payment, PaymentId, PlanId, Subscription, SubscriptionId } from '../types.js';
 
 export type RetryStrategy = {
   name: string;

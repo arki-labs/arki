@@ -17,15 +17,15 @@ import { pgSchema, varchar } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
 import { z } from 'zod';
 
-import type { UserId } from '@arki/auth/ids';
+import type { UserId } from './core/user-id.js';
 import { initJournal } from '@arki/journal';
 import { journalTables } from '@arki/journal/pg';
 
-import { createCoreJournal } from './core/journal';
-import { createCustomerId, createPlanId } from './core/primitives';
-import { createCoreTables } from './core/tables';
-import { createRefundsJournal } from './refunds/journal';
-import { createRefundsTables } from './refunds/tables';
+import { createCoreJournal } from './core/journal.js';
+import { createCustomerId, createPlanId } from './core/primitives.js';
+import { createCoreTables } from './core/tables.js';
+import { createRefundsJournal } from './refunds/journal.js';
+import { createRefundsTables } from './refunds/tables.js';
 
 export const schema = pgSchema('pay');
 

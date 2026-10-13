@@ -1,6 +1,6 @@
 import { instantSchema } from '@arki/date/zod';
 
-import type { CustomerRiskProfile } from './types';
+import type { CustomerRiskProfile } from './types.js';
 
 const requiredInstant = instantSchema();
 const optionalInstant = instantSchema().optional();

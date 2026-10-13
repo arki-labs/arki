@@ -1,9 +1,9 @@
-import { userIdSchema } from '@arki/auth/ids';
+import { userIdSchema } from './user-id.js';
 import { z } from '@arki/contracts';
 import { instantSchema } from '@arki/date/zod';
 
-import { refundIdSchema } from '../refunds/primitives';
-import { moneyJsonSchema, positiveMoneySchema, priceSchema } from './money';
+import { refundIdSchema } from '../refunds/primitives.js';
+import { moneyJsonSchema, positiveMoneySchema, priceSchema } from './money.js';
 import {
   billingIntervalValues,
   paymentIdSchema,
@@ -16,7 +16,7 @@ import {
   subscriptionStatusValues,
   webhookEventTypeValues,
   webhookIdSchema,
-} from './primitives';
+} from './primitives.js';
 
 // Base enum schemas
 export const paymentProviderSchema = z.enum(paymentProviderValues);

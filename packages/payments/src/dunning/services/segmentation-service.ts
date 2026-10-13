@@ -5,12 +5,12 @@ import { now, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
 import { Money } from '@arki/money';
 
-import type { CoreTables } from '../../core/tables';
-import type { Customer, CustomerId } from '../../core/types';
-import type { CreateCustomerSegmentInput, ListCustomerSegmentsQuery, UpdateCustomerSegmentInput } from '../contracts';
-import type { CustomerSegmentId } from '../primitives';
-import type { DunningDatabase } from '../repository';
-import type { DunningTables } from '../tables';
+import type { CoreTables } from '../../core/tables.js';
+import type { Customer, CustomerId } from '../../core/types.js';
+import type { CreateCustomerSegmentInput, ListCustomerSegmentsQuery, UpdateCustomerSegmentInput } from '../contracts.js';
+import type { CustomerSegmentId } from '../primitives.js';
+import type { DunningDatabase } from '../repository.js';
+import type { DunningTables } from '../tables.js';
 import type {
   CustomerRiskProfile,
   CustomerSegment,
@@ -19,9 +19,9 @@ import type {
   RiskScore,
   SegmentCriteria,
   SubscriptionHistoryData,
-} from '../types';
-import { toMinorColumn } from '../../core/money';
-import { createCustomerRiskProfileRepository, createCustomerSegmentRepository } from '../repository';
+} from '../types.js';
+import { toMinorColumn } from '../../core/money.js';
+import { createCustomerRiskProfileRepository, createCustomerSegmentRepository } from '../repository.js';
 
 const logger = getLogger('dunning.segmentation');
 

@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import type { Instant } from '@arki/date';
 import { fromUnix } from '@arki/date';
 
-import type { PaymentProviderType } from '../types';
+import type { PaymentProviderType } from '../types.js';
 
 export type WebhookSecurityValidationResult = {
   isValid: boolean;

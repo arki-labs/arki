@@ -4,8 +4,8 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 
 import { now } from '@arki/date';
 
-import type { TaxConfigId, TaxExemptionId, TaxJurisdictionId } from './primitives';
-import type { TaxTables } from './tables';
+import type { TaxConfigId, TaxExemptionId, TaxJurisdictionId } from './primitives.js';
+import type { TaxTables } from './tables.js';
 import type {
   NewTaxConfig,
   NewTaxExemption,
@@ -13,7 +13,7 @@ import type {
   TaxConfig,
   TaxExemption,
   TaxJurisdiction,
-} from './types';
+} from './types.js';
 
 /**
  * Structural database type for the tax repositories. The tax repositories

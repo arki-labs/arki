@@ -1,6 +1,6 @@
 import Stripe from 'stripe';
 
-import type { UserId } from '@arki/auth/ids';
+import type { UserId } from '../user-id.js';
 import type { Instant } from '@arki/date';
 import { fromUnix, now } from '@arki/date';
 import { Money, sum } from '@arki/money';
@@ -20,11 +20,11 @@ import type {
   SubscriptionPreview,
   WebhookEventType,
   WebhookValidationResult,
-} from '../types';
-import type { PaymentProviderConfig } from './base-provider';
-import { toMinorColumn } from '../money';
-import { createCustomerId, createPlanId } from '../primitives';
-import { BasePaymentProvider } from './base-provider';
+} from '../types.js';
+import type { PaymentProviderConfig } from './base-provider.js';
+import { toMinorColumn } from '../money.js';
+import { createCustomerId, createPlanId } from '../primitives.js';
+import { BasePaymentProvider } from './base-provider.js';
 
 export class StripeProvider extends BasePaymentProvider {
   readonly providerType = 'stripe' as const;

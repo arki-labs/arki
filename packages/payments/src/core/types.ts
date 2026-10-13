@@ -14,8 +14,8 @@ import type {
   SubscriptionStatus,
   WebhookEventType,
   WebhookId,
-} from './primitives';
-import type { CoreTables } from './tables';
+} from './primitives.js';
+import type { CoreTables } from './tables.js';
 
 export type {
   BillingInterval,
@@ -32,7 +32,7 @@ export type {
   WebhookEventType,
   WebhookId,
 };
-export type { PaymentMethodInfo, SubscriptionPreview } from './contracts';
+export type { PaymentMethodInfo, SubscriptionPreview } from './contracts.js';
 
 export type Plan = InferSelectModel<CoreTables['plans']>;
 export type NewPlan = InferInsertModel<CoreTables['plans']>;

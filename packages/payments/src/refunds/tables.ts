@@ -2,13 +2,12 @@ import type { PgColumn, PgSchema } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { bigint, integer, text, varchar } from 'drizzle-orm/pg-core';
 
-import type { UserId } from '@arki/auth/ids';
-import { createIdFactory } from '@arki/db/id-factory';
+import { userIdFactory } from '../core/user-id.js';
 import { instant } from '@arki/db/temporal';
 
-import type { RefundReason, RefundStatus } from './primitives';
-import { paymentIdFactory } from '../core/primitives';
-import { refundIdFactory, refundReasonValues, refundStatusValues } from './primitives';
+import type { RefundReason, RefundStatus } from './primitives.js';
+import { paymentIdFactory } from '../core/primitives.js';
+import { refundIdFactory, refundReasonValues, refundStatusValues } from './primitives.js';
 
 export type CreateRefundsTablesDeps = {
   schema: PgSchema;
@@ -22,7 +21,6 @@ export function createRefundsTables({ schema, paymentIdRef, userIdRef }: CreateR
   // Re-build FK factories locally so COLUMN_ZOD_SCHEMA tagging matches the host-app's
   // version of these column builders exactly.
   const paymentFk = paymentIdFactory.createForeignKeyFactory(paymentIdRef);
-  const userIdFactory = createIdFactory<'usr_', UserId>('usr_');
   const userFk = userIdFactory.createForeignKeyFactory(userIdRef);
 
   const refundReasonEnum = schema.enum('refund_reason', refundReasonValues);

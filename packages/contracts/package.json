@@ -1,18 +1,7 @@
 {
   "name": "@arki/contracts",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Shared Zod schemas and Drizzle contract helpers — branded ID-aware select/insert/update schemas with auto-applied column refinements.",
-  "license": "MIT",
-  "type": "module",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/arki-labs/arki.git",
-    "directory": "packages/contracts"
-  },
-  "homepage": "https://arki.dev",
-  "bugs": {
-    "url": "https://github.com/arki-labs/arki/issues"
-  },
   "keywords": [
     "arki",
     "typescript",
@@ -22,10 +11,18 @@
     "validation",
     "contracts"
   ],
-  "publishConfig": {
-    "access": "public"
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/contracts"
+  },
+  "license": "MIT",
   "sideEffects": false,
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -60,6 +57,7 @@
     "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
@@ -75,5 +73,8 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "typescript": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

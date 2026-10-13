@@ -5,7 +5,7 @@ import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import type { Instant } from '@arki/date';
 import { fromDate, now, sub } from '@arki/date';
 
-import type { CustomerId } from '../core/primitives';
+import type { CustomerId } from '../core/primitives.js';
 import type {
   CreateCustomerSegmentInput,
   CreateDunningCampaignInput,
@@ -17,7 +17,7 @@ import type {
   UpdateCustomerSegmentInput,
   UpdateDunningCampaignInput,
   UpdateDunningTemplateInput,
-} from './contracts';
+} from './contracts.js';
 import type {
   CustomerSegmentId,
   DunningCampaignId,
@@ -26,8 +26,8 @@ import type {
   DunningExecutionId,
   DunningTemplateId,
   ExecutionStatus,
-} from './primitives';
-import type { DunningTables } from './tables';
+} from './primitives.js';
+import type { DunningTables } from './tables.js';
 import type {
   CustomerRiskProfile,
   DunningCampaign,
@@ -37,9 +37,9 @@ import type {
   ExecutionResultDb,
   NewDunningCommunication,
   NewDunningExecution,
-} from './types';
-import { sumMinorByCurrency } from './analytics-money';
-import { readCustomerRiskProfile } from './stored-risk-profile';
+} from './types.js';
+import { sumMinorByCurrency } from './analytics-money.js';
+import { readCustomerRiskProfile } from './stored-risk-profile.js';
 
 /**
  * Structural database type accepted by the dunning repositories. See the

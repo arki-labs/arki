@@ -2,8 +2,7 @@ import type { PgColumn, PgSchema } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { bigint, boolean, check, integer, jsonb, text, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
 
-import type { UserId } from '@arki/auth/ids';
-import { createIdFactory } from '@arki/db/id-factory';
+import { userIdFactory } from './user-id.js';
 import { instant } from '@arki/db/temporal';
 
 import type {
@@ -14,7 +13,7 @@ import type {
   PlanTier,
   SubscriptionStatus,
   WebhookEventType,
-} from './primitives';
+} from './primitives.js';
 import {
   billingIntervalValues,
   customerIdFactory,
@@ -28,7 +27,7 @@ import {
   subscriptionStatusValues,
   webhookEventTypeValues,
   webhookIdFactory,
-} from './primitives';
+} from './primitives.js';
 
 export type CreateCoreTablesDeps = {
   /** The app's own `pgSchema(...)` instance — namespaces every table created here. */
@@ -46,10 +45,6 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
   const paymentMethodTypeEnum = schema.enum('payment_method_type', paymentMethodTypeValues);
   const webhookEventTypeEnum = schema.enum('webhook_event_type', webhookEventTypeValues);
 
-  // Reconstruct the user ID factory locally so the FK columns we build here carry the
-  // same `COLUMN_ZOD_SCHEMA` tag that `@arki/auth`'s userIdFactory attaches — this is
-  // what makes `createInsertSchema(customers)` auto-validate `userId` as a `usr_*` brand.
-  const userIdFactory = createIdFactory<'usr_', UserId>('usr_');
   const userFk = userIdFactory.createForeignKeyFactory(userIdRef);
 
   const plans = schema.table(

@@ -1,4 +1,4 @@
-import type { UserId } from '@arki/auth/ids';
+import type { UserId } from '../core/user-id.js';
 import type { Instant } from '@arki/date';
 import type { Money } from '@arki/money';
 import { z } from '@arki/contracts';
@@ -6,16 +6,16 @@ import { toMillis } from '@arki/date';
 import { sum } from '@arki/money';
 import { currencyCodeSchema } from '@arki/money/zod';
 
-import type { NotificationService } from '../core/notifications/service';
-import type { StripeProvider } from '../core/providers/stripe-provider';
-import type { PaymentRepository } from '../core/repository';
-import type { PaymentId } from '../core/types';
-import type { RefundWrites } from './journal';
-import type { RefundRepository, RefundsDatabase } from './repository';
-import type { RefundsTables } from './tables';
-import type { Refund, RefundApprovalData, RefundRejectionData, RefundRequestData } from './types';
-import { nonNegativeMoneySchema, paymentAmount } from '../core/money';
-import { createRefundRepository, refundAmountOf } from './repository';
+import type { NotificationService } from '../core/notifications/service.js';
+import type { StripeProvider } from '../core/providers/stripe-provider.js';
+import type { PaymentRepository } from '../core/repository.js';
+import type { PaymentId } from '../core/types.js';
+import type { RefundWrites } from './journal.js';
+import type { RefundRepository, RefundsDatabase } from './repository.js';
+import type { RefundsTables } from './tables.js';
+import type { Refund, RefundApprovalData, RefundRejectionData, RefundRequestData } from './types.js';
+import { nonNegativeMoneySchema, paymentAmount } from '../core/money.js';
+import { createRefundRepository, refundAmountOf } from './repository.js';
 
 /**
  * The largest refund approved without a person, per currency: `{ USD: '10.00', JPY: '1500' }`.

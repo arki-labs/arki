@@ -16,10 +16,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isInstant } from '@arki/date';
 import { CommandError } from '@arki/journal';
 
-import type { AppDb } from '../../test-support';
-import type { CoreWrites } from '../journal';
-import type { Payment, PaymentStatus } from '../types';
-import type { DunningRule } from './dunning-service';
+import type { AppDb } from '../../test-support.js';
+import type { CoreWrites } from '../journal.js';
+import type { Payment, PaymentStatus } from '../types.js';
+import type { DunningRule } from './dunning-service.js';
 import {
   coreReads,
   runnerOn,
@@ -27,10 +27,10 @@ import {
   seedSubscription,
   subscriptionRow,
   unexpectedCall,
-} from '../../service-test-support';
-import { countEvents, eventTypesOf, openDb, rejectionOf, typed } from '../../test-support';
-import { createPaymentId } from '../primitives';
-import { DunningService } from './dunning-service';
+} from '../../service-test-support.js';
+import { countEvents, eventTypesOf, openDb, rejectionOf, typed } from '../../test-support.js';
+import { createPaymentId } from '../primitives.js';
+import { DunningService } from './dunning-service.js';
 
 type Provider = ConstructorParameters<typeof DunningService>[0];
 

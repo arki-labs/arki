@@ -17,22 +17,22 @@
 
 import type { Instant } from '@arki/date';
 import type { JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
-import { userIdSchema } from '@arki/auth/ids';
+import { userIdSchema } from '../user-id.js';
 import { z } from '@arki/contracts';
 import { fromDate } from '@arki/date';
 import { CommandError } from '@arki/journal';
 import { Money } from '@arki/money';
 
-import type { CoreTables } from '../tables';
-import { fromStoredNumber, moneyJsonSchema, nonNegativeMoneySchema, toMinorColumn } from '../money';
+import type { CoreTables } from '../tables.js';
+import { fromStoredNumber, moneyJsonSchema, nonNegativeMoneySchema, toMinorColumn } from '../money.js';
 import {
   createPaymentId,
   customerIdSchema,
   paymentIdSchema,
   paymentMethodTypeValues,
   subscriptionIdSchema,
-} from '../primitives';
-import { storedReal } from './support';
+} from '../primitives.js';
+import { storedReal } from './support.js';
 
 type PaymentRow = CoreTables['payments']['$inferSelect'];
 

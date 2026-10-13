@@ -3,7 +3,7 @@ import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import type { Instant } from '@arki/date';
 import type { MoneyJSON } from '@arki/money';
 
-import type { CustomerId, PaymentId, SubscriptionId } from '../core/primitives';
+import type { CustomerId, PaymentId, SubscriptionId } from '../core/primitives.js';
 import type {
   CommunicationChannel,
   CommunicationStatus,
@@ -13,8 +13,8 @@ import type {
   DunningCampaignType,
   DunningTemplateId,
   ExecutionStatus,
-} from './primitives';
-import type { DunningTables } from './tables';
+} from './primitives.js';
+import type { DunningTables } from './tables.js';
 
 export type CampaignTrigger = {
   type: 'payment_failure' | 'subscription_status' | 'time_based' | 'manual';

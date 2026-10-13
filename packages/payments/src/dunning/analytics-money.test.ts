@@ -9,9 +9,9 @@ import { describe, expect, it } from 'vitest';
 
 import { money } from '@arki/money';
 
-import { fromMinorColumn, toMinorColumn } from '../core/money';
-import { createDunningCampaignId } from './primitives';
-import { analyticsRowId, sumMinorByCurrency } from './analytics-money';
+import { fromMinorColumn, toMinorColumn } from '../core/money.js';
+import { createDunningCampaignId } from './primitives.js';
+import { analyticsRowId, sumMinorByCurrency } from './analytics-money.js';
 
 describe('sumMinorByCurrency', () => {
   it('never adds two currencies together', () => {

@@ -1,8 +1,8 @@
-import { createPaymentRepository, type CreatePaymentRepositoryDeps, type PaymentDatabase } from './core/repository';
-import { createDunningRepository, type DunningDatabase, type DunningRepositoryTables } from './dunning/repository';
-import { createRefundRepository, type RefundsDatabase } from './refunds/repository';
-import type { RefundsTables } from './refunds/tables';
-import { createTaxRepositories, type TaxDatabase, type TaxRepositoryTables } from './tax/repository';
+import { createPaymentRepository, type CreatePaymentRepositoryDeps, type PaymentDatabase } from './core/repository.js';
+import { createDunningRepository, type DunningDatabase, type DunningRepositoryTables } from './dunning/repository.js';
+import { createRefundRepository, type RefundsDatabase } from './refunds/repository.js';
+import type { RefundsTables } from './refunds/tables.js';
+import { createTaxRepositories, type TaxDatabase, type TaxRepositoryTables } from './tax/repository.js';
 
 export type PaymentRepositoriesTables = {
   core: CreatePaymentRepositoryDeps['tables'];

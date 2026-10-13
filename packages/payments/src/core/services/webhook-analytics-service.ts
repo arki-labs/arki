@@ -1,8 +1,8 @@
 import type { Instant } from '@arki/date';
 import { isSameOrAfter, isSameOrBefore, now, sub, toMillis } from '@arki/date';
 
-import type { PaymentRepository } from '../repository';
-import type { PaymentProviderType, WebhookEventType, WebhookId } from '../types';
+import type { PaymentRepository } from '../repository.js';
+import type { PaymentProviderType, WebhookEventType, WebhookId } from '../types.js';
 
 export type WebhookMetrics = {
   totalEvents: number;

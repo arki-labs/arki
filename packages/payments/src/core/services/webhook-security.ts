@@ -3,7 +3,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import type { Instant } from '@arki/date';
 import { isBefore, now, sub } from '@arki/date';
 
-import type { PaymentProviderType, WebhookValidationResult } from '../types';
+import type { PaymentProviderType, WebhookValidationResult } from '../types.js';
 
 export type WebhookSecurityConfig = {
   allowedIps: string[];

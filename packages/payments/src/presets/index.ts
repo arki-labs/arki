@@ -9,13 +9,13 @@ export {
   createSubscriptionBilling,
   getEntitlement,
   projectStripeSubscription,
-} from './subscription';
+} from './subscription.js';
 export type {
   Entitlement,
   PriceToPlan,
   SubscriptionBilling,
   SubscriptionBillingConfig,
-} from './subscription';
+} from './subscription.js';
 
-export { projectRevenueCatEvent, revenueCatWebhookSchema, verifyRevenueCatAuth } from './revenuecat';
-export type { RevenueCatEvent, RevenueCatWebhook } from './revenuecat';
+export { projectRevenueCatEvent, revenueCatWebhookSchema, verifyRevenueCatAuth } from './revenuecat.js';
+export type { RevenueCatEvent, RevenueCatWebhook } from './revenuecat.js';

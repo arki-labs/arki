@@ -1,11 +1,11 @@
 import type { Instant } from '@arki/date';
 import { fromDate, isSameOrBefore, now, toDate, toMillis } from '@arki/date';
 
-import type { CoreWrites } from '../journal';
-import type { BasePaymentProvider } from '../providers/base-provider';
-import type { PaymentRepository } from '../repository';
-import type { PaymentId, SubscriptionId } from '../types';
-import { paymentAmount } from '../money';
+import type { CoreWrites } from '../journal.js';
+import type { BasePaymentProvider } from '../providers/base-provider.js';
+import type { PaymentRepository } from '../repository.js';
+import type { PaymentId, SubscriptionId } from '../types.js';
+import { paymentAmount } from '../money.js';
 
 export type DunningRule = {
   id: string;

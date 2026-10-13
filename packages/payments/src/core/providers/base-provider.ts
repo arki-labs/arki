@@ -16,7 +16,7 @@ import type {
   SubscriptionPreview,
   SubscriptionStatus,
   WebhookValidationResult,
-} from '../types';
+} from '../types.js';
 
 export type PaymentProviderConfig = {
   apiKey: string;

@@ -14,12 +14,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
 
-import type { AppDb } from '../../test-support';
-import type { CoreWrites } from '../journal';
-import type { Subscription, SubscriptionId } from '../types';
-import { coreReads, runnerOn, seedSubscription, subscriptionRow, unexpectedCall } from '../../service-test-support';
-import { countEvents, eventTypesOf, openDb, rejectionOf, typed } from '../../test-support';
-import { SubscriptionManager } from './subscription-manager';
+import type { AppDb } from '../../test-support.js';
+import type { CoreWrites } from '../journal.js';
+import type { Subscription, SubscriptionId } from '../types.js';
+import { coreReads, runnerOn, seedSubscription, subscriptionRow, unexpectedCall } from '../../service-test-support.js';
+import { countEvents, eventTypesOf, openDb, rejectionOf, typed } from '../../test-support.js';
+import { SubscriptionManager } from './subscription-manager.js';
 
 type Provider = ConstructorParameters<typeof SubscriptionManager>[0];
 

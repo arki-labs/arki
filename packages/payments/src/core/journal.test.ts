@@ -19,9 +19,9 @@ import type { CommandErrorCode, CommandRunner } from '@arki/journal';
 import { instant } from '@arki/date';
 import { CommandError } from '@arki/journal';
 
-import type { AppDb, AppTx } from '../test-support';
-import type { CoreWrites } from './journal';
-import type { PaymentId } from './types';
+import type { AppDb, AppTx } from '../test-support.js';
+import type { CoreWrites } from './journal.js';
+import type { PaymentId } from './types.js';
 import {
   core,
   countEvents,
@@ -35,9 +35,9 @@ import {
   schema,
   typed,
   userId,
-} from '../test-support';
-import { createCoreJournal } from './journal';
-import { createPaymentId, createSubscriptionId, paymentIdFactory, subscriptionIdFactory } from './primitives';
+} from '../test-support.js';
+import { createCoreJournal } from './journal.js';
+import { createPaymentId, createSubscriptionId, paymentIdFactory, subscriptionIdFactory } from './primitives.js';
 
 const { payments } = core;
 const { journal } = plain;

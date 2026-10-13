@@ -2,11 +2,11 @@ import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import { eq } from 'drizzle-orm';
 
-import type { UserId } from '@arki/auth/ids';
+import type { UserId } from './user-id.js';
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
 
-import type { CoreTables } from './tables';
+import type { CoreTables } from './tables.js';
 import type {
   Customer,
   CustomerId,
@@ -32,7 +32,7 @@ import type {
   WebhookEvent,
   WebhookEventType,
   WebhookId,
-} from './types';
+} from './types.js';
 
 /**
  * Structural database type accepted by the payments repositories.

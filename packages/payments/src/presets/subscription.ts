@@ -1,14 +1,14 @@
 import type Stripe from 'stripe';
 
-import type { UserId } from '@arki/auth/ids';
+import type { UserId } from '../core/user-id.js';
 import type { Instant } from '@arki/date';
 import { fromUnix } from '@arki/date';
 
-import type { CoreWrites } from '../core/journal';
-import type { StripeProvider } from '../core/providers/stripe-provider';
-import type { PaymentRepository } from '../core/repository';
-import type { PlanId, SubscriptionStatus } from '../core/types';
-import { subscriptionStatusValues } from '../core/primitives';
+import type { CoreWrites } from '../core/journal.js';
+import type { StripeProvider } from '../core/providers/stripe-provider.js';
+import type { PaymentRepository } from '../core/repository.js';
+import type { PlanId, SubscriptionStatus } from '../core/types.js';
+import { subscriptionStatusValues } from '../core/primitives.js';
 
 /** The one journal write a webhook preset makes. A `CoreWrites` fits. */
 type SubscriptionSync = Pick<CoreWrites, 'syncSubscription'>;

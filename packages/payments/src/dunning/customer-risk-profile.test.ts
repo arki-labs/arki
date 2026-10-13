@@ -16,10 +16,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Instant } from '@arki/date';
 import { instant, isInstant } from '@arki/date';
 
-import type { CustomerRiskProfile } from './types';
-import { core, customerId, schema, userId, users } from '../test-support';
-import { readCustomerRiskProfile } from './stored-risk-profile';
-import { createDunningTables } from './tables';
+import type { CustomerRiskProfile } from './types.js';
+import { core, customerId, schema, userId, users } from '../test-support.js';
+import { readCustomerRiskProfile } from './stored-risk-profile.js';
+import { createDunningTables } from './tables.js';
 
 const dunning = createDunningTables({
   schema,

@@ -1,7 +1,10 @@
 import { createIdFactory } from '@arki/db/id-factory';
 
-// ID types
-export type UserId = `usr_${string}`;
+import type { UserId } from '@arki/contracts';
+
+// ID types. `UserId` is defined in `@arki/contracts`, so packages that refer to a user share it
+// without depending on this package.
+export type { UserId } from '@arki/contracts';
 export type UserVerificationId = `verif_${string}`;
 export type SessionId = `sess_${string}`;
 export type RoleId = `role_${string}`;

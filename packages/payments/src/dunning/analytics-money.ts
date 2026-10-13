@@ -10,8 +10,8 @@
 
 import { MoneyBag } from '@arki/money/bag';
 
-import type { DunningCampaignId } from './primitives';
-import { fromMinorColumn } from '../core/money';
+import type { DunningCampaignId } from './primitives.js';
+import { fromMinorColumn } from '../core/money.js';
 
 /**
  * Counters with no payment behind them (customers reached, messages sent) have

@@ -13,13 +13,13 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import type { AppDb } from '../../test-support';
-import type { CoreWrites } from '../journal';
-import type { PaymentStatus, SubscriptionStatus } from '../types';
-import type { RetryStrategy } from './payment-retry-service';
-import { coreReads, runnerOn, seedPayment, seedSubscription, subscriptionRow } from '../../service-test-support';
-import { countEvents, eventTypesOf, openDb, typed } from '../../test-support';
-import { PaymentRetryService } from './payment-retry-service';
+import type { AppDb } from '../../test-support.js';
+import type { CoreWrites } from '../journal.js';
+import type { PaymentStatus, SubscriptionStatus } from '../types.js';
+import type { RetryStrategy } from './payment-retry-service.js';
+import { coreReads, runnerOn, seedPayment, seedSubscription, subscriptionRow } from '../../service-test-support.js';
+import { countEvents, eventTypesOf, openDb, typed } from '../../test-support.js';
+import { PaymentRetryService } from './payment-retry-service.js';
 
 type Provider = ConstructorParameters<typeof PaymentRetryService>[0];
 

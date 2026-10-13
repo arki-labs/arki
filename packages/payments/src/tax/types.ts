@@ -1,6 +1,6 @@
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 
-import type { TaxTables } from './tables';
+import type { TaxTables } from './tables.js';
 
 export type TaxConfig = InferSelectModel<TaxTables['taxConfigurations']>;
 export type NewTaxConfig = InferInsertModel<TaxTables['taxConfigurations']>;

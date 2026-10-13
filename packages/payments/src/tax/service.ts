@@ -2,8 +2,8 @@ import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
 import { Money, sum } from '@arki/money';
 
-import type { StripeProvider } from '../core/providers/stripe-provider';
-import type { CustomerId, PaymentId, SubscriptionId } from '../core/types';
+import type { StripeProvider } from '../core/providers/stripe-provider.js';
+import type { CustomerId, PaymentId, SubscriptionId } from '../core/types.js';
 
 /**
  * Tax calculation input for subscriptions and one-time payments

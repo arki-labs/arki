@@ -17,21 +17,21 @@ import { eq } from 'drizzle-orm';
 
 import type { Instant } from '@arki/date';
 import type { JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
-import { userIdSchema } from '@arki/auth/ids';
+import { userIdSchema } from '../user-id.js';
 import { z } from '@arki/contracts';
 import { fromDate } from '@arki/date';
 import { instantSchema } from '@arki/date/zod';
 import { CommandError } from '@arki/journal';
 
-import type { CoreTables } from '../tables';
+import type { CoreTables } from '../tables.js';
 import {
   createSubscriptionId,
   customerIdSchema,
   planIdSchema,
   subscriptionIdSchema,
   subscriptionStatusValues,
-} from '../primitives';
-import { sameJson, toInstant, toIso, toNullableInstant } from './support';
+} from '../primitives.js';
+import { sameJson, toInstant, toIso, toNullableInstant } from './support.js';
 
 type SubscriptionRow = CoreTables['subscriptions']['$inferSelect'];
 

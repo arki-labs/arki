@@ -25,19 +25,19 @@
 
 import type { Instant } from '@arki/date';
 import type { CommandRunner, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
-import { userIdSchema } from '@arki/auth/ids';
+import { userIdSchema } from '../core/user-id.js';
 import { z } from '@arki/contracts';
 import { fromDate } from '@arki/date';
 import { CommandError } from '@arki/journal';
 import { Money } from '@arki/money';
 import { anyMoneySchema } from '@arki/money/zod';
 
-import type { RefundsTables } from './tables';
-import type { Refund } from './types';
-import { writtenRow } from '../core/journal/support';
-import { fromStoredNumber, moneyJsonSchema, toMinorColumn } from '../core/money';
-import { paymentIdSchema } from '../core/primitives';
-import { createRefundId, refundIdSchema, refundReasonValues } from './primitives';
+import type { RefundsTables } from './tables.js';
+import type { Refund } from './types.js';
+import { writtenRow } from '../core/journal/support.js';
+import { fromStoredNumber, moneyJsonSchema, toMinorColumn } from '../core/money.js';
+import { paymentIdSchema } from '../core/primitives.js';
+import { createRefundId, refundIdSchema, refundReasonValues } from './primitives.js';
 
 type RefundRow = RefundsTables['refunds']['$inferSelect'];
 

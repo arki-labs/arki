@@ -24,7 +24,7 @@ import type {
   CompletePaymentInput,
   FailPaymentInput,
   InitiatePaymentInput,
-} from './journal/payment';
+} from './journal/payment.js';
 import type {
   ActivateSubscriptionInput,
   CancelSubscriptionInput,
@@ -34,19 +34,19 @@ import type {
   ReactivateSubscriptionInput,
   ResumeSubscriptionInput,
   SyncSubscriptionInput,
-} from './journal/subscription';
-import type { CoreTables } from './tables';
-import type { Payment, Subscription } from './types';
-import { createPaymentJournal } from './journal/payment';
-import { createSubscriptionJournal } from './journal/subscription';
-import { writtenRow } from './journal/support';
+} from './journal/subscription.js';
+import type { CoreTables } from './tables.js';
+import type { Payment, Subscription } from './types.js';
+import { createPaymentJournal } from './journal/payment.js';
+import { createSubscriptionJournal } from './journal/subscription.js';
+import { writtenRow } from './journal/support.js';
 
 export {
   cancelPaymentInputSchema,
   completePaymentInputSchema,
   failPaymentInputSchema,
   initiatePaymentInputSchema,
-} from './journal/payment';
+} from './journal/payment.js';
 export {
   activateSubscriptionInputSchema,
   cancelSubscriptionInputSchema,
@@ -56,13 +56,13 @@ export {
   reactivateSubscriptionInputSchema,
   resumeSubscriptionInputSchema,
   syncSubscriptionInputSchema,
-} from './journal/subscription';
+} from './journal/subscription.js';
 export type {
   CancelPaymentInput,
   CompletePaymentInput,
   FailPaymentInput,
   InitiatePaymentInput,
-} from './journal/payment';
+} from './journal/payment.js';
 export type {
   ActivateSubscriptionInput,
   CancelSubscriptionInput,
@@ -72,7 +72,7 @@ export type {
   ReactivateSubscriptionInput,
   ResumeSubscriptionInput,
   SyncSubscriptionInput,
-} from './journal/subscription';
+} from './journal/subscription.js';
 
 /**
  * What the services call to change a payment or a subscription. Each function

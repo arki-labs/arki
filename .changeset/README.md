@@ -25,7 +25,7 @@ for the source of truth; trimmed for stable v1 per the doctrine
 4. **frontend** — _empty for v1.0_; every Wave 4 candidate still
    fails build-output / docs / privacy or depends on the
    still-private `@arki/react-hooks`. Targeted for v1.1.
-5. **specialized** — `@arki/money` (depends on `@arki/math`); the other
+5. **specialized** — `@arki/money` (depends on `@arki/math`), `@arki/payments`; the other
    Wave 5 candidates are still `private: true`. Targeted for v1.1+.
 
 ## Gating

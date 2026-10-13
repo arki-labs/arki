@@ -21,7 +21,7 @@ import { z } from '@arki/contracts';
 import { Money, money } from '@arki/money';
 import { anyMoneySchema } from '@arki/money/zod';
 
-import type { Payment, Plan } from './types';
+import type { Payment, Plan } from './types.js';
 
 /**
  * `Money` as the whole minor units an amount column holds. Exact: an amount
