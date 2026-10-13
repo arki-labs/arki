@@ -68,12 +68,12 @@ describe('gamma and beta', () => {
     expect(gamma(1)).toBe(1);
     expect(rel(gamma(-0.5), -2 * Math.sqrt(Math.PI))).toBeLessThan(1e-14);
     expect(rel(gamma(1.5), Math.sqrt(Math.PI) / 2)).toBeLessThan(1e-14);
-    expect(rel(gamma(171), 7.257415615307994e306)).toBeLessThan(1e-14);
-    expect(rel(gamma(171.5), 9.483367566824795e307)).toBeLessThan(1e-12);
+    expect(rel(gamma(171), 7.257_415_615_307_994e306)).toBeLessThan(1e-14);
+    expect(rel(gamma(171.5), 9.483_367_566_824_795e307)).toBeLessThan(1e-12);
   });
   it('gives the float factorial as gamma(n + 1)', () => {
     expect(rel(gamma(21), 2_432_902_008_176_640_000)).toBeLessThan(1e-14);
-    expect(rel(gamma(171), 7.257415615307994e306)).toBeLessThan(1e-14);
+    expect(rel(gamma(171), 7.257_415_615_307_994e306)).toBeLessThan(1e-14);
   });
   it('satisfies the recurrence Γ(x + 1) = xΓ(x)', () => {
     for (const x of [0.1, 0.7, 2.3, 10.9, 55.5, -1.5, -7.25]) {

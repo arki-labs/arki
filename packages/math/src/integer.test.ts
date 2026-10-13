@@ -153,13 +153,13 @@ describe('factorial', () => {
     const elapsed = Date.now() - start;
     expect(f.toString().length).toBe(35_660);
     expect(f % 10n ** 2499n).toBe(0n); // 2499 trailing zeros: floor(10000/5)+... = 2499
-    expect(f / factorial(9_999n)).toBe(10_000n);
+    expect(f / factorial(9999n)).toBe(10_000n);
     expect(elapsed).toBeLessThan(500);
   });
   it('permutations and combinations at n = 10,000', () => {
     expect(permutations(10_000n, 10_000n)).toBe(factorial(10_000n));
-    expect(permutations(10_000n, 3n)).toBe(10_000n * 9_999n * 9_998n);
-    expect(combinations(10_000n, 5_000n).toString().length).toBe(3009);
+    expect(permutations(10_000n, 3n)).toBe(10_000n * 9999n * 9998n);
+    expect(combinations(10_000n, 5000n).toString().length).toBe(3009);
     expect(combinations(10_000n, 1n)).toBe(10_000n);
   });
   it('gcd/lcm: number forms refuse unsafe inputs, bigint handles them', () => {
