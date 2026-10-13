@@ -381,30 +381,10 @@ export class Money<C extends string = string> {
     const count = ratios.length;
     if (count === 0) throw new InvalidArgumentError('allocate needs at least one ratio');
     if (count > MAX_PARTS) throw new ResourceLimitError(`allocate makes at most ${MAX_PARTS} parts`);
-    const coefficients: Units[] = [];
-    const fractions: number[] = [];
-    let common = 0;
-    for (const ratio of ratios) {
-      const parsed =
-        typeof ratio === 'number'
-          ? parseNumber(ratio)
-          : typeof ratio === 'string'
-            ? parseDecimal(ratio)
-            : typeof ratio === 'bigint'
-              ? { coefficient: canon(ratio), fraction: 0 }
-              : badRatio();
-      if (parsed.coefficient < 0) throw new InvalidArgumentError(`Ratios must not be negative, got ${String(ratio)}`);
-      coefficients.push(parsed.coefficient);
-      fractions.push(parsed.fraction);
-      if (parsed.fraction > common) common = parsed.fraction;
-    }
-    const weights: Units[] = [];
+    // Whole-number ratios are their own weights; others are scaled to a common denominator.
+    const weights: readonly Units[] = areWholeRatios(ratios) ? ratios : scaledWeights(ratios);
     let total: Units = 0;
-    for (let i = 0; i < count; i++) {
-      const weight = mulUnits(coefficients[i] ?? 0, pow10(common - (fractions[i] ?? 0)));
-      weights.push(weight);
-      total = addUnits(total, weight);
-    }
+    for (const weight of weights) total = addUnits(total, weight);
     if (total === 0) throw new InvalidArgumentError('Ratios must not all be zero');
     return distribute(this, weights, total, options?.remainder ?? 'largest');
   }
@@ -581,6 +561,38 @@ function combine<C extends string>(a: Money<C>, b: Money<C>, subtract: boolean):
   return Money.create(addUnits(left, subtract ? negUnits(right) : right), scale, a.currency);
 }
 
+/** Whether every ratio is a non-negative safe integer, which is then its own weight. */
+function areWholeRatios(ratios: readonly (number | bigint | string)[]): ratios is readonly number[] {
+  for (const ratio of ratios) if (typeof ratio !== 'number' || !Number.isSafeInteger(ratio) || ratio < 0) return false;
+  return true;
+}
+
+/** Reads each ratio exactly and scales all of them to the most decimals among them. */
+function scaledWeights(ratios: readonly (number | bigint | string)[]): Units[] {
+  const weights: Units[] = [];
+  const fractions: number[] = [];
+  let common = 0;
+  for (const ratio of ratios) {
+    const parsed =
+      typeof ratio === 'number'
+        ? parseNumber(ratio)
+        : typeof ratio === 'string'
+          ? parseDecimal(ratio)
+          : typeof ratio === 'bigint'
+            ? { coefficient: canon(ratio), fraction: 0 }
+            : badRatio();
+    if (parsed.coefficient < 0) throw new InvalidArgumentError(`Ratios must not be negative, got ${String(ratio)}`);
+    weights.push(parsed.coefficient);
+    fractions.push(parsed.fraction);
+    if (parsed.fraction > common) common = parsed.fraction;
+  }
+  if (common > 0) {
+    for (let i = 0; i < weights.length; i++)
+      weights[i] = mulUnits(weights[i] ?? 0, pow10(common - (fractions[i] ?? 0)));
+  }
+  return weights;
+}
+
 function distribute<C extends string>(
   whole: Money<C>,
   weights: readonly Units[],
@@ -591,29 +603,59 @@ function distribute<C extends string>(
   const magnitude = negative ? negUnits(whole.units) : whole.units;
   const count = weights.length;
   const shares: Units[] = [];
-  const rests: Units[] = [];
+  // Rests are kept only once two differ: with every rest equal, largest-remainder order is index order.
+  let firstRest: Units = 0;
+  let rests: Units[] | undefined;
   let given: Units = 0;
   for (let i = 0; i < count; i++) {
-    const exact = mulUnits(magnitude, weights[i] ?? 0);
-    const share = mulDiv(exact, 1, total, 'down');
+    const weight = weights[i] ?? 0;
+    let share: Units;
+    let rest: Units;
+    const product = typeof magnitude === 'number' && typeof weight === 'number' ? magnitude * weight : MAX + 1;
+    if (product <= MAX && typeof total === 'number') {
+      // Both non-negative and exact: `%` on doubles is exact, so the floor division is too.
+      rest = product % total;
+      share = (product - rest) / total;
+    } else {
+      const exact = mulUnits(magnitude, weight);
+      share = mulDiv(exact, 1, total, 'down');
+      rest = addUnits(exact, negUnits(mulUnits(share, total)));
+    }
     shares.push(share);
-    rests.push(addUnits(exact, negUnits(mulUnits(share, total))));
     given = addUnits(given, share);
+    if (i === 0) {
+      firstRest = rest;
+    } else if (rests !== undefined) {
+      rests.push(rest);
+    } else if (rest !== firstRest) {
+      rests = Array.from({ length: i }, () => firstRest);
+      rests.push(rest);
+    }
   }
   // Fewer than `count` units are left, and only parts with a non-zero rest can need one.
   let left = Number(addUnits(magnitude, negUnits(given)));
-  if (left > 0) {
+  if (left > 0 && policy === 'largest' && rests !== undefined) {
+    const byRest = rests;
     const order: number[] = [];
     for (let i = 0; i < count; i++) if (weights[i] !== 0) order.push(i);
-    if (policy === 'largest') order.sort((x, y) => compareUnits(rests[y] ?? 0, rests[x] ?? 0) || x - y);
-    else if (policy === 'last') order.reverse();
+    order.sort((x, y) => compareUnits(byRest[y] ?? 0, byRest[x] ?? 0) || x - y);
     for (const index of order) {
       if (left === 0) break;
       shares[index] = addUnits(shares[index] ?? 0, 1);
       left -= 1;
     }
+  } else if (left > 0) {
+    const fromEnd = policy === 'last';
+    for (let step = 0; step < count && left > 0; step++) {
+      const index = fromEnd ? count - 1 - step : step;
+      if (weights[index] === 0) continue;
+      shares[index] = addUnits(shares[index] ?? 0, 1);
+      left -= 1;
+    }
   }
-  return shares.map(share => Money.create(negative ? negUnits(share) : share, whole.scale, whole.currency));
+  const parts: Money<C>[] = [];
+  for (const share of shares) parts.push(Money.create(negative ? negUnits(share) : share, whole.scale, whole.currency));
+  return parts;
 }
 
 // Shorthands and aggregates ------------------------------------------------

@@ -448,3 +448,67 @@ describe('types', () => {
     expectTypeOf<ReturnType<Money['valueOf']>>().toBeNever();
   });
 });
+
+describe('allocation matches largest remainder in bigint arithmetic', () => {
+  type Policy = 'largest' | 'first' | 'last';
+
+  /** Independent reference: every step in bigint, ties broken by position. */
+  function reference(units: bigint, weights: readonly bigint[], policy: Policy): bigint[] {
+    const negative = units < 0n;
+    const magnitude = negative ? -units : units;
+    const total = weights.reduce((a, b) => a + b, 0n);
+    const shares = weights.map(weight => (magnitude * weight) / total);
+    const rests = weights.map((weight, i) => magnitude * weight - (shares[i] ?? 0n) * total);
+    let left = magnitude - shares.reduce((a, b) => a + b, 0n);
+    const order = weights.flatMap((weight, i) => (weight === 0n ? [] : [i]));
+    if (policy === 'largest') {
+      order.sort((x, y) => {
+        const a = rests[x] ?? 0n;
+        const b = rests[y] ?? 0n;
+        return a === b ? x - y : a < b ? 1 : -1;
+      });
+    } else if (policy === 'last') {
+      order.reverse();
+    }
+    for (const index of order) {
+      if (left === 0n) break;
+      shares[index] = (shares[index] ?? 0n) + 1n;
+      left -= 1n;
+    }
+    return shares.map(share => (negative ? -share : share));
+  }
+
+  it('on number, bigint and decimal-string ratios, small and huge amounts, every policy', () => {
+    const next = rng(9);
+    const eur = Currency.of('EUR');
+    const policies: readonly Policy[] = ['largest', 'first', 'last'];
+    for (let round = 0; round < 1500; round++) {
+      const huge = next() < 0.2;
+      const magnitude = huge ? 2n ** 70n + BigInt(Math.floor(next() * 1e9)) : BigInt(Math.floor(next() * 1e7));
+      const units = next() < 0.3 ? -magnitude : magnitude;
+      const count = 1 + Math.floor(next() * 6);
+      const coefficients = Array.from({ length: count }, () => BigInt(Math.floor(next() * (next() < 0.5 ? 4 : 1000))));
+      const fractions = Array.from({ length: count }, () => (next() < 0.3 ? Math.floor(next() * 3) : 0));
+      if (!coefficients.some(c => c > 0n)) coefficients[0] = 1n;
+      const ratios = coefficients.map((c, i) => {
+        const fraction = fractions[i] ?? 0;
+        if (fraction > 0) return (Number(c) / 10 ** fraction).toFixed(fraction);
+        const kind = next();
+        return kind < 0.6 ? Number(c) : kind < 0.8 ? c : String(c);
+      });
+      const common = Math.max(...fractions);
+      const weights = coefficients.map((c, i) => c * 10n ** BigInt(common - (fractions[i] ?? 0)));
+      const whole = Money.fromMinor(units, eur);
+      for (const policy of policies) {
+        const parts = whole.allocate(ratios, { remainder: policy }).map(part => BigInt(part.units));
+        expect(parts, `${units} ${JSON.stringify(ratios.map(String))} ${policy}`).toEqual(
+          reference(units, weights, policy),
+        );
+      }
+    }
+  });
+
+  it('treats -0 as a zero ratio', () => {
+    expect(money('0.03', 'EUR').allocate([-0, 1, 1]).map(String)).toEqual(['0.00 EUR', '0.02 EUR', '0.01 EUR']);
+  });
+});
