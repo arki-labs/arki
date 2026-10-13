@@ -33,8 +33,10 @@ export type MiddlewareFunction<TContextOut1, TContextOut2, TMeta extends QueueMe
   meta: TMeta;
 
   /**
-   * Call the next middleware or handler
-   * Can optionally transform the context
+   * Call the next middleware, or the handler after the last one.
+   * Resolves only once everything inside has finished, handler included, and
+   * rejects with the handler's error, so `try { return await next() } finally { ... }`
+   * wraps the handler. Can optionally replace the context for what follows.
    */
   next: (opts?: { ctx?: TContextOut2 }) => Promise<MiddlewareResult<TContextOut2>>;
 }) => Promise<MiddlewareResult<TContextOut2>>;
@@ -47,6 +49,12 @@ export type MiddlewareResult<TContext> = {
    * The context to pass to the next middleware/handler
    */
   ctx: TContext;
+
+  /**
+   * What the handler returned, as seen from `await next()`.
+   * Unset when a middleware returns without calling `next()`.
+   */
+  output?: unknown;
 };
 
 /**

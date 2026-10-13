@@ -173,6 +173,28 @@ const authMiddleware = q.middleware<AppContext & { user: User }>(async ({ ctx, d
 });
 ```
 
+**Middleware wraps the handler.** The handler is the innermost `next()`: a
+middleware's `await next()` resolves only after everything inside it, handler
+included, has finished; it rejects with the handler's error; and its result
+carries what the handler returned (`output`). So `try`/`finally` around
+`next()` surrounds the whole run:
+
+```typescript
+const timed = q.middleware(async ({ job, next }) => {
+  const start = Date.now();
+  try {
+    const result = await next(); // the handler has finished here
+    console.log(`[${job.name}] returned`, result.output);
+    return result;
+  } finally {
+    console.log(`[${job.name}] took ${Date.now() - start}ms`); // runs after the handler, even when it throws
+  }
+});
+```
+
+With `.use(mw1).use(mw2)` the order is `mw1` before, `mw2` before, handler,
+`mw2` after, `mw1` after. `next({ ctx })` replaces the context for what follows.
+
 **Standard Middleware:**
 
 - `errorHandlingMiddleware()` - Catches and formats errors
@@ -185,15 +207,26 @@ const authMiddleware = q.middleware<AppContext & { user: User }>(async ({ ctx, d
 
 ### Schedules
 
-Schedules run jobs on a recurring basis:
+**A schedule triggers its job; it does not run it.** On each tick,
+`.job(someJob).data(d)` adds `d` to `someJob`'s own queue (a BullMQ job
+scheduler whose id is the schedule name), exactly like `someJob.trigger(d)`.
+The job's own worker then runs it: input check, the job's own middleware,
+retries and concurrency. The schedule has no queue, worker or middleware of
+its own, and registering only the schedule also registers its job.
 
 ```typescript
-// Wrap an existing job
+// Wrap an existing job (named `generate-report-schedule` by default)
 const dailyReport = q.schedule.cron('0 9 * * *', { timezone: 'America/New_York' }).job(generateReport).data({
   reportType: 'daily',
 });
 
-// Inline handler with middleware
+// Name it; several schedules can trigger one job, each under its own name
+const weeklyReport = q.schedule.weekly('monday', '09:00').name('weekly-report').job(generateReport).data({
+  reportType: 'weekly',
+});
+
+// Inline handler with middleware: an anonymous job named after the schedule,
+// whose middleware is the `.use()` chain
 const hourlySync = q.schedule
   .interval(60 * 60 * 1000) // Every hour
   .use(structuredLoggingMiddleware())
@@ -205,6 +238,17 @@ const hourlySync = q.schedule
     return { synced: true };
   });
 ```
+
+Middleware for a wrapped job belongs on the job (`q.job.use(mw)`):
+`q.schedule.cron(...).use(mw).job(j)` is a compile error, and plain JS gets a
+`QueueDefinitionError` (`ARKI_QUEUE_E012`). Two schedules with the same name
+throw `ARKI_QUEUE_E013` at `register()`.
+
+`start()` prunes schedules removed from code: on each registered job's queue
+it removes `schedule:<name>` schedulers that no registered schedule owns, so a
+renamed or deleted schedule stops ticking. Other scheduler keys on the queue
+(your own repeat jobs) are never touched. The runtime-local queue does the same
+for keyed pg-boss schedules on each job's queue.
 
 ### Durable backend for `@arki/schedule`
 
@@ -236,7 +280,6 @@ Flows define complex workflows with dependencies:
 const orderFlow = q.flow
   .name('orders:process-flow')
   .input(z.object({ orderId: z.string() }))
-  .use(loggingMiddleware())
   .step('validate', {
     job: validateJob,
     data: input => ({ orderId: input.orderId }),
@@ -264,7 +307,8 @@ const orderFlow = q.flow
 - Automatic dependency validation (no circular dependencies)
 - Type-safe step IDs
 - Parallel execution (steps with same dependencies run in parallel)
-- Middleware applies to all steps
+- No flow `.use()`: each step runs later in its own job's worker, so nothing
+  can wrap a whole flow. Put middleware on the step jobs (`q.job.use(mw)`).
 
 ### Registry Organization
 
@@ -366,8 +410,6 @@ const rateLimitMiddleware = q.middleware(async ({ ctx, data, next }) => {
 const etlFlow = q.flow
   .name('data:etl-pipeline')
   .input(z.object({ sourceId: z.string() }))
-  .use(structuredLoggingMiddleware())
-  .use(errorHandlingMiddleware())
   // Extract step
   .step('extract', {
     job: extractJob,
@@ -597,9 +639,10 @@ Create scheduled jobs:
 q.schedule
   .cron(pattern, options?)           // Cron-based
   .interval(milliseconds)            // Interval-based
-  .use(middleware)                   // Add middleware
-  .job(existingJob).data(data)       // Wrap existing job
+  .name(name)                        // Optional for .job(), required for an inline handler
+  .job(existingJob).data(data)       // Trigger an existing job (no .use() here)
   // OR
+  .use(middleware)                   // Inline handler middleware
   .name(name).input(schema).handler(...) // Inline handler
 ```
 
@@ -611,7 +654,6 @@ Create multi-step workflows:
 q.flow
   .name(name)
   .input(schema)
-  .use(middleware)
   .step(id, {
     job,
     data: (input) => ...,

@@ -72,12 +72,15 @@ export type DayOfWeek = keyof typeof DAY_OF_WEEK;
  */
 function parseTime(time: string): { hours: string; minutes: string } {
   const parts = time.split(':');
-  const hours = parts[0]!;
-  const minutes = parts[1] ?? '0';
+  if (parts.length > 2) {
+    throw invalidCronValue(`Invalid time: ${time}. Use HH:mm or HH`);
+  }
+  const [hours = '', minutes = '0'] = parts;
 
-  // Validate hours and minutes
-  const h = Number.parseInt(hours);
-  const m = Number.parseInt(minutes);
+  // Validate hours and minutes. Digits only: parseInt would accept "9am" and
+  // pass the text through into the cron expression.
+  const h = /^\d{1,2}$/.test(hours) ? Number(hours) : Number.NaN;
+  const m = /^\d{1,2}$/.test(minutes) ? Number(minutes) : Number.NaN;
 
   if (Number.isNaN(h) || h < 0 || h > 23) {
     throw invalidCronValue(`Invalid hours: ${hours}. Must be 0-23`);
@@ -87,7 +90,8 @@ function parseTime(time: string): { hours: string; minutes: string } {
     throw invalidCronValue(`Invalid minutes: ${minutes}. Must be 0-59`);
   }
 
-  return { hours, minutes };
+  // Normalized numbers ("09" -> "9"): the cron field is the value, not the text.
+  return { hours: String(h), minutes: String(m) };
 }
 
 /**

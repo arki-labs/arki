@@ -1,10 +1,15 @@
 import { PGlite } from '@electric-sql/pglite';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { buildPgBossAdapter } from './adapter';
 
 const pglite = new PGlite();
 const adapter = buildPgBossAdapter(pglite);
+
+// PGlite's WASM start can pass the 5s test timeout when the whole suite runs in parallel.
+beforeAll(async () => {
+  await pglite.waitReady;
+}, 30_000);
 
 afterAll(async () => {
   await pglite.close();

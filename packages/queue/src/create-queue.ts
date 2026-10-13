@@ -12,15 +12,13 @@
 import type { Job as BullMQJob, RepeatOptions } from 'bullmq';
 import { FlowProducer, Queue, Worker } from 'bullmq';
 
-import type { z } from '@arki/contracts';
-
 import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { QueueConnection } from './redis-connection.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
 import type { FlowDefinition, QueueInstance, ScheduleDefinition } from './types/builder.ts';
-import type { JobDefinition, JobHandler } from './types/job.ts';
-import type { QueueMeta } from './types/queue.ts';
+import type { JobDefinition } from './types/job.ts';
 import { debugFlow, debugJob, debugRegister, debugSchedule, debugWorker } from './debug.ts';
+import { duplicateScheduleError } from './errors.ts';
 import { createJobContext, executeMiddlewareChain } from './middleware.ts';
 import { parseRedisConnection } from './redis-connection.ts';
 import { getWorkerBackoffStrategy, toBullMQBackoff } from './retry-strategies.ts';
@@ -32,6 +30,9 @@ import { getWorkerBackoffStrategy, toBullMQBackoff } from './retry-strategies.ts
 type Registry = {
   [key: string]: JobDefinition<unknown, unknown, unknown> | ScheduleDefinition | FlowDefinition | Registry;
 };
+
+/** Job scheduler ids of schedules: `schedule:<schedule name>` on the job's queue */
+const SCHEDULER_ID_PREFIX = 'schedule:';
 
 /**
  * Queue instance options
@@ -54,8 +55,9 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
   const connectionConfig = parseRedisConnection(connection);
 
   // Track registered items
-  const registeredJobs = new Map<string, JobDefinition<unknown, unknown, TContext>>();
-  const registeredSchedules = new Map<string, InternalScheduleDefinition<unknown, unknown, TContext>>();
+  // Each registered job with the BullMQ queue its worker reads
+  const registeredJobs = new Map<string, { definition: JobDefinition<unknown, unknown, TContext>; queue: Queue }>();
+  const registeredSchedules = new Map<string, InternalScheduleDefinition>();
   const registeredFlows = new Map<string, InternalFlowDefinition>();
 
   // Track BullMQ instances
@@ -67,15 +69,16 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
   /**
    * Register a single job definition
    */
-  function registerJobDefinition<TInput, TOutput>(definition: JobDefinition<TInput, TOutput, TContext>): void {
+  function registerJobDefinition<TInput, TOutput>(definition: JobDefinition<TInput, TOutput, TContext>): Queue {
     const internal = definition._internal;
 
     debugRegister('[%s] Registering job definition', internal.name);
 
-    if (registeredJobs.has(internal.name)) {
+    const existing = registeredJobs.get(internal.name);
+    if (existing) {
       debugRegister('[%s] Job already registered, skipping', internal.name);
       console.warn(`Job "${internal.name}" is already registered, skipping`);
-      return;
+      return existing.queue;
     }
 
     // Create BullMQ queue
@@ -97,7 +100,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     debugWorker('[%s] Creating worker with concurrency: %d', internal.name, internal.options?.maxParallelism ?? 5);
     const worker = new Worker(
       internal.name,
-      async (job: BullMQJob<TInput, TOutput>) => {
+      async (job: BullMQJob<TInput, TOutput | undefined>) => {
         debugJob('[%s] Job %s started', internal.name, job.id);
 
         // Validate input
@@ -109,19 +112,16 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
         const baseContext = await createContext();
         const jobContext = createJobContext(baseContext, job);
 
-        // Execute middleware chain + handler
+        // Execute middleware chain around the handler (onion)
         debugJob('[%s] Job %s executing middleware chain (%d middleware)', internal.name, job.id, internal.middlewares.length);
-        const result = await executeMiddlewareChain<typeof jobContext, typeof jobContext>(
+        const handlerResult = await executeMiddlewareChain<typeof jobContext, typeof jobContext, TOutput>(
           internal.middlewares,
           jobContext,
           validatedData,
           job,
-          {} as QueueMeta, // Meta will be populated by middleware if needed
+          {}, // Meta will be populated by middleware if needed
+          ctx => internal.handler(validatedData, ctx),
         );
-
-        // Final handler execution (after all middleware)
-        debugJob('[%s] Job %s executing handler', internal.name, job.id);
-        const handlerResult = await internal.handler(validatedData, result);
         debugJob('[%s] Job %s completed successfully', internal.name, job.id);
         return handlerResult;
       },
@@ -151,103 +151,47 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
       }
     });
 
-    // Store queue reference on the definition for trigger()
+    // Store queue reference on the definition for trigger(), and the worker beside it
     internal._queue = queue;
+    internal._worker = worker;
 
     // Store instances
     queues.push(queue);
     workers.push(worker);
-    registeredJobs.set(internal.name, definition as JobDefinition<unknown, unknown, TContext>);
+    registeredJobs.set(internal.name, { definition: definition as JobDefinition<unknown, unknown, TContext>, queue });
 
     debugRegister('[%s] Job registered successfully', internal.name);
     console.log(`✓ Registered job: ${internal.name}`);
+    return queue;
   }
 
   /**
-   * Register a schedule definition
+   * Register a schedule definition.
+   *
+   * A schedule is a trigger: it adds its data to the job's own queue through a
+   * BullMQ job scheduler (or one delayed job for a timeout), and the job's own
+   * worker runs it. It creates no queue or worker of its own.
    */
   async function registerScheduleDefinition(definition: ScheduleDefinition): Promise<void> {
     const internal = definition._internal as InternalScheduleDefinition;
+    const jobName = internal.job._internal.name;
 
-    debugSchedule('[%s] Registering schedule definition (type: %s)', internal.name, internal.type);
+    debugSchedule('[%s] Registering schedule definition (type: %s, job: %s)', internal.name, internal.type, jobName);
 
     if (registeredSchedules.has(internal.name)) {
-      debugSchedule('[%s] Schedule already registered, skipping', internal.name);
-      console.warn(`Schedule "${internal.name}" is already registered, skipping`);
-      return;
+      throw duplicateScheduleError(internal.name);
     }
 
-    // Create queue for the schedule
-    debugSchedule('[%s] Creating queue for schedule', internal.name);
-    const queue = new Queue(internal.name, {
-      connection: connectionConfig,
-      prefix: keyPrefix,
-    });
-
-    // Determine the handler based on job variant
-    let handler: JobHandler<unknown, unknown, TContext>;
-    let inputSchema: z.ZodType<unknown>;
-
-    if (internal.jobVariant.type === 'existing') {
-      // Use existing job's handler
-      const jobInternal = internal.jobVariant.job._internal;
-      handler = jobInternal.handler as JobHandler<unknown, unknown, TContext>;
-      inputSchema = jobInternal.inputSchema;
-
-      // Ensure the job is registered
-      if (!registeredJobs.has(jobInternal.name)) {
-        registerJobDefinition(internal.jobVariant.job);
-      }
-    } else {
-      // Use inline handler
-      handler = internal.jobVariant.handler as JobHandler<unknown, unknown, TContext>;
-      inputSchema = internal.jobVariant.inputSchema;
-    }
-
-    // Create worker for the schedule
-    debugSchedule('[%s] Creating worker for schedule', internal.name);
-    const worker = new Worker(
-      internal.name,
-      async (job: BullMQJob) => {
-        debugSchedule('[%s] Schedule job %s started', internal.name, job.id);
-
-        // Validate input
-        const validatedData = inputSchema.parse(job.data);
-
-        // Create context
-        const baseContext = await createContext();
-        const jobContext = createJobContext(baseContext, job);
-
-        // Execute middleware chain + handler
-        debugSchedule('[%s] Schedule job %s executing middleware and handler', internal.name, job.id);
-        const contextAfterMiddleware = await executeMiddlewareChain<typeof jobContext, typeof jobContext>(
-          internal.middlewares,
-          jobContext,
-          validatedData,
-          job,
-          {} as QueueMeta,
-        );
-
-        const result = await handler(validatedData, contextAfterMiddleware);
-        debugSchedule('[%s] Schedule job %s completed', internal.name, job.id);
-        return result;
-      },
-      {
-        connection: connectionConfig,
-        prefix: keyPrefix,
-        autorun: false,
-      },
-    );
-
-    // Set up the schedule
-    const scheduleData = internal.jobVariant.type === 'existing' ? internal.jobVariant.data : {};
+    // Ensure the job is registered, so its worker runs what the schedule adds
+    const queue = registeredJobs.get(jobName)?.queue ?? registerJobDefinition(internal.job);
 
     if (internal.type === 'timeout') {
       // Timeout: one-time execution after delay
       debugSchedule('[%s] Configuring timeout schedule with delay: %dms', internal.name, internal.value);
-      await queue.add('scheduled-job', scheduleData, {
+      await queue.add(jobName, internal.data, {
         delay: internal.value as number,
-        jobId: `schedule:${internal.name}`,
+        // BullMQ refuses a custom id with one `:` ("Custom Id cannot contain :")
+        jobId: `schedule-${internal.name}`,
       });
     } else {
       // Cron or Interval: repeating execution
@@ -261,29 +205,61 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
               every: internal.value as number,
             };
 
-      const schedulerId = `schedule:${internal.name}`;
-
-      // This queue holds exactly one schedule, so any other scheduler entry is
-      // stale. BullMQ 5 `queue.add(..., { repeat })` stored the schedule under
-      // an md5 key; BullMQ 6 keeps running such an entry next to the new one,
-      // so without this every tick would execute twice.
-      for (const scheduler of await queue.getJobSchedulers()) {
-        if (scheduler.key !== schedulerId) {
-          debugSchedule('[%s] Removing stale scheduler entry: %s', internal.name, scheduler.key);
-          await queue.removeJobScheduler(scheduler.key);
+      // An inline schedule's anonymous job queue is the queue older versions
+      // gave the schedule itself. There, BullMQ 5 `queue.add(..., { repeat })`
+      // left an md5-keyed entry that BullMQ 6 keeps running next to the new
+      // one, so every tick would execute twice. Only this package writes to
+      // that queue, so any key outside `schedule:` is such a leftover. A
+      // wrapped job's queue is never cleaned this way: other keys there may be
+      // the app's own repeat jobs.
+      if (internal.inline) {
+        for (const scheduler of await queue.getJobSchedulers()) {
+          if (!scheduler.key.startsWith(SCHEDULER_ID_PREFIX)) {
+            debugSchedule('[%s] Removing legacy scheduler entry: %s', internal.name, scheduler.key);
+            await queue.removeJobScheduler(scheduler.key);
+          }
         }
       }
 
+      const schedulerId = `${SCHEDULER_ID_PREFIX}${internal.name}`;
       debugSchedule('[%s] Configuring %s schedule with value: %s', internal.name, internal.type, internal.value);
-      await queue.upsertJobScheduler(schedulerId, repeatOptions, { name: 'scheduled-job', data: scheduleData });
+      await queue.upsertJobScheduler(schedulerId, repeatOptions, { name: jobName, data: internal.data });
     }
 
-    queues.push(queue);
-    workers.push(worker);
     registeredSchedules.set(internal.name, internal);
 
     debugSchedule('[%s] Schedule registered successfully', internal.name);
     console.log(`✓ Registered schedule: ${internal.name} (${internal.type})`);
+  }
+
+  /**
+   * Remove the schedulers of schedules that are no longer in code.
+   *
+   * A renamed or deleted schedule leaves `schedule:<old-name>` on its job's
+   * queue, and the job's live worker would keep running those ticks. Runs at
+   * start(), once every schedule is registered: on each registered job's
+   * queue it removes `schedule:` keys that no registered schedule of that job
+   * owns. Keys outside the `schedule:` id space are never touched.
+   */
+  async function pruneStaleSchedulers(): Promise<void> {
+    const liveIds = new Map<string, Set<string>>();
+    for (const schedule of registeredSchedules.values()) {
+      if (schedule.type === 'timeout') continue;
+      const jobName = schedule.job._internal.name;
+      const ids = liveIds.get(jobName) ?? new Set<string>();
+      ids.add(`${SCHEDULER_ID_PREFIX}${schedule.name}`);
+      liveIds.set(jobName, ids);
+    }
+
+    for (const [jobName, { queue }] of registeredJobs) {
+      const live = liveIds.get(jobName);
+      for (const scheduler of await queue.getJobSchedulers()) {
+        if (scheduler.key.startsWith(SCHEDULER_ID_PREFIX) && !live?.has(scheduler.key)) {
+          debugSchedule('[%s] Removing scheduler of a schedule no longer registered: %s', jobName, scheduler.key);
+          await queue.removeJobScheduler(scheduler.key);
+        }
+      }
+    }
   }
 
   /**
@@ -379,6 +355,9 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     debugWorker('Flows registered: %d', registeredFlows.size);
     debugWorker('Workers created: %d', workers.length);
     debugWorker('Queues created: %d', queues.length);
+
+    // Every schedule is registered by now; drop schedulers left by removed ones before any tick runs
+    await pruneStaleSchedulers();
 
     for (const worker of workers) {
       if (!startedWorkers.has(worker)) {

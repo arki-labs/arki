@@ -17,7 +17,9 @@ export type {
   ScheduleBuilderChain,
   ScheduleBuilderDef,
   ScheduleBuilderFactory,
+  ScheduleBuilderNamed,
   ScheduleBuilderNeedsInput,
+  ScheduleBuilderWithMiddleware,
   ScheduleDefinition,
   ScheduleJobWrapper,
 } from './builder.ts';

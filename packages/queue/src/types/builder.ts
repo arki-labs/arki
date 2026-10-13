@@ -288,26 +288,67 @@ export type ScheduleBuilderFactory<TContext, TMeta extends QueueMeta> = {
 
 /**
  * Schedule builder definition
+ *
+ * A schedule is a trigger: `.job(j).data(d)` adds `d` to `j`'s own queue on
+ * each tick, the same as `j.trigger(d)`, and `j`'s worker runs it with `j`'s
+ * own middleware. An inline schedule (`.name().input().handler()`) is an
+ * anonymous job; its `.use()` chain is that job's middleware.
  */
 export type ScheduleBuilderDef<TContext, TContextOut, TMeta extends QueueMeta> = {
   /**
-   * Add middleware to this schedule
+   * Add middleware to the inline schedule's handler. A schedule that wraps a
+   * job has no middleware of its own, so the builder this returns has no `.job()`.
    */
   use<TContextOut2>(
     middleware: JobMiddleware<TContextOut, TContextOut2, TMeta>,
-  ): ScheduleBuilderDef<TContext, TContextOut2, TMeta>;
+  ): ScheduleBuilderWithMiddleware<TContext, TContextOut2, TMeta>;
 
   /**
-   * Wrap an existing job. The schedule worker runs the schedule's own
-   * middleware, not the job's, and hands the result to the job's handler; so
-   * the job's context must be one this schedule provides (`TContextOut`).
+   * Wrap an existing job: each tick adds `.data()` to the job's own queue.
+   * Any built job fits: its own worker runs it, with its own middleware and context.
    */
-  job<TInput>(job: JobDefinition<TInput, unknown, TContextOut>): ScheduleJobWrapper<TInput>;
+  job<TInput>(job: JobDefinition<TInput, unknown, never>): ScheduleJobWrapper<TInput>;
+
+  /**
+   * Name the schedule (defaults to `<job name>-schedule` for `.job()`; required for an inline handler)
+   */
+  name(name: string): ScheduleBuilderNamed<TContext, TContextOut, TMeta>;
+};
+
+/**
+ * Schedule builder after `.use()`: only an inline handler can follow.
+ * Has no `.job()`: wrapping a job here is a compile error (the job's own middleware applies).
+ */
+export type ScheduleBuilderWithMiddleware<TContext, TContextOut, TMeta extends QueueMeta> = {
+  /**
+   * Add more middleware to the inline schedule's handler
+   */
+  use<TContextOut2>(
+    middleware: JobMiddleware<TContextOut, TContextOut2, TMeta>,
+  ): ScheduleBuilderWithMiddleware<TContext, TContextOut2, TMeta>;
 
   /**
    * Set name for inline handler
    */
   name(name: string): ScheduleBuilderNeedsInput<TContext, TContextOut, TMeta>;
+};
+
+/**
+ * Schedule builder after `.name()` with no middleware: wrap a job, or set
+ * the input of an inline handler. Has no `.handler()` until `.input()` runs.
+ */
+export type ScheduleBuilderNamed<TContext, TContextOut, TMeta extends QueueMeta> = {
+  /**
+   * Wrap an existing job under this schedule name
+   */
+  job<TInput>(job: JobDefinition<TInput, unknown, never>): ScheduleJobWrapper<TInput>;
+
+  /**
+   * Set input schema (unlocks `.handler()`)
+   */
+  input<TNewInput>(
+    schema: z.ZodType<TNewInput>,
+  ): ScheduleBuilderChain<TContext, TContextOut, TMeta, TNewInput, never>;
 };
 
 /**
@@ -389,11 +430,6 @@ export type FlowBuilderStart<TContext, TMeta extends QueueMeta> = {
  */
 export type FlowBuilderNeedsStep<TContext, TMeta extends QueueMeta, TInput> = {
   /**
-   * Add middleware to all steps
-   */
-  use(middleware: JobMiddleware<unknown, unknown, TMeta>): FlowBuilderNeedsStep<TContext, TMeta, TInput>;
-
-  /**
    * Add the first step to the flow (unlocks `.build()`)
    */
   step<const TId extends string, TStepInput>(
@@ -411,14 +447,10 @@ export type FlowBuilderNeedsStep<TContext, TMeta extends QueueMeta, TInput> = {
 };
 
 /**
- * Flow builder with input and at least one step - can add middleware, steps, and build
+ * Flow builder with input and at least one step - can add steps and build.
+ * Flows have no `.use()`: each step runs in its own job's worker, with that job's middleware.
  */
 export type FlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput> = {
-  /**
-   * Add middleware to all steps
-   */
-  use(middleware: JobMiddleware<unknown, unknown, TMeta>): FlowBuilderWithInput<TContext, TMeta, TInput>;
-
   /**
    * Add a step to the flow
    */

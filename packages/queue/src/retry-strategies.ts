@@ -177,14 +177,14 @@ export function createBackoffStrategy(
   switch (backoff.type) {
     case 'fixed': {
       const delay = backoff.delay;
-      return () => (maxDelay ? Math.min(delay, maxDelay) : delay);
+      return () => (maxDelay === undefined ? delay : Math.min(delay, maxDelay));
     }
 
     case 'exponential': {
       const { delay, base = 2 } = backoff;
       return attemptsMade => {
         const calculatedDelay = delay * Math.pow(base, attemptsMade);
-        return maxDelay ? Math.min(calculatedDelay, maxDelay) : calculatedDelay;
+        return maxDelay === undefined ? calculatedDelay : Math.min(calculatedDelay, maxDelay);
       };
     }
 
@@ -194,7 +194,7 @@ export function createBackoffStrategy(
         // Linear: delay * (attempt + 1)
         // +1 because attemptsMade is 0-indexed
         const calculatedDelay = delay * (attemptsMade + 1);
-        return maxDelay ? Math.min(calculatedDelay, maxDelay) : calculatedDelay;
+        return maxDelay === undefined ? calculatedDelay : Math.min(calculatedDelay, maxDelay);
       };
     }
 
@@ -203,7 +203,7 @@ export function createBackoffStrategy(
       return attemptsMade => {
         // Polynomial: delay * (attempt + 1) ^ power
         const calculatedDelay = delay * Math.pow(attemptsMade + 1, power);
-        return maxDelay ? Math.min(calculatedDelay, maxDelay) : calculatedDelay;
+        return maxDelay === undefined ? calculatedDelay : Math.min(calculatedDelay, maxDelay);
       };
     }
 
@@ -214,7 +214,7 @@ export function createBackoffStrategy(
         const baseDelay = delay * Math.pow(base, attemptsMade);
         const jitterMultiplier = 1 + Math.random() * jitter;
         const calculatedDelay = baseDelay * jitterMultiplier;
-        return maxDelay ? Math.min(calculatedDelay, maxDelay) : calculatedDelay;
+        return maxDelay === undefined ? calculatedDelay : Math.min(calculatedDelay, maxDelay);
       };
     }
 
@@ -233,7 +233,7 @@ export function createBackoffStrategy(
       return attemptsMade => {
         const fib = getFib(attemptsMade);
         const calculatedDelay = delay * fib;
-        return maxDelay ? Math.min(calculatedDelay, maxDelay) : calculatedDelay;
+        return maxDelay === undefined ? calculatedDelay : Math.min(calculatedDelay, maxDelay);
       };
     }
 
@@ -248,7 +248,7 @@ export function createBackoffStrategy(
         const max = previousDelay * multiplier;
         const calculatedDelay = min + Math.random() * (max - min);
         previousDelay = calculatedDelay;
-        return maxDelay ? Math.min(calculatedDelay, maxDelay) : calculatedDelay;
+        return maxDelay === undefined ? calculatedDelay : Math.min(calculatedDelay, maxDelay);
       };
     }
 
@@ -258,7 +258,7 @@ export function createBackoffStrategy(
         // Random between 0 and exponential_delay
         const exponentialDelay = delay * Math.pow(base, attemptsMade);
         const calculatedDelay = Math.random() * exponentialDelay;
-        return maxDelay ? Math.min(calculatedDelay, maxDelay) : calculatedDelay;
+        return maxDelay === undefined ? calculatedDelay : Math.min(calculatedDelay, maxDelay);
       };
     }
 
@@ -269,7 +269,7 @@ export function createBackoffStrategy(
         const exponentialDelay = delay * Math.pow(base, attemptsMade);
         const halfDelay = exponentialDelay / 2;
         const calculatedDelay = halfDelay + Math.random() * halfDelay;
-        return maxDelay ? Math.min(calculatedDelay, maxDelay) : calculatedDelay;
+        return maxDelay === undefined ? calculatedDelay : Math.min(calculatedDelay, maxDelay);
       };
     }
 
@@ -287,7 +287,7 @@ export function createBackoffStrategy(
           calculatedDelay = exponentialDelay * Math.pow(base, exponentialAttempt);
         }
 
-        return maxDelay ? Math.min(calculatedDelay, maxDelay) : calculatedDelay;
+        return maxDelay === undefined ? calculatedDelay : Math.min(calculatedDelay, maxDelay);
       };
     }
 
@@ -303,14 +303,14 @@ export function createBackoffStrategy(
         const tier = sortedTiers.find(t => attemptNumber <= t.maxAttempt);
 
         const calculatedDelay = tier?.delay ?? sortedTiers.at(-1)!.delay;
-        return maxDelay ? Math.min(calculatedDelay, maxDelay) : calculatedDelay;
+        return maxDelay === undefined ? calculatedDelay : Math.min(calculatedDelay, maxDelay);
       };
     }
 
     case 'custom': {
       return async (attemptsMade, type, err) => {
         const calculatedDelay = await backoff.strategy(attemptsMade, type, err);
-        return maxDelay ? Math.min(calculatedDelay, maxDelay) : calculatedDelay;
+        return maxDelay === undefined ? calculatedDelay : Math.min(calculatedDelay, maxDelay);
       };
     }
 

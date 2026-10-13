@@ -386,9 +386,9 @@ describe('createBackoffStrategy', () => {
       );
 
       expect(strategy(0)).toBe(2000);
-      expect(strategy(4)).toBe(2000);
-      expect(strategy(5)).toBe(4000);
-      expect(strategy(6)).toBe(5000); // Would be 8000, capped
+      expect(strategy(2)).toBe(1000); // 1000 * 2^0, first exponential attempt
+      expect(strategy(4)).toBe(4000); // 1000 * 2^2
+      expect(strategy(5)).toBe(5000); // Would be 8000, capped
     });
   });
 

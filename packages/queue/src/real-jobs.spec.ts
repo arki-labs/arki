@@ -1,6 +1,7 @@
 /**
  * Type contract: a job built with `q.job` can be wrapped by a schedule and
- * used as a flow step as-is, with no cast.
+ * used as a flow step as-is, with no cast, whatever its own middleware adds
+ * to the context: the job's own worker runs it in both cases.
  *
  * Built jobs carry a concrete output and context type. The builders used to
  * ask for `JobDefinition<TInput, unknown, unknown>`, which rejects every real
@@ -28,7 +29,7 @@ const sendEmail = q.job
   .input(z.object({ to: z.string() }))
   .handler((data, ctx) => Promise.resolve({ sentTo: data.to, by: ctx.userId }));
 
-/** A job whose middleware adds `db` to the context. Only its own worker runs that middleware. */
+/** A job whose middleware adds `db` to the context. Its own worker runs that middleware. */
 const withDb = q.middleware<JobContext<TestContext>, JobContext<TestContext> & { db: string }>(({ ctx, next }) =>
   next({ ctx: { ...ctx, db: 'pg' } }),
 );
@@ -50,16 +51,32 @@ describe('real jobs in schedules', () => {
     expect(schedule._type).toBe('schedule');
   });
 
-  it('rejects a job whose context the schedule does not provide', () => {
-    // The schedule worker runs the schedule's own middleware, not the job's,
-    // so a job that needs `db` from its middleware would not get it.
-    // @ts-expect-error -- the schedule context has no `db`
-    const schedule = q.schedule.cron('0 0 * * *').job(needsDb);
-    expect(schedule).toBeDefined();
+  it('accepts a job with its own middleware, with no schedule middleware', () => {
+    // A schedule only adds data to the job's queue; the job's own worker runs
+    // its own middleware (`withDb`), so the schedule needs none.
+    const schedule = q.schedule.cron('0 0 * * *').job(needsDb).data({ id: 'x' });
+    expect(schedule._type).toBe('schedule');
   });
 
-  it('accepts that job once the schedule adds the same context', () => {
-    const schedule = q.schedule.cron('0 0 * * *').use(withDb).job(needsDb).data({ id: 'x' });
+  it('rejects schedule middleware in front of a job', () => {
+    // A schedule that wraps a job has no middleware of its own.
+    // @ts-expect-error -- the builder after `.use()` has no `.job()`
+    expect(() => q.schedule.cron('0 0 * * *').use(withDb).job(needsDb)).toThrow();
+  });
+
+  it('rejects schedule middleware in front of a named job schedule', () => {
+    // @ts-expect-error -- `.use().name()` leads to an inline handler only, never `.job()`
+    expect(() => q.schedule.cron('0 0 * * *').use(withDb).name('real-jobs-named').job(needsDb)).toThrow();
+  });
+
+  it('names a schedule that wraps a job', () => {
+    const schedule = q.schedule.cron('0 0 * * *').name('real-jobs-nightly').job(sendEmail).data({ to: 'a@b.c' });
+    expect(schedule._internal).toMatchObject({ name: 'real-jobs-nightly' });
+  });
+
+  it('rejects named schedule data that does not match the job input', () => {
+    // @ts-expect-error -- `to` must be a string, also after `.name()`
+    const schedule = q.schedule.cron('0 0 * * *').name('real-jobs-bad').job(sendEmail).data({ to: 42 });
     expect(schedule._type).toBe('schedule');
   });
 });

@@ -6,7 +6,7 @@
  * - Step dependencies and execution order
  * - Parallel step execution
  * - Data flow between steps
- * - Middleware integration
+ * - Step jobs keep their own middleware (flows have no `.use()`)
  * - Dependency validation
  * - Error handling
  */
@@ -19,13 +19,7 @@ import { z } from '@arki/contracts';
 
 import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { JobContext } from './types/job.ts';
-import type { JobMiddleware } from './types/middleware.ts';
-import type { QueueMeta } from './types/queue.ts';
 import { initQueue } from './init.ts';
-
-// Helper to cast middleware to expected type for flow middleware
-const asFlowMiddleware = (middleware: JobMiddleware<any, any, any>): JobMiddleware<unknown, unknown, QueueMeta> =>
-  middleware as any;
 
 // Test context type
 type TestContext = {
@@ -71,17 +65,17 @@ describe('Basic Flow Creation', () => {
     const q = initQueue.context<TestContext>().create();
 
     const step1Job = q.job
-      .name('test:flow-step1')
+      .name('test-flow-step1')
       .input(z.object({ value: z.number() }))
       .handler(async data => ({ result: data.value * 2 }));
 
     const step2Job = q.job
-      .name('test:flow-step2')
+      .name('test-flow-step2')
       .input(z.object({ value: z.number() }))
       .handler(async data => ({ result: data.value + 10 }));
 
     const flow = q.flow
-      .name('test:simple-flow')
+      .name('test-simple-flow')
       .input(z.object({ initialValue: z.number() }))
       .step('step1', {
         job: step1Job,
@@ -97,7 +91,7 @@ describe('Basic Flow Creation', () => {
     const internal = flow._internal as InternalFlowDefinition;
 
     expect(flow._type).toBe('flow');
-    expect(internal.name).toBe('test:simple-flow');
+    expect(internal.name).toBe('test-simple-flow');
     expect(internal.steps).toHaveLength(2);
     expect(internal.steps[0]!.id).toBe('step1');
     expect(internal.steps[1]!.id).toBe('step2');
@@ -108,22 +102,22 @@ describe('Basic Flow Creation', () => {
     const q = initQueue.context<TestContext>().create();
 
     const jobA = q.job
-      .name('test:parallel-a')
+      .name('test-parallel-a')
       .input(z.object({ data: z.string() }))
       .handler(async data => ({ result: `A:${data.data}` }));
 
     const jobB = q.job
-      .name('test:parallel-b')
+      .name('test-parallel-b')
       .input(z.object({ data: z.string() }))
       .handler(async data => ({ result: `B:${data.data}` }));
 
     const jobC = q.job
-      .name('test:parallel-c')
+      .name('test-parallel-c')
       .input(z.object({ data: z.string() }))
       .handler(async data => ({ result: `C:${data.data}` }));
 
     const flow = q.flow
-      .name('test:parallel-flow')
+      .name('test-parallel-flow')
       .input(z.object({ data: z.string() }))
       .step('stepA', {
         job: jobA,
@@ -151,12 +145,12 @@ describe('Basic Flow Creation', () => {
     const q = initQueue.context<TestContext>().create();
 
     const job = q.job
-      .name('test:multi-dep-job')
+      .name('test-multi-dep-job')
       .input(z.object({ value: z.number() }))
       .handler(async data => ({ result: data.value }));
 
     const flow = q.flow
-      .name('test:multi-dep-flow')
+      .name('test-multi-dep-flow')
       .input(z.object({ value: z.number() }))
       .step('step1', {
         job: job,
@@ -183,7 +177,7 @@ describe('Basic Flow Creation', () => {
 
     expect(() => {
       q.flow
-        .name('test:no-steps')
+        .name('test-no-steps')
         .input(z.object({ value: z.number() }))
         .build();
     }).toThrow('At least one step is required');
@@ -192,23 +186,11 @@ describe('Basic Flow Creation', () => {
   it('should throw error if flow has no input schema', () => {
     const q = initQueue.context<TestContext>().create();
 
-    const job = q.job
-      .name('test:some-job')
-      .input(z.object({ value: z.number() }))
-      .handler(async () => ({ result: 1 }));
-
-    expect(() => {
-      // Test that build() fails without input schema
-      // We need to get the builder to a state where it has steps but no input
-      // This is tricky because the type system prevents it, but we can test the runtime validation
-      const builder = q.flow.name('test:no-input') as any;
-      builder
-        .step('step1', {
-          job: job,
-          data: () => ({ value: 1 }),
-        })
-        .build();
-    }).toThrow('Input schema is required');
+    // A flow with no input cannot add steps at all: the builder after .name()
+    // only offers .input(), at runtime too, so .build() is unreachable.
+    const named = q.flow.name('test-no-input');
+    expect(Reflect.get(named, 'step')).toBeUndefined();
+    expect(Reflect.get(named, 'build')).toBeUndefined();
   });
 });
 
@@ -221,13 +203,13 @@ describe('Dependency Validation', () => {
     const q = initQueue.context<TestContext>().create();
 
     const job = q.job
-      .name('test:validation-job')
+      .name('test-validation-job')
       .input(z.object({ value: z.number() }))
       .handler(async () => ({ result: 1 }));
 
     expect(() => {
       q.flow
-        .name('test:invalid-dep')
+        .name('test-invalid-dep')
         .input(z.object({ value: z.number() }))
         .step('step1', {
           job: job,
@@ -246,7 +228,7 @@ describe('Dependency Validation', () => {
     const q = initQueue.context<TestContext>().create();
 
     const _job = q.job
-      .name('test:circular-job')
+      .name('test-circular-job')
       .input(z.object({ value: z.number() }))
       .handler(async () => ({ result: 1 }));
 
@@ -260,12 +242,12 @@ describe('Dependency Validation', () => {
     const q = initQueue.context<TestContext>().create();
 
     const job = q.job
-      .name('test:chain-job')
+      .name('test-chain-job')
       .input(z.object({ value: z.number() }))
       .handler(async () => ({ result: 1 }));
 
     const flow = q.flow
-      .name('test:valid-chain')
+      .name('test-valid-chain')
       .input(z.object({ value: z.number() }))
       .step('step1', {
         job: job,
@@ -305,7 +287,7 @@ describe('Flow Execution', () => {
     const executionOrder: string[] = [];
 
     const step1Job = q.job
-      .name('test:ordered-step1')
+      .name('test-ordered-step1')
       .input(z.object({ id: z.string() }))
       .handler(async data => {
         executionOrder.push('step1');
@@ -313,7 +295,7 @@ describe('Flow Execution', () => {
       });
 
     const step2Job = q.job
-      .name('test:ordered-step2')
+      .name('test-ordered-step2')
       .input(z.object({ id: z.string() }))
       .handler(async data => {
         executionOrder.push('step2');
@@ -321,7 +303,7 @@ describe('Flow Execution', () => {
       });
 
     const step3Job = q.job
-      .name('test:ordered-step3')
+      .name('test-ordered-step3')
       .input(z.object({ id: z.string() }))
       .handler(async data => {
         executionOrder.push('step3');
@@ -329,7 +311,7 @@ describe('Flow Execution', () => {
       });
 
     const flow = q.flow
-      .name('test:ordered-flow')
+      .name('test-ordered-flow')
       .input(z.object({ flowId: z.string() }))
       .step('step1', {
         job: step1Job,
@@ -373,7 +355,7 @@ describe('Flow Execution', () => {
     const executionTimes: Record<string, number> = {};
 
     const stepJobA = q.job
-      .name('test:parallel-exec-a')
+      .name('test-parallel-exec-a')
       .input(z.object({ delay: z.number() }))
       .handler(async data => {
         executionTimes['stepA'] = Date.now();
@@ -382,7 +364,7 @@ describe('Flow Execution', () => {
       });
 
     const stepJobB = q.job
-      .name('test:parallel-exec-b')
+      .name('test-parallel-exec-b')
       .input(z.object({ delay: z.number() }))
       .handler(async data => {
         executionTimes['stepB'] = Date.now();
@@ -391,7 +373,7 @@ describe('Flow Execution', () => {
       });
 
     const flow = q.flow
-      .name('test:parallel-exec-flow')
+      .name('test-parallel-exec-flow')
       .input(z.object({ value: z.number() }))
       .step('stepA', {
         job: stepJobA,
@@ -418,17 +400,17 @@ describe('Data Flow Between Steps', () => {
     const q = initQueue.context<TestContext>().create();
 
     const step1Job = q.job
-      .name('test:transform-step1')
+      .name('test-transform-step1')
       .input(z.object({ value: z.number() }))
       .handler(async data => ({ doubled: data.value * 2 }));
 
     const step2Job = q.job
-      .name('test:transform-step2')
+      .name('test-transform-step2')
       .input(z.object({ value: z.number(), extra: z.string() }))
       .handler(async data => ({ result: `${data.value}-${data.extra}` }));
 
     const flow = q.flow
-      .name('test:transform-flow')
+      .name('test-transform-flow')
       .input(z.object({ initialValue: z.number() }))
       .step('double', {
         job: step1Job,
@@ -453,12 +435,12 @@ describe('Data Flow Between Steps', () => {
     const q = initQueue.context<TestContext>().create();
 
     const validateUserJob = q.job
-      .name('test:validate-user')
+      .name('test-validate-user')
       .input(z.object({ userId: z.string(), email: z.string() }))
       .handler(async data => ({ valid: true, userId: data.userId }));
 
     const createOrderJob = q.job
-      .name('test:create-order')
+      .name('test-create-order')
       .input(
         z.object({
           orderId: z.string(),
@@ -469,7 +451,7 @@ describe('Data Flow Between Steps', () => {
       .handler(async data => ({ orderId: data.orderId, created: true }));
 
     const flow = q.flow
-      .name('test:complex-transform')
+      .name('test-complex-transform')
       .input(
         z.object({
           user: z.object({ id: z.string(), email: z.string() }),
@@ -505,72 +487,34 @@ describe('Data Flow Between Steps', () => {
 // ============================================
 
 describe('Middleware with Flows', () => {
-  it('should apply middleware to all flow steps', () => {
+  it('has no flow .use(): each step runs with its own job middleware', () => {
     const q = initQueue.context<TestContext>().create();
 
     const loggingMiddleware = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts => {
       return opts.next({ ctx: opts.ctx });
     });
 
+    // The middleware belongs on the step job: its worker runs it for that step.
     const job = q.job
-      .name('test:flow-middleware-job')
+      .use(loggingMiddleware)
+      .name('test-flow-middleware-job')
       .input(z.object({ value: z.number() }))
       .handler(async () => ({ result: 1 }));
 
     const flow = q.flow
-      .name('test:flow-with-middleware')
+      .name('test-flow-with-middleware')
       .input(z.object({ value: z.number() }))
-      .use(asFlowMiddleware(loggingMiddleware))
       .step('step1', {
         job: job,
         data: input => ({ value: input.value }),
-      })
-      .step('step2', {
-        job: job,
-        data: input => ({ value: input.value }),
-      })
-      .build();
+      });
 
-    const internal = flow._internal as InternalFlowDefinition;
+    // @ts-expect-error -- a flow has no middleware of its own
+    expect(flow.use).toBeUndefined();
 
-    expect(internal.middlewares).toHaveLength(1);
-  });
-
-  it('should chain multiple middleware in flows', () => {
-    const q = initQueue.context<TestContext>().create();
-
-    const middleware1 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts =>
-      opts.next({ ctx: opts.ctx }),
-    );
-
-    const middleware2 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts =>
-      opts.next({ ctx: opts.ctx }),
-    );
-
-    const middleware3 = q.middleware<JobContext<TestContext>, JobContext<TestContext>>(opts =>
-      opts.next({ ctx: opts.ctx }),
-    );
-
-    const job = q.job
-      .name('test:chain-middleware-job')
-      .input(z.object({ value: z.number() }))
-      .handler(async () => ({ result: 1 }));
-
-    const flow = q.flow
-      .name('test:chain-middleware-flow')
-      .input(z.object({ value: z.number() }))
-      .use(asFlowMiddleware(middleware1))
-      .use(asFlowMiddleware(middleware2))
-      .use(asFlowMiddleware(middleware3))
-      .step('step1', {
-        job: job,
-        data: input => ({ value: input.value }),
-      })
-      .build();
-
-    const internal = flow._internal as InternalFlowDefinition;
-
-    expect(internal.middlewares).toHaveLength(3);
+    const internal = flow.build()._internal as InternalFlowDefinition;
+    expect(internal).not.toHaveProperty('middlewares');
+    expect(internal.steps[0]!.job._internal.middlewares).toHaveLength(1);
   });
 });
 
@@ -583,27 +527,27 @@ describe('Real-World Flow Scenarios', () => {
     const q = initQueue.context<TestContext>().create();
 
     const validateOrderJob = q.job
-      .name('test:validate-order')
+      .name('test-validate-order')
       .input(z.object({ orderId: z.string() }))
       .handler(async data => ({ orderId: data.orderId, valid: true }));
 
     const processPaymentJob = q.job
-      .name('test:process-payment')
+      .name('test-process-payment')
       .input(z.object({ orderId: z.string(), amount: z.number() }))
       .handler(async data => ({ orderId: data.orderId, paid: true }));
 
     const updateInventoryJob = q.job
-      .name('test:update-inventory')
+      .name('test-update-inventory')
       .input(z.object({ orderId: z.string(), items: z.array(z.string()) }))
       .handler(async data => ({ orderId: data.orderId, updated: true }));
 
     const sendConfirmationJob = q.job
-      .name('test:send-confirmation')
+      .name('test-send-confirmation')
       .input(z.object({ orderId: z.string(), email: z.string() }))
       .handler(async data => ({ orderId: data.orderId, sent: true }));
 
     const flow = q.flow
-      .name('test:order-processing')
+      .name('test-order-processing')
       .input(
         z.object({
           orderId: z.string(),
@@ -635,7 +579,7 @@ describe('Real-World Flow Scenarios', () => {
 
     const internal = flow._internal as InternalFlowDefinition;
 
-    expect(internal.name).toBe('test:order-processing');
+    expect(internal.name).toBe('test-order-processing');
     expect(internal.steps).toHaveLength(4);
     expect(internal.steps[3]!.dependsOn).toEqual(['payment', 'inventory']);
   });
@@ -644,27 +588,27 @@ describe('Real-World Flow Scenarios', () => {
     const q = initQueue.context<TestContext>().create();
 
     const fetchDataJob = q.job
-      .name('test:fetch-data')
+      .name('test-fetch-data')
       .input(z.object({ source: z.string() }))
       .handler(async () => ({ data: 'fetched' }));
 
     const transformDataJob = q.job
-      .name('test:transform-data')
+      .name('test-transform-data')
       .input(z.object({ data: z.string() }))
       .handler(async () => ({ data: 'transformed' }));
 
     const validateDataJob = q.job
-      .name('test:validate-data')
+      .name('test-validate-data')
       .input(z.object({ data: z.string() }))
       .handler(async () => ({ valid: true }));
 
     const storeDataJob = q.job
-      .name('test:store-data')
+      .name('test-store-data')
       .input(z.object({ data: z.string() }))
       .handler(async () => ({ stored: true }));
 
     const flow = q.flow
-      .name('test:data-pipeline')
+      .name('test-data-pipeline')
       .input(z.object({ dataSource: z.string() }))
       .step('fetch', {
         job: fetchDataJob,
@@ -696,32 +640,32 @@ describe('Real-World Flow Scenarios', () => {
     const q = initQueue.context<TestContext>().create();
 
     const prepareJob = q.job
-      .name('test:prepare')
+      .name('test-prepare')
       .input(z.object({ id: z.string() }))
       .handler(async () => ({ prepared: true }));
 
     const processAJob = q.job
-      .name('test:process-a')
+      .name('test-process-a')
       .input(z.object({ data: z.string() }))
       .handler(async () => ({ resultA: 'done' }));
 
     const processBJob = q.job
-      .name('test:process-b')
+      .name('test-process-b')
       .input(z.object({ data: z.string() }))
       .handler(async () => ({ resultB: 'done' }));
 
     const processCJob = q.job
-      .name('test:process-c')
+      .name('test-process-c')
       .input(z.object({ data: z.string() }))
       .handler(async () => ({ resultC: 'done' }));
 
     const aggregateJob = q.job
-      .name('test:aggregate')
+      .name('test-aggregate')
       .input(z.object({ id: z.string() }))
       .handler(async () => ({ aggregated: true }));
 
     const flow = q.flow
-      .name('test:fan-out-fan-in')
+      .name('test-fan-out-fan-in')
       .input(z.object({ requestId: z.string() }))
       .step('prepare', {
         job: prepareJob,
@@ -767,12 +711,12 @@ describe('Flow Configuration', () => {
     const q = initQueue.context<TestContext>().create();
 
     const job = q.job
-      .name('test:queue-step')
+      .name('test-queue-step')
       .input(z.object({ value: z.number() }))
       .handler(async () => ({ result: 1 }));
 
     const flow = q.flow
-      .name('test:custom-queues')
+      .name('test-custom-queues')
       .input(z.object({ value: z.number() }))
       .step('highPriority', {
         job: job,
@@ -797,12 +741,12 @@ describe('Flow Configuration', () => {
     const q = initQueue.context<TestContext>().create();
 
     const job = q.job
-      .name('test:opts-step')
+      .name('test-opts-step')
       .input(z.object({ value: z.number() }))
       .handler(async () => ({ result: 1 }));
 
     const flow = q.flow
-      .name('test:step-opts')
+      .name('test-step-opts')
       .input(z.object({ value: z.number() }))
       .step('step1', {
         job: job,

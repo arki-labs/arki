@@ -18,11 +18,11 @@ import { PgBoss, getConstructionPlans } from 'pg-boss';
 
 import type { InternalScheduleDefinition } from '../schedule-builder.ts';
 import type { QueueInstance } from '../types/builder.ts';
-import type { JobDefinition } from '../types/job.ts';
+import type { JobContext, JobDefinition } from '../types/job.ts';
 import type { ScheduleDefinition } from '../types/builder.ts';
-import type { QueueMeta } from '../types/queue.ts';
 import { executeMiddlewareChain } from '../middleware.ts';
 import { debugJob, debugRegister, debugSchedule, debugWorker } from '../debug.ts';
+import { duplicateScheduleError } from '../errors.ts';
 import { buildPgBossAdapter } from './adapter.ts';
 
 const POLL_INTERVAL_SECONDS = 0.5;
@@ -83,7 +83,8 @@ export function createRuntimeLocalQueueInstance<TContext>(
       ) => {
         if (!boss) throw new Error(`Queue not started — call queue.start() first`);
         const id = await boss.send(jobName, data as object, {
-          priority: opts?.priority,
+          // pg-boss rejects `priority: undefined` ("priority must be an integer").
+          ...(opts?.priority === undefined ? {} : { priority: opts.priority }),
           startAfter: opts?.delay ? new Date(Date.now() + opts.delay) : undefined,
           singletonKey: opts?.jobId,
         });
@@ -109,7 +110,7 @@ export function createRuntimeLocalQueueInstance<TContext>(
 
   function registerScheduleDef(def: ScheduleDefinition): void {
     const internal = def._internal as InternalScheduleDefinition;
-    if (scheduleDefs.has(internal.name)) return;
+    if (scheduleDefs.has(internal.name)) throw duplicateScheduleError(internal.name);
 
     if (internal.type === 'interval') {
       console.warn(
@@ -127,10 +128,9 @@ export function createRuntimeLocalQueueInstance<TContext>(
       return;
     }
 
-    // If the schedule wraps an existing job, ensure the job is registered.
-    if (internal.jobVariant.type === 'existing') {
-      registerJobDef(internal.jobVariant.job as JobDefinition<unknown, unknown, unknown>);
-    }
+    // A schedule sends to its job's own queue (an inline schedule's job is
+    // anonymous, named after the schedule); ensure that job has a worker.
+    registerJobDef(internal.job);
 
     scheduleDefs.set(internal.name, internal);
     debugSchedule('[runtime-local] registered schedule: %s (%s)', internal.name, internal.value);
@@ -184,21 +184,18 @@ export function createRuntimeLocalQueueInstance<TContext>(
 
     debugJob('[runtime-local] [%s] executing handler (job %s)', internal.name, shim.id);
 
-    const finalContext = await executeMiddlewareChain<typeof jobContext, typeof jobContext>(
+    // Same onion as the BullMQ path: the handler runs inside every middleware's next().
+    // The handler signature in @arki/queue's type system expects JobContext<TDeps>
+    // (BullMQ-shaped). The runtime-local context is structurally equivalent for
+    // everything handlers actually access (ctx.job.id, ctx.job.name, updateProgress,
+    // log, plus the user's createContext() deps), so the chain hands it over as one.
+    await executeMiddlewareChain<typeof jobContext, JobContext<unknown>, unknown>(
       internal.middlewares,
       jobContext,
       validatedData,
       shim as unknown as BullMQJob,
-      {} as QueueMeta,
-    );
-
-    // The handler signature in @arki/queue's type system expects JobContext<TDeps>
-    // (BullMQ-shaped). The runtime-local context is structurally equivalent for
-    // everything handlers actually access (ctx.job.id, ctx.job.name, updateProgress,
-    // log, plus the user's createContext() deps). Cast through unknown to bridge them.
-    await (internal.handler as (data: unknown, ctx: unknown) => Promise<unknown>)(
-      validatedData,
-      finalContext,
+      {},
+      ctx => internal.handler(validatedData, ctx),
     );
   }
 
@@ -216,9 +213,12 @@ export function createRuntimeLocalQueueInstance<TContext>(
     // Pre-run the schema DDL via the multi-statement runner before PgBoss is constructed.
     // This is required because PgBoss's bootstrap is a multi-statement block that only
     // the Simple Query Protocol can execute (see adapter.ts for full explanation).
-    const constructionPlan = getConstructionPlans(schema);
-    const runSql = pglite.exec.bind(pglite) as typeof pglite.exec;
-    await runSql(constructionPlan);
+    // Only on a fresh database: the plan is not idempotent ("type job_state
+    // already exists"), so a restart on a persisted PGlite would fail here.
+    const installed = await pglite.query<{ name: string | null }>('select to_regclass($1)::text as name', [`${schema}.version`]);
+    if (!installed.rows[0]?.name) {
+      await pglite.exec(getConstructionPlans(schema));
+    }
 
     boss = new PgBoss({
       db: buildPgBossAdapter(pglite),
@@ -250,47 +250,36 @@ export function createRuntimeLocalQueueInstance<TContext>(
       debugWorker('[runtime-local] worker started for: %s', name);
     }
 
-    // Register cron schedules. boss.schedule creates the repeating job entry;
-    // boss.work above handles consumption when the schedule fires.
+    // Register cron schedules. A schedule is a trigger: boss.schedule sends its
+    // data to the job's own queue, keyed by the schedule name so several
+    // schedules can target one job; the job's boss.work() above runs it.
     for (const [name, internal] of scheduleDefs.entries()) {
       const pattern = internal.value as string;
-      const scheduleData = internal.jobVariant.type === 'existing' ? internal.jobVariant.data : {};
+      const jobName = internal.job._internal.name;
 
-      // Create the queue and worker for the schedule's handler.
-      await boss.createQueue(name);
-      await boss.schedule(name, pattern, scheduleData as object, {
+      await boss.schedule(jobName, pattern, internal.data as object, {
         tz: internal.options?.timezone,
+        key: name,
       });
 
-      // Determine handler — either the wrapped job's handler or the inline one.
-      const scheduleHandler =
-        internal.jobVariant.type === 'existing'
-          ? (internal.jobVariant.job as JobDefinition<unknown, unknown, unknown>)
-          : null;
+      debugSchedule('[runtime-local] schedule registered: %s -> %s (cron: %s)', name, jobName, pattern);
+    }
 
-      await boss.work<unknown>(
-        name,
-        { pollingIntervalSeconds: POLL_INTERVAL_SECONDS, batchSize: 1 },
-        async ([pgBossJob]) => {
-          if (!pgBossJob) return;
-          if (scheduleHandler) {
-            await runJobHandler(scheduleHandler, pgBossJob);
-          } else if (internal.jobVariant.type === 'inline') {
-            // Inline handler path
-            const iv = internal.jobVariant;
-            const validatedData = iv.inputSchema.parse(pgBossJob.data);
-            const baseContext = await createContext();
-            const shim = makeJobShim(pgBossJob.id, pgBossJob.name, pgBossJob.data);
-            const jobContext = { ...(baseContext as object), updateProgress: shim.updateProgress, log: shim.log, job: shim };
-            await (iv.handler as (data: unknown, ctx: unknown) => Promise<unknown>)(
-              validatedData,
-              jobContext,
-            );
-          }
-        },
-      );
-
-      debugSchedule('[runtime-local] schedule registered: %s (cron: %s)', name, pattern);
+    // Drop schedules no longer in code. Each schedule is keyed by its name on
+    // its job's queue, so a renamed or deleted one leaves a keyed entry the
+    // job's worker would keep running. Unkeyed entries are not ours: leave them.
+    const liveKeys = new Map<string, Set<string>>();
+    for (const [name, internal] of scheduleDefs.entries()) {
+      const jobName = internal.job._internal.name;
+      liveKeys.set(jobName, (liveKeys.get(jobName) ?? new Set<string>()).add(name));
+    }
+    for (const jobName of jobDefs.keys()) {
+      for (const stale of await boss.getSchedules(jobName)) {
+        if (stale.key !== '' && !liveKeys.get(jobName)?.has(stale.key)) {
+          debugSchedule('[runtime-local] removing schedule no longer registered: %s (key %s)', jobName, stale.key);
+          await boss.unschedule(jobName, stale.key);
+        }
+      }
     }
 
     console.log('✓ Queue infrastructure started (runtime-local)');

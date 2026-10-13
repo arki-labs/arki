@@ -6,14 +6,13 @@
  * Flows define multi-step workflows where steps can depend on each other:
  * - Each step runs a job with data derived from flow input
  * - Steps can specify dependencies (must run after other steps complete)
- * - Middleware applies to all steps in the flow
+ * - Each step runs in its own job's worker, with that job's middleware (a flow has no `.use()`)
  *
  * @example
  * ```typescript
  * const orderFlow = q.flow
  *   .name('orders:process')
  *   .input(z.object({ orderId: z.string() }))
- *   .use(loggingMiddleware())
  *   .step('validate', {
  *     job: validateJob,
  *     data: input => ({ orderId: input.orderId }),
@@ -33,7 +32,6 @@ import { debugBuilder } from './debug.ts';
 import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
 import type { FlowBuilderNeedsStep, FlowBuilderStart, FlowBuilderWithInput, FlowDefinition } from './types/builder.ts';
 import type { AnyJobDefinition, JobDefinition } from './types/job.ts';
-import type { JobMiddleware } from './types/middleware.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
 
 /**
@@ -73,11 +71,6 @@ export type InternalFlowDefinition<TInput = unknown, TJob = JobDefinition<unknow
   steps: readonly FlowStepInternal<TJob>[];
 
   /**
-   * Middleware chain applied to all steps
-   */
-  middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[];
-
-  /**
    * Queue configuration
    */
   config: QueueConfig;
@@ -90,7 +83,6 @@ type FlowBuilderState<TInput> = {
   config: QueueConfig;
   name: string;
   inputSchema?: z.ZodType<TInput>;
-  middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[];
   steps: FlowStepInternal<AnyJobDefinition>[];
 };
 
@@ -197,7 +189,6 @@ export function createFlowBuilder<TContext, TMeta extends QueueMeta>(
         config,
         name,
         inputSchema: schema,
-        middlewares: [],
         steps: [],
       });
     },
@@ -212,15 +203,6 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
   state: FlowBuilderState<TInput>,
 ): FlowBuilderWithInput<TContext, TMeta, TInput> {
   return {
-    use(middleware: JobMiddleware<unknown, unknown, TMeta>) {
-      debugBuilder('[%s] Adding middleware to flow (total: %d)', state.name, state.middlewares.length + 1);
-
-      return createFlowBuilderWithInput<TContext, TMeta, TInput>({
-        ...state,
-        middlewares: [...state.middlewares, middleware as JobMiddleware<unknown, unknown, QueueMeta>],
-      });
-    },
-
     step<const TId extends string, TStepInput>(
       id: TId,
       config: {
@@ -272,10 +254,9 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
       }
 
       debugBuilder(
-        '[%s] Building flow definition with %d steps and %d middleware',
+        '[%s] Building flow definition with %d steps',
         state.name,
         state.steps.length,
-        state.middlewares.length,
       );
 
       // Validate step dependencies
@@ -285,7 +266,6 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
         name: state.name,
         inputSchema: state.inputSchema,
         steps: state.steps,
-        middlewares: state.middlewares,
         config: state.config,
       };
 

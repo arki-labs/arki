@@ -100,6 +100,27 @@ describe('schedule builder guards', () => {
     expect(q.schedule.daily('09:00').handler).toBeUndefined();
   });
 
+  it('.use() then .job() is a compile error and throws scheduleMiddlewareWithJob', () => {
+    const withMiddleware = q.schedule.everyMinutes(5).use(q.middleware(({ next }) => next()));
+    const error = thrown(() =>
+      // @ts-expect-error -- a schedule that wraps a job has no middleware of its own
+      withMiddleware.job(stepJob),
+    );
+    expectCode(error, QUEUE_DEFINITION_ERROR_CODES.scheduleMiddlewareWithJob);
+    expect(error).toHaveProperty('message', expect.stringContaining('Remove .use() before .job(guards:step)'));
+  });
+
+  it('untyped .use().job() throws scheduleMiddlewareWithJob', () => {
+    // Plain JS: the types are gone, the definition-time throw remains.
+    const untyped: Record<string, unknown> = q.schedule.everyMinutes(5).use(q.middleware(({ next }) => next()));
+    const job = untyped['job'];
+    if (typeof job !== 'function') throw new Error('Expected the runtime builder to still carry .job()');
+    expectCode(
+      thrown(() => Reflect.apply(job, untyped, [stepJob])),
+      QUEUE_DEFINITION_ERROR_CODES.scheduleMiddlewareWithJob,
+    );
+  });
+
   it('builds once .name() and .input() ran, with middleware before .name()', () => {
     const schedule = q.schedule
       .interval(60_000)
@@ -127,16 +148,23 @@ describe('flow builder guards', () => {
     expect(q.flow.name('guards:flow').build).toBeUndefined();
   });
 
-  it('builds once a step exists, with .use() before or after the step', () => {
+  it('builds once a step exists', () => {
     const flow = q.flow
       .name('guards:flow-ok')
       .input(z.object({}))
-      .use(q.middleware(({ next }) => next()))
       .step('first', { job: stepJob, data: () => ({}) })
-      .use(q.middleware(({ next }) => next()))
       .build();
 
     expect(flow._type).toBe('flow');
+  });
+
+  it('has no .use(): each step runs with its own job middleware', () => {
+    const flow = q.flow.name('guards:flow-no-use').input(z.object({}));
+    // @ts-expect-error -- a flow has no middleware of its own
+    expect(flow.use).toBeUndefined();
+    const withStep = flow.step('first', { job: stepJob, data: () => ({}) });
+    // @ts-expect-error -- not after a step either
+    expect(withStep.use).toBeUndefined();
   });
 
   it('an unknown step id throws unknownStepDependency (runtime only)', () => {

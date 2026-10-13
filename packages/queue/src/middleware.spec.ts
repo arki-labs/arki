@@ -2,12 +2,13 @@
  * Integration tests for middleware execution chain
  *
  * Tests the complete middleware functionality including:
- * - Middleware execution order
+ * - Middleware execution order (onion: the handler runs inside every next())
  * - Context transformation
  * - Async middleware operations
  * - Error handling
  * - Real-world middleware patterns
  */
+import type { Job as BullMQJob, Queue } from 'bullmq';
 import type { StartedTestContainer } from 'testcontainers';
 import { GenericContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -79,7 +80,7 @@ describe('Basic Middleware Execution', () => {
 
     const job = q.job
       .use(middleware)
-      .name('test:single-middleware')
+      .name('test-single-middleware')
       .input(z.object({ value: z.number() }))
       .handler(async data => {
         executionLog.push('handler-executed');
@@ -140,7 +141,7 @@ describe('Basic Middleware Execution', () => {
       .use(middleware1)
       .use(middleware2)
       .use(middleware3)
-      .name('test:chain-order')
+      .name('test-chain-order')
       .input(z.object({ value: z.number() }))
       .handler(async () => {
         executionOrder.push('handler');
@@ -188,7 +189,7 @@ describe('Basic Middleware Execution', () => {
     const job = q.job
       .use(shortCircuitMiddleware)
       .use(laterMiddleware)
-      .name('test:short-circuit')
+      .name('test-short-circuit')
       .input(z.object({ value: z.number() }))
       .handler(async () => {
         executionLog.push('handler');
@@ -244,7 +245,7 @@ describe('Context Transformation', () => {
 
     const job = q.job
       .use(enrichmentMiddleware)
-      .name('test:context-transform')
+      .name('test-context-transform')
       .input(z.object({ value: z.number() }))
       .handler(async (data, ctx) => {
         capturedRequestId = ctx.requestId;
@@ -303,7 +304,7 @@ describe('Context Transformation', () => {
       .use(middleware1)
       .use(middleware2)
       .use(middleware3)
-      .name('test:chain-transform')
+      .name('test-chain-transform')
       .input(z.object({ value: z.number() }))
       .handler(async (data, ctx) => {
         capturedContext = ctx;
@@ -349,7 +350,7 @@ describe('Context Transformation', () => {
 
     const job = q.job
       .use(middleware)
-      .name('test:original-context')
+      .name('test-original-context')
       .input(z.object({ value: z.number() }))
       .handler(async () => ({ result: 1 }));
 
@@ -409,7 +410,7 @@ describe('Async Middleware Operations', () => {
 
     const job = q.job
       .use(asyncMiddleware)
-      .name('test:async-middleware')
+      .name('test-async-middleware')
       .input(z.object({ value: z.number() }))
       .handler(async (data, ctx) => {
         capturedData = { apiData: ctx.apiData };
@@ -465,7 +466,7 @@ describe('Async Middleware Operations', () => {
     const job = q.job
       .use(asyncMiddleware1)
       .use(asyncMiddleware2)
-      .name('test:async-sequence')
+      .name('test-async-sequence')
       .input(z.object({ value: z.number() }))
       .handler(async () => {
         executionOrder.push('handler');
@@ -545,7 +546,7 @@ describe('Real-World Middleware Patterns', () => {
 
     const job = q.job
       .use(loggingMiddleware)
-      .name('test:logging-middleware')
+      .name('test-logging-middleware')
       .input(z.object({ taskId: z.string() }))
       .handler(async data => {
         return { taskId: data.taskId, completed: true };
@@ -596,7 +597,7 @@ describe('Real-World Middleware Patterns', () => {
 
     const job = q.job
       .use(timingMiddleware)
-      .name('test:timing-middleware')
+      .name('test-timing-middleware')
       .input(z.object({ delay: z.number() }))
       .handler(async data => {
         await new Promise(resolve => setTimeout(resolve, data.delay));
@@ -644,7 +645,7 @@ describe('Real-World Middleware Patterns', () => {
 
     const job = q.job
       .use(authMiddleware)
-      .name('test:auth-middleware')
+      .name('test-auth-middleware')
       .input(z.object({ action: z.string() }))
       .handler(async (data, ctx) => {
         wasAuthenticated = ctx.authenticated;
@@ -703,7 +704,7 @@ describe('Real-World Middleware Patterns', () => {
 
     const job = q.job
       .use(validationMiddleware)
-      .name('test:validation-middleware')
+      .name('test-validation-middleware')
       .input(z.object({ value: z.number() }))
       .handler(async data => {
         processedValues.push(data.value);
@@ -752,7 +753,7 @@ describe('Error Handling in Middleware', () => {
 
     const job = q.job
       .use(errorMiddleware)
-      .name('test:error-middleware')
+      .name('test-error-middleware')
       .input(z.object({ value: z.number() }))
       .options({
         retry: { attempts: 1, backoff: { type: 'fixed', delay: 100 } },
@@ -802,7 +803,7 @@ describe('Error Handling in Middleware', () => {
 
     const job = q.job
       .use(errorHandlingMiddleware)
-      .name('test:error-handling')
+      .name('test-error-handling')
       .input(z.object({ value: z.number() }))
       .handler(async () => {
         handlerExecuted = true;
@@ -828,6 +829,155 @@ describe('Error Handling in Middleware', () => {
 
     expect(errorLog).toContain('Simulated error');
     expect(handlerExecuted).toBe(true);
+
+    await queue.stop();
+  }, 15000);
+});
+
+// ============================================
+// Onion Order: middleware wraps the handler
+// ============================================
+
+/** Add one job and wait until its worker has finished with it. */
+async function runToEnd(queue: Queue, name: string, data: unknown): Promise<BullMQJob> {
+  const added = await queue.add(name, data);
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const state = await added.getState();
+    if (state === 'completed' || state === 'failed') {
+      const settled = await queue.getJob(added.id ?? '');
+      if (!settled) throw new Error(`Job ${added.id} disappeared`);
+      return settled;
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error(`Job ${added.id} did not finish`);
+}
+
+describe('Onion order (middleware wraps the handler)', () => {
+  const createContext = () => ({ userId: 'onion-user', timestamp: new Date() });
+
+  it('runs mw1-before, mw2-before, handler, mw2-after, mw1-after', async () => {
+    const q = initQueue.context<BaseContext>().create();
+    const order: string[] = [];
+
+    const tracing = (label: string) =>
+      q.middleware(async ({ next }) => {
+        order.push(`${label}-before`);
+        try {
+          return await next();
+        } finally {
+          order.push(`${label}-after`);
+        }
+      });
+
+    const job = q.job
+      .use(tracing('mw1'))
+      .use(tracing('mw2'))
+      .name('onion-order')
+      .input(z.object({}))
+      .handler(async () => {
+        // Yield first: an `after` that ran before the handler finished would land here.
+        await new Promise(resolve => setTimeout(resolve, 50));
+        order.push('handler');
+      });
+
+    const queue = q.createQueue({ connection: redisUrl, createContext });
+    await queue.register(q.registry({ job }));
+    await queue.start();
+
+    const settled = await runToEnd(job._internal._queue!, 'onion-order', {});
+
+    expect(settled.finishedOn).toBeDefined();
+    expect(order).toEqual(['mw1-before', 'mw2-before', 'handler', 'mw2-after', 'mw1-after']);
+
+    await queue.stop();
+  }, 15000);
+
+  it('rejects a middleware next() with the handler error, so its catch sees it', async () => {
+    const q = initQueue.context<BaseContext>().create();
+    const caught: string[] = [];
+
+    const catching = q.middleware(async ({ next }) => {
+      try {
+        return await next();
+      } catch (error) {
+        caught.push(error instanceof Error ? error.message : String(error));
+        throw error;
+      }
+    });
+
+    const job = q.job
+      .use(catching)
+      .name('onion-error')
+      .input(z.object({}))
+      .options({ retry: { attempts: 1, backoff: { type: 'fixed', delay: 10 } } })
+      .handler(async () => {
+        throw new Error('handler failed');
+      });
+
+    const queue = q.createQueue({ connection: redisUrl, createContext });
+    await queue.register(q.registry({ job }));
+    await queue.start();
+
+    const settled = await runToEnd(job._internal._queue!, 'onion-error', {});
+
+    expect(caught).toEqual(['handler failed']);
+    expect(settled.failedReason).toBe('handler failed');
+
+    await queue.stop();
+  }, 15000);
+
+  it('lets a middleware see the handler result, and the job returns it', async () => {
+    const q = initQueue.context<BaseContext>().create();
+    const seen: unknown[] = [];
+
+    const observing = q.middleware(async ({ next }) => {
+      const result = await next();
+      seen.push(result.output);
+      return result;
+    });
+
+    const job = q.job
+      .use(observing)
+      .name('onion-result')
+      .input(z.object({ a: z.number(), b: z.number() }))
+      .handler(async data => ({ sum: data.a + data.b }));
+
+    const queue = q.createQueue({ connection: redisUrl, createContext });
+    await queue.register(q.registry({ job }));
+    await queue.start();
+
+    const settled = await runToEnd(job._internal._queue!, 'onion-result', { a: 1, b: 2 });
+
+    expect(seen).toEqual([{ sum: 3 }]);
+    expect(settled.returnvalue).toEqual({ sum: 3 });
+
+    await queue.stop();
+  }, 15000);
+
+  it('passes the context from next({ ctx }) to the handler', async () => {
+    const q = initQueue.context<BaseContext>().create();
+    const handlerTraceIds: string[] = [];
+
+    const withTrace = q.middleware<JobContext<BaseContext>, JobContext<BaseContext> & { traceId: string }>(
+      ({ ctx, next }) => next({ ctx: { ...ctx, traceId: 'trace-1' } }),
+    );
+
+    const job = q.job
+      .use(withTrace)
+      .name('onion-context')
+      .input(z.object({}))
+      .handler(async (_data, ctx) => {
+        handlerTraceIds.push(ctx.traceId);
+      });
+
+    const queue = q.createQueue({ connection: redisUrl, createContext });
+    await queue.register(q.registry({ job }));
+    await queue.start();
+
+    await runToEnd(job._internal._queue!, 'onion-context', {});
+
+    expect(handlerTraceIds).toEqual(['trace-1']);
 
     await queue.stop();
   }, 15000);

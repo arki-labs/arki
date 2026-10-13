@@ -4,12 +4,16 @@
  * Tests the complete flow from queue creation to job execution using real Redis.
  * Covers: initialization, job registration, worker startup, job execution, and shutdown.
  */
+import { Queue } from 'bullmq';
+import { Redis } from 'ioredis';
 import type { StartedTestContainer } from 'testcontainers';
 import { GenericContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { z } from '@arki/contracts';
 
+import { QUEUE_DEFINITION_ERROR_CODES } from './errors.ts';
+import type { QueueBuilder } from './types/builder.ts';
 import type { JobContext } from './types/job.ts';
 import { initQueue } from './init.ts';
 
@@ -92,14 +96,14 @@ describe('Queue Initialization', () => {
       const q = initQueue.context<TestContext>().create();
 
       const job = q.job
-        .name('test:simple-job')
+        .name('test-simple-job')
         .input(z.object({ message: z.string() }))
         .handler(async data => {
           return { success: true, message: data.message };
         });
 
       expect(job._type).toBe('job');
-      expect(job._internal.name).toBe('test:simple-job');
+      expect(job._internal.name).toBe('test-simple-job');
       expect(job._internal.inputSchema).toBeDefined();
       expect(job._internal.handler).toBeDefined();
     });
@@ -113,7 +117,7 @@ describe('Queue Initialization', () => {
 
       const job = q.job
         .use(middleware)
-        .name('test:job-with-middleware')
+        .name('test-job-with-middleware')
         .input(z.object({ value: z.number() }))
         .handler(async data => {
           return { result: data.value * 2 };
@@ -126,7 +130,7 @@ describe('Queue Initialization', () => {
       const q = initQueue.context<TestContext>().create();
 
       const job = q.job
-        .name('test:job-with-options')
+        .name('test-job-with-options')
         .input(z.object({ id: z.string() }))
         .options({
           maxParallelism: 10,
@@ -147,17 +151,17 @@ describe('Queue Initialization', () => {
     it('should throw error if name is missing', () => {
       const q = initQueue.context<TestContext>().create();
 
-      expect(() => {
-        // @ts-expect-error - Testing runtime validation
-        q.job.input(z.object({ test: z.string() })).handler(async () => ({ result: 'test' }));
-      }).toThrow('Job name is required');
+      // The unnamed job builder only offers .use() and .name(), at runtime too,
+      // so a job without a name cannot be built.
+      expect(Reflect.get(q.job, 'input')).toBeUndefined();
+      expect(Reflect.get(q.job, 'handler')).toBeUndefined();
     });
 
     it('should throw error if input schema is missing', () => {
       const q = initQueue.context<TestContext>().create();
 
       expect(() => {
-        const builder = q.job.name('test:missing-input') as any;
+        const builder = q.job.name('test-missing-input') as any;
         builder.handler(async () => ({ result: 'test' }));
       }).toThrow('Input schema is required');
     });
@@ -176,7 +180,7 @@ describe('Job Registration and Execution', () => {
       const processedMessages: string[] = [];
 
       const job = q.job
-        .name('test:single-job')
+        .name('test-single-job')
         .input(z.object({ message: z.string() }))
         .handler(async data => {
           processedMessages.push(data.message);
@@ -213,13 +217,15 @@ describe('Job Registration and Execution', () => {
       const q = initQueue.context<TestContext>().create();
 
       const job = q.job
-        .name('test:validation-job')
+        .name('test-validation-job')
         .input(
           z.object({
             email: z.email(),
             age: z.number().min(0).max(120),
           }),
         )
+        // One attempt: the default 3 would retry the invalid input before it fails
+        .options({ retry: { attempts: 1 } })
         .handler(async data => {
           return { valid: true, email: data.email, age: data.age };
         });
@@ -276,7 +282,7 @@ describe('Job Registration and Execution', () => {
       };
 
       const job1 = q.job
-        .name('test:multi-job-1')
+        .name('test-multi-job-1')
         .input(z.object({ id: z.string() }))
         .handler(async data => {
           results['job1']!.push(data.id);
@@ -284,7 +290,7 @@ describe('Job Registration and Execution', () => {
         });
 
       const job2 = q.job
-        .name('test:multi-job-2')
+        .name('test-multi-job-2')
         .input(z.object({ value: z.number() }))
         .handler(async data => {
           results['job2']!.push(`value-${data.value}`);
@@ -292,7 +298,7 @@ describe('Job Registration and Execution', () => {
         });
 
       const job3 = q.job
-        .name('test:multi-job-3')
+        .name('test-multi-job-3')
         .input(z.object({ name: z.string() }))
         .handler(async data => {
           results['job3']!.push(data.name);
@@ -338,7 +344,7 @@ describe('Job Registration and Execution', () => {
       const results: string[] = [];
 
       const emailJob = q.job
-        .name('test:nested-email')
+        .name('test-nested-email')
         .input(z.object({ to: z.string() }))
         .handler(async data => {
           results.push(`email:${data.to}`);
@@ -346,7 +352,7 @@ describe('Job Registration and Execution', () => {
         });
 
       const smsJob = q.job
-        .name('test:nested-sms')
+        .name('test-nested-sms')
         .input(z.object({ phone: z.string() }))
         .handler(async data => {
           results.push(`sms:${data.phone}`);
@@ -393,7 +399,7 @@ describe('Job Registration and Execution', () => {
       const logMessages: string[] = [];
 
       const job = q.job
-        .name('test:context-job')
+        .name('test-context-job')
         .input(z.object({ steps: z.number() }))
         .handler(async (data, ctx) => {
           for (let i = 0; i <= data.steps; i++) {
@@ -439,7 +445,7 @@ describe('Job Registration and Execution', () => {
       let capturedTimestamp: Date | undefined;
 
       const job = q.job
-        .name('test:custom-context')
+        .name('test-custom-context')
         .input(z.object({ action: z.string() }))
         .handler(async (data, ctx) => {
           capturedUserId = ctx.userId;
@@ -494,7 +500,7 @@ describe('Middleware Integration', () => {
 
     const job = q.job
       .use(loggingMiddleware)
-      .name('test:middleware-job')
+      .name('test-middleware-job')
       .input(z.object({ data: z.string() }))
       .handler(async data => {
         executionOrder.push('handler');
@@ -553,7 +559,7 @@ describe('Middleware Integration', () => {
       .use(middleware1)
       .use(middleware2)
       .use(middleware3)
-      .name('test:chain-middleware')
+      .name('test-chain-middleware')
       .input(z.object({ value: z.number() }))
       .handler(async data => {
         executionOrder.push('handler');
@@ -605,7 +611,7 @@ describe('Middleware Integration', () => {
 
     const job = q.job
       .use(enrichmentMiddleware)
-      .name('test:context-transform')
+      .name('test-context-transform')
       .input(z.object({ action: z.string() }))
       .handler(async (data, ctx) => {
         capturedRequestId = ctx.requestId;
@@ -652,7 +658,7 @@ describe('Retry and Error Handling', () => {
     const attemptTimestamps: number[] = [];
 
     const job = q.job
-      .name('test:retry-job')
+      .name('test-retry-job')
       .input(z.object({ shouldFail: z.boolean() }))
       .options({
         retry: {
@@ -707,7 +713,7 @@ describe('Retry and Error Handling', () => {
     let attemptCount = 0;
 
     const job = q.job
-      .name('test:maxdelay-job')
+      .name('test-maxdelay-job')
       .input(z.object({ id: z.string() }))
       .options({
         retry: {
@@ -753,7 +759,7 @@ describe('Retry and Error Handling', () => {
     const failedJobIds: string[] = [];
 
     const job = q.job
-      .name('test:failure-job')
+      .name('test-failure-job')
       .input(z.object({ throwError: z.boolean() }))
       .options({
         retry: {
@@ -810,7 +816,7 @@ describe('Graceful Shutdown', () => {
     const q = initQueue.context<TestContext>().create();
 
     const job = q.job
-      .name('test:shutdown-job')
+      .name('test-shutdown-job')
       .input(z.object({ id: z.string() }))
       .handler(async data => {
         return { processed: data.id };
@@ -849,7 +855,7 @@ describe('Graceful Shutdown', () => {
     let shutdownTime: number | undefined;
 
     const job = q.job
-      .name('test:inflight-job')
+      .name('test-inflight-job')
       .input(z.object({ id: z.string(), delay: z.number() }))
       .handler(async data => {
         await new Promise(resolve => setTimeout(resolve, data.delay));
@@ -903,7 +909,7 @@ describe('Real-World Scenarios', () => {
     const JOB_COUNT = 50;
 
     const job = q.job
-      .name('test:throughput-job')
+      .name('test-throughput-job')
       .input(z.object({ index: z.number() }))
       .options({
         maxParallelism: 10, // Process 10 jobs concurrently
@@ -953,7 +959,7 @@ describe('Real-World Scenarios', () => {
     const processedResults: string[] = [];
 
     const job = q.job
-      .name('test:api-call-job')
+      .name('test-api-call-job')
       .input(z.object({ userId: z.string() }))
       .options({
         retry: {
@@ -988,6 +994,139 @@ describe('Real-World Scenarios', () => {
     expect(mockApiCall).toHaveBeenCalledTimes(2);
     expect(processedResults).toContain('processed-user-abc');
     expect(processedResults).toContain('processed-user-xyz');
+
+    await queue.stop();
+  }, 15000);
+});
+
+// ============================================
+// Schedules trigger their job
+// ============================================
+
+describe('Schedules trigger their job', () => {
+  const createContext = () => ({ userId: 'schedule-user', timestamp: new Date() });
+
+  function bullQueue(name: string): Queue {
+    const url = new URL(redisUrl);
+    return new Queue(name, { connection: { host: url.hostname, port: Number(url.port) }, prefix: 'queue:' });
+  }
+
+  it("runs the job's own middleware on a scheduled tick", async () => {
+    const q = initQueue.context<TestContext>().create();
+    const runs: { traceId: string; value: number }[] = [];
+
+    const withTrace = q.middleware<JobContext<TestContext>, JobContext<TestContext> & { traceId: string }>(
+      ({ ctx, next }) => next({ ctx: { ...ctx, traceId: 'from-job-middleware' } }),
+    );
+
+    const job = q.job
+      .use(withTrace)
+      .name('sched-own-middleware')
+      .input(z.object({ value: z.number() }))
+      .handler(async (data, ctx) => {
+        runs.push({ traceId: ctx.traceId, value: data.value });
+      });
+
+    // Only the schedule is registered: it must register the job (and its worker) itself.
+    const schedule = q.schedule.interval(300).job(job).data({ value: 7 });
+
+    const queue = q.createQueue({ connection: redisUrl, createContext });
+    await queue.register(q.registry({ schedule }));
+    await queue.start();
+
+    await new Promise(resolve => setTimeout(resolve, 1200));
+
+    expect(runs.length).toBeGreaterThanOrEqual(1);
+    expect(runs[0]).toEqual({ traceId: 'from-job-middleware', value: 7 });
+
+    await queue.stop();
+  }, 15000);
+
+  it('creates no queue of its own for a schedule that wraps a job', async () => {
+    const q = initQueue.context<TestContext>().create();
+
+    const job = q.job
+      .name('sched-target')
+      .input(z.object({}))
+      .handler(async () => {});
+    const schedule = q.schedule.cron('0 0 * * *').name('sched-no-own-queue').job(job).data({});
+
+    const queue = q.createQueue({ connection: redisUrl, createContext });
+    await queue.register(q.registry({ schedule }));
+    await queue.start();
+
+    const redis = new Redis(redisUrl);
+    // The schedule's name owns no BullMQ keys: no queue, no worker, no scheduler of its own.
+    expect(await redis.keys('queue:sched-no-own-queue*')).toEqual([]);
+    // Its scheduler lives on the job's own queue.
+    const jobQueue = bullQueue('sched-target');
+    expect((await jobQueue.getJobSchedulers()).map(s => s.key)).toEqual(['schedule:sched-no-own-queue']);
+
+    await jobQueue.close();
+    redis.disconnect();
+    await queue.stop();
+  }, 15000);
+
+  it('prunes a schedule removed from code at start, and keeps the rest', async () => {
+    const job = (q: QueueBuilder<TestContext>) =>
+      q.job
+        .name('sched-shared')
+        .input(z.object({ slot: z.string() }))
+        .handler(async () => {});
+
+    // First deploy: schedules A and B on one job.
+    const before = initQueue.context<TestContext>().create();
+    const beforeJob = job(before);
+    const a = before.schedule.cron('0 8 * * *').name('sched-shared-a').job(beforeJob).data({ slot: 'am' });
+    const b = before.schedule.cron('0 20 * * *').name('sched-shared-b').job(beforeJob).data({ slot: 'pm' });
+    const first = before.createQueue({ connection: redisUrl, createContext });
+    await first.register(before.registry({ a, b }));
+    await first.start();
+    await first.stop();
+
+    // The app's own repeat job on the same queue: outside the `schedule:` id space.
+    const jobQueue = bullQueue('sched-shared');
+    await jobQueue.upsertJobScheduler('app-own-repeat', { every: 60_000 }, { name: 'sched-shared', data: { slot: 'x' } });
+    expect((await jobQueue.getJobSchedulers()).map(s => s.key).sort()).toEqual([
+      'app-own-repeat',
+      'schedule:sched-shared-a',
+      'schedule:sched-shared-b',
+    ]);
+
+    // Next deploy: B was deleted from code.
+    const after = initQueue.context<TestContext>().create();
+    const afterJob = job(after);
+    const aAgain = after.schedule.cron('0 8 * * *').name('sched-shared-a').job(afterJob).data({ slot: 'am' });
+    const second = after.createQueue({ connection: redisUrl, createContext });
+    await second.register(after.registry({ aAgain }));
+    await second.start();
+
+    expect((await jobQueue.getJobSchedulers()).map(s => s.key).sort()).toEqual([
+      'app-own-repeat',
+      'schedule:sched-shared-a',
+    ]);
+
+    await jobQueue.close();
+    await second.stop();
+  }, 15000);
+
+  it('throws a coded error for a duplicate schedule name', async () => {
+    const q = initQueue.context<TestContext>().create();
+
+    const job = q.job
+      .name('sched-dupe')
+      .input(z.object({}))
+      .handler(async () => {});
+
+    const first = q.schedule.cron('0 1 * * *').name('sched-dupe-name').job(job).data({});
+    const second = q.schedule.cron('0 2 * * *').name('sched-dupe-name').job(job).data({});
+
+    const queue = q.createQueue({ connection: redisUrl, createContext });
+    await expect(queue.register(q.registry({ first, second }))).rejects.toMatchObject({
+      name: 'QueueDefinitionError',
+      code: QUEUE_DEFINITION_ERROR_CODES.duplicateScheduleName,
+      message: 'Schedule "sched-dupe-name" is already registered.',
+    });
 
     await queue.stop();
   }, 15000);

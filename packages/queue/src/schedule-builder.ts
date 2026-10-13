@@ -10,9 +10,12 @@
  *
  * ## Usage Patterns
  *
- * Schedules can either:
- * 1. Wrap an existing job: `q.schedule.cron('0 0 * * *').job(existingJob).data({ ... })`
- * 2. Define inline: `q.schedule.interval(60000).name('my-schedule').input(schema).handler(fn)`
+ * A schedule is a trigger, not a runner. It can either:
+ * 1. Wrap an existing job: `q.schedule.cron('0 0 * * *').job(existingJob).data({ ... })`.
+ *    Each tick adds the data to the job's own queue, the same as `existingJob.trigger(data)`;
+ *    the job's worker runs it with the job's own middleware, retries and concurrency.
+ * 2. Define inline: `q.schedule.interval(60000).name('my-schedule').input(schema).handler(fn)`.
+ *    This is an anonymous job named after the schedule; `.use()` before `.name()` is its middleware.
  *
  * @example
  * ```typescript
@@ -49,13 +52,15 @@ import type { z } from '@arki/contracts';
 
 import { debugBuilder } from './debug.ts';
 import { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
+import { createJobBuilder } from './job-builder.ts';
 import type {
   ScheduleBuilderChain,
   ScheduleBuilderDef,
+  ScheduleBuilderNamed,
   ScheduleDefinition,
   ScheduleJobWrapper,
 } from './types/builder.ts';
-import type { JobDefinition, JobHandler } from './types/job.ts';
+import type { AnyJobDefinition, JobDefinition } from './types/job.ts';
 import type { JobMiddleware } from './types/middleware.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
 
@@ -67,15 +72,20 @@ type ScheduleType = 'cron' | 'interval' | 'timeout';
 /**
  * Internal schedule definition structure
  * This is what gets stored in ScheduleDefinition._internal
+ *
+ * A schedule is a trigger: on each tick it adds `data` to `job`'s own queue,
+ * and the job's worker runs it. The builder stores the job as
+ * `AnyJobDefinition`; the queue reads `_internal` back with the default
+ * `TJob`, the same erasure boundary flow steps use.
  */
-export type InternalScheduleDefinition<TInput = unknown, TOutput = unknown, TContext = unknown> = {
+export type InternalScheduleDefinition<TJob = JobDefinition<unknown, unknown, unknown>> = {
   /**
-   * Type of schedule (cron or interval)
+   * Type of schedule (cron, interval or timeout)
    */
   type: ScheduleType;
 
   /**
-   * Schedule value (cron pattern or interval in ms)
+   * Schedule value (cron pattern, or interval/delay in ms)
    */
   value: string | number;
 
@@ -85,29 +95,25 @@ export type InternalScheduleDefinition<TInput = unknown, TOutput = unknown, TCon
   options?: { timezone?: string };
 
   /**
-   * Schedule name
+   * Schedule name (the job scheduler id on the job's queue)
    */
   name: string;
 
   /**
-   * Job variant - either wrapping existing job or inline handler
+   * The job each tick adds to: the wrapped job, or for an inline schedule an
+   * anonymous job named after the schedule, whose middleware is the schedule's `.use()` chain
    */
-  jobVariant:
-    | {
-        type: 'existing';
-        job: JobDefinition<TInput, TOutput, TContext>;
-        data: TInput;
-      }
-    | {
-        type: 'inline';
-        inputSchema: z.ZodType<TInput>;
-        handler: JobHandler<TInput, TOutput, TContext>;
-      };
+  job: TJob;
 
   /**
-   * Middleware chain for this schedule
+   * Whether `job` is the inline schedule's own anonymous job (only this package writes to its queue)
    */
-  middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[];
+  inline: boolean;
+
+  /**
+   * The data each tick adds (`{}` for an inline schedule)
+   */
+  data: unknown;
 
   /**
    * Queue configuration
@@ -158,6 +164,8 @@ export function createScheduleBuilder<TContext, TContextOut, TMeta extends Queue
     use<TContextOut2>(middleware: JobMiddleware<TContextOut, TContextOut2, TMeta>) {
       debugBuilder('Adding middleware to schedule (total: %d)', middlewares.length + 1);
 
+      // One runtime object serves both typestates: the ScheduleBuilderWithMiddleware
+      // type hides `.job()` after `.use()`; the throw in scheduleJob() backs it up.
       return createScheduleBuilder<TContext, TContextOut2, TMeta>(
         scheduleType,
         scheduleValue,
@@ -167,52 +175,70 @@ export function createScheduleBuilder<TContext, TContextOut, TMeta extends Queue
       );
     },
 
-    job<TInput>(job: JobDefinition<TInput, unknown, TContextOut>): ScheduleJobWrapper<TInput> {
-      debugBuilder('Wrapping existing job: %s', job._internal.name);
-
-      return {
-        data(data: TInput): ScheduleDefinition {
-          // Generate name from job if not explicitly set
-          const scheduleName = state.name ?? `${job._internal.name}-schedule`;
-
-          debugBuilder(
-            '[%s] Creating schedule definition (type: %s, wraps: %s)',
-            scheduleName,
-            scheduleType,
-            job._internal.name,
-          );
-
-          const internal: InternalScheduleDefinition<TInput, unknown, TContextOut> = {
-            type: scheduleType,
-            value: scheduleValue,
-            options: scheduleOptions,
-            name: scheduleName,
-            jobVariant: {
-              type: 'existing',
-              job,
-              data,
-            },
-            middlewares,
-            config,
-          };
-
-          return {
-            _type: 'schedule',
-            _internal: internal,
-          };
-        },
-      };
+    job<TInput>(job: JobDefinition<TInput, unknown, never>): ScheduleJobWrapper<TInput> {
+      return scheduleJob(state, job);
     },
 
     name(name: string) {
       debugBuilder('Setting schedule name: %s', name);
 
-      // One runtime object serves both typestates: the ScheduleBuilderNeedsInput
-      // type hides `.handler()` until `.input()` runs; the throw below backs it up.
+      // One runtime object serves every named typestate: ScheduleBuilderNamed
+      // offers `.job()` and `.input()`, ScheduleBuilderNeedsInput hides `.job()`
+      // after `.use()`, and both hide `.handler()` until `.input()` runs; the
+      // throws below back them up.
       return createScheduleBuilderChain<TContext, TContextOut, TMeta, never, never>({
         ...state,
         name,
       });
+    },
+  };
+}
+
+/**
+ * Wrap an existing job: each tick adds `data` to the job's own queue.
+ * @internal
+ */
+function scheduleJob<TInput>(
+  state: ScheduleBuilderState<unknown>,
+  job: JobDefinition<TInput, unknown, never>,
+): ScheduleJobWrapper<TInput> {
+  if (state.middlewares.length > 0) {
+    throw new QueueDefinitionError({
+      code: QUEUE_DEFINITION_ERROR_CODES.scheduleMiddlewareWithJob,
+      message: `A schedule that wraps a job has no middleware of its own. Remove .use() before .job(${job._internal.name}).`,
+      remediation: 'Add the middleware to the job instead (q.job.use(mw)...); its worker runs it on every scheduled run.',
+    });
+  }
+
+  debugBuilder('Wrapping existing job: %s', job._internal.name);
+
+  return {
+    data(data: TInput): ScheduleDefinition {
+      // Generate name from job if not explicitly set
+      const scheduleName = state.name ?? `${job._internal.name}-schedule`;
+
+      debugBuilder(
+        '[%s] Creating schedule definition (type: %s, triggers: %s)',
+        scheduleName,
+        state.scheduleType,
+        job._internal.name,
+      );
+
+      const internal: InternalScheduleDefinition<AnyJobDefinition> = {
+        type: state.scheduleType,
+        value: state.scheduleValue,
+        options: state.scheduleOptions,
+        name: scheduleName,
+        job,
+        inline: false,
+        data,
+        config: state.config,
+      };
+
+      return {
+        _type: 'schedule',
+        _internal: internal,
+      };
     },
   };
 }
@@ -223,8 +249,13 @@ export function createScheduleBuilder<TContext, TContextOut, TMeta extends Queue
  */
 function createScheduleBuilderChain<TContext, TContextOut, TMeta extends QueueMeta, TInput, TOutput>(
   state: ScheduleBuilderState<TInput>,
-): ScheduleBuilderChain<TContext, TContextOut, TMeta, TInput, TOutput> {
+): ScheduleBuilderChain<TContext, TContextOut, TMeta, TInput, TOutput> &
+  Pick<ScheduleBuilderNamed<TContext, TContextOut, TMeta>, 'job'> {
   return {
+    job<TJobInput>(job: JobDefinition<TJobInput, unknown, never>): ScheduleJobWrapper<TJobInput> {
+      return scheduleJob(state, job);
+    },
+
     input<TNewInput>(schema: z.ZodType<TNewInput>) {
       debugBuilder('[%s] Setting input schema for schedule', state.name ?? 'unnamed');
 
@@ -264,20 +295,24 @@ function createScheduleBuilderChain<TContext, TContextOut, TMeta extends QueueMe
         state.middlewares.length,
       );
 
-      type ActualInput = THandlerInput extends never ? TInput : THandlerInput;
-      type ActualOutput = THandlerOutput extends never ? TOutput : THandlerOutput;
+      // An inline schedule is an anonymous job named after the schedule: its
+      // `.use()` chain is that job's middleware, and it runs on the job path.
+      const job = createJobBuilder<TContext, TContextOut, TMeta>({
+        config: state.config,
+        middlewares: state.middlewares,
+      })
+        .name(state.name)
+        .input(state.inputSchema)
+        .handler<THandlerInput, unknown>(handler);
 
-      const internal: InternalScheduleDefinition<ActualInput, ActualOutput, TContextOut> = {
+      const internal: InternalScheduleDefinition<AnyJobDefinition> = {
         type: state.scheduleType,
         value: state.scheduleValue,
         options: state.scheduleOptions,
         name: state.name,
-        jobVariant: {
-          type: 'inline',
-          inputSchema: state.inputSchema as z.ZodType<ActualInput>,
-          handler: handler as JobHandler<ActualInput, ActualOutput, TContextOut>,
-        },
-        middlewares: state.middlewares,
+        job,
+        inline: true,
+        data: {},
         config: state.config,
       };
 

@@ -167,10 +167,12 @@ function actionForJob(job: JobDefinition<unknown, unknown, unknown>, direction: 
 
 function actionForSchedule(schedule: ScheduleDefinition): QueueDotAction {
   const internal = schedule._internal as InternalScheduleDefinition;
+  // A schedule adds to its job's own queue; it has no queue of its own.
+  const queue = internal.job._internal.name;
   const meta: JsonObject = {
     kind: 'schedule',
     scheduleType: internal.type,
-    queue: internal.name,
+    queue,
     value: typeof internal.value === 'number' ? internal.value : internal.value,
     ...(internal.options?.timezone === undefined ? {} : { timezone: internal.options.timezone }),
   };
@@ -178,7 +180,7 @@ function actionForSchedule(schedule: ScheduleDefinition): QueueDotAction {
     id: `${internal.name}.fire`,
     binding: 'queue',
     direction: 'in',
-    address: internal.name,
+    address: queue,
     metaSchema: QUEUE_ACTION_META_SCHEMA,
     meta,
   };

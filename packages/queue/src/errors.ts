@@ -3,7 +3,8 @@
  *
  * Most builder-order mistakes are already compile errors; these throws are
  * the runtime backstop for plain JS, casts, and the checks types cannot
- * express (unknown step ids, dependency cycles, out-of-range cron values).
+ * express (unknown step ids, dependency cycles, out-of-range cron values,
+ * duplicate schedule names).
  */
 
 export const QUEUE_DEFINITION_ERROR_CODES = {
@@ -13,6 +14,8 @@ export const QUEUE_DEFINITION_ERROR_CODES = {
   unknownStepDependency: 'ARKI_QUEUE_E009',
   circularStepDependency: 'ARKI_QUEUE_E010',
   invalidCronValue: 'ARKI_QUEUE_E011',
+  scheduleMiddlewareWithJob: 'ARKI_QUEUE_E012',
+  duplicateScheduleName: 'ARKI_QUEUE_E013',
 } as const;
 
 export class QueueDefinitionError extends Error {
@@ -29,4 +32,13 @@ export class QueueDefinitionError extends Error {
     this.code = args.code;
     this.remediation = args.remediation;
   }
+}
+
+/** Two schedules share a name. The name is the job scheduler id, so the second would replace the first. */
+export function duplicateScheduleError(name: string): QueueDefinitionError {
+  return new QueueDefinitionError({
+    code: QUEUE_DEFINITION_ERROR_CODES.duplicateScheduleName,
+    message: `Schedule "${name}" is already registered.`,
+    remediation: 'Give each schedule its own name with .name("..."); two schedules of one job need different names.',
+  });
 }
