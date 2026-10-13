@@ -9,6 +9,7 @@ import {
   formatFileSize,
   formatNumber,
   formatPercent,
+  RUNTIME_LOCALE,
 } from './format.js';
 
 describe('formatNumber', () => {
@@ -79,6 +80,33 @@ describe('formatCompact', () => {
     expect(formatCompact(1_230_000)).toBe('1.2M');
     expect(formatCompact(1_230_000, { display: 'long' })).toBe('1.2 million');
     expect(formatCompact(1_230_000, { maximumFractionDigits: 2 })).toBe('1.23M');
+  });
+
+  it('formats compact money with a currency', () => {
+    expect(formatCompact(1_250_000, { currency: 'USD' })).toBe('$1.3M');
+    expect(formatCompact(1_250_000, { currency: 'USD', maximumFractionDigits: 2 })).toBe('$1.25M');
+    expect(formatCompact(1_250_000, { currency: 'USD', display: 'long' })).toBe(
+      new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        notation: 'compact',
+        compactDisplay: 'long',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 1,
+      }).format(1_250_000),
+    );
+  });
+
+  it('keeps the exact-input rule: compact money takes whole numbers on the exact path', () => {
+    expect(formatCompact('1250000', { currency: 'EUR', locale: 'de-DE' })).toBe(
+      new Intl.NumberFormat('de-DE', {
+        style: 'currency',
+        currency: 'EUR',
+        notation: 'compact',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 1,
+      }).format(1_250_000),
+    );
   });
 });
 
@@ -217,5 +245,56 @@ describe('createFormatter snapshot', () => {
     expect(fmt.formatPercent(0.125)).toBe(fmt.formatPercent(0.125, {}));
     expect(fmt.formatCompact(1_230_000)).toBe(fmt.formatCompact(1_230_000, {}));
     expect(fmt.formatFileSize(1536)).toBe(fmt.formatFileSize(1536, {}));
+  });
+});
+
+describe('runtime default locale', () => {
+  const sample = 1_234_567.891;
+
+  it('stays en-US unless the caller opts in', () => {
+    expect(formatNumber(sample)).toBe('1,234,567.891');
+    expect(formatNumber(sample, { locale: undefined })).toBe('1,234,567.891');
+  });
+
+  it("forwards locale: 'default' to Intl as no locale, like toLocaleString()", () => {
+    const runtime = new Intl.NumberFormat(undefined, {});
+    expect(formatNumber(sample, { locale: RUNTIME_LOCALE })).toBe(runtime.format(sample));
+    expect(formatNumber(sample, { locale: 'default' })).toBe(sample.toLocaleString());
+  });
+
+  it('applies to every formatter', () => {
+    const locale = RUNTIME_LOCALE;
+    expect(formatCurrency(1234.5, 'USD', { locale })).toBe(
+      new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(1234.5),
+    );
+    expect(formatPercent(0.125, { locale })).toBe(
+      new Intl.NumberFormat(undefined, { style: 'percent', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(
+        0.125,
+      ),
+    );
+    expect(formatCompact(1_250_000, { locale, currency: 'USD' })).toBe(
+      new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: 'USD',
+        notation: 'compact',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 1,
+      }).format(1_250_000),
+    );
+    expect(formatFileSize(1536, { locale })).toBe(
+      `${new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 1 }).format(1.536)} kB`,
+    );
+  });
+
+  it('works through createFormatter, bound or per call', () => {
+    const bound = createFormatter({ locale: RUNTIME_LOCALE, currency: 'USD' });
+    expect(bound.formatNumber(sample)).toBe(new Intl.NumberFormat(undefined).format(sample));
+    expect(bound.formatCurrency(1234.5)).toBe(
+      new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(1234.5),
+    );
+    const english = createFormatter({ locale: 'en-US' });
+    expect(english.formatNumber(sample, { locale: RUNTIME_LOCALE })).toBe(
+      new Intl.NumberFormat(undefined).format(sample),
+    );
   });
 });
