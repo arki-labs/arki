@@ -22,11 +22,13 @@ function isValidDate(value: unknown): value is Date {
   return value instanceof Date && !Number.isNaN(value.getTime());
 }
 
-function isTimestamp(value: unknown): value is Timestamp {
+/** Whether a value is a `Date` (not `Invalid Date`), `Instant` or `ZonedDateTime`. */
+export function isTimestamp(value: unknown): value is Timestamp {
   return isValidDate(value) || isInstant(value) || isZonedDateTime(value);
 }
 
-function describeKind(value: unknown): string {
+/** Name the kind of a value that failed `isTimestamp`, for an error message. */
+export function describeKind(value: unknown): string {
   if (value instanceof Date) {
     return 'an invalid Date';
   }
@@ -34,8 +36,17 @@ function describeKind(value: unknown): string {
   return typeof value;
 }
 
-function epochNanoseconds(value: Timestamp): bigint {
+/** The exact epoch of a timestamp in nanoseconds, whatever its kind. */
+export function epochNanoseconds(value: Timestamp): bigint {
   return value instanceof Date ? BigInt(value.getTime()) * NANOSECONDS_PER_MILLISECOND : value.epochNanoseconds;
+}
+
+/** The epoch of a timestamp in whole milliseconds, rounded toward the past. */
+export function epochMilliseconds(value: Timestamp): number {
+  const nanoseconds = epochNanoseconds(value);
+  const milliseconds = nanoseconds / NANOSECONDS_PER_MILLISECOND;
+
+  return Number(nanoseconds < 0n && nanoseconds % NANOSECONDS_PER_MILLISECOND !== 0n ? milliseconds - 1n : milliseconds);
 }
 
 function format(value: Timestamp): string {

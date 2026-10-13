@@ -31,8 +31,8 @@ import * as debug from './debug';
 import { debugTester } from './debug';
 import { FactoryRegistry, faker } from './factories';
 import * as performance from './performance';
-import type { Timestamps } from './timestamps';
-import { assertTimestamps, assertUpdatedAfterCreated } from './timestamps';
+import type { Timestamp, Timestamps } from './timestamps';
+import { assertTimestamps, assertUpdatedAfterCreated, epochMilliseconds } from './timestamps';
 
 type CallerCollection<TCaller> = {
   public: TCaller;
@@ -1209,12 +1209,12 @@ export class IntegrationTester<
     options: {
       past?: { years?: number; months?: number; days?: number };
       future?: { years?: number; months?: number; days?: number };
-      between?: { from: Date; to: Date };
+      between?: { from: Timestamp; to: Timestamp };
     } = {},
   ): Date {
     if (options.between) {
-      const fromTime = options.between.from.getTime();
-      const toTime = options.between.to.getTime();
+      const fromTime = epochMilliseconds(options.between.from);
+      const toTime = epochMilliseconds(options.between.to);
       const randomTime = this.generateBetween(fromTime, toTime);
       return new Date(randomTime);
     }

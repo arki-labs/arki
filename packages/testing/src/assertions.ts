@@ -7,6 +7,9 @@
 
 import type { ZodSchema } from 'zod/v4';
 
+import type { Timestamp } from './timestamps';
+import { describeKind, epochNanoseconds, isTimestamp } from './timestamps';
+
 /**
  * Assert that a pagination response is valid
  *
@@ -77,6 +80,9 @@ export function assertPaginationValid(
 /**
  * Assert that a timestamp is recent (within specified seconds)
  *
+ * The timestamp may be a `Date`, or a Temporal `Instant` or `ZonedDateTime`
+ * from `@arki/date`. It is compared with now by its exact epoch.
+ *
  * @param timestamp - Timestamp to check
  * @param options - Options including withinSeconds (default: 10)
  *
@@ -89,17 +95,16 @@ export function assertPaginationValid(
 export function assertTimestampRecent(
   timestamp: unknown,
   options: { withinSeconds?: number; label?: string } = {},
-): asserts timestamp is Date {
+): asserts timestamp is Timestamp {
   const { withinSeconds = 10, label = 'timestamp' } = options;
 
-  if (!(timestamp instanceof Date)) {
-    throw new TypeError(`Expected ${label} to be a Date, got ${typeof timestamp}`);
+  if (!isTimestamp(timestamp)) {
+    throw new TypeError(`Expected ${label} to be a Date, Instant or ZonedDateTime, got ${describeKind(timestamp)}`);
   }
 
-  const now = Date.now();
-  const timestampMs = timestamp.getTime();
-  const diffMs = Math.abs(now - timestampMs);
-  const diffSeconds = diffMs / 1000;
+  const nowNanoseconds = BigInt(Date.now()) * 1_000_000n;
+  const differenceNanoseconds = nowNanoseconds - epochNanoseconds(timestamp);
+  const diffSeconds = Number(differenceNanoseconds < 0n ? -differenceNanoseconds : differenceNanoseconds) / 1e9;
 
   if (diffSeconds > withinSeconds) {
     throw new Error(
