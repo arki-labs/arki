@@ -1,0 +1,200 @@
+# RFC: The core of Arki Dot, centred on the journal
+
+- **Status:** PROPOSED (2026-10-12). Five founder decisions open (section 6).
+  The faults in section 3 are FIXED, except the replay-order claim, which is
+  not checked.
+- **Scope:** `@arki/dot` and the pieces that become its core: db, rpc,
+  queues, crons, telemetry, logs, with `@arki/journal` at the centre.
+- **Inputs:** in the folder `2026-10-12-dot-core-centred-on-journal/` next
+  to this file: `brief.md` (the shared brief), `proposal-fable.md`,
+  `proposal-astra.md`.
+
+Two architects worked from the same brief without seeing each other:
+
+- Fable: `proposal-fable.md` (561 lines)
+- Astra: `proposal-astra.md` (807 lines)
+
+This file compares them and gives one merged recommendation. Every claim
+marked "checked" was opened in the code by this session, not taken on trust.
+
+One note on wording. The brief first said "core things for Arki". The founder
+corrected it to "core things for Arki Dot". Fable got the correction mid-run.
+Astra did not. Astra's answer is still about Dot throughout, so it was not
+re-run.
+
+## 1. Where both agree
+
+These points came out the same in both reviews. Treat them as settled unless
+the founder disagrees.
+
+1. **The journal is the right centre.** It already stores the event, the
+   updated row, the projections and the follow-up job in one database
+   transaction (`packages/journal/src/write.ts:239-255`, checked).
+2. **The Dot kernel stays small.** `@arki/dot` must not import the database,
+   the journal, the queue or Redis. They are core as plugins that ship with
+   Dot, not as kernel imports. One real app (novelette server) boots with no
+   database at all.
+3. **Not everything is an event.** Both said no to this part of the request,
+   for the same reason. Only a fact about business data is a stored journal
+   event. A command, an rpc call, a cron tick, a log line and a trace span are
+   in-memory signals. Storing them would turn every log line into a Postgres
+   write and fill the event table with rows that cannot be replayed.
+4. **One way to extend: a typed wrapper.** A function that receives the call
+   and a `next`. It can watch, change, stop or replace. Plugins run in the
+   order they are declared. The first one is outermost. No registry keyed by
+   strings.
+5. **No `@arki/rpc` package.** 29 apps use oRPC directly. oRPC already has
+   middleware. A wrapper would be a second thing to keep in step.
+6. **Logging must stop doing work on import.** `@arki/log` reads the
+   environment and builds pino when the file loads
+   (`packages/log/src/lib/config.ts:118`, checked). The Dot kernel imports it
+   (`packages/dot/src/kernel/app-instance.ts:8`, checked). So importing Dot
+   breaks Dot's own rule.
+7. **Split server telemetry out of `@arki/meter`.** New `@arki/telemetry`.
+   Meter keeps browser analytics, used by 15 apps. Server telemetry is used
+   by 3.
+8. **Journal follow-up jobs are the default "run this later" path.** BullMQ
+   stays, as an optional step up.
+9. **Delete `@arki/queue/runtime-local`.** One app uses it (loonyjobs).
+10. **Retire `@arki/event-sourcing`** once Kapodopera has moved (50 files).
+11. **Fix the new-app template early.** Its server imports Kapodopera's code
+    (`turbo/generators/templates/application/server/src/index.ts:16-20`,
+    checked).
+12. **Replacing a core piece is explicit.** No "the last plugin wins".
+
+## 2. Where they differ
+
+| Topic | Fable | Astra | Recommendation |
+|---|---|---|---|
+| What "core" looks like to an app author | Six core plugins. The app file stays a `defineApp().use(...)` chain of about seven lines. | A new `@arki/app` package with one `backend({...})` call that expands to the same plugins. | Core plugins first. Decide on the one-call preset after one app has run on them. See decision 1. |
+| How a plugin attaches | Hooks live on the service: `journal.hooks.command.around(...)`. A plugin declares it needs the service and attaches in `boot`. | A plain `Extension` object with fixed slots (`log`, `command`, `cron`), passed to the preset. | Fable's. It uses the dependency system Dot already has, keeps the app's own metadata type, and needs no central list of slots. |
+| Rules for a wrapper | Light. A wrapper may pass a changed input to `next`. Command hooks wrap the transaction from outside. | Strict. `next` at most once. A wrapper cannot turn a failed command into a success. A wrapper for all commands cannot rewrite the input. Command wrappers run inside the transaction. Registration is frozen before work starts. | Astra's rules on Fable's mechanism. Running inside the transaction means an error anywhere rolls back cleanly. |
+| Is the journal worker ready to be the default? | Assumed yes. | No. Found three faults (section 3). Fix them first. | Astra's. All three are confirmed. |
+| The existing log plans | Keep 004, 007, 010. | Keep 004. Change 007. Replace 010. | Astra's. See section 4. |
+| May a declaration throw on import? | Not raised. | No. Collect the errors and raise them at boot. Notes that the doctrine file contradicts itself. | Neither as stated. See decision 3. |
+| Crons inside `@arki/queue` | Delete them. Crons live only in `@arki/schedule`. | Keep them as the durable option. In-process crons skip runs while the app is down. | Keep them until `@arki/schedule` has a durable option. See decision 4. |
+| The rpc mount | Shown as already handled by `http({ features })`. | Shows the hand-written "gateway" plugin (about 20 lines) apps need today. Proposes a small helper in `@arki/http`. | Astra's. The gateway is the real boilerplate in the app file. |
+| Slice collection | Four adapters each copy the same "collect feature slices" code with unsafe casts. Unify into one typed helper. | Notes the casts. Warns any preset needs negative type tests first. | Both. Do Fable's helper, gated by Astra's type tests. |
+| Database URL | Unchanged. | Add an explicit `url` option. Today the adapter only reads `DB_URL` (`packages/db/src/dot.ts:177`, checked). | Astra's. It is additive. |
+| The untyped `$config` bag in Dot | Delete it. | Not raised. | Delete. Checked: only Dot's own files read it. |
+
+## 3. Faults found in current code (all checked)
+
+Astra found these. Fable did not look. Each was confirmed by reading the code.
+
+**All six were fixed on 2026-10-12**, the same day:
+
+| Fault | Fix | Proof |
+|---|---|---|
+| 1. One lease per batch | `drain` claims one job at a time, right before it runs. | Test: while a job runs, no other job of the batch holds a lease. |
+| 2. Shutdown never reaches a job | `stop()` aborts the signal `drain` and the effect get. `drain` claims nothing after an abort. | Test: an effect that waits for the abort lets `stop()` resolve. Before, it hung. |
+| 3. Renamed effect strands work | New `journal.strandedJobs(db)` counts pending jobs no effect claims. Jobs stay untouched, for rolling deploys. | Test. README "The worker" section. |
+| 4. Array quotes in local queue SQL | The array branch escapes `'` like the other branches. | Test against a real PGlite. It fails on the old line with a syntax error. |
+| 5. Queue reads `NODE_ENV` at declaration | The `isDev` default is a getter, read on use. | Typecheck; no test reads it at import any more. |
+| 6. Doctrine contradiction | `composition-doctrine.md` §1 now allows a throw that depends only on the source (a duplicate key), never one that depends on the world. This applies decision 3, option A. Revert that paragraph if the founder picks B. | Doc change. |
+
+Changesets: `.changeset/journal-worker-claims-and-stop.md` (journal minor),
+`.changeset/queue-local-array-quotes-and-lazy-isdev.md` (queue patch).
+
+Remaining limit, recorded in the journal README: a single job longer than the
+60-second lease can still be claimed by a second worker. Lease renewal while
+a job runs was not built.
+
+The original findings:
+
+1. **One lease for a whole batch of jobs.** The worker claims up to 20 jobs
+   with one expiry time, then runs them one after another
+   (`packages/journal/src/worker.ts:64-95,109-143`). If an early job is slow,
+   the lease on the later ones runs out before they start. A second worker
+   can then take them, and they run twice.
+2. **Shutdown never reaches a running job.** The worker loop calls `drain`
+   without a stop signal (`packages/journal/src/worker.ts:190`). `drain` then
+   makes its own signal that is never fired (`worker.ts:58`). A job cannot
+   learn that the app is stopping.
+3. **Renaming a follow-up job strands its queued work.** The worker only
+   claims jobs whose name it knows (`worker.ts:59,73`). Jobs queued under an
+   old name are never claimed, never failed and never reported.
+4. **Unsafe SQL text in the local queue adapter.** It builds SQL by pasting
+   values into the text. The branch for arrays does not escape the `'`
+   character (`packages/queue/src/runtime-local/adapter.ts:21-29,44`). This
+   adapter is the one both reviews want deleted.
+5. **`@arki/queue` reads `NODE_ENV` when a queue is declared**
+   (`packages/queue/src/init.ts:62`). That is an environment read at import.
+6. **Dot's doctrine file contradicts itself.** Line 17-19 says importing must
+   never throw. Line 94-96 requires a throw at import for a duplicate key
+   (`packages/dot/docs/composition-doctrine.md`).
+
+Not checked: Astra's claim that replaying events by sequence number can miss
+events that commit out of order (`packages/journal/src/history.ts:237`).
+Astra marks it as reasoning, not a reproduced failure.
+
+Also worth knowing: no app uses the journal's Dot plugin today. Games
+Platform starts the worker by hand. Everseek and Kapodopera run no worker.
+So "journal inside Dot" is designed but not yet proven by any app.
+
+## 4. What this means for the plans in `plans/packages/`
+
+| Plan | Verdict | Why |
+|---|---|---|
+| 004 log tests | Keep | Still the safety net before changing the logger. Do not treat "flush sorts by level" as a rule the new logger must keep. |
+| 007 log core | Hold and revise | It builds one shared, changeable `settings` object. A Dot `log()` plugin needs each app to own its logger, so one plugin can change it. |
+| 009 schedule lock errors | Keep | Both reviews want it. Later it folds into the cron hook. |
+| 010 log main entry | Hold, likely replace | Its Node entry installs logging at import. That is the same rule break this work sets out to remove. See decision 2. |
+
+## 5. Merged recommendation
+
+**Shape.** A small kernel plus core plugins that ship with Dot: `log()`,
+`db()`, `journal()`, `schedule()`, `telemetry()`, and rpc through `http()`.
+Each core piece exposes typed hooks on its own service. A plugin says which
+service it needs and attaches in `boot`. Durable things go through the
+journal. Everything else is an in-memory wrapper.
+
+**Order of work.** Each stage ships alone and leaves every app working.
+
+| Stage | What | Size | Risk |
+|---|---|---|---|
+| 0 | Fix the template server: remove the Kapodopera imports. | Small | Low |
+| 1 | Repair the journal worker (faults 1-3, DONE 2026-10-12) and the schedule lock outcome (plan 009, open). | Medium | High on correctness, few users today |
+| 2 | Pure logger core, a `log()` Dot plugin, kernel moves onto it, import test on `@arki/dot`. Fix the `NODE_ENV` read in queue. | Large | Medium: every server logs |
+| 3 | The hook helper. Hooks on journal commands, writes and jobs, on cron runs, and on log records. Astra's rules. | Medium | Low: additive |
+| 4 | `@arki/telemetry` split out of meter, with a bridge from hooks to OpenTelemetry. | Medium | Low: 3 apps |
+| 5 | One typed slice-collection helper. An rpc mount helper in `@arki/http`. Explicit database URL. Delete `$config`. | Medium | Low |
+| 6 | Prove it: the template and one journal app boot through Dot with all core plugins. Then decide on the one-call preset. | Medium | Medium |
+| 7 | Finish journal adoption, remove `@arki/event-sourcing`, slim `@arki/queue`. | Large, mostly app work | Medium |
+
+## 6. Decisions for the founder
+
+1. **Core plugins only, or also a one-call preset?**
+   A: core plugins, app file stays a short chain. B: add `@arki/app` with
+   `backend({...})`. Trade-off: B is less to type but is a new package whose
+   types must stay exact across every feature. Recommendation: A now, revisit
+   after stage 6.
+2. **How does Node logging get switched on?**
+   A: explicitly. Dot apps use the `log()` plugin. Other apps add one line at
+   startup. B: automatically on import, as plan 010 does. Trade-off: A keeps
+   the "import does nothing" rule but 46 apps do not boot through Dot, so
+   each needs that line. B needs no app change but keeps the rule break.
+   Recommendation: A.
+3. **May a declaration throw on a programmer error at import?**
+   A: yes, for checks that depend only on the code, such as a duplicate key.
+   No environment reads. Fix the doctrine wording. B: never. Collect errors
+   and raise at boot. Trade-off: B is purer but adds a collection step to
+   every declaration helper. Recommendation: A.
+4. **What does a cron promise?**
+   A: best effort in-process by default. Durable crons stay an explicit queue
+   feature. B: every cron is durable. Trade-off: B needs stored state for
+   every schedule. Recommendation: A, and do not delete the queue's cron
+   support until there is a durable replacement.
+5. **Is the journal the default "run later" path?**
+   Both reviews say yes, with BullMQ optional. Recommendation: yes, but only
+   after stage 1.
+
+## 7. Limits of this review
+
+- Nothing was built or run. No test suite, no type-check of the proposed APIs
+  beyond Astra's in-memory compile of its own examples.
+- Deployed setups were not inspected.
+- Fable's count of 15 unsafe casts in the four adapters was only partly
+  confirmed (9 found with a narrow search).
+- The uncommitted journal work in the tree was read as it stood on
+  2026-10-12 and may have moved since.

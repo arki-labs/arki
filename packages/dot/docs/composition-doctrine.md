@@ -15,9 +15,16 @@ declarations; point dependencies only downward; observe the world only in
 ## 1. Declarations are inert (the drizzle-table rule)
 
 Importing any module in the declaration layer must be **observationally
-free**: no env observation, no I/O, no connections, no throws, no global
-mutation. Pure *computation* at import is fine (deriving actions, building a
-handler from a static router); *observation* is not.
+free**: no env observation, no I/O, no connections, no throws that depend on
+the world, no global mutation. Pure *computation* at import is fine (deriving
+actions, building a handler from a static router); *observation* is not.
+
+- A declaration **may throw on a mistake in the code itself**, such as a
+  duplicate key in a compose fold (§4) or an invalid cron string. Such a throw
+  depends only on the source, so it fails on every import, in every
+  environment, the same way: it behaves like a type error the compiler could
+  not catch. A throw that depends on env, files, the network or the clock is
+  never allowed at import.
 
 - Env is observed at **use**, never at import — `@arki/env`'s `defineEnv` is
   lazy by design (the `process.env` snapshot and validation fire on first
