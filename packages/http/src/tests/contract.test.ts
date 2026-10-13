@@ -26,7 +26,6 @@ describe('route factories', () => {
     expect(route.post('/x', { id: 'a' }).method).toBe('POST');
     expect(route.put('/x', { id: 'b' }).method).toBe('PUT');
     expect(route.patch('/x', { id: 'c' }).method).toBe('PATCH');
-    // eslint-disable-next-line drizzle/enforce-delete-with-where -- route.delete is an HTTP contract factory, not a query builder
     expect(route.delete('/x', { id: 'd' }).method).toBe('DELETE');
   });
 
