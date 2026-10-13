@@ -1,5 +1,21 @@
 # @arki/resilience
 
+## 0.1.0
+
+### Minor Changes
+
+- The package now owns its public types and errors. `Policy` replaces cockatiel's `IPolicy`: `execute(fn, signal?)` gives `fn` a `{ signal, attempt }` context, and every policy exposes `onSuccess` and `onFailure`, with `onRetry`, `onGiveUp`, `onBreak`, `onHalfOpen`, `onReset`, `onTimeout` and `onReject` on the policies that have them. `CircuitOpenError`, `TimeoutError` and `BulkheadRejectedError` are this package's own classes with the engine error as `cause`, and a call cancelled by the caller's signal now rejects with `CancelledError` instead of being reported as a timeout. The `wrap` and `noop` exports are this package's own too. No cockatiel name appears in the published types anymore, so a cockatiel major release is no longer a breaking change here. The engine is upgraded to cockatiel 4.
+
+  Breaking: import `Policy` instead of `IPolicy`. Errors thrown by the policies are no longer `instanceof` cockatiel's classes.
+
+## 0.0.3
+
+### Patch Changes
+
+- Deprecate `withCircuitBreaker`. It builds a new circuit breaker on every call, so the breaker never remembers a failure and never opens. Build one policy with `createCircuitBreakerPolicy()` and pass it to `withResilience()` on each call. The export stays until the next breaking release.
+- Fix the README: the timeout option is `timeoutMs`, not `durationMs`, and the circuit-breaker options are `halfOpenAfter` and `consecutiveFailures`. The quick-wrapper example no longer imports `withCircuitBreaker`, and a reused-breaker example is added.
+- Add the first tests for the execution helpers.
+
 ## 0.0.2
 
 ### Patch Changes

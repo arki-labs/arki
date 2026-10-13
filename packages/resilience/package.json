@@ -1,6 +1,6 @@
 {
   "name": "@arki/resilience",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "Resilience primitives for ARKI — retry, circuit breaker, timeout, bulkhead, and curated presets, built on cockatiel.",
   "license": "MIT",
   "repository": {
@@ -44,7 +44,7 @@
     "package.json"
   ],
   "dependencies": {
-    "cockatiel": "^3.2.1"
+    "cockatiel": "^4.0.0"
   },
   "publishConfig": {
     "access": "public"
