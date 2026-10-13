@@ -5,7 +5,6 @@ export function remember<V>(cache: Map<string, V>, key: string, limit: number, c
   const created = create();
   if (cache.size >= limit) {
     const oldest = cache.keys().next();
-    // eslint-disable-next-line drizzle/enforce-delete-with-where -- Map#delete, not a Drizzle query
     if (oldest.done !== true) cache.delete(oldest.value);
   }
   cache.set(key, created);
