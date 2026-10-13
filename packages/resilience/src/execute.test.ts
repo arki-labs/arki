@@ -4,6 +4,7 @@ import {
   createCircuitBreakerPolicy,
   createRetryPolicy,
   isBrokenCircuitError,
+  noop,
   withCircuitBreaker,
   withResilience,
   withRetry,
@@ -48,6 +49,25 @@ describe('execution helpers', () => {
     const policy = createRetryPolicy({ maxAttempts: 1, initialDelay: 1, maxDelay: 2 });
 
     await expect(withResilience(() => 42, policy)).resolves.toBe(42);
+  });
+
+  // withResilience returns the policy's promise directly (no async wrapper), so a policy that throws
+  // synchronously must still reach the caller as a rejection, never as a synchronous throw.
+  it('withResilience turns a synchronous throw from the policy into a rejection', async () => {
+    const thrown = new Error('policy broke');
+    const broken: typeof noop = Object.create(noop, {
+      execute: {
+        value: () => {
+          throw thrown;
+        },
+      },
+    });
+
+    let call: Promise<unknown> | undefined;
+    expect(() => {
+      call = withResilience(() => 1, broken);
+    }).not.toThrow();
+    await expect(call).rejects.toBe(thrown);
   });
 
   it('a reused circuit breaker opens and stops calling the failing function', async () => {

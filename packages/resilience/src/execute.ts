@@ -4,6 +4,20 @@ import type { CircuitBreakerPolicyOptions, RetryPolicyOptions, TimeoutPolicyOpti
 import { createCircuitBreakerPolicy, createRetryPolicy, createTimeoutPolicy } from './policies.js';
 
 /**
+ * Return the policy's own promise instead of awaiting it inside an `async` function, which would
+ * wrap it in a second promise and add microtask hops to every call. A policy that throws instead of
+ * rejecting still yields a rejected promise, as an `async` function would.
+ */
+function run<T>(policy: IPolicy, fn: (context: { signal: AbortSignal }) => T | Promise<T>): Promise<T> {
+  try {
+    return policy.execute(fn);
+  } catch (error) {
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- passes the thrown value through unchanged, as an `async` function would
+    return Promise.reject(error);
+  }
+}
+
+/**
  * Execute a function with an already-constructed resilience policy.
  *
  * @example
@@ -14,11 +28,11 @@ import { createCircuitBreakerPolicy, createRetryPolicy, createTimeoutPolicy } fr
  * );
  * ```
  */
-export async function withResilience<T>(
+export function withResilience<T>(
   fn: (context: { signal: AbortSignal }) => T | Promise<T>,
   policy: IPolicy,
 ): Promise<T> {
-  return policy.execute(fn);
+  return run(policy, fn);
 }
 
 /**
@@ -27,23 +41,21 @@ export async function withResilience<T>(
  * Convenience wrapper that creates an ephemeral retry policy from the provided
  * options and executes immediately.
  */
-export async function withRetry<T>(
+export function withRetry<T>(
   fn: (context: { signal: AbortSignal }) => T | Promise<T>,
   options?: RetryPolicyOptions,
 ): Promise<T> {
-  const policy = createRetryPolicy(options);
-  return policy.execute(fn);
+  return run(createRetryPolicy(options), fn);
 }
 
 /**
  * Execute a function with a timeout policy.
  */
-export async function withTimeout<T>(
+export function withTimeout<T>(
   fn: (context: { signal: AbortSignal }) => T | Promise<T>,
   options?: TimeoutPolicyOptions,
 ): Promise<T> {
-  const policy = createTimeoutPolicy(options);
-  return policy.execute(fn);
+  return run(createTimeoutPolicy(options), fn);
 }
 
 /**
@@ -51,10 +63,9 @@ export async function withTimeout<T>(
  * remembers a failure and never opens. Build one policy with
  * `createCircuitBreakerPolicy()` and pass it to `withResilience()` on each call.
  */
-export async function withCircuitBreaker<T>(
+export function withCircuitBreaker<T>(
   fn: (context: { signal: AbortSignal }) => T | Promise<T>,
   options?: CircuitBreakerPolicyOptions,
 ): Promise<T> {
-  const policy = createCircuitBreakerPolicy(options);
-  return policy.execute(fn);
+  return run(createCircuitBreakerPolicy(options), fn);
 }
