@@ -17,7 +17,7 @@ import { findEventDefinition } from './fold.js';
 import { leaseToken } from './id.js';
 import { assertRootDb } from './storage.js';
 
-const LEASE_SECONDS = 60;
+const DEFAULT_LEASE_SECONDS = 60;
 const MAX_ATTEMPTS = 8;
 const BACKOFF_BASE_MS = 1000;
 const BACKOFF_CAP_MS = 300_000;
@@ -59,7 +59,7 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
 
   // Every time here is database time, so a worker with a skewed clock
   // cannot take a live lease or push a retry into the far future.
-  const claimOne = (db: AppDb & RootDb): Promise<JobRow | undefined> =>
+  const claimOne = (db: AppDb & RootDb, leaseSeconds: number): Promise<JobRow | undefined> =>
     db.transaction(async (tx): Promise<JobRow | undefined> => {
       const due = await tx
         .select({ id: jobsTable.id })
@@ -81,7 +81,7 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
         .update(jobsTable)
         .set({
           leaseToken: leaseToken(),
-          leaseUntil: dbNowPlus(LEASE_SECONDS),
+          leaseUntil: dbNowPlus(leaseSeconds),
           attempts: sql`${jobsTable.attempts} + 1`,
         })
         .where(eq(jobsTable.id, first.id))
@@ -89,8 +89,37 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
       return claimed;
     });
 
-  const runJob = async (db: AppDb & RootDb, job: JobRow, signal: AbortSignal): Promise<void> => {
+  /**
+   * Keeps the lease alive while the effect runs: every half lease, push `lease_until`
+   * out by a full lease, under this worker's token. Zero rows means the lease was
+   * lost (the worker stalled past the lease and another one reclaimed the job):
+   * the effect's signal aborts so it can stop, and its ack will find nothing to
+   * acknowledge. The timer never keeps the process alive.
+   */
+  const renewWhile = (db: AppDb & RootDb, job: JobRow, leaseSeconds: number, lost: AbortController) => {
+    const token = job.leaseToken ?? '';
+    const timer = setInterval(() => {
+      void db
+        .update(jobsTable)
+        .set({ leaseUntil: dbNowPlus(leaseSeconds) })
+        .where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, token)))
+        .returning({ id: jobsTable.id })
+        .then(rows => {
+          if (rows.length === 0) {
+            clearInterval(timer);
+            lost.abort(new Error(`journal: the lease on job ${job.id} was lost; another worker holds it now`));
+          }
+        })
+        .catch((error: unknown) => debugDrain('%s %s: lease renewal failed: %s', job.effect, job.id, errorText(error)));
+    }, leaseSeconds * 500);
+    timer.unref?.();
+    return () => clearInterval(timer);
+  };
+
+  const runJob = async (db: AppDb & RootDb, job: JobRow, signal: AbortSignal, leaseSeconds: number): Promise<void> => {
     const effect = effectsByName.get(job.effect);
+    const lost = new AbortController();
+    const stopRenewing = renewWhile(db, job, leaseSeconds, lost);
     try {
       if (effect === undefined) throw new Error(`effect "${job.effect}" is not registered`);
       const [eventRow] = await db.select().from(eventsTable).where(eq(eventsTable.seq, job.eventSeq));
@@ -101,8 +130,9 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
         eventRow.entityId,
       );
       // Inside the lease: a hook that throws fails the job like a handler failure.
+      const ownSignal = AbortSignal.any([signal, lost.signal]);
       await deps.hooks.run({ name: job.effect, event, jobId: job.id, attempt: job.attempts }, () =>
-        effect.run(event, { jobId: job.id, signal, db, run: deps.runOn(db, event) }),
+        effect.run(event, { jobId: job.id, signal: ownSignal, db, run: deps.runOn(db, event) }),
       );
       await db.delete(jobsTable).where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
       debugDrain('%s %s: done', job.effect, job.id);
@@ -125,16 +155,19 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
         dead ? ', dead' : '',
         errorText(error),
       );
+    } finally {
+      stopRenewing();
     }
   };
 
   return async (
     db: AppDb & RootDb,
-    opts?: { readonly batchSize?: number; readonly signal?: AbortSignal },
+    opts?: { readonly batchSize?: number; readonly signal?: AbortSignal; readonly leaseSeconds?: number },
   ): Promise<number> => {
     assertRootDb(db, 'drain');
     deps.hooks.freeze();
     const batchSize = opts?.batchSize ?? 20;
+    const leaseSeconds = opts?.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
     const signal = opts?.signal ?? new AbortController().signal;
     if (known.length === 0) return 0;
 
@@ -145,10 +178,10 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
     // An aborted signal stops the claiming; the job already running finishes.
     let claimed = 0;
     while (claimed < batchSize && !signal.aborted) {
-      const job = await claimOne(db);
+      const job = await claimOne(db, leaseSeconds);
       if (job === undefined) break;
       claimed += 1;
-      await runJob(db, job, signal);
+      await runJob(db, job, signal, leaseSeconds);
     }
     return claimed;
   };
@@ -181,7 +214,7 @@ export type WorkerDeps<AppDb extends RootDb> = {
   /** Runs one batch. The journal passes its own `drain` method, looked up on each call. */
   readonly drain: (
     db: AppDb & RootDb,
-    opts?: { readonly batchSize?: number; readonly signal?: AbortSignal },
+    opts?: { readonly batchSize?: number; readonly signal?: AbortSignal; readonly leaseSeconds?: number },
   ) => Promise<number>;
 };
 
@@ -191,7 +224,7 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
 
   const worker = (
     db: AppDb & RootDb,
-    opts?: { readonly pollMs?: number; readonly batchSize?: number },
+    opts?: { readonly pollMs?: number; readonly batchSize?: number; readonly leaseSeconds?: number },
   ): JournalWorker => {
     assertRootDb(db, 'worker');
     const pollMs = opts?.pollMs ?? DEFAULT_POLL_MS;
@@ -224,7 +257,11 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
         woken = false;
         let processed = 0;
         try {
-          processed = await deps.drain(db, { batchSize: opts?.batchSize, signal: stopping.signal });
+          processed = await deps.drain(db, {
+            batchSize: opts?.batchSize,
+            signal: stopping.signal,
+            leaseSeconds: opts?.leaseSeconds,
+          });
         } catch (error) {
           debugWorker('drain failed: %s', errorText(error));
         }

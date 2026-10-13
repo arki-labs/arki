@@ -327,9 +327,9 @@ export const journal = j.compose({ tables, effects: [orderMail], services: { mai
 
 `journal.worker(db, { pollMs, batchSize })` is a loop around `drain`. When a pass finds no job it sleeps `pollMs` (1000 by default).
 
-- A pass claims one job at a time, right before it runs it, up to `batchSize` jobs. So each job's 60-second lease covers its own work only, and a slow job cannot let the lease of a later one run out. A job queued during the pass can run in the same pass.
+- A pass claims one job at a time, right before it runs it, up to `batchSize` jobs. So each job's lease (`leaseSeconds`, default 60) covers its own work only, and a slow job cannot let the lease of a later one run out. A job queued during the pass can run in the same pass.
+- While an effect runs, the worker renews its lease every half lease, under its own token. A long effect is safe for as long as its worker is alive. If the renewal finds the lease gone (the worker stalled past a whole lease and another worker reclaimed the job), the effect's `ctx.signal` aborts so it can stop, and its result is not acknowledged: the other worker owns the job now. An effect that does external work should still pass `jobId` on as an idempotency key, because the stall can happen between the work and the ack.
 - `stop()` aborts the running effect's `ctx.signal`, claims no further job, and resolves when that effect returns. An effect that does long work should pass `ctx.signal` on (for example to `fetch`) so shutdown does not wait for it.
-- A job longer than the 60-second lease can still be claimed by a second worker. Keep effects short, or split the work.
 - `drain` and the worker never claim a job whose effect this journal does not have. During a rolling deploy an older worker may still have it. After the deploy, `journal.strandedJobs(db)` lists what is left, counted per effect name. A non-empty list means an effect was renamed or removed while it had jobs: bring it back under its old name until the count is zero, or delete those rows on purpose.
 
 A wake ends the sleep, so an effect does not wait for the next poll:

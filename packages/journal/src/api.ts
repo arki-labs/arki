@@ -244,12 +244,14 @@ export type Journal<
   /**
    * Run up to `batchSize` due jobs. Returns how many jobs were claimed. Root database only.
    * It must open the journal's transaction type: an effect runs commands on it.
-   * Each job is claimed right before it runs, so its lease covers only its own work.
+   * Each job is claimed right before it runs, so its lease (`leaseSeconds`, default 60)
+   * covers only its own work, and the lease is renewed every half lease while the effect
+   * runs. A lost lease aborts the effect's `ctx.signal`.
    * Once `signal` is aborted no further job is claimed; the running one sees it as `ctx.signal`.
    */
   drain(
     db: AppDb & RootDb & TransactionSource<Tx>,
-    opts?: { readonly batchSize?: number; readonly signal?: AbortSignal },
+    opts?: { readonly batchSize?: number; readonly signal?: AbortSignal; readonly leaseSeconds?: number },
   ): Promise<number>;
   /**
    * A loop around `drain`. The same database as `drain`. `stop()` aborts the running
@@ -257,7 +259,7 @@ export type Journal<
    */
   worker(
     db: AppDb & RootDb & TransactionSource<Tx>,
-    opts?: { readonly pollMs?: number; readonly batchSize?: number },
+    opts?: { readonly pollMs?: number; readonly batchSize?: number; readonly leaseSeconds?: number },
   ): JournalWorker;
   /**
    * Wake every running worker this journal started in this process. Call it

@@ -112,6 +112,63 @@ describe('drain', () => {
     expect(await jobById(job.id)).toBeNull();
   });
 
+  it('renews the lease while a long effect runs, so it is not claimed twice; a lost lease aborts the effect', async () => {
+    // Why: AI and network effects run for minutes. Without renewal a second worker would take the
+    // job after the lease and run it twice. With it, the only way to lose a job is to stall past a
+    // whole lease, and then the effect must stop, because another worker owns the job now.
+    const seen: string[] = [];
+    const slow = j.effect('slow-mail', order, {
+      OrderPaid: async (e, { signal }) => {
+        await new Promise<void>(resolve => {
+          const timer = setTimeout(resolve, 1300);
+          signal.addEventListener('abort', () => {
+            clearTimeout(timer);
+            resolve();
+          });
+        });
+        seen.push(signal.aborted ? `${e.entityId}:aborted` : e.entityId);
+      },
+    });
+    const slowJournal = j.compose({ tables, effects: [slow] });
+    const place = (id: OrderId) =>
+      db.transaction(tx =>
+        slowJournal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      );
+    const pay = (id: OrderId) =>
+      db.transaction(tx => slowJournal.write(tx, order, id, { meta, events: () => [OrderPaid({ amount: 1 })] }));
+    const leaseOf = async (effect: string) => {
+      const rows = await db.select().from(tables.jobs).where(eq(tables.jobs.effect, effect));
+      return rows[0];
+    };
+
+    // Lease of one second, renewed every 500 ms; the effect takes 1.3 s and finishes once.
+    const first = orderId(++next);
+    await place(first);
+    await pay(first);
+    const draining = slowJournal.drain(db, { leaseSeconds: 1 });
+    await new Promise(resolve => setTimeout(resolve, 700));
+    const midway = await leaseOf('slow-mail');
+    expect(midway?.leaseUntil?.getTime(), 'the lease was pushed past its first expiry').toBeGreaterThan(
+      Date.now() + 200,
+    );
+    expect(await draining).toBe(1);
+    expect(seen).toEqual([first]);
+    expect(await leaseOf('slow-mail')).toBeUndefined();
+
+    // Another worker took the job (the token changed): the next renewal aborts the effect.
+    const second = orderId(++next);
+    await place(second);
+    await pay(second);
+    const draining2 = slowJournal.drain(db, { leaseSeconds: 1 });
+    await new Promise(resolve => setTimeout(resolve, 200));
+    await db.update(tables.jobs).set({ leaseToken: 'other-worker' }).where(eq(tables.jobs.effect, 'slow-mail'));
+    expect(await draining2).toBe(1);
+    expect(seen).toEqual([first, `${second}:aborted`]);
+    // Not acknowledged by this worker: the row is still there, under the other token.
+    expect(await leaseOf('slow-mail')).toMatchObject({ leaseToken: 'other-worker' });
+    await db.delete(tables.jobs).where(eq(tables.jobs.effect, 'slow-mail'));
+  }, 15_000);
+
   it('leaves a job for an unknown effect pending and untouched', async () => {
     const job = await placeAndPay();
     await db.update(tables.jobs).set({ effect: 'retired-effect' }).where(eq(tables.jobs.id, job.id));
