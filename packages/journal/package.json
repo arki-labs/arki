@@ -42,10 +42,20 @@
       "import": "./dist/dot.js",
       "default": "./dist/dot.js"
     },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "default": "./dist/errors.js"
+    },
     "./orpc": {
       "types": "./dist/orpc.d.ts",
       "import": "./dist/orpc.js",
       "default": "./dist/orpc.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "default": "./dist/testing.js"
     },
     "./package.json": "./package.json"
   },
@@ -94,13 +104,21 @@
   },
   "peerDependencies": {
     "@arki/dot": "workspace:*",
-    "@orpc/server": "catalog:backend"
+    "@electric-sql/pglite": "catalog:",
+    "@orpc/server": "catalog:backend",
+    "drizzle-kit": "catalog:drizzle"
   },
   "peerDependenciesMeta": {
     "@arki/dot": {
       "optional": true
     },
+    "@electric-sql/pglite": {
+      "optional": true
+    },
     "@orpc/server": {
+      "optional": true
+    },
+    "drizzle-kit": {
       "optional": true
     }
   },

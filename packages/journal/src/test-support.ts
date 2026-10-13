@@ -2,14 +2,12 @@
  * Shared fixture for the package tests: an in-memory PGlite, the journal
  * tables, and a small `orders` domain. Excluded from the build.
  */
-import { PGlite } from '@electric-sql/pglite';
-import { pushSchema } from 'drizzle-kit/api-postgres';
 import { integer, pgTable, varchar } from 'drizzle-orm/pg-core';
-import { drizzle } from 'drizzle-orm/pglite';
 import { z } from 'zod';
 
 import { initJournal } from './journal.js';
 import { journalTables } from './pg.js';
+import { openJournalDb } from './testing.js';
 
 export type OrderId = `ord_${string}`;
 export const orderId = (n: number): OrderId => `ord_${n}`;
@@ -79,13 +77,6 @@ export const profile = j
   .on(ProfileFlagged, (_row, e) => ({ nick: e.data.nick }))
   .on(ProfileClosed, () => null);
 
-export async function openDb() {
-  const client = new PGlite('memory://');
-  await client.waitReady;
-  const db = drizzle({ client });
-  const { apply } = await pushSchema({ ...tables, orders, customerOrderCounts, profiles }, db);
-  await apply();
-  return { db, client };
-}
+export const openDb = () => openJournalDb({ ...tables, orders, customerOrderCounts, profiles });
 
 export const meta = { actorId: 'usr_test' };
