@@ -1,4 +1,4 @@
-// Speed of @arki/log against pino (which it wraps), winston and consola.
+// Speed of @arki/log against pino, winston and consola.
 // Run: `bun run bench` (explore) or `bun run bench --profile publish --write-readme`.
 //
 // Every logger writes to an in-process sink, so nothing touches a terminal or a disk.
@@ -11,8 +11,7 @@ import pino from 'pino';
 import winston from 'winston';
 
 import { compare, defineSuite, scenario } from '@arki/bench';
-import { configuration, Logger } from '@arki/log';
-import { createLogging, fingersCrossed, lineSink, redact } from '@arki/log/core';
+import { createLogging, fingersCrossed, lineSink, redact } from '@arki/log';
 import { file } from '@arki/log/node';
 
 type Fields = { userId: number; route: string; cached: boolean };
@@ -36,15 +35,9 @@ const sinkStream = new Writable({
   },
 });
 
-// @arki/log builds its own pino instance at import time and writes it to stdout. Swap it for an
-// equivalent one (same options) that writes to the sink. Batching is off by default and stays off.
-configuration.transport = pino({ level: 'trace', base: null, timestamp: false }, sink);
-const arki = new Logger('bench');
-arki.setSeverity(configuration.getSeverity()); // INFO unless LOG_LEVEL says otherwise
-
 const pinoLog = pino({ level: 'info', base: null }, sink);
 
-// The new zero-dependency core (`@arki/log/core`), writing JSON lines to the same sink.
+// @arki/log (zero dependencies), writing JSON lines to the same sink.
 const coreLogging = createLogging();
 coreLogging.configure({
   channels: { sink: lineSink(line => sink.write(line)) },
@@ -85,7 +78,10 @@ coreDevNullLogging.configure({
   default: { level: 'info', channels: ['devnull'] },
 });
 const coreDevNull = coreDevNullLogging.getLogger('bench');
-const pinoDevNull = pino({ level: 'info', base: null }, pino.destination({ dest: '/dev/null', minLength: 16 * 1024 - 1 }));
+const pinoDevNull = pino(
+  { level: 'info', base: null },
+  pino.destination({ dest: '/dev/null', minLength: 16 * 1024 - 1 }),
+);
 
 const winstonLog = winston.createLogger({
   level: 'info',
@@ -122,10 +118,6 @@ const pick = (o: Record<string, unknown>): Parsed['fields'] => ({
 const text = (value: Parsed): string => JSON.stringify(value);
 
 // How each library lays out the message and the fields in its line.
-const fromArki = (line: string): string => {
-  const o = record(line);
-  return text({ message: o.body, fields: pick(o.attributes as Record<string, unknown>) });
-};
 const fromCore = (line: string): string => {
   const o = record(line);
   return text({ message: o.message, fields: pick(o.fields as Record<string, unknown>) });
@@ -172,12 +164,11 @@ const noLine = (call: Call, write: (call: Call) => void): number => {
 export default defineSuite({
   id: '@arki/log',
   intro:
-    'Logging a line to an in-process sink with `@arki/log`, against pino (which it wraps), winston and consola. Pino is the speed reference for structured JSON logging in Node; winston and consola are the other widely used loggers.',
+    'Logging a line to an in-process sink with `@arki/log`, against pino, winston and consola. Pino is the speed reference for structured JSON logging in Node; winston and consola are the other widely used loggers.',
   notes: [
-    'Every logger writes to a sink in memory. `@arki/log` builds its own pino instance that writes to stdout, so the benchmark swaps `configuration.transport` for an identical pino instance (same options) that writes to the sink. Batching is off, which is the default.',
-    "The JSON differs. `@arki/log` wraps each call in a record (name, body, attributes, severity number and text, timestamp, trace ids) before handing it to pino. That is the structured contract the package sells, and it is the extra work in the rows below. Direct pino, winston and consola write only the message and the fields. The contract is therefore narrow: one line that contains the message and the three fields with the same values, and the check parses each library's line to read them back.",
-    '`@arki/log/core` is the zero-dependency rewrite (plan 007). It writes one JSON object per line: `time`, `level`, `levelName`, `category`, `template`, the rendered `message`, then `fields`. Its rows use the same sink and the same contract.',
-    'Pino is used the way its docs show (fields first, then the message), with `base: null` to match `@arki/log`. Winston has the timestamp and JSON formats on. Consola has one reporter that writes `JSON.stringify` of the entry (level, type, time, arguments). winston writes through a stream, so its cost includes that.',
+    'Every logger writes to a sink in memory.',
+    "The JSON differs. `@arki/log` writes one JSON object per line: `time`, `level`, `levelName`, `category`, `template`, the rendered `message`, then `fields`. Pino, winston and consola write their own layouts. The contract is therefore narrow: one line that contains the message and the three fields with the same values, and the check parses each library's line to read them back.",
+    'Pino is used the way its docs show (fields first, then the message), with `base: null`. Winston has the timestamp and JSON formats on. Consola has one reporter that writes `JSON.stringify` of the entry (level, type, time, arguments). winston writes through a stream, so its cost includes that.',
   ],
   groups: [
     compare<Call>({
@@ -189,19 +180,10 @@ export default defineSuite({
       },
       inputs: calls,
       expected: ({ message, fields }) => text({ message, fields }),
-      baseline: 'arki',
+      baseline: 'core',
       cases: c => ({
-        arki: c({
-          label: '@arki/log logger.info(msg, fields)',
-          package: '@arki/log',
-          run: ({ message, fields }) => {
-            arki.info(message, fields);
-            return sink.last;
-          },
-          normalize: fromArki,
-        }),
         core: c({
-          label: '@arki/log/core log.info(msg, fields)',
+          label: '@arki/log log.info(msg, fields)',
           package: '@arki/log',
           run: ({ message, fields }) => {
             core.info(message, fields);
@@ -245,15 +227,10 @@ export default defineSuite({
       contract: { id: 'log-disabled/v1', description: 'no written line from a debug call below the active info level' },
       inputs: calls,
       expected: () => 0,
-      baseline: 'arki',
+      baseline: 'core',
       cases: c => ({
-        arki: c({
-          label: '@arki/log logger.debug(msg, fields)',
-          package: '@arki/log',
-          run: call => noLine(call, ({ message, fields }) => arki.debug(message, fields)),
-        }),
         core: c({
-          label: '@arki/log/core log.debug(msg, fields)',
+          label: '@arki/log log.debug(msg, fields)',
           package: '@arki/log',
           run: call => noLine(call, ({ message, fields }) => core.debug(message, fields)),
         }),
@@ -280,13 +257,8 @@ export default defineSuite({
       title: 'Create a child logger with one bound field',
       note: 'The usual per-request or per-module pattern. The rows do different work and are not ranked: consola has no bound fields, so its row uses `withTag` (a name only).',
       cases: {
-        arki: {
-          label: '@arki/log logger.child(name, fields)',
-          package: '@arki/log',
-          run: () => arki.child('http', { requestId: 'r-1' }),
-        },
         core: {
-          label: '@arki/log/core log.with(fields)',
+          label: '@arki/log log.with(fields)',
           package: '@arki/log',
           run: () => core.with({ requestId: 'r-1' }),
         },
@@ -312,7 +284,7 @@ export default defineSuite({
       baseline: 'core',
       cases: c => ({
         core: c({
-          label: '@arki/log/core log.info(msg)',
+          label: '@arki/log log.info(msg)',
           package: '@arki/log',
           run: ({ message }) => {
             core.info(message);
@@ -361,7 +333,7 @@ export default defineSuite({
       baseline: 'core',
       cases: c => ({
         core: c({
-          label: '@arki/log/core log.with(bound).info(msg, fields)',
+          label: '@arki/log log.with(bound).info(msg, fields)',
           package: '@arki/log',
           run: ({ message, fields }) => {
             coreBound.info(message, fields);
@@ -400,7 +372,7 @@ export default defineSuite({
       baseline: 'core',
       cases: c => ({
         core: c({
-          label: "@arki/log/core log.info('user {userId} on {route}', fields)",
+          label: "@arki/log log.info('user {userId} on {route}', fields)",
           package: '@arki/log',
           run: ({ fields }) => {
             core.info('user {userId} on {route}', fields);
@@ -431,7 +403,7 @@ export default defineSuite({
       baseline: 'core',
       cases: c => ({
         core: c({
-          label: '@arki/log/core redact([5 paths])',
+          label: '@arki/log redact([5 paths])',
           package: '@arki/log',
           run: ({ message }) => {
             coreRedact.info(message, secrets);
@@ -460,16 +432,16 @@ export default defineSuite({
       kind: 'scenario',
       id: 'fingers-crossed',
       title: 'info: message + 3 fields held by fingersCrossed (no trigger)',
-      note: 'Records wait in a bounded ring for an error that never comes, so nothing is written. Pino has no equivalent; the plain core row is the same call with a normal sink.',
+      note: 'Records wait in a bounded ring for an error that never comes, so nothing is written. Pino has no equivalent; the plain row is the same call with a normal sink.',
       inputs: calls,
       cases: {
         held: {
-          label: '@arki/log/core fingersCrossed, no trigger',
+          label: '@arki/log fingersCrossed, no trigger',
           package: '@arki/log',
           run: ({ message, fields }) => coreHeld.info(message, fields),
         },
         written: {
-          label: '@arki/log/core plain sink',
+          label: '@arki/log plain sink',
           package: '@arki/log',
           run: ({ message, fields }) => core.info(message, fields),
         },
@@ -479,11 +451,11 @@ export default defineSuite({
       kind: 'scenario',
       id: 'dev-null',
       title: 'info: message + 3 fields, really written to /dev/null',
-      note: 'Both buffer lines and write them with `fs.writeSync` at 16 KiB: the core `file()` sink and `pino.destination({ minLength: 16 KiB })`. Not ranked: the line layouts differ.',
+      note: 'Both buffer lines and write them with `fs.writeSync` at 16 KiB: the `@arki/log` `file()` sink and `pino.destination({ minLength: 16 KiB })`. Not ranked: the line layouts differ.',
       inputs: calls,
       cases: {
         core: {
-          label: "@arki/log/core file({ path: '/dev/null' })",
+          label: "@arki/log file({ path: '/dev/null' })",
           package: '@arki/log',
           run: ({ message, fields }) => coreDevNull.info(message, fields),
         },

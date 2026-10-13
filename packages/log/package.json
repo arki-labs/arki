@@ -1,7 +1,7 @@
 {
   "name": "@arki/log",
   "version": "0.0.3",
-  "description": "Structured logging primitives for ARKI — severity levels, batching, distributed tracing hooks, and Pino-backed transports.",
+  "description": "Zero-dependency structured logging for every JavaScript runtime — message templates, channels, scoped context, redaction, fingers-crossed buffering and OpenTelemetry records.",
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -18,8 +18,8 @@
     "typescript",
     "logger",
     "logging",
-    "pino",
-    "debug",
+    "structured-logging",
+    "opentelemetry",
     "observability"
   ],
   "publishConfig": {
@@ -28,16 +28,6 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
-    },
-    "./debug": {
-      "types": "./dist/debug.d.ts",
-      "import": "./dist/debug.js",
-      "default": "./dist/debug.js"
-    },
-    "./core": {
       "types": "./dist/core/index.d.ts",
       "import": "./dist/core/index.js",
       "default": "./dist/core/index.js"
@@ -46,6 +36,11 @@
       "types": "./dist/node/index.d.ts",
       "import": "./dist/node/index.js",
       "default": "./dist/node/index.js"
+    },
+    "./otel": {
+      "types": "./dist/otel/index.d.ts",
+      "import": "./dist/otel/index.js",
+      "default": "./dist/otel/index.js"
     },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
@@ -78,20 +73,30 @@
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
-  "dependencies": {
-    "debug": "catalog:",
-    "pino": "catalog:"
-  },
   "devDependencies": {
     "@arki/bench": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/debug": "catalog:",
+    "@opentelemetry/api": "catalog:opentelemetry",
+    "@opentelemetry/api-logs": "catalog:opentelemetry",
     "@types/node": "catalog:node",
     "consola": "^3.4.2",
+    "pino": "catalog:",
     "typescript": "catalog:",
     "winston": "^3.19.0"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "catalog:opentelemetry",
+    "@opentelemetry/api-logs": "catalog:opentelemetry"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/api": {
+      "optional": true
+    },
+    "@opentelemetry/api-logs": {
+      "optional": true
+    }
   }
 }
