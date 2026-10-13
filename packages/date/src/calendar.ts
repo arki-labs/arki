@@ -5,6 +5,7 @@
 
 import type { Civil, PlainDate, Weekday, WeekRules } from './types.js';
 import { plainDate } from './core.js';
+import { epochDaysOf, weekOfDays } from './internal/buckets.js';
 import { daysBetween } from './internal/days.js';
 import { startOfWeekDate } from './internal/week.js';
 import { ISO_WEEK, Temporal } from './types.js';
@@ -62,6 +63,8 @@ function week1Start(year: number, rules: WeekRules): PlainDate {
  * calendar year around New Year.
  */
 export function weekOf(value: Civil, rules: WeekRules = ISO_WEEK): WeekInfo {
+  const days = epochDaysOf(value);
+  if (days !== undefined) return weekOfDays(days, rules);
   const date = plainDate(value);
   const weekStart = startOfWeekDate(date, rules);
   let weekYear = date.year + 1;

@@ -1,24 +1,16 @@
 import type { PlainDate, Weekday } from '../types.js';
-import { Temporal } from '../types.js';
+import { daysFromCivil } from './civil.js';
 
 const WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const satisfies readonly Weekday[];
 
 const MS_PER_DAY = 86_400_000;
 
 /**
- * Days since 1970-01-01 for an ISO calendar date, via `Date.UTC` — pure
- * integer arithmetic with no zone, and far cheaper than `PlainDate#until`
- * on the polyfill. Valid across Temporal's whole date range (which matches
- * `Date`'s ±271,821 years).
+ * Days since 1970-01-01 for an ISO calendar date — pure integer arithmetic,
+ * far cheaper than `PlainDate#until` on the polyfill. Valid for any year.
  */
 export function epochDay(date: PlainDate): number {
-  // setUTCFullYear(y, m, d) sets all three at once, so years 0–99 are not
-  // remapped to 19xx the way `Date.UTC(y, …)` does (which turned 0000-02-29 into March 1).
-  const d = new Date(0);
-  d.setUTCFullYear(date.year, date.month - 1, date.day);
-  const ms = d.getTime();
-  if (Number.isNaN(ms)) return Temporal.PlainDate.from('1970-01-01').until(date, { largestUnit: 'day' }).days;
-  return Math.floor(ms / MS_PER_DAY);
+  return daysFromCivil(date.year, date.month, date.day);
 }
 
 /** The `YYYY-MM-DD` key of an epoch day — identical to `PlainDate#toString()`, including extended years. */

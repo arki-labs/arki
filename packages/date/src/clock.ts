@@ -13,9 +13,10 @@ import { SystemClock } from '@arki/clock';
 
 import type { Civil, Instant, PlainDate, Point, Timeline, WeekRules, ZonedDateTime } from './types.js';
 import { instant, plainDate } from './core.js';
+import { bucketStart, epochDaysOf, shiftBucket, zonedDays } from './internal/buckets.js';
 import { systemTimeZone } from './interop.js';
 import { startOf } from './math.js';
-import { isInstant, isZonedDateTime, Temporal } from './types.js';
+import { isInstant, ISO_WEEK, isZonedDateTime, Temporal } from './types.js';
 
 const systemClock: Clock = new SystemClock();
 
@@ -55,12 +56,30 @@ function civilIn(value: Point, timeZone: string | undefined): Civil {
 
 type CurrentUnit = 'day' | 'week' | 'month' | 'year';
 
+/** `sameCurrentUnit` on integer day counts; `undefined` for a non-ISO calendar (Temporal then decides). */
+function sameCurrentBucket(
+  value: Point,
+  unit: CurrentUnit,
+  offsetUnits: number,
+  options: CurrentOptions | undefined,
+): boolean | undefined {
+  const timeZone = options?.timeZone;
+  const zone = isZonedDateTime(value) ? (timeZone ?? value.timeZoneId) : (timeZone ?? systemTimeZone());
+  const days = epochDaysOf(value, isInstant(value) ? zone : timeZone);
+  if (days === undefined) return undefined;
+  const rules = options?.week ?? ISO_WEEK;
+  const current = bucketStart(zonedDays(now(options).epochMilliseconds, zone), unit, rules);
+  return bucketStart(days, unit, rules) === shiftBucket(current, unit, offsetUnits);
+}
+
 function sameCurrentUnit(
   value: Point,
   unit: CurrentUnit,
   offsetUnits: number,
   options: CurrentOptions | undefined,
 ): boolean {
+  const fast = sameCurrentBucket(value, unit, offsetUnits, options);
+  if (fast !== undefined) return fast;
   const civil = civilIn(value, options?.timeZone);
   const zone = isZonedDateTime(civil) ? civil.timeZoneId : (options?.timeZone ?? systemTimeZone());
   const target = startOf(plainDate(civil), unit, options);

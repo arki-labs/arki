@@ -10,6 +10,7 @@
  * - `diff(from, to)` is `to − from`: positive when `to` is later.
  */
 
+import type { DurationInput } from './internal/amount.js';
 import type {
   Amount,
   AmountFor,
@@ -35,9 +36,11 @@ import { instant } from './core.js';
 import { negateDurationInput, toDurationInput } from './internal/amount.js';
 import { daysBetween } from './internal/days.js';
 import { sameKind } from './internal/kind.js';
+import { addPlainDate, endOfPlainDate, startOfPlainDate } from './internal/plain.js';
 import { addPoint, comparePoints, isCalendarUnit } from './internal/point.js';
 import { startOfWeekDate } from './internal/week.js';
-import { isInstant, ISO_WEEK, isPlainDate, isPlainDateTime, isZonedDateTime } from './types.js';
+import { startOfZoned } from './internal/zoned.js';
+import { isDuration, isInstant, ISO_WEEK, isPlainDate, isPlainDateTime, isZonedDateTime } from './types.js';
 
 export type ArithmeticOptions = Readonly<{ overflow?: Overflow }>;
 export type SetOptions = Readonly<{ overflow?: Overflow; disambiguation?: Disambiguation }>;
@@ -54,7 +57,16 @@ export function add<T extends Point>(
   options?: ArithmeticOptions,
 ): T;
 export function add(value: Point, amount: Amount | Duration, options?: ArithmeticOptions): Point {
-  return sameKind(value, addPoint(value, toDurationInput(amount), options));
+  return sameKind(value, addAny(value, toDurationInput(amount), options));
+}
+
+/** Temporal's `add`, through the integer fast path for ISO-calendar plain dates. */
+function addAny(value: Point, input: DurationInput, options: ArithmeticOptions | undefined): Point {
+  if (isPlainDate(value) && !isDuration(input)) {
+    const fast = addPlainDate(value, input, options?.overflow);
+    if (fast !== undefined) return fast;
+  }
+  return addPoint(value, input, options);
 }
 
 /** `value − amount`. Not always the inverse of `add` (Jan 31 + 1 month − 1 month = Feb 28 − 1 month = Jan 28). */
@@ -65,7 +77,7 @@ export function sub<T extends Point>(
   options?: ArithmeticOptions,
 ): T;
 export function sub(value: Point, amount: Amount | Duration, options?: ArithmeticOptions): Point {
-  return sameKind(value, addPoint(value, negateDurationInput(toDurationInput(amount)), options));
+  return sameKind(value, addAny(value, negateDurationInput(toDurationInput(amount)), options));
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +117,8 @@ export function set<T extends Civil>(value: T, patch: Partial<PartsFor<NoInfer<T
 // boundaries
 
 function startOfDate(date: PlainDate, unit: CalendarUnit, rules: WeekRules): PlainDate {
+  const fast = startOfPlainDate(date, unit, rules);
+  if (fast !== undefined) return fast;
   switch (unit) {
     case 'day': {
       return date;
@@ -129,6 +143,10 @@ function startOfPoint(value: Point, unit: Unit, rules: WeekRules): Point {
     if (isInstant(value))
       throw new RangeError(`startOf(${unit}) needs a zone — project the Instant with inZone() first`);
     if (isPlainDate(value)) return startOfDate(value, unit, rules);
+    if (isZonedDateTime(value)) {
+      const fast = startOfZoned(value, unit, rules);
+      if (fast !== undefined) return fast;
+    }
     const date = startOfDate(value.toPlainDate(), unit, rules);
     if (isPlainDateTime(value)) return date.toPlainDateTime();
     return date.toZonedDateTime({ timeZone: value.timeZoneId });
@@ -218,6 +236,10 @@ export function nextBoundary(value: Point, unit: Unit, options?: WeekOptions): P
 export function endOf<T extends Civil>(value: T, unit: CalendarUnit, options?: WeekOptions): T;
 export function endOf<T extends Point>(value: T, unit: UnitFor<NoInfer<T>>, options?: WeekOptions): T;
 export function endOf(value: Point, unit: Unit, options?: WeekOptions): Point {
+  if (isPlainDate(value) && isCalendarUnit(unit)) {
+    const fast = endOfPlainDate(value, unit, options?.week ?? ISO_WEEK);
+    if (fast !== undefined) return sameKind(value, fast);
+  }
   const next = nextBoundaryPoint(value, unit, options?.week ?? ISO_WEEK);
   const step: Amount = isPlainDate(next) ? { days: -1 } : { nanoseconds: -1 };
   return sameKind(value, addPoint(next, step));
