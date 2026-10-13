@@ -662,6 +662,7 @@ describe('powerRegression', () => {
 });
 
 describe('polynomialRegression', () => {
+  const relativeError = (actual: number, expected: number): number => Math.abs(actual - expected) / Math.abs(expected);
   it('recovers an exact quadratic, lowest degree first', () => {
     const xs = [-2, -1, 0, 1, 2, 3];
     const fit = polynomialRegression(
@@ -698,6 +699,38 @@ describe('polynomialRegression', () => {
     expect(() => polynomialRegression([1, 1, 2], [1, 2, 3], 2)).toThrow(InvalidArgumentError);
     expect(() => polynomialRegression([1, 2, 3], [1, 2, 3], 1.5)).toThrow(InvalidArgumentError);
     expect(() => polynomialRegression([1, 2, 3], [1, 2, 3], -1)).toThrow(InvalidArgumentError);
+  });
+  it('fits a cubic on calendar years, where uncentered x is ill-conditioned', () => {
+    // y = 0.01 (x - 2015)(x - 2020)(x - 2024) + 100. Raw powers of x ~ 2000 make the
+    // uncentered normal equations numerically singular; centered and scaled x does not.
+    const years = Array.from({ length: 10 }, (_, i) => 2015 + i);
+    const cubic = (v: number): number => 0.01 * (v - 2015) * (v - 2020) * (v - 2024) + 100;
+    const fit = polynomialRegression(
+      years,
+      years.map(v => cubic(v)),
+      3,
+    );
+    // Expanded: 0.01x³ - 60.59x² + 122_371.4x - 82_382_872 (+ 100).
+    const expected = [-82_382_872 + 100, 122_371.4, -60.59, 0.01];
+    for (const [k, c] of expected.entries()) expect(relativeError(fit.coefficients[k]!, c)).toBeLessThan(1e-11);
+    for (const at of [2015, 2017.5, 2020, 2024, 2026, 2030]) {
+      expect(relativeError(fit.predict(at), cubic(at))).toBeLessThan(1e-12);
+    }
+    expect(fit.r2).toBeCloseTo(1, 12);
+  });
+  it('predicts in the centered basis, even where the expanded coefficients are sensitive', () => {
+    // A degree-5 fit of the same cubic: the zero x^4, x^5 terms make the expanded
+    // coefficients sensitive, but predict never goes through them.
+    const years = Array.from({ length: 10 }, (_, i) => 2015 + i);
+    const cubic = (v: number): number => 0.01 * (v - 2015) * (v - 2020) * (v - 2024) + 100;
+    const fit = polynomialRegression(
+      years,
+      years.map(v => cubic(v)),
+      5,
+    );
+    for (const at of [2015, 2019.5, 2024, 2026]) {
+      expect(relativeError(fit.predict(at), cubic(at))).toBeLessThan(1e-9);
+    }
   });
   it('reports a numerically singular system as a typed error', () => {
     const xs = Array.from({ length: 30 }, (_, i) => i + 1);
@@ -771,8 +804,22 @@ describe('quartiles', () => {
     expect(quartiles([1, 2, 3, 4, 5, 6, 7], { method: 'tukey' })).toEqual({ q1: 2.5, q2: 4, q3: 5.5 });
     expect(quartiles([4], { method: 'tukey' })).toEqual({ q1: 4, q2: 4, q3: 4 });
   });
+  it("'medianExcluded' leaves the odd middle value out of both halves (TI-83, Wikipedia Method 1)", () => {
+    // Wikipedia "Quartile", example 1: Method 1 gives Q1 = 15, Q3 = 43; Method 2 gives 25.5, 42.5.
+    const data = [6, 7, 15, 36, 39, 40, 41, 42, 43, 47, 49];
+    expect(quartiles(data, { method: 'medianExcluded' })).toEqual({ q1: 15, q2: 40, q3: 43 });
+    expect(quartiles(data, { method: 'tukey' })).toEqual({ q1: 25.5, q2: 40, q3: 42.5 });
+    // Example 2 has an even count, so both rules split it the same way: Q1 = 15, Q3 = 40.
+    const even = [7, 15, 36, 39, 40, 41];
+    expect(quartiles(even, { method: 'medianExcluded' })).toEqual({ q1: 15, q2: 37.5, q3: 40 });
+    expect(quartiles(even, { method: 'tukey' })).toEqual({ q1: 15, q2: 37.5, q3: 40 });
+    expect(quartiles([1, 2, 3, 4, 5, 6, 7], { method: 'medianExcluded' })).toEqual({ q1: 2, q2: 4, q3: 6 });
+    expect(quartiles([3, 1, 2], { method: 'medianExcluded' })).toEqual({ q1: 1, q2: 2, q3: 3 });
+    expect(quartiles([4], { method: 'medianExcluded' })).toEqual({ q1: 4, q2: 4, q3: 4 });
+  });
   it('rejects empty data and unknown methods', () => {
     expect(() => quartiles([])).toThrow(EmptyDataError);
+    expect(() => quartiles([], { method: 'medianExcluded' })).toThrow(EmptyDataError);
     expect(() => quartiles([1, 2], { method: 'hinge' as QuantileMethod })).toThrow(InvalidArgumentError);
   });
 });
@@ -824,6 +871,39 @@ describe('pooledVariance and pooledStddev', () => {
   });
   it('lets a single-value group add nothing', () => {
     expect(pooledVariance([[2, 4, 6], [100]])).toBeCloseTo(4, 12);
+  });
+  it('accepts summaries ({ n, stddev } or { n, variance }) equal to the raw groups', () => {
+    // [2, 4, 6]: n 3, s^2 4; [1, 3]: n 2, s^2 2 (sample variances, ddof 1).
+    const summaries = [
+      { n: 3, variance: 4 },
+      { n: 2, stddev: Math.sqrt(2) },
+    ];
+    expect(pooledVariance(summaries)).toBeCloseTo(pooledVariance(groups), 12);
+    expect(pooledVariance(summaries, { ddof: 0 })).toBeCloseTo(pooledVariance(groups, { ddof: 0 }), 12);
+    expect(pooledStddev(summaries)).toBeCloseTo(pooledStddev(groups), 12);
+    // Raw and summary groups mix; a summary of one value adds nothing.
+    expect(pooledVariance([[2, 4, 6], { n: 2, variance: 2 }])).toBeCloseTo(10 / 3, 12);
+    expect(
+      pooledVariance([
+        { n: 3, stddev: 2 },
+        { n: 1, stddev: 0 },
+      ]),
+    ).toBeCloseTo(4, 12);
+  });
+  it('rejects malformed summaries', () => {
+    expect(() => pooledVariance([{ n: 0, stddev: 1 }])).toThrow(InvalidArgumentError);
+    expect(() => pooledVariance([{ n: 2.5, stddev: 1 }])).toThrow(InvalidArgumentError);
+    expect(() => pooledVariance([{ n: 3, stddev: -1 }])).toThrow(InvalidArgumentError);
+    expect(() => pooledVariance([{ n: 3, variance: Number.NaN }])).toThrow(InvalidArgumentError);
+    expect(() => pooledVariance([{ n: 3 } as { n: number; stddev: number }])).toThrow(InvalidArgumentError);
+    const both = { n: 3, stddev: 2, variance: 4 } as { n: number; stddev: number };
+    expect(() => pooledVariance([both])).toThrow(InvalidArgumentError);
+    expect(() =>
+      pooledVariance([
+        { n: 1, stddev: 1 },
+        { n: 1, variance: 1 },
+      ]),
+    ).toThrow(EmptyDataError);
   });
   it('rejects no groups, empty groups and no degrees of freedom', () => {
     expect(() => pooledVariance([])).toThrow(EmptyDataError);

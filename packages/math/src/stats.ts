@@ -87,8 +87,18 @@ export type QuantileOptions = {
   method?: QuantileMethod;
 };
 
-/** A quantile method, or `'tukey'`: Tukey's hinges, the medians of the lower and upper halves (R `fivenum`). */
-export type QuartileMethod = QuantileMethod | 'tukey';
+/**
+ * A quantile method, or one of the two "median of each half" rules. They differ
+ * only for an odd count, in where the middle value goes:
+ * - `'tukey'`: Tukey's hinges; the median belongs to BOTH halves (R `fivenum`,
+ *   `boxplot.stats`; Wikipedia's "Method 2").
+ * - `'medianExcluded'`: the median belongs to NEITHER half (TI-83/TI-84
+ *   `1-Var Stats`, Moore & McCabe; Wikipedia's "Method 1").
+ *
+ * For 6, 7, 15, 36, 39, 40, 41, 42, 43, 47, 49: `'medianExcluded'` gives Q1 = 15,
+ * Q3 = 43; `'tukey'` gives Q1 = 25.5, Q3 = 42.5.
+ */
+export type QuartileMethod = QuantileMethod | 'tukey' | 'medianExcluded';
 
 export type QuartileOptions = {
   /** Default `'linear'` (R-7), like `quantile`. */
@@ -135,6 +145,13 @@ export type ConfidenceInterval = {
   marginOfError: number;
   level: number;
 };
+
+/**
+ * A group known only by its size and SAMPLE spread (ddof 1): `{ n, stddev }` or
+ * `{ n, variance }`. Accepted by `pooledVariance` and `pooledStddev`.
+ */
+export type SampleSummary =
+  { n: number; stddev: number; variance?: never } | { n: number; variance: number; stddev?: never };
 
 export type MarginOfErrorInput = {
   /** Standard deviation of the data (sample, unless you know the population value). */
@@ -815,26 +832,28 @@ function quantileOf(values: Iterable<number>, q: number, method: QuantileMethod,
 
 /**
  * The three quartiles in one sort. `method` is any `quantile` method (default
- * `'linear'`, R-7) or `'tukey'`: Tukey's hinges, the medians of the lower and
- * upper halves with the middle value in both halves when the count is odd —
- * the box-plot quartiles of R's `fivenum` and `boxplot.stats`.
+ * `'linear'`, R-7), or a "median of each half" rule (see `QuartileMethod`):
+ * `'tukey'` (the box-plot hinges of R's `fivenum`, the middle value in both
+ * halves when the count is odd) or `'medianExcluded'` (the TI-83 rule, the
+ * middle value in neither half). A single value is all three quartiles.
  * Throws `EmptyDataError` when empty.
  */
 export function quartiles(values: Iterable<number>, options: QuartileOptions = {}): Quartiles {
-  const tukey = options.method === 'tukey';
-  const method = tukey ? 'linear' : quantileMethodOf(options.method);
+  const halves = options.method === 'tukey' || options.method === 'medianExcluded';
+  const method = halves ? 'linear' : quantileMethodOf(options.method);
   const sorted = sortedCopy(toNumbers(values, 'values'));
   const n = sorted.length;
   if (n === 0) throw new EmptyDataError('quartiles of an empty data set');
-  if (tukey) {
-    // R fivenum: hinge depth d = floor((n + 3) / 2) / 2 (1-based), averaging x[floor(d)] and x[ceiling(d)].
-    const depth = Math.floor((n + 3) / 2) / 2;
-    const at = (d: number): number => {
-      const low = sorted[Math.floor(d) - 1]!;
-      const high = sorted[Math.ceil(d) - 1]!;
+  if (halves) {
+    // The median of `length` sorted values starting at `start`.
+    const medianOf = (start: number, length: number): number => {
+      const low = sorted[start + Math.floor((length - 1) / 2)]!;
+      const high = sorted[start + Math.floor(length / 2)]!;
       return noNegativeZero(low === high ? low : low / 2 + high / 2);
     };
-    return { q1: at(depth), q2: at((n + 1) / 2), q3: at(n + 1 - depth) };
+    // Each half's length; an odd count's middle value joins both halves ('tukey') or neither.
+    const half = n % 2 === 0 ? n / 2 : options.method === 'tukey' || n === 1 ? (n + 1) / 2 : (n - 1) / 2;
+    return { q1: medianOf(0, half), q2: medianOf(0, n), q3: medianOf(n - half, half) };
   }
   const at = (q: number): number => quantileFromSorted(sorted, quantilePosition(n, q, method));
   return { q1: at(0.25), q2: at(0.5), q3: at(0.75) };
@@ -929,27 +948,57 @@ export function stddev(values: NumericValues, options: VarianceOptions & Partial
 }
 
 /**
+ * The sum of squared deviations of one `pooledVariance` group, and its size.
+ * A summary's spread is a SAMPLE spread (ddof 1), so its sum is `(n - 1) * s^2`.
+ */
+function groupSquares(group: Iterable<number> | SampleSummary, index: number): { squares: number; n: number } {
+  if (Symbol.iterator in group) {
+    const items = materialize(group);
+    if (items.length === 0) throw new EmptyDataError(`samples[${index}] is empty`);
+    // A population variance times n is the group's sum of squared deviations.
+    return { squares: numberVariance(items, 0) * items.length, n: items.length };
+  }
+  const n = assertCount(group.n, 1);
+  if (group.variance !== undefined && group.stddev !== undefined) {
+    throw new InvalidArgumentError(`samples[${index}] gives both variance and stddev; give one`);
+  }
+  const variance =
+    group.variance === undefined
+      ? assertSpread(group.stddev ?? Number.NaN, 'stddev') ** 2
+      : assertSpread(group.variance, 'variance');
+  return { squares: (n - 1) * variance, n };
+}
+
+/**
  * Pooled variance of two or more groups that share one spread: the within-group
  * sums of squared deviations, added, over the pooled degrees of freedom,
  * `sum(SS_i) / (N - g * ddof)` for g groups of N values in all. The default
  * `ddof: 1` is the textbook pooled sample variance
  * `sum((n_i - 1) * s_i^2) / sum(n_i - 1)` (the two-sample t-test's s_p^2, ANOVA's
  * mean square within); `ddof: 0` divides by N. A group of one value adds no
- * spread and, with `ddof: 1`, no degrees of freedom. Throws `EmptyDataError`
- * for no groups, an empty group, or no degrees of freedom left.
+ * spread and, with `ddof: 1`, no degrees of freedom.
+ *
+ * A group is its raw values, or a `SampleSummary` (`{ n, stddev }` or
+ * `{ n, variance }`) when only summary data is at hand. A summary's spread is
+ * read as a sample spread (ddof 1, what calculators and papers report), so it
+ * stands for `(n - 1) * s^2` squared deviations whatever `ddof` you pool with;
+ * a summary gives the same result as the raw values it summarizes.
+ *
+ * Throws `EmptyDataError` for no groups, an empty group, or no degrees of
+ * freedom left, and `InvalidArgumentError` for a bad summary.
  */
-export function pooledVariance(samples: Iterable<Iterable<number>>, options: VarianceOptions = {}): number {
+export function pooledVariance(
+  samples: Iterable<Iterable<number> | SampleSummary>,
+  options: VarianceOptions = {},
+): number {
   const ddof = ddofOf(options);
   let squares = 0;
   let freedom = 0;
   let groups = 0;
   for (const sample of samples) {
-    const items = materialize(sample);
-    const n = items.length;
-    if (n === 0) throw new EmptyDataError(`samples[${groups}] is empty`);
-    // A population variance times n is the group's sum of squared deviations.
-    squares += numberVariance(items, 0) * n;
-    freedom += n - ddof;
+    const group = groupSquares(sample, groups);
+    squares += group.squares;
+    freedom += group.n - ddof;
     groups++;
   }
   if (groups === 0) throw new EmptyDataError('pooledVariance of no samples');
@@ -957,8 +1006,11 @@ export function pooledVariance(samples: Iterable<Iterable<number>>, options: Var
   return noNegativeZero(assertRepresentable(squares / freedom, 'variance'));
 }
 
-/** Square root of `pooledVariance`, with the same `ddof` convention (sample by default). */
-export function pooledStddev(samples: Iterable<Iterable<number>>, options: VarianceOptions = {}): number {
+/** Square root of `pooledVariance`, with the same groups and `ddof` convention (sample by default). */
+export function pooledStddev(
+  samples: Iterable<Iterable<number> | SampleSummary>,
+  options: VarianceOptions = {},
+): number {
   return Math.sqrt(pooledVariance(samples, options));
 }
 
@@ -1328,8 +1380,17 @@ function solveLinearSystem(matrix: number[][], rhs: number[]): number[] {
 /**
  * Least-squares polynomial of the given `degree`, by the normal equations.
  * Coefficients are lowest degree first (`[c0, c1, ...]`); `r2` is measured on
- * the original y. x is scaled by its largest magnitude while solving, which
- * keeps the system well conditioned for moderate degrees.
+ * the original y.
+ *
+ * x is centered and scaled to `u = (x - center) / halfRange`, which spans
+ * [-1, 1], before solving, so data far from zero (years 2015 to 2024, say) is
+ * as well conditioned as data around zero. `predict` and the diagnostics
+ * evaluate the fit in that centered basis, which is the accurate path.
+ * `coefficients` are mapped back to powers of x for display and reuse; for x
+ * far from zero relative to its spread they are inherently sensitive (each one
+ * is a sum of large terms that nearly cancel), so evaluating them by hand can
+ * lose digits that `predict` keeps.
+ *
  * Throws `InvalidArgumentError` for a non-integer or negative degree, or fewer
  * distinct x values than `degree + 1`, and `NumericRangeError` when the system
  * is numerically singular.
@@ -1342,13 +1403,21 @@ export function polynomialRegression(x: Iterable<number>, y: Iterable<number>, d
   if (new Set(xs).size < degree + 1) {
     throw new InvalidArgumentError(`degree ${degree} needs at least ${degree + 1} distinct x values`);
   }
-  const scale = xs.reduce((m, v) => Math.max(m, Math.abs(v)), 0) || 1;
+  let low = xs[0]!;
+  let high = low;
+  for (const value of xs) {
+    if (value < low) low = value;
+    if (value > high) high = value;
+  }
+  // Halving first keeps the midrange and half-range finite for any finite x.
+  const center = low / 2 + high / 2;
+  const halfRange = high / 2 - low / 2 || 1;
   const size = degree + 1;
-  // powerSums[k] = sum(u^k), moments[k] = sum(u^k * y), with u = x / scale.
+  // powerSums[k] = sum(u^k), moments[k] = sum(u^k * y), with u = (x - center) / halfRange.
   const powerSums: number[] = Array.from<number>({ length: 2 * degree + 1 }).fill(0);
   const moments: number[] = Array.from<number>({ length: size }).fill(0);
   for (const [i, value] of xs.entries()) {
-    const u = value / scale;
+    const u = (value - center) / halfRange;
     let power = 1;
     for (let k = 0; k <= 2 * degree; k++) {
       powerSums[k]! += power;
@@ -1357,19 +1426,28 @@ export function polynomialRegression(x: Iterable<number>, y: Iterable<number>, d
     }
   }
   const matrix = Array.from({ length: size }, (_, r) => Array.from({ length: size }, (_, c) => powerSums[r + c]!));
-  const scaled = solveLinearSystem(matrix, moments);
-  const coefficients = scaled.map((c, k) => assertRepresentable(noNegativeZero(c / scale ** k), 'coefficient'));
-  const predict = (at: number): number => {
-    assertFinite(at, 'x');
+  const centered = solveLinearSystem(matrix, moments);
+  const predictCentered = (at: number): number => {
+    const u = (at - center) / halfRange;
     let result = 0;
-    for (let k = coefficients.length - 1; k >= 0; k--) result = result * at + coefficients[k]!;
+    for (let k = degree; k >= 0; k--) result = result * u + centered[k]!;
     return result;
   };
+  // Back to powers of x: divide by halfRange^k (powers of t = x - center), then
+  // Taylor-shift by the center (repeated synthetic division by t = x - center).
+  const coefficients = [...centered];
+  for (let k = 1; k <= degree; k++) for (let j = k; j <= degree; j++) coefficients[j]! /= halfRange;
+  for (let i = 0; i < degree; i++)
+    for (let j = degree - 1; j >= i; j--) coefficients[j]! -= center * coefficients[j + 1]!;
+  const predict = (at: number): number => {
+    assertFinite(at, 'x');
+    return predictCentered(at);
+  };
   return {
-    coefficients,
+    coefficients: coefficients.map(c => assertRepresentable(noNegativeZero(c), 'coefficient')),
     ...diagnostics(
       ys,
-      xs.map(v => predict(v)),
+      xs.map(v => predictCentered(v)),
       degree,
     ),
     predict,
