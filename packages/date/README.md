@@ -148,6 +148,7 @@ Every module is also a subpath: `@arki/date/math`, `@arki/date/interval`, …
 | `zod`       | optional, needs `zod`: `plainDateSchema` `plainDateTimeSchema` `instantSchema` `zonedDateTimeSchema` `durationSchema` `timeZoneSchema` `intervalSchema`                                                                                                                          |
 | `react`     | optional, needs `react`: `useNow` `useToday` `useRelativeTime`                                                                                                                                                                                                                   |
 | `serialize` | optional, needs `@orpc/client` and/or `superjson`: `temporalJsonSerializers` `registerTemporalTypes` `TEMPORAL_RPC_TYPES`                                                                                                                                                        |
+| `tanstack`  | optional, needs `@tanstack/react-router`: `temporalSerializationAdapters` and one adapter per type                                                                                                                                                                               |
 | `parseISO`  | `parseISO(text): Date` — legacy, date-fns semantics (zone-less text is local time)                                                                                                                                                                                               |
 
 ### Durations
@@ -253,6 +254,22 @@ registerTemporalTypes(SuperJSON); // where the TanStack Query client dehydrates 
 ```
 
 Values travel as ISO text and are checked on arrival. The codecs use oRPC custom type ids 100–104 (`TEMPORAL_RPC_TYPES`).
+
+### Loaders and server functions (`@arki/date/tanstack`)
+
+TanStack Start sends loader data, server-function results and the SSR payload through seroval, which keeps `Date` but throws on a Temporal value. Register the adapters once in `src/start.ts`:
+
+```ts
+import { createStart } from '@tanstack/react-start';
+
+import { temporalSerializationAdapters } from '@arki/date/tanstack';
+
+export const startInstance = createStart(() => ({
+  serializationAdapters: temporalSerializationAdapters,
+}));
+```
+
+Values travel as ISO / RFC 9557 text, so a `ZonedDateTime` keeps its zone and an `Instant` its nanoseconds.
 
 ### Pickers and `Date`
 

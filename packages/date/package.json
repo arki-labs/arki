@@ -121,6 +121,11 @@
       "import": "./dist/serialize.js",
       "default": "./dist/serialize.js"
     },
+    "./tanstack": {
+      "types": "./dist/tanstack.d.ts",
+      "import": "./dist/tanstack.js",
+      "default": "./dist/tanstack.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -159,23 +164,30 @@
     "@arki/vitest-config": "workspace:*",
     "@orpc/client": "catalog:backend",
     "@orpc/server": "catalog:backend",
+    "@tanstack/react-router": "catalog:tanstack/start",
+    "@tanstack/router-core": "^1.171.34",
     "@testing-library/react": "catalog:testing",
     "@types/react": "catalog:react",
     "date-fns": "catalog:utilities",
     "jsdom": "catalog:text-processing",
     "react": "catalog:react",
     "react-dom": "catalog:react",
+    "seroval": "^1.6.8",
     "superjson": "catalog:utilities",
     "zod": "catalog:"
   },
   "peerDependencies": {
     "@orpc/client": "catalog:backend",
+    "@tanstack/react-router": "catalog:tanstack/start",
     "react": "catalog:react",
     "superjson": "catalog:utilities",
     "zod": "catalog:"
   },
   "peerDependenciesMeta": {
     "@orpc/client": {
+      "optional": true
+    },
+    "@tanstack/react-router": {
       "optional": true
     },
     "react": {
