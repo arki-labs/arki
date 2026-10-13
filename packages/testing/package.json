@@ -24,11 +24,13 @@
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/auth": "workspace:*",
+    "@arki/date": "workspace:*",
     "@arki/db": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",
@@ -43,6 +45,7 @@
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*"
+    "@arki/vitest-config": "workspace:*",
+    "vitest": "catalog:"
   }
 }

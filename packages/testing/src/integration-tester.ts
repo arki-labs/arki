@@ -31,6 +31,8 @@ import * as debug from './debug';
 import { debugTester } from './debug';
 import { FactoryRegistry, faker } from './factories';
 import * as performance from './performance';
+import type { Timestamps } from './timestamps';
+import { assertTimestamps, assertUpdatedAfterCreated } from './timestamps';
 
 type CallerCollection<TCaller> = {
   public: TCaller;
@@ -1012,8 +1014,10 @@ export class IntegrationTester<
   /**
    * Assert that an object has valid createdAt and updatedAt timestamps
    *
+   * Each may be a `Date`, or a Temporal `Instant` or `ZonedDateTime` from `@arki/date`.
+   *
    * @param obj - Object to check
-   * @throws Error if timestamps are missing or not Date instances
+   * @throws Error if timestamps are missing or are not one of those types
    *
    * @example
    * ```typescript
@@ -1021,18 +1025,8 @@ export class IntegrationTester<
    * tester.assertTimestamps(game);
    * ```
    */
-  assertTimestamps(obj: unknown): asserts obj is { createdAt: Date; updatedAt: Date } {
-    if (!obj || typeof obj !== 'object') {
-      throw new Error('Expected object with timestamps');
-    }
-
-    const record = obj as any;
-    if (!(record.createdAt instanceof Date)) {
-      throw new TypeError(`Expected createdAt to be a Date, got ${typeof record.createdAt}`);
-    }
-    if (!(record.updatedAt instanceof Date)) {
-      throw new TypeError(`Expected updatedAt to be a Date, got ${typeof record.updatedAt}`);
-    }
+  assertTimestamps(obj: unknown): asserts obj is Timestamps {
+    assertTimestamps(obj);
   }
 
   /**
@@ -1048,12 +1042,8 @@ export class IntegrationTester<
    * tester.assertUpdatedAfterCreated(game);
    * ```
    */
-  assertUpdatedAfterCreated(obj: { createdAt: Date; updatedAt: Date }): void {
-    if (obj.updatedAt.getTime() < obj.createdAt.getTime()) {
-      throw new Error(
-        `Expected updatedAt (${obj.updatedAt.toISOString()}) to be >= createdAt (${obj.createdAt.toISOString()})`,
-      );
-    }
+  assertUpdatedAfterCreated(obj: Timestamps): void {
+    assertUpdatedAfterCreated(obj);
   }
 
   /**

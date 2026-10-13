@@ -23,6 +23,7 @@ export { createFactories } from './factories';
 
 // Enhanced assertions
 export * from './assertions';
+export * from './timestamps';
 
 // Debug utilities
 export * from './debug';
