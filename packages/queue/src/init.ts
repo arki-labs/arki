@@ -59,7 +59,11 @@ export const initQueue = {
             const fullConfig: QueueConfig = {
               transformer: config?.transformer ?? (superjson as DataTransformer),
               errorFormatter: config?.errorFormatter ?? (error => error),
-              isDev: config?.isDev ?? process.env['NODE_ENV'] === 'development',
+              // Read on use, not here: `create()` runs when the queue module is
+              // imported, and importing a declaration must not read the environment.
+              get isDev() {
+                return config?.isDev ?? process.env['NODE_ENV'] === 'development';
+              },
             };
 
             return createQueueBuilder<TContext, TMeta>(fullConfig);
@@ -89,7 +93,7 @@ export const initQueue = {
  * @internal
  */
 function createQueueBuilder<TContext, TMeta extends QueueMeta>(config: QueueConfig): QueueBuilder<TContext, TMeta> {
-  debugBuilder('Creating queue builder (isDev: %s)', config.isDev);
+  debugBuilder('Creating queue builder');
 
   // Create base job builder with empty middleware
   // Output context is JobContext<TContext> because runtime wraps user context with framework utilities

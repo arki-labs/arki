@@ -41,7 +41,7 @@ export function buildPgBossAdapter(pglite: PGlite): Db {
         sql = text.replace(/\$(\d+)/g, (_, n: string) => {
           const v = values[Number(n) - 1];
           if (v === null || v === undefined) return 'NULL';
-          if (Array.isArray(v)) return `'${encodePgArray(v)}'`;
+          if (Array.isArray(v)) return `'${encodePgArray(v).replaceAll("'", "''")}'`;
           if (typeof v === 'number') return v.toString();
           if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
           if (v instanceof Date) return `'${v.toISOString()}'`;
