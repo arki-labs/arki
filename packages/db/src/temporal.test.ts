@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { eq, gte, sql } from 'drizzle-orm';
+import { defineRelations, eq, gte, sql } from 'drizzle-orm';
 import { pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -102,5 +102,60 @@ describe('columns on PGlite', () => {
         .from(events)
         .where(eq(events.day, toPlainDate('2026-03-29'))),
     ).toEqual([{ id: 'a' }]);
+  });
+});
+
+// Relational queries return nested rows as JSON, a different path from plain selects.
+const owners = pgTable('temporal_owners', {
+  id: text('id').primaryKey(),
+  joinedOn: plainDate('joined_on').notNull(),
+  seenAt: instant('seen_at').notNull(),
+  legacySeenAt: instant('legacy_seen_at', { withTimezone: false }).notNull(),
+});
+const visits = pgTable('temporal_visits', {
+  id: text('id').primaryKey(),
+  ownerId: text('owner_id').notNull(),
+  at: instant('at').notNull(),
+});
+const relations = defineRelations({ owners, visits }, r => ({
+  owners: { visits: r.many.visits({ from: r.owners.id, to: r.visits.ownerId }) },
+  visits: { owner: r.one.owners({ from: r.visits.ownerId, to: r.owners.id }) },
+}));
+
+describe('columns in relational queries on PGlite', () => {
+  const client = new PGlite();
+  const db = drizzle({ client, relations });
+  const seenAt = toInstant('2026-10-25T00:30:00.5Z'); // inside the Bucharest fall-back fold
+
+  beforeAll(async () => {
+    await db.execute(sql`SET TIME ZONE 'Europe/Bucharest'`);
+    await db.execute(sql`
+      CREATE TABLE temporal_owners (
+        id text PRIMARY KEY,
+        joined_on date NOT NULL,
+        seen_at timestamp with time zone NOT NULL,
+        legacy_seen_at timestamp NOT NULL
+      )
+    `);
+    await db.execute(
+      sql`CREATE TABLE temporal_visits (id text PRIMARY KEY, owner_id text NOT NULL, at timestamp with time zone NOT NULL)`,
+    );
+    await db.insert(owners).values({ id: 'o', joinedOn: toPlainDate('2026-02-28'), seenAt, legacySeenAt: seenAt });
+    await db.insert(visits).values({ id: 'v', ownerId: 'o', at: seenAt });
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it('reads nested one and many relations as Temporal values', async () => {
+    const visit = await db.query.visits.findFirst({ with: { owner: true } });
+    expect(visit?.at.equals(seenAt)).toBe(true);
+    expect(visit?.owner?.joinedOn.toString()).toBe('2026-02-28');
+    expect(visit?.owner?.seenAt.equals(seenAt)).toBe(true);
+    expect(visit?.owner?.legacySeenAt.equals(seenAt)).toBe(true);
+
+    const owner = await db.query.owners.findFirst({ with: { visits: true } });
+    expect(owner?.visits[0]?.at.equals(seenAt)).toBe(true);
   });
 });
