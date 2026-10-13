@@ -1,6 +1,7 @@
 # RFC: The core of Arki Dot, centred on the journal
 
-- **Status:** PROPOSED (2026-10-12). Five founder decisions open (section 6).
+- **Status:** PROPOSED (2026-10-12). All five decisions answered 2026-10-13
+  (section 6). Decision 3 is implemented (section 6a).
   The faults in section 3 are FIXED, except the replay-order claim, which is
   not checked.
 - **Scope:** `@arki/dot` and the pieces that become its core: db, rpc,
@@ -146,8 +147,10 @@ So "journal inside Dot" is designed but not yet proven by any app.
 **Shape.** A small kernel plus core plugins that ship with Dot: `log()`,
 `db()`, `journal()`, `schedule()`, `telemetry()`, and rpc through `http()`.
 Each core piece exposes typed hooks on its own service. A plugin says which
-service it needs and attaches in `boot`. Durable things go through the
-journal. Everything else is an in-memory wrapper.
+service it needs and attaches in `boot`. Business facts and their direct
+consequences go through the journal. General background work and durable
+crons go through BullMQ (`@arki/queue`), the default (decisions 4 and 5).
+Everything else is an in-memory wrapper.
 
 **Order of work.** Each stage ships alone and leaves every app working.
 
@@ -160,9 +163,21 @@ journal. Everything else is an in-memory wrapper.
 | 4 | `@arki/telemetry` split out of meter, with a bridge from hooks to OpenTelemetry. | Medium | Low: 3 apps |
 | 5 | One typed slice-collection helper. An rpc mount helper in `@arki/http`. Explicit database URL. Delete `$config`. | Medium | Low |
 | 6 | Prove it: the template and one journal app boot through Dot with all core plugins. Then decide on the one-call preset. | Medium | Medium |
-| 7 | Finish journal adoption, remove `@arki/event-sourcing`, slim `@arki/queue`. | Large, mostly app work | Medium |
+| 7 | Finish journal adoption, remove `@arki/event-sourcing`. In `@arki/queue`, delete only `runtime-local` (one app). Add `durable: true` crons to `@arki/schedule`, backed by the queue's repeatable jobs. | Large, mostly app work | Medium |
 
 ## 6. Decisions for the founder
+
+**Answered 2026-10-13:**
+
+| # | Decision | Founder's answer | What it changes |
+|---|---|---|---|
+| 1 | App shape | **Core plugins.** No `@arki/app` preset now. | None. Revisit a preset after stage 6. |
+| 2 | Node logging startup | **Explicit.** Dot apps get it from `log()`; other apps add one startup line. | Plan 010 is replaced. Plan 007 is revised: each app owns its logger, no shared mutable settings. |
+| 3 | Where declarations check for mistakes | **The ladder (option C) with refactors R1-R6** (section 6a): types first, then a coded throw at import, then boot for anything that depends on the world. | Doctrine §1 states the ladder. R1-R6 done 2026-10-13. |
+| 4 | What a cron promises | **Each cron chooses.** `defineSchedule({ ..., durable: true })` is backed by a BullMQ repeatable job; the default (`durable: false`) runs in process and skips ticks missed while down. A durable cron with no queue plugin fails boot with a coded error. | `@arki/schedule` gains a durable mode that hands the cron to `@arki/queue`. The queue's cron support stays: it becomes that backend. |
+| 5 | Default "run later" path | **BullMQ stays the default.** Journal effects are for consequences of committed business events. | The template keeps Redis and `@arki/queue`. Stage 7 no longer slims the queue's cron or job features. |
+
+The original options and recommendations, kept for the record:
 
 1. **Core plugins only, or also a one-call preset?**
    A: core plugins, app file stays a short chain. B: add `@arki/app` with
@@ -188,6 +203,89 @@ journal. Everything else is an in-memory wrapper.
 5. **Is the journal the default "run later" path?**
    Both reviews say yes, with BullMQ optional. Recommendation: yes, but only
    after stage 1.
+
+## 6a. Decision 3 in depth: where a declaration checks for mistakes
+
+Added 2026-10-13 at the founder's request ("I want the best way; we can
+refactor"). Evidence: a survey of the ten core packages, with the key claims
+re-checked in the code.
+
+### What exists today
+
+- About 52 places throw while a declaration runs: `composeRouter`,
+  `j.entity`, `defineSchedule`, the queue's job builder, and others.
+- **None of them depends on the world.** All 9 throws that read env or the
+  network (db URL, KV URL, `defineEnv`) already run at boot or lazily. The
+  rule "never observe the world at import" already holds.
+- **Only 6 of the 52 are also caught by TypeScript.** `composeSchema` in
+  `@arki/db` rejects a duplicate key in the type
+  (`packages/db/src/composition.ts:24-42`). `composeRouter` and
+  `composeRepos` do not: their type is a plain intersection
+  (`packages/feature/src/index.ts:134`), so a duplicate key is found only by
+  the throw at `:146`. The doctrine (§4) claims otherwise.
+- About 17 are partly typed, and about 29 are runtime only. The 9 throws in
+  the queue's builders (`.handler()` before `.name()` or `.input()`,
+  `packages/queue/src/job-builder.ts:101-107`) could all be type errors.
+- **Dot's CLI already survives a throw at import.** `dot explain` and
+  `dot doctor` catch it and print a coded `AppImportFailed` error with the
+  original message (`packages/dot/src/cli/discover.ts:146-158`). The
+  original error's own code is kept only inside the message text.
+- About 20 of the throws are plain `Error` with no code: feature (2),
+  journal (about 15), queue builders (9), db builder (2). The others use
+  coded errors (`ScheduleError`, `HttpConfigError`, `DbCompositionError`).
+
+### The three options
+
+**A. Throw at import, for mistakes in the code only** (what is committed now).
+
+**B. Never throw at import. Collect the problems and raise them at boot.**
+This fails on four counts:
+
+1. 46 of 47 apps do not boot through Dot. A router built by
+   `composeRouter` is used directly by oRPC. If the duplicate-key check
+   moved to Dot's boot, those apps would never run it. The second feature
+   would silently replace the first. A loud error becomes a silent bug.
+2. Collecting needs a place to put the problems. That is either a global
+   list (the doctrine forbids global changes at import) or a list carried
+   by every value, which every consumer must remember to check.
+3. Its main benefit, good tooling output, already exists: the CLI turns an
+   import throw into a coded error.
+4. Its other benefit, "see every problem at once", is better delivered by
+   TypeScript. `tsc` reports every type error in one run.
+
+**C. The ladder (recommended).** Each check lives on the earliest step that
+can see it:
+
+1. **Types** when TypeScript can express the check. `tsc` reports every one
+   at once, in the editor, before any code runs.
+2. **A throw at import** when the check depends only on the source but types
+   cannot express it (a cron string that does not parse, a key column that
+   is nullable). It fails at the line of the mistake, in every environment,
+   every time, and `dot explain` reports it with a code.
+3. **Boot** for anything that depends on the world (env, files, network,
+   clock). Never at import.
+
+Two more rules:
+
+- **Never move a check down the ladder.** A check that can run at import
+  must not wait for boot, because some consumers never boot.
+- **Keep a runtime throw behind every type check.** Plain JavaScript and
+  type casts skip the types. The throw is the backstop.
+
+### The refactors option C needs
+
+| # | Change | Size | Moves |
+|---|---|---|---|
+| R1 | `composeRouter` and `composeRepos` reject duplicate keys in the type. Move `DuplicateKeys` from `@arki/db` to `@arki/ts` and use it in both packages. | Small | 2 checks to types; makes doctrine §4 true |
+| R2 | A coded error for every declaration mistake: a `code` and a `remediation`. Convert the about 20 plain `Error` throws (journal gets a new `JournalError` code for bad definitions). | Medium | Every import failure is coded |
+| R3 | `dot explain` / `dot doctor`: when an import fails and the cause carries a code, print that code and its remediation, not only `AppImportFailed`. | Small | Better tooling output |
+| R4 | The queue's job, schedule and flow builders track their state in the type: `.handler()` and `.build()` exist only after `.name()` and `.input()`. The runtime throws stay as backstops. | Medium | 9 checks to types; matters more now BullMQ is the default |
+| R5 | `@arki/http` mount paths typed as `` `/${string}` ``. | Small | 1 check to types |
+| R6 | Doctrine §1 states the ladder. Doctrine §4 is corrected or made true by R1. | Small | — |
+
+Breaking changes: R1 and R4 can turn code that compiled into a type error,
+but only code that would already throw at import. R2 changes error classes,
+which breaks a consumer that matches on `instanceof Error` plus a message.
 
 ## 7. Limits of this review
 
