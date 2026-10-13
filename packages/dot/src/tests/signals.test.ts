@@ -36,7 +36,6 @@ function makeFakeProc(): FakeProc {
       return this;
     },
     off(event, listener) {
-      // eslint-disable-next-line drizzle/enforce-delete-with-where -- Set.delete, not a query builder
       listeners.get(event)?.delete(listener as () => void);
       return this;
     },
