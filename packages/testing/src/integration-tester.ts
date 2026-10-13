@@ -79,6 +79,13 @@ async function closeDatabaseClient(db: object): Promise<'ended' | 'released' | n
   return null;
 }
 
+/** Thrown at the end of `withTransaction` so Drizzle rolls the transaction back. Never reaches callers. */
+class TransactionRollback extends Error {
+  constructor() {
+    super('Test transaction rollback');
+  }
+}
+
 /**
  * Integration testing helper class providing comprehensive utilities for testing
  * tRPC applications with PostgreSQL and Redis.
@@ -944,28 +951,35 @@ export class IntegrationTester<
     }
 
     debugTester.debug('[tester] Starting auto-rollback transaction');
+    // Drizzle rolls back when the transaction function throws. The sentinel is thrown
+    // outside any catch of ours, so it always reaches Drizzle and the transaction never commits.
+    const rollback = new TransactionRollback();
+    const outcome: { failed: boolean; error?: unknown } = { failed: false };
     try {
-      return await this._db.transaction(async tx => {
+      await this._db.transaction(async tx => {
         this.currentTransaction = tx;
         debugTester.debug('[tester] Transaction started');
         try {
           await callback();
-          debugTester.debug('[tester] Callback completed, initiating rollback');
-          throw new Error('__ROLLBACK__');
         } catch (error) {
-          if (error instanceof Error && error.message === '__ROLLBACK__') {
-            debugTester.debug('[tester] Transaction rolled back successfully');
-            return;
-          }
           debugTester.debug('[tester] Error in transaction callback', {
             error: error instanceof Error ? error.message : 'unknown error',
           });
-          throw error;
+          outcome.failed = true;
+          outcome.error = error;
         } finally {
           this.currentTransaction = null;
         }
+        throw rollback;
       });
     } catch (error) {
+      if (error === rollback) {
+        debugTester.debug('[tester] Transaction rolled back successfully');
+        if (outcome.failed) {
+          throw outcome.error;
+        }
+        return;
+      }
       // Suppress connection errors during rollback - they're expected when using the throw-to-rollback pattern
       if (
         error instanceof Error &&

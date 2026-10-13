@@ -6,8 +6,7 @@
  * skipped the test transaction, and could wait forever on a lock the transaction held.
  *
  * The check reads from the base connection while the transaction is still open. Rows written
- * in the transaction are not committed yet, so the base connection must not see them. (It does
- * not check the rollback itself: `withTransaction` swallows its rollback sentinel and commits.)
+ * in the transaction are not committed yet, so the base connection must not see them.
  * These tests run against a real Postgres (a container, unless a global connection string is set).
  */
 import path from 'node:path';
@@ -105,5 +104,38 @@ describe('callers inside withTransaction', () => {
     await tester.asUser().caller.addWidget('kept');
 
     expect(await countWidgets()).toBe(1);
+  });
+
+  it('rolls back what a callback wrote through currentDb, repo and a caller', async () => {
+    await tester.withTransaction(async () => {
+      await tester.currentDb.insert(widgets).values({ name: 'via currentDb' });
+      await tester.asUser().caller.addWidget('via caller');
+
+      expect(await tester.repo.countWidgets()).toBe(2);
+    });
+
+    expect(await countWidgets()).toBe(0);
+    expect(await tester.repo.countWidgets()).toBe(0);
+  });
+
+  it('rolls back and rethrows the callback error unchanged', async () => {
+    const failure = new Error('callback failed');
+
+    await expect(
+      tester.withTransaction(async () => {
+        await tester.currentDb.insert(widgets).values({ name: 'doomed' });
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+
+    expect(await countWidgets()).toBe(0);
+  });
+
+  it('leaves no transaction open after a rollback', async () => {
+    await tester.withTransaction(async () => {
+      await tester.currentDb.insert(widgets).values({ name: 'gone' });
+    });
+
+    expect(tester.currentDb).toBe(tester.db);
   });
 });
