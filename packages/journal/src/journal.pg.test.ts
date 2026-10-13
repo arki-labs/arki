@@ -12,6 +12,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { listenOnPool } from './listen.js';
 import {
   customerOrderCounts,
   j,
@@ -360,6 +361,55 @@ describe('two workers on real Postgres', () => {
     const { afterB, afterA } = await staleAck('ok', 'ok');
     expect(afterB).toBeNull();
     expect(afterA).toBeNull();
+  }, 30_000);
+});
+
+describe('listenOnPool on real Postgres', () => {
+  it('a listening worker fires taps for a commit made on another connection, survives a dropped connection, and gives its client back on stop', async () => {
+    // Why: taps are the multi-instance realtime path. The listener must hear commits from any
+    // connection, reconnect on its own when the connection dies, and leave the pool as it found it.
+    const seen: string[] = [];
+    const live = j.tap('pg-live', order, {
+      OrderPlaced: e => {
+        seen.push(e.entityId);
+      },
+    });
+    const tapped = j.compose({ tables, taps: [live] });
+    const listenPool = new pg.Pool({ connectionString: container.getConnectionUri(), max: 2 });
+    const until = async (check: () => boolean) => {
+      const end = Date.now() + 5000;
+      while (!check() && Date.now() < end) await sleep(25);
+    };
+    const placeOnB = async () => {
+      const id = orderId(++next);
+      await dbB.transaction(tx =>
+        tapped.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      );
+      return id;
+    };
+    const worker = tapped.worker(drizzle({ client: listenPool }), {
+      pollMs: 60_000,
+      listen: listenOnPool(listenPool, tapped.wakeChannel, { retryMs: 50 }),
+    });
+    await worker.start();
+    try {
+      const first = await placeOnB();
+      await until(() => seen.length === 1);
+      expect(seen).toEqual([first]);
+
+      // Kill the listening backend from outside; the listener reconnects and hears the next commit.
+      await dbB.execute(
+        sql`select pg_terminate_backend(pid) from pg_stat_activity where query ilike ${'LISTEN%'} and pid <> pg_backend_pid()`,
+      );
+      await sleep(300);
+      const second = await placeOnB();
+      await until(() => seen.length === 2);
+      expect(seen).toEqual([first, second]);
+    } finally {
+      await worker.stop();
+    }
+    expect(listenPool.totalCount - listenPool.idleCount, 'no client still checked out').toBe(0);
+    await listenPool.end();
   }, 30_000);
 });
 

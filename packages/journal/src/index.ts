@@ -70,3 +70,5 @@ export type {
 } from './types.js';
 export type { JournalTables } from './pg.js';
 export type { Around, HookPoint } from './hooks.js';
+export { listenOnPool } from './listen.js';
+export type { ListenClient, ListenPool } from './listen.js';
