@@ -239,6 +239,7 @@ formatCompact(1230000); // '1.2M'
 formatCompact(1230000, { display: 'long' }); // '1.2 million'
 formatFileSize(1536); // '1.5 kB'
 formatFileSize(1536, { system: 'iec' }); // '1.5 KiB'
+formatFileSize(1536, { system: 'jedec' }); // '1.5 KB'  — powers of 1024, KB/MB/GB labels
 
 const ro = createFormatter({ locale: 'ro-RO', currency: 'RON' });
 ro.formatCurrency(25); // '25,00 RON'

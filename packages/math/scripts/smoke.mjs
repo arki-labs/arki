@@ -62,6 +62,7 @@ const checks = [
       ],
   ['format percent', formatPercent(0.125), '12.5%'],
   ['format file size', formatFileSize(1536), '1.5 kB'],
+  ['file size jedec', formatFileSize(1536, { system: 'jedec' }), '1.5 KB'],
   hasFormatToParts
     ? ['parse de-DE', parseNumber('1.234,56', { locale: 'de-DE' }), 1234.56]
     : [

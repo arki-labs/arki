@@ -40,8 +40,11 @@ export type CompactOptions = {
 } & FormatOptions;
 
 export type FileSizeOptions = {
-  /** `'si'` uses powers of 1000 (`kB`), `'iec'` powers of 1024 (`KiB`). Default `'si'`. */
-  system?: 'si' | 'iec';
+  /**
+   * `'si'` uses powers of 1000 (`kB`), `'iec'` powers of 1024 (`KiB`), `'jedec'` powers of 1024
+   * with the `KB`/`MB`/`GB` labels most file managers print. Default `'si'`.
+   */
+  system?: 'si' | 'iec' | 'jedec';
 } & FormatOptions;
 
 const DEFAULT_LOCALE = 'en-US';
@@ -257,6 +260,7 @@ export function formatCompact(value: FormatValue, options: CompactOptions = {}):
 const FILE_UNITS = {
   si: { base: 1000, labels: ['B', 'kB', 'MB', 'GB', 'TB', 'PB', 'EB'] },
   iec: { base: 1024, labels: ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB'] },
+  jedec: { base: 1024, labels: ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB'] },
 } as const;
 
 /**
@@ -271,7 +275,7 @@ export function formatFileSize(bytes: number | bigint, options: FileSizeOptions 
   return fileSizeWith(bytes, options.system ?? 'si', nf);
 }
 
-function fileSizeWith(bytes: number | bigint, system: 'si' | 'iec', nf: Intl.NumberFormat): string {
+function fileSizeWith(bytes: number | bigint, system: 'si' | 'iec' | 'jedec', nf: Intl.NumberFormat): string {
   const amount = typeof bytes === 'bigint' ? Number(bytes) : bytes;
   assertFinite(amount, 'bytes');
   if (amount < 0)

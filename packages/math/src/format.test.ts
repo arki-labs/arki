@@ -92,6 +92,15 @@ describe('formatFileSize', () => {
     expect(formatFileSize(1024, { system: 'iec' })).toBe('1 KiB');
   });
 
+  it('jedec uses powers of 1024 with KB/MB/GB labels', () => {
+    expect(formatFileSize(0, { system: 'jedec' })).toBe('0 B');
+    expect(formatFileSize(512, { system: 'jedec' })).toBe('512 B');
+    expect(formatFileSize(1024, { system: 'jedec' })).toBe('1 KB');
+    expect(formatFileSize(1536, { system: 'jedec' })).toBe('1.5 KB');
+    expect(formatFileSize(1_048_576, { system: 'jedec' })).toBe('1 MB');
+    expect(formatFileSize(1_073_741_824, { system: 'jedec' })).toBe('1 GB');
+  });
+
   it('accepts bigint', () => {
     expect(formatFileSize(5_000_000n)).toBe('5 MB');
   });
