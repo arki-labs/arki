@@ -26,6 +26,7 @@
     "@arki/emails": "workspace:*",
     "@arki/icons": "workspace:*",
     "@arki/intl": "workspace:*",
+    "@arki/log": "workspace:*",
     "@arki/meter": "workspace:*",
     "@arki/offline": "workspace:*",
     "@arki/react-fullscreen": "workspace:*",

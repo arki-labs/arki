@@ -1,6 +1,21 @@
 import handler from '@tanstack/react-start/server-entry';
 
+import { configure } from '@arki/log';
+import { asyncContext, fromEnv, stdout } from '@arki/log/node';
+
 import { paraglideMiddleware } from './paraglide/server.js';
+
+// Switch logging on once, before the app serves anything (@arki/log RFC §8).
+const logging = configure({
+  ...fromEnv(),
+  context: asyncContext(),
+  channels: { stdout: stdout() },
+  default: { level: 'info', channels: ['stdout'] },
+});
+// Dev: Vite runs this module again on reload. Hand logging back first, so the
+// next configure() does not throw ARKI_LOG_E001.
+import.meta.hot?.dispose(() => logging.close());
+import.meta.hot?.on('vite:beforeFullReload', () => void logging.close());
 
 /**
  * Server fetch handler.
@@ -26,8 +41,6 @@ import { paraglideMiddleware } from './paraglide/server.js';
  */
 export default {
   fetch(request: Request): Promise<Response> {
-    return paraglideMiddleware(request, ({ request: localizedRequest }) =>
-      handler.fetch(localizedRequest),
-    );
+    return paraglideMiddleware(request, ({ request: localizedRequest }) => handler.fetch(localizedRequest));
   },
 };
