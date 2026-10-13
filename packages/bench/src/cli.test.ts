@@ -389,6 +389,79 @@ describe('arki-bench compare --ci', () => {
   });
 });
 
+describe('arki-bench losses', () => {
+  const summary = {
+    estimate: 100,
+    interval: [97, 103] as const,
+    median: 100,
+    min: 90,
+    max: 110,
+    p75: 105,
+    p99: 109,
+    cv: 0.02,
+    n: 10,
+  };
+  const lossGroup = (role: 'competitor' | 'variant'): GroupResult => ({
+    kind: 'compare',
+    id: 'sum',
+    title: 'Sum',
+    unit: 'ns',
+    baseline: 'demo',
+    cases: [
+      { key: 'demo', label: '@demo/lib', package: '@demo/lib', role: 'baseline', summary, flags: [] },
+      { key: 'rival', label: 'rival', role, summary, flags: [] },
+    ],
+    comparisons: [{ case: 'rival', ratio: 0.5, interval: [0.45, 0.55], verdict: 'lower' }],
+  });
+  const rough = {
+    profile: 'quick' as const,
+    publishable: false,
+    warnings: [{ code: 'quick-profile', message: 'quick' }],
+  };
+
+  it('reads the package .bench by default and fails CI only on a loss in a publishable result', async () => {
+    const root = tempPackage();
+    mkdirSync(path.join(root, '.bench'));
+    writeResult(root, '.bench/rough.json', saved({ ...rough, groups: [lossGroup('competitor')] }));
+    const listed = capture(root);
+    // A rough result alone is listed, never a CI failure.
+    expect(await main(['losses', '--ci'], listed.io)).toBe(0);
+    expect(listed.out()).toContain('2.0× slower [1.8–2.2]');
+    expect(listed.out()).toContain('rough: quick profile');
+
+    writeResult(root, '.bench/clean.json', saved({ groups: [lossGroup('competitor')] }));
+    const failing = capture(root);
+    expect(await main(['losses', '--ci'], failing.io)).toBe(1);
+    expect(failing.err()).toContain('FAIL — 1 loss in publishable results');
+    expect(await main(['losses'], capture(root).io)).toBe(0);
+  });
+
+  it('finds **/.bench/*.json under a directory, skipping node_modules, and hides variants on request', async () => {
+    const root = tempPackage();
+    for (const folder of ['packages/a/.bench', 'node_modules/x/.bench'])
+      mkdirSync(path.join(root, folder), { recursive: true });
+    writeResult(root, 'packages/a/.bench/a.json', saved({ groups: [lossGroup('variant')] }));
+    writeResult(root, 'node_modules/x/.bench/x.json', saved({ groups: [lossGroup('competitor')] }));
+    const json = capture(root);
+    expect(await main(['losses', '.', '--json'], json.io)).toBe(0);
+    const losses: unknown = JSON.parse(json.out());
+    expect(losses).toEqual([expect.objectContaining({ role: 'variant', suite: '@demo/lib' })]);
+    expect(json.err()).toContain('Read 1 result.');
+    // Variants count for CI while they are listed; --no-variants hides them from both.
+    expect(await main(['losses', '.', '--ci'], capture(root).io)).toBe(1);
+    const hidden = capture(root);
+    expect(await main(['losses', '.', '--ci', '--no-variants'], hidden.io)).toBe(0);
+    expect(hidden.out()).toMatch(/^No losses/);
+  });
+
+  it('reports a directory without results instead of printing an empty table', async () => {
+    const root = tempPackage();
+    const report = capture(root);
+    expect(await main(['losses', '.'], report.io)).toBe(1);
+    expect(report.err()).toContain('No .bench/*.json results under .');
+  });
+});
+
 describe('ciProblems', () => {
   it('fails a failed contract, a size over budget, and a publish run that is not publishable', () => {
     const contract: GroupResult = {

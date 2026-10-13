@@ -11,8 +11,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { BenchResult, Profile, RunOptions, SuiteSpec } from './core/types.js';
+import { collectLosses } from './core/losses.js';
 import { formatTime } from './core/report/format.js';
-import { renderComparison, renderMarkdown, renderText } from './core/report/index.js';
+import { renderComparison, renderLosses, renderMarkdown, renderText } from './core/report/index.js';
 import { specHash } from './core/spec.js';
 import { compareRuns } from './core/stats.js';
 import { checkReadme, readReadmeMeta, writeReadme } from './node/readme.js';
@@ -32,7 +33,7 @@ type FlagSpec = {
   optional?: boolean;
 };
 
-type CommandName = 'run' | 'report' | 'compare' | 'check' | 'list' | 'doctor';
+type CommandName = 'run' | 'report' | 'compare' | 'losses' | 'check' | 'list' | 'doctor';
 
 type CommandSpec = {
   usage: string;
@@ -125,6 +126,28 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
     examples: [
       'arki-bench compare .bench/base.json .bench/head.json --ci',
       'arki-bench compare base.json head.json --threshold 3% --format markdown',
+    ],
+  },
+  losses: {
+    usage: 'arki-bench losses [results or directories…] [options]',
+    summary:
+      'List where our library is slower, larger or higher than another row, across saved results. Without arguments, reads .bench/*.json in the package root; a directory is searched for **/.bench/*.json (node_modules and hidden directories skipped).',
+    flags: {
+      markdown: { description: 'Print Markdown (for an issue or a PR) instead of the table.' },
+      json: { description: 'Print the losses as JSON.' },
+      ci: {
+        description:
+          'Exit 1 when a listed loss comes from a publishable result. Rough (not publishable) results are listed but never fail.',
+      },
+      'no-variants': {
+        description: 'Hide variant losses (another way to call our own library is cheaper). Listed by default.',
+      },
+    },
+    examples: [
+      'arki-bench losses                       # this package',
+      'arki-bench losses .                     # every package under this directory',
+      'arki-bench losses packages --markdown   # for an issue',
+      'arki-bench losses .bench/money.json --ci',
     ],
   },
   check: {
@@ -342,6 +365,7 @@ Usage
   arki-bench [run] [files…] [options]          run suites and print a table
   arki-bench report <result.json> [options]     render a saved result
   arki-bench compare <base.json> <head.json>    compare two runs (CI)
+  arki-bench losses [results or dirs…]          where our library is slower, larger or higher
   arki-bench check [README.md]                  exit 1 when the README section is stale
   arki-bench list                               show suites, groups, cases, contracts
   arki-bench doctor                             check this machine before measuring
@@ -694,6 +718,70 @@ function commandCompare(args: ParsedArgs, io: Io): number {
   return has(args, 'ci') && comparison.status === 'fail' ? 1 : 0;
 }
 
+/** `.bench/*.json` directly in `directory`, sorted. */
+function benchResults(directory: string): string[] {
+  const folder = path.join(directory, '.bench');
+  if (!existsSync(folder) || !statSync(folder).isDirectory()) return [];
+  return readdirSync(folder)
+    .filter(name => name.endsWith('.json'))
+    .map(name => path.join(folder, name))
+    .toSorted();
+}
+
+/** `**\/.bench/*.json` under `directory`, pruning node_modules and hidden directories (except `.bench`). */
+export function findResults(directory: string): readonly string[] {
+  const found: string[] = [];
+  const pending = [directory];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    found.push(...benchResults(next));
+    for (const entry of readdirSync(next, { withFileTypes: true })) {
+      if (entry.isDirectory() && entry.name !== 'node_modules' && !entry.name.startsWith('.'))
+        pending.push(path.join(next, entry.name));
+    }
+  }
+  return found.toSorted();
+}
+
+function commandLosses(args: ParsedArgs, io: Io): number {
+  const explicit: string[] = [];
+  const discovered: string[] = [];
+  if (args.positionals.length === 0) {
+    const root = findPackageRoot(io.cwd);
+    discovered.push(...benchResults(root));
+    if (discovered.length === 0)
+      throw new CommandError(`No saved results in ${path.join(root, '.bench')}. Run arki-bench first.`);
+  }
+  for (const target of args.positionals) {
+    const absolute = path.resolve(io.cwd, target);
+    if (!existsSync(absolute)) throw new CommandError(`${target} does not exist.`);
+    if (statSync(absolute).isDirectory()) {
+      const found = findResults(absolute);
+      if (found.length === 0) throw new CommandError(`No .bench/*.json results under ${target}.`);
+      discovered.push(...found);
+    } else {
+      explicit.push(absolute);
+    }
+  }
+  const results: BenchResult[] = explicit.map(file => readResult(file, io.cwd));
+  for (const file of new Set(discovered)) {
+    // One stale or foreign file in a tree of results is reported, not fatal.
+    try {
+      results.push(readResult(file, io.cwd));
+    } catch (error) {
+      if (!(error instanceof CommandError)) throw error;
+      io.stderr(`arki-bench: skipped ${path.relative(io.cwd, file) || file}: ${error.message}\n`);
+    }
+  }
+  const losses = collectLosses(results).filter(loss => loss.role === 'competitor' || !has(args, 'no-variants'));
+  if (has(args, 'json')) io.stdout(`${JSON.stringify(losses, null, 2)}\n`);
+  else io.stdout(renderLosses(losses, { format: has(args, 'markdown') ? 'markdown' : 'text' }));
+  io.stderr(`Read ${results.length} ${results.length === 1 ? 'result' : 'results'}.\n`);
+  const failing = losses.filter(loss => loss.publishable).length;
+  if (!has(args, 'ci') || failing === 0) return 0;
+  io.stderr(`FAIL — ${failing} ${failing === 1 ? 'loss' : 'losses'} in publishable results.\n`);
+  return 1;
+}
+
 async function loadSuites(
   args: ParsedArgs,
   io: Io,
@@ -880,6 +968,9 @@ export async function main(argv: readonly string[], io: Io = processIo()): Promi
       }
       case 'compare': {
         return commandCompare(args, io);
+      }
+      case 'losses': {
+        return commandLosses(args, io);
       }
       case 'check': {
         return await commandCheck(args, io);

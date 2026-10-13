@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import type { BenchResult, Block, CaseResult, GroupResult, Interval } from './types.js';
-import { bandVerdict, compareBlocks, compareRuns, createRandom, summarize, summarizeValues } from './stats.js';
+import {
+  bandVerdict,
+  compareBlocks,
+  compareMedians,
+  compareRuns,
+  createRandom,
+  MIN_COMPARISON_BLOCKS,
+  summarize,
+  summarizeValues,
+} from './stats.js';
 
 // ---------------------------------------------------------------------------
 // Synthetic data (no timing anywhere)
@@ -104,7 +113,7 @@ function metricGroup(value: number): GroupResult {
     summary: summarizeValues([value]),
     flags: [],
   };
-  return group('m', [metricCase], { kind: 'metric', unit: 'instantiations', contract: undefined });
+  return group('m', [metricCase], { kind: 'metric', unit: 'instantiations', deterministic: true, contract: undefined });
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +277,55 @@ describe('compareBlocks', () => {
     const base = makeBlocks({ nsPerOp: 100, noise: 0.3, seed: 1 });
     const other = makeBlocks({ nsPerOp: 110, noise: 0.3, seed: 2 });
     expect(compareBlocks(base, other, { seed: 11 })).toEqual(compareBlocks(base, other, { seed: 11 }));
+  });
+});
+
+describe('comparisons on too few blocks', () => {
+  // A quick run times one block per case. One block resamples to itself, so a
+  // bootstrap would give a zero-width interval and turn one noisy sample into
+  // a confident "50× slower [50–50]". Such a comparison must never rank.
+  const one = (nsPerOp: number, process = 0): Block[] => [{ process, block: 0, ns: nsPerOp * 1000, ops: 1000 }];
+
+  it('never calls a one-block comparison lower or higher, however large the gap', () => {
+    for (const [base, other] of [
+      [one(100), one(5000)],
+      [one(5000), one(100)],
+      [one(100), makeBlocks({ nsPerOp: 5000 })],
+      [makeBlocks({ nsPerOp: 100 }), one(5000)],
+    ] as const) {
+      const result = compareBlocks(base, other, { seed: 5 });
+      expect(result.verdict).toBe('inconclusive');
+      // The point ratio stays; the interval is [ratio, ratio]: nothing was resampled.
+      expect(result.interval).toEqual([result.ratio, result.ratio]);
+    }
+    expect(compareBlocks(one(100), one(5000)).ratio).toBe(50);
+  });
+
+  it('applies the same minimum to repeated metric observations', () => {
+    const value = (ns: number): Block[] => [{ process: 0, block: 0, ns, ops: 1 }];
+    expect(compareMedians(value(10), value(500)).verdict).toBe('inconclusive');
+  });
+
+  it('counts blocks over all processes: one block in each of two processes is enough to resample', () => {
+    expect(MIN_COMPARISON_BLOCKS).toBe(2);
+    const base = [...one(100, 0), ...one(101, 1)];
+    const other = [...one(5000, 0), ...one(5050, 1)];
+    expect(compareBlocks(base, other, { seed: 5 }).verdict).toBe('higher');
+  });
+
+  it('never reports a one-block run as regressed or improved in CI', () => {
+    const base = run([group('g', [speedCase('a', one(100))])]);
+    const head = run([group('g', [speedCase('a', one(5000))])]);
+    const result = compareRuns(base, head);
+    expect(result.status).toBe('pass');
+    expect(result.rows[0]).toMatchObject({ status: 'inconclusive', reason: expect.stringContaining('1 block') });
+    expect(result.rows[0]?.interval).toBeUndefined();
+    // Without samples the stored summary interval is [x, x]: still not a verdict.
+    const bare = compareRuns(
+      run([group('g', [speedCase('a', one(100), false)])]),
+      run([group('g', [speedCase('a', one(5000), false)])]),
+    );
+    expect(bare.rows[0]?.status).toBe('inconclusive');
   });
 });
 

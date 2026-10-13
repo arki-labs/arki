@@ -1,5 +1,16 @@
 # @arki/bench
 
+## 0.0.2
+
+Fixed:
+
+- A comparison from too few blocks no longer gets a verdict. A `quick` run times one block per case, and one block gave a zero-width bootstrap interval, so a single noisy sample read as "50× slower [50–50]". Each side now needs at least 2 blocks over all processes (`MIN_COMPARISON_BLOCKS`); below that `compareBlocks` and `compareMedians` return the point ratio, interval `[ratio, ratio]` and `inconclusive`, and `compareRuns` marks the row `inconclusive` instead of `regressed` or `improved`. Reports print `inconclusive (1 block)` and `1 block` in the interval column, also for results saved by 0.0.1. Sizes and deterministic metrics are exact and unchanged.
+
+Added:
+
+- `collectLosses(results)` and `renderLosses(losses, { format })`: every row where the suite's own library is slower, larger or higher than a competitor or a variant, across any number of saved results and every runtime of a matrix, worst first, with rough (not publishable) results marked.
+- `arki-bench losses [results or directories…]`: reads `.bench/*.json` in the package, or `**/.bench/*.json` under a directory. `--markdown`, `--json`, `--no-variants`, and `--ci` (exit 1 on a loss in a publishable result).
+
 ## 0.0.1
 
 First public release.

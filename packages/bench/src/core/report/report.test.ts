@@ -476,3 +476,35 @@ describe('renderComparison', () => {
     expect(markdown).toContain('**FAIL** — 1 regressed beyond 5%');
   });
 });
+
+describe('one-block rows', () => {
+  // A quick run times one block per case: there is no interval to print, and
+  // results saved before 0.0.2 even recorded a verdict for it. Neither may
+  // reach a table as "50× slower [50–50]".
+  const single = (estimate: number): Summary => ({
+    ...summary(estimate),
+    interval: [estimate, estimate],
+    n: 1,
+  });
+  const quick: GroupResult = {
+    ...roundGroup,
+    cases: [
+      row('arki', 100, { label: '@arki/money', role: 'baseline', summary: single(100), blocks: blocks(1, 1, 100) }),
+      row('dinero', 5000, { label: 'dinero.js', summary: single(5000), blocks: blocks(1, 1, 5000) }),
+    ],
+    comparisons: [comparison('dinero', 50, [50, 50], 'higher')],
+  };
+  const result = fixture({ profile: 'quick', publishable: false, groups: [quick] });
+
+  it('says "1 block" instead of a verdict or a zero-width interval', () => {
+    const text = renderText(result);
+    const markdown = renderMarkdown(result);
+    for (const page of [text, markdown]) {
+      expect(page).toContain('inconclusive (1 block)');
+      expect(page).not.toContain('50× slower');
+      expect(page).not.toMatch(/\[50(?:\.0+)?–50/);
+    }
+    // The interval column of the README table says why it is empty.
+    expect(markdown).toMatch(/\| 5 µs \| 1 block \|/);
+  });
+});

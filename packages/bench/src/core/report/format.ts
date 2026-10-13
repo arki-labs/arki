@@ -3,6 +3,7 @@
  * environment line. Pure string functions; no host APIs.
  */
 import type { BenchResult, CaseResult, Comparison, GroupResult, Interval } from '../types.js';
+import { comparisonBlocks, MIN_COMPARISON_BLOCKS } from '../stats.js';
 
 /** Rounds to `digits` significant digits without switching to exponent notation for normal values. */
 export function significant(value: number, digits = 3): string {
@@ -91,7 +92,7 @@ export function formatSpread(estimate: number, interval: Interval): string {
 }
 
 /** Decimals for a ratio factor: `1.06`, `3.2`, `12`. */
-function factorDecimals(factor: number): number {
+export function factorDecimals(factor: number): number {
   if (factor >= 10) return 0;
   if (factor >= 1.1) return 1;
   return 2;
@@ -125,16 +126,26 @@ export function verdictFor(
   if (row.role === 'baseline') return { text: options.baselineText, tone: 'baseline' };
   const comparison = group.comparisons.find(entry => entry.case === row.key);
   if (!comparison) return undefined;
-  return describeComparison(group.kind, comparison, options.inconclusivePrefix);
+  return describeComparison(group.kind, comparison, options.inconclusivePrefix, comparisonBlocks(group, row.key));
 }
 
+/**
+ * `blocks`: the thinner side's block count for a sampled comparison (see
+ * `comparisonBlocks`). Below `MIN_COMPARISON_BLOCKS` the row is
+ * `inconclusive (1 block)`, never a factor with a `[x–x]` interval, even when
+ * an older result recorded a verdict for it.
+ */
 export function describeComparison(
   kind: GroupResult['kind'],
   comparison: Comparison,
   inconclusivePrefix: string,
+  blocks?: number,
 ): Verdict {
   const words = directionWords(kind);
   const [low, high] = comparison.interval;
+  if (blocks !== undefined && blocks < MIN_COMPARISON_BLOCKS) {
+    return { text: `${inconclusivePrefix}inconclusive (${plural(blocks, 'block')})`, tone: 'unknown' };
+  }
   if (comparison.verdict === 'tie') return { text: '≈ same', tone: 'neutral' };
   if (comparison.verdict === 'inconclusive') {
     const decimals = 2;
@@ -229,6 +240,16 @@ export function versionOf(result: BenchResult, row: CaseResult): string | undefi
 /** The headline number of a row: gzip bytes for size rows, the summary estimate otherwise. */
 export function headline(row: CaseResult): number {
   return row.size === undefined ? row.summary.estimate : row.size.gzip;
+}
+
+/**
+ * The 95% interval of a row's estimate, or `1 block` when fewer than
+ * `MIN_COMPARISON_BLOCKS` blocks (or observations) stand behind it: one block
+ * has no interval, and `[x–x]` would read as a measured one.
+ */
+export function rangeText(row: CaseResult, unit?: string): string {
+  if (row.summary.n < MIN_COMPARISON_BLOCKS) return plural(row.summary.n, 'block');
+  return formatRange(row.summary.interval, unit);
 }
 
 /** A deterministic metric group (collected once). Decided by the spec, never by zero spread. */

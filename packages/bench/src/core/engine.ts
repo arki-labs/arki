@@ -65,6 +65,7 @@ import {
   summarizeValues,
 } from './stats.js';
 import { MITATA_VERSION, VERSION } from './version.js';
+import { BLOCKING_WARNINGS } from './warnings.js';
 
 /**
  * Measurement budget per profile.
@@ -1133,25 +1134,7 @@ async function runSize(
 // Assessment: flags, warnings and publishability, derived from the data
 // ---------------------------------------------------------------------------
 
-/**
- * Warning codes that make a result not publishable. Every other code
- * (`package-version-unknown`, `inputs-shared`) is advice.
- */
-export const BLOCKING_WARNINGS: readonly string[] = [
-  'quick-profile',
-  'explore-profile',
-  'filtered',
-  'contract-failed',
-  'optimized-out',
-  'floor-unreliable',
-  'unstable',
-  'state-mutated',
-  'teardown-failed',
-  'size-skipped',
-  'size-unavailable',
-  'runtime-missing',
-  'busy-machine',
-];
+export { BLOCKING_WARNINGS } from './warnings.js';
 
 const BLOCKING = new Set(BLOCKING_WARNINGS);
 

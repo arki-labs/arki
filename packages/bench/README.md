@@ -113,6 +113,8 @@ Every ratio is `case / baseline` with a 95% interval. The verdict words are:
 | `≈ same`                    | The interval lies inside ±2%. A tiny but certain difference is a tie, not a win. |
 | `inconclusive [0.90–1.30×]` | The data cannot tell. A low point estimate is not a winner.                      |
 
+A timed row needs at least 2 blocks on each side, over all processes (`MIN_COMPARISON_BLOCKS`), before it can get a verdict. One block has nothing to resample, so a `quick` run, which times one block per case, gives every ratio `inconclusive`: reports print `inconclusive (1 block)` and the interval column says `1 block`. In the saved result such a comparison keeps its point `ratio`, and its `interval` is `[ratio, ratio]`, which here means "not measured", not "exact". Repeated metrics follow the same rule; sizes and deterministic metrics are exact and need none. Reports and `losses` apply the rule to older results too, whatever verdict they recorded.
+
 No report ever names a "fastest" case. Size groups say `smaller` / `larger`, metric groups `lower` / `higher`. The saved result uses one vocabulary for every kind (lower is better everywhere): `lower`, `higher`, `tie`, `inconclusive`. Exact ratios (sizes, deterministic metrics) use the same ±2% band.
 
 Rows are also flagged:
@@ -143,6 +145,7 @@ Put two markers in your README where the section goes:
 
 ```md
 <!-- bench:start -->
+
 ## Benchmarks
 
 What the portable core adds to a browser bundle (minified, then compressed file by file), next to the timing libraries people reach for. Timing itself is mitata: `@arki/bench` calls its `measure`, so per-operation overhead is the same.
@@ -153,13 +156,13 @@ Versions: @arki/bench 0.0.1 · mitata 1.0.34 · tinybench 6.2.1.
 
 ### Define, run and render a suite
 
-Rows marked *different contract* do other work: they are measured and shown, never ranked.
+Rows marked _different contract_ do other work: they are measured and shown, never ranked.
 
-| Library | Version | JS+CSS gzip | brotli | raw | Budget (gzip) | vs @arki/bench/core |
-| --- | --- | --: | --: | --: | --- | --- |
-| **@arki/bench/core** | 0.0.1 | 18.9 kB | 16.9 kB | 54.8 kB | 21 kB | baseline |
-| mitata (bench, run) | 1.0.34 | 13 kB | 11.7 kB | 41.6 kB | — | different contract: timing and console output only |
-| tinybench (Bench) | 6.2.1 | 6.42 kB | 5.77 kB | 20.5 kB | — | different contract: timing and a results table only |
+| Library              | Version | JS+CSS gzip |  brotli |     raw | Budget (gzip) | vs @arki/bench/core                                 |
+| -------------------- | ------- | ----------: | ------: | ------: | ------------- | --------------------------------------------------- |
+| **@arki/bench/core** | 0.0.1   |     18.9 kB | 16.9 kB | 54.8 kB | 21 kB         | baseline                                            |
+| mitata (bench, run)  | 1.0.34  |       13 kB | 11.7 kB | 41.6 kB | —             | different contract: timing and console output only  |
+| tinybench (Bench)    | 6.2.1   |     6.42 kB | 5.77 kB | 20.5 kB | —             | different contract: timing and a results table only |
 
 **Notes**
 
@@ -241,7 +244,43 @@ FAIL — 1 regressed beyond 5% · 1 within tolerance
 
 Statuses: `regressed` and `improved` (the interval is beyond the threshold), `within tolerance`, `inconclusive`, `incompatible` (different contract, runtime, unit or profile, or the case's work changed: needs a new baseline, not a speed-up), `added`, `removed`, and `contract failed` (the head's contract check failed: one `group/(contract)` row, and the comparison fails). Compatibility is judged per case from its `workHash`, so adding a competitor or renaming a label keeps every other row comparable. Every head size row is checked against its budget, whatever its status: over it, the row is `regressed`. Repeated metrics compare their medians. `--threshold 3%` changes the band; `--format markdown` gives a table for a PR comment. `compare` fails on a regression or a failed head contract. `run --ci` fails on a failed contract, a size over budget, or a `publish` run that is not publishable.
 
+A row with fewer than 2 blocks on either side is `inconclusive` (`1 block: too few to compare`), never `regressed` or `improved`.
+
 Shared CI runners are noisy. Treat their numbers as a regression alarm, and publish README numbers from a quiet machine (`arki-bench doctor` tells you what to close).
+
+## Finding losses
+
+Where is our library slower, larger or higher than a rival? `losses` reads saved results and lists every row where the other side costs less:
+
+```sh
+arki-bench losses                 # .bench/*.json in this package
+arki-bench losses .               # every **/.bench/*.json below (node_modules and hidden directories skipped)
+arki-bench losses packages --markdown > losses.md
+```
+
+```text
+Losses  3 losses in 2 suites · 1 from rough results (not publishable)
+
+Competitors: a rival costs less than our library
+  suite        runtime  group     ours         cheaper  ours is                source
+  @arki/money  node     bundle    @arki/money  dinero   4.0× larger (exact)    publishable
+  @arki/date   bun      parse     @arki/date   luxon    2.5× slower [2.3–2.8]  rough: quick profile / busy machine
+
+Variants: another way to call our own library costs less
+  suite        runtime  group     ours         cheaper     ours is                source
+  @arki/money  node     allocate  @arki/money  arki split  1.3× slower [1.2–1.3]  publishable
+```
+
+A loss is a comparison with verdict `lower` (the other row is faster, smaller or lower) in a group whose baseline is the suite's own library: its `package` is the suite id, or it names no package. `differs` rows do other work and never count; neither do ties, inconclusive rows or one-block rows. Each runtime of a matrix is read on its own. Variants are listed in their own section because they are our own slow paths: a cheaper way to call the same library. `--no-variants` hides them.
+
+Rows from a result that is not publishable are listed as rough, with the reason. In CI, `--ci` exits 1 when a listed loss comes from a publishable result; a rough result alone never fails:
+
+```yaml
+- run: bunx arki-bench --profile publish
+- run: bunx arki-bench losses --ci
+```
+
+`--markdown` prints a table for an issue or a PR, `--json` the `Loss[]` that `collectLosses` returns.
 
 ## Size budgets
 
@@ -302,6 +341,7 @@ The same file runs under each runtime. The result keeps one result per runtime i
 | `arki-bench [run] [files…]`                  | Run suites. `--profile`, `--filter group[/case]`, `--seed`, `--processes`, `--runtime`, `--timeout`, `--out`, `--json` (always an array), `--markdown`, `--write-readme [path]`, `--reproduce`, `--force`, `--ci`, `--no-samples`, `--no-color`. |
 | `arki-bench report <result.json>`            | Render a saved result: `--format text\|markdown\|json`, `--write README.md`, `--force`.                                                                                                                                                          |
 | `arki-bench compare <base.json> <head.json>` | Case-by-case comparison: `--threshold 5%`, `--format text\|markdown`, `--ci`.                                                                                                                                                                    |
+| `arki-bench losses [results or dirs…]`       | Where our library costs more than another row, across saved results: `--markdown`, `--json`, `--ci`, `--no-variants`.                                                                                                                            |
 | `arki-bench check [README.md]`               | Exit 1 when the README section is missing or stale.                                                                                                                                                                                              |
 | `arki-bench list`                            | Suites, groups, cases, contracts. `--json`.                                                                                                                                                                                                      |
 | `arki-bench doctor`                          | Runtime, timer resolution, GC, CPU, load, Bun/Deno on PATH, and what to fix.                                                                                                                                                                     |
@@ -329,7 +369,7 @@ const published = await runFile('bench/money.bench.ts', { profile: 'publish', pr
 writeReadme('README.md', renderMarkdown(published));
 ```
 
-`@arki/bench` exports `defineSuite`, `compare`, `scenario`, `size`, `metric` and every type below.
+`@arki/bench` exports `defineSuite`, `compare`, `scenario`, `size`, `metric`, `collectLosses`, `renderLosses` and every type below.
 
 `@arki/bench/core` (portable):
 
@@ -348,11 +388,14 @@ writeReadme('README.md', renderMarkdown(published));
 | `BLOCKING_WARNINGS`                     | `readonly string[]`: warning codes that make a result not publishable.                                           |
 | `summarize`, `summarizeValues`          | Statistics on raw blocks, or on repeated values (median).                                                        |
 | `compareBlocks`, `compareMedians`       | `(base, other, { seed?, threshold? })`: ratio, 95% interval and verdict of Σns/Σops, or of medians.              |
+| `MIN_COMPARISON_BLOCKS`                 | `2`: blocks (or metric observations) each side needs before a sampled comparison gets a verdict.                 |
 | `compareRuns`                           | `(base, head, { threshold?, seed? }) => RunComparison`                                                           |
 | `createRandom`, `DEFAULT_SEED`          | The seeded PRNG (mulberry32) and the default seed.                                                               |
 | `renderText`                            | `(result, { color? }) => string`                                                                                 |
 | `renderMarkdown`                        | `(result, { reproduce? }) => string`                                                                             |
 | `renderComparison`                      | `(comparison, 'text' \| 'markdown') => string`                                                                   |
+| `collectLosses`                         | `(results: readonly BenchResult[]) => Loss[]`: rows where our library costs more, worst first.                   |
+| `renderLosses`                          | `(losses, { format: 'text' \| 'markdown' }) => string`                                                           |
 
 `@arki/bench/node` (host):
 
@@ -374,7 +417,7 @@ writeReadme('README.md', renderMarkdown(published));
 - `profile`, `seed`, `publishable`, `warnings` (`{ code, message, group?, case?, runtime? }`).
 - `environment` — runtime and version, OS, arch, CPU, cores, runtime flags, harness and mitata versions, git revision and dirty state, load at start and end, date.
 - `packages` — the installed version of every package a case names.
-- `groups[]` — kind, id, title, unit, contract, contract check (inputs, failures), baseline, `deterministic` (metrics), the empty-function `floor` and its raw `floorBlocks` (speed), `cases[]` (key, label, package, role, `workHash`, summary with estimate, interval, median, min, max, p75, p99, cv, n; raw `blocks` unless `--no-samples`; size bytes; limit; flags) and `comparisons[]` (ratio, interval, verdict: `lower`, `higher`, `tie` or `inconclusive`).
+- `groups[]` — kind, id, title, unit, contract, contract check (inputs, failures), baseline, `deterministic` (metrics), the empty-function `floor` and its raw `floorBlocks` (speed), `cases[]` (key, label, package, role, `workHash`, summary with estimate, interval, median, min, max, p75, p99, cv, n; raw `blocks` unless `--no-samples`; size bytes; limit; flags) and `comparisons[]` (ratio, interval, verdict: `lower`, `higher`, `tie` or `inconclusive`; with fewer than 2 blocks on a side the interval is `[ratio, ratio]`, meaning not measured, and the verdict `inconclusive`).
 - `blocks` — speed cases: `{ process, block, ns, ops }`, time spent on that many operations. Metric cases reuse the shape for raw observations: one block per collected value, `ns` holding the value in the group's unit and `ops` = 1.
 - `runtimes[]` — one full result per runtime in a matrix run.
 

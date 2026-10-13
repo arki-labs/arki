@@ -1,6 +1,6 @@
 {
   "name": "@arki/bench",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": false,
   "description": "Benchmarks you can publish: compare a library against its competitors under executable contracts, with honest statistics, full provenance, bundle-size budgets and README tables generated from saved results. Built on mitata.",
   "keywords": [

@@ -12,13 +12,13 @@ import {
   flagText,
   formatBytes,
   formatQuantity,
-  formatRange,
   formatSpread,
   hostLabel,
   isDeterministic,
   matrixRows,
   plural,
   profileLabel,
+  rangeText,
   runtimeLabel,
   sections,
   verdictFor,
@@ -98,7 +98,7 @@ function speedTable(result: BenchResult, group: GroupResult): string[] {
       escapeCell(versionOf(result, entry) ?? '—'),
       formatQuantity(entry.summary.estimate, group.unit),
     ];
-    if (!deterministic) cells.push(formatRange(entry.summary.interval, group.unit));
+    if (!deterministic) cells.push(rangeText(entry, group.unit));
     if (header.length > cells.length) cells.push(verdictCell(group, entry));
     lines.push(row(cells));
   }

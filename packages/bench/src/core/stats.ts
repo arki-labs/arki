@@ -375,8 +375,48 @@ export function bandVerdict(interval: Interval, threshold = TIE_BAND): Compariso
 }
 
 /**
+ * Fewest blocks (timed blocks, or observations of a repeated metric) each side
+ * of a sampled comparison needs, in total over all processes, before it can
+ * carry a verdict. One block resamples to itself, so its bootstrap interval
+ * has zero width and would turn one noisy sample into a confident "50× slower
+ * [50–50]". (The profiles' `minSamples` is a different thing: mitata's samples
+ * inside one block.) Exact comparisons (sizes, deterministic metrics) never
+ * need it.
+ */
+export const MIN_COMPARISON_BLOCKS = 2;
+
+/**
+ * A sampled comparison with fewer than {@link MIN_COMPARISON_BLOCKS} blocks on
+ * a side: the point ratio, interval [ratio, ratio] (no interval was measured;
+ * the field stays required) and always `inconclusive`.
+ */
+function unmeasuredComparison(ratio: number): Omit<Comparison, 'case'> {
+  return { ratio, interval: [ratio, ratio], verdict: 'inconclusive' };
+}
+
+/**
+ * Blocks behind the thinner side of a sampled comparison in `group` (the
+ * smaller `summary.n` of the baseline and `key`), or undefined when the
+ * comparison is exact (size, deterministic metric) or a row is missing.
+ * Below {@link MIN_COMPARISON_BLOCKS} the comparison has no measured interval
+ * and no verdict, whatever an older result recorded: reports say so instead
+ * of printing `[x–x]`, and `collectLosses` skips it.
+ */
+export function comparisonBlocks(group: GroupResult, key: string): number | undefined {
+  if (group.kind === 'size' || group.kind === 'scenario' || group.deterministic === true) return undefined;
+  const base = group.cases.find(entry => entry.key === group.baseline);
+  const other = group.cases.find(entry => entry.key === key);
+  if (!base || !other) return undefined;
+  return Math.min(base.summary.n, other.summary.n);
+}
+
+/**
  * Ratio of two cases, other / base (Σns/Σops each), with a 95% interval from
  * resampling both sides independently with the hierarchical design.
+ *
+ * With fewer than {@link MIN_COMPARISON_BLOCKS} blocks on either side there is
+ * nothing to resample: the result is the point ratio, interval
+ * [ratio, ratio], verdict `inconclusive`.
  *
  * Verdicts, with t = threshold (default 0.02):
  * - `lower` / `higher`: the whole interval lies beyond the band, so the
@@ -396,6 +436,7 @@ export function compareBlocks(
   const baseDesign = toDesign(base, 'compareBlocks(base)');
   const otherDesign = toDesign(other, 'compareBlocks(other)');
   const ratio = safeRatio(totalOverTotal(otherDesign), totalOverTotal(baseDesign));
+  if (Math.min(base.length, other.length) < MIN_COMPARISON_BLOCKS) return unmeasuredComparison(ratio);
   const interval = ratioInterval(baseDesign, otherDesign, createRandom(options.seed ?? DEFAULT_SEED), ALPHA);
   return { ratio, interval, verdict: bandVerdict(interval, threshold) };
 }
@@ -412,6 +453,8 @@ export function exactComparison(base: number, other: number, threshold = TIE_BAN
  * same two-stage bootstrap as `compareBlocks` (processes, then observations),
  * taking the median of each resample. The median is the metric estimator
  * (see `summarizeValues`), so the ratio compares the numbers the report shows.
+ * Fewer than {@link MIN_COMPARISON_BLOCKS} observations on a side give the
+ * point ratio, interval [ratio, ratio] and `inconclusive`, as in `compareBlocks`.
  */
 export function compareMedians(
   base: readonly Block[],
@@ -422,6 +465,7 @@ export function compareMedians(
   const baseDesign = toDesign(base, 'compareMedians(base)');
   const otherDesign = toDesign(other, 'compareMedians(other)');
   const ratio = safeRatio(designMedian(otherDesign), designMedian(baseDesign));
+  if (Math.min(base.length, other.length) < MIN_COMPARISON_BLOCKS) return unmeasuredComparison(ratio);
   const interval = medianRatioInterval(baseDesign, otherDesign, createRandom(options.seed ?? DEFAULT_SEED), ALPHA);
   return { ratio, interval, verdict: bandVerdict(interval, threshold) };
 }
@@ -438,7 +482,7 @@ type Pending = {
   kind: GroupResult['kind'];
   base: CaseResult;
   head: CaseResult;
-  method: 'blocks' | 'summaries' | 'exact';
+  method: 'blocks' | 'summaries' | 'exact' | 'too-few';
 };
 
 /** The `case` of the one row a group gets when its head contract check failed. */
@@ -450,6 +494,7 @@ function caseValue(kind: GroupResult['kind'], result: CaseResult): number {
 
 function methodFor(group: GroupResult, base: CaseResult, head: CaseResult): Pending['method'] {
   if (group.kind === 'size' || (group.kind === 'metric' && group.deterministic === true)) return 'exact';
+  if (Math.min(base.summary.n, head.summary.n) < MIN_COMPARISON_BLOCKS) return 'too-few';
   if (base.blocks?.length && head.blocks?.length) return 'blocks';
   const [baseLow, baseHigh] = base.summary.interval;
   const [headLow, headHigh] = head.summary.interval;
@@ -744,6 +789,16 @@ function judge(entry: Pending, threshold: number, alpha: number, seed: number): 
   const base = caseValue(entry.kind, entry.base);
   const head = caseValue(entry.kind, entry.head);
   const ratio = safeRatio(head, base);
+  if (entry.method === 'too-few') {
+    // One block (or one observation) has no interval: never a regression or an improvement.
+    const blocks = Math.min(entry.base.summary.n, entry.head.summary.n);
+    const reason = `${blocks} ${blocks === 1 ? 'block' : 'blocks'}: too few to compare (needs ${MIN_COMPARISON_BLOCKS} per side)`;
+    return withBudget(
+      { group: entry.group, case: entry.head.key, base, head, ratio, status: 'inconclusive', reason },
+      entry.kind,
+      entry.head,
+    );
+  }
   let interval: Interval;
   let reason: string | undefined;
   if (entry.method === 'blocks') {

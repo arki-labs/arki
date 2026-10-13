@@ -12,13 +12,15 @@ export {
   SpecError,
 } from './spec.js';
 export { assessResult, BLOCKING_WARNINGS, PROFILE_BUDGETS, runSuite } from './engine.js';
+export { collectLosses } from './losses.js';
 export {
   compareBlocks,
   compareMedians,
   compareRuns,
   createRandom,
   DEFAULT_SEED,
+  MIN_COMPARISON_BLOCKS,
   summarize,
   summarizeValues,
 } from './stats.js';
-export { renderMarkdown, renderText, renderComparison } from './report/index.js';
+export { renderLosses, renderMarkdown, renderText, renderComparison } from './report/index.js';

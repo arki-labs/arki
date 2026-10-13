@@ -424,3 +424,30 @@ export type RunComparison = {
     reason?: string;
   }[];
 };
+
+/**
+ * A row where another way of doing the work costs less than the suite's own
+ * library: a `lower` comparison in a group whose baseline is the suite's
+ * library (see `collectLosses`).
+ */
+export type Loss = {
+  /** The suite id of the result it came from. */
+  suite: string;
+  /** The runtime it was measured on (each runtime of a matrix separately). */
+  runtime: Environment['runtime']['name'];
+  group: { id: string; title: string; kind: GroupResult['kind'] };
+  /** Label of the baseline row: the suite's own library. */
+  baseline: string;
+  /** The row that costs less. */
+  case: { key: string; label: string };
+  /** `competitor`: a rival is cheaper. `variant`: another way to call our own library is cheaper. */
+  role: 'competitor' | 'variant';
+  /** The baseline is `factor`× the other row (time, bytes or the metric): 1 / the comparison's ratio, > 1. */
+  factor: number;
+  /** 95% interval of `factor`; [factor, factor] for exact comparisons (sizes, deterministic metrics). */
+  interval: Interval;
+  /** Whether the result it came from was publishable. */
+  publishable: boolean;
+  /** Why that result is not publishable, in words (`quick profile`, `busy machine`); empty when it is. */
+  rough: readonly string[];
+};
