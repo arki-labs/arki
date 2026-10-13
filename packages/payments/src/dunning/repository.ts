@@ -39,6 +39,7 @@ import type {
   NewDunningExecution,
 } from './types';
 import { sumMinorByCurrency } from './analytics-money';
+import { readCustomerRiskProfile } from './stored-risk-profile';
 
 /**
  * Structural database type accepted by the dunning repositories. See the
@@ -794,7 +795,9 @@ export class CustomerRiskProfileRepository {
   }
 
   async findByCustomerId(customerId: CustomerId): Promise<CustomerRiskProfile | undefined> {
-    return this.q.customerRiskProfiles.findFirst({ where: { customerId } });
+    const profile = await this.q.customerRiskProfiles.findFirst({ where: { customerId } });
+
+    return profile && readCustomerRiskProfile(profile);
   }
 
   async create(
@@ -814,7 +817,7 @@ export class CustomerRiskProfileRepository {
       })
       .returning();
 
-    return profile;
+    return profile && readCustomerRiskProfile(profile);
   }
 
   async update(
@@ -827,7 +830,7 @@ export class CustomerRiskProfileRepository {
       .where(eq(this.customerRiskProfiles.customerId, customerId))
       .returning();
 
-    return profile;
+    return profile && readCustomerRiskProfile(profile);
   }
 
   async upsert(
@@ -843,24 +846,28 @@ export class CustomerRiskProfileRepository {
   }
 
   async findByRiskCategory(category: string, limit = 100): Promise<CustomerRiskProfile[]> {
-    return this.q.customerRiskProfiles.findMany({
+    const profiles = await this.q.customerRiskProfiles.findMany({
       where: { RAW: sql`${this.customerRiskProfiles.riskScore}->>'category' = ${category}` },
       orderBy: () =>
         desc(sql`(${this.customerRiskProfiles.riskScore}->>'overall')::numeric`),
       limit,
     });
+
+    return profiles.map(profile => readCustomerRiskProfile(profile));
   }
 
   async findBySegmentId(
     segmentId: CustomerSegmentId,
     limit = 100,
   ): Promise<CustomerRiskProfile[]> {
-    return this.q.customerRiskProfiles.findMany({
+    const profiles = await this.q.customerRiskProfiles.findMany({
       where: {
         RAW: sql`${this.customerRiskProfiles.segmentIds} @> ${JSON.stringify([segmentId])}`,
       },
       limit,
     });
+
+    return profiles.map(profile => readCustomerRiskProfile(profile));
   }
 
   async updateSegments(
@@ -873,7 +880,7 @@ export class CustomerRiskProfileRepository {
       .where(eq(this.customerRiskProfiles.customerId, customerId))
       .returning();
 
-    return profile;
+    return profile && readCustomerRiskProfile(profile);
   }
 }
 
