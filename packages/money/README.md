@@ -234,6 +234,99 @@ Node 20+, Bun, Deno, modern browsers and React Native on Hermes V1 (React Native
 
 On Hermes for Apple platforms, `Intl.NumberFormat` has no `formatToParts` and formats number strings through a float. So `parseMoney` with a `locale` throws `UnsupportedFeatureError` (pass `symbols` instead), `formatMoneyToParts` throws, and `formatMoney` is exact up to 15 significant digits and throws beyond. Arithmetic, allocation, conversion, Stripe units and JSON work everywhere.
 
+<!-- bench:start -->
+## Benchmarks
+
+Speed of `@arki/money` against dinero.js v1 and currency.js, the two money libraries most projects use, with big.js as a plain decimal baseline.
+
+Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+
+### add
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/money | 11.4 ns | fastest |
+| @arki/money (bigint, > 2^53) | 163.5 ns | 14.37× |
+| dinero.js v1 | 2.89 µs | 254.24× |
+| currency.js | 1.79 µs | 157.39× |
+| big.js | 753.7 ns | 66.22× |
+
+### multiply by 1.0825 and round half-even
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/money (prepared factor) | 98.2 ns | fastest |
+| @arki/money (string factor) | 469.4 ns | 4.78× |
+| dinero.js v1 | 6.10 µs | 62.18× |
+| currency.js (half-up only) | 2.19 µs | 22.34× |
+| big.js | 943.6 ns | 9.61× |
+
+### allocate 100 into [1, 1, 1]
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/money | 869.6 ns | 4.25× |
+| @arki/money split(3) | 204.6 ns | fastest |
+| dinero.js v1 | 11.14 µs | 54.45× |
+| currency.js distribute(3) | 6.41 µs | 31.31× |
+
+### compare
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/money | 33.7 ns | fastest |
+| dinero.js v1 (lessThan) | 46.2 ns | 1.37× |
+| big.js | 220.4 ns | 6.54× |
+
+### construct from a string
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/money | 367.3 ns | 4.18× |
+| @arki/money fromMinor | 87.9 ns | fastest |
+| dinero.js v1 (minor units only) | 1.74 µs | 19.84× |
+| currency.js | 2.37 µs | 27.01× |
+
+### sum of 1000
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/money sum() | 8.71 µs | fastest |
+| @arki/money reduce(plus) | 34.65 µs | 3.98× |
+
+### convert and round once
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/money direct EUR→USD | 1.23 µs | fastest |
+| @arki/money cross USD→GBP via EUR | 2.08 µs | 1.70× |
+
+### parse and payment units
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/money parse de-DE (bound parser) | 10.86 µs | 20.04× |
+| @arki/money toStripeAmount | 542.0 ns | fastest |
+
+### format en-US
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/money | 1.44 µs | fastest |
+| dinero.js v1 | 37.99 µs | 26.43× |
+| currency.js | 1.54 µs | 1.07× |
+
+Read the rows with the contracts in mind:
+
+- Contracts differ, so read rows with care.
+- currency.js stores a float and rounds every result to 2 decimals.
+- dinero.js v1 stores safe-integer cents and rounds multiplication by default.
+- big.js is a decimal, not money: it has no currency and no allocation.
+- `@arki/money` keeps a currency on every value, refuses to mix currencies, and uses bigint minor units, so amounts beyond 2^53 stay exact.
+
+Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+<!-- bench:end -->
+
 ## License
 
 MIT

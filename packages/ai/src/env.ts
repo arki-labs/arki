@@ -9,6 +9,9 @@ import { defineEnv } from '@arki/env/core';
 export const env = defineEnv({
   name: '@arki/ai',
   server: {
+    // Diarized prerecorded speech
+    DEEPGRAM_API_KEY: z.string().optional(),
+
     // OpenAI
     OPENAI_API_KEY: z.string().optional(),
     OPENAI_EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),

@@ -74,6 +74,56 @@ const env = defineEnv({
   package for plugin authoring, lifecycle, diagnostics, and the
   [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).
 
+<!-- bench:start -->
+## Benchmarks
+
+Defining and validating a 15-variable server environment with `defineEnv()`, against `@t3-oss/env-core` (which it wraps), envalid, and a plain zod object parse.
+
+Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+
+### Define + validate 15 variables + read one value
+
+Each call builds a fresh environment from scratch, validates every variable, then reads `PORT`.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/env defineEnv() | 25.03 µs | fastest |
+| @t3-oss/env-core createEnv() (used directly) | 306.02 µs | 12.22× |
+| envalid cleanEnv() | 59.23 µs | 2.37× |
+| zod z.object().parse(process.env) | 177.92 µs | 7.11× |
+
+### Define only (no read)
+
+Declare the environment and never read it. `defineEnv()` defers all work to the first read; the others validate immediately.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/env defineEnv() (lazy, no validation yet) | 126.8 ns | fastest |
+| @t3-oss/env-core createEnv() (validates now) | 519.07 µs | 4094.95× |
+| envalid cleanEnv() (validates now) | 115.66 µs | 912.46× |
+| zod z.object().parse(process.env) (validates now) | 431.26 µs | 3402.26× |
+
+### Read one value from an already-validated environment
+
+The hot path: `env.PORT` after the environment exists.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/env (lazy object over createEnv) | 229.1 ns | 28.25× |
+| @t3-oss/env-core createEnv() | 50.3 ns | 6.20× |
+| envalid cleanEnv() | 83.8 ns | 10.34× |
+| zod parsed plain object | 8.1 ns | fastest |
+
+Read the rows with the contracts in mind:
+
+- `defineEnv()` is lazy: it builds and validates the environment on the first property read, so "define + first read" is the fair row for it. The "define only" group shows what declaring an env costs before anything reads it.
+- Validation is forced on (`skipValidation: false`) for `defineEnv()` and `createEnv`, because `defineEnv()` skips validation outside development by default.
+- `defineEnv()` and `createEnv` share the same zod schemas, so the gap between them is the wrapper alone: building `runtimeEnv` from `process.env`, a labelled error handler, and the lazy object. envalid uses its own validators, and the plain zod parse does no env-specific work (no empty-string handling, no frozen result).
+- `createEnv`, envalid and the zod parse are given the whole `process.env`, as their docs show, so their cost grows with how many variables the process has. `defineEnv()` reads only the keys it declares. The gap therefore depends on the size of the environment it runs in.
+
+Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+<!-- bench:end -->
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

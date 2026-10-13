@@ -166,6 +166,62 @@ it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
 application framework, see `packages/dot/docs/` for plugin authoring,
 lifecycle, and diagnostics.
 
+<!-- bench:start -->
+## Benchmarks
+
+Logging a line to an in-process sink with `@arki/log`, against pino (which it wraps), winston and consola. Pino is the speed reference for structured JSON logging in Node; winston and consola are the other widely used loggers.
+
+Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+
+### info: message + 3 fields
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/log logger.info(msg, fields) | 2.16 µs | 1.60× |
+| pino log.info(fields, msg) (used directly) | 2.53 µs | 1.87× |
+| winston log.info(msg, fields) | 6.45 µs | 4.78× |
+| consola log.info(msg, fields) | 1.35 µs | fastest |
+
+### info: message only
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/log logger.info(msg) | 1.47 µs | 1.76× |
+| pino log.info(msg) (used directly) | 834.4 ns | fastest |
+| winston log.info(msg) | 5.63 µs | 6.75× |
+| consola log.info(msg) | 1.59 µs | 1.91× |
+
+### debug call while the level is info (disabled)
+
+The call is dropped before anything is built. This is the cost of leaving debug logging in hot code.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/log logger.debug(msg, fields) | 22.9 ns | fastest |
+| pino log.debug(fields, msg) (used directly) | 119.1 ns | 5.19× |
+| winston log.debug(msg, fields) | 24.40 µs | 1064.03× |
+| consola log.debug(msg, fields) | 177.7 ns | 7.75× |
+
+### Create a child logger with one bound field
+
+The usual per-request or per-module pattern. consola has no bound fields, so its row uses `withTag` (a name only).
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/log logger.child(name, fields) | 278.7 ns | fastest |
+| pino log.child(bindings) (used directly) | 571.7 ns | 2.05× |
+| winston log.child(meta) | 848.2 ns | 3.04× |
+| consola log.withTag(name) | 15.12 µs | 54.24× |
+
+Read the rows with the contracts in mind:
+
+- Every logger writes JSON to a sink that drops its output. `@arki/log` builds its own pino instance that writes to stdout, so the benchmark swaps `configuration.transport` for an identical pino instance (same options) that writes to the sink. Batching is off, which is the default.
+- The JSON differs. `@arki/log` wraps each call in a record (name, body, attributes, severity number and text, timestamp, trace ids) before handing it to pino. That is the structured contract the package sells, and it is the extra work in the rows below. Direct pino, winston and consola write only the message and the fields.
+- Pino is used the way its docs show (fields first, then the message), with `base: null` to match `@arki/log`. Winston has the timestamp and JSON formats on. Consola has one reporter that writes `JSON.stringify` of the entry. winston writes through a stream, so its cost includes that.
+
+Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+<!-- bench:end -->
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

@@ -22,8 +22,9 @@ import { anthropic } from '@ai-sdk/anthropic';
 import { google } from '@ai-sdk/google';
 import { groq } from '@ai-sdk/groq';
 import { mistral } from '@ai-sdk/mistral';
-import { openai } from '@ai-sdk/openai';
-import { Output, generateText, streamText } from 'ai';
+import { createOpenAI, openai } from '@ai-sdk/openai';
+import { generateText, Output, streamText } from 'ai';
+import { createOllama } from 'ai-sdk-ollama';
 
 import type { z } from '@arki/contracts';
 
@@ -35,6 +36,7 @@ import { aiTelemetry } from './telemetry';
 // ── Per-provider model defaults ───────────────────────────────
 
 const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
+  ollama: 'qwen3.6:latest',
   openai: 'gpt-4o-mini',
   anthropic: 'claude-3-5-haiku-latest',
   groq: 'openai/gpt-oss-20b',
@@ -45,6 +47,12 @@ const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
 // ── Config type ────────────────────────────────────────────────
 
 export type LLMProviderConfig = {
+  /** Explicit provider override for a capability. */
+  provider?: 'ollama' | 'openai' | 'anthropic' | 'groq' | 'google' | 'mistral';
+  /** Endpoint override: native Ollama or OpenAI-compatible chat completions. */
+  baseURL?: string;
+  /** Credential for the endpoint override; otherwise uses OPENAI_API_KEY. */
+  apiKey?: string;
   /** Override the default model for the active provider. */
   model?: string;
   /** Default temperature for all calls (0–1). */
@@ -62,12 +70,24 @@ export type LLMProviderConfig = {
  * environment, then accepts per-call overrides via `config`.
  */
 export function createLLMProvider(config: LLMProviderConfig = {}): StructuredLLMProvider {
-  const providerName = env.LLM_PROVIDER;
+  const providerName = config.provider ?? env.LLM_PROVIDER;
   const model = config.model ?? env.LLM_MODEL ?? PROVIDER_DEFAULT_MODELS[providerName] ?? 'gpt-4o-mini';
 
-  let languageModel: LanguageModel;
+  if (config.baseURL && !['openai', 'ollama'].includes(providerName))
+    throw new Error('baseURL requires openai or ollama provider');
+  let languageModel: LanguageModel | ((signal?: AbortSignal) => LanguageModel);
 
   switch (providerName) {
+    case 'ollama': {
+      // ai-sdk-ollama's native client omits the AI SDK abort signal from HTTP calls.
+      // A model per call binds cancellation without mutating a shared client.
+      languageModel = signal =>
+        createOllama({
+          baseURL: (config.baseURL ?? env.OLLAMA_BASE_URL).replace(/\/v1\/?$/u, ''),
+          fetch: (input, init) => fetch(input, { ...init, signal }),
+        })(model);
+      break;
+    }
     case 'anthropic': {
       languageModel = anthropic(model);
       break;
@@ -85,7 +105,9 @@ export function createLLMProvider(config: LLMProviderConfig = {}): StructuredLLM
       break;
     }
     default: {
-      languageModel = openai(model);
+      languageModel = config.baseURL
+        ? createOpenAI({ baseURL: config.baseURL, apiKey: config.apiKey ?? env.OPENAI_API_KEY ?? 'local' }).chat(model)
+        : openai(model);
     }
   }
 
@@ -110,7 +132,7 @@ export function createLLMProvider(config: LLMProviderConfig = {}): StructuredLLM
  */
 class LanguageModelAdapter implements StructuredLLMProvider {
   constructor(
-    private readonly languageModel: LanguageModel,
+    private readonly languageModel: LanguageModel | ((signal?: AbortSignal) => LanguageModel),
     private readonly providerName: string,
     private readonly modelName: string,
     private readonly defaultTemperature: number,
@@ -120,16 +142,18 @@ class LanguageModelAdapter implements StructuredLLMProvider {
   async generateStructuredData<T>(prompt: string, schema: z.ZodSchema<T>, options: GenerateOptions = {}): Promise<T> {
     try {
       const result = await generateText({
-        model: this.languageModel,
+        model: typeof this.languageModel === 'function' ? this.languageModel(options.signal) : this.languageModel,
         system: options.systemPrompt,
         prompt,
-        output: Output.object({ schema: schema as z.ZodSchema }),
+        output: Output.object({ schema }),
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
+        maxOutputTokens: options.maxTokens,
         ...aiTelemetry(`${this.providerName}.generateStructuredData`),
       });
-      return result.output as T;
+      if (result.finishReason !== 'stop') throw new Error(`Incomplete generation: ${result.finishReason}`);
+      return result.output;
     } catch (error) {
       throw new GenerationError(
         `[${this.providerName}/${this.modelName}] Structured generation failed: ${getErrorMessage(error)}`,
@@ -145,16 +169,18 @@ class LanguageModelAdapter implements StructuredLLMProvider {
   ): Promise<T> {
     try {
       const result = await generateText({
-        model: this.languageModel,
+        model: typeof this.languageModel === 'function' ? this.languageModel(options.signal) : this.languageModel,
         system: options.systemPrompt,
         messages: messages.map(m => ({ role: m.role, content: m.content })),
-        output: Output.object({ schema: schema as z.ZodSchema }),
+        output: Output.object({ schema }),
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
+        maxOutputTokens: options.maxTokens,
         ...aiTelemetry(`${this.providerName}.generateStructuredDataFromMessages`),
       });
-      return result.output as T;
+      if (result.finishReason !== 'stop') throw new Error(`Incomplete generation: ${result.finishReason}`);
+      return result.output;
     } catch (error) {
       throw new GenerationError(
         `[${this.providerName}/${this.modelName}] Structured generation from messages failed: ${getErrorMessage(error)}`,
@@ -166,12 +192,13 @@ class LanguageModelAdapter implements StructuredLLMProvider {
   async generateText(prompt: string, options: GenerateOptions = {}): Promise<string> {
     try {
       const result = await generateText({
-        model: this.languageModel,
+        model: typeof this.languageModel === 'function' ? this.languageModel(options.signal) : this.languageModel,
         system: options.systemPrompt,
         prompt,
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
+        maxOutputTokens: options.maxTokens,
         ...aiTelemetry(`${this.providerName}.generateText`),
       });
       return result.text;
@@ -186,12 +213,13 @@ class LanguageModelAdapter implements StructuredLLMProvider {
   async *streamConversation(messages: Message[], options: StreamOptions = {}): AsyncGenerator<string, void, unknown> {
     try {
       const stream = streamText({
-        model: this.languageModel,
+        model: typeof this.languageModel === 'function' ? this.languageModel(options.signal) : this.languageModel,
         system: options.systemPrompt,
         messages: messages.map(m => ({ role: m.role, content: m.content })),
         temperature: options.temperature ?? this.defaultTemperature,
         maxRetries: options.maxRetries ?? this.defaultMaxRetries,
         abortSignal: options.signal,
+        maxOutputTokens: options.maxTokens,
         ...aiTelemetry(`${this.providerName}.streamConversation`),
       });
 

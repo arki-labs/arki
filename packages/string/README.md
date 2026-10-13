@@ -301,6 +301,72 @@ it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
 application framework, see `packages/dot/docs/` for plugin authoring,
 lifecycle, and diagnostics.
 
+<!-- bench:start -->
+## Benchmarks
+
+Speed of `@arki/string` against lodash-es, change-case, slugify and escape-html, the libraries most projects use for case conversion, truncation, slugs and escaping.
+
+Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+
+### camelCase
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/string camelCase | 45.23 µs | 21.84× |
+| lodash-es camelCase | 2.07 µs | fastest |
+| change-case camelCase | 2.90 µs | 1.40× |
+
+### kebabCase
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/string kebabCase | 3.88 µs | 2.11× |
+| lodash-es kebabCase | 1.84 µs | fastest |
+| change-case kebabCase | 2.94 µs | 1.60× |
+
+### Truncate 228 characters to 80
+
+Every library ends the result with `…` inside the 80-character limit. lodash cuts at a code unit; `@arki/string` cuts at a grapheme.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/string truncate | 103.49 µs | 1671.23× |
+| lodash-es truncate | 61.9 ns | fastest |
+
+### Slugify an accented title
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/string slugify | 9.29 µs | fastest |
+| slugify (lower, strict) | 13.78 µs | 1.48× |
+
+### Escape HTML (a 63-character tag with quotes and ampersands)
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/string escapeHtml | 2.05 µs | 3.37× |
+| escape-html | 610.4 ns | fastest |
+| lodash-es escape | 992.4 ns | 1.63× |
+
+### Escape a string for use in a RegExp
+
+`@arki/string` also escapes a leading letter or digit as `\xNN`, so the result is safe to paste after a backslash or inside a character class; lodash does not.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/string escapeRegExp | 2.65 µs | 2.53× |
+| lodash-es escapeRegExp | 1.05 µs | fastest |
+
+Read the rows with the contracts in mind:
+
+- Case inputs are plain ASCII so every library does the same work. With accents, lodash strips them (`café` becomes `cafe`) while `@arki/string` and change-case keep them.
+- `@arki/string` counts user-perceived characters (graphemes), so it never cuts an emoji or an accented letter in half. lodash `truncate` counts UTF-16 code units. Counting graphemes is more work, which shows in the truncate row.
+- Slugs differ by design: `@arki/string` transliterates `ü` to `ue` and `&` to `and` (German rules), slugify gives `u` and drops `&`; both are configurable. Outputs of the same input are not identical, so compare speed, not output.
+- escape-html, lodash `escape` and `@arki/string` produce the same output for HTML text and attribute values.
+
+Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+<!-- bench:end -->
+
 ## License
 
 MIT. See [LICENSE](./LICENSE).

@@ -34,6 +34,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "fast-xml-parser": "catalog:",
     "feed": "catalog:",
     "rss": "catalog:"
   },

@@ -644,6 +644,43 @@ The full docs live in [`docs/`](./docs):
 
 Agent-discoverable index: [`llms.txt`](./llms.txt).
 
+<!-- bench:start -->
+## Benchmarks
+
+A 20-service graph where each service depends on the two before it, built with `@arki/dot` plugins and with awilix, the most used dependency-injection container for Node. A hand-wired version is the floor: no container at all.
+
+Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+
+### Build the graph and bring it up (boot + dispose, 20 services)
+
+dot: declare 20 plugins, boot, dispose. awilix: create a container, register 20 factories, resolve all 20, dispose. Hand-wired: build the 20 objects in order.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/dot (boot + dispose) | 199.83 µs | 14.99× |
+| awilix (register + resolve + dispose) | 65.92 µs | 4.94× |
+| hand-written wiring (no container) | 13.33 µs | fastest |
+
+### Look up a service after boot
+
+The hot path: code that already has a booted app asks for one service. dot services are plain properties; awilix `resolve` and `cradle` go through a cache lookup.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/dot (app.services.s19) | 30.3 ns | fastest |
+| awilix (container.resolve('s19')) | 67.2 ns | 2.21× |
+| awilix (container.cradle.s19) | 105.4 ns | 3.47× |
+| hand-written (plain object property) | 32.0 ns | 1.05× |
+
+Read the rows with the contracts in mind:
+
+- `@arki/dot` and awilix do different jobs. awilix is a container: it registers factories and builds them on first use. dot runs an application lifecycle: it orders plugins by their declared needs, runs `configure`, `boot` and `dispose` hooks in order (and in reverse on shutdown), checks the wiring at compile time, and records a manifest and diagnostics for every plugin.
+- The boot rows therefore measure more work in dot than in awilix. They are shown so you can see what that lifecycle costs, not to say the two are interchangeable.
+- Boot is async in dot (plugin hooks may await). awilix resolves synchronously.
+
+Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+<!-- bench:end -->
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

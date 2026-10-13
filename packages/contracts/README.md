@@ -101,6 +101,47 @@ compose it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
 application framework, see `packages/dot/docs/` for plugin authoring,
 lifecycle, and diagnostics.
 
+<!-- bench:start -->
+## Benchmarks
+
+Building and using Zod schemas from a 15-column Drizzle table, compared with drizzle-orm/zod (which @arki/contracts wraps) and a hand-written Zod object.
+
+Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+
+### Build select schema (15 columns)
+
+Usually done once at startup.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/contracts createSelectSchema | 193.66 µs | 1.26× |
+| drizzle-orm/zod createSelectSchema | 153.73 µs | fastest |
+
+### Build insert schema (15 columns)
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/contracts createInsertSchema | 148.37 µs | 1.60× |
+| drizzle-orm/zod createInsertSchema | 92.97 µs | fastest |
+
+### Parse one valid row
+
+@arki/contracts and the hand-written schema check the id prefix "usr_"; plain drizzle-orm/zod only checks that id is a string.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/contracts select schema | 2.71 µs | 3.43× |
+| drizzle-orm/zod select schema | 2.82 µs | 3.57× |
+| hand-written z.object | 790.4 ns | fastest |
+
+Read the rows with the contracts in mind:
+
+- @arki/contracts calls drizzle-orm/zod and then adds branded types and the per-column runtime schemas stashed by ID factories; that extra work is the cost shown in the build rows.
+- The hand-written schema does not read the table at all, so it only shows the floor for parsing.
+
+Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+<!-- bench:end -->
+
 ## License
 
 MIT. See [LICENSE](./LICENSE).

@@ -508,6 +508,130 @@ module (`factorial`, `combinations`, `permutations`, `fibonacci`) honour the
 same digit cap. These are resource guards against hostile input, not
 precision settings — well within them, arithmetic is exact.
 
+<!-- bench:start -->
+## Benchmarks
+
+Speed of `@arki/math` against the libraries most people reach for: decimal.js, big.js and bignumber.js for decimal arithmetic, fraction.js for exact fractions, simple-statistics for descriptive statistics, and jstat for probability distributions.
+
+Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+
+### Decimal plus (1234.5678 + 98.76)
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math | 102.0 ns | fastest |
+| decimal.js | 388.5 ns | 3.81× |
+| big.js | 386.0 ns | 3.78× |
+| bignumber.js | 268.1 ns | 2.63× |
+
+### Decimal times
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math | 98.7 ns | fastest |
+| decimal.js | 664.9 ns | 6.73× |
+| big.js | 332.4 ns | 3.37× |
+| bignumber.js | 502.8 ns | 5.09× |
+
+### Decimal divide, 10 places, half-even
+
+Every library rounds the quotient to 10 decimal places, half-even. The other libraries divide at a working precision first and round after; `@arki/math` rounds once, exactly.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math dividedBy({ scale, rounding }) | 673.5 ns | fastest |
+| decimal.js div + toDecimalPlaces | 11.21 µs | 16.65× |
+| big.js div + round | 4.12 µs | 6.11× |
+| bignumber.js dividedBy + decimalPlaces | 13.34 µs | 19.81× |
+
+### Decimal parse a string
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math decimal() | 476.1 ns | fastest |
+| decimal.js | 712.0 ns | 1.50× |
+| big.js | 699.4 ns | 1.47× |
+| bignumber.js | 911.6 ns | 1.91× |
+
+### Decimal toString (30 integer digits, 9 decimals)
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math | 336.6 ns | 1.00× |
+| decimal.js | 460.7 ns | 1.37× |
+| big.js | 2.06 µs | 6.13× |
+| bignumber.js | 336.3 ns | fastest |
+
+### Rational plus (355/113 + 22/7)
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math ratio | 235.6 ns | fastest |
+| fraction.js | 441.5 ns | 1.87× |
+
+### Rational times
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math ratio | 619.0 ns | 1.77× |
+| fraction.js | 349.4 ns | fastest |
+
+### Mean of 1,000 numbers
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math | 34.69 µs | 12.80× |
+| simple-statistics | 2.71 µs | fastest |
+
+### Standard deviation of 1,000 numbers (population)
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math | 14.85 µs | 5.85× |
+| simple-statistics standardDeviation | 2.54 µs | fastest |
+
+### 90th percentile of 1,000 numbers
+
+Both interpolate linearly between ranks, so results agree to rounding.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math percentile | 304.59 µs | 61.28× |
+| simple-statistics quantile | 4.97 µs | fastest |
+
+### Normal distribution cdf at 1.96
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math normal().cdf | 470.7 ns | 2.34× |
+| jstat normal.cdf | 201.3 ns | fastest |
+
+### Normal distribution quantile at 0.975
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math normal().quantile | 1.28 µs | fastest |
+| jstat normal.inv | 2.39 µs | 1.88× |
+
+### Student t (10 degrees of freedom) quantile at 0.975
+
+`@arki/math` solves the quantile until |cdf(x) − p| ≤ 1e-12 and rejects bad input; jstat uses a looser fixed approximation with no input checks.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math studentT(10).quantile | 4.90 µs | 5.03× |
+| jstat studentt.inv | 974.2 ns | fastest |
+
+Read the rows with the contracts in mind:
+
+- `@arki/math` Decimal is exact: it stores a bigint plus a scale and never rounds unless you ask. Division throws when the result does not terminate, so every divide case below passes an explicit `{ scale, rounding }`.
+- decimal.js and bignumber.js round to a working precision on every operation (here 40 significant digits for decimal.js, 20 decimal places for bignumber.js and big.js). They are fast because they give up exactness; `@arki/math` gives up some speed to keep it.
+- Rational is exact and always reduced to lowest terms, as in fraction.js.
+- Statistics functions in `@arki/math` check every element is a finite number, copy the input, sum with Neumaier compensation (so the total is accurate) and sort the full array for percentiles. simple-statistics skips the checks and the copy, uses plain summation and selects the percentile without a full sort. That is why they are much faster on 1,000 numbers: `@arki/math` trades speed for validated input and accurate sums.
+
+Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+<!-- bench:end -->
+
 ## License
 
 MIT
