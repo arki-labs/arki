@@ -107,6 +107,9 @@ describe('write', () => {
     expect(result.events).toHaveLength(1);
     expect(result.events[0]).toMatchObject({ type: 'OrderPlaced', version: 1, entityId: id, kind: 'order', meta });
     expect(result.events[0]?.id).toMatch(/^evt_/);
+    // A bare write has no command and no cause, but it starts a chain of its own.
+    expect(result.events[0]).toMatchObject({ commandId: null, causeSeq: null });
+    expect(result.events[0]?.correlationId).toMatch(/^cor_/);
     expectTypeOf(result.events[0]?.type).toEqualTypeOf<
       'OrderPlaced' | 'OrderPaid' | 'OrderNoted' | 'OrderCancelled' | undefined
     >();
@@ -455,6 +458,9 @@ describe('write', () => {
       version: 1,
       meta,
       recordedAt: new Date(),
+      commandId: null,
+      causeSeq: null,
+      correlationId: null,
     };
     const ctx = {
       jobId: 'job_x',

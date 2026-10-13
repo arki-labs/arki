@@ -43,8 +43,8 @@ export type DrainDeps<Meta extends z.ZodObject, AppDb extends RootDb, Run> = {
   readonly tables: JournalTables;
   readonly effects: readonly Effect<z.output<Meta>, AppDb, Run>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
-  /** Makes an effect's `ctx.run`: the journal's `run`, bound to the root database this drain was given. */
-  readonly runOn: (db: AppDb & RootDb) => Run;
+  /** Makes an effect's `ctx.run`: the journal's `run`, bound to the root database this drain was given and to the event the job is for. */
+  readonly runOn: (db: AppDb & RootDb, cause: { readonly seq: number; readonly correlationId: string | null }) => Run;
 };
 
 export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>(deps: DrainDeps<Meta, AppDb, Run>) {
@@ -97,7 +97,7 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
         findEventDefinition(effect.entities, eventRow.kind, eventRow.type),
         eventRow.entityId,
       );
-      await effect.run(event, { jobId: job.id, signal, db, run: deps.runOn(db) });
+      await effect.run(event, { jobId: job.id, signal, db, run: deps.runOn(db, event) });
       await db.delete(jobsTable).where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
       debugDrain('%s %s: done', job.effect, job.id);
     } catch (error) {

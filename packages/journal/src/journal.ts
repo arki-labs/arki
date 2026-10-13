@@ -155,15 +155,15 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     tables,
     effects,
     history,
-    runOn: db => (command, input, meta) => journal.run(db, command, input, meta),
+    runOn: (db, cause) => (command, input, meta) => run(db, command, input, meta, undefined, cause),
   });
   const workers = createWorkers<WorkerDb>({ drain: (db, opts) => journal.drain(db, opts) });
   const strandedJobs = createStrandedJobs({ tables, effectNames: effects.map(effect => effect.name) });
 
   const journal: Journal<Meta, Tx, AppDb> = {
     write: (tx, entity, id, input) => write(tx, entity, id, input),
-    run: (source, command, input, meta) => run(source, command, input, meta),
-    bind: (source, meta) => (command, input) => journal.run(source, command, input, meta),
+    run: (source, command, input, meta, opts) => run(source, command, input, meta, opts),
+    bind: (source, meta, opts) => (command, input) => journal.run(source, command, input, meta, opts),
     replay: (db, entity, id, opts) => history.replay(db, entity, id, opts),
     verify: (db, entity, id) => history.verify(db, entity, id),
     repair: (db, entity, id) => history.repair(db, entity, id),

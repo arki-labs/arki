@@ -8,6 +8,7 @@ export type {
   JournalDefinitions,
   ReplayResult,
   RootCommandRunner,
+  RunOptions,
   VerifyResult,
   NextEvents,
   WriteInput,

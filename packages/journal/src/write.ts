@@ -18,12 +18,13 @@ import type {
   EntityTable,
   Projection,
   Row,
+  Trace,
   TransactionSource,
 } from './types.js';
 import { debugWrite } from './debug.js';
 import { JournalError } from './errors.js';
 import { fold, hasDeclaredEventType } from './fold.js';
-import { eventId, jobId } from './id.js';
+import { correlationId, eventId, jobId } from './id.js';
 import {
   assertExactId,
   assertRoundTrips,
@@ -42,9 +43,9 @@ const PG_UNIQUE_VIOLATION = '23505';
  * at insert, so without it two transactions can commit in the other order: a reader
  * that checkpointed at the later seq never sees the earlier one. With it, seq order is
  * commit order, and `seq > cursor` is a safe cursor. Cost: event appends across the
- * app commit one transaction at a time. The namespace is 'JRNL' as an int.
+ * app commit one transaction at a time. The namespace is 'JRNL' as an int (0x4a524e4c).
  */
-const APPEND_LOCK_NAMESPACE = 0x4A_52_4E_4C;
+const APPEND_LOCK_NAMESPACE = 1_247_301_196;
 const APPEND_LOCK_KEY = 1;
 
 function isUniqueViolation(error: unknown): boolean {
@@ -92,6 +93,7 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
     id: EntityId<Tbl, Key>,
     getValidatedMeta: () => MetaOut,
     events: NextEvents<Tbl, E, Tx>,
+    trace: Trace,
     onJobs?: (count: number) => void,
   ): Promise<WriteResult<Tbl, E, MetaOut, Key>> => {
     return oneAtATime(tx, `write to ${entity.kind} ${id}`, async () => {
@@ -170,6 +172,9 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
               type: event.type,
               data: validated[index],
               meta,
+              commandId: trace.commandId,
+              causeSeq: trace.causeSeq,
+              correlationId: trace.correlationId,
             })),
           )
           .returning()
@@ -299,6 +304,8 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
         return meta;
       },
       input.events,
+      // No command and no cause. A fresh chain, so every recorded event has a correlation id.
+      { commandId: null, causeSeq: null, correlationId: correlationId() },
     );
 
   return { write, writeWithValidatedMeta };

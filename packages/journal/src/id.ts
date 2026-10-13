@@ -11,6 +11,8 @@ const prefixed = <P extends string>(prefix: P): `${P}${string}` => `${prefix}${c
 
 export const eventId = () => prefixed('evt_');
 export const jobId = () => prefixed('job_');
+export const commandId = () => prefixed('cmd_');
+export const correlationId = () => prefixed('cor_');
 export const leaseToken = () => createId();
 
 const NAME_KINDS = {

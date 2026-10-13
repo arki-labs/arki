@@ -36,8 +36,18 @@ export function journalTables(schema?: PgSchema) {
       data: jsonb('data').notNull(),
       meta: jsonb('meta').notNull(),
       recordedAt: timestamp('recorded_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+      // Stamped by the library, never by the app. Null on rows written before these columns existed.
+      /** The `cmd_` id of the command run that wrote this event. Null for a bare `journal.write`. */
+      commandId: varchar('command_id'),
+      /** Inside an effect's `ctx.run`: the seq of the event the job was for. Else null. */
+      causeSeq: bigint('cause_seq', { mode: 'number' }),
+      /** Shared by every event of one chain: inherited from the cause event or the parent run, else new per root run. */
+      correlationId: varchar('correlation_id'),
     },
-    t => [unique('journal_events_kind_entity_id_version_unique').on(t.kind, t.entityId, t.version)],
+    t => [
+      unique('journal_events_kind_entity_id_version_unique').on(t.kind, t.entityId, t.version),
+      index('journal_events_correlation_id_idx').on(t.correlationId),
+    ],
   );
 
   const jobs = table(

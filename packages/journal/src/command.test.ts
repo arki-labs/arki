@@ -523,3 +523,65 @@ describe('journal.run', () => {
     expect(second.row?.note).toBe('row v1, tx saw 1');
   });
 });
+
+const stamps = async (id: OrderId) => {
+  const events = await eventsOf(id);
+  return events.map(e => ({
+    type: e.type,
+    commandId: e.commandId,
+    causeSeq: e.causeSeq,
+    correlationId: e.correlationId,
+  }));
+};
+
+describe('trace', () => {
+  it('a run stamps its own command id and a new correlation id on every event it writes', async () => {
+    // Why: a reader of the log must be able to answer "which command wrote this?" without the app
+    // threading ids by hand. The library knows, so the library stamps.
+    const id = orderId(++next);
+    await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
+    const [placed] = await stamps(id);
+    expect(placed?.commandId).toMatch(/^cmd_/);
+    expect(placed?.correlationId).toMatch(/^cor_/);
+    expect(placed?.causeSeq).toBeNull();
+    await journal.run(db, payOrder, { orderId: id, amount: 1 }, meta);
+    const [, paid] = await stamps(id);
+    // A second root run is a second chain with its own command.
+    expect(paid?.commandId).not.toBe(placed?.commandId);
+    expect(paid?.correlationId).not.toBe(placed?.correlationId);
+  });
+
+  it('a child run gets its own command id and inherits the chain; the context exposes both', async () => {
+    const seen: { commandId: string; correlationId: string }[] = [];
+    const outer = j.command('traceOuter', z.object({ orderId: orderIdSchema }), async (input, ctx) => {
+      seen.push({ commandId: ctx.commandId, correlationId: ctx.correlationId });
+      await ctx.run(inner, input);
+    });
+    const inner = j.command('traceInner', z.object({ orderId: orderIdSchema }), async (input, ctx) => {
+      seen.push({ commandId: ctx.commandId, correlationId: ctx.correlationId });
+      await ctx.write(order, input.orderId, () => [OrderPlaced({ customerId: 'c', total: 1 })]);
+    });
+    const id = orderId(++next);
+    await journal.run(db, outer, { orderId: id }, meta, { correlationId: 'req_123' });
+    const [placed] = await stamps(id);
+    expect(seen).toHaveLength(2);
+    expect(seen[0]?.commandId).not.toBe(seen[1]?.commandId);
+    expect(seen.map(s => s.correlationId)).toEqual(['req_123', 'req_123']);
+    // The event carries the command that wrote it: the child, not the parent.
+    expect(placed).toEqual({
+      type: 'OrderPlaced',
+      commandId: seen[1]?.commandId,
+      causeSeq: null,
+      correlationId: 'req_123',
+    });
+  });
+
+  it('bind passes the seed on, so a request context can tie every command of one request together', async () => {
+    const id = orderId(++next);
+    const runAs = journal.bind(db, meta, { correlationId: 'req_bound' });
+    await runAs(placeOrder, { orderId: id, customerId: 'c', total: 1 });
+    await runAs(payOrder, { orderId: id, amount: 1 });
+    const bound = await stamps(id);
+    expect(bound.map(s => s.correlationId)).toEqual(['req_bound', 'req_bound']);
+  });
+});

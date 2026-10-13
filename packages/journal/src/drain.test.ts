@@ -272,6 +272,12 @@ describe('effect context: run', () => {
       ['OrderPlaced', meta],
       ['OrderPaid', system],
     ]);
+    // The reaction is stamped with its cause: the event the job was for, and that event's chain.
+    const [placed, paid] = events;
+    expect(paid?.causeSeq).toBe(placed?.seq);
+    expect(paid?.correlationId).toBe(placed?.correlationId);
+    expect(paid?.commandId).toMatch(/^cmd_/);
+    expect(placed?.causeSeq).toBeNull();
   });
 
   it('queues a job for the command it ran and the next claim runs it, so one reaction can start the next', async () => {

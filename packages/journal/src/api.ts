@@ -66,11 +66,23 @@ export type Command<S extends z.ZodType, R, in MetaOut, in Tx extends Transactio
  * needed: the two types refer to each other, and TypeScript cannot measure the
  * variance of such a pair on its own.
  */
+/** Options of `journal.run` and `journal.bind`. */
+export type RunOptions = {
+  /**
+   * Seeds the chain's correlation id, for example with the request id. Without it, a run
+   * from an effect continues the cause event's chain, and any other run starts a new one.
+   */
+  readonly correlationId?: string;
+};
 export type CommandContext<out MetaOut, out Tx extends TransactionSource<Tx> = DbHandle> = {
   /** The command's transaction. Use it for reads and for writes outside any entity. */
   readonly tx: Tx;
   /** The parsed metadata every `write` in this command records. */
   readonly meta: MetaOut;
+  /** This run's `cmd_` id. Every event it writes carries it. */
+  readonly commandId: string;
+  /** The chain this run belongs to. Every event it writes carries it; a child run inherits it. */
+  readonly correlationId: string;
   /** `journal.write` on this command's transaction with this command's metadata. Safe to destructure. */
   readonly write: <K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     entity: EntityDef<K, Tbl, E, MetaOut, Key>,
@@ -136,6 +148,7 @@ export type Journal<
     command: Command<S, R, z.output<Meta>, Tx>,
     input: NoInfer<z.input<S>>,
     meta: z.input<Meta>,
+    opts?: RunOptions,
   ): Promise<Awaited<R>>;
   /**
    * The command door: `run` with `source` and `meta` fixed. It returns
@@ -148,7 +161,7 @@ export type Journal<
    * `run`: a default in the meta schema gives each command its own value, and
    * a bad `meta` rejects the call, inside the transaction guard, as `run` does.
    */
-  bind(source: TransactionSource<Tx>, meta: z.input<Meta>): CommandRunner<z.output<Meta>, Tx>;
+  bind(source: TransactionSource<Tx>, meta: z.input<Meta>, opts?: RunOptions): CommandRunner<z.output<Meta>, Tx>;
   /** Rebuild the row from the log in memory. `throughVersion` is the last version applied. */
   replay<K extends string, Tbl extends EntityTable, E extends AnyEventDef, Key extends string>(
     db: DbHandle,

@@ -130,6 +130,9 @@ export function createHistory<Meta extends z.ZodObject>(deps: HistoryDeps<Meta>)
       version: row.version,
       meta: meta.data,
       recordedAt: row.recordedAt,
+      commandId: row.commandId,
+      causeSeq: row.causeSeq,
+      correlationId: row.correlationId,
     });
   };
 

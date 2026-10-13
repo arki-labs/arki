@@ -124,6 +124,23 @@ export type RecordedStamp<Meta = unknown, Id extends string = string> = {
   readonly version: number;
   readonly meta: Meta;
   readonly recordedAt: Date;
+  /** The `cmd_` id of the command run that wrote it. Null for a bare `journal.write`, and on rows older than the column. */
+  readonly commandId: string | null;
+  /** The seq of the event whose effect ran the command that wrote it. Null outside an effect, and on rows older than the column. */
+  readonly causeSeq: number | null;
+  /** Shared by every event of one chain. Null only on rows older than the column. */
+  readonly correlationId: string | null;
+};
+
+/**
+ * Where a write comes from. The library fills it: a command run stamps its own id, an
+ * effect's `ctx.run` passes the event it is for, a root `run` may be seeded with a
+ * correlation id from the request. A bare `journal.write` has no command and no cause.
+ */
+export type Trace = {
+  readonly commandId: string | null;
+  readonly causeSeq: number | null;
+  readonly correlationId: string;
 };
 
 /** What reducers and handlers receive: the event as stored in the log. */

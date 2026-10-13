@@ -135,6 +135,16 @@ Inside a command, an uncaught failure anywhere rolls back everything the command
 
 The types are all inferred: the handler's `input` from the schema, `journal.run`'s `input` as the schema's input type, the return type from the handler, `row`, id and events in `write` from the entity, `tx` from `initJournal.tx<AppTx>()`, `meta` from the meta schema.
 
+### Tracing
+
+Every recorded event says where it came from. The library stamps three columns; the app never sets them.
+
+- `commandId`: the `cmd_` id of the run that wrote the event. A child run gets its own. A bare `journal.write` has none.
+- `causeSeq`: inside an effect's `ctx.run`, the `seq` of the event the job was for. So a reaction points at what it reacts to.
+- `correlationId`: one id for the whole chain. A run from an effect continues the cause event's chain. A root run starts a new chain, unless `journal.run(db, cmd, input, meta, { correlationId })` or `journal.bind(db, meta, { correlationId })` seeds it, for example with the request id. A bare write starts its own chain.
+
+The command context exposes `commandId` and `correlationId` for logs. To read a chain: `select * from journal_events where correlation_id = $1 order by seq`. Rows written before these columns existed have `null` in all three.
+
 ### Where commands run from
 
 The same `journal.run` serves every trigger. `journal.bind(db, meta)` is the same call with `db` and `meta` fixed. Checking who the caller is stays application code; business rules live in the command.
@@ -171,7 +181,7 @@ export const journal = j.compose({ tables, effects: [closeAfterPayment] });
 
 `journal.write(tx, entity, id, { meta, events })` is what a command's `write` calls. Use it directly only when there is no command: a one-off migration step, or a test that needs a specific `meta` per write. `events` is the function that looks at the locked row, checks the rules, and returns the events to append. It runs after the row is locked, inside the write's savepoint, and receives that savepoint as `{ tx }`, so it can read related rows under the lock. It may be async. It only accepts events declared on the entity; the row type, the id type and the event data types are all inferred.
 
-`write` returns `{ row, events }`: the stored row after the write (`null` after a delete) and the recorded events, each with `seq`, `id`, `entityId`, `version`, `meta` and `recordedAt`. An entity can be created again after a delete; its version continues from the last event.
+`write` returns `{ row, events }`: the stored row after the write (`null` after a delete) and the recorded events, each with `seq`, `id`, `entityId`, `version`, `meta`, `recordedAt` and the trace: `commandId`, `causeSeq`, `correlationId` (see Tracing). An entity can be created again after a delete; its version continues from the last event.
 
 ### Rows that existed before the journal
 
@@ -383,7 +393,11 @@ journal_events
   data         jsonb not null
   meta         jsonb not null
   recorded_at  timestamptz not null default now()
+  command_id      varchar                 -- cmd_xxx, the run that wrote it; null for a bare write
+  cause_seq       bigint                  -- the event whose effect ran that command; else null
+  correlation_id  varchar                 -- one per chain; see Tracing
   unique (kind, entity_id, version)
+  index (correlation_id)
 
 journal_jobs
   id            varchar primary key       -- job_xxx; pass it on as an idempotency key
