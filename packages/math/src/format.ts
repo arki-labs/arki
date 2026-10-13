@@ -10,7 +10,7 @@
 
 import type { Decimal } from './decimal.js';
 import type { RoundingMode } from './rounding.js';
-import { isDecimal } from './decimal.js';
+import { decimal, isDecimal } from './decimal.js';
 import { InvalidArgumentError, NumberFormatError, NumericRangeError, UnsupportedFeatureError } from './errors.js';
 import { assertFinite } from './number.js';
 
@@ -85,14 +85,45 @@ function getNumberFormat(locale: string, options: Intl.NumberFormatOptions): Int
 let exactStringsSupported: boolean | undefined;
 
 /** Probes lazily, once. 2^53 + 1 cannot survive a trip through `Number`, so an Intl that coerces fails. */
-function assertExactStringSupport(): void {
+function hasExactStringSupport(): boolean {
   exactStringsSupported ??=
     new Intl.NumberFormat('en-US', { useGrouping: false }).format('9007199254740993') === '9007199254740993';
-  if (!exactStringsSupported) {
-    throw new UnsupportedFeatureError(
-      'This runtime cannot format decimal strings exactly (Intl.NumberFormat v3 is missing); pass a number or bigint instead, or print the value with Decimal#toString().',
-    );
+  return exactStringsSupported;
+}
+
+// A double tells apart every decimal of up to 15 significant digits.
+const MAX_EXACT_DOUBLE_DIGITS = 15;
+
+/**
+ * For runtimes whose Intl reads decimal text through a double (React Native's
+ * Hermes). The value is rounded exactly here, to the digits Intl will show, so
+ * Intl has nothing left to round. If the shown digits fit in 15, the double's
+ * error is far below half a unit of the last digit and the output is exact.
+ * Compact notation picks its scale per locale, so only whole numbers pass there.
+ */
+function toExactDouble(text: string, nf: Intl.NumberFormat, rounding: RoundingMode): number {
+  const resolved = nf.resolvedOptions();
+  const value = decimal(text);
+  const max = resolved.maximumFractionDigits;
+  if (resolved.notation === 'compact' || max === undefined) {
+    if (value.isInteger() && integerDigitCount(value.toString()) <= MAX_EXACT_DOUBLE_DIGITS) return Number(text);
+    throw unsupportedExactFormat(text);
   }
+  const percent = resolved.style === 'percent';
+  const shown = (percent ? value.times(100) : value).round(max, rounding === 'unnecessary' ? 'halfUp' : rounding);
+  const shownText = shown.trim().toString();
+  const dot = shownText.indexOf('.');
+  const fractionDigits = Math.max(resolved.minimumFractionDigits ?? 0, dot === -1 ? 0 : shownText.length - dot - 1);
+  if (integerDigitCount(shownText) + fractionDigits > MAX_EXACT_DOUBLE_DIGITS) throw unsupportedExactFormat(text);
+  const result = Number((percent ? shown.times('0.01') : shown).toString());
+  // -0.001 shown with two digits is '-0.00', as exact Intl prints it.
+  return result === 0 && value.isNegative() ? -0 : result;
+}
+
+function unsupportedExactFormat(text: string): UnsupportedFeatureError {
+  return new UnsupportedFeatureError(
+    `This runtime's Intl.NumberFormat reads decimal text through a double (Intl.NumberFormat v3 is missing), so it cannot show '${text}' exactly; values up to ${MAX_EXACT_DOUBLE_DIGITS} shown digits work. Print the value with Decimal#toString() instead.`,
+  );
 }
 
 // Intl.NumberFormat caps its mathematical value near the double range and prints larger values as '∞'.
@@ -121,7 +152,11 @@ function integerDigitCount(text: string): number {
   return (dot === -1 ? text.length : dot) - start;
 }
 
-function toIntlInput(value: FormatValue): number | bigint | `${number}` {
+function toIntlInput(
+  value: FormatValue,
+  nf: Intl.NumberFormat,
+  rounding: RoundingMode = 'halfUp',
+): number | bigint | `${number}` {
   if (typeof value === 'number') {
     assertFinite(value, 'value');
     return value;
@@ -142,8 +177,7 @@ function toIntlInput(value: FormatValue): number | bigint | `${number}` {
     );
   }
   assertIntlRange(integerDigitCount(text));
-  assertExactStringSupport();
-  return text;
+  return hasExactStringSupport() ? text : toExactDouble(text, nf, rounding);
 }
 
 /** Builds Intl options from the shared ones, filling fraction-digit defaults without creating min > max. */
@@ -171,8 +205,8 @@ function baseOptions(options: FormatOptions, defaults: { min?: number; max?: num
 }
 
 function run(value: FormatValue, options: FormatOptions, intlOptions: Intl.NumberFormatOptions): string {
-  const input = toIntlInput(value);
-  return getNumberFormat(options.locale ?? DEFAULT_LOCALE, intlOptions).format(input);
+  const nf = getNumberFormat(options.locale ?? DEFAULT_LOCALE, intlOptions);
+  return nf.format(toIntlInput(value, nf, options.rounding));
 }
 
 const percentOptions = (options: FormatOptions): Intl.NumberFormatOptions => ({
@@ -265,6 +299,10 @@ export type Formatter = {
   formatCurrency(value: FormatValue, currency: string, options?: CurrencyOptions): string;
 };
 
+function formatWith(nf: Intl.NumberFormat, value: FormatValue): string {
+  return nf.format(toIntlInput(value, nf));
+}
+
 /**
  * Binds a default locale (and optionally a currency) once. The defaults are
  * copied at creation, so later changes to the caller's object have no effect.
@@ -306,17 +344,17 @@ export function createFormatter(defaults: { locale?: string; currency?: string }
     if (chosen === undefined) {
       throw new InvalidArgumentError('No currency: pass one or bind it with createFormatter({ currency })');
     }
-    if (explicit === undefined && options === undefined) return money().format(toIntlInput(value));
+    if (explicit === undefined && options === undefined) return formatWith(money(), value);
     return formatCurrency(value, chosen, withLocale(options));
   }
 
   return {
     formatNumber: (value, options) =>
-      options === undefined ? plain().format(toIntlInput(value)) : formatNumber(value, withLocale(options)),
+      options === undefined ? formatWith(plain(), value) : formatNumber(value, withLocale(options)),
     formatPercent: (value, options) =>
-      options === undefined ? percent().format(toIntlInput(value)) : formatPercent(value, withLocale(options)),
+      options === undefined ? formatWith(percent(), value) : formatPercent(value, withLocale(options)),
     formatCompact: (value, options) =>
-      options === undefined ? compact().format(toIntlInput(value)) : formatCompact(value, withLocale(options)),
+      options === undefined ? formatWith(compact(), value) : formatCompact(value, withLocale(options)),
     formatFileSize: (bytes, options) =>
       options === undefined ? fileSizeWith(bytes, 'si', fileSize()) : formatFileSize(bytes, withLocale(options)),
     formatCurrency: boundCurrency,

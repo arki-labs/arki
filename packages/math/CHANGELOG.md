@@ -29,7 +29,8 @@ Fixed (found by the new Hermes V1 runtime check, React Native 0.86):
 
 - Importing the package crashed on React Native: English ordinals built an `Intl.PluralRules` at load time, which Hermes lacks. The suffix is now plain arithmetic.
 - `median`, `percentile`, `mode`, `divisors` and the number-word helpers used `toSorted`/`toReversed`, which Hermes lacks. Lint now forbids them.
-- Locale parsing without `Intl.NumberFormat#formatToParts` threw a raw `TypeError`; it now throws `UnsupportedFeatureError`.
+- Locale parsing without `Intl.NumberFormat#formatToParts` threw a raw `TypeError`; it now throws `UnsupportedFeatureError`. New `symbols` option (`{ decimal, group, minusSign?, digits? }`) parses without `Intl`.
+- Formatting a `Decimal` or decimal string on Hermes always threw, because Hermes formats text through a double. The value is now rounded exactly first; up to 15 shown digits print exactly, more still throw `UnsupportedFeatureError`.
 - `test:runtimes` gains a Hermes leg (`HERMES_BIN`).
 
 ## 0.0.3

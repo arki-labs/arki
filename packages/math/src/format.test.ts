@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { decimal } from './decimal.js';
 import { InvalidArgumentError, NumberFormatError, NumericRangeError } from './errors.js';
@@ -135,6 +135,61 @@ describe('exact-string range and probe', () => {
 
   it('keeps digits past 2^53 that a Number coercion would destroy', () => {
     expect(formatNumber('9007199254740993', { useGrouping: false })).toBe('9007199254740993');
+  });
+});
+
+/** Behaves like React Native's Hermes: decimal text goes through a double before formatting. */
+class DoubleOnlyNumberFormat extends Intl.NumberFormat {
+  override format(value: number | bigint | Intl.StringNumericLiteral): string {
+    return super.format(typeof value === 'string' ? Number(value) : value);
+  }
+}
+
+async function loadWithDoubleOnlyIntl() {
+  vi.stubGlobal('Intl', Object.create(Intl, { NumberFormat: { value: DoubleOnlyNumberFormat } }));
+  vi.resetModules();
+  const [format, exact, errors] = await Promise.all([
+    import('./format.js'),
+    import('./decimal.js'),
+    import('./errors.js'),
+  ]);
+  return { ...format, decimal: exact.decimal, UnsupportedFeatureError: errors.UnsupportedFeatureError };
+}
+
+describe('runtimes whose Intl reads decimal text through a double (Hermes)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('formats money exactly, because amounts fit in 15 digits', async () => {
+    const m = await loadWithDoubleOnlyIntl();
+    expect(m.formatCurrency(m.decimal('1234.5'), 'EUR', { locale: 'de-DE' })).toBe('1.234,50\u00A0€');
+    expect(m.formatCurrency(m.decimal('999999999999.99'), 'USD')).toBe('$999,999,999,999.99');
+    expect(m.createFormatter({ currency: 'USD' }).formatCurrency(m.decimal('19.99'))).toBe('$19.99');
+  });
+
+  it('rounds the Decimal itself, so a long value still prints the right short result', async () => {
+    const m = await loadWithDoubleOnlyIntl();
+    // 1.005 as a double is 1.00499999…; exact halfUp rounding must still give 1.01.
+    expect(m.formatNumber(m.decimal('1.005'), { maximumFractionDigits: 2 })).toBe('1.01');
+    expect(m.formatNumber(m.decimal('0.12345678901234567891'), { maximumFractionDigits: 3 })).toBe('0.123');
+    expect(m.formatNumber(m.decimal('2.5'), { maximumFractionDigits: 0, rounding: 'halfEven' })).toBe('2');
+    expect(m.formatNumber(m.decimal('-0.001'), { maximumFractionDigits: 2 })).toBe('-0');
+    expect(m.formatPercent(m.decimal('0.123456'))).toBe('12.35%');
+  });
+
+  it('refuses digits a double would change instead of printing a wrong value', async () => {
+    const m = await loadWithDoubleOnlyIntl();
+    expect(() => m.formatNumber('9007199254740993', { useGrouping: false })).toThrow(m.UnsupportedFeatureError);
+    expect(() => m.formatNumber(m.decimal('1234567890123.456'), { maximumFractionDigits: 3 })).toThrow(
+      m.UnsupportedFeatureError,
+    );
+  });
+
+  it('accepts only whole numbers in compact notation, whose scale depends on the locale', async () => {
+    const m = await loadWithDoubleOnlyIntl();
+    expect(m.formatCompact(m.decimal('1230000'))).toBe('1.2M');
+    expect(() => m.formatCompact(m.decimal('1.25'))).toThrow(m.UnsupportedFeatureError);
   });
 });
 

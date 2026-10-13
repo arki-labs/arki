@@ -8,6 +8,7 @@ import {
   decimal,
   formatCurrency,
   formatFileSize,
+  formatNumber,
   formatPercent,
   gcd,
   isPrime,
@@ -45,17 +46,18 @@ const checks = [
   ['gcd', gcd(12, 18), 6],
   ['mean', mean([1, 2, 3, 4]), 2.5],
   ['stddev', round(stddev([2, 4, 4, 4, 5, 5, 7, 9], { ddof: 0 }), 6), 2],
-  // Hermes (React Native) formats number strings through a double and has no
-  // formatToParts: those calls must fail with the typed error, never a wrong value.
+  // Hermes (React Native) formats number strings through a double: up to 15
+  // shown digits still come out exact, more must fail with the typed error.
+  [
+    'format currency (exact Decimal input)',
+    formatCurrency(decimal('1234.5'), 'EUR', { locale: 'de-DE' }),
+    '1.234,50\u00A0€',
+  ],
   exactStrings
-    ? [
-        'format currency (exact Decimal input)',
-        formatCurrency(decimal('1234.5'), 'EUR', { locale: 'de-DE' }),
-        '1.234,50\u00A0€',
-      ]
+    ? ['format past 2^53', formatNumber('9007199254740993', { useGrouping: false }), '9007199254740993']
     : [
-        'format Decimal needs exact strings',
-        errorName(() => formatCurrency(decimal('1234.5'), 'EUR')),
+        'format past 2^53 needs exact strings',
+        errorName(() => formatNumber('9007199254740993')),
         'UnsupportedFeatureError',
       ],
   ['format percent', formatPercent(0.125), '12.5%'],
@@ -67,6 +69,7 @@ const checks = [
         errorName(() => parseNumber('1,5', { locale: 'de-DE' })),
         'UnsupportedFeatureError',
       ],
+  ['parse with explicit symbols', parseNumber('1.234,56', { symbols: { decimal: ',', group: '.' } }), 1234.56],
   ['seeded random', createRandom(42).int(1, 6), createRandom(42).int(1, 6)],
   ['fluent', num(127.3).clamp(0, 100).roundTo(5).value(), 100],
   ['distributions', round(normal().quantile(0.975), 6), 1.959964],

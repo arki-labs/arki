@@ -11,6 +11,9 @@
  * The locale decides what the separators mean: `'1.234'` is 1.234 in `en-US`
  * but 1234 in `de-DE`. Group separators are only removed, never validated, so
  * `'1,23,4'` is accepted in `en-US` and reads as 1234.
+ *
+ * Runtimes without `Intl.NumberFormat#formatToParts` (React Native's Hermes on
+ * iOS) throw `UnsupportedFeatureError`; pass `symbols` to parse without `Intl`.
  */
 
 import type { Decimal } from './decimal.js';
@@ -18,8 +21,21 @@ import { decimal } from './decimal.js';
 import { NumberFormatError, NumericRangeError, UnsupportedFeatureError } from './errors.js';
 
 export type ParseOptions = {
-  /** BCP 47 locale tag. Default `'en-US'`. */
+  /** BCP 47 locale tag. Default `'en-US'`. Ignored when `symbols` is given. */
   locale?: string;
+  /**
+   * The separators to read, instead of asking `Intl` for the locale's:
+   * `{ decimal: ',', group: '.' }`. Minus defaults to `'-'`, digits to ASCII.
+   */
+  symbols?: ParseSymbols;
+};
+
+export type ParseSymbols = {
+  decimal: string;
+  group: string;
+  minusSign?: string;
+  /** The ten digits `0` to `9`. Default ASCII. */
+  digits?: readonly string[];
 };
 
 export type LocaleNumberSymbols = {
@@ -46,20 +62,24 @@ type PreparedLocale = {
 };
 
 const MAX_PREPARED_LOCALES = 64;
+const ASCII_DIGITS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 const preparedCache = new Map<string, PreparedLocale>();
+
+function prepareSymbols(symbols: ParseSymbols): PreparedLocale {
+  const group = symbols.group.replaceAll(BIDI_MARKS, '');
+  return Object.freeze({
+    digitMap: new Map((symbols.digits ?? ASCII_DIGITS).map((digit, index) => [digit, String(index)])),
+    decimal: symbols.decimal,
+    group,
+    minusSign: (symbols.minusSign ?? '-').replaceAll(BIDI_MARKS, ''),
+    groupIsSpace: /^\s$/.test(group),
+  });
+}
 
 function prepare(locale: string): PreparedLocale {
   const cached = preparedCache.get(locale);
   if (cached) return cached;
-  const symbols = localeNumberSymbols(locale);
-  const group = symbols.group.replaceAll(BIDI_MARKS, '');
-  const prepared: PreparedLocale = Object.freeze({
-    digitMap: new Map(symbols.digits.map((digit, index) => [digit, String(index)])),
-    decimal: symbols.decimal,
-    group,
-    minusSign: symbols.minusSign,
-    groupIsSpace: /^\s$/.test(group),
-  });
+  const prepared = prepareSymbols(localeNumberSymbols(locale));
   if (preparedCache.size >= MAX_PREPARED_LOCALES) preparedCache.clear();
   preparedCache.set(locale, prepared);
   return prepared;
@@ -73,7 +93,7 @@ export function localeNumberSymbols(locale: string): LocaleNumberSymbols {
     // React Native's Hermes on Apple platforms has Intl.NumberFormat but no formatToParts.
     if (typeof formatter.formatToParts !== 'function') {
       throw new UnsupportedFeatureError(
-        "This runtime lacks Intl.NumberFormat#formatToParts, which locale-aware parsing needs (React Native's Hermes on iOS)",
+        "This runtime lacks Intl.NumberFormat#formatToParts, which locale-aware parsing needs (React Native's Hermes on iOS); pass options.symbols instead",
       );
     }
     const parts = formatter.formatToParts(-1_234_567.89);
@@ -94,8 +114,7 @@ const STRICT_DECIMAL = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
 const OUTER_SPACE = /^[ \t\n\r\f\v\u00A0\u202F]+|[ \t\n\r\f\v\u00A0\u202F]+$/g;
 const GROUP_SPACES = /[ \u00A0\u202F\u2009]/g;
 
-function normalize(input: string, locale: string): string {
-  const prepared = prepare(locale);
+function normalize(input: string, prepared: PreparedLocale): string {
   let text = input.replaceAll(OUTER_SPACE, '').replaceAll(BIDI_MARKS, '');
   let mapped = '';
   for (const char of text) mapped += prepared.digitMap.get(char) ?? char;
@@ -107,13 +126,17 @@ function normalize(input: string, locale: string): string {
     .replaceAll(/[\u2212\u2013]/g, '-');
 }
 
-function normalizeOrThrow(input: string, locale: string): string {
+function normalizeOrThrow(input: string, options: ParseOptions): string {
   if (typeof input !== 'string') throw new TypeError('input must be a string; convert other types first');
-  const normalized = normalize(input, locale);
+  const symbols = options.symbols;
+  const locale = options.locale ?? DEFAULT_LOCALE;
+  const normalized = normalize(input, symbols === undefined ? prepare(locale) : prepareSymbols(symbols));
   if (!STRICT_DECIMAL.test(normalized)) {
-    throw new NumberFormatError(
-      `Cannot parse '${input}' as a number in locale '${locale}'; check the locale matches the text (the decimal mark differs between locales), or pass an ASCII string to decimal()`,
-    );
+    const source =
+      symbols === undefined
+        ? `in locale '${locale}'; check the locale matches the text (the decimal mark differs between locales)`
+        : `with decimal mark '${symbols.decimal}' and group separator '${symbols.group}'`;
+    throw new NumberFormatError(`Cannot parse '${input}' as a number ${source}, or pass an ASCII string to decimal()`);
   }
   return normalized;
 }
@@ -123,8 +146,7 @@ function normalizeOrThrow(input: string, locale: string): string {
  * Lenient and locale-aware; for strict ASCII input use `decimal()`.
  */
 export function parseNumber(input: string, options: ParseOptions = {}): number {
-  const locale = options.locale ?? DEFAULT_LOCALE;
-  const result = Number(normalizeOrThrow(input, locale));
+  const result = Number(normalizeOrThrow(input, options));
   if (!Number.isFinite(result)) {
     throw new NumericRangeError(`'${input}' is too large for a JS number; use parseDecimal to keep every digit`);
   }
@@ -133,5 +155,5 @@ export function parseNumber(input: string, options: ParseOptions = {}): number {
 
 /** Like `parseNumber` (lenient, locale-aware) but exact: every digit survives in the returned `Decimal`. */
 export function parseDecimal(input: string, options: ParseOptions = {}): Decimal {
-  return decimal(normalizeOrThrow(input, options.locale ?? DEFAULT_LOCALE));
+  return decimal(normalizeOrThrow(input, options));
 }

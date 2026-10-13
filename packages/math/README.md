@@ -268,6 +268,7 @@ parseNumber('1.234,56', { locale: 'de-DE' }); // 1234.56
 parseNumber('1 234,56', { locale: 'fr-FR' }); // 1234.56
 parseNumber('−5', { locale: 'sv-SE' }); // -5   (U+2212 minus)
 parseDecimal('1,234.56').toString(); // '1234.56'
+parseNumber('1.234,56', { symbols: { decimal: ',', group: '.' } }); // 1234.56, no Intl needed
 parseNumber('abc'); // throws NumberFormatError
 ```
 
@@ -486,11 +487,16 @@ try {
 
 - **Node 22+, Bun, Deno, browsers**: everything, verified by the test suite
   and a smoke run of the built package in each runtime (`bun run test:runtimes`).
-- **React Native (Hermes)**: arithmetic, statistics, random and the float
-  helpers need only `bigint`. Formatting and parsing depend on the host's
-  `Intl` build; when a feature is missing (exact string formatting, a
-  non-default `roundingMode`), the call throws `UnsupportedFeatureError`
-  rather than silently degrading.
+- **React Native (Hermes V1)**: everything runs; `bun run test:runtimes`
+  checks it when `HERMES_BIN` points at a Hermes binary. Two `Intl` gaps
+  shape formatting and parsing:
+  - Hermes formats decimal text through a double. `Decimal` values are
+    rounded exactly first, so anything up to 15 shown digits (every normal
+    amount) prints exactly; more throws `UnsupportedFeatureError` instead of
+    printing a wrong digit. Compact notation accepts whole numbers only.
+  - Hermes on iOS has no `formatToParts`, so locale parsing throws
+    `UnsupportedFeatureError`; pass `symbols` to parse without `Intl`.
+  - A non-default `rounding` mode throws `UnsupportedFeatureError`.
 - Pure ESM, no runtime-specific globals; the lint config rejects any
   `node:*`/`bun:*` import or `process`/`Buffer` use in library code.
 
