@@ -1,28 +1,19 @@
 import type { UserId } from '@arki/auth/ids';
+import type { Money } from '@arki/money';
 import { z } from '@arki/contracts';
 import { sum } from '@arki/money';
-import type { Money } from '@arki/money';
 import { currencyCodeSchema } from '@arki/money/zod';
 
 import type { NotificationService } from '../core/notifications/service';
 import type { StripeProvider } from '../core/providers/stripe-provider';
 import type { PaymentRepository } from '../core/repository';
 import type { PaymentId } from '../core/types';
-import { nonNegativeMoneySchema, paymentAmount } from '../core/money';
 import type { RefundWrites } from './journal';
-import {
-  type RefundsDatabase,
-  type RefundRepository,
-  createRefundRepository,
-  refundAmountOf,
-} from './repository';
+import type { RefundRepository, RefundsDatabase } from './repository';
 import type { RefundsTables } from './tables';
-import type {
-  Refund,
-  RefundApprovalData,
-  RefundRejectionData,
-  RefundRequestData,
-} from './types';
+import type { Refund, RefundApprovalData, RefundRejectionData, RefundRequestData } from './types';
+import { nonNegativeMoneySchema, paymentAmount } from '../core/money';
+import { createRefundRepository, refundAmountOf } from './repository';
 
 /**
  * The largest refund approved without a person, per currency: `{ USD: '10.00', JPY: '1500' }`.
@@ -30,23 +21,21 @@ import type {
  * A currency missing here has no small-refund rule: its refunds wait for a person.
  * Parsed once when the service is built; a bad code or amount throws there, not on a refund.
  */
-export const refundAutoApproveLimitsSchema = z
-  .record(currencyCodeSchema, z.string())
-  .transform((limits, ctx) => {
-    const parsed = new Map<string, Money>();
+export const refundAutoApproveLimitsSchema = z.record(currencyCodeSchema, z.string()).transform((limits, ctx) => {
+  const parsed = new Map<string, Money>();
 
-    for (const [currency, amount] of Object.entries(limits)) {
-      const limit = nonNegativeMoneySchema.safeParse({ amount, currency });
+  for (const [currency, amount] of Object.entries(limits)) {
+    const limit = nonNegativeMoneySchema.safeParse({ amount, currency });
 
-      if (limit.success) {
-        parsed.set(currency, limit.data);
-      } else {
-        ctx.addIssue({ code: 'custom', path: [currency], message: `Not a ${currency} amount: ${amount}` });
-      }
+    if (limit.success) {
+      parsed.set(currency, limit.data);
+    } else {
+      ctx.addIssue({ code: 'custom', path: [currency], message: `Not a ${currency} amount: ${amount}` });
     }
+  }
 
-    return parsed;
-  });
+  return parsed;
+});
 
 export type RefundAutoApproveLimits = z.input<typeof refundAutoApproveLimitsSchema>;
 
@@ -211,7 +200,9 @@ export class RefundService {
 
     const paid = paymentAmount(payment);
     if (!amount.hasSameCurrency(paid)) {
-      throw new Error(`Refund currency ${amount.currency.code} differs from the payment currency ${paid.currency.code}`);
+      throw new Error(
+        `Refund currency ${amount.currency.code} differs from the payment currency ${paid.currency.code}`,
+      );
     }
 
     if (payment.createdAt && Date.now() - payment.createdAt.getTime() > this.refundWindow) {
@@ -220,7 +211,7 @@ export class RefundService {
 
     const existingRefunds = await this.refundRepository.findByPaymentId(paymentId);
     const totalRefunded = sum(
-      existingRefunds.filter((r) => r.status === 'completed').map(refund => refundAmountOf(refund)),
+      existingRefunds.filter(r => r.status === 'completed').map(refund => refundAmountOf(refund)),
       paid.currency,
     );
 
@@ -229,12 +220,15 @@ export class RefundService {
     }
   }
 
+  /**
+   * The per-currency limit is the only rule, whatever the reason: a billing
+   * error or technical issue of any size used to skip the person, so a large
+   * refund in any currency could go out unreviewed.
+   */
   private async shouldAutoApprove(refund: Refund): Promise<boolean> {
     const amount = refundAmountOf(refund);
     const limit = this.autoApproveLimits.get(amount.currency.code);
-    if (limit !== undefined && amount.lte(limit)) return true;
-    if (['billing_error', 'technical_issue'].includes(refund.reason)) return true;
-    return false;
+    return limit !== undefined && amount.lte(limit);
   }
 
   private async notifyApprovers(refund: Refund): Promise<void> {

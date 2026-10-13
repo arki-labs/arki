@@ -19,11 +19,12 @@ import { money } from '@arki/money';
 import type { CoreWrites } from '../core/journal';
 import type { AppDb } from '../test-support';
 import type { RefundWrites } from './journal';
+import type { RefundReason } from './primitives';
+import type { RefundAutoApproveLimits } from './service';
 import { toMinorColumn } from '../core/money';
 import { createPaymentId } from '../core/primitives';
 import { coreReads, refundReads, refundRow, runnerOn, seedPayment } from '../service-test-support';
 import { adminId, countEvents, customerId, eventTypesOf, openDb, rejectionOf, typed, userId } from '../test-support';
-import type { RefundAutoApproveLimits } from './service';
 import { RefundService } from './service';
 
 type Provider = ConstructorParameters<typeof RefundService>[2];
@@ -80,13 +81,17 @@ function serviceWith(provider: Provider, autoApproveLimits?: RefundAutoApproveLi
 }
 
 /** A customer asks for `amount` back from a payment of 5000 in the same currency. */
-async function askFor(amount: Money, autoApproveLimits?: RefundAutoApproveLimits) {
+async function askFor(
+  amount: Money,
+  autoApproveLimits?: RefundAutoApproveLimits,
+  reason: RefundReason = 'customer_request',
+) {
   const payment = await seedPayment(coreWrites, null, '5000', amount.currency.code);
 
   return serviceWith(providerThatRefunds, autoApproveLimits).requestRefund({
     paymentId: payment.id,
     amount,
-    reason: 'customer_request',
+    reason,
     requestedBy: userId,
   });
 }
@@ -245,11 +250,14 @@ describe('auto-approval limits per currency', () => {
     ['10.01', 'USD', 'pending'],
     ['1500', 'JPY', 'completed'],
     ['1501', 'JPY', 'pending'],
-  ])('under the default limits, %s %s ends %s: at the limit is small, a unit above is not', async (amount, currency, status) => {
-    const refund = await askFor(money(amount, currency));
+  ])(
+    'under the default limits, %s %s ends %s: at the limit is small, a unit above is not',
+    async (amount, currency, status) => {
+      const refund = await askFor(money(amount, currency));
 
-    expect(refund.status).toBe(status);
-  });
+      expect(refund.status).toBe(status);
+    },
+  );
 
   it('10 JPY waits for a person when JPY has no limit: "10" no longer means 10 of any currency', async () => {
     const refund = await askFor(money(10, 'JPY'), { USD: '10.00' });
@@ -264,6 +272,17 @@ describe('auto-approval limits per currency', () => {
     expect(refund.status).toBe('pending');
     expect(await eventTypesOf(db, 'refund', refund.id)).toEqual(['RefundRequestedV2']);
   });
+
+  it.each(['billing_error', 'technical_issue'] as const)(
+    'a %s above the limit still waits for a person: our own mistakes do not skip review at any size',
+    async reason => {
+      const above = await askFor(money('10.01', 'USD'), undefined, reason);
+      const atLimit = await askFor(money('10.00', 'USD'), undefined, reason);
+
+      expect(above.status).toBe('pending');
+      expect(atLimit.status).toBe('completed');
+    },
+  );
 
   it('turns down a limit that is not an amount of its currency when the service is built, not on a refund', () => {
     expect(() => serviceWith(providerThatRefunds, { USD: '10.001' })).toThrow();
