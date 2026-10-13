@@ -1,0 +1,90 @@
+{
+  "name": "@arki/bench",
+  "version": "0.0.1",
+  "private": false,
+  "description": "Benchmarks you can publish: compare a library against its competitors under executable contracts, with honest statistics, full provenance, bundle-size budgets and README tables generated from saved results. Built on mitata.",
+  "keywords": [
+    "arki",
+    "benchmark",
+    "bench",
+    "performance",
+    "mitata",
+    "statistics",
+    "bundle-size",
+    "regression",
+    "ci"
+  ],
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/bench"
+  },
+  "license": "MIT",
+  "sideEffects": [
+    "./dist/cli.js",
+    "./dist/node/worker.js",
+    "./dist/node/size-worker.js"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "default": "./dist/core/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "import": "./dist/node/index.js",
+      "default": "./dist/node/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "arki-bench": "./dist/cli.js"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:runtimes": "bun run build && node scripts/smoke.mjs && bun scripts/smoke.mjs && if command -v deno >/dev/null; then deno run --no-config --import-map=scripts/deno-import-map.json -A scripts/smoke.mjs; else echo 'deno not installed: skipped'; fi && bun build scripts/smoke.mjs --target=browser --external bun:jsc --outdir=.cache/browser-check && node scripts/smoke-browser.mjs && node scripts/smoke-hermes.mjs",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "mitata": "1.0.34",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@types/node": "catalog:node"
+  },
+  "engines": {
+    "node": ">=22.10"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
