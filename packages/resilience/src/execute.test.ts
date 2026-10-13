@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import type { Policy } from './index.js';
 import {
   createCircuitBreakerPolicy,
   createRetryPolicy,
@@ -55,13 +56,13 @@ describe('execution helpers', () => {
   // synchronously must still reach the caller as a rejection, never as a synchronous throw.
   it('withResilience turns a synchronous throw from the policy into a rejection', async () => {
     const thrown = new Error('policy broke');
-    const broken: typeof noop = Object.create(noop, {
-      execute: {
-        value: () => {
-          throw thrown;
-        },
+    const broken: Policy = {
+      onSuccess: noop.onSuccess,
+      onFailure: noop.onFailure,
+      execute() {
+        throw thrown;
       },
-    });
+    };
 
     let call: Promise<unknown> | undefined;
     expect(() => {

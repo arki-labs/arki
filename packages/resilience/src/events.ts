@@ -1,4 +1,4 @@
-import type { CircuitBreakerPolicy, IPolicy, RetryPolicy, TimeoutPolicy } from 'cockatiel';
+import type { CircuitBreakerPolicy, FailureReason, Policy, RetryPolicy, TimeoutPolicy } from './policy.js';
 
 // ---------------------------------------------------------------------------
 // Logger interface — intentionally minimal so callers can pass any logger.
@@ -11,19 +11,27 @@ export type PolicyLogger = {
 };
 
 // ---------------------------------------------------------------------------
-// Type guards for cockatiel policy event detection
+// Type guards for policy event detection
 // ---------------------------------------------------------------------------
 
-function hasRetryEvents(policy: IPolicy): policy is IPolicy & RetryPolicy {
+function hasRetryEvents(policy: Policy): policy is RetryPolicy {
   return 'onRetry' in policy;
 }
 
-function hasCircuitBreakerEvents(policy: IPolicy): policy is IPolicy & CircuitBreakerPolicy {
+function hasCircuitBreakerEvents(policy: Policy): policy is CircuitBreakerPolicy {
   return 'onBreak' in policy && 'onReset' in policy && 'onHalfOpen' in policy;
 }
 
-function hasTimeoutEvents(policy: IPolicy): policy is IPolicy & TimeoutPolicy {
+function hasTimeoutEvents(policy: Policy): policy is TimeoutPolicy {
   return 'onTimeout' in policy;
+}
+
+/** One line of text for a failure, whatever was thrown. */
+function describe(reason: FailureReason): string {
+  if ('error' in reason) {
+    return reason.error instanceof Error ? reason.error.message : String(reason.error);
+  }
+  return String(reason.value);
 }
 
 // ---------------------------------------------------------------------------
@@ -36,7 +44,7 @@ function hasTimeoutEvents(policy: IPolicy): policy is IPolicy & TimeoutPolicy {
  *
  * Returns a cleanup function that disposes all subscriptions.
  */
-export function attachPolicyLogger(policy: IPolicy, logger: PolicyLogger, policyName = 'resilience'): () => void {
+export function attachPolicyLogger(policy: Policy, logger: PolicyLogger, policyName = 'resilience'): () => void {
   const disposables: { dispose(): void }[] = [];
 
   // Retry events
@@ -46,9 +54,8 @@ export function attachPolicyLogger(policy: IPolicy, logger: PolicyLogger, policy
         logger.warn(`[${policyName}] Retry attempt`, { attempt, delay });
       }),
       policy.onGiveUp(failureReason => {
-        const errorMsg = 'error' in failureReason ? failureReason.error.message : String(failureReason.value);
         logger.error(`[${policyName}] All retries exhausted`, {
-          error: errorMsg,
+          error: describe(failureReason),
         });
       }),
     );
@@ -61,9 +68,8 @@ export function attachPolicyLogger(policy: IPolicy, logger: PolicyLogger, policy
         if ('isolated' in failureReason) {
           logger.error(`[${policyName}] Circuit breaker opened (isolated)`);
         } else {
-          const errorMsg = 'error' in failureReason ? failureReason.error.message : String(failureReason.value);
           logger.error(`[${policyName}] Circuit breaker opened`, {
-            error: errorMsg,
+            error: describe(failureReason),
           });
         }
       }),
@@ -85,7 +91,7 @@ export function attachPolicyLogger(policy: IPolicy, logger: PolicyLogger, policy
     );
   }
 
-  // Success / failure events (available on all IPolicy)
+  // Success / failure events (available on every policy)
   disposables.push(
     policy.onSuccess(({ duration }) => {
       logger.info(`[${policyName}] Operation succeeded`, {
@@ -93,9 +99,8 @@ export function attachPolicyLogger(policy: IPolicy, logger: PolicyLogger, policy
       });
     }),
     policy.onFailure(({ reason, duration }) => {
-      const errorMsg = 'error' in reason ? reason.error.message : String(reason.value);
       logger.error(`[${policyName}] Operation failed`, {
-        error: errorMsg,
+        error: describe(reason),
         durationMs: duration,
       });
     }),

@@ -1,8 +1,5 @@
-import { wrap } from 'cockatiel';
-
-import type { IPolicy } from 'cockatiel';
-
-import { createResiliencePolicy, createRetryPolicy, createTimeoutPolicy } from './policies.js';
+import type { Policy } from './policy.js';
+import { createResiliencePolicy, createRetryPolicy, createTimeoutPolicy, wrap } from './policies.js';
 
 /**
  * Resilience policy tuned for external API calls (geocoding, AI providers, etc.).
@@ -11,7 +8,7 @@ import { createResiliencePolicy, createRetryPolicy, createTimeoutPolicy } from '
  * - Circuit breaker: 5 consecutive failures, 30 s half-open
  * - Timeout: 10 s per attempt
  */
-export const externalApiPolicy: IPolicy = createResiliencePolicy({
+export const externalApiPolicy: Policy = createResiliencePolicy({
   retry: {
     maxAttempts: 3,
     initialDelay: 200,
@@ -35,7 +32,7 @@ export const externalApiPolicy: IPolicy = createResiliencePolicy({
  * - Retry: 2 attempts, 50 ms initial, 1 s max
  * - Timeout: 5 s per attempt
  */
-export const databasePolicy: IPolicy = wrap(
+export const databasePolicy: Policy = wrap(
   createRetryPolicy({
     maxAttempts: 2,
     initialDelay: 50,
@@ -54,7 +51,7 @@ export const databasePolicy: IPolicy = wrap(
  * - Circuit breaker: 10 consecutive failures, 60 s half-open
  * - Timeout: 60 s per attempt
  */
-export const backgroundJobPolicy: IPolicy = createResiliencePolicy({
+export const backgroundJobPolicy: Policy = createResiliencePolicy({
   retry: {
     maxAttempts: 5,
     initialDelay: 500,

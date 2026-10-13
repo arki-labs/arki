@@ -2,17 +2,6 @@
   "name": "@arki/resilience",
   "version": "0.0.3",
   "description": "Resilience primitives for ARKI — retry, circuit breaker, timeout, bulkhead, and curated presets, built on cockatiel.",
-  "license": "MIT",
-  "type": "module",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/arki-labs/arki.git",
-    "directory": "packages/resilience"
-  },
-  "homepage": "https://arki.dev",
-  "bugs": {
-    "url": "https://github.com/arki-labs/arki/issues"
-  },
   "keywords": [
     "arki",
     "typescript",
@@ -23,10 +12,18 @@
     "bulkhead",
     "cockatiel"
   ],
-  "publishConfig": {
-    "access": "public"
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/resilience"
+  },
+  "license": "MIT",
   "sideEffects": false,
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -55,6 +52,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:runtimes": "bun run build && node scripts/smoke.mjs && bun scripts/smoke.mjs && if command -v deno >/dev/null; then deno run --no-config --node-modules-dir=manual scripts/smoke.mjs; else echo 'deno not installed: skipped'; fi && bun build scripts/smoke.mjs --target=browser --outdir=.cache/browser-check && node scripts/smoke-browser.mjs && node scripts/smoke-hermes.mjs",
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
@@ -70,5 +68,8 @@
     "opossum": "^10.0.0",
     "p-retry": "^8.0.1",
     "typescript": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
