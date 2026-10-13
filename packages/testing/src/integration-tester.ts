@@ -1,7 +1,5 @@
 import crypto from 'node:crypto';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import type { AnyRelations } from 'drizzle-orm';
-import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import { PgTable } from 'drizzle-orm/pg-core';
 import type { StartedTestContainer } from 'testcontainers';
 import { is, sql } from 'drizzle-orm';
@@ -14,6 +12,7 @@ import { KV } from '@arki/kv';
 
 import type {
   IntegrationTesterConfig,
+  TesterDatabase,
   TesterOptions,
   TesterUserOverrides,
   TesterUsers,
@@ -29,7 +28,7 @@ import {
 } from './containers';
 import * as debug from './debug';
 import { debugTester } from './debug';
-import { FactoryRegistry, faker } from './factories';
+import { faker } from './factories';
 import * as performance from './performance';
 import type { Timestamp, Timestamps } from './timestamps';
 import { assertTimestamps, assertUpdatedAfterCreated, epochMilliseconds } from './timestamps';
@@ -85,33 +84,31 @@ async function closeDatabaseClient(db: object): Promise<'ended' | 'released' | n
  * tRPC applications with PostgreSQL and Redis.
  *
  * @template TSchema - Drizzle schema type
- * @template TDatabase - Database instance type (NodePgDatabase)
+ * @template TDatabase - The root database type, as `createDatabase` returns it (the type of `tester.db`)
  * @template TRepositories - Repository collection type
  * @template TCaller - tRPC caller type
  * @template TContext - tRPC context type
+ * @template THandle - What repositories and the context take: the root database or a transaction
  *
  * @example
  * ```typescript
- * const TesterBase = createIntegrationTester({
+ * const t = initTester.context<AppContext>().caller<Caller>().create({
  *   schema,
  *   migrationsFolder: './migrations',
+ *   createDatabase,
  *   createContext,
  *   createCaller,
  *   createRepositories,
  *   defaultUsers: { user, moderator, admin },
- *   baseFactories: {
- *     user: userFactory,
- *     game: gameFactory,
- *   },
  * });
  *
- * export class Tester extends TesterBase {}
+ * const createTester = t.tester.withFactories({ user: userFactory, game: gameFactory });
  *
  * // In tests
- * const tester = new Tester();
+ * const tester = createTester();
  * await tester.setup();
  * await tester.withTransaction(async () => {
- *   const user = tester.factory.create('user'); // Base factory auto-registered
+ *   const user = tester.factory.user(); // typed by the factories passed above
  *   const result = await tester.caller.user.someMethod();
  *   tester.assertValidId(result.id, 'prefix_');
  * });
@@ -120,13 +117,13 @@ async function closeDatabaseClient(db: object): Promise<'ended' | 'released' | n
  */
 export class IntegrationTester<
   TSchema extends Record<string, unknown>,
-  TDatabase extends NodePgDatabase<AnyRelations>,
+  TDatabase extends THandle,
   TRepositories extends Record<string, unknown>,
   TCaller,
   TContext extends Record<string, unknown>,
-  TFactories = FactoryRegistry,
+  THandle extends TesterDatabase<THandle>,
 > {
-  protected readonly config: IntegrationTesterConfig<TSchema, TDatabase, TRepositories, TCaller, TContext>;
+  protected readonly config: IntegrationTesterConfig<TSchema, TDatabase, TRepositories, TCaller, TContext, THandle>;
   protected readonly options: TesterOptions;
 
   protected container: StartedPostgreSqlContainer | null = null;
@@ -142,15 +139,12 @@ export class IntegrationTester<
   protected _repo: TRepositories | null = null;
   protected _kv: KV | null = null;
   protected _users: TesterUsers | null = null;
-  protected _caller: CallerCollection<TCaller> | null = null;
   protected _baseContext: TContext | null = null;
 
-  protected currentTransaction: NodePgTransaction<AnyRelations> | null = null;
+  protected currentTransaction: THandle | null = null;
 
   protected randomCounter = 0;
   protected randomSeed: string;
-
-  protected _factoryRegistry: TFactories | null = null;
 
   protected currentUser: TestUser | null = null;
   protected currentCaller: TCaller | null = null;
@@ -176,7 +170,7 @@ export class IntegrationTester<
   public readonly faker = faker;
 
   constructor(
-    config: IntegrationTesterConfig<TSchema, TDatabase, TRepositories, TCaller, TContext>,
+    config: IntegrationTesterConfig<TSchema, TDatabase, TRepositories, TCaller, TContext, THandle>,
     options: TesterOptions = {},
   ) {
     this.config = config;
@@ -195,7 +189,7 @@ export class IntegrationTester<
    * Get the current database context (transaction if active, otherwise base db)
    * This ensures operations use the transaction when running inside withTransaction()
    */
-  protected getCurrentDb(): TDatabase {
+  protected getCurrentDb(): THandle {
     if (!this._db) {
       throw new Error('Tester not initialized. Call setup() first.');
     }
@@ -204,16 +198,32 @@ export class IntegrationTester<
     if (useTransaction) {
       debugTester.debug('[tester] getCurrentDb: Using transaction context');
     }
-    // Cast needed: a Drizzle transaction has the database's methods but is a separate class, so it
-    // is not assignable to the generic TDatabase (TS2322 on the unioned return).
-    return (this.currentTransaction ?? this._db) as TDatabase;
+    return this.currentTransaction ?? this._db;
   }
 
+  /**
+   * Repositories on the current database: the test transaction while `withTransaction` is
+   * running, the base database otherwise. So a read through `repo` sees what a caller wrote
+   * in the same transaction. Read it inside the transaction; a value kept from before it
+   * still uses the base database.
+   */
   get repo(): TRepositories {
     if (!this._repo) {
       throw new Error('Tester not initialized. Call setup() first.');
     }
+    if (this.currentTransaction) {
+      return this.config.createRepositories(this.currentTransaction);
+    }
     return this._repo;
+  }
+
+  /**
+   * The database callers and `repo` use right now: the test transaction while `withTransaction`
+   * is running, the root database otherwise. Use it to check what a caller wrote in the
+   * transaction. (`db` is always the root database, so it cannot see uncommitted rows.)
+   */
+  get currentDb(): THandle {
+    return this.getCurrentDb();
   }
 
   get kv(): KV {
@@ -230,43 +240,33 @@ export class IntegrationTester<
     return this._users;
   }
 
+  /**
+   * Callers for every role. Each property builds its caller when you read it, on the current
+   * database: the test transaction while `withTransaction` is running, the base database
+   * otherwise. Read it inside the transaction; a caller you kept from before it still writes
+   * on the base database.
+   */
   get caller(): CallerCollection<TCaller> {
-    if (!this._caller) {
-      throw new Error('Tester not initialized. Call setup() first.');
-    }
-    return this._caller;
+    const users = this.users;
+    const build = (role: TestUserRole, user: TestUser | null): TCaller => this.callerFor(role, user);
+    return {
+      get public() {
+        return build('public', null);
+      },
+      get user() {
+        return build('user', users.user);
+      },
+      get moderator() {
+        return build('moderator', users.moderator);
+      },
+      get admin() {
+        return build('admin', users.admin);
+      },
+    };
   }
 
   get currentTx() {
     return this.currentTransaction;
-  }
-
-  /**
-   * Get factory registry for managing test data factories
-   * When using createTester pattern, factories are injected via setFactoryRegistry()
-   */
-  get factory(): TFactories {
-    if (!this._factoryRegistry) {
-      // Fallback for backward compatibility
-      // Cast needed: this fallback is only correct when TFactories is its default (FactoryRegistry).
-      this._factoryRegistry = new FactoryRegistry() as TFactories;
-      this.registerBaseFactories();
-    }
-    return this._factoryRegistry;
-  }
-
-  /**
-   * Inject typed factory registry from outside
-   * Used by createTester() factory function to avoid inheritance
-   *
-   * @example
-   * ```typescript
-   * const tester = new AppTester(config);
-   * tester.setFactoryRegistry(factories);
-   * ```
-   */
-  setFactoryRegistry<T extends TFactories>(registry: T): void {
-    this._factoryRegistry = registry;
   }
 
   getUser(role: 'user' | 'moderator' | 'admin'): TestUser {
@@ -308,7 +308,7 @@ export class IntegrationTester<
     if (useUniqueDatabase) {
       this.uniqueDatabaseName = `test_${crypto.randomBytes(8).toString('hex')}`;
       debugTester.debug('[tester] Creating unique database (name: {name})', { name: this.uniqueDatabaseName });
-      const adminDb = this.createDatabaseConnection(connectionString);
+      const adminDb = this.openSchemaDatabase(connectionString);
       try {
         await adminDb.execute(sql.raw(`CREATE DATABASE "${this.uniqueDatabaseName}"`));
 
@@ -330,13 +330,18 @@ export class IntegrationTester<
     }
 
     debugTester.debug('[tester] Creating database connection and running migrations');
-    const database = this.createDatabaseConnection(connectionString);
-    this._db = database;
-    await migrate(this._db, { migrationsFolder: this.config.migrationsFolder });
+    const migrationDb = this.openSchemaDatabase(connectionString);
+    try {
+      await migrate(migrationDb, { migrationsFolder: this.config.migrationsFolder });
+    } finally {
+      await closeDatabaseClient(migrationDb);
+    }
     debugTester.debug('[tester] Migrations completed');
+    const database = this.config.createDatabase(connectionString);
+    this._db = database;
 
     debugTester.debug('[tester] Creating repositories');
-    this._repo = this.config.createRepositories(this._db);
+    this._repo = this.config.createRepositories(database);
     debugTester.debug('[tester] Repositories created');
 
     const { redisConnectionString: customRedisConnectionString, useUniqueRedisNamespace = false } = this.options;
@@ -383,13 +388,6 @@ export class IntegrationTester<
       debugTester.debug('[tester] onSetup hook completed');
     }
 
-    debugTester.debug('[tester] Creating callers for all roles');
-    this._caller = {
-      public: this.createCaller('public', null, baseContext),
-      user: this.createCaller('user', this._users.user, baseContext),
-      moderator: this.createCaller('moderator', this._users.moderator, baseContext),
-      admin: this.createCaller('admin', this._users.admin, baseContext),
-    };
     debugTester.debug('[tester] Setup completed successfully');
   }
 
@@ -499,13 +497,13 @@ export class IntegrationTester<
 
     if (this.uniqueDatabaseName) {
       debugTester.debug('[tester] Dropping unique database (name: {name})', { name: this.uniqueDatabaseName });
-      let adminDb: TDatabase | null = null;
+      let adminDb: ReturnType<typeof this.openSchemaDatabase> | null = null;
       try {
         const connection =
           this.options.connectionString ?? this.baseConnectionString ?? getGlobalPostgresConnectionString();
 
         if (connection) {
-          adminDb = this.createDatabaseConnection(connection);
+          adminDb = this.openSchemaDatabase(connection);
           await adminDb.execute(sql.raw(`DROP DATABASE IF EXISTS "${this.uniqueDatabaseName}" WITH (FORCE)`));
           debugTester.debug('[tester] Unique database dropped');
         } else {
@@ -549,7 +547,6 @@ export class IntegrationTester<
     }
 
     debugTester.debug('[tester] Cleaning up references');
-    this._caller = null;
     this._users = null;
     this._baseContext = null;
     this.ownsContainer = false;
@@ -732,14 +729,7 @@ export class IntegrationTester<
    * ```
    */
   asUser(): { user: TestUser; caller: TCaller } {
-    if (!this._users || !this._caller) {
-      throw new Error('Tester not initialized. Call setup() first.');
-    }
-
-    this.currentUser = this._users.user;
-    this.currentCaller = this._caller.user;
-
-    return { user: this._users.user, caller: this._caller.user };
+    return this.asRole('user', this.users.user);
   }
 
   /**
@@ -779,7 +769,7 @@ export class IntegrationTester<
       debugTester.debug('[tester] User created in database');
     }
 
-    const caller = this.createCaller('user', user, baseContext);
+    const caller = this.callerFor('user', user);
     debugTester.debug('[tester] Dynamic user and caller created');
 
     return { user, caller };
@@ -798,8 +788,7 @@ export class IntegrationTester<
    */
   asGuest(): TCaller {
     this.currentUser = null;
-    const baseContext = this.buildBaseContext();
-    this.currentCaller = this.createCaller('user', null, baseContext);
+    this.currentCaller = this.callerFor('user', null);
     return this.currentCaller;
   }
 
@@ -815,14 +804,7 @@ export class IntegrationTester<
    * ```
    */
   asModerator(): { user: TestUser; caller: TCaller } {
-    if (!this._users || !this._caller) {
-      throw new Error('Tester not initialized. Call setup() first.');
-    }
-
-    this.currentUser = this._users.moderator;
-    this.currentCaller = this._caller.moderator;
-
-    return { user: this._users.moderator, caller: this._caller.moderator };
+    return this.asRole('moderator', this.users.moderator);
   }
 
   /**
@@ -837,14 +819,7 @@ export class IntegrationTester<
    * ```
    */
   asAdmin(): { user: TestUser; caller: TCaller } {
-    if (!this._users || !this._caller) {
-      throw new Error('Tester not initialized. Call setup() first.');
-    }
-
-    this.currentUser = this._users.admin;
-    this.currentCaller = this._caller.admin;
-
-    return { user: this._users.admin, caller: this._caller.admin };
+    return this.asRole('admin', this.users.admin);
   }
 
   /**
@@ -872,8 +847,7 @@ export class IntegrationTester<
         roles: ['user'],
       };
       this.currentUser = user;
-      const baseContext = this.buildBaseContext();
-      this.currentCaller = this.createCaller('user', user, baseContext);
+      this.currentCaller = this.callerFor('user', user);
     }
 
     if (!this.currentCaller) {
@@ -1332,23 +1306,6 @@ export class IntegrationTester<
     this.randomCounter = 0;
   }
 
-  /**
-   * Register base factories from config
-   * Only works with FactoryRegistry instances, skipped for custom typed registries
-   */
-  protected registerBaseFactories(): void {
-    if (!this.config.baseFactories || !this._factoryRegistry) {
-      return;
-    }
-
-    // Only register if using base FactoryRegistry (not custom typed registry)
-    if (this._factoryRegistry instanceof FactoryRegistry) {
-      for (const [name, factory] of Object.entries(this.config.baseFactories)) {
-        this._factoryRegistry.register(name, factory);
-      }
-    }
-  }
-
   protected mergeUsers(overrides: TesterUserOverrides = {}): TesterUsers {
     return {
       user: overrides.user ?? { ...this.config.defaultUsers.user },
@@ -1371,13 +1328,13 @@ export class IntegrationTester<
       throw new Error('Tester not initialized. Call setup() first.');
     }
 
-    const currentDb = this.getCurrentDb();
-    const repositories = this.config.createRepositories(currentDb);
-
     // Reuse the initial context when not in a transaction to avoid creating duplicate connections
     if (!this.currentTransaction && this._baseContext) {
       return this._baseContext;
     }
+
+    const currentDb = this.getCurrentDb();
+    const repositories = this.config.createRepositories(currentDb);
 
     // When running inside a transaction, reuse heavy resources (event store, message bus)
     // from the base context while swapping in the transactional db/repositories.
@@ -1406,13 +1363,27 @@ export class IntegrationTester<
     return context;
   }
 
-  // Cast needed (TS2352 on a direct `as TDatabase`): initDb builds the database with relations derived from
-  // `config.schema`, while TDatabase is whatever subtype the app's `createRepositories` asks for. TypeScript
-  // cannot prove the two agree, so the app must keep its database type consistent with its schema.
-  protected createDatabaseConnection(connectionString: string): TDatabase {
-    return initDb.schema(this.config.schema).create({
-      connectionString,
-      isDev: true,
-    }).db as unknown as TDatabase;
+  /**
+   * A short-lived connection built from `config.schema`. The tester uses it for what does not
+   * depend on the app's database type: running migrations and creating or dropping the unique
+   * test database. Close it with `closeDatabaseClient`.
+   */
+  protected openSchemaDatabase(connectionString: string) {
+    return initDb.schema(this.config.schema).create({ connectionString, isDev: true }).db;
+  }
+
+  /**
+   * Build a caller for `role` on the current database (the test transaction while
+   * `withTransaction` runs, the base database otherwise).
+   */
+  protected callerFor(role: TestUserRole, user: TestUser | null): TCaller {
+    return this.createCaller(role, user, this.buildBaseContext());
+  }
+
+  /** Make `user` the current user and hand out a caller for it. */
+  protected asRole(role: TestUserRole, user: TestUser): { user: TestUser; caller: TCaller } {
+    this.currentUser = user;
+    this.currentCaller = this.callerFor(role, user);
+    return { user, caller: this.currentCaller };
   }
 }

@@ -5,7 +5,7 @@
  * an `Instant` or a `ZonedDateTime`.
  */
 import type { AnyRelations } from 'drizzle-orm';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import { describe, expect, it } from 'vitest';
 
 import { createUserId } from '@arki/auth';
@@ -23,10 +23,14 @@ function offlineTester() {
     NodePgDatabase<AnyRelations>,
     Record<string, never>,
     null,
-    Record<string, never>
+    Record<string, never>,
+    NodePgDatabase<AnyRelations> | NodePgTransaction<AnyRelations>
   >({
     schema: {},
     migrationsFolder: '',
+    createDatabase: () => {
+      throw new Error('offline tester: no database');
+    },
     createContext: () => ({}),
     createCaller: () => null,
     createRepositories: () => ({}),

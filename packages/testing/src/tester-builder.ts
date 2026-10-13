@@ -14,6 +14,7 @@
  *   .create({
  *     schema,
  *     migrationsFolder: './migrations',
+ *     createDatabase,
  *     createContext,
  *     createCaller,
  *     createRepositories,
@@ -25,25 +26,23 @@
  * ```
  */
 
-import type { AnyRelations } from 'drizzle-orm';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-
-import type { TesterOptions, IntegrationTesterConfig } from './types';
+import type { IntegrationTesterConfig, TesterDatabase, TesterOptions } from './types';
 import { IntegrationTester } from './integration-tester';
 
 /**
  * Configuration for tester initialization. The schema, database and repository
- * types are inferred from the functions you pass in (for example, the database
- * type from `createRepositories`' parameter, the repository type from its
- * return value).
+ * types are inferred from the functions you pass in (the database type from
+ * `createRepositories`' parameter, the root database type from what `createDatabase` returns, and the
+ * repository type from `createRepositories`' return value).
  */
 export type TesterConfig<
   TSchema extends Record<string, unknown>,
-  TDatabase extends NodePgDatabase<AnyRelations>,
+  TDatabase extends THandle,
   TRepositories extends Record<string, unknown>,
   TContext extends Record<string, unknown>,
   TCaller,
-> = IntegrationTesterConfig<TSchema, TDatabase, TRepositories, TCaller, TContext>;
+  THandle extends TesterDatabase<THandle>,
+> = IntegrationTesterConfig<TSchema, TDatabase, TRepositories, TCaller, TContext, THandle>;
 
 /**
  * Tester builder with context and caller types captured
@@ -55,10 +54,11 @@ export type TesterBuilder<TContext extends Record<string, unknown>, TCaller> = {
    */
   create<
     TSchema extends Record<string, unknown>,
-    TDatabase extends NodePgDatabase<AnyRelations>,
+    TDatabase extends THandle,
     TRepositories extends Record<string, unknown>,
+    THandle extends TesterDatabase<THandle>,
   >(
-    config: TesterConfig<TSchema, TDatabase, TRepositories, TContext, TCaller>,
+    config: TesterConfig<TSchema, TDatabase, TRepositories, TContext, TCaller, THandle>,
   ): {
     /**
      * Tester factory with methods to create configured testers
@@ -76,18 +76,21 @@ export type TesterBuilder<TContext extends Record<string, unknown>, TCaller> = {
        * tester.factory.gameRegistry.game(); // Fully typed!
        * ```
        */
-      withFactories<TFactories>(
+      withFactories<TFactories extends object>(
         factories: TFactories,
       ): (
         options?: TesterOptions,
-      ) => IntegrationTester<TSchema, TDatabase, TRepositories, TCaller, TContext, TFactories>;
+      ) => IntegrationTester<TSchema, TDatabase, TRepositories, TCaller, TContext, THandle> & {
+        /** The factories passed to `withFactories`, exactly as typed there. */
+        readonly factory: TFactories;
+      };
 
       /**
-       * Create a basic tester without custom factories
+       * Create a basic tester without factories (it has no `factory` property)
        */
       create(
         options?: TesterOptions,
-      ): IntegrationTester<TSchema, TDatabase, TRepositories, TCaller, TContext>;
+      ): IntegrationTester<TSchema, TDatabase, TRepositories, TCaller, TContext, THandle>;
     };
   };
 }
@@ -133,35 +136,28 @@ export type InitialTesterBuilder = {
  */
 class TesterBuilderImpl<
   TSchema extends Record<string, unknown>,
-  TDatabase extends NodePgDatabase<AnyRelations>,
+  TDatabase extends THandle,
   TRepositories extends Record<string, unknown>,
   TContext extends Record<string, unknown>,
   TCaller,
+  THandle extends TesterDatabase<THandle>,
 > {
-  constructor(private config: TesterConfig<TSchema, TDatabase, TRepositories, TContext, TCaller>) {}
+  constructor(private config: TesterConfig<TSchema, TDatabase, TRepositories, TContext, TCaller, THandle>) {}
 
   get tester() {
     return {
-      withFactories: <TFactories>(factories: TFactories) => {
+      withFactories: <TFactories extends object>(factories: TFactories) => {
         return (options?: TesterOptions) => {
-          // Create internal tester class that extends IntegrationTester
-          class ConfiguredTester extends IntegrationTester<
-            TSchema,
-            TDatabase,
-            TRepositories,
-            TCaller,
-            TContext,
-            TFactories
-          > {}
+          class ConfiguredTester extends IntegrationTester<TSchema, TDatabase, TRepositories, TCaller, TContext, THandle> {
+            readonly factory = factories;
+          }
 
-          const tester = new ConfiguredTester(this.config, options);
-          tester.setFactoryRegistry(factories);
-          return tester;
+          return new ConfiguredTester(this.config, options);
         };
       },
 
       create: (options?: TesterOptions) => {
-        class ConfiguredTester extends IntegrationTester<TSchema, TDatabase, TRepositories, TCaller, TContext> {}
+        class ConfiguredTester extends IntegrationTester<TSchema, TDatabase, TRepositories, TCaller, TContext, THandle> {}
 
         return new ConfiguredTester(this.config, options);
       },

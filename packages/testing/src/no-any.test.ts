@@ -5,9 +5,11 @@
  * trusting it. The `expectTypeOf` lines fail to compile if a type goes back to
  * `any`; the runtime lines pin the behaviour the new checks must keep.
  */
+import type { AnyRelations } from 'drizzle-orm';
+import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { Factory } from './factories';
+import type { Factory, FactoryBuilder, FactoryMap } from './factories';
 import type { IntegrationTester } from './integration-tester';
 import type { IntegrationTesterConfig } from './types';
 import {
@@ -119,20 +121,58 @@ describe('factories', () => {
     expect(sequence.every(game => game.name === 'Seq')).toBe(true);
   });
 
-  it('the registry accepts any factory and returns the type the caller names', () => {
-    const registry = new FactoryRegistry();
-    registry.register('game', gameFactory);
-    expectTypeOf(registry.create<Game>('game')).toEqualTypeOf<Game>();
-    expect(registry.createMany<Game>('game', 2)).toHaveLength(2);
-    expect(() => registry.create('missing')).toThrow(/not registered/);
+  it('factory() is the builder and factory(overrides) is the object, as at runtime', () => {
+    expectTypeOf(gameFactory()).toEqualTypeOf<FactoryBuilder<Game>>();
+    expectTypeOf(gameFactory({ name: 'Go' })).toEqualTypeOf<Game>();
+    // eslint-disable-next-line unicorn/no-useless-undefined -- `undefined` selects the object overload, which is the point
+    expectTypeOf(gameFactory(undefined)).toEqualTypeOf<Game>();
+    expectTypeOf<ReturnType<Factory<Game>>>().toEqualTypeOf<Game>();
+    expect(gameFactory().with('rank', 7).build().rank).toBe(7);
+    // eslint-disable-next-line unicorn/no-useless-undefined -- same overload as above, at runtime
+    expect(gameFactory(undefined).rank).toBe(0);
   });
 
-  it('IntegrationTesterConfig takes a map of any factory type', () => {
-    type BaseFactories = NonNullable<
-      IntegrationTesterConfig<Record<string, never>, never, never, never, never>['baseFactories']
-    >;
-    expectTypeOf<{ game: Factory<Game> }>().toExtend<BaseFactories>();
-    expectTypeOf<BaseFactories['game']>().not.toBeAny();
+  describe('FactoryRegistry', () => {
+    type Player = { id: string; score: number };
+    const playerFactory = createFactory<Player>(() => ({ id: 'p', score: 0 }));
+    const registry = new FactoryRegistry({ game: gameFactory, player: playerFactory });
+
+    const narrowed = (name: string) => {
+      if (registry.has(name)) {
+        expectTypeOf(name).toEqualTypeOf<'game' | 'player'>();
+      }
+      return registry.has(name);
+    };
+
+    /** Compiled, never called: each line must fail to type-check. */
+    const neverRun = () => {
+      // @ts-expect-error 'missing' is not a registered name
+      registry.create('missing');
+      // @ts-expect-error a player has no `name`
+      registry.create('player', { name: 'x' });
+      // @ts-expect-error a game's rank is a number
+      registry.create('game', { rank: 'first' });
+    };
+
+    it('infers the output of each name from the map', () => {
+      expectTypeOf(registry).toEqualTypeOf<FactoryRegistry<{ game: Game; player: Player }>>();
+      expectTypeOf(registry.create('game')).toEqualTypeOf<Game>();
+      expectTypeOf(registry.create('player', { score: 3 })).toEqualTypeOf<Player>();
+      expectTypeOf(registry.createMany('player', 2)).toEqualTypeOf<Player[]>();
+      expectTypeOf(registry.get('game')).toEqualTypeOf<Factory<Game>>();
+      expectTypeOf<FactoryMap<{ game: Game }>>().toEqualTypeOf<{ game: Factory<Game> }>();
+      expect(registry.create('game', { name: 'Go' }).name).toBe('Go');
+      expect(registry.createMany('game', 2)).toHaveLength(2);
+    });
+
+    it('rejects names and overrides the map does not have', () => {
+      expect(neverRun).toBeTypeOf('function');
+    });
+
+    it('has() narrows a string to a registered name', () => {
+      expect(narrowed('game')).toBe(true);
+      expect(narrowed('toString')).toBe(false);
+    });
   });
 });
 
@@ -160,8 +200,29 @@ describe('IntegrationTester surface', () => {
     never,
     Record<string, unknown>,
     unknown,
-    Record<string, unknown>
+    Record<string, unknown>,
+    never
   >;
+
+  it('the current transaction has the app database type, so no cast swaps one for the other', () => {
+    type Handle = NodePgDatabase<AnyRelations> | NodePgTransaction<AnyRelations>;
+    type Root = NodePgDatabase<AnyRelations>;
+    type AppTester = IntegrationTester<
+      Record<string, unknown>,
+      Root,
+      Record<string, unknown>,
+      unknown,
+      Record<string, unknown>,
+      Handle
+    >;
+    expectTypeOf<AppTester['currentTx']>().toEqualTypeOf<Handle | null>();
+    expectTypeOf<AppTester['db']>().toEqualTypeOf<Root>();
+  });
+
+  it('createDatabase returns the database type that createRepositories takes', () => {
+    type Config = IntegrationTesterConfig<Record<string, never>, never, never, never, never, never>;
+    expectTypeOf<Config['createDatabase']>().parameters.toEqualTypeOf<[connectionString: string]>();
+  });
 
   it('withTransaction returns nothing, because the transaction always rolls back', () => {
     expectTypeOf<AnyTester['withTransaction']>().returns.resolves.toBeVoid();

@@ -29,47 +29,39 @@ pnpm add @arki/testing --filter=your-app
 
 ```typescript
 // apps/your-app/backend/src/core/__tests__/tester.ts
-import { createIntegrationTester } from '@arki/testing';
+import { initDbWithOptions } from '@arki/db/init';
+import { initTester } from '@arki/testing';
 
-import { createContext } from '../core/context';
-import { createCaller } from '../core/trpc';
-import { createRepositories } from '../db/repositories';
-import { schema } from '../db/schema';
+import type { Database } from '../../db';
+import { createContext } from '../context';
+import { createCaller } from '../trpc';
+import { createRepositories } from '../../db';
+import { relations } from '../../relations';
+import { schema } from '../../schema';
+import { factories } from './factories';
 
-const TesterBase = createIntegrationTester({
-  schema,
-  migrationsFolder: './migrations',
-  createContext: ({ db, repo, kv }) => createContext({ db, repo, kv }),
-  createCaller: ({ context }) => createCaller(context),
-  createRepositories: db => createRepositories(db),
-  defaultUsers: {
-    user: {
-      id: 'usr_test',
-      email: 'user@example.com',
-      name: 'Test User',
+const t = initTester
+  .context<AppContext>()
+  .caller<Caller>()
+  .create({
+    schema,
+    migrationsFolder: './migrations',
+    // The one place the database type comes from: `tester.db` is whatever this returns.
+    // Build it like production (same relations).
+    createDatabase: connectionString => initDbWithOptions({ connectionString }, { relations }),
+    // Takes the root database or the transaction of `withTransaction` (here `Database = Db | Transaction`).
+    createRepositories: (db: Database) => createRepositories(db),
+    createContext: ({ db, repo, kv }) => createContext({ db, repo, kv }),
+    createCaller: ({ context }) => createCaller(context),
+    defaultUsers: {
+      user: { id: 'usr_test', email: 'user@example.com', name: 'Test User' },
+      moderator: { id: 'usr_mod', email: 'mod@example.com', name: 'Test Moderator', roles: ['moderator'] },
+      admin: { id: 'usr_admin', email: 'admin@example.com', name: 'Test Admin', roles: ['admin'] },
     },
-    moderator: {
-      id: 'usr_mod',
-      email: 'mod@example.com',
-      name: 'Test Moderator',
-      roles: ['moderator'],
-    },
-    admin: {
-      id: 'usr_admin',
-      email: 'admin@example.com',
-      name: 'Test Admin',
-      roles: ['admin'],
-    },
-  },
-  // Optional: Register base factories available in all tests
-  baseFactories: {
-    user: userFactory,
-    game: gameFactory,
-    session: sessionFactory,
-  },
-});
+  });
 
-export class Tester extends TesterBase {}
+// `tester.factory` is exactly the `factories` object, with its types.
+export const createTester = t.tester.withFactories(factories);
 ```
 
 ### 2. Global Vitest Setup
@@ -326,63 +318,31 @@ const users = createMany(userFactory, 5, index => ({
 const sessions = createSequence(sessionFactory, 'score', [100, 200, 300, 400, 500]);
 ```
 
-### Factory Registry
+### Factories on the tester
+
+`withFactories(factories)` puts the object you pass on `tester.factory`, with its exact type. A tester made with `t.tester.create()` has no `factory`.
 
 ```typescript
-// Register factories
-const tester = new Tester();
-tester.factory.register('user', userFactory);
-tester.factory.register('game', gameFactory);
-tester.factory.register('session', sessionFactory);
+const factories = createFactories({ user: userFactory, game: gameFactory });
+const createTester = t.tester.withFactories(factories);
 
-// Use registered factories
-const user = tester.factory.create('user', { email: 'test@example.com' });
-const users = tester.factory.createMany('user', 5);
+const tester = createTester();
+const user = tester.factory.user({ email: 'test@example.com' }); // User
+const draft = tester.factory.game().with('name', 'Chess').build(); // builder pattern
 ```
 
-### Base Factories
+`factory()` with no arguments returns a `FactoryBuilder`; `factory(overrides)` returns the object.
 
-Register factories once during tester configuration to make them available in all tests:
+### Factory Registry
+
+To look factories up by name, build a `FactoryRegistry` from a map. Each name has its own result type:
 
 ```typescript
-// In tester.ts - define your factories
-const userFactory = createFactory<User>(() => ({
-  id: createUserId(),
-  email: faker.internet.email(),
-  name: faker.person.fullName(),
-  createdAt: faker.date.past(),
-  updatedAt: new Date(),
-}));
+const registry = new FactoryRegistry({ user: userFactory, game: gameFactory });
 
-const gameFactory = createFactory<Game>(() => ({
-  id: createGameId(),
-  name: faker.word.words(2),
-  slug: faker.helpers.slugify(faker.word.words(2)),
-  status: 'active',
-  createdAt: faker.date.past(),
-  updatedAt: new Date(),
-}));
-
-// Register as base factories
-const TesterBase = createIntegrationTester({
-  // ... other config
-  baseFactories: {
-    user: userFactory,
-    game: gameFactory,
-    session: sessionFactory,
-  },
-});
-
-// In tests - factories are automatically available
-const tester = new Tester();
-await tester.setup();
-
-const user = tester.factory.create('user');
-const games = tester.factory.createMany('game', 10);
-const customGame = tester.factory.create('game', { name: 'Chess' });
-
-// You can still register additional test-specific factories
-tester.factory.register('tempEntity', tempEntityFactory);
+const user = registry.create('user', { email: 'test@example.com' }); // User
+const games = registry.createMany('game', 10); // Game[]
+registry.create('nope'); // compile error
 ```
 
 ## Enhanced Assertions
@@ -795,10 +755,8 @@ const gameFactory = createFactory<Game>(() => ({
   // ...
 }));
 
-tester.factory.register('game', gameFactory);
-
-// In tests - function pattern
-const game = tester.factory.create('game', { name: 'Chess' });
+// In tests - function pattern (factories passed to withFactories)
+const game = tester.factory.game({ name: 'Chess' });
 
 // In tests - builder pattern
 const game = gameFactory().with('name', 'Chess').with('status', 'active').build();
@@ -811,10 +769,11 @@ The package uses strict type checking with no `any` types. Generic constraints e
 ```typescript
 class IntegrationTester<
   TSchema extends Record<string, unknown>,
-  TDatabase extends NodePgDatabase<TSchema>,
+  TDatabase extends THandle, // the root database `createDatabase` returns (type of `tester.db`)
   TRepositories extends Record<string, unknown>,
   TCaller,
   TContext extends Record<string, unknown>,
+  THandle extends TesterDatabase<THandle>, // root database or transaction, as repositories take it
 >
 ```
 
@@ -847,7 +806,7 @@ A helper written for a single test optimizes for one call site. A helper written
 - ✅ Lifecycle wiring — test containers, MSW server, Vitest hooks
 - ✅ Assertion helpers that encode workspace conventions — prefixed IDs, branded types, pagination shape, timestamp recency
 - ✅ Cross-cutting infrastructure — deterministic randomness, debug logging, performance measurement
-- ✅ Cross-app entity factories (rare; most live in the consuming app via `tester.factory.register(...)`)
+- ✅ Cross-app entity factories (rare; most live in the consuming app and are passed to `withFactories(...)`)
 
 ### What does **not** belong here
 

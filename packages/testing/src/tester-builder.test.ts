@@ -6,7 +6,7 @@
  * arguments. These tests fail to compile if either falls back to `any`.
  */
 import type { AnyRelations } from 'drizzle-orm';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { createUserId } from '@arki/auth';
@@ -17,12 +17,14 @@ import { initTester } from './tester-builder';
 const testUser: TestUser = { id: createUserId(), email: 'test@example.com', name: 'Test' };
 
 type AppDb = NodePgDatabase<AnyRelations>;
-type AppContext = { db: AppDb; label: string };
+/** What the app's repositories take: the database, or the transaction a test runs in. */
+type Handle = AppDb | NodePgTransaction<AnyRelations>;
+type AppContext = { db: Handle; label: string };
 type Caller = { ping(): string };
 
 const widgets = { id: 'widgets' };
 
-function createRepositories(_db: AppDb) {
+function createRepositories(_db: Handle) {
   return { widgets: { count: (): Promise<number> => Promise.resolve(1) } };
 }
 
@@ -32,6 +34,9 @@ const t = initTester
   .create({
     schema: { widgets },
     migrationsFolder: '',
+    createDatabase: (): AppDb => {
+      throw new Error('type test: never run');
+    },
     createRepositories,
     createContext: ({ db }) => ({ db, label: 'test' }),
     createCaller: () => ({ ping: () => 'pong' }),
@@ -60,6 +65,14 @@ describe('initTester inference', () => {
     expectTypeOf<WithFactories['repo']>().toEqualTypeOf<ReturnType<typeof createRepositories>>();
     expectTypeOf<WithFactories['factory']>().toEqualTypeOf<typeof factories>();
     expect(withFactories).toBeDefined();
+  });
+
+  it('gives the tester without factories no factory property', () => {
+    expectTypeOf<Basic>().not.toHaveProperty('factory');
+  });
+
+  it('types factories as the object passed to withFactories', () => {
+    expectTypeOf<WithFactories['factory']['widget']['make']>().returns.toEqualTypeOf<{ id: number }>();
   });
 
   it('rejects a repo member that the app never defined', () => {
