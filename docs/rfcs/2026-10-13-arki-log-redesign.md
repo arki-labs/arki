@@ -41,7 +41,7 @@ export const logging = configure({
 });
 ```
 
-A Dot app does the same through `log(...)` from `@arki/log/dot` (§9).
+A Dot app does the same through `log(...)` from `@arki/dot/log` (§9).
 
 ## 3. Logger and categories
 
@@ -214,11 +214,11 @@ Without the declaration, `to()` accepts any string.
 
 ## 9. Dot integration
 
-Dot gets an optional **logging slot**. A plugin can declare a logging capability; `log(config)` from `@arki/log/dot` is that plugin.
+Dot gets an optional **logging slot**. A plugin can declare a logging capability; `log(config)` from `@arki/dot/log` is that plugin. (It lives in Dot, not in `@arki/log/dot`: Dot already depends on `@arki/log`, so the other direction would be a build cycle that breaks clean Docker builds.)
 
 ```ts
 import { defineApp } from '@arki/dot';
-import { log } from '@arki/log/dot';
+import { log } from '@arki/dot/log';
 import { fromEnv, stdout, asyncContext } from '@arki/log/node';
 
 const app = await defineApp('checkout')
@@ -265,8 +265,8 @@ test('refund over limit alerts', async () => {
 | `@arki/log` | `getLogger`, `configure`, `createLogging`, `withContext`, `shareContext`, `Level`, processors, formatters, core sinks, wrappers, types | nothing (web-standard globals only; ESLint guard as in `packages/math`) |
 | `@arki/log/node` | `stdout`, `stderr`, `file`, `fromEnv`, `asyncContext` | `node:*`, `process` (runs on Bun and Deno too) |
 | `@arki/log/otel` | `otelTrace`, `otelSink` | optional `@opentelemetry/*` peers |
-| `@arki/log/dot` | `log()` | `@arki/dot` peer |
 | `@arki/log/testing` | `fakeLog` | core |
+| `@arki/dot/log` (in Dot) | `log()` | `@arki/dot`, `@arki/log` |
 
 Removed: `./debug`, the `pino` and `debug` dependencies, `Logger` class, `rootLogger`, `createLogger`, `configuration`, `Configuration`, `LoggingFormatter`, `LogBatch`, `AsyncTransport`, `Severity*`, `Attributes`, `Body`. `pino`, `winston` and `consola` stay as dev dependencies for the benchmark.
 
