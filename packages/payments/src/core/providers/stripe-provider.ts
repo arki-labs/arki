@@ -25,6 +25,7 @@ import type { PaymentProviderConfig } from './base-provider.js';
 import { toMinorColumn } from '../money.js';
 import { createCustomerId, createPlanId } from '../primitives.js';
 import { BasePaymentProvider } from './base-provider.js';
+import { mapStripeEventType } from './stripe-event-types.js';
 
 export class StripeProvider extends BasePaymentProvider {
   readonly providerType = 'stripe' as const;
@@ -669,25 +670,7 @@ export class StripeProvider extends BasePaymentProvider {
   }
 
   private mapStripeEventType(stripeEventType: string): string {
-    // Map Stripe event types to our webhook event types
-    const eventTypeMap: Record<string, string> = {
-      'customer.subscription.created': 'subscription.created',
-      'customer.subscription.updated': 'subscription.updated',
-      'customer.subscription.deleted': 'subscription.canceled',
-      'customer.subscription.trial_will_end': 'subscription.trial_will_end',
-      'payment_intent.succeeded': 'payment.succeeded',
-      'payment_intent.payment_failed': 'payment.failed',
-      'payment_intent.requires_action': 'payment.requires_action',
-      'customer.created': 'customer.created',
-      'customer.updated': 'customer.updated',
-      'customer.deleted': 'customer.deleted',
-      'invoice.created': 'invoice.created',
-      'invoice.finalized': 'invoice.finalized',
-      'invoice.payment_succeeded': 'invoice.paid',
-      'invoice.payment_failed': 'invoice.payment_failed',
-    };
-
-    return eventTypeMap[stripeEventType] || stripeEventType;
+    return mapStripeEventType(stripeEventType) ?? stripeEventType;
   }
 
   private mapRefundReasonToStripe(reason?: string): Stripe.RefundCreateParams.Reason | undefined {
