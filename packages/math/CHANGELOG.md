@@ -7,7 +7,7 @@ compatibility promise; renames below are not aliased.
 
 Added:
 
-- `@arki/math/money` — `Money`/`money()`: a `Decimal` pinned to the currency's `Intl` minor-unit scale; exact-or-throw construction, banker's rounding for `times`/`dividedBy`, lossless `allocate`, `toMinorUnits`, `parse`/`toString` round-trip, `format` via `formatCurrency`, `CurrencyMismatchError`; unknown ISO codes are rejected via `Intl.supportedValuesOf`.
+- Money moved to its own package, `@arki/money` (exact amounts on whole units, a shipped ISO 4217 table, no default rounding). `@arki/math/money` and `CurrencyMismatchError` are not part of this package.
 - `@arki/math/units` — `convert`, `convertExact` (returns `Rational`), `formatUnit`, `unitCategory`, `unitsOf`, `isUnit` over 11 categories with exact rational factors.
 - `@arki/math/finance` — `payment`, `amortizationSchedule`, `futureValue`, `presentValue`, `netPresentValue`, `internalRateOfReturn`, `effectiveRate`, `nominalRate`, `compoundInterest`, `simpleInterest`, `periodsToReach` on `Decimal`, exact intermediates rounded once at the requested scale (integer periods only; `nominalRate` carries a guard-digit caveat).
 - `@arki/math/integer` — `factorial`, `combinations`, `permutations`, `isPrime` (deterministic below 2⁶⁴), `primeFactors` (trial division + Pollard's rho), `divisors`, `modPow`, `modInverse`, `isEven`, `isOdd`, `digitSum`, `fibonacci`.
@@ -16,7 +16,7 @@ Added:
 - `Decimal#roundTo(step, rounding)`.
 - Integer results (`factorial`, `combinations`, `permutations`, `fibonacci`) honour the 10,000-digit limit like `Decimal` and `Rational`.
 - `ratio('4 1/2')` parses mixed numbers.
-- `Decimal`, `Rational`, `NumberValue` and `Money` print as `Decimal(1.5)` etc. in Node, Bun and Deno consoles.
+- `Decimal`, `Rational` and `NumberValue` print as `Decimal(1.5)` etc. in Node, Bun and Deno consoles.
 
 Changed:
 

@@ -13,7 +13,6 @@
     "fraction",
     "bigint",
     "rounding",
-    "money",
     "statistics",
     "format",
     "intl",
@@ -114,10 +113,6 @@
       "types": "./dist/words/*.d.ts",
       "import": "./dist/words/*.js",
       "default": "./dist/words/*.js"
-    },
-    "./money": {
-      "types": "./dist/money.d.ts",
-      "default": "./dist/money.js"
     },
     "./units": {
       "types": "./dist/units.d.ts",
