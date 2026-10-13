@@ -17,13 +17,16 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { fromMillis, fromUnix, instant, toDate } from '@arki/date';
 
 import type { CoreWrites } from '../core/journal.js';
-import type { PaymentProviderType } from '../core/types.js';
+import type { SubscriptionStatus } from '../core/primitives.js';
+import type { PaymentProviderType, Subscription } from '../core/types.js';
 import type { AppDb } from '../test-support.js';
 import type { RevenueCatEvent } from './revenuecat.js';
 import type { SubscriptionBilling } from './subscription.js';
+import { createSubscriptionId } from '../core/primitives.js';
 import { StripeProvider } from '../core/providers/stripe-provider.js';
 import { coreReads, runnerOn } from '../service-test-support.js';
 import {
+  adminId,
   core,
   countEvents,
   customerId,
@@ -34,8 +37,8 @@ import {
   typed,
   userId,
 } from '../test-support.js';
-import { projectRevenueCatEvent } from './revenuecat.js';
-import { createSubscriptionBilling } from './subscription.js';
+import { projectRevenueCatEvent, verifyRevenueCatAuth } from './revenuecat.js';
+import { createSubscriptionBilling, getEntitlement } from './subscription.js';
 
 const { customers, subscriptions } = core;
 
@@ -63,6 +66,21 @@ async function rowOf(providerSubscriptionId: string) {
   }
 
   return row;
+}
+
+function rowsOf(providerSubscriptionId: string) {
+  return db.select().from(subscriptions).where(eq(subscriptions.providerSubscriptionId, providerSubscriptionId));
+}
+
+/** A delivery the preset must refuse: it throws, and no event or row is written. */
+async function expectRefused(delivery: Promise<unknown>, providerSubscriptionId: string) {
+  const before = await countEvents(db);
+
+  const error = await rejectionOf(delivery);
+
+  expect(await countEvents(db)).toBe(before);
+  expect(await rowsOf(providerSubscriptionId)).toHaveLength(0);
+  return error;
 }
 
 describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
@@ -104,13 +122,19 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
     });
   });
 
-  /** One signed `customer.subscription.*` delivery, shaped as Stripe sends it. */
-  function deliver(
-    type: 'customer.subscription.created' | 'customer.subscription.updated' | 'customer.subscription.deleted',
-    subscriptionId: string,
-    changes: Record<string, unknown> = {},
-  ) {
-    const payload = JSON.stringify({
+  type SubscriptionEventType =
+    | 'customer.subscription.created'
+    | 'customer.subscription.updated'
+    | 'customer.subscription.deleted';
+
+  /** The `Stripe-Signature` header Stripe would send for this body, signed with `secret`. */
+  function sign(payload: string, secret = WEBHOOK_SECRET) {
+    return stripe.webhooks.generateTestHeaderString({ payload, secret });
+  }
+
+  /** The body of one `customer.subscription.*` event, shaped as Stripe sends it. */
+  function subscriptionEvent(type: SubscriptionEventType, subscriptionId: string, changes: Record<string, unknown> = {}) {
+    return JSON.stringify({
       id: 'evt_presets_test',
       object: 'event',
       type,
@@ -132,11 +156,13 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
         },
       },
     });
+  }
 
-    return billing.handleWebhook(
-      payload,
-      stripe.webhooks.generateTestHeaderString({ payload, secret: WEBHOOK_SECRET }),
-    );
+  /** One signed `customer.subscription.*` delivery. */
+  function deliver(type: SubscriptionEventType, subscriptionId: string, changes: Record<string, unknown> = {}) {
+    const payload = subscriptionEvent(type, subscriptionId, changes);
+
+    return billing.handleWebhook(payload, sign(payload));
   }
 
   it('the first delivery creates the row for the owner of the Stripe customer and leaves one event', async () => {
@@ -227,6 +253,165 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
     expect(await countEvents(db)).toBe(before);
     const rows = await db.select().from(subscriptions).where(eq(subscriptions.providerSubscriptionId, 'sub_orphan'));
     expect(rows).toHaveLength(0);
+  });
+
+  it('a delivery signed with another secret is rejected and nothing is written', async () => {
+    // Anyone can POST to the webhook URL; only Stripe knows the secret.
+    const payload = subscriptionEvent('customer.subscription.created', 'sub_forged');
+
+    const error = await expectRefused(billing.handleWebhook(payload, sign(payload, 'whsec_someone_else')), 'sub_forged');
+
+    expect(error).toBeInstanceOf(Stripe.errors.StripeSignatureVerificationError);
+  });
+
+  it('a body changed after Stripe signed it is rejected and nothing is written', async () => {
+    const signed = subscriptionEvent('customer.subscription.created', 'sub_tampered');
+    const tampered = subscriptionEvent('customer.subscription.created', 'sub_tampered', { status: 'active' });
+
+    const error = await expectRefused(billing.handleWebhook(tampered, sign(signed)), 'sub_tampered');
+
+    expect(error).toBeInstanceOf(Stripe.errors.StripeSignatureVerificationError);
+  });
+
+  it('a price the app does not sell is rejected by name and nothing is written', async () => {
+    // Granting Pro for an unknown price would hand out a plan nobody configured.
+    const error = await expectRefused(
+      deliver('customer.subscription.created', 'sub_other_price', {
+        items: { data: [{ current_period_start: JAN_1, current_period_end: FEB_1, price: { id: 'price_elsewhere' } }] },
+      }),
+      'sub_other_price',
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).toContain('"price_elsewhere" is not a configured plan');
+  });
+
+  it('a subscription whose first line item has no price is rejected and nothing is written', async () => {
+    const error = await expectRefused(
+      deliver('customer.subscription.created', 'sub_no_price', { items: { data: [] } }),
+      'sub_no_price',
+    );
+
+    expect(String(error)).toContain('first line item has no price');
+  });
+
+  it('a status Stripe adds later is rejected loudly instead of being guessed', async () => {
+    const error = await expectRefused(
+      deliver('customer.subscription.created', 'sub_new_status', { status: 'on_vacation' }),
+      'sub_new_status',
+    );
+
+    expect(String(error)).toContain('unmapped Stripe subscription status: "on_vacation"');
+  });
+
+  it('a signed event that is not a subscription change is acknowledged as not handled and writes nothing', async () => {
+    const payload = JSON.stringify({
+      id: 'evt_invoice',
+      object: 'event',
+      type: 'invoice.paid',
+      data: { object: { id: 'in_test', object: 'invoice', customer: 'cus_test' } },
+    });
+    const before = await countEvents(db);
+
+    const result = await billing.handleWebhook(payload, sign(payload));
+
+    expect(result).toEqual({ handled: false, type: 'invoice.paid' });
+    expect(await countEvents(db)).toBe(before);
+  });
+
+  it('a user with no subscription rows is on the free tier', async () => {
+    expect(await billing.getEntitlement(adminId)).toEqual({ tier: 'free' });
+  });
+});
+
+/** `getEntitlement` over rows as `findSubscriptionsByUserId` returns them: newest first. */
+function entitlementOf(...newestFirst: Subscription[]) {
+  return getEntitlement({ findSubscriptionsByUserId: () => Promise.resolve(newestFirst) }, userId);
+}
+
+describe('getEntitlement', () => {
+  const JAN_1 = instant('2026-01-01T00:00:00.000Z');
+  const JAN_8 = instant('2026-01-08T00:00:00.000Z');
+  const FEB_1 = instant('2026-02-01T00:00:00.000Z');
+
+  function subscription(status: SubscriptionStatus, changes: Partial<Subscription> = {}): Subscription {
+    return {
+      id: createSubscriptionId(),
+      userId,
+      planId,
+      customerId,
+      providerSubscriptionId: `sub_${status}`,
+      status,
+      currentPeriodStart: JAN_1,
+      currentPeriodEnd: FEB_1,
+      trialStart: null,
+      trialEnd: null,
+      canceledAt: null,
+      cancelAtPeriodEnd: false,
+      metadata: null,
+      createdAt: JAN_1,
+      updatedAt: JAN_1,
+      ...changes,
+    };
+  }
+
+  it('an active subscription grants Pro until the end of its period', async () => {
+    expect(await entitlementOf(subscription('active', { cancelAtPeriodEnd: true }))).toEqual({
+      tier: 'pro',
+      status: 'active',
+      renews: FEB_1,
+      cancelAtPeriodEnd: true,
+      trialEnd: null,
+    });
+  });
+
+  it('a trialing subscription grants Pro, so the trial meant to sell Pro actually shows it', async () => {
+    expect(await entitlementOf(subscription('trialing', { trialStart: JAN_1, trialEnd: JAN_8 }))).toEqual({
+      tier: 'pro',
+      status: 'trialing',
+      renews: FEB_1,
+      cancelAtPeriodEnd: false,
+      trialEnd: JAN_8,
+    });
+  });
+
+  it('a past-due subscription alone does not grant Pro', async () => {
+    expect(await entitlementOf(subscription('past_due'))).toEqual({ tier: 'free' });
+  });
+
+  it('a newer canceled subscription does not hide an older one that is still active', async () => {
+    const canceled = subscription('canceled', { canceledAt: JAN_8 });
+    const active = subscription('active');
+
+    expect(await entitlementOf(canceled, active)).toMatchObject({ tier: 'pro', status: 'active' });
+  });
+});
+
+describe('verifyRevenueCatAuth', () => {
+  const SECRET = 'Bearer rc_shared_secret';
+
+  it('accepts the exact header configured in RevenueCat', () => {
+    expect(verifyRevenueCatAuth(SECRET, SECRET)).toBe(true);
+  });
+
+  it('rejects everything when no secret is configured, so an unset env var cannot open the webhook', () => {
+    expect(verifyRevenueCatAuth('', '')).toBe(false);
+    expect(verifyRevenueCatAuth(SECRET, '')).toBe(false);
+  });
+
+  it('rejects a request with no Authorization header', () => {
+    expect(verifyRevenueCatAuth(null, SECRET)).toBe(false);
+  });
+
+  it('rejects a header of another length without throwing', () => {
+    expect(verifyRevenueCatAuth('Bearer short', SECRET)).toBe(false);
+  });
+
+  it('rejects a header of the same length with different content', () => {
+    const forged = SECRET.slice(0, -1) + 'X';
+    expect(forged).toHaveLength(SECRET.length);
+
+    expect(verifyRevenueCatAuth(forged, SECRET)).toBe(false);
   });
 });
 
@@ -333,6 +518,68 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
     expect(await countEvents(db)).toBe(before);
     expect(await rowOf('rc_expired')).toEqual(canceled);
     expect(await eventTypesOf(db, 'subscription', canceled.id)).toEqual(['SubscriptionCreated', 'SubscriptionSynced']);
+  });
+
+  it('a purchase inside a trial period is stored as trialing with the trial window', async () => {
+    await deliver('rc_trial', { period_type: 'TRIAL' });
+
+    expect(await rowOf('rc_trial')).toMatchObject({
+      status: 'trialing',
+      trialStart: fromMillis(JAN_1),
+      trialEnd: fromMillis(FEB_1),
+      cancelAtPeriodEnd: false,
+    });
+  });
+
+  it('a cancellation keeps access until the period ends', async () => {
+    await deliver('rc_cancel');
+
+    await deliver('rc_cancel', { type: 'CANCELLATION' });
+
+    expect(await rowOf('rc_cancel')).toMatchObject({
+      status: 'active',
+      cancelAtPeriodEnd: true,
+      currentPeriodEnd: fromMillis(FEB_1),
+    });
+  });
+
+  it('a billing issue moves the subscription to past due', async () => {
+    await deliver('rc_billing');
+
+    await deliver('rc_billing', { type: 'BILLING_ISSUE' });
+
+    expect(await rowOf('rc_billing')).toMatchObject({ status: 'past_due' });
+  });
+
+  it('a purchase that never expires gets a period end about 100 years out', async () => {
+    await deliver('rc_lifetime', { type: 'NON_RENEWING_PURCHASE', expiration_at_ms: null });
+
+    expect(await rowOf('rc_lifetime')).toMatchObject({
+      status: 'active',
+      currentPeriodStart: fromMillis(JAN_1),
+      currentPeriodEnd: fromMillis(JAN_1 + 100 * 365 * 24 * 60 * 60 * 1000),
+    });
+  });
+
+  it('an event with no transaction ids is keyed by user and product, so repeats converge to one row', async () => {
+    const event = {
+      type: 'INITIAL_PURCHASE',
+      app_user_id: userId,
+      product_id: 'pro_yearly',
+      period_type: 'NORMAL',
+      purchased_at_ms: JAN_1,
+      expiration_at_ms: FEB_1,
+    };
+
+    await projectRevenueCatEvent({ writes, event, customer: { id: customerId, userId }, planId });
+    await projectRevenueCatEvent({ writes, event, customer: { id: customerId, userId }, planId });
+
+    const rows = await db
+      .select()
+      .from(subscriptions)
+      .where(eq(subscriptions.providerSubscriptionId, `${userId}:pro_yearly`));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: 'active', currentPeriodEnd: fromMillis(FEB_1) });
   });
 
   it('an event that is not a subscription change is not handled and writes nothing', async () => {
