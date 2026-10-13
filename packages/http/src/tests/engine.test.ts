@@ -9,8 +9,8 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { routes } from '../bundle.js';
-import { route } from '../contract.js';
 import { requestContext } from '../context.js';
+import { route } from '../contract.js';
 import { buildEngine, composeMiddleware } from '../engine.js';
 import { HTTP_ERROR_CODES, HttpError } from '../error.js';
 
@@ -29,7 +29,10 @@ describe('buildEngine', () => {
       output: z.object({ id: z.string(), expand: z.string().optional() }),
     });
     const engine = buildEngine([
-      routes().bind(getOrder, ({ params, query }) => ({ id: params.id, ...(query.expand === undefined ? {} : { expand: query.expand }) })),
+      routes().bind(getOrder, ({ params, query }) => ({
+        id: params.id,
+        ...(query.expand === undefined ? {} : { expand: query.expand }),
+      })),
     ]);
 
     const res = await engine.fetch(new Request(`${BASE}/orders/o42?expand=items`));
@@ -110,9 +113,7 @@ describe('buildEngine', () => {
 
   it('passes raw Responses through untouched', async () => {
     const redirect = route.get('/old', { id: 'old' });
-    const engine = buildEngine([
-      routes().bind(redirect, () => Response.redirect(`${BASE}/new`, 308)),
-    ]);
+    const engine = buildEngine([routes().bind(redirect, () => Response.redirect(`${BASE}/new`, 308))]);
     const res = await engine.fetch(new Request(`${BASE}/old`));
     expect(res.status).toBe(308);
     expect(res.headers.get('location')).toBe(`${BASE}/new`);
@@ -225,5 +226,63 @@ describe('buildEngine', () => {
     const res = await engine.fetch(new Request(`${BASE}/whoami`, { headers: { 'x-request-id': 'req-7' } }));
     expect(await res.json()).toEqual({ rid: 'req-7' });
     expect(requestContext()).toBeUndefined();
+  });
+
+  // A route with no derivers and no body runs its handler synchronously; one
+  // with either goes through the async path. Both must answer identically.
+  describe('sync and async paths answer the same', () => {
+    const item = z.object({ id: z.string() });
+    const syncGet = route.get('/sync/:id', { id: 'sync', output: item });
+    const asyncGet = route.get('/async/:id', { id: 'async', output: item });
+    const derivedGet = route.get('/derived/:id', { id: 'derived', output: item });
+    const engine = buildEngine([
+      routes()
+        .bind(syncGet, ({ params }) => {
+          if (params.id === 'boom') throw new HttpError(409, HTTP_ERROR_CODES.badRequest, 'nope');
+          return { id: params.id };
+        })
+        .bind(asyncGet, async ({ params }) => {
+          await Promise.resolve();
+          if (params.id === 'boom') throw new HttpError(409, HTTP_ERROR_CODES.badRequest, 'nope');
+          return { id: requestContext()?.requestId === 'r-1' ? params.id : 'lost-context' };
+        }),
+      routes()
+        .derive('tag', () => 'x')
+        .bind(derivedGet, ({ params }) => {
+          if (params.id === 'boom') throw new HttpError(409, HTTP_ERROR_CODES.badRequest, 'nope');
+          return { id: params.id };
+        }),
+    ]);
+    const send = (path: string) => engine.fetch(new Request(`${BASE}${path}`, { headers: { 'x-request-id': 'r-1' } }));
+
+    it('serializes the output with the same body and content type', async () => {
+      for (const path of ['/sync/a%20b', '/async/a%20b', '/derived/a%20b']) {
+        const res = await send(path);
+        expect(res.status).toBe(200);
+        expect(res.headers.get('content-type')).toBe('application/json');
+        expect(await res.text()).toBe('{"id":"a b"}');
+      }
+    });
+
+    it('maps a sync throw and an async rejection to the same envelope', async () => {
+      for (const path of ['/sync/boom', '/async/boom', '/derived/boom']) {
+        const res = await send(path);
+        expect(res.status).toBe(409);
+        expect(await envelopeOf(res)).toMatchObject({ code: HTTP_ERROR_CODES.badRequest, message: 'nope' });
+      }
+    });
+  });
+
+  it('answers 500 when the validated output has no JSON form, like Response.json', async () => {
+    const empty = route.get('/empty', { id: 'empty', output: z.unknown() });
+    const engine = buildEngine([
+      routes().bind(empty, () => {
+        // Returns nothing: undefined has no JSON form.
+      }),
+    ]);
+    const res = await engine.fetch(new Request(`${BASE}/empty`));
+    expect(res.status).toBe(500);
+    const error = await envelopeOf(res);
+    expect(error.code).toBe(HTTP_ERROR_CODES.internal);
   });
 });
