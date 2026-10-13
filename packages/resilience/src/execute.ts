@@ -47,11 +47,9 @@ export async function withTimeout<T>(
 }
 
 /**
- * Execute a function with a circuit breaker policy.
- *
- * Note: for the circuit breaker to be effective across multiple calls, you
- * should create the policy once and reuse it rather than calling this helper
- * repeatedly (each call creates a fresh breaker with no history).
+ * @deprecated Builds a new circuit breaker on every call, so it never
+ * remembers a failure and never opens. Build one policy with
+ * `createCircuitBreakerPolicy()` and pass it to `withResilience()` on each call.
  */
 export async function withCircuitBreaker<T>(
   fn: (context: { signal: AbortSignal }) => T | Promise<T>,

@@ -1,5 +1,13 @@
 # @arki/resilience
 
+## 0.0.3
+
+### Patch Changes
+
+- Deprecate `withCircuitBreaker`. It builds a new circuit breaker on every call, so the breaker never remembers a failure and never opens. Build one policy with `createCircuitBreakerPolicy()` and pass it to `withResilience()` on each call. The export stays until the next breaking release.
+- Fix the README: the timeout option is `timeoutMs`, not `durationMs`, and the circuit-breaker options are `halfOpenAfter` and `consecutiveFailures`. The quick-wrapper example no longer imports `withCircuitBreaker`, and a reused-breaker example is added.
+- Add the first tests for the execution helpers.
+
 ## 0.0.2
 
 ### Patch Changes

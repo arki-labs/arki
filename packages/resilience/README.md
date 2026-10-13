@@ -41,8 +41,8 @@ import {
 
 const policy = createResiliencePolicy({
   retry: { maxAttempts: 3, initialDelay: 200 },
-  timeout: { durationMs: 5_000 },
-  circuitBreaker: { halfOpenAfterMs: 30_000, threshold: 5 },
+  timeout: { timeoutMs: 5_000 },
+  circuitBreaker: { halfOpenAfter: 30_000, consecutiveFailures: 5 },
 });
 
 const result = await withResilience(({ signal }) => doWork(signal), policy);
@@ -53,10 +53,18 @@ const result = await withResilience(({ signal }) => doWork(signal), policy);
 For one-off calls without a long-lived policy:
 
 ```ts
-import { withRetry, withTimeout, withCircuitBreaker } from '@arki/resilience';
+import { withRetry, withTimeout } from '@arki/resilience';
 
 await withRetry(() => sendEmail('support@example.com'), { maxAttempts: 3 });
-await withTimeout(() => slowOperation(), { durationMs: 1_000 });
+await withTimeout(() => slowOperation(), { timeoutMs: 1_000 });
+```
+
+A circuit breaker must remember past failures, so build it once and reuse it:
+
+```ts
+const breaker = createCircuitBreakerPolicy({ consecutiveFailures: 2 });
+
+await withResilience(() => callDownstream(), breaker); // opens after 2 failures in a row
 ```
 
 ### Observability
@@ -75,7 +83,8 @@ attachPolicyLogger(policy, {
 - `createResiliencePolicy(options)` — compose retry + timeout + circuit breaker + bulkhead.
 - `createRetryPolicy`, `createCircuitBreakerPolicy`, `createTimeoutPolicy`, `createBulkheadPolicy` — individual primitives.
 - `externalApiPolicy`, `databasePolicy`, `backgroundJobPolicy` — pre-tuned presets.
-- `withResilience`, `withRetry`, `withTimeout`, `withCircuitBreaker` — execution helpers.
+- `withResilience`, `withRetry`, `withTimeout` — execution helpers.
+- `withCircuitBreaker` — **deprecated**. It builds a new breaker on every call, so it never opens. Use `createCircuitBreakerPolicy()` once and `withResilience()` per call.
 - `attachPolicyLogger(policy, logger)` — observability hooks.
 - `CircuitOpenError`, `TimeoutError`, `RetriesExhaustedError` — typed errors with helpers (`isResilienceError`, `isBrokenCircuitError`, `isBulkheadRejectedError`).
 - Re-exports `IPolicy`, `wrap`, `noop` from `cockatiel`.
@@ -86,6 +95,7 @@ attachPolicyLogger(policy, {
 compose it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
 application framework, see `packages/dot/docs/` for plugin authoring,
 lifecycle, and diagnostics.
+
 
 ## License
 

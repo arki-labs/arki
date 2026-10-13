@@ -1,6 +1,6 @@
 {
   "name": "@arki/resilience",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Resilience primitives for ARKI — retry, circuit breaker, timeout, bulkhead, and curated presets, built on cockatiel.",
   "license": "MIT",
   "type": "module",
@@ -53,6 +53,7 @@
     "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
