@@ -1,9 +1,11 @@
 import type { AnyRelations, SQL, SQLWrapper } from 'drizzle-orm';
-import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
+import { and, desc, eq, gte, sql } from 'drizzle-orm';
+
+import type { Instant } from '@arki/date';
+import { fromDate, now, sub } from '@arki/date';
 
 import type { CustomerId } from '../core/primitives';
-import { sumMinorByCurrency } from './analytics-money';
 import type {
   CreateCustomerSegmentInput,
   CreateDunningCampaignInput,
@@ -36,6 +38,7 @@ import type {
   NewDunningCommunication,
   NewDunningExecution,
 } from './types';
+import { sumMinorByCurrency } from './analytics-money';
 
 /**
  * Structural database type accepted by the dunning repositories. See the
@@ -178,7 +181,7 @@ export class DunningCampaignRepository {
   ): Promise<DunningCampaign | null> {
     const [campaign] = await this.db
       .update(this.dunningCampaigns)
-      .set({ ...input, updatedAt: new Date() })
+      .set({ ...input, updatedAt: now() })
       .where(eq(this.dunningCampaigns.id, id))
       .returning();
 
@@ -230,7 +233,7 @@ export class DunningCampaignRepository {
   ): Promise<DunningCampaign | undefined> {
     const [campaign] = await this.db
       .update(this.dunningCampaigns)
-      .set({ status, updatedBy, updatedAt: new Date() })
+      .set({ status, updatedBy, updatedAt: now() })
       .where(eq(this.dunningCampaigns.id, id))
       .returning();
 
@@ -238,11 +241,12 @@ export class DunningCampaignRepository {
   }
 
   async getAnalyticsSummary(campaignId?: DunningCampaignId, days = 30) {
+    // Local-time calendar days, as before: the working value stays a `Date` until the query.
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
     const inRange = and(
-      gte(this.dunningCampaignAnalytics.date, startDate),
+      gte(this.dunningCampaignAnalytics.date, fromDate(startDate)),
       campaignId ? eq(this.dunningCampaignAnalytics.campaignId, campaignId) : undefined,
     );
 
@@ -322,7 +326,7 @@ export class DunningTemplateRepository {
   ): Promise<DunningTemplate | null> {
     const [template] = await this.db
       .update(this.dunningTemplates)
-      .set({ ...input, updatedAt: new Date() })
+      .set({ ...input, updatedAt: now() })
       .where(eq(this.dunningTemplates.id, id))
       .returning();
 
@@ -346,7 +350,7 @@ export class DunningTemplateRepository {
   ): Promise<DunningTemplate | undefined> {
     const [template] = await this.db
       .update(this.dunningTemplates)
-      .set({ isActive, updatedAt: new Date() })
+      .set({ isActive, updatedAt: now() })
       .where(eq(this.dunningTemplates.id, id))
       .returning();
 
@@ -435,28 +439,28 @@ export class DunningExecutionRepository {
     status: ExecutionStatus,
     result?: ExecutionResultDb,
     errorMessage?: string,
-    customScheduledAt?: Date,
+    customScheduledAt?: Instant,
   ): Promise<DunningExecution | undefined> {
     const updateData: Partial<DunningExecution> = {
       status,
-      updatedAt: new Date(),
+      updatedAt: now(),
     };
 
     if (status === 'running' && !result) {
-      updateData.startedAt = new Date();
+      updateData.startedAt = now();
     } else
       switch (status) {
         case 'completed':
         case 'failed': {
-          updateData.completedAt = new Date();
+          updateData.completedAt = now();
           break;
         }
         case 'cancelled': {
-          updateData.completedAt = new Date();
+          updateData.completedAt = now();
           break;
         }
         case 'scheduled': {
-          updateData.scheduledAt = customScheduledAt || new Date();
+          updateData.scheduledAt = customScheduledAt || now();
           break;
         }
         // No default
@@ -483,7 +487,7 @@ export class DunningExecutionRepository {
     return this.q.dunningExecutions.findMany({
       where: {
         status: 'scheduled',
-        scheduledAt: { lte: new Date() },
+        scheduledAt: { lte: now() },
       },
       orderBy: (t) => t.scheduledAt as unknown as SQLWrapper,
       limit,
@@ -494,7 +498,7 @@ export class DunningExecutionRepository {
     return this.q.dunningExecutions.findMany({
       where: {
         status: 'failed',
-        nextRetryAt: { lte: new Date() },
+        nextRetryAt: { lte: now() },
       },
       orderBy: (t) => t.nextRetryAt as unknown as SQLWrapper,
       limit,
@@ -503,14 +507,14 @@ export class DunningExecutionRepository {
 
   async incrementRetryCount(
     id: DunningExecutionId,
-    nextRetryAt?: Date,
+    nextRetryAt?: Instant,
   ): Promise<DunningExecution | undefined> {
     const [execution] = await this.db
       .update(this.dunningExecutions)
       .set({
         retryCount: sql`${this.dunningExecutions.retryCount} + 1`,
         nextRetryAt,
-        updatedAt: new Date(),
+        updatedAt: now(),
       })
       .where(eq(this.dunningExecutions.id, id))
       .returning();
@@ -523,8 +527,7 @@ export class DunningExecutionRepository {
     campaignId: DunningCampaignId,
     hours = 24,
   ): Promise<DunningExecution[]> {
-    const since = new Date();
-    since.setHours(since.getHours() - hours);
+    const since = sub(now(), { hours });
 
     return this.q.dunningExecutions.findMany({
       where: {
@@ -620,10 +623,10 @@ export class DunningCommunicationRepository {
     id: DunningCommunicationId,
     status: DunningCommunication['status'],
     updates: {
-      sentAt?: Date;
-      deliveredAt?: Date;
-      openedAt?: Date;
-      clickedAt?: Date;
+      sentAt?: Instant;
+      deliveredAt?: Instant;
+      openedAt?: Instant;
+      clickedAt?: Instant;
       failureReason?: string;
       providerMessageId?: string;
       providerResponse?: Record<string, unknown>;
@@ -635,7 +638,7 @@ export class DunningCommunicationRepository {
       .set({
         status,
         ...updates,
-        updatedAt: new Date(),
+        updatedAt: now(),
       })
       .where(eq(this.dunningCommunications.id, id))
       .returning();
@@ -734,7 +737,7 @@ export class CustomerSegmentRepository {
   ): Promise<CustomerSegmentRow | undefined> {
     const [segment] = await this.db
       .update(this.customerSegments)
-      .set({ ...input, updatedAt: new Date() })
+      .set({ ...input, updatedAt: now() })
       .where(eq(this.customerSegments.id, id))
       .returning();
 
@@ -753,8 +756,8 @@ export class CustomerSegmentRepository {
       .update(this.customerSegments)
       .set({
         customerCount: count,
-        lastCalculated: new Date(),
-        updatedAt: new Date(),
+        lastCalculated: now(),
+        updatedAt: now(),
       })
       .where(eq(this.customerSegments.id, id))
       .returning();
@@ -767,12 +770,13 @@ export class CustomerSegmentRepository {
     // (`lastCalculated + INTERVAL '1 hour' * updateFrequency <= now`)
     // has no structured equivalent — keep it as RAW alongside the structured
     // boolean filters.
-    const now = new Date();
+    // A raw `sql` parameter bypasses the column codec, so it stays a `Date`.
+    const current = new Date();
     return this.q.customerSegments.findMany({
       where: {
         isActive: true,
         autoUpdate: true,
-        RAW: sql`${this.customerSegments.lastCalculated} IS NULL OR ${this.customerSegments.lastCalculated} + INTERVAL '1 hour' * ${this.customerSegments.updateFrequency} <= ${now}`,
+        RAW: sql`${this.customerSegments.lastCalculated} IS NULL OR ${this.customerSegments.lastCalculated} + INTERVAL '1 hour' * ${this.customerSegments.updateFrequency} <= ${current}`,
       },
     });
   }
@@ -819,7 +823,7 @@ export class CustomerRiskProfileRepository {
   ): Promise<CustomerRiskProfile | undefined> {
     const [profile] = await this.db
       .update(this.customerRiskProfiles)
-      .set({ ...input, updatedAt: new Date() })
+      .set({ ...input, updatedAt: now() })
       .where(eq(this.customerRiskProfiles.customerId, customerId))
       .returning();
 
@@ -865,7 +869,7 @@ export class CustomerRiskProfileRepository {
   ): Promise<CustomerRiskProfile | undefined> {
     const [profile] = await this.db
       .update(this.customerRiskProfiles)
-      .set({ segmentIds, updatedAt: new Date() })
+      .set({ segmentIds, updatedAt: now() })
       .where(eq(this.customerRiskProfiles.customerId, customerId))
       .returning();
 

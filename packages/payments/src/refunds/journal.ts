@@ -23,9 +23,11 @@
  * rounded half-even to the currency's minor units.
  */
 
+import type { Instant } from '@arki/date';
 import type { CommandRunner, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import { userIdSchema } from '@arki/auth/ids';
 import { z } from '@arki/contracts';
+import { fromDate } from '@arki/date';
 import { CommandError } from '@arki/journal';
 import { Money } from '@arki/money';
 import { anyMoneySchema } from '@arki/money/zod';
@@ -146,7 +148,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
     originalAmountMinor: number,
     refundAmountMinor: number,
     currency: string,
-    at: Date,
+    at: Instant,
   ) => ({
     paymentId: data.paymentId,
     originalAmountMinor,
@@ -179,7 +181,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
         legacyMinor(e.data.originalAmount, e.data.currency),
         legacyMinor(e.data.refundAmount, e.data.currency),
         e.data.currency,
-        e.recordedAt,
+        fromDate(e.recordedAt),
       ),
     )
     .create(RefundRequestedV2, e =>
@@ -188,34 +190,34 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
         toMinorColumn(Money.fromJSON(e.data.originalAmount)),
         toMinorColumn(Money.fromJSON(e.data.refundAmount)),
         e.data.refundAmount.currency,
-        e.recordedAt,
+        fromDate(e.recordedAt),
       ),
     )
     .on(RefundApproved, (_row, e) => ({
       status: 'approved',
       approvedBy: e.data.approvedBy,
-      approvedAt: e.recordedAt,
-      updatedAt: e.recordedAt,
+      approvedAt: fromDate(e.recordedAt),
+      updatedAt: fromDate(e.recordedAt),
     }))
     .on(RefundRejected, (_row, e) => ({
       status: 'rejected',
       rejectedBy: e.data.rejectedBy,
       rejectionReason: e.data.rejectionReason,
-      updatedAt: e.recordedAt,
+      updatedAt: fromDate(e.recordedAt),
     }))
-    .on(RefundProcessed, (_row, e) => ({ status: 'processing', processedAt: e.recordedAt, updatedAt: e.recordedAt }))
+    .on(RefundProcessed, (_row, e) => ({ status: 'processing', processedAt: fromDate(e.recordedAt), updatedAt: fromDate(e.recordedAt) }))
     .on(RefundCompleted, (_row, e) => ({
       status: 'completed',
       providerRefundId: e.data.providerRefundId,
       providerResponse: e.data.providerResponse,
-      completedAt: e.recordedAt,
-      updatedAt: e.recordedAt,
+      completedAt: fromDate(e.recordedAt),
+      updatedAt: fromDate(e.recordedAt),
     }))
     // The row keeps the error the way the service stored it before the journal: a JSON string
     .on(RefundFailed, (_row, e) => ({
       status: 'failed',
       providerResponse: JSON.stringify({ error: e.data.errorMessage }),
-      updatedAt: e.recordedAt,
+      updatedAt: fromDate(e.recordedAt),
     }));
 
   const requestRefund = j.command('requestRefund', requestRefundInputSchema, (input, { write }) => {

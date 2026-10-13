@@ -18,7 +18,9 @@ import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
+import type { Instant } from '@arki/date';
 import type { CommandErrorCode, CommandRunner } from '@arki/journal';
+import { fromDate } from '@arki/date';
 import { CommandError } from '@arki/journal';
 
 import type { PaymentId } from '../core/types';
@@ -53,6 +55,10 @@ let paymentId: PaymentId;
 
 /** The app's command runner, as the service gets it: here it runs on the test database. */
 const run: Parameters<typeof typed.refunds.writes>[0] = (command, input) => journal.run(db, command, input, meta);
+
+/** The time the journal recorded for an event, as the `Instant` a reducer stores. */
+const recordedAtOf = (event: { recordedAt: Date } | undefined): Instant | undefined =>
+  event ? fromDate(event.recordedAt) : undefined;
 
 /** Amounts go in as `Money` JSON: exact text with a currency. */
 const usd = (amount: string) => ({ amount, currency: 'USD' });
@@ -167,7 +173,7 @@ describe('requestRefund', () => {
       metadata: '{}',
       version: 1,
     });
-    expect(row?.requestedAt).toEqual(result.events[0]?.recordedAt);
+    expect(row?.requestedAt).toEqual(recordedAtOf(result.events[0]));
   });
 
   it('makes an id when the caller has none', async () => {
@@ -303,7 +309,7 @@ describe('approveRefund and rejectRefund', () => {
     expect(result.events.map(event => event.type)).toEqual(['RefundApproved']);
     const row = await rowOf(refundId);
     expect(row).toMatchObject({ status: 'approved', approvedBy: adminId, version: 2 });
-    expect(row?.approvedAt).toEqual(result.events[0]?.recordedAt);
+    expect(row?.approvedAt).toEqual(recordedAtOf(result.events[0]));
   });
 
   it('rejects approving a refund twice, so the provider is not asked to refund twice', async () => {
@@ -357,7 +363,7 @@ describe('processRefund, completeRefund and failRefund', () => {
     expect(result.events.map(event => event.type)).toEqual(['RefundProcessed']);
     const row = await rowOf(refundId);
     expect(row).toMatchObject({ status: 'processing', providerRefundId: null, version: 3 });
-    expect(row?.processedAt).toEqual(result.events[0]?.recordedAt);
+    expect(row?.processedAt).toEqual(recordedAtOf(result.events[0]));
   });
 
   it('rejects processing a refund nobody approved', async () => {
@@ -389,7 +395,7 @@ describe('processRefund, completeRefund and failRefund', () => {
       providerResponse: '{"id":"re_123"}',
       version: 4,
     });
-    expect(row?.completedAt).toEqual(result.events[0]?.recordedAt);
+    expect(row?.completedAt).toEqual(recordedAtOf(result.events[0]));
   });
 
   it('rejects completing a refund that is not being processed', async () => {

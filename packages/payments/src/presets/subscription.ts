@@ -1,12 +1,14 @@
 import type Stripe from 'stripe';
 
 import type { UserId } from '@arki/auth/ids';
+import type { Instant } from '@arki/date';
+import { fromUnix } from '@arki/date';
 
 import type { CoreWrites } from '../core/journal';
-import { subscriptionStatusValues } from '../core/primitives';
 import type { StripeProvider } from '../core/providers/stripe-provider';
 import type { PaymentRepository } from '../core/repository';
 import type { PlanId, SubscriptionStatus } from '../core/types';
+import { subscriptionStatusValues } from '../core/primitives';
 
 /** The one journal write a webhook preset makes. A `CoreWrites` fits. */
 type SubscriptionSync = Pick<CoreWrites, 'syncSubscription'>;
@@ -61,12 +63,12 @@ export async function projectStripeSubscription(params: {
     planId,
     providerSubscriptionId: sub.id,
     status: mapStatus(sub.status),
-    currentPeriodStart: new Date(item.current_period_start * 1000),
-    currentPeriodEnd: new Date(item.current_period_end * 1000),
-    trialStart: sub.trial_start ? new Date(sub.trial_start * 1000) : null,
-    trialEnd: sub.trial_end ? new Date(sub.trial_end * 1000) : null,
+    currentPeriodStart: fromUnix(item.current_period_start),
+    currentPeriodEnd: fromUnix(item.current_period_end),
+    trialStart: sub.trial_start ? fromUnix(sub.trial_start) : null,
+    trialEnd: sub.trial_end ? fromUnix(sub.trial_end) : null,
     cancelAtPeriodEnd: sub.cancel_at_period_end,
-    canceledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000) : null,
+    canceledAt: sub.canceled_at ? fromUnix(sub.canceled_at) : null,
     metadata: sub.metadata,
   });
 }
@@ -98,11 +100,11 @@ export type Entitlement =
       tier: 'pro';
       status: SubscriptionStatus;
       /** End of the current paid-or-trial period — when Pro renews or lapses. */
-      renews: Date;
+      renews: Instant;
       /** Canceled but retains Pro until `renews`. */
       cancelAtPeriodEnd: boolean;
       /** Trial end if this subscription has/had a trial; null otherwise. */
-      trialEnd: Date | null;
+      trialEnd: Instant | null;
     };
 
 /**

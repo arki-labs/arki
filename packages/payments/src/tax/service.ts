@@ -1,3 +1,5 @@
+import type { Instant } from '@arki/date';
+import { now } from '@arki/date';
 import { Money, sum } from '@arki/money';
 
 import type { StripeProvider } from '../core/providers/stripe-provider';
@@ -63,7 +65,7 @@ export type TaxTransaction = {
   customerId?: CustomerId;
   paymentId?: PaymentId;
   subscriptionId?: SubscriptionId;
-  createdAt: Date;
+  createdAt: Instant;
   jurisdiction: string;
   taxCode?: string;
 }
@@ -180,7 +182,7 @@ export class TaxService {
         customerId: params.customerId,
         paymentId: params.paymentId,
         subscriptionId: params.subscriptionId,
-        createdAt: new Date(),
+        createdAt: now(),
         jurisdiction: 'Unknown', // Would be extracted from tax breakdown
         taxCode: params.lineItems[0]?.taxCode,
       };
@@ -262,8 +264,8 @@ export class TaxService {
    */
   async generateTaxReport(params: {
     reportType: 'sales_and_use_tax' | 'vat' | 'gst';
-    startDate: Date;
-    endDate: Date;
+    startDate: Instant;
+    endDate: Instant;
     jurisdiction?: string;
   }): Promise<{
     id: string;

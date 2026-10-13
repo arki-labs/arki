@@ -1,5 +1,8 @@
 import type { AnyPgColumn, PgSchema } from 'drizzle-orm/pg-core';
-import { boolean, jsonb, text, timestamp, varchar } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { boolean, jsonb, text, varchar } from 'drizzle-orm/pg-core';
+
+import { instant } from '@arki/db/temporal';
 
 import type {
   ExemptionStatus,
@@ -98,8 +101,12 @@ export function createTaxTables({ schema }: CreateTaxTablesDeps) {
       crossBorderCompliance: boolean;
     }>(),
     isDefault: boolean('is_default').notNull().default(false),
-    createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).notNull().defaultNow(),
+    createdAt: instant('created_at')
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: instant('updated_at')
+      .notNull()
+      .default(sql`now()`),
     createdBy: varchar('created_by', { length: 255 }),
     updatedBy: varchar('updated_by', { length: 255 }),
   });
@@ -124,10 +131,14 @@ export function createTaxTables({ schema }: CreateTaxTablesDeps) {
     registrationRequired: boolean('registration_required').notNull().default(false),
     filingFrequency: varchar('filing_frequency', { length: 50 }),
     isActive: boolean('is_active').notNull().default(true),
-    effectiveFrom: timestamp('effective_from', { mode: 'date', withTimezone: true }),
-    effectiveTo: timestamp('effective_to', { mode: 'date', withTimezone: true }),
-    createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).notNull().defaultNow(),
+    effectiveFrom: instant('effective_from'),
+    effectiveTo: instant('effective_to'),
+    createdAt: instant('created_at')
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: instant('updated_at')
+      .notNull()
+      .default(sql`now()`),
   });
 
   const taxExemptions = schema.table('tax_exemptions', {
@@ -140,8 +151,8 @@ export function createTaxTables({ schema }: CreateTaxTablesDeps) {
     exemptionCode: varchar('exemption_code', { length: 50 }).notNull(),
     reason: text('reason').notNull(),
     certificateNumber: varchar('certificate_number', { length: 100 }),
-    validFrom: timestamp('valid_from', { mode: 'date', withTimezone: true }).notNull(),
-    validTo: timestamp('valid_to', { mode: 'date', withTimezone: true }),
+    validFrom: instant('valid_from').notNull(),
+    validTo: instant('valid_to'),
     documents: jsonb('documents').$type<
       {
         type: string;
@@ -150,11 +161,15 @@ export function createTaxTables({ schema }: CreateTaxTablesDeps) {
         expiresAt?: string;
       }[]
     >(),
-    createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).notNull().defaultNow(),
+    createdAt: instant('created_at')
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: instant('updated_at')
+      .notNull()
+      .default(sql`now()`),
     createdBy: varchar('created_by', { length: 255 }),
     approvedBy: varchar('approved_by', { length: 255 }),
-    approvedAt: timestamp('approved_at', { mode: 'date', withTimezone: true }),
+    approvedAt: instant('approved_at'),
   });
 
   const taxConfigForeignKeys = taxConfigIdFactory.createForeignKeyFactory(() => taxConfigurations.id);

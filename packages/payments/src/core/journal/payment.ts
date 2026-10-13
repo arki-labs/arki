@@ -15,13 +15,16 @@
  * the currency's minor units.
  */
 
+import type { Instant } from '@arki/date';
 import type { JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import { userIdSchema } from '@arki/auth/ids';
 import { z } from '@arki/contracts';
+import { fromDate } from '@arki/date';
 import { CommandError } from '@arki/journal';
 import { Money } from '@arki/money';
 
 import type { CoreTables } from '../tables';
+import { fromStoredNumber, moneyJsonSchema, nonNegativeMoneySchema, toMinorColumn } from '../money';
 import {
   createPaymentId,
   customerIdSchema,
@@ -29,7 +32,6 @@ import {
   paymentMethodTypeValues,
   subscriptionIdSchema,
 } from '../primitives';
-import { fromStoredNumber, moneyJsonSchema, nonNegativeMoneySchema, toMinorColumn } from '../money';
 import { storedReal } from './support';
 
 type PaymentRow = CoreTables['payments']['$inferSelect'];
@@ -97,7 +99,7 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
   const PaymentCanceled = j.event('PaymentCanceled', z.object({}));
 
   type StartData = z.output<typeof PaymentInitiatedV2.schema>;
-  const started = (data: Omit<StartData, 'amount'>, amountMinor: number, currency: string, at: Date) =>
+  const started = (data: Omit<StartData, 'amount'>, amountMinor: number, currency: string, at: Instant) =>
     ({
       subscriptionId: data.subscriptionId,
       userId: data.userId,
@@ -124,23 +126,23 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
         e.data,
         toMinorColumn(fromStoredNumber(storedReal(e.data.amount), e.data.currency)),
         e.data.currency,
-        e.recordedAt,
+        fromDate(e.recordedAt),
       ),
     )
     .create(PaymentInitiatedV2, e =>
-      started(e.data, toMinorColumn(Money.fromJSON(e.data.amount)), e.data.amount.currency, e.recordedAt),
+      started(e.data, toMinorColumn(Money.fromJSON(e.data.amount)), e.data.amount.currency, fromDate(e.recordedAt)),
     )
     .on(PaymentCompleted, (_row, e) => ({
       status: 'succeeded',
       receiptUrl: e.data.receiptUrl,
-      updatedAt: e.recordedAt,
+      updatedAt: fromDate(e.recordedAt),
     }))
     .on(PaymentFailed, (_row, e) => ({
       status: 'failed',
       failureReason: e.data.failureReason,
-      updatedAt: e.recordedAt,
+      updatedAt: fromDate(e.recordedAt),
     }))
-    .on(PaymentCanceled, (_row, e) => ({ status: 'canceled', updatedAt: e.recordedAt }));
+    .on(PaymentCanceled, (_row, e) => ({ status: 'canceled', updatedAt: fromDate(e.recordedAt) }));
 
   const initiatePayment = j.command('initiatePayment', initiatePaymentInputSchema, (input, { write }) => {
     const paymentId = input.paymentId ?? createPaymentId();

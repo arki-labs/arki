@@ -16,6 +16,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { CommandErrorCode, CommandRunner } from '@arki/journal';
+import { instant } from '@arki/date';
 import { CommandError } from '@arki/journal';
 
 import type { AppDb, AppTx } from '../test-support';
@@ -356,8 +357,8 @@ describe('writes(run): what the services call', () => {
       customerId,
       providerSubscriptionId: 'psub_writes',
       status: 'active' as const,
-      currentPeriodStart: new Date('2026-01-01T00:00:00.000Z'),
-      currentPeriodEnd: new Date('2026-02-01T00:00:00.000Z'),
+      currentPeriodStart: instant('2026-01-01T00:00:00.000Z'),
+      currentPeriodEnd: instant('2026-02-01T00:00:00.000Z'),
     };
 
     const created = await writes.createSubscription({ subscriptionId, ...delivery });
@@ -375,7 +376,7 @@ describe('writes(run): what the services call', () => {
     });
     expect(await writes.activateSubscription({ subscriptionId })).toMatchObject({ status: 'active' });
     expect(
-      await writes.cancelSubscription({ subscriptionId, canceledAt: new Date('2026-01-20T00:00:00.000Z') }),
+      await writes.cancelSubscription({ subscriptionId, canceledAt: instant('2026-01-20T00:00:00.000Z') }),
     ).toMatchObject({ status: 'canceled' });
     expect(await writes.reactivateSubscription({ subscriptionId })).toMatchObject({
       status: 'active',

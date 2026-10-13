@@ -14,6 +14,8 @@ import { and, eq } from 'drizzle-orm';
 import Stripe from 'stripe';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { fromMillis, fromUnix, instant, toDate } from '@arki/date';
+
 import type { CoreWrites } from '../core/journal';
 import type { PaymentProviderType } from '../core/types';
 import type { AppDb } from '../test-support';
@@ -149,10 +151,10 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
       customerId,
       planId,
       status: 'trialing',
-      currentPeriodStart: new Date(JAN_1 * 1000),
-      currentPeriodEnd: new Date(FEB_1 * 1000),
-      trialStart: new Date(JAN_1 * 1000),
-      trialEnd: new Date(JAN_8 * 1000),
+      currentPeriodStart: fromUnix(JAN_1),
+      currentPeriodEnd: fromUnix(FEB_1),
+      trialStart: fromUnix(JAN_1),
+      trialEnd: fromUnix(JAN_8),
       cancelAtPeriodEnd: false,
       canceledAt: null,
       metadata: { userId },
@@ -188,8 +190,8 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
     const row = await rowOf('sub_renewed');
     expect(row).toMatchObject({
       status: 'active',
-      currentPeriodStart: new Date(FEB_1 * 1000),
-      currentPeriodEnd: new Date(MAR_1 * 1000),
+      currentPeriodStart: fromUnix(FEB_1),
+      currentPeriodEnd: fromUnix(MAR_1),
       version: 2,
     });
     expect(await eventTypesOf(db, 'subscription', row.id)).toEqual(['SubscriptionCreated', 'SubscriptionSynced']);
@@ -206,7 +208,7 @@ describe('Stripe: createSubscriptionBilling().handleWebhook', () => {
     await deliver('customer.subscription.deleted', 'sub_status', { status: 'canceled', canceled_at: JAN_8 });
 
     const row = await rowOf('sub_status');
-    expect(row).toMatchObject({ status: 'canceled', canceledAt: new Date(JAN_8 * 1000), version: 3 });
+    expect(row).toMatchObject({ status: 'canceled', canceledAt: fromUnix(JAN_8), version: 3 });
     expect(await eventTypesOf(db, 'subscription', row.id)).toEqual([
       'SubscriptionCreated',
       'SubscriptionSynced',
@@ -269,8 +271,8 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
       customerId,
       planId,
       status: 'active',
-      currentPeriodStart: new Date(JAN_1),
-      currentPeriodEnd: new Date(FEB_1),
+      currentPeriodStart: fromMillis(JAN_1),
+      currentPeriodEnd: fromMillis(FEB_1),
       trialStart: null,
       trialEnd: null,
       cancelAtPeriodEnd: false,
@@ -303,8 +305,8 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
     const row = await rowOf('rc_renewed');
     expect(row).toMatchObject({
       status: 'active',
-      currentPeriodStart: new Date(FEB_1),
-      currentPeriodEnd: new Date(MAR_1),
+      currentPeriodStart: fromMillis(FEB_1),
+      currentPeriodEnd: fromMillis(MAR_1),
       version: 2,
     });
     expect(await eventTypesOf(db, 'subscription', row.id)).toEqual(['SubscriptionCreated', 'SubscriptionSynced']);
@@ -314,9 +316,9 @@ describe('RevenueCat: projectRevenueCatEvent', () => {
   it('a repeated expiration writes no event and keeps the first cancel time', async () => {
     // RevenueCat sends no cancel time, so the preset stamps "now" on every delivery.
     // Only the clock is faked: the database keeps its real timers.
-    const firstSeen = new Date('2026-02-01T10:00:00.000Z');
+    const firstSeen = instant('2026-02-01T10:00:00.000Z');
     vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(firstSeen);
+    vi.setSystemTime(toDate(firstSeen));
     await deliver('rc_expired');
 
     await deliver('rc_expired', { type: 'EXPIRATION' });

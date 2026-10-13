@@ -1,8 +1,8 @@
 import { timingSafeEqual } from 'node:crypto';
 
-import { z } from '@arki/contracts';
-
 import type { UserId } from '@arki/auth/ids';
+import { z } from '@arki/contracts';
+import { fromMillis, now, toMillis } from '@arki/date';
 
 import type { CoreWrites } from '../core/journal';
 import type { CustomerId, PlanId, SubscriptionStatus } from '../core/types';
@@ -128,10 +128,10 @@ export async function projectRevenueCatEvent(params: {
     event.transaction_id ??
     `${event.app_user_id}:${event.product_id ?? 'unknown'}`;
 
-  const periodStart = event.purchased_at_ms ? new Date(event.purchased_at_ms) : new Date();
+  const periodStart = event.purchased_at_ms ? fromMillis(event.purchased_at_ms) : now();
   const periodEnd = event.expiration_at_ms
-    ? new Date(event.expiration_at_ms)
-    : new Date(periodStart.getTime() + NON_EXPIRING_MS);
+    ? fromMillis(event.expiration_at_ms)
+    : fromMillis(toMillis(periodStart) + NON_EXPIRING_MS);
   const isTrial = event.period_type === 'TRIAL';
 
   await writes.syncSubscription({
@@ -145,7 +145,7 @@ export async function projectRevenueCatEvent(params: {
     trialStart: isTrial ? periodStart : null,
     trialEnd: isTrial ? periodEnd : null,
     cancelAtPeriodEnd: mapped.cancelAtPeriodEnd,
-    canceledAt: mapped.status === 'canceled' ? new Date() : null,
+    canceledAt: mapped.status === 'canceled' ? now() : null,
     metadata: { provider: 'revenuecat', store: event.store ?? null, environment: event.environment ?? null },
   });
   return { handled: true };

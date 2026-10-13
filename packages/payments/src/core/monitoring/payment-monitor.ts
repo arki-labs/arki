@@ -1,5 +1,7 @@
+import type { Instant } from '@arki/date';
 import type { KV } from '@arki/kv';
 import type { Money } from '@arki/money';
+import { now } from '@arki/date';
 
 // AlertingService interface - to be implemented or imported from a shared location
 type AlertingService = {
@@ -32,7 +34,7 @@ type PaymentAnomaly = {
   type: string;
   severity: 'warning' | 'critical';
   description: string;
-  detectedAt: Date;
+  detectedAt: Instant;
   metadata?: Record<string, unknown>;
 }
 
@@ -42,7 +44,7 @@ type PaymentAlert = {
   severity: 'warning' | 'critical';
   message: string;
   data: Record<string, unknown>;
-  triggeredAt: Date;
+  triggeredAt: Instant;
   status: 'active' | 'resolved';
 }
 
@@ -58,7 +60,7 @@ type PaymentSystemHealth = {
     successRate: number;
   };
   providers: Record<string, boolean>;
-  lastUpdated: Date;
+  lastUpdated: Instant;
 }
 
 export class PaymentMonitoringService {
@@ -187,8 +189,8 @@ export class PaymentMonitoringService {
 
   private async checkFailureRate(): Promise<void> {
     const window = 5 * 60 * 1000; // 5 minutes
-    const now = Date.now();
-    const cutoff = now - window;
+    const nowMs = Date.now();
+    const cutoff = nowMs - window;
 
     // Get recent payment attempts
     const attempts = await this.getMetricValues('payment_attempts_total', cutoff);
@@ -317,11 +319,11 @@ export class PaymentMonitoringService {
 
   async detectAnomalies(): Promise<PaymentAnomaly[]> {
     const anomalies: PaymentAnomaly[] = [];
-    const now = Date.now();
+    const nowMs = Date.now();
     const oneHour = 60 * 60 * 1000;
 
     // Detect unusual payment volumes
-    const currentHourVolume = await this.getHourlyVolume(now);
+    const currentHourVolume = await this.getHourlyVolume(nowMs);
     const historicalAverage = await this.getHistoricalAverageVolume();
 
     if (currentHourVolume > historicalAverage * 3) {
@@ -329,13 +331,13 @@ export class PaymentMonitoringService {
         type: 'unusual_volume',
         severity: 'warning',
         description: `Payment volume ${currentHourVolume} is 3x higher than average ${historicalAverage}`,
-        detectedAt: new Date(),
+        detectedAt: now(),
         metadata: { current: currentHourVolume, average: historicalAverage },
       });
     }
 
     // Detect sudden spike in failed payments
-    const recentFailures = await this.getMetricValues('payment_failures_total', now - oneHour);
+    const recentFailures = await this.getMetricValues('payment_failures_total', nowMs - oneHour);
     const failureSpike = recentFailures.length > 20;
 
     if (failureSpike) {
@@ -343,7 +345,7 @@ export class PaymentMonitoringService {
         type: 'failure_spike',
         severity: 'critical',
         description: `Sudden spike in payment failures: ${recentFailures.length} in last hour`,
-        detectedAt: new Date(),
+        detectedAt: now(),
         metadata: { failureCount: recentFailures.length },
       });
     }
@@ -352,15 +354,15 @@ export class PaymentMonitoringService {
   }
 
   async getSystemHealth(): Promise<PaymentSystemHealth> {
-    const now = Date.now();
+    const nowMs = Date.now();
     const oneHour = 60 * 60 * 1000;
 
     const [paymentSuccessRate, webhookSuccessRate, avgPaymentProcessingTime, avgWebhookProcessingTime] =
       await Promise.all([
-        this.calculateSuccessRate('payment_attempts_total', now - oneHour, now),
-        this.calculateSuccessRate('webhook_attempts_total', now - oneHour, now),
-        this.getAverageMetric('payment_processing_time', now - oneHour, now),
-        this.getAverageMetric('webhook_processing_time', now - oneHour, now),
+        this.calculateSuccessRate('payment_attempts_total', nowMs - oneHour, nowMs),
+        this.calculateSuccessRate('webhook_attempts_total', nowMs - oneHour, nowMs),
+        this.getAverageMetric('payment_processing_time', nowMs - oneHour, nowMs),
+        this.getAverageMetric('webhook_processing_time', nowMs - oneHour, nowMs),
       ]);
 
     // Calculate overall health score (0-1)
@@ -385,7 +387,7 @@ export class PaymentMonitoringService {
       providers: {
         stripe: true, // Would check actual provider health
       },
-      lastUpdated: new Date(),
+      lastUpdated: now(),
     };
   }
 
@@ -400,7 +402,7 @@ export class PaymentMonitoringService {
       severity,
       message: `Payment system alert: ${metricName} ${severity}`,
       data,
-      triggeredAt: new Date(),
+      triggeredAt: now(),
       status: 'active',
     };
 

@@ -1,10 +1,10 @@
+import type { Instant } from '@arki/date';
+import { fromDate, isSameOrBefore, now, toDate, toMillis } from '@arki/date';
+
 import type { CoreWrites } from '../journal';
 import type { BasePaymentProvider } from '../providers/base-provider';
 import type { PaymentRepository } from '../repository';
-import type {
-  PaymentId,
-  SubscriptionId,
-} from '../types';
+import type { PaymentId, SubscriptionId } from '../types';
 import { paymentAmount } from '../money';
 
 export type DunningRule = {
@@ -43,9 +43,9 @@ export type DunningEvent = {
   userId: string;
   eventType: 'payment_failed' | 'retry_scheduled' | 'grace_period_ended' | 'subscription_recovered';
   data: Record<string, unknown>;
-  scheduledFor?: Date;
-  processedAt?: Date;
-  createdAt: Date;
+  scheduledFor?: Instant;
+  processedAt?: Instant;
+  createdAt: Instant;
 }
 
 export type DunningStats = {
@@ -193,9 +193,10 @@ export class DunningService {
       }
 
       // Create dunning events based on configured rules
-      const failureDate = new Date();
+      const failureDate = now();
       for (const rule of this.config.rules.filter(r => r.enabled && r.trigger.event === 'payment_failed')) {
-        const scheduledDate = new Date(failureDate);
+        // Local-time calendar days, as before: the working value stays a `Date` until it is stored.
+        const scheduledDate = toDate(failureDate);
         scheduledDate.setDate(scheduledDate.getDate() + rule.trigger.delayDays);
 
         const dunningEvent: DunningEvent = {
@@ -211,7 +212,7 @@ export class DunningService {
             failureReason,
             attempt: rule.retryCount || 0,
           },
-          scheduledFor: scheduledDate,
+          scheduledFor: fromDate(scheduledDate),
           createdAt: failureDate,
         };
 
@@ -232,15 +233,15 @@ export class DunningService {
    * Process scheduled dunning events
    */
   async processDunningEvents(): Promise<void> {
-    const now = new Date();
+    const current = now();
     const eventsToProcess = [...this.dunningEvents.values()]
-      .filter(event => !event.processedAt && event.scheduledFor && event.scheduledFor <= now)
-      .sort((a, b) => (a.scheduledFor?.getTime() || 0) - (b.scheduledFor?.getTime() || 0));
+      .filter(event => !event.processedAt && event.scheduledFor && isSameOrBefore(event.scheduledFor, current))
+      .sort((a, b) => (a.scheduledFor ? toMillis(a.scheduledFor) : 0) - (b.scheduledFor ? toMillis(b.scheduledFor) : 0));
 
     for (const event of eventsToProcess) {
       try {
         await this.processEvent(event);
-        event.processedAt = new Date();
+        event.processedAt = now();
         console.log(`Processed dunning event ${event.id}`);
       } catch (error) {
         console.error(`Failed to process dunning event ${event.id}:`, error);
@@ -372,7 +373,7 @@ export class DunningService {
       await this.writes.cancelSubscription({
         subscriptionId: event.subscriptionId,
         status: 'canceled',
-        canceledAt: new Date(),
+        canceledAt: now(),
       });
 
       // Remove remaining dunning events
@@ -418,8 +419,8 @@ export class DunningService {
       subscriptionId,
       userId: '', // Would need to get from subscription
       eventType: 'subscription_recovered',
-      data: { recoveredAt: new Date() },
-      createdAt: new Date(),
+      data: { recoveredAt: now() },
+      createdAt: now(),
     };
 
     this.dunningEvents.set(recoveryEvent.id, recoveryEvent);
@@ -430,7 +431,7 @@ export class DunningService {
   /**
    * Get dunning statistics for analytics
    */
-  async getDunningStats(startDate?: Date, endDate?: Date): Promise<DunningStats> {
+  async getDunningStats(startDate?: Instant, endDate?: Instant): Promise<DunningStats> {
     const payments = await this.paymentRepository.getPaymentStats(startDate, endDate);
     const subscriptions = await this.paymentRepository.getSubscriptionStats(startDate, endDate);
 
@@ -469,7 +470,7 @@ export class DunningService {
   getPendingEventsForSubscription(subscriptionId: SubscriptionId): DunningEvent[] {
     return [...this.dunningEvents.values()]
       .filter(event => event.subscriptionId === subscriptionId && !event.processedAt)
-      .sort((a, b) => (a.scheduledFor?.getTime() || 0) - (b.scheduledFor?.getTime() || 0));
+      .sort((a, b) => (a.scheduledFor ? toMillis(a.scheduledFor) : 0) - (b.scheduledFor ? toMillis(b.scheduledFor) : 0));
   }
 
   /**

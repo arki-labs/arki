@@ -1,8 +1,10 @@
 import type { AnyRelations } from 'drizzle-orm';
-import { eq } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
+import { eq } from 'drizzle-orm';
 
 import type { UserId } from '@arki/auth/ids';
+import type { Instant } from '@arki/date';
+import { now } from '@arki/date';
 
 import type { CoreTables } from './tables';
 import type {
@@ -189,7 +191,7 @@ export class PaymentRepository {
   async updatePlan(id: PlanId, data: UpdatePlan): Promise<Plan> {
     const result = await this.db
       .update(this.plans)
-      .set({ ...data, updatedAt: new Date() })
+      .set({ ...data, updatedAt: now() })
       .where(eq(this.plans.id, id))
       .returning();
     const row = result[0];
@@ -202,7 +204,7 @@ export class PaymentRepository {
   async deactivatePlan(id: PlanId): Promise<Plan> {
     const result = await this.db
       .update(this.plans)
-      .set({ isActive: false, updatedAt: new Date() })
+      .set({ isActive: false, updatedAt: now() })
       .where(eq(this.plans.id, id))
       .returning();
     const row = result[0];
@@ -249,7 +251,7 @@ export class PaymentRepository {
   async updateCustomer(id: CustomerId, data: UpdateCustomer): Promise<Customer> {
     const result = await this.db
       .update(this.customers)
-      .set({ ...data, updatedAt: new Date() })
+      .set({ ...data, updatedAt: now() })
       .where(eq(this.customers.id, id))
       .returning();
     const row = result[0];
@@ -310,7 +312,7 @@ export class PaymentRepository {
     });
   }
 
-  async findSubscriptionsEndingInRange(startDate: Date, endDate: Date): Promise<Subscription[]> {
+  async findSubscriptionsEndingInRange(startDate: Instant, endDate: Instant): Promise<Subscription[]> {
     return this.q.subscriptions.findMany({
       where: {
         currentPeriodEnd: { gte: startDate, lte: endDate },
@@ -425,7 +427,7 @@ export class PaymentRepository {
   async updateWebhookEvent(id: WebhookId, data: UpdateWebhookEvent): Promise<WebhookEvent> {
     const result = await this.db
       .update(this.webhookEvents)
-      .set({ ...data, updatedAt: new Date() })
+      .set({ ...data, updatedAt: now() })
       .where(eq(this.webhookEvents.id, id))
       .returning();
     const row = result[0];
@@ -440,8 +442,8 @@ export class PaymentRepository {
       .update(this.webhookEvents)
       .set({
         processed: true,
-        processedAt: new Date(),
-        updatedAt: new Date(),
+        processedAt: now(),
+        updatedAt: now(),
       })
       .where(eq(this.webhookEvents.id, id))
       .returning();
@@ -462,9 +464,9 @@ export class PaymentRepository {
       .update(this.webhookEvents)
       .set({
         attempts: currentEvent.attempts + 1,
-        lastAttemptAt: new Date(),
+        lastAttemptAt: now(),
         errorMessage,
-        updatedAt: new Date(),
+        updatedAt: now(),
       })
       .where(eq(this.webhookEvents.id, id))
       .returning();
@@ -477,8 +479,8 @@ export class PaymentRepository {
 
   // Analytics and reporting methods
   async getSubscriptionStats(
-    startDate?: Date,
-    endDate?: Date,
+    startDate?: Instant,
+    endDate?: Instant,
   ): Promise<SubscriptionWithRelations[]> {
     const createdAt =
       startDate || endDate
@@ -491,7 +493,7 @@ export class PaymentRepository {
     });
   }
 
-  async getPaymentStats(startDate?: Date, endDate?: Date): Promise<PaymentWithRelations[]> {
+  async getPaymentStats(startDate?: Instant, endDate?: Instant): Promise<PaymentWithRelations[]> {
     const createdAt =
       startDate || endDate
         ? { ...(startDate && { gte: startDate }), ...(endDate && { lte: endDate }) }

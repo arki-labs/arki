@@ -1,13 +1,11 @@
 import Stripe from 'stripe';
 
 import type { UserId } from '@arki/auth/ids';
+import type { Instant } from '@arki/date';
+import { fromUnix, now } from '@arki/date';
 import { Money, sum } from '@arki/money';
 import { fromStripeAmount, toStripeAmount } from '@arki/money/stripe';
-import { toMinorColumn } from '../money';
-import {
-  createCustomerId,
-  createPlanId
-} from '../primitives';
+
 import type {
   BillingInterval,
   Customer,
@@ -23,8 +21,10 @@ import type {
   WebhookEventType,
   WebhookValidationResult,
 } from '../types';
-import { BasePaymentProvider  } from './base-provider';
-import type {PaymentProviderConfig} from './base-provider';
+import type { PaymentProviderConfig } from './base-provider';
+import { toMinorColumn } from '../money';
+import { createCustomerId, createPlanId } from '../primitives';
+import { BasePaymentProvider } from './base-provider';
 
 export class StripeProvider extends BasePaymentProvider {
   readonly providerType = 'stripe' as const;
@@ -72,8 +72,8 @@ export class StripeProvider extends BasePaymentProvider {
       name: params.name ?? null,
       defaultPaymentMethodId: null,
       metadata: params.metadata ?? null,
-      createdAt: new Date(stripeCustomer.created * 1000),
-      updatedAt: new Date(),
+      createdAt: fromUnix(stripeCustomer.created),
+      updatedAt: now(),
     };
   }
 
@@ -137,8 +137,8 @@ export class StripeProvider extends BasePaymentProvider {
       isActive: true,
       trialPeriodDays: params.trialPeriodDays ?? null,
       metadata: { stripeProductId: stripeProduct.id, stripePriceId: stripePrice.id, ...params.metadata },
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now(),
+      updatedAt: now(),
     };
   }
 
@@ -289,8 +289,8 @@ export class StripeProvider extends BasePaymentProvider {
       metadata: refund.metadata ? Object.fromEntries(
         Object.entries(refund.metadata).map(([k, v]) => [k, v ?? null])
       ) as Record<string, unknown> : null,
-      createdAt: new Date(refund.created * 1000),
-      updatedAt: new Date(),
+      createdAt: fromUnix(refund.created),
+      updatedAt: now(),
     };
   }
 
@@ -605,8 +605,8 @@ export class StripeProvider extends BasePaymentProvider {
 
   async getTaxReport(params: {
     reportType: 'sales_and_use_tax' | 'vat' | 'gst';
-    startDate: Date;
-    endDate: Date;
+    startDate: Instant;
+    endDate: Instant;
     jurisdiction?: string;
   }): Promise<{
     id: string;
@@ -625,7 +625,7 @@ export class StripeProvider extends BasePaymentProvider {
     // 2. Poll for completion
     // 3. Return download URLs
 
-    console.log(`Creating tax report: ${params.reportType} from ${params.startDate.toISOString()} to ${params.endDate.toISOString()}`);
+    console.log(`Creating tax report: ${params.reportType} from ${params.startDate.toString()} to ${params.endDate.toString()}`);
 
     return {
       id: reportId,

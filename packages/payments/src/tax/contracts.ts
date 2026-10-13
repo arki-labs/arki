@@ -1,4 +1,5 @@
 import { z } from '@arki/contracts';
+import { instantSchema } from '@arki/date/zod';
 
 import type { TaxComplianceReport } from './reporting';
 import type { TaxCalculationResult, TaxService } from './service';
@@ -108,8 +109,8 @@ export const createJurisdictionSchema = z.object({
   taxIdRequired: z.boolean().default(false),
   registrationRequired: z.boolean().default(false),
   filingFrequency: z.string().max(50).optional(),
-  effectiveFrom: z.date().optional(),
-  effectiveTo: z.date().optional(),
+  effectiveFrom: instantSchema().optional(),
+  effectiveTo: instantSchema().optional(),
 });
 
 export const getJurisdictionsByCountryInputSchema = z.object({
@@ -129,8 +130,8 @@ export const createExemptionSchema = z.object({
   exemptionCode: z.string().max(50),
   reason: z.string().min(1),
   certificateNumber: z.string().max(100).optional(),
-  validFrom: z.date(),
-  validTo: z.date().optional(),
+  validFrom: instantSchema(),
+  validTo: instantSchema().optional(),
   documents: z
     .array(
       z.object({
@@ -213,8 +214,8 @@ export const taxIdValidationSchema = z.object({
 
 export const generateTaxReportInputSchema = z.object({
   reportType: z.enum(['sales_and_use_tax', 'vat', 'gst']),
-  startDate: z.date(),
-  endDate: z.date(),
+  startDate: instantSchema(),
+  endDate: instantSchema(),
   jurisdiction: z.string().optional(),
 });
 
@@ -309,15 +310,15 @@ export const taxComplianceReportSchema = z.object({
     year: z.number(),
     quarter: z.number().optional(),
     month: z.number().optional(),
-    startDate: z.date(),
-    endDate: z.date(),
+    startDate: instantSchema(),
+    endDate: instantSchema(),
   }),
   jurisdiction: z.string(),
   totalSales: moneyJsonSchema,
   totalTaxCollected: moneyJsonSchema,
   exemptSales: moneyJsonSchema,
   transactions: z.number(),
-  generatedAt: z.date(),
+  generatedAt: instantSchema(),
   status: z.enum(['pending', 'completed', 'failed']),
   downloadUrl: z.string().optional(),
   summary: z.object({

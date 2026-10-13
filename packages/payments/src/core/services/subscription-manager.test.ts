@@ -12,16 +12,12 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { instant } from '@arki/date';
+
 import type { AppDb } from '../../test-support';
 import type { CoreWrites } from '../journal';
 import type { Subscription, SubscriptionId } from '../types';
-import {
-  coreReads,
-  runnerOn,
-  seedSubscription,
-  subscriptionRow,
-  unexpectedCall,
-} from '../../service-test-support';
+import { coreReads, runnerOn, seedSubscription, subscriptionRow, unexpectedCall } from '../../service-test-support';
 import { countEvents, eventTypesOf, openDb, rejectionOf, typed } from '../../test-support';
 import { SubscriptionManager } from './subscription-manager';
 
@@ -90,7 +86,7 @@ afterAll(async () => {
 describe('cancelSubscription', () => {
   it('a cancel at the end of the period stores what the provider reports: still active, flagged to end', async () => {
     const { id } = await seedSubscription(writes, 'active');
-    const canceledAt = new Date('2026-01-20T10:00:00.000Z');
+    const canceledAt = instant('2026-01-20T10:00:00.000Z');
     const manager = managerWith(current => ({ ...current, status: 'active', canceledAt, cancelAtPeriodEnd: true }));
 
     const result = await manager.cancelSubscription(id);
@@ -102,7 +98,7 @@ describe('cancelSubscription', () => {
 
   it('an immediate cancel ends the subscription now and records the event', async () => {
     const { id } = await seedSubscription(writes, 'active');
-    const canceledAt = new Date('2026-01-21T10:00:00.000Z');
+    const canceledAt = instant('2026-01-21T10:00:00.000Z');
     const manager = managerWith(current => ({ ...current, status: 'canceled', canceledAt }));
 
     await manager.cancelSubscription(id, { immediately: true });
@@ -192,7 +188,7 @@ describe('pauseSubscription and resumeSubscription', () => {
 describe('syncSubscriptionWithProvider', () => {
   it('stores the provider snapshot once: a second sync with the same answer writes no event', async () => {
     const { id } = await seedSubscription(writes, 'active');
-    const currentPeriodEnd = new Date('2026-03-01T00:00:00.000Z');
+    const currentPeriodEnd = instant('2026-03-01T00:00:00.000Z');
     const manager = managerWith(current => ({ ...current, status: 'past_due', currentPeriodEnd }));
 
     const synced = await manager.syncSubscriptionWithProvider(id);

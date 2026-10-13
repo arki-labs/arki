@@ -1,12 +1,15 @@
 import crypto from 'node:crypto';
 
+import type { Instant } from '@arki/date';
+import { fromUnix } from '@arki/date';
+
 import type { PaymentProviderType } from '../types';
 
 export type WebhookSecurityValidationResult = {
   isValid: boolean;
   sanitizedPayload?: unknown;
   provider: PaymentProviderType;
-  timestamp: Date;
+  timestamp: Instant;
 }
 
 export class WebhookSecurityError extends Error {
@@ -127,7 +130,7 @@ export class WebhookSecurityService {
       isValid: true,
       sanitizedPayload,
       provider,
-      timestamp: new Date(Number.parseInt(timestamp) * 1000),
+      timestamp: fromUnix(Number.parseInt(timestamp)),
     };
   }
 
@@ -332,7 +335,7 @@ export class WebhookSecurityService {
     type: WebhookSecurityErrorCode | 'SUCCESS';
     provider: PaymentProviderType;
     sourceIp: string;
-    timestamp: Date;
+    timestamp: Instant;
     details?: Record<string, unknown>;
   }): Promise<void> {
     // This would log to a security audit trail

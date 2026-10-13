@@ -1,8 +1,10 @@
 import type { PgColumn, PgSchema } from 'drizzle-orm/pg-core';
-import { bigint, integer, text, timestamp, varchar } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { bigint, integer, text, varchar } from 'drizzle-orm/pg-core';
 
 import type { UserId } from '@arki/auth/ids';
 import { createIdFactory } from '@arki/db/id-factory';
+import { instant } from '@arki/db/temporal';
 
 import type { RefundReason, RefundStatus } from './primitives';
 import { paymentIdFactory } from '../core/primitives';
@@ -41,15 +43,15 @@ export function createRefundsTables({ schema, paymentIdRef, userIdRef }: CreateR
     approvedBy: userFk.optional('approved_by'),
     rejectedBy: userFk.optional('rejected_by'),
     rejectionReason: text('rejection_reason'),
-    requestedAt: timestamp('requested_at', { mode: 'date', withTimezone: true }).defaultNow(),
-    approvedAt: timestamp('approved_at', { mode: 'date', withTimezone: true }),
-    processedAt: timestamp('processed_at', { mode: 'date', withTimezone: true }),
-    completedAt: timestamp('completed_at', { mode: 'date', withTimezone: true }),
+    requestedAt: instant('requested_at').default(sql`now()`),
+    approvedAt: instant('approved_at'),
+    processedAt: instant('processed_at'),
+    completedAt: instant('completed_at'),
     internalNotes: text('internal_notes'),
     customerNote: text('customer_note'),
     metadata: text('metadata'),
-    createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow(),
-    updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).defaultNow(),
+    createdAt: instant('created_at').default(sql`now()`),
+    updatedAt: instant('updated_at').default(sql`now()`),
     /** Set by `@arki/journal`. 0 means: this row was written before the journal. */
     version: integer('version').notNull().default(0),
   });

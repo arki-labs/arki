@@ -9,15 +9,18 @@
  * whole provider snapshot, so a webhook delivery is one event.
  *
  * Event data is plain JSON: times are ISO strings and reducers build the
- * `Date`. `updatedAt` is `e.recordedAt`. Command inputs take `Date` values,
+ * `Instant`. `updatedAt` is `e.recordedAt`. Command inputs take `Instant` values,
  * because inputs are not stored.
  */
 
 import { eq } from 'drizzle-orm';
 
+import type { Instant } from '@arki/date';
 import type { JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import { userIdSchema } from '@arki/auth/ids';
 import { z } from '@arki/contracts';
+import { fromDate } from '@arki/date';
+import { instantSchema } from '@arki/date/zod';
 import { CommandError } from '@arki/journal';
 
 import type { CoreTables } from '../tables';
@@ -28,7 +31,7 @@ import {
   subscriptionIdSchema,
   subscriptionStatusValues,
 } from '../primitives';
-import { sameJson, toDate, toIso, toNullableDate } from './support';
+import { sameJson, toInstant, toIso, toNullableInstant } from './support';
 
 type SubscriptionRow = CoreTables['subscriptions']['$inferSelect'];
 
@@ -67,11 +70,11 @@ export const syncSubscriptionInputSchema = z.object({
   providerSubscriptionId: z.string().min(1).max(255),
   /** The status the provider reports */
   status: statusSchema,
-  currentPeriodStart: z.date(),
-  currentPeriodEnd: z.date(),
-  trialStart: z.date().nullable().optional(),
-  trialEnd: z.date().nullable().optional(),
-  canceledAt: z.date().nullable().optional(),
+  currentPeriodStart: instantSchema(),
+  currentPeriodEnd: instantSchema(),
+  trialStart: instantSchema().nullable().optional(),
+  trialEnd: instantSchema().nullable().optional(),
+  canceledAt: instantSchema().nullable().optional(),
   cancelAtPeriodEnd: z.boolean().optional(),
   metadata: metadataSchema.nullable().optional(),
 });
@@ -85,7 +88,7 @@ export const cancelSubscriptionInputSchema = z.object({
   subscriptionId: subscriptionIdSchema,
   /** The status the provider reports. A cancel at the end of the period keeps the subscription `active`. */
   status: statusSchema.default('canceled'),
-  canceledAt: z.date().nullable().optional(),
+  canceledAt: instantSchema().nullable().optional(),
   cancelAtPeriodEnd: z.boolean().optional(),
 });
 
@@ -118,7 +121,7 @@ export type MarkSubscriptionPastDueInput = z.input<typeof markSubscriptionPastDu
 export type ActivateSubscriptionInput = z.input<typeof activateSubscriptionInputSchema>;
 
 /** The time the caller gave, or the one the row holds when the caller did not say. */
-function resolveTime(given: Date | null | undefined, kept: Date | null): string | null {
+function resolveTime(given: Instant | null | undefined, kept: Instant | null): string | null {
   const time = given === undefined ? kept : given;
 
   return time === null ? null : toIso(time);
@@ -203,46 +206,46 @@ export function createSubscriptionJournal<
       customerId: e.data.customerId,
       providerSubscriptionId: e.data.providerSubscriptionId,
       status: e.data.status,
-      currentPeriodStart: toDate(e.data.currentPeriodStart),
-      currentPeriodEnd: toDate(e.data.currentPeriodEnd),
-      trialStart: toNullableDate(e.data.trialStart),
-      trialEnd: toNullableDate(e.data.trialEnd),
-      canceledAt: toNullableDate(e.data.canceledAt),
+      currentPeriodStart: toInstant(e.data.currentPeriodStart),
+      currentPeriodEnd: toInstant(e.data.currentPeriodEnd),
+      trialStart: toNullableInstant(e.data.trialStart),
+      trialEnd: toNullableInstant(e.data.trialEnd),
+      canceledAt: toNullableInstant(e.data.canceledAt),
       cancelAtPeriodEnd: e.data.cancelAtPeriodEnd,
       metadata: e.data.metadata,
-      createdAt: e.recordedAt,
-      updatedAt: e.recordedAt,
+      createdAt: fromDate(e.recordedAt),
+      updatedAt: fromDate(e.recordedAt),
     }))
     .on(SubscriptionSynced, (_row, e) => ({
       userId: e.data.userId,
       planId: e.data.planId,
       customerId: e.data.customerId,
       status: e.data.status,
-      currentPeriodStart: toDate(e.data.currentPeriodStart),
-      currentPeriodEnd: toDate(e.data.currentPeriodEnd),
-      trialStart: toNullableDate(e.data.trialStart),
-      trialEnd: toNullableDate(e.data.trialEnd),
-      canceledAt: toNullableDate(e.data.canceledAt),
+      currentPeriodStart: toInstant(e.data.currentPeriodStart),
+      currentPeriodEnd: toInstant(e.data.currentPeriodEnd),
+      trialStart: toNullableInstant(e.data.trialStart),
+      trialEnd: toNullableInstant(e.data.trialEnd),
+      canceledAt: toNullableInstant(e.data.canceledAt),
       cancelAtPeriodEnd: e.data.cancelAtPeriodEnd,
       metadata: e.data.metadata,
-      updatedAt: e.recordedAt,
+      updatedAt: fromDate(e.recordedAt),
     }))
-    .on(SubscriptionActivated, (_row, e) => ({ status: 'active', updatedAt: e.recordedAt }))
+    .on(SubscriptionActivated, (_row, e) => ({ status: 'active', updatedAt: fromDate(e.recordedAt) }))
     .on(SubscriptionCanceled, (_row, e) => ({
       status: e.data.status,
-      canceledAt: toNullableDate(e.data.canceledAt),
+      canceledAt: toNullableInstant(e.data.canceledAt),
       cancelAtPeriodEnd: e.data.cancelAtPeriodEnd,
-      updatedAt: e.recordedAt,
+      updatedAt: fromDate(e.recordedAt),
     }))
     .on(SubscriptionReactivated, (_row, e) => ({
       status: e.data.status,
       canceledAt: null,
       cancelAtPeriodEnd: false,
-      updatedAt: e.recordedAt,
+      updatedAt: fromDate(e.recordedAt),
     }))
-    .on(SubscriptionPaused, (_row, e) => ({ status: e.data.status, updatedAt: e.recordedAt }))
-    .on(SubscriptionResumed, (_row, e) => ({ status: e.data.status, updatedAt: e.recordedAt }))
-    .on(SubscriptionPastDue, (_row, e) => ({ status: 'past_due', updatedAt: e.recordedAt }));
+    .on(SubscriptionPaused, (_row, e) => ({ status: e.data.status, updatedAt: fromDate(e.recordedAt) }))
+    .on(SubscriptionResumed, (_row, e) => ({ status: e.data.status, updatedAt: fromDate(e.recordedAt) }))
+    .on(SubscriptionPastDue, (_row, e) => ({ status: 'past_due', updatedAt: fromDate(e.recordedAt) }));
 
   /** Stores a subscription the provider just created, with the status the provider reported. */
   const createSubscription = j.command('createSubscription', createSubscriptionInputSchema, (input, { write }) => {

@@ -13,6 +13,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { CommandErrorCode } from '@arki/journal';
+import { instant } from '@arki/date';
 import { CommandError } from '@arki/journal';
 
 import type { AppDb } from '../test-support';
@@ -40,8 +41,8 @@ let db: AppDb;
 let client: PGlite;
 let next = 0;
 
-const periodStart = new Date('2026-01-01T00:00:00.000Z');
-const periodEnd = new Date('2026-02-01T00:00:00.000Z');
+const periodStart = instant('2026-01-01T00:00:00.000Z');
+const periodEnd = instant('2026-02-01T00:00:00.000Z');
 
 /** What a provider reports for a new subscription. Each call names a new provider subscription. */
 function delivery(overrides: Partial<SyncSubscriptionInput> = {}): SyncSubscriptionInput {
@@ -136,7 +137,7 @@ describe('createSubscription', () => {
   });
 
   it('keeps the trial dates and the `trialing` status of a subscription that starts with a trial', async () => {
-    const trialEnd = new Date('2026-01-15T00:00:00.000Z');
+    const trialEnd = instant('2026-01-15T00:00:00.000Z');
     const subscriptionId = await seed('trialing', { trialStart: periodStart, trialEnd });
 
     expect(await rowOf(subscriptionId)).toMatchObject({ status: 'trialing', trialStart: periodStart, trialEnd });
@@ -166,7 +167,7 @@ describe('createSubscription', () => {
 describe('cancelSubscription', () => {
   it('keeps the provider status and `cancelAtPeriodEnd` for a cancel at the end of the period (the old rule forced `canceled`)', async () => {
     const subscriptionId = await seed('active');
-    const canceledAt = new Date('2026-01-10T12:00:00.000Z');
+    const canceledAt = instant('2026-01-10T12:00:00.000Z');
 
     const result = await journal.run(
       db,
@@ -186,7 +187,7 @@ describe('cancelSubscription', () => {
 
   it('cancels at once with status `canceled` when the provider says so (the dunning cancel)', async () => {
     const subscriptionId = await seed('past_due');
-    const canceledAt = new Date('2026-01-11T00:00:00.000Z');
+    const canceledAt = instant('2026-01-11T00:00:00.000Z');
 
     await journal.run(db, commands.cancelSubscription, { subscriptionId, canceledAt }, meta);
 
@@ -442,7 +443,7 @@ describe('syncSubscription (webhooks and provider sync)', () => {
     const input = delivery({ metadata: { plan: 'pro' } });
     const first = await journal.run(db, commands.syncSubscription, input, meta);
     const subscriptionId = first.row?.id ?? createSubscriptionId();
-    const renewedUntil = new Date('2026-03-01T00:00:00.000Z');
+    const renewedUntil = instant('2026-03-01T00:00:00.000Z');
 
     // A renewal that goes past due. The delivery does not mention the metadata, so the row keeps it.
     const second = await journal.run(
@@ -476,7 +477,7 @@ describe('syncSubscription (webhooks and provider sync)', () => {
   it('writes no event when a provider repeats a cancellation with a new "now" (RevenueCat stamps every delivery)', async () => {
     const input = delivery();
     await journal.run(db, commands.syncSubscription, input, meta);
-    const firstCanceledAt = new Date('2026-01-20T10:00:00.000Z');
+    const firstCanceledAt = instant('2026-01-20T10:00:00.000Z');
     const canceled = await journal.run(
       db,
       commands.syncSubscription,
@@ -489,7 +490,7 @@ describe('syncSubscription (webhooks and provider sync)', () => {
     const repeated = await journal.run(
       db,
       commands.syncSubscription,
-      { ...input, status: 'canceled', canceledAt: new Date('2026-01-20T10:05:00.000Z') },
+      { ...input, status: 'canceled', canceledAt: instant('2026-01-20T10:05:00.000Z') },
       meta,
     );
 

@@ -10,6 +10,7 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { instant } from '@arki/date';
 import { money } from '@arki/money';
 import { CurrencyMismatchError } from '@arki/money/errors';
 
@@ -26,7 +27,7 @@ let client: PGlite;
 let writes: CoreWrites;
 
 /** The subscription runs 2026-01-01 → 2026-02-01 (31 days) on the 10.00 USD test plan; 21 days are left. */
-const effectiveDate = new Date('2026-01-11T00:00:00.000Z');
+const effectiveDate = instant('2026-01-11T00:00:00.000Z');
 
 async function planAt(price: string, currency: string): Promise<PlanId> {
   const id = createPlanId();

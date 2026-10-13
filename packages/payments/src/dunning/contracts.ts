@@ -1,5 +1,6 @@
 import { userIdSchema } from '@arki/auth/ids';
 import { z } from '@arki/contracts';
+import { instantSchema } from '@arki/date/zod';
 
 import type { SpendRange } from './types';
 import { nonNegativeMoneySchema } from '../core/money';
@@ -142,7 +143,7 @@ export const riskScoreSchema = z.object({
   overall: z.number().min(0).max(100),
   factors: z.record(z.string(), z.number()),
   category: riskCategorySchema,
-  lastCalculated: z.date(),
+  lastCalculated: instantSchema(),
   trends: z.object({
     direction: z.enum(['improving', 'stable', 'declining']),
     changePercent: z.number(),
@@ -234,8 +235,8 @@ export const executeCampaignInputSchema = z.object({
 export const campaignAnalyticsInputSchema = z.object({
   campaignId: dunningCampaignIdSchema.optional(),
   period: z.object({
-    start: z.date(),
-    end: z.date(),
+    start: instantSchema(),
+    end: instantSchema(),
   }),
   granularity: z.enum(['hour', 'day', 'week', 'month']).default('day'),
   metrics: z.array(z.string()).optional(),
@@ -253,7 +254,7 @@ export const updateExecutionStatusInputSchema = z.object({
         z.object({
           customerId: customerIdSchema,
           error: z.string(),
-          timestamp: z.date(),
+          timestamp: instantSchema(),
         }),
       ),
       performance: z.object({
@@ -267,10 +268,10 @@ export const updateExecutionStatusInputSchema = z.object({
 export const updateCommunicationStatusInputSchema = z.object({
   communicationId: dunningCommunicationIdSchema,
   status: communicationStatusSchema,
-  sentAt: z.date().optional(),
-  deliveredAt: z.date().optional(),
-  openedAt: z.date().optional(),
-  clickedAt: z.date().optional(),
+  sentAt: instantSchema().optional(),
+  deliveredAt: instantSchema().optional(),
+  openedAt: instantSchema().optional(),
+  clickedAt: instantSchema().optional(),
   failureReason: z.string().optional(),
   providerMessageId: z.string().optional(),
   providerResponse: z.record(z.string(), z.unknown()).optional(),
@@ -280,7 +281,7 @@ export const updateCommunicationStatusInputSchema = z.object({
 export const communicationWebhookSchema = z.object({
   communicationId: dunningCommunicationIdSchema,
   event: z.enum(['sent', 'delivered', 'opened', 'clicked', 'bounced', 'complained']),
-  timestamp: z.date(),
+  timestamp: instantSchema(),
   providerData: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -304,7 +305,7 @@ export const customerRiskProfileInputSchema = z.object({
     successfulPayments: z.number().int().min(0),
     failedPayments: z.number().int().min(0),
     averageAmount: z.number().min(0),
-    lastPaymentDate: z.date().optional(),
+    lastPaymentDate: instantSchema().optional(),
     streakDays: z.number().int().min(0),
   }),
   subscriptionHistory: z.object({
@@ -316,7 +317,7 @@ export const customerRiskProfileInputSchema = z.object({
   }),
   engagementMetrics: z.object({
     score: z.number().min(0).max(100),
-    lastActivity: z.date().optional(),
+    lastActivity: instantSchema().optional(),
     activityFrequency: z.number().min(0), // activities per week
     featureUsage: z.record(z.string(), z.number()),
   }),
@@ -356,8 +357,8 @@ export const listExecutionsQuerySchema = z.object({
   campaignId: dunningCampaignIdSchema.optional(),
   customerId: customerIdSchema.optional(),
   status: executionStatusSchema.optional(),
-  scheduledAfter: z.date().optional(),
-  scheduledBefore: z.date().optional(),
+  scheduledAfter: instantSchema().optional(),
+  scheduledBefore: instantSchema().optional(),
   sortBy: z.enum(['scheduledAt', 'startedAt', 'completedAt', 'createdAt']).default('scheduledAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });
@@ -369,8 +370,8 @@ export const listCommunicationsQuerySchema = z.object({
   customerId: customerIdSchema.optional(),
   channel: communicationChannelSchema.optional(),
   status: communicationStatusSchema.optional(),
-  sentAfter: z.date().optional(),
-  sentBefore: z.date().optional(),
+  sentAfter: instantSchema().optional(),
+  sentBefore: instantSchema().optional(),
   sortBy: z.enum(['sentAt', 'deliveredAt', 'createdAt']).default('createdAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });
@@ -388,8 +389,8 @@ export const dunningCampaignResponseSchema = z.object({
   createdBy: userIdSchema,
   updatedBy: userIdSchema.optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
-  createdAt: z.date(),
-  updatedAt: z.date(),
+  createdAt: instantSchema(),
+  updatedAt: instantSchema(),
 });
 
 export const customerSegmentResponseSchema = z.object({
@@ -400,13 +401,13 @@ export const customerSegmentResponseSchema = z.object({
   criteria: segmentCriteriaSchema,
   isActive: z.boolean(),
   customerCount: z.number().int().optional(),
-  lastCalculated: z.date().optional(),
+  lastCalculated: instantSchema().optional(),
   autoUpdate: z.boolean(),
   updateFrequency: z.number().int().optional(),
   createdBy: userIdSchema,
   metadata: z.record(z.string(), z.unknown()).optional(),
-  createdAt: z.date(),
-  updatedAt: z.date(),
+  createdAt: instantSchema(),
+  updatedAt: instantSchema(),
 });
 
 // Type inference from schemas

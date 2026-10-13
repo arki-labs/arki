@@ -1,6 +1,8 @@
 import type { UserId } from '@arki/auth/ids';
+import type { Instant } from '@arki/date';
 import type { Money } from '@arki/money';
 import { z } from '@arki/contracts';
+import { toMillis } from '@arki/date';
 import { sum } from '@arki/money';
 import { currencyCodeSchema } from '@arki/money/zod';
 
@@ -205,7 +207,7 @@ export class RefundService {
       );
     }
 
-    if (payment.createdAt && Date.now() - payment.createdAt.getTime() > this.refundWindow) {
+    if (payment.createdAt && Date.now() - toMillis(payment.createdAt) > this.refundWindow) {
       throw new Error('Refund window exceeded');
     }
 
@@ -262,7 +264,7 @@ export class RefundService {
   }
 
   // Analytics methods
-  async getRefundMetrics(startDate?: Date, endDate?: Date) {
+  async getRefundMetrics(startDate?: Instant, endDate?: Instant) {
     return this.refundRepository.getRefundMetrics(startDate, endDate);
   }
 

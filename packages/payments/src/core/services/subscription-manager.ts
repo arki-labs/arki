@@ -1,16 +1,11 @@
 import type { UserId } from '@arki/auth/ids';
+import type { Instant } from '@arki/date';
+import { fromDate } from '@arki/date';
 
 import type { CoreWrites } from '../journal';
 import type { BasePaymentProvider } from '../providers/base-provider';
 import type { PaymentRepository } from '../repository';
-import type {
-  Plan,
-  PlanId,
-  Subscription,
-  SubscriptionId,
-  SubscriptionPreview,
-  SubscriptionStatus,
-} from '../types';
+import type { Plan, PlanId, Subscription, SubscriptionId, SubscriptionPreview, SubscriptionStatus } from '../types';
 import { paymentAmount } from '../money';
 
 // Utility functions to convert between database and domain types
@@ -31,7 +26,7 @@ function convertSubscriptionArrayToDomain(dbSubscriptions: any[]): Subscription[
 export type SubscriptionChangeOptions = {
   prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
   immediateChange?: boolean;
-  effectiveDate?: Date;
+  effectiveDate?: Instant;
 }
 
 export type SubscriptionCreationOptions = {
@@ -45,7 +40,7 @@ export type SubscriptionCancellationOptions = {
   immediately?: boolean;
   reason?: string;
   provideFeedback?: boolean;
-  effectiveDate?: Date;
+  effectiveDate?: Instant;
 }
 
 export type SubscriptionAnalytics = {
@@ -347,12 +342,13 @@ export class SubscriptionManager {
 
   async handleTrialEndingSoon(daysBeforeExpiration = 3): Promise<Subscription[]> {
     try {
+      // Local-time calendar days, as before: the working values stay `Date`s until the query.
       const startDate = new Date();
       startDate.setDate(startDate.getDate() + daysBeforeExpiration - 1);
       const endDate = new Date();
       endDate.setDate(endDate.getDate() + daysBeforeExpiration);
 
-      const subscriptions = await this.paymentRepository.findSubscriptionsEndingInRange(startDate, endDate);
+      const subscriptions = await this.paymentRepository.findSubscriptionsEndingInRange(fromDate(startDate), fromDate(endDate));
 
       // Filter for trialing subscriptions
       const trialingSubscriptions = subscriptions.filter(sub => sub.status === 'trialing');
@@ -385,7 +381,7 @@ export class SubscriptionManager {
     }
   }
 
-  async getSubscriptionAnalytics(startDate?: Date, endDate?: Date): Promise<SubscriptionAnalytics> {
+  async getSubscriptionAnalytics(startDate?: Instant, endDate?: Instant): Promise<SubscriptionAnalytics> {
     try {
       const subscriptions = await this.paymentRepository.getSubscriptionStats(startDate, endDate);
       const payments = await this.paymentRepository.getPaymentStats(startDate, endDate);

@@ -1,5 +1,6 @@
 import { userIdSchema } from '@arki/auth/ids';
 import { z } from '@arki/contracts';
+import { instantSchema } from '@arki/date/zod';
 
 import { refundIdSchema } from '../refunds/primitives';
 import { moneyJsonSchema, positiveMoneySchema, priceSchema } from './money';
@@ -145,8 +146,8 @@ export const paymentQuerySchema = paginationSchema.extend({
   status: paymentStatusSchema.optional(),
   subscriptionId: subscriptionIdSchema.optional(),
   userId: userIdSchema.optional(),
-  startDate: z.string().datetime().optional(),
-  endDate: z.string().datetime().optional(),
+  startDate: instantSchema().optional(),
+  endDate: instantSchema().optional(),
 });
 
 export const planQuerySchema = paginationSchema.extend({
@@ -164,14 +165,14 @@ export const webhookEventQuerySchema = paginationSchema.extend({
   provider: paymentProviderSchema.optional(),
   eventType: webhookEventTypeSchema.optional(),
   processed: z.boolean().optional(),
-  startDate: z.string().datetime().optional(),
-  endDate: z.string().datetime().optional(),
+  startDate: instantSchema().optional(),
+  endDate: instantSchema().optional(),
 });
 
 // Analytics schemas
 export const analyticsQuerySchema = z.object({
-  startDate: z.string().datetime().optional(),
-  endDate: z.string().datetime().optional(),
+  startDate: instantSchema().optional(),
+  endDate: instantSchema().optional(),
   groupBy: z.enum(['day', 'week', 'month', 'year']).optional().default('month'),
   metrics: z
     .array(z.enum(['revenue', 'subscriptions', 'churn', 'mrr', 'arr']))
@@ -197,8 +198,8 @@ export const subscriptionPreviewSchema = z.object({
     nextInvoiceTotal: moneyJsonSchema,
     creditApplied: moneyJsonSchema,
   }),
-  trialEnd: z.date().optional(),
-  nextBillingDate: z.date(),
+  trialEnd: instantSchema().optional(),
+  nextBillingDate: instantSchema(),
 });
 
 export const subscriptionAnalyticsResponseSchema = z.object({
@@ -356,15 +357,15 @@ export const rejectRefundInputSchema = z.object({
 
 // Analytics router
 export const getAnalyticsMetricsInputSchema = z.object({
-  startDate: z.date().optional(),
-  endDate: z.date().optional(),
+  startDate: instantSchema().optional(),
+  endDate: instantSchema().optional(),
 });
 
 // Proration router
 export const prorationPreviewInputSchema = z.object({
   subscriptionId: subscriptionIdSchema,
   newPlanId: planIdSchema,
-  changeDate: z.date().optional(),
+  changeDate: instantSchema().optional(),
   prorationMode: z.enum(['immediate', 'next_cycle']).default('immediate'),
 });
 

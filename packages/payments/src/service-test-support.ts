@@ -10,6 +10,8 @@
 import { and, eq, gte, lte } from 'drizzle-orm';
 
 import type { UserId } from '@arki/auth/ids';
+import type { Instant } from '@arki/date';
+import { instant } from '@arki/date';
 
 import type { CoreWrites } from './core/journal';
 import type { Payment, PaymentId, PlanId, Subscription, SubscriptionId, SubscriptionStatus } from './core/types';
@@ -71,7 +73,7 @@ export function coreReads(db: AppDb) {
     async findSubscriptionsByStatus(status: SubscriptionStatus) {
       return db.select().from(subscriptions).where(eq(subscriptions.status, status));
     },
-    async findSubscriptionsEndingInRange(startDate: Date, endDate: Date) {
+    async findSubscriptionsEndingInRange(startDate: Instant, endDate: Instant) {
       return db
         .select()
         .from(subscriptions)
@@ -129,9 +131,9 @@ export function seedSubscription(writes: CoreWrites, status: SubscriptionStatus)
     customerId,
     providerSubscriptionId: `psub_service_${next}`,
     status,
-    currentPeriodStart: new Date('2026-01-01T00:00:00.000Z'),
-    currentPeriodEnd: new Date('2026-02-01T00:00:00.000Z'),
-    canceledAt: status === 'canceled' ? new Date('2026-01-15T00:00:00.000Z') : null,
+    currentPeriodStart: instant('2026-01-01T00:00:00.000Z'),
+    currentPeriodEnd: instant('2026-02-01T00:00:00.000Z'),
+    canceledAt: status === 'canceled' ? instant('2026-01-15T00:00:00.000Z') : null,
   });
 }
 

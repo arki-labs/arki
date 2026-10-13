@@ -1,4 +1,5 @@
 import { createInsertSchema, createSelectSchema, z } from '@arki/contracts';
+import { instantSchema } from '@arki/date/zod';
 
 import type { CoreTables } from './tables';
 
@@ -39,11 +40,11 @@ export function createCoreDerivedSchemas({
   // `version` belongs to the journal: it is not part of what the API reads or writes
   const subscriptionSelectSchema = createSelectSchema(subscriptions).omit({ version: true });
   const subscriptionInsertSchema = createInsertSchema(subscriptions, {
-    currentPeriodStart: z.date(),
-    currentPeriodEnd: z.date(),
-    trialStart: z.date().optional(),
-    trialEnd: z.date().optional(),
-    canceledAt: z.date().optional(),
+    currentPeriodStart: instantSchema(),
+    currentPeriodEnd: instantSchema(),
+    trialStart: instantSchema().optional(),
+    trialEnd: instantSchema().optional(),
+    canceledAt: instantSchema().optional(),
   }).omit({ version: true });
   const subscriptionUpdateSchema = subscriptionInsertSchema.partial().omit({ id: true, userId: true });
 

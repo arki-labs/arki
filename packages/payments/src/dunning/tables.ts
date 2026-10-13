@@ -1,6 +1,9 @@
-import { sql } from 'drizzle-orm';
 import type { PgColumn, PgSchema } from 'drizzle-orm/pg-core';
-import { bigint, boolean, check, integer, jsonb, real, text, timestamp, varchar } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { bigint, boolean, check, integer, jsonb, real, text, varchar } from 'drizzle-orm/pg-core';
+
+import type { Instant } from '@arki/date';
+import { instant } from '@arki/db/temporal';
 
 import type {
   CommunicationChannel,
@@ -108,8 +111,8 @@ export function createDunningTables({
     createdBy: text('created_by').notNull(),
     updatedBy: text('updated_by'),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: instant('created_at').notNull().default(sql`now()`),
+    updatedAt: instant('updated_at').notNull().default(sql`now()`),
   });
 
   const dunningTemplates = schema.table('dunning_templates', {
@@ -135,8 +138,8 @@ export function createDunningTables({
     isActive: boolean('is_active').notNull().default(true),
     abTestVariant: varchar('ab_test_variant', { length: 50 }),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: instant('created_at').notNull().default(sql`now()`),
+    updatedAt: instant('updated_at').notNull().default(sql`now()`),
   });
 
   const dunningExecutions = schema.table('dunning_executions', {
@@ -151,16 +154,16 @@ export function createDunningTables({
     triggerType: varchar('trigger_type', { length: 100 }).notNull(),
     triggerData: jsonb('trigger_data').$type<Record<string, unknown>>().notNull(),
     status: executionStatusEnum('status').$type<ExecutionStatus>().notNull().default('scheduled'),
-    scheduledAt: timestamp('scheduled_at', { withTimezone: true }).notNull(),
-    startedAt: timestamp('started_at', { withTimezone: true }),
-    completedAt: timestamp('completed_at', { withTimezone: true }),
+    scheduledAt: instant('scheduled_at').notNull(),
+    startedAt: instant('started_at'),
+    completedAt: instant('completed_at'),
     result: jsonb('result').$type<ExecutionResultJson>(),
     errorMessage: text('error_message'),
     retryCount: integer('retry_count').notNull().default(0),
-    nextRetryAt: timestamp('next_retry_at', { withTimezone: true }),
+    nextRetryAt: instant('next_retry_at'),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: instant('created_at').notNull().default(sql`now()`),
+    updatedAt: instant('updated_at').notNull().default(sql`now()`),
   });
 
   const dunningCommunications = schema.table('dunning_communications', {
@@ -175,17 +178,17 @@ export function createDunningTables({
     subject: varchar('subject', { length: 500 }),
     content: text('content').notNull(),
     status: communicationStatusEnum('status').$type<CommunicationStatus>().notNull().default('pending'),
-    sentAt: timestamp('sent_at', { withTimezone: true }),
-    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
-    openedAt: timestamp('opened_at', { withTimezone: true }),
-    clickedAt: timestamp('clicked_at', { withTimezone: true }),
+    sentAt: instant('sent_at'),
+    deliveredAt: instant('delivered_at'),
+    openedAt: instant('opened_at'),
+    clickedAt: instant('clicked_at'),
     failureReason: text('failure_reason'),
     providerMessageId: varchar('provider_message_id', { length: 255 }),
     providerResponse: jsonb('provider_response').$type<Record<string, unknown>>(),
     trackingData: jsonb('tracking_data').$type<Record<string, unknown>>(),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: instant('created_at').notNull().default(sql`now()`),
+    updatedAt: instant('updated_at').notNull().default(sql`now()`),
   });
 
   const customerSegments = schema.table('customer_segments', {
@@ -208,13 +211,13 @@ export function createDunningTables({
       .notNull(),
     isActive: boolean('is_active').notNull().default(true),
     customerCount: integer('customer_count').default(0),
-    lastCalculated: timestamp('last_calculated', { withTimezone: true }),
+    lastCalculated: instant('last_calculated'),
     autoUpdate: boolean('auto_update').notNull().default(true),
     updateFrequency: integer('update_frequency').default(24),
     createdBy: text('created_by').notNull(),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: instant('created_at').notNull().default(sql`now()`),
+    updatedAt: instant('updated_at').notNull().default(sql`now()`),
   });
 
   const customerRiskProfiles = schema.table('customer_risk_profiles', {
@@ -226,7 +229,7 @@ export function createDunningTables({
         overall: number;
         factors: Record<string, number>;
         category: 'low' | 'medium' | 'high' | 'critical';
-        lastCalculated: Date;
+        lastCalculated: Instant;
         trends: {
           direction: 'improving' | 'stable' | 'declining';
           changePercent: number;
@@ -240,7 +243,7 @@ export function createDunningTables({
         successfulPayments: number;
         failedPayments: number;
         averageAmount: number;
-        lastPaymentDate?: Date;
+        lastPaymentDate?: Instant;
         streakDays: number;
       }>()
       .notNull(),
@@ -256,7 +259,7 @@ export function createDunningTables({
     engagementMetrics: jsonb('engagement_metrics')
       .$type<{
         score: number;
-        lastActivity?: Date;
+        lastActivity?: Instant;
         activityFrequency: number;
         featureUsage: Record<string, number>;
       }>()
@@ -271,14 +274,14 @@ export function createDunningTables({
       }>()
       .notNull(),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: instant('created_at').notNull().default(sql`now()`),
+    updatedAt: instant('updated_at').notNull().default(sql`now()`),
   });
 
   const dunningCampaignAnalytics = schema.table('dunning_campaign_analytics', {
     id: varchar('id', { length: 255 }).primaryKey(),
     campaignId: dunningCampaignIdFactory.foreignKey('campaign_id', () => dunningCampaigns.id, { onDelete: 'cascade' }),
-    date: timestamp('date', { withTimezone: true }).notNull(),
+    date: instant('date').notNull(),
     executions: integer('executions').notNull().default(0),
     customersReached: integer('customers_reached').notNull().default(0),
     communicationsSent: integer('communications_sent').notNull().default(0),
@@ -298,8 +301,8 @@ export function createDunningTables({
     conversionRate: real('conversion_rate').notNull().default(0),
     roi: real('roi').notNull().default(0),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: instant('created_at').notNull().default(sql`now()`),
+    updatedAt: instant('updated_at').notNull().default(sql`now()`),
   }, (_table) => [
     check('dunning_analytics_revenue_recovered_minor_not_negative', sql`"revenue_recovered_minor" >= 0`),
     check('dunning_analytics_communication_costs_minor_not_negative', sql`"communication_costs_minor" >= 0`),

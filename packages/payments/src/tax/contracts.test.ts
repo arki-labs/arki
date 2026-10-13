@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { instant } from '@arki/date';
 import { money } from '@arki/money';
 
 import type { TaxComplianceReport } from './reporting';
@@ -63,11 +64,11 @@ describe('customerTaxSummarySchema', () => {
 
 describe('taxComplianceReportSchema', () => {
   it('converts the totals and the category amounts, and keeps the dates', () => {
-    const startDate = new Date('2026-01-01T00:00:00.000Z');
+    const startDate = instant('2026-01-01T00:00:00.000Z');
     const report: TaxComplianceReport = {
       id: 'report_1',
       reportType: 'vat',
-      period: { year: 2026, quarter: 1, startDate, endDate: new Date('2026-03-31T00:00:00.000Z') },
+      period: { year: 2026, quarter: 1, startDate, endDate: instant('2026-03-31T00:00:00.000Z') },
       jurisdiction: 'all',
       totalSales: money('1000.000', 'KWD'),
       totalTaxCollected: money('50.125', 'KWD'),

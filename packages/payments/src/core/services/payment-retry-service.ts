@@ -1,3 +1,6 @@
+import type { Instant } from '@arki/date';
+import { add, isSameOrBefore, now, toMillis } from '@arki/date';
+
 import type { CoreWrites } from '../journal';
 import type { BasePaymentProvider } from '../providers/base-provider';
 import type { PaymentRepository } from '../repository';
@@ -20,12 +23,12 @@ export type RetryAttempt = {
   paymentId: PaymentId;
   subscriptionId: SubscriptionId;
   attemptNumber: number;
-  scheduledFor: Date;
-  executedAt?: Date;
+  scheduledFor: Instant;
+  executedAt?: Instant;
   status: 'pending' | 'executing' | 'succeeded' | 'failed' | 'cancelled';
   failureReason?: string;
   strategyUsed: string;
-  createdAt: Date;
+  createdAt: Instant;
 };
 
 export type RetryAnalytics = {
@@ -126,8 +129,8 @@ export class PaymentRetryService {
         id: payment.subscriptionId,
         userId: payment.userId,
         status: 'active',
-        currentPeriodStart: new Date(),
-        currentPeriodEnd: new Date(),
+        currentPeriodStart: now(),
+        currentPeriodEnd: now(),
         planId: 'default_plan_id' as PlanId,
         customerId: payment.customerId,
         providerSubscriptionId: 'default_provider_id',
@@ -136,8 +139,8 @@ export class PaymentRetryService {
         trialStart: null,
         trialEnd: null,
         canceledAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: now(),
+        updatedAt: now(),
       };
 
       const domainPayment: Payment = {
@@ -160,11 +163,11 @@ export class PaymentRetryService {
       await this.cancelRetries(paymentId);
 
       const retryAttempts: RetryAttempt[] = [];
-      const now = new Date();
+      const current = now();
 
       for (let i = 0; i < strategy.maxAttempts; i++) {
         const delayMinutes = this.calculateDelay(strategy, i);
-        const scheduledFor = new Date(now.getTime() + delayMinutes * 60 * 1000);
+        const scheduledFor = add(current, { minutes: delayMinutes });
 
         const attempt: RetryAttempt = {
           id: `retry_${paymentId}_${i + 1}_${Date.now()}`,
@@ -174,7 +177,7 @@ export class PaymentRetryService {
           scheduledFor,
           status: 'pending',
           strategyUsed: strategy.name,
-          createdAt: now,
+          createdAt: current,
         };
 
         this.retryAttempts.set(attempt.id, attempt);
@@ -192,10 +195,10 @@ export class PaymentRetryService {
   }
 
   async processRetries(): Promise<void> {
-    const now = new Date();
+    const current = now();
     const pendingRetries = [...this.retryAttempts.values()]
-      .filter((attempt) => attempt.status === 'pending' && attempt.scheduledFor <= now)
-      .sort((a, b) => a.scheduledFor.getTime() - b.scheduledFor.getTime());
+      .filter((attempt) => attempt.status === 'pending' && isSameOrBefore(attempt.scheduledFor, current))
+      .sort((a, b) => toMillis(a.scheduledFor) - toMillis(b.scheduledFor));
 
     console.log(`Processing ${pendingRetries.length} pending retry attempts`);
 
@@ -212,7 +215,7 @@ export class PaymentRetryService {
 
   private async executeRetry(attempt: RetryAttempt): Promise<void> {
     attempt.status = 'executing';
-    attempt.executedAt = new Date();
+    attempt.executedAt = now();
 
     try {
       const subscription = await this.paymentRepository.findSubscriptionById(attempt.subscriptionId);
@@ -347,7 +350,7 @@ export class PaymentRetryService {
       .sort((a, b) => a.attemptNumber - b.attemptNumber);
   }
 
-  async getRetryAnalytics(startDate?: Date, endDate?: Date): Promise<RetryAnalytics> {
+  async getRetryAnalytics(startDate?: Instant, endDate?: Instant): Promise<RetryAnalytics> {
     const allRetries = [...this.retryAttempts.values()];
 
     const filteredRetries =
@@ -373,7 +376,7 @@ export class PaymentRetryService {
       successfulWithExecutionTime.length > 0
         ? successfulWithExecutionTime.reduce((sum, attempt) => {
             const hours =
-              (attempt.executedAt!.getTime() - attempt.createdAt.getTime()) / (1000 * 60 * 60);
+              (toMillis(attempt.executedAt!) - toMillis(attempt.createdAt)) / (1000 * 60 * 60);
             return sum + hours;
           }, 0) / successfulWithExecutionTime.length
         : 0;

@@ -1,6 +1,8 @@
 import { eq } from 'drizzle-orm';
 
 import type { UserId } from '@arki/auth/ids';
+import type { Instant } from '@arki/date';
+import { now } from '@arki/date';
 import { getLogger } from '@arki/log';
 import { Money } from '@arki/money';
 
@@ -31,7 +33,7 @@ export type DunningTriggerEvent = {
   subscriptionId?: SubscriptionId;
   paymentId?: PaymentId;
   metadata: Record<string, unknown>;
-  timestamp: Date;
+  timestamp: Instant;
 };
 
 /**
@@ -188,7 +190,7 @@ export class DunningIntegrationService {
   async handleTrialEnding(event: {
     subscriptionId: SubscriptionId;
     customerId: CustomerId;
-    trialEndDate: Date;
+    trialEndDate: Instant;
     daysUntilEnd: number;
     metadata?: Record<string, unknown>;
   }): Promise<void> {
@@ -196,7 +198,7 @@ export class DunningIntegrationService {
       customerId: event.customerId,
       subscriptionId: event.subscriptionId,
       daysUntilEnd: event.daysUntilEnd,
-      trialEndDate: event.trialEndDate.toISOString(),
+      trialEndDate: event.trialEndDate.toString(),
     });
 
     const customerSegments = await this.segmentationService.getCustomerSegments(event.customerId);
@@ -401,7 +403,7 @@ export class DunningIntegrationService {
             .update(this.dunningExecutions)
             .set({
               status: 'cancelled',
-              completedAt: new Date(),
+              completedAt: now(),
               result: {
                 customersProcessed: 0,
                 communicationsSent: 0,
@@ -475,7 +477,7 @@ export class DunningIntegrationService {
     event: {
       subscriptionId: SubscriptionId;
       customerId: CustomerId;
-      trialEndDate: Date;
+      trialEndDate: Instant;
       daysUntilEnd: number;
       metadata?: Record<string, unknown>;
     },

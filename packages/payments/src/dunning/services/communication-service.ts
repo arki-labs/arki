@@ -1,3 +1,5 @@
+import type { Instant } from '@arki/date';
+import { fromDate, now, toDate } from '@arki/date';
 import { getLogger } from '@arki/log';
 
 import type { ListCommunicationsQuery, UpdateCommunicationStatusInput } from '../contracts';
@@ -47,7 +49,7 @@ export type CommunicationResult = {
 
 export type CommunicationDeliveryStatus = {
   status: CommStatus;
-  timestamp: Date;
+  timestamp: Instant;
   metadata?: Record<string, unknown>;
 };
 
@@ -112,7 +114,7 @@ export class EmailProvider implements CommunicationProvider {
         messageId: data.id,
         providerResponse: {
           provider: 'resend',
-          timestamp: new Date().toISOString(),
+          timestamp: now().toString(),
           recipient: request.recipient,
           resendId: data.id,
         },
@@ -155,7 +157,7 @@ export class EmailProvider implements CommunicationProvider {
         const data = (await response.json()) as { last_event?: string; created_at: string } & Record<string, unknown>;
         return {
           status: data.last_event === 'delivered' ? 'delivered' : 'sent',
-          timestamp: new Date(data.created_at),
+          timestamp: fromDate(new Date(data.created_at)),
           metadata: data,
         };
       }
@@ -168,7 +170,7 @@ export class EmailProvider implements CommunicationProvider {
     // Fallback status
     return {
       status: 'sent',
-      timestamp: new Date(),
+      timestamp: now(),
     };
   }
 
@@ -238,7 +240,7 @@ export class SMSProvider implements CommunicationProvider {
         messageId: data.sid,
         providerResponse: {
           provider: 'twilio',
-          timestamp: new Date().toISOString(),
+          timestamp: now().toString(),
           recipient: request.recipient,
           twilioSid: data.sid,
           status: data.status,
@@ -302,7 +304,7 @@ export class SMSProvider implements CommunicationProvider {
 
         return {
           status,
-          timestamp: new Date(data.date_updated || data.date_created || Date.now()),
+          timestamp: fromDate(new Date(data.date_updated || data.date_created || Date.now())),
           metadata: {
             twilioStatus: data.status,
             errorCode: data.error_code,
@@ -319,7 +321,7 @@ export class SMSProvider implements CommunicationProvider {
     // Fallback status
     return {
       status: 'sent',
-      timestamp: new Date(),
+      timestamp: now(),
     };
   }
 
@@ -380,7 +382,7 @@ export class InAppProvider implements CommunicationProvider {
       //   category: 'dunning',
       //   isRead: false,
       //   metadata: request.trackingData,
-      //   createdAt: new Date(),
+      //   createdAt: now(),
       // });
 
       // For now, we'll simulate success
@@ -389,7 +391,7 @@ export class InAppProvider implements CommunicationProvider {
         messageId: notificationId,
         providerResponse: {
           provider: 'in_app',
-          timestamp: new Date().toISOString(),
+          timestamp: now().toString(),
           recipient: request.recipient,
           notificationId,
           appUrl: `${this.config.appUrl}/notifications/${notificationId}`,
@@ -426,7 +428,7 @@ export class InAppProvider implements CommunicationProvider {
       // For now, simulate checking if the notification was "read"
       return {
         status: 'delivered', // In-app notifications are considered delivered when created
-        timestamp: new Date(),
+        timestamp: now(),
         metadata: {
           messageId,
           readAt: null, // Would be filled if user has read the notification
@@ -438,7 +440,7 @@ export class InAppProvider implements CommunicationProvider {
       });
       return {
         status: 'delivered',
-        timestamp: new Date(),
+        timestamp: now(),
       };
     }
   }
@@ -493,7 +495,7 @@ export class WebhookProvider implements CommunicationProvider {
       payload.metadata = {
         ...payload.metadata,
         ...request.trackingData,
-        timestamp: new Date().toISOString(),
+        timestamp: now().toString(),
       };
 
       const messageId = `webhook_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
@@ -529,7 +531,7 @@ export class WebhookProvider implements CommunicationProvider {
         messageId,
         providerResponse: {
           provider: 'webhook',
-          timestamp: new Date().toISOString(),
+          timestamp: now().toString(),
           recipient: webhookUrl,
           status: response.status,
           headers: responseHeaders,
@@ -630,7 +632,7 @@ export class CommunicationOrchestrationService {
       // Update communication status
       if (result.success) {
         await this.communicationRepo.updateStatus(communication.id, 'sent', {
-          sentAt: new Date(),
+          sentAt: now(),
           providerMessageId: result.messageId,
           providerResponse: result.providerResponse,
         });
@@ -682,7 +684,7 @@ export class CommunicationOrchestrationService {
       customer_name: customer.name || 'Valued Customer',
       customer_email: customer.email || '',
       customer_id: customer.id,
-      current_date: new Date().toLocaleDateString(),
+      current_date: toDate(now()).toLocaleDateString(),
       company_name: 'Your Company', // Would come from configuration
     };
   }
@@ -718,7 +720,7 @@ export class CommunicationOrchestrationService {
 
         if (result.success) {
           await this.communicationRepo.updateStatus(communication.id, 'sent', {
-            sentAt: new Date(),
+            sentAt: now(),
             providerMessageId: result.messageId,
             providerResponse: result.providerResponse,
           });
@@ -745,7 +747,7 @@ export class CommunicationOrchestrationService {
   async handleCommunicationWebhook(data: {
     providerMessageId: string;
     event: 'delivered' | 'opened' | 'clicked' | 'bounced' | 'complained';
-    timestamp: Date;
+    timestamp: Instant;
     metadata?: Record<string, unknown>;
   }): Promise<void> {
     const communication = await this.communicationRepo.findByProviderMessageId(data.providerMessageId);
@@ -760,7 +762,7 @@ export class CommunicationOrchestrationService {
         [data.event]: data.timestamp,
         ...(data.metadata && { metadata: data.metadata }),
       },
-      updatedAt: new Date(),
+      updatedAt: now(),
     };
 
     switch (data.event) {
@@ -807,7 +809,7 @@ export class CommunicationOrchestrationService {
    * Update communication status manually
    */
   async updateCommunicationStatus(input: UpdateCommunicationStatusInput): Promise<DunningCommunication | null> {
-    const updates: Partial<CommunicationUpdateData> = { updatedAt: new Date() };
+    const updates: Partial<CommunicationUpdateData> = { updatedAt: now() };
 
     if (input.sentAt) updates.sentAt = input.sentAt;
     if (input.deliveredAt) updates.deliveredAt = input.deliveredAt;

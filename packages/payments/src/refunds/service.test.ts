@@ -14,6 +14,7 @@ import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { Money } from '@arki/money';
+import { instant, isInstant } from '@arki/date';
 import { money } from '@arki/money';
 
 import type { CoreWrites } from '../core/journal';
@@ -36,7 +37,7 @@ let writes: RefundWrites;
 
 /** The id the provider gives the refund. The service stores it as `providerRefundId`. */
 const refundedAs = createPaymentId();
-const refundedOn = new Date('2026-01-10T00:00:00.000Z');
+const refundedOn = instant('2026-01-10T00:00:00.000Z');
 
 /** Every amount the provider was asked to pay back, in order. */
 const askedToRefund: (Money | undefined)[] = [];
@@ -298,7 +299,7 @@ describe('approveRefund', () => {
     const refund = await service.approveRefund({ refundId: pending.id, approvedBy: adminId });
 
     expect(refund).toMatchObject({ status: 'completed', approvedBy: adminId });
-    expect(refund.completedAt).toBeInstanceOf(Date);
+    expect(isInstant(refund.completedAt)).toBe(true);
     expect(await refundRow(db, pending.id)).toMatchObject({ status: 'completed', approvedBy: adminId });
     expect(await eventTypesOf(db, 'refund', pending.id)).toEqual([
       'RefundRequestedV2',

@@ -5,18 +5,21 @@
  * Plain TypeScript only: this file runs on Node, Bun, Deno, browsers and Hermes.
  */
 
+import type { Instant } from '@arki/date';
+import { instant } from '@arki/date';
+
 /** Event data is stored as JSON, so a time travels as an ISO string. */
-export function toIso(value: Date): string {
-  return value.toISOString();
+export function toIso(value: Instant): string {
+  return value.toString();
 }
 
-/** Reducers build the `Date` a timestamp column stores. */
-export function toDate(iso: string): Date {
-  return new Date(iso);
+/** Reducers build the `Instant` an `instant` column stores. */
+export function toInstant(iso: string): Instant {
+  return instant(iso);
 }
 
-export function toNullableDate(iso: string | null): Date | null {
-  return iso === null ? null : new Date(iso);
+export function toNullableInstant(iso: string | null): Instant | null {
+  return iso === null ? null : instant(iso);
 }
 
 /**

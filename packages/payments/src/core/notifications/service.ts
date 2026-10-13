@@ -1,3 +1,5 @@
+import { now } from '@arki/date';
+
 import type { Refund } from '../../refunds/types';
 import { refundAmountOf } from '../../refunds/repository';
 
@@ -91,7 +93,7 @@ export class EmailNotificationService implements NotificationService {
     //     refundId: refund.id,
     //     amount: refund.refundAmount,
     //     error: error instanceof Error ? error.message : 'Unknown error',
-    //     failedAt: new Date(),
+    //     failedAt: now(),
     //     customerNote: refund.customerNote,
     //   },
     // });
@@ -173,7 +175,7 @@ export class SlackNotificationService implements NotificationService {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `*Refund ID:* ${refund.id}\n*Amount:* ${refundAmountOf(refund).toString()}\n*Error:* ${error instanceof Error ? error.message : 'Unknown error'}\n*Failed At:* ${new Date().toISOString()}`,
+            text: `*Refund ID:* ${refund.id}\n*Amount:* ${refundAmountOf(refund).toString()}\n*Error:* ${error instanceof Error ? error.message : 'Unknown error'}\n*Failed At:* ${now().toString()}`,
           },
         },
       ],

@@ -1,5 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 
+import type { Instant } from '@arki/date';
+import { now, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
 import { Money } from '@arki/money';
 
@@ -367,7 +369,7 @@ export class CustomerSegmentationService {
       overall: Math.round(overallScore),
       factors: adjustedFactors,
       category,
-      lastCalculated: new Date(),
+      lastCalculated: now(),
       trends,
     };
 
@@ -537,9 +539,10 @@ export class CustomerSegmentationService {
     // Get historical risk scores if available (would typically be stored)
     // For now, calculate trend based on recent payment and subscription behavior
 
-    const now = new Date();
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+    // Raw `sql` parameters bypass the column codec, so these working values stay `Date`s.
+    const current = new Date();
+    const thirtyDaysAgo = new Date(current.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const sixtyDaysAgo = new Date(current.getTime() - 60 * 24 * 60 * 60 * 1000);
 
     // Compare recent vs older payment patterns
     const recentPayments = await this.db
@@ -651,7 +654,7 @@ export class CustomerSegmentationService {
     const recencyRisk = engagementMetrics.lastActivity
       ? Math.min(
           50,
-          Math.max(0, (Date.now() - engagementMetrics.lastActivity.getTime()) / (1000 * 60 * 60 * 24) - 7) * 2,
+          Math.max(0, (Date.now() - toMillis(engagementMetrics.lastActivity)) / (1000 * 60 * 60 * 24) - 7) * 2,
         )
       : 50;
 
@@ -661,10 +664,10 @@ export class CustomerSegmentationService {
   /**
    * Calculate recency risk based on last payment (0-100)
    */
-  private calculateRecencyRisk(lastPaymentDate?: Date): number {
+  private calculateRecencyRisk(lastPaymentDate?: Instant): number {
     if (!lastPaymentDate) return 100; // No payments = highest risk
 
-    const daysSinceLastPayment = (Date.now() - lastPaymentDate.getTime()) / (1000 * 60 * 60 * 24);
+    const daysSinceLastPayment = (Date.now() - toMillis(lastPaymentDate)) / (1000 * 60 * 60 * 24);
     return Math.min(100, Math.max(0, (daysSinceLastPayment - 30) * 2)); // Risk increases after 30 days
   }
 
@@ -688,7 +691,7 @@ export class CustomerSegmentationService {
         successfulPayments: sql<number>`COUNT(CASE WHEN status = 'succeeded' THEN 1 END)`,
         failedPayments: sql<number>`COUNT(CASE WHEN status = 'failed' THEN 1 END)`,
         averageAmount: sql<number>`AVG(amount)`,
-        lastPaymentDate: sql<Date>`MAX(CASE WHEN status = 'succeeded' THEN created_at END)`,
+        lastPaymentDate: sql`MAX(CASE WHEN status = 'succeeded' THEN created_at END)`.mapWith(this.payments.createdAt),
       })
       .from(this.payments)
       .where(sql`${this.payments.customerId} = ${customerId}`);
@@ -752,14 +755,14 @@ export class CustomerSegmentationService {
     }
 
     // Calculate engagement based on available data
-    const now = new Date();
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const current = new Date();
+    const thirtyDaysAgo = new Date(current.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     // Get recent payment activity as a proxy for engagement
     const recentPaymentActivity = await this.db
       .select({
         paymentCount: sql<number>`COUNT(*)`,
-        lastPaymentDate: sql<Date>`MAX(created_at)`,
+        lastPaymentDate: sql`MAX(created_at)`.mapWith(this.payments.createdAt),
         successRate: sql<number>`ROUND((COUNT(CASE WHEN status = 'succeeded' THEN 1 END) * 100.0 / COUNT(*)), 2)`,
       })
       .from(this.payments)
@@ -778,7 +781,7 @@ export class CustomerSegmentationService {
       .select({
         activeSubscriptions: sql<number>`COUNT(CASE WHEN status = 'active' THEN 1 END)`,
         recentStatusChanges: sql<number>`COUNT(CASE WHEN updated_at >= ${thirtyDaysAgo} THEN 1 END)`,
-        lastSubscriptionUpdate: sql<Date>`MAX(updated_at)`,
+        lastSubscriptionUpdate: sql`MAX(updated_at)`.mapWith(this.subscriptions.updatedAt),
       })
       .from(this.subscriptions)
       .where(sql`${this.subscriptions.customerId} = ${customerId}`);
@@ -806,11 +809,11 @@ export class CustomerSegmentationService {
 
     // Recency contributes 30% to engagement score
     const mostRecentActivity = [paymentActivity.lastPaymentDate, subEngagement.lastSubscriptionUpdate]
-      .filter((date): date is Date => date !== null)
-      .sort((a, b) => b.getTime() - a.getTime())[0];
+      .filter((date): date is Instant => date !== null)
+      .sort((a, b) => toMillis(b) - toMillis(a))[0];
 
     if (mostRecentActivity) {
-      const daysSinceLastActivity = (now.getTime() - mostRecentActivity.getTime()) / (1000 * 60 * 60 * 24);
+      const daysSinceLastActivity = (current.getTime() - toMillis(mostRecentActivity)) / (1000 * 60 * 60 * 24);
       let recencyScore = Math.max(0, 30 - daysSinceLastActivity); // Decreases by 1 point per day
       recencyScore = Math.max(0, recencyScore);
       engagementScore += recencyScore;

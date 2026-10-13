@@ -1,4 +1,6 @@
-import { Money, max } from '@arki/money';
+import type { Instant } from '@arki/date';
+import { fromDate, isAfter, isBefore, now, toDate, toMillis } from '@arki/date';
+import { max, Money } from '@arki/money';
 import { formatMoney } from '@arki/money/format';
 
 import type { PaymentRepository } from '../repository';
@@ -35,7 +37,7 @@ export type ProrationCalculation = {
   subscription: Subscription;
   remainingTime: RemainingTime;
   costs: ProrationCosts;
-  effectiveDate: Date;
+  effectiveDate: Instant;
 };
 
 /** What is left of the current period. `percentage` is for display; costs use the exact milliseconds. */
@@ -55,7 +57,7 @@ export type ProrationCosts = {
 };
 
 export type ProrationOptions = {
-  effectiveDate?: Date;
+  effectiveDate?: Instant;
   prorationBehavior: 'create_prorations' | 'none' | 'always_invoice';
   previewOnly?: boolean;
 };
@@ -84,7 +86,7 @@ export class ProrationService {
     const currentPlan = convertPlanToDomain(dbSubscription.plan);
     const newPlan = convertPlanToDomain(dbNewPlan);
     const subscription = convertSubscriptionToDomain(dbSubscription);
-    const effectiveDate = options.effectiveDate || new Date();
+    const effectiveDate = options.effectiveDate || now();
 
     const remainingTime = this.calculateRemainingTime(subscription, effectiveDate);
 
@@ -163,7 +165,7 @@ export class ProrationService {
   }> {
     const immediate = await this.calculateProration(subscriptionId, newPlanId, {
       prorationBehavior: 'create_prorations',
-      effectiveDate: new Date(),
+      effectiveDate: now(),
     });
 
     const subscription = await this.paymentRepository.findSubscriptionById(subscriptionId);
@@ -209,21 +211,21 @@ export class ProrationService {
     };
   }
 
-  private calculateRemainingTime(subscription: Subscription, effectiveDate: Date): RemainingTime {
-    const currentPeriodStart = new Date(subscription.currentPeriodStart);
-    const currentPeriodEnd = new Date(subscription.currentPeriodEnd);
-    const effective = new Date(effectiveDate);
+  private calculateRemainingTime(subscription: Subscription, effectiveDate: Instant): RemainingTime {
+    const currentPeriodStart = subscription.currentPeriodStart;
+    const currentPeriodEnd = subscription.currentPeriodEnd;
+    const effective = effectiveDate;
 
-    if (effective < currentPeriodStart) {
+    if (isBefore(effective, currentPeriodStart)) {
       throw new Error('Effective date cannot be before current period start');
     }
 
-    if (effective > currentPeriodEnd) {
+    if (isAfter(effective, currentPeriodEnd)) {
       throw new Error('Effective date cannot be after current period end');
     }
 
-    const totalPeriodMs = currentPeriodEnd.getTime() - currentPeriodStart.getTime();
-    const remainingMs = currentPeriodEnd.getTime() - effective.getTime();
+    const totalPeriodMs = toMillis(currentPeriodEnd) - toMillis(currentPeriodStart);
+    const remainingMs = toMillis(currentPeriodEnd) - toMillis(effective);
 
     const days = Math.ceil(remainingMs / (1000 * 60 * 60 * 24));
     const percentage = (remainingMs / totalPeriodMs) * 100;
@@ -286,12 +288,11 @@ export class ProrationService {
     subscription: Subscription,
     currentPlan: Plan,
     newPlan: Plan,
-    effectiveDate: Date,
-  ): Date {
-    const effective = new Date(effectiveDate);
-
+    effectiveDate: Instant,
+  ): Instant {
     if (newPlan.interval !== currentPlan.interval) {
-      const nextBilling = new Date(effective);
+      // Local-time calendar steps, as before: the working value stays a `Date` until it is returned.
+      const nextBilling = toDate(effectiveDate);
 
       switch (newPlan.interval) {
         case 'monthly': {
@@ -312,10 +313,10 @@ export class ProrationService {
         }
       }
 
-      return nextBilling;
+      return fromDate(nextBilling);
     }
 
-    return new Date(subscription.currentPeriodEnd);
+    return subscription.currentPeriodEnd;
   }
 
   async generateProrationSummary(
@@ -377,7 +378,7 @@ export class ProrationService {
       description,
       breakdown,
       totalChange,
-      effectiveDate: proration.effectiveDate.toISOString().split('T')[0]!,
+      effectiveDate: proration.effectiveDate.toString().split('T')[0]!,
     };
   }
 }

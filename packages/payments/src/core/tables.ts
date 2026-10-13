@@ -1,28 +1,31 @@
-import { sql } from 'drizzle-orm';
 import type { PgColumn, PgSchema } from 'drizzle-orm/pg-core';
-import { bigint, boolean, check, integer, jsonb, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { bigint, boolean, check, integer, jsonb, text, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
 
 import type { UserId } from '@arki/auth/ids';
 import { createIdFactory } from '@arki/db/id-factory';
+import { instant } from '@arki/db/temporal';
 
+import type {
+  BillingInterval,
+  PaymentMethodType,
+  PaymentProviderType,
+  PaymentStatus,
+  PlanTier,
+  SubscriptionStatus,
+  WebhookEventType,
+} from './primitives';
 import {
-  type BillingInterval,
   billingIntervalValues,
   customerIdFactory,
-  type PaymentMethodType,
   paymentIdFactory,
   paymentMethodTypeValues,
-  type PaymentProviderType,
   paymentProviderValues,
-  type PaymentStatus,
   paymentStatusValues,
   planIdFactory,
-  type PlanTier,
   planTierValues,
   subscriptionIdFactory,
-  type SubscriptionStatus,
   subscriptionStatusValues,
-  type WebhookEventType,
   webhookEventTypeValues,
   webhookIdFactory,
 } from './primitives';
@@ -65,8 +68,8 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
       isActive: boolean('is_active').notNull().default(true),
       trialPeriodDays: integer('trial_period_days'),
       metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-      createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-      updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+      createdAt: instant('created_at').notNull().default(sql`now()`),
+      updatedAt: instant('updated_at').notNull().default(sql`now()`),
     },
     (_table) => [check('plans_price_minor_not_negative', sql`"price_minor" >= 0`)],
   );
@@ -80,8 +83,8 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
     name: varchar('name', { length: 255 }),
     defaultPaymentMethodId: varchar('default_payment_method_id', { length: 255 }),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: instant('created_at').notNull().default(sql`now()`),
+    updatedAt: instant('updated_at').notNull().default(sql`now()`),
   });
 
   const subscriptions = schema.table(
@@ -93,15 +96,15 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
       customerId: customerIdFactory.foreignKey('customer_id', () => customers.id, { onDelete: 'cascade' }),
       providerSubscriptionId: varchar('provider_subscription_id', { length: 255 }).notNull(),
       status: subscriptionStatusEnum('status').$type<SubscriptionStatus>().notNull().default('incomplete'),
-      currentPeriodStart: timestamp('current_period_start', { withTimezone: true }).notNull(),
-      currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }).notNull(),
-      trialStart: timestamp('trial_start', { withTimezone: true }),
-      trialEnd: timestamp('trial_end', { withTimezone: true }),
-      canceledAt: timestamp('canceled_at', { withTimezone: true }),
+      currentPeriodStart: instant('current_period_start').notNull(),
+      currentPeriodEnd: instant('current_period_end').notNull(),
+      trialStart: instant('trial_start'),
+      trialEnd: instant('trial_end'),
+      canceledAt: instant('canceled_at'),
       cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
       metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-      createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-      updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+      createdAt: instant('created_at').notNull().default(sql`now()`),
+      updatedAt: instant('updated_at').notNull().default(sql`now()`),
       /** Set by `@arki/journal`. 0 means: this row was written before the journal. */
       version: integer('version').notNull().default(0),
     },
@@ -129,8 +132,8 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
       refunded: boolean('refunded').notNull().default(false),
       refundedAmountMinor: bigint('refunded_amount_minor', { mode: 'number' }).notNull().default(0),
       metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-      createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-      updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+      createdAt: instant('created_at').notNull().default(sql`now()`),
+      updatedAt: instant('updated_at').notNull().default(sql`now()`),
       /** Set by `@arki/journal`. 0 means: this row was written before the journal. */
       version: integer('version').notNull().default(0),
     },
@@ -150,13 +153,13 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
       providerEventId: varchar('provider_event_id', { length: 255 }).notNull(),
       data: jsonb('data').$type<Record<string, unknown>>().notNull(),
       processed: boolean('processed').notNull().default(false),
-      processedAt: timestamp('processed_at', { withTimezone: true }),
+      processedAt: instant('processed_at'),
       attempts: integer('attempts').notNull().default(0),
-      lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+      lastAttemptAt: instant('last_attempt_at'),
       errorMessage: text('error_message'),
       sourceIp: varchar('source_ip', { length: 45 }),
-      createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-      updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+      createdAt: instant('created_at').notNull().default(sql`now()`),
+      updatedAt: instant('updated_at').notNull().default(sql`now()`),
     },
     (table) => [uniqueIndex('webhook_events_provider_event_id_idx').on(table.providerEventId)],
   );

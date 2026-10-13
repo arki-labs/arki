@@ -13,6 +13,7 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { isInstant } from '@arki/date';
 import { CommandError } from '@arki/journal';
 
 import type { AppDb } from '../../test-support';
@@ -183,7 +184,7 @@ describe('processDunningEvents', () => {
 
     const row = await subscriptionRow(db, id);
     expect(row).toMatchObject({ status: 'canceled' });
-    expect(row?.canceledAt).toBeInstanceOf(Date);
+    expect(isInstant(row?.canceledAt)).toBe(true);
     expect(await eventTypesOf(db, 'subscription', id)).toEqual([
       'SubscriptionCreated',
       'SubscriptionPastDue',

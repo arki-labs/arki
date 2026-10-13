@@ -1,5 +1,6 @@
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 
+import type { Instant } from '@arki/date';
 import type { MoneyJSON } from '@arki/money';
 
 import type { CustomerId, PaymentId, SubscriptionId } from '../core/primitives';
@@ -88,7 +89,7 @@ export type RiskScore = {
   overall: number; // 0-100
   factors: Record<string, number>;
   category: 'low' | 'medium' | 'high' | 'critical';
-  lastCalculated: Date;
+  lastCalculated: Instant;
   trends: {
     direction: 'improving' | 'stable' | 'declining';
     changePercent: number;
@@ -103,7 +104,7 @@ export type ExecutionResultDb = {
   errors: {
     customerId: string;
     error: string;
-    timestamp: Date;
+    timestamp: Instant;
   }[];
   performance: {
     processingTime: number; // milliseconds
@@ -118,7 +119,7 @@ export type ExecutionResult = {
   errors: {
     customerId: CustomerId;
     error: string;
-    timestamp: Date;
+    timestamp: Instant;
   }[];
   performance: {
     processingTime: number; // milliseconds
@@ -128,7 +129,7 @@ export type ExecutionResult = {
 
 // Analytics Types
 export type CampaignMetrics = {
-  period: { start: Date; end: Date };
+  period: { start: Instant; end: Instant };
   executions: number;
   customersReached: number;
   communicationsSent: number;
@@ -186,8 +187,8 @@ export type DunningCampaignSummary = {
   customersReached: number;
   conversionRate: number;
   revenueRecovered: number;
-  lastExecuted?: Date;
-  createdAt: Date;
+  lastExecuted?: Instant;
+  createdAt: Instant;
 };
 
 export type DunningDashboardStats = {
@@ -203,7 +204,7 @@ export type DunningDashboardStats = {
     campaignName: string;
     customerCount: number;
     status: ExecutionStatus;
-    executedAt: Date;
+    executedAt: Instant;
   }[];
 };
 
@@ -235,7 +236,7 @@ export type PaymentHistoryData = {
   successfulPayments: number;
   failedPayments: number;
   averageAmount: number;
-  lastPaymentDate?: Date;
+  lastPaymentDate?: Instant;
   streakDays: number;
   payments: PaymentRecord[];
 };
@@ -244,7 +245,7 @@ export type PaymentRecord = {
   id: PaymentId;
   amount: number;
   status: 'succeeded' | 'failed' | 'pending' | 'canceled';
-  createdAt: Date;
+  createdAt: Instant;
   failureReason?: string;
 };
 
@@ -262,15 +263,15 @@ export type SubscriptionRecord = {
   id: SubscriptionId;
   status: string;
   planTier?: string;
-  createdAt: Date;
-  updatedAt: Date;
-  canceledAt?: Date;
+  createdAt: Instant;
+  updatedAt: Instant;
+  canceledAt?: Instant;
 };
 
 // Engagement metrics structures
 export type EngagementMetricsData = {
   score: number;
-  lastActivity?: Date;
+  lastActivity?: Instant;
   activityFrequency: number;
   featureUsage: Record<string, number>;
 };
@@ -289,8 +290,8 @@ export type CampaignQueryRow = {
   trigger: CampaignTrigger;
   target_segments: string[];
   created_by: string;
-  created_at: Date;
-  updated_at: Date;
+  created_at: Instant;
+  updated_at: Instant;
 };
 
 export type CustomerQueryRow = {
@@ -318,7 +319,7 @@ export type TrialEndingEventData = {
   customerId: CustomerId;
   subscriptionId: SubscriptionId;
   daysUntilEnd: number;
-  trialEndDate: Date;
+  trialEndDate: Instant;
 };
 
 export type PaymentFailureEventData = {
@@ -363,26 +364,26 @@ export type RiskWeights = {
 // Update operation types
 export type CommunicationUpdateData = {
   status?: CommunicationStatus;
-  sentAt?: Date;
-  deliveredAt?: Date;
-  openedAt?: Date;
-  clickedAt?: Date;
+  sentAt?: Instant;
+  deliveredAt?: Instant;
+  openedAt?: Instant;
+  clickedAt?: Instant;
   failureReason?: string;
   providerMessageId?: string;
   providerResponse?: Record<string, unknown>;
   trackingData?: Record<string, unknown>;
-  updatedAt: Date;
+  updatedAt: Instant;
 };
 
 export type ExecutionUpdateData = {
   status?: ExecutionStatus;
-  startedAt?: Date;
-  completedAt?: Date;
+  startedAt?: Instant;
+  completedAt?: Instant;
   result?: ExecutionResultDb;
   errorMessage?: string;
   retryCount?: number;
-  nextRetryAt?: Date;
-  updatedAt: Date;
+  nextRetryAt?: Instant;
+  updatedAt: Instant;
 };
 
 // Campaign execution condition types
@@ -439,7 +440,7 @@ export type PaymentFailureEvent = {
   failureCount: number;
   amount: number;
   failureReason: string;
-  timestamp: Date;
+  timestamp: Instant;
 };
 
 export type TrialEndingEvent = {
@@ -447,8 +448,8 @@ export type TrialEndingEvent = {
   customerId: CustomerId;
   subscriptionId: SubscriptionId;
   daysUntilEnd: number;
-  trialEndDate: Date;
-  timestamp: Date;
+  trialEndDate: Instant;
+  timestamp: Instant;
 };
 
 export type DunningEvent = PaymentFailureEvent | TrialEndingEvent;
@@ -457,8 +458,8 @@ export type DunningEvent = PaymentFailureEvent | TrialEndingEvent;
 // Removed CustomerSegmentDbModel and CustomerRiskProfileDbModel in favor of Drizzle inferred types
 
 export type EngagementMetrics = {
-  lastLoginDate?: Date;
-  lastActivity?: Date;
+  lastLoginDate?: Instant;
+  lastActivity?: Instant;
   sessionCount: number;
   pageViews: number;
   featureUsage: Record<string, number>;

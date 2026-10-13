@@ -1,6 +1,8 @@
 import type { AnyRelations } from 'drizzle-orm';
-import { and, desc, eq, sql } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
+import { and, desc, eq, sql } from 'drizzle-orm';
+
+import { now } from '@arki/date';
 
 import type { TaxConfigId, TaxExemptionId, TaxJurisdictionId } from './primitives';
 import type { TaxTables } from './tables';
@@ -79,7 +81,7 @@ export class TaxConfigurationRepository {
   async updateConfiguration(id: TaxConfigId, data: UpdateTaxConfiguration): Promise<TaxConfig> {
     const result = await this.db
       .update(this.taxConfigurations)
-      .set({ ...data, updatedAt: new Date() })
+      .set({ ...data, updatedAt: now() })
       .where(eq(this.taxConfigurations.id, id))
       .returning();
     if (!result[0]) {
@@ -92,13 +94,13 @@ export class TaxConfigurationRepository {
     // First, remove default flag from all configurations
     await this.db
       .update(this.taxConfigurations)
-      .set({ isDefault: false, updatedAt: new Date() })
+      .set({ isDefault: false, updatedAt: now() })
       .where(eq(this.taxConfigurations.isDefault, true));
 
     // Then set the new default
     const result = await this.db
       .update(this.taxConfigurations)
-      .set({ isDefault: true, updatedAt: new Date() })
+      .set({ isDefault: true, updatedAt: now() })
       .where(eq(this.taxConfigurations.id, id))
       .returning();
 
@@ -209,7 +211,7 @@ export class TaxJurisdictionRepository {
   ): Promise<TaxJurisdiction> {
     const result = await this.db
       .update(this.taxJurisdictions)
-      .set({ ...data, updatedAt: new Date() })
+      .set({ ...data, updatedAt: now() })
       .where(eq(this.taxJurisdictions.id, id))
       .returning();
     if (!result[0]) {
@@ -300,6 +302,7 @@ export class TaxExemptionRepository {
   }
 
   async findExpiringExemptions(days = 30): Promise<TaxExemption[]> {
+    // Local-time calendar days, as before. The raw `sql` parameter below needs a string.
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + days);
 
@@ -320,7 +323,7 @@ export class TaxExemptionRepository {
   async updateExemption(id: TaxExemptionId, data: UpdateTaxExemption): Promise<TaxExemption> {
     const result = await this.db
       .update(this.taxExemptions)
-      .set({ ...data, updatedAt: new Date() })
+      .set({ ...data, updatedAt: now() })
       .where(eq(this.taxExemptions.id, id))
       .returning();
     if (!result[0]) {
@@ -335,8 +338,8 @@ export class TaxExemptionRepository {
       .set({
         status: 'active',
         approvedBy,
-        approvedAt: new Date(),
-        updatedAt: new Date(),
+        approvedAt: now(),
+        updatedAt: now(),
       })
       .where(eq(this.taxExemptions.id, id))
       .returning();
@@ -349,7 +352,7 @@ export class TaxExemptionRepository {
   async revokeExemption(id: TaxExemptionId): Promise<TaxExemption> {
     const result = await this.db
       .update(this.taxExemptions)
-      .set({ status: 'revoked', updatedAt: new Date() })
+      .set({ status: 'revoked', updatedAt: now() })
       .where(eq(this.taxExemptions.id, id))
       .returning();
     if (!result[0]) {

@@ -1,11 +1,11 @@
 import { sql } from 'drizzle-orm';
 
-import { z } from '@arki/contracts';
-import { getLogger } from '@arki/log';
+import type { Instant } from '@arki/date';
 import type { Money } from '@arki/money';
+import { z } from '@arki/contracts';
+import { add, fromDate, isAfter, now } from '@arki/date';
+import { getLogger } from '@arki/log';
 
-import { fromMinorColumn, toMinorColumn } from '../../core/money';
-import { DEFAULT_ANALYTICS_CURRENCY, analyticsRowId } from '../analytics-money';
 import type { PaymentRetryService } from '../../core/services/payment-retry-service';
 import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types';
 import type {
@@ -29,6 +29,8 @@ import type {
   TimeBasedConditions,
 } from '../types';
 import type { CommunicationOrchestrationService } from './communication-service';
+import { fromMinorColumn, toMinorColumn } from '../../core/money';
+import { analyticsRowId, DEFAULT_ANALYTICS_CURRENCY } from '../analytics-money';
 import {
   createDunningCampaignRepository,
   createDunningExecutionRepository,
@@ -227,8 +229,7 @@ export class DunningCampaignService {
       // Create execution for each template in sequence
       let currentDelay = 0;
       for (const template of templates) {
-        const scheduledAt = new Date();
-        scheduledAt.setHours(scheduledAt.getHours() + currentDelay);
+        const scheduledAt = add(now(), { hours: currentDelay });
 
         const execution = await this.executionRepo.create({
           campaignId: input.campaignId,
@@ -295,6 +296,7 @@ export class DunningCampaignService {
   ): Promise<EligibleCustomer[]> {
     const { paymentFailureCount = 1, daysSinceFailure = 7, daysSinceLastPayment = 30 } = conditions;
 
+    // Raw `sql` parameters below bypass the column codec, so these working values stay `Date`s.
     const sinceFailure = new Date();
     sinceFailure.setDate(sinceFailure.getDate() - daysSinceFailure);
 
@@ -487,7 +489,7 @@ export class DunningCampaignService {
 
       logger.info('Execution rescheduled to next business hour', {
         executionId: execution.id,
-        scheduledAt: nextBusinessHour.toISOString(),
+        scheduledAt: nextBusinessHour.toString(),
       });
 
       // Update the execution to be scheduled for the next business hour
@@ -517,7 +519,7 @@ export class DunningCampaignService {
     campaign: DunningCampaign,
   ) {
     const startTime = Date.now();
-    const errors: { customerId: CustomerId; error: string; timestamp: Date }[] = [];
+    const errors: { customerId: CustomerId; error: string; timestamp: Instant }[] = [];
 
     try {
       // Get customer information
@@ -599,7 +601,7 @@ export class DunningCampaignService {
               {
                 customerId: execution.customerId,
                 error: communicationResult.failureReason || 'Communication failed',
-                timestamp: new Date(),
+                timestamp: now(),
               },
             ],
         performance: {
@@ -612,7 +614,7 @@ export class DunningCampaignService {
       errors.push({
         customerId: execution.customerId,
         error: errorMessage,
-        timestamp: new Date(),
+        timestamp: now(),
       });
 
       return {
@@ -639,7 +641,7 @@ export class DunningCampaignService {
       const targetTimezone = timezone || 'UTC';
 
       // Get current time in the specified timezone
-      const now = new Date();
+      const current = new Date();
       const timeInTimezone = new Intl.DateTimeFormat('en-US', {
         timeZone: targetTimezone,
         year: 'numeric',
@@ -649,10 +651,10 @@ export class DunningCampaignService {
         minute: '2-digit',
         second: '2-digit',
         hour12: false,
-      }).formatToParts(now);
+      }).formatToParts(current);
 
       const hour = Number.parseInt(timeInTimezone.find(part => part.type === 'hour')?.value || '0');
-      const dayOfWeek = now.getDay(); // 0 = Sunday, 6 = Saturday
+      const dayOfWeek = current.getDay(); // 0 = Sunday, 6 = Saturday
 
       // Check if current day is allowed (if specified)
       if (allowedDays && allowedDays.length > 0) {
@@ -680,8 +682,9 @@ export class DunningCampaignService {
   /**
    * Get next business hour in the specified timezone
    */
-  private getNextBusinessHour(timezone?: string, allowedDays?: number[]): Date {
+  private getNextBusinessHour(timezone?: string, allowedDays?: number[]): Instant {
     const targetTimezone = timezone || 'UTC';
+    // Local-time wall-clock steps, as before: the working value stays a `Date` until it is returned.
     const next = new Date();
 
     try {
@@ -718,7 +721,7 @@ export class DunningCampaignService {
         next.setHours(9, 0, 0, 0);
       }
 
-      return next;
+      return fromDate(next);
     } catch (error) {
       logger.error('Error calculating next business hour', {
         error: error instanceof Error ? error.message : String(error),
@@ -728,7 +731,7 @@ export class DunningCampaignService {
       if (new Date().getHours() >= 17) {
         next.setDate(next.getDate() + 1);
       }
-      return next;
+      return fromDate(next);
     }
   }
 
@@ -775,7 +778,7 @@ export class DunningCampaignService {
           scheduledExec.customerId === execution.customerId &&
           scheduledExec.campaignId === execution.campaignId &&
           scheduledExec.scheduledAt &&
-          scheduledExec.scheduledAt > new Date()
+          isAfter(scheduledExec.scheduledAt, now())
         ) {
           await this.executionRepo.updateStatus(
             scheduledExec.id,
@@ -808,7 +811,7 @@ export class DunningCampaignService {
       communicationsSent?: number;
     },
   ): Promise<void> {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = now().toString().slice(0, 10);
     // One row per campaign, day and currency. Counters with no payment go to the default-currency row.
     const currency = metrics.revenueRecovered?.currency.code ?? DEFAULT_ANALYTICS_CURRENCY;
     const analyticsId = analyticsRowId(campaignId, today, currency);
@@ -876,8 +879,7 @@ export class DunningCampaignService {
           await this.executionRepo.updateStatus(executionDb.id, 'failed', undefined, 'Max retries exceeded');
         } else {
           // Schedule next retry with exponential backoff
-          const nextRetry = new Date();
-          nextRetry.setMinutes(nextRetry.getMinutes() + Math.pow(2, executionDb.retryCount) * 30);
+          const nextRetry = add(now(), { minutes: Math.pow(2, executionDb.retryCount) * 30 });
           await this.executionRepo.incrementRetryCount(executionDb.id, nextRetry);
         }
       }

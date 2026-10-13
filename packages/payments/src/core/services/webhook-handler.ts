@@ -1,13 +1,11 @@
 import { EventEmitter } from 'node:events';
 
+import { now } from '@arki/date';
+
 import type { PaymentRepository } from '../repository';
-import type {
-  PaymentProviderType,
-  WebhookEventType,
-  WebhookId,
-} from '../types';
-import { createWebhookId } from '../primitives';
+import type { PaymentProviderType, WebhookEventType, WebhookId } from '../types';
 import type { WebhookSecurityService } from './webhook-security';
+import { createWebhookId } from '../primitives';
 
 export type WebhookProcessingResult = {
   success: boolean;
@@ -112,10 +110,10 @@ export class WebhookHandler extends EventEmitter {
           data: validation.data || {},
           processed: false,
           attempts: 1,
-          lastAttemptAt: new Date(),
+          lastAttemptAt: now(),
           sourceIp,
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          createdAt: now(),
+          updatedAt: now(),
         });
         webhookId = webhookEvent.id;
       }

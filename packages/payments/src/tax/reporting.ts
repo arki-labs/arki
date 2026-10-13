@@ -1,5 +1,7 @@
-import { money, sum } from '@arki/money';
+import type { Instant } from '@arki/date';
 import type { Money } from '@arki/money';
+import { fromDate, instant, now } from '@arki/date';
+import { money, sum } from '@arki/money';
 
 import type { StripeProvider } from '../core/providers/stripe-provider';
 
@@ -10,8 +12,8 @@ export type ReportingPeriod = {
   year: number;
   quarter?: number;
   month?: number;
-  startDate: Date;
-  endDate: Date;
+  startDate: Instant;
+  endDate: Instant;
 };
 
 /**
@@ -26,7 +28,7 @@ export type TaxComplianceReport = {
   totalTaxCollected: Money;
   exemptSales: Money;
   transactions: number;
-  generatedAt: Date;
+  generatedAt: Instant;
   status: 'pending' | 'completed' | 'failed';
   downloadUrl?: string;
   summary: {
@@ -51,7 +53,7 @@ export type CustomerTaxSummary = {
   totalTax: Money;
   transactions: {
     id: string;
-    date: Date;
+    date: Instant;
     amount: Money;
     tax: Money;
     type: 'subscription' | 'one_time';
@@ -69,7 +71,7 @@ export type CustomerTaxSummary = {
  */
 export type TaxAuditEntry = {
   id: string;
-  timestamp: Date;
+  timestamp: Instant;
   action: 'calculate' | 'apply' | 'refund' | 'exempt' | 'report';
   entity: 'payment' | 'subscription' | 'customer' | 'exemption';
   entityId: string;
@@ -129,7 +131,7 @@ export class TaxReportingService {
         totalTaxCollected: localSummary.totalTax,
         exemptSales: localSummary.exemptSales,
         transactions: localSummary.transactionCount,
-        generatedAt: new Date(),
+        generatedAt: now(),
         status: stripeReport.status as any,
         downloadUrl: stripeReport.downloadUrl,
         summary,
@@ -149,8 +151,9 @@ export class TaxReportingService {
     try {
       // This would query the database for customer transactions
       // For now, return a placeholder structure
-      const startDate = new Date(year, 0, 1);
-      const endDate = new Date(year, 11, 31);
+      // Local-time calendar boundaries, as before.
+      const startDate = fromDate(new Date(year, 0, 1));
+      const endDate = fromDate(new Date(year, 11, 31));
 
       // Query payments and subscriptions for this customer in the year
       // This is a simplified implementation - in reality would involve complex queries
@@ -181,7 +184,7 @@ export class TaxReportingService {
   async createAuditEntry(entry: Omit<TaxAuditEntry, 'id' | 'timestamp'>): Promise<TaxAuditEntry> {
     const auditEntry: TaxAuditEntry = {
       id: `audit_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
-      timestamp: new Date(),
+      timestamp: now(),
       ...entry,
     };
 
@@ -197,14 +200,15 @@ export class TaxReportingService {
   async getUpcomingDeadlines(): Promise<{
     jurisdiction: string;
     type: string;
-    deadline: Date;
+    deadline: Instant;
     description: string;
     priority: 'high' | 'medium' | 'low';
   }[]> {
     // This would integrate with tax jurisdiction data to calculate deadlines
+    // Local-time calendar boundaries, as before.
     const currentDate = new Date();
-    const nextQuarter = new Date(currentDate.getFullYear(), Math.floor(currentDate.getMonth() / 3) * 3 + 3, 0);
-    const nextYear = new Date(currentDate.getFullYear() + 1, 0, 31);
+    const nextQuarter = fromDate(new Date(currentDate.getFullYear(), Math.floor(currentDate.getMonth() / 3) * 3 + 3, 0));
+    const nextYear = fromDate(new Date(currentDate.getFullYear() + 1, 0, 31));
 
     return [
       {
@@ -328,13 +332,13 @@ export class TaxReportingService {
     };
   }
 
-  private async getCustomerTransactions(_customerId: string, _startDate: Date, _endDate: Date) {
+  private async getCustomerTransactions(_customerId: string, _startDate: Instant, _endDate: Instant) {
     // This would query the payments and subscription tables
     // For now, return placeholder data
     return [
       {
         id: 'pay_123',
-        date: new Date('2024-01-15'),
+        date: instant('2024-01-15T00:00:00Z'),
         amount: money('29.99', 'USD'),
         tax: money('2.70', 'USD'),
         type: 'subscription' as const,

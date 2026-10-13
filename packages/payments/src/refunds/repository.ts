@@ -1,16 +1,18 @@
 import type { AnyRelations } from 'drizzle-orm';
-import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
+import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 
 import type { UserId } from '@arki/auth/ids';
+import type { Instant } from '@arki/date';
 import type { Money } from '@arki/money';
+import { toMillis } from '@arki/date';
 import { MoneyBag } from '@arki/money/bag';
 
 import type { PaymentId } from '../core/primitives';
-import { fromMinorColumn, toMinorColumn } from '../core/money';
 import type { RefundId, RefundReason, RefundStatus } from './primitives';
 import type { RefundsTables } from './tables';
 import type { Refund } from './types';
+import { fromMinorColumn, toMinorColumn } from '../core/money';
 
 /**
  * Structural database type for the refunds repository. Only uses
@@ -93,8 +95,8 @@ export class RefundRepository {
   }
 
   async getRefundMetrics(
-    startDate?: Date,
-    endDate?: Date,
+    startDate?: Instant,
+    endDate?: Instant,
   ): Promise<{
     totalCount: number;
     /** One exact total per currency: refunds in USD and EUR do not add up to one number */
@@ -146,7 +148,7 @@ export class RefundRepository {
 
     const totalTime = completedRefunds.reduce((sum, refund) => {
       if (refund.completedAt && refund.requestedAt) {
-        return sum + (refund.completedAt.getTime() - refund.requestedAt.getTime());
+        return sum + (toMillis(refund.completedAt) - toMillis(refund.requestedAt));
       }
       return sum;
     }, 0);
@@ -158,8 +160,8 @@ export class RefundRepository {
     status?: RefundStatus;
     reason?: RefundReason;
     userId?: UserId;
-    startDate?: Date;
-    endDate?: Date;
+    startDate?: Instant;
+    endDate?: Instant;
     /** Bounds also select their currency: refunds in another currency are left out */
     minAmount?: Money;
     maxAmount?: Money;

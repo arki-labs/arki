@@ -72,6 +72,7 @@
   "dependencies": {
     "@arki/auth": "workspace:*",
     "@arki/contracts": "workspace:*",
+    "@arki/date": "workspace:*",
     "@arki/db": "workspace:*",
     "@arki/env": "workspace:*",
     "@arki/journal": "workspace:*",

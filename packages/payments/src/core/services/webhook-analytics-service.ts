@@ -1,9 +1,8 @@
+import type { Instant } from '@arki/date';
+import { isSameOrAfter, isSameOrBefore, now, sub, toMillis } from '@arki/date';
+
 import type { PaymentRepository } from '../repository';
-import type {
-  PaymentProviderType,
-  WebhookEventType,
-  WebhookId,
-} from '../types';
+import type { PaymentProviderType, WebhookEventType, WebhookId } from '../types';
 
 export type WebhookMetrics = {
   totalEvents: number;
@@ -19,7 +18,7 @@ export type WebhookMetrics = {
     eventType: WebhookEventType;
     provider: PaymentProviderType;
     error: string;
-    timestamp: Date;
+    timestamp: Instant;
   }[];
 }
 
@@ -55,9 +54,9 @@ export type WebhookAlert = {
   severity: 'low' | 'medium' | 'high' | 'critical';
   message: string;
   data: Record<string, unknown>;
-  triggeredAt: Date;
+  triggeredAt: Instant;
   resolved?: boolean;
-  resolvedAt?: Date;
+  resolvedAt?: Instant;
 }
 
 export class WebhookAnalyticsService {
@@ -76,7 +75,7 @@ export class WebhookAnalyticsService {
   /**
    * Get comprehensive webhook metrics
    */
-  async getWebhookMetrics(startDate?: Date, endDate?: Date): Promise<WebhookMetrics> {
+  async getWebhookMetrics(startDate?: Instant, endDate?: Instant): Promise<WebhookMetrics> {
     try {
       const events = await this.getWebhookEventsInRange(startDate, endDate);
 
@@ -89,7 +88,7 @@ export class WebhookAnalyticsService {
       const processedEventsWithTime = events.filter(e => e.processed && e.processedAt && e.createdAt);
       const averageProcessingTime = processedEventsWithTime.length > 0
         ? processedEventsWithTime.reduce((sum, event) => {
-            const processingTime = event.processedAt!.getTime() - event.createdAt.getTime();
+            const processingTime = toMillis(event.processedAt!) - toMillis(event.createdAt);
             return sum + processingTime;
           }, 0) / processedEventsWithTime.length
         : 0;
@@ -116,7 +115,7 @@ export class WebhookAnalyticsService {
       // Get recent errors (last 10)
       const recentErrors = events
         .filter(e => e.errorMessage)
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt))
         .slice(0, 10)
         .map(event => ({
           webhookId: event.id,
@@ -147,7 +146,7 @@ export class WebhookAnalyticsService {
   /**
    * Assess webhook system health
    */
-  async getWebhookHealth(startDate?: Date): Promise<WebhookHealth> {
+  async getWebhookHealth(startDate?: Instant): Promise<WebhookHealth> {
     const metrics = await this.getWebhookMetrics(startDate);
     const issues: WebhookHealth['issues'] = [];
     const recommendations: string[] = [];
@@ -221,13 +220,13 @@ export class WebhookAnalyticsService {
   /**
    * Get webhook performance metrics
    */
-  async getWebhookPerformance(startDate?: Date, endDate?: Date): Promise<WebhookPerformance> {
+  async getWebhookPerformance(startDate?: Instant, endDate?: Instant): Promise<WebhookPerformance> {
     const events = await this.getWebhookEventsInRange(startDate, endDate);
 
     // Calculate processing times for percentiles
     const processingTimes = events
       .filter(e => e.processed && e.processedAt && e.createdAt)
-      .map(e => e.processedAt!.getTime() - e.createdAt.getTime())
+      .map(e => toMillis(e.processedAt!) - toMillis(e.createdAt))
       .sort((a, b) => a - b);
 
     const averageProcessingTime = processingTimes.length > 0
@@ -305,7 +304,7 @@ export class WebhookAnalyticsService {
       severity,
       message,
       data,
-      triggeredAt: new Date(),
+      triggeredAt: now(),
       resolved: false,
     };
 
@@ -314,7 +313,7 @@ export class WebhookAnalyticsService {
     // Limit number of stored alerts
     if (this.alerts.size > this.alertThresholds.maxAlerts) {
       const oldestAlert = [...this.alerts.entries()]
-        .sort(([, a], [, b]) => a.triggeredAt.getTime() - b.triggeredAt.getTime())[0];
+        .sort(([, a], [, b]) => toMillis(a.triggeredAt) - toMillis(b.triggeredAt))[0];
 
       if (oldestAlert) {
         this.alerts.delete(oldestAlert[0]);
@@ -331,7 +330,7 @@ export class WebhookAnalyticsService {
     const alert = this.alerts.get(alertId);
     if (alert && !alert.resolved) {
       alert.resolved = true;
-      alert.resolvedAt = new Date();
+      alert.resolvedAt = now();
     }
   }
 
@@ -341,7 +340,7 @@ export class WebhookAnalyticsService {
   getActiveAlerts(): WebhookAlert[] {
     return [...this.alerts.values()]
       .filter(alert => !alert.resolved)
-      .sort((a, b) => b.triggeredAt.getTime() - a.triggeredAt.getTime());
+      .sort((a, b) => toMillis(b.triggeredAt) - toMillis(a.triggeredAt));
   }
 
   /**
@@ -349,14 +348,14 @@ export class WebhookAnalyticsService {
    */
   getAllAlerts(): WebhookAlert[] {
     return [...this.alerts.values()]
-      .sort((a, b) => b.triggeredAt.getTime() - a.triggeredAt.getTime());
+      .sort((a, b) => toMillis(b.triggeredAt) - toMillis(a.triggeredAt));
   }
 
   /**
    * Generate webhook monitoring report
    */
-  async generateMonitoringReport(startDate?: Date, endDate?: Date): Promise<{
-    period: { startDate: Date; endDate: Date };
+  async generateMonitoringReport(startDate?: Instant, endDate?: Instant): Promise<{
+    period: { startDate: Instant; endDate: Instant };
     metrics: WebhookMetrics;
     health: WebhookHealth;
     performance: WebhookPerformance;
@@ -366,8 +365,8 @@ export class WebhookAnalyticsService {
     };
     recommendations: string[];
   }> {
-    const actualStartDate = startDate || new Date(Date.now() - 24 * 60 * 60 * 1000); // Last 24 hours
-    const actualEndDate = endDate || new Date();
+    const actualStartDate = startDate || sub(now(), { hours: 24 }); // Last 24 hours
+    const actualEndDate = endDate || now();
 
     const [metrics, health, performance] = await Promise.all([
       this.getWebhookMetrics(actualStartDate, actualEndDate),
@@ -377,8 +376,8 @@ export class WebhookAnalyticsService {
 
     const activeAlerts = this.getActiveAlerts();
     const recentAlerts = [...this.alerts.values()]
-      .filter(alert => alert.triggeredAt >= actualStartDate)
-      .sort((a, b) => b.triggeredAt.getTime() - a.triggeredAt.getTime());
+      .filter(alert => isSameOrAfter(alert.triggeredAt, actualStartDate))
+      .sort((a, b) => toMillis(b.triggeredAt) - toMillis(a.triggeredAt));
 
     // Combine recommendations from health check and performance analysis
     const recommendations = [
@@ -405,7 +404,7 @@ export class WebhookAnalyticsService {
   /**
    * Helper method to get webhook events in date range
    */
-  private async getWebhookEventsInRange(startDate?: Date, endDate?: Date) {
+  private async getWebhookEventsInRange(startDate?: Instant, endDate?: Instant) {
     // This would typically call a repository method to get filtered events
     // For now, we'll simulate with a basic approach
 
@@ -418,7 +417,7 @@ export class WebhookAnalyticsService {
 
     return allEvents.filter(event => {
       const eventDate = event.createdAt;
-      return (!startDate || eventDate >= startDate) && (!endDate || eventDate <= endDate);
+      return (!startDate || isSameOrAfter(eventDate, startDate)) && (!endDate || isSameOrBefore(eventDate, endDate));
     });
   }
 
@@ -475,10 +474,10 @@ export class WebhookAnalyticsService {
   /**
    * Get time range in hours between dates
    */
-  private getTimeRangeHours(startDate?: Date, endDate?: Date): number {
-    const start = startDate || new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const end = endDate || new Date();
-    return (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+  private getTimeRangeHours(startDate?: Instant, endDate?: Instant): number {
+    const start = startDate || sub(now(), { hours: 24 });
+    const end = endDate || now();
+    return (toMillis(end) - toMillis(start)) / (1000 * 60 * 60);
   }
 
   /**

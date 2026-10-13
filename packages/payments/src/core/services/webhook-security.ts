@@ -1,5 +1,8 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
+import type { Instant } from '@arki/date';
+import { isBefore, now, sub } from '@arki/date';
+
 import type { PaymentProviderType, WebhookValidationResult } from '../types';
 
 export type WebhookSecurityConfig = {
@@ -17,7 +20,7 @@ export type WebhookValidationOptions = {
 type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
 
 export class WebhookSecurityService {
-  private processedEvents = new Map<string, Date>();
+  private processedEvents = new Map<string, Instant>();
   private readonly config: WebhookSecurityConfig;
 
   constructor(config: WebhookSecurityConfig) {
@@ -188,14 +191,14 @@ export class WebhookSecurityService {
   }
 
   private markEventAsProcessed(eventId: string): void {
-    this.processedEvents.set(eventId, new Date());
+    this.processedEvents.set(eventId, now());
   }
 
   private cleanupOldEvents(): void {
-    const cutoffTime = new Date(Date.now() - this.config.replayWindowSeconds * 1000 * 2);
+    const cutoffTime = sub(now(), { seconds: this.config.replayWindowSeconds * 2 });
 
     for (const [eventId, processedAt] of this.processedEvents) {
-      if (processedAt < cutoffTime) {
+      if (isBefore(processedAt, cutoffTime)) {
         this.processedEvents.delete(eventId);
       }
     }
