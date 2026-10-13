@@ -8,20 +8,48 @@
 
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference -- loads the local module declaration for an untyped competitor
 /// <reference path="./jstat.d.ts" />
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference -- loads the local module declaration for an untyped competitor
+/// <reference path="./regression.d.ts" />
 
 /* eslint-disable unicorn/require-number-to-fixed-digits-argument -- these are decimal.js / big.js / bignumber.js `toFixed()`: with no argument they print every digit in plain notation (unlike Number#toFixed), which the contracts rely on */
 import Big from 'big.js';
 import BigNumber from 'bignumber.js';
 import { Decimal } from 'decimal.js';
+import { Complex as ComplexJs } from 'complex.js';
 import Fraction from 'fraction.js';
 import jStat from 'jstat';
+import {
+  complex as mathComplex,
+  det,
+  divide as mathDivide,
+  inv,
+  lusolve,
+  multiply as mathMultiply,
+  polynomialRoot,
+  pow as mathPow,
+  sqrt as mathSqrt,
+} from 'mathjs';
+import { determinant as mlDeterminant, inverse as mlInverse, Matrix, solve as mlSolve } from 'ml-matrix';
+import regression from 'regression';
 import * as ss from 'simple-statistics';
 
 import { compare, defineSuite, scenario } from '@arki/bench';
+import { complex } from '@arki/math/complex';
 import { decimal } from '@arki/math/decimal';
 import { normal, studentT } from '@arki/math/distributions';
+import { determinant, inverse, multiply, solve } from '@arki/math/linear-algebra';
+import { cubicRoots } from '@arki/math/polynomial';
+import { createRandom } from '@arki/math/random';
 import { ratio } from '@arki/math/rational';
-import { mean, percentile, stddev } from '@arki/math/stats';
+import {
+  exponentialRegression,
+  linearRegression,
+  mean,
+  percentile,
+  polynomialRegression,
+  powerRegression,
+  stddev,
+} from '@arki/math/stats';
 
 const SCALE = 10;
 const SCALE_OPTIONS = { scale: SCALE, rounding: 'halfEven' } as const;
@@ -118,6 +146,78 @@ const fractionText = (value: Fraction): string => `${value.s * value.n}/${value.
 const ratioText = (value: { numerator: bigint; denominator: bigint }): string =>
   `${value.numerator}/${value.denominator}`;
 
+// ---- Regression, linear algebra, complex numbers and polynomials ----
+
+type Series = { x: number[]; y: number[] };
+
+/** Two data sets of 1,000 points: x uniform in [0.5, 10), y = `curve(x, standard normal noise)`. Seeded, so identical for every library. */
+function series(seed: number, curve: (x: number, noise: number) => number): Series[] {
+  return [seed * 100, seed * 100 + 1].map(state => {
+    const random = createRandom(state);
+    const x = Array.from({ length: 1000 }, () => random.float(0.5, 10));
+    return { x, y: x.map(value => curve(value, random.gaussian())) };
+  });
+}
+
+const points = (x: readonly number[], y: readonly number[]): [number, number][] =>
+  x.map((value, index): [number, number] => [value, y[index] ?? 0]);
+
+// regression-js rounds its output to 2 decimals unless told otherwise.
+const REGRESSION_OPTIONS = { precision: 15 } as const;
+
+type MatrixPair = { a: number[][]; b: number[][] };
+
+/** Three seeded pairs of n×n matrices with entries in [-1, 1); `a` also gets +n on its diagonal, which keeps it well-conditioned for solve, determinant and inverse. */
+function matrixPairs(n: number): MatrixPair[] {
+  return [11, 22, 33].map(seed => {
+    const random = createRandom(seed + n);
+    const fill = (): number[][] => Array.from({ length: n }, () => Array.from({ length: n }, () => random.float(-1, 1)));
+    const a = fill().map((row, index) => row.map((value, column) => (index === column ? value + n : value)));
+    return { a, b: fill() };
+  });
+}
+
+/** Numbers to 9 significant digits, comma-separated. */
+const list = (values: readonly number[]): string => values.map(value => sig9(value)).join(',');
+
+/** Every number inside nested arrays, in row order. */
+function flatNumbers(value: unknown): number[] {
+  if (typeof value === 'number') return [value];
+  if (Array.isArray(value)) return value.flatMap(item => flatNumbers(item));
+  throw new TypeError('expected numbers or arrays of numbers');
+}
+
+const matrixText = (matrix: readonly (readonly number[])[]): string =>
+  matrix.map(row => list(row)).join(';');
+
+type ComplexPair = { a: readonly [number, number]; b: readonly [number, number] };
+
+const complexPairs: readonly ComplexPair[] = [
+  { a: [3, 4], b: [1, -2] },
+  { a: [-2.5, 0.5], b: [0.75, 3] },
+  { a: [0.1, -7], b: [2, 0.001] },
+  { a: [5, 0], b: [0, 1] },
+  { a: [-4, 0], b: [1.5, -0.5] },
+  { a: [1000, -2000], b: [3, 4] },
+];
+
+/** Real and imaginary part of a complex number from any of the three libraries, to 9 significant digits. */
+function parts(value: unknown): string {
+  if (typeof value === 'object' && value !== null && 're' in value && 'im' in value) {
+    const { re, im } = value;
+    if (typeof re === 'number' && typeof im === 'number') return `${sig9(re)},${sig9(im)}`;
+  }
+  throw new TypeError('not a complex number');
+}
+
+/** Roots sorted by real part, then imaginary part, each to 9 significant digits. */
+const rootsText = (roots: readonly { re: number; im: number }[]): string =>
+  roots
+    .map(({ re, im }) => ({ re: sig9(re), im: sig9(im) }))
+    .toSorted((p, q) => Number(p.re) - Number(q.re) || Number(p.im) - Number(q.im))
+    .map(({ re, im }) => `${re},${im}`)
+    .join(';');
+
 export default defineSuite({
   id: '@arki/math',
   intro:
@@ -129,6 +229,8 @@ export default defineSuite({
     'Rational and fraction.js are exact and reduce to lowest terms; results are compared as `numerator/denominator`.',
     'Statistics run on five data sets of 1,000 numbers (a sine wave, values near 1e9, negatives, a constant, random cents) and are compared to 12 significant digits, because compensated and plain summation can differ in the last bits.',
     'Statistics in `@arki/math` check that every element is a finite number, never modify the input, use compensated summation, and select percentiles with quickselect on a checked copy (falling back to a sort when selection stalls). simple-statistics also uses compensated summation and quickselect on a copy; jstat sorts a full copy.',
+    'Regression runs on two seeded data sets of 1,000 points, linear algebra on three seeded sets of matrices (50×50, or 20×20 for inverse; the matrix to solve, invert or take the determinant of is diagonally dominant so every library is well-conditioned), complex numbers on six pairs that include a real, an imaginary and a negative-real input. All are compared to 9 significant digits, with values below 1e-12 counted as 0. Matrices are converted to ml-matrix `Matrix` objects before timing, as that library expects; mathjs and `@arki/math` take plain `number[][]`.',
+    '`@arki/math` linearRegression also computes r², which simple-statistics `linearRegression` does not; regression-js is run with `precision: 15` (its default of 2 decimals would round the result). regression-js exponential fits a different curve, so it is shown without a rank.',
     'Distribution values are compared to 9 significant digits, with values below 1e-12 counted as 0.',
   ],
   groups: [
@@ -529,6 +631,410 @@ export default defineSuite({
           label: 'jstat studentt.inv',
           package: 'jstat',
           run: ({ p, df }: { p: number; df: number }) => jStat.studentt.inv(p, df),
+        }),
+      }),
+    }),
+    compare<Series>({
+      id: 'linear-regression',
+      title: 'Linear regression (1,000 points)',
+      contract: {
+        id: 'math-linear-regression/v1',
+        description: 'least-squares slope and intercept of y on x, to 9 significant digits',
+      },
+      inputs: series(1, (x, noise) => 5 + 3 * x + noise * 2),
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math linearRegression',
+          package: '@arki/math',
+          run: ({ x, y }: Series) => linearRegression(x, y),
+          normalize: fit => list([fit.slope, fit.intercept]),
+        }),
+        ss: c({
+          label: 'simple-statistics linearRegression',
+          package: 'simple-statistics',
+          setup: ({ x, y }: Series) => points(x, y),
+          run: data => ss.linearRegression(data),
+          normalize: fit => list([fit.m, fit.b]),
+        }),
+        regression: c({
+          label: 'regression linear',
+          package: 'regression',
+          setup: ({ x, y }: Series) => points(x, y),
+          run: data => regression.linear(data, REGRESSION_OPTIONS),
+          normalize: fit => list(fit.equation),
+        }),
+      }),
+    }),
+    compare<Series>({
+      id: 'power-regression',
+      title: 'Power regression (1,000 points)',
+      contract: {
+        id: 'math-power-regression/v1',
+        description: 'y = a·x^b fitted by least squares on ln y against ln x; a and b to 9 significant digits',
+      },
+      inputs: series(2, (x, noise) => 2 * x ** 1.5 * (1 + noise * 0.05)),
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math powerRegression',
+          package: '@arki/math',
+          run: ({ x, y }: Series) => powerRegression(x, y),
+          normalize: fit => list([fit.a, fit.b]),
+        }),
+        regression: c({
+          label: 'regression power',
+          package: 'regression',
+          setup: ({ x, y }: Series) => points(x, y),
+          run: data => regression.power(data, REGRESSION_OPTIONS),
+          normalize: fit => list(fit.equation),
+        }),
+      }),
+    }),
+    scenario<Series>({
+      id: 'exponential-regression',
+      title: 'Exponential regression (1,000 points)',
+      inputs: series(3, (x, noise) => 1.5 * Math.exp(0.25 * x) * (1 + noise * 0.05)),
+      note: 'Not ranked: the rows fit different curves. `@arki/math` fits ln y against x by least squares (the standard log-linear fit). regression-js minimizes a y-weighted error instead, so its a and b differ in the 3rd digit on noisy data.',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math exponentialRegression',
+          package: '@arki/math',
+          run: ({ x, y }: Series) => exponentialRegression(x, y),
+        }),
+        regression: c({
+          label: 'regression exponential',
+          package: 'regression',
+          setup: ({ x, y }: Series) => points(x, y),
+          run: data => regression.exponential(data, REGRESSION_OPTIONS),
+        }),
+      }),
+    }),
+    compare<Series>({
+      id: 'polynomial-regression',
+      title: 'Polynomial regression, degree 2 (1,000 points)',
+      contract: {
+        id: 'math-polynomial-regression/v1',
+        description: 'least-squares quadratic y = c0 + c1·x + c2·x²; the three coefficients to 9 significant digits',
+      },
+      inputs: series(4, (x, noise) => 1 + 2 * x - 0.3 * x * x + noise),
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math polynomialRegression',
+          package: '@arki/math',
+          run: ({ x, y }: Series) => polynomialRegression(x, y, 2),
+          normalize: fit => list(fit.coefficients),
+        }),
+        regression: c({
+          label: 'regression polynomial',
+          package: 'regression',
+          setup: ({ x, y }: Series) => points(x, y),
+          run: data => regression.polynomial(data, { ...REGRESSION_OPTIONS, order: 2 }),
+          // regression-js lists the highest power first.
+          normalize: fit => list(fit.equation.toReversed()),
+        }),
+      }),
+    }),
+    compare<MatrixPair>({
+      id: 'matrix-multiply',
+      title: 'Matrix multiply (50×50)',
+      contract: { id: 'math-matrix-multiply/v1', description: 'the product A·B, every entry to 9 significant digits' },
+      inputs: matrixPairs(50),
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math multiply',
+          package: '@arki/math',
+          run: ({ a, b }: MatrixPair) => multiply(a, b),
+          normalize: matrixText,
+        }),
+        mlMatrix: c({
+          label: 'ml-matrix mmul',
+          package: 'ml-matrix',
+          setup: ({ a, b }) => ({ x: new Matrix(a), y: new Matrix(b) }),
+          run: ({ x, y }) => x.mmul(y),
+          normalize: result => matrixText(result.to2DArray()),
+        }),
+        mathjs: c({
+          label: 'mathjs multiply',
+          package: 'mathjs',
+          run: ({ a, b }: MatrixPair) => mathMultiply(a, b),
+          normalize: matrixText,
+        }),
+      }),
+    }),
+    compare<MatrixPair>({
+      id: 'matrix-solve',
+      title: 'Solve A·x = b (50×50)',
+      contract: {
+        id: 'math-matrix-solve/v1',
+        description: 'the vector x with A·x = b for a well-conditioned square A, every entry to 9 significant digits',
+      },
+      inputs: matrixPairs(50),
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math solve',
+          package: '@arki/math',
+          setup: ({ a, b }) => ({ a, v: b.map(row => row[0] ?? 0) }),
+          run: ({ a, v }) => solve(a, v),
+          normalize: result => list(result),
+        }),
+        mlMatrix: c({
+          label: 'ml-matrix solve',
+          package: 'ml-matrix',
+          setup: ({ a, b }) => ({ x: new Matrix(a), v: Matrix.columnVector(b.map(row => row[0] ?? 0)) }),
+          run: ({ x, v }) => mlSolve(x, v),
+          normalize: result => list(result.to1DArray()),
+        }),
+        mathjs: c({
+          label: 'mathjs lusolve',
+          package: 'mathjs',
+          setup: ({ a, b }) => ({ a, v: b.map(row => row[0] ?? 0) }),
+          run: ({ a, v }) => lusolve(a, v),
+          normalize: result => list(flatNumbers(result.valueOf())),
+        }),
+      }),
+    }),
+    compare<MatrixPair>({
+      id: 'matrix-determinant',
+      title: 'Determinant (50×50)',
+      contract: {
+        id: 'math-matrix-determinant/v1',
+        description: 'det(A) of a well-conditioned square matrix, to 9 significant digits',
+      },
+      inputs: matrixPairs(50),
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math determinant',
+          package: '@arki/math',
+          run: ({ a }: MatrixPair) => determinant(a),
+          normalize: sig9,
+        }),
+        mlMatrix: c({
+          label: 'ml-matrix determinant',
+          package: 'ml-matrix',
+          setup: ({ a }) => new Matrix(a),
+          run: x => mlDeterminant(x),
+          normalize: sig9,
+        }),
+        mathjs: c({
+          label: 'mathjs det',
+          package: 'mathjs',
+          run: ({ a }: MatrixPair) => det(a),
+          normalize: sig9,
+        }),
+      }),
+    }),
+    compare<MatrixPair>({
+      id: 'matrix-inverse',
+      title: 'Inverse (20×20)',
+      contract: { id: 'math-matrix-inverse/v1', description: 'A⁻¹ of a well-conditioned square matrix, every entry to 9 significant digits' },
+      inputs: matrixPairs(20),
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math inverse',
+          package: '@arki/math',
+          run: ({ a }: MatrixPair) => inverse(a),
+          normalize: matrixText,
+        }),
+        mlMatrix: c({
+          label: 'ml-matrix inverse',
+          package: 'ml-matrix',
+          setup: ({ a }) => new Matrix(a),
+          run: x => mlInverse(x),
+          normalize: result => matrixText(result.to2DArray()),
+        }),
+        mathjs: c({
+          label: 'mathjs inv',
+          package: 'mathjs',
+          run: ({ a }: MatrixPair) => inv(a),
+          normalize: matrixText,
+        }),
+      }),
+    }),
+    compare<ComplexPair>({
+      id: 'complex-times',
+      title: 'Complex times',
+      contract: { id: 'math-complex-times/v1', description: 'the product of two complex numbers; real and imaginary part to 9 significant digits' },
+      inputs: complexPairs,
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math Complex.times',
+          package: '@arki/math',
+          setup: ({ a, b }) => ({ x: complex(a[0], a[1]), y: complex(b[0], b[1]) }),
+          run: ({ x, y }) => x.times(y),
+          normalize: parts,
+        }),
+        complexJs: c({
+          label: 'complex.js mul',
+          package: 'complex.js',
+          setup: ({ a, b }) => ({ x: new ComplexJs(a[0], a[1]), y: new ComplexJs(b[0], b[1]) }),
+          run: ({ x, y }) => x.mul(y),
+          normalize: parts,
+        }),
+        mathjs: c({
+          label: 'mathjs multiply',
+          package: 'mathjs',
+          setup: ({ a, b }) => ({ x: mathComplex(a[0], a[1]), y: mathComplex(b[0], b[1]) }),
+          run: ({ x, y }) => mathMultiply(x, y),
+          normalize: parts,
+        }),
+      }),
+    }),
+    compare<ComplexPair>({
+      id: 'complex-divided-by',
+      title: 'Complex dividedBy',
+      contract: { id: 'math-complex-divide/v1', description: 'the quotient of two complex numbers; real and imaginary part to 9 significant digits' },
+      inputs: complexPairs,
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math Complex.dividedBy',
+          package: '@arki/math',
+          setup: ({ a, b }) => ({ x: complex(a[0], a[1]), y: complex(b[0], b[1]) }),
+          run: ({ x, y }) => x.dividedBy(y),
+          normalize: parts,
+        }),
+        complexJs: c({
+          label: 'complex.js div',
+          package: 'complex.js',
+          setup: ({ a, b }) => ({ x: new ComplexJs(a[0], a[1]), y: new ComplexJs(b[0], b[1]) }),
+          run: ({ x, y }) => x.div(y),
+          normalize: parts,
+        }),
+        mathjs: c({
+          label: 'mathjs divide',
+          package: 'mathjs',
+          setup: ({ a, b }) => ({ x: mathComplex(a[0], a[1]), y: mathComplex(b[0], b[1]) }),
+          run: ({ x, y }) => mathDivide(x, y),
+          normalize: parts,
+        }),
+      }),
+    }),
+    compare<ComplexPair>({
+      id: 'complex-pow',
+      title: 'Complex pow',
+      contract: { id: 'math-complex-pow/v1', description: 'the principal value of z^w for complex z and w; real and imaginary part to 9 significant digits' },
+      inputs: complexPairs,
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math Complex.pow',
+          package: '@arki/math',
+          setup: ({ a, b }) => ({ x: complex(a[0], a[1]), y: complex(b[0], b[1]) }),
+          run: ({ x, y }) => x.pow(y),
+          normalize: parts,
+        }),
+        complexJs: c({
+          label: 'complex.js pow',
+          package: 'complex.js',
+          setup: ({ a, b }) => ({ x: new ComplexJs(a[0], a[1]), y: new ComplexJs(b[0], b[1]) }),
+          run: ({ x, y }) => x.pow(y),
+          normalize: parts,
+        }),
+        mathjs: c({
+          label: 'mathjs pow',
+          package: 'mathjs',
+          setup: ({ a, b }) => ({ x: mathComplex(a[0], a[1]), y: mathComplex(b[0], b[1]) }),
+          run: ({ x, y }) => mathPow(x, y),
+          normalize: parts,
+        }),
+      }),
+    }),
+    compare<ComplexPair>({
+      id: 'complex-sqrt',
+      title: 'Complex sqrt',
+      contract: { id: 'math-complex-sqrt/v1', description: 'the principal square root; real and imaginary part to 9 significant digits' },
+      inputs: complexPairs,
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math Complex.sqrt',
+          package: '@arki/math',
+          setup: ({ a }) => complex(a[0], a[1]),
+          run: x => x.sqrt(),
+          normalize: parts,
+        }),
+        complexJs: c({
+          label: 'complex.js sqrt',
+          package: 'complex.js',
+          setup: ({ a }) => new ComplexJs(a[0], a[1]),
+          run: x => x.sqrt(),
+          normalize: parts,
+        }),
+        mathjs: c({
+          label: 'mathjs sqrt',
+          package: 'mathjs',
+          setup: ({ a }) => mathComplex(a[0], a[1]),
+          run: x => mathSqrt(x),
+          normalize: parts,
+        }),
+      }),
+    }),
+    compare<string>({
+      id: 'complex-parse',
+      title: 'Complex parse',
+      contract: { id: 'math-complex-parse/v1', description: 'the number a text like "3+4i" stands for; real and imaginary part to 9 significant digits' },
+      inputs: ['3+4i', '-2.5-0.5i', '7', '2i', '-i', '1.5e3+2e-3i', '0.125 - 8i'],
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math complex(text)',
+          package: '@arki/math',
+          run: (text: string) => complex(text),
+          normalize: parts,
+        }),
+        complexJs: c({
+          label: 'complex.js new Complex(text)',
+          package: 'complex.js',
+          run: (text: string) => new ComplexJs(text),
+          normalize: parts,
+        }),
+        mathjs: c({
+          label: 'mathjs complex(text)',
+          package: 'mathjs',
+          run: (text: string) => mathComplex(text),
+          normalize: parts,
+        }),
+      }),
+    }),
+    compare<readonly [number, number, number, number]>({
+      id: 'cubic-roots',
+      title: 'Cubic roots',
+      contract: {
+        id: 'math-cubic-roots/v1',
+        description: 'all three roots of ax³+bx²+cx+d, as real/imaginary parts sorted by real part then imaginary part, to 9 significant digits',
+      },
+      inputs: [
+        [1, -6, 11, -6],
+        [2, -4, -22, 24],
+        [1, 0, 0, -8],
+        [1, 2, 3, 4],
+        [-3, 0.5, 7, 1.25],
+      ],
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math cubicRoots',
+          package: '@arki/math',
+          run: ([a, b, c0, d]: readonly [number, number, number, number]) => cubicRoots(a, b, c0, d),
+          normalize: result =>
+            rootsText(
+              result.kind === 'real'
+                ? result.roots.map(re => ({ re, im: 0 }))
+                : [{ re: result.real, im: 0 }, ...result.complex],
+            ),
+        }),
+        mathjs: c({
+          label: 'mathjs polynomialRoot',
+          package: 'mathjs',
+          run: ([a, b, c0, d]: readonly [number, number, number, number]) => polynomialRoot(d, c0, b, a),
+          normalize: result => rootsText(result.map(root => (typeof root === 'number' ? { re: root, im: 0 } : root))),
         }),
       }),
     }),

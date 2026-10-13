@@ -171,9 +171,13 @@
     "@types/node": "catalog:node",
     "big.js": "catalog:",
     "bignumber.js": "catalog:",
+    "complex.js": "^2.4.3",
     "decimal.js": "catalog:",
     "fraction.js": "^5.3.4",
     "jstat": "catalog:",
+    "mathjs": "catalog:",
+    "ml-matrix": "^6.15.0",
+    "regression": "^2.0.1",
     "simple-statistics": "catalog:"
   },
   "publishConfig": {
