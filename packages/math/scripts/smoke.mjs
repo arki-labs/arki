@@ -3,13 +3,17 @@
 // It exercises one call per module; the unit tests cover the details.
 
 import {
+  complex,
+  confidenceInterval,
   convert,
   createRandom,
+  cubicRoots,
   decimal,
   formatCurrency,
   formatFileSize,
   formatNumber,
   formatPercent,
+  fromBase,
   gcd,
   isPrime,
   mean,
@@ -19,11 +23,16 @@ import {
   payment,
   ratio,
   round,
+  roundToSignificant,
+  sampleSize,
+  solveTriangles,
   spellNumber,
   spellOrdinal,
   sqrt,
   stddev,
+  toBase,
 } from '../dist/index.js';
+import { determinant, solve } from '../dist/linear-algebra.js';
 import { ro } from '../dist/words/ro.js';
 
 const exactStrings =
@@ -80,6 +89,40 @@ const checks = [
   ['units', convert(100, 'C', 'F'), 212],
   ['finance', payment(200_000, 0.005, 360, { scale: 2, rounding: 'halfEven' }).toString(), '1199.10'],
   ['integer', isPrime(9_007_199_254_740_881), true],
+  ['number bases past 2^53', fromBase(toBase(2n ** 100n, 36), 36) === 2n ** 100n, true],
+  ['significant figures', roundToSignificant(123_456, 2), 120_000],
+  ['fuel economy reciprocal', round(convert(30, 'mpg', 'l/100km'), 2), 7.84],
+  ['stats inference', sampleSize({ marginOfError: 0.03 }), 1068],
+  ['confidence interval', round(confidenceInterval([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).lower, 6), 3.334149],
+  ['geometry SSA', solveTriangles({ a: 7, b: 10, A: 30 }, { angleUnit: 'deg' }).length, 2],
+  [
+    'linear-algebra solve',
+    solve(
+      [
+        [2, 1, 1],
+        [4, -6, 0],
+        [-2, 7, 2],
+      ],
+      [5, -2, 9],
+    )
+      .map(v => round(v, 9))
+      .join(),
+    '1,1,2',
+  ],
+  [
+    'determinant',
+    round(
+      determinant([
+        [2, 1, 1],
+        [4, -6, 0],
+        [-2, 7, 2],
+      ]),
+      9,
+    ),
+    -16,
+  ],
+  ['complex', complex(1, 1).pow(2).toString(), '2i'],
+  ['polynomial', cubicRoots(1, -6, 11, -6).roots.join(), '1,2,3'],
 ];
 
 const runtime =

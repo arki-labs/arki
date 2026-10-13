@@ -1,5 +1,25 @@
 # @arki/math
 
+## 0.0.6
+
+Four new modules and the general math a calculator site needs.
+
+Added:
+
+- `@arki/math/geometry` — `solveTriangles`/`solveTriangle` from any three parts (SSA returns 0–2 triangles), `circle`, `circleSector`, `ellipse`, `regularPolygon`, volumes and surfaces of sphere, cylinder, cone, frustum, square pyramid, cube, cuboid and torus, `distance`, `midpoint`, `polygonArea`/`signedPolygonArea`, `isPythagoreanTriple`, `pythagoreanTriples`.
+- `@arki/math/linear-algebra` (subpath only) — vectors and dense matrices on plain arrays: `dot`, `cross`, `norm`, `normalize`, `angleBetween`, `projection`, `plus`, `minus`, `times`, `matrix`, `identity`, `transpose`, `trace`, `multiply`, `luDecompose`, `determinant`, `solve`, `inverse`, `rank`.
+- `@arki/math/complex` — immutable `Complex`/`complex()`: arithmetic, polar form, `exp`, `ln`, `log`, `sqrt`, `pow`, `nthRoots`, strict parsing of `'3+4i'`.
+- `@arki/math/polynomial` — coefficient arrays highest degree first: `evaluatePolynomial`, `polynomialDerivative`, `addPolynomials`, `multiplyPolynomials`, `quadraticRoots`, `cubicRoots`, `polynomialRoots` (any degree).
+- `stats` — `zScore`, `standardError`, `marginOfError`, `confidenceInterval`, `sampleSize`; `exponentialRegression`, `logarithmicRegression`, `powerRegression`, `polynomialRegression`.
+- `units` — power, frequency, force, torque, fuel economy (`l/100km` as the reciprocal of `km/l`) and data rate: 17 categories.
+- `integer` — `toBase`, `fromBase` (bases 2–36, `bigint`-exact).
+- `number` — `roundToSignificant`, `significantDigits`; `Decimal#roundToSignificant`.
+- `errors` — `SingularMatrixError`, `ConvergenceError`.
+
+Changed:
+
+- `linearRegression` now also returns `r2` and `predict(x)`, like the other fits.
+
 ## 0.0.5
 
 React Native support, and money leaves the package.

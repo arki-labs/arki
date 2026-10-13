@@ -219,7 +219,14 @@ describe('linearRegression', () => {
     expect(fit.intercept).toBeCloseTo(0.6, 12);
   });
   it('allows constant y (flat line)', () => {
-    expect(linearRegression([1, 2, 3], [4, 4, 4])).toEqual({ slope: 0, intercept: 4 });
+    const fit = linearRegression([1, 2, 3], [4, 4, 4]);
+    expect({ slope: fit.slope, intercept: fit.intercept, r2: fit.r2 }).toEqual({ slope: 0, intercept: 4, r2: 1 });
+  });
+  it('reports r2 and predicts like the other fits, so callers can swap fit kinds', () => {
+    // Same noisy points: r = 0.8, so r2 = 0.64 (r2 of a straight-line fit is r squared)
+    const fit = linearRegression([1, 2, 3, 4, 5], [2, 1, 4, 3, 5]);
+    expect(fit.r2).toBeCloseTo(0.64, 12);
+    expect(fit.predict(10)).toBeCloseTo(8.6, 12);
   });
   it('rejects constant x, mismatched lengths and too few points', () => {
     expect(() => linearRegression([2, 2, 2], [1, 2, 3])).toThrow(InvalidArgumentError);

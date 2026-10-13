@@ -16,7 +16,7 @@
  */
 
 import { Complex } from './complex.js';
-import { InvalidArgumentError, MathError, NumericRangeError } from './errors.js';
+import { ConvergenceError, InvalidArgumentError, NumericRangeError } from './errors.js';
 import { assertFinite } from './number.js';
 
 /** Coefficients, highest degree first. */
@@ -448,7 +448,7 @@ function aberth(input: readonly number[]): Complex[] {
     }
   }
   if (remaining > 0) {
-    throw new MathError(`polynomialRoots did not converge in ${MAX_ITERATIONS} iterations`);
+    throw new ConvergenceError(`polynomialRoots did not converge in ${MAX_ITERATIONS} iterations`);
   }
   return re.map((x, k) => {
     const y = im[k]!;

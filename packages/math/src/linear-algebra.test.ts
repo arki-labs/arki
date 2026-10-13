@@ -7,6 +7,7 @@ import {
   MathError,
   NumericRangeError,
   ResourceLimitError,
+  SingularMatrixError,
 } from './errors.js';
 import {
   angleBetween,
@@ -24,7 +25,6 @@ import {
   plus,
   projection,
   rank,
-  SingularMatrixError,
   solve,
   times,
   trace,

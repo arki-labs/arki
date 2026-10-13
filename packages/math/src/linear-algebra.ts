@@ -34,9 +34,9 @@
 import {
   DivisionByZeroError,
   InvalidArgumentError,
-  MathError,
   NumericRangeError,
   ResourceLimitError,
+  SingularMatrixError,
 } from './errors.js';
 import { assertFinite } from './number.js';
 
@@ -66,9 +66,6 @@ export type LuDecomposition = {
   /** Sign of the permutation: `1` for an even number of row swaps, `-1` for odd. */
   sign: 1 | -1;
 };
-
-/** `solve` or `inverse` met a matrix that is singular to working precision. */
-export class SingularMatrixError extends MathError {}
 
 /** Largest matrix `identity` builds (rows × columns); keeps `identity(1e6)` from exhausting memory. */
 const MAX_ELEMENTS = 10_000_000;

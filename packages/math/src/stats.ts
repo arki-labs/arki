@@ -33,7 +33,8 @@ export type MinMax = {
   max: number;
 };
 
-export type LinearFit = {
+/** `y = intercept + slope * x`. */
+export type LinearFit = Fit & {
   slope: number;
   intercept: number;
 };
@@ -735,7 +736,16 @@ export function linearRegression(x: Iterable<number>, y: Iterable<number>): Line
   if (sxx === 0) throw new InvalidArgumentError('linear regression is undefined when x is constant');
   const slope = assertRepresentable(((sxy / sxx) * ky) / kx, 'slope');
   const intercept = assertRepresentable(meanY - slope * meanX, 'intercept');
-  return { slope: noNegativeZero(slope), intercept: noNegativeZero(intercept) };
+  const fit = { slope: noNegativeZero(slope), intercept: noNegativeZero(intercept) };
+  const predict = (at: number): number => fit.intercept + fit.slope * at;
+  return {
+    ...fit,
+    r2: rSquared(
+      ys,
+      xs.map(v => predict(v)),
+    ),
+    predict,
+  };
 }
 
 // ---------------------------------------------------------------------------
