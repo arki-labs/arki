@@ -93,7 +93,7 @@ function grammarFromSymbols(currency: Currency, symbols: ParseSymbols): Grammar 
 function sortMarks(marks: readonly string[]): string[] {
   return [...new Set(marks.map(mark => normalizeSpaces(mark).trim()))]
     .filter(mark => mark !== '')
-    .toSorted((a, b) => b.length - a.length);
+    .sort((a, b) => b.length - a.length);
 }
 
 function grammarFromIntl(currency: Currency, locale: string): Grammar {

@@ -169,7 +169,7 @@ moneyInputSchema('EUR', { locale: 'de-DE' }).parse('1.234,56 €'); // form fiel
 ```
 
 ```ts
-import { moneyDecimal, moneyJson, moneyMinor } from '@arki/money/drizzle';
+import { moneyDecimal, moneyJson, moneyMinor } from '@arki/money/drizzle/pg'; // or /drizzle/mysql, /drizzle/sqlite
 
 const prices = pgTable('prices', {
   total: moneyMinor('total', { currency: 'EUR' }), // bigint of cents ↔ Money<'EUR'>
@@ -177,6 +177,14 @@ const prices = pgTable('prices', {
   price: moneyJson('price'), // jsonb { amount, currency } ↔ Money in any currency
 });
 ```
+
+| Column         | Postgres        | MySQL / MariaDB | SQLite                               |
+| -------------- | --------------- | --------------- | ------------------------------------ |
+| `moneyMinor`   | `bigint`        | `bigint`        | `integer`                            |
+| `moneyDecimal` | `numeric(p, s)` | `decimal(p, s)` | `text` (SQLite has no exact decimal) |
+| `moneyJson`    | `jsonb`         | `json`          | `text`                               |
+
+SQLite drivers usually return numbers, which are exact up to 2^53 minor units. A bigger stored amount throws on read instead of turning into a wrong value; switch the driver to big integers to read it (libSQL `intMode: 'bigint'`, better-sqlite3 `safeIntegers()`).
 
 The schemas take the JSON shape as input, so tRPC and oRPC clients infer what to send. The columns read text from every driver, so no value passes through a float, and writing another currency or a value that needs rounding throws. `zod` (4.x) and `drizzle-orm` (1.x) are optional peer dependencies, used only by their subpaths.
 
@@ -186,21 +194,21 @@ Every deliberate failure extends `MathError` from `@arki/math`, so one `instance
 
 ## Entry points
 
-| Import                 | Contents                                                                       |
-| ---------------------- | ------------------------------------------------------------------------------ |
-| `@arki/money`          | `Money`, `money`, `Currency`, `factor`, `sum`, `average`, `min`, `max`, errors |
-| `@arki/money/currency` | `Currency` alone                                                               |
-| `@arki/money/format`   | `formatMoney`, `formatMoneyToParts`, `createMoneyFormatter`                    |
-| `@arki/money/exact`    | `toDecimal`, `toRational` bridges to `@arki/math`                              |
-| `@arki/money/errors`   | Error classes                                                                  |
-| `@arki/money/parse`    | `parseMoney`, `createMoneyParser`                                              |
-| `@arki/money/exchange` | `exchangeRate`, `ratesFrom`, `convert`, `createConverter`, `Converter`         |
-| `@arki/money/provider` | `toProviderUnits`, `fromProviderUnits`                                         |
-| `@arki/money/rational` | `RationalMoney`, `isRationalMoney`                                             |
-| `@arki/money/bag`      | `MoneyBag`                                                                     |
-| `@arki/money/zod`      | `moneySchema`, `anyMoneySchema`, `moneyInputSchema`, `currencyCodeSchema`      |
-| `@arki/money/drizzle`  | `moneyMinor`, `moneyDecimal`, `moneyJson` (Postgres)                           |
-| `@arki/money/stripe`   | `toStripe`, `toStripeAmount`, `fromStripeAmount`, `stripeRule`                 |
+| Import                                        | Contents                                                                       |
+| --------------------------------------------- | ------------------------------------------------------------------------------ |
+| `@arki/money`                                 | `Money`, `money`, `Currency`, `factor`, `sum`, `average`, `min`, `max`, errors |
+| `@arki/money/currency`                        | `Currency` alone                                                               |
+| `@arki/money/format`                          | `formatMoney`, `formatMoneyToParts`, `createMoneyFormatter`                    |
+| `@arki/money/exact`                           | `toDecimal`, `toRational` bridges to `@arki/math`                              |
+| `@arki/money/errors`                          | Error classes                                                                  |
+| `@arki/money/parse`                           | `parseMoney`, `createMoneyParser`                                              |
+| `@arki/money/exchange`                        | `exchangeRate`, `ratesFrom`, `convert`, `createConverter`, `Converter`         |
+| `@arki/money/provider`                        | `toProviderUnits`, `fromProviderUnits`                                         |
+| `@arki/money/rational`                        | `RationalMoney`, `isRationalMoney`                                             |
+| `@arki/money/bag`                             | `MoneyBag`                                                                     |
+| `@arki/money/zod`                             | `moneySchema`, `anyMoneySchema`, `moneyInputSchema`, `currencyCodeSchema`      |
+| `@arki/money/drizzle/pg`, `/mysql`, `/sqlite` | `moneyMinor`, `moneyDecimal`, `moneyJson`                                      |
+| `@arki/money/stripe`                          | `toStripe`, `toStripeAmount`, `fromStripeAmount`, `stripeRule`                 |
 
 ## Performance
 
@@ -222,7 +230,9 @@ Amounts past 2^53 switch to `bigint` and stay exact; adding them costs about 29 
 
 ## Runtime support
 
-Node 20+, Bun, Deno, modern browsers and React Native (Hermes with `BigInt`). `bun run test:runtimes` builds the package and runs the same checks under Node, Bun, Deno and headless Chromium.
+Node 20+, Bun, Deno, modern browsers and React Native on Hermes V1 (React Native 0.86). `bun run test:runtimes` runs the same checks on all five; the Hermes leg needs a `hermes` binary (`HERMES_BIN`, build steps in `scripts/smoke-hermes.mjs`) and says so loudly when it is missing.
+
+On Hermes for Apple platforms, `Intl.NumberFormat` has no `formatToParts` and formats number strings through a float. So `parseMoney` with a `locale` throws `UnsupportedFeatureError` (pass `symbols` instead), `formatMoneyToParts` throws, and `formatMoney` is exact up to 15 significant digits and throws beyond. Arithmetic, allocation, conversion, Stripe units and JSON work everywhere.
 
 ## License
 

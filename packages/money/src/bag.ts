@@ -70,7 +70,7 @@ export class MoneyBag {
 
   /** The non-zero balances, sorted by currency code. */
   entries(): RationalMoney[] {
-    return [...this.balances.values()].toSorted((a, b) => (a.currency.code < b.currency.code ? -1 : 1));
+    return [...this.balances.values()].sort((a, b) => (a.currency.code < b.currency.code ? -1 : 1));
   }
 
   /** `true` when every balance is zero. */

@@ -3,7 +3,7 @@ import { pgTable, serial } from 'drizzle-orm/pg-core';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
-import { moneyDecimal, moneyJson, moneyMinor } from './drizzle.js';
+import { moneyDecimal, moneyJson, moneyMinor } from './drizzle/pg.js';
 import { Currency, CurrencyMismatchError, Money, money, RoundingNecessaryError } from './index.js';
 import { anyMoneySchema, currencyCodeSchema, moneyInputSchema, moneySchema } from './zod.js';
 

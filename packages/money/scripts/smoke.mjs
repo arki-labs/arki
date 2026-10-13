@@ -18,6 +18,18 @@ const converter = createConverter(ratesFrom({ base: 'EUR', rates: { USD: '1.0832
   via: 'EUR',
 });
 
+const hasFormatToParts = typeof Intl.NumberFormat.prototype.formatToParts === 'function';
+const deSymbols = { decimal: ',', group: '.', currency: ['€'] };
+const enSymbols = { decimal: '.', group: ',' };
+const errorName = fn => {
+  try {
+    fn();
+    return 'accepted';
+  } catch (error) {
+    return error.name;
+  }
+};
+
 const checks = [
   ['parse and print', money('19.99', 'EUR').toString(), '19.99 EUR'],
   ['exact add', money('0.10', 'EUR').plus(money('0.20', 'EUR')).toString(), '0.30 EUR'],
@@ -45,19 +57,22 @@ const checks = [
   ],
   ['JSON', JSON.stringify(money('1.5', 'EUR')), '{"amount":"1.50","currency":"EUR"}'],
   ['rational bridge', toRational(money('19.90', 'EUR')).toString(), '199/10'],
-  ['parse de-DE', parseMoney('1.234,56 €', 'EUR', { locale: 'de-DE' }).toString(), '1234.56 EUR'],
-  [
-    'parse strict',
-    (() => {
-      try {
-        parseMoney('1,23,4', 'USD');
-        return 'accepted';
-      } catch (e) {
-        return e.name;
-      }
-    })(),
-    'NumberFormatError',
-  ],
+  // Hermes on Apple has Intl.NumberFormat but no formatToParts: locale parsing must
+  // fail with a typed error, and the Intl-free `symbols` path must still work.
+  ...(hasFormatToParts
+    ? [
+        ['parse de-DE', parseMoney('1.234,56 €', 'EUR', { locale: 'de-DE' }).toString(), '1234.56 EUR'],
+        ['parse strict', errorName(() => parseMoney('1,23,4', 'USD')), 'NumberFormatError'],
+      ]
+    : [
+        [
+          'parse needs formatToParts',
+          errorName(() => parseMoney('1,00 €', 'EUR', { locale: 'de-DE' })),
+          'UnsupportedFeatureError',
+        ],
+        ['parse with symbols', parseMoney('1.234,56 €', 'EUR', { symbols: deSymbols }).toString(), '1234.56 EUR'],
+        ['parse strict', errorName(() => parseMoney('1,23,4', 'USD', { symbols: enSymbols })), 'NumberFormatError'],
+      ]),
   [
     'convert via base',
     converter.convert(money('1234.56', 'USD'), 'GBP', { rounding: 'halfEven' }).toString(),
@@ -82,13 +97,15 @@ for (const [name, actual, expected] of checks) {
   console.log(`FAIL ${name}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
 }
 const runtime =
-  typeof Deno !== 'undefined'
-    ? 'deno'
-    : typeof Bun !== 'undefined'
-      ? 'bun'
-      : typeof window !== 'undefined'
-        ? 'browser'
-        : 'node';
+  typeof HermesInternal !== 'undefined'
+    ? 'hermes'
+    : typeof Deno !== 'undefined'
+      ? 'deno'
+      : typeof Bun !== 'undefined'
+        ? 'bun'
+        : typeof window !== 'undefined'
+          ? 'browser'
+          : 'node';
 if (failed > 0) {
   console.log(`${runtime}: ${failed} smoke checks FAILED`);
   throw new Error('smoke failed');

@@ -1,6 +1,6 @@
 {
   "name": "@arki/money",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "private": false,
   "description": "Exact, fast money for every JavaScript runtime — amounts kept as whole units (plain numbers, bigint only when huge), a shipped ISO 4217 currency table, exact-or-throw rounding, fair allocation, and currencies checked by the type system.",
   "keywords": [
@@ -93,10 +93,20 @@
       "import": "./dist/zod.js",
       "default": "./dist/zod.js"
     },
-    "./drizzle": {
-      "types": "./dist/drizzle.d.ts",
-      "import": "./dist/drizzle.js",
-      "default": "./dist/drizzle.js"
+    "./drizzle/pg": {
+      "types": "./dist/drizzle/pg.d.ts",
+      "import": "./dist/drizzle/pg.js",
+      "default": "./dist/drizzle/pg.js"
+    },
+    "./drizzle/mysql": {
+      "types": "./dist/drizzle/mysql.d.ts",
+      "import": "./dist/drizzle/mysql.js",
+      "default": "./dist/drizzle/mysql.js"
+    },
+    "./drizzle/sqlite": {
+      "types": "./dist/drizzle/sqlite.d.ts",
+      "import": "./dist/drizzle/sqlite.js",
+      "default": "./dist/drizzle/sqlite.js"
     },
     "./package.json": "./package.json"
   },
@@ -120,7 +130,7 @@
     "lint": "eslint .",
     "size": "bun run build && bun scripts/size.mjs",
     "test": "vitest run",
-    "test:runtimes": "bun run build && node scripts/smoke.mjs && bun scripts/smoke.mjs && if command -v deno >/dev/null; then deno run --no-config --node-modules-dir=manual scripts/smoke.mjs; else echo 'deno not installed: skipped'; fi && bun build scripts/smoke.mjs --target=browser --outdir=.cache/browser-check && node scripts/smoke-browser.mjs",
+    "test:runtimes": "bun run build && node scripts/smoke.mjs && bun scripts/smoke.mjs && if command -v deno >/dev/null; then deno run --no-config --node-modules-dir=manual scripts/smoke.mjs; else echo 'deno not installed: skipped'; fi && bun build scripts/smoke.mjs --target=browser --outdir=.cache/browser-check && node scripts/smoke-browser.mjs && node scripts/smoke-hermes.mjs",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
@@ -133,11 +143,13 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@electric-sql/pglite": "catalog:",
+    "@libsql/client": "^0.18.0",
     "@types/node": "catalog:node",
     "big.js": "catalog:",
     "currency.js": "^2.0.4",
     "dinero.js": "1",
     "drizzle-orm": "catalog:drizzle",
+    "mysql2": "^3.24.5",
     "zod": "catalog:"
   },
   "peerDependencies": {

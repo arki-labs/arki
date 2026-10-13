@@ -20,7 +20,9 @@ const BUDGETS = {
   rational: 10_200,
   bag: 10_700,
   zod: 8300,
-  drizzle: 6700,
+  'drizzle/pg': 6900,
+  'drizzle/mysql': 6900,
+  'drizzle/sqlite': 6900,
 };
 
 async function gzipSize(entry) {

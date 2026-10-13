@@ -1,5 +1,20 @@
 # @arki/money
 
+## 0.0.4
+
+Changed:
+
+- `@arki/money/drizzle` is now `@arki/money/drizzle/pg`. No alias (pre-1.0).
+
+Added:
+
+- `@arki/money/drizzle/mysql` (`bigint`, `decimal`, `json`) and `@arki/money/drizzle/sqlite` (`integer`, `text`, `text`), sharing one set of conversions with Postgres. An integer a driver already rounded past 2^53 throws on read. MySQL round trip tested on MySQL 8 (`MONEY_TEST_MYSQL_URL`), SQLite on libSQL.
+- Hermes V1 (React Native 0.86) leg in `test:runtimes`.
+
+Fixed:
+
+- Locale parsing and `MoneyBag` used `Array#toSorted`, which Hermes lacks, and crashed on React Native. Lint now forbids `toSorted`, `toReversed` and `toSpliced`.
+
 ## 0.0.3
 
 Added:
