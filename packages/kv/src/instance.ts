@@ -1,5 +1,6 @@
 import { debugKV } from './debug.js';
 import { env } from './env.js';
+import { KV_INITIALIZATION_ERROR_CODES, KVInitializationError } from './errors.js';
 import { KV } from './index.js';
 
 /**
@@ -20,8 +21,11 @@ export async function initializeKV(namespace?: string): Promise<KV | null> {
     debugKV.debug('[instance] Missing KV_URL configuration');
     if (env.NODE_ENV === 'production') {
       debugKV.debug('[instance] CRITICAL: KV_URL required in production');
-      console.error('CRITICAL: KV_URL must be defined in production.');
-      process.exit(1);
+      throw new KVInitializationError({
+        code: KV_INITIALIZATION_ERROR_CODES.urlRequiredInProduction,
+        message: 'KV_URL must be defined in production.',
+        remediation: 'Set KV_URL in the production environment.',
+      });
     }
     debugKV.debug('[instance] Running without KV in development mode');
     console.warn('⚠️  KV_URL not defined. Running without KV store (development mode).');
@@ -62,8 +66,12 @@ export async function initializeKV(namespace?: string): Promise<KV | null> {
     });
     if (env.NODE_ENV === 'production') {
       debugKV.debug('[instance] CRITICAL: Production initialization failure');
-      console.error('CRITICAL: Failed to initialize or connect to KV store.', error);
-      process.exit(1);
+      throw new KVInitializationError({
+        code: KV_INITIALIZATION_ERROR_CODES.connectionFailed,
+        message: 'Failed to initialize or connect to KV store.',
+        remediation: 'Check that KV_URL points to a reachable KV server.',
+        cause: error,
+      });
     }
     debugKV.debug('[instance] Running without KV in development mode after error');
     console.error('⚠️  Failed to connect to KV store. Running without KV (development mode).', error);
@@ -90,8 +98,11 @@ export function createKVInstance(namespace?: string): KV | null {
     debugKV.debug('[instance] Missing KV_URL configuration');
     if (env.NODE_ENV === 'production') {
       debugKV.debug('[instance] CRITICAL: KV_URL required in production');
-      console.error('CRITICAL: KV_URL must be defined in production.');
-      process.exit(1);
+      throw new KVInitializationError({
+        code: KV_INITIALIZATION_ERROR_CODES.urlRequiredInProduction,
+        message: 'KV_URL must be defined in production.',
+        remediation: 'Set KV_URL in the production environment.',
+      });
     }
     debugKV.debug('[instance] Returning null in development mode (missing config)');
     return null;
@@ -114,8 +125,12 @@ export function createKVInstance(namespace?: string): KV | null {
     });
     if (env.NODE_ENV === 'production') {
       debugKV.debug('[instance] CRITICAL: Production creation failure');
-      console.error('CRITICAL: Failed to create KV instance.', error);
-      process.exit(1);
+      throw new KVInitializationError({
+        code: KV_INITIALIZATION_ERROR_CODES.creationFailed,
+        message: 'Failed to create KV instance.',
+        remediation: 'Check that KV_URL is a valid KV connection URL.',
+        cause: error,
+      });
     }
     debugKV.debug('[instance] Returning null in development mode after error');
     console.error('⚠️  Failed to create KV instance. Running without KV (development mode).', error);
