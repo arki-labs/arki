@@ -120,6 +120,53 @@ const arrival = (gate: Promise<void>, producer: Promise<unknown>, why: string): 
   );
 
 describe('two writers on real Postgres', () => {
+  it('appends commit in seq order: a second writer gets no seq until the first commits, so `seq > cursor` is safe', async () => {
+    // Why: seq is a bigserial, assigned at insert. Without the append lock, A takes seq 10, B takes 11
+    // and commits first, a reader checkpoints at 11, and A's event at 10 is never read.
+    const release = deferred();
+    const appended = deferred();
+    const writerA = dbA.transaction(async tx => {
+      const result = await journal.write(tx, order, orderId(++next), {
+        meta,
+        events: () => [OrderPlaced({ customerId: 'c', total: 1 })],
+      });
+      appended.resolve();
+      await release.promise;
+      return result;
+    });
+    const settle: Promise<unknown>[] = [writerA];
+    try {
+      await arrival(appended.promise, writerA, 'writer A never appended');
+      let settledB = false;
+      const writerB = dbB
+        .transaction(tx =>
+          journal.write(tx, order, orderId(++next), {
+            meta,
+            events: () => [OrderPlaced({ customerId: 'c', total: 1 })],
+          }),
+        )
+        .then(result => {
+          settledB = true;
+          return result;
+        });
+      settle.push(writerB);
+
+      await sleep(300);
+      expect(settledB, 'B must wait for the append lock while A holds it').toBe(false);
+
+      release.resolve();
+      const resultA = await writerA;
+      const resultB = await writerB;
+      const seqA = resultA.events[0]?.seq;
+      const seqB = resultB.events[0]?.seq;
+      if (seqA === undefined || seqB === undefined) throw new Error('no events');
+      expect(seqB).toBeGreaterThan(seqA);
+    } finally {
+      release.resolve();
+      await Promise.allSettled(settle);
+    }
+  }, 30_000);
+
   it("the second writer waits on the row lock, then sees the first writer's row", async () => {
     const id = orderId(1);
     await dbA.transaction(tx =>
@@ -180,40 +227,35 @@ describe('two writers on real Postgres', () => {
     }
   }, 30_000);
 
-  it('two simultaneous creates of one new id: one wins, the other is CONFLICT, the log has one version 1', async () => {
-    // A new id has no row to lock, so the unique index is the only guard. Both writers
-    // must have read "no row" before either inserts, or this would be ROW_EXISTS.
+  it('two simultaneous creates of one new id: the second waits at the append lock, sees the first row, and is ROW_EXISTS', async () => {
+    // Why: a new id has no row to lock. Before the append lock, both writers read "no row", both
+    // inserted, and the unique index turned the loser into CONFLICT. The lock serialises them: the
+    // loser loads the winner's row and gets the ordinary answer for a create over a row. The unique
+    // index stays as the backstop for a writer that reaches the insert some other way.
     const id = orderId(++next);
-    let arrived = 0;
-    const bothLoaded = deferred();
-    // Each writer waits for the other at the barrier. If the other fails before it
-    // arrives, the wait fails with that reason instead of hanging.
-    const placedBy = (customerId: string, me: number) => async () => {
-      arrived += 1;
-      if (arrived === 2) bothLoaded.resolve();
-      const other = writers[1 - me];
-      if (other === undefined) throw new Error('the other writer was never started');
-      await arrival(bothLoaded.promise, other, `writer ${customerId}: the other writer never loaded its row`);
-      return [OrderPlaced({ customerId, total: 1 })];
-    };
-    const placeOn = (db: typeof dbA, events: ReturnType<typeof placedBy>) =>
-      db.transaction(tx => journal.write(tx, order, id, { meta, events }));
-    const writers = [placeOn(dbA, placedBy('a', 0)), placeOn(dbB, placedBy('b', 1))];
-    try {
-      const results = await Promise.allSettled(writers);
-      const won = results.filter(result => result.status === 'fulfilled');
-      const lost = results.filter(result => result.status === 'rejected');
-      expect(won, 'one writer must win').toHaveLength(1);
-      expect(lost, 'one writer must lose').toHaveLength(1);
-      expect(lost[0]?.reason).toMatchObject({ code: 'CONFLICT' });
-      const events = await dbA.select().from(tables.events).where(eq(tables.events.entityId, id));
-      expect(events.map(e => e.version)).toEqual([1]);
-      const rows = await dbA.select().from(orders).where(eq(orders.id, id));
-      expect(rows.map(r => r.customerId)).toEqual([won[0]?.value.row?.customerId]);
-    } finally {
-      bothLoaded.resolve();
-      await Promise.allSettled(writers);
-    }
+    const seen: (string | null)[] = [];
+    const placeOn = (db: typeof dbA, customerId: string) =>
+      db.transaction(tx =>
+        journal.write(tx, order, id, {
+          meta,
+          events: row => {
+            seen.push(row?.customerId ?? null);
+            return [OrderPlaced({ customerId, total: 1 })];
+          },
+        }),
+      );
+    const results = await Promise.allSettled([placeOn(dbA, 'a'), placeOn(dbB, 'b')]);
+    const won = results.filter(result => result.status === 'fulfilled');
+    const lost = results.filter(result => result.status === 'rejected');
+    expect(won, 'one writer must win').toHaveLength(1);
+    expect(lost, 'one writer must lose').toHaveLength(1);
+    expect(lost[0]?.reason).toMatchObject({ code: 'ROW_EXISTS' });
+    const winner = won[0]?.value.row?.customerId;
+    expect(seen.toSorted(), "the loser loaded the winner's row").toEqual([null, winner].toSorted());
+    const events = await dbA.select().from(tables.events).where(eq(tables.events.entityId, id));
+    expect(events.map(e => e.version)).toEqual([1]);
+    const rows = await dbA.select().from(orders).where(eq(orders.id, id));
+    expect(rows.map(r => r.customerId)).toEqual([winner]);
   }, 30_000);
 });
 

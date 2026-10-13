@@ -5,7 +5,7 @@
  * Must not import `journal`, `command` or `worker`.
  */
 import type { z } from 'zod';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import type { NextEvents, WriteInput, WriteResult } from './api.js';
 import type { History } from './history.js';
@@ -36,6 +36,16 @@ import {
 import { oneAtATime } from './transaction-guard.js';
 
 const PG_UNIQUE_VIOLATION = '23505';
+/**
+ * The append lock: `pg_advisory_xact_lock(namespace, key)`, taken at the start of
+ * every write and held until the transaction commits. `seq` is a bigserial, assigned
+ * at insert, so without it two transactions can commit in the other order: a reader
+ * that checkpointed at the later seq never sees the earlier one. With it, seq order is
+ * commit order, and `seq > cursor` is a safe cursor. Cost: event appends across the
+ * app commit one transaction at a time. The namespace is 'JRNL' as an int.
+ */
+const APPEND_LOCK_NAMESPACE = 0x4A_52_4E_4C;
+const APPEND_LOCK_KEY = 1;
 
 function isUniqueViolation(error: unknown): boolean {
   let current: unknown = error;
@@ -88,6 +98,10 @@ export function createWriter<Meta extends z.ZodObject, Tx extends TransactionSou
       assertExactId(entity, id);
       const meta = getValidatedMeta();
       return tx.transaction(async sp => {
+        // Before the row lock, so every journal transaction takes its locks in the same
+        // order (append lock, then rows) and two commands writing two entities cannot deadlock.
+        // Re-entrant inside one transaction, so nested commands take it once.
+        await sp.execute(sql`select pg_advisory_xact_lock(${APPEND_LOCK_NAMESPACE}::int, ${APPEND_LOCK_KEY}::int)`);
         const erased: EntityTable = entity.table;
         const loaded = await loadRow(sp, entity, id, true);
         if (loaded !== null && !isRowOf(entity.table, loaded)) {

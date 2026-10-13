@@ -370,9 +370,11 @@ await run(payOrder, input);
 
 `journalTables()` returns both. The app's migrations create them (`drizzle-kit generate`). The library never creates tables at runtime.
 
+`seq` is commit order, not only insert order. Every write takes one advisory transaction lock (`pg_advisory_xact_lock`, namespace `0x4a524e4c`) at its start and holds it until the transaction commits, so a transaction that took a lower `seq` always commits first. A reader that remembers the last `seq` it saw, as `rerun` does with `afterSeq`, therefore misses nothing. The cost: event appends across the whole app commit one transaction at a time, and a transaction that writes events and then does slow work holds every other writer until it commits. Keep writes near the end of a transaction, or keep the transaction short.
+
 ```text
 journal_events
-  seq          bigserial primary key      -- global order, used by rerun
+  seq          bigserial primary key      -- commit order, used by rerun
   id           varchar not null unique    -- evt_xxx
   kind         varchar(64) not null
   entity_id    varchar(256) not null
