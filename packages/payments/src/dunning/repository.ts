@@ -3,6 +3,7 @@ import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 
 import type { CustomerId } from '../core/primitives';
+import { sumMinorByCurrency } from './analytics-money';
 import type {
   CreateCustomerSegmentInput,
   CreateDunningCampaignInput,
@@ -168,7 +169,7 @@ export class DunningCampaignRepository {
       throw new Error('Failed to create dunning campaign');
     }
 
-    return campaign as DunningCampaign;
+    return campaign;
   }
 
   async update(
@@ -181,7 +182,7 @@ export class DunningCampaignRepository {
       .where(eq(this.dunningCampaigns.id, id))
       .returning();
 
-    return (campaign as DunningCampaign | undefined) ?? null;
+    return (campaign) ?? null;
   }
 
   async delete(id: DunningCampaignId): Promise<void> {
@@ -233,33 +234,41 @@ export class DunningCampaignRepository {
       .where(eq(this.dunningCampaigns.id, id))
       .returning();
 
-    return campaign as DunningCampaign | undefined;
+    return campaign;
   }
 
   async getAnalyticsSummary(campaignId?: DunningCampaignId, days = 30) {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    const query = this.db
+    const inRange = and(
+      gte(this.dunningCampaignAnalytics.date, startDate),
+      campaignId ? eq(this.dunningCampaignAnalytics.campaignId, campaignId) : undefined,
+    );
+
+    const [counters] = await this.db
       .select({
         executions: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.executions}), 0)`,
         customersReached: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.customersReached}), 0)`,
         communicationsSent: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.communicationsSent}), 0)`,
         paymentsRecovered: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.paymentsRecovered}), 0)`,
-        revenueRecovered: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.revenueRecovered}), 0)`,
         conversionRate: sql<number>`COALESCE(AVG(${this.dunningCampaignAnalytics.conversionRate}), 0)`,
         roi: sql<number>`COALESCE(AVG(${this.dunningCampaignAnalytics.roi}), 0)`,
       })
       .from(this.dunningCampaignAnalytics)
-      .where(
-        and(
-          gte(this.dunningCampaignAnalytics.date, startDate),
-          campaignId ? eq(this.dunningCampaignAnalytics.campaignId, campaignId) : undefined,
-        ),
-      );
+      .where(inRange);
 
-    const [result] = await query;
-    return result;
+    // Money is summed per currency: rows of different currencies never add up.
+    const recovered = await this.db
+      .select({
+        currency: this.dunningCampaignAnalytics.currency,
+        units: sql<string>`COALESCE(SUM(${this.dunningCampaignAnalytics.revenueRecoveredMinor}), 0)::text`,
+      })
+      .from(this.dunningCampaignAnalytics)
+      .where(inRange)
+      .groupBy(this.dunningCampaignAnalytics.currency);
+
+    return { ...counters, revenueRecovered: sumMinorByCurrency(recovered) };
   }
 }
 
@@ -304,7 +313,7 @@ export class DunningTemplateRepository {
       throw new Error('Failed to create dunning template');
     }
 
-    return template as DunningTemplate;
+    return template;
   }
 
   async update(
@@ -317,7 +326,7 @@ export class DunningTemplateRepository {
       .where(eq(this.dunningTemplates.id, id))
       .returning();
 
-    return (template as DunningTemplate | undefined) ?? null;
+    return (template) ?? null;
   }
 
   async delete(id: DunningTemplateId): Promise<void> {
@@ -341,7 +350,7 @@ export class DunningTemplateRepository {
       .where(eq(this.dunningTemplates.id, id))
       .returning();
 
-    return template as DunningTemplate | undefined;
+    return template;
   }
 }
 
@@ -418,7 +427,7 @@ export class DunningExecutionRepository {
       throw new Error('Failed to create dunning execution');
     }
 
-    return execution as DunningExecution;
+    return execution;
   }
 
   async updateStatus(
@@ -467,7 +476,7 @@ export class DunningExecutionRepository {
       .where(eq(this.dunningExecutions.id, id))
       .returning();
 
-    return execution as DunningExecution | undefined;
+    return execution;
   }
 
   async findScheduledExecutions(limit = 100): Promise<DunningExecution[]> {
@@ -506,7 +515,7 @@ export class DunningExecutionRepository {
       .where(eq(this.dunningExecutions.id, id))
       .returning();
 
-    return execution as DunningExecution | undefined;
+    return execution;
   }
 
   async findRecentForCustomer(
@@ -604,7 +613,7 @@ export class DunningCommunicationRepository {
       throw new Error('Failed to create dunning communication');
     }
 
-    return communication as DunningCommunication;
+    return communication;
   }
 
   async updateStatus(
@@ -631,7 +640,7 @@ export class DunningCommunicationRepository {
       .where(eq(this.dunningCommunications.id, id))
       .returning();
 
-    return (communication as DunningCommunication | undefined) ?? null;
+    return (communication) ?? null;
   }
 
   async findPendingCommunications(limit = 100): Promise<DunningCommunication[]> {
@@ -716,7 +725,7 @@ export class CustomerSegmentRepository {
       })
       .returning();
 
-    return segment as CustomerSegmentRow | undefined;
+    return segment;
   }
 
   async update(
@@ -729,7 +738,7 @@ export class CustomerSegmentRepository {
       .where(eq(this.customerSegments.id, id))
       .returning();
 
-    return segment as CustomerSegmentRow | undefined;
+    return segment;
   }
 
   async delete(id: CustomerSegmentId): Promise<void> {
@@ -750,7 +759,7 @@ export class CustomerSegmentRepository {
       .where(eq(this.customerSegments.id, id))
       .returning();
 
-    return segment as CustomerSegmentRow | undefined;
+    return segment;
   }
 
   async findSegmentsForAutoUpdate(): Promise<CustomerSegmentRow[]> {
@@ -801,7 +810,7 @@ export class CustomerRiskProfileRepository {
       })
       .returning();
 
-    return profile as CustomerRiskProfile | undefined;
+    return profile;
   }
 
   async update(
@@ -814,7 +823,7 @@ export class CustomerRiskProfileRepository {
       .where(eq(this.customerRiskProfiles.customerId, customerId))
       .returning();
 
-    return profile as CustomerRiskProfile | undefined;
+    return profile;
   }
 
   async upsert(
@@ -860,7 +869,7 @@ export class CustomerRiskProfileRepository {
       .where(eq(this.customerRiskProfiles.customerId, customerId))
       .returning();
 
-    return profile as CustomerRiskProfile | undefined;
+    return profile;
   }
 }
 

@@ -1,5 +1,6 @@
+import { sql } from 'drizzle-orm';
 import type { PgColumn, PgSchema } from 'drizzle-orm/pg-core';
-import { boolean, integer, jsonb, real, text, timestamp, varchar } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, integer, jsonb, real, text, timestamp, varchar } from 'drizzle-orm/pg-core';
 
 import type {
   CommunicationChannel,
@@ -287,17 +288,23 @@ export function createDunningTables({
     smsSent: integer('sms_sent').notNull().default(0),
     smsDelivered: integer('sms_delivered').notNull().default(0),
     paymentsRecovered: integer('payments_recovered').notNull().default(0),
-    revenueRecovered: real('revenue_recovered').notNull().default(0),
+    /** Money of one currency per row: `currency` names the unit of the three `*Minor` columns. Read and write through `core/money.ts`. */
+    currency: varchar('currency', { length: 3 }).notNull().default('USD'),
+    revenueRecoveredMinor: bigint('revenue_recovered_minor', { mode: 'number' }).notNull().default(0),
     unsubscribes: integer('unsubscribes').notNull().default(0),
     complaints: integer('complaints').notNull().default(0),
-    communicationCosts: real('communication_costs').notNull().default(0),
-    processingCosts: real('processing_costs').notNull().default(0),
+    communicationCostsMinor: bigint('communication_costs_minor', { mode: 'number' }).notNull().default(0),
+    processingCostsMinor: bigint('processing_costs_minor', { mode: 'number' }).notNull().default(0),
     conversionRate: real('conversion_rate').notNull().default(0),
     roi: real('roi').notNull().default(0),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  });
+  }, (_table) => [
+    check('dunning_analytics_revenue_recovered_minor_not_negative', sql`"revenue_recovered_minor" >= 0`),
+    check('dunning_analytics_communication_costs_minor_not_negative', sql`"communication_costs_minor" >= 0`),
+    check('dunning_analytics_processing_costs_minor_not_negative', sql`"processing_costs_minor" >= 0`),
+  ]);
 
   const dunningCampaignForeignKeys = dunningCampaignIdFactory.createForeignKeyFactory(() => dunningCampaigns.id);
   const dunningTemplateForeignKeys = dunningTemplateIdFactory.createForeignKeyFactory(() => dunningTemplates.id);

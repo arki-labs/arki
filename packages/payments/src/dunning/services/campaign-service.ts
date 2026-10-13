@@ -1,7 +1,11 @@
 import { sql } from 'drizzle-orm';
 
+import { z } from '@arki/contracts';
 import { getLogger } from '@arki/log';
+import type { Money } from '@arki/money';
 
+import { fromMinorColumn, toMinorColumn } from '../../core/money';
+import { DEFAULT_ANALYTICS_CURRENCY, analyticsRowId } from '../analytics-money';
 import type { PaymentRetryService } from '../../core/services/payment-retry-service';
 import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types';
 import type {
@@ -40,6 +44,9 @@ type EligibleCustomer = {
 };
 
 const logger = getLogger('dunning.campaign');
+
+/** The payment row `checkAndStopOnPaymentSuccess` reads; node-postgres sends `bigint` as text. */
+const paymentRowSchema = z.object({ amount_minor: z.union([z.number(), z.string()]), currency: z.string() });
 
 /**
  * Service for managing dunning campaigns
@@ -745,7 +752,7 @@ export class DunningCampaignService {
   private async checkAndStopOnPaymentSuccess(execution: DunningExecution): Promise<void> {
     // Check if the customer has made a successful payment since the execution started
     const paymentResult = await this.db.execute(sql`
-      SELECT p.id, p.amount, p.created_at
+      SELECT p.id, p.amount_minor, p.currency, p.created_at
       FROM payments p
       WHERE p.customer_id = ${execution.customerId}
         AND p.status = 'succeeded'
@@ -780,10 +787,10 @@ export class DunningCampaignService {
       }
 
       // Update campaign analytics with successful recovery
-      const payment = recentSuccessfulPayments[0] as { amount: number };
+      const payment = paymentRowSchema.parse(recentSuccessfulPayments[0]);
       await this.updateCampaignAnalytics(execution.campaignId, {
         paymentsRecovered: 1,
-        revenueRecovered: Number(payment.amount),
+        revenueRecovered: fromMinorColumn(payment.amount_minor, payment.currency),
       });
     }
   }
@@ -795,32 +802,35 @@ export class DunningCampaignService {
     campaignId: DunningCampaignId,
     metrics: {
       paymentsRecovered?: number;
-      revenueRecovered?: number;
+      revenueRecovered?: Money;
       executions?: number;
       customersReached?: number;
       communicationsSent?: number;
     },
   ): Promise<void> {
-    const today = new Date().toISOString().split('T')[0];
-    const analyticsId = `${campaignId}-${today}`;
+    const today = new Date().toISOString().slice(0, 10);
+    // One row per campaign, day and currency. Counters with no payment go to the default-currency row.
+    const currency = metrics.revenueRecovered?.currency.code ?? DEFAULT_ANALYTICS_CURRENCY;
+    const analyticsId = analyticsRowId(campaignId, today, currency);
+    const revenueMinor = metrics.revenueRecovered ? toMinorColumn(metrics.revenueRecovered) : 0;
 
     // NOTE: Analytics tracking would be implemented with a separate analytics repository
     // when the dunningCampaignAnalytics table is properly set up.
     // For now, this SQL query remains as a placeholder.
     await this.db.execute(sql`
       INSERT INTO dunning_campaign_analytics (
-        id, campaign_id, date, payments_recovered, revenue_recovered,
+        id, campaign_id, date, currency, payments_recovered, revenue_recovered_minor,
         executions, customers_reached, communications_sent, created_at, updated_at
       )
       VALUES (
-        ${analyticsId}, ${campaignId}, ${today},
-        ${metrics.paymentsRecovered || 0}, ${metrics.revenueRecovered || 0},
+        ${analyticsId}, ${campaignId}, ${today}, ${currency},
+        ${metrics.paymentsRecovered || 0}, ${revenueMinor},
         ${metrics.executions || 0}, ${metrics.customersReached || 0}, ${metrics.communicationsSent || 0},
         NOW(), NOW()
       )
       ON CONFLICT (id) DO UPDATE SET
         payments_recovered = dunning_campaign_analytics.payments_recovered + ${metrics.paymentsRecovered || 0},
-        revenue_recovered = dunning_campaign_analytics.revenue_recovered + ${metrics.revenueRecovered || 0},
+        revenue_recovered_minor = dunning_campaign_analytics.revenue_recovered_minor + ${revenueMinor},
         executions = dunning_campaign_analytics.executions + ${metrics.executions || 0},
         customers_reached = dunning_campaign_analytics.customers_reached + ${metrics.customersReached || 0},
         communications_sent = dunning_campaign_analytics.communications_sent + ${metrics.communicationsSent || 0},
