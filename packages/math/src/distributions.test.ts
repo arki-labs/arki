@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import type { ContinuousDistribution } from './distributions.js';
 import {
+  beta,
+  betaLn,
   binomial,
   chiSquare,
   erf,
@@ -9,6 +11,7 @@ import {
   erfInv,
   exponential,
   fisherF,
+  gamma,
   gammaLn,
   noncentralT,
   normal,
@@ -18,7 +21,7 @@ import {
   studentT,
   uniform,
 } from './distributions.js';
-import { InvalidArgumentError } from './errors.js';
+import { InvalidArgumentError, NumericRangeError } from './errors.js';
 
 describe('special functions', () => {
   it('erf and erfc', () => {
@@ -54,6 +57,43 @@ describe('special functions', () => {
     expect(regularizedBeta(0, 2, 3)).toBe(0);
     expect(regularizedBeta(1, 2, 3)).toBe(1);
     expect(regularizedBeta(0.3, 1, 1)).toBeCloseTo(0.3, 14);
+  });
+});
+
+describe('gamma and beta', () => {
+  const rel = (got: number, want: number) => Math.abs(got - want) / Math.abs(want);
+  it('matches reference values', () => {
+    expect(rel(gamma(0.5), Math.sqrt(Math.PI))).toBeLessThan(1e-14);
+    expect(gamma(5)).toBe(24);
+    expect(gamma(1)).toBe(1);
+    expect(rel(gamma(-0.5), -2 * Math.sqrt(Math.PI))).toBeLessThan(1e-14);
+    expect(rel(gamma(1.5), Math.sqrt(Math.PI) / 2)).toBeLessThan(1e-14);
+    expect(rel(gamma(171), 7.257415615307994e306)).toBeLessThan(1e-14);
+    expect(rel(gamma(171.5), 9.483367566824795e307)).toBeLessThan(1e-12);
+  });
+  it('gives the float factorial as gamma(n + 1)', () => {
+    expect(rel(gamma(21), 2_432_902_008_176_640_000)).toBeLessThan(1e-14);
+    expect(rel(gamma(171), 7.257415615307994e306)).toBeLessThan(1e-14);
+  });
+  it('satisfies the recurrence Γ(x + 1) = xΓ(x)', () => {
+    for (const x of [0.1, 0.7, 2.3, 10.9, 55.5, -1.5, -7.25]) {
+      expect(rel(gamma(x + 1), x * gamma(x))).toBeLessThan(1e-13);
+    }
+  });
+  it('rejects poles and overflow loudly', () => {
+    expect(() => gamma(0)).toThrow(InvalidArgumentError);
+    expect(() => gamma(-3)).toThrow(InvalidArgumentError);
+    expect(() => gamma(172)).toThrow(NumericRangeError);
+    expect(() => gamma(171.7)).toThrow(NumericRangeError);
+    expect(() => gamma(1e-320)).toThrow(NumericRangeError);
+    expect(() => gamma(Number.NaN)).toThrow(InvalidArgumentError);
+    expect(gamma(-200.5)).toBe(0);
+  });
+  it('beta and betaLn', () => {
+    expect(rel(beta(2, 3), 1 / 12)).toBeLessThan(1e-13);
+    expect(rel(beta(0.5, 0.5), Math.PI)).toBeLessThan(1e-13);
+    expect(betaLn(1, 1)).toBeCloseTo(0, 13);
+    expect(() => beta(0, 1)).toThrow(InvalidArgumentError);
   });
 });
 

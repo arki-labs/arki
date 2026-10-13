@@ -6,6 +6,12 @@ import { ResourceLimitError } from '../errors.js';
  */
 export const MAX_DIGITS = 10_000;
 export const MAX_SCALE = 10_000;
+/**
+ * Digit cap for plain `bigint` integer results (`factorial`, `combinations`,
+ * `permutations`). Decimal and Rational keep the tighter `MAX_DIGITS`: their
+ * arithmetic multiplies and rescales, so size costs more there.
+ */
+export const MAX_INTEGER_DIGITS = 100_000;
 
 export function assertDigitLimit(digitCount: number, what: string): void {
   if (digitCount > MAX_DIGITS) {

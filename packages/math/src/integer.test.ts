@@ -144,8 +144,29 @@ describe('factorial', () => {
     expect(() => factorial(-1)).toThrow(InvalidArgumentError);
     expect(() => factorial(-1n)).toThrow(InvalidArgumentError);
     expect(() => factorial(1.5)).toThrow(InvalidArgumentError);
-    expect(() => factorial(3249n)).toThrow(ResourceLimitError); // 3249! is the first past 10,000 digits
-    expect(factorial(3248n).toString().length).toBe(9998);
+    expect(() => factorial(25_206n)).toThrow(ResourceLimitError); // 25,206! is the first past 100,000 digits
+    expect(factorial(25_205n).toString().length).toBe(99_996);
+  });
+  it('computes 10,000! exactly and fast', () => {
+    const start = Date.now();
+    const f = factorial(10_000n);
+    const elapsed = Date.now() - start;
+    expect(f.toString().length).toBe(35_660);
+    expect(f % 10n ** 2499n).toBe(0n); // 2499 trailing zeros: floor(10000/5)+... = 2499
+    expect(f / factorial(9_999n)).toBe(10_000n);
+    expect(elapsed).toBeLessThan(500);
+  });
+  it('permutations and combinations at n = 10,000', () => {
+    expect(permutations(10_000n, 10_000n)).toBe(factorial(10_000n));
+    expect(permutations(10_000n, 3n)).toBe(10_000n * 9_999n * 9_998n);
+    expect(combinations(10_000n, 5_000n).toString().length).toBe(3009);
+    expect(combinations(10_000n, 1n)).toBe(10_000n);
+  });
+  it('gcd/lcm: number forms refuse unsafe inputs, bigint handles them', () => {
+    expect(() => gcd(2 ** 53, 6)).toThrow(InvalidArgumentError);
+    expect(() => lcm(6, 2 ** 53 + 2)).toThrow(InvalidArgumentError);
+    expect(gcd(2n ** 80n, 6n * 2n ** 70n)).toBe(2n ** 71n);
+    expect(lcm(2n ** 60n, 3n ** 40n)).toBe(2n ** 60n * 3n ** 40n);
   });
 });
 
@@ -166,7 +187,7 @@ describe('combinations', () => {
     expect(() => combinations(-1n, 0n)).toThrow(InvalidArgumentError);
     expect(() => combinations(100, 50)).toThrow(NumericRangeError);
     expect(() => combinations(5, 2n as never)).toThrow(TypeError);
-    expect(() => combinations(100_000n, 50_000n)).toThrow(ResourceLimitError);
+    expect(() => combinations(1_000_000n, 500_000n)).toThrow(ResourceLimitError);
   });
   it('number and bigint forms agree on 500 pseudo-random cases', () => {
     let seed = 12_345;
@@ -205,7 +226,7 @@ describe('permutations', () => {
     expect(() => permutations(-1, 0)).toThrow(InvalidArgumentError);
     expect(() => permutations(-1n, 0n)).toThrow(InvalidArgumentError);
     expect(() => permutations(30, 20)).toThrow(NumericRangeError);
-    expect(() => permutations(20_000n, 10_001n)).toThrow(ResourceLimitError);
+    expect(() => permutations(200_000n, 100_001n)).toThrow(ResourceLimitError);
   });
 });
 
@@ -323,8 +344,8 @@ describe('fibonacci', () => {
     expect(() => fibonacci(1.5)).toThrow(InvalidArgumentError);
     expect(() => fibonacci(47_852)).toThrow(ResourceLimitError);
     expect(fibonacci(47_851).toString().length).toBe(10_000);
-    expect(() => combinations(10n ** 1000n, 100n)).toThrow(ResourceLimitError);
-    expect(() => permutations(10n ** 1000n, 100n)).toThrow(ResourceLimitError);
+    expect(() => combinations(10n ** 1000n, 1000n)).toThrow(ResourceLimitError);
+    expect(() => permutations(10n ** 1000n, 1000n)).toThrow(ResourceLimitError);
     expect(() => modPow(2n, undefined as never, 7n)).toThrow(TypeError);
   });
 });

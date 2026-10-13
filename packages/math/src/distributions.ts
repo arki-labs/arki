@@ -102,6 +102,61 @@ export function gammaLn(x: number): number {
   return noNegativeZero(lnGamma(x));
 }
 
+const MAX_GAMMA_ARG = 171.624_376_956_302_72; // Γ(x) overflows a double just above this
+
+function positiveGamma(x: number): number {
+  // x >= 0.5. Same Lanczos sum as lnGamma, but exponentiated directly (no ln/exp round trip)
+  // so the relative error stays near 1e-15. Two half-powers avoid overflow of t^(z + 0.5).
+  const z = x - 1;
+  const t = z + 7.5;
+  let a = LANCZOS[0] ?? 0;
+  for (let i = 1; i < LANCZOS.length; i++) a += (LANCZOS[i] ?? 0) / (z + i);
+  const half = t ** ((z + 0.5) / 2);
+  return SQRT_2PI * half * (Math.exp(-t) * half) * a;
+}
+
+/**
+ * The gamma function Γ(x) for finite `x`. `Γ(n + 1) = n!`, so this is the float
+ * factorial for `n > 18`. Positive integers up to 171 are exact products;
+ * other values use Lanczos (relative error ~1e-15) with the reflection formula
+ * for `x < 0.5`. Poles (`0` and the negative integers) throw
+ * `InvalidArgumentError`; a result beyond the double range (`x` above about
+ * 171.62, or `x` within ~1e-308 of a pole) throws `NumericRangeError`.
+ * Very negative `x` whose true value is below the smallest double returns `0`.
+ */
+export function gamma(x: number): number {
+  assertFinite(x, 'x');
+  if (Number.isInteger(x)) {
+    if (x <= 0) throw new InvalidArgumentError(`gamma has a pole at ${x}`);
+    if (x > 171) throw new NumericRangeError(`gamma(${x}) exceeds the largest finite number`);
+    let result = 1;
+    for (let i = 2; i < x; i++) result *= i;
+    return result;
+  }
+  if (x > MAX_GAMMA_ARG) throw new NumericRangeError(`gamma(${x}) exceeds the largest finite number`);
+  let result: number;
+  if (x < 0.5) {
+    const sine = Math.sin(Math.PI * x);
+    // Γ(1 - x) overflows for x < -170.6, where |Γ(x)| is below the smallest double anyway.
+    if (1 - x > MAX_GAMMA_ARG) return 0;
+    result = Math.PI / (sine * positiveGamma(1 - x));
+  } else {
+    result = positiveGamma(x);
+  }
+  if (!Number.isFinite(result)) throw new NumericRangeError(`gamma(${x}) exceeds the largest finite number`);
+  return noNegativeZero(result);
+}
+
+/** ln B(a, b) = ln Γ(a) + ln Γ(b) − ln Γ(a + b), for `a, b > 0`. */
+export function betaLn(a: number, b: number): number {
+  return noNegativeZero(gammaLn(a) + gammaLn(b) - gammaLn(a + b));
+}
+
+/** The beta function B(a, b) = Γ(a)Γ(b) / Γ(a + b), for `a, b > 0`. Underflows to `0` for very large arguments. */
+export function beta(a: number, b: number): number {
+  return Math.exp(betaLn(a, b));
+}
+
 function gammaSeries(a: number, x: number, gln: number): number {
   let ap = a;
   let del = 1 / a;
