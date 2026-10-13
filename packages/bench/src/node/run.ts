@@ -34,6 +34,7 @@ import type {
 import { assessResult, metricComparisons, runSuite } from '../core/engine.js';
 import { validateSuite } from '../core/spec.js';
 import { compareBlocks, summarize, summarizeValues } from '../core/stats.js';
+import { findDeclaredNode, withNodeVersionCheck } from './node-version.js';
 import { applyLoadCheck, collectProvenance, currentLoad } from './provenance.js';
 import { parseResult } from './result-schema.js';
 import { createSizeRunner } from './size.js';
@@ -46,6 +47,12 @@ export type RunFileOptions = RunOptions & {
   processes?: number;
   /** Run the file under each of these runtimes; results land in `result.runtimes`. */
   runtimes?: readonly Runtime[];
+  /**
+   * The Node binary for the Node leg (a path or a command name). Default: the
+   * Node running this code, or `node` from `PATH` when this code runs on
+   * another runtime.
+   */
+  node?: string;
   /** Directory a relative `file` is resolved from. Default: the current directory. */
   cwd?: string;
   /** Keep raw blocks in the result. Default true. */
@@ -256,12 +263,18 @@ function assertNodeCanStripTypes(file: string): void {
   }
 }
 
-function workerCommand(runtime: Runtime, suite: string): [string, string[]] {
+/** @internal The program that starts a worker: the chosen Node binary for Node, else this process or `PATH`. */
+export function workerExecutable(runtime: Runtime, node?: string): string {
+  if (runtime === 'node' && node !== undefined) return node;
+  return runtime === currentRuntime() ? process.execPath : runtime;
+}
+
+function workerCommand(runtime: Runtime, suite: string, node?: string): [string, string[]] {
   const worker = workerPath();
-  const executable = runtime === currentRuntime() ? process.execPath : runtime;
+  const executable = workerExecutable(runtime, node);
   switch (runtime) {
     case 'node': {
-      const flags = runtime === currentRuntime() ? process.execArgv.filter(flag => FORWARDED_NODE_FLAG.test(flag)) : [];
+      const flags = executable === process.execPath ? process.execArgv.filter(flag => FORWARDED_NODE_FLAG.test(flag)) : [];
       if (isTypeScript(suite) || isTypeScript(worker)) {
         assertNodeCanStripTypes(suite);
         flags.push(STRIP_TYPES, '--disable-warning=ExperimentalWarning');
@@ -307,9 +320,10 @@ function parseFailure(json: string): WorkerFailure {
 function runWorker(
   runtime: Runtime,
   request: WorkerRequest,
+  node: string | undefined,
   onProgress?: (event: ProgressEvent) => void,
 ): Promise<BenchResult> {
-  const [command, args] = workerCommand(runtime, request.file);
+  const [command, args] = workerCommand(runtime, request.file, node);
   const label = `Benchmark worker (${runtime}, process ${String(request.options.process ?? 0)})`;
 
   return new Promise((resolvePromise, reject) => {
@@ -384,13 +398,14 @@ async function runProcesses(
   file: string,
   root: string,
   options: RunOptions,
+  node?: string,
 ): Promise<BenchResult> {
   const results: BenchResult[] = [];
   // Sequential on purpose: concurrent processes compete for CPU and corrupt each other's timings.
   // All processes share the seed; the engine mixes the process index into block order.
   for (let index = 0; index < count; index++) {
     const request: WorkerRequest = { file, root, options: toWorkerOptions({ ...options, process: index }) };
-    results.push(await runWorker(runtime, request, options.onProgress));
+    results.push(await runWorker(runtime, request, node, options.onProgress));
   }
   return mergeProcessResults(results, options.budget?.maxCv === undefined ? {} : { maxCv: options.budget.maxCv });
 }
@@ -514,9 +529,10 @@ function withoutSamples(result: BenchResult): BenchResult {
 // runFile
 // ---------------------------------------------------------------------------
 
-function isInstalled(runtime: Runtime): boolean {
-  if (runtime === currentRuntime()) return true;
-  const probe = spawnSync(runtime, ['--version'], { stdio: 'ignore', timeout: 15_000 });
+function isInstalled(runtime: Runtime, node?: string): boolean {
+  const executable = workerExecutable(runtime, node);
+  if (executable === process.execPath) return true;
+  const probe = spawnSync(executable, ['--version'], { stdio: 'ignore', timeout: 15_000 });
   return probe.error === undefined;
 }
 
@@ -530,6 +546,7 @@ export async function runFile(file: string, options: RunFileOptions = {}): Promi
   const {
     processes = publish ? DEFAULT_PUBLISH_PROCESSES : 1,
     runtimes,
+    node,
     cwd = process.cwd(),
     samples = true,
     ...runOptions
@@ -543,30 +560,45 @@ export async function runFile(file: string, options: RunFileOptions = {}): Promi
 
   const count = processes;
 
+  const declaredNode = findDeclaredNode(suitePath);
+
   let result: BenchResult;
   if (runtimes !== undefined && runtimes.length > 0) {
     const results: BenchResult[] = [];
     const missing: Warning[] = [];
     for (const runtime of new Set(runtimes)) {
-      if (!isInstalled(runtime)) {
+      if (!isInstalled(runtime, node)) {
         missing.push({
           code: 'runtime-missing',
           runtime,
-          message: `${runtime} is not installed (not found on PATH), so the suite did not run under it.`,
+          message:
+            runtime === 'node' && node !== undefined
+              ? `Node binary "${node}" was not found, so the suite did not run under it.`
+              : `${runtime} is not installed (not found on PATH), so the suite did not run under it.`,
         });
         continue;
       }
-      results.push(await runProcesses(runtime, count, suitePath, root, runOptions));
+      results.push(await runProcesses(runtime, count, suitePath, root, runOptions, node));
     }
     if (results.length === 0) {
       throw new Error(`None of the requested runtimes is installed: ${[...new Set(runtimes)].join(', ')}.`);
     }
-    result = combineRuntimes(results, missing);
-  } else if (publish || count > 1 || (currentRuntime() === 'node' && isTypeScript(suitePath))) {
-    // Node loads TypeScript only with a flag: run it in a child that has the flag instead of changing this process.
-    result = await runProcesses(currentRuntime(), count, suitePath, root, runOptions);
+    result = combineRuntimes(
+      results.map(item => withNodeVersionCheck(item, declaredNode)),
+      missing,
+    );
+  } else if (
+    publish ||
+    count > 1 ||
+    (currentRuntime() === 'node' && (isTypeScript(suitePath) || (node !== undefined && node !== process.execPath)))
+  ) {
+    // Node loads TypeScript only with a flag, and another Node binary is another process: run a child instead of changing this one.
+    result = withNodeVersionCheck(
+      await runProcesses(currentRuntime(), count, suitePath, root, runOptions, node),
+      declaredNode,
+    );
   } else {
-    result = await measureInThisProcess(suitePath, root, runOptions);
+    result = withNodeVersionCheck(await measureInThisProcess(suitePath, root, runOptions), declaredNode);
   }
 
   return samples ? result : withoutSamples(result);

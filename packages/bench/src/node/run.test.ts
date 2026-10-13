@@ -312,6 +312,42 @@ export default {
     expect(result.environment.runtime.name).toBe('node');
   }, 60_000);
 
+  it('measures on the Node binary it is given and reports a Node the project does not target', async () => {
+    writeFileSync(path.join(dir, '.nvmrc'), 'v999\n');
+    try {
+      const result = await runFile('suite.bench.ts', { cwd: dir, profile: 'quick', budget, node: process.execPath });
+      expect(result.environment.runtime.version).toBe(process.versions.node);
+      const warning = result.warnings.find(item => item.code === 'node-version-mismatch');
+      expect(warning?.message).toContain(`Node ${process.versions.node}`);
+      expect(warning?.message).toContain('v999');
+      expect(result.publishable).toBe(false);
+      const matrix = await runFile('suite.bench.ts', {
+        cwd: dir,
+        profile: 'quick',
+        budget,
+        runtimes: ['node'],
+        node: process.execPath,
+      });
+      expect(matrix.warnings.map(item => item.code)).toContain('node-version-mismatch');
+    } finally {
+      rmSync(path.join(dir, '.nvmrc'), { force: true });
+    }
+    const clean = await runFile('suite.bench.ts', { cwd: dir, profile: 'quick', budget });
+    expect(clean.warnings.map(item => item.code)).not.toContain('node-version-mismatch');
+  }, 60_000);
+
+  it('says so when the requested Node binary does not exist, instead of measuring on another Node', async () => {
+    const result = await runFile('suite.bench.ts', {
+      cwd: dir,
+      profile: 'quick',
+      budget,
+      runtimes: ['node', 'bun'],
+      node: path.join(dir, 'no-such-node'),
+    });
+    expect(result.warnings.find(item => item.code === 'runtime-missing')?.message).toContain('no-such-node');
+    expect(result.publishable).toBe(false);
+  }, 30_000);
+
   it('explains a file whose default export is not a suite', async () => {
     await expect(runFile('empty.bench.js', { cwd: dir, profile: 'quick' })).rejects.toThrow(/default export/);
   });

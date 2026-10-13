@@ -137,7 +137,7 @@ In each round every case gets one block, in a seeded random order. Drift from he
 
 One number from one run cannot say whether a 4% difference is real. The interval comes from the run design: a two-stage bootstrap that resamples processes, then blocks within each process. The estimate is total time over total operations, so stalls the work really pays for are counted.
 
-Only a `publish` run can be publishable. It is not when a contract failed, a row is `optimized out` or `unstable`, the floor was disturbed, a case mutated its state or failed to tear down, the run was filtered, a size group was skipped or unmeasured, a runtime of the matrix was missing, or the machine was busy (1-minute load above half the cores, checked in every profile; a suite of only size and deterministic metric groups is exempt, since load cannot change them). `warnings` says which; the codes that block are exported as `BLOCKING_WARNINGS`. After merging fresh processes, the host derives every flag, warning and `publishable` again from the merged data with the same rules (`assessResult`).
+Only a `publish` run can be publishable. It is not when a contract failed, a row is `optimized out` or `unstable`, the floor was disturbed, a case mutated its state or failed to tear down, the run was filtered, a size group was skipped or unmeasured, a runtime of the matrix was missing, Node was not the version the project targets, or the machine was busy (1-minute load above half the cores, checked in every profile; a suite of only size and deterministic metric groups is exempt, since load cannot change them). `warnings` says which; the codes that block are exported as `BLOCKING_WARNINGS`. After merging fresh processes, the host derives every flag, warning and `publishable` again from the merged data with the same rules (`assessResult`).
 
 ## The README section
 
@@ -332,6 +332,19 @@ arki-bench --profile publish --runtime node,bun,deno
 ```
 
 The same file runs under each runtime. The result keeps one result per runtime in `runtimes`, and the table gets one column per runtime. Ratios compare libraries within one runtime; the columns are not comparable to each other (Node and Deno run V8, Bun runs JavaScriptCore). The matrix is publishable only when every runtime is; its `warnings` are the union, each with the `runtime` it came from. A runtime that is not installed is skipped with a `runtime-missing` warning, which blocks publishing.
+
+### Which Node it measures
+
+The Node leg runs on the Node that runs `arki-bench` (`process.execPath`). The `#!/usr/bin/env node` line picks whichever `node` is first on `PATH`, which may not be the Node your project targets. Pick one on purpose:
+
+```sh
+arki-bench --node /opt/homebrew/opt/node@26/bin/node
+ARKI_BENCH_NODE=/path/to/node arki-bench --runtime node,bun
+```
+
+`--node` wins over `ARKI_BENCH_NODE`. A path that does not exist is a `runtime-missing` warning, not a silent run on another Node. The report header names the version that ran, for example `Node 26.11.0`.
+
+The project says which Node it targets in one of these, found by walking up from the bench file: `.nvmrc`, `.node-version`, `package.json` `volta.node`, then `package.json` `engines.node`. A pin file or `volta` anywhere up the tree wins over `engines`, which usually says what a library supports rather than what to measure on. Plain versions (`v26`, `26.1`), `^`, `~`, comparators (`>=22.10 <27`), `x` wildcards and `||` are understood; a value like `lts/*` is ignored. When the Node that ran does not meet it, the result carries a `node-version-mismatch` warning naming both versions and the file, and is not publishable.
 
 ## Commands
 

@@ -66,6 +66,11 @@ const COMMANDS: Readonly<Record<CommandName, CommandSpec>> = {
         description: 'Fresh processes per suite, in any profile. Default 5 for publish, 1 otherwise.',
       },
       runtime: { value: 'list', description: 'Comma-separated runtimes for a runtime matrix: node,bun,deno.' },
+      node: {
+        value: 'path',
+        description:
+          'Node binary for the Node leg (or set ARKI_BENCH_NODE). Default: the Node running arki-bench. A result on a Node the project does not target (.nvmrc, .node-version, volta, engines.node) is not publishable.',
+      },
       timeout: { value: 'ms', description: 'Per-call timeout for async cases. Default 10000.' },
       out: {
         value: 'file',
@@ -636,6 +641,8 @@ async function commandRun(args: ParsedArgs, io: Io): Promise<number> {
   const runtimeFlag = stringFlag(args, 'runtime');
   const runtimes = runtimeFlag === undefined ? undefined : parseRuntimes(runtimeFlag);
 
+  const node = stringFlag(args, 'node') ?? (io.env.ARKI_BENCH_NODE || undefined);
+
   const { runFile } = await import('./node/run.js');
   const status = progress(io);
   const results: BenchResult[] = [];
@@ -650,6 +657,7 @@ async function commandRun(args: ParsedArgs, io: Io): Promise<number> {
           timeoutMs,
           processes,
           runtimes,
+          node,
           cwd: root,
           samples: !has(args, 'no-samples'),
           onProgress: status.event,

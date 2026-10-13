@@ -18,5 +18,6 @@ export const BLOCKING_WARNINGS: readonly string[] = [
   'size-skipped',
   'size-unavailable',
   'runtime-missing',
+  'node-version-mismatch',
   'busy-machine',
 ];
