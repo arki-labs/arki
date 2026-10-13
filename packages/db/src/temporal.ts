@@ -14,6 +14,11 @@
  * covers them all. Values Temporal cannot hold (`infinity`, BC dates) throw a
  * `RangeError` instead of becoming a wrong date.
  *
+ * A raw `sql` selection mapped with `.mapWith(column)` skips the codec, and Bun
+ * SQL then returns a `Date`. That is accepted too: Bun reads `timestamptz` as
+ * the exact moment, `timestamp` as its UTC wall clock and `date` as UTC
+ * midnight, the same meanings the text parser uses (milliseconds only).
+ *
  * There is no `ZonedDateTime` column: Postgres stores no zone. Keep the zone in
  * its own `text` column and project on read with `zoned(instant, zone)`.
  */
@@ -35,8 +40,15 @@ export function plainDateToDriver(value: PlainDate): string {
   return value.toString();
 }
 
-/** Postgres `date` text → `PlainDate`. */
-export function plainDateFromDriver(text: string): PlainDate {
+/** Postgres `date` text (or a `Date` at UTC midnight, from Bun SQL) → `PlainDate`. */
+export function plainDateFromDriver(text: string | Date): PlainDate {
+  if (text instanceof Date) {
+    return Temporal.PlainDate.from({
+      year: text.getUTCFullYear(),
+      month: text.getUTCMonth() + 1,
+      day: text.getUTCDate(),
+    });
+  }
   try {
     return Temporal.PlainDate.from(text);
   } catch {
@@ -52,9 +64,11 @@ export function instantToDriver(value: Instant): string {
 /**
  * Postgres `timestamptz` or `timestamp` text → `Instant`. The two are told apart
  * by format, not guessed: `timestamptz` text always ends in an offset and
- * `timestamp` text never does; the latter is read as UTC.
+ * `timestamp` text never does; the latter is read as UTC. A `Date` (Bun SQL,
+ * raw selections) is taken as the exact moment it holds.
  */
-export function instantFromDriver(text: string): Instant {
+export function instantFromDriver(text: string | Date): Instant {
+  if (text instanceof Date) return Temporal.Instant.fromEpochMilliseconds(text.getTime());
   const iso = text.replace(' ', 'T');
   try {
     if (HAS_OFFSET.test(iso)) return Temporal.Instant.from(iso);

@@ -22,6 +22,12 @@ describe('driver text parsing', () => {
     expect(instantFromDriver('2026-05-20 07:30:00.25').toString()).toBe('2026-05-20T07:30:00.25Z');
   });
 
+  it('accepts the Date objects Bun SQL returns for raw selections', () => {
+    // Measured on Bun 1.4.2 + Postgres 17, identical under every process and session zone.
+    expect(instantFromDriver(new Date('2026-03-29T00:30:00.123Z')).toString()).toBe('2026-03-29T00:30:00.123Z');
+    expect(plainDateFromDriver(new Date('2026-03-29T00:00:00.000Z')).toString()).toBe('2026-03-29');
+  });
+
   it('refuses values Temporal cannot hold instead of guessing', () => {
     expect(() => instantFromDriver('infinity')).toThrow(/cannot read timestamp "infinity"/);
     expect(() => plainDateFromDriver('0044-03-15 BC')).toThrow(/cannot read date/);
