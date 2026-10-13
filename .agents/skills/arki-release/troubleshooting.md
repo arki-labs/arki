@@ -36,16 +36,16 @@ Battle-tested traps from real release sessions. Each one cost time; documented h
 
 ## The `git add -A` parent-walk trap
 
-**Symptom:** Running `git add -A` inside `.release/arki-public/` stages files from the parent monorepo (`apps/<x>/`, `tooling/<y>/`, `.claude/`). `git status` shows paths like `../../apps/avocabo/...`.
+**Symptom:** Running `git add -A` inside `.release/arki-public/` (or any folder without its own `.git/`) stages files from the parent monorepo (`apps/<x>/`, `tooling/<y>/`, `.claude/`). `git status` shows paths like `../../apps/avocabo/...`.
 
-**Root cause:** `.release/arki-public/.git/` doesn't exist (e.g., never `git init`'d there, or was wiped by `export-public`'s `removeDirectory(outputPath)`). Git walks UP looking for a `.git/`, finds the monorepo's, and operates against THAT.
+**Root cause:** the export folder never has a `.git/` (`export-public`'s `removeDirectory(outputPath)` wipes it); mirror git work belongs in `.release/arki-mirror/`. Git walks UP looking for a `.git/`, finds the monorepo's, and operates against THAT.
 
 **Detect before damaging:**
 ```bash
-cd /Users/afurculita/Developer/workspace/.release/arki-public
+cd /Users/afurculita/Developer/workspace/.release/arki-mirror
 git rev-parse --git-dir
-# MUST be:  /Users/afurculita/Developer/workspace/.release/arki-public/.git
-# If it's the monorepo's path, STOP and run `git init -b main` first.
+# MUST be:  /Users/afurculita/Developer/workspace/.release/arki-mirror/.git
+# If it's the monorepo's path, STOP: clone the mirror there first (sync-github.md step 3).
 ```
 
 **Recover after damaging:** the index pollution is reversible via `git reset HEAD <path>`, but the workspace's "only-touch-own-edits" rule forbids `reset` on sibling-agent files. So:
@@ -100,7 +100,7 @@ for p in <pkg-list>; do
   npm publish --access public ".release/arki-public/packages/$p"
 done
 
-# Before force-pushing to arki-labs/arki, re-materialize with the workspaces
+# Before syncing arki-labs/arki, re-materialize with the workspaces
 # field so cloners can `bun install` cleanly
 bun release:arki export-public
 ```
@@ -126,31 +126,11 @@ npm view @arki/<pkg> version
 
 ## The `.git/` preservation gotcha during re-materialize
 
-**Symptom:** You move `.release/arki-public/.git/` to `/tmp/...`, run `export-public`, move it back — and on the next `git status`, the `.git/` is gone.
+**Symptom:** a `.git/` inside `.release/arki-public/` disappears after `export-public`, or a git command there acts on the monorepo.
 
-**Root cause:** `export-public` calls `removeDirectory(outputPath)` which wipes `.release/arki-public/` entirely, including the parent dir (not just its contents). After mv-back, the directory recreation may have happened OR the timing got confusing. Often the actual issue is a `mv source destination` where `destination/` exists as a real dir → source ends up nested.
+**Root cause:** `export-public` calls `removeDirectory(outputPath)`, which wipes `.release/arki-public/` entirely, `.git/` included. Moving `.git/` out and back is fragile (a `mv` into an existing dir nests it).
 
-**Robust approach:** **don't preserve `.git/` across re-materialize**. Instead:
-
-```bash
-# 1. Re-materialize
-bun tooling/arki-release/src/cli.ts export-public
-
-# 2. Fresh init each time
-cd .release/arki-public
-git init -b main
-git config user.name "Alexandru Furculita"
-git config user.email "alex@furculita.net"
-git config commit.gpgsign false
-git add .
-git commit -m "..."
-git remote add origin git@github.com:arki-labs/arki.git
-git push --force origin main
-git tag -a v<version> -m "..."
-git push origin v<version>
-```
-
-The GitHub history loses commit ancestry (each ship is a fresh single commit). That's a feature, not a bug — it matches the doctrine that the materialized tree is a generated mirror, not a development branch.
+**Fix (since 2026-10-13):** never keep git state in the export folder. The mirror checkout lives in `.release/arki-mirror/` and receives the export via `rsync --delete --exclude .git`; see [sync-github.md](./sync-github.md).
 
 ## Chicken-and-egg: transitive `@arki/*` deps in pre-publication state
 
@@ -223,18 +203,11 @@ Or pass `ensure_ascii=False` if you really need Python:
 json.dump(d, open(path, 'w'), indent=2, ensure_ascii=False)
 ```
 
-## Force-pushing destroys remote history
+## Never force-push `arki-labs/arki`
 
-**Symptom:** `git push --force` to `arki-labs/arki main` succeeds and the old commits are gone from the default-branch history.
+**Rule (founder, 2026-10-13):** the mirror keeps one commit per release on top of the last. Syncs use a plain `git push`. Before that date every sync was `git init` + `git push --force`, which reset `main` to a single commit and broke every clone's `git pull`.
 
-**By design:** the public repo is a regenerated mirror. Force-push is the intended sync mechanism. Old commits remain accessible via reflog/dangling-commit garbage collection windows (typically 30-90 days on GitHub).
-
-**Safety protocol:**
-
-1. Before force-pushing, clone the remote into `/tmp/arki-probe` and inspect what's there.
-2. If you find content you don't recognize, STOP — surface to user.
-3. If you find user's own old work, surface and get explicit "replace" authorization before force-push.
-4. After force-push, GitHub keeps the abandoned commits temporarily — they can be recovered via the reflog UI if needed.
+**If a plain push is rejected:** `origin/main` moved since your fetch. Inspect `git log --oneline main..origin/main` in `.release/arki-mirror/`; if you don't recognize it, STOP and surface it to the user. Otherwise redo the fetch → rsync → commit steps in [sync-github.md](./sync-github.md). Do not force.
 
 ## Per-package mirror description-stamp failures
 

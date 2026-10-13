@@ -30,7 +30,7 @@ git diff --stat packages/
 # 4. Re-materialize the public tree (concrete versions, no workspace:*)
 #    Use --no-workspaces-root for the publish-mode tree (npm publish from
 #    a child dir would otherwise parent-walk into the workspaces field and
-#    break). Re-run WITHOUT the flag before the GitHub mirror force-push,
+#    break). Re-run WITHOUT the flag before the GitHub mirror sync,
 #    so cloners of arki-labs/arki can still `bun install` from the root.
 bun tooling/arki-release/src/cli.ts export-public --no-workspaces-root
 
@@ -99,6 +99,6 @@ To opt source into npm too, add `"src"` to a package's `files` array. Worth doin
 
 - [ ] `bun release:arki scorecard` → `Stable release gate: OPEN`
 - [ ] `npm view @arki/<pkg> version` → returns the new version
-- [ ] `git log --oneline -1 .release/arki-public/.git/` (in the mirror) → new commit pushed
+- [ ] `git -C .release/arki-mirror log --oneline -2` → new release commit on top of the previous one, and equal to `git -C .release/arki-mirror ls-remote origin main`
 - [ ] `git ls-remote git@github.com:arki-labs/arki.git refs/tags/<tag>` → tag exists on remote
 - [ ] Source monorepo commit pushed (Coolify, internal CI, etc. may consume it)
