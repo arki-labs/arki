@@ -2,7 +2,10 @@
  * Payment on the journal: its events, the entity and the commands
  *
  * One `payments` row is the current state of a payment, keyed by its id.
- * A payment starts `pending` and ends `succeeded`, `failed` or `canceled`.
+ * A payment starts `pending`, may wait in `requires_action` for the customer,
+ * and ends `succeeded`, `failed` or `canceled`. A `failed` payment can still
+ * succeed (the customer retried with the provider); a `succeeded` one never
+ * fails.
  *
  * The command takes the amount as `Money` JSON (`{ amount: '19.99',
  * currency: 'USD' }`), and `PaymentInitiatedV2` keeps it in that form, exact.
@@ -61,10 +64,13 @@ export const failPaymentInputSchema = z.object({ paymentId: paymentIdSchema, fai
 
 export const cancelPaymentInputSchema = z.object({ paymentId: paymentIdSchema });
 
+export const markPaymentRequiresActionInputSchema = z.object({ paymentId: paymentIdSchema });
+
 export type InitiatePaymentInput = z.input<typeof initiatePaymentInputSchema>;
 export type CompletePaymentInput = z.input<typeof completePaymentInputSchema>;
 export type FailPaymentInput = z.input<typeof failPaymentInputSchema>;
 export type CancelPaymentInput = z.input<typeof cancelPaymentInputSchema>;
+export type MarkPaymentRequiresActionInput = z.input<typeof markPaymentRequiresActionInputSchema>;
 
 function requirePayment(row: PaymentRow | null, paymentId: string): PaymentRow {
   if (!row) {
@@ -72,6 +78,11 @@ function requirePayment(row: PaymentRow | null, paymentId: string): PaymentRow {
   }
 
   return row;
+}
+
+/** A payment the provider has not settled yet: it may still succeed, fail or need the customer. */
+function isOpen(status: PaymentRow['status']): boolean {
+  return status === 'pending' || status === 'processing' || status === 'requires_action';
 }
 
 export function createPaymentJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
@@ -97,6 +108,8 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
   const PaymentCompleted = j.event('PaymentCompleted', z.object({ receiptUrl: z.string().nullable() }));
   const PaymentFailed = j.event('PaymentFailed', z.object({ failureReason: z.string() }));
   const PaymentCanceled = j.event('PaymentCanceled', z.object({}));
+  /** The provider needs the customer to act (for example 3-D Secure) before the payment can finish. */
+  const PaymentRequiresAction = j.event('PaymentRequiresAction', z.object({}));
 
   type StartData = z.output<typeof PaymentInitiatedV2.schema>;
   const started = (data: Omit<StartData, 'amount'>, amountMinor: number, currency: string, at: Instant) =>
@@ -142,7 +155,8 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
       failureReason: e.data.failureReason,
       updatedAt: fromDate(e.recordedAt),
     }))
-    .on(PaymentCanceled, (_row, e) => ({ status: 'canceled', updatedAt: fromDate(e.recordedAt) }));
+    .on(PaymentCanceled, (_row, e) => ({ status: 'canceled', updatedAt: fromDate(e.recordedAt) }))
+    .on(PaymentRequiresAction, (_row, e) => ({ status: 'requires_action', updatedAt: fromDate(e.recordedAt) }));
 
   const initiatePayment = j.command('initiatePayment', initiatePaymentInputSchema, (input, { write }) => {
     const paymentId = input.paymentId ?? createPaymentId();
@@ -167,11 +181,15 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
     });
   });
 
+  /**
+   * The money was collected. An open payment completes, and so does a `failed`
+   * one: the customer retried on the same provider payment and it succeeded.
+   */
   const completePayment = j.command('completePayment', completePaymentInputSchema, (input, { write }) =>
     write(payment, input.paymentId, row => {
       const current = requirePayment(row, input.paymentId);
 
-      if (current.status !== 'pending' && current.status !== 'processing') {
+      if (!isOpen(current.status) && current.status !== 'failed') {
         throw new CommandError('CONFLICT', `Cannot complete payment with status ${current.status}`);
       }
 
@@ -179,11 +197,12 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
     }),
   );
 
+  /** Only an open payment fails. A `succeeded` payment never moves back to `failed`. */
   const failPayment = j.command('failPayment', failPaymentInputSchema, (input, { write }) =>
     write(payment, input.paymentId, row => {
       const current = requirePayment(row, input.paymentId);
 
-      if (current.status !== 'pending' && current.status !== 'processing') {
+      if (!isOpen(current.status)) {
         throw new CommandError('CONFLICT', `Cannot fail payment with status ${current.status}`);
       }
 
@@ -203,9 +222,36 @@ export function createPaymentJournal<Meta extends z.ZodObject, Tx extends Transa
     }),
   );
 
+  /** The customer must act before the payment can finish. Repeating it on a payment that already waits writes nothing. */
+  const markPaymentRequiresAction = j.command(
+    'markPaymentRequiresAction',
+    markPaymentRequiresActionInputSchema,
+    (input, { write }) =>
+      write(payment, input.paymentId, row => {
+        const current = requirePayment(row, input.paymentId);
+
+        if (current.status === 'requires_action') {
+          return [];
+        }
+
+        if (!isOpen(current.status)) {
+          throw new CommandError('CONFLICT', `Cannot mark payment with status ${current.status} as requiring action`);
+        }
+
+        return [PaymentRequiresAction({})];
+      }),
+  );
+
   return {
     payment,
-    events: { PaymentInitiated, PaymentInitiatedV2, PaymentCompleted, PaymentFailed, PaymentCanceled },
-    commands: { initiatePayment, completePayment, failPayment, cancelPayment },
+    events: {
+      PaymentInitiated,
+      PaymentInitiatedV2,
+      PaymentCompleted,
+      PaymentFailed,
+      PaymentCanceled,
+      PaymentRequiresAction,
+    },
+    commands: { initiatePayment, completePayment, failPayment, cancelPayment, markPaymentRequiresAction },
   };
 }

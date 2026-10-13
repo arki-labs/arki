@@ -3,15 +3,17 @@ import { EventEmitter } from 'node:events';
 import { now, sub } from '@arki/date';
 import { getLogger } from '@arki/log';
 
+import type { CoreWrites } from '../journal.js';
 import type { PaymentRepository } from '../repository.js';
-import type { PaymentProviderType, WebhookEventType, WebhookId } from '../types.js';
+import type { PaymentProviderType, PaymentStatus, WebhookEventType, WebhookId } from '../types.js';
 import type { WebhookSecurityService } from './webhook-security.js';
 import { createWebhookId } from '../primitives.js';
+import { parseStripePaymentIntent, parseStripeSubscription } from './webhook-event-payloads.js';
 
 /** Logs ids and event types only, never event data. */
 const logger = getLogger('arki:payments:webhook');
 
-/** The storage the handler needs. A `PaymentRepository` satisfies it. */
+/** The storage the handler needs: the event claims, and the two lookups by provider id. A `PaymentRepository` satisfies it. */
 export type WebhookEventStore = Pick<
   PaymentRepository,
   | 'claimWebhookEvent'
@@ -19,10 +21,33 @@ export type WebhookEventStore = Pick<
   | 'markWebhookEventAsProcessed'
   | 'findUnprocessedWebhookEvents'
   | 'updateWebhookEvent'
+  | 'findSubscriptionByProviderSubscriptionId'
+  | 'findPaymentByProviderPaymentId'
 >;
 
 /** The validation the handler needs. A `WebhookSecurityService` satisfies it. */
 export type WebhookValidator = Pick<WebhookSecurityService, 'validateWebhook'>;
+
+/** The journal writes the handler makes. A `CoreWrites` satisfies it. */
+export type WebhookWrites = Pick<
+  CoreWrites,
+  'syncSubscription' | 'completePayment' | 'failPayment' | 'markPaymentRequiresAction'
+>;
+
+/** What a payment event says happened at the provider. */
+type PaymentOutcome = 'succeeded' | 'failed' | 'requires_action';
+
+/**
+ * The local statuses each outcome moves a payment from; the same rules as the
+ * commands. A `failed` payment can still succeed (the customer retried on the
+ * same PaymentIntent); a `succeeded` one never fails. Any other status: the
+ * event changes nothing, so a late, repeated or out-of-order event is safe.
+ */
+const paymentMovesFrom: Record<PaymentOutcome, readonly PaymentStatus[]> = {
+  succeeded: ['pending', 'processing', 'requires_action', 'failed'],
+  failed: ['pending', 'processing', 'requires_action'],
+  requires_action: ['pending', 'processing'],
+};
 
 export type WebhookProcessingResult = {
   success: boolean;
@@ -67,6 +92,8 @@ export class WebhookHandler extends EventEmitter {
   constructor(
     private readonly paymentRepository: WebhookEventStore,
     private readonly webhookSecurity: WebhookValidator,
+    /** Every change of a `payments` or `subscriptions` row goes through the journal: `paymentsJournal.writes(run)`. */
+    private readonly writes: WebhookWrites,
     config: Partial<WebhookHandlerConfig> = {},
   ) {
     super();
@@ -392,15 +419,70 @@ export class WebhookHandler extends EventEmitter {
     });
   }
 
+  /**
+   * Bring the local subscription in line with Stripe. The row must exist: a
+   * subscription made outside the app has no owner here, so the event fails
+   * and is retried (open item D4). `planId` and `metadata` stay as they are.
+   * A delivery that changes nothing writes no event.
+   */
+  private async applySubscriptionEvent(data: WebhookEventData): Promise<void> {
+    const snapshot = parseStripeSubscription(data.data);
+    const row = await this.paymentRepository.findSubscriptionByProviderSubscriptionId(snapshot.providerSubscriptionId);
+    if (!row) {
+      throw new Error(`No local subscription for provider subscription ${snapshot.providerSubscriptionId}`);
+    }
+
+    await this.writes.syncSubscription({
+      userId: row.userId,
+      planId: row.planId,
+      customerId: row.customerId,
+      ...snapshot,
+    });
+  }
+
+  /**
+   * Move the local payment to what Stripe reports, following
+   * `paymentMovesFrom`. A payment already where the event would put it, or
+   * settled past it, is left alone and the event counts as done.
+   */
+  private async applyPaymentEvent(data: WebhookEventData, outcome: PaymentOutcome): Promise<void> {
+    const intent = parseStripePaymentIntent(data.data);
+    const row = await this.paymentRepository.findPaymentByProviderPaymentId(intent.providerPaymentId);
+    if (!row) {
+      throw new Error(`No local payment for provider payment ${intent.providerPaymentId}`);
+    }
+
+    if (!paymentMovesFrom[outcome].includes(row.status)) {
+      logger.debug('Payment {paymentId} is {status}; webhook {webhookId} changes nothing', {
+        paymentId: row.id,
+        status: row.status,
+        webhookId: data.webhookId,
+      });
+      return;
+    }
+
+    switch (outcome) {
+      case 'succeeded': {
+        await this.writes.completePayment({ paymentId: row.id });
+        break;
+      }
+      case 'failed': {
+        await this.writes.failPayment({ paymentId: row.id, failureReason: intent.failureReason ?? 'payment_failed' });
+        break;
+      }
+      case 'requires_action': {
+        await this.writes.markPaymentRequiresAction({ paymentId: row.id });
+        break;
+      }
+    }
+  }
+
   // Event handler implementations
   private async handleSubscriptionCreated(data: WebhookEventData): Promise<void> {
     try {
-      // Extract subscription data from webhook
       const subscriptionData = data.data;
       logger.debug('Subscription created (webhook {webhookId})', { webhookId: data.webhookId });
-
-      // Update local database if needed
-      // This would typically sync with the provider data
+      await this.applySubscriptionEvent(data);
 
       this.emit('subscription:created', { subscriptionData, webhookId: data.webhookId });
     } catch (error) {
@@ -412,8 +494,7 @@ export class WebhookHandler extends EventEmitter {
     try {
       const subscriptionData = data.data;
       logger.debug('Subscription updated (webhook {webhookId})', { webhookId: data.webhookId });
-
-      // Sync subscription status and details with local database
+      await this.applySubscriptionEvent(data);
 
       this.emit('subscription:updated', { subscriptionData, webhookId: data.webhookId });
     } catch (error) {
@@ -425,9 +506,7 @@ export class WebhookHandler extends EventEmitter {
     try {
       const subscriptionData = data.data;
       logger.debug('Subscription canceled (webhook {webhookId})', { webhookId: data.webhookId });
-
-      // Update subscription status in local database
-      // Trigger any cancellation workflows (access revocation, notifications, etc.)
+      await this.applySubscriptionEvent(data);
 
       this.emit('subscription:canceled', { subscriptionData, webhookId: data.webhookId });
     } catch (error) {
@@ -453,10 +532,7 @@ export class WebhookHandler extends EventEmitter {
     try {
       const paymentData = data.data;
       logger.debug('Payment succeeded (webhook {webhookId})', { webhookId: data.webhookId });
-
-      // Update payment status in local database
-      // Send payment confirmation
-      // Update user access/features
+      await this.applyPaymentEvent(data, 'succeeded');
 
       this.emit('payment:succeeded', { paymentData, webhookId: data.webhookId });
     } catch (error) {
@@ -468,10 +544,7 @@ export class WebhookHandler extends EventEmitter {
     try {
       const paymentData = data.data;
       logger.debug('Payment failed (webhook {webhookId})', { webhookId: data.webhookId });
-
-      // Update payment status in local database
-      // Send payment failure notification
-      // Implement retry logic or access restrictions
+      await this.applyPaymentEvent(data, 'failed');
 
       this.emit('payment:failed', { paymentData, webhookId: data.webhookId });
     } catch (error) {
@@ -483,8 +556,7 @@ export class WebhookHandler extends EventEmitter {
     try {
       const paymentData = data.data;
       logger.debug('Payment requires action (webhook {webhookId})', { webhookId: data.webhookId });
-
-      // Notify user that action is required (e.g., 3D Secure authentication)
+      await this.applyPaymentEvent(data, 'requires_action');
 
       this.emit('payment:requires_action', { paymentData, webhookId: data.webhookId });
     } catch (error) {
@@ -594,7 +666,8 @@ export class WebhookHandler extends EventEmitter {
 export function createWebhookHandler(
   paymentRepository: WebhookEventStore,
   webhookSecurity: WebhookValidator,
+  writes: WebhookWrites,
   config?: Partial<WebhookHandlerConfig>,
 ) {
-  return new WebhookHandler(paymentRepository, webhookSecurity, config);
+  return new WebhookHandler(paymentRepository, webhookSecurity, writes, config);
 }

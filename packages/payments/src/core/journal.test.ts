@@ -309,7 +309,78 @@ describe('completePayment, failPayment and cancelPayment', () => {
     );
   });
 
-  it.each(['completePayment', 'failPayment', 'cancelPayment'] as const)(
+  it('completes a failed payment: the customer retried with the provider and the money was collected', async () => {
+    const paymentId = await seed();
+    await journal.run(db, commands.failPayment, { paymentId, failureReason: 'card_declined' }, meta);
+
+    const result = await journal.run(db, commands.completePayment, { paymentId }, meta);
+
+    expect(result.events.map(event => event.type)).toEqual(['PaymentCompleted']);
+    expect(await rowOf(paymentId)).toMatchObject({ status: 'succeeded', version: 3 });
+    expect(await eventTypesOf(db, 'payment', paymentId)).toEqual([
+      'PaymentInitiatedV2',
+      'PaymentFailed',
+      'PaymentCompleted',
+    ]);
+  });
+
+  it('marks a pending payment as waiting for the customer', async () => {
+    const paymentId = await seed();
+
+    const result = await journal.run(db, commands.markPaymentRequiresAction, { paymentId }, meta);
+
+    expect(result.events.map(event => event.type)).toEqual(['PaymentRequiresAction']);
+    expect(await rowOf(paymentId)).toMatchObject({ status: 'requires_action', version: 2 });
+  });
+
+  it('a repeated requires-action writes nothing, so a resent webhook is safe', async () => {
+    const paymentId = await seed();
+    await journal.run(db, commands.markPaymentRequiresAction, { paymentId }, meta);
+    const eventsBefore = await countEvents(db);
+
+    const result = await journal.run(db, commands.markPaymentRequiresAction, { paymentId }, meta);
+
+    expect(result.events).toEqual([]);
+    expect(await countEvents(db)).toBe(eventsBefore);
+    expect(await rowOf(paymentId)).toMatchObject({ status: 'requires_action', version: 2 });
+  });
+
+  it('completes a payment after the customer acted (3-D Secure passed)', async () => {
+    const paymentId = await seed();
+    await journal.run(db, commands.markPaymentRequiresAction, { paymentId }, meta);
+
+    await journal.run(db, commands.completePayment, { paymentId }, meta);
+
+    expect(await eventTypesOf(db, 'payment', paymentId)).toEqual([
+      'PaymentInitiatedV2',
+      'PaymentRequiresAction',
+      'PaymentCompleted',
+    ]);
+    expect(await rowOf(paymentId)).toMatchObject({ status: 'succeeded' });
+  });
+
+  it('fails a payment after the customer action failed', async () => {
+    const paymentId = await seed();
+    await journal.run(db, commands.markPaymentRequiresAction, { paymentId }, meta);
+
+    await journal.run(db, commands.failPayment, { paymentId, failureReason: 'authentication_failed' }, meta);
+
+    expect(await rowOf(paymentId)).toMatchObject({ status: 'failed', failureReason: 'authentication_failed' });
+  });
+
+  it('rejects requires-action on a settled payment', async () => {
+    const paymentId = await seed();
+    await journal.run(db, commands.completePayment, { paymentId }, meta);
+
+    await expectRejected(
+      () => journal.run(db, commands.markPaymentRequiresAction, { paymentId }, meta),
+      'CONFLICT',
+      'Cannot mark payment with status succeeded as requiring action',
+      paymentId,
+    );
+  });
+
+  it.each(['completePayment', 'failPayment', 'cancelPayment', 'markPaymentRequiresAction'] as const)(
     '%s rejects a payment that is not there',
     async name => {
       const paymentId = createPaymentId();
@@ -317,6 +388,7 @@ describe('completePayment, failPayment and cancelPayment', () => {
         completePayment: () => journal.run(db, commands.completePayment, { paymentId }, meta),
         failPayment: () => journal.run(db, commands.failPayment, { paymentId, failureReason: 'x' }, meta),
         cancelPayment: () => journal.run(db, commands.cancelPayment, { paymentId }, meta),
+        markPaymentRequiresAction: () => journal.run(db, commands.markPaymentRequiresAction, { paymentId }, meta),
       };
 
       await expectRejected(attempts[name], 'NOT_FOUND', `Payment ${paymentId} not found`);
@@ -346,6 +418,18 @@ describe('writes(run): what the services call', () => {
     expect(await eventTypesOf(db, 'payment', completed)).toEqual(['PaymentInitiatedV2', 'PaymentCompleted']);
     expect(await eventTypesOf(db, 'payment', failed)).toEqual(['PaymentInitiatedV2', 'PaymentFailed']);
     expect(await eventTypesOf(db, 'payment', canceled)).toEqual(['PaymentInitiatedV2', 'PaymentCanceled']);
+  });
+
+  it('runs markPaymentRequiresAction and hands back the row without the journal `version`', async () => {
+    const writes = plain.core.writes(run);
+    const paymentId = createPaymentId();
+    await writes.initiatePayment({ paymentId, ...intent() });
+
+    const waiting = await writes.markPaymentRequiresAction({ paymentId });
+
+    expect(waiting).toMatchObject({ id: paymentId, status: 'requires_action' });
+    expect(waiting).not.toHaveProperty('version');
+    expect(await eventTypesOf(db, 'payment', paymentId)).toEqual(['PaymentInitiatedV2', 'PaymentRequiresAction']);
   });
 
   it('runs the subscription commands, one event per call, in the order the services call them', async () => {
@@ -417,6 +501,7 @@ describe('types', () => {
   it('keeps `version` out of the rows the services get', () => {
     expectTypeOf<Awaited<ReturnType<CoreWrites['createSubscription']>>>().not.toHaveProperty('version');
     expectTypeOf<Awaited<ReturnType<CoreWrites['initiatePayment']>>>().not.toHaveProperty('version');
+    expectTypeOf<Awaited<ReturnType<CoreWrites['markPaymentRequiresAction']>>>().not.toHaveProperty('version');
   });
 });
 

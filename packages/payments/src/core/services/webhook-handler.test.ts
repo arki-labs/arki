@@ -18,18 +18,19 @@ import type { PGlite } from '@electric-sql/pglite';
 import { asc, eq, isNotNull } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { add, now, sub } from '@arki/date';
+import { add, fromUnix, now, sub } from '@arki/date';
 
 import type { AppDb } from '../../test-support.js';
-import type { WebhookEvent, WebhookValidationResult } from '../types.js';
-import type { WebhookEventStore, WebhookProcessingResult, WebhookValidator } from './webhook-handler.js';
+import type { WebhookEvent, WebhookEventType, WebhookValidationResult } from '../types.js';
+import type { WebhookEventStore, WebhookProcessingResult, WebhookValidator, WebhookWrites } from './webhook-handler.js';
 import type { WebhookValidationOptions } from './webhook-security.js';
-import { core, openDb } from '../../test-support.js';
+import { runnerOn, seedPayment, seedSubscription } from '../../service-test-support.js';
+import { core, countEvents, eventTypesOf, openDb, typed } from '../../test-support.js';
 import { createWebhookId } from '../primitives.js';
 import { claimWebhookEvent, reclaimWebhookEvent } from '../webhook-claims.js';
 import { WebhookHandler } from './webhook-handler.js';
 
-const { webhookEvents } = core;
+const { payments, subscriptions, webhookEvents } = core;
 
 let db: AppDb;
 let client: PGlite;
@@ -85,7 +86,20 @@ function storeOn(database: AppDb): WebhookEventStore {
         .returning();
       return only(rows, 'update');
     },
+    async findSubscriptionByProviderSubscriptionId(id) {
+      const [row] = await database.select().from(subscriptions).where(eq(subscriptions.providerSubscriptionId, id));
+      return row ?? null;
+    },
+    async findPaymentByProviderPaymentId(id) {
+      const [row] = await database.select().from(payments).where(eq(payments.providerPaymentId, id));
+      return row ?? null;
+    },
   };
+}
+
+/** The journal writes on the test database: the real commands, as the app's `paymentsJournal.writes(run)`. */
+function writesOn(database: AppDb) {
+  return typed.core.writes(runnerOn(database));
 }
 
 /** A validator that returns `result` and records the options it was called with. */
@@ -116,7 +130,7 @@ function countingHandler(
   body: (run: number) => Promise<void> = () => Promise.resolve(),
 ) {
   const { validator, calls } = validatorReturning(options.result ?? valid);
-  const handler = new WebhookHandler(storeOn(db), validator, {
+  const handler = new WebhookHandler(storeOn(db), validator, writesOn(db), {
     ...(options.skipIpValidation === undefined ? {} : { skipIpValidation: options.skipIpValidation }),
     ...(options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries }),
   });
@@ -368,5 +382,255 @@ describe('WebhookHandler before the claim', () => {
 
     expect(skipping.calls).toEqual([{ skipIpValidation: true }]);
     expect(checking.calls).toEqual([{ skipIpValidation: false }]);
+  });
+});
+
+/** A handler whose validator returns a Stripe event of `type` carrying `object`, on the test database. */
+function stateHandler(eventType: WebhookEventType, object: Record<string, unknown>, store = storeOn(db)) {
+  const { validator } = validatorReturning({
+    isValid: true,
+    provider: 'stripe',
+    eventType,
+    data: { id: 'evt_x', type: 'x', data: { object } },
+  });
+  const writes: WebhookWrites = writesOn(db);
+  return new WebhookHandler(store, validator, writes);
+}
+
+/** A Stripe Subscription object, as `customer.subscription.*` events carry it. */
+function stripeSubscription(id: string, fields: Record<string, unknown> = {}) {
+  return {
+    id,
+    object: 'subscription',
+    status: 'active',
+    cancel_at_period_end: false,
+    canceled_at: null,
+    trial_start: null,
+    trial_end: null,
+    items: { data: [{ current_period_start: 1_760_000_000, current_period_end: 1_762_592_000 }] },
+    ...fields,
+  };
+}
+
+/** A Stripe PaymentIntent object, as `payment_intent.*` events carry it. */
+function stripeIntent(id: string, fields: Record<string, unknown> = {}) {
+  return { id, object: 'payment_intent', last_payment_error: null, ...fields };
+}
+
+async function subscriptionRowOf(providerSubscriptionId: string) {
+  const [row] = await db
+    .select()
+    .from(subscriptions)
+    .where(eq(subscriptions.providerSubscriptionId, providerSubscriptionId));
+  return row;
+}
+
+async function paymentRowOf(providerPaymentId: string) {
+  const [row] = await db.select().from(payments).where(eq(payments.providerPaymentId, providerPaymentId));
+  return row;
+}
+
+describe('WebhookHandler: webhooks change subscriptions and payments', () => {
+  let nextEvent = 0;
+
+  /** A new Stripe event id, so each delivery is a new event unless a test is about redelivery. */
+  function freshEventId(): string {
+    nextEvent += 1;
+    return `evt_state_${nextEvent}`;
+  }
+
+  it('subscription.updated brings the status and the billing period in line with Stripe', async () => {
+    const seeded = await seedSubscription(writesOn(db), 'active');
+    const object = stripeSubscription(seeded.providerSubscriptionId, { status: 'past_due' });
+    const handler = stateHandler('subscription.updated', object);
+
+    expect(await deliver(handler, freshEventId())).toMatchObject({ success: true });
+
+    const row = await subscriptionRowOf(seeded.providerSubscriptionId);
+    expect(row).toMatchObject({ status: 'past_due', userId: seeded.userId, planId: seeded.planId });
+    expect(row?.currentPeriodStart.equals(fromUnix(1_760_000_000))).toBe(true);
+    expect(row?.currentPeriodEnd.equals(fromUnix(1_762_592_000))).toBe(true);
+    const subscriptionEvents = await eventTypesOf(db, 'subscription', seeded.id);
+    expect(subscriptionEvents.at(-1)).toBe('SubscriptionSynced');
+
+    // The same state again, under a new event id: nothing changed, so nothing is written.
+    const eventsBefore = await countEvents(db);
+    expect(await deliver(handler, freshEventId())).toMatchObject({ success: true });
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  it('subscription.canceled marks the subscription canceled, with the time Stripe canceled it', async () => {
+    const seeded = await seedSubscription(writesOn(db), 'active');
+    const object = stripeSubscription(seeded.providerSubscriptionId, {
+      status: 'canceled',
+      canceled_at: 1_760_500_000,
+    });
+
+    expect(await deliver(stateHandler('subscription.canceled', object), freshEventId())).toMatchObject({
+      success: true,
+    });
+
+    const row = await subscriptionRowOf(seeded.providerSubscriptionId);
+    expect(row?.status).toBe('canceled');
+    expect(row?.canceledAt?.equals(fromUnix(1_760_500_000))).toBe(true);
+    const subscriptionEvents = await eventTypesOf(db, 'subscription', seeded.id);
+    expect(subscriptionEvents.at(-1)).toBe('SubscriptionSynced');
+  });
+
+  it('subscription.created for a subscription the app does not know fails and is retried: no owner is invented', async () => {
+    const eventId = freshEventId();
+    const eventsBefore = await countEvents(db);
+
+    const result = await deliver(stateHandler('subscription.created', stripeSubscription('psub_unknown')), eventId);
+
+    expect(result).toMatchObject({ success: false, retryable: true });
+    const stored = await rowFor(eventId);
+    expect(stored.processed).toBe(false);
+    expect(stored.errorMessage).toContain('No local subscription');
+    expect(await countEvents(db)).toBe(eventsBefore);
+    expect(await subscriptionRowOf('psub_unknown')).toBeUndefined();
+  });
+
+  it('payment.succeeded completes a pending payment', async () => {
+    const seeded = await seedPayment(writesOn(db), null);
+
+    const result = await deliver(
+      stateHandler('payment.succeeded', stripeIntent(seeded.providerPaymentId)),
+      freshEventId(),
+    );
+
+    expect(result).toMatchObject({ success: true });
+    expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ status: 'succeeded' });
+    expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual(['PaymentInitiatedV2', 'PaymentCompleted']);
+  });
+
+  it('payment.failed fails a pending payment and keeps the reason Stripe gave', async () => {
+    const seeded = await seedPayment(writesOn(db), null);
+    const object = stripeIntent(seeded.providerPaymentId, {
+      last_payment_error: { message: 'Your card was declined.', code: 'card_declined' },
+    });
+
+    expect(await deliver(stateHandler('payment.failed', object), freshEventId())).toMatchObject({ success: true });
+
+    expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({
+      status: 'failed',
+      failureReason: 'Your card was declined.',
+    });
+    expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual(['PaymentInitiatedV2', 'PaymentFailed']);
+  });
+
+  it('payment.requires_action marks a pending payment as waiting for the customer', async () => {
+    const seeded = await seedPayment(writesOn(db), null);
+
+    await deliver(stateHandler('payment.requires_action', stripeIntent(seeded.providerPaymentId)), freshEventId());
+
+    expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ status: 'requires_action' });
+    const paymentEvents = await eventTypesOf(db, 'payment', seeded.id);
+    expect(paymentEvents.at(-1)).toBe('PaymentRequiresAction');
+  });
+
+  it('payment.succeeded after payment.requires_action completes it (3-D Secure passed)', async () => {
+    const seeded = await seedPayment(writesOn(db), null);
+    const object = stripeIntent(seeded.providerPaymentId);
+
+    await deliver(stateHandler('payment.requires_action', object), freshEventId());
+    await deliver(stateHandler('payment.succeeded', object), freshEventId());
+
+    expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ status: 'succeeded' });
+    expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual([
+      'PaymentInitiatedV2',
+      'PaymentRequiresAction',
+      'PaymentCompleted',
+    ]);
+  });
+
+  it('payment.succeeded after payment.failed completes it: the customer retried and the money was collected', async () => {
+    const seeded = await seedPayment(writesOn(db), null);
+    const object = stripeIntent(seeded.providerPaymentId);
+
+    await deliver(stateHandler('payment.failed', object), freshEventId());
+    expect(await deliver(stateHandler('payment.succeeded', object), freshEventId())).toMatchObject({ success: true });
+
+    expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ status: 'succeeded' });
+    expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual([
+      'PaymentInitiatedV2',
+      'PaymentFailed',
+      'PaymentCompleted',
+    ]);
+  });
+
+  it('payment.failed for a payment that already succeeded changes nothing: the money was taken', async () => {
+    const seeded = await seedPayment(writesOn(db), null);
+    await writesOn(db).completePayment({ paymentId: seeded.id });
+    const eventsBefore = await countEvents(db);
+    const eventId = freshEventId();
+
+    const result = await deliver(stateHandler('payment.failed', stripeIntent(seeded.providerPaymentId)), eventId);
+
+    expect(result).toMatchObject({ success: true });
+    expect(result.error).toBeUndefined();
+    expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ status: 'succeeded' });
+    expect(await countEvents(db)).toBe(eventsBefore);
+    expect(await rowFor(eventId)).toMatchObject({ processed: true });
+  });
+
+  it('a payment event without an id fails as an invalid payload and writes nothing', async () => {
+    const eventId = freshEventId();
+    const eventsBefore = await countEvents(db);
+
+    const result = await deliver(stateHandler('payment.succeeded', { object: 'payment_intent' }), eventId);
+
+    expect(result).toMatchObject({ success: false });
+    const stored = await rowFor(eventId);
+    expect(stored.errorMessage).toMatch(/Invalid webhook payload:/);
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  it('invoice.paid still only acknowledges: the event is processed and nothing is written', async () => {
+    const eventId = freshEventId();
+    const eventsBefore = await countEvents(db);
+
+    expect(await deliver(stateHandler('invoice.paid', { id: 'in_1', object: 'invoice' }), eventId)).toMatchObject({
+      success: true,
+    });
+
+    expect(await rowFor(eventId)).toMatchObject({ processed: true });
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  it('a resend of a processed payment event does not run again (the claim)', async () => {
+    const seeded = await seedPayment(writesOn(db), null);
+    const handler = stateHandler('payment.succeeded', stripeIntent(seeded.providerPaymentId));
+    expect(await deliver(handler, 'evt_dup')).toMatchObject({ success: true });
+    const eventsBefore = await countEvents(db);
+
+    expect(await deliver(handler, 'evt_dup')).toMatchObject({ success: true, error: 'Event already processed' });
+
+    expect(await countEvents(db)).toBe(eventsBefore);
+    expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual(['PaymentInitiatedV2', 'PaymentCompleted']);
+  });
+
+  it('a rerun after a crash between the write and "processed" writes nothing twice (the status guard)', async () => {
+    const seeded = await seedPayment(writesOn(db), null);
+    const real = storeOn(db);
+    let marks = 0;
+    const crashingOnce: WebhookEventStore = {
+      ...real,
+      markWebhookEventAsProcessed(id) {
+        marks += 1;
+        return marks === 1 ? Promise.reject(new Error('connection lost')) : real.markWebhookEventAsProcessed(id);
+      },
+    };
+    const handler = stateHandler('payment.succeeded', stripeIntent(seeded.providerPaymentId), crashingOnce);
+
+    expect(await deliver(handler, 'evt_crash')).toMatchObject({ success: false, retryable: true });
+    expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ status: 'succeeded' });
+    const eventsBefore = await countEvents(db);
+
+    expect(await deliver(handler, 'evt_crash')).toMatchObject({ success: true });
+
+    expect(await rowFor('evt_crash')).toMatchObject({ attempts: 2, processed: true });
+    expect(await countEvents(db)).toBe(eventsBefore);
+    expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual(['PaymentInitiatedV2', 'PaymentCompleted']);
   });
 });

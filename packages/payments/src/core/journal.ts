@@ -24,6 +24,7 @@ import type {
   CompletePaymentInput,
   FailPaymentInput,
   InitiatePaymentInput,
+  MarkPaymentRequiresActionInput,
 } from './journal/payment.js';
 import type {
   ActivateSubscriptionInput,
@@ -46,6 +47,7 @@ export {
   completePaymentInputSchema,
   failPaymentInputSchema,
   initiatePaymentInputSchema,
+  markPaymentRequiresActionInputSchema,
 } from './journal/payment.js';
 export {
   activateSubscriptionInputSchema,
@@ -62,6 +64,7 @@ export type {
   CompletePaymentInput,
   FailPaymentInput,
   InitiatePaymentInput,
+  MarkPaymentRequiresActionInput,
 } from './journal/payment.js';
 export type {
   ActivateSubscriptionInput,
@@ -83,6 +86,8 @@ export type CoreWrites = {
   completePayment(input: CompletePaymentInput): Promise<Payment>;
   failPayment(input: FailPaymentInput): Promise<Payment>;
   cancelPayment(input: CancelPaymentInput): Promise<Payment>;
+  /** The customer must act (for example 3-D Secure). A payment that already waits stays as it is. */
+  markPaymentRequiresAction(input: MarkPaymentRequiresActionInput): Promise<Payment>;
   createSubscription(input: CreateSubscriptionInput): Promise<Subscription>;
   /** Create or update by the provider's subscription id. A delivery that changes nothing writes no event. */
   syncSubscription(input: SyncSubscriptionInput): Promise<Subscription>;
@@ -112,6 +117,8 @@ export function createCoreJournal<Meta extends z.ZodObject, Tx extends Transacti
       completePayment: input => writtenRow(run(commands.completePayment, input), 'completePayment'),
       failPayment: input => writtenRow(run(commands.failPayment, input), 'failPayment'),
       cancelPayment: input => writtenRow(run(commands.cancelPayment, input), 'cancelPayment'),
+      markPaymentRequiresAction: input =>
+        writtenRow(run(commands.markPaymentRequiresAction, input), 'markPaymentRequiresAction'),
       createSubscription: input => writtenRow(run(commands.createSubscription, input), 'createSubscription'),
       syncSubscription: input => writtenRow(run(commands.syncSubscription, input), 'syncSubscription'),
       cancelSubscription: input => writtenRow(run(commands.cancelSubscription, input), 'cancelSubscription'),
