@@ -3,12 +3,12 @@
 // It exercises one call per module; the unit tests cover the details.
 
 import {
+  convert,
   createRandom,
   decimal,
   formatCurrency,
   formatFileSize,
   formatPercent,
-  convert,
   gcd,
   isPrime,
   mean,
@@ -25,6 +25,18 @@ import {
 } from '../dist/index.js';
 import { ro } from '../dist/words/ro.js';
 
+const exactStrings =
+  new Intl.NumberFormat('en-US', { useGrouping: false }).format('9007199254740993') === '9007199254740993';
+const hasFormatToParts = typeof Intl.NumberFormat.prototype.formatToParts === 'function';
+const errorName = fn => {
+  try {
+    fn();
+    return 'accepted';
+  } catch (error) {
+    return error.name;
+  }
+};
+
 const checks = [
   ['decimal exact', decimal('0.1').plus('0.2').toString(), '0.3'],
   ['decimal division', decimal(1).dividedBy(3, { scale: 4, rounding: 'halfEven' }).toString(), '0.3333'],
@@ -33,14 +45,28 @@ const checks = [
   ['gcd', gcd(12, 18), 6],
   ['mean', mean([1, 2, 3, 4]), 2.5],
   ['stddev', round(stddev([2, 4, 4, 4, 5, 5, 7, 9], { ddof: 0 }), 6), 2],
-  [
-    'format currency (exact Decimal input)',
-    formatCurrency(decimal('1234.5'), 'EUR', { locale: 'de-DE' }),
-    '1.234,50 €',
-  ],
+  // Hermes (React Native) formats number strings through a double and has no
+  // formatToParts: those calls must fail with the typed error, never a wrong value.
+  exactStrings
+    ? [
+        'format currency (exact Decimal input)',
+        formatCurrency(decimal('1234.5'), 'EUR', { locale: 'de-DE' }),
+        '1.234,50\u00A0€',
+      ]
+    : [
+        'format Decimal needs exact strings',
+        errorName(() => formatCurrency(decimal('1234.5'), 'EUR')),
+        'UnsupportedFeatureError',
+      ],
   ['format percent', formatPercent(0.125), '12.5%'],
   ['format file size', formatFileSize(1536), '1.5 kB'],
-  ['parse de-DE', parseNumber('1.234,56', { locale: 'de-DE' }), 1234.56],
+  hasFormatToParts
+    ? ['parse de-DE', parseNumber('1.234,56', { locale: 'de-DE' }), 1234.56]
+    : [
+        'parse needs formatToParts',
+        errorName(() => parseNumber('1,5', { locale: 'de-DE' })),
+        'UnsupportedFeatureError',
+      ],
   ['seeded random', createRandom(42).int(1, 6), createRandom(42).int(1, 6)],
   ['fluent', num(127.3).clamp(0, 100).roundTo(5).value(), 100],
   ['distributions', round(normal().quantile(0.975), 6), 1.959964],
@@ -53,13 +79,15 @@ const checks = [
 ];
 
 const runtime =
-  typeof Deno !== 'undefined'
-    ? `deno ${Deno.version.deno}`
-    : typeof Bun !== 'undefined'
-      ? `bun ${Bun.version}`
-      : typeof navigator !== 'undefined' && navigator.userAgent && !navigator.userAgent.includes('Node')
-        ? `browser ${navigator.userAgent}`
-        : `node ${globalThis.process?.version ?? ''}`;
+  typeof HermesInternal !== 'undefined'
+    ? 'hermes'
+    : typeof Deno !== 'undefined'
+      ? `deno ${Deno.version.deno}`
+      : typeof Bun !== 'undefined'
+        ? `bun ${Bun.version}`
+        : typeof navigator !== 'undefined' && navigator.userAgent && !navigator.userAgent.includes('Node')
+          ? `browser ${navigator.userAgent}`
+          : `node ${globalThis.process?.version ?? ''}`;
 
 let failed = 0;
 for (const [name, actual, expected] of checks) {

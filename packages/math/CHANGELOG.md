@@ -25,6 +25,13 @@ Changed:
 - `SpreadOptions` is gone; use `VarianceOptions`.
 - `assertFinite` is no longer exported from `@arki/math/number`.
 
+Fixed (found by the new Hermes V1 runtime check, React Native 0.86):
+
+- Importing the package crashed on React Native: English ordinals built an `Intl.PluralRules` at load time, which Hermes lacks. The suffix is now plain arithmetic.
+- `median`, `percentile`, `mode`, `divisors` and the number-word helpers used `toSorted`/`toReversed`, which Hermes lacks. Lint now forbids them.
+- Locale parsing without `Intl.NumberFormat#formatToParts` threw a raw `TypeError`; it now throws `UnsupportedFeatureError`.
+- `test:runtimes` gains a Hermes leg (`HERMES_BIN`).
+
 ## 0.0.3
 
 Correctness and performance pass after an independent review.

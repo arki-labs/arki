@@ -141,7 +141,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:runtimes": "bun run build && node scripts/smoke.mjs && bun scripts/smoke.mjs && if command -v deno >/dev/null; then deno run --no-config scripts/smoke.mjs; else echo 'deno not installed: skipped'; fi && bun build scripts/smoke.mjs --target=browser --outdir=.cache/browser-check && node scripts/smoke-browser.mjs",
+    "test:runtimes": "bun run build && node scripts/smoke.mjs && bun scripts/smoke.mjs && if command -v deno >/dev/null; then deno run --no-config scripts/smoke.mjs; else echo 'deno not installed: skipped'; fi && bun build scripts/smoke.mjs --target=browser --outdir=.cache/browser-check && node scripts/smoke-browser.mjs && node scripts/smoke-hermes.mjs",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",

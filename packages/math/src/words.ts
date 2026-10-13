@@ -79,7 +79,7 @@ export function thousandsGroups(n: bigint): number[] {
     groups.push(Number(n % 1000n));
     n /= 1000n;
   }
-  return groups.toReversed();
+  return [...groups].reverse();
 }
 
 /** Rejects an integer too long for the locale before any grouping work is done. */
@@ -250,19 +250,17 @@ function enSpellOrdinal(n: bigint, and: boolean): string {
   return cardinal.slice(0, separator + 1) + enOrdinalWord(cardinal.slice(separator + 1));
 }
 
-const EN_SUFFIX: Record<Intl.LDMLPluralRule, string> = {
-  one: 'st',
-  two: 'nd',
-  few: 'rd',
-  other: 'th',
-  zero: 'th',
-  many: 'th',
-};
-const enPlural = new Intl.PluralRules('en', { type: 'ordinal' });
-
+/**
+ * English ordinal suffix from the last two digits: 11–13 take `th`, otherwise
+ * 1 → `st`, 2 → `nd`, 3 → `rd`, anything else `th`. Plain arithmetic, not
+ * `Intl.PluralRules`, which React Native's Hermes does not have.
+ */
 function enOrdinal(n: bigint, digits: string): string {
-  // PluralRules takes a number; only the last two digits decide the suffix.
-  return `${digits}${EN_SUFFIX[enPlural.select(Number(n % 100n))]}`;
+  const lastTwo = Number((n < 0n ? -n : n) % 100n);
+  const last = lastTwo % 10;
+  const suffix =
+    lastTwo >= 11 && lastTwo <= 13 ? 'th' : last === 1 ? 'st' : last === 2 ? 'nd' : last === 3 ? 'rd' : 'th';
+  return `${digits}${suffix}`;
 }
 
 /** American English: `one hundred two`, `two thousand twenty-six`. */

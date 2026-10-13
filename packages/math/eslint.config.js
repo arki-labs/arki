@@ -21,6 +21,17 @@ export default [
           ],
         },
       ],
+      // ES2023 copying array methods are missing on Hermes V1 (React Native 0.86).
+      'no-restricted-properties': [
+        'error',
+        ...['toSorted', 'toReversed', 'toSpliced'].map(property => ({
+          property,
+          message: 'Missing on Hermes (React Native). Copy the array, then sort/reverse/splice it.',
+        })),
+      ],
+      // The copy-then-sort pattern above is deliberate.
+      'unicorn/no-array-sort': 'off',
+      'unicorn/no-array-reverse': 'off',
       'no-restricted-globals': [
         'error',
         { name: 'process', message: 'Not available in browsers.' },

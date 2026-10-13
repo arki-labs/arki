@@ -15,7 +15,7 @@
 
 import type { Decimal } from './decimal.js';
 import { decimal } from './decimal.js';
-import { NumberFormatError, NumericRangeError } from './errors.js';
+import { NumberFormatError, NumericRangeError, UnsupportedFeatureError } from './errors.js';
 
 export type ParseOptions = {
   /** BCP 47 locale tag. Default `'en-US'`. */
@@ -69,7 +69,14 @@ function prepare(locale: string): PreparedLocale {
 export function localeNumberSymbols(locale: string): LocaleNumberSymbols {
   let symbols = symbolCache.get(locale);
   if (!symbols) {
-    const parts = new Intl.NumberFormat(locale).formatToParts(-1_234_567.89);
+    const formatter = new Intl.NumberFormat(locale);
+    // React Native's Hermes on Apple platforms has Intl.NumberFormat but no formatToParts.
+    if (typeof formatter.formatToParts !== 'function') {
+      throw new UnsupportedFeatureError(
+        "This runtime lacks Intl.NumberFormat#formatToParts, which locale-aware parsing needs (React Native's Hermes on iOS)",
+      );
+    }
+    const parts = formatter.formatToParts(-1_234_567.89);
     const find = (type: string, fallback: string): string => parts.find(part => part.type === type)?.value ?? fallback;
     const plain = new Intl.NumberFormat(locale, { useGrouping: false });
     symbols = {

@@ -100,8 +100,8 @@ function noNegativeZero(value: number): number {
 
 /**
  * Validates every element and returns them as an array. An array input is
- * returned as-is (never mutated by this module — sorting goes through
- * `toSorted`), so the common case allocates nothing.
+ * returned as-is (never mutated by this module — sorting works on a copy),
+ * so the common case allocates nothing.
  */
 function toNumbers(values: Iterable<number>, name: string): readonly number[] {
   const out: readonly number[] = Array.isArray(values) ? values : [...values];
@@ -157,7 +157,7 @@ function interpolate(low: number, high: number, fraction: number): number {
 }
 
 function sortedCopy(values: readonly number[]): number[] {
-  return values.toSorted((a, b) => a - b);
+  return [...values].sort((a, b) => a - b);
 }
 
 function pairs(x: Iterable<number>, y: Iterable<number>): { xs: readonly number[]; ys: readonly number[] } {
@@ -360,7 +360,7 @@ export function median(values: Iterable<Decimal>): Decimal;
 export function median(values: NumericValues): number | Decimal {
   const items = materialize(values);
   if (isDecimal(items[0])) {
-    const ordered = decimalsFrom(items).toSorted((a, b) => a.compareTo(b));
+    const ordered = [...decimalsFrom(items)].sort((a, b) => a.compareTo(b));
     const middle = ordered.length >> 1;
     return ordered.length % 2 === 1 ? ordered[middle]! : ordered[middle - 1]!.plus(ordered[middle]!).dividedBy(2);
   }
@@ -383,7 +383,7 @@ export function mode(values: Iterable<number>): number[] {
   }
   const result: number[] = [];
   for (const [value, count] of counts) if (count === best) result.push(value);
-  return result.toSorted((a, b) => a - b);
+  return result.sort((a, b) => a - b);
 }
 
 /**

@@ -116,7 +116,7 @@ function withGender(stem: string, gender: Gender | undefined): string {
 function spellOrdinal(n: bigint, gender: Gender | undefined): string {
   assertInRange(n);
   // Exact multiples of a scale word end in the noun: "millionste", "zweimillionste".
-  for (const scale of SCALES.toReversed()) {
+  for (const scale of [...SCALES].reverse()) {
     if (n % scale.value !== 0n || (n / scale.value) % 1000n === 0n) continue;
     const count = Number((n / scale.value) % 1000n);
     const before = n - BigInt(count) * scale.value;
