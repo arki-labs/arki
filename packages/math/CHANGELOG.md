@@ -1,5 +1,20 @@
 # @arki/math
 
+## 0.0.8
+
+Third round from the ekuation migration.
+
+Added:
+
+- `units` — `splitUnits`/`joinUnits` for composite values (5 ft 7 in, 1 h 30 min); a negative value carries its sign on the first non-zero part. Units `dm`, `fathom`, `pc`, `ct`, `ton_us`, `ton_uk`, `kcal/h`, `GJ`, `ft*lbf`, `PB`, `EB`, `PiB`, `EiB`.
+- `stats` — `quartiles` method `'medianExcluded'`; `pooledVariance`/`pooledStddev` accept `{ n, stddev }` / `{ n, variance }` summaries (`SampleSummary`).
+- `polynomial` — `quadraticRoots` results carry an error-compensated `discriminant`, and its sign decides real vs complex.
+
+Fixed:
+
+- `polynomialRegression` threw "ill-conditioned" for x far from zero (years); it now solves on centered, scaled x.
+- `round`, `roundTo` and `roundToSignificant` threw on floats past 2^53 (`round(1e20, 2)`); they round them as typed.
+
 ## 0.0.7
 
 What the ekuation calculators needed after their first migration.

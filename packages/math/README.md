@@ -234,8 +234,12 @@ linearRegression([1, 2, 3], [2, 4, 6]).slope; // 2
 `quantile` and `percentile` take `{ method }` for all nine Hyndman–Fan
 definitions (R types 1–9, named as in NumPy: `'inverseCdf'` is nearest rank,
 `'weibull'` is Excel `PERCENTILE.EXC`, `'linear'` the default). `quartiles`
-adds Tukey's hinges (R `fivenum`). `pooledVariance`/`pooledStddev` combine
-groups. The linear fit also reports `adjustedR2`, `residualStandardError` and
+adds two hinge rules for odd counts: `'tukey'` keeps the median in both
+halves (R `fivenum`), `'medianExcluded'` leaves it out (TI-83, Moore & McCabe).
+`pooledVariance`/`pooledStddev` combine groups, given as raw samples or as
+`{ n, stddev }` / `{ n, variance }` summaries. `polynomialRegression` centers
+x before solving, so year-scale x (2015…2024) fits; `predict` evaluates in the
+centered basis, because the power-basis `coefficients` lose digits there. The linear fit also reports `adjustedR2`, `residualStandardError` and
 the slope/intercept standard errors; these are `undefined` when no degrees of
 freedom are left (a line through two points).
 
@@ -465,14 +469,23 @@ economy mixes distance-per-volume and volume-per-distance units:
 `7.84…`, and converting `0` to or from `l/100km` throws.
 
 ```ts
-import { convert, convertExact, formatUnit, unitsOf } from '@arki/math/units';
+import { convert, convertExact, formatUnit, joinUnits, splitUnits, unitsOf } from '@arki/math/units';
 
 convert(5, 'km', 'mi'); // 3.1068559611866697
 convert(1, 'GiB', 'GB'); // 1.073741824
 convertExact(1, 'mi', 'km').toString(); // '25146/15625'
 convert(1, 'm', 'kg'); // throws InvalidArgumentError: length → mass
 formatUnit(5, 'km', { display: 'long' }); // '5 kilometers'
-unitsOf('pressure'); // ['Pa', 'kPa', 'bar', 'atm', 'psi', 'mmHg']
+unitsOf('pressure'); // ['Pa', 'kPa', 'MPa', 'bar', 'atm', 'psi', 'mmHg', 'Torr']
+splitUnits(67, 'in', ['ft', 'in']); // [{ unit: 'ft', value: 5 }, { unit: 'in', value: 7 }]
+splitUnits(71.99, 'in', ['ft', 'in'], { scale: 0 }); // 6 ft 0 in   rounds once, then carries
+joinUnits(
+  [
+    { unit: 'ft', value: 5 },
+    { unit: 'in', value: 7 },
+  ],
+  'in',
+); // 67
 ```
 
 ## Finance
@@ -613,7 +626,7 @@ cancellation; `polynomialRoots` handles any degree.
 import { cubicRoots, evaluatePolynomial, polynomialRoots, quadraticRoots } from '@arki/math/polynomial';
 
 evaluatePolynomial([1, -6, 11, -6], 4); // 6
-quadraticRoots(1, -3, 2); // { kind: 'real', roots: [1, 2] }
+quadraticRoots(1, -3, 2); // { kind: 'real', roots: [1, 2], discriminant: 1 }   b² − 4ac, error-compensated
 quadraticRoots(1, 0, 1).kind; // 'complex'
 cubicRoots(1, -6, 11, -6).roots; // [1, 2, 3]
 polynomialRoots([1, 0, 0, 0, -1]).length; // 4

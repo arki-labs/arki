@@ -32,6 +32,7 @@ import {
   solveTriangles,
   spellNumber,
   spellOrdinal,
+  splitUnits,
   sqrt,
   stddev,
   toBase,
@@ -133,6 +134,14 @@ const checks = [
   ['tukey hinges', Object.values(quartiles([1, 2, 3, 4, 5, 6, 7, 8], { method: 'tukey' })).join(), '2.5,4.5,6.5'],
   ['light-year exact', convertExact(1, 'ly', 'm').toString(), '9460730472580800'],
   ['round fast path agrees', round(2.675, 2), 2.68],
+  ['round past 2^53', round(1e20, 2), 1e20],
+  [
+    'composite units',
+    splitUnits(90, 'min', ['h', 'min'])
+      .map(part => part.value)
+      .join(),
+    '1,30',
+  ],
 ];
 
 const runtime =
