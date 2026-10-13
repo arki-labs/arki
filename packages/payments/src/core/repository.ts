@@ -33,6 +33,7 @@ import type {
   WebhookEventType,
   WebhookId,
 } from './types.js';
+import { claimWebhookEvent, reclaimWebhookEvent } from './webhook-claims.js';
 
 /**
  * Structural database type accepted by the payments repositories.
@@ -392,6 +393,16 @@ export class PaymentRepository {
       throw new Error('Failed to create webhook event');
     }
     return row as WebhookEvent;
+  }
+
+  /** Insert the event, or return the row that holds its id. See `claimWebhookEvent` in `webhook-claims.ts`. */
+  async claimWebhookEvent(data: NewWebhookEvent): Promise<{ event: WebhookEvent; created: boolean }> {
+    return claimWebhookEvent(this.db, this.webhookEvents, data);
+  }
+
+  /** Take over a failed or stale unprocessed event. See `reclaimWebhookEvent` in `webhook-claims.ts`. */
+  async reclaimWebhookEvent(id: WebhookId, seenAttempts: number, leaseCutoff: Instant): Promise<boolean> {
+    return reclaimWebhookEvent(this.db, this.webhookEvents, id, seenAttempts, leaseCutoff);
   }
 
   async findWebhookEventById(id: WebhookId): Promise<WebhookEvent | null> {

@@ -1,11 +1,28 @@
 import { EventEmitter } from 'node:events';
 
-import { now } from '@arki/date';
+import { now, sub } from '@arki/date';
+import { getLogger } from '@arki/log';
 
 import type { PaymentRepository } from '../repository.js';
 import type { PaymentProviderType, WebhookEventType, WebhookId } from '../types.js';
 import type { WebhookSecurityService } from './webhook-security.js';
 import { createWebhookId } from '../primitives.js';
+
+/** Logs ids and event types only, never event data. */
+const logger = getLogger('arki:payments:webhook');
+
+/** The storage the handler needs. A `PaymentRepository` satisfies it. */
+export type WebhookEventStore = Pick<
+  PaymentRepository,
+  | 'claimWebhookEvent'
+  | 'reclaimWebhookEvent'
+  | 'markWebhookEventAsProcessed'
+  | 'findUnprocessedWebhookEvents'
+  | 'updateWebhookEvent'
+>;
+
+/** The validation the handler needs. A `WebhookSecurityService` satisfies it. */
+export type WebhookValidator = Pick<WebhookSecurityService, 'validateWebhook'>;
 
 export type WebhookProcessingResult = {
   success: boolean;
@@ -22,10 +39,25 @@ export type WebhookEventData = {
 }
 
 export type WebhookHandlerConfig = {
+  /** Attempts after which an unprocessed event is given up on, and the provider told to stop resending. */
   maxRetries: number;
   retryDelayMs: number;
+  /**
+   * Answer before the event is processed. Off by default: the provider's
+   * resends are the retry mechanism, and they only happen when the answer
+   * says the event failed. An early answer turns every processing failure
+   * into a lost event.
+   */
   enableAsync: boolean;
   enableEventEmitter: boolean;
+  /**
+   * How long an attempt may run before another delivery may take the event
+   * over. An attempt older than this with no recorded error is treated as
+   * crashed.
+   */
+  processingLeaseMs: number;
+  /** Skip the source-address check. For routes with no real client address; the signature check still runs. */
+  skipIpValidation: boolean;
 }
 
 export class WebhookHandler extends EventEmitter {
@@ -33,16 +65,18 @@ export class WebhookHandler extends EventEmitter {
   private readonly eventHandlers = new Map<WebhookEventType, (data: WebhookEventData) => Promise<void>>();
 
   constructor(
-    private readonly paymentRepository: PaymentRepository,
-    private readonly webhookSecurity: WebhookSecurityService,
+    private readonly paymentRepository: WebhookEventStore,
+    private readonly webhookSecurity: WebhookValidator,
     config: Partial<WebhookHandlerConfig> = {},
   ) {
     super();
     this.config = {
       maxRetries: 3,
       retryDelayMs: 1000,
-      enableAsync: true,
+      enableAsync: false,
       enableEventEmitter: true,
+      processingLeaseMs: 5 * 60 * 1000,
+      skipIpValidation: false,
       ...config,
     };
 
@@ -66,6 +100,7 @@ export class WebhookHandler extends EventEmitter {
         timestamp,
         sourceIp,
         webhookSecret,
+        { skipIpValidation: this.config.skipIpValidation },
       );
 
       if (!validation.isValid) {
@@ -86,48 +121,65 @@ export class WebhookHandler extends EventEmitter {
         };
       }
 
-      // 3. Check for duplicate events
-      const existingEvent = await this.paymentRepository.findWebhookEventByProviderEventId(eventData.id, provider);
-      if (existingEvent?.processed) {
-        return {
-          success: true,
-          webhookId: existingEvent.id,
-          error: 'Event already processed',
-        };
+      // 3. An event type we do not handle: acknowledge it, store nothing.
+      const eventType = validation.eventType;
+      if (!eventType) {
+        logger.debug('Ignoring unhandled webhook event type {type}', { type: eventData.type });
+        return { success: true, error: `Unhandled event type: ${eventData.type}` };
       }
 
-      // 4. Store webhook event
-      let webhookId: WebhookId;
-      if (existingEvent) {
-        webhookId = existingEvent.id;
-        await this.paymentRepository.incrementWebhookEventAttempts(webhookId);
-      } else {
-        const webhookEvent = await this.paymentRepository.createWebhookEvent({
-          id: createWebhookId(),
-          provider,
-          eventType: validation.eventType!,
-          providerEventId: eventData.id,
-          data: validation.data || {},
-          processed: false,
-          attempts: 1,
-          lastAttemptAt: now(),
-          sourceIp,
-          createdAt: now(),
-          updatedAt: now(),
-        });
-        webhookId = webhookEvent.id;
+      // 4. Claim the event. Only the delivery whose insert wins goes on to
+      //    process it; the database's unique index decides, so this holds
+      //    across concurrent requests and across server instances.
+      //    `attempts` counts started attempts.
+      const data = validation.data || {};
+      const { event, created } = await this.paymentRepository.claimWebhookEvent({
+        id: createWebhookId(),
+        provider,
+        eventType,
+        providerEventId: eventData.id,
+        data,
+        processed: false,
+        attempts: 1,
+        lastAttemptAt: now(),
+        sourceIp,
+        createdAt: now(),
+        updatedAt: now(),
+      });
+      const webhookId = event.id;
+
+      if (!created) {
+        if (event.processed) {
+          return { success: true, webhookId, error: 'Event already processed' };
+        }
+        if (event.attempts >= this.config.maxRetries) {
+          logger.error('Webhook {webhookId} given up after {attempts} attempts', {
+            webhookId,
+            attempts: event.attempts,
+          });
+          return { success: false, webhookId, retryable: false, error: 'Max retry attempts exceeded' };
+        }
+        // A resend of an event that failed or whose attempt crashed takes it
+        // over; a resend of one still inside its lease asks to be resent later.
+        const reclaimed = await this.paymentRepository.reclaimWebhookEvent(
+          webhookId,
+          event.attempts,
+          this.leaseCutoff(),
+        );
+        if (!reclaimed) {
+          logger.debug('Webhook {webhookId} is being processed; asking for a resend', { webhookId });
+          return { success: false, webhookId, retryable: true, error: 'Event is being processed' };
+        }
       }
 
-      // 5. Process the event
+      // 5. Process the event. A failure is recorded on the row and answered
+      //    as retryable, so the provider's resend takes it over.
       if (this.config.enableAsync) {
-        // Process asynchronously
-        this.processEventAsync(webhookId, validation.eventType!, provider, validation.data || {});
-        return { success: true, webhookId };
+        void this.processEventAsync(webhookId, eventType, provider, data);
       } else {
-        // Process synchronously
-        await this.processEvent(webhookId, validation.eventType!, provider, validation.data || {});
-        return { success: true, webhookId };
+        await this.runClaimed(webhookId, eventType, provider, data);
       }
+      return { success: true, webhookId };
     } catch (error) {
       return {
         success: false,
@@ -137,13 +189,35 @@ export class WebhookHandler extends EventEmitter {
     }
   }
 
+  /**
+   * Re-run failed or crashed events without waiting for a resend. Optional:
+   * provider resends already do this. Uses the same takeover as a resend, so
+   * it never runs an event whose attempt is still inside its lease.
+   */
   async retryFailedWebhooks(): Promise<void> {
     try {
       const unprocessedEvents = await this.paymentRepository.findUnprocessedWebhookEvents();
 
       for (const event of unprocessedEvents) {
         if (event.attempts < this.config.maxRetries) {
-          await this.processEventAsync(event.id, event.eventType, event.provider, event.data);
+          const reclaimed = await this.paymentRepository.reclaimWebhookEvent(
+            event.id,
+            event.attempts,
+            this.leaseCutoff(),
+          );
+          if (!reclaimed) {
+            continue;
+          }
+          try {
+            await this.runClaimed(event.id, event.eventType, event.provider, event.data);
+          } catch (error) {
+            this.emit('webhook:processing_error', {
+              webhookId: event.id,
+              eventType: event.eventType,
+              provider: event.provider,
+              error: error instanceof Error ? error.message : 'Unknown error',
+            });
+          }
         } else {
           // Mark as failed after max retries
           await this.paymentRepository.updateWebhookEvent(event.id, {
@@ -174,13 +248,8 @@ export class WebhookHandler extends EventEmitter {
     // Process in background
     setImmediate(async () => {
       try {
-        await this.processEvent(webhookId, eventType, provider, data);
+        await this.runClaimed(webhookId, eventType, provider, data);
       } catch (error) {
-        await this.paymentRepository.incrementWebhookEventAttempts(
-          webhookId,
-          error instanceof Error ? error.message : 'Unknown error',
-        );
-
         this.emit('webhook:processing_error', {
           webhookId,
           eventType,
@@ -189,6 +258,32 @@ export class WebhookHandler extends EventEmitter {
         });
       }
     });
+  }
+
+  /** The moment before which an attempt with no recorded error counts as crashed. */
+  private leaseCutoff() {
+    return sub(now(), { milliseconds: this.config.processingLeaseMs });
+  }
+
+  /**
+   * Run an event this caller has claimed. On failure, record the error on the
+   * row, so the next resend may take the event over, and rethrow.
+   */
+  private async runClaimed(
+    webhookId: WebhookId,
+    eventType: WebhookEventType,
+    provider: PaymentProviderType,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await this.processEvent(webhookId, eventType, provider, data);
+    } catch (error) {
+      await this.paymentRepository.updateWebhookEvent(webhookId, {
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      });
+      logger.warn('Webhook {webhookId} failed; a resend may retry it', { webhookId });
+      throw error;
+    }
   }
 
   private async processEvent(
@@ -210,7 +305,7 @@ export class WebhookHandler extends EventEmitter {
       if (handler) {
         await handler(eventData);
       } else {
-        console.warn(`No handler found for webhook event type: ${eventType}`);
+        logger.warn('No handler for webhook event type {eventType}', { eventType });
       }
 
       // Mark as processed
@@ -302,7 +397,7 @@ export class WebhookHandler extends EventEmitter {
     try {
       // Extract subscription data from webhook
       const subscriptionData = data.data;
-      console.log('Subscription created:', subscriptionData);
+      logger.debug('Subscription created (webhook {webhookId})', { webhookId: data.webhookId });
 
       // Update local database if needed
       // This would typically sync with the provider data
@@ -316,7 +411,7 @@ export class WebhookHandler extends EventEmitter {
   private async handleSubscriptionUpdated(data: WebhookEventData): Promise<void> {
     try {
       const subscriptionData = data.data;
-      console.log('Subscription updated:', subscriptionData);
+      logger.debug('Subscription updated (webhook {webhookId})', { webhookId: data.webhookId });
 
       // Sync subscription status and details with local database
 
@@ -329,7 +424,7 @@ export class WebhookHandler extends EventEmitter {
   private async handleSubscriptionCanceled(data: WebhookEventData): Promise<void> {
     try {
       const subscriptionData = data.data;
-      console.log('Subscription canceled:', subscriptionData);
+      logger.debug('Subscription canceled (webhook {webhookId})', { webhookId: data.webhookId });
 
       // Update subscription status in local database
       // Trigger any cancellation workflows (access revocation, notifications, etc.)
@@ -343,7 +438,7 @@ export class WebhookHandler extends EventEmitter {
   private async handleSubscriptionTrialWillEnd(data: WebhookEventData): Promise<void> {
     try {
       const subscriptionData = data.data;
-      console.log('Subscription trial will end:', subscriptionData);
+      logger.debug('Subscription trial will end (webhook {webhookId})', { webhookId: data.webhookId });
 
       // Send trial ending notifications
       // Update user about upcoming charges
@@ -357,7 +452,7 @@ export class WebhookHandler extends EventEmitter {
   private async handlePaymentSucceeded(data: WebhookEventData): Promise<void> {
     try {
       const paymentData = data.data;
-      console.log('Payment succeeded:', paymentData);
+      logger.debug('Payment succeeded (webhook {webhookId})', { webhookId: data.webhookId });
 
       // Update payment status in local database
       // Send payment confirmation
@@ -372,7 +467,7 @@ export class WebhookHandler extends EventEmitter {
   private async handlePaymentFailed(data: WebhookEventData): Promise<void> {
     try {
       const paymentData = data.data;
-      console.log('Payment failed:', paymentData);
+      logger.debug('Payment failed (webhook {webhookId})', { webhookId: data.webhookId });
 
       // Update payment status in local database
       // Send payment failure notification
@@ -387,7 +482,7 @@ export class WebhookHandler extends EventEmitter {
   private async handlePaymentRequiresAction(data: WebhookEventData): Promise<void> {
     try {
       const paymentData = data.data;
-      console.log('Payment requires action:', paymentData);
+      logger.debug('Payment requires action (webhook {webhookId})', { webhookId: data.webhookId });
 
       // Notify user that action is required (e.g., 3D Secure authentication)
 
@@ -400,7 +495,7 @@ export class WebhookHandler extends EventEmitter {
   private async handleCustomerCreated(data: WebhookEventData): Promise<void> {
     try {
       const customerData = data.data;
-      console.log('Customer created:', customerData);
+      logger.debug('Customer created (webhook {webhookId})', { webhookId: data.webhookId });
 
       this.emit('customer:created', { customerData, webhookId: data.webhookId });
     } catch (error) {
@@ -411,7 +506,7 @@ export class WebhookHandler extends EventEmitter {
   private async handleCustomerUpdated(data: WebhookEventData): Promise<void> {
     try {
       const customerData = data.data;
-      console.log('Customer updated:', customerData);
+      logger.debug('Customer updated (webhook {webhookId})', { webhookId: data.webhookId });
 
       this.emit('customer:updated', { customerData, webhookId: data.webhookId });
     } catch (error) {
@@ -422,7 +517,7 @@ export class WebhookHandler extends EventEmitter {
   private async handleCustomerDeleted(data: WebhookEventData): Promise<void> {
     try {
       const customerData = data.data;
-      console.log('Customer deleted:', customerData);
+      logger.debug('Customer deleted (webhook {webhookId})', { webhookId: data.webhookId });
 
       // Clean up customer data and subscriptions
 
@@ -435,7 +530,7 @@ export class WebhookHandler extends EventEmitter {
   private async handleInvoiceCreated(data: WebhookEventData): Promise<void> {
     try {
       const invoiceData = data.data;
-      console.log('Invoice created:', invoiceData);
+      logger.debug('Invoice created (webhook {webhookId})', { webhookId: data.webhookId });
 
       this.emit('invoice:created', { invoiceData, webhookId: data.webhookId });
     } catch (error) {
@@ -446,7 +541,7 @@ export class WebhookHandler extends EventEmitter {
   private async handleInvoiceFinalized(data: WebhookEventData): Promise<void> {
     try {
       const invoiceData = data.data;
-      console.log('Invoice finalized:', invoiceData);
+      logger.debug('Invoice finalized (webhook {webhookId})', { webhookId: data.webhookId });
 
       this.emit('invoice:finalized', { invoiceData, webhookId: data.webhookId });
     } catch (error) {
@@ -457,7 +552,7 @@ export class WebhookHandler extends EventEmitter {
   private async handleInvoicePaid(data: WebhookEventData): Promise<void> {
     try {
       const invoiceData = data.data;
-      console.log('Invoice paid:', invoiceData);
+      logger.debug('Invoice paid (webhook {webhookId})', { webhookId: data.webhookId });
 
       this.emit('invoice:paid', { invoiceData, webhookId: data.webhookId });
     } catch (error) {
@@ -468,7 +563,7 @@ export class WebhookHandler extends EventEmitter {
   private async handleInvoicePaymentFailed(data: WebhookEventData): Promise<void> {
     try {
       const invoiceData = data.data;
-      console.log('Invoice payment failed:', invoiceData);
+      logger.debug('Invoice payment failed (webhook {webhookId})', { webhookId: data.webhookId });
 
       this.emit('invoice:payment_failed', { invoiceData, webhookId: data.webhookId });
     } catch (error) {
@@ -497,8 +592,8 @@ export class WebhookHandler extends EventEmitter {
 }
 
 export function createWebhookHandler(
-  paymentRepository: PaymentRepository,
-  webhookSecurity: WebhookSecurityService,
+  paymentRepository: WebhookEventStore,
+  webhookSecurity: WebhookValidator,
   config?: Partial<WebhookHandlerConfig>,
 ) {
   return new WebhookHandler(paymentRepository, webhookSecurity, config);
