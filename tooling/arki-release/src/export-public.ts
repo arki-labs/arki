@@ -100,6 +100,8 @@ interface RawManifest {
   readonly module?: string;
   readonly types?: string;
   readonly files?: readonly string[];
+  /** Command-line entry points (`arki-bench` → `./dist/cli.js`), kept as written. */
+  readonly bin?: string | Readonly<Record<string, string>>;
   readonly keywords?: readonly string[];
   readonly repository?: { readonly type: string; readonly url: string };
   readonly bugs?: { readonly url: string };
@@ -431,6 +433,7 @@ function synthesizeParsedManifest(
     module: raw.module,
     types: raw.types,
     files: raw.files,
+    bin: raw.bin,
     keywords: raw.keywords,
     repository: raw.repository,
     bugs: raw.bugs,
@@ -488,6 +491,7 @@ async function readRawManifest(absolutePath: string): Promise<RawManifest> {
     module: typeof m['module'] === 'string' ? m['module'] : undefined,
     types: typeof m['types'] === 'string' ? m['types'] : undefined,
     files: narrowStringArray(m['files']),
+    bin: typeof m['bin'] === 'string' ? m['bin'] : narrowStringRecord(m['bin']),
     keywords: narrowStringArray(m['keywords']),
     repository: narrowRepository(m['repository']),
     bugs: narrowBugs(m['bugs']),
@@ -1064,6 +1068,7 @@ function serializePublishableManifest(manifest: PublishableManifest): Record<str
   if (manifest.module !== undefined) out['module'] = manifest.module;
   if (manifest.types !== undefined) out['types'] = manifest.types;
   if (manifest.files !== undefined) out['files'] = manifest.files;
+  if (manifest.bin !== undefined) out['bin'] = manifest.bin;
   if (manifest.dependencies !== undefined) out['dependencies'] = manifest.dependencies;
   if (manifest.peerDependencies !== undefined) out['peerDependencies'] = manifest.peerDependencies;
   if (manifest.optionalDependencies !== undefined) {

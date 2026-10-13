@@ -151,6 +151,7 @@ export function materializeManifest(
     ...(inputRaw.module !== undefined ? { module: inputRaw.module } : {}),
     ...(inputRaw.types !== undefined ? { types: inputRaw.types } : {}),
     ...(inputRaw.files !== undefined ? { files: inputRaw.files } : {}),
+    ...(inputRaw.bin !== undefined ? { bin: inputRaw.bin } : {}),
     ...(dependencies !== undefined ? { dependencies } : {}),
     ...(peerDependencies !== undefined ? { peerDependencies } : {}),
     ...(optionalDependencies !== undefined ? { optionalDependencies } : {}),
@@ -193,6 +194,7 @@ interface ManifestRaw {
   readonly module?: string;
   readonly types?: string;
   readonly files?: readonly string[];
+  readonly bin?: string | Readonly<Record<string, string>>;
   readonly keywords?: readonly string[];
   readonly repository?: { readonly type: string; readonly url: string };
   readonly bugs?: { readonly url: string };
@@ -226,6 +228,7 @@ function readManifestRaw(input: ParsedManifest): ManifestRaw {
     module: typeof raw.module === 'string' ? raw.module : undefined,
     types: typeof raw.types === 'string' ? raw.types : undefined,
     files: Array.isArray(raw.files) ? (raw.files as readonly string[]) : undefined,
+    bin: raw.bin,
     keywords: Array.isArray(raw.keywords) ? (raw.keywords as readonly string[]) : undefined,
     repository: raw.repository,
     bugs: raw.bugs,

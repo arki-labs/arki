@@ -144,6 +144,12 @@ export default tseslint.config(
   },
   {
     linterOptions: { reportUnusedDisableDirectives: true },
-    languageOptions: { parserOptions: { projectService: true } },
+    languageOptions: {
+      parserOptions: {
+        // Benchmark suites (`bench/*.bench.ts`, run by `arki-bench`) sit outside each
+        // package's `src` tsconfig; lint them with the default project instead.
+        projectService: { allowDefaultProject: ['bench/*.ts'], defaultProject: 'tsconfig.json' },
+      },
+    },
   },
 );

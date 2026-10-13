@@ -415,6 +415,8 @@ export type PublishableManifest = {
   readonly module?: string;
   readonly types?: string;
   readonly files?: readonly string[];
+  /** Command-line entry points, kept as written. */
+  readonly bin?: string | Readonly<Record<string, string>>;
   readonly dependencies?: Readonly<Record<string, string>>;
   readonly peerDependencies?: Readonly<Record<string, string>>;
   readonly optionalDependencies?: Readonly<Record<string, string>>;

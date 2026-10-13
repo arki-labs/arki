@@ -158,6 +158,25 @@ describe('exportPublicTree', () => {
     expect(written['publishConfig']).toEqual({ access: 'public' });
   });
 
+  // A package that ships a command (`arki-bench`) is useless on npm without its `bin` map.
+  it('keeps the bin field, so a published package still installs its command', async () => {
+    writeRoot(tmp);
+    writePkg(tmp, 'assert', {
+      name: '@arki/assert',
+      version: '1.0.0',
+      type: 'module',
+      bin: { 'arki-assert': './dist/cli.js' },
+      files: ['dist'],
+    });
+    writeFixtureFile(tmp, 'packages/assert/README.md', '# @arki/assert\n');
+    writeFixtureFile(tmp, 'packages/assert/dist/cli.js', '#!/usr/bin/env node\n');
+
+    await exportPublicTree({ rootCwd: tmp, config: baseConfig });
+
+    const written = readJson(path.join(tmp, baseConfig.publicTreePath, 'packages/assert/package.json'));
+    expect(written).toMatchObject({ bin: { 'arki-assert': './dist/cli.js' } });
+  });
+
   it('produces byte-identical output on consecutive runs (determinism)', async () => {
     writeRoot(tmp);
     writePkg(tmp, 'assert', {
