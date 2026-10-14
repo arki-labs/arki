@@ -5,6 +5,8 @@
  * in FIFO order with idempotency keys. Handles 401 (auth halt),
  * 4xx (dead-letter), and 5xx / network errors (backoff + retry).
  */
+import { sleep } from '@arki/async';
+
 import type { QueueStorage } from './storage.ts';
 import type { DeadLetterStore } from './dead-letter.ts';
 import type { AnyRpcClient, QueuedMutation, QueueEvent } from './queue.ts';
@@ -40,10 +42,6 @@ function getHttpStatus(error: unknown): number | null {
     if (typeof s === 'number') return s;
   }
   return null;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,5 @@
+import { sleep } from '@arki/async';
+
 import { debugOrchestration } from '../debug';
 
 export type FlowEvent<State> =
@@ -61,10 +63,6 @@ export class FlowError extends Error {
 const DEFAULT_MAX_STEPS = 100;
 const DEFAULT_RETRY_DELAY_MS = 250;
 const DEFAULT_RETRY_BACKOFF = 2;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
 
 class FlowInterruptedError extends FlowError {}
 

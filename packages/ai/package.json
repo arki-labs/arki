@@ -68,6 +68,7 @@
     "@ai-sdk/otel": "catalog:ai",
     "@ai-sdk/react": "catalog:ai",
     "@ai-sdk/ui-utils": "catalog:ai",
+    "@arki/async": "workspace:*",
     "@arki/contracts": "workspace:*",
     "@arki/env": "workspace:*",
     "@arki/log": "workspace:*",

@@ -74,6 +74,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@arki/async": "workspace:*",
     "@arki/date": "workspace:*",
     "@tanstack/query-async-storage-persister": "catalog:tanstack/react-query",
     "@tanstack/react-db": "catalog:",
