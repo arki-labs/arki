@@ -4,17 +4,121 @@
   "version": "0.1.3",
   "type": "module",
   "exports": {
-    "./*": {
-      "types": "./dist/src/*.d.ts",
-      "import": "./src/*.ts",
-      "node": "./src/*.ts"
+    "./env": {
+      "types": "./dist/src/env.d.ts",
+      "import": "./src/env.ts",
+      "node": "./src/env.ts"
+    },
+    "./local/delete": {
+      "types": "./dist/src/local/delete.d.ts",
+      "import": "./src/local/delete.ts",
+      "node": "./src/local/delete.ts"
+    },
+    "./local/dir": {
+      "types": "./dist/src/local/dir.d.ts",
+      "import": "./src/local/dir.ts",
+      "node": "./src/local/dir.ts"
+    },
+    "./local/glob": {
+      "types": "./dist/src/local/glob.d.ts",
+      "import": "./src/local/glob.ts",
+      "node": "./src/local/glob.ts"
+    },
+    "./local/read-file": {
+      "types": "./dist/src/local/read-file.d.ts",
+      "import": "./src/local/read-file.ts",
+      "node": "./src/local/read-file.ts"
+    },
+    "./local/read-first-line": {
+      "types": "./dist/src/local/read-first-line.d.ts",
+      "import": "./src/local/read-first-line.ts",
+      "node": "./src/local/read-first-line.ts"
+    },
+    "./local/write": {
+      "types": "./dist/src/local/write.d.ts",
+      "import": "./src/local/write.ts",
+      "node": "./src/local/write.ts"
+    },
+    "./s3": {
+      "types": "./dist/src/s3.d.ts",
+      "import": "./src/s3.ts",
+      "node": "./src/s3.ts"
+    },
+    "./storage": {
+      "types": "./dist/src/storage/index.d.ts",
+      "import": "./src/storage/index.ts",
+      "node": "./src/storage/index.ts"
+    },
+    "./storage/index": {
+      "types": "./dist/src/storage/index.d.ts",
+      "import": "./src/storage/index.ts",
+      "node": "./src/storage/index.ts"
+    },
+    "./storage/local-adapter": {
+      "types": "./dist/src/storage/local-adapter.d.ts",
+      "import": "./src/storage/local-adapter.ts",
+      "node": "./src/storage/local-adapter.ts"
+    },
+    "./storage/r2": {
+      "types": "./dist/src/storage/r2.d.ts",
+      "import": "./src/storage/r2.ts",
+      "node": "./src/storage/r2.ts"
+    },
+    "./storage/s3-adapter": {
+      "types": "./dist/src/storage/s3-adapter.d.ts",
+      "import": "./src/storage/s3-adapter.ts",
+      "node": "./src/storage/s3-adapter.ts"
+    },
+    "./storage/types": {
+      "types": "./dist/src/storage/types.d.ts",
+      "import": "./src/storage/types.ts",
+      "node": "./src/storage/types.ts"
     },
     "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
-      "*": [
-        "src/*"
+      "env": [
+        "src/env.ts"
+      ],
+      "local/delete": [
+        "src/local/delete.ts"
+      ],
+      "local/dir": [
+        "src/local/dir.ts"
+      ],
+      "local/glob": [
+        "src/local/glob.ts"
+      ],
+      "local/read-file": [
+        "src/local/read-file.ts"
+      ],
+      "local/read-first-line": [
+        "src/local/read-first-line.ts"
+      ],
+      "local/write": [
+        "src/local/write.ts"
+      ],
+      "s3": [
+        "src/s3.ts"
+      ],
+      "storage": [
+        "src/storage/index.ts"
+      ],
+      "storage/index": [
+        "src/storage/index.ts"
+      ],
+      "storage/local-adapter": [
+        "src/storage/local-adapter.ts"
+      ],
+      "storage/r2": [
+        "src/storage/r2.ts"
+      ],
+      "storage/s3-adapter": [
+        "src/storage/s3-adapter.ts"
+      ],
+      "storage/types": [
+        "src/storage/types.ts"
       ]
     }
   },

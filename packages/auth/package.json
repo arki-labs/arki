@@ -35,11 +35,6 @@
       "import": "./src/workspaces/server/index.ts",
       "node": "./src/workspaces/server/index.ts"
     },
-    "./security/*": {
-      "types": "./dist/src/security/*.d.ts",
-      "import": "./src/security/*.ts",
-      "node": "./src/security/*.ts"
-    },
     "./email/schema": {
       "types": "./dist/src/email/schema.d.ts",
       "import": "./src/email/schema.ts",
@@ -50,10 +45,130 @@
       "import": "./src/tweaks-column.ts",
       "node": "./src/tweaks-column.ts"
     },
-    "./*": {
-      "types": "./dist/src/*.d.ts",
-      "import": "./src/*.ts",
-      "node": "./src/*.ts"
+    "./better-auth.config": {
+      "types": "./dist/src/better-auth.config.d.ts",
+      "import": "./src/better-auth.config.ts",
+      "node": "./src/better-auth.config.ts"
+    },
+    "./client-base-url": {
+      "types": "./dist/src/client-base-url.d.ts",
+      "import": "./src/client-base-url.ts",
+      "node": "./src/client-base-url.ts"
+    },
+    "./constants": {
+      "types": "./dist/src/constants.d.ts",
+      "import": "./src/constants.ts",
+      "node": "./src/constants.ts"
+    },
+    "./create-auth": {
+      "types": "./dist/src/create-auth.d.ts",
+      "import": "./src/create-auth.ts",
+      "node": "./src/create-auth.ts"
+    },
+    "./debug": {
+      "types": "./dist/src/debug.d.ts",
+      "import": "./src/debug.ts",
+      "node": "./src/debug.ts"
+    },
+    "./define-auth-backend": {
+      "types": "./dist/src/define-auth-backend.d.ts",
+      "import": "./src/define-auth-backend.ts",
+      "node": "./src/define-auth-backend.ts"
+    },
+    "./dot.config": {
+      "types": "./dist/src/dot.config.d.ts",
+      "import": "./src/dot.config.ts",
+      "node": "./src/dot.config.ts"
+    },
+    "./email/resendAuthProvider": {
+      "types": "./dist/src/email/resendAuthProvider.d.ts",
+      "import": "./src/email/resendAuthProvider.ts",
+      "node": "./src/email/resendAuthProvider.ts"
+    },
+    "./email/sendVerificationRequest": {
+      "types": "./dist/src/email/sendVerificationRequest.d.ts",
+      "import": "./src/email/sendVerificationRequest.ts",
+      "node": "./src/email/sendVerificationRequest.ts"
+    },
+    "./env": {
+      "types": "./dist/src/env.d.ts",
+      "import": "./src/env.ts",
+      "node": "./src/env.ts"
+    },
+    "./errors": {
+      "types": "./dist/src/errors.d.ts",
+      "import": "./src/errors.ts",
+      "node": "./src/errors.ts"
+    },
+    "./ids": {
+      "types": "./dist/src/ids.d.ts",
+      "import": "./src/ids.ts",
+      "node": "./src/ids.ts"
+    },
+    "./password": {
+      "types": "./dist/src/password.d.ts",
+      "import": "./src/password.ts",
+      "node": "./src/password.ts"
+    },
+    "./security/rate-limit": {
+      "types": "./dist/src/security/rate-limit.d.ts",
+      "import": "./src/security/rate-limit.ts",
+      "node": "./src/security/rate-limit.ts"
+    },
+    "./security/timing-attacks": {
+      "types": "./dist/src/security/timing-attacks.d.ts",
+      "import": "./src/security/timing-attacks.ts",
+      "node": "./src/security/timing-attacks.ts"
+    },
+    "./tanstack-start/e2e-handler": {
+      "types": "./dist/src/tanstack-start/e2e-handler.d.ts",
+      "import": "./src/tanstack-start/e2e-handler.ts",
+      "node": "./src/tanstack-start/e2e-handler.ts"
+    },
+    "./tanstack-start/require-auth": {
+      "types": "./dist/src/tanstack-start/require-auth.d.ts",
+      "import": "./src/tanstack-start/require-auth.ts",
+      "node": "./src/tanstack-start/require-auth.ts"
+    },
+    "./testing/playwright": {
+      "types": "./dist/src/testing/playwright.d.ts",
+      "import": "./src/testing/playwright.ts",
+      "node": "./src/testing/playwright.ts"
+    },
+    "./testing/production-boot": {
+      "types": "./dist/src/testing/production-boot.d.ts",
+      "import": "./src/testing/production-boot.ts",
+      "node": "./src/testing/production-boot.ts"
+    },
+    "./token": {
+      "types": "./dist/src/token.d.ts",
+      "import": "./src/token.ts",
+      "node": "./src/token.ts"
+    },
+    "./workspaces/server": {
+      "types": "./dist/src/workspaces/server/index.d.ts",
+      "import": "./src/workspaces/server/index.ts",
+      "node": "./src/workspaces/server/index.ts"
+    },
+    "./workspaces/server/kernel": {
+      "types": "./dist/src/workspaces/server/kernel.d.ts",
+      "import": "./src/workspaces/server/kernel.ts",
+      "node": "./src/workspaces/server/kernel.ts"
+    },
+    "./workspaces/server/plugin": {
+      "types": "./dist/src/workspaces/server/plugin.d.ts",
+      "import": "./src/workspaces/server/plugin.ts",
+      "node": "./src/workspaces/server/plugin.ts"
+    },
+    "./workspaces/server/schema": {
+      "types": "./dist/src/workspaces/server/schema.d.ts",
+      "import": "./src/workspaces/server/schema.ts",
+      "node": "./src/workspaces/server/schema.ts"
+    },
+    "./workspaces/server/types": {
+      "types": "./dist/src/workspaces/server/types.d.ts",
+      "import": "./src/workspaces/server/types.ts",
+      "node": "./src/workspaces/server/types.ts"
     },
     "./package.json": "./package.json"
   },

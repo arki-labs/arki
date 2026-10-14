@@ -2,6 +2,7 @@
   "name": "@arki/payments-native",
   "version": "0.1.0",
   "private": true,
+  "sideEffects": false,
   "type": "module",
   "exports": {
     ".": {
@@ -20,13 +21,13 @@
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
-  "peerDependencies": {
-    "react-native-purchases": ">=8"
-  },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "react-native-purchases": "catalog:"
+  },
+  "peerDependencies": {
+    "react-native-purchases": ">=8"
   }
 }

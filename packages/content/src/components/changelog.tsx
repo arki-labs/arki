@@ -1,7 +1,7 @@
 import { createParser, createSearchParamsCache, parseAsInteger } from 'nuqs/server';
 import { useTranslations } from 'use-intl';
 
-import type { LinkComponent } from '@arki/intl/types';
+import type { LinkComponent } from '@arki/intl/react';
 import { format } from '@arki/date/format';
 import { CaretLeft, CaretRight, Rss } from '@arki/icons/phosphor';
 import { Button } from '@arki/ui/button';

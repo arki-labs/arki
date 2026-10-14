@@ -10,7 +10,7 @@
  */
 import SuperJSON from 'superjson';
 
-import { registerTemporalTypes } from '@arki/date/serialize';
+import { registerTemporalTypes } from '@arki/date/orpc';
 
 export const offlineSerializer = new SuperJSON();
 registerTemporalTypes(offlineSerializer);

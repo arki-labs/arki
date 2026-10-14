@@ -1,17 +1,8 @@
 {
   "name": "@arki/ui",
   "version": "0.1.5",
+  "private": false,
   "description": "React component library for ARKI apps — Base UI primitives styled with Tailwind v4 semantic tokens: forms, overlays, navigation, data display and charts.",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/arki-labs/arki.git",
-    "directory": "packages/ui"
-  },
-  "homepage": "https://arki.dev",
-  "bugs": {
-    "url": "https://github.com/arki-labs/arki/issues"
-  },
   "keywords": [
     "arki",
     "typescript",
@@ -21,26 +12,18 @@
     "base-ui",
     "tailwind"
   ],
-  "publishConfig": {
-    "access": "public"
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
   },
-  "type": "module",
-  "private": false,
-  "files": [
-    "dist/**",
-    "!dist/**/*.spec.*",
-    "!dist/**/*.test.*",
-    "src/**",
-    "!src/**/*.test.*",
-    "!src/**/*.spec.*",
-    "!src/**/tests/**",
-    "!src/**/test/**",
-    "!src/**/__tests__/**",
-    "README.md",
-    "LICENSE",
-    "package.json"
-  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/ui"
+  },
+  "license": "MIT",
   "sideEffects": false,
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
@@ -383,22 +366,34 @@
       "browser": "./src/tooltip.tsx"
     },
     "./styles/animations.css": "./src/styles/animations.css",
-    "./*": {
-      "types": "./dist/src/*.d.ts",
-      "import": "./src/*.tsx",
-      "browser": "./src/*.tsx"
+    "./as-child": {
+      "types": "./dist/src/as-child.d.ts",
+      "import": "./src/as-child.tsx",
+      "browser": "./src/as-child.tsx"
+    },
+    "./math-input/complex-input": {
+      "types": "./dist/src/math-input/complex-input.d.ts",
+      "import": "./src/math-input/complex-input.tsx",
+      "browser": "./src/math-input/complex-input.tsx"
+    },
+    "./math-input/index": {
+      "types": "./dist/src/math-input/index.d.ts",
+      "import": "./src/math-input/index.tsx",
+      "browser": "./src/math-input/index.tsx"
+    },
+    "./slot": {
+      "types": "./dist/src/slot.d.ts",
+      "import": "./src/slot.tsx",
+      "browser": "./src/slot.tsx"
     },
     "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
-      "index": [
-        "src/index.ts"
-      ],
-      "cn": [
+      "utils": [
         "src/cn.ts"
       ],
-      "utils": [
+      "cn": [
         "src/cn.ts"
       ],
       "toast": [
@@ -479,6 +474,9 @@
       "form": [
         "src/form.tsx"
       ],
+      "glass-card": [
+        "src/glass-card.tsx"
+      ],
       "hover-card": [
         "src/hover-card.tsx"
       ],
@@ -490,6 +488,9 @@
       ],
       "input-otp": [
         "src/input-otp.tsx"
+      ],
+      "katex": [
+        "src/katex.tsx"
       ],
       "label": [
         "src/label.tsx"
@@ -590,11 +591,34 @@
       "tooltip": [
         "src/tooltip.tsx"
       ],
-      "*": [
-        "src/*"
+      "as-child": [
+        "src/as-child.tsx"
+      ],
+      "math-input/complex-input": [
+        "src/math-input/complex-input.tsx"
+      ],
+      "math-input/index": [
+        "src/math-input/index.tsx"
+      ],
+      "slot": [
+        "src/slot.tsx"
       ]
     }
   },
+  "files": [
+    "dist/**",
+    "!dist/**/*.spec.*",
+    "!dist/**/*.test.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
     "bench": "bun run build && arki-bench",
     "build": "tsc",
@@ -647,9 +671,12 @@
     "@types/react-dom": "catalog:react",
     "vitest": "catalog:"
   },
-  "module:jsx": "src",
   "peerDependencies": {
     "react": "catalog:react",
     "react-dom": "catalog:react"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "module:jsx": "src"
 }

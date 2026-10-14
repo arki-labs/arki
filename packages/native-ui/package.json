@@ -10,20 +10,180 @@
       "import": "./src/index.ts",
       "browser": "./src/index.ts"
     },
-    "./components/*": {
-      "types": "./dist/src/components/*.d.ts",
-      "import": "./src/components/*.tsx",
-      "browser": "./src/components/*.tsx"
+    "./components/accordion": {
+      "types": "./dist/src/components/accordion.d.ts",
+      "import": "./src/components/accordion.tsx",
+      "browser": "./src/components/accordion.tsx"
     },
-    "./primitives/*": {
-      "types": "./dist/src/primitives/*/index.d.ts",
-      "import": "./src/primitives/*/index.tsx",
-      "browser": "./src/primitives/*/index.tsx"
+    "./components/alert": {
+      "types": "./dist/src/components/alert.d.ts",
+      "import": "./src/components/alert.tsx",
+      "browser": "./src/components/alert.tsx"
     },
-    "./lib/*": {
-      "types": "./dist/src/lib/*.d.ts",
-      "import": "./src/lib/*.ts",
-      "browser": "./src/lib/*.ts"
+    "./components/alert-dialog": {
+      "types": "./dist/src/components/alert-dialog.d.ts",
+      "import": "./src/components/alert-dialog.tsx",
+      "browser": "./src/components/alert-dialog.tsx"
+    },
+    "./components/aspect-ratio": {
+      "types": "./dist/src/components/aspect-ratio.d.ts",
+      "import": "./src/components/aspect-ratio.tsx",
+      "browser": "./src/components/aspect-ratio.tsx"
+    },
+    "./components/avatar": {
+      "types": "./dist/src/components/avatar.d.ts",
+      "import": "./src/components/avatar.tsx",
+      "browser": "./src/components/avatar.tsx"
+    },
+    "./components/badge": {
+      "types": "./dist/src/components/badge.d.ts",
+      "import": "./src/components/badge.tsx",
+      "browser": "./src/components/badge.tsx"
+    },
+    "./components/button": {
+      "types": "./dist/src/components/button.d.ts",
+      "import": "./src/components/button.tsx",
+      "browser": "./src/components/button.tsx"
+    },
+    "./components/card": {
+      "types": "./dist/src/components/card.d.ts",
+      "import": "./src/components/card.tsx",
+      "browser": "./src/components/card.tsx"
+    },
+    "./components/checkbox": {
+      "types": "./dist/src/components/checkbox.d.ts",
+      "import": "./src/components/checkbox.tsx",
+      "browser": "./src/components/checkbox.tsx"
+    },
+    "./components/collapsible": {
+      "types": "./dist/src/components/collapsible.d.ts",
+      "import": "./src/components/collapsible.tsx",
+      "browser": "./src/components/collapsible.tsx"
+    },
+    "./components/context-menu": {
+      "types": "./dist/src/components/context-menu.d.ts",
+      "import": "./src/components/context-menu.tsx",
+      "browser": "./src/components/context-menu.tsx"
+    },
+    "./components/dialog": {
+      "types": "./dist/src/components/dialog.d.ts",
+      "import": "./src/components/dialog.tsx",
+      "browser": "./src/components/dialog.tsx"
+    },
+    "./components/dropdown-menu": {
+      "types": "./dist/src/components/dropdown-menu.d.ts",
+      "import": "./src/components/dropdown-menu.tsx",
+      "browser": "./src/components/dropdown-menu.tsx"
+    },
+    "./components/hover-card": {
+      "types": "./dist/src/components/hover-card.d.ts",
+      "import": "./src/components/hover-card.tsx",
+      "browser": "./src/components/hover-card.tsx"
+    },
+    "./components/icon": {
+      "types": "./dist/src/components/icon.d.ts",
+      "import": "./src/components/icon.tsx",
+      "browser": "./src/components/icon.tsx"
+    },
+    "./components/input": {
+      "types": "./dist/src/components/input.d.ts",
+      "import": "./src/components/input.tsx",
+      "browser": "./src/components/input.tsx"
+    },
+    "./components/label": {
+      "types": "./dist/src/components/label.d.ts",
+      "import": "./src/components/label.tsx",
+      "browser": "./src/components/label.tsx"
+    },
+    "./components/menubar": {
+      "types": "./dist/src/components/menubar.d.ts",
+      "import": "./src/components/menubar.tsx",
+      "browser": "./src/components/menubar.tsx"
+    },
+    "./components/native-only-animated-view": {
+      "types": "./dist/src/components/native-only-animated-view.d.ts",
+      "import": "./src/components/native-only-animated-view.tsx",
+      "browser": "./src/components/native-only-animated-view.tsx"
+    },
+    "./components/popover": {
+      "types": "./dist/src/components/popover.d.ts",
+      "import": "./src/components/popover.tsx",
+      "browser": "./src/components/popover.tsx"
+    },
+    "./components/progress": {
+      "types": "./dist/src/components/progress.d.ts",
+      "import": "./src/components/progress.tsx",
+      "browser": "./src/components/progress.tsx"
+    },
+    "./components/radio-group": {
+      "types": "./dist/src/components/radio-group.d.ts",
+      "import": "./src/components/radio-group.tsx",
+      "browser": "./src/components/radio-group.tsx"
+    },
+    "./components/select": {
+      "types": "./dist/src/components/select.d.ts",
+      "import": "./src/components/select.tsx",
+      "browser": "./src/components/select.tsx"
+    },
+    "./components/separator": {
+      "types": "./dist/src/components/separator.d.ts",
+      "import": "./src/components/separator.tsx",
+      "browser": "./src/components/separator.tsx"
+    },
+    "./components/skeleton": {
+      "types": "./dist/src/components/skeleton.d.ts",
+      "import": "./src/components/skeleton.tsx",
+      "browser": "./src/components/skeleton.tsx"
+    },
+    "./components/switch": {
+      "types": "./dist/src/components/switch.d.ts",
+      "import": "./src/components/switch.tsx",
+      "browser": "./src/components/switch.tsx"
+    },
+    "./components/tabs": {
+      "types": "./dist/src/components/tabs.d.ts",
+      "import": "./src/components/tabs.tsx",
+      "browser": "./src/components/tabs.tsx"
+    },
+    "./components/text": {
+      "types": "./dist/src/components/text.d.ts",
+      "import": "./src/components/text.tsx",
+      "browser": "./src/components/text.tsx"
+    },
+    "./components/textarea": {
+      "types": "./dist/src/components/textarea.d.ts",
+      "import": "./src/components/textarea.tsx",
+      "browser": "./src/components/textarea.tsx"
+    },
+    "./components/toggle": {
+      "types": "./dist/src/components/toggle.d.ts",
+      "import": "./src/components/toggle.tsx",
+      "browser": "./src/components/toggle.tsx"
+    },
+    "./components/toggle-group": {
+      "types": "./dist/src/components/toggle-group.d.ts",
+      "import": "./src/components/toggle-group.tsx",
+      "browser": "./src/components/toggle-group.tsx"
+    },
+    "./components/tooltip": {
+      "types": "./dist/src/components/tooltip.d.ts",
+      "import": "./src/components/tooltip.tsx",
+      "browser": "./src/components/tooltip.tsx"
+    },
+    "./lib/cn": {
+      "types": "./dist/src/lib/cn.d.ts",
+      "import": "./src/lib/cn.ts",
+      "browser": "./src/lib/cn.ts"
+    },
+    "./lib/colors": {
+      "types": "./dist/src/lib/colors.d.ts",
+      "import": "./src/lib/colors.ts",
+      "browser": "./src/lib/colors.ts"
+    },
+    "./lib/utils": {
+      "types": "./dist/src/lib/utils.d.ts",
+      "import": "./src/lib/utils.ts",
+      "browser": "./src/lib/utils.ts"
     },
     "./package.json": "./package.json"
   },

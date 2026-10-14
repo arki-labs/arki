@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { checkLibrary } from './library-check';
+import { checkAll, checkLibrary } from './library-check';
 
 function packageDir(folder: string, manifest: object, turbo: object | null): string {
   const dir = path.join(mkdtempSync(path.join(tmpdir(), 'arki-library-check-')), folder);
@@ -42,9 +42,72 @@ describe('checkLibrary', () => {
     expect(result.warnings).toHaveLength(2);
   });
 
+  it('does not ask a CSS export for types, because a stylesheet has no typings', () => {
+    const manifest = {
+      ...good,
+      sideEffects: ['**/*.css'],
+      exports: { ...good.exports, './styles.css': './src/styles.css', './theme.css': { default: './src/theme.css' } },
+    };
+    expect(checkLibrary(packageDir('demo', manifest, { tags: ['web'] }))).toEqual({ errors: [], warnings: [] });
+  });
+
+  it('still asks a code export without a "types" even when a CSS export sits next to it', () => {
+    const manifest = { ...good, exports: { './x': { import: './dist/x.js' }, './a.css': './src/a.css' } };
+    expect(checkLibrary(packageDir('demo', manifest, { tags: ['web'] })).errors).toEqual([
+      'export "./x" has no "types"',
+    ]);
+  });
+
+  it('accepts an exact sideEffects list but warns when it is missing', () => {
+    const listed = { ...good, sideEffects: ['./dist/register.js'] };
+    expect(checkLibrary(packageDir('demo', listed, { tags: ['web'] })).warnings).toEqual([]);
+    const missing = { ...good, sideEffects: undefined };
+    expect(checkLibrary(packageDir('demo', missing, { tags: ['web'] })).warnings).toHaveLength(1);
+  });
+
   it('fails when the folder name differs from the package name, because the public mirror is named after the package', () => {
     expect(checkLibrary(packageDir('other', good, { tags: ['web'] })).errors).toEqual([
       'folder "other" should be "demo" (folder = name)',
     ]);
+  });
+});
+
+describe('checkAll', () => {
+  function repo(): string {
+    const root = mkdtempSync(path.join(tmpdir(), 'arki-library-check-all-'));
+    for (const [group, folder, manifest, turbo] of [
+      ['packages', 'demo', good, { tags: ['web'] }],
+      [
+        'packages',
+        'broken',
+        { ...good, name: '@arki/broken', exports: { '.': { import: './dist/i.js' } } },
+        { tags: ['web'] },
+      ],
+      ['tooling', 'cfg', { name: '@arki/cfg', exports: { '.': './x.js' } }, { tags: ['tooling'] }],
+    ] as const) {
+      const dir = path.join(root, group, folder);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify(manifest));
+      writeFileSync(path.join(dir, 'turbo.json'), JSON.stringify(turbo));
+    }
+    return root;
+  }
+
+  it('walks packages and tooling and reports each error with its package', () => {
+    const result = checkAll(repo(), []);
+    expect(result.errors).toEqual([{ package: '@arki/broken', error: 'export "." has no "types"' }]);
+  });
+
+  it('lets a baselined error pass', () => {
+    const entry = { package: '@arki/broken', error: 'export "." has no "types"', reason: 'being rebuilt' };
+    const result = checkAll(repo(), [entry]);
+    expect(result.errors).toEqual([]);
+    expect(result.baselined).toBe(1);
+    expect(result.stale).toEqual([]);
+  });
+
+  it('flags a baseline entry that no longer matches an error, so the file cannot rot', () => {
+    const entry = { package: '@arki/demo', error: 'export "." has no "types"', reason: 'fixed long ago' };
+    expect(checkAll(repo(), [entry]).stale).toEqual([entry]);
   });
 });

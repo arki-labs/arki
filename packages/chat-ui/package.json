@@ -86,17 +86,18 @@
       "browser": "./src/types.ts"
     },
     "./styles/chat.css": "./src/styles/chat.css",
-    "./*": {
-      "types": "./dist/src/*.d.ts",
-      "import": "./src/*.tsx",
-      "browser": "./src/*.tsx"
-    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
     "*": {
       "thread": [
         "src/thread.tsx"
+      ],
+      "agent-panel": [
+        "src/agent-panel.tsx"
+      ],
+      "runtime-conversation": [
+        "src/runtime-conversation.tsx"
       ],
       "message": [
         "src/message.tsx"
@@ -136,9 +137,6 @@
       ],
       "types": [
         "src/types.ts"
-      ],
-      "*": [
-        "src/*"
       ]
     }
   },

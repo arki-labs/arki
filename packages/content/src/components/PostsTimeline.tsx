@@ -1,7 +1,7 @@
 import { createParser, createSearchParamsCache, parseAsInteger } from 'nuqs/server';
 import { useTranslations } from 'use-intl';
 
-import type { LinkComponent } from '@arki/intl/types';
+import type { LinkComponent } from '@arki/intl/react';
 import { Rss } from '@arki/icons/phosphor';
 import { Button } from '@arki/ui/button';
 import { Pagination, PaginationContent, PaginationLink } from '@arki/ui/pagination';

@@ -1,4 +1,4 @@
-import type { LinkComponent } from '@arki/intl/types';
+import type { LinkComponent } from '@arki/intl/react';
 import { format } from '@arki/date/format';
 
 type TimelineProps = {

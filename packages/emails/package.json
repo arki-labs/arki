@@ -52,19 +52,79 @@
       "import": "./src/providers/quota-store-kv.ts",
       "node": "./src/providers/quota-store-kv.ts"
     },
-    "./templates/*": {
-      "types": "./dist/src/templates/*.d.ts",
-      "import": "./src/templates/*.tsx",
-      "node": "./src/templates/*.tsx",
-      "browser": "./src/templates/*.tsx"
+    "./templates/arki-magic-link": {
+      "types": "./dist/src/templates/arki-magic-link.d.ts",
+      "import": "./src/templates/arki-magic-link.tsx",
+      "node": "./src/templates/arki-magic-link.tsx",
+      "browser": "./src/templates/arki-magic-link.tsx"
+    },
+    "./templates/notion-magic-link": {
+      "types": "./dist/src/templates/notion-magic-link.d.ts",
+      "import": "./src/templates/notion-magic-link.tsx",
+      "node": "./src/templates/notion-magic-link.tsx",
+      "browser": "./src/templates/notion-magic-link.tsx"
+    },
+    "./templates/plaid-verify-identity": {
+      "types": "./dist/src/templates/plaid-verify-identity.d.ts",
+      "import": "./src/templates/plaid-verify-identity.tsx",
+      "node": "./src/templates/plaid-verify-identity.tsx",
+      "browser": "./src/templates/plaid-verify-identity.tsx"
+    },
+    "./templates/stripe-welcome": {
+      "types": "./dist/src/templates/stripe-welcome.d.ts",
+      "import": "./src/templates/stripe-welcome.tsx",
+      "node": "./src/templates/stripe-welcome.tsx",
+      "browser": "./src/templates/stripe-welcome.tsx"
+    },
+    "./templates/vercel-invite-user": {
+      "types": "./dist/src/templates/vercel-invite-user.d.ts",
+      "import": "./src/templates/vercel-invite-user.tsx",
+      "node": "./src/templates/vercel-invite-user.tsx",
+      "browser": "./src/templates/vercel-invite-user.tsx"
     },
     "./package.json": "./package.json"
   },
   "types": "./dist/src/index.d.ts",
   "typesVersions": {
     "*": {
-      "*": [
-        "src/*"
+      "send": [
+        "src/send.ts"
+      ],
+      "client": [
+        "src/client/init.ts"
+      ],
+      "providers/resend": [
+        "src/providers/resend.ts"
+      ],
+      "providers/unosend": [
+        "src/providers/unosend.ts"
+      ],
+      "providers/ses": [
+        "src/providers/ses.ts"
+      ],
+      "providers/cloudflare-email-service": [
+        "src/providers/cloudflare-email-service.ts"
+      ],
+      "providers/quota-router": [
+        "src/providers/quota-router.ts"
+      ],
+      "providers/quota-store-kv": [
+        "src/providers/quota-store-kv.ts"
+      ],
+      "templates/arki-magic-link": [
+        "src/templates/arki-magic-link.tsx"
+      ],
+      "templates/notion-magic-link": [
+        "src/templates/notion-magic-link.tsx"
+      ],
+      "templates/plaid-verify-identity": [
+        "src/templates/plaid-verify-identity.tsx"
+      ],
+      "templates/stripe-welcome": [
+        "src/templates/stripe-welcome.tsx"
+      ],
+      "templates/vercel-invite-user": [
+        "src/templates/vercel-invite-user.tsx"
       ]
     }
   },
