@@ -16,7 +16,7 @@
  */
 import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { Instant } from '@arki/date';
 import type { CommandErrorCode, CommandRunner } from '@arki/journal';
@@ -127,15 +127,27 @@ async function expectRejected(
   }
 }
 
-beforeAll(async () => {
-  ({ db, client } = await openDb());
-  paymentId = createPaymentId();
+/** A payment of 100 USD. At most one refund of a payment is pending at a time, so each test gets its own. */
+let paymentCounter = 0;
+async function freshPayment(): Promise<PaymentId> {
+  paymentCounter += 1;
+  const id = createPaymentId();
   await journal.run(
     db,
     typed.core.commands.initiatePayment,
-    { paymentId, userId, customerId, providerPaymentId: 'pi_refunds', amount: usd('100') },
+    { paymentId: id, userId, customerId, providerPaymentId: `pi_refunds_${paymentCounter}`, amount: usd('100') },
     meta,
   );
+
+  return id;
+}
+
+beforeAll(async () => {
+  ({ db, client } = await openDb());
+});
+
+beforeEach(async () => {
+  paymentId = await freshPayment();
 });
 
 afterAll(async () => {
@@ -297,6 +309,49 @@ describe('a refund recorded before minor units (`RefundRequested`)', () => {
       status: 'pending',
     });
     expect(await journal.verify(db, entities.refund, refundId)).toEqual({ ok: true });
+  });
+});
+
+describe('what a payment can refund, checked inside the command', () => {
+  it('refuses a request over what earlier approved refunds left, and writes nothing', async () => {
+    const earlier = createRefundId();
+    await journal.run(db, commands.requestRefund, { refundId: earlier, ...request({ refundAmount: usd('80') }) }, meta);
+    await journal.run(db, commands.approveRefund, { refundId: earlier, approvedBy: adminId }, meta);
+
+    await expectRejected(
+      () => journal.run(db, commands.requestRefund, { ...request({ refundAmount: usd('30') }) }, meta),
+      'CONFLICT',
+      'Refund of 30.00 USD exceeds what is left of the payment',
+    );
+  });
+
+  it('lets a request through that fits what is left', async () => {
+    const earlier = createRefundId();
+    await journal.run(db, commands.requestRefund, { refundId: earlier, ...request({ refundAmount: usd('80') }) }, meta);
+    await journal.run(db, commands.approveRefund, { refundId: earlier, approvedBy: adminId }, meta);
+
+    const result = await journal.run(db, commands.requestRefund, { ...request({ refundAmount: usd('20') }) }, meta);
+
+    expect(result.events.map(event => event.type)).toEqual(['RefundRequestedV2']);
+  });
+
+  it('refuses a refund of a payment that does not exist', async () => {
+    const error = await rejectionOf(
+      journal.run(db, commands.requestRefund, { ...request(), paymentId: createPaymentId() }, meta),
+    );
+
+    expect(error).toBeInstanceOf(CommandError);
+    expect(error).toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('the database allows one pending refund per payment', async () => {
+    await journal.run(db, commands.requestRefund, { ...request({ refundAmount: usd('10') }) }, meta);
+
+    const error = await rejectionOf(
+      journal.run(db, commands.requestRefund, { ...request({ refundAmount: usd('10') }) }, meta),
+    );
+
+    expect(error).toMatchObject({ cause: { constraint: 'refunds_one_pending_per_payment_idx' } });
   });
 });
 
@@ -520,8 +575,9 @@ describe('writes(run): what RefundService calls', () => {
 
   it('runs the reject and the fail commands too', async () => {
     const writes = typed.refunds.writes(run);
-    const rejected = await seed('pending');
+    // The processing one first: a payment has one pending refund at a time
     const failed = await seed('processing');
+    const rejected = await seed('pending');
 
     expect(await writes.rejectRefund({ refundId: rejected, rejectedBy: adminId, rejectionReason: 'no' })).toMatchObject(
       { status: 'rejected' },
@@ -567,6 +623,6 @@ const legacyRefunds = schema.table('legacy_refunds', { id: refundIdFactory.prima
 /** Never called: `tsc` checks it. An app that forgot the schema change must fail to compile, not fail at run time. */
 function rejectsATableWithoutVersion() {
   // @ts-expect-error -- a table without the `version` column cannot hold a journal entity
-  createRefundsJournal(plain.j, { refunds: legacyRefunds });
+  createRefundsJournal(plain.j, { refunds: legacyRefunds, payments: core.payments });
 }
 void rejectsATableWithoutVersion;

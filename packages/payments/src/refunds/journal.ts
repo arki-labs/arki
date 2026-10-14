@@ -26,12 +26,15 @@
 import type { Instant } from '@arki/date';
 import type { CommandRunner, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import { userIdSchema } from '../core/user-id.js';
+import { and, eq, inArray, sql } from 'drizzle-orm';
+
 import { z } from '@arki/contracts';
 import { fromDate } from '@arki/date';
 import { CommandError } from '@arki/journal';
 import { Money } from '@arki/money';
 import { anyMoneySchema } from '@arki/money/zod';
 
+import type { CoreTables } from '../core/tables.js';
 import type { RefundsTables } from './tables.js';
 import type { Refund } from './types.js';
 import { writtenRow } from '../core/journal/support.js';
@@ -118,8 +121,9 @@ function legacyMinor(amount: number, currency: string): number {
 
 export function createRefundsJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
   j: JournalDefinitions<Meta, Tx, AppDb>,
-  tables: Pick<RefundsTables, 'refunds'>,
+  tables: Pick<RefundsTables, 'refunds'> & Pick<CoreTables, 'payments'>,
 ) {
+  const { payments } = tables;
   const refundRequest = {
     paymentId: paymentIdSchema,
     reason: reasonSchema,
@@ -229,8 +233,39 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
       updatedAt: fromDate(e.recordedAt),
     }));
 
-  const requestRefund = j.command('requestRefund', requestRefundInputSchema, (input, { write }) => {
+  /**
+   * The payment row is locked for the rest of the transaction, so two requests for one payment take
+   * turns: the second counts the first. Without the lock both could read the same total and together
+   * refund more than was paid. A refund that is pending, approved, processing or completed holds money.
+   */
+  const requestRefund = j.command('requestRefund', requestRefundInputSchema, async (input, { tx, write }) => {
     const refundId = input.refundId ?? createRefundId();
+
+    const [payment] = await tx
+      .select({ amountMinor: payments.amountMinor, currency: payments.currency })
+      .from(payments)
+      .where(eq(payments.id, input.paymentId))
+      .for('update');
+    if (!payment) {
+      throw new CommandError('NOT_FOUND', `Payment ${input.paymentId} not found`);
+    }
+
+    const refundMinor = toMinorColumn(input.refundAmount);
+    let exceedsPayment = false;
+    if (input.refundAmount.currency.code === payment.currency.toUpperCase()) {
+      const [held] = await tx
+        .select({ total: sql<string | null>`SUM(${tables.refunds.refundAmountMinor})` })
+        .from(tables.refunds)
+        .where(
+          and(
+            eq(tables.refunds.paymentId, input.paymentId),
+            eq(tables.refunds.currency, payment.currency.toUpperCase()),
+            inArray(tables.refunds.status, ['pending', 'approved', 'processing', 'completed']),
+          ),
+        );
+
+      exceedsPayment = Number(held?.total ?? 0) + refundMinor > payment.amountMinor;
+    }
 
     return write(refund, refundId, row => {
       if (row) {
@@ -253,6 +288,13 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
 
       if (!input.refundAmount.isPositive()) {
         throw new CommandError('BAD_REQUEST', 'Refund amount must be positive');
+      }
+
+      if (exceedsPayment) {
+        throw new CommandError(
+          'CONFLICT',
+          `Refund of ${input.refundAmount.toString()} exceeds what is left of the payment`,
+        );
       }
 
       return [

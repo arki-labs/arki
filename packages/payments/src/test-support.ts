@@ -52,7 +52,7 @@ const plainDefinitions = initJournal({ meta: metaSchema });
 export const plain = {
   j: plainDefinitions,
   core: createCoreJournal(plainDefinitions, core),
-  refunds: createRefundsJournal(plainDefinitions, refundsTables),
+  refunds: createRefundsJournal(plainDefinitions, { refunds: refundsTables.refunds, payments: core.payments }),
   journal: plainDefinitions.compose({ tables: journalTablesInSchema }),
 };
 
@@ -64,7 +64,7 @@ const typedDefinitions = initJournal.tx<AppTx>().db<AppDb>().create({ meta: meta
 export const typed = {
   j: typedDefinitions,
   core: createCoreJournal(typedDefinitions, core),
-  refunds: createRefundsJournal(typedDefinitions, refundsTables),
+  refunds: createRefundsJournal(typedDefinitions, { refunds: refundsTables.refunds, payments: core.payments }),
   journal: typedDefinitions.compose({ tables: journalTablesInSchema }),
 };
 

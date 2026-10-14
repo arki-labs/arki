@@ -17,6 +17,7 @@ import type { RefundsTables } from './tables.js';
 import type { Refund, RefundApprovalData, RefundRejectionData, RefundRequestData } from './types.js';
 import { nonNegativeMoneySchema, paymentAmount } from '../core/money.js';
 import { createRefundRepository, refundAmountOf } from './repository.js';
+import { pendingRefundIndexName } from './tables.js';
 import { RefundError } from './types.js';
 
 /**
@@ -58,6 +59,18 @@ export type RefundServiceConfig = {
   /** Small refunds approved without a person. Defaults to `DEFAULT_REFUND_AUTO_APPROVE_LIMITS`. */
   autoApproveLimits?: RefundAutoApproveLimits;
 };
+
+/** Whether the error is the database refusing a second pending refund for a payment, at any depth of `cause`. */
+function isPendingRefundConflict(error: unknown): boolean {
+  for (let current = error, depth = 0; current instanceof Error && depth < 5; depth += 1) {
+    if ('constraint' in current && current.constraint === pendingRefundIndexName) {
+      return true;
+    }
+    current = current.cause;
+  }
+
+  return false;
+}
 
 /** A refund in these statuses has been, or will be, paid back, so it counts against what the payment can still refund. */
 function refundHoldsMoney(status: Refund['status']): boolean {
@@ -103,16 +116,29 @@ export class RefundService {
   async requestRefund(data: RefundRequestData): Promise<Refund> {
     await this.validateRefundEligibility(data.paymentId, data.amount);
 
-    const refund = await this.writes.requestRefund({
-      paymentId: data.paymentId,
-      originalAmount: data.amount.toJSON(),
-      refundAmount: data.amount.toJSON(),
-      reason: data.reason,
-      requestedBy: data.requestedBy,
-      customerNote: data.customerNote,
-      internalNotes: data.internalNotes,
-      metadata: JSON.stringify({}),
-    });
+    const refund = await this.writes
+      .requestRefund({
+        paymentId: data.paymentId,
+        originalAmount: data.amount.toJSON(),
+        refundAmount: data.amount.toJSON(),
+        reason: data.reason,
+        requestedBy: data.requestedBy,
+        customerNote: data.customerNote,
+        internalNotes: data.internalNotes,
+        metadata: JSON.stringify({}),
+      })
+      .catch((error: unknown) => {
+        // Two requests can pass the check above together; the database lets only one stay pending
+        if (isPendingRefundConflict(error)) {
+          throw new RefundError(
+            `Payment ${data.paymentId} already has a refund waiting for a decision`,
+            'DUPLICATE_PENDING_REFUND',
+            error,
+          );
+        }
+
+        throw error;
+      });
 
     if (await this.shouldAutoApprove(refund)) {
       return this.approveRefund({ refundId: refund.id, approvedBy: this.systemUserId as UserId });

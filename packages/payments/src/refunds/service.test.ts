@@ -11,6 +11,7 @@
  * and that a request the service turns down writes nothing.
  */
 import type { PGlite } from '@electric-sql/pglite';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { Money } from '@arki/money';
@@ -18,6 +19,7 @@ import { instant, isInstant } from '@arki/date';
 import { money } from '@arki/money';
 
 import type { CoreWrites } from '../core/journal.js';
+import type { PaymentId } from '../core/types.js';
 import type { AppDb } from '../test-support.js';
 import type { RefundWrites } from './journal.js';
 import type { RefundReason } from './primitives.js';
@@ -25,7 +27,17 @@ import type { RefundAutoApproveLimits } from './service.js';
 import { toMinorColumn } from '../core/money.js';
 import { createPaymentId } from '../core/primitives.js';
 import { coreReads, refundReads, refundRow, runnerOn, seedPayment } from '../service-test-support.js';
-import { adminId, countEvents, customerId, eventTypesOf, openDb, rejectionOf, typed, userId } from '../test-support.js';
+import {
+  adminId,
+  countEvents,
+  customerId,
+  eventTypesOf,
+  openDb,
+  refundsTables,
+  rejectionOf,
+  typed,
+  userId,
+} from '../test-support.js';
 import { createRefundId } from './primitives.js';
 import { RefundService } from './service.js';
 
@@ -512,5 +524,54 @@ describe('what a payment can still refund', () => {
     });
 
     expect(second).toMatchObject({ status: 'pending' });
+  });
+});
+
+describe('two requests at once for one payment', () => {
+  const request = (paymentId: PaymentId, amount: Money) => ({
+    paymentId,
+    amount,
+    reason: 'customer_request' as const,
+    requestedBy: userId,
+  });
+
+  /** Only a database-level rule can stop this: the service's own reads see no refund yet. */
+  it('the database refuses the second pending refund even when the service check sees nothing', async () => {
+    const blind = new RefundService(
+      { ...refundReads(db), findByPaymentId: () => Promise.resolve([]) },
+      writes,
+      providerThatRefunds,
+      coreReads(db),
+      { systemUserId: adminId },
+    );
+    const payment = await seedPayment(coreWrites, null, '100');
+    await blind.requestRefund(request(payment.id, money(40, 'USD')));
+
+    const error = await rejectionOf(blind.requestRefund(request(payment.id, money(20, 'USD'))));
+
+    expect(error).toMatchObject({ name: 'RefundError', code: 'DUPLICATE_PENDING_REFUND' });
+    const rows = await db.select().from(refundsTables.refunds).where(eq(refundsTables.refunds.paymentId, payment.id));
+    expect(rows).toHaveLength(1);
+  });
+
+  /**
+   * PGlite has one connection, so its transactions run one after the other: this proves that exactly one
+   * of two simultaneous requests wins and the other gets the typed error, not that two connections wait
+   * on the payment's row lock. The lock itself needs a real Postgres.
+   */
+  it('of two simultaneous requests exactly one is stored', async () => {
+    const service = serviceWith(providerThatRefunds);
+    const payment = await seedPayment(coreWrites, null, '100');
+
+    const results = await Promise.allSettled([
+      service.requestRefund(request(payment.id, money(40, 'USD'))),
+      service.requestRefund(request(payment.id, money(40, 'USD'))),
+    ]);
+
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    const failed = results.find(result => result.status === 'rejected');
+    expect(failed?.reason).toMatchObject({ code: 'DUPLICATE_PENDING_REFUND' });
+    const rows = await db.select().from(refundsTables.refunds).where(eq(refundsTables.refunds.paymentId, payment.id));
+    expect(rows).toHaveLength(1);
   });
 });
