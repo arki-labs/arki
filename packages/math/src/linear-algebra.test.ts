@@ -6,12 +6,16 @@ import {
   DivisionByZeroError,
   InvalidArgumentError,
   MathError,
+  NotPositiveDefiniteError,
   NumericRangeError,
   ResourceLimitError,
   SingularMatrixError,
 } from './errors.js';
 import {
   angleBetween,
+  choleskyDecompose,
+  choleskySolve,
+  conditionNumber,
   cross,
   determinant,
   dot,
@@ -19,6 +23,7 @@ import {
   eigenvalues,
   identity,
   inverse,
+  leastSquares,
   luDecompose,
   matrix,
   minus,
@@ -27,7 +32,11 @@ import {
   normalize,
   plus,
   projection,
+  pseudoInverse,
+  qrDecompose,
   rank,
+  singularValueDecompose,
+  singularValues,
   solve,
   symmetricEigenDecompose,
   symmetricEigenvalues,
@@ -919,5 +928,592 @@ describe('eigen solvers: validation and hygiene', () => {
     eigenDecompose(b);
     eigenvalues(b);
     expect(b).toEqual(copy);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// QR, Cholesky, SVD, least squares
+
+const EPSILON = Number.EPSILON;
+
+/** Seeded m×n matrix with entries uniform in [-1, 1). */
+function randomRectangular(seed: number, m: number, n: number): number[][] {
+  const random = createRandom(seed);
+  return Array.from({ length: m }, () => Array.from({ length: n }, () => random.float(-1, 1)));
+}
+
+/** Seeded symmetric positive definite n×n matrix BᵀB + I. */
+function randomSpd(seed: number, n: number): number[][] {
+  const b = randomMatrix(seed, n);
+  return plus(multiply(transpose(b), b), identity(n));
+}
+
+/** ‖QᵀQ − I‖_F: how far the columns of `q` are from orthonormal. */
+function orthogonalityError(q: Matrix): number {
+  const columns = q[0]!.length;
+  return frobenius(minus(multiply(transpose(q), q), identity(columns)));
+}
+
+/** Σₖ σₖ · left[k] · right[k]ᵀ. */
+function fromSvd(values: Vector, left: Matrix, right: Matrix): number[][] {
+  return multiply(
+    transpose(left).map(row => row.map((x, k) => x * values[k]!)),
+    right,
+  );
+}
+
+/** Wilkinson's W₂₁⁺: tridiagonal, diagonal |10 − i|, off-diagonal 1. Its two largest eigenvalues agree to 14 digits. */
+const WILKINSON_21: Matrix = Array.from({ length: 21 }, (_, i) =>
+  Array.from({ length: 21 }, (_, j) => (i === j ? Math.abs(10 - i) : Math.abs(i - j) === 1 ? 1 : 0)),
+);
+
+/** Kahan's matrix (n = 100, θ = 1.2): upper triangular, smallest pivot ≈ 9e-4, yet σ_min ≈ 9e-17. */
+function kahan(n: number): number[][] {
+  const s = Math.sin(1.2);
+  const c = Math.cos(1.2);
+  return Array.from({ length: n }, (_, i) =>
+    Array.from({ length: n }, (_, j) => (j < i ? 0 : s ** i * (j === i ? 1 : -c))),
+  );
+}
+
+const SHAPES: readonly (readonly [number, number])[] = [
+  [1, 1],
+  [6, 6],
+  [12, 5],
+  [5, 12],
+  [40, 40],
+  [100, 10],
+];
+
+describe('qrDecompose', () => {
+  it('matches the textbook Householder example exactly (unique when R has a positive diagonal)', () => {
+    // Wikipedia, "QR decomposition", Householder example: A = Q·R with R = [[14, 21, −14], [0, 175, −70], [0, 0, 35]].
+    const a = [
+      [12, -51, 4],
+      [6, 167, -68],
+      [-4, 24, -41],
+    ];
+    const { orthogonal, upper, permutation, rank: r } = qrDecompose(a, { pivoting: false });
+    expect(permutation).toEqual([0, 1, 2]);
+    expect(r).toBe(3);
+    expectMatrixClose(
+      upper,
+      [
+        [14, 21, -14],
+        [0, 175, -70],
+        [0, 0, 35],
+      ],
+      1e-12,
+    );
+    expectMatrixClose(
+      orthogonal,
+      [
+        [6 / 7, -69 / 175, -58 / 175],
+        [3 / 7, 158 / 175, 6 / 175],
+        [-2 / 7, 6 / 35, -33 / 35],
+      ],
+      1e-15,
+    );
+  });
+
+  it('is backward stable with orthonormal Q, for tall, wide and square matrices, pivoted or not', () => {
+    // The Householder guarantee (Higham, Accuracy and Stability, Thm 19.4): ‖A·P − Q·R‖ ≤ c·n·ε·‖A‖.
+    for (const [index, [m, n]] of SHAPES.entries()) {
+      const a = randomRectangular(100 + index, m, n);
+      for (const pivoting of [true, false]) {
+        const { orthogonal, upper, permutation } = qrDecompose(a, { pivoting });
+        const k = Math.min(m, n);
+        expect(orthogonal).toHaveLength(m);
+        expect(orthogonal[0]).toHaveLength(k);
+        expect(upper).toHaveLength(k);
+        expect(upper[0]).toHaveLength(n);
+        const permuted = a.map(row => permutation.map(j => row[j]!));
+        const bound = 4 * Math.max(m, n) * EPSILON;
+        expect(frobenius(minus(permuted, multiply(orthogonal, upper)))).toBeLessThanOrEqual(bound * frobenius(a));
+        expect(orthogonalityError(orthogonal)).toBeLessThanOrEqual(bound);
+        for (const [i, row] of upper.entries()) {
+          for (let j = 0; j < i; j++) expect(row[j]).toBe(0);
+          expect(row[i]).toBeGreaterThanOrEqual(0);
+        }
+        if (pivoting) {
+          // Pivoting makes |r_kk| non-increasing: that is what makes the rank readable from R.
+          for (let i = 1; i < k; i++) expect(upper[i]![i]!).toBeLessThanOrEqual(upper[i - 1]![i - 1]! * (1 + 1e-12));
+        }
+      }
+    }
+  });
+
+  it('reveals the numerical rank with pivoting, and honours an explicit tolerance', () => {
+    expect(qrDecompose(SINGULAR).rank).toBe(2);
+    expect(qrDecompose(STRANG).rank).toBe(3);
+    expect(qrDecompose([[0, 0, 0]]).rank).toBe(0);
+    // Columns 0 and 2 are equal and column 3 = column 0 + column 1: rank 2 of 4.
+    const dependent = [
+      [1, 2, 1, 3],
+      [0, 1, 0, 1],
+      [2, -1, 2, 1],
+      [1, 1, 1, 2],
+      [3, 0, 3, 3],
+    ];
+    expect(qrDecompose(dependent).rank).toBe(2);
+    expect(rank(dependent)).toBe(2);
+    const nearlyDependent = [
+      [1, 1],
+      [1, 1 + 1e-10],
+    ];
+    expect(qrDecompose(nearlyDependent).rank).toBe(2);
+    expect(qrDecompose(nearlyDependent, { tolerance: 1e-8 }).rank).toBe(1);
+  });
+
+  it('scales away from overflow and underflow', () => {
+    for (const factor of [1e300, 1e-300]) {
+      const a = randomRectangular(7, 6, 4).map(row => row.map(x => x * factor));
+      const { orthogonal, upper, permutation } = qrDecompose(a);
+      expect(orthogonalityError(orthogonal)).toBeLessThan(1e-14);
+      const permuted = a.map(row => permutation.map(j => row[j]! / factor));
+      const product = multiply(orthogonal, upper).map(row => row.map(x => x / factor));
+      expect(frobenius(minus(permuted, product))).toBeLessThan(1e-14);
+    }
+  });
+});
+
+describe('choleskyDecompose / choleskySolve', () => {
+  // Wikipedia, "Cholesky decomposition", example: an integer matrix with an integer factor.
+  const SPD = [
+    [4, 12, -16],
+    [12, 37, -43],
+    [-16, -43, 98],
+  ];
+
+  it('factors the textbook example exactly', () => {
+    expect(choleskyDecompose(SPD).lower).toEqual([
+      [2, 0, 0],
+      [6, 1, 0],
+      [-8, 5, 3],
+    ]);
+  });
+
+  it('reconstructs A = L·Lᵀ to working precision', () => {
+    for (const n of [1, 5, 30]) {
+      const a = randomSpd(n, n);
+      const { lower } = choleskyDecompose(a);
+      for (const [i, row] of lower.entries()) {
+        for (let j = i + 1; j < n; j++) expect(row[j]).toBe(0);
+        expect(row[i]).toBeGreaterThan(0);
+      }
+      expect(frobenius(minus(a, multiply(lower, transpose(lower))))).toBeLessThanOrEqual(
+        4 * n * EPSILON * frobenius(a),
+      );
+    }
+  });
+
+  it('throws NotPositiveDefiniteError for symmetric matrices that are not positive definite', () => {
+    // Eigenvalues 3 and −1: symmetric but indefinite. Cholesky is the standard definiteness test.
+    const indefinite = [
+      [1, 2],
+      [2, 1],
+    ];
+    expect(() => choleskyDecompose(indefinite)).toThrow(NotPositiveDefiniteError);
+    expect(() => choleskyDecompose([[-1]])).toThrow(NotPositiveDefiniteError);
+    expect(() => choleskyDecompose([[0]])).toThrow(NotPositiveDefiniteError);
+    expect(() => choleskySolve(indefinite, [1, 1])).toThrow(NotPositiveDefiniteError);
+    expect(() => choleskyDecompose(indefinite)).toThrow(MathError);
+  });
+
+  it('rejects a non-symmetric matrix instead of reading one triangle', () => {
+    const lopsided = [
+      [4, 1],
+      [3, 4],
+    ];
+    expect(() => choleskyDecompose(lopsided)).toThrow(InvalidArgumentError);
+    expect(() => choleskySolve(lopsided, [1, 1])).toThrow(InvalidArgumentError);
+    // Within a loose tolerance it factors (A + Aᵀ)/2 = [[4, 2], [2, 4]]: l₁₀ = 2/2.
+    expect(choleskyDecompose(lopsided, { tolerance: 2 }).lower[1]![0]).toBe(1);
+  });
+
+  it('solves SPD systems like solve does, for vector and matrix right-hand sides', () => {
+    const a = randomSpd(9, 12);
+    const b = randomRectangular(10, 12, 3);
+    expectMatrixClose(choleskySolve(a, b), solve(a, b), 1e-12);
+    const v = b.map(row => row[0]!);
+    expectClose(choleskySolve(a, v), solve(a, v), 1e-12);
+    expectClose(choleskySolve(SPD, multiply(SPD, [1, -2, 3])), [1, -2, 3], 1e-12);
+  });
+
+  it('solves an ill-conditioned Hilbert system as accurately as LU', () => {
+    // cond₂(H₈) ≈ 1.5e10: the error bound is cond·ε ≈ 3e-6 relative.
+    const h = hilbert(8);
+    const x = choleskySolve(
+      h,
+      multiply(
+        h,
+        Array.from({ length: 8 }, () => 1),
+      ),
+    );
+    for (const value of x) expect(Math.abs(value - 1)).toBeLessThan(1e-5);
+  });
+
+  it('throws SingularMatrixError for a singular positive semidefinite matrix', () => {
+    const semidefinite = [
+      [1, 1],
+      [1, 1],
+    ];
+    expect(() => choleskySolve(semidefinite, [1, 1])).toThrow(SingularMatrixError);
+    expect(() => choleskySolve([[1e-10]], [1], { tolerance: 1e-9 })).toThrow(SingularMatrixError);
+  });
+});
+
+describe('singularValues / singularValueDecompose', () => {
+  it('matches known singular values', () => {
+    // Worked example (MIT 18.06; NumPy svd gives [5, 3]): A·Aᵀ = [[17, 8], [8, 17]], eigenvalues 25 and 9.
+    expectClose(
+      singularValues([
+        [3, 2, 2],
+        [2, 3, -2],
+      ]),
+      [5, 3],
+      1e-14,
+    );
+    // Signs are absorbed into the vectors; values come out descending.
+    expect(
+      singularValues([
+        [2, 0],
+        [0, -3],
+      ]),
+    ).toEqual([3, 2]);
+    // NumPy: svd([[1,2,3],[4,5,6],[7,8,9]]) → 16.8481033526142, 1.06836951455471, ~0.
+    const values = singularValues(SINGULAR);
+    expectClose(values.slice(0, 2), [16.848_103_352_614_2, 1.068_369_514_554_71], 1e-12);
+    expect(values[2]).toBeLessThan(1e-14);
+  });
+
+  it('agrees with the symmetric eigensolver on Hilbert and Wilkinson matrices', () => {
+    // For a symmetric matrix the singular values are the |eigenvalues|: two independent algorithms must agree.
+    for (const a of [hilbert(10), WILKINSON_21, randomSymmetric(3, 15)]) {
+      // Descending |λ|, by insertion (no Array#sort or #toSorted in this package's sources).
+      const fromEigen: number[] = [];
+      for (const x of symmetricEigenvalues(a)) {
+        const magnitude = Math.abs(x);
+        let at = fromEigen.length;
+        while (at > 0 && fromEigen[at - 1]! < magnitude) at--;
+        fromEigen.splice(at, 0, magnitude);
+      }
+      const values = singularValues(a);
+      const scale = values[0]!;
+      for (const [k, value] of values.entries()) {
+        expect(Math.abs(value - fromEigen[k]!)).toBeLessThanOrEqual(8 * a.length * EPSILON * scale);
+      }
+    }
+    // W₂₁⁺'s two largest eigenvalues, 10.746194182903322 and 10.746194182903393, are resolved apart.
+    const [first, second] = singularValues(WILKINSON_21);
+    expect(first! - second!).toBeGreaterThan(0);
+    expect(first! - second!).toBeLessThan(1e-12);
+    expect(first).toBeCloseTo(10.746_194_182_903_39, 12);
+  });
+
+  it('reconstructs A = U·Σ·Vᵀ with orthonormal U and V, for every shape', () => {
+    for (const [index, [m, n]] of SHAPES.entries()) {
+      const a = randomRectangular(200 + index, m, n);
+      const { values, left, right } = singularValueDecompose(a);
+      const k = Math.min(m, n);
+      expect(values).toHaveLength(k);
+      expect(left).toHaveLength(k);
+      expect(left[0]).toHaveLength(m);
+      expect(right).toHaveLength(k);
+      expect(right[0]).toHaveLength(n);
+      for (let i = 1; i < k; i++) expect(values[i]!).toBeLessThanOrEqual(values[i - 1]!);
+      expect(values[k - 1]).toBeGreaterThanOrEqual(0);
+      const bound = 8 * Math.max(m, n) * EPSILON;
+      expect(frobenius(minus(a, fromSvd(values, left, right)))).toBeLessThanOrEqual(bound * frobenius(a));
+      expect(orthogonalityError(transpose(left))).toBeLessThanOrEqual(bound);
+      expect(orthogonalityError(transpose(right))).toBeLessThanOrEqual(bound);
+      expectClose(singularValues(a), values, 0);
+    }
+  });
+
+  it('fixes each sign pair so the largest entry of left[k] is positive', () => {
+    const { left } = singularValueDecompose(randomRectangular(4, 7, 5));
+    for (const vector of left) {
+      const largest = vector.reduce((best, x) => (Math.abs(x) > Math.abs(best) ? x : best), 0);
+      expect(largest).toBeGreaterThan(0);
+    }
+  });
+
+  it('handles zero, rank-one and badly scaled matrices', () => {
+    const zero = singularValueDecompose([
+      [0, 0, 0],
+      [0, 0, 0],
+    ]);
+    expect(zero.values).toEqual([0, 0]);
+    expect(orthogonalityError(transpose(zero.left))).toBe(0);
+    // Rank one: u·vᵀ with ‖u‖ = 3, ‖v‖ = 5 has the single non-zero singular value 15.
+    const outer = [1, 2, 2].map(x => [3, 4].map(y => x * y));
+    const values = singularValues(outer);
+    expect(values[0]).toBeCloseTo(15, 13);
+    expect(values[1]).toBeLessThan(1e-14);
+    for (const factor of [1e305, 1e-305]) {
+      expectClose(
+        singularValues([
+          [3 * factor, 2 * factor, 2 * factor],
+          [2 * factor, 3 * factor, -2 * factor],
+        ]).map(x => x / factor),
+        [5, 3],
+        1e-13,
+      );
+    }
+  });
+});
+
+describe('conditionNumber', () => {
+  it('is 1 for the identity and for any orthogonal matrix', () => {
+    expect(conditionNumber(identity(5))).toBe(1);
+    const { orthogonal } = qrDecompose(randomMatrix(8, 6));
+    expect(conditionNumber(orthogonal)).toBeCloseTo(1, 13);
+  });
+
+  it('measures how ill-conditioned a matrix is', () => {
+    expect(
+      conditionNumber([
+        [1, 0],
+        [0, 1e-10],
+      ]),
+    ).toBeCloseTo(1e10, 0);
+    // NumPy: np.linalg.cond(scipy.linalg.hilbert(5)) = 476607.25024259...
+    expect(conditionNumber(hilbert(5)) / 476_607.250_242_59).toBeCloseTo(1, 9);
+    expect(conditionNumber(hilbert(12))).toBeGreaterThan(1e15);
+  });
+
+  it('is Infinity when the smallest singular value is exactly zero', () => {
+    expect(conditionNumber([[0, 0]])).toBe(Infinity);
+    expect(
+      conditionNumber([
+        [1, 2],
+        [2, 4],
+        [0, 0],
+      ]),
+    ).toBeGreaterThan(1e15);
+  });
+});
+
+describe('leastSquares', () => {
+  it('fits a straight line to an overdetermined system', () => {
+    // Points (1, 1), (2, 2), (3, 2): least-squares line y = 2/3 + x/2.
+    const x = leastSquares(
+      [
+        [1, 1],
+        [1, 2],
+        [1, 3],
+      ],
+      [1, 2, 2],
+    );
+    // cond(A) ≈ 6.4, so a few ulps of error are the backward-stable bound.
+    expectClose(x, [2 / 3, 1 / 2], 1e-14);
+  });
+
+  it('leaves a residual orthogonal to the columns of A, and solves square systems like solve', () => {
+    const a = randomRectangular(11, 30, 6);
+    const b = randomRectangular(12, 30, 1).map(row => row[0]!);
+    const x = leastSquares(a, b);
+    const r = minus(multiply(a, x), b);
+    for (const value of multiply(transpose(a), r)) expect(Math.abs(value)).toBeLessThan(1e-13);
+    const square = randomMatrix(13, 7);
+    const v = randomRectangular(14, 7, 1).map(row => row[0]!);
+    expectClose(leastSquares(square, v), solve(square, v), 1e-12);
+    const columns = randomRectangular(15, 30, 3);
+    const solutions = leastSquares(a, columns);
+    expectClose(
+      solutions.map(row => row[1]!),
+      leastSquares(
+        a,
+        columns.map(row => row[1]!),
+      ),
+      0,
+    );
+  });
+
+  it("solves Läuchli's problem, where the normal equations are singular in float64", () => {
+    // AᵀA = [[1 + δ², 1], [1, 1 + δ²]] and δ² = 1e-16 < ε, so forming it loses the answer.
+    const delta = 1e-8;
+    const lauchli = [
+      [1, 1],
+      [delta, 0],
+      [0, delta],
+    ];
+    const b = [2, delta, delta];
+    expectClose(leastSquares(lauchli, b), [1, 1], 1e-14);
+    expect(() => solve(multiply(transpose(lauchli), lauchli), multiply(transpose(lauchli), b))).toThrow(
+      SingularMatrixError,
+    );
+  });
+
+  it('recovers a consistent solution on an ill-conditioned Hilbert-like system, to cond·ε', () => {
+    // The first 8 columns of the 20×20 Hilbert matrix: cond₂ ≈ 3.8e8, so normal equations (cond² ≈ 1.5e17) fail.
+    const a = Array.from({ length: 20 }, (_, i) => Array.from({ length: 8 }, (_, j) => 1 / (i + j + 1)));
+    const x = leastSquares(
+      a,
+      multiply(
+        a,
+        Array.from({ length: 8 }, () => 1),
+      ),
+    );
+    for (const value of x) expect(Math.abs(value - 1)).toBeLessThan(1e-6);
+  });
+
+  it('returns the minimum-norm solution when A is rank-deficient or underdetermined', () => {
+    // Every x with x₀ + x₁ = 2 fits [[1, 1], [1, 1]]·x = [2, 2]; the shortest is [1, 1].
+    expectClose(
+      leastSquares(
+        [
+          [1, 1],
+          [1, 1],
+          [1, 1],
+        ],
+        [1, 2, 3],
+      ),
+      [1, 1],
+      1e-15,
+    );
+    // One equation, three unknowns: x = 6·[1, 2, 3] / 14, along the row.
+    expectClose(leastSquares([[1, 2, 3]], [6]), [6 / 14, 12 / 14, 18 / 14], 1e-15);
+    // Agrees with the pseudo-inverse (the definition of the minimum-norm solution).
+    const deficient = [
+      [1, 2, 3],
+      [4, 5, 6],
+      [7, 8, 9],
+      [1, 0, -1],
+    ];
+    const b = [1, 2, 4, 0];
+    expectClose(leastSquares(deficient, b), multiply(pseudoInverse(deficient), b), 1e-13);
+    expect(leastSquares([[0, 0]], [5])).toEqual([0, 0]);
+  });
+
+  it('rejects mismatched right-hand sides', () => {
+    expect(() => leastSquares([[1], [2]], [1, 2, 3])).toThrow(InvalidArgumentError);
+    expect(() => leastSquares([[1], [2]], [[1]])).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('pseudoInverse', () => {
+  it('matches NumPy pinv on a full-column-rank matrix', () => {
+    // np.linalg.pinv([[1, 2], [3, 4], [5, 6]]) = [[-4/3, -1/3, 2/3], [13/12, 1/3, -5/12]].
+    expectMatrixClose(
+      pseudoInverse([
+        [1, 2],
+        [3, 4],
+        [5, 6],
+      ]),
+      [
+        [-4 / 3, -1 / 3, 2 / 3],
+        [13 / 12, 1 / 3, -5 / 12],
+      ],
+      1e-14,
+    );
+  });
+
+  it('satisfies the four Moore–Penrose conditions on a rank-deficient matrix', () => {
+    const a = multiply(randomRectangular(21, 7, 3), randomRectangular(22, 3, 5)); // 7×5, rank 3
+    const p = pseudoInverse(a);
+    expect(p).toHaveLength(5);
+    expect(p[0]).toHaveLength(7);
+    const ap = multiply(a, p);
+    const pa = multiply(p, a);
+    expect(frobenius(minus(multiply(ap, a), a))).toBeLessThan(1e-13);
+    expect(frobenius(minus(multiply(pa, p), p))).toBeLessThan(1e-13);
+    expect(frobenius(minus(ap, transpose(ap)))).toBeLessThan(1e-13);
+    expect(frobenius(minus(pa, transpose(pa)))).toBeLessThan(1e-13);
+  });
+
+  it('equals the inverse for a non-singular matrix, and is zero for the zero matrix', () => {
+    expectMatrixClose(pseudoInverse(STRANG), inverse(STRANG), 1e-14);
+    expect(
+      pseudoInverse([
+        [0, 0, 0],
+        [0, 0, 0],
+      ]),
+    ).toEqual([
+      [0, 0],
+      [0, 0],
+      [0, 0],
+    ]);
+    // An explicit tolerance drops the small singular value of a near-singular matrix.
+    const near = [
+      [1, 0],
+      [0, 1e-12],
+    ];
+    expect(pseudoInverse(near, { tolerance: 1e-9 })).toEqual([
+      [1, 0],
+      [0, 0],
+    ]);
+  });
+});
+
+describe('rank: singular values vs elimination', () => {
+  it("sees the near-singularity of Kahan's matrix that elimination and pivoted QR miss", () => {
+    // Every pivot of the triangular Kahan matrix is ≥ 9e-4, but σ_min ≈ 9e-17 ≤ 100·ε·σ₁. It is built so
+    // that column pivoting swaps nothing (R = K), which is why rank defaults to the singular values.
+    const k = kahan(100);
+    expect(rank(k)).toBe(99);
+    expect(rank(k, { method: 'elimination' })).toBe(100);
+    expect(qrDecompose(k).rank).toBe(100);
+  });
+
+  it('applies an explicit tolerance to whichever quantity is counted, and rejects unknown methods', () => {
+    const near = [
+      [1, 0],
+      [0, 1e-10],
+    ];
+    expect(rank(near)).toBe(2);
+    expect(rank(near, { tolerance: 1e-9 })).toBe(1);
+    expect(rank(near, { method: 'elimination', tolerance: 1e-9 })).toBe(1);
+    // @ts-expect-error -- an unknown method is a runtime error too
+    expect(() => rank(near, { method: 'qr' })).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('factorizations: validation and hygiene', () => {
+  it('rejects malformed input with a typed error', () => {
+    for (const run of [
+      (a: Matrix) => qrDecompose(a),
+      (a: Matrix) => singularValues(a),
+      (a: Matrix) => singularValueDecompose(a),
+      (a: Matrix) => conditionNumber(a),
+      (a: Matrix) => pseudoInverse(a),
+      (a: Matrix) => leastSquares(a, [1]),
+    ]) {
+      expect(() => run([])).toThrow(InvalidArgumentError);
+      expect(() => run([[Number.NaN]])).toThrow(InvalidArgumentError);
+      expect(() => run([[1, 2], [3]])).toThrow(InvalidArgumentError);
+    }
+    expect(() => choleskyDecompose([[1, 2]])).toThrow(InvalidArgumentError);
+    expect(() => choleskySolve([[1]], [1, 2])).toThrow(InvalidArgumentError);
+  });
+
+  it('never modifies or aliases the input, and never returns -0', () => {
+    const a = randomRectangular(31, 5, 3).map(row => Object.freeze([...row]));
+    const copy = a.map(row => [...row]);
+    const qr = qrDecompose(a);
+    const svd = singularValueDecompose(a);
+    pseudoInverse(a);
+    leastSquares(a, [1, 2, 3, 4, 5]);
+    expect(a).toEqual(copy);
+    const negativeZero = [
+      [-0, 0],
+      [0, -0],
+    ];
+    const outputs = [
+      ...qrDecompose(negativeZero).upper.flat(),
+      ...qrDecompose(negativeZero).orthogonal.flat(),
+      ...singularValueDecompose(negativeZero).left.flat(),
+      ...singularValueDecompose(negativeZero).right.flat(),
+      ...pseudoInverse(negativeZero).flat(),
+      ...leastSquares(negativeZero, [-0, 0]),
+      ...choleskyDecompose([
+        [4, -0],
+        [-0, 9],
+      ]).lower.flat(),
+    ];
+    for (const x of outputs) expect(Object.is(x, -0)).toBe(false);
+    expect(qr.orthogonal[0]).not.toBe(a[0]);
+    expect(svd.right[0]).not.toBe(a[0]);
   });
 });

@@ -1,7 +1,9 @@
 /**
  * Lean dense linear algebra over plain JS numbers (float64): vectors, small to
- * medium matrices, LU with partial pivoting, eigenvalues and eigenvectors. For
- * symbolic algebra or sparse storage, reach for a full CAS such as mathjs.
+ * medium matrices, LU with partial pivoting, QR with column pivoting,
+ * Cholesky, the singular value decomposition, least squares, eigenvalues and
+ * eigenvectors. For symbolic algebra or sparse storage, reach for a full CAS
+ * such as mathjs.
  *
  * **Representation.** Vectors are `readonly number[]` and matrices are
  * `readonly (readonly number[])[]` (an array of rows), not a `Matrix` class.
@@ -22,13 +24,34 @@
  * `|u_kk| <= n · Number.EPSILON · ‖A‖∞` (‖A‖∞ = largest absolute row sum).
  * That is the point where the matrix is singular to working precision: a
  * perturbation of `A` the size of its own rounding error could make it
- * exactly singular. `rank` counts pivots above `max(m, n) · Number.EPSILON ·
- * ‖A‖∞`, the same rule NumPy's `matrix_rank` applies to singular values. Each
- * function takes `{ tolerance }` to replace the default with an absolute
- * threshold. `determinant` never throws for a singular matrix; it returns the
- * product of the pivots, which may be tiny rather than exactly zero.
- * Gaussian elimination is a fast, good-enough rank test; for rank decisions on
- * badly conditioned data, use an SVD.
+ * exactly singular. Rank decisions use one rule everywhere, NumPy's
+ * `matrix_rank`: a singular value counts as zero at or below
+ * `max(m, n) · Number.EPSILON · σ₁` (σ₁ the largest). `rank`, `pseudoInverse`
+ * and the rank-deficient path of `leastSquares` apply it to singular values;
+ * `qrDecompose` and the full-rank test of `leastSquares` apply it to the
+ * diagonal of a column-pivoted `R`, where `|r₀₀|` stands in for σ₁ (it is
+ * within a factor `√n` of it). Each function takes `{ tolerance }` to replace
+ * the default with an absolute threshold. `determinant` never throws for a
+ * singular matrix; it returns the product of the pivots, which may be tiny
+ * rather than exactly zero.
+ *
+ * **Orthogonal factorizations and least squares.** `qrDecompose` is
+ * Householder QR with column pivoting (LAPACK `dgeqp3`; `{ pivoting: false }`
+ * for plain QR). `choleskyDecompose` / `choleskySolve` factor a symmetric
+ * positive definite matrix as `L·Lᵀ` (`dpotrf`); a matrix that is not throws
+ * `NotPositiveDefiniteError`. `singularValues` / `singularValueDecompose` are
+ * Golub–Kahan–Reinsch: Householder bidiagonalization and implicit-shift QR
+ * (LINPACK `dsvdc`, as in JAMA), backward stable, singular values descending.
+ * `leastSquares` solves `min ‖A·x − b‖₂` by pivoted QR and, when `A` is
+ * rank-deficient or wide, returns the minimum-norm solution from the SVD;
+ * neither path forms the normal equations `AᵀA`, which square the condition
+ * number. Column pivoting reveals rank on all but contrived inputs (Kahan's
+ * matrix defeats it); the SVD never misses. `conditionNumber` is `σ₁ / σₖ`;
+ * `pseudoInverse` is `V·Σ⁺·Uᵀ`. The SVD's QR iteration is capped at 75 sweeps
+ * per singular value (typically 2 or 3 are needed); past the cap it throws
+ * `ConvergenceError`. Like the eigen routines, all of these work on a copy
+ * scaled by a power of two, so entries near the float64 limits neither
+ * overflow nor underflow.
  *
  * **Eigenvalues.** Four functions, named like `luDecompose`:
  * `symmetricEigenvalues` / `symmetricEigenDecompose` for a symmetric matrix,
@@ -64,10 +87,12 @@ import {
   ConvergenceError,
   DivisionByZeroError,
   InvalidArgumentError,
+  NotPositiveDefiniteError,
   NumericRangeError,
   ResourceLimitError,
   SingularMatrixError,
 } from './errors.js';
+import { applyQTranspose, backSubstitute, householderQr } from './internal/householder.js';
 import { assertFinite } from './number.js';
 
 /** A vector: a non-empty array of finite numbers. */
@@ -600,14 +625,42 @@ export function inverse(a: Matrix, options?: ToleranceOptions): number[][] {
   return result;
 }
 
+/** Options for `rank`. */
+export type RankOptions = ToleranceOptions & {
+  /**
+   * `'svd'` (the default) counts singular values above the tolerance, the
+   * reliable rank test. `'elimination'` counts pivots of row echelon form with
+   * partial pivoting: several times faster, but on badly conditioned input it
+   * can miss a near-dependence that the singular values show.
+   */
+  method?: 'svd' | 'elimination';
+};
+
 /**
  * The number of linearly independent rows (equivalently, columns) of any
- * `m×n` matrix, by row echelon form with partial pivoting. A pivot at or below
- * `max(m, n) · Number.EPSILON · ‖A‖∞` counts as zero; pass `{ tolerance }` to
- * set an absolute threshold instead.
+ * `m×n` matrix. By default it counts the singular values above
+ * `max(m, n) · Number.EPSILON · σ₁` (σ₁ the largest), the rule of NumPy's
+ * `matrix_rank`, so `rank`, `pseudoInverse` and `leastSquares` agree.
+ * `{ method: 'elimination' }` counts row echelon pivots above
+ * `max(m, n) · Number.EPSILON · ‖A‖∞` instead. `{ tolerance }` replaces the
+ * default with an absolute threshold for whichever quantity is counted.
  */
-export function rank(a: Matrix, options?: ToleranceOptions): number {
+export function rank(a: Matrix, options?: RankOptions): number {
   const [rows, columns] = assertMatrix(a, 'a');
+  const method = options?.method ?? 'svd';
+  if (method === 'elimination') return eliminationRank(a, rows, columns, options);
+  if (method !== 'svd') throw new InvalidArgumentError(`method must be 'svd' or 'elimination', got ${String(method)}`);
+  const { values, scale } = svdOf(a, rows, columns, false);
+  const tolerance =
+    options?.tolerance === undefined
+      ? Math.max(rows, columns) * EPS * values[0]!
+      : resolveTolerance(options, () => 0) * scale;
+  let r = 0;
+  for (const value of values) if (value > tolerance) r++;
+  return r;
+}
+
+function eliminationRank(a: Matrix, rows: number, columns: number, options: ToleranceOptions | undefined): number {
   const tolerance = resolveTolerance(options, () => Math.max(rows, columns) * Number.EPSILON * normInfinity(a));
   const work = a.map(row => [...row]);
   let r = 0;
@@ -685,10 +738,21 @@ function hypot(a: number, b: number): number {
  * array per row costs more than a 20×20 decomposition's whole setup.
  */
 function squareRows(n: number): Float64Array[] {
-  const buffer = new Float64Array(n * n);
+  return bufferRows(n, n);
+}
+
+/** `count` zeroed rows of length `length`, as views on one buffer. */
+function bufferRows(count: number, length: number): Float64Array[] {
+  const buffer = new Float64Array(count * length);
   const rows: Float64Array[] = [];
-  for (let i = 0; i < n; i++) rows.push(buffer.subarray(i * n, i * n + n));
+  for (let i = 0; i < count; i++) rows.push(buffer.subarray(i * length, i * length + length));
   return rows;
+}
+
+/** The power of two that brings `largest` near 1 (`1` for zero); scaling by it is exact. */
+function powerOfTwoScale(largest: number): number {
+  const exponent = largest === 0 ? 0 : Math.max(-1020, Math.min(1020, Math.round(Math.log2(largest))));
+  return 2 ** -exponent;
 }
 
 /**
@@ -712,17 +776,13 @@ function scaledCopy(a: Matrix, n: number): { work: Float64Array[]; scale: number
       if (magnitude > largest) largest = magnitude;
     }
   }
-  const exponent = largest === 0 ? 0 : Math.max(-1020, Math.min(1020, Math.round(Math.log2(largest))));
-  const scale = 2 ** -exponent;
+  const scale = powerOfTwoScale(largest);
   if (scale !== 1) for (const row of work) for (let j = 0; j < n; j++) row[j]! *= scale;
   return { work, scale };
 }
 
 /** Validates, scales and symmetrizes `a`; throws `InvalidArgumentError` if it is not symmetric. */
-function symmetricInput(
-  a: Matrix,
-  options: SymmetryOptions | undefined,
-): { w: Float64Array[]; n: number; scale: number } {
+function symmetricInput(a: Matrix, options?: SymmetryOptions): { w: Float64Array[]; n: number; scale: number } {
   const n = assertSquare(a, 'a');
   const { work, scale } = scaledCopy(a, n);
   let tolerance: number;
@@ -1608,4 +1668,735 @@ function unitVector(re: Float64Array, im: Float64Array, n: number): Complex[] {
   const vector: Complex[] = [];
   for (let i = 0; i < n; i++) vector.push(Complex.fromParts(finish(re[i]! / length), finish(im[i]! / length)));
   return vector;
+}
+
+// ---------------------------------------------------------------------------
+// QR, Cholesky, singular values and least squares
+
+/** Options for `qrDecompose`. */
+export type QrOptions = ToleranceOptions & {
+  /**
+   * Column pivoting (default `true`): each step takes the remaining column of
+   * largest norm, so `|r_kk|` falls along the diagonal and `rank` is reliable.
+   * `false` gives plain Householder QR of `A` itself (`permutation` is then the
+   * identity).
+   */
+  pivoting?: boolean;
+};
+
+/** `A·P = Q·R`, from `qrDecompose`; `k = min(m, n)` for an `m×n` matrix `A`. */
+export type QrDecomposition = {
+  /** `Q`, `m×k` with orthonormal columns. */
+  orthogonal: number[][];
+  /** `R`, `k×n` upper triangular (trapezoidal when `n > m`), with a non-negative diagonal. */
+  upper: number[][];
+  /** Column `j` of `A·P` is column `permutation[j]` of `A`. */
+  permutation: number[];
+  /** The number of diagonal entries of `R` above the tolerance: the numerical rank, with pivoting. */
+  rank: number;
+};
+
+/** `A = L·Lᵀ`, from `choleskyDecompose`. */
+export type CholeskyDecomposition = {
+  /** Lower-triangular `L` with a positive diagonal. */
+  lower: number[][];
+};
+
+/** `A = Σₖ values[k] · left[k] · right[k]ᵀ`, from `singularValueDecompose`. */
+export type SingularValueDecomposition = {
+  /** The `min(m, n)` singular values, descending, all `≥ 0`. */
+  values: number[];
+  /** `left[k]` is the unit left singular vector (length `m`) for `values[k]`; together they are orthonormal. */
+  left: number[][];
+  /** `right[k]` is the unit right singular vector (length `n`) for `values[k]`; together they are orthonormal. */
+  right: number[][];
+};
+
+/**
+ * A validated `m×n` matrix as `Float64Array` views on one buffer, by columns
+ * (`n` arrays of length `m`) or by rows, multiplied by the power of two that
+ * brings its largest magnitude near 1 (exact; see `scaledCopy`).
+ */
+function scaledVectors(a: Matrix, m: number, n: number, byColumns: boolean): { work: Float64Array[]; scale: number } {
+  const work = byColumns ? bufferRows(n, m) : bufferRows(m, n);
+  let largest = 0;
+  for (let i = 0; i < m; i++) {
+    const source = a[i]!;
+    for (let j = 0; j < n; j++) {
+      const x = source[j]!;
+      if (byColumns) work[j]![i] = x;
+      else work[i]![j] = x;
+      const magnitude = Math.abs(x);
+      if (magnitude > largest) largest = magnitude;
+    }
+  }
+  const scale = powerOfTwoScale(largest);
+  if (scale !== 1) for (const vector of work) for (let i = 0; i < vector.length; i++) vector[i]! *= scale;
+  return { work, scale };
+}
+
+/** Validates a vector or matrix right-hand side with `m` rows; returns its columns. */
+function rightHandSides(b: Vector | Matrix, m: number): { columns: Float64Array[]; vector: boolean } {
+  if (!isMatrixShape(b)) {
+    assertSameLength(m, assertVector(b, 'b'));
+    return { columns: [Float64Array.from(b)], vector: true };
+  }
+  const [rows, count] = assertMatrix(b, 'b');
+  assertSameLength(m, rows);
+  const columns = bufferRows(count, m);
+  for (let i = 0; i < m; i++) {
+    const row = b[i]!;
+    for (let j = 0; j < count; j++) columns[j]![i] = row[j]!;
+  }
+  return { columns, vector: false };
+}
+
+/** Solution columns (each of length `n`, scaled by `factor`) as a vector or an `n×count` matrix. */
+function solutionOutput(
+  columns: readonly Float64Array[],
+  n: number,
+  factor: number,
+  vector: boolean,
+): number[] | number[][] {
+  if (!vector) return columnsToRows(columns, n, factor);
+  const x = columns[0]!;
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) out.push(finish(x[i]! * factor));
+  return out;
+}
+
+/** Columns of length `n`, times `factor`, as an `n×count` matrix. */
+function columnsToRows(columns: readonly Float64Array[], n: number, factor: number): number[][] {
+  const out: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const row: number[] = [];
+    for (const column of columns) row.push(finish(column[i]! * factor));
+    out.push(row);
+  }
+  return out;
+}
+
+/**
+ * `A·P = Q·R` for any `m×n` matrix, by Householder reflections (LAPACK
+ * `dgeqp3`, or `dgeqrf` with `{ pivoting: false }`). `Q` is the thin `m×k`
+ * factor with `k = min(m, n)`; `R` is `k×n`. Each diagonal entry of `R` is made
+ * non-negative (flipping the matching column of `Q`), so without pivoting the
+ * factorization of a full-rank `A` is unique. `rank` counts the `|r_kk|` above
+ * `max(m, n) · Number.EPSILON · |r₀₀|`, or above `{ tolerance }` (absolute).
+ * Backward stable: `‖A·P − Q·R‖ ≈ n · ε · ‖A‖`. Never throws for a
+ * rank-deficient matrix.
+ */
+export function qrDecompose(a: Matrix, options?: QrOptions): QrDecomposition {
+  const [m, n] = assertMatrix(a, 'a');
+  const { work: columns, scale } = scaledVectors(a, m, n, true);
+  const { tau, permutation } = householderQr(columns, m, options?.pivoting !== false);
+  const k = Math.min(m, n);
+  const tolerance =
+    options?.tolerance === undefined
+      ? Math.max(m, n) * EPS * Math.abs(columns[0]![0]!)
+      : resolveTolerance(options, () => 0) * scale;
+  // Q's columns, accumulated backwards from [I; 0] (LAPACK dorgqr): reflector
+  // i leaves the columns before i untouched.
+  const q = bufferRows(k, m);
+  for (let j = 0; j < k; j++) q[j]![j] = 1;
+  for (let i = k - 1; i >= 0; i--) {
+    const t = tau[i]!;
+    if (t === 0) continue;
+    const v = columns[i]!;
+    for (let j = i; j < k; j++) {
+      const column = q[j]!;
+      let s = column[i]!;
+      for (let r = i + 1; r < m; r++) s += v[r]! * column[r]!;
+      s *= t;
+      column[i]! -= s;
+      for (let r = i + 1; r < m; r++) column[r]! -= s * v[r]!;
+    }
+  }
+  let r = 0;
+  const signs: number[] = [];
+  for (let j = 0; j < k; j++) {
+    const diagonal = columns[j]![j]!;
+    signs.push(diagonal < 0 ? -1 : 1);
+    if (Math.abs(diagonal) > tolerance) r++;
+  }
+  const orthogonal: number[][] = [];
+  for (let i = 0; i < m; i++) {
+    const row: number[] = [];
+    for (let j = 0; j < k; j++) row.push(finish(signs[j]! * q[j]![i]!));
+    orthogonal.push(row);
+  }
+  const upper: number[][] = [];
+  for (let i = 0; i < k; i++) {
+    const row: number[] = [];
+    const factor = signs[i]! / scale;
+    for (let j = 0; j < n; j++) row.push(j < i ? 0 : finish(columns[j]![i]! * factor));
+    upper.push(row);
+  }
+  return { orthogonal, upper, permutation, rank: r };
+}
+
+/**
+ * Doubles a power-of-two scaled matrix when the exponent is odd, so `√scale`
+ * is an exact power of two as well and unscaling `L` adds no rounding (an
+ * integer matrix with an integer factor gets it exactly).
+ */
+function evenlyScaled<T extends { w: Float64Array[]; scale: number }>(input: T): T {
+  if (Number.isInteger(Math.log2(input.scale) / 2)) return input;
+  for (const row of input.w) for (let j = 0; j < row.length; j++) row[j]! *= 2;
+  return { ...input, scale: input.scale * 2 };
+}
+
+/**
+ * Cholesky–Banachiewicz on the lower triangle of `w`, in place, row by row (each
+ * inner product walks two rows). Stops at the first diagonal pivot `d` (the
+ * value whose square root becomes `l_ii`) at or below `floor`, leaves `d` in
+ * `w[i][i]` and returns `i`; returns `-1` on success.
+ */
+function choleskyInPlace(w: Float64Array[], n: number, floor: number): number {
+  for (let i = 0; i < n; i++) {
+    const row = w[i]!;
+    for (let j = 0; j < i; j++) {
+      const other = w[j]!;
+      let s = row[j]!;
+      for (let k = 0; k < j; k++) s -= row[k]! * other[k]!;
+      row[j] = s / other[j]!;
+    }
+    let d = row[i]!;
+    for (let k = 0; k < i; k++) d -= row[k]! * row[k]!;
+    row[i] = d;
+    if (d <= floor) return i;
+    row[i] = Math.sqrt(d);
+  }
+  return -1;
+}
+
+/**
+ * `A = L·Lᵀ` for a symmetric positive definite matrix (LAPACK `dpotrf`): about
+ * half the work of LU, and no pivoting is needed. Symmetry is checked like
+ * `symmetricEigenvalues` (`InvalidArgumentError` beyond the tolerance; the
+ * factorization uses `(A + Aᵀ) / 2`). Throws `NotPositiveDefiniteError` when a
+ * diagonal pivot is `≤ 0`, the LAPACK rule, which makes this the standard
+ * positive-definiteness test. A singular positive semidefinite matrix may pass
+ * with a tiny diagonal entry or throw, depending on rounding.
+ */
+export function choleskyDecompose(a: Matrix, options?: SymmetryOptions): CholeskyDecomposition {
+  const { w, n, scale } = evenlyScaled(symmetricInput(a, options));
+  const failed = choleskyInPlace(w, n, 0);
+  if (failed >= 0) {
+    throw new NotPositiveDefiniteError(
+      `matrix is not positive definite (pivot ${failed} is ${w[failed]![failed]! / scale}, not > 0)`,
+    );
+  }
+  // A·s = (L·√s)(L·√s)ᵀ, so L = L_s / √s.
+  const unscale = 1 / Math.sqrt(scale);
+  const lower: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const source = w[i]!;
+    const row: number[] = [];
+    for (let j = 0; j < n; j++) row.push(j > i ? 0 : finish(source[j]! * unscale));
+    lower.push(row);
+  }
+  return { lower };
+}
+
+/**
+ * Solves `A·x = b` for a symmetric positive definite `A` by Cholesky: about
+ * twice as fast as `solve`, and as accurate. `b` is a vector or a matrix of
+ * right-hand-side columns, as for `solve`. Symmetry is checked with the
+ * default tolerance (see `choleskyDecompose`). A pivot `d` with
+ * `|d| ≤ n · Number.EPSILON · ‖A‖∞` (or `{ tolerance }`, absolute; the same
+ * quantity `solve` tests, since for this matrix `d` equals LU's pivot) throws
+ * `SingularMatrixError`; a pivot below `−tolerance` throws
+ * `NotPositiveDefiniteError`.
+ */
+export function choleskySolve(a: Matrix, b: Vector, options?: ToleranceOptions): number[];
+export function choleskySolve(a: Matrix, b: Matrix, options?: ToleranceOptions): number[][];
+export function choleskySolve(a: Matrix, b: Vector | Matrix, options?: ToleranceOptions): number[] | number[][] {
+  const { w, n, scale } = evenlyScaled(symmetricInput(a));
+  const { columns, vector } = rightHandSides(b, n);
+  let tolerance: number;
+  if (options?.tolerance === undefined) {
+    let norm = 0;
+    for (const row of w) {
+      let sum = 0;
+      for (let j = 0; j < n; j++) sum += Math.abs(row[j]!);
+      norm = Math.max(norm, sum);
+    }
+    tolerance = n * EPS * norm;
+  } else {
+    tolerance = resolveTolerance(options, () => 0) * scale;
+  }
+  const failed = choleskyInPlace(w, n, tolerance);
+  if (failed >= 0) {
+    const pivot = w[failed]![failed]!;
+    if (pivot < -tolerance) {
+      throw new NotPositiveDefiniteError(`matrix is not positive definite (pivot ${failed} is ${pivot / scale})`);
+    }
+    throw new SingularMatrixError(`matrix is singular to working precision (pivot ${failed} ≤ ${tolerance / scale})`);
+  }
+  for (const y of columns) {
+    // L·z = b, then Lᵀ·x = z (by columns of Lᵀ, which are rows of L).
+    for (let i = 0; i < n; i++) {
+      const row = w[i]!;
+      let s = y[i]!;
+      for (let k = 0; k < i; k++) s -= row[k]! * y[k]!;
+      y[i] = s / row[i]!;
+    }
+    for (let i = n - 1; i >= 0; i--) {
+      const row = w[i]!;
+      const x = y[i]! / row[i]!;
+      y[i] = x;
+      for (let k = 0; k < i; k++) y[k]! -= row[k]! * x;
+    }
+  }
+  // (s·A)·x_s = b, so x = s·x_s.
+  return solutionOutput(columns, n, scale, vector);
+}
+
+/** Largest number of QR sweeps spent on one singular value before `ConvergenceError`. */
+const SVD_SWEEPS = 75;
+const SVD_TINY = 2 ** -966;
+
+/**
+ * Golub–Kahan–Reinsch SVD of an `m×n` matrix with `m ≥ n`, held by columns in
+ * `c` (destroyed): Householder bidiagonalization, then implicit-shift QR on
+ * the bidiagonal with deflation and splitting (LINPACK `dsvdc`, as in JAMA).
+ * Every loop walks one column, since `c`, `U` and `V` are all stored by
+ * columns. Singular values come out descending; `u[k]` (length `m`) and `v[k]`
+ * (length `n`) are the singular vectors when `vectors` is set.
+ */
+function golubKahan(
+  c: Float64Array[],
+  m: number,
+  n: number,
+  vectors: boolean,
+): { s: Float64Array; u: Float64Array[]; v: Float64Array[] } {
+  const s = new Float64Array(n);
+  const e = new Float64Array(n);
+  const work = new Float64Array(m);
+  const u = vectors ? bufferRows(n, m) : [];
+  const v = vectors ? bufferRows(n, n) : [];
+  const nct = Math.min(m - 1, n);
+  const nrt = Math.max(0, Math.min(n - 2, m));
+  // Bidiagonalize: diagonal into s, superdiagonal into e.
+  for (let k = 0; k < Math.max(nct, nrt); k++) {
+    const ck = c[k]!;
+    if (k < nct) {
+      let sum = 0;
+      for (let i = k; i < m; i++) sum += ck[i]! * ck[i]!;
+      let norm = Math.sqrt(sum);
+      if (norm !== 0) {
+        if (ck[k]! < 0) norm = -norm;
+        for (let i = k; i < m; i++) ck[i]! /= norm;
+        ck[k]! += 1;
+      }
+      s[k] = -norm;
+    }
+    for (let j = k + 1; j < n; j++) {
+      const cj = c[j]!;
+      if (k < nct && s[k] !== 0) {
+        let t = 0;
+        for (let i = k; i < m; i++) t += ck[i]! * cj[i]!;
+        t = -t / ck[k]!;
+        for (let i = k; i < m; i++) cj[i]! += t * ck[i]!;
+      }
+      e[j] = cj[k]!;
+    }
+    if (vectors && k < nct) {
+      const uk = u[k]!;
+      for (let i = k; i < m; i++) uk[i] = ck[i]!;
+    }
+    if (k < nrt) {
+      let sum = 0;
+      for (let i = k + 1; i < n; i++) sum += e[i]! * e[i]!;
+      let norm = Math.sqrt(sum);
+      if (norm !== 0) {
+        if (e[k + 1]! < 0) norm = -norm;
+        for (let i = k + 1; i < n; i++) e[i]! /= norm;
+        e[k + 1]! += 1;
+      }
+      e[k] = -norm;
+      if (k + 1 < m && norm !== 0) {
+        work.fill(0, k + 1);
+        for (let j = k + 1; j < n; j++) {
+          const ej = e[j]!;
+          const cj = c[j]!;
+          for (let i = k + 1; i < m; i++) work[i]! += ej * cj[i]!;
+        }
+        for (let j = k + 1; j < n; j++) {
+          const t = -e[j]! / e[k + 1]!;
+          const cj = c[j]!;
+          for (let i = k + 1; i < m; i++) cj[i]! += t * work[i]!;
+        }
+      }
+      if (vectors) {
+        const vk = v[k]!;
+        for (let i = k + 1; i < n; i++) vk[i] = e[i]!;
+      }
+    }
+  }
+  let p = n;
+  if (nct < n) s[nct] = c[nct]![nct]!;
+  if (nrt + 1 < p) e[nrt] = c[p - 1]![nrt]!;
+  e[p - 1] = 0;
+  if (vectors) {
+    for (let j = nct; j < n; j++) u[j]![j] = 1;
+    for (let k = nct - 1; k >= 0; k--) {
+      const uk = u[k]!;
+      if (s[k] === 0) {
+        uk.fill(0);
+        uk[k] = 1;
+        continue;
+      }
+      for (let j = k + 1; j < n; j++) {
+        const uj = u[j]!;
+        let t = 0;
+        for (let i = k; i < m; i++) t += uk[i]! * uj[i]!;
+        t = -t / uk[k]!;
+        for (let i = k; i < m; i++) uj[i]! += t * uk[i]!;
+      }
+      for (let i = k; i < m; i++) uk[i] = -uk[i]!;
+      uk[k] = 1 + uk[k]!;
+      uk.fill(0, 0, k);
+    }
+    for (let k = n - 1; k >= 0; k--) {
+      const vk = v[k]!;
+      if (k < nrt && e[k] !== 0) {
+        for (let j = k + 1; j < n; j++) {
+          const vj = v[j]!;
+          let t = 0;
+          for (let i = k + 1; i < n; i++) t += vk[i]! * vj[i]!;
+          t = -t / vk[k + 1]!;
+          for (let i = k + 1; i < n; i++) vj[i]! += t * vk[i]!;
+        }
+      }
+      vk.fill(0);
+      vk[k] = 1;
+    }
+  }
+  const last = p - 1;
+  let sweeps = 0;
+  while (p > 0) {
+    // Find the trailing unreduced block. kase 1: s[p-1] and e[k-1] negligible
+    // (deflate); 2: s[k] negligible (split); 3: QR sweep on s[k..p-1]; 4: converged.
+    let k: number;
+    for (k = p - 2; k >= 0; k--) {
+      if (Math.abs(e[k]!) <= SVD_TINY + EPS * (Math.abs(s[k]!) + Math.abs(s[k + 1]!))) {
+        e[k] = 0;
+        break;
+      }
+    }
+    let kase: number;
+    if (k === p - 2) {
+      kase = 4;
+    } else {
+      let ks: number;
+      for (ks = p - 1; ks > k; ks--) {
+        const t = Math.abs(e[ks]!) + (ks === k + 1 ? 0 : Math.abs(e[ks - 1]!));
+        if (Math.abs(s[ks]!) <= SVD_TINY + EPS * t) {
+          s[ks] = 0;
+          break;
+        }
+      }
+      if (ks === k) {
+        kase = 3;
+      } else if (ks === p - 1) {
+        kase = 1;
+      } else {
+        kase = 2;
+        k = ks;
+      }
+    }
+    k++;
+    switch (kase) {
+      case 1: {
+        let f = e[p - 2]!;
+        e[p - 2] = 0;
+        for (let j = p - 2; j >= k; j--) {
+          const t = hypot(s[j]!, f);
+          const cs = s[j]! / t;
+          const sn = f / t;
+          s[j] = t;
+          if (j !== k) {
+            f = -sn * e[j - 1]!;
+            e[j - 1] = cs * e[j - 1]!;
+          }
+          if (vectors) rotate(v[j]!, v[p - 1]!, cs, sn, n);
+        }
+        break;
+      }
+      case 2: {
+        let f = e[k - 1]!;
+        e[k - 1] = 0;
+        for (let j = k; j < p; j++) {
+          const t = hypot(s[j]!, f);
+          const cs = s[j]! / t;
+          const sn = f / t;
+          s[j] = t;
+          f = -sn * e[j]!;
+          e[j] = cs * e[j]!;
+          if (vectors) rotate(u[j]!, u[k - 1]!, cs, sn, m);
+        }
+        break;
+      }
+      case 3: {
+        if (++sweeps > SVD_SWEEPS) {
+          throw new ConvergenceError(`the SVD did not converge in ${SVD_SWEEPS} sweeps for one singular value`);
+        }
+        // The shift: the eigenvalue of the trailing 2×2 of BᵀB nearer its last entry.
+        const scale = Math.max(
+          Math.abs(s[p - 1]!),
+          Math.abs(s[p - 2]!),
+          Math.abs(e[p - 2]!),
+          Math.abs(s[k]!),
+          Math.abs(e[k]!),
+        );
+        const sp = s[p - 1]! / scale;
+        const spm1 = s[p - 2]! / scale;
+        const epm1 = e[p - 2]! / scale;
+        const sk = s[k]! / scale;
+        const ek = e[k]! / scale;
+        const b = ((spm1 + sp) * (spm1 - sp) + epm1 * epm1) / 2;
+        const cc = sp * epm1 * (sp * epm1);
+        let shift = 0;
+        if (b !== 0 || cc !== 0) {
+          shift = Math.sqrt(b * b + cc);
+          if (b < 0) shift = -shift;
+          shift = cc / (b + shift);
+        }
+        let f = (sk + sp) * (sk - sp) + shift;
+        let g = sk * ek;
+        // Chase the bulge down the bidiagonal.
+        for (let j = k; j < p - 1; j++) {
+          let t = hypot(f, g);
+          let cs = f / t;
+          let sn = g / t;
+          if (j !== k) e[j - 1] = t;
+          f = cs * s[j]! + sn * e[j]!;
+          e[j] = cs * e[j]! - sn * s[j]!;
+          g = sn * s[j + 1]!;
+          s[j + 1] = cs * s[j + 1]!;
+          if (vectors) rotate(v[j]!, v[j + 1]!, cs, sn, n);
+          t = hypot(f, g);
+          cs = f / t;
+          sn = g / t;
+          s[j] = t;
+          f = cs * e[j]! + sn * s[j + 1]!;
+          s[j + 1] = -sn * e[j]! + cs * s[j + 1]!;
+          g = sn * e[j + 1]!;
+          e[j + 1] = cs * e[j + 1]!;
+          if (vectors && j < m - 1) rotate(u[j]!, u[j + 1]!, cs, sn, m);
+        }
+        e[p - 2] = f;
+        break;
+      }
+      default: {
+        // Converged: make s[k] non-negative, then bubble it into descending order.
+        if (s[k]! <= 0) {
+          s[k] = s[k]! < 0 ? -s[k]! : 0;
+          if (vectors) {
+            const vk = v[k]!;
+            for (let i = 0; i < n; i++) vk[i] = -vk[i]!;
+          }
+        }
+        while (k < last && s[k]! < s[k + 1]!) {
+          const t = s[k]!;
+          s[k] = s[k + 1]!;
+          s[k + 1] = t;
+          if (vectors) {
+            [v[k], v[k + 1]] = [v[k + 1]!, v[k]!];
+            [u[k], u[k + 1]] = [u[k + 1]!, u[k]!];
+          }
+          k++;
+        }
+        sweeps = 0;
+        p--;
+      }
+    }
+  }
+  return { s, u, v };
+}
+
+/** `(x, y) ← (cs·x + sn·y, cs·y − sn·x)` over the first `length` entries. */
+function rotate(x: Float64Array, y: Float64Array, cs: number, sn: number, length: number): void {
+  for (let i = 0; i < length; i++) {
+    const a = x[i]!;
+    const b = y[i]!;
+    x[i] = cs * a + sn * b;
+    y[i] = cs * b - sn * a;
+  }
+}
+
+/**
+ * The SVD of a validated `m×n` matrix, on a power-of-two scaled copy (values
+ * are `scale` times the true ones). A wide matrix is factored as its
+ * transpose, with the roles of the singular vectors swapped back.
+ */
+function svdOf(
+  a: Matrix,
+  m: number,
+  n: number,
+  vectors: boolean,
+): { values: Float64Array; left: Float64Array[]; right: Float64Array[]; scale: number } {
+  const tall = m >= n;
+  // Tall: the columns of A. Wide: the rows of A, which are the columns of Aᵀ.
+  const { work, scale } = scaledVectors(a, m, n, tall);
+  const { s, u, v } = tall ? golubKahan(work, m, n, vectors) : golubKahan(work, n, m, vectors);
+  return tall ? { values: s, left: u, right: v, scale } : { values: s, left: v, right: u, scale };
+}
+
+/**
+ * The singular values of any `m×n` matrix: `min(m, n)` of them, descending,
+ * all `≥ 0` (the square roots of the eigenvalues of `AᵀA`, computed without
+ * forming it). Golub–Kahan–Reinsch: backward stable, so each value is within
+ * about `max(m, n) · ε · σ₁` of the exact one. Throws `ConvergenceError` if
+ * the QR iteration stalls (see the module docs). Faster than
+ * `singularValueDecompose`: no singular vectors are accumulated.
+ */
+export function singularValues(a: Matrix): number[] {
+  const [m, n] = assertMatrix(a, 'a');
+  const { values, scale } = svdOf(a, m, n, false);
+  const out: number[] = [];
+  for (const value of values) out.push(finish(value / scale));
+  return out;
+}
+
+/**
+ * `A = U·Σ·Vᵀ` for any `m×n` matrix, in thin form: `values` holds the
+ * `k = min(m, n)` singular values, descending; `left[k]` and `right[k]` are the
+ * matching unit singular vectors, so `transpose(left)` is the `m×k` factor `U`
+ * and `right` is `Vᵀ` (NumPy's `Vh`). Each pair's sign is fixed so that the
+ * largest-magnitude entry of `left[k]` (the first, on a tie) is positive.
+ * Throws like `singularValues`.
+ */
+export function singularValueDecompose(a: Matrix): SingularValueDecomposition {
+  const [m, n] = assertMatrix(a, 'a');
+  const { values, left, right, scale } = svdOf(a, m, n, true);
+  const out: SingularValueDecomposition = { values: [], left: [], right: [] };
+  for (const [k, value] of values.entries()) {
+    const u = left[k]!;
+    const v = right[k]!;
+    let largest = 0;
+    let sign = 1;
+    for (let i = 0; i < m; i++) {
+      const x = u[i]!;
+      if (Math.abs(x) > largest) {
+        largest = Math.abs(x);
+        sign = x < 0 ? -1 : 1;
+      }
+    }
+    out.values.push(finish(value / scale));
+    const leftVector: number[] = [];
+    for (let i = 0; i < m; i++) leftVector.push(finish(sign * u[i]!));
+    const rightVector: number[] = [];
+    for (let i = 0; i < n; i++) rightVector.push(finish(sign * v[i]!));
+    out.left.push(leftVector);
+    out.right.push(rightVector);
+  }
+  return out;
+}
+
+/**
+ * The 2-norm condition number `σ₁ / σₖ` (largest over smallest singular
+ * value) of any `m×n` matrix: about how many times a relative error in `A` or
+ * `b` can be magnified in the solution of `A·x = b` or a least-squares fit.
+ * `1` for an orthogonal matrix; `Infinity` (as NumPy's `cond` returns) when
+ * the smallest singular value is exactly `0`, the one case in this module
+ * that returns a non-finite number, since the condition number of a singular
+ * matrix is infinite by definition.
+ */
+export function conditionNumber(a: Matrix): number {
+  const [m, n] = assertMatrix(a, 'a');
+  const { values } = svdOf(a, m, n, false);
+  const smallest = values.at(-1)!;
+  if (smallest === 0) return Infinity;
+  return finish(values[0]! / smallest);
+}
+
+/**
+ * The Moore–Penrose pseudo-inverse `A⁺` (`n×m` for an `m×n` matrix) from the
+ * SVD: `V·Σ⁺·Uᵀ`, where `Σ⁺` inverts the singular values above
+ * `max(m, n) · Number.EPSILON · σ₁` (NumPy's `pinv` default) and zeroes the
+ * rest; `{ tolerance }` sets an absolute cut-off instead. `A⁺·b` is the
+ * minimum-norm least-squares solution, but `leastSquares` computes that faster
+ * and more accurately.
+ */
+export function pseudoInverse(a: Matrix, options?: ToleranceOptions): number[][] {
+  const [m, n] = assertMatrix(a, 'a');
+  const { values, left, right, scale } = svdOf(a, m, n, true);
+  const tolerance =
+    options?.tolerance === undefined ? Math.max(m, n) * EPS * values[0]! : resolveTolerance(options, () => 0) * scale;
+  // Built by columns (one per row of A) so the inner loop is contiguous.
+  const columns = bufferRows(m, n);
+  for (const [k, value] of values.entries()) {
+    if (!(value > tolerance)) break;
+    const u = left[k]!;
+    const v = right[k]!;
+    // (s·A)⁺ = A⁺ / s, so A⁺ = s · (s·A)⁺.
+    const factor = scale / value;
+    for (let j = 0; j < m; j++) {
+      const weight = u[j]! * factor;
+      if (weight === 0) continue;
+      const column = columns[j]!;
+      for (let i = 0; i < n; i++) column[i]! += weight * v[i]!;
+    }
+  }
+  return columnsToRows(columns, n, 1);
+}
+
+/**
+ * The least-squares solution of `A·x ≈ b` for any `m×n` matrix: the `x` that
+ * minimizes `‖A·x − b‖₂`. `b` is a vector (gives `x`, length `n`) or a matrix
+ * of right-hand-side columns (gives an `n`-row matrix of solution columns).
+ *
+ * Solved by Householder QR with column pivoting, never the normal equations
+ * `AᵀA·x = Aᵀb` (which square the condition number). When `R` shows `A` has
+ * full column rank (every `|r_kk|` above `max(m, n) · Number.EPSILON · |r₀₀|`,
+ * or above `{ tolerance }`, absolute), `x` is unique and comes from `R`. Otherwise
+ * (rank-deficient, or fewer rows than columns) infinitely many `x` fit equally
+ * well, and the one of smallest norm is returned, as NumPy's `lstsq` does: it
+ * is computed from the SVD, dropping singular values at or below
+ * `max(m, n) · Number.EPSILON · σ₁` (or `{ tolerance }`). Never throws for a
+ * singular or rank-deficient `A`.
+ */
+export function leastSquares(a: Matrix, b: Vector, options?: ToleranceOptions): number[];
+export function leastSquares(a: Matrix, b: Matrix, options?: ToleranceOptions): number[][];
+export function leastSquares(a: Matrix, b: Vector | Matrix, options?: ToleranceOptions): number[] | number[][] {
+  const [m, n] = assertMatrix(a, 'a');
+  const { columns: rhs, vector } = rightHandSides(b, m);
+  const explicit = options?.tolerance === undefined ? undefined : resolveTolerance(options, () => 0);
+  if (m >= n) {
+    const { work: columns, scale } = scaledVectors(a, m, n, true);
+    const { tau, permutation } = householderQr(columns, m, true);
+    const tolerance = explicit === undefined ? m * EPS * Math.abs(columns[0]![0]!) : explicit * scale;
+    let fullRank = true;
+    for (let k = 0; k < n; k++) if (!(Math.abs(columns[k]![k]!) > tolerance)) fullRank = false;
+    if (fullRank) {
+      const solutions = bufferRows(rhs.length, n);
+      for (const [c, y] of rhs.entries()) {
+        applyQTranspose(columns, tau, m, y);
+        backSubstitute(columns, n, y);
+        const x = solutions[c]!;
+        for (let k = 0; k < n; k++) x[permutation[k]!] = y[k]!;
+      }
+      // (s·A)·x_s = b, so x = s·x_s.
+      return solutionOutput(solutions, n, scale, vector);
+    }
+  }
+  const { values, left, right, scale } = svdOf(a, m, n, true);
+  const tolerance = explicit === undefined ? Math.max(m, n) * EPS * values[0]! : explicit * scale;
+  const solutions = bufferRows(rhs.length, n);
+  for (const [c, y] of rhs.entries()) {
+    const x = solutions[c]!;
+    for (const [k, value] of values.entries()) {
+      if (!(value > tolerance)) break;
+      const u = left[k]!;
+      const v = right[k]!;
+      let projection = 0;
+      for (let i = 0; i < m; i++) projection += u[i]! * y[i]!;
+      const weight = projection / value;
+      for (let i = 0; i < n; i++) x[i]! += weight * v[i]!;
+    }
+  }
+  return solutionOutput(solutions, n, scale, vector);
 }
