@@ -4,6 +4,11 @@ import { decimal } from './decimal.js';
 import { DivisionByZeroError, InvalidArgumentError, NumberFormatError, RoundingNecessaryError } from './errors.js';
 import { isRational, ratio } from './rational.js';
 
+// Node's `util.inspect` and Deno's console both look this symbol up on the object.
+function inspectWith(value: object, hook: symbol): unknown {
+  return Reflect.apply(Reflect.get(value, hook) as () => string, value, []);
+}
+
 describe('ratio() construction', () => {
   it('builds equal values from different spellings', () => {
     const third = ratio(1, 3);
@@ -38,8 +43,14 @@ describe('ratio() construction', () => {
     expect(() => ratio('abc')).toThrow(NumberFormatError);
     expect(() => ratio(1.5, 2)).toThrow();
   });
-  it('is frozen and recognized', () => {
-    expect(Object.isFrozen(ratio(1, 2))).toBe(true);
+  it('is not frozen and is recognized', () => {
+    // Results are deliberately not frozen. `Object.freeze` on every result made an
+    // inlined `times` loop 5–7× slower (Bun 25.9 → 3.7 ns, Node 40.7 → 7.3 ns,
+    // measured 2026-10-14), and no peer (decimal.js, big.js, bignumber.js,
+    // fraction.js, complex.js) freezes. The guarantee is that no method modifies its
+    // operands; the shared constants that arithmetic returns are frozen instead.
+    expect(Object.isFrozen(ratio(1, 2))).toBe(false);
+    expect(Object.isFrozen(ratio(1, 2).times(3))).toBe(false);
     expect(isRational(ratio(1, 2))).toBe(true);
     expect(isRational(decimal(1))).toBe(false);
   });
@@ -160,5 +171,46 @@ describe('approximate', () => {
   });
   it('rejects a limit below 1', () => {
     expect(() => ratio(1, 3).approximate(0)).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('immutability without freezing', () => {
+  it('leaves the receiver and the operand unchanged after success and failure, frozen or not', () => {
+    for (const freeze of [false, true]) {
+      const a = ratio(-3, 4);
+      const b = ratio(2, 3);
+      if (freeze) {
+        Object.freeze(a);
+        Object.freeze(b);
+      }
+      expect(a.plus(b).toString()).toBe('-1/12');
+      expect(a.minus(b).toString()).toBe('-17/12');
+      expect(a.times(b).toString()).toBe('-1/2');
+      expect(a.dividedBy(b).toString()).toBe('-9/8');
+      expect(a.pow(-2).toString()).toBe('16/9');
+      expect(() => a.dividedBy(0)).toThrow(DivisionByZeroError);
+      expect(() => b.minus(b).inverse()).toThrow(DivisionByZeroError);
+      expect([a.numerator, a.denominator, b.numerator, b.denominator]).toEqual([-3n, 4n, 2n, 3n]);
+    }
+  });
+
+  it('freezes the shared zero that zero sums and products return', () => {
+    // Every zero result is one module-wide 0/1. If a caller could write to it,
+    // every later zero product and zero sum would come out wrong.
+    const zero = ratio(1, 3).times(0);
+    expect(Object.isFrozen(zero)).toBe(true);
+    expect(() => Object.assign(zero, { numerator: 5n })).toThrow(TypeError);
+    expect(ratio(2, 3).times(0).toString()).toBe('0');
+    expect(ratio(1, 6).plus(ratio(-1, 6)).toString()).toBe('0');
+    expect(ratio(0, 7).plus(ratio(1, 2)).toString()).toBe('1/2');
+  });
+
+  it('keeps its JSON text, console display and plain-data shape', () => {
+    const r = ratio(-1, 3);
+    expect(JSON.stringify({ r })).toBe('{"r":"-1/3"}');
+    expect(ratio(r.toJSON()).eq(r)).toBe(true);
+    expect(inspectWith(r, Symbol.for('nodejs.util.inspect.custom'))).toBe('Rational(-1/3)');
+    expect(Object.keys(r)).toEqual(['numerator', 'denominator']);
+    expect(Object.fromEntries(Object.entries(r))).toEqual({ numerator: -1n, denominator: 3n });
   });
 });

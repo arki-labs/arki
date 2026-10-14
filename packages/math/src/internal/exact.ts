@@ -91,10 +91,15 @@ function toBigIntInput(value: IntegerInput, what: string): bigint {
 // ---------------------------------------------------------------------------
 
 /**
- * An exact finite decimal: `coefficient × 10^-scale`. Immutable. The scale
- * is retained, so `'1.10'` stays `1.10` and `'1.10' × 3` is `3.30` — what a
+ * An exact finite decimal: `coefficient × 10^-scale`. The scale is retained,
+ * so `'1.10'` stays `1.10` and `'1.10' × 3` is `3.30` — what a
  * person expects from money and measurements. Equality is numeric:
  * `decimal('1.0').eq('1.00')` is `true`.
+ *
+ * Immutable: methods never modify their operands and the fields are `readonly`.
+ * Instances are not frozen — `Object.freeze` per result cost 5–7× in hot loops,
+ * and no peer library (decimal.js, big.js, fraction.js, complex.js) freezes —
+ * but the shared constants arithmetic can return are frozen.
  */
 export class Decimal {
   readonly coefficient: bigint;
@@ -104,7 +109,6 @@ export class Decimal {
     if (brand !== BRAND) throw new TypeError('Use decimal(value) instead of new Decimal()');
     this.coefficient = coefficient;
     this.scale = scale;
-    Object.freeze(this);
   }
 
   /** @internal */
@@ -395,7 +399,8 @@ function align(a: Decimal, b: Decimal): [bigint, bigint, number] {
   return [a.coefficient * pow10(b.scale - a.scale), b.coefficient, b.scale];
 }
 
-const ONE = Decimal.fromParts({ coefficient: 1n, scale: 0 });
+// Frozen: `pow(0)` returns it, and `pow(-n)` divides by it.
+const ONE = Object.freeze(Decimal.fromParts({ coefficient: 1n, scale: 0 }));
 
 export function decimal(value: DecimalInput): Decimal {
   return Decimal.from(value);
@@ -421,8 +426,13 @@ export type MixedNumber = {
 
 /**
  * An exact fraction of two bigints, always reduced, denominator always
- * positive, zero always `0/1`. Immutable. Where `Decimal` must throw
- * (`1 ÷ 3`), a `Rational` just keeps going.
+ * positive, zero always `0/1`. Where `Decimal` must throw (`1 ÷ 3`), a
+ * `Rational` just keeps going.
+ *
+ * Immutable: methods never modify their operands and the fields are `readonly`.
+ * Instances are not frozen — `Object.freeze` per result cost 5–7× in hot loops,
+ * and no peer library (decimal.js, big.js, fraction.js, complex.js) freezes —
+ * but the shared constants arithmetic can return are frozen.
  */
 export class Rational {
   readonly numerator: bigint;
@@ -432,7 +442,6 @@ export class Rational {
     if (brand !== BRAND) throw new TypeError('Use ratio(value) instead of new Rational()');
     this.numerator = numerator;
     this.denominator = denominator;
-    Object.freeze(this);
   }
 
   /** Normalizes sign and reduces by the GCD. */
@@ -721,7 +730,8 @@ export function ratio(first: RationalInput, second?: IntegerInput): Rational {
   return Rational.fromParts(toBigIntInput(first as IntegerInput, 'numerator'), toBigIntInput(second, 'denominator'));
 }
 
-const RATIONAL_ZERO = Rational.fromParts(0n, 1n);
+// Frozen: zero sums and products return it.
+const RATIONAL_ZERO = Object.freeze(Rational.fromParts(0n, 1n));
 
 export function isRational(value: unknown): value is Rational {
   return value instanceof Rational;

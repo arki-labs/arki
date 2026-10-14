@@ -245,3 +245,16 @@ describe('trailing zeros do not inflate the work', () => {
     expect(sqrt(`2.${'0'.repeat(5000)}`, { scale: 5 }).toString()).toBe('1.41421');
   });
 });
+
+describe('shared constants', () => {
+  it('freezes the one that exp(0, { scale: 0 }) returns, so no caller can corrupt later results', () => {
+    // exp(0) at scale 0 returns the module-wide ONE that ln, log and pow also use.
+    const one = exp(0, { scale: 0 });
+    expect(Object.isFrozen(one)).toBe(true);
+    expect(() => Object.assign(one, { coefficient: 7n })).toThrow(TypeError);
+    expect(exp(0, { scale: 0 }).toString()).toBe('1');
+    expect(ln(1, { scale: 2 }).toString()).toBe('0.00');
+    expect(pow(1, '0.5', { scale: 0 }).toString()).toBe('1');
+    expect(pow(4, -1, { scale: 2 }).toString()).toBe('0.25');
+  });
+});

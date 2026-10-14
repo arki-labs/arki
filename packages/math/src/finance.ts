@@ -80,7 +80,7 @@ const GUARD_DIGITS = 10;
 /** Most rows `amortizationSchedule` builds; more throws `ResourceLimitError`. */
 const MAX_SCHEDULE_PERIODS = 100_000;
 
-const ONE = Decimal.from(1);
+const ONE = Object.freeze(Decimal.from(1));
 
 function resolveRounding(options: ScaleOptions): RoundingMode {
   return options.rounding ?? 'halfEven';

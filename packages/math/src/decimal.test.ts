@@ -12,6 +12,11 @@ import {
 } from './errors.js';
 import { ROUNDING_MODES } from './rounding.js';
 
+// Node's `util.inspect` and Deno's console both look this symbol up on the object.
+function inspectWith(value: object, hook: symbol): unknown {
+  return Reflect.apply(Reflect.get(value, hook) as () => string, value, []);
+}
+
 describe('decimal() construction', () => {
   it('reads numbers through their shortest spelling', () => {
     expect(decimal(0.1).toString()).toBe('0.1');
@@ -72,8 +77,14 @@ describe('decimal() construction', () => {
     expect(() => decimal('1e-10001')).toThrow(ResourceLimitError);
     expect(decimal('1'.repeat(10_000)).toString()).toHaveLength(10_000);
   });
-  it('is frozen and recognized by isDecimal', () => {
-    expect(Object.isFrozen(decimal(1))).toBe(true);
+  it('is not frozen and is recognized by isDecimal', () => {
+    // Results are deliberately not frozen. `Object.freeze` on every result made an
+    // inlined `times` loop 5–7× slower (Bun 25.9 → 3.7 ns, Node 40.7 → 7.3 ns,
+    // measured 2026-10-14), and no peer (decimal.js, big.js, bignumber.js,
+    // fraction.js, complex.js) freezes. The guarantee is that no method modifies its
+    // operands; the shared constants that arithmetic returns are frozen instead.
+    expect(Object.isFrozen(decimal(1))).toBe(false);
+    expect(Object.isFrozen(decimal('1.5').times(2))).toBe(false);
     expect(isDecimal(decimal(1))).toBe(true);
     expect(isDecimal('1')).toBe(false);
     expect(isDecimal({ coefficient: 1n, scale: 0 })).toBe(false);
@@ -411,5 +422,47 @@ describe('string parsing matches the documented syntax', () => {
     }
     const value = decimal(text);
     expect({ coefficient: value.coefficient, scale: value.scale }).toEqual(expected);
+  });
+});
+
+describe('immutability without freezing', () => {
+  it('leaves the receiver and the operand unchanged after success and failure, frozen or not', () => {
+    for (const freeze of [false, true]) {
+      const a = decimal('12.50');
+      const b = decimal('-0.3');
+      if (freeze) {
+        Object.freeze(a);
+        Object.freeze(b);
+      }
+      expect(a.plus(b).toString()).toBe('12.20');
+      expect(a.minus(b).toString()).toBe('12.80');
+      expect(a.times(b).toString()).toBe('-3.750');
+      expect(a.dividedBy(b, { scale: 2, rounding: 'halfEven' }).toString()).toBe('-41.67');
+      expect(a.mod(b).toString()).toBe('0.20');
+      expect(a.pow(-2).toString()).toBe('0.0064');
+      expect(() => a.dividedBy(b)).toThrow(RoundingNecessaryError);
+      expect(() => a.dividedBy(0)).toThrow(DivisionByZeroError);
+      expect(() => a.mod(0)).toThrow(DivisionByZeroError);
+      expect([a.coefficient, a.scale, b.coefficient, b.scale]).toEqual([1250n, 2, -3n, 1]);
+    }
+  });
+
+  it('freezes the shared one that pow(0) returns, so no caller can corrupt later results', () => {
+    // pow(0) returns a module-wide ONE, and pow(-n) divides by that same ONE.
+    // If a caller could write to it, `decimal(4).pow(-1)` would come out wrong.
+    const one = decimal(2).pow(0);
+    expect(Object.isFrozen(one)).toBe(true);
+    expect(() => Object.assign(one, { coefficient: 7n })).toThrow(TypeError);
+    expect(decimal(4).pow(-1).toString()).toBe('0.25');
+    expect(decimal(9).pow(0).toString()).toBe('1');
+  });
+
+  it('keeps its JSON text, console display and plain-data shape', () => {
+    const d = decimal('-1.50');
+    expect(JSON.stringify({ d })).toBe('{"d":"-1.50"}');
+    expect(decimal(d.toJSON()).toString()).toBe('-1.50');
+    expect(inspectWith(d, Symbol.for('nodejs.util.inspect.custom'))).toBe('Decimal(-1.50)');
+    expect(Object.keys(d)).toEqual(['coefficient', 'scale']);
+    expect(Object.fromEntries(Object.entries(d))).toEqual({ coefficient: -150n, scale: 2 });
   });
 });

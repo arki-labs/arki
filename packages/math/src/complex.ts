@@ -124,11 +124,17 @@ function imaginaryText(x: number): string {
 }
 
 /**
- * An immutable complex number `re + im·i` with finite float parts. Create one
- * with `complex(3, 4)`, `complex('3+4i')` or `Complex.fromPolar(r, theta)`.
+ * A complex number `re + im·i` with finite float parts. Create one with
+ * `complex(3, 4)`, `complex('3+4i')` or `Complex.fromPolar(r, theta)`.
  * Equality (`eq`) is exact; use `approxEqual` after float arithmetic.
+ *
+ * Immutable: methods never modify their operands and the fields are `readonly`.
+ * Instances are not frozen — `Object.freeze` per result cost 5–7× in hot loops,
+ * and no peer library (decimal.js, big.js, fraction.js, complex.js) freezes —
+ * but the shared constants arithmetic can return are frozen.
  */
 export class Complex {
+  // Frozen below the class: arithmetic returns them (`pow`, `sqrt`, `inverse`).
   static readonly ZERO: Complex = new Complex(0, 0, BRAND);
   static readonly ONE: Complex = new Complex(1, 0, BRAND);
   static readonly I: Complex = new Complex(0, 1, BRAND);
@@ -140,7 +146,6 @@ export class Complex {
     if (brand !== BRAND) throw new TypeError('Use complex(re, im) instead of new Complex()');
     this.re = re;
     this.im = im;
-    Object.freeze(this);
   }
 
   /** Builds `re + im·i` from finite parts. `-0` becomes `0`. */
@@ -459,6 +464,10 @@ export class Complex {
 
   readonly [Symbol.toStringTag] = 'Complex';
 }
+
+Object.freeze(Complex.ZERO);
+Object.freeze(Complex.ONE);
+Object.freeze(Complex.I);
 
 /** `complex(3, 4)` is `3 + 4i`; `complex(5)` is real; `complex('3+4i')` parses. */
 export function complex(re: number, im?: number): Complex;

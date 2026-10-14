@@ -54,7 +54,8 @@ const MAX_RADICAND_DIGITS = 200_000;
 /** Largest power built while checking whether a logarithm is exact, in digits. */
 const MAX_EXACT_CHECK_DIGITS = 4 * MAX_DIGITS;
 
-const ONE = Decimal.from(1);
+// Frozen: `exp(0, { scale: 0 })` and `pow(1, …)` can return it.
+const ONE = Object.freeze(Decimal.from(1));
 
 function zeroAt(scale: number): Decimal {
   return Decimal.fromParts({ coefficient: 0n, scale });

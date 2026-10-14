@@ -317,3 +317,59 @@ describe('comparison', () => {
     expect(z.approxEqual(z, 0)).toBe(true);
   });
 });
+
+describe('immutability without freezing', () => {
+  // Results are deliberately not frozen. `Object.freeze` on every result made an
+  // inlined `times` loop 5–7× slower (Bun 25.9 → 3.7 ns, Node 40.7 → 7.3 ns,
+  // measured 2026-10-14), and no peer (decimal.js, big.js, bignumber.js,
+  // fraction.js, complex.js) freezes. The guarantee is that no method modifies its
+  // operands; the shared constants that arithmetic returns are frozen instead.
+  it('does not freeze results', () => {
+    expect(Object.isFrozen(complex(1, 2))).toBe(false);
+    expect(Object.isFrozen(complex(1, 2).times(complex(3, 4)))).toBe(false);
+  });
+
+  it('leaves the receiver and the operand unchanged after success and failure, frozen or not', () => {
+    for (const freeze of [false, true]) {
+      const a = complex(3, -4);
+      const b = complex(0.5, 2);
+      if (freeze) {
+        Object.freeze(a);
+        Object.freeze(b);
+      }
+      expect(a.plus(b).eq(complex(3.5, -2))).toBe(true);
+      expect(a.times(b).eq(complex(9.5, 4))).toBe(true);
+      expect(a.dividedBy(b).times(b).approxEqual(a)).toBe(true);
+      expect(a.sqrt().eq(complex(2, -1))).toBe(true);
+      expect(a.pow(b).ln().exp().approxEqual(a.pow(b))).toBe(true);
+      expect(a.nthRoots(3)).toHaveLength(3);
+      expect(() => a.dividedBy(0)).toThrow(DivisionByZeroError);
+      expect(() => complex(0).pow(complex(-1, 1))).toThrow(DivisionByZeroError);
+      expect([a.re, a.im, b.re, b.im]).toEqual([3, -4, 0.5, 2]);
+    }
+  });
+
+  it('freezes ZERO, ONE and I, which arithmetic returns as results', () => {
+    // pow(0) returns Complex.ONE, sqrt(0) and 0^n return Complex.ZERO, and
+    // inverse() divides Complex.ONE. If a caller could write to them, later
+    // inverses, roots and powers would come out wrong.
+    expect([Complex.ZERO, Complex.ONE, Complex.I].every(c => Object.isFrozen(c))).toBe(true);
+    const one = complex(2, 3).pow(0);
+    const zero = complex(0).sqrt();
+    expect(() => Object.assign(one, { re: 5 })).toThrow(TypeError);
+    expect(() => Object.assign(zero, { im: 5 })).toThrow(TypeError);
+    expect(complex(4).pow(-1).eq(complex(0.25))).toBe(true);
+    expect(complex(4).inverse().eq(complex(0.25))).toBe(true);
+    expect(complex(-4).sqrt().eq(complex(0, 2))).toBe(true);
+    expect(complex(0).pow(2).isZero()).toBe(true);
+    expect(complex(0).times(complex(3, 4)).isZero()).toBe(true);
+    expect(complex(8).nthRoots(3)[0]?.approxEqual(complex(2))).toBe(true);
+  });
+
+  it('keeps its JSON text and plain-data shape', () => {
+    const z = complex(3, -4);
+    expect(complex(z.toJSON()).eq(z)).toBe(true);
+    expect(Object.keys(z)).toEqual(['re', 'im']);
+    expect(Object.fromEntries(Object.entries(z))).toEqual({ re: 3, im: -4 });
+  });
+});
