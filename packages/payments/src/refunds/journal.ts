@@ -58,12 +58,18 @@ export const requestRefundInputSchema = z.object({
   metadata: z.string().nullable().optional(),
 });
 
-export const approveRefundInputSchema = z.object({ refundId: refundIdSchema, approvedBy: userIdSchema });
+export const approveRefundInputSchema = z.object({
+  refundId: refundIdSchema,
+  approvedBy: userIdSchema,
+  /** The approver's notes. Left out or null: none. */
+  notes: z.string().nullable().optional(),
+});
 
 export const rejectRefundInputSchema = z.object({
   refundId: refundIdSchema,
   rejectedBy: userIdSchema,
-  rejectionReason: z.string(),
+  /** The customer-facing why. A blank reason says nothing, so it is turned down. */
+  rejectionReason: z.string().trim().min(1),
 });
 
 export const processRefundInputSchema = z.object({ refundId: refundIdSchema });
@@ -132,7 +138,8 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
     'RefundRequestedV2',
     z.object({ ...refundRequest, originalAmount: moneyJsonSchema, refundAmount: moneyJsonSchema }),
   );
-  const RefundApproved = j.event('RefundApproved', z.object({ approvedBy: userIdSchema }));
+  // `notes` is optional: refunds approved before approval notes existed have events without it
+  const RefundApproved = j.event('RefundApproved', z.object({ approvedBy: userIdSchema, notes: z.string().nullable().optional() }));
   const RefundRejected = j.event('RefundRejected', z.object({ rejectedBy: userIdSchema, rejectionReason: z.string() }));
   /** The refund was handed to the provider. The provider's refund id is not known yet. */
   const RefundProcessed = j.event('RefundProcessed', z.object({}));
@@ -162,6 +169,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
     approvedBy: null,
     rejectedBy: null,
     rejectionReason: null,
+    approvalNotes: null,
     requestedAt: at,
     approvedAt: null,
     processedAt: null,
@@ -196,6 +204,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
     .on(RefundApproved, (_row, e) => ({
       status: 'approved',
       approvedBy: e.data.approvedBy,
+      approvalNotes: e.data.notes ?? null,
       approvedAt: fromDate(e.recordedAt),
       updatedAt: fromDate(e.recordedAt),
     }))
@@ -269,7 +278,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
         throw new CommandError('CONFLICT', `Cannot approve refund with status ${current.status}`);
       }
 
-      return [RefundApproved({ approvedBy: input.approvedBy })];
+      return [RefundApproved({ approvedBy: input.approvedBy, notes: input.notes ?? null })];
     }),
   );
 

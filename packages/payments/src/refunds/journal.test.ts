@@ -312,6 +312,27 @@ describe('approveRefund and rejectRefund', () => {
     expect(row?.approvedAt).toEqual(recordedAtOf(result.events[0]));
   });
 
+  it("keeps the approver's notes on the row", async () => {
+    const refundId = await seed('pending');
+
+    await journal.run(db, commands.approveRefund, { refundId, approvedBy: adminId, notes: 'seen the receipt' }, meta);
+
+    expect(await rowOf(refundId)).toMatchObject({ status: 'approved', approvalNotes: 'seen the receipt' });
+  });
+
+  it('refuses a rejection with a blank reason and writes nothing', async () => {
+    const refundId = await seed('pending');
+    const eventsBefore = await countEvents(db);
+
+    const error = await rejectionOf(
+      journal.run(db, commands.rejectRefund, { refundId, rejectedBy: adminId, rejectionReason: '  ' }, meta),
+    );
+
+    expect(error).toBeDefined();
+    expect(await countEvents(db)).toBe(eventsBefore);
+    expect(await rowOf(refundId)).toMatchObject({ status: 'pending' });
+  });
+
   it('rejects approving a refund twice, so the provider is not asked to refund twice', async () => {
     const refundId = await seed('approved');
 

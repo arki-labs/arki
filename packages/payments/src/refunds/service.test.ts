@@ -26,6 +26,7 @@ import { toMinorColumn } from '../core/money.js';
 import { createPaymentId } from '../core/primitives.js';
 import { coreReads, refundReads, refundRow, runnerOn, seedPayment } from '../service-test-support.js';
 import { adminId, countEvents, customerId, eventTypesOf, openDb, rejectionOf, typed, userId } from '../test-support.js';
+import { createRefundId } from './primitives.js';
 import { RefundService } from './service.js';
 
 type Provider = ConstructorParameters<typeof RefundService>[2];
@@ -353,5 +354,106 @@ describe('rejectRefund', () => {
 
     expect(refund).toMatchObject({ status: 'rejected', rejectedBy: adminId, rejectionReason: 'outside policy' });
     expect(await eventTypesOf(db, 'refund', pending.id)).toEqual(['RefundRequestedV2', 'RefundRejected']);
+  });
+});
+
+describe('approval notes, missing refunds, empty reasons and double requests', () => {
+  it("the approver's notes are kept on the refund and in its event", async () => {
+    const service = serviceWith(providerThatRefunds);
+    const pending = await pendingRefund(service);
+
+    const refund = await service.approveRefund({
+      refundId: pending.id,
+      approvedBy: adminId,
+      notes: 'checked with the customer',
+    });
+
+    expect(refund).toMatchObject({ status: 'completed', approvalNotes: 'checked with the customer' });
+    expect(await refundRow(db, pending.id)).toMatchObject({ approvalNotes: 'checked with the customer' });
+  });
+
+  it('an approval without notes leaves them empty', async () => {
+    const service = serviceWith(providerThatRefunds);
+    const pending = await pendingRefund(service);
+
+    const refund = await service.approveRefund({ refundId: pending.id, approvedBy: adminId });
+
+    expect(refund.approvalNotes).toBeNull();
+  });
+
+  it('approving a refund that does not exist is a REFUND_NOT_FOUND error, not a plain failure', async () => {
+    const eventsBefore = await countEvents(db);
+
+    const error = await rejectionOf(
+      serviceWith(providerThatRefunds).approveRefund({ refundId: createRefundId(), approvedBy: adminId }),
+    );
+
+    expect(error).toMatchObject({ name: 'RefundError', code: 'REFUND_NOT_FOUND' });
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  it('rejecting a refund that does not exist is a REFUND_NOT_FOUND error', async () => {
+    const error = await rejectionOf(
+      serviceWith(providerThatRefunds).rejectRefund({ refundId: createRefundId(), rejectedBy: adminId, reason: 'no' }),
+    );
+
+    expect(error).toMatchObject({ name: 'RefundError', code: 'REFUND_NOT_FOUND' });
+  });
+
+  it.each(['', '   '])('a rejection with the reason %j is refused and the refund stays pending', async reason => {
+    const service = serviceWith(providerThatRefunds);
+    const pending = await pendingRefund(service);
+    const eventsBefore = await countEvents(db);
+
+    const error = await rejectionOf(service.rejectRefund({ refundId: pending.id, rejectedBy: adminId, reason }));
+
+    expect(error).toMatchObject({ name: 'RefundError', code: 'REASON_REQUIRED' });
+    expect(await countEvents(db)).toBe(eventsBefore);
+    expect(await refundRow(db, pending.id)).toMatchObject({ status: 'pending', rejectionReason: null });
+  });
+
+  it('a second request for a payment that already has a pending refund is refused', async () => {
+    const service = serviceWith(providerThatRefunds);
+    const payment = await seedPayment(coreWrites, null, '100');
+    await service.requestRefund({
+      paymentId: payment.id,
+      amount: money(40, 'USD'),
+      reason: 'customer_request',
+      requestedBy: userId,
+    });
+    const eventsBefore = await countEvents(db);
+
+    const error = await rejectionOf(
+      service.requestRefund({
+        paymentId: payment.id,
+        amount: money(20, 'USD'),
+        reason: 'customer_request',
+        requestedBy: userId,
+      }),
+    );
+
+    expect(error).toMatchObject({ name: 'RefundError', code: 'DUPLICATE_PENDING_REFUND' });
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  it('once the first refund is decided, the payment can be refunded again', async () => {
+    const service = serviceWith(providerThatRefunds);
+    const payment = await seedPayment(coreWrites, null, '100');
+    const first = await service.requestRefund({
+      paymentId: payment.id,
+      amount: money(40, 'USD'),
+      reason: 'customer_request',
+      requestedBy: userId,
+    });
+    await service.rejectRefund({ refundId: first.id, rejectedBy: adminId, reason: 'outside policy' });
+
+    const second = await service.requestRefund({
+      paymentId: payment.id,
+      amount: money(20, 'USD'),
+      reason: 'customer_request',
+      requestedBy: userId,
+    });
+
+    expect(second).toMatchObject({ status: 'pending' });
   });
 });

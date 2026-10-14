@@ -41,6 +41,8 @@ export function createRefundsTables({ schema, paymentIdRef, userIdRef }: CreateR
     approvedBy: userFk.optional('approved_by'),
     rejectedBy: userFk.optional('rejected_by'),
     rejectionReason: text('rejection_reason'),
+    /** What the approver wrote when approving. Null when they wrote nothing. */
+    approvalNotes: text('approval_notes'),
     requestedAt: instant('requested_at').default(sql`now()`),
     approvedAt: instant('approved_at'),
     processedAt: instant('processed_at'),
