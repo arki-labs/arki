@@ -126,6 +126,10 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
       receiptUrl: text('receipt_url'),
       refunded: boolean('refunded').notNull().default(false),
       refundedAmountMinor: bigint('refunded_amount_minor', { mode: 'number' }).notNull().default(0),
+      /** The provider's dispute (chargeback) on this payment, set when the customer's bank opens one. */
+      disputeId: varchar('dispute_id', { length: 255 }),
+      /** The dispute's status as the provider reports it, such as `needs_response`. Null: no dispute. */
+      disputeStatus: varchar('dispute_status', { length: 64 }),
       metadata: jsonb('metadata').$type<Record<string, unknown>>(),
       createdAt: instant('created_at').notNull().default(sql`now()`),
       updatedAt: instant('updated_at').notNull().default(sql`now()`),

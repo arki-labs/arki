@@ -417,6 +417,11 @@ function stripeIntent(id: string, fields: Record<string, unknown> = {}) {
   return { id, object: 'payment_intent', last_payment_error: null, ...fields };
 }
 
+/** A Stripe Charge object, as `charge.refunded` events carry it. */
+function stripeCharge(paymentIntent: string | null, fields: Record<string, unknown> = {}) {
+  return { id: 'ch_test', object: 'charge', payment_intent: paymentIntent, amount_refunded: 0, currency: 'usd', ...fields };
+}
+
 async function subscriptionRowOf(providerSubscriptionId: string) {
   const [row] = await db
     .select()
@@ -517,6 +522,70 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
       failureReason: 'Your card was declined.',
     });
     expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual(['PaymentInitiatedV2', 'PaymentFailed']);
+  });
+
+  it('payment.refunded records the total Stripe refunded on a collected payment', async () => {
+    const seeded = await seedPayment(writesOn(db), null, '25');
+    await writesOn(db).completePayment({ paymentId: seeded.id });
+    const charge = stripeCharge(seeded.providerPaymentId, { amount_refunded: 1000, currency: 'usd' });
+
+    expect(await deliver(stateHandler('payment.refunded', charge), freshEventId())).toMatchObject({ success: true });
+    // Stripe sends the whole total again on a resend: nothing changes
+    expect(await deliver(stateHandler('payment.refunded', charge), freshEventId())).toMatchObject({ success: true });
+
+    expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ refunded: true, refundedAmountMinor: 1000 });
+    expect(await eventTypesOf(db, 'payment', seeded.id)).toEqual([
+      'PaymentInitiatedV2',
+      'PaymentCompleted',
+      'PaymentRefundRecorded',
+    ]);
+  });
+
+  it('payment.refunded before the payment is collected fails and is retried, so the refund is not lost', async () => {
+    const seeded = await seedPayment(writesOn(db), null);
+    const eventId = freshEventId();
+
+    const result = await deliver(
+      stateHandler('payment.refunded', stripeCharge(seeded.providerPaymentId, { amount_refunded: 500 })),
+      eventId,
+    );
+
+    expect(result).toMatchObject({ success: false, retryable: true });
+    expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({ refunded: false, refundedAmountMinor: 0 });
+  });
+
+  it('payment.refunded for a charge without a payment intent is acknowledged and records nothing', async () => {
+    const eventsBefore = await countEvents(db);
+
+    const result = await deliver(
+      stateHandler('payment.refunded', stripeCharge(null, { amount_refunded: 500 })),
+      freshEventId(),
+    );
+
+    expect(result).toMatchObject({ success: true });
+    expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  it('payment.dispute_created records the dispute on the payment', async () => {
+    const seeded = await seedPayment(writesOn(db), null);
+    await writesOn(db).completePayment({ paymentId: seeded.id });
+    const dispute = {
+      id: 'dp_webhook_1',
+      object: 'dispute',
+      payment_intent: seeded.providerPaymentId,
+      status: 'needs_response',
+      reason: 'fraudulent',
+    };
+
+    expect(await deliver(stateHandler('payment.dispute_created', dispute), freshEventId())).toMatchObject({
+      success: true,
+    });
+
+    expect(await paymentRowOf(seeded.providerPaymentId)).toMatchObject({
+      disputeId: 'dp_webhook_1',
+      disputeStatus: 'needs_response',
+    });
+    expect(await eventTypesOf(db, 'payment', seeded.id)).toContain('PaymentDisputeRecorded');
   });
 
   it('payment.requires_action marks a pending payment as waiting for the customer', async () => {

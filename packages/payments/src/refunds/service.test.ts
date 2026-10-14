@@ -63,6 +63,8 @@ const providerThatRefunds: Provider = {
       receiptUrl: null,
       refunded: true,
       refundedAmountMinor: toMinorColumn(refunded),
+      disputeId: null,
+      disputeStatus: null,
       metadata: null,
       createdAt: refundedOn,
       updatedAt: refundedOn,

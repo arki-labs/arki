@@ -2,13 +2,19 @@ import { EventEmitter } from 'node:events';
 
 import { now, sub } from '@arki/date';
 import { getLogger } from '@arki/log';
+import { fromStripeAmount } from '@arki/money/stripe';
 
 import type { CoreWrites } from '../journal.js';
 import type { PaymentRepository } from '../repository.js';
 import type { PaymentProviderType, PaymentStatus, WebhookEventType, WebhookId } from '../types.js';
 import type { WebhookSecurityService } from './webhook-security.js';
 import { createWebhookId } from '../primitives.js';
-import { parseStripePaymentIntent, parseStripeSubscription } from './webhook-event-payloads.js';
+import {
+  parseStripeCharge,
+  parseStripeDispute,
+  parseStripePaymentIntent,
+  parseStripeSubscription,
+} from './webhook-event-payloads.js';
 
 /** Logs ids and event types only, never event data. */
 const logger = getLogger('arki:payments:webhook');
@@ -31,7 +37,12 @@ export type WebhookValidator = Pick<WebhookSecurityService, 'validateWebhook'>;
 /** The journal writes the handler makes. A `CoreWrites` satisfies it. */
 export type WebhookWrites = Pick<
   CoreWrites,
-  'syncSubscription' | 'completePayment' | 'failPayment' | 'markPaymentRequiresAction'
+  | 'syncSubscription'
+  | 'completePayment'
+  | 'failPayment'
+  | 'markPaymentRequiresAction'
+  | 'recordPaymentRefund'
+  | 'recordPaymentDispute'
 >;
 
 /** What a payment event says happened at the provider. */
@@ -376,6 +387,14 @@ export class WebhookHandler extends EventEmitter {
     });
 
     // Payment events
+    this.eventHandlers.set('payment.refunded', async (data: WebhookEventData) => {
+      await this.handlePaymentRefunded(data);
+    });
+
+    this.eventHandlers.set('payment.dispute_created', async (data: WebhookEventData) => {
+      await this.handlePaymentDisputeCreated(data);
+    });
+
     this.eventHandlers.set('payment.succeeded', async (data: WebhookEventData) => {
       await this.handlePaymentSucceeded(data);
     });
@@ -474,6 +493,64 @@ export class WebhookHandler extends EventEmitter {
         await this.writes.markPaymentRequiresAction({ paymentId: row.id });
         break;
       }
+    }
+  }
+
+  /**
+   * Stripe reports the total refunded so far on the charge, so a resent or out-of-order event
+   * cannot double or lower the amount. A charge made outside a PaymentIntent has no local payment.
+   */
+  private async handlePaymentRefunded(data: WebhookEventData): Promise<void> {
+    try {
+      const charge = parseStripeCharge(data.data);
+      if (charge.providerPaymentId === null) {
+        logger.warn('Refund webhook {webhookId} is for a charge without a payment intent; nothing to record', {
+          webhookId: data.webhookId,
+        });
+        return;
+      }
+
+      const row = await this.paymentRepository.findPaymentByProviderPaymentId(charge.providerPaymentId);
+      if (!row) {
+        throw new Error(`No local payment for provider payment ${charge.providerPaymentId}`);
+      }
+
+      const refundedAmount = fromStripeAmount(charge.amountRefunded, charge.currency).toJSON();
+      await this.writes.recordPaymentRefund({ paymentId: row.id, refundedAmount });
+
+      this.emit('payment:refunded', { paymentData: data.data, webhookId: data.webhookId });
+    } catch (error) {
+      throw new Error(`Failed to handle payment refunded: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private async handlePaymentDisputeCreated(data: WebhookEventData): Promise<void> {
+    try {
+      const dispute = parseStripeDispute(data.data);
+      if (dispute.providerPaymentId === null) {
+        logger.warn('Dispute webhook {webhookId} is for a charge without a payment intent; nothing to record', {
+          webhookId: data.webhookId,
+        });
+        return;
+      }
+
+      const row = await this.paymentRepository.findPaymentByProviderPaymentId(dispute.providerPaymentId);
+      if (!row) {
+        throw new Error(`No local payment for provider payment ${dispute.providerPaymentId}`);
+      }
+
+      await this.writes.recordPaymentDispute({
+        paymentId: row.id,
+        disputeId: dispute.disputeId,
+        status: dispute.status,
+        reason: dispute.reason,
+      });
+
+      this.emit('payment:dispute_created', { paymentData: data.data, webhookId: data.webhookId });
+    } catch (error) {
+      throw new Error(
+        `Failed to handle payment dispute created: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
     }
   }
 

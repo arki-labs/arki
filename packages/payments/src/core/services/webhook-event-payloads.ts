@@ -39,6 +39,28 @@ const stripePaymentIntentEvent = z.object({
   }),
 });
 
+const stripeChargeEvent = z.object({
+  data: z.object({
+    object: z.object({
+      id: z.string().min(1),
+      payment_intent: z.string().min(1).nullish(),
+      amount_refunded: z.number().int().min(0),
+      currency: z.string().length(3),
+    }),
+  }),
+});
+
+const stripeDisputeEvent = z.object({
+  data: z.object({
+    object: z.object({
+      id: z.string().min(1),
+      payment_intent: z.string().min(1).nullish(),
+      status: z.string().min(1),
+      reason: z.string().nullish(),
+    }),
+  }),
+});
+
 /** What Stripe says a subscription looks like now, in the fields `syncSubscription` takes. */
 export type StripeSubscriptionSnapshot = {
   providerSubscriptionId: string;
@@ -101,5 +123,53 @@ export function parseStripePaymentIntent(event: Record<string, unknown>): Stripe
   return {
     providerPaymentId: intent.id,
     failureReason: intent.last_payment_error?.message ?? intent.last_payment_error?.code ?? null,
+  };
+}
+
+/** A refunded charge: which payment, and how much of it Stripe has refunded in total. */
+export type StripeChargeSnapshot = {
+  /** Null for a charge that was not made through a PaymentIntent: we hold no payment for it. */
+  providerPaymentId: string | null;
+  /** Total refunded so far, in Stripe's units of `currency`. */
+  amountRefunded: number;
+  currency: string;
+};
+
+/** A dispute: which payment, and where it stands. */
+export type StripeDisputeSnapshot = {
+  providerPaymentId: string | null;
+  disputeId: string;
+  status: string;
+  reason: string | null;
+};
+
+export function parseStripeCharge(event: Record<string, unknown>): StripeChargeSnapshot {
+  const result = stripeChargeEvent.safeParse(event);
+  if (!result.success) {
+    throw invalid(result.error);
+  }
+
+  const charge = result.data.data.object;
+
+  return {
+    providerPaymentId: charge.payment_intent ?? null,
+    amountRefunded: charge.amount_refunded,
+    currency: charge.currency,
+  };
+}
+
+export function parseStripeDispute(event: Record<string, unknown>): StripeDisputeSnapshot {
+  const result = stripeDisputeEvent.safeParse(event);
+  if (!result.success) {
+    throw invalid(result.error);
+  }
+
+  const dispute = result.data.data.object;
+
+  return {
+    providerPaymentId: dispute.payment_intent ?? null,
+    disputeId: dispute.id,
+    status: dispute.status,
+    reason: dispute.reason ?? null,
   };
 }

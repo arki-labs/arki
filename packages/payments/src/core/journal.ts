@@ -25,6 +25,8 @@ import type {
   FailPaymentInput,
   InitiatePaymentInput,
   MarkPaymentRequiresActionInput,
+  RecordPaymentDisputeInput,
+  RecordPaymentRefundInput,
 } from './journal/payment.js';
 import type {
   ActivateSubscriptionInput,
@@ -48,6 +50,8 @@ export {
   failPaymentInputSchema,
   initiatePaymentInputSchema,
   markPaymentRequiresActionInputSchema,
+  recordPaymentDisputeInputSchema,
+  recordPaymentRefundInputSchema,
 } from './journal/payment.js';
 export {
   activateSubscriptionInputSchema,
@@ -65,6 +69,8 @@ export type {
   FailPaymentInput,
   InitiatePaymentInput,
   MarkPaymentRequiresActionInput,
+  RecordPaymentDisputeInput,
+  RecordPaymentRefundInput,
 } from './journal/payment.js';
 export type {
   ActivateSubscriptionInput,
@@ -88,6 +94,10 @@ export type CoreWrites = {
   cancelPayment(input: CancelPaymentInput): Promise<Payment>;
   /** The customer must act (for example 3-D Secure). A payment that already waits stays as it is. */
   markPaymentRequiresAction(input: MarkPaymentRequiresActionInput): Promise<Payment>;
+  /** The provider refunded the payment. Takes the total refunded so far; a total that is not higher writes nothing. */
+  recordPaymentRefund(input: RecordPaymentRefundInput): Promise<Payment>;
+  /** A dispute opened or changed status. The same dispute and status again writes nothing. */
+  recordPaymentDispute(input: RecordPaymentDisputeInput): Promise<Payment>;
   createSubscription(input: CreateSubscriptionInput): Promise<Subscription>;
   /** Create or update by the provider's subscription id. A delivery that changes nothing writes no event. */
   syncSubscription(input: SyncSubscriptionInput): Promise<Subscription>;
@@ -119,6 +129,8 @@ export function createCoreJournal<Meta extends z.ZodObject, Tx extends Transacti
       cancelPayment: input => writtenRow(run(commands.cancelPayment, input), 'cancelPayment'),
       markPaymentRequiresAction: input =>
         writtenRow(run(commands.markPaymentRequiresAction, input), 'markPaymentRequiresAction'),
+      recordPaymentRefund: input => writtenRow(run(commands.recordPaymentRefund, input), 'recordPaymentRefund'),
+      recordPaymentDispute: input => writtenRow(run(commands.recordPaymentDispute, input), 'recordPaymentDispute'),
       createSubscription: input => writtenRow(run(commands.createSubscription, input), 'createSubscription'),
       syncSubscription: input => writtenRow(run(commands.syncSubscription, input), 'syncSubscription'),
       cancelSubscription: input => writtenRow(run(commands.cancelSubscription, input), 'cancelSubscription'),

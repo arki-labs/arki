@@ -480,6 +480,8 @@ export class StripeProvider extends BasePaymentProvider {
       receiptUrl: null,
       refunded: true,
       refundedAmountMinor: toMinorColumn(refunded),
+      disputeId: null,
+      disputeStatus: null,
       metadata: refund.metadata ? Object.fromEntries(
         Object.entries(refund.metadata).map(([k, v]) => [k, v ?? null])
       ) as Record<string, unknown> : null,

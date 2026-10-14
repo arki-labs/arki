@@ -9,6 +9,8 @@ const STRIPE_EVENT_TYPES: Readonly<Record<string, WebhookEventType>> = {
   'payment_intent.succeeded': 'payment.succeeded',
   'payment_intent.payment_failed': 'payment.failed',
   'payment_intent.requires_action': 'payment.requires_action',
+  'charge.refunded': 'payment.refunded',
+  'charge.dispute.created': 'payment.dispute_created',
   'customer.created': 'customer.created',
   'customer.updated': 'customer.updated',
   'customer.deleted': 'customer.deleted',

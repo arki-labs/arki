@@ -74,6 +74,8 @@ export const webhookEventTypeValues = [
   'payment.succeeded',
   'payment.failed',
   'payment.requires_action',
+  'payment.refunded',
+  'payment.dispute_created',
   'customer.created',
   'customer.updated',
   'customer.deleted',
