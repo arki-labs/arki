@@ -328,9 +328,9 @@ export const taxComplianceReportSchema = z.object({
     endDate: instantSchema(),
   }),
   jurisdiction: z.string(),
-  totalSales: moneyJsonSchema,
-  totalTaxCollected: moneyJsonSchema,
-  exemptSales: moneyJsonSchema,
+  totalSales: z.array(moneyJsonSchema),
+  totalTaxCollected: z.array(moneyJsonSchema),
+  exemptSales: z.array(moneyJsonSchema),
   transactions: z.number(),
   generatedAt: instantSchema(),
   summary: z.object({
@@ -344,9 +344,9 @@ export const taxComplianceReportSchema = z.object({
 export function taxComplianceReportJson(report: TaxComplianceReport): z.input<typeof taxComplianceReportSchema> {
   return {
     ...report,
-    totalSales: report.totalSales.toJSON(),
-    totalTaxCollected: report.totalTaxCollected.toJSON(),
-    exemptSales: report.exemptSales.toJSON(),
+    totalSales: report.totalSales.map(total => total.toJSON()),
+    totalTaxCollected: report.totalTaxCollected.map(total => total.toJSON()),
+    exemptSales: report.exemptSales.map(total => total.toJSON()),
     summary: {
       ...report.summary,
       topTaxCategories: report.summary.topTaxCategories.map(category => ({

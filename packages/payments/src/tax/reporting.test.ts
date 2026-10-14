@@ -19,7 +19,7 @@ import { PaymentRepository } from '../core/repository.js';
 import { runnerOn } from '../service-test-support.js';
 import { adminId, core, customerId, openDb, schema, typed, userId } from '../test-support.js';
 import { createTaxReportingService } from './reporting.js';
-import { TaxExemptionRepository } from './repository.js';
+import { createTaxRepositories } from './repository.js';
 import { createTaxTables } from './tables.js';
 
 const tax = createTaxTables({ schema });
@@ -44,6 +44,7 @@ const otherCustomerId = createCustomerId();
 let client: PGlite;
 let writes: ReturnType<typeof typed.core.writes>;
 let reporting: ReturnType<typeof createTaxReportingService>;
+let taxRepos: ReturnType<typeof createTaxRepositories>;
 let paymentCounter = 0;
 
 async function payment(options: {
@@ -77,6 +78,9 @@ beforeAll(async () => {
     ...tax.enums,
     taxJurisdictions: tax.taxJurisdictions,
     taxExemptions: tax.taxExemptions,
+    taxConfigurations: tax.taxConfigurations,
+    taxRecords: tax.taxRecords,
+    taxAuditEntries: tax.taxAuditEntries,
   });
   client = opened.client;
   const db = opened.db;
@@ -87,10 +91,8 @@ beforeAll(async () => {
     .values({ id: otherCustomerId, userId: adminId, providerCustomerId: 'cus_other', email: 'other@example.com' });
 
   const dbWithRelations = drizzle({ client, relations });
-  reporting = createTaxReportingService({
-    payments: new PaymentRepository(dbWithRelations, core),
-    exemptions: new TaxExemptionRepository(dbWithRelations, tax),
-  });
+  taxRepos = createTaxRepositories(dbWithRelations, tax);
+  reporting = createTaxReportingService({ payments: new PaymentRepository(dbWithRelations, core), ...taxRepos });
 
   const exemption = (customer: string, status: 'active' | 'revoked', validFrom: string, validTo: string | null) =>
     db.insert(tax.taxExemptions).values({

@@ -20,6 +20,7 @@ import {
   taxBusinessTypeValues,
   taxCalculationModeValues,
   taxConfigIdFactory,
+  taxAuditEntryIdFactory,
   taxConfigStatusValues,
   taxExemptionIdFactory,
   taxJurisdictionIdFactory,
@@ -228,6 +229,30 @@ export function createTaxTables({ schema }: CreateTaxTablesDeps) {
     ],
   );
 
+  /** Every tax action that was audited (a calculation, an exemption, a report), append-only. */
+  const taxAuditEntries = schema.table(
+    'tax_audit_entries',
+    {
+      id: taxAuditEntryIdFactory.primaryColumn(),
+      action: varchar('action', { length: 20 }).$type<'calculate' | 'apply' | 'refund' | 'exempt' | 'report'>().notNull(),
+      entity: varchar('entity', { length: 20 }).$type<'payment' | 'subscription' | 'customer' | 'exemption'>().notNull(),
+      entityId: varchar('entity_id', { length: 255 }).notNull(),
+      details: jsonb('details')
+        .$type<{
+          before?: unknown;
+          after?: unknown;
+          reason?: string;
+          userId?: string;
+          metadata?: Record<string, unknown>;
+        }>()
+        .notNull(),
+      occurredAt: instant('occurred_at')
+        .notNull()
+        .default(sql`now()`),
+    },
+    table => [index('tax_audit_entries_entity_idx').on(table.entity, table.entityId, table.occurredAt)],
+  );
+
   const taxConfigForeignKeys = taxConfigIdFactory.createForeignKeyFactory(() => taxConfigurations.id);
   const taxJurisdictionForeignKeys = taxJurisdictionIdFactory.createForeignKeyFactory(() => taxJurisdictions.id);
   const taxExemptionForeignKeys = taxExemptionIdFactory.createForeignKeyFactory(() => taxExemptions.id);
@@ -246,6 +271,7 @@ export function createTaxTables({ schema }: CreateTaxTablesDeps) {
     taxJurisdictions,
     taxExemptions,
     taxRecords,
+    taxAuditEntries,
     foreignKeys: {
       taxConfigForeignKeys,
       taxJurisdictionForeignKeys,

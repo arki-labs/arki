@@ -122,7 +122,8 @@ export class TaxService {
   async calculateTax(input: TaxCalculationInput): Promise<TaxCalculationResult> {
     const currency = input.currency.toUpperCase();
     // An exemption "for a customer" must name the customer; same for the other two types
-    const scoped = (await this.reads.exemptions.findApplicableExemptions(input.customerId)).filter(
+    const applicable = await this.reads.exemptions.findApplicableExemptions(input.customerId);
+    const scoped = applicable.filter(
       exemption =>
         (exemption.type !== 'customer' || exemption.customerId !== null) &&
         (exemption.type !== 'product' || exemption.productCode !== null) &&

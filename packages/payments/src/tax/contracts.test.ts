@@ -71,9 +71,9 @@ describe('taxComplianceReportSchema', () => {
       reportType: 'vat',
       period: { year: 2026, quarter: 1, startDate, endDate: instant('2026-03-31T00:00:00.000Z') },
       jurisdiction: 'all',
-      totalSales: money('1000.000', 'KWD'),
-      totalTaxCollected: money('50.125', 'KWD'),
-      exemptSales: money(0, 'KWD'),
+      totalSales: [money('1000.000', 'KWD')],
+      totalTaxCollected: [money('50.125', 'KWD')],
+      exemptSales: [money(0, 'KWD')],
       transactions: 3,
       generatedAt: startDate,
       summary: {
@@ -86,7 +86,7 @@ describe('taxComplianceReportSchema', () => {
 
     const sent = taxComplianceReportSchema.parse(taxComplianceReportJson(report));
 
-    expect(sent.totalTaxCollected).toEqual({ amount: '50.125', currency: 'KWD' });
+    expect(sent.totalTaxCollected).toEqual([{ amount: '50.125', currency: 'KWD' }]);
     expect(sent.summary.topTaxCategories[0]?.tax).toEqual({ amount: '50.125', currency: 'KWD' });
     expect(sent.period.startDate).toEqual(startDate);
   });

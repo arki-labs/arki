@@ -13,3 +13,6 @@ export type NewTaxExemption = InferInsertModel<TaxTables['taxExemptions']>;
 
 export type TaxRecord = InferSelectModel<TaxTables['taxRecords']>;
 export type NewTaxRecord = InferInsertModel<TaxTables['taxRecords']>;
+
+export type TaxAuditRow = InferSelectModel<TaxTables['taxAuditEntries']>;
+export type NewTaxAuditRow = InferInsertModel<TaxTables['taxAuditEntries']>;
