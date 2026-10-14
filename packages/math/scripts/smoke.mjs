@@ -11,6 +11,7 @@ import {
   createRandom,
   cubicRoots,
   decimal,
+  findRoot,
   formatCurrency,
   formatFileSize,
   formatNumber,
@@ -18,6 +19,7 @@ import {
   fromBase,
   gamma,
   gcd,
+  integrate,
   isPrime,
   mean,
   normal,
@@ -141,6 +143,13 @@ const checks = [
       .map(part => part.value)
       .join(),
     '1,30',
+  ],
+  ['brent root (Wallis cubic)', round(findRoot(x => x ** 3 - 2 * x - 5, [2, 3]).root, 9), 2.094551482],
+  ['adaptive integral', round(integrate(Math.sin, [0, Math.PI]).value, 12), 2],
+  [
+    'tanh-sinh endpoint singularity',
+    round(integrate(x => 1 / Math.sqrt(x), [0, 1], { method: 'tanhSinh' }).value, 9),
+    2,
   ],
 ];
 

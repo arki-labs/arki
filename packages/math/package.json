@@ -126,6 +126,18 @@
       "types": "./dist/finance-float.d.ts",
       "default": "./dist/finance-float.js"
     },
+    "./roots": {
+      "types": "./dist/roots.d.ts",
+      "default": "./dist/roots.js"
+    },
+    "./integrate": {
+      "types": "./dist/integrate.d.ts",
+      "default": "./dist/integrate.js"
+    },
+    "./differentiate": {
+      "types": "./dist/differentiate.d.ts",
+      "default": "./dist/differentiate.js"
+    },
     "./geometry": {
       "types": "./dist/geometry.d.ts",
       "default": "./dist/geometry.js"
