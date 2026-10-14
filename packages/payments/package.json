@@ -1,6 +1,6 @@
 {
   "name": "@arki/payments",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Payments for ARKI apps — Stripe provider, plans, customers, subscriptions, payments, refunds, dunning and tax, as Drizzle table factories, repositories, services and @arki/journal commands.",
   "keywords": [
     "arki",
