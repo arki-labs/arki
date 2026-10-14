@@ -39,6 +39,7 @@ import { DivisionByZeroError, InvalidArgumentError, ResourceLimitError, Rounding
 import { abs, digitCount, divideRounded, gcd, pow10 } from './internal/bigint.js';
 import { assertScale } from './internal/fraction.js';
 import { MAX_DIGITS } from './internal/limits.js';
+import { assertRadicandSize, integerRoot, rootAt } from './internal/roots.js';
 
 /**
  * Number of fraction digits in the result and how to round the last one.
@@ -58,8 +59,6 @@ const MAX_GUARD_DIGITS = 2560;
  * stays below 1 + 1e-5 units, so 2 is a safe bound with margin.
  */
 const ERROR_BOUND = 2n;
-/** Largest integer a root is taken of, in digits. */
-const MAX_RADICAND_DIGITS = 200_000;
 /** Largest power built while checking whether a logarithm is exact, in digits. */
 const MAX_EXACT_CHECK_DIGITS = 4 * MAX_DIGITS;
 
@@ -188,36 +187,6 @@ function roundApproximation(
 // Integer roots
 // ---------------------------------------------------------------------------
 
-function bitLength(n: bigint): number {
-  return n.toString(2).length;
-}
-
-/** ⌊value^(1/k)⌋ for value ≥ 0, by Newton's iteration from a float seed above the root. */
-function integerRoot(value: bigint, k: number): bigint {
-  if (value < 2n || k === 1) return value;
-  const bits = bitLength(value);
-  if (k >= bits) return 1n;
-  const shift = Math.max(0, bits - 53);
-  const rootLog2 = (Math.log2(Number(value >> BigInt(shift))) + shift) / k;
-  const exponent = Math.max(0, Math.floor(rootLog2) - 50);
-  let x = (BigInt(Math.ceil(2 ** (rootLog2 - exponent) * (1 + 1e-9))) + 1n) << BigInt(exponent);
-  const K = BigInt(k);
-  for (;;) {
-    const next = ((K - 1n) * x + value / x ** (K - 1n)) / K;
-    if (next >= x) break;
-    x = next;
-  }
-  while (x ** K > value) x--;
-  while ((x + 1n) ** K <= value) x++;
-  return x;
-}
-
-function assertRadicandSize(digits: number): void {
-  if (digits > MAX_RADICAND_DIGITS) {
-    throw new ResourceLimitError(`The root needs a ${digits}-digit intermediate; the limit is ${MAX_RADICAND_DIGITS}`);
-  }
-}
-
 /** The exact n-th root as a decimal, or `undefined` when it has infinitely many digits. */
 function exactRoot(x: Decimal, n: number): Decimal | undefined {
   const magnitude = abs(x.coefficient);
@@ -251,16 +220,10 @@ function rootOf(value: DecimalInput, n: number, options: ScaleOptions | undefine
   if (!x.isZero()) assertResultFits(log10Estimate(x.abs()) / n, scale, what);
   // Trailing zeros carry no value; trimming keeps them from inflating the work estimate.
   const trimmed = x.trim();
-  const magnitude = abs(trimmed.coefficient);
   // One digit past `scale`, so a "sticky" digit can stand in for everything cut off.
-  const working = Math.max(scale + 1, Math.ceil(trimmed.scale / n));
-  const shift = n * working - trimmed.scale;
-  assertRadicandSize(digitCount(magnitude) + shift);
-  const radicand = magnitude * pow10(shift);
-  const root = integerRoot(radicand, n);
-  const sticky = root ** BigInt(n) === radicand ? 0n : 1n;
-  const tenfold = root * 10n + sticky;
-  const coefficient = divideRounded(x.isNegative() ? -tenfold : tenfold, pow10(working + 1 - scale), rounding);
+  const { root, exact } = rootAt(abs(trimmed.coefficient), trimmed.scale, n, scale + 1);
+  const tenfold = root * 10n + (exact ? 0n : 1n);
+  const coefficient = divideRounded(x.isNegative() ? -tenfold : tenfold, 100n, rounding);
   return checked(Decimal.fromParts({ coefficient, scale }), what);
 }
 
