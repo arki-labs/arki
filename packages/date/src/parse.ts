@@ -138,7 +138,7 @@ function words(
 ): Matcher {
   const candidates = entries
     .map(([word, value]): readonly [string, number] => [word.toLocaleLowerCase(locale), value])
-    .toSorted((left, right) => right[0].length - left[0].length);
+    .sort((left, right) => right[0].length - left[0].length);
   return {
     expected: `${expected} for "${token}"`,
     read: (text, at, fields) => {

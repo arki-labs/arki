@@ -149,7 +149,7 @@ export function mergeIntervals<T extends Point>(list: readonly Interval<T>[]): r
   if (first) for (const item of list) assertSameIntervalKind(first, item, 'mergeIntervals');
   const sorted = list
     .filter(item => !isEmptyInterval(item))
-    .toSorted((x, y) => cmp(x.start, y.start) || cmp(x.end, y.end));
+    .sort((x, y) => cmp(x.start, y.start) || cmp(x.end, y.end));
   const merged: Interval<T>[] = [];
   for (const item of sorted) {
     const last = merged.at(-1);
