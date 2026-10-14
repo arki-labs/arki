@@ -1,0 +1,88 @@
+{
+  "name": "@arki/async",
+  "version": "0.0.0",
+  "private": false,
+  "description": "Small, exact timing helpers for every JavaScript runtime — an abortable sleep, plus debounce and throttle with the lodash contract and coded errors.",
+  "keywords": [
+    "arki",
+    "typescript",
+    "async",
+    "sleep",
+    "delay",
+    "debounce",
+    "throttle",
+    "abort",
+    "AbortSignal",
+    "timer"
+  ],
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/async"
+  },
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "default": "./dist/errors.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "scripts": {
+    "bench": "bun run build && arki-bench",
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:runtimes": "arki-runtimes",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "devDependencies": {
+    "@arki/bench": "workspace:*",
+    "@arki/eslint-config": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@types/lodash": "^4.17.25",
+    "@types/lodash.debounce": "^4.0.9",
+    "@types/lodash.throttle": "^4.1.9",
+    "@types/node": "catalog:node",
+    "@types/throttle-debounce": "^5.0.2",
+    "delay": "^7.0.0",
+    "es-toolkit": "^1.52.0",
+    "just-debounce-it": "^3.2.0",
+    "lodash": "^4.18.1",
+    "lodash.debounce": "^4.0.8",
+    "lodash.throttle": "^4.1.1",
+    "throttle-debounce": "^5.0.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
