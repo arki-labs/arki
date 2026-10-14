@@ -4,5 +4,10 @@
   ],
   "tags": [
     "platform"
-  ]
+  ],
+  "tasks": {
+    "test": {
+      "env": ["$TURBO_EXTENDS$", "ENCRYPTION_KEY"]
+    }
+  }
 }

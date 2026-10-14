@@ -20,8 +20,14 @@ export class SecureConfig {
   private readonly maskInLogs: boolean;
 
   constructor(options: SecureConfigOptions = {}) {
-    // Use provided key or derive from environment
-    const key = options.encryptionKey || process.env['ENCRYPTION_KEY'] || 'default-dev-key-change-in-production';
+    // Use the provided key or the environment one. There is no fallback key:
+    // a shared default would make every deployment's secrets decryptable.
+    const key = options.encryptionKey || process.env['ENCRYPTION_KEY'];
+    if (!key) {
+      throw new ValidationError(
+        'SecureConfig needs an encryption key. Pass `encryptionKey` or set the ENCRYPTION_KEY environment variable.',
+      );
+    }
 
     // Create a 32-byte key from the provided key
     this.encryptionKey = createHash('sha256').update(key).digest();
@@ -187,10 +193,16 @@ export class SecureConfig {
   }
 }
 
+let sharedSecureConfig: SecureConfig | undefined;
+
 /**
- * Global secure configuration instance
+ * Shared secure configuration instance. Created on first use so that
+ * importing this module never throws when no encryption key is set.
  */
-export const secureConfig = new SecureConfig();
+export function getSecureConfig(): SecureConfig {
+  sharedSecureConfig ??= new SecureConfig();
+  return sharedSecureConfig;
+}
 
 /**
  * Helper function to get API key securely
@@ -201,21 +213,21 @@ export function getSecureApiKey(
   defaultValue?: string
 ): string {
   // Check secure config first
-  if (secureConfig.has(keyName)) {
-    return secureConfig.get(keyName)!;
+  if (getSecureConfig().has(keyName)) {
+    return getSecureConfig().get(keyName)!;
   }
 
   // Check environment variable
   if (envVar && process.env[envVar]) {
     const value = process.env[envVar];
     // Store in secure config for future use
-    secureConfig.set(keyName, value);
+    getSecureConfig().set(keyName, value);
     return value;
   }
 
   // Use default value if provided
   if (defaultValue) {
-    secureConfig.set(keyName, defaultValue);
+    getSecureConfig().set(keyName, defaultValue);
     return defaultValue;
   }
 
@@ -234,7 +246,7 @@ export function setSecureApiKey(keyName: string, value: string): void {
   const cleanValue = value.trim();
 
   // Store securely
-  secureConfig.set(keyName, cleanValue);
+  getSecureConfig().set(keyName, cleanValue);
 }
 
 /**

@@ -20,11 +20,6 @@
       "import": "./src/react/*.tsx",
       "browser": "./src/react/*.tsx"
     },
-    "./md": {
-      "types": "./dist/src/md/index.d.ts",
-      "import": "./src/md/index.tsx",
-      "browser": "./src/md/index.tsx"
-    },
     "./cost": {
       "types": "./dist/src/cost/index.d.ts",
       "import": "./src/cost/index.ts",
@@ -67,28 +62,19 @@
     "@ai-sdk/mistral": "catalog:ai",
     "@ai-sdk/openai": "catalog:ai",
     "@ai-sdk/otel": "catalog:ai",
-    "@ai-sdk/provider": "^4.0.25",
-    "@ai-sdk/react": "catalog:ai",
-    "@ai-sdk/ui-utils": "catalog:ai",
     "@arki/async": "workspace:*",
     "@arki/contracts": "workspace:*",
     "@arki/env": "workspace:*",
     "@arki/log": "workspace:*",
-    "@google/genai": "catalog:ai",
-    "@openrouter/ai-sdk-provider": "catalog:ai",
     "@qdrant/js-client-rest": "catalog:",
-    "@t3-oss/env-core": "catalog:env",
     "ai": "catalog:ai",
     "ai-sdk-ollama": "catalog:ai",
-    "csv-parse": "catalog:",
-    "ollama": "catalog:ai",
-    "react-markdown": "catalog:content",
-    "remark-gfm": "catalog:content",
-    "streamdown": "catalog:ai",
-    "vitest": "catalog:",
     "zod": "catalog:"
   },
   "peerDependenciesMeta": {
+    "@ai-sdk/react": {
+      "optional": true
+    },
     "@huggingface/transformers": {
       "optional": true
     },
@@ -104,19 +90,34 @@
     "react-dom": {
       "optional": true
     },
+    "react-markdown": {
+      "optional": true
+    },
+    "remark-gfm": {
+      "optional": true
+    },
+    "streamdown": {
+      "optional": true
+    },
     "voyageai": {
       "optional": true
     }
   },
   "peerDependencies": {
+    "@ai-sdk/react": "catalog:ai",
     "@huggingface/transformers": "*",
     "@mastra/core": "1.37.1",
     "@mixedbread-ai/sdk": "*",
     "react": "catalog:react",
     "react-dom": "catalog:react",
+    "react-markdown": "catalog:content",
+    "remark-gfm": "catalog:content",
+    "streamdown": "catalog:ai",
     "voyageai": "*"
   },
   "devDependencies": {
+    "@ai-sdk/provider": "^4.0.25",
+    "@ai-sdk/react": "catalog:ai",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
@@ -124,7 +125,12 @@
     "@mastra/core": "catalog:",
     "@opentelemetry/api": "catalog:opentelemetry",
     "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
-    "typescript": "catalog:"
+    "@types/node": "catalog:node",
+    "react-markdown": "catalog:content",
+    "remark-gfm": "catalog:content",
+    "streamdown": "catalog:ai",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "types": "./dist/src/index.d.ts",
   "sideEffects": false

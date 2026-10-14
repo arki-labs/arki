@@ -9,7 +9,7 @@
  *
  * @example Using ReactMarkdown (standard approach)
  * ```tsx
- * import { ReactMarkdown, remarkGfm } from '@arki/ai/md';
+ * import { ReactMarkdown, remarkGfm } from '@arki/ai/react/md';
  *
  * <ReactMarkdown remarkPlugins={[remarkGfm]}>
  *   {message.content}
@@ -18,7 +18,7 @@
  *
  * @example Using Streamdown (optimized for AI streaming)
  * ```tsx
- * import { Streamdown } from '@arki/ai/md';
+ * import { Streamdown } from '@arki/ai/react/md';
  *
  * <Streamdown mode="streaming">
  *   {message.content}

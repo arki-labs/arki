@@ -3,7 +3,7 @@
  *
  * Returns a `StructuredLLMProvider` wired to the configured backend.
  * Provider selection is driven by the `LLM_PROVIDER` environment variable
- * (default: "openai"). Per-call model and temperature overrides are accepted
+ * (default: "ollama"). Per-call model and temperature overrides are accepted
  * via the `config` parameter.
  *
  * Usage:
@@ -29,7 +29,7 @@ import { createOllama } from 'ai-sdk-ollama';
 import type { z } from '@arki/contracts';
 
 import type { GenerateOptions, Message, StreamOptions, StructuredLLMProvider } from './types';
-import { env } from '../env';
+import { DEFAULT_LLM_PROVIDER, DEFAULT_OLLAMA_BASE_URL, env } from '../env';
 import { GenerationError, getErrorMessage } from '../errors';
 import { aiTelemetry } from './telemetry';
 
@@ -66,11 +66,11 @@ export type LLMProviderConfig = {
 /**
  * Create a provider-agnostic `StructuredLLMProvider` from environment config.
  *
- * Reads `LLM_PROVIDER` (default "openai") and `LLM_MODEL` (optional) from the
+ * Reads `LLM_PROVIDER` (default "ollama", local first) and `LLM_MODEL` (optional) from the
  * environment, then accepts per-call overrides via `config`.
  */
 export function createLLMProvider(config: LLMProviderConfig = {}): StructuredLLMProvider {
-  const providerName = config.provider ?? env.LLM_PROVIDER;
+  const providerName = config.provider ?? env.LLM_PROVIDER ?? DEFAULT_LLM_PROVIDER;
   const model = config.model ?? env.LLM_MODEL ?? PROVIDER_DEFAULT_MODELS[providerName] ?? 'gpt-4o-mini';
 
   if (config.baseURL && !['openai', 'ollama'].includes(providerName))
@@ -83,7 +83,7 @@ export function createLLMProvider(config: LLMProviderConfig = {}): StructuredLLM
       // A model per call binds cancellation without mutating a shared client.
       languageModel = signal =>
         createOllama({
-          baseURL: (config.baseURL ?? env.OLLAMA_BASE_URL).replace(/\/v1\/?$/u, ''),
+          baseURL: (config.baseURL ?? env.OLLAMA_BASE_URL ?? DEFAULT_OLLAMA_BASE_URL).replace(/\/v1\/?$/u, ''),
           fetch: (input, init) => fetch(input, { ...init, signal }),
         })(model);
       break;
