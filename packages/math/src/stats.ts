@@ -21,6 +21,7 @@ import { normal, studentT } from './distributions.js';
 import { EmptyDataError, InvalidArgumentError, NumericRangeError, RoundingNecessaryError } from './errors.js';
 import { divideRounded, pow10 } from './internal/bigint.js';
 import { assertScale } from './internal/fraction.js';
+import { applyQTranspose, backSubstitute, householderQr } from './internal/householder.js';
 import { assertFinite } from './number.js';
 
 export type VarianceOptions = {
@@ -1555,41 +1556,9 @@ export function powerRegression(x: Iterable<number>, y: Iterable<number>): Power
 }
 
 /**
- * Solves `matrix * solution = rhs` (square, modified in place) by Gaussian
- * elimination with partial pivoting. A pivot that is tiny next to the largest
- * entry means the system is numerically singular.
- */
-function solveLinearSystem(matrix: number[][], rhs: number[]): number[] {
-  const size = rhs.length;
-  let largest = 0;
-  for (const row of matrix) for (const value of row) largest = Math.max(largest, Math.abs(value));
-  for (let col = 0; col < size; col++) {
-    let pivotRow = col;
-    for (let r = col + 1; r < size; r++) {
-      if (Math.abs(matrix[r]![col]!) > Math.abs(matrix[pivotRow]![col]!)) pivotRow = r;
-    }
-    if (Math.abs(matrix[pivotRow]![col]!) <= largest * 1e-13) {
-      throw new NumericRangeError('polynomial fit is ill-conditioned; lower the degree or rescale x');
-    }
-    [matrix[col], matrix[pivotRow]] = [matrix[pivotRow]!, matrix[col]!];
-    [rhs[col], rhs[pivotRow]] = [rhs[pivotRow]!, rhs[col]!];
-    for (let r = col + 1; r < size; r++) {
-      const factor = matrix[r]![col]! / matrix[col]![col]!;
-      for (let c = col; c < size; c++) matrix[r]![c]! -= factor * matrix[col]![c]!;
-      rhs[r]! -= factor * rhs[col]!;
-    }
-  }
-  const solution: number[] = Array.from<number>({ length: size }).fill(0);
-  for (let r = size - 1; r >= 0; r--) {
-    let acc = rhs[r]!;
-    for (let c = r + 1; c < size; c++) acc -= matrix[r]![c]! * solution[c]!;
-    solution[r] = acc / matrix[r]![r]!;
-  }
-  return solution;
-}
-
-/**
- * Least-squares polynomial of the given `degree`, by the normal equations.
+ * Least-squares polynomial of the given `degree`, by Householder QR with
+ * column pivoting on the Vandermonde matrix (never the normal equations, which
+ * square its condition number; NumPy's `polyfit` uses an SVD to the same end).
  * Coefficients are lowest degree first (`[c0, c1, ...]`); `r2` is measured on
  * the original y.
  *
@@ -1603,8 +1572,10 @@ function solveLinearSystem(matrix: number[][], rhs: number[]): number[] {
  * lose digits that `predict` keeps.
  *
  * Throws `InvalidArgumentError` for a non-integer or negative degree, or fewer
- * distinct x values than `degree + 1`, and `NumericRangeError` when the system
- * is numerically singular.
+ * distinct x values than `degree + 1`, and `NumericRangeError` when the
+ * Vandermonde matrix is rank-deficient to working precision: some `|r_kk|` of
+ * its column-normalized QR is at or below `n · Number.EPSILON · |r₀₀|` (`n`
+ * points), the rank rule of NumPy's `polyfit`, where NumPy warns.
  */
 export function polynomialRegression(x: Iterable<number>, y: Iterable<number>, degree: number): PolynomialFit {
   if (!Number.isInteger(degree) || degree < 0) {
@@ -1624,20 +1595,44 @@ export function polynomialRegression(x: Iterable<number>, y: Iterable<number>, d
   const center = low / 2 + high / 2;
   const halfRange = high / 2 - low / 2 || 1;
   const size = degree + 1;
-  // powerSums[k] = sum(u^k), moments[k] = sum(u^k * y), with u = (x - center) / halfRange.
-  const powerSums: number[] = Array.from<number>({ length: 2 * degree + 1 }).fill(0);
-  const moments: number[] = Array.from<number>({ length: size }).fill(0);
+  const count = xs.length;
+  // The Vandermonde matrix in u = (x - center) / halfRange, by columns (u^0, u^1, ...),
+  // each scaled to unit norm as NumPy's polyfit does, so the rank test below
+  // compares columns on an equal footing. |u| <= 1 with u = ±1 at the ends, so
+  // every column has norm >= 1 and no power overflows.
+  const buffer = new Float64Array(count * size);
+  const columns: Float64Array[] = [];
+  for (let k = 0; k < size; k++) columns.push(buffer.subarray(k * count, k * count + count));
   for (const [i, value] of xs.entries()) {
     const u = (value - center) / halfRange;
     let power = 1;
-    for (let k = 0; k <= 2 * degree; k++) {
-      powerSums[k]! += power;
-      if (k < size) moments[k]! += power * (ys[i] ?? 0);
+    for (let k = 0; k < size; k++) {
+      columns[k]![i] = power;
       power *= u;
     }
   }
-  const matrix = Array.from({ length: size }, (_, r) => Array.from({ length: size }, (_, c) => powerSums[r + c]!));
-  const centered = solveLinearSystem(matrix, moments);
+  const norms: number[] = [];
+  for (const column of columns) {
+    let sum = 0;
+    for (let i = 0; i < count; i++) sum += column[i]! * column[i]!;
+    const norm = Math.sqrt(sum);
+    for (let i = 0; i < count; i++) column[i]! /= norm;
+    norms.push(norm);
+  }
+  // Least squares by Householder QR with column pivoting: the error grows with
+  // cond(V), where the normal equations VᵀV·c = Vᵀy would square it.
+  const { tau, permutation } = householderQr(columns, count, true);
+  const threshold = count * Number.EPSILON * Math.abs(columns[0]![0]!);
+  for (let k = 0; k < size; k++) {
+    if (!(Math.abs(columns[k]![k]!) > threshold)) {
+      throw new NumericRangeError('polynomial fit is ill-conditioned; lower the degree or rescale x');
+    }
+  }
+  const solution = Float64Array.from(ys);
+  applyQTranspose(columns, tau, count, solution);
+  backSubstitute(columns, size, solution);
+  const centered: number[] = Array.from<number>({ length: size }).fill(0);
+  for (let k = 0; k < size; k++) centered[permutation[k]!] = solution[k]! / norms[permutation[k]!]!;
   const predictCentered = (at: number): number => {
     const u = (at - center) / halfRange;
     let result = 0;

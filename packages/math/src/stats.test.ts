@@ -756,9 +756,41 @@ describe('polynomialRegression', () => {
       expect(relativeError(fit.predict(at), cubic(at))).toBeLessThan(1e-9);
     }
   });
-  it('reports a numerically singular system as a typed error', () => {
-    const xs = Array.from({ length: 30 }, (_, i) => i + 1);
-    expect(() => polynomialRegression(xs, xs, 25)).toThrow(NumericRangeError);
+  it('reports a rank-deficient Vandermonde matrix as a typed error', () => {
+    // Four of the six x values lie within 3e-12 of each other: their u² columns differ by ~1e-24, far
+    // below n·ε, so a degree-4 fit has fewer independent columns than coefficients (NumPy's polyfit warns).
+    const xs = [0, 1, 1 + 1e-12, 1 + 2e-12, 1 + 3e-12, 2];
+    expect(() => polynomialRegression(xs, xs, 4)).toThrow(NumericRangeError);
+  });
+  it('solves by QR, not the normal equations, so high degrees keep their digits', () => {
+    // An exact degree-16 polynomial on 80 points in [-1, 1] (where the fit's basis is x itself, so the
+    // coefficients are what was solved for). cond(V) ≈ 1e5 after column scaling: QR loses about
+    // cond·ε ≈ 1e-11, the normal equations cond²·ε ≈ 5e-6 (measured on the previous implementation).
+    const degree = 16;
+    const xs = Array.from({ length: 80 }, (_, i) => -1 + (2 * i) / 79);
+    const truth = Array.from({ length: degree + 1 }, (_, k) => (k % 2 ? -1 : 1) * (k + 1));
+    const fit = polynomialRegression(
+      xs,
+      xs.map(v => truth.reduceRight((acc, c) => acc * v + c, 0)),
+      degree,
+    );
+    for (const [k, c] of truth.entries()) expect(relativeError(fit.coefficients[k]!, c)).toBeLessThan(1e-10);
+    // A degree-25 fit of 30 points of y = x: the normal equations (cond² > 1e13) gave up; QR fits it.
+    const line = Array.from({ length: 30 }, (_, i) => i + 1);
+    const high = polynomialRegression(line, line, 25);
+    for (const at of [1, 7.5, 15.5, 30]) expect(high.predict(at)).toBeCloseTo(at, 8);
+  });
+  it('matches the NIST StRD Wampler1 certified values', () => {
+    // Wampler1: y = 1 + x + x² + x³ + x⁴ + x⁵ at x = 0..20; every certified coefficient is exactly 1.
+    // Mapping the centered fit back to powers of x costs a few digits here; the solve itself is exact to ~1e-15.
+    const xs = Array.from({ length: 21 }, (_, i) => i);
+    const fit = polynomialRegression(
+      xs,
+      xs.map(v => 1 + v + v ** 2 + v ** 3 + v ** 4 + v ** 5),
+      5,
+    );
+    for (const c of fit.coefficients) expect(Math.abs(c - 1)).toBeLessThan(1e-9);
+    expect(fit.r2).toBe(1);
   });
 });
 
