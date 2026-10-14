@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { checkLayers, packageNameOf, parseImports } from './layers';
+import { isAdapterSubpath } from './adapters';
+import { checkLayers, packageNameOf, parseImports, staleBaselineEntries } from './layers';
 
 type Fixture = {
   readonly tag: string;
@@ -54,11 +55,25 @@ describe('checkLayers', () => {
       demo: {
         tag: 'foundation',
         manifest: reactPeer,
-        files: { 'src/index.ts': "export * from './hook';", 'src/hook.ts': "import { useState } from 'react';\nexport { useState };" },
+        files: {
+          'src/index.ts': "export * from './hook';",
+          'src/hook.ts': "import { useState } from 'react';\nexport { useState };",
+        },
       },
     });
     const findings = checkLayers({ root });
     expect(findings.map(f => [f.rule, f.file.split(path.sep).at(-1), f.line])).toEqual([['L003', 'hook.ts', 1]]);
+  });
+
+  it('allows a lazy import() of an optional peer from a portable entry, because nothing loads until it runs', () => {
+    const root = repo({
+      demo: {
+        tag: 'foundation',
+        manifest: reactPeer,
+        files: { 'src/index.ts': "export const load = () => import('react');" },
+      },
+    });
+    expect(checkLayers({ root })).toEqual([]);
   });
 
   it('lets an adapter entry import its own optional peer and a web package, whatever the layer (P3)', () => {
@@ -162,5 +177,50 @@ describe('packageNameOf', () => {
     for (const ignored of ['./x', 'node:fs', 'fs', 'bun', 'bun:test', 'virtual:pwa', '#internal', '@/x', '~x']) {
       expect(packageNameOf(ignored)).toBeUndefined();
     }
+  });
+});
+
+describe('staleBaselineEntries', () => {
+  const finding = {
+    package: '@arki/a',
+    rule: 'L003',
+    file: 'packages/a/src/hook.ts',
+    line: 1,
+    specifier: 'react',
+    message: 'm',
+    reach: 'portable',
+  } as const;
+  const entry = {
+    package: '@arki/a',
+    rule: 'L003',
+    specifier: 'react',
+    file: 'packages/a/src/hook.ts',
+    reason: 'why',
+  } as const;
+
+  it('keeps an entry that still matches a live finding, so the known problem stays visible', () => {
+    expect(staleBaselineEntries([entry], [finding])).toEqual([]);
+  });
+
+  it('reports an entry whose finding is gone, because the baseline may only shrink', () => {
+    expect(staleBaselineEntries([entry], [])).toEqual([entry]);
+    expect(staleBaselineEntries([{ ...entry, file: 'packages/a/src/other.ts' }], [finding])).toHaveLength(1);
+    expect(staleBaselineEntries([{ ...entry, specifier: 'zod' }], [finding])).toHaveLength(1);
+  });
+
+  it('judges only the requested package, since other packages were not checked', () => {
+    expect(staleBaselineEntries([entry], [], '@arki/b')).toEqual([]);
+    expect(staleBaselineEntries([entry], [], '@arki/a')).toEqual([entry]);
+  });
+});
+
+describe('isAdapterSubpath', () => {
+  it('treats entries named for the dependency they adapt to as adapters, and plain names as portable', () => {
+    for (const name of ['zod', 'tanstack', 'orpc', 'sentry', 'mastra', 'pg', 'http', 'react']) {
+      expect(isAdapterSubpath(`./${name}`)).toBe(true);
+    }
+    expect(isAdapterSubpath('./sentry/client')).toBe(true);
+    expect(isAdapterSubpath('./serialize')).toBe(false);
+    expect(isAdapterSubpath('./client')).toBe(false);
   });
 });

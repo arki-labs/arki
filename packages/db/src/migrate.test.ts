@@ -16,8 +16,8 @@ import { defineRelations, sql } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { db } from './dot.js';
-import { dbMigrations, migrateDb, readMigrations, type MigratableDb } from './migrate.js';
+import { db, dbMigrations } from './dot.js';
+import { migrateDb, readMigrations, type MigratableDb } from './migrate.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
 
 const widgets = pgTable('widgets', { id: text('id').primaryKey(), label: text('label').notNull() });

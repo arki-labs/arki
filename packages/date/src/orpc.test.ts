@@ -7,7 +7,7 @@ import SuperJSON from 'superjson';
 import { describe, expect, it } from 'vitest';
 
 import { instant, plainDate, plainDateTime, zoned } from './core.js';
-import { registerTemporalTypes, temporalJsonSerializers } from './serialize.js';
+import { registerTemporalTypes, temporalJsonSerializers } from './orpc.js';
 import { Temporal } from './types.js';
 
 const sample = {

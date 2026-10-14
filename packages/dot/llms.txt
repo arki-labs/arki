@@ -8,7 +8,7 @@
 
 - [Quickstart tutorial](docs/quickstart.md): Boot your first DOT app in five minutes
 - [README](README.md): Overview, install, top-level concepts
-- [Quickstart example](docs/examples/quickstart.ts): Runnable code for the quickstart
+- [Quickstart example](../env/docs/examples/quickstart.ts): Runnable code for the quickstart
 
 ## Plugins and lifecycle
 

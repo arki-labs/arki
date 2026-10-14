@@ -1,10 +1,10 @@
 /**
- * @arki/geo/maps/google - Google Maps integration
+ * @arki/geo/react/google-maps - Google Maps integration
  *
  * Complete abstraction layer over @vis.gl/react-google-maps.
  * Applications should never import from @vis.gl directly.
  *
- * @module @arki/geo/maps/google
+ * @module @arki/geo/react/google-maps
  */
 
 // ============================================

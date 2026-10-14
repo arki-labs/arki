@@ -2,8 +2,8 @@ import type { MastraModelConfig } from '@mastra/core/llm';
 import { Agent } from '@mastra/core/agent';
 import { createTool } from '@mastra/core/tools';
 
-import type { AgentRuntime, AgentTool, RuntimeEvent, RuntimeUsage, ToolLoopInput } from './types';
-import { debugRuntime } from '../debug';
+import type { AgentRuntime, AgentTool, RuntimeEvent, RuntimeUsage, ToolLoopInput } from './runtime/types';
+import { debugRuntime } from './debug';
 
 /**
  * Mastra-backed runtime (P1). Implements the SAME `AgentRuntime` contract as the AI-SDK
@@ -11,7 +11,7 @@ import { debugRuntime } from '../debug';
  * platform depth (memory / evals / MCP), which stays Mastra-specific and is NOT abstracted
  * here (see packages/ai/docs/adapter-layer-proposal.md — over-abstraction is the #1 risk).
  *
- * `@mastra/core` is an OPTIONAL peer dependency: this module lives at the `@arki/ai/runtime/mastra`
+ * `@mastra/core` is an OPTIONAL peer dependency: this module lives at the `@arki/ai/mastra`
  * subpath and is NOT re-exported from the main `@arki/ai` barrel, so consumers that don't use
  * the Mastra backend never need it installed.
  *

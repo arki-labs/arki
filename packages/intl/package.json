@@ -19,6 +19,11 @@
       "import": "./src/types.ts",
       "browser": "./src/types.ts"
     },
+    "./react": {
+      "types": "./dist/src/react.d.ts",
+      "import": "./src/react.ts",
+      "browser": "./src/react.ts"
+    },
     "./tanstack-start": {
       "types": "./dist/src/integrations/tanstack-start/index.d.ts",
       "import": "./src/integrations/tanstack-start/index.ts",

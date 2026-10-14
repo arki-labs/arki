@@ -241,12 +241,12 @@ const label = useRelativeTime(post.publishedAt, { numeric: 'auto' }); // "yester
 
 Every hook takes `clock` so tests can drive it with a `MockClock`. The first render reads the clock synchronously, so server and client agree. `react` is an optional peer dependency.
 
-### Sending values over oRPC and SuperJSON (`@arki/date/serialize`)
+### Sending values over oRPC and SuperJSON (`@arki/date/orpc`)
 
 oRPC and SuperJSON keep `Date` but not Temporal values: without help an `Instant` arrives as a string typed as `Instant`, or as `{}`. Register the codecs on both ends:
 
 ```ts
-import { registerTemporalTypes, temporalJsonSerializers } from '@arki/date/serialize';
+import { registerTemporalTypes, temporalJsonSerializers } from '@arki/date/orpc';
 
 new RPCHandler(appRouter, { customJsonSerializers: temporalJsonSerializers }); // server
 new RPCLink({ url, customJsonSerializers: temporalJsonSerializers }); // web and native clients

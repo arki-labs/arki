@@ -35,7 +35,6 @@ const DEFAULT_DIMS = 1024;
 export async function createBedrockEmbeddingProvider(
   config: BedrockEmbeddingConfig = {},
 ): Promise<AiSdkEmbeddingProvider> {
-  // @ts-expect-error - optional peer dependency
   const { createAmazonBedrock } = await import('@ai-sdk/amazon-bedrock');
   const bedrock = createAmazonBedrock({
     region: config.region ?? process.env['AWS_REGION'] ?? 'us-east-1',

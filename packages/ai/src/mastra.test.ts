@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { createMastraRuntime, toMastraTools } from './mastra';
-import type { RuntimeEvent } from './types';
+import type { RuntimeEvent } from './runtime/types';
 
 async function collect(stream: AsyncIterable<RuntimeEvent>): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];

@@ -41,6 +41,6 @@ do.
 
 ## Worked examples
 
-- [`examples/quickstart.ts`](./examples/quickstart.ts) — the complete
+- [`env/docs/examples/quickstart.ts`](../../env/docs/examples/quickstart.ts) — the complete
   `defineApp(...).use(...).boot()` example used by the quickstart and by the
   release-tooling fixture matrix.

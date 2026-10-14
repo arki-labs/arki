@@ -10,7 +10,7 @@
       "import": "./src/index.ts",
       "node": "./src/index.ts"
     },
-    "./client": {
+    "./react": {
       "types": "./dist/src/client.d.ts",
       "import": "./src/client.ts",
       "browser": "./src/client.ts"
@@ -20,7 +20,7 @@
       "import": "./src/geocoding/index.ts",
       "node": "./src/geocoding/index.ts"
     },
-    "./maps/google": {
+    "./react/google-maps": {
       "types": "./dist/src/maps/google/index.d.ts",
       "import": "./src/maps/google/index.ts",
       "node": "./src/maps/google/index.ts"

@@ -2,8 +2,7 @@ import path from 'node:path';
 
 import type { MigratableDb } from '@arki/db/migrate';
 import type { EmptyShape, Plugin } from '@arki/dot/plugin';
-import { db } from '@arki/db/dot';
-import { dbMigrations } from '@arki/db/migrate';
+import { db, dbMigrations } from '@arki/db/dot';
 import { defineApp } from '@arki/dot';
 import { log } from '@arki/dot/log';
 import { env } from '@arki/env/dot';

@@ -61,7 +61,6 @@ export class BedrockReranker implements Reranker {
   private async getModel_() {
     if (!this.modelPromise) {
       this.modelPromise = (async () => {
-        // @ts-expect-error - optional peer dependency
         const { createAmazonBedrock } = await import('@ai-sdk/amazon-bedrock');
         const bedrock = createAmazonBedrock({
           region: this.config.region ?? process.env['AWS_REGION'] ?? 'us-east-1',

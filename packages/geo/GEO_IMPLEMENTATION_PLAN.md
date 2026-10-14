@@ -692,7 +692,7 @@ export { isValidCoordinates, formatCoordinates } from './core/coordinates';
 
 ```diff
 - import { calculateDistance } from '../../shared/data/historical-images';
-+ import { calculateDistance } from '@arki/geo/client';
++ import { calculateDistance } from '@arki/geo/react';
 
 // Update Coordinates type if needed
 - type Coordinates = { lat: number; lng: number };
@@ -707,7 +707,7 @@ export { isValidCoordinates, formatCoordinates } from './core/coordinates';
 -   // ... implementation
 - }
 + // Remove local implementation, import from @arki/geo
-+ import { calculateDistance } from '@arki/geo/client';
++ import { calculateDistance } from '@arki/geo/react';
 ```
 
 ### Phase 6: Update Documentation ✅
@@ -765,7 +765,7 @@ console.log(`Store is nearby: ${isNearby}`);
 ```typescript
 'use client';
 
-import { useDistance } from '@arki/geo/client';
+import { useDistance } from '@arki/geo/react';
 import type { Coordinates } from '@arki/geo';
 
 export function DistanceDisplay({
@@ -792,7 +792,7 @@ export function DistanceDisplay({
 ### Frontend: Core Utilities Only
 
 ```typescript
-import { calculateDistance, formatCoordinates } from '@arki/geo/client';
+import { calculateDistance, formatCoordinates } from '@arki/geo/react';
 
 // No React needed for pure calculations
 const distance = calculateDistance({ lat: 40.7128, lng: -74.006 }, { lat: 34.0522, lng: -118.2437 }, 'mi');
@@ -808,7 +808,7 @@ console.log(`Distance: ${distance.toFixed(0)} miles`);
 
 ```typescript
 // Frontend - only imports core utilities, no node-geocoder
-import { calculateDistance, useDistance } from '@arki/geo/client';
+import { calculateDistance, useDistance } from '@arki/geo/react';
 ```
 
 ✅ **Correct - Server imports:**
@@ -837,7 +837,7 @@ npx bundle-analyzer .next/static/chunks/*.js
 
 Expected results:
 
-- `@arki/geo/client` imports: ~2KB (core utilities only)
+- `@arki/geo/react` imports: ~2KB (core utilities only)
 - `@arki/geo` imports: ~150KB (includes node-geocoder)
 
 ## 📊 Testing Strategy

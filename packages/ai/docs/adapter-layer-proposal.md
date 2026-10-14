@@ -85,7 +85,7 @@ lowest-common-denominator that loses every framework's reason to exist. Specific
    (zero new deps — uses `ai` already in `@arki/ai`). Exported from the main `@arki/ai` barrel.
    4 mock-model tests (`src/runtime/ai-sdk-runtime.test.ts`); full package suite 27/27 green,
    typecheck clean. `debugRuntime` (`DEBUG=ai:runtime`) added.
-2. **P1 (✅ SHIPPED 2026-06-01):** `createMastraRuntime` at the `@arki/ai/runtime/mastra`
+2. **P1 (✅ SHIPPED 2026-06-01):** `createMastraRuntime` at the `@arki/ai/mastra`
    subpath, same `AgentRuntime` interface (decision "b"). `@mastra/core` is an OPTIONAL peer
    dependency (NOT in the main barrel), so the ~18 `@arki/ai` consumers don't transitively pull
    Mastra. Model typed as Mastra's `MastraModelConfig` (sidesteps the ai-v6 `LanguageModel`

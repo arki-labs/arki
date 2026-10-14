@@ -8,7 +8,7 @@
 'use client';
 
 import { useState } from 'react';
-import { GoogleMap } from '@arki/geo/maps/google';
+import { GoogleMap } from '@arki/geo/react/google-maps';
 import { Spinner } from '@arki/ui/base';
 
 export function MapWithLoading() {
@@ -130,7 +130,7 @@ import { Spinner } from '@arki/ui/base';
 
 // Lazy load the map component to reduce initial bundle size
 const GoogleMapLazy = lazy(() =>
-  import('@arki/geo/maps/google').then((mod) => ({ default: mod.GoogleMap })),
+  import('@arki/geo/react/google-maps').then((mod) => ({ default: mod.GoogleMap })),
 );
 
 export function MapWithLazyLoading() {
@@ -147,7 +147,7 @@ export function MapWithLazyLoading() {
 ### Touch-Friendly Map Configuration
 
 ```typescript
-import { GoogleMap } from '@arki/geo/maps/google';
+import { GoogleMap } from '@arki/geo/react/google-maps';
 
 export function MobileOptimizedMap() {
   return (
@@ -170,7 +170,7 @@ export function MobileOptimizedMap() {
 
 ```typescript
 import { useMediaQuery } from '@arki/react-hooks';
-import { GoogleMap, Marker } from '@arki/geo/maps/google';
+import { GoogleMap, Marker } from '@arki/geo/react/google-maps';
 
 export function ResponsiveMarkers() {
   const isMobile = useMediaQuery('(max-width: 768px)');
@@ -193,7 +193,7 @@ export function ResponsiveMarkers() {
 ### ARIA Labels for Maps
 
 ```typescript
-import { GoogleMap } from '@arki/geo/maps/google';
+import { GoogleMap } from '@arki/geo/react/google-maps';
 
 export function AccessibleMap() {
   return (
@@ -214,7 +214,7 @@ export function AccessibleMap() {
 'use client';
 
 import { useRef } from 'react';
-import { GoogleMap } from '@arki/geo/maps/google';
+import { GoogleMap } from '@arki/geo/react/google-maps';
 import type { Coordinates } from '@arki/geo';
 import { Button } from '@arki/ui/base';
 
@@ -269,7 +269,7 @@ export function KeyboardNavigableMap() {
 
 ```typescript
 import { Card, CardContent, CardHeader, CardTitle } from '@arki/ui/base';
-import { GoogleMap, Marker } from '@arki/geo/maps/google';
+import { GoogleMap, Marker } from '@arki/geo/react/google-maps';
 
 export function MapCard() {
   return (
@@ -335,8 +335,8 @@ export const locationRouter = createTRPCRouter({
 'use client';
 
 import { useState } from 'react';
-import { GoogleMap, Marker, InfoWindow } from '@arki/geo/maps/google';
-import { useDistance } from '@arki/geo/client';
+import { GoogleMap, Marker, InfoWindow } from '@arki/geo/react/google-maps';
+import { useDistance } from '@arki/geo/react';
 import type { Coordinates } from '@arki/geo';
 import { Input, Card } from '@arki/ui/base';
 

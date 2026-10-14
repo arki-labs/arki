@@ -59,6 +59,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@ai-sdk/amazon-bedrock": "catalog:ai",
     "@ai-sdk/anthropic": "catalog:ai",
     "@ai-sdk/cohere": "catalog:ai",
     "@ai-sdk/google": "catalog:ai",
@@ -88,9 +89,6 @@
     "zod": "catalog:"
   },
   "peerDependenciesMeta": {
-    "@ai-sdk/amazon-bedrock": {
-      "optional": true
-    },
     "@huggingface/transformers": {
       "optional": true
     },
@@ -111,7 +109,6 @@
     }
   },
   "peerDependencies": {
-    "@ai-sdk/amazon-bedrock": "catalog:ai",
     "@huggingface/transformers": "*",
     "@mastra/core": "1.37.1",
     "@mixedbread-ai/sdk": "*",

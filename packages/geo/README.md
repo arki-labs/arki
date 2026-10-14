@@ -22,7 +22,7 @@ Create a unified geospatial package that:
 ```
 @arki/geo
 ├── Main export (server + shared)     → import from '@arki/geo'
-├── Client export (React + core)      → import from '@arki/geo/client'
+├── Client export (React + core)      → import from '@arki/geo/react'
 ├── Core utilities (isomorphic)       → import from '@arki/geo/core'
 └── Geocoding (server-only)           → import from '@arki/geo/geocoding'
 ```
@@ -77,7 +77,7 @@ const isNearby = isWithinRadius(center, point, 5);
 ### Frontend: Distance Hook
 
 ```typescript
-import { useDistance } from '@arki/geo/client';
+import { useDistance } from '@arki/geo/react';
 
 const { distance, bearing, formatted } = useDistance(from, to, {
   unit: 'km',
@@ -88,7 +88,7 @@ const { distance, bearing, formatted } = useDistance(from, to, {
 ### Frontend: Pure Calculations
 
 ```typescript
-import { calculateDistance, formatCoordinates } from '@arki/geo/client';
+import { calculateDistance, formatCoordinates } from '@arki/geo/react';
 
 const dist = calculateDistance(pointA, pointB, 'mi');
 ```
@@ -104,7 +104,7 @@ const dist = calculateDistance(pointA, pointB, 'mi');
 
 ### Frontend Apps
 
-- [ ] Replace local distance functions → `@arki/geo/client`
+- [ ] Replace local distance functions → `@arki/geo/react`
 - [ ] Update `Coordinates` type to standard format
 - [ ] Never import from `@arki/geo` (server-only)
 - [ ] Test bundle size (should be ~2KB)
@@ -113,7 +113,7 @@ const dist = calculateDistance(pointA, pointB, 'mi');
 
 ### ✅ DO
 
-- Import from `@arki/geo/client` in frontend code
+- Import from `@arki/geo/react` in frontend code
 - Use standard `{ lat, lng }` coordinates everywhere
 - Use `calculateDistance()` from package, not local implementations
 

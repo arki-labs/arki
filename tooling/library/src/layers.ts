@@ -35,7 +35,8 @@
  *   arki-layers [--json] [--package @arki/name] [--root <dir>]
  *
  * A baseline file (`tooling/library/layers-baseline.json`) may list known findings,
- * each with a reason; only findings not in it fail the run.
+ * each with a reason; only findings not in it fail the run. An entry that matches no live
+ * finding is stale and also fails the run, so the baseline only shrinks.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { builtinModules } from 'node:module';
@@ -45,8 +46,8 @@ import { parseArgs } from 'node:util';
 import ts from 'typescript';
 import { z } from 'zod';
 
-import { isAdapterSubpath } from './adapters';
 import type { ExportTarget, Manifest } from './manifest';
+import { isAdapterSubpath } from './adapters';
 import { leaves, readManifest } from './manifest';
 import { complain, say } from './report';
 
@@ -82,7 +83,9 @@ const turboSchema = z.object({
         .record(
           z.string(),
           z.object({
-            dependencies: z.object({ allow: z.array(z.string()).optional(), deny: z.array(z.string()).optional() }).optional(),
+            dependencies: z
+              .object({ allow: z.array(z.string()).optional(), deny: z.array(z.string()).optional() })
+              .optional(),
           }),
         )
         .optional(),
@@ -107,7 +110,7 @@ export function readTagRules(root: string): TagRules {
 /** Workspaces we never walk: their source is huge data. They still count as import targets. */
 const SKIP_WALK = new Set(['@arki/dictionary', '@arki/dictionaries']);
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.cache', '.turbo', '.output', 'coverage', '.git']);
-const SOURCE_FILE = /\.(?:[cm]?[jt]sx?)$/;
+const SOURCE_FILE = /\.[cm]?[jt]sx?$/;
 /** A wildcard export never counts tests, specs or benches as entries. */
 const TEST_FILE = /\.(?:test|spec|bench)\.[cm]?[jt]sx?$/;
 const MAX_FILE_BYTES = 1_000_000;
@@ -143,7 +146,8 @@ function listSourceFiles(dir: string): string[] {
   return out;
 }
 
-type Import = { readonly specifier: string; readonly line: number; readonly typeOnly: boolean };
+/** `lazy`: a runtime `import()` call, which loads nothing until it runs. */
+type Import = { readonly specifier: string; readonly line: number; readonly typeOnly: boolean; readonly lazy: boolean };
 
 function scriptKind(file: string): ts.ScriptKind {
   if (file.endsWith('x')) return file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.JSX;
@@ -154,12 +158,13 @@ function scriptKind(file: string): ts.ScriptKind {
 export function parseImports(file: string, text: string): Import[] {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false, scriptKind(file));
   const found: Import[] = [];
-  const add = (literal: ts.Node, typeOnly: boolean): void => {
+  const add = (literal: ts.Node, typeOnly: boolean, lazy = false): void => {
     if (!ts.isStringLiteralLike(literal)) return;
     found.push({
       specifier: literal.text,
       line: source.getLineAndCharacterOfPosition(literal.getStart(source)).line + 1,
       typeOnly,
+      lazy,
     });
   };
   const visit = (node: ts.Node): void => {
@@ -185,7 +190,7 @@ export function parseImports(file: string, text: string): Import[] {
       add(node.moduleReference.expression, node.isTypeOnly);
     } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       const [first] = node.arguments;
-      if (first) add(first, false);
+      if (first) add(first, false, true);
     } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
       add(node.argument.literal, true);
     }
@@ -199,7 +204,12 @@ const BUILTINS = new Set(builtinModules.flatMap(name => [name, name.split('/')[0
 
 /** The npm package name of a bare specifier, or `undefined` when it is not one we track. */
 export function packageNameOf(specifier: string): string | undefined {
-  if (specifier.startsWith('.') || specifier.startsWith('/') || specifier.startsWith('#') || specifier.startsWith('~')) {
+  if (
+    specifier.startsWith('.') ||
+    specifier.startsWith('/') ||
+    specifier.startsWith('#') ||
+    specifier.startsWith('~')
+  ) {
     return undefined;
   }
   // `node:x`, `bun:x`, `virtual:x`, `cloudflare:x`: a scheme, not an npm package.
@@ -256,7 +266,7 @@ function entriesOf(workspace: Workspace, sourceFiles: readonly string[]): Entry[
     seen.add(key);
     entries.push({ subpath, adapter: isAdapterSubpath(subpath), file });
   };
-  for (const [subpath, target] of Object.entries(workspace.manifest.exports) as [string, ExportTarget][]) {
+  for (const [subpath, target] of Object.entries<ExportTarget>(workspace.manifest.exports)) {
     if (subpath === './package.json') continue;
     const runtime = leaves(target).filter(
       leaf => !leaf.conditions.includes('types') && /\.[cm]?[jt]sx?$/.test(leaf.value) && !leaf.value.endsWith('.d.ts'),
@@ -268,7 +278,10 @@ function entriesOf(workspace: Workspace, sourceFiles: readonly string[]): Entry[
           if (wildcardMatched) break;
           // Wildcard target: every source file that matches the pattern is an entry.
           const pattern = new RegExp(
-            `^${candidate.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '(.+)').replace(/\\\.[cm]?[jt]sx?$/, '\\.[cm]?[jt]sx?')}$`,
+            `^${candidate
+              .replaceAll(/[.+?^${}()|[\]\\]/g, '\\$&')
+              .replaceAll('*', '(.+)')
+              .replace(/\\\.[cm]?[jt]sx?$/, '\\.[cm]?[jt]sx?')}$`,
           );
           for (const file of sourceFiles) {
             if (TEST_FILE.test(file)) continue;
@@ -318,7 +331,7 @@ const baselineSchema = z.object({
   ),
 });
 
-type BaselineEntry = z.infer<typeof baselineSchema>['entries'][number];
+export type BaselineEntry = z.infer<typeof baselineSchema>['entries'][number];
 
 function readBaseline(file: string): BaselineEntry[] {
   if (!existsSync(file)) return [];
@@ -332,6 +345,29 @@ function baselined(entries: readonly BaselineEntry[], finding: Finding): boolean
       entry.rule === finding.rule &&
       entry.specifier === finding.specifier &&
       (entry.file === undefined || entry.file === finding.file),
+  );
+}
+
+/**
+ * Baseline entries that match no live finding. A fixed finding must leave the baseline, so the
+ * file only shrinks. With `only` set, entries of other packages are not judged: their findings
+ * were never computed.
+ */
+export function staleBaselineEntries(
+  entries: readonly BaselineEntry[],
+  findings: readonly Finding[],
+  only?: string,
+): BaselineEntry[] {
+  return entries.filter(
+    entry =>
+      (only === undefined || entry.package === only) &&
+      !findings.some(
+        finding =>
+          entry.package === finding.package &&
+          entry.rule === finding.rule &&
+          entry.specifier === finding.specifier &&
+          (entry.file === undefined || entry.file === finding.file),
+      ),
   );
 }
 
@@ -425,7 +461,8 @@ export function checkLayers({ root, only }: CheckOptions): Finding[] {
           });
         }
 
-        if (optionalPeers.has(dep) && state?.portable) {
+        // A lazy import() of an optional peer is how a portable entry stays usable without it (RFC P3).
+        if (optionalPeers.has(dep) && state?.portable && !item.lazy) {
           findings.push({
             ...where,
             rule: 'L003',
@@ -461,7 +498,7 @@ export function checkLayers({ root, only }: CheckOptions): Finding[] {
             other.specifier === finding.specifier,
         ) === index,
     )
-    .sort((a, b) => a.package.localeCompare(b.package) || a.file.localeCompare(b.file) || a.line - b.line);
+    .toSorted((a, b) => a.package.localeCompare(b.package) || a.file.localeCompare(b.file) || a.line - b.line);
 }
 
 function findRepoRoot(from: string): string {
@@ -488,19 +525,25 @@ function main(): number {
   const baseline = readBaseline(values.baseline ? path.resolve(values.baseline) : BASELINE_FILE);
   const findings = all.filter(finding => !baselined(baseline, finding));
   const known = all.length - findings.length;
+  const stale = staleBaselineEntries(baseline, all, values.package);
 
   const byRule: Record<string, number> = {};
   for (const finding of findings) byRule[finding.rule] = (byRule[finding.rule] ?? 0) + 1;
 
   if (values.json) {
-    say(JSON.stringify({ findings, counts: byRule, baselined: known }, null, 2));
-    return findings.length > 0 ? 1 : 0;
+    say(JSON.stringify({ findings, counts: byRule, baselined: known, stale }, null, 2));
+    return findings.length > 0 || stale.length > 0 ? 1 : 0;
   }
 
   const byPackage = Map.groupBy(findings, finding => finding.package);
   for (const [pkg, items] of byPackage) {
     complain(`${pkg} (${String(items.length)})`);
     for (const item of items) complain(`  ${item.file}:${String(item.line)}  ${item.rule}  ${item.message}`);
+  }
+  for (const entry of stale) {
+    complain(
+      `stale baseline entry: ${entry.package} ${entry.rule} ${entry.specifier}${entry.file ? ` (${entry.file})` : ''}; it no longer matches a finding, delete it from layers-baseline.json`,
+    );
   }
   const summary = Object.entries(byRule)
     .map(([rule, count]) => `${rule}=${String(count)}`)
@@ -509,6 +552,10 @@ function main(): number {
     complain(
       `arki-layers: ${String(findings.length)} finding(s) in ${String(byPackage.size)} package(s) [${summary}]${known > 0 ? `, ${String(known)} baselined` : ''}`,
     );
+    return 1;
+  }
+  if (stale.length > 0) {
+    complain(`arki-layers: ${String(stale.length)} stale baseline entr${stale.length === 1 ? 'y' : 'ies'}`);
     return 1;
   }
   say(`arki-layers: ok${known > 0 ? ` (${String(known)} baselined)` : ''}`);

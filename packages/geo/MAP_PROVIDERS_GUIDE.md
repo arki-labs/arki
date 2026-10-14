@@ -48,7 +48,7 @@ export function GoogleMapExample() {
 'use client';
 
 import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps';
-import { useDistance, calculateBounds } from '@arki/geo/client';
+import { useDistance, calculateBounds } from '@arki/geo/react';
 import type { Coordinates } from '@arki/geo';
 
 export function GoogleMapWithDistance() {

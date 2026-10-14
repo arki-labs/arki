@@ -112,4 +112,4 @@ Both are idempotent — calling them twice is safe.
 - [Adapter authoring](./adapter-authoring.md) — expose your own package.
 
 The full working code for this tutorial lives at
-[`examples/quickstart.ts`](./examples/quickstart.ts).
+[`env/docs/examples/quickstart.ts`](../../env/docs/examples/quickstart.ts).

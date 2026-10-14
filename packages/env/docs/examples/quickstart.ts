@@ -1,5 +1,6 @@
 /**
- * Worked example from `docs/quickstart.md`.
+ * Worked example from `packages/dot/docs/quickstart.md`. It lives in `@arki/env` because it
+ * imports `@arki/env/dot`, and `@arki/dot` must not depend on `@arki/env`.
  *
  * This file is intentionally minimal and dependency-light:
  *
