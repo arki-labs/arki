@@ -38,3 +38,26 @@ export function resolveLimits(limits: Limits | undefined): ResolvedLimits {
     nodes: positive('nodes', limits.nodes, DEFAULT_LIMITS.nodes),
   };
 }
+
+/** Budgets a domain's `compile` checks (RFC §11). Each is a positive integer. */
+export type CompileLimits = {
+  /** Bounds the recursion over the tree, as in `parse`. Default 256. */
+  readonly depth?: number;
+  /**
+   * Steps per call, checked statically: one per node plus each host
+   * function's extra `cost`, times the number of points for `sample`.
+   * Default 10 000 000.
+   */
+  readonly steps?: number;
+};
+
+export type ResolvedCompileLimits = { readonly depth: number; readonly steps: number };
+
+export const DEFAULT_STEPS = 10_000_000;
+
+export function resolveCompileLimits(limits: CompileLimits | undefined): ResolvedCompileLimits {
+  return {
+    depth: positive('depth', limits?.depth, DEFAULT_LIMITS.depth),
+    steps: positive('steps', limits?.steps, DEFAULT_STEPS),
+  };
+}
