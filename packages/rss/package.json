@@ -8,21 +8,14 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "import": "./src/index.ts",
-      "node": "./src/index.ts"
+      "default": "./src/index.ts"
     },
-    "./*": {
-      "types": "./dist/src/*.d.ts",
-      "import": "./src/*.ts",
-      "node": "./src/*.ts"
+    "./generate": {
+      "types": "./dist/src/generate.d.ts",
+      "import": "./src/generate.ts",
+      "default": "./src/generate.ts"
     },
     "./package.json": "./package.json"
-  },
-  "typesVersions": {
-    "*": {
-      "*": [
-        "src/*"
-      ]
-    }
   },
   "scripts": {
     "clean": "git clean -xdf .cache .turbo dist node_modules",
@@ -30,20 +23,18 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "vitest run"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "fast-xml-parser": "catalog:",
-    "feed": "catalog:",
-    "rss": "catalog:"
+    "fast-xml-parser": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/rss": "catalog:types",
     "typescript": "catalog:"
   },
   "types": "./dist/src/index.d.ts",

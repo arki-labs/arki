@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import type { Icon as LucideIcon } from "@arki/icons/phosphor";
+import type { Icon as LucideIcon } from '@arki/icons/phosphor';
 import { AvatarImage } from '@arki/ui/avatar';
 import { cn } from '@arki/ui/cn';
 
@@ -18,7 +18,7 @@ const EmbeddedCard = ({ href, className, children }: Props) => (
       rel="noreferrer"
       className={cn(
         'group mb-2 block space-y-2 rounded-md p-5 shadow-md',
-        'border-t border-r border-b border-l-8',
+        'border-b border-l-8 border-r border-t',
         'border-base-300 dark:border-base-600',
         'hover:border-primary-600 dark:hover:border-primary-400',
         className,

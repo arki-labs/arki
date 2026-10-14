@@ -1,12 +1,12 @@
 import { createParser, createSearchParamsCache, parseAsInteger } from 'nuqs/server';
-
-import type { LinkComponent } from '@arki/intl/types';
-import { Button } from '@arki/ui/button';
-import { Pagination, PaginationContent, PaginationLink } from '@arki/ui/pagination';
-import { Rss } from '@arki/icons/phosphor';
 import { useTranslations } from 'use-intl';
 
-import type { Post } from '../collections/post';
+import type { LinkComponent } from '@arki/intl/types';
+import { Rss } from '@arki/icons/phosphor';
+import { Button } from '@arki/ui/button';
+import { Pagination, PaginationContent, PaginationLink } from '@arki/ui/pagination';
+
+import type { Post } from '../models';
 import { Timeline } from './timeline';
 
 const parseAsPageIndex = createParser({

@@ -1,9 +1,6 @@
 import { allChangelogs, allFAQs, allLegals, allPosts } from 'content-collections';
 
-import type { Changelog } from '@arki/content/collections/changelog';
-import type { Faq } from '@arki/content/collections/faq';
-import type { Legal } from '@arki/content/collections/legal';
-import type { Post } from '@arki/content/collections/post';
+import type { Changelog, Faq, Legal, Post } from '@arki/content';
 
 export const posts = (allPosts as Post[]).sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime());
 

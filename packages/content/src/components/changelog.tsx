@@ -1,13 +1,13 @@
 import { createParser, createSearchParamsCache, parseAsInteger } from 'nuqs/server';
-
-import type { LinkComponent } from '@arki/intl/types';
-import { Button } from '@arki/ui/button';
-import { Pagination, PaginationContent, PaginationLink } from '@arki/ui/pagination';
-import { format } from '@arki/date/format';
-import { CaretLeft, CaretRight, Rss } from '@arki/icons/phosphor';
 import { useTranslations } from 'use-intl';
 
-import type { Changelog } from '../collections/changelog';
+import type { LinkComponent } from '@arki/intl/types';
+import { format } from '@arki/date/format';
+import { CaretLeft, CaretRight, Rss } from '@arki/icons/phosphor';
+import { Button } from '@arki/ui/button';
+import { Pagination, PaginationContent, PaginationLink } from '@arki/ui/pagination';
+
+import type { Changelog } from '../models';
 import { Mdx } from './mdx';
 import { Timeline } from './timeline';
 
@@ -103,7 +103,7 @@ export function ChangelogPagination({ prev, next }: { prev?: Changelog; next?: C
         <div className="w-1/2 flex-1 text-left">
           <Button asChild variant="link">
             <a href={`/changelog/${prev.slug}`} className="group">
-              <CaretLeft className="text-muted-foreground group-hover:text-foreground mr-2 h-4 w-4" />
+              <CaretLeft className="mr-2 h-4 w-4 text-muted-foreground group-hover:text-foreground" />
               <span className="truncate">{prev.title}</span>
             </a>
           </Button>
@@ -116,7 +116,7 @@ export function ChangelogPagination({ prev, next }: { prev?: Changelog; next?: C
           <Button asChild variant="link">
             <a href={`/changelog/${next.slug}`} className="group">
               <span className="truncate">{next.title}</span>
-              <CaretRight className="text-muted-foreground group-hover:text-foreground ml-2 h-4 w-4" />
+              <CaretRight className="ml-2 h-4 w-4 text-muted-foreground group-hover:text-foreground" />
             </a>
           </Button>
         </div>
@@ -131,14 +131,10 @@ export function ChangelogCard({ post }: { post: Changelog }) {
   return (
     <article className="relative mx-auto flex max-w-prose flex-col gap-8">
       <div className="grid w-full gap-3">
-        <p className="text-muted-foreground font-mono text-sm">{format(new Date(post.publishedAt), 'LLL dd, y')}</p>
+        <p className="font-mono text-sm text-muted-foreground">{format(new Date(post.publishedAt), 'LLL dd, y')}</p>
         <h1 className="font-cal mb-5 text-3xl">{post.title}</h1>
-        <div className="border-border relative aspect-video w-full overflow-hidden rounded-lg border">
-          <img
-            src={post.image.url}
-            alt={post.title}
-            className="absolute inset-0 h-full w-full object-cover"
-          />
+        <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-border">
+          <img src={post.image.url} alt={post.title} className="absolute inset-0 h-full w-full object-cover" />
         </div>
       </div>
       <Mdx code={post.content.mdx} />

@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 
-import { buildChangelogFeed } from '@arki/content/collections/feeds/changelog';
+import { buildChangelogFeed } from '@arki/content';
 
 import config from '~/config';
 import { changelogs } from '~/content/util';

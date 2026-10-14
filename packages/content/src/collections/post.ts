@@ -1,13 +1,13 @@
-import { z } from '@arki/contracts';
-import { remarkCodeHike } from '@code-hike/mdx';
-import type { Meta } from '@content-collections/core';
-import { defineCollection } from '@content-collections/core';
-import { compileMDX } from '@content-collections/mdx';
 import { exec as syncExec } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { remarkCodeHike } from '@code-hike/mdx';
+import { defineCollection } from '@content-collections/core';
+import { compileMDX } from '@content-collections/mdx';
 import readingTime from 'reading-time';
 import remarkGfm from 'remark-gfm';
+
+import { z } from '@arki/contracts';
 
 import theme from '../lib/ch-theme.json' with { type: 'json' };
 import resolveImageBlurDataURL from '../lib/imageBlurDataURL';
@@ -45,31 +45,6 @@ async function collectImageInformation({ image, directory }: ImageParams) {
   const blurDataURL = await resolveImageBlurDataURL(postDirectory, directory, image);
   return { url, blurDataURL };
 }
-
-export type Post = {
-  title: string;
-  description: string;
-  publishedAt: Date;
-  author: {
-    name: string;
-    url?: string;
-    avatar?: string;
-  };
-  tags: string[];
-  content: {
-    mdx: string;
-    raw: string;
-  };
-  readingTime: string;
-  lastModification: string;
-  image: {
-    url: string;
-    blurDataURL: string;
-  };
-  url: string;
-  slug: string;
-  _meta: Meta;
-};
 
 export const posts = defineCollection({
   name: 'posts',

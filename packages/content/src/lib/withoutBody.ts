@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { Post } from '../collections/post';
+import type { Post } from '../models';
 
 export default async function withoutBody(posts: Post[], outputPath: string) {
   const postsWithoutContent = posts.map(post => {

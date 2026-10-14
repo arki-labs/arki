@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
 
-import { Article } from '@arki/content/components/article';
+import { Article } from '@arki/content/react';
 import { Shell } from '@arki/sitekit/components/shell';
 import { PageContainer } from '@arki/sitekit/layout/workspace/page-container.tsx';
 

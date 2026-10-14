@@ -1,16 +1,10 @@
-import { z } from '@arki/contracts';
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
 import remarkGfm from 'remark-gfm';
 
-import { addIdToHeadings } from '../plugins/add-id-to-headings';
+import { z } from '@arki/contracts';
 
-export type Legal = {
-  title: string;
-  updatedAt: string;
-  mdx: string;
-  slug: string;
-};
+import { addIdToHeadings } from '../plugins/add-id-to-headings';
 
 export const legals = defineCollection({
   name: 'Legals',

@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 
-import { buildPostFeed } from '@arki/content/collections/feeds/post';
+import { buildPostFeed } from '@arki/content';
 
 import config from '~/config';
 import { posts } from '~/content/util';

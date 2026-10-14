@@ -2,44 +2,34 @@
   "name": "@arki/content",
   "version": "0.1.2",
   "private": true,
+  "sideEffects": false,
   "type": "module",
   "exports": {
-    "./collections/*": {
-      "types": "./dist/src/collections/*.d.ts",
-      "import": "./src/collections/*.ts",
-      "browser": "./src/collections/*.ts"
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
     },
-    "./components/*": {
-      "types": "./dist/src/components/*.d.ts",
-      "import": "./src/components/*.tsx",
-      "browser": "./src/components/*.tsx"
+    "./node": {
+      "types": "./dist/src/node.d.ts",
+      "import": "./src/node.ts",
+      "default": "./src/node.ts"
     },
-    "./mdx": {
-      "types": "./dist/src/mdx.d.ts",
-      "import": "./src/mdx.ts",
-      "browser": "./src/mdx.ts"
-    },
-    "./core": {
-      "types": "./dist/src/core.d.ts",
-      "import": "./src/core.ts",
-      "browser": "./src/core.ts"
+    "./react": {
+      "types": "./dist/src/react.d.ts",
+      "import": "./src/react.ts",
+      "default": "./src/react.ts"
     },
     "./package.json": "./package.json"
   },
-  "typesVersions": {
-    "*": {
-      "*": [
-        "src/*"
-      ]
-    }
-  },
   "scripts": {
+    "build": "tsc",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -73,6 +63,5 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*"
-  },
-  "sideEffects": false
+  }
 }

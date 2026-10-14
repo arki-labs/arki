@@ -1,6 +1,6 @@
+import { ArrowBendDownRight, File, FolderOpen } from '@arki/icons/phosphor';
 import { formatFileSize } from '@arki/math/format';
 import { cn } from '@arki/ui/cn';
-import { ArrowBendDownRight, File, FolderOpen } from '@arki/icons/phosphor';
 
 type DirectoryNode = {
   name: string;

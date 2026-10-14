@@ -13,8 +13,8 @@ const MarkdownImage = ({ src, alt, width, height }: Props) => {
     <img
       src={src}
       alt={alt}
-      width={width !== undefined ? Number(width) : undefined}
-      height={height !== undefined ? Number(height) : undefined}
+      width={width === undefined ? undefined : Number(width)}
+      height={height === undefined ? undefined : Number(height)}
       className="rounded-md shadow-md"
       loading="lazy"
       decoding="async"

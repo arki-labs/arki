@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { useDebouncedValue } from '@arki/react-hooks/debounce';
 
-import type { PostOverview } from './types';
+import type { PostOverview } from '../models';
 
 const useSearch = () => {
   const [query, setQuery] = useState('');

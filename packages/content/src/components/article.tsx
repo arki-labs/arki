@@ -1,10 +1,9 @@
-
 import { format } from '@arki/date/format';
 import { Avatar, AvatarFallback, AvatarImage } from '@arki/ui/avatar';
 import { Badge } from '@arki/ui/badge';
 import { ScrollToTop } from '@arki/ui/scroll-to-top';
 
-import type { Post } from '../collections/post';
+import type { Post } from '../models';
 import { Mdx } from './mdx';
 
 export function Article({ post }: { post: Post }) {
@@ -17,7 +16,7 @@ export function Article({ post }: { post: Post }) {
     <article className="relative mx-auto flex max-w-prose flex-col gap-8">
       <div className="grid w-full gap-3">
         <h1 className="font-cal mb-5 text-3xl">{post.title}</h1>
-        <figure className="border-border relative aspect-video w-full overflow-hidden rounded-lg border">
+        <figure className="relative aspect-video w-full overflow-hidden rounded-lg border border-border">
           <img
             src={post.image.url}
             alt={post.title}
@@ -31,12 +30,12 @@ export function Article({ post }: { post: Post }) {
             <AvatarImage src={post.author.avatar} />
             <AvatarFallback>{getNameInitials(post.author.name)}</AvatarFallback>
           </Avatar>
-          <div className="text-muted-foreground text-sm font-light">
+          <div className="text-sm font-light text-muted-foreground">
             <a
               href={post.author.url ?? '#'}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-foreground cursor-pointer font-medium hover:underline"
+              className="cursor-pointer font-medium text-foreground hover:underline"
             >
               {post.author.name}
             </a>

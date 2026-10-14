@@ -1,15 +1,9 @@
-import { z } from '@arki/contracts';
 import { defineCollection } from '@content-collections/core';
 import { compileMDX } from '@content-collections/mdx';
 
-import { addIdToHeadings } from '../plugins/add-id-to-headings';
+import { z } from '@arki/contracts';
 
-export type Faq = {
-  title: string;
-  order: number;
-  mdx: string;
-  slug: string;
-};
+import { addIdToHeadings } from '../plugins/add-id-to-headings';
 
 export const faqs = defineCollection({
   name: 'FAQs',
