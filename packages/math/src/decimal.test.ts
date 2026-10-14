@@ -77,6 +77,22 @@ describe('decimal() construction', () => {
     expect(() => decimal('1e-10001')).toThrow(ResourceLimitError);
     expect(decimal('1'.repeat(10_000)).toString()).toHaveLength(10_000);
   });
+  it('counts coefficient digits, not leading zeros, like every result', () => {
+    // Rule: at most 10 000 coefficient digits (integer digits + scale). The parser used to
+    // count the "0" of "0.", so a scale-10 000 value below 1 could not read its own toString().
+    const third = decimal(1).dividedBy(3, { scale: 10_000, rounding: 'down' });
+    expect(decimal(third.toString()).eq(third)).toBe(true);
+    expect(decimal(`0.${'0'.repeat(9999)}1`).coefficient).toBe(1n);
+    expect(decimal(`-0.${'9'.repeat(10_000)}`).coefficient).toBe(-(10n ** 10_000n - 1n));
+    expect(decimal(`000${'9'.repeat(10_000)}`).toString()).toBe('9'.repeat(10_000));
+    expect(decimal('0e10000').isZero()).toBe(true);
+    // At the cap and one past it.
+    expect(decimal(`${'9'.repeat(5000)}.${'9'.repeat(5000)}`).scale).toBe(5000);
+    expect(() => decimal(`${'9'.repeat(5001)}.${'9'.repeat(5000)}`)).toThrow(ResourceLimitError);
+    expect(() => decimal(`0.${'0'.repeat(10_000)}1`)).toThrow(ResourceLimitError); // scale 10 001
+    expect(decimal('1e9999').coefficient).toBe(10n ** 9999n);
+    expect(() => decimal('1e10000')).toThrow(ResourceLimitError);
+  });
   it('is not frozen and is recognized by isDecimal', () => {
     // Results are deliberately not frozen. `Object.freeze` on every result made an
     // inlined `times` loop 5–7× slower (Bun 25.9 → 3.7 ns, Node 40.7 → 7.3 ns,

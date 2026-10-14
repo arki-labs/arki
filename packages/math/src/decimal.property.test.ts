@@ -344,3 +344,21 @@ describe('Decimal properties: differential against decimal.js at 60 significant 
     );
   });
 });
+
+describe('Decimal properties: round trip at the digit cap', () => {
+  it('parses every Decimal back from its own toString(), up to 10 000 digits and scale 10 000', () => {
+    const LIMIT = 10_000;
+    const coefficient = fc
+      .integer({ min: 1, max: LIMIT })
+      .chain(digits => fc.bigInt({ min: 1n - pow10(digits), max: pow10(digits) - 1n }));
+    fc.assert(
+      fc.property(coefficient, fc.integer({ min: 0, max: LIMIT }), (c, scale) => {
+        const value = decimal(c).times(`1e-${scale}`);
+        const back = decimal(value.toString());
+        expect(back.eq(value)).toBe(true);
+        expect(back.scale).toBe(value.scale);
+      }),
+      config,
+    );
+  });
+});
