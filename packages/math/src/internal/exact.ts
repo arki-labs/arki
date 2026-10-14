@@ -29,6 +29,10 @@ export type IntegerInput = string | number | bigint;
 
 const BRAND = Symbol('arki.math.exact');
 
+/** Coefficients in this range print through `Number` in `toString`. */
+const MAX_SAFE_COEFFICIENT = BigInt(Number.MAX_SAFE_INTEGER);
+const MIN_SAFE_COEFFICIENT = -MAX_SAFE_COEFFICIENT;
+
 function refuseCoercion(typeName: string): never {
   throw new TypeError(
     `A ${typeName} cannot be used as a number. Call .toNumber() for a float, or use .plus()/.times()/... for exact arithmetic`,
@@ -311,11 +315,23 @@ export class Decimal {
 
   /** Plain notation, never exponent form: `'0.000001'`, `'-12.30'`. */
   toString(): string {
-    const digits = abs(this.coefficient).toString();
-    const negative = this.coefficient < 0n ? '-' : '';
-    if (this.scale === 0) return negative + digits;
-    const padded = digits.padStart(this.scale + 1, '0');
-    return `${negative}${padded.slice(0, -this.scale)}.${padded.slice(-this.scale)}`;
+    const { coefficient, scale } = this;
+    let negative: boolean;
+    let digits: string;
+    if (coefficient >= MIN_SAFE_COEFFICIENT && coefficient <= MAX_SAFE_COEFFICIENT) {
+      // Exact as a number, and engines print a number faster than a bigint.
+      const value = Number(coefficient);
+      negative = value < 0;
+      digits = String(negative ? -value : value);
+    } else {
+      negative = coefficient < 0n;
+      digits = (negative ? -coefficient : coefficient).toString();
+    }
+    const sign = negative ? '-' : '';
+    if (scale === 0) return sign + digits;
+    const point = digits.length - scale;
+    if (point > 0) return sign + digits.slice(0, point) + '.' + digits.slice(point);
+    return sign + '0.' + '0'.repeat(-point) + digits;
   }
 
   /** Like `Number.prototype.toFixed`, but on the exact value and with a chosen rounding mode. */

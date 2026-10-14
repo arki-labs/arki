@@ -20,6 +20,22 @@ describe('decimal() construction', () => {
     expect(decimal(1e-7).toString()).toBe('0.0000001');
     expect(decimal(42).toString()).toBe('42');
   });
+  it('prints every digit on both sides of the safe-integer range', () => {
+    // toString prints coefficients up to 2^53 - 1 through Number and larger ones as bigints;
+    // the text must not change at the switch (nor round, nor turn into exponent form).
+    for (const text of [
+      '9007199254740991',
+      '-9007199254740991',
+      '9007199254740992',
+      '-9007199254740993',
+      '900719925474099.1',
+      '-0.0000009007199254740993',
+      '12345678901234567890123.45',
+      '0.000000000000000000001',
+    ]) {
+      expect(decimal(text).toString()).toBe(text);
+    }
+  });
   it('accepts bigint and Decimal', () => {
     expect(decimal(12n).toString()).toBe('12');
     const d = decimal('1.5');
