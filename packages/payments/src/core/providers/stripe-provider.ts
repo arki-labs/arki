@@ -13,6 +13,7 @@ import type {
   Payment,
   PaymentId,
   PaymentMethodInfo,
+  PaymentStatus,
   Plan,
   PlanId,
   Subscription,
@@ -23,18 +24,19 @@ import type {
 } from '../types.js';
 import type { PaymentProviderConfig } from './base-provider.js';
 import { toMinorColumn } from '../money.js';
-import { createCustomerId, createPlanId, createSubscriptionId } from '../primitives.js';
+import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId, planIdSchema } from '../primitives.js';
 import { BasePaymentProvider } from './base-provider.js';
 import { PaymentProviderError, mapStripeError } from './provider-error.js';
 import { mapStripeEventType } from './stripe-event-types.js';
 
 /**
  * The rows the provider reads to turn our ids into Stripe ids. A `PaymentRepository` fits.
- * Without it, the calls that take a customer, plan or subscription id throw `not_configured`.
+ * Without it, the calls that take a customer, plan, subscription or payment id throw `not_configured`.
  */
 export type StripeReferenceReads = {
   findCustomerById(id: CustomerId): Promise<Customer | null>;
   findPlanById(id: PlanId): Promise<Plan | null>;
+  findPaymentById(id: PaymentId): Promise<Payment | null>;
   findSubscriptionById(id: SubscriptionId): Promise<Subscription | null>;
 };
 
@@ -113,14 +115,31 @@ export class StripeProvider extends BasePaymentProvider {
     return customer;
   }
 
-  private async priceRef(planId: PlanId): Promise<string> {
+  private async planRef(planId: PlanId): Promise<Plan> {
     const plan = await this.requireReferences().findPlanById(planId);
     if (!plan) throw new PaymentProviderError('reference_not_found', `Plan ${planId} not found`);
+    return plan;
+  }
+
+  private priceIdOf(plan: Plan): string {
     const priceId = plan.metadata?.stripePriceId;
     if (typeof priceId !== 'string' || priceId === '') {
-      throw new PaymentProviderError('reference_not_found', `Plan ${planId} has no Stripe price id (metadata.stripePriceId)`);
+      throw new PaymentProviderError(
+        'reference_not_found',
+        `Plan ${plan.id} has no Stripe price id (metadata.stripePriceId)`,
+      );
     }
     return priceId;
+  }
+
+  private async priceRef(planId: PlanId): Promise<string> {
+    return this.priceIdOf(await this.planRef(planId));
+  }
+
+  private async paymentRef(paymentId: PaymentId): Promise<Payment> {
+    const payment = await this.requireReferences().findPaymentById(paymentId);
+    if (!payment) throw new PaymentProviderError('reference_not_found', `Payment ${paymentId} not found`);
+    return payment;
   }
 
   private async subscriptionRef(subscriptionId: SubscriptionId): Promise<Subscription> {
@@ -147,7 +166,8 @@ export class StripeProvider extends BasePaymentProvider {
       planId: base.planId,
       customerId: base.customerId,
       providerSubscriptionId: stripeSubscription.id,
-      status: this.mapSubscriptionStatus(stripeSubscription.status),
+      // A paused subscription keeps Stripe status `active`; `pause_collection` is what marks it
+      status: stripeSubscription.pause_collection ? 'paused' : this.mapSubscriptionStatus(stripeSubscription.status),
       currentPeriodStart: fromUnix(item.current_period_start),
       currentPeriodEnd: fromUnix(item.current_period_end),
       trialStart: stripeSubscription.trial_start === null ? null : fromUnix(stripeSubscription.trial_start),
@@ -189,27 +209,82 @@ export class StripeProvider extends BasePaymentProvider {
     };
   }
 
-  async getCustomer(_customerId: CustomerId): Promise<Customer | null> {
-    try {
-      // This would typically retrieve from our database first
-      // For now, implementing the provider interface
-      throw new Error('Method should retrieve from database, not implement directly');
-    } catch {
-      return null;
-    }
+  /** Our customer row, refreshed with what Stripe holds now. */
+  private toCustomer(row: Customer, stripeCustomer: Stripe.Customer): Customer {
+    const defaultPaymentMethod = stripeCustomer.invoice_settings.default_payment_method;
+    return {
+      ...row,
+      email: stripeCustomer.email ?? row.email,
+      name: stripeCustomer.name ?? null,
+      defaultPaymentMethodId:
+        typeof defaultPaymentMethod === 'string' ? defaultPaymentMethod : (defaultPaymentMethod?.id ?? null),
+      updatedAt: now(),
+    };
+  }
+
+  async getCustomer(customerId: CustomerId): Promise<Customer | null> {
+    const row = await this.requireReferences().findCustomerById(customerId);
+    if (!row) return null;
+
+    const stripeCustomer = await this.call(() => this.stripe.customers.retrieve(row.providerCustomerId));
+    // Stripe answers a deleted customer with a stub: the customer is gone
+    if (stripeCustomer.deleted === true) return null;
+    return this.toCustomer(row, stripeCustomer);
   }
 
   async updateCustomer(
-    _customerId: CustomerId,
-    _params: { email?: string; name?: string; metadata?: Record<string, unknown> },
+    customerId: CustomerId,
+    params: { email?: string; name?: string; metadata?: Record<string, unknown> },
   ): Promise<Customer> {
-    // Implementation would update both Stripe and our database
-    throw new Error('Not implemented - requires database integration');
+    const row = await this.customerRef(customerId);
+
+    const stripeCustomer = await this.call(() =>
+      this.stripe.customers.update(row.providerCustomerId, {
+        email: params.email,
+        name: params.name,
+        metadata: toStripeMetadata(params.metadata),
+      }),
+    );
+
+    const updated = this.toCustomer(row, stripeCustomer);
+    return params.metadata === undefined ? updated : { ...updated, metadata: { ...row.metadata, ...params.metadata } };
   }
 
-  async deleteCustomer(_customerId: CustomerId): Promise<void> {
-    // Implementation would delete from both Stripe and our database
-    throw new Error('Not implemented - requires database integration');
+  async deleteCustomer(customerId: CustomerId): Promise<void> {
+    const row = await this.customerRef(customerId);
+    await this.call(() => this.stripe.customers.del(row.providerCustomerId));
+  }
+
+  /** Our plan row, refreshed with the price and product Stripe holds now. */
+  private toPlan(row: Plan, price: Stripe.Price, productName?: string): Plan {
+    if (price.unit_amount === null || !price.recurring) {
+      throw new PaymentProviderError(
+        'unknown',
+        `Stripe price ${price.id} is not a flat recurring price, so it is not a plan`,
+      );
+    }
+    const amount = fromStripeAmount(price.unit_amount, price.currency);
+    return {
+      ...row,
+      name: productName ?? row.name,
+      priceMinor: toMinorColumn(amount),
+      currency: amount.currency.code,
+      interval: this.mapStripeIntervalToBilling(price.recurring.interval),
+      intervalCount: price.recurring.interval_count,
+      isActive: price.active,
+      updatedAt: now(),
+    };
+  }
+
+  private productIdOf(price: Stripe.Price): string {
+    return typeof price.product === 'string' ? price.product : price.product.id;
+  }
+
+  /** The product's name when the price was fetched with `expand: ['product']` and the product still exists. */
+  private expandedProductName(price: Stripe.Price): string | undefined {
+    const product = price.product;
+    if (typeof product === 'string' || product.deleted === true) return undefined;
+    return product.name;
   }
 
   async createPlan(params: {
@@ -220,24 +295,27 @@ export class StripeProvider extends BasePaymentProvider {
     trialPeriodDays?: number;
     metadata?: Record<string, unknown>;
   }): Promise<Plan> {
-    const stripeProduct = await this.stripe.products.create({
-      name: params.name,
-      metadata: params.metadata as Stripe.MetadataParam,
-    });
+    const planId = createPlanId();
+    const stripeProduct = await this.call(() =>
+      this.stripe.products.create({ name: params.name, metadata: toStripeMetadata(params.metadata) }),
+    );
 
-    const stripePrice = await this.stripe.prices.create({
-      product: stripeProduct.id,
-      unit_amount: toStripeAmount(params.amount),
-      currency: params.amount.currency.code,
-      recurring: {
-        interval: this.mapBillingIntervalToStripe(params.interval),
-        interval_count: params.intervalCount || 1,
-      },
-      metadata: params.metadata as Stripe.MetadataParam,
-    });
+    const stripePrice = await this.call(() =>
+      this.stripe.prices.create({
+        product: stripeProduct.id,
+        unit_amount: toStripeAmount(params.amount),
+        currency: params.amount.currency.code.toLowerCase(),
+        recurring: {
+          interval: this.mapBillingIntervalToStripe(params.interval),
+          interval_count: params.intervalCount || 1,
+        },
+        // `planId` lets `listPlans` find our row from a Stripe price
+        metadata: toStripeMetadata({ ...params.metadata, planId }),
+      }),
+    );
 
     return {
-      id: createPlanId(),
+      id: planId,
       name: params.name,
       description: '',
       tier: 'basic', // Would be determined by business logic
@@ -254,27 +332,69 @@ export class StripeProvider extends BasePaymentProvider {
     };
   }
 
-  async getPlan(_planId: PlanId): Promise<Plan | null> {
-    // Implementation would retrieve from our database
-    throw new Error('Not implemented - requires database integration');
+  async getPlan(planId: PlanId): Promise<Plan | null> {
+    const row = await this.requireReferences().findPlanById(planId);
+    if (!row) return null;
+
+    const price = await this.call(() =>
+      this.stripe.prices.retrieve(this.priceIdOf(row), { expand: ['product'] }),
+    );
+    return this.toPlan(row, price, this.expandedProductName(price));
   }
 
   async updatePlan(
-    _planId: PlanId,
-    _params: { name?: string; metadata?: Record<string, unknown> },
+    planId: PlanId,
+    params: { name?: string; metadata?: Record<string, unknown> },
   ): Promise<Plan> {
-    // Implementation would update both Stripe and our database
-    throw new Error('Not implemented - requires database integration');
+    const row = await this.planRef(planId);
+    const priceId = this.priceIdOf(row);
+    const metadata = toStripeMetadata(params.metadata);
+
+    const price = await this.call(() =>
+      metadata === undefined
+        ? this.stripe.prices.retrieve(priceId)
+        : this.stripe.prices.update(priceId, { metadata }),
+    );
+    let name = row.name;
+    if (params.name !== undefined || metadata !== undefined) {
+      const product = await this.call(() =>
+        this.stripe.products.update(this.productIdOf(price), { name: params.name, metadata }),
+      );
+      name = product.name;
+    }
+
+    const refreshed = this.toPlan(row, price, name);
+    return params.metadata === undefined ? refreshed : { ...refreshed, metadata: { ...row.metadata, ...params.metadata } };
   }
 
-  async deletePlan(_planId: PlanId): Promise<void> {
-    // Implementation would archive in both Stripe and our database
-    throw new Error('Not implemented - requires database integration');
+  /** Stripe prices cannot be deleted, so a deleted plan is archived: the price and its product stop being sold. */
+  async deletePlan(planId: PlanId): Promise<void> {
+    const priceId = await this.priceRef(planId);
+
+    const price = await this.call(() => this.stripe.prices.update(priceId, { active: false }));
+    await this.call(() => this.stripe.products.update(this.productIdOf(price), { active: false }));
   }
 
+  /**
+   * The active plans Stripe sells that this package created: prices carrying our `planId` in their
+   * metadata, whose row still exists. Prices made in the Stripe dashboard have no row here and are left out.
+   */
   async listPlans(): Promise<Plan[]> {
-    // Implementation would retrieve from our database
-    throw new Error('Not implemented - requires database integration');
+    const references = this.requireReferences();
+    const prices = await this.call(() =>
+      this.stripe.prices
+        .list({ active: true, type: 'recurring', expand: ['data.product'], limit: 100 })
+        .autoPagingToArray({ limit: 10_000 }),
+    );
+
+    const plans: Plan[] = [];
+    for (const price of prices) {
+      const parsed = planIdSchema.safeParse(price.metadata.planId);
+      if (!parsed.success) continue;
+      const row = await references.findPlanById(parsed.data);
+      if (row) plans.push(this.toPlan(row, price, this.expandedProductName(price)));
+    }
+    return plans;
   }
 
   async createSubscription(params: {
@@ -316,9 +436,12 @@ export class StripeProvider extends BasePaymentProvider {
     });
   }
 
-  async getSubscription(_subscriptionId: SubscriptionId): Promise<Subscription | null> {
-    // Implementation would retrieve from our database
-    throw new Error('Not implemented - requires database integration');
+  async getSubscription(subscriptionId: SubscriptionId): Promise<Subscription | null> {
+    const row = await this.requireReferences().findSubscriptionById(subscriptionId);
+    if (!row) return null;
+
+    const stripeSubscription = await this.call(() => this.stripe.subscriptions.retrieve(row.providerSubscriptionId));
+    return this.toSubscription(stripeSubscription, row);
   }
 
   async updateSubscription(
@@ -402,54 +525,218 @@ export class StripeProvider extends BasePaymentProvider {
     });
   }
 
-  async reactivateSubscription(_subscriptionId: SubscriptionId): Promise<Subscription> {
-    // Implementation would reactivate in both Stripe and our database
-    throw new Error('Not implemented - requires database integration');
+  /** Updates the Stripe subscription and returns our subscription row as Stripe now has it. */
+  private async updateStripeSubscription(
+    subscriptionId: SubscriptionId,
+    update: Stripe.SubscriptionUpdateParams,
+  ): Promise<Subscription> {
+    const current = await this.subscriptionRef(subscriptionId);
+    const stripeSubscription = await this.call(() =>
+      this.stripe.subscriptions.update(current.providerSubscriptionId, update),
+    );
+    return this.toSubscription(stripeSubscription, current);
   }
 
-  async pauseSubscription(_subscriptionId: SubscriptionId): Promise<Subscription> {
-    // Stripe-specific pause logic
-    throw new Error('Not implemented - requires database integration');
+  /** Undoes a cancellation that is set to happen at the end of the paid period. */
+  async reactivateSubscription(subscriptionId: SubscriptionId): Promise<Subscription> {
+    return this.updateStripeSubscription(subscriptionId, { cancel_at_period_end: false });
   }
 
-  async resumeSubscription(_subscriptionId: SubscriptionId): Promise<Subscription> {
-    // Stripe-specific resume logic
-    throw new Error('Not implemented - requires database integration');
+  /** Stops charging and keeps the subscription: invoices are voided until `resumeSubscription`. */
+  async pauseSubscription(subscriptionId: SubscriptionId): Promise<Subscription> {
+    return this.updateStripeSubscription(subscriptionId, { pause_collection: { behavior: 'void' } });
   }
 
-  async previewSubscriptionChange(_params: {
+  async resumeSubscription(subscriptionId: SubscriptionId): Promise<Subscription> {
+    // An empty string clears `pause_collection` in Stripe's API
+    return this.updateStripeSubscription(subscriptionId, { pause_collection: '' });
+  }
+
+  /**
+   * What changing to `planId` would charge, from a Stripe upcoming-invoice preview (nothing is created).
+   * `immediateTotal` is the net of the proration lines (a credit larger than the charge is zero),
+   * `creditApplied` the unused time credited back, `nextInvoiceTotal` the lines of the new plan itself.
+   */
+  async previewSubscriptionChange(params: {
     subscriptionId: SubscriptionId;
     planId: PlanId;
     prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
   }): Promise<SubscriptionPreview> {
-    // Stripe-specific proration preview
-    throw new Error('Not implemented - requires database integration');
+    const current = await this.subscriptionRef(params.subscriptionId);
+    const priceId = await this.priceRef(params.planId);
+    const customer = await this.customerRef(current.customerId);
+
+    const existing = await this.call(() => this.stripe.subscriptions.retrieve(current.providerSubscriptionId));
+    const item = existing.items.data[0];
+    if (!item) throw new PaymentProviderError('unknown', `Stripe subscription ${existing.id} has no items`);
+
+    const invoice = await this.call(() =>
+      this.stripe.invoices.createPreview({
+        customer: customer.providerCustomerId,
+        subscription: existing.id,
+        subscription_details: {
+          items: [{ id: item.id, price: priceId }],
+          proration_behavior: params.prorationBehavior,
+        },
+      }),
+    );
+
+    const currency = invoice.currency;
+    let charged = Money.zero(currency.toUpperCase());
+    let credited = Money.zero(currency.toUpperCase());
+    let next = Money.zero(currency.toUpperCase());
+    for (const line of invoice.lines.data) {
+      const amount = fromStripeAmount(line.amount, currency);
+      const proration = line.parent?.subscription_item_details?.proration ?? false;
+      if (!proration) {
+        next = next.plus(amount);
+      } else if (amount.isNegative()) {
+        credited = credited.plus(amount.abs());
+      } else {
+        charged = charged.plus(amount);
+      }
+    }
+    const net = charged.minus(credited);
+
+    return {
+      planId: params.planId,
+      proration: {
+        immediateTotal: (net.isNegative() ? Money.zero(currency.toUpperCase()) : net).toJSON(),
+        nextInvoiceTotal: next.toJSON(),
+        creditApplied: credited.toJSON(),
+      },
+      trialEnd: existing.trial_end === null ? undefined : fromUnix(existing.trial_end),
+      nextBillingDate: fromUnix(item.current_period_end),
+    };
   }
 
-  async createPayment(_params: {
+  /** Our payment from a Stripe payment intent fetched with `expand: ['payment_method', 'latest_charge']`. */
+  private toPayment(
+    intent: Stripe.PaymentIntent,
+    base: Pick<Payment, 'id' | 'userId' | 'customerId' | 'subscriptionId' | 'metadata' | 'disputeId' | 'disputeStatus' | 'createdAt'>,
+  ): Payment {
+    const amount = fromStripeAmount(intent.amount, intent.currency);
+    const paymentMethod = intent.payment_method;
+    const charge = intent.latest_charge;
+    const chargeObject = charge !== null && typeof charge === 'object' ? charge : null;
+    const refundedMinor = chargeObject
+      ? toMinorColumn(fromStripeAmount(chargeObject.amount_refunded, intent.currency))
+      : 0;
+
+    return {
+      id: base.id,
+      userId: base.userId,
+      customerId: base.customerId,
+      subscriptionId: base.subscriptionId,
+      providerPaymentId: intent.id,
+      amountMinor: toMinorColumn(amount),
+      currency: amount.currency.code,
+      status: this.mapPaymentIntentStatus(intent),
+      paymentMethod:
+        paymentMethod !== null && typeof paymentMethod === 'object'
+          ? this.mapPaymentMethodType(paymentMethod.type)
+          : 'card',
+      description: intent.description,
+      failureReason: intent.last_payment_error?.message ?? null,
+      receiptUrl: chargeObject?.receipt_url ?? null,
+      refunded: refundedMinor > 0,
+      refundedAmountMinor: refundedMinor,
+      disputeId: base.disputeId,
+      disputeStatus: base.disputeStatus,
+      metadata: base.metadata,
+      createdAt: base.createdAt,
+      updatedAt: now(),
+    };
+  }
+
+  private mapPaymentIntentStatus(intent: Stripe.PaymentIntent): PaymentStatus {
+    switch (intent.status) {
+      case 'succeeded': {
+        return 'succeeded';
+      }
+      case 'canceled': {
+        return 'canceled';
+      }
+      case 'processing':
+      case 'requires_capture': {
+        return 'processing';
+      }
+      case 'requires_action': {
+        return 'requires_action';
+      }
+      case 'requires_payment_method': {
+        // A fresh intent waits for a method; one that has a payment error is a failed attempt
+        return intent.last_payment_error ? 'failed' : 'pending';
+      }
+      default: {
+        return 'pending';
+      }
+    }
+  }
+
+  /** Charges the payment method now, with the customer present. */
+  async createPayment(params: {
     customerId: CustomerId;
     amount: Money;
     paymentMethodId: string;
     description?: string;
     metadata?: Record<string, unknown>;
   }): Promise<Payment> {
-    // Implementation would create payment intent in Stripe
-    throw new Error('Not implemented - requires database integration');
+    const customer = await this.customerRef(params.customerId);
+
+    const intent = await this.call(() =>
+      this.stripe.paymentIntents.create({
+        // Stripe's own units: JPY is sent as yen, not yen x 100
+        amount: toStripeAmount(params.amount),
+        currency: params.amount.currency.code.toLowerCase(),
+        customer: customer.providerCustomerId,
+        payment_method: params.paymentMethodId,
+        confirm: true,
+        // Redirect methods need a return page this call does not have
+        automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+        description: params.description,
+        metadata: toStripeMetadata({ ...params.metadata, userId: customer.userId, customerId: customer.id }),
+        expand: ['payment_method', 'latest_charge'],
+      }),
+    );
+
+    return this.toPayment(intent, {
+      id: createPaymentId(),
+      userId: customer.userId,
+      customerId: customer.id,
+      subscriptionId: null,
+      metadata: params.metadata ?? null,
+      disputeId: null,
+      disputeStatus: null,
+      createdAt: fromUnix(intent.created),
+    });
   }
 
-  async getPayment(_paymentId: PaymentId): Promise<Payment | null> {
-    // Implementation would retrieve from our database
-    throw new Error('Not implemented - requires database integration');
+  async getPayment(paymentId: PaymentId): Promise<Payment | null> {
+    const row = await this.requireReferences().findPaymentById(paymentId);
+    if (!row) return null;
+
+    const intent = await this.call(() =>
+      this.stripe.paymentIntents.retrieve(row.providerPaymentId, { expand: ['payment_method', 'latest_charge'] }),
+    );
+    return this.toPayment(intent, row);
   }
 
-  async confirmPayment(_paymentId: PaymentId): Promise<Payment> {
-    // Implementation would confirm payment intent in Stripe
-    throw new Error('Not implemented - requires database integration');
+  /** Confirms the payment intent: also how a failed payment is tried again. */
+  async confirmPayment(paymentId: PaymentId): Promise<Payment> {
+    const row = await this.paymentRef(paymentId);
+    const intent = await this.call(() =>
+      this.stripe.paymentIntents.confirm(row.providerPaymentId, { expand: ['payment_method', 'latest_charge'] }),
+    );
+    return this.toPayment(intent, row);
   }
 
-  async cancelPayment(_paymentId: PaymentId): Promise<Payment> {
-    // Implementation would cancel payment intent in Stripe
-    throw new Error('Not implemented - requires database integration');
+  async cancelPayment(paymentId: PaymentId): Promise<Payment> {
+    const row = await this.paymentRef(paymentId);
+    const intent = await this.call(() =>
+      this.stripe.paymentIntents.cancel(row.providerPaymentId, { expand: ['payment_method', 'latest_charge'] }),
+    );
+    return this.toPayment(intent, row);
   }
 
   async refundPayment(
@@ -495,29 +782,64 @@ export class StripeProvider extends BasePaymentProvider {
     };
   }
 
-  async attachPaymentMethod(_params: {
+  private toPaymentMethodInfo(method: Stripe.PaymentMethod, defaultMethodId: string | null): PaymentMethodInfo {
+    return {
+      id: method.id,
+      type: this.mapPaymentMethodType(method.type),
+      brand: method.card?.brand ?? method.us_bank_account?.bank_name ?? undefined,
+      last4: method.card?.last4 ?? method.us_bank_account?.last4 ?? undefined,
+      expiryMonth: method.card?.exp_month,
+      expiryYear: method.card?.exp_year,
+      isDefault: method.id === defaultMethodId,
+    };
+  }
+
+  /** The id of the customer's default payment method in Stripe, or null. */
+  private async defaultPaymentMethodOf(providerCustomerId: string): Promise<string | null> {
+    const stripeCustomer = await this.call(() => this.stripe.customers.retrieve(providerCustomerId));
+    if (stripeCustomer.deleted === true) {
+      throw new PaymentProviderError('invalid_request', `Stripe customer ${providerCustomerId} was deleted`);
+    }
+    const method = stripeCustomer.invoice_settings.default_payment_method;
+    return typeof method === 'string' ? method : (method?.id ?? null);
+  }
+
+  async attachPaymentMethod(params: {
     customerId: CustomerId;
     paymentMethodId: string;
   }): Promise<PaymentMethodInfo> {
-    // Implementation would attach payment method to customer in Stripe
-    throw new Error('Not implemented - requires database integration');
+    const customer = await this.customerRef(params.customerId);
+
+    const method = await this.call(() =>
+      this.stripe.paymentMethods.attach(params.paymentMethodId, { customer: customer.providerCustomerId }),
+    );
+    return this.toPaymentMethodInfo(method, await this.defaultPaymentMethodOf(customer.providerCustomerId));
   }
 
   async detachPaymentMethod(paymentMethodId: string): Promise<void> {
     await this.stripe.paymentMethods.detach(paymentMethodId);
   }
 
-  async listPaymentMethods(_customerId: CustomerId): Promise<PaymentMethodInfo[]> {
-    // Implementation would list payment methods for customer
-    throw new Error('Not implemented - requires database integration');
+  async listPaymentMethods(customerId: CustomerId): Promise<PaymentMethodInfo[]> {
+    const customer = await this.customerRef(customerId);
+
+    const methods = await this.call(() =>
+      this.stripe.paymentMethods
+        .list({ customer: customer.providerCustomerId, limit: 100 })
+        .autoPagingToArray({ limit: 10_000 }),
+    );
+    const defaultMethodId = await this.defaultPaymentMethodOf(customer.providerCustomerId);
+    return methods.map(method => this.toPaymentMethodInfo(method, defaultMethodId));
   }
 
-  async setDefaultPaymentMethod(_params: {
-    customerId: CustomerId;
-    paymentMethodId: string;
-  }): Promise<void> {
-    // Implementation would set default payment method for customer
-    throw new Error('Not implemented - requires database integration');
+  async setDefaultPaymentMethod(params: { customerId: CustomerId; paymentMethodId: string }): Promise<void> {
+    const customer = await this.customerRef(params.customerId);
+
+    await this.call(() =>
+      this.stripe.customers.update(customer.providerCustomerId, {
+        invoice_settings: { default_payment_method: params.paymentMethodId },
+      }),
+    );
   }
 
   async validateWebhook(
@@ -910,6 +1232,26 @@ export class StripeProvider extends BasePaymentProvider {
       }
       default: {
         return 'month';
+      }
+    }
+  }
+
+  private mapStripeIntervalToBilling(interval: Stripe.Price.Recurring.Interval): BillingInterval {
+    switch (interval) {
+      case 'day': {
+        return 'daily';
+      }
+      case 'week': {
+        return 'weekly';
+      }
+      case 'month': {
+        return 'monthly';
+      }
+      case 'year': {
+        return 'yearly';
+      }
+      default: {
+        throw new PaymentProviderError('unknown', `Stripe billing interval ${interval} is not supported`);
       }
     }
   }

@@ -78,6 +78,7 @@ const references = {
   findPlanById: (id: string) =>
     Promise.resolve([proPlan, teamPlan, planRow(null)].find(plan => plan.id === id) ?? null),
   findSubscriptionById: (id: string) => Promise.resolve(id === subscriptionRow.id ? subscriptionRow : null),
+  findPaymentById: () => Promise.resolve(null),
 };
 
 function stripeSubscription(overrides: Record<string, unknown> = {}) {
