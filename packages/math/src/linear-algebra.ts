@@ -470,7 +470,8 @@ type Factored = {
 /** In-place Doolittle LU with partial pivoting on a fresh copy of a validated square matrix. */
 function factor(a: Matrix): Factored {
   const n = a.length;
-  const lu = a.map(row => [...row]);
+  // eslint-disable-next-line unicorn/prefer-spread -- slice keeps JavaScriptCore's unboxed double storage; a spread copy boxes the entries and makes elimination about 2× slower in Bun
+  const lu = a.map(row => row.slice());
   const permutation = Array.from({ length: n }, (_, i) => i);
   let sign: 1 | -1 = 1;
   for (let k = 0; k < n; k++) {
@@ -667,7 +668,8 @@ export function rank(a: Matrix, options?: RankOptions): number {
 
 function eliminationRank(a: Matrix, rows: number, columns: number, options: ToleranceOptions | undefined): number {
   const tolerance = resolveTolerance(options, () => Math.max(rows, columns) * Number.EPSILON * normInfinity(a));
-  const work = a.map(row => [...row]);
+  // eslint-disable-next-line unicorn/prefer-spread -- slice keeps JavaScriptCore's unboxed double storage; a spread copy boxes the entries and makes elimination about 2× slower in Bun
+  const work = a.map(row => row.slice());
   let r = 0;
   for (let c = 0; c < columns && r < rows; c++) {
     let pivotRow = r;
