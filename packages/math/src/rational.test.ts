@@ -87,6 +87,11 @@ describe('arithmetic', () => {
     expect(ratio(-1, 2).abs().toString()).toBe('1/2');
     expect(ratio(1, 2).negated().toString()).toBe('-1/2');
   });
+  it('toDecimal keeps the 10 000-digit cap of every Decimal', () => {
+    const big = ratio('9'.repeat(9999));
+    expect(big.toDecimal({ scale: 1 }).scale).toBe(1);
+    expect(() => big.toDecimal({ scale: 2 })).toThrow(ResourceLimitError);
+  });
   it('pow refuses only a numerator or denominator past the 10 000-digit cap', () => {
     // The estimate used to add both parts' digit counts and multiply by the exponent, so
     // (2/3)^14000 (4215 and 6680 digits) and even 1^20000 were refused.

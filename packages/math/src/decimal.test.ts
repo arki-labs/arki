@@ -77,6 +77,25 @@ describe('decimal() construction', () => {
     expect(() => decimal('1e-10001')).toThrow(ResourceLimitError);
     expect(decimal('1'.repeat(10_000)).toString()).toHaveLength(10_000);
   });
+  it('keeps every arithmetic result within 10 000 coefficient digits, so each one parses back', () => {
+    // Rule: any Decimal has at most 10 000 coefficient digits (integer digits + scale).
+    // Aligning or padding the scale used to build longer ones that decimal(x.toString()) refused.
+    const big = decimal('9'.repeat(9999));
+    const roundTrips = (value: Decimal) => decimal(value.toString()).eq(value);
+    expect(roundTrips(big.toScale(1))).toBe(true);
+    expect(() => big.toScale(2)).toThrow(ResourceLimitError);
+    expect(roundTrips(big.plus('0.1'))).toBe(true);
+    expect(() => big.plus('0.01')).toThrow(ResourceLimitError);
+    expect(() => big.minus('0.01')).toThrow(ResourceLimitError);
+    expect(() => decimal('0.01').minus(big)).toThrow(ResourceLimitError);
+    expect(roundTrips(Decimal.sum([big, '0.1']))).toBe(true);
+    expect(() => Decimal.sum([big, '0.01'])).toThrow(ResourceLimitError);
+    expect(roundTrips(big.dividedBy(3, { scale: 1, rounding: 'down' }))).toBe(true);
+    expect(() => big.dividedBy(3, { scale: 2, rounding: 'down' })).toThrow(ResourceLimitError);
+    // Rounding can carry into one more digit: 99…9 (10 000 digits) to 1 figure is 10^10000.
+    expect(() => decimal('9'.repeat(10_000)).roundToSignificant(1)).toThrow(ResourceLimitError);
+    expect(roundTrips(decimal('9'.repeat(9999)).roundToSignificant(1))).toBe(true);
+  });
   it('counts coefficient digits, not leading zeros, like every result', () => {
     // Rule: at most 10 000 coefficient digits (integer digits + scale). The parser used to
     // count the "0" of "0.", so a scale-10 000 value below 1 could not read its own toString().

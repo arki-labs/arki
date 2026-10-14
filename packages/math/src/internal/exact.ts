@@ -44,10 +44,11 @@ const DIGIT_LIMIT = 10n ** BigInt(MAX_DIGITS);
 const NEGATIVE_DIGIT_LIMIT = -DIGIT_LIMIT;
 
 /**
- * Parsing caps inputs at `MAX_DIGITS`, and results that multiply must stay under it too
- * (as `pow` already does): `x = x.times(x)` doubles the digits every step and would
- * otherwise run for seconds before the engine's BigInt limit throws a `RangeError`.
- * One comparison, constant time for ordinary values.
+ * Every Decimal has at most `MAX_DIGITS` coefficient digits (integer digits + scale), so
+ * each one parses back from its own `toString()`. Parsing caps inputs; every result that
+ * can grow (sum, product, quotient, power, rescale) is checked here. Without it
+ * `x = x.times(x)` doubles the digits every step and runs for seconds before the engine's
+ * BigInt limit throws a `RangeError`. One comparison, constant time for ordinary values.
  */
 function assertResultDigits(value: bigint, what: string): bigint {
   if (value >= DIGIT_LIMIT || value <= NEGATIVE_DIGIT_LIMIT) {
@@ -171,7 +172,7 @@ export class Decimal {
       }
       coefficient += d.scale === scale ? d.coefficient : d.coefficient * pow10(scale - d.scale);
     }
-    return new Decimal(coefficient, scale, BRAND);
+    return new Decimal(assertResultDigits(coefficient, 'The sum'), scale, BRAND);
   }
 
   /** Comparator for sorting: `prices.sort(Decimal.compare)`. */
@@ -195,12 +196,12 @@ export class Decimal {
 
   plus(other: DecimalInput): Decimal {
     const [a, b, scale] = align(this, Decimal.from(other));
-    return new Decimal(a + b, scale, BRAND);
+    return new Decimal(assertResultDigits(a + b, 'The sum'), scale, BRAND);
   }
 
   minus(other: DecimalInput): Decimal {
     const [a, b, scale] = align(this, Decimal.from(other));
-    return new Decimal(a - b, scale, BRAND);
+    return new Decimal(assertResultDigits(a - b, 'The difference'), scale, BRAND);
   }
 
   times(other: DecimalInput): Decimal {
@@ -219,9 +220,13 @@ export class Decimal {
    */
   dividedBy(other: DecimalInput, options?: ScaleOptions): Decimal {
     const that = Decimal.from(other);
-    return Decimal.fromParts(
-      fractionToDecimalParts(this.coefficient * pow10(that.scale), that.coefficient * pow10(this.scale), options),
+    const parts = fractionToDecimalParts(
+      this.coefficient * pow10(that.scale),
+      that.coefficient * pow10(this.scale),
+      options,
     );
+    assertResultDigits(parts.coefficient, 'The quotient');
+    return Decimal.fromParts(parts);
   }
 
   /** Remainder with the sign of the dividend, like JavaScript's `%`. */
@@ -269,7 +274,7 @@ export class Decimal {
     assertScale(scale);
     const diff = scale - this.scale;
     if (diff === 0) return this;
-    if (diff > 0) return new Decimal(this.coefficient * pow10(diff), scale, BRAND);
+    if (diff > 0) return new Decimal(assertResultDigits(this.coefficient * pow10(diff), 'The value'), scale, BRAND);
     return new Decimal(divideRounded(this.coefficient, pow10(-diff), rounding), scale, BRAND);
   }
 
@@ -292,7 +297,7 @@ export class Decimal {
     // Rounding away the integer digits leaves trailing zeros: keep them as integer zeros, not a negative scale.
     return this.scale >= drop
       ? new Decimal(rounded, this.scale - drop, BRAND)
-      : new Decimal(rounded * pow10(drop - this.scale), 0, BRAND);
+      : new Decimal(assertResultDigits(rounded * pow10(drop - this.scale), 'The rounded value'), 0, BRAND);
   }
 
   /** Rounds to the nearest multiple of `step`: `decimal('1.23').roundTo('0.05')` → `1.25`. Default half-up. */
@@ -670,7 +675,9 @@ export class Rational {
 
   /** Exact when the fraction terminates; otherwise needs `{ scale, rounding }` or it throws. */
   toDecimal(options?: ScaleOptions): Decimal {
-    return Decimal.fromParts(fractionToDecimalParts(this.numerator, this.denominator, options));
+    const parts = fractionToDecimalParts(this.numerator, this.denominator, options);
+    assertResultDigits(parts.coefficient, 'The decimal');
+    return Decimal.fromParts(parts);
   }
 
   /** `7/2` → `{ whole: 3n, fraction: 1/2 }`; `-7/2` → `{ whole: -3n, fraction: -1/2 }`. */
