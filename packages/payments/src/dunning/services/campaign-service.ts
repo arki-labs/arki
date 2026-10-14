@@ -61,7 +61,7 @@ export class DunningCampaignService {
 
   constructor(
     private readonly db: DunningDatabase,
-    tables: Pick<
+    private readonly tables: Pick<
       DunningTables,
       'dunningCampaigns' | 'dunningCampaignAnalytics' | 'dunningTemplates' | 'dunningExecutions'
     >,
@@ -91,9 +91,15 @@ export class DunningCampaignService {
    * Create a new dunning campaign with templates
    */
   async createCampaign(input: CreateDunningCampaignInput, createdBy: string): Promise<DunningCampaign> {
-    return this.db.transaction(async _tx => {
-      // Create the campaign
-      const campaignModel = await this.campaignRepo.create({
+    return this.db.transaction(async tx => {
+      // The repositories run on the transaction: a template that fails takes the campaign with it
+      const campaignRepo = createDunningCampaignRepository(tx, {
+        dunningCampaigns: this.tables.dunningCampaigns,
+        dunningCampaignAnalytics: this.tables.dunningCampaignAnalytics,
+      });
+      const templateRepo = createDunningTemplateRepository(tx, { dunningTemplates: this.tables.dunningTemplates });
+
+      const campaignModel = await campaignRepo.create({
         ...input,
         createdBy,
       });
@@ -102,10 +108,9 @@ export class DunningCampaignService {
         throw new Error('Failed to create campaign');
       }
 
-      // Create templates for the campaign
       const templates = [];
       for (const templateInput of input.templates) {
-        const template = await this.templateRepo.create({
+        const template = await templateRepo.create({
           campaignId: campaignModel.id,
           name: templateInput.name,
           stepNumber: templateInput.stepNumber,
