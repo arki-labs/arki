@@ -6,6 +6,7 @@ import { refundIdSchema } from '../refunds/primitives.js';
 import { moneyJsonSchema, positiveMoneySchema, priceSchema } from './money.js';
 import {
   billingIntervalValues,
+  customerIdSchema,
   paymentIdSchema,
   paymentMethodTypeValues,
   paymentProviderValues,
@@ -145,6 +146,7 @@ export const subscriptionQuerySchema = paginationSchema.extend({
 export const paymentQuerySchema = paginationSchema.extend({
   status: paymentStatusSchema.optional(),
   subscriptionId: subscriptionIdSchema.optional(),
+  customerId: customerIdSchema.optional(),
   userId: userIdSchema.optional(),
   startDate: instantSchema().optional(),
   endDate: instantSchema().optional(),

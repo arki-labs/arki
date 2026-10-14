@@ -1,9 +1,13 @@
 import type { Instant } from '@arki/date';
-import type { Money } from '@arki/money';
-import { fromDate, instant, now } from '@arki/date';
-import { money, sum } from '@arki/money';
+import { fromDate, now, sub } from '@arki/date';
+import { Money, money, sum } from '@arki/money';
 
+import type { PaymentRepository } from '../core/repository.js';
 import type { StripeProvider } from '../core/providers/stripe-provider.js';
+import type { CustomerId } from '../core/types.js';
+import type { ExemptionType } from './primitives.js';
+import type { TaxExemptionRepository } from './repository.js';
+import { moneyJsonSchema } from '../core/money.js';
 
 /**
  * Tax compliance and reporting periods
@@ -45,12 +49,17 @@ export type TaxComplianceReport = {
 
 /**
  * Customer tax summary for compliance
+ *
+ * Built from the customer's succeeded payments of the calendar year (UTC). A payment's tax is the
+ * `taxAmount` its metadata records at checkout; a payment without one carried no recorded tax and
+ * counts zero. Totals are one amount per currency: currencies are never added.
  */
 export type CustomerTaxSummary = {
   customerId: string;
   year: number;
-  totalPaid: Money;
-  totalTax: Money;
+  /** One total per currency, ordered by currency code. */
+  totalPaid: Money[];
+  totalTax: Money[];
   transactions: {
     id: string;
     date: Instant;
@@ -59,12 +68,21 @@ export type CustomerTaxSummary = {
     type: 'subscription' | 'one_time';
     description: string;
   }[];
+  /** Exemptions that were in force at some point in the year. */
   exemptions: {
-    type: string;
-    amount: Money;
+    type: ExemptionType;
     reason: string;
+    certificateNumber: string | null;
+    validFrom: Instant;
+    validTo: Instant | null;
   }[];
 }
+
+/** What the customer summary reads. A `PaymentRepository` and a `TaxExemptionRepository` fit. */
+export type TaxReportReads = {
+  payments: Pick<PaymentRepository, 'findPayments'>;
+  exemptions: Pick<TaxExemptionRepository, 'findCustomerExemptionsInRange'>;
+};
 
 /**
  * Tax audit trail entry
@@ -84,6 +102,37 @@ export type TaxAuditEntry = {
   };
 }
 
+/** The amounts summed per currency, ordered by currency code. Exact; currencies are never added. */
+function totalsByCurrency(amounts: readonly Money[]): Money[] {
+  const byCurrency = new Map<string, Money[]>();
+  for (const amount of amounts) {
+    byCurrency.set(amount.currency.code, [...(byCurrency.get(amount.currency.code) ?? []), amount]);
+  }
+
+  return [...byCurrency.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([code, items]) => sum(items, code));
+}
+
+/**
+ * The tax a payment recorded in its metadata at checkout (`taxAmount`, `Money` JSON), as `Money`
+ * in the payment's currency. No `taxAmount` means no tax was recorded: zero. One that is not
+ * `Money` JSON, or is in another currency than the payment, throws: a wrong total must not pass.
+ */
+function recordedTax(paymentId: string, metadata: Record<string, unknown> | null, currency: string): Money {
+  const recorded = metadata?.taxAmount;
+  if (recorded === undefined || recorded === null) return Money.zero(currency);
+
+  const parsed = moneyJsonSchema.safeParse(recorded);
+  if (!parsed.success) {
+    throw new Error(`Payment ${paymentId} has a taxAmount that is not money: ${JSON.stringify(recorded)}`);
+  }
+  const tax = Money.fromJSON(parsed.data);
+  if (tax.currency.code !== currency) {
+    throw new Error(`Payment ${paymentId} is in ${currency} but records tax in ${tax.currency.code}`);
+  }
+
+  return tax;
+}
+
 /**
  * Tax Reporting and Compliance Service
  *
@@ -91,7 +140,10 @@ export type TaxAuditEntry = {
  * and audit trail functionality for tax operations.
  */
 export class TaxReportingService {
-  constructor(private readonly stripeProvider: StripeProvider) {}
+  constructor(
+    private readonly stripeProvider: StripeProvider,
+    private readonly reads: TaxReportReads,
+  ) {}
 
   /**
    * Generate comprehensive tax compliance report
@@ -145,37 +197,56 @@ export class TaxReportingService {
   }
 
   /**
-   * Get customer tax summary for a specific year
+   * Get customer tax summary for a specific year (UTC): the customer's succeeded payments with the
+   * tax recorded on each, and the exemptions in force during the year.
    */
-  async getCustomerTaxSummary(customerId: string, year: number): Promise<CustomerTaxSummary> {
-    try {
-      // This would query the database for customer transactions
-      // For now, return a placeholder structure
-      // Local-time calendar boundaries, as before.
-      const startDate = fromDate(new Date(year, 0, 1));
-      const endDate = fromDate(new Date(year, 11, 31));
+  async getCustomerTaxSummary(customerId: CustomerId, year: number): Promise<CustomerTaxSummary> {
+    const startDate = fromDate(new Date(Date.UTC(year, 0, 1)));
+    const endDate = sub(fromDate(new Date(Date.UTC(year + 1, 0, 1))), { nanoseconds: 1 });
 
-      // Query payments and subscriptions for this customer in the year
-      // This is a simplified implementation - in reality would involve complex queries
-      const transactions = await this.getCustomerTransactions(customerId, startDate, endDate);
-      const exemptions = await this.getCustomerExemptions(customerId, year);
-
-      // Exact sums; a transaction in another currency throws CurrencyMismatchError
-      const totalPaid = sum(transactions.map(t => t.amount), 'USD');
-      const totalTax = sum(transactions.map(t => t.tax), 'USD');
-
-      return {
+    const transactions: CustomerTaxSummary['transactions'] = [];
+    const pageSize = 100;
+    for (let offset = 0; ; offset += pageSize) {
+      const page = await this.reads.payments.findPayments({
+        status: 'succeeded',
         customerId,
-        year,
-        totalPaid,
-        totalTax,
-        transactions,
-        exemptions,
-      };
-    } catch (error) {
-      console.error('Failed to get customer tax summary:', error);
-      throw new Error(`Failed to get customer tax summary: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        startDate,
+        endDate,
+        limit: pageSize,
+        offset,
+      });
+
+      for (const payment of page) {
+        const amount = Money.fromMinor(payment.amountMinor, payment.currency.toUpperCase());
+        transactions.push({
+          id: payment.id,
+          date: payment.createdAt,
+          amount,
+          tax: recordedTax(payment.id, payment.metadata, amount.currency.code),
+          type: payment.subscriptionId ? 'subscription' : 'one_time',
+          description: payment.description ?? '',
+        });
+      }
+
+      if (page.length < pageSize) break;
     }
+
+    const exemptions = await this.reads.exemptions.findCustomerExemptionsInRange(customerId, startDate, endDate);
+
+    return {
+      customerId,
+      year,
+      totalPaid: totalsByCurrency(transactions.map((t) => t.amount)),
+      totalTax: totalsByCurrency(transactions.map((t) => t.tax)),
+      transactions,
+      exemptions: exemptions.map((exemption) => ({
+        type: exemption.type,
+        reason: exemption.reason,
+        certificateNumber: exemption.certificateNumber,
+        validFrom: exemption.validFrom,
+        validTo: exemption.validTo,
+      })),
+    };
   }
 
   /**
@@ -332,26 +403,6 @@ export class TaxReportingService {
     };
   }
 
-  private async getCustomerTransactions(_customerId: string, _startDate: Instant, _endDate: Instant) {
-    // This would query the payments and subscription tables
-    // For now, return placeholder data
-    return [
-      {
-        id: 'pay_123',
-        date: instant('2024-01-15T00:00:00Z'),
-        amount: money('29.99', 'USD'),
-        tax: money('2.70', 'USD'),
-        type: 'subscription' as const,
-        description: 'Pro Plan - Monthly',
-      },
-    ];
-  }
-
-  private async getCustomerExemptions(_customerId: string, _year: number) {
-    // This would query the tax exemptions table
-    return [];
-  }
-
   private formatAsCSV(_data: unknown): string {
     // Simple CSV formatting - would be more sophisticated in reality
     return 'Date,Amount,Tax,Type,Description\n' +
@@ -378,8 +429,8 @@ export class TaxReportingService {
 /**
  * Factory function to create TaxReportingService
  */
-export function createTaxReportingService(stripeProvider: StripeProvider): TaxReportingService {
-  return new TaxReportingService(stripeProvider);
+export function createTaxReportingService(stripeProvider: StripeProvider, reads: TaxReportReads): TaxReportingService {
+  return new TaxReportingService(stripeProvider, reads);
 }
 
 /**

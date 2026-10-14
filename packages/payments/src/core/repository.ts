@@ -390,7 +390,7 @@ export class PaymentRepository {
 
   /** Payments matching the filters left in `query`, newest first, one page. `startDate` and `endDate` bound `createdAt`, both inclusive. */
   async findPayments(query: PaymentQuery): Promise<Payment[]> {
-    const { status, subscriptionId, userId, startDate, endDate, limit, offset } = query;
+    const { status, subscriptionId, customerId, userId, startDate, endDate, limit, offset } = query;
     const createdAt =
       startDate || endDate
         ? {
@@ -403,6 +403,7 @@ export class PaymentRepository {
       where: {
         ...(status && { status }),
         ...(subscriptionId && { subscriptionId }),
+        ...(customerId && { customerId }),
         ...(userId && { userId }),
         ...(createdAt && { createdAt }),
       },

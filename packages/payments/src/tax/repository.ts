@@ -1,7 +1,9 @@
 import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import type { PgliteDatabase } from 'drizzle-orm/pglite';
+import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 
+import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
 
 import type { TaxConfigId, TaxExemptionId, TaxJurisdictionId } from './primitives.js';
@@ -23,7 +25,8 @@ import type {
  */
 export type TaxDatabase =
   | NodePgDatabase<AnyRelations>
-  | NodePgTransaction<AnyRelations>;
+  | NodePgTransaction<AnyRelations>
+  | PgliteDatabase<AnyRelations>;
 
 export type UpdateTaxConfiguration = Partial<Omit<NewTaxConfig, 'id'>>;
 export type UpdateTaxJurisdiction = Partial<Omit<NewTaxJurisdiction, 'id'>>;
@@ -266,6 +269,25 @@ export class TaxExemptionRepository {
           // Check that exemption is currently valid
           sql`${this.taxExemptions.validFrom} <= NOW()`,
           sql`(${this.taxExemptions.validTo} IS NULL OR ${this.taxExemptions.validTo} > NOW())`,
+        ),
+      )
+      .orderBy(this.taxExemptions.validFrom) as Promise<TaxExemption[]>;
+  }
+
+  /**
+   * The customer's exemptions that were in force at some point between `start` and `end`,
+   * both inclusive. Pending and revoked exemptions never applied, so they are left out.
+   */
+  async findCustomerExemptionsInRange(customerId: string, start: Instant, end: Instant): Promise<TaxExemption[]> {
+    return this.db
+      .select()
+      .from(this.taxExemptions)
+      .where(
+        and(
+          eq(this.taxExemptions.customerId, customerId),
+          inArray(this.taxExemptions.status, ['active', 'expired']),
+          lte(this.taxExemptions.validFrom, end),
+          or(isNull(this.taxExemptions.validTo), gte(this.taxExemptions.validTo, start)),
         ),
       )
       .orderBy(this.taxExemptions.validFrom) as Promise<TaxExemption[]>;

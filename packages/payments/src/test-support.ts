@@ -68,7 +68,8 @@ export const typed = {
   journal: typedDefinitions.compose({ tables: journalTablesInSchema }),
 };
 
-export async function openDb() {
+/** `extra`: more tables or enums of the same schema, pushed in the same call (a second push would drop these). */
+export async function openDb(extra: Record<string, unknown> = {}) {
   const client = new PGlite('memory://');
   await client.waitReady;
   const db = drizzle({ client });
@@ -85,6 +86,7 @@ export async function openDb() {
       ...refundsTables.enums,
       refunds: refundsTables.refunds,
       ...journalTablesInSchema,
+      ...extra,
     },
     db,
   );
