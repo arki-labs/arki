@@ -28,14 +28,19 @@ import {
   multiply as mathMultiply,
   pow as mathPow,
   sqrt as mathSqrt,
+  transpose as mathTranspose,
   polynomialRoot,
+  qr,
 } from 'mathjs';
 import {
+  CholeskyDecomposition,
   EigenvalueDecomposition,
   Matrix,
   determinant as mlDeterminant,
   inverse as mlInverse,
   solve as mlSolve,
+  QrDecomposition,
+  SingularValueDecomposition,
 } from 'ml-matrix';
 import regression from 'regression';
 import * as ss from 'simple-statistics';
@@ -45,10 +50,14 @@ import { complex } from '@arki/math/complex';
 import { decimal } from '@arki/math/decimal';
 import { normal, studentT } from '@arki/math/distributions';
 import {
+  choleskyDecompose,
   determinant,
   eigenDecompose,
   inverse,
+  leastSquares,
   multiply,
+  qrDecompose,
+  singularValueDecompose,
   solve,
   symmetricEigenDecompose,
 } from '@arki/math/linear-algebra';
@@ -216,6 +225,29 @@ const symmetricSquares: Square[] = generalSquares.map(({ a }) => ({
 
 /** Real eigenvalues sorted ascending, each to 9 significant digits. */
 const sortedText = (values: readonly number[]): string => list(values.toSorted((p, q) => p - q));
+
+/** The diagonally dominant 50×50 matrices of `matrixPairs(50)`, for QR. */
+const qrSquares: Square[] = matrixPairs(50).map(({ a }) => ({ a }));
+
+/** Their symmetric parts: diagonally dominant with a positive diagonal, so symmetric positive definite. */
+const spdSquares: Square[] = qrSquares.map(({ a }) => ({
+  a: a.map((row, i) => row.map((value, j) => (value + (a[j]?.[i] ?? 0)) / 2)),
+}));
+
+/** Three seeded 30×30 matrices with entries in [-1, 1) and no diagonal boost, for the SVD. */
+const svdSquares: Square[] = matrixPairs(30).map(({ b }) => ({ a: b }));
+
+type LeastSquaresProblem = { a: number[][]; b: number[] };
+
+/** Three seeded overdetermined systems: A is 100×10 with entries in [-1, 1), b has 100 entries. */
+const leastSquaresProblems: LeastSquaresProblem[] = [44, 55, 66].map(seed => {
+  const random = createRandom(seed);
+  const a = Array.from({ length: 100 }, () => Array.from({ length: 10 }, () => random.float(-1, 1)));
+  return { a, b: Array.from({ length: 100 }, () => random.float(-1, 1)) };
+});
+
+/** |entries| of R, row by row, to 9 significant digits: R is unique up to the sign of each row. */
+const absoluteText = (values: readonly number[]): string => list(values.map(value => Math.abs(value)));
 
 type ComplexPair = { a: readonly [number, number]; b: readonly [number, number] };
 
@@ -943,6 +975,131 @@ export default defineSuite({
           run: x => new EigenvalueDecomposition(x),
           normalize: result =>
             rootsText(result.realEigenvalues.map((re, index) => ({ re, im: result.imaginaryEigenvalues[index] ?? 0 }))),
+        }),
+      }),
+    }),
+    compare<Square>({
+      id: 'qr-decomposition',
+      title: 'QR decomposition (50×50)',
+      contract: {
+        id: 'math-qr/v1',
+        description:
+          'Householder A = Q·R without column pivoting, Q formed explicitly; |r_ij| compared to 9 significant digits (R is unique up to row signs)',
+      },
+      inputs: qrSquares,
+      baseline: 'arki',
+      note: 'Every row forms both Q and R (ml-matrix computes Q lazily, so its row reads both getters). `@arki/math` runs `{ pivoting: false }`, its plain-QR mode, because pivoting reorders the columns of R; its default (pivoted) mode measured within a few percent of this.',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math qrDecompose',
+          package: '@arki/math',
+          run: ({ a }: Square) => qrDecompose(a, { pivoting: false }),
+          normalize: result => absoluteText(result.upper.flat()),
+        }),
+        mlMatrix: c({
+          label: 'ml-matrix QrDecomposition',
+          package: 'ml-matrix',
+          setup: ({ a }) => new Matrix(a),
+          run: x => {
+            const decomposition = new QrDecomposition(x);
+            return { q: decomposition.orthogonalMatrix, r: decomposition.upperTriangularMatrix };
+          },
+          normalize: result => absoluteText(result.r.to2DArray().flat()),
+        }),
+        mathjs: c({
+          label: 'mathjs qr',
+          package: 'mathjs',
+          run: ({ a }: Square) => qr(a),
+          normalize: result => absoluteText(flatNumbers(result.R.valueOf())),
+        }),
+      }),
+    }),
+    compare<Square>({
+      id: 'cholesky',
+      title: 'Cholesky decomposition (50×50)',
+      contract: {
+        id: 'math-cholesky/v1',
+        description:
+          'the lower-triangular L with A = L·Lᵀ for a symmetric positive definite A, every entry to 9 significant digits',
+      },
+      inputs: spdSquares,
+      baseline: 'arki',
+      note: 'mathjs has no Cholesky decomposition. Both rows check that A is symmetric before factoring.',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math choleskyDecompose',
+          package: '@arki/math',
+          run: ({ a }: Square) => choleskyDecompose(a),
+          normalize: result => matrixText(result.lower),
+        }),
+        mlMatrix: c({
+          label: 'ml-matrix CholeskyDecomposition',
+          package: 'ml-matrix',
+          setup: ({ a }) => new Matrix(a),
+          run: x => new CholeskyDecomposition(x).lowerTriangularMatrix,
+          normalize: result => matrixText(result.to2DArray()),
+        }),
+      }),
+    }),
+    compare<Square>({
+      id: 'svd',
+      title: 'Singular value decomposition (30×30)',
+      contract: {
+        id: 'math-svd/v1',
+        description:
+          'singular values and both sets of singular vectors of a general square matrix; the singular values, descending, to 9 significant digits',
+      },
+      inputs: svdSquares,
+      baseline: 'arki',
+      note: 'mathjs has no SVD. Both rows compute the left and right singular vectors (ml-matrix does by default).',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math singularValueDecompose',
+          package: '@arki/math',
+          run: ({ a }: Square) => singularValueDecompose(a),
+          normalize: result => list(result.values),
+        }),
+        mlMatrix: c({
+          label: 'ml-matrix SingularValueDecomposition',
+          package: 'ml-matrix',
+          setup: ({ a }) => new Matrix(a),
+          run: x => new SingularValueDecomposition(x),
+          normalize: result => list(result.diagonal),
+        }),
+      }),
+    }),
+    compare<LeastSquaresProblem>({
+      id: 'least-squares',
+      title: 'Least squares (100×10)',
+      contract: {
+        id: 'math-least-squares/v1',
+        description: 'the x minimizing ‖A·x − b‖₂ for a full-rank 100×10 A, every entry to 9 significant digits',
+      },
+      inputs: leastSquaresProblems,
+      baseline: 'arki',
+      note: '`@arki/math` leastSquares and ml-matrix `solve` both use Householder QR (`@arki/math` with column pivoting and a rank check). mathjs has no least-squares solver; its row solves the normal equations AᵀA·x = Aᵀb with `lusolve`, the usual mathjs recipe, which squares the condition number (harmless on these well-conditioned inputs).',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math leastSquares',
+          package: '@arki/math',
+          run: ({ a, b }: LeastSquaresProblem) => leastSquares(a, b),
+          normalize: result => list(result),
+        }),
+        mlMatrix: c({
+          label: 'ml-matrix solve',
+          package: 'ml-matrix',
+          setup: ({ a, b }) => ({ x: new Matrix(a), v: Matrix.columnVector(b) }),
+          run: ({ x, v }) => mlSolve(x, v),
+          normalize: result => list(result.to1DArray()),
+        }),
+        mathjs: c({
+          label: 'mathjs lusolve on the normal equations',
+          package: 'mathjs',
+          run: ({ a, b }: LeastSquaresProblem) => {
+            const at = mathTranspose(a);
+            return lusolve(mathMultiply(at, a), mathMultiply(at, b));
+          },
+          normalize: result => list(flatNumbers(result.valueOf())),
         }),
       }),
     }),
