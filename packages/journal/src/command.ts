@@ -168,6 +168,9 @@ export function createCommandRunner<Meta extends z.ZodObject, Tx extends Transac
               idempotencyKey: key ?? null,
             },
             async (): Promise<Awaited<R>> => {
+              // Before the receipt: a receipt proves the command ran once, not that this caller
+              // may have its result. A replay is authorized like a first run.
+              if (command.authorize !== undefined) await command.authorize(parsed, { tx, meta });
               if (key === undefined) return await command.handler(parsed, context);
               const held = await claimReceipt(tx, key, command.name, parsed, own);
               if (held !== undefined) {

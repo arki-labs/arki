@@ -2,7 +2,9 @@ export { initJournal } from './journal.js';
 export { need } from './handlers.js';
 export type {
   Command,
+  CommandAuthorize,
   CommandContext,
+  CommandOptions,
   CommandRunner,
   Journal,
   JournalDefinitions,

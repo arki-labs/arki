@@ -13,6 +13,7 @@ import { z } from 'zod';
 
 import type { OrderId } from './test-support.js';
 import type { DbHandle, Row } from './types.js';
+import { CommandError } from './errors.js';
 import { initJournal } from './journal.js';
 import {
   accountId,
@@ -662,6 +663,85 @@ describe('idempotency receipts', () => {
     const pruned = await journal.pruneReceipts(db, { before: new Date(Date.now() + 60_000) });
     expect(pruned).toBeGreaterThan(0);
     expect(await receiptOf(`k_bound_${next}`)).toBeNull();
+  });
+});
+
+describe('authorize', () => {
+  it('a replayed receipt is authorized again: a caller who may not run the command gets no stored result', async () => {
+    // Why: a receipt proves the command ran once, not that this caller may see or repeat it.
+    // A check inside the handler does not run on a replay, so it lives in `authorize`.
+    const allowed = new Set(['usr_owner', 'usr_test']);
+    const checked: string[] = [];
+    let runs = 0;
+    const approve = j.command(
+      'approveOrder',
+      z.object({ orderId: orderIdSchema }),
+      async (input, { write }) => {
+        runs += 1;
+        const { row } = await write(order, input.orderId, () => [OrderNoted({ note: 'approved' })]);
+        return { version: row?.version ?? 0 };
+      },
+      {
+        authorize: (_input, { meta: who }) => {
+          checked.push(who.actorId);
+          if (!allowed.has(who.actorId)) throw new CommandError('FORBIDDEN', 'Not allowed to approve');
+        },
+      },
+    );
+    const id = orderId(++next);
+    await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
+    const key = `k_authorize_${next}`;
+    const owner = { actorId: 'usr_owner' };
+    expect(await journal.run(db, approve, { orderId: id }, owner, { idempotencyKey: key })).toEqual({ version: 2 });
+    expect(await journal.run(db, approve, { orderId: id }, owner, { idempotencyKey: key })).toEqual({ version: 2 });
+
+    // The same key from a caller without the permission, and from the owner after it was revoked.
+    await expect(
+      journal.run(db, approve, { orderId: id }, { actorId: 'usr_intruder' }, { idempotencyKey: key }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    allowed.delete('usr_owner');
+    await expect(journal.run(db, approve, { orderId: id }, owner, { idempotencyKey: key })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+
+    expect(runs, 'the handler ran once; every other call was a replay or a refusal').toBe(1);
+    expect(checked).toEqual(['usr_owner', 'usr_owner', 'usr_intruder', 'usr_owner']);
+    expect(await receiptOf(key), 'a refused replay leaves the receipt as it was').toMatchObject({
+      result: { value: { version: 2 } },
+    });
+    const events = await eventsOf(id);
+    expect(events.map(e => e.type)).toEqual(['OrderPlaced', 'OrderNoted']);
+  });
+
+  it('runs before the handler on a call without a key, and a child command is authorized too', async () => {
+    let runs = 0;
+    const guarded = j.command(
+      'guardedNote',
+      z.object({ orderId: orderIdSchema }),
+      async (input, { write }) => {
+        runs += 1;
+        await write(order, input.orderId, () => [OrderNoted({ note: 'guarded' })]);
+      },
+      {
+        authorize: (_input, { meta: who }) => {
+          if (who.actorId !== 'usr_test') throw new CommandError('FORBIDDEN', 'Only the test actor');
+        },
+      },
+    );
+    const parent = j.command('parentOfGuarded', z.object({ orderId: orderIdSchema }), (input, { run }) =>
+      run(guarded, input),
+    );
+    const id = orderId(++next);
+    await journal.run(db, placeOrder, { orderId: id, customerId: 'c', total: 1 }, meta);
+    await expect(journal.run(db, guarded, { orderId: id }, { actorId: 'usr_other' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+    await expect(journal.run(db, parent, { orderId: id }, { actorId: 'usr_other' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+    expect(runs).toBe(0);
+    await journal.run(db, parent, { orderId: id }, meta);
+    expect(runs).toBe(1);
   });
 });
 

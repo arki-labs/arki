@@ -81,6 +81,27 @@ export type Command<S extends z.ZodType, R, in MetaOut, in Tx extends Transactio
   readonly name: string;
   readonly input: S;
   readonly handler: (input: z.output<S>, context: CommandContext<MetaOut, Tx>) => R;
+  /** The command's `authorize` option, when it has one. See {@link CommandOptions}. */
+  readonly authorize?: CommandAuthorize<z.output<S>, MetaOut, Tx>;
+};
+/**
+ * Decides whether the caller may run a command. It runs inside the command's transaction,
+ * after the input and `meta` are parsed, on every call: a call that replays an idempotency
+ * receipt runs it too, before the stored result is returned. Throw (a `CommandError`
+ * `FORBIDDEN`, usually) to refuse; the run rolls back and nothing is replayed.
+ */
+export type CommandAuthorize<Input, in MetaOut, in Tx extends TransactionSource<Tx> = DbHandle> = (
+  input: Input,
+  context: { readonly tx: Tx; readonly meta: MetaOut },
+) => void | Promise<void>;
+/** Options of `j.command`. */
+export type CommandOptions<Input, MetaOut, Tx extends TransactionSource<Tx> = DbHandle> = {
+  /**
+   * Put the caller's permission check here, not in the handler. A repeat with an idempotency
+   * key does not run the handler, so a check inside it would not run either: the stored result
+   * would go to whoever replays the key. `authorize` runs on the first call and on every replay.
+   */
+  readonly authorize?: CommandAuthorize<Input, MetaOut, Tx>;
 };
 /**
  * What a command handler receives. `write` and `run` are bound to the command's
@@ -409,6 +430,7 @@ export type JournalDefinitions<
     name: string,
     input: S,
     handler: (input: z.output<S>, context: CommandContext<z.output<Meta>, Tx>) => R,
+    options?: CommandOptions<z.output<S>, z.output<Meta>, Tx>,
   ): Command<S, R, z.output<Meta>, Tx>;
   /** `on` is `NoInfer` so `E` comes from `entity`; handlers are then contextually typed. */
   projection<E extends AnyEntity<z.output<Meta>>>(

@@ -114,7 +114,10 @@ function createInit<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, 
   return {
     event: defineEvent,
     entity,
-    command: (name, input, handler) => ({ name, input, handler }),
+    command: (name, input, handler, options) =>
+      options?.authorize === undefined
+        ? { name, input, handler }
+        : { name, input, handler, authorize: options.authorize },
     projection: (name, entity, on, opts) => defineProjection(name, entity, on, opts),
     effect: effectFor<MetaOut, AppDb, RootCommandRunner<Meta, Tx>>(),
     tap: tapFor<MetaOut, AppDb>(),

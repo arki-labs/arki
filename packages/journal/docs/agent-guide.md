@@ -164,6 +164,7 @@ export const publicProcedure = os.use(appErrors).use(commandErrors());
 - `source` is the root database or a transaction, with the rules of `journal.run`. On the root database each call commits and wakes the worker. On a transaction the call joins it; the caller commits and then calls `journal.wake()`.
 - A bound runner has the type `CommandRunner`, the type of a command context's `run`. Pass it to code that takes one, for example `paymentsJournal.writes(runCommand)` of `@arki/payments`.
 - A rule that rejects the request throws `new CommandError(code, message)`. The command rolls back and the caller gets the same error. The four codes are in [Rejected rules](#rejected-rules-commanderror).
+- A permission check goes in `j.command(name, input, handler, { authorize: (input, { tx, meta }) => ... })`, not in the handler. A call with an `idempotencyKey` that replays a receipt never runs the handler, but it always runs `authorize` first.
 - An oRPC app adds `commandErrors()` to its procedure builders once. Procedures then need no try/catch around a command. Any other host matches with `isCommandError(error, code?)`.
 - `journal.run(source, command, input, meta)` is the long form. It parses the input and `meta`, opens the transaction, and returns what the handler returns.
 - From an effect, call `ctx.run(command, input, meta)`. It is `journal.run` on the worker's root database.

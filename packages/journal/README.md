@@ -152,6 +152,8 @@ A webhook or a retried request can run the same command twice. `journal.run(db, 
 
 The result must survive JSON, because the replay returns the stored form; a result with a `Date` or a class instance fails the first run with `UNSTABLE_SCHEMA`. Return plain data: an id, a status, a version. A key from outside is scoped by the app: `${tenant}:${eventId}`, never the bare client value. A bound runner and an effect's `ctx.run` take the key per call: `runAs(cmd, input, { idempotencyKey })`.
 
+A replay does not run the handler, so a permission check inside the handler does not run either. Put it in the command's `authorize` option: `j.command(name, input, handler, { authorize: (input, { tx, meta }) => ... })`. It runs inside the transaction on every call, a replay included, before the stored result is returned; it throws (a `CommandError` `FORBIDDEN`, usually) to refuse, and a refused replay changes nothing.
+
 Receipts hold inputs and results, so they can hold personal data, and `forget` does not touch them. An app that keys personal flows prunes on a schedule: `journal.pruneReceipts(db, { before })`.
 
 ### Where commands run from
