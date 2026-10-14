@@ -167,6 +167,15 @@ describe('modulus, argument and polar form', () => {
     expect(complex(1e200, 1e200).abs()).toBeCloseTo(Math.SQRT2 * 1e200, -186);
   });
 
+  // Finite parts can have a modulus beyond Number.MAX_VALUE (up to √2 times it). The
+  // library never answers Infinity, so abs and toPolar refuse with a typed error.
+  it('throws NumericRangeError when |z| itself is beyond the float range', () => {
+    expect(() => complex(1.5e308, 1.5e308).abs()).toThrow(NumericRangeError);
+    expect(() => complex(-1.5e308, 1.5e308).toPolar()).toThrow(NumericRangeError);
+    expect(complex(1e308, 1e308).abs()).toBe(Math.hypot(1e308, 1e308));
+    expect(complex(Number.MAX_VALUE, 0).abs()).toBe(Number.MAX_VALUE);
+  });
+
   it('keeps the argument in (-π, π]', () => {
     expect(complex(-1).arg()).toBe(Math.PI);
     expect(complex(0, -1).arg()).toBe(-Math.PI / 2);
@@ -195,6 +204,15 @@ describe('exp, ln, log', () => {
     expect(() => Complex.ZERO.ln()).toThrow(InvalidArgumentError);
   });
 
+  // ln|z| is about 710 even where |z| overflows, so ln and log must answer, not throw.
+  it('takes the logarithm of a value whose modulus is beyond the float range', () => {
+    const z = complex(1.5e308, 1.5e308);
+    const ln = z.ln();
+    expect(ln.re).toBeCloseTo(Math.log(1.5e308) + Math.LN2 / 2, 12);
+    expect(ln.im).toBe(Math.PI / 4);
+    expect(z.log(10).re).toBeCloseTo(308 + Math.log10(1.5) + Math.log10(2) / 2, 12);
+  });
+
   it('takes logarithms in any base except 0 and 1', () => {
     close(complex(8).log(2), 3);
     close(complex(-8).log(2), complex(3, Math.PI / Math.LN2));
@@ -216,6 +234,20 @@ describe('roots and powers', () => {
       const root = z.sqrt();
       expect(root.re).toBeGreaterThanOrEqual(0);
       close(root.times(root), z, 1e-13);
+    }
+  });
+
+  // Roots shrink the modulus, so a root of a value at the top of the float range
+  // fits easily: an overflow on the way there would be a spurious error.
+  it('takes roots of values whose modulus is beyond the float range', () => {
+    // 1e308 + 1e308i: |z| fits, but |re| + |z| inside the square root did not.
+    for (const z of [complex(1e308, 1e308), complex(1.5e308, -1.5e308), complex(-1.7e308, 1e308), complex(1.7e308)]) {
+      // Squared back at half size: (root / 2)² = z / 4, since root² itself may not fit.
+      const half = z.sqrt().times(0.5);
+      close(half.times(half), z.times(0.25), 1e-13);
+      close(z.pow(0.5).times(0.5), half, 1e-13);
+      const third = z.nthRoots(3)[0]!.times(0.5);
+      close(third.times(third).times(third), z.times(0.125), 1e-13);
     }
   });
 
@@ -273,5 +305,15 @@ describe('comparison', () => {
     expect(complex(1e12, 0).approxEqual(complex(1e12 + 1, 0))).toBe(true); // relative for large values
     expect(complex(1e-3, 0).approxEqual(0)).toBe(false); // absolute near zero
     expect(() => sum.approxEqual(0, -1)).toThrow(InvalidArgumentError);
+  });
+
+  // An overflowing distance or modulus must not make far-apart values "equal"
+  // (Infinity <= tolerance × Infinity), nor make close ones throw.
+  it('compares values at the top of the float range', () => {
+    const z = complex(1.5e308, 1.5e308);
+    expect(z.approxEqual(complex(1.5e308, -1.5e308))).toBe(false);
+    expect(z.approxEqual(complex(-1.5e308, -1.5e308))).toBe(false);
+    expect(z.approxEqual(complex(1.5e308, 1.5e308 * (1 + 1e-12)))).toBe(true);
+    expect(z.approxEqual(z, 0)).toBe(true);
   });
 });

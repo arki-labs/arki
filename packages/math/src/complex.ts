@@ -55,7 +55,16 @@ function result(re: number, im: number, operation: string): Complex {
  */
 function logModulus(re: number, im: number): number {
   const squares = re * re + im * im;
-  return squares > 1e-290 && squares < Infinity ? 0.5 * Math.log(squares) : Math.log(Math.hypot(re, im));
+  if (squares > 1e-290 && squares < Infinity) return 0.5 * Math.log(squares);
+  const modulus = Math.hypot(re, im);
+  // |z| can exceed Number.MAX_VALUE (by up to √2) while ln|z| is about 710: halve, then add ln 2.
+  return modulus === Infinity ? Math.log(Math.hypot(re / 2, im / 2)) + Math.LN2 : Math.log(modulus);
+}
+
+/** `|z|^p`, also when `|z|` itself (up to √2 × `Number.MAX_VALUE`) does not fit a float. */
+function modulusPower(re: number, im: number, p: number): number {
+  const modulus = Math.hypot(re, im);
+  return modulus === Infinity ? Math.hypot(re / 2, im / 2) ** p * 2 ** p : modulus ** p;
 }
 
 /** Division scaling thresholds (Baudin & Smith 2012), with ε = 2⁻⁵³. */
@@ -244,9 +253,15 @@ export class Complex {
     return Complex.fromParts(this.re, -this.im);
   }
 
-  /** Modulus `|z|`, via `Math.hypot` so large parts do not overflow. */
+  /**
+   * Modulus `|z|`, via `Math.hypot` so large parts do not overflow. Throws
+   * `NumericRangeError` when `|z|` itself is beyond the float range, which
+   * finite parts allow (up to √2 × `Number.MAX_VALUE`, as for `1e308 + 1e308i`).
+   */
   abs(): number {
-    return Math.hypot(this.re, this.im);
+    const modulus = Math.hypot(this.re, this.im);
+    if (modulus === Infinity) throw new NumericRangeError('abs overflows the float range');
+    return modulus;
   }
 
   /** Principal argument in `(-π, π]`. The argument of zero is `0`, as in C's `carg`. */
@@ -254,6 +269,7 @@ export class Complex {
     return Math.atan2(this.im, this.re);
   }
 
+  /** `{ r: abs(), theta: arg() }`; throws `NumericRangeError` where `abs` does. */
   toPolar(): Polar {
     return { r: this.abs(), theta: this.arg() };
   }
@@ -285,7 +301,10 @@ export class Complex {
     if (this.isZero()) return Complex.ZERO;
     const { re, im } = this;
     // t = sqrt((|re| + |z|) / 2) never cancels; the other part is im / 2t.
-    const t = Math.sqrt((Math.abs(re) + this.abs()) / 2);
+    let t = Math.sqrt((Math.abs(re) + Math.hypot(re, im)) / 2);
+    // Near the top of the float range |re| + |z| overflows though t does not:
+    // t = 2 sqrt((|re/4| + |z/4|) / 2), and dividing such large parts by 4 is exact.
+    if (t === Infinity) t = 2 * Math.sqrt((Math.abs(re / 4) + Math.hypot(re / 4, im / 4)) / 2);
     if (re >= 0) return result(t, im / (2 * t), 'sqrt');
     return result(Math.abs(im) / (2 * t), im < 0 ? -t : t, 'sqrt');
   }
@@ -304,7 +323,7 @@ export class Complex {
       throw new DivisionByZeroError(`0 raised to ${w.toString()}`);
     }
     if (w.im === 0) {
-      const magnitude = this.abs() ** w.re;
+      const magnitude = modulusPower(this.re, this.im, w.re);
       const angle = this.arg() * w.re;
       if (angle === 0) return result(magnitude, 0, 'pow');
       return result(magnitude * Math.cos(angle), magnitude * Math.sin(angle), 'pow');
@@ -361,7 +380,7 @@ export class Complex {
       throw new InvalidArgumentError(`n must be a positive safe integer, got ${n}`);
     }
     if (this.isZero()) return Array.from({ length: n }, () => Complex.ZERO);
-    const modulus = this.abs() ** (1 / n);
+    const modulus = modulusPower(this.re, this.im, 1 / n);
     const angle = this.arg();
     const roots: Complex[] = [];
     for (let k = 0; k < n; k++) {
@@ -397,8 +416,14 @@ export class Complex {
     const that = Complex.from(other);
     assertFinite(tolerance, 'tolerance');
     if (tolerance < 0) throw new InvalidArgumentError('tolerance must be non-negative');
-    const distance = Math.hypot(this.re - that.re, this.im - that.im);
-    return distance <= tolerance * Math.max(1, this.abs(), that.abs());
+    // Near the top of the float range the distance or a modulus would overflow:
+    // compare everything at a quarter of its size there (exact for such parts).
+    const largest = Math.max(Math.abs(this.re), Math.abs(this.im), Math.abs(that.re), Math.abs(that.im));
+    const k = largest > 2 ** 1022 ? 0.25 : 1;
+    const distance = Math.hypot(this.re * k - that.re * k, this.im * k - that.im * k);
+    return (
+      distance <= tolerance * Math.max(k, Math.hypot(this.re * k, this.im * k), Math.hypot(that.re * k, that.im * k))
+    );
   }
 
   /** `3 + 4i`, `3 - 4i`, `-2i`, `i`, `5` (see the module notes for the grammar). */
