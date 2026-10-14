@@ -48,6 +48,16 @@ function result(re: number, im: number, operation: string): Complex {
   return Complex.fromParts(re, im);
 }
 
+/**
+ * `ln|z|`. Uses `ln(re² + im²) / 2` while that sum is a normal float: it skips
+ * `Math.hypot` and is at least as accurate (checked against 60-digit references).
+ * Falls back to `ln(hypot)` near overflow or underflow.
+ */
+function logModulus(re: number, im: number): number {
+  const squares = re * re + im * im;
+  return squares > 1e-290 && squares < Infinity ? 0.5 * Math.log(squares) : Math.log(Math.hypot(re, im));
+}
+
 const NUMBER = String.raw`(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+|E[+-]?\d+)?`;
 const REAL_ONLY = new RegExp(String.raw`^([+-]?${NUMBER})$`);
 const IMAGINARY_ONLY = new RegExp(String.raw`^([+-]?)(${NUMBER})?i$`);
@@ -195,7 +205,7 @@ export class Complex {
   /** Principal natural logarithm `ln|z| + i·arg(z)`. Throws `InvalidArgumentError` for zero. */
   ln(): Complex {
     if (this.isZero()) throw new InvalidArgumentError('ln is not defined at zero');
-    return result(Math.log(this.abs()), this.arg(), 'ln');
+    return result(logModulus(this.re, this.im), this.arg(), 'ln');
   }
 
   /** Principal logarithm in `base`: `ln(z) / ln(base)`. `base` must not be 0 or 1. */
@@ -236,9 +246,17 @@ export class Complex {
       if (angle === 0) return result(magnitude, 0, 'pow');
       return result(magnitude * Math.cos(angle), magnitude * Math.sin(angle), 'pow');
     }
-    const logModulus = Math.log(this.abs());
+    const lnModulus = logModulus(this.re, this.im);
     const angle = this.arg();
-    return Complex.fromParts(w.re * logModulus - w.im * angle, w.re * angle + w.im * logModulus).exp();
+    // e^(w·ln z), without building the intermediate w·ln z as a Complex.
+    const exponentRe = w.re * lnModulus - w.im * angle;
+    const exponentIm = w.re * angle + w.im * lnModulus;
+    if (!Number.isFinite(exponentRe) || !Number.isFinite(exponentIm)) {
+      throw new NumericRangeError('pow overflows the float range');
+    }
+    const scale = Math.exp(exponentRe);
+    if (exponentIm === 0) return result(scale, 0, 'pow');
+    return result(scale * Math.cos(exponentIm), scale * Math.sin(exponentIm), 'pow');
   }
 
   private integerPower(n: number): Complex {
