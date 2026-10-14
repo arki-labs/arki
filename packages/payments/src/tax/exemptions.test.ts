@@ -93,7 +93,8 @@ describe('a new exemption', () => {
 
     await repos.exemptions.approveExemption(created.id, 'usr_admin');
 
-    expect((await repos.exemptions.findApplicableExemptions('cus_review')).map(e => e.id)).toEqual([created.id]);
+    const applicable = await repos.exemptions.findApplicableExemptions('cus_review');
+    expect(applicable.map(e => e.id)).toEqual([created.id]);
   });
 
   it('cannot end before it starts: the contract and the table both say no', async () => {
@@ -171,7 +172,8 @@ describe('calculateTax with exemptions', () => {
     expect(requests).toHaveLength(1);
 
     await repos.exemptions.revokeExemption(exemption.id);
-    expect((await service.calculateTax(sale)).taxAmount.toDecimalString()).toBe('19.00');
+    const taxed = await service.calculateTax(sale);
+    expect(taxed.taxAmount.toDecimalString()).toBe('19.00');
   });
 
   it('never lets a global exemption with no product exempt anyone: it cannot even be created', async () => {

@@ -248,7 +248,7 @@ export class PaymentRepository {
   async createCustomer(data: NewCustomer): Promise<Customer> {
     const [created] = await this.db.insert(this.customers).values(data).onConflictDoNothing().returning();
     if (created) {
-      return created as Customer;
+      return created;
     }
 
     const existing = await this.findCustomerByUserId(data.userId);

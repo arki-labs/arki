@@ -501,7 +501,8 @@ export class TaxReportingService {
       if (customerId === null) return false;
       let held = exemptionsByCustomer.get(customerId);
       if (!held) {
-        held = (await this.reads.exemptions.findCustomerExemptionsInRange(customerId, start, end)).filter(
+        const inRange = await this.reads.exemptions.findCustomerExemptionsInRange(customerId, start, end);
+        held = inRange.filter(
           exemption => exemption.productCode === null && exemption.jurisdictionId === null,
         );
         exemptionsByCustomer.set(customerId, held);

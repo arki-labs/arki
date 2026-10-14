@@ -238,7 +238,8 @@ describe('compliance status and deadlines', () => {
     ]);
 
     const pending = await config([{ country: 'DE', type: 'vat', number: 'DE123456789', status: 'pending' }]);
-    expect((await reporting.validateComplianceStatus()).status).toBe('warning');
+    const compliance = await reporting.validateComplianceStatus();
+    expect(compliance.status).toBe('warning');
 
     await repos.configurations.updateConfiguration(pending.id, {
       businessDetails: {
