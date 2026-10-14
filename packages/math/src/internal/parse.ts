@@ -63,27 +63,36 @@ export function parseDecimalString(input: string): DecimalParts {
   } else if (integerDigits + fractionDigits === 0) {
     throw notADecimal(input);
   }
-  // A positive exponent beyond the fraction digits pads the coefficient with zeros; count those too.
-  const paddedDigits = Math.max(0, exponent - fractionDigits);
-  assertDigitLimit(integerDigits + fractionDigits + paddedDigits, `"${input.slice(0, 20)}…"`);
+  // Leading zeros carry no value. Only the coefficient's digits count, the rule every
+  // result obeys, so a scale-10 000 value below 1 parses back from its own toString().
+  let integerFrom = integerStart;
+  while (integerFrom < integerEnd && input.codePointAt(integerFrom) === 48 /* 0 */) integerFrom++;
+  let fractionFrom = fractionStart;
+  if (integerFrom === integerEnd) {
+    while (fractionFrom < fractionEnd && input.codePointAt(fractionFrom) === 48 /* 0 */) fractionFrom++;
+  }
+  const significantDigits = integerEnd - integerFrom + (fractionEnd - fractionFrom);
+  // A positive exponent beyond the fraction digits pads a non-zero coefficient with zeros; count those too.
+  const paddedDigits = significantDigits === 0 ? 0 : Math.max(0, exponent - fractionDigits);
+  assertDigitLimit(significantDigits + paddedDigits, `"${input.slice(0, 20)}…"`);
+  let scale = fractionDigits - exponent;
+  assertScaleLimit(scale, 'Scale');
 
   let coefficient: bigint;
-  if (integerDigits + fractionDigits <= EXACT_NUMBER_DIGITS) {
+  if (significantDigits <= EXACT_NUMBER_DIGITS) {
     // Short coefficients are built exactly as a number: much cheaper than BigInt(text).
     let digits = 0;
-    for (let i = integerStart; i < integerEnd; i++) digits = digits * 10 + digitAt(input, i);
-    for (let i = fractionStart; i < fractionEnd; i++) digits = digits * 10 + digitAt(input, i);
+    for (let i = integerFrom; i < integerEnd; i++) digits = digits * 10 + digitAt(input, i);
+    for (let i = fractionFrom; i < fractionEnd; i++) digits = digits * 10 + digitAt(input, i);
     coefficient = BigInt(digits);
   } else {
-    coefficient = BigInt(input.slice(integerStart, integerEnd) + input.slice(fractionStart, fractionEnd));
+    coefficient = BigInt(input.slice(integerFrom, integerEnd) + input.slice(fractionFrom, fractionEnd));
   }
   if (first === 45) coefficient = -coefficient;
-  let scale = fractionDigits - exponent;
   if (scale < 0) {
     coefficient *= pow10(-scale);
     scale = 0;
   }
-  assertScaleLimit(scale, 'Scale');
   return { coefficient, scale };
 }
 

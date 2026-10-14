@@ -69,8 +69,8 @@ Everything is a subpath import, tree-shakeable by concern. The root
 | `@arki/math/finance`        | `payment`, `amortizationSchedule`, `futureValue`, `netPresentValue`, `internalRateOfReturn`, … — on `Decimal`; `finance/float` has the same verbs on `number`                                                                                |
 | `@arki/math/distributions`  | `normal`, `studentT`, `noncentralT`, `chiSquare`, `fisherF`, `exponential`, `uniform`, `binomial`, `poisson`, `erf`, `erfInv`, `gamma`, `gammaLn`, `beta`, …                                                                                 |
 | `@arki/math/geometry`       | `solveTriangle(s)`, `circle`, `circleSector`, `ellipse`, `regularPolygon`, solids, `distance`, `polygonArea`, `pythagoreanTriples`                                                                                                           |
-| `@arki/math/linear-algebra` | `dot`, `cross`, `norm`, `multiply`, `transpose`, `determinant`, `solve`, `inverse`, `rank`, `luDecompose` — on plain arrays (subpath only)                                                                                                   |
-| `@arki/math/complex`        | `complex()`, `Complex` — arithmetic, polar form, `exp`, `ln`, `sqrt`, `pow`, `nthRoots`                                                                                                                                                      |
+| `@arki/math/linear-algebra` | `solve`, `inverse`, `determinant`, LU, pivoted QR, Cholesky, SVD, `leastSquares`, `pseudoInverse`, `conditionNumber`, `rank`, eigenvalues and eigenvectors — on plain arrays (subpath only)                                                  |
+| `@arki/math/complex`        | `complex()`, `Complex` — arithmetic, polar form, `exp`, `ln`, `sqrt`, `pow`, `nthRoots`, `sin`…`atanh`                                                                                                                                       |
 | `@arki/math/polynomial`     | `evaluatePolynomial`, `polynomialDerivative`, `quadraticRoots`, `cubicRoots`, `polynomialRoots`                                                                                                                                              |
 | `@arki/math/decimal-math`   | `sqrt`, `cbrt`, `nthRoot`, `exp`, `ln`, `log10`, `log2`, `log`, `pow`, `PI`, `E` — correctly rounded, on `Decimal`                                                                                                                           |
 | `@arki/math/words`          | `spellNumber`, `spellOrdinal`, `formatOrdinal`; locales `en`, `enGB` built in, `words/ro`, `/de`, `/fr`, `/es`, `/it` opt-in                                                                                                                 |
@@ -79,13 +79,17 @@ Everything is a subpath import, tree-shakeable by concern. The root
 | `@arki/math/random`         | `createRandom(seed)`, `randomInt`, `shuffle`, `sample`, `pick`, …                                                                                                                                                                            |
 | `@arki/math/fluent`         | `num()` — immutable fluent wrapper for plain numbers                                                                                                                                                                                         |
 | `@arki/math/rounding`       | `RoundingMode`, `ROUNDING_MODES`, `isRoundingMode`                                                                                                                                                                                           |
+| `@arki/math/roots`          | `findRoot` (Brent), `bisect`, `newton`, `findRoots` — with an error estimate                                                                                                                                                                 |
+| `@arki/math/integrate`      | `integrate` — adaptive Gauss–Kronrod and tanh-sinh, infinite intervals                                                                                                                                                                       |
+| `@arki/math/differentiate`  | `derivative` (Ridders), `limit` (Richardson) — numerical estimates with an error estimate                                                                                                                                                    |
 | `@arki/math/errors`         | `MathError` and its subclasses                                                                                                                                                                                                               |
 
-Deliberately **not** here: expression parsing, symbolic algebra, sparse or
-decomposition-heavy linear algebra (SVD, eigenvalues), and arbitrary-precision
-trigonometry. Those need their own engines; reach for mathjs or a numerics
-library. `geometry`, `linear-algebra`, `complex` and `polynomial` work on
-plain `number` (float64), like the rest of the numeric layer.
+Deliberately **not** here: expression parsing and symbolic algebra (they are
+languages with their own security surface; they are planned as sibling packages
+built on this one), sparse matrices, and arbitrary-precision trigonometry.
+`geometry`, `linear-algebra`, `complex`, `polynomial`, `roots`, `integrate` and
+`differentiate` work on plain `number` (float64), like the rest of the numeric
+layer.
 
 ## Rounding
 
@@ -114,7 +118,9 @@ none of the modes above, and one of the reasons this package exists.
 
 ## Decimal
 
-`coefficient × 10^-scale`, immutable, frozen. Inputs: `string` (strict ASCII
+`coefficient × 10^-scale`, immutable: methods never modify their operands and
+fields are `readonly`. Instances are not frozen (freezing every result costs 5–7×
+in hot loops, and no peer library does it); the shared constants are. Inputs: `string` (strict ASCII
 decimal syntax, exponent allowed), `number` (read through its shortest
 decimal spelling, so `decimal(0.1)` is exactly `1/10`; non-finite and
 unsafe integers throw), `bigint`, or another `Decimal`.
@@ -385,9 +391,9 @@ subtraction loses the tail: `1 - normal().cdf(9)` is `0`, while
 smallest `k` with `cdf(k) ≥ p`".
 
 The special functions underneath — `erf`, `erfc`, `erfInv`, `gamma`, `gammaLn`, `beta`, `betaLn`,
-`regularizedGammaP`, `regularizedBeta` — are exported too. Accuracy: `cdf`
-≈ 1e-15 for the normal, ≤ 1e-9 round-trip for t/χ²/F quantiles, 5e-13 for
-the non-central t (verified by numerical integration).
+`regularizedGammaP`, `regularizedBeta` — are exported too. Every one of them, and every
+distribution method, is measured against mpmath far into the tails; the bounds are in
+[Accuracy](#accuracy).
 
 ## Decimal math
 
@@ -600,6 +606,41 @@ inverse([
 ]); // [[-2, 1], [1.5, -0.5]]
 ```
 
+Decompositions follow LAPACK's algorithms: pivoted Householder QR, Cholesky
+(`NotPositiveDefiniteError` when it fails), SVD (Golub–Kahan–Reinsch), and
+eigenvalues — symmetric by Householder tridiagonalization and implicit QL,
+general by balancing, Hessenberg reduction and Francis double-shift QR.
+`leastSquares` uses pivoted QR and returns the minimum-norm solution when `A`
+is rank-deficient. `rank` counts singular values above `max(m, n)·ε·σ₁` (NumPy's
+rule); `{ method: 'elimination' }` uses LU instead. `conditionNumber` is
+`Infinity` for an exactly singular matrix, like NumPy's `cond`. General
+eigenvalues come back as `Complex`, sorted like `polynomialRoots`.
+
+```ts
+import { eigenvalues, leastSquares, singularValues, symmetricEigenvalues } from '@arki/math/linear-algebra';
+
+symmetricEigenvalues([
+  [2, 1],
+  [1, 2],
+]); // [1.0000000000000002, 3]   ascending
+eigenvalues([
+  [0, -1],
+  [1, 0],
+]).map(String); // ['-i', 'i']   a rotation
+singularValues([
+  [3, 0],
+  [4, 5],
+]); // [6.708203932499369, 2.23606797749979]
+leastSquares(
+  [
+    [1, 1],
+    [1, 2],
+    [1, 3],
+  ],
+  [1, 2, 2],
+); // [0.666…, 0.5]   intercept, slope
+```
+
 ## Complex numbers
 
 Immutable `Complex` with the same verbs as `Decimal`. Principal branches for
@@ -613,6 +654,34 @@ complex(1, 1).pow(2).toString(); // '2i'
 complex('3+4i').abs(); // 5
 complex(-1).sqrt().toString(); // 'i'
 complex(1).nthRoots(3).length; // 3
+complex(1, 1).sin().toString(); // '1.2984575814159773 + 0.6349639147847361i'
+complex(2).asin().toString(); // '1.5707963267948966 - 1.3169578969248166i'
+```
+
+`sin`, `cos`, `tan`, their inverses and the hyperbolic functions use principal
+branches (C99 Annex G). The library has no `-0`, so a point exactly on a branch
+cut takes Kahan's counter-clockwise rule, like `sqrt` and `ln` and like mpmath
+and Mathematica; C and NumPy pick the other side on half of the cuts.
+Measured within 3.1 ulp of a 700-digit reference from 1e-300 to 1e300.
+
+## Roots, integrals and derivatives
+
+Every result carries an error estimate, and a method that misses its tolerance
+throws a `ConvergenceError` subclass holding its best estimate (`.best`) instead
+of returning a wrong number. A function that returns `NaN` or `Infinity` throws
+`NumericRangeError` naming the point. `derivative` and `limit` are numerical
+estimates, not proofs.
+
+```ts
+import { derivative, limit } from '@arki/math/differentiate';
+import { integrate } from '@arki/math/integrate';
+import { findRoot } from '@arki/math/roots';
+
+findRoot(x => x ** 3 - 2 * x - 5, [2, 3]).root; // 2.094551481542327   Brent, bracket must change sign
+integrate(x => Math.exp(-x * x), [0, Infinity]).value; // 0.886226925452758   √π/2
+integrate(x => 1 / Math.sqrt(x), [0, 1], { method: 'tanhSinh' }).value; // 2   endpoint singularity
+derivative(Math.sin, 0).value; // 1
+limit(x => Math.sin(x) / x, 0).value; // 1
 ```
 
 ## Polynomials
@@ -649,18 +718,19 @@ try {
 }
 ```
 
-| Error                     | When                                                         |
-| ------------------------- | ------------------------------------------------------------ |
-| `NumberFormatError`       | a string is not a number in the accepted syntax              |
-| `InvalidArgumentError`    | reversed bounds, negative step, p out of range, …            |
-| `DivisionByZeroError`     | division by zero, zero to a negative power                   |
-| `RoundingNecessaryError`  | an exact result needs rounding and no mode was given         |
-| `NumericRangeError`       | non-finite, unsafe integer, overflow or underflow            |
-| `EmptyDataError`          | a statistic of an empty (or too small) data set              |
-| `ResourceLimitError`      | more than 10 000 digits, or an exponent beyond ±10 000       |
-| `UnsupportedFeatureError` | the runtime's `Intl` lacks a feature the call relies on      |
-| `SingularMatrixError`     | `solve`/`inverse` met a matrix singular to working precision |
-| `ConvergenceError`        | an iterative method (`polynomialRoots`) did not converge     |
+| Error                      | When                                                                                                                                                                             |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NumberFormatError`        | a string is not a number in the accepted syntax                                                                                                                                  |
+| `InvalidArgumentError`     | reversed bounds, negative step, p out of range, …                                                                                                                                |
+| `DivisionByZeroError`      | division by zero, zero to a negative power                                                                                                                                       |
+| `RoundingNecessaryError`   | an exact result needs rounding and no mode was given                                                                                                                             |
+| `NumericRangeError`        | non-finite, unsafe integer, overflow or underflow                                                                                                                                |
+| `EmptyDataError`           | a statistic of an empty (or too small) data set                                                                                                                                  |
+| `ResourceLimitError`       | more than 10 000 digits, or an exponent beyond ±10 000                                                                                                                           |
+| `UnsupportedFeatureError`  | the runtime's `Intl` lacks a feature the call relies on                                                                                                                          |
+| `SingularMatrixError`      | `solve`/`inverse` met a matrix singular to working precision                                                                                                                     |
+| `ConvergenceError`         | an iterative method did not converge (`polynomialRoots`, eigenvalues, SVD; `RootConvergenceError`, `IntegrationConvergenceError`, `ExtrapolationConvergenceError` carry `.best`) |
+| `NotPositiveDefiniteError` | `choleskyDecompose` met a matrix that is not positive definite                                                                                                                   |
 
 ## Runtime support
 
@@ -681,16 +751,128 @@ try {
 
 ## Limits
 
-Inputs and intermediate results are capped at 10 000 digits and an exponent
-magnitude of 10 000 (`ResourceLimitError`); `bigint` results from the integer
-module (`factorial`, `combinations`, `permutations`, `fibonacci`) honour the
-same digit cap. These are resource guards against hostile input, not
-precision settings — well within them, arithmetic is exact.
+Every `Decimal` and `Rational` — input or result — has at most 10 000 digits
+(integer digits plus scale) and an exponent magnitude of at most 10 000;
+anything larger throws `ResourceLimitError`, early from an estimate and exactly
+on the result. Internal guard digits do not count, so `PI(9999)` is the largest
+π, and every value the library returns parses back from its own `toString()`.
+Bigint `factorial`, `permutations` and `combinations` allow results up to
+100 000 digits; `fibonacci` and `fromBase` keep 10 000. These are resource
+guards against hostile input, not precision settings — within them, arithmetic
+is exact.
+
+## Accuracy
+
+Every row below is checked by a test. The tests compare against independent
+reference data in [`test/reference/`](./test/reference). That folder is for
+development and is not published. The references are mpmath (arbitrary
+precision) for `decimal-math`, the special functions and the distributions, and
+the [NIST StRD](https://www.itl.nist.gov/div898/strd/) certified values for
+statistics and regression. Seeded generator scripts rebuild the data.
+
+The guarantees come in three kinds:
+
+- **Exact.** No rounding happens unless you ask for it: `Decimal` and `Rational`
+  arithmetic, `convertExact`, exact `finance`, and integer functions.
+- **Correctly rounded.** The result is the true value rounded once, in the mode
+  you chose. The tests compare digit for digit, and
+  [`test/reference/ERROR-ANALYSIS.md`](./test/reference/ERROR-ANALYSIS.md) has the
+  proof.
+- **Float bounds.** These are the largest error seen over every reference point,
+  tails included. They are measured, not proven. A change that exceeds one fails
+  the build.
+
+### Decimal math (`@arki/math/decimal-math`)
+
+Each case runs in all 8 rounding modes, at scales from 0 to 100. In
+`unnecessary` mode, an inexact value must throw.
+
+- **Near-tie cases** sit within `10^-(scale+14)` to `10^-(scale+90)` of a
+  rounding boundary. They force the Ziv loop to retry with 20, 40, 80 and 160
+  guard digits.
+- **Exact cases** are roots that land exactly on a tie, and logarithms or powers
+  with exact results.
+
+| Function            | Guarantee                                                            | Evidence: cases (random / near-tie / exact)             |
+| ------------------- | -------------------------------------------------------------------- | ------------------------------------------------------- |
+| `sqrt`              | correctly rounded; exact or `RoundingNecessaryError` without options | 120 / 12 / 12                                           |
+| `cbrt`              | correctly rounded; negative input gives a negative root              | 80 / 12 / 12                                            |
+| `nthRoot` (n 4–12)  | correctly rounded                                                    | 80 / 12 / 12                                            |
+| `exp`               | correctly rounded                                                    | 120 / 32 / —                                            |
+| `ln`                | correctly rounded                                                    | 120 / 32 / —                                            |
+| `log10`, `log2`     | correctly rounded; exact results detected                            | 159 / 64 / 24                                           |
+| `log` (any base)    | correctly rounded; exact results detected                            | 60 / — / 24                                             |
+| `pow` (non-integer) | correctly rounded; exact results detected                            | 114 / 32 / 30                                           |
+| `PI`, `E`           | correctly rounded (half-even)                                        | Machin and Taylor kernels audited in the error analysis |
+
+### Special functions and distributions (`@arki/math/distributions`)
+
+The error is relative: `|got − want| / |want|`. The noncentral t is the
+exception, measured in absolute error. One ulp is about 1.1e-16 to 2.2e-16. The
+reference values go down to about 1e-300. Quantiles are tested at `p` from 1e-300
+up to `1 − 1e-15`.
+
+| Function                             | Max error                                        | Points | Range covered                                            |
+| ------------------------------------ | ------------------------------------------------ | -----: | -------------------------------------------------------- |
+| `erf`                                | 4e-16 (2 ulp)                                    |    180 | \|x\| from 1e-300 to 6                                   |
+| `erfc`                               | 5e-16 (3 ulp)                                    |    149 | x from −6 to 26.5 (values down to 6e-296)                |
+| `erfInv`                             | 5e-16 (2 ulp)                                    |    186 | p from 1e-300 to `1 − 1e-15`                             |
+| `gamma`                              | 3e-13                                            |     75 | x from 1e-300 to 171.6, and negative non-integers        |
+| `gammaLn`                            | 1e-13                                            |    180 | x from 1e-300 to 1e300                                   |
+| `beta`, `betaLn`                     | 2e-12, 5e-13                                     |    336 | a, b from 1e-3 to 1e3                                    |
+| `regularizedGammaP`                  | 1e-12                                            |    271 | a from 0.01 to 1000, x from a/1000 to 10a                |
+| `regularizedBeta`                    | 2e-11                                            |    800 | a, b from 0.1 to 1000, x from 0.001 to 0.999             |
+| `normal` cdf, sf / pdf               | 3e-13 / 2e-13                                    |    570 | z from −37 to 37                                         |
+| `normal` quantile                    | 5e-16 (2 ulp)                                    |     68 | p from 1e-300 to `1 − 1e-15`                             |
+| `studentT` cdf, sf / pdf             | 5e-12 / 1e-12                                    |  1 560 | df from 1 to 1000, \|t\| up to 1e8                       |
+| `studentT` quantile                  | 3e-12                                            |    224 | p from 1e-100 to `1 − 1e-12`                             |
+| `chiSquare` cdf, sf, pdf             | 2e-12                                            |    836 | df from 1 to 1000, x from df/10⁴ to 50·df                |
+| `chiSquare` quantile                 | 2e-12                                            |    224 | p from 1e-100 to `1 − 1e-12`                             |
+| `fisherF` cdf, sf, pdf               | 3e-13                                            |    693 | (df1, df2) from (1, 1) to (100, 100), x from 1e-4 to 1e4 |
+| `fisherF` quantile                   | 3e-12                                            |    175 | p from 1e-60 to `1 − 1e-10`                              |
+| `noncentralT` cdf                    | 2e-14 **absolute**                               |    174 | df from 5 to 50, ncp from −2 to 10                       |
+| `exponential` cdf, sf, pdf, quantile | correctly rounded at every point (bound 2.3e-16) |    211 | x from 1e-10 to 316; p down to 1e-300                    |
+| `binomial` pmf, cdf, sf              | 2e-12                                            |  1 022 | n up to 1000, p from 0.01 to 0.9, the whole support      |
+| `poisson` pmf, cdf, sf               | 8e-12                                            |  1 558 | λ from 0.5 to 1000, out to λ + 40√λ + 40                 |
+| `binomial`, `poisson` quantile       | exact (the smallest k with cdf(k) ≥ p)           |    360 | random p                                                 |
+
+The noncentral t (AS 243) is accurate in absolute terms. Where its cdf is at
+least 1e-3, the relative error is at most 1.2e-12. Far down the lower tail, the
+relative error grows: 4e-7 where the cdf is 1e-8. For comparison, scipy (Boost)
+is off by up to 1.7e-8 relative on the same points.
+
+### Statistics and regression (NIST StRD)
+
+The figures are digits of agreement with the certified values, out of the 15
+that NIST certifies. Higher is better. The measure is the log relative error,
+LRE = −log₁₀(relative error).
+
+| Dataset (difficulty)                                     | Function                                                                     | Digits on `number` | On `Decimal`                 |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------- | -----------------: | ---------------------------- |
+| PiDigits, Lottery, Lew, NumAcc1 (lower)                  | `mean`, `stddev`                                                             |             15, 15 | equal to the certified value |
+| Mavro, Michelso (lower)                                  | `mean` / `stddev`                                                            |          15 / ≥ 13 | equal to the certified value |
+| NumAcc2 (average)                                        | `mean` / `stddev`                                                            |        15 / ≥ 14.5 | equal to the certified value |
+| NumAcc3 (average), NumAcc4 (higher)                      | `mean` / `stddev`                                                            |      15 / ≥ 9, ≥ 8 | equal to the certified value |
+| Norris (lower)                                           | `linearRegression`: slope, intercept, their standard errors, residual SD, r² |             ≥ 12.5 | —                            |
+| Pontius (lower, quadratic)                               | `polynomialRegression`                                                       |             ≥ 11.5 | —                            |
+| Filip (higher, degree 10)                                | `polynomialRegression`                                                       |             ≥ 13.5 | —                            |
+| Wampler1–5 (higher, degree 5)                            | `polynomialRegression`                                                       | ≥ 9, 12, 9, 9, 7.5 | —                            |
+| Longley (higher, 6 predictors); NoInt1, NoInt2 (average) | `leastSquares`                                                               |       ≥ 10.5; ≥ 14 | —                            |
+
+On `Decimal` input, `mean` is exact and `stddev` is correctly rounded. Both
+reproduce every certified value digit for digit.
+
+On `number` input, NumAcc3 and NumAcc4 are limited by the data, not by the
+algorithm: values such as `10000000.2` are not exact doubles. Against the exact
+standard deviation of the binary inputs, `stddev` keeps at least 14 digits on
+every dataset.
+
+The polynomial and least-squares rows hold on both V8 and JavaScriptCore.
 
 <!-- bench:start -->
 ## Benchmarks
 
-Speed of `@arki/math` against the libraries most people reach for: decimal.js, big.js and bignumber.js for decimal arithmetic, fraction.js for exact fractions, simple-statistics for descriptive statistics, and jstat for probability distributions.
+Speed of `@arki/math` against the libraries most people reach for: decimal.js, big.js and bignumber.js for decimal arithmetic; fraction.js for exact fractions; simple-statistics and jstat for descriptive statistics; jstat for probability distributions; simple-statistics and regression (regression-js) for curve fitting; ml-matrix and mathjs for linear algebra; complex.js and mathjs for complex numbers; mathjs for polynomial roots. Each table only ranks libraries that returned the same result on every checked input. The published tables come from a publish run on an idle machine and keep every case, including the ones where `@arki/math` is slower.
 
 Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
 

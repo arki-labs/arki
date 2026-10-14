@@ -20,9 +20,14 @@
  *   are detected exactly, so `rounding: 'unnecessary'` returns them and
  *   throws `RoundingNecessaryError` for everything else.
  *
- * Practical limits: `scale` is at most 10 000, and a result may have at most
- * 10 000 digits in total (`exp(100000, { scale: 10 })` throws
- * `ResourceLimitError`). Cost grows faster than linearly with `scale`: about
+ * Limits: a result obeys the same cap as every `Decimal` — at most 10 000
+ * digits in its coefficient, counting integer digits and the `scale` fraction
+ * digits (leading zeros of a value below 1 do not count). So `scale` can reach
+ * 10 000 only for results below 1: `exp(-1, { scale: 10000 })` works,
+ * `exp(1, { scale: 10000 })` and `PI(10000)` (10 001 digits) throw
+ * `ResourceLimitError`, as does `exp(100000, { scale: 10 })`. The guard digits
+ * used inside never count against the cap, and a result that surely breaks it
+ * is refused before any work. Cost grows faster than linearly with `scale`: about
  * a millisecond at 50 digits, about 10 ms at 1 000, and a few seconds for a
  * logarithm at 10 000.
  */
@@ -34,6 +39,7 @@ import { DivisionByZeroError, InvalidArgumentError, ResourceLimitError, Rounding
 import { abs, digitCount, divideRounded, gcd, pow10 } from './internal/bigint.js';
 import { assertScale } from './internal/fraction.js';
 import { MAX_DIGITS } from './internal/limits.js';
+import { assertRadicandSize, integerRoot, rootAt } from './internal/roots.js';
 
 /**
  * Number of fraction digits in the result and how to round the last one.
@@ -47,14 +53,17 @@ type Resolved = { scale: number; rounding: RoundingMode };
 const GUARD_DIGITS = 10;
 /** Ziv's loop gives up after this many guard digits. */
 const MAX_GUARD_DIGITS = 2560;
-/** Every fixed-point approximation is within this many units of its last digit. */
+/**
+ * Every fixed-point approximation is within this many units of its last digit.
+ * Audited per kernel (test/reference/ERROR-ANALYSIS.md in the repository): each
+ * stays below 1 + 1e-5 units, so 2 is a safe bound with margin.
+ */
 const ERROR_BOUND = 2n;
-/** Largest integer a root is taken of, in digits. */
-const MAX_RADICAND_DIGITS = 200_000;
 /** Largest power built while checking whether a logarithm is exact, in digits. */
 const MAX_EXACT_CHECK_DIGITS = 4 * MAX_DIGITS;
 
-const ONE = Decimal.from(1);
+// Frozen: `exp(0, { scale: 0 })` and `pow(1, …)` can return it.
+const ONE = Object.freeze(Decimal.from(1));
 
 function zeroAt(scale: number): Decimal {
   return Decimal.fromParts({ coefficient: 0n, scale });
@@ -101,9 +110,37 @@ function log10Estimate(value: Decimal): number {
   return Math.log10(Number(`0.${digits.slice(0, 17)}`)) + digits.length - value.scale;
 }
 
-/** A positive value below 1% of the last kept digit, rounded with `rounding`. */
-function belowHalfUnit(scale: number, rounding: RoundingMode): Decimal {
-  return Decimal.fromParts({ coefficient: divideRounded(1n, 100n, rounding), scale });
+/** Size estimates are clamped to ±10^6: far past any result the limits allow, and always finite. */
+const LOG10_ESTIMATE_CLAMP = 6;
+
+/**
+ * log10 |log10 x| for a positive x ≠ 1, finite. Near 1 a plain log10(x) rounds
+ * to 0 (and its log to -Infinity), so this works from t = x − 1 instead.
+ */
+function log10OfLog10(x: Decimal): number {
+  const t = x.minus(ONE);
+  const tFloat = approximate(t);
+  if (Math.abs(tFloat) >= 0.5) return Math.log10(Math.abs(log10Estimate(x)));
+  // log1p keeps the digits that log10(1 + t) would cancel.
+  if (Math.abs(tFloat) >= 1e-300) return Math.log10(Math.abs(Math.log1p(tFloat)) / Math.LN10);
+  // Below the float range ln(1 + t) = t to far more digits than a float holds.
+  return log10Estimate(t.abs()) - Math.log10(Math.LN10);
+}
+
+/**
+ * log10(x^y) for x > 0 as a float. Worked out in log space, because y alone
+ * can be past the float range (`'1e9999'`), where y · log10(x) would become
+ * Infinity, or Infinity · 0 = NaN.
+ */
+function log10PowerEstimate(x: Decimal, y: Decimal): number {
+  if (y.isZero() || x.eq(ONE)) return 0;
+  const magnitude = 10 ** Math.min(log10OfLog10(x) + log10Estimate(y.abs()), LOG10_ESTIMATE_CLAMP);
+  return x.lt(ONE) === y.isNegative() ? magnitude : -magnitude;
+}
+
+/** A value below 1% of the last kept digit (negative when asked), rounded with `rounding`. */
+function belowHalfUnit(scale: number, rounding: RoundingMode, negative = false): Decimal {
+  return Decimal.fromParts({ coefficient: divideRounded(negative ? -1n : 1n, 100n, rounding), scale });
 }
 
 // ---------------------------------------------------------------------------
@@ -150,36 +187,6 @@ function roundApproximation(
 // Integer roots
 // ---------------------------------------------------------------------------
 
-function bitLength(n: bigint): number {
-  return n.toString(2).length;
-}
-
-/** ⌊value^(1/k)⌋ for value ≥ 0, by Newton's iteration from a float seed above the root. */
-function integerRoot(value: bigint, k: number): bigint {
-  if (value < 2n || k === 1) return value;
-  const bits = bitLength(value);
-  if (k >= bits) return 1n;
-  const shift = Math.max(0, bits - 53);
-  const rootLog2 = (Math.log2(Number(value >> BigInt(shift))) + shift) / k;
-  const exponent = Math.max(0, Math.floor(rootLog2) - 50);
-  let x = (BigInt(Math.ceil(2 ** (rootLog2 - exponent) * (1 + 1e-9))) + 1n) << BigInt(exponent);
-  const K = BigInt(k);
-  for (;;) {
-    const next = ((K - 1n) * x + value / x ** (K - 1n)) / K;
-    if (next >= x) break;
-    x = next;
-  }
-  while (x ** K > value) x--;
-  while ((x + 1n) ** K <= value) x++;
-  return x;
-}
-
-function assertRadicandSize(digits: number): void {
-  if (digits > MAX_RADICAND_DIGITS) {
-    throw new ResourceLimitError(`The root needs a ${digits}-digit intermediate; the limit is ${MAX_RADICAND_DIGITS}`);
-  }
-}
-
 /** The exact n-th root as a decimal, or `undefined` when it has infinitely many digits. */
 function exactRoot(x: Decimal, n: number): Decimal | undefined {
   const magnitude = abs(x.coefficient);
@@ -209,19 +216,15 @@ function rootOf(value: DecimalInput, n: number, options: ScaleOptions | undefine
     return root;
   }
   const { scale, rounding } = resolve(options, name);
+  const what = label(name, x);
+  if (!x.isZero()) assertResultFits(log10Estimate(x.abs()) / n, scale, what);
   // Trailing zeros carry no value; trimming keeps them from inflating the work estimate.
   const trimmed = x.trim();
-  const magnitude = abs(trimmed.coefficient);
   // One digit past `scale`, so a "sticky" digit can stand in for everything cut off.
-  const working = Math.max(scale + 1, Math.ceil(trimmed.scale / n));
-  const shift = n * working - trimmed.scale;
-  assertRadicandSize(digitCount(magnitude) + shift);
-  const radicand = magnitude * pow10(shift);
-  const root = integerRoot(radicand, n);
-  const sticky = root ** BigInt(n) === radicand ? 0n : 1n;
-  const tenfold = root * 10n + sticky;
-  const coefficient = divideRounded(x.isNegative() ? -tenfold : tenfold, pow10(working + 1 - scale), rounding);
-  return Decimal.fromParts({ coefficient, scale });
+  const { root, exact } = rootAt(abs(trimmed.coefficient), trimmed.scale, n, scale + 1);
+  const tenfold = root * 10n + (exact ? 0n : 1n);
+  const coefficient = divideRounded(x.isNegative() ? -tenfold : tenfold, 100n, rounding);
+  return checked(Decimal.fromParts({ coefficient, scale }), what);
 }
 
 // ---------------------------------------------------------------------------
@@ -414,10 +417,29 @@ function isExactLogarithm(x: Decimal, b: Decimal, candidate: Decimal): boolean {
   return p >= 0n ? xPower * pow10(bScale) === bPower * pow10(xScale) : xPower * bPower === pow10(xScale + bScale);
 }
 
-function assertResultDigits(integerDigits: number, scale: number, what: string): void {
-  if (Number.isNaN(integerDigits) || integerDigits + scale > MAX_DIGITS) {
-    throw new ResourceLimitError(`${what} would have more than ${MAX_DIGITS} digits`);
-  }
+// ---------------------------------------------------------------------------
+// The digit limit: on the returned value only
+// ---------------------------------------------------------------------------
+
+function tooManyDigits(what: string): ResourceLimitError {
+  return new ResourceLimitError(`${what} would have more than ${MAX_DIGITS} digits`);
+}
+
+/**
+ * Refuses, before any work, a result that would surely have more than
+ * `MAX_DIGITS` digits. `log10Magnitude` estimates log10 |result|, so the result
+ * has about `scale + ⌊log10Magnitude⌋ + 1` digits. The 1e-9 slack absorbs float
+ * error; `checked` settles what the estimate leaves open (e.g. 9.99… rounding
+ * up to 10.0).
+ */
+function assertResultFits(log10Magnitude: number, scale: number, what: string): void {
+  if (scale + Math.floor(log10Magnitude - 1e-9) + 1 > MAX_DIGITS) throw tooManyDigits(what);
+}
+
+/** The returned value has at most `MAX_DIGITS` digits in its coefficient, like any Decimal. */
+function checked(result: Decimal, what: string): Decimal {
+  if (digitCount(result.coefficient) > MAX_DIGITS) throw tooManyDigits(what);
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -469,11 +491,15 @@ export function nthRoot(value: DecimalInput, n: number, options?: ScaleOptions):
 export function exp(value: DecimalInput, options: ScaleOptions): Decimal {
   const x = Decimal.from(value).trim();
   const resolved = resolve(options, 'exp');
-  if (x.isZero()) return ONE.toScale(resolved.scale);
+  const what = label('exp', x);
+  if (x.isZero()) return checked(ONE.toScale(resolved.scale), what);
   const log10Result = approximate(x) * Math.LOG10E;
-  assertResultDigits(Math.floor(log10Result) + 1, resolved.scale, `exp(${x.toString()})`);
+  assertResultFits(log10Result, resolved.scale, what);
   if (log10Result < -(resolved.scale + 3)) return belowHalfUnit(resolved.scale, resolved.rounding);
-  return roundApproximation(precision => expFixed(x.coefficient, x.scale, precision), resolved, label('exp', x));
+  return checked(
+    roundApproximation(precision => expFixed(x.coefficient, x.scale, precision), resolved, what),
+    what,
+  );
 }
 
 /**
@@ -486,7 +512,12 @@ export function ln(value: DecimalInput, options: ScaleOptions): Decimal {
   const resolved = resolve(options, 'ln');
   if (!x.isPositive()) throw new InvalidArgumentError(`ln is defined for positive values, got ${x.toString()}`);
   if (x.eq(ONE)) return zeroAt(resolved.scale);
-  return roundApproximation(precision => lnFixed(x, precision), resolved, label('ln', x));
+  const what = label('ln', x);
+  assertResultFits(log10OfLog10(x) + Math.log10(Math.LN10), resolved.scale, what);
+  return checked(
+    roundApproximation(precision => lnFixed(x, precision), resolved, what),
+    what,
+  );
 }
 
 /**
@@ -503,11 +534,16 @@ export function log(value: DecimalInput, base: DecimalInput, options: ScaleOptio
     throw new InvalidArgumentError(`The logarithm base must be positive and not 1, got ${b.toString()}`);
   }
   if (x.eq(ONE)) return zeroAt(resolved.scale);
-  return roundApproximation(
-    precision => logFixed(x, b, precision),
-    resolved,
-    label('log', x, b),
-    candidate => isExactLogarithm(x, b, candidate),
+  const what = label('log', x, b);
+  assertResultFits(log10OfLog10(x) - log10OfLog10(b), resolved.scale, what);
+  return checked(
+    roundApproximation(
+      precision => logFixed(x, b, precision),
+      resolved,
+      what,
+      candidate => isExactLogarithm(x, b, candidate),
+    ),
+    what,
   );
 }
 
@@ -525,26 +561,22 @@ export function log2(value: DecimalInput, options: ScaleOptions): Decimal {
  * `base` raised to `exponent`.
  *
  * - Integer exponent: exact, through `Decimal#pow` (`pow(2, 10)` → `1024`,
- *   `0^0` → `1`). With options the exact result is rounded to `scale`; a
- *   negative exponent then divides with rounding (`pow(3, -1, { scale: 3 })`
- *   → `0.333`) instead of throwing.
+ *   `0^0` → `1`). With options the result is correctly rounded to `scale`
+ *   and the exact power is only an intermediate: a negative exponent divides
+ *   with rounding (`pow(3, -1, { scale: 3 })` → `0.333`) instead of throwing,
+ *   and `pow('0.5', 20000, { scale: 10 })` → `0.0000000000`. Exponents of any
+ *   size work (`pow(1, '1e9999', { scale: 2 })` → `1.00`).
  * - Non-integer exponent: requires options (`InvalidArgumentError` otherwise)
  *   and a base ≥ 0 (`InvalidArgumentError` for negative bases); computed as
  *   exp(exponent · ln(base)) and correctly rounded. `0^positive` is 0. Exact
  *   cases are detected: `pow(4, '0.5', { scale: 2 })` → `2.00`.
- * - Results over 10 000 digits throw `ResourceLimitError`.
+ * - Results over 10 000 digits throw `ResourceLimitError` (see the module doc).
  */
 export function pow(base: DecimalInput, exponent: DecimalInput, options?: ScaleOptions): Decimal {
   const rawBase = Decimal.from(base);
   const rawExponent = Decimal.from(exponent);
+  if (rawExponent.isInteger()) return integerPower(rawBase, rawExponent.toBigInt(), options);
 
-  if (rawExponent.isInteger()) {
-    const n = Number(rawExponent.toBigInt());
-    if (options === undefined) return rawBase.pow(n);
-    const { scale, rounding } = resolve(options, 'pow');
-    if (n < 0 && !rawBase.isZero()) return ONE.dividedBy(rawBase.pow(-n), { scale, rounding });
-    return rawBase.pow(n).toScale(scale, rounding);
-  }
   // Trailing zeros carry no value; trimming keeps them from inflating the work estimate.
   const x = rawBase.trim();
   const y = rawExponent.trim();
@@ -558,7 +590,8 @@ export function pow(base: DecimalInput, exponent: DecimalInput, options?: ScaleO
     if (y.isNegative()) throw new DivisionByZeroError('Zero cannot be raised to a negative power');
     return zeroAt(scale);
   }
-  if (x.eq(ONE)) return ONE.toScale(scale);
+  const what = label('pow', x, y);
+  if (x.eq(ONE)) return checked(ONE.toScale(scale), what);
 
   // Exact when base is a perfect q-th power, exponent = p/q in lowest terms.
   // A rational r ≠ 1 with r^q = base needs at least q bits in base.
@@ -570,38 +603,105 @@ export function pow(base: DecimalInput, exponent: DecimalInput, options?: ScaleO
     const root = exactRoot(x, Number(q));
     if (root) {
       const power = Number(p);
-      return power < 0
-        ? ONE.dividedBy(root.pow(-power), { scale, rounding })
-        : root.pow(power).toScale(scale, rounding);
+      const result =
+        power < 0 ? ONE.dividedBy(root.pow(-power), { scale, rounding }) : root.pow(power).toScale(scale, rounding);
+      return checked(result, what);
     }
   }
 
-  const log10Result = approximate(y) * log10Estimate(x);
-  assertResultDigits(Math.floor(log10Result) + 1, scale, `pow(${x.toString()}, ${y.toString()})`);
+  const log10Result = log10PowerEstimate(x, y);
+  assertResultFits(log10Result, scale, what);
   if (log10Result < -(scale + 3)) return belowHalfUnit(scale, rounding);
+  return checked(roundApproximation(powApproximation(x, y, log10Result), resolved, what), what);
+}
+
+/**
+ * Largest exact power an integer exponent builds, in digits (`coefficient^|n|`
+ * plus its scale shift). A larger exact power cannot sit on a rounding boundary
+ * of a result within the limits — its decimal expansion is longer than
+ * `scale + 1` digits — so the logarithmic path rounds it, and Ziv's loop ends.
+ */
+const MAX_EXACT_POWER_DIGITS = 5 * MAX_DIGITS;
+
+/**
+ * `base^n` for an integer n of any size. Without options it is exact
+ * (`Decimal#pow`, whose limits apply). With options only the rounded result
+ * counts against the digit limit: the exact power is an intermediate, built
+ * when it is small enough and approximated through exp(n · ln |base|) when not.
+ */
+function integerPower(base: Decimal, n: bigint, options: ScaleOptions | undefined): Decimal {
+  const what = label('pow', base, Decimal.from(n));
+  if (options === undefined) {
+    if (Number.isSafeInteger(Number(n))) return base.pow(Number(n));
+    if (base.isZero() && n < 0n) throw new DivisionByZeroError('Zero cannot be raised to a negative power');
+    throw tooManyDigits(what);
+  }
+  const resolved = resolve(options, 'pow');
+  const { scale, rounding } = resolved;
+  if (n === 0n) return checked(ONE.toScale(scale), what);
+  if (base.isZero()) {
+    if (n < 0n) throw new DivisionByZeroError('Zero cannot be raised to a negative power');
+    return zeroAt(scale);
+  }
+  const x = base.abs().trim();
+  const negative = base.isNegative() && n % 2n !== 0n;
+  if (x.eq(ONE)) return checked((negative ? ONE.negated() : ONE).toScale(scale), what);
+
+  const exponent = Decimal.from(n);
+  const log10Result = log10PowerEstimate(x, exponent);
+  assertResultFits(log10Result, scale, what);
+  if (log10Result < -(scale + 3)) return belowHalfUnit(scale, rounding, negative);
+
+  const k = abs(n);
+  // Digits of coefficient^k plus its scale shift: at least k/4, so k is checked as a bigint first.
+  const exactIsSmall =
+    k <= BigInt(4 * MAX_EXACT_POWER_DIGITS) && Number(k) * (log10Estimate(x) + 2 * x.scale) <= MAX_EXACT_POWER_DIGITS;
+  if (exactIsSmall) {
+    const power = x.coefficient ** k;
+    const signed = negative ? -power : power;
+    const powerScale = x.scale * Number(k);
+    let coefficient: bigint;
+    if (n < 0n) {
+      // x^-k = 10^powerScale / power
+      coefficient = divideRounded(negative ? -pow10(powerScale + scale) : pow10(powerScale + scale), power, rounding);
+    } else {
+      coefficient =
+        powerScale >= scale
+          ? divideRounded(signed, pow10(powerScale - scale), rounding)
+          : signed * pow10(scale - powerScale);
+    }
+    return checked(Decimal.fromParts({ coefficient, scale }), what);
+  }
+  const approximateAt = powApproximation(x, exponent, log10Result);
+  return checked(
+    roundApproximation(negative ? precision => -approximateAt(precision) : approximateAt, resolved, what),
+    what,
+  );
+}
+
+/** x^y for x > 0 as exp(y · ln x), in the shape `roundApproximation` takes. */
+function powApproximation(x: Decimal, y: Decimal, log10Result: number): (precision: number) => bigint {
   const integerDigits = Math.max(0, Math.ceil(log10Result)) + 1;
   const exponentDigits = digitCount(abs(y.coefficient) / pow10(y.scale)) + 1;
-  return roundApproximation(
-    precision => {
-      // t = y·ln(x) to `exponentPrecision` digits: an error δ in t is a relative error δ in the result.
-      const exponentPrecision = precision + integerDigits + 10;
-      const lnBase = lnFixed(x, exponentPrecision + exponentDigits);
-      const t = (y.coefficient * lnBase) / pow10(y.scale + exponentDigits);
-      return expFixed(t, exponentPrecision, precision);
-    },
-    resolved,
-    label('pow', x, y),
-  );
+  return precision => {
+    // t = y·ln(x) to `exponentPrecision` digits: an error δ in t is a relative error δ in the result.
+    const exponentPrecision = precision + integerDigits + 10;
+    const lnBase = lnFixed(x, exponentPrecision + exponentDigits);
+    const t = (y.coefficient * lnBase) / pow10(y.scale + exponentDigits);
+    return expFixed(t, exponentPrecision, precision);
+  };
 }
 
 /** π to `scale` fraction digits, rounded half-even. Machin's formula, cached per precision. */
 export function PI(scale: number): Decimal {
   assertScale(scale);
+  assertResultFits(Math.log10(3), scale, 'PI'); // π is in [1, 10)
   return roundApproximation(piFixed, { scale, rounding: 'halfEven' }, 'PI');
 }
 
 /** e to `scale` fraction digits, rounded half-even. Σ 1/k!, cached per precision. */
 export function E(scale: number): Decimal {
   assertScale(scale);
+  assertResultFits(Math.log10(2), scale, 'E'); // e is in [1, 10)
   return roundApproximation(eFixed, { scale, rounding: 'halfEven' }, 'E');
 }

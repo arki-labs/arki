@@ -29,10 +29,54 @@ export type IntegerInput = string | number | bigint;
 
 const BRAND = Symbol('arki.math.exact');
 
+/** Coefficients in this range print through `Number` in `toString`. */
+const MAX_SAFE_COEFFICIENT = BigInt(Number.MAX_SAFE_INTEGER);
+const MIN_SAFE_COEFFICIENT = -MAX_SAFE_COEFFICIENT;
+
 function refuseCoercion(typeName: string): never {
   throw new TypeError(
     `A ${typeName} cannot be used as a number. Call .toNumber() for a float, or use .plus()/.times()/... for exact arithmetic`,
   );
+}
+
+/** `10^MAX_DIGITS` and its negation: a value at or past them has more than `MAX_DIGITS` digits. */
+const DIGIT_LIMIT = 10n ** BigInt(MAX_DIGITS);
+const NEGATIVE_DIGIT_LIMIT = -DIGIT_LIMIT;
+
+/**
+ * Every Decimal has at most `MAX_DIGITS` coefficient digits (integer digits + scale), so
+ * each one parses back from its own `toString()`. Parsing caps inputs; every result that
+ * can grow (sum, product, quotient, power, rescale) is checked here. Without it
+ * `x = x.times(x)` doubles the digits every step and runs for seconds before the engine's
+ * BigInt limit throws a `RangeError`. One comparison, constant time for ordinary values.
+ */
+function assertResultDigits(value: bigint, what: string): bigint {
+  if (value >= DIGIT_LIMIT || value <= NEGATIVE_DIGIT_LIMIT) {
+    throw new ResourceLimitError(`${what} would have more than ${MAX_DIGITS} digits`);
+  }
+  return value;
+}
+
+/** log10 of a magnitude above 1, from its leading 17 digits: plenty to size a power. */
+function log10OfMagnitude(magnitude: bigint): number {
+  const text = magnitude.toString();
+  const lead = text.slice(0, 17);
+  return Math.log10(Number(lead)) + (text.length - lead.length);
+}
+
+/**
+ * `base^exponent` (exponent ≥ 1) within `MAX_DIGITS`. Refused up front when the log10
+ * estimate says the result surely has too many digits; the 1e-9 slack absorbs float
+ * error, and the exact check settles the edge (10^9999 fits, 10^10000 does not).
+ * Bases 0, 1 and -1 are exact at any exponent.
+ */
+function powerWithinLimit(base: bigint, exponent: number, what: string): bigint {
+  const magnitude = abs(base);
+  if (magnitude <= 1n) return base < 0n && exponent % 2 === 0 ? 1n : base;
+  if (Math.floor(exponent * log10OfMagnitude(magnitude) - 1e-9) + 1 > MAX_DIGITS) {
+    throw new ResourceLimitError(`${what} would have more than ${MAX_DIGITS} digits`);
+  }
+  return assertResultDigits(base ** BigInt(exponent), what);
 }
 
 function assertSafeExponent(exponent: number): void {
@@ -87,10 +131,15 @@ function toBigIntInput(value: IntegerInput, what: string): bigint {
 // ---------------------------------------------------------------------------
 
 /**
- * An exact finite decimal: `coefficient × 10^-scale`. Immutable. The scale
- * is retained, so `'1.10'` stays `1.10` and `'1.10' × 3` is `3.30` — what a
+ * An exact finite decimal: `coefficient × 10^-scale`. The scale is retained,
+ * so `'1.10'` stays `1.10` and `'1.10' × 3` is `3.30` — what a
  * person expects from money and measurements. Equality is numeric:
  * `decimal('1.0').eq('1.00')` is `true`.
+ *
+ * Immutable: methods never modify their operands and the fields are `readonly`.
+ * Instances are not frozen — `Object.freeze` per result cost 5–7× in hot loops,
+ * and no peer library (decimal.js, big.js, fraction.js, complex.js) freezes —
+ * but the shared constants arithmetic can return are frozen.
  */
 export class Decimal {
   readonly coefficient: bigint;
@@ -100,7 +149,6 @@ export class Decimal {
     if (brand !== BRAND) throw new TypeError('Use decimal(value) instead of new Decimal()');
     this.coefficient = coefficient;
     this.scale = scale;
-    Object.freeze(this);
   }
 
   /** @internal */
@@ -124,7 +172,7 @@ export class Decimal {
       }
       coefficient += d.scale === scale ? d.coefficient : d.coefficient * pow10(scale - d.scale);
     }
-    return new Decimal(coefficient, scale, BRAND);
+    return new Decimal(assertResultDigits(coefficient, 'The sum'), scale, BRAND);
   }
 
   /** Comparator for sorting: `prices.sort(Decimal.compare)`. */
@@ -148,12 +196,12 @@ export class Decimal {
 
   plus(other: DecimalInput): Decimal {
     const [a, b, scale] = align(this, Decimal.from(other));
-    return new Decimal(a + b, scale, BRAND);
+    return new Decimal(assertResultDigits(a + b, 'The sum'), scale, BRAND);
   }
 
   minus(other: DecimalInput): Decimal {
     const [a, b, scale] = align(this, Decimal.from(other));
-    return new Decimal(a - b, scale, BRAND);
+    return new Decimal(assertResultDigits(a - b, 'The difference'), scale, BRAND);
   }
 
   times(other: DecimalInput): Decimal {
@@ -162,7 +210,7 @@ export class Decimal {
     if (scale > MAX_SCALE) {
       throw new ResourceLimitError(`The product would have ${scale} fraction digits; the limit is ${MAX_SCALE}`);
     }
-    return new Decimal(this.coefficient * that.coefficient, scale, BRAND);
+    return new Decimal(assertResultDigits(this.coefficient * that.coefficient, 'The product'), scale, BRAND);
   }
 
   /**
@@ -172,9 +220,13 @@ export class Decimal {
    */
   dividedBy(other: DecimalInput, options?: ScaleOptions): Decimal {
     const that = Decimal.from(other);
-    return Decimal.fromParts(
-      fractionToDecimalParts(this.coefficient * pow10(that.scale), that.coefficient * pow10(this.scale), options),
+    const parts = fractionToDecimalParts(
+      this.coefficient * pow10(that.scale),
+      that.coefficient * pow10(this.scale),
+      options,
     );
+    assertResultDigits(parts.coefficient, 'The quotient');
+    return Decimal.fromParts(parts);
   }
 
   /** Remainder with the sign of the dividend, like JavaScript's `%`. */
@@ -191,12 +243,17 @@ export class Decimal {
     if (exponent === 0) return ONE;
     if (exponent < 0) {
       if (this.isZero()) throw new DivisionByZeroError('Zero cannot be raised to a negative power');
-      return ONE.dividedBy(this.pow(-exponent));
+      // x^-n = (1/x)^n: 1/x terminates exactly when x^-n does, and sizing the result
+      // directly lets 0.5^-14000 (= 2^14000) through without building 0.5^14000 first.
+      return ONE.dividedBy(this).pow(-exponent);
     }
-    if (digitCount(this.coefficient) * exponent > MAX_DIGITS || this.scale * exponent > MAX_SCALE) {
-      throw new ResourceLimitError(`${this.toString()} ^ ${exponent} exceeds the digit limit`);
+    const scale = this.scale * exponent;
+    if (scale > MAX_SCALE) {
+      throw new ResourceLimitError(
+        `${this.toString()} ^ ${exponent} would have ${scale} fraction digits; the limit is ${MAX_SCALE}`,
+      );
     }
-    return new Decimal(this.coefficient ** BigInt(exponent), this.scale * exponent, BRAND);
+    return new Decimal(powerWithinLimit(this.coefficient, exponent, `${this.toString()} ^ ${exponent}`), scale, BRAND);
   }
 
   abs(): Decimal {
@@ -217,7 +274,7 @@ export class Decimal {
     assertScale(scale);
     const diff = scale - this.scale;
     if (diff === 0) return this;
-    if (diff > 0) return new Decimal(this.coefficient * pow10(diff), scale, BRAND);
+    if (diff > 0) return new Decimal(assertResultDigits(this.coefficient * pow10(diff), 'The value'), scale, BRAND);
     return new Decimal(divideRounded(this.coefficient, pow10(-diff), rounding), scale, BRAND);
   }
 
@@ -240,7 +297,7 @@ export class Decimal {
     // Rounding away the integer digits leaves trailing zeros: keep them as integer zeros, not a negative scale.
     return this.scale >= drop
       ? new Decimal(rounded, this.scale - drop, BRAND)
-      : new Decimal(rounded * pow10(drop - this.scale), 0, BRAND);
+      : new Decimal(assertResultDigits(rounded * pow10(drop - this.scale), 'The rounded value'), 0, BRAND);
   }
 
   /** Rounds to the nearest multiple of `step`: `decimal('1.23').roundTo('0.05')` → `1.25`. Default half-up. */
@@ -311,11 +368,23 @@ export class Decimal {
 
   /** Plain notation, never exponent form: `'0.000001'`, `'-12.30'`. */
   toString(): string {
-    const digits = abs(this.coefficient).toString();
-    const negative = this.coefficient < 0n ? '-' : '';
-    if (this.scale === 0) return negative + digits;
-    const padded = digits.padStart(this.scale + 1, '0');
-    return `${negative}${padded.slice(0, -this.scale)}.${padded.slice(-this.scale)}`;
+    const { coefficient, scale } = this;
+    let negative: boolean;
+    let digits: string;
+    if (coefficient >= MIN_SAFE_COEFFICIENT && coefficient <= MAX_SAFE_COEFFICIENT) {
+      // Exact as a number, and engines print a number faster than a bigint.
+      const value = Number(coefficient);
+      negative = value < 0;
+      digits = String(negative ? -value : value);
+    } else {
+      negative = coefficient < 0n;
+      digits = (negative ? -coefficient : coefficient).toString();
+    }
+    const sign = negative ? '-' : '';
+    if (scale === 0) return sign + digits;
+    const point = digits.length - scale;
+    if (point > 0) return sign + digits.slice(0, point) + '.' + digits.slice(point);
+    return sign + '0.' + '0'.repeat(-point) + digits;
   }
 
   /** Like `Number.prototype.toFixed`, but on the exact value and with a chosen rounding mode. */
@@ -379,7 +448,8 @@ function align(a: Decimal, b: Decimal): [bigint, bigint, number] {
   return [a.coefficient * pow10(b.scale - a.scale), b.coefficient, b.scale];
 }
 
-const ONE = Decimal.fromParts({ coefficient: 1n, scale: 0 });
+// Frozen: `pow(0)` returns it, and `pow(-n)` divides by it.
+const ONE = Object.freeze(Decimal.fromParts({ coefficient: 1n, scale: 0 }));
 
 export function decimal(value: DecimalInput): Decimal {
   return Decimal.from(value);
@@ -405,8 +475,13 @@ export type MixedNumber = {
 
 /**
  * An exact fraction of two bigints, always reduced, denominator always
- * positive, zero always `0/1`. Immutable. Where `Decimal` must throw
- * (`1 ÷ 3`), a `Rational` just keeps going.
+ * positive, zero always `0/1`. Where `Decimal` must throw (`1 ÷ 3`), a
+ * `Rational` just keeps going.
+ *
+ * Immutable: methods never modify their operands and the fields are `readonly`.
+ * Instances are not frozen — `Object.freeze` per result cost 5–7× in hot loops,
+ * and no peer library (decimal.js, big.js, fraction.js, complex.js) freezes —
+ * but the shared constants arithmetic can return are frozen.
  */
 export class Rational {
   readonly numerator: bigint;
@@ -416,7 +491,6 @@ export class Rational {
     if (brand !== BRAND) throw new TypeError('Use ratio(value) instead of new Rational()');
     this.numerator = numerator;
     this.denominator = denominator;
-    Object.freeze(this);
   }
 
   /** Normalizes sign and reduces by the GCD. */
@@ -447,15 +521,19 @@ export class Rational {
     if (g === 1n) {
       // Coprime denominators: the sum is already in lowest terms.
       return new Rational(
-        this.numerator * that.denominator + that.numerator * this.denominator,
-        this.denominator * that.denominator,
+        assertResultDigits(this.numerator * that.denominator + that.numerator * this.denominator, 'The numerator'),
+        assertResultDigits(this.denominator * that.denominator, 'The denominator'),
         BRAND,
       );
     }
     const numerator = this.numerator * (that.denominator / g) + that.numerator * (this.denominator / g);
     if (numerator === 0n) return RATIONAL_ZERO;
     const g2 = gcd(numerator, g);
-    return new Rational(numerator / g2, (this.denominator / g) * (that.denominator / g2), BRAND);
+    return new Rational(
+      assertResultDigits(numerator / g2, 'The numerator'),
+      assertResultDigits((this.denominator / g) * (that.denominator / g2), 'The denominator'),
+      BRAND,
+    );
   }
 
   minus(other: RationalInput): Rational {
@@ -469,16 +547,27 @@ export class Rational {
     const g1 = gcd(this.numerator, that.denominator);
     const g2 = gcd(that.numerator, this.denominator);
     return new Rational(
-      (this.numerator / g1) * (that.numerator / g2),
-      (this.denominator / g2) * (that.denominator / g1),
+      assertResultDigits((this.numerator / g1) * (that.numerator / g2), 'The numerator'),
+      assertResultDigits((this.denominator / g2) * (that.denominator / g1), 'The denominator'),
       BRAND,
     );
   }
 
+  /** Cross-cancels like `times`, so the result is reduced before its size is checked. */
   dividedBy(other: RationalInput): Rational {
     const that = Rational.from(other);
     if (that.isZero()) throw new DivisionByZeroError('Division by zero');
-    return Rational.fromParts(this.numerator * that.denominator, this.denominator * that.numerator);
+    if (this.numerator === 0n) return RATIONAL_ZERO;
+    const g1 = gcd(this.numerator, that.numerator);
+    const g2 = gcd(this.denominator, that.denominator);
+    const numerator = (this.numerator / g1) * (that.denominator / g2);
+    const denominator = (this.denominator / g2) * (that.numerator / g1);
+    const flip = denominator < 0n ? -1n : 1n;
+    return new Rational(
+      assertResultDigits(flip * numerator, 'The numerator'),
+      assertResultDigits(flip * denominator, 'The denominator'),
+      BRAND,
+    );
   }
 
   /** Integer exponent; negative exponents invert. */
@@ -486,11 +575,12 @@ export class Rational {
     assertSafeExponent(exponent);
     if (exponent === 0) return Rational.fromParts(1n, 1n);
     if (exponent < 0) return this.inverse().pow(-exponent);
-    if ((digitCount(this.numerator) + digitCount(this.denominator)) * exponent > MAX_DIGITS) {
-      throw new ResourceLimitError(`${this.toString()} ^ ${exponent} exceeds the digit limit`);
-    }
-    const e = BigInt(exponent);
-    return new Rational(this.numerator ** e, this.denominator ** e, BRAND);
+    const what = `${this.toString()} ^ ${exponent}`;
+    return new Rational(
+      powerWithinLimit(this.numerator, exponent, `The numerator of ${what}`),
+      powerWithinLimit(this.denominator, exponent, `The denominator of ${what}`),
+      BRAND,
+    );
   }
 
   /** The reciprocal: `2/3` → `3/2`. */
@@ -585,7 +675,9 @@ export class Rational {
 
   /** Exact when the fraction terminates; otherwise needs `{ scale, rounding }` or it throws. */
   toDecimal(options?: ScaleOptions): Decimal {
-    return Decimal.fromParts(fractionToDecimalParts(this.numerator, this.denominator, options));
+    const parts = fractionToDecimalParts(this.numerator, this.denominator, options);
+    assertResultDigits(parts.coefficient, 'The decimal');
+    return Decimal.fromParts(parts);
   }
 
   /** `7/2` → `{ whole: 3n, fraction: 1/2 }`; `-7/2` → `{ whole: -3n, fraction: -1/2 }`. */
@@ -705,7 +797,8 @@ export function ratio(first: RationalInput, second?: IntegerInput): Rational {
   return Rational.fromParts(toBigIntInput(first as IntegerInput, 'numerator'), toBigIntInput(second, 'denominator'));
 }
 
-const RATIONAL_ZERO = Rational.fromParts(0n, 1n);
+// Frozen: zero sums and products return it.
+const RATIONAL_ZERO = Object.freeze(Rational.fromParts(0n, 1n));
 
 export function isRational(value: unknown): value is Rational {
   return value instanceof Rational;

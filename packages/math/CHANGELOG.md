@@ -1,5 +1,51 @@
 # @arki/math
 
+## 0.0.10
+
+Proof and the numerical core.
+
+Added:
+
+- **Accuracy evidence.** Reference tests against mpmath (1 163 decimal-math cases, 160 near rounding boundaries; 9 852 distribution and special-function points down to 1e-300 tails) and the 20 NIST StRD datasets; an error analysis proving `decimal-math`'s rounding bound; the README "Accuracy" table lists each function's guarantee and evidence.
+- **Property tests and differential fuzzing** (fast-check, dev-only): algebraic laws, rounding against a BigInt oracle, Decimal vs decimal.js at 60 digits, Rational vs fraction.js, hostile input always ends in a `MathError`.
+- `linear-algebra`: eigenvalues and eigenvectors (`symmetricEigenvalues`, `symmetricEigenDecompose`, `eigenvalues`, `eigenDecompose`), pivoted QR (`qrDecompose`), Cholesky (`choleskyDecompose`, `choleskySolve`, `NotPositiveDefiniteError`), SVD (`singularValues`, `singularValueDecompose`), `leastSquares`, `pseudoInverse`, `conditionNumber`.
+- `@arki/math/roots` (Brent `findRoot`, `bisect`, safeguarded `newton`, `findRoots`), `@arki/math/integrate` (adaptive Gauss–Kronrod G7–K15 and tanh-sinh, infinite intervals), `@arki/math/differentiate` (Ridders `derivative`, Richardson `limit`). Results carry error estimates; failures throw `ConvergenceError` subclasses with `.best`.
+- `Complex`: `sin`, `cos`, `tan`, `sinh`, `cosh`, `tanh` and their inverses; principal branches, Kahan's counter-clockwise rule on cuts; within 3.1 ulp of a 700-digit reference.
+
+Changed:
+
+- **Breaking:** `rank` counts singular values by default (NumPy's rule); `{ method: 'elimination' }` keeps the LU count.
+- **Breaking:** one digit cap for every `Decimal`/`Rational` result (10 000 digits, guard digits excluded): `PI(10000)`, `E(10000)`, `sqrt(2, { scale: 10000 })`, products and sums past the cap now throw `ResourceLimitError`; `decimal(3).pow(-20000)` throws `RoundingNecessaryError`.
+- `polynomialRegression` solves by pivoted QR instead of the normal equations: up to five orders of magnitude more accurate at degree 10–18.
+- LU-based `solve`, `determinant` and `inverse` about 2× faster.
+
+Fixed:
+
+- Far-tail quantiles of `studentT`, `chiSquare`, `fisherF` and `noncentralT` were badly wrong (`studentT(100).quantile(1 − 1e-12)` gave 68 instead of 8.03); they now hold 1e-12 relative error. `normal.quantile` near 0.5 is 2 ulp (was 1e-9 relative).
+- `eigenDecompose` returned wrong eigenvectors on badly scaled matrices; balancing now follows LAPACK `dgebal` (residual 4.0 → 1e-100 on the worst case).
+- `Complex#sqrt` of a subnormal number threw; `Decimal`/`Rational` products ran away instead of stopping at the digit limit; `pow` with a huge integer exponent threw `InvalidArgumentError`; `Decimal#pow` refused results that fit (`2^14000`, `1^20000`); `nominalRate` hit the cap early; a scale-10000 value below 1 did not parse back from its own text.
+
+## 0.0.9
+
+Speed: fastest against decimal.js, big.js, bignumber.js, fraction.js, complex.js, ml-matrix, mathjs, jstat, simple-statistics and regression-js in nearly every benchmark group.
+
+Changed:
+
+- **Breaking:** `Decimal`, `Rational` and `Complex` instances are no longer frozen (`Object.isFrozen` is `false`). Methods still never modify their operands and fields stay `readonly`. Freezing every result cost 5–7× in hot loops, because a frozen result cannot be optimized away; no peer library freezes. Shared constants (`Complex.ZERO`/`ONE`/`I`, the `1` returned by `pow(0)` and `exp(0)`, the Rational zero) stay frozen.
+- Exponential, logarithmic, power and polynomial fits compute `r2` and the other diagnostics on first read (2–3× faster when unread; identical values). Fit fields are `readonly`.
+
+Faster (identical results, checked against the previous build):
+
+- Linear algebra: `multiply` about 7×, `inverse` 2×, `solve` and `determinant` about 1.5× (i-k-j loops on `Float64Array` rows; cheap validation).
+- `linearRegression` about 7× (one fused pass for plain arrays); `powerRegression` about 2.5×.
+- `sum`, `mean` and the statistics built on them: compensated summation on four independent streams, same accuracy.
+- `Complex` `times`, `dividedBy`, `sqrt`, `pow`, `ln`; `Decimal#toString` for coefficients in the safe-integer range.
+
+Fixed:
+
+- `Complex#dividedBy` follows Baudin & Smith (2012): `(1e308 + 1e308i) / (1e308 + 1e308i)` is 1 instead of a range error, and all ten hard cases from the paper are correctly rounded.
+- `Complex#abs` and `toPolar` threw nothing and returned `Infinity` past the float range; they now throw `NumericRangeError`. `ln`, `log`, `sqrt`, `pow`, `nthRoots` and `approxEqual` work for |z| beyond `Number.MAX_VALUE`.
+
 ## 0.0.8
 
 General math a calculators app still needed: composite units, quartile and pooled-variance variants, and two fixes.

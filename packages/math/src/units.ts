@@ -760,9 +760,13 @@ export function convert(value: number, from: Unit, to: Unit): number {
  * (`°F = °C × 9/5 + 32`, `K = °C + 273.15`); `l/100km` takes the exact
  * reciprocal (`mpg` → `l/100km` is `100 / km-per-litre`).
  *
- * Angles between `deg`, `grad`, `turn`, `arcmin` and `arcsec` are exact; so are `sr` to `sr` and `deg2` to `deg2`. Any conversion between
- * `rad` and another angle unit (or `sr` and `deg2`) needs π and throws `RoundingNecessaryError`
- * (`rad` to `rad` is fine). Use `convert` for those.
+ * π splits three categories in two: `rad` from the other angle units
+ * (`deg` = π/180 rad), `sr` from `deg2` (= (π/180)² sr), and `pc` (= 648000/π
+ * au) from every other length. Conversions within one side are exact: `deg`,
+ * `grad`, `turn`, `arcmin` and `arcsec` among themselves, `sr` to `sr`, `deg2`
+ * to `deg2`, `pc` to `pc`, and the other lengths among themselves. Crossing the
+ * split — `rad` ↔ `deg`, `sr` ↔ `deg2`, `pc` ↔ `ly` or `m` — needs π and throws
+ * `RoundingNecessaryError`. Use `convert` for those.
  */
 export function convertExact(value: RationalInput, from: Unit, to: Unit): Rational {
   const input = Rational.from(value);
@@ -816,7 +820,7 @@ function assertSplittable(category: UnitCategory): void {
  *
  * Throws `InvalidArgumentError` for an empty list, unknown or mixed categories, units not
  * strictly largest-first, temperature and fuel economy (not additive), or a non-finite
- * `value`; `RoundingNecessaryError` for units that mix π (such as `rad` with `deg`).
+ * `value`; `RoundingNecessaryError` for units that mix π (`rad` with `deg`, `pc` with `ly`).
  */
 export function splitUnits(
   value: RationalInput,

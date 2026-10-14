@@ -1,6 +1,6 @@
 {
   "name": "@arki/math",
-  "version": "0.0.8",
+  "version": "0.0.10",
   "description": "Zero-dependency math toolkit — exact Decimal and Rational arithmetic on bigint, explicit rounding modes, float helpers that round what you typed, descriptive statistics, Intl-backed locale formatting and parsing, seeded random, and a fluent number wrapper.",
   "license": "MIT",
   "repository": {
@@ -123,6 +123,18 @@
     "./finance/float": {
       "types": "./dist/finance-float.d.ts",
       "default": "./dist/finance-float.js"
+    },
+    "./roots": {
+      "types": "./dist/roots.d.ts",
+      "default": "./dist/roots.js"
+    },
+    "./integrate": {
+      "types": "./dist/integrate.d.ts",
+      "default": "./dist/integrate.js"
+    },
+    "./differentiate": {
+      "types": "./dist/differentiate.d.ts",
+      "default": "./dist/differentiate.js"
     },
     "./geometry": {
       "types": "./dist/geometry.d.ts",
