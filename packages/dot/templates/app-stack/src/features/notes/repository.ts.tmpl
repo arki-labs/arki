@@ -1,0 +1,24 @@
+import type { DbHandle } from '@arki/journal';
+import { desc, eq } from '@arki/db/orm';
+
+import type { NoteId } from './tables';
+import { notes } from './tables';
+
+/**
+ * Reads for notes. Writes never go here: they go through `createNote` in
+ * `note.ts`, so every change is journaled. Accepts the root database or a
+ * transaction.
+ */
+export function notesRepository(db: DbHandle) {
+  return {
+    /** Newest first. */
+    list(limit = 50) {
+      return db.select().from(notes).orderBy(desc(notes.createdAt), desc(notes.id)).limit(limit);
+    },
+
+    async findById(id: NoteId) {
+      const [row] = await db.select().from(notes).where(eq(notes.id, id)).limit(1);
+      return row;
+    },
+  };
+}

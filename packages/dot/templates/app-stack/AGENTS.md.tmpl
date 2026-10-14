@@ -1,0 +1,62 @@
+# AGENTS.md
+
+Guide for coding agents working in `{{name}}`.
+
+## Verify every change
+
+```sh
+bun run typecheck
+bun run test        # in-memory PGlite, no Docker needed
+bun run build       # production build; catches server-bundle problems
+```
+
+## Layout
+
+```text
+src/
+  app.ts                  The DOT app: plugins in boot order. `dot explain` reads it.
+  env.ts                  Env schema (zod). Add new env vars here.
+  testing.ts              bootTestApp(): the real app on in-memory PGlite.
+  server/
+    db.ts                 schema (every table) + Drizzle relations
+    journal.ts            `j` (definitions) + `appJournal` (projections, effects)
+    journal-tables.ts     the journal's own tables
+    orpc.ts               `procedure` builder + RpcContext type
+    router.ts             the API: one key per feature
+    runtime.ts            starts the app once; builds the request context
+  features/<name>/
+    tables.ts             Drizzle tables (a leaf: imports nothing from server/)
+    <entity>.ts           journal events, entity, commands
+    repository.ts         reads
+    procedures.ts         oRPC procedures
+    <name>.test.ts        tests through `call(procedure, input, { context })`
+  routes/                 TanStack Start file routes (pages + /api/*)
+  lib/orpc.ts             browser client: `orpc.<feature>.<procedure>`
+drizzle/                  migrations (generated; commit them)
+```
+
+## Add a feature
+
+1. `src/features/<name>/tables.ts`: the table. A journal entity needs a string `id` (use `createIdFactory`) and `version integer not null default 0`. Export a record: `export const <name>Tables = { ... }`.
+2. Add that record to `composeSchema(...)` in `src/server/db.ts`.
+3. `bun run db:generate`, then commit the new folder in `drizzle/`.
+4. `src/features/<name>/<entity>.ts`: events with `j.event`, the entity with `j.entity`, and commands with `j.command`. A rule that rejects input throws `CommandError(code, message)` from `@arki/journal`.
+5. `repository.ts` for reads, `procedures.ts` for the API. Writes call `context.run(command, input)`. Reads call the repository.
+6. Add the router to `src/server/router.ts`.
+7. A page in `src/routes/`. The route tree (`src/routeTree.gen.ts`) regenerates on `dev` and `build`.
+8. A test next to the feature, using `bootTestApp()` from `~/testing`.
+
+Projections (same-transaction read models) and effects (after-commit jobs) are listed in `appJournal` in `src/server/journal.ts`.
+
+## Rules
+
+- Every write to a feature table goes through a journal command. Never `insert`/`update` a feature table directly: the event log is the audit trail.
+- Logging: `getLogger('app:<area>')` from `@arki/log`. Never `console.log`. `DEBUG=app:*` shows debug output.
+- Validate every external input with zod.
+- No `any`, no `@ts-ignore`.
+- Import Drizzle helpers from `@arki/db/pg` and `@arki/db/orm`, not from `drizzle-orm`, so the app keeps one Drizzle copy.
+
+## Inspect the app
+
+- `bun run dot:explain` prints plugins, services and boot order without connecting to anything.
+- `bun run dot:doctor` boots the app (needs `DB_URL`) and reports every plugin's health. Add `--json` for machine-readable output.

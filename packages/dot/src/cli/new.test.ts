@@ -20,13 +20,17 @@ const resolve = (...segments: string[]): string => path.resolve(...segments);
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_TEMPLATE,
   planOperations,
   resolveTargetDir,
+  resolveTemplateName,
   runNew,
   validateAppName,
 } from './new.js';
 import { sha256 } from './files.js';
-import { DotCliErrorCode } from './error-codes.js';
+import { DotCliError, DotCliErrorCode } from './error-codes.js';
+import { main } from './index.js';
+import { readDotVersion, TEMPLATE_VERSIONS, ZOD_VERSION } from './versions.js';
 
 const FROZEN_NOW = () => new Date('2026-05-21T00:00:00.000Z');
 const TEMPLATE_ROOT = resolve(__dirname, '..', '..', 'templates', 'app-minimal');
@@ -560,4 +564,199 @@ describe('generated app boots', () => {
 
     await rm(bootRoot, { recursive: true, force: true });
   }, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// Templates: `stack` (default) and `minimal`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Files a stranger needs for the stack app to install, test, build and
+ * deploy. Losing any of them breaks one of those steps, so the plan must
+ * always contain them.
+ */
+const STACK_KEY_FILES = [
+  '.dockerignore',
+  '.env.example',
+  '.gitignore',
+  'AGENTS.md',
+  'Dockerfile',
+  'README.md',
+  'docker-compose.yml',
+  'drizzle.config.ts',
+  'package.json',
+  'tsconfig.json',
+  'vite.config.ts',
+  'vitest.config.ts',
+  'src/app.ts',
+  'src/entry-server.ts',
+  'src/env.ts',
+  'src/router.tsx',
+  'src/routeTree.gen.ts',
+  'src/server/db.ts',
+  'src/server/journal.ts',
+  'src/server/journal-tables.ts',
+  'src/server/orpc.ts',
+  'src/server/router.ts',
+  'src/server/runtime.ts',
+  'src/features/notes/tables.ts',
+  'src/features/notes/note.ts',
+  'src/features/notes/repository.ts',
+  'src/features/notes/procedures.ts',
+  'src/features/notes/notes.test.ts',
+  'src/routes/__root.tsx',
+  'src/routes/index.tsx',
+  'src/routes/api/health.ts',
+  'src/routes/api/rpc.$.ts',
+] as const;
+
+describe('templates', () => {
+  it('uses the stack template when --template is omitted', async () => {
+    expect(DEFAULT_TEMPLATE).toBe('stack');
+    const { operations } = await planOperations({ name: 'fixture', cwd: workDir });
+    const paths = operations.map(op => op.path);
+    expect(paths).toEqual(expect.arrayContaining([...STACK_KEY_FILES]));
+  });
+
+  it('the stack plan ships an initial migration for the notes and journal tables', async () => {
+    const { operations } = await planOperations({ name: 'fixture', cwd: workDir, template: 'stack' });
+    const migration = operations.find(op => /^drizzle\/\d{14}_init\/migration\.sql$/.test(op.path));
+    expect(migration, 'drizzle/<timestamp>_init/migration.sql').toBeDefined();
+    expect(migration!.content).toContain('CREATE TABLE "notes"');
+    expect(migration!.content).toContain('CREATE TABLE "journal_events"');
+    expect(operations.some(op => /^drizzle\/\d{14}_init\/snapshot\.json$/.test(op.path))).toBe(true);
+  });
+
+  // The release packlist forbids `.env*` files in the tarball, so the
+  // template stores `env.example` and the scaffold writes `.env.example`.
+  it('writes .env.example although the template stores it as env.example', async () => {
+    const { operations } = await planOperations({ name: 'fixture', cwd: workDir });
+    expect(operations.map(op => op.path)).toContain('.env.example');
+    expect(operations.map(op => op.path)).not.toContain('env.example');
+    const { readdir: readTemplateDir } = await import('node:fs/promises');
+    const templateFiles = await readTemplateDir(resolve(__dirname, '..', '..', 'templates', 'app-stack'));
+    expect(templateFiles.filter(f => /^\.env/.test(f))).toEqual([]);
+  });
+
+  it('--template minimal still produces the 8-file skeleton', async () => {
+    const { operations } = await planOperations({ name: 'fixture', cwd: workDir, template: 'minimal' });
+    expect(operations.map(op => op.path)).toEqual([...EXPECTED_FILES]);
+  });
+
+  it('rejects an unknown template with DOT_CLI_E005', async () => {
+    expect(() => resolveTemplateName('fullstack')).toThrow(DotCliError);
+    const sink = captureSink();
+    const envelope = await runNew({
+      name: 'fixture',
+      cwd: workDir,
+      template: 'fullstack',
+      dryRun: true,
+      json: true,
+      out: sink.out,
+      now: FROZEN_NOW,
+    });
+    expect(envelope.status).toBe('failure');
+    expect(envelope.errors[0]?.code).toBe(DotCliErrorCode.InvalidArgs);
+    expect(envelope.errors[0]?.message).toContain('fullstack');
+    expect(envelope.operations).toEqual([]);
+  });
+
+  it('the CLI passes --template through and fails on an unknown name', async () => {
+    const out: string[] = [];
+    const ok = await main({
+      argv: ['new', 'fixture', '--template', 'minimal', '--dry-run', '--json', '--cwd', workDir],
+      stdout: line => out.push(line),
+      stderr: () => undefined,
+      now: FROZEN_NOW,
+    });
+    expect(ok).toBe(0);
+    const envelope = JSON.parse(out.join('')) as { operations: { path: string }[] };
+    expect(envelope.operations.map(op => op.path)).toEqual([...EXPECTED_FILES]);
+
+    const errLines: string[] = [];
+    const bad = await main({
+      argv: ['new', 'fixture', '--template', 'nope', '--dry-run', '--cwd', workDir],
+      stdout: () => undefined,
+      stderr: line => errLines.push(line),
+      now: FROZEN_NOW,
+    });
+    expect(bad).toBe(1);
+    expect(errLines.join('')).toContain(DotCliErrorCode.InvalidArgs);
+  });
+
+  // A stranger installs from npm, outside this monorepo. Anything that only
+  // resolves inside the workspace, or an unfinished marker, breaks that.
+  it.each(['stack', 'minimal'] as const)(
+    '%s: no generated file contains workspace-only specifiers, parent escapes, TODOs or unfilled placeholders',
+    async template => {
+      const { operations } = await planOperations({ name: 'fixture', cwd: workDir, template });
+      for (const op of operations) {
+        expect(op.content, op.path).not.toContain('workspace:');
+        expect(op.content, op.path).not.toContain('catalog:');
+        expect(op.content, op.path).not.toContain('../../');
+        expect(op.content, op.path).not.toContain('TODO');
+        expect(op.content, op.path).not.toMatch(/\{\{\w+\}\}/);
+      }
+    },
+  );
+
+  it('stack package.json pins every @arki dependency to a published version', async () => {
+    const { operations } = await planOperations({ name: 'fixture', cwd: workDir });
+    const manifest = JSON.parse(operations.find(op => op.path === 'package.json')!.content) as {
+      name: string;
+      dependencies: Record<string, string>;
+    };
+    expect(manifest.name).toBe('fixture');
+    expect(manifest.dependencies).toMatchObject({
+      '@arki/dot': `^${readDotVersion()}`,
+      '@arki/env': `^${TEMPLATE_VERSIONS.env}`,
+      '@arki/log': `^${TEMPLATE_VERSIONS.log}`,
+      '@arki/db': `^${TEMPLATE_VERSIONS.db}`,
+      '@arki/journal': `^${TEMPLATE_VERSIONS.journal}`,
+      '@arki/ui': `^${TEMPLATE_VERSIONS.ui}`,
+      '@arki/design-systems': `^${TEMPLATE_VERSIONS['design-systems']}`,
+      zod: ZOD_VERSION,
+    });
+    // Only the packages above: every other @arki package is unpublished.
+    const arkiDeps = Object.keys(manifest.dependencies).filter(dep => dep.startsWith('@arki/'));
+    expect(arkiDeps.sort()).toEqual(
+      ['@arki/db', '@arki/design-systems', '@arki/dot', '@arki/env', '@arki/journal', '@arki/log', '@arki/ui'].sort(),
+    );
+  });
+});
+
+describe('template versions', () => {
+  // The scaffold must never ask npm for an @arki version older than the one
+  // in this monorepo: the generated code is written against today's API.
+  it('TEMPLATE_VERSIONS are not behind the workspace packages', async () => {
+    const packagesDir = resolve(__dirname, '..', '..', '..');
+    const parse = (v: string) => v.split('.').map(part => Number.parseInt(part, 10));
+    const atLeast = (have: string, want: string) => {
+      const [a, b] = [parse(have), parse(want)];
+      for (let i = 0; i < 3; i++) {
+        if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+      }
+      return true;
+    };
+    for (const [pkg, pinned] of Object.entries(TEMPLATE_VERSIONS)) {
+      const manifest = JSON.parse(await readFile(join(packagesDir, pkg, 'package.json'), 'utf-8')) as {
+        name: string;
+        version: string;
+      };
+      expect(manifest.name).toBe(`@arki/${pkg}`);
+      expect(atLeast(pinned, manifest.version), `@arki/${pkg}: template ${pinned} < workspace ${manifest.version}`).toBe(
+        true,
+      );
+    }
+  });
+
+  it('dot --version prints the package.json version', async () => {
+    const manifest = JSON.parse(await readFile(resolve(__dirname, '..', '..', 'package.json'), 'utf-8')) as {
+      version: string;
+    };
+    const out: string[] = [];
+    const code = await main({ argv: ['--version'], stdout: line => out.push(line) });
+    expect(code).toBe(0);
+    expect(out.join('').trim()).toBe(manifest.version);
+  });
 });

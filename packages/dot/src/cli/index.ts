@@ -29,6 +29,7 @@ import { DotLifecycleError } from '../lifecycle.js';
 import { discoverApp, guards } from './discover.js';
 import { dotCliDocsUrl, DotCliError, DotCliErrorCode } from './error-codes.js';
 import { runNew } from './new.js';
+import { readDotVersion } from './versions.js';
 import { probeObservability } from './observability-probe.js';
 import { renderDoctor } from './render-doctor.js';
 import { renderExplain } from './render-explain.js';
@@ -37,7 +38,7 @@ import { renderProjection } from './render-projection.js';
 
 const debugCli = getLogger('arki:dot:cli');
 
-const VERSION = '0.1.0';
+const VERSION = readDotVersion();
 
 const HELP_TEXT = `dot — CLI for inspecting and scaffolding DOT apps
 
@@ -75,6 +76,9 @@ Common options:
                          pointing at the docs to wire one in.
 
 \`new\` options:
+  --template <name>      Template to scaffold: stack (default) or minimal.
+                         stack = TanStack Start + oRPC + Postgres + journal;
+                         minimal = defineApp + env only.
   --target <dir>         Directory to create the app in (default: <app-name>)
   --pm <npm|pnpm|bun>    Package manager hint for the README (default: bun)
   --dry-run              Print planned file operations without writing
@@ -92,6 +96,8 @@ export type CliArgs = {
   positional?: string;
   /** `--target` (only honored by `new`). */
   target?: string;
+  /** `--template` (only honored by `new`). Validated by `runNew`. */
+  template?: string;
   /** `--pm` (only honored by `new`). */
   pm?: 'npm' | 'pnpm' | 'bun';
   /** `--dry-run` (only honored by `new`). */
@@ -167,6 +173,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         help: { type: 'boolean', default: false },
         version: { type: 'boolean', default: false },
         target: { type: 'string' },
+        template: { type: 'string' },
         pm: { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
         force: { type: 'boolean', default: false },
@@ -193,6 +200,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     help?: boolean;
     version?: boolean;
     target?: string;
+    template?: string;
     pm?: string;
     'dry-run'?: boolean;
     force?: boolean;
@@ -252,6 +260,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     cwd: values.cwd,
     positional,
     target: values.target,
+    template: values.template,
     pm,
     dryRun: values['dry-run'] ?? false,
     force: values.force ?? false,
@@ -524,6 +533,7 @@ export async function main(options: MainOptions): Promise<number> {
         name: args.positional,
         cwd: args.cwd,
         target: args.target,
+        template: args.template,
         pm: args.pm,
         dryRun: args.dryRun,
         json: args.json,

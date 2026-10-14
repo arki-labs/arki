@@ -1,0 +1,40 @@
+/**
+ * Notes, written through the journal.
+ *
+ * - `NoteCreated` is the event. It is stored forever in `journal_events`,
+ *   with the actor from the request: the audit trail.
+ * - `note` is the entity: how events turn into a row in `notes`.
+ * - `createNote` is the command a procedure runs. It checks input, picks an
+ *   id and writes the event. Event row and table row commit together.
+ */
+import { z } from 'zod';
+
+import { j } from '~/server/journal';
+
+import { noteId, notes } from './tables';
+
+export const NoteCreated = j.event(
+  'NoteCreated',
+  z.object({
+    title: z.string(),
+    body: z.string(),
+  }),
+);
+
+export const note = j.entity('note', notes).create(NoteCreated, e => ({
+  title: e.data.title,
+  body: e.data.body,
+  // A reducer sets every column itself: database defaults are not in the log.
+  createdAt: e.recordedAt,
+}));
+
+export const createNoteInput = z.object({
+  title: z.string().trim().min(1, 'Give the note a title.').max(200),
+  body: z.string().trim().max(5000).default(''),
+});
+
+export const createNote = j.command('createNote', createNoteInput, async (input, { write }) => {
+  const id = noteId.create();
+  await write(note, id, () => [NoteCreated({ title: input.title, body: input.body })]);
+  return { id };
+});

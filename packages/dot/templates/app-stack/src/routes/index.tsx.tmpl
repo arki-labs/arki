@@ -1,0 +1,119 @@
+import type { FormEvent } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { createFileRoute } from '@tanstack/react-router';
+import { useState } from 'react';
+
+import { Button } from '@arki/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@arki/ui/card';
+import { Input } from '@arki/ui/input';
+import { Label } from '@arki/ui/label';
+import { Textarea } from '@arki/ui/textarea';
+
+import { orpc } from '~/lib/orpc';
+
+export const Route = createFileRoute('/')({
+  component: NotesPage,
+});
+
+function NotesPage() {
+  return (
+    <main className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-10">
+      <header className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold tracking-tight">Notes</h1>
+        <p className="text-sm text-muted-foreground">
+          Each note is written through a journal command, so every change is kept as an event.
+        </p>
+      </header>
+      <NewNoteForm />
+      <NoteList />
+    </main>
+  );
+}
+
+function NewNoteForm() {
+  const queryClient = useQueryClient();
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+
+  const create = useMutation(
+    orpc.notes.create.mutationOptions({
+      onSuccess: async () => {
+        setTitle('');
+        setBody('');
+        await queryClient.invalidateQueries({ queryKey: orpc.notes.key() });
+      },
+    }),
+  );
+
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    create.mutate({ title, body });
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>New note</CardTitle>
+        <CardDescription>Saved to Postgres through the createNote command.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={onSubmit} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="note-title">Title</Label>
+            <Input id="note-title" value={title} onChange={e => setTitle(e.target.value)} maxLength={200} required />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="note-body">Body</Label>
+            <Textarea id="note-body" value={body} onChange={e => setBody(e.target.value)} rows={4} />
+          </div>
+          {create.error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {create.error.message}
+            </p>
+          ) : null}
+          <div>
+            <Button type="submit" disabled={create.isPending}>
+              {create.isPending ? 'Saving…' : 'Save note'}
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function NoteList() {
+  const notes = useQuery(orpc.notes.list.queryOptions({ input: { limit: 50 } }));
+
+  if (notes.isPending) return <p className="text-sm text-muted-foreground">Loading notes…</p>;
+  if (notes.isError) {
+    return (
+      <p role="alert" className="text-sm text-destructive">
+        Could not load notes: {notes.error.message}
+      </p>
+    );
+  }
+  if (notes.data.length === 0) {
+    return <p className="text-sm text-muted-foreground">No notes yet. Write the first one above.</p>;
+  }
+
+  return (
+    <ul className="flex flex-col gap-3">
+      {notes.data.map(note => (
+        <li key={note.id}>
+          <Card>
+            <CardHeader>
+              <CardTitle>{note.title}</CardTitle>
+              <CardDescription>{note.createdAt.toLocaleString()}</CardDescription>
+            </CardHeader>
+            {note.body ? (
+              <CardContent>
+                <p className="text-sm whitespace-pre-wrap">{note.body}</p>
+              </CardContent>
+            ) : null}
+          </Card>
+        </li>
+      ))}
+    </ul>
+  );
+}

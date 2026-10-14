@@ -1,0 +1,15 @@
+import { defineConfig } from 'drizzle-kit';
+
+/**
+ * `bun run db:generate` writes a new migration into `drizzle/` from the
+ * table files below. `bun run db:migrate` applies pending migrations to
+ * `DB_URL`. The server also applies them on boot (see `src/app.ts`).
+ */
+export default defineConfig({
+  dialect: 'postgresql',
+  schema: ['./src/features/*/tables.ts', './src/server/journal-tables.ts'],
+  out: './drizzle',
+  dbCredentials: {
+    url: process.env.DB_URL ?? 'postgres://app:app@localhost:5432/app',
+  },
+});

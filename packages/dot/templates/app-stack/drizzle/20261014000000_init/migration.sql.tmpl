@@ -1,0 +1,58 @@
+CREATE TABLE "notes" (
+	"id" varchar(256) PRIMARY KEY,
+	"title" varchar(200) NOT NULL,
+	"body" text NOT NULL,
+	"created_at" timestamp with time zone NOT NULL,
+	"version" integer DEFAULT 0 NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "journal_cursors" (
+	"name" varchar(128) PRIMARY KEY,
+	"seq" bigint DEFAULT 0 NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "journal_events" (
+	"seq" bigserial PRIMARY KEY,
+	"id" varchar NOT NULL UNIQUE,
+	"kind" varchar(64) NOT NULL,
+	"entity_id" varchar(256) NOT NULL,
+	"version" integer NOT NULL,
+	"type" varchar(128) NOT NULL,
+	"data" jsonb NOT NULL,
+	"meta" jsonb NOT NULL,
+	"recorded_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"command_id" varchar,
+	"cause_seq" bigint,
+	"correlation_id" varchar,
+	"erased_at" timestamp with time zone,
+	"schema_version" integer DEFAULT 1 NOT NULL,
+	CONSTRAINT "journal_events_kind_entity_id_version_unique" UNIQUE("kind","entity_id","version")
+);
+--> statement-breakpoint
+CREATE TABLE "journal_jobs" (
+	"id" varchar PRIMARY KEY,
+	"event_seq" bigint NOT NULL,
+	"effect" varchar(128) NOT NULL,
+	"priority" integer DEFAULT 0 NOT NULL,
+	"attempts" integer DEFAULT 0 NOT NULL,
+	"available_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"lease_until" timestamp with time zone,
+	"lease_token" varchar,
+	"last_error" text,
+	"dead_at" timestamp with time zone,
+	CONSTRAINT "journal_jobs_event_seq_effect_unique" UNIQUE("event_seq","effect")
+);
+--> statement-breakpoint
+CREATE TABLE "journal_receipts" (
+	"key" varchar(256) PRIMARY KEY,
+	"command" varchar(128) NOT NULL,
+	"input" jsonb NOT NULL,
+	"result" jsonb,
+	"command_id" varchar NOT NULL,
+	"recorded_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX "journal_events_correlation_id_idx" ON "journal_events" ("correlation_id");--> statement-breakpoint
+CREATE INDEX "journal_jobs_due_idx" ON "journal_jobs" ("priority" DESC NULLS LAST,"available_at") WHERE "dead_at" is null;--> statement-breakpoint
+ALTER TABLE "journal_jobs" ADD CONSTRAINT "journal_jobs_event_seq_journal_events_seq_fkey" FOREIGN KEY ("event_seq") REFERENCES "journal_events"("seq");

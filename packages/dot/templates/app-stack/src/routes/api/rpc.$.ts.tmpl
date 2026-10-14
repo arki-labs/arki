@@ -1,0 +1,36 @@
+import { createFileRoute } from '@tanstack/react-router';
+import { onError } from '@orpc/server';
+import { RPCHandler } from '@orpc/server/fetch';
+
+import { getLogger } from '@arki/log';
+
+import { router } from '~/server/router';
+import { createRpcContext } from '~/server/runtime';
+
+const log = getLogger('app:rpc');
+
+const handler = new RPCHandler(router, {
+  interceptors: [
+    onError(error => {
+      log.error('rpc call failed: {error}', { error: error instanceof Error ? error : String(error) });
+    }),
+  ],
+});
+
+async function handle(request: Request): Promise<Response> {
+  const { matched, response } = await handler.handle(request, {
+    prefix: '/api/rpc',
+    context: await createRpcContext(),
+  });
+  return matched ? response : new Response('Not found', { status: 404 });
+}
+
+/** The oRPC endpoint. The browser client in `lib/orpc.ts` talks to it. */
+export const Route = createFileRoute('/api/rpc/$')({
+  server: {
+    handlers: {
+      GET: ({ request }) => handle(request),
+      POST: ({ request }) => handle(request),
+    },
+  },
+});

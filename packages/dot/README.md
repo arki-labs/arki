@@ -568,9 +568,12 @@ Runtime failures carry stable codes (`DotLifecycleError.code`):
 `@arki/dot` ships a small CLI for scaffolding and inspecting apps:
 
 ```bash
-# Scaffold a minimal DOT app (package.json, tsconfig, app entrypoint,
-# env schema, AGENTS.md, README, gitignore, vitest boot test).
+# Scaffold a full-stack app: TanStack Start + oRPC + Postgres (@arki/db)
+# + @arki/journal + @arki/ui, with Dockerfile, migrations and tests.
 dot new my-app
+
+# Scaffold the smallest DOT app instead (defineApp + env, vitest boot test).
+dot new my-app --template minimal
 
 # Preview the file operations without writing anything.
 dot new my-app --dry-run --json | jq '.operations'
@@ -596,17 +599,29 @@ records which plugin's published service satisfied which need during boot.
 
 ### `dot new <app-name>`
 
-Scaffolds a minimal DOT app under `<app-name>/` (override with `--target`).
-The scaffold ships a `defineApp(...)` entrypoint wired to `@arki/env/dot`,
-a vitest that boots the app and asserts the manifest shape, and an
-`AGENTS.md` documenting verification commands and the public/private
-boundary for agents working in the generated tree. Pass `--dry-run --json`
+Scaffolds an app under `<app-name>/` (override with `--target`). Pick the
+starting point with `--template`:
+
+- **`stack`** (default) — a full-stack app in one package: TanStack Start
+  (React, Vite, Nitro), an oRPC API at `/api/rpc`, Postgres through
+  `@arki/db`, every write through an `@arki/journal` command (an audit
+  trail), all composed with `defineApp`. UI uses `@arki/ui` with the
+  workbench design system. It ships one feature end to end (`notes`), an
+  initial migration, `/api/health`, a `docker-compose.yml` for local
+  Postgres, a production `Dockerfile`, tests on in-memory PGlite (no
+  Docker), and a README + AGENTS.md. Run it with `bun install`,
+  `cp .env.example .env`, `docker compose up -d`, `bun run dev`.
+- **`minimal`** — a `defineApp(...)` entrypoint wired to `@arki/env/dot`,
+  a vitest that boots the app and asserts the manifest shape, and an
+  `AGENTS.md` documenting verification commands.
+
+An unknown template name fails with `DOT_CLI_E005`. Pass `--dry-run --json`
 to inspect the exact file operations (path, action, contentHash,
 contentBytes, reason) before committing them to disk; `--force`
 overwrites pre-existing files in the target directory.
 
-Templates live at [`templates/app-minimal/`](./templates/app-minimal) and
-ship with the published tarball.
+Templates live in [`templates/`](./templates) and ship with the published
+tarball. Generated apps depend only on published `@arki/*` packages.
 
 ## Architecture
 
