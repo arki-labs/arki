@@ -30,9 +30,9 @@ let repos: ReturnType<typeof createTaxRepositories>;
 /** Stripe answers 19% on 100 EUR in Germany, whatever is asked. */
 type StripeJurisdiction = { display_name: string; level: string; country: string; state: string | null };
 
-function serviceWithStripe(
-  jurisdiction: StripeJurisdiction = { display_name: 'Germany', level: 'country', country: 'DE', state: null },
-) {
+const GERMANY: StripeJurisdiction = { display_name: 'Germany', level: 'country', country: 'DE', state: null };
+
+function serviceWithStripe(jurisdiction: StripeJurisdiction = GERMANY) {
   const http = createFakeStripeHttp(() => ({
     body: {
       object: 'tax.calculation',
@@ -139,6 +139,15 @@ describe('exemption stats', () => {
     expect(stats.totalActive).toBeGreaterThanOrEqual(1);
     expect(stats.totalPendingReview).toBe(0);
   });
+});
+
+const line = (displayName: string, level: string, state: string | null) => ({
+  amount: money('1', 'USD'),
+  rate: 1,
+  jurisdiction: displayName,
+  country: 'US',
+  state: state ?? undefined,
+  level,
 });
 
 describe('calculateTax with exemptions', () => {
@@ -318,14 +327,6 @@ describe('calculateTax with exemptions', () => {
         stateCode: 'CA',
       }),
     ]);
-    const line = (displayName: string, level: string, state: string | null) => ({
-      amount: money('1', 'USD'),
-      rate: 1,
-      jurisdiction: displayName,
-      country: 'US',
-      state: state ?? undefined,
-      level,
-    });
     const owns = jurisdictionOwnsLine;
     const stateLine = line('California', 'state', 'CA');
     const countyLine = line('Alameda County', 'county', 'CA');

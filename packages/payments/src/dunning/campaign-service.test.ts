@@ -447,34 +447,36 @@ describe('a scheduled execution in a named schema', () => {
   });
 });
 
+const riskProfile = (customer: CustomerId, unsubscribedChannels: ('email' | 'sms')[]) => ({
+  customerId: customer,
+  riskScore: {
+    overall: 0,
+    factors: {},
+    category: 'low' as const,
+    lastCalculated: now(),
+    trends: { direction: 'stable' as const, changePercent: 0, timeframe: 30 },
+  },
+  paymentHistory: { totalPayments: 0, successfulPayments: 0, failedPayments: 0, averageAmount: 0, streakDays: 0 },
+  subscriptionHistory: {
+    totalSubscriptions: 0,
+    activeSubscriptions: 0,
+    canceledSubscriptions: 0,
+    averageDuration: 0,
+  },
+  engagementMetrics: { score: 0, activityFrequency: 0, featureUsage: {} },
+  communicationPreferences: { unsubscribed: false, unsubscribedChannels },
+});
+
 describe('channel opt-outs', () => {
   it('never sends on a channel the customer opted out of, and still reaches a customer who opted out of another', async () => {
-    const profile = (customer: CustomerId, unsubscribedChannels: ('email' | 'sms')[]) => ({
-      customerId: customer,
-      riskScore: {
-        overall: 0,
-        factors: {},
-        category: 'low' as const,
-        lastCalculated: now(),
-        trends: { direction: 'stable' as const, changePercent: 0, timeframe: 30 },
-      },
-      paymentHistory: { totalPayments: 0, successfulPayments: 0, failedPayments: 0, averageAmount: 0, streakDays: 0 },
-      subscriptionHistory: {
-        totalSubscriptions: 0,
-        activeSubscriptions: 0,
-        canceledSubscriptions: 0,
-        averageDuration: 0,
-      },
-      engagementMetrics: { score: 0, activityFrequency: 0, featureUsage: {} },
-      communicationPreferences: { unsubscribed: false, unsubscribedChannels },
-    });
     const optedOut = await newCustomer('optedout');
     const otherChannel = await newCustomer('otherchannel');
     await db
       .insert(dunning.customerRiskProfiles)
-      .values([profile(optedOut.id, ['email']), profile(otherChannel.id, ['sms'])]);
+      .values([riskProfile(optedOut.id, ['email']), riskProfile(otherChannel.id, ['sms'])]);
     const campaignId = await createdCampaign('Opt-out: email');
-    const templateId = (await service.getCampaign(campaignId))?.templates?.[0]?.id;
+    const campaign = await service.getCampaign(campaignId);
+    const templateId = campaign?.templates[0]?.id;
     for (const buyer of [optedOut, otherChannel]) {
       await db.insert(tables.dunningExecutions).values({
         campaignId,
