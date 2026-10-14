@@ -4,17 +4,19 @@ Arki is the `@arki/*` package set (about 54 packages under `packages/`) turned i
 
 **Positioning (proposed):** *Arki is the maintained TypeScript SaaS foundation for people who ship many products on servers they control.*
 
-**Status:** Research done 2026-10-14. Strategy proposed. No decision taken yet. See [decisions.md](decisions.md).
+**Status:** Strategy accepted 2026-10-14 (A-01…A-11). Execution plan: [plan.md](plan.md). See [decisions.md](decisions.md).
 
 ## Where things are
 
 | File | What it holds |
 | --- | --- |
+| [plan.md](plan.md) | **The execution plan**: weeks 1–13 task by task, Laravel parity matrix, AI pillar, licence product, gates, months 4–12. |
 | [strategy.md](strategy.md) | The recommended strategy: product, pricing, how to beat Laravel, risks, first 90 days. Start here. |
 | [core-packages.md](core-packages.md) | Every `@arki/*` package sorted into four tiers: Stack, Libraries, Licence, Out of brand. |
-| [decisions.md](decisions.md) | Decisions the strategy needs. Each one is `proposed` until the founder accepts or rejects it. |
+| [decisions.md](decisions.md) | Decisions the strategy needs. A-01…A-12, all accepted 2026-10-14. |
 | [research/01-market/](research/01-market/) | Round 1: what Laravel sells, the JS/TS framework market, and an inventory of every `@arki/*` package. |
 | [research/02-advisors/](research/02-advisors/) | Round 2: the same brief answered blind by two advisors (Fable and Astra), plus the synthesis and verified findings. |
+| [research/03-plan/](research/03-plan/) | Round 3: top Laravel packages + Laravel AI, the JS AI market, Arki's AI inventory, and the two advisor plans merged into plan.md. |
 
 ## How to add to this area
 
