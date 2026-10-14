@@ -1,4 +1,4 @@
-import { QUEUE_ACTION_META_SCHEMA } from './dot.ts';
+import { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 type JsonObject = { [key: string]: JsonValue };

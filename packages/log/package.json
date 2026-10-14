@@ -86,6 +86,7 @@
     "consola": "^3.4.2",
     "pino": "catalog:",
     "typescript": "catalog:",
+    "vitest": "catalog:",
     "winston": "^3.19.0"
   },
   "peerDependencies": {

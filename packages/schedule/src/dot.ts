@@ -5,7 +5,9 @@ import type { ScheduleDef } from './index.js';
 import type { DurableScheduler, KvLike, ScheduleRuntime } from './runtime.js';
 import { assertDurableBackend, createScheduleRuntime } from './runtime.js';
 
-export const SCHEDULE_ACTION_META_SCHEMA = '@arki/schedule/action-meta@1';
+import { SCHEDULE_ACTION_META_SCHEMA } from './action-meta.js';
+
+export { SCHEDULE_ACTION_META_SCHEMA };
 
 type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 type JsonObject = { [key: string]: JsonValue };

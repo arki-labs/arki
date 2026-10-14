@@ -53,6 +53,17 @@
     "@codemirror/lang-yaml": "catalog:codemirror",
     "@codemirror/state": "catalog:codemirror",
     "@codemirror/view": "catalog:codemirror",
+    "@uiw/codemirror-theme-atomone": "^4.25.12",
+    "@uiw/codemirror-theme-dracula": "^4.25.12",
+    "@uiw/codemirror-theme-eclipse": "^4.25.12",
+    "@uiw/codemirror-theme-github": "^4.25.12",
+    "@uiw/codemirror-theme-gruvbox-dark": "^4.25.12",
+    "@uiw/codemirror-theme-monokai": "^4.25.12",
+    "@uiw/codemirror-theme-nord": "^4.25.12",
+    "@uiw/codemirror-theme-quietlight": "^4.25.12",
+    "@uiw/codemirror-theme-tokyo-night": "^4.25.12",
+    "@uiw/codemirror-theme-vscode": "^4.25.12",
+    "@uiw/codemirror-theme-xcode": "^4.25.12",
     "@uiw/codemirror-themes-all": "catalog:",
     "@uiw/react-codemirror": "catalog:"
   },
@@ -62,7 +73,11 @@
     "@arki/tsconfig": "workspace:*",
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react",
+    "react": "catalog:react",
     "typescript": "catalog:"
   },
-  "module:jsx": "src"
+  "module:jsx": "src",
+  "peerDependencies": {
+    "react": "^18 || ^19"
+  }
 }

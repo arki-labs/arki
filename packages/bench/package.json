@@ -80,7 +80,8 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/node": "catalog:node"
+    "@types/node": "catalog:node",
+    "vitest": "catalog:"
   },
   "engines": {
     "node": ">=22.10"

@@ -13,6 +13,10 @@ const manifestSchema = z.object({
   name: z.string().min(1),
   exports: z.union([z.string(), z.record(z.string(), exportTarget)]).optional(),
   dependencies: z.record(z.string(), z.string()).optional(),
+  devDependencies: z.record(z.string(), z.string()).optional(),
+  peerDependencies: z.record(z.string(), z.string()).optional(),
+  optionalDependencies: z.record(z.string(), z.string()).optional(),
+  peerDependenciesMeta: z.record(z.string(), z.object({ optional: z.boolean().optional() })).optional(),
   sideEffects: z.union([z.boolean(), z.array(z.string())]).optional(),
 });
 
@@ -21,6 +25,11 @@ export type Manifest = {
   /** Subpath (`.`, `./foo`) to target. A string `exports` becomes `{ '.': value }`. */
   readonly exports: Readonly<Record<string, ExportTarget>>;
   readonly dependencies: Readonly<Record<string, string>>;
+  readonly devDependencies: Readonly<Record<string, string>>;
+  readonly peerDependencies: Readonly<Record<string, string>>;
+  readonly optionalDependencies: Readonly<Record<string, string>>;
+  /** Names of peers marked `"optional": true` in `peerDependenciesMeta`. */
+  readonly optionalPeers: ReadonlySet<string>;
   readonly sideEffects: boolean | readonly string[] | undefined;
 };
 
@@ -31,11 +40,20 @@ export function readManifest(dir: string): Manifest {
   if (!parsed.success) {
     throw new Error(`${file} is not a valid package manifest: ${z.prettifyError(parsed.error)}`);
   }
-  const { name, exports, dependencies, sideEffects } = parsed.data;
+  const { name, exports, dependencies, devDependencies, peerDependencies, optionalDependencies, peerDependenciesMeta, sideEffects } =
+    parsed.data;
   return {
     name,
     exports: typeof exports === 'string' ? { '.': exports } : (exports ?? {}),
     dependencies: dependencies ?? {},
+    devDependencies: devDependencies ?? {},
+    peerDependencies: peerDependencies ?? {},
+    optionalDependencies: optionalDependencies ?? {},
+    optionalPeers: new Set(
+      Object.entries(peerDependenciesMeta ?? {})
+        .filter(([, meta]) => meta.optional === true)
+        .map(([peer]) => peer),
+    ),
     sideEffects,
   };
 }

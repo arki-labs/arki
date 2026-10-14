@@ -89,13 +89,17 @@
     "@testcontainers/redis": "catalog:testing",
     "drizzle-orm": "catalog:drizzle",
     "msw": "catalog:testing",
-    "testcontainers": "catalog:testing"
+    "testcontainers": "catalog:testing",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
     "vitest": "catalog:"
   }
 }

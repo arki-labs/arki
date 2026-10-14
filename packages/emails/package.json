@@ -85,14 +85,20 @@
     "@aws-sdk/client-sesv2": "catalog:",
     "@react-email/render": "catalog:react-email",
     "react-email": "catalog:",
-    "resend": "catalog:"
+    "resend": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
-    "@types/node": "catalog:node"
+    "@types/node": "catalog:node",
+    "react": "catalog:react",
+    "vitest": "catalog:"
   },
-  "module:jsx": "src"
+  "module:jsx": "src",
+  "peerDependencies": {
+    "react": "^18 || ^19"
+  }
 }

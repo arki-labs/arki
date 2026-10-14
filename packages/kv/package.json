@@ -107,6 +107,7 @@
     "@arki/vitest-config": "workspace:*",
     "@types/node": "catalog:node",
     "typescript": "catalog:",
-    "unstorage": "^1.17.5"
+    "unstorage": "^1.17.5",
+    "vitest": "catalog:"
   }
 }

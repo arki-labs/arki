@@ -79,7 +79,8 @@
     "@arki/vitest-config": "workspace:*",
     "@types/node": "catalog:node",
     "drizzle-orm": "catalog:drizzle",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "publishConfig": {
     "access": "public"

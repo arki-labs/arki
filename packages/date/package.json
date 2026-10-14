@@ -178,6 +178,7 @@
     "react-dom": "catalog:react",
     "seroval": "^1.6.8",
     "superjson": "catalog:utilities",
+    "vitest": "catalog:",
     "zod": "catalog:"
   },
   "peerDependencies": {

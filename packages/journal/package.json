@@ -101,7 +101,8 @@
     "@types/node": "catalog:node",
     "@types/pg": "catalog:drizzle",
     "drizzle-kit": "catalog:drizzle",
-    "pg": "catalog:drizzle"
+    "pg": "catalog:drizzle",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "@arki/dot": "workspace:*",

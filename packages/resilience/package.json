@@ -68,7 +68,8 @@
     "@types/node": "catalog:node",
     "opossum": "^10.0.0",
     "p-retry": "^8.0.1",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "publishConfig": {
     "access": "public"

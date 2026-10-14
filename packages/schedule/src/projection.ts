@@ -1,4 +1,4 @@
-import { SCHEDULE_ACTION_META_SCHEMA } from './dot.js';
+import { SCHEDULE_ACTION_META_SCHEMA } from './action-meta.js';
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 type JsonObject = { [key: string]: JsonValue };

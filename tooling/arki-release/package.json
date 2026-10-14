@@ -33,13 +33,19 @@
     "debug": "catalog:"
   },
   "devDependencies": {
+    "@arki/db": "workspace:*",
+    "@arki/dot": "workspace:*",
+    "@arki/env": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/kv": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@types/bun": "catalog:",
     "@types/debug": "catalog:",
+    "drizzle-orm": "catalog:drizzle",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
   }
 }

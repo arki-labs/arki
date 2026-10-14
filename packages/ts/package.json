@@ -80,6 +80,7 @@
     "@types/node": "catalog:node",
     "ts-essentials": "^10.2.1",
     "type-fest": "^5.10.0",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

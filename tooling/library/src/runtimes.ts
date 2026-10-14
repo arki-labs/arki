@@ -31,6 +31,7 @@ import { expectImportPure } from '@arki/ts/testing';
 
 import type { Manifest } from './manifest';
 import { hasNoNpmDependencies, readManifest, runtimeEntry } from './manifest';
+import { isAdapterSubpath } from './adapters';
 import { complain, say } from './report';
 
 const LEGS = ['purity', 'node', 'bun', 'deno', 'browser', 'hermes'] as const;
@@ -91,23 +92,6 @@ function bundle(context: Context, name: 'browser' | 'hermes' | 'deno'): string {
   return outfile;
 }
 
-/** Entry names that adapt to a platform or an optional peer (RFC `arki-structure` P3). */
-const ADAPTERS = new Set([
-  'node',
-  'browser',
-  'react',
-  'native',
-  'react-native',
-  'dot',
-  'drizzle',
-  'otel',
-  'testing',
-  'tanstack-start',
-  'orpc',
-  'pg',
-  'server',
-]);
-
 /** An adapter whose platform piece is absent here (an optional peer, an unbuilt native addon). */
 const UNLOADABLE = /Cannot find (?:module|package)|No native build|dlopen|\.node['"]? was compiled/;
 
@@ -128,7 +112,7 @@ function purity({ cwd, manifest }: Context): void {
       expectImportPure([entry]);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const isAdapter = ADAPTERS.has(subpath.replace(/^\.\//, '').split('/')[0] ?? '');
+      const isAdapter = isAdapterSubpath(subpath);
       if (!isAdapter || !UNLOADABLE.test(message)) throw new Error(`${subpath}: ${message}`, { cause: error });
       unloadable.push(subpath);
     }

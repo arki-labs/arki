@@ -11,7 +11,9 @@ import type { QueueMeta } from './types/queue.ts';
 import { debugWorker } from './debug.ts';
 import { createDurableScheduler } from './durable-scheduler.ts';
 
-export const QUEUE_ACTION_META_SCHEMA = '@arki/queue/action-meta@1';
+import { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
+
+export { QUEUE_ACTION_META_SCHEMA };
 
 export const QUEUE_PLUGIN_ERROR_CODES = {
   startupTimeout: 'ARKI_QUEUE_E001',

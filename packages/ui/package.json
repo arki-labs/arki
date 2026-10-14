@@ -640,9 +640,12 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@tailwindcss/node": "^4.3.3",
+    "@tailwindcss/oxide": "^4.3.3",
     "@types/debug": "catalog:",
     "@types/react": "catalog:react",
-    "@types/react-dom": "catalog:react"
+    "@types/react-dom": "catalog:react",
+    "vitest": "catalog:"
   },
   "module:jsx": "src",
   "peerDependencies": {

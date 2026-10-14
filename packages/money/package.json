@@ -152,6 +152,7 @@
     "dinero.js": "1",
     "drizzle-orm": "catalog:drizzle",
     "mysql2": "^3.24.5",
+    "vitest": "catalog:",
     "zod": "catalog:"
   },
   "peerDependencies": {

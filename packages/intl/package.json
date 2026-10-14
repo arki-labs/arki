@@ -53,7 +53,16 @@
     "@arki/vitest-config": "workspace:*",
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react",
+    "react": "catalog:react",
     "vitest": "catalog:"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "peerDependencies": {
+    "react": "^18 || ^19"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  }
 }

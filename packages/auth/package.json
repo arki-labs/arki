@@ -85,6 +85,8 @@
     "@t3-oss/env-core": "catalog:env",
     "bcrypt": "catalog:",
     "better-auth": "catalog:better-auth",
+    "drizzle-orm": "catalog:drizzle",
+    "vitest": "catalog:",
     "zod": "catalog:"
   },
   "peerDependencies": {

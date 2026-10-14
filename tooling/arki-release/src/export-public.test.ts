@@ -41,7 +41,7 @@ const baseConfig: ReleaseConfig = {
   ],
 };
 
-const uiConfig: ReleaseConfig = { ...baseConfig, waves: [{ id: 'ui', label: 'UI', packages: ['@arki/ui'] }] };
+const uiConfig: ReleaseConfig = { ...baseConfig, waves: [{ id: 'frontend', label: 'Frontend', packages: ['@arki/ui'] }] };
 
 /** Write a file under a temp workspace, creating parents on demand. */
 function writeFixtureFile(root: string, relPath: string, contents: string): void {

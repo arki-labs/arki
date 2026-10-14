@@ -63,6 +63,7 @@
     "class-variance-authority": "catalog:styling",
     "clsx": "catalog:styling",
     "phosphor-react-native": "catalog:expo",
+    "react-native-screens": "catalog:expo",
     "tailwind-merge": "catalog:styling"
   },
   "devDependencies": {
@@ -74,6 +75,7 @@
     "typescript": "catalog:"
   },
   "peerDependencies": {
+    "nativewind": "catalog:expo",
     "react": "catalog:react19",
     "react-native": "catalog:expo",
     "react-native-gesture-handler": "catalog:expo",

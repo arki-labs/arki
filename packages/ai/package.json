@@ -66,6 +66,7 @@
     "@ai-sdk/mistral": "catalog:ai",
     "@ai-sdk/openai": "catalog:ai",
     "@ai-sdk/otel": "catalog:ai",
+    "@ai-sdk/provider": "^4.0.25",
     "@ai-sdk/react": "catalog:ai",
     "@ai-sdk/ui-utils": "catalog:ai",
     "@arki/async": "workspace:*",
@@ -83,28 +84,29 @@
     "react-markdown": "catalog:content",
     "remark-gfm": "catalog:content",
     "streamdown": "catalog:ai",
+    "vitest": "catalog:",
     "zod": "catalog:"
   },
   "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    },
-    "react-dom": {
-      "optional": true
-    },
     "@ai-sdk/amazon-bedrock": {
-      "optional": true
-    },
-    "voyageai": {
-      "optional": true
-    },
-    "@mixedbread-ai/sdk": {
       "optional": true
     },
     "@huggingface/transformers": {
       "optional": true
     },
     "@mastra/core": {
+      "optional": true
+    },
+    "@mixedbread-ai/sdk": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "voyageai": {
       "optional": true
     }
   },

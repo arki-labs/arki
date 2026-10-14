@@ -109,6 +109,7 @@
     "@orpc/client": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@orpc/tanstack-query": "catalog:backend",
+    "@sentry/core": "^11.6.0",
     "@tanstack/react-devtools": "catalog:tanstack/start",
     "@tanstack/react-query": "catalog:tanstack/react-query",
     "@tanstack/react-query-devtools": "catalog:tanstack/react-query",
@@ -117,6 +118,8 @@
     "@tanstack/react-start": "catalog:tanstack/start",
     "@tanstack/start-vite-plugin": "catalog:tanstack/start",
     "@unpic/react": "catalog:tanstack/start",
+    "@vitejs/plugin-react": "catalog:",
+    "jotai": "catalog:",
     "jotai-devtools": "catalog:",
     "nitropack": "catalog:tanstack/start",
     "superjson": "catalog:utilities",
@@ -156,7 +159,7 @@
     "@types/node": "catalog:node",
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react",
-    "@vitejs/plugin-react": "catalog:"
+    "vitest": "catalog:"
   },
   "sideEffects": [
     "./src/pwa/sw.ts",

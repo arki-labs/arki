@@ -99,6 +99,7 @@
     "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@types/node": "catalog:node",
     "awilix": "^13.0.5",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

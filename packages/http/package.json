@@ -104,7 +104,8 @@
     "@hono/zod-validator": "^0.9.1",
     "@types/node": "catalog:node",
     "itty-router": "^5.0.24",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "prettier": "@arki/prettier-config"
 }

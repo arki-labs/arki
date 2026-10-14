@@ -94,6 +94,7 @@
     "@arki/vitest-config": "workspace:*",
     "@types/node": "catalog:node",
     "envalid": "^8.2.0",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

@@ -76,6 +76,7 @@
     "@vitejs/plugin-react": "catalog:",
     "react": "catalog:react",
     "react-dom": "catalog:react",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

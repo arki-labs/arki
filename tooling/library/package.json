@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
+    "arki-layers": "./src/layers.ts",
     "arki-library-check": "./src/library-check.ts",
     "arki-runtimes": "./src/runtimes.ts"
   },
@@ -16,6 +17,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@playwright/test": "catalog:testing",
+    "typescript": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -24,7 +26,6 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@types/bun": "catalog:",
-    "typescript": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {

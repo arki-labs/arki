@@ -104,7 +104,8 @@
     "@types/node-geocoder": "catalog:types",
     "@types/react": "catalog:react",
     "@vis.gl/react-google-maps": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "@vis.gl/react-google-maps": "catalog:",
