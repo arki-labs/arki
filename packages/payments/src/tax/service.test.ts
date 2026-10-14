@@ -15,6 +15,12 @@ import { StripeProvider } from '../core/providers/stripe-provider.js';
 import { createFakeStripeHttp } from '../core/providers/stripe-test-support.js';
 import { TaxService } from './service.js';
 
+/** No exemptions: nothing in these tests is exempt. */
+const noExemptions = {
+  exemptions: { findApplicableExemptions: () => Promise.resolve([]) },
+  jurisdictions: { findJurisdictionById: () => Promise.resolve(null) },
+};
+
 function serviceAnswering(status: number, body: unknown) {
   const http = createFakeStripeHttp(() => ({ status, body }));
   const provider = new StripeProvider(
@@ -22,7 +28,7 @@ function serviceAnswering(status: number, body: unknown) {
     { httpClient: http.client, maxNetworkRetries: 0 },
   );
 
-  return { tax: new TaxService(provider), requests: http.requests };
+  return { tax: new TaxService(provider, noExemptions), requests: http.requests };
 }
 
 const input = {

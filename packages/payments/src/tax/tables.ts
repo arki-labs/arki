@@ -1,6 +1,6 @@
 import type { AnyPgColumn, PgSchema } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { boolean, jsonb, text, varchar } from 'drizzle-orm/pg-core';
+import { boolean, check, jsonb, text, varchar } from 'drizzle-orm/pg-core';
 
 import { instant } from '@arki/db/temporal';
 
@@ -141,10 +141,13 @@ export function createTaxTables({ schema }: CreateTaxTablesDeps) {
       .default(sql`now()`),
   });
 
-  const taxExemptions = schema.table('tax_exemptions', {
+  const taxExemptions = schema.table(
+    'tax_exemptions',
+    {
     id: taxExemptionIdFactory.primaryColumn(),
     type: exemptionTypeEnum('type').$type<ExemptionType>().notNull(),
-    status: exemptionStatusEnum('status').$type<ExemptionStatus>().notNull().default('active'),
+    /** New exemptions wait for review: only `approveExemption` makes one `active`, and only an `active` one is applied to a sale. */
+    status: exemptionStatusEnum('status').$type<ExemptionStatus>().notNull().default('pending_review'),
     customerId: varchar('customer_id', { length: 255 }),
     productCode: varchar('product_code', { length: 100 }),
     jurisdictionId: taxJurisdictionIdFactory.optionalForeignKey('jurisdiction_id', () => taxJurisdictions.id),
@@ -170,7 +173,9 @@ export function createTaxTables({ schema }: CreateTaxTablesDeps) {
     createdBy: varchar('created_by', { length: 255 }),
     approvedBy: varchar('approved_by', { length: 255 }),
     approvedAt: instant('approved_at'),
-  });
+    },
+    (_table) => [check('tax_exemptions_valid_to_not_before_valid_from', sql`"valid_to" IS NULL OR "valid_to" >= "valid_from"`)],
+  );
 
   const taxConfigForeignKeys = taxConfigIdFactory.createForeignKeyFactory(() => taxConfigurations.id);
   const taxJurisdictionForeignKeys = taxJurisdictionIdFactory.createForeignKeyFactory(() => taxJurisdictions.id);

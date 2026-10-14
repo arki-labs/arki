@@ -1,4 +1,5 @@
 import { z } from '@arki/contracts';
+import { isBefore } from '@arki/date';
 import { instantSchema } from '@arki/date/zod';
 
 import type { TaxComplianceReport } from './reporting.js';
@@ -89,6 +90,13 @@ export const setDefaultConfigurationInputSchema = z.object({
 });
 
 // Tax jurisdiction
+
+/** A tax rate in percent, as a decimal string: `'19'`, `'7.5'`. Never negative, never above 100. */
+export const taxRateSchema = z
+  .string()
+  .regex(/^\d+(\.\d+)?$/, 'A tax rate is a non-negative decimal number')
+  .refine(rate => Number(rate) <= 100, 'A tax rate is at most 100');
+
 export const createJurisdictionSchema = z.object({
   name: z.string().min(1).max(255),
   code: z.string().max(20),
@@ -96,11 +104,11 @@ export const createJurisdictionSchema = z.object({
   parentId: taxJurisdictionIdSchema.optional(),
   countryCode: z.string().length(2),
   stateCode: z.string().max(10).optional(),
-  standardRate: z.string().optional(),
+  standardRate: taxRateSchema.optional(),
   reducedRates: z
     .array(
       z.object({
-        rate: z.string(),
+        rate: taxRateSchema,
         description: z.string(),
         applicableTo: z.array(z.string()),
       }),
@@ -122,7 +130,8 @@ export const getJurisdictionHierarchyInputSchema = z.object({
 });
 
 // Tax exemption
-export const createExemptionSchema = z.object({
+export const createExemptionSchema = z
+  .object({
   type: exemptionTypeSchema,
   customerId: z.string().max(255).optional(),
   productCode: z.string().max(100).optional(),
@@ -142,7 +151,11 @@ export const createExemptionSchema = z.object({
       }),
     )
     .optional(),
-});
+  })
+  .refine(exemption => exemption.validTo === undefined || !isBefore(exemption.validTo, exemption.validFrom), {
+    path: ['validTo'],
+    message: 'validTo must not be before validFrom',
+  });
 
 export const getCustomerExemptionsInputSchema = z.object({
   customerId: z.string(),
@@ -267,6 +280,8 @@ export const taxCalculationResultSchema = z.object({
     }),
   ),
   applicableTaxIds: z.array(z.string()),
+  /** The exemptions that kept tax off this sale, in whole or in part. */
+  appliedExemptionIds: z.array(taxExemptionIdSchema),
 });
 
 export function taxCalculationResultJson(result: TaxCalculationResult): z.input<typeof taxCalculationResultSchema> {

@@ -1,9 +1,18 @@
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
-import { Money } from '@arki/money';
+import { Money, sum } from '@arki/money';
 
 import type { StripeProvider } from '../core/providers/stripe-provider.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../core/types.js';
+import type { TaxExemptionId } from './primitives.js';
+import type { TaxExemptionRepository, TaxJurisdictionRepository } from './repository.js';
+import { checkTaxIdFormat } from './tax-id.js';
+
+/** What `TaxService` reads. A `TaxExemptionRepository` and a `TaxJurisdictionRepository` fit. */
+export type TaxServiceReads = {
+  exemptions: Pick<TaxExemptionRepository, 'findApplicableExemptions'>;
+  jurisdictions: Pick<TaxJurisdictionRepository, 'findJurisdictionById'>;
+};
 
 /**
  * Tax calculation input for subscriptions and one-time payments
@@ -50,7 +59,10 @@ export type TaxCalculationResult = {
     amount: Money;
     taxCode?: string;
   }[];
+  /** The customer's tax IDs whose format is valid for their type and country. */
   applicableTaxIds: string[];
+  /** The exemptions that kept tax off this sale, in whole or in part. */
+  appliedExemptionIds: TaxExemptionId[];
 }
 
 /**
@@ -78,7 +90,10 @@ export type TaxTransaction = {
  * audit trails and business logic.
  */
 export class TaxService {
-  constructor(private readonly stripeProvider: StripeProvider) {
+  constructor(
+    private readonly stripeProvider: StripeProvider,
+    private readonly reads: TaxServiceReads,
+  ) {
     // Verify that Stripe provider supports tax features
     if (!stripeProvider.features.taxCalculation) {
       throw new Error('Tax service requires a provider with tax calculation capabilities');
@@ -88,33 +103,117 @@ export class TaxService {
   /**
    * Calculate tax for a potential purchase
    * This is used for price previews and checkout calculations
+   *
+   * Exemptions in force are applied. An active exemption keeps tax off a line when it is the
+   * customer's (or open to every customer) and its product code, if it has one, is the line's
+   * tax code or plan; one tied to a jurisdiction removes that jurisdiction's tax from the
+   * breakdown, unless the tax is inclusive (it is part of the price then, and stays). A line that is
+   * wholly exempt is not sent to Stripe. An exemption needs what its type says it is for (a customer, a product or a
+   * jurisdiction): one without would exempt every sale, so it is never applied.
    */
   async calculateTax(input: TaxCalculationInput): Promise<TaxCalculationResult> {
-    // A failure is the caller's to handle: a checkout must not go on with tax it does not know.
-    // The provider throws `PaymentProviderError`; its `retryable` says whether trying again can help.
-    const result = await this.stripeProvider.calculateTax({
-      customerId: input.customerId,
-      lineItems: input.lineItems.map(item => ({
-        amount: item.amount,
-        reference: item.reference,
-        taxCode: item.taxCode,
-      })),
-      currency: input.currency,
-      customerDetails: input.customerDetails,
-    });
+    const currency = input.currency.toUpperCase();
+    // An exemption "for a customer" must name the customer; same for the other two types
+    const scoped = (await this.reads.exemptions.findApplicableExemptions(input.customerId)).filter(
+      exemption =>
+        (exemption.type !== 'customer' || exemption.customerId !== null) &&
+        (exemption.type !== 'product' || exemption.productCode !== null) &&
+        (exemption.type !== 'jurisdiction' || exemption.jurisdictionId !== null),
+    );
+    const lineExemptions = scoped.filter(exemption => exemption.jurisdictionId === null);
+    const jurisdictionExemptions = scoped.filter(exemption => exemption.jurisdictionId !== null);
+
+    const applied = new Set<TaxExemptionId>();
+    const taxableLines: TaxCalculationInput['lineItems'] = [];
+    const exemptLines: TaxCalculationInput['lineItems'] = [];
+    for (const item of input.lineItems) {
+      const exemption = lineExemptions.find(
+        candidate =>
+          candidate.productCode === null || candidate.productCode === item.taxCode || candidate.productCode === item.planId,
+      );
+      if (exemption) {
+        applied.add(exemption.id);
+        exemptLines.push(item);
+      } else {
+        taxableLines.push(item);
+      }
+    }
+
+    const exemptSubtotal = sum(
+      exemptLines.map(item => item.amount),
+      currency,
+    );
+
+    let subtotal = exemptSubtotal;
+    let taxAmount = Money.zero(currency);
+    let taxInclusive = false;
+    let breakdown: TaxCalculationResult['breakdown'] = [];
+
+    if (taxableLines.length > 0) {
+      // A failure is the caller's to handle: a checkout must not go on with tax it does not know.
+      // The provider throws `PaymentProviderError`; its `retryable` says whether trying again can help.
+      const result = await this.stripeProvider.calculateTax({
+        customerId: input.customerId,
+        lineItems: taxableLines.map(item => ({
+          amount: item.amount,
+          reference: item.reference,
+          taxCode: item.taxCode,
+        })),
+        currency: input.currency,
+        customerDetails: input.customerDetails,
+      });
+
+      subtotal = exemptSubtotal.plus(result.amountTotal.minus(result.taxAmountExclusive));
+      taxAmount = result.taxAmountExclusive;
+      taxInclusive = result.taxAmountInclusive.isPositive();
+      breakdown = result.taxBreakdown.map(line => ({
+        jurisdiction: line.jurisdiction,
+        rate: line.rate,
+        amount: line.amount,
+        taxCode: line.taxCode,
+      }));
+
+      if (!taxInclusive && jurisdictionExemptions.length > 0) {
+        const exemptJurisdictions = new Map<TaxExemptionId, string[]>();
+        for (const exemption of jurisdictionExemptions) {
+          // A jurisdiction exemption tied to one product cannot be told apart in the breakdown
+          if (exemption.productCode !== null || exemption.jurisdictionId === null) continue;
+          const jurisdiction = await this.reads.jurisdictions.findJurisdictionById(exemption.jurisdictionId);
+          if (jurisdiction) {
+            exemptJurisdictions.set(exemption.id, [jurisdiction.name.toLowerCase(), jurisdiction.code.toLowerCase()]);
+          }
+        }
+
+        breakdown = breakdown.filter(line => {
+          const label = line.jurisdiction.toLowerCase();
+          for (const [id, names] of exemptJurisdictions) {
+            if (names.includes(label)) {
+              applied.add(id);
+              taxAmount = taxAmount.minus(line.amount);
+
+              return false;
+            }
+          }
+
+          return true;
+        });
+      }
+    }
 
     return {
-      subtotal: result.amountTotal.minus(result.taxAmountExclusive),
-      taxAmount: result.taxAmountExclusive,
-      total: result.amountTotal,
-      taxInclusive: result.taxAmountInclusive.isPositive(),
-      breakdown: result.taxBreakdown.map(breakdown => ({
-        jurisdiction: breakdown.jurisdiction,
-        rate: breakdown.rate,
-        amount: breakdown.amount,
-        taxCode: breakdown.taxCode,
-      })),
-      applicableTaxIds: [], // Would be populated based on customer tax IDs
+      subtotal,
+      taxAmount,
+      total: subtotal.plus(taxAmount),
+      taxInclusive,
+      breakdown,
+      applicableTaxIds: (input.customerDetails?.taxIds ?? [])
+        .filter(
+          taxId =>
+            input.customerDetails?.address?.country !== undefined &&
+            checkTaxIdFormat({ ...taxId, country: input.customerDetails.address.country }).format === 'valid',
+        )
+        .map(taxId => taxId.value),
+      appliedExemptionIds: [...applied],
     };
   }
 
@@ -264,8 +363,9 @@ export class TaxService {
   }
 
   /**
-   * Validate tax ID for a customer
-   * Helps ensure compliance and accurate tax calculation
+   * Check the format of a customer's tax ID. The format only: whether the number is registered
+   * takes the registry (VIES, HMRC, the IRS). `format: 'unknown'` means no format is known for
+   * the type (or for the country under `eu_vat`); the ID is then not `valid`.
    */
   async validateTaxId(taxId: {
     type: string;
@@ -277,22 +377,12 @@ export class TaxService {
     country?: string;
     type?: string;
   }> {
-    // This would integrate with Stripe's tax ID validation
-    // For now, we'll return a basic validation
-
-    const commonPatterns: Record<string, RegExp> = {
-      'us_ein': /^\d{2}-\d{7}$/,
-      'eu_vat': /^[A-Z]{2}[A-Z0-9]+$/,
-      'gb_vat': /^GB\d{9}$/,
-      'ca_bn': /^\d{9}RT\d{4}$/,
-    };
-
-    const pattern = commonPatterns[`${taxId.country.toLowerCase()}_${taxId.type.toLowerCase()}`];
-    const valid = pattern ? pattern.test(taxId.value) : true; // Assume valid if no pattern
+    const { format } = checkTaxIdFormat(taxId);
 
     return {
-      valid,
-      format: valid ? 'valid' : 'invalid',
+      // `unknown` means no format is known for the type: it was not checked, so it is not valid
+      valid: format === 'valid',
+      format,
       country: taxId.country,
       type: taxId.type,
     };
@@ -328,8 +418,8 @@ export class TaxService {
 /**
  * Factory function to create TaxService
  */
-export function createTaxService(stripeProvider: StripeProvider): TaxService {
-  return new TaxService(stripeProvider);
+export function createTaxService(stripeProvider: StripeProvider, reads: TaxServiceReads): TaxService {
+  return new TaxService(stripeProvider, reads);
 }
 
 /**

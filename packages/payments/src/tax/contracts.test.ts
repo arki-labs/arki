@@ -31,6 +31,7 @@ const calculation: TaxCalculationResult = {
   taxInclusive: false,
   breakdown: [{ jurisdiction: 'JP', rate: 10, amount: money('150', 'JPY') }],
   applicableTaxIds: [],
+  appliedExemptionIds: [],
 };
 
 describe('taxCalculationResultSchema', () => {

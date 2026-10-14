@@ -1,7 +1,7 @@
 import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
 
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
@@ -293,6 +293,28 @@ export class TaxExemptionRepository {
       .orderBy(this.taxExemptions.validFrom);
   }
 
+  /**
+   * The exemptions that can keep tax off a sale to `customerId` at `at`: active, in force, and
+   * either the customer's own or open to every customer (no `customerId`). Pending, revoked and
+   * expired ones never apply. `threshold` exemptions are left out: nothing stores a threshold
+   * amount to test a sale against. The caller narrows by product and jurisdiction.
+   */
+  async findApplicableExemptions(customerId: string, at: Instant = now()): Promise<TaxExemption[]> {
+    return this.db
+      .select()
+      .from(this.taxExemptions)
+      .where(
+        and(
+          or(eq(this.taxExemptions.customerId, customerId), isNull(this.taxExemptions.customerId)),
+          eq(this.taxExemptions.status, 'active'),
+          ne(this.taxExemptions.type, 'threshold'),
+          lte(this.taxExemptions.validFrom, at),
+          or(isNull(this.taxExemptions.validTo), gt(this.taxExemptions.validTo, at)),
+        ),
+      )
+      .orderBy(this.taxExemptions.validFrom, this.taxExemptions.id);
+  }
+
   async findProductExemptions(productCode: string): Promise<TaxExemption[]> {
     return this.db
       .select()
@@ -390,6 +412,7 @@ export class TaxExemptionRepository {
   // Analytics and reporting methods
   async getExemptionStats(): Promise<{
     totalActive: number;
+    totalPendingReview: number;
     totalExpired: number;
     totalRevoked: number;
     expiringNext30Days: number;
@@ -398,22 +421,27 @@ export class TaxExemptionRepository {
     futureDate.setDate(futureDate.getDate() + 30);
 
     const [activeCount] = await this.db
-      .select({ count: sql<number>`count(*)` })
+      .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(this.taxExemptions)
       .where(eq(this.taxExemptions.status, 'active'));
 
+    const [pendingCount] = await this.db
+      .select({ count: sql<number>`count(*)`.mapWith(Number) })
+      .from(this.taxExemptions)
+      .where(eq(this.taxExemptions.status, 'pending_review'));
+
     const [expiredCount] = await this.db
-      .select({ count: sql<number>`count(*)` })
+      .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(this.taxExemptions)
       .where(eq(this.taxExemptions.status, 'expired'));
 
     const [revokedCount] = await this.db
-      .select({ count: sql<number>`count(*)` })
+      .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(this.taxExemptions)
       .where(eq(this.taxExemptions.status, 'revoked'));
 
     const [expiringCount] = await this.db
-      .select({ count: sql<number>`count(*)` })
+      .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(this.taxExemptions)
       .where(
         and(
@@ -426,6 +454,7 @@ export class TaxExemptionRepository {
 
     return {
       totalActive: activeCount?.count || 0,
+      totalPendingReview: pendingCount?.count || 0,
       totalExpired: expiredCount?.count || 0,
       totalRevoked: revokedCount?.count || 0,
       expiringNext30Days: expiringCount?.count || 0,
