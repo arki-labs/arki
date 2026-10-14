@@ -1104,7 +1104,14 @@ export class StripeProvider extends BasePaymentProvider {
     taxBreakdown: {
       amount: Money;
       rate: number;
+      /** The jurisdiction's display name, such as `California`. Not unique: use `country`, `state` and `level` to tell places apart. */
       jurisdiction: string;
+      /** Two-letter country code of the jurisdiction. */
+      country: string;
+      /** ISO 3166-2 subdivision code without the country prefix, such as `NY`. Absent for a country-level tax. */
+      state?: string;
+      /** `country`, `state`, `county`, `city` or `district` (Stripe may add more). */
+      level: string;
       taxCode?: string;
     }[];
   }> {
@@ -1121,7 +1128,10 @@ export class StripeProvider extends BasePaymentProvider {
           rate: typeof breakdown.tax_rate_details?.percentage_decimal === 'number'
             ? breakdown.tax_rate_details.percentage_decimal
             : Number.parseFloat(String(breakdown.tax_rate_details?.percentage_decimal || 0)),
-          jurisdiction: breakdown.jurisdiction?.display_name || '',
+          jurisdiction: breakdown.jurisdiction.display_name,
+          country: breakdown.jurisdiction.country,
+          state: breakdown.jurisdiction.state ?? undefined,
+          level: breakdown.jurisdiction.level,
           taxCode: item.tax_code,
         })) || []
       ) || [],

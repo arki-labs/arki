@@ -18,7 +18,7 @@ import { createFakeStripeHttp } from '../core/providers/stripe-test-support.js';
 import { customerId, openDb, schema } from '../test-support.js';
 import { createExemptionSchema, createJurisdictionSchema } from './contracts.js';
 import { createTaxRepositories } from './repository.js';
-import { TaxService } from './service.js';
+import { jurisdictionOwnsLine, TaxService } from './service.js';
 import { createTaxTables } from './tables.js';
 
 const tax = createTaxTables({ schema });
@@ -28,7 +28,11 @@ let db: ReturnType<typeof drizzle>;
 let repos: ReturnType<typeof createTaxRepositories>;
 
 /** Stripe answers 19% on 100 EUR in Germany, whatever is asked. */
-function serviceWithStripe() {
+type StripeJurisdiction = { display_name: string; level: string; country: string; state: string | null };
+
+function serviceWithStripe(
+  jurisdiction: StripeJurisdiction = { display_name: 'Germany', level: 'country', country: 'DE', state: null },
+) {
   const http = createFakeStripeHttp(() => ({
     body: {
       object: 'tax.calculation',
@@ -42,7 +46,7 @@ function serviceWithStripe() {
             tax_breakdown: [
               {
                 amount: 1900,
-                jurisdiction: { display_name: 'Germany', level: 'country' },
+                jurisdiction,
                 tax_rate_details: { percentage_decimal: '19' },
               },
             ],
@@ -257,5 +261,81 @@ describe('calculateTax with exemptions', () => {
     expect(result.taxAmount.toDecimalString()).toBe('0.00');
     expect(result.total.toDecimalString()).toBe('100.00');
     expect(result.appliedExemptionIds).toEqual([exemption.id]);
+  });
+
+  it('tells same-named places in different countries apart: Georgia the country is exempt, Georgia the US state is not', async () => {
+    const georgia = await repos.jurisdictions.createJurisdiction({
+      name: 'Georgia',
+      code: 'GE',
+      type: 'country',
+      countryCode: 'GE',
+    });
+    const exemption = await repos.exemptions.createExemption({
+      type: 'jurisdiction',
+      jurisdictionId: georgia.id,
+      customerId: 'cust_georgia',
+      exemptionCode: 'GE-EXEMPT',
+      reason: 'Diplomatic',
+      validFrom: past,
+    });
+    await repos.exemptions.approveExemption(exemption.id, 'usr_admin');
+    const usState = { display_name: 'Georgia', level: 'state', country: 'US', state: 'GA' };
+    const country = { display_name: 'Georgia', level: 'country', country: 'GE', state: null };
+    const lines = [{ amount: money('100', 'EUR'), description: 'Pro', reference: 'line_1', taxCode: 'txcd_other' }];
+
+    const inUs = await serviceWithStripe(usState).service.calculateTax({
+      ...sale,
+      customerId: 'cust_georgia',
+      lineItems: lines,
+    });
+    const inGeorgia = await serviceWithStripe(country).service.calculateTax({
+      ...sale,
+      customerId: 'cust_georgia',
+      lineItems: lines,
+    });
+
+    expect(inUs.taxAmount.toDecimalString()).toBe('19.00');
+    expect(inUs.breakdown).toHaveLength(1);
+    expect(inUs.appliedExemptionIds).toEqual([]);
+    expect(inGeorgia.breakdown).toEqual([]);
+    expect(inGeorgia.appliedExemptionIds).toEqual([exemption.id]);
+  });
+
+  it('matches a US state by its subdivision code, and a county only with the same name', async () => {
+    const [california, alameda] = await Promise.all([
+      repos.jurisdictions.createJurisdiction({
+        name: 'California',
+        code: 'US-CA',
+        type: 'state',
+        countryCode: 'US',
+        stateCode: 'CA',
+      }),
+      repos.jurisdictions.createJurisdiction({
+        name: 'Alameda County',
+        code: 'ALAMEDA',
+        type: 'county',
+        countryCode: 'US',
+        stateCode: 'CA',
+      }),
+    ]);
+    const line = (displayName: string, level: string, state: string | null) => ({
+      amount: money('1', 'USD'),
+      rate: 1,
+      jurisdiction: displayName,
+      country: 'US',
+      state: state ?? undefined,
+      level,
+    });
+    const owns = jurisdictionOwnsLine;
+    const stateLine = line('California', 'state', 'CA');
+    const countyLine = line('Alameda County', 'county', 'CA');
+    const otherCounty = line('Orange County', 'county', 'CA');
+    const sameCountyOtherState = line('Alameda County', 'county', 'NY');
+
+    expect(owns(california, stateLine)).toBe(true);
+    expect(owns(california, countyLine)).toBe(false);
+    expect(owns(alameda, countyLine)).toBe(true);
+    expect(owns(alameda, otherCounty)).toBe(false);
+    expect(owns(alameda, sameCountyOtherState)).toBe(false);
   });
 });

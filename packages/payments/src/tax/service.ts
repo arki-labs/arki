@@ -7,6 +7,7 @@ import type { StripeProvider } from '../core/providers/stripe-provider.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../core/types.js';
 import type { TaxExemptionId } from './primitives.js';
 import type { TaxExemptionRepository, TaxJurisdictionRepository, TaxRecordRepository } from './repository.js';
+import type { TaxJurisdiction } from './types.js';
 import { checkTaxIdFormat } from './tax-id.js';
 
 /** What `TaxService` reads. A `TaxExemptionRepository` and a `TaxJurisdictionRepository` fit. */
@@ -17,6 +18,45 @@ export type TaxServiceReads = {
 };
 
 const logger = getLogger('arki:payments:tax');
+
+type TaxBreakdownLine = Awaited<ReturnType<StripeProvider['calculateTax']>>['taxBreakdown'][number];
+
+/** How Stripe names the level of each jurisdiction type of ours. */
+const STRIPE_LEVEL: Record<TaxJurisdiction['type'], string> = {
+  country: 'country',
+  state: 'state',
+  province: 'state',
+  city: 'city',
+  county: 'county',
+  district: 'district',
+};
+
+/** A subdivision code as Stripe writes it: upper case, without the country prefix (`US-CA` is `CA`). */
+const subdivisionCode = (code: string) => code.trim().toUpperCase().replace(/^[A-Z]{2}-/, '');
+
+/**
+ * True when Stripe's tax line is the tax of our jurisdiction. The display name alone cannot say:
+ * Georgia is a US state and a country. The line must be in the same country, at the same level, and
+ * in the same state. Stripe gives no code below the state, so a city, county or district must also
+ * carry the same name. A jurisdiction that cannot be placed this way matches nothing: tax is charged
+ * rather than wrongly waived.
+ */
+export function jurisdictionOwnsLine(jurisdiction: TaxJurisdiction, line: TaxBreakdownLine): boolean {
+  if (line.country.toUpperCase() !== jurisdiction.countryCode.toUpperCase()) return false;
+  if (line.level !== STRIPE_LEVEL[jurisdiction.type]) return false;
+  if (jurisdiction.type === 'country') return true;
+
+  const state = line.state === undefined ? undefined : subdivisionCode(line.state);
+  if (jurisdiction.type === 'state' || jurisdiction.type === 'province') {
+    const wanted = subdivisionCode(jurisdiction.stateCode ?? jurisdiction.code);
+
+    return state === wanted;
+  }
+
+  if (jurisdiction.stateCode !== null && state !== subdivisionCode(jurisdiction.stateCode)) return false;
+
+  return line.jurisdiction.toLowerCase() === jurisdiction.name.toLowerCase();
+}
 
 /**
  * Tax calculation input for subscriptions and one-time payments
@@ -178,28 +218,22 @@ export class TaxService {
       subtotal = exemptSubtotal.plus(result.amountTotal.minus(result.taxAmountExclusive));
       taxAmount = result.taxAmountExclusive;
       taxInclusive = result.taxAmountInclusive.isPositive();
-      breakdown = result.taxBreakdown.map(line => ({
-        jurisdiction: line.jurisdiction,
-        rate: line.rate,
-        amount: line.amount,
-        taxCode: line.taxCode,
-      }));
+      let lines = result.taxBreakdown;
 
       if (!taxInclusive && jurisdictionExemptions.length > 0) {
-        const exemptJurisdictions = new Map<TaxExemptionId, string[]>();
+        const exemptJurisdictions = new Map<TaxExemptionId, TaxJurisdiction>();
         for (const exemption of jurisdictionExemptions) {
           // A jurisdiction exemption tied to one product cannot be told apart in the breakdown
           if (exemption.productCode !== null || exemption.jurisdictionId === null) continue;
           const jurisdiction = await this.reads.jurisdictions.findJurisdictionById(exemption.jurisdictionId);
           if (jurisdiction) {
-            exemptJurisdictions.set(exemption.id, [jurisdiction.name.toLowerCase(), jurisdiction.code.toLowerCase()]);
+            exemptJurisdictions.set(exemption.id, jurisdiction);
           }
         }
 
-        breakdown = breakdown.filter(line => {
-          const label = line.jurisdiction.toLowerCase();
-          for (const [id, names] of exemptJurisdictions) {
-            if (names.includes(label)) {
+        lines = lines.filter(line => {
+          for (const [id, jurisdiction] of exemptJurisdictions) {
+            if (jurisdictionOwnsLine(jurisdiction, line)) {
               applied.add(id);
               taxAmount = taxAmount.minus(line.amount);
 
@@ -210,6 +244,13 @@ export class TaxService {
           return true;
         });
       }
+
+      breakdown = lines.map(line => ({
+        jurisdiction: line.jurisdiction,
+        rate: line.rate,
+        amount: line.amount,
+        taxCode: line.taxCode,
+      }));
     }
 
     return {
