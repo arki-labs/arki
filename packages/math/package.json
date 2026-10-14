@@ -196,7 +196,8 @@
     "mathjs": "catalog:",
     "ml-matrix": "^6.15.0",
     "regression": "^2.0.1",
-    "simple-statistics": "catalog:"
+    "simple-statistics": "catalog:",
+    "vitest": "catalog:"
   },
   "publishConfig": {
     "access": "public"

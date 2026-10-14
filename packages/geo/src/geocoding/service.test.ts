@@ -1,7 +1,7 @@
 import { http, HttpResponse, setupMswServer } from '@arki/testing/msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { GeocodingError } from '../core/errors';
+import { GeocodingAbortedError, GeocodingError } from '../core/errors';
 import type { GeocodingCache } from './service';
 import { createGeocodingService, GeocodingService } from './service';
 import type { GeocodeResult, GeocodingConfig } from './types';
@@ -382,6 +382,72 @@ describe('GeocodingService', () => {
       expect(results.get('good')).toMatchObject({ provider: 'nominatim' });
       expect(results.get('bad')).toBeInstanceOf(GeocodingError);
       expect(results.get('also good')).toMatchObject({ provider: 'nominatim' });
+    });
+  });
+
+  describe('cancellation', () => {
+    const noCache = { enabled: false, ttl: 0, keyPrefix: '' };
+
+    it('rejects before any request when the signal is already aborted', async () => {
+      let calls = 0;
+      server.use(
+        http.get(`${NOMINATIM}/search`, () => {
+          calls += 1;
+          return HttpResponse.json(nominatimHit('1', '2'));
+        }),
+      );
+      const service = new GeocodingService(baseConfig({ cache: noCache }));
+      const signal = AbortSignal.abort();
+
+      await expect(service.geocode('1 Main St', undefined, { signal })).rejects.toBeInstanceOf(
+        GeocodingAbortedError,
+      );
+      await expect(service.reverseGeocode(1, 2, undefined, { signal })).rejects.toMatchObject({
+        code: 'GEOCODING_ABORTED',
+      });
+      expect(calls).toBe(0);
+    });
+
+    it('stops the fallback chain when the signal aborts during the primary attempt', async () => {
+      const controller = new AbortController();
+      let googleCalls = 0;
+      server.use(
+        http.get(`${NOMINATIM}/search`, () => {
+          controller.abort();
+          return new HttpResponse(null, { status: 500 });
+        }),
+        http.get(GOOGLE, () => {
+          googleCalls += 1;
+          return HttpResponse.json(googleHit);
+        }),
+      );
+      const service = new GeocodingService(baseConfig({ cache: noCache }));
+
+      const failure = await service
+        .geocode('1 Main St', undefined, { signal: controller.signal })
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(GeocodingAbortedError);
+      expect(googleCalls).toBe(0);
+    });
+
+    it('stops a batch between items and starts no new lookups', async () => {
+      const controller = new AbortController();
+      let calls = 0;
+      server.use(
+        http.get(`${NOMINATIM}/search`, () => {
+          calls += 1;
+          if (calls === 2) controller.abort();
+          return HttpResponse.json(nominatimHit('1', '2'));
+        }),
+      );
+      const service = new GeocodingService(baseConfig({ cache: noCache }));
+      const addresses = Array.from({ length: 6 }, (_, index) => `${index} Main St`);
+
+      await expect(
+        service.batchGeocode(addresses, 1, { signal: controller.signal }),
+      ).rejects.toBeInstanceOf(GeocodingAbortedError);
+      expect(calls).toBe(2);
     });
   });
 

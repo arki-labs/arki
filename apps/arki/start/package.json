@@ -69,7 +69,6 @@
     "@types/node": "catalog:node",
     "@types/react": "catalog:react",
     "@types/react-dom": "catalog:react",
-    "@types/rss": "catalog:types",
     "@vitejs/plugin-react": "catalog:",
     "dotenv-cli": "catalog:env",
     "jiti": "catalog:build-tools",

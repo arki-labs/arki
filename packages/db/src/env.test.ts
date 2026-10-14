@@ -7,8 +7,8 @@
  * set with the same value.
  *
  * The fix is a runtime alias in `env.ts`: `DB_URL` resolves from EITHER
- * `process.env.DATABASE_URL` (preferred — PG/Coolify/12-factor standard) OR
- * `process.env.DB_URL` (historical @arki/db name). This file tests the
+ * `process.env.DB_URL` (canonical @arki/db name, wins when both are set) OR
+ * `process.env.DATABASE_URL` (PG/Coolify/12-factor standard fallback). This file tests the
  * resolution layer structurally so future regressions surface immediately.
  *
  * Why `vi.resetModules()` per test: `env.ts` reads `process.env` at module
@@ -38,15 +38,15 @@ describe('@arki/db env — DATABASE_URL → DB_URL resolution (iteration 2 Conce
     expect(env.DB_URL).toBe('postgresql://user:pass@localhost:5432/from_database_url');
   });
 
-  it('prefers DATABASE_URL over DB_URL when BOTH are set', async () => {
-    process.env['DATABASE_URL'] = 'postgresql://user:pass@localhost:5432/preferred';
-    process.env['DB_URL'] = 'postgresql://user:pass@localhost:5432/legacy';
+  it('prefers the package-specific DB_URL over DATABASE_URL when BOTH are set', async () => {
+    process.env['DATABASE_URL'] = 'postgresql://user:pass@localhost:5432/ambient';
+    process.env['DB_URL'] = 'postgresql://user:pass@localhost:5432/explicit';
     vi.resetModules();
     const { env } = await import('./env.js');
-    expect(env.DB_URL).toBe('postgresql://user:pass@localhost:5432/preferred');
+    expect(env.DB_URL).toBe('postgresql://user:pass@localhost:5432/explicit');
   });
 
-  it('falls back to DB_URL when DATABASE_URL is unset (backward compatibility)', async () => {
+  it('uses DB_URL alone when DATABASE_URL is unset', async () => {
     delete process.env['DATABASE_URL'];
     process.env['DB_URL'] = 'postgresql://user:pass@localhost:5432/legacy_only';
     vi.resetModules();

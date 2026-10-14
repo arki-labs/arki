@@ -34,11 +34,13 @@
     },
     "./server": {
       "types": "./dist/src/server.d.ts",
-      "node": "./src/server.ts"
+      "node": "./src/server.ts",
+      "default": "./src/server.ts"
     },
     "./http": {
       "types": "./dist/src/http.d.ts",
-      "node": "./src/http.ts"
+      "node": "./src/http.ts",
+      "default": "./src/http.ts"
     },
     "./package.json": "./package.json"
   },

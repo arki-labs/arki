@@ -37,6 +37,18 @@ export class GeocodingError extends GeoError {
 }
 
 /**
+ * Error thrown when a lookup is cancelled through its `AbortSignal`.
+ * Remediation: this is not a failure of the providers. Do not retry unless
+ * the caller still wants the result; pass a fresh signal if it does.
+ */
+export class GeocodingAbortedError extends GeoError {
+  constructor(message = 'Geocoding was aborted by the caller', cause?: unknown) {
+    super(message, 'GEOCODING_ABORTED', cause);
+    this.name = 'GeocodingAbortedError';
+  }
+}
+
+/**
  * Error thrown when map provider initialization fails
  */
 export class MapProviderError extends GeoError {

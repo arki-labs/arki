@@ -13,7 +13,7 @@ import type { KV } from '@arki/kv';
 import type { Entry, Options } from 'node-geocoder';
 import NodeGeocoder from 'node-geocoder';
 
-import { GeocodingError } from '../core/errors';
+import { GeocodingAbortedError, GeocodingError } from '../core/errors';
 import type {
   AddressComponents,
   GeocodeResult,
@@ -23,6 +23,22 @@ import type {
 
 /** The slice of `KV` the service needs. Any store with `get` and `set` fits. */
 export type GeocodingCache = Pick<KV, 'get' | 'set'>;
+
+/**
+ * Options shared by every lookup.
+ *
+ * `signal` cancels the lookup. It is checked before each provider attempt and
+ * between batch items. node-geocoder does not accept a signal, so a request
+ * that is already in flight finishes in the background; the lookup itself
+ * rejects with `GeocodingAbortedError` at the next check.
+ */
+export interface GeocodingOptions {
+  signal?: AbortSignal;
+}
+
+const throwIfAborted = (signal: AbortSignal | undefined): void => {
+  if (signal?.aborted) throw new GeocodingAbortedError(undefined, signal.reason);
+};
 
 export class GeocodingService {
   private geocoders: Map<GeocodingProvider, NodeGeocoder.Geocoder>;
@@ -114,7 +130,11 @@ export class GeocodingService {
   async geocode(
     address: string,
     preferredProvider?: GeocodingProvider,
+    options: GeocodingOptions = {},
   ): Promise<GeocodeResult> {
+    const { signal } = options;
+    throwIfAborted(signal);
+
     // Check cache first
     if (this.cacheEnabled && this.kv) {
       const cacheKey = `${this.cacheKeyPrefix}${this.hashAddress(address)}`;
@@ -132,9 +152,11 @@ export class GeocodingService {
     for (const providerName of providerOrder) {
       const geocoder = this.geocoders.get(providerName);
       if (!geocoder) continue;
+      throwIfAborted(signal);
 
       try {
         const results = await geocoder.geocode(address);
+        throwIfAborted(signal);
 
         if (!results || results.length === 0) {
           throw new GeocodingError(
@@ -161,6 +183,7 @@ export class GeocodingService {
 
         return result;
       } catch (error) {
+        if (error instanceof GeocodingAbortedError) throw error;
         lastError = error as Error;
         console.warn(`Geocoding failed with provider ${providerName}:`, error);
         continue;
@@ -181,7 +204,11 @@ export class GeocodingService {
     lat: number,
     lon: number,
     preferredProvider?: GeocodingProvider,
+    options: GeocodingOptions = {},
   ): Promise<GeocodeResult> {
+    const { signal } = options;
+    throwIfAborted(signal);
+
     // Check cache first
     if (this.cacheEnabled && this.kv) {
       const cacheKey = `${this.cacheKeyPrefix}reverse:${lat},${lon}`;
@@ -199,9 +226,11 @@ export class GeocodingService {
     for (const providerName of providerOrder) {
       const geocoder = this.geocoders.get(providerName);
       if (!geocoder) continue;
+      throwIfAborted(signal);
 
       try {
         const results = await geocoder.reverse({ lat, lon });
+        throwIfAborted(signal);
 
         if (!results || results.length === 0) {
           throw new GeocodingError(
@@ -228,6 +257,7 @@ export class GeocodingService {
 
         return result;
       } catch (error) {
+        if (error instanceof GeocodingAbortedError) throw error;
         lastError = error as Error;
         console.warn(`Reverse geocoding failed with provider ${providerName}:`, error);
         continue;
@@ -248,18 +278,23 @@ export class GeocodingService {
   async batchGeocode(
     addresses: string[],
     concurrency = 5,
+    options: GeocodingOptions = {},
   ): Promise<Map<string, GeocodeResult | Error>> {
+    const { signal } = options;
+    throwIfAborted(signal);
     const results = new Map<string, GeocodeResult | Error>();
     const queue = [...addresses];
 
     const processNext = async (): Promise<void> => {
+      throwIfAborted(signal);
       const address = queue.shift();
       if (!address) return;
 
       try {
-        const result = await this.geocode(address);
+        const result = await this.geocode(address, undefined, { signal });
         results.set(address, result);
       } catch (error) {
+        if (error instanceof GeocodingAbortedError) throw error;
         results.set(address, error as Error);
       }
 

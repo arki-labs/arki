@@ -1,14 +1,3 @@
 {
-  "entries": [
-    {
-      "package": "@arki/admin",
-      "error": "export \"./server\" has no \"import\" or \"default\" under dist/ or src/",
-      "reason": "owned by the manifest-contract admin pass running in parallel; ./server only has a \"node\" condition. Add \"import\" (or default) there and delete this entry"
-    },
-    {
-      "package": "@arki/admin",
-      "error": "export \"./http\" has no \"import\" or \"default\" under dist/ or src/",
-      "reason": "same as ./server: only a \"node\" condition. Add \"import\" there and delete this entry"
-    }
-  ]
+  "entries": []
 }
