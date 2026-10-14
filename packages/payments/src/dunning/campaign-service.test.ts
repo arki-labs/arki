@@ -15,6 +15,7 @@ import { add, now, sub } from '@arki/date';
 
 import type { CustomerId } from '../core/types.js';
 import type { CreateDunningCampaignInput } from './contracts.js';
+import { updateDunningCampaignInputSchema } from './contracts.js';
 import type { DunningCampaignId } from './primitives.js';
 import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
 import { userIdFactory } from '../core/user-id.js';
@@ -135,6 +136,48 @@ describe('createCampaign', () => {
 
     expect(await countOf(tables.dunningCampaigns)).toBe(campaigns);
     expect(await countOf(tables.dunningTemplates)).toBe(templates);
+  });
+});
+
+describe('updateCampaign templates', () => {
+  it('replaces the steps: updates a matching step in place, adds a new one, deletes the one that is gone', async () => {
+    const created = await service.createCampaign(campaignInput([0, 24]), 'usr_admin');
+    const [first, second] = created.templates;
+
+    const updated = await service.updateCampaign(
+      created.id,
+      {
+        templates: [
+          { name: 'SMS nudge', stepNumber: 1, delayHours: 2, communication: { channel: 'sms', content: 'Pay now', variables: [] } },
+          { name: 'Final notice', stepNumber: 3, delayHours: 72, communication: { channel: 'email', subject: 'Last call', content: 'Final', variables: [] } },
+        ],
+      },
+      'usr_admin',
+    );
+
+    expect(updated?.templates.map(template => [template.stepNumber, template.communication.channel])).toEqual([
+      [1, 'sms'],
+      [3, 'email'],
+    ]);
+    // Step 1 keeps its id, so executions that point at it keep their history
+    expect(updated?.templates[0]?.id).toBe(first?.id);
+    expect(updated?.templates.some(template => template.id === second?.id)).toBe(false);
+  });
+
+  it('leaves the steps alone when templates is omitted', async () => {
+    const created = await service.createCampaign(campaignInput([0, 24]), 'usr_admin');
+
+    const updated = await service.updateCampaign(created.id, { name: 'Renamed' }, 'usr_admin');
+
+    expect(updated?.name).toBe('Renamed');
+    expect(updated?.templates.map(template => template.id)).toEqual(created.templates.map(template => template.id));
+  });
+
+  it('rejects an empty set and duplicate step numbers at the contract', () => {
+    const [step] = campaignInput([0]).templates;
+    expect(updateDunningCampaignInputSchema.safeParse({ templates: [] }).success).toBe(false);
+    expect(updateDunningCampaignInputSchema.safeParse({ templates: [step, step] }).success).toBe(false);
+    expect(updateDunningCampaignInputSchema.safeParse({ templates: [step] }).success).toBe(true);
   });
 });
 

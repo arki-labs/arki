@@ -142,28 +142,58 @@ export class DunningCampaignService {
   }
 
   /**
-   * Update an existing campaign
+   * Update an existing campaign.
+   *
+   * When `input.templates` is given it is the complete new set of steps (replace semantics, like create).
+   * Steps are matched by `stepNumber`: a matching step is updated in place (its id, and so the history
+   * that points at it, survives), a new number is inserted, and a number that is gone is deleted.
+   * A step that already sent a communication cannot be deleted (the database refuses), so the whole
+   * update fails and nothing changes. Omit `templates` to leave the steps alone.
    */
   async updateCampaign(
     campaignId: DunningCampaignId,
     input: UpdateDunningCampaignInput,
     updatedBy: string,
   ): Promise<(DunningCampaign & { templates: DunningTemplate[] }) | null> {
-    const campaignModel = await this.campaignRepo.update(campaignId, {
-      ...input,
-      updatedBy,
+    const { templates: nextTemplates, ...campaignFields } = input;
+
+    return this.db.transaction(async tx => {
+      const campaignRepo = createDunningCampaignRepository(tx, {
+        dunningCampaigns: this.tables.dunningCampaigns,
+        dunningCampaignAnalytics: this.tables.dunningCampaignAnalytics,
+      });
+      const templateRepo = createDunningTemplateRepository(tx, { dunningTemplates: this.tables.dunningTemplates });
+
+      const campaignModel = await campaignRepo.update(campaignId, { ...campaignFields, updatedBy });
+      if (!campaignModel) {
+        return null;
+      }
+
+      if (nextTemplates) {
+        const existing = await templateRepo.findByCampaignId(campaignId);
+        const keptSteps = new Set(nextTemplates.map(template => template.stepNumber));
+
+        for (const template of existing) {
+          if (!keptSteps.has(template.stepNumber)) await templateRepo.delete(template.id);
+        }
+        for (const next of nextTemplates) {
+          const current = existing.find(template => template.stepNumber === next.stepNumber);
+          if (current) {
+            await templateRepo.update(current.id, {
+              name: next.name,
+              delayHours: next.delayHours,
+              communication: next.communication,
+            });
+          } else {
+            await templateRepo.create({ campaignId, ...next });
+          }
+        }
+      }
+
+      const templates = await templateRepo.findByCampaignId(campaignId);
+
+      return { ...campaignModel, templates };
     });
-
-    if (!campaignModel) {
-      return null;
-    }
-
-    const templates = await this.templateRepo.findByCampaignId(campaignId);
-
-    return {
-      ...campaignModel,
-      templates,
-    };
   }
 
   /**
