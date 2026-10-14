@@ -82,6 +82,7 @@ COPY --parents \
   ./packages/*/package.json \
   ./packages/*/*/package.json \
   ./tooling/*/package.json \
+  ./patches \
   ./
 ENV CI=true
 RUN --mount=type=cache,id=bun-store,target=/root/.bun/install/cache \
