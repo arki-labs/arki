@@ -59,7 +59,7 @@ describe('jaroWinkler', () => {
     expect(jaroWinkler('', '')).toBe(1);
     expect(jaroWinkler('abc', '')).toBe(0);
     expect(jaroWinkler('abcdef', 'abcxyz', { prefixScale: 0 })).toBeLessThan(jaroWinkler('abcdef', 'abcxyz'));
-    expect(() => jaroWinkler('a', 'b', { prefixScale: 0.5 })).toThrow(RangeError);
+    expect(() => jaroWinkler('a', 'b', { prefixScale: 0.5 })).toThrowError(/ARKI_STRING_E001/);
   });
 
   it('is what a name matcher needs: folding first makes accents and case irrelevant', () => {

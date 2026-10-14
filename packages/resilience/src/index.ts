@@ -1,6 +1,8 @@
 // Errors
 export {
   ResilienceError,
+  RESILIENCE_ERROR_CODES,
+  type ResilienceErrorCode,
   CircuitOpenError,
   TimeoutError,
   CancelledError,

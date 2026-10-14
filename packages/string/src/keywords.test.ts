@@ -33,7 +33,7 @@ describe('keywords', () => {
     expect(keywords('İstanbul istanbul', { locale: 'tr' })).toHaveLength(1);
     expect(STOP_WORDS.en.includes('the')).toBe(true);
     expect(keywords('')).toEqual([]);
-    expect(() => keywords(TEXT, { length: 0 })).toThrow(RangeError);
+    expect(() => keywords(TEXT, { length: 0 })).toThrowError(/ARKI_STRING_E001/);
   });
 });
 
@@ -47,7 +47,7 @@ describe('tokenization follows words()', () => {
       { keyword: "don't", occurrences: 1, percentage: 50 },
       { keyword: 'stop', occurrences: 1, percentage: 50 },
     ]);
-    expect(() => keywords('a', { limit: 0 })).toThrow(RangeError);
+    expect(() => keywords('a', { limit: 0 })).toThrowError(/ARKI_STRING_E001/);
   });
 });
 

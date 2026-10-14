@@ -25,7 +25,7 @@ describe('initials', () => {
     expect(initials('')).toBe('');
     expect(initials('émile zola')).toBe('ÉZ');
     expect(initials('👩‍💻 dev')).toBe('👩‍💻D');
-    expect(() => initials('x', { max: 0 })).toThrow(RangeError);
+    expect(() => initials('x', { max: 0 })).toThrowError(/ARKI_STRING_E001/);
   });
 });
 
@@ -38,7 +38,7 @@ describe('truncate', () => {
     expect(truncate('abcdef', 5, { ellipsis: '...' })).toBe('ab...');
     expect(truncate('abcdef', 2, { ellipsis: '...' })).toBe('..');
     expect(truncate('👨‍👩‍👧‍👦👨‍👩‍👧‍👦👨‍👩‍👧‍👦', 2)).toBe('👨‍👩‍👧‍👦…');
-    expect(() => truncate('x', -1)).toThrow(RangeError);
+    expect(() => truncate('x', -1)).toThrowError(/ARKI_STRING_E001/);
   });
   it('backs up to a word boundary', () => {
     expect(truncate('alpha beta', 8, { boundary: 'word-before' })).toBe('alpha…');
@@ -56,7 +56,7 @@ describe('excerpt', () => {
     expect(excerpt(text, 'cat')).toBeUndefined();
     expect(excerpt(text, 'fox')).toBe(text);
     expect(excerpt('é', 'e')).toBeUndefined();
-    expect(() => excerpt(text, '')).toThrow(TypeError);
+    expect(() => excerpt(text, '')).toThrowError(/ARKI_STRING_E001/);
   });
 });
 
@@ -67,7 +67,7 @@ describe('wrapText', () => {
     expect(wrapText('supercalifragilistic', 5)).toBe('supercalifragilistic');
     expect(wrapText('supercalifragilistic', 5, { breakWords: true })).toBe('super\ncalif\nragil\nistic');
     expect(wrapText('a b', 1, { newline: '<br>' })).toBe('a<br>b');
-    expect(() => wrapText('x', 0)).toThrow(RangeError);
+    expect(() => wrapText('x', 0)).toThrowError(/ARKI_STRING_E001/);
   });
 });
 
@@ -123,7 +123,7 @@ describe('initials for a single word', () => {
     expect(initials('émile', { singleWord: 2 })).toBe('ÉM');
     expect(initials('Alex Lee', { singleWord: 2 })).toBe('AL'); // two words: unchanged rule
     expect(initials('Alex')).toBe('A');
-    expect(() => initials('Alex', { singleWord: 0 })).toThrow(RangeError);
+    expect(() => initials('Alex', { singleWord: 0 })).toThrowError(/ARKI_STRING_E001/);
   });
 });
 

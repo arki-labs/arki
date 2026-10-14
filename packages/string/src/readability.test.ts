@@ -130,14 +130,14 @@ describe('readingTime / speakingTime', () => {
     expect(readingTime(text, { wordsPerMinute: 476 }).seconds).toBe(30);
     expect(speakingTime(text).seconds).toBeCloseTo(95.2);
     expect(readingTime('').seconds).toBe(0);
-    expect(() => readingTime(text, { wordsPerMinute: 0 })).toThrow(RangeError);
+    expect(() => readingTime(text, { wordsPerMinute: 0 })).toThrowError(/ARKI_STRING_E001/);
   });
 });
 
 describe('option validation', () => {
   it('rejects non-finite reading speeds', () => {
-    expect(() => readingTime('a b', { wordsPerMinute: Number.POSITIVE_INFINITY })).toThrow(RangeError);
-    expect(() => speakingTime('a b', { wordsPerMinute: Number.NaN })).toThrow(RangeError);
+    expect(() => readingTime('a b', { wordsPerMinute: Number.POSITIVE_INFINITY })).toThrowError(/ARKI_STRING_E001/);
+    expect(() => speakingTime('a b', { wordsPerMinute: Number.NaN })).toThrowError(/ARKI_STRING_E001/);
   });
 });
 

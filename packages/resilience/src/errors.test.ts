@@ -10,6 +10,7 @@ import {
   isBrokenCircuitError,
   isBulkheadRejectedError,
   isResilienceError,
+  RESILIENCE_ERROR_CODES,
   ResilienceError,
   RetriesExhaustedError,
   TimeoutError,
@@ -100,5 +101,28 @@ describe('error predicates', () => {
     expect(error.attempts).toBe(3);
     expect(error.lastError).toBe(last);
     expect(error.message).toBe('All 3 retry attempts exhausted: last');
+  });
+});
+
+describe('error codes', () => {
+  it('gives each failure its own stable code, so callers can branch on it instead of the message', async () => {
+    expect(await circuitOpenError()).toMatchObject({ code: 'ARKI_RESILIENCE_E001' });
+    expect(await timeoutError()).toMatchObject({ code: 'ARKI_RESILIENCE_E002' });
+    expect(new CancelledError()).toMatchObject({ code: 'ARKI_RESILIENCE_E003' });
+    expect(new BulkheadRejectedError()).toMatchObject({ code: 'ARKI_RESILIENCE_E004' });
+    expect(new RetriesExhaustedError(3)).toMatchObject({ code: 'ARKI_RESILIENCE_E005' });
+  });
+
+  it('lists every code once and attaches a remediation to each error', () => {
+    expect(Object.values(RESILIENCE_ERROR_CODES)).toHaveLength(5);
+    for (const error of [
+      new CircuitOpenError(),
+      new TimeoutError(),
+      new CancelledError(),
+      new BulkheadRejectedError(),
+      new RetriesExhaustedError(1),
+    ]) {
+      expect(error.remediation.length).toBeGreaterThan(0);
+    }
   });
 });

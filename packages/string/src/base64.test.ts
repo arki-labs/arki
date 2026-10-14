@@ -41,8 +41,8 @@ describe('text round-trips', () => {
     expect([...utf8Encode(sample)]).toEqual([...new TextEncoder().encode(sample)]);
   });
   it('rejects unpaired surrogates', () => {
-    expect(() => toBase64('\uD83D')).toThrow(TypeError);
-    expect(() => byteLength('x\uDC00')).toThrow(TypeError);
+    expect(() => toBase64('\uD83D')).toThrowError(/ARKI_STRING_E002/);
+    expect(() => byteLength('x\uDC00')).toThrowError(/ARKI_STRING_E002/);
   });
   it('encodes an url-safe alphabet', () => {
     expect(toBase64('ûÿ', { alphabet: 'url' })).not.toMatch(/[+/=]/u);
@@ -95,7 +95,7 @@ describe('strict decoding', () => {
     ['Zm9', { alphabet: 'url', padding: 'required' }],
     ['A', { alphabet: 'url' }],
   ] as const)('rejects %j with %j', (encoded, options) => {
-    expect(() => base64ToBytes(encoded, options)).toThrow(SyntaxError);
+    expect(() => base64ToBytes(encoded, options)).toThrowError(/ARKI_STRING_E003/);
     expect(tryFromBase64(encoded, options)).toBeNull();
   });
   it('accepts url input without padding by default', () => {
@@ -103,7 +103,7 @@ describe('strict decoding', () => {
   });
   it('separates binary from text decoding', () => {
     expect([...base64ToBytes('/w==')]).toEqual([255]);
-    expect(() => fromBase64('/w==')).toThrow(TypeError);
+    expect(() => fromBase64('/w==')).toThrowError(/ARKI_STRING_E002/);
     expect(tryFromBase64('/w==')).toBeNull();
   });
   it.each([
@@ -115,6 +115,6 @@ describe('strict decoding', () => {
     [[0x80], 'stray continuation'],
     [[0xff], 'invalid lead'],
   ])('utf8Decode rejects %j (%s)', bytes => {
-    expect(() => utf8Decode(new Uint8Array(bytes))).toThrow(TypeError);
+    expect(() => utf8Decode(new Uint8Array(bytes))).toThrowError(/ARKI_STRING_E002/);
   });
 });

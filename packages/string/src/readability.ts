@@ -10,6 +10,7 @@
 import type { TextInput } from './internal/analysis.js';
 import type { ReadabilityScores } from './internal/readability.js';
 import type { SyllableLanguage } from './internal/syllables.js';
+import { STRING_ERROR_CODES, StringError } from './errors.js';
 import { toAnalysis } from './internal/analysis.js';
 import { sum } from './internal/math.js';
 import {
@@ -150,7 +151,10 @@ export function speakingTime(text: TextInput, options: TimeOptions = {}): Readin
 
 function estimate(wordCount: number, wordsPerMinute: number): ReadingTime {
   if (!Number.isFinite(wordsPerMinute) || wordsPerMinute <= 0) {
-    throw new RangeError(`wordsPerMinute must be a positive finite number, got ${String(wordsPerMinute)}`);
+    throw new StringError(
+      STRING_ERROR_CODES.invalidArgument,
+      `wordsPerMinute must be a positive finite number, got ${String(wordsPerMinute)}`,
+    );
   }
   const minutes = wordCount / wordsPerMinute;
   return { words: wordCount, seconds: minutes * 60, minutes };

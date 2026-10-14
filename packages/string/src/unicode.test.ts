@@ -36,7 +36,7 @@ describe('positional operations', () => {
     expect(at(sample, -1)).toBe('B');
     expect(at(sample, 3)).toBeUndefined();
     expect(at(sample, -4)).toBeUndefined();
-    expect(() => at(sample, 1.5)).toThrow(RangeError);
+    expect(() => at(sample, 1.5)).toThrowError(/ARKI_STRING_E001/);
   });
   it('slice', () => {
     expect(slice(sample, 1, 2)).toBe('👩‍💻');
@@ -58,13 +58,13 @@ describe('positional operations', () => {
     expect(splice(sample, 1, 1, '-')).toBe('A-B');
     expect(splice(sample, 1, 0, 'x')).toBe('Ax👩‍💻B');
     expect(splice(sample, -1, 5)).toBe('A👩‍💻');
-    expect(() => splice(sample, 0, -1)).toThrow(RangeError);
+    expect(() => splice(sample, 0, -1)).toThrowError(/ARKI_STRING_E001/);
   });
   it('chunk', () => {
     expect(chunk(`ab${FAMILY}cd`, 2)).toEqual(['ab', `${FAMILY}c`, 'd']);
     expect(chunk('', 3)).toEqual([]);
     expect(chunk('abc', 3).join('')).toBe('abc');
-    expect(() => chunk('abc', 0)).toThrow(RangeError);
+    expect(() => chunk('abc', 0)).toThrowError(/ARKI_STRING_E001/);
   });
 });
 

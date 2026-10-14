@@ -64,7 +64,7 @@ describe('slugify', () => {
     expect(slugify('Hello World', { separator: '' })).toBe('helloworld');
     expect(slugify('Hello World', { lowercase: false })).toBe('Hello-World');
     expect(slugify('a.b.c', { preserveCharacters: ['.'] })).toBe('a.b.c');
-    expect(() => slugify('a', { preserveCharacters: ['-'] })).toThrow(TypeError);
+    expect(() => slugify('a', { preserveCharacters: ['-'] })).toThrowError(/ARKI_STRING_E001/);
     expect(slugify('_private', { preserveLeadingUnderscore: true })).toBe('_private');
     expect(slugify('_private')).toBe('private');
     expect(slugify('trailing-', { preserveTrailingDash: true })).toBe('trailing-');

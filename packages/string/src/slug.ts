@@ -8,6 +8,7 @@
  */
 
 import type { Replacements } from './slug/types.js';
+import { STRING_ERROR_CODES, StringError } from './errors.js';
 import { escapeRegExp } from './escape.js';
 import { rulesets } from './slug/rules.js';
 import { builtinReplacements, localeReplacements } from './slug/transliterations.js';
@@ -161,7 +162,10 @@ export function slugify(text: string, options: SlugifyOptions = {}): string {
   const lowercase = options.lowercase ?? true;
   const preserve = options.preserveCharacters ?? [];
   if (preserve.includes(separator)) {
-    throw new TypeError(`The separator ${JSON.stringify(separator)} cannot also be a preserved character`);
+    throw new StringError(
+      STRING_ERROR_CODES.invalidArgument,
+      `The separator ${JSON.stringify(separator)} cannot also be a preserved character`,
+    );
   }
 
   const leadingUnderscore = options.preserveLeadingUnderscore === true && text.startsWith('_');

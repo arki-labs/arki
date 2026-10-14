@@ -5,6 +5,7 @@
  */
 
 import type { KeywordLanguage } from './internal/stop-words.js';
+import { STRING_ERROR_CODES, StringError } from './errors.js';
 import { lower } from './internal/locale.js';
 import { STOP_WORDS } from './internal/stop-words.js';
 import { wordSpans } from './internal/words.js';
@@ -44,7 +45,10 @@ const CLAUSE_BREAK = /[.!?…,;:()[\]{}"“”„]|\s[-–—]\s|\n/u;
 function positiveInteger(value: number | undefined, fallback: number, name: string): number {
   const resolved = value ?? fallback;
   if (!Number.isInteger(resolved) || resolved < 1) {
-    throw new RangeError(`${name} must be a positive integer, got ${String(resolved)}`);
+    throw new StringError(
+      STRING_ERROR_CODES.invalidArgument,
+      `${name} must be a positive integer, got ${String(resolved)}`,
+    );
   }
   return resolved;
 }

@@ -118,6 +118,24 @@ const detach = attachPolicyLogger(policy, logger, 'billing');
 - `ResilienceError`, `CircuitOpenError`, `TimeoutError`, `CancelledError`, `BulkheadRejectedError`, `RetriesExhaustedError` — typed errors with helpers (`isResilienceError`, `isBrokenCircuitError`, `isBulkheadRejectedError`).
 - Types: `Policy`, `PolicyContext`, `PolicyCallback`, `RetryPolicy`, `CircuitBreakerPolicy`, `TimeoutPolicy`, `BulkheadPolicy`, `PolicyEvent`, `Subscription` and the event payloads `SuccessEvent`, `FailureEvent`, `FailureReason`, `RetryEvent`, `BreakEvent`.
 
+## Errors
+
+Every error the policies raise is a `ResilienceError` with a stable `code` and a `remediation`. Match on `error.code`, never on the message. Errors thrown by your own function pass through untouched.
+
+| Code                   | Class                   | Meaning                                                          |
+| ---------------------- | ----------------------- | ---------------------------------------------------------------- |
+| `ARKI_RESILIENCE_E001` | `CircuitOpenError`      | The circuit breaker is open and rejected the call.               |
+| `ARKI_RESILIENCE_E002` | `TimeoutError`          | A timeout policy reached its deadline.                           |
+| `ARKI_RESILIENCE_E003` | `CancelledError`        | The caller's own signal aborted the call. `cause` is its reason. |
+| `ARKI_RESILIENCE_E004` | `BulkheadRejectedError` | Every execution slot and queue slot was taken.                   |
+| `ARKI_RESILIENCE_E005` | `RetriesExhaustedError` | Every retry attempt failed. `lastError` holds the last one.      |
+
+The codes are also exported as `RESILIENCE_ERROR_CODES`.
+
+## Runtime support
+
+Node, Bun, Deno, modern browsers and React Native (Hermes). Pure ESM. The package uses only `setTimeout`, `AbortSignal` and `Promise` at call time, with no `node:*` imports and no `process` or `Buffer`. `bun run test:runtimes` runs a smoke test of the built package on every runtime; the Hermes leg needs a `hermes` binary (`HERMES_BIN`) and prints `INCOMPLETE` when it is missing.
+
 ## When does the overhead matter?
 
 Almost never. A policy adds a few microseconds to a call: the benchmarks below measure that on a call that returns at once, and on a call that waits 1 ms. The calls these policies guard, to a network service, an AI provider or a database, take milliseconds to seconds, so the policy costs well under one percent of the call it protects. The one case to think about is a hot loop over an in-memory function, where the policy can cost more than the work. There, wrap the loop, not each iteration.

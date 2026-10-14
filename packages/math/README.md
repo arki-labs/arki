@@ -703,6 +703,8 @@ polynomialRoots([1, 0, 0, 0, -1]).length; // 4
 
 ## Errors
 
+Every error has a stable `code` (`ARKI_MATH_E001` to `E011`, also exported as `MATH_ERROR_CODES`) and a one-sentence `remediation`. Match on the code, never on the message. Wrong runtime types still throw the built-in `TypeError`.
+
 ```ts
 import { MathError, RoundingNecessaryError } from '@arki/math/errors';
 
@@ -718,19 +720,19 @@ try {
 }
 ```
 
-| Error                      | When                                                                                                                                                                             |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NumberFormatError`        | a string is not a number in the accepted syntax                                                                                                                                  |
-| `InvalidArgumentError`     | reversed bounds, negative step, p out of range, …                                                                                                                                |
-| `DivisionByZeroError`      | division by zero, zero to a negative power                                                                                                                                       |
-| `RoundingNecessaryError`   | an exact result needs rounding and no mode was given                                                                                                                             |
-| `NumericRangeError`        | non-finite, unsafe integer, overflow or underflow                                                                                                                                |
-| `EmptyDataError`           | a statistic of an empty (or too small) data set                                                                                                                                  |
-| `ResourceLimitError`       | more than 10 000 digits, or an exponent beyond ±10 000                                                                                                                           |
-| `UnsupportedFeatureError`  | the runtime's `Intl` lacks a feature the call relies on                                                                                                                          |
-| `SingularMatrixError`      | `solve`/`inverse` met a matrix singular to working precision                                                                                                                     |
-| `ConvergenceError`         | an iterative method did not converge (`polynomialRoots`, eigenvalues, SVD; `RootConvergenceError`, `IntegrationConvergenceError`, `ExtrapolationConvergenceError` carry `.best`) |
-| `NotPositiveDefiniteError` | `choleskyDecompose` met a matrix that is not positive definite                                                                                                                   |
+| Code             | Error                      | When                                                                                                                                                                             |
+| ---------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ARKI_MATH_E001` | `NumberFormatError`        | a string is not a number in the accepted syntax                                                                                                                                  |
+| `ARKI_MATH_E002` | `InvalidArgumentError`     | reversed bounds, negative step, p out of range, …                                                                                                                                |
+| `ARKI_MATH_E003` | `DivisionByZeroError`      | division by zero, zero to a negative power                                                                                                                                       |
+| `ARKI_MATH_E004` | `RoundingNecessaryError`   | an exact result needs rounding and no mode was given                                                                                                                             |
+| `ARKI_MATH_E005` | `NumericRangeError`        | non-finite, unsafe integer, overflow or underflow                                                                                                                                |
+| `ARKI_MATH_E006` | `EmptyDataError`           | a statistic of an empty (or too small) data set                                                                                                                                  |
+| `ARKI_MATH_E007` | `ResourceLimitError`       | more than 10 000 digits, or an exponent beyond ±10 000                                                                                                                           |
+| `ARKI_MATH_E008` | `UnsupportedFeatureError`  | the runtime's `Intl` lacks a feature the call relies on                                                                                                                          |
+| `ARKI_MATH_E009` | `SingularMatrixError`      | `solve`/`inverse` met a matrix singular to working precision                                                                                                                     |
+| `ARKI_MATH_E010` | `ConvergenceError`         | an iterative method did not converge (`polynomialRoots`, eigenvalues, SVD; `RootConvergenceError`, `IntegrationConvergenceError`, `ExtrapolationConvergenceError` carry `.best`) |
+| `ARKI_MATH_E011` | `NotPositiveDefiniteError` | `choleskyDecompose` met a matrix that is not positive definite                                                                                                                   |
 
 ## Runtime support
 
@@ -870,6 +872,7 @@ every dataset.
 The polynomial and least-squares rows hold on both V8 and JavaScriptCore.
 
 <!-- bench:start -->
+
 ## Benchmarks
 
 Speed of `@arki/math` against the libraries most people reach for: decimal.js, big.js and bignumber.js for decimal arithmetic; fraction.js for exact fractions; simple-statistics and jstat for descriptive statistics; jstat for probability distributions; simple-statistics and regression (regression-js) for curve fitting; ml-matrix and mathjs for linear algebra; complex.js and mathjs for complex numbers; mathjs for polynomial roots. Each table only ranks libraries that returned the same result on every checked input. The published tables come from a publish run on an idle machine and keep every case, including the ones where `@arki/math` is slower.
@@ -878,110 +881,110 @@ Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is b
 
 ### Decimal plus (1234.5678 + 98.76)
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/math | 102.0 ns | fastest |
-| decimal.js | 388.5 ns | 3.81× |
-| big.js | 386.0 ns | 3.78× |
-| bignumber.js | 268.1 ns | 2.63× |
+| Library      | Time / op | vs fastest |
+| ------------ | --------: | ---------: |
+| @arki/math   |  102.0 ns |    fastest |
+| decimal.js   |  388.5 ns |      3.81× |
+| big.js       |  386.0 ns |      3.78× |
+| bignumber.js |  268.1 ns |      2.63× |
 
 ### Decimal times
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/math | 98.7 ns | fastest |
-| decimal.js | 664.9 ns | 6.73× |
-| big.js | 332.4 ns | 3.37× |
-| bignumber.js | 502.8 ns | 5.09× |
+| Library      | Time / op | vs fastest |
+| ------------ | --------: | ---------: |
+| @arki/math   |   98.7 ns |    fastest |
+| decimal.js   |  664.9 ns |      6.73× |
+| big.js       |  332.4 ns |      3.37× |
+| bignumber.js |  502.8 ns |      5.09× |
 
 ### Decimal divide, 10 places, half-even
 
 Every library rounds the quotient to 10 decimal places, half-even. The other libraries divide at a working precision first and round after; `@arki/math` rounds once, exactly.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/math dividedBy({ scale, rounding }) | 673.5 ns | fastest |
-| decimal.js div + toDecimalPlaces | 11.21 µs | 16.65× |
-| big.js div + round | 4.12 µs | 6.11× |
-| bignumber.js dividedBy + decimalPlaces | 13.34 µs | 19.81× |
+| Library                                   | Time / op | vs fastest |
+| ----------------------------------------- | --------: | ---------: |
+| @arki/math dividedBy({ scale, rounding }) |  673.5 ns |    fastest |
+| decimal.js div + toDecimalPlaces          |  11.21 µs |     16.65× |
+| big.js div + round                        |   4.12 µs |      6.11× |
+| bignumber.js dividedBy + decimalPlaces    |  13.34 µs |     19.81× |
 
 ### Decimal parse a string
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/math decimal() | 476.1 ns | fastest |
-| decimal.js | 712.0 ns | 1.50× |
-| big.js | 699.4 ns | 1.47× |
-| bignumber.js | 911.6 ns | 1.91× |
+| Library              | Time / op | vs fastest |
+| -------------------- | --------: | ---------: |
+| @arki/math decimal() |  476.1 ns |    fastest |
+| decimal.js           |  712.0 ns |      1.50× |
+| big.js               |  699.4 ns |      1.47× |
+| bignumber.js         |  911.6 ns |      1.91× |
 
 ### Decimal toString (30 integer digits, 9 decimals)
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/math | 336.6 ns | 1.00× |
-| decimal.js | 460.7 ns | 1.37× |
-| big.js | 2.06 µs | 6.13× |
-| bignumber.js | 336.3 ns | fastest |
+| Library      | Time / op | vs fastest |
+| ------------ | --------: | ---------: |
+| @arki/math   |  336.6 ns |      1.00× |
+| decimal.js   |  460.7 ns |      1.37× |
+| big.js       |   2.06 µs |      6.13× |
+| bignumber.js |  336.3 ns |    fastest |
 
 ### Rational plus (355/113 + 22/7)
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/math ratio | 235.6 ns | fastest |
-| fraction.js | 441.5 ns | 1.87× |
+| Library          | Time / op | vs fastest |
+| ---------------- | --------: | ---------: |
+| @arki/math ratio |  235.6 ns |    fastest |
+| fraction.js      |  441.5 ns |      1.87× |
 
 ### Rational times
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/math ratio | 619.0 ns | 1.77× |
-| fraction.js | 349.4 ns | fastest |
+| Library          | Time / op | vs fastest |
+| ---------------- | --------: | ---------: |
+| @arki/math ratio |  619.0 ns |      1.77× |
+| fraction.js      |  349.4 ns |    fastest |
 
 ### Mean of 1,000 numbers
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/math | 34.69 µs | 12.80× |
-| simple-statistics | 2.71 µs | fastest |
+| Library           | Time / op | vs fastest |
+| ----------------- | --------: | ---------: |
+| @arki/math        |  34.69 µs |     12.80× |
+| simple-statistics |   2.71 µs |    fastest |
 
 ### Standard deviation of 1,000 numbers (population)
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/math | 14.85 µs | 5.85× |
-| simple-statistics standardDeviation | 2.54 µs | fastest |
+| Library                             | Time / op | vs fastest |
+| ----------------------------------- | --------: | ---------: |
+| @arki/math                          |  14.85 µs |      5.85× |
+| simple-statistics standardDeviation |   2.54 µs |    fastest |
 
 ### 90th percentile of 1,000 numbers
 
 Both interpolate linearly between ranks, so results agree to rounding.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/math percentile | 304.59 µs | 61.28× |
-| simple-statistics quantile | 4.97 µs | fastest |
+| Library                    | Time / op | vs fastest |
+| -------------------------- | --------: | ---------: |
+| @arki/math percentile      | 304.59 µs |     61.28× |
+| simple-statistics quantile |   4.97 µs |    fastest |
 
 ### Normal distribution cdf at 1.96
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/math normal().cdf | 470.7 ns | 2.34× |
-| jstat normal.cdf | 201.3 ns | fastest |
+| Library                 | Time / op | vs fastest |
+| ----------------------- | --------: | ---------: |
+| @arki/math normal().cdf |  470.7 ns |      2.34× |
+| jstat normal.cdf        |  201.3 ns |    fastest |
 
 ### Normal distribution quantile at 0.975
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/math normal().quantile | 1.28 µs | fastest |
-| jstat normal.inv | 2.39 µs | 1.88× |
+| Library                      | Time / op | vs fastest |
+| ---------------------------- | --------: | ---------: |
+| @arki/math normal().quantile |   1.28 µs |    fastest |
+| jstat normal.inv             |   2.39 µs |      1.88× |
 
 ### Student t (10 degrees of freedom) quantile at 0.975
 
 `@arki/math` solves the quantile until |cdf(x) − p| ≤ 1e-12 and rejects bad input; jstat uses a looser fixed approximation with no input checks.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/math studentT(10).quantile | 4.90 µs | 5.03× |
-| jstat studentt.inv | 974.2 ns | fastest |
+| Library                          | Time / op | vs fastest |
+| -------------------------------- | --------: | ---------: |
+| @arki/math studentT(10).quantile |   4.90 µs |      5.03× |
+| jstat studentt.inv               |  974.2 ns |    fastest |
 
 Read the rows with the contracts in mind:
 

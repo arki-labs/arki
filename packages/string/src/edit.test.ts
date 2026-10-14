@@ -31,7 +31,7 @@ describe('replace*', () => {
     expect(replaceStart('barfoo', 'foo', 'x')).toBe('barfoo');
     expect(replaceEnd('foobar', 'bar', 'x')).toBe('foox');
     expect(replaceEnd('barfoo', 'bar', 'x')).toBe('barfoo');
-    expect(() => replaceFirst('abc', '', 'x')).toThrow(TypeError);
+    expect(() => replaceFirst('abc', '', 'x')).toThrowError(/ARKI_STRING_E001/);
     expect(replaceFirst('é', 'e', 'x')).toBe('é');
   });
 });
@@ -41,13 +41,13 @@ describe('swap / deduplicate', () => {
     expect(swap('ab', { a: 'b', b: 'c' })).toBe('bc');
     expect(swap('abc', { ab: '1', a: '2', abc: '3' })).toBe('3');
     expect(swap('hello', {})).toBe('hello');
-    expect(() => swap('x', { '': 'y' })).toThrow(TypeError);
+    expect(() => swap('x', { '': 'y' })).toThrowError(/ARKI_STRING_E001/);
   });
   it('deduplicates adjacent tokens', () => {
     expect(deduplicate('a   b  c')).toBe('a b c');
     expect(deduplicate('a..b...c', '.')).toBe('a.b.c');
     expect(deduplicate('a--b', '-')).toBe('a-b');
-    expect(() => deduplicate('x', '')).toThrow(TypeError);
+    expect(() => deduplicate('x', '')).toThrowError(/ARKI_STRING_E001/);
   });
 });
 
@@ -65,7 +65,7 @@ describe('wrap / unwrap / mask', () => {
     expect(mask('taylor@example.com', { start: 3, end: -4 })).toBe('tay***********.com');
     expect(mask('ab👩‍💻cd', { start: 1, end: 3, glyph: '#' })).toBe('a##cd');
     expect(mask('abc', { start: 2, end: 1 })).toBe('abc');
-    expect(() => mask('abc', { start: 0.5 })).toThrow(RangeError);
+    expect(() => mask('abc', { start: 0.5 })).toThrowError(/ARKI_STRING_E001/);
   });
 });
 
@@ -75,8 +75,8 @@ describe('padding', () => {
     expect(padStart('👩‍💻', 3, '-')).toBe('--👩‍💻');
     expect(padEnd('a', 4, '👍🏽x')).toBe('a👍🏽x👍🏽');
     expect(padStart('abc', 2)).toBe('abc');
-    expect(() => padStart('a', 3, '')).toThrow(TypeError);
-    expect(() => padStart('a', -1)).toThrow(RangeError);
+    expect(() => padStart('a', 3, '')).toThrowError(/ARKI_STRING_E001/);
+    expect(() => padStart('a', -1)).toThrowError(/ARKI_STRING_E001/);
   });
 });
 
@@ -109,17 +109,17 @@ describe('interpolate', () => {
     expect(interpolate('[{{ value }}]', { value: null })).toBe('[]');
   });
   it('handles missing keys per policy', () => {
-    expect(() => interpolate('{{ nope }}', {})).toThrow(ReferenceError);
-    expect(() => interpolate('{{ value }}', { value: undefined })).toThrow(ReferenceError);
+    expect(() => interpolate('{{ nope }}', {})).toThrowError(/ARKI_STRING_E005/);
+    expect(() => interpolate('{{ value }}', { value: undefined })).toThrowError(/ARKI_STRING_E005/);
     expect(interpolate('a {{ nope }} b', {}, { missing: 'keep' })).toBe('a {{ nope }} b');
     expect(interpolate('a {{ nope }} b', {}, { missing: 'empty' })).toBe('a  b');
-    expect(() => interpolate('{{ toString }}', {})).toThrow(ReferenceError);
+    expect(() => interpolate('{{ toString }}', {})).toThrowError(/ARKI_STRING_E005/);
   });
   it('escapes and rejects malformed placeholders', () => {
     expect(interpolate(String.raw`\{{ raw }} and \\ slash`, {})).toBe(String.raw`{{ raw }} and \ slash`);
-    expect(() => interpolate('{{ open', {})).toThrow(SyntaxError);
-    expect(() => interpolate('{{ a.b }}', {})).toThrow(SyntaxError);
-    expect(() => interpolate('{{ }}', {})).toThrow(SyntaxError);
+    expect(() => interpolate('{{ open', {})).toThrowError(/ARKI_STRING_E004/);
+    expect(() => interpolate('{{ a.b }}', {})).toThrowError(/ARKI_STRING_E004/);
+    expect(() => interpolate('{{ }}', {})).toThrowError(/ARKI_STRING_E004/);
   });
 });
 
@@ -147,15 +147,15 @@ describe('replacement strings are literal', () => {
     expect(replaceAll('é e', 'e', 'X')).toBe('é X');
     expect(replaceAll('aaa', 'aa', 'b')).toBe('ba');
     expect(replaceAll('abc', 'z', 'y')).toBe('abc');
-    expect(() => replaceAll('abc', '', 'y')).toThrow(TypeError);
+    expect(() => replaceAll('abc', '', 'y')).toThrowError(/ARKI_STRING_E001/);
   });
 });
 
 describe('padding and mask keep their grapheme contract', () => {
   it('rejects fills that merge into neighbours', () => {
-    expect(() => padEnd('a', 3, '́')).toThrow(RangeError);
-    expect(() => padStart('a', 3, '\u{1F1F7}')).toThrow(RangeError);
+    expect(() => padEnd('a', 3, '́')).toThrowError(/ARKI_STRING_E001/);
+    expect(() => padStart('a', 3, '\u{1F1F7}')).toThrowError(/ARKI_STRING_E001/);
     expect(padEnd('a', 3, '\u{1F1F7}\u{1F1F4}')).toBe('a\u{1F1F7}\u{1F1F4}\u{1F1F7}\u{1F1F4}');
-    expect(() => mask('abc', { glyph: '́' })).toThrow(RangeError);
+    expect(() => mask('abc', { glyph: '́' })).toThrowError(/ARKI_STRING_E001/);
   });
 });

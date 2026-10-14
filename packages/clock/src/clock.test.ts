@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
 import { MockClock, SystemClock } from './clock.js';
+import { CLOCK_ERROR_CODES, ClockError } from './errors.js';
+
+describe('ClockError', () => {
+  it('carries a stable code and a remediation, so callers match on the code and not the message', () => {
+    const clock = new MockClock();
+    try {
+      clock.advance(-5);
+      expect.unreachable('advance(-5) should throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ClockError);
+      expect(error).toMatchObject({ code: CLOCK_ERROR_CODES.invalidAdvance, name: 'ClockError' });
+      expect(error instanceof ClockError && error.remediation.length > 0).toBe(true);
+    }
+    expect(CLOCK_ERROR_CODES.invalidAdvance).toBe('ARKI_CLOCK_E001');
+  });
+});
 
 describe('SystemClock', () => {
   it('returns the current system time within a tight window', () => {
@@ -50,13 +66,13 @@ describe('MockClock', () => {
 
   it('rejects negative advances so tests cannot silently rewind time', () => {
     const clock = new MockClock();
-    expect(() => clock.advance(-1)).toThrow(RangeError);
+    expect(() => clock.advance(-1)).toThrowError(/ARKI_CLOCK_E001/);
   });
 
   it('rejects non-finite advances', () => {
     const clock = new MockClock();
-    expect(() => clock.advance(Number.NaN)).toThrow(RangeError);
-    expect(() => clock.advance(Number.POSITIVE_INFINITY)).toThrow(RangeError);
+    expect(() => clock.advance(Number.NaN)).toThrowError(/ARKI_CLOCK_E001/);
+    expect(() => clock.advance(Number.POSITIVE_INFINITY)).toThrowError(/ARKI_CLOCK_E001/);
   });
 
   it('returns a fresh Date on every call so callers cannot mutate clock state', () => {

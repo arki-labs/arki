@@ -18,7 +18,8 @@ const runtime = globalThis.Deno
 const checks = [];
 const check = (name, actual, expected) => checks.push({ name, ok: actual === expected, actual, expected });
 
-check('segmenter state', typeof Intl.Segmenter === 'function', !forceFallback);
+// Hermes V1 has no Intl.Segmenter, so it always runs the fallback path.
+check('segmenter state', typeof Intl.Segmenter === 'function', !forceFallback && typeof HermesInternal === 'undefined');
 check('unicode length', s.length('👨‍👩‍👧‍👦é'), 2);
 check('unicode at', s.at('A👩‍💻B', 1), '👩‍💻');
 check('unicode flag tags', s.length('🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}'), 1);
@@ -57,10 +58,10 @@ if (failed.length > 0) throw new Error(`${failed.length} smoke check(s) failed o
 // The fallback run. The segmenter is cached on first use, so it needs a fresh process.
 const onNodeOrBun = !forceFallback && (globalThis.Bun || globalThis.process?.versions?.node) && !globalThis.Deno;
 if (onNodeOrBun) {
-  // A variable specifier keeps `bun build --target=browser` from trying to bundle the Node builtin.
-  const childProcess = 'node:child_process';
-  const { spawnSync } = await import(childProcess);
-  const result = spawnSync(globalThis.process.execPath, [new URL(import.meta.url).pathname, '--no-intl-segmenter'], {
+  // `getBuiltinModule`, not `import()`: it keeps `bun build --target=browser` from bundling the Node builtin, and Hermes rejects `import()` as a syntax error even in code that never runs there.
+  const { spawnSync } = globalThis.process.getBuiltinModule('node:child_process');
+  // `process.argv[1]`, not `import.meta.url`: Hermes rejects `import.meta` as a syntax error even in code that never runs there.
+  const result = spawnSync(globalThis.process.execPath, [globalThis.process.argv[1], '--no-intl-segmenter'], {
     encoding: 'utf8',
   });
   globalThis.process.stdout.write(result.stdout);

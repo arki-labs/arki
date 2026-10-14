@@ -80,7 +80,7 @@ function exactDecimal(x: number): Decimal {
   const view = new DataView(new ArrayBuffer(8));
   view.setFloat64(0, x);
   const bits = view.getBigUint64(0);
-  const biased = Number((bits >> 52n) & 0x7ffn);
+  const biased = Number((bits >> 52n) & 2047n);
   const fraction = bits & ((1n << 52n) - 1n);
   const mantissa = biased === 0 ? fraction : fraction | (1n << 52n);
   const exponent = biased === 0 ? -1074 : biased - 1075;
@@ -118,7 +118,10 @@ describe('NIST StRD univariate summary statistics', () => {
     });
 
     it(`${name}: on numbers, stddev keeps ≥ 14 digits of the exact stddev of its binary inputs`, () => {
-      const exact = stddev(values.map(exactDecimal), { scale: 40, rounding: 'halfEven' });
+      const exact = stddev(
+        values.map(value => exactDecimal(value)),
+        { scale: 40, rounding: 'halfEven' },
+      );
       expect(lre(stddev(values), Number(exact.toString()))).toBeGreaterThanOrEqual(14);
     });
 

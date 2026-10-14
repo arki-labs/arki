@@ -190,7 +190,7 @@ The schemas take the JSON shape as input, so tRPC and oRPC clients infer what to
 
 ## Errors
 
-Every deliberate failure extends `MathError` from `@arki/math`, so one `instanceof` catches both libraries. Money-only errors extend `MoneyError`: `CurrencyMismatchError`, `UnknownCurrencyError`, `ExchangeRateError`, `ProviderAmountError`. Shared ones: `RoundingNecessaryError`, `DivisionByZeroError`, `InvalidArgumentError`, `NumberFormatError`, `NumericRangeError`, `ResourceLimitError`, `EmptyDataError`, `UnsupportedFeatureError`.
+Every deliberate failure extends `MathError` from `@arki/math`, so one `instanceof` catches both libraries. Money-only errors extend `MoneyError`: `CurrencyMismatchError`, `UnknownCurrencyError`, `ExchangeRateError`, `ProviderAmountError`. Each has a stable `code` and a `remediation`; match on the code, never on the message. The money-only codes are `ARKI_MONEY_E001` (`CurrencyMismatchError`), `E002` (`UnknownCurrencyError`; the bad text is `currencyCode`), `E003` (`ExchangeRateError`) and `E004` (`ProviderAmountError`), also exported as `MONEY_ERROR_CODES`. Shared ones keep their `ARKI_MATH_*` codes: `RoundingNecessaryError`, `DivisionByZeroError`, `InvalidArgumentError`, `NumberFormatError`, `NumericRangeError`, `ResourceLimitError`, `EmptyDataError`, `UnsupportedFeatureError`.
 
 ## Entry points
 
