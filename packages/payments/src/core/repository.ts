@@ -239,13 +239,28 @@ export class PaymentRepository {
   }
 
   // Customer methods
+  /**
+   * A user has one customer, and a provider customer is one row. Two checkouts that race to
+   * create the same customer both succeed: the second gets the row the first wrote. A customer
+   * that clashes with a different one (another provider id for the user, or the provider id
+   * of another user) is an error, not a silent pick of either row.
+   */
   async createCustomer(data: NewCustomer): Promise<Customer> {
-    const result = await this.db.insert(this.customers).values(data).returning();
-    const row = result[0];
-    if (!row) {
-      throw new Error('Failed to create customer');
+    const [created] = await this.db.insert(this.customers).values(data).onConflictDoNothing().returning();
+    if (created) {
+      return created as Customer;
     }
-    return row as Customer;
+
+    const existing = await this.findCustomerByUserId(data.userId);
+    if (existing && existing.providerCustomerId === data.providerCustomerId) {
+      return existing;
+    }
+
+    throw new Error(
+      existing
+        ? `User ${data.userId} already has customer ${existing.id} with provider customer ${existing.providerCustomerId}`
+        : `Provider customer ${data.providerCustomerId} already belongs to another user`,
+    );
   }
 
   async findCustomerById(id: CustomerId): Promise<Customer | null> {

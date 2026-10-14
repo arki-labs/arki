@@ -69,18 +69,26 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
     (_table) => [check('plans_price_minor_not_negative', sql`"price_minor" >= 0`)],
   );
 
-  const customers = schema.table('customers', {
-    id: customerIdFactory.primaryColumn(),
-    userId: userFk.required('user_id', { onDelete: 'cascade' }),
-    providerCustomerId: varchar('provider_customer_id', { length: 255 }).notNull(),
-    provider: paymentProviderEnum('provider').$type<PaymentProviderType>().notNull().default('stripe'),
-    email: varchar('email', { length: 255 }).notNull(),
-    name: varchar('name', { length: 255 }),
-    defaultPaymentMethodId: varchar('default_payment_method_id', { length: 255 }),
-    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-    createdAt: instant('created_at').notNull().default(sql`now()`),
-    updatedAt: instant('updated_at').notNull().default(sql`now()`),
-  });
+  const customers = schema.table(
+    'customers',
+    {
+      id: customerIdFactory.primaryColumn(),
+      userId: userFk.required('user_id', { onDelete: 'cascade' }),
+      providerCustomerId: varchar('provider_customer_id', { length: 255 }).notNull(),
+      provider: paymentProviderEnum('provider').$type<PaymentProviderType>().notNull().default('stripe'),
+      email: varchar('email', { length: 255 }).notNull(),
+      name: varchar('name', { length: 255 }),
+      defaultPaymentMethodId: varchar('default_payment_method_id', { length: 255 }),
+      metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+      createdAt: instant('created_at').notNull().default(sql`now()`),
+      updatedAt: instant('updated_at').notNull().default(sql`now()`),
+    },
+    // One customer per user, and one row per provider customer: the lookups by either id read a single row
+    (table) => [
+      uniqueIndex('customers_user_id_idx').on(table.userId),
+      uniqueIndex('customers_provider_customer_id_idx').on(table.providerCustomerId),
+    ],
+  );
 
   const subscriptions = schema.table(
     'subscriptions',
