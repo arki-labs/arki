@@ -31,11 +31,13 @@ import type {
 import type {
   ActivateSubscriptionInput,
   CancelSubscriptionInput,
+  ChangeSubscriptionPlanInput,
   CreateSubscriptionInput,
   MarkSubscriptionPastDueInput,
   PauseSubscriptionInput,
   ReactivateSubscriptionInput,
   ResumeSubscriptionInput,
+  SetSubscriptionCancelAtPeriodEndInput,
   SyncSubscriptionInput,
 } from './journal/subscription.js';
 import type { CoreTables } from './tables.js';
@@ -56,11 +58,13 @@ export {
 export {
   activateSubscriptionInputSchema,
   cancelSubscriptionInputSchema,
+  changeSubscriptionPlanInputSchema,
   createSubscriptionInputSchema,
   markSubscriptionPastDueInputSchema,
   pauseSubscriptionInputSchema,
   reactivateSubscriptionInputSchema,
   resumeSubscriptionInputSchema,
+  setSubscriptionCancelAtPeriodEndInputSchema,
   syncSubscriptionInputSchema,
 } from './journal/subscription.js';
 export type {
@@ -105,6 +109,10 @@ export type CoreWrites = {
   reactivateSubscription(input: ReactivateSubscriptionInput): Promise<Subscription>;
   pauseSubscription(input: PauseSubscriptionInput): Promise<Subscription>;
   resumeSubscription(input: ResumeSubscriptionInput): Promise<Subscription>;
+  /** The provider moved the subscription to another plan. The same plan again writes nothing. */
+  changeSubscriptionPlan(input: ChangeSubscriptionPlanInput): Promise<Subscription>;
+  /** Set or clear "ends at the period end", as the provider reports it. The status does not change. */
+  setSubscriptionCancelAtPeriodEnd(input: SetSubscriptionCancelAtPeriodEndInput): Promise<Subscription>;
   markSubscriptionPastDue(input: MarkSubscriptionPastDueInput): Promise<Subscription>;
   activateSubscription(input: ActivateSubscriptionInput): Promise<Subscription>;
 };
@@ -138,6 +146,10 @@ export function createCoreJournal<Meta extends z.ZodObject, Tx extends Transacti
         writtenRow(run(commands.reactivateSubscription, input), 'reactivateSubscription'),
       pauseSubscription: input => writtenRow(run(commands.pauseSubscription, input), 'pauseSubscription'),
       resumeSubscription: input => writtenRow(run(commands.resumeSubscription, input), 'resumeSubscription'),
+      changeSubscriptionPlan: input =>
+        writtenRow(run(commands.changeSubscriptionPlan, input), 'changeSubscriptionPlan'),
+      setSubscriptionCancelAtPeriodEnd: input =>
+        writtenRow(run(commands.setSubscriptionCancelAtPeriodEnd, input), 'setSubscriptionCancelAtPeriodEnd'),
       markSubscriptionPastDue: input =>
         writtenRow(run(commands.markSubscriptionPastDue, input), 'markSubscriptionPastDue'),
       activateSubscription: input => writtenRow(run(commands.activateSubscription, input), 'activateSubscription'),

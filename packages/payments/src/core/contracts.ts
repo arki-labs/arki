@@ -87,12 +87,16 @@ export const createSubscriptionInputSchema = z.object({
   customerDetails: customerDetailsSchema,
 });
 
-export const updateSubscriptionInputSchema = z.object({
-  planId: planIdSchema.optional(),
-  paymentMethodId: z.string().optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-  cancelAtPeriodEnd: z.boolean().optional(),
-});
+export const updateSubscriptionInputSchema = z
+  .object({
+    planId: planIdSchema.optional(),
+    paymentMethodId: z.string().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    cancelAtPeriodEnd: z.boolean().optional(),
+  })
+  .refine(data => data.planId !== undefined || data.cancelAtPeriodEnd !== undefined, {
+    message: 'Give a planId, a cancelAtPeriodEnd, or both',
+  });
 
 export const cancelSubscriptionInputSchema = z.object({
   immediately: z.boolean().default(false),

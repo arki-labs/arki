@@ -13,12 +13,14 @@ import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { instant } from '@arki/date';
+import { Money } from '@arki/money';
 
 import type { AppDb } from '../../test-support.js';
 import type { CoreWrites } from '../journal.js';
 import type { Subscription, SubscriptionId } from '../types.js';
 import { coreReads, runnerOn, seedSubscription, subscriptionRow, unexpectedCall } from '../../service-test-support.js';
-import { countEvents, eventTypesOf, openDb, rejectionOf, typed } from '../../test-support.js';
+import { core, countEvents, eventTypesOf, openDb, planId, rejectionOf, typed } from '../../test-support.js';
+import { createPlanId } from '../primitives.js';
 import { SubscriptionManager } from './subscription-manager.js';
 
 type Provider = ConstructorParameters<typeof SubscriptionManager>[0];
@@ -45,8 +47,17 @@ function providerReporting(report: (current: Subscription) => Subscription): Pro
 
   return {
     createSubscription: unexpectedCall('createSubscription'),
-    updateSubscription: unexpectedCall('updateSubscription'),
-    previewSubscriptionChange: unexpectedCall('previewSubscriptionChange'),
+    updateSubscription: answer,
+    previewSubscriptionChange: () =>
+      Promise.resolve({
+        planId,
+        proration: {
+          immediateTotal: Money.zero('USD').toJSON(),
+          nextInvoiceTotal: Money.zero('USD').toJSON(),
+          creditApplied: Money.zero('USD').toJSON(),
+        },
+        nextBillingDate: instant('2026-02-01T00:00:00.000Z'),
+      }),
     cancelSubscription: answer,
     reactivateSubscription: answer,
     pauseSubscription: answer,
@@ -114,6 +125,51 @@ describe('cancelSubscription', () => {
     await expectRefused(
       () => manager.cancelSubscription(id),
       'Failed to cancel subscription: Subscription is already canceled',
+      id,
+    );
+  });
+});
+
+describe('updateSubscription', () => {
+  it('stores the plan the provider moved the subscription to, and records one event', async () => {
+    const { id } = await seedSubscription(writes, 'active');
+    const premium = createPlanId();
+    await db.insert(core.plans).values({ id: premium, name: 'Premium', priceMinor: 2000 });
+    const manager = managerWith(current => ({ ...current, planId: premium }));
+
+    const result = await manager.updateSubscription(id, premium);
+
+    expect(result.subscription).toMatchObject({ id, planId: premium });
+    expect(await subscriptionRow(db, id)).toMatchObject({ planId: premium });
+    expect(await eventTypesOf(db, 'subscription', id)).toEqual(['SubscriptionCreated', 'SubscriptionPlanChanged']);
+  });
+});
+
+describe('setCancelAtPeriodEnd', () => {
+  it('sets and clears the flag with the provider, keeps the status, and records one event each time', async () => {
+    const { id } = await seedSubscription(writes, 'active');
+    const flagged = async (cancelAtPeriodEnd: boolean) => {
+      await managerWith(current => ({ ...current, cancelAtPeriodEnd })).setCancelAtPeriodEnd(id, cancelAtPeriodEnd);
+
+      return subscriptionRow(db, id);
+    };
+
+    expect(await flagged(true)).toMatchObject({ status: 'active', cancelAtPeriodEnd: true });
+    expect(await flagged(false)).toMatchObject({ status: 'active', cancelAtPeriodEnd: false });
+    expect(await eventTypesOf(db, 'subscription', id)).toEqual([
+      'SubscriptionCreated',
+      'SubscriptionCancelAtPeriodEndSet',
+      'SubscriptionCancelAtPeriodEndSet',
+    ]);
+  });
+
+  it('a canceled subscription is refused before the provider is asked, and nothing is written', async () => {
+    const { id } = await seedSubscription(writes, 'canceled');
+    const manager = managerWith(current => ({ ...current, cancelAtPeriodEnd: true }));
+
+    await expectRefused(
+      () => manager.setCancelAtPeriodEnd(id, true),
+      'Failed to set cancel at period end: Subscription is already canceled',
       id,
     );
   });
