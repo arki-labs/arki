@@ -1836,38 +1836,84 @@ export function qrDecompose(a: Matrix, options?: QrOptions): QrDecomposition {
 }
 
 /**
- * Doubles a power-of-two scaled matrix when the exponent is odd, so `√scale`
- * is an exact power of two as well and unscaling `L` adds no rounding (an
- * integer matrix with an integer factor gets it exactly).
+ * Cholesky–Banachiewicz (LAPACK `dpotrf`'s arithmetic) on a fresh `number[][]`
+ * copy of a square matrix (`n×n`, validated by the caller), row by row, so each inner product walks
+ * two rows; the copy becomes `L`. Unscaled: every product is bounded by a
+ * diagonal entry of `A`, so nothing overflows, and an integer matrix with an
+ * integer factor gets it exactly.
+ *
+ * Symmetry is checked as each lower entry `a[i][j]` is reached (the upper
+ * triangle still holds the input), against `n · ε · ‖A‖∞` or `symmetry`
+ * (absolute), and the factorization uses the mean of `a[i][j]` and `a[j][i]`.
+ * A non-symmetric matrix always throws `InvalidArgumentError`, even when a
+ * pivot fails first. Stops at the first diagonal pivot `d` (the value whose
+ * square root becomes `l_ii`) that is not above `floor`: returns that `d` and
+ * its index. On success every entry is finite (an overflow would have made a
+ * later pivot `−∞` or `NaN`) and the upper triangle is zero.
  */
-function evenlyScaled<T extends { w: Float64Array[]; scale: number }>(input: T): T {
-  if (Number.isInteger(Math.log2(input.scale) / 2)) return input;
-  for (const row of input.w) for (let j = 0; j < row.length; j++) row[j]! *= 2;
-  return { ...input, scale: input.scale * 2 };
-}
-
-/**
- * Cholesky–Banachiewicz on the lower triangle of `w`, in place, row by row (each
- * inner product walks two rows). Stops at the first diagonal pivot `d` (the
- * value whose square root becomes `l_ii`) at or below `floor`, leaves `d` in
- * `w[i][i]` and returns `i`; returns `-1` on success.
- */
-function choleskyInPlace(w: Float64Array[], n: number, floor: number): number {
+function cholesky(
+  a: Matrix,
+  n: number,
+  symmetry: number | undefined,
+  floor: (norm: number) => number,
+): { lower: number[][]; norm: number; failed?: { index: number; pivot: number; threshold: number } } {
+  const w: number[][] = [];
+  let norm = 0;
+  for (const source of a) {
+    let sum = 0;
+    for (const x of source) sum += Math.abs(x);
+    if (sum > norm) norm = sum;
+    // eslint-disable-next-line unicorn/prefer-spread -- slice keeps JavaScriptCore's unboxed double storage; a spread copy boxes the entries and makes the factorization about 2.5× slower in Bun
+    w.push(source.slice());
+  }
+  const tolerance = symmetry ?? n * EPS * norm;
+  const threshold = floor(norm);
+  const asymmetry = (i: number, j: number, lower: number, upper: number): InvalidArgumentError =>
+    new InvalidArgumentError(
+      `a is not symmetric: |a[${i}][${j}] − a[${j}][${i}]| = ${Math.abs(lower - upper)} exceeds the tolerance`,
+    );
   for (let i = 0; i < n; i++) {
     const row = w[i]!;
     for (let j = 0; j < i; j++) {
       const other = w[j]!;
-      let s = row[j]!;
-      for (let k = 0; k < j; k++) s -= row[k]! * other[k]!;
-      row[j] = s / other[j]!;
+      const lower = row[j]!;
+      const upper = other[i]!;
+      if (Math.abs(lower - upper) > tolerance) throw asymmetry(i, j, lower, upper);
+      other[i] = 0; // read for the last time: L is zero above the diagonal
+      // Four running sums, so consecutive subtractions do not wait on each other
+      // (the split BLAS kernels use; the error bound is unchanged).
+      let s0 = (lower + upper) / 2;
+      let s1 = 0;
+      let s2 = 0;
+      let s3 = 0;
+      let k = 0;
+      for (; k + 3 < j; k += 4) {
+        s0 -= row[k]! * other[k]!;
+        s1 -= row[k + 1]! * other[k + 1]!;
+        s2 -= row[k + 2]! * other[k + 2]!;
+        s3 -= row[k + 3]! * other[k + 3]!;
+      }
+      for (; k < j; k++) s0 -= row[k]! * other[k]!;
+      const l = (s0 + s1 + (s2 + s3)) / other[j]!;
+      row[j] = l === 0 ? 0 : l; // drops -0
     }
     let d = row[i]!;
     for (let k = 0; k < i; k++) d -= row[k]! * row[k]!;
-    row[i] = d;
-    if (d <= floor) return i;
+    // `!(d > threshold)` also stops at NaN (LAPACK checks it too).
+    if (!(d > threshold)) {
+      // The rows not reached yet still hold the input: finish the symmetry check there.
+      for (let r = i + 1; r < n; r++) {
+        for (let c = 0; c < r; c++) {
+          const lower = w[r]![c]!;
+          const upper = w[c]![r]!;
+          if (Math.abs(lower - upper) > tolerance) throw asymmetry(r, c, lower, upper);
+        }
+      }
+      return { lower: w, norm, failed: { index: i, pivot: d, threshold } };
+    }
     row[i] = Math.sqrt(d);
   }
-  return -1;
+  return { lower: w, norm };
 }
 
 /**
@@ -1880,21 +1926,12 @@ function choleskyInPlace(w: Float64Array[], n: number, floor: number): number {
  * with a tiny diagonal entry or throw, depending on rounding.
  */
 export function choleskyDecompose(a: Matrix, options?: SymmetryOptions): CholeskyDecomposition {
-  const { w, n, scale } = evenlyScaled(symmetricInput(a, options));
-  const failed = choleskyInPlace(w, n, 0);
-  if (failed >= 0) {
+  const symmetry = options?.tolerance === undefined ? undefined : resolveTolerance(options, () => 0);
+  const { lower, failed } = cholesky(a, assertSquare(a, 'a'), symmetry, () => 0);
+  if (failed) {
     throw new NotPositiveDefiniteError(
-      `matrix is not positive definite (pivot ${failed} is ${w[failed]![failed]! / scale}, not > 0)`,
+      `matrix is not positive definite (pivot ${failed.index} is ${failed.pivot}, not > 0)`,
     );
-  }
-  // A·s = (L·√s)(L·√s)ᵀ, so L = L_s / √s.
-  const unscale = 1 / Math.sqrt(scale);
-  const lower: number[][] = [];
-  for (let i = 0; i < n; i++) {
-    const source = w[i]!;
-    const row: number[] = [];
-    for (let j = 0; j < n; j++) row.push(j > i ? 0 : finish(source[j]! * unscale));
-    lower.push(row);
   }
   return { lower };
 }
@@ -1912,27 +1949,16 @@ export function choleskyDecompose(a: Matrix, options?: SymmetryOptions): Cholesk
 export function choleskySolve(a: Matrix, b: Vector, options?: ToleranceOptions): number[];
 export function choleskySolve(a: Matrix, b: Matrix, options?: ToleranceOptions): number[][];
 export function choleskySolve(a: Matrix, b: Vector | Matrix, options?: ToleranceOptions): number[] | number[][] {
-  const { w, n, scale } = evenlyScaled(symmetricInput(a));
+  const explicit = options?.tolerance === undefined ? undefined : resolveTolerance(options, () => 0);
+  const n = assertSquare(a, 'a');
   const { columns, vector } = rightHandSides(b, n);
-  let tolerance: number;
-  if (options?.tolerance === undefined) {
-    let norm = 0;
-    for (const row of w) {
-      let sum = 0;
-      for (let j = 0; j < n; j++) sum += Math.abs(row[j]!);
-      norm = Math.max(norm, sum);
+  const { lower: w, failed } = cholesky(a, n, undefined, norm => explicit ?? n * EPS * norm);
+  if (failed) {
+    const { index, pivot, threshold } = failed;
+    if (pivot < -threshold || Number.isNaN(pivot)) {
+      throw new NotPositiveDefiniteError(`matrix is not positive definite (pivot ${index} is ${pivot})`);
     }
-    tolerance = n * EPS * norm;
-  } else {
-    tolerance = resolveTolerance(options, () => 0) * scale;
-  }
-  const failed = choleskyInPlace(w, n, tolerance);
-  if (failed >= 0) {
-    const pivot = w[failed]![failed]!;
-    if (pivot < -tolerance) {
-      throw new NotPositiveDefiniteError(`matrix is not positive definite (pivot ${failed} is ${pivot / scale})`);
-    }
-    throw new SingularMatrixError(`matrix is singular to working precision (pivot ${failed} ≤ ${tolerance / scale})`);
+    throw new SingularMatrixError(`matrix is singular to working precision (pivot ${index} ≤ ${threshold})`);
   }
   for (const y of columns) {
     // L·z = b, then Lᵀ·x = z (by columns of Lᵀ, which are rows of L).
@@ -1949,8 +1975,7 @@ export function choleskySolve(a: Matrix, b: Vector | Matrix, options?: Tolerance
       for (let k = 0; k < i; k++) y[k]! -= row[k]! * x;
     }
   }
-  // (s·A)·x_s = b, so x = s·x_s.
-  return solutionOutput(columns, n, scale, vector);
+  return solutionOutput(columns, n, 1, vector);
 }
 
 /** Largest number of QR sweeps spent on one singular value before `ConvergenceError`. */

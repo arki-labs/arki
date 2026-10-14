@@ -1603,20 +1603,21 @@ export function polynomialRegression(x: Iterable<number>, y: Iterable<number>, d
   const buffer = new Float64Array(count * size);
   const columns: Float64Array[] = [];
   for (let k = 0; k < size; k++) columns.push(buffer.subarray(k * count, k * count + count));
-  for (const [i, value] of xs.entries()) {
-    const u = (value - center) / halfRange;
+  const squares = new Float64Array(size);
+  for (let i = 0; i < count; i++) {
+    const u = (xs[i]! - center) / halfRange;
     let power = 1;
     for (let k = 0; k < size; k++) {
       columns[k]![i] = power;
+      squares[k]! += power * power;
       power *= u;
     }
   }
   const norms: number[] = [];
-  for (const column of columns) {
-    let sum = 0;
-    for (let i = 0; i < count; i++) sum += column[i]! * column[i]!;
-    const norm = Math.sqrt(sum);
-    for (let i = 0; i < count; i++) column[i]! /= norm;
+  for (const [k, column] of columns.entries()) {
+    const norm = Math.sqrt(squares[k]!);
+    const inverse = 1 / norm;
+    for (let i = 0; i < count; i++) column[i]! *= inverse;
     norms.push(norm);
   }
   // Least squares by Householder QR with column pivoting: the error grows with
@@ -1628,7 +1629,7 @@ export function polynomialRegression(x: Iterable<number>, y: Iterable<number>, d
       throw new NumericRangeError('polynomial fit is ill-conditioned; lower the degree or rescale x');
     }
   }
-  const solution = Float64Array.from(ys);
+  const solution = new Float64Array(ys);
   applyQTranspose(columns, tau, count, solution);
   backSubstitute(columns, size, solution);
   const centered: number[] = Array.from<number>({ length: size }).fill(0);
