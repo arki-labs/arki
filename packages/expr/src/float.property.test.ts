@@ -15,6 +15,7 @@ import { ratio } from '@arki/math/rational';
 
 import type { BinaryNode, Node } from './ast.js';
 import { compile } from './float.js';
+import { compile as compileRational } from './rational.js';
 
 const SPAN = { start: 0, end: 0 } as const;
 /** Twice the unit roundoff: a generous per-operation relative error for `+ - * /`. */
@@ -155,6 +156,28 @@ describe('float against Rational', () => {
         expect(Math.abs(actual.value - truth)).toBeLessThanOrEqual(2 * expected.error + U * Math.abs(truth));
       }),
       { numRuns: 2000 },
+    );
+  });
+
+  it('the oracle is the rational domain: same value, or the same error class (so float is bounded against it)', () => {
+    // Why: RFC §19 states float's bound against the Rational domain; this pins the oracle above to it.
+    fc.assert(
+      fc.property(trees, root => {
+        const expected = exact(root);
+        fc.pre(expected.kind !== 'unbounded');
+        let domain: { readonly value: Rational } | { readonly error: unknown };
+        try {
+          domain = { value: compileRational({ version: 1, source: '', root, warnings: [] })() };
+        } catch (error) {
+          domain = { error };
+        }
+        if (expected.kind === 'throws') {
+          expect(classOf('error' in domain ? domain.error : undefined)).toBe(classOf(expected.error));
+          return;
+        }
+        expect('value' in domain && domain.value.eq(expected.exact)).toBe(true);
+      }),
+      { numRuns: 1000 },
     );
   });
 

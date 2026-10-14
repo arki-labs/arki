@@ -41,6 +41,16 @@
       "import": "./dist/latex.js",
       "default": "./dist/latex.js"
     },
+    "./decimal": {
+      "types": "./dist/decimal.d.ts",
+      "import": "./dist/decimal.js",
+      "default": "./dist/decimal.js"
+    },
+    "./rational": {
+      "types": "./dist/rational.d.ts",
+      "import": "./dist/rational.js",
+      "default": "./dist/rational.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

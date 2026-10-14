@@ -61,3 +61,18 @@ export function resolveCompileLimits(limits: CompileLimits | undefined): Resolve
     steps: positive('steps', limits?.steps, DEFAULT_STEPS),
   };
 }
+
+/** The budgets of an exact domain's `compile` (`@arki/expr/decimal`, `@arki/expr/rational`). */
+export type ExactLimits = CompileLimits & {
+  /**
+   * Digits: of each literal, checked at compile, and of a power or factorial
+   * result, estimated before computing it (`9^9^9`, `10000!`). Default 1 000.
+   */
+  readonly digits?: number;
+};
+
+export const DEFAULT_DIGITS = 1000;
+
+export function resolveDigits(limits: ExactLimits | undefined): number {
+  return positive('digits', limits?.digits, DEFAULT_DIGITS);
+}
