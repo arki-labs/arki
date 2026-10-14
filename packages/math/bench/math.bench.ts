@@ -280,7 +280,7 @@ const rootsText = (roots: readonly { re: number; im: number }[]): string =>
 export default defineSuite({
   id: '@arki/math',
   intro:
-    'Speed of `@arki/math` against the libraries most people reach for: decimal.js, big.js and bignumber.js for decimal arithmetic, fraction.js for exact fractions, simple-statistics and jstat for descriptive statistics, and jstat for probability distributions. Each table only ranks libraries that returned the same result on every checked input.',
+    'Speed of `@arki/math` against the libraries most people reach for: decimal.js, big.js and bignumber.js for decimal arithmetic; fraction.js for exact fractions; simple-statistics and jstat for descriptive statistics; jstat for probability distributions; simple-statistics and regression (regression-js) for curve fitting; ml-matrix and mathjs for linear algebra; complex.js and mathjs for complex numbers; mathjs for polynomial roots. Each table only ranks libraries that returned the same result on every checked input. The published tables come from a publish run on an idle machine and keep every case, including the ones where `@arki/math` is slower.',
   notes: [
     '`@arki/math` Decimal is exact: it stores a bigint plus a scale and never rounds unless you ask. Division throws when the result does not terminate, so every divide case passes `{ scale: 10, rounding: "halfEven" }`.',
     'The other decimal libraries are configured to keep the same promise: decimal.js works at 100 significant digits (enough to be exact on every add and multiply input here; its default is 20) with half-even rounding, and big.js and bignumber.js round each division once, at 10 places, half-even.',
