@@ -1,5 +1,5 @@
 import type { SQL } from 'drizzle-orm';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import type { Instant } from '@arki/date';
 import type { Money } from '@arki/money';
@@ -548,20 +548,29 @@ export class DunningCampaignService {
     try {
       // Get customer information
       const { customers: customersTable, customerRiskProfiles } = this.tables;
-      const customerResult = await this.db.execute(sql`
-        SELECT c.id, c.email, c.name, crp.communication_preferences
-        FROM ${customersTable} c
-        LEFT JOIN ${customerRiskProfiles} crp ON crp.customer_id = c.id
-        WHERE c.id = ${execution.customerId}
-      `);
+      const [row] = await this.db
+        .select({
+          id: customersTable.id,
+          email: customersTable.email,
+          name: customersTable.name,
+          communicationPreferences: customerRiskProfiles.communicationPreferences,
+        })
+        .from(customersTable)
+        .leftJoin(customerRiskProfiles, eq(customerRiskProfiles.customerId, customersTable.id))
+        .where(eq(customersTable.id, execution.customerId))
+        .limit(1);
 
-      const customers = customerResult.rows || [];
-      if (customers.length === 0) {
+      if (!row) {
         throw new Error(`Customer ${execution.customerId} not found`);
       }
 
-      const customer = customers[0] as unknown as CustomerData;
-      const communicationPrefs = customer.communication_preferences || {};
+      const customer: CustomerData = {
+        id: row.id,
+        email: row.email ?? undefined,
+        name: row.name ?? undefined,
+        communicationPreferences: row.communicationPreferences ?? undefined,
+      };
+      const communicationPrefs = customer.communicationPreferences ?? {};
 
       // Check if customer has unsubscribed from this channel
       if (campaign.settings.respectUnsubscribe && communicationPrefs.unsubscribed) {
@@ -576,7 +585,7 @@ export class DunningCampaignService {
         };
       }
 
-      if (communicationPrefs.unsubscribed_channels?.includes(template.communication.channel)) {
+      if (communicationPrefs.unsubscribedChannels?.includes(template.communication.channel)) {
         logger.info('Customer has unsubscribed from channel', {
           customerId: execution.customerId,
           channel: template.communication.channel,

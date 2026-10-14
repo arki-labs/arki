@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { add, now, sub } from '@arki/date';
 
+import type { CustomerId } from '../core/types.js';
 import type { CreateDunningCampaignInput } from './contracts.js';
 import type { DunningCampaignId } from './primitives.js';
 import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
@@ -423,5 +424,57 @@ describe('a scheduled execution in a named schema', () => {
       .from(tables.dunningCampaignAnalytics)
       .where(eq(tables.dunningCampaignAnalytics.campaignId, campaignId));
     expect(row).toMatchObject({ paymentsRecovered: 1, currency: 'EUR', revenueRecoveredMinor: 1999 });
+  });
+});
+
+describe('channel opt-outs', () => {
+  it('never sends on a channel the customer opted out of, and still reaches a customer who opted out of another', async () => {
+    const profile = (customer: CustomerId, unsubscribedChannels: ('email' | 'sms')[]) => ({
+      customerId: customer,
+      riskScore: {
+        overall: 0,
+        factors: {},
+        category: 'low' as const,
+        lastCalculated: now(),
+        trends: { direction: 'stable' as const, changePercent: 0, timeframe: 30 },
+      },
+      paymentHistory: { totalPayments: 0, successfulPayments: 0, failedPayments: 0, averageAmount: 0, streakDays: 0 },
+      subscriptionHistory: {
+        totalSubscriptions: 0,
+        activeSubscriptions: 0,
+        canceledSubscriptions: 0,
+        averageDuration: 0,
+      },
+      engagementMetrics: { score: 0, activityFrequency: 0, featureUsage: {} },
+      communicationPreferences: { unsubscribed: false, unsubscribedChannels },
+    });
+    const optedOut = await newCustomer('optedout');
+    const otherChannel = await newCustomer('otherchannel');
+    await db
+      .insert(dunning.customerRiskProfiles)
+      .values([profile(optedOut.id, ['email']), profile(otherChannel.id, ['sms'])]);
+    const campaignId = await createdCampaign('Opt-out: email');
+    const templateId = (await service.getCampaign(campaignId))?.templates?.[0]?.id;
+    for (const buyer of [optedOut, otherChannel]) {
+      await db.insert(tables.dunningExecutions).values({
+        campaignId,
+        templateId,
+        customerId: buyer.id,
+        triggerType: 'manual',
+        triggerData: {},
+        status: 'scheduled',
+        scheduledAt: sub(now(), { minutes: 1 }),
+      });
+    }
+    // A send reaches the communication service factory, which throws here: the error lands in the result
+    await service.processScheduledExecutions(1000);
+    const rows = await db
+      .select()
+      .from(tables.dunningExecutions)
+      .where(eq(tables.dunningExecutions.campaignId, campaignId));
+
+    const byCustomer = Object.fromEntries(rows.map(row => [row.customerId, JSON.stringify(row.result)]));
+    expect(byCustomer[optedOut.id]).not.toContain('no communications in this test');
+    expect(byCustomer[otherChannel.id]).toContain('no communications in this test');
   });
 });

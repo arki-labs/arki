@@ -206,10 +206,10 @@ export type CustomerData = {
   name?: string;
   email?: string;
   phone?: string;
-  communication_preferences?: {
+  communicationPreferences?: {
     unsubscribed?: boolean;
-    unsubscribed_channels?: string[];
-    preferred_channel?: string;
+    unsubscribedChannels?: string[];
+    preferredChannel?: string;
   };
   metadata?: Record<string, unknown>;
 };
