@@ -1,7 +1,8 @@
 # RFC: the shape of `@arki/*`
 
 - Date: 2026-10-14
-- Status: Accepted 2026-10-14. Founder decisions: D1 add tokens, D2 keep and relocate, D3 merge as entries.
+- Status: Implemented 2026-10-14 (waves 1–6, commits 745ba32679 … d0ba607ab4; not pushed). Founder decisions: D1 add tokens, D2 keep and relocate, D3 merge as entries.
+- Open after implementation: `@arki/math` declares no `vitest` (42 `arki-layers` baseline entries; one manifest line); `@arki/admin` `./server` and `./http` are node-only entries (2 `arki-library-check` baseline entries); `@arki/geo` has no AbortSignal or rate limiter; `@arki/db` `env.test.ts` DATABASE_URL precedence test fails (pre-existing); `@arki/async` needs an idle publish bench run; Hermes legs are INCOMPLETE until a Hermes binary is installed; 23 apps still list `@types/rss`.
 - Designers: Fable and Astra, independently; merged here. Sources: `scratchpad/arki-structure-{fable,astra}.md` (session scratch, not kept).
 - Scope: backlog B1–B18 (`plans/packages/README.md`), a shared library tooling preset, and a new `@arki/async`.
 
