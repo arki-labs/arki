@@ -56,6 +56,28 @@ function assertResultDigits(value: bigint, what: string): bigint {
   return value;
 }
 
+/** log10 of a magnitude above 1, from its leading 17 digits: plenty to size a power. */
+function log10OfMagnitude(magnitude: bigint): number {
+  const text = magnitude.toString();
+  const lead = text.slice(0, 17);
+  return Math.log10(Number(lead)) + (text.length - lead.length);
+}
+
+/**
+ * `base^exponent` (exponent ≥ 1) within `MAX_DIGITS`. Refused up front when the log10
+ * estimate says the result surely has too many digits; the 1e-9 slack absorbs float
+ * error, and the exact check settles the edge (10^9999 fits, 10^10000 does not).
+ * Bases 0, 1 and -1 are exact at any exponent.
+ */
+function powerWithinLimit(base: bigint, exponent: number, what: string): bigint {
+  const magnitude = abs(base);
+  if (magnitude <= 1n) return base < 0n && exponent % 2 === 0 ? 1n : base;
+  if (Math.floor(exponent * log10OfMagnitude(magnitude) - 1e-9) + 1 > MAX_DIGITS) {
+    throw new ResourceLimitError(`${what} would have more than ${MAX_DIGITS} digits`);
+  }
+  return assertResultDigits(base ** BigInt(exponent), what);
+}
+
 function assertSafeExponent(exponent: number): void {
   if (!Number.isSafeInteger(exponent)) {
     throw new InvalidArgumentError(`Exponent must be a safe integer, got ${exponent}`);
@@ -216,12 +238,17 @@ export class Decimal {
     if (exponent === 0) return ONE;
     if (exponent < 0) {
       if (this.isZero()) throw new DivisionByZeroError('Zero cannot be raised to a negative power');
-      return ONE.dividedBy(this.pow(-exponent));
+      // x^-n = (1/x)^n: 1/x terminates exactly when x^-n does, and sizing the result
+      // directly lets 0.5^-14000 (= 2^14000) through without building 0.5^14000 first.
+      return ONE.dividedBy(this).pow(-exponent);
     }
-    if (digitCount(this.coefficient) * exponent > MAX_DIGITS || this.scale * exponent > MAX_SCALE) {
-      throw new ResourceLimitError(`${this.toString()} ^ ${exponent} exceeds the digit limit`);
+    const scale = this.scale * exponent;
+    if (scale > MAX_SCALE) {
+      throw new ResourceLimitError(
+        `${this.toString()} ^ ${exponent} would have ${scale} fraction digits; the limit is ${MAX_SCALE}`,
+      );
     }
-    return new Decimal(this.coefficient ** BigInt(exponent), this.scale * exponent, BRAND);
+    return new Decimal(powerWithinLimit(this.coefficient, exponent, `${this.toString()} ^ ${exponent}`), scale, BRAND);
   }
 
   abs(): Decimal {
@@ -543,11 +570,12 @@ export class Rational {
     assertSafeExponent(exponent);
     if (exponent === 0) return Rational.fromParts(1n, 1n);
     if (exponent < 0) return this.inverse().pow(-exponent);
-    if ((digitCount(this.numerator) + digitCount(this.denominator)) * exponent > MAX_DIGITS) {
-      throw new ResourceLimitError(`${this.toString()} ^ ${exponent} exceeds the digit limit`);
-    }
-    const e = BigInt(exponent);
-    return new Rational(this.numerator ** e, this.denominator ** e, BRAND);
+    const what = `${this.toString()} ^ ${exponent}`;
+    return new Rational(
+      powerWithinLimit(this.numerator, exponent, `The numerator of ${what}`),
+      powerWithinLimit(this.denominator, exponent, `The denominator of ${what}`),
+      BRAND,
+    );
   }
 
   /** The reciprocal: `2/3` → `3/2`. */

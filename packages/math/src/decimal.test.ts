@@ -217,6 +217,44 @@ describe('pow and mod', () => {
   it('guards against huge results', () => {
     expect(() => decimal(10).pow(20_000)).toThrow(ResourceLimitError);
   });
+  it('refuses only results that truly pass the 10 000-digit cap', () => {
+    // Rule: a result may have at most 10 000 coefficient digits (integer digits + scale).
+    // The size estimate used to multiply the base's digit count by the exponent, so 2^14000
+    // (4215 digits) and even 1^20000 were refused.
+    const digits = (value: Decimal) => value.coefficient.toString().replace('-', '').length;
+    expect(digits(decimal(2).pow(14_000))).toBe(4215);
+    expect(
+      decimal(2)
+        .pow(14_000)
+        .eq(2n ** 14_000n),
+    ).toBe(true);
+    // Bases 0, 1 and -1 stay exact at any exponent.
+    expect(decimal(1).pow(20_000).toString()).toBe('1');
+    expect(decimal(1).pow(Number.MAX_SAFE_INTEGER).toString()).toBe('1');
+    expect(decimal(-1).pow(Number.MAX_SAFE_INTEGER).toString()).toBe('-1');
+    expect(decimal(-1).pow(20_000).toString()).toBe('1');
+    expect(decimal(0).pow(Number.MAX_SAFE_INTEGER).toString()).toBe('0');
+    // At the cap and one past it: 2^33219 has 10 000 digits, 2^33220 has 10 001.
+    expect(digits(decimal(2).pow(33_219))).toBe(10_000);
+    expect(() => decimal(2).pow(33_220)).toThrow(ResourceLimitError);
+    // An exact power of ten sits right on the estimate's edge; the exact check decides.
+    expect(digits(decimal(10).pow(9999))).toBe(10_000);
+    expect(() => decimal(10).pow(10_000)).toThrow(ResourceLimitError);
+    // The scale counts too: 0.5^10000 has scale 10 000, 0.5^10001 one more.
+    expect(decimal('0.5').pow(10_000).scale).toBe(10_000);
+    expect(() => decimal('0.5').pow(10_001)).toThrow(ResourceLimitError);
+  });
+  it('sizes negative powers by their result, not by the inverted power', () => {
+    // 0.5^-14000 is 2^14000 (4215 digits); building 0.5^14000 first needed scale 14 000.
+    expect(
+      decimal('0.5')
+        .pow(-14_000)
+        .eq(2n ** 14_000n),
+    ).toBe(true);
+    expect(decimal(2).pow(-10_000).scale).toBe(10_000);
+    expect(() => decimal(2).pow(-10_001)).toThrow(ResourceLimitError);
+    expect(decimal('2.0').pow(-2).toString()).toBe('0.25');
+  });
   it('mod follows the dividend sign', () => {
     expect(decimal('-7.5').mod(2).toString()).toBe('-1.5');
     expect(decimal('7.5').mod(-2).toString()).toBe('1.5');

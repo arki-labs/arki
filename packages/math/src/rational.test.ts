@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { decimal } from './decimal.js';
-import { DivisionByZeroError, InvalidArgumentError, NumberFormatError, RoundingNecessaryError } from './errors.js';
+import {
+  DivisionByZeroError,
+  InvalidArgumentError,
+  NumberFormatError,
+  ResourceLimitError,
+  RoundingNecessaryError,
+} from './errors.js';
 import { isRational, ratio } from './rational.js';
 
 // Node's `util.inspect` and Deno's console both look this symbol up on the object.
@@ -80,6 +86,27 @@ describe('arithmetic', () => {
     expect(() => ratio(0).inverse()).toThrow(DivisionByZeroError);
     expect(ratio(-1, 2).abs().toString()).toBe('1/2');
     expect(ratio(1, 2).negated().toString()).toBe('-1/2');
+  });
+  it('pow refuses only a numerator or denominator past the 10 000-digit cap', () => {
+    // The estimate used to add both parts' digit counts and multiply by the exponent, so
+    // (2/3)^14000 (4215 and 6680 digits) and even 1^20000 were refused.
+    expect(
+      ratio(2, 3)
+        .pow(14_000)
+        .eq(ratio(2n ** 14_000n, 3n ** 14_000n)),
+    ).toBe(true);
+    expect(ratio(1).pow(20_000).toString()).toBe('1');
+    expect(ratio(-1).pow(Number.MAX_SAFE_INTEGER).toString()).toBe('-1');
+    expect(ratio(0).pow(Number.MAX_SAFE_INTEGER).toString()).toBe('0');
+    // At the cap and one past it, for each part: 2^33219 has 10 000 digits, 2^33220 has 10 001.
+    expect(
+      ratio(1, 2)
+        .pow(33_219)
+        .eq(ratio(1n, 2n ** 33_219n)),
+    ).toBe(true);
+    expect(() => ratio(1, 2).pow(33_220)).toThrow(ResourceLimitError);
+    expect(() => ratio(2).pow(33_220)).toThrow(ResourceLimitError);
+    expect(() => ratio(1, 2).pow(-33_220)).toThrow(ResourceLimitError);
   });
 });
 
