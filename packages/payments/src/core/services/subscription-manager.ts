@@ -167,6 +167,7 @@ export class SubscriptionManager {
       // Update the subscription
       const updatedSubscription = await this.paymentProvider.updateSubscription(subscriptionId, {
         planId: newPlanId,
+        prorationBehavior: options.prorationBehavior || 'create_prorations',
       });
 
       return {

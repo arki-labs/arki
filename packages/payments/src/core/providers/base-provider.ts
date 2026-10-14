@@ -86,6 +86,8 @@ export abstract class BasePaymentProvider {
     paymentMethodId?: string;
     trialPeriodDays?: number;
     metadata?: Record<string, unknown>;
+    /** Same key, same parameters: the provider returns the first result instead of creating a second subscription. */
+    idempotencyKey?: string;
   }): Promise<Subscription>;
 
   abstract getSubscription(subscriptionId: SubscriptionId): Promise<Subscription | null>;
@@ -97,14 +99,19 @@ export abstract class BasePaymentProvider {
       paymentMethodId?: string;
       metadata?: Record<string, unknown>;
       cancelAtPeriodEnd?: boolean;
+      /** What happens to the charge when `planId` changes. The provider's default applies when left out. */
+      prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
+      idempotencyKey?: string;
     },
   ): Promise<Subscription>;
 
   abstract cancelSubscription(
     subscriptionId: SubscriptionId,
     options: {
+      /** True: end it now. Otherwise it stays active until the end of the paid period. */
       immediately?: boolean;
       reason?: string;
+      idempotencyKey?: string;
     },
   ): Promise<Subscription>;
 
@@ -169,7 +176,10 @@ export abstract class BasePaymentProvider {
   ): Promise<WebhookValidationResult>;
 
   // Utility Methods
-  abstract createSetupIntent(customerId: CustomerId): Promise<{
+  abstract createSetupIntent(
+    customerId: CustomerId,
+    options?: { idempotencyKey?: string },
+  ): Promise<{
     clientSecret: string;
     setupIntentId: string;
   }>;
@@ -178,7 +188,12 @@ export abstract class BasePaymentProvider {
     customerId: CustomerId;
     amount: Money;
     paymentMethodId?: string;
+    /**
+     * True: charge now without the customer present. Needs `paymentMethodId`.
+     * False: the customer finishes the payment in the client with the returned secret.
+     */
     automatic: boolean;
+    idempotencyKey?: string;
   }): Promise<{
     clientSecret: string;
     paymentIntentId: string;
