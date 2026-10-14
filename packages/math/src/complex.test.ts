@@ -314,6 +314,136 @@ describe('roots and powers', () => {
   });
 });
 
+describe('trigonometric and hyperbolic functions', () => {
+  const EPS = 2 ** -52;
+  /** Each part within `ulps` units of its reference (relative; a zero reference must be met exactly). */
+  const near = (actual: Complex, re: number, im: number, ulps = 4): void => {
+    const off = (got: number, want: number) => (want === 0 ? Math.abs(got) : Math.abs(got - want) / Math.abs(want));
+    const label = `${actual.toString()} vs ${re} + ${im}i`;
+    expect(off(actual.re, re), label).toBeLessThanOrEqual(ulps * EPS);
+    expect(off(actual.im, im), label).toBeLessThanOrEqual(ulps * EPS);
+  };
+  const z = complex(1.5, 2);
+
+  // References: mpmath 1.4.1 at 60 digits, rounded to the nearest double.
+  it('matches mpmath at 1.5 + 2i', () => {
+    near(z.sin(), 3.752_771_340_479_298, 0.256_553_956_090_481_8);
+    near(z.cos(), 0.266_127_195_313_545_8, -3.617_775_073_940_137_5);
+    near(z.tan(), 0.005_362_060_922_003_056_5, 1.036_920_282_100_185);
+    near(z.sinh(), -0.886_092_909_362_531_4, 2.139_040_009_980_677);
+    near(z.cosh(), -0.978_947_819_646_557_7, 1.936_148_329_510_507_3);
+    near(z.tanh(), 1.064_144_399_176_537_1, -0.080_391_015_310_168_18);
+    near(z.asin(), 0.606_511_518_199_754_8, 1.622_494_148_871_593_8);
+    near(z.acos(), 0.964_284_808_595_141_9, -1.622_494_148_871_593_8);
+    near(z.atan(), 1.311_223_269_671_635, 0.310_428_283_077_195_8);
+    near(z.asinh(), 1.600_410_055_234_613_7, 0.887_765_146_183_905_1);
+    near(z.acosh(), 1.622_494_148_871_593_8, 0.964_284_808_595_141_9);
+    near(z.atanh(), 0.220_089_680_662_022_92, 1.245_257_966_072_656_8);
+  });
+
+  it('keeps the digits where the plain formulas cancel (mpmath references)', () => {
+    // A tiny imaginary part: im = 1e-20 / √0.75. A naive ln(iz + √(1 − z²)) returns 0 here.
+    near(complex(0.5, 1e-20).asin(), 0.523_598_775_598_298_9, 1.154_700_538_379_251_5e-20);
+    // Next to the branch point 1: both parts ≈ 1e-5, the naive form keeps about 8 digits.
+    near(complex(1, 1e-10).acos(), 9.999_999_999_916_666e-6, -1.000_000_000_008_333_4e-5);
+    // Next to the pole at 1: (1 − x)² + y² underflows to 0.
+    near(complex(1, 1e-200).atanh(), 230.605_082_889_684_55, 0.785_398_163_397_448_3);
+    near(complex(1e-10, 1e-10).sinh(), 1e-10, 1e-10);
+  });
+
+  it('does not overflow where the result fits (mpmath references)', () => {
+    near(complex(1e300, 1e300).asin(), 0.785_398_163_397_448_3, 691.815_248_669_053_6);
+    // atan(2^28 i) on the cut: π/2 + i·atanh(2^-28), not π/2 + 0i.
+    near(complex(0, 2 ** 28).atan(), 1.570_796_326_794_896_6, 3.725_290_298_461_914e-9);
+    // atanh z = 1/z − iπ/2 below the real axis, at a size where |z|² overflows.
+    near(complex(1e300, -1e300).atanh(), 5e-301, -Math.PI / 2);
+    // cosh(710.6) overflows a double, but sin(π/4)·cosh(710.6) does not.
+    near(complex(Math.PI / 4, 710.6).sin(), 1.439_175_797_666_210_7e308, 1.439_175_797_666_210_7e308, 8);
+    near(complex(1, 30).tan(), 1.592_454_540_898_266_7e-26, 1);
+    expect(complex(800, 1).tanh().re).toBe(1);
+  });
+
+  it('throws NumericRangeError only when the result overflows', () => {
+    expect(() => complex(1, 800).sin()).toThrow(NumericRangeError);
+    expect(() => complex(1, 711).cos()).toThrow(NumericRangeError);
+    expect(() => complex(800, 1).cosh()).toThrow(NumericRangeError);
+    expect(() => complex(800).sinh()).toThrow(NumericRangeError);
+  });
+
+  it('throws InvalidArgumentError at the poles, like ln(0)', () => {
+    expect(() => Complex.ZERO.ln()).toThrow(InvalidArgumentError);
+    expect(() => complex(1).atanh()).toThrow(InvalidArgumentError);
+    expect(() => complex(-1).atanh()).toThrow(InvalidArgumentError);
+    expect(() => Complex.I.atan()).toThrow(InvalidArgumentError);
+    expect(() => complex(0, -1).atan()).toThrow(InvalidArgumentError);
+  });
+
+  // With no -0, a point on a cut takes the counter-clockwise limit (Kahan); mpmath and
+  // Mathematica agree. C99 with +0 would give the conjugate of the first, third,
+  // fifth and seventh lines below.
+  it('takes counter-clockwise continuity on the branch cuts (mpmath values)', () => {
+    const acosh2 = 1.316_957_896_924_816_8;
+    const atanh2 = 0.549_306_144_334_054_9;
+    near(complex(2).asin(), Math.PI / 2, -acosh2);
+    near(complex(-2).asin(), -Math.PI / 2, acosh2);
+    near(complex(2).acos(), 0, acosh2);
+    near(complex(-2).acos(), Math.PI, -acosh2);
+    near(complex(2).atanh(), atanh2, -Math.PI / 2);
+    near(complex(-2).atanh(), -atanh2, Math.PI / 2);
+    near(complex(0, -2).atan(), -Math.PI / 2, -atanh2);
+    near(complex(0, 2).atan(), Math.PI / 2, atanh2);
+    near(complex(0, -2).asinh(), -acosh2, -Math.PI / 2);
+    near(complex(0, 2).asinh(), acosh2, Math.PI / 2);
+    near(complex(-2).acosh(), acosh2, Math.PI);
+    near(complex(0.5).acosh(), 0, Math.acos(0.5));
+    near(complex(-0.5).acosh(), 0, Math.acos(-0.5));
+  });
+
+  it('keeps the odd functions odd on their cuts, where conjugate symmetry cannot hold', () => {
+    for (const w of [complex(3), complex(-1.5), complex(0, 3), complex(0, -1.5)]) {
+      expect(w.negated().asin().eq(w.asin().negated()), `asin ${w.toString()}`).toBe(true);
+      if (w.im === 0) expect(w.negated().atanh().eq(w.atanh().negated())).toBe(true);
+      else expect(w.negated().atan().eq(w.atan().negated())).toBe(true);
+      expect(w.negated().asinh().eq(w.asinh().negated())).toBe(true);
+    }
+    // On the cut, conj(2) is 2, so asin(conj 2) = asin 2 ≠ conj(asin 2).
+    expect(complex(2).conjugate().asin().eq(complex(2).asin().conjugate())).toBe(false);
+  });
+
+  it('agrees exactly with Math on the real axis', () => {
+    const fns = ['sin', 'cos', 'tan', 'sinh', 'cosh', 'tanh', 'atan', 'asinh'] as const;
+    for (const x of [0, 1e-300, 1e-8, 0.3, -0.75, 1, -2.5, 7, 100, 1e15]) {
+      for (const f of fns) {
+        if (!Number.isFinite(Math[f](x))) continue; // sinh/cosh of 1e15
+        const w = complex(x)[f]();
+        expect(w.re, `${f}(${x})`).toBe(Math[f](x));
+        expect(w.im, `${f}(${x})`).toBe(0);
+      }
+    }
+    for (const x of [-1, -0.9, -1e-9, 0, 0.5, 1]) {
+      expect(complex(x).asin().eq(Math.asin(x))).toBe(true);
+      expect(complex(x).acos().eq(Math.acos(x))).toBe(true);
+      if (Math.abs(x) < 1) expect(complex(x).atanh().eq(Math.atanh(x))).toBe(true);
+    }
+    for (const x of [1, 1.5, 1e10, 1e300]) expect(complex(x).acosh().eq(Math.acosh(x))).toBe(true);
+  });
+
+  it('never returns -0', () => {
+    const results = [
+      complex(-2).asinh(),
+      complex(2).atan(),
+      complex(0, 2).sinh(),
+      complex(-1).tan(),
+      complex(0, -3).cosh(),
+      complex(-0.5).acosh(),
+      complex(2).acos(),
+    ];
+    for (const w of results) {
+      expect(Object.is(w.re, -0) || Object.is(w.im, -0), w.toString()).toBe(false);
+    }
+  });
+});
+
 describe('comparison', () => {
   it('separates exact from approximate equality', () => {
     const sum = complex(0.1, 0.2).plus(complex(0.2, 0.1));

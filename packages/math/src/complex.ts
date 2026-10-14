@@ -13,6 +13,28 @@
  * `NumericRangeError`. Results never carry `-0`, so the principal argument
  * is always in `(-π, π]` and `ln(-1)` is `πi`, never `-πi`.
  *
+ * Trigonometric and hyperbolic functions — `sin`, `cos`, `tan`, `sinh`,
+ * `cosh`, `tanh` and their inverses — follow C99 Annex G and W. Kahan,
+ * "Branch Cuts for Complex Elementary Functions, or Much Ado About Nothing's
+ * Sign Bit" (1987). The inverses return principal values, with these cuts:
+ *
+ * - `asin`, `acos`, `atanh`: the real axis outside [-1, 1] (`atanh(±1)` is a pole)
+ * - `atan`, `asinh`: the imaginary axis outside [-i, i] (`atan(±i)` is a pole)
+ * - `acosh`: the real axis left of 1
+ *
+ * C99 picks the side of a cut from the sign of a zero part. With no `-0`, a
+ * point ON a cut takes Kahan's counter-clockwise continuity: the limit met
+ * while circling the cut's branch point counter-clockwise — the rule `sqrt`
+ * and `ln` already follow (`ln(-1)` is `πi`). So `asin(2)` is
+ * `π/2 - 1.3170i` (from below), `asin(-2)` is `-π/2 + 1.3170i` (from above),
+ * `atan(2i)` is `π/2 + 0.5493i` (from the right) and `acosh(-2)` is
+ * `1.3170 + πi`. This matches Mathematica, mpmath and Common Lisp, and keeps
+ * the odd functions odd on their cuts. C, NumPy and Python's `cmath` read a
+ * zero part as `+0`, so they differ on half of the cuts: `asin`, `acos` and
+ * `atanh` right of 1, `atan` and `asinh` below `-i`. Off the cuts
+ * `f(conj z) = conj f(z)`; on a cut `conj z` is `z`, so it cannot hold there.
+ * Poles throw `InvalidArgumentError`, like `ln(0)`.
+ *
  * Text format: `toString()` prints `3 + 4i`, `3 - 4i`, `-2i`, `i`, `5`.
  * Each part uses JS shortest round-trip number text (`1e-7`, `1e+21`), so
  * `Complex.from(z.toString())` gives back `z` exactly. The parser accepts
@@ -86,6 +108,165 @@ function smithPart(a: number, b: number, c: number, d: number, ratio: number, de
     return bRatio === 0 ? a / denominator + (b / denominator) * ratio : (a + bRatio) / denominator;
   }
   return (a + d * (b / c)) / denominator;
+}
+
+// ---------------------------------------------------------------------------
+// Trigonometric and hyperbolic kernels on (re, im) pairs. Internal values may
+// carry -0; `result` drops it on the way out.
+// ---------------------------------------------------------------------------
+
+type Parts = [re: number, im: number];
+
+/**
+ * `t · e^a / 2` for a > 0 large enough that cosh(a) overflows while the
+ * product may not (|t| < 1). Halving `a` is exact, so the two factors carry
+ * only `Math.exp`'s own rounding.
+ */
+function timesHalfExp(t: number, a: number): number {
+  const h = Math.exp(a / 2);
+  return t * h * (h / 2);
+}
+
+/** `t · cosh(a)`, finite whenever the true product is (up to rounding). */
+function timesCosh(t: number, a: number): number {
+  if (t === 0) return 0;
+  const c = Math.cosh(a);
+  return c === Infinity ? timesHalfExp(t, Math.abs(a)) : t * c;
+}
+
+/** `t · sinh(a)`, finite whenever the true product is (up to rounding). */
+function timesSinh(t: number, a: number): number {
+  if (t === 0 || a === 0) return 0;
+  const s = Math.sinh(a);
+  if (Number.isFinite(s)) return t * s;
+  const product = timesHalfExp(t, Math.abs(a));
+  return a < 0 ? -product : product;
+}
+
+/** sin(x + iy) = sin x cosh y + i cos x sinh y. */
+function sinParts(x: number, y: number): Parts {
+  return [timesCosh(Math.sin(x), y), timesSinh(Math.cos(x), y)];
+}
+
+/** cos(x + iy) = cos x cosh y − i sin x sinh y. */
+function cosParts(x: number, y: number): Parts {
+  return [timesCosh(Math.cos(x), y), -timesSinh(Math.sin(x), y)];
+}
+
+/**
+ * tanh(x + iy) by Kahan's formula (Branch Cuts, 1987): with t = tan y,
+ * β = 1 + t², s = sinh x, ρ = √(1 + s²), tanh z = (βρs + it) / (1 + βs²).
+ * No cancellation, and no overflow: past |x| = 22, tanh x is ±1 in floats and
+ * the imaginary part is 4 sin y cos y e^(-2|x|).
+ */
+function tanhParts(x: number, y: number): Parts {
+  if (y === 0) return [Math.tanh(x), 0];
+  if (Math.abs(x) >= 22) {
+    const e = Math.exp(-Math.abs(x));
+    return [x < 0 ? -1 : 1, 4 * Math.sin(y) * Math.cos(y) * e * e];
+  }
+  const t = Math.tan(y);
+  const beta = 1 + t * t;
+  const s = Math.sinh(x);
+  const rho = Math.sqrt(1 + s * s);
+  const denominator = 1 + beta * s * s;
+  return [(beta * rho * s) / denominator, t / denominator];
+}
+
+/** Past 2^27 the inverse functions take asymptotic forms; the terms they drop are below 2^-54 relative. */
+const ASYMPTOTIC = 2 ** 27;
+/** Below 2^-500, y² loses its digits (or underflows), so the arcsine takes its small-y limit. */
+const TINY_PART = 2 ** -500;
+/** Hull, Fairgrieve & Tang's crossover points. */
+const A_CROSSOVER = 1.5;
+const B_CROSSOVER = 0.6417;
+
+/**
+ * Arcsine and arccosine for x, y ≥ 0: asin(x + iy) = asinRe + i·im and
+ * acos(x + iy) = acosRe − i·im. T. E. Hull, T. F. Fairgrieve and P. T. P.
+ * Tang, "Implementing the complex arcsine and arccosine functions using
+ * exception handling", ACM TOMS 23(3), 1997: with r = |z + 1|, s = |z − 1|,
+ * A = (r + s)/2 and B = x/A, re = asin B and im = ln(A + √(A² − 1)), each
+ * rewritten (log1p of A − 1, atan instead of asin near B = 1) where the plain
+ * form cancels.
+ */
+function arcsineParts(x: number, y: number): { asinRe: number; acosRe: number; im: number } {
+  if (x > ASYMPTOTIC || y > ASYMPTOTIC) {
+    // asin z ≈ −i·ln(2iz): B = x/|z| and A = |z| to within 2^-54.
+    return { asinRe: Math.atan2(x, y), acosRe: Math.atan2(y, x), im: logModulus(x, y) + Math.LN2 };
+  }
+  const r = Math.hypot(x + 1, y);
+  const s = Math.hypot(x - 1, y);
+  const a = (r + s) / 2;
+  const b = x / a;
+  const yy = y * y;
+  let asinRe: number;
+  let acosRe: number;
+  if (b <= B_CROSSOVER) {
+    asinRe = Math.asin(b);
+    acosRe = Math.acos(b);
+  } else {
+    // √(A² − x²) without cancelling: tan(asin B) = x / d.
+    const d =
+      x <= 1
+        ? Math.sqrt(0.5 * (a + x) * (yy / (r + (x + 1)) + (s + (1 - x))))
+        : y * Math.sqrt(0.5 * ((a + x) / (r + (x + 1)) + (a + x) / (s + (x - 1))));
+    asinRe = Math.atan(x / d);
+    acosRe = Math.atan(d / x);
+  }
+  if (a > A_CROSSOVER) return { asinRe, acosRe, im: Math.log(a + Math.sqrt(a * a - 1)) };
+  // A − 1, as a sum of terms that never cancel.
+  let am1: number;
+  if (x < 1) {
+    // Here A − 1 = y²/(2(1 − x²)) to within y², and im = √(2(A − 1)).
+    if (y < TINY_PART) return { asinRe, acosRe, im: y / Math.sqrt((1 - x) * (1 + x)) };
+    am1 = 0.5 * (yy / (r + (x + 1)) + yy / (s + (1 - x)));
+  } else {
+    am1 = 0.5 * (yy / (r + (x + 1)) + (s + (x - 1)));
+  }
+  return { asinRe, acosRe, im: Math.log1p(am1 + Math.sqrt(am1 * (a + 1))) };
+}
+
+/**
+ * Sign of the imaginary part for asin, acos and atanh: the sign of `im`, and
+ * on the real-axis cuts (im = 0, |re| > 1) counter-clockwise continuity —
+ * from below right of 1, from above left of -1.
+ */
+function cutSign(re: number, im: number): 1 | -1 {
+  return im < 0 || (im === 0 && re > 1) ? -1 : 1;
+}
+
+function asinParts(re: number, im: number): Parts {
+  const p = arcsineParts(Math.abs(re), Math.abs(im));
+  return [re < 0 ? -p.asinRe : p.asinRe, cutSign(re, im) * p.im];
+}
+
+/**
+ * atanh(x + iy) = ¼·log1p(4x / ((1 − x)² + y²)) + ½·i·atan2(2y, (1 − x)(1 + x) − y²)
+ * for x, y ≥ 0 (as in Kahan's paper), with odd symmetry for the other
+ * quadrants. Past 2^27 it uses atanh z = 1/z + iπ/2 (upper half plane).
+ */
+function atanhParts(re: number, im: number): Parts {
+  const x = Math.abs(re);
+  const y = Math.abs(im);
+  let real: number;
+  let imaginary: number;
+  if (x > ASYMPTOTIC || y > ASYMPTOTIC) {
+    // 1/z = (x − iy)/|z|², scaled so |z|² cannot overflow; atanh(1/z) = 1/z within 2^-54.
+    const m = Math.max(x, y);
+    const xs = x / m;
+    const ys = y / m;
+    const q = xs * xs + ys * ys;
+    real = xs / q / m;
+    imaginary = Math.PI / 2 - ys / q / m;
+  } else {
+    const oneMinusX = 1 - x;
+    const d = oneMinusX * oneMinusX + y * y;
+    // Where d is tiny (z next to the pole at 1), log1p(4x/d) = ln(4x) − ln d far past float precision.
+    real = d > 1e-100 ? Math.log1p((4 * x) / d) / 4 : (Math.log(4 * x) - 2 * Math.log(Math.hypot(oneMinusX, y))) / 4;
+    imaginary = Math.atan2(2 * y, oneMinusX * (1 + x) - y * y) / 2;
+  }
+  return [re < 0 ? -real : real, cutSign(re, im) * imaginary];
 }
 
 const NUMBER = String.raw`(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+|E[+-]?\d+)?`;
@@ -385,6 +566,121 @@ export class Complex {
       }
     }
     return result(re, im, 'pow');
+  }
+
+  // Trigonometric and hyperbolic functions ------------------------------------
+  // Branch cuts and the values on them: see the module notes. On the real
+  // axis each returns exactly what the `Math` function of the same name does.
+
+  /** sin(x + iy) = sin x cosh y + i cos x sinh y; overflows (`NumericRangeError`) only when the result does. */
+  sin(): Complex {
+    const [re, im] = sinParts(this.re, this.im);
+    return result(re, im, 'sin');
+  }
+
+  /** cos(x + iy) = cos x cosh y − i sin x sinh y. */
+  cos(): Complex {
+    const [re, im] = cosParts(this.re, this.im);
+    return result(re, im, 'cos');
+  }
+
+  /** tan z = −i·tanh(iz), by Kahan's cancellation-free formula; never overflows. */
+  tan(): Complex {
+    if (this.im === 0) return result(Math.tan(this.re), 0, 'tan');
+    const [re, im] = tanhParts(-this.im, this.re);
+    return result(im, -re, 'tan');
+  }
+
+  /** sinh z = −i·sin(iz) = sinh x cos y + i cosh x sin y. */
+  sinh(): Complex {
+    const [re, im] = sinParts(-this.im, this.re);
+    return result(im, -re, 'sinh');
+  }
+
+  /** cosh z = cos(iz) = cosh x cos y + i sinh x sin y. */
+  cosh(): Complex {
+    const [re, im] = cosParts(-this.im, this.re);
+    return result(re, im, 'cosh');
+  }
+
+  /** tanh z by Kahan's formula: (βρs + it) / (1 + βs²) with t = tan y, β = 1 + t², s = sinh x, ρ = √(1 + s²). */
+  tanh(): Complex {
+    const [re, im] = tanhParts(this.re, this.im);
+    return result(re, im, 'tanh');
+  }
+
+  /**
+   * Principal arcsine, real part in [-π/2, π/2]. Cuts: the real axis outside
+   * [-1, 1]; `asin(2)` is `π/2 - 1.3170i`, `asin(-2)` is `-π/2 + 1.3170i`.
+   */
+  asin(): Complex {
+    if (this.im === 0 && Math.abs(this.re) <= 1) return result(Math.asin(this.re), 0, 'asin');
+    const [re, im] = asinParts(this.re, this.im);
+    return result(re, im, 'asin');
+  }
+
+  /**
+   * Principal arccosine, real part in [0, π]; `acos z = π/2 − asin z`, same
+   * cuts. `acos(2)` is `1.3170i`, `acos(-2)` is `π - 1.3170i`.
+   */
+  acos(): Complex {
+    if (this.im === 0 && Math.abs(this.re) <= 1) return result(Math.acos(this.re), 0, 'acos');
+    const p = arcsineParts(Math.abs(this.re), Math.abs(this.im));
+    const re = this.re < 0 ? Math.PI - p.acosRe : p.acosRe;
+    return result(re, -cutSign(this.re, this.im) * p.im, 'acos');
+  }
+
+  /**
+   * Principal arctangent, real part in [-π/2, π/2]; `atan z = −i·atanh(iz)`.
+   * Cuts: the imaginary axis outside [-i, i]; `atan(2i)` is `π/2 + 0.5493i`,
+   * `atan(-2i)` is `-π/2 - 0.5493i`. `atan(±i)` throws `InvalidArgumentError`.
+   */
+  atan(): Complex {
+    if (this.im === 0) return result(Math.atan(this.re), 0, 'atan');
+    if (this.re === 0 && Math.abs(this.im) === 1) {
+      throw new InvalidArgumentError(`atan is not defined at ${this.toString()} (a pole)`);
+    }
+    const [re, im] = atanhParts(-this.im, this.re);
+    return result(im, -re, 'atan');
+  }
+
+  /**
+   * Principal inverse hyperbolic sine, `asinh z = −i·asin(iz)`. Cuts: the
+   * imaginary axis outside [-i, i]; `asinh(2i)` is `1.3170 + π/2·i`.
+   */
+  asinh(): Complex {
+    if (this.im === 0) return result(Math.asinh(this.re), 0, 'asinh');
+    const [re, im] = asinParts(-this.im, this.re);
+    return result(im, -re, 'asinh');
+  }
+
+  /**
+   * Principal inverse hyperbolic cosine, real part ≥ 0 and imaginary part in
+   * [-π, π]. Cut: the real axis left of 1, valued from above: `acosh(0.5)` is
+   * `1.0472i`, `acosh(-2)` is `1.3170 + πi`.
+   */
+  acosh(): Complex {
+    if (this.im === 0 && this.re >= 1) return result(Math.acosh(this.re), 0, 'acosh');
+    // acosh z = ±i·acos z, the sign making the real part non-negative.
+    const p = arcsineParts(Math.abs(this.re), Math.abs(this.im));
+    const angle = this.re < 0 ? Math.PI - p.acosRe : p.acosRe;
+    return result(p.im, this.im < 0 ? -angle : angle, 'acosh');
+  }
+
+  /**
+   * Principal inverse hyperbolic tangent, imaginary part in [-π/2, π/2]. Cuts:
+   * the real axis outside [-1, 1]; `atanh(2)` is `0.5493 - π/2·i`,
+   * `atanh(-2)` is `-0.5493 + π/2·i`. `atanh(±1)` throws `InvalidArgumentError`.
+   */
+  atanh(): Complex {
+    if (this.im === 0) {
+      if (Math.abs(this.re) < 1) return result(Math.atanh(this.re), 0, 'atanh');
+      if (Math.abs(this.re) === 1) {
+        throw new InvalidArgumentError(`atanh is not defined at ${this.toString()} (a pole)`);
+      }
+    }
+    const [re, im] = atanhParts(this.re, this.im);
+    return result(re, im, 'atanh');
   }
 
   /**

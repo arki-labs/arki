@@ -101,3 +101,112 @@ describe('Complex properties: field laws within float tolerance', () => {
     }
   });
 });
+
+describe('Complex properties: trigonometric and hyperbolic functions', () => {
+  // Parts up to 20: e^20 keeps sin, cos, sinh and cosh far inside the float range.
+  const moderateArb = fc.oneof(
+    fc.double({ min: -20, max: 20, noNaN: true }),
+    fc.double({ min: -1e-3, max: 1e-3, noNaN: true }),
+    fc.double({ min: -1e-300, max: 1e-300, noNaN: true }),
+  );
+  const moderateComplexArb = fc.tuple(moderateArb, moderateArb).map(([re, im]) => complex(re, im));
+  /** Real part strictly inside (-limit, limit), any moderate imaginary part. */
+  const stripArb = (limit: number) =>
+    fc
+      .tuple(fc.double({ min: -limit, max: limit, noNaN: true }), moderateArb)
+      .filter(([re]) => Math.abs(re) < limit)
+      .map(([re, im]) => complex(re, im));
+  const names = [
+    'sin',
+    'cos',
+    'tan',
+    'sinh',
+    'cosh',
+    'tanh',
+    'asin',
+    'acos',
+    'atan',
+    'asinh',
+    'acosh',
+    'atanh',
+  ] as const;
+
+  it('f(conj z) = conj f(z) exactly, everywhere off the branch cuts', () => {
+    fc.assert(
+      fc.property(complexArb, z => {
+        // The cuts lie on the axes; away from both, the identity has no exceptions.
+        fc.pre(z.re !== 0 && z.im !== 0);
+        for (const name of names) {
+          let value: Complex;
+          try {
+            value = z[name]();
+          } catch {
+            expect(() => z.conjugate()[name]()).toThrow();
+            continue;
+          }
+          expect(z.conjugate()[name]().eq(value.conjugate()), `${name}(${z.toString()})`).toBe(true);
+        }
+      }),
+      config,
+    );
+  });
+
+  it('sin² z + cos² z = 1 and tan z = sin z / cos z', () => {
+    fc.assert(
+      fc.property(moderateComplexArb, z => {
+        const s = z.sin();
+        const c = z.cos();
+        // Both squares grow like e^(2|im z|) and cancel to 1: compare at their size.
+        const size = s.abs() ** 2 + c.abs() ** 2;
+        expectClose(s.times(s).plus(c.times(c)), complex(1), size);
+        expectClose(z.tan(), s.dividedBy(c));
+        const sh = z.sinh();
+        const ch = z.cosh();
+        expectClose(ch.times(ch).minus(sh.times(sh)), complex(1), sh.abs() ** 2 + ch.abs() ** 2);
+        expectClose(z.tanh(), sh.dividedBy(ch));
+      }),
+      config,
+    );
+  });
+
+  it('each inverse undoes its function on the principal strip', () => {
+    // Away from the strip edges, where the inverse is ill-conditioned (cos z ≈ 0 for asin).
+    fc.assert(
+      fc.property(stripArb(1.5), z => {
+        expectClose(z.sin().asin(), z);
+        expectClose(complex(z.im, z.re).sinh().asinh(), complex(z.im, z.re));
+        // tan z tends to ±i as |im z| grows, where atan is ill-conditioned (about e^(2|im z|)):
+        // the round trip is checked where that stays below 10^3.
+        if (Math.abs(z.im) <= 3) {
+          expectClose(z.tan().atan(), z);
+          expectClose(complex(z.im, z.re).tanh().atanh(), complex(z.im, z.re));
+        }
+      }),
+      config,
+    );
+    fc.assert(
+      fc.property(stripArb(1.5), z => {
+        const w = complex(z.re + Math.PI / 2, z.im); // re in (0.07, 3.07): inside acos's (0, π)
+        expectClose(w.cos().acos(), w);
+        const v = complex(Math.abs(z.im) + 0.1, z.re * 2); // re > 0, |im| < 3: inside acosh's strip
+        expectClose(v.cosh().acosh(), v);
+      }),
+      config,
+    );
+  });
+
+  it('each function undoes its inverse everywhere', () => {
+    fc.assert(
+      fc.property(complexArb, z => {
+        fc.pre(z.abs() < 1e3);
+        expectClose(z.asin().sin(), z);
+        expectClose(z.acos().cos(), z);
+        expectClose(z.asinh().sinh(), z);
+        expectClose(z.acosh().cosh(), z);
+        if (!(z.im === 0 && Math.abs(z.re) === 1)) expectClose(z.atanh().tanh(), z);
+        if (!(z.re === 0 && Math.abs(z.im) === 1)) expectClose(z.atan().tan(), z);
+      }),
+      config,
+    );
+  });
+});
