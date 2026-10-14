@@ -1,5 +1,12 @@
 # @arki/dot
 
+## 0.6.1
+
+### Patch Changes
+
+- Updated dependencies [0e2ed57]
+  - @arki/contracts@0.1.0
+
 ## 0.6.0
 
 ### Minor Changes

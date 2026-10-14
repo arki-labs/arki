@@ -1,5 +1,14 @@
 # @arki/db
 
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [0e2ed57]
+  - @arki/contracts@0.1.0
+  - @arki/dot@0.6.1
+  - @arki/env@0.0.11
+
 ## 0.3.0
 
 ### Minor Changes

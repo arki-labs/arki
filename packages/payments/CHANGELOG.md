@@ -1,5 +1,16 @@
 # @arki/payments
 
+## 0.3.2
+
+### Patch Changes
+
+- Updated dependencies [0e2ed57]
+  - @arki/contracts@0.1.0
+  - @arki/db@0.3.1
+  - @arki/kv@0.2.1
+  - @arki/env@0.0.11
+  - @arki/journal@0.2.1
+
 ## 0.3.1
 
 ### Patch Changes
