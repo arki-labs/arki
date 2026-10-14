@@ -238,10 +238,37 @@ describe('plans', () => {
         : { body: stripePrice({ id: 'price_new' }) },
     );
 
-    const plan = await stripe.createPlan({ name: 'New', amount: money('9.99', 'USD'), interval: 'monthly' });
+    const plan = await stripe.createPlan({
+      name: 'New',
+      tier: 'pro',
+      description: 'For teams',
+      features: ['seats', 'sso'],
+      amount: money('9.99', 'USD'),
+      interval: 'monthly',
+    });
 
     expect(requests[1]?.form['metadata[planId]']).toBe(plan.id);
     expect(plan.metadata).toMatchObject({ stripePriceId: 'price_new' });
+  });
+
+  it('createPlan takes tier, description and features from its input, and sends the description to Stripe', async () => {
+    const { stripe, requests } = provider(request =>
+      request.path === '/v1/products'
+        ? { body: { id: 'prod_new', object: 'product', name: 'New' } }
+        : { body: stripePrice({ id: 'price_new' }) },
+    );
+
+    const plan = await stripe.createPlan({
+      name: 'New',
+      tier: 'enterprise',
+      description: 'For teams',
+      features: ['seats', 'sso'],
+      amount: money('9.99', 'USD'),
+      interval: 'monthly',
+    });
+
+    expect(plan).toMatchObject({ tier: 'enterprise', description: 'For teams', features: ['seats', 'sso'] });
+    expect(requests[0]?.form['description']).toBe('For teams');
   });
 
   it('getPlan refreshes name, price and interval from the Stripe price and product', async () => {

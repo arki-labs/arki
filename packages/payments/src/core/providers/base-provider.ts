@@ -11,6 +11,7 @@ import type {
   PaymentProviderType,
   Plan,
   PlanId,
+  PlanTier,
   Subscription,
   SubscriptionId,
   SubscriptionPreview,
@@ -64,6 +65,9 @@ export abstract class BasePaymentProvider {
   // Plan Management
   abstract createPlan(params: {
     name: string;
+    description?: string;
+    tier: PlanTier;
+    features?: string[];
     amount: Money;
     interval: BillingInterval;
     intervalCount?: number;

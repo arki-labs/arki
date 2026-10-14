@@ -15,6 +15,7 @@ import type {
   PaymentStatus,
   Plan,
   PlanId,
+  PlanTier,
   Subscription,
   SubscriptionId,
   SubscriptionPreview,
@@ -246,14 +247,16 @@ export class StripeProvider extends BasePaymentProvider {
     name?: string;
     metadata?: Record<string, unknown>;
   }): Promise<Customer> {
-    const stripeCustomer = await this.stripe.customers.create({
-      email: params.email,
-      name: params.name,
-      metadata: {
-        userId: params.userId,
-        ...params.metadata,
-      },
-    });
+    const stripeCustomer = await this.call(() =>
+      this.stripe.customers.create({
+        email: params.email,
+        name: params.name,
+        metadata: {
+          userId: params.userId,
+          ...params.metadata,
+        },
+      }),
+    );
 
     return {
       id: createCustomerId(),
@@ -349,6 +352,10 @@ export class StripeProvider extends BasePaymentProvider {
 
   async createPlan(params: {
     name: string;
+    description?: string;
+    tier: PlanTier;
+    /** What the plan includes, shown to customers. */
+    features?: string[];
     amount: Money;
     interval: BillingInterval;
     intervalCount?: number;
@@ -357,7 +364,11 @@ export class StripeProvider extends BasePaymentProvider {
   }): Promise<Plan> {
     const planId = createPlanId();
     const stripeProduct = await this.call(() =>
-      this.stripe.products.create({ name: params.name, metadata: toStripeMetadata(params.metadata) }),
+      this.stripe.products.create({
+        name: params.name,
+        description: params.description,
+        metadata: toStripeMetadata(params.metadata),
+      }),
     );
 
     const stripePrice = await this.call(() =>
@@ -377,13 +388,13 @@ export class StripeProvider extends BasePaymentProvider {
     return {
       id: planId,
       name: params.name,
-      description: '',
-      tier: 'basic', // Would be determined by business logic
+      description: params.description ?? null,
+      tier: params.tier,
       priceMinor: toMinorColumn(params.amount),
       currency: params.amount.currency.code,
       interval: params.interval,
       intervalCount: params.intervalCount || 1,
-      features: [], // Would be populated from metadata or separate config
+      features: params.features ?? [],
       isActive: true,
       trialPeriodDays: params.trialPeriodDays ?? null,
       metadata: { stripeProductId: stripeProduct.id, stripePriceId: stripePrice.id, ...params.metadata },
@@ -874,7 +885,7 @@ export class StripeProvider extends BasePaymentProvider {
   }
 
   async detachPaymentMethod(paymentMethodId: string): Promise<void> {
-    await this.stripe.paymentMethods.detach(paymentMethodId);
+    await this.call(() => this.stripe.paymentMethods.detach(paymentMethodId));
   }
 
   async listPaymentMethods(customerId: CustomerId): Promise<PaymentMethodInfo[]> {
@@ -916,11 +927,11 @@ export class StripeProvider extends BasePaymentProvider {
         data: event.data.object as unknown as Record<string, unknown>,
       };
     } catch (error) {
-      return {
-        isValid: false,
-        provider: 'stripe',
-        error: error instanceof Error ? error.message : 'Invalid webhook signature',
-      };
+      // A bad signature or an unreadable payload is an answer ("not valid"), not a failure
+      if (error instanceof Stripe.errors.StripeSignatureVerificationError || error instanceof SyntaxError) {
+        return { isValid: false, provider: 'stripe', error: error.message };
+      }
+      throw mapStripeError(error);
     }
   }
 
@@ -1006,10 +1017,9 @@ export class StripeProvider extends BasePaymentProvider {
     providerCustomerId: string,
     returnUrl: string,
   ): Promise<{ url: string }> {
-    const session = await this.stripe.billingPortal.sessions.create({
-      customer: providerCustomerId,
-      return_url: returnUrl,
-    });
+    const session = await this.call(() =>
+      this.stripe.billingPortal.sessions.create({ customer: providerCustomerId, return_url: returnUrl }),
+    );
     return { url: session.url };
   }
 
@@ -1039,7 +1049,7 @@ export class StripeProvider extends BasePaymentProvider {
     /** Enable Stripe Tax (must be configured on the account) so EU VAT is calculated at checkout. */
     automaticTax?: boolean;
   }): Promise<{ url: string; sessionId: string }> {
-    const session = await this.stripe.checkout.sessions.create({
+    const session = await this.call(() => this.stripe.checkout.sessions.create({
       mode: 'subscription',
       line_items: [{ price: params.priceId, quantity: 1 }],
       // `customer` and `customer_email` are mutually exclusive in Checkout.
@@ -1055,10 +1065,10 @@ export class StripeProvider extends BasePaymentProvider {
         ...(params.metadata ? { metadata: params.metadata } : {}),
       },
       metadata: params.metadata,
-    });
+    }));
 
     if (!session.url) {
-      throw new Error('Stripe Checkout did not return a session URL');
+      throw new PaymentProviderError('unknown', `Stripe Checkout session ${session.id} came back without a URL`);
     }
     return { url: session.url, sessionId: session.id };
   }
@@ -1112,7 +1122,7 @@ export class StripeProvider extends BasePaymentProvider {
             ? breakdown.tax_rate_details.percentage_decimal
             : Number.parseFloat(String(breakdown.tax_rate_details?.percentage_decimal || 0)),
           jurisdiction: breakdown.jurisdiction?.display_name || '',
-          taxCode: breakdown.jurisdiction?.level || undefined,
+          taxCode: item.tax_code,
         })) || []
       ) || [],
     };
@@ -1282,14 +1292,13 @@ export class StripeProvider extends BasePaymentProvider {
 
   async healthCheck(): Promise<{ status: 'healthy' | 'degraded' | 'unhealthy'; details?: string }> {
     try {
-      // Simple health check - list recent events
-      await this.stripe.events.list({ limit: 1 });
+      await this.call(() => this.stripe.events.list({ limit: 1 }));
       return { status: 'healthy' };
     } catch (error) {
-      return {
-        status: 'unhealthy',
-        details: error instanceof Error ? error.message : 'Unknown error',
-      };
+      const failure = error instanceof Error ? error : new Error('Unknown error');
+      // A rate limit says Stripe is up and refusing for now: degraded, not down
+      const degraded = error instanceof PaymentProviderError && error.code === 'rate_limited';
+      return { status: degraded ? 'degraded' : 'unhealthy', details: failure.message };
     }
   }
 
