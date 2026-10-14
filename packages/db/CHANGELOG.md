@@ -1,5 +1,28 @@
 # @arki/db
 
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [0e2ed57]
+  - @arki/contracts@0.1.0
+  - @arki/dot@0.6.1
+  - @arki/env@0.0.11
+
+## 0.3.0
+
+### Minor Changes
+
+- 13bb516: Move the `dbMigrations` DOT plugin from `@arki/db/migrate` to `@arki/db/dot`. `@arki/db/migrate` keeps `migrateDb`, `readMigrations` and the types, and no longer imports `@arki/dot`. Replace `import { dbMigrations } from '@arki/db/migrate'` with `import { dbMigrations } from '@arki/db/dot'`.
+- 9fa13ce: Dot plugin error codes join the `ARKI_` scheme: `KV_PLUGIN_E001` is now `ARKI_KV_PLUGIN_E001`, `DB_PLUGIN_E001` is `ARKI_DB_PLUGIN_E001` and `JOURNAL_PLUGIN_E001` is `ARKI_JOURNAL_PLUGIN_E001`. Code that matches on the old strings must update; the `*_PLUGIN_ERROR_CODES` constants carry the new values. The kv and db `docsUrl` slugs follow the codes. `@arki/dot` documents `ARKI_<PKG>_PLUGIN_E<NNN>` as the recommended prefix.
+
+### Patch Changes
+
+- Updated dependencies [228b4f5]
+- Updated dependencies [9fa13ce]
+  - @arki/dot@0.6.0
+  - @arki/env@0.0.10
+
 ## 0.2.0
 
 ### Minor Changes

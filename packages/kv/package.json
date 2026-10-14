@@ -1,6 +1,6 @@
 {
   "name": "@arki/kv",
-  "version": "0.1.8",
+  "version": "0.2.1",
   "description": "Key-value store abstraction with pluggable adapters for ARKI — Redis-backed Keyv client and rate-limiter with TLS auto-detection and Upstash support.",
   "license": "MIT",
   "repository": {
@@ -64,8 +64,8 @@
     "package.json"
   ],
   "dependencies": {
-    "@arki/contracts": "0.0.5",
-    "@arki/env": "0.0.9",
+    "@arki/contracts": "0.1.0",
+    "@arki/env": "0.0.11",
     "@arki/log": "0.1.0",
     "@arki/ts": "0.0.3",
     "@keyv/redis": "5.1.6",
@@ -76,7 +76,7 @@
     "zod": "4.6.5"
   },
   "peerDependencies": {
-    "@arki/dot": "^0.5.0"
+    "@arki/dot": "^0.6.1"
   },
   "peerDependenciesMeta": {
     "@arki/dot": {

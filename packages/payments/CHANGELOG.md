@@ -1,5 +1,31 @@
 # @arki/payments
 
+## 0.3.2
+
+### Patch Changes
+
+- Updated dependencies [0e2ed57]
+  - @arki/contracts@0.1.0
+  - @arki/db@0.3.1
+  - @arki/kv@0.2.1
+  - @arki/env@0.0.11
+  - @arki/journal@0.2.1
+
+## 0.3.1
+
+### Patch Changes
+
+- d0ba607: Replaces the `"./*"` wildcard in `exports` with one explicit entry per public module. Every import path that worked before still works, so nothing breaks. New tools can now list and check the exact set of entries.
+- Updated dependencies [13bb516]
+- Updated dependencies [228b4f5]
+- Updated dependencies [1668156]
+- Updated dependencies [9fa13ce]
+- Updated dependencies [ec0bf8b]
+  - @arki/db@0.3.0
+  - @arki/journal@0.2.0
+  - @arki/kv@0.2.0
+  - @arki/env@0.0.10
+
 ## 0.3.0
 
 ### Minor Changes

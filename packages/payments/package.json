@@ -1,6 +1,6 @@
 {
   "name": "@arki/payments",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "description": "Payments for ARKI apps — Stripe provider, plans, customers, subscriptions, payments, refunds, dunning and tax, as Drizzle table factories, repositories, services and @arki/journal commands.",
   "license": "MIT",
   "repository": {
@@ -394,12 +394,12 @@
     "package.json"
   ],
   "dependencies": {
-    "@arki/contracts": "0.0.5",
+    "@arki/contracts": "0.1.0",
     "@arki/date": "0.2.0",
-    "@arki/db": "0.2.0",
-    "@arki/env": "0.0.9",
-    "@arki/journal": "0.1.1",
-    "@arki/kv": "0.1.8",
+    "@arki/db": "0.3.1",
+    "@arki/env": "0.0.11",
+    "@arki/journal": "0.2.1",
+    "@arki/kv": "0.2.1",
     "@arki/log": "0.1.0",
     "@arki/money": "0.0.4",
     "@t3-oss/env-core": "^0.13.11",

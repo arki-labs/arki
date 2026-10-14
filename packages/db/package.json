@@ -1,6 +1,6 @@
 {
   "name": "@arki/db",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "description": "Drizzle ORM repositories and database helpers for ARKI — Postgres + PGlite runtimes, projection builder, branded ID factory, and env-aware connection pooling.",
   "license": "MIT",
   "repository": {
@@ -119,9 +119,9 @@
     "package.json"
   ],
   "dependencies": {
-    "@arki/contracts": "0.0.5",
+    "@arki/contracts": "0.1.0",
     "@arki/date": "0.2.0",
-    "@arki/env": "0.0.9",
+    "@arki/env": "0.0.11",
     "@arki/log": "0.1.0",
     "@electric-sql/pglite": "^0.4.6",
     "@paralleldrive/cuid2": "^3.3.0",
@@ -132,7 +132,7 @@
     "zod": "4.6.5"
   },
   "peerDependencies": {
-    "@arki/dot": "^0.5.0"
+    "@arki/dot": "^0.6.1"
   },
   "peerDependenciesMeta": {
     "@arki/dot": {
