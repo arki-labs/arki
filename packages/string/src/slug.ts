@@ -78,7 +78,6 @@ type Compiled = Readonly<{ map: ReadonlyMap<string, string>; pattern: RegExp }>;
 function compile(entries: Replacements): Compiled {
   const map = new Map<string, string>();
   for (const [from, to] of entries) if (from !== '') map.set(from, to);
-  // eslint-disable-next-line unicorn/no-array-sort -- fresh copy; ES2023 toSorted is missing on older engines
   const keys = [...map.keys()].sort((a, b) => b.length - a.length);
   const pattern = new RegExp(keys.map(key => escapeRegExp(key)).join('|'), 'gu');
   return { map, pattern };

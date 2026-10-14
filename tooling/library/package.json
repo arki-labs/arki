@@ -1,0 +1,33 @@
+{
+  "name": "@arki/library-tooling",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "arki-library-check": "./src/library-check.ts",
+    "arki-runtimes": "./src/runtimes.ts"
+  },
+  "scripts": {
+    "clean": "git clean -xdf .cache .turbo node_modules",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit --skipLibCheck"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@playwright/test": "catalog:testing",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@arki/ts": "workspace:*"
+  }
+}

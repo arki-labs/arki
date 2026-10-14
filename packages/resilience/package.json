@@ -52,7 +52,7 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:runtimes": "bun run build && node scripts/smoke.mjs && bun scripts/smoke.mjs && if command -v deno >/dev/null; then deno run --no-config --node-modules-dir=manual scripts/smoke.mjs; else echo 'deno not installed: skipped'; fi && bun build scripts/smoke.mjs --target=browser --outdir=.cache/browser-check && node scripts/smoke-browser.mjs && node scripts/smoke-hermes.mjs",
+    "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
@@ -62,6 +62,7 @@
   "devDependencies": {
     "@arki/bench": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@types/node": "catalog:node",

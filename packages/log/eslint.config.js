@@ -1,45 +1,4 @@
-import baseConfig from '@arki/eslint-config/base';
+import { library } from '@arki/eslint-config/library';
 
-/** @type {import('typescript-eslint').Config} */
-export default [
-  {
-    ignores: ['dist/**'],
-  },
-  ...baseConfig,
-  {
-    // The core and testing entries run in Node, Bun, Deno, browsers and React Native.
-    // Only web-standard globals are allowed; no runtime-specific builtins.
-    // `src/node/**` is exempt: it is the Node entry.
-    files: ['src/core/**/*.ts', 'src/testing/**/*.ts'],
-    ignores: ['src/**/*.test.ts'],
-    rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            { group: ['node:*'], message: 'Node builtins are not available in browsers or Deno.' },
-            { group: ['bun', 'bun:*'], message: 'Bun builtins are not available elsewhere.' },
-          ],
-        },
-      ],
-      // ES2023 copying array methods are missing on Hermes V1 (React Native 0.86).
-      'no-restricted-properties': [
-        'error',
-        ...['toSorted', 'toReversed', 'toSpliced'].map(property => ({
-          property,
-          message: 'Missing on Hermes (React Native). Copy the array, then sort/reverse/splice it.',
-        })),
-      ],
-      // The copy-then-sort pattern above is deliberate.
-      'unicorn/no-array-sort': 'off',
-      'unicorn/no-array-reverse': 'off',
-      'no-restricted-globals': [
-        'error',
-        { name: 'process', message: 'Not available in browsers.' },
-        { name: 'Buffer', message: 'Not available in browsers or Deno.' },
-        { name: 'require', message: 'ESM only.' },
-        { name: '__dirname', message: 'ESM only.' },
-      ],
-    },
-  },
-];
+// `src/node` is the Node entry and `src/otel` the OpenTelemetry one; both may use runtime-specific builtins.
+export default library({ adapters: ['src/node/**', 'src/otel/**'] });

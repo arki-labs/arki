@@ -6,6 +6,5 @@ export function sum(values: readonly number[]): number {
 
 /** Ascending copy; `Array.prototype.toSorted` is ES2023 and missing from some mobile engines. */
 export function sortedAscending(values: readonly number[]): number[] {
-  // eslint-disable-next-line unicorn/no-array-sort -- copying first keeps the input untouched
   return [...values].sort((a, b) => a - b);
 }

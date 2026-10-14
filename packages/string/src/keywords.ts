@@ -92,7 +92,6 @@ export function keywords(text: string, options: KeywordOptions = {}): Keyword[] 
   const result = [...counts]
     .filter(([, occurrences]) => occurrences >= minOccurrences)
     .map(([keyword, occurrences]) => ({ keyword, occurrences, percentage: (occurrences / total) * 100 }))
-    // eslint-disable-next-line unicorn/no-array-sort -- the array is freshly built; no ES2023 toSorted for older engines
     .sort((a, b) => b.occurrences - a.occurrences || (a.keyword < b.keyword ? -1 : 1));
   return limit === undefined ? result : result.slice(0, limit);
 }

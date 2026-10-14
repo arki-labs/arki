@@ -1,6 +1,7 @@
-// Cross-runtime smoke test: run with `node`, `bun`, `deno run --allow-read`, and
-// `node --no-intl-segmenter` (see below) which deletes `Intl.Segmenter` first so the
-// in-house UAX #29 scanner runs end to end, as it does on React Native (Hermes).
+// Cross-runtime smoke test, run by `arki-runtimes` on every engine. On Node and
+// Bun it also re-runs itself with `--no-intl-segmenter`, which deletes
+// `Intl.Segmenter` first so the in-house UAX #29 scanner runs end to end, as it
+// does on React Native (Hermes).
 // Imports the built `dist/` (run `bun run build` first) and exercises one
 // operation per subpath so a runtime gap fails loudly on every engine.
 
@@ -52,3 +53,17 @@ const failed = checks.filter(c => !c.ok);
 for (const c of failed) console.error(`✗ ${c.name}: expected ${String(c.expected)}, got ${String(c.actual)}`);
 console.log(`${runtime}: ${checks.length - failed.length}/${checks.length} smoke checks passed`);
 if (failed.length > 0) throw new Error(`${failed.length} smoke check(s) failed on ${runtime}`);
+
+// The fallback run. The segmenter is cached on first use, so it needs a fresh process.
+const onNodeOrBun = !forceFallback && (globalThis.Bun || globalThis.process?.versions?.node) && !globalThis.Deno;
+if (onNodeOrBun) {
+  // A variable specifier keeps `bun build --target=browser` from trying to bundle the Node builtin.
+  const childProcess = 'node:child_process';
+  const { spawnSync } = await import(childProcess);
+  const result = spawnSync(globalThis.process.execPath, [new URL(import.meta.url).pathname, '--no-intl-segmenter'], {
+    encoding: 'utf8',
+  });
+  globalThis.process.stdout.write(result.stdout);
+  globalThis.process.stderr.write(result.stderr);
+  if (result.status !== 0) throw new Error(`the no-Intl.Segmenter run failed (exit ${result.status})`);
+}

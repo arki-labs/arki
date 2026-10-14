@@ -63,7 +63,6 @@ export function replaceEnd(text: string, search: string, replacement: string): s
  * the longest matching key wins, and inserted values are never re-scanned.
  */
 export function swap(text: string, replacements: Readonly<Record<string, string>>): string {
-  // eslint-disable-next-line unicorn/no-array-sort -- fresh array; ES2023 toSorted is missing on older engines
   const keys = Object.keys(replacements).sort((a, b) => b.length - a.length);
   for (const key of keys) assertNeedle(key, 'replacement key');
   if (keys.length === 0) return text;

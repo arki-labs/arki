@@ -230,7 +230,7 @@ Amounts past 2^53 switch to `bigint` and stay exact; adding them costs about 29 
 
 ## Runtime support
 
-Node 20+, Bun, Deno, modern browsers and React Native on Hermes V1 (React Native 0.86). `bun run test:runtimes` runs the same checks on all five; the Hermes leg needs a `hermes` binary (`HERMES_BIN`, build steps in `scripts/smoke-hermes.mjs`) and says so loudly when it is missing.
+Node 20+, Bun, Deno, modern browsers and React Native on Hermes V1 (React Native 0.86). `bun run test:runtimes` runs the same checks on all five; the Hermes leg needs a `hermes` binary (`HERMES_BIN`) and prints `INCOMPLETE` when it is missing.
 
 On Hermes for Apple platforms, `Intl.NumberFormat` has no `formatToParts` and formats number strings through a float. So `parseMoney` with a `locale` throws `UnsupportedFeatureError` (pass `symbols` instead), `formatMoneyToParts` throws, and `formatMoney` is exact up to 15 significant digits and throws beyond. Arithmetic, allocation, conversion, Stripe units and JSON work everywhere.
 

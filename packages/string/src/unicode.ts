@@ -95,7 +95,6 @@ export function take(text: string, count: number): string {
 
 /** Reverses the grapheme sequence, keeping each grapheme intact. */
 export function reverse(text: string): string {
-  // eslint-disable-next-line unicorn/no-array-reverse -- fresh copy; ES2023 toReversed is missing on older engines
   return [...graphemes(text)].reverse().join('');
 }
 
