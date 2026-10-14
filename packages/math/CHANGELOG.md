@@ -1,5 +1,26 @@
 # @arki/math
 
+## 0.0.9
+
+Speed: fastest against decimal.js, big.js, bignumber.js, fraction.js, complex.js, ml-matrix, mathjs, jstat, simple-statistics and regression-js in nearly every benchmark group.
+
+Changed:
+
+- **Breaking:** `Decimal`, `Rational` and `Complex` instances are no longer frozen (`Object.isFrozen` is `false`). Methods still never modify their operands and fields stay `readonly`. Freezing every result cost 5–7× in hot loops, because a frozen result cannot be optimized away; no peer library freezes. Shared constants (`Complex.ZERO`/`ONE`/`I`, the `1` returned by `pow(0)` and `exp(0)`, the Rational zero) stay frozen.
+- Exponential, logarithmic, power and polynomial fits compute `r2` and the other diagnostics on first read (2–3× faster when unread; identical values). Fit fields are `readonly`.
+
+Faster (identical results, checked against the previous build):
+
+- Linear algebra: `multiply` about 7×, `inverse` 2×, `solve` and `determinant` about 1.5× (i-k-j loops on `Float64Array` rows; cheap validation).
+- `linearRegression` about 7× (one fused pass for plain arrays); `powerRegression` about 2.5×.
+- `sum`, `mean` and the statistics built on them: compensated summation on four independent streams, same accuracy.
+- `Complex` `times`, `dividedBy`, `sqrt`, `pow`, `ln`; `Decimal#toString` for coefficients in the safe-integer range.
+
+Fixed:
+
+- `Complex#dividedBy` follows Baudin & Smith (2012): `(1e308 + 1e308i) / (1e308 + 1e308i)` is 1 instead of a range error, and all ten hard cases from the paper are correctly rounded.
+- `Complex#abs` and `toPolar` threw nothing and returned `Infinity` past the float range; they now throw `NumericRangeError`. `ln`, `log`, `sqrt`, `pow`, `nthRoots` and `approxEqual` work for |z| beyond `Number.MAX_VALUE`.
+
 ## 0.0.8
 
 General math a calculators app still needed: composite units, quartile and pooled-variance variants, and two fixes.

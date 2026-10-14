@@ -114,7 +114,9 @@ none of the modes above, and one of the reasons this package exists.
 
 ## Decimal
 
-`coefficient × 10^-scale`, immutable, frozen. Inputs: `string` (strict ASCII
+`coefficient × 10^-scale`, immutable: methods never modify their operands and
+fields are `readonly`. Instances are not frozen (freezing every result costs 5–7×
+in hot loops, and no peer library does it); the shared constants are. Inputs: `string` (strict ASCII
 decimal syntax, exponent allowed), `number` (read through its shortest
 decimal spelling, so `decimal(0.1)` is exactly `1/10`; non-finite and
 unsafe integers throw), `bigint`, or another `Decimal`.
