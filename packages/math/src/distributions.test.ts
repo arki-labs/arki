@@ -368,6 +368,21 @@ describe('quantile convergence is judged in probability, not x', () => {
     const d = chiSquare(0.1);
     expect(d.cdf(d.quantile(0.05))).toBeCloseTo(0.05, 12);
   });
+
+  // A tolerance of 1e-12 absolute accepts any x whose tail probability is below
+  // 1e-12: studentT(100).quantile(1 − 1e-12) returned 68 (true value 8.03), and
+  // chiSquare(1).quantile(1e-100) returned 5.9e-39 (true value 1.6e-200). The
+  // tail being solved must match to 1e-12 of itself. References: mpmath, 50 digits.
+  it.each([
+    ['studentT(100)', studentT(100), 1 - 1e-12, 8.025_830_060_218_645],
+    ['studentT(3)', studentT(3), 1e-64, -2.225_769_823_822_442_1e21],
+    ['chiSquare(1)', chiSquare(1), 1e-100, 1.570_796_326_794_896_6e-200],
+    ['chiSquare(200)', chiSquare(200), 1e-100, 7.901_597_617_080_129],
+    ['fisherF(1, 1)', fisherF(1, 1), 1e-60, 2.467_401_100_272_339_4e-120],
+    ['normal()', normal(), 0.499_999_999_999_999_94, -1.391_458_212_335_883_6e-16],
+  ] as const)('%s.quantile(%s) keeps its relative accuracy in the tail', (_name, d, p, want) => {
+    expect(Math.abs(d.quantile(p) - want) / Math.abs(want)).toBeLessThan(1e-11);
+  });
 });
 
 describe('noncentralT density near 0 and in the tails', () => {

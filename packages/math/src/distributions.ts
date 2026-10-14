@@ -20,8 +20,10 @@ export type ContinuousDistribution = {
   /** Survival function P(X > x) = 1 − cdf(x), computed on the accurate side where the distribution allows. */
   sf(x: number): number;
   /**
-   * Quantile: the x with cdf(x) = p, p in (0, 1), solved until |cdf(x) − p| ≤ 1e-12·max(p, 1 − p);
-   * p = 0 / 1 return the support bounds (±Infinity where unbounded).
+   * Quantile: the x with cdf(x) = p, p in (0, 1), solved on the accurate side to 1e-12 of the
+   * smaller tail (|cdf(x) − p| ≤ 1e-12·p for p ≤ ½, |sf(x) − (1 − p)| ≤ 1e-12·(1 − p) above), so
+   * far-tail quantiles keep their relative accuracy; p = 0 / 1 return the support bounds
+   * (±Infinity where unbounded).
    */
   quantile(p: number): number;
   /** Expected value, or `undefined` when the distribution has none. */
@@ -396,8 +398,15 @@ function acklam(p: number): number {
   return (poly(ACKLAM_A, r) * q) / (poly(ACKLAM_B, r) * r + 1);
 }
 
-/** Standard normal quantile: Acklam's guess, then two Halley steps on erfc. */
+/**
+ * Standard normal quantile. In the middle, √2·erfInv(2p − 1): 2p − 1 is exact
+ * there and erfInv keeps its relative accuracy even where the quantile is
+ * tiny. In the tails, Acklam's guess and two Halley steps on erfc, taken in the
+ * lower tail (the upper one by symmetry, as 1 − p is exact above ½).
+ */
 function normalQuantile(p: number): number {
+  if (p >= 0.25 && p <= 0.75) return SQRT2 * erfInv(2 * p - 1);
+  if (p > 0.5) return -normalQuantile(1 - p);
   let x = acklam(p);
   for (let i = 0; i < 2; i++) {
     const e = 0.5 * erfcRaw(-x / SQRT2) - p;
@@ -457,20 +466,32 @@ function nextFactor(factor: number): number {
 }
 
 /**
- * Inverts a monotone cdf. First brackets the quantile, growing the bracket by
- * squaring factors so tails many orders of magnitude out are reached in a few
- * steps. Then runs Newton steps (when a pdf is given) safeguarded by bisection
- * — geometric when the bracket spans orders of magnitude, and stepping toward a
- * support bound of 0 by squaring factors — until |cdf(x) − p| ≤ 1e-12·max(p, 1 − p),
- * which is meaningful however small the quantile is. If the bracket shrinks to
- * adjacent doubles first, the endpoint with the smaller error is returned.
- * Throws `NumericRangeError` if the iteration cap is hit.
+ * Inverts a monotone distribution on its accurate side: for p ≤ ½ it solves
+ * cdf(x) = p, above it sf(x) = 1 − p (exact in floating point there), each to
+ * 1e-12 of that tail probability, so a quantile far out in either tail is as
+ * accurate as one near the middle. First brackets the quantile, growing the
+ * bracket by squaring factors so tails many orders of magnitude out are reached
+ * in a few steps. Then runs Newton steps (when a pdf is given) safeguarded by
+ * bisection — geometric when the bracket spans orders of magnitude, and
+ * stepping toward a support bound of 0 by squaring factors. If the bracket
+ * shrinks to adjacent doubles first, the endpoint with the smaller error is
+ * returned. Throws `NumericRangeError` if the iteration cap is hit.
  */
-function invertCdf(cdf: (x: number) => number, p: number, bracket: Bracket, pdf?: (x: number) => number): number {
+function invertCdf(
+  cdf: (x: number) => number,
+  sf: (x: number) => number,
+  p: number,
+  bracket: Bracket,
+  pdf?: (x: number) => number,
+): number {
+  const lowerTail = p <= 0.5;
+  const q = 1 - p;
+  // Increasing in x and zero at the quantile; its derivative is the pdf either way.
+  const residual = lowerTail ? (x: number): number => cdf(x) - p : (x: number): number => q - sf(x);
   let { lo, hi } = bracket;
   let factor = 2;
   if (!bracket.loFixed) {
-    while (cdf(lo) > p) {
+    while (residual(lo) > 0) {
       if (lo === -Number.MAX_VALUE) throw outOfRange();
       hi = lo;
       lo = Math.max(lo * factor, -Number.MAX_VALUE);
@@ -478,20 +499,20 @@ function invertCdf(cdf: (x: number) => number, p: number, bracket: Bracket, pdf?
     }
   }
   factor = 2;
-  while (cdf(hi) < p) {
+  while (residual(hi) < 0) {
     if (hi === Number.MAX_VALUE) throw outOfRange();
     lo = hi;
     hi = Math.min(hi * factor, Number.MAX_VALUE);
     factor = nextFactor(factor);
   }
 
-  const tolerance = QUANTILE_TOLERANCE * Math.max(p, 1 - p);
+  const tolerance = QUANTILE_TOLERANCE * (lowerTail ? p : q);
   // While lo is still the support bound 0, bisection steps toward it by squaring factors.
   let zeroFactor = 2;
   let x = bisectionPoint(lo, hi, zeroFactor);
   let previousError = Infinity;
   for (let i = 0; i < QUANTILE_MAX_ITER; i++) {
-    const f = cdf(x) - p;
+    const f = residual(x);
     const error = Math.abs(f);
     if (error <= tolerance) return x;
     if (f > 0) hi = x;
@@ -511,13 +532,13 @@ function invertCdf(cdf: (x: number) => number, p: number, bracket: Bracket, pdf?
       next = bisectionPoint(lo, hi, zeroFactor);
       if (!(next > lo && next < hi)) {
         // lo and hi are adjacent doubles: no representable x does better.
-        return Math.abs(cdf(lo) - p) <= Math.abs(cdf(hi) - p) ? lo : hi;
+        return Math.abs(residual(lo)) <= Math.abs(residual(hi)) ? lo : hi;
       }
     }
     x = next;
   }
   throw new NumericRangeError(
-    `quantile did not converge to |cdf(x) - p| <= ${tolerance} within ${QUANTILE_MAX_ITER} iterations (p = ${p})`,
+    `quantile did not converge to within ${tolerance} of the ${lowerTail ? 'lower' : 'upper'} tail probability in ${QUANTILE_MAX_ITER} iterations (p = ${p})`,
   );
 }
 
@@ -589,7 +610,7 @@ export function studentT(df: number): ContinuousDistribution {
   const pdf = (x: number): number => studentTPdf(x, df, lnNorm);
   const quantile = (p: number): number =>
     solveQuantile(p, -Infinity, Infinity, () =>
-      p === 0.5 ? 0 : invertCdf(cdf, p, { lo: -1, hi: 1, loFixed: false }, pdf),
+      p === 0.5 ? 0 : invertCdf(cdf, x => cdf(-x), p, { lo: -1, hi: 1, loFixed: false }, pdf),
     );
   return {
     pdf(x) {
@@ -786,7 +807,9 @@ export function noncentralT(df: number, ncp: number): ContinuousDistribution {
     return Math.max(0, (df / x) * (nctCdfFrom(kernelPlus2, x * stretch) - cdf(x)));
   };
   const quantile = (p: number): number =>
-    solveQuantile(p, -Infinity, Infinity, () => invertCdf(cdf, p, { lo: -1, hi: 1, loFixed: false }, pdf));
+    solveQuantile(p, -Infinity, Infinity, () =>
+      invertCdf(cdf, x => nctSfFrom(kernel, x), p, { lo: -1, hi: 1, loFixed: false }, pdf),
+    );
   return {
     pdf(x) {
       assertPoint(x, 'x');
@@ -817,13 +840,18 @@ export function chiSquare(df: number): ContinuousDistribution {
     if (x === Infinity) return 1;
     return gammaPQ(k, x / 2, gln).p;
   };
+  const sf = (x: number): number => {
+    if (x <= 0) return 1;
+    if (x === Infinity) return 0;
+    return gammaPQ(k, x / 2, gln).q;
+  };
   const pdf = (x: number): number => {
     if (x < 0 || x === Infinity) return 0;
     if (x === 0) return df < 2 ? Infinity : df === 2 ? 0.5 : 0;
     return Math.exp((k - 1) * Math.log(x) - x / 2 - lnNorm);
   };
   const quantile = (p: number): number =>
-    solveQuantile(p, 0, Infinity, () => invertCdf(cdf, p, { lo: 0, hi: Math.max(1, df), loFixed: true }, pdf));
+    solveQuantile(p, 0, Infinity, () => invertCdf(cdf, sf, p, { lo: 0, hi: Math.max(1, df), loFixed: true }, pdf));
   return {
     pdf(x) {
       assertPoint(x, 'x');
@@ -835,9 +863,7 @@ export function chiSquare(df: number): ContinuousDistribution {
     },
     sf(x) {
       assertPoint(x, 'x');
-      if (x <= 0) return 1;
-      if (x === Infinity) return 0;
-      return noNegativeZero(gammaPQ(k, x / 2, gln).q);
+      return noNegativeZero(sf(x));
     },
     quantile,
     mean: df,
@@ -859,6 +885,13 @@ export function fisherF(df1: number, df2: number): ContinuousDistribution {
     const d = df1 * x + df2;
     return betaI((df1 * x) / d, df2 / d, a, b, lnB);
   };
+  const sf = (x: number): number => {
+    if (x <= 0) return 1;
+    if (x === Infinity) return 0;
+    const d = df1 * x + df2;
+    // 1 − I_u(a, b) = I_{1−u}(b, a), evaluated on its own accurate side.
+    return betaI(df2 / d, (df1 * x) / d, b, a, lnB);
+  };
   const pdf = (x: number): number => {
     if (x < 0 || x === Infinity) return 0;
     if (x === 0) return df1 < 2 ? Infinity : df1 === 2 ? 1 : 0;
@@ -866,7 +899,7 @@ export function fisherF(df1: number, df2: number): ContinuousDistribution {
     return Math.exp(lnNum + lnPdfConst - Math.log(x));
   };
   const quantile = (p: number): number =>
-    solveQuantile(p, 0, Infinity, () => invertCdf(cdf, p, { lo: 0, hi: 1, loFixed: true }, pdf));
+    solveQuantile(p, 0, Infinity, () => invertCdf(cdf, sf, p, { lo: 0, hi: 1, loFixed: true }, pdf));
   return {
     pdf(x) {
       assertPoint(x, 'x');
@@ -878,11 +911,7 @@ export function fisherF(df1: number, df2: number): ContinuousDistribution {
     },
     sf(x) {
       assertPoint(x, 'x');
-      if (x <= 0) return 1;
-      if (x === Infinity) return 0;
-      const d = df1 * x + df2;
-      // 1 − I_u(a, b) = I_{1−u}(b, a), evaluated on its own accurate side.
-      return noNegativeZero(betaI(df2 / d, (df1 * x) / d, b, a, lnB));
+      return noNegativeZero(sf(x));
     },
     quantile,
     mean: df2 > 2 ? df2 / (df2 - 2) : undefined,
