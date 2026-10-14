@@ -313,6 +313,11 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
     write(refund, input.refundId, row => {
       const current = requireRefund(row, input.refundId);
 
+      // The provider's webhook and the service both report the same refund: the second changes nothing
+      if (current.status === 'completed' && current.providerRefundId === input.providerRefundId) {
+        return [];
+      }
+
       if (current.status !== 'processing') {
         throw new CommandError(
           'CONFLICT',

@@ -419,6 +419,27 @@ describe('processRefund, completeRefund and failRefund', () => {
     expect(row?.completedAt).toEqual(recordedAtOf(result.events[0]));
   });
 
+  it('completing a refund with the Stripe id it already has changes nothing', async () => {
+    const refundId = await seed('completed');
+    const eventsBefore = await eventTypesOf(db, 'refund', refundId);
+
+    const result = await journal.run(db, commands.completeRefund, { refundId, providerRefundId: 're_seed' }, meta);
+
+    expect(result.events).toEqual([]);
+    expect(await eventTypesOf(db, 'refund', refundId)).toEqual(eventsBefore);
+  });
+
+  it('rejects completing a completed refund with another Stripe id', async () => {
+    const refundId = await seed('completed');
+
+    await expectRejected(
+      () => journal.run(db, commands.completeRefund, { refundId, providerRefundId: 're_other' }, meta),
+      'CONFLICT',
+      'Cannot complete refund with status completed. Must be processing first.',
+      refundId,
+    );
+  });
+
   it('rejects completing a refund that is not being processed', async () => {
     const refundId = await seed('approved');
 

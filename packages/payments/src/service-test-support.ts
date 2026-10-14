@@ -105,6 +105,11 @@ export function refundReads(db: AppDb) {
 
       return row ?? null;
     },
+    async findByProviderRefundId(providerRefundId: string) {
+      const [row] = await db.select().from(refunds).where(eq(refunds.providerRefundId, providerRefundId));
+
+      return row ?? null;
+    },
     async findByPaymentId(paymentId: PaymentId) {
       return db.select().from(refunds).where(eq(refunds.paymentId, paymentId));
     },

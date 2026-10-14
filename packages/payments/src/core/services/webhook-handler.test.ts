@@ -22,10 +22,16 @@ import { add, fromUnix, now, sub } from '@arki/date';
 
 import type { AppDb } from '../../test-support.js';
 import type { WebhookEvent, WebhookEventType, WebhookValidationResult } from '../types.js';
-import type { WebhookEventStore, WebhookProcessingResult, WebhookValidator, WebhookWrites } from './webhook-handler.js';
+import type {
+  WebhookEventStore,
+  WebhookProcessingResult,
+  WebhookRefunds,
+  WebhookValidator,
+  WebhookWrites,
+} from './webhook-handler.js';
 import type { WebhookValidationOptions } from './webhook-security.js';
-import { runnerOn, seedPayment, seedSubscription } from '../../service-test-support.js';
-import { core, countEvents, eventTypesOf, openDb, typed } from '../../test-support.js';
+import { refundReads, refundRow, runnerOn, seedPayment, seedSubscription } from '../../service-test-support.js';
+import { adminId, core, countEvents, eventTypesOf, openDb, typed, userId } from '../../test-support.js';
 import { createWebhookId } from '../primitives.js';
 import { claimWebhookEvent, reclaimWebhookEvent } from '../webhook-claims.js';
 import { WebhookHandler } from './webhook-handler.js';
@@ -386,7 +392,12 @@ describe('WebhookHandler before the claim', () => {
 });
 
 /** A handler whose validator returns a Stripe event of `type` carrying `object`, on the test database. */
-function stateHandler(eventType: WebhookEventType, object: Record<string, unknown>, store = storeOn(db)) {
+function stateHandler(
+  eventType: WebhookEventType,
+  object: Record<string, unknown>,
+  store = storeOn(db),
+  refunds?: WebhookRefunds,
+) {
   const { validator } = validatorReturning({
     isValid: true,
     provider: 'stripe',
@@ -394,7 +405,7 @@ function stateHandler(eventType: WebhookEventType, object: Record<string, unknow
     data: { id: 'evt_x', type: 'x', data: { object } },
   });
   const writes: WebhookWrites = writesOn(db);
-  return new WebhookHandler(store, validator, writes);
+  return new WebhookHandler(store, validator, writes, {}, refunds);
 }
 
 /** A Stripe Subscription object, as `customer.subscription.*` events carry it. */
@@ -564,6 +575,102 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
 
     expect(result).toMatchObject({ success: true });
     expect(await countEvents(db)).toBe(eventsBefore);
+  });
+
+  describe('payment.refunded and the refunds table', () => {
+    const refundsOn = (): WebhookRefunds => ({ reads: refundReads(db), writes: typed.refunds.writes(runnerOn(db)) });
+
+    /** A collected payment of 25 and a refund of 10 of it that was handed to Stripe and not yet completed. */
+    async function refundInFlight() {
+      const payment = await seedPayment(writesOn(db), null, '25');
+      await writesOn(db).completePayment({ paymentId: payment.id });
+      const refundWrites = typed.refunds.writes(runnerOn(db));
+      const refund = await refundWrites.requestRefund({
+        paymentId: payment.id,
+        originalAmount: { amount: '25', currency: 'USD' },
+        refundAmount: { amount: '10', currency: 'USD' },
+        reason: 'customer_request',
+        requestedBy: userId,
+      });
+      await refundWrites.approveRefund({ refundId: refund.id, approvedBy: adminId });
+      await refundWrites.processRefund({ refundId: refund.id });
+      return { payment, refund };
+    }
+
+    function chargeWithRefund(providerPaymentId: string, refund: Record<string, unknown>) {
+      return stripeCharge(providerPaymentId, {
+        amount_refunded: 1000,
+        currency: 'usd',
+        refunds: { data: [{ status: 'succeeded', ...refund }] },
+      });
+    }
+
+    it('completes the refund the service started but never saw finish, with the Stripe refund id', async () => {
+      const { payment, refund } = await refundInFlight();
+      const charge = chargeWithRefund(payment.providerPaymentId, { id: 're_lost', metadata: { refundId: refund.id } });
+
+      expect(await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId())).toMatchObject({
+        success: true,
+      });
+
+      expect(await refundRow(db, refund.id)).toMatchObject({ status: 'completed', providerRefundId: 're_lost' });
+      expect(await eventTypesOf(db, 'refund', refund.id)).toEqual([
+        'RefundRequestedV2',
+        'RefundApproved',
+        'RefundProcessed',
+        'RefundCompleted',
+      ]);
+    });
+
+    it('a resent event changes nothing: the refund is found by its Stripe id', async () => {
+      const { payment, refund } = await refundInFlight();
+      const charge = chargeWithRefund(payment.providerPaymentId, { id: 're_twice', metadata: { refundId: refund.id } });
+      await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId());
+      const eventsBefore = await countEvents(db);
+
+      expect(await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId())).toMatchObject({
+        success: true,
+      });
+
+      expect(await countEvents(db)).toBe(eventsBefore);
+    });
+
+    it('a refund the service already completed is left as it is', async () => {
+      const { payment, refund } = await refundInFlight();
+      await typed.refunds.writes(runnerOn(db)).completeRefund({ refundId: refund.id, providerRefundId: 're_done' });
+      const eventsBefore = await eventTypesOf(db, 'refund', refund.id);
+      const charge = chargeWithRefund(payment.providerPaymentId, { id: 're_done', metadata: { refundId: refund.id } });
+
+      expect(await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId())).toMatchObject({
+        success: true,
+      });
+
+      expect(await eventTypesOf(db, 'refund', refund.id)).toEqual(eventsBefore);
+    });
+
+    it('a refund made at Stripe, outside the service, is acknowledged and gets no refunds row', async () => {
+      const { payment, refund } = await refundInFlight();
+      const charge = chargeWithRefund(payment.providerPaymentId, { id: 're_dashboard', metadata: {} });
+
+      expect(await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId())).toMatchObject({
+        success: true,
+      });
+
+      expect(await refundRow(db, refund.id)).toMatchObject({ status: 'processing', providerRefundId: null });
+    });
+
+    it('a refund Stripe has not succeeded yet is not completed', async () => {
+      const { payment, refund } = await refundInFlight();
+      const charge = chargeWithRefund(payment.providerPaymentId, {
+        id: 're_pending',
+        status: 'pending',
+        metadata: { refundId: refund.id },
+      });
+
+      await deliver(stateHandler('payment.refunded', charge, storeOn(db), refundsOn()), freshEventId());
+
+      expect(await refundRow(db, refund.id)).toMatchObject({ status: 'processing' });
+    });
   });
 
   it('payment.dispute_created records the dispute on the payment', async () => {

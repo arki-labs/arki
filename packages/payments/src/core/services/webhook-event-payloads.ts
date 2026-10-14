@@ -46,6 +46,18 @@ const stripeChargeEvent = z.object({
       payment_intent: z.string().min(1).nullish(),
       amount_refunded: z.number().int().min(0),
       currency: z.string().length(3),
+      /** Only on API versions that still list refunds on the charge. */
+      refunds: z
+        .object({
+          data: z.array(
+            z.object({
+              id: z.string().min(1),
+              status: z.string().nullish(),
+              metadata: z.record(z.string(), z.string()).nullish(),
+            }),
+          ),
+        })
+        .nullish(),
     }),
   }),
 });
@@ -133,6 +145,16 @@ export type StripeChargeSnapshot = {
   /** Total refunded so far, in Stripe's units of `currency`. */
   amountRefunded: number;
   currency: string;
+  /** The refunds the charge lists. Empty when Stripe does not list them on the charge. */
+  refunds: StripeChargeRefund[];
+};
+
+/** One refund of a charge, with the id our `RefundService` put in its metadata, if it made it. */
+export type StripeChargeRefund = {
+  providerRefundId: string;
+  status: string | null;
+  /** `metadata.refundId`: set when `RefundService` made the refund; null for a refund made at Stripe. */
+  refundId: string | null;
 };
 
 /** A dispute: which payment, and where it stands. */
@@ -155,6 +177,11 @@ export function parseStripeCharge(event: Record<string, unknown>): StripeChargeS
     providerPaymentId: charge.payment_intent ?? null,
     amountRefunded: charge.amount_refunded,
     currency: charge.currency,
+    refunds: (charge.refunds?.data ?? []).map(refund => ({
+      providerRefundId: refund.id,
+      status: refund.status ?? null,
+      refundId: refund.metadata?.['refundId'] ?? null,
+    })),
   };
 }
 

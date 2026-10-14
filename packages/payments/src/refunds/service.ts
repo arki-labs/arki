@@ -176,9 +176,8 @@ export class RefundService {
         throw new Error(`Payment ${refund.paymentId} not found`);
       }
 
-      const providerPaymentId = payment.providerPaymentId || payment.id;
-
-      const providerResult = await this.paymentProvider.refundPayment(providerPaymentId as PaymentId, {
+      // The provider resolves its own payment from our payment id
+      const providerResult = await this.paymentProvider.refundPayment(payment.id, {
         amount: refundAmountOf(refund),
         reason: refund.reason,
         metadata: {
@@ -189,7 +188,7 @@ export class RefundService {
 
       const completedRefund = await this.writes.completeRefund({
         refundId: refund.id,
-        providerRefundId: providerResult.id,
+        providerRefundId: providerResult.providerRefundId,
         providerResponse: JSON.stringify(providerResult),
       });
 

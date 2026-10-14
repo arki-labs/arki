@@ -36,8 +36,8 @@ let client: PGlite;
 let coreWrites: CoreWrites;
 let writes: RefundWrites;
 
-/** The id the provider gives the refund. The service stores it as `providerRefundId`. */
-const refundedAs = createPaymentId();
+/** The Stripe refund id the provider gives. The service stores it as `providerRefundId`. */
+const refundedAs = 're_test';
 const refundedOn = instant('2026-01-10T00:00:00.000Z');
 
 /** Every amount the provider was asked to pay back, in order. */
@@ -45,30 +45,33 @@ const askedToRefund: (Money | undefined)[] = [];
 
 /** A provider that pays the refund back. */
 const providerThatRefunds: Provider = {
-  refundPayment: (providerPaymentId, params) => {
+  refundPayment: (paymentId, params) => {
     askedToRefund.push(params.amount);
     const refunded = params.amount ?? money(0, 'USD');
 
     return Promise.resolve({
-      id: refundedAs,
-      userId,
-      customerId,
-      subscriptionId: null,
-      providerPaymentId: 're_test',
-      amountMinor: toMinorColumn(refunded),
-      currency: refunded.currency.code,
-      status: 'succeeded',
-      paymentMethod: 'card',
-      description: `Refund for ${providerPaymentId}`,
-      failureReason: null,
-      receiptUrl: null,
-      refunded: true,
-      refundedAmountMinor: toMinorColumn(refunded),
-      disputeId: null,
-      disputeStatus: null,
-      metadata: null,
-      createdAt: refundedOn,
-      updatedAt: refundedOn,
+      providerRefundId: refundedAs,
+      payment: {
+        id: paymentId,
+        userId,
+        customerId,
+        subscriptionId: null,
+        providerPaymentId: 'pi_test',
+        amountMinor: toMinorColumn(refunded),
+        currency: refunded.currency.code,
+        status: 'succeeded',
+        paymentMethod: 'card',
+        description: null,
+        failureReason: null,
+        receiptUrl: null,
+        refunded: true,
+        refundedAmountMinor: toMinorColumn(refunded),
+        disputeId: null,
+        disputeStatus: null,
+        metadata: null,
+        createdAt: refundedOn,
+        updatedAt: refundedOn,
+      },
     });
   },
 };

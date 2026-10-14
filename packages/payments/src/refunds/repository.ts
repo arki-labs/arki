@@ -1,5 +1,6 @@
 import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
+import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 
 import type { UserId } from '../core/user-id.js';
@@ -27,7 +28,8 @@ export function refundAmountOf(refund: Pick<Refund, 'refundAmountMinor' | 'curre
 
 export type RefundsDatabase =
   | NodePgDatabase<AnyRelations>
-  | NodePgTransaction<AnyRelations>;
+  | NodePgTransaction<AnyRelations>
+  | PgliteDatabase<AnyRelations>;
 
 export class RefundRepository {
   private readonly db: RefundsDatabase;
@@ -43,6 +45,16 @@ export class RefundRepository {
       .select()
       .from(this.refunds)
       .where(eq(this.refunds.id, refundId))
+      .limit(1);
+    return (refund as Refund | undefined) ?? null;
+  }
+
+  /** The refund the provider knows by `providerRefundId`: the link between a webhook and our row. */
+  async findByProviderRefundId(providerRefundId: string): Promise<Refund | null> {
+    const [refund] = await this.db
+      .select()
+      .from(this.refunds)
+      .where(eq(this.refunds.providerRefundId, providerRefundId))
       .limit(1);
     return (refund as Refund | undefined) ?? null;
   }
