@@ -8,7 +8,7 @@
  * into the first row instead of an error.
  */
 import type { PGlite } from '@electric-sql/pglite';
-import { defineRelations } from 'drizzle-orm';
+import { defineRelations, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -43,7 +43,24 @@ describe('customers table', () => {
     expect(error).toMatchObject({ cause: { message: expect.stringContaining('customers_user_id_idx') } });
   });
 
-  it('refuses a second row for the same provider customer', async () => {
+  it('accepts the same provider customer id under another provider', async () => {
+    const [row] = await db
+      .insert(core.customers)
+      .values({
+        id: createCustomerId(),
+        userId: adminId,
+        providerCustomerId: 'cus_test',
+        provider: 'paypal',
+        email: 'admin@example.com',
+      })
+      .returning();
+
+    expect(row).toMatchObject({ provider: 'paypal', providerCustomerId: 'cus_test' });
+    // Clean up: the next tests create the admin's customer themselves
+    await db.delete(core.customers).where(eq(core.customers.provider, 'paypal'));
+  });
+
+  it('refuses a second row for the same provider customer under the same provider', async () => {
     const error = await rejectionOf(
       db
         .insert(core.customers)

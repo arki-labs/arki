@@ -83,10 +83,11 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
       createdAt: instant('created_at').notNull().default(sql`now()`),
       updatedAt: instant('updated_at').notNull().default(sql`now()`),
     },
-    // One customer per user, and one row per provider customer: the lookups by either id read a single row
+    // One customer per user, and one row per provider customer. Two providers may hand out the same id,
+    // so the id is only unique within its provider: the lookup by provider id reads a single row with `provider`.
     (table) => [
       uniqueIndex('customers_user_id_idx').on(table.userId),
-      uniqueIndex('customers_provider_customer_id_idx').on(table.providerCustomerId),
+      uniqueIndex('customers_provider_customer_id_idx').on(table.provider, table.providerCustomerId),
     ],
   );
 
