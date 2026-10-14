@@ -67,7 +67,7 @@ Run `bun release:arki scorecard` whenever in doubt. If `BLOCKED`, fix what's blo
 
 Decided 2026-05-21 by the founder: every `@arki/*` package ships under the **0.0.x experimental track** until the public API is stable enough to commit to semver guarantees. `1.0.0` is reserved for when "no breaking changes except in a major bump" is a credible promise — which we earn through the scorecard + adoption, not by fiat.
 
-Patch bump (0.0.1 → 0.0.2): any change, breaking or not. Yes, this is anti-semver — that's intentional for the experimental track.
+Below 1.0, a **breaking** change is a **minor** changeset (0.0.8 → 0.1.0), with every monorepo call site updated in the same slice and no compatibility shim. Any other change is a **patch** changeset. Never a major bump below 1.0. (Founder rule, restated 2026-10-14 in `docs/rfcs/2026-10-14-arki-structure.md` P8; it supersedes the earlier "patch for any change".)
 
 ## Top-level procedures — pick the right one
 
