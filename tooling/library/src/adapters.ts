@@ -6,6 +6,7 @@ export const ADAPTERS = new Set([
   'native',
   'react-native',
   'dot',
+  'foreman',
   'drizzle',
   'otel',
   'testing',

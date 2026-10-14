@@ -32,6 +32,12 @@
       "node": "./src/projection.ts",
       "default": "./dist/src/projection.js"
     },
+    "./foreman": {
+      "types": "./dist/src/foreman/index.d.ts",
+      "import": "./src/foreman/index.ts",
+      "node": "./src/foreman/index.ts",
+      "default": "./dist/src/foreman/index.js"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/src/index.d.ts",
@@ -59,15 +65,8 @@
     "superjson": "catalog:utilities",
     "zod": "catalog:"
   },
-  "peerDependencies": {
-    "@arki/dot": "workspace:*"
-  },
-  "peerDependenciesMeta": {
-    "@arki/dot": {
-      "optional": true
-    }
-  },
   "devDependencies": {
+    "@arki/admin": "workspace:*",
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
@@ -78,5 +77,17 @@
     "testcontainers": "catalog:testing",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@arki/admin": "workspace:*",
+    "@arki/dot": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@arki/admin": {
+      "optional": true
+    },
+    "@arki/dot": {
+      "optional": true
+    }
   }
 }
