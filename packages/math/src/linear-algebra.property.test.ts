@@ -166,70 +166,58 @@ describe('linear-algebra properties', () => {
           for (const [j, x] of row.entries()) (d[offset + i] ?? [])[offset + j] = x;
         offset += block.length;
       }
-      // Entries below 1e-12 become 0 (see regression 1 below: subnormal entries break the vectors).
+      // Entries below 1e-12 become 0. An entry far below ε·‖A‖ can make balancing rescale its whole
+      // row or column by 2^±70 or more, and then eigenvectors are poor in LAPACK (numpy) too: about 1 draw
+      // in 600 without this cutoff, every one of them as bad in numpy. The module docs say so.
       return squareArb(n).map(m => {
         const p = plus(
           m.map(row => row.map(x => (Math.abs(x) < 1e-12 ? 0 : x))),
           times(identity(n), 10 * n + 1),
         );
-        // Round-off leaves entries like 1e-29 where P·D·P⁻¹ cancels; zero them for the same reason.
+        // Round-off leaves entries like 1e-29 where P·D·P⁻¹ cancels: such entries, for the same reason.
         const a = multiply(multiply(p, d), inverse(p));
         const cutoff = 1e-12 * size(a);
         return a.map(row => row.map(x => (Math.abs(x) < cutoff ? 0 : x)));
       });
     });
 
+  /**
+   * A backward-stable bound: `c · n · ε · ‖A‖` with ‖A‖ the largest entry and c = 16. Over 20,000
+   * seeded draws of the property below the worst case reached c ≈ 5.9.
+   */
+  const bound = (a: Matrix): number => 16 * a.length * Number.EPSILON * Math.max(1, size(a));
+
   it('general eigenpairs: A·v ≈ λv (complex), unit vectors, for separated eigenvalues', () => {
     fc.assert(
       fc.property(diagonalizableArb, a => {
-        // A backward-stable solver reaches ~1e-15 relative; this bound leaves room for regression 3 below.
-        expect(worstResidual(a)).toBeLessThanOrEqual(1e-9 * Math.max(1, size(a)) * a.length);
+        expect(worstResidual(a)).toBeLessThanOrEqual(bound(a));
       }),
       config,
     );
   });
 
-  // Found by an earlier version of the property above that drew any random matrix. Reported to the
-  // linear-algebra owner, not fixed here. `it.fails` turns red once fixed: then make these plain `it`.
-  //
-  // 1. An entry many orders of magnitude below the rest (1e-50 .. 1e-200 here; 1e-20 and 1e-300 pass)
-  //    makes eigenDecompose return vectors that are not eigenvectors (residual 5 on a norm-7 matrix).
-  //    Shrunk counterexamples: [[-1,0,0],[0,0,3e-9],[6.8e-308,0,0]] (residual 3e-9) and, with three
-  //    well-separated eigenvalues 6, −9, −30, [[6,5e-324,9e-323],[0,-9,0],[0,-0.677…,-30]] (residual 0.68).
-  it.fails('regression: a tiny off-diagonal entry must not break eigenDecompose vectors', () => {
-    expect(
-      worstResidual([
-        [2, 5, 1],
-        [0, 3, 4],
-        [1e-100, 0, 7],
-      ]),
-    ).toBeLessThanOrEqual(1e-12 * 7 * 3);
+  // Found by an earlier version of the property above that drew any random matrix. EISPACK-style
+  // balancing left the diagonal out of its row and column norms, so one tiny entry drove the scaling
+  // to 1e56 (here) and `x = D·y` blew the round-off in `y` up into eigenvectors with residual ≈ ‖A‖.
+  it('regression: a tiny off-diagonal entry must not break eigenDecompose vectors', () => {
+    const a = [
+      [2, 5, 1],
+      [0, 3, 4],
+      [1e-100, 0, 7],
+    ];
+    expect(worstResidual(a)).toBeLessThanOrEqual(bound(a));
   });
 
-  it.fails('regression: subnormal entries must not break eigenDecompose vectors', () => {
+  it('regression: subnormal entries must not break eigenDecompose vectors', () => {
     const a = [
       [6, 5e-324, 9e-323],
       [0, -9, 0],
       [0, -0.677_419_354_838_709_6, -30],
     ];
-    expect(worstResidual(a)).toBeLessThanOrEqual(1e-12 * 30 * 3);
+    expect(worstResidual(a)).toBeLessThanOrEqual(bound(a));
   });
 
-  // 2. A nearly defective matrix (eigenvalues ≈ ±1e-6 from a perturbed Jordan block) gets a residual
-  //    of 5e-5; a backward-stable solver (LAPACK trevc) keeps ‖A·v − λ·v‖ near ε·‖A‖ even there.
-  it.fails('regression: nearly defective eigenpairs keep a small residual', () => {
-    const a = [
-      [0, 1, 0, 0],
-      [0, 0, -1, 0],
-      [-1e-12, 0, 1, 0],
-      [-1, 0, 0, 0],
-    ];
-    expect(worstResidual(a)).toBeLessThanOrEqual(1e-9 * 4);
-  });
-
-  // 3. Distinct, well-separated eigenvalues (−15, −3, 0, 3, 9, 36), but one entry about 1e-12 of the
-  //    largest: residual 5.6e-10, about 1e4 × what ε·n·‖A‖ allows (2.2e-10 here, LAPACK reaches ~1e-14).
-  it.fails('regression: a small entry costs eigenDecompose accuracy', () => {
+  it('regression: a small entry costs eigenDecompose no accuracy', () => {
     const a = [
       [-3, 0, 0, 0, 0, 0],
       [-3.600_000_000_000_396e-11, 9, 0, 0, 0, 0],
@@ -238,6 +226,48 @@ describe('linear-algebra properties', () => {
       [0, 0, 0, 0, 0, 0],
       [0, 1.327_868_852_459_016_3, 0, 0, 0, 36],
     ];
-    expect(worstResidual(a)).toBeLessThanOrEqual(1e-12 * 36 * 6);
+    expect(worstResidual(a)).toBeLessThanOrEqual(bound(a));
+  });
+
+  // A nearly defective matrix (eigenvalues ≈ ±1e-6·i from a perturbed Jordan block). Balancing rescales
+  // by up to 2²⁶ here, which buys about 9 more digits in the eigenvalues (unbalanced, Im λ is off by
+  // 1e-11) and costs residual: 2.2e-13, about 250 · n · ε · ‖A‖. LAPACK's dgeev (numpy) gets 2.6e-13.
+  it('regression: nearly defective eigenpairs keep a small residual and accurate eigenvalues', () => {
+    const a = [
+      [0, 1, 0, 0],
+      [0, 0, -1, 0],
+      [-1e-12, 0, 1, 0],
+      [-1, 0, 0, 0],
+    ];
+    expect(worstResidual(a)).toBeLessThanOrEqual(32 * bound(a));
+    // The roots of λ³ − λ² − 1e-12 (mpmath, 50 digits), plus the 0 that column 4 isolates.
+    const { values } = eigenDecompose(a);
+    const exact = [
+      Complex.fromParts(-4.999_999_999_99e-13, -9.999_999_999_993_75e-7),
+      Complex.fromParts(-4.999_999_999_99e-13, 9.999_999_999_993_75e-7),
+      Complex.from(0),
+      Complex.from(1.000_000_000_001),
+    ];
+    for (const [k, value] of values.entries()) {
+      expect(value.minus(exact[k]!).abs()).toBeLessThanOrEqual(1e-18 + Number.EPSILON * exact[k]!.abs());
+    }
+  });
+
+  // Exposed once balancing stopped rescaling these: EISPACK's Hessenberg accumulation divided by the
+  // square of a subnormal column scale (0), and its back-substitution divided by a subnormal pivot.
+  it('regression: subnormal columns and pivots give finite eigenvectors', () => {
+    for (const a of [
+      [
+        [30, 0.387_096_774_193_548_4, 1.636_363_636_363_635_8],
+        [0, 21, 4.227_272_727_272_727_5],
+        [9e-323, -2.129_032_258_064_516, 21],
+      ],
+      [
+        [4e-323, 0],
+        [6, -2e-323],
+      ],
+    ]) {
+      expect(worstResidual(a)).toBeLessThanOrEqual(bound(a));
+    }
   });
 });

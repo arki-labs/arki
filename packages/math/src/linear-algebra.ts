@@ -70,10 +70,15 @@
  * Algorithms are the LAPACK/EISPACK routes: Householder tridiagonalization plus
  * implicit QL with Wilkinson shifts (`dsyev`/`tql2`) for symmetric input;
  * balancing, Householder reduction to Hessenberg form and Francis double-shift
- * QR (`dgeev`/`hqr2`) for general input. The matrix is first scaled by a power
- * of two (exact) so entries near the float64 limits neither overflow nor
- * underflow. Results are backward stable: each eigenpair satisfies
- * `‖A·v − λ·v‖ ≈ n · ε · ‖A‖`. Eigenvalues of a defective matrix (a Jordan
+ * QR (`dgeev`/`dgebal`/`dlahqr`) for general input. The matrix is first scaled
+ * by a power of two (exact) so entries near the float64 limits neither overflow
+ * nor underflow. Results are backward stable: each eigenpair satisfies
+ * `‖A·v − λ·v‖ ≈ n · ε · ‖A‖`. Balancing trades a little of that for accuracy
+ * when it rescales strongly: a nearly defective or graded matrix keeps far more
+ * accurate eigenvalues, with residuals up to a few hundred `n · ε · ‖A‖`, as
+ * LAPACK's `dgeev` gives. Entries far below `ε · ‖A‖` (round-off left over from
+ * a cancellation, say) can make balancing rescale a whole row, and then the
+ * eigenvectors may be poor, as in LAPACK and MATLAB: zero such entries first. Eigenvalues of a defective matrix (a Jordan
  * block) are as accurate as the problem allows, about `ε^(1/k)` for a block of
  * size `k`, so a double root may come out as a close real pair or a tiny
  * complex pair, as in every float library; their eigenvectors are then nearly
@@ -718,6 +723,7 @@ export type EigenDecomposition = {
 };
 
 const EPS = Number.EPSILON;
+const MIN_NORMAL = 2 ** -1022;
 
 /** `√(a² + b²)` without overflow or underflow of the squares. */
 function hypot(a: number, b: number): number {
@@ -1072,49 +1078,161 @@ export function symmetricEigenDecompose(a: Matrix, options?: SymmetryOptions): S
   return { values, vectors };
 }
 
+/** A balancing similarity `A = P·D·B·D⁻¹·Pᵀ` (LAPACK `dgebal`): see `balance`. */
+type Balancing = {
+  /** The diagonal of `D`; 1 outside `low..high`. */
+  readonly factors: Float64Array;
+  /** Outside `low..high`, the index row/column `j` was swapped with (LAPACK's `SCALE`). */
+  readonly swaps: Int32Array;
+  readonly low: number;
+  readonly high: number;
+};
+
+/** Smallest and largest safe balancing factors (LAPACK `SFMIN1`/`SFMAX1`, `SFMIN2`/`SFMAX2`). */
+const SAFE_MIN = MIN_NORMAL / EPS;
+const SAFE_MAX = 1 / SAFE_MIN;
+const SAFE_MIN2 = SAFE_MIN * 2;
+const SAFE_MAX2 = 1 / SAFE_MIN2;
+
+/** Swaps rows `i` and `j` and columns `i` and `j` of `h`: a permutation similarity. */
+function swapRowsAndColumns(h: Float64Array[], i: number, j: number): void {
+  for (const row of h) {
+    const t = row[i]!;
+    row[i] = row[j]!;
+    row[j] = t;
+  }
+  const a = h[i]!;
+  const b = h[j]!;
+  for (let k = 0; k < a.length; k++) {
+    const t = a[k]!;
+    a[k] = b[k]!;
+    b[k] = t;
+  }
+}
+
 /**
- * Balances `h` in place by a diagonal similarity `D⁻¹·A·D` with power-of-two
- * entries (EISPACK `balanc`, scaling only): each row and column pair gets
- * comparable norms, which can make the eigenvalues of a badly scaled matrix
- * far more accurate. Returns the diagonal of `D`.
+ * Balances `h` in place (LAPACK 3.5+ `dgebal`). First a permutation moves rows
+ * and columns that isolate an eigenvalue out of the way, leaving the block
+ * `low..high`; then a diagonal similarity `D⁻¹·B·D` with power-of-two entries
+ * gives each row and column of that block comparable norms, which can make the
+ * eigenvalues of a badly scaled matrix far more accurate. The norms include
+ * the diagonal (James, Langou & Lowery, 2014): EISPACK's `balanc` left it out,
+ * so an entry far below rounding level (1e-100 next to 7) drove `D` to 1e56,
+ * and `x = D·y` then turned the round-off in `y` into eigenvectors with a
+ * residual of order `‖A‖`.
  */
-function balance(h: Float64Array[], n: number): Float64Array {
+function balance(h: Float64Array[], n: number): Balancing {
   const factors = new Float64Array(n).fill(1);
+  const swaps = new Int32Array(n);
+  for (let i = 0; i < n; i++) swaps[i] = i;
+  let low = 0;
+  let high = n - 1;
+  // Push rows with no off-diagonal entry in columns low..high to the bottom: each isolates an eigenvalue.
+  let moved = true;
+  while (moved) {
+    moved = false;
+    for (let i = high; i >= 0; i--) {
+      const row = h[i]!;
+      let isolated = true;
+      for (let j = 0; j <= high; j++) {
+        if (j !== i && row[j] !== 0) {
+          isolated = false;
+          break;
+        }
+      }
+      if (!isolated) continue;
+      swaps[high] = i;
+      if (i !== high) swapRowsAndColumns(h, i, high);
+      moved = true;
+      if (high === 0) return { factors, swaps, low: 0, high: 0 };
+      high--;
+    }
+  }
+  // Push columns with no off-diagonal entry in rows low..high to the left.
+  moved = true;
+  while (moved) {
+    moved = false;
+    for (let j = low, last = high; j <= last; j++) {
+      let isolated = true;
+      for (let i = low; i <= high; i++) {
+        if (i !== j && h[i]![j] !== 0) {
+          isolated = false;
+          break;
+        }
+      }
+      if (!isolated) continue;
+      swaps[low] = j;
+      if (j !== low) swapRowsAndColumns(h, j, low);
+      moved = true;
+      low++;
+    }
+  }
+  // Scale rows and columns low..high (LAPACK 3.5+ `dgebal`): 2-norms that include the diagonal.
   let done = false;
   while (!done) {
     done = true;
-    for (let i = 0; i < n; i++) {
+    for (let i = low; i <= high; i++) {
       const hi = h[i]!;
       let c = 0;
       let r = 0;
-      for (let j = 0; j < n; j++) {
-        if (j === i) continue;
-        c += Math.abs(h[j]![i]!);
-        r += Math.abs(hi[j]!);
+      for (let j = low; j <= high; j++) {
+        c = hypot(c, h[j]![i]!);
+        r = hypot(r, hi[j]!);
       }
+      let ca = 0;
+      for (let j = 0; j <= high; j++) ca = Math.max(ca, Math.abs(h[j]![i]!));
+      let ra = 0;
+      for (let j = low; j < n; j++) ra = Math.max(ra, Math.abs(hi[j]!));
       if (c === 0 || r === 0) continue;
       let g = r / 2;
       let f = 1;
       const s = c + r;
-      while (c < g) {
+      while (c < g && Math.max(f, c, ca) < SAFE_MAX2 && Math.min(r, g, ra) > SAFE_MIN2) {
         f *= 2;
-        c *= 4;
+        c *= 2;
+        ca *= 2;
+        r /= 2;
+        g /= 2;
+        ra /= 2;
       }
-      g = r * 2;
-      while (c > g) {
+      g = c / 2;
+      while (g >= r && Math.max(r, ra) < SAFE_MAX2 && Math.min(f, c, g, ca) > SAFE_MIN2) {
         f /= 2;
-        c /= 4;
+        c /= 2;
+        g /= 2;
+        ca /= 2;
+        r *= 2;
+        ra *= 2;
       }
-      if ((c + r) / f < 0.95 * s) {
-        done = false;
-        factors[i]! *= f;
-        const inverseF = 1 / f;
-        for (let j = 0; j < n; j++) hi[j]! *= inverseF;
-        for (let j = 0; j < n; j++) h[j]![i]! *= f;
-      }
+      if (c + r >= 0.95 * s) continue;
+      const factor = factors[i]!;
+      if (f < 1 && factor < 1 && f * factor <= SAFE_MIN) continue;
+      if (f > 1 && factor > 1 && factor >= SAFE_MAX / f) continue;
+      done = false;
+      factors[i] = factor * f;
+      const inverseF = 1 / f;
+      for (let j = 0; j < n; j++) hi[j]! *= inverseF;
+      for (let j = 0; j < n; j++) h[j]![i]! *= f;
     }
   }
-  return factors;
+  return { factors, swaps, low, high };
+}
+
+/** Maps each eigenvector row `y` of `vt` (of the balanced matrix) back to `x = P·D·y` (LAPACK `dgebak`). */
+function unbalance(vt: Float64Array[], n: number, { factors, swaps, low, high }: Balancing): void {
+  for (const row of vt) {
+    for (let i = low; i <= high; i++) row[i]! *= factors[i]!;
+    // Undo the swaps in reverse: the column pushes (low−1 down to 0), then the row pushes (high+1 up to n−1).
+    for (let k = 0; k < n; k++) {
+      if (k >= low && k <= high) continue;
+      const i = k < low ? low - 1 - k : k;
+      const j = swaps[i]!;
+      if (j === i) continue;
+      const t = row[i]!;
+      row[i] = row[j]!;
+      row[j] = t;
+    }
+  }
 }
 
 /**
@@ -1125,6 +1243,9 @@ function balance(h: Float64Array[], n: number): Float64Array {
 function hessenberg(h: Float64Array[], n: number, vt?: Float64Array[]): void {
   const ort = new Float64Array(n);
   const sums = new Float64Array(n);
+  // Per column, the scale and `hh` of its reflector `I − v·vᵀ/hh` (`v` = column / scale).
+  const scales = new Float64Array(n);
+  const norms = new Float64Array(n);
   for (let m = 1; m <= n - 2; m++) {
     let scale = 0;
     for (let i = m; i < n; i++) scale += Math.abs(h[i]![m - 1]!);
@@ -1158,7 +1279,8 @@ function hessenberg(h: Float64Array[], n: number, vt?: Float64Array[]): void {
       f /= hh;
       for (let j = m; j < n; j++) row[j]! -= f * ort[j]!;
     }
-    ort[m]! *= scale;
+    scales[m] = scale;
+    norms[m] = hh;
     h[m]![m - 1] = scale * g;
   }
   if (vt) {
@@ -1167,16 +1289,18 @@ function hessenberg(h: Float64Array[], n: number, vt?: Float64Array[]): void {
       row[i] = 1;
     }
     for (let m = n - 2; m >= 1; m--) {
-      const sub = h[m]![m - 1]!;
-      if (sub === 0) continue;
-      for (let i = m + 1; i < n; i++) ort[i] = h[i]![m - 1]!;
+      const scale = scales[m]!;
+      if (scale === 0) continue;
+      // The reflector in its scaled form: EISPACK's unscaled one divides by scale², which
+      // underflows to 0 for a subnormal column.
+      for (let i = m + 1; i < n; i++) ort[i] = h[i]![m - 1]! / scale;
+      const hh = norms[m]!;
       for (let j = m; j < n; j++) {
         const row = vt[j]!;
         let g = 0;
         for (let i = m; i < n; i++) g += ort[i]! * row[i]!;
-        // Double division avoids possible underflow.
-        g = g / ort[m]! / sub;
-        for (let i = m; i < n; i++) row[i]! += g * ort[i]!;
+        g /= hh;
+        for (let i = m; i < n; i++) row[i]! -= g * ort[i]!;
       }
     }
   }
@@ -1200,7 +1324,8 @@ function complexDivide(xr: number, xi: number, yr: number, yi: number, out: Floa
 
 /**
  * Francis double-shift QR on the Hessenberg `h` (EISPACK `hqr2`, as in JAMA,
- * plus an iteration cap). Writes eigenvalue `k` as `d[k] + e[k]·i`; a complex
+ * plus an iteration cap, LAPACK `dlahqr`'s deflation test and LAPACK `dtrevc`'s
+ * guard on tiny pivots in the back-substitution). Writes eigenvalue `k` as `d[k] + e[k]·i`; a complex
  * pair sits at `k, k+1` with `e[k] > 0`. With `vt`, the rows of `vt` become
  * the eigenvectors of the matrix `vt` was formed for: row `k` alone for a
  * real eigenvalue, rows `k` (real part) and `k+1` (imaginary part) for the
@@ -1209,6 +1334,8 @@ function complexDivide(xr: number, xi: number, yr: number, yi: number, out: Floa
  */
 function francisQr(h: Float64Array[], n: number, d: Float64Array, e: Float64Array, vt?: Float64Array[]): void {
   const maxIterations = 30 * Math.max(10, n);
+  // LAPACK's SMLNUM: a subdiagonal this small is negligible outright.
+  const tiny = (MIN_NORMAL * n) / EPS;
   let norm = 0;
   for (let i = 0; i < n; i++) {
     const row = h[i]!;
@@ -1232,9 +1359,25 @@ function francisQr(h: Float64Array[], n: number, d: Float64Array, e: Float64Arra
     // Look for a single small subdiagonal element.
     let l = en;
     while (l > 0) {
-      s = Math.abs(h[l - 1]![l - 1]!) + Math.abs(h[l]![l]!);
+      const hl = h[l]!;
+      const sub = Math.abs(hl[l - 1]!);
+      if (sub <= tiny) break;
+      const corner = h[l - 1]![l - 1]!;
+      s = Math.abs(corner) + Math.abs(hl[l]!);
       if (s === 0) s = norm;
-      if (Math.abs(h[l]![l - 1]!) < EPS * s) break;
+      if (sub < EPS * s) {
+        // Ahues & Kressner's conservative test (LAPACK `dlahqr`): it weighs the product
+        // h[l][l−1]·h[l−1][l], which a diagonal (balancing) similarity leaves unchanged.
+        const sup = Math.abs(h[l - 1]![l]!);
+        const ab = Math.max(sub, sup);
+        const ba = Math.min(sub, sup);
+        const diagonal = Math.abs(hl[l]!);
+        const gap = Math.abs(corner - hl[l]!);
+        const aa = Math.max(diagonal, gap);
+        const bb = Math.min(diagonal, gap);
+        const sum = aa + ab;
+        if (ba * (ab / sum) <= Math.max(tiny, EPS * (bb * (aa / sum)))) break;
+      }
       l--;
     }
     const hEn = h[en]!;
@@ -1448,6 +1591,7 @@ function francisQr(h: Float64Array[], n: number, d: Float64Array, e: Float64Arra
     q = e[en]!;
     if (q === 0) {
       // A real vector.
+      const smin = Math.max(EPS * Math.abs(p), tiny);
       let l = en;
       h[en]![en] = 1;
       for (let i = en - 1; i >= 0; i--) {
@@ -1462,7 +1606,15 @@ function francisQr(h: Float64Array[], n: number, d: Float64Array, e: Float64Arra
         }
         l = i;
         if (e[i] === 0) {
-          row[en] = w === 0 ? -r / (EPS * norm) : -r / w;
+          // A pivot below smin is raised to it (LAPACK `dlaln2`), and the vector is scaled
+          // down first when the quotient would overflow.
+          const pivot = Math.abs(w) < smin ? smin : w;
+          if (Math.abs(r) > 1 && Math.abs(pivot) < 1 && Math.abs(r) > Math.abs(pivot) / tiny) {
+            const shrink = 1 / Math.abs(r);
+            for (let j = i + 1; j <= en; j++) h[j]![en]! *= shrink;
+            r *= shrink;
+          }
+          row[en] = -r / pivot;
         } else {
           const below = h[i + 1]!;
           x = row[i + 1]!;
@@ -1562,10 +1714,12 @@ function francisQr(h: Float64Array[], n: number, d: Float64Array, e: Float64Arra
 }
 
 /** Scales and balances a validated copy of `a`; `factors` is the balancing diagonal `D`. */
-function generalInput(a: Matrix): { n: number; h: Float64Array[]; scale: number; factors: Float64Array } {
+function generalInput(a: Matrix): { n: number; h: Float64Array[]; scale: number; balancing: Balancing } {
   const n = assertSquare(a, 'a');
   const { work: h, scale } = scaledCopy(a, n);
-  return { n, h, scale, factors: balance(h, n) };
+  const balancing = balance(h, n);
+
+  return { n, h, scale, balancing };
 }
 
 /** Eigenvalue indices sorted by real part, then imaginary part. */
@@ -1599,14 +1753,13 @@ export function eigenvalues(a: Matrix): Complex[] {
  * Throws `ConvergenceError` if the QR iteration stalls.
  */
 export function eigenDecompose(a: Matrix): EigenDecomposition {
-  const { n, h, scale, factors } = generalInput(a);
+  const { n, h, scale, balancing } = generalInput(a);
   const v = squareRows(n);
   hessenberg(h, n, v);
   const d = new Float64Array(n);
   const e = new Float64Array(n);
   francisQr(h, n, d, e, v);
-  // Undo the balancing: x = D·y.
-  for (const row of v) for (let i = 0; i < n; i++) row[i]! *= factors[i]!;
+  unbalance(v, n, balancing);
   const im = new Float64Array(n);
   const unit: Complex[][] = [];
   for (let k = 0; k < n; k++) {
