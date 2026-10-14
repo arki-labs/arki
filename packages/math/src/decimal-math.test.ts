@@ -213,6 +213,111 @@ describe('errors', () => {
   });
 });
 
+describe('huge integer exponents', () => {
+  // '1e9999' is an integer far past Number.MAX_SAFE_INTEGER. It used to reach
+  // Decimal#pow as Infinity and fail argument validation ("got Infinity").
+  it('throws ResourceLimitError when the result is too big, with or without options', () => {
+    expect(() => pow('2', '1e9999', { scale: 2 })).toThrow(ResourceLimitError);
+    expect(() => pow('-2', '1e9999', { scale: 2 })).toThrow(ResourceLimitError);
+    expect(() => pow('2', '1e9999')).toThrow(ResourceLimitError);
+  });
+
+  it('trivial bases stay exact at any exponent', () => {
+    const odd = `1${'0'.repeat(30)}1`;
+    expect(pow(1, '1e9999', { scale: 2 }).toString()).toBe('1.00');
+    expect(pow(-1, '1e9999', { scale: 2 }).toString()).toBe('1.00');
+    expect(pow(-1, odd, { scale: 2 }).toString()).toBe('-1.00');
+    expect(pow(0, '1e9999', { scale: 2 }).toString()).toBe('0.00');
+    expect(() => pow(0, '-1e9999', { scale: 2 })).toThrow(DivisionByZeroError);
+  });
+
+  it('results that underflow round like exp of a very negative value', () => {
+    expect(pow('0.5', '1e9999', { scale: 5 }).toString()).toBe('0.00000');
+    expect(pow('-0.5', `1${'0'.repeat(30)}1`, { scale: 5, rounding: 'floor' }).toString()).toBe('-0.00001');
+    expect(pow(2, '-1e9999', { scale: 5, rounding: 'up' }).toString()).toBe('0.00001');
+  });
+
+  it('a moderate result of a huge exponent is still correctly rounded', () => {
+    // (1 + 10^-9998)^(10^9998) = e − e/2·10^-9998 + …, so e to 5 digits.
+    expect(pow(`1.${'0'.repeat(9997)}1`, '1e9998', { scale: 5 }).toString()).toBe('2.71828');
+  });
+
+  it('no float overflow in the size estimate of a non-integer exponent', () => {
+    // y·log10(x) was estimated as Infinity · 0 = NaN here (y > 1e308, x within 1e-17 of 1).
+    const y = `1${'0'.repeat(400)}.5`;
+    expect(pow(`1.${'0'.repeat(499)}1`, y, { scale: 5 }).toString()).toBe('1.00000');
+    expect(() => pow(`1.${'0'.repeat(29)}1`, y, { scale: 5 })).toThrow(ResourceLimitError);
+    expect(pow(`0.${'9'.repeat(30)}`, y, { scale: 5 }).toString()).toBe('0.00000');
+  });
+
+  it('integer powers whose exact value is too long to build are rounded, not refused', () => {
+    // The exact 0.5^20000 has 20 000 fraction digits; only 10 are asked for.
+    expect(pow('0.5', 20_000, { scale: 10 }).toString()).toBe('0.0000000000');
+    expect(pow('0.5', 20_000, { scale: 10, rounding: 'ceiling' }).toString()).toBe('0.0000000001');
+    // 2^14000 has 4215 digits — within the limit.
+    const big = pow(2, 14_000, { scale: 0 });
+    expect(big.coefficient).toBe(2n ** 14_000n);
+    // 0.999^5000 ≈ 0.006721 needs a 15 000-digit exact power along the way.
+    expect(pow('0.999', 5000, { scale: 6 }).toString()).toBe('0.006721');
+    expect(pow('0.999', -5000, { scale: 2 }).toString()).toBe('148.78');
+  });
+});
+
+describe('the digit limit applies to the returned value only', () => {
+  // Rule: a result may have at most 10 000 digits in its coefficient (integer
+  // digits + scale), the same cap every Decimal obeys. Guard digits used inside
+  // do not count. One digit over throws ResourceLimitError, before the work.
+  const digits = (value: { coefficient: bigint }) => value.coefficient.toString().replace('-', '').length;
+  const LIMIT = 10_000;
+
+  it('roots', { timeout: 20_000 }, () => {
+    expect(digits(sqrt(2, { scale: LIMIT - 1 }))).toBe(LIMIT);
+    expect(() => sqrt(2, { scale: LIMIT })).toThrow(ResourceLimitError);
+    expect(digits(sqrt('0.5', { scale: LIMIT }))).toBe(LIMIT);
+    // 5000 integer digits + 10 000 fraction digits used to come back as 15 000 digits.
+    expect(() => sqrt('9'.repeat(LIMIT), { scale: LIMIT })).toThrow(ResourceLimitError);
+    expect(() => sqrt('9'.repeat(LIMIT), { scale: 5001 })).toThrow(ResourceLimitError);
+    expect(digits(sqrt('9'.repeat(LIMIT), { scale: 5000 }))).toBe(LIMIT);
+    expect(() => cbrt(2, { scale: LIMIT })).toThrow(ResourceLimitError);
+    expect(digits(cbrt('0.5', { scale: LIMIT }))).toBe(LIMIT);
+    expect(() => nthRoot(2, 5, { scale: LIMIT })).toThrow(ResourceLimitError);
+    // Just below a power of ten, the up-front estimate must not refuse a result that fits.
+    expect(digits(sqrt('99.999999999999', { scale: LIMIT - 1 }))).toBe(LIMIT);
+  });
+
+  it('exp', { timeout: 20_000 }, () => {
+    expect(() => exp(1, { scale: LIMIT })).toThrow(ResourceLimitError);
+    expect(() => exp(0, { scale: LIMIT })).toThrow(ResourceLimitError);
+    expect(digits(exp(0, { scale: LIMIT - 1 }))).toBe(LIMIT);
+    expect(digits(exp(-1, { scale: LIMIT }))).toBe(LIMIT);
+  });
+
+  it('ln and log', { timeout: 20_000 }, () => {
+    expect(digits(ln(2, { scale: LIMIT }))).toBe(LIMIT);
+    expect(() => ln(3, { scale: LIMIT })).toThrow(ResourceLimitError);
+    expect(digits(ln(1, { scale: LIMIT }))).toBe(1);
+    expect(digits(log(2, 10, { scale: LIMIT }))).toBe(LIMIT);
+    expect(() => log(100, 10, { scale: LIMIT })).toThrow(ResourceLimitError);
+    expect(digits(log(100, 10, { scale: LIMIT - 1 }))).toBe(LIMIT);
+  });
+
+  it('pow', { timeout: 20_000 }, () => {
+    expect(digits(pow(3, 2, { scale: LIMIT - 1 }))).toBe(LIMIT);
+    expect(() => pow(4, 2, { scale: LIMIT - 1 })).toThrow(ResourceLimitError);
+    expect(() => pow(1, '0.5', { scale: LIMIT })).toThrow(ResourceLimitError);
+    expect(digits(pow(2, '0.5', { scale: LIMIT - 1 }))).toBe(LIMIT);
+    expect(() => pow(2, '0.5', { scale: LIMIT })).toThrow(ResourceLimitError);
+    expect(digits(pow('0.5', '0.5', { scale: LIMIT }))).toBe(LIMIT);
+  });
+
+  it('π and e', { timeout: 20_000 }, () => {
+    expect(digits(PI(LIMIT - 1))).toBe(LIMIT);
+    expect(() => PI(LIMIT)).toThrow(ResourceLimitError);
+    expect(digits(E(LIMIT - 1))).toBe(LIMIT);
+    expect(() => E(LIMIT)).toThrow(ResourceLimitError);
+  });
+});
+
 describe('performance', () => {
   it('PI(1000) is fast', { timeout: 5000 }, () => {
     const start = Date.now();
