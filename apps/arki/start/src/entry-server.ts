@@ -1,21 +1,33 @@
 import handler from '@tanstack/react-start/server-entry';
 
+import type { Configured, LogConfig } from '@arki/log';
 import { configure } from '@arki/log';
 import { asyncContext, fromEnv, stdout } from '@arki/log/node';
 
 import { paraglideMiddleware } from './paraglide/server.js';
 
+declare global {
+  // The configure() handle lives as long as the logging setup it controls: for
+  // the whole process. See the note below.
+  var arkiEntryLogging: Configured<string> | undefined;
+}
+
 // Switch logging on once, before the app serves anything (@arki/log RFC §8).
-const logging = configure({
+// Dev: Nitro's dev worker imports this module again, in the same process, after
+// an edit, and never runs import.meta.hot dispose hooks. Logging stays
+// configured across that re-run, so a second configure() would throw
+// ARKI_LOG_E001. The re-run swaps the setup in place with reconfigure() instead.
+const loggingConfig = {
   ...fromEnv(),
   context: asyncContext(),
   channels: { stdout: stdout() },
   default: { level: 'info', channels: ['stdout'] },
-});
-// Dev: Vite runs this module again on reload. Hand logging back first, so the
-// next configure() does not throw ARKI_LOG_E001.
-import.meta.hot?.dispose(() => logging.close());
-import.meta.hot?.on('vite:beforeFullReload', () => void logging.close());
+} satisfies LogConfig<'stdout'>;
+if (globalThis.arkiEntryLogging) {
+  void globalThis.arkiEntryLogging.reconfigure(loggingConfig);
+} else {
+  globalThis.arkiEntryLogging = configure(loggingConfig);
+}
 
 /**
  * Server fetch handler.
