@@ -1,6 +1,6 @@
 {
   "name": "@arki/journal",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "description": "A journal for Drizzle entities: every change is an immutable event row, the current state is a normal table row, and both are written in one transaction. Inline projections run in the same transaction; effects run after commit from a job table.",
   "keywords": [

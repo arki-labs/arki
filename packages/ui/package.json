@@ -1,6 +1,6 @@
 {
   "name": "@arki/ui",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "React component library for ARKI apps — Base UI primitives styled with Tailwind v4 semantic tokens: forms, overlays, navigation, data display and charts.",
   "license": "MIT",
   "repository": {
