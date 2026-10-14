@@ -577,34 +577,34 @@ describe('WebhookHandler: webhooks change subscriptions and payments', () => {
     expect(await countEvents(db)).toBe(eventsBefore);
   });
 
+const refundsOn = (): WebhookRefunds => ({ reads: refundReads(db), writes: typed.refunds.writes(runnerOn(db)) });
+
+/** A collected payment of 25 and a refund of 10 of it that was handed to Stripe and not yet completed. */
+async function refundInFlight() {
+  const payment = await seedPayment(writesOn(db), null, '25');
+  await writesOn(db).completePayment({ paymentId: payment.id });
+  const refundWrites = typed.refunds.writes(runnerOn(db));
+  const refund = await refundWrites.requestRefund({
+    paymentId: payment.id,
+    originalAmount: { amount: '25', currency: 'USD' },
+    refundAmount: { amount: '10', currency: 'USD' },
+    reason: 'customer_request',
+    requestedBy: userId,
+  });
+  await refundWrites.approveRefund({ refundId: refund.id, approvedBy: adminId });
+  await refundWrites.processRefund({ refundId: refund.id });
+  return { payment, refund };
+}
+
+function chargeWithRefund(providerPaymentId: string, refund: Record<string, unknown>) {
+  return stripeCharge(providerPaymentId, {
+    amount_refunded: 1000,
+    currency: 'usd',
+    refunds: { data: [{ status: 'succeeded', ...refund }] },
+  });
+}
+
   describe('payment.refunded and the refunds table', () => {
-    const refundsOn = (): WebhookRefunds => ({ reads: refundReads(db), writes: typed.refunds.writes(runnerOn(db)) });
-
-    /** A collected payment of 25 and a refund of 10 of it that was handed to Stripe and not yet completed. */
-    async function refundInFlight() {
-      const payment = await seedPayment(writesOn(db), null, '25');
-      await writesOn(db).completePayment({ paymentId: payment.id });
-      const refundWrites = typed.refunds.writes(runnerOn(db));
-      const refund = await refundWrites.requestRefund({
-        paymentId: payment.id,
-        originalAmount: { amount: '25', currency: 'USD' },
-        refundAmount: { amount: '10', currency: 'USD' },
-        reason: 'customer_request',
-        requestedBy: userId,
-      });
-      await refundWrites.approveRefund({ refundId: refund.id, approvedBy: adminId });
-      await refundWrites.processRefund({ refundId: refund.id });
-      return { payment, refund };
-    }
-
-    function chargeWithRefund(providerPaymentId: string, refund: Record<string, unknown>) {
-      return stripeCharge(providerPaymentId, {
-        amount_refunded: 1000,
-        currency: 'usd',
-        refunds: { data: [{ status: 'succeeded', ...refund }] },
-      });
-    }
-
     it('completes the refund the service started but never saw finish, with the Stripe refund id', async () => {
       const { payment, refund } = await refundInFlight();
       const charge = chargeWithRefund(payment.providerPaymentId, { id: 're_lost', metadata: { refundId: refund.id } });

@@ -56,7 +56,7 @@ export class RefundRepository {
       .from(this.refunds)
       .where(eq(this.refunds.providerRefundId, providerRefundId))
       .limit(1);
-    return (refund as Refund | undefined) ?? null;
+    return refund ?? null;
   }
 
   async findByPaymentId(paymentId: PaymentId): Promise<Refund[]> {

@@ -35,8 +35,9 @@ afterAll(async () => {
 
 describe('RefundRepository.findByProviderRefundId', () => {
   it('finds the refund that was completed with that Stripe id, and no other', async () => {
+    const payment = await seedPayment(coreWrites, null, '25');
     const refund = await writes.requestRefund({
-      paymentId: (await seedPayment(coreWrites, null, '25')).id,
+      paymentId: payment.id,
       originalAmount: { amount: '25', currency: 'USD' },
       refundAmount: { amount: '10', currency: 'USD' },
       reason: 'customer_request',
