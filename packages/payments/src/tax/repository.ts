@@ -6,15 +6,17 @@ import { and, desc, eq, gt, gte, inArray, isNull, lte, ne, or, sql } from 'drizz
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
 
-import type { TaxConfigId, TaxExemptionId, TaxJurisdictionId } from './primitives.js';
+import type { TaxConfigId, TaxExemptionId, TaxJurisdictionId, TaxRecordType } from './primitives.js';
 import type { TaxTables } from './tables.js';
 import type {
   NewTaxConfig,
   NewTaxExemption,
   NewTaxJurisdiction,
+  NewTaxRecord,
   TaxConfig,
   TaxExemption,
   TaxJurisdiction,
+  TaxRecord,
 } from './types.js';
 
 /**
@@ -462,9 +464,94 @@ export class TaxExemptionRepository {
   }
 }
 
+/** The tax in one jurisdiction and one currency over a period: collected on sales, given back on refunds. */
+export type TaxRecordTotal = {
+  jurisdiction: string;
+  currency: string;
+  saleTaxMinor: number;
+  refundTaxMinor: number;
+  /** Distinct sale transactions that carried tax here */
+  saleCount: number;
+  /** Distinct refund transactions that carried tax here */
+  refundCount: number;
+};
+
+/**
+ * Tax Record Repository
+ * The per-jurisdiction tax of each recorded sale and refund
+ */
+export class TaxRecordRepository {
+  private readonly db: TaxDatabase;
+  private readonly taxRecords: TaxTables['taxRecords'];
+
+  constructor(db: TaxDatabase, tables: Pick<TaxTables, 'taxRecords'>) {
+    this.db = db;
+    this.taxRecords = tables.taxRecords;
+  }
+
+  /** Write the rows. A row already recorded (same type, reference, jurisdiction and rate) is left as it was. */
+  async recordMany(rows: NewTaxRecord[]): Promise<void> {
+    if (rows.length === 0) return;
+    await this.db.insert(this.taxRecords).values(rows).onConflictDoNothing();
+  }
+
+  async findByReference(type: TaxRecordType, reference: string): Promise<TaxRecord[]> {
+    return this.db
+      .select()
+      .from(this.taxRecords)
+      .where(and(eq(this.taxRecords.type, type), eq(this.taxRecords.reference, reference)))
+      .orderBy(this.taxRecords.jurisdiction, this.taxRecords.rate);
+  }
+
+  /** How many distinct sales carried tax between `start` and `end`, both inclusive (a sale taxed in two jurisdictions counts once). */
+  async countSaleTransactions(period: { start: Instant; end: Instant; customerId?: string }): Promise<number> {
+    const [row] = await this.db
+      .select({ count: sql<number>`count(distinct ${this.taxRecords.reference})`.mapWith(Number) })
+      .from(this.taxRecords)
+      .where(
+        and(
+          eq(this.taxRecords.type, 'sale'),
+          gte(this.taxRecords.occurredAt, period.start),
+          lte(this.taxRecords.occurredAt, period.end),
+          period.customerId === undefined ? undefined : eq(this.taxRecords.customerId, period.customerId),
+        ),
+      );
+
+    return row?.count ?? 0;
+  }
+
+  /**
+   * Tax per jurisdiction and currency for the records that happened between `start` and `end`,
+   * both inclusive, ordered by jurisdiction then currency. `customerId` limits it to one customer.
+   */
+  async totalsByJurisdiction(period: { start: Instant; end: Instant; customerId?: string }): Promise<TaxRecordTotal[]> {
+    const { type, taxAmountMinor, reference } = this.taxRecords;
+
+    return this.db
+      .select({
+        jurisdiction: this.taxRecords.jurisdiction,
+        currency: this.taxRecords.currency,
+        saleTaxMinor: sql<number>`coalesce(sum(${taxAmountMinor}) filter (where ${type} = 'sale'), 0)`.mapWith(Number),
+        refundTaxMinor: sql<number>`coalesce(sum(${taxAmountMinor}) filter (where ${type} = 'refund'), 0)`.mapWith(Number),
+        saleCount: sql<number>`count(distinct ${reference}) filter (where ${type} = 'sale')`.mapWith(Number),
+        refundCount: sql<number>`count(distinct ${reference}) filter (where ${type} = 'refund')`.mapWith(Number),
+      })
+      .from(this.taxRecords)
+      .where(
+        and(
+          gte(this.taxRecords.occurredAt, period.start),
+          lte(this.taxRecords.occurredAt, period.end),
+          period.customerId === undefined ? undefined : eq(this.taxRecords.customerId, period.customerId),
+        ),
+      )
+      .groupBy(this.taxRecords.jurisdiction, this.taxRecords.currency)
+      .orderBy(this.taxRecords.jurisdiction, this.taxRecords.currency);
+  }
+}
+
 export type TaxRepositoryTables = Pick<
   TaxTables,
-  'taxConfigurations' | 'taxJurisdictions' | 'taxExemptions'
+  'taxConfigurations' | 'taxJurisdictions' | 'taxExemptions' | 'taxRecords'
 >;
 
 /**
@@ -476,6 +563,7 @@ export function createTaxRepositories(db: TaxDatabase, tables: TaxRepositoryTabl
     configurations: new TaxConfigurationRepository(db, { taxConfigurations: tables.taxConfigurations }),
     jurisdictions: new TaxJurisdictionRepository(db, { taxJurisdictions: tables.taxJurisdictions }),
     exemptions: new TaxExemptionRepository(db, { taxExemptions: tables.taxExemptions }),
+    records: new TaxRecordRepository(db, { taxRecords: tables.taxRecords }),
   };
 }
 

@@ -225,13 +225,6 @@ export const taxIdValidationSchema = z.object({
   country: z.string().length(2),
 });
 
-export const generateTaxReportInputSchema = z.object({
-  reportType: z.enum(['sales_and_use_tax', 'vat', 'gst']),
-  startDate: instantSchema(),
-  endDate: instantSchema(),
-  jurisdiction: z.string().optional(),
-});
-
 export const getCustomerTaxSummaryInputSchema = z.object({
   customerId: z.string(),
   year: z.number().min(2000).max(2100),
@@ -296,7 +289,8 @@ export function taxCalculationResultJson(result: TaxCalculationResult): z.input<
 
 /** What `TaxService.getCustomerTaxSummary` answers. */
 export const customerTaxSummarySchema = z.object({
-  totalTaxPaid: moneyJsonSchema,
+  /** One total per currency, ordered by currency code */
+  totalTaxPaid: z.array(moneyJsonSchema),
   totalTransactions: z.number(),
   breakdown: z.array(
     z.object({
@@ -312,7 +306,7 @@ export function customerTaxSummaryJson(
 ): z.input<typeof customerTaxSummarySchema> {
   return {
     ...summary,
-    totalTaxPaid: summary.totalTaxPaid.toJSON(),
+    totalTaxPaid: summary.totalTaxPaid.map(total => total.toJSON()),
     breakdown: summary.breakdown.map(line => ({ ...line, taxAmount: line.taxAmount.toJSON() })),
   };
 }
@@ -334,8 +328,6 @@ export const taxComplianceReportSchema = z.object({
   exemptSales: moneyJsonSchema,
   transactions: z.number(),
   generatedAt: instantSchema(),
-  status: z.enum(['pending', 'completed', 'failed']),
-  downloadUrl: z.string().optional(),
   summary: z.object({
     taxableTransactions: z.number(),
     exemptTransactions: z.number(),
@@ -380,7 +372,6 @@ export type RevokeExemptionInput = z.infer<typeof revokeExemptionInputSchema>;
 export type TaxCalculationInput = z.infer<typeof taxCalculationInputSchema>;
 export type CalculateSubscriptionTaxInput = z.infer<typeof calculateSubscriptionTaxInputSchema>;
 export type TaxIdValidation = z.infer<typeof taxIdValidationSchema>;
-export type GenerateTaxReportInput = z.infer<typeof generateTaxReportInputSchema>;
 export type GetCustomerTaxSummaryInput = z.infer<typeof getCustomerTaxSummaryInputSchema>;
 
 export type GenerateComplianceReportInput = z.infer<typeof generateComplianceReportInputSchema>;

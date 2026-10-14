@@ -68,7 +68,7 @@ const sale = {
 const past = instant('2020-01-01T00:00:00Z');
 
 beforeAll(async () => {
-  const opened = await openDb({ ...tax.enums, taxJurisdictions: tax.taxJurisdictions, taxExemptions: tax.taxExemptions });
+  const opened = await openDb({ ...tax.enums, taxJurisdictions: tax.taxJurisdictions, taxExemptions: tax.taxExemptions, taxRecords: tax.taxRecords });
   client = opened.client;
   db = drizzle({ client });
   repos = createTaxRepositories(db, tax);

@@ -15,7 +15,6 @@ import { instant } from '@arki/date';
 
 import type { PaymentId } from '../core/types.js';
 import { createCustomerId } from '../core/primitives.js';
-import { StripeProvider } from '../core/providers/stripe-provider.js';
 import { PaymentRepository } from '../core/repository.js';
 import { runnerOn } from '../service-test-support.js';
 import { adminId, core, customerId, openDb, schema, typed, userId } from '../test-support.js';
@@ -88,8 +87,7 @@ beforeAll(async () => {
     .values({ id: otherCustomerId, userId: adminId, providerCustomerId: 'cus_other', email: 'other@example.com' });
 
   const dbWithRelations = drizzle({ client, relations });
-  const provider = new StripeProvider({ apiKey: 'sk_test_fake', webhookSecret: 'whsec_fake', environment: 'sandbox' });
-  reporting = createTaxReportingService(provider, {
+  reporting = createTaxReportingService({
     payments: new PaymentRepository(dbWithRelations, core),
     exemptions: new TaxExemptionRepository(dbWithRelations, tax),
   });

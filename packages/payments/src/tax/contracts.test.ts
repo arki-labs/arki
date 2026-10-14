@@ -51,14 +51,14 @@ describe('taxCalculationResultSchema', () => {
 describe('customerTaxSummarySchema', () => {
   it('sends each amount as exact text with its currency', () => {
     const summary = {
-      totalTaxPaid: money('12.34', 'EUR'),
+      totalTaxPaid: [money('12.34', 'EUR')],
       totalTransactions: 2,
       breakdown: [{ jurisdiction: 'DE', taxAmount: money('12.34', 'EUR'), transactionCount: 2 }],
     };
 
     const sent = customerTaxSummarySchema.parse(customerTaxSummaryJson(summary));
 
-    expect(sent.totalTaxPaid).toEqual({ amount: '12.34', currency: 'EUR' });
+    expect(sent.totalTaxPaid).toEqual([{ amount: '12.34', currency: 'EUR' }]);
     expect(sent.breakdown[0]?.taxAmount).toEqual({ amount: '12.34', currency: 'EUR' });
   });
 });
@@ -76,7 +76,6 @@ describe('taxComplianceReportSchema', () => {
       exemptSales: money(0, 'KWD'),
       transactions: 3,
       generatedAt: startDate,
-      status: 'completed',
       summary: {
         taxableTransactions: 3,
         exemptTransactions: 0,

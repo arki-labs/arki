@@ -3,7 +3,6 @@ import { fromDate, now, sub } from '@arki/date';
 import { Money, money, sum } from '@arki/money';
 
 import type { PaymentRepository } from '../core/repository.js';
-import type { StripeProvider } from '../core/providers/stripe-provider.js';
 import type { CustomerId } from '../core/types.js';
 import type { ExemptionType } from './primitives.js';
 import type { TaxExemptionRepository } from './repository.js';
@@ -33,8 +32,6 @@ export type TaxComplianceReport = {
   exemptSales: Money;
   transactions: number;
   generatedAt: Instant;
-  status: 'pending' | 'completed' | 'failed';
-  downloadUrl?: string;
   summary: {
     taxableTransactions: number;
     exemptTransactions: number;
@@ -140,10 +137,7 @@ function recordedTax(paymentId: string, metadata: Record<string, unknown> | null
  * and audit trail functionality for tax operations.
  */
 export class TaxReportingService {
-  constructor(
-    private readonly stripeProvider: StripeProvider,
-    private readonly reads: TaxReportReads,
-  ) {}
+  constructor(private readonly reads: TaxReportReads) {}
 
   /**
    * Generate comprehensive tax compliance report
@@ -154,14 +148,6 @@ export class TaxReportingService {
     jurisdiction?: string;
   }): Promise<TaxComplianceReport> {
     try {
-      // Generate report with Stripe Tax
-      const stripeReport = await this.stripeProvider.getTaxReport({
-        reportType: params.reportType,
-        startDate: params.period.startDate,
-        endDate: params.period.endDate,
-        jurisdiction: params.jurisdiction,
-      });
-
       // Aggregate local transaction data
       const localSummary = await this.aggregateLocalTransactions(params.period);
 
@@ -175,7 +161,7 @@ export class TaxReportingService {
       };
 
       const report: TaxComplianceReport = {
-        id: stripeReport.id,
+        id: `${params.reportType}:${params.jurisdiction ?? 'all'}:${params.period.startDate.toString()}`,
         reportType: params.reportType,
         period: params.period,
         jurisdiction: params.jurisdiction || 'all',
@@ -184,8 +170,6 @@ export class TaxReportingService {
         exemptSales: localSummary.exemptSales,
         transactions: localSummary.transactionCount,
         generatedAt: now(),
-        status: stripeReport.status as any,
-        downloadUrl: stripeReport.downloadUrl,
         summary,
       };
 
@@ -429,8 +413,8 @@ export class TaxReportingService {
 /**
  * Factory function to create TaxReportingService
  */
-export function createTaxReportingService(stripeProvider: StripeProvider, reads: TaxReportReads): TaxReportingService {
-  return new TaxReportingService(stripeProvider, reads);
+export function createTaxReportingService(reads: TaxReportReads): TaxReportingService {
+  return new TaxReportingService(reads);
 }
 
 /**

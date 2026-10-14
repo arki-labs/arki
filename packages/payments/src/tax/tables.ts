@@ -1,6 +1,6 @@
 import type { AnyPgColumn, PgSchema } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { boolean, check, jsonb, text, varchar } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, index, jsonb, numeric, text, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
 
 import { instant } from '@arki/db/temporal';
 
@@ -11,6 +11,7 @@ import type {
   TaxBusinessType,
   TaxCalculationMode,
   TaxConfigStatus,
+  TaxRecordType,
 } from './primitives.js';
 import {
   exemptionStatusValues,
@@ -22,6 +23,8 @@ import {
   taxConfigStatusValues,
   taxExemptionIdFactory,
   taxJurisdictionIdFactory,
+  taxRecordIdFactory,
+  taxRecordTypeValues,
 } from './primitives.js';
 
 export type CreateTaxTablesDeps = {
@@ -35,6 +38,7 @@ export function createTaxTables({ schema }: CreateTaxTablesDeps) {
   const jurisdictionTypeEnum = schema.enum('jurisdiction_type', jurisdictionTypeValues);
   const exemptionTypeEnum = schema.enum('exemption_type', exemptionTypeValues);
   const exemptionStatusEnum = schema.enum('exemption_status', exemptionStatusValues);
+  const taxRecordTypeEnum = schema.enum('tax_record_type', taxRecordTypeValues);
 
   const taxConfigurations = schema.table('tax_configurations', {
     id: taxConfigIdFactory.primaryColumn(),
@@ -177,6 +181,47 @@ export function createTaxTables({ schema }: CreateTaxTablesDeps) {
     (_table) => [check('tax_exemptions_valid_to_not_before_valid_from', sql`"valid_to" IS NULL OR "valid_to" >= "valid_from"`)],
   );
 
+  /**
+   * The tax a sale or a refund carried in one jurisdiction, written when the transaction is
+   * recorded. One row per (type, reference, jurisdiction, rate). The customer's tax summary and the
+   * compliance report add these up; nothing else stores per-jurisdiction tax.
+   */
+  const taxRecords = schema.table(
+    'tax_records',
+    {
+      id: taxRecordIdFactory.primaryColumn(),
+      /** The caller's id for the transaction. Recording the same one again changes nothing. */
+      reference: varchar('reference', { length: 255 }).notNull(),
+      type: taxRecordTypeEnum('type').$type<TaxRecordType>().notNull(),
+      /** The jurisdiction as the tax calculation named it, such as `California`. */
+      jurisdiction: varchar('jurisdiction', { length: 255 }).notNull(),
+      /** Percent, such as `19.0000`. */
+      rate: numeric('rate', { precision: 8, scale: 4, mode: 'string' }).notNull(),
+      /** Whole minor units of `currency`, always positive: `type` says whether it was collected or given back. */
+      taxAmountMinor: bigint('tax_amount_minor', { mode: 'number' }).notNull(),
+      currency: varchar('currency', { length: 3 }).notNull(),
+      taxCode: varchar('tax_code', { length: 50 }),
+      customerId: varchar('customer_id', { length: 255 }),
+      paymentId: varchar('payment_id', { length: 255 }),
+      subscriptionId: varchar('subscription_id', { length: 255 }),
+      providerTransactionId: varchar('provider_transaction_id', { length: 255 }),
+      occurredAt: instant('occurred_at')
+        .notNull()
+        .default(sql`now()`),
+    },
+    table => [
+      uniqueIndex('tax_records_transaction_jurisdiction_rate_unique').on(
+        table.type,
+        table.reference,
+        table.jurisdiction,
+        table.rate,
+      ),
+      index('tax_records_customer_occurred_idx').on(table.customerId, table.occurredAt),
+      index('tax_records_occurred_idx').on(table.occurredAt),
+      check('tax_records_tax_amount_minor_not_negative', sql`"tax_amount_minor" >= 0`),
+    ],
+  );
+
   const taxConfigForeignKeys = taxConfigIdFactory.createForeignKeyFactory(() => taxConfigurations.id);
   const taxJurisdictionForeignKeys = taxJurisdictionIdFactory.createForeignKeyFactory(() => taxJurisdictions.id);
   const taxExemptionForeignKeys = taxExemptionIdFactory.createForeignKeyFactory(() => taxExemptions.id);
@@ -189,10 +234,12 @@ export function createTaxTables({ schema }: CreateTaxTablesDeps) {
       jurisdictionTypeEnum,
       exemptionTypeEnum,
       exemptionStatusEnum,
+      taxRecordTypeEnum,
     },
     taxConfigurations,
     taxJurisdictions,
     taxExemptions,
+    taxRecords,
     foreignKeys: {
       taxConfigForeignKeys,
       taxJurisdictionForeignKeys,

@@ -1,18 +1,22 @@
 import type { Instant } from '@arki/date';
-import { now } from '@arki/date';
+import { fromDate, now, sub } from '@arki/date';
+import { getLogger } from '@arki/log';
 import { Money, sum } from '@arki/money';
 
 import type { StripeProvider } from '../core/providers/stripe-provider.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../core/types.js';
 import type { TaxExemptionId } from './primitives.js';
-import type { TaxExemptionRepository, TaxJurisdictionRepository } from './repository.js';
+import type { TaxExemptionRepository, TaxJurisdictionRepository, TaxRecordRepository } from './repository.js';
 import { checkTaxIdFormat } from './tax-id.js';
 
 /** What `TaxService` reads. A `TaxExemptionRepository` and a `TaxJurisdictionRepository` fit. */
 export type TaxServiceReads = {
   exemptions: Pick<TaxExemptionRepository, 'findApplicableExemptions'>;
   jurisdictions: Pick<TaxJurisdictionRepository, 'findJurisdictionById'>;
+  records: Pick<TaxRecordRepository, 'findByReference' | 'recordMany' | 'totalsByJurisdiction' | 'countSaleTransactions'>;
 };
+
+const logger = getLogger('arki:payments:tax');
 
 /**
  * Tax calculation input for subscriptions and one-time payments
@@ -78,7 +82,11 @@ export type TaxTransaction = {
   paymentId?: PaymentId;
   subscriptionId?: SubscriptionId;
   createdAt: Instant;
-  jurisdiction: string;
+  /** The tax in each jurisdiction, as recorded. They add up to `taxAmount`. */
+  breakdown: {
+    jurisdiction: string;
+    taxAmount: Money;
+  }[];
   taxCode?: string;
 }
 
@@ -220,6 +228,11 @@ export class TaxService {
   /**
    * Create a tax transaction for compliance tracking
    * Called when a payment is successful or a refund is processed
+   *
+   * `breakdown` is the tax the checkout's `calculateTax` returned for this sale. It is stored, one
+   * record per jurisdiction and rate, and is what `getCustomerTaxSummary` and the compliance report
+   * add up. Recording a `reference` twice (for the same `type`) returns the first record and does
+   * not call the provider again. A failure is the caller's to handle, as in `calculateTax`.
    */
   async createTaxTransaction(params: {
     reference: string;
@@ -236,60 +249,141 @@ export class TaxService {
     }[];
     currency: string;
     customerDetails?: TaxCalculationInput['customerDetails'];
+    /** The tax by jurisdiction, from `calculateTax`; every amount is in `currency` */
+    breakdown: TaxCalculationResult['breakdown'];
+    /** When the sale or refund happened. Defaults to now. */
+    occurredAt?: Instant;
+    /** For a `refund`: the `reference` of the recorded sale it reverses. Required there, ignored for a sale. */
+    originalReference?: string;
   }): Promise<TaxTransaction> {
-    try {
-      const transaction = await this.stripeProvider.createTaxTransaction({
-        reference: params.reference,
-        type: params.type,
-        customerId: params.customerId,
-        lineItems: params.lineItems.map(item => ({
-          amount: item.amount,
-          quantity: 1,
-          reference: item.reference,
-          taxCode: item.taxCode,
-        })),
-        currency: params.currency,
-        customerDetails: params.customerDetails,
-      });
+    const currency = params.currency.toUpperCase();
+    const taxCode = params.lineItems[0]?.taxCode;
 
-      // In a real implementation, you might want to store this in your database
-      // for additional tracking and reporting
+    // Per jurisdiction and rate: one record each, whatever number of lines carried it
+    const grouped = new Map<string, { jurisdiction: string; rate: number; amounts: Money[] }>();
+    for (const line of params.breakdown) {
+      if (line.amount.currency.code !== currency) {
+        throw new Error(
+          `Tax for ${line.jurisdiction} is in ${line.amount.currency.code}, but the transaction ${params.reference} is in ${currency}`,
+        );
+      }
+      const key = `${line.jurisdiction}\u0000${line.rate}`;
+      const entry = grouped.get(key) ?? { jurisdiction: line.jurisdiction, rate: line.rate, amounts: [] };
+      entry.amounts.push(line.amount);
+      grouped.set(key, entry);
+    }
+    const lines = [...grouped.values()].map(entry => ({ ...entry, taxAmount: sum(entry.amounts, currency) }));
+    const taxAmount = sum(
+      lines.map(line => line.taxAmount),
+      currency,
+    );
+
+    const existing = await this.reads.records.findByReference(params.type, params.reference);
+    const first = existing[0];
+    if (first) {
+      logger.debug('Tax transaction {reference} was already recorded', { reference: params.reference });
 
       return {
-        id: transaction.id,
+        id: first.providerTransactionId ?? first.id,
         reference: params.reference,
         type: params.type,
-        amount: transaction.amountTotal,
-        taxAmount: transaction.taxAmountExclusive,
+        amount: sum(
+          params.lineItems.map(item => item.amount),
+          currency,
+        ),
+        taxAmount: sum(
+          existing.map(record => Money.fromMinor(record.taxAmountMinor, record.currency)),
+          currency,
+        ),
         customerId: params.customerId,
         paymentId: params.paymentId,
         subscriptionId: params.subscriptionId,
-        createdAt: now(),
-        jurisdiction: 'Unknown', // Would be extracted from tax breakdown
-        taxCode: params.lineItems[0]?.taxCode,
+        createdAt: first.occurredAt,
+        breakdown: existing.map(record => ({
+          jurisdiction: record.jurisdiction,
+          taxAmount: Money.fromMinor(record.taxAmountMinor, record.currency),
+        })),
+        taxCode,
       };
-    } catch (error) {
-      console.error('Tax transaction creation failed:', error);
-      throw new Error(`Failed to create tax transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+
+    let originalTransactionId: string | undefined;
+    if (params.type === 'refund') {
+      if (params.originalReference === undefined) {
+        throw new Error(`Refund ${params.reference} needs originalReference: the reference of the sale it reverses`);
+      }
+      const original = await this.reads.records.findByReference('sale', params.originalReference);
+      originalTransactionId = original.find(record => record.providerTransactionId !== null)?.providerTransactionId ?? undefined;
+      if (originalTransactionId === undefined) {
+        throw new Error(`Refund ${params.reference} reverses sale ${params.originalReference}, which was never recorded`);
+      }
+    }
+
+    const transaction = await this.stripeProvider.createTaxTransaction({
+      reference: params.reference,
+      type: params.type,
+      originalTransactionId,
+      customerId: params.customerId,
+      lineItems: params.lineItems.map(item => ({
+        amount: item.amount,
+        quantity: 1,
+        reference: item.reference,
+        taxCode: item.taxCode,
+      })),
+      currency: params.currency,
+      customerDetails: params.customerDetails,
+    });
+
+    // The provider worked the tax out itself; the records are the caller's breakdown. They should agree.
+    const recorded = transaction.taxAmountExclusive.plus(transaction.taxAmountInclusive).abs();
+    if (recorded.toMinorNumber() !== taxAmount.toMinorNumber()) {
+      logger.warn('Tax transaction {reference}: the provider recorded {recorded} tax, the breakdown says {breakdown}', {
+        reference: params.reference,
+        recorded: recorded.toString(),
+        breakdown: taxAmount.toString(),
+      });
+    }
+
+    const createdAt = params.occurredAt ?? now();
+    await this.reads.records.recordMany(
+      lines.map(line => ({
+        reference: params.reference,
+        type: params.type,
+        jurisdiction: line.jurisdiction,
+        rate: String(line.rate),
+        taxAmountMinor: line.taxAmount.toMinorNumber(),
+        currency,
+        taxCode,
+        customerId: params.customerId,
+        paymentId: params.paymentId,
+        subscriptionId: params.subscriptionId,
+        providerTransactionId: transaction.id,
+        occurredAt: createdAt,
+      })),
+    );
+
+    return {
+      id: transaction.id,
+      reference: params.reference,
+      type: params.type,
+      amount: transaction.amountTotal,
+      taxAmount,
+      customerId: params.customerId,
+      paymentId: params.paymentId,
+      subscriptionId: params.subscriptionId,
+      createdAt,
+      breakdown: lines.map(line => ({ jurisdiction: line.jurisdiction, taxAmount: line.taxAmount })),
+      taxCode,
+    };
   }
 
   /**
    * Get tax settings and configuration
    * Useful for displaying tax information to customers
    */
-  async getTaxSettings(){
-    try {
-      return await this.stripeProvider.getTaxSettings();
-    } catch (error) {
-      console.error('Failed to retrieve tax settings:', error);
-
-      // Return default settings if API call fails
-      return {
-        defaultTaxCode: 'txcd_10000000',
-        taxRegistrations: [],
-      };
-    }
+  async getTaxSettings() {
+    // A failure is the caller's: settings made up on error would show a default tax code the account does not use.
+    return this.stripeProvider.getTaxSettings();
   }
 
   /**
@@ -341,28 +435,6 @@ export class TaxService {
   }
 
   /**
-   * Get tax compliance report
-   * For generating tax reports for filing purposes
-   */
-  async generateTaxReport(params: {
-    reportType: 'sales_and_use_tax' | 'vat' | 'gst';
-    startDate: Instant;
-    endDate: Instant;
-    jurisdiction?: string;
-  }): Promise<{
-    id: string;
-    status: 'pending' | 'succeeded' | 'failed';
-    downloadUrl?: string;
-  }> {
-    try {
-      return await this.stripeProvider.getTaxReport(params);
-    } catch (error) {
-      console.error('Tax report generation failed:', error);
-      throw new Error(`Failed to generate tax report: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  /**
    * Check the format of a customer's tax ID. The format only: whether the number is registered
    * takes the registry (VIES, HMRC, the IRS). `format: 'unknown'` means no format is known for
    * the type (or for the country under `eu_vat`); the ID is then not `valid`.
@@ -391,12 +463,17 @@ export class TaxService {
   /**
    * Get tax summary for a customer
    * Useful for customer portals and tax reporting
+   *
+   * Built from the tax records of the calendar year (UTC): what each jurisdiction collected on the
+   * customer's sales, less what it gave back on refunds. Totals are one `Money` per currency
+   * (never added across currencies), ordered by currency code; `breakdown` has one row per
+   * jurisdiction and currency. `totalTransactions` counts the sales that carried tax.
    */
-  async getCustomerTaxSummary(_params: {
+  async getCustomerTaxSummary(params: {
     customerId: CustomerId;
     year: number;
   }): Promise<{
-    totalTaxPaid: Money;
+    totalTaxPaid: Money[];
     totalTransactions: number;
     breakdown: {
       jurisdiction: string;
@@ -404,13 +481,28 @@ export class TaxService {
       transactionCount: number;
     }[];
   }> {
-    // This would query your database for tax transactions
-    // For now, we'll return a placeholder
+    const start = fromDate(new Date(Date.UTC(params.year, 0, 1)));
+    const end = sub(fromDate(new Date(Date.UTC(params.year + 1, 0, 1))), { nanoseconds: 1 });
+    const period = { start, end, customerId: params.customerId };
+    const totals = await this.reads.records.totalsByJurisdiction(period);
+
+    const breakdown = totals.map(total => ({
+      jurisdiction: total.jurisdiction,
+      taxAmount: Money.fromMinor(total.saleTaxMinor - total.refundTaxMinor, total.currency),
+      transactionCount: total.saleCount,
+    }));
+
+    const byCurrency = new Map<string, Money[]>();
+    for (const line of breakdown) {
+      byCurrency.set(line.taxAmount.currency.code, [...(byCurrency.get(line.taxAmount.currency.code) ?? []), line.taxAmount]);
+    }
 
     return {
-      totalTaxPaid: Money.zero('USD'),
-      totalTransactions: 0,
-      breakdown: [],
+      totalTaxPaid: [...byCurrency.entries()]
+        .toSorted(([a], [b]) => a.localeCompare(b))
+        .map(([code, amounts]) => sum(amounts, code)),
+      totalTransactions: await this.reads.records.countSaleTransactions(period),
+      breakdown,
     };
   }
 }
