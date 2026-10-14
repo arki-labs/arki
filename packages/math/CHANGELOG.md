@@ -1,5 +1,60 @@
 # @arki/math
 
+## 0.0.8
+
+General math a calculators app still needed: composite units, quartile and pooled-variance variants, and two fixes.
+
+Added:
+
+- `units` — `splitUnits`/`joinUnits` for composite values (5 ft 7 in, 1 h 30 min); a negative value carries its sign on the first non-zero part. Units `dm`, `fathom`, `pc`, `ct`, `ton_us`, `ton_uk`, `kcal/h`, `GJ`, `ft*lbf`, `PB`, `EB`, `PiB`, `EiB`.
+- `stats` — `quartiles` method `'medianExcluded'`; `pooledVariance`/`pooledStddev` accept `{ n, stddev }` / `{ n, variance }` summaries (`SampleSummary`).
+- `polynomial` — `quadraticRoots` results carry an error-compensated `discriminant`, and its sign decides real vs complex.
+
+Fixed:
+
+- `polynomialRegression` threw "ill-conditioned" for x far from zero (years); it now solves on centered, scaled x.
+- `round`, `roundTo` and `roundToSignificant` threw on floats past 2^53 (`round(1e20, 2)`); they round them as typed.
+
+## 0.0.7
+
+Float finance, more statistics and units, and a faster `round`.
+
+Added:
+
+- `@arki/math/finance/float` — the finance functions on `number` with the same names and sign rules: fractional and negative periods, no digit limit, fast in loops; `log1p`/`expm1` keep tiny rates accurate.
+- `finance` — `futureValue`/`presentValue` take `{ payment, timing }` (Excel `FV`/`PV` with a payment); `periodsToReach` takes `{ payment, timing }` (Excel `NPER`).
+- `stats` — `quantile`/`percentile` `{ method }` for all nine Hyndman–Fan definitions (NumPy names, `QUANTILE_METHODS`); `quartiles` (incl. Tukey hinges); `percentileRank`; `pooledVariance`, `pooledStddev`; the linear fit reports `adjustedR2`, `residualStandardError`, `slopeStandardError`, `interceptStandardError`, the polynomial fit `adjustedR2`, `residualStandardError`.
+- `distributions` — `gamma`, `beta`, `betaLn`.
+- `units` — electric current, illuminance, radioactivity, dynamic and kinematic viscosity, solid angle (22 categories); `nm`, `µm`, `au`, `ly`, `cm3`, `in3`, `ft3`, `yd3`, imperial volumes, `month`, `year` (Julian), `ft/s`, `MJ`, `BTU`, `eV`, `MPa`, `Torr`, `arcmin`, `arcsec`, `kbit`…`Gibit`.
+- `format` — `formatCompact` takes `currency`; `locale: 'default'` (`RUNTIME_LOCALE`) formats in the runtime's locale.
+
+Changed:
+
+- `round`/`roundTo` are about 15–20× faster through a float fast path; results are identical (checked against the exact path on 1.6M seeded cases in all rounding modes).
+- Bigint `factorial`, `permutations` and `combinations` allow results up to 100 000 digits (was 10 000); `factorial` and `permutations` use product splitting.
+- `quantile` treats a position within 4 ulps of a whole number as whole, as R does.
+- `AngleUnit`, `UnitCategory` and `Unit` gained members, so exhaustive `Record<AngleUnit, …>` code must add them.
+
+## 0.0.6
+
+Four new modules and the general math a calculator site needs.
+
+Added:
+
+- `@arki/math/geometry` — `solveTriangles`/`solveTriangle` from any three parts (SSA returns 0–2 triangles), `circle`, `circleSector`, `ellipse`, `regularPolygon`, volumes and surfaces of sphere, cylinder, cone, frustum, square pyramid, cube, cuboid and torus, `distance`, `midpoint`, `polygonArea`/`signedPolygonArea`, `isPythagoreanTriple`, `pythagoreanTriples`.
+- `@arki/math/linear-algebra` (subpath only) — vectors and dense matrices on plain arrays: `dot`, `cross`, `norm`, `normalize`, `angleBetween`, `projection`, `plus`, `minus`, `times`, `matrix`, `identity`, `transpose`, `trace`, `multiply`, `luDecompose`, `determinant`, `solve`, `inverse`, `rank`.
+- `@arki/math/complex` — immutable `Complex`/`complex()`: arithmetic, polar form, `exp`, `ln`, `log`, `sqrt`, `pow`, `nthRoots`, strict parsing of `'3+4i'`.
+- `@arki/math/polynomial` — coefficient arrays highest degree first: `evaluatePolynomial`, `polynomialDerivative`, `addPolynomials`, `multiplyPolynomials`, `quadraticRoots`, `cubicRoots`, `polynomialRoots` (any degree).
+- `stats` — `zScore`, `standardError`, `marginOfError`, `confidenceInterval`, `sampleSize`; `exponentialRegression`, `logarithmicRegression`, `powerRegression`, `polynomialRegression`.
+- `units` — power, frequency, force, torque, fuel economy (`l/100km` as the reciprocal of `km/l`) and data rate: 17 categories.
+- `integer` — `toBase`, `fromBase` (bases 2–36, `bigint`-exact).
+- `number` — `roundToSignificant`, `significantDigits`; `Decimal#roundToSignificant`.
+- `errors` — `SingularMatrixError`, `ConvergenceError`.
+
+Changed:
+
+- `linearRegression` now also returns `r2` and `predict(x)`, like the other fits.
+
 ## 0.0.5
 
 React Native support, and money leaves the package.

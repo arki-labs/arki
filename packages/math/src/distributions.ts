@@ -102,6 +102,61 @@ export function gammaLn(x: number): number {
   return noNegativeZero(lnGamma(x));
 }
 
+const MAX_GAMMA_ARG = 171.624_376_956_302_7; // Γ(x) overflows a double just above this
+
+function positiveGamma(x: number): number {
+  // x >= 0.5. Same Lanczos sum as lnGamma, but exponentiated directly (no ln/exp round trip)
+  // so the relative error stays near 1e-15. Two half-powers avoid overflow of t^(z + 0.5).
+  const z = x - 1;
+  const t = z + 7.5;
+  let a = LANCZOS[0] ?? 0;
+  for (let i = 1; i < LANCZOS.length; i++) a += (LANCZOS[i] ?? 0) / (z + i);
+  const half = t ** ((z + 0.5) / 2);
+  return SQRT_2PI * half * (Math.exp(-t) * half) * a;
+}
+
+/**
+ * The gamma function Γ(x) for finite `x`. `Γ(n + 1) = n!`, so this is the float
+ * factorial for `n > 18`. Positive integers up to 171 are exact products;
+ * other values use Lanczos (relative error ~1e-15) with the reflection formula
+ * for `x < 0.5`. Poles (`0` and the negative integers) throw
+ * `InvalidArgumentError`; a result beyond the double range (`x` above about
+ * 171.62, or `x` within ~1e-308 of a pole) throws `NumericRangeError`.
+ * Very negative `x` whose true value is below the smallest double returns `0`.
+ */
+export function gamma(x: number): number {
+  assertFinite(x, 'x');
+  if (Number.isInteger(x)) {
+    if (x <= 0) throw new InvalidArgumentError(`gamma has a pole at ${x}`);
+    if (x > 171) throw new NumericRangeError(`gamma(${x}) exceeds the largest finite number`);
+    let result = 1;
+    for (let i = 2; i < x; i++) result *= i;
+    return result;
+  }
+  if (x > MAX_GAMMA_ARG) throw new NumericRangeError(`gamma(${x}) exceeds the largest finite number`);
+  let result: number;
+  if (x < 0.5) {
+    const sine = Math.sin(Math.PI * x);
+    // Γ(1 - x) overflows for x < -170.6, where |Γ(x)| is below the smallest double anyway.
+    if (1 - x > MAX_GAMMA_ARG) return 0;
+    result = Math.PI / (sine * positiveGamma(1 - x));
+  } else {
+    result = positiveGamma(x);
+  }
+  if (!Number.isFinite(result)) throw new NumericRangeError(`gamma(${x}) exceeds the largest finite number`);
+  return noNegativeZero(result);
+}
+
+/** ln B(a, b) = ln Γ(a) + ln Γ(b) − ln Γ(a + b), for `a, b > 0`. */
+export function betaLn(a: number, b: number): number {
+  return noNegativeZero(gammaLn(a) + gammaLn(b) - gammaLn(a + b));
+}
+
+/** The beta function B(a, b) = Γ(a)Γ(b) / Γ(a + b), for `a, b > 0`. Underflows to `0` for very large arguments. */
+export function beta(a: number, b: number): number {
+  return Math.exp(betaLn(a, b));
+}
+
 function gammaSeries(a: number, x: number, gln: number): number {
   let ap = a;
   let del = 1 / a;
@@ -211,22 +266,89 @@ export function regularizedBeta(x: number, a: number, b: number): number {
   return noNegativeZero(betaI(x, 1 - x, a, b));
 }
 
+// W. J. Cody's rational Chebyshev approximations for erf and erfc (Math. Comp. 23, 1969; netlib
+// specfun CALERF), accurate to about 1e-16 relative: erf on |x| ≤ 0.46875, erfc on (0.46875, 4]
+// and erfc beyond 4. Each table is ordered as in CALERF.
+const ERF_A = [
+  3.161_123_743_870_565_5, 113.864_154_151_050_16, 377.485_237_685_302, 3209.377_589_138_469_4,
+  0.185_777_706_184_603_15,
+];
+const ERF_B = [23.601_290_952_344_122, 244.024_637_934_444_17, 1282.616_526_077_372_3, 2844.236_833_439_171];
+const ERFC_C = [
+  0.564_188_496_988_670_1, 8.883_149_794_388_377, 66.119_190_637_141_63, 298.635_138_197_400_1, 881.952_221_241_769,
+  1712.047_612_634_070_7, 2051.078_377_826_071_6, 1230.339_354_797_997_2, 2.153_115_354_744_038_3e-8,
+];
+const ERFC_D = [
+  15.744_926_110_709_835, 117.693_950_891_312_5, 537.181_101_862_009_9, 1621.389_574_566_690_3, 3290.799_235_733_459_7,
+  4362.619_090_143_247, 3439.367_674_143_721_6, 1230.339_354_803_749_5,
+];
+const ERFC_P = [
+  0.305_326_634_961_232_36, 0.360_344_899_949_804_45, 0.125_781_726_111_229_26, 0.016_083_785_148_742_275,
+  0.000_658_749_161_529_837_8, 0.016_315_387_137_302_097,
+];
+const ERFC_Q = [
+  2.568_520_192_289_822, 1.872_952_849_923_467_3, 0.527_905_102_951_428_5, 0.060_518_341_312_441_32,
+  0.002_335_204_976_268_691_8,
+];
+const ERF_SMALL = 0.468_75;
+/** erfc(x) underflows to 0 beyond this. */
+const ERFC_ZERO_FROM = 26.543;
+const INV_SQRT_PI = 1 / Math.sqrt(Math.PI);
+
+/** erf(x) for |x| ≤ ERF_SMALL. */
+function erfSmall(x: number): number {
+  const xx = x * x;
+  let numerator = ERF_A[4]! * xx;
+  let denominator = xx;
+  for (let i = 0; i < 3; i++) {
+    numerator = (numerator + ERF_A[i]!) * xx;
+    denominator = (denominator + ERF_B[i]!) * xx;
+  }
+  return (x * (numerator + ERF_A[3]!)) / (denominator + ERF_B[3]!);
+}
+
+/** erfc(y) for y > ERF_SMALL. */
+function erfcLarge(y: number): number {
+  if (y >= ERFC_ZERO_FROM) return 0;
+  let ratio: number;
+  if (y <= 4) {
+    let numerator = ERFC_C[8]! * y;
+    let denominator = y;
+    for (let i = 0; i < 7; i++) {
+      numerator = (numerator + ERFC_C[i]!) * y;
+      denominator = (denominator + ERFC_D[i]!) * y;
+    }
+    ratio = (numerator + ERFC_C[7]!) / (denominator + ERFC_D[7]!);
+  } else {
+    const inverseSquare = 1 / (y * y);
+    let numerator = ERFC_P[5]! * inverseSquare;
+    let denominator = inverseSquare;
+    for (let i = 0; i < 4; i++) {
+      numerator = (numerator + ERFC_P[i]!) * inverseSquare;
+      denominator = (denominator + ERFC_Q[i]!) * inverseSquare;
+    }
+    ratio = (INV_SQRT_PI - (inverseSquare * (numerator + ERFC_P[4]!)) / (denominator + ERFC_Q[4]!)) / y;
+  }
+  // e^(−y²) split as e^(−r²)·e^(−(y − r)(y + r)) with r = y rounded down to 1/16, so y² never rounds.
+  const rounded = Math.trunc(y * 16) / 16;
+  return Math.exp(-rounded * rounded) * Math.exp(-(y - rounded) * (y + rounded)) * ratio;
+}
+
 function erfRaw(x: number): number {
   const ax = Math.abs(x);
-  if (ax === 0) return 0;
-  if (ax > 6) return x < 0 ? -1 : 1;
-  const { p } = gammaPQ(0.5, ax * ax, LN_SQRT_PI);
-  return x < 0 ? -p : p;
+  if (ax <= ERF_SMALL) return erfSmall(x);
+  const value = 0.5 - erfcLarge(ax) + 0.5;
+  return x < 0 ? -value : value;
 }
 
 function erfcRaw(x: number): number {
-  if (x === Infinity) return 0;
-  if (x < 0) return 2 - erfcRaw(-x);
-  if (x === 0) return 1;
-  return gammaPQ(0.5, x * x, LN_SQRT_PI).q;
+  const ax = Math.abs(x);
+  if (ax <= ERF_SMALL) return 1 - erfSmall(x);
+  const value = erfcLarge(ax);
+  return x < 0 ? 2 - value : value;
 }
 
-/** The error function erf(x) = 2/√π ∫₀ˣ e^(−t²) dt (via the incomplete gamma function, ~1e-15). */
+/** The error function erf(x) = 2/√π ∫₀ˣ e^(−t²) dt (Cody's rational approximations, ~1e-16). */
 export function erf(x: number): number {
   assertFinite(x, 'x');
   return noNegativeZero(erfRaw(x));
@@ -416,7 +538,8 @@ export function normal(mean = 0, stddev = 1): ContinuousDistribution {
   assertPositive(stddev, 'stddev');
   const pdfNorm = stddev * SQRT_2PI;
   const erfcScale = stddev * SQRT2;
-  const quantile = (p: number): number => solveQuantile(p, -Infinity, Infinity, () => mean + stddev * normalQuantile(p));
+  const quantile = (p: number): number =>
+    solveQuantile(p, -Infinity, Infinity, () => mean + stddev * normalQuantile(p));
   return {
     pdf(x) {
       assertPoint(x, 'x');

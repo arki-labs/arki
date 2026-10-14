@@ -7,11 +7,12 @@
 import {
   DivisionByZeroError,
   InvalidArgumentError,
+  NumberFormatError,
   NumericRangeError,
   ResourceLimitError,
 } from './errors.js';
 import { abs as absBigInt, digitCount, floorDiv, gcd as gcdBigInt } from './internal/bigint.js';
-import { assertDigitLimit, MAX_DIGITS } from './internal/limits.js';
+import { assertDigitLimit, MAX_INTEGER_DIGITS } from './internal/limits.js';
 
 function assertSafeInteger(value: number, name: string): void {
   if (!Number.isSafeInteger(value)) {
@@ -90,19 +91,37 @@ export function divmod(
   return [quotient === 0 ? 0 : quotient, remainder === 0 ? 0 : remainder];
 }
 
-// Every bigint result honours MAX_DIGITS (10,000 digits), like Decimal and Rational do.
-// 3248! has 9,998 digits; 3249! is the first to cross the limit.
-const MAX_BIGINT_FACTORIAL = 3248;
+// Bigint results honour MAX_INTEGER_DIGITS (100,000 digits); 25,205! has 99,996 digits, 25,206! is the first to cross.
+const MAX_BIGINT_FACTORIAL = 25_205;
 // Caps the loop length; the result's digit count is checked exactly afterwards.
-const MAX_BIGINT_TERMS = 10_000;
+const MAX_BIGINT_TERMS = 100_000;
 // F(47,851) has 10,000 digits; F(47,852) is the first to cross the limit.
 const MAX_FIBONACCI = 47_851;
+const MAX_FIBONACCI_DIGITS = 10_000;
+
+function assertIntegerDigits(digitTotal: number, what: string): void {
+  if (digitTotal > MAX_INTEGER_DIGITS) {
+    throw new ResourceLimitError(`${what} has ${digitTotal} digits; the limit is ${MAX_INTEGER_DIGITS}`);
+  }
+}
 
 /** Cheap pre-check: a product of `terms` factors each below `n` has at most `terms · digits(n)` digits. */
 function assertProductFits(terms: bigint, n: bigint, what: string): void {
-  if (terms * BigInt(digitCount(n)) > BigInt(MAX_DIGITS) * 4n) {
-    throw new ResourceLimitError(`${what} would exceed ${MAX_DIGITS} digits`);
+  if (terms * BigInt(digitCount(n)) > BigInt(MAX_INTEGER_DIGITS) * 4n) {
+    throw new ResourceLimitError(`${what} would exceed ${MAX_INTEGER_DIGITS} digits`);
   }
+}
+
+/** Product of lo, lo+1, ..., hi by binary splitting: balanced multiplies beat a running product on big results. */
+function rangeProduct(lo: bigint, hi: bigint): bigint {
+  if (lo > hi) return 1n;
+  if (hi - lo < 8n) {
+    let result = lo;
+    for (let i = lo + 1n; i <= hi; i++) result *= i;
+    return result;
+  }
+  const mid = (lo + hi) / 2n;
+  return rangeProduct(lo, mid) * rangeProduct(mid + 1n, hi);
 }
 
 function assertBigInt(value: unknown, what: string): asserts value is bigint {
@@ -120,7 +139,7 @@ function unsafeResult(what: string): NumericRangeError {
 /**
  * `n!`. The `number` form works up to `n = 18`; above that the result is
  * unsafe and it throws `NumericRangeError`. The `bigint` form is capped at
- * `n = 10_000` (`ResourceLimitError`).
+ * `n = 25_205` (results up to 100,000 digits; `ResourceLimitError`).
  */
 export function factorial(n: number): number;
 export function factorial(n: bigint): bigint;
@@ -130,9 +149,7 @@ export function factorial(n: number | bigint): number | bigint {
     if (n > BigInt(MAX_BIGINT_FACTORIAL)) {
       throw new ResourceLimitError(`factorial is limited to n <= ${MAX_BIGINT_FACTORIAL}`);
     }
-    let result = 1n;
-    for (let i = 2n; i <= n; i++) result *= i;
-    return result;
+    return rangeProduct(2n, n);
   }
   assertSafeInteger(n, 'n');
   if (n < 0) throw new InvalidArgumentError('factorial requires n >= 0');
@@ -146,7 +163,7 @@ export function factorial(n: number | bigint): number | bigint {
  * Binomial coefficient C(n, k), the number of ways to choose `k` of `n`.
  * Returns `0` when `k` is outside `0..n`. Uses the multiplicative formula,
  * dividing at every step so values stay integral. The `bigint` form allows
- * at most 10_000 steps (`ResourceLimitError`).
+ * at most 100_000 steps and a 100,000-digit result (`ResourceLimitError`).
  */
 export function combinations(n: number, k: number): number;
 export function combinations(n: bigint, k: bigint): bigint;
@@ -165,7 +182,7 @@ export function combinations(n: number | bigint, k: number | bigint): number | b
     assertProductFits(steps, n, `combinations(${n}, ${kb})`);
     let result = 1n;
     for (let i = 1n; i <= steps; i++) result = (result * (base + i)) / i;
-    assertDigitLimit(digitCount(result), `combinations(${n}, ${kb})`);
+    assertIntegerDigits(digitCount(result), `combinations(${n}, ${kb})`);
     return result;
   }
   const kn = k as number;
@@ -189,7 +206,7 @@ export function combinations(n: number | bigint, k: number | bigint): number | b
 
 /**
  * Ordered selections P(n, k) = n! / (n − k)!. Returns `0` when `k` is
- * outside `0..n`. The `bigint` form allows at most 10_000 terms.
+ * outside `0..n`. The `bigint` form allows at most 100_000 terms and a 100,000-digit result.
  */
 export function permutations(n: number, k: number): number;
 export function permutations(n: bigint, k: bigint): bigint;
@@ -203,9 +220,8 @@ export function permutations(n: number | bigint, k: number | bigint): number | b
       throw new ResourceLimitError(`permutations is limited to k <= ${MAX_BIGINT_TERMS}`);
     }
     assertProductFits(kb, n, `permutations(${n}, ${kb})`);
-    let result = 1n;
-    for (let i = 0n; i < kb; i++) result *= n - i;
-    assertDigitLimit(digitCount(result), `permutations(${n}, ${kb})`);
+    const result = rangeProduct(n - kb + 1n, n);
+    assertIntegerDigits(digitCount(result), `permutations(${n}, ${kb})`);
     return result;
   }
   const kn = k as number;
@@ -425,7 +441,7 @@ function divisorsBigInt(n: bigint): bigint[] {
   if (n < 1n) throw new InvalidArgumentError('divisors requires n >= 1');
   let result: bigint[] = [1n];
   const factors = primeFactorsBigInt(n);
-  for (let i = 0; i < factors.length; ) {
+  for (let i = 0; i < factors.length;) {
     const p = factors[i] as bigint;
     let j = i;
     while (j < factors.length && factors[j] === p) j++;
@@ -466,6 +482,52 @@ export function digitSum(n: number | bigint): number {
   return sum;
 }
 
+function assertBase(base: number): void {
+  if (!Number.isInteger(base) || base < 2 || base > 36) {
+    throw new InvalidArgumentError(`base must be an integer from 2 to 36, got ${base}`);
+  }
+}
+
+/**
+ * Writes an integer in `base` 2 to 36 with lowercase digits: `toBase(255, 16)`
+ * is `'ff'`, `toBase(-10, 2)` is `'-1010'`. A `number` must be a safe integer;
+ * a `bigint` is exact at any size. No prefix (`0x`) is added.
+ */
+export function toBase(value: number | bigint, base: number): string {
+  assertBase(base);
+  if (typeof value === 'number') assertSafeInteger(value, 'value');
+  return value.toString(base);
+}
+
+/**
+ * Reads an integer written in `base` 2 to 36 into a `bigint`: `fromBase('ff', 16)`
+ * is `255n`. An optional leading `-` or `+` is allowed and digits are case
+ * insensitive. Anything else (spaces, `_`, a `0x` prefix, a digit too large for
+ * the base, empty text) throws `NumberFormatError`.
+ */
+export function fromBase(text: string, base: number): bigint {
+  assertBase(base);
+  const negative = text.startsWith('-');
+  const start = negative || text.startsWith('+') ? 1 : 0;
+  if (text.length - start === 0) throw new NumberFormatError(`"${text}" has no digits`);
+  assertDigitLimit(text.length - start, 'fromBase input');
+  const radix = BigInt(base);
+  let result = 0n;
+  for (let i = start; i < text.length; i++) {
+    const code = text.codePointAt(i) ?? -1;
+    // '0'-'9' → 0-9, 'a'-'z' / 'A'-'Z' → 10-35; anything else is out of range.
+    let digit = 99;
+    if (code >= 48 && code <= 57) digit = code - 48;
+    else if (code >= 97 && code <= 122) digit = code - 87;
+    else if (code >= 65 && code <= 90) digit = code - 55;
+    if (digit >= base) {
+      throw new NumberFormatError(`"${text.charAt(i)}" is not a valid base ${base} digit (in "${text}")`);
+    }
+    result = result * radix + BigInt(digit);
+  }
+  return negative ? -result : result;
+}
+
 function fibonacciPair(n: number): [bigint, bigint] {
   if (n === 0) return [0n, 1n];
   const [a, b] = fibonacciPair(n >> 1);
@@ -486,6 +548,8 @@ export function fibonacci(n: number): bigint {
     throw new ResourceLimitError(`fibonacci is limited to n <= ${MAX_FIBONACCI}`);
   }
   const result = fibonacciPair(n)[0];
-  assertDigitLimit(digitCount(result), `fibonacci(${n})`);
+  if (digitCount(result) > MAX_FIBONACCI_DIGITS) {
+    throw new ResourceLimitError(`fibonacci(${n}) would exceed ${MAX_FIBONACCI_DIGITS} digits`);
+  }
   return result;
 }

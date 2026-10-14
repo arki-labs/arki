@@ -55,30 +55,37 @@ throw `TypeError`.
 ## Modules
 
 Everything is a subpath import, tree-shakeable by concern. The root
-`@arki/math` re-exports it all.
+`@arki/math` re-exports it all except `linear-algebra`, whose short names
+(`plus`, `times`, `norm`, `inverse`) would clash at the root.
 
-| Import                     | What it gives you                                                                                                                           |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@arki/math/decimal`       | `decimal()`, `Decimal` — exact decimals with retained scale                                                                                 |
-| `@arki/math/rational`      | `ratio()`, `Rational` — exact fractions on `bigint`                                                                                         |
-| `@arki/math/number`        | `clamp`, `lerp`, `inverseLerp`, `remap`, `inRange`, `round`, `roundTo`, `approxEqual`, `range`, `linspace`                                  |
-| `@arki/math/integer`       | `gcd`, `lcm`, `divmod`, `factorial`, `combinations`, `permutations`, `isPrime`, `primeFactors`, `divisors`, `modPow`, `modInverse`, `fibonacci` |
-| `@arki/math/stats`         | `sum`, `mean`, `median`, `mode`, `percentile`, `variance`, `stddev`, `minMax`, `correlation`, `linearRegression`; `mean`…`stddev` exact on `Decimal[]` |
-| `@arki/math/units`         | `convert`, `convertExact`, `formatUnit` — 11 categories, exact ratios                                                                        |
-| `@arki/math/finance`       | `payment`, `amortizationSchedule`, `futureValue`, `netPresentValue`, `internalRateOfReturn`, … — on `Decimal`                               |
-| `@arki/math/distributions` | `normal`, `studentT`, `noncentralT`, `chiSquare`, `fisherF`, `exponential`, `uniform`, `binomial`, `poisson`, `erf`, `erfInv`, `gammaLn`, … |
-| `@arki/math/decimal-math`  | `sqrt`, `cbrt`, `nthRoot`, `exp`, `ln`, `log10`, `log2`, `log`, `pow`, `PI`, `E` — correctly rounded, on `Decimal`                          |
-| `@arki/math/words`         | `spellNumber`, `spellOrdinal`, `formatOrdinal`; locales `en`, `enGB` built in, `words/ro`, `/de`, `/fr`, `/es`, `/it` opt-in                |
-| `@arki/math/format`        | `formatNumber`, `formatCurrency`, `formatPercent`, `formatCompact`, `formatFileSize`, `createFormatter`                                     |
-| `@arki/math/parse`         | `parseNumber`, `parseDecimal` — locale-aware, the parser `Intl` never shipped                                                               |
-| `@arki/math/random`        | `createRandom(seed)`, `randomInt`, `shuffle`, `sample`, `pick`, …                                                                           |
-| `@arki/math/fluent`        | `num()` — immutable fluent wrapper for plain numbers                                                                                        |
-| `@arki/math/rounding`      | `RoundingMode`, `ROUNDING_MODES`, `isRoundingMode`                                                                                          |
-| `@arki/math/errors`        | `MathError` and its subclasses                                                                                                              |
+| Import                      | What it gives you                                                                                                                                                                                                                            |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@arki/math/decimal`        | `decimal()`, `Decimal` — exact decimals with retained scale                                                                                                                                                                                  |
+| `@arki/math/rational`       | `ratio()`, `Rational` — exact fractions on `bigint`                                                                                                                                                                                          |
+| `@arki/math/number`         | `clamp`, `lerp`, `inverseLerp`, `remap`, `inRange`, `round`, `roundTo`, `roundToSignificant`, `significantDigits`, `approxEqual`, `range`, `linspace`                                                                                        |
+| `@arki/math/integer`        | `gcd`, `lcm`, `divmod`, `factorial`, `combinations`, `permutations`, `isPrime`, `primeFactors`, `divisors`, `modPow`, `modInverse`, `fibonacci`, `toBase`, `fromBase`                                                                        |
+| `@arki/math/stats`          | `sum`, `mean`, `median`, `mode`, `percentile`, `variance`, `stddev`, `minMax`, `correlation`, `zScore`, `confidenceInterval`, `sampleSize`, linear/exponential/logarithmic/power/polynomial regression; `mean`…`stddev` exact on `Decimal[]` |
+| `@arki/math/units`          | `convert`, `convertExact`, `formatUnit` — 22 categories, exact ratios                                                                                                                                                                        |
+| `@arki/math/finance`        | `payment`, `amortizationSchedule`, `futureValue`, `netPresentValue`, `internalRateOfReturn`, … — on `Decimal`; `finance/float` has the same verbs on `number`                                                                                |
+| `@arki/math/distributions`  | `normal`, `studentT`, `noncentralT`, `chiSquare`, `fisherF`, `exponential`, `uniform`, `binomial`, `poisson`, `erf`, `erfInv`, `gamma`, `gammaLn`, `beta`, …                                                                                 |
+| `@arki/math/geometry`       | `solveTriangle(s)`, `circle`, `circleSector`, `ellipse`, `regularPolygon`, solids, `distance`, `polygonArea`, `pythagoreanTriples`                                                                                                           |
+| `@arki/math/linear-algebra` | `dot`, `cross`, `norm`, `multiply`, `transpose`, `determinant`, `solve`, `inverse`, `rank`, `luDecompose` — on plain arrays (subpath only)                                                                                                   |
+| `@arki/math/complex`        | `complex()`, `Complex` — arithmetic, polar form, `exp`, `ln`, `sqrt`, `pow`, `nthRoots`                                                                                                                                                      |
+| `@arki/math/polynomial`     | `evaluatePolynomial`, `polynomialDerivative`, `quadraticRoots`, `cubicRoots`, `polynomialRoots`                                                                                                                                              |
+| `@arki/math/decimal-math`   | `sqrt`, `cbrt`, `nthRoot`, `exp`, `ln`, `log10`, `log2`, `log`, `pow`, `PI`, `E` — correctly rounded, on `Decimal`                                                                                                                           |
+| `@arki/math/words`          | `spellNumber`, `spellOrdinal`, `formatOrdinal`; locales `en`, `enGB` built in, `words/ro`, `/de`, `/fr`, `/es`, `/it` opt-in                                                                                                                 |
+| `@arki/math/format`         | `formatNumber`, `formatCurrency`, `formatPercent`, `formatCompact`, `formatFileSize`, `createFormatter`                                                                                                                                      |
+| `@arki/math/parse`          | `parseNumber`, `parseDecimal` — locale-aware, the parser `Intl` never shipped                                                                                                                                                                |
+| `@arki/math/random`         | `createRandom(seed)`, `randomInt`, `shuffle`, `sample`, `pick`, …                                                                                                                                                                            |
+| `@arki/math/fluent`         | `num()` — immutable fluent wrapper for plain numbers                                                                                                                                                                                         |
+| `@arki/math/rounding`       | `RoundingMode`, `ROUNDING_MODES`, `isRoundingMode`                                                                                                                                                                                           |
+| `@arki/math/errors`         | `MathError` and its subclasses                                                                                                                                                                                                               |
 
-Deliberately **not** here: expression parsing, symbolic algebra, matrices,
-complex numbers, and arbitrary-precision trigonometry. Those need their own
-engines; reach for mathjs or a numerics library.
+Deliberately **not** here: expression parsing, symbolic algebra, sparse or
+decomposition-heavy linear algebra (SVD, eigenvalues), and arbitrary-precision
+trigonometry. Those need their own engines; reach for mathjs or a numerics
+library. `geometry`, `linear-algebra`, `complex` and `polynomial` work on
+plain `number` (float64), like the rest of the numeric layer.
 
 ## Rounding
 
@@ -202,15 +209,56 @@ interpolation (Excel `PERCENTILE.INC`, numpy's default). Empty input throws
 `EmptyDataError`; a non-finite element throws `InvalidArgumentError`.
 
 ```ts
-import { linearRegression, mean, median, percentile, quantile, stddev } from '@arki/math/stats';
+import {
+  linearRegression,
+  mean,
+  median,
+  percentile,
+  percentileRank,
+  quantile,
+  quartiles,
+  stddev,
+} from '@arki/math/stats';
 
 mean([1, 2, 3, 4]); // 2.5
 median([3, 1, 2]); // 2
 percentile([1, 2, 3, 4], 25); // 1.75   p on 0–100
 quantile([1, 2, 3, 4], 0.25); // 1.75   same thing, q on 0–1
+quantile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 0.25, { method: 'weibull' }); // 2.75   Excel PERCENTILE.EXC
+quartiles([1, 2, 3, 4, 5, 6, 7, 8], { method: 'tukey' }); // { q1: 2.5, q2: 4.5, q3: 6.5 }   box-plot hinges
+percentileRank([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 7); // 65
 stddev([2, 4, 4, 4, 5, 5, 7, 9], { ddof: 0 }); // 2
-linearRegression([1, 2, 3], [2, 4, 6]); // { slope: 2, intercept: 0 }
+linearRegression([1, 2, 3], [2, 4, 6]).slope; // 2
 ```
+
+`quantile` and `percentile` take `{ method }` for all nine Hyndman–Fan
+definitions (R types 1–9, named as in NumPy: `'inverseCdf'` is nearest rank,
+`'weibull'` is Excel `PERCENTILE.EXC`, `'linear'` the default). `quartiles`
+adds two hinge rules for odd counts: `'tukey'` keeps the median in both
+halves (R `fivenum`), `'medianExcluded'` leaves it out (TI-83, Moore & McCabe).
+`pooledVariance`/`pooledStddev` combine groups, given as raw samples or as
+`{ n, stddev }` / `{ n, variance }` summaries. `polynomialRegression` centers
+x before solving, so year-scale x (2015…2024) fits; `predict` evaluates in the
+centered basis, because the power-basis `coefficients` lose digits there. The linear fit also reports `adjustedR2`, `residualStandardError` and
+the slope/intercept standard errors; these are `undefined` when no degrees of
+freedom are left (a line through two points).
+
+Inference uses exact critical values from `distributions` (Student t by
+default, `method: 'z'` for the normal). `sampleSize` rounds up.
+
+```ts
+import { confidenceInterval, polynomialRegression, sampleSize, zScore } from '@arki/math/stats';
+
+confidenceInterval([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]); // { mean: 5.5, lower: 3.33…, upper: 7.67…, … }  R t.test
+sampleSize({ marginOfError: 0.03 }); // 1068   a ±3% poll at 95%
+zScore(130, 100, 15); // 2
+polynomialRegression([0, 1, 2, 3], [1, 2, 5, 10], 2).coefficients; // [1, 0, 1]  lowest degree first
+```
+
+Every fit (`linearRegression`, `exponentialRegression`, `logarithmicRegression`,
+`powerRegression`, `polynomialRegression`) returns its coefficients, `r2` and
+`predict(x)`. `r2` is measured on the original y values, also for the fits that
+are solved on `ln y`.
 
 ## Formatting
 
@@ -237,8 +285,10 @@ formatCurrency(decimal('0.1').plus('0.2'), 'USD'); // '$0.30' — exact in, exac
 formatPercent(0.125); // '12.5%'  — input is a fraction, as in Intl
 formatCompact(1230000); // '1.2M'
 formatCompact(1230000, { display: 'long' }); // '1.2 million'
+formatCompact(1_250_000, { currency: 'USD' }); // '$1.3M'
 formatFileSize(1536); // '1.5 kB'
 formatFileSize(1536, { system: 'iec' }); // '1.5 KiB'
+formatFileSize(1536, { system: 'jedec' }); // '1.5 KB'  — powers of 1024, KB/MB/GB labels
 
 const ro = createFormatter({ locale: 'ro-RO', currency: 'RON' });
 ro.formatCurrency(25); // '25,00 RON'
@@ -248,7 +298,9 @@ ro.formatPercent(0.07); // '7 %'
 There is no global "current locale": the default is `en-US`, every call
 takes `{ locale }`, and `createFormatter` binds defaults for an app or a
 request without mutating shared state. That keeps SSR, tests, and
-concurrent requests honest.
+concurrent requests honest. To format like `toLocaleString()` does, in the
+runtime's own locale, ask for it by name: `{ locale: 'default' }` (exported as
+`RUNTIME_LOCALE`). A missing locale never means the runtime's.
 
 Ordinals and number‑to‑words are not included — `Intl` has no style for
 them, and English suffix tables would be wrong everywhere else.
@@ -332,7 +384,7 @@ subtraction loses the tail: `1 - normal().cdf(9)` is `0`, while
 `normal().sf(9)` is `1.13e-19`. Discrete `quantile(p)` is exactly "the
 smallest `k` with `cdf(k) ≥ p`".
 
-The special functions underneath — `erf`, `erfc`, `erfInv`, `gammaLn`,
+The special functions underneath — `erf`, `erfc`, `erfInv`, `gamma`, `gammaLn`, `beta`, `betaLn`,
 `regularizedGammaP`, `regularizedBeta` — are exported too. Accuracy: `cdf`
 ≈ 1e-15 for the normal, ≤ 1e-9 round-trip for t/χ²/F quantiles, 5e-13 for
 the non-central t (verified by numerical integration).
@@ -405,21 +457,35 @@ this one: same rounding modes, same error family, and it accepts `Decimal` and
 
 ## Units
 
-Eleven categories (length, mass, area, volume, temperature, time, speed,
-data, energy, pressure, angle) with every factor stored as an exact
+Twenty-two categories (length, mass, area, volume, temperature, time, speed,
+data, energy, pressure, angle, power, frequency, force, torque, fuel economy,
+data rate, electric current, illuminance, radioactivity, dynamic and kinematic
+viscosity, solid angle) with every factor stored as an exact
 rational, so `convert(1, 'in', 'cm')` is exactly `2.54` and
 `convert(100, 'C', 'F')` is exactly `212`. `convertExact` returns the
-`Rational`; only conversions through π (radians) refuse to be exact.
+`Rational`; only conversions through π (radians) refuse to be exact. Fuel
+economy mixes distance-per-volume and volume-per-distance units:
+`l/100km` is the reciprocal of `km/l`, so `convert(30, 'mpg', 'l/100km')` is
+`7.84…`, and converting `0` to or from `l/100km` throws.
 
 ```ts
-import { convert, convertExact, formatUnit, unitsOf } from '@arki/math/units';
+import { convert, convertExact, formatUnit, joinUnits, splitUnits, unitsOf } from '@arki/math/units';
 
 convert(5, 'km', 'mi'); // 3.1068559611866697
 convert(1, 'GiB', 'GB'); // 1.073741824
 convertExact(1, 'mi', 'km').toString(); // '25146/15625'
 convert(1, 'm', 'kg'); // throws InvalidArgumentError: length → mass
 formatUnit(5, 'km', { display: 'long' }); // '5 kilometers'
-unitsOf('pressure'); // ['Pa', 'kPa', 'bar', 'atm', 'psi', 'mmHg']
+unitsOf('pressure'); // ['Pa', 'kPa', 'MPa', 'bar', 'atm', 'psi', 'mmHg', 'Torr']
+splitUnits(67, 'in', ['ft', 'in']); // [{ unit: 'ft', value: 5 }, { unit: 'in', value: 7 }]
+splitUnits(71.99, 'in', ['ft', 'in'], { scale: 0 }); // 6 ft 0 in   rounds once, then carries
+joinUnits(
+  [
+    { unit: 'ft', value: 5 },
+    { unit: 'in', value: 7 },
+  ],
+  'in',
+); // 67
 ```
 
 ## Finance
@@ -438,6 +504,25 @@ netPresentValue(0.1, [100, 100, 100], { scale: 2 }).toString(); // '248.69'
 amortizationSchedule(1000, 0.01, 12, { scale: 2 }).at(-1)?.balance.toString(); // '0.00'
 ```
 
+`futureValue` and `presentValue` take `{ payment, timing }` for annuities
+(Excel `FV`/`PV` with a payment, `timing: 'begin'` for type 1). Results are
+balances, so `futureValue(pv, r, n, { payment })` is `-FV(r, n, payment, pv)`.
+
+`@arki/math/finance/float` has the same functions, names and sign rules on
+`number`, for what the exact layer cannot do: fractional or negative periods,
+horizons whose exact powers pass the digit limit, and tight loops. `(1+r)^n`
+goes through `log1p`/`expm1`, so tiny rates stay accurate and rate `0` is
+exact. `periodsToReach` (in both paths; it needs a logarithm, so it is always
+float) takes `{ payment }` like Excel `NPER`.
+
+```ts
+import { futureValue, payment, periodsToReach } from '@arki/math/finance/float';
+
+payment(200_000, 0.05 / 12, 360); // 1073.6432460242777
+futureValue(1000, 0.05, 7.5); // 1441.8488753719537   fractional periods
+periodsToReach(5000, 0, 0.18 / 12, { payment: -200 }); // 31.56…   months to pay off a card
+```
+
 ## Integers
 
 Number theory with `number` and `bigint` overloads; the `number` form throws
@@ -453,6 +538,98 @@ isPrime(9_007_199_254_740_881); // true
 primeFactors(360); // [2, 2, 2, 3, 3, 5]
 modPow(2n, 10n, 1000n); // 24n
 fibonacci(90); // 2880067194370816120n
+toBase(255, 16); // 'ff'
+fromBase('zz', 36); // 1295n   always bigint, exact past 2^53
+```
+
+Bigint `factorial`, `permutations` and `combinations` allow results up to
+100 000 digits (`factorial` up to n = 25 205; 10 000! takes about 1.5 ms).
+For a float factorial past the safe range, use `gamma(n + 1)` from
+`distributions`.
+
+## Geometry
+
+Radians by default; pass `{ angleUnit: 'deg' }` (any angle unit from
+`units`) to work in degrees. `solveTriangles` takes any three parts that fix a
+triangle and returns every triangle they describe: SSA can give 0, 1 or 2.
+`solveTriangle` returns the one triangle and throws when there are none or two.
+Areas use stable formulas (Kahan's Heron), so needle-thin triangles stay accurate.
+
+```ts
+import { circle, polygonArea, solveTriangle, solveTriangles, sphere } from '@arki/math/geometry';
+
+solveTriangle({ a: 3, b: 4, c: 5 }).area; // 6
+solveTriangles({ a: 7, b: 10, A: 30 }, { angleUnit: 'deg' }).length; // 2   the ambiguous case
+circle(2).area; // 12.566370614359172
+sphere(1).volume; // 4.1887902047863905
+polygonArea([
+  [0, 0],
+  [4, 0],
+  [4, 3],
+]); // 6
+```
+
+## Linear algebra
+
+Dense float64 on plain arrays (`number[]`, `number[][]`): no wrapper class, so
+values go to JSON and other libraries as they are, and results never share
+memory with inputs. `solve`, `inverse` and `determinant` use LU with partial
+pivoting. A matrix singular to working precision throws `SingularMatrixError`
+(pivot at or below `n·ε·‖A‖∞`; `{ tolerance }` overrides). Import it from its
+subpath; the root does not re-export it.
+
+```ts
+import { determinant, inverse, solve } from '@arki/math/linear-algebra';
+
+solve(
+  [
+    [2, 1, 1],
+    [4, -6, 0],
+    [-2, 7, 2],
+  ],
+  [5, -2, 9],
+); // [1, 1, 2]
+determinant([
+  [2, 1, 1],
+  [4, -6, 0],
+  [-2, 7, 2],
+]); // -16
+inverse([
+  [1, 2],
+  [3, 4],
+]); // [[-2, 1], [1.5, -0.5]]
+```
+
+## Complex numbers
+
+Immutable `Complex` with the same verbs as `Decimal`. Principal branches for
+`sqrt`, `ln` and `pow`; division by zero throws instead of giving `NaN`.
+`toString()` prints `3 + 4i` and parses back exactly.
+
+```ts
+import { complex } from '@arki/math/complex';
+
+complex(1, 1).pow(2).toString(); // '2i'
+complex('3+4i').abs(); // 5
+complex(-1).sqrt().toString(); // 'i'
+complex(1).nthRoots(3).length; // 3
+```
+
+## Polynomials
+
+Coefficient arrays, highest degree first (like NumPy's `polyval` and `roots`):
+`[1, -6, 11, -6]` is x³ − 6x² + 11x − 6. Roots come back tagged, so you know
+whether you got real numbers or `Complex` values. `quadraticRoots` avoids
+cancellation; `polynomialRoots` handles any degree.
+
+```ts
+import { cubicRoots, evaluatePolynomial, polynomialRoots, quadraticRoots } from '@arki/math/polynomial';
+
+evaluatePolynomial([1, -6, 11, -6], 4); // 6
+quadraticRoots(1, -3, 2); // { kind: 'real', roots: [1, 2], discriminant: 1 }   b² − 4ac, error-compensated
+quadraticRoots(1, 0, 1).kind; // 'complex'
+cubicRoots(1, -6, 11, -6).roots; // [1, 2, 3]
+polynomialRoots([1, 0, 0, 0, -1]).length; // 4
 ```
 
 ## Errors
@@ -472,16 +649,18 @@ try {
 }
 ```
 
-| Error                     | When                                                    |
-| ------------------------- | ------------------------------------------------------- |
-| `NumberFormatError`       | a string is not a number in the accepted syntax         |
-| `InvalidArgumentError`    | reversed bounds, negative step, p out of range, …       |
-| `DivisionByZeroError`     | division by zero, zero to a negative power              |
-| `RoundingNecessaryError`  | an exact result needs rounding and no mode was given    |
-| `NumericRangeError`       | non-finite, unsafe integer, overflow or underflow       |
-| `EmptyDataError`          | a statistic of an empty (or too small) data set         |
-| `ResourceLimitError`      | more than 10 000 digits, or an exponent beyond ±10 000  |
-| `UnsupportedFeatureError` | the runtime's `Intl` lacks a feature the call relies on |
+| Error                     | When                                                         |
+| ------------------------- | ------------------------------------------------------------ |
+| `NumberFormatError`       | a string is not a number in the accepted syntax              |
+| `InvalidArgumentError`    | reversed bounds, negative step, p out of range, …            |
+| `DivisionByZeroError`     | division by zero, zero to a negative power                   |
+| `RoundingNecessaryError`  | an exact result needs rounding and no mode was given         |
+| `NumericRangeError`       | non-finite, unsafe integer, overflow or underflow            |
+| `EmptyDataError`          | a statistic of an empty (or too small) data set              |
+| `ResourceLimitError`      | more than 10 000 digits, or an exponent beyond ±10 000       |
+| `UnsupportedFeatureError` | the runtime's `Intl` lacks a feature the call relies on      |
+| `SingularMatrixError`     | `solve`/`inverse` met a matrix singular to working precision |
+| `ConvergenceError`        | an iterative method (`polynomialRoots`) did not converge     |
 
 ## Runtime support
 
@@ -507,6 +686,130 @@ magnitude of 10 000 (`ResourceLimitError`); `bigint` results from the integer
 module (`factorial`, `combinations`, `permutations`, `fibonacci`) honour the
 same digit cap. These are resource guards against hostile input, not
 precision settings — well within them, arithmetic is exact.
+
+<!-- bench:start -->
+## Benchmarks
+
+Speed of `@arki/math` against the libraries most people reach for: decimal.js, big.js and bignumber.js for decimal arithmetic, fraction.js for exact fractions, simple-statistics for descriptive statistics, and jstat for probability distributions.
+
+Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+
+### Decimal plus (1234.5678 + 98.76)
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math | 102.0 ns | fastest |
+| decimal.js | 388.5 ns | 3.81× |
+| big.js | 386.0 ns | 3.78× |
+| bignumber.js | 268.1 ns | 2.63× |
+
+### Decimal times
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math | 98.7 ns | fastest |
+| decimal.js | 664.9 ns | 6.73× |
+| big.js | 332.4 ns | 3.37× |
+| bignumber.js | 502.8 ns | 5.09× |
+
+### Decimal divide, 10 places, half-even
+
+Every library rounds the quotient to 10 decimal places, half-even. The other libraries divide at a working precision first and round after; `@arki/math` rounds once, exactly.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math dividedBy({ scale, rounding }) | 673.5 ns | fastest |
+| decimal.js div + toDecimalPlaces | 11.21 µs | 16.65× |
+| big.js div + round | 4.12 µs | 6.11× |
+| bignumber.js dividedBy + decimalPlaces | 13.34 µs | 19.81× |
+
+### Decimal parse a string
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math decimal() | 476.1 ns | fastest |
+| decimal.js | 712.0 ns | 1.50× |
+| big.js | 699.4 ns | 1.47× |
+| bignumber.js | 911.6 ns | 1.91× |
+
+### Decimal toString (30 integer digits, 9 decimals)
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math | 336.6 ns | 1.00× |
+| decimal.js | 460.7 ns | 1.37× |
+| big.js | 2.06 µs | 6.13× |
+| bignumber.js | 336.3 ns | fastest |
+
+### Rational plus (355/113 + 22/7)
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math ratio | 235.6 ns | fastest |
+| fraction.js | 441.5 ns | 1.87× |
+
+### Rational times
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math ratio | 619.0 ns | 1.77× |
+| fraction.js | 349.4 ns | fastest |
+
+### Mean of 1,000 numbers
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math | 34.69 µs | 12.80× |
+| simple-statistics | 2.71 µs | fastest |
+
+### Standard deviation of 1,000 numbers (population)
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math | 14.85 µs | 5.85× |
+| simple-statistics standardDeviation | 2.54 µs | fastest |
+
+### 90th percentile of 1,000 numbers
+
+Both interpolate linearly between ranks, so results agree to rounding.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math percentile | 304.59 µs | 61.28× |
+| simple-statistics quantile | 4.97 µs | fastest |
+
+### Normal distribution cdf at 1.96
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math normal().cdf | 470.7 ns | 2.34× |
+| jstat normal.cdf | 201.3 ns | fastest |
+
+### Normal distribution quantile at 0.975
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math normal().quantile | 1.28 µs | fastest |
+| jstat normal.inv | 2.39 µs | 1.88× |
+
+### Student t (10 degrees of freedom) quantile at 0.975
+
+`@arki/math` solves the quantile until |cdf(x) − p| ≤ 1e-12 and rejects bad input; jstat uses a looser fixed approximation with no input checks.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/math studentT(10).quantile | 4.90 µs | 5.03× |
+| jstat studentt.inv | 974.2 ns | fastest |
+
+Read the rows with the contracts in mind:
+
+- `@arki/math` Decimal is exact: it stores a bigint plus a scale and never rounds unless you ask. Division throws when the result does not terminate, so every divide case below passes an explicit `{ scale, rounding }`.
+- decimal.js and bignumber.js round to a working precision on every operation (here 40 significant digits for decimal.js, 20 decimal places for bignumber.js and big.js). They are fast because they give up exactness; `@arki/math` gives up some speed to keep it.
+- Rational is exact and always reduced to lowest terms, as in fraction.js.
+- Statistics functions in `@arki/math` check every element is a finite number, copy the input, sum with Neumaier compensation (so the total is accurate) and sort the full array for percentiles. simple-statistics skips the checks and the copy, uses plain summation and selects the percentile without a full sort. That is why they are much faster on 1,000 numbers: `@arki/math` trades speed for validated input and accurate sums.
+
+Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+<!-- bench:end -->
 
 ## License
 

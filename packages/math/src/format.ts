@@ -18,7 +18,12 @@ import { assertFinite } from './number.js';
 export type FormatValue = number | bigint | Decimal | string;
 
 export type FormatOptions = {
-  /** BCP 47 locale tag. Default `'en-US'`. */
+  /**
+   * BCP 47 locale tag. Default `'en-US'`, so output is the same on every machine
+   * (SSR-safe). Pass `'default'` (`RUNTIME_LOCALE`) to opt in to the runtime's own
+   * locale, what `toLocaleString()` uses with no argument; the output then depends
+   * on the user's machine.
+   */
   locale?: string;
   minimumFractionDigits?: number;
   maximumFractionDigits?: number;
@@ -37,14 +42,34 @@ export type CurrencyOptions = {
 export type CompactOptions = {
   /** `'short'` gives `1.2M`, `'long'` gives `1.2 million`. Default `'short'`. */
   display?: 'short' | 'long';
+  /**
+   * An ISO 4217 code that turns the result into compact money: `{ currency: 'USD' }` gives
+   * `$1.3M`. The fraction-digit defaults (0 to 1) still apply, so ask for
+   * `maximumFractionDigits: 2` to get `$1.25M`. A formatter's bound currency is not used here.
+   */
+  currency?: string;
+  /** How the currency is shown, as in `formatCurrency`. Only used with `currency`. */
+  currencyDisplay?: CurrencyOptions['currencyDisplay'];
 } & FormatOptions;
 
 export type FileSizeOptions = {
-  /** `'si'` uses powers of 1000 (`kB`), `'iec'` powers of 1024 (`KiB`). Default `'si'`. */
-  system?: 'si' | 'iec';
+  /**
+   * `'si'` uses powers of 1000 (`kB`), `'iec'` powers of 1024 (`KiB`), `'jedec'` powers of 1024
+   * with the `KB`/`MB`/`GB` labels most file managers print. Default `'si'`.
+   */
+  system?: 'si' | 'iec' | 'jedec';
 } & FormatOptions;
 
 const DEFAULT_LOCALE = 'en-US';
+
+/**
+ * Pass as `locale` to use the runtime's default locale instead of `'en-US'`.
+ * It is a word, not `undefined`, so a missing locale can never switch it on by accident.
+ */
+export const RUNTIME_LOCALE = 'default';
+
+/** `Intl` picks the runtime locale when none is given. */
+const intlLocale = (locale: string): string | undefined => (locale === RUNTIME_LOCALE ? undefined : locale);
 
 const INTL_ROUNDING = {
   up: 'expand',
@@ -69,14 +94,15 @@ function getNumberFormat(locale: string, options: Intl.NumberFormatOptions): Int
   const cached = formatterCache.get(key);
   if (cached) return cached;
   if (options.roundingMode !== undefined) {
-    const echoed = new Intl.NumberFormat(locale, { roundingMode: options.roundingMode }).resolvedOptions().roundingMode;
+    const echoed = new Intl.NumberFormat(intlLocale(locale), { roundingMode: options.roundingMode }).resolvedOptions()
+      .roundingMode;
     if (echoed !== options.roundingMode) {
       throw new UnsupportedFeatureError(
         `This runtime does not support Intl.NumberFormat roundingMode '${options.roundingMode}' (Intl.NumberFormat v3); use the default 'halfUp' rounding.`,
       );
     }
   }
-  const created = new Intl.NumberFormat(locale, options);
+  const created = new Intl.NumberFormat(intlLocale(locale), options);
   if (formatterCache.size >= MAX_CACHE_ENTRIES) formatterCache.clear();
   formatterCache.set(key, created);
   return created;
@@ -214,11 +240,19 @@ const percentOptions = (options: FormatOptions): Intl.NumberFormatOptions => ({
   style: 'percent',
 });
 
-const compactOptions = (options: CompactOptions): Intl.NumberFormatOptions => ({
-  ...baseOptions(options, { min: 0, max: 1 }),
-  notation: 'compact',
-  compactDisplay: options.display ?? 'short',
-});
+const compactOptions = (options: CompactOptions): Intl.NumberFormatOptions => {
+  const intlOptions: Intl.NumberFormatOptions = {
+    ...baseOptions(options, { min: 0, max: 1 }),
+    notation: 'compact',
+    compactDisplay: options.display ?? 'short',
+  };
+  if (options.currency !== undefined) {
+    intlOptions.style = 'currency';
+    intlOptions.currency = options.currency;
+    if (options.currencyDisplay !== undefined) intlOptions.currencyDisplay = options.currencyDisplay;
+  }
+  return intlOptions;
+};
 
 const currencyOptions = (currency: string, options: CurrencyOptions): Intl.NumberFormatOptions => {
   const intlOptions: Intl.NumberFormatOptions = { ...baseOptions(options), style: 'currency', currency };
@@ -249,7 +283,10 @@ export function formatPercent(fraction: FormatValue, options: FormatOptions = {}
   return run(fraction, options, percentOptions(options));
 }
 
-/** Short or long compact form: `formatCompact(1230000)` → `'1.2M'`. Default max 1 fraction digit. */
+/**
+ * Short or long compact form: `formatCompact(1230000)` → `'1.2M'`. Default max 1 fraction digit.
+ * With `currency` it is compact money: `formatCompact(1_250_000, { currency: 'USD' })` → `'$1.3M'`.
+ */
 export function formatCompact(value: FormatValue, options: CompactOptions = {}): string {
   return run(value, options, compactOptions(options));
 }
@@ -257,6 +294,7 @@ export function formatCompact(value: FormatValue, options: CompactOptions = {}):
 const FILE_UNITS = {
   si: { base: 1000, labels: ['B', 'kB', 'MB', 'GB', 'TB', 'PB', 'EB'] },
   iec: { base: 1024, labels: ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB'] },
+  jedec: { base: 1024, labels: ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB'] },
 } as const;
 
 /**
@@ -271,7 +309,7 @@ export function formatFileSize(bytes: number | bigint, options: FileSizeOptions 
   return fileSizeWith(bytes, options.system ?? 'si', nf);
 }
 
-function fileSizeWith(bytes: number | bigint, system: 'si' | 'iec', nf: Intl.NumberFormat): string {
+function fileSizeWith(bytes: number | bigint, system: 'si' | 'iec' | 'jedec', nf: Intl.NumberFormat): string {
   const amount = typeof bytes === 'bigint' ? Number(bytes) : bytes;
   assertFinite(amount, 'bytes');
   if (amount < 0)

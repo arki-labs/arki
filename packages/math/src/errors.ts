@@ -37,3 +37,8 @@ export class ResourceLimitError extends MathError {}
 /** The runtime lacks an `Intl` feature this call depends on. */
 export class UnsupportedFeatureError extends MathError {}
 
+/** A matrix is singular to working precision, so it has no inverse and `A·x = b` has no unique solution. */
+export class SingularMatrixError extends MathError {}
+
+/** An iterative method did not reach its tolerance within its iteration limit. */
+export class ConvergenceError extends MathError {}
