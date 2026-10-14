@@ -33,7 +33,7 @@ export function handleForeman(request: Request) {
     environment: 'production',
     app: { version, commit },
     nonces: kv, // any @arki/kv KV
-    receipts: kvReceiptStore(kv), // required for executes; also serves core.receipts
+    receipts: kvReceiptStore(kv, { namespace: 'myapp:production' }), // required for executes; also serves core.receipts
     context: () => ({}),
     health: async () => (await getFleetSnapshot()).health, // reuse the /api/fleet function
     modules: [queueForemanModule({ queues })],
@@ -107,7 +107,7 @@ A second execute with the same id never runs the action again. It gets the store
 
 An action that ran but returned data its own schema rejects (`ARKI_ADMIN_E005`) did apply: it is recorded `applied` with `result: null`.
 
-**Plain app: `kvReceiptStore(kv)`** (`@arki/admin/server` or `./receipts`). Takes the claim with `setIfNotExists`, then keeps the receipt with `set`. Receipts live 30 days by default (`ttlSeconds`); less than Foreman's 300-second window throws `ARKI_ADMIN_E014`. Keep each action atomic: an action that throws after a partial write is still recorded `failed`. Use one KV namespace per app.
+**Plain app: `kvReceiptStore(kv, { namespace })`** (`@arki/admin/server` or `./receipts`). Takes the claim with `setIfNotExists`, then keeps the receipt with `set`. Receipts live 30 days by default (`ttlSeconds`); less than Foreman's 300-second window throws `ARKI_ADMIN_E014`. Keep each action atomic: an action that throws after a partial write is still recorded `failed`. `namespace` is the app's audience (`slug:environment`, e.g. `novelette:production`) and is part of every key, so apps or environments sharing one KV cannot read each other's receipts. It is required; a value that is not an audience throws `ARKI_ADMIN_E014`.
 
 **DOT app with a journal: `journalReceiptStore(...)`** (`@arki/admin/pg`). Add the table and migrate:
 

@@ -27,7 +27,7 @@ import type { ForemanModule } from './module';
 import { ADMIN_ERROR_CODES, AdminError } from './errors';
 import { jsonValueSchema } from './json';
 import { defineModule, defineRead } from './module';
-import { executionIdSchema } from './protocol';
+import { audienceSchema, executionIdSchema } from './protocol';
 
 export const RECEIPTS_MODULE_ID = 'core.receipts';
 /** The read Foreman calls to settle a lost execute answer. */
@@ -132,6 +132,11 @@ export type ReceiptKV = {
 };
 
 export type KvReceiptStoreOptions = {
+  /**
+   * Whose receipts these are: the app's audience, `slug:environment` (`novelette:production`).
+   * Every key carries it, so two apps (or two environments) on one KV never read each other's receipts.
+   */
+  namespace: string;
   /** How long a receipt is kept. At least {@link RECEIPT_WINDOW_SECONDS}. Defaults to 30 days. */
   ttlSeconds?: number;
   /** Key prefix. Defaults to `arki:admin:receipt`. */
@@ -139,6 +144,8 @@ export type KvReceiptStoreOptions = {
 };
 
 const kvOptionsSchema = z.object({
+  // The audience pattern allows only `[a-z0-9-]` around one `:`, so a namespace cannot carry a key separator of its own.
+  namespace: audienceSchema,
   ttlSeconds: z.int().min(RECEIPT_WINDOW_SECONDS).optional(),
   prefix: z.string().min(1).optional(),
 });
@@ -148,21 +155,23 @@ const kvOptionsSchema = z.object({
  * the claim and the settle each are one write. An action that throws after a
  * partial write is still recorded `failed`, so keep each action atomic.
  *
- * Throws `ARKI_ADMIN_E014` for a TTL shorter than Foreman's receipt window.
+ * Throws `ARKI_ADMIN_E014` for a TTL shorter than Foreman's receipt window,
+ * or a namespace that is not an audience.
  */
-export function kvReceiptStore(kv: ReceiptKV, options: KvReceiptStoreOptions = {}): ReceiptStore {
+export function kvReceiptStore(kv: ReceiptKV, options: KvReceiptStoreOptions): ReceiptStore {
   const parsed = kvOptionsSchema.safeParse(options);
   if (!parsed.success) {
     throw new AdminError(
       ADMIN_ERROR_CODES.invalidConfig,
       `The receipt store options are invalid:\n${z.prettifyError(parsed.error)}`,
-      `Keep receipts at least ${String(RECEIPT_WINDOW_SECONDS)} s (Foreman's receipt window); the default is 30 days.`,
+      `Pass the app's audience as namespace ("novelette:production"). Keep receipts at least ${String(RECEIPT_WINDOW_SECONDS)} s (Foreman's receipt window); the default is 30 days.`,
     );
   }
   const ttl = parsed.data.ttlSeconds ?? DEFAULT_RECEIPT_TTL_SECONDS;
+  const { namespace } = parsed.data;
   const prefix = parsed.data.prefix ?? 'arki:admin:receipt';
-  const claimKey = (executionId: string) => `${prefix}:claim:${executionId}`;
-  const receiptKey = (executionId: string) => `${prefix}:value:${executionId}`;
+  const claimKey = (executionId: string) => `${prefix}:${namespace}:claim:${executionId}`;
+  const receiptKey = (executionId: string) => `${prefix}:${namespace}:value:${executionId}`;
 
   const get = async (executionId: string): Promise<StoredReceipt | undefined> => {
     const raw = await kv.get(receiptKey(executionId));

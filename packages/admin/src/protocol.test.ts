@@ -126,7 +126,7 @@ function setup(options: SetupOptions = {}) {
     keys: options.keys ?? { read: { current: readPair.publicKey }, execute: { current: executePair.publicKey } },
     writes: options.writes ?? 'on',
     nonces: memoryNonces(clock),
-    receipts: kvReceiptStore(memoryKv(clock)),
+    receipts: kvReceiptStore(memoryKv(clock), { namespace: 'novelette:production' }),
     modules: [module],
     context: () => ({ tenant: 'acme' }),
     app: { version: '1.2.3' },

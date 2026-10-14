@@ -93,7 +93,7 @@ type SetupOptions = {
 function setup(options: SetupOptions = {}) {
   const clock = new MockClock(T0);
   const kv = memoryKv(clock);
-  const receipts = options.receipts === null ? undefined : (options.receipts ?? kvReceiptStore(kv));
+  const receipts = options.receipts === null ? undefined : (options.receipts ?? kvReceiptStore(kv, { namespace: AUD }));
   const { module, runs } = buildModule(options.behaviour ?? 'ok');
   const handler = createForemanHandler<Ctx>({
     identity: { aud: AUD, privateKey: appPair.privateKey },
@@ -157,7 +157,7 @@ describe('T(admin-receipts) the dispatcher records every execute', () => {
   it('settles the receipt before the response leaves the app', async () => {
     const order: string[] = [];
     const clock = new MockClock(T0);
-    const inner = kvReceiptStore(memoryKv(clock));
+    const inner = kvReceiptStore(memoryKv(clock), { namespace: AUD });
     // A slow store: a settle that is not awaited would land after the response.
     const slow: ReceiptStore = {
       claim: receipt => inner.claim(receipt),
@@ -216,7 +216,7 @@ describe('T(admin-receipts) the dispatcher records every execute', () => {
   it('an execution still pending refuses the repeat with E018 and does not run it', async () => {
     const { execute, runs, kv, receiptOf } = setup();
     // Another instance claimed it and is still running (or died mid-action).
-    await kvReceiptStore(kv).claim({
+    await kvReceiptStore(kv, { namespace: AUD }).claim({
       status: 'pending',
       executionId: 'exe_busy',
       actionId: 'queue.retryJob',
@@ -256,7 +256,7 @@ describe('T(admin-receipts) fail closed', () => {
     const broken: ReceiptStore = {
       claim: () => Promise.reject(new Error('redis down')),
       settle: () => Promise.resolve(),
-      get: executionId => kvReceiptStore(memoryKv(new MockClock(T0))).get(executionId),
+      get: executionId => kvReceiptStore(memoryKv(new MockClock(T0)), { namespace: AUD }).get(executionId),
     };
     const { execute, runs } = setup({ receipts: broken });
     expect(await codeOf(execute('exe_store_down'))).toBe(ADMIN_ERROR_CODES.receiptsUnavailable);
@@ -279,10 +279,48 @@ describe('T(admin-receipts) the receipt read', () => {
 });
 
 describe('T(admin-receipts) the KV store', () => {
+  it('two apps on one KV never see each other’s receipts: every key carries the namespace', async () => {
+    const kv = memoryKv(new MockClock(T0));
+    const novelette = kvReceiptStore(kv, { namespace: 'novelette:production' });
+    const brandability = kvReceiptStore(kv, { namespace: 'brandability:production' });
+    const claim = {
+      status: 'pending',
+      executionId: 'exe_shared',
+      actionId: 'queue.retryJob',
+      claimedAt: T0.toISOString(),
+    } as const;
+    expect(await novelette.claim(claim)).toEqual({ claimed: true });
+    expect(await brandability.get('exe_shared')).toBeUndefined();
+    // The other app's claim on the same id is its own, not "already taken".
+    expect(await brandability.claim(claim)).toEqual({ claimed: true });
+    expect(await novelette.get('exe_shared')).toMatchObject({ status: 'pending' });
+    expect(
+      [...kv.entries.keys()].every(
+        key => key.includes('novelette:production') || key.includes('brandability:production'),
+      ),
+    ).toBe(true);
+  });
+
+  it('refuses a namespace that is missing or could slip into another key', () => {
+    const kv = memoryKv(new MockClock(T0));
+    for (const namespace of [
+      '',
+      'novelette',
+      'novelette:production:claim',
+      'a:b:value:x',
+      'Nove lette:prod',
+      'novelette:',
+    ]) {
+      expect(() => kvReceiptStore(kv, { namespace })).toThrow(/ARKI_ADMIN_E014/);
+    }
+  });
+
   it('refuses to keep receipts shorter than Foreman’s receipt window', () => {
     const kv = memoryKv(new MockClock(T0));
-    expect(() => kvReceiptStore(kv, { ttlSeconds: RECEIPT_WINDOW_SECONDS - 1 })).toThrow(/ARKI_ADMIN_E014/);
-    expect(() => kvReceiptStore(kv, { ttlSeconds: RECEIPT_WINDOW_SECONDS })).not.toThrow();
+    expect(() => kvReceiptStore(kv, { namespace: AUD, ttlSeconds: RECEIPT_WINDOW_SECONDS - 1 })).toThrow(
+      /ARKI_ADMIN_E014/,
+    );
+    expect(() => kvReceiptStore(kv, { namespace: AUD, ttlSeconds: RECEIPT_WINDOW_SECONDS })).not.toThrow();
   });
 
   it('still holds an applied receipt a day after the window, so a late reconcile is not misread', async () => {
