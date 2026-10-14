@@ -59,6 +59,11 @@ export type RefundServiceConfig = {
   autoApproveLimits?: RefundAutoApproveLimits;
 };
 
+/** A refund in these statuses has been, or will be, paid back, so it counts against what the payment can still refund. */
+function refundHoldsMoney(status: Refund['status']): boolean {
+  return status === 'pending' || status === 'approved' || status === 'processing' || status === 'completed';
+}
+
 /** The refund reads the service makes. A `RefundRepository` fits. */
 type RefundReads = Pick<
   RefundRepository,
@@ -233,13 +238,15 @@ export class RefundService {
       throw new RefundError(`Payment ${paymentId} already has a refund waiting for a decision`, 'DUPLICATE_PENDING_REFUND');
     }
 
+    // Money already promised back counts, not only money already sent: an approved or processing
+    // refund will be paid. Rejected and failed ones never move money.
     const totalRefunded = sum(
-      existingRefunds.filter(r => r.status === 'completed').map(refund => refundAmountOf(refund)),
+      existingRefunds.filter(r => refundHoldsMoney(r.status)).map(refund => refundAmountOf(refund)),
       paid.currency,
     );
 
     if (totalRefunded.plus(amount).gt(paid)) {
-      throw new Error('Refund amount exceeds payment amount');
+      throw new RefundError('Refund amount exceeds payment amount', 'AMOUNT_EXCEEDED');
     }
   }
 

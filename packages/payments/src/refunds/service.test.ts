@@ -178,7 +178,7 @@ describe('requestRefund', () => {
       }),
     );
 
-    expect(error).toMatchObject({ message: 'Refund amount exceeds payment amount' });
+    expect(error).toMatchObject({ code: 'AMOUNT_EXCEEDED', message: 'Refund amount exceeds payment amount' });
     expect(await countEvents(db)).toBe(eventsBefore);
   });
 
@@ -453,6 +453,60 @@ describe('approval notes, missing refunds, empty reasons and double requests', (
     const second = await service.requestRefund({
       paymentId: payment.id,
       amount: money(20, 'USD'),
+      reason: 'customer_request',
+      requestedBy: userId,
+    });
+
+    expect(second).toMatchObject({ status: 'pending' });
+  });
+});
+
+describe('what a payment can still refund', () => {
+  it.each(['approved', 'processing'] as const)(
+    'a %s refund already counts: a request over the rest is refused with AMOUNT_EXCEEDED',
+    async stage => {
+      const payment = await seedPayment(coreWrites, null, '100');
+      const earlier = await writes.requestRefund({
+        paymentId: payment.id,
+        originalAmount: { amount: '100', currency: 'USD' },
+        refundAmount: { amount: '80', currency: 'USD' },
+        reason: 'customer_request',
+        requestedBy: userId,
+      });
+      await writes.approveRefund({ refundId: earlier.id, approvedBy: adminId });
+      if (stage === 'processing') {
+        await writes.processRefund({ refundId: earlier.id });
+      }
+      const eventsBefore = await countEvents(db);
+
+      const error = await rejectionOf(
+        serviceWith(providerThatRefunds).requestRefund({
+          paymentId: payment.id,
+          amount: money(30, 'USD'),
+          reason: 'customer_request',
+          requestedBy: userId,
+        }),
+      );
+
+      expect(error).toMatchObject({ name: 'RefundError', code: 'AMOUNT_EXCEEDED' });
+      expect(await countEvents(db)).toBe(eventsBefore);
+    },
+  );
+
+  it('a rejected or failed refund frees its amount again', async () => {
+    const service = serviceWith(providerThatRefunds);
+    const payment = await seedPayment(coreWrites, null, '100');
+    const first = await service.requestRefund({
+      paymentId: payment.id,
+      amount: money(80, 'USD'),
+      reason: 'customer_request',
+      requestedBy: userId,
+    });
+    await service.rejectRefund({ refundId: first.id, rejectedBy: adminId, reason: 'outside policy' });
+
+    const second = await service.requestRefund({
+      paymentId: payment.id,
+      amount: money(90, 'USD'),
       reason: 'customer_request',
       requestedBy: userId,
     });
