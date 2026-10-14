@@ -13,6 +13,7 @@ import { debugService } from '../debug.ts';
 import { GenerationError, getErrorMessage, RateLimitError } from '../errors';
 import { rateLimiters } from '../utils/rate-limiter';
 import { aiServiceConfigSchema, validateInput } from '../validation';
+import { DEFAULT_ANTHROPIC_MODEL } from './factory';
 
 type ChatMessage = ModelMessage;
 
@@ -59,7 +60,7 @@ export class AnthropicService {
       ...config,
     });
 
-    this.model = validConfig.model || 'claude-3-5-sonnet-latest';
+    this.model = validConfig.model || DEFAULT_ANTHROPIC_MODEL;
     this.defaultTemperature = validConfig.temperature ?? 0.2;
     this.defaultMaxRetries = validConfig.maxRetries ?? 2;
 

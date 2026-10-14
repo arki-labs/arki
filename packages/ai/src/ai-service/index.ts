@@ -18,7 +18,7 @@ export * from './openrouter-service';
 export * from './provider-router';
 
 // LLM provider factory (provider-agnostic, driven by LLM_PROVIDER env var)
-export { createLLMProvider, type LLMProviderConfig } from './factory';
+export { createLLMProvider, DEFAULT_ANTHROPIC_MODEL, resolveLlmModel, type LLMProviderConfig } from './factory';
 
 // Utilities
 export * from './structured-generation';

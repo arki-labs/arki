@@ -25,6 +25,7 @@ import type {
 import { debugService } from '../debug.ts';
 import { env } from '../env.ts';
 import { GenerationError, getErrorMessage } from '../errors.ts';
+import { DEFAULT_ANTHROPIC_MODEL } from './factory.ts';
 import { createGoogleService } from './google-service.ts';
 import { createGroqService } from './groq-service.ts';
 import { createMistralService } from './mistral-service.ts';
@@ -39,7 +40,7 @@ const DEFAULT_MODELS: Record<ProviderConfig['name'], string> = {
   mistral: 'mistral-small-latest',
   openrouter: 'meta-llama/llama-3.2-3b-instruct:free',
   openai: 'gpt-4o-mini',
-  anthropic: 'claude-3-haiku-20240307',
+  anthropic: DEFAULT_ANTHROPIC_MODEL,
 };
 
 function resolveModel(config: ProviderConfig): string {

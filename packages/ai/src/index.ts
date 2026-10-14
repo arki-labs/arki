@@ -138,6 +138,8 @@ export {
   type GenerateOptions,
   // Provider-agnostic factory and interface
   createLLMProvider,
+  DEFAULT_ANTHROPIC_MODEL,
+  resolveLlmModel,
   type LLMProviderConfig,
   type StructuredLLMProvider,
 } from './ai-service';
@@ -167,14 +169,7 @@ export {
 } from './capabilities';
 
 // Flow orchestration utilities
-export {
-  Flow,
-  FlowError,
-  createFlow,
-  type FlowConfig,
-  type FlowEvent,
-  type FlowNode,
-} from './orchestration';
+export { Flow, FlowError, createFlow, type FlowConfig, type FlowEvent, type FlowNode } from './orchestration';
 
 // Agent-runtime adapter layer (swappable tool-loop backends behind one neutral contract).
 // P0 ships the AI-SDK backend; Mastra/LangGraph/TanStack adapters follow the same interface.

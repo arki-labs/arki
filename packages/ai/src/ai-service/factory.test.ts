@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 
 import { z } from '@arki/contracts';
 
-import { createLLMProvider } from './factory';
+import { createLLMProvider, DEFAULT_ANTHROPIC_MODEL, resolveLlmModel } from './factory';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -121,3 +121,9 @@ for (const mode of ['prompt', 'messages'] as const)
         : await provider.generateStructuredDataFromMessages([{ role: 'user', content: 'input' }], transformed);
     expect(output).toEqual({ summary: 'source!', count: 4 });
   });
+
+test('anthropic defaults to claude-sonnet-5-5 and LLM_MODEL-style override wins', () => {
+  expect(resolveLlmModel({ provider: 'anthropic' })).toBe('claude-sonnet-5-5');
+  expect(DEFAULT_ANTHROPIC_MODEL).toBe('claude-sonnet-5-5');
+  expect(resolveLlmModel({ provider: 'anthropic', model: 'claude-opus-x' })).toBe('claude-opus-x');
+});

@@ -11,7 +11,7 @@
  *   const result = await llm.generateStructuredData(prompt, schema);
  *
  * To switch providers at runtime, set:
- *   LLM_PROVIDER=anthropic   LLM_MODEL=claude-3-5-haiku-latest
+ *   LLM_PROVIDER=anthropic   LLM_MODEL=claude-sonnet-5-5
  *   LLM_PROVIDER=groq         LLM_MODEL=openai/gpt-oss-20b
  *   LLM_PROVIDER=google       LLM_MODEL=gemini-2.0-flash
  *   LLM_PROVIDER=mistral      LLM_MODEL=mistral-small-latest
@@ -35,10 +35,13 @@ import { aiTelemetry } from './telemetry';
 
 // ── Per-provider model defaults ───────────────────────────────
 
+/** Default Claude model when `LLM_PROVIDER=anthropic` and no `LLM_MODEL` is set. */
+export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5-5';
+
 const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
   ollama: 'qwen3.6:latest',
   openai: 'gpt-4o-mini',
-  anthropic: 'claude-3-5-haiku-latest',
+  anthropic: DEFAULT_ANTHROPIC_MODEL,
   groq: 'openai/gpt-oss-20b',
   google: 'gemini-2.0-flash',
   mistral: 'mistral-small-latest',
@@ -64,6 +67,16 @@ export type LLMProviderConfig = {
 // ── Factory ───────────────────────────────────────────────────
 
 /**
+ * The model id `createLLMProvider` uses for this config: the explicit `model`,
+ * else `LLM_MODEL`, else the provider default. Use it to record which model
+ * produced an output.
+ */
+export function resolveLlmModel(config: Pick<LLMProviderConfig, 'provider' | 'model'> = {}): string {
+  const providerName = config.provider ?? env.LLM_PROVIDER ?? DEFAULT_LLM_PROVIDER;
+  return config.model ?? env.LLM_MODEL ?? PROVIDER_DEFAULT_MODELS[providerName] ?? 'gpt-4o-mini';
+}
+
+/**
  * Create a provider-agnostic `StructuredLLMProvider` from environment config.
  *
  * Reads `LLM_PROVIDER` (default "ollama", local first) and `LLM_MODEL` (optional) from the
@@ -71,7 +84,7 @@ export type LLMProviderConfig = {
  */
 export function createLLMProvider(config: LLMProviderConfig = {}): StructuredLLMProvider {
   const providerName = config.provider ?? env.LLM_PROVIDER ?? DEFAULT_LLM_PROVIDER;
-  const model = config.model ?? env.LLM_MODEL ?? PROVIDER_DEFAULT_MODELS[providerName] ?? 'gpt-4o-mini';
+  const model = resolveLlmModel(config);
 
   if (config.baseURL && !['openai', 'ollama'].includes(providerName))
     throw new Error('baseURL requires openai or ollama provider');
