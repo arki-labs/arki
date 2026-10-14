@@ -1,8 +1,8 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
-import { decimal } from './decimal.js';
-import { MathError } from './errors.js';
+import { Decimal, decimal } from './decimal.js';
+import { MathError, ResourceLimitError } from './errors.js';
 import { fromBase } from './integer.js';
 import { parseDecimal, parseNumber } from './parse.js';
 import { ratio } from './rational.js';
@@ -14,21 +14,31 @@ declare const process: { readonly env: Readonly<Record<string, string | undefine
 const RUNS = Math.max(300, Number(process.env.MATH_PROPERTY_RUNS) || 0);
 const config = { seed: 20_261_014, numRuns: RUNS };
 
-/** Generous per-call budget: a resource limit answers in milliseconds, a missing one takes seconds. */
-const BUDGET_MS = 1000;
+/**
+ * Generous per-call budget: a resource limit answers in milliseconds, a missing one takes
+ * seconds to minutes. The worst legitimate call is a gcd of two 10_000-digit numbers (~0.5 s).
+ */
+const BUDGET_MS = 2000;
 
 /**
  * Untrusted input must either produce a value or throw a typed `MathError`, quickly.
  * A `TypeError`, `RangeError` or `SyntaxError` escaping from the engine is a bug.
+ * Returns the value, or `undefined` after a `MathError`.
  */
-function expectReturnsOrMathError(run: () => unknown): void {
+function attempt<T>(run: () => T): T | undefined {
   const started = Date.now();
   try {
-    run();
+    return run();
   } catch (error) {
     expect(error, String(error)).toBeInstanceOf(MathError);
+    return undefined;
+  } finally {
+    expect(Date.now() - started).toBeLessThan(BUDGET_MS);
   }
-  expect(Date.now() - started).toBeLessThan(BUDGET_MS);
+}
+
+function expectReturnsOrMathError(run: () => unknown): void {
+  attempt(run);
 }
 
 const numericAlphabet = fc.constantFrom(...'0123456789.eE+-/ _, ٫٣');
@@ -98,5 +108,77 @@ describe('hostile inputs: parsing never hangs and only throws MathError', () => 
       ),
       config,
     );
+  });
+});
+
+describe('hostile inputs: deep values never hang and only throw MathError', () => {
+  type Value = ReturnType<typeof decimal> | ReturnType<typeof ratio>;
+
+  /** One arithmetic step on a value and a second operand; every step can double the digits. */
+  const steps: readonly ((x: Value, y: Value) => Value)[] = [
+    (x, y) => (x instanceof Decimal ? x.times(x) : x.times(y)),
+    x => (x instanceof Decimal ? x.times(x) : x.times(x)),
+    (x, y) => (x instanceof Decimal ? x.plus(x) : x.plus(y.isZero() ? 1 : x.inverse())),
+    (x, y) =>
+      x instanceof Decimal
+        ? x.dividedBy(y.isZero() ? 7 : decimal(y.toString()), { scale: 50, rounding: 'halfEven' })
+        : x.dividedBy(y.isZero() ? 7 : y),
+  ];
+
+  const digits = fc
+    .record({ digit: fc.constantFrom('1', '3', '7', '9'), length: fc.integer({ min: 1, max: 10_000 }) })
+    .map(({ digit, length }) => digit.repeat(length));
+  const valueArb = fc.oneof(
+    digits.map(text => decimal(text)),
+    fc.tuple(digits, fc.integer({ min: 0, max: 9999 })).map(([text, scale]) => decimal(`${text}e-${scale}`)),
+    fc.tuple(digits, digits).map(([p, q]) => ratio(`${p}/${q}`)),
+  );
+
+  it('chains of times / plus / dividedBy on values at the size limits', () => {
+    fc.assert(
+      fc.property(
+        valueArb,
+        valueArb,
+        fc.array(fc.integer({ min: 0, max: steps.length - 1 }), { minLength: 1, maxLength: 24 }),
+        (start, other, plan) => {
+          const second = start instanceof Decimal === other instanceof Decimal ? other : start;
+          // The budget applies to each step; the chain stops at the first MathError.
+          let x: Value | undefined = start;
+          for (const index of plan) {
+            const step = steps[index];
+            const current: Value | undefined = x;
+            if (step === undefined || current === undefined) break;
+            x = attempt(() => step(current, second));
+          }
+        },
+      ),
+      { ...config, numRuns: Math.ceil(RUNS / 3) },
+    );
+  });
+
+  // Found while probing deep values: parsing caps inputs at 10_000 digits, but nothing capped results,
+  // so 14 squarings of a 10_000-digit value ran for ~6 s and ended in the engine's
+  // "RangeError: Maximum BigInt size exceeded" instead of a ResourceLimitError.
+  function expectSquaringStops<T extends { times(other: T): T }>(start: T): void {
+    const started = Date.now();
+    expect(() => {
+      let x = start;
+      for (let i = 0; i < 40; i++) x = x.times(x);
+    }).toThrow(ResourceLimitError);
+    expect(Date.now() - started).toBeLessThan(BUDGET_MS);
+  }
+
+  it('regression: repeated squaring hits ResourceLimitError quickly (Decimal and Rational)', () => {
+    expectSquaringStops(decimal('9'.repeat(10_000)));
+    expectSquaringStops(ratio(`${'9'.repeat(10_000)}/7`));
+  });
+
+  it("regression: x + 1/x doubles a Rational's digits too, and also stops at the limit", () => {
+    const started = Date.now();
+    expect(() => {
+      let x = ratio(`${'7'.repeat(6000)}/${'3'.repeat(6000)}`);
+      for (let i = 0; i < 40; i++) x = x.plus(x.inverse());
+    }).toThrow(ResourceLimitError);
+    expect(Date.now() - started).toBeLessThan(BUDGET_MS);
   });
 });

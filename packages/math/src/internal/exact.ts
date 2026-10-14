@@ -39,6 +39,23 @@ function refuseCoercion(typeName: string): never {
   );
 }
 
+/** `10^MAX_DIGITS` and its negation: a value at or past them has more than `MAX_DIGITS` digits. */
+const DIGIT_LIMIT = 10n ** BigInt(MAX_DIGITS);
+const NEGATIVE_DIGIT_LIMIT = -DIGIT_LIMIT;
+
+/**
+ * Parsing caps inputs at `MAX_DIGITS`, and results that multiply must stay under it too
+ * (as `pow` already does): `x = x.times(x)` doubles the digits every step and would
+ * otherwise run for seconds before the engine's BigInt limit throws a `RangeError`.
+ * One comparison, constant time for ordinary values.
+ */
+function assertResultDigits(value: bigint, what: string): bigint {
+  if (value >= DIGIT_LIMIT || value <= NEGATIVE_DIGIT_LIMIT) {
+    throw new ResourceLimitError(`${what} would have more than ${MAX_DIGITS} digits`);
+  }
+  return value;
+}
+
 function assertSafeExponent(exponent: number): void {
   if (!Number.isSafeInteger(exponent)) {
     throw new InvalidArgumentError(`Exponent must be a safe integer, got ${exponent}`);
@@ -170,7 +187,7 @@ export class Decimal {
     if (scale > MAX_SCALE) {
       throw new ResourceLimitError(`The product would have ${scale} fraction digits; the limit is ${MAX_SCALE}`);
     }
-    return new Decimal(this.coefficient * that.coefficient, scale, BRAND);
+    return new Decimal(assertResultDigits(this.coefficient * that.coefficient, 'The product'), scale, BRAND);
   }
 
   /**
@@ -472,15 +489,19 @@ export class Rational {
     if (g === 1n) {
       // Coprime denominators: the sum is already in lowest terms.
       return new Rational(
-        this.numerator * that.denominator + that.numerator * this.denominator,
-        this.denominator * that.denominator,
+        assertResultDigits(this.numerator * that.denominator + that.numerator * this.denominator, 'The numerator'),
+        assertResultDigits(this.denominator * that.denominator, 'The denominator'),
         BRAND,
       );
     }
     const numerator = this.numerator * (that.denominator / g) + that.numerator * (this.denominator / g);
     if (numerator === 0n) return RATIONAL_ZERO;
     const g2 = gcd(numerator, g);
-    return new Rational(numerator / g2, (this.denominator / g) * (that.denominator / g2), BRAND);
+    return new Rational(
+      assertResultDigits(numerator / g2, 'The numerator'),
+      assertResultDigits((this.denominator / g) * (that.denominator / g2), 'The denominator'),
+      BRAND,
+    );
   }
 
   minus(other: RationalInput): Rational {
@@ -494,16 +515,27 @@ export class Rational {
     const g1 = gcd(this.numerator, that.denominator);
     const g2 = gcd(that.numerator, this.denominator);
     return new Rational(
-      (this.numerator / g1) * (that.numerator / g2),
-      (this.denominator / g2) * (that.denominator / g1),
+      assertResultDigits((this.numerator / g1) * (that.numerator / g2), 'The numerator'),
+      assertResultDigits((this.denominator / g2) * (that.denominator / g1), 'The denominator'),
       BRAND,
     );
   }
 
+  /** Cross-cancels like `times`, so the result is reduced before its size is checked. */
   dividedBy(other: RationalInput): Rational {
     const that = Rational.from(other);
     if (that.isZero()) throw new DivisionByZeroError('Division by zero');
-    return Rational.fromParts(this.numerator * that.denominator, this.denominator * that.numerator);
+    if (this.numerator === 0n) return RATIONAL_ZERO;
+    const g1 = gcd(this.numerator, that.numerator);
+    const g2 = gcd(this.denominator, that.denominator);
+    const numerator = (this.numerator / g1) * (that.denominator / g2);
+    const denominator = (this.denominator / g2) * (that.numerator / g1);
+    const flip = denominator < 0n ? -1n : 1n;
+    return new Rational(
+      assertResultDigits(flip * numerator, 'The numerator'),
+      assertResultDigits(flip * denominator, 'The denominator'),
+      BRAND,
+    );
   }
 
   /** Integer exponent; negative exponents invert. */
