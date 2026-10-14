@@ -64,6 +64,16 @@
       "import": "./src/client.ts",
       "default": "./src/client.ts"
     },
+    "./receipts": {
+      "types": "./dist/src/receipts.d.ts",
+      "import": "./src/receipts.ts",
+      "default": "./src/receipts.ts"
+    },
+    "./pg": {
+      "types": "./dist/src/pg.d.ts",
+      "import": "./src/pg.ts",
+      "default": "./src/pg.ts"
+    },
     "./connections/coolify": {
       "types": "./dist/src/connections/coolify/index.d.ts",
       "import": "./src/connections/coolify/index.ts",
@@ -98,19 +108,31 @@
     "@arki/eslint-config": "workspace:*",
     "@arki/feature": "workspace:*",
     "@arki/http": "workspace:*",
+    "@arki/journal": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@electric-sql/pglite": "catalog:",
     "@types/node": "catalog:node",
+    "drizzle-kit": "catalog:drizzle",
+    "drizzle-orm": "catalog:drizzle",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@arki/http": "workspace:*"
+    "@arki/http": "workspace:*",
+    "@arki/journal": "workspace:*",
+    "drizzle-orm": "catalog:drizzle"
   },
   "peerDependenciesMeta": {
     "@arki/http": {
+      "optional": true
+    },
+    "@arki/journal": {
+      "optional": true
+    },
+    "drizzle-orm": {
       "optional": true
     }
   },

@@ -11,8 +11,12 @@
  *     single code `ARKI_ADMIN_E007`; the specific reason goes to the app's log.
  *  3. Executes: `FOREMAN_WRITES=off` refuses (403 `E009`).
  *  4. Capability lookup (404 `E011`), scope check (403 `E008`), and for
- *     executes the pinned `schemaHash` (409 `E010`).
- *  5. The module's own validation: bad input 400 (`E004`), bad output 500 (`E005`).
+ *     executes the pinned `schemaHash` (409 `E010`) and a receipt store (403
+ *     `E017`): no execute ever runs without a receipt.
+ *  5. Executes claim the permit's `executionId` in the receipt store. A held id
+ *     never runs again: the stored outcome is returned, or 409 `E018` while it
+ *     is still pending. The receipt is settled before the response is sent.
+ *  6. The module's own validation: bad input 400 (`E004`), bad output 500 (`E005`).
  *
  * Every response — errors included — carries a proof signed by the app's
  * identity key, so the client can tell it reached the target it meant to.
@@ -29,8 +33,9 @@ import { getLogger } from '@arki/log';
 import type { AdminErrorCode } from './errors';
 import type { AnyAction, AnyRead, ForemanModule, Permit } from './module';
 import type { Envelope, ErrorBody, ForemanManifest, KeyUse, ProviderReadiness, WritesMode } from './protocol';
+import type { ReceiptStore, SettledReceipt, StoredReceipt } from './receipts';
 import { ADMIN_ERROR_CODES, AdminError } from './errors';
-import { sha256 } from './json';
+import { canonicalJson, jsonValueSchema, sha256 } from './json';
 import { describeModule } from './module';
 import {
   audienceSchema,
@@ -84,6 +89,12 @@ export type CreateForemanHandlerOptions<TCtx> = {
   writes: WritesMode;
   /** Replay protection. Pass an `@arki/kv` `KV`. */
   nonces: NonceStore;
+  /**
+   * Execution receipts (`kvReceiptStore` or `@arki/admin/pg` `journalReceiptStore`).
+   * Required for writes: with `writes: 'on'` and no store, every execute is refused
+   * (`ARKI_ADMIN_E017`). Serve it to Foreman with `withCoreModules({ receipts })`.
+   */
+  receipts?: ReceiptStore;
   /** The modules this app exposes. Read and action ids must be unique across them. */
   modules: readonly ForemanModule<TCtx>[];
   /** Builds the context reads and actions receive, after authentication. */
@@ -135,6 +146,8 @@ const STATUS_BY_CODE: Partial<Record<AdminErrorCode, number>> = {
   [ADMIN_ERROR_CODES.writesDisabled]: 403,
   [ADMIN_ERROR_CODES.unknownCapability]: 404,
   [ADMIN_ERROR_CODES.staleApproval]: 409,
+  [ADMIN_ERROR_CODES.receiptsUnavailable]: 403,
+  [ADMIN_ERROR_CODES.executionInProgress]: 409,
 };
 
 /**
@@ -153,6 +166,10 @@ export function createForemanHandler<TCtx>(
   const clock = options.clock ?? new SystemClock();
   const basePath = config.basePath ?? FOREMAN_BASE_PATH;
   const [appId = '', environment = ''] = config.identity.aud.split(':');
+  const receipts = options.receipts;
+  if (config.writes === 'on' && receipts === undefined) {
+    logger.warn('Foreman writes are on but no receipt store is configured: every execute is refused.');
+  }
 
   // Keys and descriptions are computed once, on first use (Web Crypto is async).
   async function importKeys(): Promise<{ identity: CryptoKey; read: CryptoKey[]; execute: CryptoKey[] }> {
@@ -301,7 +318,107 @@ export function createForemanHandler<TCtx>(
       expectedRevision: claim.expectedRevision,
       approvedBy: claim.approvedBy,
     };
-    return action.runExecute(parseInput(body), await options.context(request), permit);
+    // Fail closed: no execute runs without a receipt Foreman can read back.
+    if (receipts === undefined) {
+      throw new AdminError(
+        ADMIN_ERROR_CODES.receiptsUnavailable,
+        'This app has no receipt store, so it refuses every execute.',
+        'Pass `receipts` (kvReceiptStore or journalReceiptStore) to the Foreman handler.',
+      );
+    }
+    return executeOnce(receipts, action, parseInput(body), await options.context(request), permit, url);
+  }
+
+  /** Run an action at most once per execution id, and settle its receipt before answering. */
+  async function executeOnce(
+    store: ReceiptStore,
+    action: AnyAction<TCtx>,
+    input: unknown,
+    ctx: TCtx,
+    permit: Permit,
+    url: URL,
+  ): Promise<unknown> {
+    const { executionId } = permit;
+    const pending = {
+      status: 'pending',
+      executionId,
+      actionId: action.id,
+      claimedAt: clock.now().toISOString(),
+    } as const;
+    let claim: Awaited<ReturnType<ReceiptStore['claim']>>;
+    try {
+      claim = await store.claim(pending);
+    } catch (error) {
+      throw new AdminError(
+        ADMIN_ERROR_CODES.receiptsUnavailable,
+        'The receipt store could not take the claim, so the action did not run.',
+        "Check the receipt store's backing service (KV or database), then propose the action again.",
+        { cause: error },
+      );
+    }
+    if (!claim.claimed) return replay(claim.receipt, action.id, executionId);
+
+    let result: unknown;
+    try {
+      result = await action.runExecute(input, ctx, permit);
+    } catch (error) {
+      const at = clock.now().toISOString();
+      // The action ran and returned, but broke its own output schema: it did apply.
+      const receipt: SettledReceipt =
+        error instanceof AdminError && error.code === ADMIN_ERROR_CODES.invalidOutput
+          ? { ...pending, status: 'applied', appliedAt: at, result: null }
+          : { ...pending, status: 'failed', failedAt: at, error: publicError(error) };
+      await settle(store, receipt, url);
+      throw error;
+    }
+
+    // The receipt holds exactly what the response carries: the result after JSON.
+    const wire = jsonValueSchema.safeParse(parseJsonBytes(utf8(JSON.stringify(result ?? null))));
+    const json = wire.success ? wire.data : null;
+    await settle(
+      store,
+      {
+        ...pending,
+        status: 'applied',
+        appliedAt: clock.now().toISOString(),
+        result: json,
+        resultHash: await sha256(utf8(canonicalJson(json))),
+      },
+      url,
+    );
+    return result;
+  }
+
+  /** The stored outcome of an execution id this call did not claim. Never runs the action. */
+  function replay(receipt: StoredReceipt | undefined, actionId: string, executionId: string): unknown {
+    logger.info('Foreman execute {executionId} repeated; answering from its receipt', { executionId });
+    if (receipt !== undefined && receipt.actionId !== actionId) {
+      throw new AdminError(
+        ADMIN_ERROR_CODES.staleApproval,
+        `Execution ${executionId} belongs to another action.`,
+        'An execution id runs one action once. Propose and approve this action again.',
+      );
+    }
+    switch (receipt?.status) {
+      case 'applied': {
+        return receipt.result;
+      }
+      case 'failed': {
+        throw new AdminError(
+          receipt.error.code,
+          receipt.error.message,
+          'This execution already ran and failed. Propose and approve it again.',
+        );
+      }
+      case 'pending':
+      case undefined: {
+        throw new AdminError(
+          ADMIN_ERROR_CODES.executionInProgress,
+          `Execution ${executionId} is still running, or stopped before it recorded an outcome.`,
+          'Do not send it again. Read core.receipts.get for its outcome.',
+        );
+      }
+    }
   }
 
   return async function foremanHandler(request: Request): Promise<Response> {
@@ -337,6 +454,22 @@ function parseConfig<TCtx>(options: CreateForemanHandlerOptions<TCtx>): z.output
     );
   }
   return result.data;
+}
+
+/**
+ * Record the outcome. A store failure here is logged, not thrown: the action already ran,
+ * so the true answer still goes out, and the claim stays `pending` (read as unknown).
+ */
+async function settle(store: ReceiptStore, receipt: SettledReceipt, url: URL): Promise<void> {
+  try {
+    await store.settle(receipt);
+  } catch (error) {
+    logger.error('Foreman receipt for {executionId} not settled on {path}; it stays pending', {
+      executionId: receipt.executionId,
+      path: url.pathname,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function requireScope(envelope: Envelope, permission: string): void {
@@ -423,33 +556,34 @@ function unknownCapability(url: URL): AdminError {
   );
 }
 
+/** The code and message a failure shows on the wire. 5xx messages never carry the app's internal message. */
+function publicError(error: unknown): { code: AdminErrorCode; message: string } {
+  if (!(error instanceof AdminError)) {
+    return { code: ADMIN_ERROR_CODES.handlerFailed, message: 'The app failed to handle the request.' };
+  }
+  if ((STATUS_BY_CODE[error.code] ?? 500) < 500) {
+    const prefix = `${error.code}: `;
+    const message = error.message.startsWith(prefix) ? error.message.slice(prefix.length) : error.message;
+    return { code: error.code, message };
+  }
+  const message =
+    error.code === ADMIN_ERROR_CODES.invalidOutput
+      ? 'The app produced data that does not match its own contract.'
+      : 'The app failed to handle the request.';
+  return { code: error.code, message };
+}
+
 /** Status and wire body for a failure. 5xx bodies never carry the app's internal message. */
 function errorResponse(error: unknown, url: URL): [number, ErrorBody] {
+  const { code, message } = publicError(error);
+  const status = error instanceof AdminError ? (STATUS_BY_CODE[error.code] ?? 500) : 500;
   if (error instanceof AdminError) {
-    const status = STATUS_BY_CODE[error.code] ?? 500;
-    if (status < 500) {
-      const message = error.message.startsWith(`${error.code}: `)
-        ? error.message.slice(error.code.length + 2)
-        : error.message;
-      return [status, { error: { code: error.code, message, remediation: error.remediation } }];
+    if (status >= 500) {
+      logger.error('Foreman request failed on {path}: {message}', { path: url.pathname, message: error.message });
     }
-    logger.error('Foreman request failed on {path}: {message}', { path: url.pathname, message: error.message });
-    const message =
-      error.code === ADMIN_ERROR_CODES.invalidOutput
-        ? 'The app produced data that does not match its own contract.'
-        : 'The app failed to handle the request.';
-    return [status, { error: { code: error.code, message, remediation: error.remediation } }];
+    return [status, { error: { code, message, remediation: error.remediation } }];
   }
   if (error instanceof Error) logger.error(error, { path: url.pathname });
   else logger.error('Foreman handler threw a non-Error on {path}', { path: url.pathname });
-  return [
-    500,
-    {
-      error: {
-        code: ADMIN_ERROR_CODES.handlerFailed,
-        message: 'The app failed to handle the request.',
-        remediation: "Check the app's log for this request.",
-      },
-    },
-  ];
+  return [status, { error: { code, message, remediation: "Check the app's log for this request." } }];
 }

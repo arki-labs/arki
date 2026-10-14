@@ -89,9 +89,12 @@ export const scopeSchema = z.string().regex(SCOPE_PATTERN, 'Use "area:verb" or "
 
 const sha256Schema = z.string().regex(SHA256_PATTERN);
 
+/** The id Foreman gives one execution. It keys the app's receipt for that execution. */
+export const executionIdSchema = z.string().min(1).max(128);
+
 /** What an execute envelope carries from the approval. The dispatcher turns it into a `Permit`. */
 export const permitClaimSchema = z.strictObject({
-  executionId: z.string().min(1).max(128),
+  executionId: executionIdSchema,
   /** The preview `revision` the approval pinned. */
   expectedRevision: z.string().min(1).max(256),
   approvedBy: z.string().min(1).max(256),

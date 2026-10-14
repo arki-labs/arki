@@ -41,6 +41,13 @@ export const ADMIN_ERROR_CODES = {
   handlerFailed: 'ARKI_ADMIN_E015',
   /** The client could not reach the target (network error or timeout). Outcome unknown. */
   unreachable: 'ARKI_ADMIN_E016',
+  /**
+   * An execute was refused before it ran because no receipt could be recorded: writes are on
+   * but no receipt store is configured, or the store could not take the claim (HTTP 403).
+   */
+  receiptsUnavailable: 'ARKI_ADMIN_E017',
+  /** An execute with this execution id is still running, or stopped before it recorded an outcome (HTTP 409). */
+  executionInProgress: 'ARKI_ADMIN_E018',
 } as const;
 
 /** The code of an {@link AdminError}. */

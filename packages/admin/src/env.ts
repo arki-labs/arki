@@ -29,7 +29,8 @@ export const foremanEnvShape = {
   FOREMAN_WRITES: writesModeSchema.optional(),
 };
 
-export type ForemanEnv = { [K in keyof typeof foremanEnvShape]: z.output<(typeof foremanEnvShape)[K]> };
+/** The `FOREMAN_*` part of a validated env: exactly what `foremanEnvShape` parses to, every key optional. */
+export type ForemanEnv = z.output<z.ZodObject<typeof foremanEnvShape>>;
 
 /** The handler config the env describes. */
 export type ForemanEnvConfig = Pick<CreateForemanHandlerOptions<never>, 'identity' | 'keys' | 'writes'> & {

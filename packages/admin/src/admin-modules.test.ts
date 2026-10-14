@@ -23,6 +23,8 @@ import { foreman } from './dot';
 import { foremanConfigFromEnv } from './env';
 import { createForemanHandlerFromEnv } from './foreman-app';
 import { ADMIN_ERROR_CODES, AdminError, defineAction, defineModule, defineRead, describeModule } from './module';
+import { kvReceiptStore } from './receipts';
+import { memoryKv } from './test-support';
 
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;
 
@@ -116,6 +118,7 @@ function appOptions(env: ForemanEnv, clock: MockClock): ForemanAppOptions<{ tena
     app: { version: '1.2.3', commit: 'abc1234' },
     packages: { '@arki/queue': '0.1.0' },
     nonces: memoryNonces(clock),
+    receipts: kvReceiptStore(memoryKv(clock)),
     clock,
     health: () => health,
     modules: [queueModule()],
@@ -176,11 +179,16 @@ describe('T(admin-modules): one module set, two attachments', () => {
     expect(fromPlain['executed']).toEqual({ requeued: true });
   });
 
-  it('describes core.health, core.manifest and the app modules, in that order', async () => {
+  it('describes core.health, core.manifest, core.receipts (a store is given) and the app modules, in that order', async () => {
     const [plain] = mounts();
     if (plain === undefined) throw new Error('expected a mount');
     const manifest = await clientFor(plain).manifest();
-    expect(manifest.modules.map(module => module.id)).toEqual(['core.health', 'core.manifest', '@arki/queue']);
+    expect(manifest.modules.map(module => module.id)).toEqual([
+      'core.health',
+      'core.manifest',
+      'core.receipts',
+      '@arki/queue',
+    ]);
     expect(manifest.app).toEqual({ id: APP_ID, environment: ENVIRONMENT, version: '1.2.3', commit: 'abc1234' });
     expect(manifest.readiness.writes).toBe('on');
   });

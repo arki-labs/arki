@@ -15,7 +15,10 @@ import { ADMIN_ERROR_CODES } from './errors';
 
 const logger = getLogger('arki:admin');
 
-export type ForemanAppOptions<TCtx> = Pick<CreateForemanHandlerOptions<TCtx>, 'nonces' | 'context' | 'clock'> &
+export type ForemanAppOptions<TCtx> = Pick<
+  CreateForemanHandlerOptions<TCtx>,
+  'nonces' | 'receipts' | 'context' | 'clock'
+> &
   Pick<CoreModulesOptions<TCtx>, 'health' | 'modules' | 'packages' | 'providers'> & {
     /** The app's validated env. The `FOREMAN_*` keys come from `foremanEnvShape`. */
     env: ForemanEnv;
@@ -55,6 +58,7 @@ export function createForemanHandlerFromEnv<TCtx>(
     keys: config.keys,
     writes: config.writes,
     nonces: options.nonces,
+    receipts: options.receipts,
     context: options.context,
     clock: options.clock,
     app: options.app,
@@ -67,6 +71,7 @@ export function createForemanHandlerFromEnv<TCtx>(
       providers: options.providers,
       health: options.health,
       modules: options.modules,
+      receipts: options.receipts,
     }),
   });
 }

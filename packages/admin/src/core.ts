@@ -1,6 +1,6 @@
 /**
- * The two modules every Foreman target serves (RFC § 3.3): `core.health` and
- * `core.manifest`. They are ordinary modules, so a DOT app and a plain
+ * The modules every Foreman target serves (RFC § 3.3): `core.health`,
+ * `core.manifest`, and `core.receipts` when the app has a receipt store. They are ordinary modules, so a DOT app and a plain
  * TanStack app expose them the same way.
  *
  * - `core.health` reports the roll-up status and the dependency checks, in the
@@ -13,9 +13,11 @@ import { z } from '@arki/contracts';
 import type { FleetHealth } from './contract';
 import type { AnyForemanModule, ForemanModule } from './module';
 import type { ForemanManifest, ProviderReadiness, WritesMode } from './protocol';
+import type { ReceiptStore } from './receipts';
 import { fleetHealthCheckSchema, fleetHealthSchema } from './contract';
 import { defineModule, defineRead, describeModule } from './module';
 import { FOREMAN_PROTOCOL_VERSION, foremanManifestSchema } from './protocol';
+import { receiptsModule } from './receipts';
 
 export const CORE_PERMISSION = 'core:read';
 export const CORE_HEALTH_MODULE_ID = 'core.health';
@@ -34,13 +36,15 @@ export type CoreModulesOptions<TCtx> = {
   health: () => FleetHealth | Promise<FleetHealth>;
   /** The app's own modules. */
   modules?: readonly ForemanModule<TCtx>[];
+  /** The receipt store the handler records executes in. Given, it is served as `core.receipts`. */
+  receipts?: ReceiptStore;
 };
 
 const emptyInput = z.strictObject({});
 
 /**
  * The module list to hand to `createForemanHandler`: `core.health`,
- * `core.manifest`, then the app's own modules. The manifest read describes
+ * `core.manifest`, `core.receipts` (with a receipt store), then the app's own modules. The manifest read describes
  * this whole list, so it always agrees with `GET /api/foreman/manifest`.
  */
 export function withCoreModules<TCtx>(options: CoreModulesOptions<TCtx>): readonly ForemanModule<TCtx>[] {
@@ -99,6 +103,8 @@ export function withCoreModules<TCtx>(options: CoreModulesOptions<TCtx>): readon
     actions: {},
   });
 
-  all.push(health, manifest, ...(options.modules ?? []));
+  all.push(health, manifest);
+  if (options.receipts !== undefined) all.push(receiptsModule<TCtx>(options.receipts));
+  all.push(...(options.modules ?? []));
   return all;
 }

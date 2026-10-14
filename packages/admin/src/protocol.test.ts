@@ -28,6 +28,8 @@ import {
   toBase64Url,
   utf8,
 } from './protocol';
+import { kvReceiptStore } from './receipts';
+import { memoryKv } from './test-support';
 
 type Ctx = { tenant: string };
 type KeyPair = Awaited<ReturnType<typeof generateForemanKeyPair>>;
@@ -124,6 +126,7 @@ function setup(options: SetupOptions = {}) {
     keys: options.keys ?? { read: { current: readPair.publicKey }, execute: { current: executePair.publicKey } },
     writes: options.writes ?? 'on',
     nonces: memoryNonces(clock),
+    receipts: kvReceiptStore(memoryKv(clock)),
     modules: [module],
     context: () => ({ tenant: 'acme' }),
     app: { version: '1.2.3' },

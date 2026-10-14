@@ -154,4 +154,15 @@ export {
   NONCE_TTL_SECONDS,
 } from './protocol';
 export type { ForemanAppOptions } from './foreman-app';
+export type {
+  ReceiptAnswer,
+  ReceiptClaimResult,
+  ReceiptKV,
+  ReceiptStore,
+  KvReceiptStoreOptions,
+  PendingReceipt,
+  SettledReceipt,
+  StoredReceipt,
+} from './receipts';
+export { kvReceiptStore, RECEIPT_WINDOW_SECONDS } from './receipts';
 export { createForemanHandlerFromEnv } from './foreman-app';
