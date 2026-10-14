@@ -178,6 +178,7 @@
     "bignumber.js": "catalog:",
     "complex.js": "^2.4.3",
     "decimal.js": "catalog:",
+    "fast-check": "^4.10.2",
     "fraction.js": "^5.3.4",
     "jstat": "catalog:",
     "mathjs": "catalog:",

@@ -4,5 +4,10 @@
   ],
   "tags": [
     "foundation"
-  ]
+  ],
+  "tasks": {
+    "test": {
+      "env": ["$TURBO_EXTENDS$", "MATH_PROPERTY_RUNS"]
+    }
+  }
 }
