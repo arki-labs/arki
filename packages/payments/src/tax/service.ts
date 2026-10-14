@@ -1,6 +1,6 @@
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
-import { Money, sum } from '@arki/money';
+import { Money } from '@arki/money';
 
 import type { StripeProvider } from '../core/providers/stripe-provider.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../core/types.js';
@@ -90,49 +90,32 @@ export class TaxService {
    * This is used for price previews and checkout calculations
    */
   async calculateTax(input: TaxCalculationInput): Promise<TaxCalculationResult> {
-    try {
-      const result = await this.stripeProvider.calculateTax({
-        customerId: input.customerId,
-        lineItems: input.lineItems.map(item => ({
-          amount: item.amount,
-          reference: item.reference,
-          taxCode: item.taxCode,
-        })),
-        currency: input.currency,
-        customerDetails: input.customerDetails,
-      });
+    // A failure is the caller's to handle: a checkout must not go on with tax it does not know.
+    // The provider throws `PaymentProviderError`; its `retryable` says whether trying again can help.
+    const result = await this.stripeProvider.calculateTax({
+      customerId: input.customerId,
+      lineItems: input.lineItems.map(item => ({
+        amount: item.amount,
+        reference: item.reference,
+        taxCode: item.taxCode,
+      })),
+      currency: input.currency,
+      customerDetails: input.customerDetails,
+    });
 
-      return {
-        subtotal: result.amountTotal.minus(result.taxAmountExclusive),
-        taxAmount: result.taxAmountExclusive,
-        total: result.amountTotal,
-        taxInclusive: result.taxAmountInclusive.isPositive(),
-        breakdown: result.taxBreakdown.map(breakdown => ({
-          jurisdiction: breakdown.jurisdiction,
-          rate: breakdown.rate,
-          amount: breakdown.amount,
-          taxCode: breakdown.taxCode,
-        })),
-        applicableTaxIds: [], // Would be populated based on customer tax IDs
-      };
-    } catch (error) {
-      console.error('Tax calculation failed:', error);
-
-      // Fallback: return zero tax if calculation fails. `sum` is exact and throws on a line item in another currency
-      const currency = input.currency.toUpperCase();
-      const subtotal = sum(
-        input.lineItems.map(item => Money.of(item.amount, currency)),
-        currency,
-      );
-      return {
-        subtotal,
-        taxAmount: Money.zero(currency),
-        total: subtotal,
-        taxInclusive: false,
-        breakdown: [],
-        applicableTaxIds: [],
-      };
-    }
+    return {
+      subtotal: result.amountTotal.minus(result.taxAmountExclusive),
+      taxAmount: result.taxAmountExclusive,
+      total: result.amountTotal,
+      taxInclusive: result.taxAmountInclusive.isPositive(),
+      breakdown: result.taxBreakdown.map(breakdown => ({
+        jurisdiction: breakdown.jurisdiction,
+        rate: breakdown.rate,
+        amount: breakdown.amount,
+        taxCode: breakdown.taxCode,
+      })),
+      applicableTaxIds: [], // Would be populated based on customer tax IDs
+    };
   }
 
   /**

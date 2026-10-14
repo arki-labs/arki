@@ -714,8 +714,8 @@ export class StripeProvider extends BasePaymentProvider {
       taxCode?: string;
     }[];
   }> {
-    const calculation = await this.stripe.tax.calculations.create({
-      currency: params.currency,
+    const request: Stripe.Tax.CalculationCreateParams = {
+      currency: params.currency.toLowerCase(),
       line_items: params.lineItems.map(item => ({
         // Throws CurrencyMismatchError for a line item in another currency
         amount: toStripeAmount(Money.of(item.amount, params.currency.toUpperCase())),
@@ -734,7 +734,8 @@ export class StripeProvider extends BasePaymentProvider {
         })),
       } : undefined,
       expand: ['line_items.data.tax_breakdown'],
-    });
+    };
+    const calculation = await this.call(() => this.stripe.tax.calculations.create(request));
 
     return {
       amountTotal: fromStripeAmount(calculation.amount_total, calculation.currency),
