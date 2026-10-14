@@ -174,6 +174,43 @@ each other's services, that's a design smell the type system surfaces
 immediately — merge them, or extract the shared piece into a third plugin both
 consume.
 
+### Features and the hexagon
+
+Domain modules are `feature()` values from `@arki/dot/feature`. A feature is
+inert data: router fragments and repo factories fold without any kernel, and
+boot-time slices (`jobs()`, `schedules()`, `endpoints()`) say what the
+feature hands its adapters.
+
+```ts
+import { feature } from '@arki/dot/feature';
+
+export const orders = feature('orders', {
+  router: { orders: ordersRouter },
+  repos: { orders: createOrdersRepository },
+  needs: { db: service<Db>() },
+  use: [jobs({ syncOrders })],
+  boot: ({ db }) => ({ ordersIndex: openIndex(db) }),
+});
+```
+
+The app wires its units in three steps — the hexagon of ports and adapters:
+
+```ts
+defineApp('shop')
+  .use(db({ relations }))            // driven: what features need
+  .use(queue({ connection }))
+  .features([orders, billing])       // the domain
+  .serve(http({ port: 3000 }))       // driving: what calls the features
+  .serve(queueWorker({ q, needs: {}, context }));
+```
+
+The order is a compile error, not a convention: `.use()` is closed after
+`.features()` (infrastructure never depends on the domain), a feature is not a
+plugin, and a driving adapter (`driver(...)`) cannot sit in `.use()`. Driving
+adapters are bound to the mounted features — `http()` serves every feature's
+routes without being told the list. `dot explain --graph` draws the three
+groups, numbered in boot order.
+
 ### Tokens — cross-package service contracts
 
 An anonymous `service<T>()` couples consumer and provider by property name.

@@ -27,20 +27,38 @@ function escapeLabel(name: string): string {
   return name.replaceAll('"', '#quot;');
 }
 
+/** Hexagon groups, in boot order. A plugin without a role is a driven adapter. */
+const GROUPS = [
+  { id: 'driven', label: 'driven · what features need', role: undefined },
+  { id: 'features', label: 'features · the domain', role: 'feature' },
+  { id: 'driving', label: 'driving · what calls the features', role: 'driving' },
+] as const;
+
 /**
  * Build Mermaid `flowchart` source from a manifest. Deterministic: node
- * ids follow declaration order, edges follow manifest order.
+ * ids follow declaration order, edges follow manifest order. An app built
+ * with `.features()` / `.serve()` is drawn as the hexagon's three groups;
+ * any other app is a flat list.
  */
 export function buildMermaidGraph(manifest: DotAppManifest): string {
-  const lines: string[] = ['flowchart TD'];
+  const lines: string[] = ['flowchart TD', '  %% numbers = boot order'];
   const idByPlugin = new Map<string, string>();
-
-  for (const [index, plugin] of manifest.plugins.entries()) {
+  const nodes = manifest.plugins.map((plugin, index) => {
     const id = `p${index.toString()}`;
     idByPlugin.set(plugin.name, id);
     const order = (index + 1).toString();
     const version = plugin.version === undefined ? '' : `@${plugin.version}`;
-    lines.push(`  ${id}["${order} · ${escapeLabel(plugin.name)}${escapeLabel(version)}"]`);
+    return { role: plugin.role, line: `${id}["${order} · ${escapeLabel(plugin.name)}${escapeLabel(version)}"]` };
+  });
+
+  if (nodes.some(node => node.role !== undefined)) {
+    for (const group of GROUPS) {
+      const members = nodes.filter(node => node.role === group.role);
+      if (members.length === 0) continue;
+      lines.push(`  subgraph ${group.id}["${group.label}"]`, ...members.map(node => `    ${node.line}`), '  end');
+    }
+  } else {
+    lines.push(...nodes.map(node => `  ${node.line}`));
   }
 
   for (const edge of manifest.dependencies) {

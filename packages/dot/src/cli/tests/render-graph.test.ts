@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { DotAppManifest } from '../../manifest.js';
 import { defineApp } from '../../define-app.js';
+import { feature } from '../../feature.js';
 import { plugin, service } from '../../plugin-contract.js';
 import { buildMermaidGraph, renderGraph } from '../render-graph.js';
 
@@ -39,7 +40,7 @@ describe('buildMermaidGraph', () => {
     });
 
     expect(buildMermaidGraph(manifest)).toBe(
-      ['flowchart TD', '  p0["1 · db@1.2.0"]', '  p1["2 · billing"]', '  p1 -->|requires| p0', ''].join('\n'),
+      ['flowchart TD', '  %% numbers = boot order', '  p0["1 · db@1.2.0"]', '  p1["2 · billing"]', '  p1 -->|requires| p0', ''].join('\n'),
     );
   });
 
@@ -66,7 +67,7 @@ describe('renderGraph', () => {
       { manifest, command: 'explain' },
       { json: false, out: line => plainLines.push(line), now: () => new Date(0) },
     );
-    expect(plainLines.join('')).toBe('flowchart TD\n  p0["1 · solo"]\n');
+    expect(plainLines.join('')).toBe('flowchart TD\n  %% numbers = boot order\n  p0["1 · solo"]\n');
 
     const jsonLines: string[] = [];
     const envelope = renderGraph(
@@ -94,6 +95,25 @@ describe('renderGraph', () => {
     const source = buildMermaidGraph(app.manifest);
     expect(source).toContain('p0["1 · db"]');
     expect(source).toContain('p1["2 · billing"]');
+    expect(source).toContain('p1 -->|requires| p0');
+    await app.dispose();
+  });
+
+  it('draws a .features()/.serve() app as the hexagon: driven → features → driving, numbered in boot order', async () => {
+    const db = plugin({ name: 'db', boot: () => ({ db: { ok: true } }) });
+    const orders = feature('orders', { needs: { db: service<{ ok: boolean }>() } });
+    const health = plugin({ name: 'health', needs: { db: service<{ ok: boolean }>() }, boot: ({ db: handle }) => ({ health: handle.ok }) });
+
+    const app = await defineApp('hexagon').use(db).features([orders]).serve(health).boot();
+    const source = buildMermaidGraph(app.manifest);
+    const groups = source.split('\n').filter(line => line.trim().startsWith('subgraph'));
+    // The groups appear in boot order, so the drawing reads like the builder chain.
+    expect(groups).toEqual([
+      '  subgraph driven["driven · what features need"]',
+      '  subgraph features["features · the domain"]',
+      '  subgraph driving["driving · what calls the features"]',
+    ]);
+    expect(source).toContain('    p1["2 · orders"]');
     expect(source).toContain('p1 -->|requires| p0');
     await app.dispose();
   });

@@ -9,7 +9,7 @@ do.
 - [Principles](./principles.md) — the five rules every API, error message,
   and PR is measured against. Read these before contributing.
 - [Composition doctrine](./composition-doctrine.md) — declaration-first
-  rules for structuring an app on `@arki/dot` + `@arki/feature`: inert
+  rules for structuring an app on `@arki/dot` and its features: inert
   declarations, typed folds, one-way dependencies, import purity.
 
 ## For app authors

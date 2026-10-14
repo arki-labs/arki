@@ -373,6 +373,9 @@ declare const ProvidesSym: unique symbol;
  * The phantom symbol properties carry `TNeeds` / `TProvides` for the app
  * builder's compile-time wiring check; they never exist at runtime.
  */
+/** See {@link Plugin.role}. */
+export type DotPluginRole = 'feature' | 'driving';
+
 export type Plugin<TNeeds extends ServiceRecord = ServiceRecord, TProvides extends ServiceRecord = ServiceRecord> = {
   /** Unique identifier for this plugin within the app. */
   readonly name: string;
@@ -383,6 +386,12 @@ export type Plugin<TNeeds extends ServiceRecord = ServiceRecord, TProvides exten
   readonly actions: readonly ActionSource[];
   /** Mount-time renames: publish key → new wire key (see {@link rename}). */
   readonly renames: Readonly<Record<string, string>>;
+  /**
+   * Where the app builder mounted this plugin in the hexagon: `feature`
+   * (`.features()`) or `driving` (`.serve()`). Absent for `.use()` — a
+   * driven adapter, or any plugin in an app that never calls `.features()`.
+   */
+  readonly role?: DotPluginRole;
   /**
    * The logging slot. At most one plugin per app fills it. The kernel calls
    * the factory before its first lifecycle record and closes the handle after

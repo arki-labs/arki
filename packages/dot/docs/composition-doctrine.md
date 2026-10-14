@@ -1,6 +1,6 @@
 # Declaration-first composition doctrine
 
-How to structure an app built on `@arki/dot` + `@arki/feature`. These rules
+How to structure an app built on `@arki/dot` and its features (`@arki/dot/feature`). These rules
 are distilled from what drizzle and oRPC get right, proven on a full
 production backend. When your code and this doc disagree, fix one of them —
 don't fork silently.
@@ -95,27 +95,50 @@ The pin makes the hand list compiler-enforced instead of trusted.
 
 ## 3. One declaration, many projections
 
-A feature is declared **once** (`defineFeature`) and everything else is a
-projection of it: the DOT plugin (`plug`), the slice token (`tokenOf`),
-manifest actions (`dot explain` attribution), the composed router (client
-types), the repo record. If adding a capability requires editing a second
+A feature is declared **once** (`feature()`) and everything else is a
+projection of it: the plugin `.features()` mounts, the slice token
+(`tokenOf`), manifest actions (`dot explain` attribution), the composed
+router (client types), the repo record. If adding a capability requires editing a second
 place, the design is wrong — extend the declaration and derive.
 
 Boot-time capabilities ride **slice contracts** — structural
 `{ key, actions, resolve }` wrappers exported by the adapter that consumes
 them (`jobs()` from `@arki/queue/dot`, `schedules()` from
 `@arki/schedule/dot`, `endpoints()` from `@arki/http`). Dependencies follow
-use; the slice set stays open; `@arki/feature` imports no adapter.
+use; the slice set stays open; `@arki/dot/feature` imports no adapter.
 
 ## 4. One membership list, typed folds
 
 `src/features.ts` is THE list. Everything derives from the tuple:
-`plugs(features)`, `tokens(features)`, `composeRouter(features)`,
-`composeRepos(features, db)`, `composeSchema(...)`. Folds are typed
+`.features(features)`, `composeRouter(features)`,
+`composeRepos(features, db)`, `composeSchema(...)`. Driving adapters
+(`http`, `schedule`, `queueWorker`) are bound to the mounted list by
+`.serve()` — they never take it as an argument. Folds are typed
 identities: runtime merge + exact intersection type + duplicate-key
 rejection, as a compile error first and a coded throw at module load behind
 it. There is never a second list to
 forget.
+
+### The app spine is a hexagon
+
+`app.ts` wires the units in three steps, and the builder types enforce the
+order — a unit in the wrong step does not compile:
+
+```ts
+defineApp('shop')
+  .use(db({ relations }))           // driven adapters — what features need
+  .use(queue({ connection }))       //   (a queue CLIENT features enqueue with)
+  .features(features)               // the domain core — feature() values, one list
+  .serve(http({ port }))            // driving adapters — what calls the features
+  .serve(queueWorker({ q, needs: {}, context }));
+```
+
+Infrastructure never depends on the domain: nothing in `.use()` can need a
+feature service, and `.use()` is closed once `.features()` is called.
+Adapter authors pick the side explicitly: `driver(features => plugin(...))`
+is accepted only by `.serve()`; `driven(features => plugin(...))` — a driven
+adapter that reads the features' static declarations, like the journal — only
+by `.use()`.
 
 ## 5. Dependencies point one way (the drizzle-relations rule)
 
@@ -155,7 +178,7 @@ Three lifetimes, three homes:
 | Lifetime | Home | Examples |
 | --- | --- | --- |
 | compile-time | ES modules, composed folds | schema, relations, routers, repo factories, context TYPE |
-| boot-time | plugins / `defineFeature` `boot` + slices | db handle, auth instance, event store, route bundles |
+| boot-time | plugins / `feature()` `boot` + slices | db handle, auth instance, event store, route bundles |
 | request-time | the gateway's context factory | session lookup, per-request context value |
 
 "If it doesn't need boot, it doesn't need a plugin" — static data rides
