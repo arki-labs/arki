@@ -60,6 +60,7 @@ These come from `apps/arki/docs/plans/2026-05-20-arki-dot-public-release.md` and
 - **README + LICENSE present** — every public package.
 - **`publishConfig.access: public`** — every public manifest.
 - **Scorecard gate OPEN** — `bun release:arki scorecard` must report `Stable release gate: OPEN` before any publish.
+- **Consumer smoke passes** — the wave's tarballs install and import outside the monorepo under Node and Bun, with one copy of each `@arki/*` package ([ship-update.md § Before publish](./ship-update.md#before-publish-dependency-drift-and-consumer-smoke)).
 
 Run `bun release:arki scorecard` whenever in doubt. If `BLOCKED`, fix what's blocking before touching `npm publish` or `git push`.
 

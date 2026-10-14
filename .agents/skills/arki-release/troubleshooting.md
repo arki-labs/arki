@@ -143,7 +143,7 @@ npm view @arki/<pkg> version
 1. **Ship in waves** — publish Wave 1 to npm first, then Wave 2 (its `@arki/*` deps now exist on npm), then Wave 3. Natural ordering that dissolves the cycle.
 2. **Satellite tarball cache** — future fixture-matrix improvement. The matrix would stage all packed tarballs in a temp dir and tell the PM (via `overrides` or `--registry file://`) to resolve `@arki/*` from there. ~4-8 hours of tooling work, not done yet.
 
-For now, accept that pre-publication Wave 2/3 packages can't be fixture-verified. The scorecard's `dot-gates` (kernel boot probe) is the next-best verifier.
+Until then, verify pre-publication packages by hand with the consumer smoke in [ship-update.md § Before publish](./ship-update.md#before-publish-dependency-drift-and-consumer-smoke). It does the satellite-tarball install with npm `overrides`.
 
 ## Fixture matrix probes assume a root `.` export
 
