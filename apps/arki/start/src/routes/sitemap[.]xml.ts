@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 
-import { sitemapResponse } from '@arki/sitekit/seo';
+import { sitemapResponse } from '@arki/seo';
 
 import config from '~/config';
 

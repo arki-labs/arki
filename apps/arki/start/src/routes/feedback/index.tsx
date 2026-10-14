@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { FeedbackPageTemplateIn3Cards } from '@arki/sitekit/feedback/templates/page-3-cards.tsx';
+import { FeedbackPageTemplateIn3Cards } from '@arki/feedback/react';
 
 import config from '~/config';
 import { getDefaultMeta } from '~/shared-metadata';

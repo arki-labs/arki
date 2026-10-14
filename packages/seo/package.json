@@ -1,0 +1,81 @@
+{
+  "name": "@arki/seo",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/seo"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./react": {
+      "types": "./dist/src/react/index.d.ts",
+      "import": "./src/react/index.ts",
+      "default": "./src/react/index.ts"
+    },
+    "./tanstack-start": {
+      "types": "./dist/src/tanstack-start.d.ts",
+      "import": "./src/tanstack-start.ts",
+      "default": "./src/tanstack-start.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "schema-dts": "catalog:"
+  },
+  "peerDependencies": {
+    "@arki/icons": "workspace:*",
+    "@arki/ui": "workspace:*",
+    "@tanstack/react-router": "catalog:tanstack/start",
+    "react": "catalog:react",
+    "react-dom": "catalog:react"
+  },
+  "peerDependenciesMeta": {
+    "@arki/icons": {
+      "optional": true
+    },
+    "@arki/ui": {
+      "optional": true
+    },
+    "@tanstack/react-router": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@tanstack/react-router": "catalog:tanstack/start",
+    "@types/react": "catalog:react",
+    "@types/react-dom": "catalog:react",
+    "@vitejs/plugin-react": "catalog:",
+    "react": "catalog:react",
+    "react-dom": "catalog:react",
+    "typescript": "catalog:"
+  }
+}

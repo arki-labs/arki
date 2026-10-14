@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 
-import { robotsTxtResponse } from '@arki/sitekit/seo';
+import { robotsTxtResponse } from '@arki/seo';
 
 import { getBaseUrl } from '~/config';
 

@@ -29,6 +29,9 @@
 @source "../../../../../packages/ui/components/src";
 @source "../../../../../packages/theme/src";
 @source "../../../../../packages/sitekit/src";
+@source "../../../../../packages/seo/src";
+@source "../../../../../packages/feedback/src";
+@source "../../../../../packages/auth/src";
 @source "../../../../../packages/design-systems/src";
 
 @custom-variant dark (&:is(.dark *));

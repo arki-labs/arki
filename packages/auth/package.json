@@ -20,6 +20,16 @@
       "import": "./src/tanstack-start/index.ts",
       "node": "./src/tanstack-start/index.ts"
     },
+    "./react": {
+      "types": "./dist/src/react/index.d.ts",
+      "import": "./src/react/index.ts",
+      "browser": "./src/react/index.ts"
+    },
+    "./react/templates": {
+      "types": "./dist/src/react/templates/index.d.ts",
+      "import": "./src/react/templates/index.ts",
+      "browser": "./src/react/templates/index.ts"
+    },
     "./workspaces": {
       "types": "./dist/src/workspaces/server/index.d.ts",
       "import": "./src/workspaces/server/index.ts",
@@ -69,6 +79,7 @@
     "@auth/core": "catalog:",
     "@auth/drizzle-adapter": "catalog:drizzle",
     "@better-auth/expo": "catalog:better-auth",
+    "@daveyplate/better-auth-tanstack": "catalog:",
     "@daveyplate/better-auth-ui": "catalog:better-auth",
     "@paralleldrive/cuid2": "catalog:utilities",
     "@t3-oss/env-core": "catalog:env",
@@ -78,6 +89,8 @@
   },
   "peerDependencies": {
     "@arki/dot": "workspace:*",
+    "@arki/icons": "workspace:*",
+    "@arki/ui": "workspace:*",
     "@playwright/test": "catalog:testing",
     "@tanstack/react-router": "catalog:tanstack/start",
     "@tanstack/react-start": "catalog:tanstack/start",
@@ -88,6 +101,12 @@
     "@arki/dot": {
       "optional": true
     },
+    "@arki/icons": {
+      "optional": true
+    },
+    "@arki/ui": {
+      "optional": true
+    },
     "@playwright/test": {
       "optional": true
     },
@@ -95,6 +114,12 @@
       "optional": true
     },
     "@tanstack/react-start": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
       "optional": true
     }
   },
