@@ -1,0 +1,51 @@
+import path from 'node:path';
+
+import type { MigratableDb } from '@arki/db/migrate';
+import type { EmptyShape, Plugin } from '@arki/dot/plugin';
+import { db } from '@arki/db/dot';
+import { dbMigrations } from '@arki/db/migrate';
+import { defineApp } from '@arki/dot';
+import { log } from '@arki/dot/log';
+import { env } from '@arki/env/dot';
+import { journal } from '@arki/journal/dot';
+import { asyncContext, fromEnv, stdout } from '@arki/log/node';
+
+import { envSchema } from './env';
+import { relations } from './server/db';
+import { appJournal } from './server/journal';
+
+/** Where `drizzle-kit generate` writes migrations. Run the server from the project root. */
+const MIGRATIONS_FOLDER = path.resolve(process.cwd(), 'drizzle');
+
+/**
+ * The DOT app. A DOT app is the sum of its plugins, in boot order:
+ *
+ * 1. `log`        switches logging on (`@arki/log`) before anything else runs.
+ * 2. `env`        validates `src/env.ts` and publishes `services.env`.
+ * 3. `db`         opens Postgres and publishes `services.db`.
+ * 4. `migrations` applies pending migrations from `drizzle/`.
+ * 5. `journal`    publishes `services.journal`, the door every write goes through.
+ *
+ * The database plugin is a parameter so tests can boot the same app on an
+ * in-memory PGlite database (see `src/testing.ts`).
+ */
+export function createApp(database: Plugin<EmptyShape, { readonly db: MigratableDb<typeof relations> }>) {
+  return defineApp('{{name}}')
+    .use(
+      log(() => ({
+        ...fromEnv(),
+        context: asyncContext(),
+        channels: { stdout: stdout() },
+        default: { level: 'info', channels: ['stdout'] },
+      })),
+    )
+    .use(env({ schema: envSchema }))
+    .use(database)
+    .use(dbMigrations({ migrationsFolder: MIGRATIONS_FOLDER }))
+    .use(journal({ journal: appJournal }));
+}
+
+/** The production app: Postgres from `DB_URL`. `dot explain` and `dot doctor` load this export. */
+export const app = createApp(db({ relations }));
+
+export default app;

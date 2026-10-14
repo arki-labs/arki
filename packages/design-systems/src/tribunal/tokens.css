@@ -63,6 +63,7 @@
   --destructive-foreground: oklch(0.97 0.01 80);
   --success: oklch(0.52 0.1 145);
   --warning: oklch(0.62 0.13 75);
+  --info: oklch(0.5 0.1 240);
   --border: oklch(0.88 0.015 75);
   /* A darker hairline for inputs, secondary buttons, hover edges and rules. */
   --border-strong: oklch(0.78 0.018 70);
@@ -80,6 +81,7 @@
   /* Verdict band surfaces (tinted backgrounds behind GO/CAUTION/REWORK) */
   --success-surface: oklch(0.93 0.04 145);
   --warning-surface: oklch(0.94 0.05 80);
+  --info-surface: oklch(0.93 0.03 240);
   --destructive-surface: oklch(0.93 0.04 27);
 
   /* ── Stage palette ──────────────────────────────────────────────
@@ -180,6 +182,7 @@
   --destructive-foreground: oklch(0.16 0.012 60);
   --success: oklch(0.72 0.14 145);
   --warning: oklch(0.78 0.14 80);
+  --info: oklch(0.78 0.1 240);
   --border: oklch(0.3 0.014 60);
   --border-strong: oklch(0.42 0.016 60);
   --input: oklch(0.3 0.014 60);
@@ -194,6 +197,7 @@
 
   --success-surface: oklch(0.3 0.06 145);
   --warning-surface: oklch(0.3 0.06 80);
+  --info-surface: oklch(0.3 0.05 240);
   --destructive-surface: oklch(0.3 0.08 27);
 
   /* brighter stage hues for the dark ground */

@@ -1,0 +1,26 @@
+import { db } from '@arki/db/dot';
+import { call } from '@orpc/server';
+
+import { createApp } from './app';
+import { relations } from './server/db';
+import type { RpcContext } from './server/orpc';
+
+/**
+ * Boot the real app on a fresh in-memory PGlite database: same plugins, same
+ * migrations, no Docker. Call `dispose()` in `afterAll`.
+ */
+export async function bootTestApp() {
+  const booted = await createApp(db({ driver: 'pglite', memory: true, relations })).boot();
+  const context: RpcContext = {
+    db: booted.services.db,
+    run: booted.services.journal.bind(booted.services.db, { actorId: null }),
+  };
+  return {
+    services: booted.services,
+    context,
+    dispose: () => booted.dispose(),
+  };
+}
+
+/** Call a procedure the way the HTTP handler does, input validation included. */
+export { call };

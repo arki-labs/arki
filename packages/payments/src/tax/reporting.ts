@@ -1,9 +1,20 @@
 import type { Instant } from '@arki/date';
-import type { Money } from '@arki/money';
-import { fromDate, instant, now } from '@arki/date';
-import { money, sum } from '@arki/money';
+import { compareAsc, fromDate, now, sub } from '@arki/date';
+import { getLogger } from '@arki/log';
+import { Money, sum } from '@arki/money';
 
-import type { StripeProvider } from '../core/providers/stripe-provider.js';
+import type { PaymentRepository } from '../core/repository.js';
+import type { CustomerId } from '../core/types.js';
+import type { ExemptionType } from './primitives.js';
+import type {
+  TaxAuditRepository,
+  TaxConfigurationRepository,
+  TaxExemptionRepository,
+  TaxJurisdictionRepository,
+  TaxRecordRepository,
+} from './repository.js';
+import type { TaxExemption } from './types.js';
+import { moneyJsonSchema } from '../core/money.js';
 
 /**
  * Tax compliance and reporting periods
@@ -24,17 +35,20 @@ export type TaxComplianceReport = {
   reportType: 'sales_and_use_tax' | 'vat' | 'gst';
   period: ReportingPeriod;
   jurisdiction: string;
-  totalSales: Money;
-  totalTaxCollected: Money;
-  exemptSales: Money;
+  /** What succeeded payments of the period brought in, one total per currency, ordered by currency code */
+  totalSales: Money[];
+  /** Tax collected on sales less tax given back on refunds, per currency */
+  totalTaxCollected: Money[];
+  /** Sales to customers with a blanket exemption in force, per currency */
+  exemptSales: Money[];
   transactions: number;
   generatedAt: Instant;
-  status: 'pending' | 'completed' | 'failed';
-  downloadUrl?: string;
   summary: {
     taxableTransactions: number;
     exemptTransactions: number;
+    /** Mean, over taxable payments, of tax as a share of the sale before tax (0.19 is 19%). A ratio, not an amount. */
     averageTaxRate: number;
+    /** One row per category and currency, ordered by category then currency */
     topTaxCategories: {
       category: string;
       sales: Money;
@@ -45,12 +59,17 @@ export type TaxComplianceReport = {
 
 /**
  * Customer tax summary for compliance
+ *
+ * Built from the customer's succeeded payments of the calendar year (UTC). A payment's tax is the
+ * `taxAmount` its metadata records at checkout; a payment without one carried no recorded tax and
+ * counts zero. Totals are one amount per currency: currencies are never added.
  */
 export type CustomerTaxSummary = {
   customerId: string;
   year: number;
-  totalPaid: Money;
-  totalTax: Money;
+  /** One total per currency, ordered by currency code. */
+  totalPaid: Money[];
+  totalTax: Money[];
   transactions: {
     id: string;
     date: Instant;
@@ -59,12 +78,30 @@ export type CustomerTaxSummary = {
     type: 'subscription' | 'one_time';
     description: string;
   }[];
+  /** Exemptions that were in force at some point in the year. */
   exemptions: {
-    type: string;
-    amount: Money;
+    type: ExemptionType;
     reason: string;
+    certificateNumber: string | null;
+    validFrom: Instant;
+    validTo: Instant | null;
   }[];
 }
+
+/** What the reports read. The repositories of `createTaxRepositories` and a `PaymentRepository` fit. */
+export type TaxReportReads = {
+  payments: Pick<PaymentRepository, 'findPayments'>;
+  exemptions: Pick<
+    TaxExemptionRepository,
+    'findCustomerExemptionsInRange' | 'findExemptionsInRange' | 'findExpiringExemptions'
+  >;
+  records: Pick<TaxRecordRepository, 'totalsByJurisdiction' | 'totalsByPayment'>;
+  audit: Pick<TaxAuditRepository, 'record' | 'findByEntity'>;
+  configurations: Pick<TaxConfigurationRepository, 'findDefaultConfiguration'>;
+  jurisdictions: Pick<TaxJurisdictionRepository, 'findActiveJurisdictions'>;
+};
+
+const logger = getLogger('arki:payments:tax-reporting');
 
 /**
  * Tax audit trail entry
@@ -84,6 +121,50 @@ export type TaxAuditEntry = {
   };
 }
 
+/** One succeeded payment of the period, with the tax recorded for it. */
+export type TaxExportRow = {
+  id: string;
+  date: Instant;
+  customerId: string | null;
+  type: 'subscription' | 'one_time';
+  amount: Money;
+  tax: Money;
+  /** Zero tax because the customer held a blanket exemption at the time */
+  exempt: boolean;
+  description: string;
+};
+
+/** The amounts summed per currency, ordered by currency code. Exact; currencies are never added. */
+function totalsByCurrency(amounts: readonly Money[]): Money[] {
+  const byCurrency = new Map<string, Money[]>();
+  for (const amount of amounts) {
+    byCurrency.set(amount.currency.code, [...(byCurrency.get(amount.currency.code) ?? []), amount]);
+  }
+
+  return [...byCurrency.entries()].toSorted(([a], [b]) => a.localeCompare(b)).map(([code, items]) => sum(items, code));
+}
+
+/**
+ * The tax a payment recorded in its metadata at checkout (`taxAmount`, `Money` JSON), as `Money`
+ * in the payment's currency. No `taxAmount` means no tax was recorded: zero. One that is not
+ * `Money` JSON, or is in another currency than the payment, throws: a wrong total must not pass.
+ */
+function recordedTax(paymentId: string, metadata: Record<string, unknown> | null, currency: string): Money {
+  const recorded = metadata?.taxAmount;
+  if (recorded === undefined || recorded === null) return Money.zero(currency);
+
+  const parsed = moneyJsonSchema.safeParse(recorded);
+  if (!parsed.success) {
+    throw new Error(`Payment ${paymentId} has a taxAmount that is not money: ${JSON.stringify(recorded)}`);
+  }
+  const tax = Money.fromJSON(parsed.data);
+  if (tax.currency.code !== currency) {
+    throw new Error(`Payment ${paymentId} is in ${currency} but records tax in ${tax.currency.code}`);
+  }
+
+  return tax;
+}
+
 /**
  * Tax Reporting and Compliance Service
  *
@@ -91,145 +172,198 @@ export type TaxAuditEntry = {
  * and audit trail functionality for tax operations.
  */
 export class TaxReportingService {
-  constructor(private readonly stripeProvider: StripeProvider) {}
+  constructor(private readonly reads: TaxReportReads) {}
 
   /**
-   * Generate comprehensive tax compliance report
+   * Generate the tax compliance report of a period, from what the package stored: the succeeded
+   * payments, the tax records and the exemptions. Stripe Tax has no report endpoint, so nothing is
+   * fetched from it. `reportType` names the report; the records do not tell VAT from sales tax.
+   * `jurisdiction` (any case) limits the tax, and the payments to those it taxed.
    */
   async generateComplianceReport(params: {
     reportType: 'sales_and_use_tax' | 'vat' | 'gst';
     period: ReportingPeriod;
     jurisdiction?: string;
   }): Promise<TaxComplianceReport> {
-    try {
-      // Generate report with Stripe Tax
-      const stripeReport = await this.stripeProvider.getTaxReport({
-        reportType: params.reportType,
-        startDate: params.period.startDate,
-        endDate: params.period.endDate,
-        jurisdiction: params.jurisdiction,
+    const aggregate = await this.aggregateLocalTransactions(params.period, params.jurisdiction);
+
+    return {
+      id: `${params.reportType}:${params.jurisdiction ?? 'all'}:${params.period.startDate.toString()}`,
+      reportType: params.reportType,
+      period: params.period,
+      jurisdiction: params.jurisdiction ?? 'all',
+      totalSales: aggregate.totalSales,
+      totalTaxCollected: aggregate.totalTax,
+      exemptSales: aggregate.exemptSales,
+      transactions: aggregate.rows.length,
+      generatedAt: now(),
+      summary: {
+        taxableTransactions: aggregate.taxableCount,
+        exemptTransactions: aggregate.exemptCount,
+        averageTaxRate: aggregate.averageTaxRate,
+        topTaxCategories: aggregate.categories,
+      },
+    };
+  }
+
+  /**
+   * Get customer tax summary for a specific year (UTC): the customer's succeeded payments with the
+   * tax recorded on each, and the exemptions in force during the year.
+   */
+  async getCustomerTaxSummary(customerId: CustomerId, year: number): Promise<CustomerTaxSummary> {
+    const startDate = fromDate(new Date(Date.UTC(year, 0, 1)));
+    const endDate = sub(fromDate(new Date(Date.UTC(year + 1, 0, 1))), { nanoseconds: 1 });
+
+    const transactions: CustomerTaxSummary['transactions'] = [];
+    const pageSize = 100;
+    for (let offset = 0; ; offset += pageSize) {
+      const page = await this.reads.payments.findPayments({
+        status: 'succeeded',
+        customerId,
+        startDate,
+        endDate,
+        limit: pageSize,
+        offset,
       });
 
-      // Aggregate local transaction data
-      const localSummary = await this.aggregateLocalTransactions(params.period);
+      for (const payment of page) {
+        const amount = Money.fromMinor(payment.amountMinor, payment.currency.toUpperCase());
+        transactions.push({
+          id: payment.id,
+          date: payment.createdAt,
+          amount,
+          tax: recordedTax(payment.id, payment.metadata, amount.currency.code),
+          type: payment.subscriptionId ? 'subscription' : 'one_time',
+          description: payment.description ?? '',
+        });
+      }
 
-      // Calculate summary statistics
-      const summary = {
-        taxableTransactions: localSummary.taxableCount,
-        exemptTransactions: localSummary.exemptCount,
-        // A display ratio of two amounts in one currency, not an amount
-        averageTaxRate: localSummary.totalTax.toMinorNumber() / localSummary.totalSales.toMinorNumber() || 0,
-        topTaxCategories: localSummary.categories,
-      };
-
-      const report: TaxComplianceReport = {
-        id: stripeReport.id,
-        reportType: params.reportType,
-        period: params.period,
-        jurisdiction: params.jurisdiction || 'all',
-        totalSales: localSummary.totalSales,
-        totalTaxCollected: localSummary.totalTax,
-        exemptSales: localSummary.exemptSales,
-        transactions: localSummary.transactionCount,
-        generatedAt: now(),
-        status: stripeReport.status as any,
-        downloadUrl: stripeReport.downloadUrl,
-        summary,
-      };
-
-      return report;
-    } catch (error) {
-      console.error('Failed to generate compliance report:', error);
-      throw new Error(`Failed to generate compliance report: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      if (page.length < pageSize) break;
     }
+
+    const exemptions = await this.reads.exemptions.findCustomerExemptionsInRange(customerId, startDate, endDate);
+
+    return {
+      customerId,
+      year,
+      totalPaid: totalsByCurrency(transactions.map((t) => t.amount)),
+      totalTax: totalsByCurrency(transactions.map((t) => t.tax)),
+      transactions,
+      exemptions: exemptions.map((exemption) => ({
+        type: exemption.type,
+        reason: exemption.reason,
+        certificateNumber: exemption.certificateNumber,
+        validFrom: exemption.validFrom,
+        validTo: exemption.validTo,
+      })),
+    };
   }
 
   /**
-   * Get customer tax summary for a specific year
-   */
-  async getCustomerTaxSummary(customerId: string, year: number): Promise<CustomerTaxSummary> {
-    try {
-      // This would query the database for customer transactions
-      // For now, return a placeholder structure
-      // Local-time calendar boundaries, as before.
-      const startDate = fromDate(new Date(year, 0, 1));
-      const endDate = fromDate(new Date(year, 11, 31));
-
-      // Query payments and subscriptions for this customer in the year
-      // This is a simplified implementation - in reality would involve complex queries
-      const transactions = await this.getCustomerTransactions(customerId, startDate, endDate);
-      const exemptions = await this.getCustomerExemptions(customerId, year);
-
-      // Exact sums; a transaction in another currency throws CurrencyMismatchError
-      const totalPaid = sum(transactions.map(t => t.amount), 'USD');
-      const totalTax = sum(transactions.map(t => t.tax), 'USD');
-
-      return {
-        customerId,
-        year,
-        totalPaid,
-        totalTax,
-        transactions,
-        exemptions,
-      };
-    } catch (error) {
-      console.error('Failed to get customer tax summary:', error);
-      throw new Error(`Failed to get customer tax summary: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  /**
-   * Create audit trail entry for tax-related actions
+   * Create audit trail entry for tax-related actions. The entry is stored; `id` and `timestamp` are the stored ones.
    */
   async createAuditEntry(entry: Omit<TaxAuditEntry, 'id' | 'timestamp'>): Promise<TaxAuditEntry> {
-    const auditEntry: TaxAuditEntry = {
-      id: `audit_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
-      timestamp: now(),
-      ...entry,
-    };
+    const row = await this.reads.audit.record({
+      action: entry.action,
+      entity: entry.entity,
+      entityId: entry.entityId,
+      details: entry.details,
+    });
 
-    // In a real implementation, this would be stored in the database
-    console.log('Tax audit entry created:', auditEntry);
+    return { id: row.id, timestamp: row.occurredAt, action: row.action, entity: row.entity, entityId: row.entityId, details: row.details };
+  }
 
-    return auditEntry;
+  /** The audit entries about one entity, oldest first. */
+  async getAuditTrail(entity: TaxAuditEntry['entity'], entityId: string): Promise<TaxAuditEntry[]> {
+    const rows = await this.reads.audit.findByEntity(entity, entityId);
+
+    return rows.map(row => ({
+      id: row.id,
+      timestamp: row.occurredAt,
+      action: row.action,
+      entity: row.entity,
+      entityId: row.entityId,
+      details: row.details,
+    }));
   }
 
   /**
-   * Get upcoming tax filing deadlines
+   * The next filing deadline of each jurisdiction we are registered in. A jurisdiction is listed
+   * when it requires registration, has a monthly, quarterly or annual `filingFrequency`, and the
+   * default tax configuration holds an active registration for its country. The deadline is the
+   * end (UTC) of the month after the filing period closes: the jurisdiction row stores no due day,
+   * so this is the common rule, not a statute. Nearest first.
    */
-  async getUpcomingDeadlines(): Promise<{
+  async getUpcomingDeadlines(asOf: Instant = now()): Promise<{
     jurisdiction: string;
     type: string;
     deadline: Instant;
     description: string;
     priority: 'high' | 'medium' | 'low';
   }[]> {
-    // This would integrate with tax jurisdiction data to calculate deadlines
-    // Local-time calendar boundaries, as before.
-    const currentDate = new Date();
-    const nextQuarter = fromDate(new Date(currentDate.getFullYear(), Math.floor(currentDate.getMonth() / 3) * 3 + 3, 0));
-    const nextYear = fromDate(new Date(currentDate.getFullYear() + 1, 0, 31));
+    const [jurisdictions, configuration] = await Promise.all([
+      this.reads.jurisdictions.findActiveJurisdictions(),
+      this.reads.configurations.findDefaultConfiguration(),
+    ]);
+    const registered = new Set(
+      (configuration?.businessDetails?.registrations ?? [])
+        .filter(registration => registration.status === 'active')
+        .map(registration => registration.country.toUpperCase()),
+    );
 
-    return [
-      {
-        jurisdiction: 'US',
-        type: 'Quarterly Sales Tax',
-        deadline: nextQuarter,
-        description: 'Q3 2024 sales tax filing for US jurisdictions',
-        priority: 'high',
-      },
-      {
-        jurisdiction: 'EU',
-        type: 'VAT Return',
-        deadline: nextYear,
-        description: 'Annual VAT return for EU sales',
-        priority: 'medium',
-      },
-    ];
+    const lengths: Record<string, { months: number; label: string }> = {
+      monthly: { months: 1, label: 'Monthly' },
+      quarterly: { months: 3, label: 'Quarterly' },
+      annual: { months: 12, label: 'Annual' },
+      yearly: { months: 12, label: 'Annual' },
+    };
+    const asOfDate = new Date(asOf.toString());
+    const asOfMillis = asOfDate.getTime();
+    const dayMillis = 86_400_000;
+
+    const deadlines = [];
+    for (const jurisdiction of jurisdictions) {
+      if (!jurisdiction.registrationRequired || !registered.has(jurisdiction.countryCode.toUpperCase())) continue;
+      const length = lengths[(jurisdiction.filingFrequency ?? '').toLowerCase()];
+      if (!length) {
+        logger.debug('Jurisdiction {code} has no filing frequency this service can schedule', { code: jurisdiction.code });
+        continue;
+      }
+
+      // Months counted from year 0; a period of `months` ends in each month whose (index + 1) divides evenly
+      let periodEnd = asOfDate.getUTCFullYear() * 12 + asOfDate.getUTCMonth() - 12;
+      let deadlineMillis: number;
+      for (;; periodEnd += 1) {
+        if ((periodEnd + 1) % length.months !== 0) continue;
+        const nextMonth = periodEnd + 1;
+        const candidate = Date.UTC(Math.floor(nextMonth / 12), (nextMonth % 12) + 1, 1) - 1;
+        if (candidate >= asOfMillis) {
+          deadlineMillis = candidate;
+          break;
+        }
+      }
+
+      const daysLeft = (deadlineMillis - asOfMillis) / dayMillis;
+      deadlines.push({
+        jurisdiction: jurisdiction.name,
+        type: `${length.label} filing`,
+        deadline: fromDate(new Date(deadlineMillis)),
+        description: `${length.label} tax filing for ${jurisdiction.name}`,
+        priority: daysLeft <= 14 ? ('high' as const) : daysLeft <= 45 ? ('medium' as const) : ('low' as const),
+        millis: deadlineMillis,
+      });
+    }
+
+    return deadlines
+      .toSorted((a, b) => a.millis - b.millis || a.jurisdiction.localeCompare(b.jurisdiction))
+      .map(({ millis: _millis, ...deadline }) => deadline);
   }
 
   /**
-   * Validate tax compliance status
+   * Validate tax compliance status from what is stored: every active jurisdiction that requires
+   * registration needs an active registration for its country in the default tax configuration
+   * (none, or an inactive one, is critical; a pending one is a warning), and exemptions ending
+   * within 30 days are a warning.
    */
   async validateComplianceStatus(): Promise<{
     status: 'compliant' | 'warning' | 'non_compliant';
@@ -240,28 +374,38 @@ export class TaxReportingService {
       severity: 'critical' | 'warning' | 'info';
     }[];
   }> {
-    const issues = [];
+    const issues: Awaited<ReturnType<TaxReportingService['validateComplianceStatus']>>['issues'] = [];
 
-    // Check for expiring exemptions (would need to access repositories correctly)
-    // For now, placeholder logic
-    const expiringExemptions: unknown[] = []; // await context.repo.paymentsTax.exemptions.findExpiringExemptions(30);
-    if (expiringExemptions.length > 0) {
+    const expiring = await this.reads.exemptions.findExpiringExemptions(30);
+    if (expiring.length > 0) {
       issues.push({
-        type: 'expired_exemption' as const,
+        type: 'expired_exemption',
         jurisdiction: 'multiple',
-        description: `${expiringExemptions.length} tax exemptions expiring within 30 days`,
-        severity: 'warning' as const,
+        description: `${expiring.length} tax exemptions expiring within 30 days`,
+        severity: 'warning',
       });
     }
 
-    // Check for missing tax registrations (placeholder logic)
-    const hasUSRegistration = true; // Would check database
-    if (!hasUSRegistration) {
+    const [jurisdictions, configuration] = await Promise.all([
+      this.reads.jurisdictions.findActiveJurisdictions(),
+      this.reads.configurations.findDefaultConfiguration(),
+    ]);
+    const registrations = configuration?.businessDetails?.registrations ?? [];
+    const required = new Map<string, string>();
+    for (const jurisdiction of jurisdictions) {
+      if (jurisdiction.registrationRequired) required.set(jurisdiction.countryCode.toUpperCase(), jurisdiction.name);
+    }
+    for (const [country, name] of required) {
+      const ofCountry = registrations.filter(registration => registration.country.toUpperCase() === country);
+      if (ofCountry.some(registration => registration.status === 'active')) continue;
+      const pending = ofCountry.some(registration => registration.status === 'pending');
       issues.push({
-        type: 'missing_registration' as const,
-        jurisdiction: 'US',
-        description: 'Missing sales tax registration for US operations',
-        severity: 'critical' as const,
+        type: 'missing_registration',
+        jurisdiction: country,
+        description: pending
+          ? `Tax registration for ${name} is still pending`
+          : `No active tax registration for ${name}, which requires one`,
+        severity: pending ? 'warning' : 'critical',
       });
     }
 
@@ -275,7 +419,10 @@ export class TaxReportingService {
   }
 
   /**
-   * Export tax data for external systems
+   * Export tax data for external systems: one row per succeeded payment of the period with the tax
+   * recorded for it, and with `includeExemptions` one row per exemption in force in the period.
+   * CSV values are quoted when they need it, and text that a spreadsheet would run as a formula is
+   * prefixed with a quote. XML text is escaped, and characters XML 1.0 cannot hold are dropped.
    */
   async exportTaxData(params: {
     format: 'csv' | 'json' | 'xml';
@@ -286,27 +433,48 @@ export class TaxReportingService {
     data: string;
     filename: string;
   }> {
-    const transactions = await this.aggregateLocalTransactions(params.period);
+    const aggregate = await this.aggregateLocalTransactions(params.period);
+    const exemptions = params.includeExemptions
+      ? await this.reads.exemptions.findExemptionsInRange(params.period.startDate, params.period.endDate)
+      : [];
 
-    const filename = `tax_export_${params.period.year}${params.period.quarter ? `_Q${params.period.quarter}` : ''}.${params.format}`;
+    const filename = `tax_export_${params.period.year}${params.period.quarter ? `_Q${params.period.quarter}` : ''}${params.period.month ? `_M${params.period.month}` : ''}.${params.format}`;
 
     let data: string;
-
     switch (params.format) {
       case 'csv': {
-        data = this.formatAsCSV(transactions);
+        data = formatAsCSV(aggregate.rows, exemptions);
         break;
       }
       case 'json': {
-        data = JSON.stringify(transactions, null, 2);
+        data = JSON.stringify(
+          {
+            period: { year: params.period.year, start: params.period.startDate.toString(), end: params.period.endDate.toString() },
+            totalSales: aggregate.totalSales,
+            totalTaxCollected: aggregate.totalTax,
+            transactions: aggregate.rows.map(row => ({
+              id: row.id,
+              date: row.date.toString(),
+              customerId: row.customerId,
+              type: row.type,
+              amount: row.amount,
+              tax: row.tax,
+              exempt: row.exempt,
+              description: row.description,
+            })),
+            exemptions: exemptions.map(exemption => exemptionRow(exemption)),
+          },
+          null,
+          2,
+        );
         break;
       }
       case 'xml': {
-        data = this.formatAsXML(transactions);
+        data = formatAsXML(aggregate.rows, exemptions);
         break;
       }
       default: {
-        throw new Error(`Unsupported format: ${params.format}`);
+        throw new Error('Unsupported export format');
       }
     }
 
@@ -315,71 +483,238 @@ export class TaxReportingService {
 
   // Private helper methods
 
-  private async aggregateLocalTransactions(_period: ReportingPeriod) {
-    // This would perform complex database aggregations
-    // For now, return placeholder data
+  /**
+   * The succeeded payments of the period with their tax. Tax per payment is what the tax records
+   * hold under its payment id (sales less refunds); a payment with none carried none. Collected
+   * tax is every record of the period, so it includes tax recorded without a payment id.
+   */
+  private async aggregateLocalTransactions(period: ReportingPeriod, jurisdiction?: string) {
+    const { startDate: start, endDate: end } = period;
+    const taxByPayment = new Map<string, Money>();
+    const paymentTotals = await this.reads.records.totalsByPayment({ start, end, jurisdiction });
+    for (const row of paymentTotals) {
+      taxByPayment.set(row.paymentId, Money.fromMinor(row.saleTaxMinor - row.refundTaxMinor, row.currency));
+    }
+
+    const exemptionsByCustomer = new Map<string, TaxExemption[]>();
+    const blanketExemptionAt = async (customerId: string | null, at: Instant) => {
+      if (customerId === null) return false;
+      let held = exemptionsByCustomer.get(customerId);
+      if (!held) {
+        const inRange = await this.reads.exemptions.findCustomerExemptionsInRange(customerId, start, end);
+        held = inRange.filter(
+          exemption => exemption.productCode === null && exemption.jurisdictionId === null,
+        );
+        exemptionsByCustomer.set(customerId, held);
+      }
+
+      return held.some(
+        exemption =>
+          compareAsc(exemption.validFrom, at) <= 0 && (exemption.validTo === null || compareAsc(exemption.validTo, at) > 0),
+      );
+    };
+
+    const rows: TaxExportRow[] = [];
+    const pageSize = 100;
+    for (let offset = 0; ; offset += pageSize) {
+      const page = await this.reads.payments.findPayments({
+        status: 'succeeded',
+        startDate: start,
+        endDate: end,
+        limit: pageSize,
+        offset,
+      });
+
+      for (const payment of page) {
+        const taxed = taxByPayment.get(payment.id);
+        if (jurisdiction !== undefined && taxed === undefined) continue;
+        const amount = Money.fromMinor(payment.amountMinor, payment.currency.toUpperCase());
+        const tax = taxed ?? Money.zero(amount.currency.code);
+        rows.push({
+          id: payment.id,
+          date: payment.createdAt,
+          customerId: payment.customerId ?? null,
+          type: payment.subscriptionId ? 'subscription' : 'one_time',
+          amount,
+          tax,
+          exempt: tax.isZero() && (await blanketExemptionAt(payment.customerId ?? null, payment.createdAt)),
+          description: payment.description ?? '',
+        });
+      }
+
+      if (page.length < pageSize) break;
+    }
+
+    const collected = await this.reads.records.totalsByJurisdiction({ start, end, jurisdiction });
+
+    const taxable = rows.filter(row => row.tax.isPositive());
+    const categories = new Map<string, { category: string; sales: Money[]; tax: Money[]; currency: string }>();
+    for (const row of rows) {
+      const category = row.type === 'subscription' ? 'Subscriptions' : 'One-time payments';
+      const currency = row.amount.currency.code;
+      const entry = categories.get(`${category}\u0000${currency}`) ?? { category, sales: [], tax: [], currency };
+      entry.sales.push(row.amount);
+      entry.tax.push(row.tax);
+      categories.set(`${category}\u0000${currency}`, entry);
+    }
+
     return {
-      totalSales: money(50_000, 'USD'),
-      totalTax: money(4500, 'USD'),
-      exemptSales: money(2000, 'USD'),
-      taxableCount: 150,
-      exemptCount: 10,
-      transactionCount: 160,
-      categories: [
-        { category: 'SaaS Subscriptions', sales: money(40_000, 'USD'), tax: money(3600, 'USD') },
-        { category: 'One-time Payments', sales: money(10_000, 'USD'), tax: money(900, 'USD') },
-      ],
+      rows,
+      totalSales: totalsByCurrency(rows.map(row => row.amount)),
+      totalTax: totalsByCurrency(collected.map(row => Money.fromMinor(row.saleTaxMinor - row.refundTaxMinor, row.currency))),
+      exemptSales: totalsByCurrency(rows.filter(row => row.exempt).map(row => row.amount)),
+      taxableCount: taxable.length,
+      exemptCount: rows.filter(row => row.exempt).length,
+      // A ratio of two amounts in one currency, so it is the same in any currency
+      averageTaxRate:
+        taxable.length === 0
+          ? 0
+          : taxable.reduce((total, row) => total + row.tax.toMinorNumber() / (row.amount.toMinorNumber() - row.tax.toMinorNumber()), 0) /
+            taxable.length,
+      categories: [...categories.values()]
+        .toSorted((a, b) => a.category.localeCompare(b.category) || a.currency.localeCompare(b.currency))
+        .map(entry => ({
+          category: entry.category,
+          sales: sum(entry.sales, entry.currency),
+          tax: sum(entry.tax, entry.currency),
+        })),
     };
   }
+}
 
-  private async getCustomerTransactions(_customerId: string, _startDate: Instant, _endDate: Instant) {
-    // This would query the payments and subscription tables
-    // For now, return placeholder data
-    return [
-      {
-        id: 'pay_123',
-        date: instant('2024-01-15T00:00:00Z'),
-        amount: money('29.99', 'USD'),
-        tax: money('2.70', 'USD'),
-        type: 'subscription' as const,
-        description: 'Pro Plan - Monthly',
-      },
-    ];
+/** One export row about an exemption. */
+function exemptionRow(exemption: TaxExemption) {
+  return {
+    id: exemption.id,
+    type: exemption.type,
+    customerId: exemption.customerId,
+    reason: exemption.reason,
+    certificateNumber: exemption.certificateNumber,
+    validFrom: exemption.validFrom.toString(),
+    validTo: exemption.validTo?.toString() ?? null,
+  };
+}
+
+/**
+ * One CSV field. Quoted when it holds a comma, a quote or a line break, with quotes doubled.
+ * Text a spreadsheet would run as a formula (`=`, `+`, `-`, `@`, tab, CR first) gets a leading `'`.
+ */
+function csvField(value: string, options: { text: boolean }): string {
+  const guarded = options.text && /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+
+  return /[",\r\n]/.test(guarded) ? `"${guarded.replaceAll('"', '""')}"` : guarded;
+}
+
+function formatAsCSV(rows: readonly TaxExportRow[], exemptions: readonly TaxExemption[]): string {
+  const lines = ['record_type,id,date,customer_id,type,currency,amount,tax,exempt,description'];
+  for (const row of rows) {
+    lines.push(
+      [
+        'payment',
+        csvField(row.id, { text: true }),
+        row.date.toString(),
+        csvField(row.customerId ?? '', { text: true }),
+        row.type,
+        row.amount.currency.code,
+        row.amount.toDecimalString(),
+        row.tax.toDecimalString(),
+        String(row.exempt),
+        csvField(row.description, { text: true }),
+      ].join(','),
+    );
+  }
+  for (const exemption of exemptions) {
+    lines.push(
+      [
+        'exemption',
+        csvField(exemption.id, { text: true }),
+        exemption.validFrom.toString(),
+        csvField(exemption.customerId ?? '', { text: true }),
+        exemption.type,
+        '',
+        '',
+        '',
+        'true',
+        csvField(exemption.reason, { text: true }),
+      ].join(','),
+    );
   }
 
-  private async getCustomerExemptions(_customerId: string, _year: number) {
-    // This would query the tax exemptions table
-    return [];
-  }
+  return `${lines.join('\r\n')}\r\n`;
+}
 
-  private formatAsCSV(_data: unknown): string {
-    // Simple CSV formatting - would be more sophisticated in reality
-    return 'Date,Amount,Tax,Type,Description\n' +
-           '2024-01-15,29.99,2.70,subscription,Pro Plan - Monthly\n';
-  }
+/** Whether XML 1.0 can hold the code point. Control characters (but tab, line feed, carriage return), U+FFFE and U+FFFF cannot. */
+function isXmlChar(code: number): boolean {
+  return (
+    code === 0x09 ||
+    code === 0x0A ||
+    code === 0x0D ||
+    (code >= 0x20 && code <= 0xD7_FF) ||
+    (code >= 0xE0_00 && code <= 0xFF_FD) ||
+    (code >= 0x1_00_00 && code <= 0x10_FF_FF)
+  );
+}
 
-  private formatAsXML(_data: unknown): string {
-    // Simple XML formatting - would be more sophisticated in reality
-    return `<?xml version="1.0" encoding="UTF-8"?>
-<tax_report>
-  <transactions>
-    <transaction>
-      <date>2024-01-15</date>
-      <amount>29.99</amount>
-      <tax>2.70</tax>
-      <type>subscription</type>
-      <description>Pro Plan - Monthly</description>
-    </transaction>
-  </transactions>
-</tax_report>`;
+function xmlText(value: string): string {
+  // Iterating a string by code point turns a lone surrogate into one code point in 0xd800..0xdfff: dropped
+  return [...value]
+    .filter(char => isXmlChar(char.codePointAt(0) ?? 0))
+    .join('')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;');
+}
+
+function element(name: string, value: string, indent: string): string {
+  return `${indent}<${name}>${xmlText(value)}</${name}>`;
+}
+
+function formatAsXML(rows: readonly TaxExportRow[], exemptions: readonly TaxExemption[]): string {
+  const lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<tax_report>', '  <transactions>'];
+  for (const row of rows) {
+    lines.push(
+      '    <transaction>',
+      element('id', row.id, '      '),
+      element('date', row.date.toString(), '      '),
+      element('customer_id', row.customerId ?? '', '      '),
+      element('type', row.type, '      '),
+      element('currency', row.amount.currency.code, '      '),
+      element('amount', row.amount.toDecimalString(), '      '),
+      element('tax', row.tax.toDecimalString(), '      '),
+      element('exempt', String(row.exempt), '      '),
+      element('description', row.description, '      '),
+      '    </transaction>',
+    );
   }
+  lines.push('  </transactions>');
+  if (exemptions.length > 0) {
+    lines.push('  <exemptions>');
+    for (const exemption of exemptions) {
+      lines.push(
+        '    <exemption>',
+        element('id', exemption.id, '      '),
+        element('type', exemption.type, '      '),
+        element('customer_id', exemption.customerId ?? '', '      '),
+        element('reason', exemption.reason, '      '),
+        element('valid_from', exemption.validFrom.toString(), '      '),
+        element('valid_to', exemption.validTo?.toString() ?? '', '      '),
+        '    </exemption>',
+      );
+    }
+    lines.push('  </exemptions>');
+  }
+  lines.push('</tax_report>');
+
+  return `${lines.join('\n')}\n`;
 }
 
 /**
  * Factory function to create TaxReportingService
  */
-export function createTaxReportingService(stripeProvider: StripeProvider): TaxReportingService {
-  return new TaxReportingService(stripeProvider);
+export function createTaxReportingService(reads: TaxReportReads): TaxReportingService {
+  return new TaxReportingService(reads);
 }
 
 /**
@@ -411,7 +746,7 @@ export function createTaxReportingService(stripeProvider: StripeProvider): TaxRe
  * ## Usage Examples:
  *
  * ```typescript
- * const reportingService = createTaxReportingService(db, stripeProvider);
+ * const reportingService = createTaxReportingService({ payments, ...createTaxRepositories(db, tables) });
  *
  * // Generate quarterly sales tax report
  * const report = await reportingService.generateComplianceReport({

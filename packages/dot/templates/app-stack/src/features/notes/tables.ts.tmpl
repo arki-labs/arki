@@ -1,0 +1,22 @@
+/**
+ * Notes table. A leaf: it imports nothing from `server/`, so drizzle-kit can
+ * load it on its own.
+ *
+ * A journal entity table needs a string key (`id`) and `version`: the
+ * journal bumps `version` on every event and uses it to catch write races.
+ */
+import { createIdFactory } from '@arki/db/id-factory';
+import { integer, pgTable, text, timestamp, varchar } from '@arki/db/pg';
+
+export const noteId = createIdFactory('note_');
+export type NoteId = ReturnType<typeof noteId.create>;
+
+export const notes = pgTable('notes', {
+  id: noteId.primaryColumn(),
+  title: varchar('title', { length: 200 }).notNull(),
+  body: text('body').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+  version: integer('version').notNull().default(0),
+});
+
+export const notesTables = { notes };

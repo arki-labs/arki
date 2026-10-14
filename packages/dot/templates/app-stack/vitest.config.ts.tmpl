@@ -1,0 +1,14 @@
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  resolve: {
+    tsconfigPaths: true,
+  },
+  test: {
+    include: ['src/**/*.test.ts'],
+    environment: 'node',
+    // Each test file boots its own app on an in-memory PGlite database.
+    // Booting runs every migration, so give it room on slow machines.
+    hookTimeout: 30_000,
+  },
+});

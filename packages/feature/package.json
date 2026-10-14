@@ -1,6 +1,6 @@
 {
   "name": "@arki/feature",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "Feature declarations for ARKI backends — one defineFeature() call per domain module carrying its router fragments, repository factories, and boot-time slices; compile-time composition helpers; and a DOT seam that plugs features into a kernel app.",
   "license": "MIT",
   "repository": {
@@ -43,7 +43,7 @@
     "package.json"
   ],
   "peerDependencies": {
-    "@arki/dot": "^0.4.1"
+    "@arki/dot": "^0.5.0"
   },
   "peerDependenciesMeta": {
     "@arki/dot": {

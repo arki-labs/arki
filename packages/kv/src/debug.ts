@@ -8,14 +8,14 @@
  * DEBUG=kv:* - Enable all logs
  */
 
-import { createDebug } from '@arki/log/debug';
+import { getLogger } from '@arki/log';
 
 /**
  * Debug logger for KV client operations
  */
-export const debugKV = createDebug('kv:client');
+export const debugKV = getLogger('kv:client');
 
 /**
  * Debug logger for rate limiting operations
  */
-export const debugLimiter = createDebug('kv:limiter');
+export const debugLimiter = getLogger('kv:limiter');

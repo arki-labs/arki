@@ -82,7 +82,8 @@ export function createCoreDerivedSchemas({
     customer: customerResponseSchema.optional(),
   });
   const paymentResponseSchema = paymentSelectSchema.extend({
-    subscription: subscriptionResponseSchema.optional(),
+    /** Null for a one-off payment: it belongs to no subscription. */
+    subscription: subscriptionResponseSchema.nullish(),
     customer: customerResponseSchema.optional(),
   });
 

@@ -24,7 +24,8 @@
  *    read it correctly.
  */
 
-import { Logger } from '@arki/log';
+import type { Logger } from '@arki/log';
+import { getLogger } from '@arki/log';
 
 /**
  * The slice of `process` the signal hook touches. Injectable so tests can
@@ -71,7 +72,7 @@ export function hookSignals(app: Disposable, options: HookSignalsOptions = {}): 
   const signals = options.signals ?? ['SIGTERM', 'SIGINT'];
   const timeoutMs = options.timeoutMs ?? 10_000;
   const proc: SignalTarget = options.proc ?? (process as unknown as SignalTarget);
-  const logger = new Logger('arki:dot:signals', { 'dot.app.name': app.name });
+  const logger = getLogger('arki:dot:signals').with({ 'dot.app.name': app.name });
 
   const handlers = new Map<string, () => void>();
 

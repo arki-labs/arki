@@ -1,0 +1,12 @@
+@import 'tailwindcss';
+
+/* Workbench design system from @arki/design-systems: fonts, tokens, and the
+   bridge that maps tokens onto Tailwind (bg-background, text-primary, ...). */
+@import '@arki/design-systems/workbench/fonts.css';
+@import '@arki/design-systems/workbench/tokens.css';
+@import '@arki/design-systems/workbench/theme-bridge.css';
+
+/* Tailwind must see the classes used inside @arki/ui components. */
+@source '../node_modules/@arki/ui/src';
+
+@custom-variant dark (&:is(.dark *));

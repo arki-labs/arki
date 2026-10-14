@@ -1,0 +1,8 @@
+import { notesRouter } from '~/features/notes/procedures';
+
+/** The oRPC API, served at `/api/rpc`. A new feature adds its router here. */
+export const router = {
+  notes: notesRouter,
+};
+
+export type AppRouter = typeof router;

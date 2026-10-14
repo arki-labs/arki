@@ -1,5 +1,6 @@
-import type { AnyRelations, SQL, SQLWrapper } from 'drizzle-orm';
+import type { AnyColumn, AnyRelations, SQL, SQLWrapper } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
+import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
 
 import type { Instant } from '@arki/date';
@@ -47,11 +48,13 @@ import { readCustomerRiskProfile } from './stored-risk-profile.js';
  * relations graph MUST register the dunning tables (`dunningCampaigns`,
  * `dunningTemplates`, `dunningExecutions`, `dunningCommunications`,
  * `customerSegments`, `customerRiskProfiles`) for the relational query
- * builder calls below to work at runtime.
+ * builder calls below to work at runtime. PGlite is accepted so the package
+ * can run these queries in its own tests.
  */
 export type DunningDatabase =
   | NodePgDatabase<AnyRelations>
-  | NodePgTransaction<AnyRelations>;
+  | NodePgTransaction<AnyRelations>
+  | PgliteDatabase<AnyRelations>;
 
 type FieldFilter<T> =
   | T
@@ -72,8 +75,17 @@ type FieldFilter<T> =
       isNotNull?: boolean;
     };
 
+/**
+ * The table a relational query hands to its `RAW` and `orderBy` callbacks. The
+ * query builder gives the table an alias (`d0`), so raw SQL must read columns
+ * from this argument. A column object taken from the schema renders with the
+ * real table name, which Postgres rejects ("invalid reference to FROM-clause
+ * entry").
+ */
+type AliasedTable<T> = { [K in keyof T]: AnyColumn };
+
 type WhereClause<T> = { [K in keyof T]?: FieldFilter<T[K]> } & {
-  RAW?: SQL | SQLWrapper;
+  RAW?: SQL | SQLWrapper | ((table: AliasedTable<T>) => SQL);
 };
 
 type OrderByReturn = SQL | SQLWrapper | (SQL | SQLWrapper)[];
@@ -87,8 +99,8 @@ type FindMany<TResult> = (config: {
   where?: WhereClause<TResult>;
   columns?: Record<string, boolean>;
   orderBy?: (
-    table: TResult,
-    helpers: { desc: (col: unknown) => SQL; asc: (col: unknown) => SQL },
+    table: AliasedTable<TResult>,
+    helpers: { desc: (col: AnyColumn) => SQL; asc: (col: AnyColumn) => SQL },
   ) => OrderByReturn;
   limit?: number;
   offset?: number;
@@ -140,8 +152,6 @@ export class DunningCampaignRepository {
   async findMany(query: ListDunningCampaignsQuery): Promise<DunningCampaign[]> {
     const { limit, offset, type, status, search, sortBy, sortOrder } = query;
 
-    const orderColumn = this.dunningCampaigns[sortBy as keyof DunningTables['dunningCampaigns']];
-    const orderDirection = sortOrder === 'asc' ? orderColumn : desc(orderColumn as SQLWrapper);
 
     return this.q.dunningCampaigns.findMany({
       where: {
@@ -149,7 +159,7 @@ export class DunningCampaignRepository {
         ...(status && { status }),
         ...(search && { name: { ilike: `%${search}%` } }),
       },
-      orderBy: () => orderDirection as SQL | SQLWrapper,
+      orderBy: (table, { asc, desc }) => (sortOrder === 'asc' ? asc(table[sortBy]) : desc(table[sortBy])),
       limit,
       offset,
     });
@@ -204,26 +214,23 @@ export class DunningCampaignRepository {
     // The trigger-type lookup hits a JSONB field (`trigger->>'type'`) and the
     // segment intersection uses a JSONB EXISTS subquery — both have no
     // structured-filter equivalent and stay as RAW.
-    const triggerTypePredicate = sql`${this.dunningCampaigns.trigger}->>'type' = ${triggerType}`;
-    const segmentPredicate =
-      customerSegmentIds && customerSegmentIds.length > 0
-        ? sql`
-          EXISTS (
-                    SELECT 1 FROM jsonb_array_elements_text(${this.dunningCampaigns.targetSegments}) AS segment
-                    WHERE segment = ANY(${customerSegmentIds})
-                  )
-        `
-        : undefined;
-    const rawPredicate = segmentPredicate
-      ? and(triggerTypePredicate, segmentPredicate)!
-      : triggerTypePredicate;
+    const hasSegments = customerSegmentIds && customerSegmentIds.length > 0;
 
     return this.q.dunningCampaigns.findMany({
       where: {
         status: 'active',
-        RAW: rawPredicate,
+        RAW: table => {
+          const triggerTypePredicate = sql`${table.trigger}->>'type' = ${triggerType}`;
+
+          return hasSegments
+            ? and(
+                triggerTypePredicate,
+                sql`EXISTS (SELECT 1 FROM jsonb_array_elements_text(${table.targetSegments}) AS segment WHERE segment IN ${customerSegmentIds})`,
+              )!
+            : triggerTypePredicate;
+        },
       },
-      orderBy: () => desc(sql`${this.dunningCampaigns.settings}->>'priority'`),
+      orderBy: table => desc(sql`${table.settings}->>'priority'`),
     });
   }
 
@@ -246,22 +253,72 @@ export class DunningCampaignRepository {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
+    return this.getAnalyticsSince(fromDate(startDate), campaignId);
+  }
+
+  /** How many campaigns exist, and how many of them are `active`. */
+  async countCampaigns(): Promise<{ total: number; active: number }> {
+    const rows = await this.db
+      .select({
+        status: this.dunningCampaigns.status,
+        total: sql<number>`count(*)::int`.mapWith(Number),
+      })
+      .from(this.dunningCampaigns)
+      .groupBy(this.dunningCampaigns.status);
+
+    return {
+      total: rows.reduce((sum, row) => sum + row.total, 0),
+      active: rows.find((row) => row.status === 'active')?.total ?? 0,
+    };
+  }
+
+  /**
+   * The campaign that recovered the most payments since `since`, its conversion rate the
+   * tie-break. Null when no campaign recovered a payment: there is no top to name. Ranked
+   * by count, not money, because campaigns recover in different currencies.
+   */
+  async findTopPerformer(
+    since: Instant,
+  ): Promise<{ campaignId: DunningCampaignId; paymentsRecovered: number; conversionRate: number } | null> {
+    const analytics = this.dunningCampaignAnalytics;
+    const recovered = sql<number>`COALESCE(SUM(${analytics.paymentsRecovered}), 0)::int`.mapWith(Number);
+    const conversion = sql<number>`COALESCE(AVG(${analytics.conversionRate}), 0)`.mapWith(Number);
+
+    const [top] = await this.db
+      .select({ campaignId: analytics.campaignId, paymentsRecovered: recovered, conversionRate: conversion })
+      .from(analytics)
+      .where(gte(analytics.date, since))
+      .groupBy(analytics.campaignId)
+      .having(sql`SUM(${analytics.paymentsRecovered}) > 0`)
+      .orderBy(desc(recovered), desc(conversion), analytics.campaignId)
+      .limit(1);
+
+    return top ?? null;
+  }
+
+  /** The analytics rows from `since` on, summed. Money stays one balance per currency. */
+  async getAnalyticsSince(since: Instant, campaignId?: DunningCampaignId) {
     const inRange = and(
-      gte(this.dunningCampaignAnalytics.date, fromDate(startDate)),
+      gte(this.dunningCampaignAnalytics.date, since),
       campaignId ? eq(this.dunningCampaignAnalytics.campaignId, campaignId) : undefined,
     );
 
     const [counters] = await this.db
       .select({
-        executions: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.executions}), 0)`,
-        customersReached: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.customersReached}), 0)`,
-        communicationsSent: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.communicationsSent}), 0)`,
-        paymentsRecovered: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.paymentsRecovered}), 0)`,
-        conversionRate: sql<number>`COALESCE(AVG(${this.dunningCampaignAnalytics.conversionRate}), 0)`,
-        roi: sql<number>`COALESCE(AVG(${this.dunningCampaignAnalytics.roi}), 0)`,
+        executions: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.executions}), 0)`.mapWith(Number),
+        customersReached: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.customersReached}), 0)`.mapWith(Number),
+        communicationsSent: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.communicationsSent}), 0)`.mapWith(Number),
+        paymentsRecovered: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.paymentsRecovered}), 0)`.mapWith(Number),
+        conversionRate: sql<number>`COALESCE(AVG(${this.dunningCampaignAnalytics.conversionRate}), 0)`.mapWith(Number),
+        roi: sql<number>`COALESCE(AVG(${this.dunningCampaignAnalytics.roi}), 0)`.mapWith(Number),
       })
       .from(this.dunningCampaignAnalytics)
       .where(inRange);
+
+    // An aggregate without GROUP BY always answers one row
+    if (!counters) {
+      throw new Error('Campaign analytics aggregate returned no row');
+    }
 
     // Money is summed per currency: rows of different currencies never add up.
     const recovered = await this.db
@@ -296,7 +353,7 @@ export class DunningTemplateRepository {
   async findByCampaignId(campaignId: DunningCampaignId): Promise<DunningTemplate[]> {
     return this.q.dunningTemplates.findMany({
       where: { campaignId },
-      orderBy: (t) => t.stepNumber as unknown as SQLWrapper,
+      orderBy: (t) => t.stepNumber,
     });
   }
 
@@ -341,7 +398,7 @@ export class DunningTemplateRepository {
   async findActiveTemplates(campaignId: DunningCampaignId): Promise<DunningTemplate[]> {
     return this.q.dunningTemplates.findMany({
       where: { campaignId, isActive: true },
-      orderBy: (t) => t.stepNumber as unknown as SQLWrapper,
+      orderBy: (t) => t.stepNumber,
     });
   }
 
@@ -379,9 +436,6 @@ export class DunningExecutionRepository {
     const { limit, offset, campaignId, customerId, status, scheduledAfter, scheduledBefore, sortBy, sortOrder } =
       query;
 
-    const orderColumn = this.dunningExecutions[sortBy as keyof DunningTables['dunningExecutions']];
-    const orderDirection = sortOrder === 'asc' ? orderColumn : desc(orderColumn as SQLWrapper);
-
     const scheduledAt =
       scheduledAfter || scheduledBefore
         ? {
@@ -397,7 +451,7 @@ export class DunningExecutionRepository {
         ...(status && { status }),
         ...(scheduledAt && { scheduledAt }),
       },
-      orderBy: () => orderDirection as SQL | SQLWrapper,
+      orderBy: (table, { asc, desc }) => (sortOrder === 'asc' ? asc(table[sortBy]) : desc(table[sortBy])),
       limit,
       offset,
     });
@@ -490,7 +544,7 @@ export class DunningExecutionRepository {
         status: 'scheduled',
         scheduledAt: { lte: now() },
       },
-      orderBy: (t) => t.scheduledAt as unknown as SQLWrapper,
+      orderBy: (t) => t.scheduledAt,
       limit,
     });
   }
@@ -501,7 +555,7 @@ export class DunningExecutionRepository {
         status: 'failed',
         nextRetryAt: { lte: now() },
       },
-      orderBy: (t) => t.nextRetryAt as unknown as SQLWrapper,
+      orderBy: (t) => t.nextRetryAt,
       limit,
     });
   }
@@ -561,10 +615,6 @@ export class DunningCommunicationRepository {
     const { limit, offset, executionId, customerId, channel, status, sentAfter, sentBefore, sortBy, sortOrder } =
       query;
 
-    const orderColumn =
-      this.dunningCommunications[sortBy as keyof DunningTables['dunningCommunications']];
-    const orderDirection = sortOrder === 'asc' ? orderColumn : desc(orderColumn as SQLWrapper);
-
     const sentAt =
       sentAfter || sentBefore
         ? {
@@ -581,7 +631,7 @@ export class DunningCommunicationRepository {
         ...(status && { status }),
         ...(sentAt && { sentAt }),
       },
-      orderBy: () => orderDirection as SQL | SQLWrapper,
+      orderBy: (table, { asc, desc }) => (sortOrder === 'asc' ? asc(table[sortBy]) : desc(table[sortBy])),
       limit,
       offset,
     });
@@ -650,7 +700,7 @@ export class DunningCommunicationRepository {
   async findPendingCommunications(limit = 100): Promise<DunningCommunication[]> {
     return this.q.dunningCommunications.findMany({
       where: { status: 'pending' },
-      orderBy: (t) => t.createdAt as unknown as SQLWrapper,
+      orderBy: (t) => t.createdAt,
       limit,
     });
   }
@@ -664,12 +714,12 @@ export class DunningCommunicationRepository {
   async getMetricsForExecution(executionId: DunningExecutionId) {
     const [result] = await this.db
       .select({
-        total: sql<number>`COUNT(*)`,
-        sent: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.status} = 'sent' THEN 1 END)`,
-        delivered: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.status} = 'delivered' THEN 1 END)`,
-        opened: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.openedAt} IS NOT NULL THEN 1 END)`,
-        clicked: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.clickedAt} IS NOT NULL THEN 1 END)`,
-        failed: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.status} = 'failed' THEN 1 END)`,
+        total: sql<number>`COUNT(*)`.mapWith(Number),
+        sent: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.status} = 'sent' THEN 1 END)`.mapWith(Number),
+        delivered: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.status} = 'delivered' THEN 1 END)`.mapWith(Number),
+        opened: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.openedAt} IS NOT NULL THEN 1 END)`.mapWith(Number),
+        clicked: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.clickedAt} IS NOT NULL THEN 1 END)`.mapWith(Number),
+        failed: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.status} = 'failed' THEN 1 END)`.mapWith(Number),
       })
       .from(this.dunningCommunications)
       .where(eq(this.dunningCommunications.executionId, executionId));
@@ -698,8 +748,6 @@ export class CustomerSegmentRepository {
   async findMany(query: ListCustomerSegmentsQuery): Promise<CustomerSegmentRow[]> {
     const { limit, offset, type, isActive, search, sortBy, sortOrder } = query;
 
-    const orderColumn = this.customerSegments[sortBy as keyof DunningTables['customerSegments']];
-    const orderDirection = sortOrder === 'asc' ? orderColumn : desc(orderColumn as SQLWrapper);
 
     return this.q.customerSegments.findMany({
       where: {
@@ -707,7 +755,7 @@ export class CustomerSegmentRepository {
         ...(isActive !== undefined && { isActive }),
         ...(search && { name: { ilike: `%${search}%` } }),
       },
-      orderBy: () => orderDirection as SQL | SQLWrapper,
+      orderBy: (table, { asc, desc }) => (sortOrder === 'asc' ? asc(table[sortBy]) : desc(table[sortBy])),
       limit,
       offset,
     });
@@ -777,7 +825,8 @@ export class CustomerSegmentRepository {
       where: {
         isActive: true,
         autoUpdate: true,
-        RAW: sql`${this.customerSegments.lastCalculated} IS NULL OR ${this.customerSegments.lastCalculated} + INTERVAL '1 hour' * ${this.customerSegments.updateFrequency} <= ${current}`,
+        RAW: table =>
+          sql`${table.lastCalculated} IS NULL OR ${table.lastCalculated} + INTERVAL '1 hour' * ${table.updateFrequency} <= ${current}`,
       },
     });
   }
@@ -847,9 +896,8 @@ export class CustomerRiskProfileRepository {
 
   async findByRiskCategory(category: string, limit = 100): Promise<CustomerRiskProfile[]> {
     const profiles = await this.q.customerRiskProfiles.findMany({
-      where: { RAW: sql`${this.customerRiskProfiles.riskScore}->>'category' = ${category}` },
-      orderBy: () =>
-        desc(sql`(${this.customerRiskProfiles.riskScore}->>'overall')::numeric`),
+      where: { RAW: table => sql`${table.riskScore}->>'category' = ${category}` },
+      orderBy: table => desc(sql`(${table.riskScore}->>'overall')::numeric`),
       limit,
     });
 
@@ -862,7 +910,7 @@ export class CustomerRiskProfileRepository {
   ): Promise<CustomerRiskProfile[]> {
     const profiles = await this.q.customerRiskProfiles.findMany({
       where: {
-        RAW: sql`${this.customerRiskProfiles.segmentIds} @> ${JSON.stringify([segmentId])}`,
+        RAW: table => sql`${table.segmentIds} @> ${JSON.stringify([segmentId])}`,
       },
       limit,
     });

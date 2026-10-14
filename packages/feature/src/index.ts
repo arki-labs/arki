@@ -131,19 +131,77 @@ export function defineFeature<
   };
 }
 
+export const FEATURE_ERROR_CODES = {
+  duplicateRouterKey: 'FEATURE_E001',
+  duplicateRepoKey: 'FEATURE_E002',
+} as const;
+
+export type FeatureErrorCode = (typeof FEATURE_ERROR_CODES)[keyof typeof FEATURE_ERROR_CODES];
+
+/**
+ * A mistake in how features are composed. The types reject the same
+ * mistake at compile time; this is the backstop for code that skips them.
+ */
+export class FeatureError extends Error {
+  readonly code: FeatureErrorCode;
+  readonly remediation: string;
+
+  constructor(args: { readonly code: FeatureErrorCode; readonly message: string; readonly remediation: string }) {
+    super(args.message);
+    this.name = 'FeatureError';
+    this.code = args.code;
+    this.remediation = args.remediation;
+  }
+}
+
+/** The keys a record names one by one. An index signature (`Record<string, X>`) names none. */
+type LiteralKeys<R> = keyof {
+  [K in keyof R as string extends K ? never : number extends K ? never : symbol extends K ? never : K]: R[K];
+};
+
+/** Keys that more than one record in the tuple names. `never` when every key is unique. */
+type DuplicateKeys<TRecords extends readonly unknown[], TSeen extends PropertyKey = never> = TRecords extends readonly [
+  infer Head,
+  ...infer Tail,
+]
+  ? (LiteralKeys<Head> & TSeen) | DuplicateKeys<Tail, TSeen | LiteralKeys<Head>>
+  : never;
+
+type RoutersOf<T extends readonly AnyFeature[]> = {
+  readonly [I in keyof T]: T[I] extends AnyFeature ? T[I]['router'] : never;
+};
+
+type ReposOf<T extends readonly AnyFeature[]> = {
+  readonly [I in keyof T]: T[I] extends AnyFeature ? T[I]['repos'] : never;
+};
+
+/**
+ * `unknown` when no key repeats. Otherwise a property the feature list
+ * cannot have, so the call does not compile and the error names the keys.
+ */
+type Distinct<TKeys extends PropertyKey, TLabel extends string> = [TKeys] extends [never]
+  ? unknown
+  : Readonly<Record<TLabel, TKeys>>;
+
 export type ComposedRouter<T extends readonly AnyFeature[]> = UnionToIntersection<T[number]['router']>;
 
 /**
  * Fold the features' router fragments into one router — value AND type
- * from the single list. A mount key claimed by two features throws at
- * module load.
+ * from the single list. A mount key claimed by two features is a compile
+ * error, and throws `FeatureError` at module load for code that skips types.
  */
-export function composeRouter<const T extends readonly AnyFeature[]>(features: T): ComposedRouter<T> {
+export function composeRouter<const T extends readonly AnyFeature[]>(
+  features: T & NoInfer<Distinct<DuplicateKeys<RoutersOf<T>>, 'ARKI_FEATURE: duplicate router mount keys'>>,
+): ComposedRouter<T> {
   const merged: Record<string, unknown> = {};
   for (const f of features) {
     for (const [key, fragment] of Object.entries(f.router)) {
       if (key in merged) {
-        throw new Error(`[feature] router mount key "${key}" is contributed by more than one feature.`);
+        throw new FeatureError({
+          code: FEATURE_ERROR_CODES.duplicateRouterKey,
+          message: `[feature] router mount key "${key}" is contributed by more than one feature.`,
+          remediation: 'Give each feature its own router mount key, or merge the two fragments in one feature.',
+        });
       }
       merged[key] = fragment;
     }
@@ -187,16 +245,24 @@ export type RepoDatabaseOf<T extends readonly AnyFeature[]> = {
   ? TDb
   : never;
 
-/** Fold the features' repo factories over one db handle. */
+/**
+ * Fold the features' repo factories over one db handle. A repo key claimed
+ * by two features is a compile error, and throws `FeatureError` for code
+ * that skips types.
+ */
 export function composeRepos<const T extends readonly AnyFeature[]>(
-  features: T,
+  features: T & NoInfer<Distinct<DuplicateKeys<ReposOf<T>>, 'ARKI_FEATURE: duplicate repo keys'>>,
   database: RepoDatabaseOf<T>,
 ): ComposedRepos<T> {
   const repos: Record<string, unknown> = {};
   for (const f of features) {
     for (const [key, factory] of Object.entries(f.repos)) {
       if (key in repos) {
-        throw new Error(`[feature] repo key "${key}" is contributed by more than one feature.`);
+        throw new FeatureError({
+          code: FEATURE_ERROR_CODES.duplicateRepoKey,
+          message: `[feature] repo key "${key}" is contributed by more than one feature.`,
+          remediation: 'Give each feature its own repo key, or move both factories into one feature.',
+        });
       }
       repos[key] = (factory as (db: RepoDatabaseOf<T>) => unknown)(database);
     }

@@ -1,6 +1,6 @@
 {
   "name": "@arki/design-systems",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Shared visual foundations for ARKI web apps — semantic colour tokens, Tailwind v4 theme bridges and the atelier / workbench / arena design systems with bundled fonts.",
   "license": "MIT",
   "repository": {

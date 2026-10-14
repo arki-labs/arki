@@ -18,7 +18,7 @@
  *    through individual plugin failures, reporting an aggregate error.
  */
 
-import type { ActionManifest, ProjectionManifest, JsonObject, ServiceKind } from './manifest.js';
+import type { ActionManifest, JsonObject, ProjectionManifest, ServiceKind } from './manifest.js';
 
 declare const TypeOf: unique symbol;
 
@@ -52,8 +52,8 @@ export type LazyService<T> = Service<T | Lazy<T>> & {
  * delivers a `Lazy<T>` handle whether the provider is eager or lazy.
  */
 export const service: (<T>() => Service<T>) & { readonly lazy: <T>() => LazyService<T> } = Object.assign(
-  <T,>(): Service<T> => ({}),
-  { lazy: <T,>(): LazyService<T> => ({ lazy: true }) },
+  <T>(): Service<T> => ({}),
+  { lazy: <T>(): LazyService<T> => ({ lazy: true }) },
 );
 
 /** Internal (kernel) check: is this witness a lazy-lifting one? */
@@ -348,6 +348,17 @@ export type DotConfigureContext = {
 
 type MaybePromise<T> = T | Promise<T>;
 
+/** What the kernel passes to a plugin's `logging` factory. */
+export type DotLoggingContext = {
+  /** App name (passed to `defineApp`). */
+  readonly appName: string;
+};
+
+/** What a `logging` factory returns. The kernel closes it after the app's last lifecycle record. */
+export type DotLoggingHandle = {
+  close(): Promise<void>;
+};
+
 declare const NeedsSym: unique symbol;
 declare const ProvidesSym: unique symbol;
 
@@ -362,10 +373,7 @@ declare const ProvidesSym: unique symbol;
  * The phantom symbol properties carry `TNeeds` / `TProvides` for the app
  * builder's compile-time wiring check; they never exist at runtime.
  */
-export type Plugin<
-  TNeeds extends ServiceRecord = ServiceRecord,
-  TProvides extends ServiceRecord = ServiceRecord,
-> = {
+export type Plugin<TNeeds extends ServiceRecord = ServiceRecord, TProvides extends ServiceRecord = ServiceRecord> = {
   /** Unique identifier for this plugin within the app. */
   readonly name: string;
   /** Optional semantic version string. */
@@ -375,6 +383,12 @@ export type Plugin<
   readonly actions: readonly ActionSource[];
   /** Mount-time renames: publish key → new wire key (see {@link rename}). */
   readonly renames: Readonly<Record<string, string>>;
+  /**
+   * The logging slot. At most one plugin per app fills it. The kernel calls
+   * the factory before its first lifecycle record and closes the handle after
+   * its last one (after `dispose`, or after a failed `configure`/`boot`/`start`).
+   */
+  readonly logging?: (ctx: DotLoggingContext) => DotLoggingHandle;
   readonly hooks: {
     readonly configure?: (ctx: DotConfigureContext) => void;
     readonly boot?: (ctx: never) => MaybePromise<ServiceRecord | void>;
@@ -438,6 +452,8 @@ export function plugin<
   readonly version?: string;
   readonly needs?: TShape;
   readonly actions?: readonly ActionSource[];
+  /** Fill the logging slot (see {@link Plugin.logging}). Called by the kernel, never at import. */
+  readonly logging?: (ctx: DotLoggingContext) => DotLoggingHandle;
   readonly configure?: (ctx: DotConfigureContext) => void;
   readonly boot?: (ctx: CtxOf<TShape> & KernelCtx) => MaybePromise<TProvides | void>;
   readonly start?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
@@ -450,6 +466,7 @@ export function plugin<
     needs: def.needs ?? {},
     actions: def.actions ?? [],
     renames: {},
+    ...(def.logging === undefined ? {} : { logging: def.logging }),
     hooks: {
       ...(def.configure === undefined ? {} : { configure: def.configure }),
       ...(def.boot === undefined ? {} : { boot: def.boot }),

@@ -18,10 +18,11 @@ import type {
   WeekRules,
 } from './types.js';
 import { instant, plainDate } from './core.js';
+import { bucketStart, epochDaysOf } from './internal/buckets.js';
 import { assertSameKind } from './internal/kind.js';
 import { comparePoints, isCalendarUnit } from './internal/point.js';
 import { startOf } from './math.js';
-import { isInstant, isPlainDate, isPlainDateTime, isZonedDateTime } from './types.js';
+import { isInstant, ISO_WEEK, isPlainDate, isPlainDateTime, isZonedDateTime } from './types.js';
 
 function equalsPoint(a: Point, b: Point): boolean {
   assertSameKind(a, b, 'equals');
@@ -86,6 +87,21 @@ function toBucketable(value: Point, timeZone: string | undefined, unit: string):
   return value;
 }
 
+/**
+ * Calendar buckets compared as integer day counts. `undefined` (Temporal then
+ * decides, and raises its errors) for instants without a zone, zoned values in
+ * different zones without a `timeZone` option, and non-ISO calendars.
+ */
+function sameBucket(a: Point, b: Point, unit: CalendarUnit, options: SameOptions | undefined): boolean | undefined {
+  const zone = options?.timeZone;
+  if (zone === undefined && isZonedDateTime(a) && isZonedDateTime(b) && a.timeZoneId !== b.timeZoneId) return undefined;
+  const left = epochDaysOf(a, zone);
+  const right = epochDaysOf(b, zone);
+  if (left === undefined || right === undefined) return undefined;
+  const rules = options?.week ?? ISO_WEEK;
+  return bucketStart(left, unit, rules) === bucketStart(right, unit, rules);
+}
+
 /** Units a value can be bucketed by: instants may use calendar units once projected into `timeZone`. */
 export type BucketUnitFor<T extends Point> = PlainDate extends T ? CalendarUnit : Unit;
 
@@ -105,6 +121,10 @@ export function isSame<T extends Point>(
 ): boolean;
 export function isSame(a: Point, b: Point, unit: Unit, options?: SameOptions): boolean {
   assertSameKind(a, b, 'isSame');
+  if (isCalendarUnit(unit)) {
+    const fast = sameBucket(a, b, unit, options);
+    if (fast !== undefined) return fast;
+  }
   const left = toBucketable(a, options?.timeZone, unit);
   const right = toBucketable(b, options?.timeZone, unit);
   if (isZonedDateTime(left) && isZonedDateTime(right) && left.timeZoneId !== right.timeZoneId) {

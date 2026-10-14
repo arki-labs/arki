@@ -1,8 +1,8 @@
-import { SQL } from 'bun';
 import type { AnyRelations } from 'drizzle-orm';
 import type { BunSQLDatabase } from 'drizzle-orm/bun-sql/postgres';
-import { drizzle } from 'drizzle-orm/bun-sql/postgres';
 import type { DrizzlePgConfig } from 'drizzle-orm/pg-core/utils';
+import { SQL } from 'bun';
+import { drizzle } from 'drizzle-orm/bun-sql/postgres';
 
 import { debugInit } from './debug.js';
 import { env } from './env.js';
@@ -16,13 +16,13 @@ export const initDb = <TRelations extends AnyRelations>(
   connectionString: string,
   config: Omit<DrizzlePgConfig<TRelations>, 'relations'> & { relations: TRelations },
 ): BunSQLDatabase<TRelations> => {
-  debugInit('[bun] Initializing database with connection string (logger: %s)', !!config.logger);
+  debugInit.debug('[bun] Initializing database with connection string (logger: {logger})', { logger: !!config.logger });
 
   const client = new SQL(connectionString);
 
   const db = drizzle<TRelations>({ ...config, client });
 
-  debugInit('[bun] Database initialized successfully with Bun SQL driver');
+  debugInit.debug('[bun] Database initialized successfully with Bun SQL driver');
 
   return db;
 };
@@ -35,11 +35,11 @@ export const initDb = <TRelations extends AnyRelations>(
 export function createDb<TRelations extends AnyRelations>(
   config: Omit<DrizzlePgConfig<TRelations>, 'relations'> & { relations: TRelations },
 ): BunSQLDatabase<TRelations> {
-  debugInit('[bun] Creating database from environment configuration');
+  debugInit.debug('[bun] Creating database from environment configuration');
 
   const connectionUrl = env.DB_URL;
   if (!connectionUrl) {
-    debugInit('[bun] Database creation failed: DB_URL not configured');
+    debugInit.debug('[bun] Database creation failed: DB_URL not configured');
     throw new Error('Database URL is not configured. Please set DB_URL environment variable.');
   }
 
@@ -48,7 +48,7 @@ export function createDb<TRelations extends AnyRelations>(
     logger: config.logger ?? (env.DB_LOGGING || env.NODE_ENV === 'development'),
   });
 
-  debugInit('[bun] Database created successfully');
+  debugInit.debug('[bun] Database created successfully');
 
   return db;
 }

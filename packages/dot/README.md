@@ -425,6 +425,40 @@ queue, same-phase calls coalesce onto one in-flight promise, and a
 `dispose()` racing a slow `start()` always runs after it — the app ends
 `disposed`, never resurrected.
 
+## Logging
+
+Dot logs through [`@arki/log`](../log). The kernel's own records go to the
+`arki:dot:lifecycle` category. Importing Dot switches nothing on: the app
+does, with `log()` from `@arki/dot/log` as its **first** `.use(...)`.
+
+```ts
+import { defineApp } from '@arki/dot';
+import { log } from '@arki/dot/log';
+import { asyncContext, fromEnv, stdout } from '@arki/log/node';
+
+const app = await defineApp('checkout')
+  .use(log(() => ({ ...fromEnv(), context: asyncContext(), channels: { stdout: stdout() }, default: { level: 'info', channels: ['stdout'] } })))
+  .boot();
+```
+
+- The config is a thunk. It runs when the app boots, never at import.
+- `resource['service.name']` defaults to the app name.
+- The `configure()` handle is published as the `logging` service
+  (`needs: { logging: service<Configured<'stdout'>>() }`).
+- `log()` reads no env on its own (spread `fromEnv()`), installs no
+  OpenTelemetry SDK and does not patch `console`.
+
+`log()` fills Dot's **logging slot**. Any plugin can fill it with
+`plugin({ name, logging: ({ appName }) => handle })`, where `handle` has
+`close(): Promise<void>`. The kernel calls the factory before its first
+lifecycle record (`configure: starting`) and closes the handle after its
+last one (`dispose: complete`). On a failed `configure`, `boot` or `start`,
+the failure is written first and logging closes last. An app has at most one
+logging plugin: two is `DOT_LIFECYCLE_E018`.
+
+Without a logging plugin, `@arki/log` keeps only the first 64 records at
+`warn` and above, and writes nothing else.
+
 ## Testing plugins
 
 `testPlugin` is the typed unit-test builder: satisfy a plugin's needs directly
@@ -534,9 +568,12 @@ Runtime failures carry stable codes (`DotLifecycleError.code`):
 `@arki/dot` ships a small CLI for scaffolding and inspecting apps:
 
 ```bash
-# Scaffold a minimal DOT app (package.json, tsconfig, app entrypoint,
-# env schema, AGENTS.md, README, gitignore, vitest boot test).
+# Scaffold a full-stack app: TanStack Start + oRPC + Postgres (@arki/db)
+# + @arki/journal + @arki/ui, with Dockerfile, migrations and tests.
 dot new my-app
+
+# Scaffold the smallest DOT app instead (defineApp + env, vitest boot test).
+dot new my-app --template minimal
 
 # Preview the file operations without writing anything.
 dot new my-app --dry-run --json | jq '.operations'
@@ -562,17 +599,29 @@ records which plugin's published service satisfied which need during boot.
 
 ### `dot new <app-name>`
 
-Scaffolds a minimal DOT app under `<app-name>/` (override with `--target`).
-The scaffold ships a `defineApp(...)` entrypoint wired to `@arki/env/dot`,
-a vitest that boots the app and asserts the manifest shape, and an
-`AGENTS.md` documenting verification commands and the public/private
-boundary for agents working in the generated tree. Pass `--dry-run --json`
+Scaffolds an app under `<app-name>/` (override with `--target`). Pick the
+starting point with `--template`:
+
+- **`stack`** (default) — a full-stack app in one package: TanStack Start
+  (React, Vite, Nitro), an oRPC API at `/api/rpc`, Postgres through
+  `@arki/db`, every write through an `@arki/journal` command (an audit
+  trail), all composed with `defineApp`. UI uses `@arki/ui` with the
+  workbench design system. It ships one feature end to end (`notes`), an
+  initial migration, `/api/health`, a `docker-compose.yml` for local
+  Postgres, a production `Dockerfile`, tests on in-memory PGlite (no
+  Docker), and a README + AGENTS.md. Run it with `bun install`,
+  `cp .env.example .env`, `docker compose up -d`, `bun run dev`.
+- **`minimal`** — a `defineApp(...)` entrypoint wired to `@arki/env/dot`,
+  a vitest that boots the app and asserts the manifest shape, and an
+  `AGENTS.md` documenting verification commands.
+
+An unknown template name fails with `DOT_CLI_E005`. Pass `--dry-run --json`
 to inspect the exact file operations (path, action, contentHash,
 contentBytes, reason) before committing them to disk; `--force`
 overwrites pre-existing files in the target directory.
 
-Templates live at [`templates/app-minimal/`](./templates/app-minimal) and
-ship with the published tarball.
+Templates live in [`templates/`](./templates) and ship with the published
+tarball. Generated apps depend only on published `@arki/*` packages.
 
 ## Architecture
 
@@ -585,7 +634,7 @@ own packages and consume `@arki/dot` as a peer dependency:
 import { env } from '@arki/env/dot';
 import { db } from '@arki/db/dot';
 import { kv } from '@arki/kv/dot';
-import { eventSourcing } from '@arki/event-sourcing/dot';
+import { journal } from '@arki/journal/dot';
 ```
 
 This keeps the kernel free of optional dependencies and lets each adapter
@@ -609,6 +658,43 @@ The full docs live in [`docs/`](./docs):
 - [Release policy](./docs/release-policy.md) — SemVer and deprecation.
 
 Agent-discoverable index: [`llms.txt`](./llms.txt).
+
+<!-- bench:start -->
+## Benchmarks
+
+A 20-service graph where each service depends on the two before it, built with `@arki/dot` plugins and with awilix, the most used dependency-injection container for Node. A hand-wired version is the floor: no container at all.
+
+Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+
+### Build the graph and bring it up (boot + dispose, 20 services)
+
+dot: declare 20 plugins, boot, dispose. awilix: create a container, register 20 factories, resolve all 20, dispose. Hand-wired: build the 20 objects in order.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/dot (boot + dispose) | 199.83 µs | 14.99× |
+| awilix (register + resolve + dispose) | 65.92 µs | 4.94× |
+| hand-written wiring (no container) | 13.33 µs | fastest |
+
+### Look up a service after boot
+
+The hot path: code that already has a booted app asks for one service. dot services are plain properties; awilix `resolve` and `cradle` go through a cache lookup.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/dot (app.services.s19) | 30.3 ns | fastest |
+| awilix (container.resolve('s19')) | 67.2 ns | 2.21× |
+| awilix (container.cradle.s19) | 105.4 ns | 3.47× |
+| hand-written (plain object property) | 32.0 ns | 1.05× |
+
+Read the rows with the contracts in mind:
+
+- `@arki/dot` and awilix do different jobs. awilix is a container: it registers factories and builds them on first use. dot runs an application lifecycle: it orders plugins by their declared needs, runs `configure`, `boot` and `dispose` hooks in order (and in reverse on shutdown), checks the wiring at compile time, and records a manifest and diagnostics for every plugin.
+- The boot rows therefore measure more work in dot than in awilix. They are shown so you can see what that lifecycle costs, not to say the two are interchangeable.
+- Boot is async in dot (plugin hooks may await). awilix resolves synchronously.
+
+Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+<!-- bench:end -->
 
 ## License
 

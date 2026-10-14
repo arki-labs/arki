@@ -1,4 +1,5 @@
 import { z } from '@arki/contracts';
+import { isBefore } from '@arki/date';
 import { instantSchema } from '@arki/date/zod';
 
 import type { TaxComplianceReport } from './reporting.js';
@@ -89,6 +90,13 @@ export const setDefaultConfigurationInputSchema = z.object({
 });
 
 // Tax jurisdiction
+
+/** A tax rate in percent, as a decimal string: `'19'`, `'7.5'`. Never negative, never above 100. */
+export const taxRateSchema = z
+  .string()
+  .regex(/^\d+(\.\d+)?$/, 'A tax rate is a non-negative decimal number')
+  .refine(rate => Number(rate) <= 100, 'A tax rate is at most 100');
+
 export const createJurisdictionSchema = z.object({
   name: z.string().min(1).max(255),
   code: z.string().max(20),
@@ -96,11 +104,11 @@ export const createJurisdictionSchema = z.object({
   parentId: taxJurisdictionIdSchema.optional(),
   countryCode: z.string().length(2),
   stateCode: z.string().max(10).optional(),
-  standardRate: z.string().optional(),
+  standardRate: taxRateSchema.optional(),
   reducedRates: z
     .array(
       z.object({
-        rate: z.string(),
+        rate: taxRateSchema,
         description: z.string(),
         applicableTo: z.array(z.string()),
       }),
@@ -122,7 +130,8 @@ export const getJurisdictionHierarchyInputSchema = z.object({
 });
 
 // Tax exemption
-export const createExemptionSchema = z.object({
+export const createExemptionSchema = z
+  .object({
   type: exemptionTypeSchema,
   customerId: z.string().max(255).optional(),
   productCode: z.string().max(100).optional(),
@@ -142,7 +151,16 @@ export const createExemptionSchema = z.object({
       }),
     )
     .optional(),
-});
+  })
+  .refine(
+    exemption =>
+      exemption.customerId !== undefined || exemption.productCode !== undefined || exemption.jurisdictionId !== undefined,
+    { path: ['customerId'], message: 'An exemption needs a customer, a product code or a jurisdiction: with none it would exempt every sale' },
+  )
+  .refine(exemption => exemption.validTo === undefined || !isBefore(exemption.validTo, exemption.validFrom), {
+    path: ['validTo'],
+    message: 'validTo must not be before validFrom',
+  });
 
 export const getCustomerExemptionsInputSchema = z.object({
   customerId: z.string(),
@@ -212,13 +230,6 @@ export const taxIdValidationSchema = z.object({
   country: z.string().length(2),
 });
 
-export const generateTaxReportInputSchema = z.object({
-  reportType: z.enum(['sales_and_use_tax', 'vat', 'gst']),
-  startDate: instantSchema(),
-  endDate: instantSchema(),
-  jurisdiction: z.string().optional(),
-});
-
 export const getCustomerTaxSummaryInputSchema = z.object({
   customerId: z.string(),
   year: z.number().min(2000).max(2100),
@@ -267,6 +278,8 @@ export const taxCalculationResultSchema = z.object({
     }),
   ),
   applicableTaxIds: z.array(z.string()),
+  /** The exemptions that kept tax off this sale, in whole or in part. */
+  appliedExemptionIds: z.array(taxExemptionIdSchema),
 });
 
 export function taxCalculationResultJson(result: TaxCalculationResult): z.input<typeof taxCalculationResultSchema> {
@@ -281,7 +294,8 @@ export function taxCalculationResultJson(result: TaxCalculationResult): z.input<
 
 /** What `TaxService.getCustomerTaxSummary` answers. */
 export const customerTaxSummarySchema = z.object({
-  totalTaxPaid: moneyJsonSchema,
+  /** One total per currency, ordered by currency code */
+  totalTaxPaid: z.array(moneyJsonSchema),
   totalTransactions: z.number(),
   breakdown: z.array(
     z.object({
@@ -297,7 +311,7 @@ export function customerTaxSummaryJson(
 ): z.input<typeof customerTaxSummarySchema> {
   return {
     ...summary,
-    totalTaxPaid: summary.totalTaxPaid.toJSON(),
+    totalTaxPaid: summary.totalTaxPaid.map(total => total.toJSON()),
     breakdown: summary.breakdown.map(line => ({ ...line, taxAmount: line.taxAmount.toJSON() })),
   };
 }
@@ -314,13 +328,11 @@ export const taxComplianceReportSchema = z.object({
     endDate: instantSchema(),
   }),
   jurisdiction: z.string(),
-  totalSales: moneyJsonSchema,
-  totalTaxCollected: moneyJsonSchema,
-  exemptSales: moneyJsonSchema,
+  totalSales: z.array(moneyJsonSchema),
+  totalTaxCollected: z.array(moneyJsonSchema),
+  exemptSales: z.array(moneyJsonSchema),
   transactions: z.number(),
   generatedAt: instantSchema(),
-  status: z.enum(['pending', 'completed', 'failed']),
-  downloadUrl: z.string().optional(),
   summary: z.object({
     taxableTransactions: z.number(),
     exemptTransactions: z.number(),
@@ -332,9 +344,9 @@ export const taxComplianceReportSchema = z.object({
 export function taxComplianceReportJson(report: TaxComplianceReport): z.input<typeof taxComplianceReportSchema> {
   return {
     ...report,
-    totalSales: report.totalSales.toJSON(),
-    totalTaxCollected: report.totalTaxCollected.toJSON(),
-    exemptSales: report.exemptSales.toJSON(),
+    totalSales: report.totalSales.map(total => total.toJSON()),
+    totalTaxCollected: report.totalTaxCollected.map(total => total.toJSON()),
+    exemptSales: report.exemptSales.map(total => total.toJSON()),
     summary: {
       ...report.summary,
       topTaxCategories: report.summary.topTaxCategories.map(category => ({
@@ -365,7 +377,6 @@ export type RevokeExemptionInput = z.infer<typeof revokeExemptionInputSchema>;
 export type TaxCalculationInput = z.infer<typeof taxCalculationInputSchema>;
 export type CalculateSubscriptionTaxInput = z.infer<typeof calculateSubscriptionTaxInputSchema>;
 export type TaxIdValidation = z.infer<typeof taxIdValidationSchema>;
-export type GenerateTaxReportInput = z.infer<typeof generateTaxReportInputSchema>;
 export type GetCustomerTaxSummaryInput = z.infer<typeof getCustomerTaxSummaryInputSchema>;
 
 export type GenerateComplianceReportInput = z.infer<typeof generateComplianceReportInputSchema>;

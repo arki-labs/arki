@@ -1,7 +1,7 @@
 {
   "name": "@arki/log",
-  "version": "0.0.3",
-  "description": "Structured logging primitives for ARKI — severity levels, batching, distributed tracing hooks, and Pino-backed transports.",
+  "version": "0.1.0",
+  "description": "Zero-dependency structured logging for every JavaScript runtime — message templates, channels, scoped context, redaction, fingers-crossed buffering and OpenTelemetry records.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -16,22 +16,32 @@
     "typescript",
     "logger",
     "logging",
-    "pino",
-    "debug",
+    "structured-logging",
+    "opentelemetry",
     "observability"
   ],
   "type": "module",
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "default": "./dist/core/index.js"
     },
-    "./debug": {
-      "types": "./dist/debug.d.ts",
-      "import": "./dist/debug.js",
-      "default": "./dist/debug.js"
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "import": "./dist/node/index.js",
+      "default": "./dist/node/index.js"
+    },
+    "./otel": {
+      "types": "./dist/otel/index.d.ts",
+      "import": "./dist/otel/index.js",
+      "default": "./dist/otel/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js",
+      "default": "./dist/testing/index.js"
     },
     "./package.json": "./package.json"
   },
@@ -47,9 +57,17 @@
     "LICENSE",
     "package.json"
   ],
-  "dependencies": {
-    "debug": "^4.4.3",
-    "pino": "^10.4.0"
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/api-logs": "^0.214.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/api": {
+      "optional": true
+    },
+    "@opentelemetry/api-logs": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"

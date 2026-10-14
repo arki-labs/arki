@@ -1,0 +1,49 @@
+{
+  "name": "{{name}}",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "start": "bun .output/server/index.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "dot:explain": "bun --bun --env-file=.env dot explain",
+    "dot:doctor": "bun --bun --env-file=.env dot doctor"
+  },
+  "dependencies": {
+    "@arki/db": "^{{dbVersion}}",
+    "@arki/design-systems": "^{{designSystemsVersion}}",
+    "@arki/dot": "^{{dotVersion}}",
+    "@arki/env": "^{{envVersion}}",
+    "@arki/journal": "^{{journalVersion}}",
+    "@arki/log": "^{{logVersion}}",
+    "@arki/ui": "^{{uiVersion}}",
+    "@orpc/client": "^1.15.5",
+    "@orpc/server": "^1.15.5",
+    "@orpc/tanstack-query": "^1.15.5",
+    "@tanstack/react-query": "^5.104.1",
+    "@tanstack/react-router": "^1.170.41",
+    "@tanstack/react-start": "^1.168.60",
+    "drizzle-orm": "1.0.0-rc.4",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "{{zodVersion}}"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "drizzle-kit": "1.0.0-rc.4",
+    "nitro": "3.0.260903-beta",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3"
+  }
+}

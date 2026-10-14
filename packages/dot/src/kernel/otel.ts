@@ -1,3 +1,8 @@
+import type { Span } from '@opentelemetry/api';
+import { metrics, SpanStatusCode, trace } from '@opentelemetry/api';
+
+import type { DotLifecycleHook } from '../lifecycle.js';
+
 /**
  * OpenTelemetry instrumentation for the DOT kernel.
  *
@@ -25,11 +30,6 @@
  * @see packages/dot/docs/principles.md — principle 3 (deterministic) +
  *      principle 4 (agent-discoverable).
  */
-
-import { metrics, SpanStatusCode, trace, type Span } from '@opentelemetry/api';
-import type { Logger } from '@arki/log';
-
-import type { DotLifecycleHook } from '../lifecycle.js';
 
 const INSTRUMENTATION_NAME = '@arki/dot';
 const INSTRUMENTATION_VERSION = '0.1.0';
@@ -115,14 +115,6 @@ export function withPluginHookSpan<R>(
     readonly pluginVersion?: string;
     readonly hook: DotLifecycleHook;
     readonly order: number;
-    /**
-     * Optional plugin-scoped logger. When present, the helper threads the
-     * span's `traceId` + `spanId` onto the logger via `setTraceContext`
-     * before invoking the body — every log line emitted from within the
-     * plugin's hook is automatically correlated with this span in the
-     * `traceId`/`spanId` fields of `LogRecord`.
-     */
-    readonly logger?: Logger;
   },
   fn: (span: Span) => R,
 ): R {
@@ -135,10 +127,6 @@ export function withPluginHookSpan<R>(
       'dot.plugin.order': opts.order,
     }),
   });
-  if (opts.logger) {
-    const sc = span.spanContext();
-    opts.logger.setTraceContext(sc.traceId, sc.spanId);
-  }
   const started = performance.now();
   let status: 'ok' | 'failed' = 'ok';
   const finish = (): void => {
@@ -195,14 +183,6 @@ export function withPhaseSpan<R>(
     readonly appVersion?: string;
     readonly phase: DotLifecycleHook;
     readonly pluginCount: number;
-    /**
-     * Optional phase-scoped logger. When present, the helper threads
-     * the span's `traceId` + `spanId` onto the logger before invoking
-     * the body — every log line written during the phase carries the
-     * trace context so it's groupable with the corresponding span in
-     * any OTel-compatible backend.
-     */
-    readonly logger?: Logger;
   },
   fn: (span: Span) => R,
 ): R {
@@ -217,10 +197,6 @@ export function withPhaseSpan<R>(
       }),
     },
     (span): R => {
-      if (opts.logger) {
-        const sc = span.spanContext();
-        opts.logger.setTraceContext(sc.traceId, sc.spanId);
-      }
       const started = performance.now();
       let status: 'ok' | 'failed' = 'ok';
       const finish = (): void => {

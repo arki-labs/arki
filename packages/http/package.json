@@ -1,6 +1,6 @@
 {
   "name": "@arki/http",
-  "version": "0.0.4",
+  "version": "0.1.0",
   "description": "Typed HTTP for ARKI — route contracts as data, zod-validated handlers, request-scope derivers, SSE streaming, OpenAPI generation, and the DOT http() plugin.",
   "license": "MIT",
   "repository": {
@@ -64,7 +64,7 @@
     "package.json"
   ],
   "dependencies": {
-    "@arki/log": "0.0.3",
+    "@arki/log": "0.1.0",
     "@arki/ts": "0.0.3",
     "@hono/node-server": "^2.1.4",
     "hono": "^4.13.13",
@@ -73,7 +73,7 @@
     "zod": "4.6.5"
   },
   "peerDependencies": {
-    "@arki/dot": "^0.4.1"
+    "@arki/dot": "^0.5.0"
   },
   "peerDependenciesMeta": {
     "@arki/dot": {

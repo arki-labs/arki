@@ -1,9 +1,10 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 import type { Instant } from '@arki/date';
-import { isBefore, now, sub } from '@arki/date';
+import { add, fromUnix, isAfter, isBefore, now, sub } from '@arki/date';
 
 import type { PaymentProviderType, WebhookValidationResult } from '../types.js';
+import { mapStripeEventType } from '../providers/stripe-event-types.js';
 
 export type WebhookSecurityConfig = {
   allowedIps: string[];
@@ -18,6 +19,16 @@ export type WebhookValidationOptions = {
 };
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
+
+/** A whole number of seconds since the epoch, as Stripe writes `t=`. */
+const UNIX_SECONDS = /^\d+$/;
+
+/** Constant-time string compare. Different lengths are simply unequal (`timingSafeEqual` would throw). */
+function constantTimeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'utf8');
+  const right = Buffer.from(b, 'utf8');
+  return left.length === right.length && timingSafeEqual(left, right);
+}
 
 export class WebhookSecurityService {
   private processedEvents = new Map<string, Instant>();
@@ -51,8 +62,9 @@ export class WebhookSecurityService {
         };
       }
 
-      // 2. Timestamp validation (prevent replay attacks)
-      if (!options.skipTimestampValidation) {
+      // 2. Timestamp validation (prevent replay attacks). Stripe signs its own
+      //    timestamp, which the signature check verifies; the caller's value is not trusted.
+      if (!options.skipTimestampValidation && provider !== 'stripe') {
         const timestampValidation = this.validateTimestamp(timestamp);
         if (!timestampValidation.isValid) {
           return {
@@ -93,9 +105,15 @@ export class WebhookSecurityService {
       // Mark event as processed
       this.markEventAsProcessed(eventId);
 
+      const eventType =
+        provider === 'stripe' && typeof sanitizedPayload['type'] === 'string'
+          ? (mapStripeEventType(sanitizedPayload['type']) ?? undefined)
+          : undefined;
+
       return {
         isValid: true,
         provider,
+        eventType,
         data: sanitizedPayload,
       };
     } catch (error) {
@@ -160,7 +178,10 @@ export class WebhookSecurityService {
 
   private validateTimestamp(timestamp: string): { isValid: boolean; error?: string } {
     try {
-      const webhookTime = Number.parseInt(timestamp, 10) * 1000;
+      if (!UNIX_SECONDS.test(timestamp)) {
+        return { isValid: false, error: 'Invalid timestamp format' };
+      }
+      const webhookTime = Number(timestamp) * 1000;
       const currentTime = Date.now();
       const timeDifference = Math.abs(currentTime - webhookTime);
 
@@ -211,6 +232,11 @@ export class WebhookSecurityService {
     timestamp: string,
     webhookSecret: string,
   ): WebhookValidationResult {
+    // An HMAC keyed with an empty secret can be computed by anyone.
+    if (!webhookSecret) {
+      return { isValid: false, provider, error: 'Webhook secret is not configured' };
+    }
+
     try {
       switch (provider) {
         case 'stripe': {
@@ -246,20 +272,19 @@ export class WebhookSecurityService {
     secret: string,
   ): WebhookValidationResult {
     try {
-      const elements = signature.split(',');
-      const signatureMap = new Map<string, string>();
+      let signedTimestamp: string | undefined;
+      const candidates: string[] = [];
 
-      for (const element of elements) {
-        const [key, value] = element.split('=');
-        if (key && value) {
-          signatureMap.set(key, value);
-        }
+      for (const element of signature.split(',')) {
+        const separator = element.indexOf('=');
+        const key = element.slice(0, separator).trim();
+        const value = element.slice(separator + 1).trim();
+        if (separator <= 0 || !value) continue;
+        if (key === 't') signedTimestamp = value;
+        if (key === 'v1') candidates.push(value);
       }
 
-      const expectedSignature = signatureMap.get('v1');
-      const receivedTimestamp = signatureMap.get('t');
-
-      if (!expectedSignature || !receivedTimestamp) {
+      if (!signedTimestamp || candidates.length === 0) {
         return {
           isValid: false,
           provider: 'stripe',
@@ -267,18 +292,23 @@ export class WebhookSecurityService {
         };
       }
 
-      const payloadStr = typeof payload === 'string' ? payload : payload.toString();
-      const signedPayload = `${receivedTimestamp}.${payloadStr}`;
+      const window = { seconds: this.config.replayWindowSeconds };
+      const current = now();
+      if (!UNIX_SECONDS.test(signedTimestamp)) {
+        return { isValid: false, provider: 'stripe', error: 'Signature timestamp is outside the allowed window' };
+      }
+      const signedAt = fromUnix(Number(signedTimestamp));
+      if (isBefore(signedAt, sub(current, window)) || isAfter(signedAt, add(current, window))) {
+        return { isValid: false, provider: 'stripe', error: 'Signature timestamp is outside the allowed window' };
+      }
 
-      const computedSignature = createHash('sha256')
-        .update(signedPayload, 'utf8')
-        .update(secret, 'utf8')
+      const payloadStr = typeof payload === 'string' ? payload : payload.toString();
+      const computedSignature = createHmac('sha256', secret)
+        .update(`${signedTimestamp}.${payloadStr}`, 'utf8')
         .digest('hex');
 
-      const isValid = timingSafeEqual(
-        Buffer.from(expectedSignature, 'hex'),
-        Buffer.from(computedSignature, 'hex'),
-      );
+      // Stripe sends one `v1` per active secret while a secret is being rolled; any may match.
+      const isValid = candidates.some((candidate) => constantTimeEqual(candidate, computedSignature));
 
       return {
         isValid,
@@ -295,53 +325,21 @@ export class WebhookSecurityService {
   }
 
   private validatePayPalSignature(
-    payload: string | Buffer,
-    signature: string,
-    secret: string,
+    _payload: string | Buffer,
+    _signature: string,
+    _secret: string,
   ): WebhookValidationResult {
-    try {
-      const payloadStr = typeof payload === 'string' ? payload : payload.toString();
-      const computedSignature = createHash('sha256').update(payloadStr + secret).digest('hex');
-
-      const isValid = timingSafeEqual(Buffer.from(signature), Buffer.from(computedSignature));
-
-      return {
-        isValid,
-        provider: 'paypal',
-        error: isValid ? undefined : 'PayPal signature verification failed',
-      };
-    } catch (error) {
-      return {
-        isValid: false,
-        provider: 'paypal',
-        error: `PayPal signature validation error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      };
-    }
+    // PayPal verifies through its API with transmission headers this method does not receive.
+    return { isValid: false, provider: 'paypal', error: 'PayPal signature verification is not implemented' };
   }
 
   private validateSquareSignature(
-    payload: string | Buffer,
-    signature: string,
-    secret: string,
+    _payload: string | Buffer,
+    _signature: string,
+    _secret: string,
   ): WebhookValidationResult {
-    try {
-      const payloadStr = typeof payload === 'string' ? payload : payload.toString();
-      const computedSignature = createHash('sha256').update(secret + payloadStr).digest('hex');
-
-      const isValid = timingSafeEqual(Buffer.from(signature), Buffer.from(computedSignature));
-
-      return {
-        isValid,
-        provider: 'square',
-        error: isValid ? undefined : 'Square signature verification failed',
-      };
-    } catch (error) {
-      return {
-        isValid: false,
-        provider: 'square',
-        error: `Square signature validation error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      };
-    }
+    // Square signs the notification URL plus the body, and this method does not receive the URL.
+    return { isValid: false, provider: 'square', error: 'Square signature verification is not implemented' };
   }
 
   private sanitizePayload(payload: string | Buffer): Record<string, unknown> {

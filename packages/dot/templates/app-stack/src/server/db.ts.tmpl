@@ -1,0 +1,15 @@
+import { composeSchema } from '@arki/db';
+import { defineRelations } from '@arki/db/orm';
+
+import { notesTables } from '~/features/notes/tables';
+
+import { journalCursors, journalEvents, journalJobs, journalReceipts } from './journal-tables';
+
+/**
+ * Every table the app owns. A new feature adds its `tables.ts` record here.
+ * A duplicate table name is a compile error.
+ */
+export const schema = composeSchema(notesTables, { journalEvents, journalJobs, journalReceipts, journalCursors });
+
+/** Drizzle relations between tables. Add `one`/`many` links in the callback when you need them. */
+export const relations = defineRelations(schema);

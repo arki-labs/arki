@@ -1,0 +1,29 @@
+/**
+ * The journal: every write to a feature table goes through a command, which
+ * records an immutable event row and updates the table row in one
+ * transaction. That event log is the app's audit trail.
+ *
+ * - `j` declares events, entities and commands (see `features/notes/note.ts`).
+ * - `appJournal` is the wired journal: the one place that lists projections
+ *   (same-transaction read models) and effects (after-commit jobs).
+ */
+import { z } from 'zod';
+
+import { initJournal } from '@arki/journal';
+
+import { allJournalTables } from './journal-tables';
+
+/** Stamped on every event. `actorId` is the user who caused the write, or `null` for system writes. */
+export const journalMetaSchema = z.object({
+  actorId: z.string().nullable(),
+});
+
+export type JournalMeta = z.output<typeof journalMetaSchema>;
+
+export const j = initJournal({ meta: journalMetaSchema });
+
+export const appJournal = j.compose({
+  tables: allJournalTables,
+  projections: [],
+  effects: [],
+});

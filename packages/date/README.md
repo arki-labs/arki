@@ -148,6 +148,7 @@ Every module is also a subpath: `@arki/date/math`, `@arki/date/interval`, …
 | `zod`       | optional, needs `zod`: `plainDateSchema` `plainDateTimeSchema` `instantSchema` `zonedDateTimeSchema` `durationSchema` `timeZoneSchema` `intervalSchema`                                                                                                                          |
 | `react`     | optional, needs `react`: `useNow` `useToday` `useRelativeTime`                                                                                                                                                                                                                   |
 | `serialize` | optional, needs `@orpc/client` and/or `superjson`: `temporalJsonSerializers` `registerTemporalTypes` `TEMPORAL_RPC_TYPES`                                                                                                                                                        |
+| `tanstack`  | optional, needs `@tanstack/react-router`: `temporalSerializationAdapters` and one adapter per type                                                                                                                                                                               |
 | `parseISO`  | `parseISO(text): Date` — legacy, date-fns semantics (zone-less text is local time)                                                                                                                                                                                               |
 
 ### Durations
@@ -254,6 +255,22 @@ registerTemporalTypes(SuperJSON); // where the TanStack Query client dehydrates 
 
 Values travel as ISO text and are checked on arrival. The codecs use oRPC custom type ids 100–104 (`TEMPORAL_RPC_TYPES`).
 
+### Loaders and server functions (`@arki/date/tanstack`)
+
+TanStack Start sends loader data, server-function results and the SSR payload through seroval, which keeps `Date` but throws on a Temporal value. Register the adapters once in `src/start.ts`:
+
+```ts
+import { createStart } from '@tanstack/react-start';
+
+import { temporalSerializationAdapters } from '@arki/date/tanstack';
+
+export const startInstance = createStart(() => ({
+  serializationAdapters: temporalSerializationAdapters,
+}));
+```
+
+Values travel as ISO / RFC 9557 text, so a `ZonedDateTime` keeps its zone and an `Instant` its nanoseconds.
+
 ### Pickers and `Date`
 
 `fromDate(d)` keeps the **instant**. `fromPickerDate(d, { basis: 'local' })` keeps the **calendar fields** the picker showed (`new Date(2026, 0, 31)` → `2026-01-31`). They are different on purpose; `toPickerDate` round-trips and throws for a day the zone skipped.
@@ -265,6 +282,119 @@ Recurrence rules (RRULE), natural-language parsing, a holiday database, non-ISO 
 ## Verification
 
 `bun run test` (vitest, Node), `bun run test:bun` (same suite under Bun; the React hooks run in happy-dom), `bun run build && bun run smoke` (one check per module under `node`, `bun` and `deno`). The token formatter and `parseISO` are differential-tested against date-fns for every pattern used in the monorepo.
+
+<!-- bench:start -->
+## Benchmarks
+
+Compares @arki/date with the three date libraries people most often pick in JavaScript: date-fns, Day.js and Luxon. Native `Date` and `Intl` are included where they solve the same task.
+
+Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+
+### Parse an ISO 8601 instant
+
+Input: `2026-10-09T12:37:48.123Z`. @arki/date returns an `Instant`; the others return a `Date`, a Day.js, or a Luxon `DateTime`.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/date parseISO | 18.03 µs | 35.52× |
+| date-fns parseISO | 2.86 µs | 5.64× |
+| Day.js dayjs(string) | 594.1 ns | 1.17× |
+| Luxon DateTime.fromISO | 7.80 µs | 15.36× |
+| native Date.parse | 507.7 ns | fastest |
+
+### Add one month
+
+Calendar date 2026-01-31 plus one month (the end-of-month clamping case).
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/date add(plainDate, { months: 1 }) | 5.17 µs | 3.95× |
+| date-fns addMonths | 1.31 µs | fastest |
+| Day.js add(1, "month") | 9.39 µs | 7.18× |
+| Luxon plus({ months: 1 }) | 6.15 µs | 4.70× |
+
+### Start of month
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/date startOf(plainDate, "month") | 3.55 µs | 3.61× |
+| date-fns startOfMonth | 983.3 ns | fastest |
+| Day.js startOf("month") | 1.68 µs | 1.71× |
+| Luxon startOf("month") | 1.75 µs | 1.78× |
+
+### Format as `yyyy-MM-dd HH:mm`
+
+All libraries format the same `Date` in the machine time zone. The pattern is parsed on every call; none of these libraries offers a precompiled formatter.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/date format(Date, pattern) | 21.56 µs | 3.58× |
+| date-fns format | 7.16 µs | 1.19× |
+| Day.js format | 10.00 µs | 1.66× |
+| Luxon toFormat | 6.03 µs | fastest |
+
+### Difference in calendar days
+
+2026-01-31 to 2026-12-31 (334 days).
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/date diff(plainDate, plainDate, "day") | 1.27 µs | fastest |
+| date-fns differenceInCalendarDays | 15.52 µs | 12.19× |
+| Day.js diff(…, "day") | 1.84 µs | 1.45× |
+| Luxon diff(…, "days") | 11.35 µs | 8.92× |
+
+### Convert an instant to a time zone and read the hour
+
+Europe/Bucharest. The native row uses one prepared `Intl.DateTimeFormat`, which is the fastest native route but returns a string, not a date object.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/date inZone(instant, zone).hour | 10.86 µs | 9.63× |
+| Day.js tz(zone).hour() (utc + timezone plugins) | 110.09 µs | 97.68× |
+| Luxon fromJSDate(date, { zone }).hour | 13.91 µs | 12.34× |
+| native Intl.DateTimeFormat (prepared) | 1.13 µs | fastest |
+
+### Other @arki/date operations (no direct competitor)
+
+These rows are for tracking regressions in this package. They are not a comparison, so ignore the "vs fastest" column.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| zoned(Date, tz) | 17.95 µs | 188.09× |
+| instant(Date) | 2.82 µs | 29.58× |
+| plainDate(string) | 6.53 µs | 68.45× |
+| add(zoned, { days: 1 }) | 71.97 µs | 753.96× |
+| startOf(zoned, "month") | 51.91 µs | 543.82× |
+| startOf(zoned, "hour") | 9.17 µs | 96.12× |
+| endOf(plainDate, "month") | 25.33 µs | 265.37× |
+| isSameDay(zoned, zoned) | 3.62 µs | 37.92× |
+| format(zoned, "yyyy-MM-dd") | 13.71 µs | 143.60× |
+| format(Date, "MMM d, yyyy") | 22.63 µs | 237.02× |
+| format(zoned, "PPPP") | 14.72 µs | 154.17× |
+| formatIntl(zoned, medium) | 11.63 µs | 121.83× |
+| relative(instant, ref) | 3.53 µs | 36.98× |
+| relativeToNow(instant) | 54.00 µs | 565.72× |
+| isToday(plainDate) | 21.98 µs | 230.24× |
+| isoWeek(plainDate) | 17.86 µs | 187.08× |
+| addBusinessDays(plainDate, 10) | 4.55 µs | 47.65× |
+| each month x12 | 73.39 µs | 768.78× |
+| splitByUnit day x31 | 160.73 µs | 1683.76× |
+| date(Date).add.startOf.format | 74.14 µs | 776.68× |
+| humanizeDuration(P1DT2H) | 142.93 µs | 1497.28× |
+| toDate(zoned) | 261.0 ns | 2.73× |
+| systemTimeZone() | 95.5 ns | fastest |
+
+Read the rows with the contracts in mind:
+
+- @arki/date is built on Temporal values: immutable, nanosecond precision, and time zones come from the IANA database, not from the host machine. Day.js and date-fns work on `Date`, which has millisecond precision and a local-time bias. Luxon is also immutable and zone-aware.
+- @arki/date rejects impossible input (such as 2026-02-31) instead of rolling it over, and it adds months by clamping to the last valid day (Jan 31 + 1 month = Feb 28). date-fns, Day.js and Luxon clamp too; native `Date` does not, so it is left out of the month group.
+- Day.js `diff(…, "day")` counts whole 24-hour spans. date-fns `differenceInCalendarDays`, Luxon `diff` and @arki/date `diff` on plain dates count calendar days. The inputs here are midnight local dates, so the answers agree.
+- date-fns has no time-zone conversion without the extra `@date-fns/tz` package, so it is not in the zone group. Day.js needs its `utc` and `timezone` plugins, which are loaded here.
+- The @arki/date numbers include input validation and building a Temporal object, which is what you pay for correctness. The extra cases at the end have no direct competitor and exist to catch regressions.
+
+Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+<!-- bench:end -->
 
 ## License
 

@@ -1,5 +1,18 @@
 # @arki/kv
 
+## 0.1.8
+
+### Patch Changes
+
+- 0fac2e0: `getRateLimiter(id, options)` finds its cached limiter faster. Limiters are now kept per id, and options that hold only plain values are compared field by field instead of being turned into JSON on every call. Which limiter you get back is unchanged: the same id and options that serialise to the same JSON still share one limiter.
+- Updated dependencies [0685dfa]
+- Updated dependencies
+- Updated dependencies [91efd52]
+- Updated dependencies [2854df5]
+  - @arki/dot@0.5.0
+  - @arki/env@0.0.9
+  - @arki/log@0.1.0
+
 ## 0.1.7
 
 ### Patch Changes

@@ -26,12 +26,15 @@
 import type { Instant } from '@arki/date';
 import type { CommandRunner, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
 import { userIdSchema } from '../core/user-id.js';
+import { and, eq, inArray, sql } from 'drizzle-orm';
+
 import { z } from '@arki/contracts';
 import { fromDate } from '@arki/date';
 import { CommandError } from '@arki/journal';
 import { Money } from '@arki/money';
 import { anyMoneySchema } from '@arki/money/zod';
 
+import type { CoreTables } from '../core/tables.js';
 import type { RefundsTables } from './tables.js';
 import type { Refund } from './types.js';
 import { writtenRow } from '../core/journal/support.js';
@@ -58,12 +61,18 @@ export const requestRefundInputSchema = z.object({
   metadata: z.string().nullable().optional(),
 });
 
-export const approveRefundInputSchema = z.object({ refundId: refundIdSchema, approvedBy: userIdSchema });
+export const approveRefundInputSchema = z.object({
+  refundId: refundIdSchema,
+  approvedBy: userIdSchema,
+  /** The approver's notes. Left out or null: none. */
+  notes: z.string().nullable().optional(),
+});
 
 export const rejectRefundInputSchema = z.object({
   refundId: refundIdSchema,
   rejectedBy: userIdSchema,
-  rejectionReason: z.string(),
+  /** The customer-facing why. A blank reason says nothing, so it is turned down. */
+  rejectionReason: z.string().trim().min(1),
 });
 
 export const processRefundInputSchema = z.object({ refundId: refundIdSchema });
@@ -112,8 +121,9 @@ function legacyMinor(amount: number, currency: string): number {
 
 export function createRefundsJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
   j: JournalDefinitions<Meta, Tx, AppDb>,
-  tables: Pick<RefundsTables, 'refunds'>,
+  tables: Pick<RefundsTables, 'refunds'> & Pick<CoreTables, 'payments'>,
 ) {
+  const { payments } = tables;
   const refundRequest = {
     paymentId: paymentIdSchema,
     reason: reasonSchema,
@@ -132,7 +142,8 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
     'RefundRequestedV2',
     z.object({ ...refundRequest, originalAmount: moneyJsonSchema, refundAmount: moneyJsonSchema }),
   );
-  const RefundApproved = j.event('RefundApproved', z.object({ approvedBy: userIdSchema }));
+  // `notes` is optional: refunds approved before approval notes existed have events without it
+  const RefundApproved = j.event('RefundApproved', z.object({ approvedBy: userIdSchema, notes: z.string().nullable().optional() }));
   const RefundRejected = j.event('RefundRejected', z.object({ rejectedBy: userIdSchema, rejectionReason: z.string() }));
   /** The refund was handed to the provider. The provider's refund id is not known yet. */
   const RefundProcessed = j.event('RefundProcessed', z.object({}));
@@ -162,6 +173,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
     approvedBy: null,
     rejectedBy: null,
     rejectionReason: null,
+    approvalNotes: null,
     requestedAt: at,
     approvedAt: null,
     processedAt: null,
@@ -196,6 +208,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
     .on(RefundApproved, (_row, e) => ({
       status: 'approved',
       approvedBy: e.data.approvedBy,
+      approvalNotes: e.data.notes ?? null,
       approvedAt: fromDate(e.recordedAt),
       updatedAt: fromDate(e.recordedAt),
     }))
@@ -220,8 +233,39 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
       updatedAt: fromDate(e.recordedAt),
     }));
 
-  const requestRefund = j.command('requestRefund', requestRefundInputSchema, (input, { write }) => {
+  /**
+   * The payment row is locked for the rest of the transaction, so two requests for one payment take
+   * turns: the second counts the first. Without the lock both could read the same total and together
+   * refund more than was paid. A refund that is pending, approved, processing or completed holds money.
+   */
+  const requestRefund = j.command('requestRefund', requestRefundInputSchema, async (input, { tx, write }) => {
     const refundId = input.refundId ?? createRefundId();
+
+    const [payment] = await tx
+      .select({ amountMinor: payments.amountMinor, currency: payments.currency })
+      .from(payments)
+      .where(eq(payments.id, input.paymentId))
+      .for('update');
+    if (!payment) {
+      throw new CommandError('NOT_FOUND', `Payment ${input.paymentId} not found`);
+    }
+
+    const refundMinor = toMinorColumn(input.refundAmount);
+    let exceedsPayment = false;
+    if (input.refundAmount.currency.code === payment.currency.toUpperCase()) {
+      const [held] = await tx
+        .select({ total: sql<string | null>`SUM(${tables.refunds.refundAmountMinor})` })
+        .from(tables.refunds)
+        .where(
+          and(
+            eq(tables.refunds.paymentId, input.paymentId),
+            eq(tables.refunds.currency, payment.currency.toUpperCase()),
+            inArray(tables.refunds.status, ['pending', 'approved', 'processing', 'completed']),
+          ),
+        );
+
+      exceedsPayment = Number(held?.total ?? 0) + refundMinor > payment.amountMinor;
+    }
 
     return write(refund, refundId, row => {
       if (row) {
@@ -244,6 +288,13 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
 
       if (!input.refundAmount.isPositive()) {
         throw new CommandError('BAD_REQUEST', 'Refund amount must be positive');
+      }
+
+      if (exceedsPayment) {
+        throw new CommandError(
+          'CONFLICT',
+          `Refund of ${input.refundAmount.toString()} exceeds what is left of the payment`,
+        );
       }
 
       return [
@@ -269,7 +320,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
         throw new CommandError('CONFLICT', `Cannot approve refund with status ${current.status}`);
       }
 
-      return [RefundApproved({ approvedBy: input.approvedBy })];
+      return [RefundApproved({ approvedBy: input.approvedBy, notes: input.notes ?? null })];
     }),
   );
 
@@ -303,6 +354,11 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
   const completeRefund = j.command('completeRefund', completeRefundInputSchema, (input, { write }) =>
     write(refund, input.refundId, row => {
       const current = requireRefund(row, input.refundId);
+
+      // The provider's webhook and the service both report the same refund: the second changes nothing
+      if (current.status === 'completed' && current.providerRefundId === input.providerRefundId) {
+        return [];
+      }
 
       if (current.status !== 'processing') {
         throw new CommandError(

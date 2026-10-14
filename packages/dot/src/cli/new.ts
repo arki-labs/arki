@@ -1,5 +1,12 @@
 /**
- * `dot new <app>` — scaffold a minimal DOT app.
+ * `dot new <app>` — scaffold a DOT app from a bundled template.
+ *
+ * Two templates ship with the package (`--template <name>`):
+ *
+ *   - `stack` (default) — a full-stack app: TanStack Start + oRPC +
+ *     Drizzle/Postgres via `@arki/db` + `@arki/journal`, composed with
+ *     `@arki/dot`, styled with `@arki/ui` and the workbench design system.
+ *   - `minimal` — the smallest DOT app: `defineApp` + `@arki/env`.
  *
  * Two-phase: we first build an in-memory list of {@link FileOperation}
  * entries describing every file the scaffold WOULD write (template
@@ -12,7 +19,7 @@
  * which files will land, with sha256 hashes so they can verify the
  * post-run filesystem matches the plan.
  *
- * Templates live at `packages/dot/templates/app-minimal/` and use
+ * Templates live at `packages/dot/templates/app-<name>/` and use
  * `.tmpl` suffixes + `{{name}}`-style placeholders. The suffix is
  * stripped during scaffolding so `package.json.tmpl` becomes
  * `package.json` on disk.
@@ -21,14 +28,15 @@
  * `dot migrate`) are deliberately NOT surfaced here.
  */
 
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { createDebugLogger } from '@arki/log/debug';
+import { getLogger } from '@arki/log';
 
 import type { DiagnosticIssue } from '../diagnostics.js';
 import type { FileOperation } from './files.js';
 import type { DotNewEnvelope } from './json.js';
+import { DotCliError, DotCliErrorCode } from './error-codes.js';
 import {
   collectTemplateFiles,
   directoryIsNonEmpty,
@@ -38,10 +46,10 @@ import {
   utf8ByteLength,
   writeFileEnsuringDir,
 } from './files.js';
-import { DotCliError, DotCliErrorCode } from './error-codes.js';
 import { toPublicOperation } from './json.js';
+import { readDotVersion, TEMPLATE_VERSIONS, ZOD_VERSION } from './versions.js';
 
-const debugNew = createDebugLogger('arki:dot:cli:new');
+const debugNew = getLogger('arki:dot:cli:new');
 
 /**
  * Package manager the generated README + AGENTS.md will reference.
@@ -49,6 +57,15 @@ const debugNew = createDebugLogger('arki:dot:cli:new');
  * with Bun first.
  */
 export type PackageManager = 'npm' | 'pnpm' | 'bun';
+
+/** Template names accepted by `--template`. */
+export const TEMPLATE_NAMES = ['stack', 'minimal'] as const;
+
+/** A bundled template. */
+export type TemplateName = (typeof TEMPLATE_NAMES)[number];
+
+/** The template `dot new` uses when `--template` is omitted. */
+export const DEFAULT_TEMPLATE: TemplateName = 'stack';
 
 /** Options accepted by {@link runNew}. */
 export type RunNewOptions = {
@@ -66,6 +83,11 @@ export type RunNewOptions = {
   readonly target?: string;
   /** Package manager hint surfaced in README/AGENTS.md. Defaults to `bun`. */
   readonly pm?: PackageManager;
+  /**
+   * Bundled template to scaffold (`stack` or `minimal`). Defaults to
+   * {@link DEFAULT_TEMPLATE}. Any other value fails with `DOT_CLI_E005`.
+   */
+  readonly template?: string;
   /** When true, only plan operations — write nothing. */
   readonly dryRun?: boolean;
   /** When true, emit JSON to `out`. Otherwise emit progress lines. */
@@ -80,55 +102,104 @@ export type RunNewOptions = {
   readonly now?: () => Date;
   /**
    * Override template root. Used by tests; production callers should
-   * leave this undefined so the bundled `templates/app-minimal/`
+   * leave this undefined so the bundled `templates/app-<template>/`
    * directory is used.
    */
   readonly templateRoot?: string;
   /**
-   * Version values inlined into the generated `package.json`. The
-   * defaults track the current `@arki/dot` + `@arki/env` releases.
+   * Version values inlined into the generated `package.json`. `dot`
+   * defaults to this package's own version; the others default to
+   * {@link TEMPLATE_VERSIONS} (see `versions.ts`).
    */
   readonly versions?: {
     readonly dot?: string;
     readonly env?: string;
     readonly zod?: string;
+    readonly log?: string;
+    readonly db?: string;
+    readonly journal?: string;
+    readonly ui?: string;
+    readonly designSystems?: string;
   };
 };
-
-/** Defaults for inlined dependency versions. Kept in one place. */
-const DEFAULT_VERSIONS = {
-  dot: '0.1.0',
-  env: '0.1.0',
-  zod: '4.3.5',
-} as const;
 
 const DEFAULT_PM: PackageManager = 'bun';
 
 const APP_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 
-const FILE_REASONS: Record<string, string> = {
+const MINIMAL_FILE_REASONS: Record<string, string> = {
   'package.json': 'Package manifest with @arki/dot + @arki/env dependencies',
   'tsconfig.json': 'TypeScript config for ESM + NodeNext + strict mode',
   'README.md': 'Quickstart and inspection commands',
-  'AGENTS.md':
-    'Agent-readable conventions (verification commands, public/private boundaries, DOT artifact locations)',
+  'AGENTS.md': 'Agent-readable conventions (verification commands, public/private boundaries, DOT artifact locations)',
   '.gitignore': 'Standard ignores for node_modules, dist, env files',
   'src/app.ts': 'App entrypoint composing defineApp + env adapter',
   'src/env.ts': 'Env schema (zod) consumed by @arki/env/dot',
   'tests/boot.test.ts': 'Vitest that boots the app and asserts manifest shape',
 };
 
+const STACK_FILE_REASONS: Record<string, string> = {
+  'package.json': 'Package manifest: TanStack Start, oRPC, @arki/dot, @arki/db, @arki/journal, @arki/ui',
+  'tsconfig.json': 'Strict TypeScript config for the whole app',
+  'README.md': 'Run locally, deploy to Coolify, what comes next',
+  'AGENTS.md': 'Agent guide: where features live, how to add one, dot explain / dot doctor',
+  '.gitignore': 'Ignores for node_modules, build output, env files',
+  '.dockerignore': 'Keeps node_modules, build output and env files out of the Docker context',
+  '.env.example': 'Env vars the app reads, with local defaults',
+  Dockerfile: 'Multi-stage Bun image that builds and serves the Nitro output',
+  'docker-compose.yml': 'Postgres for local development',
+  'drizzle.config.ts': 'drizzle-kit config: schema files and migrations folder',
+  'vite.config.ts': 'Vite + TanStack Start + Nitro + Tailwind',
+  'vitest.config.ts': 'Vitest config (tests use in-memory PGlite, no Docker)',
+  'src/app.ts': 'The DOT app: log, env, db, migrations, journal',
+  'src/env.ts': 'Env schema (zod) consumed by @arki/env/dot',
+};
+
+const FILE_REASONS: Record<TemplateName, Record<string, string>> = {
+  stack: STACK_FILE_REASONS,
+  minimal: MINIMAL_FILE_REASONS,
+};
+
 const TEMPLATE_SUFFIX = '.tmpl';
 
 /**
- * Resolve the default template directory, anchored relative to this
- * source file. Works both when running from `src/` under Bun and from
- * `dist/` after `tsc` — both layouts put the templates directory two
- * levels above (`packages/dot/templates/app-minimal`).
+ * Template files stored under a different name than they are written as.
+ * The published tarball must not contain any `.env*` file (the release
+ * packlist rejects them, so secrets can never ship by accident), so the
+ * example env file lives in the template as `env.example`.
  */
-function defaultTemplateRoot(): string {
+const WRITTEN_AS: Record<string, string> = {
+  'env.example': '.env.example',
+};
+
+/**
+ * Resolve a bundled template directory, anchored relative to this source
+ * file. Works both when running from `src/` under Bun and from `dist/`
+ * after `tsc` — both layouts put the templates directory two levels above
+ * (`packages/dot/templates/app-<name>`).
+ */
+function defaultTemplateRoot(template: TemplateName): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(here, '..', '..', 'templates', 'app-minimal');
+  return path.resolve(here, '..', '..', 'templates', `app-${template}`);
+}
+
+function isTemplateName(value: string): value is TemplateName {
+  return (TEMPLATE_NAMES as readonly string[]).includes(value);
+}
+
+/**
+ * Validate a `--template` value. Omitted means {@link DEFAULT_TEMPLATE}.
+ * Exported so tests can assert the error without running a scaffold.
+ */
+export function resolveTemplateName(value: string | undefined): TemplateName {
+  if (value === undefined) return DEFAULT_TEMPLATE;
+  if (isTemplateName(value)) return value;
+  throw new DotCliError({
+    code: DotCliErrorCode.InvalidArgs,
+    message: `Unknown template "${value}".`,
+    remediation: `Use one of: ${TEMPLATE_NAMES.join(', ')}. Omit --template for the default (${DEFAULT_TEMPLATE}).`,
+    metadata: { received: value, allowed: [...TEMPLATE_NAMES] },
+  });
 }
 
 /**
@@ -166,8 +237,8 @@ export function validateAppName(name: string): void {
   }
 }
 
-function describeFile(relativePath: string): string {
-  return FILE_REASONS[relativePath] ?? `Scaffold file: ${relativePath}`;
+function describeFile(template: TemplateName, relativePath: string): string {
+  return FILE_REASONS[template][relativePath] ?? `Scaffold file: ${relativePath}`;
 }
 
 function substitute(content: string, vars: Record<string, string>): string {
@@ -189,14 +260,10 @@ export async function planOperations(opts: RunNewOptions): Promise<{
 }> {
   validateAppName(opts.name);
 
+  const template = resolveTemplateName(opts.template);
   const target = resolveTargetDir(opts);
-  const templateRoot = opts.templateRoot ?? defaultTemplateRoot();
+  const templateRoot = opts.templateRoot ?? defaultTemplateRoot(template);
   const pm = opts.pm ?? DEFAULT_PM;
-  const versions = {
-    dot: opts.versions?.dot ?? DEFAULT_VERSIONS.dot,
-    env: opts.versions?.env ?? DEFAULT_VERSIONS.env,
-    zod: opts.versions?.zod ?? DEFAULT_VERSIONS.zod,
-  };
 
   const templateFiles = await collectTemplateFiles(templateRoot);
   if (templateFiles.length === 0) {
@@ -212,9 +279,14 @@ export async function planOperations(opts: RunNewOptions): Promise<{
   const vars: Record<string, string> = {
     name: opts.name,
     pkgManager: pm,
-    dotVersion: versions.dot,
-    envVersion: versions.env,
-    zodVersion: versions.zod,
+    dotVersion: opts.versions?.dot ?? readDotVersion(),
+    envVersion: opts.versions?.env ?? TEMPLATE_VERSIONS.env,
+    zodVersion: opts.versions?.zod ?? ZOD_VERSION,
+    logVersion: opts.versions?.log ?? TEMPLATE_VERSIONS.log,
+    dbVersion: opts.versions?.db ?? TEMPLATE_VERSIONS.db,
+    journalVersion: opts.versions?.journal ?? TEMPLATE_VERSIONS.journal,
+    uiVersion: opts.versions?.ui ?? TEMPLATE_VERSIONS.ui,
+    designSystemsVersion: opts.versions?.designSystems ?? TEMPLATE_VERSIONS['design-systems'],
   };
 
   const operations: FileOperation[] = [];
@@ -223,9 +295,10 @@ export async function planOperations(opts: RunNewOptions): Promise<{
     const raw = await readTemplate(absoluteTemplate);
     const rendered = substitute(raw, vars);
 
-    const stripped = templateRelPath.endsWith(TEMPLATE_SUFFIX)
+    const withoutSuffix = templateRelPath.endsWith(TEMPLATE_SUFFIX)
       ? templateRelPath.slice(0, -TEMPLATE_SUFFIX.length)
       : templateRelPath;
+    const stripped = WRITTEN_AS[withoutSuffix] ?? withoutSuffix;
     const targetPath = path.join(target, stripped);
     const exists = await fileExists(targetPath);
 
@@ -243,7 +316,7 @@ export async function planOperations(opts: RunNewOptions): Promise<{
       action,
       contentHash: sha256(rendered),
       contentBytes: utf8ByteLength(rendered),
-      reason: describeFile(stripped),
+      reason: describeFile(template, stripped),
       content: rendered,
     });
   }
@@ -369,7 +442,7 @@ export async function runNew(opts: RunNewOptions): Promise<DotNewEnvelope> {
       // either created or overwritten with the planned content.
       written.push({ ...op, action: op.action === 'skip' ? 'create' : op.action });
     } catch (error) {
-      debugNew('write failed for %s: %O', dest, error);
+      debugNew.debug('write failed for {dest}', { dest, error: error instanceof Error ? error : String(error) });
       errors.push({
         code: DotCliErrorCode.AppLifecycleFailed,
         severity: 'error',
@@ -394,11 +467,19 @@ export async function runNew(opts: RunNewOptions): Promise<DotNewEnvelope> {
   if (opts.json) {
     out(`${JSON.stringify(envelope, null, 2)}\n`);
   } else if (status === 'success') {
-    out(`Scaffolded ${written.length} file(s) under ${path.relative(opts.cwd ?? process.cwd(), target) || '.'}.\n`);
+    const relativeTarget = path.relative(opts.cwd ?? process.cwd(), target) || '.';
+    const pm = opts.pm ?? DEFAULT_PM;
+    out(`Scaffolded ${written.length} file(s) under ${relativeTarget}.\n`);
     out(`Next steps:\n`);
-    out(`  cd ${path.relative(opts.cwd ?? process.cwd(), target) || '.'}\n`);
-    out(`  ${opts.pm ?? DEFAULT_PM} install\n`);
-    out(`  ${opts.pm ?? DEFAULT_PM} run test\n`);
+    out(`  cd ${relativeTarget}\n`);
+    out(`  ${pm} install\n`);
+    if (resolveTemplateName(opts.template) === 'stack') {
+      out(`  cp .env.example .env\n`);
+      out(`  docker compose up -d\n`);
+      out(`  ${pm} run dev\n`);
+    } else {
+      out(`  ${pm} run test\n`);
+    }
   } else {
     err(`dot: scaffold completed with ${errors.length} error(s).\n`);
     for (const issue of errors) {

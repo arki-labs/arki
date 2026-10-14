@@ -52,7 +52,7 @@ const plainDefinitions = initJournal({ meta: metaSchema });
 export const plain = {
   j: plainDefinitions,
   core: createCoreJournal(plainDefinitions, core),
-  refunds: createRefundsJournal(plainDefinitions, refundsTables),
+  refunds: createRefundsJournal(plainDefinitions, { refunds: refundsTables.refunds, payments: core.payments }),
   journal: plainDefinitions.compose({ tables: journalTablesInSchema }),
 };
 
@@ -64,11 +64,12 @@ const typedDefinitions = initJournal.tx<AppTx>().db<AppDb>().create({ meta: meta
 export const typed = {
   j: typedDefinitions,
   core: createCoreJournal(typedDefinitions, core),
-  refunds: createRefundsJournal(typedDefinitions, refundsTables),
+  refunds: createRefundsJournal(typedDefinitions, { refunds: refundsTables.refunds, payments: core.payments }),
   journal: typedDefinitions.compose({ tables: journalTablesInSchema }),
 };
 
-export async function openDb() {
+/** `extra`: more tables or enums of the same schema, pushed in the same call (a second push would drop these). */
+export async function openDb(extra: Record<string, unknown> = {}) {
   const client = new PGlite('memory://');
   await client.waitReady;
   const db = drizzle({ client });
@@ -85,6 +86,7 @@ export async function openDb() {
       ...refundsTables.enums,
       refunds: refundsTables.refunds,
       ...journalTablesInSchema,
+      ...extra,
     },
     db,
   );

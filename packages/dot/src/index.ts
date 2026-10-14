@@ -28,6 +28,8 @@ export type {
   ActionSource,
   CtxOf,
   DotConfigureContext,
+  DotLoggingContext,
+  DotLoggingHandle,
   EmptyShape,
   InferredProvides,
   KernelCtx,
@@ -48,11 +50,7 @@ export type {
 export { initPlugins } from './init-plugins.js';
 export type { InitPluginsFactory } from './init-plugins.js';
 
-export {
-  DotLifecycleError,
-  DotLifecycleErrorCode,
-  DOT_LIFECYCLE_HOOKS,
-} from './lifecycle.js';
+export { DotLifecycleError, DotLifecycleErrorCode, DOT_LIFECYCLE_HOOKS } from './lifecycle.js';
 export type {
   DotLifecycleHook,
   DotLifecycleState,

@@ -18,7 +18,7 @@ import type {
   WallInput,
   ZonedDateTime,
 } from './types.js';
-import { readLenientISO } from './internal/iso.js';
+import { readCommonISO, readLenientISO } from './internal/iso.js';
 import { systemTimeZone } from './internal/system-zone.js';
 import { isInstant, isPlainDate, isPlainDateTime, isZonedDateTime, Temporal } from './types.js';
 
@@ -183,7 +183,10 @@ export type ParseISOOptions = Readonly<{
  * or `zoned()`; for a calendar date use `plainDate()`.
  */
 export function parseISO(text: string, options?: ParseISOOptions): Instant {
-  const result = readLenientISO(text, options?.timeZone ?? systemTimeZone());
+  const zone = (): string => options?.timeZone ?? systemTimeZone();
+  const epochMs = readCommonISO(text, zone);
+  if (epochMs !== undefined) return Temporal.Instant.fromEpochMilliseconds(epochMs);
+  const result = readLenientISO(text, zone());
   if (result === undefined) throw new RangeError(`parseISO: "${text}" is not ISO 8601 date/time text`);
   return result;
 }

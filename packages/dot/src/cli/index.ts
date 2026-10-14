@@ -17,10 +17,9 @@
  * Exit codes: `0` on success/warning envelopes (doctor warnings still mean the
  * app booted), `1` on `failure` envelopes and on every structured CLI error.
  */
-
 import { parseArgs as nodeParseArgs } from 'node:util';
 
-import { createDebugLogger } from '@arki/log/debug';
+import { getLogger } from '@arki/log';
 
 import type { DotApp, DotAppBuilder, DotAppConfigured } from '../define-app.js';
 import type { DiagnosticIssue } from '../diagnostics.js';
@@ -28,17 +27,18 @@ import type { DiscoveredApp, DiscoveryResult } from './discover.js';
 import type { DotCliEnvelope, DotCliEnvelopeStatus } from './render-explain.js';
 import { DotLifecycleError } from '../lifecycle.js';
 import { discoverApp, guards } from './discover.js';
-import { DotCliError, DotCliErrorCode, dotCliDocsUrl } from './error-codes.js';
+import { dotCliDocsUrl, DotCliError, DotCliErrorCode } from './error-codes.js';
 import { runNew } from './new.js';
+import { readDotVersion } from './versions.js';
 import { probeObservability } from './observability-probe.js';
 import { renderDoctor } from './render-doctor.js';
 import { renderExplain } from './render-explain.js';
 import { renderGraph } from './render-graph.js';
 import { renderProjection } from './render-projection.js';
 
-const debugCli = createDebugLogger('arki:dot:cli');
+const debugCli = getLogger('arki:dot:cli');
 
-const VERSION = '0.1.0';
+const VERSION = readDotVersion();
 
 const HELP_TEXT = `dot — CLI for inspecting and scaffolding DOT apps
 
@@ -76,6 +76,9 @@ Common options:
                          pointing at the docs to wire one in.
 
 \`new\` options:
+  --template <name>      Template to scaffold: stack (default) or minimal.
+                         stack = TanStack Start + oRPC + Postgres + journal;
+                         minimal = defineApp + env only.
   --target <dir>         Directory to create the app in (default: <app-name>)
   --pm <npm|pnpm|bun>    Package manager hint for the README (default: bun)
   --dry-run              Print planned file operations without writing
@@ -93,6 +96,8 @@ export type CliArgs = {
   positional?: string;
   /** `--target` (only honored by `new`). */
   target?: string;
+  /** `--template` (only honored by `new`). Validated by `runNew`. */
+  template?: string;
   /** `--pm` (only honored by `new`). */
   pm?: 'npm' | 'pnpm' | 'bun';
   /** `--dry-run` (only honored by `new`). */
@@ -168,6 +173,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         help: { type: 'boolean', default: false },
         version: { type: 'boolean', default: false },
         target: { type: 'string' },
+        template: { type: 'string' },
         pm: { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
         force: { type: 'boolean', default: false },
@@ -194,6 +200,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     help?: boolean;
     version?: boolean;
     target?: string;
+    template?: string;
     pm?: string;
     'dry-run'?: boolean;
     force?: boolean;
@@ -253,6 +260,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     cwd: values.cwd,
     positional,
     target: values.target,
+    template: values.template,
     pm,
     dryRun: values['dry-run'] ?? false,
     force: values.force ?? false,
@@ -292,9 +300,7 @@ export async function runExplain(
       // explain never boots — just configure.
       configured = (discovered as DotAppBuilder<Record<string, unknown>>).configure();
     } else {
-      configured = discovered as
-        | DotApp<Record<string, unknown>>
-        | DotAppConfigured<Record<string, unknown>>;
+      configured = discovered as DotApp<Record<string, unknown>> | DotAppConfigured<Record<string, unknown>>;
     }
   } catch (err) {
     throw wrapLifecycleError(err, 'configure');
@@ -345,10 +351,7 @@ type DoctorRunOptions = {
  * even after a boot throw. This is the whole point of `doctor`: failure
  * should be observable, not opaque.
  */
-export async function runDoctor(
-  discovered: DiscoveredApp,
-  opts: DoctorRunOptions,
-): Promise<DotCliEnvelope<unknown>> {
+export async function runDoctor(discovered: DiscoveredApp, opts: DoctorRunOptions): Promise<DotCliEnvelope<unknown>> {
   // Already-booted app: just read diagnostics, don't touch lifecycle.
   if (!guards.isDotAppBuilder(discovered) && !guards.isDotAppConfigured(discovered)) {
     const app = discovered as DotApp<Record<string, unknown>>;
@@ -383,7 +386,9 @@ export async function runDoctor(
     // We deliberately swallow the throw so the user sees the per-plugin
     // issues instead of an opaque wrapper error.
     bootThrew = true;
-    debugCli('boot threw, falling back to configured diagnostics: %O', err);
+    debugCli.debug('boot threw, falling back to configured diagnostics', {
+      error: err instanceof Error ? err : String(err),
+    });
   }
 
   try {
@@ -412,7 +417,7 @@ export async function runDoctor(
       try {
         await bootedApp.dispose();
       } catch (err) {
-        debugCli('dispose threw: %O', err);
+        debugCli.debug('dispose threw', { error: err instanceof Error ? err : String(err) });
       }
     }
   }
@@ -528,6 +533,7 @@ export async function main(options: MainOptions): Promise<number> {
         name: args.positional,
         cwd: args.cwd,
         target: args.target,
+        template: args.template,
         pm: args.pm,
         dryRun: args.dryRun,
         json: args.json,
@@ -603,12 +609,9 @@ function envelopeExitCode(status: DotCliEnvelopeStatus): number {
 }
 
 function formatErrorText(err: DotCliError): string {
-  return [
-    `dot: ${err.code} ${err.message}`,
-    `  remediation: ${err.remediation}`,
-    `  docs: ${err.docsUrl}`,
-    '',
-  ].join('\n');
+  return [`dot: ${err.code} ${err.message}`, `  remediation: ${err.remediation}`, `  docs: ${err.docsUrl}`, ''].join(
+    '\n',
+  );
 }
 
 /**

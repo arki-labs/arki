@@ -1,8 +1,9 @@
 import type { AnyRelations } from 'drizzle-orm';
-import { defineRelations } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PoolConfig } from 'pg';
+import { defineRelations } from 'drizzle-orm';
 
+import { DB_COMPOSITION_ERROR_CODES, DbCompositionError } from './composition.js';
 import { debugProjection } from './debug.js';
 import { initDbWithOptions } from './init.js';
 
@@ -41,31 +42,17 @@ export type ProjectionHandler<TEvent, TRepos, TRelations extends AnyRelations = 
 /**
  * Projection builder interface
  */
-export type ProjectionBuilder<
-  TEvent = never,
-  TRepos = never,
-  TRelations extends AnyRelations = AnyRelations,
-> = {
+export type ProjectionBuilder<TEvent = never, TRepos = never, TRelations extends AnyRelations = AnyRelations> = {
   named<TName extends string>(name: TName): ProjectionBuilderWithName<TEvent, TRepos, TRelations, TName>;
 };
 
-export type ProjectionBuilderWithName<
-  _TEvent,
-  TRepos,
-  TRelations extends AnyRelations,
-  TName extends string,
-> = {
+export type ProjectionBuilderWithName<_TEvent, TRepos, TRelations extends AnyRelations, TName extends string> = {
   on<TEventType extends { type: string }>(
     eventTypes: readonly TEventType['type'][] | TEventType['type'][],
   ): ProjectionBuilderWithEvents<TEventType, TRepos, TRelations, TName>;
 };
 
-export type ProjectionBuilderWithEvents<
-  TEvent,
-  TRepos,
-  TRelations extends AnyRelations,
-  TName extends string,
-> = {
+export type ProjectionBuilderWithEvents<TEvent, TRepos, TRelations extends AnyRelations, TName extends string> = {
   handle(handler: ProjectionHandler<TEvent, TRepos, TRelations>): ProjectionDefinition<TName>;
 };
 
@@ -158,12 +145,7 @@ function applyMiddleware(
   return next();
 }
 
-class ProjectionBuilderImpl<
-  TEvent,
-  TRepos,
-  TRelations extends AnyRelations,
-  TName extends string = string,
->
+class ProjectionBuilderImpl<TEvent, TRepos, TRelations extends AnyRelations, TName extends string = string>
   implements
     ProjectionBuilder<TEvent, TRepos, TRelations>,
     ProjectionBuilderWithName<TEvent, TRepos, TRelations, TName>,
@@ -185,7 +167,7 @@ class ProjectionBuilderImpl<
   }
 
   named<N extends string>(name: N): ProjectionBuilderWithName<TEvent, TRepos, TRelations, N> {
-    debugProjection('[builder] Setting projection name: %s', name);
+    debugProjection.debug('[builder] Setting projection name: {name}', { name });
     this._name = name;
     return this as unknown as ProjectionBuilderImpl<TEvent, TRepos, TRelations, N>;
   }
@@ -193,19 +175,27 @@ class ProjectionBuilderImpl<
   on<TEventType extends { type: string }>(
     eventTypes: readonly TEventType['type'][] | TEventType['type'][],
   ): ProjectionBuilderWithEvents<TEventType, TRepos, TRelations, TName> {
-    debugProjection('[builder] Registering event types: %o', eventTypes);
+    debugProjection.debug('[builder] Registering event types: {eventTypes}', { eventTypes });
     this._eventTypes = [...eventTypes];
     return this as unknown as ProjectionBuilderImpl<TEventType, TRepos, TRelations, TName>;
   }
 
   handle(handler: ProjectionHandler<TEvent, TRepos, TRelations>): ProjectionDefinition<TName> {
     if (!this._name) {
-      debugProjection('[builder] Error: Projection name is required');
-      throw new Error('Projection name is required. Call .named() first.');
+      debugProjection.debug('[builder] Error: Projection name is required');
+      throw new DbCompositionError({
+        code: DB_COMPOSITION_ERROR_CODES.projectionNameMissing,
+        message: 'Projection name is required. Call .named() first.',
+        remediation: 'Call .named("...") before .handle().',
+      });
     }
     if (!this._eventTypes) {
-      debugProjection('[builder] Error: Event types are required');
-      throw new Error('Event types are required. Call .on() first.');
+      debugProjection.debug('[builder] Error: Event types are required');
+      throw new DbCompositionError({
+        code: DB_COMPOSITION_ERROR_CODES.projectionEventsMissing,
+        message: 'Event types are required. Call .on() first.',
+        remediation: 'Call .on(...) with the event types before .handle().',
+      });
     }
 
     const name = this._name as TName;
@@ -214,8 +204,10 @@ class ProjectionBuilderImpl<
     const repos = this.repos;
     const db = this._db;
 
-    debugProjection('[builder] Creating projection definition (name: %s, eventTypes: %o, middlewareCount: %d)',
-      name, eventTypes, middleware.length);
+    debugProjection.debug(
+      '[builder] Creating projection definition (name: {name}, eventTypes: {eventTypes}, middlewareCount: {middlewareLength})',
+      { name, eventTypes, middlewareLength: middleware.length },
+    );
 
     return {
       name,
@@ -234,19 +226,24 @@ class ProjectionBuilderImpl<
   }
 
   use(middleware: ProjectionMiddleware): ProjectionBuilderRoot<TRepos, TRelations> {
-    debugProjection('[builder] Adding projection middleware (currentCount: %d)', this._middleware.length);
+    debugProjection.debug('[builder] Adding projection middleware (currentCount: {currentCount})', {
+      currentCount: this._middleware.length,
+    });
     const newBuilder = new ProjectionBuilderImpl<TEvent, TRepos, TRelations, TName>(this.repos, this._db, [
       ...this._middleware,
       middleware,
     ]);
-    debugProjection('[builder] Middleware added (newCount: %d)', this._middleware.length + 1);
+    debugProjection.debug('[builder] Middleware added (newCount: {newCount})', {
+      newCount: this._middleware.length + 1,
+    });
     return newBuilder;
   }
 }
 
-class DbBuilderImpl<TRelations extends AnyRelations, TRepos extends Record<string, unknown>>
-  implements DbBuilder<TRelations, TRepos>
-{
+class DbBuilderImpl<TRelations extends AnyRelations, TRepos extends Record<string, unknown>> implements DbBuilder<
+  TRelations,
+  TRepos
+> {
   readonly db: NodePgDatabase<TRelations>;
   readonly isDev: boolean;
   private _repos?: TRepos;
@@ -266,10 +263,16 @@ class DbBuilderImpl<TRelations extends AnyRelations, TRepos extends Record<strin
     key: K,
     factory: (db: NodePgDatabase<TRelations>) => R,
   ): DbBuilder<TRelations, TRepos & Record<K, R>> {
-    debugProjection('[builder] Registering repository (key: %s, currentCount: %d)', key, this._repoFactories.size);
+    debugProjection.debug('[builder] Registering repository (key: {key}, currentCount: {currentCount})', {
+      key,
+      currentCount: this._repoFactories.size,
+    });
     const newFactories = new Map(this._repoFactories);
     newFactories.set(key, factory);
-    debugProjection('[builder] Repository registered (key: %s, newCount: %d)', key, newFactories.size);
+    debugProjection.debug('[builder] Repository registered (key: {key}, newCount: {newFactoriesSize})', {
+      key,
+      newFactoriesSize: newFactories.size,
+    });
     return new DbBuilderImpl<TRelations, TRepos & Record<K, R>>(this.db, this.isDev, newFactories) as DbBuilder<
       TRelations,
       TRepos & Record<K, R>
@@ -282,16 +285,18 @@ class DbBuilderImpl<TRelations extends AnyRelations, TRepos extends Record<strin
 
   get projection(): ProjectionBuilderRoot<TRepos, TRelations> {
     if (!this._repos) {
-      debugProjection('[builder] Initializing repositories from factories (count: %d)', this._repoFactories.size);
+      debugProjection.debug('[builder] Initializing repositories from factories (count: {count})', {
+        count: this._repoFactories.size,
+      });
       const repos: Record<string, unknown> = {};
       for (const [key, factory] of this._repoFactories) {
-        debugProjection('[builder] Creating repository: %s', key);
+        debugProjection.debug('[builder] Creating repository: {key}', { key });
         repos[key] = factory(this.db);
       }
       this._repos = repos as TRepos;
-      debugProjection('[builder] All repositories initialized');
+      debugProjection.debug('[builder] All repositories initialized');
     }
-    debugProjection('[builder] Creating projection builder');
+    debugProjection.debug('[builder] Creating projection builder');
     return new ProjectionBuilderImpl<never, TRepos, TRelations>(this._repos, this.db);
   }
 }
@@ -304,21 +309,23 @@ class SchemaBuilderImpl<TRelations extends AnyRelations> implements SchemaBuilde
     isDev?: boolean;
     poolConfig?: Partial<PoolConfig>;
   }): DbBuilder<TRelations, Record<string, never>> {
-    debugProjection('[builder] Creating database builder (isDev: %s, hasPoolConfig: %s)',
-      options.isDev ?? false, !!options.poolConfig);
+    debugProjection.debug('[builder] Creating database builder (isDev: {isDev}, hasPoolConfig: {hasPoolConfig})', {
+      isDev: options.isDev ?? false,
+      hasPoolConfig: !!options.poolConfig,
+    });
 
     const poolConfig: PoolConfig = {
       connectionString: options.connectionString,
       ...options.poolConfig,
     };
 
-    debugProjection('[builder] Initializing database with pool config');
+    debugProjection.debug('[builder] Initializing database with pool config');
     const db = initDbWithOptions<TRelations>(poolConfig, {
       relations: this.relations,
       logger: options.isDev,
     });
 
-    debugProjection('[builder] Database builder created successfully');
+    debugProjection.debug('[builder] Database builder created successfully');
     return new DbBuilderImpl<TRelations, Record<string, never>>(db, options.isDev ?? false);
   }
 }
@@ -327,13 +334,13 @@ class InitialBuilderImpl implements InitialBuilder {
   schema<TSchema extends Record<string, unknown>>(
     schema: TSchema,
   ): SchemaBuilder<ReturnType<typeof defineRelations<TSchema>>> {
-    debugProjection('[builder] Setting database schema (deriving relations via defineRelations)');
+    debugProjection.debug('[builder] Setting database schema (deriving relations via defineRelations)');
     const relations = defineRelations(schema) as ReturnType<typeof defineRelations<TSchema>>;
     return new SchemaBuilderImpl(relations);
   }
 
   relations<TRelations extends AnyRelations>(relations: TRelations): SchemaBuilder<TRelations> {
-    debugProjection('[builder] Setting database relations (explicit RQBv2)');
+    debugProjection.debug('[builder] Setting database relations (explicit RQBv2)');
     return new SchemaBuilderImpl(relations);
   }
 }

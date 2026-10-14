@@ -1,5 +1,21 @@
 # @arki/date
 
+## 0.2.0
+
+### Minor Changes
+
+- 3c2cc9d: Much faster hot paths. Results are unchanged: every fast path is checked against Temporal on thousands of generated values, and it hands any case it does not cover (other calendars, `reject` on an ambiguous time, rare zone histories) back to Temporal.
+
+  - `parseISO` reads common ISO 8601 text with integer math (about 10× faster).
+  - `format` reads fields once with integer math and caches localized names (about 5× faster).
+  - `startOf`/`endOf` on plain dates and zoned values, `diff` in days, `isSame*`, `isToday` and friends, and `weekOf` work on day counts instead of Temporal objects.
+  - Time-zone offsets come from a per-day cache instead of a new `ZonedDateTime` per question.
+
+- e115648: `@arki/date/tanstack` adds `temporalSerializationAdapters`: TanStack Router / Start serialization adapters for `Instant`, `ZonedDateTime`, `PlainDate`, `PlainDateTime` and `Duration`. Loader data, server-function results and the SSR payload travel through seroval, which throws on Temporal values; register the adapters once with `createStart(() => ({ serializationAdapters: temporalSerializationAdapters }))`. Values travel as ISO / RFC 9557 text. `@tanstack/react-router` is an optional peer dependency.
+- 11f2ba7: Temporal values end to end. `@arki/date/serialize` adds `temporalJsonSerializers` (oRPC `customJsonSerializers` for `Instant`, `ZonedDateTime`, `PlainDate`, `PlainDateTime` and `Duration`) and `registerTemporalTypes(superjson)`, so values keep their type across `RPCHandler` → `RPCLink` and SSR dehydration.
+
+  `@arki/db/temporal` columns now use Drizzle's exact SQL type names (`timestamp with time zone`, `timestamp`, `date`), so adopting them never produces a migration, and declare Drizzle's `:string` codecs so every driver, Bun SQL included, returns Postgres text. `instant(name, { withTimezone: false })` maps an existing `timestamp` column, read as UTC like Drizzle's own column. Parsing is strict: `infinity` and BC values throw.
+
 ## 0.1.0
 
 ### Minor Changes

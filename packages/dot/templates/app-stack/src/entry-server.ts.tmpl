@@ -1,0 +1,12 @@
+import handler from '@tanstack/react-start/server-entry';
+
+/**
+ * Server entry. Nitro calls `fetch` on the default export, so it must be an
+ * object with a `fetch` method (a bare handler function builds, then every
+ * request fails with "mod.fetch is not a function").
+ */
+export default {
+  fetch(request: Request) {
+    return handler.fetch(request);
+  },
+};

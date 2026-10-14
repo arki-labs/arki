@@ -1,0 +1,26 @@
+import { createFileRoute } from '@tanstack/react-router';
+
+import { sql } from '@arki/db/orm';
+import { getLogger } from '@arki/log';
+
+import { startApp } from '~/server/runtime';
+
+const log = getLogger('app:health');
+
+/** Health check for Coolify / Docker: 200 when the app is started and Postgres answers. */
+export const Route = createFileRoute('/api/health')({
+  server: {
+    handlers: {
+      GET: async () => {
+        try {
+          const { services } = await startApp();
+          await services.db.execute(sql`select 1`);
+          return Response.json({ status: 'ok' });
+        } catch (error) {
+          log.error('health check failed: {error}', { error: error instanceof Error ? error : String(error) });
+          return Response.json({ status: 'error' }, { status: 503 });
+        }
+      },
+    },
+  },
+});

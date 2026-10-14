@@ -1,0 +1,42 @@
+import { hookSignals } from '@arki/dot';
+
+import { app } from '~/app';
+
+import type { RpcContext } from './orpc';
+
+type StartedApp = Awaited<ReturnType<typeof app.start>>;
+
+declare global {
+  // One started app per process. Kept on globalThis so a dev-server reload
+  // reuses it instead of opening a second database pool.
+  var __dotAppStart: Promise<StartedApp> | undefined;
+}
+
+/**
+ * Start the DOT app once (boot runs migrations, then the journal worker
+ * starts) and return it. A failed start is not cached: the next call tries
+ * again, so a database that comes up late does not need a restart.
+ */
+export function startApp(): Promise<StartedApp> {
+  globalThis.__dotAppStart ??= app.start().then(
+    started => {
+      // SIGTERM / SIGINT drain the app: stop the worker, close the pool.
+      hookSignals(started);
+      return started;
+    },
+    (error: unknown) => {
+      globalThis.__dotAppStart = undefined;
+      throw error;
+    },
+  );
+  return globalThis.__dotAppStart;
+}
+
+/** The oRPC context for one request. There is no sign-in yet, so writes have no actor. */
+export async function createRpcContext(): Promise<RpcContext> {
+  const { services } = await startApp();
+  return {
+    db: services.db,
+    run: services.journal.bind(services.db, { actorId: null }),
+  };
+}

@@ -190,6 +190,58 @@ await uow(async tx => {
   package for plugin authoring, lifecycle, diagnostics, and the
   [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).
 
+<!-- bench:start -->
+## Benchmarks
+
+ID creation against the common ID generators, and PGlite (in memory) queries through the @arki/db handle against raw Drizzle on the same PGlite instance.
+
+Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+
+### Create one ID
+
+Contracts differ: @arki IDs are prefixed cuid2 strings typed as `usr_${string}`; the others return plain strings. uuid v7 is time-ordered; randomUUID is v4.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/db createIdFactory("usr_").create() | 173.90 µs | 2807.49× |
+| @arki/db createPrefixedId("usr_") | 237.20 µs | 3829.40× |
+| @paralleldrive/cuid2 createId (used directly) | 177.48 µs | 2865.26× |
+| nanoid | 61.9 ns | fastest |
+| uuid v7 | 2.01 µs | 32.37× |
+| crypto.randomUUID() | 261.2 ns | 4.22× |
+
+### Insert one row (PGlite, in memory)
+
+The @arki table fills its id with the factory default; the raw table uses randomUUID().
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/db handle, id from ID factory | 364.83 µs | 1.93× |
+| raw drizzle() on same PGlite, id from randomUUID | 189.08 µs | fastest |
+
+### Find one row by id
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/db handle, select().where(eq) | 272.58 µs | 1.24× |
+| @arki/db handle, relational query.findFirst | 240.83 µs | 1.09× |
+| raw drizzle() on same PGlite, select().where(eq) | 220.54 µs | fastest |
+
+### List 50 rows
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/db handle, select().from() | 318.12 µs | 1.07× |
+| raw drizzle() on same PGlite, select().from() | 297.08 µs | fastest |
+
+Read the rows with the contracts in mind:
+
+- @arki/db has no repository class. It adds the prefixed ID factory (cuid2 plus a typed, validated column) and the PGlite runtime, so query rows measure only that wrapper cost and the id default.
+- Rows in the query groups run against a growing table for inserts; compare rows within a group only.
+
+Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+<!-- bench:end -->
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

@@ -1,0 +1,48 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { allJournalTables } from '~/server/journal-tables';
+import { bootTestApp, call } from '~/testing';
+
+import { notesRouter } from './procedures';
+
+let testApp: Awaited<ReturnType<typeof bootTestApp>>;
+
+beforeAll(async () => {
+  testApp = await bootTestApp();
+});
+
+afterAll(async () => {
+  await testApp.dispose();
+});
+
+describe('notes', () => {
+  it('creates a note and lists it back', async () => {
+    const { id } = await call(notesRouter.create, { title: 'First note', body: 'Hello' }, { context: testApp.context });
+
+    const listed = await call(notesRouter.list, { limit: 10 }, { context: testApp.context });
+    expect(listed.map(n => n.id)).toContain(id);
+
+    const found = await call(notesRouter.byId, { id }, { context: testApp.context });
+    expect(found).toMatchObject({ title: 'First note', body: 'Hello', version: 1 });
+  });
+
+  // The audit trail is the reason writes go through the journal: a note row
+  // without its event would be a change nobody can explain later.
+  it('records a NoteCreated event for every note it writes', async () => {
+    const { id } = await call(notesRouter.create, { title: 'Audited' }, { context: testApp.context });
+
+    const events = await testApp.services.db.select().from(allJournalTables.events);
+    const created = events.filter(e => e.entityId === id);
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({ kind: 'note', type: 'NoteCreated', version: 1 });
+  });
+
+  it('rejects an empty title before anything is written', async () => {
+    const before = await call(notesRouter.list, { limit: 100 }, { context: testApp.context });
+
+    await expect(call(notesRouter.create, { title: '   ' }, { context: testApp.context })).rejects.toThrow();
+
+    const after = await call(notesRouter.list, { limit: 100 }, { context: testApp.context });
+    expect(after).toHaveLength(before.length);
+  });
+});

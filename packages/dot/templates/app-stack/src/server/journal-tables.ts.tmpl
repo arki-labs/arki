@@ -1,0 +1,13 @@
+/**
+ * The journal's own tables: the event log, the job queue for effects,
+ * idempotency receipts and projection cursors. Exported one by one so
+ * drizzle-kit finds them (see drizzle.config.ts) and your migrations own them.
+ */
+import { journalTables } from '@arki/journal/pg';
+
+export const allJournalTables = journalTables();
+
+export const journalEvents = allJournalTables.events;
+export const journalJobs = allJournalTables.jobs;
+export const journalReceipts = allJournalTables.receipts;
+export const journalCursors = allJournalTables.cursors;

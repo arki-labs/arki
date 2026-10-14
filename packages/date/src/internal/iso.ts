@@ -3,6 +3,8 @@
  */
 
 import { Temporal } from '../types.js';
+import { daysFromCivil, daysInMonthOf, MS_PER_DAY } from './civil.js';
+import { epochFromWall } from './offsets.js';
 
 const DATE_TIME_DELIMITER = /[T ]/;
 const TIME_ZONE_DELIMITER = /[Z ]/i;
@@ -150,4 +152,87 @@ export function readLenientISO(text: string, timeZone: string): Temporal.Instant
     .toZonedDateTimeISO('UTC')
     .toPlainDateTime();
   return wall.toZonedDateTime(timeZone).toInstant();
+}
+
+// ---------------------------------------------------------------------------
+// fast path
+
+/** The digit at `index`, or -1 (also past the end). */
+function digitAt(text: string, index: number): number {
+  const value = (text.codePointAt(index) ?? -1) - 48;
+  return value >= 0 && value <= 9 ? value : -1;
+}
+
+function twoDigitsAt(text: string, index: number): number {
+  const tens = digitAt(text, index);
+  const ones = digitAt(text, index + 1);
+  return tens < 0 || ones < 0 ? -1 : tens * 10 + ones;
+}
+
+/** `±HH`, `±HHMM` or `±HH:MM` from `index` to the end: milliseconds to add to reach UTC, or `undefined`. */
+function readOffset(text: string, index: number): number | undefined {
+  const sign = text.charAt(index);
+  if (sign !== '+' && sign !== '-') return undefined;
+  const hours = twoDigitsAt(text, index + 1);
+  if (hours < 0) return undefined;
+  let minutes = 0;
+  const rest = text.length - (index + 3);
+  if (rest === 3 && text.charAt(index + 3) === ':') minutes = twoDigitsAt(text, index + 4);
+  else if (rest === 2) minutes = twoDigitsAt(text, index + 3);
+  else if (rest !== 0) return undefined;
+  if (minutes < 0 || minutes > 59) return undefined;
+  return (sign === '+' ? -1 : 1) * (hours * MS_PER_HOUR + minutes * MS_PER_MINUTE);
+}
+
+/**
+ * The common ISO 8601 shapes — `YYYY-MM-DD`, optionally followed by `T` or a
+ * space, `HH:MM`, `:SS`, a `.`/`,` fraction and `Z` or `±HH[[:]MM]` — read
+ * with plain arithmetic. Returns epoch milliseconds, or `undefined` for any
+ * other text; the caller then uses `readLenientISO`, so every answer equals
+ * the lenient reader's (same validation, same fraction arithmetic).
+ */
+export function readCommonISO(text: string, timeZone: () => string): number | undefined {
+  const length = text.length;
+  if (length < 10 || text.charAt(4) !== '-' || text.charAt(7) !== '-') return undefined;
+  const century = twoDigitsAt(text, 0);
+  const yearOfCentury = twoDigitsAt(text, 2);
+  const month = twoDigitsAt(text, 5);
+  const day = twoDigitsAt(text, 8);
+  if (century < 0 || yearOfCentury < 0 || month < 1 || month > 12 || day < 1) return undefined;
+  const year = century * 100 + yearOfCentury;
+  if (day > daysInMonthOf(year, month)) return undefined;
+  const date = daysFromCivil(year, month, day) * MS_PER_DAY;
+
+  let time = 0;
+  let index = 10;
+  if (length > 10) {
+    const separator = text.charAt(10);
+    if ((separator !== 'T' && separator !== ' ') || text.charAt(13) !== ':') return undefined;
+    const hours = twoDigitsAt(text, 11);
+    const minutes = twoDigitsAt(text, 14);
+    if (hours < 0 || minutes < 0) return undefined;
+    let seconds = 0;
+    index = 16;
+    if (text.charAt(16) === ':') {
+      seconds = twoDigitsAt(text, 17);
+      if (seconds < 0) return undefined;
+      index = 19;
+      const mark = text.charAt(19);
+      if (mark === '.' || mark === ',') {
+        index = 20;
+        while (digitAt(text, index) >= 0) index++;
+        if (index === 20) return undefined;
+        // The lenient reader's arithmetic exactly: parse "SS.fff" as one float.
+        seconds = Number.parseFloat(text.slice(17, index).replace(',', '.'));
+      }
+    }
+    const valid = hours === 24 ? minutes === 0 && seconds === 0 : seconds < 60 && minutes < 60 && hours < 25;
+    if (!valid) return undefined;
+    time = hours * MS_PER_HOUR + minutes * MS_PER_MINUTE + seconds * 1000;
+  }
+
+  if (index === length) return epochFromWall(timeZone(), Math.trunc(date + time));
+  if (text.charAt(index) === 'Z') return index + 1 === length ? Math.trunc(date + time) : undefined;
+  const offset = readOffset(text, index);
+  return offset === undefined ? undefined : Math.trunc(date + time + offset);
 }

@@ -47,7 +47,7 @@ export type DunningIntegrationConfig = {
   communication?: CommunicationOrchestrationConfig;
 };
 
-export type DunningIntegrationCoreTables = Pick<CoreTables, 'customers' | 'payments' | 'subscriptions'>;
+export type DunningIntegrationCoreTables = Pick<CoreTables, 'customers' | 'payments' | 'subscriptions' | 'plans'>;
 
 export type DunningIntegrationDunningTables = Pick<
   DunningTables,
@@ -90,6 +90,10 @@ export class DunningIntegrationService {
         dunningCampaignAnalytics: dunningTables.dunningCampaignAnalytics,
         dunningTemplates: dunningTables.dunningTemplates,
         dunningExecutions: dunningTables.dunningExecutions,
+        customerRiskProfiles: dunningTables.customerRiskProfiles,
+        customers: coreTables.customers,
+        payments: coreTables.payments,
+        subscriptions: coreTables.subscriptions,
       },
       () => this.communicationService,
       paymentRetryService,

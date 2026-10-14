@@ -92,6 +92,51 @@ adapters collect slices from.
 - **Dependencies point one way** — features import their contracts,
   never each other's internals; composition happens above them.
 
+<!-- bench:start -->
+## Benchmarks
+
+There is no direct npm competitor for `@arki/feature`: it is a small declaration layer for backend domain modules. So the comparison is against the hand-written wiring a team would write without it, a plain object of the same shape and a loop that merges them. Each case uses 50 features, each with a router fragment, a repository factory and a boot-time slice.
+
+Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+
+### Declare 50 features
+
+Build the 50 feature values from ready-made specs.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/feature (defineFeature) | 2.71 µs | fastest |
+| hand-written object literal | 3.36 µs | 1.24× |
+
+### Compose the router fragments of 50 features
+
+`composeRouter` rejects duplicate mount keys. The first hand-written row does not check; the second does.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/feature (composeRouter) | 34.05 µs | 3.02× |
+| hand-written merge (Object.assign, no check) | 11.29 µs | fastest |
+| hand-written merge with duplicate check | 26.93 µs | 2.39× |
+
+### Build the repositories of 50 features over one database handle
+
+Calls each repository factory once. `composeRepos` rejects duplicate repo keys; the hand-written rows show the loop without and with that check.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/feature (composeRepos) | 14.44 µs | 1.06× |
+| hand-written loop (no check) | 13.67 µs | fastest |
+| hand-written loop with duplicate check | 26.24 µs | 1.92× |
+
+Read the rows with the contracts in mind:
+
+- `defineFeature` copies a spec into the declared shape and fills in defaults. The hand-written object skips defaults and does no checking.
+- `composeRouter` and `composeRepos` throw a coded error when two features claim the same key (and fail to compile under TypeScript). The plain merge (`Object.assign`) silently lets the last feature win, so the fair baseline is the loop with its own duplicate check, shown as a separate row.
+- All of this runs once at module load, not per request. The numbers show it costs microseconds, not that it needs tuning.
+
+Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+<!-- bench:end -->
+
 ## License
 
 MIT © ARKI Contributors

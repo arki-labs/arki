@@ -1,11 +1,13 @@
 import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
-import { eq } from 'drizzle-orm';
+import type { PgliteDatabase } from 'drizzle-orm/pglite';
+import { count, eq } from 'drizzle-orm';
 
 import type { UserId } from './user-id.js';
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
 
+import type { PaymentQuery, PlanQuery, SubscriptionQuery } from './contracts.js';
 import type { CoreTables } from './tables.js';
 import type {
   Customer,
@@ -33,6 +35,7 @@ import type {
   WebhookEventType,
   WebhookId,
 } from './types.js';
+import { claimWebhookEvent, reclaimWebhookEvent } from './webhook-claims.js';
 
 /**
  * Structural database type accepted by the payments repositories.
@@ -51,7 +54,8 @@ import type {
  */
 export type PaymentDatabase =
   | NodePgDatabase<AnyRelations>
-  | NodePgTransaction<AnyRelations>;
+  | NodePgTransaction<AnyRelations>
+  | PgliteDatabase<AnyRelations>;
 
 type FieldFilter<T> =
   | T
@@ -181,6 +185,22 @@ export class PaymentRepository {
     });
   }
 
+  /** Plans matching the filters left in `query`, cheapest first within a tier, one page. */
+  async findPlans(query: PlanQuery): Promise<Plan[]> {
+    const { tier, interval, isActive, limit, offset } = query;
+
+    return this.q.plans.findMany({
+      where: {
+        ...(tier && { tier }),
+        ...(interval && { interval }),
+        ...(isActive !== undefined && { isActive }),
+      },
+      orderBy: (t) => [t.tier, t.priceMinor, t.id],
+      limit,
+      offset,
+    });
+  }
+
   async findActivePlans(): Promise<Plan[]> {
     return this.q.plans.findMany({
       where: { isActive: true },
@@ -219,13 +239,28 @@ export class PaymentRepository {
   }
 
   // Customer methods
+  /**
+   * A user has one customer, and a provider customer is one row. Two checkouts that race to
+   * create the same customer both succeed: the second gets the row the first wrote. A customer
+   * that clashes with a different one (another provider id for the user, or the provider id
+   * of another user) is an error, not a silent pick of either row.
+   */
   async createCustomer(data: NewCustomer): Promise<Customer> {
-    const result = await this.db.insert(this.customers).values(data).returning();
-    const row = result[0];
-    if (!row) {
-      throw new Error('Failed to create customer');
+    const [created] = await this.db.insert(this.customers).values(data).onConflictDoNothing().returning();
+    if (created) {
+      return created;
     }
-    return row as Customer;
+
+    const existing = await this.findCustomerByUserId(data.userId);
+    if (existing && existing.providerCustomerId === data.providerCustomerId) {
+      return existing;
+    }
+
+    throw new Error(
+      existing
+        ? `User ${data.userId} already has customer ${existing.id} with provider customer ${existing.providerCustomerId}`
+        : `Provider customer ${data.providerCustomerId} already belongs to another user`,
+    );
   }
 
   async findCustomerById(id: CustomerId): Promise<Customer | null> {
@@ -281,6 +316,23 @@ export class PaymentRepository {
       where: { userId },
       with: { plan: true, customer: true },
       orderBy: (t, { desc }) => [desc(t.createdAt)],
+    });
+  }
+
+  /** Subscriptions matching the filters left in `query`, newest first, one page. */
+  async findSubscriptions(query: SubscriptionQuery): Promise<Subscription[]> {
+    const { status, planId, userId, limit, offset } = query;
+
+    return this.q.subscriptions.findMany({
+      where: {
+        ...(status && { status }),
+        ...(planId && { planId }),
+        ...(userId && { userId }),
+      },
+      with: { plan: true, customer: true },
+      orderBy: (t, { desc }) => [desc(t.createdAt), t.id],
+      limit,
+      offset,
     });
   }
 
@@ -351,6 +403,35 @@ export class PaymentRepository {
     });
   }
 
+  /** Payments matching the filters left in `query`, newest first, one page. `startDate` and `endDate` bound `createdAt`, both inclusive. */
+  async findPayments(query: PaymentQuery): Promise<Payment[]> {
+    const { status, subscriptionId, customerId, userId, startDate, endDate, limit, offset } = query;
+    const createdAt =
+      startDate || endDate
+        ? {
+            ...(startDate && { gte: startDate }),
+            ...(endDate && { lte: endDate }),
+          }
+        : undefined;
+
+    return this.q.payments.findMany({
+      where: {
+        ...(status && { status }),
+        ...(subscriptionId && { subscriptionId }),
+        ...(customerId && { customerId }),
+        ...(userId && { userId }),
+        ...(createdAt && { createdAt }),
+      },
+      with: {
+        subscription: { with: { plan: true } },
+        customer: true,
+      },
+      orderBy: (t, { desc }) => [desc(t.createdAt), t.id],
+      limit,
+      offset,
+    });
+  }
+
   async findPaymentsBySubscriptionId(subscriptionId: SubscriptionId): Promise<Payment[]> {
     return this.q.payments.findMany({
       where: { subscriptionId },
@@ -392,6 +473,16 @@ export class PaymentRepository {
       throw new Error('Failed to create webhook event');
     }
     return row as WebhookEvent;
+  }
+
+  /** Insert the event, or return the row that holds its id. See `claimWebhookEvent` in `webhook-claims.ts`. */
+  async claimWebhookEvent(data: NewWebhookEvent): Promise<{ event: WebhookEvent; created: boolean }> {
+    return claimWebhookEvent(this.db, this.webhookEvents, data);
+  }
+
+  /** Take over a failed or stale unprocessed event. See `reclaimWebhookEvent` in `webhook-claims.ts`. */
+  async reclaimWebhookEvent(id: WebhookId, seenAttempts: number, leaseCutoff: Instant): Promise<boolean> {
+    return reclaimWebhookEvent(this.db, this.webhookEvents, id, seenAttempts, leaseCutoff);
   }
 
   async findWebhookEventById(id: WebhookId): Promise<WebhookEvent | null> {
@@ -506,16 +597,16 @@ export class PaymentRepository {
   }
 
   async getCustomerCount(): Promise<number> {
-    const result = await this.db.select({ count: this.customers.id }).from(this.customers);
-    return result.length;
+    const [row] = await this.db.select({ total: count() }).from(this.customers);
+    return row?.total ?? 0;
   }
 
   async getActiveSubscriptionCount(): Promise<number> {
-    const result = await this.db
-      .select({ count: this.subscriptions.id })
+    const [row] = await this.db
+      .select({ total: count() })
       .from(this.subscriptions)
       .where(eq(this.subscriptions.status, 'active'));
-    return result.length;
+    return row?.total ?? 0;
   }
 }
 

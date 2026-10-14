@@ -6,6 +6,7 @@ import { refundIdSchema } from '../refunds/primitives.js';
 import { moneyJsonSchema, positiveMoneySchema, priceSchema } from './money.js';
 import {
   billingIntervalValues,
+  customerIdSchema,
   paymentIdSchema,
   paymentMethodTypeValues,
   paymentProviderValues,
@@ -86,12 +87,16 @@ export const createSubscriptionInputSchema = z.object({
   customerDetails: customerDetailsSchema,
 });
 
-export const updateSubscriptionInputSchema = z.object({
-  planId: planIdSchema.optional(),
-  paymentMethodId: z.string().optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-  cancelAtPeriodEnd: z.boolean().optional(),
-});
+export const updateSubscriptionInputSchema = z
+  .object({
+    planId: planIdSchema.optional(),
+    paymentMethodId: z.string().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    cancelAtPeriodEnd: z.boolean().optional(),
+  })
+  .refine(data => data.planId !== undefined || data.cancelAtPeriodEnd !== undefined, {
+    message: 'Give a planId, a cancelAtPeriodEnd, or both',
+  });
 
 export const cancelSubscriptionInputSchema = z.object({
   immediately: z.boolean().default(false),
@@ -145,6 +150,7 @@ export const subscriptionQuerySchema = paginationSchema.extend({
 export const paymentQuerySchema = paginationSchema.extend({
   status: paymentStatusSchema.optional(),
   subscriptionId: subscriptionIdSchema.optional(),
+  customerId: customerIdSchema.optional(),
   userId: userIdSchema.optional(),
   startDate: instantSchema().optional(),
   endDate: instantSchema().optional(),

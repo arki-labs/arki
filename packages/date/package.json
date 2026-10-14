@@ -1,6 +1,6 @@
 {
   "name": "@arki/date",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Date and time math for ARKI — Temporal-based calendar dates, instants, zoned date-times, durations and interval algebra with a small, explicit API. Runs on Node, Bun, Deno, browsers and edge runtimes.",
   "license": "MIT",
   "repository": {
@@ -120,6 +120,11 @@
       "import": "./dist/serialize.js",
       "default": "./dist/serialize.js"
     },
+    "./tanstack": {
+      "types": "./dist/tanstack.d.ts",
+      "import": "./dist/tanstack.js",
+      "default": "./dist/tanstack.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -140,12 +145,16 @@
   },
   "peerDependencies": {
     "@orpc/client": "^1.15.5",
+    "@tanstack/react-router": "1.170.41",
     "react": "19.3.0",
     "superjson": "latest",
     "zod": "4.6.5"
   },
   "peerDependenciesMeta": {
     "@orpc/client": {
+      "optional": true
+    },
+    "@tanstack/react-router": {
       "optional": true
     },
     "react": {

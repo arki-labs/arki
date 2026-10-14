@@ -1,0 +1,21 @@
+import { os } from '@orpc/server';
+
+import type { CommandRunner, DbHandle } from '@arki/journal';
+import { commandErrors } from '@arki/journal/orpc';
+
+import type { JournalMeta } from './journal';
+
+/** What every procedure receives. Built per request in `server/runtime.ts`. */
+export type RpcContext = {
+  /** The root database, for reads through repositories. */
+  readonly db: DbHandle;
+  /** Runs a journal command with this request's actor: `context.run(command, input)`. */
+  readonly run: CommandRunner<JournalMeta>;
+};
+
+/**
+ * Where every procedure starts. `commandErrors()` turns a rejected command
+ * (`CommandError`) or a lost write race into a typed oRPC error with the
+ * right status, instead of a 500.
+ */
+export const procedure = os.$context<RpcContext>().use(commandErrors());

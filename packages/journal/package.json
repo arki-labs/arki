@@ -1,6 +1,6 @@
 {
   "name": "@arki/journal",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A journal for Drizzle entities: every change is an immutable event row, the current state is a normal table row, and both are written in one transaction. Inline projections run in the same transaction; effects run after commit from a job table.",
   "license": "MIT",
   "repository": {
@@ -70,13 +70,13 @@
     "package.json"
   ],
   "dependencies": {
-    "@arki/log": "0.0.3",
+    "@arki/log": "0.1.0",
     "@paralleldrive/cuid2": "^3.3.0",
     "drizzle-orm": "1.0.0-rc.4",
     "zod": "4.6.5"
   },
   "peerDependencies": {
-    "@arki/dot": "^0.4.1",
+    "@arki/dot": "^0.5.0",
     "@electric-sql/pglite": "^0.4.6",
     "@orpc/server": "^1.15.5",
     "drizzle-kit": "1.0.0-rc.4"

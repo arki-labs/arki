@@ -1,0 +1,35 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { createRouter } from '@tanstack/react-router';
+
+import { routeTree } from './routeTree.gen';
+
+function makeRouter() {
+  // One QueryClient per router: per request on the server, one for the app's
+  // lifetime in the browser.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { staleTime: 30_000 } },
+  });
+
+  return createRouter({
+    routeTree,
+    context: { queryClient },
+    defaultPreload: 'intent',
+    scrollRestoration: true,
+    Wrap: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>,
+  });
+}
+
+let browserRouter: ReturnType<typeof makeRouter> | undefined;
+
+/** TanStack Start calls this. A fresh router per server request; one router in the browser. */
+export function getRouter() {
+  if (typeof document === 'undefined') return makeRouter();
+  browserRouter ??= makeRouter();
+  return browserRouter;
+}
+
+declare module '@tanstack/react-router' {
+  interface Register {
+    router: ReturnType<typeof makeRouter>;
+  }
+}

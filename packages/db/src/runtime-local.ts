@@ -1,6 +1,8 @@
+import type { Extension } from '@electric-sql/pglite';
 import type { AnyRelations, Logger } from 'drizzle-orm';
-import { PGlite, type Extension } from '@electric-sql/pglite';
-import { drizzle, type PgliteDatabase } from 'drizzle-orm/pglite';
+import type { PgliteDatabase } from 'drizzle-orm/pglite';
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
 
 import { debugInit } from './debug.js';
 
@@ -34,13 +36,11 @@ export async function initDbRuntimeLocal<TRelations extends AnyRelations>(
   },
 ): Promise<{ db: PgliteDatabase<TRelations>; pglite: PGlite }> {
   const url = options.memory === true ? 'memory://' : (options.dataDir ?? './.local/db');
-  debugInit('[runtime-local] Initializing PGlite at: %s', url);
+  debugInit.debug('[runtime-local] Initializing PGlite at: {url}', { url });
 
-  const pglite = options.extensions
-    ? new PGlite(url, { extensions: options.extensions })
-    : new PGlite(url);
+  const pglite = options.extensions ? new PGlite(url, { extensions: options.extensions }) : new PGlite(url);
   await pglite.waitReady;
-  debugInit('[runtime-local] PGlite ready');
+  debugInit.debug('[runtime-local] PGlite ready');
 
   const db = drizzle({
     client: pglite,
@@ -48,6 +48,6 @@ export async function initDbRuntimeLocal<TRelations extends AnyRelations>(
     ...(config.logger === undefined ? {} : { logger: config.logger }),
   }) as PgliteDatabase<TRelations>;
 
-  debugInit('[runtime-local] Drizzle database initialized');
+  debugInit.debug('[runtime-local] Drizzle database initialized');
   return { db, pglite };
 }

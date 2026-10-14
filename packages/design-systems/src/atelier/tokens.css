@@ -42,6 +42,13 @@
   --accent-foreground: hsl(24 10% 12%);
   --destructive: hsl(0 72% 51%);
   --destructive-foreground: hsl(0 0% 100%);
+  --destructive-surface: hsl(0 60% 94%);
+  --success: hsl(165 60% 26%);
+  --success-surface: hsl(165 45% 93%);
+  --warning: hsl(30 90% 28%);
+  --warning-surface: hsl(36 80% 92%);
+  --info: hsl(220 55% 38%);
+  --info-surface: hsl(220 50% 94%);
   --border: hsl(36 15% 88%);
   --input: hsl(36 15% 88%);
   --ring: hsl(24 90% 48%);
@@ -90,6 +97,13 @@
   --accent-foreground: hsl(36 20% 90%);
   --destructive: hsl(0 62% 40%);
   --destructive-foreground: hsl(0 0% 98%);
+  --destructive-surface: hsl(0 30% 17%);
+  --success: hsl(160 55% 62%);
+  --success-surface: hsl(160 30% 16%);
+  --warning: hsl(36 92% 64%);
+  --warning-surface: hsl(36 40% 16%);
+  --info: hsl(220 75% 74%);
+  --info-surface: hsl(220 35% 18%);
   --border: hsl(24 6% 18%);
   --input: hsl(24 6% 18%);
   --ring: hsl(24 95% 58%);

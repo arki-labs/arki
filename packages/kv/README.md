@@ -90,6 +90,38 @@ When the rate-limiter Redis client is not ready, the limiter transparently falls
   package for plugin authoring, lifecycle, diagnostics, and the
   [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).
 
+<!-- bench:start -->
+## Benchmarks
+
+Only the rate limiter is benchmarked, against `rate-limiter-flexible`, the library `@arki/kv` wraps. `@arki/kv` talks only to Redis, so its get/set path needs a server and is not measured here. While it cannot reach Redis, `getRateLimiter()` returns an in-memory limiter, and that is what runs below.
+
+Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+
+### consume on a limiter you already hold
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/kv getRateLimiter() result, held once | 500.0 ns | 1.50× |
+| rate-limiter-flexible RateLimiterMemory (used directly) | 333.0 ns | fastest |
+
+### Look the limiter up on every request, then consume
+
+How the API reads when you call it inline in a request handler.
+
+| Library | Time / op | vs fastest |
+| --- | ---: | ---: |
+| @arki/kv kv.getRateLimiter(id, options).consume(key) | 708.0 ns | 2.13× |
+| Map<id, RateLimiterMemory> lookup, then consume | 333.0 ns | fastest |
+
+Read the rows with the contracts in mind:
+
+- The Redis client in this benchmark points at a closed local port. Nothing is listening and nothing leaves the machine. This measures the in-memory fallback, not the Redis-backed limiter that production uses, whose cost is dominated by the network round trip.
+- The limiter allows 1,000,000,000 points, so no call is rejected and every `consume` takes the success path.
+- Holding the limiter and calling `consume` runs the same `rate-limiter-flexible` code as using it directly, so those two rows should match within noise. The only difference is the lookup row: `getRateLimiter(id, options)` builds a cache key by serialising the options to JSON on every call.
+
+Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+<!-- bench:end -->
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

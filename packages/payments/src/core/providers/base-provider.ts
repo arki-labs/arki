@@ -11,6 +11,7 @@ import type {
   PaymentProviderType,
   Plan,
   PlanId,
+  PlanTier,
   Subscription,
   SubscriptionId,
   SubscriptionPreview,
@@ -25,6 +26,12 @@ export type PaymentProviderConfig = {
   publicKey?: string;
   environment: 'sandbox' | 'production';
 }
+
+/** What a refund call answers: the provider's refund id, and the payment as the provider now has it. */
+export type ProviderRefundResult = {
+  providerRefundId: string;
+  payment: Payment;
+};
 
 export abstract class BasePaymentProvider {
   protected config: PaymentProviderConfig;
@@ -58,6 +65,9 @@ export abstract class BasePaymentProvider {
   // Plan Management
   abstract createPlan(params: {
     name: string;
+    description?: string;
+    tier: PlanTier;
+    features?: string[];
     amount: Money;
     interval: BillingInterval;
     intervalCount?: number;
@@ -86,6 +96,8 @@ export abstract class BasePaymentProvider {
     paymentMethodId?: string;
     trialPeriodDays?: number;
     metadata?: Record<string, unknown>;
+    /** Same key, same parameters: the provider returns the first result instead of creating a second subscription. */
+    idempotencyKey?: string;
   }): Promise<Subscription>;
 
   abstract getSubscription(subscriptionId: SubscriptionId): Promise<Subscription | null>;
@@ -97,14 +109,19 @@ export abstract class BasePaymentProvider {
       paymentMethodId?: string;
       metadata?: Record<string, unknown>;
       cancelAtPeriodEnd?: boolean;
+      /** What happens to the charge when `planId` changes. The provider's default applies when left out. */
+      prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
+      idempotencyKey?: string;
     },
   ): Promise<Subscription>;
 
   abstract cancelSubscription(
     subscriptionId: SubscriptionId,
     options: {
+      /** True: end it now. Otherwise it stays active until the end of the paid period. */
       immediately?: boolean;
       reason?: string;
+      idempotencyKey?: string;
     },
   ): Promise<Subscription>;
 
@@ -143,7 +160,7 @@ export abstract class BasePaymentProvider {
       reason?: string;
       metadata?: Record<string, unknown>;
     },
-  ): Promise<Payment>;
+  ): Promise<ProviderRefundResult>;
 
   // Payment Methods
   abstract attachPaymentMethod(params: {
@@ -169,7 +186,10 @@ export abstract class BasePaymentProvider {
   ): Promise<WebhookValidationResult>;
 
   // Utility Methods
-  abstract createSetupIntent(customerId: CustomerId): Promise<{
+  abstract createSetupIntent(
+    customerId: CustomerId,
+    options?: { idempotencyKey?: string },
+  ): Promise<{
     clientSecret: string;
     setupIntentId: string;
   }>;
@@ -178,7 +198,12 @@ export abstract class BasePaymentProvider {
     customerId: CustomerId;
     amount: Money;
     paymentMethodId?: string;
+    /**
+     * True: charge now without the customer present. Needs `paymentMethodId`.
+     * False: the customer finishes the payment in the client with the returned secret.
+     */
     automatic: boolean;
+    idempotencyKey?: string;
   }): Promise<{
     clientSecret: string;
     paymentIntentId: string;

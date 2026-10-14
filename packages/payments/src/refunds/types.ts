@@ -53,6 +53,9 @@ export type RefundMetrics = {
 
 export type RefundErrorCode =
   | 'TRANSACTION_NOT_FOUND'
+  | 'REFUND_NOT_FOUND'
+  | 'DUPLICATE_PENDING_REFUND'
+  | 'REASON_REQUIRED'
   | 'INVALID_STATE'
   | 'AMOUNT_EXCEEDED'
   | 'WINDOW_EXCEEDED'

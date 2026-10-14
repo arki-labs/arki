@@ -69,18 +69,27 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
     (_table) => [check('plans_price_minor_not_negative', sql`"price_minor" >= 0`)],
   );
 
-  const customers = schema.table('customers', {
-    id: customerIdFactory.primaryColumn(),
-    userId: userFk.required('user_id', { onDelete: 'cascade' }),
-    providerCustomerId: varchar('provider_customer_id', { length: 255 }).notNull(),
-    provider: paymentProviderEnum('provider').$type<PaymentProviderType>().notNull().default('stripe'),
-    email: varchar('email', { length: 255 }).notNull(),
-    name: varchar('name', { length: 255 }),
-    defaultPaymentMethodId: varchar('default_payment_method_id', { length: 255 }),
-    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
-    createdAt: instant('created_at').notNull().default(sql`now()`),
-    updatedAt: instant('updated_at').notNull().default(sql`now()`),
-  });
+  const customers = schema.table(
+    'customers',
+    {
+      id: customerIdFactory.primaryColumn(),
+      userId: userFk.required('user_id', { onDelete: 'cascade' }),
+      providerCustomerId: varchar('provider_customer_id', { length: 255 }).notNull(),
+      provider: paymentProviderEnum('provider').$type<PaymentProviderType>().notNull().default('stripe'),
+      email: varchar('email', { length: 255 }).notNull(),
+      name: varchar('name', { length: 255 }),
+      defaultPaymentMethodId: varchar('default_payment_method_id', { length: 255 }),
+      metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+      createdAt: instant('created_at').notNull().default(sql`now()`),
+      updatedAt: instant('updated_at').notNull().default(sql`now()`),
+    },
+    // One customer per user, and one row per provider customer. Two providers may hand out the same id,
+    // so the id is only unique within its provider: the lookup by provider id reads a single row with `provider`.
+    (table) => [
+      uniqueIndex('customers_user_id_idx').on(table.userId),
+      uniqueIndex('customers_provider_customer_id_idx').on(table.provider, table.providerCustomerId),
+    ],
+  );
 
   const subscriptions = schema.table(
     'subscriptions',
@@ -126,6 +135,10 @@ export function createCoreTables({ schema, userIdRef }: CreateCoreTablesDeps) {
       receiptUrl: text('receipt_url'),
       refunded: boolean('refunded').notNull().default(false),
       refundedAmountMinor: bigint('refunded_amount_minor', { mode: 'number' }).notNull().default(0),
+      /** The provider's dispute (chargeback) on this payment, set when the customer's bank opens one. */
+      disputeId: varchar('dispute_id', { length: 255 }),
+      /** The dispute's status as the provider reports it, such as `needs_response`. Null: no dispute. */
+      disputeStatus: varchar('dispute_status', { length: 64 }),
       metadata: jsonb('metadata').$type<Record<string, unknown>>(),
       createdAt: instant('created_at').notNull().default(sql`now()`),
       updatedAt: instant('updated_at').notNull().default(sql`now()`),

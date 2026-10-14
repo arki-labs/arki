@@ -1,5 +1,11 @@
 # @arki/design-systems
 
+## 0.1.2
+
+### Patch Changes
+
+- 15a99f5: Add `--success`, `--warning`, `--info` status colors and a `--destructive-surface` tint, each with a `-surface` tint, to atelier, workbench, arena and gallery (light and dark). Tribunal gains `--info`. All are mapped into Tailwind, so `bg-success`, `text-warning` and `bg-info-surface` work in every system.
+
 ## 0.1.1
 
 ### Patch Changes
