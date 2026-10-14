@@ -62,6 +62,16 @@ const stripeChargeEvent = z.object({
   }),
 });
 
+const stripeRefundEvent = z.object({
+  data: z.object({
+    object: z.object({
+      id: z.string().min(1),
+      status: z.string().nullish(),
+      metadata: z.record(z.string(), z.string()).nullish(),
+    }),
+  }),
+});
+
 const stripeDisputeEvent = z.object({
   data: z.object({
     object: z.object({
@@ -182,6 +192,22 @@ export function parseStripeCharge(event: Record<string, unknown>): StripeChargeS
       status: refund.status ?? null,
       refundId: refund.metadata?.['refundId'] ?? null,
     })),
+  };
+}
+
+/** A refund as `refund.created` and `refund.updated` carry it. */
+export function parseStripeRefund(event: Record<string, unknown>): StripeChargeRefund {
+  const result = stripeRefundEvent.safeParse(event);
+  if (!result.success) {
+    throw invalid(result.error);
+  }
+
+  const refund = result.data.data.object;
+
+  return {
+    providerRefundId: refund.id,
+    status: refund.status ?? null,
+    refundId: refund.metadata?.['refundId'] ?? null,
   };
 }
 

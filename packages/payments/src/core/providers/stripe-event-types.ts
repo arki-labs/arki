@@ -11,6 +11,9 @@ const STRIPE_EVENT_TYPES: Readonly<Record<string, WebhookEventType>> = {
   'payment_intent.requires_action': 'payment.requires_action',
   'charge.refunded': 'payment.refunded',
   'charge.dispute.created': 'payment.dispute_created',
+  // Stripe API versions without `refunds` on the charge report each refund on its own
+  'refund.created': 'refund.updated',
+  'refund.updated': 'refund.updated',
   'customer.created': 'customer.created',
   'customer.updated': 'customer.updated',
   'customer.deleted': 'customer.deleted',

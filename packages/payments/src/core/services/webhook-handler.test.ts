@@ -659,6 +659,39 @@ function chargeWithRefund(providerPaymentId: string, refund: Record<string, unkn
       expect(await refundRow(db, refund.id)).toMatchObject({ status: 'processing', providerRefundId: null });
     });
 
+    it('refund.updated alone completes a refund the service lost, and a resend changes nothing', async () => {
+      const { refund } = await refundInFlight();
+      const object = { id: 're_alone', object: 'refund', status: 'succeeded', metadata: { refundId: refund.id } };
+
+      expect(await deliver(stateHandler('refund.updated', object, storeOn(db), refundsOn()), freshEventId())).toMatchObject({
+        success: true,
+      });
+      expect(await refundRow(db, refund.id)).toMatchObject({ status: 'completed', providerRefundId: 're_alone' });
+      const eventsBefore = await countEvents(db);
+
+      expect(await deliver(stateHandler('refund.updated', object, storeOn(db), refundsOn()), freshEventId())).toMatchObject({
+        success: true,
+      });
+      expect(await countEvents(db)).toBe(eventsBefore);
+    });
+
+    it('refund.updated for a refund Stripe has not succeeded, or one made at Stripe, changes nothing', async () => {
+      const { refund } = await refundInFlight();
+      const eventsBefore = await countEvents(db);
+
+      for (const object of [
+        { id: 're_p', status: 'pending', metadata: { refundId: refund.id } },
+        { id: 're_dash', status: 'succeeded', metadata: {} },
+      ]) {
+        expect(await deliver(stateHandler('refund.updated', object, storeOn(db), refundsOn()), freshEventId())).toMatchObject({
+          success: true,
+        });
+      }
+
+      expect(await countEvents(db)).toBe(eventsBefore);
+      expect(await refundRow(db, refund.id)).toMatchObject({ status: 'processing' });
+    });
+
     it('a refund Stripe has not succeeded yet is not completed', async () => {
       const { payment, refund } = await refundInFlight();
       const charge = chargeWithRefund(payment.providerPaymentId, {

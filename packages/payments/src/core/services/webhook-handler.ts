@@ -17,6 +17,7 @@ import {
   parseStripeCharge,
   parseStripeDispute,
   parseStripePaymentIntent,
+  parseStripeRefund,
   parseStripeSubscription,
 } from './webhook-event-payloads.js';
 
@@ -405,6 +406,10 @@ export class WebhookHandler extends EventEmitter {
       await this.handlePaymentRefunded(data);
     });
 
+    this.eventHandlers.set('refund.updated', async (data: WebhookEventData) => {
+      await this.handleRefundUpdated(data);
+    });
+
     this.eventHandlers.set('payment.dispute_created', async (data: WebhookEventData) => {
       await this.handlePaymentDisputeCreated(data);
     });
@@ -584,6 +589,20 @@ export class WebhookHandler extends EventEmitter {
       await this.refunds.writes.completeRefund({
         refundId: ours.id,
         providerRefundId: listedRefund.providerRefundId,
+      });
+    }
+  }
+
+  /**
+   * A refund on its own, for Stripe API versions that do not list refunds on the charge.
+   * It lines up with our `refunds` row the same way as a refund listed on a charge.
+   */
+  private async handleRefundUpdated(data: WebhookEventData): Promise<void> {
+    try {
+      await this.reconcileRefunds([parseStripeRefund(data.data)]);
+    } catch (error) {
+      throw new Error(`Failed to handle refund update: ${error instanceof Error ? error.message : 'Unknown error'}`, {
+        cause: error,
       });
     }
   }
