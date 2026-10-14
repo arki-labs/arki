@@ -40,12 +40,12 @@ export type MinMax = {
  */
 export type LinearFit = Fit &
   FitDiagnostics & {
-    slope: number;
-    intercept: number;
+    readonly slope: number;
+    readonly intercept: number;
     /** Standard error of the slope: `residualStandardError / sqrt(sum((x - mean x)^2))`. */
-    slopeStandardError: number | undefined;
+    readonly slopeStandardError: number | undefined;
     /** Standard error of the intercept: `residualStandardError * sqrt(1/n + mean(x)^2 / sum((x - mean x)^2))`. */
-    interceptStandardError: number | undefined;
+    readonly interceptStandardError: number | undefined;
   };
 
 /**
@@ -167,10 +167,23 @@ export type MeanSampleSizeInput = { marginOfError: number; stddev: number; level
 /** Sample size for estimating a proportion; `proportion` defaults to 0.5, the worst case. */
 export type ProportionSampleSizeInput = { marginOfError: number; proportion?: number; level?: number; stddev?: never };
 
-/** A fitted curve: its fit quality and a function to evaluate it. */
+/**
+ * A fitted curve: its fit quality and a function to evaluate it.
+ *
+ * The coefficients and `predict` are computed by the fit itself. In the
+ * exponential, logarithmic, power and polynomial fits, `r2` and the other
+ * diagnostics are measured on first read: reading any one of them measures
+ * them all, once, with the same arithmetic and the same result as an eager
+ * fit. They are enumerable own getters, so `JSON.stringify(fit)`, `{ ...fit }`
+ * and `Object.keys(fit)` show them as plain values. Until that first read the
+ * fit holds its own copy of the data (never the caller's arrays, which may
+ * change after the call returns); it drops the copy once the diagnostics are
+ * measured. `linearRegression` measures its diagnostics during the call: its
+ * residual pass costs less than the copy of the data a later pass would need.
+ */
 type Fit = {
   /** Coefficient of determination `1 - SSres / SStot`, measured on the original y values. */
-  r2: number;
+  readonly r2: number;
   predict(x: number): number;
 };
 
@@ -181,22 +194,22 @@ type Fit = {
  */
 type FitDiagnostics = {
   /** `1 - (1 - r2) * (n - 1) / (n - k - 1)`: r2 penalised for the number of predictors. */
-  adjustedR2: number | undefined;
+  readonly adjustedR2: number | undefined;
   /** Standard error of the estimate (R's "residual standard error", Excel `STEYX`): `sqrt(SSres / (n - k - 1))`. */
-  residualStandardError: number | undefined;
+  readonly residualStandardError: number | undefined;
 };
 
 /** `y = a * e^(b * x)`. */
-export type ExponentialFit = Fit & { a: number; b: number };
+export type ExponentialFit = Fit & { readonly a: number; readonly b: number };
 /** `y = a + b * ln(x)`. */
-export type LogarithmicFit = Fit & { a: number; b: number };
+export type LogarithmicFit = Fit & { readonly a: number; readonly b: number };
 /** `y = a * x^b`. */
-export type PowerFit = Fit & { a: number; b: number };
+export type PowerFit = Fit & { readonly a: number; readonly b: number };
 /**
  * `y = c[0] + c[1] * x + c[2] * x^2 + ...`, lowest degree first. Diagnostics use
  * k = degree predictors, so n - degree - 1 residual degrees of freedom.
  */
-export type PolynomialFit = Fit & FitDiagnostics & { coefficients: readonly number[] };
+export type PolynomialFit = Fit & FitDiagnostics & { readonly coefficients: readonly number[] };
 
 type NumericValues = Iterable<number> | Iterable<Decimal>;
 
@@ -1225,6 +1238,27 @@ export function linearRegression(x: Iterable<number>, y: Iterable<number>): Line
   };
 }
 
+/**
+ * The data a fit keeps for diagnostics it measures later. A caller's array may
+ * change after the call returns, so it is copied; an array this module built
+ * (from any other iterable) is already the fit's own.
+ */
+function owned(data: readonly number[], input: Iterable<number>): readonly number[] {
+  return data === input ? [...data] : data;
+}
+
+/**
+ * `measure`'s result, computed on the first call and returned ever after. Once
+ * it has run, `measure` (and the data it holds) is released.
+ */
+function once<T>(measure: () => T): () => T {
+  let state: { measure: () => T } | { value: T } = { measure };
+  return () => {
+    if ('measure' in state) state = { value: state.measure() };
+    return state.value;
+  };
+}
+
 type Line = { xs: readonly number[]; ys: readonly number[]; centered: Centered; slope: number; intercept: number };
 
 /**
@@ -1430,17 +1464,19 @@ function logsOf(values: readonly number[], name: string): number[] {
 }
 
 /** `r2` on the original y of a curve `model`, with `sumsOfSquares`' arithmetic but no array of predictions. */
-function curveR2(xs: readonly number[], ys: readonly number[], model: (x: number) => number): number {
-  const center = meanOf(ys);
-  let residual = 0;
-  let total = 0;
-  let i = 0;
-  for (const y of ys) {
-    const miss = y - model(xs[i++]!);
-    residual += miss * miss;
-    total += (y - center) * (y - center);
-  }
-  return r2Of({ residual, total });
+function curveR2(xs: readonly number[], ys: readonly number[], model: (x: number) => number): () => number {
+  return () => {
+    const center = meanOf(ys);
+    let residual = 0;
+    let total = 0;
+    let i = 0;
+    for (const y of ys) {
+      const miss = y - model(xs[i++]!);
+      residual += miss * miss;
+      total += (y - center) * (y - center);
+    }
+    return r2Of({ residual, total });
+  };
 }
 
 /**
@@ -1454,7 +1490,15 @@ export function exponentialRegression(x: Iterable<number>, y: Iterable<number>):
   const a = assertRepresentable(Math.exp(line.intercept), 'a');
   const b = line.slope;
   const predict = (at: number): number => a * Math.exp(b * at);
-  return { a, b, r2: curveR2(xs, ys, predict), predict };
+  const r2 = once(curveR2(owned(xs, x), owned(ys, y), predict));
+  return {
+    a,
+    b,
+    get r2() {
+      return r2();
+    },
+    predict,
+  };
 }
 
 /**
@@ -1464,13 +1508,23 @@ export function exponentialRegression(x: Iterable<number>, y: Iterable<number>):
  */
 export function logarithmicRegression(x: Iterable<number>, y: Iterable<number>): LogarithmicFit {
   const { xs, ys } = pairs(x, y);
-  const { intercept: a, slope: b } = fitLine(logsOf(xs, 'x'), ys);
+  const logXs = logsOf(xs, 'x');
+  const { intercept: a, slope: b } = fitLine(logXs, ys);
   const predict = (at: number): number => {
     assertFinite(at, 'x');
     if (at <= 0) throw new InvalidArgumentError(`x must be positive, got ${at}`);
     return a + b * Math.log(at);
   };
-  return { a, b, r2: curveR2(xs, ys, at => a + b * Math.log(at)), predict };
+  // The model on ln x: `logXs` already holds every Math.log(x), so the result is the same.
+  const r2 = once(curveR2(logXs, owned(ys, y), logX => a + b * logX));
+  return {
+    a,
+    b,
+    get r2() {
+      return r2();
+    },
+    predict,
+  };
 }
 
 /**
@@ -1489,7 +1543,15 @@ export function powerRegression(x: Iterable<number>, y: Iterable<number>): Power
     if (at <= 0) throw new InvalidArgumentError(`x must be positive, got ${at}`);
     return a * Math.pow(at, b);
   };
-  return { a, b, r2: curveR2(xs, ys, at => a * Math.pow(at, b)), predict };
+  const r2 = once(curveR2(owned(xs, x), owned(ys, y), at => a * Math.pow(at, b)));
+  return {
+    a,
+    b,
+    get r2() {
+      return r2();
+    },
+    predict,
+  };
 }
 
 /**
@@ -1592,13 +1654,33 @@ export function polynomialRegression(x: Iterable<number>, y: Iterable<number>, d
     assertFinite(at, 'x');
     return predictCentered(at);
   };
+  const measured = once(polynomialDiagnostics(owned(xs, x), owned(ys, y), predictCentered, degree));
   return {
     coefficients: coefficients.map(c => assertRepresentable(noNegativeZero(c), 'coefficient')),
-    ...diagnostics(
+    get r2() {
+      return measured().r2;
+    },
+    get adjustedR2() {
+      return measured().adjustedR2;
+    },
+    get residualStandardError() {
+      return measured().residualStandardError;
+    },
+    predict,
+  };
+}
+
+/** `polynomialRegression`'s diagnostics, from the fit's predictions at every x. */
+function polynomialDiagnostics(
+  xs: readonly number[],
+  ys: readonly number[],
+  predictCentered: (x: number) => number,
+  degree: number,
+): () => { r2: number } & FitDiagnostics {
+  return () =>
+    diagnostics(
       ys,
       xs.map(v => predictCentered(v)),
       degree,
-    ),
-    predict,
-  };
+    );
 }

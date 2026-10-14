@@ -985,4 +985,58 @@ describe('regression diagnostics', () => {
     expect(fit.adjustedR2).toBeUndefined();
     expect(fit.residualStandardError).toBeUndefined();
   });
+  // The diagnostics are measured on first read, later than the call. A caller who
+  // reuses or sorts its arrays in between must still get the fit of the data it passed.
+  it('measures the diagnostics on the data as passed, even if the caller changes its arrays first', () => {
+    const x = [1, 2, 3, 4, 5, 6];
+    const y = [2.1, 3.9, 6.2, 7.8, 10.1, 12.2];
+    const fits = () => ({
+      line: linearRegression([...x], [...y]),
+      poly: polynomialRegression([...x], [...y], 2),
+      exp: exponentialRegression([...x], [...y]),
+      log: logarithmicRegression([...x], [...y]),
+      pow: powerRegression([...x], [...y]),
+    });
+    const expected = fits();
+    const late = {
+      line: linearRegression(x, y),
+      poly: polynomialRegression(x, y, 2),
+      exp: exponentialRegression(x, y),
+      log: logarithmicRegression(x, y),
+      pow: powerRegression(x, y),
+    };
+    x.reverse();
+    y.fill(1);
+    for (const kind of ['line', 'poly', 'exp', 'log', 'pow'] as const) expect(late[kind].r2).toBe(expected[kind].r2);
+    for (const kind of ['line', 'poly'] as const) {
+      expect(late[kind].adjustedR2).toBe(expected[kind].adjustedR2);
+      expect(late[kind].residualStandardError).toBe(expected[kind].residualStandardError);
+    }
+    expect(late.line.slopeStandardError).toBe(expected.line.slopeStandardError);
+    expect(late.line.interceptStandardError).toBe(expected.line.interceptStandardError);
+  });
+  // Lazy getters must not hide the numbers from code that serialises, logs or copies a fit.
+  it('shows lazily measured diagnostics to JSON.stringify, spread and toEqual as plain values', () => {
+    const fit = polynomialRegression([-2, -1, 0, 1, 2], [4.2, 0.8, 0.1, 1.1, 3.8], 2);
+    expect(Object.keys(fit)).toEqual(['coefficients', 'r2', 'adjustedR2', 'residualStandardError', 'predict']);
+    const values = {
+      coefficients: fit.coefficients,
+      r2: fit.r2,
+      adjustedR2: fit.adjustedR2,
+      residualStandardError: fit.residualStandardError,
+    };
+    expect(JSON.stringify(fit)).toBe(JSON.stringify(values));
+    const copy = { ...fit };
+    expect(copy).toEqual({ ...values, predict: expect.any(Function) });
+    expect(Object.getOwnPropertyDescriptor(copy, 'r2')).toMatchObject({ value: fit.r2, writable: true });
+    expect(copy.predict(3)).toBe(fit.predict(3));
+    expect(fit).toEqual({ ...values, predict: expect.any(Function) });
+    for (const curve of [
+      exponentialRegression([1, 2, 3], [2, 5, 11]),
+      logarithmicRegression([1, 2, 3], [1, 2.4, 3.1]),
+      powerRegression([1, 2, 3], [3, 12, 27]),
+    ]) {
+      expect(JSON.stringify(curve)).toBe(JSON.stringify({ a: curve.a, b: curve.b, r2: curve.r2 }));
+    }
+  });
 });
