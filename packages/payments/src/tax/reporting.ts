@@ -109,7 +109,7 @@ function totalsByCurrency(amounts: readonly Money[]): Money[] {
     byCurrency.set(amount.currency.code, [...(byCurrency.get(amount.currency.code) ?? []), amount]);
   }
 
-  return [...byCurrency.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([code, items]) => sum(items, code));
+  return [...byCurrency.entries()].toSorted(([a], [b]) => a.localeCompare(b)).map(([code, items]) => sum(items, code));
 }
 
 /**

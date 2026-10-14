@@ -82,9 +82,11 @@ afterAll(async () => {
   await client.close();
 });
 
-describe('findPlans', () => {
-  const plans = (query: Partial<PlanQuery>) => repo.findPlans({ ...page, ...query });
+const plans = (query: Partial<PlanQuery>) => repo.findPlans({ ...page, ...query });
+const subscriptions = (query: Partial<SubscriptionQuery>) => repo.findSubscriptions({ ...page, ...query });
+const payments = (query: Partial<PaymentQuery>) => repo.findPayments({ ...page, ...query });
 
+describe('findPlans', () => {
   it('returns only the tier asked for', async () => {
     const result = await plans({ tier: 'pro' });
 
@@ -92,8 +94,10 @@ describe('findPlans', () => {
   });
 
   it('filters by interval and by active state', async () => {
-    expect((await plans({ interval: 'yearly' })).map(plan => plan.name)).toEqual(['Pro yearly']);
-    expect((await plans({ isActive: false })).map(plan => plan.name)).toEqual(['Retired']);
+    const rows1 = await plans({ interval: 'yearly' });
+    expect(rows1.map(plan => plan.name)).toEqual(['Pro yearly']);
+    const rows2 = await plans({ isActive: false });
+    expect(rows2.map(plan => plan.name)).toEqual(['Retired']);
   });
 
   it('returns every plan without a filter, and pages them', async () => {
@@ -102,13 +106,12 @@ describe('findPlans', () => {
   });
 
   it('finds the fixture plan under its default tier', async () => {
-    expect((await plans({ tier: 'basic' })).map(plan => plan.id)).toEqual([planId]);
+    const rows3 = await plans({ tier: 'basic' });
+    expect(rows3.map(plan => plan.id)).toEqual([planId]);
   });
 });
 
 describe('findSubscriptions', () => {
-  const subscriptions = (query: Partial<SubscriptionQuery>) => repo.findSubscriptions({ ...page, ...query });
-
   it('returns only the status asked for', async () => {
     const result = await subscriptions({ status: 'canceled' });
 
@@ -138,11 +141,11 @@ describe('findSubscriptions', () => {
 });
 
 describe('findPayments', () => {
-  const payments = (query: Partial<PaymentQuery>) => repo.findPayments({ ...page, ...query });
-
   it('returns only the status asked for', async () => {
-    expect((await payments({ status: 'succeeded' })).map(payment => payment.status)).toEqual(['succeeded']);
-    expect((await payments({ status: 'failed' })).map(payment => payment.status)).toEqual(['failed']);
+    const rows4 = await payments({ status: 'succeeded' });
+    expect(rows4.map(payment => payment.status)).toEqual(['succeeded']);
+    const rows5 = await payments({ status: 'failed' });
+    expect(rows5.map(payment => payment.status)).toEqual(['failed']);
     expect(await payments({ status: 'pending' })).toHaveLength(1);
   });
 
@@ -163,6 +166,7 @@ describe('findPayments', () => {
     const subscription = await seedSubscription(writes, 'active');
     const payment = await seedPayment(writes, subscription.id);
 
-    expect((await payments({ subscriptionId: subscription.id })).map(row => row.id)).toEqual([payment.id]);
+    const rows6 = await payments({ subscriptionId: subscription.id });
+    expect(rows6.map(row => row.id)).toEqual([payment.id]);
   });
 });

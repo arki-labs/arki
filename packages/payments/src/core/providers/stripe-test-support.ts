@@ -25,9 +25,9 @@ export function createFakeStripeHttp(respond: (request: RecordedStripeRequest) =
   const fakeFetch = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(input instanceof Request ? input.url : input.toString());
     const headers: Record<string, string> = {};
-    new Headers(init?.headers).forEach((value, key) => {
+    for (const [key, value] of new Headers(init?.headers)) {
       headers[key.toLowerCase()] = value;
-    });
+    }
     const body = typeof init?.body === 'string' ? init.body : '';
     const form: Record<string, string> = {};
     // GET and DELETE params travel in the query string, POST params in the body
@@ -38,9 +38,9 @@ export function createFakeStripeHttp(respond: (request: RecordedStripeRequest) =
 
     const answer = respond(request);
     return Promise.resolve(
-      new Response(JSON.stringify(answer.body), {
+      Response.json(answer.body, {
         status: answer.status ?? 200,
-        headers: { 'content-type': 'application/json', 'request-id': 'req_fake' },
+        headers: { 'request-id': 'req_fake' },
       }),
     );
   };

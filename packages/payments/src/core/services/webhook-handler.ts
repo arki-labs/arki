@@ -520,7 +520,9 @@ export class WebhookHandler extends EventEmitter {
 
       this.emit('payment:refunded', { paymentData: data.data, webhookId: data.webhookId });
     } catch (error) {
-      throw new Error(`Failed to handle payment refunded: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(`Failed to handle payment refunded: ${error instanceof Error ? error.message : 'Unknown error'}`, {
+        cause: error,
+      });
     }
   }
 
@@ -550,6 +552,7 @@ export class WebhookHandler extends EventEmitter {
     } catch (error) {
       throw new Error(
         `Failed to handle payment dispute created: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        { cause: error },
       );
     }
   }

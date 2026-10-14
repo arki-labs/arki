@@ -160,31 +160,31 @@ describe('listExecutions', () => {
   });
 });
 
-describe('getDashboardStats', () => {
-  async function analytics(
-    campaignId: DunningCampaignId,
-    at: ReturnType<typeof now>,
-    row: {
-      currency: string;
-      revenueMinor: number;
-      executions: number;
-      conversionRate: number;
-      paymentsRecovered: number;
-    },
-  ) {
-    await db.insert(tables.dunningCampaignAnalytics).values({
-      id: `${campaignId}-${at.toString()}-${row.currency}`,
-      campaignId,
-      date: at,
-      currency: row.currency,
-      revenueRecoveredMinor: row.revenueMinor,
-      executions: row.executions,
-      customersReached: row.executions,
-      paymentsRecovered: row.paymentsRecovered,
-      conversionRate: row.conversionRate,
-    });
-  }
+async function analytics(
+  campaignId: DunningCampaignId,
+  at: ReturnType<typeof now>,
+  row: {
+    currency: string;
+    revenueMinor: number;
+    executions: number;
+    conversionRate: number;
+    paymentsRecovered: number;
+  },
+) {
+  await db.insert(tables.dunningCampaignAnalytics).values({
+    id: `${campaignId}-${at.toString()}-${row.currency}`,
+    campaignId,
+    date: at,
+    currency: row.currency,
+    revenueRecoveredMinor: row.revenueMinor,
+    executions: row.executions,
+    customersReached: row.executions,
+    paymentsRecovered: row.paymentsRecovered,
+    conversionRate: row.conversionRate,
+  });
+}
 
+describe('getDashboardStats', () => {
   it('reads campaign counts, today, the month, the top campaign and the latest executions from the tables', async () => {
     // Each assertion below is about this campaign's rows; other tests' campaigns only add to the counts
     const before = await service.getDashboardStats();

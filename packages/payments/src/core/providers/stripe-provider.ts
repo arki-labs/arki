@@ -52,7 +52,12 @@ function toStripeMetadata(metadata: Record<string, unknown> | undefined): Stripe
   const out: Stripe.MetadataParam = {};
   for (const [key, value] of Object.entries(metadata)) {
     if (value === null || value === undefined) continue;
-    out[key] = typeof value === 'string' ? value : typeof value === 'object' ? JSON.stringify(value) : String(value);
+    out[key] =
+      typeof value === 'string'
+        ? value
+        : typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint'
+          ? String(value)
+          : JSON.stringify(value);
   }
   return out;
 }

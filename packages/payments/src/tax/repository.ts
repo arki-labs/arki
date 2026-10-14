@@ -290,7 +290,7 @@ export class TaxExemptionRepository {
           or(isNull(this.taxExemptions.validTo), gte(this.taxExemptions.validTo, start)),
         ),
       )
-      .orderBy(this.taxExemptions.validFrom) as Promise<TaxExemption[]>;
+      .orderBy(this.taxExemptions.validFrom);
   }
 
   async findProductExemptions(productCode: string): Promise<TaxExemption[]> {
