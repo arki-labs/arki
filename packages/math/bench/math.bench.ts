@@ -14,22 +14,29 @@
 /* eslint-disable unicorn/require-number-to-fixed-digits-argument -- these are decimal.js / big.js / bignumber.js `toFixed()`: with no argument they print every digit in plain notation (unlike Number#toFixed), which the contracts rely on */
 import Big from 'big.js';
 import BigNumber from 'bignumber.js';
-import { Decimal } from 'decimal.js';
 import { Complex as ComplexJs } from 'complex.js';
+import { Decimal } from 'decimal.js';
 import Fraction from 'fraction.js';
 import jStat from 'jstat';
 import {
-  complex as mathComplex,
   det,
-  divide as mathDivide,
+  eigs,
   inv,
   lusolve,
+  complex as mathComplex,
+  divide as mathDivide,
   multiply as mathMultiply,
-  polynomialRoot,
   pow as mathPow,
   sqrt as mathSqrt,
+  polynomialRoot,
 } from 'mathjs';
-import { determinant as mlDeterminant, inverse as mlInverse, Matrix, solve as mlSolve } from 'ml-matrix';
+import {
+  EigenvalueDecomposition,
+  Matrix,
+  determinant as mlDeterminant,
+  inverse as mlInverse,
+  solve as mlSolve,
+} from 'ml-matrix';
 import regression from 'regression';
 import * as ss from 'simple-statistics';
 
@@ -37,7 +44,14 @@ import { compare, defineSuite, scenario } from '@arki/bench';
 import { complex } from '@arki/math/complex';
 import { decimal } from '@arki/math/decimal';
 import { normal, studentT } from '@arki/math/distributions';
-import { determinant, inverse, multiply, solve } from '@arki/math/linear-algebra';
+import {
+  determinant,
+  eigenDecompose,
+  inverse,
+  multiply,
+  solve,
+  symmetricEigenDecompose,
+} from '@arki/math/linear-algebra';
 import { cubicRoots } from '@arki/math/polynomial';
 import { createRandom } from '@arki/math/random';
 import { ratio } from '@arki/math/rational';
@@ -171,7 +185,8 @@ type MatrixPair = { a: number[][]; b: number[][] };
 function matrixPairs(n: number): MatrixPair[] {
   return [11, 22, 33].map(seed => {
     const random = createRandom(seed + n);
-    const fill = (): number[][] => Array.from({ length: n }, () => Array.from({ length: n }, () => random.float(-1, 1)));
+    const fill = (): number[][] =>
+      Array.from({ length: n }, () => Array.from({ length: n }, () => random.float(-1, 1)));
     const a = fill().map((row, index) => row.map((value, column) => (index === column ? value + n : value)));
     return { a, b: fill() };
   });
@@ -187,8 +202,20 @@ function flatNumbers(value: unknown): number[] {
   throw new TypeError('expected numbers or arrays of numbers');
 }
 
-const matrixText = (matrix: readonly (readonly number[])[]): string =>
-  matrix.map(row => list(row)).join(';');
+const matrixText = (matrix: readonly (readonly number[])[]): string => matrix.map(row => list(row)).join(';');
+
+type Square = { a: number[][] };
+
+/** The three diagonally dominant 20×20 matrices of `matrixPairs(20)`, for the general eigen group. */
+const generalSquares: Square[] = matrixPairs(20).map(({ a }) => ({ a }));
+
+/** Their symmetric parts (A + Aᵀ)/2, exactly symmetric, for the symmetric eigen group. */
+const symmetricSquares: Square[] = generalSquares.map(({ a }) => ({
+  a: a.map((row, i) => row.map((value, j) => (value + (a[j]?.[i] ?? 0)) / 2)),
+}));
+
+/** Real eigenvalues sorted ascending, each to 9 significant digits. */
+const sortedText = (values: readonly number[]): string => list(values.toSorted((p, q) => p - q));
 
 type ComplexPair = { a: readonly [number, number]; b: readonly [number, number] };
 
@@ -229,7 +256,7 @@ export default defineSuite({
     'Rational and fraction.js are exact and reduce to lowest terms; results are compared as `numerator/denominator`.',
     'Statistics run on five data sets of 1,000 numbers (a sine wave, values near 1e9, negatives, a constant, random cents) and are compared to 12 significant digits, because compensated and plain summation can differ in the last bits.',
     'Statistics in `@arki/math` check that every element is a finite number, never modify the input, use compensated summation, and select percentiles with quickselect on a checked copy (falling back to a sort when selection stalls). simple-statistics also uses compensated summation and quickselect on a copy; jstat sorts a full copy.',
-    'Regression runs on two seeded data sets of 1,000 points, linear algebra on three seeded sets of matrices (50×50, or 20×20 for inverse; the matrix to solve, invert or take the determinant of is diagonally dominant so every library is well-conditioned), complex numbers on six pairs that include a real, an imaginary and a negative-real input. All are compared to 9 significant digits, with values below 1e-12 counted as 0. Matrices are converted to ml-matrix `Matrix` objects before timing, as that library expects; mathjs and `@arki/math` take plain `number[][]`.',
+    'Regression runs on two seeded data sets of 1,000 points, linear algebra on three seeded sets of matrices (50×50, or 20×20 for inverse; the matrix to solve, invert or take the determinant of is diagonally dominant so every library is well-conditioned), eigendecompositions on three seeded 20×20 matrices (the diagonally dominant ones, and their symmetric parts for the symmetric group; every library also computes eigenvectors, which ml-matrix and mathjs do by default), complex numbers on six pairs that include a real, an imaginary and a negative-real input. All are compared to 9 significant digits, with values below 1e-12 counted as 0. Matrices are converted to ml-matrix `Matrix` objects before timing, as that library expects; mathjs and `@arki/math` take plain `number[][]`.',
     '`@arki/math` linearRegression also computes r², which simple-statistics `linearRegression` does not; regression-js is run with `precision: 15` (its default of 2 decimals would round the result). regression-js exponential fits a different curve, so it is shown without a rank.',
     'Distribution values are compared to 9 significant digits, with values below 1e-12 counted as 0.',
   ],
@@ -831,7 +858,10 @@ export default defineSuite({
     compare<MatrixPair>({
       id: 'matrix-inverse',
       title: 'Inverse (20×20)',
-      contract: { id: 'math-matrix-inverse/v1', description: 'A⁻¹ of a well-conditioned square matrix, every entry to 9 significant digits' },
+      contract: {
+        id: 'math-matrix-inverse/v1',
+        description: 'A⁻¹ of a well-conditioned square matrix, every entry to 9 significant digits',
+      },
       inputs: matrixPairs(20),
       baseline: 'arki',
       cases: c => ({
@@ -856,10 +886,73 @@ export default defineSuite({
         }),
       }),
     }),
+    compare<Square>({
+      id: 'symmetric-eigen',
+      title: 'Symmetric eigendecomposition (20×20)',
+      contract: {
+        id: 'math-symmetric-eigen/v1',
+        description:
+          'eigenvalues and eigenvectors of a symmetric matrix; the eigenvalues, sorted, are compared to 9 significant digits',
+      },
+      inputs: symmetricSquares,
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math symmetricEigenDecompose',
+          package: '@arki/math',
+          run: ({ a }: Square) => symmetricEigenDecompose(a),
+          normalize: result => sortedText(result.values),
+        }),
+        mlMatrix: c({
+          label: 'ml-matrix EigenvalueDecomposition',
+          package: 'ml-matrix',
+          setup: ({ a }) => new Matrix(a),
+          run: x => new EigenvalueDecomposition(x, { assumeSymmetric: true }),
+          normalize: result => sortedText(result.realEigenvalues),
+        }),
+        mathjs: c({
+          label: 'mathjs eigs',
+          package: 'mathjs',
+          run: ({ a }: Square) => eigs(a),
+          normalize: result => sortedText(flatNumbers(result.values.valueOf())),
+        }),
+      }),
+    }),
+    compare<Square>({
+      id: 'general-eigen',
+      title: 'General eigendecomposition (20×20)',
+      contract: {
+        id: 'math-general-eigen/v1',
+        description:
+          'eigenvalues (real or complex) and eigenvectors of a non-symmetric real matrix; the eigenvalues, sorted by real then imaginary part, are compared to 9 significant digits',
+      },
+      inputs: generalSquares,
+      baseline: 'arki',
+      note: 'mathjs `eigs` is not shown: on all three inputs it throws "The eigenvalues failed to converge" (with its default precision of 1e-15, and still on two of the three with `precision: 1e-8`).',
+      cases: c => ({
+        arki: c({
+          label: '@arki/math eigenDecompose',
+          package: '@arki/math',
+          run: ({ a }: Square) => eigenDecompose(a),
+          normalize: result => rootsText(result.values),
+        }),
+        mlMatrix: c({
+          label: 'ml-matrix EigenvalueDecomposition',
+          package: 'ml-matrix',
+          setup: ({ a }) => new Matrix(a),
+          run: x => new EigenvalueDecomposition(x),
+          normalize: result =>
+            rootsText(result.realEigenvalues.map((re, index) => ({ re, im: result.imaginaryEigenvalues[index] ?? 0 }))),
+        }),
+      }),
+    }),
     compare<ComplexPair>({
       id: 'complex-times',
       title: 'Complex times',
-      contract: { id: 'math-complex-times/v1', description: 'the product of two complex numbers; real and imaginary part to 9 significant digits' },
+      contract: {
+        id: 'math-complex-times/v1',
+        description: 'the product of two complex numbers; real and imaginary part to 9 significant digits',
+      },
       inputs: complexPairs,
       baseline: 'arki',
       cases: c => ({
@@ -889,7 +982,10 @@ export default defineSuite({
     compare<ComplexPair>({
       id: 'complex-divided-by',
       title: 'Complex dividedBy',
-      contract: { id: 'math-complex-divide/v1', description: 'the quotient of two complex numbers; real and imaginary part to 9 significant digits' },
+      contract: {
+        id: 'math-complex-divide/v1',
+        description: 'the quotient of two complex numbers; real and imaginary part to 9 significant digits',
+      },
       inputs: complexPairs,
       baseline: 'arki',
       cases: c => ({
@@ -919,7 +1015,10 @@ export default defineSuite({
     compare<ComplexPair>({
       id: 'complex-pow',
       title: 'Complex pow',
-      contract: { id: 'math-complex-pow/v1', description: 'the principal value of z^w for complex z and w; real and imaginary part to 9 significant digits' },
+      contract: {
+        id: 'math-complex-pow/v1',
+        description: 'the principal value of z^w for complex z and w; real and imaginary part to 9 significant digits',
+      },
       inputs: complexPairs,
       baseline: 'arki',
       cases: c => ({
@@ -949,7 +1048,10 @@ export default defineSuite({
     compare<ComplexPair>({
       id: 'complex-sqrt',
       title: 'Complex sqrt',
-      contract: { id: 'math-complex-sqrt/v1', description: 'the principal square root; real and imaginary part to 9 significant digits' },
+      contract: {
+        id: 'math-complex-sqrt/v1',
+        description: 'the principal square root; real and imaginary part to 9 significant digits',
+      },
       inputs: complexPairs,
       baseline: 'arki',
       cases: c => ({
@@ -979,7 +1081,10 @@ export default defineSuite({
     compare<string>({
       id: 'complex-parse',
       title: 'Complex parse',
-      contract: { id: 'math-complex-parse/v1', description: 'the number a text like "3+4i" stands for; real and imaginary part to 9 significant digits' },
+      contract: {
+        id: 'math-complex-parse/v1',
+        description: 'the number a text like "3+4i" stands for; real and imaginary part to 9 significant digits',
+      },
       inputs: ['3+4i', '-2.5-0.5i', '7', '2i', '-i', '1.5e3+2e-3i', '0.125 - 8i'],
       baseline: 'arki',
       cases: c => ({
@@ -1008,7 +1113,8 @@ export default defineSuite({
       title: 'Cubic roots',
       contract: {
         id: 'math-cubic-roots/v1',
-        description: 'all three roots of ax³+bx²+cx+d, as real/imaginary parts sorted by real part then imaginary part, to 9 significant digits',
+        description:
+          'all three roots of ax³+bx²+cx+d, as real/imaginary parts sorted by real part then imaginary part, to 9 significant digits',
       },
       inputs: [
         [1, -6, 11, -6],

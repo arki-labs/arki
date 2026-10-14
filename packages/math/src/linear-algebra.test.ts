@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Matrix, Vector } from './linear-algebra.js';
+import { Complex, complex } from './complex.js';
 import {
   DivisionByZeroError,
   InvalidArgumentError,
@@ -14,6 +15,8 @@ import {
   cross,
   determinant,
   dot,
+  eigenDecompose,
+  eigenvalues,
   identity,
   inverse,
   luDecompose,
@@ -26,10 +29,14 @@ import {
   projection,
   rank,
   solve,
+  symmetricEigenDecompose,
+  symmetricEigenvalues,
   times,
   trace,
   transpose,
 } from './linear-algebra.js';
+import { polynomialRoots } from './polynomial.js';
+import { createRandom } from './random.js';
 
 /** Hilbert matrix H[i][j] = 1/(i+j+1): the textbook ill-conditioned matrix (cond∞(H₁₀) ≈ 3.5e13). */
 function hilbert(n: number): number[][] {
@@ -477,5 +484,440 @@ describe('rank', () => {
     ];
     expect(rank(nearlyDependent)).toBe(2);
     expect(rank(nearlyDependent, { tolerance: 1e-8 })).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Eigenvalues
+
+/** Seeded n×n matrix with entries uniform in [-1, 1). */
+function randomMatrix(seed: number, n: number): number[][] {
+  const random = createRandom(seed);
+  return Array.from({ length: n }, () => Array.from({ length: n }, () => random.float(-1, 1)));
+}
+
+/** Seeded symmetric n×n matrix (A + Aᵀ)/2, exactly symmetric. */
+function randomSymmetric(seed: number, n: number): number[][] {
+  const a = randomMatrix(seed, n);
+  return a.map((row, i) => row.map((x, j) => (x + a[j]![i]!) / 2));
+}
+
+/** Frobenius norm ‖A‖_F. */
+function frobenius(a: Matrix): number {
+  return Math.sqrt(a.flat().reduce((sum, x) => sum + x * x, 0));
+}
+
+/** max_i |(A·v − λ·v)_i| for a complex eigenpair. */
+function residual(a: Matrix, value: Complex, vector: readonly Complex[]): number {
+  let worst = 0;
+  for (const [i, row] of a.entries()) {
+    let sum = Complex.ZERO;
+    for (const [j, x] of row.entries()) sum = sum.plus(vector[j]!.times(x));
+    worst = Math.max(worst, sum.minus(value.times(vector[i]!)).abs());
+  }
+  return worst;
+}
+
+/** max_i |(A·v − λ·v)_i| for a real eigenpair. */
+function realResidual(a: Matrix, value: number, vector: Vector): number {
+  return Math.max(...multiply(a, vector).map((x, i) => Math.abs(x - value * vector[i]!)));
+}
+
+/** Companion matrix of a monic-normalized polynomial (highest degree first): its eigenvalues are the roots. */
+function companion(coefficients: readonly number[]): number[][] {
+  const [lead = 1, ...rest] = coefficients;
+  const n = rest.length;
+  return Array.from({ length: n }, (_, i) =>
+    Array.from({ length: n }, (_, j) => (i === 0 ? -rest[j]! / lead : i === j + 1 ? 1 : 0)),
+  );
+}
+
+const parts = (values: readonly Complex[]): [number, number][] => values.map(z => [z.re, z.im]);
+
+describe('symmetricEigenvalues / symmetricEigenDecompose', () => {
+  it('a diagonal matrix: the eigenvalues are the diagonal (ascending, exact) and the vectors the standard basis', () => {
+    // Nothing to rotate away, so no rounding may creep in.
+    const { values, vectors } = symmetricEigenDecompose([
+      [3, 0, 0],
+      [0, -1, 0],
+      [0, 0, 2],
+    ]);
+    expect(values).toEqual([-1, 2, 3]);
+    expect(vectors).toEqual([
+      [0, 1, 0],
+      [0, 0, 1],
+      [1, 0, 0],
+    ]);
+    expect(symmetricEigenvalues([[-7]])).toEqual([-7]);
+  });
+
+  it('the second-difference matrix tridiag(−1, 2, −1): λ = 2 − √2, 2, 2 + √2 (Strang §6.4)', () => {
+    const a: Matrix = [
+      [2, -1, 0],
+      [-1, 2, -1],
+      [0, -1, 2],
+    ];
+    const { values, vectors } = symmetricEigenDecompose(a);
+    const expected = [2 - Math.SQRT2, 2, 2 + Math.SQRT2];
+    for (const [k, value] of values.entries()) expect(value).toBeCloseTo(expected[k]!, 14);
+    expect(symmetricEigenvalues(a)).toEqual(values);
+    // v₁ = (1, √2, 1)/2 and v₃ = (1, −√2, 1)/2 up to sign; the sign rule makes the largest entry positive.
+    const v1 = vectors[0]!;
+    const v3 = vectors[2]!;
+    for (const [i, x] of [0.5, Math.SQRT1_2, 0.5].entries()) expect(v1[i]).toBeCloseTo(x, 14);
+    for (const [i, x] of [-0.5, Math.SQRT1_2, -0.5].entries()) expect(v3[i]).toBeCloseTo(x, 14);
+    // v₂ = (1, 0, −1)/√2: its two largest entries tie, so only check it up to sign.
+    expect(Math.abs(vectors[1]![0]!)).toBeCloseTo(Math.SQRT1_2, 14);
+    expect(vectors[1]![1]).toBeCloseTo(0, 14);
+    expect(vectors[1]![0]! + vectors[1]![2]!).toBeCloseTo(0, 14);
+  });
+
+  it('random symmetric matrices: residual ≤ 1e-12·‖A‖, orthonormal vectors, ascending values, Σλ = trace', () => {
+    for (const n of [2, 5, 20, 50]) {
+      const a = randomSymmetric(1000 + n, n);
+      const { values, vectors } = symmetricEigenDecompose(a);
+      const size = frobenius(a);
+      for (const [k, value] of values.entries()) {
+        expect(realResidual(a, value, vectors[k]!)).toBeLessThanOrEqual(1e-12 * size);
+        if (k > 0) expect(value).toBeGreaterThanOrEqual(values[k - 1]!);
+      }
+      // VᵀV = I: the vectors are an orthonormal basis, not just eigenvectors.
+      for (const [i, u] of vectors.entries()) {
+        for (const [j, w] of vectors.entries()) expect(Math.abs(dot(u, w) - (i === j ? 1 : 0))).toBeLessThan(1e-13);
+      }
+      expect(values.reduce((sum, x) => sum + x, 0)).toBeCloseTo(trace(a), 11);
+      // The values-only path skips the vector work but must agree.
+      for (const [k, x] of symmetricEigenvalues(a).entries())
+        expect(Math.abs(x - values[k]!)).toBeLessThan(1e-13 * size);
+    }
+  });
+
+  it('a repeated eigenvalue still gets an orthonormal basis of its eigenspace', () => {
+    // J + I with J the all-ones matrix: λ = 1, 1, 4; any orthonormal basis of x₁+x₂+x₃ = 0 is right for λ = 1.
+    const a: Matrix = [
+      [2, 1, 1],
+      [1, 2, 1],
+      [1, 1, 2],
+    ];
+    const { values, vectors } = symmetricEigenDecompose(a);
+    expect(values[0]).toBeCloseTo(1, 14);
+    expect(values[1]).toBeCloseTo(1, 14);
+    expect(values[2]).toBeCloseTo(4, 14);
+    for (const [k, v] of vectors.entries()) expect(realResidual(a, values[k]!, v)).toBeLessThan(1e-14);
+    expect(Math.abs(dot(vectors[0]!, vectors[1]!))).toBeLessThan(1e-15);
+    for (const x of vectors[2]!) expect(x).toBeCloseTo(1 / Math.sqrt(3), 15);
+  });
+
+  it('2×2 edge case [[1, 2], [2, 4]]: λ = 0 and 5, vectors (2, −1)/√5 and (1, 2)/√5', () => {
+    const { values, vectors } = symmetricEigenDecompose([
+      [1, 2],
+      [2, 4],
+    ]);
+    expect(values[0]).toBeCloseTo(0, 14);
+    expect(values[1]).toBeCloseTo(5, 14);
+    const r5 = Math.sqrt(5);
+    for (const [i, x] of [2 / r5, -1 / r5].entries()) expect(vectors[0]![i]).toBeCloseTo(x, 14);
+    for (const [i, x] of [1 / r5, 2 / r5].entries()) expect(vectors[1]![i]).toBeCloseTo(x, 14);
+  });
+
+  it('entries near the float64 limits neither overflow nor underflow (exact power-of-two prescaling)', () => {
+    // λ = −1, 3 times the scale; the squares inside the iteration would be 1e600 or 1e-600 unscaled.
+    for (const scale of [1e300, 1e-300]) {
+      const values = symmetricEigenvalues([
+        [scale, 2 * scale],
+        [2 * scale, scale],
+      ]);
+      expect(values[0]! / scale).toBeCloseTo(-1, 14);
+      expect(values[1]! / scale).toBeCloseTo(3, 14);
+    }
+  });
+
+  it('accepts float rounding noise in the symmetry but rejects a real asymmetry', () => {
+    const noisy: Matrix = [
+      [1, 0.1 + 0.2],
+      [0.3, 1],
+    ];
+    expect(symmetricEigenvalues(noisy)[1]).toBeCloseTo(1.3, 15);
+    expect(() => symmetricEigenvalues(noisy, { tolerance: 0 })).toThrow(InvalidArgumentError);
+    expect(() =>
+      symmetricEigenvalues([
+        [1, 2],
+        [3, 1],
+      ]),
+    ).toThrow(InvalidArgumentError);
+    expect(
+      symmetricEigenvalues(
+        [
+          [1, 2],
+          [2.5, 1],
+        ],
+        { tolerance: 1 },
+      ),
+    ).toEqual(
+      symmetricEigenvalues([
+        [1, 2.25],
+        [2.25, 1],
+      ]),
+    );
+    expect(() => symmetricEigenvalues([[1]], { tolerance: -1 })).toThrow(InvalidArgumentError);
+  });
+});
+
+describe('eigenvalues / eigenDecompose', () => {
+  it('a triangular matrix: the eigenvalues are its diagonal (exact when upper triangular, already Schur form)', () => {
+    const upper: Matrix = [
+      [4, 1, -2],
+      [0, -3, 5],
+      [0, 0, 1],
+    ];
+    expect(parts(eigenvalues(upper))).toEqual([
+      [-3, 0],
+      [1, 0],
+      [4, 0],
+    ]);
+    const lower = transpose(upper);
+    for (const [k, z] of eigenvalues(lower).entries()) {
+      expect(z.re).toBeCloseTo([-3, 1, 4][k]!, 13);
+      expect(z.isReal()).toBe(true);
+    }
+    const diagonal = eigenDecompose([
+      [2, 0],
+      [0, -5],
+    ]);
+    expect(parts(diagonal.values)).toEqual([
+      [-5, 0],
+      [2, 0],
+    ]);
+    expect(diagonal.vectors.map(vector => parts(vector))).toEqual([
+      [
+        [0, 0],
+        [1, 0],
+      ],
+      [
+        [1, 0],
+        [0, 0],
+      ],
+    ]);
+  });
+
+  it('a rotation by θ has the complex pair cos θ ∓ i·sin θ with vectors (1, ±i)/√2', () => {
+    const theta = 0.3;
+    const rotation: Matrix = [
+      [Math.cos(theta), -Math.sin(theta)],
+      [Math.sin(theta), Math.cos(theta)],
+    ];
+    const { values, vectors } = eigenDecompose(rotation);
+    expect(values[0]!.approxEqual(complex(Math.cos(theta), -Math.sin(theta)), 1e-15)).toBe(true);
+    expect(values[1]!.approxEqual(complex(Math.cos(theta), Math.sin(theta)), 1e-15)).toBe(true);
+    expect(values[0]!.isReal()).toBe(false);
+    // Conjugate eigenvalues get conjugate vectors.
+    expect(vectors[0]![0]!.approxEqual(complex(Math.SQRT1_2, 0), 1e-15)).toBe(true);
+    expect(vectors[0]![1]!.approxEqual(complex(0, Math.SQRT1_2), 1e-15)).toBe(true);
+    expect(vectors[1]![1]!.approxEqual(complex(0, -Math.SQRT1_2), 1e-15)).toBe(true);
+  });
+
+  it('random general matrices: residual ≤ 1e-12·‖A‖, unit vectors, conjugate pairs, Σλ = trace', () => {
+    for (const n of [1, 2, 5, 20, 40]) {
+      const a = randomMatrix(2000 + n, n);
+      const { values, vectors } = eigenDecompose(a);
+      const size = frobenius(a);
+      for (const [k, value] of values.entries()) {
+        const v = vectors[k]!;
+        expect(residual(a, value, v)).toBeLessThanOrEqual(1e-12 * size);
+        expect(Math.sqrt(v.reduce((sum, z) => sum + z.abs() ** 2, 0))).toBeCloseTo(1, 14);
+        if (value.isReal()) expect(v.every(z => z.isReal())).toBe(true);
+      }
+      const complexOnes = values.filter(z => !z.isReal());
+      // Each complex eigenvalue's conjugate is in the list too.
+      for (const z of complexOnes) expect(complexOnes.some(w => w.eq(z.conjugate()))).toBe(true);
+      const sum = values.reduce((acc, z) => acc.plus(z), Complex.ZERO);
+      expect(sum.re).toBeCloseTo(trace(a), 11);
+      expect(sum.im).toBeCloseTo(0, 11);
+      // The values-only path (EISPACK hqr) must find the same spectrum.
+      for (const [k, z] of eigenvalues(a).entries()) expect(z.minus(values[k]!).abs()).toBeLessThan(1e-11 * size);
+    }
+  });
+
+  it('the product of the eigenvalues is the determinant', () => {
+    const a = randomMatrix(77, 6);
+    const product = eigenvalues(a).reduce((acc, z) => acc.times(z), Complex.ONE);
+    expect(product.re).toBeCloseTo(determinant(a), 12);
+    expect(product.im).toBeCloseTo(0, 12);
+  });
+
+  it('a Jordan block keeps its triple eigenvalue; a non-triangular defective matrix gets it to ~√ε', () => {
+    expect(
+      parts(
+        eigenvalues([
+          [2, 1, 0],
+          [0, 2, 1],
+          [0, 0, 2],
+        ]),
+      ),
+    ).toEqual([
+      [2, 0],
+      [2, 0],
+      [2, 0],
+    ]);
+    // [[1, 1], [−1, 3]] has (λ − 2)² as characteristic polynomial and a single eigenvector (1, 1):
+    // a double root perturbed by ε moves by about √ε ≈ 1.5e-8, in every float library.
+    const { values, vectors } = eigenDecompose([
+      [1, 1],
+      [-1, 3],
+    ]);
+    for (const z of values) expect(z.minus(2).abs()).toBeLessThan(1e-7);
+    for (const v of vectors) {
+      expect(v[0]!.minus(Math.SQRT1_2).abs()).toBeLessThan(1e-7);
+      expect(v[1]!.minus(Math.SQRT1_2).abs()).toBeLessThan(1e-7);
+    }
+  });
+
+  it('balancing recovers the eigenvalues of a badly scaled matrix to full precision', () => {
+    // A = D·T·D⁻¹ with D = diag(1e-10, 1, 1e10) and T = tridiag(−1, 2, −1): same eigenvalues 2 − √2, 2, 2 + √2.
+    // Without balancing the error would be about ε·‖A‖ ≈ 2e-6; balancing brings ‖A‖ back to ~4.
+    const a: Matrix = [
+      [2, -1e-10, 0],
+      [-1e10, 2, -1e-10],
+      [0, -1e10, 2],
+    ];
+    const expected = [2 - Math.SQRT2, 2, 2 + Math.SQRT2];
+    const { values, vectors } = eigenDecompose(a);
+    for (const [k, z] of values.entries()) {
+      expect(Math.abs(z.re - expected[k]!)).toBeLessThan(1e-14);
+      expect(z.im).toBe(0);
+    }
+    // The vectors are undone through D as well: A·v = λ·v holds relative to v's own scale.
+    for (const [k, v] of vectors.entries()) expect(residual(a, values[k]!, v)).toBeLessThan(1e-12);
+  });
+
+  it('a cyclic permutation (where standard shifts stall) converges through the exceptional shifts', () => {
+    // Its eigenvalues are the cube roots of unity: 1 and −1/2 ± i·√3/2.
+    const roots = eigenvalues([
+      [0, 0, 1],
+      [1, 0, 0],
+      [0, 1, 0],
+    ]);
+    const expected = [complex(-0.5, -Math.sqrt(3) / 2), complex(-0.5, Math.sqrt(3) / 2), complex(1, 0)];
+    for (const [k, z] of roots.entries()) expect(z.approxEqual(expected[k]!, 1e-14)).toBe(true);
+    // 4-cycle: the fourth roots of unity −1, −i, i, 1.
+    const four = eigenvalues([
+      [0, 0, 0, 1],
+      [1, 0, 0, 0],
+      [0, 1, 0, 0],
+      [0, 0, 1, 0],
+    ]);
+    for (const [k, w] of [complex(-1, 0), complex(0, -1), complex(0, 1), complex(1, 0)].entries())
+      expect(four[k]!.approxEqual(w, 1e-14)).toBe(true);
+  });
+
+  it('repeated eigenvalues of a non-symmetric matrix: 5·I and a block-diagonal pair', () => {
+    expect(parts(eigenvalues(times(identity(3), 5)))).toEqual([
+      [5, 0],
+      [5, 0],
+      [5, 0],
+    ]);
+    const { values, vectors } = eigenDecompose([
+      [3, 4, 0, 0],
+      [-4, 3, 0, 0],
+      [0, 0, 3, 4],
+      [0, 0, -4, 3],
+    ]);
+    expect(values.map(z => [z.re, Math.round(z.im)])).toEqual([
+      [3, -4],
+      [3, -4],
+      [3, 4],
+      [3, 4],
+    ]);
+    for (const [k, v] of vectors.entries())
+      expect(
+        residual(
+          identity(4).map(
+            (_, i) =>
+              [
+                [3, 4, 0, 0],
+                [-4, 3, 0, 0],
+                [0, 0, 3, 4],
+                [0, 0, -4, 3],
+              ][i]!,
+          ),
+          values[k]!,
+          v,
+        ),
+      ).toBeLessThan(1e-14);
+  });
+
+  it('1×1 and 2×2 edge cases', () => {
+    const one = eigenDecompose([[-3]]);
+    expect(parts(one.values)).toEqual([[-3, 0]]);
+    expect(parts(one.vectors[0]!)).toEqual([[1, 0]]);
+    // Companion of x² + 3x + 2 = (x + 1)(x + 2).
+    for (const [k, z] of eigenvalues([
+      [0, 1],
+      [-2, -3],
+    ]).entries()) {
+      expect(z.re).toBeCloseTo([-2, -1][k]!, 15);
+      expect(z.im).toBe(0);
+    }
+    expect(
+      parts(
+        eigenvalues([
+          [0, 0],
+          [0, 0],
+        ]),
+      ),
+    ).toEqual([
+      [0, 0],
+      [0, 0],
+    ]);
+  });
+
+  it('the companion matrix of a polynomial has its roots as eigenvalues (agrees with polynomialRoots)', () => {
+    // x⁵ − 2x⁴ + 3x³ − 4x² + 5x − 6: one real root, two complex pairs.
+    const coefficients = [1, -2, 3, -4, 5, -6];
+    const fromRoots = polynomialRoots(coefficients);
+    const fromMatrix = eigenvalues(companion(coefficients));
+    expect(fromMatrix).toHaveLength(5);
+    for (const [k, z] of fromMatrix.entries()) expect(z.minus(fromRoots[k]!).abs()).toBeLessThan(1e-12);
+    expect(fromMatrix.filter(z => z.isReal())).toHaveLength(1);
+  });
+});
+
+describe('eigen solvers: validation and hygiene', () => {
+  it('rejects non-square, empty and non-finite input with a typed error', () => {
+    for (const solver of [eigenvalues, eigenDecompose, symmetricEigenvalues, symmetricEigenDecompose]) {
+      expect(() => solver([[1, 2]])).toThrow(InvalidArgumentError);
+      expect(() => solver([])).toThrow(InvalidArgumentError);
+      expect(() => solver([[Number.NaN]])).toThrow(InvalidArgumentError);
+      expect(() =>
+        solver([
+          [Infinity, 0],
+          [0, 1],
+        ]),
+      ).toThrow(InvalidArgumentError);
+    }
+  });
+
+  it('never modifies or aliases the input, and never returns -0', () => {
+    const a = [
+      [-0, 0],
+      [0, -0],
+    ];
+    const frozen = a.map(row => Object.freeze([...row]));
+    const symmetric = symmetricEigenDecompose(frozen);
+    const general = eigenDecompose(frozen);
+    for (const x of [...symmetric.values, ...symmetric.vectors.flat()]) expect(Object.is(x, -0)).toBe(false);
+    for (const z of [...general.values, ...general.vectors.flat()]) {
+      expect(Object.is(z.re, -0) || Object.is(z.im, -0)).toBe(false);
+    }
+    symmetric.vectors[0]![0] = 99;
+    expect(frozen).toEqual([
+      [-0, 0],
+      [0, -0],
+    ]);
+    const b = randomMatrix(5, 4);
+    const copy = b.map(row => [...row]);
+    eigenDecompose(b);
+    eigenvalues(b);
+    expect(b).toEqual(copy);
   });
 });
