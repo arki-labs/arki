@@ -100,3 +100,16 @@ describe('PaymentRepository.createCustomer', () => {
     expect(taken).toMatchObject({ message: 'Provider customer cus_test already belongs to another user' });
   });
 });
+
+describe('PaymentRepository counts', () => {
+  it('getCustomerCount returns a number, not text', async () => {
+    const total = await repo.getCustomerCount();
+
+    expect(typeof total).toBe('number');
+    expect(total).toBeGreaterThanOrEqual(1);
+  });
+
+  it('getActiveSubscriptionCount returns a number, zero when there are none', async () => {
+    expect(await repo.getActiveSubscriptionCount()).toBe(0);
+  });
+});

@@ -1,7 +1,7 @@
 import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
-import { eq } from 'drizzle-orm';
+import { count, eq } from 'drizzle-orm';
 
 import type { UserId } from './user-id.js';
 import type { Instant } from '@arki/date';
@@ -597,16 +597,16 @@ export class PaymentRepository {
   }
 
   async getCustomerCount(): Promise<number> {
-    const result = await this.db.select({ count: this.customers.id }).from(this.customers);
-    return result.length;
+    const [row] = await this.db.select({ total: count() }).from(this.customers);
+    return row?.total ?? 0;
   }
 
   async getActiveSubscriptionCount(): Promise<number> {
-    const result = await this.db
-      .select({ count: this.subscriptions.id })
+    const [row] = await this.db
+      .select({ total: count() })
       .from(this.subscriptions)
       .where(eq(this.subscriptions.status, 'active'));
-    return result.length;
+    return row?.total ?? 0;
   }
 }
 
