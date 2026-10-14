@@ -1,0 +1,23 @@
+[
+  {
+    "name": "@arki/expr (parse, print, scientific)",
+    "path": "dist/index.js",
+    "import": "{ parse, print, scientific }",
+    "limit": "6 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/expr + @arki/expr/float (parse, compile)",
+    "path": ["dist/index.js", "dist/float.js"],
+    "import": { "dist/index.js": "{ parse }", "dist/float.js": "{ compile }" },
+    "limit": "15 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/expr/latex (toLatex)",
+    "path": "dist/latex.js",
+    "import": "{ toLatex }",
+    "limit": "3 kB",
+    "gzip": true
+  }
+]

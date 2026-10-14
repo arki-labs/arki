@@ -3,6 +3,7 @@
 // It exercises each export once, plus a 256-deep expression (RFC §18); the
 // unit tests cover the details.
 
+import { compile, evaluate } from '../dist/float.js';
 import {
   decimalComma,
   defineLanguage,
@@ -15,6 +16,7 @@ import {
   print,
   scientific,
 } from '../dist/index.js';
+import { toLatex } from '../dist/latex.js';
 
 const code = run => {
   try {
@@ -26,6 +28,16 @@ const code = run => {
 };
 
 const deep = `${'('.repeat(255)}x${')'.repeat(255)}`;
+const message = run => {
+  try {
+    run();
+    return 'none';
+  } catch (error) {
+    return error instanceof Error ? error.message : 'other';
+  }
+};
+const gaps = compile(parse('1/x'), { variables: ['x'] }).sample(new Float64Array([0, 2]), new Float64Array(2));
+
 const physics = defineLanguage({ extends: scientific, functions: { hypot: { arity: [2, 16] } } });
 
 const checks = [
@@ -39,6 +51,12 @@ const checks = [
   ['not a function', code(() => parse('foo(x)')), 'not-a-function'],
   ['unbalanced bar', code(() => parse('|x|y|')), 'unbalanced-bar'],
   ['256-deep expression', print(parse(deep)), deep],
+  ['float evaluate', evaluate('2^10 - 1'), 1023],
+  ['float degrees', evaluate('sin(90)', { angle: 'deg' }), 1],
+  ['float 256-deep expression', compile(parse(deep), { variables: ['x'] }).at(3), 3],
+  ['float typed error', message(() => evaluate('1/0')), 'Division by zero: 1 / 0'],
+  ['float sample gap', `${gaps[0]},${gaps[1]}`, 'NaN,0.5'],
+  ['latex', toLatex(parse('sqrt(x)/2')), '\\frac{\\sqrt{x}}{2}'],
   [
     '100 000 parentheses',
     code(() => parse(`${'('.repeat(100000)}x`, { limits: { length: 200000, tokens: 200000 } })),

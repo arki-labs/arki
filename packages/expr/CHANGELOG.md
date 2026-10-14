@@ -1,5 +1,14 @@
 # @arki/expr
 
+## Unreleased
+
+Float domain and LaTeX (RFC `2026-10-14-arki-expr` §21 step 2).
+
+- `@arki/expr/float`: `compile`, `compileEquation`, `evaluate`. Closure trees specialised per operator and arity; a checked tree for `f()` / `f.at()` that throws typed `@arki/math` errors, and a lazily built IEEE tree for `f.sample()` where `NaN` marks a gap. Degree mode, split-letter name resolution with `f.readings`, `split-after-division` warnings, static `steps` budget, `signal` checks in `sample`.
+- `@arki/expr/latex`: `toLatex`.
+- `Language` carries its function and constant names as type parameters, so `compile` requires host implementations by type. Function definitions take an optional `cost` (default 1) for the steps budget.
+- `size-limit` budgets in `test`; benchmark suite against mathjs (pruned) and expr-eval.
+
 ## 0.0.1
 
 Core (RFC `2026-10-14-arki-expr` §21 step 1). Not published yet.

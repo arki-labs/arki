@@ -31,6 +31,16 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./float": {
+      "types": "./dist/float.d.ts",
+      "import": "./dist/float.js",
+      "default": "./dist/float.js"
+    },
+    "./latex": {
+      "types": "./dist/latex.d.ts",
+      "import": "./dist/latex.js",
+      "default": "./dist/latex.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -44,12 +54,13 @@
     "package.json"
   ],
   "scripts": {
+    "bench": "bun run build && arki-bench",
     "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "test": "vitest run",
+    "test": "vitest run && size-limit",
     "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
@@ -58,11 +69,17 @@
     "@arki/math": "workspace:*"
   },
   "devDependencies": {
+    "@arki/bench": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/library-tooling": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
+    "@size-limit/esbuild": "^14.2.0",
+    "@size-limit/file": "^14.2.0",
+    "expr-eval": "^2.0.2",
     "fast-check": "^4.10.2",
+    "mathjs": "catalog:",
+    "size-limit": "^14.2.0",
     "vitest": "catalog:"
   }
 }

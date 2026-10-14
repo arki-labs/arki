@@ -1,6 +1,6 @@
 # @arki/expr
 
-A safe expression language on [`@arki/math`](../math): a hand-written parser for user-typed formulas (`2x^2 + sin(x)`, `|x - 1|`, `√2`, `1/2x`), a typed and versioned AST with source spans, and canonical printing for storage. This entry holds no numeric code; evaluation domains build on its AST. The design is specified in `docs/rfcs/2026-10-14-arki-expr.md`.
+A safe expression language on [`@arki/math`](../math): a hand-written parser for user-typed formulas (`2x^2 + sin(x)`, `|x - 1|`, `√2`, `1/2x`), a typed and versioned AST with source spans, and canonical printing for storage. The root entry holds no numeric code; evaluation lives in domain entries (`@arki/expr/float`), and `@arki/expr/latex` prints LaTeX. The design is specified in `docs/rfcs/2026-10-14-arki-expr.md`.
 
 ## Security model
 
@@ -23,3 +23,44 @@ parse('foo(x)'); // throws ParseError { code: 'not-a-function', span: { start: 0
 ```
 
 A name followed by `(` is a call only when the language registers it as a function. To read a variable before `(` as a product (`x(y+1)`), pass the variables: `parse('x(y+1)', { variables: ['x', 'y'] })`.
+
+## Float (`@arki/expr/float`)
+
+```ts
+import { parse, parseEquation } from '@arki/expr';
+import { compile, compileEquation, evaluate } from '@arki/expr/float';
+
+evaluate('2^10 - 1'); // 1023, for the keypad
+evaluate('sin(90)', { angle: 'deg' }); // 1
+
+const f = compile(parse('2x^2 + sin(x)'), { variables: ['x'] });
+f({ x: 1.5 }); // typed errors, never NaN or Infinity
+f.at(1.5); // one variable, no scope object
+f.sample(xs, out); // Float64Array in and out; NaN marks a gap in a plot
+
+const { left, right, difference } = compileEquation(parseEquation('x^2 = 2x'), { variables: ['x'] });
+```
+
+- **Errors, not NaN.** `f()` and `f.at()` throw `@arki/math`'s errors: `sqrt(-1)` and `ln(0)` are `InvalidArgumentError`, `x/0` is `DivisionByZeroError`, overflow is `NumericRangeError`. `sample` is the only call that returns `NaN`: it marks a point with no value.
+- **Names resolve at compile.** A declared variable or a constant wins; otherwise a multi-letter name splits into declared letters (`xy` → `x·y`, listed in `f.readings`); otherwise `unknown-name` with a span. Declaring `pi` as a variable is `name-conflict`. `a/bc` read as `a/(b·c)` adds a `split-after-division` warning.
+- **Degrees** apply to forward-trig arguments and inverse-trig results at any depth; multiples of 90° are exact (`sin(180°)` is `0`, `tan(90°)` is an error).
+- **Host names.** Pass the language to `compile`; the types then require an implementation for every function and constant it adds to `scientific`. Host functions receive numbers only.
+
+## LaTeX (`@arki/expr/latex`)
+
+```ts
+import { toLatex } from '@arki/expr/latex';
+
+toLatex(parse('sqrt(x)/2 + |x|')); // '\\frac{\\sqrt{x}}{2} + \\left|x\\right|'
+```
+
+`\frac` for `/`, `^{}`, `\sqrt[n]{}`, `\sin`-style commands, `\pi`, `n!`, `\cdot` for an explicit `*` and juxtaposition for an implicit one. Host functions use their language `latex` command, otherwise `\operatorname{name}`.
+
+## Limits
+
+| Budget                               | Default                   | Checked                                                                                               |
+| ------------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `length`, `tokens`, `depth`, `nodes` | 10 000, 5 000, 256, 5 000 | while parsing, in `fromJSON`, and `depth` again in `compile`, `print` and `toLatex`                   |
+| `steps`                              | 10 000 000                | statically: nodes (plus each host function's declared `cost`) per call, times the points for `sample` |
+
+`sample` checks `{ signal }` every 1 024 points. Compiled functions are closures: no `eval`, no `new Function`. Bundle budgets (min + gzip, checked by `size-limit` in `test`): root ≤ 6 kB, root + float ≤ 15 kB, latex ≤ 3 kB.
