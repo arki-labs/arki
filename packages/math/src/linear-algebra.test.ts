@@ -239,6 +239,45 @@ describe('matrix basics', () => {
     expect(() => multiply([[1, 2]], [[1, 2]])).toThrow(InvalidArgumentError);
   });
 
+  it('multiply adds every term for any inner size, not only multiples of four', () => {
+    // The product loop takes four rows of b per sweep; the remainder must still count.
+    for (const size of [1, 3, 4, 5, 7, 8, 9]) {
+      const row = Array.from({ length: size }, (_, k) => k + 1);
+      const column = row.map(value => [value, -value]);
+      const sumOfSquares = (size * (size + 1) * (2 * size + 1)) / 6;
+      expect(multiply([row], column)).toEqual([[sumOfSquares, -sumOfSquares]]);
+    }
+  });
+
+  it('multiply gives the same product however the input arrays were built', () => {
+    // b is copied into typed storage; holey, spread and mapped arrays must all read the same.
+    const a = [
+      [1.5, -2, 0, 4, 0.25],
+      [3, 1, -1, 2, 8],
+    ];
+    const b = [
+      [1, 2],
+      [0.5, -1],
+      [2, 2],
+      [-3, 0],
+      [4, 0.125],
+    ];
+    const expected = multiply(a, b);
+    const holey = b.map(row => {
+      const copy: number[] = [];
+      copy[1] = row[1]!;
+      copy[0] = row[0]!;
+      return copy;
+    });
+    expect(multiply(a, holey)).toEqual(expected);
+    expect(
+      multiply(
+        a.map(row => [...row]),
+        b.map(row => row.map(value => value)),
+      ),
+    ).toEqual(expected);
+  });
+
   it('multiply by a vector gives the matrix-vector product', () => {
     expect(multiply(STRANG, [1, 1, 2])).toEqual([5, -2, 9]);
     expect(() => multiply(STRANG, [1, 2])).toThrow(InvalidArgumentError);

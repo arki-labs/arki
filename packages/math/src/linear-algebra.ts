@@ -76,7 +76,12 @@ const MAX_ELEMENTS = 10_000_000;
 function assertVector(v: Vector, name: string): number {
   if (!Array.isArray(v)) throw new TypeError(`${name} must be an array of numbers`);
   if (v.length === 0) throw new InvalidArgumentError(`${name} must not be empty`);
-  for (const [i, x] of v.entries()) assertFinite(x, `${name}[${i}]`);
+  let i = 0;
+  for (const x of v) {
+    // Cheap check first; the message is only built for the failing entry.
+    if (typeof x !== 'number' || !Number.isFinite(x)) assertFinite(x, `${name}[${i}]`);
+    i++;
+  }
   return v.length;
 }
 
@@ -85,7 +90,8 @@ function assertMatrix(a: Matrix, name: string): [number, number] {
   if (!Array.isArray(a)) throw new TypeError(`${name} must be an array of rows`);
   if (a.length === 0) throw new InvalidArgumentError(`${name} must have at least one row`);
   let columns = -1;
-  for (const [i, row] of a.entries()) {
+  let i = 0;
+  for (const row of a) {
     if (!Array.isArray(row)) throw new TypeError(`${name}[${i}] must be an array of numbers`);
     if (columns === -1) {
       if (row.length === 0) throw new InvalidArgumentError(`${name} must have at least one column`);
@@ -95,7 +101,13 @@ function assertMatrix(a: Matrix, name: string): [number, number] {
         `${name} is not rectangular: row ${i} has ${row.length} columns, row 0 has ${columns}`,
       );
     }
-    for (const [j, x] of row.entries()) assertFinite(x, `${name}[${i}][${j}]`);
+    let j = 0;
+    for (const x of row) {
+      // Cheap check first; the message is only built for the failing entry.
+      if (typeof x !== 'number' || !Number.isFinite(x)) assertFinite(x, `${name}[${i}][${j}]`);
+      j++;
+    }
+    i++;
   }
   return [a.length, columns];
 }
@@ -339,23 +351,52 @@ export function multiply(a: Matrix, b: Matrix | Vector): number[][] | number[] {
   const [rowsB, columnsB] = assertMatrix(b, 'b');
   if (columns !== rowsB)
     throw new InvalidArgumentError(`cannot multiply: a has ${columns} columns, b has ${rowsB} rows`);
-  // i-k-j order: the inner loop walks rows of b and of the result, both contiguous.
-  return finishMatrix(
-    a.map(row => {
-      const out = Array.from({ length: columnsB }, () => 0);
-      for (const [k, x] of row.entries()) {
-        if (x === 0) continue;
-        const rowB = b[k]!;
-        for (let j = 0; j < columnsB; j++) out[j]! += x * rowB[j]!;
+  // i-k-j order: the inner loop walks a row of b and the accumulator, both
+  // contiguous. The rows of b are copied once into Float64Arrays, so the hot
+  // loop reads one storage kind however the caller built its arrays (mixed
+  // array kinds otherwise make engines fall back to slower generic loads).
+  // Indexed loops throughout: JSC iterates a typed array with for-of through slow helpers.
+  const rowsOfB: Float64Array[] = [];
+  for (const rowB of b) rowsOfB.push(new Float64Array(rowB));
+  const accumulator = new Float64Array(columnsB);
+  const rows = a.length;
+  const product: number[][] = [];
+  for (let i = 0; i < rows; i++) {
+    const row = a[i]!;
+    accumulator.fill(0);
+    let k = 0;
+    // Four rows of b per sweep, so the accumulator is loaded and stored a
+    // quarter as often. Every entry still adds its products in k order, so
+    // the result is bit-identical to the one-row loop.
+    for (; k + 3 < columns; k += 4) {
+      const x0 = row[k]!;
+      const x1 = row[k + 1]!;
+      const x2 = row[k + 2]!;
+      const x3 = row[k + 3]!;
+      const b0 = rowsOfB[k]!;
+      const b1 = rowsOfB[k + 1]!;
+      const b2 = rowsOfB[k + 2]!;
+      const b3 = rowsOfB[k + 3]!;
+      for (let j = 0; j < columnsB; j++) {
+        accumulator[j] = accumulator[j]! + x0 * b0[j]! + x1 * b1[j]! + x2 * b2[j]! + x3 * b3[j]!;
       }
-      return out;
-    }),
-  );
+    }
+    for (; k < columns; k++) {
+      const x = row[k]!;
+      const rowB = rowsOfB[k]!;
+      for (let j = 0; j < columnsB; j++) accumulator[j]! += x * rowB[j]!;
+    }
+    const out: number[] = [];
+    for (let j = 0; j < columnsB; j++) out.push(finish(accumulator[j]!));
+    product.push(out);
+  }
+  return product;
 }
 
 function rowDot(row: Vector, v: Vector): number {
   let sum = 0;
-  for (const [i, x] of row.entries()) sum += x * v[i]!;
+  let i = 0;
+  for (const x of row) sum += x * v[i++]!;
   return sum;
 }
 
@@ -490,9 +531,43 @@ export function solve(a: Matrix, b: Vector | Matrix, options?: ToleranceOptions)
  */
 export function inverse(a: Matrix, options?: ToleranceOptions): number[][] {
   const n = assertSquare(a, 'a');
-  const factored = factorNonSingular(a, options);
-  const columns = Array.from({ length: n }, (_, j) => substitute(factored, i => (i === j ? 1 : 0)));
-  return finishMatrix(Array.from({ length: n }, (_, i) => columns.map(column => column[i]!)));
+  const { lu, permutation } = factorNonSingular(a, options);
+  // Solves L·U·X = P for all n columns at once, a row of X at a time: every
+  // entry gets the same operations in the same order as one `substitute` per
+  // column, but the inner loops run along contiguous Float64Array rows.
+  const x: Float64Array[] = [];
+  for (const source of permutation) {
+    const row = new Float64Array(n);
+    row[source] = 1;
+    x.push(row);
+  }
+  for (let i = 1; i < n; i++) {
+    const factors = lu[i]!;
+    const target = x[i]!;
+    for (let j = 0; j < i; j++) {
+      const f = factors[j]!;
+      const solved = x[j]!;
+      for (let c = 0; c < n; c++) target[c]! -= f * solved[c]!;
+    }
+  }
+  for (let i = n - 1; i >= 0; i--) {
+    const factors = lu[i]!;
+    const target = x[i]!;
+    for (let j = i + 1; j < n; j++) {
+      const f = factors[j]!;
+      const solved = x[j]!;
+      for (let c = 0; c < n; c++) target[c]! -= f * solved[c]!;
+    }
+    const pivot = factors[i]!;
+    for (let c = 0; c < n; c++) target[c]! /= pivot;
+  }
+  const result: number[][] = [];
+  for (const row of x) {
+    const out: number[] = [];
+    for (let c = 0; c < n; c++) out.push(finish(row[c]!));
+    result.push(out);
+  }
+  return result;
 }
 
 /**
