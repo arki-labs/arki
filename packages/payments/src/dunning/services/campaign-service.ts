@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import type { Instant } from '@arki/date';
 import type { Money } from '@arki/money';
 import { z } from '@arki/contracts';
-import { add, fromDate, isAfter, now } from '@arki/date';
+import { add, fromDate, isAfter, now, sub } from '@arki/date';
 import { getLogger } from '@arki/log';
 
 import type { PaymentRetryService } from '../../core/services/payment-retry-service.js';
@@ -12,6 +12,7 @@ import type {
   CreateDunningCampaignInput,
   ExecuteCampaignInput,
   ListDunningCampaignsQuery,
+  ListExecutionsQuery,
   UpdateDunningCampaignInput,
 } from '../contracts.js';
 import type { DunningCampaignId, DunningCampaignStatus } from '../primitives.js';
@@ -22,6 +23,7 @@ import type {
   CustomerData,
   CustomerQueryRow,
   DunningCampaign,
+  DunningDashboardStats,
   DunningExecution,
   DunningTemplate,
   PaymentFailureConditions,
@@ -90,7 +92,10 @@ export class DunningCampaignService {
   /**
    * Create a new dunning campaign with templates
    */
-  async createCampaign(input: CreateDunningCampaignInput, createdBy: string): Promise<DunningCampaign> {
+  async createCampaign(
+    input: CreateDunningCampaignInput,
+    createdBy: string,
+  ): Promise<DunningCampaign & { templates: DunningTemplate[] }> {
     return this.db.transaction(async tx => {
       // The repositories run on the transaction: a template that fails takes the campaign with it
       const campaignRepo = createDunningCampaignRepository(tx, {
@@ -851,6 +856,56 @@ export class DunningCampaignService {
    */
   async getCampaignAnalytics(campaignId?: DunningCampaignId, days = 30) {
     return this.campaignRepo.getAnalyticsSummary(campaignId, days);
+  }
+
+  /** One page of executions, filtered and sorted as `query` says. */
+  async listExecutions(query: ListExecutionsQuery): Promise<DunningExecution[]> {
+    return this.executionRepo.findMany(query);
+  }
+
+  /**
+   * The numbers on the dunning dashboard, all read from the tables: campaign counts, what ran
+   * today (since 00:00 UTC), what was recovered today and this month, the conversion rate and
+   * the top campaign over the last 30 days, and the latest executions.
+   */
+  async getDashboardStats(): Promise<DunningDashboardStats> {
+    const current = new Date();
+    const startOfToday = fromDate(new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate())));
+    const startOfMonth = fromDate(new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), 1)));
+    const last30Days = sub(now(), { hours: 30 * 24 });
+
+    const [campaigns, today, month, recent, top, recentExecutions] = await Promise.all([
+      this.campaignRepo.countCampaigns(),
+      this.campaignRepo.getAnalyticsSince(startOfToday),
+      this.campaignRepo.getAnalyticsSince(startOfMonth),
+      this.campaignRepo.getAnalyticsSince(last30Days),
+      this.campaignRepo.findTopPerformer(last30Days),
+      this.executionRepo.findMany({ limit: 10, offset: 0, sortBy: 'createdAt', sortOrder: 'desc' }),
+    ]);
+
+    const topCampaign = top ? await this.campaignRepo.findById(top.campaignId) : null;
+    const topRevenue = top ? await this.campaignRepo.getAnalyticsSince(last30Days, top.campaignId) : null;
+
+    return {
+      totalCampaigns: campaigns.total,
+      activeCampaigns: campaigns.active,
+      executionsToday: today.executions,
+      customersReachedToday: today.customersReached,
+      revenueRecoveredToday: today.revenueRecovered,
+      revenueRecoveredThisMonth: month.revenueRecovered,
+      averageConversionRate: recent.conversionRate,
+      topPerformingCampaign:
+        top && topCampaign && topRevenue
+          ? {
+              id: top.campaignId,
+              name: topCampaign.name,
+              paymentsRecovered: top.paymentsRecovered,
+              conversionRate: top.conversionRate,
+              revenueRecovered: topRevenue.revenueRecovered,
+            }
+          : null,
+      recentExecutions,
+    };
   }
 
   /**

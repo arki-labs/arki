@@ -11,7 +11,10 @@ import { count, defineRelations } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { add, now, sub } from '@arki/date';
+
 import type { CreateDunningCampaignInput } from './contracts.js';
+import type { DunningCampaignId } from './primitives.js';
 import { core, customerId, schema, userId, users } from '../test-support.js';
 import { DunningCampaignService } from './services/campaign-service.js';
 import { createDunningTables } from './tables.js';
@@ -117,5 +120,120 @@ describe('createCampaign', () => {
 
     expect(await countOf(tables.dunningCampaigns)).toBe(campaigns);
     expect(await countOf(tables.dunningTemplates)).toBe(templates);
+  });
+});
+
+async function createdCampaign(name: string, status: 'active' | 'draft' = 'active'): Promise<DunningCampaignId> {
+  const created = await service.createCampaign({ ...campaignInput([0]), name }, 'usr_admin');
+  await service.updateCampaign(created.id, { status }, 'usr_admin');
+
+  return created.id;
+}
+
+async function execution(campaignId: DunningCampaignId, status: 'scheduled' | 'completed', scheduledAt = now()) {
+  const [row] = await db
+    .insert(tables.dunningExecutions)
+    .values({ campaignId, customerId, triggerType: 'manual', triggerData: {}, status, scheduledAt })
+    .returning();
+  if (!row) throw new Error('execution not inserted');
+
+  return row;
+}
+
+describe('listExecutions', () => {
+  it('returns the executions of one campaign, filtered by status, newest scheduled first, one page at a time', async () => {
+    const mine = await createdCampaign('List executions: mine');
+    const other = await createdCampaign('List executions: other');
+    const first = await execution(mine, 'scheduled', sub(now(), { hours: 3 }));
+    const second = await execution(mine, 'completed', sub(now(), { hours: 2 }));
+    const third = await execution(mine, 'scheduled', sub(now(), { hours: 1 }));
+    await execution(other, 'scheduled');
+    const query = { limit: 20, offset: 0, sortBy: 'scheduledAt', sortOrder: 'desc' } as const;
+
+    const all = await service.listExecutions({ ...query, campaignId: mine });
+    const scheduled = await service.listExecutions({ ...query, campaignId: mine, status: 'scheduled' });
+    const secondPage = await service.listExecutions({ ...query, campaignId: mine, limit: 2, offset: 2 });
+
+    expect(all.map(row => row.id)).toEqual([third.id, second.id, first.id]);
+    expect(scheduled.map(row => row.id)).toEqual([third.id, first.id]);
+    expect(secondPage.map(row => row.id)).toEqual([first.id]);
+  });
+});
+
+describe('getDashboardStats', () => {
+  async function analytics(
+    campaignId: DunningCampaignId,
+    at: ReturnType<typeof now>,
+    row: {
+      currency: string;
+      revenueMinor: number;
+      executions: number;
+      conversionRate: number;
+      paymentsRecovered: number;
+    },
+  ) {
+    await db.insert(tables.dunningCampaignAnalytics).values({
+      id: `${campaignId}-${at.toString()}-${row.currency}`,
+      campaignId,
+      date: at,
+      currency: row.currency,
+      revenueRecoveredMinor: row.revenueMinor,
+      executions: row.executions,
+      customersReached: row.executions,
+      paymentsRecovered: row.paymentsRecovered,
+      conversionRate: row.conversionRate,
+    });
+  }
+
+  it('reads campaign counts, today, the month, the top campaign and the latest executions from the tables', async () => {
+    // Each assertion below is about this campaign's rows; other tests' campaigns only add to the counts
+    const before = await service.getDashboardStats();
+    const winner = await createdCampaign('Dashboard: winner');
+    await createdCampaign('Dashboard: idle', 'draft');
+    await analytics(winner, now(), {
+      currency: 'USD',
+      revenueMinor: 1999,
+      executions: 4,
+      conversionRate: 0.5,
+      paymentsRecovered: 400,
+    });
+    await analytics(winner, add(now(), { seconds: 1 }), {
+      currency: 'EUR',
+      revenueMinor: 500,
+      executions: 1,
+      conversionRate: 0.5,
+      paymentsRecovered: 100,
+    });
+    await analytics(winner, sub(now(), { hours: 24 * 45 }), {
+      currency: 'USD',
+      revenueMinor: 99_999,
+      executions: 70,
+      conversionRate: 0.9,
+      paymentsRecovered: 9000,
+    });
+    const latest = await execution(winner, 'scheduled');
+
+    const stats = await service.getDashboardStats();
+
+    expect(stats.totalCampaigns).toBe(before.totalCampaigns + 2);
+    expect(stats.activeCampaigns).toBe(before.activeCampaigns + 1);
+    expect(stats.executionsToday - before.executionsToday).toBe(5);
+    expect(stats.customersReachedToday - before.customersReachedToday).toBe(5);
+    expect(stats.revenueRecoveredToday.toJSON()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ currency: 'USD' }),
+        expect.objectContaining({ currency: 'EUR' }),
+      ]),
+    );
+    // 45 days ago is outside today, the month and the top-campaign window
+    expect(stats.revenueRecoveredThisMonth.toString()).not.toContain('999.99');
+    expect(stats.topPerformingCampaign).toMatchObject({
+      id: winner,
+      name: 'Dashboard: winner',
+      paymentsRecovered: 500,
+    });
+    expect(stats.topPerformingCampaign?.revenueRecovered.toJSON()).toHaveLength(2);
+    expect(stats.recentExecutions[0]?.id).toBe(latest.id);
+    expect(stats.recentExecutions.length).toBeLessThanOrEqual(10);
   });
 });

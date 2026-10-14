@@ -253,8 +253,53 @@ export class DunningCampaignRepository {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
+    return this.getAnalyticsSince(fromDate(startDate), campaignId);
+  }
+
+  /** How many campaigns exist, and how many of them are `active`. */
+  async countCampaigns(): Promise<{ total: number; active: number }> {
+    const rows = await this.db
+      .select({
+        status: this.dunningCampaigns.status,
+        total: sql<number>`count(*)::int`,
+      })
+      .from(this.dunningCampaigns)
+      .groupBy(this.dunningCampaigns.status);
+
+    return {
+      total: rows.reduce((sum, row) => sum + row.total, 0),
+      active: rows.find((row) => row.status === 'active')?.total ?? 0,
+    };
+  }
+
+  /**
+   * The campaign that recovered the most payments since `since`, its conversion rate the
+   * tie-break. Null when no campaign recovered a payment: there is no top to name. Ranked
+   * by count, not money, because campaigns recover in different currencies.
+   */
+  async findTopPerformer(
+    since: Instant,
+  ): Promise<{ campaignId: DunningCampaignId; paymentsRecovered: number; conversionRate: number } | null> {
+    const analytics = this.dunningCampaignAnalytics;
+    const recovered = sql<number>`COALESCE(SUM(${analytics.paymentsRecovered}), 0)::int`;
+    const conversion = sql<number>`COALESCE(AVG(${analytics.conversionRate}), 0)`;
+
+    const [top] = await this.db
+      .select({ campaignId: analytics.campaignId, paymentsRecovered: recovered, conversionRate: conversion })
+      .from(analytics)
+      .where(gte(analytics.date, since))
+      .groupBy(analytics.campaignId)
+      .having(sql`SUM(${analytics.paymentsRecovered}) > 0`)
+      .orderBy(desc(recovered), desc(conversion), analytics.campaignId)
+      .limit(1);
+
+    return top ?? null;
+  }
+
+  /** The analytics rows from `since` on, summed. Money stays one balance per currency. */
+  async getAnalyticsSince(since: Instant, campaignId?: DunningCampaignId) {
     const inRange = and(
-      gte(this.dunningCampaignAnalytics.date, fromDate(startDate)),
+      gte(this.dunningCampaignAnalytics.date, since),
       campaignId ? eq(this.dunningCampaignAnalytics.campaignId, campaignId) : undefined,
     );
 
@@ -269,6 +314,11 @@ export class DunningCampaignRepository {
       })
       .from(this.dunningCampaignAnalytics)
       .where(inRange);
+
+    // An aggregate without GROUP BY always answers one row
+    if (!counters) {
+      throw new Error('Campaign analytics aggregate returned no row');
+    }
 
     // Money is summed per currency: rows of different currencies never add up.
     const recovered = await this.db
