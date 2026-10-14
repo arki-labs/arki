@@ -74,7 +74,7 @@ export type ServerConfig = {
  */
 export function createServerHandler(
   config: ServerConfig,
-  appHandler: (request: Request) => Response | Promise<Response>,
+  appHandler: (request: Request) => Response | null | Promise<Response | null>,
 ): AnyServer {
   const {
     port = Number(process.env.PORT) || 3000,
