@@ -515,8 +515,8 @@ export function rename<
  * and coding agents can then match on a stable `code`, follow `docsUrl`,
  * and apply `remediation` without parsing the message.
  *
- * Codes are per-adapter. Recommended prefix is `<PKG>_PLUGIN_E<NNN>` (e.g.
- * `KV_PLUGIN_E001`, `DB_PLUGIN_E001`). The kernel does not own the code
+ * Codes are per-adapter. Recommended prefix is `ARKI_<PKG>_PLUGIN_E<NNN>` (e.g.
+ * `ARKI_KV_PLUGIN_E001`, `ARKI_DB_PLUGIN_E001`). The kernel does not own the code
  * namespace — each adapter defines its own constants and links them in
  * its README.
  *
@@ -524,7 +524,7 @@ export function rename<
  * of the API") and principle 4 ("agent-discoverable everywhere").
  */
 export class DotPluginError extends Error {
-  /** Stable error code, e.g. `KV_PLUGIN_E001`. */
+  /** Stable error code, e.g. `ARKI_KV_PLUGIN_E001`. */
   readonly code: string;
   /** One-sentence guidance on how to fix the underlying problem. */
   readonly remediation: string;

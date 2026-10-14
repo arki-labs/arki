@@ -45,7 +45,7 @@ describe('@arki/kv/dot', () => {
       expect(cause).toBeInstanceOf(DotPluginError);
       const pluginErr = cause as DotPluginError;
       expect(pluginErr.code).toBe(KV_PLUGIN_ERROR_CODES.urlNotConfigured);
-      expect(pluginErr.code).toBe('KV_PLUGIN_E001');
+      expect(pluginErr.code).toBe('ARKI_KV_PLUGIN_E001');
       expect(pluginErr.message).toMatch(/KV URL is not configured/);
       expect(pluginErr.remediation).toMatch(/options\.url|KV_URL/);
       expect(pluginErr.docsUrl).toMatch(/^https?:\/\//);

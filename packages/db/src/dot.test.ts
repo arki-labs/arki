@@ -87,7 +87,7 @@ describe('@arki/db/dot', () => {
       expect(cause).toBeInstanceOf(DotPluginError);
       const pluginErr = cause as DotPluginError;
       expect(pluginErr.code).toBe(DB_PLUGIN_ERROR_CODES.dbUrlNotConfigured);
-      expect(pluginErr.code).toBe('DB_PLUGIN_E001');
+      expect(pluginErr.code).toBe('ARKI_DB_PLUGIN_E001');
       expect(pluginErr.message).toMatch(/DB_URL is not configured/);
       expect(pluginErr.remediation).toMatch(/DB_URL|pglite/);
       expect(pluginErr.docsUrl).toMatch(/^https?:\/\//);

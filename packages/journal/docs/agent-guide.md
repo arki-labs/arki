@@ -242,7 +242,7 @@ This is the only copy of this table. The message texts are in `src/errors.ts`. A
 
 ### Dot boot errors
 
-- `JOURNAL_PLUGIN_E001`, a `DotPluginError`: a feature token holds a `journal` slice that `journalHandlers` did not make. Declare the slice with `journalHandlers({ projections, effects })`.
+- `ARKI_JOURNAL_PLUGIN_E001`, a `DotPluginError`: a feature token holds a `journal` slice that `journalHandlers` did not make. Declare the slice with `journalHandlers({ projections, effects })`.
 - `journal: duplicate effect name "x" (features "feature.orders" and "feature.billing")`: two features list a handler with the same name. Rename one. Projections get the same message with `projection`.
 - `journal: effect "x" needs "mailer", but no service with that name was given; ...`: thrown by `j.compose` in a plain app and at boot in a Dot app. Plain app: add `mailer` to `services` in `j.compose`. Dot app: add it to the `needs` of the feature that lists the effect.
 - `journal: effect "x" has a need named "db", ...`: thrown by `j.effect`. The names `jobId`, `signal`, `db` and `run` are taken. Give the need another name.

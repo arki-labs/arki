@@ -71,7 +71,7 @@ import { initDbRuntimeLocal } from './runtime-local.js';
  */
 export const DB_PLUGIN_ERROR_CODES = {
   /** boot was called without a configured DB_URL (pg driver). */
-  dbUrlNotConfigured: 'DB_PLUGIN_E001',
+  dbUrlNotConfigured: 'ARKI_DB_PLUGIN_E001',
 } as const;
 
 /**
@@ -182,7 +182,7 @@ export function db<TRelations extends AnyRelations>(
           message: '[db] DB_URL is not configured.',
           remediation:
             'Set DB_URL in the environment before booting the app, or switch the plugin to the pglite driver for in-process databases.',
-          docsUrl: 'https://arki.dev/dot/errors/db-plugin-e001',
+          docsUrl: 'https://arki.dev/dot/errors/arki-db-plugin-e001',
         });
       }
       const handle = createDb<TRelations>({
