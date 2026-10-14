@@ -24,6 +24,8 @@ const partArb = fc.oneof(
   fc.integer({ min: -20, max: 20 }),
   fc.double({ min: -1e3, max: 1e3, noNaN: true }),
   fc.double({ min: -1e-3, max: 1e-3, noNaN: true }),
+  // Subnormal and near-underflow parts: the bottom of the float range.
+  fc.double({ min: -1e-300, max: 1e-300, noNaN: true }),
 );
 const complexArb = fc.tuple(partArb, partArb).map(([re, im]) => complex(re, im));
 const nonZeroArb = complexArb.filter(z => z.abs() > 1e-6);
@@ -73,8 +75,29 @@ describe('Complex properties: field laws within float tolerance', () => {
         const root = z.sqrt();
         expect(root.re >= 0).toBe(true);
         expectClose(root.times(root), z);
+        // Relative check that also bites for tiny z: |√z| = √|z|. The reference scales a tiny z
+        // up first (exact), because |z| of a subnormal z is itself rounded to a few bits.
+        const scale = z.abs() < 1e-200 ? 2 ** 600 : 1;
+        const modulus = Math.sqrt(Math.hypot(z.re * scale, z.im * scale)) / Math.sqrt(scale);
+        expect(Math.abs(root.abs() - modulus)).toBeLessThanOrEqual(1e-15 * modulus);
       }),
       config,
     );
+  });
+
+  // Found by the property above (5000 runs): |re| + |z| of a subnormal z halves to 0, so t = 0 and
+  // im / 2t overflowed into "sqrt overflows the float range". √(−5e-324 i) = 2^-537 · (1 − i)/√2.
+  it('regression: sqrt of a subnormal number does not underflow to a division by zero', () => {
+    const part = 2 ** -537 * Math.SQRT1_2;
+    for (const [z, expected] of [
+      [complex(0, -5e-324), complex(part, -part)],
+      [complex(0, 5e-324), complex(part, part)],
+      [complex(5e-324, 0), complex(2 ** -537, 0)],
+      [complex(-5e-324, 0), complex(0, 2 ** -537)],
+    ] as const) {
+      const root = z.sqrt();
+      expect(Math.abs(root.re - expected.re)).toBeLessThanOrEqual(1e-15 * 2 ** -537);
+      expect(Math.abs(root.im - expected.im)).toBeLessThanOrEqual(1e-15 * 2 ** -537);
+    }
   });
 });

@@ -304,7 +304,13 @@ export class Complex {
   /** Principal square root: the root with `re > 0`, or `im ≥ 0` when `re` is 0. */
   sqrt(): Complex {
     if (this.isZero()) return Complex.ZERO;
-    const { re, im } = this;
+    // Near the bottom of the float range (|re| + |z|) / 2 loses its low bits, and for a
+    // subnormal z it halves to 0, so t = 0 and im / 2t overflows. Work on z · 2^600 (exact
+    // for parts this small) and take 2^-300 back out of the root.
+    const tiny = Math.abs(this.re) < 2 ** -500 && Math.abs(this.im) < 2 ** -500;
+    const re = tiny ? this.re * 2 ** 600 : this.re;
+    const im = tiny ? this.im * 2 ** 600 : this.im;
+    const unscale = tiny ? 2 ** -300 : 1;
     // |z| is √(re² + im²) while that sum is a normal float: as accurate as
     // Math.hypot here (same max error against 80-digit references) and several
     // times faster in V8. Math.hypot takes over near overflow and underflow.
@@ -315,8 +321,8 @@ export class Complex {
     // Near the top of the float range |re| + |z| overflows though t does not:
     // t = 2 sqrt((|re/4| + |z/4|) / 2), and dividing such large parts by 4 is exact.
     if (t === Infinity) t = 2 * Math.sqrt((Math.abs(re / 4) + Math.hypot(re / 4, im / 4)) / 2);
-    if (re >= 0) return result(t, im / (2 * t), 'sqrt');
-    return result(Math.abs(im) / (2 * t), im < 0 ? -t : t, 'sqrt');
+    if (re >= 0) return result(t * unscale, (im / (2 * t)) * unscale, 'sqrt');
+    return result((Math.abs(im) / (2 * t)) * unscale, (im < 0 ? -t : t) * unscale, 'sqrt');
   }
 
   /**
