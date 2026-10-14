@@ -26,15 +26,13 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "browser": "./dist/schema.browser.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./schema": {
-      "types": "./dist/schema.d.ts",
-      "browser": "./dist/schema.browser.js",
-      "import": "./dist/schema.js",
-      "default": "./dist/schema.js"
+    "./drizzle": {
+      "types": "./dist/drizzle.d.ts",
+      "import": "./dist/drizzle.js",
+      "default": "./dist/drizzle.js"
     },
     "./package.json": "./package.json"
   },
@@ -62,9 +60,16 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "drizzle-orm": "catalog:drizzle",
     "zod": "catalog:",
     "zod-form-data": "catalog:validation"
+  },
+  "peerDependencies": {
+    "drizzle-orm": "catalog:drizzle"
+  },
+  "peerDependenciesMeta": {
+    "drizzle-orm": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@arki/bench": "workspace:*",
@@ -72,6 +77,8 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@types/node": "catalog:node",
+    "drizzle-orm": "catalog:drizzle",
     "typescript": "catalog:"
   },
   "publishConfig": {

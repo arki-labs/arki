@@ -10,7 +10,7 @@ import { createInsertSchema as drizzleInsert, createSelectSchema as drizzleSelec
 import { z } from 'zod/v4';
 
 import { compare, defineSuite } from '@arki/bench';
-import { COLUMN_ZOD_SCHEMA, createInsertSchema, createSelectSchema } from '@arki/contracts';
+import { COLUMN_ZOD_SCHEMA, createInsertSchema, createSelectSchema } from '@arki/contracts/drizzle';
 
 const idColumn = () => {
   const builder = varchar('id', { length: 256 }).notNull().primaryKey();

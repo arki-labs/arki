@@ -12,11 +12,9 @@ bun add @arki/contracts
 pnpm add @arki/contracts
 ```
 
-Peer-installs:
+Dependencies: `zod` (v4) and `zod-form-data`.
 
-- `drizzle-orm`
-- `zod` (v4)
-- `zod-form-data`
+The `@arki/contracts/drizzle` entry needs `drizzle-orm` (an optional peer dependency). The main entry never loads it.
 
 ## Why
 
@@ -56,7 +54,7 @@ const schema = formData.zfd.formData({
 ```ts
 import { jsonb, pgTable, varchar } from 'drizzle-orm/pg-core';
 
-import { createInsertSchema, createSelectSchema } from '@arki/contracts';
+import { createInsertSchema, createSelectSchema } from '@arki/contracts/drizzle';
 
 const users = pgTable('users', {
   id: varchar('id').$type<`usr_${string}`>().primaryKey(),
@@ -86,13 +84,19 @@ const strictSelect = createSelectSchema(users, {
 
 ## API
 
+Main entry, `@arki/contracts` (no Drizzle):
+
+- `formData` — re-exported `zod-form-data` namespace.
+- `z`, `ZodError`, every Zod export — re-exported from `zod/v4`.
+- `UserId`, `userIdSchema` — shared id types.
+
+Drizzle entry, `@arki/contracts/drizzle`:
+
 - `createSelectSchema(table, refine?)` — branded select schema.
 - `createInsertSchema(table, refine?)` — branded insert schema.
 - `createUpdateSchema(table, refine?)` — every field optional, otherwise like insert.
 - `COLUMN_ZOD_SCHEMA` — `Symbol.for('@arki/contracts/columnZodSchema')` side-channel for ID factories.
 - `bufferSchema`, `jsonSchema`, `literalSchema`, `createSchemaFactory` — re-exported from `drizzle-orm/zod`.
-- `formData` — re-exported `zod-form-data` namespace.
-- `z`, `ZodError`, every Zod export — re-exported from `zod/v4`.
 
 ## Documentation
 
