@@ -1,11 +1,13 @@
 import type { AnyRelations } from 'drizzle-orm';
 import type { NodePgDatabase, NodePgTransaction } from 'drizzle-orm/node-postgres';
+import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { eq } from 'drizzle-orm';
 
 import type { UserId } from './user-id.js';
 import type { Instant } from '@arki/date';
 import { now } from '@arki/date';
 
+import type { PaymentQuery, PlanQuery, SubscriptionQuery } from './contracts.js';
 import type { CoreTables } from './tables.js';
 import type {
   Customer,
@@ -52,7 +54,8 @@ import { claimWebhookEvent, reclaimWebhookEvent } from './webhook-claims.js';
  */
 export type PaymentDatabase =
   | NodePgDatabase<AnyRelations>
-  | NodePgTransaction<AnyRelations>;
+  | NodePgTransaction<AnyRelations>
+  | PgliteDatabase<AnyRelations>;
 
 type FieldFilter<T> =
   | T
@@ -182,6 +185,22 @@ export class PaymentRepository {
     });
   }
 
+  /** Plans matching the filters left in `query`, cheapest first within a tier, one page. */
+  async findPlans(query: PlanQuery): Promise<Plan[]> {
+    const { tier, interval, isActive, limit, offset } = query;
+
+    return this.q.plans.findMany({
+      where: {
+        ...(tier && { tier }),
+        ...(interval && { interval }),
+        ...(isActive !== undefined && { isActive }),
+      },
+      orderBy: (t) => [t.tier, t.priceMinor, t.id],
+      limit,
+      offset,
+    });
+  }
+
   async findActivePlans(): Promise<Plan[]> {
     return this.q.plans.findMany({
       where: { isActive: true },
@@ -285,6 +304,23 @@ export class PaymentRepository {
     });
   }
 
+  /** Subscriptions matching the filters left in `query`, newest first, one page. */
+  async findSubscriptions(query: SubscriptionQuery): Promise<Subscription[]> {
+    const { status, planId, userId, limit, offset } = query;
+
+    return this.q.subscriptions.findMany({
+      where: {
+        ...(status && { status }),
+        ...(planId && { planId }),
+        ...(userId && { userId }),
+      },
+      with: { plan: true, customer: true },
+      orderBy: (t, { desc }) => [desc(t.createdAt), t.id],
+      limit,
+      offset,
+    });
+  }
+
   async findActiveSubscriptionByUserId(userId: UserId): Promise<SubscriptionWithPlan | null> {
     const subscription = await this.q.subscriptions.findFirst({
       where: { userId, status: 'active' },
@@ -349,6 +385,34 @@ export class PaymentRepository {
       },
       orderBy: (t, { desc }) => [desc(t.createdAt)],
       limit,
+    });
+  }
+
+  /** Payments matching the filters left in `query`, newest first, one page. `startDate` and `endDate` bound `createdAt`, both inclusive. */
+  async findPayments(query: PaymentQuery): Promise<Payment[]> {
+    const { status, subscriptionId, userId, startDate, endDate, limit, offset } = query;
+    const createdAt =
+      startDate || endDate
+        ? {
+            ...(startDate && { gte: startDate }),
+            ...(endDate && { lte: endDate }),
+          }
+        : undefined;
+
+    return this.q.payments.findMany({
+      where: {
+        ...(status && { status }),
+        ...(subscriptionId && { subscriptionId }),
+        ...(userId && { userId }),
+        ...(createdAt && { createdAt }),
+      },
+      with: {
+        subscription: { with: { plan: true } },
+        customer: true,
+      },
+      orderBy: (t, { desc }) => [desc(t.createdAt), t.id],
+      limit,
+      offset,
     });
   }
 
