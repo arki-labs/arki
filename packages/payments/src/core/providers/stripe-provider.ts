@@ -22,7 +22,7 @@ import type {
   WebhookEventType,
   WebhookValidationResult,
 } from '../types.js';
-import type { PaymentProviderConfig } from './base-provider.js';
+import type { PaymentProviderConfig, ProviderRefundResult } from './base-provider.js';
 import { toMinorColumn } from '../money.js';
 import { createCustomerId, createPaymentId, createPlanId, createSubscriptionId, planIdSchema } from '../primitives.js';
 import { BasePaymentProvider } from './base-provider.js';
@@ -739,47 +739,44 @@ export class StripeProvider extends BasePaymentProvider {
     return this.toPayment(intent, row);
   }
 
+  /**
+   * Refunds the payment's Stripe charge. `paymentId` is our payment id; the Stripe payment intent comes
+   * from its row. The answer holds the Stripe refund id and the payment with what Stripe now reports as
+   * refunded in total (earlier refunds included). A refund Stripe fails or cancels throws.
+   */
   async refundPayment(
     paymentId: PaymentId,
     params: { amount?: Money; reason?: string; metadata?: Record<string, unknown> },
-  ): Promise<Payment> {
-    // For the refund service, we need to refund using the Stripe payment intent ID
-    // This assumes paymentId is the Stripe payment intent ID
-    const refund = await this.stripe.refunds.create({
-      payment_intent: paymentId,
-      // Stripe's own units: JPY is sent as yen, not yen × 100
-      amount: params.amount === undefined ? undefined : toStripeAmount(params.amount),
-      reason: this.mapRefundReasonToStripe(params.reason),
-      metadata: params.metadata as Stripe.MetadataParam,
-    });
+  ): Promise<ProviderRefundResult> {
+    const row = await this.paymentRef(paymentId);
+    if (params.amount !== undefined && params.amount.currency.code !== row.currency.toUpperCase()) {
+      throw new PaymentProviderError(
+        'invalid_request',
+        `Refund currency ${params.amount.currency.code} differs from the payment currency ${row.currency}`,
+      );
+    }
 
-    const refunded = fromStripeAmount(refund.amount, refund.currency);
+    const refund = await this.call(() =>
+      this.stripe.refunds.create({
+        payment_intent: row.providerPaymentId,
+        // Stripe's own units: JPY is sent as yen, not yen x 100
+        amount: params.amount === undefined ? undefined : toStripeAmount(params.amount),
+        reason: this.mapRefundReasonToStripe(params.reason),
+        metadata: toStripeMetadata({ ...params.metadata, paymentId: row.id }),
+      }),
+    );
+    if (refund.status === 'failed' || refund.status === 'canceled') {
+      throw new PaymentProviderError(
+        'unknown',
+        `Stripe refund ${refund.id} ${refund.status}${refund.failure_reason ? `: ${refund.failure_reason}` : ''}`,
+      );
+    }
 
-    // Return a simplified Payment object for the refund
-    // In a real implementation, this would create a proper Payment record
-    return {
-      id: refund.id as PaymentId,
-      userId: 'usr_placeholder' as UserId, // Would be retrieved from the original payment
-      customerId: 'cust_placeholder' as CustomerId,
-      subscriptionId: null,
-      providerPaymentId: refund.id,
-      amountMinor: toMinorColumn(refunded),
-      currency: refunded.currency.code,
-      status: refund.status === 'succeeded' ? 'succeeded' : 'failed',
-      paymentMethod: 'card', // Default
-      description: `Refund for ${paymentId}`,
-      failureReason: null,
-      receiptUrl: null,
-      refunded: true,
-      refundedAmountMinor: toMinorColumn(refunded),
-      disputeId: null,
-      disputeStatus: null,
-      metadata: refund.metadata ? Object.fromEntries(
-        Object.entries(refund.metadata).map(([k, v]) => [k, v ?? null])
-      ) as Record<string, unknown> : null,
-      createdAt: fromUnix(refund.created),
-      updatedAt: now(),
-    };
+    // The refund only knows its own amount; the payment's total refunded sits on the charge
+    const intent = await this.call(() =>
+      this.stripe.paymentIntents.retrieve(row.providerPaymentId, { expand: ['payment_method', 'latest_charge'] }),
+    );
+    return { providerRefundId: refund.id, payment: this.toPayment(intent, row) };
   }
 
   private toPaymentMethodInfo(method: Stripe.PaymentMethod, defaultMethodId: string | null): PaymentMethodInfo {

@@ -26,6 +26,12 @@ export type PaymentProviderConfig = {
   environment: 'sandbox' | 'production';
 }
 
+/** What a refund call answers: the provider's refund id, and the payment as the provider now has it. */
+export type ProviderRefundResult = {
+  providerRefundId: string;
+  payment: Payment;
+};
+
 export abstract class BasePaymentProvider {
   protected config: PaymentProviderConfig;
   abstract readonly providerType: PaymentProviderType;
@@ -150,7 +156,7 @@ export abstract class BasePaymentProvider {
       reason?: string;
       metadata?: Record<string, unknown>;
     },
-  ): Promise<Payment>;
+  ): Promise<ProviderRefundResult>;
 
   // Payment Methods
   abstract attachPaymentMethod(params: {
