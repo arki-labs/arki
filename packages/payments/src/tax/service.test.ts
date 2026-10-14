@@ -19,6 +19,12 @@ import { TaxService } from './service.js';
 const noExemptions = {
   exemptions: { findApplicableExemptions: () => Promise.resolve([]) },
   jurisdictions: { findJurisdictionById: () => Promise.resolve(null) },
+  records: {
+    findByReference: () => Promise.resolve([]),
+    recordMany: () => Promise.resolve(),
+    totalsByJurisdiction: () => Promise.resolve([]),
+    countSaleTransactions: () => Promise.resolve(0),
+  },
 };
 
 function serviceAnswering(status: number, body: unknown) {

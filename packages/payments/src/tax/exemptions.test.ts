@@ -174,6 +174,34 @@ describe('calculateTax with exemptions', () => {
     expect((await service.calculateTax(sale)).taxAmount.toDecimalString()).toBe('19.00');
   });
 
+  it('never lets a global exemption with no product exempt anyone: it cannot even be created', async () => {
+    const global = { type: 'customer' as const, exemptionCode: 'ALL', reason: 'oops', validFrom: past };
+
+    await expect(repos.exemptions.createExemption(global)).rejects.toThrow(/needs a customer/);
+    expect(createExemptionSchema.safeParse(global).success).toBe(false);
+    // The table refuses it too, for a writer that skips the repository
+    await expect(db.insert(tax.taxExemptions).values({ ...global, status: 'active' })).rejects.toThrow();
+  });
+
+  it('exempts the customer who owns a blanket exemption, and not another customer', async () => {
+    const exemption = await repos.exemptions.createExemption({
+      type: 'customer',
+      customerId: 'cust_owner',
+      exemptionCode: 'NONPROFIT',
+      reason: 'Registered charity',
+      validFrom: past,
+    });
+    await repos.exemptions.approveExemption(exemption.id, 'usr_admin');
+    const { service } = serviceWithStripe();
+
+    const owner = await service.calculateTax({ ...sale, customerId: 'cust_owner' });
+    const stranger = await service.calculateTax({ ...sale, customerId: 'cust_stranger' });
+
+    expect(owner.taxAmount.toDecimalString()).toBe('0.00');
+    expect(stranger.taxAmount.toDecimalString()).toBe('19.00');
+    expect(stranger.appliedExemptionIds).toEqual([]);
+  });
+
   it('exempts only the lines of the exempt product', async () => {
     const exemption = await repos.exemptions.createExemption({
       type: 'product',

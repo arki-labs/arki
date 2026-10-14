@@ -178,7 +178,13 @@ export function createTaxTables({ schema }: CreateTaxTablesDeps) {
     approvedBy: varchar('approved_by', { length: 255 }),
     approvedAt: instant('approved_at'),
     },
-    (_table) => [check('tax_exemptions_valid_to_not_before_valid_from', sql`"valid_to" IS NULL OR "valid_to" >= "valid_from"`)],
+    (_table) => [
+      check(
+        'tax_exemptions_has_scope',
+        sql`"customer_id" IS NOT NULL OR "product_code" IS NOT NULL OR "jurisdiction_id" IS NOT NULL`,
+      ),
+      check('tax_exemptions_valid_to_not_before_valid_from', sql`"valid_to" IS NULL OR "valid_to" >= "valid_from"`),
+    ],
   );
 
   /**

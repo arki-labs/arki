@@ -152,6 +152,11 @@ export const createExemptionSchema = z
     )
     .optional(),
   })
+  .refine(
+    exemption =>
+      exemption.customerId !== undefined || exemption.productCode !== undefined || exemption.jurisdictionId !== undefined,
+    { path: ['customerId'], message: 'An exemption needs a customer, a product code or a jurisdiction: with none it would exempt every sale' },
+  )
   .refine(exemption => exemption.validTo === undefined || !isBefore(exemption.validTo, exemption.validFrom), {
     path: ['validTo'],
     message: 'validTo must not be before validFrom',

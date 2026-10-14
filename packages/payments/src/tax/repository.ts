@@ -244,6 +244,9 @@ export class TaxExemptionRepository {
   }
 
   async createExemption(data: NewTaxExemption): Promise<TaxExemption> {
+    if (!data.customerId && !data.productCode && !data.jurisdictionId) {
+      throw new Error('A tax exemption needs a customer, a product code or a jurisdiction');
+    }
     const result = await this.db.insert(this.taxExemptions).values(data).returning();
     if (!result[0]) {
       throw new Error('Failed to create tax exemption');

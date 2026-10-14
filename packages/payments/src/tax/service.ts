@@ -113,8 +113,8 @@ export class TaxService {
    * This is used for price previews and checkout calculations
    *
    * Exemptions in force are applied. An active exemption keeps tax off a line when it is the
-   * customer's (or open to every customer) and its product code, if it has one, is the line's
-   * tax code or plan; one tied to a jurisdiction removes that jurisdiction's tax from the
+   * customer's own, or open to every customer but then tied to a product that is the line's tax
+   * code or plan (a global exemption with no product would zero everyone's tax, so it never applies); one tied to a jurisdiction removes that jurisdiction's tax from the
    * breakdown, unless the tax is inclusive (it is part of the price then, and stays). A line that is
    * wholly exempt is not sent to Stripe. An exemption needs what its type says it is for (a customer, a product or a
    * jurisdiction): one without would exempt every sale, so it is never applied.
@@ -135,9 +135,12 @@ export class TaxService {
     const taxableLines: TaxCalculationInput['lineItems'] = [];
     const exemptLines: TaxCalculationInput['lineItems'] = [];
     for (const item of input.lineItems) {
-      const exemption = lineExemptions.find(
-        candidate =>
-          candidate.productCode === null || candidate.productCode === item.taxCode || candidate.productCode === item.planId,
+      // A blanket exemption (no product) exempts every line, so it must be this customer's own.
+      // One open to every customer must name the product it is for, and match it exactly.
+      const exemption = lineExemptions.find(candidate =>
+        candidate.productCode === null
+          ? candidate.customerId === input.customerId
+          : candidate.productCode === item.taxCode || candidate.productCode === item.planId,
       );
       if (exemption) {
         applied.add(exemption.id);
