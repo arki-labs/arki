@@ -53,7 +53,7 @@ Plus finished workflows that are not packages yet: workspace onboarding, subscri
 - Domain-specific: `text-bible`, `books-import`, `usfm-to-json`, `poetry`, `dictionary`, `mw-dictionary`, `text-hyphen`, `text`, `text-operations`, `games-*`, `domains-*`.
 - Useful but not Stack: `geo`, `scraping`, `rss`, `images`, `diff-engine`, `formats`, `content`, converters (`html-to-md`, `html-to-text`, `md-to-html`, `md-to-pdf`), `text-embeddings`, `code-editor`, `spinners`, `react-fullscreen`, `react-sounds`.
 - Not ready / later: `offline`, `native-ui`, `payments-native`.
-- Internal: `f04-config`, `design-systems-apps`.
+- Internal: `f04-config` (moved to `apps/evervest/config`); app brand design systems live in each app's `design` workspace.
 
 These keep serving the founder's apps. Any of them can move up a tier later by decision, not by drift.
 
