@@ -21,16 +21,19 @@ import type {
   GeocodingProvider,
 } from './types';
 
+/** The slice of `KV` the service needs. Any store with `get` and `set` fits. */
+export type GeocodingCache = Pick<KV, 'get' | 'set'>;
+
 export class GeocodingService {
   private geocoders: Map<GeocodingProvider, NodeGeocoder.Geocoder>;
   private primaryProvider: GeocodingProvider;
   private fallbackProviders: GeocodingProvider[];
-  private kv?: KV;
+  private kv?: GeocodingCache;
   private cacheEnabled: boolean;
   private cacheTTL: number;
   private cacheKeyPrefix: string;
 
-  constructor(config: GeocodingConfig, kv?: KV) {
+  constructor(config: GeocodingConfig, kv?: GeocodingCache) {
     this.geocoders = new Map();
     this.primaryProvider = config.provider;
     this.fallbackProviders = config.fallbackProviders;
@@ -122,12 +125,7 @@ export class GeocodingService {
     }
 
     // Try primary provider first (or preferred if specified)
-    const providerOrder = preferredProvider
-      ? [
-          preferredProvider,
-          ...this.fallbackProviders.filter((p) => p !== preferredProvider),
-        ]
-      : [this.primaryProvider, ...this.fallbackProviders];
+    const providerOrder = this.getProviderOrder(preferredProvider);
 
     let lastError: Error | null = null;
 
@@ -194,12 +192,7 @@ export class GeocodingService {
     }
 
     // Try primary provider first (or preferred if specified)
-    const providerOrder = preferredProvider
-      ? [
-          preferredProvider,
-          ...this.fallbackProviders.filter((p) => p !== preferredProvider),
-        ]
-      : [this.primaryProvider, ...this.fallbackProviders];
+    const providerOrder = this.getProviderOrder(preferredProvider);
 
     let lastError: Error | null = null;
 
@@ -282,6 +275,17 @@ export class GeocodingService {
   }
 
   /**
+   * Providers to try, in order: the preferred one (if any), then the primary,
+   * then the fallbacks. Each provider appears once.
+   */
+  private getProviderOrder(preferredProvider?: GeocodingProvider): GeocodingProvider[] {
+    const ordered = preferredProvider
+      ? [preferredProvider, this.primaryProvider, ...this.fallbackProviders]
+      : [this.primaryProvider, ...this.fallbackProviders];
+    return [...new Set(ordered)];
+  }
+
+  /**
    * Transform node-geocoder Entry to our GeocodeResult format
    */
   private transformResult(entry: Entry, provider: GeocodingProvider): GeocodeResult {
@@ -322,7 +326,7 @@ export class GeocodingService {
  */
 export function createGeocodingService(
   config: GeocodingConfig,
-  kv?: KV,
+  kv?: GeocodingCache,
 ): GeocodingService {
   return new GeocodingService(config, kv);
 }
