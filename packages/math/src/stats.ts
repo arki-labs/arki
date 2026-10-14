@@ -300,42 +300,65 @@ function elementError(value: unknown, at: string): Error {
 /**
  * Compensated sum of number elements, or a non-finite value when an element
  * is not finite or the sum overflows (a non-finite element makes the running
- * total non-finite for good, so no per-element check is needed). Two
+ * total non-finite for good, so no per-element check is needed). Four
  * interleaved streams each keep the exact error of every addition (Knuth's
- * TwoSum) and are merged exactly at the end: as accurate as one Neumaier
- * pass, with two independent dependency chains instead of one.
+ * TwoSum), and the stream totals are merged with TwoSum too, keeping those
+ * errors: as accurate as one Neumaier pass, with four independent dependency
+ * chains instead of one.
  */
 function pairedSum(items: readonly unknown[], name: string): number {
   let total0 = 0;
   let error0 = 0;
   let total1 = 0;
   let error1 = 0;
+  let total2 = 0;
+  let error2 = 0;
+  let total3 = 0;
+  let error3 = 0;
   const length = items.length;
   let i = 0;
-  for (; i + 1 < length; i += 2) {
+  for (; i + 3 < length; i += 4) {
     const a = items[i];
     const b = items[i + 1];
-    if (typeof a !== 'number' || typeof b !== 'number') throw invalidElement(items, name);
-    const next0 = total0 + a;
-    const part0 = next0 - total0;
-    error0 += total0 - (next0 - part0) + (a - part0);
-    total0 = next0;
-    const next1 = total1 + b;
-    const part1 = next1 - total1;
-    error1 += total1 - (next1 - part1) + (b - part1);
-    total1 = next1;
+    const c = items[i + 2];
+    const d = items[i + 3];
+    if (typeof a !== 'number' || typeof b !== 'number' || typeof c !== 'number' || typeof d !== 'number') {
+      throw invalidElement(items, name);
+    }
+    let next = total0 + a;
+    let part = next - total0;
+    error0 += total0 - (next - part) + (a - part);
+    total0 = next;
+    next = total1 + b;
+    part = next - total1;
+    error1 += total1 - (next - part) + (b - part);
+    total1 = next;
+    next = total2 + c;
+    part = next - total2;
+    error2 += total2 - (next - part) + (c - part);
+    total2 = next;
+    next = total3 + d;
+    part = next - total3;
+    error3 += total3 - (next - part) + (d - part);
+    total3 = next;
   }
-  if (i < length) {
+  for (; i < length; i++) {
     const a = items[i];
     if (typeof a !== 'number') throw invalidElement(items, name);
-    const next0 = total0 + a;
-    const part0 = next0 - total0;
-    error0 += total0 - (next0 - part0) + (a - part0);
-    total0 = next0;
+    const next = total0 + a;
+    const part = next - total0;
+    error0 += total0 - (next - part) + (a - part);
+    total0 = next;
   }
-  const total = total0 + total1;
-  const part = total - total0;
-  return total + (error0 + error1 + (total0 - (total - part)) + (total1 - part));
+  const low = total0 + total1;
+  let part = low - total0;
+  const lowError = total0 - (low - part) + (total1 - part);
+  const high = total2 + total3;
+  part = high - total2;
+  const highError = total2 - (high - part) + (total3 - part);
+  const total = low + high;
+  part = total - low;
+  return total + (error0 + error1 + error2 + error3 + lowError + highError + (low - (total - part)) + (high - part));
 }
 
 /**
