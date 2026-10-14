@@ -129,8 +129,8 @@ describe('scanFile + scanDirectory (temp fixtures)', () => {
     expect(paths).toContain(path.join('nested', 'deep.md'));
   });
 
-  it('scanDirectory excludes node_modules, dist, .turbo, .cache', async () => {
-    for (const dirname of ['node_modules', 'dist', '.turbo', '.cache']) {
+  it('scanDirectory excludes node_modules, dist, .turbo, .cache, .bench', async () => {
+    for (const dirname of ['node_modules', 'dist', '.turbo', '.cache', '.bench']) {
       mkdirSync(path.join(tmp, dirname), { recursive: true });
       writeFileSync(path.join(tmp, dirname, 'leak.md'), 'has hyphenate');
     }

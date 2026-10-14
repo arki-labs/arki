@@ -72,6 +72,8 @@ export const DEFAULT_EXCLUDE_DIRS: readonly string[] = [
   '.next',
   '.git',
   'coverage',
+  // Raw `arki-bench` results: gitignored and never packed, but they record local absolute paths.
+  '.bench',
 ];
 
 /**
