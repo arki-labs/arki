@@ -1,7 +1,6 @@
 import Stripe from 'stripe';
 
 import type { UserId } from '../user-id.js';
-import type { Instant } from '@arki/date';
 import { fromUnix, now } from '@arki/date';
 import { Money, sum } from '@arki/money';
 import { fromStripeAmount, toStripeAmount } from '@arki/money/stripe';
@@ -64,6 +63,66 @@ function toStripeMetadata(metadata: Record<string, unknown> | undefined): Stripe
   return out;
 }
 
+type TaxCustomerDetails = {
+  address?: {
+    line1?: string;
+    line2?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+    country?: string;
+  };
+  taxIds?: {
+    type: string;
+    value: string;
+  }[];
+};
+
+/** The Stripe tax calculation params for line items in one currency. Shared by quotes and recorded transactions. */
+function toTaxCalculationParams(params: {
+  currency: string;
+  lineItems: { amount: Money; quantity?: number; reference: string; taxCode?: string }[];
+  customerDetails?: TaxCustomerDetails;
+}): Stripe.Tax.CalculationCreateParams {
+  const currency = params.currency.toUpperCase();
+  const address = params.customerDetails?.address;
+  if (address && !address.country) {
+    throw new PaymentProviderError('invalid_request', 'A customer address for tax needs a country');
+  }
+
+  return {
+    currency: params.currency.toLowerCase(),
+    line_items: params.lineItems.map(item => ({
+      // Throws CurrencyMismatchError for a line item in another currency. A whole quantity times an amount is exact.
+      amount: toStripeAmount(Money.of(item.amount, currency).times(item.quantity ?? 1)),
+      quantity: item.quantity,
+      reference: item.reference,
+      tax_code: item.taxCode || 'txcd_10000000', // General tax code
+    })),
+    customer_details: params.customerDetails
+      ? {
+          address:
+            address && address.country
+              ? {
+                  line1: address.line1,
+                  line2: address.line2,
+                  city: address.city,
+                  state: address.state,
+                  postal_code: address.postalCode,
+                  country: address.country,
+                }
+              : undefined,
+          address_source: 'billing' as const,
+          tax_ids: params.customerDetails.taxIds?.map(taxId => ({
+            type: taxId.type,
+            value: taxId.value,
+          })),
+        }
+      : undefined,
+    expand: ['line_items.data.tax_breakdown'],
+  };
+}
+
 export class StripeProvider extends BasePaymentProvider {
   readonly providerType = 'stripe' as const;
   private stripe: Stripe;
@@ -76,7 +135,8 @@ export class StripeProvider extends BasePaymentProvider {
     automatedDunning: true,
     taxCalculation: true,
     taxCompliance: true,
-    taxReporting: true,
+    // Stripe Tax has no report endpoint: reports are built from our own tables (`src/tax/reporting.ts`)
+    taxReporting: false,
   };
 
   constructor(config: PaymentProviderConfig, options: StripeProviderOptions = {}) {
@@ -1038,27 +1098,7 @@ export class StripeProvider extends BasePaymentProvider {
       taxCode?: string;
     }[];
   }> {
-    const request: Stripe.Tax.CalculationCreateParams = {
-      currency: params.currency.toLowerCase(),
-      line_items: params.lineItems.map(item => ({
-        // Throws CurrencyMismatchError for a line item in another currency
-        amount: toStripeAmount(Money.of(item.amount, params.currency.toUpperCase())),
-        reference: item.reference,
-        tax_code: item.taxCode || 'txcd_10000000', // General tax code
-      })),
-      customer_details: params.customerDetails ? {
-        address: params.customerDetails.address ? {
-          ...params.customerDetails.address,
-          country: params.customerDetails.address.country || 'US',
-        } : undefined,
-        address_source: 'billing' as const,
-        tax_ids: params.customerDetails.taxIds?.map(taxId => ({
-          type: taxId.type as Stripe.Tax.CalculationCreateParams.CustomerDetails.TaxId.Type,
-          value: taxId.value,
-        })),
-      } : undefined,
-      expand: ['line_items.data.tax_breakdown'],
-    };
+    const request = toTaxCalculationParams(params);
     const calculation = await this.call(() => this.stripe.tax.calculations.create(request));
 
     return {
@@ -1078,10 +1118,19 @@ export class StripeProvider extends BasePaymentProvider {
     };
   }
 
+  /**
+   * Records a sale or a refund with Stripe Tax, for tax reporting.
+   *
+   * - `sale`: calculates the tax of the line items, then records that calculation as a transaction.
+   * - `refund`: reverses `originalTransactionId`, a transaction recorded earlier. Without `lineItems`
+   *   the whole transaction is reversed. With them, the refunded total (tax included) is reversed.
+   *
+   * The totals are read from the line items of the recorded transaction: negative for a refund.
+   */
   async createTaxTransaction(params: {
     reference: string;
     type: 'sale' | 'refund';
-    /** Every line item is in `currency`. */
+    /** Every line item is in `currency`. A refund with no line items reverses the whole original transaction. */
     lineItems: {
       amount: Money;
       quantity?: number;
@@ -1090,46 +1139,96 @@ export class StripeProvider extends BasePaymentProvider {
     }[];
     currency: string;
     customerId?: CustomerId;
-    customerDetails?: {
-      address?: {
-        line1?: string;
-        line2?: string;
-        city?: string;
-        state?: string;
-        postalCode?: string;
-        country?: string;
-      };
-      taxIds?: {
-        type: string;
-        value: string;
-      }[];
-    };
+    /** The Stripe tax transaction a `refund` reverses (the `id` `createTaxTransaction` returned for the sale). */
+    originalTransactionId?: string;
+    customerDetails?: TaxCustomerDetails;
   }): Promise<{
     id: string;
     amountTotal: Money;
     taxAmountExclusive: Money;
     taxAmountInclusive: Money;
   }> {
-    // For now, we'll simulate a tax transaction since Stripe's Tax API
-    // may have different endpoints for transaction recording
+    const transaction =
+      params.type === 'refund' ? await this.reverseTaxTransaction(params) : await this.recordTaxSale(params);
 
-    // In production, this would integrate with Stripe's actual tax recording API
-    const transactionId = `txn_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-    // A whole quantity times an amount is exact: no rounding mode needed
-    const totalAmount = sum(
-      params.lineItems.map(item => Money.of(item.amount, params.currency.toUpperCase()).times(item.quantity || 1)),
-      params.currency.toUpperCase(),
-    );
-
-    // This would typically call Stripe's tax transaction API
-    // await this.stripe.tax.transactions.createFromCalculation(...)
+    const lines = transaction.line_items?.data;
+    if (!lines) {
+      throw new PaymentProviderError('unknown', `Stripe tax transaction ${transaction.id} came back without line items`);
+    }
+    let net = Money.zero(transaction.currency.toUpperCase());
+    let taxExclusive = net;
+    let taxInclusive = net;
+    for (const line of lines) {
+      const tax = fromStripeAmount(line.amount_tax, transaction.currency);
+      net = net.plus(fromStripeAmount(line.amount, transaction.currency));
+      if (line.tax_behavior === 'inclusive') {
+        taxInclusive = taxInclusive.plus(tax);
+      } else {
+        taxExclusive = taxExclusive.plus(tax);
+      }
+    }
 
     return {
-      id: transactionId,
-      amountTotal: totalAmount,
-      taxAmountExclusive: Money.zero(params.currency.toUpperCase()), // Would be calculated by Stripe
-      taxAmountInclusive: Money.zero(params.currency.toUpperCase()), // Would be calculated by Stripe
+      id: transaction.id,
+      // Exclusive tax is on top of the line amounts; inclusive tax is already in them
+      amountTotal: net.plus(taxExclusive),
+      taxAmountExclusive: taxExclusive,
+      taxAmountInclusive: taxInclusive,
     };
+  }
+
+  private async recordTaxSale(
+    params: Parameters<StripeProvider['createTaxTransaction']>[0],
+  ): Promise<Stripe.Tax.Transaction> {
+    const customer = params.customerId === undefined ? undefined : await this.customerRef(params.customerId);
+
+    const calculation = await this.call(() =>
+      this.stripe.tax.calculations.create({
+        ...toTaxCalculationParams(params),
+        customer: customer?.providerCustomerId,
+      }),
+    );
+    if (!calculation.id) {
+      throw new PaymentProviderError('unknown', 'Stripe tax calculation has no id, so it cannot be recorded');
+    }
+    const calculationId = calculation.id;
+
+    return this.call(() =>
+      this.stripe.tax.transactions.createFromCalculation({
+        calculation: calculationId,
+        reference: params.reference,
+        expand: ['line_items'],
+      }),
+    );
+  }
+
+  private async reverseTaxTransaction(
+    params: Parameters<StripeProvider['createTaxTransaction']>[0],
+  ): Promise<Stripe.Tax.Transaction> {
+    if (params.originalTransactionId === undefined) {
+      throw new PaymentProviderError('invalid_request', 'A tax refund needs originalTransactionId: the sale it reverses');
+    }
+    const originalTransactionId = params.originalTransactionId;
+    const currency = params.currency.toUpperCase();
+
+    const reversal: Stripe.Tax.TransactionCreateReversalParams =
+      params.lineItems.length === 0
+        ? { mode: 'full', original_transaction: originalTransactionId, reference: params.reference, expand: ['line_items'] }
+        : {
+            mode: 'partial',
+            original_transaction: originalTransactionId,
+            reference: params.reference,
+            // Stripe wants the refunded total, tax included, as a negative integer
+            flat_amount: -toStripeAmount(
+              sum(
+                params.lineItems.map(item => Money.of(item.amount, currency).times(item.quantity ?? 1)),
+                currency,
+              ),
+            ),
+            expand: ['line_items'],
+          };
+
+    return this.call(() => this.stripe.tax.transactions.createReversal(reversal));
   }
 
   async getTaxSettings(): Promise<{
@@ -1149,53 +1248,35 @@ export class StripeProvider extends BasePaymentProvider {
       status: string;
     }[];
   }> {
-    const settings = await this.stripe.tax.settings.retrieve({
-      expand: ['head_office', 'status_details'],
-    });
+    const settings = await this.call(() => this.stripe.tax.settings.retrieve());
+    const registrations = await this.call(() =>
+      this.stripe.tax.registrations.list({ status: 'all', limit: 100 }).autoPagingToArray({ limit: 10_000 }),
+    );
 
+    const headOffice = settings.head_office?.address;
     return {
-      defaultTaxCode: settings.defaults?.tax_code || 'txcd_10000000',
-      headOfficeLocation: settings.head_office ? {
-        address: {
-          country: settings.head_office.address.country || 'US',
-          state: settings.head_office.address.state || undefined,
-          city: settings.head_office.address.city || undefined,
-          line1: settings.head_office.address.line1 || undefined,
-          postalCode: settings.head_office.address.postal_code || undefined,
-        },
-      } : undefined,
-      taxRegistrations: [], // Simplified for now - would parse actual status details
-    };
-  }
-
-  async getTaxReport(params: {
-    reportType: 'sales_and_use_tax' | 'vat' | 'gst';
-    startDate: Instant;
-    endDate: Instant;
-    jurisdiction?: string;
-  }): Promise<{
-    id: string;
-    status: 'pending' | 'succeeded' | 'failed';
-    url?: string;
-    downloadUrl?: string;
-  }> {
-    // Create a tax report (this is a placeholder for the actual implementation)
-    // Stripe's tax reporting might use different endpoints based on jurisdiction
-
-    // For now, we'll simulate a tax report creation
-    const reportId = `tax_report_${Date.now()}_${params.reportType}`;
-
-    // In a real implementation, this would:
-    // 1. Create a report via Stripe's tax API for the specified date range
-    // 2. Poll for completion
-    // 3. Return download URLs
-
-    console.log(`Creating tax report: ${params.reportType} from ${params.startDate.toString()} to ${params.endDate.toString()}`);
-
-    return {
-      id: reportId,
-      status: 'pending',
-      url: `https://dashboard.stripe.com/tax/reports/${reportId}`,
+      // Stripe's general tax code, which applies when the account sets no default
+      defaultTaxCode: settings.defaults.tax_code || 'txcd_10000000',
+      headOfficeLocation: headOffice?.country
+        ? {
+            address: {
+              country: headOffice.country,
+              state: headOffice.state || undefined,
+              city: headOffice.city || undefined,
+              line1: headOffice.line1 || undefined,
+              postalCode: headOffice.postal_code || undefined,
+            },
+          }
+        : undefined,
+      taxRegistrations: registrations.map(registration => {
+        // One option object per registration, keyed by country: it names the registration type
+        const [option] = Object.values(registration.country_options);
+        return {
+          country: registration.country,
+          type: option && 'type' in option && typeof option.type === 'string' ? option.type : 'unknown',
+          status: registration.status,
+        };
+      }),
     };
   }
 

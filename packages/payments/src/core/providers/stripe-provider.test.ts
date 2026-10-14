@@ -190,42 +190,42 @@ describe('refundPayment', () => {
   });
 });
 
-describe('calculateTax', () => {
-  const calculation = (request: RecordedStripeRequest) => ({
-    body: {
-      id: 'taxcalc_1',
-      object: 'tax.calculation',
-      currency: request.form.currency,
-      // Stripe answers in its units: 10% tax on 1500 JPY is 150 JPY
-      amount_total: 1650,
-      tax_amount_exclusive: 150,
-      tax_amount_inclusive: 0,
-      line_items: {
-        object: 'list',
-        data: [
-          {
-            tax_breakdown: [
-              {
-                amount: 150,
-                tax_rate_details: { percentage_decimal: '10.0' },
-                jurisdiction: { display_name: 'Japan', level: 'country' },
-              },
-            ],
-          },
-        ],
-      },
+const calculation = (request: RecordedStripeRequest) => ({
+  body: {
+    id: 'taxcalc_1',
+    object: 'tax.calculation',
+    currency: request.form.currency,
+    // Stripe answers in its units: 10% tax on 1500 JPY is 150 JPY
+    amount_total: 1650,
+    tax_amount_exclusive: 150,
+    tax_amount_inclusive: 0,
+    line_items: {
+      object: 'list',
+      data: [
+        {
+          tax_breakdown: [
+            {
+              amount: 150,
+              tax_rate_details: { percentage_decimal: '10.0' },
+              jurisdiction: { display_name: 'Japan', level: 'country' },
+            },
+          ],
+        },
+      ],
     },
-  });
+  },
+});
 
-  function taxProvider() {
-    const http = createFakeStripeHttp(calculation);
-    const stripe = new StripeProvider(
-      { apiKey: 'sk_test_units', webhookSecret: 'whsec_units', environment: 'sandbox' },
-      { httpClient: http.client, maxNetworkRetries: 0 },
-    );
-    return { stripe, requests: http.requests };
-  }
+function taxProvider() {
+  const http = createFakeStripeHttp(calculation);
+  const stripe = new StripeProvider(
+    { apiKey: 'sk_test_units', webhookSecret: 'whsec_units', environment: 'sandbox' },
+    { httpClient: http.client, maxNetworkRetries: 0 },
+  );
+  return { stripe, requests: http.requests };
+}
 
+describe('calculateTax', () => {
   it('sends JPY line items in yen and reads totals back in yen', async () => {
     const { stripe, requests } = taxProvider();
 

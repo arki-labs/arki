@@ -177,6 +177,11 @@ function stripeIntent(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const line = (amount: number, proration: boolean) => ({
+  amount,
+  parent: { subscription_item_details: { proration } },
+});
+
 describe('customers', () => {
   it('getCustomer reads the Stripe customer and refreshes our row with it', async () => {
     const { stripe, requests } = provider(() => ({ body: stripeCustomer() }));
@@ -364,10 +369,6 @@ describe('subscriptions', () => {
   });
 
   it('previewSubscriptionChange splits the upcoming invoice into proration charge, credit and next invoice', async () => {
-    const line = (amount: number, proration: boolean) => ({
-      amount,
-      parent: { subscription_item_details: { proration } },
-    });
     const { stripe, requests } = provider(request =>
       request.path === '/v1/invoices/create_preview'
         ? {
