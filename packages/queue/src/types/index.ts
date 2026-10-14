@@ -12,6 +12,7 @@ export type {
   JobBuilderChain,
   JobBuilderDef,
   JobBuilderNeedsInput,
+  BullMQQueueInstance,
   QueueBuilder,
   QueueInstance,
   ScheduleBuilderChain,

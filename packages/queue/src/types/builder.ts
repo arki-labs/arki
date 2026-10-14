@@ -3,6 +3,8 @@
  * Inspired by tRPC's builder pattern
  */
 
+import type { Queue } from 'bullmq';
+
 import type { z } from '@arki/contracts';
 
 import type { QueueConnection } from '../redis-connection.ts';
@@ -61,7 +63,7 @@ export type QueueBuilder<TContext, TMeta extends QueueMeta = QueueMeta> = {
     connection: QueueConnection;
     keyPrefix?: string;
     createContext: () => TContext | Promise<TContext>;
-  }) => QueueInstance;
+  }) => BullMQQueueInstance;
 };
 
 /**
@@ -499,4 +501,13 @@ export type QueueInstance = {
    * Stop all workers and close connections
    */
   stop(): Promise<void>;
+};
+
+/**
+ * The BullMQ-backed queue instance. Adds a read-only view of its BullMQ queues, for tools that read job state
+ * (for example the Foreman failed-job source). The runtime-local instance is a plain `QueueInstance`.
+ */
+export type BullMQQueueInstance = QueueInstance & {
+  /** The BullMQ `Queue` of every registered job, by queue name. Empty until `register()` runs. */
+  queues(): ReadonlyMap<string, Queue>;
 };

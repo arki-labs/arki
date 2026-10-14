@@ -15,7 +15,7 @@ import { FlowProducer, Queue, Worker } from 'bullmq';
 import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { QueueConnection } from './redis-connection.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
-import type { FlowDefinition, QueueInstance, ScheduleDefinition } from './types/builder.ts';
+import type { BullMQQueueInstance, FlowDefinition, ScheduleDefinition } from './types/builder.ts';
 import type { JobDefinition } from './types/job.ts';
 import { debugFlow, debugJob, debugRegister, debugSchedule, debugWorker } from './debug.ts';
 import { duplicateScheduleError } from './errors.ts';
@@ -47,7 +47,7 @@ export type QueueInstanceOptions<TContext> = {
  * Create a queue instance that can register and run jobs, schedules, and flows
  * @internal - Called by QueueBuilder.createQueue()
  */
-export function createQueueInstance<TContext>(options: QueueInstanceOptions<TContext>): QueueInstance {
+export function createQueueInstance<TContext>(options: QueueInstanceOptions<TContext>): BullMQQueueInstance {
   const { connection, keyPrefix = 'queue:', createContext } = options;
 
   debugRegister.debug('Creating queue instance with keyPrefix: {keyPrefix}', { keyPrefix });
@@ -448,5 +448,6 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     register,
     start,
     stop,
+    queues: () => new Map(queues.map(queue => [queue.name, queue])),
   };
 }

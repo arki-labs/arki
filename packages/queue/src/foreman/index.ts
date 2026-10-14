@@ -14,6 +14,7 @@ import { QUEUE_FOREMAN_ERROR_CODES, QueueForemanError } from './errors.ts';
 import { redactSecrets } from './redact.ts';
 
 export { QUEUE_FOREMAN_ERROR_CODES, QueueForemanError, type QueueForemanErrorCode } from './errors.ts';
+export { bullmqFailedJobSource, type BullMQFailedJobSourceOptions } from './bullmq-source.ts';
 export { pgBossFailedJobSource, type PgBossFailedJobSourceOptions } from './pg-boss-source.ts';
 export { redactSecrets } from './redact.ts';
 export type { FailedJobRecord, FailedJobSource } from './source.ts';

@@ -114,6 +114,7 @@ export type {
   JobMiddleware,
   JobOptions,
   MiddlewareFunction,
+  BullMQQueueInstance,
   QueueBuilder,
   QueueInstance,
   QueuePriority,
