@@ -4,11 +4,16 @@
 // `process` access…) fails loudly on every engine, not just on Node.
 import * as date from '../dist/index.js';
 
-const runtime = globalThis.Deno
-  ? `deno ${globalThis.Deno.version.deno}`
-  : globalThis.Bun
-    ? `bun ${globalThis.Bun.version}`
-    : `node ${globalThis.process?.version ?? '?'}`;
+const runtime =
+  typeof HermesInternal !== 'undefined'
+    ? 'hermes'
+    : globalThis.Deno
+      ? `deno ${globalThis.Deno.version.deno}`
+      : globalThis.Bun
+        ? `bun ${globalThis.Bun.version}`
+        : typeof window !== 'undefined'
+          ? 'browser'
+          : `node ${globalThis.process?.version ?? '?'}`;
 const checks = [];
 const check = (name, actual, expected) => checks.push({ name, ok: actual === expected, actual, expected });
 

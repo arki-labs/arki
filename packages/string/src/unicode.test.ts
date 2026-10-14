@@ -70,23 +70,37 @@ describe('positional operations', () => {
 
 describe('UAX #29 fallback scanner', () => {
   const unassigned = /\p{Cn}/u;
+  const extPict = /^\p{Extended_Pictographic}$/u;
   const corpus = readFileSync(new URL('__tests__/fixtures/GraphemeBreakTest.txt', import.meta.url), 'utf8');
 
   type Case = { text: string; expected: number[]; line: string };
   const cases: Case[] = [];
   let skipped = 0;
   for (const raw of corpus.split('\n')) {
-    const line = raw.split('#')[0]?.trim() ?? '';
+    const [data = '', comment = ''] = raw.split('#');
+    const line = data.trim();
     if (line === '') continue;
     const tokens = line.split(/\s+/);
     let text = '';
     const expected: number[] = [];
+    const chars: string[] = [];
     for (const token of tokens) {
       if (token === '÷') expected.push(text.length);
-      else if (token !== '×') text += String.fromCodePoint(Number.parseInt(token, 16));
+      else if (token !== '×') {
+        const char = String.fromCodePoint(Number.parseInt(token, 16));
+        chars.push(char);
+        text += char;
+      }
     }
     if (unassigned.test(text)) {
       skipped += 1; // the engine's Unicode tables predate this code point
+      continue;
+    }
+    // The comment gives each code point's class, e.g. `(ExtPict)` or `(XXm…mExtPict)` (X minus ExtPict).
+    const labels = [...comment.matchAll(/\(([^()]*)\)\s*(?=[÷×]|$)/g)].map(match => match[1]);
+    if (labels.length !== chars.length) throw new Error(`GraphemeBreakTest comment format changed: ${raw}`);
+    if (chars.some((char, index) => extPict.test(char) !== (labels[index] === 'ExtPict'))) {
+      skipped += 1; // the engine's Extended_Pictographic table disagrees with this fixture's Unicode version
       continue;
     }
     cases.push({ text, expected, line });
