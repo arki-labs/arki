@@ -7,8 +7,8 @@
  *            with an empty environment (`expectImportPure` from `@arki/ts/testing`)
  *   node     `node scripts/smoke.mjs`
  *   bun      `bun scripts/smoke.mjs`
- *   deno     unbundled when the package has no npm dependencies, else the
- *            `bun build --target=browser` bundle
+ *   deno     unbundled when the package has no npm dependencies, else a
+ *            `bun build --target=node` bundle
  *   browser  that bundle in headless Chromium (Playwright)
  *   hermes   an IIFE bundle with a console shim under `$HERMES_BIN`
  *
@@ -68,16 +68,22 @@ function requireSmokeFile({ cwd }: Context): void {
   if (!existsSync(path.join(cwd, SMOKE))) throw new Error(`${SMOKE} is missing`);
 }
 
-/** Bundles the smoke file once per format. `bun:*` stays external: the portable code guards it at runtime. */
+/**
+ * Bundles the smoke file once per engine. Browser and Hermes get the browser
+ * build of every dependency; Deno gets the node build, which it runs through its
+ * `node:` support (a browser build may touch `document`). `bun:*` stays external:
+ * the portable code guards it at runtime.
+ */
 const bundles = new Map<string, string>();
-function bundle(context: Context, name: 'browser' | 'hermes'): string {
+function bundle(context: Context, name: 'browser' | 'hermes' | 'deno'): string {
   const cached = bundles.get(name);
   if (cached) return cached;
   const outfile = `${OUT}/${name}.js`;
+  const target = name === 'deno' ? '--target=node' : '--target=browser';
   const format = name === 'hermes' ? ['--format=iife'] : [];
   const { output, status } = run(
     'bun',
-    ['build', SMOKE, '--target=browser', '--external', 'bun:*', ...format, `--outfile=${outfile}`],
+    ['build', SMOKE, target, '--external', 'bun:*', ...format, `--outfile=${outfile}`],
     context.cwd,
   );
   if (status !== 0) throw new Error(`bundling for ${name} failed\n${output}`);
@@ -85,17 +91,50 @@ function bundle(context: Context, name: 'browser' | 'hermes'): string {
   return outfile;
 }
 
+/** Entry names that adapt to a platform or an optional peer (RFC `arki-structure` P3). */
+const ADAPTERS = new Set([
+  'node',
+  'browser',
+  'react',
+  'native',
+  'react-native',
+  'dot',
+  'drizzle',
+  'otel',
+  'testing',
+  'tanstack-start',
+  'orpc',
+  'pg',
+  'server',
+]);
+
+/** An adapter whose platform piece is absent here (an optional peer, an unbuilt native addon). */
+const UNLOADABLE = /Cannot find (?:module|package)|No native build|dlopen|\.node['"]? was compiled/;
+
 function purity({ cwd, manifest }: Context): void {
-  const entries = new Set<string>();
+  const entries = new Map<string, string>();
   for (const [subpath, target] of Object.entries(manifest.exports)) {
     if (subpath.includes('*')) continue;
     const entry = runtimeEntry(target);
-    if (entry) entries.add(path.resolve(cwd, entry));
+    if (entry) entries.set(subpath, path.resolve(cwd, entry));
   }
-  const missing = [...entries].filter(entry => !existsSync(entry));
+  const missing = [...entries.values()].filter(entry => !existsSync(entry));
   if (missing.length > 0) throw new Error(`built output is missing (run the build first): ${missing.join(', ')}`);
-  expectImportPure([...entries]);
-  say(`  ${String(entries.size)} export entries import cleanly with an empty environment`);
+
+  // One process per entry, so one adapter that cannot load here does not hide the others.
+  const unloadable: string[] = [];
+  for (const [subpath, entry] of entries) {
+    try {
+      expectImportPure([entry]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isAdapter = ADAPTERS.has(subpath.replace(/^\.\//, '').split('/')[0] ?? '');
+      if (!isAdapter || !UNLOADABLE.test(message)) throw new Error(`${subpath}: ${message}`, { cause: error });
+      unloadable.push(subpath);
+    }
+  }
+  say(`  ${String(entries.size - unloadable.length)} export entries import cleanly with an empty environment`);
+  if (unloadable.length > 0) throw new Incomplete(`adapter entries cannot load here: ${unloadable.join(', ')}`);
 }
 
 function deno(context: Context): void {
@@ -104,8 +143,8 @@ function deno(context: Context): void {
     say('  mode: unbundled (no npm dependencies)');
     smoke('deno', ['run', '--no-config', '--node-modules-dir=manual', '-A', SMOKE], cwd);
   } else {
-    say('  mode: bundled (npm dependencies; Deno cannot read catalog: versions)');
-    smoke('deno', ['run', '--no-config', '-A', bundle(context, 'browser')], cwd);
+    say('  mode: bundled for node (npm dependencies; Deno cannot read catalog: versions)');
+    smoke('deno', ['run', '--no-config', '-A', bundle(context, 'deno')], cwd);
   }
 }
 
@@ -175,7 +214,8 @@ const legRunners: Record<Leg, (context: Context) => void | Promise<void>> = {
 function selectLegs(only: string | undefined): readonly Leg[] {
   if (!only) return LEGS;
   const wanted = only.split(',').map(name => name.trim());
-  const unknown = wanted.filter(name => !LEGS.some(leg => leg === name));
+  const known = new Set<string>(LEGS);
+  const unknown = wanted.filter(name => !known.has(name));
   if (unknown.length > 0) throw new Error(`unknown leg(s): ${unknown.join(', ')} (legs: ${LEGS.join(', ')})`);
   return LEGS.filter(leg => wanted.includes(leg));
 }

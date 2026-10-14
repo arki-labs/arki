@@ -44,7 +44,7 @@ Small, unpublished, single-job packages become entries of one product. Nothing i
 | Today | Becomes | Importers |
 |---|---|---|
 | `html-to-md`, `html-to-text`, `md-to-html` | `@arki/formats/{html-to-md,html-to-text,md-to-html}` — one unified/remark engine (B4) | 0 |
-| `usfm-to-json` | `@arki/formats/usfm` | 0 |
+| `usfm-to-json` | `@arki/formats/node` (it needs a native tree-sitter addon, so it is a Node adapter) | 0 |
 | `md-to-pdf` | stays its own product (React-PDF is a heavy, different dependency) | 0 |
 | `domains-availability`, `domains-tlds`, `namecheap` | `@arki/domains` with `/availability`, `/tlds`, `/namecheap` | 5, 1, 0 |
 | `text-operations` | the root of `@arki/text` (it was the package's only content: `text/src/index.ts:15` re-exported it whole) | 1 |
