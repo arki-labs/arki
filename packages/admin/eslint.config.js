@@ -1,9 +1,4 @@
-import baseConfig from '@arki/eslint-config/base';
+import { library } from '@arki/eslint-config/library';
 
-/** @type {import('typescript-eslint').Config} */
-export default [
-  {
-    ignores: ['dist/**'],
-  },
-  ...baseConfig,
-];
+// `src/server.ts` is the Node-only `./server` entry (node:crypto); `src/dot.ts` needs the optional `@arki/http` peer; every other entry is portable.
+export default library({ adapters: ['src/server.ts', 'src/dot.ts'] });

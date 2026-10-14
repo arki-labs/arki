@@ -1,19 +1,8 @@
 {
   "name": "@arki/admin",
-  "private": true,
   "version": "0.0.2",
+  "private": true,
   "description": "Fleet administration contract for ARKI apps — the shared snapshot schema, app-side request handler, and Foreman-side federation client behind admin.fork.works.",
-  "license": "MIT",
-  "type": "module",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/arki-labs/arki.git",
-    "directory": "packages/admin"
-  },
-  "homepage": "https://arki.dev",
-  "bugs": {
-    "url": "https://github.com/arki-labs/arki/issues"
-  },
   "keywords": [
     "arki",
     "typescript",
@@ -21,10 +10,18 @@
     "fleet",
     "federation"
   ],
-  "publishConfig": {
-    "access": "public"
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/admin"
+  },
+  "license": "MIT",
   "sideEffects": false,
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
@@ -42,6 +39,36 @@
       "node": "./src/http.ts",
       "default": "./src/http.ts"
     },
+    "./module": {
+      "types": "./dist/src/module.d.ts",
+      "import": "./src/module.ts",
+      "default": "./src/module.ts"
+    },
+    "./core": {
+      "types": "./dist/src/core.d.ts",
+      "import": "./src/core.ts",
+      "default": "./src/core.ts"
+    },
+    "./env": {
+      "types": "./dist/src/env.d.ts",
+      "import": "./src/env.ts",
+      "default": "./src/env.ts"
+    },
+    "./dot": {
+      "types": "./dist/src/dot.d.ts",
+      "import": "./src/dot.ts",
+      "default": "./src/dot.ts"
+    },
+    "./client": {
+      "types": "./dist/src/client.d.ts",
+      "import": "./src/client.ts",
+      "default": "./src/client.ts"
+    },
+    "./connections/coolify": {
+      "types": "./dist/src/connections/coolify/index.d.ts",
+      "import": "./src/connections/coolify/index.ts",
+      "default": "./src/connections/coolify/index.ts"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -51,25 +78,32 @@
     "package.json"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@arki/contracts": "workspace:*"
+    "@arki/clock": "workspace:*",
+    "@arki/contracts": "workspace:*",
+    "@arki/log": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
+    "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/http": "workspace:*",
+    "@arki/kv": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@types/node": "catalog:node",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "@arki/http": "workspace:*"
@@ -78,5 +112,8 @@
     "@arki/http": {
       "optional": true
     }
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -97,8 +97,7 @@ export type FleetRegistryEntry = {
 
 /** Result of one federated fetch — a discriminated union so callers handle failure explicitly. */
 export type FleetFetchResult =
-  | { id: string; ok: true; snapshot: FleetSnapshot }
-  | { id: string; ok: false; error: string };
+  { id: string; ok: true; snapshot: FleetSnapshot } | { id: string; ok: false; error: string };
 
 export type FetchFleetSnapshotOptions = {
   /** Override the global fetch (tests). */
@@ -142,3 +141,17 @@ export async function fetchFleetSnapshot(
 }
 
 export type { FleetSnapshot } from './contract';
+
+// Protocol 2 — the signed dispatcher (portable; re-exported here because apps mount it server-side).
+export type { CreateForemanHandlerOptions, NonceStore, PublicKeyRing } from './dispatcher';
+export { createForemanHandler } from './dispatcher';
+export type { ForemanManifest, ProviderReadiness, WritesMode } from './protocol';
+export {
+  FOREMAN_BASE_PATH,
+  FOREMAN_PROTOCOL_VERSION,
+  foremanManifestSchema,
+  generateForemanKeyPair,
+  NONCE_TTL_SECONDS,
+} from './protocol';
+export type { ForemanAppOptions } from './foreman-app';
+export { createForemanHandlerFromEnv } from './foreman-app';
