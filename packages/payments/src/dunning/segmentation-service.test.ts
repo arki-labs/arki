@@ -56,7 +56,7 @@ async function newCustomer(label: string) {
   return { id, owner };
 }
 
-async function pay(buyer: Awaited<ReturnType<typeof newCustomer>>, amountMinor: number) {
+async function pay(buyer: Awaited<ReturnType<typeof newCustomer>>, amountMinor: number, currency = 'EUR') {
   const id = createPaymentId();
   await db.insert(core.payments).values({
     id,
@@ -64,7 +64,7 @@ async function pay(buyer: Awaited<ReturnType<typeof newCustomer>>, amountMinor: 
     customerId: buyer.id,
     providerPaymentId: `pi_${id}`,
     amountMinor,
-    currency: 'EUR',
+    currency,
     status: 'succeeded',
   });
 }
@@ -155,5 +155,18 @@ describe('customer history', () => {
     expect(payments).toMatchObject({ totalPayments: 1, successfulPayments: 1, failedPayments: 0 });
     expect(subscriptions).toMatchObject({ totalSubscriptions: 0, activeSubscriptions: 0 });
     expect(typeof engagement.score).toBe('number');
+  });
+
+  it('averages in one currency, the one with most payments, and names it, never mixing currencies', async () => {
+    const buyer = await newCustomer('twocurrencies');
+    await pay(buyer, 1000, 'EUR');
+    await pay(buyer, 3000, 'EUR');
+    await pay(buyer, 900_000, 'JPY');
+
+    const payments = await service['getCustomerPaymentHistory'](buyer.id);
+    const profile = await service.updateCustomerRiskProfile(buyer.id);
+
+    expect(payments).toMatchObject({ totalPayments: 3, successfulPayments: 3, averageAmount: 2000, currency: 'EUR' });
+    expect(profile.paymentHistory).toMatchObject({ averageAmount: 2000, currency: 'EUR' });
   });
 });

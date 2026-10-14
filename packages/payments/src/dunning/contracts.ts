@@ -305,6 +305,7 @@ export const customerRiskProfileInputSchema = z.object({
     successfulPayments: z.number().int().min(0),
     failedPayments: z.number().int().min(0),
     averageAmount: z.number().min(0),
+    currency: z.string().optional(),
     lastPaymentDate: instantSchema().optional(),
     streakDays: z.number().int().min(0),
   }),
