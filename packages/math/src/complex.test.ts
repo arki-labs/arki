@@ -118,6 +118,38 @@ describe('arithmetic', () => {
     expect(complex(1e300, 1e300).dividedBy(complex(1e300, 1e300)).eq(1)).toBe(true);
   });
 
+  it('divides at extreme scales when the quotient itself is representable (Baudin & Smith)', () => {
+    // Smith alone overflows here: its denominator c + d·(d/c) is 2e308.
+    expect(complex(1e308, 1e308).dividedBy(complex(1e308, 1e308)).eq(1)).toBe(true);
+    expect(complex(1).dividedBy(1e-200).eq(1e200)).toBe(true);
+    expect(complex(1e-300, 1e-300).dividedBy(complex(1e-300, 1e-300)).eq(1)).toBe(true);
+    // Only a quotient outside the float range throws.
+    expect(() => complex(1e308).dividedBy(1e-10)).toThrow(NumericRangeError);
+  });
+
+  it('returns the correctly rounded quotient on the Baudin & Smith 2012 hard cases', () => {
+    // [a, b, c, d] as powers of two for (a + b·i) / (c + d·i), and the exact
+    // quotient rounded to a float (checked with 1,200-digit decimal arithmetic).
+    // Plain Smith gets six of these wrong: 0 or a lost imaginary part, an
+    // overflow, or 0.5 + 0.5i instead of 0.6 + 0.2i.
+    const cases: [number, number, number, number, number, number][] = [
+      [0, 0, 0, 1023, 2 ** -1023, -(2 ** -1023)],
+      [0, 0, -1023, -1023, 2 ** 1023, 0],
+      [1023, -1023, 677, -677, 2 ** 346, -(2 ** -1008)],
+      [1023, 1023, 0, 0, 2 ** 1023, 0],
+      [1020, -844, 656, -780, 2 ** 364, -(2 ** -1072)],
+      [-71, 1021, 1001, -323, 2 ** -1072, 2 ** 20],
+      [-347, -54, -1037, -1058, 3.898_125_604_559_113_3e289, 8.174_961_907_852_354e295],
+      [-1074, -1074, -1073, -1074, 0.6, 0.2],
+      [1015, -989, 1023, 1023, 0.001_953_125, -0.001_953_125],
+      [-622, -1071, -343, -798, 1.029_511_517_893_605_8e-84, 6.971_459_875_150_762e-220],
+    ];
+    for (const [a, b, c, d, re, im] of cases) {
+      const quotient = complex(2 ** a, 2 ** b).dividedBy(complex(2 ** c, 2 ** d));
+      expect([quotient.re, quotient.im]).toEqual([re, im]);
+    }
+  });
+
   it('throws on division by zero rather than returning NaN or Infinity', () => {
     expect(() => complex(1, 1).dividedBy(0)).toThrow(DivisionByZeroError);
     expect(() => Complex.ZERO.inverse()).toThrow(DivisionByZeroError);

@@ -58,6 +58,27 @@ function logModulus(re: number, im: number): number {
   return squares > 1e-290 && squares < Infinity ? 0.5 * Math.log(squares) : Math.log(Math.hypot(re, im));
 }
 
+/** Division scaling thresholds (Baudin & Smith 2012), with ε = 2⁻⁵³. */
+const HALF_MAX = Number.MAX_VALUE / 2;
+/** 2⁻¹⁰²² · 2 / ε: below this, parts are scaled up before dividing. */
+const TINY = 2 ** -968;
+/** 2 / ε², the exact power of two used to scale tiny parts up. */
+const UPSCALE = 2 ** 107;
+
+/**
+ * `(a + b·r) / denominator`, the real part of `(a + b·i) / (c + d·i)` for
+ * `|d| ≤ |c|`, given `ratio = d / c` and `denominator = c + d·ratio`. When
+ * `b·ratio` or `ratio` underflows to 0, it regroups so `b` still counts
+ * (Baudin & Smith 2012). The imaginary part is `smithPart(b, -a, ...)`.
+ */
+function smithPart(a: number, b: number, c: number, d: number, ratio: number, denominator: number): number {
+  if (ratio !== 0) {
+    const bRatio = b * ratio;
+    return bRatio === 0 ? a / denominator + (b / denominator) * ratio : (a + bRatio) / denominator;
+  }
+  return (a + d * (b / c)) / denominator;
+}
+
 const NUMBER = String.raw`(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+|E[+-]?\d+)?`;
 const REAL_ONLY = new RegExp(String.raw`^([+-]?${NUMBER})$`);
 const IMAGINARY_ONLY = new RegExp(String.raw`^([+-]?)(${NUMBER})?i$`);
@@ -151,20 +172,62 @@ export class Complex {
     return result(this.re * that.re - this.im * that.im, this.re * that.im + this.im * that.re, 'times');
   }
 
-  /** Smith's algorithm, which avoids overflow in `|divisor|²`. Throws on a zero divisor. */
+  /**
+   * Robust complex division (Baudin & Smith 2012, "A Robust Complex Division
+   * in Scilab"): Smith's algorithm, which avoids overflow in `|divisor|²`,
+   * plus exact power-of-two scaling when a part is near overflow or underflow,
+   * so `(1e308 + 1e308i) / (1e308 + 1e308i)` is `1`. Throws on a zero divisor,
+   * and `NumericRangeError` only when the quotient itself is out of range.
+   */
   dividedBy(other: ComplexInput): Complex {
     const that = Complex.from(other);
     if (that.isZero()) throw new DivisionByZeroError(`${this.toString()} divided by zero`);
-    const { re: a, im: b } = this;
-    const { re: c, im: d } = that;
-    if (Math.abs(c) >= Math.abs(d)) {
+    let a = this.re;
+    let b = this.im;
+    let c = that.re;
+    let d = that.im;
+    const absC = Math.abs(c);
+    const absD = Math.abs(d);
+    const ab = Math.max(Math.abs(a), Math.abs(b));
+    const cd = Math.max(absC, absD);
+    let scale = 1;
+    // Only extreme exponents take this branch; scaling by a power of two is exact.
+    if (!(ab < HALF_MAX && ab > TINY && cd < HALF_MAX && cd > TINY)) {
+      if (ab >= HALF_MAX) {
+        a *= 0.5;
+        b *= 0.5;
+        scale *= 2;
+      } else if (ab <= TINY) {
+        a *= UPSCALE;
+        b *= UPSCALE;
+        scale /= UPSCALE;
+      }
+      if (cd >= HALF_MAX) {
+        c *= 0.5;
+        d *= 0.5;
+        scale *= 0.5;
+      } else if (cd <= TINY) {
+        c *= UPSCALE;
+        d *= UPSCALE;
+        scale *= UPSCALE;
+      }
+    }
+    let re: number;
+    let im: number;
+    // Scaling keeps the order of |c| and |d|.
+    if (absD <= absC) {
       const ratio = d / c;
       const denominator = c + d * ratio;
-      return result((a + b * ratio) / denominator, (b - a * ratio) / denominator, 'dividedBy');
+      re = smithPart(a, b, c, d, ratio, denominator);
+      im = smithPart(b, -a, c, d, ratio, denominator);
+    } else {
+      // (b + a·i) / (d + c·i) is the conjugate of the quotient.
+      const ratio = c / d;
+      const denominator = d + c * ratio;
+      re = smithPart(b, a, d, c, ratio, denominator);
+      im = -smithPart(a, -b, d, c, ratio, denominator);
     }
-    const ratio = c / d;
-    const denominator = c * ratio + d;
-    return result((a * ratio + b) / denominator, (b * ratio - a) / denominator, 'dividedBy');
+    return result(re * scale, im * scale, 'dividedBy');
   }
 
   /** `1 / z`. Throws `DivisionByZeroError` for zero. */
