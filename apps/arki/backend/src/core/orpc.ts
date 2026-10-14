@@ -6,12 +6,13 @@
  */
 import { ORPCError, os } from '@orpc/server';
 
-import { RateLimitExceededError } from '@arki/kv/errors';
 import { ZodError } from '@arki/contracts';
+import { RateLimitExceededError } from '@arki/kv/errors';
 
-import { env } from '../env';
 import type { RestrictedResource, UserId, UserModel, UserPermission, UserRole } from '../features/auth';
 import type { ORPCContext } from './context';
+import { env } from '../env';
+import { ADMIN_ROLE_NAME } from '../features/auth/constants';
 
 /**
  * Base oRPC instance with typed context
@@ -97,11 +98,7 @@ const createAuthorizeMiddleware = (resource: RestrictedResource, action: UserPer
       });
     }
 
-    const hasPermission = await context.repo.auth.hasPermission(
-      context.session.user.id as UserId,
-      resource,
-      action,
-    );
+    const hasPermission = await context.repo.auth.hasPermission(context.session.user.id as UserId, resource, action);
 
     if (!hasPermission) {
       throw new ORPCError('FORBIDDEN', {
@@ -121,7 +118,7 @@ const createAuthorizeMiddleware = (resource: RestrictedResource, action: UserPer
 /**
  * Role authorization middleware factory — checks if user has at least one of the given roles.
  */
-const createRoleMiddleware = (roles: UserRole[]) => {
+const createRoleMiddleware = (roles: readonly string[]) => {
   return o.middleware(async ({ context, next }) => {
     if (!context.session?.user) {
       throw new ORPCError('UNAUTHORIZED', {
@@ -149,9 +146,9 @@ const createRoleMiddleware = (roles: UserRole[]) => {
 };
 
 /**
- * Admin middleware — checks if user has the "admin" role.
+ * Admin middleware — checks if user has the seeded "Admin" role.
  */
-const adminMiddleware = createRoleMiddleware(['admin']);
+const adminMiddleware = createRoleMiddleware([ADMIN_ROLE_NAME]);
 
 // ---------------------------------------------------------------------------
 // Procedure builders
@@ -171,10 +168,7 @@ export const publicProcedure = o.use(timingMiddleware).use(errorHandlingMiddlewa
  * Use this for procedures that require a logged-in user.
  * Guarantees `context.session.user` is non-null.
  */
-export const protectedProcedure = o
-  .use(timingMiddleware)
-  .use(errorHandlingMiddleware)
-  .use(authMiddleware);
+export const protectedProcedure = o.use(timingMiddleware).use(errorHandlingMiddleware).use(authMiddleware);
 
 /**
  * Admin procedure

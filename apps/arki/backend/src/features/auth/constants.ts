@@ -7,6 +7,11 @@ import type { UserId } from './types';
 export const SYSTEM_USER_ID = 'usystem' as UserId;
 
 /**
+ * The seeded administrator role. The seed creates it and the admin middleware looks for it by this exact name.
+ */
+export const ADMIN_ROLE_NAME = 'Admin';
+
+/**
  * System user details for database seeding
  */
 export const SYSTEM_USER = {

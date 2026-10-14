@@ -1,8 +1,7 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 import type { Database } from '../../db';
 import type { RestrictedResource, UserPermission } from './schema';
-import { Permission, Role, RolePermission, User, UserRoleAssignment } from './schema';
 import type {
   NewPermission,
   NewRole,
@@ -15,6 +14,7 @@ import type {
   UpdateUser,
   UserId,
 } from './types';
+import { Permission, Role, RolePermission, User, UserRoleAssignment } from './schema';
 
 /**
  * Repository for User-related database operations
@@ -32,7 +32,7 @@ export class UserRepository {
     }
 
     return this.db.query.User.findFirst({
-      where: { RAW: eq(User.id, id) },
+      where: { id },
       with: {
         accounts: true,
       },
@@ -49,7 +49,7 @@ export class UserRepository {
     }
 
     return this.db.query.User.findFirst({
-      where: { RAW: eq(User.email, email) },
+      where: { email },
     });
   }
 
@@ -109,7 +109,7 @@ export class UserRepository {
    */
   async findRoleById(id: RoleId) {
     return this.db.query.Role.findFirst({
-      where: { RAW: eq(Role.id, id) },
+      where: { id },
     });
   }
 
@@ -118,7 +118,7 @@ export class UserRepository {
    */
   async findRoleByName(name: string) {
     return this.db.query.Role.findFirst({
-      where: { RAW: eq(Role.name, name) },
+      where: { name },
     });
   }
 
@@ -161,7 +161,7 @@ export class UserRepository {
    */
   async findPermissionById(id: PermissionId) {
     return this.db.query.Permission.findFirst({
-      where: { RAW: eq(Permission.id, id) },
+      where: { id },
     });
   }
 
@@ -170,7 +170,7 @@ export class UserRepository {
    */
   async findPermissionByResourceAction(resource: RestrictedResource, action: UserPermission) {
     return this.db.query.Permission.findFirst({
-      where: { RAW: and(eq(Permission.resource, resource), eq(Permission.action, action))! },
+      where: { resource, action },
     });
   }
 
@@ -207,7 +207,7 @@ export class UserRepository {
    */
   async getUserRoles(userId: UserId) {
     const userRoles = await this.db.query.UserRoleAssignment.findMany({
-      where: { RAW: eq(UserRoleAssignment.userId, userId) },
+      where: { userId },
       with: {
         role: true,
       },
@@ -234,7 +234,7 @@ export class UserRepository {
    */
   async getRoleUsers(roleId: RoleId) {
     const roleUsers = await this.db.query.UserRoleAssignment.findMany({
-      where: { RAW: eq(UserRoleAssignment.roleId, roleId) },
+      where: { roleId },
       with: {
         user: true,
       },
@@ -268,7 +268,7 @@ export class UserRepository {
    */
   async getRolePermissions(roleId: RoleId) {
     const rolePermissions = await this.db.query.RolePermission.findMany({
-      where: { RAW: eq(RolePermission.roleId, roleId) },
+      where: { roleId },
       with: {
         permission: true,
       },
@@ -281,7 +281,7 @@ export class UserRepository {
    */
   async getPermissionRoles(permissionId: PermissionId) {
     const permissionRoles = await this.db.query.RolePermission.findMany({
-      where: { RAW: eq(RolePermission.permissionId, permissionId) },
+      where: { permissionId },
       with: {
         role: true,
       },
@@ -298,7 +298,7 @@ export class UserRepository {
 
     const roleIds = userRoles.map(role => role?.id).filter((id): id is RoleId => Boolean(id));
     const permissions = await this.db.query.RolePermission.findMany({
-      where: { RAW: inArray(RolePermission.roleId, roleIds) },
+      where: { roleId: { in: roleIds } },
       with: {
         permission: true,
       },

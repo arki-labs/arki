@@ -1,5 +1,6 @@
-import { repositories } from '../../../db';
 import type { RestrictedResource, UserPermission } from '../schema';
+import { repositories } from '../../../db';
+import { ADMIN_ROLE_NAME } from '../constants';
 
 /**
  * Define standard permissions for the application
@@ -85,7 +86,7 @@ const STANDARD_ROLES: {
     ],
   },
   {
-    name: 'Admin',
+    name: ADMIN_ROLE_NAME,
     description: 'Administrator with full system access',
     permissions: [
       { resource: 'system', action: 'admin' },
@@ -137,7 +138,7 @@ export async function seedPermissionsAndRoles() {
         name: roleDef.name,
         description: roleDef.description,
         isDefault: roleDef.isDefault || false,
-        isSystem: roleDef.name === 'Admin', // Mark Admin as system role
+        isSystem: roleDef.name === ADMIN_ROLE_NAME, // Mark Admin as system role
       });
       console.log(`Created role: ${roleDef.name}`);
     }
@@ -149,7 +150,7 @@ export async function seedPermissionsAndRoles() {
     }
 
     // Assign permissions to role
-    if (roleDef.name === 'Admin') {
+    if (roleDef.name === ADMIN_ROLE_NAME) {
       // Admin gets all permissions
       for (const [, permission] of Array.from(permissionMap.entries())) {
         await repositories.auth.assignPermissionToRole(role.id, permission.id);
@@ -188,7 +189,9 @@ export async function seedAdminUser(email: string, name: string, hashedPassword:
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    console.log(`Admin user created: ${email} (password must be set via Better Auth flow: ${hashedPassword.slice(0, 8)}…)`);
+    console.log(
+      `Admin user created: ${email} (password must be set via Better Auth flow: ${hashedPassword.slice(0, 8)}…)`,
+    );
   }
 
   if (!user) {
@@ -197,7 +200,7 @@ export async function seedAdminUser(email: string, name: string, hashedPassword:
   }
 
   // Assign Admin role
-  const adminRole = await repositories.auth.findRoleByName('Admin');
+  const adminRole = await repositories.auth.findRoleByName(ADMIN_ROLE_NAME);
   if (adminRole) {
     await repositories.auth.assignRoleToUser(user.id, adminRole.id);
     console.log(`Assigned Admin role to user: ${email}`);
