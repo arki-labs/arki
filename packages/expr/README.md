@@ -1,6 +1,6 @@
 # @arki/expr
 
-A safe expression language on [`@arki/math`](../math): a hand-written parser for user-typed formulas (`2x^2 + sin(x)`, `|x - 1|`, `√2`, `1/2x`), a typed and versioned AST with source spans, and canonical printing for storage. The root entry holds no numeric code; evaluation lives in domain entries (`@arki/expr/float`), and `@arki/expr/latex` prints LaTeX. The design is specified in `docs/rfcs/2026-10-14-arki-expr.md`.
+A safe expression language on [`@arki/math`](../math): a hand-written parser for user-typed formulas (`2x^2 + sin(x)`, `|x - 1|`, `√2`, `1/2x`), a typed and versioned AST with source spans, and canonical printing for storage. The root entry holds no numeric code; evaluation lives in domain entries (`@arki/expr/float`, `@arki/expr/decimal`, `@arki/expr/rational`), and `@arki/expr/latex` prints LaTeX. The design is specified in `docs/rfcs/2026-10-14-arki-expr.md`.
 
 ## Security model
 
@@ -46,6 +46,39 @@ const { left, right, difference } = compileEquation(parseEquation('x^2 = 2x'), {
 - **Degrees** apply to forward-trig arguments and inverse-trig results at any depth; multiples of 90° are exact (`sin(180°)` is `0`, `tan(90°)` is an error).
 - **Host names.** Pass the language to `compile`; the types then require an implementation for every function and constant it adds to `scientific`. Host functions receive numbers only.
 
+## Decimal (`@arki/expr/decimal`)
+
+```ts
+import { compile, evaluate } from '@arki/expr/decimal';
+
+evaluate('0.1 + 0.2').toString(); // '0.3' — literals are read from their text
+
+const price = compile(parse('base * (1 + rate)'), { variables: ['base', 'rate'], scale: 2, rounding: 'halfEven' });
+price({ base: '19.99', rate: '0.19' }).toString(); // '23.7881' — multiplication never rounds
+compile(parse('total / 3'), { variables: ['total'], scale: 2, rounding: 'halfEven' })({ total: '10' }).toString(); // '3.33'
+compile(parse('1/3 * 3'), { scale: 4, rounding: 'halfEven' }).detailed(); // { value: 0.9999, exact: false } — show ≈
+```
+
+- **Exact or rounded where you said.** `+ - *` and integer powers never round. `/` is exact when the quotient terminates (`1/8` is `0.125` at any scale) and otherwise rounds to `{ scale, rounding }`. Functions — `sqrt cbrt nthRoot exp ln log log10 log2`, non-integer powers — and the constants `pi`, `e` return their correctly rounded value at `scale` (default 20).
+- **The default rounding is `'unnecessary'`**, like `Decimal#dividedBy`: a step that would round throws `RoundingNecessaryError` until you choose a mode.
+- **`f.detailed(scope)`** returns `{ value, exact }`; `exact` is false once any step rounded, including a folded constant such as `pi`.
+- **No silent float.** Trigonometry and `i` are a compile-time `ParseError` `not-in-domain` pointing at the call. A host that wants float trig on decimals registers it as a host function and says so.
+- `factorial` (integers only), `mod` (floored), `floor`, `ceil`, `round` (half away from zero), `fix`, `sign`, `abs` are exact. Scope values accept what `decimal()` accepts; host functions receive and return `Decimal`s.
+
+## Rational (`@arki/expr/rational`)
+
+```ts
+import { evaluate } from '@arki/expr/rational';
+
+evaluate('1/3 + 1/6').toString(); // '1/2'
+evaluate('8^(2/3)').toString(); // '4'
+evaluate('2^(1/2)'); // throws RoundingNecessaryError: the exact answer exists, a Rational cannot hold it
+```
+
+Never rounds. `sqrt`, `cbrt`, `nthRoot` and non-integer powers return a value only when it is rational. `exp`, the logarithms, trigonometry and `pi`, `e`, `i` are `not-in-domain` at compile, with no special cases such as `ln(1) = 0`; `e` and `i` are then free to be declared as variables. Same verbs as the other domains: `compile`, `compileEquation`, `evaluate`, `f(scope)`, `f.detailed` (always exact), `f.readings`, `f.warnings`, `f.variables`.
+
+Both exact domains fold constant subtrees at compile and take `{ signal }` per call (`f(scope, { signal })`, `evaluate(text, { signal })`): it is checked before each operation on a value above 100 digits.
+
 ## LaTeX (`@arki/expr/latex`)
 
 ```ts
@@ -58,9 +91,10 @@ toLatex(parse('sqrt(x)/2 + |x|')); // '\\frac{\\sqrt{x}}{2} + \\left|x\\right|'
 
 ## Limits
 
-| Budget                               | Default                   | Checked                                                                                               |
-| ------------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `length`, `tokens`, `depth`, `nodes` | 10 000, 5 000, 256, 5 000 | while parsing, in `fromJSON`, and `depth` again in `compile`, `print` and `toLatex`                   |
-| `steps`                              | 10 000 000                | statically: nodes (plus each host function's declared `cost`) per call, times the points for `sample` |
+| Budget                               | Default                   | Checked                                                                                                                                                                       |
+| ------------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `length`, `tokens`, `depth`, `nodes` | 10 000, 5 000, 256, 5 000 | while parsing, in `fromJSON`, and `depth` again in `compile`, `print` and `toLatex`                                                                                           |
+| `steps`                              | 10 000 000                | statically: nodes (plus each host function's declared `cost`) per call, times the points for `sample`                                                                         |
+| `digits` (exact domains)             | 1 000                     | literal digits at compile; a power (≈ exponent × digits of the base) or factorial (log-gamma) result before computing it: `9^9^9` and `10000!` throw `ExprLimitError` at once |
 
-`sample` checks `{ signal }` every 1 024 points. Compiled functions are closures: no `eval`, no `new Function`. Bundle budgets (min + gzip, checked by `size-limit` in `test`): root ≤ 6 kB, root + float ≤ 15 kB, latex ≤ 3 kB.
+`sample` checks `{ signal }` every 1 024 points. Compiled functions are closures: no `eval`, no `new Function`. Bundle budgets (min + gzip, checked by `size-limit` in `test`): root ≤ 6 kB, root + float ≤ 15 kB, latex ≤ 3 kB; root + decimal and root + rational ≤ 10 kB each with `@arki/math` left out (the 6 kB core budget plus 4 kB of domain glue), and the full cost with the `@arki/math` subpaths they import is gated too (≈ 17.4 kB decimal, ≈ 14.7 kB rational).

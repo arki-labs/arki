@@ -3,6 +3,7 @@
 // It exercises each export once, plus a 256-deep expression (RFC §18); the
 // unit tests cover the details.
 
+import { evaluate as evaluateDecimal } from '../dist/decimal.js';
 import { compile, evaluate } from '../dist/float.js';
 import {
   decimalComma,
@@ -17,6 +18,7 @@ import {
   scientific,
 } from '../dist/index.js';
 import { toLatex } from '../dist/latex.js';
+import { evaluate as evaluateRational } from '../dist/rational.js';
 
 const code = run => {
   try {
@@ -57,6 +59,9 @@ const checks = [
   ['float typed error', message(() => evaluate('1/0')), 'Division by zero: 1 / 0'],
   ['float sample gap', `${gaps[0]},${gaps[1]}`, 'NaN,0.5'],
   ['latex', toLatex(parse('sqrt(x)/2')), '\\frac{\\sqrt{x}}{2}'],
+  ['decimal evaluate', evaluateDecimal('0.1 + 0.2 + 10/3', { scale: 2, rounding: 'halfEven' }).toString(), '3.63'],
+  ['rational evaluate', evaluateRational('8^(2/3) + 1/3').toString(), '13/3'],
+  ['rational digits budget', code(() => evaluateRational('9^9^9')), 'digits'],
   [
     '100 000 parentheses',
     code(() => parse(`${'('.repeat(100000)}x`, { limits: { length: 200000, tokens: 200000 } })),

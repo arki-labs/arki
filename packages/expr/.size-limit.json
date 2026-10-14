@@ -9,7 +9,10 @@
   {
     "name": "@arki/expr + @arki/expr/float (parse, compile)",
     "path": ["dist/index.js", "dist/float.js"],
-    "import": { "dist/index.js": "{ parse }", "dist/float.js": "{ compile }" },
+    "import": {
+      "dist/index.js": "{ parse }",
+      "dist/float.js": "{ compile }"
+    },
     "limit": "15 kB",
     "gzip": true
   },
@@ -18,6 +21,48 @@
     "path": "dist/latex.js",
     "import": "{ toLatex }",
     "limit": "3 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/expr + @arki/expr/decimal glue (parse, compile; @arki/math ignored): core 6 kB + glue 4 kB",
+    "path": ["dist/index.js", "dist/decimal.js"],
+    "import": {
+      "dist/index.js": "{ parse }",
+      "dist/decimal.js": "{ compile }"
+    },
+    "ignore": ["@arki/math"],
+    "limit": "10 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/expr + @arki/expr/rational glue (parse, compile; @arki/math ignored): core 6 kB + glue 4 kB",
+    "path": ["dist/index.js", "dist/rational.js"],
+    "import": {
+      "dist/index.js": "{ parse }",
+      "dist/rational.js": "{ compile }"
+    },
+    "ignore": ["@arki/math"],
+    "limit": "10 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/expr + @arki/expr/decimal (parse, compile), with the @arki/math subpaths",
+    "path": ["dist/index.js", "dist/decimal.js"],
+    "import": {
+      "dist/index.js": "{ parse }",
+      "dist/decimal.js": "{ compile }"
+    },
+    "limit": "18 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/expr + @arki/expr/rational (parse, compile), with the @arki/math subpaths",
+    "path": ["dist/index.js", "dist/rational.js"],
+    "import": {
+      "dist/index.js": "{ parse }",
+      "dist/rational.js": "{ compile }"
+    },
+    "limit": "15 kB",
     "gzip": true
   }
 ]

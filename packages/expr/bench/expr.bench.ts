@@ -12,6 +12,7 @@ import { Parser } from 'expr-eval';
 import {
   absDependencies,
   addDependencies,
+  bignumberDependencies,
   compileDependencies,
   cosDependencies,
   create,
@@ -21,6 +22,7 @@ import {
   multiplyDependencies,
   parseDependencies,
   powDependencies,
+  roundDependencies,
   sinDependencies,
   sqrtDependencies,
   subtractDependencies,
@@ -29,6 +31,7 @@ import {
 
 import { compare, defineSuite, size } from '@arki/bench';
 import { parse } from '@arki/expr';
+import { compile as compileDecimal, evaluate as evaluateDecimal } from '@arki/expr/decimal';
 import { compile, evaluate } from '@arki/expr/float';
 
 const math = create(
@@ -51,6 +54,21 @@ const math = create(
   { number: 'number' },
 );
 const exprEval = new Parser();
+/** mathjs pruned to the decimal cases, on BigNumber (decimal.js) with 64 significant digits. */
+const mathBig = create(
+  {
+    addDependencies,
+    bignumberDependencies,
+    compileDependencies,
+    divideDependencies,
+    evaluateDependencies,
+    multiplyDependencies,
+    parseDependencies,
+    roundDependencies,
+    subtractDependencies,
+  },
+  { number: 'BigNumber', precision: 64 },
+);
 /** The same pruned set as `math` above, as source for the bundle-size case. */
 const MATHJS_DEPENDENCIES = [
   'abs',
@@ -125,6 +143,20 @@ const curveNormal = (values: ArrayLike<number>): number[] =>
   Array.from(values, (value, index) => within4Ulps([curveReference[index] ?? Number.NaN])(value));
 
 const KEYPAD_INPUTS = ['2^10 - 1', KEYPAD, '(1 + 2)*3/4 - 0.5^3'] as const;
+
+/** Six operations; the division does not terminate, so it rounds at scale 2. */
+const PRICE = '(price * qty - discount) * (1 + vat) / months + fee';
+const PRICE_SCOPE = { price: '19.99', qty: '3', discount: '5.00', vat: '0.19', months: '12', fee: '0.99' } as const;
+const PRICE_VARIABLES = ['price', 'qty', 'discount', 'vat', 'months', 'fee'] as const;
+
+function bigString(value: unknown): string {
+  return mathBig.isBigNumber(value) ? value.toString() : 'not a BigNumber';
+}
+
+/** The contract for the price formula: the result rounded half-up to 2 decimals. */
+function cents(text: string): string {
+  return bigString(mathBig.round(mathBig.bignumber(text), 2));
+}
 const keypadNormal = within4Ulps(KEYPAD_INPUTS.map(text => evaluate(text)));
 
 export default defineSuite({
@@ -271,6 +303,53 @@ export default defineSuite({
           package: 'expr-eval',
           run: text => exprEval.evaluate(text),
           normalize: keypadNormal,
+        }),
+      }),
+    }),
+    compare<string>({
+      id: 'decimal-one-shot',
+      title: 'Decimal one-shot: 0.1 + 0.2 (parse + evaluate)',
+      contract: { id: 'expr-decimal-one-shot/v1', description: 'the exact decimal result as a string' },
+      inputs: ['0.1 + 0.2'],
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/expr/decimal evaluate',
+          package: '@arki/expr',
+          run: text => evaluateDecimal(text),
+          normalize: value => value.toString(),
+        }),
+        mathjs: c({
+          label: 'mathjs evaluate (BigNumber)',
+          package: 'mathjs',
+          run: (text): unknown => mathBig.evaluate(text),
+          normalize: bigString,
+        }),
+      }),
+    }),
+    compare<string>({
+      id: 'decimal-price',
+      title: `Decimal price formula at scale 2: ${PRICE}`,
+      contract: { id: 'expr-decimal-price/v1', description: 'the result rounded half-up to 2 decimals' },
+      inputs: [PRICE],
+      baseline: 'arki',
+      cases: c => ({
+        arki: c({
+          label: '@arki/expr/decimal compiled f(scope)',
+          package: '@arki/expr',
+          setup: text => compileDecimal(parse(text), { variables: PRICE_VARIABLES, scale: 2, rounding: 'halfUp' }),
+          run: f => f(PRICE_SCOPE),
+          normalize: value => cents(value.toString()),
+        }),
+        mathjs: c({
+          label: 'mathjs compile().evaluate (BigNumber)',
+          package: 'mathjs',
+          setup: text => mathBig.compile(text),
+          run: (compiled): unknown =>
+            compiled.evaluate(
+              Object.fromEntries(Object.entries(PRICE_SCOPE).map(([name, value]) => [name, mathBig.bignumber(value)])),
+            ),
+          normalize: value => cents(bigString(value)),
         }),
       }),
     }),
