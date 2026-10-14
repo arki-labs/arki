@@ -406,3 +406,26 @@ describe('security', () => {
     expect(f({ process: 1, globalThis: 2 })).toBe(3);
   });
 });
+
+describe('gamma', () => {
+  // Graphing users type gamma(x) (mathjs had it); it must plot, with poles as gaps, not crash.
+  it('evaluates the gamma function, matching factorial at integers', () => {
+    expect(evaluate('gamma(5)')).toBe(24);
+    expect(evaluate('gamma(0.5)')).toBeCloseTo(Math.sqrt(Math.PI), 14);
+    expect(evaluate('gamma(4.5)')).toBeCloseTo(evaluate('3.5!'), 14);
+  });
+
+  it('throws a typed error at a pole in a single evaluation', () => {
+    expect(() => evaluate('gamma(0)')).toThrow(InvalidArgumentError);
+    expect(() => evaluate('gamma(-2)')).toThrow(InvalidArgumentError);
+  });
+
+  it('marks poles as gaps in sample()', () => {
+    const f = compile(parse('gamma(x)'), { variables: ['x'] });
+    const out = new Float64Array(3);
+    f.sample(Float64Array.of(-1, 0.5, 3), out);
+    expect(Number.isNaN(out[0])).toBe(true);
+    expect(out[1]).toBeCloseTo(Math.sqrt(Math.PI), 14);
+    expect(out[2]).toBe(2);
+  });
+});

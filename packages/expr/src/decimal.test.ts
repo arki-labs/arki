@@ -93,7 +93,8 @@ describe('RFC §8: the decimal row', () => {
   });
 
   it('trigonometry is a compile-time not-in-domain error pointing at the call, never a float fallback', () => {
-    for (const fn of ['sin', 'acos', 'tanh', 'asech']) {
+    // gamma has no exact decimal value at non-integers either, so it is rejected the same way.
+    for (const fn of ['sin', 'acos', 'tanh', 'asech', 'gamma']) {
       const error = parseError(() => compile(parse(`1 + ${fn}(x)`), { variables: ['x'] }));
       expect(error.code).toBe('not-in-domain');
       expect(error.span).toEqual({ start: 4, end: 4 + fn.length });

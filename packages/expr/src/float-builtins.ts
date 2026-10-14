@@ -92,6 +92,15 @@ function tanDeg(a: number): number {
   return r === 0 ? 0 : Number.POSITIVE_INFINITY;
 }
 
+/** IEEE-style gamma for `sample()`: a pole or a non-finite input is a gap. */
+function gammaRaw(a: number): number {
+  try {
+    return gamma(a);
+  } catch {
+    return Number.NaN;
+  }
+}
+
 function factorialRaw(a: number): number {
   if (Number.isInteger(a) && a < 0) return Number.NaN;
   if (a > 171) return Number.POSITIVE_INFINITY;
@@ -207,6 +216,7 @@ const ANGLE_FREE: readonly [string, Builtin][] = [
   ['round', { unary: unary('round', round) }],
   ['fix', { unary: unary('fix', Math.trunc) }],
   ['factorial', { unary: { raw: factorialRaw, checked: factorialChecked } }],
+  ['gamma', { unary: { raw: gammaRaw, checked: gamma } }],
   [
     'mod',
     {

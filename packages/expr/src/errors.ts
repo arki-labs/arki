@@ -24,7 +24,7 @@ export type ParseErrorCode =
 /** The input text (or a stored AST) is not an expression this language accepts. */
 export class ParseError extends MathError {
   readonly code: ParseErrorCode;
-  readonly remediation = 'Fix the text at `span`: `code` names the problem and `expected` lists what would be accepted there.';
+  readonly remediation = 'Fix the text at `span`; `expected` lists what fits there.';
   readonly span: Span;
   /** Same as `span.start`: where to put the caret. */
   readonly position: number;

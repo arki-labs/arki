@@ -235,7 +235,7 @@ describe('acceptance (RFC §3, parse side)', () => {
     const expected = [
       'sin cos tan sec csc cot asin acos atan asec acsc acot',
       'sinh cosh tanh sech csch coth asinh acosh atanh asech acsch acoth',
-      'exp ln log log10 log2 sqrt cbrt nthRoot pow abs sign ceil floor round fix factorial mod',
+      'exp ln log log10 log2 sqrt cbrt nthRoot pow abs sign ceil floor round fix factorial gamma mod',
     ]
       .join(' ')
       .split(' ');

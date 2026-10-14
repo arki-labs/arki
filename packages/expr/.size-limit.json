@@ -3,7 +3,7 @@
     "name": "@arki/expr (parse, print, scientific)",
     "path": "dist/index.js",
     "import": "{ parse, print, scientific }",
-    "limit": "6 kB",
+    "limit": "6.25 kB",
     "gzip": true
   },
   {

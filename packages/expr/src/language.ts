@@ -192,7 +192,7 @@ const unary = (latex?: string): FunctionDefinition => (latex === undefined ? { a
 /**
  * The built-in language: trigonometric, inverse, hyperbolic and inverse
  * hyperbolic functions (with the `sec csc cot` families), `exp ln log log10
- * log2 sqrt cbrt nthRoot pow abs sign ceil floor round fix factorial mod`,
+ * log2 sqrt cbrt nthRoot pow abs sign ceil floor round fix factorial gamma mod`,
  * and the constants `pi`, `e` and `i`. `log(x)` is the natural log;
  * `log(x, b)` takes a base.
  */
@@ -238,6 +238,7 @@ export const scientific = defineLanguage({
     round: unary(),
     fix: unary(),
     factorial: unary(),
+    gamma: unary('\\Gamma'),
     mod: { arity: 2 },
   },
   constants: {

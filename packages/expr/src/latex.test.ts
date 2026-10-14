@@ -64,3 +64,9 @@ describe('toLatex (RFC §12, C-26)', () => {
     expect(() => toLatex(node)).toThrow(ExprLimitError);
   });
 });
+
+describe('gamma', () => {
+  it('prints as the capital Greek letter, like other named functions', () => {
+    expect(latex('gamma(x)')).toContain('\\Gamma');
+  });
+});
