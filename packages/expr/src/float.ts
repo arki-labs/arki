@@ -473,6 +473,8 @@ function core(
       FLOAT_CONSTANTS.has(name) || language.constantSpec(name) !== undefined || own(constants, name) !== undefined,
     isFunction: name =>
       table.has(name) || language.functionSpec(name) !== undefined || own(functions, name) !== undefined,
+    isOutsideDomain: name =>
+      !FLOAT_CONSTANTS.has(name) && own(constants, name) === undefined && scientific.constantSpec(name) !== undefined,
     roots,
     source,
   });

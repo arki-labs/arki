@@ -81,6 +81,17 @@ describe('acceptance (RFC §3)', () => {
     expect(parseError(() => compile(parse('2pi'), { variables: ['pi'] })).code).toBe('name-conflict');
   });
 
+  it('i may be declared as a variable: the float domain has no imaginary unit, so the name is free', () => {
+    // Real formulas use i as an index or a current (sum of a_i, V = iR). Rejecting it
+    // as a name-conflict would block them for a constant this domain cannot evaluate.
+    expect(compile(parse('2i + 1'), { variables: ['i'] }).at(3)).toBe(7);
+    expect(compile(parse('xi'), { variables: ['x', 'i'] })({ x: 2, i: 5 })).toBe(10);
+    // Undeclared, i is still the complex constant, reported as outside this domain.
+    expect(parseError(() => compile(parse('2i'), { variables: ['x'] })).code).toBe('not-in-domain');
+    // pi and e have values here, so declaring them stays a conflict.
+    expect(parseError(() => compile(parse('e'), { variables: ['e'] })).code).toBe('name-conflict');
+  });
+
   it('C-21: one result type: always a number, and sqrt(-1) is an error, not a Complex', () => {
     expect(typeof evaluate('sqrt(4)')).toBe('number');
     expect(thrown(() => evaluate('sqrt(-1)'))).toBeInstanceOf(InvalidArgumentError);

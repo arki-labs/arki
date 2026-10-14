@@ -36,6 +36,12 @@ export type BinderOptions = {
   readonly variables: readonly string[];
   readonly isConstant: (name: string) => boolean;
   readonly isFunction: (name: string) => boolean;
+  /**
+   * A constant of the language that this domain has no value for (`i` in
+   * float). It still resolves as a constant, so a use reports `not-in-domain`,
+   * but a host may declare it as a variable: the name is free here.
+   */
+  readonly isOutsideDomain: (name: string) => boolean;
   /** The trees being compiled, to point a `name-conflict` at a use of the name. */
   readonly roots: readonly Node[];
   readonly source: string;
@@ -73,8 +79,9 @@ export class Binder {
         throw new InvalidArgumentError(`"${String(name)}" is not a valid variable name`);
       }
       if (this.slots.has(name)) throw new InvalidArgumentError(`Variable "${name}" is declared twice`);
-      if (this.isConstant(name) || this.isFunction(name)) {
-        const kind = this.isConstant(name) ? 'constant' : 'function';
+      const isConstant = this.isConstant(name) && !options.isOutsideDomain(name);
+      if (isConstant || this.isFunction(name)) {
+        const kind = isConstant ? 'constant' : 'function';
         throw new ParseError(`"${name}" is a ${kind}; it cannot also be a variable`, {
           code: 'name-conflict',
           span: firstUse(options.roots, name),
