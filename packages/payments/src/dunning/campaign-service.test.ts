@@ -7,7 +7,7 @@
  */
 import { PGlite } from '@electric-sql/pglite';
 import { pushSchema } from 'drizzle-kit/api-postgres';
-import { count, defineRelations } from 'drizzle-orm';
+import { count, defineRelations, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -235,5 +235,22 @@ describe('getDashboardStats', () => {
     expect(stats.topPerformingCampaign?.revenueRecovered.toJSON()).toHaveLength(2);
     expect(stats.recentExecutions[0]?.id).toBe(latest.id);
     expect(stats.recentExecutions.length).toBeLessThanOrEqual(10);
+  });
+});
+
+describe('campaign analytics', () => {
+  it('adds each metric to the day row of the campaign, in a schema that is not public', async () => {
+    const campaignId = await createdCampaign('Analytics: counters');
+
+    // The method is private: the execution paths that call it also need a mail provider
+    await service['updateCampaignAnalytics'](campaignId, { customersReached: 1, communicationsSent: 1 });
+    await service['updateCampaignAnalytics'](campaignId, { customersReached: 2, executions: 3 });
+
+    const rows = await db
+      .select()
+      .from(tables.dunningCampaignAnalytics)
+      .where(eq(tables.dunningCampaignAnalytics.campaignId, campaignId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ customersReached: 3, communicationsSent: 1, executions: 3, paymentsRecovered: 0 });
   });
 });

@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import type { Instant } from '@arki/date';
 import type { Money } from '@arki/money';
 import { z } from '@arki/contracts';
-import { add, fromDate, isAfter, now, sub } from '@arki/date';
+import { add, fromDate, instant, isAfter, now, sub } from '@arki/date';
 import { getLogger } from '@arki/log';
 
 import type { PaymentRetryService } from '../../core/services/payment-retry-service.js';
@@ -827,28 +827,36 @@ export class DunningCampaignService {
     const analyticsId = analyticsRowId(campaignId, today, currency);
     const revenueMinor = metrics.revenueRecovered ? toMinorColumn(metrics.revenueRecovered) : 0;
 
-    // NOTE: Analytics tracking would be implemented with a separate analytics repository
-    // when the dunningCampaignAnalytics table is properly set up.
-    // For now, this SQL query remains as a placeholder.
-    await this.db.execute(sql`
-      INSERT INTO dunning_campaign_analytics (
-        id, campaign_id, date, currency, payments_recovered, revenue_recovered_minor,
-        executions, customers_reached, communications_sent, created_at, updated_at
-      )
-      VALUES (
-        ${analyticsId}, ${campaignId}, ${today}, ${currency},
-        ${metrics.paymentsRecovered || 0}, ${revenueMinor},
-        ${metrics.executions || 0}, ${metrics.customersReached || 0}, ${metrics.communicationsSent || 0},
-        NOW(), NOW()
-      )
-      ON CONFLICT (id) DO UPDATE SET
-        payments_recovered = dunning_campaign_analytics.payments_recovered + ${metrics.paymentsRecovered || 0},
-        revenue_recovered_minor = dunning_campaign_analytics.revenue_recovered_minor + ${revenueMinor},
-        executions = dunning_campaign_analytics.executions + ${metrics.executions || 0},
-        customers_reached = dunning_campaign_analytics.customers_reached + ${metrics.customersReached || 0},
-        communications_sent = dunning_campaign_analytics.communications_sent + ${metrics.communicationsSent || 0},
-        updated_at = NOW()
-    `);
+    const analytics = this.tables.dunningCampaignAnalytics;
+    const paymentsRecovered = metrics.paymentsRecovered ?? 0;
+    const executions = metrics.executions ?? 0;
+    const customersReached = metrics.customersReached ?? 0;
+    const communicationsSent = metrics.communicationsSent ?? 0;
+
+    await this.db
+      .insert(analytics)
+      .values({
+        id: analyticsId,
+        campaignId,
+        date: instant(`${today}T00:00:00Z`),
+        currency,
+        paymentsRecovered,
+        revenueRecoveredMinor: revenueMinor,
+        executions,
+        customersReached,
+        communicationsSent,
+      })
+      .onConflictDoUpdate({
+        target: analytics.id,
+        set: {
+          paymentsRecovered: sql`${analytics.paymentsRecovered} + ${paymentsRecovered}`,
+          revenueRecoveredMinor: sql`${analytics.revenueRecoveredMinor} + ${revenueMinor}`,
+          executions: sql`${analytics.executions} + ${executions}`,
+          customersReached: sql`${analytics.customersReached} + ${customersReached}`,
+          communicationsSent: sql`${analytics.communicationsSent} + ${communicationsSent}`,
+          updatedAt: now(),
+        },
+      });
   }
 
   /**
