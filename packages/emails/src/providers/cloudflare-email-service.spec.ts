@@ -1,14 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const debugEmailsMock = vi.hoisted(() => vi.fn());
-vi.mock('../debug', () => ({ debugEmails: debugEmailsMock }));
-
 // The schema is the load-bearing piece — if it doesn't accept real CF responses
 // and reject malformed ones, the safeParse layer in callCloudflareApi is decorative.
-import {
-  CloudflareResponseSchema,
-  cloudflareEmailServiceProvider,
-} from './cloudflare-email-service';
+import { cloudflareEmailServiceProvider, CloudflareResponseSchema } from './cloudflare-email-service';
+
+const debugEmailsMock = vi.hoisted(() => vi.fn());
+vi.mock('../debug', () => ({ debugEmails: { debug: debugEmailsMock } }));
 
 describe('CloudflareResponseSchema', () => {
   it('accepts a valid success response', () => {
@@ -95,9 +92,7 @@ describe('cloudflareEmailServiceProvider.send', () => {
 
     expect(result).toEqual({ data: { id: 'cf:reader@example.com' }, error: null });
     const call = fetchMock.mock.calls[0];
-    expect(call?.[0]).toBe(
-      'https://api.cloudflare.com/client/v4/accounts/acct-123/email/sending/send',
-    );
+    expect(call?.[0]).toBe('https://api.cloudflare.com/client/v4/accounts/acct-123/email/sending/send');
     expect(call?.[1]?.headers).toMatchObject({ Authorization: 'Bearer token-abc' });
     const rawBody = call?.[1]?.body;
     if (typeof rawBody !== 'string') throw new TypeError('expected a string request body');
@@ -231,8 +226,8 @@ describe('cloudflareEmailServiceProvider dropped-field handling (issue 13 M1)', 
     await provider.send({ ...payload, tags: [{ name: 'category', value: 'digest' }] });
 
     expect(debugEmailsMock).toHaveBeenCalledWith(
-      expect.stringContaining('[cloudflare-email-service] %d tags dropped'),
-      1,
+      expect.stringContaining('[cloudflare-email-service] {tagsLength} tags dropped'),
+      { tagsLength: 1 },
     );
     const bodyRaw = fetchMock.mock.calls[0]?.[1]?.body;
     expect(typeof bodyRaw).toBe('string');
@@ -253,10 +248,8 @@ describe('cloudflareEmailServiceProvider dropped-field handling (issue 13 M1)', 
 
     expect(debugEmailsMock).toHaveBeenCalledWith(
       expect.stringContaining('[cloudflare-email-service] scheduledAt dropped'),
-      '2026-08-01T09:00:00Z',
+      { scheduledAt: '2026-08-01T09:00:00Z' },
     );
-    expect(debugEmailsMock).toHaveBeenCalledWith(
-      expect.stringContaining('[cloudflare-email-service] react dropped'),
-    );
+    expect(debugEmailsMock).toHaveBeenCalledWith(expect.stringContaining('[cloudflare-email-service] react dropped'));
   });
 });

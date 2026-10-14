@@ -1,5 +1,3 @@
-import { Resend } from 'resend';
-
 import type { EmailProvider } from './types';
 import { debugEmails } from '../debug';
 
@@ -21,7 +19,13 @@ export function resendProvider(options: {
    */
   quotaPerMonth?: number;
 }): EmailProvider {
-  const client = new Resend(options.apiKey);
+  // Lazy: `resend` is an optional peer dependency, loaded on the first send.
+  const loadClient = async () => {
+    const { Resend } = await import('resend');
+    return new Resend(options.apiKey);
+  };
+  let client: ReturnType<typeof loadClient> | undefined;
+  const getClient = () => (client ??= loadClient());
 
   return {
     name: 'resend',
@@ -30,28 +34,35 @@ export function resendProvider(options: {
     async send(payload) {
       debugEmails.debug('[resend] Sending to={to} subject="{subject}"', { to: payload.to, subject: payload.subject });
 
-      const { data, error } = await client.emails.send({
-        to: payload.to,
-        from: payload.from,
-        subject: payload.subject,
-        html: payload.html,
-        text: payload.text,
-        react: payload.react as never,
-        cc: payload.cc,
-        bcc: payload.bcc,
-        replyTo: payload.replyTo,
-        headers: payload.headers,
-        tags: payload.tags,
-        scheduledAt: payload.scheduledAt,
-      });
+      try {
+        const { data, error } = await (
+          await getClient()
+        ).emails.send({
+          to: payload.to,
+          from: payload.from,
+          subject: payload.subject,
+          html: payload.html,
+          text: payload.text,
+          react: payload.react as never,
+          cc: payload.cc,
+          bcc: payload.bcc,
+          replyTo: payload.replyTo,
+          headers: payload.headers,
+          tags: payload.tags,
+          scheduledAt: payload.scheduledAt,
+        });
+        if (error) {
+          debugEmails.debug('[resend] Send failed: {failed}', { failed: error.message });
+          return { data: null, error: { message: error.message, name: 'ResendError' } };
+        }
 
-      if (error) {
-        debugEmails.debug('[resend] Send failed: {failed}', { failed: error.message });
-        return { data: null, error: { message: error.message, name: 'ResendError' } };
+        debugEmails.debug('[resend] Sent ok id={id}', { id: data?.id });
+        return { data: { id: data?.id ?? '' }, error: null };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        debugEmails.debug('[resend] Send threw: {failed}', { failed: message });
+        return { data: null, error: { message, name: 'ResendError' } };
       }
-
-      debugEmails.debug('[resend] Sent ok id={id}', { id: data?.id });
-      return { data: { id: data?.id ?? '' }, error: null };
     },
   };
 }

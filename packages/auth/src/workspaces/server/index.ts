@@ -25,6 +25,7 @@ export {
   workspaceReadFilter,
   resolveWriteScope,
   reassignScope,
+  canSeeRow,
 } from './kernel';
 
 export {
@@ -37,6 +38,7 @@ export type {
   WorkspaceRole,
   WorkspaceContext,
   Scope,
+  RowScope,
   ScopeLevel,
   WorkspaceResourceConfig,
 } from './types';

@@ -1,15 +1,28 @@
 ---
-title: "@arki/emails — Outbound Deliverability Fundamentals (SES + Cloudflare ES)"
+title: '@arki/emails — Outbound Deliverability Fundamentals (SES + Cloudflare ES)'
 type: package-research-prompt
-package: "@arki/emails"
+package: '@arki/emails'
 slug: emails-deliv
 round: 00
-depends-on: ["apps/avocabo/docs/features/newsletter-ingestion/research/00-email-infrastructure-feasibility"]
-decision-to-unblock: "Define the operational deliverability contract for every consumer app using @arki/emails. Output: a per-provider config + DNS recipe + monitoring + warmup playbook that an app can adopt to make inbox-placement reliable."
+depends-on: ['apps/avocabo/docs/features/newsletter-ingestion/research/00-email-infrastructure-feasibility']
+decision-to-unblock: 'Define the operational deliverability contract for every consumer app using @arki/emails. Output: a per-provider config + DNS recipe + monitoring + warmup playbook that an app can adopt to make inbox-placement reliable.'
 bootstrap-constraints: inherit
 status: ready
-research-home-precedent: "First instance of package-level research at packages/{name}/docs/research/. Founder-chosen 2026-05-29; treat as the canonical pattern for cross-cutting @arki/* infra research that informs every consumer app."
-tags: [research, package-research-prompt, deliverability, ses, cloudflare-email-service, spf, dkim, dmarc, bimi, mta-sts, tls-rpt]
+research-home-precedent: 'First instance of package-level research at packages/{name}/docs/research/. Founder-chosen 2026-05-29; treat as the canonical pattern for cross-cutting @arki/* infra research that informs every consumer app.'
+tags:
+  [
+    research,
+    package-research-prompt,
+    deliverability,
+    ses,
+    cloudflare-email-service,
+    spf,
+    dkim,
+    dmarc,
+    bimi,
+    mta-sts,
+    tls-rpt,
+  ]
 ---
 
 ## Package Context

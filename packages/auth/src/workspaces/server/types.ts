@@ -51,6 +51,9 @@ export type Scope = {
   teamId: TeamId | null;
 };
 
+/** A stored row's owner plus its scope — what a move must check before it runs. */
+export type RowScope = Scope & { userId: string };
+
 /** The three scope levels, named. */
 export type ScopeLevel = 'personal' | 'org' | 'team';
 

@@ -42,10 +42,14 @@ export type CreateE2EHandlerOptions = {
    * Emails this endpoint may act on. The handler deletes and re-creates the account it is given, so any
    * address it accepts can be reset by whoever reaches a non-production server. Restrict it to reserved
    * test addresses, for example `email => email.endsWith('@myapp.test')`. Refused addresses get a 403
-   * before any account is looked up. Omitted: every address is accepted.
+   * before any account is looked up. Omitted: only addresses under the reserved `.test` top-level domain
+   * (RFC 2606) are accepted, so a real person's address can never be reset by default.
    */
   allowEmail?: (email: string) => boolean;
 };
+
+/** Default `allowEmail`: the reserved `.test` TLD can never belong to a real mailbox. */
+const isReservedTestAddress = (email: string): boolean => email.toLowerCase().endsWith('.test');
 
 type CreateSessionBody = { email?: string };
 
@@ -99,7 +103,7 @@ export function createE2EHandler({
   defaultEmail,
   testPassword = DEFAULT_TEST_PASSWORD,
   testUserName = DEFAULT_TEST_USER_NAME,
-  allowEmail,
+  allowEmail = isReservedTestAddress,
 }: CreateE2EHandlerOptions) {
   return async ({ request }: { request: Request }): Promise<Response> => {
     if (process.env['NODE_ENV'] === 'production') {
@@ -108,7 +112,7 @@ export function createE2EHandler({
 
     const body = (await request.json().catch(() => ({}))) as CreateSessionBody;
     const email = typeof body.email === 'string' && body.email.length > 0 ? body.email : defaultEmail;
-    if (allowEmail && !allowEmail(email)) {
+    if (!allowEmail(email)) {
       log.warn('refused e2e session for an address outside the allowed test addresses');
       return Response.json({ error: 'This address cannot be used for test sessions.' }, { status: 403 });
     }

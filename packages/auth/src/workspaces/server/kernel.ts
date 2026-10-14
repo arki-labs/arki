@@ -3,7 +3,7 @@ import type { SQL } from 'drizzle-orm';
 import type { PgTable } from 'drizzle-orm/pg-core';
 
 import { roleAtLeast, scopeLevel, WorkspaceScopeError } from './types';
-import type { Scope, WorkspaceContext, WorkspaceResourceConfig } from './types';
+import type { RowScope, Scope, WorkspaceContext, WorkspaceResourceConfig } from './types';
 
 /**
  * The workspace scoping kernel (D-WS-002). Two responsibilities:
@@ -133,10 +133,37 @@ export function resolveWriteScope(
 }
 
 /**
+ * `true` when `ctx` can see a row stored at `row` — the same three branches as
+ * {@link workspaceReadFilter}, evaluated in memory for one row:
+ *
+ * - personal: the row's owner is the actor.
+ * - org-wide: the row sits in the active organization.
+ * - team:     the row sits in the active organization AND the actor is on its team.
+ */
+export function canSeeRow(config: WorkspaceResourceConfig, row: RowScope, ctx: WorkspaceContext): boolean {
+  if (row.organizationId === null) {
+    return row.userId === ctx.userId;
+  }
+  if (row.organizationId !== ctx.activeOrganizationId) {
+    return false;
+  }
+  if (row.teamId === null || !config.teamColumn) {
+    return true;
+  }
+  return ctx.memberTeamIds.includes(row.teamId);
+}
+
+/**
  * Move an existing row to `target` scope (D-WS-009). Validates rights at the
  * target via {@link resolveWriteScope}, applies the caller's typed update with
  * the resolved scope, then runs the registered `onReassign` cascade — all
  * intended to run inside one transaction the caller controls.
+ *
+ * `current` is the row's owner and scope as stored now, read by the caller from
+ * the db. The actor must be able to see the row where it is before moving it.
+ * Without that check, anyone who learns a row id could pull another user's,
+ * team's, or organization's row into a scope they can read. It is required, and
+ * a missing value is refused at runtime too (fail closed for untyped callers).
  *
  * The caller supplies `applyUpdate` (it owns the app-typed Drizzle handle and
  * runs `db.update(table).set(...).where(eq(idColumn, rowId))`), so the kernel
@@ -147,8 +174,14 @@ export async function reassignScope(opts: {
   rowId: string;
   target: Scope;
   ctx: WorkspaceContext;
+  current: RowScope;
   applyUpdate: (resolved: Scope) => Promise<void>;
 }): Promise<Scope> {
+  // `current` is typed as required; the runtime check also refuses a missing value from untyped callers.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (!opts.current || !canSeeRow(opts.config, opts.current, opts.ctx)) {
+    throw new WorkspaceScopeError('Cannot move a row you cannot see in its current scope.');
+  }
   const resolved = resolveWriteScope(opts.config, opts.target, opts.ctx);
   await opts.applyUpdate(resolved);
   await opts.config.onReassign?.(opts.ctx, opts.rowId, resolved);

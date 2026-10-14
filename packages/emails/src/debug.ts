@@ -2,11 +2,11 @@ import { getLogger } from '@arki/log';
 
 /**
  * Debug logger for email operations
- * Enable with: DEBUG=emails:send
+ * Enable with: DEBUG=arki:emails
  */
-export const debugEmails = getLogger('emails:send');
+export const debugEmails = getLogger('arki:emails');
 
 /**
  * Enable all email debug logs
- * Enable with: DEBUG=emails:*
+ * Enable with: DEBUG=arki:emails
  */

@@ -36,9 +36,10 @@ export type DefineAuthBackendOptions = {
   productionUrl: string;
   /**
    * Secret used by better-auth to sign session cookies and verification tokens.
-   * If `undefined`, better-auth falls back to `process.env.BETTER_AUTH_SECRET`
-   * (kept in sync by the `betterAuth` wrapper). Production callers must always
-   * provide one — leaving it `undefined` is a footgun in non-server runtimes.
+   * Each instance keeps its own; nothing copies it into `process.env`.
+   * In production it is required and must be at least 32 characters, or the
+   * factory throws. Outside production, `undefined` lets Better Auth fall back to
+   * its dev default.
    */
   secret: string | undefined;
 
@@ -186,6 +187,9 @@ export function defineAuthBackend(options: DefineAuthBackendOptions) {
       ? [
           magicLink({
             disableSignUp: magicLinkConfig.disableSignUp,
+            // Better Auth stores the raw token by default, so anyone who can read the
+            // verification table could sign in as a pending user. Store only its hash.
+            storeToken: 'hashed',
             sendMagicLink: async ({ email, url, token }, ctx) => {
               await magicLinkConfig.send({ email, url, token, request: ctx?.request });
             },

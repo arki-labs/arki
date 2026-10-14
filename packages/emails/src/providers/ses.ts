@@ -1,7 +1,17 @@
-import { SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
-
 import type { EmailProvider, SendEmailPayload, SendEmailResult } from './types';
 import { debugEmails } from '../debug';
+
+/** Memoize the first call's promise; a rejected load is retried on the next send. */
+function once<T>(load: () => Promise<T>): () => Promise<T> {
+  let pending: Promise<T> | undefined;
+  return () => {
+    pending ??= load().catch((err: unknown) => {
+      pending = undefined;
+      throw err;
+    });
+    return pending;
+  };
+}
 
 function toAddresses(value: string | string[] | undefined): string[] | undefined {
   if (value === undefined) return undefined;
@@ -57,9 +67,16 @@ export function sesProvider(options: {
    */
   quotaPerMonth?: number;
 }): EmailProvider {
-  const client = new SESv2Client({
-    region: options.region,
-    ...(options.credentials ? { credentials: options.credentials } : {}),
+  // Lazy: `@aws-sdk/client-sesv2` is an optional peer dependency, loaded on the first send.
+  const loadSdk = once(async () => {
+    const { SESv2Client, SendEmailCommand } = await import('@aws-sdk/client-sesv2');
+    return {
+      SendEmailCommand,
+      client: new SESv2Client({
+        region: options.region,
+        ...(options.credentials ? { credentials: options.credentials } : {}),
+      }),
+    };
   });
 
   return {
@@ -97,6 +114,14 @@ export function sesProvider(options: {
         debugEmails.debug('[ses] react dropped (SES requires pre-rendered html)');
       }
 
+      let sdk: Awaited<ReturnType<typeof loadSdk>>;
+      try {
+        sdk = await loadSdk();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to load @aws-sdk/client-sesv2';
+        return { data: null, error: { message, name: 'SESError' } };
+      }
+      const { client, SendEmailCommand } = sdk;
       const command = new SendEmailCommand({
         FromEmailAddress: payload.from,
         Destination: {

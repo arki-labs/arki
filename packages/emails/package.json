@@ -1,7 +1,7 @@
 {
   "name": "@arki/emails",
-  "private": true,
   "version": "0.1.2",
+  "private": true,
   "sideEffects": false,
   "type": "module",
   "exports": {
@@ -52,35 +52,17 @@
       "import": "./src/providers/quota-store-kv.ts",
       "node": "./src/providers/quota-store-kv.ts"
     },
-    "./templates/arki-magic-link": {
-      "types": "./dist/src/templates/arki-magic-link.d.ts",
-      "import": "./src/templates/arki-magic-link.tsx",
-      "node": "./src/templates/arki-magic-link.tsx",
-      "browser": "./src/templates/arki-magic-link.tsx"
+    "./react/templates/magic-link": {
+      "types": "./dist/src/templates/magic-link.d.ts",
+      "import": "./src/templates/magic-link.tsx",
+      "node": "./src/templates/magic-link.tsx",
+      "browser": "./src/templates/magic-link.tsx"
     },
-    "./templates/notion-magic-link": {
-      "types": "./dist/src/templates/notion-magic-link.d.ts",
-      "import": "./src/templates/notion-magic-link.tsx",
-      "node": "./src/templates/notion-magic-link.tsx",
-      "browser": "./src/templates/notion-magic-link.tsx"
-    },
-    "./templates/plaid-verify-identity": {
-      "types": "./dist/src/templates/plaid-verify-identity.d.ts",
-      "import": "./src/templates/plaid-verify-identity.tsx",
-      "node": "./src/templates/plaid-verify-identity.tsx",
-      "browser": "./src/templates/plaid-verify-identity.tsx"
-    },
-    "./templates/stripe-welcome": {
-      "types": "./dist/src/templates/stripe-welcome.d.ts",
-      "import": "./src/templates/stripe-welcome.tsx",
-      "node": "./src/templates/stripe-welcome.tsx",
-      "browser": "./src/templates/stripe-welcome.tsx"
-    },
-    "./templates/vercel-invite-user": {
-      "types": "./dist/src/templates/vercel-invite-user.d.ts",
-      "import": "./src/templates/vercel-invite-user.tsx",
-      "node": "./src/templates/vercel-invite-user.tsx",
-      "browser": "./src/templates/vercel-invite-user.tsx"
+    "./react/templates/magic-link-minimal": {
+      "types": "./dist/src/templates/magic-link-minimal.d.ts",
+      "import": "./src/templates/magic-link-minimal.tsx",
+      "node": "./src/templates/magic-link-minimal.tsx",
+      "browser": "./src/templates/magic-link-minimal.tsx"
     },
     "./package.json": "./package.json"
   },
@@ -111,20 +93,11 @@
       "providers/quota-store-kv": [
         "src/providers/quota-store-kv.ts"
       ],
-      "templates/arki-magic-link": [
-        "src/templates/arki-magic-link.tsx"
+      "react/templates/magic-link": [
+        "src/templates/magic-link.tsx"
       ],
-      "templates/notion-magic-link": [
-        "src/templates/notion-magic-link.tsx"
-      ],
-      "templates/plaid-verify-identity": [
-        "src/templates/plaid-verify-identity.tsx"
-      ],
-      "templates/stripe-welcome": [
-        "src/templates/stripe-welcome.tsx"
-      ],
-      "templates/vercel-invite-user": [
-        "src/templates/vercel-invite-user.tsx"
+      "react/templates/magic-link-minimal": [
+        "src/templates/magic-link-minimal.tsx"
       ]
     }
   },
@@ -142,10 +115,7 @@
   "dependencies": {
     "@arki/contracts": "workspace:*",
     "@arki/log": "workspace:*",
-    "@aws-sdk/client-sesv2": "catalog:",
     "@react-email/render": "catalog:react-email",
-    "react-email": "catalog:",
-    "resend": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -153,12 +123,29 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@aws-sdk/client-sesv2": "catalog:",
     "@types/node": "catalog:node",
     "react": "catalog:react",
+    "react-email": "catalog:",
+    "resend": "catalog:",
     "vitest": "catalog:"
   },
-  "module:jsx": "src",
   "peerDependencies": {
-    "react": "^18 || ^19"
-  }
+    "@aws-sdk/client-sesv2": "^3",
+    "react": "^18 || ^19",
+    "react-email": "^6",
+    "resend": "^6"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-sesv2": {
+      "optional": true
+    },
+    "react-email": {
+      "optional": true
+    },
+    "resend": {
+      "optional": true
+    }
+  },
+  "module:jsx": "src"
 }

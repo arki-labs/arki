@@ -1,5 +1,3 @@
-import type { EmailConfig } from '@auth/core/providers/email';
-import type { Theme } from '@auth/core/types';
 import { createId } from '@paralleldrive/cuid2';
 
 import type { EmailClient } from '@arki/emails';
@@ -7,14 +5,37 @@ import type { EmailClient } from '@arki/emails';
 import { debugEmail } from '../debug';
 import { env } from '../env';
 
+/** Extra provider options a caller passes through unchanged (the Auth.js email-provider `options` slot). */
+export type EmailProviderUserConfig = Record<string, unknown>;
+
+/** Visual theme an Auth.js-style email provider receives. Only kept for shape compatibility. */
+export type EmailTheme = {
+  colorScheme?: 'auto' | 'dark' | 'light';
+  logo?: string;
+  brandColor?: string;
+  buttonText?: string;
+};
+
 type SendVerificationRequestParams = {
   identifier: string;
   url: string;
   expires: Date;
-  provider: EmailConfig & { from?: string };
+  provider: { from?: string };
   token: string;
-  theme: Theme;
+  theme: EmailTheme;
   request: Request;
+};
+
+/** The email-provider object `ResendProvider` builds (the Auth.js email-provider shape, typed locally). */
+export type EmailProviderConfig = {
+  id: string;
+  type: 'email';
+  name: string;
+  server: string;
+  from?: string;
+  maxAge: number;
+  sendVerificationRequest: (params: SendVerificationRequestParams) => Promise<void>;
+  options: EmailProviderUserConfig;
 };
 
 export const sendVerificationRequest = (

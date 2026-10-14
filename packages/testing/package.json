@@ -30,7 +30,7 @@
       "import": "./src/factories.ts",
       "node": "./src/factories.ts"
     },
-    "./integration-tester": {
+    "./server/integration-tester": {
       "types": "./dist/src/integration-tester.d.ts",
       "import": "./src/integration-tester.ts",
       "node": "./src/integration-tester.ts"
@@ -45,7 +45,7 @@
       "import": "./src/performance.ts",
       "node": "./src/performance.ts"
     },
-    "./tester-builder": {
+    "./server/tester-builder": {
       "types": "./dist/src/tester-builder.d.ts",
       "import": "./src/tester-builder.ts",
       "node": "./src/tester-builder.ts"
@@ -54,11 +54,6 @@
       "types": "./dist/src/timestamps.d.ts",
       "import": "./src/timestamps.ts",
       "node": "./src/timestamps.ts"
-    },
-    "./types": {
-      "types": "./dist/src/types.d.ts",
-      "import": "./src/types.ts",
-      "node": "./src/types.ts"
     },
     "./vitest-setup": {
       "types": "./dist/src/vitest-setup.d.ts",
@@ -79,27 +74,49 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@arki/auth": "workspace:*",
     "@arki/date": "workspace:*",
     "@arki/db": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",
     "@faker-js/faker": "catalog:testing",
-    "@testcontainers/postgresql": "catalog:testing",
-    "@testcontainers/redis": "catalog:testing",
     "drizzle-orm": "catalog:drizzle",
-    "msw": "catalog:testing",
-    "testcontainers": "catalog:testing",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@arki/auth": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@testcontainers/postgresql": "catalog:testing",
+    "@testcontainers/redis": "catalog:testing",
+    "msw": "catalog:testing",
+    "testcontainers": "catalog:testing",
     "vitest": "catalog:"
   },
   "peerDependencies": {
+    "@arki/auth": "workspace:*",
+    "@testcontainers/postgresql": "catalog:testing",
+    "@testcontainers/redis": "catalog:testing",
+    "msw": "catalog:testing",
+    "testcontainers": "catalog:testing",
     "vitest": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "@arki/auth": {
+      "optional": true
+    },
+    "@testcontainers/postgresql": {
+      "optional": true
+    },
+    "@testcontainers/redis": {
+      "optional": true
+    },
+    "msw": {
+      "optional": true
+    },
+    "testcontainers": {
+      "optional": true
+    }
   }
 }

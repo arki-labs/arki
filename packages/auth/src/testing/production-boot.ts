@@ -54,7 +54,7 @@ const MUTATED_ENV_KEYS = [
  * env restore cannot mutate the already-built instance.
  */
 export function applyProductionBootEnv(): () => void {
-  const previous = new Map(MUTATED_ENV_KEYS.map((key) => [key, process.env[key]]));
+  const previous = new Map(MUTATED_ENV_KEYS.map(key => [key, process.env[key]]));
   if (!process.env.DATABASE_URL && process.env.DB_URL) {
     process.env.DATABASE_URL = process.env.DB_URL;
   }
@@ -83,10 +83,10 @@ export function applyProductionBootEnv(): () => void {
  * ```
  */
 export function emailModuleMock(): {
-  createEmailClientFromEnv: () => { send: ReturnType<typeof vi.fn> };
+  createEmailClient: () => { send: ReturnType<typeof vi.fn> };
 } {
   return {
-    createEmailClientFromEnv: () => ({
+    createEmailClient: () => ({
       send: vi.fn().mockResolvedValue({ error: null }),
     }),
   };

@@ -179,9 +179,9 @@
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
@@ -191,18 +191,29 @@
     "@arki/env": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",
-    "@auth/core": "catalog:",
-    "@auth/drizzle-adapter": "catalog:drizzle",
     "@better-auth/expo": "catalog:better-auth",
     "@daveyplate/better-auth-tanstack": "catalog:",
     "@daveyplate/better-auth-ui": "catalog:better-auth",
+    "@noble/hashes": "^2.2.0",
     "@paralleldrive/cuid2": "catalog:utilities",
     "@t3-oss/env-core": "catalog:env",
-    "bcrypt": "catalog:",
     "better-auth": "catalog:better-auth",
     "drizzle-orm": "catalog:drizzle",
-    "vitest": "catalog:",
     "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@arki/dot": "workspace:*",
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@playwright/test": "catalog:testing",
+    "@tanstack/react-router": "catalog:tanstack/start",
+    "@tanstack/react-start": "catalog:tanstack/start",
+    "@types/node": "catalog:node",
+    "@types/react": "catalog:react",
+    "@types/react-dom": "catalog:react",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "@arki/dot": "workspace:*",
@@ -212,7 +223,8 @@
     "@tanstack/react-router": "catalog:tanstack/start",
     "@tanstack/react-start": "catalog:tanstack/start",
     "react": "catalog:react",
-    "react-dom": "catalog:react"
+    "react-dom": "catalog:react",
+    "vitest": "catalog:"
   },
   "peerDependenciesMeta": {
     "@arki/dot": {
@@ -238,19 +250,9 @@
     },
     "react-dom": {
       "optional": true
+    },
+    "vitest": {
+      "optional": true
     }
-  },
-  "devDependencies": {
-    "@arki/dot": "workspace:*",
-    "@arki/eslint-config": "workspace:*",
-    "@arki/prettier-config": "workspace:*",
-    "@arki/tsconfig": "workspace:*",
-    "@arki/vitest-config": "workspace:*",
-    "@playwright/test": "catalog:testing",
-    "@tanstack/react-router": "catalog:tanstack/start",
-    "@tanstack/react-start": "catalog:tanstack/start",
-    "@types/bcrypt": "catalog:types",
-    "@types/react": "catalog:react",
-    "@types/react-dom": "catalog:react"
   }
 }

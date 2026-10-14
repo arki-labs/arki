@@ -1,8 +1,4 @@
 {
-  "extends": [
-    "//"
-  ],
-  "tags": [
-    "platform"
-  ]
+  "extends": ["//"],
+  "tags": ["platform"]
 }

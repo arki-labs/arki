@@ -30,7 +30,7 @@ pnpm add @arki/testing --filter=your-app
 ```typescript
 // apps/your-app/backend/src/core/__tests__/tester.ts
 import { initDbWithOptions } from '@arki/db/init';
-import { initTester } from '@arki/testing';
+import { initTester } from '@arki/testing/server/tester-builder';
 
 import type { Database } from '../../db';
 import { createContext } from '../context';
@@ -68,7 +68,7 @@ export const createTester = t.tester.withFactories(factories);
 
 ```typescript
 // apps/your-app/backend/vitest.setup.ts
-import { setupGlobalTestContainers, teardownGlobalTestContainers } from '@arki/testing';
+import { setupGlobalTestContainers, teardownGlobalTestContainers } from '@arki/testing/containers';
 
 export async function setup() {
   await setupGlobalTestContainers();

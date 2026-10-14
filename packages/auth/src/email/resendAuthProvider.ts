@@ -1,21 +1,21 @@
-import type { EmailConfig, EmailUserConfig } from '@auth/core/providers/email';
+import { createEmailClient } from '@arki/emails';
 
-import { createEmailClientFromEnv } from '@arki/emails';
-
+import type { EmailProviderConfig, EmailProviderUserConfig } from './sendVerificationRequest';
 import { debugAuth } from '../debug';
+import { env } from '../env';
 import { sendVerificationRequest } from './sendVerificationRequest';
 
 export function ResendProvider(
   apiKey: string,
-  config: EmailUserConfig,
+  config: EmailProviderUserConfig,
   sendVerificationRequestTemplate?: (conf: { loginUrl: string }) => React.ReactElement | React.ReactNode,
-): EmailConfig & { from: string } {
+): EmailProviderConfig & { from: string } {
   debugAuth.debug(
     '[ResendProvider] Initializing Resend email provider (hasApiKey: {hasApiKey}, hasTemplate: {hasTemplate})',
     { hasApiKey: !!apiKey, hasTemplate: !!sendVerificationRequestTemplate },
   );
 
-  const emailClient = createEmailClientFromEnv({ resendApiKey: apiKey });
+  const emailClient = createEmailClient({ isDev: env.NODE_ENV === 'development', resend: { apiKey } });
 
   const provider = {
     id: 'email',

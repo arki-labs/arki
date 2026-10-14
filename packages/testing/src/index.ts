@@ -8,15 +8,6 @@
  * @packageDocumentation
  */
 
-// Core exports
-export * from './containers';
-export * from './integration-tester';
-export * from './types';
-
-// Tester builder (tRPC-style initialization)
-export { initTester } from './tester-builder';
-export type { TesterConfig } from './tester-builder';
-
 // Factory system
 export * from './factories';
 export { createFactories } from './factories';
@@ -31,5 +22,9 @@ export * from './debug';
 // Performance utilities
 export * from './performance';
 
-// Note: vitest-setup is available as a separate entry point
-// Import it directly via '@arki/testing/vitest-setup' in your setup files
+// The root loads no Docker client, no msw and no `@arki/auth`. These are explicit entries:
+//   '@arki/testing/containers'         testcontainers (setupGlobalTestContainers, startPostgresContainer, ...)
+//   '@arki/testing/server/integration-tester' IntegrationTester and its types, TestUser etc. (needs `@arki/auth`)
+//   '@arki/testing/server/tester-builder'     initTester (needs `@arki/auth`)
+//   '@arki/testing/msw'                msw helpers
+//   '@arki/testing/vitest-setup'       vitest setup file

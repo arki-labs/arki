@@ -1,16 +1,16 @@
 import { Body, Button, Container, Head, Heading, Hr, Html, Link, Preview, Section, Text } from 'react-email';
 
-type ArkiMagicLinkEmailProps = {
+type MagicLinkEmailProps = {
   loginUrl?: string;
   appName?: string;
   appUrl?: string;
 };
 
-export const ArkiMagicLinkEmail = ({
+export const MagicLinkEmail = ({
   loginUrl = 'https://example.com/login',
-  appName = 'Arki',
+  appName = 'App',
   appUrl = 'https://example.com',
-}: ArkiMagicLinkEmailProps) => (
+}: MagicLinkEmailProps) => (
   <Html>
     <Head />
     <Preview>Sign in to {appName}</Preview>
@@ -27,9 +27,7 @@ export const ArkiMagicLinkEmail = ({
         {/* Main content */}
         <Section style={content}>
           <Heading style={h2}>Your magic link is ready</Heading>
-          <Text style={paragraph}>
-            Click below to sign in to {appName}. This link expires in 10 minutes.
-          </Text>
+          <Text style={paragraph}>Click below to sign in to {appName}. This link expires in 10 minutes.</Text>
 
           {/* CTA Button with gradient */}
           <Section style={buttonContainer}>
@@ -48,9 +46,7 @@ export const ArkiMagicLinkEmail = ({
 
         {/* Minimal footer */}
         <Section style={footer}>
-          <Text style={footerText}>
-            Didn't request this? You can safely ignore this email.
-          </Text>
+          <Text style={footerText}>Didn't request this? You can safely ignore this email.</Text>
           <Text style={footerText}>
             <Link href={`${appUrl}/help`} style={footerLink}>
               Need help?
@@ -62,7 +58,7 @@ export const ArkiMagicLinkEmail = ({
   </Html>
 );
 
-export default ArkiMagicLinkEmail;
+export default MagicLinkEmail;
 
 // Styles
 const main = {

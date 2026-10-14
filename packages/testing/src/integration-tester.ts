@@ -1401,3 +1401,5 @@ export class IntegrationTester<
     return { user, caller: this.currentCaller };
   }
 }
+
+export type * from './types';

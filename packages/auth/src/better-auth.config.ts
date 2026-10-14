@@ -1,13 +1,17 @@
-import { expo } from '@better-auth/expo';
-import { betterAuth } from './create-auth';
+import type { BetterAuthPlugin } from 'better-auth';
 import type { DB } from 'better-auth/adapters/drizzle';
+import { expo } from '@better-auth/expo';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { magicLink, oAuthProxy } from 'better-auth/plugins';
-import { createEmailClientFromEnv } from '@arki/emails';
 
 import { createPrefixedId } from '@arki/db/id';
+import { createEmailClient } from '@arki/emails';
+import { getLogger } from '@arki/log';
 
+import { betterAuth } from './create-auth';
 import { env } from './env';
+
+const authLogger = getLogger('arki:auth');
 
 export function initAuth(
   db: DB,
@@ -57,7 +61,7 @@ export function initAuth(
   }
 
   const emailClient = options.resendApiKey
-    ? createEmailClientFromEnv({ resendApiKey: options.resendApiKey })
+    ? createEmailClient({ isDev: env.NODE_ENV === 'development', resend: { apiKey: options.resendApiKey } })
     : undefined;
 
   const googleProvider =
@@ -122,12 +126,12 @@ export function initAuth(
          */
         currentURL: options.baseUrl,
         productionURL: options.productionUrl,
-      }) as any,
+      }) as BetterAuthPlugin,
       expo(),
       magicLink({
         sendMagicLink: async ({ email, url }) => {
           if (!emailClient) {
-            console.error('Email client not configured, cannot send magic link');
+            authLogger.error('Email client not configured, cannot send magic link');
             throw new Error('Email service not configured. Please try again later.');
           }
 
@@ -139,7 +143,7 @@ export function initAuth(
           });
 
           if (error) {
-            console.error('Failed to send magic link email:', error.message);
+            authLogger.error('Failed to send magic link email: {message}', { message: error.message });
             throw new Error('Failed to send magic link email. Please try again later.');
           }
         },

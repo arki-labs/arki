@@ -1,18 +1,18 @@
 import { Body, Container, Head, Heading, Html, Link, Preview, Text } from 'react-email';
 
-type NotionMagicLinkEmailProps = {
+type MinimalMagicLinkEmailProps = {
   loginUrl?: string;
   appUrl?: string;
   appKey?: string;
   appDescription?: string;
 };
 
-export const NotionMagicLinkEmail = ({
-  loginUrl = 'fake-news',
+export const MinimalMagicLinkEmail = ({
+  loginUrl = 'https://example.com/login',
   appUrl,
   appKey,
   appDescription,
-}: NotionMagicLinkEmailProps) => (
+}: MinimalMagicLinkEmailProps) => (
   <Html>
     <Head />
     <Preview>Log in with this magic link</Preview>
@@ -54,7 +54,7 @@ export const NotionMagicLinkEmail = ({
   </Html>
 );
 
-export default NotionMagicLinkEmail;
+export default MinimalMagicLinkEmail;
 
 const main = {
   backgroundColor: '#ffffff',

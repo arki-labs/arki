@@ -149,6 +149,7 @@ describe('reassignScope — move + cascade (D-WS-009)', () => {
     const resolved = await reassignScope({
       config: { ...sourceConfig, onReassign },
       rowId: 'src_1',
+      current: { userId: 'u2', organizationId: null, teamId: null },
       target: { organizationId: 'organization_1', teamId: 'team_a' },
       ctx: memberCtx,
       applyUpdate,
@@ -168,12 +169,64 @@ describe('reassignScope — move + cascade (D-WS-009)', () => {
       reassignScope({
         config: sourceConfig,
         rowId: 'src_1',
+        current: { userId: 'u2', organizationId: null, teamId: null },
         target: { organizationId: 'organization_1', teamId: null }, // org-wide
         ctx: memberCtx, // member < admin shareRole
         applyUpdate,
       }),
     ).rejects.toThrow(WorkspaceScopeError);
     expect(applyUpdate).not.toHaveBeenCalled();
+  });
+
+  // Tenant denial: a move must not be a way to reach rows the actor cannot read. Without this,
+  // anyone who learns a row id could pull a team's, another user's, or another org's row into
+  // a scope they can see (the target-scope gate alone allows it).
+  it.each([
+    ["a team row of a team the actor is not on", { userId: 'u9', organizationId: 'organization_1', teamId: 'team_b' }],
+    ["another user's personal row", { userId: 'u9', organizationId: null, teamId: null }],
+    ['a row in another organization', { userId: 'u9', organizationId: 'organization_2', teamId: null }],
+  ] as const)('refuses to move %s, before touching the db', async (_label, current) => {
+    const applyUpdate = vi.fn((): Promise<void> => Promise.resolve());
+    await expect(
+      reassignScope({
+        config: sourceConfig,
+        rowId: 'src_1',
+        current,
+        target: { organizationId: 'organization_1', teamId: 'team_a' }, // a scope memberCtx may write
+        ctx: memberCtx,
+        applyUpdate,
+      }),
+    ).rejects.toThrow(WorkspaceScopeError);
+    expect(applyUpdate).not.toHaveBeenCalled();
+  });
+
+  // Fail closed: a caller that forgets to load the row's current scope must not skip the visibility check.
+  it('refuses a move when the current scope is missing', async () => {
+    const applyUpdate = vi.fn((): Promise<void> => Promise.resolve());
+    await expect(
+      // @ts-expect-error -- `current` is required; this models an untyped caller that omits it.
+      reassignScope({
+        config: sourceConfig,
+        rowId: 'src_1',
+        target: { organizationId: 'organization_1', teamId: 'team_a' },
+        ctx: memberCtx,
+        applyUpdate,
+      }),
+    ).rejects.toThrow(WorkspaceScopeError);
+    expect(applyUpdate).not.toHaveBeenCalled();
+  });
+
+  it('moves a row the actor can see in its current scope', async () => {
+    const applyUpdate = vi.fn((): Promise<void> => Promise.resolve());
+    await reassignScope({
+      config: sourceConfig,
+      rowId: 'src_1',
+      current: { userId: 'u2', organizationId: null, teamId: null },
+      target: { organizationId: 'organization_1', teamId: 'team_a' },
+      ctx: memberCtx,
+      applyUpdate,
+    });
+    expect(applyUpdate).toHaveBeenCalledOnce();
   });
 });
 

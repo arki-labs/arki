@@ -49,6 +49,23 @@ describe('createE2EHandler', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  // Leaving allowEmail out must not open the endpoint to every address: the handler deletes the account it is
+  // given, so the default has to refuse anything that could be a real mailbox.
+  it('refuses a real-looking address when allowEmail is omitted', async () => {
+    const { auth, handler, internalAdapter } = fakeAuth();
+    const mint = createE2EHandler({ auth, defaultEmail: 'e2e@app.test' });
+
+    const refused = await mint({ request: post({ email: 'founder@real-company.com' }) });
+
+    expect(refused.status).toBe(403);
+    expect(internalAdapter.findUserByEmail).not.toHaveBeenCalled();
+    expect(internalAdapter.deleteUser).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+
+    const allowed = await mint({ request: post({ email: 'someone@app.test' }) });
+    expect(allowed.status).toBe(200);
+  });
+
   it('signs an allowed test address up and in', async () => {
     const { auth, handler } = fakeAuth();
     const mint = createE2EHandler({

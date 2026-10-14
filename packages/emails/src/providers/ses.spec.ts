@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { sesProvider } from './ses';
+
 // Captured shape of the SendEmailCommand input this suite inspects.
 type CapturedSendInput = {
   EmailTags?: { Name: string; Value: string }[];
 };
 
-const sendMock = vi.hoisted(() =>
-  vi.fn<(command: { input: CapturedSendInput }) => Promise<{ MessageId?: string }>>(),
-);
+const sendMock = vi.hoisted(() => vi.fn<(command: { input: CapturedSendInput }) => Promise<{ MessageId?: string }>>());
 const debugEmailsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@aws-sdk/client-sesv2', () => {
@@ -23,9 +23,7 @@ vi.mock('@aws-sdk/client-sesv2', () => {
   return { SESv2Client, SendEmailCommand };
 });
 
-vi.mock('../debug', () => ({ debugEmails: debugEmailsMock }));
-
-import { sesProvider } from './ses';
+vi.mock('../debug', () => ({ debugEmails: { debug: debugEmailsMock } }));
 
 const provider = sesProvider({ region: 'eu-west-1' });
 
@@ -70,10 +68,9 @@ describe('sesProvider dropped-field handling (issue 13 M1)', () => {
 
     await provider.send({ ...basePayload, scheduledAt: '2026-08-01T09:00:00Z' });
 
-    expect(debugEmailsMock).toHaveBeenCalledWith(
-      expect.stringContaining('[ses] scheduledAt dropped'),
-      '2026-08-01T09:00:00Z',
-    );
+    expect(debugEmailsMock).toHaveBeenCalledWith(expect.stringContaining('[ses] scheduledAt dropped'), {
+      scheduledAt: '2026-08-01T09:00:00Z',
+    });
   });
 
   it('debug-logs a dropped react element (Resend-only field)', async () => {

@@ -3,10 +3,12 @@ export { initEmails } from './client/init';
 export type { EmailClient } from './client/init';
 export {
   CLOUDFLARE_EMAIL_SERVICE_FREE_QUOTA,
-  createEmailClientFromEnv,
+  createEmailClient,
+  EmailClientConfigSchema,
   RESEND_FREE_QUOTA,
   UNOSEND_PRO_QUOTA,
-} from './client/auto';
+} from './client/create';
+export type { EmailClientConfig } from './client/create';
 export { EmailProcedure } from './client/email-procedure';
 
 // Providers
@@ -26,4 +28,4 @@ export type { EmailProvider, SendEmailPayload, SendEmailResult } from './provide
 // have no JSX loader (drizzle-kit config bundling), breaking schema generation in
 // any backend whose graph reaches `@arki/emails` via `@arki/auth`. Import templates
 // directly from the typed subpath instead:
-//   import { ArkiMagicLinkEmail } from '@arki/emails/templates/arki-magic-link';
+//   import { MagicLinkEmail } from '@arki/emails/react/templates/magic-link';

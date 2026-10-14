@@ -20,6 +20,8 @@ export const ADAPTERS = new Set([
   'sentry',
   'mastra',
   'http',
+  'containers',
+  'msw',
   'connections',
 ]);
 

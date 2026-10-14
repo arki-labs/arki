@@ -15,7 +15,7 @@ type InitEmailsOptions = {
   providers: EmailProvider[];
   /**
    * When true, emails are logged but NOT delivered.
-   * Defaults to `process.env.NODE_ENV === 'development'`.
+   * Defaults to `false` — the library never reads `process.env`.
    */
   isDev?: boolean;
   /**
@@ -92,7 +92,7 @@ export function initEmails(options: InitEmailsOptions): EmailClient {
     throw new Error('[arki/emails] initEmails requires at least one provider');
   }
 
-  const isDev = options.isDev ?? process.env['NODE_ENV'] === 'development';
+  const isDev = options.isDev ?? false;
 
   const provider: EmailProvider =
     options.providers.length === 1 ? options.providers[0]! : quotaRouter(options.providers, { store: options.store });

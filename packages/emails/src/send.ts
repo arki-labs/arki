@@ -4,22 +4,20 @@
  * This low-level helper is kept for backward compatibility.
  * Internally it delegates to `initEmails` with the no-op dev provider.
  */
+import type { SendEmailPayload } from './providers/types';
 import { initEmails } from './client/init';
 import { resendProvider } from './providers/resend';
-import type { SendEmailPayload } from './providers/types';
 
 export type { SendEmailPayload };
 
 /**
- * @deprecated Use `initEmails({ providers: [resendProvider({ apiKey })] }).send(payload)`.
+ * @deprecated Use `initEmails({ providers: [resendProvider({ apiKey })], isDev }).send(payload)`.
  *
- * Sends an email via Resend. In development (`NODE_ENV=development`) delivery
- * is skipped entirely — same behaviour as `initEmails({ isDev: true })`.
+ * Sends an email via Resend. Pass `isDev: true` to skip delivery
+ * (same as `initEmails({ isDev: true })`).
  */
-export const send = async (apiKey: string, payload: SendEmailPayload): Promise<void> => {
-  const isDev = process.env['NODE_ENV'] === 'development';
-
-  const client = initEmails({ providers: [resendProvider({ apiKey })], isDev });
+export const send = async (apiKey: string, payload: SendEmailPayload, options: { isDev: boolean }): Promise<void> => {
+  const client = initEmails({ providers: [resendProvider({ apiKey })], isDev: options.isDev });
   const { error } = await client.send(payload);
 
   if (error) {
