@@ -218,6 +218,10 @@ describe('getTaxSettings', () => {
 
     const settings = await stripe.getTaxSettings();
 
+    // `head_office` and `status_details` are inline in the settings object: Stripe has nothing to expand
+    // there, and asking for it is an error. The head office above came back without any expand.
+    expect(requests[0]).toMatchObject({ path: '/v1/tax/settings' });
+    expect(Object.keys(requests[0]?.form ?? {}).filter(key => key.startsWith('expand'))).toEqual([]);
     expect(requests[1]).toMatchObject({ path: '/v1/tax/registrations', form: { status: 'all' } });
     expect(settings).toEqual({
       defaultTaxCode: 'txcd_20030000',
