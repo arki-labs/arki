@@ -241,6 +241,30 @@ describe('linearRegression', () => {
   it('rejects non-finite values', () => {
     expect(() => linearRegression([1, 2], [1, Infinity])).toThrow(InvalidArgumentError);
   });
+  it('gives arrays (fused fast path) and other iterables (general path) bit-identical fits', () => {
+    // The array path is a speed-up only: the same data must never fit differently
+    // because it arrived as an array instead of a Set or a generator.
+    const x = Array.from({ length: 101 }, (_, i) => 0.5 + ((i * 37) % 101) / 10);
+    const y = x.map((v, i) => 5 + 3 * v + Math.sin(i) * 2);
+    const fromArrays = linearRegression(x, y);
+    const fromIterables = linearRegression(new Set(x), y.values());
+    const fields = [
+      'slope',
+      'intercept',
+      'r2',
+      'adjustedR2',
+      'residualStandardError',
+      'slopeStandardError',
+      'interceptStandardError',
+    ] as const;
+    for (const field of fields) expect(fromArrays[field]).toBe(fromIterables[field]);
+  });
+  it('reports the same first bad element on the array path as on the general path', () => {
+    // x is checked before y, and the first bad element wins, whatever comes later.
+    expect(() => linearRegression([1, Number.NaN, 3], [1, 'a' as unknown as number, 3])).toThrow('x[1] must be finite');
+    expect(() => linearRegression([1, 2, 3], [1, 2, 'a' as unknown as number])).toThrow('y[2] must be a number');
+    expect(() => linearRegression([1, 2, Infinity], [1, 2])).toThrow('x[2] must be finite');
+  });
 });
 
 describe('overflow safety', () => {
