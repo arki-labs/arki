@@ -331,7 +331,7 @@ export class DunningCampaignService {
         SELECT
           p.customer_id,
           p.subscription_id,
-          p.id as payment_id,
+          (array_agg(p.id ORDER BY p.created_at DESC))[1] as payment_id,
           COUNT(*) as failure_count,
           MAX(p.created_at) as last_failure_date,
           json_build_object(
@@ -342,7 +342,7 @@ export class DunningCampaignService {
         FROM ${payments} p
         WHERE p.status = 'failed'
           AND p.created_at >= ${sinceFailure}
-        GROUP BY p.customer_id, p.subscription_id, p.id
+        GROUP BY p.customer_id, p.subscription_id
         HAVING COUNT(*) >= ${paymentFailureCount}
       ),
       recent_customers AS (

@@ -361,6 +361,26 @@ describe('executeCampaign finds eligible customers in a named schema', () => {
     expect(executions.map(row => row.customerId)).not.toContain(excluded.id);
   });
 
+  it('payment_failure: failures are counted per customer and subscription, so the failure count threshold can be met', async () => {
+    const repeated = await newCustomer('repeated');
+    await newPayment(repeated, 'failed', sub(now(), { hours: 72 }));
+    await newPayment(repeated, 'failed', sub(now(), { hours: 48 }));
+    const latest = await newPayment(repeated, 'failed', sub(now(), { hours: 24 }));
+    const twice = await newCustomer('twice');
+    await newPayment(twice, 'failed', sub(now(), { hours: 48 }));
+    await newPayment(twice, 'failed', sub(now(), { hours: 24 }));
+    const campaignId = await createdCampaign('Eligible: three failures', 'active', {
+      type: 'payment_failure',
+      conditions: { paymentFailureCount: 3 },
+    });
+
+    const executions = await service.executeCampaign({ campaignId, dryRun: false }, 'usr_admin');
+
+    expect(executions.map(row => row.customerId)).toEqual([repeated.id]);
+    expect(executions[0]?.paymentId).toBe(latest);
+    expect(executions[0]?.triggerData).toMatchObject({ failure_count: 3 });
+  });
+
   it('subscription_status: an overdue subscription is returned with the customer id, not the user id', async () => {
     const buyer = await newCustomer('pastdue');
     const subscriptionId = await newSubscription(buyer, {
