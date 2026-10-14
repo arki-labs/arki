@@ -1,3 +1,4 @@
+import type { SQL } from 'drizzle-orm';
 import { and, eq, sql } from 'drizzle-orm';
 
 import type { Instant } from '@arki/date';
@@ -22,6 +23,7 @@ import type {
 } from '../types.js';
 import { toMinorColumn } from '../../core/money.js';
 import { createCustomerRiskProfileRepository, createCustomerSegmentRepository } from '../repository.js';
+import { valueList } from '../sql-list.js';
 
 const logger = getLogger('dunning.segmentation');
 
@@ -31,7 +33,7 @@ const logger = getLogger('dunning.segmentation');
  * Service for customer segmentation and risk scoring
  * Handles segment management, customer classification, and risk assessment
  */
-export type SegmentationCoreTables = Pick<CoreTables, 'customers' | 'payments' | 'subscriptions'>;
+export type SegmentationCoreTables = Pick<CoreTables, 'customers' | 'payments' | 'subscriptions' | 'plans'>;
 export type SegmentationDunningTables = Pick<DunningTables, 'customerSegments' | 'customerRiskProfiles'>;
 
 export class CustomerSegmentationService {
@@ -40,6 +42,7 @@ export class CustomerSegmentationService {
   private readonly customers: CoreTables['customers'];
   private readonly payments: CoreTables['payments'];
   private readonly subscriptions: CoreTables['subscriptions'];
+  private readonly plans: CoreTables['plans'];
 
   constructor(
     private readonly db: DunningDatabase,
@@ -55,6 +58,7 @@ export class CustomerSegmentationService {
     this.customers = coreTables.customers;
     this.payments = coreTables.payments;
     this.subscriptions = coreTables.subscriptions;
+    this.plans = coreTables.plans;
   }
 
   /**
@@ -149,10 +153,10 @@ export class CustomerSegmentationService {
     const result =
       conditions.length > 0
         ? await this.db
-            .select({ count: sql<number>`COUNT(DISTINCT ${this.customers.id})` })
+            .select({ count: sql<number>`COUNT(DISTINCT ${this.customers.id})`.mapWith(Number) })
             .from(this.customers)
             .where(conditions.length === 1 ? conditions[0] : and(...conditions))
-        : await this.db.select({ count: sql<number>`COUNT(DISTINCT ${this.customers.id})` }).from(this.customers);
+        : await this.db.select({ count: sql<number>`COUNT(DISTINCT ${this.customers.id})`.mapWith(Number) }).from(this.customers);
 
     return result[0]?.count ?? 0;
   }
@@ -206,8 +210,8 @@ export class CustomerSegmentationService {
   /**
    * Build SQL conditions from segment criteria
    */
-  private buildSegmentConditions(criteria: SegmentCriteria): any[] {
-    const conditions = [];
+  private buildSegmentConditions(criteria: SegmentCriteria): SQL[] {
+    const conditions: SQL[] = [];
 
     // Total spent criteria: only payments in the range's currency count, compared in minor units
     // (summing USD and EUR into one number would be meaningless).
@@ -215,7 +219,7 @@ export class CustomerSegmentationService {
     if (criteria.totalSpent && spendBound) {
       const { min, max } = criteria.totalSpent;
       const totalSpentSubquery = this.db
-        .select({ customerId: this.payments.customerId, total: sql<string>`SUM(${this.payments.amountMinor})` })
+        .select({ customerId: this.payments.customerId, total: sql<string>`SUM(${this.payments.amountMinor})`.as('total') })
         .from(this.payments)
         .where(
           and(
@@ -303,8 +307,8 @@ export class CustomerSegmentationService {
         sql`
           ${this.customers.id} IN (
                     SELECT s.customer_id FROM ${this.subscriptions} s
-                    JOIN plans p ON s.plan_id = p.id
-                    WHERE p.tier = ANY(${criteria.planTier})
+                    JOIN ${this.plans} p ON s.plan_id = p.id
+                    WHERE p.tier IN ${valueList(criteria.planTier)}
                   )
         `,
       );
@@ -485,10 +489,10 @@ export class CustomerSegmentationService {
     const monthlyPayments = await this.db
       .select({
         month: sql<string>`DATE_TRUNC('month', created_at)`,
-        paymentCount: sql<number>`COUNT(*)`,
-        totalAmount: sql<number>`SUM(amount)`,
-        avgAmount: sql<number>`AVG(amount)`,
-        failureCount: sql<number>`COUNT(CASE WHEN status = 'failed' THEN 1 END)`,
+        paymentCount: sql<number>`COUNT(*)`.mapWith(Number),
+        totalAmount: sql<number>`SUM(${this.payments.amountMinor})`.mapWith(Number),
+        avgAmount: sql<number>`AVG(${this.payments.amountMinor})`.mapWith(Number),
+        failureCount: sql<number>`COUNT(CASE WHEN status = 'failed' THEN 1 END)`.mapWith(Number),
       })
       .from(this.payments)
       .where(
@@ -547,9 +551,9 @@ export class CustomerSegmentationService {
     // Compare recent vs older payment patterns
     const recentPayments = await this.db
       .select({
-        totalPayments: sql<number>`COUNT(*)`,
-        failedPayments: sql<number>`COUNT(CASE WHEN status = 'failed' THEN 1 END)`,
-        avgAmount: sql<number>`AVG(amount)`,
+        totalPayments: sql<number>`COUNT(*)`.mapWith(Number),
+        failedPayments: sql<number>`COUNT(CASE WHEN status = 'failed' THEN 1 END)`.mapWith(Number),
+        avgAmount: sql<number>`AVG(${this.payments.amountMinor})`.mapWith(Number),
       })
       .from(this.payments)
       .where(
@@ -558,9 +562,9 @@ export class CustomerSegmentationService {
 
     const olderPayments = await this.db
       .select({
-        totalPayments: sql<number>`COUNT(*)`,
-        failedPayments: sql<number>`COUNT(CASE WHEN status = 'failed' THEN 1 END)`,
-        avgAmount: sql<number>`AVG(amount)`,
+        totalPayments: sql<number>`COUNT(*)`.mapWith(Number),
+        failedPayments: sql<number>`COUNT(CASE WHEN status = 'failed' THEN 1 END)`.mapWith(Number),
+        avgAmount: sql<number>`AVG(${this.payments.amountMinor})`.mapWith(Number),
       })
       .from(this.payments)
       .where(
@@ -687,10 +691,10 @@ export class CustomerSegmentationService {
   private async getCustomerPaymentHistory(customerId: CustomerId): Promise<any> {
     const result = await this.db
       .select({
-        totalPayments: sql<number>`COUNT(*)`,
-        successfulPayments: sql<number>`COUNT(CASE WHEN status = 'succeeded' THEN 1 END)`,
-        failedPayments: sql<number>`COUNT(CASE WHEN status = 'failed' THEN 1 END)`,
-        averageAmount: sql<number>`AVG(amount)`,
+        totalPayments: sql<number>`COUNT(*)`.mapWith(Number),
+        successfulPayments: sql<number>`COUNT(CASE WHEN status = 'succeeded' THEN 1 END)`.mapWith(Number),
+        failedPayments: sql<number>`COUNT(CASE WHEN status = 'failed' THEN 1 END)`.mapWith(Number),
+        averageAmount: sql<number>`AVG(${this.payments.amountMinor})`.mapWith(Number),
         lastPaymentDate: sql`MAX(CASE WHEN status = 'succeeded' THEN created_at END)`.mapWith(this.payments.createdAt),
       })
       .from(this.payments)
@@ -713,10 +717,10 @@ export class CustomerSegmentationService {
   private async getCustomerSubscriptionHistory(customerId: CustomerId): Promise<any> {
     const result = await this.db
       .select({
-        totalSubscriptions: sql<number>`COUNT(*)`,
-        activeSubscriptions: sql<number>`COUNT(CASE WHEN status = 'active' THEN 1 END)`,
-        canceledSubscriptions: sql<number>`COUNT(CASE WHEN status = 'canceled' THEN 1 END)`,
-        averageDuration: sql<number>`AVG(EXTRACT(EPOCH FROM (COALESCE(canceled_at, NOW()) - created_at)) / 86400 / 30)`,
+        totalSubscriptions: sql<number>`COUNT(*)`.mapWith(Number),
+        activeSubscriptions: sql<number>`COUNT(CASE WHEN status = 'active' THEN 1 END)`.mapWith(Number),
+        canceledSubscriptions: sql<number>`COUNT(CASE WHEN status = 'canceled' THEN 1 END)`.mapWith(Number),
+        averageDuration: sql<number>`AVG(EXTRACT(EPOCH FROM (COALESCE(canceled_at, NOW()) - created_at)) / 86400 / 30)`.mapWith(Number),
         currentStatus: sql<string>`MAX(CASE WHEN status = 'active' THEN status END)`,
       })
       .from(this.subscriptions)
@@ -761,9 +765,9 @@ export class CustomerSegmentationService {
     // Get recent payment activity as a proxy for engagement
     const recentPaymentActivity = await this.db
       .select({
-        paymentCount: sql<number>`COUNT(*)`,
+        paymentCount: sql<number>`COUNT(*)`.mapWith(Number),
         lastPaymentDate: sql`MAX(created_at)`.mapWith(this.payments.createdAt),
-        successRate: sql<number>`ROUND((COUNT(CASE WHEN status = 'succeeded' THEN 1 END) * 100.0 / COUNT(*)), 2)`,
+        successRate: sql<number>`ROUND((COUNT(CASE WHEN status = 'succeeded' THEN 1 END) * 100.0 / COUNT(*)), 2)`.mapWith(Number),
       })
       .from(this.payments)
       .where(
@@ -779,8 +783,8 @@ export class CustomerSegmentationService {
     // Get subscription engagement (active subscriptions, upgrades, etc.)
     const subscriptionEngagement = await this.db
       .select({
-        activeSubscriptions: sql<number>`COUNT(CASE WHEN status = 'active' THEN 1 END)`,
-        recentStatusChanges: sql<number>`COUNT(CASE WHEN updated_at >= ${thirtyDaysAgo} THEN 1 END)`,
+        activeSubscriptions: sql<number>`COUNT(CASE WHEN status = 'active' THEN 1 END)`.mapWith(Number),
+        recentStatusChanges: sql<number>`COUNT(CASE WHEN updated_at >= ${thirtyDaysAgo} THEN 1 END)`.mapWith(Number),
         lastSubscriptionUpdate: sql`MAX(updated_at)`.mapWith(this.subscriptions.updatedAt),
       })
       .from(this.subscriptions)

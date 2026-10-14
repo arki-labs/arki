@@ -261,7 +261,7 @@ export class DunningCampaignRepository {
     const rows = await this.db
       .select({
         status: this.dunningCampaigns.status,
-        total: sql<number>`count(*)::int`,
+        total: sql<number>`count(*)::int`.mapWith(Number),
       })
       .from(this.dunningCampaigns)
       .groupBy(this.dunningCampaigns.status);
@@ -281,8 +281,8 @@ export class DunningCampaignRepository {
     since: Instant,
   ): Promise<{ campaignId: DunningCampaignId; paymentsRecovered: number; conversionRate: number } | null> {
     const analytics = this.dunningCampaignAnalytics;
-    const recovered = sql<number>`COALESCE(SUM(${analytics.paymentsRecovered}), 0)::int`;
-    const conversion = sql<number>`COALESCE(AVG(${analytics.conversionRate}), 0)`;
+    const recovered = sql<number>`COALESCE(SUM(${analytics.paymentsRecovered}), 0)::int`.mapWith(Number);
+    const conversion = sql<number>`COALESCE(AVG(${analytics.conversionRate}), 0)`.mapWith(Number);
 
     const [top] = await this.db
       .select({ campaignId: analytics.campaignId, paymentsRecovered: recovered, conversionRate: conversion })
@@ -305,12 +305,12 @@ export class DunningCampaignRepository {
 
     const [counters] = await this.db
       .select({
-        executions: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.executions}), 0)`,
-        customersReached: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.customersReached}), 0)`,
-        communicationsSent: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.communicationsSent}), 0)`,
-        paymentsRecovered: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.paymentsRecovered}), 0)`,
-        conversionRate: sql<number>`COALESCE(AVG(${this.dunningCampaignAnalytics.conversionRate}), 0)`,
-        roi: sql<number>`COALESCE(AVG(${this.dunningCampaignAnalytics.roi}), 0)`,
+        executions: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.executions}), 0)`.mapWith(Number),
+        customersReached: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.customersReached}), 0)`.mapWith(Number),
+        communicationsSent: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.communicationsSent}), 0)`.mapWith(Number),
+        paymentsRecovered: sql<number>`COALESCE(SUM(${this.dunningCampaignAnalytics.paymentsRecovered}), 0)`.mapWith(Number),
+        conversionRate: sql<number>`COALESCE(AVG(${this.dunningCampaignAnalytics.conversionRate}), 0)`.mapWith(Number),
+        roi: sql<number>`COALESCE(AVG(${this.dunningCampaignAnalytics.roi}), 0)`.mapWith(Number),
       })
       .from(this.dunningCampaignAnalytics)
       .where(inRange);
@@ -714,12 +714,12 @@ export class DunningCommunicationRepository {
   async getMetricsForExecution(executionId: DunningExecutionId) {
     const [result] = await this.db
       .select({
-        total: sql<number>`COUNT(*)`,
-        sent: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.status} = 'sent' THEN 1 END)`,
-        delivered: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.status} = 'delivered' THEN 1 END)`,
-        opened: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.openedAt} IS NOT NULL THEN 1 END)`,
-        clicked: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.clickedAt} IS NOT NULL THEN 1 END)`,
-        failed: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.status} = 'failed' THEN 1 END)`,
+        total: sql<number>`COUNT(*)`.mapWith(Number),
+        sent: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.status} = 'sent' THEN 1 END)`.mapWith(Number),
+        delivered: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.status} = 'delivered' THEN 1 END)`.mapWith(Number),
+        opened: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.openedAt} IS NOT NULL THEN 1 END)`.mapWith(Number),
+        clicked: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.clickedAt} IS NOT NULL THEN 1 END)`.mapWith(Number),
+        failed: sql<number>`COUNT(CASE WHEN ${this.dunningCommunications.status} = 'failed' THEN 1 END)`.mapWith(Number),
       })
       .from(this.dunningCommunications)
       .where(eq(this.dunningCommunications.executionId, executionId));

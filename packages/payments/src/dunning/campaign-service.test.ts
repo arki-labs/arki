@@ -15,7 +15,9 @@ import { add, now, sub } from '@arki/date';
 
 import type { CreateDunningCampaignInput } from './contracts.js';
 import type { DunningCampaignId } from './primitives.js';
-import { core, customerId, schema, userId, users } from '../test-support.js';
+import { createCustomerId, createPaymentId, createSubscriptionId } from '../core/primitives.js';
+import { userIdFactory } from '../core/user-id.js';
+import { core, customerId, planId, schema, userId, users } from '../test-support.js';
 import { DunningCampaignService } from './services/campaign-service.js';
 import { createDunningTables } from './tables.js';
 
@@ -34,6 +36,14 @@ const tables = {
 };
 
 const relations = defineRelations(tables, () => ({}));
+
+const serviceTables = {
+  ...tables,
+  customerRiskProfiles: dunning.customerRiskProfiles,
+  customers: core.customers,
+  payments: core.payments,
+  subscriptions: core.subscriptions,
+};
 
 let client: PGlite;
 let db: ReturnType<typeof drizzle<typeof relations>>;
@@ -54,6 +64,7 @@ beforeAll(async () => {
       payments: core.payments,
       ...dunning.enums,
       ...tables,
+      customerRiskProfiles: dunning.customerRiskProfiles,
     },
     db,
   );
@@ -62,7 +73,7 @@ beforeAll(async () => {
   await db
     .insert(core.customers)
     .values({ id: customerId, userId, providerCustomerId: 'cus_test', email: 'buyer@example.com' });
-  service = new DunningCampaignService(db, tables, () => {
+  service = new DunningCampaignService(db, serviceTables, () => {
     throw new Error('no communications in this test');
   });
 });
@@ -71,11 +82,14 @@ afterAll(async () => {
   await client.close();
 });
 
-function campaignInput(delayHours: number[]): CreateDunningCampaignInput {
+function campaignInput(
+  delayHours: number[],
+  trigger?: CreateDunningCampaignInput['trigger'],
+): CreateDunningCampaignInput {
   return {
     name: 'Recover failed payments',
     type: 'payment_failed',
-    trigger: { type: 'payment_failure', conditions: { paymentFailureCount: 1 } },
+    trigger: trigger ?? { type: 'payment_failure', conditions: { paymentFailureCount: 1 } },
     settings: {
       enabled: true,
       priority: 1,
@@ -123,8 +137,12 @@ describe('createCampaign', () => {
   });
 });
 
-async function createdCampaign(name: string, status: 'active' | 'draft' = 'active'): Promise<DunningCampaignId> {
-  const created = await service.createCampaign({ ...campaignInput([0]), name }, 'usr_admin');
+async function createdCampaign(
+  name: string,
+  status: 'active' | 'draft' = 'active',
+  trigger?: CreateDunningCampaignInput['trigger'],
+): Promise<DunningCampaignId> {
+  const created = await service.createCampaign({ ...campaignInput([0], trigger), name }, 'usr_admin');
   await service.updateCampaign(created.id, { status }, 'usr_admin');
 
   return created.id;
@@ -252,5 +270,158 @@ describe('campaign analytics', () => {
       .where(eq(tables.dunningCampaignAnalytics.campaignId, campaignId));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ customersReached: 3, communicationsSent: 1, executions: 3, paymentsRecovered: 0 });
+  });
+});
+
+/** A customer of its own, so the eligibility queries see only the rows a test made. */
+async function newCustomer(label: string) {
+  const owner = userIdFactory.create();
+  const id = createCustomerId();
+  await db.insert(users).values({ id: owner });
+  await db
+    .insert(core.customers)
+    .values({ id, userId: owner, providerCustomerId: `cus_${label}`, email: `${label}@example.com` });
+
+  return { id, owner };
+}
+
+async function newPlan() {
+  await db.insert(core.plans).values({ id: planId, name: 'Pro', tier: 'pro', priceMinor: 1999 }).onConflictDoNothing();
+}
+
+async function newSubscription(
+  buyer: Awaited<ReturnType<typeof newCustomer>>,
+  row: { status: 'past_due' | 'trialing'; currentPeriodEnd: ReturnType<typeof now>; trialEnd?: ReturnType<typeof now> },
+) {
+  await newPlan();
+  const id = createSubscriptionId();
+  await db.insert(core.subscriptions).values({
+    id,
+    userId: buyer.owner,
+    planId,
+    customerId: buyer.id,
+    providerSubscriptionId: `sub_${id}`,
+    status: row.status,
+    currentPeriodStart: sub(row.currentPeriodEnd, { hours: 720 }),
+    currentPeriodEnd: row.currentPeriodEnd,
+    trialEnd: row.trialEnd,
+  });
+
+  return id;
+}
+
+async function newPayment(
+  buyer: Awaited<ReturnType<typeof newCustomer>>,
+  status: 'failed' | 'succeeded',
+  createdAt: ReturnType<typeof now>,
+) {
+  const id = createPaymentId();
+  await db.insert(core.payments).values({
+    id,
+    userId: buyer.owner,
+    customerId: buyer.id,
+    providerPaymentId: `pi_${id}`,
+    amountMinor: 1999,
+    currency: 'EUR',
+    status,
+    failureReason: status === 'failed' ? 'card_declined' : null,
+    createdAt,
+  });
+
+  return id;
+}
+
+describe('executeCampaign finds eligible customers in a named schema', () => {
+  it('payment_failure: a customer whose payment failed and who has not paid since gets the campaign', async () => {
+    const buyer = await newCustomer('failed');
+    await newPayment(buyer, 'failed', sub(now(), { hours: 24 }));
+    const campaignId = await createdCampaign('Eligible: failed payment');
+
+    const executions = await service.executeCampaign({ campaignId, dryRun: false }, 'usr_admin');
+
+    expect(executions.map(row => row.customerId)).toEqual([buyer.id]);
+    expect(executions[0]?.triggerData).toMatchObject({ failure_reasons: ['card_declined'] });
+  });
+
+  it('payment_failure: a later successful payment takes the customer out, and the exclude list works alone', async () => {
+    const paid = await newCustomer('paid');
+    await newPayment(paid, 'failed', sub(now(), { hours: 48 }));
+    await newPayment(paid, 'succeeded', sub(now(), { hours: 24 }));
+    const excluded = await newCustomer('excluded');
+    await newPayment(excluded, 'failed', sub(now(), { hours: 24 }));
+    const campaignId = await createdCampaign('Eligible: paid and excluded');
+
+    const executions = await service.executeCampaign(
+      { campaignId, dryRun: false, customFilters: { excludeCustomerIds: [excluded.id], testMode: false } },
+      'usr_admin',
+    );
+
+    expect(executions.map(row => row.customerId)).not.toContain(paid.id);
+    expect(executions.map(row => row.customerId)).not.toContain(excluded.id);
+  });
+
+  it('subscription_status: an overdue subscription is returned with the customer id, not the user id', async () => {
+    const buyer = await newCustomer('pastdue');
+    const subscriptionId = await newSubscription(buyer, {
+      status: 'past_due',
+      currentPeriodEnd: sub(now(), { hours: 72 }),
+    });
+    const campaignId = await createdCampaign('Eligible: past due', 'active', {
+      type: 'subscription_status',
+      conditions: { subscriptionStatus: ['past_due'] },
+    });
+
+    const executions = await service.executeCampaign(
+      { campaignId, dryRun: false, customFilters: { customerIds: [buyer.id], testMode: false } },
+      'usr_admin',
+    );
+
+    expect(executions.map(row => [row.customerId, row.subscriptionId])).toEqual([[buyer.id, subscriptionId]]);
+    expect(executions[0]?.triggerData).toMatchObject({ subscription_status: 'past_due' });
+  });
+
+  it('time_based: a trial that ends soon is returned', async () => {
+    const buyer = await newCustomer('trial');
+    const subscriptionId = await newSubscription(buyer, {
+      status: 'trialing',
+      currentPeriodEnd: add(now(), { hours: 48 }),
+      trialEnd: add(now(), { hours: 48 }),
+    });
+    const campaignId = await createdCampaign('Eligible: trial ending', 'active', {
+      type: 'time_based',
+      conditions: { trialEndingDays: 3 },
+    });
+
+    const executions = await service.executeCampaign({ campaignId, dryRun: false }, 'usr_admin');
+
+    expect(executions.map(row => row.subscriptionId)).toContain(subscriptionId);
+  });
+});
+
+describe('a scheduled execution in a named schema', () => {
+  it('stops on a successful payment and records the recovery in the campaign analytics', async () => {
+    const buyer = await newCustomer('recovered');
+    const campaignId = await createdCampaign('Recovery: analytics');
+    const campaign = await service.getCampaign(campaignId);
+    const templateId = campaign?.templates?.[0]?.id;
+    await db.insert(tables.dunningExecutions).values({
+      campaignId,
+      templateId,
+      customerId: buyer.id,
+      triggerType: 'manual',
+      triggerData: {},
+      status: 'scheduled',
+      scheduledAt: sub(now(), { minutes: 1 }),
+      startedAt: sub(now(), { hours: 1 }),
+    });
+    await newPayment(buyer, 'succeeded', now());
+
+    await service.processScheduledExecutions(1000);
+
+    const [row] = await db
+      .select()
+      .from(tables.dunningCampaignAnalytics)
+      .where(eq(tables.dunningCampaignAnalytics.campaignId, campaignId));
+    expect(row).toMatchObject({ paymentsRecovered: 1, currency: 'EUR', revenueRecoveredMinor: 1999 });
   });
 });

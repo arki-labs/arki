@@ -1,11 +1,13 @@
+import type { SQL } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 
 import type { Instant } from '@arki/date';
 import type { Money } from '@arki/money';
 import { z } from '@arki/contracts';
-import { add, fromDate, instant, isAfter, now, sub } from '@arki/date';
+import { add, fromDate, instant, isAfter, now, sub, toMillis } from '@arki/date';
 import { getLogger } from '@arki/log';
 
+import type { CoreTables } from '../../core/tables.js';
 import type { PaymentRetryService } from '../../core/services/payment-retry-service.js';
 import type { CustomerId, PaymentId, SubscriptionId } from '../../core/types.js';
 import type {
@@ -17,6 +19,7 @@ import type {
 } from '../contracts.js';
 import type { DunningCampaignId, DunningCampaignStatus } from '../primitives.js';
 import type { DunningDatabase } from '../repository.js';
+import { valueList } from '../sql-list.js';
 import type { DunningTables } from '../tables.js';
 import type {
   CampaignExecutionFilters,
@@ -49,6 +52,15 @@ type EligibleCustomer = {
 
 const logger = getLogger('dunning.campaign');
 
+/** Narrows a cross-domain query to (or away from) the customers a caller named. */
+function customerFilters(column: SQL, filters?: CampaignExecutionFilters): SQL[] {
+  const conditions: SQL[] = [];
+  if (filters?.customerIds?.length) conditions.push(sql`${column} IN ${valueList(filters.customerIds)}`);
+  if (filters?.excludeCustomerIds?.length) conditions.push(sql`${column} NOT IN ${valueList(filters.excludeCustomerIds)}`);
+
+  return conditions;
+}
+
 /** The payment row `checkAndStopOnPaymentSuccess` reads; node-postgres sends `bigint` as text. */
 const paymentRowSchema = z.object({ amount_minor: z.union([z.number(), z.string()]), currency: z.string() });
 
@@ -63,10 +75,7 @@ export class DunningCampaignService {
 
   constructor(
     private readonly db: DunningDatabase,
-    private readonly tables: Pick<
-      DunningTables,
-      'dunningCampaigns' | 'dunningCampaignAnalytics' | 'dunningTemplates' | 'dunningExecutions'
-    >,
+    private readonly tables: DunningCampaignServiceTables,
     private readonly communicationServiceFactory: () => CommunicationOrchestrationService,
     private readonly _paymentRetryService?: PaymentRetryService,
   ) {
@@ -313,10 +322,10 @@ export class DunningCampaignService {
     const sinceLastPayment = new Date();
     sinceLastPayment.setDate(sinceLastPayment.getDate() - daysSinceLastPayment);
 
-    // NOTE: This is a cross-domain query that accesses payments and customers tables
-    // which are outside the dunning domain. These remain as SQL queries since they
-    // don't belong to the dunning feature's repository.
-    // Query for customers with payment failures
+    // Cross-domain query: payments and customers belong to the core tables, not to dunning.
+    // The tables are interpolated so the names carry their schema.
+    const { customers: customersTable, payments } = this.tables;
+    const customerConditions = customerFilters(sql`customer_id`, customFilters);
     const result = await this.db.execute(sql`
       WITH failed_payments AS (
         SELECT
@@ -330,36 +339,35 @@ export class DunningCampaignService {
             'last_failure_date', MAX(p.created_at),
             'failure_reasons', array_agg(DISTINCT p.failure_reason)
           ) as trigger_data
-        FROM payments p
+        FROM ${payments} p
         WHERE p.status = 'failed'
           AND p.created_at >= ${sinceFailure}
         GROUP BY p.customer_id, p.subscription_id, p.id
         HAVING COUNT(*) >= ${paymentFailureCount}
       ),
       recent_customers AS (
-        SELECT DISTINCT
+        SELECT
           fp.customer_id,
           fp.subscription_id,
           fp.payment_id,
           fp.trigger_data
         FROM failed_payments fp
-        JOIN customers c ON c.id = fp.customer_id
-        LEFT JOIN payments recent_success ON (
+        JOIN ${customersTable} c ON c.id = fp.customer_id
+        LEFT JOIN ${payments} recent_success ON (
           recent_success.customer_id = fp.customer_id
           AND recent_success.status = 'succeeded'
           AND recent_success.created_at > fp.last_failure_date
         )
         WHERE recent_success.id IS NULL
           AND NOT EXISTS (
-            SELECT 1 FROM payments p2
+            SELECT 1 FROM ${payments} p2
             WHERE p2.customer_id = fp.customer_id
               AND p2.status = 'succeeded'
               AND p2.created_at >= ${sinceLastPayment}
           )
       )
       SELECT * FROM recent_customers
-      ${customFilters?.customerIds?.length ? sql`WHERE customer_id = ANY(${customFilters.customerIds as string[]})` : sql``}
-      ${customFilters?.excludeCustomerIds?.length ? sql`AND customer_id != ANY(${customFilters.excludeCustomerIds as string[]})` : sql``}
+      ${customerConditions.length > 0 ? sql`WHERE ${sql.join(customerConditions, sql` AND `)}` : sql``}
       LIMIT 1000
     `);
 
@@ -378,10 +386,16 @@ export class DunningCampaignService {
   ): Promise<EligibleCustomer[]> {
     const { subscriptionStatus = ['past_due', 'unpaid'] } = conditions;
 
-    // NOTE: Cross-domain query accessing subscriptions and customers tables
+    // Cross-domain query: subscriptions and customers belong to the core tables.
+    const { customers: customersTable, subscriptions } = this.tables;
+    const filters = [
+      sql`s.status IN ${valueList(subscriptionStatus)}`,
+      sql`s.current_period_end < NOW()`,
+      ...customerFilters(sql`c.id`, customFilters),
+    ];
     const result = await this.db.execute(sql`
-      SELECT DISTINCT
-        s.user_id as customer_id,
+      SELECT
+        c.id as customer_id,
         s.id as subscription_id,
         NULL as payment_id,
         json_build_object(
@@ -389,12 +403,9 @@ export class DunningCampaignService {
           'current_period_end', s.current_period_end,
           'days_overdue', EXTRACT(days FROM NOW() - s.current_period_end)
         ) as trigger_data
-      FROM subscriptions s
-      JOIN customers c ON c.user_id = s.user_id
-      WHERE s.status = ANY(${subscriptionStatus})
-        AND s.current_period_end < NOW()
-        ${customFilters?.customerIds?.length ? sql`AND c.id = ANY(${customFilters.customerIds as string[]})` : sql``}
-        ${customFilters?.excludeCustomerIds?.length ? sql`AND c.id != ANY(${customFilters.excludeCustomerIds as string[]})` : sql``}
+      FROM ${subscriptions} s
+      JOIN ${customersTable} c ON c.id = s.customer_id
+      WHERE ${sql.join(filters, sql` AND `)}
       ORDER BY s.current_period_end ASC
       LIMIT 1000
     `);
@@ -417,10 +428,18 @@ export class DunningCampaignService {
     const targetDate = new Date();
     targetDate.setDate(targetDate.getDate() + Math.max(trialEndingDays, renewalReminderDays));
 
-    // NOTE: Cross-domain query accessing subscriptions and customers tables
+    // Cross-domain query: subscriptions and customers belong to the core tables.
+    const { customers: customersTable, subscriptions } = this.tables;
+    const filters = [
+      sql`s.status = 'trialing'`,
+      sql`s.trial_end IS NOT NULL`,
+      sql`s.trial_end BETWEEN NOW() AND ${targetDate}`,
+      sql`s.trial_end > NOW()`,
+      ...customerFilters(sql`c.id`, customFilters),
+    ];
     const result = await this.db.execute(sql`
-      SELECT DISTINCT
-        s.user_id as customer_id,
+      SELECT
+        c.id as customer_id,
         s.id as subscription_id,
         NULL as payment_id,
         json_build_object(
@@ -428,14 +447,9 @@ export class DunningCampaignService {
           'days_until_end', EXTRACT(days FROM s.trial_end - NOW()),
           'subscription_status', s.status
         ) as trigger_data
-      FROM subscriptions s
-      JOIN customers c ON c.user_id = s.user_id
-      WHERE s.status = 'trialing'
-        AND s.trial_end IS NOT NULL
-        AND s.trial_end BETWEEN NOW() AND ${targetDate}
-        AND s.trial_end > NOW()
-        ${customFilters?.customerIds?.length ? sql`AND c.id = ANY(${customFilters.customerIds as string[]})` : sql``}
-        ${customFilters?.excludeCustomerIds?.length ? sql`AND c.id != ANY(${customFilters.excludeCustomerIds as string[]})` : sql``}
+      FROM ${subscriptions} s
+      JOIN ${customersTable} c ON c.id = s.customer_id
+      WHERE ${sql.join(filters, sql` AND `)}
       ORDER BY s.trial_end ASC
       LIMIT 1000
     `);
@@ -533,10 +547,11 @@ export class DunningCampaignService {
 
     try {
       // Get customer information
+      const { customers: customersTable, customerRiskProfiles } = this.tables;
       const customerResult = await this.db.execute(sql`
         SELECT c.id, c.email, c.name, crp.communication_preferences
-        FROM customers c
-        LEFT JOIN customer_risk_profiles crp ON crp.customer_id = c.id
+        FROM ${customersTable} c
+        LEFT JOIN ${customerRiskProfiles} crp ON crp.customer_id = c.id
         WHERE c.id = ${execution.customerId}
       `);
 
@@ -766,10 +781,10 @@ export class DunningCampaignService {
     // Check if the customer has made a successful payment since the execution started
     const paymentResult = await this.db.execute(sql`
       SELECT p.id, p.amount_minor, p.currency, p.created_at
-      FROM payments p
+      FROM ${this.tables.payments} p
       WHERE p.customer_id = ${execution.customerId}
         AND p.status = 'succeeded'
-        AND p.created_at >= ${execution.startedAt || execution.scheduledAt}
+        AND p.created_at >= ${new Date(toMillis(execution.startedAt ?? execution.scheduledAt))}
       ORDER BY p.created_at DESC
       LIMIT 1
     `);
@@ -964,8 +979,9 @@ export class DunningCampaignService {
 
 export type DunningCampaignServiceTables = Pick<
   DunningTables,
-  'dunningCampaigns' | 'dunningCampaignAnalytics' | 'dunningTemplates' | 'dunningExecutions'
->;
+  'dunningCampaigns' | 'dunningCampaignAnalytics' | 'dunningTemplates' | 'dunningExecutions' | 'customerRiskProfiles'
+> &
+  Pick<CoreTables, 'customers' | 'payments' | 'subscriptions'>;
 
 /**
  * Factory function to create DunningCampaignService.
