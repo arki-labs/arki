@@ -1,3 +1,5 @@
+import { STRING_ERROR_CODES, StringError } from './errors.js';
+
 /**
  * Minimal `{{ name }}` templating for flat values. No expressions, no dotted
  * paths, no recursion. Output is plain text; escape separately when needed.
@@ -15,7 +17,7 @@ const IDENTIFIER = /^[\p{L}_$][\p{L}\p{N}_$]*$/u;
 /**
  * Replaces `{{ name }}` placeholders with `values[name]`. `null` renders as
  * `''`; `undefined` counts as missing. `\{{` emits a literal `{{` and `\\`
- * a literal backslash. Malformed placeholders throw `SyntaxError`.
+ * a literal backslash. Malformed placeholders throw `StringError` (`ARKI_STRING_E004`).
  */
 export function interpolate(template: string, values: TemplateValues, options: InterpolateOptions = {}): string {
   const missing = options.missing ?? 'throw';
@@ -40,14 +42,16 @@ export function interpolate(template: string, values: TemplateValues, options: I
     }
 
     const close = template.indexOf('}}', index + 2);
-    if (close === -1) throw new SyntaxError(`Unterminated placeholder at index ${String(index)}`);
+    if (close === -1)
+      throw new StringError(STRING_ERROR_CODES.invalidTemplate, `Unterminated placeholder at index ${String(index)}`);
     const raw = template.slice(index, close + 2);
     const key = template.slice(index + 2, close).trim();
-    if (!IDENTIFIER.test(key)) throw new SyntaxError(`Invalid placeholder ${raw}`);
+    if (!IDENTIFIER.test(key)) throw new StringError(STRING_ERROR_CODES.invalidTemplate, `Invalid placeholder ${raw}`);
 
     const value = Object.hasOwn(values, key) ? values[key] : undefined;
     if (value === undefined) {
-      if (missing === 'throw') throw new ReferenceError(`Missing value for placeholder ${raw}`);
+      if (missing === 'throw')
+        throw new StringError(STRING_ERROR_CODES.missingValue, `Missing value for placeholder ${raw}`);
       if (missing === 'keep') output += raw;
     } else {
       output += value === null ? '' : String(value);

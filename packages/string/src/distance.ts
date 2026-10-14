@@ -4,6 +4,7 @@
  * (`fold` in `./unicode`). All three are O(n·m) in the grapheme counts.
  */
 
+import { STRING_ERROR_CODES, StringError } from './errors.js';
 import { graphemes } from './unicode.js';
 
 export type JaroWinklerOptions = Readonly<{
@@ -69,7 +70,10 @@ function bigrams(text: string): Map<string, number> {
 export function jaroWinkler(a: string, b: string, options: JaroWinklerOptions = {}): number {
   const scale = options.prefixScale ?? 0.1;
   if (!(scale >= 0 && scale <= 0.25)) {
-    throw new RangeError(`prefixScale must be between 0 and 0.25, got ${String(options.prefixScale)}`);
+    throw new StringError(
+      STRING_ERROR_CODES.invalidArgument,
+      `prefixScale must be between 0 and 0.25, got ${String(options.prefixScale)}`,
+    );
   }
   if (a === b) return 1;
   const source = [...graphemes(a)];

@@ -52,10 +52,45 @@
       "import": "./src/phosphor-defaults.tsx",
       "browser": "./src/phosphor-defaults.tsx"
     },
-    "./*": {
-      "types": "./dist/src/*.d.ts",
-      "import": "./src/*.ts",
-      "browser": "./src/*.ts"
+    "./spinners": {
+      "types": "./dist/src/spinners/index.d.ts",
+      "import": "./src/spinners/index.ts",
+      "browser": "./src/spinners/index.ts"
+    },
+    "./brands/index": {
+      "types": "./dist/src/brands/index.d.ts",
+      "import": "./src/brands/index.ts",
+      "browser": "./src/brands/index.ts"
+    },
+    "./home": {
+      "types": "./dist/src/home.d.ts",
+      "import": "./src/home.ts",
+      "browser": "./src/home.ts"
+    },
+    "./index": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./src/index.ts",
+      "browser": "./src/index.ts"
+    },
+    "./phosphor-ssr": {
+      "types": "./dist/src/phosphor-ssr.d.ts",
+      "import": "./src/phosphor-ssr.ts",
+      "browser": "./src/phosphor-ssr.ts"
+    },
+    "./spinners/index": {
+      "types": "./dist/src/spinners/index.d.ts",
+      "import": "./src/spinners/index.ts",
+      "browser": "./src/spinners/index.ts"
+    },
+    "./types": {
+      "types": "./dist/src/types.d.ts",
+      "import": "./src/types.ts",
+      "browser": "./src/types.ts"
+    },
+    "./wc": {
+      "types": "./dist/src/wc.d.ts",
+      "import": "./src/wc.ts",
+      "browser": "./src/wc.ts"
     },
     "./package.json": "./package.json"
   },

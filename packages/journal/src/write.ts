@@ -87,7 +87,7 @@ function dueAt(
 
 /** Insert order is the version order. `RETURNING` does not promise it, so restore it. */
 export function sortedByVersion<Row extends { readonly version: number }>(rows: readonly Row[]): Row[] {
-  return rows.toSorted((a, b) => a.version - b.version);
+  return [...rows].sort((a, b) => a.version - b.version);
 }
 
 /** What a write needs from the journal. */

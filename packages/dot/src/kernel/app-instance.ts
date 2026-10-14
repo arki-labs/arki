@@ -1652,6 +1652,7 @@ export class DotAppImpl {
       plugins.push({
         name: plugin.name,
         version: plugin.version,
+        ...(plugin.role === undefined ? {} : { role: plugin.role }),
         dependencies: needWireKeys,
         provides: [...record.provides],
       });

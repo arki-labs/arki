@@ -2,12 +2,11 @@ import path from 'node:path';
 
 import type { MigratableDb } from '@arki/db/migrate';
 import type { EmptyShape, Plugin } from '@arki/dot/plugin';
-import { db } from '@arki/db/dot';
-import { dbMigrations } from '@arki/db/migrate';
+import { db, dbMigrations } from '@arki/db/dot';
 import { defineApp } from '@arki/dot';
 import { log } from '@arki/dot/log';
 import { env } from '@arki/env/dot';
-import { journal } from '@arki/journal/dot';
+import { journal, journalWorker } from '@arki/journal/dot';
 import { asyncContext, fromEnv, stdout } from '@arki/log/node';
 
 import { envSchema } from './env';
@@ -25,6 +24,7 @@ const MIGRATIONS_FOLDER = path.resolve(process.cwd(), 'drizzle');
  * 3. `db`         opens Postgres and publishes `services.db`.
  * 4. `migrations` applies pending migrations from `drizzle/`.
  * 5. `journal`    publishes `services.journal`, the door every write goes through.
+ * 6. `journal-worker` runs the journal's effects (after-commit jobs) between start and stop.
  *
  * The database plugin is a parameter so tests can boot the same app on an
  * in-memory PGlite database (see `src/testing.ts`).
@@ -42,7 +42,8 @@ export function createApp(database: Plugin<EmptyShape, { readonly db: Migratable
     .use(env({ schema: envSchema }))
     .use(database)
     .use(dbMigrations({ migrationsFolder: MIGRATIONS_FOLDER }))
-    .use(journal({ journal: appJournal }));
+    .use(journal({ journal: appJournal }))
+    .serve(journalWorker());
 }
 
 /** The production app: Postgres from `DB_URL`. `dot explain` and `dot doctor` load this export. */

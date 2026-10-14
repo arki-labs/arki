@@ -5,6 +5,7 @@
  */
 
 import type { KeywordLanguage } from './internal/stop-words.js';
+import { STRING_ERROR_CODES, StringError } from './errors.js';
 import { lower } from './internal/locale.js';
 import { STOP_WORDS } from './internal/stop-words.js';
 import { wordSpans } from './internal/words.js';
@@ -44,7 +45,10 @@ const CLAUSE_BREAK = /[.!?…,;:()[\]{}"“”„]|\s[-–—]\s|\n/u;
 function positiveInteger(value: number | undefined, fallback: number, name: string): number {
   const resolved = value ?? fallback;
   if (!Number.isInteger(resolved) || resolved < 1) {
-    throw new RangeError(`${name} must be a positive integer, got ${String(resolved)}`);
+    throw new StringError(
+      STRING_ERROR_CODES.invalidArgument,
+      `${name} must be a positive integer, got ${String(resolved)}`,
+    );
   }
   return resolved;
 }
@@ -92,7 +96,6 @@ export function keywords(text: string, options: KeywordOptions = {}): Keyword[] 
   const result = [...counts]
     .filter(([, occurrences]) => occurrences >= minOccurrences)
     .map(([keyword, occurrences]) => ({ keyword, occurrences, percentage: (occurrences / total) * 100 }))
-    // eslint-disable-next-line unicorn/no-array-sort -- the array is freshly built; no ES2023 toSorted for older engines
     .sort((a, b) => b.occurrences - a.occurrences || (a.keyword < b.keyword ? -1 : 1));
   return limit === undefined ? result : result.slice(0, limit);
 }

@@ -1,3 +1,5 @@
+import { CLOCK_ERROR_CODES, ClockError } from './errors.js';
+
 /**
  * Time-source abstraction — the single boundary where
  * "what time is it?" is answered.
@@ -26,7 +28,7 @@ export class SystemClock implements Clock {
  * - `now()` returns a fresh `Date` on every call so callers mutating the
  *   returned value cannot corrupt clock state (`Date` is mutable in JS).
  * - `advance(ms)` moves time forward only; negative or non-finite values
- *   throw `RangeError`. Silent backward drift tends to mask test bugs.
+ *   throw `ClockError` (`ARKI_CLOCK_E001`). Silent backward drift tends to mask test bugs.
  * - `setNow(date)` sets absolute time and is allowed to go backward — this
  *   is the escape hatch for tests that need to arrange a past scenario.
  */
@@ -43,8 +45,10 @@ export class MockClock implements Clock {
 
   advance(ms: number): void {
     if (!Number.isFinite(ms) || ms < 0) {
-      throw new RangeError(
+      throw new ClockError(
+        CLOCK_ERROR_CODES.invalidAdvance,
         `MockClock.advance requires a finite non-negative number of milliseconds, received ${String(ms)}`,
+        'Pass a finite number of milliseconds that is zero or more. To go back in time, call setNow.',
       );
     }
     this.#currentMs += ms;

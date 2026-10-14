@@ -53,11 +53,13 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 
 import type { EmptyShape, Plugin } from '@arki/dot/plugin';
-import { plugin, DotPluginError } from '@arki/dot/plugin';
+import { plugin, service, DotPluginError } from '@arki/dot/plugin';
 
 import type { PgliteInitOptions } from './runtime-local.js';
 import { env } from './env.js';
 import { createDb } from './factory.js';
+import type { MigratableDb, MigrateDbOptions } from './migrate.js';
+import { migrateDb } from './migrate.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
 
 /**
@@ -69,7 +71,7 @@ import { initDbRuntimeLocal } from './runtime-local.js';
  */
 export const DB_PLUGIN_ERROR_CODES = {
   /** boot was called without a configured DB_URL (pg driver). */
-  dbUrlNotConfigured: 'DB_PLUGIN_E001',
+  dbUrlNotConfigured: 'ARKI_DB_PLUGIN_E001',
 } as const;
 
 /**
@@ -180,7 +182,7 @@ export function db<TRelations extends AnyRelations>(
           message: '[db] DB_URL is not configured.',
           remediation:
             'Set DB_URL in the environment before booting the app, or switch the plugin to the pglite driver for in-process databases.',
-          docsUrl: 'https://arki.dev/dot/errors/db-plugin-e001',
+          docsUrl: 'https://arki.dev/dot/errors/arki-db-plugin-e001',
         });
       }
       const handle = createDb<TRelations>({
@@ -200,4 +202,21 @@ export function db<TRelations extends AnyRelations>(
       }
     },
   }) as Plugin<EmptyShape, DbServices<TRelations, 'pg' | 'pglite'>>;
+}
+
+/**
+ * DOT plugin: migrate during `boot`, after the `db` plugin and before any
+ * plugin that reads tables. Needs the `db` service; provides nothing.
+ */
+export function dbMigrations<TRelations extends AnyRelations = AnyRelations>(
+  options: MigrateDbOptions,
+): Plugin<{ readonly db: MigratableDb<TRelations> }, Record<never, never>> {
+  return plugin({
+    name: 'db-migrations',
+    version: '0.1.0',
+    needs: { db: service<MigratableDb<TRelations>>() },
+    async boot({ db }) {
+      await migrateDb(db, options);
+    },
+  });
 }

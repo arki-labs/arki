@@ -18,6 +18,7 @@
 export { isLazy, lazy, lazyOf, plugin, provide, rename, service, token, DotPluginError } from './plugin-contract.js';
 export type {
   AnyPlugin,
+  DotPluginRole,
   ActionDeclaration,
   ActionSource,
   CtxOf,

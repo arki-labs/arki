@@ -36,6 +36,11 @@
       "import": "./dist/plugin.js",
       "default": "./dist/plugin.js"
     },
+    "./feature": {
+      "types": "./dist/feature.d.ts",
+      "import": "./dist/feature.js",
+      "default": "./dist/feature.js"
+    },
     "./package.json": "./package.json",
     "./cli": {
       "types": "./dist/cli/index.d.ts",

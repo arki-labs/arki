@@ -1,6 +1,8 @@
 // Errors
 export {
   ResilienceError,
+  RESILIENCE_ERROR_CODES,
+  type ResilienceErrorCode,
   CircuitOpenError,
   TimeoutError,
   CancelledError,
@@ -57,4 +59,4 @@ export { attachPolicyLogger } from './events.js';
 export type { PolicyLogger } from './events.js';
 
 // Execution helpers
-export { withResilience, withRetry, withTimeout, withCircuitBreaker } from './execute.js';
+export { withResilience, withRetry, withTimeout } from './execute.js';

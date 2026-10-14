@@ -4,6 +4,7 @@
  * return the input unchanged when a delimiter is absent.
  */
 
+import { STRING_ERROR_CODES, StringError } from './errors.js';
 import { graphemeBoundaries } from './internal/graphemes.js';
 import { assertNeedle, findLiteral } from './internal/search.js';
 
@@ -40,7 +41,10 @@ export function containsAny(text: string, needles: readonly string[]): boolean {
 /** Grapheme index of the first occurrence of `needle` at or after grapheme `from`, or -1. */
 export function indexOf(text: string, needle: string, from = 0): number {
   if (!Number.isInteger(from) || from < 0)
-    throw new RangeError(`from must be a non-negative integer, got ${String(from)}`);
+    throw new StringError(
+      STRING_ERROR_CODES.invalidArgument,
+      `from must be a non-negative integer, got ${String(from)}`,
+    );
   const boundaries = graphemeBoundaries(text);
   const fromUnit = boundaries[Math.min(from, boundaries.length - 1)] ?? text.length;
   const index = findLiteral(text, needle, { from: fromUnit });

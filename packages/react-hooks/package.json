@@ -1,0 +1,127 @@
+{
+  "name": "@arki/react-hooks",
+  "version": "0.1.1",
+  "description": "Curated React hooks for ARKI apps — Mantine, usehooks-ts, hotkeys and local-storage hooks under one import.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "react",
+    "hooks"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./async-memo": {
+      "types": "./dist/src/async-memo.d.ts",
+      "import": "./src/async-memo.tsx",
+      "browser": "./src/async-memo.tsx"
+    },
+    "./copy-to-clipboard": {
+      "types": "./dist/src/copy-to-clipboard.d.ts",
+      "import": "./src/copy-to-clipboard.tsx",
+      "browser": "./src/copy-to-clipboard.tsx"
+    },
+    "./debounce": {
+      "types": "./dist/src/debounce.d.ts",
+      "import": "./src/debounce.tsx",
+      "browser": "./src/debounce.tsx"
+    },
+    "./hotkeys": {
+      "types": "./dist/src/hotkeys.d.ts",
+      "import": "./src/hotkeys.tsx",
+      "browser": "./src/hotkeys.tsx"
+    },
+    "./is-client": {
+      "types": "./dist/src/is-client.d.ts",
+      "import": "./src/is-client.tsx",
+      "browser": "./src/is-client.tsx"
+    },
+    "./local-storage": {
+      "types": "./dist/src/local-storage.d.ts",
+      "import": "./src/local-storage.tsx",
+      "browser": "./src/local-storage.tsx"
+    },
+    "./long-press": {
+      "types": "./dist/src/long-press.d.ts",
+      "import": "./src/long-press.tsx",
+      "browser": "./src/long-press.tsx"
+    },
+    "./media-query": {
+      "types": "./dist/src/media-query.d.ts",
+      "import": "./src/media-query.tsx",
+      "browser": "./src/media-query.tsx"
+    },
+    "./pagination": {
+      "types": "./dist/src/pagination.d.ts",
+      "import": "./src/pagination.tsx",
+      "browser": "./src/pagination.tsx"
+    },
+    "./timeout": {
+      "types": "./dist/src/timeout.d.ts",
+      "import": "./src/timeout.tsx",
+      "browser": "./src/timeout.tsx"
+    },
+    "./toggle": {
+      "types": "./dist/src/toggle.d.ts",
+      "import": "./src/toggle.tsx",
+      "browser": "./src/toggle.tsx"
+    },
+    "./touch": {
+      "types": "./dist/src/touch.d.ts",
+      "import": "./src/touch.tsx",
+      "browser": "./src/touch.tsx"
+    },
+    "./use-swipe-gesture": {
+      "types": "./dist/src/use-swipe-gesture.d.ts",
+      "import": "./src/use-swipe-gesture.tsx",
+      "browser": "./src/use-swipe-gesture.tsx"
+    },
+    "./use-touch-feedback": {
+      "types": "./dist/src/use-touch-feedback.d.ts",
+      "import": "./src/use-touch-feedback.tsx",
+      "browser": "./src/use-touch-feedback.tsx"
+    },
+    "./use-viewport": {
+      "types": "./dist/src/use-viewport.d.ts",
+      "import": "./src/use-viewport.tsx",
+      "browser": "./src/use-viewport.tsx"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "!dist/**/*.spec.*",
+    "!dist/**/*.test.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@mantine/hooks": "9.7.1",
+    "@reecelucas/react-use-hotkeys": "^2.0.0",
+    "@rehooks/local-storage": "^2.4.5",
+    "react-hotkeys-hook": "^5.3.3",
+    "usehooks-ts": "^3.1.1"
+  },
+  "peerDependencies": {
+    "react": "19.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

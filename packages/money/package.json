@@ -119,7 +119,7 @@
     "package.json"
   ],
   "dependencies": {
-    "@arki/math": "0.0.5"
+    "@arki/math": "0.0.10"
   },
   "peerDependencies": {
     "drizzle-orm": ">=1.0.0-rc.4 <2",

@@ -190,7 +190,7 @@ The schemas take the JSON shape as input, so tRPC and oRPC clients infer what to
 
 ## Errors
 
-Every deliberate failure extends `MathError` from `@arki/math`, so one `instanceof` catches both libraries. Money-only errors extend `MoneyError`: `CurrencyMismatchError`, `UnknownCurrencyError`, `ExchangeRateError`, `ProviderAmountError`. Shared ones: `RoundingNecessaryError`, `DivisionByZeroError`, `InvalidArgumentError`, `NumberFormatError`, `NumericRangeError`, `ResourceLimitError`, `EmptyDataError`, `UnsupportedFeatureError`.
+Every deliberate failure extends `MathError` from `@arki/math`, so one `instanceof` catches both libraries. Money-only errors extend `MoneyError`: `CurrencyMismatchError`, `UnknownCurrencyError`, `ExchangeRateError`, `ProviderAmountError`. Each has a stable `code` and a `remediation`; match on the code, never on the message. The money-only codes are `ARKI_MONEY_E001` (`CurrencyMismatchError`), `E002` (`UnknownCurrencyError`; the bad text is `currencyCode`), `E003` (`ExchangeRateError`) and `E004` (`ProviderAmountError`), also exported as `MONEY_ERROR_CODES`. Shared ones keep their `ARKI_MATH_*` codes: `RoundingNecessaryError`, `DivisionByZeroError`, `InvalidArgumentError`, `NumberFormatError`, `NumericRangeError`, `ResourceLimitError`, `EmptyDataError`, `UnsupportedFeatureError`.
 
 ## Entry points
 
@@ -230,11 +230,9 @@ Amounts past 2^53 switch to `bigint` and stay exact; adding them costs about 29 
 
 ## Runtime support
 
-Node 20+, Bun, Deno, modern browsers and React Native on Hermes V1 (React Native 0.86). `bun run test:runtimes` runs the same checks on all five; the Hermes leg needs a `hermes` binary (`HERMES_BIN`, build steps in `scripts/smoke-hermes.mjs`) and says so loudly when it is missing.
+Node 20+, Bun, Deno, modern browsers and React Native on Hermes V1 (React Native 0.86). `bun run test:runtimes` runs the same checks on all five; the Hermes leg needs a `hermes` binary (`HERMES_BIN`) and prints `INCOMPLETE` when it is missing.
 
 On Hermes for Apple platforms, `Intl.NumberFormat` has no `formatToParts` and formats number strings through a float. So `parseMoney` with a `locale` throws `UnsupportedFeatureError` (pass `symbols` instead), `formatMoneyToParts` throws, and `formatMoney` is exact up to 15 significant digits and throws beyond. Arithmetic, allocation, conversion, Stripe units and JSON work everywhere.
-
-## Benchmarks
 
 <!-- bench:start -->
 ## Benchmarks

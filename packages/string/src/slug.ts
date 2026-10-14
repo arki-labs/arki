@@ -8,6 +8,7 @@
  */
 
 import type { Replacements } from './slug/types.js';
+import { STRING_ERROR_CODES, StringError } from './errors.js';
 import { escapeRegExp } from './escape.js';
 import { rulesets } from './slug/rules.js';
 import { builtinReplacements, localeReplacements } from './slug/transliterations.js';
@@ -78,7 +79,6 @@ type Compiled = Readonly<{ map: ReadonlyMap<string, string>; pattern: RegExp }>;
 function compile(entries: Replacements): Compiled {
   const map = new Map<string, string>();
   for (const [from, to] of entries) if (from !== '') map.set(from, to);
-  // eslint-disable-next-line unicorn/no-array-sort -- fresh copy; ES2023 toSorted is missing on older engines
   const keys = [...map.keys()].sort((a, b) => b.length - a.length);
   const pattern = new RegExp(keys.map(key => escapeRegExp(key)).join('|'), 'gu');
   return { map, pattern };
@@ -162,7 +162,10 @@ export function slugify(text: string, options: SlugifyOptions = {}): string {
   const lowercase = options.lowercase ?? true;
   const preserve = options.preserveCharacters ?? [];
   if (preserve.includes(separator)) {
-    throw new TypeError(`The separator ${JSON.stringify(separator)} cannot also be a preserved character`);
+    throw new StringError(
+      STRING_ERROR_CODES.invalidArgument,
+      `The separator ${JSON.stringify(separator)} cannot also be a preserved character`,
+    );
   }
 
   const leadingUnderscore = options.preserveLeadingUnderscore === true && text.startsWith('_');

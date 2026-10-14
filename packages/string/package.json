@@ -67,6 +67,11 @@
       "import": "./dist/edit.js",
       "default": "./dist/edit.js"
     },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "default": "./dist/errors.js"
+    },
     "./escape": {
       "types": "./dist/escape.d.ts",
       "import": "./dist/escape.js",

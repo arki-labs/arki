@@ -115,10 +115,10 @@
       "import": "./dist/react.js",
       "default": "./dist/react.js"
     },
-    "./serialize": {
-      "types": "./dist/serialize.d.ts",
-      "import": "./dist/serialize.js",
-      "default": "./dist/serialize.js"
+    "./orpc": {
+      "types": "./dist/orpc.d.ts",
+      "import": "./dist/orpc.js",
+      "default": "./dist/orpc.js"
     },
     "./tanstack": {
       "types": "./dist/tanstack.d.ts",

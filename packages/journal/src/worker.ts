@@ -15,7 +15,9 @@ import type {
   DbHandle,
   Effect,
   EffectHookContext,
+  HandlerServices,
   JournalWorker,
+  Needs,
   Projection,
   RootDb,
   StrandedJobs,
@@ -27,6 +29,7 @@ import type {
 import { debugDrain, debugWorker } from './debug.js';
 import { JournalError } from './errors.js';
 import { findEventDefinition } from './fold.js';
+import { bindHandlers } from './handlers.js';
 import { leaseToken } from './id.js';
 import { assertRootDb } from './storage.js';
 
@@ -57,7 +60,8 @@ export type DrainDeps<Meta extends z.ZodObject, AppDb extends RootDb, Run> = {
   readonly tables: JournalTables;
   /** The effect hooks. Frozen by the first drain. */
   readonly hooks: HookPointInternal<EffectHookContext<z.output<Meta>>>;
-  readonly effects: readonly Effect<z.output<Meta>, AppDb, Run>[];
+  /** As composed: an effect may still have needs. Each drain binds them from its `services`. */
+  readonly effects: readonly Effect<z.output<Meta>, AppDb, Run, Needs>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
   /** Makes an effect's `ctx.run`: the journal's `run`, bound to the root database this drain was given and to the event the job is for. */
   readonly runOn: (db: AppDb & RootDb, cause: { readonly seq: number; readonly correlationId: string | null }) => Run;
@@ -66,9 +70,7 @@ export type DrainDeps<Meta extends z.ZodObject, AppDb extends RootDb, Run> = {
 export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>(deps: DrainDeps<Meta, AppDb, Run>) {
   const { events: eventsTable, jobs: jobsTable } = deps.tables;
   const { decodeStoredEvent } = deps.history;
-  const effectsByName = new Map(deps.effects.map(effect => [effect.name, effect]));
-
-  const known = [...effectsByName.keys()];
+  const known = deps.effects.map(effect => effect.name);
 
   // Every time here is database time, so a worker with a skewed clock
   // cannot take a live lease or push a retry into the far future.
@@ -149,7 +151,13 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
     };
   };
 
-  const runJob = async (db: AppDb & RootDb, job: JobRow, signal: AbortSignal, leaseSeconds: number): Promise<void> => {
+  const runJob = async (
+    db: AppDb & RootDb,
+    job: JobRow,
+    signal: AbortSignal,
+    leaseSeconds: number,
+    effectsByName: ReadonlyMap<string, Effect<z.output<Meta>, AppDb, Run>>,
+  ): Promise<void> => {
     const effect = effectsByName.get(job.effect);
     const lost = new AbortController();
     const stopRenewing = renewWhile(db, job, leaseSeconds, lost);
@@ -194,9 +202,17 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
 
   return async (
     db: AppDb & RootDb,
-    opts?: { readonly batchSize?: number; readonly signal?: AbortSignal; readonly leaseSeconds?: number },
+    opts?: {
+      readonly batchSize?: number;
+      readonly signal?: AbortSignal;
+      readonly leaseSeconds?: number;
+      readonly services?: HandlerServices;
+    },
   ): Promise<number> => {
     assertRootDb(db, 'drain');
+    // Before any claim: a missing service refuses the drain, not one job after another.
+    const { effects } = bindHandlers({ effects: deps.effects, taps: [] }, opts?.services);
+    const effectsByName = new Map(effects.map(effect => [effect.name, effect]));
     deps.hooks.freeze();
     const batchSize = opts?.batchSize ?? 20;
     const leaseSeconds = opts?.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
@@ -213,7 +229,7 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
       const job = await claimOne(db, leaseSeconds);
       if (job === undefined) break;
       claimed += 1;
-      await runJob(db, job, signal, leaseSeconds);
+      await runJob(db, job, signal, leaseSeconds, effectsByName);
     }
     return claimed;
   };
@@ -293,7 +309,12 @@ export type WorkerDeps<AppDb extends RootDb> = {
   /** Runs one batch. The journal passes its own `drain` method, looked up on each call. */
   readonly drain: (
     db: AppDb & RootDb,
-    opts?: { readonly batchSize?: number; readonly signal?: AbortSignal; readonly leaseSeconds?: number },
+    opts?: {
+      readonly batchSize?: number;
+      readonly signal?: AbortSignal;
+      readonly leaseSeconds?: number;
+      readonly services?: HandlerServices;
+    },
   ) => Promise<number>;
   /** One batch per async projection. Returns how many events were scanned. */
   readonly catchUp: (
@@ -301,7 +322,9 @@ export type WorkerDeps<AppDb extends RootDb> = {
     opts?: { readonly batchSize?: number },
   ) => Promise<{ readonly scanned: number }>;
   /** Fire the taps for one wake payload. */
-  readonly dispatch: (db: AppDb & RootDb, payload: string) => Promise<void>;
+  readonly dispatch: (db: AppDb & RootDb, payload: string, services: HandlerServices | undefined) => Promise<void>;
+  /** Throws when an effect or a tap is missing a service in `services`. */
+  readonly checkServices: (services: HandlerServices | undefined) => void;
   readonly tapNames: readonly string[];
 };
 
@@ -427,7 +450,8 @@ export function createCatchUp<Meta extends z.ZodObject, Tx extends TransactionSo
 /** What tap dispatch needs from the journal. */
 export type TapDispatchDeps<Meta extends z.ZodObject, AppDb extends RootDb> = {
   readonly tables: Pick<JournalTables, 'events'>;
-  readonly taps: readonly Tap<z.output<Meta>, AppDb>[];
+  /** As composed: a tap may still have needs. Each dispatch binds them from its `services`. */
+  readonly taps: readonly Tap<z.output<Meta>, AppDb, Needs>[];
   readonly history: Pick<History<Meta>, 'decodeStoredEvent'>;
 };
 
@@ -451,10 +475,15 @@ export function createTapDispatch<Meta extends z.ZodObject, AppDb extends RootDb
   const types = [...new Set(deps.taps.flatMap(tap => [...tap.types]))];
 
   /** Load the committed events in the range that some tap wants, and run each matching tap. Errors are logged, never thrown. */
-  const dispatch = async (db: AppDb & RootDb, payload: string): Promise<void> => {
+  const dispatch = async (
+    db: AppDb & RootDb,
+    payload: string,
+    services: HandlerServices | undefined,
+  ): Promise<void> => {
     if (deps.taps.length === 0) return;
     const range = parseRange(payload);
     if (range === undefined) return;
+    const { taps } = bindHandlers({ effects: [], taps: deps.taps }, services);
     const rows = await db
       .select()
       .from(eventsTable)
@@ -468,7 +497,7 @@ export function createTapDispatch<Meta extends z.ZodObject, AppDb extends RootDb
       )
       .orderBy(asc(eventsTable.seq));
     for (const row of rows) {
-      for (const tap of deps.taps) {
+      for (const tap of taps) {
         if (!tap.types.has(row.type) || !tap.entities.some(entity => entity.kind === row.kind)) continue;
         try {
           const event = deps.history.decodeStoredEvent(
@@ -507,9 +536,11 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
       readonly leaseSeconds?: number;
       readonly listen?: WakeListener;
       readonly taps?: boolean;
+      readonly services?: HandlerServices;
     },
   ): JournalWorker => {
     assertRootDb(db, 'worker');
+    deps.checkServices(opts?.services);
     if (deps.tapNames.length > 0 && opts?.listen === undefined && opts?.taps !== false)
       throw new Error(
         `journal: this journal has taps (${deps.tapNames.join(', ')}) but the worker has no \`listen\`; taps fire only from the wake channel. Wire LISTEN on journal.wakeChannel, or pass { taps: false } for a worker that runs jobs only`,
@@ -551,6 +582,7 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
             batchSize: opts?.batchSize,
             signal: stopping.signal,
             leaseSeconds: opts?.leaseSeconds,
+            services: opts?.services,
           });
           if (isRunning()) {
             const caught = await deps.catchUp(db);
@@ -577,7 +609,7 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
           unlisten = await opts.listen(payload => {
             wake();
             if (opts.taps === false) return;
-            dispatching = dispatching.then(() => deps.dispatch(db, payload)).catch(quiet);
+            dispatching = dispatching.then(() => deps.dispatch(db, payload, opts.services)).catch(quiet);
           });
         }
         debugWorker.debug('start (poll {pollMs}ms{value2})', {

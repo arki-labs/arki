@@ -25,15 +25,13 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "browser": "./dist/schema.browser.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./schema": {
-      "types": "./dist/schema.d.ts",
-      "browser": "./dist/schema.browser.js",
-      "import": "./dist/schema.js",
-      "default": "./dist/schema.js"
+    "./drizzle": {
+      "types": "./dist/drizzle.d.ts",
+      "import": "./dist/drizzle.js",
+      "default": "./dist/drizzle.js"
     },
     "./package.json": "./package.json"
   },
@@ -50,9 +48,16 @@
     "package.json"
   ],
   "dependencies": {
-    "drizzle-orm": "1.0.0-rc.4",
     "zod": "4.6.5",
     "zod-form-data": "^3.0.3"
+  },
+  "peerDependencies": {
+    "drizzle-orm": "1.0.0-rc.4"
+  },
+  "peerDependenciesMeta": {
+    "drizzle-orm": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"

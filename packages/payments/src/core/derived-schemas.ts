@@ -1,4 +1,5 @@
-import { createInsertSchema, createSelectSchema, z } from '@arki/contracts';
+import { z } from '@arki/contracts';
+import { createInsertSchema, createSelectSchema } from '@arki/contracts/drizzle';
 import { instantSchema } from '@arki/date/zod';
 
 import type { CoreTables } from './tables.js';

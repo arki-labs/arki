@@ -2,7 +2,8 @@ import { createId as createCuid } from '@paralleldrive/cuid2';
 import type { PgColumn } from 'drizzle-orm/pg-core';
 import { varchar } from 'drizzle-orm/pg-core';
 
-import { COLUMN_ZOD_SCHEMA, z } from '@arki/contracts';
+import { z } from '@arki/contracts';
+import { COLUMN_ZOD_SCHEMA } from '@arki/contracts/drizzle';
 
 // Core ID creation
 export const createId = () => createCuid();

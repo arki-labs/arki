@@ -364,10 +364,25 @@
       "browser": "./src/tooltip.tsx"
     },
     "./styles/animations.css": "./src/styles/animations.css",
-    "./*": {
-      "types": "./dist/src/*.d.ts",
-      "import": "./src/*.tsx",
-      "browser": "./src/*.tsx"
+    "./as-child": {
+      "types": "./dist/src/as-child.d.ts",
+      "import": "./src/as-child.tsx",
+      "browser": "./src/as-child.tsx"
+    },
+    "./math-input/complex-input": {
+      "types": "./dist/src/math-input/complex-input.d.ts",
+      "import": "./src/math-input/complex-input.tsx",
+      "browser": "./src/math-input/complex-input.tsx"
+    },
+    "./math-input/index": {
+      "types": "./dist/src/math-input/index.d.ts",
+      "import": "./src/math-input/index.tsx",
+      "browser": "./src/math-input/index.tsx"
+    },
+    "./slot": {
+      "types": "./dist/src/slot.d.ts",
+      "import": "./src/slot.tsx",
+      "browser": "./src/slot.tsx"
     },
     "./package.json": "./package.json"
   },

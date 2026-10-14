@@ -107,10 +107,30 @@
       "import": "./dist/words.js",
       "default": "./dist/words.js"
     },
-    "./words/*": {
-      "types": "./dist/words/*.d.ts",
-      "import": "./dist/words/*.js",
-      "default": "./dist/words/*.js"
+    "./words/de": {
+      "types": "./dist/words/de.d.ts",
+      "import": "./dist/words/de.js",
+      "default": "./dist/words/de.js"
+    },
+    "./words/es": {
+      "types": "./dist/words/es.d.ts",
+      "import": "./dist/words/es.js",
+      "default": "./dist/words/es.js"
+    },
+    "./words/fr": {
+      "types": "./dist/words/fr.d.ts",
+      "import": "./dist/words/fr.js",
+      "default": "./dist/words/fr.js"
+    },
+    "./words/it": {
+      "types": "./dist/words/it.d.ts",
+      "import": "./dist/words/it.js",
+      "default": "./dist/words/it.js"
+    },
+    "./words/ro": {
+      "types": "./dist/words/ro.d.ts",
+      "import": "./dist/words/ro.js",
+      "default": "./dist/words/ro.js"
     },
     "./units": {
       "types": "./dist/units.d.ts",

@@ -65,10 +65,320 @@
       "import": "./dist/repositories.js",
       "default": "./dist/repositories.js"
     },
-    "./*": {
-      "types": "./dist/*.d.ts",
-      "import": "./dist/*.js",
-      "default": "./dist/*.js"
+    "./core/contracts": {
+      "types": "./dist/core/contracts.d.ts",
+      "import": "./dist/core/contracts.js",
+      "default": "./dist/core/contracts.js"
+    },
+    "./core/derived-schemas": {
+      "types": "./dist/core/derived-schemas.d.ts",
+      "import": "./dist/core/derived-schemas.js",
+      "default": "./dist/core/derived-schemas.js"
+    },
+    "./core/index": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js",
+      "default": "./dist/core/index.js"
+    },
+    "./core/journal": {
+      "types": "./dist/core/journal.d.ts",
+      "import": "./dist/core/journal.js",
+      "default": "./dist/core/journal.js"
+    },
+    "./core/journal/payment": {
+      "types": "./dist/core/journal/payment.d.ts",
+      "import": "./dist/core/journal/payment.js",
+      "default": "./dist/core/journal/payment.js"
+    },
+    "./core/journal/subscription": {
+      "types": "./dist/core/journal/subscription.d.ts",
+      "import": "./dist/core/journal/subscription.js",
+      "default": "./dist/core/journal/subscription.js"
+    },
+    "./core/journal/support": {
+      "types": "./dist/core/journal/support.d.ts",
+      "import": "./dist/core/journal/support.js",
+      "default": "./dist/core/journal/support.js"
+    },
+    "./core/money": {
+      "types": "./dist/core/money.d.ts",
+      "import": "./dist/core/money.js",
+      "default": "./dist/core/money.js"
+    },
+    "./core/monitoring/payment-monitor": {
+      "types": "./dist/core/monitoring/payment-monitor.d.ts",
+      "import": "./dist/core/monitoring/payment-monitor.js",
+      "default": "./dist/core/monitoring/payment-monitor.js"
+    },
+    "./core/notifications/service": {
+      "types": "./dist/core/notifications/service.d.ts",
+      "import": "./dist/core/notifications/service.js",
+      "default": "./dist/core/notifications/service.js"
+    },
+    "./core/primitives": {
+      "types": "./dist/core/primitives.d.ts",
+      "import": "./dist/core/primitives.js",
+      "default": "./dist/core/primitives.js"
+    },
+    "./core/providers/base-provider": {
+      "types": "./dist/core/providers/base-provider.d.ts",
+      "import": "./dist/core/providers/base-provider.js",
+      "default": "./dist/core/providers/base-provider.js"
+    },
+    "./core/providers/provider-error": {
+      "types": "./dist/core/providers/provider-error.d.ts",
+      "import": "./dist/core/providers/provider-error.js",
+      "default": "./dist/core/providers/provider-error.js"
+    },
+    "./core/providers/stripe-event-types": {
+      "types": "./dist/core/providers/stripe-event-types.d.ts",
+      "import": "./dist/core/providers/stripe-event-types.js",
+      "default": "./dist/core/providers/stripe-event-types.js"
+    },
+    "./core/providers/stripe-provider": {
+      "types": "./dist/core/providers/stripe-provider.d.ts",
+      "import": "./dist/core/providers/stripe-provider.js",
+      "default": "./dist/core/providers/stripe-provider.js"
+    },
+    "./core/repository": {
+      "types": "./dist/core/repository.d.ts",
+      "import": "./dist/core/repository.js",
+      "default": "./dist/core/repository.js"
+    },
+    "./core/security/webhook-security": {
+      "types": "./dist/core/security/webhook-security.d.ts",
+      "import": "./dist/core/security/webhook-security.js",
+      "default": "./dist/core/security/webhook-security.js"
+    },
+    "./core/services/dunning-service": {
+      "types": "./dist/core/services/dunning-service.d.ts",
+      "import": "./dist/core/services/dunning-service.js",
+      "default": "./dist/core/services/dunning-service.js"
+    },
+    "./core/services/payment-retry-service": {
+      "types": "./dist/core/services/payment-retry-service.d.ts",
+      "import": "./dist/core/services/payment-retry-service.js",
+      "default": "./dist/core/services/payment-retry-service.js"
+    },
+    "./core/services/proration-service": {
+      "types": "./dist/core/services/proration-service.d.ts",
+      "import": "./dist/core/services/proration-service.js",
+      "default": "./dist/core/services/proration-service.js"
+    },
+    "./core/services/subscription-manager": {
+      "types": "./dist/core/services/subscription-manager.d.ts",
+      "import": "./dist/core/services/subscription-manager.js",
+      "default": "./dist/core/services/subscription-manager.js"
+    },
+    "./core/services/webhook-analytics-service": {
+      "types": "./dist/core/services/webhook-analytics-service.d.ts",
+      "import": "./dist/core/services/webhook-analytics-service.js",
+      "default": "./dist/core/services/webhook-analytics-service.js"
+    },
+    "./core/services/webhook-event-payloads": {
+      "types": "./dist/core/services/webhook-event-payloads.d.ts",
+      "import": "./dist/core/services/webhook-event-payloads.js",
+      "default": "./dist/core/services/webhook-event-payloads.js"
+    },
+    "./core/services/webhook-handler": {
+      "types": "./dist/core/services/webhook-handler.d.ts",
+      "import": "./dist/core/services/webhook-handler.js",
+      "default": "./dist/core/services/webhook-handler.js"
+    },
+    "./core/services/webhook-security": {
+      "types": "./dist/core/services/webhook-security.d.ts",
+      "import": "./dist/core/services/webhook-security.js",
+      "default": "./dist/core/services/webhook-security.js"
+    },
+    "./core/tables": {
+      "types": "./dist/core/tables.d.ts",
+      "import": "./dist/core/tables.js",
+      "default": "./dist/core/tables.js"
+    },
+    "./core/types": {
+      "types": "./dist/core/types.d.ts",
+      "import": "./dist/core/types.js",
+      "default": "./dist/core/types.js"
+    },
+    "./core/user-id": {
+      "types": "./dist/core/user-id.d.ts",
+      "import": "./dist/core/user-id.js",
+      "default": "./dist/core/user-id.js"
+    },
+    "./core/webhook-claims": {
+      "types": "./dist/core/webhook-claims.d.ts",
+      "import": "./dist/core/webhook-claims.js",
+      "default": "./dist/core/webhook-claims.js"
+    },
+    "./dunning/analytics-money": {
+      "types": "./dist/dunning/analytics-money.d.ts",
+      "import": "./dist/dunning/analytics-money.js",
+      "default": "./dist/dunning/analytics-money.js"
+    },
+    "./dunning/contracts": {
+      "types": "./dist/dunning/contracts.d.ts",
+      "import": "./dist/dunning/contracts.js",
+      "default": "./dist/dunning/contracts.js"
+    },
+    "./dunning/index": {
+      "types": "./dist/dunning/index.d.ts",
+      "import": "./dist/dunning/index.js",
+      "default": "./dist/dunning/index.js"
+    },
+    "./dunning/primitives": {
+      "types": "./dist/dunning/primitives.d.ts",
+      "import": "./dist/dunning/primitives.js",
+      "default": "./dist/dunning/primitives.js"
+    },
+    "./dunning/repository": {
+      "types": "./dist/dunning/repository.d.ts",
+      "import": "./dist/dunning/repository.js",
+      "default": "./dist/dunning/repository.js"
+    },
+    "./dunning/services/campaign-service": {
+      "types": "./dist/dunning/services/campaign-service.d.ts",
+      "import": "./dist/dunning/services/campaign-service.js",
+      "default": "./dist/dunning/services/campaign-service.js"
+    },
+    "./dunning/services/communication-service": {
+      "types": "./dist/dunning/services/communication-service.d.ts",
+      "import": "./dist/dunning/services/communication-service.js",
+      "default": "./dist/dunning/services/communication-service.js"
+    },
+    "./dunning/services/integration-service": {
+      "types": "./dist/dunning/services/integration-service.d.ts",
+      "import": "./dist/dunning/services/integration-service.js",
+      "default": "./dist/dunning/services/integration-service.js"
+    },
+    "./dunning/services/segmentation-service": {
+      "types": "./dist/dunning/services/segmentation-service.d.ts",
+      "import": "./dist/dunning/services/segmentation-service.js",
+      "default": "./dist/dunning/services/segmentation-service.js"
+    },
+    "./dunning/sql-list": {
+      "types": "./dist/dunning/sql-list.d.ts",
+      "import": "./dist/dunning/sql-list.js",
+      "default": "./dist/dunning/sql-list.js"
+    },
+    "./dunning/stored-risk-profile": {
+      "types": "./dist/dunning/stored-risk-profile.d.ts",
+      "import": "./dist/dunning/stored-risk-profile.js",
+      "default": "./dist/dunning/stored-risk-profile.js"
+    },
+    "./dunning/tables": {
+      "types": "./dist/dunning/tables.d.ts",
+      "import": "./dist/dunning/tables.js",
+      "default": "./dist/dunning/tables.js"
+    },
+    "./dunning/types": {
+      "types": "./dist/dunning/types.d.ts",
+      "import": "./dist/dunning/types.js",
+      "default": "./dist/dunning/types.js"
+    },
+    "./index": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./presets/index": {
+      "types": "./dist/presets/index.d.ts",
+      "import": "./dist/presets/index.js",
+      "default": "./dist/presets/index.js"
+    },
+    "./presets/revenuecat": {
+      "types": "./dist/presets/revenuecat.d.ts",
+      "import": "./dist/presets/revenuecat.js",
+      "default": "./dist/presets/revenuecat.js"
+    },
+    "./presets/subscription": {
+      "types": "./dist/presets/subscription.d.ts",
+      "import": "./dist/presets/subscription.js",
+      "default": "./dist/presets/subscription.js"
+    },
+    "./refunds/contracts": {
+      "types": "./dist/refunds/contracts.d.ts",
+      "import": "./dist/refunds/contracts.js",
+      "default": "./dist/refunds/contracts.js"
+    },
+    "./refunds/index": {
+      "types": "./dist/refunds/index.d.ts",
+      "import": "./dist/refunds/index.js",
+      "default": "./dist/refunds/index.js"
+    },
+    "./refunds/journal": {
+      "types": "./dist/refunds/journal.d.ts",
+      "import": "./dist/refunds/journal.js",
+      "default": "./dist/refunds/journal.js"
+    },
+    "./refunds/primitives": {
+      "types": "./dist/refunds/primitives.d.ts",
+      "import": "./dist/refunds/primitives.js",
+      "default": "./dist/refunds/primitives.js"
+    },
+    "./refunds/repository": {
+      "types": "./dist/refunds/repository.d.ts",
+      "import": "./dist/refunds/repository.js",
+      "default": "./dist/refunds/repository.js"
+    },
+    "./refunds/service": {
+      "types": "./dist/refunds/service.d.ts",
+      "import": "./dist/refunds/service.js",
+      "default": "./dist/refunds/service.js"
+    },
+    "./refunds/tables": {
+      "types": "./dist/refunds/tables.d.ts",
+      "import": "./dist/refunds/tables.js",
+      "default": "./dist/refunds/tables.js"
+    },
+    "./refunds/types": {
+      "types": "./dist/refunds/types.d.ts",
+      "import": "./dist/refunds/types.js",
+      "default": "./dist/refunds/types.js"
+    },
+    "./tax/contracts": {
+      "types": "./dist/tax/contracts.d.ts",
+      "import": "./dist/tax/contracts.js",
+      "default": "./dist/tax/contracts.js"
+    },
+    "./tax/index": {
+      "types": "./dist/tax/index.d.ts",
+      "import": "./dist/tax/index.js",
+      "default": "./dist/tax/index.js"
+    },
+    "./tax/primitives": {
+      "types": "./dist/tax/primitives.d.ts",
+      "import": "./dist/tax/primitives.js",
+      "default": "./dist/tax/primitives.js"
+    },
+    "./tax/reporting": {
+      "types": "./dist/tax/reporting.d.ts",
+      "import": "./dist/tax/reporting.js",
+      "default": "./dist/tax/reporting.js"
+    },
+    "./tax/repository": {
+      "types": "./dist/tax/repository.d.ts",
+      "import": "./dist/tax/repository.js",
+      "default": "./dist/tax/repository.js"
+    },
+    "./tax/service": {
+      "types": "./dist/tax/service.d.ts",
+      "import": "./dist/tax/service.js",
+      "default": "./dist/tax/service.js"
+    },
+    "./tax/tables": {
+      "types": "./dist/tax/tables.d.ts",
+      "import": "./dist/tax/tables.js",
+      "default": "./dist/tax/tables.js"
+    },
+    "./tax/tax-id": {
+      "types": "./dist/tax/tax-id.d.ts",
+      "import": "./dist/tax/tax-id.js",
+      "default": "./dist/tax/tax-id.js"
+    },
+    "./tax/types": {
+      "types": "./dist/tax/types.d.ts",
+      "import": "./dist/tax/types.js",
+      "default": "./dist/tax/types.js"
     },
     "./package.json": "./package.json"
   },

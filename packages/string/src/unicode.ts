@@ -10,6 +10,7 @@
  * negative positions (counted from the end) need the full boundary list.
  */
 
+import { STRING_ERROR_CODES, StringError } from './errors.js';
 import { graphemeBoundaries, graphemeBreaks, graphemeCount, segmentGraphemes } from './internal/graphemes.js';
 
 export { graphemeBoundaries } from './internal/graphemes.js';
@@ -25,7 +26,8 @@ export function length(text: string): number {
 }
 
 function assertInteger(value: number, name: string): void {
-  if (!Number.isInteger(value)) throw new RangeError(`${name} must be an integer, got ${String(value)}`);
+  if (!Number.isInteger(value))
+    throw new StringError(STRING_ERROR_CODES.invalidArgument, `${name} must be an integer, got ${String(value)}`);
 }
 
 /** Normalizes a slice-style index (negative counts from the end, clamped to [0, count]). */
@@ -95,7 +97,6 @@ export function take(text: string, count: number): string {
 
 /** Reverses the grapheme sequence, keeping each grapheme intact. */
 export function reverse(text: string): string {
-  // eslint-disable-next-line unicorn/no-array-reverse -- fresh copy; ES2023 toReversed is missing on older engines
   return [...graphemes(text)].reverse().join('');
 }
 
@@ -103,7 +104,8 @@ export function reverse(text: string): string {
 export function splice(text: string, start: number, deleteCount: number, insert = ''): string {
   assertInteger(start, 'start');
   assertInteger(deleteCount, 'deleteCount');
-  if (deleteCount < 0) throw new RangeError(`deleteCount must be >= 0, got ${String(deleteCount)}`);
+  if (deleteCount < 0)
+    throw new StringError(STRING_ERROR_CODES.invalidArgument, `deleteCount must be >= 0, got ${String(deleteCount)}`);
   const boundaries = graphemeBoundaries(text);
   const count = boundaries.length - 1;
   const from = resolveIndex(start, count);
@@ -114,7 +116,7 @@ export function splice(text: string, start: number, deleteCount: number, insert 
 /** Splits `text` into chunks of `size` graphemes; the last chunk may be shorter. */
 export function chunk(text: string, size: number): string[] {
   assertInteger(size, 'size');
-  if (size <= 0) throw new RangeError(`size must be > 0, got ${String(size)}`);
+  if (size <= 0) throw new StringError(STRING_ERROR_CODES.invalidArgument, `size must be > 0, got ${String(size)}`);
   const chunks: string[] = [];
   let start = 0;
   let position = 0;

@@ -16,6 +16,8 @@ export type {
   DotApp,
   DotAppBuilder,
   DotAppConfigured,
+  DotAppLifecycle,
+  DotServeBuilder,
   NormalizeProvides,
   UseAllAvail,
   UseAllGuard,
@@ -25,6 +27,7 @@ export type {
 export { isLazy, lazy, lazyOf, plugin, provide, rename, service, token, DotPluginError } from './plugin-contract.js';
 export type {
   AnyPlugin,
+  DotPluginRole,
   ActionSource,
   CtxOf,
   DotConfigureContext,

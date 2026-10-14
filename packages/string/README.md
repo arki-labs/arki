@@ -209,6 +209,20 @@ textMetrics(article); // every count, score, and statistic in one object
 - `hashCode` (in `/hash`) is the non-negative Java `String.hashCode` over
   UTF-16 units: stable, fast, and not cryptographic.
 
+## Errors
+
+`import { StringError } from '@arki/string'` (or `@arki/string/errors`). Every failure on purpose is a `StringError` with a stable `code` and a `remediation`. Match on `error.code`, never on the message. Wrong runtime types, such as a number where a string is required, are not checked and have no code.
+
+| Code               | Raised by                                                                                                                        | Meaning                                                                               |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `ARKI_STRING_E001` | `padStart`, `mask`, `truncate`, `wrapText`, `indexOf`, `keywords`, `chunk`, `slugify`, `readingTime`, search helpers, and others | An argument is out of range: empty needle, negative or non-integer length, bad glyph. |
+| `ARKI_STRING_E002` | `toBase64`, `byteLength`, `utf8Encode`, `utf8Decode`, `fromBase64`                                                               | Text or bytes are not valid UTF-8.                                                    |
+| `ARKI_STRING_E003` | `base64ToBytes`, `fromBase64`                                                                                                    | Input is not strict base64.                                                           |
+| `ARKI_STRING_E004` | `interpolate`                                                                                                                    | A placeholder is malformed.                                                           |
+| `ARKI_STRING_E005` | `interpolate`                                                                                                                    | A placeholder has no value and `missing` is `'throw'`.                                |
+
+The codes are also exported as `STRING_ERROR_CODES`.
+
 ## Runtime support
 
 Node 24+, Bun, Deno, every evergreen browser, and React Native (Hermes). The
@@ -238,14 +252,14 @@ the whole string, so `at(text, 5)` costs the same on 10k and 100k characters.
 
 No `Buffer`, `atob`, or `btoa`. Text functions are UTF-8; byte functions take
 and return `Uint8Array`. Decoding is strict: whitespace, mixed alphabets, bad
-padding, impossible lengths, and nonzero unused bits throw `SyntaxError`;
-invalid UTF-8 throws `TypeError`. `tryFromBase64` returns `null` instead.
+padding, impossible lengths, and nonzero unused bits throw `StringError` (`ARKI_STRING_E003`);
+invalid UTF-8 throws `StringError` (`ARKI_STRING_E002`). `tryFromBase64` returns `null` instead.
 
 ```ts
 toBase64('f'); // 'Zg=='
 toBase64('f', { alphabet: 'url' }); // 'Zg'  (url defaults to no padding)
 base64ToBytes('/w=='); // Uint8Array [255]
-fromBase64('/w=='); // throws TypeError: not UTF-8
+fromBase64('/w=='); // throws StringError ARKI_STRING_E002: not UTF-8
 ```
 
 ### Slugs
@@ -279,7 +293,7 @@ slugify('我是谁', { replacements: chinese }); // 'wo-shi-shui'
 
 ```ts
 interpolate('Hi {{ name }}', { name: 'Ada' }); // 'Hi Ada'
-interpolate('{{ missing }}', {}); // throws ReferenceError
+interpolate('{{ missing }}', {}); // throws StringError ARKI_STRING_E005
 interpolate('{{ missing }}', {}, { missing: 'keep' }); // '{{ missing }}'
 ```
 
@@ -300,6 +314,73 @@ Flat identifier keys only. `null` renders as `''`, `undefined` is missing.
 it with the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
 application framework, see `packages/dot/docs/` for plugin authoring,
 lifecycle, and diagnostics.
+
+<!-- bench:start -->
+
+## Benchmarks
+
+Speed of `@arki/string` against lodash-es, change-case, slugify and escape-html, the libraries most projects use for case conversion, truncation, slugs and escaping.
+
+Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
+
+### camelCase
+
+| Library                | Time / op | vs fastest |
+| ---------------------- | --------: | ---------: |
+| @arki/string camelCase |  45.23 µs |     21.84× |
+| lodash-es camelCase    |   2.07 µs |    fastest |
+| change-case camelCase  |   2.90 µs |      1.40× |
+
+### kebabCase
+
+| Library                | Time / op | vs fastest |
+| ---------------------- | --------: | ---------: |
+| @arki/string kebabCase |   3.88 µs |      2.11× |
+| lodash-es kebabCase    |   1.84 µs |    fastest |
+| change-case kebabCase  |   2.94 µs |      1.60× |
+
+### Truncate 228 characters to 80
+
+Every library ends the result with `…` inside the 80-character limit. lodash cuts at a code unit; `@arki/string` cuts at a grapheme.
+
+| Library               | Time / op | vs fastest |
+| --------------------- | --------: | ---------: |
+| @arki/string truncate | 103.49 µs |   1671.23× |
+| lodash-es truncate    |   61.9 ns |    fastest |
+
+### Slugify an accented title
+
+| Library                 | Time / op | vs fastest |
+| ----------------------- | --------: | ---------: |
+| @arki/string slugify    |   9.29 µs |    fastest |
+| slugify (lower, strict) |  13.78 µs |      1.48× |
+
+### Escape HTML (a 63-character tag with quotes and ampersands)
+
+| Library                 | Time / op | vs fastest |
+| ----------------------- | --------: | ---------: |
+| @arki/string escapeHtml |   2.05 µs |      3.37× |
+| escape-html             |  610.4 ns |    fastest |
+| lodash-es escape        |  992.4 ns |      1.63× |
+
+### Escape a string for use in a RegExp
+
+`@arki/string` also escapes a leading letter or digit as `\xNN`, so the result is safe to paste after a backslash or inside a character class; lodash does not.
+
+| Library                   | Time / op | vs fastest |
+| ------------------------- | --------: | ---------: |
+| @arki/string escapeRegExp |   2.65 µs |      2.53× |
+| lodash-es escapeRegExp    |   1.05 µs |    fastest |
+
+Read the rows with the contracts in mind:
+
+- Case inputs are plain ASCII so every library does the same work. With accents, lodash strips them (`café` becomes `cafe`) while `@arki/string` and change-case keep them.
+- `@arki/string` counts user-perceived characters (graphemes), so it never cuts an emoji or an accented letter in half. lodash `truncate` counts UTF-16 code units. Counting graphemes is more work, which shows in the truncate row.
+- Slugs differ by design: `@arki/string` transliterates `ü` to `ue` and `&` to `and` (German rules), slugify gives `u` and drops `&`; both are configurable. Outputs of the same input are not identical, so compare speed, not output.
+- escape-html, lodash `escape` and `@arki/string` produce the same output for HTML text and attribute values.
+
+Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
+<!-- bench:end -->
 
 ## License
 

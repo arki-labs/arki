@@ -5,10 +5,11 @@
  * boundary set.
  */
 
+import { STRING_ERROR_CODES, StringError } from '../errors.js';
 import { graphemeBoundaries, isGraphemeBoundary } from './graphemes.js';
 
 export function assertNeedle(needle: string, name = 'needle'): void {
-  if (needle === '') throw new TypeError(`${name} must not be empty`);
+  if (needle === '') throw new StringError(STRING_ERROR_CODES.invalidArgument, `${name} must not be empty`);
 }
 
 export type FindOptions = Readonly<{

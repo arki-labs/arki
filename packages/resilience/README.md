@@ -113,11 +113,28 @@ const detach = attachPolicyLogger(policy, logger, 'billing');
 - `createRetryPolicy`, `createCircuitBreakerPolicy`, `createTimeoutPolicy`, `createBulkheadPolicy` — individual primitives.
 - `externalApiPolicy`, `databasePolicy`, `backgroundJobPolicy` — pre-tuned presets.
 - `withResilience`, `withRetry`, `withTimeout` — execution helpers.
-- `withCircuitBreaker` — **deprecated**. It builds a new breaker on every call, so it never opens. Use `createCircuitBreakerPolicy()` once and `withResilience()` per call.
 - `attachPolicyLogger(policy, logger)` — observability hooks.
 - `wrap(...policies)` — compose policies from the outside in; `noop` — a policy that only runs the function.
 - `ResilienceError`, `CircuitOpenError`, `TimeoutError`, `CancelledError`, `BulkheadRejectedError`, `RetriesExhaustedError` — typed errors with helpers (`isResilienceError`, `isBrokenCircuitError`, `isBulkheadRejectedError`).
 - Types: `Policy`, `PolicyContext`, `PolicyCallback`, `RetryPolicy`, `CircuitBreakerPolicy`, `TimeoutPolicy`, `BulkheadPolicy`, `PolicyEvent`, `Subscription` and the event payloads `SuccessEvent`, `FailureEvent`, `FailureReason`, `RetryEvent`, `BreakEvent`.
+
+## Errors
+
+Every error the policies raise is a `ResilienceError` with a stable `code` and a `remediation`. Match on `error.code`, never on the message. Errors thrown by your own function pass through untouched.
+
+| Code                   | Class                   | Meaning                                                          |
+| ---------------------- | ----------------------- | ---------------------------------------------------------------- |
+| `ARKI_RESILIENCE_E001` | `CircuitOpenError`      | The circuit breaker is open and rejected the call.               |
+| `ARKI_RESILIENCE_E002` | `TimeoutError`          | A timeout policy reached its deadline.                           |
+| `ARKI_RESILIENCE_E003` | `CancelledError`        | The caller's own signal aborted the call. `cause` is its reason. |
+| `ARKI_RESILIENCE_E004` | `BulkheadRejectedError` | Every execution slot and queue slot was taken.                   |
+| `ARKI_RESILIENCE_E005` | `RetriesExhaustedError` | Every retry attempt failed. `lastError` holds the last one.      |
+
+The codes are also exported as `RESILIENCE_ERROR_CODES`.
+
+## Runtime support
+
+Node, Bun, Deno, modern browsers and React Native (Hermes). Pure ESM. The package uses only `setTimeout`, `AbortSignal` and `Promise` at call time, with no `node:*` imports and no `process` or `Buffer`. `bun run test:runtimes` runs a smoke test of the built package on every runtime; the Hermes leg needs a `hermes` binary (`HERMES_BIN`) and prints `INCOMPLETE` when it is missing.
 
 ## When does the overhead matter?
 

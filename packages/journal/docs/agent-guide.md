@@ -19,11 +19,11 @@ Paths that start with `src/` are files of this package. App files are named from
 
 ## Three objects
 
-| Object                | How you get it                                | What it does                                                                                                  | Where it lives in an app             |
-| --------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| `j`, the definitions  | `initJournal` (see Setup)                     | Declares things: `j.event`, `j.entity`, `j.command`, `j.projection`, `j.effect`. It never touches a database. | `journal.ts`                         |
-| The entity builder    | `j.entity(kind, table)`                       | A chain of `.create(Event, reducer)` and `.on(Event, reducer)`. The result is the entity you pass to `write`. | `features/<name>/<entity>.ts`        |
-| `journal`, the runner | `j.compose({ tables, projections, effects })` | Does the work: `run`, `bind`, `write`, `replay`, `verify`, `repair`, `rerun`, `drain`, `worker`, `wake`.      | `journal.root.ts`, or the Dot plugin |
+| Object                | How you get it                                | What it does                                                                                                  | Where it lives in an app                             |
+| --------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `j`, the definitions  | `initJournal` (see Setup)                     | Declares things: `j.event`, `j.entity`, `j.command`, `j.projection`, `j.effect`. It never touches a database. | `journal.ts`                                         |
+| The entity builder    | `j.entity(kind, table)`                       | A chain of `.create(Event, reducer)` and `.on(Event, reducer)`. The result is the entity you pass to `write`. | `features/<name>/<entity>.ts`                        |
+| `journal`, the runner | `j.compose({ tables, projections, effects })` | Does the work: `run`, `bind`, `write`, `replay`, `verify`, `repair`, `rerun`, `drain`, `worker`, `wake`.      | `journal.root.ts`, or the Dot adapter `journal(...)` |
 
 How to tell them apart: only `journal` takes a database. Events, entities, commands, projections and effects need only `j`. They must never import the composed `journal`.
 
@@ -116,13 +116,13 @@ export const closeAfterPayment = j.effect('close-after-payment', order, {
 
 - The handler gets `(e, { jobId, signal, db, run })`. `db` is the root database given to `drain` or `worker`. Read committed rows with it.
 - An effect that needs nothing has three arguments. An effect that needs a service has four: the third is `{ mailer: need<Mailer>() }`, with `need` from `@arki/journal`. The handler then reads `mailer` from its context, typed. Do not wrap an effect in a function to pass a service in.
-- Where the service comes from: a plain app gives it once, in `j.compose({ ..., services: { mailer } })`. In a Dot app it is a service of the feature that lists the effect, and the feature declares it in `needs`. A missing service is a compile error. `j.compose` and the Dot boot also throw, and the message names the effect and the need.
+- Where the service comes from: a plain app gives it once, in `j.compose({ ..., services: { mailer } })`. In a Dot app it is a service of the feature that lists the effect, and the feature declares it in `needs`. A missing service is a compile error. `j.compose` and the feature's boot in a Dot app also throw, and the message names the effect and the need.
 - A need cannot be named `jobId`, `signal`, `db` or `run`. `j.effect` throws when the effect is defined.
 - `run(command, input, meta)` is `journal.run` on that same database: its own transaction, committed before it returns. `meta` is required, and the library never picks an actor. It works the same in a plain app and in a Dot app.
 - If the command throws, the effect fails: nothing of the command is committed and the job is retried. If the effect fails after `run` returned, the command stays committed and runs again on the retry. Make the command safe to run twice. The usual key is `jobId`.
 - `jobId` is the same on every retry. An effect can run more than once, so pass `jobId` on as an idempotency key.
 - Where it is registered: under `effects` in `journal.root.ts`, or in the feature's `journalHandlers` in a Dot app. Effect names are unique per journal.
-- Who runs the worker: a plain app calls `journal.worker(db).start()` once per process and `stop()` on shutdown. In a Dot app the `journal(...)` plugin does both.
+- Who runs the worker: a plain app calls `journal.worker(db).start()` once per process and `stop()` on shutdown. In a Dot app, `.serve(journalWorker())` does both.
 - Which process runs the worker: an effect runs in the process that runs the worker. If an effect talks to something that lives in memory (an event emitter, a socket list, a cache), run the worker in the process that holds it. A worker in another process claims the job and the in-memory listeners never hear it. Tests do not catch this, because a test is one process.
 - `wake`: `journal.run(db, ...)` on the root database wakes the worker after its commit. After a transaction of your own, call `journal.wake()` yourself. Other processes find the job by polling.
 - A failing effect does not reach the caller. Its error is stored on the job row (`last_error`). The job is retried and marked dead after 8 failed attempts.
@@ -164,6 +164,7 @@ export const publicProcedure = os.use(appErrors).use(commandErrors());
 - `source` is the root database or a transaction, with the rules of `journal.run`. On the root database each call commits and wakes the worker. On a transaction the call joins it; the caller commits and then calls `journal.wake()`.
 - A bound runner has the type `CommandRunner`, the type of a command context's `run`. Pass it to code that takes one, for example `paymentsJournal.writes(runCommand)` of `@arki/payments`.
 - A rule that rejects the request throws `new CommandError(code, message)`. The command rolls back and the caller gets the same error. The four codes are in [Rejected rules](#rejected-rules-commanderror).
+- A permission check goes in `j.command(name, input, handler, { authorize: (input, { tx, meta }) => ... })`, not in the handler. A call with an `idempotencyKey` that replays a receipt never runs the handler, but it always runs `authorize` first.
 - An oRPC app adds `commandErrors()` to its procedure builders once. Procedures then need no try/catch around a command. Any other host matches with `isCommandError(error, code?)`.
 - `journal.run(source, command, input, meta)` is the long form. It parses the input and `meta`, opens the transaction, and returns what the handler returns.
 - From an effect, call `ctx.run(command, input, meta)`. It is `journal.run` on the worker's root database.
@@ -241,9 +242,9 @@ This is the only copy of this table. The message texts are in `src/errors.ts`. A
 
 ### Dot boot errors
 
-- `JOURNAL_PLUGIN_E001`, a `DotPluginError`: a feature token holds a `journal` slice that `journalHandlers` did not make. Declare the slice with `journalHandlers({ projections, effects })`.
-- `journal: duplicate effect name "x" (features "feature.orders" and "feature.billing")`: two features list a handler with the same name. Rename one. Projections get the same message with `projection`.
-- `journal: effect "x" needs "mailer", but no service with that name was given; ...`: thrown by `j.compose` in a plain app and at boot in a Dot app. Plain app: add `mailer` to `services` in `j.compose`. Dot app: add it to the `needs` of the feature that lists the effect.
+- `ARKI_JOURNAL_PLUGIN_E001`, a `DotPluginError`: a feature lists a `journal` slice that `journalHandlers` did not make. Declare the slice with `journalHandlers({ projections, effects })`.
+- `journal: duplicate effect name "x" (features "orders" and "billing")`: two features list a handler with the same name. Rename one. Projections get the same message with `projection`.
+- `journal: effect "x" needs "mailer", but no service with that name was given; ...`: thrown by `j.compose` in a plain app, and at the boot of the feature that lists the effect in a Dot app. A journal composed with `services: 'worker'` throws it from `worker` or `drain` instead. Plain app: add `mailer` to `services` in `j.compose`. Dot app: add it to the `needs` of the feature that lists the effect.
 - `journal: effect "x" has a need named "db", ...`: thrown by `j.effect`. The names `jobId`, `signal`, `db` and `run` are taken. Give the need another name.
 
 ## Recovery verbs
@@ -256,18 +257,18 @@ This is the only copy of this table. The message texts are in `src/errors.ts`. A
 | `verify(db, entity, id)`                         | A database or a transaction        | `{ ok: true }`, or `{ ok: false, expected, actual }`.                          | To check one stored row against its log. It compares only the columns that reducers set.                                                                                                    |
 | `repair(db, entity, id)`                         | A database or a transaction        | The stored row after the repair, or `null`.                                    | The row is wrong and the history is complete. It writes no event, runs no projection and creates no job.                                                                                    |
 | `rerun(db, projection, { afterSeq, batchSize })` | A database that opens transactions | `{ events }`: how many events it handled.                                      | To fill a new read model or rebuild a lost one. Every handler runs again, so empty a counting read model first.                                                                             |
-| `drain(db, { batchSize, signal })`               | The root database only             | How many jobs it claimed.                                                      | To run one batch of due jobs by hand, in a test or a script. The worker calls it in a loop.                                                                                                 |
+| `drain(db, { batchSize, signal, services })`     | The root database only             | How many jobs it claimed.                                                      | To run one batch of due jobs by hand, in a test or a script. The worker calls it in a loop.                                                                                                 |
 
 ## Dot
 
-`@arki/journal/dot` exports the plugin `journal(...)` and the feature slice `journalHandlers(...)`. The code is in `src/dot.ts`.
+`@arki/journal/dot` exports the driven adapter `journal(...)` (for `.use()`), the driving adapter `journalWorker(...)` (for `.serve()`) and the feature slice `journalHandlers(...)`. The code is in `src/dot.ts`.
 
-| Question                  | Plain app                                             | Dot app                                                                          |
-| ------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Where handlers are listed | One `journal.root.ts` calls `j.compose(...)`.         | Each feature lists its own with `journalHandlers(...)`. There is no root file.   |
-| Who builds the journal    | Your code.                                            | The plugin: `journal({ j, tables, features })`. It publishes `services.journal`. |
-| Who runs the worker       | Your code: `journal.worker(db)`, `start()`, `stop()`. | The plugin, between `start` and `stop`. Pass `worker: false` to turn it off.     |
-| What an effect needs      | `services` in `j.compose(...)`, once for the app.     | The services of the feature that lists the effect. It declares them in `needs`.  |
+| Question                  | Plain app                                             | Dot app                                                                                   |
+| ------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Where handlers are listed | One `journal.root.ts` calls `j.compose(...)`.         | Each feature lists its own with `journalHandlers(...)`. There is no root file.            |
+| Who builds the journal    | Your code.                                            | `journal({ j, tables })`, from the mounted features. It publishes `services.journal`.     |
+| Who runs the worker       | Your code: `journal.worker(db)`, `start()`, `stop()`. | `.serve(journalWorker())`, between `start` and `stop`. A process without it runs no jobs. |
+| What an effect needs      | `services` in `j.compose(...)`, once for the app.     | The services of the feature that lists the effect. It declares them in `needs`.           |
 
 | Where the door is bound | The request context: `journal.bind(db, { actorId })`. | The gateway's context factory: `services.journal.bind(services.db, { actorId })`. |
 
@@ -275,7 +276,9 @@ The code for both wirings is in the [README, Dot](../README.md#dot).
 
 The gateway binds the door once per request. Its context factory reads the session and puts `run: services.journal.bind(services.db, { actorId })` on the context. A procedure then calls `context.run(command, input)`. The plugin does not bind for you: only the app knows the actor.
 
-An effect runs a command with `ctx.run` in both wirings. In feature mode the journal is built after the features, and that is fine: the journal hands `run` to the effect when the job runs.
+An effect runs a command with `ctx.run` in both wirings. The journal hands `run` to the effect when the job runs.
+
+In feature mode the journal is built before the features, from their `journalHandlers` declarations, so a feature can need it. Effects and taps still need the features' booted services. The journal is therefore composed with `services: 'worker'`: a write only queues jobs and never needs those services. `journalWorker()` reads each feature's services from its slice record and passes them to `journal.worker(db, { services })`, per effect and tap.
 
 ## Shared packages
 
@@ -308,7 +311,7 @@ export function billingJournal<Meta extends z.ZodObject, Tx extends TransactionS
 These look odd. Each one is needed.
 
 - `ownHandler` with `Object.hasOwn` in `src/handlers.ts`: an event type named `toString` must not find a handler on the prototype.
-- `bindEffect` in `src/handlers.ts` runs for every effect, also for one without needs, and a Dot app runs it twice (the bridge, then `j.compose`): it is the one place where a need gets its service and where a missing service is caught.
+- `bindEffect` in `src/handlers.ts` runs for every effect, also for one without needs, and a worker runs it again on every drain for a journal composed with `services: 'worker'`: it is the one place where a need gets its service and where a missing service is caught.
 - `need<T>()` is the journal's own marker, not Dot's `service<T>()`: the core must load and type-check without `@arki/dot`, and Dot keeps the key of its marker private.
 - `const E` on `compose` (`src/api.ts`) and `journalHandlers` (`src/dot.ts`): without it TypeScript reads `[plainEffect, effectWithNeeds]` as a list of plain effects, and a missing service is no longer a compile error.
 - The module-scoped `WeakMap` in `src/transaction-guard.ts`: two journals on one transaction share its savepoint stack, so they must share this guard.

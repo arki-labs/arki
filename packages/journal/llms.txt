@@ -5,7 +5,7 @@
 ## Import paths
 - `@arki/journal`: the core. `initJournal`, `need`, `CommandError`, `isCommandError`, `JournalError`, `isJournalError` and the types.
 - `@arki/journal/pg`: `journalTables()`, the two tables (`journal_events`, `journal_jobs`) for the app's schema.
-- `@arki/journal/dot`: optional. The `@arki/dot` plugin `journal(...)` and the feature slice `journalHandlers(...)`.
+- `@arki/journal/dot`: optional. The `@arki/dot` adapters `journal(...)` (driven, for `.use()`) and `journalWorker(...)` (driving, for `.serve()`), and the feature slice `journalHandlers(...)`.
 - `@arki/journal/orpc`: optional. The oRPC middleware `commandErrors()` and the function `toORPCError(error)`.
 
 ## Start here

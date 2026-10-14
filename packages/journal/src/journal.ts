@@ -20,6 +20,7 @@ import type {
   EntityTable,
   IdTable,
   KeyName,
+  Needs,
   Projection,
   RootDb,
   SingleKey,
@@ -30,7 +31,7 @@ import { createCommandRunner } from './command.js';
 import { defineEntity } from './entity.js';
 import { JournalError } from './errors.js';
 import { defineEvent } from './event.js';
-import { bindEffect, bindTap, defineProjection, effectFor, tapFor } from './handlers.js';
+import { bindEffect, bindHandlers, bindTap, defineProjection, effectFor, tapFor } from './handlers.js';
 import { createHistory } from './history.js';
 import { createHookPoint } from './hooks.js';
 import {
@@ -114,13 +115,20 @@ function createInit<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, 
   return {
     event: defineEvent,
     entity,
-    command: (name, input, handler) => ({ name, input, handler }),
+    command: (name, input, handler, options) =>
+      options?.authorize === undefined
+        ? { name, input, handler }
+        : { name, input, handler, authorize: options.authorize },
     projection: (name, entity, on, opts) => defineProjection(name, entity, on, opts),
     effect: effectFor<MetaOut, AppDb, RootCommandRunner<Meta, Tx>>(),
     tap: tapFor<MetaOut, AppDb>(),
     compose: config => {
-      const effects = (config.effects ?? []).map(effect => bindEffect(effect, config.services ?? {}));
-      const taps = (config.taps ?? []).map(tap => bindTap(tap, config.services ?? {}));
+      // `'worker'`: the handlers keep their needs, and each worker or drain gives the services.
+      const services = config.services === 'worker' ? undefined : (config.services ?? {});
+      const effects = (config.effects ?? []).map(effect =>
+        services === undefined ? effect : bindEffect(effect, services),
+      );
+      const taps = (config.taps ?? []).map(tap => (services === undefined ? tap : bindTap(tap, services)));
       return createJournal<Meta, Tx, AppDb>(metaSchema, config.tables, config.projections ?? [], effects, taps);
     },
   };
@@ -143,8 +151,9 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
   metaSchema: Meta,
   tables: JournalTables,
   projections: readonly Projection<z.output<Meta>, Tx>[],
-  effects: readonly Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>>[],
-  taps: readonly Tap<z.output<Meta>, AppDb>[] = [],
+  /** An effect or a tap may still have needs (`services: 'worker'`): only the worker runs them, with its `services`. */
+  effects: readonly Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>, Needs>[],
+  taps: readonly Tap<z.output<Meta>, AppDb, Needs>[] = [],
 ): Journal<Meta, Tx, AppDb> {
   assertUniqueNames('tap', taps);
   const eventsSchema = getTableConfig(tables.events).schema;
@@ -196,6 +205,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     drain: (db, opts) => journal.drain(db, opts),
     catchUp: (db, opts) => journal.catchUp(db, opts),
     dispatch,
+    checkServices: services => void bindHandlers({ effects, taps }, services),
     tapNames: taps.map(tap => tap.name),
   });
   const strandedJobs = createStrandedJobs({ tables, effectNames: effects.map(effect => effect.name) });

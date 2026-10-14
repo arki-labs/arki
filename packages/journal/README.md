@@ -152,6 +152,8 @@ A webhook or a retried request can run the same command twice. `journal.run(db, 
 
 The result must survive JSON, because the replay returns the stored form; a result with a `Date` or a class instance fails the first run with `UNSTABLE_SCHEMA`. Return plain data: an id, a status, a version. A key from outside is scoped by the app: `${tenant}:${eventId}`, never the bare client value. A bound runner and an effect's `ctx.run` take the key per call: `runAs(cmd, input, { idempotencyKey })`.
 
+A replay does not run the handler, so a permission check inside the handler does not run either. Put it in the command's `authorize` option: `j.command(name, input, handler, { authorize: (input, { tx, meta }) => ... })`. It runs inside the transaction on every call, a replay included, before the stored result is returned; it throws (a `CommandError` `FORBIDDEN`, usually) to refuse, and a refused replay changes nothing.
+
 Receipts hold inputs and results, so they can hold personal data, and `forget` does not touch them. An app that keys personal flows prunes on a schedule: `journal.pruneReceipts(db, { before })`.
 
 ### Where commands run from
@@ -432,7 +434,11 @@ The rules, all enforced:
 
 ## Dot
 
-`@arki/journal/dot` connects the journal to an `@arki/dot` app. It exports the plugin `journal(...)` and the feature slice `journalHandlers(...)`. `@arki/dot` is an optional peer. The core entry never imports it.
+`@arki/journal/dot` connects the journal to an `@arki/dot` app. It exports two adapters and one feature slice. `@arki/dot` is an optional peer. The core entry never imports it.
+
+- `journal(...)`: the driven part, for `.use()`. It publishes `services.journal`, so features can write through it.
+- `journalWorker(...)`: the driving part, for `.serve()`. It runs effects, taps and async projections between `start` and `stop`.
+- `journalHandlers(...)`: the feature slice. A feature lists its projections, effects and taps with it.
 
 **Not a Dot app.** List the handlers in one `journal.root.ts`. Start and stop the worker yourself.
 
@@ -447,11 +453,11 @@ await worker.start();
 await worker.stop();
 ```
 
-**Dot app.** Each feature lists its own handlers with `journalHandlers`. The plugin builds the journal from the feature list. There is no root file: `features.ts` is the only list.
+**Dot app.** Each feature lists its own handlers with `journalHandlers`. The app lists its features once, in `.features([...])`. Both adapters read that list. There is no root file.
 
 ```ts
 // src/features/orders/feature.ts
-export const orders = defineFeature('orders', {
+export const orders = feature('orders', {
   needs: { mailer: service<Mailer>() },
   use: [journalHandlers({ projections: [customerStats], effects: [orderMail] })],
 });
@@ -460,23 +466,25 @@ export const orders = defineFeature('orders', {
 export const app = defineApp('shop')
   .use(db())
   .use(mailer())
-  .useAll(plugs(features))
-  .use(journal({ j, tables: journalTables(), features: tokens(features) }));
+  .use(journal({ j, tables: journalTables() }))
+  .features([orders, billing])
+  .serve(journalWorker());
 
 // The gateway binds the door once per request, in its context factory. A procedure calls `context.run`.
 const run = services.journal.bind(services.db, { actorId: user.id });
 await run(payOrder, input);
 ```
 
-- `journal(...)` publishes `services.journal`. It needs the root database under the `db` key. A transaction there is a compile error.
-- It starts one worker on `start` and stops it on `stop`. Options: `worker: false` (no worker in this process), `pollMs`, `batchSize`.
-- `effects` is a list. An effect with needs gets them from the booted services of the feature that lists it, by name. The feature must declare each one in its own `needs`, or it does not compile.
+- `journal(...)` boots before the features. It reads their `journalHandlers` declarations, not their booted services, so a feature can `need` the journal and write through it, even in its own `boot`.
+- This works because a write never needs an effect's services. A write runs the inline projections, which get only the transaction, and queues each effect's job. The journal is composed with `services: 'worker'`. `journalWorker()` gives each effect and tap its services when it runs it.
+- `journal(...)` needs the root database under the `db` key. A transaction there is a compile error.
+- `journalWorker()` starts one worker on `start` and stops it on `stop`. Options: `pollMs`, `batchSize`, `leaseSeconds`, `listen`, `taps`. A process that serves no worker still writes. Its jobs wait for a process that serves one.
+- An effect with needs gets them from the booted services of the feature that lists it, by name. The feature must declare each one in its own `needs`, or it does not compile. A missing service fails that feature's boot.
 - Two features may use the same need name for two different services. Each effect gets the service of its own feature.
 - Every effect is an action in the app manifest (`binding: 'journal'`, id `<name>.run`). Projections are never listed: they run inside the write.
 - Two features with the same projection name or the same effect name fail the boot. The message names the duplicate and both features.
 - A feature without `journalHandlers` adds nothing. That is allowed.
-- The feature tokens are needs at run time only. A feature mounted after `journal(...)`, or not mounted, fails at boot and not at compile time.
-- An app that composed its journal itself passes it: `journal({ journal })`.
+- An app that composed its journal itself passes it: `journal({ journal })`. Serve `journalWorker()` if it has effects, taps or async projections. `journalHandlers` slices are not read in this mode.
 - A second journal uses Dot's `rename`: `rename(journal({ journal: reports }), { journal: 'reportsJournal' }, 'reports-journal')`.
 - An effect runs a command with `ctx.run` in both modes. It needs no closure over the journal.
 
