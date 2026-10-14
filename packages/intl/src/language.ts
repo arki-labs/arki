@@ -1,3 +1,5 @@
+import { isLangCode } from 'is-language-code';
+
 export {
   type IsoType as LanguageIsoCode,
   getAll639_1,
@@ -10,3 +12,6 @@ export {
   getNativeName,
   isValid,
 } from 'all-iso-language-codes';
+
+/** Checks a BCP 47 tag such as `en-US` against the language lists. Returns the `is-language-code` result. */
+export const isLanguageCode = (value: string) => isLangCode(value);

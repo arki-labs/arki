@@ -37,11 +37,13 @@
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "vitest run"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "all-iso-language-codes": "catalog:",
+    "is-language-code": "catalog:",
     "use-intl": "catalog:"
   },
   "devDependencies": {
@@ -50,7 +52,8 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@types/react": "catalog:react",
-    "@types/react-dom": "catalog:react"
+    "@types/react-dom": "catalog:react",
+    "vitest": "catalog:"
   },
   "sideEffects": false
 }

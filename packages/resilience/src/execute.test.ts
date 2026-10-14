@@ -6,7 +6,6 @@ import {
   createRetryPolicy,
   isBrokenCircuitError,
   noop,
-  withCircuitBreaker,
   withResilience,
   withRetry,
   withTimeout,
@@ -85,19 +84,5 @@ describe('execution helpers', () => {
 
     expect(isBrokenCircuitError(third)).toBe(true);
     expect(calls).toBe(2);
-  });
-
-  it('withCircuitBreaker never opens because each call builds a fresh breaker', async () => {
-    let calls = 0;
-    const failing = (): never => {
-      calls += 1;
-      throw new Error('downstream down');
-    };
-
-    await expect(withCircuitBreaker(failing, { consecutiveFailures: 2 })).rejects.toThrow('downstream down');
-    await expect(withCircuitBreaker(failing, { consecutiveFailures: 2 })).rejects.toThrow('downstream down');
-    await expect(withCircuitBreaker(failing, { consecutiveFailures: 2 })).rejects.toThrow('downstream down');
-
-    expect(calls).toBe(3);
   });
 });

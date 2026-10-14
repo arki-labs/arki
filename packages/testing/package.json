@@ -10,10 +10,60 @@
       "import": "./src/index.ts",
       "node": "./src/index.ts"
     },
-    "./*": {
-      "types": "./dist/src/*.d.ts",
-      "import": "./src/*.ts",
-      "node": "./src/*.ts"
+    "./assertions": {
+      "types": "./dist/src/assertions.d.ts",
+      "import": "./src/assertions.ts",
+      "node": "./src/assertions.ts"
+    },
+    "./containers": {
+      "types": "./dist/src/containers.d.ts",
+      "import": "./src/containers.ts",
+      "node": "./src/containers.ts"
+    },
+    "./debug": {
+      "types": "./dist/src/debug.d.ts",
+      "import": "./src/debug.ts",
+      "node": "./src/debug.ts"
+    },
+    "./factories": {
+      "types": "./dist/src/factories.d.ts",
+      "import": "./src/factories.ts",
+      "node": "./src/factories.ts"
+    },
+    "./integration-tester": {
+      "types": "./dist/src/integration-tester.d.ts",
+      "import": "./src/integration-tester.ts",
+      "node": "./src/integration-tester.ts"
+    },
+    "./msw": {
+      "types": "./dist/src/msw.d.ts",
+      "import": "./src/msw.ts",
+      "node": "./src/msw.ts"
+    },
+    "./performance": {
+      "types": "./dist/src/performance.d.ts",
+      "import": "./src/performance.ts",
+      "node": "./src/performance.ts"
+    },
+    "./tester-builder": {
+      "types": "./dist/src/tester-builder.d.ts",
+      "import": "./src/tester-builder.ts",
+      "node": "./src/tester-builder.ts"
+    },
+    "./timestamps": {
+      "types": "./dist/src/timestamps.d.ts",
+      "import": "./src/timestamps.ts",
+      "node": "./src/timestamps.ts"
+    },
+    "./types": {
+      "types": "./dist/src/types.d.ts",
+      "import": "./src/types.ts",
+      "node": "./src/types.ts"
+    },
+    "./vitest-setup": {
+      "types": "./dist/src/vitest-setup.d.ts",
+      "import": "./src/vitest-setup.ts",
+      "node": "./src/vitest-setup.ts"
     },
     "./package.json": "./package.json"
   },
