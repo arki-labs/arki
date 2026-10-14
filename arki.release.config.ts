@@ -104,7 +104,7 @@ export const config: ReleaseConfig = {
       label: 'Wave 5 — Specialized',
       // `@arki/money` joined 2026-10-13 (exact money on `@arki/math`, so not
       // Foundation). Other candidates (`@arki/ai`, `@arki/rich-text`,
-      // `@arki/images`, `@arki/diff-engine`) are still `private: true`; they
+      // `@arki/images`, `@arki/diff`) are still `private: true`; they
       // join once their internals stabilise. `@arki/bench` joined 2026-10-13
       // (benchmark toolkit on mitata; no @arki deps, dev-time tool).
       // `@arki/payments` joined 2026-10-13 (Stripe provider, plans, subscriptions,

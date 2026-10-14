@@ -47,7 +47,7 @@ Small, unpublished, single-job packages become entries of one product. Nothing i
 | `usfm-to-json` | `@arki/formats/usfm` | 0 |
 | `md-to-pdf` | stays its own product (React-PDF is a heavy, different dependency) | 0 |
 | `domains-availability`, `domains-tlds`, `namecheap` | `@arki/domains` with `/availability`, `/tlds`, `/namecheap` | 5, 1, 0 |
-| `text-operations` | `@arki/text/operations` (`text/src/index.ts:15` already re-exports it whole) | 1 |
+| `text-operations` | the root of `@arki/text` (it was the package's only content: `text/src/index.ts:15` re-exported it whole) | 1 |
 | `spinners` | `@arki/icons/spinners` | 0 |
 | `diff-engine` | rename `@arki/diff` (private) | 5 |
 
@@ -90,7 +90,7 @@ First run (2026-10-14): the only layer violations are `images → ui, sitekit, d
 | B1 | `contracts/drizzle` (§3). Minor changeset. |
 | B2 | Obsolete — `event-sourcing` is gone. Close it. |
 | B3 | Vitest for `tanstack-start` pure parts (router, server path handling, request-isolated query client); `seo.ts` moves to `@arki/seo` with its tests; purity leg on every entry. |
-| B4 | One Markdown engine (unified/remark) in `formats`; `marked` leaves (`formats/src/markdown.ts:404`, `:467`). Golden fixtures: GFM, raw HTML, sanitizing, malformed input. |
+| B4 | One Markdown engine (unified/remark) in `formats`; `marked` leaves (`formats/src/markdown.ts:404`, `:467`). Golden fixtures: GFM, raw HTML, sanitizing, malformed input. `src/html.ts` uses `DOMParser`/`Element` with no DOM lib (typecheck fails today): it is a browser adapter, so it moves behind `@arki/formats/browser`. |
 | B5 | `images/react` entry (§3). |
 | B6 | sitekit split (§3). 39 apps update four import prefixes. |
 | B7 | `content`: `.` (models, search, feeds — portable, time injected), `/node` (build pipeline: sharp, unified), `/react`. Tests for search ranking and feed ordering. |

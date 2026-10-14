@@ -47,10 +47,4 @@ describe('checkLibrary', () => {
       'folder "other" should be "demo" (folder = name)',
     ]);
   });
-
-  it('exempts workspaces still nested under converters, domains and text/operations until the next wave moves them', () => {
-    for (const nested of ['packages/converters/other', 'packages/domains/other', 'packages/text/operations']) {
-      expect(checkLibrary(packageDir(nested, good, { tags: ['web'] })).errors).toEqual([]);
-    }
-  });
 });

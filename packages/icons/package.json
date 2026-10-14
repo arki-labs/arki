@@ -70,6 +70,11 @@
       "import": "./src/phosphor-defaults.tsx",
       "browser": "./src/phosphor-defaults.tsx"
     },
+    "./spinners": {
+      "types": "./dist/src/spinners/index.d.ts",
+      "import": "./src/spinners/index.ts",
+      "browser": "./src/spinners/index.ts"
+    },
     "./*": {
       "types": "./dist/src/*.d.ts",
       "import": "./src/*.ts",

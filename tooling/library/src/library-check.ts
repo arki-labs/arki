@@ -30,10 +30,6 @@ function readTags(dir: string): string[] {
   return turboSchema.parse(JSON.parse(raw)).tags ?? [];
 }
 
-// Workspaces still nested under these paths are exempt from the folder check.
-// The next flatten wave moves them and removes this allow-list.
-const stillNested = /\/packages\/(?:converters\/|domains\/|text\/operations$)/;
-
 const underBuildOrSource = /^\.\/(?:dist|src)\//;
 
 export function checkLibrary(dir: string): CheckResult {
@@ -43,7 +39,7 @@ export function checkLibrary(dir: string): CheckResult {
 
   const folder = path.basename(path.resolve(dir));
   const expected = manifest.name.replace(/^@arki\//, '');
-  if (folder !== expected && !stillNested.test(path.resolve(dir).split(path.sep).join('/'))) {
+  if (folder !== expected) {
     errors.push(`folder "${folder}" should be "${expected}" (folder = name)`);
   }
 
