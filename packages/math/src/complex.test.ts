@@ -237,6 +237,23 @@ describe('roots and powers', () => {
     }
   });
 
+  // sqrt computes |z| as √(re² + im²) only while re² + im² is a normal float,
+  // and falls back to Math.hypot outside it: both sides of each edge must stay right.
+  it('square roots stay right on both sides of the fast-modulus range', () => {
+    for (const z of [
+      complex(1e-144, -3e-145),
+      complex(-1e-146, 1e-146),
+      complex(3e-170, 1),
+      complex(-1.2e154, 1e153),
+      complex(1.4e154, -1e154),
+    ]) {
+      const root = z.sqrt();
+      expect(Number.isFinite(root.re) && Number.isFinite(root.im)).toBe(true);
+      close(root.times(root), z, 1e-13);
+    }
+    expect(complex(-1e-160).sqrt().eq(complex(0, 1e-80))).toBe(true);
+  });
+
   // Roots shrink the modulus, so a root of a value at the top of the float range
   // fits easily: an overflow on the way there would be a spurious error.
   it('takes roots of values whose modulus is beyond the float range', () => {

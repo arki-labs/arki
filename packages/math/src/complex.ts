@@ -305,8 +305,13 @@ export class Complex {
   sqrt(): Complex {
     if (this.isZero()) return Complex.ZERO;
     const { re, im } = this;
+    // |z| is √(re² + im²) while that sum is a normal float: as accurate as
+    // Math.hypot here (same max error against 80-digit references) and several
+    // times faster in V8. Math.hypot takes over near overflow and underflow.
+    const squares = re * re + im * im;
+    const modulus = squares > 1e-290 && squares < Infinity ? Math.sqrt(squares) : Math.hypot(re, im);
     // t = sqrt((|re| + |z|) / 2) never cancels; the other part is im / 2t.
-    let t = Math.sqrt((Math.abs(re) + Math.hypot(re, im)) / 2);
+    let t = Math.sqrt((Math.abs(re) + modulus) / 2);
     // Near the top of the float range |re| + |z| overflows though t does not:
     // t = 2 sqrt((|re/4| + |z/4|) / 2), and dividing such large parts by 4 is exact.
     if (t === Infinity) t = 2 * Math.sqrt((Math.abs(re / 4) + Math.hypot(re / 4, im / 4)) / 2);
