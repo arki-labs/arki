@@ -48,7 +48,12 @@ export type GroupNode = { readonly kind: 'group'; readonly inner: Node; readonly
 
 export type Node = NumberNode | NameNode | UnaryNode | BinaryNode | CallNode | FactorialNode | GroupNode;
 
-export type WarningCode = 'implicit-after-division' | 'implicit-after-power';
+/**
+ * `implicit-after-division` and `implicit-after-power` come from `parse`;
+ * `split-after-division` comes from `compile`, which reads `a/bc` as `a/(b·c)`
+ * when it splits `bc` into letters.
+ */
+export type WarningCode = 'implicit-after-division' | 'implicit-after-power' | 'split-after-division';
 
 /** A legal but easily misread input, such as `1/2x` (read as `(1/2)·x`). */
 export type Warning = {

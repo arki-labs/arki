@@ -33,7 +33,11 @@ const NODE_KEYS: Readonly<Record<Node['kind'], readonly string[]>> = {
 };
 
 const NODE_KINDS: readonly Node['kind'][] = ['number', 'name', 'unary', 'binary', 'call', 'factorial', 'group'];
-const WARNING_CODES: readonly WarningCode[] = ['implicit-after-division', 'implicit-after-power'];
+const WARNING_CODES: readonly WarningCode[] = [
+  'implicit-after-division',
+  'implicit-after-power',
+  'split-after-division',
+];
 const BINARY_OPS = ['+', '-', '*', '/', '^'] as const;
 const NOTATIONS: readonly CallNotation[] = ['call', 'bars', 'radical'];
 const NO_SPAN: Span = { start: 0, end: 0 };

@@ -17,7 +17,7 @@ describe('defineLanguage', () => {
   });
 
   it('extends a language with host functions and constants', () => {
-    expect(physics.functionSpec('hypot')).toEqual({ arity: [2, 16], latex: '\\operatorname{hypot}' });
+    expect(physics.functionSpec('hypot')).toEqual({ arity: [2, 16], latex: '\\operatorname{hypot}', cost: 1 });
     expect(physics.functionSpec('sin')).toEqual(scientific.functionSpec('sin'));
     const expr = parse('hypot(x, g) + sin(x)', { language: physics });
     // names() classifies against the language it is given, like parse.
@@ -51,11 +51,20 @@ describe('defineLanguage', () => {
     expect(() => defineLanguage({ extends: scientific, constants: { pi: {} } })).toThrow(/conflict/);
   });
 
+  it('takes a step cost per host function, a positive integer, so the steps budget can count slow functions', () => {
+    const lang = defineLanguage({ functions: { slow: { arity: 1, cost: 40 } } });
+    expect(lang.functionSpec('slow')?.cost).toBe(40);
+    for (const cost of [0, -1, 1.5, Number.NaN]) {
+      expect(() => defineLanguage({ functions: { slow: { arity: 1, cost } } })).toThrow(InvalidArgumentError);
+    }
+  });
+
   it('cannot be changed after it is built', () => {
     expect(Object.isFrozen(scientific)).toBe(true);
     expect(Object.isFrozen(scientific.functionSpec('log'))).toBe(true);
-    const listed = scientific.functionNames();
+    const listed: string[] = scientific.functionNames();
     listed.push('eval');
+    expect(scientific.functionNames()).not.toContain('eval');
     expect(scientific.functionSpec('eval')).toBeUndefined();
   });
 
