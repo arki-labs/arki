@@ -9,14 +9,14 @@
  * - Registry traversal (nested job organization)
  */
 
-import type { Job as BullMQJob, RepeatOptions } from 'bullmq';
+import type { Job as BullMQJob, QueueOptions, RepeatOptions } from 'bullmq';
 import { FlowProducer, Queue, Worker } from 'bullmq';
 
 import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { QueueConnection } from './redis-connection.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
 import type { BullMQQueueInstance, FlowDefinition, ScheduleDefinition } from './types/builder.ts';
-import type { JobDefinition } from './types/job.ts';
+import type { JobDefinition, JobOptions } from './types/job.ts';
 import { debugFlow, debugJob, debugRegister, debugSchedule, debugWorker } from './debug.ts';
 import { duplicateScheduleError } from './errors.ts';
 import { createJobContext, executeMiddlewareChain } from './middleware.ts';
@@ -30,6 +30,27 @@ import { getWorkerBackoffStrategy, toBullMQBackoff } from './retry-strategies.ts
 type Registry = {
   [key: string]: JobDefinition<unknown, unknown, unknown> | ScheduleDefinition | FlowDefinition | Registry;
 };
+
+/**
+ * The BullMQ queue options of one job's queue. Retry defaults live on the
+ * queue (not on each `add()`), so every producer of a job — the worker's own
+ * `trigger()` and the `queue()` DOT client — must build its queue from this.
+ */
+export function jobQueueOptions(
+  options: JobOptions | undefined,
+  connection: QueueConnection,
+  keyPrefix: string,
+): QueueOptions {
+  return {
+    connection: parseRedisConnection(connection),
+    prefix: keyPrefix,
+    defaultJobOptions: {
+      attempts: options?.retry?.attempts ?? 3,
+      backoff: toBullMQBackoff(options?.retry),
+      ...options?.bullmqOptions,
+    },
+  };
+}
 
 /** Job scheduler ids of schedules: `schedule:<schedule name>` on the job's queue */
 const SCHEDULER_ID_PREFIX = 'schedule:';
@@ -85,15 +106,7 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
       internalName: internal.name,
       value2: internal.options?.retry?.attempts ?? 3,
     });
-    const queue = new Queue(internal.name, {
-      connection: connectionConfig,
-      prefix: keyPrefix,
-      defaultJobOptions: {
-        attempts: internal.options?.retry?.attempts ?? 3,
-        backoff: toBullMQBackoff(internal.options?.retry),
-        ...internal.options?.bullmqOptions,
-      },
-    });
+    const queue = new Queue(internal.name, jobQueueOptions(internal.options, connection, keyPrefix));
 
     // Get custom backoff strategy if needed
     const backoffStrategy = getWorkerBackoffStrategy(internal.options?.retry);

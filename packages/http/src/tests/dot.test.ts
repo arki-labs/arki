@@ -1,6 +1,6 @@
 /**
- * The `http()` plugin inside a real DOT app: token-collected bundles, the
- * socketless fetch seam, manifest registration with schemas, real
+ * The `http()` driving adapter inside a real DOT app: routes from the
+ * app's mounted features and from token bundles, the socketless fetch seam, manifest registration with schemas, real
  * listening on an ephemeral port, drain-on-stop semantics, and the E005
  * drain-timeout watchdog.
  *
@@ -9,14 +9,15 @@
  * socket layer.
  */
 
+import { feature } from '@arki/dot/feature';
 import { defineApp, provide, service, token, plugin } from '@arki/dot/plugin';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import type { RouteBundle } from '../bundle.js';
-import { routes } from '../bundle.js';
+import { endpoints, routes } from '../bundle.js';
 import { route } from '../contract.js';
-import { http, registerRoutes } from '../dot.js';
+import { HTTP_PLUGIN_ERROR_CODES, http, registerRoutes } from '../dot.js';
 import { HTTP_ERROR_CODES } from '../error.js';
 
 const listOrders = route.get('/orders', {
@@ -30,7 +31,10 @@ const progress = route.sse('/orders/:id/progress', {
 });
 
 const OrdersRoutes = token<RouteBundle>()('orders.routes');
-const OrdersFeature = token<{ readonly routes?: RouteBundle }>()('feature.orders');
+const health = route.get('/health', {
+  id: 'health.get',
+  output: z.object({ ok: z.boolean() }),
+});
 
 type OrdersDb = { list(): { id: string }[] };
 
@@ -73,7 +77,7 @@ describe('http() plugin', () => {
     const app = await defineApp('http-test')
       .use(ordersDbPlugin)
       .use(ordersPlugin)
-      .use(http({ port: 0, bundles: [OrdersRoutes] }))
+      .serve(http({ port: 0, bundles: [OrdersRoutes] }))
       .boot();
 
     const { httpServer } = app.services;
@@ -97,31 +101,76 @@ describe('http() plugin', () => {
     await app.dispose();
   });
 
-  it('collects route bundles from feature tokens without declaring activator actions', async () => {
-    const featurePlugin = plugin({
-      name: 'orders-feature',
+  // The point of a driver: the app lists its features once, in
+  // `.features()`, and `.serve(http())` serves their routes. A second list
+  // inside http() would drift from the first.
+  it('serves the routes of every mounted feature without the app listing them again', async () => {
+    const orders = feature('orders', {
       needs: { ordersDb: service<OrdersDb>() },
       actions: [listOrders],
-      boot: ({ ordersDb }) =>
-        provide(
-          OrdersFeature,
-          {
-            routes: routes().bind(listOrders, () => ordersDb.list()),
-          },
-        ),
+      use: [endpoints(({ ordersDb }: { readonly ordersDb: OrdersDb }) => routes().bind(listOrders, () => ordersDb.list()))],
     });
+    // A feature with no HTTP surface is skipped, not an error.
+    const quiet = feature('quiet', {});
 
     const app = await defineApp('http-feature-test')
       .use(ordersDbPlugin)
-      .use(featurePlugin)
-      .use(http({ port: 0, features: [OrdersFeature] as const }))
+      .features([orders, quiet])
+      .serve(http({ port: 0 }))
       .boot();
 
     const res = await app.services.httpServer.fetch(new Request('http://in-process/orders'));
     expect(await res.json()).toEqual([{ id: 'o1' }]);
-    expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual(['orders-feature:orders.list']);
+    // Route contracts belong to the feature; the driver declares none of its own.
+    expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual(['orders:orders.list']);
 
     await app.dispose();
+  });
+
+  // Why http() belongs in `.serve()`: under `.use()` it would boot before
+  // the features, when their routes do not exist yet. The builder rejects
+  // it at compile time, so an app never serves a silently empty route table.
+  it('cannot be mounted with .use() ahead of the features it serves', () => {
+    const orders = feature('orders', {
+      actions: [listOrders],
+      use: [endpoints(() => routes().bind(listOrders, () => []))],
+    });
+
+    // @ts-expect-error — http() is a driving adapter: it belongs in .serve(), after .features()
+    const tooEarly = () => defineApp('http-too-early').use(http({ port: 0 })).features([orders]);
+    expect(tooEarly).toBeTypeOf('function');
+  });
+
+  it('serves token bundles and feature routes from one route table', async () => {
+    const status = feature('status', {
+      actions: [health],
+      use: [endpoints(() => routes().bind(health, () => ({ ok: true })))],
+    });
+
+    const app = await defineApp('http-mixed-test')
+      .use(ordersDbPlugin)
+      .use(ordersPlugin)
+      .features([status])
+      .serve(http({ port: 0, bundles: [OrdersRoutes] }))
+      .boot();
+
+    const { httpServer } = app.services;
+    const ordersRes = await httpServer.fetch(new Request('http://in-process/orders'));
+    expect(await ordersRes.json()).toEqual([{ id: 'o1' }]);
+    const healthRes = await httpServer.fetch(new Request('http://in-process/health'));
+    expect(await healthRes.json()).toEqual({ ok: true });
+
+    await app.dispose();
+  });
+
+  it('fails boot with E010 when a feature publishes a routes slice that is not a bundle', async () => {
+    const broken = feature('broken', {
+      use: [{ key: 'routes', actions: [], resolve: () => ({ not: 'a bundle' }) }],
+    });
+
+    await expect(defineApp('http-broken-slice').features([broken]).serve(http({ port: 0 })).boot()).rejects.toMatchObject({
+      cause: { code: HTTP_PLUGIN_ERROR_CODES.routesSliceInvalid },
+    });
   });
 
   it('start listens on an ephemeral port; stop drains in-flight requests before returning', async () => {
@@ -144,7 +193,7 @@ describe('http() plugin', () => {
 
     const app = await defineApp('http-drain')
       .use(slowPlugin)
-      .use(http({ port: 0, bundles: [SlowRoutes] }))
+      .serve(http({ port: 0, bundles: [SlowRoutes] }))
       .start();
 
     const url = app.services.httpServer.url();
@@ -188,7 +237,7 @@ describe('http() plugin', () => {
 
     const app = await defineApp('http-hang')
       .use(hangPlugin)
-      .use(http({ port: 0, bundles: [HangRoutes], drainTimeoutMs: 100 }))
+      .serve(http({ port: 0, bundles: [HangRoutes], drainTimeoutMs: 100 }))
       .start();
 
     const url = app.services.httpServer.url();
@@ -212,28 +261,13 @@ describe('http() plugin', () => {
   it('enforces bundle provision in the type system', () => {
     const Ghost = token<RouteBundle>()('ghost.routes');
     // @ts-expect-error — nothing provides ghost.routes, so the wiring guard rejects the composition
-    void defineApp('http-guard').use(http({ port: 0, bundles: [Ghost] }));
-  });
-
-  it('enforces feature token provision in the type system', () => {
-    const Ghost = token<{ readonly routes?: RouteBundle }>()('ghost.feature');
-    // @ts-expect-error — nothing provides ghost.feature, so the wiring guard rejects the composition
-    void defineApp('http-feature-guard').use(http({ port: 0, features: [Ghost] as const }));
+    void defineApp('http-guard').serve(http({ port: 0, bundles: [Ghost] }));
   });
 
   it('rejects the same bundle token listed twice', () => {
     try {
       http({ port: 0, bundles: [OrdersRoutes, OrdersRoutes] });
       expect.unreachable('duplicate bundle token must throw');
-    } catch (error) {
-      expect(error).toMatchObject({ code: HTTP_ERROR_CODES.duplicateRoute });
-    }
-  });
-
-  it('rejects the same feature token listed twice', () => {
-    try {
-      http({ port: 0, features: [OrdersFeature, OrdersFeature] as const });
-      expect.unreachable('duplicate feature token must throw');
     } catch (error) {
       expect(error).toMatchObject({ code: HTTP_ERROR_CODES.duplicateRoute });
     }

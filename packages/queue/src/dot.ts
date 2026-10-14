@@ -1,29 +1,43 @@
-import type { CtxOf, EmptyShape, NeedsShape, Plugin, Token, WireNeeds } from '@arki/dot/plugin';
-import { DotPluginError, plugin } from '@arki/dot/plugin';
+/**
+ * DOT adapters for `@arki/queue`, split along the hexagon:
+ *
+ *   defineApp('shop')
+ *     .use(queue({ connection }))          // driven: the client features enqueue with
+ *     .features([orders])                  // orders declares `use: [jobs(orderJobs)]`
+ *     .serve(queueWorker({ q, context }))  // driving: runs the mounted features' jobs
+ *
+ * `queue()` provides the `queue` service. `queueWorker()` is bound to the
+ * features the app mounted, so the app never lists them a second time.
+ * `durableScheduler()` is the BullMQ backend `@arki/schedule` uses.
+ */
+import type { AnyFeature, AnyFeatureSlice, Driver } from '@arki/dot/feature';
+import type { CtxOf, EmptyShape, NeedsShape, Plugin, Service, WireNeeds } from '@arki/dot/plugin';
+import { driver, sliceOf } from '@arki/dot/feature';
+import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
-import type { QueueInstanceOptions } from './create-queue.ts';
 import type { DurableScheduler, DurableSchedulerOptions } from './durable-scheduler.ts';
 import type { InternalFlowDefinition } from './flow-builder.ts';
+import type { QueueClient, QueueClientHandle, QueueClientOptions } from './queue-client.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
 import type { FlowDefinition, QueueBuilder, QueueInstance, ScheduleDefinition } from './types/builder.ts';
 import type { JobDefinition, JobOptions } from './types/job.ts';
 import type { QueueMeta } from './types/queue.ts';
+import { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
 import { debugWorker } from './debug.ts';
 import { createDurableScheduler } from './durable-scheduler.ts';
+import { createQueueClient } from './queue-client.ts';
 
-import { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
-
-export { QUEUE_ACTION_META_SCHEMA };
+export { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
+export type { QueueClient, QueueClientOptions } from './queue-client.ts';
 
 export const QUEUE_PLUGIN_ERROR_CODES = {
   startupTimeout: 'ARKI_QUEUE_E001',
   doubleStart: 'ARKI_QUEUE_E002',
   stopBeforeStart: 'ARKI_QUEUE_E003',
-  exclusiveModes: 'ARKI_QUEUE_E004',
-  featureMissing: 'ARKI_QUEUE_E005',
+  clientMissing: 'ARKI_QUEUE_E006',
 } as const;
 
-const QUEUE_RUNTIME_PLUGIN_VERSION = '2.1.0';
+const QUEUE_PLUGIN_VERSION = '3.0.0';
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
 
 type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
@@ -41,49 +55,6 @@ export type QueueDotAction = {
 };
 
 export type QueueRegistry = Record<string, unknown>;
-
-export type QueueFeatureToken = Token<object, string>;
-
-export type QueueRuntimeHandle = {
-  stop(): Promise<void>;
-};
-
-export type QueueRuntimeOptions<TNeeds extends NeedsShape & NoReservedKeys> = {
-  readonly name?: string;
-  readonly needs: TNeeds;
-  readonly registry: QueueRegistry;
-  readonly start: (services: CtxOf<TNeeds>) => Promise<QueueRuntimeHandle>;
-  readonly startupTimeoutMs?: number;
-  readonly blocking?: boolean;
-};
-
-export type QueueRuntimeFeatureOptions<
-  TNeeds extends NeedsShape & NoReservedKeys,
-  TContext,
-  TFeatures extends readonly QueueFeatureToken[],
-> = {
-  readonly name?: string;
-  readonly needs: TNeeds;
-  readonly q: QueueBuilder<TContext, QueueMeta>;
-  readonly features: TFeatures;
-  readonly context: (services: CtxOf<TNeeds>) => TContext | Promise<TContext>;
-  readonly connection: QueueInstanceOptions<TContext>['connection'];
-  readonly keyPrefix?: string;
-  readonly startupTimeoutMs?: number;
-  readonly blocking?: boolean;
-};
-
-export type QueueFeatureNeeds<TFeatures extends readonly QueueFeatureToken[]> = {
-  // Value = the token's OWN payload type: the kernel guard then checks
-  // exactly what the feature plugin provides. A payload without `queue`
-  // simply contributes nothing at collection time.
-  readonly [Tok in TFeatures[number] as Tok extends Token<unknown, infer K> ? K : never]: Tok extends Token<
-    infer TPayload,
-    string
-  >
-    ? TPayload
-    : never;
-};
 
 function isJobDefinition(value: unknown): value is JobDefinition<unknown, unknown, unknown> {
   return (
@@ -219,22 +190,58 @@ export function queueActions(registry: QueueRegistry): readonly QueueDotAction[]
   return [...queueConsumerActions(registry), ...queueProducerActions(registry)];
 }
 
-/** The `@arki/feature` slice contract a `jobs(...)` declaration produces. */
+/**
+ * The slice a `jobs(...)` declaration produces. The registry lands under
+ * `queue` in the feature's slice record, where `queueWorker()` collects it.
+ * The slice's manifest actions are the PRODUCER side only (the feature can
+ * enqueue these jobs wherever it is mounted); the consumer side belongs to
+ * the worker, which exists only in the process that runs the jobs.
+ */
 export type QueueFeatureSlice<TRegistry extends QueueRegistry> = {
   readonly key: 'queue';
   readonly actions: readonly QueueDotAction[];
+  readonly registry: TRegistry;
   readonly resolve: (services: unknown) => TRegistry;
 };
 
-/**
- * Declare a feature's queue registry as a boot-time slice
- * (`defineFeature(..., { use: [jobs(registry)] })`). The payload lands
- * under `queue` in the feature's slice token — where
- * `queueRuntime({ features })` collects it — and the derived actions
- * join the feature's manifest.
- */
+/** Declare a feature's jobs: `feature('orders', { use: [jobs(orderJobs)] })`. */
 export function jobs<const TRegistry extends QueueRegistry>(registry: TRegistry): QueueFeatureSlice<TRegistry> {
-  return { key: 'queue', actions: queueActions(registry), resolve: () => registry };
+  return { key: 'queue', actions: queueProducerActions(registry), registry, resolve: () => registry };
+}
+
+function isQueueRegistry(value: unknown): value is QueueRegistry {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isJobsSlice(slice: AnyFeatureSlice): slice is AnyFeatureSlice & { readonly registry: QueueRegistry } {
+  return slice.key === 'queue' && 'registry' in slice && isQueueRegistry(slice.registry);
+}
+
+/** The jobs every feature declared, keyed by feature name — known before boot, for the manifest. */
+function declaredRegistry(features: readonly AnyFeature[]): QueueRegistry {
+  const registry: QueueRegistry = {};
+  for (const f of features) {
+    const slice = f.use.find(candidate => isJobsSlice(candidate));
+    if (slice !== undefined) registry[f.name] = slice.registry;
+  }
+  return registry;
+}
+
+/** The jobs every booted feature published, read from its slice record. */
+function bootedRegistry(ctx: object, features: readonly AnyFeature[]): QueueRegistry {
+  const registry: QueueRegistry = {};
+  for (const f of features) {
+    const slice = sliceOf(ctx, f)['queue'];
+    if (isQueueRegistry(slice)) {
+      registry[f.name] = slice;
+      continue;
+    }
+    debugWorker.debug('[{value1}] Feature "{featureName}" did not contribute a queue slice.', {
+      value1: 'queue-worker',
+      featureName: f.name,
+    });
+  }
+  return registry;
 }
 
 function queuePluginError(args: {
@@ -251,61 +258,15 @@ function queuePluginError(args: {
   });
 }
 
-function assertExclusiveMode(
-  options:
-    | QueueRuntimeOptions<NeedsShape & NoReservedKeys>
-    | QueueRuntimeFeatureOptions<NeedsShape & NoReservedKeys, unknown, readonly QueueFeatureToken[]>,
-): void {
-  const hasRegistry = 'registry' in options || 'start' in options;
-  const hasFeatures = 'features' in options || 'q' in options || 'context' in options;
-  if (hasRegistry && hasFeatures) {
-    throw queuePluginError({
-      code: QUEUE_PLUGIN_ERROR_CODES.exclusiveModes,
-      message: '[queue] queueRuntime options cannot mix registry/start mode with q/features/context mode.',
-      remediation:
-        'Use either queueRuntime({ registry, start, ... }) or queueRuntime({ q, features, context, connection, ... }).',
-      docsSlug: 'arki-queue-e004',
-    });
-  }
-}
-
-function featureRegistry(options: {
-  readonly features: readonly QueueFeatureToken[];
-  readonly record: Readonly<Record<string, { readonly queue?: QueueRegistry } | undefined>>;
-}): QueueRegistry {
-  const registry: QueueRegistry = {};
-  for (const feature of options.features) {
-    const slice = options.record[feature.key];
-    if (slice === undefined) {
-      throw queuePluginError({
-        code: QUEUE_PLUGIN_ERROR_CODES.featureMissing,
-        message: `[queue] feature token "${feature.key}" was not provided by any earlier plugin.`,
-        remediation:
-          'Mount the feature plugin that provides this token before queueRuntime(...). The typed builder catches this unless composition was erased.',
-        docsSlug: 'arki-queue-e005',
-      });
-    }
-    if (slice.queue !== undefined) {
-      registry[feature.key] = slice.queue;
-      continue;
-    }
-    debugWorker.debug('[{value1}] Feature "{featureKey}" did not contribute a queue slice.', {
-      value1: 'queue-runtime',
-      featureKey: feature.key,
-    });
-  }
-  return registry;
-}
-
 function timeoutAfter(ms: number, pluginName: string): Promise<never> {
   return new Promise((_resolve, reject) => {
     const timer = setTimeout(() => {
       reject(
         queuePluginError({
           code: QUEUE_PLUGIN_ERROR_CODES.startupTimeout,
-          message: `[queue] runtime "${pluginName}" startup timed out after ${String(ms)}ms.`,
+          message: `[queue] worker "${pluginName}" startup timed out after ${String(ms)}ms.`,
           remediation:
-            'Check Redis connectivity and worker dependency assembly, or raise startupTimeoutMs if the runtime intentionally needs more time.',
+            'Check Redis connectivity and the worker context factory, or raise startupTimeoutMs if the worker intentionally needs more time.',
           docsSlug: 'arki-queue-e001',
         }),
       );
@@ -335,7 +296,7 @@ export function durableScheduler(
 ): Plugin<EmptyShape, { readonly [DURABLE_SCHEDULES_KEY]: DurableScheduler }> {
   return plugin({
     name: options.name ?? 'durable-scheduler',
-    version: QUEUE_RUNTIME_PLUGIN_VERSION,
+    version: QUEUE_PLUGIN_VERSION,
     configure(ctx) {
       ctx.declareProvides('durable-scheduler');
     },
@@ -351,150 +312,193 @@ export function durableScheduler(
   });
 }
 
+export type QueuePluginOptions = QueueClientOptions & {
+  readonly name?: string;
+};
+
 /**
- * Build a DOT plugin that owns queue worker lifecycle while the app keeps
- * ownership of concrete runtime assembly.
+ * Provide the `queue` client features enqueue with. Mount it with `.use()`,
+ * before `.features()`. Boot opens no connection: each job's BullMQ queue
+ * opens on its first `enqueue`. Stop closes them.
  */
-export function queueRuntime<TNeeds extends NeedsShape & NoReservedKeys>(
-  options: QueueRuntimeOptions<TNeeds>,
-): Plugin<WireNeeds<TNeeds>, EmptyShape>;
-export function queueRuntime<
-  TNeeds extends NeedsShape & NoReservedKeys,
-  TContext,
-  const TFeatures extends readonly QueueFeatureToken[],
->(
-  options: QueueRuntimeFeatureOptions<TNeeds, TContext, TFeatures>,
-): Plugin<WireNeeds<TNeeds> & QueueFeatureNeeds<TFeatures>, EmptyShape>;
-export function queueRuntime<
-  TNeeds extends NeedsShape & NoReservedKeys,
-  TContext,
-  const TFeatures extends readonly QueueFeatureToken[],
->(
-  options: QueueRuntimeOptions<TNeeds> | QueueRuntimeFeatureOptions<TNeeds, TContext, TFeatures>,
-): Plugin<WireNeeds<TNeeds>, EmptyShape> {
-  assertExclusiveMode(
-    options as
-      | QueueRuntimeOptions<NeedsShape & NoReservedKeys>
-      | QueueRuntimeFeatureOptions<NeedsShape & NoReservedKeys, unknown, readonly QueueFeatureToken[]>,
-  );
-  const pluginName = options.name ?? 'queue-runtime';
-  const startupTimeoutMs = options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
-  const blocking = options.blocking ?? false;
-  const registry = 'registry' in options ? options.registry : {};
-
-  let started = false;
-  let handle: QueueRuntimeHandle | undefined;
-  let startup: Promise<QueueRuntimeHandle | void> | undefined;
-
-  const runStartup = async (ctx: CtxOf<TNeeds> & Readonly<Record<string, unknown>>): Promise<QueueRuntimeHandle> => {
-    const start = async (): Promise<QueueRuntimeHandle> => {
-      if ('registry' in options) {
-        return options.start(ctx);
-      }
-
-      const features = featureRegistry({
-        features: options.features,
-        record: ctx as Readonly<Record<string, { readonly queue?: QueueRegistry } | undefined>>,
-      });
-      // Context is assembled exactly ONCE, inside the guarded start: an
-      // assembly failure (missing creds) must degrade boot like any other
-      // startup failure instead of failing every job run, and expensive
-      // context graphs must not be rebuilt per execution. Per-run
-      // enrichment belongs to job middleware, not this factory.
-      const resolvedContext = await options.context(ctx);
-      const queue: QueueInstance = options.q.createQueue({
-        connection: options.connection,
-        ...(options.keyPrefix === undefined ? {} : { keyPrefix: options.keyPrefix }),
-        createContext: () => resolvedContext,
-      });
-      await queue.register(features);
-      await queue.start();
-      return queue;
-    };
-
-    const runtime = await Promise.race([start(), timeoutAfter(startupTimeoutMs, pluginName)]);
-    handle = runtime;
-    return runtime;
-  };
-
-  const needs =
-    'registry' in options
-      ? options.needs
-      : {
-          ...options.needs,
-          ...Object.fromEntries(options.features.map(feature => [feature.key, feature])),
-        };
-
-  const inner = plugin<NeedsShape & NoReservedKeys, EmptyShape>({
-    name: pluginName,
-    version: QUEUE_RUNTIME_PLUGIN_VERSION,
-    needs,
-    actions: 'registry' in options ? queueActions(registry) : [],
+export function queue(options: QueuePluginOptions): Plugin<EmptyShape, { readonly queue: QueueClient }> {
+  let handle: QueueClientHandle | undefined;
+  return plugin({
+    name: options.name ?? 'queue',
+    version: QUEUE_PLUGIN_VERSION,
     configure(ctx) {
       ctx.registerProjection({
         format: 'queue-topology',
         binding: 'queue',
         module: '@arki/queue/projection',
       });
-      ctx.declareProvides('queue-runtime');
+      ctx.declareProvides('queue-client');
     },
-    async start(ctx) {
-      if (started || startup !== undefined) {
-        throw queuePluginError({
-          code: QUEUE_PLUGIN_ERROR_CODES.doubleStart,
-          message: `[queue] runtime "${pluginName}" was started twice.`,
-          remediation: 'Call app.start() once, or call app.stop() before starting the queue runtime again.',
-          docsSlug: 'arki-queue-e002',
-        });
-      }
-
-      started = true;
-      if (blocking) {
-        startup = runStartup(ctx as CtxOf<TNeeds> & Readonly<Record<string, unknown>>);
-        try {
-          await startup;
-        } catch (error) {
-          startup = undefined;
-          handle = undefined;
-          started = false;
-          throw error;
-        }
-        return;
-      }
-
-      startup = runStartup(ctx as CtxOf<TNeeds> & Readonly<Record<string, unknown>>).catch((error: unknown) => {
-        debugWorker.debug('[{pluginName}] Queue runtime startup failed', {
-          pluginName,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        started = false;
-        handle = undefined;
-      });
+    boot: () => {
+      handle = createQueueClient(options);
+      return { queue: handle.client };
     },
     async stop() {
-      if (!started && startup === undefined && handle === undefined) {
-        throw queuePluginError({
-          code: QUEUE_PLUGIN_ERROR_CODES.stopBeforeStart,
-          message: `[queue] runtime "${pluginName}" was stopped before it started.`,
-          remediation: 'Only call stop after a successful start, or let the DOT app lifecycle manage shutdown.',
-          docsSlug: 'arki-queue-e003',
-        });
-      }
-
-      const runtime = handle ?? (await startup);
-      startup = undefined;
-      handle = undefined;
-      started = false;
-      await runtime?.stop();
+      await handle?.close();
     },
     async dispose() {
-      const runtime = handle ?? (await startup);
-      startup = undefined;
-      handle = undefined;
-      started = false;
-      await runtime?.stop();
+      await handle?.close();
     },
   });
+}
 
-  return inner as unknown as Plugin<WireNeeds<TNeeds>, EmptyShape>;
+function isQueueClient(value: unknown): value is QueueClient {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'enqueue' in value &&
+    typeof value.enqueue === 'function' &&
+    'keyPrefix' in value &&
+    typeof value.keyPrefix === 'string' &&
+    'connection' in value
+  );
+}
+
+/**
+ * The `queue` client from a worker hook's context. The builder guard already
+ * proves it is there; this reads it without a cast (the hook context is a
+ * mapped type over the caller's generic needs, which TS cannot index).
+ */
+function queueClientOf(ctx: object, pluginName: string): QueueClient {
+  const value: unknown = 'queue' in ctx ? ctx.queue : undefined;
+  if (isQueueClient(value)) return value;
+  throw queuePluginError({
+    code: QUEUE_PLUGIN_ERROR_CODES.clientMissing,
+    message: `[queue] worker "${pluginName}" found no queue client under "queue".`,
+    remediation: 'Mount queue({ connection }) with .use(...) before .features(...) and .serve(queueWorker(...)).',
+    docsSlug: 'arki-queue-e006',
+  });
+}
+
+/** What every worker needs on top of its own needs: the client it shares connection and prefix with. */
+type WorkerShape<TNeeds extends NeedsShape> = TNeeds & { readonly queue: Service<QueueClient> };
+
+export type QueueWorkerOptions<TNeeds extends NeedsShape & NoReservedKeys, TContext> = {
+  readonly name?: string;
+  /** Services the job context is built from, besides the `queue` client. Use `{}` for none. */
+  readonly needs: TNeeds;
+  readonly q: QueueBuilder<TContext, QueueMeta>;
+  /**
+   * Build the job context. Runs exactly ONCE, inside the guarded start: an
+   * assembly failure (missing credentials) degrades boot like any other
+   * startup failure instead of failing every job run, and an expensive
+   * context graph is not rebuilt per execution. Per-run enrichment belongs
+   * to job middleware.
+   */
+  readonly context: (services: CtxOf<WorkerShape<TNeeds>>) => TContext | Promise<TContext>;
+  readonly startupTimeoutMs?: number;
+  /** Wait for the workers in `app.start()`. Default: start in the background. */
+  readonly blocking?: boolean;
+};
+
+/**
+ * Run the jobs of every feature the app mounted. Mount it with `.serve()`:
+ * it is bound to the app's features (each `jobs(...)` slice), uses the
+ * `queue` client's connection and key prefix, and owns the consumer side of
+ * the manifest (`<job>.consume`, `<schedule>.fire`).
+ */
+export function queueWorker<TContext, TNeeds extends NeedsShape & NoReservedKeys>(
+  options: QueueWorkerOptions<TNeeds, TContext>,
+): Driver<WireNeeds<WorkerShape<TNeeds>>, EmptyShape> {
+  const pluginName = options.name ?? 'queue-worker';
+  const startupTimeoutMs = options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
+  const blocking = options.blocking ?? false;
+  const needs: WorkerShape<TNeeds> = { ...options.needs, queue: service<QueueClient>() };
+
+  return driver(features => {
+    let started = false;
+    let handle: QueueInstance | undefined;
+    let startup: Promise<QueueInstance | void> | undefined;
+
+    const runStartup = async (ctx: CtxOf<WorkerShape<TNeeds>>): Promise<QueueInstance> => {
+      const start = async (): Promise<QueueInstance> => {
+        const client = queueClientOf(ctx, pluginName);
+        const registry = bootedRegistry(ctx, features);
+        const resolvedContext = await options.context(ctx);
+        const instance = options.q.createQueue({
+          connection: client.connection,
+          keyPrefix: client.keyPrefix,
+          createContext: () => resolvedContext,
+        });
+        await instance.register(registry);
+        await instance.start();
+        return instance;
+      };
+
+      const runtime = await Promise.race([start(), timeoutAfter(startupTimeoutMs, pluginName)]);
+      handle = runtime;
+      return runtime;
+    };
+
+    return plugin<WorkerShape<TNeeds>, EmptyShape>({
+      name: pluginName,
+      version: QUEUE_PLUGIN_VERSION,
+      needs,
+      actions: queueConsumerActions(declaredRegistry(features)),
+      configure(ctx) {
+        ctx.declareProvides('queue-worker');
+      },
+      async start(ctx) {
+        if (started || startup !== undefined) {
+          throw queuePluginError({
+            code: QUEUE_PLUGIN_ERROR_CODES.doubleStart,
+            message: `[queue] worker "${pluginName}" was started twice.`,
+            remediation: 'Call app.start() once, or call app.stop() before starting the queue worker again.',
+            docsSlug: 'arki-queue-e002',
+          });
+        }
+
+        started = true;
+        if (blocking) {
+          startup = runStartup(ctx);
+          try {
+            await startup;
+          } catch (error) {
+            startup = undefined;
+            handle = undefined;
+            started = false;
+            throw error;
+          }
+          return;
+        }
+
+        startup = runStartup(ctx).catch((error: unknown) => {
+          debugWorker.debug('[{pluginName}] Queue worker startup failed', {
+            pluginName,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          started = false;
+          handle = undefined;
+        });
+      },
+      async stop() {
+        if (!started && startup === undefined && handle === undefined) {
+          throw queuePluginError({
+            code: QUEUE_PLUGIN_ERROR_CODES.stopBeforeStart,
+            message: `[queue] worker "${pluginName}" was stopped before it started.`,
+            remediation: 'Only call stop after a successful start, or let the DOT app lifecycle manage shutdown.',
+            docsSlug: 'arki-queue-e003',
+          });
+        }
+
+        const runtime = handle ?? (await startup);
+        startup = undefined;
+        handle = undefined;
+        started = false;
+        await runtime?.stop();
+      },
+      async dispose() {
+        const runtime = handle ?? (await startup);
+        startup = undefined;
+        handle = undefined;
+        started = false;
+        await runtime?.stop();
+      },
+    });
+  });
 }

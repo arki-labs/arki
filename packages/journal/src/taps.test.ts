@@ -153,4 +153,35 @@ describe('taps', () => {
       await worker.stop();
     }
   });
+
+  it("a tap composed with `services: 'worker'` gets them from the worker, and a worker without them does not start", async () => {
+    const hub: string[] = [];
+    const live = j.tap(
+      'live-with-worker-hub',
+      order,
+      { hub: need<string[]>() },
+      {
+        OrderPlaced: (e, ctx) => {
+          ctx.hub.push(e.entityId);
+        },
+      },
+    );
+    const journal = j.compose({ tables, taps: [live], services: 'worker' });
+    const listen = listenOn(journal.wakeChannel);
+    expect(() => journal.worker(db, { pollMs: 60_000, listen })).toThrow(
+      expect.objectContaining({ code: 'BAD_DEFINITION' }),
+    );
+    const worker = journal.worker(db, { pollMs: 60_000, listen, services: () => ({ hub }) });
+    await worker.start();
+    try {
+      const id = orderId(++next);
+      await db.transaction(tx =>
+        journal.write(tx, order, id, { meta, events: () => [OrderPlaced({ customerId: 'c', total: 1 })] }),
+      );
+      await waitFor(() => hub.length === 1);
+      expect(hub).toEqual([id]);
+    } finally {
+      await worker.stop();
+    }
+  });
 });

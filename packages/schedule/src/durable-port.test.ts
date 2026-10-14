@@ -19,7 +19,7 @@ describe('the BullMQ backend fits the durable port', () => {
     // Declaring the backend opens no connection: Redis is reached only when a schedule starts.
     const app = defineApp('durable-port')
       .use(durableScheduler({ connection: 'redis://127.0.0.1:6379' }))
-      .use(schedule({ schedules: [nightly], durable: DurableSchedules }))
+      .serve(schedule({ schedules: [nightly], durable: DurableSchedules }))
       .configure();
     expect(app.manifest.actions).toContainEqual(expect.objectContaining({ id: 'nightly.fire', plugin: 'schedule' }));
   });

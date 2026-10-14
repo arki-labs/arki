@@ -68,6 +68,8 @@ export type {
   Row,
   Services,
   ServicesFor,
+  HandlerRef,
+  HandlerServices,
   TransactionSource,
   JournalWorker,
   StrandedJobs,

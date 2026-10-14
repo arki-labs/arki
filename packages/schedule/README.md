@@ -10,6 +10,37 @@ Schedules for DOT apps. Each schedule chooses how it runs:
 
 Both kinds work with `cron` and with `every`.
 
+## Inside a DOT app
+
+A feature declares its schedules with `schedules([...])`. `schedule()` is a
+driving adapter: mount it with `.serve()`, after the features. It runs the
+schedules of every mounted feature — the app lists its features once:
+
+```ts
+import { feature } from '@arki/dot/feature';
+import { service } from '@arki/dot/plugin';
+import { initSchedule } from '@arki/schedule';
+import { schedule, schedules } from '@arki/schedule/dot';
+
+type Ctx = { readonly db: Db };
+const s = initSchedule.context<Ctx>().create();
+
+export const reports = feature('reports', {
+  use: [schedules([s.define({ name: 'daily-report', cron: '0 6 * * *', handler: async ({ db }) => db.reports.build() })])],
+});
+
+defineApp('shop')
+  .use(db({ url }))
+  .features([reports, billing])
+  .serve(schedule({ needs: { db: service<Db>() }, context: ({ db }) => ({ db }) }));
+```
+
+`context` builds the one value every handler receives. The features are
+bound at runtime, so the compiler cannot check that their schedules expect
+this context: keep one context type per app. A schedule no feature owns
+goes in `schedule({ schedules: [...] })`; it runs on the same runtime, so
+names must be unique across both.
+
 ## In-process schedules
 
 Use these for single-replica processes by default. For multi-replica
@@ -39,7 +70,7 @@ const nightly = defineSchedule({
 
 defineApp('billing')
   .use(durableScheduler({ connection: env.REDIS_URL, keyPrefix: 'billing:' }))
-  .use(schedule({ schedules: [nightly], durable: DurableSchedules }));
+  .serve(schedule({ schedules: [nightly], durable: DurableSchedules }));
 ```
 
 Declaring a durable schedule reads nothing from the world. Boot only builds
@@ -52,7 +83,7 @@ Where each mistake is caught:
 
 | Mistake | Caught |
 | --- | --- |
-| `durable: DurableSchedules` with no `durableScheduler()` mounted before it | Type error at `.use(...)` |
+| `durable: DurableSchedules` with no `durableScheduler()` mounted before it | Type error at `.serve(...)` |
 | `durable` given anything but the `DurableSchedules` token | Type error |
 | A durable name that contains `:` (BullMQ forbids it in queue names) | `ScheduleError` `ARKI_SCHEDULE_E001` from `defineSchedule` |
 | A `durable: true` schedule but no `durable` option on `schedule()` | `ScheduleError` `ARKI_SCHEDULE_E005` at boot, naming the schedule |

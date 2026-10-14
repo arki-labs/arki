@@ -22,6 +22,7 @@ import type {
   EntityTable,
   EventDef,
   EventOptions,
+  HandlerServices,
   IdTable,
   JournalWorker,
   KeyName,
@@ -316,10 +317,16 @@ export type Journal<
    * covers only its own work, and the lease is renewed every half lease while the effect
    * runs. A lost lease aborts the effect's `ctx.signal`.
    * Once `signal` is aborted no further job is claimed; the running one sees it as `ctx.signal`.
+   * `services`: see `worker`.
    */
   drain(
     db: AppDb & RootDb & TransactionSource<Tx>,
-    opts?: { readonly batchSize?: number; readonly signal?: AbortSignal; readonly leaseSeconds?: number },
+    opts?: {
+      readonly batchSize?: number;
+      readonly signal?: AbortSignal;
+      readonly leaseSeconds?: number;
+      readonly services?: HandlerServices;
+    },
   ): Promise<number>;
   /**
    * A loop around `drain`. The same database as `drain`. `stop()` aborts the running
@@ -339,6 +346,12 @@ export type Journal<
       readonly listen?: WakeListener;
       /** `false`: a jobs-only worker in a journal that has taps. Another process must listen. */
       readonly taps?: boolean;
+      /**
+       * The services of a journal composed with `services: 'worker'`, per effect and tap.
+       * A need without a value throws here, before the worker starts. A journal composed
+       * with its services ignores this.
+       */
+      readonly services?: HandlerServices;
     },
   ): JournalWorker;
   /**
@@ -456,7 +469,7 @@ export type JournalDefinitions<
   ): Effect<z.output<Meta>, AppDb, RootCommandRunner<Meta, Tx>, N>;
   /**
    * Build the runtime journal from the tables and the handlers. `services` holds one
-   * value for every need of every listed effect, by name. A need without a value throws here.
+   * value for every need of every listed effect, by name. A need without a value throws here, unless `services` is `'worker'`.
    * `const`: the list is read as a tuple, so an effect with needs keeps them next to one without.
    */
   /** A tap: in-process, after commit, lossy. See `Tap`. Same shapes as `effect`. */
@@ -483,5 +496,12 @@ export type JournalDefinitions<
     } & ServicesOption<ServicesFor<E> & ServicesFor<T>>,
   ): Journal<Meta, Tx, AppDb>;
 };
-/** `services` is required as soon as one listed effect has a need. */
-type ServicesOption<S> = unknown extends S ? { readonly services?: Services } : { readonly services: S & Services };
+/**
+ * `services` is required as soon as one listed effect has a need. `'worker'` leaves the needs
+ * open: writes never need them, and each `worker` or `drain` gives them (`HandlerServices`).
+ * That is for services that exist only after the journal: the Dot adapter's features boot
+ * after the journal they write through.
+ */
+type ServicesOption<S> = unknown extends S
+  ? { readonly services?: Services | 'worker' }
+  : { readonly services: (S & Services) | 'worker' };

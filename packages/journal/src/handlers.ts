@@ -6,6 +6,7 @@ import type {
   EffectContext,
   EffectHandlers,
   EffectSchedule,
+  HandlerServices,
   Need,
   Needed,
   Needs,
@@ -217,19 +218,32 @@ export function tapFor<Meta, AppDb>() {
   return tap;
 }
 
-/** Give one tap its services, as `bindEffect` does for an effect. */
-export function bindTap<Meta, AppDb>(tap: Tap<Meta, AppDb, Needs>, services: Services): Tap<Meta, AppDb> {
+/**
+ * The value of each need of one handler, read from `services` by name. `services` may hold more.
+ * Throws when one is missing: without this check the handler would start, and fail on `undefined`.
+ */
+export function givenServices(
+  kind: 'effect' | 'tap',
+  handler: { readonly name: string; readonly needs: Needs },
+  services: Services,
+): Services {
   const given: Record<string, unknown> = {};
-  for (const key of Object.keys(tap.needs)) {
+  for (const key of Object.keys(handler.needs)) {
     if (!Object.hasOwn(services, key) || services[key] === undefined)
       throw new JournalError(
         'BAD_DEFINITION',
-        'tap',
-        tap.name,
-        `journal: tap "${tap.name}" needs "${key}", but no service with that name was given; pass it as j.compose({ services: { ${key} } }), or in a Dot app add it to the \`needs\` of the feature that lists this tap`,
+        kind,
+        handler.name,
+        `journal: ${kind} "${handler.name}" needs "${key}", but no service with that name was given; pass it as j.compose({ services: { ${key} } }), or in a Dot app add it to the \`needs\` of the feature that lists this ${kind}`,
       );
     given[key] = services[key];
   }
+  return given;
+}
+
+/** Give one tap its services, as `bindEffect` does for an effect. */
+export function bindTap<Meta, AppDb>(tap: Tap<Meta, AppDb, Needs>, services: Services): Tap<Meta, AppDb> {
+  const given = givenServices('tap', tap, services);
   return { ...tap, needs: {}, run: (event, ctx) => tap.run(event, { ...given, ...ctx }) };
 }
 
@@ -237,26 +251,34 @@ export function bindTap<Meta, AppDb>(tap: Tap<Meta, AppDb, Needs>, services: Ser
  * Give one effect its services. The result needs nothing more, so the worker can run it.
  * `services` may hold more than this effect needs: each need is read by its name.
  * This is the only place a need meets its value. `j.compose` calls it with the app's
- * `services`; the Dot bridge calls it with the services of the feature that lists the effect.
+ * `services`; a worker calls it with the services it was given (`HandlerServices`).
  */
 export function bindEffect<Meta, AppDb, Run>(
   effect: Effect<Meta, AppDb, Run, Needs>,
   services: Services,
 ): Effect<Meta, AppDb, Run> {
-  const given: Record<string, unknown> = {};
-  for (const key of Object.keys(effect.needs)) {
-    // Without this check the effect would start, and every job would fail on `undefined`.
-    if (!Object.hasOwn(services, key) || services[key] === undefined)
-      throw new JournalError(
-        'BAD_DEFINITION',
-        'effect',
-        effect.name,
-        `journal: effect "${effect.name}" needs "${key}", but no service with that name was given; pass it as j.compose({ services: { ${key} } }), or in a Dot app add it to the \`needs\` of the feature that lists this effect`,
-      );
-    given[key] = services[key];
-  }
+  const given = givenServices('effect', effect, services);
   return withSchedule(
     { ...effect, needs: {}, run: (event, ctx) => effect.run(event, { ...given, ...ctx }) },
     effect.schedule,
   );
+}
+
+/**
+ * The effects and taps as they run: each bound to its services from `services`.
+ * A handler `j.compose` already bound needs nothing, so it gets nothing. Throws on the first
+ * missing service, so a worker refuses to start instead of failing job after job.
+ */
+export function bindHandlers<Meta, AppDb, Run>(
+  handlers: {
+    readonly effects: readonly Effect<Meta, AppDb, Run, Needs>[];
+    readonly taps: readonly Tap<Meta, AppDb, Needs>[];
+  },
+  services: HandlerServices | undefined,
+): { readonly effects: readonly Effect<Meta, AppDb, Run>[]; readonly taps: readonly Tap<Meta, AppDb>[] } {
+  const of = (kind: 'effect' | 'tap', name: string): Services => services?.({ kind, name }) ?? {};
+  return {
+    effects: handlers.effects.map(effect => bindEffect(effect, of('effect', effect.name))),
+    taps: handlers.taps.map(tap => bindTap(tap, of('tap', tap.name))),
+  };
 }

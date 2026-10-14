@@ -7,10 +7,10 @@
  */
 import { beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { FeatureSlice } from '@arki/feature';
+import type { FeatureSlice } from '@arki/dot/feature';
 import { MockClock } from '@arki/clock';
 import { z } from '@arki/contracts';
-import { defineFeature } from '@arki/feature';
+import { feature } from '@arki/dot/feature';
 import { buildEngine } from '@arki/http';
 
 import type { FleetHealth } from './contract';
@@ -264,7 +264,7 @@ describe('the foreman() slice in a feature', () => {
       'foreman.preview',
       'foreman.execute',
     ]);
-    const feature = defineFeature('operations', { use: [slice] });
-    expect(feature.use).toHaveLength(1);
+    const operations = feature('operations', { use: [slice] });
+    expect(operations.use).toHaveLength(1);
   });
 });

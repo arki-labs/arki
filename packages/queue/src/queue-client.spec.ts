@@ -1,0 +1,89 @@
+/**
+ * T(queue-client-split): an API process enqueues with `queue()`, a separate
+ * worker process runs the job with `queueWorker()` (real Redis).
+ * Why it matters: the API server never registers jobs, so the job's own
+ * `trigger()` cannot work there. The client must reach the SAME BullMQ queue
+ * the worker reads, with the SAME retry defaults the job declares.
+ */
+import type { StartedTestContainer } from 'testcontainers';
+import { Queue } from 'bullmq';
+import { GenericContainer, Wait } from 'testcontainers';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { z } from '@arki/contracts';
+import { defineApp } from '@arki/dot';
+import { feature } from '@arki/dot/feature';
+
+import { jobs, queue, queueWorker } from './dot.ts';
+import { initQueue } from './init.ts';
+import { parseRedisConnection } from './redis-connection.ts';
+
+let redisContainer: StartedTestContainer;
+let redisUrl: string;
+
+beforeAll(async () => {
+  redisContainer = await new GenericContainer('redis:7-alpine')
+    .withExposedPorts(6379)
+    .withWaitStrategy(Wait.forLogMessage('Ready to accept connections'))
+    .start();
+  redisUrl = `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`;
+}, 60_000);
+
+afterAll(async () => {
+  await redisContainer.stop();
+}, 30_000);
+
+async function waitFor(done: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (done()) return;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error('Timed out waiting');
+}
+
+describe('queue() client + queueWorker() in separate apps', () => {
+  it('a job enqueued by the API app runs in the worker app, with the job retry defaults', async () => {
+    const q = initQueue.context<{ readonly worker: string }>().create();
+    const received: string[] = [];
+    const sendMail = q.job
+      .name(`send-mail-${crypto.randomUUID()}`)
+      .input(z.object({ to: z.string() }))
+      .options({ retry: { attempts: 5 } })
+      .handler((data, ctx) => {
+        received.push(`${ctx.worker}:${data.to}`);
+        return Promise.resolve('sent');
+      });
+    const mail = feature('mail', { use: [jobs({ sendMail })] });
+    const keyPrefix = `split-${crypto.randomUUID()}:`;
+
+    const api = await defineApp('api')
+      .use(queue({ connection: redisUrl, keyPrefix }))
+      .features([mail])
+      .start();
+    const worker = await defineApp('worker')
+      .use(queue({ connection: redisUrl, keyPrefix }))
+      .features([mail])
+      .serve(queueWorker({ q, needs: {}, blocking: true, context: () => ({ worker: 'w1' }) }))
+      .start();
+
+    try {
+      const jobId = await api.services.queue.enqueue(sendMail, { to: 'a@b.c' });
+      await waitFor(() => received.length === 1);
+      expect(received).toEqual(['w1:a@b.c']);
+
+      const inspect = new Queue(sendMail._internal.name, {
+        connection: parseRedisConnection(redisUrl),
+        prefix: keyPrefix,
+      });
+      try {
+        const job = await inspect.getJob(jobId);
+        expect(job?.opts.attempts).toBe(5);
+      } finally {
+        await inspect.close();
+      }
+    } finally {
+      await worker.dispose();
+      await api.dispose();
+    }
+  }, 30_000);
+});

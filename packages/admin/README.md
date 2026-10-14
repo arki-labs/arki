@@ -51,13 +51,14 @@ Keep the `/api/fleet` route. Foreman still polls it until it negotiates protocol
 
 ## DOT app
 
-`foreman()` is a `defineFeature` slice. It takes the same options as `createForemanHandlerFromEnv`, built from the feature's `needs`.
+`foreman()` is a feature slice. It takes the same options as `createForemanHandlerFromEnv`, built from the feature's `needs`.
 
 ```ts
 import { foreman } from '@arki/admin/dot';
+import { feature } from '@arki/dot/feature';
 import { journalReceiptStore } from '@arki/admin/pg';
 
-export const operations = defineFeature('operations', {
+export const operations = feature('operations', {
   needs: { kv: service<KV>(), db: service<Db>() },
   use: [
     foreman(({ kv, db }: { kv: KV; db: Db }) => ({
@@ -80,7 +81,7 @@ export const operations = defineFeature('operations', {
 });
 ```
 
-The slice lands under the `routes` key, so `defineFeature` throws `FEATURE_E003` if the same feature also holds an `endpoints()` slice. Give Foreman its own feature. The four `/api/foreman` routes show up in `dot explain`; module actions are in the manifest.
+The slice lands under the `routes` key, so `feature()` throws `FEATURE_E003` if the same feature also holds an `endpoints()` slice. Give Foreman its own feature. The four `/api/foreman` routes show up in `dot explain`; module actions are in the manifest.
 
 ## Modules every target serves
 

@@ -1,9 +1,9 @@
 /**
- * The DOT attachment: `foreman()` is a `defineFeature` slice that mounts the
+ * The DOT attachment: `foreman()` is a feature slice that mounts the
  * protocol-2 routes under `/api/foreman`.
  *
  * ```ts
- * export const operations = defineFeature('operations', {
+ * export const operations = feature('operations', {
  *   needs: { kv: service<KV>(), db: service<Db>() },
  *   use: [
  *     foreman(({ kv, db }: { kv: KV; db: Db }) => ({
@@ -19,8 +19,8 @@
  * });
  * ```
  *
- * The slice lands under the `routes` key, where `http({ features })` collects
- * it. `defineFeature` rejects two slices with one key, so put `foreman()` in
+ * The slice lands under the `routes` key, where `.serve(http(...))` collects
+ * it. `feature()` rejects two slices with one key, so put `foreman()` in
  * its own feature, not next to an `endpoints()` slice.
  *
  * `@arki/http` is an optional peer: this entry only makes sense in a DOT http app.
@@ -55,8 +55,8 @@ const executeRoute = route.post(`${FOREMAN_BASE_PATH}/actions/:id/execute`, {
 const ROUTE_CONTRACTS = [manifestRoute, readRoute, previewRoute, executeRoute] as const;
 
 /**
- * The slice `foreman()` returns. Its shape is the `@arki/feature` slice
- * contract; this package does not import `@arki/feature`.
+ * The slice `foreman()` returns. Its shape is the `@arki/dot/feature` slice
+ * contract; this package does not import `@arki/dot/feature`.
  */
 export type ForemanFeatureSlice<TServices> = {
   readonly key: 'routes';

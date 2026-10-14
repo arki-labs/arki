@@ -1,10 +1,8 @@
 /**
- * The Dot bridge. `journal(...)` publishes the journal and owns the worker.
- * `journalHandlers(...)` lets a feature hand over its projections and effects.
- *
- * Features here are built by hand with `plugin` and `provide`. That is what
- * `plug(defineFeature(name, { use: [slice] }))` from `@arki/feature` does, so
- * this package needs no dependency on it.
+ * The Dot bridge. `journal(...)` is the driven part: it publishes the journal so
+ * features can write through it. `journalWorker(...)` is the driving part: it runs
+ * the effects, taps and async projections. `journalHandlers(...)` lets a feature
+ * hand over its projections, effects and taps.
  */
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
@@ -12,12 +10,12 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
-import type { ActionSource } from '@arki/dot/plugin';
-import { bootTestApp, defineApp, rename } from '@arki/dot';
-import { plugin, provide, token } from '@arki/dot/plugin';
+import { defineApp, rename } from '@arki/dot';
+import { feature } from '@arki/dot/feature';
+import { plugin, provide, service, token } from '@arki/dot/plugin';
 
 import type { OrderId } from './test-support.js';
-import { journal, journalHandlers } from './dot.js';
+import { journal, journalHandlers, journalWorker } from './dot.js';
 import { need } from './handlers.js';
 import { initJournal } from './journal.js';
 import {
@@ -132,22 +130,6 @@ const placedCount = async (customerId: string) => {
   return rows[0]?.placed ?? 0;
 };
 
-/** A feature with no needs: its plugin publishes the slice payload under its `feature.<name>` token. */
-function feature<Handlers>(
-  name: string,
-  slice: {
-    readonly key: 'journal';
-    readonly actions: readonly ActionSource[];
-    readonly resolve: (services: unknown) => Handlers;
-  },
-) {
-  const tok = token<{ readonly journal: Handlers }>()(`feature.${name}`);
-  return {
-    token: tok,
-    plugin: plugin({ name, actions: slice.actions, boot: ctx => provide(tok, { journal: slice.resolve(ctx) }) }),
-  };
-}
-
 const typed = initJournal
   .tx<AppTx>()
   .db<PgliteDatabase>()
@@ -159,7 +141,7 @@ describe('journal(...) in direct mode', () => {
     const app = track(
       await defineApp('typed')
         .use(dbPlugin())
-        .use(journal({ journal: typedJournal, worker: false }))
+        .use(journal({ journal: typedJournal }))
         .boot(),
     );
 
@@ -175,7 +157,7 @@ describe('journal(...) in direct mode', () => {
     const app = track(
       await defineApp('untyped')
         .use(dbPlugin())
-        .use(journal({ journal: untyped, worker: false }))
+        .use(journal({ journal: untyped }))
         .boot(),
     );
 
@@ -202,11 +184,15 @@ describe('journal(...) in direct mode', () => {
     expect(withTx.configure().manifest.plugins.map(p => p.name)).toEqual(['db']);
   });
 
-  it('runs one worker between start and stop, so effects fire without worker code in the app and none runs during shutdown', async () => {
+  it('runs effects only through a served `journalWorker()`, between start and stop, so none runs during shutdown', async () => {
     const mail = recorder('dot-direct-mail');
     const composed = j.compose({ tables, effects: [mail.effect] });
     const app = track(
-      await bootTestApp<{ journal: TestJournal }>([dbPlugin(), journal({ journal: composed, pollMs: POLL_MS })]),
+      await defineApp('direct-worker')
+        .use(dbPlugin())
+        .use(journal({ journal: composed }))
+        .serve(journalWorker({ pollMs: POLL_MS }))
+        .boot(),
     );
     await app.start();
 
@@ -222,14 +208,14 @@ describe('journal(...) in direct mode', () => {
     expect(await db.select().from(tables.jobs)).toHaveLength(1);
   });
 
-  it('starts no worker with `worker: false`, so a web-only process leaves the jobs to the worker process', async () => {
+  it('runs no effect in an app that serves no worker, so a web-only process leaves the jobs to the worker process', async () => {
     const mail = recorder('dot-no-worker-mail');
     const composed = j.compose({ tables, effects: [mail.effect] });
     const app = track(
-      await bootTestApp<{ journal: TestJournal }>([
-        dbPlugin(),
-        journal({ journal: composed, worker: false, pollMs: POLL_MS }),
-      ]),
+      await defineApp('web-only')
+        .use(dbPlugin())
+        .use(journal({ journal: composed }))
+        .boot(),
     );
     await app.start();
 
@@ -246,8 +232,8 @@ describe('journal(...) in direct mode', () => {
     const app = track(
       await defineApp('two-journals')
         .use(dbPlugin())
-        .use(journal({ journal: main, worker: false }))
-        .use(rename(journal({ journal: reports, worker: false }), { journal: 'reportsJournal' }, 'reports-journal'))
+        .use(journal({ journal: main }))
+        .use(rename(journal({ journal: reports }), { journal: 'reportsJournal' }, 'reports-journal'))
         .boot(),
     );
 
@@ -257,35 +243,44 @@ describe('journal(...) in direct mode', () => {
   });
 });
 
-describe('journal(...) in feature mode', () => {
-  it('builds the journal from the feature list alone: one command fires each inline projection and, through the worker, each effect', async () => {
+describe('journal({ j, tables }) with features', () => {
+  it('builds the journal from the mounted features alone: one command fires each inline projection and, through the worker, each effect', async () => {
     const ordersMail = recorder('dot-orders-mail');
     const billingMail = recorder('dot-billing-mail');
-    const orders = feature(
-      'orders',
-      journalHandlers({ projections: [countPlaced('dot-orders-count', 'orders')], effects: [ordersMail.effect] }),
-    );
-    const billing = feature(
-      'billing',
-      journalHandlers({ projections: [countPlaced('dot-billing-count', 'billing')], effects: [billingMail.effect] }),
-    );
+    const orders = feature('orders', {
+      use: [
+        journalHandlers({ projections: [countPlaced('dot-orders-count', 'orders')], effects: [ordersMail.effect] }),
+      ],
+    });
+    const billing = feature('billing', {
+      use: [
+        journalHandlers({ projections: [countPlaced('dot-billing-count', 'billing')], effects: [billingMail.effect] }),
+      ],
+    });
     // A feature with no journal slice is allowed: it contributes nothing.
-    const Plain = token<{ readonly routes: readonly string[] }>()('feature.plain');
-    const plain = plugin({ name: 'plain', boot: () => provide(Plain, { routes: [] }) });
+    const plain = feature('plain', {});
 
+    // The features are listed once: `journal` and `journalWorker` are both bound to them.
     const app = track(
-      await bootTestApp<{ journal: TestJournal }>([
-        dbPlugin(),
-        orders.plugin,
-        billing.plugin,
-        plain,
-        journal({ j, tables, features: [orders.token, billing.token, Plain], pollMs: POLL_MS }),
-      ]),
+      await defineApp('feature-mode')
+        .use(dbPlugin())
+        .use(journal({ j, tables }))
+        .features([orders, billing, plain])
+        .serve(journalWorker({ pollMs: POLL_MS }))
+        .boot(),
     );
     await app.start();
 
     expect(app.services.journal.catalog.projections).toEqual(['dot-orders-count', 'dot-billing-count']);
     expect(app.services.journal.catalog.effects).toEqual(['dot-orders-mail', 'dot-billing-mail']);
+    expect(app.manifest.plugins.map(p => p.name)).toEqual([
+      'db',
+      'journal',
+      'orders',
+      'billing',
+      'plain',
+      'journal-worker',
+    ]);
 
     const id = orderId(++next);
     await app.services.journal.run(db, placeOrder, { id, customerId: 'feature-mode' }, meta);
@@ -296,7 +291,27 @@ describe('journal(...) in feature mode', () => {
     expect(billingMail.handled).toEqual([id]);
   });
 
-  it('lets an effect declared with `journalHandlers` run a command of another feature through `ctx.run`, so no feature needs the journal that is built after it', async () => {
+  it("lets a feature write through the journal at its own boot, with every feature's projections already in it, because the journal boots before the features", async () => {
+    const counting = feature('counting', {
+      use: [journalHandlers({ projections: [countPlaced('dot-boot-count', 'boot')] })],
+    });
+    const id = orderId(++next);
+    // `writer` comes before nothing it needs: `counting` is mounted after it and its projection still runs.
+    const writer = feature('writer', {
+      needs: { journal: service<TestJournal>(), db: service<PgliteDatabase>() },
+      boot: async ctx => {
+        await ctx.journal.run(ctx.db, placeOrder, { id, customerId: 'at-boot' }, meta);
+      },
+    });
+
+    track(
+      await defineApp('write-at-boot').use(dbPlugin()).use(journal({ j, tables })).features([writer, counting]).boot(),
+    );
+
+    expect(await placedCount('boot:at-boot')).toBe(1);
+  });
+
+  it('lets an effect declared with `journalHandlers` run a command of another feature through `ctx.run`', async () => {
     // Billing owns the command and hears the payment. Ordering only reacts to its own event.
     const payOrder = j.command(
       'payOrder',
@@ -304,27 +319,27 @@ describe('journal(...) in feature mode', () => {
       (input, { write }) => write(order, input.id, () => [OrderPaid({ amount: 1 })]),
     );
     const paid = signal();
-    const ordering = feature(
-      'ordering',
-      journalHandlers({
-        effects: [
-          j.effect('dot-pay-on-place', order, {
-            OrderPlaced: (e, { run }) => run(payOrder, { id: e.entityId }, { actorId: 'system' }),
-          }),
-        ],
-      }),
-    );
-    const billing = feature(
-      'billing',
-      journalHandlers({ effects: [j.effect('dot-paid-receipt', order, { OrderPaid: () => paid.open() })] }),
-    );
+    const ordering = feature('ordering', {
+      use: [
+        journalHandlers({
+          effects: [
+            j.effect('dot-pay-on-place', order, {
+              OrderPlaced: (e, { run }) => run(payOrder, { id: e.entityId }, { actorId: 'system' }),
+            }),
+          ],
+        }),
+      ],
+    });
+    const billing = feature('billing', {
+      use: [journalHandlers({ effects: [j.effect('dot-paid-receipt', order, { OrderPaid: () => paid.open() })] })],
+    });
     const app = track(
-      await bootTestApp<{ journal: TestJournal }>([
-        dbPlugin(),
-        ordering.plugin,
-        billing.plugin,
-        journal({ j, tables, features: [ordering.token, billing.token], pollMs: POLL_MS }),
-      ]),
+      await defineApp('cross-feature')
+        .use(dbPlugin())
+        .use(journal({ j, tables }))
+        .features([ordering, billing])
+        .serve(journalWorker({ pollMs: POLL_MS }))
+        .boot(),
     );
     await app.start();
 
@@ -368,7 +383,7 @@ describe('journal(...) in feature mode', () => {
     const heard: { orders: OrderId[]; billing: OrderId[] } = { orders: [], billing: [] };
     const told = { orders: signal(), billing: signal() };
     /** One emitter plugin and one feature that wires it to its own `emitter` need. */
-    const emitterFeature = (name: 'orders' | 'billing') => {
+    const emitterFeature = <Name extends 'orders' | 'billing'>(name: Name) => {
       const EmitterToken = token<Emitter>()(`${name}.emitter`);
       const emitter = plugin({
         name: `${name}-emitter`,
@@ -380,28 +395,24 @@ describe('journal(...) in feature mode', () => {
             },
           }),
       });
-      const slice = journalHandlers({ effects: [announce(name)] });
-      const Feature = token<{ readonly journal: ReturnType<typeof slice.resolve> }>()(`feature.${name}`);
-      const feature = plugin({
-        name,
+      const owner = feature(name, {
         needs: { emitter: EmitterToken },
-        actions: slice.actions,
-        boot: ctx => provide(Feature, { journal: slice.resolve(ctx) }),
+        use: [journalHandlers({ effects: [announce(name)] })],
       });
-      return { emitter, feature, token: Feature };
+      return { emitter, feature: owner };
     };
     const orders = emitterFeature('orders');
     const billing = emitterFeature('billing');
 
     const app = track(
-      await bootTestApp<{ journal: TestJournal }>([
-        dbPlugin(),
-        orders.emitter,
-        billing.emitter,
-        orders.feature,
-        billing.feature,
-        journal({ j, tables, features: [orders.token, billing.token], pollMs: POLL_MS }),
-      ]),
+      await defineApp('per-feature-services')
+        .use(dbPlugin())
+        .use(orders.emitter)
+        .use(billing.emitter)
+        .use(journal({ j, tables }))
+        .features([orders.feature, billing.feature])
+        .serve(journalWorker({ pollMs: POLL_MS }))
+        .boot(),
     );
     await app.start();
 
@@ -431,6 +442,8 @@ describe('journal(...) in feature mode', () => {
     expectTypeOf(journalHandlers({ effects: [recorder('dot-plain').effect] }).resolve)
       .parameter(0)
       .toBeUnknown();
+    // @ts-expect-error -- this feature needs no `emitter`, so its services do not fit the slice
+    feature('forgetful', { use: [slice] });
 
     expect(() =>
       // @ts-expect-error -- type test: these services have no `emitter`, so they do not fit the slice
@@ -441,50 +454,42 @@ describe('journal(...) in feature mode', () => {
   });
 
   it('fails the boot and names the effect and both features when two features declare the same effect name, so a job never has two owners and nobody has to search for the second one', async () => {
-    const first = feature('first', journalHandlers({ effects: [recorder('dot-twice').effect] }));
-    const second = feature('second', journalHandlers({ effects: [recorder('dot-twice').effect] }));
+    const first = feature('first', { use: [journalHandlers({ effects: [recorder('dot-twice').effect] })] });
+    const second = feature('second', { use: [journalHandlers({ effects: [recorder('dot-twice').effect] })] });
 
     await expect(
-      bootTestApp([
-        dbPlugin(),
-        first.plugin,
-        second.plugin,
-        journal({ j, tables, features: [first.token, second.token], worker: false }),
-      ]),
-    ).rejects.toThrow('duplicate effect name "dot-twice" (features "feature.first" and "feature.second")');
+      defineApp('twice').use(dbPlugin()).use(journal({ j, tables })).features([first, second]).boot(),
+    ).rejects.toThrow('duplicate effect name "dot-twice" (features "first" and "second")');
   });
 
   it('fails the boot and names both features when two features declare the same projection name, so one read model is never written by two handlers', async () => {
-    const first = feature('first', journalHandlers({ projections: [countPlaced('dot-count-twice', 'first')] }));
-    const second = feature('second', journalHandlers({ projections: [countPlaced('dot-count-twice', 'second')] }));
+    const first = feature('first', {
+      use: [journalHandlers({ projections: [countPlaced('dot-count-twice', 'first')] })],
+    });
+    const second = feature('second', {
+      use: [journalHandlers({ projections: [countPlaced('dot-count-twice', 'second')] })],
+    });
 
     await expect(
-      bootTestApp([
-        dbPlugin(),
-        first.plugin,
-        second.plugin,
-        journal({ j, tables, features: [first.token, second.token], worker: false }),
-      ]),
-    ).rejects.toThrow('duplicate projection name "dot-count-twice" (features "feature.first" and "feature.second")');
+      defineApp('twice').use(dbPlugin()).use(journal({ j, tables })).features([first, second]).boot(),
+    ).rejects.toThrow('duplicate projection name "dot-count-twice" (features "first" and "second")');
   });
 
   it('says so when one feature lists the same effect name twice, so the message does not send the reader to a second feature', async () => {
-    const only = feature(
-      'only',
-      journalHandlers({ effects: [recorder('dot-same-feature').effect, recorder('dot-same-feature').effect] }),
-    );
+    const only = feature('only', {
+      use: [journalHandlers({ effects: [recorder('dot-same-feature').effect, recorder('dot-same-feature').effect] })],
+    });
 
-    await expect(
-      bootTestApp([dbPlugin(), only.plugin, journal({ j, tables, features: [only.token], worker: false })]),
-    ).rejects.toThrow('duplicate effect name "dot-same-feature" (feature "feature.only", twice)');
+    await expect(defineApp('once').use(dbPlugin()).use(journal({ j, tables })).features([only]).boot()).rejects.toThrow(
+      'duplicate effect name "dot-same-feature" (feature "only", twice)',
+    );
   });
 
   it('refuses a `journal` slice that `journalHandlers` did not make, so a wiring mistake fails at boot and not inside a write', async () => {
-    const Broken = token<{ readonly journal: { readonly effects: string } }>()('feature.broken');
-    const broken = plugin({ name: 'broken', boot: () => provide(Broken, { journal: { effects: 'not a list' } }) });
+    const broken = feature('broken', { use: [{ key: 'journal', actions: [], resolve: () => ({}) }] });
 
     await expect(
-      bootTestApp([dbPlugin(), broken, journal({ j, tables, features: [Broken], worker: false })]),
-    ).rejects.toThrow(/feature\.broken/);
+      defineApp('broken').use(dbPlugin()).use(journal({ j, tables })).features([broken]).boot(),
+    ).rejects.toThrow(/feature "broken"/);
   });
 });

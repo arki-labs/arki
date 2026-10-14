@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { defineApp, plugin, provide, service, token } from '@arki/dot/plugin';
+import { feature } from '@arki/dot/feature';
+import { defineApp, plugin, provide, service } from '@arki/dot/plugin';
 
-import { DurableSchedules, schedule, scheduleActions } from './dot.js';
+import { DurableSchedules, schedule, scheduleActions, schedules } from './dot.js';
 import { ScheduleError, SCHEDULE_ERROR_CODES, defineSchedule, initSchedule } from './index.js';
 import { project } from './projection.js';
 import {
@@ -69,7 +70,7 @@ describe('schedule DOT projection', () => {
       timezone: 'UTC',
       handler: async () => {},
     });
-    const app = defineApp('schedule-app').use(schedule({ schedules: [daily], lock: lockThat(true) })).configure();
+    const app = defineApp('schedule-app').serve(schedule({ schedules: [daily], lock: lockThat(true) })).configure();
 
     expect(app.manifest.actions).toEqual([
       {
@@ -99,90 +100,66 @@ describe('schedule DOT projection', () => {
     ]);
   });
 
-  it('feature mode collects schedules from feature tokens and does not declare activator actions', async () => {
-    type ScheduleCtx = {
-      readonly dependencyName: string;
-    };
+  // The point of a driver: the app lists its features once, in
+  // `.features()`, and `.serve(schedule())` runs their schedules. A second
+  // list inside schedule() would drift from the first.
+  it('runs the schedules of every mounted feature with the app context, without listing them again', async () => {
+    type ScheduleCtx = { readonly dependencyName: string };
     const s = initSchedule.context<ScheduleCtx>().create();
-    const Feature = token<{ readonly schedules?: readonly [ReturnType<typeof s.define>] }>()('feature.schedules');
-    const dependency = plugin({
-      name: 'dependency',
-      boot: () => ({ dependency: { name: 'dep' } }),
-    });
     const calls: string[] = [];
+    // Durable so the test can fire the tick through the fake backend.
     const daily = s.define({
       name: 'feature-daily',
       every: '1h',
+      durable: true,
       handler: async ctx => {
         calls.push(ctx.dependencyName);
       },
     });
-    const feature = plugin({
-      name: 'feature',
-      actions: scheduleActions([daily]),
-      boot: () => provide(Feature, { schedules: [daily] }),
-    });
+    const reports = feature('reports', { use: [schedules([daily])] });
+    // A feature with no schedules is skipped, not an error.
+    const quiet = feature('quiet', {});
+    const fake = fakeDurableScheduler();
+    const dependency = plugin({ name: 'dependency', boot: () => ({ dependency: { name: 'dep' } }) });
+    const backend = plugin({ name: 'durable-backend', boot: () => provide(DurableSchedules, fake) });
+
     const app = await defineApp('schedule-feature')
       .use(dependency)
-      .use(feature)
-      .use(
+      .use(backend)
+      .features([reports, quiet])
+      .serve(
         schedule({
-          features: [Feature] as const,
           needs: { dependency: service<{ readonly name: string }>() },
           context: ({ dependency: dep }) => ({ dependencyName: dep.name }),
+          durable: DurableSchedules,
         }),
       )
       .boot();
 
-    expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual(['feature:feature-daily.fire']);
-    await app.dispose();
-    expect(calls).toEqual([]);
-  });
-
-  it('feature mode accepts no-context schedule tokens without a context factory', async () => {
-    const daily = defineSchedule({
-      name: 'feature-plain',
-      every: '1h',
-      handler: async () => {},
-    });
-    const Feature = token<{ readonly schedules?: readonly [typeof daily] }>()('feature.plain-schedules');
-    const feature = plugin({
-      name: 'plain-feature',
-      actions: scheduleActions([daily]),
-      boot: () => provide(Feature, { schedules: [daily] }),
-    });
-    const app = await defineApp('schedule-plain-feature')
-      .use(feature)
-      .use(schedule({ features: [Feature] as const }))
-      .boot();
-
-    expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual(['plain-feature:feature-plain.fire']);
+    // Schedule actions belong to the feature; the driver declares none of its own.
+    expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual(['reports:feature-daily.fire']);
+    await app.start();
+    await expect(registration(fake, 'feature-daily').run()).resolves.toEqual({ name: 'feature-daily', status: 'ran' });
+    expect(calls).toEqual(['dep']);
+    await app.stop();
     await app.dispose();
   });
 
-  it('feature mode keeps typed schedule context when mixed with no-context schedules', () => {
-    const s = initSchedule.context<{ readonly db: { readonly ping: () => string } }>().create();
-    const typed = s.define({
-      name: 'feature-typed',
-      every: '1h',
-      handler: async ctx => {
-        ctx.db.ping();
-      },
-    });
-    const plain = defineSchedule({
-      name: 'feature-plain',
-      every: '1h',
-      handler: async () => {},
-    });
-    const TypedFeature = token<{ readonly schedules?: readonly [typeof typed] }>()('feature.typed-context');
-    const PlainFeature = token<{ readonly schedules?: readonly [typeof plain] }>()('feature.plain-context');
+  it('runs feature and app-level schedules on one runtime, so their names must not clash', async () => {
+    const plain = defineSchedule({ name: 'shared-name', every: '1h', handler: () => Promise.resolve() });
+    const owner = feature('owner', { use: [schedules([plain])] });
 
-    schedule({
-      features: [TypedFeature, PlainFeature] as const,
-      context: () => ({ db: { ping: () => 'ok' } }),
+    await expect(
+      defineApp('schedule-clash').features([owner]).serve(schedule({ schedules: [plain] })).boot(),
+    ).rejects.toMatchObject({ cause: { code: SCHEDULE_ERROR_CODES.duplicateSchedule } });
+  });
+
+  it('fails boot with a coded error when a feature publishes a schedules slice that is not a schedule list', async () => {
+    const broken = feature('broken', { use: [{ key: 'schedules', actions: [], resolve: () => ({ not: 'a list' }) }] });
+
+    await expect(defineApp('schedule-broken').features([broken]).serve(schedule({})).boot()).rejects.toMatchObject({
+      cause: { code: SCHEDULE_ERROR_CODES.invalidDefinition },
     });
-    // @ts-expect-error typed feature schedules still require their context when mixed with plain schedules.
-    schedule({ features: [TypedFeature, PlainFeature] as const, context: () => undefined });
   });
 
   it('projects the recurring surface from schedule actions', () => {
@@ -466,18 +443,17 @@ describe('durable schedules', () => {
   it('the Dot plugin fails boot with a coded error when a durable schedule has no backend', async () => {
     const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
 
-    await expect(defineApp('durable-missing').use(schedule({ schedules: [nightly] })).boot()).rejects.toMatchObject({
+    await expect(defineApp('durable-missing').serve(schedule({ schedules: [nightly] })).boot()).rejects.toMatchObject({
       cause: { code: SCHEDULE_ERROR_CODES.durableBackendMissing },
     });
   });
 
-  it('the Dot plugin fails boot in feature mode too, naming the schedule', async () => {
+  it('the Dot plugin fails boot for a durable feature schedule too, naming the schedule', async () => {
     const nightly = defineSchedule({ name: 'feature-nightly', every: '1h', durable: true, handler: async () => {} });
-    const Feature = token<{ readonly schedules?: readonly [typeof nightly] }>()('feature.durable');
-    const feature = plugin({ name: 'durable-feature', boot: () => provide(Feature, { schedules: [nightly] }) });
+    const durableFeature = feature('durable-feature', { use: [schedules([nightly])] });
 
     await expect(
-      defineApp('durable-missing-feature').use(feature).use(schedule({ features: [Feature] as const })).boot(),
+      defineApp('durable-missing-feature').features([durableFeature]).serve(schedule({})).boot(),
     ).rejects.toMatchObject({
       cause: { code: SCHEDULE_ERROR_CODES.durableBackendMissing, message: expect.stringContaining('"feature-nightly"') },
     });
@@ -497,7 +473,7 @@ describe('durable schedules', () => {
     });
     const app = await defineApp('durable-app')
       .use(backend)
-      .use(schedule({ schedules: [nightly], durable: DurableSchedules }))
+      .serve(schedule({ schedules: [nightly], durable: DurableSchedules }))
       .boot();
 
     await app.start();
@@ -513,7 +489,7 @@ describe('durable schedules', () => {
     const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
 
     // @ts-expect-error schedule({ durable: DurableSchedules }) needs a plugin that provides DurableSchedules.
-    defineApp('durable-no-backend').use(schedule({ schedules: [nightly], durable: DurableSchedules }));
+    defineApp('durable-no-backend').serve(schedule({ schedules: [nightly], durable: DurableSchedules }));
     // @ts-expect-error durable takes the DurableSchedules token, not a boolean.
     schedule({ schedules: [nightly], durable: true });
   });

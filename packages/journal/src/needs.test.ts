@@ -97,3 +97,50 @@ describe('an effect with needs', () => {
     expect(journal.catalog.effects).toEqual(['needs-order-mail']);
   });
 });
+
+describe("an effect composed with `services: 'worker'`", () => {
+  it('writes and queues its job without the service, because only running the effect needs it: a journal can exist before its services do', async () => {
+    const { sent, mailer } = outbox();
+    const journal = j.compose({ tables, effects: [orderMail], services: 'worker' });
+
+    const id = await placeAndPay(journal);
+    expect(sent).toHaveLength(0);
+    expect(await journal.drain(db, { services: () => ({ mailer }) })).toBe(1);
+
+    expect(sent.map(mail => mail.orderId)).toEqual([id]);
+  });
+
+  it('refuses a drain or a worker without the service, and claims no job, so the mistake shows once and no job burns its retries', async () => {
+    const { sent, mailer } = outbox();
+    const journal = j.compose({ tables, effects: [orderMail], services: 'worker' });
+    await placeAndPay(journal);
+    const message =
+      'journal: effect "needs-order-mail" needs "mailer", but no service with that name was given; pass it as j.compose({ services: { mailer } }), or in a Dot app add it to the `needs` of the feature that lists this effect';
+
+    await expect(journal.drain(db)).rejects.toThrow(message);
+    expect(() => journal.worker(db)).toThrow(message);
+    // The job was never claimed: it runs once the service is given.
+    expect(await journal.drain(db, { services: () => ({ mailer }) })).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('asks for the services per handler, so two effects can get two different services under one need name', async () => {
+    const first = outbox();
+    const second = outbox();
+    const otherMail = j.effect(
+      'needs-other-mail',
+      order,
+      { mailer: need<Mailer>() },
+      { OrderPaid: (e, { jobId, mailer }) => mailer.send({ orderId: e.entityId, idempotencyKey: jobId }) },
+    );
+    const journal = j.compose({ tables, effects: [orderMail, otherMail], services: 'worker' });
+    await placeAndPay(journal);
+
+    await journal.drain(db, {
+      services: ({ name }) => ({ mailer: name === 'needs-order-mail' ? first.mailer : second.mailer }),
+    });
+
+    expect(first.sent).toHaveLength(1);
+    expect(second.sent).toHaveLength(1);
+  });
+});

@@ -8,22 +8,18 @@ const orpcOnlyInAdapter = {
   group: ['@orpc/*'],
   message: '`@orpc/server` is an optional peer. Only `src/orpc.ts` may import it, so the core entry loads without it.',
 };
-const noFeaturePackage = {
-  group: ['@arki/feature', '@arki/feature/*'],
-  message: 'Feature slices are read by shape. `@arki/feature` must not become a dependency of the journal.',
-};
 
 // `src/dot.ts` and `src/orpc.ts` are the adapters; `src/test-support.ts` is test scaffolding.
 export default [
   ...library({ adapters: ['src/dot.ts', 'src/orpc.ts', 'src/test-support.ts'] }),
   {
-    // The core may not import the optional peers or the feature package.
+    // The core may not import the optional peers (features live in `@arki/dot/feature`).
     files: ['src/**/*.ts'],
     ignores: ['src/**/*.test.ts', 'src/dot.ts', 'src/orpc.ts', 'src/test-support.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [...portableImportPatterns, dotOnlyInBridge, orpcOnlyInAdapter, noFeaturePackage] },
+        { patterns: [...portableImportPatterns, dotOnlyInBridge, orpcOnlyInAdapter] },
       ],
     },
   },

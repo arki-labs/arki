@@ -1,7 +1,31 @@
-import type { CtxOf, EmptyShape, NeedsShape, Plugin, Token, WireNeeds } from '@arki/dot/plugin';
+/**
+ * DOT adapter for `@arki/schedule` — the `schedule()` driving adapter.
+ *
+ * `schedule()` is a driver: `.serve(schedule(...))` binds it to the
+ * features the app mounted and runs every feature's `schedules(...)` slice,
+ * plus any app-level `schedules` passed here. The app lists its features
+ * once:
+ *
+ * ```ts
+ * defineApp('shop')
+ *   .use(db({ url }))
+ *   .features([billing, reports])           // each declares `use: [schedules(defs)]`
+ *   .serve(schedule({ needs: { db: service<Db>() }, context: ({ db }) => ({ db }) }));
+ * ```
+ *
+ * `context` builds the one value every handler receives — feature and
+ * app-level schedules alike. The features are bound at runtime, so the
+ * compiler cannot check that their schedules expect this context: keep
+ * one context type per app (e.g. via `initSchedule.context<Ctx>()`).
+ */
+
+import type { AnyFeature, Driver } from '@arki/dot/feature';
+import type { CtxOf, EmptyShape, NeedsShape, Plugin, WireNeeds } from '@arki/dot/plugin';
+import { driver, sliceOf } from '@arki/dot/feature';
 import { plugin, token } from '@arki/dot/plugin';
 
 import type { ScheduleDef } from './index.js';
+import { ScheduleError, SCHEDULE_ERROR_CODES } from './errors.js';
 import type { DurableScheduler, KvLike, ScheduleRuntime } from './runtime.js';
 import { assertDurableBackend, createScheduleRuntime } from './runtime.js';
 
@@ -21,18 +45,13 @@ export type ScheduleDotAction = {
   readonly meta: JsonObject;
 };
 
-export type ScheduleDotOptions = {
-  readonly schedules: readonly ScheduleDef[];
-  readonly lock?: KvLike;
-  readonly jitterMs?: number;
-};
-
 type NoReservedKeys = Readonly<Record<`$${string}`, never>>;
 
 /**
  * The durable backend service. `durableScheduler()` from `@arki/queue/dot`
  * provides it under this key; `schedule({ durable: DurableSchedules })`
  * needs it, so the app builder rejects the app when no provider is mounted.
+ * It is the adapter's own need, not a feature slice.
  */
 export const DurableSchedules = token<DurableScheduler>()('arki.schedule.durable');
 
@@ -62,52 +81,12 @@ function durableBackend(services: Readonly<Record<string, unknown>>): DurableSch
   return isDurableScheduler(value) ? value : undefined;
 }
 
-export type ScheduleFeatureToken<TContext = undefined> = Token<
-  { readonly schedules?: readonly ScheduleDef<TContext>[] },
-  string
->;
-
-type AnyScheduleFeatureToken = Token<object, string>;
-
-type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) extends (value: infer TIntersection) => void
-  ? TIntersection
-  : never;
-
-type ScheduleContextsFromSlice<TSlice> = TSlice extends {
-  readonly schedules?: readonly (infer TSchedule)[];
-}
-  ? TSchedule extends ScheduleDef<infer TContext>
-    ? TContext
-    : never
-  : undefined;
-
-type ScheduleContextFromUnion<TContext> = [Exclude<TContext, undefined>] extends [never]
-  ? undefined
-  : UnionToIntersection<Exclude<TContext, undefined>>;
-
-// Naked-parameter wrapper so payload extraction DISTRIBUTES over the
-// token union — tokens now carry per-feature payload types, and a
-// single non-distributive inference across differing payloads collapses
-// to a useless common supertype.
-type SliceOfToken<TTok> = TTok extends Token<infer TSlice, string> ? TSlice : never;
-
-type ScheduleFeatureContext<TFeatures extends readonly AnyScheduleFeatureToken[]> = [
-  TFeatures[number],
-] extends [never]
-  ? undefined
-  : ScheduleContextFromUnion<ScheduleContextsFromSlice<SliceOfToken<TFeatures[number]>>>;
-
-export type ScheduleFeatureNeeds<TFeatures extends readonly AnyScheduleFeatureToken[]> = {
-  readonly [Tok in TFeatures[number] as Tok extends Token<unknown, infer K> ? K : never]: Tok extends Token<
-    infer TSlice,
-    string
-  >
-    ? TSlice
-    : never;
-};
-
 type ScheduleBaseOptions<TContext> = {
-  readonly schedules: readonly ScheduleDef<TContext>[];
+  /**
+   * App-level schedules no feature owns. Feature schedules come from the
+   * bound features' `schedules(...)` slices; both run on one runtime.
+   */
+  readonly schedules?: readonly ScheduleDef<TContext>[];
   readonly lock?: KvLike;
   readonly jitterMs?: number;
 };
@@ -117,47 +96,30 @@ type ScheduleDurableOption<TDurable extends DurableSchedulesToken | undefined> =
   readonly durable?: TDurable;
 };
 
-type ScheduleContextOption<TNeeds extends NeedsShape, TContext> =
-  | {
-      readonly context: (services: CtxOf<TNeeds>) => TContext | Promise<TContext>;
-    }
-  | ([TContext] extends [undefined]
-      ? {
-          readonly context?: (services: CtxOf<TNeeds>) => TContext | Promise<TContext>;
-        }
-      : never);
+/** No `context`: every schedule — feature and app-level — takes no context. */
+export type ScheduleNoContextOptions<TDurable extends DurableSchedulesToken | undefined = undefined> =
+  & ScheduleBaseOptions<undefined>
+  & ScheduleDurableOption<TDurable>
+  & {
+    readonly needs?: never;
+    readonly context?: never;
+  };
 
-export type ScheduleDirectOptions<
+/**
+ * With `context`: the value every handler receives, built at boot from
+ * the adapter's own `needs`. One plain object type (no union) so the
+ * compiler infers `TNeeds` first and types `context`'s parameter from it.
+ */
+export type ScheduleOptions<
   TNeeds extends NeedsShape & NoReservedKeys,
   TContext,
   TDurable extends DurableSchedulesToken | undefined = undefined,
 > =
   & ScheduleBaseOptions<TContext>
-  & ScheduleContextOption<TNeeds, TContext>
   & ScheduleDurableOption<TDurable>
   & {
-    readonly needs: TNeeds;
-  };
-
-export type ScheduleDirectNoNeedsOptions<TContext, TDurable extends DurableSchedulesToken | undefined = undefined> =
-  & ScheduleBaseOptions<TContext>
-  & ScheduleContextOption<EmptyShape, TContext>
-  & ScheduleDurableOption<TDurable>
-  & {
-    readonly needs?: never;
-  };
-
-export type ScheduleFeatureOptions<
-  TNeeds extends NeedsShape & NoReservedKeys,
-  TFeatures extends readonly AnyScheduleFeatureToken[],
-  TDurable extends DurableSchedulesToken | undefined = undefined,
-> =
-  & Omit<ScheduleBaseOptions<ScheduleFeatureContext<TFeatures>>, 'schedules'>
-  & ScheduleContextOption<TNeeds, ScheduleFeatureContext<TFeatures>>
-  & ScheduleDurableOption<TDurable>
-  & {
-    readonly features: TFeatures;
     readonly needs?: TNeeds;
+    readonly context: (services: CtxOf<TNeeds>) => TContext | Promise<TContext>;
   };
 
 function actionForSchedule<TContext>(schedule: ScheduleDef<TContext>, locked: boolean): ScheduleDotAction {
@@ -188,7 +150,7 @@ export function scheduleActions<TContext>(
   return schedules.map(definition => actionForSchedule(definition, options.locked ?? false));
 }
 
-/** The `@arki/feature` slice contract a `schedules(...)` declaration produces. */
+/** The `@arki/dot/feature` slice contract a `schedules(...)` declaration produces. */
 export type ScheduleFeatureSlice<TContext> = {
   readonly key: 'schedules';
   readonly actions: readonly ScheduleDotAction[];
@@ -197,148 +159,128 @@ export type ScheduleFeatureSlice<TContext> = {
 
 /**
  * Declare a feature's in-process schedules as a boot-time slice
- * (`defineFeature(..., { use: [schedules(defs)] })`). The payload lands
- * under `schedules` in the feature's slice token — where
- * `schedule({ features })` collects it — and the derived actions join
- * the feature's manifest.
+ * (`feature(..., { use: [schedules(defs)] })`). The payload lands
+ * under `schedules` in the feature's slice record — where the
+ * `.serve(schedule(...))` driver collects it — and the derived actions
+ * join the feature's manifest.
  */
 export function schedules<TContext>(defs: readonly ScheduleDef<TContext>[]): ScheduleFeatureSlice<TContext> {
   return { key: 'schedules', actions: scheduleActions(defs), resolve: () => defs };
 }
 
-function collectFeatureSchedules<TContext>(
-  features: readonly AnyScheduleFeatureToken[],
-  record: Readonly<Record<string, { readonly schedules?: readonly ScheduleDef<TContext>[] } | undefined>>,
-): readonly ScheduleDef<TContext>[] {
-  const schedules: ScheduleDef<TContext>[] = [];
-  for (const feature of features) {
-    const slice = record[feature.key];
-    if (slice?.schedules !== undefined) {
-      schedules.push(...slice.schedules);
-    }
-  }
-  return schedules;
+function isScheduleList(value: unknown): value is readonly ScheduleDef<unknown>[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item: unknown) =>
+        typeof item === 'object' &&
+        item !== null &&
+        'name' in item &&
+        typeof item.name === 'string' &&
+        'handler' in item &&
+        typeof item.handler === 'function',
+    )
+  );
 }
 
-export function schedule<TContext = undefined, TDurable extends DurableSchedulesToken | undefined = undefined>(
-  options: ScheduleDirectNoNeedsOptions<TContext, TDurable>,
-): Plugin<DurableNeeds<TDurable>, EmptyShape>;
-export function schedule<
-  TNeeds extends NeedsShape & NoReservedKeys,
-  TContext = undefined,
-  TDurable extends DurableSchedulesToken | undefined = undefined,
->(
-  options: ScheduleDirectOptions<TNeeds, TContext, TDurable>,
-): Plugin<WireNeeds<TNeeds> & DurableNeeds<TDurable>, EmptyShape>;
-export function schedule<
-  TNeeds extends NeedsShape & NoReservedKeys,
-  const TFeatures extends readonly AnyScheduleFeatureToken[],
-  TDurable extends DurableSchedulesToken | undefined = undefined,
->(
-  options: ScheduleFeatureOptions<TNeeds, TFeatures, TDurable>,
-): Plugin<WireNeeds<TNeeds> & ScheduleFeatureNeeds<TFeatures> & DurableNeeds<TDurable>, EmptyShape>;
-export function schedule<
-  TNeeds extends NeedsShape & NoReservedKeys,
-  TContext,
-  const TFeatures extends readonly AnyScheduleFeatureToken[],
->(
-  options:
-    | ScheduleDirectNoNeedsOptions<TContext, DurableSchedulesToken | undefined>
-    | ScheduleDirectOptions<TNeeds, TContext, DurableSchedulesToken | undefined>
-    | ScheduleFeatureOptions<TNeeds, TFeatures, DurableSchedulesToken | undefined>,
-): Plugin<WireNeeds<TNeeds>, EmptyShape> {
-  let runtime: ScheduleRuntime | undefined;
-  const featureMode = 'features' in options;
-  const needs =
-    options.needs === undefined
-      ? {}
-      : options.needs;
-  const durableNeeds: NeedsShape = options.durable === undefined ? {} : { [DURABLE_ALIAS]: options.durable };
-  const runtimeNeeds = featureMode
-    ? {
-        ...needs,
-        ...durableNeeds,
-        ...Object.fromEntries(options.features.map(feature => [feature.key, feature])),
-      }
-    : { ...needs, ...durableNeeds };
-
-  return plugin({
-    name: 'schedule',
-    version: '0.0.1',
-    needs: runtimeNeeds,
-    actions: featureMode ? [] : scheduleActions(options.schedules, { locked: options.lock !== undefined }),
-    configure(ctx) {
-      ctx.registerProjection({
-        format: 'schedule-table',
-        binding: 'schedule',
-        module: '@arki/schedule/projection',
+/**
+ * The schedules every bound feature declared, in mount order. The guard
+ * checks shape only: each handler's context type is the app's contract
+ * with its features, which the runtime cannot see (see the module docs).
+ */
+function featureSchedules(ctx: object, features: readonly AnyFeature[]): readonly ScheduleDef<unknown>[] {
+  const collected: ScheduleDef<unknown>[] = [];
+  for (const f of features) {
+    const defs = sliceOf(ctx, f)['schedules'];
+    if (defs === undefined) continue;
+    if (!isScheduleList(defs)) {
+      throw new ScheduleError({
+        code: SCHEDULE_ERROR_CODES.invalidDefinition,
+        message: `[schedule] feature "${f.name}" published a "schedules" slice that is not a list of schedules.`,
+        remediation: 'Declare feature schedules with schedules([...]) from @arki/schedule/dot, built by defineSchedule().',
       });
-      ctx.declareProvides('schedule-runtime');
-    },
-    boot(ctx) {
-      const durable = durableBackend(ctx);
-      if (featureMode) {
-        type FeatureContext = ScheduleFeatureContext<TFeatures>;
-        const schedules = collectFeatureSchedules<FeatureContext>(
-          options.features,
-          ctx as Readonly<Record<string, { readonly schedules?: readonly ScheduleDef<FeatureContext>[] } | undefined>>,
-        );
-        assertDurableBackend(schedules, durable);
+    }
+    collected.push(...defs);
+  }
+  return collected;
+}
+
+/** The scheduler driving adapter. See the module docs for the wiring. */
+export function schedule<TDurable extends DurableSchedulesToken | undefined = undefined>(
+  options: ScheduleNoContextOptions<TDurable>,
+): Driver<DurableNeeds<TDurable>, EmptyShape>;
+export function schedule<
+  TContext,
+  TNeeds extends NeedsShape & NoReservedKeys = EmptyShape,
+  TDurable extends DurableSchedulesToken | undefined = undefined,
+>(options: ScheduleOptions<TNeeds, TContext, TDurable>): Driver<WireNeeds<TNeeds> & DurableNeeds<TDurable>, EmptyShape>;
+export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
+  options: Omit<ScheduleOptions<TNeeds, TContext, DurableSchedulesToken | undefined>, 'context'> & {
+    readonly context?: ScheduleOptions<TNeeds, TContext>['context'];
+  },
+): Driver<WireNeeds<TNeeds>, EmptyShape> {
+  const own = options.schedules ?? [];
+  const needs: NeedsShape & NoReservedKeys = {
+    ...options.needs,
+    ...(options.durable === undefined ? {} : { [DURABLE_ALIAS]: options.durable }),
+  };
+  const actions = scheduleActions(own, { locked: options.lock !== undefined });
+
+  return driver(features => {
+    let runtime: ScheduleRuntime | undefined;
+    return plugin({
+      name: 'schedule',
+      version: '0.0.1',
+      needs,
+      // App-level schedules only: feature schedules already joined each
+      // feature's manifest through their `schedules(...)` slice.
+      actions,
+      configure(ctx) {
+        ctx.registerProjection({
+          format: 'schedule-table',
+          binding: 'schedule',
+          module: '@arki/schedule/projection',
+        });
+        ctx.declareProvides('schedule-runtime');
+      },
+      boot(ctx) {
+        const durable = durableBackend(ctx);
+        const all: readonly ScheduleDef<TContext>[] = [...own, ...featureSchedules(ctx, features)];
+        assertDurableBackend(all, durable);
+        const shared = {
+          ...(options.lock === undefined ? {} : { lock: options.lock }),
+          ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
+          ...(durable === undefined ? {} : { durable }),
+        };
         const context = options.context;
         if (context === undefined) {
           runtime = createScheduleRuntime({
             // Erasure seam: public overloads only allow missing context for `TContext = undefined`.
-            schedules: schedules as readonly ScheduleDef<undefined>[],
-            ...(options.lock === undefined ? {} : { lock: options.lock }),
-            ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
-            ...(durable === undefined ? {} : { durable }),
+            schedules: all as readonly ScheduleDef<undefined>[],
+            ...shared,
           });
           return;
         }
-
-        runtime = createScheduleRuntime<FeatureContext>({
-          schedules,
-          ...(options.lock === undefined ? {} : { lock: options.lock }),
-          ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
-          ...(durable === undefined ? {} : { durable }),
+        runtime = createScheduleRuntime<TContext>({
+          schedules: all,
+          ...shared,
           createContext: () => context(ctx as CtxOf<TNeeds>),
         });
-        return;
-      }
-
-      const schedules = options.schedules;
-      assertDurableBackend(schedules, durable);
-      const context = options.context;
-      if (context === undefined) {
-        runtime = createScheduleRuntime({
-          // Erasure seam: public overloads only allow missing context for `TContext = undefined`.
-          schedules: schedules as readonly ScheduleDef<undefined>[],
-          ...(options.lock === undefined ? {} : { lock: options.lock }),
-          ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
-          ...(durable === undefined ? {} : { durable }),
-        });
-        return;
-      }
-
-      runtime = createScheduleRuntime<TContext>({
-        schedules,
-        ...(options.lock === undefined ? {} : { lock: options.lock }),
-        ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
-        ...(durable === undefined ? {} : { durable }),
-        createContext: () => context(ctx as CtxOf<TNeeds>),
-      });
-    },
-    start() {
-      runtime?.start();
-    },
-    async stop() {
-      await runtime?.stop();
-    },
-    async dispose() {
-      await runtime?.stop();
-      runtime = undefined;
-    },
-  }) as unknown as Plugin<WireNeeds<TNeeds>, EmptyShape>;
+      },
+      start() {
+        runtime?.start();
+      },
+      async stop() {
+        await runtime?.stop();
+      },
+      async dispose() {
+        await runtime?.stop();
+        runtime = undefined;
+      },
+      // Erasure seam: the needs record is runtime-built (own needs + the
+      // optional durable alias); the overloads carry the precise shape.
+    }) as unknown as Plugin<WireNeeds<TNeeds>, EmptyShape>;
+  });
 }
 
 export type { KvLike, ScheduleRuntime } from './runtime.js';

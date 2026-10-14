@@ -52,7 +52,7 @@ describe('module contract types', () => {
     expectTypeOf(module).toExtend<Parameters<typeof describeModule>[0]>();
   });
 
-  it('is an ActionSource for @arki/dot and @arki/feature `actions`', () => {
+  it('is an ActionSource for @arki/dot plugin and feature `actions`', () => {
     expectTypeOf<ForemanDotAction>().toExtend<ActionSource>();
     expectTypeOf(failedJobs).toExtend<ActionSource>();
     expectTypeOf(retryJob).toExtend<ActionSource>();

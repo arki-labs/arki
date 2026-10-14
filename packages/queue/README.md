@@ -250,6 +250,54 @@ renamed or deleted schedule stops ticking. Other scheduler keys on the queue
 (your own repeat jobs) are never touched. The runtime-local queue does the same
 for keyed pg-boss schedules on each job's queue.
 
+### DOT wiring: `queue()` and `queueWorker()`
+
+`@arki/queue/dot` splits the queue along the app hexagon. Features declare
+their jobs with `jobs(...)`. The app mounts the client with `.use()` and the
+worker with `.serve()`:
+
+```typescript
+import type { QueueClient } from '@arki/queue/dot';
+import { defineApp } from '@arki/dot';
+import { feature } from '@arki/dot/feature';
+import { service } from '@arki/dot/plugin';
+import { jobs, queue, queueWorker } from '@arki/queue/dot';
+
+const orders = feature('orders', {
+  use: [jobs({ sendReceipt })],
+  needs: { queue: service<QueueClient>() },
+  boot: ({ queue }) => ({ checkout: createCheckout(queue) }), // queue.enqueue(sendReceipt, { orderId })
+});
+
+// API process: enqueues only.
+defineApp('shop-api')
+  .use(queue({ connection: env.REDIS_URL, keyPrefix: 'shop:' }))
+  .features([orders]);
+
+// Worker process: same features, plus the worker that runs their jobs.
+defineApp('shop-worker')
+  .use(db({ relations }))
+  .use(queue({ connection: env.REDIS_URL, keyPrefix: 'shop:' }))
+  .features([orders])
+  .serve(queueWorker({ q, needs: { db: Db }, context: ({ db }) => ({ db }) }));
+```
+
+- `queue({ connection, keyPrefix?, name? })` provides the `queue` service:
+  `enqueue(job, data, options?)` returns the BullMQ job id. Boot opens no
+  connection; each job's queue opens on its first `enqueue`, with the retry
+  defaults the job declares. Use it where the job's own `trigger()` cannot
+  work: `trigger()` needs a worker that registered the job in the same process.
+- `queueWorker({ q, needs, context, blocking?, startupTimeoutMs?, name? })` is
+  bound to the features the app mounted. It registers each feature's
+  `jobs(...)` registry, reads the connection and key prefix from the `queue`
+  client, and builds the job context once at start. It starts in the
+  background unless `blocking: true`; a failed background start leaves the
+  app running without workers.
+- The manifest splits the same way: a feature's `jobs(...)` slice declares the
+  producer actions (`<job>.produce`), and the worker declares the consumer
+  actions (`<job>.consume`, `<schedule>.fire`). An API process never claims to
+  consume a queue.
+
 ### Durable backend for `@arki/schedule`
 
 `durableScheduler()` from `@arki/queue/dot` runs `@arki/schedule` schedules
