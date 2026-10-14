@@ -96,6 +96,7 @@
   "devDependencies": {
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/feature": "workspace:*",
     "@arki/http": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/prettier-config": "workspace:*",
