@@ -11,6 +11,7 @@ Arki is the `@arki/*` package set (about 54 packages under `packages/`) turned i
 | File | What it holds |
 | --- | --- |
 | [strategy.md](strategy.md) | The recommended strategy: product, pricing, how to beat Laravel, risks, first 90 days. Start here. |
+| [core-packages.md](core-packages.md) | Every `@arki/*` package sorted into four tiers: Stack, Libraries, Licence, Out of brand. |
 | [decisions.md](decisions.md) | Decisions the strategy needs. Each one is `proposed` until the founder accepts or rejects it. |
 | [research/01-market/](research/01-market/) | Round 1: what Laravel sells, the JS/TS framework market, and an inventory of every `@arki/*` package. |
 | [research/02-advisors/](research/02-advisors/) | Round 2: the same brief answered blind by two advisors (Fable and Astra), plus the synthesis and verified findings. |
