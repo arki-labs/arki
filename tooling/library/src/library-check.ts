@@ -4,10 +4,10 @@
  * directory against the structure RFC (`docs/rfcs/2026-10-14-arki-structure.md`).
  *
  * Hard errors (exit 1): an export without `types`, an export that points
- * nowhere under `dist/` or `src/`, a package with no Boundaries tag.
- * Warnings (printed, exit 0): folder name differs from the package name,
- * a `"./*"` wildcard export, `sideEffects` is not `false`. These become
- * errors once the flatten wave lands.
+ * nowhere under `dist/` or `src/`, a package with no Boundaries tag, a folder
+ * name that differs from the package name (`folder = name`, RFC B17).
+ * Warnings (printed, exit 0): a `"./*"` wildcard export, `sideEffects` is not
+ * `false`.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -30,6 +30,10 @@ function readTags(dir: string): string[] {
   return turboSchema.parse(JSON.parse(raw)).tags ?? [];
 }
 
+// Workspaces still nested under these paths are exempt from the folder check.
+// The next flatten wave moves them and removes this allow-list.
+const stillNested = /\/packages\/(?:converters\/|domains\/|text\/operations$)/;
+
 const underBuildOrSource = /^\.\/(?:dist|src)\//;
 
 export function checkLibrary(dir: string): CheckResult {
@@ -39,8 +43,8 @@ export function checkLibrary(dir: string): CheckResult {
 
   const folder = path.basename(path.resolve(dir));
   const expected = manifest.name.replace(/^@arki\//, '');
-  if (folder !== expected) {
-    warnings.push(`folder "${folder}" should be "${expected}" (folder = name, flattened in wave 3)`);
+  if (folder !== expected && !stillNested.test(path.resolve(dir).split(path.sep).join('/'))) {
+    errors.push(`folder "${folder}" should be "${expected}" (folder = name)`);
   }
 
   const wildcards = Object.keys(manifest.exports).filter(key => key.includes('*'));

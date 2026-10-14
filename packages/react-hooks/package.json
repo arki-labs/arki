@@ -1,0 +1,77 @@
+{
+  "name": "@arki/react-hooks",
+  "version": "0.1.1",
+  "description": "Curated React hooks for ARKI apps — Mantine, usehooks-ts, hotkeys and local-storage hooks under one import.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/react-hooks"
+  },
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "keywords": [
+    "arki",
+    "typescript",
+    "react",
+    "hooks"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "private": false,
+  "files": [
+    "dist/**",
+    "!dist/**/*.spec.*",
+    "!dist/**/*.test.*",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/tests/**",
+    "!src/**/test/**",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "exports": {
+    "./*": {
+      "types": "./dist/src/*.d.ts",
+      "import": "./src/*.tsx",
+      "browser": "./src/*.tsx"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "bench": "bun run build && arki-bench",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false",
+    "build": "tsc"
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@mantine/hooks": "catalog:",
+    "@reecelucas/react-use-hotkeys": "catalog:",
+    "@rehooks/local-storage": "catalog:",
+    "react-hotkeys-hook": "catalog:",
+    "usehooks-ts": "catalog:"
+  },
+  "devDependencies": {
+    "@arki/bench": "workspace:*",
+    "@arki/eslint-config": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*"
+  },
+  "module:jsx": "src",
+  "sideEffects": false,
+  "peerDependencies": {
+    "react": "catalog:react"
+  }
+}

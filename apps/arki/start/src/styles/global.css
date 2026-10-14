@@ -25,7 +25,7 @@
 
 /* Tailwind sources */
 @source "../../../../../packages/content/src";
-@source "../../../../../packages/ui/base/src";
+@source "../../../../../packages/ui/src";
 @source "../../../../../packages/ui/components/src";
 @source "../../../../../packages/theme/src";
 @source "../../../../../packages/sitekit/src";

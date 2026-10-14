@@ -6,7 +6,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/arki-labs/arki.git",
-    "directory": "packages/ui/icons"
+    "directory": "packages/icons"
   },
   "homepage": "https://arki.dev",
   "bugs": {

@@ -41,6 +41,8 @@ const baseConfig: ReleaseConfig = {
   ],
 };
 
+const uiConfig: ReleaseConfig = { ...baseConfig, waves: [{ id: 'ui', label: 'UI', packages: ['@arki/ui'] }] };
+
 /** Write a file under a temp workspace, creating parents on demand. */
 function writeFixtureFile(root: string, relPath: string, contents: string): void {
   const full = path.join(root, relPath);
@@ -445,6 +447,29 @@ describe('exportPublicTree', () => {
     expect(deps['zod']).toBe('^4.0.0');
     expect(destManifest['devDependencies']).toBeUndefined();
     expect(destManifest['scripts']).toBeUndefined();
+  });
+
+  it('names the public folder after the npm name, so @arki/ui ships as packages/ui', async () => {
+    writeRoot(tmp);
+    writePkg(tmp, 'ui', { name: '@arki/ui', version: '1.0.0', type: 'module', main: 'dist/index.js', types: 'dist/index.d.ts', files: ['dist'] });
+    writeFixtureFile(tmp, 'packages/ui/dist/index.js', 'export const ok = true;\n');
+    writeFixtureFile(tmp, 'packages/ui/dist/index.d.ts', 'export declare const ok: boolean;\n');
+
+    const envelope = await exportPublicTree({ rootCwd: tmp, config: uiConfig });
+
+    expect(envelope.status).toBe('success');
+    expect(listTreeRelative(path.join(tmp, baseConfig.publicTreePath, 'packages/ui'))).toContain('dist/index.js');
+  });
+
+  it('fails loudly when the source folder differs from the npm name, because the tree is not flat', async () => {
+    writeRoot(tmp);
+    writePkg(tmp, 'base', { name: '@arki/ui', version: '1.0.0', type: 'module', main: 'dist/index.js', types: 'dist/index.d.ts', files: ['dist'] });
+    writeFixtureFile(tmp, 'packages/base/dist/index.js', 'export const ok = true;\n');
+
+    const envelope = await exportPublicTree({ rootCwd: tmp, config: uiConfig });
+
+    expect(envelope.summary.exported).toBe(0);
+    expect(envelope.errors.map(error => error.code)).toContain('EXPORT_E007');
   });
 
   it('refuses to export to a path outside the workspace root', async () => {

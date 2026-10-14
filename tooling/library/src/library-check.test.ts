@@ -7,7 +7,7 @@ import { checkLibrary } from './library-check';
 
 function packageDir(folder: string, manifest: object, turbo: object | null): string {
   const dir = path.join(mkdtempSync(path.join(tmpdir(), 'arki-library-check-')), folder);
-  mkdirSync(dir);
+  mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, 'package.json'), JSON.stringify(manifest));
   if (turbo) writeFileSync(path.join(dir, 'turbo.json'), JSON.stringify(turbo));
   return dir;
@@ -35,10 +35,22 @@ describe('checkLibrary', () => {
     expect(checkLibrary(packageDir('demo', good, null)).errors).toHaveLength(1);
   });
 
-  it('only warns about folder name, wildcard exports and sideEffects', () => {
+  it('only warns about wildcard exports and sideEffects', () => {
     const manifest = { ...good, sideEffects: undefined, exports: { ...good.exports, './*': './dist/*.js' } };
-    const result = checkLibrary(packageDir('other', manifest, { tags: ['web'] }));
+    const result = checkLibrary(packageDir('demo', manifest, { tags: ['web'] }));
     expect(result.errors).toEqual([]);
-    expect(result.warnings).toHaveLength(3);
+    expect(result.warnings).toHaveLength(2);
+  });
+
+  it('fails when the folder name differs from the package name, because the public mirror is named after the package', () => {
+    expect(checkLibrary(packageDir('other', good, { tags: ['web'] })).errors).toEqual([
+      'folder "other" should be "demo" (folder = name)',
+    ]);
+  });
+
+  it('exempts workspaces still nested under converters, domains and text/operations until the next wave moves them', () => {
+    for (const nested of ['packages/converters/other', 'packages/domains/other', 'packages/text/operations']) {
+      expect(checkLibrary(packageDir(nested, good, { tags: ['web'] })).errors).toEqual([]);
+    }
   });
 });

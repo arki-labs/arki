@@ -82,6 +82,8 @@ export const EXPORT_ERROR_CODES = {
   manifestReadFailed: 'EXPORT_E005',
   /** A package differs from the exported commit; it was exported without its `dist/`. */
   uncommittedSource: 'EXPORT_E006',
+  /** The source folder basename differs from the npm name (`folder = name`, RFC B17). */
+  folderNameMismatch: 'EXPORT_E007',
 } as const;
 
 /**
@@ -285,7 +287,12 @@ interface ExportSingleResult {
 async function exportSinglePackage(opts: ExportSingleOptions): Promise<ExportSingleResult> {
   const sourceManifestPath = path.resolve(opts.sourceRoot, opts.item.manifestPath);
   const packageSourceDir = path.dirname(sourceManifestPath);
-  const packageDirName = path.basename(packageSourceDir);
+  // The public folder is derived from the npm name, not from the source folder.
+  // The source folder must already match it (RFC B17: folder = name), so a
+  // mismatch means the tree is not flat yet, and the export fails loudly.
+  const packageDirName = opts.item.name.startsWith('@arki/')
+    ? opts.item.name.slice('@arki/'.length)
+    : opts.item.name;
   const packageDestDir = path.join(opts.outputPath, 'packages', packageDirName);
 
   const baseItem = {
@@ -294,6 +301,20 @@ async function exportSinglePackage(opts: ExportSingleOptions): Promise<ExportSin
     sourcePath: path.relative(opts.sourceRoot, packageSourceDir),
     destPath: path.relative(opts.rootCwd, packageDestDir),
   };
+
+  if (path.basename(packageSourceDir) !== packageDirName) {
+    const error: ReleaseError = {
+      code: EXPORT_ERROR_CODES.folderNameMismatch,
+      severity: 'error',
+      message: `${opts.item.name}: source folder "${path.basename(packageSourceDir)}" must equal the npm name without scope ("${packageDirName}").`,
+      target: opts.item.name,
+      remediation: `Move ${baseItem.sourcePath} to packages/${packageDirName} (folder = name).`,
+    };
+    return {
+      exportItem: { ...baseItem, fileCount: 0, status: 'failed', reason: error.message, errors: [error] },
+      envelopeErrors: [error],
+    };
+  }
 
   // a. Re-read raw manifest from disk.
   let raw: RawManifest;

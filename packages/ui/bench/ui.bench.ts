@@ -8,7 +8,7 @@ import { Scanner } from '@tailwindcss/oxide';
 import { defineSuite, size } from '@arki/bench';
 
 const SOURCE = new URL('../src/', import.meta.url);
-const TOKENS = new URL('../../../design-systems/src/workbench/tokens.css', import.meta.url);
+const TOKENS = new URL('../../design-systems/src/workbench/tokens.css', import.meta.url);
 
 /**
  * The CSS an app's Tailwind v4 build would emit for the classes found in these @arki/ui files:
