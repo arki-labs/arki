@@ -131,6 +131,13 @@ describe('T(queue-foreman)', () => {
     expect(state.rows[0]?.state).toBe('failed');
   }, 20000);
 
+  it('rejects an offset past the bound, so one read cannot force an unbounded scan', async () => {
+    const module = queueForemanModule({ queues: { main: pgBossFailedJobSource({ pglite }) } });
+    await expect(module.reads.failedJobs.run({ offset: 10_001 }, {})).rejects.toMatchObject({
+      code: 'ARKI_ADMIN_E004',
+    });
+  });
+
   it('rejects an unknown queue key', async () => {
     const module = queueForemanModule({ queues: {} });
     await expectCode(
@@ -145,5 +152,11 @@ describe('redactSecrets', () => {
     expect(redactSecrets('auth failed: Bearer abcdefghijklmnop')).toBe('auth failed: Bearer [REDACTED]');
     expect(redactSecrets('{"api_key":"sk-live-abcdef123456"}')).not.toContain('abcdef123456');
     expect(redactSecrets('x'.repeat(2000)).length).toBeLessThan(510);
+  });
+
+  it('redacts a secret near the start of a huge message', () => {
+    const out = redactSecrets(`password=hunter2 ${'x'.repeat(1_000_000)}`);
+    expect(out).not.toContain('hunter2');
+    expect(out.length).toBeLessThan(510);
   });
 });

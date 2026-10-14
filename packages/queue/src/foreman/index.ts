@@ -21,6 +21,8 @@ export type { FailedJobRecord, FailedJobSource } from './source.ts';
 const log = getLogger('arki:queue');
 
 const MAX_PAGE = 200;
+/** Each source reads up to `offset + limit` rows when several queues are merged, so the offset is bounded too. */
+const MAX_OFFSET = 10_000;
 
 export const failedJobSchema = z
   .object({
@@ -87,7 +89,7 @@ export function queueForemanModule(options: QueueForemanOptions) {
       .object({
         queue: z.string().optional(),
         limit: z.number().int().min(1).max(MAX_PAGE).default(50),
-        offset: z.number().int().min(0).default(0),
+        offset: z.number().int().min(0).max(MAX_OFFSET).default(0),
       })
       .strict(),
     output: z
