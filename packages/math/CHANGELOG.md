@@ -2,7 +2,7 @@
 
 ## 0.0.8
 
-Third round from the ekuation migration.
+General math a calculators app still needed: composite units, quartile and pooled-variance variants, and two fixes.
 
 Added:
 
@@ -17,7 +17,7 @@ Fixed:
 
 ## 0.0.7
 
-What the ekuation calculators needed after their first migration.
+Float finance, more statistics and units, and a faster `round`.
 
 Added:
 
