@@ -47,7 +47,11 @@ type Resolved = { scale: number; rounding: RoundingMode };
 const GUARD_DIGITS = 10;
 /** Ziv's loop gives up after this many guard digits. */
 const MAX_GUARD_DIGITS = 2560;
-/** Every fixed-point approximation is within this many units of its last digit. */
+/**
+ * Every fixed-point approximation is within this many units of its last digit.
+ * Audited per kernel (test/reference/ERROR-ANALYSIS.md in the repository): each
+ * stays below 1 + 1e-5 units, so 2 is a safe bound with margin.
+ */
 const ERROR_BOUND = 2n;
 /** Largest integer a root is taken of, in digits. */
 const MAX_RADICAND_DIGITS = 200_000;
