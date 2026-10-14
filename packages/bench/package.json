@@ -29,6 +29,14 @@
     "./dist/node/worker.js",
     "./dist/node/size-worker.js"
   ],
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno",
+      "browser"
+    ]
+  },
   "type": "module",
   "exports": {
     ".": {

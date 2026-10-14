@@ -35,7 +35,17 @@ export function numberFormat(locale: string, options: Intl.NumberFormatOptions):
   );
 }
 
+/** True when this engine has the named `Intl` constructor (Hermes V1 has only `DateTimeFormat`, `NumberFormat` and `Collator`). */
+function hasIntl(name: 'ListFormat' | 'RelativeTimeFormat'): boolean {
+  return typeof Reflect.get(Intl, name) === 'function';
+}
+
+function requireIntl(name: 'ListFormat' | 'RelativeTimeFormat'): void {
+  if (!hasIntl(name)) throw new RangeError(`Intl.${name} is not available in this runtime`);
+}
+
 export function listFormat(locale: string, options: Intl.ListFormatOptions): Intl.ListFormat {
+  requireIntl('ListFormat');
   return remember(
     listFormats,
     `${locale}:${JSON.stringify(options)}`,
@@ -45,6 +55,7 @@ export function listFormat(locale: string, options: Intl.ListFormatOptions): Int
 }
 
 export function relativeTimeFormat(locale: string, options: Intl.RelativeTimeFormatOptions): Intl.RelativeTimeFormat {
+  requireIntl('RelativeTimeFormat');
   return remember(
     relativeTimeFormats,
     `${locale}:${JSON.stringify(options)}`,

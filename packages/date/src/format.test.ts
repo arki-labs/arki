@@ -1,5 +1,5 @@
 import { format as fnsFormat } from 'date-fns/format';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { instant, plainDate, plainDateTime, zoned } from './core.js';
 import { format, formatIntl, formatISO, formatRange } from './format.js';
@@ -293,5 +293,57 @@ describe('format pattern reuse', () => {
     const first = format(value, "yyyy-MM-dd 'at' HH:mm:ss.SSS xxx 'it''s'");
     for (let i = 0; i < 3; i++) expect(format(value, "yyyy-MM-dd 'at' HH:mm:ss.SSS xxx 'it''s'")).toBe(first);
     expect(first).toBe("2026-05-20 at 09:05:07.123 +03:00 it's");
+  });
+});
+
+/** Mimics Hermes: parts of a single-field format come back as one `literal`; the zone name is never a part. */
+function stubHermesParts(): void {
+  const proto = Intl.DateTimeFormat.prototype;
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- called with an explicit `this` below
+  const actualParts = proto.formatToParts;
+  vi.spyOn(proto, 'formatToParts').mockImplementation(function (this: Intl.DateTimeFormat, value) {
+    const actual = actualParts.call(this, value);
+    return actual.length === 1 || actual.some(part => part.type === 'timeZoneName')
+      ? [{ type: 'literal', value: this.format(value) }]
+      : actual;
+  });
+}
+
+describe('format on an engine whose formatToParts types a lone field as a literal (Hermes V1)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('still prints stand-alone month and weekday names, because losing them would break every LLL / EEEE pattern on React Native', () => {
+    stubHermesParts();
+    const day = plainDate('2026-01-31');
+    expect(format(day, 'LLLL', { locale: 'fi-FI' })).toBe(
+      new Intl.DateTimeFormat('fi-FI', { month: 'long', timeZone: 'UTC' }).format(Date.UTC(2026, 0, 31)),
+    );
+    expect(format(day, 'EEEE', { locale: 'fi-FI' })).toBe(
+      new Intl.DateTimeFormat('fi-FI', { weekday: 'long', timeZone: 'UTC' }).format(Date.UTC(2026, 0, 31)),
+    );
+  });
+
+  it('throws a RangeError for zone names instead of printing a wrong word', () => {
+    stubHermesParts();
+    expect(() =>
+      format(zoned({ year: 2026, month: 10, day: 9, hour: 12 }, 'Europe/Bucharest'), 'zzzz', { locale: 'fi-FI' }),
+    ).toThrow(RangeError);
+  });
+});
+
+describe('formatRange on an engine without Intl.DateTimeFormat#formatRange (Hermes V1)', () => {
+  it('throws a RangeError that names the missing API, not "undefined is not a function"', () => {
+    const proto = Intl.DateTimeFormat.prototype;
+    const real = Object.getOwnPropertyDescriptor(proto, 'formatRange');
+    Reflect.deleteProperty(proto, 'formatRange');
+    try {
+      expect(() =>
+        formatRange(plainDate('2026-05-20'), plainDate('2026-05-24'), { dateStyle: 'medium', locale: 'ro-RO' }),
+      ).toThrow(/formatRange is not available/);
+    } finally {
+      if (real) Object.defineProperty(proto, 'formatRange', real);
+    }
   });
 });

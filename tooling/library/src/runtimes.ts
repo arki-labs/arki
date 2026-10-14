@@ -10,10 +10,13 @@
  *   deno     unbundled when the package has no npm dependencies, else a
  *            `bun build --target=node` bundle
  *   browser  that bundle in headless Chromium (Playwright)
- *   hermes   an IIFE bundle with a console shim under `$HERMES_BIN`
+ *   hermes   an ESM bundle (react-native condition, wrapped for top-level await,
+ *            with the host shims of `hermes-host.ts`) under `$HERMES_BIN`
  *
  * A missing engine prints `INCOMPLETE: <leg> (<reason>)`. That is not a
  * failure unless `--require-all` is given. Any real failure exits 1 and names the leg.
+ * A package can narrow its engines with `"arki": { "runtimes": [...] }` in package.json;
+ * a leg outside that list prints `out of scope` and passes.
  *
  *   arki-runtimes [--only node,bun] [--require-all]
  *
@@ -29,16 +32,25 @@ import { parseArgs } from 'node:util';
 
 import { expectImportPure } from '@arki/ts/testing';
 
-import type { Manifest } from './manifest';
-import { hasNoNpmDependencies, readManifest, runtimeEntry } from './manifest';
+import type { Manifest, Runtime } from './manifest';
 import { isAdapterSubpath } from './adapters';
+import { HERMES_FAILURE_MARKER, hermesScript } from './hermes-host';
+import { hasNoNpmDependencies, readManifest, runtimeEntry } from './manifest';
 import { complain, say } from './report';
 
 const LEGS = ['purity', 'node', 'bun', 'deno', 'browser', 'hermes'] as const;
 type Leg = (typeof LEGS)[number];
 
+/** True when the package claims the engine behind `leg`. `purity` has no engine and always runs. */
+export function isLegInScope(leg: Leg, runtimes: ReadonlySet<Runtime>): boolean {
+  return leg === 'purity' || runtimes.has(leg);
+}
+
 /** The leg could not run because its engine is missing. */
 class Incomplete extends Error {}
+
+/** Runtime-specific bundling for the Hermes leg. */
+export const HERMES_BUNDLE_ARGS = ['--format=esm', '--conditions=react-native'] as const;
 
 const SUMMARY = /smoke checks passed/;
 const SMOKE = 'scripts/smoke.mjs';
@@ -56,10 +68,10 @@ function run(command: string, args: readonly string[], cwd: string): { output: s
 }
 
 /** Runs a smoke command; it must exit 0 and print the "smoke checks passed" line. */
-function smoke(command: string, args: readonly string[], cwd: string): void {
+function smoke(command: string, args: readonly string[], cwd: string, failureMarker?: string): void {
   const { output, status } = run(command, args, cwd);
   const summary = output.split('\n').find(line => SUMMARY.test(line));
-  if (status !== 0 || !summary) {
+  if (status !== 0 || !summary || (failureMarker !== undefined && output.includes(failureMarker))) {
     throw new Error(`${command} ${args.join(' ')} exited ${String(status)}\n${output}`);
   }
   say(`  ${summary}`);
@@ -71,7 +83,7 @@ function requireSmokeFile({ cwd }: Context): void {
 
 /**
  * Bundles the smoke file once per engine. Browser and Hermes get the browser
- * build of every dependency; Deno gets the node build, which it runs through its
+ * build of every dependency (Hermes also the `react-native` condition, since it runs inside React Native); Deno gets the node build, which it runs through its
  * `node:` support (a browser build may touch `document`). `bun:*` stays external:
  * the portable code guards it at runtime.
  */
@@ -81,7 +93,7 @@ function bundle(context: Context, name: 'browser' | 'hermes' | 'deno'): string {
   if (cached) return cached;
   const outfile = `${OUT}/${name}.js`;
   const target = name === 'deno' ? '--target=node' : '--target=browser';
-  const format = name === 'hermes' ? ['--format=iife'] : [];
+  const format = name === 'hermes' ? HERMES_BUNDLE_ARGS : [];
   const { output, status } = run(
     'bun',
     ['build', SMOKE, target, '--external', 'bun:*', ...format, `--outfile=${outfile}`],
@@ -178,12 +190,11 @@ function hermes(context: Context): void {
     throw new Incomplete('no Hermes binary; set HERMES_BIN');
   }
   const file = bundle(context, 'hermes');
-  // Hermes has no ES modules and no `console`.
-  const shim = 'globalThis.console = { log: print, warn: print, error: print };\n';
+  // Hermes has no ES modules, no `console` and no top-level `await`: run the ESM bundle inside an async function.
   const script = `${OUT}/hermes-run.js`;
   mkdirSync(path.join(context.cwd, OUT), { recursive: true });
-  writeFileSync(path.join(context.cwd, script), shim + readFileSync(path.join(context.cwd, file), 'utf8'));
-  smoke(binary, [script], context.cwd);
+  writeFileSync(path.join(context.cwd, script), hermesScript(readFileSync(path.join(context.cwd, file), 'utf8')));
+  smoke(binary, [script], context.cwd, HERMES_FAILURE_MARKER);
 }
 
 const legRunners: Record<Leg, (context: Context) => void | Promise<void>> = {
@@ -217,6 +228,10 @@ async function main(): Promise<number> {
   const incomplete: Leg[] = [];
   for (const leg of selectLegs(values.only)) {
     say(`${context.manifest.name} ${leg}`);
+    if (!isLegInScope(leg, context.manifest.runtimes)) {
+      say(`  out of scope: package.json "arki.runtimes" does not list ${leg}`);
+      continue;
+    }
     try {
       await legRunners[leg](context);
     } catch (error) {

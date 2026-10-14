@@ -119,6 +119,16 @@ describe('easter', () => {
 });
 
 describe('weekRulesFor', () => {
+  it('returns the fallback when the runtime has no Intl.Locale at all (Hermes), instead of crashing', () => {
+    const real = Reflect.get(Intl, 'Locale');
+    Reflect.set(Intl, 'Locale', undefined);
+    try {
+      expect(weekRulesFor('en-US')).toEqual({ startsOn: 1, minimalDays: 4 });
+    } finally {
+      Reflect.set(Intl, 'Locale', real);
+    }
+  });
+
   it('reads Intl week info and falls back for unknown runtimes', () => {
     const us = weekRulesFor('en-US');
     const de = weekRulesFor('de-DE');

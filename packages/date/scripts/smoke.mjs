@@ -12,6 +12,21 @@ const runtime = globalThis.Deno
 const checks = [];
 const check = (name, actual, expected) => checks.push({ name, ok: actual === expected, actual, expected });
 
+// Hermes V1 ships only Intl.DateTimeFormat, NumberFormat and Collator, with no
+// DateTimeFormat#formatRange. Where an API is missing, the library must throw a
+// RangeError that names it; the check asserts that instead of the output.
+const hasIntl = name => typeof Intl[name] === 'function';
+const checkIntl = (name, available, run, expected, missingPattern) => {
+  if (available) return check(name, run(), expected);
+  let message = '';
+  try {
+    run();
+  } catch (error) {
+    message = error instanceof RangeError ? error.message : String(error);
+  }
+  return check(`${name} throws a clear RangeError without its Intl API`, missingPattern.test(message), true);
+};
+
 const d = date.plainDate('2026-01-31');
 check('add constrain', date.add(d, { months: 1 }).toString(), '2026-02-28');
 check('startOf week', date.startOf(date.plainDate('2026-10-09'), 'week').toString(), '2026-10-05');
@@ -28,13 +43,21 @@ check('parseISO', date.parseISO('2026-W41-5T10:30Z').toString(), '2026-10-09T10:
 check('easter', date.easter(2026, 'orthodox').toString(), '2026-04-12');
 check('nthWeekdayOfMonth', date.nthWeekdayOfMonth(2026, 5, -1, 5).toString(), '2026-05-29');
 check('weekRulesFor', typeof date.weekRulesFor('en-US').startsOn, 'number');
-check('formatRange', date.formatRange(d, date.plainDate('2026-02-02'), { dateStyle: 'medium' }).length > 10, true);
+checkIntl(
+  'formatRange',
+  typeof Intl.DateTimeFormat.prototype.formatRange === 'function',
+  () => date.formatRange(d, date.plainDate('2026-02-02'), { dateStyle: 'medium' }).length > 10,
+  true,
+  /formatRange is not available/,
+);
 check('now options', typeof date.now({ clock: { now: () => new Date(0) } }).epochMilliseconds, 'number');
 check('format intl', date.formatIntl(d, { dateStyle: 'medium', locale: 'en-US' }), 'Jan 31, 2026');
-check(
+checkIntl(
   'relative',
-  date.relative(date.instant('2026-01-01T00:00:00Z'), date.instant('2026-01-03T00:00:00Z'), { locale: 'en-US' }),
+  hasIntl('RelativeTimeFormat'),
+  () => date.relative(date.instant('2026-01-01T00:00:00Z'), date.instant('2026-01-03T00:00:00Z'), { locale: 'en-US' }),
   '2 days ago',
+  /RelativeTimeFormat is not available/,
 );
 check('humanize duration', typeof date.humanizeDuration(date.duration('P1DT2H'), { locale: 'en-US' }), 'string');
 check(

@@ -93,3 +93,17 @@ describe('relativeToNow', () => {
     expect(relativeToNow(instant('2026-01-15T09:00:00Z'), { clock })).toBe('9 hours ago');
   });
 });
+
+describe('relative without Intl.RelativeTimeFormat (Hermes V1)', () => {
+  it('throws a RangeError that names the missing API, not "undefined cannot be used as a constructor"', () => {
+    const real = Reflect.get(Intl, 'RelativeTimeFormat');
+    Reflect.set(Intl, 'RelativeTimeFormat', undefined);
+    try {
+      expect(() =>
+        relative(instant('2026-01-01T00:00:00Z'), instant('2026-01-03T00:00:00Z'), { locale: 'en-US' }),
+      ).toThrow(/RelativeTimeFormat is not available/);
+    } finally {
+      Reflect.set(Intl, 'RelativeTimeFormat', real);
+    }
+  });
+});

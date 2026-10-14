@@ -9,6 +9,13 @@ const exportTarget: z.ZodType<ExportTarget> = z.lazy(() =>
   z.union([z.string(), z.null(), z.record(z.string(), exportTarget)]),
 );
 
+/** Engines `arki-runtimes` can run a package on. `purity` is not listed: it always runs. */
+export const RUNTIMES = ['node', 'bun', 'deno', 'browser', 'hermes'] as const;
+export type Runtime = (typeof RUNTIMES)[number];
+
+/** `"arki": { "runtimes": [...] }`: the engines the package claims. Missing means all of them. */
+const arkiSchema = z.object({ runtimes: z.array(z.enum(RUNTIMES)).min(1) });
+
 const manifestSchema = z.object({
   name: z.string().min(1),
   exports: z.union([z.string(), z.record(z.string(), exportTarget)]).optional(),
@@ -18,6 +25,7 @@ const manifestSchema = z.object({
   optionalDependencies: z.record(z.string(), z.string()).optional(),
   peerDependenciesMeta: z.record(z.string(), z.object({ optional: z.boolean().optional() })).optional(),
   sideEffects: z.union([z.boolean(), z.array(z.string())]).optional(),
+  arki: arkiSchema.optional(),
 });
 
 export type Manifest = {
@@ -31,6 +39,8 @@ export type Manifest = {
   /** Names of peers marked `"optional": true` in `peerDependenciesMeta`. */
   readonly optionalPeers: ReadonlySet<string>;
   readonly sideEffects: boolean | readonly string[] | undefined;
+  /** The engines the package claims; every engine when `arki.runtimes` is absent. */
+  readonly runtimes: ReadonlySet<Runtime>;
 };
 
 /** Reads and validates `<dir>/package.json`. */
@@ -40,8 +50,17 @@ export function readManifest(dir: string): Manifest {
   if (!parsed.success) {
     throw new Error(`${file} is not a valid package manifest: ${z.prettifyError(parsed.error)}`);
   }
-  const { name, exports, dependencies, devDependencies, peerDependencies, optionalDependencies, peerDependenciesMeta, sideEffects } =
-    parsed.data;
+  const {
+    name,
+    exports,
+    dependencies,
+    devDependencies,
+    peerDependencies,
+    optionalDependencies,
+    peerDependenciesMeta,
+    sideEffects,
+    arki,
+  } = parsed.data;
   return {
     name,
     exports: typeof exports === 'string' ? { '.': exports } : (exports ?? {}),
@@ -55,6 +74,7 @@ export function readManifest(dir: string): Manifest {
         .map(([peer]) => peer),
     ),
     sideEffects,
+    runtimes: new Set(arki?.runtimes ?? RUNTIMES),
   };
 }
 
