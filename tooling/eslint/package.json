@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./base": "./base.js",
+    "./feature-layers": "./feature-layers.js",
     "./library": "./library.js",
     "./react": "./react.js",
     "./tanstack-start": "./tanstack-start.js"
