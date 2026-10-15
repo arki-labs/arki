@@ -139,9 +139,7 @@ function nthRootRaw(a: number, n: number): number {
   return Number.isInteger(n) && n % 2 !== 0 ? -((-a) ** (1 / n)) : Number.NaN;
 }
 
-const ln = unary('ln', Math.log);
-
-function trig(angle: Angle): [string, Builtin][] {
+export function trig(angle: Angle): [string, Builtin][] {
   const deg = angle === 'deg';
   const sin = deg ? sinDeg : Math.sin;
   const cos = deg ? cosDeg : Math.cos;
@@ -187,49 +185,53 @@ function trig(angle: Angle): [string, Builtin][] {
   ];
 }
 
-const ANGLE_FREE: readonly [string, Builtin][] = [
-  ['sinh', { unary: unary('sinh', Math.sinh, true) }],
-  ['cosh', { unary: unary('cosh', Math.cosh, true) }],
-  ['tanh', { unary: unary('tanh', Math.tanh) }],
-  ['sech', { unary: unary('sech', a => 1 / Math.cosh(a)) }],
-  ['csch', { unary: unary('csch', a => 1 / Math.sinh(a)) }],
-  ['coth', { unary: unary('coth', a => 1 / Math.tanh(a)) }],
-  ['asinh', { unary: unary('asinh', Math.asinh) }],
-  ['acosh', { unary: unary('acosh', Math.acosh) }],
-  ['atanh', { unary: unary('atanh', Math.atanh) }],
-  ['asech', { unary: unary('asech', a => Math.acosh(1 / a)) }],
-  ['acsch', { unary: unary('acsch', a => Math.asinh(1 / a)) }],
-  ['acoth', { unary: unary('acoth', a => Math.atanh(1 / a)) }],
-  ['exp', { unary: unary('exp', Math.exp, true) }],
-  ['ln', { unary: ln }],
-  ['log', { unary: ln, binary: binary('log', (a, b) => Math.log(a) / Math.log(b)) }],
-  ['log10', { unary: unary('log10', Math.log10) }],
-  ['log2', { unary: unary('log2', Math.log2) }],
-  ['sqrt', { unary: unary('sqrt', Math.sqrt) }],
-  ['cbrt', { unary: unary('cbrt', Math.cbrt) }],
-  ['nthRoot', { unary: unary('nthRoot', Math.sqrt), binary: binary('nthRoot', nthRootRaw) }],
-  ['pow', { binary: pow }],
-  ['abs', { unary: unary('abs', Math.abs) }],
-  ['sign', { unary: unary('sign', Math.sign) }],
-  ['ceil', { unary: unary('ceil', Math.ceil) }],
-  ['floor', { unary: unary('floor', Math.floor) }],
-  ['round', { unary: unary('round', round) }],
-  ['fix', { unary: unary('fix', Math.trunc) }],
-  ['factorial', { unary: { raw: factorialRaw, checked: factorialChecked } }],
-  ['gamma', { unary: { raw: gammaRaw, checked: gamma } }],
-  [
-    'mod',
-    {
-      binary: {
-        raw: modRaw,
-        checked: (a, b) => {
-          if (b === 0) throw new DivisionByZeroError(`mod(${a}, 0) divides by zero`);
-          return modRaw(a, b);
+/** Built on first use, so a bundle that imports only `trig` (the complex domain) leaves it out. */
+function angleFree(): [string, Builtin][] {
+  const ln = unary('ln', Math.log);
+  return [
+    ['sinh', { unary: unary('sinh', Math.sinh, true) }],
+    ['cosh', { unary: unary('cosh', Math.cosh, true) }],
+    ['tanh', { unary: unary('tanh', Math.tanh) }],
+    ['sech', { unary: unary('sech', a => 1 / Math.cosh(a)) }],
+    ['csch', { unary: unary('csch', a => 1 / Math.sinh(a)) }],
+    ['coth', { unary: unary('coth', a => 1 / Math.tanh(a)) }],
+    ['asinh', { unary: unary('asinh', Math.asinh) }],
+    ['acosh', { unary: unary('acosh', Math.acosh) }],
+    ['atanh', { unary: unary('atanh', Math.atanh) }],
+    ['asech', { unary: unary('asech', a => Math.acosh(1 / a)) }],
+    ['acsch', { unary: unary('acsch', a => Math.asinh(1 / a)) }],
+    ['acoth', { unary: unary('acoth', a => Math.atanh(1 / a)) }],
+    ['exp', { unary: unary('exp', Math.exp, true) }],
+    ['ln', { unary: ln }],
+    ['log', { unary: ln, binary: binary('log', (a, b) => Math.log(a) / Math.log(b)) }],
+    ['log10', { unary: unary('log10', Math.log10) }],
+    ['log2', { unary: unary('log2', Math.log2) }],
+    ['sqrt', { unary: unary('sqrt', Math.sqrt) }],
+    ['cbrt', { unary: unary('cbrt', Math.cbrt) }],
+    ['nthRoot', { unary: unary('nthRoot', Math.sqrt), binary: binary('nthRoot', nthRootRaw) }],
+    ['pow', { binary: pow }],
+    ['abs', { unary: unary('abs', Math.abs) }],
+    ['sign', { unary: unary('sign', Math.sign) }],
+    ['ceil', { unary: unary('ceil', Math.ceil) }],
+    ['floor', { unary: unary('floor', Math.floor) }],
+    ['round', { unary: unary('round', round) }],
+    ['fix', { unary: unary('fix', Math.trunc) }],
+    ['factorial', { unary: { raw: factorialRaw, checked: factorialChecked } }],
+    ['gamma', { unary: { raw: gammaRaw, checked: gamma } }],
+    [
+      'mod',
+      {
+        binary: {
+          raw: modRaw,
+          checked: (a, b) => {
+            if (b === 0) throw new DivisionByZeroError(`mod(${a}, 0) divides by zero`);
+            return modRaw(a, b);
+          },
         },
       },
-    },
-  ],
-];
+    ],
+  ];
+}
 
 const tables = new Map<Angle, ReadonlyMap<string, Builtin>>();
 
@@ -237,7 +239,7 @@ const tables = new Map<Angle, ReadonlyMap<string, Builtin>>();
 export function builtins(angle: Angle): ReadonlyMap<string, Builtin> {
   let table = tables.get(angle);
   if (table === undefined) {
-    table = new Map([...trig(angle), ...ANGLE_FREE]);
+    table = new Map([...trig(angle), ...angleFree()]);
     tables.set(angle, table);
   }
   return table;

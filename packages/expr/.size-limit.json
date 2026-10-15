@@ -46,6 +46,17 @@
     "gzip": true
   },
   {
+    "name": "@arki/expr + @arki/expr/complex glue (parse, compile; @arki/math ignored): core 6 kB + glue 4 kB",
+    "path": ["dist/index.js", "dist/complex.js"],
+    "import": {
+      "dist/index.js": "{ parse }",
+      "dist/complex.js": "{ compile }"
+    },
+    "ignore": ["@arki/math"],
+    "limit": "10 kB",
+    "gzip": true
+  },
+  {
     "name": "@arki/expr + @arki/expr/decimal (parse, compile), with the @arki/math subpaths",
     "path": ["dist/index.js", "dist/decimal.js"],
     "import": {
@@ -63,6 +74,16 @@
       "dist/rational.js": "{ compile }"
     },
     "limit": "15 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/expr + @arki/expr/complex (parse, compile), with the @arki/math subpaths",
+    "path": ["dist/index.js", "dist/complex.js"],
+    "import": {
+      "dist/index.js": "{ parse }",
+      "dist/complex.js": "{ compile }"
+    },
+    "limit": "13.5 kB",
     "gzip": true
   }
 ]

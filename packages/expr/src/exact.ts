@@ -1,6 +1,7 @@
 /**
  * The evaluator shared by the exact domains, `@arki/expr/decimal` and
- * `@arki/expr/rational` (RFC §8, §10, §11). A domain supplies its value
+ * `@arki/expr/rational` (RFC §8, §10, §11), and reused by
+ * `@arki/expr/complex`, whose values are float64 and never exact. A domain supplies its value
  * type's operations; this module resolves names, builds the closure tree,
  * folds constant subtrees, checks the budgets and the abort signal, and
  * tracks whether any step rounded.
@@ -55,6 +56,8 @@ export type Domain<T, S> = {
   readonly ops: Readonly<Record<BinaryOp, Binary<T, S>>>;
   readonly functions: ReadonlyMap<string, Builtin<T, S>>;
   readonly constants: ReadonlyMap<string, (env: Env<S>) => T>;
+  /** Float-valued (Complex): `detailed` always reports `exact: false`. */
+  readonly approximate?: boolean;
 };
 
 /** Options of a single call. */
@@ -363,7 +366,7 @@ function builder<T, S>(
     const spec = language.functionSpec(name);
     if (fn === undefined) {
       if (scientific.functionSpec(name) !== undefined) {
-        throw new ParseError(`${name} has no exact result: the ${domain.name} domain has no ${name}`, {
+        throw new ParseError(`The ${domain.name} domain has no ${name}`, {
           code: 'not-in-domain',
           span,
           found: name,
@@ -551,7 +554,7 @@ function assemble<T, S, V extends string>(
   const detailed = (scope?: Readonly<Record<V, unknown>>, options?: CallOptions): Detailed<T> => {
     const env = newEnv(options);
     const value = execute(scope, env);
-    return Object.freeze({ value, exact: env.exact });
+    return Object.freeze({ value, exact: env.exact && shared.domain.approximate !== true });
   };
   const compiled = Object.assign(call, {
     detailed,

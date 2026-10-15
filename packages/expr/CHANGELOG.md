@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+Complex domain (RFC `2026-10-14-arki-expr` §21 step 4).
+
+- `@arki/expr/complex`: `compile`, `compileEquation`, `evaluate` on `@arki/math/complex`'s `Complex`. Float64, never exact (`f.detailed()` reports `exact: false`). Principal branches (`sqrt(-4) = 2i`, `ln(-1) = πi`, `i^i = e^(-π/2)`); on the real axis every function returns the float domain's value wherever float has one. `i` is a constant (a variable `i` is `name-conflict` in this domain only). `cbrt nthRoot sign ceil floor round fix mod factorial gamma` are `not-in-domain`. `angle: 'deg'` takes and returns real angles only. Scope values: `Complex`, finite numbers, or `{ re, im }`.
+- The shared exact-domain compiler takes an `approximate` domain flag; its `not-in-domain` message for a missing function no longer says "no exact result". The float domain builds its angle-free table on first use, so a bundle that imports only the trigonometry table leaves it out.
+- `size-limit` entries for the complex domain; a Complex-against-float property test on `+ - * / ^int` trees.
+
 Decimal and Rational domains (RFC `2026-10-14-arki-expr` §21 step 3).
 
 - `@arki/expr/decimal`: `compile`, `compileEquation`, `evaluate` on `Decimal`. `+ - *` and integer powers exact; `/` exact when it terminates, else rounded to `{ scale, rounding }` (default scale 20, rounding `'unnecessary'` → `RoundingNecessaryError`); `sqrt cbrt nthRoot exp ln log log10 log2`, non-integer powers, `pi`, `e` correctly rounded at `scale` through `@arki/math/decimal-math`; trigonometry and `i` are `not-in-domain` at compile. `f.detailed(scope)` returns `{ value, exact }`.

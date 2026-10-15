@@ -1,6 +1,6 @@
 # @arki/expr
 
-A safe expression language on [`@arki/math`](../math): a hand-written parser for user-typed formulas (`2x^2 + sin(x)`, `|x - 1|`, `√2`, `1/2x`), a typed and versioned AST with source spans, and canonical printing for storage. The root entry holds no numeric code; evaluation lives in domain entries (`@arki/expr/float`, `@arki/expr/decimal`, `@arki/expr/rational`), and `@arki/expr/latex` prints LaTeX. The design is specified in `docs/rfcs/2026-10-14-arki-expr.md`.
+A safe expression language on [`@arki/math`](../math): a hand-written parser for user-typed formulas (`2x^2 + sin(x)`, `|x - 1|`, `√2`, `1/2x`), a typed and versioned AST with source spans, and canonical printing for storage. The root entry holds no numeric code; evaluation lives in domain entries (`@arki/expr/float`, `@arki/expr/decimal`, `@arki/expr/rational`, `@arki/expr/complex`), and `@arki/expr/latex` prints LaTeX. The design is specified in `docs/rfcs/2026-10-14-arki-expr.md`.
 
 ## Security model
 
@@ -79,6 +79,26 @@ Never rounds. `sqrt`, `cbrt`, `nthRoot` and non-integer powers return a value on
 
 Both exact domains fold constant subtrees at compile and take `{ signal }` per call (`f(scope, { signal })`, `evaluate(text, { signal })`): it is checked before each operation on a value above 100 digits.
 
+## Complex (`@arki/expr/complex`)
+
+```ts
+import { compile, evaluate } from '@arki/expr/complex';
+
+evaluate('sqrt(-4)').toString(); // '2i'
+evaluate('ln(-1)').toString(); // '3.141592653589793i'
+evaluate('i^i').toString(); // '0.20787957635076193' (e^(-π/2))
+compile(parse('z^2 + 1'), { variables: ['z'] })({ z: { re: 0, im: 1 } }).toString(); // '0'
+```
+
+Values are `Complex` from `@arki/math/complex`: float64 parts, never exact, so `f.detailed()` always reports `exact: false`. Principal branches as `@arki/math/complex` defines them (C99 Annex G, Kahan's counter-clockwise rule on the cuts: `asin(2)` is `π/2 − 1.317i`, as in mathjs and Mathematica). On the real axis, wherever the float domain has a value, this domain returns exactly that value (`log10(1000)` is 3, `cos(90)` in degrees is 0); it leaves the axis only where float has no real answer (`sqrt(-2)`, `asin(2)`, `(-8)^(1/3)`).
+
+- `i` is a constant: declaring a variable `i` is a `name-conflict` here, and only here.
+- Functions: trigonometry, hyperbolics and their inverses (all with reciprocals), `exp ln log log10 log2 sqrt pow abs` (`abs` is a real-valued `Complex`). `cbrt` and `nthRoot` are `not-in-domain`: float's real root (`cbrt(-8) = -2`) and the principal root (`1 + 1.732i`) are different numbers, so neither is picked silently; write `x^(1/3)` for the principal one. `sign ceil floor round fix mod factorial gamma` (and `n!`) are `not-in-domain`: `@arki/math` has no complex definition for them.
+- `angle: 'deg'` measures real angles: trigonometry takes a real argument and an inverse must return a real angle, computed as float does; anything else is `InvalidArgumentError`.
+- Errors: `x/0` is `DivisionByZeroError`, overflow `NumericRangeError`, a pole (`ln(0)`, `cot(0)`) `InvalidArgumentError`. No result has a `NaN` or infinite part.
+- Scope values and host constants: a `Complex`, a finite number (a real), or finite `{ re, im }` parts. Text is not a value; parse it. Host functions receive and return `Complex`es.
+- Same verbs as the exact domains (`compile`, `compileEquation`, `evaluate`, `f(scope)`, `f.detailed`, `f.readings`, `f.warnings`, `f.variables`), the same compile budgets and constant folding.
+
 ## LaTeX (`@arki/expr/latex`)
 
 ```ts
@@ -97,4 +117,4 @@ toLatex(parse('sqrt(x)/2 + |x|')); // '\\frac{\\sqrt{x}}{2} + \\left|x\\right|'
 | `steps`                              | 10 000 000                | statically: nodes (plus each host function's declared `cost`) per call, times the points for `sample`                                                                         |
 | `digits` (exact domains)             | 1 000                     | literal digits at compile; a power (≈ exponent × digits of the base) or factorial (log-gamma) result before computing it: `9^9^9` and `10000!` throw `ExprLimitError` at once |
 
-`sample` checks `{ signal }` every 1 024 points. Compiled functions are closures: no `eval`, no `new Function`. Bundle budgets (min + gzip, checked by `size-limit` in `test`): root ≤ 6 kB, root + float ≤ 15 kB, latex ≤ 3 kB; root + decimal and root + rational ≤ 10 kB each with `@arki/math` left out (the 6 kB core budget plus 4 kB of domain glue), and the full cost with the `@arki/math` subpaths they import is gated too (≈ 17.4 kB decimal, ≈ 14.7 kB rational).
+`sample` checks `{ signal }` every 1 024 points. Compiled functions are closures: no `eval`, no `new Function`. Bundle budgets (min + gzip, checked by `size-limit` in `test`): root ≤ 6 kB, root + float ≤ 15 kB, latex ≤ 3 kB; root + decimal, root + rational and root + complex ≤ 10 kB each with `@arki/math` left out (the 6 kB core budget plus 4 kB of domain glue), and the full cost with the `@arki/math` subpaths they import is gated too (≈ 17.4 kB decimal, ≈ 14.7 kB rational, ≈ 13 kB complex).

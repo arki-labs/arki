@@ -7,6 +7,11 @@
  * calculator that shows `=` instead of `≈`. Float against Rational lives in
  * `float.property.test.ts`, whose oracle is checked against this Rational
  * domain there.
+ *
+ * Complex against float on the same trees: they never leave the real axis,
+ * so Complex must give float's number with a zero imaginary part, or throw
+ * float's error class. Why: a calculator that switches to the complex domain
+ * to show `sqrt(-2)` must not change any real answer it showed before.
  */
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
@@ -16,7 +21,9 @@ import type { Rational } from '@arki/math/rational';
 import { DivisionByZeroError, RoundingNecessaryError } from '@arki/math/errors';
 
 import type { Expr, Node } from './ast.js';
+import { compile as compileComplex } from './complex.js';
 import { compile as compileDecimal } from './decimal.js';
+import { compile as compileFloat } from './float.js';
 import { compile as compileRational } from './rational.js';
 
 const SPAN = { start: 0, end: 0 } as const;
@@ -103,5 +110,29 @@ describe('Decimal against Rational', () => {
       }),
       { numRuns: 2000 },
     );
+  });
+});
+
+describe('Complex against float', () => {
+  it("Complex's real part is float's value, its imaginary part 0, and the errors are float's", () => {
+    let failures = 0;
+    fc.assert(
+      fc.property(trees, root => {
+        const reference = outcome(() => compileFloat(expr(root))());
+        const actual = outcome(() => compileComplex(expr(root))());
+        if (reference.ok) {
+          expect(actual.ok).toBe(true);
+          if (actual.ok) expect([actual.value.re, actual.value.im]).toEqual([reference.value + 0, 0]);
+          return;
+        }
+        failures++;
+        expect(actual.ok).toBe(false);
+        if (!actual.ok) expect(classOf(actual.error)).toBe(classOf(reference.error));
+      }),
+      { numRuns: 2000 },
+    );
+    // Not vacuous: division by zero (0^-n included) shows up in these trees. Float's errors are tied
+    // to Rational's in float.property.test.ts, so Complex's are too.
+    expect(failures).toBeGreaterThan(0);
   });
 });

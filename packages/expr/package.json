@@ -51,6 +51,11 @@
       "import": "./dist/rational.js",
       "default": "./dist/rational.js"
     },
+    "./complex": {
+      "types": "./dist/complex.d.ts",
+      "import": "./dist/complex.js",
+      "default": "./dist/complex.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

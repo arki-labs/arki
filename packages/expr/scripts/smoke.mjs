@@ -3,6 +3,7 @@
 // It exercises each export once, plus a 256-deep expression (RFC §18); the
 // unit tests cover the details.
 
+import { evaluate as evaluateComplex } from '../dist/complex.js';
 import { evaluate as evaluateDecimal } from '../dist/decimal.js';
 import { compile, evaluate } from '../dist/float.js';
 import {
@@ -62,6 +63,7 @@ const checks = [
   ['decimal evaluate', evaluateDecimal('0.1 + 0.2 + 10/3', { scale: 2, rounding: 'halfEven' }).toString(), '3.63'],
   ['rational evaluate', evaluateRational('8^(2/3) + 1/3').toString(), '13/3'],
   ['rational digits budget', code(() => evaluateRational('9^9^9')), 'digits'],
+  ['complex principal branch', `${evaluateComplex('sqrt(-4)')} ${evaluateComplex('ln(-1)')}`, '2i 3.141592653589793i'],
   [
     '100 000 parentheses',
     code(() => parse(`${'('.repeat(100000)}x`, { limits: { length: 200000, tokens: 200000 } })),
