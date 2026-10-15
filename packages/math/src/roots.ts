@@ -59,7 +59,7 @@
  */
 
 import type { RealFunction } from './internal/calculus.js';
-import { ConvergenceError, InvalidArgumentError } from './errors.js';
+import { ConvergenceError, InvalidArgumentError, MathError } from './errors.js';
 import { assertFunction, call, readBounds, readCount, readTolerance } from './internal/calculus.js';
 import { assertFinite } from './number.js';
 
@@ -413,7 +413,10 @@ function safeguardedNewton(
  * Every root that a sign-change scan of `interval` can see, ascending. `f` is
  * evaluated on `samples + 1` evenly spaced points (default `samples` 100);
  * grid points where `f` is exactly 0 are reported as they are, and each
- * sub-interval whose ends differ in sign is refined by Brent's method. The
+ * sub-interval whose ends differ in sign is refined by Brent's method. A grid
+ * point where `f` has no finite value (it returns `NaN` or `±Infinity`, or
+ * throws a `MathError`, as `sqrt(x)` does for `x < 0`) is a gap: no sub-interval
+ * that touches it is refined, and the scan goes on. The
  * `iterations`/`evaluations` of each result count only its refinement; the scan
  * itself costs `samples + 1` evaluations.
  *
@@ -436,17 +439,30 @@ export function findRoots(
   for (let i = 0; i <= samples; i++) {
     const x = i === samples ? b : a + (b - a) * (i / samples);
     xs.push(x);
-    ys.push(call(f, x));
+    ys.push(sampleOrGap(f, x));
   }
   const roots: RootResult[] = [];
   for (let i = 0; i <= samples; i++) {
     const y = ys[i]!;
     if (y === 0) {
       roots.push(result(xs[i]!, 0, 0, 0));
-    } else if (i < samples) {
+    } else if (i < samples && !Number.isNaN(y)) {
       const yNext = ys[i + 1]!;
-      if (yNext !== 0 && y > 0 !== yNext > 0) roots.push(brent(f, xs[i]!, xs[i + 1]!, y, yNext, settings, 0));
+      if (yNext !== 0 && !Number.isNaN(yNext) && y > 0 !== yNext > 0) roots.push(brent(f, xs[i]!, xs[i + 1]!, y, yNext, settings, 0));
     }
   }
   return roots;
+}
+
+/** `f(x)` for the scan, or `NaN` where `f` has no finite value there. A wrong return type is still a `TypeError`. */
+function sampleOrGap(f: RealFunction, x: number): number {
+  let y: unknown;
+  try {
+    y = f(x);
+  } catch (error) {
+    if (error instanceof MathError) return Number.NaN;
+    throw error;
+  }
+  if (typeof y !== 'number') throw new TypeError(`f(${x}) returned ${typeof y}, expected a number`);
+  return Number.isFinite(y) ? y : Number.NaN;
 }

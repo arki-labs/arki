@@ -215,4 +215,22 @@ describe('findRoots', () => {
     expect(findRoots(f, [0, 1], { samples: 10 })).toHaveLength(0);
     expect(findRoots(f, [0, 1], { samples: 10_000 })).toHaveLength(2);
   });
+
+  // An equation solver scans a wide interval before it knows the function's domain.
+  // One point with no value (sqrt of a negative, log of 0, a pole) must not lose
+  // the roots elsewhere; it is a gap, never a sign change.
+  it('skips grid points where f has no finite value and keeps scanning', () => {
+    const sqrtMinus3 = (x: number): number => {
+      if (x < 0) throw new InvalidArgumentError('sqrt of a negative number');
+      return Math.sqrt(x) - 3;
+    };
+    expect(findRoots(sqrtMinus3, [-10, 10]).map(r => r.root)).toEqual([9]);
+    const roots = findRoots(x => Math.log(x) - 1, [-1, 5]).map(r => r.root);
+    expect(roots).toHaveLength(1);
+    expect(roots[0]).toBeCloseTo(Math.E, 12);
+  });
+
+  it('never brackets across a gap, so a NaN neighbour is not a sign change', () => {
+    expect(findRoots(x => (x < 0.5 ? Number.NaN : 1), [0, 1], { samples: 10 })).toHaveLength(0);
+  });
 });
