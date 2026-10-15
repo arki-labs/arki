@@ -1,19 +1,10 @@
-import { ASYNC_ERROR_CODES, AsyncError, invalidWait, isValidWait } from './errors.js';
+import { abortedError, invalidWait, isValidWait } from './errors.js';
 
 /** Options of {@link sleep}. */
 export type SleepOptions = {
   /** Cuts the wait short. The promise rejects with `ARKI_ASYNC_E002`, and `cause` is `signal.reason`. */
   readonly signal?: AbortSignal;
 };
-
-function aborted(signal: AbortSignal): AsyncError {
-  return new AsyncError(
-    ASYNC_ERROR_CODES.aborted,
-    'sleep() was aborted before the wait ended',
-    'Catch AsyncError with code ARKI_ASYNC_E002 where you abort, or check signal.aborted before you sleep.',
-    { cause: signal.reason },
-  );
-}
 
 /**
  * Resolves after `ms` milliseconds. `0` still waits for the next macrotask.
@@ -32,7 +23,7 @@ export function sleep(ms: number, options: SleepOptions = {}): Promise<void> {
     }
     const { signal } = options;
     if (signal?.aborted) {
-      reject(aborted(signal));
+      reject(abortedError('sleep()', signal.reason));
       return;
     }
     if (signal === undefined) {
@@ -41,7 +32,7 @@ export function sleep(ms: number, options: SleepOptions = {}): Promise<void> {
     }
     const onAbort = (): void => {
       clearTimeout(timer);
-      reject(aborted(signal));
+      reject(abortedError('sleep()', signal.reason));
     };
     const timer = setTimeout(() => {
       signal.removeEventListener('abort', onAbort);

@@ -2,7 +2,7 @@
 // Deno via `bun run test:runtimes`, and is bundled for the browser target.
 // One real-timer call per feature; the unit tests cover the details.
 
-import { AsyncError, debounce, sleep, throttle } from '../dist/index.js';
+import { all, AsyncError, debounce, mapConcurrent, race, scoped, sleep, throttle, timeout } from '../dist/index.js';
 
 async function main() {
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -40,6 +40,73 @@ async function main() {
     });
   await wait(60);
 
+  // Structured concurrency: one real-timer call per function.
+  let active = 0;
+  let peak = 0;
+  const mapped = await mapConcurrent(
+    [15, 5, 10, 1],
+    async ms => {
+      active++;
+      peak = Math.max(peak, active);
+      await wait(ms);
+      active--;
+      return ms;
+    },
+    { concurrency: 2 },
+  );
+
+  let siblingAborted = false;
+  const allFailure = await rejection(
+    all([
+      async () => {
+        await wait(5);
+        throw new AsyncError('ARKI_ASYNC_E004', 'x', 'y');
+      },
+      async signal => {
+        await sleep(1000, { signal }).catch(() => {
+          siblingAborted = signal.aborted;
+        });
+      },
+    ]),
+  );
+
+  let loserAborted = false;
+  const winner = await race([
+    async () => {
+      await wait(5);
+      return 'fast';
+    },
+    async signal => {
+      await sleep(1000, { signal }).catch(() => {
+        loserAborted = true;
+      });
+      return 'slow';
+    },
+  ]);
+
+  let timeoutSignalAborted = false;
+  const timedOut = await rejection(
+    timeout(async signal => {
+      await sleep(1000, { signal }).catch(() => {
+        timeoutSignalAborted = signal.aborted;
+      });
+    }, 5),
+  );
+
+  const order = [];
+  const cleanup = await rejection(
+    scoped(async scope => {
+      scope.defer(() => void order.push('a'));
+      await scope.acquire(
+        () => 'b',
+        () => {
+          order.push('b');
+          throw new Error('close failed');
+        },
+      );
+    }),
+  );
+
   const checks = [
     ['sleep resolves', await sleep(5).then(() => 'ok'), 'ok'],
     ['sleep(0) waits past microtasks', await zero, true],
@@ -48,6 +115,21 @@ async function main() {
     ['debounce latest wins', calls.join(','), '2'],
     ['debounce pending', pendingBefore, true],
     ['throttle leading and trailing', leading.join(','), 'a,c'],
+    ['mapConcurrent keeps input order', mapped.join(','), '15,5,10,1'],
+    ['mapConcurrent respects the limit', peak, 2],
+    [
+      'mapConcurrent invalid concurrency',
+      await rejection(mapConcurrent([1], async n => n, { concurrency: 0 })),
+      'ARKI_ASYNC_E005',
+    ],
+    ['all rejects with the first error', allFailure, 'ARKI_ASYNC_E004'],
+    ['all aborts the sibling', siblingAborted, true],
+    ['race first fulfilled wins', winner, 'fast'],
+    ['race aborts and awaits the loser', loserAborted, true],
+    ['timeout rejects at the deadline', timedOut, 'ARKI_ASYNC_E004'],
+    ['timeout aborts the task signal', timeoutSignalAborted, true],
+    ['scoped cleanup failure', cleanup, 'ARKI_ASYNC_E003'],
+    ['scoped finalizers run newest first', order.join(','), 'b,a'],
   ];
 
   let failed = 0;

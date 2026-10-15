@@ -14,7 +14,22 @@ describe('AsyncError', () => {
     expect(error.message).toContain('ARKI_ASYNC_E002');
   });
 
-  it('keeps the two published codes', () => {
-    expect(ASYNC_ERROR_CODES).toEqual({ invalidWait: 'ARKI_ASYNC_E001', aborted: 'ARKI_ASYNC_E002' });
+  it('keeps every published code stable: codes are a public contract, never renumbered', () => {
+    expect(ASYNC_ERROR_CODES).toEqual({
+      invalidWait: 'ARKI_ASYNC_E001',
+      aborted: 'ARKI_ASYNC_E002',
+      cleanupFailed: 'ARKI_ASYNC_E003',
+      timedOut: 'ARKI_ASYNC_E004',
+      invalidConcurrency: 'ARKI_ASYNC_E005',
+    });
+  });
+
+  it('carries no finalizer errors unless given, and freezes the list it gets', () => {
+    expect(new AsyncError(ASYNC_ERROR_CODES.aborted, 'm', 'r').errors).toEqual([]);
+    const errors = [new Error('a')];
+    const error = new AsyncError(ASYNC_ERROR_CODES.cleanupFailed, 'm', 'r', { errors });
+    errors.push(new Error('late'));
+    expect(error.errors).toHaveLength(1);
+    expect(Object.isFrozen(error.errors)).toBe(true);
   });
 });
