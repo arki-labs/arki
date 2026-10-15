@@ -103,7 +103,7 @@ No English is built in: `template.key` is the translation key, and `TEMPLATE_KEY
 
 | Key                                     | English                                                                        |
 | --------------------------------------- | ------------------------------------------------------------------------------ |
-| `derivation`                            | Differentiate {f} with respect to {x} ({order} times).                         |
+| `derivation`                            | Differentiate with respect to {x} ({order} times).                             |
 | `derivation.order`                      | Derivative number {order}.                                                     |
 | `derivation.simplification`             | Simplify the result.                                                           |
 | `derivative.constant`                   | {c} is a constant: its derivative is 0.                                        |
