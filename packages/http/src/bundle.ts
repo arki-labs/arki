@@ -2,23 +2,21 @@
  * Route bundles — the dynamic half of an HTTP surface.
  *
  * A bundle binds contracts to handlers. It is assembled inside a plugin's
- * `boot` hook — where the plugin's `needs` are already injected — so handlers
- * and derivers close over typed singletons:
+ * `provides` factory — where the plugin's `needs` are already injected — so
+ * handlers and derivers close over typed singletons:
  *
  * ```ts
  * export const OrdersRoutes = token<RouteBundle>()('orders.routes');
  *
  * export const ordersPlugin = plugin({
  *   name: 'orders',
- *   needs: { db: service<Db>() },
+ *   needs: { db: database.provides.db },
  *   actions: [listOrders, createOrder],
- *   async boot({ db }) {
- *     return provide(
- *       OrdersRoutes,
+ *   provides: {
+ *     [OrdersRoutes.key]: ({ db }) =>
  *       routes()
  *         .bind(listOrders, async ({ query }) => db.orders.list(query))
  *         .bind(createOrder, async ({ body }, ctx) => db.orders.create(body, ctx.requestId)),
- *     );
  *   },
  * });
  * ```

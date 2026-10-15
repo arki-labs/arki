@@ -70,10 +70,12 @@ export function myPkg(options: MyPkgDotOptions): Plugin<EmptyShape, MyPkgService
       ctx.registerService('myClient', 'custom');
     },
 
-    async boot(): Promise<MyPkgServices> {
-      const myClient = new MyClient(options.url);
-      await myClient.connect();
-      return { myClient };
+    provides: {
+      myClient: async () => {
+        const myClient = new MyClient(options.url);
+        await myClient.connect();
+        return myClient;
+      },
     },
 
     async dispose({ myClient }) {
@@ -117,37 +119,46 @@ configure(ctx) {
 The kernel merges every plugin's registration into `app.manifest`. Agents
 read this to know what services exist before the app boots.
 
-## Resource opening in `boot`
+## Resource opening in `provides`
 
-`boot` is async. Open exactly one resource per call. Return services for
-DI:
+A plugin publishes through `provides`: one factory per key. Factories may be
+async. Open exactly one resource per factory. `boot` is for side effects only
+and returns nothing:
 
 ```ts
-async boot({ $config }) {
-  // Optional: read config injected by `defineApp(name, { config })`.
-  const timeoutMs = ($config['MY_PKG_TIMEOUT_MS'] as number | undefined) ?? 5000;
+provides: {
+  myClient: async ({ $config }) => {
+    // Optional: read config injected by `defineApp(name, { config })`.
+    const timeoutMs = ($config['MY_PKG_TIMEOUT_MS'] as number | undefined) ?? 5000;
 
-  const myClient = new MyClient(options.url, { timeoutMs });
-  await myClient.connect();
-
-  return { myClient };
+    const myClient = new MyClient(options.url, { timeoutMs });
+    await myClient.connect();
+    return myClient;
+  },
 }
 ```
 
-If `boot` opens multiple resources and one of them fails, clean up the
+Because the keys are static, consumers get typed handles before boot:
+`myPkgPlugin.provides.myClient`. Read config that may change late (a URL from
+env) through a thunk option, called inside the factory, as `@arki/db/dot` does
+with `url: () => env.DB_URL`.
+
+If a factory opens multiple resources and one of them fails, clean up the
 partial state yourself before throwing — the kernel only disposes plugins
-whose `boot` returned successfully.
+whose factories completed.
 
 ```ts
-async boot() {
-  const a = await openA();
-  try {
-    const b = await openB();
-    return { a, b };
-  } catch (err) {
-    await a.close();
-    throw err;
-  }
+provides: {
+  pair: async () => {
+    const a = await openA();
+    try {
+      const b = await openB();
+      return { a, b };
+    } catch (err) {
+      await a.close();
+      throw err;
+    }
+  },
 }
 ```
 
@@ -163,10 +174,10 @@ import { plugin, service } from '@arki/dot/plugin';
 plugin({
   name: 'my-pkg',
   needs: { log: service<Logger>() },
-  async boot({ log }) {
+  boot: ({ log }) => {
     log.info('my-pkg booting');
-    return { myClient: await open() };
   },
+  provides: { myClient: () => open() },
 });
 ```
 
@@ -232,8 +243,11 @@ JSON-round-trip-safe output. Package subpath exports for projection modules
 must include a `default` condition so the CLI's Node fallback can resolve
 them app-relative.
 
-Dependency edges are not declared — the kernel observes them from actual
-service wiring at boot time and writes them into `app.manifest.dependencies`.
+Dependency edges are not declared — the kernel derives them at `configure()`
+from every plugin's needs and static provides, and writes them into
+`app.manifest.dependencies` (each entry carries its `key`). Manifest
+`provides` is filled at configure for adapters too. A provider mounted after
+its consumer is `DOT_LIFECYCLE_E020`.
 
 ## Feature slices
 
@@ -354,9 +368,9 @@ This minimises what the adapter pulls in.
 
 See the official adapters for reference:
 
-- `@arki/env/dot` — env validation via Zod (sync boot, no cleanup).
-- `@arki/kv/dot` — Redis-backed KV (async boot, dispose closes the client).
-- `@arki/db/dot` — Drizzle ORM (async boot, dispose closes the pool).
+- `@arki/env/dot` — env validation via Zod (sync provides, no cleanup).
+- `@arki/kv/dot` — Redis-backed KV (async provides, dispose closes the client).
+- `@arki/db/dot` — Drizzle ORM (async provides, dispose closes the pool).
 
 Each of these is fewer than 100 lines and demonstrates a different
 combination of the hooks.

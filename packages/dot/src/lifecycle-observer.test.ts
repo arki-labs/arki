@@ -74,8 +74,8 @@ describe('DotLifecycleObserver — happy path', () => {
       configure() {
         /* sync */
       },
-      boot() {
-        return { a: { ok: true } };
+      provides: {
+        a: () => ({ ok: true }),
       },
       async dispose() {
         /* async no-op */
@@ -163,7 +163,6 @@ describe('DotLifecycleObserver — subscribe / unsubscribe', () => {
     const pluginA = plugin({
       name: 'a',
       boot() {
-        return {};
       },
       async stop() {
         /* */
@@ -205,7 +204,6 @@ describe('DotLifecycleObserver — fault isolation', () => {
     const pluginA = plugin({
       name: 'a',
       boot() {
-        return {};
       },
     });
 
@@ -229,7 +227,6 @@ describe('renderTimeline integration', () => {
         /* */
       },
       boot() {
-        return {};
       },
     });
     const pluginB = plugin({
@@ -238,7 +235,6 @@ describe('renderTimeline integration', () => {
         /* */
       },
       boot() {
-        return {};
       },
     });
 

@@ -32,7 +32,7 @@ export const reports = feature('reports', {
 defineApp('shop')
   .use(db({ url }))
   .features([reports, billing])
-  .serve(schedule({ needs: { db: service<Db>() }, context: ({ db }) => ({ db }) }));
+  .serve(schedule({ needs: { db: database.provides.db }, context: ({ db }) => ({ db }) }));
 ```
 
 `context` builds the one value every handler receives. The features are

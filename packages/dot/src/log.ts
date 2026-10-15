@@ -42,16 +42,18 @@ export function log<const C extends string>(config: () => LogConfig<C>) {
       handle = configure({ ...resolved, resource: { 'service.name': appName, ...resolved.resource } });
       return handle;
     },
-    boot: (): LogServices<C> => {
-      if (handle === undefined) {
-        throw new DotPluginError({
-          code: DOT_LOG_ERROR_CODES.notActivated,
-          message: '[log] boot ran before the logging slot was activated.',
-          remediation: 'Mount log() with defineApp(...).use(log(...)); do not call its hooks by hand.',
-          docsUrl: 'https://github.com/arki-labs/arki/blob/HEAD/packages/dot/README.md#logging',
-        });
-      }
-      return { logging: handle };
+    provides: {
+      logging: (): LogServices<C>['logging'] => {
+        if (handle === undefined) {
+          throw new DotPluginError({
+            code: DOT_LOG_ERROR_CODES.notActivated,
+            message: '[log] boot ran before the logging slot was activated.',
+            remediation: 'Mount log() with defineApp(...).use(log(...)); do not call its hooks by hand.',
+            docsUrl: 'https://github.com/arki-labs/arki/blob/HEAD/packages/dot/README.md#logging',
+          });
+        }
+        return handle;
+      },
     },
   });
 }

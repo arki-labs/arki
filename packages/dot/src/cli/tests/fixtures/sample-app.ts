@@ -14,15 +14,15 @@ const logger = plugin({
   configure: ctx => {
     ctx.registerService('logger', 'logger');
   },
-  boot: () => ({
-    logger: {
+  provides: {
+    logger: () => ({
       info: (s: string) => {
         // Intentional console use — fixture only.
         // eslint-disable-next-line no-console
         console.log(s);
       },
-    },
-  }),
+    }),
+  },
 });
 
 export default defineApp('sample').use(logger);

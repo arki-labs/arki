@@ -86,6 +86,8 @@ When the rate-limiter Redis client is not ready, the limiter transparently falls
 `@arki/kv` ships an optional `@arki/kv/dot` adapter for the
 [`@arki/dot`](https://www.npmjs.com/package/@arki/dot) framework.
 
+- The plugin publishes `kv` through `provides`. Consumers write
+  `needs: { kv: kvPlugin.provides.kv }`; `.lazy` on the handle gives a `Lazy<T>`.
 - See `packages/dot/docs/` in the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
   package for plugin authoring, lifecycle, diagnostics, and the
   [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).

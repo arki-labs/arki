@@ -20,8 +20,6 @@ export function auth(options: AuthPluginOptions): Plugin<{ readonly db: AuthDb }
       ctx.registerService('auth', 'auth');
       ctx.declareProvides('auth');
     },
-    boot({ db }) {
-      return { auth: initAuth(db, options) };
-    },
+    provides: { auth: ({ db }) => initAuth(db, options) },
   });
 }

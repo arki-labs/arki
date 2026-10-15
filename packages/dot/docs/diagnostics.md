@@ -66,7 +66,7 @@ type DependencyEdge = {
   from: string;
   to: string;
   kind: 'requires' | 'provides' | 'uses';
-  key?: string; // the capability, on edges derived before boot from a feature's static provides
+  key?: string; // the capability, on edges derived at configure() from static provides
 };
 
 type ProjectionManifest = {
@@ -157,7 +157,24 @@ npx dot explain --json | jq '.data.manifest.plugins'
 
 The CLI **does not boot** the app — it only runs `configure`. This means
 `dot explain` is safe on a misconfigured app: it surfaces what was declared
-without trying to open resources.
+without trying to open resources. It prints one labelled edge per
+capability, such as `daily-digest --[db]--> db`. Manifest `dependencies`
+entries carry `key`, and manifest `provides` is filled at `configure()`,
+adapters included.
+
+### Wiring codes
+
+The kernel checks every plugin's needs against every plugin's static provides
+at `configure()`:
+
+- `DOT_LIFECYCLE_E020` — a provider is mounted after its consumer. The fix
+  line is role-aware: "Move X before Y in .features([...])." for a feature
+  provider, "Mount X with .use() before Y." for any other plugin.
+- `DOT_LIFECYCLE_E019` — needs and provides form a ring through any plugins.
+  The message prints the ring.
+- `DOT_LIFECYCLE_E012` — a need at boot that no plugin declares (erased or JS
+  graphs, dynamic http bundle tokens). It is no longer the code for a plain
+  ordering mistake.
 
 Output envelope:
 

@@ -3,8 +3,8 @@
  *
  * Wraps `defineEnv()` as a DOT plugin so a DOT app can validate its
  * environment alongside any other services. The plugin is sync (env
- * validation is sync), so the `boot` hook returns the validated env
- * object synchronously through the standard provides channel.
+ * validation is sync), so its `env` factory returns the validated env
+ * object synchronously; `envPlugin.provides.env` is the typed handle.
  *
  * @example
  * ```ts
@@ -78,17 +78,18 @@ export function env<TSchema extends Record<string, ZodType>>(
     configure(ctx) {
       ctx.registerService('env', 'env');
     },
-    boot() {
-      const validated = defineEnv({
-        server: options.schema,
-        options: options.skipValidation === undefined ? undefined : { skipValidation: options.skipValidation },
-      });
-      // `defineEnv` returns a Proxy from `@t3-oss/env-core`; we narrow it
-      // to the schema-derived shape so downstream typing flows through.
-      // The runtime guarantee comes from Zod-side validation inside
-      // `defineEnv`. No `any` involved — the cast is type-only.
-      const envObject = validated as unknown as EnvServices<TSchema>['env'];
-      return { env: envObject };
+    provides: {
+      env: () => {
+        const validated = defineEnv({
+          server: options.schema,
+          options: options.skipValidation === undefined ? undefined : { skipValidation: options.skipValidation },
+        });
+        // `defineEnv` returns a Proxy from `@t3-oss/env-core`; we narrow it
+        // to the schema-derived shape so downstream typing flows through.
+        // The runtime guarantee comes from Zod-side validation inside
+        // `defineEnv`. No `any` involved — the cast is type-only.
+        return validated as unknown as EnvServices<TSchema>['env'];
+      },
     },
   });
 }

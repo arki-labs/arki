@@ -186,6 +186,10 @@ await uow(async tx => {
 `@arki/db` ships an optional `@arki/db/dot` adapter for the
 [`@arki/dot`](https://www.npmjs.com/package/@arki/dot) framework.
 
+- `db()` (pg driver) takes `url?: () => string | undefined`, read at boot and
+  falling back to `DB_URL`: `export const database = db({ relations, url: () => env.DB_URL });`.
+  Consumers name the handle: `needs: { db: database.provides.db }`, and the
+  app names the type once: `export type Db = Provided<typeof database.provides.db>`.
 - See `packages/dot/docs/` in the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
   package for plugin authoring, lifecycle, diagnostics, and the
   [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).

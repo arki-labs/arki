@@ -207,7 +207,9 @@ describe('DOT manifest', () => {
     const p = plugin({
       name: 'p',
       configure: noop,
-      boot: () => ({}),
+      boot: () => {
+        /* side effects only */
+      },
       start: noop,
       stop: noop,
       dispose: noop,
@@ -224,22 +226,24 @@ describe('DOT manifest', () => {
   });
 
   it('dependency edges are observed from service wiring at boot', async () => {
-    const a = plugin({ name: 'a', boot: () => ({ alpha: 1 }) });
+    const a = plugin({ name: 'a', provides: { alpha: () => 1 } });
     const b = plugin({
       name: 'b',
       needs: { alpha: service<number>() },
-      boot: () => ({ beta: 2 }),
+      provides: { beta: () => 2 },
     });
     const c = plugin({
       name: 'c',
       needs: { beta: service<number>() },
-      boot: () => ({}),
+      boot: () => {
+        /* side effects only */
+      },
     });
     const app = await defineApp('test').use(a).use(b).use(c).boot();
     expect(app.manifest.dependencies).toEqual(
       expect.arrayContaining([
-        { from: 'b', to: 'a', kind: 'requires' },
-        { from: 'c', to: 'b', kind: 'requires' },
+        { from: 'b', to: 'a', kind: 'requires', key: 'alpha' },
+        { from: 'c', to: 'b', kind: 'requires', key: 'beta' },
       ]),
     );
     expect(app.manifest.dependencies).toHaveLength(2);

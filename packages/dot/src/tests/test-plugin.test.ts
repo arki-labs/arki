@@ -24,9 +24,9 @@ describe('testPlugin', () => {
     const consumer = plugin({
       name: 'consumer',
       needs: { db: Db, cache: service<Cache>() },
-      boot: ({ db, cache }) => ({
-        answer: { rows: db.query('q'), cached: cache.get('k') },
-      }),
+      provides: {
+        answer: ({ db, cache }) => ({ rows: db.query('q'), cached: cache.get('k') }),
+      },
     });
 
     const fakeDb: Db = { query: () => ['row'] };
@@ -46,7 +46,7 @@ describe('testPlugin', () => {
     const consumer = plugin({
       name: 'consumer',
       needs: { db: Db, cache: service<Cache>() },
-      boot: ({ db }) => ({ rows: db.query('q') }),
+      provides: { rows: ({ db }) => db.query('q') },
     });
 
     // @ts-expect-error — `cache` is still unprovided ("Expected 2 arguments").
@@ -67,10 +67,12 @@ describe('testPlugin', () => {
     const consumer = plugin({
       name: 'lazy-consumer',
       needs: { db: service.lazy<Db>() },
-      async boot({ db }) {
-        expectTypeOf(db).toEqualTypeOf<Lazy<Db>>();
-        const handle = await db.get();
-        return { rows: handle.query('q') };
+      provides: {
+        rows: async ({ db }) => {
+          expectTypeOf(db).toEqualTypeOf<Lazy<Db>>();
+          const handle = await db.get();
+          return handle.query('q');
+        },
       },
     });
 
@@ -90,7 +92,7 @@ describe('testPlugin', () => {
     const consumer = plugin({
       name: 'consumer',
       needs: { db: Db },
-      boot: ({ db, $config }) => ({ rows: db.query('q'), flag: $config['flag'] }),
+      provides: { rows: ({ db }) => db.query('q'), flag: ({ $config }) => $config['flag'] },
       dispose: ({ flag }) => void order.push(`consumer-dispose:${String(flag)}`),
     });
 

@@ -14,14 +14,17 @@ import { plugin, service } from '@arki/dot';
 export const billing = plugin({
   name: 'billing',
   version: '1.0.0',
-  needs: { db: service<Db>(), log: service<Logger>() },
+  needs: { db: database.provides.db, log: service<Logger>() },
 
   configure(ctx) {
     // Synchronous registration. No I/O.
   },
-  async boot({ db, log }) {
-    // Open resources. Publish services by returning them.
-    return { billing: new BillingService(db, log) };
+  provides: {
+    // One factory per key. Publish services here.
+    billing: ({ db, log }) => new BillingService(db, log),
+  },
+  async boot({ billing }) {
+    // Side effects only (seed, warm-up). Returns nothing.
   },
   async start({ billing }) {
     // Begin active work.
@@ -36,7 +39,8 @@ export const billing = plugin({
 ```
 
 Everything is inferred: the `needs` shape types the hook contexts, and the
-`boot` return type becomes the plugin's provides — no generic arguments.
+`provides` factories become the plugin's provides — no generic arguments.
+Returning a value from `boot` is a compile error.
 
 ## Fields
 
@@ -46,7 +50,8 @@ Everything is inferred: the `needs` shape types the hook contexts, and the
 | `version`   | no       | Semver string. Surfaces in `PluginManifest.version`.                    |
 | `needs`     | no       | Shape of service witnesses this plugin consumes (see below).            |
 | `configure` | no       | Sync hook. Registers metadata. No I/O.                               |
-| `boot`      | no       | Async hook. Opens resources; its return value IS the provides.       |
+| `provides`  | no       | One factory per key. Gets the needs; may be async (awaited in key order). |
+| `boot`      | no       | Async hook. Side effects only; sees needs and own provides.          |
 | `start`     | no       | Async hook. Begins active work after every plugin has booted.           |
 | `stop`      | no       | Async hook. Reverse order. Halts active work.                        |
 | `dispose`   | no       | Async hook. Reverse order. Releases resources.                       |
@@ -55,8 +60,8 @@ Everything is inferred: the `needs` shape types the hook contexts, and the
 
 1. **`configure`** — sync registration. Validate options, register routes,
    declare provided services for the manifest. No async, no I/O.
-2. **`boot`** — async open. Connect clients, validate runtime config, return
-   a record of services for downstream plugins to consume.
+2. **`boot`** — async side effects. Seed, warm up, validate runtime config.
+   Services come from the `provides` factories, which run first.
 3. **`start`** — async activate. Workers, schedulers, subscribers.
 4. **`stop`** — async halt. Drain workers, unsubscribe listeners.
 5. **`dispose`** — async release. Close connections, free file handles.
@@ -66,7 +71,9 @@ idempotency) is [`lifecycle.md`](./lifecycle.md).
 
 ## Services and dependency injection
 
-A plugin **provides** services by returning them from `boot`:
+A plugin **provides** services through `provides`: one factory per key.
+Factories get the plugin's needs (local aliases) plus `$app`, `$plugin` and
+`$config`. They may be async. They run in key order and are awaited:
 
 ```ts
 import { plugin } from '@arki/dot';
@@ -75,9 +82,8 @@ type Client = { ping(): Promise<void>; close(): Promise<void> };
 
 export const apiClient = plugin({
   name: 'api-client',
-  async boot() {
-    const client: Client = await openClient();
-    return { apiClient: client };
+  provides: {
+    apiClient: (): Promise<Client> => openClient(),
   },
   async dispose({ apiClient }) {
     await apiClient.close();
@@ -85,28 +91,43 @@ export const apiClient = plugin({
 });
 ```
 
-A plugin **consumes** services by declaring a `needs` shape of type
-witnesses. The hook context delivers them fully typed — destructuring is
-the injection:
+A plugin **consumes** services by declaring a `needs` shape. Name the
+provider's handle when you can import it. The hook context delivers the
+values fully typed — destructuring is the injection:
 
 ```ts
-import { plugin, service } from '@arki/dot';
+import { plugin } from '@arki/dot';
 
 export const billing = plugin({
   name: 'billing',
-  needs: { apiClient: service<Client>() },
+  needs: { apiClient: apiClientPlugin.provides.apiClient },
   async boot({ apiClient }) {
     await apiClient.ping();
-    return { billing: makeBilling(apiClient) };
   },
+  provides: { billing: ({ apiClient }) => makeBilling(apiClient) },
 });
 ```
 
+`apiClientPlugin.provides.apiClient` is a `Handle<Client, 'apiClient'>`: a
+token on the wire key, plus `.provider` (the plugin name) and `.lazy`.
+Every plugin has these handles before boot. An app names the type with
+`export type Db = Provided<typeof database.provides.db>`.
+
+Use `service<T>()` only when you cannot import the provider: a library
+contract, a test, or a host external.
+
+`boot`, `start`, `stop` and `dispose` receive the needs plus the plugin's
+own provided values.
+
 Wiring is checked **at compile time**: `.use(billing)` is a type error
 until an earlier `.use(...)` provides a compatible `apiClient`. The kernel
-re-validates at runtime (coded errors `DOT_LIFECYCLE_E012` unsatisfied
-need, `DOT_LIFECYCLE_E013` collision, `DOT_LIFECYCLE_E014` reserved key)
-for erased/dynamic composition.
+also checks every plugin's needs against every plugin's static provides at
+`configure()`. A provider mounted after its consumer is
+`DOT_LIFECYCLE_E020`. A ring through any plugins is `DOT_LIFECYCLE_E019`.
+`DOT_LIFECYCLE_E012` (unsatisfied need at boot) is only for needs no plugin
+declares (erased or JS graphs, dynamic http bundle tokens). `DOT_LIFECYCLE_E013`
+(collision) and `DOT_LIFECYCLE_E014` (reserved key) cover erased/dynamic
+composition.
 
 Hook contexts also carry `$`-prefixed kernel keys — `$app` (app name),
 `$plugin` (plugin name), `$config` (the `defineApp(name, { config })` bag). The
@@ -120,8 +141,9 @@ kernel keys can never be shadowed.
 There is no dependency graph to declare. Providers are `.use()`d before
 their consumers; the builder's type-level guard makes any other order a
 compile error, and `stop`/`dispose` run in reverse. The manifest's
-dependency edges are *observed* from actual wiring at boot — which plugin's
-service satisfied which need.
+dependency edges are derived at `configure()` from static provides — one
+labelled edge per capability, each carrying its `key`. `dot explain` prints
+them without booting.
 
 ## Multi-instance: `rename`
 
@@ -142,6 +164,16 @@ app.services.db;        // primary
 app.services.reportsDb; // second instance, same type
 ```
 
+`rename` rebuilds the handles. Consumers of the second instance use
+`reportsDb.provides.reportsDb`:
+
+```ts
+const reportsDb = rename(db({ driver: 'pglite', memory: true, relations }), { db: 'reportsDb' }, 'reports-db');
+// needs: { db: reportsDb.provides.reportsDb }
+```
+
+A handle taken before the rename keeps the old key and fails the builder guard.
+
 ## Lazy services
 
 When opening a resource is expensive and not every process needs it, wrap
@@ -153,11 +185,11 @@ import { lazy, plugin } from '@arki/dot';
 
 export const search = plugin({
   name: 'search',
-  boot: () => ({
-    search: lazy(() => connectSearchCluster(), {
+  provides: {
+    search: () => lazy(() => connectSearchCluster(), {
       dispose: client => client.close(),
     }),
-  }),
+  },
   // no dispose hook needed — the kernel auto-disposes initialized handles
 });
 ```
@@ -168,7 +200,7 @@ and consumers acquire it explicitly:
 ```ts
 export const indexer = plugin({
   name: 'indexer',
-  needs: { search: service<Lazy<SearchClient>>() },
+  needs: { search: searchPlugin.provides.search },
   async start({ search }) {
     const client = await search.get();   // first call initializes
     // ...
@@ -176,16 +208,18 @@ export const indexer = plugin({
 });
 ```
 
-`service<Lazy<T>>()` binds the consumer to a lazy provider. To stay
-agnostic about the provider's strategy, use the lifting witness
-`service.lazy<T>()` — it accepts an **eager or lazy** provider and always
-delivers a `Lazy<T>` handle (eager values arrive pre-initialized):
+A handle to a lazy provider binds the consumer to a lazy provider. To stay
+agnostic about the provider's strategy, use `.lazy` on the handle — it
+accepts an **eager or lazy** provider and always delivers a `Lazy<T>`
+(eager values arrive pre-initialized):
 
 ```ts
-needs: { search: service.lazy<SearchClient>() },
-// works against boot: () => ({ search: client })          (lifted, warm)
-// and     boot: () => ({ search: lazy(() => connect()) }) (passed through)
+needs: { search: searchPlugin.provides.search.lazy },
+// works against provides: { search: () => client }                (lifted, warm)
+// and           provides: { search: () => lazy(() => connect()) } (passed through)
 ```
+
+Without the provider in reach, `service.lazy<T>()` does the same job.
 
 Semantics:
 
@@ -213,13 +247,13 @@ a free choice:
 export const Kv = token<KvClient>()('acme.kv');
 
 // provider (in @acme/kv):
-plugin({ name: 'kv', boot: () => provide(Kv, client) });
+plugin({ name: 'kv', provides: { [Kv.key]: () => client } });
 
 // any consumer, any alias:
 plugin({
   name: 'cache',
   needs: { cache: Kv },       // wire key 'acme.kv', local alias `cache`
-  async boot({ cache }) { /* typed KvClient */ },
+  boot: ({ cache }) => { /* typed KvClient */ },
 });
 
 // derived instance token:
@@ -263,7 +297,6 @@ async boot({ $config }) {
       docsUrl: 'https://example.com/dot/docs/billing#config',
     });
   }
-  return {};
 }
 ```
 
@@ -274,12 +307,12 @@ conventions.
 
 ## Type-safe services
 
-Provides are inferred from `boot` return types and accumulate through the
+Provides are inferred from the `provides` factories and accumulate through the
 builder:
 
 ```ts
-const a = plugin({ name: 'a', boot: () => ({ a: 1 }) });
-const b = plugin({ name: 'b', boot: () => ({ b: 'x' }) });
+const a = plugin({ name: 'a', provides: { a: () => 1 } });
+const b = plugin({ name: 'b', provides: { b: () => 'x' } });
 
 const app = await defineApp('demo').use(a).use(b).boot();
 app.services.a; // number
@@ -288,6 +321,18 @@ app.services.b; // string
 
 The builder type narrows on every `.use(...)` call. No casts needed —
 anywhere, including inside hooks.
+
+## Testing with `fake`
+
+`fake(handle, value)` from `@arki/dot/test-harness` is a plugin named
+`fake:<key>`. It provides `value` under the handle's wire key, type-checked
+against the handle:
+
+```ts
+import { fake } from '@arki/dot/test-harness';
+
+defineApp('t').use(fake(database.provides.db, db)).features([billing]);
+```
 
 ## When NOT to write a plugin
 

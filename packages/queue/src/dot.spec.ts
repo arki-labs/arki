@@ -73,7 +73,7 @@ type Dependency = {
 
 const dependency = plugin({
   name: 'dependency',
-  boot: () => ({ dependency: { name: 'test-dependency' } satisfies Dependency }),
+  provides: { dependency: () => ({ name: 'test-dependency' }) satisfies Dependency },
 });
 
 const orders = feature('orders', { use: [jobs(registry)] });

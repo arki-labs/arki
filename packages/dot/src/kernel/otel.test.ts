@@ -121,8 +121,8 @@ describe('@arki/dot OTel instrumentation', () => {
       configure(ctx) {
         ctx.registerService('env', 'env');
       },
-      boot() {
-        return { env: { PORT: 3000 } };
+      provides: {
+        env: () => ({ PORT: 3000 }),
       },
     });
 
@@ -153,8 +153,8 @@ describe('@arki/dot OTel instrumentation', () => {
       configure(ctx) {
         ctx.registerService('env', 'env');
       },
-      boot() {
-        return { env: { PORT: 3000 } };
+      provides: {
+        env: () => ({ PORT: 3000 }),
       },
     });
     const webPlugin = plugin({
@@ -164,9 +164,7 @@ describe('@arki/dot OTel instrumentation', () => {
       configure(ctx) {
         ctx.registerService('web', 'custom');
       },
-      boot(): Svc {
-        return { web: { listening: false } };
-      },
+      provides: { web: (): Svc['web'] => ({ listening: false }) },
       start({ web }) {
         web.listening = true;
       },
@@ -210,7 +208,14 @@ describe('@arki/dot OTel instrumentation', () => {
   it('stamps the phase span and each plugin hook span on the kernel lifecycle records', async () => {
     using log = fakeLog();
     const app = await defineApp('trace-thread-test')
-      .use(plugin({ name: 'p', boot: () => ({}) }))
+      .use(
+        plugin({
+          name: 'p',
+          boot: () => {
+            /* side effects only */
+          },
+        }),
+      )
       .boot();
     await app.dispose();
 
@@ -260,7 +265,7 @@ describe('@arki/dot OTel instrumentation', () => {
       name: 'good',
       version: '0.1.0',
       boot() {
-        return {};
+        /* side effects only */
       },
     });
     const badPlugin = plugin({

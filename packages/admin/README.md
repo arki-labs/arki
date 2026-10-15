@@ -59,7 +59,7 @@ import { feature } from '@arki/dot/feature';
 import { journalReceiptStore } from '@arki/admin/pg';
 
 export const operations = feature('operations', {
-  needs: { kv: service<KV>(), db: service<Db>() },
+  needs: { kv: kvPlugin.provides.kv, db: database.provides.db }, // handles; service<T>() also works
   use: [
     foreman(({ kv, db }: { kv: KV; db: Db }) => ({
       env,

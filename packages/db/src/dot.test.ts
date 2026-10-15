@@ -96,6 +96,34 @@ describe('@arki/db/dot', () => {
     }
   });
 
+  it('reads the url thunk when the app boots, never at import — the handle exists before', async () => {
+    // Why: an app module declares `database = db({ relations, url: () => env.DB_URL })`
+    // at top level and features name `database.provides.db`. Importing that
+    // module must not read env or open a pool.
+    let reads = 0;
+    const database = db({
+      relations,
+      url: () => {
+        reads += 1;
+        return process.env['DB_URL'];
+      },
+    });
+    expect(database.provides.db).toMatchObject({ key: 'db', provider: 'db' });
+    const builder = defineApp('db-url-thunk').use(database);
+    builder.configure();
+    expect(reads).toBe(0);
+
+    const previous = process.env['DB_URL'];
+    delete process.env['DB_URL'];
+    try {
+      const caught = await builder.boot().catch((error: unknown) => error);
+      expect(reads).toBe(1);
+      expect(((caught as DotLifecycleError).cause as DotPluginError).code).toBe(DB_PLUGIN_ERROR_CODES.dbUrlNotConfigured);
+    } finally {
+      if (previous !== undefined) process.env['DB_URL'] = previous;
+    }
+  });
+
   it('mounts a second db scope via rename()', async () => {
     const app = await defineApp('db-named-test')
       .use(db({ driver: 'pglite', memory: true, relations }))

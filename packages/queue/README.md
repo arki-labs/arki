@@ -265,8 +265,8 @@ import { jobs, queue, queueWorker } from '@arki/queue/dot';
 
 const orders = feature('orders', {
   use: [jobs({ sendReceipt })],
-  needs: { queue: service<QueueClient>() },
-  boot: ({ queue }) => ({ checkout: createCheckout(queue) }), // queue.enqueue(sendReceipt, { orderId })
+  needs: { queue: queuePlugin.provides.queue }, // or service<QueueClient>() when the host plugin is out of reach
+  provides: { checkout: ({ queue }) => createCheckout(queue) }, // queue.enqueue(sendReceipt, { orderId })
 });
 
 // API process: enqueues only.

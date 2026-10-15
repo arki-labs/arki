@@ -27,16 +27,14 @@ const make = (index: number, deps: Record<string, unknown>): Service => ({ id: i
 const plugins = Array.from({ length: COUNT }, (_, index) => {
   const needs: Record<Key, ReturnType<typeof service<Service>>> = {};
   for (const key of depsOf(index)) needs[key] = service<Service>();
-  return plugin({
-    name: `p${index}`,
-    needs,
-    boot: ctx => {
+  const provides: Record<Key, (ctx: Record<Key, Service>) => Service> = {
+    [`s${index}`]: (ctx: Record<Key, Service>) => {
       const deps: Record<Key, Service> = {};
       for (const key of depsOf(index)) deps[key] = ctx[key];
-      const provided: Record<Key, Service> = { [`s${index}`]: make(index, deps) };
-      return provided;
+      return make(index, deps);
     },
-  });
+  };
+  return plugin({ name: `p${index}`, needs, provides });
 });
 
 async function bootDot() {

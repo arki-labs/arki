@@ -1,14 +1,17 @@
 /**
  * DOT adapter for `@arki/db`.
  *
- * Wraps the Drizzle database initialization as a DOT plugin. The plugin
- * opens a database connection in `boot`, publishes the Drizzle handle as
- * `services.db`, and tears down the underlying client in `dispose`
- * (reverse declaration order).
+ * Wraps the Drizzle database initialization as a DOT plugin. The plugin's
+ * `db` factory opens the connection at boot, publishes the Drizzle handle
+ * as `services.db`, and tears down the underlying client in `dispose`
+ * (reverse declaration order). `database.provides.db` is the typed handle
+ * consumers name in their `needs`, known before anything boots.
  *
  * Two drivers are supported:
- *   - `'pg'` (default) — `node-postgres` pool. Reads `DB_URL` and the
- *     `DB_POOL_*` env vars via `@arki/db`'s built-in env loader.
+ *   - `'pg'` (default) — `node-postgres` pool. Pass `url: () => env.DB_URL`
+ *     to read the URL at boot (never at import); without it the adapter
+ *     reads `DB_URL`. The `DB_POOL_*` env vars come from `@arki/db`'s
+ *     built-in env loader.
  *   - `'pglite'` — embedded PGlite. Pass `dataDir`, or `memory: true` for
  *     an in-memory instance. Use for tests, single-binary apps, or local
  *     development without a real Postgres server.
@@ -22,10 +25,12 @@
  *
  * const relations = defineRelations(schema, (b) => ({ ... }));
  *
- * // Node-postgres (default), reads DB_URL from env:
- * const app = await defineApp('my-app')
- *   .use(db({ relations }))
- *   .boot();
+ * // Node-postgres (default); the URL thunk runs at boot:
+ * export const database = db({ relations, url: () => env.DB_URL });
+ * export type Db = Provided<typeof database.provides.db>;
+ *
+ * const app = await defineApp('my-app').use(database).boot();
+ * // a consumer: needs: { db: database.provides.db }
  *
  * // PGlite in-memory (great for tests):
  * const testApp = await defineApp('test')
@@ -39,8 +44,8 @@
  * ```ts
  * import { rename } from '@arki/dot';
  *
- * .use(db({ relations }))
- * .use(rename(db({ driver: 'pglite', memory: true, relations }), { db: 'reportsDb' }, 'reports-db'))
+ * const reportsDb = rename(db({ driver: 'pglite', memory: true, relations }), { db: 'reportsDb' }, 'reports-db');
+ * .use(database).use(reportsDb)  // consumers name reportsDb.provides.reportsDb
  * ```
  *
  * The `@arki/dot` package is an OPTIONAL peer of `@arki/db`. Importing
@@ -70,7 +75,7 @@ import { initDbRuntimeLocal } from './runtime-local.js';
  * of the API") and principle 4 ("agent-discoverable everywhere").
  */
 export const DB_PLUGIN_ERROR_CODES = {
-  /** boot was called without a configured DB_URL (pg driver). */
+  /** The `db` factory ran without a URL (`url` thunk or DB_URL, pg driver). */
   dbUrlNotConfigured: 'ARKI_DB_PLUGIN_E001',
 } as const;
 
@@ -88,6 +93,11 @@ type BaseDbDotOptions<TRelations extends AnyRelations> = {
 export type PgDbDotOptions<TRelations extends AnyRelations> = BaseDbDotOptions<TRelations> & {
   /** Driver discriminant. Defaults to `'pg'` when omitted. */
   readonly driver?: 'pg';
+  /**
+   * The connection URL, read when the app boots (never at import). Falls
+   * back to `DB_URL` from the environment when absent or `undefined`.
+   */
+  readonly url?: () => string | undefined;
 };
 
 /** Options for the embedded-PGlite driver. */
@@ -127,8 +137,8 @@ export function db<TRelations extends AnyRelations>(
 
   if (driver === 'pglite') {
     const pgliteOptions = options as PgliteDbDotOptions<TRelations>;
-    // PGlite path: open the embedded instance and Drizzle handle in boot.
-    // We capture the raw PGlite client at boot-time so `dispose` can close
+    // PGlite path: open the embedded instance and Drizzle handle at boot.
+    // We capture the raw PGlite client in the factory so `dispose` can close
     // it deterministically. `services.db` is the Drizzle handle only —
     // exposing the PGlite client would leak driver-specific surface.
     let pgliteHandle: { close: () => Promise<void> } | undefined;
@@ -138,20 +148,22 @@ export function db<TRelations extends AnyRelations>(
       configure(ctx) {
         ctx.registerService('db', 'db');
       },
-      async boot(): Promise<DbServices<TRelations, 'pglite'>> {
-        const { db: handle, pglite } = await initDbRuntimeLocal<TRelations>(
-          {
-            ...(pgliteOptions.dataDir === undefined ? {} : { dataDir: pgliteOptions.dataDir }),
-            ...(pgliteOptions.memory === undefined ? {} : { memory: pgliteOptions.memory }),
-            ...(pgliteOptions.extensions === undefined ? {} : { extensions: pgliteOptions.extensions }),
-          },
-          {
-            relations: pgliteOptions.relations,
-            ...(pgliteOptions.logger === undefined ? {} : { logger: pgliteOptions.logger }),
-          },
-        );
-        pgliteHandle = pglite;
-        return { db: handle };
+      provides: {
+        db: async (): Promise<DbServices<TRelations, 'pglite'>['db']> => {
+          const { db: handle, pglite } = await initDbRuntimeLocal<TRelations>(
+            {
+              ...(pgliteOptions.dataDir === undefined ? {} : { dataDir: pgliteOptions.dataDir }),
+              ...(pgliteOptions.memory === undefined ? {} : { memory: pgliteOptions.memory }),
+              ...(pgliteOptions.extensions === undefined ? {} : { extensions: pgliteOptions.extensions }),
+            },
+            {
+              relations: pgliteOptions.relations,
+              ...(pgliteOptions.logger === undefined ? {} : { logger: pgliteOptions.logger }),
+            },
+          );
+          pgliteHandle = pglite;
+          return handle;
+        },
       },
       async dispose() {
         if (pgliteHandle !== undefined) {
@@ -171,25 +183,28 @@ export function db<TRelations extends AnyRelations>(
     configure(ctx) {
       ctx.registerService('db', 'db');
     },
-    boot(): DbServices<TRelations, 'pg'> {
-      // Validate at the plugin boundary so the DOT lifecycle gets a coded
-      // error. `createDb` still throws raw `Error` for non-DOT consumers
-      // (its public contract is unchanged); the check here makes sure we
-      // never reach it without a URL.
-      if (env.DB_URL === undefined || env.DB_URL === '') {
-        throw new DotPluginError({
-          code: DB_PLUGIN_ERROR_CODES.dbUrlNotConfigured,
-          message: '[db] DB_URL is not configured.',
-          remediation:
-            'Set DB_URL in the environment before booting the app, or switch the plugin to the pglite driver for in-process databases.',
-          docsUrl: 'https://arki.dev/dot/errors/arki-db-plugin-e001',
+    provides: {
+      db: (): DbServices<TRelations, 'pg'>['db'] => {
+        // Validate at the plugin boundary so the DOT lifecycle gets a coded
+        // error. `createDb` still throws raw `Error` for non-DOT consumers
+        // (its public contract is unchanged); the check here makes sure we
+        // never reach it without a URL.
+        const url = ('url' in options ? options.url?.() : undefined) ?? env.DB_URL;
+        if (url === undefined || url === '') {
+          throw new DotPluginError({
+            code: DB_PLUGIN_ERROR_CODES.dbUrlNotConfigured,
+            message: '[db] DB_URL is not configured.',
+            remediation:
+              'Pass url: () => env.DB_URL to db(...) or set DB_URL in the environment before booting the app, or switch the plugin to the pglite driver for in-process databases.',
+            docsUrl: 'https://arki.dev/dot/errors/arki-db-plugin-e001',
+          });
+        }
+        return createDb<TRelations>({
+          relations: options.relations,
+          url,
+          ...(options.logger === undefined ? {} : { logger: options.logger }),
         });
-      }
-      const handle = createDb<TRelations>({
-        relations: options.relations,
-        ...(options.logger === undefined ? {} : { logger: options.logger }),
-      });
-      return { db: handle };
+      },
     },
     async dispose({ db: handle }) {
       // Drizzle exposes the underlying pg.Pool as `$client`. We call its

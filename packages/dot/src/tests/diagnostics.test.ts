@@ -47,7 +47,12 @@ describe('DOT diagnostics', () => {
   });
 
   it('post-boot diagnostics include per-plugin status', async () => {
-    const a = plugin({ name: 'a', boot: () => ({}) });
+    const a = plugin({
+      name: 'a',
+      boot: () => {
+        /* side effects only */
+      },
+    });
     const app = await defineApp('test').use(a).boot();
     const snap = app.diagnostics;
     expect(snap.plugins).toEqual([{ plugin: 'a', status: 'ok', issues: [] }]);

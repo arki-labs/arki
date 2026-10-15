@@ -10,7 +10,7 @@
  */
 
 import { feature } from '@arki/dot/feature';
-import { defineApp, provide, service, token, plugin } from '@arki/dot/plugin';
+import { defineApp, service, token, plugin } from '@arki/dot/plugin';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -52,7 +52,7 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
 
 const ordersDbPlugin = plugin({
   name: 'orders-db',
-  boot: () => ({ ordersDb: { list: () => [{ id: 'o1' }] } satisfies OrdersDb }),
+  provides: { ordersDb: () => ({ list: () => [{ id: 'o1' }] }) satisfies OrdersDb },
 });
 
 const ordersPlugin = plugin({
@@ -61,15 +61,12 @@ const ordersPlugin = plugin({
   configure(ctx) {
     registerRoutes(ctx, [listOrders, progress]);
   },
-  boot: ({ ordersDb }) =>
-    provide(
-      OrdersRoutes,
-      routes()
+  provides: { [OrdersRoutes.key]: ({ ordersDb }) =>
+    routes()
         .bind(listOrders, () => ordersDb.list())
         .bind(progress, async function* ({ params }) {
           yield { step: Number(params.id === 'o1') };
-        }),
-    ),
+        }) },
 });
 
 describe('http() plugin', () => {
@@ -180,15 +177,12 @@ describe('http() plugin', () => {
     const SlowRoutes = token<RouteBundle>()('slow.routes');
     const slowPlugin = plugin({
       name: 'slow',
-      boot: () =>
-        provide(
-          SlowRoutes,
-          routes().bind(slow, async () => {
+      provides: { [SlowRoutes.key]: () =>
+        routes().bind(slow, async () => {
             entered.resolve();
             await gate.promise;
             return { done: true };
-          }),
-        ),
+          }) },
     });
 
     const app = await defineApp('http-drain')
@@ -223,16 +217,13 @@ describe('http() plugin', () => {
     const HangRoutes = token<RouteBundle>()('hang.routes');
     const hangPlugin = plugin({
       name: 'hang',
-      boot: () =>
-        provide(
-          HangRoutes,
-          routes().bind(hang, async () => {
+      provides: { [HangRoutes.key]: () =>
+        routes().bind(hang, async () => {
             await new Promise<never>(() => {
               // Deliberately never settles — the drain watchdog is the subject.
             });
             return { done: true };
-          }),
-        ),
+          }) },
     });
 
     const app = await defineApp('http-hang')

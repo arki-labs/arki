@@ -269,7 +269,7 @@ function journalPlugin<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
       ctx.registerService('journal', 'custom');
       ctx.declareProvides('journal');
     },
-    boot: () => ({ journal: build() }),
+    provides: { journal: () => build() },
   });
 }
 

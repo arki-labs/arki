@@ -31,19 +31,25 @@
  */
 import type {
   ActionSource,
+  AnyFactories,
+  AnyHandle,
   AnyPlugin,
   CtxOf,
   EmptyShape,
+  Handles,
   KernelCtx,
   NeedsShape,
   NoReservedKeys,
   Plugin,
+  ProvidesFactories,
   Service,
   ServiceRecord,
   Token,
   WireNeeds,
 } from './plugin-contract.js';
-import { plugin, provide, token } from './plugin-contract.js';
+import { handleOf, isLazy, isLazyWitness, lazyOf, plugin, token } from './plugin-contract.js';
+
+export type { Handle, Handles, LazyHandle, Provided, ProvidesFactories } from './plugin-contract.js';
 
 export type MaybePromise<T> = T | Promise<T>;
 
@@ -108,19 +114,8 @@ export type Feature<
    * `references(() => table.column)` of features. The keys are static, so
    * `Object.keys(billing.provides)` is known before anything boots.
    */
-  readonly provides: { readonly [K in keyof TProvides & string]: Handle<TProvides[K], K, TName> };
+  readonly provides: Handles<TProvides, TName>;
 };
-
-/** One factory per capability. Each gets the feature's needs; its key is the wire key. */
-export type ProvidesFactories<TNeeds extends NeedsShape, TProvides extends ServiceRecord> = {
-  readonly [K in keyof TProvides]: (services: CtxOf<TNeeds> & KernelCtx) => MaybePromise<TProvides[K]>;
-};
-
-/** A capability handle: a token on the wire key `K`, carrying the name of the feature that provides it. */
-export type Handle<T, K extends string, TOwner extends string> = Token<T, K> & { readonly provider: TOwner };
-
-/** An erased handle — what helpers that only read `key` / `provider` accept. */
-type AnyHandle = Token<unknown> & { readonly provider: string };
 
 /**
  * The erased feature bound list helpers fold over. `boot`'s parameter
@@ -184,7 +179,7 @@ export function feature<
   const factories = config.provides ?? ({} as ProvidesFactories<TNeeds, TProvides>);
   const handles: Record<string, AnyHandle> = {};
   for (const key of Object.keys(factories)) {
-    handles[key] = { ...token<unknown>()(key), provider: name };
+    handles[key] = handleOf(key, name);
   }
   return {
     name,
@@ -386,38 +381,40 @@ export function tokenOf<F extends AnyFeature>(f: F): FeatureTokenOf<F> {
   return token<SlicePayloads<F['use']>>()(`feature.${f.name}` as `feature.${F['name']}`);
 }
 
-/** Compile one feature into the kernel unit the app mounts. Called by `.features()`. */
+/**
+ * Compile one feature into the kernel unit the app mounts. Called by
+ * `.features()`. The feature's factories run as the plugin's factories, and
+ * its slice record is one more provides entry under `feature.<name>`, so
+ * `boot` stays side effects only. The feature's own handles pass through
+ * unchanged: `billing.provides.x === plug(billing).provides.x`.
+ */
 export function plug<F extends AnyFeature>(f: F): PluginOf<F> {
-  const tok = tokenOf(f);
+  const sliceKey = tokenOf(f).key;
   const actions: ActionSource[] = [...f.actions, ...f.use.flatMap(slice => slice.actions)];
-
-  const boot = async (ctx: CtxOf<F['needs']> & KernelCtx): Promise<ServiceRecord> => {
-    // Erasure seam: factories and boot were typed against this feature's
-    // needs by feature(); the kernel built `ctx` from those same needs.
-    const provided: ServiceRecord = {};
-    for (const [key, factory] of Object.entries(f.factories)) {
-      provided[key] = await (factory as (services: unknown) => unknown)(ctx);
-    }
-    if (f.boot !== undefined) {
-      await (f.boot as (services: unknown) => MaybePromise<void>)({ ...ctx, ...provided });
-    }
+  const slices = (ctx: CtxOf<NeedsShape> & KernelCtx): Readonly<Record<string, unknown>> => {
     const payloads: Record<string, unknown> = {};
     for (const slice of f.use) {
+      // Erasure seam: each slice was typed against this feature's needs by
+      // feature(); the kernel built `ctx` from those same needs.
       payloads[slice.key] = (slice.resolve as (services: unknown) => unknown)(ctx);
     }
-    return { ...provided, ...provide(tok, payloads as SlicePayloads<F['use']>) };
+    return payloads;
   };
+  const factories: AnyFactories = { ...f.factories, [sliceKey]: slices };
 
-  // Factory seam: plugin()'s inference through the merged boot is erased
-  // here and re-typed to the true shape declared above. feature()'s
-  // signature already enforced NoReservedKeys on the caller's needs.
+  // Factory seam: plugin()'s inference through the erased factory record is
+  // re-typed to the true shape below. feature()'s signature already enforced
+  // NoReservedKeys on the caller's needs and provides.
   const unit = plugin({
     name: f.name,
     actions,
     needs: f.needs as NeedsShape & NoReservedKeys,
-    boot: boot as (ctx: CtxOf<NeedsShape & NoReservedKeys> & KernelCtx) => Promise<ServiceRecord & NoReservedKeys>,
+    provides: factories as ProvidesFactories<NeedsShape, ServiceRecord & NoReservedKeys>,
+    ...(f.boot === undefined
+      ? {}
+      : { boot: f.boot as (services: CtxOf<NeedsShape> & ServiceRecord & KernelCtx) => MaybePromise<void> }),
   });
-  return { ...unit, provides: Object.keys(f.provides) } as unknown as PluginOf<F>;
+  return { ...unit, provides: { ...f.provides, [sliceKey]: handleOf(sliceKey, f.name) } } as unknown as PluginOf<F>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -432,8 +429,11 @@ export function plug<F extends AnyFeature>(f: F): PluginOf<F> {
  */
 export type ServicesBag = Readonly<Record<string, unknown>>;
 
-/** Every handle the features in the tuple provide, merged into one record. */
-export type HandlesIn<T extends readonly AnyFeature[]> = UnionToIntersection<T[number]['provides']>;
+/** Anything with static handles — a feature or a plugin. */
+export type HasProvides = { readonly provides: Readonly<Record<string, AnyHandle>> };
+
+/** Every handle the units in the tuple provide, merged into one record. */
+export type HandlesIn<T extends readonly HasProvides[]> = UnionToIntersection<T[number]['provides']>;
 
 /** Every service value the features in the tuple provide, keyed by wire key. */
 export type ServicesOf<T extends readonly AnyFeature[]> = UnionToIntersection<ProvidedOf<T[number]>>;
@@ -448,13 +448,14 @@ function isHandle(witness: object): witness is AnyHandle {
 }
 
 /**
- * Every handle the features provide, merged — spread it into a gateway
- * feature's `needs` and the kernel hands it every capability. The builder
- * guard then proves the gateway is mounted after every provider.
+ * Every handle the features (and plugins) provide, merged — spread it into
+ * a gateway feature's `needs` and the kernel hands it every capability:
+ * `providesOf([database, cache, ...features])`. The builder guard then
+ * proves the gateway is mounted after every provider.
  */
-export function providesOf<const T extends readonly AnyFeature[]>(features: T): HandlesIn<T> {
+export function providesOf<const T extends readonly HasProvides[]>(units: T): HandlesIn<T> {
   const merged: Record<string, AnyHandle> = {};
-  for (const f of features) Object.assign(merged, f.provides);
+  for (const unit of units) Object.assign(merged, unit.provides);
   // Erasure seam: the merge is built by key at runtime; its type is the
   // intersection of the features' handle records.
   return merged as HandlesIn<T>;
@@ -513,7 +514,9 @@ export function resolveNeeds<N extends NeedsShape>(bag: ServicesBag, needs: N): 
         "Spread providesOf(features) into the gateway's needs and pass servicesOf(ctx, features) to createContext.",
       );
     }
-    resolved[alias] = bag[witness.key];
+    const value = bag[witness.key];
+    // A lazy handle (`handle.lazy`) always receives a `Lazy<T>`, as in hook contexts.
+    resolved[alias] = isLazyWitness(witness) && !isLazy(value) ? lazyOf(value) : value;
   }
   // Erasure seam: resolved by alias at runtime from the handles' wire keys.
   return resolved as CtxOf<HandleEntries<N>>;

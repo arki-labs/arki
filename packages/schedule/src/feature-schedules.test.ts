@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { feature } from '@arki/dot/feature';
-import { defineApp, plugin, provide, service } from '@arki/dot/plugin';
+import { defineApp, plugin, service } from '@arki/dot/plugin';
 
 import type { ScheduleClock, ScheduleService } from './dot.js';
 import { composeSchedules, DurableSchedules, schedule, schedules } from './dot.js';
@@ -55,8 +55,8 @@ async function bootApp(clock: ScheduleClock) {
     },
   };
   const app = await defineApp('digest-app')
-    .use(plugin({ name: 'mailer', boot: () => ({ mailer }) }))
-    .use(plugin({ name: 'ledger', boot: () => ({ ledger }) }))
+    .use(plugin({ name: 'mailer', provides: { mailer: () => mailer } }))
+    .use(plugin({ name: 'ledger', provides: { ledger: () => ledger } }))
     .features([digest, billing])
     .serve(schedule({ clock }))
     .boot();
@@ -198,7 +198,7 @@ describe("schedule({ clock: 'host' })", () => {
   it('fails boot with a coded error for a durable backend', async () => {
     const backend = plugin({
       name: 'durable-backend',
-      boot: () => provide(DurableSchedules, { start: () => Promise.resolve(), stop: () => Promise.resolve() }),
+      provides: { [DurableSchedules.key]: () => ({ start: () => Promise.resolve(), stop: () => Promise.resolve() }) },
     });
 
     await expect(

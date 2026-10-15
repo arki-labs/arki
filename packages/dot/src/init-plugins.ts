@@ -2,7 +2,6 @@ import type {
   CtxOf,
   DotConfigureContext,
   EmptyShape,
-  InferredProvides,
   KernelCtx,
   NeedsShape,
   NoReservedKeys,
@@ -34,6 +33,11 @@ type SchemaCheckedProvides<TServices extends object, TProvides extends ServiceRe
     : TProvides[K];
 };
 
+/** One factory per published key, each checked against the context's service schema. */
+type CheckedFactories<TCtx, TServices extends object, TProvides extends ServiceRecord> = {
+  readonly [K in keyof TProvides]: (ctx: TCtx & KernelCtx) => MaybePromise<SchemaCheckedProvides<TServices, TProvides>[K]>;
+};
+
 type CommonPluginDefinition = {
   readonly name: string;
   readonly version?: string;
@@ -47,7 +51,8 @@ type KeyArrayPluginDefinition<
   TProvides extends ServiceRecord & NoReservedKeys,
 > = CommonPluginDefinition & {
   readonly needs?: TKeys;
-  readonly boot?: (ctx: PickServices<TServices, TKeys> & KernelCtx) => MaybePromise<SchemaCheckedProvides<TServices, TProvides> | void>;
+  readonly provides?: CheckedFactories<PickServices<TServices, TKeys>, TServices, TProvides>;
+  readonly boot?: (ctx: PickServices<TServices, TKeys> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly start?: (ctx: PickServices<TServices, TKeys> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly stop?: (ctx: PickServices<TServices, TKeys> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly dispose?: (ctx: PickServices<TServices, TKeys> & TProvides & KernelCtx) => MaybePromise<void>;
@@ -59,7 +64,8 @@ type WitnessPluginDefinition<
   TProvides extends ServiceRecord & NoReservedKeys,
 > = CommonPluginDefinition & {
   readonly needs: TShape;
-  readonly boot?: (ctx: CtxOf<TShape> & KernelCtx) => MaybePromise<SchemaCheckedProvides<TServices, TProvides> | void>;
+  readonly provides?: CheckedFactories<CtxOf<TShape>, TServices, TProvides>;
+  readonly boot?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly start?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly stop?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly dispose?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
@@ -71,10 +77,10 @@ export type InitPluginsFactory<TServices extends object> = {
     TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
   >(
     def: KeyArrayPluginDefinition<TServices, TKeys, TProvides>,
-  ): Plugin<PickServices<TServices, TKeys>, InferredProvides<TProvides>>;
+  ): Plugin<PickServices<TServices, TKeys>, TProvides>;
   plugin<TShape extends NeedsShape & NoReservedKeys, TProvides extends ServiceRecord & NoReservedKeys = EmptyShape>(
     def: WitnessPluginDefinition<TServices, TShape, TProvides>,
-  ): Plugin<WireNeeds<TShape>, InferredProvides<TProvides>>;
+  ): Plugin<WireNeeds<TShape>, TProvides>;
   needs<const TKeys extends ServiceKeys<TServices>>(...keys: TKeys): WitnessesFor<TServices, TKeys>;
 };
 
@@ -117,6 +123,7 @@ function createPluginFactory<TServices extends object>(): InitPluginsFactory<TSe
         ...(needs === undefined ? {} : { needs }),
         ...(def.actions === undefined ? {} : { actions: def.actions }),
         ...(def.configure === undefined ? {} : { configure: def.configure }),
+        ...(def.provides === undefined ? {} : { provides: def.provides as KernelPluginDefinition['provides'] }),
         ...(def.boot === undefined ? {} : { boot: def.boot as KernelPluginDefinition['boot'] }),
         ...(def.start === undefined ? {} : { start: def.start as KernelPluginDefinition['start'] }),
         ...(def.stop === undefined ? {} : { stop: def.stop as KernelPluginDefinition['stop'] }),

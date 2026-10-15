@@ -288,8 +288,8 @@ export type DurableSchedulerPluginOptions = DurableSchedulerOptions & {
 
 /**
  * Provide the BullMQ durable backend for `@arki/schedule`. Mount it before
- * `schedule({ ..., durable: DurableSchedules })`. Boot only builds the
- * backend; Redis is touched when the schedule plugin starts it.
+ * `schedule({ ..., durable: DurableSchedules })`. Its factory only builds
+ * the backend; Redis is touched when the schedule plugin starts it.
  */
 export function durableScheduler(
   options: DurableSchedulerPluginOptions,
@@ -300,7 +300,7 @@ export function durableScheduler(
     configure(ctx) {
       ctx.declareProvides('durable-scheduler');
     },
-    boot: () => ({ [DURABLE_SCHEDULES_KEY]: createDurableScheduler(options) }),
+    provides: { [DURABLE_SCHEDULES_KEY]: () => createDurableScheduler(options) },
     // The schedule plugin stops the backend first; stop() is idempotent, so
     // this only matters when nothing else stopped it.
     async stop(ctx) {
@@ -318,8 +318,8 @@ export type QueuePluginOptions = QueueClientOptions & {
 
 /**
  * Provide the `queue` client features enqueue with. Mount it with `.use()`,
- * before `.features()`. Boot opens no connection: each job's BullMQ queue
- * opens on its first `enqueue`. Stop closes them.
+ * before `.features()`. Its factory opens no connection: each job's BullMQ
+ * queue opens on its first `enqueue`. Stop closes them.
  */
 export function queue(options: QueuePluginOptions): Plugin<EmptyShape, { readonly queue: QueueClient }> {
   let handle: QueueClientHandle | undefined;
@@ -334,9 +334,11 @@ export function queue(options: QueuePluginOptions): Plugin<EmptyShape, { readonl
       });
       ctx.declareProvides('queue-client');
     },
-    boot: () => {
-      handle = createQueueClient(options);
-      return { queue: handle.client };
+    provides: {
+      queue: () => {
+        handle = createQueueClient(options);
+        return handle.client;
+      },
     },
     async stop() {
       await handle?.close();

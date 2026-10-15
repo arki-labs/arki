@@ -15,7 +15,7 @@
  *
  *   const myPlugin = plugin({
  *     name: 'counter',
- *     boot: () => ({ counter: { value: 0 } }),
+ *     provides: { counter: () => ({ value: 0 }) },
  *   });
  *
  *   it('publishes a counter service', async () => {
@@ -26,8 +26,9 @@
  */
 
 import type { DotApp, DotAppBuilder } from './define-app.js';
-import type { AnyPlugin, EmptyShape, Plugin, ServiceRecord, Token } from './plugin-contract.js';
+import type { AnyPlugin, EmptyShape, Handle, Plugin, ServiceRecord, Token } from './plugin-contract.js';
 import { defineApp } from './define-app.js';
+import { handleOf, plugin as definePlugin } from './plugin-contract.js';
 
 export type TestAppOptions = {
   /** App name used in the manifest. Defaults to `'test-app'`. */
@@ -178,13 +179,16 @@ function makeTestPluginBuilder(state: TestPluginState): TestPluginBuilder<Servic
   const bootApp = async (): Promise<DotApp<ServiceRecord>> => {
     const plugins: AnyPlugin[] = [];
     if (Object.keys(state.fakes).length > 0) {
-      const fakes = { ...state.fakes };
+      const name = `test:fakes(${state.plugin.name})`;
+      const fakes = Object.entries(state.fakes);
       plugins.push({
-        name: `test:fakes(${state.plugin.name})`,
+        name,
         needs: {},
         actions: [],
         renames: {},
-        hooks: { boot: () => fakes },
+        provides: Object.fromEntries(fakes.map(([key]) => [key, handleOf(key, name)])),
+        factories: Object.fromEntries(fakes.map(([key, value]) => [key, () => value])),
+        hooks: {},
       });
     }
     plugins.push(state.plugin);
@@ -209,4 +213,22 @@ function makeTestPluginBuilder(state: TestPluginState): TestPluginBuilder<Servic
     },
   };
   return impl as TestPluginBuilder<ServiceRecord, ServiceRecord>;
+}
+
+/**
+ * A plugin that provides one fake under a real handle's wire key — for
+ * app-level tests that mount the real features against fakes:
+ *
+ * ```ts
+ * defineApp('test').use(fake(database.provides.db, db)).features([...features])
+ * ```
+ *
+ * The fake is type-checked against the handle: a wrong-shaped value fails
+ * at the call site. The plugin is named `fake:<key>`.
+ */
+export function fake<T, K extends string>(handle: Handle<T, K>, value: NoInfer<T>): Plugin<EmptyShape, Readonly<Record<K, T>>> {
+  // Erasure seam: the factory record is built under `handle.key` at
+  // runtime; its type is exactly `{ [handle.key]: T }`.
+  const provides = { [handle.key]: () => value } as Readonly<Record<K, () => T>>;
+  return definePlugin({ name: `fake:${handle.key}`, provides });
 }

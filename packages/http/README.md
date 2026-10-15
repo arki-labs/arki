@@ -17,7 +17,7 @@ A route is split in two:
   a stable id. Registerable in the DOT manifest (sync `configure`),
   renderable as OpenAPI without booting, and the source of the handler's
   inferred signature.
-- **Binding** — the handler, attached inside a plugin's `boot` where the
+- **Binding** — the handler, attached inside a plugin's `provides` factory (or `boot`) where the
   plugin's typed needs are already injected. Handlers close over real
   services; no service locator exists.
 
@@ -95,7 +95,7 @@ route table, then feature routes:
 export const AdminRoutes = token<RouteBundle>()('admin.routes');
 
 defineApp('shop-api')
-  .use(adminPlugin) // boot: () => provide(AdminRoutes, routes().bind(...))
+  .use(adminPlugin) // provides: { [AdminRoutes.key]: () => routes().bind(...) }
   .features([orders])
   .serve(http({ port: 3000, bundles: [AdminRoutes] }));
 ```
@@ -122,7 +122,7 @@ later derivers) see typed. A deriver that throws `HttpError` is the whole
 ```ts
 import { derive, HttpError, HTTP_ERROR_CODES } from '@arki/http';
 
-// inside boot — `auth` is an injected singleton
+// inside a `provides` factory — `auth` is an injected singleton
 const withPrincipal = derive('principal', async req => {
   const p = await auth.verify(req.headers.get('authorization'));
   if (!p) throw new HttpError(401, HTTP_ERROR_CODES.unauthorized, 'missing or invalid credentials');

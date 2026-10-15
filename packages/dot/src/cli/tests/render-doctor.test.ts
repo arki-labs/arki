@@ -18,7 +18,7 @@ const FROZEN_NOW = () => new Date('2026-01-01T00:00:00.000Z');
 
 describe('buildDoctorEnvelope', () => {
   it('emits a DotCliEnvelope with all 5 diagnostics arrays on success', async () => {
-    const p = plugin({ name: 'p', boot: () => ({}) });
+    const p = plugin({ name: 'p', boot: () => { /* side effects only */ } });
     const app = await testApp([p]).boot();
     const envelope = buildDoctorEnvelope({ diagnostics: app.diagnostics }, { json: true, now: FROZEN_NOW });
 
@@ -37,7 +37,7 @@ describe('buildDoctorEnvelope', () => {
   });
 
   it('clean-boot app yields status=success with no error-severity issues', async () => {
-    const p = plugin({ name: 'p', boot: () => ({}) });
+    const p = plugin({ name: 'p', boot: () => { /* side effects only */ } });
     const app = await testApp([p]).boot();
     const envelope = buildDoctorEnvelope({ diagnostics: app.diagnostics }, { json: true, now: FROZEN_NOW });
     expect(envelope.status).toBe('success');
@@ -74,7 +74,7 @@ describe('buildDoctorEnvelope', () => {
 
 describe('renderDoctor', () => {
   it('JSON mode writes a parseable envelope', async () => {
-    const p = plugin({ name: 'p', boot: () => ({}) });
+    const p = plugin({ name: 'p', boot: () => { /* side effects only */ } });
     const app = await testApp([p]).boot();
 
     let written = '';
@@ -92,7 +92,7 @@ describe('renderDoctor', () => {
   });
 
   it('text mode includes per-plugin status markers', async () => {
-    const p = plugin({ name: 'p', boot: () => ({}) });
+    const p = plugin({ name: 'p', boot: () => { /* side effects only */ } });
     const app = await testApp([p]).boot();
 
     let written = '';
@@ -113,7 +113,7 @@ describe('runDoctor', () => {
     const disposeSpy = vi.fn();
     const p = plugin({
       name: 'p',
-      boot: () => ({}),
+      boot: () => { /* side effects only */ },
       dispose: () => {
         disposeSpy();
       },
@@ -136,7 +136,7 @@ describe('runDoctor', () => {
     const disposeSpy = vi.fn();
     const p = plugin({
       name: 'p',
-      boot: () => ({}),
+      boot: () => { /* side effects only */ },
       dispose: () => {
         disposeSpy();
       },

@@ -52,13 +52,15 @@ Terminal states require a fresh `defineApp(...)` to retry.
 - Returning a Promise is a contract violation. The kernel throws
   `DotLifecycleError` with code `DOT_LIFECYCLE_E001`.
 
-### `boot` — async open
+### `boot` — async side effects
 
-- Runs **async** in declaration order.
-- Opens resources, initialises clients, validates required runtime
-  configuration.
-- Publishes services into `app.services` via the return value
-  (a plain record of wire-keyed services).
+- Runs **async** in declaration order, after the plugin's `provides`
+  factories (one per key, awaited in key order).
+- Side effects only: seed, warm up, validate required runtime
+  configuration. It returns nothing; a value-returning `boot` does not
+  compile.
+- Services are published by `provides` factories into `app.services`.
+  `boot` sees the needs plus the plugin's own provided values.
 - Downstream plugins receive them destructured in their hook context,
   under the local aliases declared in `needs`.
 
@@ -102,15 +104,17 @@ A plugin whose `boot` opens partial resources before throwing **must clean
 those up itself**:
 
 ```ts
-async boot() {
-  const a = await openA();
-  try {
-    const b = await openB();
-    return { services: { a, b } };
-  } catch (err) {
-    await a.close(); // clean up our own partial state
-    throw err;
-  }
+provides: {
+  pair: async () => {
+    const a = await openA();
+    try {
+      const b = await openB();
+      return { a, b };
+    } catch (err) {
+      await a.close(); // clean up our own partial state
+      throw err;
+    }
+  },
 }
 ```
 
@@ -168,12 +172,12 @@ The kernel emits stable, machine-readable error codes:
 | `DOT_LIFECYCLE_E007`  | Reuse after `dispose()`.                                    |
 | `DOT_LIFECYCLE_E008`  | Reuse after a failed lifecycle.                             |
 | `DOT_LIFECYCLE_E011`  | Plugin registered twice.                                       |
-| `DOT_LIFECYCLE_E012`  | A `needs` entry has no provider among earlier plugins.         |
+| `DOT_LIFECYCLE_E012`  | A `needs` entry no plugin declares (erased or JS graphs, dynamic http bundle tokens) — at boot. |
 | `DOT_LIFECYCLE_E013`  | A published wire key collides with an earlier provider.     |
 | `DOT_LIFECYCLE_E014`  | A service key uses the reserved `$` (kernel) prefix.        |
 | `DOT_LIFECYCLE_E015`  | A hook exceeded the `hookTimeoutMs` watchdog budget.        |
-| `DOT_LIFECYCLE_E019`  | Feature capabilities form a ring (printed in order) — at `configure()`. |
-| `DOT_LIFECYCLE_E020`  | A feature's capability provider is mounted after it — at `configure()`. |
+| `DOT_LIFECYCLE_E019`  | Plugin needs and provides form a ring through any plugins (printed in order) — at `configure()`. |
+| `DOT_LIFECYCLE_E020`  | A provider is mounted after its consumer — at `configure()`. The fix line names the role: "Move X before Y in .features([...])." for a feature provider, "Mount X with .use() before Y." for any other plugin. |
 
 `TS7022` ("implicitly has type 'any' because it … is referenced directly or
 indirectly in its own initializer") on a `feature()` const is the compile-time

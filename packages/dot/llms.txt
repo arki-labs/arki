@@ -12,7 +12,7 @@
 
 ## Plugins and lifecycle
 
-- [Plugin authoring](docs/plugin-authoring.md): Write a `DotPlugin` — anatomy, hooks, DI, manifest contribution
+- [Plugin authoring](docs/plugin-authoring.md): Write a `DotPlugin` — anatomy, `provides` factories, typed handles (`database.provides.db`), `fake()`, DI, manifest contribution
 - [Lifecycle](docs/lifecycle.md): The 5-hook contract — state machine, failure ordering, idempotency rules, error codes
 - [Adapter authoring](docs/adapter-authoring.md): Expose a package as a DOT plugin via a `./dot` subpath export
 

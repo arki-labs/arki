@@ -12,7 +12,7 @@ import { z } from 'zod';
 
 import { defineApp, rename } from '@arki/dot';
 import { feature } from '@arki/dot/feature';
-import { plugin, provide, service, token } from '@arki/dot/plugin';
+import { plugin, service, token } from '@arki/dot/plugin';
 
 import type { OrderId } from './test-support.js';
 import { journal, journalHandlers, journalWorker } from './dot.js';
@@ -83,7 +83,7 @@ const neverBooted = <T>(): T => {
 };
 
 /** The app's `db` plugin: it publishes the root database under the `db` key. */
-const dbPlugin = () => plugin({ name: 'db', boot: () => ({ db }) });
+const dbPlugin = () => plugin({ name: 'db', provides: { db: () => db } });
 
 const placeOrder = j.command(
   'placeOrder',
@@ -166,7 +166,7 @@ describe('journal(...) in direct mode', () => {
   });
 
   it('refuses a transaction or another database type as `db` at compile time, because the worker must see committed data', () => {
-    const withTx = defineApp('tx').use(plugin({ name: 'db', boot: () => ({ db: neverBooted<AppTx>() }) }));
+    const withTx = defineApp('tx').use(plugin({ name: 'db', provides: { db: () => neverBooted<AppTx>() } }));
     // @ts-expect-error -- a transaction has `rollback`, so it is not a root database: effects would run before the outer commit.
     withTx.use(journal({ journal: j.compose({ tables }) }));
     // @ts-expect-error -- the same holds when the journal names the app's database type.
@@ -385,16 +385,21 @@ describe('journal({ j, tables }) with features', () => {
     /** One emitter plugin and one feature that wires it to its own `emitter` need. */
     const emitterFeature = <Name extends 'orders' | 'billing'>(name: Name) => {
       const EmitterToken = token<Emitter>()(`${name}.emitter`);
-      const emitter = plugin({
-        name: `${name}-emitter`,
-        boot: () =>
-          provide(EmitterToken, {
-            emit: id => {
-              heard[name].push(id);
-              told[name].open();
-            },
-          }),
-      });
+      // The handle-first way to publish under a per-instance key: provide locally, rename at mount.
+      const emitter = rename(
+        plugin({
+          name: `${name}-emitter`,
+          provides: {
+            emitter: (): Emitter => ({
+              emit: id => {
+                heard[name].push(id);
+                told[name].open();
+              },
+            }),
+          },
+        }),
+        { emitter: EmitterToken.key },
+      );
       const owner = feature(name, {
         needs: { emitter: EmitterToken },
         use: [journalHandlers({ effects: [announce(name)] })],

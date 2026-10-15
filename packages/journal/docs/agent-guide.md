@@ -312,7 +312,7 @@ These look odd. Each one is needed.
 
 - `ownHandler` with `Object.hasOwn` in `src/handlers.ts`: an event type named `toString` must not find a handler on the prototype.
 - `bindEffect` in `src/handlers.ts` runs for every effect, also for one without needs, and a worker runs it again on every drain for a journal composed with `services: 'worker'`: it is the one place where a need gets its service and where a missing service is caught.
-- `need<T>()` is the journal's own marker, not Dot's `service<T>()`: the core must load and type-check without `@arki/dot`, and Dot keeps the key of its marker private.
+- `need<T>()` is the journal's own marker, not Dot's `service<T>()` or a plugin handle such as `mailerPlugin.provides.mailer`: the core must load and type-check without `@arki/dot`, and Dot keeps the key of its marker private.
 - `const E` on `compose` (`src/api.ts`) and `journalHandlers` (`src/dot.ts`): without it TypeScript reads `[plainEffect, effectWithNeeds]` as a list of plain effects, and a missing service is no longer a compile error.
 - The module-scoped `WeakMap` in `src/transaction-guard.ts`: two journals on one transaction share its savepoint stack, so they must share this guard.
 - `assertRoundTrips` in `src/storage.ts` uses `JSON.stringify`, not `structuredClone`: it checks what JSON storage does to the value.

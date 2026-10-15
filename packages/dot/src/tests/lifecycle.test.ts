@@ -30,7 +30,6 @@ function loggingPlugin(name: string, calls: CallLog[], overrides: { failIn?: 'bo
     boot: () => {
       calls.push({ hook: 'boot', plugin: name });
       if (overrides.failIn === 'boot') throw new Error(`boom-${name}`);
-      return {};
     },
     start: () => {
       calls.push({ hook: 'start', plugin: name });
@@ -169,7 +168,6 @@ describe('DOT lifecycle', () => {
       name: 'p',
       boot: () => {
         bootCalls += 1;
-        return {};
       },
     });
     const app = await defineApp('test').use(p).boot();
@@ -194,7 +192,6 @@ describe('DOT lifecycle', () => {
       boot: async () => {
         bootCalls += 1;
         await bootGate;
-        return {};
       },
     });
 
@@ -230,7 +227,7 @@ describe('DOT lifecycle', () => {
     let stopCalls = 0;
     const p = plugin({
       name: 'p',
-      boot: () => ({}),
+      boot: () => { /* side effects only */ },
       stop: () => {
         stopCalls += 1;
       },
@@ -263,7 +260,7 @@ describe('DOT lifecycle', () => {
   });
 
   it('boot() after dispose throws DotLifecycleError with ReuseAfterDispose code', async () => {
-    const p = plugin({ name: 'p', boot: () => ({}) });
+    const p = plugin({ name: 'p', boot: () => { /* side effects only */ } });
     const app = await defineApp('test').use(p).boot();
     await app.dispose();
     await expect(app.start()).rejects.toMatchObject({
@@ -279,7 +276,6 @@ describe('DOT lifecycle', () => {
       needs: { db: service<{ query(): void }>() },
       boot: ({ db }) => {
         void db;
-        return {};
       },
     });
 
@@ -296,16 +292,16 @@ describe('DOT lifecycle', () => {
     expect(calls.filter(c => c.hook === 'dispose')).toEqual([{ hook: 'dispose', plugin: 'a' }]);
   });
 
-  it('mutual needs between two plugins (a cycle) surface the cycle hint in the E012 error', async () => {
+  it('mutual needs between two plugins are a ring (E019) at configure, before anything boots', async () => {
     const a = plugin({
       name: 'a',
       needs: { beta: service<number>() },
-      boot: ({ beta }) => ({ alpha: beta + 1 }),
+      provides: { alpha: ({ beta }) => beta + 1 },
     });
     const b = plugin({
       name: 'b',
       needs: { alpha: service<number>() },
-      boot: ({ alpha }) => ({ beta: alpha + 1 }),
+      provides: { beta: ({ alpha }) => alpha + 1 },
     });
 
     // No ordering of these two plugins typechecks — the cycle is unrepresentable
@@ -318,18 +314,21 @@ describe('DOT lifecycle', () => {
       (e: unknown) => e,
     );
     expect(error).toBeInstanceOf(DotLifecycleError);
-    expect((error as DotLifecycleError).code).toBe(DotLifecycleErrorCode.UnsatisfiedNeed);
-    expect((error as DotLifecycleError).message).toMatch(/flow strictly forward/);
-    expect((error as DotLifecycleError).message).toMatch(/cycle: merge them or extract the shared piece/);
+    // Adapters declare their provides statically, so the kernel sees the ring
+    // without booting either plugin.
+    expect((error as DotLifecycleError).code).toBe(DotLifecycleErrorCode.CapabilityRing);
+    expect((error as DotLifecycleError).message).toMatch(/a needs beta ← b needs alpha ← a/);
   });
 
   it('service collision fails boot with ServiceCollision and rolls back (incl. the colliding plugin)', async () => {
     const calls: CallLog[] = [];
     const first = plugin({
       name: 'first',
-      boot: () => {
-        calls.push({ hook: 'boot', plugin: 'first' });
-        return { db: { from: 'first' } };
+      provides: {
+        db: () => {
+          calls.push({ hook: 'boot', plugin: 'first' });
+          return { from: 'first' };
+        },
       },
       dispose: () => {
         calls.push({ hook: 'dispose', plugin: 'first' });
@@ -337,9 +336,11 @@ describe('DOT lifecycle', () => {
     });
     const second = plugin({
       name: 'second',
-      boot: () => {
-        calls.push({ hook: 'boot', plugin: 'second' });
-        return { db: { from: 'second' } };
+      provides: {
+        db: () => {
+          calls.push({ hook: 'boot', plugin: 'second' });
+          return { from: 'second' };
+        },
       },
       dispose: () => {
         calls.push({ hook: 'dispose', plugin: 'second' });
@@ -389,7 +390,6 @@ describe('lifecycle transition serialization', () => {
       name: 'slow',
       boot: () => {
         order.push('boot');
-        return {};
       },
       start: async () => {
         order.push('start:begin');
@@ -440,7 +440,7 @@ describe('lifecycle transition serialization', () => {
     const gate = deferred();
     const p = plugin({
       name: 'p',
-      boot: () => ({}),
+      boot: () => { /* side effects only */ },
       dispose: async () => {
         entered.resolve();
         await gate.promise;
@@ -473,7 +473,6 @@ describe('hookTimeoutMs watchdog (E015)', () => {
       name: 'hung',
       boot: async () => {
         await never();
-        return {};
       },
     });
 
@@ -509,12 +508,12 @@ describe('hookTimeoutMs watchdog (E015)', () => {
     const order: string[] = [];
     const hung = plugin({
       name: 'hung-dispose',
-      boot: () => ({}),
+      boot: () => { /* side effects only */ },
       dispose: () => never(),
     });
     const tidy = plugin({
       name: 'tidy',
-      boot: () => ({}),
+      boot: () => { /* side effects only */ },
       dispose: () => void order.push('tidy'),
     });
 
@@ -533,9 +532,11 @@ describe('hookTimeoutMs watchdog (E015)', () => {
   it('hooks under budget are untouched by the watchdog', async () => {
     const quick = plugin({
       name: 'quick',
-      boot: async () => {
-        await new Promise(resolve => setTimeout(resolve, 5));
-        return { ok: true };
+      provides: {
+        ok: async () => {
+          await new Promise(resolve => setTimeout(resolve, 5));
+          return true;
+        },
       },
     });
     const app = await defineApp('watchdog-ok', { hookTimeoutMs: 1000 }).use(quick).boot();
@@ -551,7 +552,7 @@ describe('reserved $ keys (E014)', () => {
     const bad = plugin({
       name: 'bad',
       // @ts-expect-error — $-prefixed provide keys are reserved for kernel context
-      boot: () => ({ $app: 42 }),
+      provides: { $app: () => 42 },
     });
 
     await expect(defineApp('reserved-publish').use(good).use(bad).boot()).rejects.toMatchObject({
@@ -578,7 +579,7 @@ describe('reserved $ keys (E014)', () => {
   });
 
   it('rename() to a $-prefixed wire key throws ReservedServiceKey at construction', () => {
-    const provider = plugin({ name: 'db', boot: () => ({ db: 1 }) });
+    const provider = plugin({ name: 'db', provides: { db: () => 1 } });
     const renamed = rename(provider, { db: '$db' });
 
     let thrown: unknown;

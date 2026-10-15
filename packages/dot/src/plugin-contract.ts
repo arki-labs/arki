@@ -2,10 +2,11 @@
  * Public plugin contract for the DOT kernel (v2).
  *
  * A plugin declares what it **needs** as a shape of type witnesses and
- * publishes what it **provides** from its `boot` hook. The kernel wires
- * services by key, injects them into hook contexts under the plugin's local
- * aliases, and fails loudly (coded errors) on unsatisfied needs or key
- * collisions.
+ * what it **provides** as one factory per published key. The keys are
+ * static, so `plugin.provides` holds a typed handle per key before
+ * anything boots. The kernel wires services by key, injects them into
+ * hook contexts under the plugin's local aliases, and fails loudly (coded
+ * errors) on unsatisfied needs or key collisions.
  *
  * Design constraints:
  *
@@ -13,7 +14,7 @@
  *    throws {@link DotLifecycleError} with code `DOT_LIFECYCLE_E001`.
  *  - Declaration order IS boot order. The app builder's type-level guard
  *    makes out-of-order composition a compile error; the kernel re-validates
- *    at runtime for erased/dynamic composition.
+ *    at configure time from the static `provides` handles.
  *  - `stop` and `dispose` run in reverse declaration order and continue
  *    through individual plugin failures, reporting an aggregate error.
  */
@@ -100,9 +101,8 @@ export function token<T>(): <K extends string>(key: K) => Token<T, K> {
 }
 
 /**
- * Publish a value under a token's wire key. Returns a record typed by the
- * token's literal key, so `boot: () => provide(Db, handle)` infers
- * `TProvides = { 'arki.db': DbHandle }`.
+ * A record holding one value under a token's wire key, typed by the
+ * token's literal key: `provide(Db, handle)` is `{ 'arki.db': DbHandle }`.
  */
 export function provide<T, K extends string>(tok: Token<T, K>, value: T): { [P in K]: T } {
   // Safe by construction: the computed key is exactly `tok.key: K`.
@@ -116,15 +116,15 @@ export type ServiceRecord = Record<string, unknown>;
 export const LazyTag: unique symbol = Symbol('dot.lazy');
 
 /**
- * A lazily-initialized service handle. Publish one from `boot` to defer an
- * expensive open until first use:
+ * A lazily-initialized service handle. Return one from a `provides`
+ * factory to defer an expensive open until first use:
  *
  * ```ts
- * boot: () => ({ db: lazy(() => openDb(), { dispose: db => db.close() }) })
+ * provides: { db: () => lazy(() => openDb(), { dispose: db => db.close() }) }
  * ```
  *
  * Laziness is visible in the type — consumers declare
- * `needs: { db: service<Lazy<Db>>() }` and call `await db.get()`. The
+ * `needs: { db: dbPlugin.provides.db }` and call `await db.get()`. The
  * kernel auto-disposes initialized handles in reverse declaration order
  * during `dispose` (and boot rollback), even when the publishing plugin has
  * no `dispose` hook. A handle that was never `get()`ed never initializes
@@ -331,7 +331,7 @@ export type DotConfigureContext = {
   /**
    * Register a service this plugin publishes, for manifest/diagnostics
    * purposes. Registration is metadata-only — the actual service instance
-   * is returned from the `boot` hook.
+   * is returned from its `provides` factory.
    */
   registerService(name: string, kind: ServiceKind): void;
   /** Register an action this plugin contributes at an app boundary. */
@@ -358,6 +358,52 @@ export type DotLoggingContext = {
 export type DotLoggingHandle = {
   close(): Promise<void>;
 };
+
+/**
+ * A capability handle: a token on the wire key `K`, stamped with the name
+ * of the unit that provides it. `plugin()` and `feature()` mint one per
+ * `provides` key, so a consumer names the capability in its `needs`
+ * (`needs: { db: database.provides.db }`) and never restates the type —
+ * the Drizzle `references(() => table.column)` of services. Identity is
+ * the wire key, not the object: the kernel resolves by `key`.
+ */
+export type Handle<T, K extends string, O extends string = string> = Token<T, K> & {
+  readonly provider: O;
+  /** The lazy-lifting form of the same handle (the `service.lazy` of handles). */
+  readonly lazy: LazyHandle<T, K, O>;
+};
+
+/**
+ * A handle that always delivers a `Lazy<T>`, whether the provider is eager
+ * or lazy — `needs: { db: database.provides.db.lazy }`.
+ */
+export type LazyHandle<T, K extends string, O extends string = string> = Token<T, K> &
+  LazyService<T> & { readonly provider: O };
+
+/** One handle per published key — what `plugin.provides` holds. */
+export type Handles<TProvides extends ServiceRecord, O extends string = string> = {
+  readonly [K in keyof TProvides & string]: Handle<TProvides[K], K, O>;
+};
+
+/** The value type behind a handle — for the one alias an app names (`type Db = Provided<typeof database.provides.db>`). */
+export type Provided<H> = H extends Service<infer T> ? T : never;
+
+/** An erased handle — what helpers that only read `key` / `provider` accept. */
+export type AnyHandle = Token<unknown> & { readonly provider: string };
+
+/** Mint the handle for wire key `key` provided by `provider` (and its lazy form). */
+export function handleOf(key: string, provider: string): Handle<unknown, string> {
+  const tok = token<unknown>()(key);
+  return { ...tok, provider, lazy: { ...tok, provider, lazy: true } };
+}
+
+/** One factory per published key. Each gets the needs + kernel keys; its key is the publish key. */
+export type ProvidesFactories<TNeeds extends NeedsShape, TProvides extends ServiceRecord> = {
+  readonly [K in keyof TProvides]: (services: CtxOf<TNeeds> & KernelCtx) => MaybePromise<TProvides[K]>;
+};
+
+/** An erased factory record — what the kernel runs at boot. */
+export type AnyFactories = Readonly<Record<string, (ctx: never) => unknown>>;
 
 declare const NeedsSym: unique symbol;
 declare const ProvidesSym: unique symbol;
@@ -393,13 +439,14 @@ export type Plugin<TNeeds extends ServiceRecord = ServiceRecord, TProvides exten
    */
   readonly role?: DotPluginRole;
   /**
-   * The publish keys this plugin provides, known before boot. A feature
-   * fills it from its `provides` factories, so the kernel can check
-   * ordering and rings at configure time and `dot explain` can draw the
-   * edges without booting. Absent for `plugin()` units — what they publish
-   * is known only once `boot` returns.
+   * One typed handle per published wire key, known before boot. The kernel
+   * checks ordering and rings at configure time from these keys, and
+   * `dot explain` draws the edges without booting. `rename()` rebuilds
+   * them on the new keys.
    */
-  readonly provides?: readonly string[];
+  readonly provides: Handles<TProvides>;
+  /** The `provides` factories, keyed by publish key (before renames). The kernel runs them in key order at boot. */
+  readonly factories: AnyFactories;
   /**
    * The logging slot. At most one plugin per app fills it. The kernel calls
    * the factory before its first lifecycle record and closes the handle after
@@ -408,7 +455,7 @@ export type Plugin<TNeeds extends ServiceRecord = ServiceRecord, TProvides exten
   readonly logging?: (ctx: DotLoggingContext) => DotLoggingHandle;
   readonly hooks: {
     readonly configure?: (ctx: DotConfigureContext) => void;
-    readonly boot?: (ctx: never) => MaybePromise<ServiceRecord | void>;
+    readonly boot?: (ctx: never) => MaybePromise<void>;
     readonly start?: (ctx: never) => MaybePromise<void>;
     readonly stop?: (ctx: never) => MaybePromise<void>;
     readonly dispose?: (ctx: never) => MaybePromise<void>;
@@ -429,9 +476,13 @@ export type AnyPlugin = Plugin<ServiceRecord, ServiceRecord>;
  * Author a DOT plugin.
  *
  * - `TShape` is inferred from the `needs` object literal.
- * - `TProvides` is inferred from `boot`'s return type — no generic argument.
- * - `boot({ db, log, $app })` destructures typed services under the local
- *   aliases declared in `needs`, plus the `$`-prefixed kernel keys.
+ * - `TProvides` is inferred from the `provides` factories — no generic
+ *   argument. Each factory gets the needs (under their local aliases) plus
+ *   the `$`-prefixed kernel keys; it may be async. The kernel runs them in
+ *   key order at boot.
+ * - `boot` is side effects only: it runs after the factories and sees their
+ *   values. Returning a value from it is a compile error — publish through
+ *   `provides`.
  * - `start` / `stop` / `dispose` additionally receive the plugin's own
  *   provides. Reverse-order teardown guarantees needs are still alive in
  *   `dispose`.
@@ -440,27 +491,15 @@ export type AnyPlugin = Plugin<ServiceRecord, ServiceRecord>;
  * ```ts
  * export const billing = plugin({
  *   name: 'billing',
- *   needs: { db: service<Db>(), log: service<Logger>() },
- *   async boot({ db, log }) {
- *     return { billing: new BillingService(db, log) };
- *   },
+ *   needs: { db: database.provides.db },
+ *   provides: { billing: ({ db }) => new BillingService(db) },
  *   async dispose({ billing }) {
  *     await billing.flush();
  *   },
  * });
+ * // billing.provides.billing is a typed handle, before anything boots.
  * ```
  */
-/**
- * A `boot` that returns `void` gives `TProvides` no inference candidate,
- * and TypeScript then substitutes the CONSTRAINT (`ServiceRecord & …`,
- * whose `keyof` is `string`) rather than the declared default. That wide
- * record would poison the app builder's collision check for every later
- * `.use()` — `keyof TAvail & string` is never empty. Detect the fallback
- * by its tell (a full string index signature — no `plugin()`-authored
- * provides record has one) and collapse it to "provides nothing".
- */
-export type InferredProvides<TP extends ServiceRecord> = string extends keyof TP ? EmptyShape : TP;
-
 export function plugin<
   TShape extends NeedsShape & NoReservedKeys = EmptyShape,
   TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
@@ -472,17 +511,27 @@ export function plugin<
   /** Fill the logging slot (see {@link Plugin.logging}). Called by the kernel, never at import. */
   readonly logging?: (ctx: DotLoggingContext) => DotLoggingHandle;
   readonly configure?: (ctx: DotConfigureContext) => void;
-  readonly boot?: (ctx: CtxOf<TShape> & KernelCtx) => MaybePromise<TProvides | void>;
+  /** One factory per published key. Each gets the needs + kernel keys. Keys are the publish keys. */
+  readonly provides?: ProvidesFactories<TShape, TProvides>;
+  /** Side effects only. Runs after the factories and sees their values. */
+  readonly boot?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly start?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly stop?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly dispose?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
-}): Plugin<WireNeeds<TShape>, InferredProvides<TProvides>> {
+}): Plugin<WireNeeds<TShape>, TProvides> {
+  const factories: AnyFactories = def.provides ?? {};
+  const handles: Record<string, AnyHandle> = {};
+  for (const key of Object.keys(factories)) handles[key] = handleOf(key, def.name);
   return {
     name: def.name,
     ...(def.version === undefined ? {} : { version: def.version }),
     needs: def.needs ?? {},
     actions: def.actions ?? [],
     renames: {},
+    // Erasure seam: the record is built by key at runtime; its type comes
+    // from the factory returns that `plugin()` inferred.
+    provides: handles as Handles<TProvides>,
+    factories,
     ...(def.logging === undefined ? {} : { logging: def.logging }),
     hooks: {
       ...(def.configure === undefined ? {} : { configure: def.configure }),
@@ -505,6 +554,12 @@ export type RenamedProvides<TP, M> = {
  * accordingly — the way to mount a second instance of an adapter without
  * a key collision. Renames compose: renaming an already-renamed key
  * rewrites the earlier entry.
+ *
+ * The returned plugin's `provides` handles are rebuilt on the new keys and
+ * name, so `rename(...).provides.reportsDb` is the handle to reference. A
+ * handle taken from the object before the rename keeps the old key — the
+ * builder guard reports it missing; reference the handle of the object you
+ * mount.
  */
 export function rename<
   TN extends ServiceRecord,
@@ -512,16 +567,24 @@ export function rename<
   const M extends { readonly [K in keyof TP]?: string },
 >(p: Plugin<TN, TP>, map: M, newName?: string): Plugin<TN, RenamedProvides<TP, M>> {
   const renames: Record<string, string> = { ...p.renames };
-  for (const [wireKey, next] of Object.entries(map)) {
+  const entries: Readonly<Record<string, string | undefined>> = map;
+  for (const [wireKey, next] of Object.entries(entries)) {
     if (typeof next !== 'string') continue;
     // If `wireKey` is itself the *result* of an earlier rename, rewrite that
     // entry (compose); otherwise it is a local publish key.
     const localKey = Object.entries(renames).find(([, w]) => w === wireKey)?.[0] ?? wireKey;
     renames[localKey] = next;
   }
-  // Phantom-only cast: runtime fields are unchanged except `renames`/`name`;
-  // only the [ProvidesSym] carrier retypes.
-  return { ...p, name: newName ?? p.name, renames } as Plugin<TN, RenamedProvides<TP, M>>;
+  const name = newName ?? p.name;
+  const handles: Record<string, AnyHandle> = {};
+  for (const wireKey of Object.keys(p.provides)) {
+    const next = entries[wireKey];
+    const key = typeof next === 'string' ? next : wireKey;
+    handles[key] = handleOf(key, name);
+  }
+  // Phantom-only cast: the handles are rebuilt by key at runtime; only the
+  // [ProvidesSym] carrier and the handle record retype.
+  return { ...p, name, renames, provides: handles } as Plugin<TN, RenamedProvides<TP, M>>;
 }
 
 /**

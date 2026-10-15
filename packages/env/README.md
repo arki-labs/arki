@@ -70,6 +70,8 @@ const env = defineEnv({
 `@arki/env` ships an optional `@arki/env/dot` adapter for the
 [`@arki/dot`](https://www.npmjs.com/package/@arki/dot) framework.
 
+- The plugin publishes `env` through `provides`. Consumers write
+  `needs: { env: envPlugin.provides.env }`.
 - See `packages/dot/docs/` in the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
   package for plugin authoring, lifecycle, diagnostics, and the
   [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).

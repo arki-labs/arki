@@ -19,7 +19,7 @@ function syntheticApp() {
     configure: ctx => {
       ctx.registerService('db', 'db');
     },
-    boot: () => ({ db: { name: 'primary' } }),
+    provides: { db: () => ({ name: 'primary' }) },
   });
   const api = plugin({
     name: 'api',

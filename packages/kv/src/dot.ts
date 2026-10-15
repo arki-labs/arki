@@ -1,9 +1,10 @@
 /**
  * DOT adapter for `@arki/kv`.
  *
- * Wraps `KV` construction as a DOT plugin. The plugin opens a Redis-backed
- * KV client in `boot`, publishes it as `services.kv`, and closes the client
- * in `dispose` (reverse declaration order).
+ * Wraps `KV` construction as a DOT plugin. The plugin's `kv` factory opens a
+ * Redis-backed KV client at boot, publishes it as `services.kv`, and closes
+ * the client in `dispose` (reverse declaration order). `cache.provides.kv`
+ * is the typed handle consumers name in their `needs`.
  *
  * @example
  * ```ts
@@ -90,19 +91,20 @@ export function kv(options: Lazy<KvDotOptions> = {}): Plugin<EmptyShape, KvServi
     configure(ctx) {
       ctx.registerService('kv', 'kv');
     },
-    boot() {
-      const config = resolveLazy(options);
-      const url = (typeof config.url === 'function' ? config.url() : config.url) ?? process.env['KV_URL'];
-      if (url === undefined || url === '') {
-        throw new DotPluginError({
-          code: KV_PLUGIN_ERROR_CODES.urlNotConfigured,
-          message: '[kv] KV URL is not configured.',
-          remediation: 'Pass options.url to kv(...) or set KV_URL in the environment before booting the app.',
-          docsUrl: 'https://arki.dev/dot/errors/arki-kv-plugin-e001',
-        });
-      }
-      const client = new KV(url, config.namespace, config.rateLimitPrefix);
-      return { kv: client };
+    provides: {
+      kv: () => {
+        const config = resolveLazy(options);
+        const url = (typeof config.url === 'function' ? config.url() : config.url) ?? process.env['KV_URL'];
+        if (url === undefined || url === '') {
+          throw new DotPluginError({
+            code: KV_PLUGIN_ERROR_CODES.urlNotConfigured,
+            message: '[kv] KV URL is not configured.',
+            remediation: 'Pass options.url to kv(...) or set KV_URL in the environment before booting the app.',
+            docsUrl: 'https://arki.dev/dot/errors/arki-kv-plugin-e001',
+          });
+        }
+        return new KV(url, config.namespace, config.rateLimitPrefix);
+      },
     },
     async dispose({ kv: client }) {
       await client.close();

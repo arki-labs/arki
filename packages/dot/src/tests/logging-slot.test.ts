@@ -40,7 +40,14 @@ describe('logging slot', () => {
     const sink = recordingSink();
     const app = await defineApp('slot-app')
       .use(loggingPlugin(sink))
-      .use(plugin({ name: 'db', boot: () => ({}) }))
+      .use(
+        plugin({
+          name: 'db',
+          boot: () => {
+            /* side effects only */
+          },
+        }),
+      )
       .boot();
     await app.dispose();
 

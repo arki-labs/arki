@@ -18,7 +18,7 @@ type Db = { readonly tag: 'db' };
 type Scorer = { readonly score: (text: string) => number };
 type Intelligence = { readonly summarize: (text: string) => string };
 
-const db = plugin({ name: 'db', boot: () => ({ db: { tag: 'db' as const } }) });
+const db = plugin({ name: 'db', provides: { db: () => ({ tag: 'db' as const }) } });
 
 describe('configure-time capability checks', () => {
   it('a ring among erased features fails configure() with E019 printing the ring in order', () => {
@@ -95,9 +95,16 @@ describe('dot explain', () => {
     expect(graph).toContain('p2 -->|entitlements| p1');
     expect(envelope).toMatchObject({ status: 'success' });
     const configured = builder.configure();
-    expect(configured.manifest.plugins.find(p => p.name === 'billing')?.provides).toEqual(['entitlements']);
+    expect(configured.manifest.plugins.find(p => p.name === 'billing')?.provides).toEqual([
+      'entitlements',
+      'feature.billing',
+    ]);
+    // Adapters (`.use(db)`) are drawn too: their provides are static handles.
+    expect(table).toContain('daily-digest --[db]--> db');
     expect(configured.manifest.dependencies).toEqual([
+      { from: 'billing', to: 'db', kind: 'requires', key: 'db' },
       { from: 'daily-digest', to: 'billing', kind: 'requires', key: 'entitlements' },
+      { from: 'daily-digest', to: 'db', kind: 'requires', key: 'db' },
     ]);
   });
 });

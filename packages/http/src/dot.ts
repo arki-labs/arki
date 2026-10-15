@@ -26,7 +26,7 @@
  * Lifecycle mapping — `.serve()` mounts after every feature, which is what
  * makes the drain order right:
  *
- *  - `boot`    — collect bundles, build the router, publish `httpServer`.
+ *  - `provides.httpServer` — collect bundles, build the router, publish `httpServer`.
  *                NOT listening yet; all feature boots finish first.
  *  - `start`   — listen (first among starts — the route table is final).
  *  - `stop`    — stop accepting, drain in-flight handlers
@@ -235,58 +235,60 @@ function bindHttp(
       ctx.registerService('httpServer', 'custom');
       ctx.registerProjection({ format: 'openapi', binding: 'http', module: '@arki/http/projection' });
     },
-    boot(ctx) {
-      // Erasure boundary: needs were declared dynamically above, so the
-      // typed hook context can't know the bundle keys — the tokens do.
-      // Bundles first, then feature routes in mount order.
-      const record = ctx as unknown as Readonly<Record<string, RouteBundle | undefined>>;
-      const bundles: RouteBundle[] = [];
-      for (const tok of bundleTokens) {
-        const bundle = record[tok.key];
-        if (bundle === undefined) {
-          throw new DotPluginError({
-            code: HTTP_PLUGIN_ERROR_CODES.bundleMissing,
-            message: `[http] bundle "${tok.key}" was not provided by any earlier plugin.`,
-            remediation:
-              'Mount the plugin that publishes this bundle before http(...). The typed builder enforces this; erased composition reaches this check.',
-            docsUrl: 'https://arki.dev/http/errors/arki-http-e008',
-          });
-        }
-        bundles.push(bundle);
-      }
-      for (const f of features) {
-        const routes = featureRoutes(ctx, f);
-        if (routes !== undefined) bundles.push(routes);
-      }
-
-      const engine = buildEngine(bundles);
-      const composed = composeMiddleware(engine.fetch, options.middleware ?? []);
-      const tracked = async (req: Request): Promise<Response> => {
-        gauge.count += 1;
-        try {
-          return await composed(req);
-        } finally {
-          gauge.count -= 1;
-          if (gauge.count === 0) {
-            const waiters = gauge.waiters.splice(0);
-            for (const waiter of waiters) waiter();
+    provides: {
+      httpServer: ctx => {
+        // Erasure boundary: needs were declared dynamically above, so the
+        // typed hook context can't know the bundle keys — the tokens do.
+        // Bundles first, then feature routes in mount order.
+        const record = ctx as unknown as Readonly<Record<string, RouteBundle | undefined>>;
+        const bundles: RouteBundle[] = [];
+        for (const tok of bundleTokens) {
+          const bundle = record[tok.key];
+          if (bundle === undefined) {
+            throw new DotPluginError({
+              code: HTTP_PLUGIN_ERROR_CODES.bundleMissing,
+              message: `[http] bundle "${tok.key}" was not provided by any earlier plugin.`,
+              remediation:
+                'Mount the plugin that publishes this bundle before http(...). The typed builder enforces this; erased composition reaches this check.',
+              docsUrl: 'https://arki.dev/http/errors/arki-http-e008',
+            });
           }
+          bundles.push(bundle);
         }
-      };
-      state.tracked = tracked;
+        for (const f of features) {
+          const routes = featureRoutes(ctx, f);
+          if (routes !== undefined) bundles.push(routes);
+        }
 
-      const httpServer: HttpServer = {
-        fetch: tracked,
-        port: () => state.handle?.port,
-        url: () => {
-          const handle = state.handle;
-          return handle === undefined
-            ? undefined
-            : `http://${displayHost(handle.hostname)}:${String(handle.port)}`;
-        },
-        inflight: () => gauge.count,
-      };
-      return { httpServer };
+        const engine = buildEngine(bundles);
+        const composed = composeMiddleware(engine.fetch, options.middleware ?? []);
+        const tracked = async (req: Request): Promise<Response> => {
+          gauge.count += 1;
+          try {
+            return await composed(req);
+          } finally {
+            gauge.count -= 1;
+            if (gauge.count === 0) {
+              const waiters = gauge.waiters.splice(0);
+              for (const waiter of waiters) waiter();
+            }
+          }
+        };
+        state.tracked = tracked;
+
+        const httpServer: HttpServer = {
+          fetch: tracked,
+          port: () => state.handle?.port,
+          url: () => {
+            const handle = state.handle;
+            return handle === undefined
+              ? undefined
+              : `http://${displayHost(handle.hostname)}:${String(handle.port)}`;
+          },
+          inflight: () => gauge.count,
+        };
+        return httpServer;
+      },
     },
     async start() {
       const tracked = state.tracked;

@@ -61,7 +61,7 @@ describe('runDoctor — --observability flag', () => {
   });
 
   it('without --observability, no DOT_CLI_E007 issue appears in the envelope', async () => {
-    const p = plugin({ name: 'p', boot: () => ({}) });
+    const p = plugin({ name: 'p', boot: () => { /* side effects only */ } });
     const app = await testApp([p]).boot();
     try {
       let written = '';
@@ -79,7 +79,7 @@ describe('runDoctor — --observability flag', () => {
   });
 
   it('with --observability and no SDK, the envelope carries a DOT_CLI_E007 warning issue', async () => {
-    const p = plugin({ name: 'p', boot: () => ({}) });
+    const p = plugin({ name: 'p', boot: () => { /* side effects only */ } });
     const app = await testApp([p]).boot();
     try {
       const envelope = await runDoctor(app, {
@@ -101,7 +101,7 @@ describe('runDoctor — --observability flag', () => {
     const provider = new BasicTracerProvider();
     trace.setGlobalTracerProvider(provider);
     try {
-      const p = plugin({ name: 'p', boot: () => ({}) });
+      const p = plugin({ name: 'p', boot: () => { /* side effects only */ } });
       const app = await testApp([p]).boot();
       try {
         const envelope = await runDoctor(app, {

@@ -23,9 +23,9 @@ type AuthService = {
 const makeDbPlugin = () =>
   plugin({
     name: 'db',
-    boot: () => ({
-      db: { query: async (_sql: string) => null } as DbService,
-    }),
+    provides: {
+      db: () => ({ query: async (_sql: string) => null }) as DbService,
+    },
   });
 
 describe('defineApp', () => {
@@ -45,7 +45,12 @@ describe('defineApp', () => {
   });
 
   it('builder.boot() returns a DotApp with state=booted', async () => {
-    const p = plugin({ name: 'p', boot: () => ({}) });
+    const p = plugin({
+      name: 'p',
+      boot: () => {
+        /* side effects only */
+      },
+    });
     const app = await defineApp('app').use(p).boot();
     expect(app.state).toBe('booted');
     expect(app.name).toBe('app');
@@ -56,9 +61,9 @@ describe('defineApp', () => {
     const dbPlugin = makeDbPlugin();
     const authPlugin = plugin({
       name: 'auth',
-      boot: () => ({
-        auth: { verify: (_token: string) => true } as AuthService,
-      }),
+      provides: {
+        auth: () => ({ verify: (_token: string) => true }) as AuthService,
+      },
     });
 
     const app = await defineApp('app').use(dbPlugin).use(authPlugin).boot();
@@ -79,7 +84,6 @@ describe('defineApp', () => {
         expect($app).toBe('app');
         expect($plugin).toBe('consumer');
         observed = db;
-        return {};
       },
     });
 
@@ -94,7 +98,6 @@ describe('defineApp', () => {
       needs: { db: service<DbService>() },
       boot: ({ db }) => {
         void db;
-        return {};
       },
     });
     // @ts-expect-error — nothing provides `db` yet
@@ -120,7 +123,12 @@ describe('defineApp', () => {
   });
 
   it('test harness produces a runnable builder', async () => {
-    const p = plugin({ name: 'p', boot: () => ({}) });
+    const p = plugin({
+      name: 'p',
+      boot: () => {
+        /* side effects only */
+      },
+    });
     const app = await testApp([p]).boot();
     expect(app.state).toBe('booted');
     await app.dispose();
@@ -133,7 +141,7 @@ describe('defineApp', () => {
       configure: ctx => {
         ctx.registerService('db', 'db');
       },
-      boot: () => ({ db: { name: 'primary' } }),
+      provides: { db: () => ({ name: 'primary' }) },
     });
     const api = plugin({
       name: 'api',
@@ -144,7 +152,6 @@ describe('defineApp', () => {
       },
       boot: ({ db }) => {
         expect(db.name).toBe('primary');
-        return {};
       },
     });
 
@@ -162,7 +169,7 @@ describe('defineApp', () => {
     ]);
     // Edges are observed from actual wiring: api's `db` need was satisfied
     // by the `db` plugin's published service.
-    expect(m.dependencies).toEqual([{ from: 'api', to: 'db', kind: 'requires' }]);
+    expect(m.dependencies).toEqual([{ from: 'api', to: 'db', kind: 'requires', key: 'db' }]);
 
     const d = app.diagnostics;
     expect(d.app).toEqual({ name: 'synthetic', state: 'booted' });
@@ -175,7 +182,7 @@ describe('defineApp', () => {
 
 describe('void-boot provides inference (constraint-fallback regression)', () => {
   it('a void-returning boot provides nothing — later plugins still pass the guard', async () => {
-    const provider = plugin({ name: 'p', boot: () => ({ thing: 42 }) });
+    const provider = plugin({ name: 'p', provides: { thing: () => 42 } });
     const sideEffect = plugin({
       name: 'side',
       needs: { thing: service<number>() },
@@ -189,7 +196,7 @@ describe('void-boot provides inference (constraint-fallback regression)', () => 
     const consumer = plugin({
       name: 'c',
       needs: { thing: service<number>() },
-      boot: ({ thing }) => ({ doubled: thing * 2 }),
+      provides: { doubled: ({ thing }) => thing * 2 },
     });
 
     const app = await defineApp('void-boot').use(provider).use(sideEffect).use(consumer).boot();
@@ -213,20 +220,20 @@ describe('initPlugins.context', () => {
     const ordersPlugin = p.plugin({
       name: 'orders',
       needs: ['db'] as const,
-      boot({ db }) {
-        expectTypeOf(db).toEqualTypeOf<DbService>();
-        return {
-          ordersService: {
+      provides: {
+        ordersService: ({ db }) => {
+          expectTypeOf(db).toEqualTypeOf<DbService>();
+          return {
             list: () => ['o1'],
-          },
-        };
+          };
+        },
       },
     });
     const authPlugin = p.plugin({
       name: 'auth',
-      boot: () => ({
-        auth: { verify: (_token: string): boolean => true } satisfies AuthService,
-      }),
+      provides: {
+        auth: () => ({ verify: (_token: string): boolean => true }) satisfies AuthService,
+      },
     });
 
     const app = await defineApp('feature-plugins')
@@ -245,14 +252,17 @@ describe('initPlugins.context', () => {
     const consumer = plugin({
       name: 'consumer',
       needs: p.needs('db'),
-      boot({ db }) {
-        expectTypeOf(db).toEqualTypeOf<DbService>();
-        return { rows: db.query('select 1') };
+      provides: {
+        rows: ({ db }) => {
+          expectTypeOf(db).toEqualTypeOf<DbService>();
+          return db.query('select 1');
+        },
       },
     });
 
     const app = await defineApp('bridge').use(dbPlugin).use(consumer).boot();
-    expect(app.services.rows).toBeInstanceOf(Promise);
+    // An async factory is awaited: the kernel publishes the resolved value.
+    expect(app.services.rows).toBeNull();
     await app.dispose();
   });
 
@@ -261,7 +271,9 @@ describe('initPlugins.context', () => {
     const consumer = p.plugin({
       name: 'consumer',
       needs: ['db'] as const,
-      boot: () => ({}),
+      boot: () => {
+        /* side effects only */
+      },
     });
 
     // @ts-expect-error — useAll preserves the same unsatisfied-needs guard as chained .use()
@@ -272,7 +284,7 @@ describe('initPlugins.context', () => {
     // @ts-expect-error — "missing" is not an AppServices key
     p.plugin({ name: 'bad-key', needs: ['missing'] as const });
     // @ts-expect-error — overlapping provides must satisfy the AppServices entry type
-    p.plugin({ name: 'bad-provide', boot: () => ({ db: { nope: true } }) });
+    p.plugin({ name: 'bad-provide', provides: { db: () => ({ nope: true }) } });
 
     expect(true).toBe(true);
   });

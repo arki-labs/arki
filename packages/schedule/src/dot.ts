@@ -402,32 +402,34 @@ export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
         });
         ctx.declareProvides('schedule-runtime');
       },
-      boot(ctx) {
-        const durable = durableBackend(ctx);
-        const all: readonly ScheduleDef<TContext>[] = [...own, ...collectFeatureSchedules(ctx, features)];
-        assertSingleClock(all, durable, clock);
-        assertDurableBackend(all, durable);
-        const shared = {
-          clock,
-          ...(options.lock === undefined ? {} : { lock: options.lock }),
-          ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
-          ...(durable === undefined ? {} : { durable }),
-        };
-        const context = options.context;
-        const created =
-          context === undefined
-            ? createScheduleRuntime({
-                // Erasure seam: public overloads only allow missing context for `TContext = undefined`.
-                schedules: all as readonly ScheduleDef<undefined>[],
-                ...shared,
-              })
-            : createScheduleRuntime<TContext>({
-                schedules: all,
-                ...shared,
-                createContext: () => context(ctx as CtxOf<TNeeds>),
-              });
-        runtime = created;
-        return { scheduler: schedulerService(clock, all.map(definition => definition.name), created) };
+      provides: {
+        scheduler: ctx => {
+          const durable = durableBackend(ctx);
+          const all: readonly ScheduleDef<TContext>[] = [...own, ...collectFeatureSchedules(ctx, features)];
+          assertSingleClock(all, durable, clock);
+          assertDurableBackend(all, durable);
+          const shared = {
+            clock,
+            ...(options.lock === undefined ? {} : { lock: options.lock }),
+            ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
+            ...(durable === undefined ? {} : { durable }),
+          };
+          const context = options.context;
+          const created =
+            context === undefined
+              ? createScheduleRuntime({
+                  // Erasure seam: public overloads only allow missing context for `TContext = undefined`.
+                  schedules: all as readonly ScheduleDef<undefined>[],
+                  ...shared,
+                })
+              : createScheduleRuntime<TContext>({
+                  schedules: all,
+                  ...shared,
+                  createContext: () => context(ctx as CtxOf<TNeeds>),
+                });
+          runtime = created;
+          return schedulerService(clock, all.map(definition => definition.name), created);
+        },
       },
       start() {
         runtime?.start();

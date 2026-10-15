@@ -16,8 +16,8 @@ lifecycle-aware piece of an application. Each plugin:
 
 - declares a **name**, **version**, and the services it **needs** as a shape
   of type witnesses;
-- **provides** services by returning them from its `boot` hook — provides
-  are *inferred from the return type*, never declared separately;
+- **provides** services through `provides`: one factory per key — the type
+  is *inferred from the factory*, never declared separately;
 - runs a **5-hook lifecycle** — `configure` → `boot` → `start` → `stop` → `dispose`;
 - **publishes typed services** to a shared, type-safe registry that later
   plugins can read from;
@@ -70,9 +70,8 @@ type Db = { query(sql: string): Promise<unknown[]> };
 
 const dbPlugin = plugin({
   name: 'database',
-  async boot() {
-    const db = await openDb(process.env.DATABASE_URL);
-    return { db };                    // ← this IS the provides declaration
+  provides: {
+    db: () => openDb(process.env.DATABASE_URL), // ← one factory per key; may be async
   },
   async dispose({ db }) {
     await db.close();
@@ -82,13 +81,15 @@ const dbPlugin = plugin({
 const billingPlugin = plugin({
   name: 'billing',
   version: '1.0.0',
-  needs: { db: service<Db>() },     // typed injection — destructure in hooks
+  needs: { db: dbPlugin.provides.db }, // typed handle — destructure in hooks
   configure(ctx) {
     // Validate config, register schemas, no I/O.
   },
-  async boot({ db }) {
-    // Open connections. The return value IS what this plugin provides.
-    return { stripe: makeStripeClient(db) };
+  provides: {
+    stripe: ({ db }) => makeStripeClient(db), // factories see the needs
+  },
+  async boot({ stripe }) {
+    // Side effects only (seed, warm-up). Returns nothing.
   },
   async start({ stripe }) {
     // Begin processing — workers, subscriptions, schedulers.
@@ -113,14 +114,16 @@ await app.dispose();
 ```
 
 There is no registry to configure, no decorators, no reflection. The `needs`
-shape is the injection contract; the `boot` return type is the provision
+shape is the injection contract; the `provides` factories are the provision
 contract; the builder's type-level guard connects the two.
 
 ## Dependency injection
 
 ### Needs are witnesses, provides are inferred
 
-`service<T>()` creates a phantom **type witness** — a runtime no-op that
+When the host can import the provider, name its handle (see
+[Plugin handles](#plugin-handles)). `service<T>()` is for the other cases: a
+library contract, a test, or a host external. It creates a phantom **type witness** — a runtime no-op that
 carries `T` at the type level. The property name you give it is your local
 alias *and* (for anonymous witnesses) the wire key:
 
@@ -131,14 +134,16 @@ const search = plugin({
     db: service<Db>(),                 // wire key 'db', local alias 'db'
     log: service<Logger>(),            // wire key 'log'
   },
-  async boot({ db, log, $app }) {      // $app/$plugin/$config: kernel context
-    log.info(`indexing for ${$app}`);
-    return { search: await buildIndex(db) };
+  provides: {
+    search: async ({ db, log, $app }) => { // $app/$plugin/$config: kernel context
+      log.info(`indexing for ${$app}`);
+      return buildIndex(db);
+    },
   },
 });
 ```
 
-`start`, `stop`, and `dispose` additionally receive the plugin's **own
+`boot`, `start`, `stop`, and `dispose` additionally receive the plugin's **own
 provides** — and because teardown runs in reverse declaration order, a plugin's
 needs are still alive in its `dispose`:
 
@@ -167,6 +172,9 @@ Reordering the first example — or `rename`-ing one provider in the second —
 makes both compile. The kernel re-validates at runtime with coded errors
 (`E012` unsatisfied need, `E013` collision, `E014` reserved key) for
 erased/dynamic composition, with full rollback of already-booted plugins.
+`E012` now fires only for needs that no plugin declares (erased or JS graphs,
+dynamic http bundle tokens). Order mistakes between plugins that declare their
+provides are caught earlier, at `configure()`: see below.
 
 There is no dependency graph to debug and **cycles are unrepresentable**:
 services flow strictly forward through the `.use()` chain. If two plugins need
@@ -236,11 +244,16 @@ key, stamped with `provider: 'billing'`. The keys are static, so the graph is
 data before anything boots:
 
 - mounting `digest` before `billing` is a compile error, and `configure()`
-  throws `DOT_LIFECYCLE_E020` naming both positions for code that skips types;
+  throws `DOT_LIFECYCLE_E020` naming both positions for code that skips types.
+  The fix line is role-aware: "Move X before Y in .features([...])." for a
+  feature provider, "Mount X with .use() before Y." for any other plugin;
 - two features that need each other form a ring: TypeScript reports `TS7022`
   on both `feature()` consts (read the two files it names), and `configure()`
-  throws `DOT_LIFECYCLE_E019` printing the ring for erased graphs;
-- `dot explain` draws `daily-digest --[entitlements]--> billing` without booting.
+  throws `DOT_LIFECYCLE_E019` printing the ring (through any plugins) for
+  erased graphs;
+- `dot explain` draws one labelled edge per capability, such as
+  `daily-digest --[entitlements]--> billing`, without booting.
+  A feature's slice record (`feature.<name>`) is one of its plugin's provides.
 
 `boot` is side effects only (seed, warm-up) and returns nothing; a
 value-returning `boot` does not compile.
@@ -279,6 +292,47 @@ export const ingestUrl = protectedProcedure
 context explicitly) and throws `FEATURE_E005` naming the alias, key and
 provider when a capability is missing from the bag.
 
+### Plugin handles
+
+Every plugin has typed handles before it boots. `database.provides.db` is a
+`Handle<T, 'db'>`: a token on the wire key `db`, plus `.provider` (the plugin
+name) and `.lazy`. The kernel checks every plugin's needs against every
+plugin's static provides at `configure()`.
+
+```ts
+import { type Provided } from '@arki/dot';
+
+export const database = db({ relations, url: () => env.DB_URL });
+export type Db = Provided<typeof database.provides.db>; // the one alias an app names
+
+const reports = plugin({
+  name: 'reports',
+  needs: {
+    db: database.provides.db,              // typed from the provider
+    cache: cache.provides.kv.lazy,         // a Lazy<T>, even if the provider is eager
+  },
+  provides: { reports: ({ db }) => makeReports(db) },
+});
+```
+
+Use `service<T>()` when you cannot import the provider: a library contract, a
+test, or a host external. `providesOf([...])` takes plugins as well as features:
+`providesOf([database, cache, ...features])`. `provide(token, value)` is only a
+record helper; in examples prefer `provides: { [Token.key]: () => value }`.
+
+In tests, `fake(handle, value)` from `@arki/dot/test-harness` is a plugin named
+`fake:<key>` that provides `value` under the handle's wire key, type-checked
+against the handle:
+
+```ts
+import { fake } from '@arki/dot/test-harness';
+
+const app = await defineApp('t')
+  .use(fake(database.provides.db, db))
+  .features([billing, digest])
+  .boot();
+```
+
 ### Tokens — cross-package service contracts
 
 An anonymous `service<T>()` couples consumer and provider by property name.
@@ -292,16 +346,14 @@ export const Db = token<NodePgDatabase<Schema>>()('arki.db');
 // A provider publishes under the token's key:
 const database = plugin({
   name: 'database',
-  async boot() {
-    return provide(Db, await connect());   // → { 'arki.db': NodePgDatabase }
-  },
+  provides: { [Db.key]: () => connect() }, // → { 'arki.db': NodePgDatabase }
 });
 
 // Any consumer, any package, any local alias:
 const reports = plugin({
   name: 'reports',
   needs: { warehouse: Db },                // wire key 'arki.db', alias yours
-  async boot({ warehouse }) { /* ... */ },
+  boot: ({ warehouse }) => { /* typed */ },
 });
 ```
 
@@ -324,13 +376,16 @@ const app = await defineApp('shop')
   .use(plugin({
     name: 'analytics',
     needs: { primary: Db, replica: ReportsDb },
-    async boot({ primary, replica }) { /* two live instances, both typed */ },
+    boot: ({ primary, replica }) => { /* two live instances, both typed */ },
   }))
   .boot();
 ```
 
 Renames compose left-to-right and are applied at publish time — collision
-checks see the final keys.
+checks see the final keys. `rename` also rebuilds the handles: with
+`const reportsDb = rename(database, { db: 'reportsDb' }, 'reports-db')`, consumers
+use `reportsDb.provides.reportsDb`. A handle taken before the rename keeps the
+old key and fails the builder guard.
 
 ### Lazy services
 
@@ -343,12 +398,10 @@ publishing plugin's own `dispose` hook, even if that plugin has none:
 ```ts
 const search = plugin({
   name: 'search',
-  async boot() {
-    return {
-      search: lazy(() => connectToElastic(), {
-        dispose: client => client.close(),
-      }),
-    };
+  provides: {
+    search: () => lazy(() => connectToElastic(), {
+      dispose: client => client.close(),
+    }),
   },
 });
 ```
@@ -398,13 +451,13 @@ export const Bus = token<MessageBus>()('shop.bus');
 // ── infrastructure plugins ───────────────────────────────────────────────
 const env = plugin({
   name: 'env',
-  boot: ({ $config }) => provide(Env, parseEnv($config)),
+  provides: { [Env.key]: ({ $config }) => parseEnv($config) },
 });
 
 const telemetry = plugin({
   name: 'telemetry',
   needs: { env: Env },
-  boot: ({ env }) => ({ metrics: makeMetrics(env.OTEL_ENDPOINT) }),
+  provides: { metrics: ({ env }) => makeMetrics(env.OTEL_ENDPOINT) },
   dispose: ({ metrics }) => metrics.flush(),
 });
 
@@ -412,9 +465,7 @@ const database = (url: string) =>
   plugin({
     name: 'database',
     needs: { metrics: service<Metrics>() },
-    async boot({ metrics }) {
-      return provide(Db, await connectPg(url, { metrics }));
-    },
+    provides: { [Db.key]: ({ metrics }) => connectPg(url, { metrics }) },
     async dispose(ctx) {
       await ctx[Db.key].end();       // own provide, published under the token key
     },
@@ -423,24 +474,24 @@ const database = (url: string) =>
 const cache = plugin({
   name: 'cache',
   needs: { env: Env },
-  boot: ({ env }) => provide(Cache, connectRedis(env.REDIS_URL)),
+  provides: { [Cache.key]: ({ env }) => connectRedis(env.REDIS_URL) },
   dispose: async ctx => ctx[Cache.key].quit(),
 });
 
 const searchCluster = plugin({
   name: 'search-cluster',
   needs: { env: Env },
-  boot: ({ env }) => ({
+  provides: {
     // Expensive external cluster — only opens if something get()s it.
-    search: lazy(() => connectElastic(env.ELASTIC_URL), {
+    search: ({ env }) => lazy(() => connectElastic(env.ELASTIC_URL), {
       dispose: client => client.close(),
     }),
-  }),
+  },
 });
 
 const bus = plugin({
   name: 'bus',
-  boot: () => provide(Bus, makeInMemoryBus()),
+  provides: { [Bus.key]: () => makeInMemoryBus() },
 });
 
 // ── domain plugins ───────────────────────────────────────────────────────
@@ -451,30 +502,30 @@ const catalog = plugin({
     cache: Cache,
     search: service.lazy<SearchClient>(),   // eager or lazy provider — same code
   },
-  boot: ({ db, cache, search }) => ({
-    catalog: makeCatalog({ db, cache, search }),
-  }),
+  provides: {
+    catalog: ({ db, cache, search }) => makeCatalog({ db, cache, search }),
+  },
 });
 
 const checkout = plugin({
   name: 'checkout',
   needs: { db: Db, bus: Bus, catalog: service<Catalog>() },
-  boot: ({ db, bus, catalog }) => ({
-    checkout: makeCheckout({ db, bus, catalog }),
-  }),
+  provides: {
+    checkout: ({ db, bus, catalog }) => makeCheckout({ db, bus, catalog }),
+  },
 });
 
 const reporting = plugin({
   name: 'reporting',
   needs: { replica: ReportsDb, catalog: service<Catalog>() },
-  boot: ({ replica, catalog }) => ({ reporting: makeReporting(replica, catalog) }),
+  provides: { reporting: ({ replica, catalog }) => makeReporting(replica, catalog) },
 });
 
 // ── process plugins — real work happens in start/stop ───────────────────
 const outboxWorker = plugin({
   name: 'outbox-worker',
   needs: { db: Db, bus: Bus },
-  boot: ({ db, bus }) => ({ outbox: makeOutbox(db, bus) }),
+  provides: { outbox: ({ db, bus }) => makeOutbox(db, bus) },
   start: ({ outbox }) => outbox.startPolling(),
   stop: ({ outbox }) => outbox.drain(),      // stop processing, keep resources
 });
@@ -487,8 +538,9 @@ const http = plugin({
     checkout: service<Checkout>(),
     reporting: service<Reporting>(),
   },
-  async boot({ env, catalog, checkout, reporting }) {
-    return { server: buildServer({ port: env.PORT, catalog, checkout, reporting }) };
+  provides: {
+    server: ({ env, catalog, checkout, reporting }) =>
+      buildServer({ port: env.PORT, catalog, checkout, reporting }),
   },
   start: ({ server }) => server.listen(),
   stop: ({ server }) => server.close(),
@@ -625,7 +677,7 @@ contexts carry the needed services (typed, under your local aliases) and
 | Hook        | Purpose                                                             |
 | ----------- | ------------------------------------------------------------------- |
 | `configure` | Validate static config; declare schemas, routes, services. No I/O.  |
-| `boot`      | Open connections; the returned record is what the plugin provides.     |
+| `boot`      | Side effects only (seed, warm-up). Returns nothing. Values go in `provides`. |
 | `start`     | Begin processing (workers, subscribers, schedulers).                |
 | `stop`      | Stop processing in reverse declaration order.                       |
 | `dispose`   | Free resources after `stop`; lazy handles auto-clean afterwards.    |
@@ -661,7 +713,9 @@ Runtime failures carry stable codes (`DotLifecycleError.code`):
 | Code                 | Meaning                                              |
 | -------------------- | ---------------------------------------------------- |
 | `DOT_LIFECYCLE_E011` | Plugin registered twice.                                |
-| `DOT_LIFECYCLE_E012` | A need has no provider among earlier plugins.           |
+| `DOT_LIFECYCLE_E012` | A need no plugin declares (erased or JS graphs, dynamic http bundle tokens). |
+| `DOT_LIFECYCLE_E019` | Plugins form a ring through their needs and provides.   |
+| `DOT_LIFECYCLE_E020` | A provider is mounted after its consumer (at `configure()`). |
 | `DOT_LIFECYCLE_E013` | A published wire key collides with an earlier one.   |
 | `DOT_LIFECYCLE_E014` | A service key uses the reserved `$` (kernel) prefix. |
 | `DOT_LIFECYCLE_E015` | A hook exceeded the `hookTimeoutMs` watchdog.        |

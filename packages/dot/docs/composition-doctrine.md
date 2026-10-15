@@ -166,11 +166,13 @@ schema leaves (tables.ts — import nothing above)
   a consumer reaching into another feature's services, repository, or
   internals is still a lateral import. Mount order stays the boot order: the
   provider must be listed before the consumer — a compile error, and
-  `DOT_LIFECYCLE_E020` at `configure()` for code that skips types.
+  `DOT_LIFECYCLE_E020` at `configure()` for code that skips types. The kernel
+  checks every plugin's needs against every plugin's static provides, so the
+  same rule holds for adapters, not only features.
 - **Capabilities never form a ring.** Two feature modules naming each
   other's handles fail as `TS7022` on both `feature()` consts (and an ESM TDZ
   `ReferenceError` at runtime); erased graphs fail `configure()` with
-  `DOT_LIFECYCLE_E019`, which prints the ring. Break it by moving the shared
+  `DOT_LIFECYCLE_E019`, which prints the ring (through any plugins). Break it by moving the shared
   piece into a third feature both need, or by reading through `db.query`
   instead of a handle. A feature's own router never names its own handle
   (also `TS7022`): own capabilities are called by import.
@@ -199,7 +201,7 @@ schema leaves (tables.ts — import nothing above)
   per-feature contexts force lateral type imports between features, which is
   the real violation.
 
-## 6. Effects live in `boot()` and request factories only
+## 6. Effects live in `provides` factories, `boot()` and request factories only
 
 Three lifetimes, three homes:
 

@@ -17,7 +17,7 @@ type Db = { readonly name: string };
 
 const db = plugin({
   name: 'db',
-  boot: () => ({ db: { name: 'pglite' } }),
+  provides: { db: () => ({ name: 'pglite' }) },
 });
 
 describe('boot is side-effect only', () => {

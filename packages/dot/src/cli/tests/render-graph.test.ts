@@ -84,25 +84,25 @@ describe('renderGraph', () => {
   });
 
   it('a booted app renders its OBSERVED wiring edges', async () => {
-    const provider = plugin({ name: 'db', boot: () => ({ db: { ok: true } }) });
+    const provider = plugin({ name: 'db', provides: { db: () => ({ ok: true }) } });
     const consumer = plugin({
       name: 'billing',
       needs: { db: service<{ ok: boolean }>() },
-      boot: ({ db }) => ({ billing: db.ok }),
+      provides: { billing: ({ db }) => db.ok },
     });
 
     const app = await defineApp('graph-int').use(provider).use(consumer).boot();
     const source = buildMermaidGraph(app.manifest);
     expect(source).toContain('p0["1 · db"]');
     expect(source).toContain('p1["2 · billing"]');
-    expect(source).toContain('p1 -->|requires| p0');
+    expect(source).toContain('p1 -->|db| p0');
     await app.dispose();
   });
 
   it('draws a .features()/.serve() app as the hexagon: driven → features → driving, numbered in boot order', async () => {
-    const db = plugin({ name: 'db', boot: () => ({ db: { ok: true } }) });
+    const db = plugin({ name: 'db', provides: { db: () => ({ ok: true }) } });
     const orders = feature('orders', { needs: { db: service<{ ok: boolean }>() } });
-    const health = plugin({ name: 'health', needs: { db: service<{ ok: boolean }>() }, boot: ({ db: handle }) => ({ health: handle.ok }) });
+    const health = plugin({ name: 'health', needs: { db: service<{ ok: boolean }>() }, provides: { health: ({ db: handle }) => handle.ok } });
 
     const app = await defineApp('hexagon').use(db).features([orders]).serve(health).boot();
     const source = buildMermaidGraph(app.manifest);
@@ -114,7 +114,7 @@ describe('renderGraph', () => {
       '  subgraph driving["driving · what calls the features"]',
     ]);
     expect(source).toContain('    p1["2 · orders"]');
-    expect(source).toContain('p1 -->|requires| p0');
+    expect(source).toContain('p1 -->|db| p0');
     await app.dispose();
   });
 });

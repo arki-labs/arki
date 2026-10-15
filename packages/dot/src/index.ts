@@ -34,15 +34,19 @@ export type {
   DotLoggingContext,
   DotLoggingHandle,
   EmptyShape,
-  InferredProvides,
+  Handle,
+  Handles,
   KernelCtx,
   Lazy,
+  LazyHandle,
   LazyService,
   NeedsShape,
   NoReservedKeys,
   Plugin,
   PluginNeeds,
   PluginProvides,
+  Provided,
+  ProvidesFactories,
   RenamedProvides,
   Service,
   ServiceRecord,
@@ -99,7 +103,7 @@ export type {
 export { renderTimeline } from './timeline.js';
 export type { RenderTimelineOptions } from './timeline.js';
 
-export { testApp, bootTestApp, testPlugin } from './test-harness.js';
+export { fake, testApp, bootTestApp, testPlugin } from './test-harness.js';
 export type { TestAppOptions, TestPluginBuilder } from './test-harness.js';
 
 export { hookSignals } from './signals.js';

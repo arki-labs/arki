@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { feature } from '@arki/dot/feature';
-import { defineApp, plugin, provide, service } from '@arki/dot/plugin';
+import { defineApp, plugin, service } from '@arki/dot/plugin';
 
 import { DurableSchedules, schedule, scheduleActions, schedules } from './dot.js';
 import { ScheduleError, SCHEDULE_ERROR_CODES, defineSchedule, initSchedule } from './index.js';
@@ -120,8 +120,8 @@ describe('schedule DOT projection', () => {
     // A feature with no schedules is skipped, not an error.
     const quiet = feature('quiet', {});
     const fake = fakeDurableScheduler();
-    const dependency = plugin({ name: 'dependency', boot: () => ({ dependency: { name: 'dep' } }) });
-    const backend = plugin({ name: 'durable-backend', boot: () => provide(DurableSchedules, fake) });
+    const dependency = plugin({ name: 'dependency', provides: { dependency: () => ({ name: 'dep' }) } });
+    const backend = plugin({ name: 'durable-backend', provides: { [DurableSchedules.key]: () => fake } });
 
     const app = await defineApp('schedule-feature')
       .use(dependency)
@@ -473,7 +473,7 @@ describe('durable schedules', () => {
 
   it('the Dot plugin takes the backend as a typed need and hands it the durable schedules at start', async () => {
     const fake = fakeDurableScheduler();
-    const backend = plugin({ name: 'durable-backend', boot: () => provide(DurableSchedules, fake) });
+    const backend = plugin({ name: 'durable-backend', provides: { [DurableSchedules.key]: () => fake } });
     const calls: string[] = [];
     const nightly = defineSchedule({
       name: 'nightly',

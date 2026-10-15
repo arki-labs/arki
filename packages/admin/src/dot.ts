@@ -4,7 +4,7 @@
  *
  * ```ts
  * export const operations = feature('operations', {
- *   needs: { kv: service<KV>(), db: service<Db>() },
+ *   needs: { kv: cache.provides.kv, db: database.provides.db },
  *   use: [
  *     foreman(({ kv, db }: { kv: KV; db: Db }) => ({
  *       env,

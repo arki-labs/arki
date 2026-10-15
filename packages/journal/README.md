@@ -458,7 +458,7 @@ await worker.stop();
 ```ts
 // src/features/orders/feature.ts
 export const orders = feature('orders', {
-  needs: { mailer: service<Mailer>() },
+  needs: { mailer: mailerPlugin.provides.mailer }, // typed handle; service<Mailer>() also works
   use: [journalHandlers({ projections: [customerStats], effects: [orderMail] })],
 });
 

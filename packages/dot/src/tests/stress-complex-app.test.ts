@@ -23,7 +23,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { DotLifecycleEvent } from '../lifecycle-observer.js';
 import type { Lazy } from '../plugin-contract.js';
 import { defineApp } from '../define-app.js';
-import { lazy, plugin, provide, rename, service, token } from '../plugin-contract.js';
+import { lazy, plugin, rename, service, token } from '../plugin-contract.js';
 
 /* ------------------------------------------------------------------ */
 /* Domain types                                                        */
@@ -82,39 +82,47 @@ const mkKv = (ns: string): KvClient => ({ ns, store: new Map(), set(k, v) { this
 
 const envPlugin = plugin({
   name: 'env',
-  boot: ({ $config }) => {
-    ev('boot:env');
-    expect($config['FEATURE_STRESS']).toBe(true); // $config threading
-    return { env: { region: 'eu-central', mailFrom: 'noreply@stress.test' } as Env };
+  provides: {
+    env: ({ $config }): Env => {
+      ev('boot:env');
+      expect($config['FEATURE_STRESS']).toBe(true); // $config threading
+      return { region: 'eu-central', mailFrom: 'noreply@stress.test' };
+    },
   },
 });
 
 const clockPlugin = plugin({
   name: 'clock',
-  boot: () => {
-    ev('boot:clock');
-    return { clock: { now: () => 1_700_000_000 } as Clock };
+  provides: {
+    clock: (): Clock => {
+      ev('boot:clock');
+      return { now: () => 1_700_000_000 };
+    },
   },
 });
 
 const loggerPlugin = plugin({
   name: 'logger',
   needs: { env: service<Env>() },
-  boot: ({ env }) => {
-    ev('boot:logger');
-    const lines: string[] = [];
-    return { log: { lines, info: m => void lines.push(`[${env.region}] ${m}`) } as Log };
+  provides: {
+    log: ({ env }): Log => {
+      ev('boot:logger');
+      const lines: string[] = [];
+      return { lines, info: m => void lines.push(`[${env.region}] ${m}`) };
+    },
   },
 });
 
 const metricsPlugin = plugin({
   name: 'metrics',
   needs: { env: service<Env>(), clock: service<Clock>() },
-  boot: ({ clock }) => {
-    ev('boot:metrics');
-    void clock.now();
-    const counts: Record<string, number> = {};
-    return { metrics: { counts, incr: k => void (counts[k] = (counts[k] ?? 0) + 1) } as Metrics };
+  provides: {
+    metrics: ({ clock }): Metrics => {
+      ev('boot:metrics');
+      void clock.now();
+      const counts: Record<string, number> = {};
+      return { counts, incr: k => void (counts[k] = (counts[k] ?? 0) + 1) };
+    },
   },
 });
 
@@ -126,10 +134,12 @@ const dbPluginFactory = (instance: string) =>
   plugin({
     name: 'db',
     needs: { log: service<Log>() },
-    boot: ({ log, $plugin }) => {
-      ev(`boot:${$plugin}`);
-      log.info(`db ${instance} opening`);
-      return { db: mkDb(instance) };
+    provides: {
+      db: ({ log, $plugin }) => {
+        ev(`boot:${$plugin}`);
+        log.info(`db ${instance} opening`);
+        return mkDb(instance);
+      },
     },
     dispose: ({ $plugin }) => {
       ev(`dispose:${$plugin}`);
@@ -142,9 +152,11 @@ const reportsDbPlugin = rename(dbPluginFactory('reports'), { db: 'reportsDb' }, 
 const kvPluginFactory = (ns: string) =>
   plugin({
     name: 'kv',
-    boot: ({ $plugin }) => {
-      ev(`boot:${$plugin}`);
-      return provide(Kv, mkKv(ns));
+    provides: {
+      [Kv.key]: ({ $plugin }) => {
+        ev(`boot:${$plugin}`);
+        return mkKv(ns);
+      },
     },
     dispose: ({ $plugin }) => {
       ev(`dispose:${$plugin}`);
@@ -158,72 +170,74 @@ const sessionsKvPlugin = rename(kvPluginFactory('sessions'), { 'stress.kv': Sess
 
 const blobPlugin = plugin({
   name: 'blob',
-  boot: () => {
-    ev('boot:blob');
-    return {
-      blob: lazy(
+  provides: {
+    blob: () => {
+      ev('boot:blob');
+      return lazy(
         (): BlobStore => {
           ev('lazyinit:blob'); // must NEVER appear — nobody touches blob
-          return { put: () => undefined };
+          return { put: () => void 1 };
         },
         { dispose: () => ev('lazyclean:blob') },
-      ),
-    };
+      );
+    },
   },
 });
 
 const searchPlugin = plugin({
   name: 'search',
-  boot: () => {
-    ev('boot:search');
-    return {
-      search: lazy(
+  provides: {
+    search: () => {
+      ev('boot:search');
+      return lazy(
         (): SearchClient => {
           ev('lazyinit:search');
           const docs: string[] = [];
           return { docs, index: d => void docs.push(d) };
         },
         { dispose: () => ev('lazyclean:search') },
-      ),
-    };
+      );
+    },
   },
 });
 
 const mailerPlugin = plugin({
   name: 'mailer',
   needs: { env: service<Env>() },
-  boot: ({ env }) => {
-    ev('boot:mailer');
-    return {
-      mailer: lazy(
+  provides: {
+    mailer: ({ env }) => {
+      ev('boot:mailer');
+      return lazy(
         (): Mailer => {
           ev('lazyinit:mailer');
           const sent: string[] = [];
           return { sent, send: to => void sent.push(`${env.mailFrom} -> ${to}`) };
         },
         { dispose: () => ev('lazyclean:mailer') },
-      ),
-    };
+      );
+    },
   },
 });
 
 const busPlugin = plugin({
   name: 'bus',
-  boot: () => {
-    ev('boot:bus');
-    const published: string[] = [];
-    const subs = new Map<string, (() => void)[]>();
-    const bus: Bus = {
-      published,
-      publish(topic) {
-        published.push(topic);
-        for (const fn of subs.get(topic) ?? []) fn();
-      },
-      subscribe(topic, fn) {
-        subs.set(topic, [...(subs.get(topic) ?? []), fn]);
-      },
-    };
-    return { bus };
+  provides: {
+    bus: () => {
+      ev('boot:bus');
+      const published: string[] = [];
+      const subs = new Map<string, (() => void)[]>();
+      const bus: Bus = {
+        published,
+        publish(topic) {
+          published.push(topic);
+          for (const fn of subs.get(topic) ?? []) fn();
+        },
+        subscribe(topic, fn) {
+          subs.set(topic, [...(subs.get(topic) ?? []), fn]);
+        },
+      };
+      return bus;
+    },
   },
   start: () => ev('start:bus'),
   stop: () => ev('stop:bus'),
@@ -237,54 +251,61 @@ const busPlugin = plugin({
 const authPlugin = plugin({
   name: 'auth',
   needs: { db: service<Db>(), cache: Kv, log: service<Log>() }, // token under a free alias
-  boot: ({ db, cache, log }) => {
-    ev('boot:auth');
-    cache.set('auth:ready', '1');
-    log.info(`auth against ${db.instance}`);
-    return { auth: { verify: t => t.startsWith('ok-') } as Auth };
+  provides: {
+    auth: ({ db, cache, log }): Auth => {
+      ev('boot:auth');
+      cache.set('auth:ready', '1');
+      log.info(`auth against ${db.instance}`);
+      return { verify: t => t.startsWith('ok-') };
+    },
   },
 });
 
 const catalogPlugin = plugin({
   name: 'catalog',
   needs: { db: service<Db>(), search: service<Lazy<SearchClient>>(), log: service<Log>() },
-  boot: ({ db, search }) => {
-    ev('boot:catalog');
-    const products: string[] = [];
-    const catalog: Catalog = {
-      products,
-      async addProduct(id) {
-        await db.query(`insert ${id}`);
-        products.push(id);
-        (await search.get()).index(id); // initializes search on first product
-      },
-    };
-    return { catalog };
+  provides: {
+    catalog: ({ db, search }) => {
+      ev('boot:catalog');
+      const products: string[] = [];
+      const catalog: Catalog = {
+        products,
+        async addProduct(id) {
+          await db.query(`insert ${id}`);
+          products.push(id);
+          const index = await search.get(); // initializes search on first product
+          index.index(id);
+        },
+      };
+      return catalog;
+    },
   },
 });
 
 const pricingPlugin = plugin({
   name: 'pricing',
   needs: { catalog: service<Catalog>(), env: service<Env>(), clock: service<Clock>() },
-  boot: ({ catalog }) => {
-    ev('boot:pricing');
-    return { pricing: { priceOf: id => (catalog.products.includes(id) ? 100 : 0) } as Pricing };
+  provides: {
+    pricing: ({ catalog }): Pricing => {
+      ev('boot:pricing');
+      return { priceOf: id => (catalog.products.includes(id) ? 100 : 0) };
+    },
   },
 });
 
 const inventoryPlugin = plugin({
   name: 'inventory',
   needs: { db: service<Db>(), stock: Kv, metrics: service<Metrics>() },
-  boot: ({ metrics }) => {
-    ev('boot:inventory');
-    return {
-      inventory: {
+  provides: {
+    inventory: ({ metrics }): Inventory => {
+      ev('boot:inventory');
+      return {
         reserve: () => {
           metrics.incr('inventory.reserve');
           return true;
         },
-      } as Inventory,
-    };
+      };
+    },
   },
 });
 
@@ -292,46 +313,46 @@ const cartPlugin = plugin({
   name: 'cart',
   // Consumes the DERIVED token — wired to the renamed second kv instance.
   needs: { pricing: service<Pricing>(), inventory: service<Inventory>(), sessions: SessionsKv },
-  boot: ({ pricing, inventory, sessions }) => {
-    ev('boot:cart');
-    expect(sessions.ns).toBe('sessions'); // proves the rename+instance wiring
-    const items: string[] = [];
-    return {
-      cart: {
+  provides: {
+    cart: ({ pricing, inventory, sessions }): Cart => {
+      ev('boot:cart');
+      expect(sessions.ns).toBe('sessions'); // proves the rename+instance wiring
+      const items: string[] = [];
+      return {
         items,
         add: id => {
           if (inventory.reserve(id) && pricing.priceOf(id) > 0) items.push(id);
           sessions.set('cart', items.join(','));
         },
-      } as Cart,
-    };
+      };
+    },
   },
 });
 
 const paymentsPlugin = plugin({
   name: 'payments',
   needs: { env: service<Env>(), mailer: service<Lazy<Mailer>>(), bus: service<Bus>() },
-  boot: ({ bus }) => {
-    ev('boot:payments');
-    return {
-      payments: {
+  provides: {
+    payments: ({ bus }): Payments => {
+      ev('boot:payments');
+      return {
         charge: async amount => {
           bus.publish('payment.charged');
           return `txn-${amount}`;
         },
-      } as Payments,
-    };
+      };
+    },
   },
 });
 
 const ordersPlugin = plugin({
   name: 'orders',
   needs: { db: service<Db>(), cart: service<Cart>(), payments: service<Payments>(), bus: service<Bus>() },
-  boot: ({ cart, payments, bus }) => {
-    ev('boot:orders');
-    const placed: string[] = [];
-    return {
-      orders: {
+  provides: {
+    orders: ({ cart, payments, bus }): Orders => {
+      ev('boot:orders');
+      const placed: string[] = [];
+      return {
         placed,
         async place() {
           const txn = await payments.charge(cart.items.length * 100);
@@ -339,8 +360,8 @@ const ordersPlugin = plugin({
           bus.publish('order.placed');
           return txn;
         },
-      } as Orders,
-    };
+      };
+    },
   },
 });
 
@@ -348,31 +369,32 @@ const shippingPlugin = plugin({
   name: 'shipping',
   // Declares the blob need but NEVER calls .get() — blob must stay cold.
   needs: { orders: service<Orders>(), blob: service<Lazy<BlobStore>>(), bus: service<Bus>() },
-  boot: ({ blob, bus }) => {
-    ev('boot:shipping');
-    return {
-      shipping: {
+  provides: {
+    shipping: ({ blob, bus }): Shipping => {
+      ev('boot:shipping');
+      return {
         ship: async orderId => {
           void blob; // deliberately unused: laziness means no init
           bus.publish(`shipped:${orderId}`);
         },
-      } as Shipping,
-    };
+      };
+    },
   },
 });
 
 const notificationsPlugin = plugin({
   name: 'notifications',
   needs: { mailer: service<Lazy<Mailer>>(), bus: service<Bus>(), auth: service<Auth>() },
-  boot: ({ mailer }) => {
-    ev('boot:notifications');
-    return {
-      notifications: {
+  provides: {
+    notifications: ({ mailer }): Notifications => {
+      ev('boot:notifications');
+      return {
         welcome: async user => {
-          (await mailer.get()).send(user); // initializes mailer on first use
+          const client = await mailer.get(); // initializes mailer on first use
+          client.send(user);
         },
-      } as Notifications,
-    };
+      };
+    },
   },
   start: () => ev('start:notifications'),
   stop: () => ev('stop:notifications'),
@@ -381,12 +403,14 @@ const notificationsPlugin = plugin({
 const analyticsPlugin = plugin({
   name: 'analytics',
   needs: { reportsDb: service<Db>(), metrics: service<Metrics>(), bus: service<Bus>() },
-  boot: ({ reportsDb, bus }) => {
-    ev('boot:analytics');
-    expect(reportsDb.instance).toBe('reports'); // renamed second db instance
-    const seen: string[] = [];
-    bus.subscribe('order.placed', () => void seen.push('order.placed'));
-    return { analytics: { seen } as Analytics };
+  provides: {
+    analytics: ({ reportsDb, bus }): Analytics => {
+      ev('boot:analytics');
+      expect(reportsDb.instance).toBe('reports'); // renamed second db instance
+      const seen: string[] = [];
+      bus.subscribe('order.placed', () => void seen.push('order.placed'));
+      return { seen };
+    },
   },
   start: () => ev('start:analytics'),
   stop: () => ev('stop:analytics'),
@@ -395,23 +419,25 @@ const analyticsPlugin = plugin({
 const reportingPlugin = plugin({
   name: 'reporting',
   needs: { reportsDb: service<Db>(), catalog: service<Catalog>(), orders: service<Orders>() },
-  boot: ({ reportsDb, catalog, orders }) => {
-    ev('boot:reporting');
-    return {
-      reporting: {
+  provides: {
+    reporting: ({ reportsDb, catalog, orders }): Reporting => {
+      ev('boot:reporting');
+      return {
         dailyReport: async () =>
           `${await reportsDb.query('report')}: ${catalog.products.length} products, ${orders.placed.length} orders`,
-      } as Reporting,
-    };
+      };
+    },
   },
 });
 
 const adminPlugin = plugin({
   name: 'admin',
   needs: { auth: service<Auth>(), reporting: service<Reporting>(), log: service<Log>() },
-  boot: ({ reporting }) => {
-    ev('boot:admin');
-    return { admin: { stats: () => reporting.dailyReport() } as Admin };
+  provides: {
+    admin: ({ reporting }): Admin => {
+      ev('boot:admin');
+      return { stats: () => reporting.dailyReport() };
+    },
   },
 });
 
@@ -429,18 +455,18 @@ const apiPlugin = plugin({
     ctx.registerAction({ id: 'api.admin.stats', binding: 'http', direction: 'in', address: 'GET /admin/stats' });
     ctx.registerService('api', 'custom');
   },
-  boot: ({ auth, orders, admin }) => {
-    ev('boot:api');
-    return {
-      api: {
+  provides: {
+    api: ({ auth, orders, admin }): Api => {
+      ev('boot:api');
+      return {
         handle: async path => {
           if (!auth.verify('ok-user')) return '403';
           if (path === '/checkout') return orders.place();
           if (path === '/admin/stats') return admin.stats();
           return '404';
         },
-      } as Api,
-    };
+      };
+    },
   },
 });
 
@@ -453,7 +479,6 @@ const indexerPlugin = plugin({
   needs: { catalog: service<Catalog>(), search: service<Lazy<SearchClient>>(), bus: service<Bus>() },
   boot: () => {
     ev('boot:worker-indexer');
-    return {};
   },
   start: async ({ search }) => {
     ev('start:worker-indexer');
@@ -468,7 +493,6 @@ const emailWorkerPlugin = plugin({
   needs: { notifications: service<Notifications>(), bus: service<Bus>() },
   boot: () => {
     ev('boot:worker-emails');
-    return {};
   },
   start: async ({ notifications }) => {
     ev('start:worker-emails');
@@ -482,7 +506,6 @@ const healthcheckPlugin = plugin({
   needs: { api: service<Api>(), db: service<Db>(), metrics: service<Metrics>() },
   boot: () => {
     ev('boot:healthcheck');
-    return {};
   },
   start: async ({ db, metrics }) => {
     ev('start:healthcheck');
@@ -613,12 +636,12 @@ describe('stress: 28-plugin commerce composition', () => {
     expect(m.actions.map(action => action.id)).toEqual(['api.checkout', 'api.admin.stats']);
     expect(m.dependencies).toEqual(
       expect.arrayContaining([
-        { from: 'logger', to: 'env', kind: 'requires' },
-        { from: 'auth', to: 'kv', kind: 'requires' },
-        { from: 'cart', to: 'kv-sessions', kind: 'requires' }, // derived token → renamed plugin
-        { from: 'analytics', to: 'db-reports', kind: 'requires' }, // renamed db instance
-        { from: 'api', to: 'admin', kind: 'requires' },
-        { from: 'healthcheck', to: 'api', kind: 'requires' },
+        { from: 'logger', to: 'env', kind: 'requires', key: 'env' },
+        { from: 'auth', to: 'kv', kind: 'requires', key: 'stress.kv' },
+        { from: 'cart', to: 'kv-sessions', kind: 'requires', key: 'stress.kv#sessions' }, // derived token → renamed plugin
+        { from: 'analytics', to: 'db-reports', kind: 'requires', key: 'reportsDb' }, // renamed db instance
+        { from: 'api', to: 'admin', kind: 'requires', key: 'admin' },
+        { from: 'healthcheck', to: 'api', kind: 'requires', key: 'api' },
       ]),
     );
     // Every edge points backward in declaration order (services flow forward).

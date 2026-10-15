@@ -289,19 +289,19 @@ export class DotAppImpl {
   }
 
   /**
-   * Walk the needs a plugin can be checked against before boot: those
-   * whose provider declared its publish keys statically (`Plugin.provides`,
-   * filled by features). A provider mounted later is a ring when its own
-   * needs lead back to the consumer (E019), otherwise an order error
-   * (E020). Satisfied needs become `dot explain`'s capability edges and the
-   * providers' manifest `provides`, without booting. `plugin()` units
-   * declare nothing statically; their needs stay with E012 at boot.
+   * Walk every plugin's needs against the static `provides` handles of
+   * every plugin (features and adapters alike). A provider mounted later is
+   * a ring when its own needs lead back to the consumer (E019), otherwise an
+   * order error (E020). Satisfied needs become `dot explain`'s capability
+   * edges and the providers' manifest `provides`, without booting. Only
+   * needs no plugin declares (erased graphs, dynamic bundle tokens) are
+   * left to E012 at boot.
    */
   #checkStaticCapabilities(): void {
     const providerByKey = new Map<string, PluginRecord>();
     for (const record of this.#records.values()) {
-      for (const localKey of record.plugin.provides ?? []) {
-        const wireKey = record.plugin.renames[localKey] ?? localKey;
+      // The handles are wire-keyed already: rename() rebuilds them on the new keys.
+      for (const wireKey of Object.keys(record.plugin.provides)) {
         record.provides.add(wireKey);
         if (!providerByKey.has(wireKey)) providerByKey.set(wireKey, record);
       }
@@ -356,7 +356,9 @@ export class DotAppImpl {
             `${label} "${record.plugin.name}" needs "${key}", which "${provider.plugin.name}" provides — ` +
             `but "${provider.plugin.name}" is mounted after it (position ${(provider.order + 1).toString()}; ` +
             `"${record.plugin.name}" is ${(record.order + 1).toString()}).\n` +
-            `Move "${provider.plugin.name}" before "${record.plugin.name}" in .features([...]).`,
+            (provider.plugin.role === 'feature'
+              ? `Move "${provider.plugin.name}" before "${record.plugin.name}" in .features([...]).`
+              : `Mount "${provider.plugin.name}" with .use() before "${record.plugin.name}".`),
         });
       }
     }
@@ -853,7 +855,7 @@ export class DotAppImpl {
     // on the plugin object, so the manifest reflects them.
     for (const plugin of this.#ordered) {
       const record = this.#records.get(plugin.name)!;
-      if (plugin.hooks.boot) record.hooks.add('boot');
+      if (plugin.hooks.boot || Object.keys(plugin.factories).length > 0) record.hooks.add('boot');
       if (plugin.hooks.start) record.hooks.add('start');
       if (plugin.hooks.stop) record.hooks.add('stop');
       if (plugin.hooks.dispose) record.hooks.add('dispose');
@@ -1103,7 +1105,9 @@ export class DotAppImpl {
         });
       }
 
-      if (!plugin.hooks.boot) {
+      const bootHook = plugin.hooks.boot;
+      const factories = Object.entries(plugin.factories);
+      if (!bootHook && factories.length === 0) {
         record.booted = true;
         bootedRecords.push(record);
         pluginLogger.debug('boot: skipped (no hook)');
@@ -1112,7 +1116,7 @@ export class DotAppImpl {
       record.hooks.add('boot');
 
       this.#emitHook('boot', plugin.name, record.order, 'starting');
-      let result: ServiceRecord | void;
+      let result: ServiceRecord;
       try {
         result = await this.#withHookBudget(plugin.name, 'boot', () =>
           withPluginHookSpan(
@@ -1123,12 +1127,19 @@ export class DotAppImpl {
               hook: 'boot',
               order: record.order,
             },
-            // Erasure boundary: hooks are stored as `(ctx: never) => ...`;
-            // the kernel is the one caller allowed to cross it.
-            span => {
+            // Erasure boundary: factories and hooks are stored as
+            // `(ctx: never) => ...`; the kernel is the one caller allowed to
+            // cross it. Factories run in key order and see the needs only;
+            // `boot` (side effects) runs after them and sees their values.
+            async span => {
               // Later records of this plugin's hook carry its span too.
               pluginLogger = pluginLogger.withTrace(span.spanContext());
-              return plugin.hooks.boot!(ctx as never);
+              const published: ServiceRecord = {};
+              for (const [key, factory] of factories) {
+                published[key] = await factory(ctx as never);
+              }
+              if (bootHook) await bootHook({ ...ctx, ...published } as never);
+              return published;
             },
           ),
         );
@@ -1140,7 +1151,7 @@ export class DotAppImpl {
           message: timedOut ? error.message : `boot hook threw for plugin "${plugin.name}": ${stringifyError(error)}`,
           remediation: timedOut
             ? `Find the hang in the boot() hook of "${plugin.name}" — a missing await or a connection that never settles — or raise defineApp's hookTimeoutMs.`
-            : `Fix the error in the boot() hook of "${plugin.name}". If boot opens partial resources before throwing, clean them up locally — DOT only disposes plugins whose boot completed.`,
+            : `Fix the error in the provides factories or boot() hook of "${plugin.name}". If boot opens partial resources before throwing, clean them up locally — DOT only disposes plugins whose boot completed.`,
           docsAnchor: timedOut ? 'hook-timeout' : 'boot-failed',
           durationMs: performance.now() - started,
           cause: error,
@@ -1148,7 +1159,7 @@ export class DotAppImpl {
         });
       }
 
-      const publishedServices: ServiceRecord = result ?? {};
+      const publishedServices: ServiceRecord = result;
       record.publishedServices = publishedServices;
       record.booted = true;
 
@@ -1164,7 +1175,7 @@ export class DotAppImpl {
             message:
               `Plugin "${plugin.name}" publishes service "${wireKey}" — the "$" prefix is reserved ` +
               `for kernel context keys ($app, $plugin, $config).`,
-            remediation: `Rename the "${wireKey}" key returned from the boot() hook of "${plugin.name}" — "$"-prefixed keys would shadow the kernel context.`,
+            remediation: `Rename the "${wireKey}" provides key of "${plugin.name}" — "$"-prefixed keys would shadow the kernel context.`,
             docsAnchor: 'reserved-service-key',
             durationMs: performance.now() - started,
             rollback: [...bootedRecords, record],
