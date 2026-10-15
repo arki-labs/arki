@@ -11,12 +11,39 @@
  * `kv.get/set` in tests because that would require a real Redis instance.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
+import type { Provided } from '@arki/dot/plugin';
 import { defineApp, DotLifecycleError, DotPluginError, rename } from '@arki/dot/plugin';
 
+import type * as KvModule from './index.js';
 import { kv, KV_PLUGIN_ERROR_CODES } from './dot.js';
 import { KV } from './index.js';
+
+// Count every client the adapter constructs: "optional" must mean that no
+// client (and so no Redis socket) exists when no URL is configured.
+const constructed = vi.hoisted(() => ({ count: 0 }));
+vi.mock('./index.js', async importOriginal => {
+  const actual = await importOriginal<typeof KvModule>();
+  class CountingKV extends actual.KV {
+    constructor(...args: ConstructorParameters<typeof actual.KV>) {
+      super(...args);
+      constructed.count += 1;
+    }
+  }
+  return { ...actual, KV: CountingKV };
+});
+
+/** Run `body` with `KV_URL` unset, restoring it afterwards. */
+async function withoutKvUrl(body: () => Promise<void>): Promise<void> {
+  const previous = process.env['KV_URL'];
+  delete process.env['KV_URL'];
+  try {
+    await body();
+  } finally {
+    if (previous !== undefined) process.env['KV_URL'] = previous;
+  }
+}
 
 describe('@arki/kv/dot', () => {
   it('contributes a kv-kind service to the manifest', () => {
@@ -80,6 +107,92 @@ describe('@arki/kv/dot', () => {
       expect(app.services.kv).toBeInstanceOf(KV);
       expect(app.services.sessionsKv).toBeInstanceOf(KV);
       expect(app.services.kv).not.toBe(app.services.sessionsKv);
+    } finally {
+      await app.dispose();
+    }
+  });
+
+  it('probe: true fails boot with a coded error when Redis is unreachable', async () => {
+    // A bad URL must stop the app at boot, not at the first request.
+    const caught = await defineApp('kv-probe-fails')
+      .use(kv({ url: 'redis://127.0.0.1:1', probe: true, probeTimeoutMs: 300 }))
+      .boot()
+      .catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(DotLifecycleError);
+    const cause = (caught as DotLifecycleError).cause;
+    expect(cause).toBeInstanceOf(DotPluginError);
+    expect((cause as DotPluginError).code).toBe(KV_PLUGIN_ERROR_CODES.probeFailed);
+  });
+});
+
+describe('@arki/kv/dot kv.optional', () => {
+  beforeEach(() => {
+    constructed.count = 0;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('types the published value as KV | null, so consumers must handle null', () => {
+    type Optional = ReturnType<typeof kv.optional>;
+    expectTypeOf<Provided<Optional['provides']['kv']>>().toEqualTypeOf<KV | null>();
+  });
+
+  it('publishes null and opens no client when no URL is configured', async () => {
+    // Dev and tests run without Redis: boot must succeed and nothing may connect.
+    await withoutKvUrl(async () => {
+      const app = await defineApp('kv-optional-null').use(kv.optional()).boot();
+      try {
+        expect(app.services.kv).toBeNull();
+        expect(constructed.count).toBe(0);
+      } finally {
+        await app.dispose();
+      }
+    });
+  });
+
+  it('treats an empty URL (an empty env var) as unset', async () => {
+    const app = await defineApp('kv-optional-empty')
+      .use(kv.optional(() => ({ url: '' })))
+      .boot();
+    try {
+      expect(app.services.kv).toBeNull();
+    } finally {
+      await app.dispose();
+    }
+  });
+
+  it('opens the same client kv() opens when a URL is configured, and closes it on dispose', async () => {
+    const close = vi.spyOn(KV.prototype, 'close');
+    const app = await defineApp('kv-optional-url')
+      .use(kv.optional({ url: 'redis://127.0.0.1:1', namespace: 'optional-test' }))
+      .boot();
+    expect(app.services.kv).toBeInstanceOf(KV);
+    expect(constructed.count).toBe(1);
+    await app.dispose();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('probe: true still fails boot on a bad URL — optional means "no URL", not "ignore errors"', async () => {
+    const caught = await defineApp('kv-optional-probe-fails')
+      .use(kv.optional({ url: 'redis://127.0.0.1:1', probe: true, probeTimeoutMs: 300 }))
+      .boot()
+      .catch((error: unknown) => error);
+    expect(((caught as DotLifecycleError).cause as DotPluginError).code).toBe(KV_PLUGIN_ERROR_CODES.probeFailed);
+  });
+
+  // Needs a real Redis: `KV_TEST_URL=redis://127.0.0.1:6379 bun run test`.
+  it.runIf(process.env['KV_TEST_URL'])('passes the probe and round-trips a value against a real Redis', async () => {
+    const app = await defineApp('kv-optional-real')
+      .use(kv.optional({ url: process.env['KV_TEST_URL'], namespace: 'arki-kv-dot-test', probe: true }))
+      .boot();
+    try {
+      const client = app.services.kv;
+      expect(client).toBeInstanceOf(KV);
+      await client?.set('greeting', 'hello', 5);
+      expect(await client?.get('greeting')).toBe('hello');
+      await client?.delete('greeting');
     } finally {
       await app.dispose();
     }

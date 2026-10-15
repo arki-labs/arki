@@ -88,6 +88,36 @@ When the rate-limiter Redis client is not ready, the limiter transparently falls
 
 - The plugin publishes `kv` through `provides`. Consumers write
   `needs: { kv: kvPlugin.provides.kv }`; `.lazy` on the handle gives a `Lazy<T>`.
+- `kv()` fails boot without a URL (`ARKI_KV_PLUGIN_E001`).
+
+### Optional KV: `kv.optional()`
+
+For an app that runs without Redis in dev or tests. It takes the same options
+as `kv()` and publishes `kv` as `KV | null`:
+
+- No URL (`options.url` unset or empty, and no `KV_URL`): `kv` is `null` and
+  no client is opened. Consumers handle `null` — a rate limiter allows every
+  request, a cache misses.
+- A URL: the same client `kv()` opens. `dispose` closes it.
+
+```ts
+import type { Provided } from '@arki/dot/plugin';
+import { kv } from '@arki/kv/dot';
+
+export const cache = kv.optional(() => ({ url: env.KV_URL, namespace: 'my-app', probe: true }));
+export type Kv = Provided<typeof cache.provides.kv>; // KV | null
+```
+
+To make a missing URL fatal in production only, throw from the thunk:
+`kv.optional(() => { if (isProd && !env.KV_URL) throw new Error('KV_URL is required'); return { url: env.KV_URL }; })`.
+
+### Connection probe (both variants)
+
+`probe: true` runs a set/get/delete round trip at boot. A bad or unreachable
+URL then fails boot with `ARKI_KV_PLUGIN_E002` instead of failing the first
+request. An unreachable Redis never answers, so the probe gives up after
+`probeTimeoutMs` (default `5000`) and closes the client. Off by default.
+
 - See `packages/dot/docs/` in the [`@arki/dot`](https://www.npmjs.com/package/@arki/dot)
   package for plugin authoring, lifecycle, diagnostics, and the
   [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).
