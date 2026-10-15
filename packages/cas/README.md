@@ -1,10 +1,10 @@
 # @arki/cas
 
-A bounded computer algebra package on [`@arki/expr`](../expr) and [`@arki/math`](../math): exact polynomials and rational functions with π and e as symbolic coefficients, closed-form roots, budgets on every input, and results as canonical expr ASTs. The design is specified in `docs/rfcs/2026-10-15-arki-cas.md`. Private, `0.0.x`: build step 1 of the RFC (polynomial core). `simplify`, `derivative`, `derivation` and `factor` come in later steps.
+A bounded computer algebra package on [`@arki/expr`](../expr) and [`@arki/math`](../math): exact polynomials and rational functions with π and e as symbolic coefficients, closed-form roots, budgets on every input, and results as canonical expr ASTs. The design is specified in `docs/rfcs/2026-10-15-arki-cas.md`. Private, `0.0.x`: build steps 1 and 2 of the RFC (polynomial core; conditions, the sign oracle and `simplify`). `derivative`, `derivation` and `factor` come in later steps.
 
 ## The ℚ[π, e] assumption
 
-Coefficients live in ℚ[π, e] (ℚ(π, e) for division), with π and e as **independent transcendentals**. A value is treated as zero exactly when all its rational coefficients are zero. That is the standard CAS convention (SymPy's `QQ[pi,E]`, Mathematica's `Together`, Maple's `normal`), and it is **not a theorem**: whether π and e are algebraically independent is an open problem; it is not even known whether π + e is irrational. No relation between them is known. `polynomialIn`, `expand`, `collect`, `rationalize`, `gcd` and `exactRoots` all zero-test under this assumption.
+Coefficients live in ℚ[π, e] (ℚ(π, e) for division), with π and e as **independent transcendentals**. A value is treated as zero exactly when all its rational coefficients are zero. That is the standard CAS convention (SymPy's `QQ[pi,E]`, Mathematica's `Together`, Maple's `normal`), and it is **not a theorem**: whether π and e are algebraically independent is an open problem; it is not even known whether π + e is irrational. No relation between them is known. `polynomialIn`, `expand`, `collect`, `rationalize`, `gcd`, `exactRoots` and `simplify` all zero-test under this assumption.
 
 Signs of non-zero constants (a discriminant such as `e^2 + 4*pi`) are decided rigorously: π and e are enclosed in rational intervals from `@arki/math` `PI`/`E`, the value is evaluated in exact interval arithmetic, and the precision doubles up to the `digits` budget. If the sign is still unknown, the answer is "unknown", never a guess (`exactRoots` then returns that part as `numeric`).
 
@@ -25,6 +25,45 @@ polynomialIn('pi*x - 1', 'x'); // linear, coefficient `pi`; exactRoots → '1 / 
 polynomialIn('sin(x) - 1', 'x'); // { kind: 'other', reason: 'transcendental', span: { start: 0, end: 6 } }
 ```
 
+## `simplify`
+
+```ts
+import { simplify } from '@arki/cas/simplify';
+
+simplify('x/x'); // '1', conditions: [x ≠ 0]
+simplify('sqrt(x^2)'); // 'abs(x)', no conditions: over ℝ this holds everywhere
+simplify('sqrt(x^2)', { assume: { x: 'nonnegative' } }); // 'x', conditions: [x ≥ 0 (assumed)]
+simplify('exp(ln(x))'); // 'x', conditions: [x > 0]
+simplify('ln(exp(x))'); // 'x', no conditions
+simplify('exp(x)*cos(x) - exp(x)*sin(x)'); // 'exp(x) * (cos(x) - sin(x))'
+simplify('((2*x)*(x - 1) - (x^2 + 1))/(x - 1)^2'); // '(x^2 - 2 * x - 1) / (x - 1)^2'
+```
+
+v1 is **real-only**: every variable ranges over ℝ and every function is its real version. The result keeps the input's value wherever the input is defined and the caller's assumptions hold. A rewrite may widen the domain (`x/x → 1`); every restriction it removes comes back in `conditions` (reason `domain`), and so does every caller assumption a rewrite relied on (reason `assumed`). A rewrite that would change the value somewhere the input is defined runs only when the sign oracle proves it safe. A restriction the result still shows is not repeated, and one the oracle proves from the expression itself (`x^2 + 1 ≠ 0`) is not a condition. `expand`, `collect`, `rationalize`, `polynomialIn` and `gcd` return lost restrictions the same way (`0*ln(x)` carries `x > 0`).
+
+| Rule | Rewrite | Needs | Returns |
+| --- | --- | --- | --- |
+| `fold` | literal arithmetic, `0*u`, `u + 0`, `1*u`, `u^1`, `u/1` | — | restrictions of a dropped `u` |
+| `expand`, `collect` | products and powers of sums multiplied out; like terms and powers | — | — |
+| `cancel` | gcd cancellation | — | cancelled factor ≠ 0 |
+| `integer-powers` | `(u^(p/q))^k → u^(kp/q)` for an integer kp/q | — | `u ≥ 0` (or `> 0`) of the removed power |
+| `fractional-powers` | `(u^a)^b`, `(g^m)^q`, `u^a·u^b` with non-integer exponents | `u > 0` proven or assumed | the assumption |
+| `sqrt-of-square` | `sqrt(c·u^2) → sqrt(c)·abs(u)`, then `→ u` | `u ≥ 0` proven or assumed for `→ u` | the assumption |
+| `square-of-sqrt` | `sqrt(u)^2 → u`, likewise `cbrt` and `nthRoot` | — | `u ≥ 0` (even roots) |
+| `exp-ln` | `exp(ln(u)) → u` | — | `u > 0` |
+| `ln-exp` | `ln(exp(u)) → u`, `ln(e^k) → k` | real (v1 always) | — |
+| `exp-product` | `exp(a)·exp(b) → exp(a + b)`, `exp(a)^y → exp(y·a)`, `1/exp(a) → exp(-a)` | — | — |
+| `abs-sign` | `abs(u) → ±u`; `abs(u)/u → sign(u)` | sign of `u` proven or assumed for the first | the assumption; `u ≠ 0` |
+| `parity` | `f(-u) → -f(u)` for odd, `f(u)` for even functions (`sin`, `cos`, `abs`, …) | — | — |
+| `special-values` | `sin(0)`, `cos(0)`, `tan(0)`, `exp(0)`, `ln(1)`, `ln(e)`, exact `sqrt` and `abs` of rationals | — | — |
+| `factor-out` | a common kernel factor pulled out of a sum (printing only) | — | — |
+
+Anything not in the table is left alone (`sin(x)^2 + cos(x)^2` stays). `applied` lists the rules that changed something.
+
+**The sign oracle** decides "proven". It is small, sound and incomplete; "unknown" never licenses a rewrite. It knows: assumed signs of names (`nonzero`, `positive`, `nonnegative`, `negative`, per call); signs of ℚ[π, e] constants (rigorous, as above); `exp(u)`, `cosh(u)` > 0; `abs(u)`, `sqrt(u)`, even roots and `u^(p/q)` ≥ 0; even powers and expanded perfect squares ≥ 0; `ln(u)` has the sign of `u − 1`; odd increasing functions (`sign`, `atan`, `sinh`, …) keep the sign of their argument; sums of non-negatives with one positive term are positive; products and quotients by sign rules.
+
+**The readable normal form.** One fraction; the numerator expanded, with a common kernel factor pulled out; the denominator printed as a product of the factors the input divided by, split further by content and repeated factors (`(x - 1)^2`). Names are ordered by name, so the output does not depend on how the input was written and `simplify` is idempotent. `numbers: 'decimal'` prints terminating rationals as decimals.
+
 ## Budgets
 
-Every call checks `nodes`, `depth`, `terms`, `degree`, `gcdDegree`, `digits` and `fuel` (defaults 5 000, 256, 10 000, 1 000, 64, 1 000, 100 000) before the expensive work and throws `CasLimitError` (a `ResourceLimitError`) with `budget`, `limit` and `actual`. `signal` is checked every 1 024 fuel units. Input errors are `CasError` (a `MathError`) with a `code` and a one-sentence `remediation`.
+Every call checks `nodes`, `depth`, `terms`, `degree`, `gcdDegree`, `digits` and `fuel` (defaults 5 000, 256, 10 000, 1 000, 64, 1 000, 100 000) before the expensive work; rewriting has no static bound, so each `simplify` rewrite also costs fuel and throws `CasLimitError` (a `ResourceLimitError`) with `budget`, `limit` and `actual`. `signal` is checked every 1 024 fuel units. Input errors are `CasError` (a `MathError`) with a `code` and a one-sentence `remediation`.

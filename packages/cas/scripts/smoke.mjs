@@ -7,6 +7,7 @@ import { parse } from '@arki/expr';
 
 import { CasError, CasLimitError, conditionToLatex } from '../dist/index.js';
 import { collect, exactRoots, expand, gcd, polynomialIn, rationalize } from '../dist/polynomial.js';
+import { simplify } from '../dist/simplify.js';
 
 const code = run => {
   try {
@@ -20,6 +21,11 @@ const code = run => {
 const roots = text => {
   const form = polynomialIn(text, 'x');
   return form.kind === 'polynomial' ? exactRoots(form).roots.map(r => r.value.source).join(', ') : form.kind;
+};
+
+const simplified = (text, options) => {
+  const r = simplify(text, options);
+  return `${r.result.source} | ${r.conditions.map(conditionToLatex).join(', ')}`;
 };
 
 const cancelled = polynomialIn('x/x - 1', 'x');
@@ -40,6 +46,12 @@ const checks = [
   ['not in domain', code(() => expand('x + i')), 'not-in-domain'],
   ['degree budget', code(() => expand('(x + 1)^10000')), 'degree'],
   ['256-deep input', expand(deep).result.source, 'x'],
+  ['simplify cancel', simplified('x/x'), '1 | x \\neq 0'],
+  ['simplify exp-ln', simplified('exp(ln(x))'), 'x | x > 0'],
+  ['simplify assumed', simplified('sqrt(x^2)', { assume: { x: 'nonnegative' } }), 'x | x \\geq 0'],
+  ['simplify readable', simplified('exp(x)*cos(x) - exp(x)*sin(x) + 0*x/(x - 1)^2'), 'exp(x) * (cos(x) - sin(x)) | x - 1 \\neq 0'],
+  ['simplify pi sign', simplified('abs(pi - 355/113)'), '-pi + 355 / 113 | '],
+  ['simplify 256-deep input', simplify(deep).result.source, 'x'],
 ];
 
 const runtime =
