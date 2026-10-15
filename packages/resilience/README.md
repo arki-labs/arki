@@ -109,7 +109,7 @@ const detach = attachPolicyLogger(policy, logger, 'billing');
 
 ## API
 
-- `createResiliencePolicy(options)` — compose retry + timeout + circuit breaker + bulkhead.
+- `createResiliencePolicy(options)` — compose retry + circuit breaker + timeout, plus an optional `bulkhead` that wraps them all (one logical call holds one slot).
 - `createRetryPolicy`, `createCircuitBreakerPolicy`, `createTimeoutPolicy`, `createBulkheadPolicy` — individual primitives.
 - `externalApiPolicy`, `databasePolicy`, `backgroundJobPolicy` — pre-tuned presets.
 - `withResilience`, `withRetry`, `withTimeout` — execution helpers.

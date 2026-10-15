@@ -52,6 +52,12 @@ export type ResiliencePolicyOptions = {
   retry?: RetryPolicyOptions;
   circuitBreaker?: CircuitBreakerPolicyOptions;
   timeout?: TimeoutPolicyOptions;
+  /**
+   * Limit concurrent calls. Off unless given, so existing callers keep unlimited
+   * concurrency. It wraps everything else: one logical call, retries included,
+   * holds one slot.
+   */
+  bulkhead?: BulkheadPolicyOptions;
 };
 
 // ---------------------------------------------------------------------------
@@ -128,16 +134,18 @@ export function wrap(first: Policy, ...rest: Policy[]): Policy {
 export const noop: Policy = fromEngine(cockatielNoop, {});
 
 /**
- * Create a composed resilience policy: retry -> circuit breaker -> timeout.
+ * Create a composed resilience policy: [bulkhead ->] retry -> circuit breaker -> timeout.
  *
- * The outermost policy (retry) wraps the circuit breaker which wraps the
- * timeout, so a single logical call may be retried while individual attempts
- * are protected by the breaker and the timeout.
+ * Retry wraps the circuit breaker which wraps the timeout, so a single logical
+ * call may be retried while individual attempts are protected by the breaker
+ * and the timeout. With `bulkhead`, the bulkhead wraps all of it, so one
+ * logical call holds one slot for all its attempts.
  */
 export function createResiliencePolicy(options: ResiliencePolicyOptions = {}): Policy {
   const retryPolicy = createRetryPolicy(options.retry);
   const breakerPolicy = createCircuitBreakerPolicy(options.circuitBreaker);
   const timeoutPolicy = createTimeoutPolicy(options.timeout);
 
-  return wrap(retryPolicy, breakerPolicy, timeoutPolicy);
+  if (options.bulkhead === undefined) return wrap(retryPolicy, breakerPolicy, timeoutPolicy);
+  return wrap(createBulkheadPolicy(options.bulkhead), retryPolicy, breakerPolicy, timeoutPolicy);
 }

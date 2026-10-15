@@ -287,6 +287,32 @@ describe('wrap and cancellation', () => {
     expect(isBrokenCircuitError(error)).toBe(true);
   });
 
+  it('with a bulkhead, one logical call holds one slot for all its retries and extra calls are rejected', async () => {
+    // Why: the README promised a bulkhead in the composite; without it a burst of calls
+    // to a slow dependency would all run at once.
+    const policy = createResiliencePolicy({
+      retry: { maxAttempts: 3, initialDelay: 1, maxDelay: 2 },
+      bulkhead: { maxConcurrent: 1, maxQueue: 0 },
+    });
+    const held = deferred<string>();
+    let attempts = 0;
+    const first = policy.execute(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('flaky'); // the retry must not need a second slot
+      return held.promise;
+    });
+    await vi.waitFor(() => {
+      expect(attempts).toBe(2);
+    });
+
+    const second = await policy.execute(() => 'second').catch((error_: unknown) => error_);
+    expect(isBulkheadRejectedError(second)).toBe(true);
+
+    held.resolve('first');
+    await expect(first).resolves.toBe('first');
+    await expect(policy.execute(() => 'third')).resolves.toBe('third');
+  });
+
   it('passes a parent signal through wrap down to the function and cancels a function that ignores it', async () => {
     const policy = wrap(
       createRetryPolicy({ maxAttempts: 3, initialDelay: 1, maxDelay: 2 }),
