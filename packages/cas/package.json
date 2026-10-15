@@ -11,7 +11,8 @@
     "algebra",
     "polynomial",
     "symbolic",
-    "roots"
+    "roots",
+    "simplify"
   ],
   "homepage": "https://arki.dev",
   "bugs": {
@@ -35,6 +36,11 @@
       "types": "./dist/polynomial.d.ts",
       "import": "./dist/polynomial.js",
       "default": "./dist/polynomial.js"
+    },
+    "./simplify": {
+      "types": "./dist/simplify.d.ts",
+      "import": "./dist/simplify.js",
+      "default": "./dist/simplify.js"
     },
     "./package.json": "./package.json"
   },
