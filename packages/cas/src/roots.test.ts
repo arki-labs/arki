@@ -155,10 +155,17 @@ describe('exactRoots over ℚ', () => {
     ]);
   });
 
-  it('returns irreducible-looking parts of degree ≥ 3 as numeric, flagged inexact (no factor before build step 4)', () => {
+  it('factors rational polynomials over ℚ first: x^4 - 5x^2 + 4 has the exact roots ±1, ±2', () => {
     const { result } = rootsOf('x^4 - 5x^2 + 4');
+    expect(result.exact).toBe(true);
+    expect(result.roots.map(r => r.value.source)).toEqual(['-2', '-1', '1', '2']);
+  });
+
+  it('solves the linear and quadratic factors exactly and returns irreducible factors of degree ≥ 3 as numeric', () => {
+    const { result } = rootsOf('(x^3 - 2) * (x^2 - 2) * (x - 5)');
+    expect(result.roots.map(r => r.value.source)).toEqual(['-sqrt(2)', 'sqrt(2)', '5']);
     expect(result.exact).toBe(false);
-    expect(result.numeric).toEqual([{ coefficients: [4, 0, -5, 0, 1], multiplicity: 1 }]);
+    expect(result.numeric).toEqual([{ coefficients: [-2, 0, 0, 1], multiplicity: 1 }]);
   });
 
   it('refuses the zero polynomial: every number is a root', () => {

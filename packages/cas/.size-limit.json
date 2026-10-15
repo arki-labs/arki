@@ -1,18 +1,34 @@
 [
   {
-    "name": "@arki/cas/polynomial without exactRoots (polynomialIn, expand, collect, rationalize, gcd; @arki/expr and @arki/math ignored): RFC target 10 kB, measured 9.4 kB (step 2 added lost-restriction conditions and the sign oracle)",
+    "name": "@arki/cas/polynomial without exactRoots and factor (polynomialIn, expand, collect, rationalize, gcd; @arki/expr and @arki/math ignored): RFC target 10 kB, measured 9.53 kB (step 2 added lost-restriction conditions and the sign oracle)",
     "path": "dist/polynomial.js",
     "import": "{ polynomialIn, expand, collect, rationalize, gcd }",
     "ignore": ["@arki/expr", "@arki/math"],
-    "limit": "9.5 kB",
+    "limit": "9.75 kB",
     "gzip": true
   },
   {
-    "name": "@arki/cas/polynomial with exactRoots (@arki/expr and @arki/math ignored): RFC target +8 kB, measured +0.9 kB",
+    "name": "@arki/cas/polynomial with exactRoots (@arki/expr and @arki/math ignored): measured 13.3 kB, since step 4 exactRoots splits by factoring over Q",
     "path": "dist/polynomial.js",
     "import": "{ polynomialIn, exactRoots }",
     "ignore": ["@arki/expr", "@arki/math"],
-    "limit": "10.5 kB",
+    "limit": "13.5 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/cas/polynomial factor (@arki/expr and @arki/math ignored): measured 12.21 kB",
+    "path": "dist/polynomial.js",
+    "import": "{ factor }",
+    "ignore": ["@arki/expr", "@arki/math"],
+    "limit": "12.5 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/cas/polynomial with exactRoots and factor (@arki/expr and @arki/math ignored): RFC target +8 kB over polynomial without them, measured +4.11 kB (13.64 kB)",
+    "path": "dist/polynomial.js",
+    "import": "{ polynomialIn, exactRoots, factor }",
+    "ignore": ["@arki/expr", "@arki/math"],
+    "limit": "14 kB",
     "gzip": true
   },
   {
@@ -48,10 +64,10 @@
     "gzip": true
   },
   {
-    "name": "@arki/cas/polynomial (polynomialIn, exactRoots) with @arki/expr parse/print and the @arki/math subpaths: measured 20.5 kB",
+    "name": "@arki/cas/polynomial (polynomialIn, exactRoots) with @arki/expr parse/print and the @arki/math subpaths: measured 25.38 kB (step 4 added factoring)",
     "path": "dist/polynomial.js",
     "import": "{ polynomialIn, exactRoots }",
-    "limit": "21 kB",
+    "limit": "25.75 kB",
     "gzip": true
   },
   {
@@ -73,6 +89,13 @@
     "path": "dist/derivation.js",
     "import": "{ derivation }",
     "limit": "28 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/cas/polynomial factor with @arki/expr parse/print and the @arki/math subpaths: measured 24.2 kB",
+    "path": "dist/polynomial.js",
+    "import": "{ factor }",
+    "limit": "24.5 kB",
     "gzip": true
   }
 ]

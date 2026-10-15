@@ -1,14 +1,15 @@
 // Cross-runtime smoke test. Runs the BUILT package (dist/) under Node, Bun and
 // Deno via `bun run test:runtimes`, and is bundled for the browser and Hermes.
 // It exercises each export once, plus a 256-deep input and a 5th-order
-// derivation (RFC §16); the unit tests cover the details.
+// derivation and a degree-40 factorization (RFC §16); the unit tests cover
+// the details.
 
 import { parse } from '@arki/expr';
 
 import { derivation } from '../dist/derivation.js';
 import { derivative } from '../dist/derivative.js';
 import { CasError, CasLimitError, conditionToLatex } from '../dist/index.js';
-import { collect, exactRoots, expand, gcd, polynomialIn, rationalize } from '../dist/polynomial.js';
+import { collect, exactRoots, expand, factor, gcd, polynomialIn, rationalize } from '../dist/polynomial.js';
 import { simplify } from '../dist/simplify.js';
 
 const code = run => {
@@ -71,6 +72,13 @@ const checks = [
   ['not differentiable', code(() => derivative('floor(x)', 'x')), 'not-differentiable'],
   ['derivative 256-deep input', derivative(deep, 'x').result.source, '1'],
   ['derivation chain step', derivation('sin(x^2)', 'x').steps.children[0].children[0].rule.id, 'chain'],
+  ['factor quartic', roots('x^4 - 5x^2 + 4'), '-2, -1, 1, 2'],
+  ['factor x^60 - 1', factor('x^60 - 1', 'x').factors.length, 12],
+  [
+    'factor degree 40',
+    factor(Array.from({ length: 10 }, (_, i) => `(x^4 + ${i + 1}*x + ${2 * i + 3})`).join('*'), 'x').factors.length,
+    10,
+  ],
   [
     '5th-order derivation',
     derivation('exp(x)*cos(x)', 'x', { order: 5 }).result.source,

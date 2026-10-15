@@ -47,6 +47,14 @@ export type CasLimits = {
   readonly steps: number;
   /** Printed nodes across a derivation's steps, counted before any step is printed. Default 50 000. */
   readonly stepNodes: number;
+  /** Degree of each square-free part `factor` splits over ℚ. Default 128. */
+  readonly factorDegree: number;
+  /** Digits of the largest coefficient `factor` splits over ℚ. Default 300. */
+  readonly factorDigits: number;
+  /** Digits of the modulus p^k that Hensel lifting reaches, computed before lifting. Default 2 000. */
+  readonly liftDigits: number;
+  /** Candidate products tried while recombining modular factors. Default 65 536. */
+  readonly recombination: number;
 };
 
 export type CasOptions = {
@@ -117,6 +125,10 @@ export const DEFAULT_LIMITS: CasLimits = Object.freeze({
   order: 10,
   steps: 2000,
   stepNodes: 50_000,
+  factorDegree: 128,
+  factorDigits: 300,
+  liftDigits: 2000,
+  recombination: 65_536,
 });
 
 const BUDGETS: readonly CasBudget[] = [
@@ -130,6 +142,10 @@ const BUDGETS: readonly CasBudget[] = [
   'order',
   'steps',
   'stepNodes',
+  'factorDegree',
+  'factorDigits',
+  'liftDigits',
+  'recombination',
 ];
 
 const SIGNAL_INTERVAL = 1024;

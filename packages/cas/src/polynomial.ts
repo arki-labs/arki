@@ -18,16 +18,23 @@ import { CasError } from './core.js';
 import { binary, Emitter, exprOf, numberNode } from './emit.js';
 import {
   coefficientsIn,
+  constant,
   constantValue,
   degreeIn,
+  divideExact,
   EMPTY,
   fromCoefficientsIn,
   generators,
   leadingTerm,
+  multiply,
+  normalized,
+  ONE,
   gcd as polyGcd,
+  power,
   scale,
 } from './poly.js';
 import { inputExpr, read } from './read.js';
+import { rationalFactorization, rationalFactors, rationalIn, squareFreeParts } from './roots.js';
 
 export { exactRoots } from './roots.js';
 export type { ExactRoots } from './roots.js';
@@ -227,4 +234,88 @@ export function polynomialIn(input: CasInput, variable: string, options: CasOpti
     coefficientOf(c.size === 0 ? ctx.fromPoly(c) : ctx.quotient(c, value.den), emitter, ctx),
   );
   return { kind: 'polynomial', coefficients, conditions };
+}
+
+/** `p` with its leading coefficient in `x` made positive (by that coefficient's own leading term). */
+function positiveIn(p: Poly, x: number): Poly {
+  const top = coefficientsIn(p, x).at(-1);
+  return top !== undefined && leadingTerm(top)?.c.isNegative() === true ? scale(p, ONE.negated()) : p;
+}
+
+export type Factored = {
+  /** The constant factor: a rational, or for coefficients in other names, π or e, the part without the variable. */
+  readonly content: Expr;
+  /** Factors in the variable, by degree then text, each with coprime integer coefficients and a positive leading coefficient. */
+  readonly factors: readonly { readonly factor: Expr; readonly multiplicity: number }[];
+  /**
+   * True when every factor is irreducible. Each square-free part with
+   * rational coefficients (after the content, which may hold other names, π
+   * or e) is factored completely over ℚ. A part whose coefficients still
+   * involve other names, π or e stays whole, and `complete` is false (v1 has
+   * no multivariate factoring).
+   */
+  readonly complete: boolean;
+  /** Restrictions of the input the factored form no longer shows (`x/x*(x - 1)`: x ≠ 0). */
+  readonly conditions: readonly Condition[];
+};
+
+/**
+ * `input` as content times a product of factors in `variable` (RFC §8.2).
+ * Rational coefficients are factored completely over ℚ by Zassenhaus's
+ * algorithm; every factor returned is proven irreducible, and a budget that
+ * runs out (`factorDegree`, `factorDigits`, `liftDigits`, `recombination`)
+ * throws `CasLimitError` instead of returning a partial answer.
+ *
+ * ```ts
+ * factor('x^4 - 5x^2 + 4', 'x'); // content 1; x - 2, x - 1, x + 1, x + 2; complete
+ * factor('2x^3 - 2x', 'x'); // content 2; x, x - 1, x + 1
+ * factor('x^4 + 1', 'x'); // x^4 + 1 (irreducible over ℚ)
+ * factor('y*x^2 - y', 'x'); // content y; x - 1, x + 1; complete
+ * factor('x^2 - y', 'x'); // x^2 - y stays whole; complete: false
+ * ```
+ *
+ * Throws `InvalidArgumentError` when the input is not a polynomial in the
+ * variable (a quotient by it, or a function of it such as `sin(x)`).
+ */
+export function factor(input: CasInput, variable: string, options: CasOptions = {}): Factored {
+  const ctx = new Context(options);
+  ctx.checkVariable(variable);
+  const value = read(inputExpr(input, ctx).root, ctx);
+  const x = ctx.nameId(variable);
+  const emitter = new Emitter(ctx, x);
+  const conditions = conditionsOf(value, ctx, x);
+  const offender = offenderOf(value, variable, ctx);
+  if (offender?.reason === 'transcendental' || (x !== undefined && degreeIn(value.den, x) > 0)) {
+    throw new InvalidArgumentError(`factor takes a polynomial in ${variable}`);
+  }
+  if (x === undefined || degreeIn(value.num, x) === 0) {
+    return { content: exprOf(emitter.node(value), ctx), factors: [], complete: true, conditions };
+  }
+  // A square-free part with rational coefficients factors completely; one irreducible over ℚ stays
+  // irreducible when transcendental constants (other names, π, e) join the coefficients.
+  let complete = true;
+  const found: { p: Poly; multiplicity: number }[] = [];
+  if (rationalIn(value.num, x)) {
+    for (const [p, multiplicity] of rationalFactorization(value.num, x, ctx)) found.push({ p, multiplicity });
+  } else {
+    for (const [part, multiplicity] of squareFreeParts(value.num, x, ctx)) {
+      const rational = rationalIn(normalized(part), x);
+      complete &&= rational;
+      const pieces = rational ? rationalFactors(part, x, ctx) : [positiveIn(normalized(part), x)];
+      for (const p of pieces) found.push({ p, multiplicity });
+    }
+  }
+  let product = constant(ONE);
+  for (const { p, multiplicity } of found) product = multiply(product, power(p, multiplicity, ctx.budget), ctx.budget);
+  const rest = divideExact(value.num, product, ctx.budget);
+  if (rest === undefined) throw new Error('cas invariant: the factors do not divide the input');
+  const sorted = found
+    .map(({ p, multiplicity }) => ({ factor: exprOf(emitter.polyNode(p), ctx), multiplicity, degree: degreeIn(p, x) }))
+    .sort((a, b) => a.degree - b.degree || (a.factor.source < b.factor.source ? -1 : 1));
+  return {
+    content: exprOf(emitter.node(ctx.quotient(rest, value.den)), ctx),
+    factors: sorted.map(({ factor: f, multiplicity }) => ({ factor: f, multiplicity })),
+    complete,
+    conditions,
+  };
 }

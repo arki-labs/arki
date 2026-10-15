@@ -1,11 +1,10 @@
 /**
- * `exactRoots` (RFC §8.3), build step 1: closed forms for parts of degree 1
- * and 2, over ℚ(π, e). A factor `x^k` gives the root 0; a polynomial of
- * degree ≥ 3 is split into square-free parts (Yun), and each part of degree
- * ≤ 2 is solved exactly. Parts of degree ≥ 3 are returned as `numeric`, with
- * float coefficients for `@arki/math/polynomial` `polynomialRoots`. Splitting
- * rational polynomials into irreducible factors (`factor`, build step 4) is
- * not here yet.
+ * `exactRoots` (RFC §8.3): closed forms for parts of degree 1 and 2, over
+ * ℚ(π, e). A factor `x^k` gives the root 0; a polynomial of degree ≥ 3 is
+ * split into square-free parts (Yun), and with rational coefficients each
+ * part into its irreducible factors over ℚ (`factor.ts`, Zassenhaus). Parts
+ * of degree ≤ 2 are solved exactly; the rest are returned as `numeric`, with
+ * float coefficients for `@arki/math/polynomial` `polynomialRoots`.
  *
  * Internal module; re-exported by `@arki/cas/polynomial`.
  */
@@ -15,11 +14,14 @@ import { Rational } from '@arki/math/rational';
 
 import type { RatFun } from './context.js';
 import type { CasOptions } from './core.js';
+import type { Zx } from './factor.js';
 import type { Poly } from './poly.js';
 import type { PolynomialForm } from './polynomial.js';
 import { constantFloat, constantSign } from './constants.js';
 import { Context } from './context.js';
+import { CasLimitError } from './core.js';
 import { binary, Emitter, exprOf } from './emit.js';
+import { irreducibleFactors, squareFree } from './factor.js';
 import {
   add,
   coefficientsIn,
@@ -32,10 +34,12 @@ import {
   EMPTY,
   fromCoefficientsIn,
   gcd,
+  generators,
   isZero,
   leadingTerm,
   multiply,
   negate,
+  normalized,
   ONE,
   primitiveIn,
   rationalContent,
@@ -143,7 +147,7 @@ function sqrtOf(m: Poly, ctx: Context): RatFun {
 }
 
 /** Square-free parts of f in x, with multiplicities (Yun's algorithm). */
-function squareFreeParts(f: Poly, x: number, ctx: Context): (readonly [Poly, number])[] {
+export function squareFreeParts(f: Poly, x: number, ctx: Context): (readonly [Poly, number])[] {
   const f0 = primitiveIn(f, x, ctx.budget);
   const df = derivativeIn(f0, x);
   const a0 = gcd(f0, df, ctx.budget);
@@ -159,6 +163,72 @@ function squareFreeParts(f: Poly, x: number, ctx: Context): (readonly [Poly, num
   }
   return out;
 }
+
+function toDense(p: Poly, x: number): Zx {
+  return coefficientsIn(p, x).map(c => constantValue(c)?.numerator ?? 0n);
+}
+
+function fromDense(f: Zx, x: number): Poly {
+  return fromCoefficientsIn(
+    f.map(c => constant(Rational.fromParts(c, 1n))),
+    x,
+  );
+}
+
+function digitsOf(f: Zx): number {
+  return Math.max(...f.map(c => (c < 0n ? -c : c).toString().length));
+}
+
+/**
+ * The irreducible factors over ℚ of a square-free polynomial in x alone
+ * (rational coefficients), each with coprime integer coefficients and a
+ * positive leading coefficient. Checks `factorDegree` and `factorDigits`
+ * first; lifting and recombination check their own budgets.
+ */
+export function rationalFactors(part: Poly, x: number, ctx: Context): Poly[] {
+  const dense = toDense(normalized(part), x);
+  ctx.budget.check('factorDegree', dense.length - 1);
+  ctx.budget.check('factorDigits', digitsOf(dense));
+  return irreducibleFactors(dense, ctx.budget).map(f => fromDense(f, x));
+}
+
+/**
+ * The complete factorization over ℚ of a polynomial in x alone: irreducible
+ * factors with multiplicities, up to a rational constant. The square-free
+ * split uses heuristic gcds (no coefficient growth); if one gives up, the
+ * remainder-sequence split of `squareFreeParts` is used instead.
+ */
+export function rationalFactorization(p: Poly, x: number, ctx: Context): (readonly [Poly, number])[] {
+  const dense = toDense(normalized(p), x);
+  ctx.budget.check('factorDigits', digitsOf(dense));
+  const parts =
+    squareFree(dense, ctx.budget)?.map(([f, m]) => [fromDense(f, x), m] as const) ?? squareFreeParts(p, x, ctx);
+  return parts.flatMap(([part, multiplicity]) => rationalFactors(part, x, ctx).map(f => [f, multiplicity] as const));
+}
+
+/** True when every generator of `p` is `x`: its coefficients are rational. */
+export function rationalIn(p: Poly, x: number): boolean {
+  for (const g of generators(p)) if (g !== x) return false;
+  return true;
+}
+
+/**
+ * The parts `exactRoots` solves: irreducible factors over ℚ for rational
+ * coefficients (so `x^4 - 5x^2 + 4` gives four linear factors), else the
+ * square-free parts. A factoring budget that runs out leaves the
+ * square-free part whole; it is then solved numerically.
+ */
+function rootParts(p: Poly, x: number, ctx: Context): (readonly [Poly, number])[] {
+  if (!rationalIn(p, x)) return squareFreeParts(p, x, ctx);
+  try {
+    return rationalFactorization(p, x, ctx);
+  } catch (error) {
+    if (error instanceof CasLimitError && FACTOR_BUDGETS.has(error.budget)) return squareFreeParts(p, x, ctx);
+    throw error;
+  }
+}
+
+const FACTOR_BUDGETS: ReadonlySet<string> = new Set(['factorDegree', 'factorDigits', 'liftDigits', 'recombination']);
 
 type Root = { readonly value: RatFun; readonly multiplicity: number; readonly real: boolean; readonly order: number };
 
@@ -191,7 +261,7 @@ export function exactRoots(form: PolynomialForm, options: CasOptions = {}): Exac
   const roots: Root[] = [];
   const numeric: { coefficients: number[]; multiplicity: number }[] = [];
   if (zeros > 0) roots.push({ value: ctx.fromPoly(EMPTY), multiplicity: zeros, real: true, order: 0 });
-  const parts = degreeIn(p, x) <= 2 ? [[p, 1] as const] : squareFreeParts(p, x, ctx);
+  const parts = degreeIn(p, x) <= 2 ? [[p, 1] as const] : rootParts(p, x, ctx);
   for (const [part, multiplicity] of parts) {
     const cs = coefficientsIn(part, x);
     if (cs.length === 2) {
