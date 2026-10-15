@@ -18,6 +18,7 @@ Fixes found by a review before publishing:
 - The sign oracle knows `log10` and `log2`; `parity` knows `acot`, `acsc`, `acsch` and `acoth` are odd.
 - A lost restriction the caller's assumptions guarantee is no longer listed (`sqrt(x)*sqrt(x)` with `x` positive has no conditions).
 - `factor` and `gcd` throw `CasError` `unsupported-constant` for constants with no zero test (`sqrt(2)`, `ln(2)`): as free symbols they hid zeros (`sqrt(2)^2 - 2`) and gave wrong gcds (`gcd(x - sqrt(2), x^2 - 2)` was 1).
+- `gcd` with several generators returns coprime integer coefficients with the term that prints first positive, as documented (`gcd(x^2 - pi^2, x - pi)` was `-x + pi`); a part `factor` leaves whole gets the same sign rule. Both no longer depend on internal generator ids.
 - Tests: time bounds use CPU time, the fastest of up to 3 runs (`src/test-support.ts`), so a loaded machine cannot fail them; the test timeout is 30 s.
 
 ### Build step 4
