@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+`derivative` and the rule-by-rule `derivation` (RFC `2026-10-15-arki-cas` §18 build step 3).
+
+- `@arki/cas/derivative`: `derivative(input, variable, { order, simplify })`, any order up to the `order` budget, other names constant, normalized between orders by the rule table; conditions for the input's lost restrictions (`ln(x)` → `1/x` needs `x > 0`) and `u ≠ 0` for `abs(u)` (reason `differentiable`). Jump functions throw `not-differentiable`, `factorial`/`gamma`/host functions `unsupported-function`, both with the call's span (no span after the first order).
+- `@arki/cas/derivation`: `derivation`, `ruleFormula`, `TEMPLATE_KEYS` and the `DerivationStep` tree: one step per rule application, the chain rule as its own step, `repeat` steps for subterms derived before, and per order a simplification shown as the normal form plus one step per rule. `derivative`'s bundle contains no step code (`scripts/entries.mjs` checks the built package).
+- Hash-consed differentiation: each distinct subterm is derived once, so cost and step count are linear in the DAG.
+- New budgets `order` (10), `steps` (2 000) and `stepNodes` (50 000).
+- `simplify` rules can be switched on one at a time (internal), which a derivation uses to show each rule as a step; `simplify` itself is unchanged.
+- Tests: the Ekuation corpus results, conditions, errors and budgets; properties against `@arki/math/differentiate` at random points, exact polynomial coefficients, order n as order 1 applied n times, and every derivation step checked numerically on its own; cross-runtime smoke with a 5th-order derivation.
+
+### Build step 2
+
 Conditions, the sign oracle and `simplify` (RFC `2026-10-15-arki-cas` §18 build step 2).
 
 - `@arki/cas/simplify`: `simplify` with the RFC §7 rule table (`fold`, `expand`, `collect`, `cancel`, `integer-powers`, `fractional-powers`, `sqrt-of-square`, `square-of-sqrt`, `exp-ln`, `ln-exp`, `exp-product`, `abs-sign`, `parity`, `special-values`, `factor-out`), applied bottom-up to a fixed point, returning `applied` rule ids; the readable normal form (factored denominator, common kernel factor pulled out, names ordered by name).

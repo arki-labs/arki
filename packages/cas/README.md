@@ -1,6 +1,6 @@
 # @arki/cas
 
-A bounded computer algebra package on [`@arki/expr`](../expr) and [`@arki/math`](../math): exact polynomials and rational functions with π and e as symbolic coefficients, closed-form roots, budgets on every input, and results as canonical expr ASTs. The design is specified in `docs/rfcs/2026-10-15-arki-cas.md`. Private, `0.0.x`: build steps 1 and 2 of the RFC (polynomial core; conditions, the sign oracle and `simplify`). `derivative`, `derivation` and `factor` come in later steps.
+A bounded computer algebra package on [`@arki/expr`](../expr) and [`@arki/math`](../math): exact polynomials and rational functions with π and e as symbolic coefficients, closed-form roots, budgets on every input, and results as canonical expr ASTs. The design is specified in `docs/rfcs/2026-10-15-arki-cas.md`. Private, `0.0.x`: build steps 1 to 3 of the RFC (polynomial core; conditions, the sign oracle and `simplify`; `derivative` and the rule-by-rule `derivation`). `factor` comes in step 4.
 
 ## The ℚ[π, e] assumption
 
@@ -64,6 +64,69 @@ Anything not in the table is left alone (`sin(x)^2 + cos(x)^2` stays). `applied`
 
 **The readable normal form.** One fraction; the numerator expanded, with a common kernel factor pulled out; the denominator printed as a product of the factors the input divided by, split further by content and repeated factors (`(x - 1)^2`). Names are ordered by name, so the output does not depend on how the input was written and `simplify` is idempotent. `numbers: 'decimal'` prints terminating rationals as decimals.
 
+## `derivative` and `derivation`
+
+```ts
+import { derivative } from '@arki/cas/derivative';
+
+derivative('x^3 - 2*x^2 + x', 'x').result.source; // '3 * x^2 - 4 * x + 1'
+derivative('sin(x^2)', 'x').result.source; // '2 * x * cos(x^2)'
+derivative('x^2 * y', 'y').result.source; // 'x^2': other names are constants
+derivative('x^5', 'x', { order: 5 }).result.source; // '120'
+derivative('ln(x)', 'x'); // '1 / x', conditions: [x > 0]: ln is only defined there
+derivative('abs(x)', 'x'); // 'sign(x)', conditions: [x ≠ 0 (differentiable)]
+derivative('sin(x^2)', 'x', { simplify: false }).result.source; // 'cos(x^2) * (2 * x)'
+derivative('floor(x)', 'x'); // throws CasError 'not-differentiable', span of floor(x)
+```
+
+Rules: constant, variable, sum, constant multiple, product, quotient, power, exponential (`a^u`, `e^u`, `exp`), general power `f^g`, logarithms (`ln`, `log`, `log(u, b)`, `log10`, `log2`), every trig, inverse trig, hyperbolic and inverse hyperbolic function of expr's `scientific` language, roots (`sqrt`, `cbrt`, `nthRoot`), `abs`, and the chain rule. `floor ceil round fix sign mod` of the variable throw `not-differentiable` (their derivative is 0 almost everywhere, and 0 would hide the jumps); `factorial`, `gamma` and host functions throw `unsupported-function`. Of a constant, any function is 0. Each distinct subterm is derived once (hash-consing), so the cost is linear in the expression's DAG; each order is normalized by the `simplify` rule table before the next.
+
+`@arki/cas/derivation` returns the same result plus the full derivation tree. `derivative`'s bundle contains none of the step code (checked on the built package by `scripts/entries.mjs`).
+
+```ts
+import { derivation, ruleFormula, TEMPLATE_KEYS } from '@arki/cas/derivation';
+
+const { steps } = derivation('sin(x^2)', 'x');
+// #0 derivation                    sin(x^2) → 2 * x * cos(x^2)
+//   #1 order 1                     sin(x^2) → 2 * x * cos(x^2)
+//     #2 chain                     sin(x^2) → cos(x^2) * (2 * x)
+//       #3 function sin            sin(x^2) → cos(x^2)
+//       #4 power                   x^2 → 2 * x
+//     #5 simplification            cos(x^2) * (2 * x) → 2 * x * cos(x^2)
+//       #6 normal form             cos(x^2) * (2 * x) → 2 * x * cos(x^2)
+ruleFormula({ kind: 'derivative', id: 'product' }); // "(f g)' = f' g + f g'"
+```
+
+Every step has a pre-order `index`, a `rule`, a `template` (`key` plus `params`), `before`, `after`, `children` and the `conditions` it introduced. A derivative step's `after` is the derivative of its `before` with `fold` applied only; the chain rule is its own step, with the outer rule (`f'(u)`) and `u'` as children. A subterm derived before is a `repeat` step pointing at the first one. Each order's `simplification` shows the algebraic normal form as one step (`fold`, `expand`, `collect` and `cancel` are computed together, so `phases` lists which happened), then each rule of the table that changed the expression, in table order, then `factor-out`.
+
+No English is built in: `template.key` is the translation key, and `TEMPLATE_KEYS` lists every key, so an app test can check its translations. English reference texts to copy:
+
+| Key                                     | English                                                                        |
+| --------------------------------------- | ------------------------------------------------------------------------------ |
+| `derivation`                            | Differentiate {f} with respect to {x} ({order} times).                         |
+| `derivation.order`                      | Derivative number {order}.                                                     |
+| `derivation.simplification`             | Simplify the result.                                                           |
+| `derivative.constant`                   | {c} is a constant: its derivative is 0.                                        |
+| `derivative.variable`                   | The derivative of {x} is 1.                                                    |
+| `derivative.sum`                        | Differentiate each term separately.                                            |
+| `derivative.constant-multiple`          | Keep the constant factor {c} and differentiate {f}.                            |
+| `derivative.constant-divisor`           | Divide the derivative of {f} by the constant {c}.                              |
+| `derivative.product`                    | Product rule for {f} times {g}.                                                |
+| `derivative.quotient`                   | Quotient rule for {f} over {g}.                                                |
+| `derivative.power`                      | Power rule with exponent {n}.                                                  |
+| `derivative.exponential`                | Exponential rule with base {a}.                                                |
+| `derivative.exponential.e`              | The exponential function is its own derivative.                                |
+| `derivative.general-power`              | Write the power as an exponential of a logarithm and differentiate.            |
+| `derivative.logarithm`                  | The derivative of the natural logarithm is one over its argument.              |
+| `derivative.logarithm.base`             | Logarithm to base {b}: divide by ln({b}).                                      |
+| `derivative.root.sqrt`, `.cbrt`, `.nth` | Write the root as a power and use the power rule.                              |
+| `derivative.absolute-value`             | The derivative of the absolute value is the sign, where the argument is not 0. |
+| `derivative.chain`                      | Chain rule: the outer derivative times the derivative of {u}.                  |
+| `derivative.repeat`                     | Already differentiated in step {of}.                                           |
+| `derivative.function.sin` … `.acoth`    | The derivative of sin is cos (one key per function).                           |
+| `simplify.normal-form`                  | Expand, collect like terms and cancel common factors.                          |
+| `simplify.<rule>`                       | One per rule of the table above (`simplify.exp-ln`, …, `simplify.factor-out`). |
+
 ## Budgets
 
-Every call checks `nodes`, `depth`, `terms`, `degree`, `gcdDegree`, `digits` and `fuel` (defaults 5 000, 256, 10 000, 1 000, 64, 1 000, 100 000) before the expensive work; rewriting has no static bound, so each `simplify` rewrite also costs fuel and throws `CasLimitError` (a `ResourceLimitError`) with `budget`, `limit` and `actual`. `signal` is checked every 1 024 fuel units. Input errors are `CasError` (a `MathError`) with a `code` and a one-sentence `remediation`.
+Every call checks `nodes`, `depth`, `terms`, `degree`, `gcdDegree`, `digits` and `fuel` (defaults 5 000, 256, 10 000, 1 000, 64, 1 000, 100 000) before the expensive work; `derivative` and `derivation` also check `order` (10) before starting, and a derivation checks `steps` (2 000; two per distinct subterm plus 16, before each order) and `stepNodes` (50 000 printed nodes, before printing the steps). A derivation spends more fuel than `derivative`: it simplifies once more per rule it shows. The readable normal form puts a sum of unrelated fractions over one denominator, so a high order of such a sum can reach the `terms` or `fuel` budget; rewriting has no static bound, so each `simplify` rewrite also costs fuel and throws `CasLimitError` (a `ResourceLimitError`) with `budget`, `limit` and `actual`. `signal` is checked every 1 024 fuel units. Input errors are `CasError` (a `MathError`) with a `code` and a one-sentence `remediation`.
