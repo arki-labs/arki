@@ -28,10 +28,12 @@ export const keyNameSchema = z
   .refine(value => !/\p{Cs}/u.test(value), 'must not contain lone surrogates')
   .refine(value => new TextEncoder().encode(value).length <= MAX_NAME_BYTES, `must be at most ${MAX_NAME_BYTES} bytes`);
 
+/** The largest limit or weight: Postgres stores them as `integer`. */
+export const MAX_PERMITS = 2_147_483_647;
 /** A semaphore size: a positive integer. */
-export const limitSchema = z.number().int().positive();
+export const limitSchema = z.number().int().positive().max(MAX_PERMITS);
 /** How many permits one hold takes: a positive integer. */
-export const weightSchema = z.number().int().positive();
+export const weightSchema = z.number().int().positive().max(MAX_PERMITS);
 /** `storeTimeout` in milliseconds, at least 1. */
 export const storeTimeoutSchema = z.number().finite().min(1);
 /** What `semaphore(key, config)` takes. */
@@ -60,6 +62,8 @@ export const guaranteesSchema = z
     poolerSafe: z.boolean(),
     /** `'transaction'`: the lock ends with the caller's transaction, so a guard has no `release`. */
     releasedBy: z.literal('transaction').optional(),
+    /** `readWrite()` only. `true`: a waiting writer stops new readers. Absent or `false`: readers can starve a writer. */
+    writerPreference: z.boolean().optional(),
     runtimes: z.array(z.enum(['node', 'bun', 'deno', 'browser', 'hermes'])).readonly(),
   })
   .readonly();
@@ -108,11 +112,33 @@ export type PermitRequest = AcquireRequest & { readonly limit: number; readonly 
 /** One attempt at a read or write hold. */
 export type SharedRequest = AcquireRequest & { readonly mode: 'read' | 'write' };
 
+/**
+ * One caller's wait on a key, from its first refused attempt until its acquire loop ends
+ * (acquired, timed out or aborted). See {@link PermitOps.waiter} and {@link SharedOps.waiter}.
+ */
+export type Waiter = {
+  /**
+   * Resolves when the key may have changed in a way this caller cares about, or when `signal`
+   * aborts. It must also resolve at once when the caller could already fit, so a release that
+   * happened between the refusal and this call is not missed.
+   */
+  waitFor(signal: AbortSignal): Promise<void>;
+  /** The caller stopped waiting. Idempotent. */
+  close(): void;
+};
+
 /** Semaphore protocol of a store with `guarantees.permits`. */
 export type PermitOps = {
   acquire(key: Key, req: PermitRequest): Promise<Grant | undefined>;
   release(grant: Grant): Promise<ReleaseOutcome>;
   extend?(grant: Grant, ttlMs: number): Promise<boolean>;
+  /**
+   * Optional. The manager calls it once per waiting caller, after the caller's first refused
+   * attempt, and prefers it to `Store.waitFor`. The waiter's condition is "`weight` permits do
+   * not fit now", which lets a store wake only the waiters that can fit and never miss a permit
+   * freed between a refusal and the wait. `close()` is called after the caller's last attempt.
+   */
+  waiter?(key: Key, weight: number): Waiter;
 };
 
 /** Read/write protocol of a store with `guarantees.shared`. */
@@ -120,6 +146,15 @@ export type SharedOps = {
   acquire(key: Key, req: SharedRequest): Promise<Grant | undefined>;
   release(grant: Grant): Promise<ReleaseOutcome>;
   extend?(grant: Grant, ttlMs: number): Promise<boolean>;
+  /**
+   * Optional, for writer preference. The manager calls it once per waiting caller, after the
+   * caller's first refused attempt, and prefers it to `Store.waitFor`. A store that counts the
+   * writers it returns here can refuse new readers while one waits. The waiter stays registered
+   * until `close()`, which the manager calls only after the caller's last attempt has settled:
+   * that closes the gap between a wake-up and the woken writer's next attempt. Remote stores in
+   * v1 do not implement it.
+   */
+  waiter?(key: Key, mode: 'read' | 'write'): Waiter;
 };
 
 /** A lease store's lease length is configured once, on the store (`pgLease(db, { ttl })`); the manager reads it. */
@@ -162,16 +197,20 @@ export type LockContext<S extends Store> = {
 };
 
 type CallOptions = {
-  /** Semaphore handles only: permits to take. A positive integer up to the limit. */
-  readonly weight?: number;
   /** Every store kind: delay the release until this long after acquisition (closes clock-skew double runs of short jobs). */
   readonly holdAtLeast?: Duration;
   /** Default `'abort'`. */
   readonly onLost?: 'abort' | 'ignore';
 };
 
-/** Options of the verbs that never wait. */
-export type TryOptions = CallOptions & { readonly signal?: AbortSignal };
+/** Options only a semaphore handle takes. */
+export type WeightOption = {
+  /** Permits to take. A positive integer up to the limit. */
+  readonly weight?: number;
+};
+
+/** Options of the verbs that never wait. `Extra` carries options of one handle kind, such as {@link WeightOption}. */
+export type TryOptions<Extra = unknown> = CallOptions & Extra & { readonly signal?: AbortSignal };
 
 /** A wait bound. Optional on process-scope stores; on any other scope `wait` or `signal` is required. */
 type WaitBound<S extends Store> = S['guarantees']['scope'] extends 'process'
@@ -180,11 +219,11 @@ type WaitBound<S extends Store> = S['guarantees']['scope'] extends 'process'
     | { readonly wait?: Duration; readonly signal: AbortSignal };
 
 /** Options of the verbs that wait (`run`, `acquire`). */
-export type RunOptions<S extends Store> = CallOptions & WaitBound<S>;
+export type RunOptions<S extends Store, Extra = unknown> = CallOptions & Extra & WaitBound<S>;
 
 /** `run(fn)` needs no options on a process-scope store; elsewhere they are required. */
-export type RunArgs<S extends Store> =
-  Record<never, never> extends RunOptions<S> ? [opts?: RunOptions<S>] : [opts: RunOptions<S>];
+export type RunArgs<S extends Store, Extra = unknown> =
+  Record<never, never> extends RunOptions<S, Extra> ? [opts?: RunOptions<S, Extra>] : [opts: RunOptions<S, Extra>];
 
 type IsLease<S extends Store> = S['guarantees']['kind'] extends 'lease' ? true : false;
 
@@ -212,14 +251,14 @@ type GuardRelease = {
 export type Guard<S extends Store> = GuardBase<S> &
   (S['guarantees']['releasedBy'] extends 'transaction' ? unknown : GuardRelease);
 
-/** The four verbs every lock handle has. */
-export type LockVerbs<S extends Store> = {
+/** The four verbs every lock handle has. `Extra` carries the options of one handle kind. */
+export type LockVerbs<S extends Store, Extra = unknown> = {
   /** One atomic attempt. Contention is a value, never an error. */
-  tryRun<T>(fn: (ctx: LockContext<S>) => T | Promise<T>, opts?: TryOptions): Promise<LockRun<Awaited<T>>>;
+  tryRun<T>(fn: (ctx: LockContext<S>) => T | Promise<T>, opts?: TryOptions<Extra>): Promise<LockRun<Awaited<T>>>;
   /** Waits up to `wait`, or until `signal` aborts; throws `held` / `aborted`. */
-  run<T>(fn: (ctx: LockContext<S>) => T | Promise<T>, ...opts: RunArgs<S>): Promise<Awaited<T>>;
-  acquire(...opts: RunArgs<S>): Promise<Guard<S>>;
-  tryAcquire(opts?: TryOptions): Promise<Guard<S> | undefined>;
+  run<T>(fn: (ctx: LockContext<S>) => T | Promise<T>, ...opts: RunArgs<S, Extra>): Promise<Awaited<T>>;
+  acquire(...opts: RunArgs<S, Extra>): Promise<Guard<S>>;
+  tryAcquire(opts?: TryOptions<Extra>): Promise<Guard<S> | undefined>;
 };
 
 /** Abort = step down and stop campaigning. */
@@ -232,7 +271,8 @@ export type LeaderOps<S extends Store> = {
 };
 
 export type MutexHandle<S extends Store> = LockVerbs<S> & (IsLease<S> extends true ? LeaderOps<S> : unknown);
-export type SemaphoreHandle<S extends Store> = LockVerbs<S>;
+/** Only a semaphore takes `weight`. */
+export type SemaphoreHandle<S extends Store> = LockVerbs<S, WeightOption>;
 export type ReadWriteHandle<S extends Store> = {
   readonly read: LockVerbs<S>;
   readonly write: LockVerbs<S>;

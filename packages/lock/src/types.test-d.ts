@@ -132,6 +132,42 @@ describe('capability gating', () => {
     locks.semaphore('pdf', {});
   });
 
+  it('weight is accepted by semaphore verbs only', () => {
+    const locks = createLocks({ store: processHold, namespace: 'a' });
+    const pool = locks.semaphore('pdf', { limit: 3 });
+    void pool.tryRun(work, { weight: 2 });
+    void pool.run(work, { weight: 2, wait: '1s' });
+    void pool.acquire({ weight: 2 });
+    void pool.tryAcquire({ weight: 2 });
+    // @ts-expect-error weight is a number
+    void pool.tryRun(work, { weight: '2' });
+
+    const mutex = locks.mutex('k');
+    // @ts-expect-error a mutex has no weight
+    void mutex.tryRun(work, { weight: 1 });
+    // @ts-expect-error a mutex has no weight
+    void mutex.run(work, { weight: 1 });
+    // @ts-expect-error a mutex has no weight
+    void mutex.acquire({ weight: 1 });
+    // @ts-expect-error a mutex has no weight
+    void mutex.tryAcquire({ weight: 1 });
+
+    const { read, write } = locks.readWrite('catalog');
+    // @ts-expect-error a read lock has no weight
+    void read.tryRun(work, { weight: 1 });
+    // @ts-expect-error a write lock has no weight
+    void write.run(work, { weight: 1 });
+    // @ts-expect-error a write lock has no weight
+    void write.acquire({ weight: 1 });
+  });
+
+  it('the semaphore still demands a wait bound on cluster stores', () => {
+    const pool = createLocks({ store: clusterLease, namespace: 'a' }).semaphore('pdf', { limit: 3 });
+    // @ts-expect-error a cluster store needs wait or signal
+    void pool.run(work, { weight: 1 });
+    void pool.run(work, { weight: 1, wait: '5s' });
+  });
+
   it('readWrite exists only when shared is true', () => {
     expectTypeOf(createLocks({ store: processHold, namespace: 'a' })).toHaveProperty('readWrite');
     expectTypeOf(createLocks({ store: clusterHold, namespace: 'a' })).not.toHaveProperty('readWrite');

@@ -1,7 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Scheduler } from './scheduler.js';
-import type { AcquireRequest, CreateLocks, Duration, Grant, Guarantees, Key, ReleaseOutcome, Store } from './types.js';
+import type {
+  AcquireRequest,
+  CreateLocks,
+  Duration,
+  Grant,
+  Guarantees,
+  Key,
+  PermitRequest,
+  ReleaseOutcome,
+  SharedRequest,
+  Store,
+} from './types.js';
 import { LockError } from './errors.js';
 import { createLocks, MIN_LEASE_TTL_MS } from './locks.js';
 
@@ -865,5 +876,328 @@ describe('a hold store that reports a lost connection through grant.lost', () =>
     const error = await pending;
     expect(error.code).toBe('config');
     expect(error.suppressed?.map(e => (e instanceof LockError ? e.code : e.message))).toEqual(['lost']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Semaphores and read/write locks: the manager binds the store's own ops
+// ---------------------------------------------------------------------------
+
+const holdOps = { ...holdProcess, permits: true, shared: true } as const satisfies Guarantees;
+const leasePermits = { ...leaseCluster, permits: true } as const satisfies Guarantees;
+
+function opsSetup(opts: { storeTimeout?: Duration } = {}) {
+  const clock = manualScheduler();
+  const calls = {
+    mutexAcquire: 0,
+    mutexRelease: [] as Grant[],
+    permitAcquire: [] as PermitRequest[],
+    permitRelease: [] as Grant[],
+    sharedAcquire: [] as SharedRequest[],
+    sharedRelease: [] as Grant[],
+    waiters: [] as { mode: 'read' | 'write'; open: boolean }[],
+    permitWaiters: [] as { weight: number; open: boolean }[],
+    openWaitersAtAttempt: [] as number[],
+  };
+  const script = {
+    permitAcquire: (key: Key, req: PermitRequest): Promise<Grant | undefined> =>
+      Promise.resolve({ key, token: req.token, fence: 1n }),
+    sharedAcquire: (key: Key, req: SharedRequest): Promise<Grant | undefined> =>
+      Promise.resolve({ key, token: req.token, fence: 1n }),
+  };
+  const store: Store<typeof holdOps> = {
+    name: 'ops',
+    guarantees: holdOps,
+    acquire() {
+      calls.mutexAcquire += 1;
+      return busy();
+    },
+    release(grant) {
+      calls.mutexRelease.push(grant);
+      return Promise.resolve('released');
+    },
+    permits: {
+      acquire(key, req) {
+        calls.permitAcquire.push(req);
+        return script.permitAcquire(key, req);
+      },
+      release(grant) {
+        calls.permitRelease.push(grant);
+        return Promise.resolve('released');
+      },
+      waiter(_key, weight) {
+        const record = { weight, open: true };
+        calls.permitWaiters.push(record);
+        return {
+          waitFor: () => neverSettles(),
+          close() {
+            record.open = false;
+          },
+        };
+      },
+    },
+    shared: {
+      acquire(key, req) {
+        calls.sharedAcquire.push(req);
+        calls.openWaitersAtAttempt.push(calls.waiters.filter(waiter => waiter.open).length);
+        return script.sharedAcquire(key, req);
+      },
+      release(grant) {
+        calls.sharedRelease.push(grant);
+        return Promise.resolve('released');
+      },
+      waiter(_key, mode) {
+        const record = { mode, open: true };
+        calls.waiters.push(record);
+        return {
+          waitFor: () => neverSettles(),
+          close() {
+            record.open = false;
+          },
+        };
+      },
+    },
+  };
+  const locks = createLocks({
+    store,
+    namespace: 'test',
+    scheduler: clock.scheduler,
+    ...(opts.storeTimeout === undefined ? {} : { storeTimeout: opts.storeTimeout }),
+  });
+  return { clock, locks, calls, script, store };
+}
+
+describe('semaphore', () => {
+  it('sends limit and weight to the permits ops and leaves the mutex ops alone, because a semaphore is its own lock', async () => {
+    const t = opsSetup();
+    const pool = t.locks.semaphore('pdf', { limit: 4 });
+    await pool.tryRun(() => 1, { weight: 3 });
+    await pool.tryRun(() => 1);
+    expect(t.calls.permitAcquire.map(req => [req.limit, req.weight])).toEqual([
+      [4, 3],
+      [4, 1],
+    ]);
+    expect(t.calls.permitRelease).toHaveLength(2);
+    expect(t.calls.mutexAcquire).toBe(0);
+    expect(t.calls.mutexRelease).toHaveLength(0);
+  });
+
+  it('uses a key of its own, so a mutex and a semaphore of one name never meet in the store', async () => {
+    const t = opsSetup();
+    const seen: string[] = [];
+    t.script.permitAcquire = (key, req) => {
+      seen.push(key.full);
+      return Promise.resolve({ key, token: req.token });
+    };
+    await t.locks.semaphore('x', { limit: 1 }).tryRun(() => 1);
+    expect(seen).toEqual(['1s:4:test:1:x']);
+  });
+
+  it('rejects a bad weight or limit with config before any store call, because the store could not tell what was meant', async () => {
+    const t = opsSetup();
+    const pool = t.locks.semaphore('pdf', { limit: 2 });
+    for (const weight of [3, 0, -1, 1.5]) {
+      expect(await failure(pool.tryAcquire({ weight }))).toMatchObject({ code: 'config' });
+      expect(await failure(pool.run(() => 1, { wait: '1s', weight }))).toMatchObject({ code: 'config' });
+    }
+    expect(t.calls.permitAcquire).toHaveLength(0);
+    for (const limit of [0, -2, 1.5]) {
+      expect(() => t.locks.semaphore('pdf', { limit })).toThrowError(LockError);
+    }
+  });
+
+  it('waits through the store permit waiter with the call weight and closes it when the wait ends, because the store knows when that weight fits', async () => {
+    const t = opsSetup();
+    t.script.permitAcquire = busy;
+    const pending = failure(t.locks.semaphore('pdf', { limit: 4 }).run(() => 1, { wait: '3s', weight: 3 }));
+    await t.clock.advance(30);
+    expect(t.calls.permitWaiters).toEqual([{ weight: 3, open: true }]);
+    await t.clock.advance(5000);
+    const error = await pending;
+    expect(error.code).toBe('held');
+    expect(t.calls.permitWaiters).toEqual([{ weight: 3, open: false }]);
+  });
+
+  it('hands back a grant that lands after the caller gave up through the permits ops, because the mutex release would free nothing', async () => {
+    const t = opsSetup({ storeTimeout: '1s' });
+    const slow = deferred<Grant | undefined>();
+    let asked: Key | undefined;
+    t.script.permitAcquire = key => {
+      asked = key;
+      return slow.promise;
+    };
+    const pending = failure(t.locks.semaphore('pdf', { limit: 2 }).tryAcquire({ weight: 2 }));
+    await t.clock.advance(1000);
+    expect(await pending).toMatchObject({ code: 'store', method: 'acquire', outcome: 'unknown' });
+    const sent = t.calls.permitAcquire[0];
+    if (asked === undefined || sent === undefined) throw new Error('the permits ops were never asked');
+    slow.resolve({ key: asked, token: sent.token });
+    await flush();
+    expect(t.calls.permitRelease.map(grant => grant.token)).toEqual([sent.token]);
+    expect(t.calls.mutexRelease).toHaveLength(0);
+  });
+
+  it('passes a config error from the store through unchanged, so a conflicting limit is not reported as an outage', async () => {
+    const t = opsSetup();
+    t.script.permitAcquire = () =>
+      Promise.reject(new LockError({ code: 'config', message: 'limit conflict', remediation: 'use one limit' }));
+    expect(await failure(t.locks.semaphore('pdf', { limit: 2 }).tryAcquire())).toMatchObject({
+      code: 'config',
+      message: expect.stringContaining('limit conflict') as unknown,
+    });
+  });
+
+  it('renews a permit through permits.extend on a lease store, because the mutex extend does not know the permit', async () => {
+    const clock = manualScheduler();
+    const extended: Grant[] = [];
+    const released: Grant[] = [];
+    const store: Store<typeof leasePermits> = {
+      name: 'lease-permits',
+      ttlMs: 30_000,
+      guarantees: leasePermits,
+      acquire: () => busy(),
+      release: () => Promise.resolve('released'),
+      permits: {
+        acquire: (key, req) => Promise.resolve({ key, token: req.token, fence: 1n }),
+        release(grant) {
+          released.push(grant);
+          return Promise.resolve('released');
+        },
+        extend(grant) {
+          extended.push(grant);
+          return Promise.resolve(true);
+        },
+      },
+    };
+    const locks = createLocks({ store, namespace: 'test', scheduler: clock.scheduler });
+    const guard = await locks.semaphore('pdf', { limit: 2 }).acquire({ wait: '1s' });
+    await clock.advance(10_000);
+    expect(extended).toHaveLength(1);
+    await guard.release();
+    expect(released).toHaveLength(1);
+    expect(clock.pending()).toBe(0);
+  });
+});
+
+describe('createLocks capability checks', () => {
+  it('rejects a store that claims permits but has no permits ops, because semaphore() could only fail later', () => {
+    const fake = scriptedStore({ ...holdProcess, permits: true });
+    expect(() => createLocks({ store: fake.store, namespace: 't' })).toThrowError(/permits/);
+  });
+
+  it('rejects a store that claims shared locks but has no shared ops', () => {
+    const fake = scriptedStore({ ...holdProcess, shared: true });
+    expect(() => createLocks({ store: fake.store, namespace: 't' })).toThrowError(/shared/);
+  });
+
+  it('rejects a lease store whose permits ops cannot extend, because every permit would expire mid-callback', () => {
+    const store: Store<typeof leasePermits> = {
+      name: 'no-extend',
+      ttlMs: 30_000,
+      guarantees: leasePermits,
+      acquire: () => busy(),
+      release: () => Promise.resolve('released'),
+      permits: { acquire: () => busy(), release: () => Promise.resolve('released') },
+    };
+    expect(() => createLocks({ store, namespace: 't' })).toThrowError(/extend/);
+  });
+
+  it('exposes no semaphore when the store does not claim permits, even if it has the ops', () => {
+    const t = opsSetup();
+    const quiet = createLocks({ store: { ...t.store, guarantees: holdProcess }, namespace: 't' });
+    expect('semaphore' in quiet).toBe(false);
+    expect('readWrite' in quiet).toBe(false);
+  });
+});
+
+describe('readWrite', () => {
+  it('sends the mode of each side and uses a key of its own', async () => {
+    const t = opsSetup();
+    const seen: string[] = [];
+    t.script.sharedAcquire = (key, req) => {
+      seen.push(key.full);
+      return Promise.resolve({ key, token: req.token });
+    };
+    const rw = t.locks.readWrite('catalog');
+    await rw.read.tryRun(() => 1);
+    await rw.write.tryRun(() => 1);
+    expect(t.calls.sharedAcquire.map(req => req.mode)).toEqual(['read', 'write']);
+    expect(seen).toEqual(['1rw:4:test:7:catalog', '1rw:4:test:7:catalog']);
+    expect(t.calls.sharedRelease).toHaveLength(2);
+    expect(t.calls.mutexAcquire).toBe(0);
+  });
+
+  it('keeps a writer registered until its last attempt has settled, because a woken writer must not lose its turn to a reader', async () => {
+    const t = opsSetup();
+    const free = t.script.sharedAcquire;
+    let refusals = 1;
+    t.script.sharedAcquire = (key, req) => (refusals-- > 0 ? busy() : free(key, req));
+    const pending = t.locks.readWrite('catalog').write.run(() => 'wrote', { wait: '10s' });
+    await t.clock.advance(1000);
+    expect(await pending).toBe('wrote');
+    expect(t.calls.waiters).toEqual([{ mode: 'write', open: false }]);
+    // Attempt 1 ran before the waiter existed; attempt 2 ran while it was still registered.
+    expect(t.calls.openWaitersAtAttempt).toEqual([0, 1]);
+  });
+
+  it.each(['wait runs out', 'caller aborts'] as const)('closes its waiter when the %s', async how => {
+    const t = opsSetup();
+    t.script.sharedAcquire = busy;
+    const controller = new AbortController();
+    const pending = failure(
+      t.locks
+        .readWrite('catalog')
+        .read.run(() => 1, { wait: '3s', ...(how === 'caller aborts' ? { signal: controller.signal } : {}) }),
+    );
+    await t.clock.advance(30);
+    if (how === 'caller aborts') controller.abort();
+    else await t.clock.advance(5000);
+    const error = await pending;
+    expect(error.code).toBe(how === 'caller aborts' ? 'aborted' : 'held');
+    expect(t.calls.waiters).toEqual([{ mode: 'read', open: false }]);
+  });
+
+  it('does not register a waiter for a try', async () => {
+    const t = opsSetup();
+    t.script.sharedAcquire = busy;
+    expect(await t.locks.readWrite('catalog').write.tryAcquire()).toBeUndefined();
+    expect(t.calls.waiters).toEqual([]);
+  });
+});
+
+describe('review 2.4 manager regressions', () => {
+  it('F1: many holds under one long-lived signal leave at most one abort listener on it', async () => {
+    const t = setup(leaseCluster);
+    const controller = new AbortController();
+    const { signal } = controller;
+    let live = 0;
+    let peak = 0;
+    const add = signal.addEventListener.bind(signal);
+    const remove = signal.removeEventListener.bind(signal);
+    signal.addEventListener = (type: string, listener: EventListenerOrEventListenerObject, opts?: unknown) => {
+      if (type === 'abort') live += 1;
+      peak = Math.max(peak, live);
+      add(type, listener, opts as AddEventListenerOptions);
+    };
+    signal.removeEventListener = (type: string, listener: EventListenerOrEventListenerObject, opts?: unknown) => {
+      if (type === 'abort') live -= 1;
+      remove(type, listener, opts as EventListenerOptions);
+    };
+    for (let i = 0; i < 50; i++) await t.locks.mutex('k').run(() => i, { signal });
+    expect(live).toBeLessThanOrEqual(1);
+    expect(peak).toBeLessThanOrEqual(2);
+  });
+
+  it('F3: a waitFor that throws synchronously does not end the wait early or leak its timer', async () => {
+    const t = setup(leaseCluster);
+    t.script.acquire = busy;
+    t.store.waitFor = () => {
+      throw new Error('waitFor: connection closed');
+    };
+    const pending = failure(t.locks.mutex('k').run(() => 1, { wait: '1s' }));
+    await t.clock.advance(5000);
+    const error = await pending;
+    expect(error.code).toBe('held');
+    expect(t.clock.pending()).toBe(0);
   });
 });

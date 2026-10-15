@@ -99,6 +99,88 @@ describe('createKey vectors', () => {
   });
 });
 
+// One vector set per primitive tag. Mutex vectors above are the ones live apps depend on.
+const PRIMITIVE_VECTORS = [
+  {
+    primitive: 'semaphore',
+    ns: 'a',
+    name: 'b',
+    full: '1s:1:a:1:b',
+    digest: 0xCF_03_46_7B_85_88_98_FCn,
+    hi: -821_868_933,
+    lo: -2_054_645_508,
+  },
+  {
+    primitive: 'semaphore',
+    ns: 'avocabo',
+    name: 'send-digest',
+    full: '1s:7:avocabo:11:send-digest',
+    digest: 0xB2_F5_D6_D6_05_24_8D_52n,
+    hi: -1_292_511_530,
+    lo: 86_281_554,
+  },
+  {
+    primitive: 'semaphore',
+    ns: 'ns',
+    name: 'héllo wörld',
+    full: '1s:2:ns:13:héllo wörld',
+    digest: 0x45_72_9A_25_C1_96_16_5Bn,
+    hi: 1_165_138_469,
+    lo: -1_047_128_485,
+  },
+  {
+    primitive: 'readWrite',
+    ns: 'a',
+    name: 'b',
+    full: '1rw:1:a:1:b',
+    digest: 0xFD_3D_1D_9F_7A_5C_A1_B2n,
+    hi: -46_326_369,
+    lo: 2_052_891_058,
+  },
+  {
+    primitive: 'readWrite',
+    ns: 'avocabo',
+    name: 'send-digest',
+    full: '1rw:7:avocabo:11:send-digest',
+    digest: 0x74_BE_35_7E_07_E0_35_48n,
+    hi: 1_958_622_590,
+    lo: 132_134_216,
+  },
+  {
+    primitive: 'readWrite',
+    ns: 'ns',
+    name: 'héllo wörld',
+    full: '1rw:2:ns:13:héllo wörld',
+    digest: 0xB6_81_8E_B9_71_F4_DC_E5n,
+    hi: -1_233_023_303,
+    lo: 1_911_872_741,
+  },
+] as const;
+
+describe('createKey vectors per primitive', () => {
+  it.each(PRIMITIVE_VECTORS)(
+    'encodes and hashes $primitive $ns / $name',
+    ({ primitive, ns, name, full, digest, hi, lo }) => {
+      const key = createKey(ns, name, primitive);
+      expect(key.full).toBe(full);
+      expect(digest64(key)).toBe(digest);
+      expect(toPgPair(key)).toEqual({ hi, lo });
+    },
+  );
+
+  it('gives a mutex, a semaphore and a read/write lock of one name three different locks, on every store', () => {
+    const keys = [createKey('a', 'b'), createKey('a', 'b', 'semaphore'), createKey('a', 'b', 'readWrite')];
+    expect(new Set(keys.map(key => key.full)).size).toBe(3);
+    expect(new Set(keys.map(key => digest64(key))).size).toBe(3);
+    expect(new Set(keys.map(key => JSON.stringify(toPgPair(key)))).size).toBe(3);
+  });
+
+  it('keeps the mutex encoding when no primitive is given, because live apps depend on those digests', () => {
+    expect(createKey('a', 'b', 'mutex')).toEqual(createKey('a', 'b'));
+    expect(createKey('a', 'b').full).toBe('1:1:a:1:b');
+  });
+});
+
 describe('createKey', () => {
   it('keeps pairs apart that collide under naive joining', () => {
     const left = createKey('a:b', 'c');

@@ -3,12 +3,22 @@
  * `(namespace, name)` pairs can never collide the way `${ns}:${name}` can
  * (`('a:b', 'c')` vs `('a', 'b:c')`). The digest is a pure-TS 64-bit FNV-1a, so
  * it runs on every runtime, Hermes included.
+ *
+ * Each primitive has its own encoding tag, so `mutex('a')`, `semaphore('a')` and
+ * `readWrite('a')` are three independent locks on every store:
+ *
+ * - mutex:     `1:<len>:<ns>:<len>:<name>`   (unchanged: live apps depend on these digests)
+ * - semaphore: `1s:<len>:<ns>:<len>:<name>`
+ * - readWrite: `1rw:<len>:<ns>:<len>:<name>`
  */
 import type { Key } from './types.js';
 import { LockError } from './errors.js';
 import { keyNameSchema } from './types.js';
 
-const ENCODING_VERSION = 1;
+/** Which lock family a key names. Part of the encoding, so families never share a lock. */
+export type Primitive = 'mutex' | 'semaphore' | 'readWrite';
+
+const PRIMITIVE_TAGS = { mutex: '1', semaphore: '1s', readWrite: '1rw' } as const satisfies Record<Primitive, string>;
 const encoder = new TextEncoder();
 
 function checkPart(label: 'namespace' | 'name', value: string): void {
@@ -23,12 +33,12 @@ function checkPart(label: 'namespace' | 'name', value: string): void {
 }
 
 /** Build the canonical key. Throws `LockError{code:'config'}` for an empty, oversized or ill-formed part. */
-export function createKey(namespace: string, name: string): Key {
+export function createKey(namespace: string, name: string, primitive: Primitive = 'mutex'): Key {
   checkPart('namespace', namespace);
   checkPart('name', name);
   const nsLength = encoder.encode(namespace).length;
   const nameLength = encoder.encode(name).length;
-  const full = `${ENCODING_VERSION}:${nsLength}:${namespace}:${nameLength}:${name}`;
+  const full = `${PRIMITIVE_TAGS[primitive]}:${nsLength}:${namespace}:${nameLength}:${name}`;
   return { namespace, name, full };
 }
 

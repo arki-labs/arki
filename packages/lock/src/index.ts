@@ -29,8 +29,10 @@ export type {
   SemaphoreHandle,
   SharedOps,
   SharedRequest,
+  Waiter,
   Store,
   TryOptions,
+  WeightOption,
 } from './types.js';
 
 export { createLocks } from './locks.js';

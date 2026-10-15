@@ -3,6 +3,12 @@
  * `run`, `acquire` and `tryAcquire`. Owns the wait loop, the renewal loop, the
  * per-process queue in front of remote stores and the `lost` plumbing.
  *
+ * Mutex, semaphore and read/write handles share one code path. Each binds a
+ * {@link Protocol}: the store's own acquire/release/extend for a mutex, its
+ * `permits` ops with `{ limit, weight }` for a semaphore, its `shared` ops with
+ * `{ mode }` for read/write. Tokens, late-grant give-back, renewal, deadlines and
+ * the per-process attempt gate are the same for all three.
+ *
  * Everything below `createLocks` works on the plain `Store`. The gated public
  * types (`Locks<S>`, `Guard<S>`) are conditional on the store's guarantees,
  * which TypeScript cannot satisfy for a generic `S`. So `createLocks` is an
@@ -22,12 +28,17 @@ import type {
   LockCounters,
   LockRun,
   Locks,
+  PermitOps,
+  ReleaseOutcome,
+  SemaphoreConfig,
+  SharedOps,
   Store,
+  Waiter,
 } from './types.js';
 import { LockError } from './errors.js';
 import { createKey } from './key.js';
 import { defaultScheduler } from './scheduler.js';
-import { storeTimeoutSchema } from './types.js';
+import { semaphoreConfigSchema, storeTimeoutSchema, weightSchema } from './types.js';
 import { BACKOFF_MAX_MS, backoffDelay, parseDuration, raceSignal, withStoreTimeout } from './wait.js';
 
 const log = getLogger('arki:lock');
@@ -64,17 +75,34 @@ type GuardImpl = {
   [Symbol.asyncDispose](): Promise<void>;
 };
 
-type MutexHandleImpl = {
+type HandleImpl = {
   tryRun<T>(fn: (ctx: ContextImpl) => T | Promise<T>, opts?: CallOptions): Promise<LockRun<Awaited<T>>>;
   run<T>(fn: (ctx: ContextImpl) => T | Promise<T>, opts?: CallOptions): Promise<Awaited<T>>;
   acquire(opts?: CallOptions): Promise<GuardImpl>;
   tryAcquire(opts?: CallOptions): Promise<GuardImpl | undefined>;
+  /** Lease stores only. */
 };
+
+/**
+ * What the manager runs a handle on. The request a protocol receives is the plain
+ * mutex request; a semaphore or read/write protocol adds its own fields before the store sees it.
+ */
+type Protocol = {
+  acquire(key: Key, req: AcquireRequest): Promise<Grant | undefined>;
+  release(grant: Grant): Promise<ReleaseOutcome>;
+  extend?(grant: Grant, ttlMs: number): Promise<boolean>;
+  /** A store-aware wait (writer preference, permits that fit). Absent or `undefined`: wait on `Store.waitFor`. */
+  waiter?(key: Key): Waiter | undefined;
+};
+
+type ReadWriteImpl = { readonly read: HandleImpl; readonly write: HandleImpl };
 
 type LocksImpl = {
   readonly store: Store;
   readonly counters: LockCounters;
-  mutex(key: string): MutexHandleImpl;
+  mutex(key: string): HandleImpl;
+  semaphore?(key: string, config: SemaphoreConfig): HandleImpl;
+  readWrite?(key: string): ReadWriteImpl;
 };
 
 /** A guard plus what only the manager may see. */
@@ -138,6 +166,10 @@ function addSuppressed(error: unknown, extra: readonly Error[]): void {
   });
 }
 
+function configError(message: string, remediation: string): LockError {
+  return new LockError({ code: 'config', message, remediation });
+}
+
 function heldError(): LockError {
   return new LockError({
     code: 'held',
@@ -173,6 +205,26 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
       remediation: `Configure the lease store with a ttl of at least ${MIN_LEASE_TTL_MS} ms.`,
     });
   }
+  const permitOps = store.guarantees.permits ? store.permits : undefined;
+  const sharedOps = store.guarantees.shared ? store.shared : undefined;
+  if (store.guarantees.permits && permitOps === undefined) {
+    throw configError(
+      'the store claims permits but has no permits ops',
+      'Give the store `permits` ops or set guarantees.permits to false.',
+    );
+  }
+  if (store.guarantees.shared && sharedOps === undefined) {
+    throw configError(
+      'the store claims shared locks but has no shared ops',
+      'Give the store `shared` ops or set guarantees.shared to false.',
+    );
+  }
+  if (leased && permitOps !== undefined && permitOps.extend === undefined) {
+    throw configError('a lease store needs permits.extend', "Add `extend` to the store's permits ops.");
+  }
+  if (leased && sharedOps !== undefined && sharedOps.extend === undefined) {
+    throw configError('a lease store needs shared.extend', "Add `extend` to the store's shared ops.");
+  }
   const nonce = Math.random().toString(36).slice(2);
   let tokenCounter = 0;
   const counts = { releaseErrors: 0, leadAcquired: 0, leadLost: 0 };
@@ -194,10 +246,10 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     return result;
   }
 
-  /** Give a grant back with its own token. Never throws. */
-  async function giveBack(grant: Grant, why: string): Promise<void> {
+  /** Give a grant back with its own token, through the protocol that issued it. Never throws. */
+  async function giveBack(protocol: Protocol, grant: Grant, why: string): Promise<void> {
     try {
-      await withStoreTimeout(store.release(grant), storeTimeoutMs, 'release', scheduler);
+      await withStoreTimeout(protocol.release(grant), storeTimeoutMs, 'release', scheduler);
     } catch (error) {
       log.error(toError(error), { why, key: keyField(grant.key) });
     }
@@ -207,6 +259,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
 
   /** One store attempt: fresh owner token, bounded, and a late grant is handed back. */
   async function attemptOnce(
+    protocol: Protocol,
     key: Key,
     waitMs: number | undefined,
     signal: AbortSignal | undefined,
@@ -219,7 +272,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
       ...(signal === undefined ? {} : { signal }),
     };
     const sentAt = scheduler.now();
-    const raw = (async () => store.acquire(key, request))();
+    const raw = (async () => protocol.acquire(key, request))();
     const bound = storeTimeoutMs + (store.guarantees.wait === 'native' && waitMs !== undefined ? waitMs : 0);
     let grant: Grant | undefined;
     if (store.guarantees.releasedBy === 'transaction') {
@@ -232,7 +285,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
         throw asStoreError(error, 'acquire');
       }
       if (signal?.aborted === true) {
-        if (grant !== undefined) await giveBack(grant, 'aborted');
+        if (grant !== undefined) await giveBack(protocol, grant, 'aborted');
         await raceSignal(Promise.resolve(), signal);
       }
     } else {
@@ -243,7 +296,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
         // Attached only once we have given up, so it also catches a grant that
         // already landed in the same instant: nobody else will release it.
         void raw.then(late => {
-          if (late !== undefined) void giveBack(late, 'late grant');
+          if (late !== undefined) void giveBack(protocol, late, 'late grant');
         }, noop);
         throw asStoreError(error, 'acquire');
       }
@@ -251,15 +304,27 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     if (grant === undefined) return undefined;
     if (leased && scheduler.now() - sentAt >= leaseMs) {
       log.warn('grant for {key} arrived after its ttl; refused', { key: keyField(key) });
-      await giveBack(grant, 'stale grant');
+      await giveBack(protocol, grant, 'stale grant');
       return undefined;
     }
     return { grant, sentAt };
   }
 
   /** Sleep between attempts: a wake-up from the store, or full-jitter backoff. Wakes early on abort. */
-  async function pause(key: Key, leftMs: number, attempt: number, signal: AbortSignal | undefined): Promise<void> {
-    const ms = store.waitFor === undefined ? Math.min(backoffDelay(attempt), leftMs) : Math.min(leftMs, BACKOFF_MAX_MS);
+  async function pause(
+    key: Key,
+    leftMs: number,
+    attempt: number,
+    signal: AbortSignal | undefined,
+    session: Waiter | undefined,
+  ): Promise<void> {
+    const waitFor =
+      session === undefined
+        ? store.waitFor === undefined
+          ? undefined
+          : (s: AbortSignal): Promise<void> => store.waitFor?.(key, s) ?? Promise.resolve()
+        : (s: AbortSignal): Promise<void> => session.waitFor(s);
+    const ms = waitFor === undefined ? Math.min(backoffDelay(attempt), leftMs) : Math.min(leftMs, BACKOFF_MAX_MS);
     const wakeup = new AbortController();
     const onAbort = (): void => {
       wakeup.abort();
@@ -275,17 +340,19 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
       });
     });
     const racers = [elapsed, woken];
-    if (store.waitFor !== undefined) {
-      const wake = store.waitFor(key, wakeup.signal);
-      // A failing waitFor must not end the wait early: the timer still bounds it.
-      racers.push(
-        wake.catch((error: unknown) => {
+    try {
+      if (waitFor !== undefined) {
+        // A failing waitFor, sync or async, must not end the wait early or leak the timer: the timer still bounds it.
+        const failed = (error: unknown): Promise<void> => {
           log.error(toError(error), { note: 'waitFor failed; falling back to backoff', key: keyField(key) });
           return neverSettlesVoid;
-        }),
-      );
-    }
-    try {
+        };
+        try {
+          racers.push(waitFor(wakeup.signal).catch(failed));
+        } catch (error) {
+          void failed(error);
+        }
+      }
       await Promise.race(racers);
     } finally {
       if (timer !== undefined) scheduler.clearTimeout(timer);
@@ -298,14 +365,14 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
   // The guard: renewal loop, deadline, loss, release
   // -------------------------------------------------------------------------
 
-  function makeHeld(key: Key, first: Attempt, opts: CallOptions): Held {
+  function makeHeld(protocol: Protocol, key: Key, first: Attempt, opts: CallOptions): Held {
     const { grant } = first;
     const controller = new AbortController();
     const holdMs = opts.holdAtLeast === undefined ? 0 : parseDuration(opts.holdAtLeast);
     const acquiredAt = scheduler.now();
     const extendFn =
-      leased && store.extend !== undefined
-        ? (g: Grant, ttlMs: number) => store.extend?.(g, ttlMs) ?? Promise.resolve(false)
+      leased && protocol.extend !== undefined
+        ? (g: Grant, ttlMs: number) => protocol.extend?.(g, ttlMs) ?? Promise.resolve(false)
         : undefined;
     let deadline = leased ? first.sentAt + leaseMs : Number.POSITIVE_INFINITY;
     const firstDeadline = deadline;
@@ -315,8 +382,12 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     let deadlineTimer: SchedulerHandle | undefined;
     let renewing: Promise<void> | undefined;
     let releasing: Promise<void> | undefined;
+    // Removes the forwarder from the caller's signal. A long-lived signal (an app shutdown) must not collect one per hold.
+    let detachCaller: (() => void) | undefined;
 
     const stopTimers = (): void => {
+      detachCaller?.();
+      detachCaller = undefined;
       if (beatTimer !== undefined) scheduler.clearTimeout(beatTimer);
       if (deadlineTimer !== undefined) scheduler.clearTimeout(deadlineTimer);
       beatTimer = undefined;
@@ -385,7 +456,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
         }
         if (ended !== undefined) {
           // The lock was given up while the renewal was in flight: hand it back.
-          if (ok) await giveBack(grant, 'late renewal');
+          if (ok) await giveBack(protocol, grant, 'late renewal');
           return;
         }
         if (!ok) {
@@ -414,7 +485,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
       stopTimers();
       let outcome;
       try {
-        outcome = await withStoreTimeout(store.release(grant), storeTimeoutMs, 'release', scheduler);
+        outcome = await withStoreTimeout(protocol.release(grant), storeTimeoutMs, 'release', scheduler);
       } catch (error) {
         throw asReleaseError(error);
       }
@@ -441,7 +512,12 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
         controller.abort(callerSignal.reason);
       };
       if (callerSignal.aborted) forward();
-      else callerSignal.addEventListener('abort', forward, { once: true });
+      else {
+        callerSignal.addEventListener('abort', forward, { once: true });
+        detachCaller = () => {
+          callerSignal.removeEventListener('abort', forward);
+        };
+      }
     }
 
     const guard: GuardImpl = {
@@ -488,7 +564,12 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
   // Verbs
   // -------------------------------------------------------------------------
 
-  async function acquireHeld(key: Key, opts: CallOptions, mode: 'try' | 'wait'): Promise<Held | undefined> {
+  async function acquireHeld(
+    protocol: Protocol,
+    key: Key,
+    opts: CallOptions,
+    mode: 'try' | 'wait',
+  ): Promise<Held | undefined> {
     const waitMs = mode === 'wait' && opts.wait !== undefined ? parseDuration(opts.wait) : undefined;
     if (mode === 'wait' && store.guarantees.scope !== 'process' && waitMs === undefined && opts.signal === undefined) {
       throw new LockError({
@@ -498,22 +579,30 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
       });
     }
     const limit = waitMs === undefined ? Number.POSITIVE_INFINITY : scheduler.now() + waitMs;
-    for (let attempt = 0; ; attempt++) {
-      const remaining = Math.max(0, limit - scheduler.now());
-      const nativeWait =
-        mode === 'wait' && store.guarantees.wait === 'native' && Number.isFinite(remaining) ? remaining : undefined;
-      const got = await gated(key, () => attemptOnce(key, nativeWait, opts.signal));
-      if (got !== undefined) {
-        const held = makeHeld(key, got, opts);
-        // A grant with less than ttl/3 left renews at once instead of waiting a beat.
-        if (held.renewNow !== undefined) await held.renewNow();
-        // Lost before the callback starts (refused, or past the deadline): never acquired.
-        if (held.lostError() === undefined) return held;
+    // A mode-aware wait (writer preference) lives from the first refusal until this loop ends,
+    // so a woken writer is still counted while its next attempt is in flight.
+    let session: Waiter | undefined;
+    try {
+      for (let attempt = 0; ; attempt++) {
+        const remaining = Math.max(0, limit - scheduler.now());
+        const nativeWait =
+          mode === 'wait' && store.guarantees.wait === 'native' && Number.isFinite(remaining) ? remaining : undefined;
+        const got = await gated(key, () => attemptOnce(protocol, key, nativeWait, opts.signal));
+        if (got !== undefined) {
+          const held = makeHeld(protocol, key, got, opts);
+          // A grant with less than ttl/3 left renews at once instead of waiting a beat.
+          if (held.renewNow !== undefined) await held.renewNow();
+          // Lost before the callback starts (refused, or past the deadline): never acquired.
+          if (held.lostError() === undefined) return held;
+        }
+        if (mode === 'try') return undefined;
+        const left = limit - scheduler.now();
+        if (left <= 0) throw heldError();
+        session ??= protocol.waiter?.(key);
+        await pause(key, left, attempt, opts.signal, session);
       }
-      if (mode === 'try') return undefined;
-      const left = limit - scheduler.now();
-      if (left <= 0) throw heldError();
-      await pause(key, left, attempt, opts.signal);
+    } finally {
+      session?.close();
     }
   }
 
@@ -560,30 +649,98 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     return settled.value;
   }
 
-  function mutex(name: string): MutexHandleImpl {
-    const key = createKey(namespace, name);
+  /** The four verbs over one key. `protocolFor` runs per call, so a semaphore can check `weight` first. */
+  function handleOver(key: Key, protocolFor: (opts: CallOptions) => Protocol): HandleImpl {
     return {
       async tryRun<T>(fn: (ctx: ContextImpl) => T | Promise<T>, opts: CallOptions = {}): Promise<LockRun<Awaited<T>>> {
-        const held = await acquireHeld(key, opts, 'try');
+        const held = await acquireHeld(protocolFor(opts), key, opts, 'try');
         if (held === undefined) return { ran: false };
         return { ran: true, value: await runHeld(held, fn, opts) };
       },
       async run<T>(fn: (ctx: ContextImpl) => T | Promise<T>, opts: CallOptions = {}): Promise<Awaited<T>> {
-        const held = await acquireHeld(key, opts, 'wait');
+        const held = await acquireHeld(protocolFor(opts), key, opts, 'wait');
         if (held === undefined) throw heldError();
         return runHeld(held, fn, opts);
       },
       async acquire(opts = {}) {
-        const held = await acquireHeld(key, opts, 'wait');
+        const held = await acquireHeld(protocolFor(opts), key, opts, 'wait');
         if (held === undefined) throw heldError();
         return held.guard;
       },
       async tryAcquire(opts = {}) {
-        const held = await acquireHeld(key, opts, 'try');
+        const held = await acquireHeld(protocolFor(opts), key, opts, 'try');
         return held?.guard;
       },
     };
   }
 
-  return { store, counters: counts, mutex };
+  const mutexProtocol: Protocol = {
+    acquire: (key, req) => store.acquire(key, req),
+    release: grant => store.release(grant),
+    ...(store.extend === undefined
+      ? {}
+      : { extend: (grant, ttlMs) => store.extend?.(grant, ttlMs) ?? Promise.resolve(false) }),
+  };
+
+  function mutex(name: string): HandleImpl {
+    const key = createKey(namespace, name);
+    return handleOver(key, () => mutexProtocol);
+  }
+
+  function semaphoreOver(ops: PermitOps): (name: string, config: SemaphoreConfig) => HandleImpl {
+    return (name, config) => {
+      const parsedConfig = semaphoreConfigSchema.safeParse(config);
+      if (!parsedConfig.success) {
+        throw configError(
+          `semaphore limit ${parsedConfig.error.issues.map(issue => issue.message).join(', ')}`,
+          'Pass { limit } as a positive integer.',
+        );
+      }
+      const { limit } = parsedConfig.data;
+      return handleOver(createKey(namespace, name, 'semaphore'), opts => {
+        const parsedWeight = weightSchema.safeParse(opts.weight ?? 1);
+        if (!parsedWeight.success || parsedWeight.data > limit) {
+          throw configError(
+            `weight must be a positive integer of at most the limit (${limit})`,
+            'Pass a smaller weight, or declare a larger limit.',
+          );
+        }
+        const weight = parsedWeight.data;
+        return {
+          acquire: (key, req) => ops.acquire(key, { ...req, limit, weight }),
+          release: grant => ops.release(grant),
+          waiter: k => ops.waiter?.(k, weight),
+          ...(ops.extend === undefined
+            ? {}
+            : { extend: (grant, ttlMs) => ops.extend?.(grant, ttlMs) ?? Promise.resolve(false) }),
+        };
+      });
+    };
+  }
+
+  function readWriteOver(ops: SharedOps): (name: string) => ReadWriteImpl {
+    return name => {
+      const key = createKey(namespace, name, 'readWrite');
+      const side = (mode: 'read' | 'write'): HandleImpl => {
+        const protocol: Protocol = {
+          acquire: (k, req) => ops.acquire(k, { ...req, mode }),
+          release: grant => ops.release(grant),
+          waiter: k => ops.waiter?.(k, mode),
+          ...(ops.extend === undefined
+            ? {}
+            : { extend: (grant, ttlMs) => ops.extend?.(grant, ttlMs) ?? Promise.resolve(false) }),
+        };
+        return handleOver(key, () => protocol);
+      };
+      return { read: side('read'), write: side('write') };
+    };
+  }
+
+  return {
+    store,
+    counters: counts,
+    mutex,
+    ...(permitOps === undefined ? {} : { semaphore: semaphoreOver(permitOps) }),
+    ...(sharedOps === undefined ? {} : { readWrite: readWriteOver(sharedOps) }),
+  };
 }

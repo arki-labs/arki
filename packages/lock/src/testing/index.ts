@@ -9,7 +9,7 @@ export type { MemoryEntry, MemoryGuarantees, MemoryStore } from '../memory.js';
 export { chaos } from './chaos.js';
 export type { ChaosHooks } from './chaos.js';
 export { ContractSkip, storeContract } from './contract.js';
-export type { ContractCase, ContractOptions, MakeStore } from './contract.js';
+export type { CaseStore, ContractCase, ContractOptions, MakeStore } from './contract.js';
 export { manualScheduler } from './manual-scheduler.js';
 export type { ManualScheduler } from './manual-scheduler.js';
 export { replicaCases } from './replicas.js';
