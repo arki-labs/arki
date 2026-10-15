@@ -1,0 +1,42 @@
+[
+  {
+    "name": "@arki/cas/polynomial without exactRoots (polynomialIn, expand, collect, rationalize, gcd; @arki/expr and @arki/math ignored): RFC target 10 kB, measured 6.64 kB",
+    "path": "dist/polynomial.js",
+    "import": "{ polynomialIn, expand, collect, rationalize, gcd }",
+    "ignore": [
+      "@arki/expr",
+      "@arki/math"
+    ],
+    "limit": "7 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/cas/polynomial with exactRoots (@arki/expr and @arki/math ignored): RFC target +8 kB, measured +1.3 kB",
+    "path": "dist/polynomial.js",
+    "import": "{ polynomialIn, exactRoots }",
+    "ignore": [
+      "@arki/expr",
+      "@arki/math"
+    ],
+    "limit": "8.5 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/cas (errors, conditionToLatex; @arki/expr and @arki/math ignored)",
+    "path": "dist/index.js",
+    "import": "{ CasError, CasLimitError, conditionToLatex }",
+    "ignore": [
+      "@arki/expr",
+      "@arki/math"
+    ],
+    "limit": "0.75 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/cas/polynomial (polynomialIn, exactRoots) with @arki/expr parse/print and the @arki/math subpaths: measured 18.18 kB",
+    "path": "dist/polynomial.js",
+    "import": "{ polynomialIn, exactRoots }",
+    "limit": "19 kB",
+    "gzip": true
+  }
+]

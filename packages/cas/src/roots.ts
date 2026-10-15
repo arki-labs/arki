@@ -1,0 +1,215 @@
+/**
+ * `exactRoots` (RFC §8.3), build step 1: closed forms for parts of degree 1
+ * and 2, over ℚ(π, e). A factor `x^k` gives the root 0; a polynomial of
+ * degree ≥ 3 is split into square-free parts (Yun), and each part of degree
+ * ≤ 2 is solved exactly. Parts of degree ≥ 3 are returned as `numeric`, with
+ * float coefficients for `@arki/math/polynomial` `polynomialRoots`. Splitting
+ * rational polynomials into irreducible factors (`factor`, build step 4) is
+ * not here yet.
+ *
+ * Internal module; re-exported by `@arki/cas/polynomial`.
+ */
+import type { Expr } from '@arki/expr';
+import { InvalidArgumentError } from '@arki/math/errors';
+import { Rational } from '@arki/math/rational';
+
+import type { RatFun } from './context.js';
+import type { CasOptions } from './core.js';
+import type { Poly } from './poly.js';
+import type { PolynomialForm } from './polynomial.js';
+import { constantFloat, constantSign } from './constants.js';
+import { Context } from './context.js';
+import { Emitter, exprOf } from './emit.js';
+import {
+  add,
+  coefficientsIn,
+  compareMonomials,
+  constant,
+  constantValue,
+  degreeIn,
+  derivativeIn,
+  divideExact,
+  EMPTY,
+  fromCoefficientsIn,
+  gcd,
+  isZero,
+  leadingTerm,
+  multiply,
+  negate,
+  ONE,
+  primitiveIn,
+  rationalContent,
+  scale,
+  subtract,
+} from './poly.js';
+import { inputExpr, kernelValue, read } from './read.js';
+
+export type ExactRoots = {
+  /** Closed-form roots; `real: false` for complex ones, which print with `i`. */
+  readonly roots: readonly { readonly value: Expr; readonly multiplicity: number; readonly real: boolean }[];
+  /** Parts with no closed form here, ascending float coefficients, for a numeric solver. */
+  readonly numeric: readonly { readonly coefficients: readonly number[]; readonly multiplicity: number }[];
+  /** False when `numeric` is non-empty. */
+  readonly exact: boolean;
+};
+
+const AT = { start: 0, end: 0 };
+
+/** Trial division stops at this prime bound; what is left is kept under the root (correct, maybe not fully reduced). */
+const TRIAL_LIMIT = 10_000n;
+
+function exactQuotient(a: Poly, b: Poly, ctx: Context): Poly {
+  const q = divideExact(a, b, ctx.budget);
+  if (q === undefined) throw new Error('cas invariant: a gcd did not divide its input');
+  return q;
+}
+
+/** ⌊√n⌋ for n ≥ 0, by Newton's method. */
+function isqrt(n: bigint): bigint {
+  if (n < 2n) return n;
+  let x = 1n << BigInt(Math.ceil(n.toString(2).length / 2));
+  for (let y = (x + n / x) / 2n; y < x; y = (x + n / x) / 2n) x = y;
+  return x;
+}
+
+/** n = s²·r with r free of square factors below the trial limit. */
+function squarePart(n: bigint, ctx: Context): readonly [bigint, bigint] {
+  let s = 1n;
+  let r = n;
+  for (let p = 2n; p <= TRIAL_LIMIT && p * p <= r; p += p === 2n ? 1n : 2n) {
+    ctx.budget.spend(1);
+    while (r % (p * p) === 0n) {
+      r /= p * p;
+      s *= p;
+    }
+  }
+  const root = isqrt(r);
+  return root * root === r ? [s * root, 1n] : [s, r];
+}
+
+/** The polynomial q with q² = p, if there is one (term by term, as in long division). */
+function polySqrt(p: Poly, ctx: Context): Poly | undefined {
+  const lead = leadingTerm(p);
+  if (lead === undefined || lead.c.isNegative() || lead.m.some(e => e % 2 !== 0)) return undefined;
+  const [num, den] = [isqrt(lead.c.numerator), isqrt(lead.c.denominator)];
+  if (num * num !== lead.c.numerator || den * den !== lead.c.denominator) return undefined;
+  const first = { m: lead.m.map(e => e / 2), c: Rational.fromParts(num, den) };
+  let q = fromTerm(first.m, first.c);
+  for (let steps = 0; steps <= p.size; steps++) {
+    const rest = subtract(p, multiply(q, q, ctx.budget));
+    const next = leadingTerm(rest);
+    if (next === undefined) return q;
+    const m = Array.from({ length: Math.max(next.m.length, first.m.length) }, (_, g) => (next.m[g] ?? 0) - (first.m[g] ?? 0));
+    // The next term of q divides the remainder's lead by 2·lead(q) and is smaller than lead(q).
+    if (m.some(e => e < 0) || compareMonomials(m, first.m) >= 0) return undefined;
+    q = add(q, fromTerm(m, next.c.dividedBy(first.c.times(2))));
+  }
+  return undefined;
+}
+
+function fromTerm(m: readonly number[], c: Rational): Poly {
+  let end = m.length;
+  while (end > 0 && m[end - 1] === 0) end--;
+  const trimmed = m.slice(0, end);
+  return new Map([[trimmed.join(','), { m: trimmed, c }]]);
+}
+
+/** √m for a positive value m in ℚ[π, e]: rational squares and polynomial squares come out, the rest stays under `sqrt`. */
+function sqrtOf(m: Poly, ctx: Context): RatFun {
+  const content = rationalContent(m);
+  const primitive = scale(m, content.inverse());
+  const [s, r] = squarePart(content.numerator * content.denominator, ctx);
+  const root = polySqrt(primitive, ctx);
+  const multiplier = ctx.fromPoly(scale(root ?? constant(ONE), Rational.fromParts(s, content.denominator)));
+  const radicand = root === undefined ? scale(primitive, Rational.fromParts(r, 1n)) : constant(Rational.fromParts(r, 1n));
+  if (constantValue(radicand)?.eq(1) === true) return multiplier;
+  return ctx.multiply(multiplier, kernelValue('sqrt', [ctx.fromPoly(radicand)], AT, ctx));
+}
+
+/** Square-free parts of f in x, with multiplicities (Yun's algorithm). */
+function squareFreeParts(f: Poly, x: number, ctx: Context): (readonly [Poly, number])[] {
+  const f0 = primitiveIn(f, x, ctx.budget);
+  const df = derivativeIn(f0, x);
+  const a0 = gcd(f0, df, ctx.budget);
+  let b = exactQuotient(f0, a0, ctx);
+  let d = subtract(exactQuotient(df, a0, ctx), derivativeIn(b, x));
+  const out: (readonly [Poly, number])[] = [];
+  for (let i = 1; degreeIn(b, x) > 0; i++) {
+    const a = gcd(b, d, ctx.budget);
+    if (degreeIn(a, x) > 0) out.push([a, i]);
+    const c = exactQuotient(d, a, ctx);
+    b = exactQuotient(b, a, ctx);
+    d = subtract(c, derivativeIn(b, x));
+  }
+  return out;
+}
+
+type Root = { readonly value: RatFun; readonly multiplicity: number; readonly real: boolean; readonly order: number };
+
+/**
+ * Closed-form roots of a `polynomialIn` result: rational and quadratic-surd
+ * roots over ℚ, and roots in ℚ(π, e) and its square roots for π/e
+ * coefficients (`pi*x = 1` → `1/pi`). A quadratic whose discriminant's sign
+ * the `digits` budget cannot decide goes to `numeric`. Zero-testing assumes π
+ * and e are algebraically independent (standard, unproven; see the README).
+ */
+export function exactRoots(form: PolynomialForm, options: CasOptions = {}): ExactRoots {
+  if (form.coefficients.length === 0) throw new InvalidArgumentError('the zero polynomial has every number as a root');
+  const ctx = new Context(options);
+  const values = form.coefficients.map(c =>
+    c.rational === null ? read(inputExpr(c.value, ctx).root, ctx) : ctx.fromPoly(constant(c.rational)),
+  );
+  for (const v of values) {
+    if (!ctx.isConstant(v.num) || !ctx.isConstant(v.den)) {
+      throw new InvalidArgumentError('exactRoots takes coefficients in ℚ(π, e), as polynomialIn returns them');
+    }
+  }
+  const x = ctx.name('x', AT);
+  let common = constant(ONE);
+  for (const v of values) common = multiply(common, exactQuotient(v.den, gcd(common, v.den, ctx.budget), ctx), ctx.budget);
+  const scaled = values.map(v => multiply(v.num, exactQuotient(common, v.den, ctx), ctx.budget));
+  const zeros = scaled.findIndex(c => !isZero(c));
+  const p = fromCoefficientsIn(scaled.slice(zeros), x);
+
+  const roots: Root[] = [];
+  const numeric: { coefficients: number[]; multiplicity: number }[] = [];
+  if (zeros > 0) roots.push({ value: ctx.fromPoly(EMPTY), multiplicity: zeros, real: true, order: 0 });
+  const parts = degreeIn(p, x) <= 2 ? [[p, 1] as const] : squareFreeParts(p, x, ctx);
+  for (const [part, multiplicity] of parts) {
+    const cs = coefficientsIn(part, x);
+    if (cs.length === 2) {
+      const [c0 = EMPTY, c1 = EMPTY] = cs;
+      roots.push({ value: ctx.quotient(negate(c0), c1), multiplicity, real: true, order: -constantFloat(c0, ctx) / constantFloat(c1, ctx) });
+    } else if (cs.length === 3) {
+      const [c = EMPTY, b = EMPTY, a = EMPTY] = cs;
+      const discriminant = subtract(multiply(b, b, ctx.budget), scale(multiply(a, c, ctx.budget), Rational.fromParts(4n, 1n)));
+      const twoA = ctx.fromPoly(scale(a, Rational.fromParts(2n, 1n)));
+      const minusB = ctx.fromPoly(negate(b));
+      const [af, bf] = [constantFloat(a, ctx), constantFloat(b, ctx)];
+      const sign = constantSign(discriminant, ctx);
+      if (sign === 0) {
+        roots.push({ value: ctx.divide(minusB, twoA), multiplicity: 2 * multiplicity, real: true, order: -bf / (2 * af) });
+      } else if (sign === undefined) {
+        numeric.push({ coefficients: cs.map(c => constantFloat(c, ctx)), multiplicity });
+      } else {
+        const magnitude = sign > 0 ? discriminant : negate(discriminant);
+        const root = sqrtOf(magnitude, ctx);
+        const s = sign > 0 ? root : ctx.multiply(root, ctx.generatorValue(ctx.atom('i', AT)));
+        const offset = Math.sqrt(Math.abs(constantFloat(discriminant, ctx))) / (2 * af);
+        for (const [shift, sign2] of [[ctx.negate(s), -1], [s, 1]] as const) {
+          const order = sign > 0 ? -bf / (2 * af) + sign2 * offset : sign2;
+          roots.push({ value: ctx.divide(ctx.add(minusB, shift), twoA), multiplicity, real: sign > 0, order });
+        }
+      }
+    } else if (cs.length > 3) {
+      numeric.push({ coefficients: cs.map(c => constantFloat(c, ctx)), multiplicity });
+    }
+  }
+  const emitter = new Emitter(ctx);
+  const sorted = roots.sort((a, b) => (a.real === b.real ? a.order - b.order : a.real ? -1 : 1));
+  return {
+    roots: sorted.map(r => ({ value: exprOf(emitter.fractionNode(r.value), ctx), multiplicity: r.multiplicity, real: r.real })),
+    numeric,
+    exact: numeric.length === 0,
+  };
+}
