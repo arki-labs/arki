@@ -86,4 +86,57 @@ describe('queue() client + queueWorker() in separate apps', () => {
       await api.dispose();
     }
   }, 30_000);
+  // Why: a flow is a BullMQ tree, so a parent step must run only after its
+  // child finished. Before flows were wired, enqueue had no flow path at all
+  // and nothing ever ran.
+  it('a flow started by the API app runs in the worker app, the child step before its parent', async () => {
+    const q = initQueue.context<{ readonly worker: string }>().create();
+    const finished: string[] = [];
+    const reserve = q.job
+      .name(`reserve-${crypto.randomUUID()}`)
+      .input(z.object({ orderId: z.string() }))
+      .handler(async data => {
+        // Slow child: a parent that did not wait would finish first
+        await new Promise(resolve => setTimeout(resolve, 200));
+        finished.push(`reserve:${data.orderId}`);
+        return 'reserved';
+      });
+    const notify = q.job
+      .name(`notify-${crypto.randomUUID()}`)
+      .input(z.object({ to: z.string() }))
+      .handler((data, ctx) => {
+        finished.push(`notify:${data.to}:${ctx.worker}`);
+        return Promise.resolve('sent');
+      });
+    const orderFlow = q.flow
+      .name('orders:process')
+      .input(z.object({ orderId: z.string() }))
+      .step('reserve', { job: reserve, data: input => ({ orderId: input.orderId }) })
+      .step('notify', { job: notify, data: input => ({ to: input.orderId }), dependsOn: ['reserve'] })
+      .build();
+    const orders = feature('orders', { use: [jobs({ reserve, notify, orderFlow })] });
+    const keyPrefix = `flow-${crypto.randomUUID()}:`;
+
+    const api = await defineApp('api')
+      .use(queue({ connection: redisUrl, keyPrefix }))
+      .features([orders])
+      .start();
+    const worker = await defineApp('worker')
+      .use(queue({ connection: redisUrl, keyPrefix }))
+      .features([orders])
+      .serve(queueWorker({ q, needs: {}, blocking: true, context: () => ({ worker: 'w1' }) }))
+      .start();
+
+    try {
+      const started = await api.services.queue.enqueue(orderFlow, { orderId: 'o-1' });
+      expect(started.flow).toBe('orders:process');
+      expect(Object.keys(started.jobIds).toSorted()).toEqual(['notify', 'reserve']);
+
+      await waitFor(() => finished.length === 2);
+      expect(finished).toEqual(['reserve:o-1', 'notify:o-1:w1']);
+    } finally {
+      await worker.dispose();
+      await api.dispose();
+    }
+  }, 30_000);
 });

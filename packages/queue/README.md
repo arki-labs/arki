@@ -283,9 +283,10 @@ defineApp('shop-worker')
 ```
 
 - `queue({ connection, keyPrefix?, name? })` provides the `queue` service:
-  `enqueue(job, data, options?)` returns the BullMQ job id. Boot opens no
+  `enqueue(job, data, options?)` returns the BullMQ job id, and
+  `enqueue(flow, input)` starts a flow (see Flows). Boot opens no
   connection; each job's queue opens on its first `enqueue`, with the retry
-  defaults the job declares. Use it where the job's own `trigger()` cannot
+  defaults the job declares, and one flow producer on the first flow. Use it where the job's own `trigger()` cannot
   work: `trigger()` needs a worker that registered the job in the same process.
 - `queueWorker({ q, needs, context, blocking?, startupTimeoutMs?, name? })` is
   bound to the features the app mounted. It registers each feature's
@@ -327,41 +328,63 @@ while no worker runs, see the `@arki/schedule` README.
 
 ### Flows (Multi-Step Workflows)
 
-Flows define complex workflows with dependencies:
+A flow runs several jobs in a set order. It is a BullMQ flow, so it is a
+**tree**: a step waits for the steps in its `dependsOn` (its children), and
+each step can be in the `dependsOn` of **at most one** other step. A parent
+step runs after all its children finished.
 
 ```typescript
 const orderFlow = q.flow
   .name('orders:process-flow')
   .input(z.object({ orderId: z.string() }))
+  // validate and reserve run in parallel
   .step('validate', {
     job: validateJob,
+    data: input => ({ orderId: input.orderId }),
+  })
+  .step('reserve', {
+    job: reserveJob,
     data: input => ({ orderId: input.orderId }),
   })
   .step('payment', {
     job: paymentJob,
     data: input => ({ orderId: input.orderId }),
-    dependsOn: ['validate'], // Wait for validation
-  })
-  .step('inventory', {
-    job: inventoryJob,
-    data: input => ({ orderId: input.orderId }),
-    dependsOn: ['payment'], // Wait for payment
+    dependsOn: ['validate', 'reserve'], // fan-in: waits for both
+    opts: { priority: 2 }, // BullMQ options for this step, over the job's own defaults
   })
   .step('notify', {
     job: notifyJob,
     data: input => ({ orderId: input.orderId }),
-    dependsOn: ['payment'], // Runs in parallel with inventory
+    dependsOn: ['payment'],
   })
   .build();
 ```
 
-**Flow features:**
+Start a flow with `enqueue`, from the `queue()` DOT client or from a
+`createQueue()` instance. The input type comes from the flow. The input is
+checked against the flow's schema first; a bad input throws
+`QueueInputError` (`ARKI_QUEUE_E018`) and nothing is added. All jobs of the
+flow are added in one atomic call.
 
-- Automatic dependency validation (no circular dependencies)
-- Type-safe step IDs
-- Parallel execution (steps with same dependencies run in parallel)
-- No flow `.use()`: each step runs later in its own job's worker, so nothing
-  can wrap a whole flow. Put middleware on the step jobs (`q.job.use(mw)`).
+```typescript
+const { jobIds } = await ctx.queue.enqueue(orderFlow, { orderId: 'o-1' });
+// jobIds: { validate: '…', reserve: '…', payment: '…', notify: '…' }
+```
+
+**Flow rules:**
+
+- Each step runs in its own job's queue and worker, with that job's retry
+  defaults and middleware. Register the step jobs in the worker (registering
+  the flow registers them). There is no flow `.use()`: put middleware on the
+  step jobs (`q.job.use(mw)`).
+- Unknown step ids (`ARKI_QUEUE_E009`) and cycles (`ARKI_QUEUE_E010`) throw at
+  `.build()`.
+- Fan-out is not supported. A step that two steps depend on throws
+  `ARKI_QUEUE_E017` at `.build()`: a BullMQ child job has exactly one parent.
+  Chain the steps instead (`notify` depends on `inventory`, which depends on
+  `payment`), or split them into two flows.
+- Workflows where a step has several dependents (a general DAG) are not
+  supported by BullMQ flows.
 
 ### Registry Organization
 
@@ -710,11 +733,10 @@ q.flow
   .step(id, {
     job,
     data: (input) => ...,
-    dependsOn?: string[],
-    queueName?: string,
-    opts?: JobOptions,
+    dependsOn?: string[], // each step id in at most one other step's dependsOn
+    opts?: FlowStepOptions, // BullMQ job options for this step
   })
-  .build()
+  .build() // FlowDefinition<TInput>; start it with enqueue(flow, input)
 ```
 
 ## Migration from v1.x

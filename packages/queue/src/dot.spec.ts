@@ -98,7 +98,11 @@ function fakeBuilder(instance: QueueInstance) {
       seen.connection = options.connection;
       seen.keyPrefix = options.keyPrefix;
       seen.createContext = options.createContext;
-      return { ...instance, queues: () => new Map() };
+      return {
+        ...instance,
+        queues: () => new Map(),
+        enqueue: () => Promise.reject(new Error('the fake queue instance never enqueues')),
+      };
     },
   };
   return { fakeQ, seen };

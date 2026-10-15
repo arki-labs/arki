@@ -3,12 +3,12 @@
  * Inspired by tRPC's builder pattern
  */
 
-import type { Queue } from 'bullmq';
+import type { JobsOptions, Queue } from 'bullmq';
 
 import type { z } from '@arki/contracts';
 
 import type { QueueConnection } from '../redis-connection.ts';
-import type { JobContext, JobDefinition, JobOptions } from './job.ts';
+import type { JobContext, JobDefinition, JobOptions, TriggerOptions } from './job.ts';
 import type { JobMiddleware, MiddlewareFunction } from './middleware.ts';
 import type { QueueConfig, QueueMeta } from './queue.ts';
 
@@ -441,8 +441,9 @@ export type FlowBuilderNeedsStep<TContext, TMeta extends QueueMeta, TInput> = {
       job: JobDefinition<TStepInput, unknown, never>;
       /** Maps the flow input to the step job's input. */
       data: (input: TInput) => NoInfer<TStepInput>;
-      queueName?: string;
-      opts?: unknown;
+      /** BullMQ options for this step's job, over the job's own defaults (retry, `bullmqOptions`). */
+      opts?: FlowStepOptions;
+      /** Steps that must finish first. Each step may be in the `dependsOn` of at most one other step. */
       dependsOn?: readonly string[];
     },
   ): FlowBuilderWithInput<TContext, TMeta, TInput>;
@@ -463,8 +464,9 @@ export type FlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput> = {
       job: JobDefinition<TStepInput, unknown, never>;
       /** Maps the flow input to the step job's input. */
       data: (input: TInput) => NoInfer<TStepInput>;
-      queueName?: string;
-      opts?: unknown;
+      /** BullMQ options for this step's job, over the job's own defaults (retry, `bullmqOptions`). */
+      opts?: FlowStepOptions;
+      /** Steps that must finish first. Each step may be in the `dependsOn` of at most one other step. */
       dependsOn?: readonly string[];
     },
   ): FlowBuilderWithInput<TContext, TMeta, TInput>;
@@ -472,15 +474,42 @@ export type FlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput> = {
   /**
    * Build the final flow definition
    */
-  build(): FlowDefinition;
+  build(): FlowDefinition<TInput>;
 };
 
 /**
- * Flow definition (opaque type for now)
+ * BullMQ options of one flow step's job. `parent` and `repeat` are owned by
+ * the flow (the tree sets parents; a flow step does not repeat).
  */
-export type FlowDefinition = {
+export type FlowStepOptions = Omit<JobsOptions, 'parent' | 'repeat' | 'deduplication'>;
+
+/**
+ * Flow definition. Start one with `enqueue(flow, input)`.
+ */
+export type FlowDefinition<TInput = unknown> = {
   _type: 'flow';
   _internal: unknown;
+  /** Type-only: carries the input type so `enqueue(flow, input)` infers it. Never set at runtime. */
+  readonly _input?: TInput;
+};
+
+/** What `enqueue(flow, input)` created: the BullMQ job id of every step, by step id. */
+export type FlowEnqueueResult = {
+  readonly flow: string;
+  readonly jobIds: Readonly<Record<string, string>>;
+};
+
+/**
+ * Add one job to its queue (returns its BullMQ job id), or start one flow
+ * (validates `input` with the flow's schema, then adds every step's job).
+ */
+export type QueueEnqueue = {
+  <TInput, TOutput, TContext>(
+    job: JobDefinition<TInput, TOutput, TContext>,
+    data: TInput,
+    options?: TriggerOptions,
+  ): Promise<string>;
+  <TInput>(flow: FlowDefinition<TInput>, input: NoInfer<TInput>): Promise<FlowEnqueueResult>;
 };
 
 /**
@@ -510,4 +539,6 @@ export type QueueInstance = {
 export type BullMQQueueInstance = QueueInstance & {
   /** The BullMQ `Queue` of every registered job, by queue name. Empty until `register()` runs. */
   queues(): ReadonlyMap<string, Queue>;
+  /** Add a registered job (like its `trigger()`), or start a flow. */
+  enqueue: QueueEnqueue;
 };

@@ -16,6 +16,7 @@ export const QUEUE_DEFINITION_ERROR_CODES = {
   invalidCronValue: 'ARKI_QUEUE_E011',
   scheduleMiddlewareWithJob: 'ARKI_QUEUE_E012',
   duplicateScheduleName: 'ARKI_QUEUE_E013',
+  stepWithManyDependents: 'ARKI_QUEUE_E017',
 } as const;
 
 export class QueueDefinitionError extends Error {
@@ -41,4 +42,29 @@ export function duplicateScheduleError(name: string): QueueDefinitionError {
     message: `Schedule "${name}" is already registered.`,
     remediation: 'Give each schedule its own name with .name("..."); two schedules of one job need different names.',
   });
+}
+
+export const QUEUE_INPUT_ERROR_CODES = {
+  invalidFlowInput: 'ARKI_QUEUE_E018',
+} as const;
+
+/**
+ * Data handed to `enqueue()` failed its schema. Thrown before anything is
+ * written to Redis, so no part of the flow starts. `cause` is the schema error.
+ */
+export class QueueInputError extends Error {
+  readonly code: (typeof QUEUE_INPUT_ERROR_CODES)[keyof typeof QUEUE_INPUT_ERROR_CODES];
+  readonly remediation: string;
+
+  constructor(args: {
+    readonly code: (typeof QUEUE_INPUT_ERROR_CODES)[keyof typeof QUEUE_INPUT_ERROR_CODES];
+    readonly message: string;
+    readonly remediation: string;
+    readonly cause: unknown;
+  }) {
+    super(args.message, { cause: args.cause });
+    this.name = 'QueueInputError';
+    this.code = args.code;
+    this.remediation = args.remediation;
+  }
 }

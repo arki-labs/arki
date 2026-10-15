@@ -342,9 +342,8 @@ describe('Flow Execution', () => {
 
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Note: BullMQ flows need FlowProducer to execute
-    // This validates the flow structure but actual execution
-    // requires FlowProducer.add() which is tested in create-queue.ts
+    // Registering a flow only registers its step jobs; enqueue(flow, input)
+    // starts it (run end to end in queue-client.spec.ts)
 
     await queue.stop();
   }, 15_000);
@@ -573,7 +572,9 @@ describe('Real-World Flow Scenarios', () => {
       .step('confirmation', {
         job: sendConfirmationJob,
         data: input => ({ orderId: input.orderId, email: input.email }),
-        dependsOn: ['payment', 'inventory'],
+        // Not ['payment', 'inventory']: inventory already waits on payment, and
+        // a flow is a tree, so payment can have only one dependent
+        dependsOn: ['inventory'],
       })
       .build();
 
@@ -581,7 +582,7 @@ describe('Real-World Flow Scenarios', () => {
 
     expect(internal.name).toBe('test-order-processing');
     expect(internal.steps).toHaveLength(4);
-    expect(internal.steps[3]!.dependsOn).toEqual(['payment', 'inventory']);
+    expect(internal.steps[3]!.dependsOn).toEqual(['inventory']);
   });
 
   it('should implement data processing pipeline', () => {
@@ -636,13 +637,9 @@ describe('Real-World Flow Scenarios', () => {
     expect(internal.steps).toHaveLength(4);
   });
 
-  it('should implement fan-out/fan-in pattern', () => {
+  // Fan-out (one step waited on by several) is not a tree, so it is rejected (see flow-jobs.spec.ts)
+  it('should implement fan-in pattern', () => {
     const q = initQueue.context<TestContext>().create();
-
-    const prepareJob = q.job
-      .name('test-prepare')
-      .input(z.object({ id: z.string() }))
-      .handler(async () => ({ prepared: true }));
 
     const processAJob = q.job
       .name('test-process-a')
@@ -667,25 +664,18 @@ describe('Real-World Flow Scenarios', () => {
     const flow = q.flow
       .name('test-fan-out-fan-in')
       .input(z.object({ requestId: z.string() }))
-      .step('prepare', {
-        job: prepareJob,
-        data: input => ({ id: input.requestId }),
-      })
-      // Fan out: These run in parallel after prepare
+      // These run in parallel
       .step('processA', {
         job: processAJob,
         data: () => ({ data: 'a' }),
-        dependsOn: ['prepare'],
       })
       .step('processB', {
         job: processBJob,
         data: () => ({ data: 'b' }),
-        dependsOn: ['prepare'],
       })
       .step('processC', {
         job: processCJob,
         data: () => ({ data: 'c' }),
-        dependsOn: ['prepare'],
       })
       // Fan in: Waits for all parallel processes to complete
       .step('aggregate', {
@@ -697,8 +687,8 @@ describe('Real-World Flow Scenarios', () => {
 
     const internal = flow._internal as InternalFlowDefinition;
 
-    expect(internal.steps).toHaveLength(5);
-    expect(internal.steps[4]!.dependsOn).toEqual(['processA', 'processB', 'processC']);
+    expect(internal.steps).toHaveLength(4);
+    expect(internal.steps[3]!.dependsOn).toEqual(['processA', 'processB', 'processC']);
   });
 });
 
@@ -707,36 +697,6 @@ describe('Real-World Flow Scenarios', () => {
 // ============================================
 
 describe('Flow Configuration', () => {
-  it('should support custom queue names per step', () => {
-    const q = initQueue.context<TestContext>().create();
-
-    const job = q.job
-      .name('test-queue-step')
-      .input(z.object({ value: z.number() }))
-      .handler(async () => ({ result: 1 }));
-
-    const flow = q.flow
-      .name('test-custom-queues')
-      .input(z.object({ value: z.number() }))
-      .step('highPriority', {
-        job: job,
-        data: input => ({ value: input.value }),
-        queueName: 'high-priority-queue',
-      })
-      .step('lowPriority', {
-        job: job,
-        data: input => ({ value: input.value }),
-        queueName: 'low-priority-queue',
-        dependsOn: ['highPriority'],
-      })
-      .build();
-
-    const internal = flow._internal as InternalFlowDefinition;
-
-    expect(internal.steps[0]!.queueName).toBe('high-priority-queue');
-    expect(internal.steps[1]!.queueName).toBe('low-priority-queue');
-  });
-
   it('should support step-specific options', () => {
     const q = initQueue.context<TestContext>().create();
 

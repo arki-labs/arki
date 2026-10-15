@@ -5,6 +5,8 @@
  * Flows define multi-step workflows where steps can depend on each other:
  * - Each step runs a job with data derived from flow input
  * - Steps can specify dependencies (must run after other steps complete)
+ * - The steps form a tree (a BullMQ flow): each step is in the `dependsOn`
+ *   of at most one other step. A parent step runs after all its children.
  * - Each step runs in its own job's worker, with that job's middleware (a flow has no `.use()`)
  *
  * @example
@@ -27,7 +29,13 @@
 
 import type { z } from '@arki/contracts';
 
-import type { FlowBuilderNeedsStep, FlowBuilderStart, FlowBuilderWithInput, FlowDefinition } from './types/builder.ts';
+import type {
+  FlowBuilderNeedsStep,
+  FlowBuilderStart,
+  FlowBuilderWithInput,
+  FlowDefinition,
+  FlowStepOptions,
+} from './types/builder.ts';
 import type { AnyJobDefinition, JobDefinition } from './types/job.ts';
 import type { QueueConfig, QueueMeta } from './types/queue.ts';
 import { debugBuilder } from './debug.ts';
@@ -44,8 +52,7 @@ type FlowStepInternal<TJob = JobDefinition<unknown, unknown, unknown>> = {
   id: string;
   job: TJob;
   data: (input: unknown) => unknown;
-  queueName?: string;
-  opts?: unknown;
+  opts?: FlowStepOptions;
   dependsOn?: readonly string[];
 };
 
@@ -122,6 +129,7 @@ function validateFlowDependencies(steps: readonly FlowStepInternal<AnyJobDefinit
 
   // Check for circular dependencies
   detectCircularDependencies(steps);
+  rejectFanOut(steps);
   debugBuilder.debug('Flow dependencies validated successfully');
 }
 
@@ -175,6 +183,34 @@ function detectCircularDependencies(steps: readonly FlowStepInternal<AnyJobDefin
 }
 
 /**
+ * BullMQ flows are trees: a child job has exactly one parent. A step in the
+ * `dependsOn` of two steps would have two parents, so it could not run once
+ * for both. Reject that here instead of running the step twice (or never).
+ * @internal
+ */
+function rejectFanOut(steps: readonly FlowStepInternal<AnyJobDefinition>[]): void {
+  const dependentOf = new Map<string, string>();
+
+  for (const step of steps) {
+    for (const dependency of new Set(step.dependsOn)) {
+      const other = dependentOf.get(dependency);
+      if (other !== undefined) {
+        throw new QueueDefinitionError({
+          code: QUEUE_DEFINITION_ERROR_CODES.stepWithManyDependents,
+          message:
+            `Step "${dependency}" is in the dependsOn of both "${other}" and "${step.id}". ` +
+            'A flow is a BullMQ tree: each step can be waited on by at most one other step.',
+          remediation:
+            `Chain the steps instead (make "${step.id}" depend on "${other}" rather than on "${dependency}"), ` +
+            'or split them into two flows.',
+        });
+      }
+      dependentOf.set(dependency, step.id);
+    }
+  }
+}
+
+/**
  * Create a flow builder start (after name is set)
  * @internal
  */
@@ -213,8 +249,7 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
       config: {
         job: JobDefinition<TStepInput, unknown, never>;
         data: (input: TInput) => NoInfer<TStepInput>;
-        queueName?: string;
-        opts?: unknown;
+        opts?: FlowStepOptions;
         dependsOn?: readonly string[];
       },
     ) {
@@ -229,7 +264,6 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
         id,
         job: config.job,
         data: config.data as (input: unknown) => unknown,
-        queueName: config.queueName,
         opts: config.opts,
         dependsOn: config.dependsOn,
       };
@@ -240,7 +274,7 @@ function createFlowBuilderWithInput<TContext, TMeta extends QueueMeta, TInput>(
       });
     },
 
-    build(): FlowDefinition {
+    build(): FlowDefinition<TInput> {
       if (!state.inputSchema) {
         throw new QueueDefinitionError({
           code: QUEUE_DEFINITION_ERROR_CODES.missingInput,

@@ -15,13 +15,15 @@ import { FlowProducer, Queue, Worker } from 'bullmq';
 import type { InternalFlowDefinition } from './flow-builder.ts';
 import type { QueueConnection } from './redis-connection.ts';
 import type { InternalScheduleDefinition } from './schedule-builder.ts';
-import type { BullMQQueueInstance, FlowDefinition, ScheduleDefinition } from './types/builder.ts';
-import type { JobDefinition, JobOptions } from './types/job.ts';
+import type { BullMQQueueInstance, FlowDefinition, FlowEnqueueResult, ScheduleDefinition } from './types/builder.ts';
+import type { AnyJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
 import { debugFlow, debugJob, debugRegister, debugSchedule, debugWorker } from './debug.ts';
 import { duplicateScheduleError } from './errors.ts';
 import { createJobContext, executeMiddlewareChain } from './middleware.ts';
 import { parseRedisConnection } from './redis-connection.ts';
-import { getWorkerBackoffStrategy, toBullMQBackoff } from './retry-strategies.ts';
+import { addFlow } from './flow-jobs.ts';
+import { jobDefaultOptions } from './job-options.ts';
+import { getWorkerBackoffStrategy } from './retry-strategies.ts';
 
 /**
  * Registry type - nested structure of jobs, schedules, and flows
@@ -44,11 +46,7 @@ export function jobQueueOptions(
   return {
     connection: parseRedisConnection(connection),
     prefix: keyPrefix,
-    defaultJobOptions: {
-      attempts: options?.retry?.attempts ?? 3,
-      backoff: toBullMQBackoff(options?.retry),
-      ...options?.bullmqOptions,
-    },
+    defaultJobOptions: jobDefaultOptions(options),
   };
 }
 
@@ -84,7 +82,8 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
   // Track BullMQ instances
   const queues: Queue[] = [];
   const workers: Worker[] = [];
-  const flowProducers: FlowProducer[] = [];
+  // Opened on the first enqueue(flow), closed by stop(), like the client's queues
+  let flowProducer: FlowProducer | undefined;
   const startedWorkers = new WeakSet<Worker>();
 
   /**
@@ -333,14 +332,6 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
       }
     }
 
-    // Create FlowProducer
-    debugFlow.debug('[{internalName}] Creating FlowProducer', { internalName: internal.name });
-    const flowProducer = new FlowProducer({
-      connection: connectionConfig,
-      prefix: keyPrefix,
-    });
-
-    flowProducers.push(flowProducer);
     registeredFlows.set(internal.name, internal);
 
     debugFlow.debug('[{internalName}] Flow registered successfully', { internalName: internal.name });
@@ -437,13 +428,10 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
       }),
     );
 
-    // Close all flow producers
-    debugWorker.debug('Closing {flowProducersLength} flow producers', { flowProducersLength: flowProducers.length });
-    await Promise.all(
-      flowProducers.map(async flowProducer => {
-        await flowProducer.close();
-      }),
-    );
+    // Close the flow producer, if a flow was ever started
+    const openFlowProducer = flowProducer;
+    flowProducer = undefined;
+    await openFlowProducer?.close();
 
     // Close all queues
     debugWorker.debug('Closing {queuesLength} queues', { queuesLength: queues.length });
@@ -457,10 +445,42 @@ export function createQueueInstance<TContext>(options: QueueInstanceOptions<TCon
     debugWorker.debug('Queue infrastructure shut down successfully');
   }
 
+  /**
+   * Add a registered job (through its `trigger()`), or start a flow. A flow's
+   * step jobs may run in this process or in another worker on the same prefix.
+   */
+  function enqueue<TInput, TOutput, TJobContext>(
+    job: JobDefinition<TInput, TOutput, TJobContext>,
+    data: TInput,
+    options?: TriggerOptions,
+  ): Promise<string>;
+  function enqueue<TInput>(flow: FlowDefinition<TInput>, input: NoInfer<TInput>): Promise<FlowEnqueueResult>;
+  async function enqueue(
+    target: AnyJobDefinition | FlowDefinition,
+    data: unknown,
+    options?: TriggerOptions,
+  ): Promise<string | FlowEnqueueResult> {
+    if (target._type === 'flow') {
+      return addFlow(
+        () => (flowProducer ??= new FlowProducer({ connection: connectionConfig, prefix: keyPrefix })),
+        target,
+        data,
+      );
+    }
+    const registered = registeredJobs.get(target._internal.name);
+    if (!registered) {
+      throw new Error(
+        `Job "${target._internal.name}" is not registered with a queue. Call queue.register() before calling enqueue().`,
+      );
+    }
+    return registered.definition.trigger(data, options);
+  }
+
   return {
     register,
     start,
     stop,
     queues: () => new Map(queues.map(queue => [queue.name, queue])),
+    enqueue,
   };
 }

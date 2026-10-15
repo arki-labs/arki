@@ -4,15 +4,19 @@
  * A job's own `trigger()` only works once a worker registered it in the same
  * process. An API server that enqueues work for a separate worker process
  * needs this client instead. It opens one BullMQ queue per job name, on first
- * use, with the same options the worker uses for that job's queue.
+ * use, with the same options the worker uses for that job's queue. Flows go
+ * through one BullMQ `FlowProducer`, also opened on first use.
  */
 
-import { Queue } from 'bullmq';
+import { FlowProducer, Queue } from 'bullmq';
 
 import type { QueueConnection } from './redis-connection.ts';
-import type { JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
+import type { FlowDefinition, FlowEnqueueResult, QueueEnqueue } from './types/builder.ts';
+import type { AnyJobDefinition, JobDefinition, JobOptions, TriggerOptions } from './types/job.ts';
 import { jobQueueOptions } from './create-queue.ts';
 import { debugJob } from './debug.ts';
+import { addFlow } from './flow-jobs.ts';
+import { parseRedisConnection } from './redis-connection.ts';
 
 const DEFAULT_KEY_PREFIX = 'queue:';
 
@@ -26,17 +30,16 @@ export type QueueClient = {
   /** Where this client enqueues. A worker that shares the client reads these. */
   readonly connection: QueueConnection;
   readonly keyPrefix: string;
-  /** Add one job to its queue. Returns the BullMQ job id. */
-  enqueue<TInput, TOutput, TContext>(
-    job: JobDefinition<TInput, TOutput, TContext>,
-    data: TInput,
-    options?: TriggerOptions,
-  ): Promise<string>;
+  /**
+   * Add one job to its queue (returns the BullMQ job id), or start a flow:
+   * validate `input` with the flow's schema, then add every step's job.
+   */
+  enqueue: QueueEnqueue;
 };
 
 export type QueueClientHandle = {
   readonly client: QueueClient;
-  /** Close every queue the client opened. Safe to call more than once. */
+  /** Close every queue (and the flow producer) the client opened. Safe to call more than once. */
   close(): Promise<void>;
 };
 
@@ -52,29 +55,52 @@ export function createQueueClient(options: QueueClientOptions): QueueClientHandl
     return queue;
   };
 
+  let flowProducer: FlowProducer | undefined;
+
+  function enqueue<TInput, TOutput, TContext>(
+    job: JobDefinition<TInput, TOutput, TContext>,
+    data: TInput,
+    options?: TriggerOptions,
+  ): Promise<string>;
+  function enqueue<TInput>(flow: FlowDefinition<TInput>, input: NoInfer<TInput>): Promise<FlowEnqueueResult>;
+  async function enqueue(
+    target: AnyJobDefinition | FlowDefinition,
+    data: unknown,
+    triggerOptions?: TriggerOptions,
+  ): Promise<string | FlowEnqueueResult> {
+    if (target._type === 'flow') {
+      return addFlow(
+        () => (flowProducer ??= new FlowProducer({ connection: parseRedisConnection(options.connection), prefix: keyPrefix })),
+        target,
+        data,
+      );
+    }
+    const name = target._internal.name;
+    const queue = queueFor(name, target._internal.options);
+    const added = await queue.add(name, data, {
+      priority: triggerOptions?.priority,
+      delay: triggerOptions?.delay,
+      jobId: triggerOptions?.jobId,
+      ...triggerOptions?.bullmqOptions,
+    });
+    debugJob.debug('[{jobName}] Enqueued job {jobId}', { jobName: name, jobId: added.id ?? '' });
+    return added.id ?? '';
+  }
+
   const client: QueueClient = {
     connection: options.connection,
     keyPrefix,
-    async enqueue(job, data, triggerOptions) {
-      const name = job._internal.name;
-      const queue = queueFor(name, job._internal.options);
-      const added = await queue.add(name, data, {
-        priority: triggerOptions?.priority,
-        delay: triggerOptions?.delay,
-        jobId: triggerOptions?.jobId,
-        ...triggerOptions?.bullmqOptions,
-      });
-      debugJob.debug('[{jobName}] Enqueued job {jobId}', { jobName: name, jobId: added.id ?? '' });
-      return added.id ?? '';
-    },
+    enqueue,
   };
 
   return {
     client,
     async close() {
       const open = [...queues.values()];
+      const openFlowProducer = flowProducer;
       queues.clear();
-      await Promise.all(open.map(queue => queue.close()));
+      flowProducer = undefined;
+      await Promise.all([...open.map(queue => queue.close()), openFlowProducer?.close()]);
     },
   };
 }

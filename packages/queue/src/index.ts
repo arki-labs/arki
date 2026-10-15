@@ -105,6 +105,8 @@ export { BullMQAdapter, HonoAdapter, createBoard } from './create-board.ts';
 export type {
   BackoffStrategy,
   FlowDefinition,
+  FlowEnqueueResult,
+  FlowStepOptions,
   JobBuilderChain,
   JobBuilderDef,
   JobBuilderNeedsInput,
@@ -116,6 +118,7 @@ export type {
   MiddlewareFunction,
   BullMQQueueInstance,
   QueueBuilder,
+  QueueEnqueue,
   QueueInstance,
   QueuePriority,
   RetryConfig,
@@ -126,8 +129,8 @@ export type {
 // Constants
 export { QUEUE_PRIORITIES } from './types/index.ts';
 
-// Coded errors for declaration mistakes
-export { QUEUE_DEFINITION_ERROR_CODES, QueueDefinitionError } from './errors.ts';
+// Coded errors for declaration mistakes and invalid enqueue input
+export { QUEUE_DEFINITION_ERROR_CODES, QUEUE_INPUT_ERROR_CODES, QueueDefinitionError, QueueInputError } from './errors.ts';
 
 // Cron pattern helpers
 export { CronPatterns } from './cron-patterns.ts';
