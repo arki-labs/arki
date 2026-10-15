@@ -253,7 +253,11 @@ describe('schedule runtime', () => {
     };
     const runtime = createScheduleRuntime({ schedules: [locked], lock: brokenLock });
 
-    await expect(runtime.trigger('locked')).resolves.toEqual({ name: 'locked', status: 'lock-failed' });
+    await expect(runtime.trigger('locked')).resolves.toEqual({
+      name: 'locked',
+      status: 'lock-failed',
+      cause: expect.objectContaining({ message: 'redis down' }),
+    });
     expect(runtime.lockErrors).toBe(1);
     expect(runtime.lockSkips).toBe(0);
     expect(calls).toEqual([]);
@@ -269,7 +273,11 @@ describe('schedule runtime', () => {
     });
     const runtime = createScheduleRuntime({ schedules: [failing] });
 
-    await expect(runtime.trigger('failing')).resolves.toEqual({ name: 'failing', status: 'handler-failed' });
+    await expect(runtime.trigger('failing')).resolves.toEqual({
+      name: 'failing',
+      status: 'handler-failed',
+      cause: expect.objectContaining({ message: 'boom' }),
+    });
     expect(runtime.handlerFailures).toBe(1);
   });
 
@@ -420,7 +428,11 @@ describe('durable schedules', () => {
     const runtime = createScheduleRuntime({ schedules: [failing], durable: fake });
 
     runtime.start();
-    await expect(registration(fake, 'failing').run()).resolves.toEqual({ name: 'failing', status: 'handler-failed' });
+    await expect(registration(fake, 'failing').run()).resolves.toEqual({
+      name: 'failing',
+      status: 'handler-failed',
+      cause: expect.objectContaining({ message: 'boom' }),
+    });
     expect(runtime.handlerFailures).toBe(1);
     await runtime.stop();
   });

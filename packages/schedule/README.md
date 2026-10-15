@@ -41,6 +41,79 @@ this context: keep one context type per app. A schedule no feature owns
 goes in `schedule({ schedules: [...] })`; it runs on the same runtime, so
 names must be unique across both.
 
+### Feature-owned schedules: `schedules(needs, defs)`
+
+When a schedule belongs to one feature and works with that feature's
+services, declare it with the feature's `needs`. The handler's parameter is
+typed from `needs` with no annotation, and the feature must list the same
+services in its own `needs` (a compile error otherwise). The driver's
+`context` is not used for these handlers.
+
+```ts
+const needs = { mailer: service<Mailer>() };
+
+export const digest = feature('digest', {
+  needs,
+  use: [
+    schedules(needs, [
+      // Plain option objects, not defineSchedule(): the handler is typed from `needs`.
+      { name: 'send-digest', cron: '0 7 * * *', handler: ({ mailer }) => mailer.sendDigest() },
+    ]),
+  ],
+});
+```
+
+The options and validation match `defineSchedule` (`cron` or `every`,
+`timezone`, `overlap`), except `durable: true`: a durable run happens in
+another process that does not hold these services. It is a type error and
+fails at declaration with `ARKI_SCHEDULE_E006`. The handler may return a
+value; a `ran` result keeps it.
+
+### The host clock: `schedule({ clock: 'host' })`
+
+By default (`clock: 'internal'`) the runtime fires schedules on its own
+timers. With `clock: 'host'`, `start()` arms nothing: a schedule runs only
+when the host calls `trigger` (a platform cron, an HTTP endpoint). A durable
+schedule or a durable backend with the host clock fails boot with
+`ARKI_SCHEDULE_E007`, because two clocks would fire the same tick.
+
+### The `scheduler` service
+
+`schedule()` provides `scheduler` to the app, typed with no annotation:
+
+```ts
+const app = await defineApp('news')
+  .use(mailer())
+  .features([digest])
+  .serve(schedule({ clock: 'host' }))
+  .boot();
+
+app.services.scheduler.clock; // 'host'
+app.services.scheduler.names; // ['send-digest']
+await app.services.scheduler.trigger('send-digest');
+```
+
+`trigger(name)` resolves a `ScheduleOutcome`: a run result (see
+[Run results](#run-results)), or `unknown` for a name the driver does not
+run. A trigger works once the app has booted, before `start()` too. After
+`stop()` it reports `unavailable`; `stop()` waits for runs it already
+accepted.
+
+### Typed triggers: `composeSchedules(features, scheduler)`
+
+`composeSchedules` turns the service into a client typed from the features'
+own `schedules(needs, defs)` declarations. An undeclared name is a compile
+error, and a `ran` outcome's `value` is that handler's resolved return type:
+
+```ts
+const schedules = composeSchedules([digest], app.services.scheduler);
+const outcome = await schedules.trigger('send-digest');
+if (outcome.status === 'ran') outcome.value; // the type sendDigest() resolves to
+```
+
+It throws `ARKI_SCHEDULE_E008` when the scheduler does not run a declared
+schedule (pass the same features the app mounts).
+
 ## In-process schedules
 
 Use these for single-replica processes by default. For multi-replica
@@ -149,8 +222,9 @@ Each run reports a `ScheduleRunResult` with one status:
 
 | Status | Meaning |
 | --- | --- |
-| `ran` | The handler finished. |
-| `handler-failed` | The handler threw. Counted in `handlerFailures` and logged as an error. A durable run also marks its BullMQ job failed. |
+| `ran` | The handler finished. `value` holds what it resolved to. |
+| `handler-failed` | The handler threw. `cause` holds the error. Counted in `handlerFailures` and logged as an error. A durable run also marks its BullMQ job failed. |
 | `skipped-overlap` | `overlap: 'skip'` and a run of the same schedule is active in this process. |
 | `skipped-lock` | In process only: another replica holds the lock for this tick. Counted in `lockSkips`. |
-| `lock-failed` | In process only: the lock store threw. Counted in `lockErrors` and logged as an error; the tick is skipped. |
+| `lock-failed` | In process only: the lock store threw. `cause` holds the error. Counted in `lockErrors` and logged as an error; the tick is skipped. |
+| `unavailable` | The runtime was already stopped; nothing ran. |

@@ -18,7 +18,8 @@ type BaseScheduleOptions = {
   readonly durable?: boolean;
 };
 
-type ScheduleHandler<TContext> = (ctx: TContext) => Promise<void>;
+/** The handler's resolved value is kept on a `ran` result (`ScheduleRunResult`). */
+type ScheduleHandler<TContext> = (ctx: TContext) => Promise<unknown>;
 
 type BaseScheduleOptionsWithContext<TContext> = BaseScheduleOptions & {
   readonly handler: ScheduleHandler<TContext>;
@@ -120,6 +121,8 @@ export type {
   DurableScheduleRegistration,
   DurableScheduler,
   KvLike,
+  ScheduleClock,
+  ScheduleOutcome,
   ScheduleRunResult,
   ScheduleRunStatus,
 } from './runtime.js';

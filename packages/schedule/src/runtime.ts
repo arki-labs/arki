@@ -45,12 +45,21 @@ export type DurableScheduler = {
   readonly stop: () => Promise<void>;
 };
 
+/**
+ * Who fires the schedules. `internal` (default): in-process timers, plus the
+ * durable backend for `durable: true` schedules. `host`: nothing fires on its
+ * own — the host (a platform cron, an HTTP endpoint) calls `trigger`.
+ */
+export type ScheduleClock = 'internal' | 'host';
+
 type ScheduleRuntimeBaseOptions<TContext> = {
   readonly schedules: readonly ScheduleDef<TContext>[];
   readonly lock?: KvLike;
   readonly jitterMs?: number;
   /** Backend for schedules declared with `durable: true`. Required when any exists. */
   readonly durable?: DurableScheduler;
+  /** Default `'internal'`. `'host'` arms no timers and allows no durable schedule or backend. */
+  readonly clock?: ScheduleClock;
 };
 
 type ScheduleRuntimeContextOptions<TContext> =
@@ -66,16 +75,30 @@ type ScheduleRuntimeContextOptions<TContext> =
 export type ScheduleRuntimeOptions<TContext = undefined> = ScheduleRuntimeBaseOptions<TContext> &
   ScheduleRuntimeContextOptions<TContext>;
 
-export type ScheduleRunStatus = 'ran' | 'skipped-overlap' | 'skipped-lock' | 'lock-failed' | 'handler-failed';
+/**
+ * What one run reports. `ran` keeps the handler's resolved value; a failure
+ * keeps its cause; `unavailable` means the runtime was already stopped.
+ */
+export type ScheduleRunResult<T = unknown> =
+  | { readonly name: string; readonly status: 'ran'; readonly value: T }
+  | { readonly name: string; readonly status: 'skipped-overlap' | 'skipped-lock' }
+  | { readonly name: string; readonly status: 'handler-failed' | 'lock-failed'; readonly cause: unknown }
+  | { readonly name: string; readonly status: 'unavailable' };
 
-export type ScheduleRunResult = {
-  readonly name: string;
-  readonly status: ScheduleRunStatus;
-};
+/** A run result, or `unknown` when no schedule has that name (the `scheduler` service's `trigger`). */
+export type ScheduleOutcome<T> = ScheduleRunResult<T> | { readonly name: string; readonly status: 'unknown' };
+
+export type ScheduleRunStatus = ScheduleRunResult['status'];
 
 export type ScheduleRuntime = {
   start(): void;
+  /** Stop firing, refuse new triggers (`unavailable`) and wait for accepted runs to finish. */
   stop(): Promise<void>;
+  /**
+   * Run one schedule now. Works before `start()` (the runtime is built, so
+   * the run is real) and reports `unavailable` after `stop()`. Throws a
+   * coded `ScheduleError` for a name this runtime does not hold.
+   */
   trigger(name: string): Promise<ScheduleRunResult>;
   readonly handlerFailures: number;
   readonly lockSkips: number;
@@ -132,6 +155,30 @@ export function assertDurableBackend<TContext>(
   });
 }
 
+/**
+ * A host clock and a durable backend would both fire the same schedule.
+ * Thrown at Dot boot by the `schedule()` plugin and at construction by a
+ * bare runtime.
+ */
+export function assertSingleClock<TContext>(
+  schedules: readonly ScheduleDef<TContext>[],
+  durable: DurableScheduler | undefined,
+  clock: ScheduleClock,
+): void {
+  if (clock !== 'host') return;
+  const first = schedules.find(schedule => schedule.durable);
+  if (first === undefined && durable === undefined) return;
+  throw new ScheduleError({
+    code: SCHEDULE_ERROR_CODES.durableWithHostClock,
+    message:
+      first === undefined
+        ? `[schedule] clock: 'host' was given a durable backend; the host and the backend would both fire schedules.`
+        : `[schedule] schedule "${first.name}" is durable, but clock: 'host' lets only the host fire schedules.`,
+    remediation:
+      "With clock: 'host', drop durable: true from every schedule and do not pass a durable backend. Use the internal clock to run durable schedules.",
+  });
+}
+
 function lockTtlSeconds<TContext>(schedule: ScheduleDef<TContext>): number {
   if (schedule.every !== undefined) {
     return Math.max(1, Math.ceil(parseEveryInterval(schedule.every) / 1000));
@@ -143,6 +190,8 @@ export function createScheduleRuntime<TContext = undefined>(
   options: ScheduleRuntimeOptions<TContext>,
 ): ScheduleRuntime {
   assertUniqueSchedules(options.schedules);
+  const clock = options.clock ?? 'internal';
+  assertSingleClock(options.schedules, options.durable, clock);
 
   const byName = new Map(options.schedules.map(schedule => [schedule.name, schedule]));
   const running = new Map<string, number>();
@@ -155,9 +204,11 @@ export function createScheduleRuntime<TContext = undefined>(
   let lockErrors = 0;
   let durableStarted = false;
 
-  async function acquireLock(schedule: ScheduleDef<TContext>): Promise<'acquired' | 'held' | 'failed'> {
+  type LockOutcome = { readonly kind: 'acquired' | 'held' } | { readonly kind: 'failed'; readonly cause: unknown };
+
+  async function acquireLock(schedule: ScheduleDef<TContext>): Promise<LockOutcome> {
     // Durable runs need no lock: the backend hands each tick to one worker.
-    if (options.lock === undefined || schedule.durable) return 'acquired';
+    if (options.lock === undefined || schedule.durable) return { kind: 'acquired' };
 
     try {
       const acquired = await options.lock.setIfNotExists(
@@ -165,9 +216,9 @@ export function createScheduleRuntime<TContext = undefined>(
         { acquiredAt: new Date().toISOString() },
         lockTtlSeconds(schedule),
       );
-      if (acquired) return 'acquired';
+      if (acquired) return { kind: 'acquired' };
       lockSkips += 1;
-      return 'held';
+      return { kind: 'held' };
     } catch (error) {
       lockErrors += 1;
       const message = error instanceof Error ? error.message : String(error);
@@ -176,32 +227,46 @@ export function createScheduleRuntime<TContext = undefined>(
         failed: message,
       });
       log.error('schedule lock acquire failed', { schedule: schedule.name, error: message });
-      return 'failed';
+      return { kind: 'failed', cause: error };
     }
   }
 
   async function run(schedule: ScheduleDef<TContext>): Promise<ScheduleRunResult> {
-    if (stopped) return { name: schedule.name, status: 'skipped-lock' };
+    if (stopped) return { name: schedule.name, status: 'unavailable' };
 
     const active = running.get(schedule.name) ?? 0;
     if (schedule.overlap === 'skip' && active > 0) {
       return { name: schedule.name, status: 'skipped-overlap' };
     }
 
-    const lock = await acquireLock(schedule);
-    if (lock === 'held') {
-      return { name: schedule.name, status: 'skipped-lock' };
-    }
-    if (lock === 'failed') {
-      return { name: schedule.name, status: 'lock-failed' };
-    }
-
+    // Reserve the slot before the first await: a second trigger arriving
+    // while the lock call is pending must see this run as active.
     running.set(schedule.name, active + 1);
+    try {
+      const lock = await acquireLock(schedule);
+      if (lock.kind === 'held') {
+        return { name: schedule.name, status: 'skipped-lock' };
+      }
+      if (lock.kind === 'failed') {
+        return { name: schedule.name, status: 'lock-failed', cause: lock.cause };
+      }
+      return await runHandler(schedule);
+    } finally {
+      const nextActive = (running.get(schedule.name) ?? 1) - 1;
+      if (nextActive <= 0) {
+        running.delete(schedule.name);
+      } else {
+        running.set(schedule.name, nextActive);
+      }
+    }
+  }
+
+  async function runHandler(schedule: ScheduleDef<TContext>): Promise<ScheduleRunResult> {
     try {
       const scheduleContext =
         options.createContext === undefined ? (undefined as TContext) : await options.createContext();
-      await schedule.handler(scheduleContext);
-      return { name: schedule.name, status: 'ran' };
+      const value = await schedule.handler(scheduleContext);
+      return { name: schedule.name, status: 'ran', value };
     } catch (error) {
       handlerFailures += 1;
       const message = error instanceof Error ? error.message : String(error);
@@ -210,14 +275,7 @@ export function createScheduleRuntime<TContext = undefined>(
         failed: message,
       });
       log.error('schedule handler failed', { schedule: schedule.name, error: message });
-      return { name: schedule.name, status: 'handler-failed' };
-    } finally {
-      const nextActive = (running.get(schedule.name) ?? 1) - 1;
-      if (nextActive <= 0) {
-        running.delete(schedule.name);
-      } else {
-        running.set(schedule.name, nextActive);
-      }
+      return { name: schedule.name, status: 'handler-failed', cause: error };
     }
   }
 
@@ -288,6 +346,8 @@ export function createScheduleRuntime<TContext = undefined>(
   return {
     start() {
       if (stopped) return;
+      // The host owns the clock: nothing is armed; runs come only from trigger.
+      if (clock === 'host') return;
       assertDurableBackend(options.schedules, options.durable);
       const durableSchedules = options.schedules.filter(schedule => schedule.durable);
       if (options.durable !== undefined && durableSchedules.length > 0) {
