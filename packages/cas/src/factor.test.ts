@@ -7,7 +7,6 @@
 import { describe, expect, it } from 'vitest';
 
 import { parse } from '@arki/expr';
-import { InvalidArgumentError } from '@arki/math/errors';
 
 import fixture from '../test/reference/fixtures/factor.json' with { type: 'json' };
 import { CasLimitError } from './core.js';
@@ -51,14 +50,28 @@ describe('factor', () => {
     expect(shown('x^2 - y')).toBe('1 * (x^2 - y) [incomplete]');
   });
 
+  it('a part of degree 1 in the variable is irreducible, whatever its coefficients: the result is complete', () => {
+    // The parts come from the primitive part, so a linear one has no factor in y left to split off.
+    expect(shown('x^2 + 2*x*y + y^2')).toBe('1 * (x + y)^2');
+    expect(shown('y*x + y^2')).toBe('y * (x + y)');
+  });
+
   it('returns the restrictions the factored form no longer shows', () => {
     const f = factor('x/x * (x^2 - 1)', 'x');
     expect(f.conditions.map(c => `${c.subject.source} ${c.relation}`)).toEqual(['x nonzero']);
   });
 
   it('refuses what is not a polynomial in the variable', () => {
-    expect(() => factor('sin(x) + 1', 'x')).toThrow(InvalidArgumentError);
-    expect(() => factor('1/x + 1', 'x')).toThrow(InvalidArgumentError);
+    // A CasError with the span of the offending part, as every verb reports what it cannot take.
+    expect(() => factor('sin(x) + 1', 'x')).toThrow(
+      expect.objectContaining({ code: 'not-polynomial', span: { start: 0, end: 6 } }),
+    );
+    expect(() => factor('1/x + 1', 'x')).toThrow(
+      expect.objectContaining({ code: 'not-polynomial', span: { start: 2, end: 3 } }),
+    );
+    expect(() => factor('x^2 + x^-2', 'x')).toThrow(
+      expect.objectContaining({ code: 'not-polynomial', span: { start: 6, end: 10 } }),
+    );
     expect(() => factor('x^2', 'pi')).toThrow(expect.objectContaining({ code: 'bad-variable' }));
   });
 

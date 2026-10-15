@@ -22,7 +22,7 @@ import type { Context, Generator, RatFun } from './context.js';
 import type { CasResult, Condition } from './core.js';
 import type { Poly, Term } from './poly.js';
 import type { Claim } from './sign.js';
-import { lostConditions } from './conditions.js';
+import { lostConditions, mergeConditions } from './conditions.js';
 import { rationalValue } from './context.js';
 import { binary, Emitter, exprOf, numberNode, product, textOf } from './emit.js';
 import {
@@ -92,7 +92,7 @@ export const RULES: readonly SimplifyRule[] = Object.freeze([
   'factor-out',
 ]);
 
-/** `f(-u) = -f(u)` over the reals. */
+/** `f(-u) = -f(u)` over the reals. expr defines `acsc`, `acot`, `acsch` and `acoth` through `1/u`, so they are odd too. */
 const ODD: ReadonlySet<string> = new Set([
   'sin',
   'tan',
@@ -100,12 +100,16 @@ const ODD: ReadonlySet<string> = new Set([
   'csc',
   'asin',
   'atan',
+  'acsc',
+  'acot',
   'sinh',
   'tanh',
   'coth',
   'csch',
   'asinh',
   'atanh',
+  'acsch',
+  'acoth',
   'cbrt',
   'sign',
 ]);
@@ -114,6 +118,7 @@ const EVEN: ReadonlySet<string> = new Set(['cos', 'sec', 'cosh', 'sech', 'abs'])
 
 /** Kernels built by a rewrite have no place in the input. */
 const NOWHERE: Span = { start: 0, end: 0 };
+const HALF = Rational.fromParts(1n, 2n);
 
 /** Passes to a fixed point. Each rule shrinks or reorders the term, so a handful suffice; fuel is the backstop. */
 const MAX_PASSES = 8;
@@ -228,6 +233,15 @@ export class Simplifier {
     return out;
   }
 
+  /** `[u, q]` for a kernel that is a rational power of `u`: `u^q`, and `sqrt(u)` as `u^(1/2)` (one value). */
+  private rationalPower(g: number, gen: Kernel): readonly [RatFun, Rational] | undefined {
+    const [u, exponent] = this.args(g, gen);
+    if (u === undefined) return undefined;
+    if (gen.fn === 'sqrt') return [u, HALF];
+    const q = gen.fn === '^' && exponent !== undefined ? rationalValue(exponent) : undefined;
+    return q === undefined ? undefined : [u, q];
+  }
+
   private args(g: number, gen: Kernel): readonly RatFun[] {
     const known = this.argValues.get(g);
     if (known !== undefined) return known;
@@ -263,9 +277,14 @@ export class Simplifier {
     return n === 1 ? r : n === 0 ? this.ctx.fromPoly(constant(ONE)) : this.ctx.power(r, n);
   }
 
-  /** `u^r`: a polynomial power for an integer `r`, else the kernel `u^r` (through the rules). */
+  /**
+   * `u^r`: a polynomial power for an integer `r`; for a half-integer `r = k/2`
+   * the reduced power of `sqrt(u)` that `square-of-sqrt` keeps,
+   * `u^((k - 1)/2)·sqrt(u)`; else the kernel `u^r` (through the rules).
+   */
   private raise(u: RatFun, r: Rational): RatFun {
     if (r.isInteger()) return this.pow(u, Number(r.numerator));
+    if (r.denominator === 2n) return this.times(this.pow(u, Number((r.numerator - 1n) / 2n)), this.sqrt('sqrt', u));
     return this.kernel('^', [u, this.ctx.fromPoly(constant(r))]);
   }
 
@@ -287,9 +306,9 @@ export class Simplifier {
     const grouped = new Set<number>();
     for (const [g, e] of term.m.entries()) {
       const gen = ctx.generators[g];
-      if (e === 0 || gen?.kind !== 'kernel' || gen.fn !== '^') continue;
-      const [base, exponent] = this.args(g, gen);
-      const q = exponent === undefined ? undefined : rationalValue(exponent);
+      // `sqrt(u)` joins only at power 1: its higher powers are `square-of-sqrt`'s.
+      if (e === 0 || gen?.kind !== 'kernel' || (gen.fn === 'sqrt' && e > 1)) continue;
+      const [base, q] = this.rationalPower(g, gen) ?? [];
       const b = base === undefined ? undefined : soleGenerator(base);
       if (q === undefined || b === undefined || q.times(e).isInteger()) continue;
       const group = groups.get(b) ?? { plain: 0, parts: [] };
@@ -362,8 +381,11 @@ export class Simplifier {
       ...group.parts.map(part => this.pow(this.generatorValue(part.g), part.e)),
     ];
     const pieces = group.parts.length + (group.plain > 0 ? 1 : 0);
+    // Only square roots (`x·sqrt(x)`): that is already the reduced form, nothing to combine.
+    const roots = group.parts.every(part => part.q.eq(HALF));
     if (
       (pieces < 2 && group.parts.every(part => part.e === 1)) ||
+      roots ||
       !this.allows('fractional-powers') ||
       !this.prove(base, 'positive')
     )
@@ -374,7 +396,10 @@ export class Simplifier {
     return [this.raise(base, total)];
   }
 
-  /** Value-level rules: `abs(u)/u → sign(u)` and exponentials moved out of the denominator. */
+  /**
+   * Value-level rules: `abs(u)/u → sign(u)`, `u/sqrt(u) → sqrt(u)` (`square-of-sqrt`; the
+   * input already needs `u > 0` there) and exponentials moved out of the denominator.
+   */
   private valueRules(r: RatFun): RatFun {
     const ctx = this.ctx;
     const budget = ctx.budget;
@@ -400,6 +425,18 @@ export class Simplifier {
         if (n === undefined || d === undefined) break;
         this.note('abs-sign');
         q = this.times(ctx.quotient(n, d), this.kernel('sign', [u]));
+      }
+    }
+    for (const g of generators(q.den)) {
+      const gen = ctx.generators[g];
+      const u = gen?.kind === 'kernel' && gen.fn === 'sqrt' ? gen.args[0] : undefined;
+      if (u === undefined || constantValue(u.den) === undefined || !this.allows('square-of-sqrt')) continue;
+      // Each step moves one sqrt(u) up and one u out; the degrees bound the loop.
+      for (let steps = degreeIn(q.den, g); steps > 0; steps--) {
+        const [n, d] = [divideExact(q.num, u.num, budget), divideExact(q.den, generator(g), budget)];
+        if (n === undefined || d === undefined) break;
+        this.note('square-of-sqrt');
+        q = ctx.quotient(multiply(n, generator(g), budget), scale(d, (constantValue(u.den) ?? ONE).inverse()));
       }
     }
     for (const g of generators(q.den)) {
@@ -518,6 +555,14 @@ export class Simplifier {
   /** `sqrt` of an exact rational square, and `sqrt(c·w^2) → sqrt(c)·abs(w)` for polynomial squares. */
   private sqrt(fn: string, u: RatFun): RatFun {
     const ctx = this.ctx;
+    // exp(a) > 0 everywhere: sqrt(exp(a)) is exp(a/2).
+    const sole = soleGenerator(u);
+    const inner = sole === undefined ? undefined : ctx.generators[sole];
+    const exponent = inner?.kind === 'kernel' && inner.fn === 'exp' ? inner.args[0] : undefined;
+    if (exponent !== undefined && this.allows('exp-product')) {
+      this.note('exp-product');
+      return this.exp(ctx.multiply(exponent, ctx.fromPoly(constant(HALF))));
+    }
     const c = rationalValue(u);
     if (c !== undefined) {
       const root = rationalSqrt(c);
@@ -571,10 +616,10 @@ export class Simplifier {
       this.note('exp-product');
       return this.exp(ctx.multiply(gen.args[0], exponent));
     }
-    if (q !== undefined && gen?.kind === 'kernel' && gen.fn === '^') {
-      const [u, a] = gen.args;
-      const r = a === undefined ? undefined : rationalValue(a);
-      if (u !== undefined && r !== undefined && this.allows('fractional-powers') && this.prove(u, 'positive')) {
+    const inner = q !== undefined && g !== undefined && gen?.kind === 'kernel' ? this.rationalPower(g, gen) : undefined;
+    if (q !== undefined && inner !== undefined) {
+      const [u, r] = inner;
+      if (this.allows('fractional-powers') && this.prove(u, 'positive')) {
         this.note('fractional-powers');
         return this.raise(u, r.times(q));
       }
@@ -590,6 +635,8 @@ export class Simplifier {
       this.note('fractional-powers');
       return this.raise(ctx.generatorValue(only[0]), q.times(only[1]));
     }
+    // `u^(k/2)` is a power of `sqrt(u)`, as the reader builds it: one kernel for one value.
+    if (q?.denominator === 2n) return this.raise(base, q);
     return kernelValue('^', [base, exponent], NOWHERE, ctx);
   }
 }
@@ -599,8 +646,8 @@ export class Simplifier {
  * kernel factor pulled out (`exp(x)*(cos(x) - sin(x))`); one fraction over a
  * denominator printed as a product of its factors (`(x - 1)^2`). The factors
  * are the ones the input divided by, split further by content and by
- * repeated factors (gcd with each partial derivative); `factor` (build step
- * 4) is not needed for that.
+ * repeated factors (gcd with each partial derivative); the printer does not
+ * call `factor`, so a denominator is never split further than that.
  */
 export class Readable extends Emitter {
   pulled = false;
@@ -734,8 +781,7 @@ export function normalize(
     const id = ctx.nameId(name);
     if (assumption === undefined || id === undefined) continue;
     const variable = ctx.generatorValue(id);
-    const subject = exprOf(emitter.node(assumption === 'negative' ? ctx.negate(variable) : variable), ctx);
-    assumed.push({ subject, relation: assumption === 'negative' ? 'positive' : assumption, reason: 'assumed' });
+    assumed.push({ subject: exprOf(emitter.node(variable), ctx), relation: assumption, reason: 'assumed' });
   }
-  return { result, conditions: [...assumed, ...lost], applied, value: simplified };
+  return { result, conditions: mergeConditions(assumed, lost), applied, value: simplified };
 }

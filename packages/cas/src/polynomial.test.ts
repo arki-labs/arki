@@ -175,6 +175,23 @@ describe('gcd', () => {
   it('works with π as a generator', () => {
     expect(gcd('x^2 - pi^2', 'x*pi + pi^2').result.source).toBe('x + pi');
   });
+
+  it('refuses a quotient with a CasError that points at the divisor and names the input', () => {
+    expect(() => gcd('1/x', 'x')).toThrow(
+      expect.objectContaining({
+        code: 'not-polynomial',
+        span: { start: 2, end: 3 },
+        message: expect.stringContaining('first'),
+      }),
+    );
+    expect(() => gcd('x^2', 'x + 1/(x - 1)')).toThrow(
+      expect.objectContaining({
+        code: 'not-polynomial',
+        span: { start: 6, end: 13 },
+        message: expect.stringContaining('second'),
+      }),
+    );
+  });
 });
 
 describe('errors', () => {

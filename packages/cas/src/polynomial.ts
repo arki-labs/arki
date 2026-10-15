@@ -6,14 +6,13 @@
  */
 import type { Expr, Node, Span } from '@arki/expr';
 import type { Rational } from '@arki/math/rational';
-import { InvalidArgumentError } from '@arki/math/errors';
 
 import type { RatFun } from './context.js';
 import type { CasInput, CasOptions, CasResult, Condition } from './core.js';
 import type { Part } from './emit.js';
 import type { Poly } from './poly.js';
-import { inputDomain, lostConditions } from './conditions.js';
-import { Context } from './context.js';
+import { inputDomain, lostConditions, mergeConditions } from './conditions.js';
+import { Context, rationalValue } from './context.js';
 import { CasError } from './core.js';
 import { binary, Emitter, exprOf, numberNode } from './emit.js';
 import {
@@ -77,6 +76,42 @@ function conditionsOf(value: RatFun, ctx: Context, main?: number): Condition[] {
 }
 
 /** The first kernel or atom of a value, by source position. */
+/**
+ * The span of the first divisor in pre-order, `/ u` or `u^-n`, whose value
+ * `varies` accepts: where a quotient by the variable starts.
+ */
+function divisorSpan(root: Node, ctx: Context, varies: (r: RatFun) => boolean): Span | undefined {
+  const stack: Node[] = [root];
+  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+    switch (node.kind) {
+      case 'binary': {
+        if (node.op === '/' && varies(read(node.right, ctx))) return node.right.span;
+        const exponent = node.op === '^' ? rationalValue(read(node.right, ctx)) : undefined;
+        if (exponent?.isNegative() === true && varies(read(node.left, ctx))) return node.span;
+        stack.push(node.right, node.left);
+        break;
+      }
+      case 'unary':
+      case 'factorial': {
+        stack.push(node.arg);
+        break;
+      }
+      case 'group': {
+        stack.push(node.inner);
+        break;
+      }
+      case 'call': {
+        stack.push(...[...node.args].reverse());
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+  }
+  return undefined;
+}
+
 function firstKernel(value: RatFun, ctx: Context): Span | undefined {
   let first: Span | undefined;
   for (const g of [...generators(value.num), ...generators(value.den)]) {
@@ -167,17 +202,21 @@ export function rationalize(
  */
 export function gcd(a: CasInput, b: CasInput, options: CasOptions = {}): CasResult {
   const ctx = new Context(options);
-  const x = read(inputExpr(a, ctx).root, ctx);
-  const y = read(inputExpr(b, ctx).root, ctx);
-  if (constantValue(x.den) === undefined || constantValue(y.den) === undefined) {
-    throw new InvalidArgumentError('gcd takes polynomials; a quotient has no polynomial gcd');
+  const inputs = [inputExpr(a, ctx).root, inputExpr(b, ctx).root] as const;
+  const [x, y] = [read(inputs[0], ctx), read(inputs[1], ctx)];
+  for (const [k, value] of [x, y].entries()) {
+    if (constantValue(value.den) !== undefined) continue;
+    const root = inputs[k === 0 ? 0 : 1];
+    throw new CasError(
+      `gcd takes polynomials; the ${k === 0 ? 'first' : 'second'} input is a quotient`,
+      'not-polynomial',
+      divisorSpan(root, ctx, r => constantValue(r.num) === undefined),
+    );
   }
   let g = polyGcd(x.num, y.num, ctx.budget);
   const lead = leadingTerm(g);
   if (generators(g).size === 1 && lead !== undefined) g = scale(g, lead.c.inverse());
-  const conditions = [...conditionsOf(x, ctx), ...conditionsOf(y, ctx)].filter(
-    (c, i, all) => all.findIndex(d => d.subject.source === c.subject.source) === i,
-  );
+  const conditions = mergeConditions(conditionsOf(x, ctx), conditionsOf(y, ctx));
   return { result: exprOf(new Emitter(ctx).polyNode(g), ctx), conditions };
 }
 
@@ -252,7 +291,9 @@ export type Factored = {
    * rational coefficients (after the content, which may hold other names, π
    * or e) is factored completely over ℚ. A part whose coefficients still
    * involve other names, π or e stays whole, and `complete` is false (v1 has
-   * no multivariate factoring).
+   * no multivariate factoring), unless it has degree 1 in the variable: such
+   * a part is primitive, so it is irreducible (`x^2 + 2xy + y^2` is
+   * `(x + y)^2`, complete).
    */
   readonly complete: boolean;
   /** Restrictions of the input the factored form no longer shows (`x/x*(x - 1)`: x ≠ 0). */
@@ -274,19 +315,29 @@ export type Factored = {
  * factor('x^2 - y', 'x'); // x^2 - y stays whole; complete: false
  * ```
  *
- * Throws `InvalidArgumentError` when the input is not a polynomial in the
- * variable (a quotient by it, or a function of it such as `sin(x)`).
+ * Throws `CasError` `not-polynomial`, with the span of the offending part,
+ * when the input is not a polynomial in the variable (a quotient by it, or a
+ * function of it such as `sin(x)`).
  */
 export function factor(input: CasInput, variable: string, options: CasOptions = {}): Factored {
   const ctx = new Context(options);
   ctx.checkVariable(variable);
-  const value = read(inputExpr(input, ctx).root, ctx);
+  const root = inputExpr(input, ctx).root;
+  const value = read(root, ctx);
   const x = ctx.nameId(variable);
   const emitter = new Emitter(ctx, x);
   const conditions = conditionsOf(value, ctx, x);
   const offender = offenderOf(value, variable, ctx);
-  if (offender?.reason === 'transcendental' || (x !== undefined && degreeIn(value.den, x) > 0)) {
-    throw new InvalidArgumentError(`factor takes a polynomial in ${variable}`);
+  if (offender?.reason === 'transcendental') {
+    throw new CasError(
+      `factor takes a polynomial in ${variable}: it holds a function of it`,
+      'not-polynomial',
+      offender.span,
+    );
+  }
+  if (x !== undefined && degreeIn(value.den, x) > 0) {
+    const span = divisorSpan(root, ctx, r => degreeIn(r.num, x) > 0);
+    throw new CasError(`factor takes a polynomial in ${variable}: it divides by ${variable}`, 'not-polynomial', span);
   }
   if (x === undefined || degreeIn(value.num, x) === 0) {
     return { content: exprOf(emitter.node(value), ctx), factors: [], complete: true, conditions };
@@ -300,7 +351,8 @@ export function factor(input: CasInput, variable: string, options: CasOptions = 
   } else {
     for (const [part, multiplicity] of squareFreeParts(value.num, x, ctx)) {
       const rational = rationalIn(normalized(part), x);
-      complete &&= rational;
+      // Parts come from the primitive part, so they are primitive (Gauss's lemma): one of degree 1 is irreducible.
+      complete &&= rational || degreeIn(part, x) === 1;
       const pieces = rational ? rationalFactors(part, x, ctx) : [positiveIn(normalized(part), x)];
       for (const p of pieces) found.push({ p, multiplicity });
     }

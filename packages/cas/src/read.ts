@@ -69,7 +69,12 @@ function isGenerator(r: RatFun, g: number): boolean {
   return term !== undefined && term.c.eq(1);
 }
 
-/** `base^exponent`: a polynomial power for an integer exponent, `exp(u)` for `e^u`, else a kernel. */
+/**
+ * `base^exponent`: a polynomial power for an integer exponent, a power of
+ * `sqrt(base)` for a half-integer one (`x^(1/2)` and `sqrt(x)` are one
+ * kernel, so they cancel and simplify together), `exp(u)` for `e^u`, else a
+ * kernel.
+ */
 function readPower(base: RatFun, exponent: RatFun, node: Node, ctx: Context): RatFun {
   const n = rationalOf(exponent);
   if (n?.isInteger() === true) {
@@ -77,6 +82,10 @@ function readPower(base: RatFun, exponent: RatFun, node: Node, ctx: Context): Ra
     return ctx.power(base, Number(n.numerator));
   }
   if (isGenerator(base, ctx.e())) return kernel('exp', [exponent], node, ctx);
+  if (n?.denominator === 2n) {
+    const root = kernel('sqrt', [base], node, ctx);
+    return n.numerator === 1n ? root : ctx.power(root, Number(n.numerator));
+  }
   return kernel('^', [base, exponent], node, ctx);
 }
 

@@ -201,8 +201,8 @@ export class SignOracle {
     if (fn === 'sqrt' || fn === 'nthRoot') return this.atLeastZero(u, 'positive');
     if (fn === '^' && n !== undefined)
       return n.isNegative() ? { signs: POSITIVE, names: NONE } : this.atLeastZero(u, 'positive');
-    // ln(u) has the sign of u - 1 = (num - den)/den.
-    if ((fn === 'ln' || fn === 'log') && args.length === 1)
+    // ln(u), log10(u) and log2(u) have the sign of u - 1 = (num - den)/den.
+    if ((fn === 'ln' || fn === 'log' || fn === 'log10' || fn === 'log2') && args.length === 1)
       return this.value({ num: subtract(u.num, u.den), den: u.den });
     return { signs: UNKNOWN, names: NONE };
   }

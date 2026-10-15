@@ -5,8 +5,10 @@
  * restrictions of its kernels: `ln`/`log` argument > 0, `log(u, b)` base > 0
  * and ≠ 1, `sqrt` and even-root arguments ≥ 0, `u^(p/q)` base ≥ 0 (> 0 for a
  * negative exponent), `asin`/`acos` 1 − u² ≥ 0, `acosh` u − 1 ≥ 0, `atanh`
- * 1 − u² > 0, `tan`/`sec` `cos(u)` ≠ 0, `cot`/`csc` `sin(u)` ≠ 0, `coth`/`csch`
- * u ≠ 0. Restrictions are collected from every kernel the input built, kept or
+ * 1 − u² > 0, `asec`/`acsc` u² − 1 ≥ 0, `acoth` u² − 1 > 0, `asech` u > 0 and
+ * 1 − u² ≥ 0, `tan`/`sec` `cos(u)` ≠ 0, `cot`/`csc` `sin(u)` ≠ 0,
+ * `coth`/`csch`/`acsch` u ≠ 0. The inverse reciprocal functions follow expr's
+ * definitions through `1/u` (`asec(u) = acos(1/u)`). Restrictions are collected from every kernel the input built, kept or
  * dropped, so `0*ln(x)` still knows about `x > 0`.
  *
  * A restriction is lost when the result no longer shows it. Every lost
@@ -18,7 +20,7 @@
 import { DivisionByZeroError } from '@arki/math/errors';
 
 import type { Context, Generator, RatFun } from './context.js';
-import type { Condition } from './core.js';
+import type { Condition, Relation } from './core.js';
 import type { Emitter } from './emit.js';
 import type { Poly } from './poly.js';
 import { rationalValue } from './context.js';
@@ -51,6 +53,12 @@ function oneMinusSquare(u: RatFun, ctx: Context): RatFun {
   return { num: subtract(den, multiply(u.num, u.num, ctx.budget)), den };
 }
 
+/** u² − 1 as a value. */
+function squareMinusOne(u: RatFun, ctx: Context): RatFun {
+  const den = multiply(u.den, u.den, ctx.budget);
+  return { num: subtract(multiply(u.num, u.num, ctx.budget), den), den };
+}
+
 /** u − 1 as a value. */
 function minusOne(u: RatFun): RatFun {
   return { num: subtract(u.num, u.den), den: u.den };
@@ -75,10 +83,16 @@ function kernelDomain(gen: Kernel, ctx: Context, into: Domain): void {
   if (fn === 'asin' || fn === 'acos' || fn === 'atanh')
     signed(oneMinusSquare(u, ctx), fn === 'atanh' ? 'positive' : 'nonnegative');
   if (fn === 'acosh') signed(minusOne(u), 'nonnegative');
+  if (fn === 'asec' || fn === 'acsc') signed(squareMinusOne(u, ctx), 'nonnegative');
+  if (fn === 'acoth') signed(squareMinusOne(u, ctx), 'positive');
+  if (fn === 'asech') {
+    signed(u, 'positive');
+    signed(oneMinusSquare(u, ctx), 'nonnegative');
+  }
   if (fn === 'tan' || fn === 'sec' || fn === 'cot' || fn === 'csc') {
     into.nonzero.push(kernelValue(fn === 'tan' || fn === 'sec' ? 'cos' : 'sin', [u], gen.span, ctx).num);
   }
-  if (fn === 'coth' || fn === 'csch') into.nonzero.push(u.num);
+  if (fn === 'coth' || fn === 'csch' || fn === 'acsch') into.nonzero.push(u.num);
 }
 
 /**
@@ -126,11 +140,11 @@ function primitive(subject: RatFun): RatFun {
   return { num: scale(subject.num, rationalContent(subject.num).inverse()), den: subject.den };
 }
 
-/** `u` for a lone `abs(u)` with a polynomial `u`: `abs(u) ≠ 0` is `u ≠ 0`. */
+/** `u` for a lone `abs(u)` or `sqrt(u)` with a polynomial `u`: `abs(u) ≠ 0` and `sqrt(u) ≠ 0` are `u ≠ 0`. */
 function absArgument(p: Poly, ctx: Context): Poly | undefined {
   const [g, ...rest] = generators(p);
   const gen = g === undefined ? undefined : ctx.generators[g];
-  const [u] = gen?.kind === 'kernel' && gen.fn === 'abs' ? gen.args : [];
+  const [u] = gen?.kind === 'kernel' && (gen.fn === 'abs' || gen.fn === 'sqrt') ? gen.args : [];
   if (rest.length > 0 || p.size !== 1 || u === undefined || constantValue(u.den) === undefined) return undefined;
   return u.num;
 }
@@ -206,7 +220,39 @@ export function lostConditions(
     if (relations?.has('positive') === true || relations?.has(s.relation) === true) continue;
     push(exprOf(emitter.node(subject), ctx), s.relation);
   }
-  // `positive` implies `nonzero` and `nonnegative`.
-  const positive = new Set(out.filter(c => c.relation === 'positive').map(c => c.subject.source));
-  return out.filter(c => c.relation === 'positive' || !positive.has(c.subject.source));
+  return mergeConditions(out);
+}
+
+/** The relations each relation implies on the same subject, itself included. */
+const IMPLIES: Readonly<Record<Relation, readonly Relation[]>> = {
+  positive: ['positive', 'nonzero', 'nonnegative'],
+  negative: ['negative', 'nonzero'],
+  nonnegative: ['nonnegative'],
+  nonzero: ['nonzero'],
+};
+
+/**
+ * Conditions from several sources as one list (RFC §6): `u ≥ 0` and `u ≠ 0`
+ * with one reason become `u > 0`; of equal conditions the first is kept; and
+ * a condition that another one implies on the same subject is dropped
+ * (`x > 0` makes `x ≠ 0` and `x ≥ 0` redundant, whatever their reasons).
+ */
+export function mergeConditions(...lists: readonly (readonly Condition[])[]): Condition[] {
+  const flat = lists.flat();
+  const all = flat.map(c =>
+    c.relation === 'nonnegative' &&
+    flat.some(d => d.relation === 'nonzero' && d.reason === c.reason && d.subject.source === c.subject.source)
+      ? { ...c, relation: 'positive' as const }
+      : c,
+  );
+  return all.filter(
+    (c, i) =>
+      !all.some(
+        (d, j) =>
+          j !== i &&
+          d.subject.source === c.subject.source &&
+          IMPLIES[d.relation].includes(c.relation) &&
+          (d.relation !== c.relation || j < i),
+      ),
+  );
 }

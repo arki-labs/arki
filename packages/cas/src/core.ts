@@ -11,7 +11,7 @@ export type { AbortSignalLike } from '@arki/expr/float';
 /** An expr AST, or a string parsed with expr's canonical `scientific` syntax. */
 export type CasInput = Expr | string;
 
-export type Relation = 'nonzero' | 'positive' | 'nonnegative';
+export type Relation = 'nonzero' | 'positive' | 'nonnegative' | 'negative';
 
 /** What the caller knows about one variable's sign (RFC §6). v1 is real-only: every variable ranges over ℝ. */
 export type Assumption = 'nonzero' | 'positive' | 'nonnegative' | 'negative';
@@ -73,7 +73,7 @@ export type CasResult = { readonly result: Expr; readonly conditions: readonly C
 
 /** Why a cas verb rejected its input. Apps translate messages by this code. */
 export type CasErrorCode =
-  'unsupported-function' | 'not-differentiable' | 'not-in-domain' | 'bad-variable' | 'not-rational';
+  'unsupported-function' | 'not-differentiable' | 'not-in-domain' | 'bad-variable' | 'not-rational' | 'not-polynomial';
 
 const REMEDIATION: Readonly<Record<CasErrorCode, string>> = {
   'unsupported-function': 'Remove the function at `span` or compute this case numerically.',
@@ -81,6 +81,7 @@ const REMEDIATION: Readonly<Record<CasErrorCode, string>> = {
   'not-in-domain': 'Remove the value at `span`; v1 works over the reals.',
   'bad-variable': 'Pass a name that is not a constant or function of the language.',
   'not-rational': 'Pass an input built from + - * / and integer powers only.',
+  'not-polynomial': 'Pass a polynomial: no division by the variable and no function of it at `span`.',
 };
 
 /** The input is outside what a cas verb handles. Values never cause this; budgets throw `CasLimitError`. */

@@ -48,7 +48,8 @@ describe('RFC §6: the required examples', () => {
 
   it('a rewrite that narrows the domain runs only under an assumption, which it returns', () => {
     expect(run('sqrt(x^2)', { x: 'nonnegative' })).toMatchObject({ result: 'x', conditions: ['x \\geq 0 (assumed)'] });
-    expect(run('sqrt(x^2)', { x: 'negative' })).toMatchObject({ result: '-x', conditions: ['-x > 0 (assumed)'] });
+    // The assumption comes back as the caller wrote it: x < 0, not -x > 0.
+    expect(run('sqrt(x^2)', { x: 'negative' })).toMatchObject({ result: '-x', conditions: ['x < 0 (assumed)'] });
     expect(run('(x^2)^(1/3)', { x: 'positive' })).toMatchObject({
       result: 'x^(2 / 3)',
       conditions: ['x > 0 (assumed)'],
@@ -92,7 +93,11 @@ describe('the rule table (RFC §7)', () => {
     ['expand', '(x + 1)^2', 'x^2 + 2 * x + 1'],
     ['collect', 'x*x + x + x', 'x^2 + 2 * x'],
     ['cancel', '(x^2 - 1)/(x + 1)', 'x - 1'],
-    ['integer-powers', '(x^(1/2))^2', 'x'],
+    ['integer-powers', '(x^(1/3))^3', 'x'],
+    ['square-of-sqrt', '(x^(1/2))^2', 'x'],
+    ['square-of-sqrt', 'x/sqrt(x)', 'sqrt(x)'],
+    ['square-of-sqrt', 'x^(5/2)', 'x^2 * sqrt(x)'],
+    ['sqrt-of-square', '(x^2)^(1/2)', 'abs(x)'],
     ['square-of-sqrt', 'sqrt(x + 1)^3', 'sqrt(x + 1) * (x + 1)'],
     ['square-of-sqrt', 'cbrt(x)^3', 'x'],
     ['square-of-sqrt', 'nthRoot(x, 4)^4', 'x'],
@@ -114,6 +119,9 @@ describe('the rule table (RFC §7)', () => {
     ['parity', 'sin(-x)', '-sin(x)'],
     ['parity', 'cos(1 - x)', 'cos(x - 1)'],
     ['parity', 'abs(-x)', 'abs(x)'],
+    // expr defines acot, acsc, acsch and acoth through 1/u, so they are odd.
+    ['parity', 'acot(-x)', '-acot(x)'],
+    ['parity', 'acoth(-x)', '-acoth(x)'],
     ['special-values', 'sin(0) + cos(0) + tan(0) + exp(0) + ln(1) + ln(e)', '3'],
     ['special-values', 'sqrt(4/9) + abs(-1/2)', '7 / 6'],
     ['factor-out', 'exp(x)*cos(x) - exp(x)*sin(x)', 'exp(x) * (cos(x) - sin(x))'],
@@ -129,7 +137,7 @@ describe('the rule table (RFC §7)', () => {
   });
 
   it('fractional powers combine only for a base proven or assumed positive', () => {
-    expect(run('x^(1/2)*x^(1/3)').result).toBe('x^(1 / 2) * x^(1 / 3)');
+    expect(run('x^(1/2)*x^(1/3)').result).toBe('x^(1 / 3) * sqrt(x)');
     expect(run('x^(1/2)*x^(1/3)', { x: 'positive' })).toMatchObject({
       result: 'x^(5 / 6)',
       conditions: ['x > 0 (assumed)'],
@@ -204,7 +212,27 @@ describe('assumptions', () => {
 
   it('nonzero alone proves nothing about abs, but makes x^2 positive', () => {
     expect(run('abs(x)', { x: 'nonzero' }).result).toBe('abs(x)');
-    expect(run('(x^2)^(1/2)', { x: 'nonzero' }).result).toBe('(x^2)^(1 / 2)');
+    expect(run('(x^2)^(1/3)', { x: 'nonzero' }).result).toBe('(x^2)^(1 / 3)');
+  });
+
+  it('x^(k/2) and sqrt(x)^k are one value: they cancel, combine and simplify together', () => {
+    expect(run('x^(1/2) - sqrt(x)').result).toBe('0');
+    expect(run('sqrt(x)*x^(1/2)').result).toBe('x');
+    expect(run('x^(3/2)/x', { x: 'positive' }).result).toBe('sqrt(x)');
+    expect(run('x^(1/3)*x^(1/6)', { x: 'positive' }).result).toBe('sqrt(x)');
+    expect(run('sqrt(exp(x))').result).toBe('exp(x / 2)');
+    // x^(-1/2) * x^(1/2) needs x > 0: one condition, not x ≥ 0 and sqrt(x) ≠ 0.
+    expect(run('x^(-1/2) * x^(1/2)').conditions).toEqual(['x > 0']);
+  });
+
+  it('applied lists fold when literal arithmetic changed the text, and nothing when it did not', () => {
+    for (const text of ['3*x*2', 'x^2^3', '1/x^-1', '6/4', '6*x/2']) expect(run(text).applied).toContain('fold');
+    for (const text of ['x/2', '2*x', '3/2', 'x/(2*y)']) expect(run(text).applied).toEqual([]);
+  });
+
+  it('log10 and log2 have the sign of their argument minus 1, as ln does', () => {
+    expect(run('abs(log2(x^2 + 2))').result).toBe('log2(x^2 + 2)');
+    expect(run('abs(log10(x^2 + 10))').result).toBe('log10(x^2 + 10)');
   });
 });
 

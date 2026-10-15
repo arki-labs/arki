@@ -230,13 +230,22 @@ export class Context {
 
   divide(a: RatFun, b: RatFun): RatFun {
     if (isZero(b.num)) throw new DivisionByZeroError('cas: division by zero');
-    if (constantValue(b.den) !== undefined && constantValue(b.num) !== undefined) this.note('fold');
+    // `fold` when a number divides a coefficient (`6*x/2`, not `x/2`; `6/4`, not `3/2`), or for a
+    // fraction as divisor: dividing by it multiplies by its reciprocal (`1/x^-1` is `x`).
+    const [ra, rb] = [rationalValue(a), rationalValue(b)];
+    const written =
+      ra?.isInteger() === true &&
+      rb?.isInteger() === true &&
+      !rb.isNegative() &&
+      ra.times(rb.inverse()).denominator === rb.numerator;
+    const literal = rb !== undefined && !written && [...a.num.values()].some(t => !t.c.eq(ONE));
+    if (literal || constantValue(b.den) === undefined) this.note('fold');
     this.divisors.push(b.num);
     return this.quotient(multiply(a.num, b.den, this.budget), multiply(a.den, b.num, this.budget));
   }
 
   power(a: RatFun, n: number): RatFun {
-    if (n === 0 || n === 1) this.note('fold');
+    if (n === 0 || n === 1 || rationalValue(a) !== undefined) this.note('fold');
     else if (a.num.size > 1 || a.den.size > 1) this.note('expand');
     if (n >= 0) return { num: power(a.num, n, this.budget), den: power(a.den, n, this.budget) };
     if (isZero(a.num)) throw new DivisionByZeroError('cas: zero to a negative power');
@@ -252,12 +261,18 @@ export class Context {
     else if (add(a.num, b.num).size < a.num.size + b.num.size) this.note('collect');
   }
 
-  /** `fold` for literal arithmetic, `0*u` and `1*u`; `expand` when a sum is multiplied out; `collect` for like powers. */
+  /**
+   * `fold` for literal arithmetic (`3*x*2`, a number times a term that has a
+   * coefficient already), `0*u` and `1*u`; `expand` when a sum is multiplied
+   * out; `collect` for like powers.
+   */
   private noteProduct(a: RatFun, b: RatFun): void {
     const ra = rationalValue(a);
     const rb = rationalValue(b);
     const trivial = (r: ReturnType<typeof rationalValue>): boolean => r !== undefined && (r.isZero() || r.eq(ONE));
-    if ((ra !== undefined && rb !== undefined) || trivial(ra) || trivial(rb)) {
+    const scaled = (r: ReturnType<typeof rationalValue>, other: RatFun): boolean =>
+      r !== undefined && [...other.num.values(), ...other.den.values()].some(t => !t.c.eq(ONE));
+    if ((ra !== undefined && rb !== undefined) || trivial(ra) || trivial(rb) || scaled(ra, b) || scaled(rb, a)) {
       this.note('fold');
       return;
     }

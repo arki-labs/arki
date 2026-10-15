@@ -23,9 +23,9 @@ export type {
 } from './core.js';
 export { CasError, CasLimitError, DEFAULT_LIMITS } from './core.js';
 
-const RELATION = { nonzero: '\\neq 0', positive: '> 0', nonnegative: '\\geq 0' } as const;
+const RELATION = { nonzero: '\\neq 0', positive: '> 0', nonnegative: '\\geq 0', negative: '< 0' } as const;
 
-/** `x \neq 0`, `x > 0`, `x \geq 0`: math notation, so apps need no translation for it. */
+/** `x \neq 0`, `x > 0`, `x \geq 0`, `x < 0`: math notation, so apps need no translation for it. */
 export function conditionToLatex(condition: Condition): string {
   return `${toLatex(condition.subject)} ${RELATION[condition.relation]}`;
 }

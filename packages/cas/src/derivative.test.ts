@@ -81,6 +81,19 @@ describe('derivative: conditions', () => {
     expect(conditionsOf('acosh(x)')).toEqual(['x - 1 nonnegative (domain)']);
   });
 
+  it('the inverse reciprocal functions have the domains of their 1/u definitions in expr', () => {
+    // acoth(u) = atanh(1/u) needs u^2 > 1; its derivative 1/(1 - x^2) is defined for |x| < 1 too.
+    expect(conditionsOf('acoth(x)')).toEqual(['x^2 - 1 positive (domain)']);
+    // asech(u) = acosh(1/u) needs 0 < u ≤ 1; the derivative's sqrt(1 - x^2) still shows u ≤ 1 but not u > 0.
+    expect(conditionsOf('asech(x)')).toEqual(['x positive (domain)']);
+    // asec(u) = acos(1/u) needs u^2 ≥ 1, which the derivative's sqrt(x^2 - 1) still shows.
+    expect(conditionsOf('asec(x)')).toEqual([]);
+  });
+
+  it('a condition another one implies is not listed twice: x > 0 covers x ≠ 0 from abs', () => {
+    expect(conditionsOf('abs(x) + ln(x)')).toEqual(['x positive (domain)']);
+  });
+
   it('a restriction the result still shows is not repeated', () => {
     expect(conditionsOf('sqrt(x)')).toEqual([]);
     expect(conditionsOf('1/x')).toEqual([]);

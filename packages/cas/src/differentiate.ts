@@ -21,7 +21,7 @@ import type { Domain } from './conditions.js';
 import type { RatFun } from './context.js';
 import type { CasInput, CasOptions, Condition } from './core.js';
 import type { Normal } from './normal.js';
-import { inputDomain, lostConditions } from './conditions.js';
+import { inputDomain, lostConditions, mergeConditions } from './conditions.js';
 import { Context } from './context.js';
 import { CasError } from './core.js';
 import { binary, decimalText, exprOf, minus, numberNode } from './emit.js';
@@ -706,14 +706,7 @@ export function differentiateOrders(
   const final = orders.at(-1);
   if (final === undefined) throw new Error('cas invariant: at least one order was differentiated');
   const conditions = final.normal?.conditions ?? lostConditions(ctx, domain, final.rawValue, new Readable(ctx));
-  const listed = new Set(conditions.map(c => `${c.relation}:${c.subject.source}`));
-  const extra = differentiable.filter(c => {
-    const key = `${c.relation}:${c.subject.source}`;
-    if (listed.has(key)) return false;
-    listed.add(key);
-    return true;
-  });
-  return { ctx, orders, result, conditions: [...conditions, ...extra] };
+  return { ctx, orders, result, conditions: mergeConditions(conditions, differentiable) };
 }
 
 /** `u ≠ 0` for each `abs(u)`, unless the sign oracle proves it from the expression alone. */

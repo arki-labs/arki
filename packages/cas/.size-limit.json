@@ -1,42 +1,42 @@
 [
   {
-    "name": "@arki/cas/polynomial without exactRoots and factor (polynomialIn, expand, collect, rationalize, gcd; @arki/expr and @arki/math ignored): RFC target 10 kB, measured 9.53 kB (step 2 added lost-restriction conditions and the sign oracle)",
+    "name": "@arki/cas/polynomial without exactRoots and factor (polynomialIn, expand, collect, rationalize, gcd; @arki/expr and @arki/math ignored): RFC target 10 kB, measured 10.01 kB (step 2 added lost-restriction conditions and the sign oracle; 10 B over target since the condition and error fixes)",
     "path": "dist/polynomial.js",
     "import": "{ polynomialIn, expand, collect, rationalize, gcd }",
     "ignore": ["@arki/expr", "@arki/math"],
-    "limit": "9.75 kB",
+    "limit": "10.25 kB",
     "gzip": true
   },
   {
-    "name": "@arki/cas/polynomial with exactRoots (@arki/expr and @arki/math ignored): measured 13.3 kB, since step 4 exactRoots splits by factoring over Q",
+    "name": "@arki/cas/polynomial with exactRoots (@arki/expr and @arki/math ignored): measured 13.62 kB, since step 4 exactRoots splits by factoring over Q",
     "path": "dist/polynomial.js",
     "import": "{ polynomialIn, exactRoots }",
     "ignore": ["@arki/expr", "@arki/math"],
-    "limit": "13.5 kB",
+    "limit": "13.75 kB",
     "gzip": true
   },
   {
-    "name": "@arki/cas/polynomial factor (@arki/expr and @arki/math ignored): measured 12.21 kB",
+    "name": "@arki/cas/polynomial factor (@arki/expr and @arki/math ignored): measured 12.7 kB",
     "path": "dist/polynomial.js",
     "import": "{ factor }",
     "ignore": ["@arki/expr", "@arki/math"],
-    "limit": "12.5 kB",
+    "limit": "13 kB",
     "gzip": true
   },
   {
-    "name": "@arki/cas/polynomial with exactRoots and factor (@arki/expr and @arki/math ignored): RFC target +8 kB over polynomial without them, measured +4.11 kB (13.64 kB)",
+    "name": "@arki/cas/polynomial with exactRoots and factor (@arki/expr and @arki/math ignored): RFC target +8 kB over polynomial without them, measured +4.14 kB (14.15 kB)",
     "path": "dist/polynomial.js",
     "import": "{ polynomialIn, exactRoots, factor }",
     "ignore": ["@arki/expr", "@arki/math"],
-    "limit": "14 kB",
+    "limit": "14.25 kB",
     "gzip": true
   },
   {
-    "name": "@arki/cas/simplify (@arki/expr and @arki/math ignored): RFC target 12 kB, measured 12.05 kB (step 3 added a switch per rule, so a derivation can show each rule as a step)",
+    "name": "@arki/cas/simplify (@arki/expr and @arki/math ignored): RFC target 12 kB, measured 12.63 kB (step 3 added a switch per rule, so a derivation can show each rule as a step)",
     "path": "dist/simplify.js",
     "import": "{ simplify }",
     "ignore": ["@arki/expr", "@arki/math"],
-    "limit": "12.25 kB",
+    "limit": "12.75 kB",
     "gzip": true
   },
   {
@@ -48,54 +48,54 @@
     "gzip": true
   },
   {
-    "name": "@arki/cas/derivative (includes simplify; no step code; @arki/expr and @arki/math ignored): RFC target 15 kB, measured 15.3 kB",
+    "name": "@arki/cas/derivative (includes simplify; no step code; @arki/expr and @arki/math ignored): RFC target 15 kB, measured 15.85 kB",
     "path": "dist/derivative.js",
     "import": "{ derivative }",
     "ignore": ["@arki/expr", "@arki/math"],
-    "limit": "15.5 kB",
+    "limit": "16 kB",
     "gzip": true
   },
   {
-    "name": "@arki/cas/derivation (@arki/expr and @arki/math ignored): RFC target derivative + 5 kB, measured 17.35 kB (+2.05 kB)",
+    "name": "@arki/cas/derivation (@arki/expr and @arki/math ignored): RFC target derivative + 5 kB, measured 17.89 kB (+2.04 kB)",
     "path": "dist/derivation.js",
     "import": "{ derivation, ruleFormula, TEMPLATE_KEYS }",
     "ignore": ["@arki/expr", "@arki/math"],
-    "limit": "17.75 kB",
+    "limit": "18 kB",
     "gzip": true
   },
   {
-    "name": "@arki/cas/polynomial (polynomialIn, exactRoots) with @arki/expr parse/print and the @arki/math subpaths: measured 25.38 kB (step 4 added factoring)",
+    "name": "@arki/cas/polynomial (polynomialIn, exactRoots) with @arki/expr parse/print and the @arki/math subpaths: measured 25.7 kB (step 4 added factoring)",
     "path": "dist/polynomial.js",
     "import": "{ polynomialIn, exactRoots }",
-    "limit": "25.75 kB",
-    "gzip": true
-  },
-  {
-    "name": "@arki/cas/simplify with @arki/expr parse/print and the @arki/math subpaths: measured 22.29 kB",
-    "path": "dist/simplify.js",
-    "import": "{ simplify }",
-    "limit": "22.5 kB",
-    "gzip": true
-  },
-  {
-    "name": "@arki/cas/derivative with @arki/expr parse/print and the @arki/math subpaths: measured 25.64 kB",
-    "path": "dist/derivative.js",
-    "import": "{ derivative }",
     "limit": "26 kB",
     "gzip": true
   },
   {
-    "name": "@arki/cas/derivation with @arki/expr parse/print and the @arki/math subpaths: measured 27.5 kB",
-    "path": "dist/derivation.js",
-    "import": "{ derivation }",
-    "limit": "28 kB",
+    "name": "@arki/cas/simplify with @arki/expr parse/print and the @arki/math subpaths: measured 22.88 kB",
+    "path": "dist/simplify.js",
+    "import": "{ simplify }",
+    "limit": "23 kB",
     "gzip": true
   },
   {
-    "name": "@arki/cas/polynomial factor with @arki/expr parse/print and the @arki/math subpaths: measured 24.2 kB",
+    "name": "@arki/cas/derivative with @arki/expr parse/print and the @arki/math subpaths: measured 26.2 kB",
+    "path": "dist/derivative.js",
+    "import": "{ derivative }",
+    "limit": "26.5 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/cas/derivation with @arki/expr parse/print and the @arki/math subpaths: measured 28.04 kB",
+    "path": "dist/derivation.js",
+    "import": "{ derivation }",
+    "limit": "28.25 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/cas/polynomial factor with @arki/expr parse/print and the @arki/math subpaths: measured 24.76 kB",
     "path": "dist/polynomial.js",
     "import": "{ factor }",
-    "limit": "24.5 kB",
+    "limit": "25 kB",
     "gzip": true
   }
 ]
