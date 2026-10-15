@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { LockError } from './errors.js';
-import { createKey, digest64, fnv1a64, legacyPgText, toPgPair } from './key.js';
+import { createKey, digest64, fnv1a64, fnv1a64Utf8, legacyPgText, toPgPair } from './key.js';
+import { keyNameSchema } from './types.js';
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -227,5 +228,66 @@ describe('createKey', () => {
 
   it('accepts exactly 512 bytes', () => {
     expect(() => createKey('ns', 'é'.repeat(256))).not.toThrow();
+  });
+});
+
+/** A seeded generator, so a failure reproduces. */
+function seeded(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state + 0x6D_2B_79_F5) >>> 0;
+    let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
+    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+/** Random text mixing ASCII, BMP, astral characters and lone (or reversed) surrogates. */
+function randomText(random: () => number, maxUnits: number): string {
+  const pick = (low: number, high: number): number => low + Math.floor(random() * (high - low + 1));
+  let text = '';
+  const units = pick(0, maxUnits);
+  while (text.length < units) {
+    const kind = random();
+    if (kind < 0.35) text += String.fromCodePoint(pick(0, 0x7F));
+    else if (kind < 0.6) text += String.fromCodePoint(pick(0x80, 0xD7_FF));
+    else if (kind < 0.7) text += String.fromCodePoint(pick(0xE0_00, 0xFF_FF));
+    else if (kind < 0.88) text += String.fromCodePoint(pick(0x1_00_00, 0x10_FF_FF));
+    else if (kind < 0.95) text += String.fromCodePoint(pick(0xD8_00, 0xDF_FF));
+    else text += String.fromCodePoint(pick(0xDC_00, 0xDF_FF), pick(0xD8_00, 0xDB_FF));
+  }
+  return text;
+}
+
+describe('inline UTF-8', () => {
+  it('hashes every string byte for byte like FNV over TextEncoder, so no Postgres key moves', () => {
+    const random = seeded(1);
+    for (let round = 0; round < 3000; round++) {
+      const text = randomText(random, 40);
+      expect(fnv1a64Utf8(text), JSON.stringify(text)).toBe(fnv1a64(bytes(text)));
+      expect(digest64({ namespace: 'n', name: 'n', full: text })).toBe(fnv1a64(bytes(text)));
+    }
+  });
+
+  it('accepts and refuses exactly what keyNameSchema does and counts the same bytes, so keys never change', () => {
+    const random = seeded(2);
+    for (let round = 0; round < 3000; round++) {
+      const text = randomText(random, round % 10 === 0 ? 300 : 30);
+      const accepted = keyNameSchema.safeParse(text).success;
+      let full: string | undefined;
+      try {
+        full = createKey('ns', text).full;
+      } catch (error) {
+        expect(error).toMatchObject({ code: 'config' });
+      }
+      expect(full !== undefined, JSON.stringify(text)).toBe(accepted);
+      if (full !== undefined) expect(full).toBe(`1:2:ns:${bytes(text).length}:${text}`);
+    }
+  });
+
+  it('words a refusal exactly as the schema does', () => {
+    expect(() => createKey('ns', '')).toThrow('lock name must not be empty');
+    expect(() => createKey('ns', '\uD800')).toThrow('lock name must not contain lone surrogates');
+    expect(() => createKey('y'.repeat(513), 'n')).toThrow('lock namespace must be at most 512 bytes');
   });
 });

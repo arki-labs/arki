@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import type { MemoryGuarantees } from './memory.js';
 import type { Grant, Store } from './types.js';
 import { LockError } from './errors.js';
 import { createKey } from './key.js';
@@ -170,7 +171,7 @@ describe('memoryStore read/write', () => {
     expect(store.peek(rwKey)).toBeUndefined();
   });
 
-  it('keeps a woken writer counted until it closes, so a reader cannot slip in between the wake-up and the retry', async () => {
+  it('reserves the key for a woken writer, so neither a reader nor another writer can slip in between the wake-up and the retry', async () => {
     const store = memoryStore();
     const reader = await store.shared.acquire(rwKey, { token: 'r1', mode: 'read' });
     if (reader === undefined) throw new Error('unreachable');
@@ -180,7 +181,8 @@ describe('memoryStore read/write', () => {
     await woken;
     // The key is free and the writer has been woken but has not retried yet.
     expect(await store.shared.acquire(rwKey, { token: 'r2', mode: 'read' })).toBeUndefined();
-    const grant = await store.shared.acquire(rwKey, { token: 'w', mode: 'write' });
+    expect(await store.shared.acquire(rwKey, { token: 'w2', mode: 'write' })).toBeUndefined();
+    const grant = await store.shared.acquire(rwKey, { token: 'w', mode: 'write', waiter: writer });
     expect(grant).toBeDefined();
     writer.close();
     if (grant === undefined) throw new Error('unreachable');
@@ -305,18 +307,19 @@ describe('memoryStore permits and the contract', () => {
     const big = await hold('big', 2);
     const small = await hold('small', 1);
     const wakes: string[] = [];
-    const park = (name: string, weight: number): void => {
-      void store.permits
-        .waiter(poolKey, weight)
-        .waitFor(new AbortController().signal)
-        .then(() => wakes.push(name));
+    const park = (name: string, weight: number) => {
+      const waiter = store.permits.waiter(poolKey, weight);
+      void waiter.waitFor(new AbortController().signal).then(() => wakes.push(name));
+      return waiter;
     };
     park('needs-3', 3);
-    park('needs-1', 1);
+    const needsOne = park('needs-1', 1);
     await Promise.resolve();
     await store.permits.release(small); // 2 in use: 1 fits, 3 does not
     await new Promise(resolve => setTimeout(resolve, 5));
     expect(wakes).toEqual(['needs-1']);
+    // The permit is reserved for needs-1 until it takes it or stops waiting; it stops.
+    needsOne.close();
     await store.permits.release(big);
     await new Promise(resolve => setTimeout(resolve, 5));
     expect(wakes).toEqual(['needs-1', 'needs-3']);
@@ -346,6 +349,190 @@ describe('memoryStore permits and the contract', () => {
       );
       expect(outcome, contractCase.name).toBe('failed');
     }
+  });
+});
+
+/** A memory store whose attempts are counted, so a test can see how much work a release causes. */
+function countingStore() {
+  const inner = memoryStore();
+  const attempts = { mutex: 0, permits: 0 };
+  const store: Store<MemoryGuarantees> = {
+    ...inner,
+    acquire: (k, req) => {
+      attempts.mutex += 1;
+      return inner.acquire(k, req);
+    },
+    waiter: k => inner.waiter(k),
+    permits: {
+      ...inner.permits,
+      acquire: (k, req) => {
+        attempts.permits += 1;
+        return inner.permits.acquire(k, req);
+      },
+    },
+  };
+  return { store, attempts };
+}
+
+const settled = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 5));
+
+describe('memoryStore hand-off', () => {
+  it('wakes exactly one waiter per mutex release, because waking the whole queue makes a contended run quadratic', async () => {
+    const store = memoryStore();
+    const holder = await grab(store, 'holder');
+    const wakes: string[] = [];
+    for (const name of ['a', 'b', 'c']) {
+      void store
+        .waiter(key)
+        .waitFor(new AbortController().signal)
+        .then(() => wakes.push(name));
+    }
+    await store.release(holder);
+    await settled();
+    expect(wakes).toEqual(['a']);
+  });
+
+  it('costs each of 1000 contended callers at most two store attempts, so the work grows linearly with the queue', async () => {
+    const { store, attempts } = countingStore();
+    const locks = createLocks({ store, namespace: 't' });
+    const callers = 1000;
+    await Promise.all(
+      Array.from({ length: callers }, () =>
+        locks.mutex('job').run(async () => {
+          await Promise.resolve();
+        }),
+      ),
+    );
+    // One refused attempt, then the one that takes the handed-over lock. Waking everyone would be ~n²/2.
+    expect(attempts.mutex).toBeLessThanOrEqual(2 * callers);
+  });
+
+  it('runs 1000 waiters in the order they asked, because the queue is first come, first served', async () => {
+    const locks = createLocks({ store: memoryStore(), namespace: 't' });
+    const order: number[] = [];
+    await Promise.all(
+      Array.from({ length: 1000 }, (_, index) =>
+        locks.mutex('job').run(async () => {
+          order.push(index);
+          await Promise.resolve();
+        }),
+      ),
+    );
+    expect(order).toEqual(Array.from({ length: 1000 }, (_, index) => index));
+  });
+
+  it('refuses a newcomer while the lock is reserved for a woken waiter, so nobody barges in between the wake-up and the retry', async () => {
+    const store = memoryStore();
+    const holder = await grab(store, 'holder');
+    const waiter = store.waiter(key);
+    const woken = waiter.waitFor(new AbortController().signal);
+    await store.release(holder);
+    await woken;
+    expect(await store.acquire(key, { token: 'newcomer' })).toBeUndefined();
+    const grant = await store.acquire(key, { token: 'waiter', waiter });
+    expect(grant?.token).toBe('waiter');
+    waiter.close();
+  });
+
+  it('passes the lock on when an aborted waiter leaves the middle of the queue, so one quitter cannot stall the rest', async () => {
+    const locks = createLocks({ store: memoryStore(), namespace: 't' });
+    const holder = await locks.mutex('job').acquire();
+    const order: string[] = [];
+    const controller = new AbortController();
+    const run = (name: string, signal?: AbortSignal) =>
+      locks
+        .mutex('job')
+        .run(() => void order.push(name), { wait: '5s', ...(signal === undefined ? {} : { signal }) })
+        .then(
+          () => 'ran',
+          (error: unknown) => (error instanceof LockError ? error.code : 'other'),
+        );
+    const first = run('a');
+    const middle = run('b', controller.signal);
+    const last = run('c');
+    await sleep(10);
+    controller.abort();
+    expect(await middle).toBe('aborted');
+    await holder.release();
+    expect([await first, await last]).toEqual(['ran', 'ran']);
+    expect(order).toEqual(['a', 'c']);
+  });
+
+  it('passes a reservation on when the woken waiter stops waiting before it takes the lock, so the hand-off is never lost', async () => {
+    const store = memoryStore();
+    const holder = await grab(store, 'holder');
+    const first = store.waiter(key);
+    const second = store.waiter(key);
+    const secondWoken = second.waitFor(new AbortController().signal);
+    await store.release(holder);
+    // The lock is reserved for `first`, which gives up instead of taking it.
+    first.close();
+    await secondWoken;
+    expect(await store.acquire(key, { token: 'first', waiter: first })).toBeUndefined();
+    const grant = await store.acquire(key, { token: 'second', waiter: second });
+    expect(grant?.token).toBe('second');
+  });
+
+  it('grants a semaphore release to the waiters that fit, in queue order, and reaches the rest on later releases', async () => {
+    const store = memoryStore();
+    const poolKey = createKey('t', 'fit', 'semaphore');
+    const take = async (token: string, weight: number, waiter?: ReturnType<typeof store.permits.waiter>) => {
+      const grant = await store.permits.acquire(poolKey, {
+        token,
+        limit: 3,
+        weight,
+        ...(waiter === undefined ? {} : { waiter }),
+      });
+      if (grant === undefined) throw new Error(`expected ${token} to be granted`);
+      return grant;
+    };
+    const full = await take('full', 3);
+    const woken: string[] = [];
+    const waiters = new Map<string, ReturnType<typeof store.permits.waiter>>();
+    for (const [name, weight] of [
+      ['a2', 2],
+      ['b2', 2],
+      ['c1', 1],
+      ['d1', 1],
+    ] as const) {
+      const waiter = store.permits.waiter(poolKey, weight);
+      waiters.set(name, waiter);
+      void waiter.waitFor(new AbortController().signal).then(() => woken.push(name));
+    }
+    await store.permits.release(full);
+    await settled();
+    // 3 free: a2 takes 2, b2 does not fit in the 1 left and keeps its place, c1 takes the last one.
+    expect(woken).toEqual(['a2', 'c1']);
+    expect(await store.permits.acquire(poolKey, { token: 'newcomer', limit: 3, weight: 1 })).toBeUndefined();
+    const a2 = await take('a2', 2, waiters.get('a2'));
+    const c1 = await take('c1', 1, waiters.get('c1'));
+    await store.permits.release(a2);
+    await settled();
+    // 2 free: b2 is first in line and fits; d1 waits behind it.
+    expect(woken).toEqual(['a2', 'c1', 'b2']);
+    await store.permits.release(c1);
+    await settled();
+    expect(woken).toEqual(['a2', 'c1', 'b2', 'd1']);
+  });
+
+  it('finishes 1000 tasks on a semaphore of 10 with few attempts each, because a release grants only the waiters that fit', async () => {
+    const { store, attempts } = countingStore();
+    const locks = createLocks({ store, namespace: 't' });
+    const tasks = 1000;
+    let inside = 0;
+    let most = 0;
+    await Promise.all(
+      Array.from({ length: tasks }, () =>
+        locks.semaphore('pool', { limit: 10 }).run(async () => {
+          inside += 1;
+          most = Math.max(most, inside);
+          await Promise.resolve();
+          inside -= 1;
+        }),
+      ),
+    );
+    expect(most).toBe(10);
+    expect(attempts.permits).toBeLessThanOrEqual(2 * tasks);
   });
 });
 

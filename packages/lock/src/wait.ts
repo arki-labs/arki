@@ -18,9 +18,10 @@ const DURATION_TEXT = /^(\d+(?:\.\d+)?)(ms|[smh])$/;
 
 /** A {@link Duration} in milliseconds. Throws `LockError{code:'config'}` for anything else. */
 export function parseDuration(duration: Duration): number {
+  // Every wait parses one, so the common number skips the schema. It accepts what the schema does.
+  if (typeof duration === 'number' && Number.isFinite(duration) && duration >= 0) return duration;
   const parsed = durationSchema.safeParse(duration);
-  if (parsed.success) {
-    if (typeof parsed.data === 'number') return parsed.data;
+  if (parsed.success && typeof parsed.data === 'string') {
     const match = DURATION_TEXT.exec(parsed.data);
     const amount = match?.[1];
     const unit = match?.[2];
@@ -84,6 +85,41 @@ export function raceSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise
       },
     );
   });
+}
+
+/** What {@link answerSoFar} gives for a store call still in flight. */
+export const NOT_YET: unique symbol = Symbol('not yet');
+const notYet: Promise<typeof NOT_YET> = Promise.resolve(NOT_YET);
+
+/**
+ * The store's answer if it is already in (an in-process store answers inside the call),
+ * else {@link NOT_YET}. One microtask, no timer: only a call still in flight needs
+ * {@link storeAnswer}'s timer and abort race. A store's rejection passes through.
+ */
+export function answerSoFar<T>(promise: Promise<T>): Promise<T | typeof NOT_YET> {
+  // An already settled promise wins: its reaction is queued before the marker's.
+  return Promise.race([promise, notYet]);
+}
+
+/**
+ * {@link withStoreTimeout}, raced with `signal` when given. A call that has already
+ * answered needs neither a timer nor an abort listener, so it gets none; a signal that
+ * aborted meanwhile still wins.
+ */
+export async function storeAnswer<T>(
+  promise: Promise<T>,
+  ms: number,
+  method: LockMethod,
+  scheduler: Scheduler = defaultScheduler,
+  signal?: AbortSignal,
+): Promise<T> {
+  const first = await answerSoFar(promise);
+  if (first === NOT_YET) {
+    const timed = withStoreTimeout(promise, ms, method, scheduler);
+    return signal === undefined ? timed : raceSignal(timed, signal);
+  }
+  if (signal?.aborted === true) throw abortedError(signal);
+  return first;
 }
 
 /**

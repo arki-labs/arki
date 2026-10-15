@@ -39,8 +39,17 @@ import { LockError } from './errors.js';
 import { createKey } from './key.js';
 import { lead } from './lead.js';
 import { defaultScheduler } from './scheduler.js';
-import { semaphoreConfigSchema, storeTimeoutSchema, weightSchema } from './types.js';
-import { BACKOFF_MAX_MS, backoffDelay, parseDuration, raceSignal, withStoreTimeout } from './wait.js';
+import { isPermitCount, semaphoreConfigSchema, storeTimeoutSchema } from './types.js';
+import {
+  answerSoFar,
+  BACKOFF_MAX_MS,
+  backoffDelay,
+  NOT_YET,
+  parseDuration,
+  raceSignal,
+  storeAnswer,
+  withStoreTimeout,
+} from './wait.js';
 
 const log = getLogger('arki:lock');
 
@@ -108,15 +117,22 @@ type LocksImpl = {
   readWrite?(key: string): ReadWriteImpl;
 };
 
-/** A guard plus what only the manager may see. */
+/** One hold, as the manager sees it. */
 type Held = {
-  readonly guard: GuardImpl;
+  readonly key: Key;
+  readonly fence: bigint | undefined;
+  signal(): AbortSignal;
+  release(): Promise<void>;
   lostError(): LockError | undefined;
+  /** The public guard. Built on first call. */
+  guard(): GuardImpl;
   /** Set when the grant arrived with less than ttl/3 left: renew once before use. */
-  readonly renewNow?: () => Promise<void>;
+  readonly renewNow: (() => Promise<void>) | undefined;
 };
 
 type Settled<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown };
+
+type Writable<T> = { -readonly [K in keyof T]: T[K] };
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -125,10 +141,6 @@ type Settled<T> = { readonly ok: true; readonly value: T } | { readonly ok: fals
 function noop(): void {
   // A late result is handled elsewhere; this only keeps it from being reported as unhandled.
 }
-
-const neverSettlesVoid: Promise<void> = new Promise<void>(() => {
-  // Never settles: used to drop out of a race.
-});
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
@@ -237,7 +249,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
 
   // One in-flight remote attempt per key per process.
   const gates = new Map<string, Promise<void>>();
-  async function gated<T>(key: Key, fn: () => Promise<T>): Promise<T> {
+  function gated<T>(key: Key, fn: () => Promise<T>): Promise<T> {
     if (store.guarantees.scope === 'process') return fn();
     const previous = gates.get(key.full) ?? Promise.resolve();
     const result = previous.then(fn);
@@ -252,7 +264,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
   /** Give a grant back with its own token, through the protocol that issued it. Never throws. */
   async function giveBack(protocol: Protocol, grant: Grant, why: string): Promise<void> {
     try {
-      await withStoreTimeout(protocol.release(grant), storeTimeoutMs, 'release', scheduler);
+      await storeAnswer(protocol.release(grant), storeTimeoutMs, 'release', scheduler);
     } catch (error) {
       log.error(toError(error), { why, key: keyField(grant.key) });
     }
@@ -266,16 +278,23 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     key: Key,
     waitMs: number | undefined,
     signal: AbortSignal | undefined,
+    waiter: Waiter | undefined,
   ): Promise<Attempt | undefined> {
-    if (signal !== undefined) await raceSignal(Promise.resolve(), signal);
-    const request: AcquireRequest = {
-      token: nextToken(),
-      ...(leased ? { ttlMs: leaseMs } : {}),
-      ...(waitMs === undefined ? {} : { waitMs }),
-      ...(signal === undefined ? {} : { signal }),
-    };
-    const sentAt = scheduler.now();
-    const raw = (async () => protocol.acquire(key, request))();
+    if (signal?.aborted === true) await raceSignal(Promise.resolve(), signal);
+    const request: Writable<AcquireRequest> = { token: nextToken() };
+    if (leased) request.ttlMs = leaseMs;
+    if (waitMs !== undefined) request.waitMs = waitMs;
+    if (signal !== undefined) request.signal = signal;
+    if (waiter !== undefined) request.waiter = waiter;
+    // Only a lease is timed from the send.
+    const sentAt = leased ? scheduler.now() : 0;
+    let raw: Promise<Grant | undefined>;
+    try {
+      raw = protocol.acquire(key, request);
+    } catch (error) {
+      // A store that throws instead of rejecting fails the same way.
+      raw = Promise.reject(asStoreError(error, 'acquire'));
+    }
     const bound = storeTimeoutMs + (store.guarantees.wait === 'native' && waitMs !== undefined ? waitMs : 0);
     let grant: Grant | undefined;
     if (store.guarantees.releasedBy === 'transaction') {
@@ -293,8 +312,10 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
       }
     } else {
       try {
-        const timed = withStoreTimeout(raw, bound, 'acquire', scheduler);
-        grant = await (signal === undefined ? timed : raceSignal(timed, signal));
+        // Inline for the common in-process answer; anything in flight gets the timer and abort race.
+        const first = await answerSoFar(raw);
+        grant = first === NOT_YET ? await storeAnswer(raw, bound, 'acquire', scheduler, signal) : first;
+        if (signal?.aborted === true) await raceSignal(Promise.resolve(), signal);
       } catch (error) {
         // Attached only once we have given up, so it also catches a grant that
         // already landed in the same instant: nobody else will release it.
@@ -328,39 +349,45 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
           : (s: AbortSignal): Promise<void> => store.waitFor?.(key, s) ?? Promise.resolve()
         : (s: AbortSignal): Promise<void> => session.waitFor(s);
     const ms = waitFor === undefined ? Math.min(backoffDelay(attempt), leftMs) : Math.min(leftMs, BACKOFF_MAX_MS);
-    const wakeup = new AbortController();
-    const onAbort = (): void => {
-      wakeup.abort();
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
+    // Tells the store's wait to stop listening once this pause is over. Dropped when the store itself ended the wait.
+    let wakeup = waitFor === undefined ? undefined : new AbortController();
     let timer: SchedulerHandle | undefined;
-    const elapsed = new Promise<void>(resolve => {
-      timer = scheduler.setTimeout(resolve, ms, { ref: true });
-    });
-    const woken = new Promise<void>(resolve => {
-      wakeup.signal.addEventListener('abort', () => {
-        resolve();
-      });
-    });
-    const racers = [elapsed, woken];
+    let onAbort: (() => void) | undefined;
+    // A failing waitFor, sync or async, must not end the wait early or leak the timer: the timer still bounds it.
+    const failed = (error: unknown): void => {
+      log.error(toError(error), { note: 'waitFor failed; falling back to backoff', key: keyField(key) });
+    };
     try {
-      if (waitFor !== undefined) {
-        // A failing waitFor, sync or async, must not end the wait early or leak the timer: the timer still bounds it.
-        const failed = (error: unknown): Promise<void> => {
-          log.error(toError(error), { note: 'waitFor failed; falling back to backoff', key: keyField(key) });
-          return neverSettlesVoid;
+      // One promise for the three ways out: the timer, the caller's abort and the store's wake-up.
+      await new Promise<void>(resolve => {
+        const done = (): void => {
+          resolve();
         };
-        try {
-          racers.push(waitFor(wakeup.signal).catch(failed));
-        } catch (error) {
-          void failed(error);
+        const wake = (): void => {
+          wakeup = undefined;
+          resolve();
+        };
+        timer = scheduler.setTimeout(done, ms, { ref: true });
+        if (signal !== undefined) {
+          if (signal.aborted) {
+            done();
+            return;
+          }
+          onAbort = done;
+          signal.addEventListener('abort', onAbort, { once: true });
         }
-      }
-      await Promise.race(racers);
+        if (waitFor === undefined || wakeup === undefined) return;
+        try {
+          waitFor(wakeup.signal).then(wake, failed);
+        } catch (error) {
+          failed(error);
+        }
+      });
     } finally {
       if (timer !== undefined) scheduler.clearTimeout(timer);
-      wakeup.abort();
-      signal?.removeEventListener('abort', onAbort);
+      // A wait the store already ended needs no cancel (and an abort is costly: it builds a DOMException).
+      wakeup?.abort();
+      if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort);
     }
   }
 
@@ -368,22 +395,18 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
   // The guard: renewal loop, deadline, loss, release
   // -------------------------------------------------------------------------
 
-  function makeHeld(protocol: Protocol, key: Key, first: Attempt, opts: CallOptions): Held {
+  function makeHeld(protocol: Protocol, key: Key, first: Attempt, opts: CallOptions, holdMs: number): Held {
     const { grant } = first;
-    const controller = new AbortController();
-    const holdMs = opts.holdAtLeast === undefined ? 0 : parseDuration(opts.holdAtLeast);
-    const acquiredAt = scheduler.now();
-    const extendFn =
-      leased && protocol.extend !== undefined
-        ? (g: Grant, ttlMs: number) => protocol.extend?.(g, ttlMs) ?? Promise.resolve(false)
-        : undefined;
+    const callerSignal = opts.signal;
+    // Without a caller signal only a loss can abort it, so it is made when first read: most callbacks never read it.
+    let controller = callerSignal === undefined ? undefined : new AbortController();
+    const acquiredAt = holdMs > 0 ? scheduler.now() : 0;
     let deadline = leased ? first.sentAt + leaseMs : Number.POSITIVE_INFINITY;
     const firstDeadline = deadline;
     let ended: 'released' | 'lost' | undefined;
     let lostError: LockError | undefined;
     let beatTimer: SchedulerHandle | undefined;
     let deadlineTimer: SchedulerHandle | undefined;
-    let renewing: Promise<void> | undefined;
     let releasing: Promise<void> | undefined;
     // Removes the forwarder from the caller's signal. A long-lived signal (an app shutdown) must not collect one per hold.
     let detachCaller: (() => void) | undefined;
@@ -414,70 +437,19 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
         ...(cause === undefined ? {} : { cause }),
       });
       log.error('lock {key} lost ({detectedBy})', { key: keyField(key), detectedBy });
-      controller.abort(lostError);
+      controller?.abort(lostError);
     };
 
-    const armDeadline = (): void => {
-      if (deadlineTimer !== undefined) scheduler.clearTimeout(deadlineTimer);
-      if (!Number.isFinite(deadline)) return;
-      deadlineTimer = scheduler.setTimeout(
-        () => {
-          lose('deadline');
-        },
-        Math.max(0, deadline - scheduler.now()),
-        { ref: false },
-      );
-    };
-
-    const armBeat = (delayMs: number): void => {
-      if (extendFn === undefined || ended !== undefined) return;
-      // One chain only: an on-demand extend() replaces the pending beat.
-      if (beatTimer !== undefined) scheduler.clearTimeout(beatTimer);
-      beatTimer = scheduler.setTimeout(
-        () => {
-          beatTimer = undefined;
-          if (ended !== undefined || renewing !== undefined) return;
-          return renew();
-        },
-        delayMs,
-        { ref: false },
-      );
-    };
-
-    /** One renewal. Errors are logged and retried next beat until the deadline. */
-    const renew = (): Promise<void> => {
-      const run = (async (): Promise<void> => {
-        if (extendFn === undefined) return;
-        const sentAt = scheduler.now();
-        let ok: boolean;
-        try {
-          ok = await withStoreTimeout(extendFn(grant, leaseMs), storeTimeoutMs, 'extend', scheduler);
-        } catch (error) {
-          log.error(toError(error), { note: 'renewal failed; retrying until the deadline', key: keyField(key) });
-          armBeat(leaseMs / 3);
-          return;
-        }
-        if (ended !== undefined) {
-          // The lock was given up while the renewal was in flight: hand it back.
-          if (ok) await giveBack(protocol, grant, 'late renewal');
-          return;
-        }
-        if (!ok) {
-          lose('renewal');
-          return;
-        }
-        deadline = sentAt + leaseMs;
-        armDeadline();
-        armBeat(leaseMs / 3);
-      })();
-      renewing = run;
-      return run.finally(() => {
-        if (renewing === run) renewing = undefined;
-      });
+    const signalOf = (): AbortSignal => {
+      if (controller === undefined) {
+        controller = new AbortController();
+        if (lostError !== undefined) controller.abort(lostError);
+      }
+      return controller.signal;
     };
 
     const doRelease = async (): Promise<void> => {
-      const wait = Math.max(0, holdMs - (scheduler.now() - acquiredAt));
+      const wait = holdMs > 0 ? Math.max(0, holdMs - (scheduler.now() - acquiredAt)) : 0;
       if (wait > 0) {
         await new Promise<void>(resolve => {
           scheduler.setTimeout(resolve, wait, { ref: true });
@@ -488,7 +460,9 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
       stopTimers();
       let outcome;
       try {
-        outcome = await withStoreTimeout(protocol.release(grant), storeTimeoutMs, 'release', scheduler);
+        const raw = protocol.release(grant);
+        const first = await answerSoFar(raw);
+        outcome = first === NOT_YET ? await storeAnswer(raw, storeTimeoutMs, 'release', scheduler) : first;
       } catch (error) {
         throw asReleaseError(error);
       }
@@ -509,10 +483,94 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
       return releasing;
     };
 
-    const callerSignal = opts.signal;
+    // The lease machinery: a local deadline, and a renewal every ttl/3 when the store can extend. Hold stores skip it.
+    let renew: (() => Promise<void>) | undefined;
+    let extend: (() => Promise<void>) | undefined;
+    if (leased) {
+      const extendFn =
+        protocol.extend === undefined
+          ? undefined
+          : (g: Grant, ttlMs: number) => protocol.extend?.(g, ttlMs) ?? Promise.resolve(false);
+      let renewing: Promise<void> | undefined;
+
+      const armDeadline = (): void => {
+        if (deadlineTimer !== undefined) scheduler.clearTimeout(deadlineTimer);
+        if (!Number.isFinite(deadline)) return;
+        deadlineTimer = scheduler.setTimeout(
+          () => {
+            lose('deadline');
+          },
+          Math.max(0, deadline - scheduler.now()),
+          { ref: false },
+        );
+      };
+
+      const armBeat = (delayMs: number): void => {
+        if (extendFn === undefined || ended !== undefined) return;
+        // One chain only: an on-demand extend() replaces the pending beat.
+        if (beatTimer !== undefined) scheduler.clearTimeout(beatTimer);
+        beatTimer = scheduler.setTimeout(
+          () => {
+            beatTimer = undefined;
+            if (ended !== undefined || renewing !== undefined) return;
+            return renewOnce();
+          },
+          delayMs,
+          { ref: false },
+        );
+      };
+
+      /** One renewal. Errors are logged and retried next beat until the deadline. */
+      const renewOnce = (): Promise<void> => {
+        const run = (async (): Promise<void> => {
+          if (extendFn === undefined) return;
+          const sentAt = scheduler.now();
+          let ok: boolean;
+          try {
+            ok = await withStoreTimeout(extendFn(grant, leaseMs), storeTimeoutMs, 'extend', scheduler);
+          } catch (error) {
+            log.error(toError(error), { note: 'renewal failed; retrying until the deadline', key: keyField(key) });
+            armBeat(leaseMs / 3);
+            return;
+          }
+          if (ended !== undefined) {
+            // The lock was given up while the renewal was in flight: hand it back.
+            if (ok) await giveBack(protocol, grant, 'late renewal');
+            return;
+          }
+          if (!ok) {
+            lose('renewal');
+            return;
+          }
+          deadline = sentAt + leaseMs;
+          armDeadline();
+          armBeat(leaseMs / 3);
+        })();
+        renewing = run;
+        return run.finally(() => {
+          if (renewing === run) renewing = undefined;
+        });
+      };
+      renew = renewOnce;
+
+      if (extendFn !== undefined) {
+        extend = async (): Promise<void> => {
+          if (ended === 'lost' && lostError !== undefined) throw lostError;
+          if (renewing === undefined) {
+            await renewOnce();
+          } else {
+            await renewing;
+          }
+          if (ended === 'lost' && lostError !== undefined) throw lostError;
+        };
+      }
+      armDeadline();
+      armBeat(leaseMs / 3);
+    }
+
     if (callerSignal !== undefined) {
       const forward = (): void => {
-        controller.abort(callerSignal.reason);
+        controller?.abort(callerSignal.reason);
       };
       if (callerSignal.aborted) forward();
       else {
@@ -523,44 +581,34 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
       }
     }
 
-    const guard: GuardImpl = {
-      key,
-      signal: controller.signal,
-      get held() {
-        return ended === undefined && scheduler.now() < deadline;
-      },
-      fence: grant.fence,
-      get expiresAt() {
-        return grant.expiresAt === undefined ? undefined : grant.expiresAt + (deadline - firstDeadline);
-      },
-      ...(extendFn === undefined
-        ? {}
-        : {
-            extend: async (): Promise<void> => {
-              if (ended === 'lost' && lostError !== undefined) throw lostError;
-              if (renewing === undefined) {
-                await renew();
-              } else {
-                await renewing;
-              }
-              if (ended === 'lost' && lostError !== undefined) throw lostError;
-            },
-          }),
-      release,
-      [Symbol.asyncDispose]: release,
+    // The public view, built on demand: `run` never needs one.
+    let view: GuardImpl | undefined;
+    const guard = (): GuardImpl => {
+      view ??= {
+        key,
+        get signal() {
+          return signalOf();
+        },
+        get held() {
+          return ended === undefined && (deadline === Number.POSITIVE_INFINITY || scheduler.now() < deadline);
+        },
+        fence: grant.fence,
+        get expiresAt() {
+          return grant.expiresAt === undefined ? undefined : grant.expiresAt + (deadline - firstDeadline);
+        },
+        ...(extend === undefined ? {} : { extend }),
+        release,
+        [Symbol.asyncDispose]: release,
+      };
+      return view;
     };
 
     void grant.lost?.then(reason => {
       lose('connection', reason);
     });
     log.debug('acquired {key}', { key: keyField(key) });
-    if (leased) {
-      armDeadline();
-      armBeat(leaseMs / 3);
-    }
-    const left = first.sentAt + leaseMs - scheduler.now();
-    const renewNow = leased && left < leaseMs / 3 ? renew : undefined;
-    return { guard, lostError: () => lostError, ...(renewNow === undefined ? {} : { renewNow }) };
+    const renewNow = renew !== undefined && first.sentAt + leaseMs - scheduler.now() < leaseMs / 3 ? renew : undefined;
+    return { key, fence: grant.fence, signal: signalOf, release, lostError: () => lostError, guard, renewNow };
   }
 
   // -------------------------------------------------------------------------
@@ -574,6 +622,8 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     mode: 'try' | 'wait',
   ): Promise<Held | undefined> {
     const waitMs = mode === 'wait' && opts.wait !== undefined ? parseDuration(opts.wait) : undefined;
+    // Parsed before the store is asked: a bad value must fail with nothing held, not leak a grant.
+    const holdMs = opts.holdAtLeast === undefined ? 0 : parseDuration(opts.holdAtLeast);
     if (mode === 'wait' && store.guarantees.scope !== 'process' && waitMs === undefined && opts.signal === undefined) {
       throw new LockError({
         code: 'config',
@@ -587,19 +637,20 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     let session: Waiter | undefined;
     try {
       for (let attempt = 0; ; attempt++) {
-        const remaining = Math.max(0, limit - scheduler.now());
         const nativeWait =
-          mode === 'wait' && store.guarantees.wait === 'native' && Number.isFinite(remaining) ? remaining : undefined;
-        const got = await gated(key, () => attemptOnce(protocol, key, nativeWait, opts.signal));
+          mode === 'wait' && store.guarantees.wait === 'native' && Number.isFinite(limit)
+            ? Math.max(0, limit - scheduler.now())
+            : undefined;
+        const got = await gated(key, () => attemptOnce(protocol, key, nativeWait, opts.signal, session));
         if (got !== undefined) {
-          const held = makeHeld(protocol, key, got, opts);
+          const held = makeHeld(protocol, key, got, opts, holdMs);
           // A grant with less than ttl/3 left renews at once instead of waiting a beat.
           if (held.renewNow !== undefined) await held.renewNow();
           // Lost before the callback starts (refused, or past the deadline): never acquired.
           if (held.lostError() === undefined) return held;
         }
         if (mode === 'try') return undefined;
-        const left = limit - scheduler.now();
+        const left = Number.isFinite(limit) ? limit - scheduler.now() : limit;
         if (left <= 0) throw heldError();
         session ??= protocol.waiter?.(key);
         await pause(key, left, attempt, opts.signal, session);
@@ -614,16 +665,23 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
     fn: (ctx: ContextImpl) => T | Promise<T>,
     opts: CallOptions,
   ): Promise<Awaited<T>> {
-    const { guard } = held;
     let settled: Settled<Awaited<T>>;
     try {
-      settled = { ok: true, value: await fn({ signal: guard.signal, fence: guard.fence, key: guard.key }) };
+      const ctx: ContextImpl = {
+        // Read through, so a callback that never looks at the signal never makes one.
+        get signal() {
+          return held.signal();
+        },
+        fence: held.fence,
+        key: held.key,
+      };
+      settled = { ok: true, value: await fn(ctx) };
     } catch (error) {
       settled = { ok: false, error };
     }
     let releaseError: LockError | undefined;
     try {
-      await guard.release();
+      await held.release();
     } catch (error) {
       releaseError = asReleaseError(error);
     }
@@ -640,7 +698,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
       // Decision 4: the callback succeeded, so the value is returned. The failure is reported, not thrown.
       counts.releaseErrors += 1;
       log.error('release of {key} failed after a successful callback: {error}', {
-        key: keyField(guard.key),
+        key: keyField(held.key),
         error: releaseError,
       });
       try {
@@ -668,11 +726,11 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
       async acquire(opts = {}) {
         const held = await acquireHeld(protocolFor(opts), key, opts, 'wait');
         if (held === undefined) throw heldError();
-        return held.guard;
+        return held.guard();
       },
       async tryAcquire(opts = {}) {
         const held = await acquireHeld(protocolFor(opts), key, opts, 'try');
-        return held?.guard;
+        return held?.guard();
       },
     };
   }
@@ -680,6 +738,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
   const mutexProtocol: Protocol = {
     acquire: (key, req) => store.acquire(key, req),
     release: grant => store.release(grant),
+    waiter: key => store.waiter?.(key),
     ...(store.extend === undefined
       ? {}
       : { extend: (grant, ttlMs) => store.extend?.(grant, ttlMs) ?? Promise.resolve(false) }),
@@ -720,23 +779,23 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
 
   function semaphoreOver(ops: PermitOps): (name: string, config: SemaphoreConfig) => HandleImpl {
     return (name, config) => {
-      const parsedConfig = semaphoreConfigSchema.safeParse(config);
-      if (!parsedConfig.success) {
+      // A plain check per handle; only a refusal pays for the schema, which words the message.
+      const parsedConfig = isPermitCount(config.limit) ? undefined : semaphoreConfigSchema.safeParse(config);
+      if (parsedConfig !== undefined) {
         throw configError(
-          `semaphore limit ${parsedConfig.error.issues.map(issue => issue.message).join(', ')}`,
+          `semaphore limit ${parsedConfig.error?.issues.map(issue => issue.message).join(', ') ?? 'is invalid'}`,
           'Pass { limit } as a positive integer.',
         );
       }
-      const { limit } = parsedConfig.data;
+      const { limit } = config;
       return handleOver(createKey(namespace, name, 'semaphore'), opts => {
-        const parsedWeight = weightSchema.safeParse(opts.weight ?? 1);
-        if (!parsedWeight.success || parsedWeight.data > limit) {
+        const weight = opts.weight ?? 1;
+        if (!isPermitCount(weight) || weight > limit) {
           throw configError(
             `weight must be a positive integer of at most the limit (${limit})`,
             'Pass a smaller weight, or declare a larger limit.',
           );
         }
-        const weight = parsedWeight.data;
         return {
           acquire: (key, req) => ops.acquire(key, { ...req, limit, weight }),
           release: grant => ops.release(grant),

@@ -34,6 +34,10 @@ export const MAX_PERMITS = 2_147_483_647;
 export const limitSchema = z.number().int().positive().max(MAX_PERMITS);
 /** How many permits one hold takes: a positive integer. */
 export const weightSchema = z.number().int().positive().max(MAX_PERMITS);
+/** The rule of `limitSchema` and `weightSchema` as a plain check, for paths that run on every call. */
+export function isPermitCount(value: number): boolean {
+  return Number.isInteger(value) && value >= 1 && value <= MAX_PERMITS;
+}
 /** `storeTimeout` in milliseconds, at least 1. */
 export const storeTimeoutSchema = z.number().finite().min(1);
 /** What `semaphore(key, config)` takes. */
@@ -104,6 +108,11 @@ export type AcquireRequest = {
   /** Stores with `wait: 'native'`: block up to this long inside the store. Absent = one attempt. */
   readonly waitMs?: number;
   readonly signal?: AbortSignal;
+  /**
+   * The caller's wait (from `waiter()`), on its attempts after the first refusal. A store that
+   * hands a freed lock straight to a waiter grants it only to that waiter's attempt.
+   */
+  readonly waiter?: Waiter;
 };
 
 /** One attempt at `weight` of `limit` permits. The store persists `limit` and rejects a conflicting one with `config`. */
@@ -171,6 +180,8 @@ type StoreBase<G extends Guarantees> = {
   extend?(grant: Grant, ttlMs: number): Promise<boolean>;
   /** Optional wake-up hook. Without it the core backs off with full jitter, 50 ms to 1 s. */
   waitFor?(key: Key, signal: AbortSignal): Promise<void>;
+  /** Optional, like {@link PermitOps.waiter} for a mutex. The manager prefers it to `waitFor`. */
+  waiter?(key: Key): Waiter;
   readonly permits?: PermitOps;
   readonly shared?: SharedOps;
   dispose?(): Promise<void>;
