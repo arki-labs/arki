@@ -72,9 +72,17 @@ function isqrt(n: bigint): bigint {
   return x;
 }
 
-/** n = s²·r with r free of square factors below the trial limit. */
+/**
+ * n = s²·r. After trial division by every p ≤ L = 10⁴, the cofactor has only prime
+ * factors above L; below L³ = 10¹² it has at most two, so its only possible square
+ * is a whole perfect square, which the isqrt check takes out. r is therefore
+ * square-free whenever that cofactor is below 10¹²; above it, a square of two large
+ * primes can stay under the root (the value is still exact, only less reduced).
+ */
 function squarePart(n: bigint, ctx: Context): readonly [bigint, bigint] {
   let s = 1n;
+  // `small` collects the primes ≤ L left with exponent 1, so that `r` keeps only primes above L.
+  let small = 1n;
   let r = n;
   for (let p = 2n; p <= TRIAL_LIMIT && p * p <= r; p += p === 2n ? 1n : 2n) {
     ctx.budget.spend(1);
@@ -82,9 +90,13 @@ function squarePart(n: bigint, ctx: Context): readonly [bigint, bigint] {
       r /= p * p;
       s *= p;
     }
+    if (r % p === 0n) {
+      r /= p;
+      small *= p;
+    }
   }
   const root = isqrt(r);
-  return root * root === r ? [s * root, 1n] : [s, r];
+  return root * root === r ? [s * root, small] : [s, small * r];
 }
 
 /** The polynomial q with q² = p, if there is one (term by term, as in long division). */

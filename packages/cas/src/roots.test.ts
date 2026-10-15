@@ -121,6 +121,8 @@ describe('exactRoots over ℚ', () => {
     ['2x^2 - 7x + 3', ['1 / 2', '3'], true],
     ['x^2 - 2', ['-sqrt(2)', 'sqrt(2)'], true],
     ['x^2 - 8', ['-2 * sqrt(2)', '2 * sqrt(2)'], true],
+    // 10007 is a prime above the trial-division bound; its square must still come out from under the root.
+    ['x^2 - 200280098', ['-10007 * sqrt(2)', '10007 * sqrt(2)'], true],
     ['x^2 - x - 1', ['(-sqrt(5) + 1) / 2', '(sqrt(5) + 1) / 2'], true],
     ['x^2 + 4', ['-2 * i', '2 * i'], false],
     ['1000000*x^2 + 1', ['-i / 1000', 'i / 1000'], false],
