@@ -488,6 +488,42 @@ await run(payOrder, input);
 - A second journal uses Dot's `rename`: `rename(journal({ journal: reports }), { journal: 'reportsJournal' }, 'reports-journal')`.
 - An effect runs a command with `ctx.run` in both modes. It needs no closure over the journal.
 
+### A `defineFeature` feature
+
+A chain feature declares the same handlers by layer. The journal reads them from the feature value before anything boots and folds them into one declaration per feature, so `journal(...)` and `journalWorker()` work as above, for both feature forms side by side.
+
+```ts
+// features/orders/feature.ts
+export const core = defineFeature('orders')
+  .needs({ journal: service<AppJournal>(), db: database.provides.db })
+  .infra(mailer, journalProjections(customerStats)) // projections keep read models: infra
+  .usecases(createUsecases); // commands live here
+export const orders = core.entrypoints(rpc(ordersContract, procedures(os)), orderEffects(core));
+
+// features/orders/entrypoints/journal.ts — `import type` only
+export const orderEffects = (c: typeof core) => journalEffects(c, { effects: [orderMail], taps: [] });
+```
+
+- `journalProjections(...projections)` is an infra plugin that boots nothing; its unit is `<feature>/journal-projections`.
+- `journalEffects(core, { effects, taps })` is an entrypoint. An effect's needs come from the feature by name: a need alias, an infra service (the feature's private `mailer` above) or `usecases`. A missing one is a compile error at this call, and a boot error for callers that skip the types.
+- Duplicate names are refused across both forms, naming both features.
+- `dot explain --as journal-flow` lists which event starts which effect (`OrderPaid → order-mail`, owned by `orders`). It reads the effects' manifest actions; nothing extra is collected. It is the only way to see that paying an order sends a mail, short of reading every file.
+
+**The actor.** `actorRun(select)` from `@arki/journal/orpc` is a middleware that adds `context.run`, the journal's runner bound to the request's database and actor. The app's `select` says who the actor is; the journal assumes no session shape.
+
+```ts
+// core/orpc.ts
+export const asActor = actorRun((context: { session: Session | null; journal: AppJournal }) => {
+  if (!context.session) throw new ORPCError('UNAUTHORIZED');
+  return { actorId: context.session.user.id };
+});
+
+// a procedure, after the feature's bind(core) put `journal` and `db` on the context
+export const pay = o.pay.use(asActor).handler(({ context, input }) => context.run(payOrder, input));
+```
+
+The procedure must have `journal` and a `db` the journal can write through on its context, or `.use(asActor)` does not compile. Binding the actor is not authorization: the command still checks what the actor may do.
+
 ## Tables
 
 `journalTables()` returns both. The app's migrations create them (`drizzle-kit generate`). The library never creates tables at runtime.

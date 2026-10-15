@@ -26,7 +26,7 @@
 
 import type { AnyDefinedFeature } from './define-feature.js';
 import type { DotDiagnosticsSnapshot } from './diagnostics.js';
-import type { AnyFeature, Driven, Driver, PluginOf } from './feature.js';
+import type { AnyFeature, Driven, Driver, MountedFeature, PluginOf } from './feature.js';
 import type { DotLifecycleObserver } from './lifecycle-observer.js';
 import type { DotLifecycleState } from './lifecycle.js';
 import type { DotAppManifest } from './manifest.js';
@@ -333,8 +333,8 @@ type BuilderState = {
   appVersion?: string;
   /** A `Driven` is bound to the final feature list at build time. */
   plugins: (AnyPlugin | Driven)[];
-  /** The features mounted by `.features()` — what drivers are bound to. */
-  features: readonly AnyFeature[];
+  /** The features mounted by `.features()`, as written — what drivers are bound to. */
+  features: readonly MountedFeature[];
   config?: Readonly<Record<string, unknown>>;
   observers?: readonly DotLifecycleObserver[];
   hookTimeoutMs?: number;
@@ -405,28 +405,7 @@ function isDefinedFeature(f: AnyFeature | AnyDefinedFeature): f is AnyDefinedFea
   return 'plugins' in f && typeof f.plugins === 'function';
 }
 
-/**
- * Migration window (removed with the object form, RFC 2026-10-15 phase 5):
- * `driver(...)` / `driven(...)` adapters are still typed over the object-form
- * `AnyFeature`. A `defineFeature` feature reaches them through this view —
- * its entrypoints are its slices (same `key`, `actions`, `resolve`) and its
- * slice record is published under the same `feature.<name>` key, so
- * `sliceOf` and the adapters' `f.use` reads work unchanged.
- */
-function adapterView(f: AnyDefinedFeature): AnyFeature {
-  return {
-    name: f.name,
-    router: {},
-    repos: {},
-    use: f.entrypoints,
-    actions: [],
-    needs: {},
-    factories: {},
-    provides: f.provides,
-  };
-}
-
-function bindAdapter(adapter: AnyPlugin | Driver, features: readonly AnyFeature[]): AnyPlugin {
+function bindAdapter(adapter: AnyPlugin | Driver, features: readonly MountedFeature[]): AnyPlugin {
   const bound: AnyPlugin = 'bind' in adapter ? bindDriver(adapter, features) : adapter;
   return { ...bound, role: 'driving' };
 }
@@ -449,7 +428,8 @@ function makeBuilder<TAvail extends ServiceRecord>(state: BuilderState): DotAppB
             isDefinedFeature(f) ? f.plugins() : [{ ...(plug(f) as AnyPlugin), role: 'feature' }],
           ),
         ],
-        features: [...state.features, ...features.map(f => (isDefinedFeature(f) ? adapterView(f) : f))],
+        // Adapters read both forms through the descriptor protocol (`entrypointsOf`), so features pass as they are.
+        features: [...state.features, ...features],
       };
       return makeBuilder<ServiceRecord>(nextState);
     },

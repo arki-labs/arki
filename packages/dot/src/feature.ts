@@ -29,6 +29,7 @@
  * `.features()` turns each feature into a plugin; driving adapters are
  * `driver(...)` values that `.serve()` binds to the mounted feature list.
  */
+import type { AnyDefinedFeature } from './define-feature.js';
 import type {
   ActionSource,
   AnyFactories,
@@ -169,6 +170,23 @@ export type AnyFeature = {
   readonly boot?: (services: never) => MaybePromise<void>;
   readonly provides: Readonly<Record<string, AnyHandle>>;
 };
+
+/**
+ * A feature as an adapter sees it while both feature forms exist: an
+ * object-form `feature()` value or a `defineFeature` feature. Drivers and
+ * driven adapters receive these, as mounted. (Phase 5 of the RFC deletes the
+ * object form; this union then narrows to the chain form.)
+ */
+export type MountedFeature = AnyFeature | AnyDefinedFeature;
+
+/**
+ * The declarations a mounted feature hands its adapters: a chain feature's
+ * `entrypoints`, or an object-form feature's `use` slices. Same protocol
+ * (`key`, `actions`, `resolve`), so an adapter reads one list either way.
+ */
+export function entrypointsOf(f: MountedFeature): readonly AnyFeatureSlice[] {
+  return 'entrypoints' in f ? f.entrypoints : f.use;
+}
 
 /**
  * Declare a feature. Pure data capture — nothing executes here; the app
@@ -549,12 +567,12 @@ export function resolveNeeds<N extends NeedsShape>(bag: ServicesBag, needs: N): 
  */
 export type Driver<TNeeds extends ServiceRecord = ServiceRecord, TProvides extends ServiceRecord = ServiceRecord> = {
   readonly side: 'driving';
-  readonly bind: (features: readonly AnyFeature[]) => Plugin<TNeeds, TProvides>;
+  readonly bind: (features: readonly MountedFeature[]) => Plugin<TNeeds, TProvides>;
 };
 
 /** Author a driving adapter. `bind` receives the app's mounted features, in order. */
 export function driver<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(
-  bind: (features: readonly AnyFeature[]) => Plugin<TNeeds, TProvides>,
+  bind: (features: readonly MountedFeature[]) => Plugin<TNeeds, TProvides>,
 ): Driver<TNeeds, TProvides> {
   return { side: 'driving', bind };
 }
@@ -564,19 +582,29 @@ export function driver<TNeeds extends ServiceRecord, TProvides extends ServiceRe
  * journal composing every feature's `journalHandlers` slice so features can
  * write through it. `.use()` binds it when the app is built, to the final
  * feature list, and it boots BEFORE the features: it sees only their
- * declarations (`f.use` slice objects), never slice records —
- * {@link sliceOf} throws there.
+ * declarations ({@link entrypointsOf}, and a chain feature's `plugins()`),
+ * never slice records — {@link sliceOf} throws there.
  */
 export type Driven<TNeeds extends ServiceRecord = ServiceRecord, TProvides extends ServiceRecord = ServiceRecord> = {
   readonly side: 'driven';
-  readonly bind: (features: readonly AnyFeature[]) => Plugin<TNeeds, TProvides>;
+  readonly bind: (features: readonly MountedFeature[]) => Plugin<TNeeds, TProvides>;
 };
 
 /** Author a driven adapter that reads the features' declarations. */
 export function driven<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(
-  bind: (features: readonly AnyFeature[]) => Plugin<TNeeds, TProvides>,
+  bind: (features: readonly MountedFeature[]) => Plugin<TNeeds, TProvides>,
 ): Driven<TNeeds, TProvides> {
   return { side: 'driven', bind };
+}
+
+/** Where a feature publishes its slice record — the same key for both feature forms. */
+function sliceKeyOf(f: MountedFeature): `feature.${string}` {
+  return `feature.${f.name}`;
+}
+
+/** The slice record's token. Untyped on purpose: the adapter that minted each slice checks its payload. */
+function sliceTokenOf(f: MountedFeature): Token<Readonly<Record<string, unknown>>, string> {
+  return token<Readonly<Record<string, unknown>>>()(sliceKeyOf(f));
 }
 
 /**
@@ -584,9 +612,9 @@ export function driven<TNeeds extends ServiceRecord, TProvides extends ServiceRe
  * so the kernel hands it every slice record and `dot explain` draws the
  * feature → driver edges. Called by `.serve()`.
  */
-export function bindDriver(adapter: Driver, features: readonly AnyFeature[]): AnyPlugin {
+export function bindDriver(adapter: Driver, features: readonly MountedFeature[]): AnyPlugin {
   const bound = adapter.bind(features) as AnyPlugin;
-  const sliceNeeds = Object.fromEntries(features.map(f => [tokenOf(f).key, tokenOf(f)]));
+  const sliceNeeds = Object.fromEntries(features.map(f => [sliceKeyOf(f), sliceTokenOf(f)]));
   return { ...bound, needs: { ...sliceNeeds, ...bound.needs } };
 }
 
@@ -595,8 +623,8 @@ export function bindDriver(adapter: Driver, features: readonly AnyFeature[]): An
  * hooks. Values are untyped on purpose: the adapter that minted the slice
  * checks its own payload shape (`jobs()`, `schedules()`, `endpoints()`).
  */
-export function sliceOf(ctx: object, f: AnyFeature): Readonly<Record<string, unknown>> {
-  const key = tokenOf(f).key;
+export function sliceOf(ctx: object, f: MountedFeature): Readonly<Record<string, unknown>> {
+  const key = sliceKeyOf(f);
   const record: unknown = (ctx as Readonly<Record<string, unknown>>)[key];
   if (typeof record !== 'object' || record === null) {
     throw new FeatureError({

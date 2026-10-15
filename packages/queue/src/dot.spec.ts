@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
-import { feature } from '@arki/dot/feature';
+import { defineFeature, feature } from '@arki/dot/feature';
 import { DotLifecycleErrorCode, plugin, service } from '@arki/dot/plugin';
 
 import type { QueueClient } from './dot.ts';
@@ -286,6 +286,35 @@ describe('queueWorker() — the driving adapter', () => {
 
     await app.dispose();
     expect(stopped).toBe(1);
+  });
+
+  it("reads a defineFeature feature's jobs() entrypoint, next to an object-form feature", async () => {
+    // Why: during the migration an app mounts both forms. The worker must
+    // register both registries and claim the consumer side of both, before boot.
+    let registered: Record<string, unknown> | undefined;
+    const { fakeQ } = fakeBuilder({ ...idleInstance(), register: next => ((registered = next), done()) });
+    const encodeVideo = q.job
+      .name('video:encode')
+      .input(z.object({ videoId: z.string() }))
+      .handler(() => Promise.resolve({ ok: true }));
+    const media = defineFeature('media').entrypoints(jobs(q.registry({ encodeVideo })));
+
+    const app = await defineApp('mixed-worker')
+      .infra(dependency, queue({ connection: REDIS_URL }))
+      .features([orders, media])
+      .entrypoints(queueWorker({ q: fakeQ, needs: {}, blocking: true, context: () => ({ dependencyName: 'x' }) }))
+      .start();
+
+    expect(Object.keys(registered ?? {})).toEqual(['orders', 'media']);
+    expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual([
+      'orders:email:send.produce',
+      'orders:image:resize.produce',
+      'media:video:encode.produce',
+      'queue-worker:email:send.consume',
+      'queue-worker:image:resize.consume',
+      'queue-worker:video:encode.consume',
+    ]);
+    await app.dispose();
   });
 
   it('does not compile without the queue client it shares connection with', () => {

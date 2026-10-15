@@ -52,6 +52,11 @@
       "import": "./dist/orpc.js",
       "default": "./dist/orpc.js"
     },
+    "./projection": {
+      "types": "./dist/projection.d.ts",
+      "import": "./dist/projection.js",
+      "default": "./dist/projection.js"
+    },
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js",

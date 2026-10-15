@@ -1,13 +1,16 @@
 /**
- * `@orpc/server` adapter: what an oRPC client sees when a command fails.
+ * `@orpc/server` adapter: what an oRPC client sees when a command fails, and who runs it.
  *
  * - `toORPCError(error)` maps one error.
  * - `commandErrors()` is the middleware that maps whatever a procedure throws.
+ * - `actorRun(select)` is the middleware that puts `context.run`, bound to the request's
+ *   actor, on a procedure's context.
  *
  * `@orpc/server` is an optional peer. Import this module only in an app that
  * serves oRPC. May import `errors` only; this is the one file that may import
  * `@orpc/server`.
  */
+import type { IntersectPick } from '@orpc/server';
 import { ORPCError, os } from '@orpc/server';
 
 import { CommandError, isJournalError } from './errors.js';
@@ -55,5 +58,65 @@ export function commandErrors() {
     } catch (error) {
       throw toORPCError(error);
     }
+  });
+}
+
+/**
+ * The journal's door, as `actorRun` reads it off the context: `bind(source, meta)` returns a
+ * runner whose writes carry `meta`. Written structurally so any journal fits, whatever its
+ * meta schema, transaction and database types.
+ */
+type Door = { bind(source: never, meta: never): unknown };
+
+type DoorSource<J extends Door> = Parameters<J['bind']>[0];
+type DoorMeta<J extends Door> = Parameters<J['bind']>[1];
+type DoorRunner<J extends Door> = ReturnType<J['bind']>;
+
+/** What `actorRun` adds: `run`, the journal's runner for this request's actor. */
+export type RunContext<TContext extends { readonly journal: Door }> = { readonly run: DoorRunner<TContext['journal']> };
+
+/** What `actorRun` needs on the context besides what `select` reads: the database the journal opens transactions on. */
+export type ActorRunContext<TContext extends { readonly journal: Door }> = TContext & {
+  readonly db: DoorSource<TContext['journal']>;
+};
+
+/**
+ * Middleware that adds `context.run`: the journal's command runner, bound to the database
+ * and to the meta (`{ actorId }`, …) that `select` reads from the request.
+ *
+ * ```ts
+ * // app: core/orpc.ts — the app decides who the actor is; the journal assumes no session shape.
+ * export const asActor = actorRun((context: { session: Session | null; journal: AppJournal }) => {
+ *   if (!context.session) throw new ORPCError('UNAUTHORIZED');
+ *   return { actorId: context.session.user.id };
+ * });
+ *
+ * // a procedure, after the feature's `bind(core)` put `journal` and `db` on the context
+ * os.pay.use(asActor).handler(({ context, input }) => context.run(payOrder, input));
+ * ```
+ *
+ * The procedure must already have `journal` and `db` on its context — usually because the
+ * feature `needs` them, which also puts the feature → journal → db edges in `dot explain`.
+ * A procedure without them, or with a `db` the journal cannot write through, does not compile.
+ * Binding the actor is not authorization: the command still checks what the actor may do.
+ */
+export function actorRun<TContext extends { readonly journal: Door }>(
+  select: (context: TContext) => DoorMeta<TContext['journal']>,
+) {
+  return os.$context<ActorRunContext<TContext>>().middleware(({ context, next }) => {
+    // Erasure seam: `bind`'s parameter types are read from the journal type with `Parameters`,
+    // which TypeScript cannot relate back to the method while `TContext` is generic.
+    const door = context.journal as {
+      bind(
+        source: DoorSource<TContext['journal']>,
+        meta: DoorMeta<TContext['journal']>,
+      ): DoorRunner<TContext['journal']>;
+    };
+    const run = door.bind(context.db, select(context));
+    // Erasure seam: oRPC asks that a new context key agree with the current context
+    // (`IntersectPick`); `run` is new, but TypeScript cannot see that through a generic `TContext`.
+    return next({
+      context: { run } as RunContext<TContext> & IntersectPick<ActorRunContext<TContext>, RunContext<TContext>>,
+    });
   });
 }

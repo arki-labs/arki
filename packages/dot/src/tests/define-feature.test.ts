@@ -15,6 +15,7 @@ import {
   defineFeature,
   driven,
   driver,
+  entrypointsOf,
   feature,
   FEATURE_ERROR_CODES,
   resolveNeeds,
@@ -437,7 +438,7 @@ describe('defineApp: .infra() / .features() / .entrypoints()', () => {
       plugin({
         name: 'collector',
         boot: () => {
-          declared = features.flatMap(f => f.use.map(slice => `${f.name}:${slice.key}`));
+          declared = features.flatMap(f => entrypointsOf(f).map(slice => `${f.name}:${slice.key}`));
         },
       }),
     );

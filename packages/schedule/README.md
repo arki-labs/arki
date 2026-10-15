@@ -41,6 +41,30 @@ this context: keep one context type per app. A schedule no feature owns
 goes in `schedule({ schedules: [...] })`; it runs on the same runtime, so
 names must be unique across both.
 
+### Schedules of a `defineFeature` feature: `schedules(core, defs)`
+
+A chain feature lists its schedules in `.entrypoints(...)`. Pass the core, and
+each handler gets what every entrypoint of the feature gets — its needs, its
+private infra and `usecases` — typed with no annotation. The schedules file
+takes the core as a parameter (`import type`), so it never imports the
+feature at runtime:
+
+```ts
+// features/daily-digest/entrypoints/schedules.ts
+import type { core } from '../feature';
+
+export const digestSchedules = (c: typeof core) =>
+  schedules(c, [{ name: 'send-digest', cron: '*/15 * * * *', handler: ({ usecases }) => usecases.sendDue() }]);
+
+// features/daily-digest/feature.ts
+export const dailyDigest = core.entrypoints(digestSchedules(core));
+```
+
+A key the feature does not have (`({ db }) => …` when only its store needs
+`db`) is a compile error. Same options and rules as below; `schedule(...)` and
+`composeSchedules(...)` serve chain and object-form features side by side.
+Cron still decides _when_; the core decides _with what_.
+
 ### Feature-owned schedules: `schedules(needs, defs)`
 
 When a schedule belongs to one feature and works with that feature's
@@ -102,7 +126,7 @@ accepted.
 ### Typed triggers: `composeSchedules(features, scheduler)`
 
 `composeSchedules` turns the service into a client typed from the features'
-own `schedules(needs, defs)` declarations. An undeclared name is a compile
+own `schedules(needs | core, defs)` declarations, in either feature form. An undeclared name is a compile
 error, and a `ran` outcome's `value` is that handler's resolved return type:
 
 ```ts

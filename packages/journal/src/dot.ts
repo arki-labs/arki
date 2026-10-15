@@ -14,14 +14,22 @@
  * transaction. So the journal is composed with `services: 'worker'`, and the worker
  * gives the services when it runs a handler.
  *
+ * A `defineFeature` feature declares the same handlers by layer, and the journal folds
+ * them back into one declaration per feature before anything boots:
+ *
+ * - `journalProjections(...)` in `.infra(...)`: projections maintain the feature's read
+ *   models, so they sit with its other infra.
+ * - `journalEffects(core, { effects, taps })` in `.entrypoints(...)`: effects and taps
+ *   are ways the feature is reached (by an event instead of a request).
+ *
  * The app's `db` plugin must publish the root Drizzle database under the `db` key.
  * `@arki/dot` is an optional peer. Import this module only inside a Dot app.
  */
 import type { z } from 'zod';
 
-import type { AnyFeature, Driven, Driver } from '@arki/dot/feature';
+import type { AnyFeatureCore, DepsOf, Driven, Driver, MountedFeature } from '@arki/dot/feature';
 import type { EmptyShape, Plugin, Service } from '@arki/dot/plugin';
-import { driven, driver, sliceOf } from '@arki/dot/feature';
+import { driven, driver, entrypointsOf, sliceOf } from '@arki/dot/feature';
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
 import type { Journal, JournalDefinitions } from './api.js';
@@ -40,11 +48,12 @@ import type {
   TransactionSource,
   WakeListener,
 } from './types.js';
+import { JOURNAL_ACTION_META_SCHEMA } from './action-meta.js';
 import { debugWorker } from './debug.js';
 import { JournalError } from './errors.js';
 import { givenServices } from './handlers.js';
 
-export const JOURNAL_ACTION_META_SCHEMA = '@arki/journal/action-meta@1';
+export { JOURNAL_ACTION_META_SCHEMA } from './action-meta.js';
 
 export const JOURNAL_PLUGIN_ERROR_CODES = { badSlice: 'ARKI_JOURNAL_PLUGIN_E001' } as const;
 
@@ -126,18 +135,120 @@ export function journalHandlers<
     key: 'journal',
     actions: effects.map(effect => effectAction(effect)),
     handlers: { projections, effects, taps },
-    // The kernel hands the feature's services over untyped, so they are read by name here.
-    resolve: (services: unknown) => {
-      const given = isServices(services) ? services : {};
-      // Checked at the feature's boot, so a missing service never waits for the first job.
-      for (const effect of effects) givenServices('effect', effect, given);
-      for (const tap of taps) givenServices('tap', tap, given);
-      return { services: given };
-    },
+    resolve: resolveServices(effects, taps),
   };
 }
 
 const isServices = (value: unknown): value is Services => typeof value === 'object' && value !== null;
+
+/** The slice's boot step: hand the feature's services over, after checking each handler finds its own. */
+function resolveServices(
+  effects: readonly { readonly name: string; readonly needs: Needs }[],
+  taps: readonly { readonly name: string; readonly needs: Needs }[],
+): (services: unknown) => JournalSlicePayload {
+  // The kernel hands the feature's services over untyped, so they are read by name here.
+  return services => {
+    const given = isServices(services) ? services : {};
+    // Checked at the feature's boot, so a missing service never waits for the first job.
+    for (const effect of effects) givenServices('effect', effect, given);
+    for (const tap of taps) givenServices('tap', tap, given);
+    return { services: given };
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* defineFeature descriptors                                           */
+/* ------------------------------------------------------------------ */
+
+/** Marks the infra plugin `journalProjections(...)` makes, so the journal can find it among a feature's units. */
+export const JOURNAL_PROJECTIONS_KIND = 'journal-projections';
+
+/**
+ * What `journalProjections(...)` puts in a feature's `.infra(...)`: a plugin
+ * that boots nothing and provides nothing — its job is the static `handlers`
+ * the journal reads before boot.
+ */
+export type JournalProjectionsPlugin<Meta = unknown, Tx = DbHandle> = Plugin<EmptyShape, EmptyShape> & {
+  readonly kind: typeof JOURNAL_PROJECTIONS_KIND;
+  readonly handlers: {
+    readonly projections: readonly Projection<Meta, Tx>[];
+    readonly effects: readonly [];
+    readonly taps: readonly [];
+  };
+};
+
+/**
+ * A `defineFeature` feature's projections, for its `.infra(...)`:
+ * `defineFeature('orders').infra(store, journalProjections(customerStats))`.
+ *
+ * Projections run inside the write's transaction (or later, in the worker,
+ * when async) and get only the transaction, so they need no services. The
+ * unit shows in `dot explain` as `<feature>/journal-projections`.
+ */
+export function journalProjections<Meta = unknown, Tx = DbHandle>(
+  ...projections: readonly Projection<Meta, Tx>[]
+): JournalProjectionsPlugin<Meta, Tx> {
+  return {
+    ...plugin({ name: 'journal-projections', provides: {} }),
+    kind: JOURNAL_PROJECTIONS_KIND,
+    handlers: { projections, effects: [], taps: [] },
+  };
+}
+
+/** What `journalEffects(core, …)` puts in a feature's `.entrypoints(...)`. Same slice as `journalHandlers`, plus its `kind`. */
+export type JournalEffectsEntrypoint<Meta = unknown, AppDb = RootDb, TServices = unknown> = JournalFeatureSlice<
+  Meta,
+  DbHandle,
+  AppDb,
+  TServices
+> & { readonly kind: 'journal' };
+
+/** A named compile error when the feature lacks a service its effects or taps need. */
+type CoversNeeds<TDeps, TNeeded> = [TDeps] extends [TNeeded]
+  ? unknown
+  : {
+      readonly 'JOURNAL: the feature does not give these effects and taps what they need': Exclude<
+        keyof TNeeded,
+        keyof TDeps
+      >;
+    };
+
+/**
+ * A `defineFeature` feature's effects and taps, for its `.entrypoints(...)`:
+ *
+ * ```ts
+ * // entrypoints/journal.ts — `import type { core }` only
+ * export const orderEffects = (c: typeof core) => journalEffects(c, { effects: [orderMail] });
+ * ```
+ *
+ * An effect's needs (`j.effect(name, entity, { mailer: need<Mailer>() }, on)`)
+ * come from the feature, by name: a need alias, an infra service or `usecases`.
+ * A missing one is a compile error here, naming it, and fails the feature's
+ * boot for callers that skip the types. `journalWorker()` hands them over
+ * when it runs the handler. Each effect is one manifest action whose meta
+ * lists its events — what `dot explain --as journal-flow` draws.
+ */
+export function journalEffects<
+  C extends AnyFeatureCore,
+  Meta = unknown,
+  AppDb = RootDb,
+  const E extends readonly Effect<Meta, AppDb, unknown, Needs>[] = readonly [],
+  const T extends readonly Tap<Meta, AppDb, Needs>[] = readonly [],
+>(
+  _core: C,
+  handlers: { readonly effects?: E; readonly taps?: T } & CoversNeeds<DepsOf<C>, ServicesFor<E> & ServicesFor<T>>,
+): JournalEffectsEntrypoint<Meta, AppDb, ServicesFor<E> & ServicesFor<T>> {
+  // `_core` is a type witness; the feature hands its own services to `resolve` when it boots.
+  const effects: readonly Effect<Meta, AppDb, unknown, Needs>[] = handlers.effects ?? [];
+  const taps: readonly Tap<Meta, AppDb, Needs>[] = handlers.taps ?? [];
+  return {
+    kind: 'journal',
+    key: 'journal',
+    actions: effects.map(effect => effectAction(effect)),
+    handlers: { projections: [], effects, taps },
+    resolve: resolveServices(effects, taps),
+  };
+}
 
 /** Direct mode: the app composed the journal itself. */
 export type JournalDirectOptions<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb> = {
@@ -193,11 +304,12 @@ function isJournalDeclarations(value: unknown): value is JournalDeclarations {
   );
 }
 
-function badSlice(feature: AnyFeature, what: string): DotPluginError {
+function badSlice(feature: MountedFeature, what: string): DotPluginError {
   return new DotPluginError({
     code: JOURNAL_PLUGIN_ERROR_CODES.badSlice,
     message: `[journal] feature "${feature.name}" has a \`journal\` slice whose ${what}.`,
-    remediation: 'Declare the slice with journalHandlers({ projections, effects, taps }) from @arki/journal/dot.',
+    remediation:
+      'Declare handlers with journalHandlers({ projections, effects, taps }), journalEffects(core, { effects, taps }) or journalProjections(...) from @arki/journal/dot.',
     docsUrl: 'https://github.com/arki-labs/arki/blob/HEAD/packages/journal/docs/agent-guide.md#dot-boot-errors',
   });
 }
@@ -209,9 +321,9 @@ function badSlice(feature: AnyFeature, what: string): DotPluginError {
  */
 function claimName(
   kind: 'effect' | 'projection' | 'tap',
-  owners: Map<string, AnyFeature>,
+  owners: Map<string, MountedFeature>,
   name: string,
-  feature: AnyFeature,
+  feature: MountedFeature,
 ): void {
   const owner = owners.get(`${kind}:${name}`);
   if (owner !== undefined) {
@@ -222,36 +334,58 @@ function claimName(
   owners.set(`${kind}:${name}`, feature);
 }
 
+/** A `journalProjections(...)` unit among a chain feature's kernel units (its `kind` survives the feature's renaming). */
+function isProjectionsUnit(unit: object): unit is { readonly handlers: unknown } {
+  return 'kind' in unit && unit.kind === JOURNAL_PROJECTIONS_KIND && 'handlers' in unit;
+}
+
 /**
- * Read each feature's `journal` slice declarations, in feature order. Refuses a name
- * that is listed twice. `owners` maps `effect:<name>` and `tap:<name>` (and
- * `projection:<name>`) to the feature that lists it.
+ * Everything one feature hands the journal, wherever it was declared: the
+ * `journal` slice (`journalHandlers` in `use`, or `journalEffects` in
+ * `.entrypoints`) and any `journalProjections` unit in a chain feature's
+ * `.infra`. Read from the feature value, so it works before anything boots.
  */
-function readDeclarations(features: readonly AnyFeature[]): {
+function declaredBy(feature: MountedFeature): readonly unknown[] {
+  const declared: unknown[] = [];
+  const slice = entrypointsOf(feature).find(item => item.key === 'journal');
+  if (slice !== undefined) declared.push('handlers' in slice ? slice.handlers : undefined);
+  if ('plugins' in feature) {
+    for (const unit of feature.plugins()) if (isProjectionsUnit(unit)) declared.push(unit.handlers);
+  }
+  return declared;
+}
+
+/**
+ * Read each feature's journal declarations, in feature order, and fold them into
+ * one list per kind. Refuses a name that is listed twice. `owners` maps
+ * `effect:<name>` and `tap:<name>` (and `projection:<name>`) to the feature that lists it.
+ */
+function readDeclarations(features: readonly MountedFeature[]): {
   readonly declarations: JournalDeclarations;
-  readonly owners: ReadonlyMap<string, AnyFeature>;
+  readonly owners: ReadonlyMap<string, MountedFeature>;
 } {
   const projections: Projection[] = [];
   const effects: Effect<unknown, RootDb, unknown, Needs>[] = [];
   const taps: Tap<unknown, RootDb, Needs>[] = [];
-  const owners = new Map<string, AnyFeature>();
+  const owners = new Map<string, MountedFeature>();
   for (const feature of features) {
-    const slice = feature.use.find(item => item.key === 'journal');
-    if (slice === undefined) {
-      debugWorker.debug('[journal] feature "{featureName}" did not contribute a journal slice', {
+    const all = declaredBy(feature);
+    if (all.length === 0) {
+      debugWorker.debug('[journal] feature "{featureName}" did not contribute journal handlers', {
         featureName: feature.name,
       });
       continue;
     }
-    const declared: unknown = 'handlers' in slice ? slice.handlers : undefined;
-    if (!isJournalDeclarations(declared))
-      throw badSlice(feature, 'handlers are not lists of projections, effects and taps');
-    for (const { name } of declared.projections) claimName('projection', owners, name, feature);
-    for (const { name } of declared.effects) claimName('effect', owners, name, feature);
-    for (const { name } of declared.taps) claimName('tap', owners, name, feature);
-    projections.push(...declared.projections);
-    effects.push(...declared.effects);
-    taps.push(...declared.taps);
+    for (const declared of all) {
+      if (!isJournalDeclarations(declared))
+        throw badSlice(feature, 'handlers are not lists of projections, effects and taps');
+      for (const { name } of declared.projections) claimName('projection', owners, name, feature);
+      for (const { name } of declared.effects) claimName('effect', owners, name, feature);
+      for (const { name } of declared.taps) claimName('tap', owners, name, feature);
+      projections.push(...declared.projections);
+      effects.push(...declared.effects);
+      taps.push(...declared.taps);
+    }
   }
   return { declarations: { projections, effects, taps }, owners };
 }
@@ -268,6 +402,8 @@ function journalPlugin<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     configure(ctx) {
       ctx.registerService('journal', 'custom');
       ctx.declareProvides('journal');
+      // `dot explain --as journal-flow`: which event starts which effect, from the effects' action meta.
+      ctx.registerProjection({ format: 'journal-flow', binding: 'journal', module: '@arki/journal/projection' });
     },
     provides: { journal: () => build() },
   });
@@ -321,10 +457,10 @@ type WorkerHost = {
 };
 
 /** The services a feature's `journal` slice published at its boot. */
-function sliceServices(ctx: object, feature: AnyFeature): Services {
+function sliceServices(ctx: object, feature: MountedFeature): Services {
   const payload = sliceOf(ctx, feature).journal;
   if (typeof payload !== 'object' || payload === null || !('services' in payload) || !isServices(payload.services))
-    throw badSlice(feature, 'boot payload holds no services; it was not made by journalHandlers');
+    throw badSlice(feature, 'boot payload holds no services; it was not made by journalHandlers or journalEffects');
   return payload.services;
 }
 
@@ -344,9 +480,13 @@ export function journalWorker(
       needs: { db: service<RootDb>(), journal: service<WorkerHost>() },
       boot(ctx) {
         const { owners } = readDeclarations(features);
-        const byFeature = new Map<AnyFeature, Services>();
-        // Every owner listed a `journal` slice, so each has a slice record.
-        for (const feature of new Set(owners.values())) byFeature.set(feature, sliceServices(ctx, feature));
+        const byFeature = new Map<MountedFeature, Services>();
+        // An effect or tap came from a `journal` slice, so its owner has a slice record. A
+        // projection may come from an infra unit instead, and needs no services anyway.
+        for (const [handler, feature] of owners) {
+          if (handler.startsWith('projection:') || byFeature.has(feature)) continue;
+          byFeature.set(feature, sliceServices(ctx, feature));
+        }
         const services: HandlerServices = ({ kind, name }) => {
           const owner = owners.get(`${kind}:${name}`);
           return (owner === undefined ? undefined : byFeature.get(owner)) ?? {};

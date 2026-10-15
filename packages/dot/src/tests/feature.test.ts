@@ -17,6 +17,7 @@ import {
   composeRouter,
   driven,
   driver,
+  entrypointsOf,
   feature,
   FEATURE_ERROR_CODES,
   plug,
@@ -360,7 +361,7 @@ describe('a driven adapter that reads the features (.use(driven))', () => {
       name: 'registry',
       provides: {
         registry: () => ({
-          handlers: features.flatMap(f => f.use.map(s => `${f.name}:${s.key}`)),
+          handlers: features.flatMap(f => entrypointsOf(f).map(s => `${f.name}:${s.key}`)),
         }),
       },
     }),

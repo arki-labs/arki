@@ -240,6 +240,54 @@ const router = routerFor({ digest: digestContract }, [dailyDigest]);
 `.features()` takes `defineFeature` features and object-form `feature()`
 values side by side during the migration.
 
+Adapter authors: drivers and driven adapters receive the features as mounted
+(`MountedFeature` — either form). Read a feature's declarations with
+`entrypointsOf(f)` (its `entrypoints`, or the object form's `use`), its slice
+record with `sliceOf(ctx, f)`, and a chain feature's own units with
+`f.plugins()`.
+
+#### oRPC, contract first: `@arki/dot/orpc`
+
+`@orpc/server` is an optional peer; only this subpath loads it.
+
+```ts
+// core/orpc.ts — once per app
+import { needsMiddleware } from '@arki/dot/orpc';
+
+export type RequestContext = { session: Session | null; headers: Headers; services: ServicesBag };
+export const bind = needsMiddleware<RequestContext>();
+
+// features/daily-digest/feature.ts — the chain stays in one file
+export const core = defineFeature('daily-digest').needs({ plans }).infra(store).usecases(createUsecases);
+export const os = implement(digestContract).$context<RequestContext>().use(bind(core));
+export const dailyDigest = core.entrypoints(rpc(digestContract, procedures(os)));
+```
+
+```ts
+// features/daily-digest/entrypoints/procedures.ts — `import type`, so no runtime import back
+import type { os } from '../feature';
+
+export const procedures = (o: typeof os) => ({
+  preview: o.preview.use(authed).handler(({ context }) => context.usecases.preview(context.session.user.id)),
+});
+```
+
+- **`bind(core)`** puts the feature's needs, private infra and `usecases` on the
+  handler context, read from `context.services` by handle. The request context
+  holds request data only; what a handler may touch is declared once, in the
+  chain, where `dot explain` sees it. `context.db` does not compile when only
+  the store needs `db`. An alias equal to a request-context key does not
+  compile either; a handle missing from the bag throws `FEATURE_E005`, naming
+  the alias.
+- **`rpc(contract, router)`** takes the router only if it implements the
+  contract: a bare `os` router, a missing procedure or another contract's
+  router do not compile. `dailyDigest.contract` and `.router` come from it,
+  for `routerFor`.
+- **Procedures are a factory over `os`.** `typeof os` depends on the core,
+  never on the finished feature, so there is no type cycle; `import type` is
+  erased, so there is no module cycle (otherwise: `ReferenceError` at import,
+  the kind of cycle no amount of coffee fixes).
+
 ### Features and the hexagon (object form — removed when the migration to `defineFeature` ends)
 
 Domain modules are `feature()` values from `@arki/dot/feature`. A feature is

@@ -9,7 +9,7 @@
  * socket layer.
  */
 
-import { feature } from '@arki/dot/feature';
+import { defineFeature, feature } from '@arki/dot/feature';
 import { defineApp, service, token, plugin } from '@arki/dot/plugin';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -17,7 +17,7 @@ import { z } from 'zod';
 import type { RouteBundle } from '../bundle.js';
 import { endpoints, routes } from '../bundle.js';
 import { route } from '../contract.js';
-import { HTTP_PLUGIN_ERROR_CODES, http, registerRoutes } from '../dot.js';
+import { endpoints as coreEndpoints, HTTP_PLUGIN_ERROR_CODES, http, registerRoutes } from '../dot.js';
 import { HTTP_ERROR_CODES } from '../error.js';
 
 const listOrders = route.get('/orders', {
@@ -122,6 +122,52 @@ describe('http() plugin', () => {
     expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual(['orders:orders.list']);
 
     await app.dispose();
+  });
+
+  it("serves a defineFeature feature's endpoints(core, build) next to an object-form feature", async () => {
+    // Why: during the migration an app mounts both forms behind one route
+    // table, and the chain form's handlers reach private infra through usecases.
+    const store = plugin({
+      name: 'store',
+      needs: { ordersDb: service<OrdersDb>() },
+      provides: { store: ({ ordersDb }) => ({ all: () => ordersDb.list() }) },
+    });
+    const core = defineFeature('orders')
+      .infra(store)
+      .usecases(({ store }) => ({ list: () => store.all() }));
+    const orderRoutes = (c: typeof core) =>
+      coreEndpoints(c, ({ usecases }) => routes().bind(listOrders, () => usecases.list()), { contracts: [listOrders] });
+    const orders = core.entrypoints(orderRoutes(core));
+    const status = feature('status', {
+      actions: [health],
+      use: [endpoints(() => routes().bind(health, () => ({ ok: true })))],
+    });
+
+    const app = await defineApp('http-mixed')
+      .infra(ordersDbPlugin)
+      .features([orders, status])
+      .entrypoints(http({ port: 0 }))
+      .boot();
+
+    const { httpServer } = app.services;
+    const ordersRes = await httpServer.fetch(new Request('http://in-process/orders'));
+    const healthRes = await httpServer.fetch(new Request('http://in-process/health'));
+    expect(await ordersRes.json()).toEqual([{ id: 'o1' }]);
+    expect(await healthRes.json()).toEqual({ ok: true });
+    // The chain feature's route contracts are its actions, known before boot.
+    expect(app.manifest.actions.map(action => `${action.plugin}:${action.id}`)).toEqual([
+      'orders:orders.list',
+      'status:health.get',
+    ]);
+    await app.dispose();
+  });
+
+  it('types endpoints(core, build) services from the core', () => {
+    const core = defineFeature('typed').usecases(() => ({ ping: () => 'pong' }));
+    coreEndpoints(core, ({ usecases }) => routes().bind(health, () => ({ ok: usecases.ping() === 'pong' })));
+    // @ts-expect-error -- `ordersDb` is not a need, infra service or usecases of this feature
+    coreEndpoints(core, ({ ordersDb }) => routes().bind(listOrders, () => ordersDb.list()));
+    expect(true).toBe(true);
   });
 
   // Why http() belongs in `.serve()`: under `.use()` it would boot before

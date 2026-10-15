@@ -2,9 +2,10 @@
  * DOT adapter for `@arki/http` — the `http()` driving adapter.
  *
  * `http()` is a driver: `.serve(http(...))` binds it to the features the
- * app mounted, and it serves every feature's `routes` slice (declared with
- * `endpoints(...)` in the feature's `use` list). The app never lists its
- * features twice:
+ * app mounted, and it serves every feature's `routes` slice — declared with
+ * `endpoints(core, build)` from this module in a `defineFeature` feature's
+ * `.entrypoints(...)`, or with `endpoints(build)` from `@arki/http` in an
+ * object-form feature's `use` list. The app never lists its features twice:
  *
  * ```ts
  * import { defineApp } from '@arki/dot';
@@ -40,7 +41,7 @@
  * adapter only makes sense inside a DOT app.
  */
 
-import type { AnyFeature, Driver } from '@arki/dot/feature';
+import type { AnyFeatureCore, DepsOf, Driver, MountedFeature } from '@arki/dot/feature';
 import type { DotConfigureContext, EmptyShape, Plugin, Token } from '@arki/dot/plugin';
 import type { Lazy } from '@arki/ts';
 import { driver, sliceOf } from '@arki/dot/feature';
@@ -164,7 +165,7 @@ function isRouteBundle(value: unknown): value is RouteBundle {
 }
 
 /** The `routes` slice of one mounted feature, or `undefined` when it declares none. */
-function featureRoutes(ctx: object, f: AnyFeature): RouteBundle | undefined {
+function featureRoutes(ctx: object, f: MountedFeature): RouteBundle | undefined {
   const routes = sliceOf(ctx, f)['routes'];
   if (routes === undefined) return undefined;
   if (!isRouteBundle(routes)) {
@@ -180,6 +181,41 @@ function featureRoutes(ctx: object, f: AnyFeature): RouteBundle | undefined {
 
 function displayHost(hostname: string): string {
   return hostname === '0.0.0.0' || hostname === '::' ? 'localhost' : hostname;
+}
+
+/** What `endpoints(core, build)` hands `.entrypoints(...)`: the feature's route bundle, built at its boot. */
+export type EndpointsEntrypoint<TServices> = {
+  readonly kind: 'routes';
+  readonly key: 'routes';
+  /** The route contracts, for the manifest and `dot explain` — known before anything boots. */
+  readonly actions: readonly ContractLike[];
+  readonly resolve: (services: TServices) => RouteBundle;
+};
+
+/**
+ * Declare a `defineFeature` feature's HTTP surface, in its `.entrypoints(...)`.
+ * `build` runs once, at the feature's boot, with what every entrypoint gets —
+ * the feature's needs, its private infra and `usecases` — typed from the core,
+ * so a routes file of its own needs no annotation:
+ *
+ * ```ts
+ * // entrypoints/routes.ts — `import type { core }` only
+ * export const orderRoutes = (c: typeof core) =>
+ *   endpoints(c, ({ usecases }) => routes().bind(listOrders, () => usecases.list()), { contracts: [listOrders] });
+ * ```
+ *
+ * `contracts` are the route contracts the bundle binds; they join the
+ * manifest as the feature's actions (a chain feature has no `actions` list
+ * of its own). The `.serve(http(...))` driver collects the bundle under
+ * `routes`, exactly as for `endpoints(build)`.
+ */
+export function endpoints<C extends AnyFeatureCore>(
+  _core: C,
+  build: (services: DepsOf<C>) => RouteBundle,
+  options: { readonly contracts?: readonly ContractLike[] } = {},
+): EndpointsEntrypoint<DepsOf<C>> {
+  // `_core` is a type witness: the feature hands its own services to `resolve` when it boots.
+  return { kind: 'routes', key: 'routes', actions: options.contracts ?? [], resolve: build };
 }
 
 /**
@@ -217,7 +253,7 @@ function bindHttp(
   options: HttpOptions<readonly BundleToken[]>,
   bundleTokens: readonly BundleToken[],
   needs: Record<string, BundleToken>,
-  features: readonly AnyFeature[],
+  features: readonly MountedFeature[],
 ): Plugin<EmptyShape, HttpServices> {
   const state: PluginState = { tracked: undefined, handle: undefined };
   const gauge: InflightGauge = { count: 0, waiters: [] };

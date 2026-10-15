@@ -297,6 +297,11 @@ defineApp('shop-worker')
   producer actions (`<job>.produce`), and the worker declares the consumer
   actions (`<job>.consume`, `<schedule>.fire`). An API process never claims to
   consume a queue.
+- A `defineFeature` feature lists the same `jobs(...)` in its
+  `.entrypoints(...)`: `defineFeature('orders')….entrypoints(jobs({ sendReceipt }))`.
+  The worker reads chain and object-form features side by side. Job handlers
+  still get the worker's `context`, not the feature's services — a job may run
+  in a process where the feature never booted.
 
 ### Durable backend for `@arki/schedule`
 

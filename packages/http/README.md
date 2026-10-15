@@ -65,6 +65,32 @@ export const orders = feature('orders', {
 });
 ```
 
+A `defineFeature` feature uses `endpoints(core, build, { contracts })` from
+`@arki/http/dot`, in `.entrypoints(...)`. `build` gets what every entrypoint
+of the feature gets — needs, private infra and `usecases` — typed from the
+core, so the routes file needs no annotation and no runtime import of the
+feature. `contracts` are the feature's manifest actions (a chain feature has no
+`actions` list of its own):
+
+```ts
+// features/orders/entrypoints/routes.ts
+import { routes } from '@arki/http';
+import { endpoints } from '@arki/http/dot';
+
+import type { core } from '../feature';
+
+export const orderRoutes = (c: typeof core) =>
+  endpoints(c, ({ usecases }) => routes().bind(listOrders, ({ query }) => usecases.list(query)), {
+    contracts: [listOrders],
+  });
+
+// features/orders/feature.ts
+export const orders = core.entrypoints(orderRoutes(core));
+```
+
+`http()` serves both forms from one route table, in mount order. (Same
+routes, fewer places for them to hide.)
+
 `http()` is a driving adapter: mount it with `.serve()`, after the
 features. It serves the routes of every mounted feature, in mount order —
 the app lists its features once:

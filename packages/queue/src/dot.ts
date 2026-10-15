@@ -10,9 +10,9 @@
  * features the app mounted, so the app never lists them a second time.
  * `durableScheduler()` is the BullMQ backend `@arki/schedule` uses.
  */
-import type { AnyFeature, AnyFeatureSlice, Driver } from '@arki/dot/feature';
+import type { AnyFeatureSlice, Driver, MountedFeature } from '@arki/dot/feature';
 import type { CtxOf, EmptyShape, NeedsShape, Plugin, Service, WireNeeds } from '@arki/dot/plugin';
-import { driver, sliceOf } from '@arki/dot/feature';
+import { driver, entrypointsOf, sliceOf } from '@arki/dot/feature';
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
 import type { DurableScheduler, DurableSchedulerOptions } from './durable-scheduler.ts';
@@ -198,15 +198,20 @@ export function queueActions(registry: QueueRegistry): readonly QueueDotAction[]
  * the worker, which exists only in the process that runs the jobs.
  */
 export type QueueFeatureSlice<TRegistry extends QueueRegistry> = {
+  /** Lets a `defineFeature` feature list it in `.entrypoints(...)`; object-form features ignore it. */
+  readonly kind: 'queue';
   readonly key: 'queue';
   readonly actions: readonly QueueDotAction[];
   readonly registry: TRegistry;
   readonly resolve: (services: unknown) => TRegistry;
 };
 
-/** Declare a feature's jobs: `feature('orders', { use: [jobs(orderJobs)] })`. */
+/**
+ * Declare a feature's jobs: `defineFeature('orders')….entrypoints(jobs(orderJobs))`,
+ * or `feature('orders', { use: [jobs(orderJobs)] })` in the object form.
+ */
 export function jobs<const TRegistry extends QueueRegistry>(registry: TRegistry): QueueFeatureSlice<TRegistry> {
-  return { key: 'queue', actions: queueProducerActions(registry), registry, resolve: () => registry };
+  return { kind: 'queue', key: 'queue', actions: queueProducerActions(registry), registry, resolve: () => registry };
 }
 
 function isQueueRegistry(value: unknown): value is QueueRegistry {
@@ -218,17 +223,17 @@ function isJobsSlice(slice: AnyFeatureSlice): slice is AnyFeatureSlice & { reado
 }
 
 /** The jobs every feature declared, keyed by feature name — known before boot, for the manifest. */
-function declaredRegistry(features: readonly AnyFeature[]): QueueRegistry {
+function declaredRegistry(features: readonly MountedFeature[]): QueueRegistry {
   const registry: QueueRegistry = {};
   for (const f of features) {
-    const slice = f.use.find(candidate => isJobsSlice(candidate));
+    const slice = entrypointsOf(f).find(candidate => isJobsSlice(candidate));
     if (slice !== undefined) registry[f.name] = slice.registry;
   }
   return registry;
 }
 
 /** The jobs every booted feature published, read from its slice record. */
-function bootedRegistry(ctx: object, features: readonly AnyFeature[]): QueueRegistry {
+function bootedRegistry(ctx: object, features: readonly MountedFeature[]): QueueRegistry {
   const registry: QueueRegistry = {};
   for (const f of features) {
     const slice = sliceOf(ctx, f)['queue'];

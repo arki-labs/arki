@@ -48,6 +48,11 @@
       "import": "./dist/feature.js",
       "default": "./dist/feature.js"
     },
+    "./orpc": {
+      "types": "./dist/orpc.d.ts",
+      "import": "./dist/orpc.js",
+      "default": "./dist/orpc.js"
+    },
     "./package.json": "./package.json",
     "./cli": {
       "types": "./dist/cli/index.d.ts",
@@ -95,6 +100,14 @@
     "@opentelemetry/api": "catalog:opentelemetry",
     "zod": "catalog:"
   },
+  "peerDependencies": {
+    "@orpc/server": "catalog:backend"
+  },
+  "peerDependenciesMeta": {
+    "@orpc/server": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@arki/bench": "workspace:*",
     "@arki/eslint-config": "workspace:*",
@@ -102,6 +115,8 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
+    "@orpc/contract": "catalog:backend",
+    "@orpc/server": "catalog:backend",
     "@types/node": "catalog:node",
     "awilix": "^13.0.5",
     "typescript": "catalog:",
