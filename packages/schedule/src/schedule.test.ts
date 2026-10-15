@@ -3,15 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { feature } from '@arki/dot/feature';
 import { defineApp, plugin, service } from '@arki/dot/plugin';
 
+import type { DurableScheduler, DurableScheduleRegistration } from './runtime.js';
 import { DurableSchedules, schedule, scheduleActions, schedules } from './dot.js';
-import { ScheduleError, SCHEDULE_ERROR_CODES, defineSchedule, initSchedule } from './index.js';
+import { defineSchedule, initSchedule, SCHEDULE_ERROR_CODES, ScheduleError } from './index.js';
 import { project } from './projection.js';
-import {
-  createScheduleRuntime,
-  type DurableScheduleRegistration,
-  type DurableScheduler,
-  type KvLike,
-} from './runtime.js';
+import { createScheduleRuntime } from './runtime.js';
 
 function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
   let resolve: () => void = () => {};
@@ -70,7 +66,9 @@ describe('schedule DOT projection', () => {
       timezone: 'UTC',
       handler: async () => {},
     });
-    const app = defineApp('schedule-app').serve(schedule({ schedules: [daily], lock: lockThat(true) })).configure();
+    const app = defineApp('schedule-app')
+      .serve(schedule({ schedules: [daily] }))
+      .configure();
 
     expect(app.manifest.actions).toEqual([
       {
@@ -85,9 +83,10 @@ describe('schedule DOT projection', () => {
           cron: '0 2 * * *',
           timezone: 'UTC',
           overlap: 'skip',
-          locked: true,
+          locked: false,
           durable: false,
         },
+        summary: 'NO LOCK — runs on every replica',
       },
     ]);
     expect(app.manifest.projections).toEqual([
@@ -150,7 +149,10 @@ describe('schedule DOT projection', () => {
     const owner = feature('owner', { use: [schedules([plain])] });
 
     await expect(
-      defineApp('schedule-clash').features([owner]).serve(schedule({ schedules: [plain] })).boot(),
+      defineApp('schedule-clash')
+        .features([owner])
+        .serve(schedule({ schedules: [plain] }))
+        .boot(),
     ).rejects.toMatchObject({ cause: { code: SCHEDULE_ERROR_CODES.duplicateSchedule } });
   });
 
@@ -220,49 +222,6 @@ describe('schedule runtime', () => {
     expect(second).toEqual({ name: 'slow', status: 'skipped-overlap' });
   });
 
-  it('skips when another replica owns the lock', async () => {
-    const calls: string[] = [];
-    const locked = defineSchedule({
-      name: 'locked',
-      every: '1h',
-      handler: async () => {
-        calls.push('handler');
-      },
-    });
-    const runtime = createScheduleRuntime({ schedules: [locked], lock: lockThat(false) });
-
-    await expect(runtime.trigger('locked')).resolves.toEqual({ name: 'locked', status: 'skipped-lock' });
-    expect(runtime.lockSkips).toBe(1);
-    expect(runtime.lockErrors).toBe(0);
-    expect(calls).toEqual([]);
-  });
-
-  it('reports a broken lock store as lock-failed, not as a held lock', async () => {
-    const calls: string[] = [];
-    const locked = defineSchedule({
-      name: 'locked',
-      every: '1h',
-      handler: async () => {
-        calls.push('handler');
-      },
-    });
-    const brokenLock: KvLike = {
-      async setIfNotExists() {
-        throw new Error('redis down');
-      },
-    };
-    const runtime = createScheduleRuntime({ schedules: [locked], lock: brokenLock });
-
-    await expect(runtime.trigger('locked')).resolves.toEqual({
-      name: 'locked',
-      status: 'lock-failed',
-      cause: expect.objectContaining({ message: 'redis down' }),
-    });
-    expect(runtime.lockErrors).toBe(1);
-    expect(runtime.lockSkips).toBe(0);
-    expect(calls).toEqual([]);
-  });
-
   it('counts handler failures without throwing out of the timer loop', async () => {
     const failing = defineSchedule({
       name: 'failing',
@@ -312,14 +271,6 @@ describe('schedule runtime', () => {
     expect(stopped).toBe(true);
   });
 });
-
-function lockThat(acquired: boolean): KvLike {
-  return {
-    async setIfNotExists() {
-      return acquired;
-    },
-  };
-}
 
 type FakeDurableScheduler = DurableScheduler & {
   readonly registered: DurableScheduleRegistration[];
@@ -373,7 +324,13 @@ describe('durable schedules', () => {
 
   it('hands durable schedules to the backend and keeps the rest on in-process timers', async () => {
     const fake = fakeDurableScheduler();
-    const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', timezone: 'UTC', durable: true, handler: async () => {} });
+    const nightly = defineSchedule({
+      name: 'nightly',
+      cron: '0 3 * * *',
+      timezone: 'UTC',
+      durable: true,
+      handler: async () => {},
+    });
     const sweep = defineSchedule({ name: 'sweep', every: '5m', durable: true, handler: async () => {} });
     const local = defineSchedule({ name: 'local', every: '1h', handler: async () => {} });
     const runtime = createScheduleRuntime({ schedules: [nightly, sweep, local], durable: fake });
@@ -400,18 +357,17 @@ describe('durable schedules', () => {
         seen.push(ctx.tenant);
       },
     });
-    // A held lock would skip an in-process run; durable runs never ask for it.
+    // Durable runs reach one worker through the backend and take no lock.
     const runtime = createScheduleRuntime({
       schedules: [nightly],
       durable: fake,
-      lock: lockThat(false),
       createContext: () => ({ tenant: 'acme' }),
     });
 
     runtime.start();
     await expect(registration(fake, 'nightly').run()).resolves.toEqual({ name: 'nightly', status: 'ran' });
     expect(seen).toEqual(['acme']);
-    expect(runtime.lockSkips).toBe(0);
+    expect(runtime.lockContention).toBe(0);
     await runtime.stop();
   });
 
@@ -455,7 +411,11 @@ describe('durable schedules', () => {
   it('the Dot plugin fails boot with a coded error when a durable schedule has no backend', async () => {
     const nightly = defineSchedule({ name: 'nightly', cron: '0 3 * * *', durable: true, handler: async () => {} });
 
-    await expect(defineApp('durable-missing').serve(schedule({ schedules: [nightly] })).boot()).rejects.toMatchObject({
+    await expect(
+      defineApp('durable-missing')
+        .serve(schedule({ schedules: [nightly] }))
+        .boot(),
+    ).rejects.toMatchObject({
       cause: { code: SCHEDULE_ERROR_CODES.durableBackendMissing },
     });
   });
@@ -467,7 +427,10 @@ describe('durable schedules', () => {
     await expect(
       defineApp('durable-missing-feature').features([durableFeature]).serve(schedule({})).boot(),
     ).rejects.toMatchObject({
-      cause: { code: SCHEDULE_ERROR_CODES.durableBackendMissing, message: expect.stringContaining('"feature-nightly"') },
+      cause: {
+        code: SCHEDULE_ERROR_CODES.durableBackendMissing,
+        message: expect.stringContaining('"feature-nightly"'),
+      },
     });
   });
 

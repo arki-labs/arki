@@ -38,15 +38,12 @@ import type { CtxOf, EmptyShape, NeedsShape, Plugin, WireNeeds } from '@arki/dot
 import { driver, entrypointsOf, sliceOf } from '@arki/dot/feature';
 import { plugin, token } from '@arki/dot/plugin';
 
-import type { ScheduleDef, ScheduleInterval, Locker, ScheduleOverlap } from './index.js';
-import { ScheduleError, SCHEDULE_ERROR_CODES } from './errors.js';
-import { defineSchedule } from './index.js';
-import type { DurableScheduler, KvLike, ScheduleClock, ScheduleOutcome, ScheduleRuntime } from './runtime.js';
-import { assertDurableBackend, assertSingleClock, createScheduleRuntime } from './runtime.js';
-
+import type { LockDuration, Locker, ScheduleDef, ScheduleInterval, ScheduleOverlap, ScheduleRun } from './index.js';
+import type { DurableScheduler, ScheduleClock, ScheduleOutcome, ScheduleRuntime } from './runtime.js';
 import { SCHEDULE_ACTION_META_SCHEMA } from './action-meta.js';
-
-export { SCHEDULE_ACTION_META_SCHEMA };
+import { SCHEDULE_ERROR_CODES, ScheduleError } from './errors.js';
+import { DEFAULT_LOCK_HOLD_MS, defineSchedule, lockDurationMs } from './index.js';
+import { assertDurableBackend, assertSingleClock, createScheduleRuntime } from './runtime.js';
 
 type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 type JsonObject = { [key: string]: JsonValue };
@@ -102,7 +99,6 @@ type ScheduleBaseOptions<TContext> = {
    * bound features' `schedules(...)` slices; both run on one runtime.
    */
   readonly schedules?: readonly ScheduleDef<TContext>[];
-  readonly lock?: KvLike;
   readonly jitterMs?: number;
   /**
    * Who fires the schedules. Default `'internal'`: in-process timers (and
@@ -136,12 +132,11 @@ type ScheduleDurableOption<TDurable extends DurableSchedulesToken | undefined> =
 
 /** No `context`: every schedule — feature and app-level — takes no context. */
 export type ScheduleNoContextOptions<TDurable extends DurableSchedulesToken | undefined = undefined> =
-  & ScheduleBaseOptions<undefined>
-  & ScheduleDurableOption<TDurable>
-  & {
-    readonly needs?: never;
-    readonly context?: never;
-  };
+  ScheduleBaseOptions<undefined> &
+    ScheduleDurableOption<TDurable> & {
+      readonly needs?: never;
+      readonly context?: never;
+    };
 
 /**
  * With `context`: the value every handler receives, built at boot from
@@ -152,26 +147,78 @@ export type ScheduleOptions<
   TNeeds extends NeedsShape & NoReservedKeys,
   TContext,
   TDurable extends DurableSchedulesToken | undefined = undefined,
-> =
-  & ScheduleBaseOptions<TContext>
-  & ScheduleDurableOption<TDurable>
-  & {
+> = ScheduleBaseOptions<TContext> &
+  ScheduleDurableOption<TDurable> & {
     readonly needs?: TNeeds;
     readonly context: (services: CtxOf<TNeeds>) => TContext | Promise<TContext>;
   };
 
+/** What a locked schedule asks for, resolved: the key, and the minimum hold in milliseconds. */
+type LockPlan = { readonly key: string; readonly holdAtLeastMs: number; readonly locks?: Locker };
+
+/** `1000` -> `1s`, `1500` -> `1500ms`: the shortest whole unit, for manifest text. */
+function formatHold(ms: number): string {
+  if (ms >= 3_600_000 && ms % 3_600_000 === 0) return `${ms / 3_600_000}h`;
+  if (ms >= 60_000 && ms % 60_000 === 0) return `${ms / 60_000}m`;
+  if (ms >= 1000 && ms % 1000 === 0) return `${ms / 1000}s`;
+  return `${ms}ms`;
+}
+
+/**
+ * The manifest line for a locked schedule:
+ * `lock ns:key  [store · kind · scope · crash→x · fence y · hold≥1s]`. The
+ * `ns:` and the bracket appear only when the locker says its namespace and
+ * store. A declaration cannot say them (the locker exists only at boot), so
+ * the static action text has just `lock key`; boot completes it with the full
+ * line (`dot doctor` shows it).
+ */
+export function lockSummary(plan: LockPlan): string {
+  const { locks, key, holdAtLeastMs } = plan;
+  const name = locks?.namespace === undefined ? key : `${locks.namespace}:${key}`;
+  const store = locks?.store;
+  if (store === undefined) return `lock ${name}`;
+  const { kind, scope, fence, releasedOnCrash } = store.guarantees;
+  const parts = [
+    store.name,
+    kind,
+    scope,
+    `crash→${releasedOnCrash}`,
+    `fence ${fence === false ? 'none' : fence}`,
+    ...(holdAtLeastMs > 0 ? [`hold≥${formatHold(holdAtLeastMs)}`] : []),
+  ];
+  return `lock ${name}  [${parts.join(' · ')}]`;
+}
+
+/**
+ * What `dot explain` warns about an unlocked schedule. On the in-process
+ * clock every replica fires it; on the host's clock nothing fires on its own,
+ * but two triggers that overlap can both run.
+ */
+function noLockSummary(clock: ScheduleClock): string {
+  return clock === 'host' ? 'NO LOCK — overlapping triggers can both run' : 'NO LOCK — runs on every replica';
+}
+
 function actionForSchedule<TContext>(
   schedule: ScheduleDef<TContext>,
-  locked: boolean,
-  lockKey?: string,
+  clock: ScheduleClock,
+  declared?: LockPlan,
 ): ScheduleDotAction {
   const kind = schedule.cron === undefined ? 'every' : 'cron';
   const address = schedule.cron ?? schedule.every ?? '';
+  const plan: LockPlan | undefined =
+    declared ??
+    (schedule.lock === undefined
+      ? undefined
+      : { ...schedule.lock, holdAtLeastMs: schedule.lock.holdAtLeastMs ?? DEFAULT_LOCK_HOLD_MS });
+  // A durable run reaches one worker through its backend: no lock, nothing to warn about.
+  const summary = plan === undefined ? (schedule.durable ? undefined : noLockSummary(clock)) : lockSummary(plan);
+  const store = plan?.locks?.store;
   return {
     id: `${schedule.name}.fire`,
     binding: 'schedule',
     direction: 'in',
     address,
+    ...(summary === undefined ? {} : { summary }),
     metaSchema: SCHEDULE_ACTION_META_SCHEMA,
     meta: {
       kind,
@@ -179,9 +226,10 @@ function actionForSchedule<TContext>(
       ...(schedule.every === undefined ? {} : { every: schedule.every }),
       ...(schedule.timezone === undefined ? {} : { timezone: schedule.timezone }),
       overlap: schedule.overlap,
-      locked: locked || lockKey !== undefined,
+      locked: plan !== undefined,
       // The lock this schedule runs under, so `dot explain` shows which jobs exclude each other.
-      ...(lockKey === undefined ? {} : { lock: lockKey }),
+      ...(plan === undefined ? {} : { lock: plan.key, holdAtLeastMs: plan.holdAtLeastMs }),
+      ...(store === undefined ? {} : { lockStore: store.name }),
       durable: schedule.durable,
     },
   };
@@ -189,9 +237,9 @@ function actionForSchedule<TContext>(
 
 export function scheduleActions<TContext>(
   schedules: readonly ScheduleDef<TContext>[],
-  options: { readonly locked?: boolean } = {},
+  clock: ScheduleClock = 'internal',
 ): readonly ScheduleDotAction[] {
-  return schedules.map(definition => actionForSchedule(definition, options.locked ?? false));
+  return schedules.map(definition => actionForSchedule(definition, clock));
 }
 
 /** The `@arki/dot/feature` slice contract a `schedules(...)` declaration produces. */
@@ -205,8 +253,10 @@ export type ScheduleFeatureSlice<TContext> = {
 
 /** Exactly one of `cron` or `every`. */
 type FeatureScheduleTiming =
-  | { readonly cron: string; readonly every?: never }
-  | { readonly every: ScheduleInterval; readonly cron?: never };
+  { readonly cron: string; readonly every?: never } | { readonly every: ScheduleInterval; readonly cron?: never };
+
+/** The ways a feature schedule asks for a lock. */
+export type FeatureLockOption = true | string | { readonly key?: string; readonly holdAtLeast?: LockDuration };
 
 /**
  * One schedule a feature owns, written as a plain option object inside
@@ -222,17 +272,24 @@ export type FeatureScheduleOptions<TServices> = FeatureScheduleTiming & {
   /**
    * Keep this job to one replica at a time, for as long as it runs: `true`
    * locks on the schedule name, a string on that key (share one key to make
-   * two jobs exclude each other). A run that finds the lock held reports
-   * `skipped-lock`. The feature needs a `locks` service — mount
-   * `advisoryLocks(database.provides.db, { namespace })` from `@arki/db/dot`
-   * in its `.infra()` (a compile error otherwise).
+   * two jobs exclude each other), the object form sets `key` and
+   * `holdAtLeast`. A run that finds the lock held reports `skipped-lock`.
+   * The feature needs a `locks` service — mount
+   * `locks({ namespace, needs, store })` from `@arki/lock/dot` (a compile
+   * error otherwise).
+   *
+   * The lock stays held at least `holdAtLeast` (default `'1s'`, `0` turns it
+   * off). A job that ends in 10 ms would otherwise free the key at once, and
+   * a replica whose clock runs a little behind would start the same tick
+   * again. The hold applies on shutdown too: the app waits for the release.
    */
-  readonly lock?: true | string;
-  readonly handler: (services: TServices) => unknown;
+  readonly lock?: FeatureLockOption;
+  /** The second argument carries `run.lock` (`signal`, `fence`) when `lock` is declared. */
+  readonly handler: (services: TServices, run: ScheduleRun) => unknown;
 };
 
 /** Defs that declare `lock`. */
-type LockedDefs<D extends readonly unknown[]> = Extract<D[number], { readonly lock: true | string }>;
+type LockedDefs<D extends readonly unknown[]> = Extract<D[number], { readonly lock: FeatureLockOption }>;
 
 /** A `lock:` schedule needs a `locks` service among the handler's services. */
 type LockGuard<TServices, D extends readonly unknown[]> = [LockedDefs<D>] extends [never]
@@ -240,25 +297,28 @@ type LockGuard<TServices, D extends readonly unknown[]> = [LockedDefs<D>] extend
   : TServices extends { readonly locks: Locker }
     ? unknown
     : {
-        readonly 'SCHEDULE: a lock needs a `locks` service — add advisoryLocks(...) from @arki/db/dot to the feature': never;
+        readonly 'SCHEDULE: a lock needs a `locks` service — add locks({ namespace, needs, store }) from @arki/lock/dot to the app .infra(), or need it as `locks`': never;
       };
 
-/** The lock key a def asks for, if any: the schedule name for `true`. */
-function lockKeyOf(def: { readonly name: string; readonly lock?: true | string }): string | undefined {
-  if (def.lock === undefined) return undefined;
-  if (def.lock === true) return def.name.trim();
-  if (def.lock.trim() === '') {
+/** The lock a def asks for, if any: the schedule name for `true`, the default hold unless it sets one. */
+function lockPlanOf(def: { readonly name: string; readonly lock?: FeatureLockOption }): LockPlan | undefined {
+  const option = def.lock;
+  if (option === undefined) return undefined;
+  const requested = typeof option === 'object' ? option.key : option === true ? undefined : option;
+  const key = requested ?? def.name.trim();
+  if (key.trim() === '') {
     throw new ScheduleError({
       code: SCHEDULE_ERROR_CODES.invalidDefinition,
       message: `[schedule] schedule "${def.name}" has an empty lock key.`,
       remediation: 'Use lock: true to lock on the schedule name, or give a non-empty key.',
     });
   }
-  return def.lock;
+  const holdAtLeast = typeof option === 'object' ? option.holdAtLeast : undefined;
+  return { key, holdAtLeastMs: holdAtLeast === undefined ? DEFAULT_LOCK_HOLD_MS : lockDurationMs(holdAtLeast) };
 }
 
 function isLocker(value: unknown): value is Locker {
-  return typeof value === 'object' && value !== null && 'tryRun' in value && typeof value.tryRun === 'function';
+  return typeof value === 'object' && value !== null && 'mutex' in value && typeof value.mutex === 'function';
 }
 
 /** The feature's `locks` service, read at boot — a missing one fails the boot, not the first tick. */
@@ -269,7 +329,7 @@ function locksOf(services: unknown, schedule: string): Locker {
       code: SCHEDULE_ERROR_CODES.lockServiceMissing,
       message: `[schedule] schedule "${schedule}" declares a lock, but its feature has no "locks" service.`,
       remediation:
-        'Add advisoryLocks(database.provides.db, { namespace }) from @arki/db/dot to the feature .infra(), or need a shared one as `locks`.',
+        'Add locks({ namespace, needs, store }) from @arki/lock/dot to the app .infra(), or need it as `locks`.',
     });
   }
   return locks;
@@ -307,26 +367,39 @@ function validateFeatureSchedule<TServices>(def: FeatureScheduleOptions<TService
       remediation: 'Write the name exactly as callers will trigger it, without surrounding spaces.',
     });
   }
-  return defineSchedule<TServices>({ ...def, handler: services => Promise.resolve(def.handler(services)) });
+  return defineSchedule<TServices>({
+    ...def,
+    handler: (services, run) => Promise.resolve(def.handler(services, run)),
+  });
 }
 
 function featureOwnedSchedules<TServices, const TDefs extends readonly FeatureScheduleOptions<TServices>[]>(
   defs: TDefs,
 ): FeatureScheduleSlice<TDefs, TServices> {
   // Validated at declaration, like defineSchedule(): a bad cron fails at import.
-  const validated = defs.map(def => ({ definition: validateFeatureSchedule<TServices>(def), lockKey: lockKeyOf(def) }));
+  const validated = defs.map(def => ({
+    definition: validateFeatureSchedule<TServices>(def),
+    lockPlan: lockPlanOf(def),
+  }));
   return {
     kind: 'schedules',
     key: 'schedules',
-    actions: validated.map(({ definition, lockKey }) => actionForSchedule(definition, false, lockKey)),
+    // The driver's clock is not known yet: a host-clock driver rewrites the unlocked text at configure.
+    actions: validated.map(({ definition, lockPlan }) => actionForSchedule(definition, 'internal', lockPlan)),
     resolve: services =>
-      validated.map(({ definition, lockKey }) => ({
+      validated.map(({ definition, lockPlan }) => ({
         ...definition,
-        handler: () => definition.handler(services),
-        ...(lockKey === undefined ? {} : { lock: { key: lockKey, locks: locksOf(services, definition.name) } }),
+        handler: (_context, run) => definition.handler(services, run),
+        ...(lockPlan === undefined ? {} : { lock: boundLock(definition.name, lockPlan, services) }),
       })),
     definitions: defs,
   };
+}
+
+/** The plan joined to the feature's `locks` service. */
+function boundLock(schedule: string, plan: LockPlan, services: unknown): NonNullable<ScheduleDef<unknown>['lock']> {
+  const locks = locksOf(services, schedule);
+  return { key: plan.key, holdAtLeastMs: plan.holdAtLeastMs, locks };
 }
 
 function isScheduleDefList<TContext>(
@@ -363,11 +436,7 @@ export function schedules<N extends NeedsShape, const D extends readonly Feature
   needs: N,
   defs: D & LockGuard<CtxOf<N>, D>,
 ): FeatureScheduleSlice<D, CtxOf<N>>;
-export function schedules<
-  TContext,
-  N extends NeedsShape,
-  const D extends readonly FeatureScheduleOptions<CtxOf<N>>[],
->(
+export function schedules<TContext, N extends NeedsShape, const D extends readonly FeatureScheduleOptions<CtxOf<N>>[]>(
   needsOrDefs: N | AnyFeatureCore | readonly ScheduleDef<TContext>[],
   defs?: D,
 ): ScheduleFeatureSlice<TContext> | FeatureScheduleSlice<D, CtxOf<N>> {
@@ -423,6 +492,21 @@ function collectFeatureSchedules(ctx: object, features: readonly MountedFeature[
   return collected;
 }
 
+/** The ids of a `schedules` slice's actions that declare no lock and are not durable. */
+function unlockedActionIds(slice: AnyFeatureSlice): readonly string[] {
+  if (!('actions' in slice) || !Array.isArray(slice.actions)) return [];
+  return slice.actions.flatMap((action: unknown) =>
+    typeof action === 'object' &&
+    action !== null &&
+    'id' in action &&
+    typeof action.id === 'string' &&
+    'summary' in action &&
+    action.summary === noLockSummary('internal')
+      ? [action.id]
+      : [],
+  );
+}
+
 function schedulerService(clock: ScheduleClock, names: readonly string[], runtime: ScheduleRuntime): ScheduleService {
   const known = new Set(names);
   return {
@@ -460,7 +544,7 @@ export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
     ...options.needs,
     ...(options.durable === undefined ? {} : { [DURABLE_ALIAS]: options.durable }),
   };
-  const actions = scheduleActions(own, { locked: options.lock !== undefined });
+  const actions = scheduleActions(own, clock);
 
   return driver(features => {
     let runtime: ScheduleRuntime | undefined;
@@ -478,16 +562,37 @@ export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
           module: '@arki/schedule/projection',
         });
         ctx.declareProvides('schedule-runtime');
+        if (clock === 'host') {
+          // Feature schedules declared before the driver knew its clock: fix the unlocked warning.
+          for (const f of features) {
+            for (const slice of entrypointsOf(f)) {
+              for (const action of slice.key === 'schedules' ? unlockedActionIds(slice) : []) {
+                ctx.describeAction(action, { summary: noLockSummary(clock) });
+              }
+            }
+          }
+        }
       },
       provides: {
         scheduler: ctx => {
           const durable = durableBackend(ctx);
           const all: readonly ScheduleDef<TContext>[] = [...own, ...collectFeatureSchedules(ctx, features)];
+          for (const definition of all) {
+            const lock = definition.lock;
+            // A locker that can say its store lets the action show the whole line: `dot doctor` prints it.
+            if (lock?.locks.store === undefined) continue;
+            ctx.$describeAction(`${definition.name}.fire`, {
+              summary: lockSummary({
+                key: lock.key,
+                holdAtLeastMs: lock.holdAtLeastMs ?? DEFAULT_LOCK_HOLD_MS,
+                locks: lock.locks,
+              }),
+            });
+          }
           assertSingleClock(all, durable, clock);
           assertDurableBackend(all, durable);
           const shared = {
             clock,
-            ...(options.lock === undefined ? {} : { lock: options.lock }),
             ...(options.jitterMs === undefined ? {} : { jitterMs: options.jitterMs }),
             ...(durable === undefined ? {} : { durable }),
           };
@@ -505,7 +610,11 @@ export function schedule<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
                   createContext: () => context(ctx as CtxOf<TNeeds>),
                 });
           runtime = created;
-          return schedulerService(clock, all.map(definition => definition.name), created);
+          return schedulerService(
+            clock,
+            all.map(definition => definition.name),
+            created,
+          );
         },
       },
       start() {
@@ -614,4 +723,6 @@ export function composeSchedules<const TFeatures extends readonly MountedFeature
   };
 }
 
-export type { KvLike, ScheduleClock, ScheduleOutcome, ScheduleRuntime } from './runtime.js';
+export type { ScheduleClock, ScheduleOutcome, ScheduleRuntime } from './runtime.js';
+
+export { SCHEDULE_ACTION_META_SCHEMA } from './action-meta.js';

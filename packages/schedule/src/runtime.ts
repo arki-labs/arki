@@ -1,21 +1,16 @@
-
 import { Cron } from 'croner';
 
 import { getLogger } from '@arki/log';
 
-import type { ScheduleDef } from './index.js';
+import type { ScheduleDef, ScheduleLock } from './index.js';
 import { SCHEDULE_ERROR_CODES, ScheduleError } from './errors.js';
-import { parseEveryInterval } from './index.js';
+import { DEFAULT_LOCK_HOLD_MS, parseEveryInterval } from './index.js';
 
 const debugSchedule = getLogger('arki:schedule');
 const log = getLogger('arki:schedule');
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 type UnrefHandle = { unref(): void };
-
-export type KvLike = {
-  setIfNotExists<T = unknown>(key: string, value: T, expirationSeconds: number): Promise<boolean>;
-};
 
 /**
  * One durable schedule handed to a {@link DurableScheduler}. Exactly one of
@@ -54,7 +49,6 @@ export type ScheduleClock = 'internal' | 'host';
 
 type ScheduleRuntimeBaseOptions<TContext> = {
   readonly schedules: readonly ScheduleDef<TContext>[];
-  readonly lock?: KvLike;
   readonly jitterMs?: number;
   /** Backend for schedules declared with `durable: true`. Required when any exists. */
   readonly durable?: DurableScheduler;
@@ -101,9 +95,25 @@ export type ScheduleRuntime = {
    */
   trigger(name: string): Promise<ScheduleRunResult>;
   readonly handlerFailures: number;
-  readonly lockSkips: number;
-  readonly lockErrors: number;
+  /** Runs skipped because another holder had the lock (`skipped-lock`). */
+  readonly lockContention: number;
+  /** Runs that never started: the lock store failed taking the lock. */
+  readonly lockFailures: number;
+  /**
+   * Runs whose lock was lost during the run or the hold. Lost while the
+   * handler ran: `lock-failed`. Lost after it finished, during the hold: the
+   * handler's outcome stands.
+   */
+  readonly lockLost: number;
+  // A failed release is not counted here: `createLocks` logs it and counts it
+  // in its own `Locks.counters.releaseErrors` (and calls `onReleaseError`).
 };
+
+/** The `code` of a `LockError`-like failure, read without importing the lock library. */
+function lockErrorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
+  return typeof error.code === 'string' ? error.code : undefined;
+}
 
 function hasUnref(value: TimerHandle): value is TimerHandle & UnrefHandle {
   return 'unref' in value;
@@ -179,13 +189,6 @@ export function assertSingleClock<TContext>(
   });
 }
 
-function lockTtlSeconds<TContext>(schedule: ScheduleDef<TContext>): number {
-  if (schedule.every !== undefined) {
-    return Math.max(1, Math.ceil(parseEveryInterval(schedule.every) / 1000));
-  }
-  return 60;
-}
-
 export function createScheduleRuntime<TContext = undefined>(
   options: ScheduleRuntimeOptions<TContext>,
 ): ScheduleRuntime {
@@ -200,50 +203,34 @@ export function createScheduleRuntime<TContext = undefined>(
   const inflight = new Set<Promise<void>>();
   let stopped = false;
   let handlerFailures = 0;
-  let lockSkips = 0;
-  let lockErrors = 0;
+  let lockContention = 0;
+  let lockFailures = 0;
+  let lockLost = 0;
   let durableStarted = false;
-
-  type LockOutcome = { readonly kind: 'acquired' | 'held' } | { readonly kind: 'failed'; readonly cause: unknown };
-
-  async function acquireLock(schedule: ScheduleDef<TContext>): Promise<LockOutcome> {
-    // Durable runs need no lock: the backend hands each tick to one worker.
-    if (options.lock === undefined || schedule.durable) return { kind: 'acquired' };
-
-    try {
-      const acquired = await options.lock.setIfNotExists(
-        `schedule:lock:${schedule.name}`,
-        { acquiredAt: new Date().toISOString() },
-        lockTtlSeconds(schedule),
-      );
-      if (acquired) return { kind: 'acquired' };
-      lockSkips += 1;
-      return { kind: 'held' };
-    } catch (error) {
-      lockErrors += 1;
-      const message = error instanceof Error ? error.message : String(error);
-      debugSchedule.debug('[{scheduleName}] lock acquire failed: {failed}', {
-        scheduleName: schedule.name,
-        failed: message,
-      });
-      log.error('schedule lock acquire failed', { schedule: schedule.name, error: message });
-      return { kind: 'failed', cause: error };
-    }
-  }
 
   /**
    * A schedule with its own lock (`lock:` in `schedules(core, …)`): the lock
-   * is held for the whole handler, however long it runs. No KV lease here —
-   * a 60 s lease would expire under a long job and let a second replica in.
+   * is held for the whole handler, however long it runs, and for at least
+   * `holdAtLeastMs` (the store releases only after that). `tryRun` resolves
+   * after the release, so this run, and a shutdown drain waiting on it, end
+   * only then.
    */
   async function runExclusive(
     schedule: ScheduleDef<TContext>,
     lock: NonNullable<ScheduleDef<TContext>['lock']>,
   ): Promise<ScheduleRunResult> {
+    // Set once the handler has finished: from then on its outcome stands, even if the lock is lost in the hold.
+    let finished: ScheduleRunResult | undefined;
     try {
-      const locked = await lock.locks.tryRun(lock.key, () => runHandler(schedule));
+      const locked = await lock.locks.mutex(lock.key).tryRun(
+        async held => {
+          finished = await runHandler(schedule, held);
+          return finished;
+        },
+        { holdAtLeast: lock.holdAtLeastMs ?? DEFAULT_LOCK_HOLD_MS },
+      );
       if (locked.ran) return locked.value;
-      lockSkips += 1;
+      lockContention += 1;
       debugSchedule.debug('[{scheduleName}] lock {lockKey} is held elsewhere; skipped', {
         scheduleName: schedule.name,
         lockKey: lock.key,
@@ -251,8 +238,18 @@ export function createScheduleRuntime<TContext = undefined>(
       return { name: schedule.name, status: 'skipped-lock' };
     } catch (error) {
       // runHandler reports handler errors as `handler-failed` and never throws,
-      // so whatever lands here came from taking or releasing the lock.
-      lockErrors += 1;
+      // so whatever lands here came from taking, keeping or releasing the lock.
+      const code = lockErrorCode(error);
+      if (code === 'lost' && finished !== undefined) {
+        lockLost += 1;
+        log.warn('lock lost during the hold — another replica may run this tick', {
+          schedule: schedule.name,
+          lock: lock.key,
+        });
+        return finished;
+      }
+      if (code === 'lost') lockLost += 1;
+      else lockFailures += 1;
       const message = error instanceof Error ? error.message : String(error);
       log.error('schedule lock failed', { schedule: schedule.name, lock: lock.key, error: message });
       return { name: schedule.name, status: 'lock-failed', cause: error };
@@ -272,13 +269,6 @@ export function createScheduleRuntime<TContext = undefined>(
     running.set(schedule.name, active + 1);
     try {
       if (schedule.lock !== undefined) return await runExclusive(schedule, schedule.lock);
-      const lock = await acquireLock(schedule);
-      if (lock.kind === 'held') {
-        return { name: schedule.name, status: 'skipped-lock' };
-      }
-      if (lock.kind === 'failed') {
-        return { name: schedule.name, status: 'lock-failed', cause: lock.cause };
-      }
       return await runHandler(schedule);
     } finally {
       const nextActive = (running.get(schedule.name) ?? 1) - 1;
@@ -290,11 +280,14 @@ export function createScheduleRuntime<TContext = undefined>(
     }
   }
 
-  async function runHandler(schedule: ScheduleDef<TContext>): Promise<ScheduleRunResult> {
+  async function runHandler(schedule: ScheduleDef<TContext>, held?: ScheduleLock): Promise<ScheduleRunResult> {
     try {
       const scheduleContext =
         options.createContext === undefined ? (undefined as TContext) : await options.createContext();
-      const value = await schedule.handler(scheduleContext);
+      const value = await schedule.handler(
+        scheduleContext,
+        held === undefined ? {} : { lock: { signal: held.signal, fence: held.fence } },
+      );
       return { name: schedule.name, status: 'ran', value };
     } catch (error) {
       handlerFailures += 1;
@@ -426,11 +419,14 @@ export function createScheduleRuntime<TContext = undefined>(
     get handlerFailures() {
       return handlerFailures;
     },
-    get lockSkips() {
-      return lockSkips;
+    get lockContention() {
+      return lockContention;
     },
-    get lockErrors() {
-      return lockErrors;
+    get lockFailures() {
+      return lockFailures;
+    },
+    get lockLost() {
+      return lockLost;
     },
   };
 }

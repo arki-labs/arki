@@ -66,6 +66,7 @@
   "devDependencies": {
     "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/lock": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/queue": "workspace:*",
     "@arki/tsconfig": "workspace:*",

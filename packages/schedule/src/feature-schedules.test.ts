@@ -333,10 +333,7 @@ describe('overlap', () => {
         await gate.promise;
       },
     });
-    const runtime = createScheduleRuntime({
-      schedules: [slow],
-      lock: { setIfNotExists: () => Promise.resolve(true) },
-    });
+    const runtime = createScheduleRuntime({ schedules: [slow] });
 
     const both = Promise.all([runtime.trigger('slow'), runtime.trigger('slow')]);
     await Promise.resolve();
