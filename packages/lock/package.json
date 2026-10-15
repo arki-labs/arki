@@ -1,0 +1,163 @@
+{
+  "name": "@arki/lock",
+  "version": "0.0.1",
+  "private": false,
+  "description": "Distributed locks and semaphores — one API over memory, Postgres, Redis and file stores, with fencing-safe leases, bounded waits and abort signals.",
+  "keywords": [
+    "arki",
+    "typescript",
+    "lock",
+    "mutex",
+    "semaphore",
+    "distributed-lock",
+    "advisory-lock",
+    "postgres",
+    "redis"
+  ],
+  "homepage": "https://arki.dev",
+  "bugs": {
+    "url": "https://github.com/arki-labs/arki/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/lock"
+  },
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./memory": {
+      "types": "./dist/memory.d.ts",
+      "import": "./dist/memory.js",
+      "default": "./dist/memory.js"
+    },
+    "./pg": {
+      "types": "./dist/pg/index.d.ts",
+      "import": "./dist/pg/index.js",
+      "default": "./dist/pg/index.js"
+    },
+    "./pg/lease": {
+      "types": "./dist/pg/lease.d.ts",
+      "import": "./dist/pg/lease.js",
+      "default": "./dist/pg/lease.js"
+    },
+    "./redis": {
+      "types": "./dist/redis/index.d.ts",
+      "import": "./dist/redis/index.js",
+      "default": "./dist/redis/index.js"
+    },
+    "./file": {
+      "types": "./dist/file/index.d.ts",
+      "import": "./dist/file/index.js",
+      "default": "./dist/file/index.js"
+    },
+    "./dot": {
+      "types": "./dist/dot/index.d.ts",
+      "import": "./dist/dot/index.js",
+      "default": "./dist/dot/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js",
+      "default": "./dist/testing/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "!src/**/__tests__/**",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "scripts": {
+    "bench": "bun run build && arki-bench",
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "format": "prettier --check . --ignore-path ../../.gitignore",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:runtimes": "arki-runtimes",
+    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+  },
+  "arki": {
+    "runtimes": [
+      "node",
+      "bun",
+      "deno",
+      "browser",
+      "hermes"
+    ]
+  },
+  "prettier": "@arki/prettier-config",
+  "dependencies": {
+    "@arki/clock": "workspace:*",
+    "@arki/log": "workspace:*",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "@arki/dot": "workspace:*",
+    "drizzle-orm": "catalog:drizzle",
+    "fast-check": "catalog:",
+    "ioredis": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "@arki/dot": {
+      "optional": true
+    },
+    "drizzle-orm": {
+      "optional": true
+    },
+    "fast-check": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    },
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@arki/bench": "workspace:*",
+    "@arki/dot": "workspace:*",
+    "@arki/eslint-config": "workspace:*",
+    "@arki/library-tooling": "workspace:*",
+    "@arki/prettier-config": "workspace:*",
+    "@arki/testing": "workspace:*",
+    "@arki/tsconfig": "workspace:*",
+    "@arki/vitest-config": "workspace:*",
+    "@electric-sql/pglite": "catalog:",
+    "@testcontainers/postgresql": "catalog:testing",
+    "@types/node": "catalog:node",
+    "@types/pg": "catalog:drizzle",
+    "@types/proper-lockfile": "catalog:",
+    "async-mutex": "catalog:",
+    "drizzle-orm": "catalog:drizzle",
+    "fast-check": "catalog:",
+    "ioredis": "catalog:",
+    "p-limit": "catalog:",
+    "pg": "catalog:drizzle",
+    "pg-advisory-lock": "catalog:",
+    "postgres": "catalog:drizzle",
+    "proper-lockfile": "catalog:",
+    "redis-semaphore": "catalog:",
+    "redlock-universal": "catalog:",
+    "testcontainers": "catalog:testing",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
