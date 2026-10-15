@@ -1,7 +1,7 @@
 {
   "name": "@arki/expr",
   "version": "0.0.1",
-  "private": true,
+  "private": false,
   "description": "A safe expression language on @arki/math: a hand-written parser with a typed, versioned AST, host-registered functions, budgets on every input, and canonical printing.",
   "keywords": [
     "arki",

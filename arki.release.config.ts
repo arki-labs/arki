@@ -111,7 +111,9 @@ export const config: ReleaseConfig = {
       // `@arki/payments` joined 2026-10-13 (Stripe provider, plans, subscriptions,
       // refunds, dunning and tax on `@arki/journal` + `@arki/money`; user ids
       // come from `@arki/contracts`).
-      packages: ['@arki/money', '@arki/bench', '@arki/payments'],
+      // `@arki/expr` and `@arki/cas` joined 2026-10-15 (formula parsing and
+      // evaluation on `@arki/math`, and the bounded CAS on top of expr).
+      packages: ['@arki/money', '@arki/bench', '@arki/payments', '@arki/expr', '@arki/cas'],
     },
   ],
 };
