@@ -22,6 +22,9 @@
  * - `model/` imports no `usecases/`, `infra/` or `entrypoints/`, and no
  *   database runtime — except `model/tables.ts`, which declares tables.
  * - `usecases/` imports no `entrypoints/` (a usecase never knows how it is called).
+ * - `usecases/` makes no RUNTIME import of infra, database, drizzle, oRPC-server
+ *   or app-specific client modules (`arki-feature-layers/usecase-runtime-imports`).
+ *   `import type` is fine. Dependencies reach a usecase through the feature graph.
  *
  * The rules only look at layer folders and app-level files, so router-first
  * features (no layer folders yet) are not flagged while they wait to convert.
@@ -60,15 +63,89 @@ const CONTRACT_ONLY = {
     'A contract ships to the browser: import only @orpc/contract, zod / @arki/contracts and ../model/* (the app contract: ./features/<name>/entrypoints/contract).',
 };
 
+/**
+ * Banned runtime imports in usecases. Each one is a way to reach infra without
+ * the feature graph.
+ */
+// A feature's private plugins (store, clients) live in infra/.
+const USECASE_INFRA = '^\\.{1,2}/(.*/)?infra(/|$)';
+// The app's database / kv modules are infra even when they sit outside the feature.
+const USECASE_DB_KV = '^\\.{1,2}/(.*/)?(db|kv)(/.*)?$';
+// The app core's oRPC module builds implementers; a usecase is not a procedure.
+const USECASE_CORE_ORPC = '^\\.{1,2}/(.*/)?core/orpc$';
+// Database runtimes: a usecase asks a store, it does not run queries itself.
+const USECASE_DB_RUNTIME = '^(drizzle-orm(/.*)?|pg|postgres|@arki/db(/.*)?)$';
+// The oRPC server belongs to the entrypoints and the app core.
+const USECASE_ORPC_SERVER = '^@orpc/server(/.*)?$';
+
+const USECASE_BANNED = [USECASE_INFRA, USECASE_DB_KV, USECASE_CORE_ORPC, USECASE_DB_RUNTIME, USECASE_ORPC_SERVER];
+
+/**
+ * The TypeScript parser adds `importKind` / `exportKind` to import and export
+ * nodes and their specifiers; plain ESTree does not know them.
+ * @typedef {{ importKind?: string, exportKind?: string }} Kinded
+ */
+
+/** True when the declaration vanishes at build time (`import type`, or all specifiers are `type`). */
+const isTypeOnly = (
+  /** @type {Kinded & { specifiers?: readonly Kinded[] }} */ node,
+  /** @type {keyof Kinded} */ kind,
+) => node[kind] === 'type' || (node.specifiers !== undefined && node.specifiers.length > 0 && node.specifiers.every(s => s[kind] === 'type'));
+
+/**
+ * A custom rule, not `no-restricted-imports`: apps add their own
+ * `@typescript-eslint/no-restricted-imports` block for features after this
+ * preset, and in flat config a later block for the same rule replaces the
+ * earlier options. A rule with its own name cannot be switched off that way.
+ *
+ * @type {import('eslint').Rule.RuleModule}
+ */
+const usecaseRuntimeImports = {
+  meta: {
+    type: 'problem',
+    schema: [{ type: 'object', properties: { patterns: { type: 'array', items: { type: 'string' } } }, additionalProperties: false }],
+    messages: {
+      runtime:
+        'A usecase takes {{source}} through the feature graph (a need or a private infra plugin), never by a runtime import. `import type` is fine.',
+    },
+  },
+  create(context) {
+    const options = /** @type {{ patterns?: string[] } | undefined} */ (context.options[0]);
+    const banned = (options?.patterns ?? []).map((source) => new RegExp(source));
+    const check = (/** @type {import('estree').Node} */ node, /** @type {unknown} */ source) => {
+      if (typeof source !== 'string') return;
+      if (banned.some((re) => re.test(source))) context.report({ node, messageId: 'runtime', data: { source: `"${source}"` } });
+    };
+    return {
+      ImportDeclaration(node) {
+        if (!isTypeOnly(node, 'importKind')) check(node, node.source.value);
+      },
+      ExportNamedDeclaration(node) {
+        if (node.source && !isTypeOnly(node, 'exportKind')) check(node, node.source.value);
+      },
+      ExportAllDeclaration(node) {
+        if (!isTypeOnly(node, 'exportKind')) check(node, node.source.value);
+      },
+      ImportExpression(node) {
+        if (node.source.type === 'Literal') check(node, node.source.value);
+      },
+    };
+  },
+};
+
+const plugin = { rules: { 'usecase-runtime-imports': usecaseRuntimeImports } };
+
 const TESTS = ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**'];
 
 /**
- * @param {{ src?: string, legacy?: string[] }} [options]
+ * @param {{ src?: string, legacy?: string[], clients?: string[] }} [options]
  *   `src`: the backend's source folder (default `'src'`).
  *   `legacy`: app-level files that still build router-first procedures and
  *   may import `@orpc/server` until they are deleted (e.g. `['src/core/offline.ts']`).
+ *   `clients`: regex sources for app-specific external clients a usecase must take
+ *   through the graph, never by a runtime import (e.g. `['^stripe$', '^web-push$']`).
  */
-export function featureLayers({ src = 'src', legacy = [] } = {}) {
+export function featureLayers({ src = 'src', legacy = [], clients = [] } = {}) {
   const features = `${src}/features/*`;
   const contracts = [`${src}/contract.ts`, `${features}/entrypoints/contract.ts`];
   const serverAllowed = [`${src}/core/orpc.ts`, `${src}/root.ts`, `${src}/gateway.ts`];
@@ -99,7 +176,11 @@ export function featureLayers({ src = 'src', legacy = [] } = {}) {
       name: 'arki/feature-layers/usecases',
       files: [`${features}/usecases/**/*.ts`],
       ignores: TESTS,
-      rules: rule([SERVER, CONTRACT, USECASES_INWARD]),
+      plugins: { 'arki-feature-layers': plugin },
+      rules: {
+        ...rule([SERVER, CONTRACT, USECASES_INWARD]),
+        'arki-feature-layers/usecase-runtime-imports': ['error', { patterns: [...USECASE_BANNED, ...clients] }],
+      },
     },
     {
       name: 'arki/feature-layers/infra-entrypoints',

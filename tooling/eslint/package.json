@@ -12,6 +12,7 @@
   },
   "scripts": {
     "clean": "git clean -xdf .cache .cache .turbo node_modules",
+    "test": "node --test feature-layers.test.js",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "typecheck": "tsc --noEmit --skipLibCheck"
   },
