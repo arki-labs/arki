@@ -26,7 +26,7 @@
  */
 import { createHash } from 'node:crypto';
 import { watch } from 'node:fs';
-import { mkdir, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, rmdir, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import nodePath from 'node:path';
 import { pid } from 'node:process';
 import type { FSWatcher } from 'node:fs';
@@ -132,6 +132,20 @@ async function readOwner(path: string): Promise<Owner | undefined> {
 }
 
 /**
+ * Delete a lock directory. A lock holds one `owner` file, so `unlink` then
+ * `rmdir` is two calls where a recursive `rm` is four or more; anything
+ * unexpected in it falls back to the recursive form.
+ */
+async function removeLockDir(path: string): Promise<void> {
+  try {
+    await unlink(nodePath.join(path, 'owner'));
+    await rmdir(path);
+  } catch {
+    await rm(path, { recursive: true, force: true });
+  }
+}
+
+/**
  * Move the lock at `path` aside and delete it, if it is `owner`'s. Moving
  * first means a successor's lock is never deleted by path; if the move caught
  * someone else's lock after all, it is put back.
@@ -150,7 +164,7 @@ async function remove(path: string, owner: string, mover: string): Promise<boole
     await rename(dead, path).catch(ignore);
     return false;
   }
-  await rm(dead, { recursive: true, force: true });
+  await removeLockDir(dead);
   return true;
 }
 
@@ -207,7 +221,7 @@ export function fileStore(dir: string, options: FileStoreOptions = {}): FileStor
       await touch(building);
       await rename(building, path);
     } catch (error) {
-      await rm(building, { recursive: true, force: true });
+      await removeLockDir(building);
       if (hasCode(error, 'ENOTEMPTY', 'EEXIST')) return false;
       throw error;
     }
