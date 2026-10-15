@@ -10,6 +10,8 @@ export const SCHEDULE_ERROR_CODES = {
   durableWithHostClock: 'ARKI_SCHEDULE_E007',
   /** `composeSchedules` names a schedule the scheduler service does not run. */
   scheduleNotServed: 'ARKI_SCHEDULE_E008',
+  /** A schedule declared `lock`, but the feature has no `locks` service to take it from. */
+  lockServiceMissing: 'ARKI_SCHEDULE_E009',
 } as const;
 
 export class ScheduleError extends Error {

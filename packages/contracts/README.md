@@ -82,6 +82,64 @@ const strictSelect = createSelectSchema(users, {
 });
 ```
 
+### Prefixed ids: `defineId`
+
+Write the prefix once; the type, the schema and the generator come from it.
+
+```ts
+import { defineId, type IdOf } from '@arki/contracts';
+
+export const storyId = defineId('sty_');
+export type StoryId = IdOf<typeof storyId>; // `sty_${string}`
+
+storyId.schema.parse(input.id); // StoryId, or a ZodError for 'pod_…'
+storyId.create(); // 'sty_' + 24 random lowercase letters and digits
+storyId.is(value); // type guard
+```
+
+- **Browser-safe.** No Drizzle. A contract, a form and a client can import it.
+  On the server, `idColumns(storyId)` from `@arki/db/id` turns the same
+  declaration into columns.
+- **Stored prefixes stay as they are.** The prefix is used exactly as given
+  (letters, digits and `_`), so `defineId('hlgt_')` matches the rows already
+  stored.
+- **The generator uses Web Crypto** (`crypto.getRandomValues`): Node, Bun,
+  Deno and browsers have it; React Native needs a polyfill such as
+  `react-native-get-random-values`. There is no `Math.random` fallback — ids
+  end up in URLs, and guessable ones are a gift to the curious.
+
+`assertUniqueIdPrefixes(...ids)` checks one app's ids. The same prefix twice
+is a compile error (with literal prefixes) and throws; a prefix that starts
+another (`'sub'` and `'sub_'`) throws too, because `sub_abc` passes both
+schemas. Call it once in a test with every declaration of the app.
+
+### Keyset pagination: `keyset`, `pageInput`, `page`
+
+Declare how a list is ordered — once, in `model/` — and use it in the
+contract and (through `@arki/db/pagination`) in the repository:
+
+```ts
+import { keyset, page, pageInput } from '@arki/contracts';
+
+export const storyOrder = keyset({ createdAt: 'desc', id: 'desc' });
+
+export const listStories = oc
+  .input(pageInput(storyOrder).extend({ status: storyStatus.optional() })) // { cursor?, limit = 20 (max 100) }
+  .output(page(storySchema)); // { items, nextCursor: string | null }
+```
+
+- **Why keyset, not offset:** with `OFFSET`, a row added while someone reads
+  shifts every later page, so rows repeat or vanish. A cursor says "after this
+  row", which stays true.
+- **End the order on a unique key.** Rows with the same `createdAt` have no
+  order of their own; `id` breaks the tie.
+- **The cursor** is the last row's key values, base64url JSON — URL-safe,
+  opaque to clients, not secret. A `Date` comes back a `Date`. A cursor another
+  keyset made, or a hand-edited one, is rejected (`TypeError`; the
+  `pageInput` schema fails validation).
+- **"No more pages" is `nextCursor: null`**, decided by fetching one extra
+  row — never guessed from a short page.
+
 ## API
 
 Main entry, `@arki/contracts` (no Drizzle):
@@ -89,6 +147,8 @@ Main entry, `@arki/contracts` (no Drizzle):
 - `formData` — re-exported `zod-form-data` namespace.
 - `z`, `ZodError`, every Zod export — re-exported from `zod/v4`.
 - `UserId`, `userIdSchema` — shared id types.
+- `defineId(prefix)`, `IdOf<typeof id>`, `IdDeclaration`, `assertUniqueIdPrefixes(...ids)` — prefixed ids declared once.
+- `keyset(order)`, `pageInput(keyset, options?)`, `page(itemSchema)`, `Page<T>`, `Keyset`, `CursorValue` — keyset pagination.
 
 Drizzle entry, `@arki/contracts/drizzle`:
 

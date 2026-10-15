@@ -35,6 +35,20 @@ export type DefineScheduleOptions<TContext = undefined> =
       readonly cron?: never;
     });
 
+/**
+ * The lock port, and all a `lock:` schedule needs: `tryRun` runs `fn` only if
+ * nobody holds `key`, and holds `key` until `fn` settles. Nothing else — no
+ * TTL, lease or renewal — so any lock library can implement it without
+ * breaking callers. `advisoryLocks` from `@arki/db/dot` implements it on
+ * PostgreSQL. Structural, so this package needs no database.
+ */
+export type Locker = {
+  readonly tryRun: <T>(
+    key: string,
+    fn: () => Promise<T>,
+  ) => Promise<{ readonly ran: true; readonly value: T } | { readonly ran: false }>;
+};
+
 export type ScheduleDef<TContext = undefined> = {
   readonly name: string;
   readonly cron?: string;
@@ -43,6 +57,13 @@ export type ScheduleDef<TContext = undefined> = {
   readonly overlap: ScheduleOverlap;
   readonly durable: boolean;
   readonly handler: ScheduleHandler<TContext>;
+  /**
+   * Run only while holding `key` in `locks`; a run that finds it held is
+   * `skipped-lock`. Bound by `schedules(core, [{ lock }])` at boot. It
+   * replaces the driver's KV lease for this schedule: a lease expires after
+   * a fixed time, this lock when the job ends.
+   */
+  readonly lock?: { readonly key: string; readonly locks: Locker };
 };
 
 function invalid(message: string, cause?: unknown): ScheduleError {

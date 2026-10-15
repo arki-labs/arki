@@ -65,6 +65,36 @@ A key the feature does not have (`({ db }) => …` when only its store needs
 `composeSchedules(...)` serve chain and object-form features side by side.
 Cron still decides _when_; the core decides _with what_.
 
+### One replica at a time: `lock`
+
+```ts
+defineFeature('clustering')
+  .infra(advisoryLocks(database.provides.db, { namespace: 'avocabo' })) // from @arki/db/dot
+  .usecases(createUsecases);
+
+schedules(core, [
+  { name: 'cluster-assign', cron: '*/5 * * * *', lock: true, handler: ({ usecases }) => usecases.assign() },
+  { name: 'cluster-batch', cron: '0 */4 * * *', lock: 'clusters', handler: ({ usecases }) => usecases.recluster() },
+]);
+```
+
+- `lock: true` locks on the schedule name; `lock: 'key'` on that key (give
+  two jobs the same key to make them exclude each other).
+- The lock comes from the feature's `locks` service, typed by the tiny
+  `Locker` port: `{ tryRun(key, fn) → { ran: true, value } | { ran: false } }`.
+  `advisoryLocks` from `@arki/db/dot` implements it with a PostgreSQL advisory
+  lock held for as long as the handler runs; any other lock library can too. A schedule with
+  `lock` and no `locks` service is a compile error (and `ARKI_SCHEDULE_E009`
+  at boot for code that skips the types).
+- A run that finds the lock held reports `skipped-lock` and the handler never
+  starts; a lock that cannot be taken reports `lock-failed`; a handler that
+  throws inside the lock is still `handler-failed`.
+- These schedules skip the driver's KV lease (`schedule({ lock })`): a lease
+  expires after a fixed time, which a long job outlives.
+- The policy is in the manifest: the schedule's action meta carries
+  `locked: true` and `lock: '<key>'`, so `dot explain` shows which jobs
+  exclude each other. `overlap: 'skip'` still guards the process itself.
+
 ### Feature-owned schedules: `schedules(needs, defs)`
 
 When a schedule belongs to one feature and works with that feature's
@@ -236,7 +266,8 @@ Checked against BullMQ 6.3 (`node_modules/bullmq/dist/esm`):
 ### Overlap and locks
 
 Durable runs never take the KV lock: BullMQ gives each tick's job to one
-worker. Each process runs at most one tick of a schedule at a time. A run
+worker. Feature schedules with `lock:` never take it either: they run under
+their own lock for the whole handler (see "One replica at a time" above). Each process runs at most one tick of a schedule at a time. A run
 that outlasts its interval can still overlap the next tick on another
 replica, because the next tick is queued when the current one starts.
 

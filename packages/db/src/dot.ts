@@ -57,12 +57,14 @@ import type { AnyRelations, Logger } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 
-import type { EmptyShape, Plugin } from '@arki/dot/plugin';
+import type { EmptyShape, Plugin, Token } from '@arki/dot/plugin';
 import { plugin, service, DotPluginError } from '@arki/dot/plugin';
 
 import type { PgliteInitOptions } from './runtime-local.js';
+import type { LockableDb } from './lock.js';
 import { env } from './env.js';
 import { createDb } from './factory.js';
+import { advisoryLocks as createAdvisoryLocks } from './lock.js';
 import type { MigratableDb, MigrateDbOptions } from './migrate.js';
 import { migrateDb } from './migrate.js';
 import { initDbRuntimeLocal } from './runtime-local.js';
@@ -77,6 +79,10 @@ import { initDbRuntimeLocal } from './runtime-local.js';
 export const DB_PLUGIN_ERROR_CODES = {
   /** The `db` factory ran without a URL (`url` thunk or DB_URL, pg driver). */
   dbUrlNotConfigured: 'ARKI_DB_PLUGIN_E001',
+  /** `repos({ withTx: … })`: `withTx` is the rebinding helper on every repos set, not a repository name. */
+  reservedRepoName: 'ARKI_DB_PLUGIN_E002',
+  /** `reader(repo, ['x'])` named something that is not a method of the repository. */
+  readerNotAMethod: 'ARKI_DB_PLUGIN_E003',
 } as const;
 
 /**
@@ -233,5 +239,163 @@ export function dbMigrations<TRelations extends AnyRelations = AnyRelations>(
     async boot({ db }) {
       await migrateDb(db, options);
     },
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* repos() — a feature's repositories as one private infra plugin      */
+/* ------------------------------------------------------------------ */
+
+/** Repository factories by name: `{ highlights: createHighlightRepository }`, each `(database) => repository`. */
+export type RepoFactories = Readonly<Record<string, (database: never) => object>>;
+
+/**
+ * The database type the factories take, read from their own parameter
+ * (Avocabo: `Db | Transaction`). Written once — in the factories.
+ */
+export type DatabaseOf<F extends RepoFactories> = Parameters<F[keyof F]>[0];
+
+/** One repository per factory, all bound to the same database or transaction. */
+export type RepoSet<F extends RepoFactories> = { readonly [K in keyof F]: ReturnType<F[K]> };
+
+/**
+ * The `repos` service: the repositories bound to the app's database, plus
+ * `withTx(tx)` for the same set bound to a transaction.
+ */
+export type Repos<F extends RepoFactories> = RepoSet<F> & {
+  /**
+   * The same repositories bound to `tx`. Every call builds a fresh set
+   * (one small object per repository), so call it once per transaction and
+   * keep the result — not once per query. For a nested transaction, call it
+   * again on this `repos` with the inner `tx`; the set it returns has no
+   * `withTx` of its own.
+   */
+  withTx(tx: DatabaseOf<F>): RepoSet<F>;
+};
+
+/** Every factory must accept the one shared database type: a stricter factory fails at `repos()`. */
+type SameDatabase<F extends RepoFactories> = { readonly [K in keyof F]: (database: DatabaseOf<F>) => object };
+
+/** `withTx` belongs to the set; a repository with that name would be silently replaced by it. */
+type NoWithTx = { readonly withTx?: never };
+
+function bindAll<F extends RepoFactories>(factories: F, database: DatabaseOf<F>): RepoSet<F> {
+  const out: Record<string, object> = {};
+  // SameDatabase<F> proved at `repos()` that each factory takes `DatabaseOf<F>`.
+  for (const [key, make] of Object.entries(factories)) out[key] = make(database);
+  // Erasure seam: built key by key at runtime; typed by the factories' own return types.
+  return out as RepoSet<F>;
+}
+
+/**
+ * A feature's repositories as one infra plugin: built once at boot, bound to
+ * the database the handle names, published as `repos`. In the feature chain
+ * it becomes private (`highlights.repos`), and `dot explain` draws
+ * `highlights → highlights/repos → database`.
+ *
+ * - The database is explicit: pass the handle (`database.provides.db`, or a
+ *   second database's handle). Its type must be one the factories accept —
+ *   a compile error otherwise. Nothing is chosen by name behind your back.
+ * - `withTx` is reserved (compile error and `ARKI_DB_PLUGIN_E002`).
+ * - Tests replace the whole set: `feature.override({ repos })` takes a full
+ *   `Repos<F>`. See the README for fakes that type-check.
+ *
+ * @example
+ * ```ts
+ * // features/highlights/infra/repository.ts
+ * export const repository = repos(database.provides.db, {
+ *   highlights: (db: Database) => new HighlightRepository(db),
+ *   collections: createCollectionRepository,
+ * });
+ * // feature.ts
+ * defineFeature('highlights').infra(repository).usecases(({ repos }) => ({
+ *   list: (itemId: ItemId) => repos.highlights.listByItem(itemId),
+ * }));
+ * ```
+ */
+export function repos<K extends string, const F extends RepoFactories>(
+  database: Token<NoInfer<DatabaseOf<F>>, K>,
+  factories: F & SameDatabase<F> & NoWithTx,
+) {
+  if (Object.hasOwn(factories, 'withTx')) {
+    throw new DotPluginError({
+      code: DB_PLUGIN_ERROR_CODES.reservedRepoName,
+      message: '[repos] "withTx" is reserved: every repos set uses it to rebind to a transaction.',
+      remediation: 'Rename the repository (for example "transactions" or "txLog").',
+      docsUrl: 'https://arki.dev/dot/errors/arki-db-plugin-e002',
+    });
+  }
+  return plugin({
+    name: 'repos',
+    // The handle is the need: the kernel orders this plugin after the database
+    // that publishes it, and the app builder checks its type.
+    needs: { db: database },
+    provides: {
+      repos: ({ db }): Repos<F> => ({ ...bindAll(factories, db), withTx: (tx: DatabaseOf<F>) => bindAll(factories, tx) }),
+    },
+  });
+}
+
+/** The keys of `R` whose values are functions. */
+type MethodKeys<R> = { [K in keyof R]: R[K] extends (...args: never[]) => unknown ? K : never }[keyof R];
+
+/**
+ * Some methods of a repository, bound to it: what a feature hands other
+ * features instead of the whole repository (reads, not writes).
+ *
+ * Why bound: `{ get: repos.stories.get }` copies a class method off its
+ * object, and the first `this.db` inside it throws. `reader()` binds each one.
+ *
+ * @example
+ * ```ts
+ * .provides({ storyReader: ({ repos }) => reader(repos.stories, ['get', 'listByUser']) })
+ * ```
+ */
+export function reader<R extends object, const M extends readonly MethodKeys<R>[]>(
+  repository: R,
+  methods: M,
+): Pick<R, M[number]> {
+  const out: Record<PropertyKey, unknown> = {};
+  for (const name of methods) {
+    const method: unknown = repository[name];
+    if (typeof method !== 'function') {
+      throw new DotPluginError({
+        code: DB_PLUGIN_ERROR_CODES.readerNotAMethod,
+        message: `[repos] reader(): "${String(name)}" is not a method of the repository.`,
+        remediation: 'List only method names; publish plain values through provides() directly.',
+        docsUrl: 'https://arki.dev/dot/errors/arki-db-plugin-e003',
+      });
+    }
+    out[name] = method.bind(repository);
+  }
+  // Erasure seam: built name by name above; each value is the repository's own method, bound.
+  return out as Pick<R, M[number]>;
+}
+
+/* ------------------------------------------------------------------ */
+/* advisoryLocks() — PostgreSQL advisory locks as a service             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * PostgreSQL advisory locks on the database the handle names, published as
+ * `locks`. `schedules(core, [{ …, lock: true }])` from `@arki/schedule/dot`
+ * uses it to keep a job to one replica at a time, for as long as the job runs.
+ *
+ * @example
+ * ```ts
+ * defineFeature('clustering')
+ *   .infra(advisoryLocks(database.provides.db, { namespace: 'avocabo' }))
+ *   .usecases(createUsecases)
+ *   .entrypoints(schedules(core, [{ name: 'cluster-assign', cron: '*\/5 * * * *', lock: true, handler }]));
+ * ```
+ */
+export function advisoryLocks<K extends string>(
+  database: Token<LockableDb, K>,
+  options: { readonly namespace: string },
+) {
+  return plugin({
+    name: 'locks',
+    needs: { db: database },
+    provides: { locks: ({ db }) => createAdvisoryLocks(db, options) },
   });
 }

@@ -38,7 +38,7 @@ import type { CtxOf, EmptyShape, NeedsShape, Plugin, WireNeeds } from '@arki/dot
 import { driver, entrypointsOf, sliceOf } from '@arki/dot/feature';
 import { plugin, token } from '@arki/dot/plugin';
 
-import type { ScheduleDef, ScheduleInterval, ScheduleOverlap } from './index.js';
+import type { ScheduleDef, ScheduleInterval, Locker, ScheduleOverlap } from './index.js';
 import { ScheduleError, SCHEDULE_ERROR_CODES } from './errors.js';
 import { defineSchedule } from './index.js';
 import type { DurableScheduler, KvLike, ScheduleClock, ScheduleOutcome, ScheduleRuntime } from './runtime.js';
@@ -160,7 +160,11 @@ export type ScheduleOptions<
     readonly context: (services: CtxOf<TNeeds>) => TContext | Promise<TContext>;
   };
 
-function actionForSchedule<TContext>(schedule: ScheduleDef<TContext>, locked: boolean): ScheduleDotAction {
+function actionForSchedule<TContext>(
+  schedule: ScheduleDef<TContext>,
+  locked: boolean,
+  lockKey?: string,
+): ScheduleDotAction {
   const kind = schedule.cron === undefined ? 'every' : 'cron';
   const address = schedule.cron ?? schedule.every ?? '';
   return {
@@ -175,7 +179,9 @@ function actionForSchedule<TContext>(schedule: ScheduleDef<TContext>, locked: bo
       ...(schedule.every === undefined ? {} : { every: schedule.every }),
       ...(schedule.timezone === undefined ? {} : { timezone: schedule.timezone }),
       overlap: schedule.overlap,
-      locked,
+      locked: locked || lockKey !== undefined,
+      // The lock this schedule runs under, so `dot explain` shows which jobs exclude each other.
+      ...(lockKey === undefined ? {} : { lock: lockKey }),
       durable: schedule.durable,
     },
   };
@@ -213,8 +219,61 @@ export type FeatureScheduleOptions<TServices> = FeatureScheduleTiming & {
   readonly timezone?: string;
   readonly overlap?: ScheduleOverlap;
   readonly durable?: false;
+  /**
+   * Keep this job to one replica at a time, for as long as it runs: `true`
+   * locks on the schedule name, a string on that key (share one key to make
+   * two jobs exclude each other). A run that finds the lock held reports
+   * `skipped-lock`. The feature needs a `locks` service — mount
+   * `advisoryLocks(database.provides.db, { namespace })` from `@arki/db/dot`
+   * in its `.infra()` (a compile error otherwise).
+   */
+  readonly lock?: true | string;
   readonly handler: (services: TServices) => unknown;
 };
+
+/** Defs that declare `lock`. */
+type LockedDefs<D extends readonly unknown[]> = Extract<D[number], { readonly lock: true | string }>;
+
+/** A `lock:` schedule needs a `locks` service among the handler's services. */
+type LockGuard<TServices, D extends readonly unknown[]> = [LockedDefs<D>] extends [never]
+  ? unknown
+  : TServices extends { readonly locks: Locker }
+    ? unknown
+    : {
+        readonly 'SCHEDULE: a lock needs a `locks` service — add advisoryLocks(...) from @arki/db/dot to the feature': never;
+      };
+
+/** The lock key a def asks for, if any: the schedule name for `true`. */
+function lockKeyOf(def: { readonly name: string; readonly lock?: true | string }): string | undefined {
+  if (def.lock === undefined) return undefined;
+  if (def.lock === true) return def.name.trim();
+  if (def.lock.trim() === '') {
+    throw new ScheduleError({
+      code: SCHEDULE_ERROR_CODES.invalidDefinition,
+      message: `[schedule] schedule "${def.name}" has an empty lock key.`,
+      remediation: 'Use lock: true to lock on the schedule name, or give a non-empty key.',
+    });
+  }
+  return def.lock;
+}
+
+function isLocker(value: unknown): value is Locker {
+  return typeof value === 'object' && value !== null && 'tryRun' in value && typeof value.tryRun === 'function';
+}
+
+/** The feature's `locks` service, read at boot — a missing one fails the boot, not the first tick. */
+function locksOf(services: unknown, schedule: string): Locker {
+  const locks: unknown = typeof services === 'object' && services !== null ? Reflect.get(services, 'locks') : undefined;
+  if (!isLocker(locks)) {
+    throw new ScheduleError({
+      code: SCHEDULE_ERROR_CODES.lockServiceMissing,
+      message: `[schedule] schedule "${schedule}" declares a lock, but its feature has no "locks" service.`,
+      remediation:
+        'Add advisoryLocks(database.provides.db, { namespace }) from @arki/db/dot to the feature .infra(), or need a shared one as `locks`.',
+    });
+  }
+  return locks;
+}
 
 /**
  * The slice `schedules(needs, defs)` produces. `resolve` binds each
@@ -255,13 +314,17 @@ function featureOwnedSchedules<TServices, const TDefs extends readonly FeatureSc
   defs: TDefs,
 ): FeatureScheduleSlice<TDefs, TServices> {
   // Validated at declaration, like defineSchedule(): a bad cron fails at import.
-  const validated = defs.map(def => validateFeatureSchedule<TServices>(def));
+  const validated = defs.map(def => ({ definition: validateFeatureSchedule<TServices>(def), lockKey: lockKeyOf(def) }));
   return {
     kind: 'schedules',
     key: 'schedules',
-    actions: scheduleActions(validated),
+    actions: validated.map(({ definition, lockKey }) => actionForSchedule(definition, false, lockKey)),
     resolve: services =>
-      validated.map(definition => ({ ...definition, handler: () => definition.handler(services) })),
+      validated.map(({ definition, lockKey }) => ({
+        ...definition,
+        handler: () => definition.handler(services),
+        ...(lockKey === undefined ? {} : { lock: { key: lockKey, locks: locksOf(services, definition.name) } }),
+      })),
     definitions: defs,
   };
 }
@@ -294,11 +357,11 @@ function isScheduleDefList<TContext>(
 export function schedules<TContext>(defs: readonly ScheduleDef<TContext>[]): ScheduleFeatureSlice<TContext>;
 export function schedules<C extends AnyFeatureCore, const D extends readonly FeatureScheduleOptions<DepsOf<C>>[]>(
   core: C,
-  defs: D,
+  defs: D & LockGuard<DepsOf<C>, D>,
 ): FeatureScheduleSlice<D, DepsOf<C>>;
 export function schedules<N extends NeedsShape, const D extends readonly FeatureScheduleOptions<CtxOf<N>>[]>(
   needs: N,
-  defs: D,
+  defs: D & LockGuard<CtxOf<N>, D>,
 ): FeatureScheduleSlice<D, CtxOf<N>>;
 export function schedules<
   TContext,

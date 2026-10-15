@@ -17,6 +17,8 @@ export const FEATURE_ERROR_CODES = {
   contractOwner: 'FEATURE_E008',
   /** `routerFor()`: a feature's contract is not mounted in the app contract. */
   contractNotMounted: 'FEATURE_E009',
+  /** `rpc()`: a procedure's contract `meta` is not plain JSON, so `dot explain` cannot show it. */
+  rpcMetaNotJson: 'FEATURE_E010',
 } as const;
 
 export type FeatureErrorCode = (typeof FEATURE_ERROR_CODES)[keyof typeof FEATURE_ERROR_CODES];

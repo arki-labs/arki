@@ -15,6 +15,11 @@
       "import": "./src/dot.ts",
       "node": "./src/dot.ts"
     },
+    "./orpc": {
+      "types": "./dist/src/orpc.d.ts",
+      "import": "./src/orpc.ts",
+      "node": "./src/orpc.ts"
+    },
     "./tanstack-start": {
       "types": "./dist/src/tanstack-start/index.d.ts",
       "import": "./src/tanstack-start/index.ts",
@@ -207,6 +212,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@orpc/server": "catalog:backend",
     "@playwright/test": "catalog:testing",
     "@tanstack/react-router": "catalog:tanstack/start",
     "@tanstack/react-start": "catalog:tanstack/start",
@@ -219,6 +225,7 @@
     "@arki/dot": "workspace:*",
     "@arki/icons": "workspace:*",
     "@arki/ui": "workspace:*",
+    "@orpc/server": "catalog:backend",
     "@playwright/test": "catalog:testing",
     "@tanstack/react-router": "catalog:tanstack/start",
     "@tanstack/react-start": "catalog:tanstack/start",
@@ -234,6 +241,9 @@
       "optional": true
     },
     "@arki/ui": {
+      "optional": true
+    },
+    "@orpc/server": {
       "optional": true
     },
     "@playwright/test": {

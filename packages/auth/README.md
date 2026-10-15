@@ -121,6 +121,43 @@ export const protectedProcedure = o.use(async ({ context, next }) => {
 export const me = protectedProcedure.handler(({ context }) => ({ id: context.user.id, email: context.user.email }));
 ```
 
+## Ownership checks: `@arki/auth/orpc`
+
+Three assertion functions for oRPC handlers. Each one replaces the
+"load, check for null, check the owner" dance with one call, and narrows the
+row to non-null afterwards. Whether a stranger sees NOT_FOUND or FORBIDDEN
+stays a choice the procedure makes by name — there is no policy engine to
+configure (and so none to misconfigure).
+
+```ts
+import { assertFound, assertOwnedOrForbidden, assertOwnedOrNotFound } from '@arki/auth/orpc';
+
+// Reads: someone else's story looks exactly like a missing one (no existence leak).
+const story = await context.repos.stories.get(input.id);
+assertOwnedOrNotFound(story, context.session.user.id, 'Story');
+return story; // narrowed: no `!`
+
+// Mutations where the caller already holds the id: "not yours" is a useful hint.
+assertOwnedOrForbidden(story, context.session.user.id, 'Story');
+```
+
+**The `getOwned` convention.** When a repository can filter by owner in the
+query, prefer that — the check then cannot be forgotten:
+
+```ts
+// infra/story-repository.ts
+getOwned = async (id: StoryId, userId: UserId) =>
+  (await this.db.select().from(stories).where(and(eq(stories.id, id), eq(stories.userId, userId))))[0] ?? null;
+
+// procedure
+const story = await context.repos.stories.getOwned(input.id, context.session.user.id);
+assertFound(story, 'Story'); // NOT_FOUND: missing and not-yours are the same row-less result
+```
+
+Rows are matched on `userId`, compared as strings, so branded ids and session
+ids fit without casts. `@orpc/server` is an optional peer; import this entry
+only in an app that serves oRPC.
+
 ## Recipe 3: Magic-link sign-in
 
 Server: pass a `send` function. The token is stored hashed.

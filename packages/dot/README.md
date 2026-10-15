@@ -283,6 +283,14 @@ export const procedures = (o: typeof os) => ({
   contract: a bare `os` router, a missing procedure or another contract's
   router do not compile. `dailyDigest.contract` and `.router` come from it,
   for `routerFor`.
+- **Every procedure is a manifest action.** `rpc()` reads the contract and
+  adds one action per procedure (binding `rpc`, id `<feature>.<path>`, so two
+  features may both have `list`). The address is the HTTP route when the
+  contract declares one (`GET /stories`), else the procedure path; the meta
+  holds the route, tags, declared errors and the contract `meta` — the place
+  to declare a policy (`oc.$meta<{ auth: 'admin' }>({})`), which `dot explain`
+  then shows without booting. Meta that is not plain JSON fails at `rpc()`
+  (`FEATURE_E010`).
 - **Procedures are a factory over `os`.** `typeof os` depends on the core,
   never on the finished feature, so there is no type cycle; `import type` is
   erased, so there is no module cycle (otherwise: `ReferenceError` at import,

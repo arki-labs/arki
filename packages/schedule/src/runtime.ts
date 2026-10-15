@@ -231,6 +231,34 @@ export function createScheduleRuntime<TContext = undefined>(
     }
   }
 
+  /**
+   * A schedule with its own lock (`lock:` in `schedules(core, …)`): the lock
+   * is held for the whole handler, however long it runs. No KV lease here —
+   * a 60 s lease would expire under a long job and let a second replica in.
+   */
+  async function runExclusive(
+    schedule: ScheduleDef<TContext>,
+    lock: NonNullable<ScheduleDef<TContext>['lock']>,
+  ): Promise<ScheduleRunResult> {
+    try {
+      const locked = await lock.locks.tryRun(lock.key, () => runHandler(schedule));
+      if (locked.ran) return locked.value;
+      lockSkips += 1;
+      debugSchedule.debug('[{scheduleName}] lock {lockKey} is held elsewhere; skipped', {
+        scheduleName: schedule.name,
+        lockKey: lock.key,
+      });
+      return { name: schedule.name, status: 'skipped-lock' };
+    } catch (error) {
+      // runHandler reports handler errors as `handler-failed` and never throws,
+      // so whatever lands here came from taking or releasing the lock.
+      lockErrors += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      log.error('schedule lock failed', { schedule: schedule.name, lock: lock.key, error: message });
+      return { name: schedule.name, status: 'lock-failed', cause: error };
+    }
+  }
+
   async function run(schedule: ScheduleDef<TContext>): Promise<ScheduleRunResult> {
     if (stopped) return { name: schedule.name, status: 'unavailable' };
 
@@ -243,6 +271,7 @@ export function createScheduleRuntime<TContext = undefined>(
     // while the lock call is pending must see this run as active.
     running.set(schedule.name, active + 1);
     try {
+      if (schedule.lock !== undefined) return await runExclusive(schedule, schedule.lock);
       const lock = await acquireLock(schedule);
       if (lock.kind === 'held') {
         return { name: schedule.name, status: 'skipped-lock' };

@@ -70,6 +70,36 @@ const idFactory = createIdFactory('post_');
 const postId = idFactory.next();
 ```
 
+### Ids declared once: `idColumns(defineId(...))`
+
+Declare the id in `@arki/contracts` — browser-safe, so the contract and the
+client can import it — and turn the same declaration into columns here. The
+prefix is the one place the id kind is written; the type, the zod schema, the
+generator and the columns all come from it.
+
+```ts
+// features/story/model/ids.ts (browser-safe)
+import { defineId, type IdOf } from '@arki/contracts';
+export const storyId = defineId('sty_');
+export type StoryId = IdOf<typeof storyId>; // `sty_${string}`
+
+// features/story/model/tables.ts (server)
+import { idColumns } from '@arki/db/id';
+const story = idColumns(storyId);
+export const stories = pgTable('stories', {
+  id: story.primaryColumn(), // varchar(256) PK, typed StoryId, defaults to storyId.create()
+  parentId: story.optionalReference('parent_id'),
+});
+```
+
+`idColumns` has the same column helpers as `createIdFactory` (`primaryColumn`,
+`reference`, `foreignKey`, …), and stamps the declaration's schema on every
+column so `@arki/contracts/drizzle` select schemas check the prefix at
+runtime. Existing prefixes stay exactly as stored: `defineId('hlgt_')` reads
+the `hlgt_…` rows already there. Never value-import `@arki/db/id` from browser
+code — it re-exports Drizzle; the browser imports the declaration from the
+`model/ids.ts` file instead.
+
 ### Temporal columns
 
 `@arki/db/temporal` maps Postgres dates and timestamps to `@arki/date` values:
@@ -155,6 +185,155 @@ await uow(async tx => {
 });
 ```
 
+## In a Dot feature: `repos()`, `reader()`, `advisoryLocks()`
+
+All three live in `@arki/db/dot` and return plain plugins. In a
+`defineFeature` chain, `.infra(...)` makes them private to the feature.
+
+### `repos(handle, factories)` — repositories built once
+
+```ts
+// features/highlights/infra/repository.ts
+export const repository = repos(database.provides.db, {
+  highlights: (db: Database) => new HighlightRepository(db), // Database = Db | Transaction
+  collections: createCollectionRepository,
+});
+
+// features/highlights/feature.ts
+export const core = defineFeature('highlights')
+  .infra(repository)
+  .usecases(({ repos }) => ({ list: (itemId: ItemId) => repos.highlights.listByItem(itemId) }));
+```
+
+- **One set per boot.** The factories run once, when the app boots, bound to
+  the database pool. No `createXRepository(context.db)` per request.
+- **The database is explicit.** Pass the handle. With two databases
+  (`rename(db(...), { db: 'reportsDb' })`), `repos(reports.provides.reportsDb, …)`
+  binds to that one; nothing is picked by the name `db` behind your back. The
+  handle's type must be one the factories accept, and all factories must take
+  the same type — both are compile errors otherwise.
+- **Private by default.** The feature's handlers and usecases see `repos`;
+  other features do not. `dot explain` draws
+  `highlights → highlights/repos → database`.
+- **`withTx` is reserved** (compile error, and `ARKI_DB_PLUGIN_E002` at runtime):
+  it is the rebinding helper below.
+
+### Transactions: `repos.withTx(tx)`
+
+```ts
+await db.transaction(async tx => {
+  const r = repos.withTx(tx); // the same repositories, bound to tx
+  await r.highlights.add(itemId);
+  await r.collections.attach(collectionId, itemId);
+});
+```
+
+`withTx` builds a fresh set on every call (one small object per repository),
+so call it once per transaction and keep the result. For a nested
+transaction (a savepoint), call `repos.withTx(inner)` on the original set
+again — the set `withTx` returns has no `withTx` of its own. Forgetting
+`withTx` inside a transaction reads through the pool, exactly like
+forgetting to pass `tx` by hand today.
+
+### Journal-backed features
+
+Repositories are the read side; events are written with `write`. Create the
+journal with the app's transaction type, so the `tx` a command receives is
+one the repositories accept:
+
+```ts
+const j = initJournal.tx<Transaction>().create({ meta });
+const deposit = j.command('deposit', input, async (data, { write, tx }) => {
+  const limit = await repos.withTx(tx).limits.forAccount(data.accountId); // reads see this command's writes
+  return write(account, data.accountId, row => /* events */ []);
+});
+```
+
+With plain `initJournal({ meta })`, `tx` is the journal's structural
+`DbHandle`, and `repos.withTx(tx)` does not compile.
+
+### Cross-feature reads: `reader(repo, methods)`
+
+Hand other features a few bound methods, not the whole repository:
+
+```ts
+.provides({ storyReader: ({ repos }) => reader(repos.stories, ['get', 'listByUser']) })
+// another feature: .needs({ stories: story.provides.storyReader }) → context.stories.get(id)
+```
+
+Why bound: `{ get: repos.stories.get }` copies a class method off its object,
+and the first `this.db` inside it throws. `reader()` binds each method
+(`ARKI_DB_PLUGIN_E003` for a name that is not a method).
+
+### Testing with repos
+
+`feature.override({ repos })` replaces the whole set — a half-faked set does
+not compile, on purpose: it would hide which queries really ran. Two fakes
+that type-check:
+
+1. **Real instances with spies.** Boot the app on PGlite and
+   `vi.spyOn(app.services['highlights.repos'].highlights, 'listByItem')`.
+2. **A full fixture whose unused methods throw.** A class repository has
+   private fields, so an object literal cannot pose as it; a subclass can:
+
+   ```ts
+   const unused = async (): Promise<never> => { throw new Error('not used by this test'); };
+   class FakeHighlights extends HighlightRepository {
+     override add = unused;
+     override listByItem = async () => [fixture];
+   }
+   const set = { highlights: new FakeHighlights(pgliteDb), collections: fakeCollections };
+   feature.override({ repos: { ...set, withTx: () => set } });
+   ```
+
+A PGlite database is not the app's node-postgres type, so it cannot stand in
+for `database.provides.db` in a typed `fake(...)`; boot the app on the
+`pglite` driver instead.
+
+### `advisoryLocks(handle, { namespace })` — one replica at a time
+
+```ts
+defineFeature('clustering').infra(advisoryLocks(database.provides.db, { namespace: 'avocabo' }));
+// then: schedules(core, [{ name: 'cluster-assign', cron: '*/5 * * * *', lock: true, handler }])
+```
+
+Publishes `locks`, a PostgreSQL advisory lock service: `locks.tryRun(key, fn)`
+runs `fn` unless another session holds `<namespace>:<key>`, and holds the
+lock until `fn` ends — not a lease that runs out under a long job (a lease is
+just a lock with a kitchen timer). The lock
+pins one pooled connection for the job's duration, so the pool needs at least
+two. PGlite has one connection: a locked job that queries through the pool
+waits forever there, so fake `locks` in PGlite tests. Without Dot:
+`withAdvisoryLock(db, key, fn)` and `advisoryLocks(db, { namespace })` from
+`@arki/db/lock`. The key hash is the one Avocabo's `withCronLock` used, so old
+and new replicas exclude each other during a deploy.
+
+## Keyset pagination: `keysetQuery`
+
+The order and the cursor are declared once in `@arki/contracts`
+(`keyset({ createdAt: 'desc', id: 'desc' })`); `@arki/db/pagination` turns them
+into the query:
+
+```ts
+const byNewest = keysetQuery(storyOrder, stories); // columns named like the keys
+
+const rows = await db
+  .select()
+  .from(stories)
+  .where(and(eq(stories.userId, userId), byNewest.after(cursor)))
+  .orderBy(...byNewest.orderBy)
+  .limit(byNewest.take(limit)); // limit + 1
+return byNewest.page(rows, limit); // { items, nextCursor } — null on the last page
+```
+
+- End the order on a unique key (`id`): rows with the same timestamp have no
+  order of their own, and pages would repeat or skip them.
+- Filters, ownership included, stay in your `where`. The cursor only moves the
+  start of the page.
+- Keys must be NOT NULL columns. Declare keyset timestamps with
+  `{ precision: 3 }` (or `mode: 'string'`): a JS `Date` keeps milliseconds,
+  Postgres keeps microseconds, and a rounded cursor can skip rows.
+
 ## Subpath exports
 
 - `@arki/db` / `@arki/db/init` — `createDb`, `initDb`, `initDbWithOptions`. Under Bun, `./init` resolves to a Bun-native SQL driver.
@@ -162,7 +341,10 @@ await uow(async tx => {
 - `@arki/db/builder` — typed projection builder.
 - `@arki/db/runtime-local` — PGlite-backed embedded runtime.
 - `@arki/db/env` — validated env object.
-- `@arki/db/id`, `@arki/db/id-factory` — CUID-based prefixed-ID helpers.
+- `@arki/db/id`, `@arki/db/id-factory` — CUID-based prefixed-ID helpers, and `idColumns(defineId(...))`.
+- `@arki/db/dot` — `db()`, `dbMigrations()`, `repos()`, `reader()`, `advisoryLocks()` for Dot apps.
+- `@arki/db/lock` — `withAdvisoryLock`, `advisoryLocks`: PostgreSQL advisory locks.
+- `@arki/db/pagination` — `keysetQuery`: keyset order, predicate, `limit + 1` and page.
 - `@arki/db/orm` — re-exports of `drizzle-orm` + `drizzle-orm/zod` schema helpers.
 - `@arki/db/pg` — re-export of `drizzle-orm/pg-core`.
 - `@arki/db/temporal` — `plainDate` and `instant` columns that hold `@arki/date` values instead of `Date`.

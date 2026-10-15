@@ -22,6 +22,7 @@
  */
 import type { FeatureSlice } from './feature.js';
 import type {
+  ActionSource,
   AnyHandle,
   AnyPlugin,
   CtxOf,
@@ -88,7 +89,16 @@ export type CoreServices<N extends NeedsShape, I extends readonly AnyPlugin[], U
  * - `resolve` runs when the feature boots, with the feature's needs, infra
  *   and usecases; its return is the payload under `key`.
  */
-export type Entrypoint<TServices = never> = FeatureSlice<string, unknown, TServices> & { readonly kind: string };
+export type Entrypoint<TServices = never> = FeatureSlice<string, unknown, TServices> & {
+  readonly kind: string;
+  /**
+   * Actions whose ids need the feature's name. Action ids are unique per
+   * binding across the app, and a procedure called `list` lives in many
+   * features — so `rpc()` names its actions `<feature>.<procedure>` here.
+   * Called when the feature compiles.
+   */
+  readonly actionsOf?: (feature: string) => readonly ActionSource[];
+};
 
 /** The erased entrypoint — what helpers that only read `kind` / `key` / `actions` accept. */
 export type AnyEntrypoint = Entrypoint<never>;
@@ -452,7 +462,7 @@ function compile(
   const unit: AnyPlugin = {
     name: state.name,
     needs: { ...state.needs, ...infra.handles },
-    actions: entrypoints.flatMap(e => [...e.actions]),
+    actions: entrypoints.flatMap(e => [...e.actions, ...(e.actionsOf?.(state.name) ?? [])]),
     renames: {},
     role: 'feature',
     provides: unitHandles,
