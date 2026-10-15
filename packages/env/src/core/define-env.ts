@@ -84,8 +84,11 @@ export function defineEnv<
   // consumed (boot, a request, a job). This is the same import/observe split
   // drizzle tables have: define everywhere, observe only at use.
   const build = (): Built<Result> => {
+    // Validate everywhere the app runs, production included. Skip only where values are
+    // legitimately absent: CI build stages (Dockerfiles set CI=true there, never in the runner)
+    // and lint runs. Skipping by NODE_ENV would boot production on an unchecked config.
     const skipValidation =
-      config.options?.skipValidation ?? (!!process.env.CI || process.env.NODE_ENV !== 'development');
+      config.options?.skipValidation ?? (!!process.env.CI || process.env.npm_lifecycle_event === 'lint');
 
     // Use the caller's explicit runtimeEnv when supplied (Vite client vars via import.meta.env, or
     // fallback aliases). Otherwise auto-build from every declared key (server + client + shared);

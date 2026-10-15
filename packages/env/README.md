@@ -33,7 +33,29 @@ console.log(env.PORT); // number
 console.log(env.DATABASE_URL); // string (validated URL)
 ```
 
-`defineEnv` reads from `process.env`, validates against the Zod schemas in `server`, and returns a fully typed object. It skips validation when `CI` is set or `NODE_ENV !== 'development'` unless you override via `options.skipValidation`.
+`defineEnv` reads from `process.env`, validates against the Zod schemas in `server`, and returns a fully typed object. Validation is lazy: it runs on the first read, so importing an env never fails.
+
+Validation runs everywhere the app runs, production included. It is skipped by default only where values are legitimately absent: when `CI` is set (Docker build stages) and during `lint` runs. Override with `options.skipValidation`.
+
+### Secrets: `secret`, `reveal`, `Redacted`
+
+Wrap a secret's schema in `secret(...)`. The variable becomes a `Redacted` value that prints as `[redacted]` in logs, JSON, template strings and `console.log`, and that the compiler will not pass where a string is expected. Read it with `reveal(...)` at the one place that needs it.
+
+```ts
+import { defineEnv, reveal, secret } from '@arki/env/core';
+
+export const env = defineEnv({
+  server: {
+    STRIPE_KEY: secret(z.string().min(1)),
+    WEBHOOK_SECRET: secret(z.string()).optional(),
+  },
+});
+
+logger.info('config {env}', { env }); // STRIPE_KEY: "[redacted]"
+const stripe = new Stripe(reveal(env.STRIPE_KEY));
+```
+
+`reveal` also accepts the raw string, because schemas do not run when validation is skipped. Redaction guards against accidents; it is not encryption.
 
 ### Contracts
 
@@ -119,7 +141,7 @@ The hot path: `env.PORT` after the environment exists.
 Read the rows with the contracts in mind:
 
 - `defineEnv()` is lazy: it builds and validates the environment on the first property read, so "define + first read" is the fair row for it. The "define only" group shows what declaring an env costs before anything reads it.
-- Validation is forced on (`skipValidation: false`) for `defineEnv()` and `createEnv`, because `defineEnv()` skips validation outside development by default.
+- Validation is forced on (`skipValidation: false`) for `defineEnv()` and `createEnv`, because `defineEnv()` skips validation by default when `CI` is set.
 - `defineEnv()` and `createEnv` share the same zod schemas, so the gap between them is the wrapper alone: building `runtimeEnv` from `process.env`, a labelled error handler, and the lazy object. envalid uses its own validators, and the plain zod parse does no env-specific work (no empty-string handling, no frozen result).
 - `createEnv`, envalid and the zod parse are given the whole `process.env`, as their docs show, so their cost grows with how many variables the process has. `defineEnv()` reads only the keys it declares. The gap therefore depends on the size of the environment it runs in.
 
