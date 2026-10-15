@@ -18,6 +18,7 @@ export type {
   DotAppConfigured,
   DotAppLifecycle,
   DotServeBuilder,
+  FeatureUnits,
   NormalizeProvides,
   UseAllAvail,
   UseAllGuard,

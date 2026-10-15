@@ -15,8 +15,20 @@
  * ```
  */
 
-export { isLazy, lazy, lazyOf, plugin, provide, rename, service, token, DotPluginError } from './plugin-contract.js';
+export {
+  handleOf,
+  isLazy,
+  lazy,
+  lazyOf,
+  plugin,
+  provide,
+  rename,
+  service,
+  token,
+  DotPluginError,
+} from './plugin-contract.js';
 export type {
+  AnyHandle,
   AnyPlugin,
   DotPluginRole,
   ActionDeclaration,

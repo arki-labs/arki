@@ -47,7 +47,43 @@ import type {
   Token,
   WireNeeds,
 } from './plugin-contract.js';
+import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
 import { handleOf, isLazy, isLazyWitness, lazyOf, plugin, token } from './plugin-contract.js';
+
+export { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
+export type { FeatureErrorCode } from './feature-error.js';
+
+// The chain form (`defineFeature(name).needs().infra().usecases().provides().entrypoints()`)
+// and contract-first composition (`routerFor`). See RFC 2026-10-15-dot-feature-builder.
+export { defineFeature, routerFor } from './define-feature.js';
+export type {
+  AnyDefinedFeature,
+  AnyEntrypoint,
+  AnyFeatureCore,
+  AppContract,
+  ContractOf,
+  CoreDeps,
+  CoreHandles,
+  CoreServices,
+  DefinedFeature,
+  DepsOf,
+  Entrypoint,
+  EntrypointPayloads,
+  EntrypointsStage,
+  FeatureCore,
+  FeatureUnit,
+  InfraProvides,
+  InfraStage,
+  NeedsStage,
+  ProvidesStage,
+  QualifiedInfra,
+  QualifiedPlugin,
+  ReservedAlias,
+  RouterFor,
+  RouterOf,
+  RpcEntrypoint,
+  UsecasesStage,
+} from './define-feature.js';
 
 export type { Handle, Handles, LazyHandle, Provided, ProvidesFactories } from './plugin-contract.js';
 
@@ -196,32 +232,6 @@ export function feature<
   };
 }
 
-export const FEATURE_ERROR_CODES = {
-  duplicateRouterKey: 'FEATURE_E001',
-  duplicateRepoKey: 'FEATURE_E002',
-  duplicateSliceKey: 'FEATURE_E003',
-  missingSlices: 'FEATURE_E004',
-  missingCapability: 'FEATURE_E005',
-} as const;
-
-export type FeatureErrorCode = (typeof FEATURE_ERROR_CODES)[keyof typeof FEATURE_ERROR_CODES];
-
-/**
- * A mistake in how features are composed. The types reject the same
- * mistake at compile time; this is the backstop for code that skips them.
- */
-export class FeatureError extends Error {
-  readonly code: FeatureErrorCode;
-  readonly remediation: string;
-
-  constructor(args: { readonly code: FeatureErrorCode; readonly message: string; readonly remediation: string }) {
-    super(args.message);
-    this.name = 'FeatureError';
-    this.code = args.code;
-    this.remediation = args.remediation;
-  }
-}
-
 /* ------------------------------------------------------------------ */
 /* Static folds                                                        */
 /* ------------------------------------------------------------------ */
@@ -354,7 +364,7 @@ export type FeatureTokenOf<F extends AnyFeature> = Token<SlicePayloads<F['use']>
  * features maps member by member (a mapped type over the union would keep
  * only the keys every member shares).
  */
-export type ProvidedOf<F extends AnyFeature> = F extends AnyFeature
+export type ProvidedOf<F extends HasProvides> = F extends HasProvides
   ? { [K in keyof F['provides']]: F['provides'][K] extends Service<infer T> ? T : never }
   : never;
 
@@ -435,8 +445,8 @@ export type HasProvides = { readonly provides: Readonly<Record<string, AnyHandle
 /** Every handle the units in the tuple provide, merged into one record. */
 export type HandlesIn<T extends readonly HasProvides[]> = UnionToIntersection<T[number]['provides']>;
 
-/** Every service value the features in the tuple provide, keyed by wire key. */
-export type ServicesOf<T extends readonly AnyFeature[]> = UnionToIntersection<ProvidedOf<T[number]>>;
+/** Every service value the units (features or plugins) in the tuple provide, keyed by wire key. */
+export type ServicesOf<T extends readonly HasProvides[]> = UnionToIntersection<ProvidedOf<T[number]>>;
 
 /** The entries of a needs shape that are capability handles (driven services like `db` drop out). */
 export type HandleEntries<N extends NeedsShape> = {
@@ -470,11 +480,11 @@ function missingCapability(alias: string, handle: AnyHandle, where: string, reme
 }
 
 /**
- * Read every capability the features provide out of a hook context whose
+ * Read every capability the units (features, `defineFeature` features or plugins) provide out of a hook context whose
  * `needs` spread {@link providesOf} — the bag a gateway passes to its
  * request context.
  */
-export function servicesOf<const T extends readonly AnyFeature[]>(ctx: object, features: T): ServicesOf<T> {
+export function servicesOf<const T extends readonly HasProvides[]>(ctx: object, features: T): ServicesOf<T> {
   const source = ctx as Readonly<Record<string, unknown>>;
   const bag: Record<string, unknown> = {};
   for (const f of features) {

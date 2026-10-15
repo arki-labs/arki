@@ -119,7 +119,56 @@ rejection, as a compile error first and a coded throw at module load behind
 it. There is never a second list to
 forget.
 
-### The app spine is a hexagon
+### The app spine: `.infra()` → `.features()` → `.entrypoints()`
+
+The same three steps under their final names (RFC
+`docs/rfcs/2026-10-15-dot-feature-builder.md`). `.use()` folds into
+`.infra()` and `.serve()` becomes `.entrypoints()`; both take a list in boot
+order, checked like `.useAll()`:
+
+```ts
+defineApp('avocabo')
+  .infra(log(...), database, cache, authn, journal({ j, tables })) // what the app runs on; log first
+  .features(features)                                               // defineFeature() values (feature() during the migration)
+  .entrypoints(gateway, schedule({ clock: 'host' }), journalWorker()); // what calls into the features
+```
+
+A feature is a chain whose steps are its folders:
+
+```ts
+// features/daily-digest/feature.ts — one file; entrypoint files take `core` / `os` as typed parameters
+export const core = defineFeature('daily-digest')
+  .needs({ plans: billing.provides.entitlements })    // other units, by handle
+  .infra(store, mailer)                                // infra/ — private plugins
+  .usecases(createUsecases);                           // usecases/ — (deps) => usecases
+export const dailyDigest = core
+  .provides({ digests: ({ usecases }) => ({ previewFor: usecases.preview }) })
+  .entrypoints(rpc(digestContract, procedures(os)), digestSchedules(core)); // entrypoints/
+```
+
+Rules the types enforce (each is also a coded runtime check):
+
+- Steps run in order; a step out of order does not compile.
+- `.usecases(create)` gets `{ ...needs, ...infra }`; `.provides` factories and
+  entrypoints get the same plus `usecases`, built once per boot.
+- Feature infra is private: `.infra(store)` publishes `daily-digest.store`
+  under the unit `daily-digest/store`; a sibling infra need follows the
+  qualified key. Other features reach it only through `.provides`.
+- `session`, `headers`, `services` and `usecases` are reserved aliases; an
+  infra key equal to a need alias, and an entrypoint key equal to a provided
+  key, are compile errors (`FEATURE_E006` at runtime).
+- `feature.override({ store: fake })` swaps an infra service before
+  compilation: one provider per key, entrypoints kept.
+- Mount keys are written once, in the app contract:
+  `routerFor(appContract, features)` finds each feature by its `rpc`
+  entrypoint's contract; an unmatched key or contract is a compile error.
+- `dot explain` draws `daily-digest → daily-digest/store → database`.
+
+App `.infra()` is shared (every feature names it by handle, it owns process
+resources); feature `.infra()` is private (it wraps the app's handles or owns
+a client nobody else shares — never a second Postgres pool).
+
+### The app spine is a hexagon (object form — removed when the migration to `defineFeature` ends)
 
 `app.ts` wires the units in three steps, and the builder types enforce the
 order — a unit in the wrong step does not compile:

@@ -182,7 +182,65 @@ each other's services, that's a design smell the type system surfaces
 immediately — merge them, or extract the shared piece into a third plugin both
 consume.
 
-### Features and the hexagon
+### Features as a chain: `defineFeature`
+
+A feature is one chain; each step has its folder (`model/` has no step).
+Each step's type offers only the later steps, and each step's input is typed
+from the earlier ones (RFC `docs/rfcs/2026-10-15-dot-feature-builder.md`).
+
+```ts
+import { defineApp } from '@arki/dot';
+import { defineFeature, routerFor } from '@arki/dot/feature';
+
+export const core = defineFeature('daily-digest')
+  .needs({ plans: billing.provides.entitlements }) // other units, by handle
+  .infra(store, mailer) // infra/: private plugins — published as `daily-digest.store`
+  .usecases(createUsecases); // usecases/: ({ store, mailer, plans }) => usecases
+
+export const dailyDigest = core
+  .provides({ digests: ({ usecases }) => ({ previewFor: usecases.preview }) }) // public handles
+  .entrypoints(rpc(digestContract, procedures(os)), digestSchedules(core)); // entrypoints/
+
+export const app = defineApp('avocabo')
+  .infra(log(config), database, billing) // what the app runs on, in boot order (log first)
+  .features([dailyDigest])
+  .entrypoints(gateway, schedule({ clock: 'host' }));
+
+// Mount keys are written once, in the app contract; each feature is found by contract.
+const router = routerFor({ digest: digestContract }, [dailyDigest]);
+```
+
+- **Private infra.** `.infra(store)` compiles to the unit `daily-digest/store`
+  providing `daily-digest.store`; a sibling plugin that needs `store` is
+  rewired to the qualified key. Two features may each have a `store`.
+- **Usecases.** Built once per boot from the needs and the infra, and handed
+  to every `provides` factory and entrypoint. `core.handles` (needs + infra +
+  `usecases`) is what a request middleware resolves from the services bag
+  (`resolveNeeds(bag, core.handles)`): the handler sees `context.usecases`,
+  `context.store`, `context.plans`, and not `context.db`.
+- **Entrypoints** are descriptors `{ kind, key, actions, resolve }` built by
+  adapter packages; `resolve` gets needs + infra + usecases, its payload is
+  published under `feature.<name>` (read with `sliceOf`), and `actions` are
+  in the manifest before boot. An entrypoint file types its handlers with
+  `DepsOf<typeof core>`.
+- **Collisions are compile errors**: steps out of order; `session`,
+  `headers`, `services`, `usecases` as aliases or keys; an infra key equal to a
+  need alias; an entrypoint key equal to a provided key. Erased callers get
+  `FEATURE_E006`.
+- **Tests**: `dailyDigest.override({ store: fakeStore })` rebuilds the store
+  plugin in place (its sibling services keep their factories) and keeps the
+  entrypoints — one provider per key.
+- **Kernel units**: `dailyDigest.plugins()` is a typed tuple
+  `[daily-digest/store, daily-digest/mailer, daily-digest]`, so
+  `.useAll(dailyDigest.plugins())` and `.features([dailyDigest])` are checked
+  by the builder guard. `dot explain` shows
+  `daily-digest --[daily-digest.store]--> daily-digest/store --[db]--> database`.
+
+`.infra()` replaces `.use()` and `.entrypoints()` replaces `.serve()`;
+`.features()` takes `defineFeature` features and object-form `feature()`
+values side by side during the migration.
+
+### Features and the hexagon (object form — removed when the migration to `defineFeature` ends)
 
 Domain modules are `feature()` values from `@arki/dot/feature`. A feature is
 inert data: router fragments and repo factories fold without any kernel, and

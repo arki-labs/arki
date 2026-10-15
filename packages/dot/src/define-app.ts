@@ -6,6 +6,11 @@
  *
  *   defineApp -> use* -> features? -> serve* -> configure() -> boot() -> start() -> stop() -> dispose()
  *
+ * The same three steps under their new names (RFC 2026-10-15-dot-feature-builder;
+ * `.use()` / `.serve()` stay until the migration ends):
+ *
+ *   defineApp(name).infra(...).features([...]).entrypoints(...)
+ *
  * `.use()` is compile-time guarded: a plugin whose `needs` are not satisfied
  * by services provided so far — or whose provides collide with existing
  * wire keys — fails to typecheck at the call site ("Expected 2 arguments,
@@ -19,11 +24,12 @@
  * See `./lifecycle.ts` for hook semantics, failure ordering, idempotency rules.
  */
 
+import type { AnyDefinedFeature } from './define-feature.js';
 import type { DotDiagnosticsSnapshot } from './diagnostics.js';
+import type { AnyFeature, Driven, Driver, PluginOf } from './feature.js';
 import type { DotLifecycleObserver } from './lifecycle-observer.js';
 import type { DotLifecycleState } from './lifecycle.js';
 import type { DotAppManifest } from './manifest.js';
-import type { AnyFeature, Driven, Driver, PluginsOf } from './feature.js';
 import type { AnyPlugin, EmptyShape, Plugin, ServiceRecord } from './plugin-contract.js';
 import { bindDriver, plug } from './feature.js';
 import { DotAppImpl } from './kernel/app-instance.js';
@@ -125,6 +131,42 @@ export type UseAllGuard<TAvail extends ServiceRecord, TPlugins extends readonly 
   ? UseAllTupleGuard<TPlugins>
   : [error: UseAllState<TAvail, TPlugins>['error']];
 
+/**
+ * `UseAllGuard` as a rest-parameter check: `unknown` when the list mounts,
+ * otherwise the error record — intersected with the argument tuple, so the
+ * call fails with the diagnostic in the expected type.
+ */
+type ListGuard<TGuard extends readonly unknown[]> = TGuard extends readonly [error: infer TError] ? TError : unknown;
+
+/** A list of plugins and adapters, each seen as the plugin it mounts (an adapter's `bind` result). */
+type AsPlugins<TUnits extends readonly unknown[]> = {
+  readonly [K in keyof TUnits]: TUnits[K] extends { readonly bind: (features: never) => infer TPlugin }
+    ? TPlugin
+    : TUnits[K];
+};
+
+/** The kernel units one feature mounts: a `defineFeature` feature's `plugins()`, or the object-form feature's plugin. */
+type UnitsOfFeature<TFeature> = TFeature extends { plugins(): infer TUnits extends readonly AnyPlugin[] }
+  ? TUnits
+  : TFeature extends AnyFeature
+    ? readonly [PluginOf<TFeature>]
+    : never;
+
+type FlattenUnits<
+  TFeatures extends readonly unknown[],
+  TAcc extends readonly AnyPlugin[],
+> = TFeatures extends readonly [infer Head, ...infer Tail]
+  ? FlattenUnits<Tail, readonly [...TAcc, ...UnitsOfFeature<Head>]>
+  : TAcc;
+
+/**
+ * Every kernel unit a feature list mounts, flattened in order — what
+ * `.features()` checks with the `UseAllGuard`. A non-tuple list stays an
+ * array, so the guard asks for a tuple.
+ */
+export type FeatureUnits<TFeatures extends readonly (AnyFeature | AnyDefinedFeature)[]> =
+  number extends TFeatures['length'] ? readonly AnyPlugin[] : FlattenUnits<TFeatures, readonly []>;
+
 /* ------------------------------------------------------------------ */
 /* Public app surface                                                  */
 /* ------------------------------------------------------------------ */
@@ -220,6 +262,15 @@ export type DotServeBuilder<TAvail extends ServiceRecord> = DotAppLifecycle<TAva
     adapter: Plugin<TNeeds, TProvides> | Driver<TNeeds, TProvides>,
     ...guard: UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>
   ): DotServeBuilder<TAvail & NormalizeProvides<TProvides>>;
+  /**
+   * Register the app's entrypoints — what calls into the features (HTTP
+   * gateway, scheduler, job worker), in order. Each `driver(...)` is bound to
+   * the mounted features; a plain plugin is mounted as-is. The whole list is
+   * checked like `.useAll()`.
+   */
+  entrypoints<const TAdapters extends readonly (AnyPlugin | Driver)[]>(
+    ...adapters: TAdapters & ListGuard<UseAllGuard<TAvail, Extract<AsPlugins<TAdapters>, readonly AnyPlugin[]>>>
+  ): DotServeBuilder<UseAllAvail<TAvail, Extract<AsPlugins<TAdapters>, readonly AnyPlugin[]>>>;
 };
 
 /**
@@ -257,14 +308,25 @@ export type DotAppBuilder<TAvail extends ServiceRecord> = DotAppLifecycle<TAvail
     ...guard: UseAllGuard<TAvail, TPlugins>
   ): DotAppBuilder<UseAllAvail<TAvail, TPlugins>>;
   /**
-   * Mount the domain features, in order. A feature may need what earlier
-   * features provide. Called once: after it, only `.serve()` remains.
+   * Register what the app runs on — logging, observability, database,
+   * cache, auth, the journal — in boot order (argument order; keep `log(...)`
+   * first). Plugins and `driven(...)` adapters; the whole list is checked
+   * like `.useAll()`. Every feature sees these by handle.
    */
-  features<const TFeatures extends readonly AnyFeature[]>(
+  infra<const TUnits extends readonly (AnyPlugin | Driven)[]>(
+    ...units: TUnits & ListGuard<UseAllGuard<TAvail, Extract<AsPlugins<TUnits>, readonly AnyPlugin[]>>>
+  ): DotAppBuilder<UseAllAvail<TAvail, Extract<AsPlugins<TUnits>, readonly AnyPlugin[]>>>;
+  /**
+   * Mount the domain features, in order. A feature may need what earlier
+   * features provide. Takes object-form `feature()` values and
+   * `defineFeature()` features (each mounts its infra plugins, then itself).
+   * Called once: after it, only `.serve()` / `.entrypoints()` remain.
+   */
+  features<const TFeatures extends readonly (AnyFeature | AnyDefinedFeature)[]>(
     features: TFeatures,
-    ...guard: UseAllGuard<TAvail, Extract<PluginsOf<TFeatures>, readonly AnyPlugin[]>>
-  ): DotServeBuilder<UseAllAvail<TAvail, Extract<PluginsOf<TFeatures>, readonly AnyPlugin[]>>>;
-} & Pick<DotServeBuilder<TAvail>, 'serve'>;
+    ...guard: UseAllGuard<TAvail, Extract<FeatureUnits<TFeatures>, readonly AnyPlugin[]>>
+  ): DotServeBuilder<UseAllAvail<TAvail, Extract<FeatureUnits<TFeatures>, readonly AnyPlugin[]>>>;
+} & Pick<DotServeBuilder<TAvail>, 'serve' | 'entrypoints'>;
 
 type BuilderState = {
   appName: string;
@@ -339,25 +401,76 @@ function buildImpl(state: BuilderState): DotAppImpl {
   });
 }
 
+function isDefinedFeature(f: AnyFeature | AnyDefinedFeature): f is AnyDefinedFeature {
+  return 'plugins' in f && typeof f.plugins === 'function';
+}
+
+/**
+ * Migration window (removed with the object form, RFC 2026-10-15 phase 5):
+ * `driver(...)` / `driven(...)` adapters are still typed over the object-form
+ * `AnyFeature`. A `defineFeature` feature reaches them through this view —
+ * its entrypoints are its slices (same `key`, `actions`, `resolve`) and its
+ * slice record is published under the same `feature.<name>` key, so
+ * `sliceOf` and the adapters' `f.use` reads work unchanged.
+ */
+function adapterView(f: AnyDefinedFeature): AnyFeature {
+  return {
+    name: f.name,
+    router: {},
+    repos: {},
+    use: f.entrypoints,
+    actions: [],
+    needs: {},
+    factories: {},
+    provides: f.provides,
+  };
+}
+
+function bindAdapter(adapter: AnyPlugin | Driver, features: readonly AnyFeature[]): AnyPlugin {
+  const bound: AnyPlugin = 'bind' in adapter ? bindDriver(adapter, features) : adapter;
+  return { ...bound, role: 'driving' };
+}
+
 function makeBuilder<TAvail extends ServiceRecord>(state: BuilderState): DotAppBuilder<TAvail> {
   // The `use` implementation is signature-erased (the guard exists purely
   // at the type level); the single cast below is the same kernel boundary
   // v1 crossed in its wrapApp helper. The phase split is type-only too:
   // one runtime object serves every phase.
   const impl = {
-    features(features: readonly AnyFeature[], ..._guard: readonly unknown[]): DotAppBuilder<ServiceRecord> {
+    features(
+      features: readonly (AnyFeature | AnyDefinedFeature)[],
+      ..._guard: readonly unknown[]
+    ): DotAppBuilder<ServiceRecord> {
       const nextState: BuilderState = {
         ...state,
-        plugins: [...state.plugins, ...features.map((f): AnyPlugin => ({ ...(plug(f) as AnyPlugin), role: 'feature' }))],
-        features: [...state.features, ...features],
+        plugins: [
+          ...state.plugins,
+          ...features.flatMap((f): readonly AnyPlugin[] =>
+            isDefinedFeature(f) ? f.plugins() : [{ ...(plug(f) as AnyPlugin), role: 'feature' }],
+          ),
+        ],
+        features: [...state.features, ...features.map(f => (isDefinedFeature(f) ? adapterView(f) : f))],
       };
       return makeBuilder<ServiceRecord>(nextState);
     },
     serve(adapter: AnyPlugin | Driver, ..._guard: readonly unknown[]): DotAppBuilder<ServiceRecord> {
-      const bound: AnyPlugin = 'bind' in adapter ? bindDriver(adapter, state.features) : adapter;
       const nextState: BuilderState = {
         ...state,
-        plugins: [...state.plugins, { ...bound, role: 'driving' }],
+        plugins: [...state.plugins, bindAdapter(adapter, state.features)],
+      };
+      return makeBuilder<ServiceRecord>(nextState);
+    },
+    entrypoints(...adapters: readonly (AnyPlugin | Driver)[]): DotAppBuilder<ServiceRecord> {
+      const nextState: BuilderState = {
+        ...state,
+        plugins: [...state.plugins, ...adapters.map(adapter => bindAdapter(adapter, state.features))],
+      };
+      return makeBuilder<ServiceRecord>(nextState);
+    },
+    infra(...units: readonly (AnyPlugin | Driven)[]): DotAppBuilder<ServiceRecord> {
+      const nextState: BuilderState = {
+        ...state,
+        plugins: [...state.plugins, ...units],
       };
       return makeBuilder<ServiceRecord>(nextState);
     },
