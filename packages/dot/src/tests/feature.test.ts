@@ -11,8 +11,21 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { defineApp, plugin, service } from '../index.js';
 
-import type { AnyFeature, ComposedRepos } from '../feature.js';
-import { composeRepos, composeRouter, driven, driver, feature, FEATURE_ERROR_CODES, plug, sliceOf, tokenOf } from '../feature.js';
+import type { AnyFeature, ComposedRepos, Handle, ServicesBag, ServicesOf } from '../feature.js';
+import {
+  composeRepos,
+  composeRouter,
+  driven,
+  driver,
+  feature,
+  FEATURE_ERROR_CODES,
+  plug,
+  providesOf,
+  resolveNeeds,
+  servicesOf,
+  sliceOf,
+  tokenOf,
+} from '../feature.js';
 
 type FakeDb = { readonly tag: 'db' };
 const fakeDb: FakeDb = { tag: 'db' };
@@ -39,7 +52,7 @@ const billing = feature('billing', {
 
 const authish = feature('authish', {
   needs: { db: service<FakeDb>() },
-  boot: ({ db }) => ({ session: { via: db.tag } }),
+  provides: { session: ({ db }) => ({ via: db.tag }) },
 });
 
 describe('compile-time folds (no kernel involved)', () => {
@@ -162,41 +175,118 @@ describe('provides handles (a feature depends on a capability, not a feature)', 
 
   const plans = feature('plans', {
     needs: { db: service<FakeDb>() },
-    boot: ({ db }) => ({ entitlements: createEntitlements(db) }),
+    provides: {
+      entitlements: ({ db }) => createEntitlements(db),
+      warmedAt: async () => {
+        await Promise.resolve();
+        return 42;
+      },
+    },
+    boot: ({ entitlements, warmedAt }) => {
+      expectTypeOf(entitlements).toEqualTypeOf<ReturnType<typeof createEntitlements>>();
+      expectTypeOf(warmedAt).toEqualTypeOf<number>();
+    },
   });
 
   const digest = feature('digest', {
     needs: { access: plans.provides.entitlements },
-    boot: ({ access }) => ({ digestPlan: (userId: string) => access.planOf(userId) }),
+    provides: { digestPlan: ({ access }) => (userId: string) => access.planOf(userId) },
   });
 
-  it("types the handle from the provider's boot return — nothing restated", () => {
+  it('the graph is data: handle keys equal the factory keys and carry their provider before anything boots', () => {
+    // dot explain and the kernel's configure-time checks read these keys
+    // without booting — a handle minted only at boot would hide the graph.
+    expect(Object.keys(plans.provides)).toEqual(['entitlements', 'warmedAt']);
+    expect(plans.provides.entitlements).toMatchObject({ key: 'entitlements', provider: 'plans' });
+    expect(plans.provides.warmedAt).toMatchObject({ key: 'warmedAt', provider: 'plans' });
+    expectTypeOf(plans.provides.entitlements.provider).toEqualTypeOf<'plans'>();
+  });
+
+  it("types each factory from the feature's needs and each handle from the factory's return — nothing restated", () => {
     expectTypeOf(plans.provides.entitlements.key).toEqualTypeOf<'entitlements'>();
-    expectTypeOf<Parameters<NonNullable<typeof digest.boot>>[0]['access']>().toEqualTypeOf<
+    // An async factory's handle carries the resolved value, not the promise.
+    expectTypeOf(plans.provides.warmedAt).toEqualTypeOf<Handle<number, 'warmedAt', 'plans'>>();
+    expectTypeOf<Parameters<typeof digest.factories.digestPlan>[0]['access']>().toEqualTypeOf<
       ReturnType<typeof createEntitlements>
     >();
   });
 
-  it('wires the consumer to the instance the provider booted, on the same wire key', async () => {
+  it('wires the consumer to the instance the provider built, on the same wire key', async () => {
     const dbPlugin = plugin({ name: 'db', boot: () => ({ db: fakeDb }) });
     const app = await defineApp('provides-test').use(dbPlugin).features([plans, digest]).boot();
 
-    expect(plans.provides.entitlements.key).toBe('entitlements');
     expect(app.services.digestPlan('usr_pro')).toBe('pro');
     expect(app.services.digestPlan('usr_free')).toBe('free');
     expect(app.services.entitlements.planOf('usr_pro')).toBe('pro');
+    expect(app.services.warmedAt).toBe(42);
     await app.dispose();
   });
 
-  it('keeps boot order honest: a consumer mounted before its provider fails to compile and to boot', async () => {
+  it('keeps boot order honest: a consumer mounted before its provider fails to compile and to configure', () => {
     const dbPlugin = plugin({ name: 'db', boot: () => ({ db: fakeDb }) });
     // @ts-expect-error — digest needs `entitlements`, which nothing mounted before it provides.
     const misordered = defineApp('provides-order-test').use(dbPlugin).features([digest, plans]);
-    await expect(misordered.boot()).rejects.toThrow(/entitlements/);
+    expect(() => misordered.configure()).toThrow(/entitlements/);
   });
 
   it('mints one stable handle per key', () => {
     expect(plans.provides.entitlements).toBe(plans.provides.entitlements);
+  });
+});
+
+const createPlanLookup = () => ({ planOf: (userId: string) => (userId === 'usr_pro' ? 'pro' : 'free') });
+const createScorer = () => ({ score: (text: string) => text.length });
+
+describe('services in the request context (gateway → bag → resolveNeeds)', () => {
+  const plans = feature('plans', { provides: { entitlements: createPlanLookup } });
+  const scoring = feature('scoring', { provides: { scorer: createScorer } });
+  // `needs` lives in its own module in an app (feature.ts and router.ts both
+  // import it); a procedure narrows the opaque bag with it.
+  const companionNeeds = { access: plans.provides.entitlements, db: service<FakeDb>() };
+  const companion = feature('companion', { needs: companionNeeds });
+  const features = [plans, scoring, companion] as const;
+
+  const gateway = feature('gateway', {
+    needs: { ...providesOf(features) },
+    provides: { bag: ctx => servicesOf(ctx, features) as ServicesBag },
+  });
+
+  it('ServicesOf is the merged provides of the tuple — named once, never restated', () => {
+    type Services = ServicesOf<typeof features>;
+    expectTypeOf<keyof Services>().toEqualTypeOf<'entitlements' | 'scorer'>();
+    expectTypeOf<Services['entitlements']>().toEqualTypeOf<ReturnType<typeof createPlanLookup>>();
+    expectTypeOf<Services['scorer']>().toEqualTypeOf<ReturnType<typeof createScorer>>();
+    expect(Object.keys(providesOf(features))).toEqual(['entitlements', 'scorer']);
+  });
+
+  it('the gateway is mounted after every provider, or the app does not compile — it never sees a half-built bag', () => {
+    const dbPlugin = plugin({ name: 'db', boot: () => ({ db: fakeDb }) });
+    // @ts-expect-error — the gateway spreads every capability into its needs; scoring is mounted after it.
+    const halfBuilt = defineApp('half-built').use(dbPlugin).features([plans, gateway, scoring, companion]);
+    expect(() => halfBuilt.configure()).toThrow(/DOT_LIFECYCLE_E020|"scorer"/);
+  });
+
+  it('a procedure resolves its capability to the very instance the app published — one DI system', async () => {
+    const dbPlugin = plugin({ name: 'db', boot: () => ({ db: fakeDb }) });
+    const app = await defineApp('bag').use(dbPlugin).features([...features, gateway]).boot();
+    const resolved = resolveNeeds(app.services.bag, companionNeeds);
+    // Driven services (`db`) are not capabilities: they stay on the context explicitly.
+    expectTypeOf(resolved).toEqualTypeOf<{ access: ReturnType<typeof createPlanLookup> }>();
+    expect(Object.keys(resolved)).toEqual(['access']);
+    expect(resolved.access).toBe(app.services.entitlements);
+    await app.dispose();
+  });
+
+  it('a capability missing from the bag throws FEATURE_E005 naming alias, key, provider and the fix', () => {
+    expect(() => resolveNeeds({}, companionNeeds)).toThrow(
+      expect.objectContaining({
+        code: FEATURE_ERROR_CODES.missingCapability,
+        message:
+          '[feature] "access" (capability "entitlements" from feature "plans") is not in the request context\'s services bag.',
+        remediation:
+          "Spread providesOf(features) into the gateway's needs and pass servicesOf(ctx, features) to createContext.",
+      }),
+    );
   });
 });
 
@@ -250,7 +340,7 @@ describe('the hexagon: .use → .features → .serve', () => {
   it('lets a later feature need what an earlier feature provides', async () => {
     const profile = feature('profile', {
       needs: { session: service<{ via: 'db' }>() },
-      boot: ({ session }) => ({ profile: `profile:${session.via}` }),
+      provides: { profile: ({ session }) => `profile:${session.via}` },
     });
     const app = await defineApp('chain').use(dbPlugin).features([authish, profile]).boot();
     expectTypeOf(app.services.profile).toEqualTypeOf<string>();
@@ -279,7 +369,7 @@ describe('a driven adapter that reads the features (.use(driven))', () => {
   it('sees the final feature list, boots before the features, and serves them as a dependency', async () => {
     const writer = feature('writer', {
       needs: { registry: service<{ handlers: readonly string[] }>() },
-      boot: ({ registry: r }) => ({ seenAtBoot: r.handlers }),
+      provides: { seenAtBoot: ({ registry: r }) => r.handlers },
     });
     const app = await defineApp('driven-binding').use(registry).features([orders, writer]).boot();
     expect(app.services.seenAtBoot).toEqual(['orders:queue']);

@@ -66,6 +66,7 @@ type DependencyEdge = {
   from: string;
   to: string;
   kind: 'requires' | 'provides' | 'uses';
+  key?: string; // the capability, on edges derived before boot from a feature's static provides
 };
 
 type ProjectionManifest = {

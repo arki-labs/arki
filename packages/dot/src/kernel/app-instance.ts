@@ -282,8 +282,84 @@ export class DotAppImpl {
       });
     }
 
+    this.#checkStaticCapabilities();
+
     // Initial empty manifest — filled in by `runConfigure`.
     this.#manifest = this.#buildManifest();
+  }
+
+  /**
+   * Walk the needs a plugin can be checked against before boot: those
+   * whose provider declared its publish keys statically (`Plugin.provides`,
+   * filled by features). A provider mounted later is a ring when its own
+   * needs lead back to the consumer (E019), otherwise an order error
+   * (E020). Satisfied needs become `dot explain`'s capability edges and the
+   * providers' manifest `provides`, without booting. `plugin()` units
+   * declare nothing statically; their needs stay with E012 at boot.
+   */
+  #checkStaticCapabilities(): void {
+    const providerByKey = new Map<string, PluginRecord>();
+    for (const record of this.#records.values()) {
+      for (const localKey of record.plugin.provides ?? []) {
+        const wireKey = record.plugin.renames[localKey] ?? localKey;
+        record.provides.add(wireKey);
+        if (!providerByKey.has(wireKey)) providerByKey.set(wireKey, record);
+      }
+    }
+    if (providerByKey.size === 0) return;
+
+    const staticNeeds = (record: PluginRecord): { key: string; provider: PluginRecord }[] =>
+      Object.entries(record.plugin.needs).flatMap(([alias, witness]) => {
+        const key = wireKeyOf(witness, alias);
+        const provider = providerByKey.get(key);
+        return provider === undefined ? [] : [{ key, provider }];
+      });
+
+    /** The ring `start needs k1 ← p1 needs k2 ← … ← start`, or undefined when `from` never leads back. */
+    const ringBack = (start: PluginRecord, from: PluginRecord, seen: Set<string>): string[] | undefined => {
+      if (from === start) return [start.plugin.name];
+      if (seen.has(from.plugin.name)) return undefined;
+      seen.add(from.plugin.name);
+      for (const need of staticNeeds(from)) {
+        const rest = ringBack(start, need.provider, seen);
+        if (rest !== undefined) return [`${from.plugin.name} needs ${need.key}`, ...rest];
+      }
+      return undefined;
+    };
+
+    for (const record of this.#records.values()) {
+      const label = record.plugin.role === 'feature' ? 'Feature' : 'Plugin';
+      for (const { key, provider } of staticNeeds(record)) {
+        if (provider.order < record.order) {
+          if (!this.#wiringEdges.some(e => e.from === record.plugin.name && e.to === provider.plugin.name && e.key === key)) {
+            this.#wiringEdges.push({ from: record.plugin.name, to: provider.plugin.name, kind: 'requires', key });
+          }
+          continue;
+        }
+        const ring = ringBack(record, provider, new Set());
+        if (ring !== undefined) {
+          throw new DotLifecycleError({
+            code: DotLifecycleErrorCode.CapabilityRing,
+            phase: 'configure',
+            plugin: record.plugin.name,
+            message:
+              `${label} "${record.plugin.name}" needs "${key}", which comes back around to itself:\n` +
+              `  ${[`${record.plugin.name} needs ${key}`, ...ring].join(' ← ')}\n` +
+              'Break the ring: move the shared piece into a third feature both need, or let one side read through db.query instead of a handle.',
+          });
+        }
+        throw new DotLifecycleError({
+          code: DotLifecycleErrorCode.ProviderMountedLater,
+          phase: 'configure',
+          plugin: record.plugin.name,
+          message:
+            `${label} "${record.plugin.name}" needs "${key}", which "${provider.plugin.name}" provides — ` +
+            `but "${provider.plugin.name}" is mounted after it (position ${(provider.order + 1).toString()}; ` +
+            `"${record.plugin.name}" is ${(record.order + 1).toString()}).\n` +
+            `Move "${provider.plugin.name}" before "${record.plugin.name}" in .features([...]).`,
+        });
+      }
+    }
   }
 
   /**
@@ -1641,9 +1717,10 @@ export class DotAppImpl {
     const services: ServiceManifest[] = [];
     const lifecycle: LifecycleManifest[] = [];
     const projections: ProjectionManifest[] = [];
-    // Edges are observed at boot time: consumer plugin → the plugin whose
-    // published wire key satisfied its need. Before boot, the per-plugin
-    // `dependencies` array (wire-key strings) is the declarative view.
+    // Capability edges between features are derived at construction from
+    // static `provides` (keyed); the rest are observed at boot time: consumer
+    // plugin → the plugin whose published wire key satisfied its need. The
+    // per-plugin `dependencies` array (wire-key strings) is the declarative view.
     const dependencies: DependencyEdge[] = this.#wiringEdges.map(e => ({ ...e }));
 
     for (const plugin of this.#ordered) {

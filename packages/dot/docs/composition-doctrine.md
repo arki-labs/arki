@@ -157,13 +157,35 @@ schema leaves (tables.ts — import nothing above)
 - **No lateral feature→feature imports — with one door.** Cross-feature table
   references go through the composed relations builder (typed by the composed
   schema — no import needed). Cross-feature behavior goes through provided
-  services, needs-checked by the graph. The door: a consumer's `feature.ts`
-  may import a provider's `feature.ts` to name a capability by handle —
+  services, needs-checked by the graph. The door: any module of a consumer
+  feature (its `feature.ts`, or a procedure) may import a provider's
+  `feature.ts` to name a capability by handle —
   `needs: { access: billing.provides.entitlements }`. That import carries a
-  token typed from billing's implementation (the type is written once, by the
-  provider) and nothing else; a consumer reaching into another feature's
-  services, repository, or internals is still a lateral import. Mount order
-  stays the boot order: the provider must be listed before the consumer.
+  handle typed from billing's `provides` factory (the type is written once,
+  by the provider) and stamped with `provider: 'billing'`, and nothing else;
+  a consumer reaching into another feature's services, repository, or
+  internals is still a lateral import. Mount order stays the boot order: the
+  provider must be listed before the consumer — a compile error, and
+  `DOT_LIFECYCLE_E020` at `configure()` for code that skips types.
+- **Capabilities never form a ring.** Two feature modules naming each
+  other's handles fail as `TS7022` on both `feature()` consts (and an ESM TDZ
+  `ReferenceError` at runtime); erased graphs fail `configure()` with
+  `DOT_LIFECYCLE_E019`, which prints the ring. Break it by moving the shared
+  piece into a third feature both need, or by reading through `db.query`
+  instead of a handle. A feature's own router never names its own handle
+  (also `TS7022`): own capabilities are called by import.
+- **Procedures read capabilities through the request context's opaque
+  bag.** The context type cannot name the merged services (it loops through
+  the routers), so it carries a `ServicesBag`; the gateway feature spreads
+  `providesOf(features)` into its needs and passes `servicesOf(ctx, features)`
+  to `createContext`, and each procedure narrows the bag through
+  `resolveNeeds` with the handles it uses, declared inline
+  (`needs({ entitlements: billing.provides.entitlements })`). Keep a feature's
+  `needs` record in its `feature.ts`; move it to a `needs.ts` leaf only when
+  that feature's OWN procedures must share the exact record — importing it
+  from `feature.ts` would close feature.ts → router → procedure → feature.ts
+  (a TDZ cycle). One DI system: the bag holds the very instances
+  `app.services` publishes.
 - **Relations are a second pass** over the composed schema: feature-owned
   fragments, one `defineRelations` call, never a god barrel.
 - **Nothing points back up — where "up" means a cycle.** The rule is
@@ -184,7 +206,7 @@ Three lifetimes, three homes:
 | Lifetime | Home | Examples |
 | --- | --- | --- |
 | compile-time | ES modules, composed folds | schema, relations, routers, repo factories, context TYPE |
-| boot-time | plugins / `feature()` `boot` + slices | db handle, auth instance, event store, route bundles |
+| boot-time | plugins / `feature()` `provides` factories, side-effect `boot` + slices | db handle, auth instance, event store, route bundles |
 | request-time | the gateway's context factory | session lookup, per-request context value |
 
 "If it doesn't need boot, it doesn't need a plugin" — static data rides
@@ -219,7 +241,13 @@ cross-feature aggregation point (requests → contexts).
 
 - Erased bounds over heterogeneous declarations use the **contravariant
   top**: `(database: never) => unknown` for repo factories, `(services:
-  never) => ...` for erased boot fns.
+  never) => ...` for erased boot fns and `provides` factories.
+- **Contextually typing a record of factories needs a reverse-mapped
+  parameter**, not a constraint: `provides?: { [K in keyof TProvides]:
+  (s: CtxOf<TNeeds>) => MaybePromise<TProvides[K]> }` types each factory's
+  parameter from `needs` and infers `TProvides` from the returns; a
+  constraint `TProvides extends Record<string, (s) => unknown>` leaves the
+  parameter untyped (`TS7031`).
 - **Indexed access does not distribute.** `T[number] extends X<infer P>`
   infers ONE `P` across the whole union; wrap in a naked-param alias
   (`type Of<T> = T extends X<infer P> ? P : never`) to distribute per

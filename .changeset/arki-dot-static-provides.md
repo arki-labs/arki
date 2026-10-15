@@ -1,0 +1,5 @@
+---
+'@arki/dot': minor
+---
+
+Breaking: `feature()` publishes through `provides` factories, one per capability (`provides: { entitlements: ({ db }) => createEntitlements(db) }`). Each factory gets the feature's needs; `boot` is now side effects only (it returns `void` and sees the factories' values), and a value-returning `boot` no longer compiles. Handles are static plain objects that carry `provider` (the feature name), so `Object.keys(billing.provides)` is known before boot. New in `@arki/dot/feature`: `Handle`, `ProvidedOf`, `ServicesOf`, `ServicesBag`, `providesOf(features)`, `servicesOf(ctx, features)` and `resolveNeeds(bag, needs)` (throws `FEATURE_E005` naming the missing capability), for carrying capabilities in a request context. The kernel checks feature capabilities at `configure()`: `DOT_LIFECYCLE_E019` prints a capability ring, `DOT_LIFECYCLE_E020` names a provider mounted after its consumer. `Plugin.provides` lists a feature's static publish keys; manifest `provides` is filled before boot and `DependencyEdge` gains an optional `key`, so `dot explain` draws `consumer --[key]--> provider` edges (Mermaid `-->|key|`) without booting.

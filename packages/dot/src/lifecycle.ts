@@ -84,6 +84,10 @@ export const DotLifecycleErrorCode = {
   ActionMetaNotJson: 'DOT_LIFECYCLE_E017',
   /** More than one plugin fills the logging slot. */
   DuplicateLogging: 'DOT_LIFECYCLE_E018',
+  /** Static capability needs form a ring: a feature's need comes back around to itself. */
+  CapabilityRing: 'DOT_LIFECYCLE_E019',
+  /** A feature needs a capability whose (static) provider is mounted after it. */
+  ProviderMountedLater: 'DOT_LIFECYCLE_E020',
 } as const;
 
 export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];

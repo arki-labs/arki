@@ -13,8 +13,11 @@
  *   (e.g. `jobs()` from `@arki/queue/dot`). Each contract carries its
  *   payload plus the manifest actions derived from it, so this module
  *   depends on no adapter and the slice set stays open.
- * - `needs` / `boot` — the runtime escape hatch for genuine lifecycle
- *   (an auth instance, an event store). Most features never use it.
+ * - `needs` / `provides` / `boot` — the runtime escape hatch for genuine
+ *   lifecycle (an auth instance, an event store). `provides` holds one
+ *   factory per capability; its keys are static, so the graph is data
+ *   before anything boots. `boot` is side effects only (seed, warm-up).
+ *   Most features never use any of them.
  *
  * The app mounts features in the middle phase of the hexagon:
  *
@@ -35,6 +38,7 @@ import type {
   NeedsShape,
   NoReservedKeys,
   Plugin,
+  Service,
   ServiceRecord,
   Token,
   WireNeeds,
@@ -92,45 +96,31 @@ export type Feature<
   readonly actions: readonly ActionSource[];
   /** Runtime escape hatch — becomes the plugin lifecycle in `.features()`. */
   readonly needs: TNeeds;
-  readonly boot?: (services: CtxOf<TNeeds> & KernelCtx) => MaybePromise<TProvides | void>;
+  /** One factory per capability, run in key order when the feature boots. */
+  readonly factories: ProvidesFactories<TNeeds, TProvides>;
+  /** Side effects only (seed, warm-up). Runs after the factories and sees their values. */
+  readonly boot?: (services: CtxOf<TNeeds> & TProvides & KernelCtx) => MaybePromise<void>;
   /**
-   * Typed handles for what `boot` provides: `billing.provides.entitlements`
-   * is a `Token` on the same wire key, typed from billing's implementation.
-   * A consumer names the capability in its `needs` and never restates the
-   * type — the Drizzle `references(() => table.column)` of features.
+   * Typed handles for what the feature provides: `billing.provides.entitlements`
+   * is a `Token` on the same wire key, typed from billing's factory and
+   * stamped with the providing feature. A consumer names the capability in
+   * its `needs` and never restates the type — the Drizzle
+   * `references(() => table.column)` of features. The keys are static, so
+   * `Object.keys(billing.provides)` is known before anything boots.
    */
-  readonly provides: ProvidesHandles<TProvides>;
+  readonly provides: { readonly [K in keyof TProvides & string]: Handle<TProvides[K], K, TName> };
 };
 
-/** One `Token` per key a feature's `boot` provides, keyed and typed by that key. */
-export type ProvidesHandles<TProvides extends ServiceRecord> = {
-  readonly [K in keyof TProvides & string]: Token<TProvides[K], K>;
+/** One factory per capability. Each gets the feature's needs; its key is the wire key. */
+export type ProvidesFactories<TNeeds extends NeedsShape, TProvides extends ServiceRecord> = {
+  readonly [K in keyof TProvides]: (services: CtxOf<TNeeds> & KernelCtx) => MaybePromise<TProvides[K]>;
 };
 
-/**
- * Boot's keys exist only once it runs, so handles are minted on first
- * access — each an ordinary token on the provided wire key. The kernel
- * resolves it like any other token: no second wiring mechanism.
- */
-function providesHandles<TProvides extends ServiceRecord>(): ProvidesHandles<TProvides> {
-  const minted = new Map<string, Token<unknown>>();
-  const handles = new Proxy(
-    {},
-    {
-      get(_target, key) {
-        if (typeof key !== 'string') return;
-        const existing = minted.get(key);
-        if (existing !== undefined) return existing;
-        const created = token<unknown>()(key);
-        minted.set(key, created);
-        return created;
-      },
-    },
-  );
-  // Erasure seam: the record is built by key at runtime; its type comes from
-  // the boot return that `feature()` inferred.
-  return handles as ProvidesHandles<TProvides>;
-}
+/** A capability handle: a token on the wire key `K`, carrying the name of the feature that provides it. */
+export type Handle<T, K extends string, TOwner extends string> = Token<T, K> & { readonly provider: TOwner };
+
+/** An erased handle — what helpers that only read `key` / `provider` accept. */
+type AnyHandle = Token<unknown> & { readonly provider: string };
 
 /**
  * The erased feature bound list helpers fold over. `boot`'s parameter
@@ -144,7 +134,9 @@ export type AnyFeature = {
   readonly use: readonly AnyFeatureSlice[];
   readonly actions: readonly ActionSource[];
   readonly needs: NeedsShape;
-  readonly boot?: (services: never) => MaybePromise<ServiceRecord | void>;
+  readonly factories: Readonly<Record<string, (services: never) => unknown>>;
+  readonly boot?: (services: never) => MaybePromise<void>;
+  readonly provides: Readonly<Record<string, AnyHandle>>;
 };
 
 /**
@@ -170,8 +162,10 @@ export function feature<
     /** Extra static manifest actions (e.g. route contracts). */
     readonly actions?: readonly ActionSource[];
     readonly needs?: TNeeds;
-    /** Runtime services (escape hatch) — merged with the slice provide. */
-    readonly boot?: (services: CtxOf<TNeeds> & KernelCtx) => MaybePromise<TProvides | void>;
+    /** One factory per capability. Each gets the feature's needs. Keys are the wire keys. */
+    readonly provides?: ProvidesFactories<TNeeds, TProvides>;
+    /** Side effects only (seed, warm-up). Runs after the factories and sees their values. */
+    readonly boot?: (services: CtxOf<TNeeds> & TProvides & KernelCtx) => MaybePromise<void>;
   },
 ): Feature<TName, TNeeds, TProvides, TUse, TRouter, TRepos> {
   const sliceKeys = new Set<string>();
@@ -187,6 +181,11 @@ export function feature<
     }
     sliceKeys.add(slice.key);
   }
+  const factories = config.provides ?? ({} as ProvidesFactories<TNeeds, TProvides>);
+  const handles: Record<string, AnyHandle> = {};
+  for (const key of Object.keys(factories)) {
+    handles[key] = { ...token<unknown>()(key), provider: name };
+  }
   return {
     name,
     router: (config.router ?? {}) as TRouter,
@@ -194,8 +193,11 @@ export function feature<
     use: (config.use ?? []) as unknown as TUse,
     actions: config.actions ?? [],
     needs: (config.needs ?? {}) as TNeeds,
+    factories,
     boot: config.boot,
-    provides: providesHandles<TProvides>(),
+    // Erasure seam: the record is built by key at runtime; its type comes
+    // from the factory returns that `feature()` inferred.
+    provides: handles as Feature<TName, TNeeds, TProvides>['provides'],
   };
 }
 
@@ -204,6 +206,7 @@ export const FEATURE_ERROR_CODES = {
   duplicateRepoKey: 'FEATURE_E002',
   duplicateSliceKey: 'FEATURE_E003',
   missingSlices: 'FEATURE_E004',
+  missingCapability: 'FEATURE_E005',
 } as const;
 
 export type FeatureErrorCode = (typeof FEATURE_ERROR_CODES)[keyof typeof FEATURE_ERROR_CODES];
@@ -350,34 +353,15 @@ export function composeRepos<const T extends readonly AnyFeature[]>(
 
 export type FeatureTokenOf<F extends AnyFeature> = Token<SlicePayloads<F['use']>, `feature.${F['name']}`>;
 
-type BootFnOf<F extends AnyFeature> = Exclude<F['boot'], undefined>;
-
-type NonVoidProvides<T> = [Exclude<T, void>] extends [never]
-  ? Record<never, never>
-  : Exclude<T, void> extends ServiceRecord
-    ? // A boot that returns only `void` gives `feature` no inference
-      // candidate for TProvides, so TS falls back to the constraint — an
-      // open `ServiceRecord` with a string index. That would read as
-      // "provides every key" and collide with everything already mounted
-      // (`db`, `kv`, …). Real provides always have literal keys, so an
-      // index-signature record can only be that fallback: treat it as empty.
-      string extends keyof Exclude<T, void>
-      ? Record<never, never>
-      : Exclude<T, void>
-    : Record<never, never>;
-
 /**
- * What the feature's boot escape hatch provides. `boot` is an optional
- * property, so `undefined` must be split off before matching the
- * function shape — and a void-only boot must resolve to an empty record
- * rather than `never` (a `never` arm would poison the whole provides
- * intersection).
+ * The service values a feature provides, keyed by wire key — each handle
+ * unwrapped to its value type. Distributive over `F`, so a union of
+ * features maps member by member (a mapped type over the union would keep
+ * only the keys every member shares).
  */
-type ProvidesOf<F extends AnyFeature> = [BootFnOf<F>] extends [never]
-  ? Record<never, never>
-  : BootFnOf<F> extends (services: never) => infer R
-    ? NonVoidProvides<Awaited<R>>
-    : Record<never, never>;
+export type ProvidedOf<F extends AnyFeature> = F extends AnyFeature
+  ? { [K in keyof F['provides']]: F['provides'][K] extends Service<infer T> ? T : never }
+  : never;
 
 /**
  * The plugin a feature becomes inside `.features()`. `WireNeeds` unwraps
@@ -386,7 +370,7 @@ type ProvidesOf<F extends AnyFeature> = [BootFnOf<F>] extends [never]
  */
 export type PluginOf<F extends AnyFeature> = Plugin<
   WireNeeds<F['needs']>,
-  ProvidesOf<F> & Readonly<Record<`feature.${F['name']}`, SlicePayloads<F['use']>>>
+  ProvidedOf<F> & Readonly<Record<`feature.${F['name']}`, SlicePayloads<F['use']>>>
 >;
 
 /** Tuple map from features to the plugins `.features()` mounts. */
@@ -408,23 +392,131 @@ export function plug<F extends AnyFeature>(f: F): PluginOf<F> {
   const actions: ActionSource[] = [...f.actions, ...f.use.flatMap(slice => slice.actions)];
 
   const boot = async (ctx: CtxOf<F['needs']> & KernelCtx): Promise<ServiceRecord> => {
-    const extra = f.boot === undefined ? undefined : await (f.boot as (services: unknown) => Promise<ServiceRecord | void>)(ctx);
+    // Erasure seam: factories and boot were typed against this feature's
+    // needs by feature(); the kernel built `ctx` from those same needs.
+    const provided: ServiceRecord = {};
+    for (const [key, factory] of Object.entries(f.factories)) {
+      provided[key] = await (factory as (services: unknown) => unknown)(ctx);
+    }
+    if (f.boot !== undefined) {
+      await (f.boot as (services: unknown) => MaybePromise<void>)({ ...ctx, ...provided });
+    }
     const payloads: Record<string, unknown> = {};
     for (const slice of f.use) {
       payloads[slice.key] = (slice.resolve as (services: unknown) => unknown)(ctx);
     }
-    return { ...extra, ...provide(tok, payloads as SlicePayloads<F['use']>) };
+    return { ...provided, ...provide(tok, payloads as SlicePayloads<F['use']>) };
   };
 
   // Factory seam: plugin()'s inference through the merged boot is erased
   // here and re-typed to the true shape declared above. feature()'s
   // signature already enforced NoReservedKeys on the caller's needs.
-  return plugin({
+  const unit = plugin({
     name: f.name,
     actions,
     needs: f.needs as NeedsShape & NoReservedKeys,
     boot: boot as (ctx: CtxOf<NeedsShape & NoReservedKeys> & KernelCtx) => Promise<ServiceRecord & NoReservedKeys>,
-  }) as unknown as PluginOf<F>;
+  });
+  return { ...unit, provides: Object.keys(f.provides) } as unknown as PluginOf<F>;
+}
+
+/* ------------------------------------------------------------------ */
+/* Capabilities in the request context                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The services a request context carries: wire key → value. Opaque on
+ * purpose — naming the merged type in the context closes a type loop
+ * through the routers. Procedures narrow it with their feature's own
+ * `needs` through {@link resolveNeeds}.
+ */
+export type ServicesBag = Readonly<Record<string, unknown>>;
+
+/** Every handle the features in the tuple provide, merged into one record. */
+export type HandlesIn<T extends readonly AnyFeature[]> = UnionToIntersection<T[number]['provides']>;
+
+/** Every service value the features in the tuple provide, keyed by wire key. */
+export type ServicesOf<T extends readonly AnyFeature[]> = UnionToIntersection<ProvidedOf<T[number]>>;
+
+/** The entries of a needs shape that are capability handles (driven services like `db` drop out). */
+export type HandleEntries<N extends NeedsShape> = {
+  [K in keyof N as N[K] extends { readonly provider: string } ? K : never]: N[K];
+};
+
+function isHandle(witness: object): witness is AnyHandle {
+  return 'provider' in witness && typeof witness.provider === 'string' && 'key' in witness && typeof witness.key === 'string';
+}
+
+/**
+ * Every handle the features provide, merged — spread it into a gateway
+ * feature's `needs` and the kernel hands it every capability. The builder
+ * guard then proves the gateway is mounted after every provider.
+ */
+export function providesOf<const T extends readonly AnyFeature[]>(features: T): HandlesIn<T> {
+  const merged: Record<string, AnyHandle> = {};
+  for (const f of features) Object.assign(merged, f.provides);
+  // Erasure seam: the merge is built by key at runtime; its type is the
+  // intersection of the features' handle records.
+  return merged as HandlesIn<T>;
+}
+
+function missingCapability(alias: string, handle: AnyHandle, where: string, remediation: string): FeatureError {
+  return new FeatureError({
+    code: FEATURE_ERROR_CODES.missingCapability,
+    message: `[feature] "${alias}" (capability "${handle.key}" from feature "${handle.provider}") is not in ${where}.`,
+    remediation,
+  });
+}
+
+/**
+ * Read every capability the features provide out of a hook context whose
+ * `needs` spread {@link providesOf} — the bag a gateway passes to its
+ * request context.
+ */
+export function servicesOf<const T extends readonly AnyFeature[]>(ctx: object, features: T): ServicesOf<T> {
+  const source = ctx as Readonly<Record<string, unknown>>;
+  const bag: Record<string, unknown> = {};
+  for (const f of features) {
+    for (const [key, handle] of Object.entries(f.provides)) {
+      if (!(key in source)) {
+        throw missingCapability(
+          key,
+          handle,
+          "this hook's context",
+          "Spread providesOf(features) into this feature's needs, so the kernel hands it every capability.",
+        );
+      }
+      bag[key] = source[key];
+    }
+  }
+  // Erasure seam: the bag is built by key at runtime; its type is the
+  // merge of the features' provided values.
+  return bag as ServicesOf<T>;
+}
+
+/**
+ * Narrow a request context's services bag with a feature's own `needs`:
+ * each capability handle resolves to its value under the local alias.
+ * Driven services (`db`) are not in the bag and drop out of the result.
+ *
+ * @throws {FeatureError} `FEATURE_E005` when a handle's key is not in the bag.
+ */
+export function resolveNeeds<N extends NeedsShape>(bag: ServicesBag, needs: N): CtxOf<HandleEntries<N>> {
+  const resolved: Record<string, unknown> = {};
+  for (const [alias, witness] of Object.entries(needs)) {
+    if (!isHandle(witness)) continue;
+    if (!(witness.key in bag)) {
+      throw missingCapability(
+        alias,
+        witness,
+        "the request context's services bag",
+        "Spread providesOf(features) into the gateway's needs and pass servicesOf(ctx, features) to createContext.",
+      );
+    }
+    resolved[alias] = bag[witness.key];
+  }
+  // Erasure seam: resolved by alias at runtime from the handles' wire keys.
+  return resolved as CtxOf<HandleEntries<N>>;
 }
 
 /* ------------------------------------------------------------------ */

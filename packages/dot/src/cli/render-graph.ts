@@ -5,11 +5,11 @@
  * source — paste-able into GitHub markdown, docs, and mermaid.live.
  *
  * The nodes are the plugins in declaration order (which IS boot order in v2 —
- * the numbering makes that visible); the edges are the manifest's
- * **observed** dependency edges, recorded by the kernel when a plugin's need
- * was satisfied during boot. `explain` never boots, so its graph shows
- * declaration order with whatever edges configure-time metadata declared;
- * `doctor` boots, so its graph shows the real wiring.
+ * the numbering makes that visible); the edges are the manifest's dependency
+ * edges. Capability edges between features are derived before boot from
+ * their static `provides` and labelled with the capability key, so
+ * `explain` (which never boots) draws them; the rest are **observed** when a
+ * plugin's need is satisfied during boot, so `doctor` shows the full wiring.
  */
 
 import type { DotAppManifest } from '../manifest.js';
@@ -67,7 +67,7 @@ export function buildMermaidGraph(manifest: DotAppManifest): string {
     // Edges referencing unknown plugins would be a kernel bug — skip rather
     // than emit invalid Mermaid.
     if (from === undefined || to === undefined) continue;
-    lines.push(`  ${from} -->|${edge.kind}| ${to}`);
+    lines.push(`  ${from} -->|${edge.key ?? edge.kind}| ${to}`);
   }
 
   return `${lines.join('\n')}\n`;

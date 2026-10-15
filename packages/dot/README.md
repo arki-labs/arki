@@ -189,7 +189,7 @@ export const orders = feature('orders', {
   repos: { orders: createOrdersRepository },
   needs: { db: service<Db>() },
   use: [jobs({ syncOrders })],
-  boot: ({ db }) => ({ ordersIndex: openIndex(db) }),
+  provides: { ordersIndex: ({ db }) => openIndex(db) },
 });
 ```
 
@@ -212,25 +212,72 @@ routes without being told the list. `dot explain --graph` draws the three
 groups, numbered in boot order.
 
 A feature depends on a capability another feature provides, not on the whole
-feature. Name it by handle — the type comes from the provider's `boot`, so it
-is written once:
+feature. A feature publishes through `provides`: one factory per capability,
+each receiving the feature's needs. Consumers name the capability by handle —
+the type comes from the provider's factory, so it is written once:
 
 ```ts
 const billing = feature('billing', {
   needs: { db: service<Db>() },
-  boot: ({ db }) => ({ entitlements: createEntitlements(db) }),
+  provides: { entitlements: ({ db }) => createEntitlements(db) },
+  boot: ({ entitlements }) => entitlements.warmUp(), // side effects only; sees the factories' values
 });
 
 const digest = feature('daily-digest', {
   needs: { access: billing.provides.entitlements }, // typed from createEntitlements
-  boot: ({ access }) => ({ digest: createDigest(access) }),
+  provides: { digest: ({ access }) => createDigest(access) },
 });
 
 defineApp('app').use(db()).features([billing, digest]); // provider first: boot order
 ```
 
 `billing.provides.entitlements` is an ordinary token on the `entitlements` wire
-key; mounting `digest` before `billing` is a compile error.
+key, stamped with `provider: 'billing'`. The keys are static, so the graph is
+data before anything boots:
+
+- mounting `digest` before `billing` is a compile error, and `configure()`
+  throws `DOT_LIFECYCLE_E020` naming both positions for code that skips types;
+- two features that need each other form a ring: TypeScript reports `TS7022`
+  on both `feature()` consts (read the two files it names), and `configure()`
+  throws `DOT_LIFECYCLE_E019` printing the ring for erased graphs;
+- `dot explain` draws `daily-digest --[entitlements]--> billing` without booting.
+
+`boot` is side effects only (seed, warm-up) and returns nothing; a
+value-returning `boot` does not compile.
+
+#### Capabilities in the request context
+
+A request context cannot name the merged service type — the routers that read
+the context are part of it, so the type loops. The context carries an opaque
+`ServicesBag` instead, and each procedure narrows it with its feature's own
+`needs`. A gateway feature, mounted last, spreads every handle into its needs
+(so the builder proves every provider boots first) and builds the bag:
+
+```ts
+import { feature, providesOf, resolveNeeds, servicesOf } from '@arki/dot/feature';
+
+export const gateway = feature('gateway', {
+  needs: { db: service<Db>(), ...providesOf(features) },
+  provides: {
+    rpc: ctx => ({
+      context: (headers: Headers) => createContext({ headers, db: ctx.db, services: servicesOf(ctx, features) }),
+    }),
+  },
+});
+
+// core/orpc.ts — the one app-side middleware
+export const needs = <N extends NeedsShape>(n: N) =>
+  o.middleware(({ context, next }) => next({ context: { services: resolveNeeds(context.services, n) } }));
+
+// a procedure names the handles it uses, inline — typed from the provider
+export const ingestUrl = protectedProcedure
+  .use(needs({ entitlements: billing.provides.entitlements }))
+  .handler(({ context }) => ingest(context.services.entitlements));
+```
+
+`resolveNeeds` keeps only handles (driven services such as `db` stay on the
+context explicitly) and throws `FEATURE_E005` naming the alias, key and
+provider when a capability is missing from the bag.
 
 ### Tokens — cross-package service contracts
 
@@ -651,9 +698,11 @@ dot explain --app ./my-app.ts --json | jq '.data.plugins'
 ```
 
 The CLI emits the same envelope shape as the in-process diagnostics snapshot
-(`app.diagnostics`), so the same downstream tools can consume either. The
-manifest's dependency edges are **observed, not declared** — the kernel
-records which plugin's published service satisfied which need during boot.
+(`app.diagnostics`), so the same downstream tools can consume either. Edges
+between features are derived before boot from their static `provides` and
+carry the capability `key`, so `explain` shows them; the rest are **observed** —
+the kernel records which plugin's published service satisfied which need
+during boot.
 
 ### `dot new <app-name>`
 

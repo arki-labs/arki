@@ -139,7 +139,7 @@ function renderTextManifest(manifest: DotAppManifest): string {
     lines.push('  (none)');
   } else {
     for (const d of manifest.dependencies) {
-      lines.push(`  ${d.from} --[${d.kind}]--> ${d.to}`);
+      lines.push(`  ${d.from} --[${d.key ?? d.kind}]--> ${d.to}`);
     }
   }
   lines.push('');

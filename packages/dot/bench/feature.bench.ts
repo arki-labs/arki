@@ -30,7 +30,9 @@ type HandFeature = {
   use: readonly FeatureSlice<string, { job: number }, unknown>[];
   actions: readonly never[];
   needs: Record<string, never>;
+  factories: Record<string, never>;
   boot: undefined;
+  provides: Record<string, never>;
 };
 
 const db: Db = { tag: 'db' };
@@ -91,7 +93,9 @@ const handDefine = (spec: Spec): HandFeature => ({
   use: spec.use ?? [],
   actions: [],
   needs: {},
+  factories: {},
   boot: undefined,
+  provides: {},
 });
 const handDefineAll = (specs: readonly Spec[]): HandFeature[] => specs.map(spec => handDefine(spec));
 
@@ -136,7 +140,7 @@ function handReposChecked(features: readonly HandFeature[], database: Db): Recor
 const describe = (features: readonly AnyFeature[] | readonly HandFeature[]): string[] =>
   features.map(
     feature =>
-      `${feature.name} router=${Object.keys(feature.router).join('+')} repos=${Object.keys(feature.repos).join('+')} use=${feature.use.map(slice => slice.key).join('+')} actions=${feature.actions.length} needs=${Object.keys(feature.needs).length} boot=${typeof feature.boot}`,
+      `${feature.name} router=${Object.keys(feature.router).join('+')} repos=${Object.keys(feature.repos).join('+')} use=${feature.use.map(slice => slice.key).join('+')} actions=${feature.actions.length} needs=${Object.keys(feature.needs).length} provides=${Object.keys(feature.provides).join('+')} boot=${typeof feature.boot}`,
   );
 
 const unchecked = 'no duplicate-key check: a repeated key silently overwrites the earlier one';

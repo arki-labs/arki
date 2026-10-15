@@ -191,4 +191,9 @@ export type DependencyEdge = {
   from: string;
   to: string;
   kind: DependencyEdgeKind;
+  /**
+   * The capability (wire key) the edge carries. Set on edges the kernel
+   * derives before boot from a feature's static `provides`.
+   */
+  key?: string;
 };

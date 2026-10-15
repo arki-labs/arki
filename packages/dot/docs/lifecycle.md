@@ -172,6 +172,13 @@ The kernel emits stable, machine-readable error codes:
 | `DOT_LIFECYCLE_E013`  | A published wire key collides with an earlier provider.     |
 | `DOT_LIFECYCLE_E014`  | A service key uses the reserved `$` (kernel) prefix.        |
 | `DOT_LIFECYCLE_E015`  | A hook exceeded the `hookTimeoutMs` watchdog budget.        |
+| `DOT_LIFECYCLE_E019`  | Feature capabilities form a ring (printed in order) — at `configure()`. |
+| `DOT_LIFECYCLE_E020`  | A feature's capability provider is mounted after it — at `configure()`. |
+
+`TS7022` ("implicitly has type 'any' because it … is referenced directly or
+indirectly in its own initializer") on a `feature()` const is the compile-time
+face of a capability ring: two feature modules name each other's handles.
+Read the two files it names; E019 is the backstop for erased graphs.
 
 `E009` (dependency cycle) and `E010` (missing dependency) are **retired**
 with the v2 wiring model — declaration order is boot order, so cycles and

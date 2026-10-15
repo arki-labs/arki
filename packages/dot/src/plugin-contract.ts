@@ -393,6 +393,14 @@ export type Plugin<TNeeds extends ServiceRecord = ServiceRecord, TProvides exten
    */
   readonly role?: DotPluginRole;
   /**
+   * The publish keys this plugin provides, known before boot. A feature
+   * fills it from its `provides` factories, so the kernel can check
+   * ordering and rings at configure time and `dot explain` can draw the
+   * edges without booting. Absent for `plugin()` units — what they publish
+   * is known only once `boot` returns.
+   */
+  readonly provides?: readonly string[];
+  /**
    * The logging slot. At most one plugin per app fills it. The kernel calls
    * the factory before its first lifecycle record and closes the handle after
    * its last one (after `dispose`, or after a failed `configure`/`boot`/`start`).
