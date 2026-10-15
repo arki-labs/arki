@@ -3,7 +3,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createKey } from '../key.js';
 import { redisKeys, redisStore } from './index.js';
-import { ACQUIRE, EXTEND, RELEASE } from './scripts.js';
+import {
+  ACQUIRE,
+  EXTEND,
+  PERMIT_ACQUIRE,
+  PERMIT_EXTEND,
+  PERMIT_RELEASE,
+  RELEASE,
+  SHARED_ACQUIRE,
+  SHARED_EXTEND,
+  SHARED_RELEASE,
+} from './scripts.js';
 
 // `lazyConnect` means no socket is ever opened: these tests need no Redis.
 const clients: Redis[] = [];
@@ -25,8 +35,8 @@ describe('redisStore (no server)', () => {
       kind: 'lease',
       scope: 'cluster',
       wait: 'wake',
-      shared: false,
-      permits: false,
+      shared: true,
+      permits: true,
       fence: 'best-effort',
       releasedOnCrash: 'after-ttl',
       clock: 'store',
@@ -68,7 +78,18 @@ describe('redisStore (no server)', () => {
   });
 
   it('does not use DELEX, because the supported floor is Redis 7', () => {
-    for (const source of [ACQUIRE, RELEASE, EXTEND]) expect(source).not.toMatch(/DELEX/i);
+    for (const source of [
+      ACQUIRE,
+      RELEASE,
+      EXTEND,
+      PERMIT_ACQUIRE,
+      PERMIT_RELEASE,
+      PERMIT_EXTEND,
+      SHARED_ACQUIRE,
+      SHARED_RELEASE,
+      SHARED_EXTEND,
+    ])
+      expect(source).not.toMatch(/DELEX/i);
   });
 
   it('bumps the fence in the same step as the win, so a fence can never be taken without the lock', () => {
