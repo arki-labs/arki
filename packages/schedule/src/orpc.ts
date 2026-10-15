@@ -39,12 +39,12 @@ const bodyOf = (spec: CronSpec): AnySchema => (isSchema(spec) ? spec : spec.body
 const skippedOf = (spec: CronSpec): Readonly<Record<string, unknown>> => (isSchema(spec) ? lockHeld : spec.skipped);
 
 /**
- * Validate with `schema`, but hand back the ORIGINAL value. oRPC replaces the
- * output with what the schema returns, and zod rebuilds objects in schema key
- * order and strips unknown keys. The wire must carry the value as produced —
- * byte for byte, keys in the order the run wrote them.
+ * Validates the body against `schema`, and returns the ORIGINAL value, not the
+ * parsed one. oRPC would send the parsed value, and zod rebuilds objects in
+ * schema key order and strips unknown keys. We keep the original so the key
+ * order stays as the run wrote it, for byte parity of cron responses.
  */
-export function validated<S extends AnySchema>(schema: S): Schema<unknown, InferSchemaOutput<S>> {
+export function checkOnly<S extends AnySchema>(schema: S): Schema<unknown, InferSchemaOutput<S>> {
   return {
     '~standard': {
       version: 1,
@@ -86,7 +86,7 @@ function procedure<S extends CronSpec>(name: string, spec: S) {
   return oc
     .$meta<CronMeta>({ cron: { skipped: skippedOf(spec) } })
     .route({ method: 'POST', path: `/${name}`, outputStructure: 'detailed', tags: ['cron'] })
-    .output(validated(detailedSchema(spec)));
+    .output(checkOnly(detailedSchema(spec)));
 }
 export type CronContract<B extends CronSpecs> = { readonly [K in keyof B]: ReturnType<typeof procedure<B[K]>> };
 
@@ -95,10 +95,10 @@ export type CronContract<B extends CronSpecs> = { readonly [K in keyof B]: Retur
  * (`/<name>`) are fixed. Spread per-feature pieces into one call.
  *
  * ```ts
- * export const cronContract = cronContract({ ...companionCron, ...pushCron });
+ * export const cronContract = defineCronContract({ ...companionCronSpecs, ...pushCronSpecs });
  * ```
  */
-export function cronContract<const B extends CronSpecs>(specs: B): CronContract<B> {
+export function defineCronContract<const B extends CronSpecs>(specs: B): CronContract<B> {
   const out: Record<string, unknown> = {};
   for (const [name, spec] of Object.entries(specs)) out[name] = procedure(name, spec);
   return out as CronContract<B>; // erasure seam: built key by key above, typed by the same map
@@ -175,15 +175,15 @@ type Builders = Record<string, { handler(fn: (o: { context: CronContext }) => Pr
 /**
  * The router. Checked at the call: every name is a schedule of some feature,
  * and every 200 body schema is EXACTLY the type put on the wire (two-way), so
- * a schema cannot drop or invent a key. `os` is the app's implementer of the
+ * a schema cannot drop or invent a key. `cronImplementer` is the app's implementer of the
  * contract with the app's middlewares (its auth) already applied:
  *
  * ```ts
- * const os = implement(cronContract).$context<CronContext>().use(cronSecret);
- * export const cronRouter = cronRouter(os, cronContract, features, policy);
+ * const cronImplementer = implement(cronContract).$context<CronContext>().use(cronSecret);
+ * export const cronRouter = cronRouterFor(cronImplementer, cronContract, features, policy);
  * ```
  */
-export function cronRouter<const B extends CronSpecs, const F extends readonly MountedFeature[]>(
+export function cronRouterFor<const B extends CronSpecs, const F extends readonly MountedFeature[]>(
   os: unknown,
   contract: CronContract<B>,
   features: F &

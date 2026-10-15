@@ -180,9 +180,9 @@ is your policy. Needs the optional peers `@orpc/contract` and `@orpc/server`.
 
 ```ts
 // server-only
-const cronContract = cronContract({ 'send-digest': digestRunSchema });
-const os = implement(cronContract).$context<CronContext>().use(cronSecret); // your auth
-export const crons = cronRouter(os, cronContract, features, {
+const cronContract = defineCronContract({ 'send-digest': digestRunSchema });
+const cronImplementer = implement(cronContract).$context<CronContext>().use(cronSecret); // your auth
+export const crons = cronRouterFor(cronImplementer, cronContract, features, {
   respond: {}, // required for a cron whose run value is not exactly its body
   skipped: () => skipped(), // overlap or held lock → the cron's lock-held body (200)
   failed: (_name, cause) => rethrow(cause), // leave oRPC; your route's 500 boundary answers
@@ -203,7 +203,7 @@ What it checks at compile time: every name is a schedule of some feature,
 and every body schema is exactly the type the run puts on the wire (both
 ways), or that cron must say in `respond` how its value maps. On the wire:
 
-- a run's body is the value as produced — `validated()` checks it but keeps
+- a run's body is the value as produced — `checkOnly()` checks it but keeps
   the original, so key order is the run's, not the schema's;
 - `fail(status, body)` answers exactly `body`, never oRPC's error envelope;
 - `skipped()` answers `{ "skipped": "lock-held" }`, or the cron's own legacy

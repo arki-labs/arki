@@ -16,7 +16,7 @@ import { service } from '@arki/dot/plugin';
 import type { ScheduleOutcome } from './dot.js';
 import type { CronContext } from './orpc.js';
 import { schedules } from './dot.js';
-import { cronContract, cronErrorBody, cronRouter, fail, ok, rethrow, skipped, validated } from './orpc.js';
+import { checkOnly, cronErrorBody, cronRouterFor, defineCronContract, fail, ok, rethrow, skipped } from './orpc.js';
 
 type Clock = { readonly now: () => number };
 const needs = { clock: service<Clock>() };
@@ -40,7 +40,7 @@ const reader = feature('reader', {
 const features = [reader] as const;
 
 // Keys on purpose NOT in the value's order: the wire must keep the value's order anyway.
-const contract = cronContract({
+const contract = defineCronContract({
   gate: z.object({ skipped: z.number(), gated: z.number() }),
   retain: z.object({ purged: z.number() }),
   items: {
@@ -49,8 +49,8 @@ const contract = cronContract({
   },
 });
 
-const os = implement(contract).$context<CronContext>();
-const router = cronRouter(os, contract, features, {
+const cronImplementer = implement(contract).$context<CronContext>();
+const router = cronRouterFor(cronImplementer, contract, features, {
   respond: { retain: v => (v.ok ? ok(v.body) : fail(500, { error: v.error })) },
   skipped: () => skipped(),
   failed: (_name, cause) => rethrow(cause),
@@ -124,21 +124,21 @@ describe('cron procedures on the wire', () => {
   });
 });
 
-describe('validated', () => {
+describe('checkOnly', () => {
   it('returns the original value, not the schema-rebuilt one', async () => {
     const value = { b: 1, a: 2, extra: true };
-    const result = await validated(z.object({ a: z.number(), b: z.number() }))['~standard'].validate(value);
+    const result = await checkOnly(z.object({ a: z.number(), b: z.number() }))['~standard'].validate(value);
     expect(result).toEqual({ value });
     expect('value' in result && result.value).toBe(value);
   });
 
   it('passes issues through', async () => {
-    const result = await validated(z.object({ a: z.number() }))['~standard'].validate({ a: 'x' });
+    const result = await checkOnly(z.object({ a: z.number() }))['~standard'].validate({ a: 'x' });
     expect('issues' in result && result.issues?.length).toBe(1);
   });
 });
 
-/* The rejections `cronRouter` must give, at compile time. */
+/* The rejections `cronRouterFor` must give, at compile time. */
 const policy = {
   respond: {},
   skipped: () => skipped(),
@@ -148,38 +148,38 @@ const policy = {
 const osOf = <C extends object>(c: C) => implement(c as Record<string, never>).$context<CronContext>();
 
 // 1. a cron name no feature schedule declares
-const c1 = cronContract({ nope: z.object({}) });
+const c1 = defineCronContract({ nope: z.object({}) });
 // @ts-expect-error 'nope' is not a schedule of any feature
-cronRouter(osOf(c1), c1, features, policy);
+cronRouterFor(osOf(c1), c1, features, policy);
 
 // 2. a MISSING key: { gated } vs the value { gated, skipped } — zod would silently strip `skipped`
-const c2 = cronContract({ gate: z.object({ gated: z.number() }) });
+const c2 = defineCronContract({ gate: z.object({ gated: z.number() }) });
 // @ts-expect-error missing key → 'gate' becomes a required respond
-cronRouter(osOf(c2), c2, features, policy);
+cronRouterFor(osOf(c2), c2, features, policy);
 
 // 3. an EXTRA key
-const c3 = cronContract({ gate: z.object({ gated: z.number(), skipped: z.number(), extra: z.string() }) });
+const c3 = defineCronContract({ gate: z.object({ gated: z.number(), skipped: z.number(), extra: z.string() }) });
 // @ts-expect-error extra key → 'gate' becomes a required respond
-cronRouter(osOf(c3), c3, features, policy);
+cronRouterFor(osOf(c3), c3, features, policy);
 
 // 4. a respond whose Ok body is not the schema: answers `v` instead of `v.body`
-const c4 = cronContract({ retain: z.object({ purged: z.number() }) });
+const c4 = defineCronContract({ retain: z.object({ purged: z.number() }) });
 // @ts-expect-error Ok body { ok, body } | { ok, error } is not { purged }
-cronRouter(osOf(c4), c4, features, { ...policy, respond: { retain: v => ok(v) } });
+cronRouterFor(osOf(c4), c4, features, { ...policy, respond: { retain: v => ok(v) } });
 
 // 5. a respond that invents a key: Ok is invariant, so { purged, extra } is not an Ok<{ purged }>
-cronRouter(osOf(c4), c4, features, {
+cronRouterFor(osOf(c4), c4, features, {
   ...policy,
   // @ts-expect-error extra key in the Ok body
   respond: { retain: v => (v.ok ? ok({ ...v.body, extra: 1 }) : fail(500, {})) },
 });
 
 // Accepted: exact body, exact unwrap.
-const c6 = cronContract({
+const c6 = defineCronContract({
   gate: z.object({ gated: z.number(), skipped: z.number() }),
   retain: z.object({ purged: z.number() }),
 });
-cronRouter(osOf(c6), c6, features, {
+cronRouterFor(osOf(c6), c6, features, {
   ...policy,
   respond: { retain: v => (v.ok ? ok(v.body) : fail(500, { error: v.error })) },
 });
