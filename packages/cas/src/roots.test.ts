@@ -103,7 +103,12 @@ function residual(coefficients: readonly Rational[], root: Node, scope: Readonly
   let sum: Field = [ZERO, ZERO, ZERO, ZERO];
   let power: Field = [R(1), ZERO, ZERO, ZERO];
   for (const c of coefficients) {
-    sum = [sum[0].plus(power[0].times(c)), sum[1].plus(power[1].times(c)), sum[2].plus(power[2].times(c)), sum[3].plus(power[3].times(c))];
+    sum = [
+      sum[0].plus(power[0].times(c)),
+      sum[1].plus(power[1].times(c)),
+      sum[2].plus(power[2].times(c)),
+      sum[3].plus(power[3].times(c)),
+    ];
     power = fieldMultiply(power, value, r);
   }
   return sum;
@@ -162,7 +167,9 @@ describe('exactRoots over ℚ', () => {
   });
 
   it('property: every root of a random rational quadratic substitutes to exactly 0', () => {
-    const rational = fc.tuple(fc.integer({ min: -30, max: 30 }), fc.integer({ min: 1, max: 6 })).map(([n, d]) => `${n}/${d}`);
+    const rational = fc
+      .tuple(fc.integer({ min: -30, max: 30 }), fc.integer({ min: 1, max: 6 }))
+      .map(([n, d]) => `${n}/${d}`);
     fc.assert(
       fc.property(rational, rational, rational, (a, b, c) => {
         fc.pre(!R(a).isZero());

@@ -31,7 +31,11 @@ export function constantSign(p: Poly, ctx: Context): -1 | 0 | 1 | undefined {
   const exact = constantValue(p);
   if (exact !== undefined) return exact.sign();
   let degree = 1;
-  for (const term of p.values()) degree = Math.max(degree, term.m.reduce((sum, e) => sum + e, 0));
+  for (const term of p.values())
+    degree = Math.max(
+      degree,
+      term.m.reduce((sum, e) => sum + e, 0),
+    );
   for (let scale = START_SCALE; scale * degree <= ctx.budget.limits.digits; scale *= 2) {
     ctx.budget.spend(p.size * degree);
     const eps = Rational.fromParts(1n, 10n ** BigInt(scale));

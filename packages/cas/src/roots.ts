@@ -111,7 +111,10 @@ function polySqrt(p: Poly, ctx: Context): Poly | undefined {
     const rest = subtract(p, multiply(q, q, ctx.budget));
     const next = leadingTerm(rest);
     if (next === undefined) return q;
-    const m = Array.from({ length: Math.max(next.m.length, first.m.length) }, (_, g) => (next.m[g] ?? 0) - (first.m[g] ?? 0));
+    const m = Array.from(
+      { length: Math.max(next.m.length, first.m.length) },
+      (_, g) => (next.m[g] ?? 0) - (first.m[g] ?? 0),
+    );
     // The next term of q divides the remainder's lead by 2·lead(q) and is smaller than lead(q).
     if (m.some(e => e < 0) || compareMonomials(m, first.m) >= 0) return undefined;
     q = add(q, fromTerm(m, next.c.dividedBy(first.c.times(2))));
@@ -133,7 +136,8 @@ function sqrtOf(m: Poly, ctx: Context): RatFun {
   const [s, r] = squarePart(content.numerator * content.denominator, ctx);
   const root = polySqrt(primitive, ctx);
   const multiplier = ctx.fromPoly(scale(root ?? constant(ONE), Rational.fromParts(s, content.denominator)));
-  const radicand = root === undefined ? scale(primitive, Rational.fromParts(r, 1n)) : constant(Rational.fromParts(r, 1n));
+  const radicand =
+    root === undefined ? scale(primitive, Rational.fromParts(r, 1n)) : constant(Rational.fromParts(r, 1n));
   if (constantValue(radicand)?.eq(1) === true) return multiplier;
   return ctx.multiply(multiplier, kernelValue('sqrt', [ctx.fromPoly(radicand)], AT, ctx));
 }
@@ -178,7 +182,8 @@ export function exactRoots(form: PolynomialForm, options: CasOptions = {}): Exac
   }
   const x = ctx.name('x', AT);
   let common = constant(ONE);
-  for (const v of values) common = multiply(common, exactQuotient(v.den, gcd(common, v.den, ctx.budget), ctx), ctx.budget);
+  for (const v of values)
+    common = multiply(common, exactQuotient(v.den, gcd(common, v.den, ctx.budget), ctx), ctx.budget);
   const scaled = values.map(v => multiply(v.num, exactQuotient(common, v.den, ctx), ctx.budget));
   const zeros = scaled.findIndex(c => !isZero(c));
   const p = fromCoefficientsIn(scaled.slice(zeros), x);
@@ -191,16 +196,29 @@ export function exactRoots(form: PolynomialForm, options: CasOptions = {}): Exac
     const cs = coefficientsIn(part, x);
     if (cs.length === 2) {
       const [c0 = EMPTY, c1 = EMPTY] = cs;
-      roots.push({ value: ctx.quotient(negate(c0), c1), multiplicity, real: true, order: -constantFloat(c0, ctx) / constantFloat(c1, ctx) });
+      roots.push({
+        value: ctx.quotient(negate(c0), c1),
+        multiplicity,
+        real: true,
+        order: -constantFloat(c0, ctx) / constantFloat(c1, ctx),
+      });
     } else if (cs.length === 3) {
       const [c = EMPTY, b = EMPTY, a = EMPTY] = cs;
-      const discriminant = subtract(multiply(b, b, ctx.budget), scale(multiply(a, c, ctx.budget), Rational.fromParts(4n, 1n)));
+      const discriminant = subtract(
+        multiply(b, b, ctx.budget),
+        scale(multiply(a, c, ctx.budget), Rational.fromParts(4n, 1n)),
+      );
       const twoA = ctx.fromPoly(scale(a, Rational.fromParts(2n, 1n)));
       const minusB = ctx.fromPoly(negate(b));
       const [af, bf] = [constantFloat(a, ctx), constantFloat(b, ctx)];
       const sign = constantSign(discriminant, ctx);
       if (sign === 0) {
-        roots.push({ value: ctx.divide(minusB, twoA), multiplicity: 2 * multiplicity, real: true, order: -bf / (2 * af) });
+        roots.push({
+          value: ctx.divide(minusB, twoA),
+          multiplicity: 2 * multiplicity,
+          real: true,
+          order: -bf / (2 * af),
+        });
       } else if (sign === undefined) {
         numeric.push({ coefficients: cs.map(c => constantFloat(c, ctx)), multiplicity });
       } else {
@@ -208,7 +226,10 @@ export function exactRoots(form: PolynomialForm, options: CasOptions = {}): Exac
         const root = sqrtOf(magnitude, ctx);
         const s = sign > 0 ? root : ctx.multiply(root, ctx.generatorValue(ctx.atom('i', AT)));
         const offset = Math.sqrt(Math.abs(constantFloat(discriminant, ctx))) / (2 * af);
-        for (const [shift, sign2] of [[ctx.negate(s), -1], [s, 1]] as const) {
+        for (const [shift, sign2] of [
+          [ctx.negate(s), -1],
+          [s, 1],
+        ] as const) {
           const order = sign > 0 ? -bf / (2 * af) + sign2 * offset : sign2;
           roots.push({ value: ctx.divide(ctx.add(minusB, shift), twoA), multiplicity, real: sign > 0, order });
         }
@@ -220,7 +241,11 @@ export function exactRoots(form: PolynomialForm, options: CasOptions = {}): Exac
   const emitter = new Emitter(ctx);
   const sorted = roots.sort((a, b) => (a.real === b.real ? a.order - b.order : a.real ? -1 : 1));
   return {
-    roots: sorted.map(r => ({ value: exprOf(fractionNode(emitter, r.value), ctx), multiplicity: r.multiplicity, real: r.real })),
+    roots: sorted.map(r => ({
+      value: exprOf(fractionNode(emitter, r.value), ctx),
+      multiplicity: r.multiplicity,
+      real: r.real,
+    })),
     numeric,
     exact: numeric.length === 0,
   };
@@ -229,5 +254,7 @@ export function exactRoots(form: PolynomialForm, options: CasOptions = {}): Exac
 /** Always one fraction, constant denominators included: `(sqrt(5) + 1) / 2`. */
 function fractionNode(emitter: Emitter, r: RatFun): Node {
   const [num, den] = emitter.fractionParts(r);
-  return constantValue(den)?.eq(1) === true ? emitter.polyNode(num) : binary('/', emitter.polyNode(num), emitter.polyNode(den));
+  return constantValue(den)?.eq(1) === true
+    ? emitter.polyNode(num)
+    : binary('/', emitter.polyNode(num), emitter.polyNode(den));
 }

@@ -122,7 +122,7 @@ export function maxDegree(p: Poly): number {
 /** The highest exponent of each generator id. */
 function degrees(p: Poly): number[] {
   const out: number[] = [];
-  for (const term of p.values()) for (const [g, e] of term.m.entries()) (out[g] = Math.max(out[g] ?? 0, e));
+  for (const term of p.values()) for (const [g, e] of term.m.entries()) out[g] = Math.max(out[g] ?? 0, e);
   return out;
 }
 
@@ -430,4 +430,3 @@ export function polySqrt(p: Poly, budget: Budget): Poly | undefined {
   }
   return root;
 }
-

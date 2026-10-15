@@ -10,13 +10,23 @@ import { InvalidArgumentError } from '@arki/math/errors';
 
 import type { RatFun } from './context.js';
 import type { CasInput, CasOptions, CasResult, Condition } from './core.js';
+import type { Part } from './emit.js';
 import type { Poly } from './poly.js';
 import { inputDomain, lostConditions } from './conditions.js';
 import { Context } from './context.js';
 import { CasError } from './core.js';
-import type { Part } from './emit.js';
 import { binary, Emitter, exprOf, numberNode } from './emit.js';
-import { gcd as polyGcd, coefficientsIn, constantValue, degreeIn, EMPTY, fromCoefficientsIn, generators, leadingTerm, scale } from './poly.js';
+import {
+  coefficientsIn,
+  constantValue,
+  degreeIn,
+  EMPTY,
+  fromCoefficientsIn,
+  generators,
+  leadingTerm,
+  gcd as polyGcd,
+  scale,
+} from './poly.js';
 import { inputExpr, read } from './read.js';
 
 export { exactRoots } from './roots.js';
@@ -64,7 +74,8 @@ function firstKernel(value: RatFun, ctx: Context): Span | undefined {
   let first: Span | undefined;
   for (const g of [...generators(value.num), ...generators(value.den)]) {
     const gen = ctx.generators[g];
-    if ((gen?.kind === 'kernel' || gen?.kind === 'atom') && (first === undefined || gen.span.start < first.start)) first = gen.span;
+    if ((gen?.kind === 'kernel' || gen?.kind === 'atom') && (first === undefined || gen.span.start < first.start))
+      first = gen.span;
   }
   return first;
 }
@@ -86,9 +97,18 @@ function collectedNode(emitter: Emitter, p: Poly, x: number): Node {
   for (let i = coefficients.length - 1; i >= 0; i--) {
     const c = coefficients[i];
     if (c === undefined || c.size === 0) continue;
-    const power = i === 0 ? undefined : i === 1 ? emitter.generatorNode(x) : binary('^', emitter.generatorNode(x), numberNode(String(i)));
+    const power =
+      i === 0
+        ? undefined
+        : i === 1
+          ? emitter.generatorNode(x)
+          : binary('^', emitter.generatorNode(x), numberNode(String(i)));
     if (c.size === 1 || power === undefined) {
-      parts.push(...emitter.parts(power === undefined ? c : fromCoefficientsIn([...Array.from({ length: i }, () => EMPTY), c], x)));
+      parts.push(
+        ...emitter.parts(
+          power === undefined ? c : fromCoefficientsIn([...Array.from({ length: i }, () => EMPTY), c], x),
+        ),
+      );
     } else {
       parts.push({ negative: false, node: () => binary('*', emitter.polyNode(c), power) });
     }
@@ -118,10 +138,19 @@ export function rationalize(
 ): { readonly numerator: Expr; readonly denominator: Expr; readonly conditions: readonly Condition[] } {
   const { ctx, value } = load(input, options);
   const span = firstKernel(value, ctx);
-  if (span !== undefined) throw new CasError('the input is not a rational function: it holds a function call or a non-integer power', 'not-rational', span);
+  if (span !== undefined)
+    throw new CasError(
+      'the input is not a rational function: it holds a function call or a non-integer power',
+      'not-rational',
+      span,
+    );
   const emitter = new Emitter(ctx);
   const [num, den] = emitter.fractionParts(value);
-  return { numerator: exprOf(emitter.polyNode(num), ctx), denominator: exprOf(emitter.polyNode(den), ctx), conditions: conditionsOf(value, ctx) };
+  return {
+    numerator: exprOf(emitter.polyNode(num), ctx),
+    denominator: exprOf(emitter.polyNode(den), ctx),
+    conditions: conditionsOf(value, ctx),
+  };
 }
 
 /**
@@ -160,7 +189,11 @@ function offenderOf(value: RatFun, variable: string, ctx: Context): Offender | u
     if (gen?.kind === 'name' && gen.name !== variable) found = { reason: 'other-variable', span: gen.span };
     else if (gen?.kind === 'atom') found = { reason: 'unsupported-constant', span: gen.span };
     else if (gen?.kind === 'kernel') {
-      const reason = gen.names.has(variable) ? 'transcendental' : gen.names.size > 0 ? 'other-variable' : 'unsupported-constant';
+      const reason = gen.names.has(variable)
+        ? 'transcendental'
+        : gen.names.size > 0
+          ? 'other-variable'
+          : 'unsupported-constant';
       found = { reason, span: gen.span };
     }
     if (found !== undefined && (first === undefined || found.span.start < first.span.start)) first = found;
@@ -190,6 +223,8 @@ export function polynomialIn(input: CasInput, variable: string, options: CasOpti
     const toCoefficients = (p: Poly): Coefficient[] => split(p).map(c => coefficientOf(ctx.fromPoly(c), emitter, ctx));
     return { kind: 'rational', numerator: toCoefficients(num), denominator: toCoefficients(den), conditions };
   }
-  const coefficients = split(value.num).map(c => coefficientOf(c.size === 0 ? ctx.fromPoly(c) : ctx.quotient(c, value.den), emitter, ctx));
+  const coefficients = split(value.num).map(c =>
+    coefficientOf(c.size === 0 ? ctx.fromPoly(c) : ctx.quotient(c, value.den), emitter, ctx),
+  );
   return { kind: 'polynomial', coefficients, conditions };
 }

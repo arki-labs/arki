@@ -16,18 +16,20 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
 import type { Expr, Node } from '@arki/expr';
+import type { Rational } from '@arki/math/rational';
 import { children, parse, print } from '@arki/expr';
 import { compile as compileFloat } from '@arki/expr/float';
 import { compile } from '@arki/expr/rational';
 import { DivisionByZeroError, InvalidArgumentError, MathError, RoundingNecessaryError } from '@arki/math/errors';
-import type { Rational } from '@arki/math/rational';
 
 import type { Condition } from './index.js';
 import { simplify } from './simplify.js';
 
 type Outcome = Rational | 'undefined' | 'inexact';
 
-const smallRational = fc.tuple(fc.integer({ min: -9, max: 9 }), fc.integer({ min: 1, max: 4 })).map(([n, d]) => (d === 1 ? String(n) : `${n}/${d}`));
+const smallRational = fc
+  .tuple(fc.integer({ min: -9, max: 9 }), fc.integer({ min: 1, max: 4 }))
+  .map(([n, d]) => (d === 1 ? String(n) : `${n}/${d}`));
 
 /** Rational functions over ℚ[π, e] in x and y. */
 const algebraic = fc.letrec<{ node: string }>(tie => ({
@@ -182,7 +184,9 @@ describe('simplify preserves values exactly where the input is defined', () => {
 describe('kernel rules preserve values in floating point', () => {
   it('exp, ln, sin, cos, sqrt and abs: within 1e-9 where the input is defined', () => {
     // Small points: nested exp grows fast, and sin of a huge argument amplifies rounding beyond any fixed tolerance.
-    const xs = fc.tuple(fc.integer({ min: -8, max: 8 }), fc.integer({ min: -8, max: 8 })).map(([a, b]) => [a / 8, b / 8] as const);
+    const xs = fc
+      .tuple(fc.integer({ min: -8, max: 8 }), fc.integer({ min: -8, max: 8 }))
+      .map(([a, b]) => [a / 8, b / 8] as const);
     fc.assert(
       fc.property(transcendental, xs, (text, [x, y]) => {
         const input = parse(text);
@@ -228,7 +232,9 @@ describe('conditions are necessary: breaking one makes the input undefined, whil
     expect(floatAt(r.result, x, 0)).toBeDefined();
     const broken = r.conditions.some(c => {
       const v = floatAt(c.subject, x, 0);
-      return v === undefined || (c.relation === 'nonzero' ? Math.abs(v) < 1e-12 : c.relation === 'positive' ? v <= 0 : v < 0);
+      return (
+        v === undefined || (c.relation === 'nonzero' ? Math.abs(v) < 1e-12 : c.relation === 'positive' ? v <= 0 : v < 0)
+      );
     });
     expect(broken).toBe(true);
   });

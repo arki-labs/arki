@@ -23,7 +23,19 @@ import type { Emitter } from './emit.js';
 import type { Poly } from './poly.js';
 import { rationalValue } from './context.js';
 import { exprOf } from './emit.js';
-import { constantValue, divideExact, gcd, generators, isZero, multiply, polyKey, rationalContent, scale, squareFreePart, subtract } from './poly.js';
+import {
+  constantValue,
+  divideExact,
+  gcd,
+  generators,
+  isZero,
+  multiply,
+  polyKey,
+  rationalContent,
+  scale,
+  squareFreePart,
+  subtract,
+} from './poly.js';
 import { kernelValue } from './read.js';
 import { holds, SignOracle } from './sign.js';
 
@@ -49,16 +61,19 @@ function kernelDomain(gen: Kernel, ctx: Context, into: Domain): void {
   if (u === undefined) return;
   const fn = gen.fn;
   const n = v === undefined ? undefined : rationalValue(v);
-  const signed = (subject: RatFun, relation: Restriction['relation']): void => void into.signed.push({ subject, relation });
+  const signed = (subject: RatFun, relation: Restriction['relation']): void =>
+    void into.signed.push({ subject, relation });
   if (fn === 'ln' || fn === 'log' || fn === 'log10' || fn === 'log2') signed(u, 'positive');
   if (fn === 'log' && v !== undefined) {
     signed(v, 'positive');
     into.nonzero.push(minusOne(v).num);
   }
   // Even roots: nthRoot(u) is sqrt(u); an odd degree is defined for every real u.
-  if (fn === 'sqrt' || (fn === 'nthRoot' && (v === undefined || (n?.isInteger() === true && n.numerator % 2n === 0n)))) signed(u, 'nonnegative');
+  if (fn === 'sqrt' || (fn === 'nthRoot' && (v === undefined || (n?.isInteger() === true && n.numerator % 2n === 0n))))
+    signed(u, 'nonnegative');
   if (fn === '^' && n !== undefined && !n.isInteger()) signed(u, n.isNegative() ? 'positive' : 'nonnegative');
-  if (fn === 'asin' || fn === 'acos' || fn === 'atanh') signed(oneMinusSquare(u, ctx), fn === 'atanh' ? 'positive' : 'nonnegative');
+  if (fn === 'asin' || fn === 'acos' || fn === 'atanh')
+    signed(oneMinusSquare(u, ctx), fn === 'atanh' ? 'positive' : 'nonnegative');
   if (fn === 'acosh') signed(minusOne(u), 'nonnegative');
   if (fn === 'tan' || fn === 'sec' || fn === 'cot' || fn === 'csc') {
     into.nonzero.push(kernelValue(fn === 'tan' || fn === 'sec' ? 'cos' : 'sin', [u], gen.span, ctx).num);
@@ -141,7 +156,10 @@ export function lostConditions(
     const p = primitive(r);
     return `${polyKey(p.num)}/${polyKey(p.den)}`;
   };
-  const nonzero = [...visible.nonzero, ...visible.signed.filter(s => s.relation === 'positive').map(s => s.subject.num)];
+  const nonzero = [
+    ...visible.nonzero,
+    ...visible.signed.filter(s => s.relation === 'positive').map(s => s.subject.num),
+  ];
   // The subjects the result shows, built only if a signed restriction survives the oracle.
   let shown: Map<string, Set<string>> | undefined;
   const shownFor = (key: string): Set<string> | undefined => {

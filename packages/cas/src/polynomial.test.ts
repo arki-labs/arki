@@ -51,7 +51,11 @@ describe('polynomialIn: the equation solver corpus (RFC S-10, S-11)', () => {
   });
 
   it('answers "not a polynomial" with a reason and the first offending span, never a throw', () => {
-    expect(polynomialIn('sin(x) - 0.5', 'x')).toEqual({ kind: 'other', reason: 'transcendental', span: { start: 0, end: 6 } });
+    expect(polynomialIn('sin(x) - 0.5', 'x')).toEqual({
+      kind: 'other',
+      reason: 'transcendental',
+      span: { start: 0, end: 6 },
+    });
     expect(polynomialIn('exp(x) - 5', 'x')).toMatchObject({ kind: 'other', reason: 'transcendental' });
     expect(polynomialIn('sqrt(x) - 3', 'x')).toMatchObject({ kind: 'other', reason: 'transcendental' });
     expect(polynomialIn('e^x - 1', 'x')).toMatchObject({ kind: 'other', reason: 'transcendental' });
@@ -103,7 +107,9 @@ describe('polynomialIn: rational functions and conditions (S-12)', () => {
 describe('polynomialIn: π and e as symbolic coefficients (S-13, decision 6)', () => {
   it('pi*x = 1 is linear with the coefficient pi, not a failed rationalization', () => {
     const form = polynomialIn('pi*x - 1', 'x');
-    expect(form.kind === 'polynomial' && form.coefficients.map(c => [c.value.source, c.rational?.toString() ?? null])).toEqual([
+    expect(
+      form.kind === 'polynomial' && form.coefficients.map(c => [c.value.source, c.rational?.toString() ?? null]),
+    ).toEqual([
       ['-1', '-1'],
       ['pi', null],
     ]);
@@ -137,7 +143,10 @@ describe('the readable normal form (RFC §5.4)', () => {
 
   it('prints one fraction over a denominator with integer coefficients', () => {
     expect(expand('x/(2y)').result.source).toBe('x / (2 * y)');
-    expect(rationalize('1/x + 1/(x+1)')).toMatchObject({ numerator: { source: '2 * x + 1' }, denominator: { source: 'x^2 + x' } });
+    expect(rationalize('1/x + 1/(x+1)')).toMatchObject({
+      numerator: { source: '2 * x + 1' },
+      denominator: { source: 'x^2 + x' },
+    });
   });
 
   it('prints exact fractions by default and terminating decimals on request (decision 3)', () => {
@@ -184,7 +193,9 @@ describe('errors', () => {
   });
 
   it('rationalize refuses a transcendental input (not-rational)', () => {
-    expect(() => rationalize('x + sin(x)')).toThrow(expect.objectContaining({ code: 'not-rational', span: { start: 4, end: 10 } }));
+    expect(() => rationalize('x + sin(x)')).toThrow(
+      expect.objectContaining({ code: 'not-rational', span: { start: 4, end: 10 } }),
+    );
   });
 
   it('budget errors are ResourceLimitErrors carrying budget, limit and actual', () => {

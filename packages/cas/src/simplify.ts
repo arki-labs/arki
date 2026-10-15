@@ -39,10 +39,10 @@ import {
   normalized,
   ONE,
   polyKey,
-  rationalContent,
-  scale,
   polySqrt,
+  rationalContent,
   rationalSqrt,
+  scale,
 } from './poly.js';
 import { inputExpr, kernelValue, read } from './read.js';
 import { holds, SignOracle } from './sign.js';
@@ -89,7 +89,22 @@ const RULES: readonly SimplifyRule[] = Object.freeze([
 ]);
 
 /** `f(-u) = -f(u)` over the reals. */
-const ODD: ReadonlySet<string> = new Set(['sin', 'tan', 'cot', 'csc', 'asin', 'atan', 'sinh', 'tanh', 'coth', 'csch', 'asinh', 'atanh', 'cbrt', 'sign']);
+const ODD: ReadonlySet<string> = new Set([
+  'sin',
+  'tan',
+  'cot',
+  'csc',
+  'asin',
+  'atan',
+  'sinh',
+  'tanh',
+  'coth',
+  'csch',
+  'asinh',
+  'atanh',
+  'cbrt',
+  'sign',
+]);
 /** `f(-u) = f(u)` over the reals. */
 const EVEN: ReadonlySet<string> = new Set(['cos', 'sec', 'cosh', 'sech', 'abs']);
 
@@ -187,7 +202,8 @@ class Simplifier {
       if (reached.has(g)) continue;
       reached.add(g);
       const gen = this.ctx.generators[g];
-      if (gen?.kind === 'kernel') for (const arg of gen.args) stack.push(...generators(arg.num), ...generators(arg.den));
+      if (gen?.kind === 'kernel')
+        for (const arg of gen.args) stack.push(...generators(arg.num), ...generators(arg.den));
     }
     for (const g of [...reached].sort((a, b) => a - b)) this.generatorValue(g);
   }
@@ -216,7 +232,9 @@ class Simplifier {
     if (constantValue(r.den) !== undefined) return this.valueRules(num);
     const den = this.poly(r.den);
     if (isZero(den.num)) throw new DivisionByZeroError('cas: division by zero');
-    return this.valueRules(ctx.quotient(multiply(num.num, den.den, ctx.budget), multiply(num.den, den.num, ctx.budget)));
+    return this.valueRules(
+      ctx.quotient(multiply(num.num, den.den, ctx.budget), multiply(num.den, den.num, ctx.budget)),
+    );
   }
 
   private poly(p: Poly): RatFun {
@@ -353,7 +371,10 @@ class Simplifier {
       // abs(u)/u and u/abs(u) are both sign(u). Each step removes one abs(u) and one u; the degrees bound the loop.
       for (let steps = degreeIn(q.num, g) + degreeIn(q.den, g); steps > 0; steps--) {
         const [top, bottom] = [divideExact(q.num, a, budget), divideExact(q.den, u.num, budget)];
-        const [n, d] = top === undefined || bottom === undefined ? [divideExact(q.num, u.num, budget), divideExact(q.den, a, budget)] : [top, bottom];
+        const [n, d] =
+          top === undefined || bottom === undefined
+            ? [divideExact(q.num, u.num, budget), divideExact(q.den, a, budget)]
+            : [top, bottom];
         if (n === undefined || d === undefined) break;
         this.note('abs-sign');
         q = this.times(ctx.quotient(n, d), this.kernel('sign', [u]));
@@ -366,7 +387,10 @@ class Simplifier {
       if (a === undefined || k === 0) continue;
       // exp(a) > 0 everywhere: 1/exp(a)^k is exp(-k·a).
       this.note('exp-product');
-      q = this.times(ctx.quotient(q.num, divideExact(q.den, generator(g, k), budget) ?? q.den), this.exp({ num: scale(a.num, Rational.from(-k)), den: a.den }));
+      q = this.times(
+        ctx.quotient(q.num, divideExact(q.den, generator(g, k), budget) ?? q.den),
+        this.exp({ num: scale(a.num, Rational.from(-k)), den: a.den }),
+      );
     }
     return q;
   }
@@ -376,7 +400,6 @@ class Simplifier {
     const budget = this.ctx.budget;
     return this.ctx.quotient(multiply(a.num, b.num, budget), multiply(a.den, b.den, budget));
   }
-
 
   /** The kernel `fn(args)` after the kernel rules; args are simplified already. */
   private kernel(fn: string, args: readonly RatFun[]): RatFun {
@@ -435,7 +458,12 @@ class Simplifier {
     }
     const g = soleGenerator(u);
     const gen = g === undefined ? undefined : ctx.generators[g];
-    if (gen?.kind === 'kernel' && (gen.fn === 'ln' || gen.fn === 'log') && gen.args.length === 1 && gen.args[0] !== undefined) {
+    if (
+      gen?.kind === 'kernel' &&
+      (gen.fn === 'ln' || gen.fn === 'log') &&
+      gen.args.length === 1 &&
+      gen.args[0] !== undefined
+    ) {
       this.note('exp-ln');
       return gen.args[0];
     }
@@ -610,7 +638,7 @@ class Readable extends Emitter {
       list.splice(i, 1, { p: normalized(g), m: item.m }, { p: normalized(q), m: item.m });
       return true;
     };
-    for (let changed = true; changed; ) {
+    for (let changed = true; changed;) {
       changed = false;
       for (let i = 0; i < list.length && !changed; i++) {
         const f = list[i]?.p ?? EMPTY;
@@ -663,7 +691,9 @@ export function simplify(input: CasInput, options: CasOptions = {}): SimplifyRes
   const emitter = new Readable(ctx);
   const result = exprOf(emitter.node(simplified), ctx);
   ctx.notes = undefined;
-  const applied = RULES.filter(rule => notes.has(rule) || simplifier.applied.has(rule) || (rule === 'factor-out' && emitter.pulled));
+  const applied = RULES.filter(
+    rule => notes.has(rule) || simplifier.applied.has(rule) || (rule === 'factor-out' && emitter.pulled),
+  );
   const lost = lostConditions(ctx, inputDomain(ctx, kernels, divisors), simplified, emitter, r => simplifier.value(r));
   const assumed: Condition[] = [];
   for (const name of simplifier.assumed) {

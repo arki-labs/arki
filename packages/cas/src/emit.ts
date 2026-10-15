@@ -98,15 +98,27 @@ export class Emitter {
     this.orderedFor = ctx.generators.length;
     const gens = ctx.generators.map((gen, id) => ({ gen, id }));
     const keyOf = (g: (typeof gens)[number]): string =>
-      g.gen.kind === 'kernel' ? g.gen.key : g.gen.kind === 'atom' || (this.byName && g.gen.kind === 'name') ? g.gen.name : '';
+      g.gen.kind === 'kernel'
+        ? g.gen.key
+        : g.gen.kind === 'atom' || (this.byName && g.gen.kind === 'name')
+          ? g.gen.name
+          : '';
     const names = gens.filter(({ gen }) => gen.kind === 'name');
     const mainId =
-      this.main ?? (this.byName ? names.sort((a, b) => (keyOf(a) < keyOf(b) ? -1 : keyOf(a) > keyOf(b) ? 1 : 0))[0]?.id : names[0]?.id);
+      this.main ??
+      (this.byName
+        ? names.sort((a, b) => (keyOf(a) < keyOf(b) ? -1 : keyOf(a) > keyOf(b) ? 1 : 0))[0]?.id
+        : names[0]?.id);
     const rank = (g: { gen: (typeof gens)[number]['gen']; id: number }): number =>
       g.id === mainId ? 2 : { pi: 0, e: 1, name: 3, kernel: 4, atom: 5 }[g.gen.kind];
-    const sorted = gens.sort((a, b) => rank(a) - rank(b) || (keyOf(a) < keyOf(b) ? -1 : keyOf(a) > keyOf(b) ? 1 : a.id - b.id));
+    const sorted = gens.sort(
+      (a, b) => rank(a) - rank(b) || (keyOf(a) < keyOf(b) ? -1 : keyOf(a) > keyOf(b) ? 1 : a.id - b.id),
+    );
     this.productOrder = sorted.map(g => g.id);
-    this.additionOrder = [...this.productOrder.filter(id => !isTranscendental(ctx, id)), ...this.productOrder.filter(id => isTranscendental(ctx, id))];
+    this.additionOrder = [
+      ...this.productOrder.filter(id => !isTranscendental(ctx, id)),
+      ...this.productOrder.filter(id => isTranscendental(ctx, id)),
+    ];
   }
 
   private compareTerms(a: Monomial, b: Monomial): number {
@@ -140,9 +152,16 @@ export class Emitter {
     if (first === undefined) return this.rationalNode(c, negative);
     const signed = (node: Node): Node => (negative ? minus(node) : node);
     if (c.eq(ONE)) return product([signed(first), ...rest]);
-    const decimal = c.isInteger() ? c.numerator.toString() : this.ctx.numbers === 'decimal' ? decimalText(c) : undefined;
+    const decimal = c.isInteger()
+      ? c.numerator.toString()
+      : this.ctx.numbers === 'decimal'
+        ? decimalText(c)
+        : undefined;
     if (decimal !== undefined) return product([signed(numberNode(decimal)), ...factors]);
-    const top = c.numerator === 1n ? product([signed(first), ...rest]) : product([signed(numberNode(c.numerator.toString())), ...factors]);
+    const top =
+      c.numerator === 1n
+        ? product([signed(first), ...rest])
+        : product([signed(numberNode(c.numerator.toString())), ...factors]);
     return binary('/', top, numberNode(c.denominator.toString()));
   }
 
@@ -171,7 +190,10 @@ export class Emitter {
   parts(p: Poly): Part[] {
     return [...p.values()]
       .sort((a, b) => this.compareTerms(a.m, b.m))
-      .map(term => ({ negative: term.c.isNegative(), node: (negative: boolean) => this.termNode(term.c.abs(), term.m, negative) }));
+      .map(term => ({
+        negative: term.c.isNegative(),
+        node: (negative: boolean) => this.termNode(term.c.abs(), term.m, negative),
+      }));
   }
 
   /** A polynomial as a sum in canonical order. */

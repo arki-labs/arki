@@ -3,10 +3,7 @@
     "name": "@arki/cas/polynomial without exactRoots (polynomialIn, expand, collect, rationalize, gcd; @arki/expr and @arki/math ignored): RFC target 10 kB, measured 9.4 kB (step 2 added lost-restriction conditions and the sign oracle)",
     "path": "dist/polynomial.js",
     "import": "{ polynomialIn, expand, collect, rationalize, gcd }",
-    "ignore": [
-      "@arki/expr",
-      "@arki/math"
-    ],
+    "ignore": ["@arki/expr", "@arki/math"],
     "limit": "9.5 kB",
     "gzip": true
   },
@@ -14,10 +11,7 @@
     "name": "@arki/cas/polynomial with exactRoots (@arki/expr and @arki/math ignored): RFC target +8 kB, measured +0.9 kB",
     "path": "dist/polynomial.js",
     "import": "{ polynomialIn, exactRoots }",
-    "ignore": [
-      "@arki/expr",
-      "@arki/math"
-    ],
+    "ignore": ["@arki/expr", "@arki/math"],
     "limit": "10.5 kB",
     "gzip": true
   },
@@ -25,10 +19,7 @@
     "name": "@arki/cas/simplify (@arki/expr and @arki/math ignored): RFC target 12 kB, measured 11.79 kB",
     "path": "dist/simplify.js",
     "import": "{ simplify }",
-    "ignore": [
-      "@arki/expr",
-      "@arki/math"
-    ],
+    "ignore": ["@arki/expr", "@arki/math"],
     "limit": "12 kB",
     "gzip": true
   },
@@ -36,10 +27,7 @@
     "name": "@arki/cas (errors, conditionToLatex; @arki/expr and @arki/math ignored)",
     "path": "dist/index.js",
     "import": "{ CasError, CasLimitError, conditionToLatex }",
-    "ignore": [
-      "@arki/expr",
-      "@arki/math"
-    ],
+    "ignore": ["@arki/expr", "@arki/math"],
     "limit": "0.75 kB",
     "gzip": true
   },

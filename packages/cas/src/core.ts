@@ -58,7 +58,8 @@ export type CasOptions = {
 export type CasResult = { readonly result: Expr; readonly conditions: readonly Condition[] };
 
 /** Why a cas verb rejected its input. Apps translate messages by this code. */
-export type CasErrorCode = 'unsupported-function' | 'not-differentiable' | 'not-in-domain' | 'bad-variable' | 'not-rational';
+export type CasErrorCode =
+  'unsupported-function' | 'not-differentiable' | 'not-in-domain' | 'bad-variable' | 'not-rational';
 
 const REMEDIATION: Readonly<Record<CasErrorCode, string>> = {
   'unsupported-function': 'Remove the function at `span` or compute this case numerically.',

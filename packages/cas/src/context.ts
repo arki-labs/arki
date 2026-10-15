@@ -89,7 +89,9 @@ export class Context {
       // Options may come from JSON: check the value at run time, whatever the type says.
       const value: string = assumption;
       if (!ASSUMPTIONS.has(value)) {
-        throw new InvalidArgumentError(`assume.${name} must be nonzero, positive, nonnegative or negative, got ${String(value)}`);
+        throw new InvalidArgumentError(
+          `assume.${name} must be nonzero, positive, nonnegative or negative, got ${String(value)}`,
+        );
       }
       this.checkVariable(name);
       assumptions.set(name, assumption);
@@ -107,7 +109,10 @@ export class Context {
       if (!(error instanceof MathError)) throw error;
     }
     if (!ok || this.language.functionSpec(variable) !== undefined) {
-      throw new CasError(`"${variable}" cannot be a variable: it is not a name, or it is a constant or function`, 'bad-variable');
+      throw new CasError(
+        `"${variable}" cannot be a variable: it is not a name, or it is a constant or function`,
+        'bad-variable',
+      );
     }
   }
 
@@ -202,7 +207,8 @@ export class Context {
 
   add(a: RatFun, b: RatFun): RatFun {
     if (this.notes !== undefined) this.noteSum(a, b);
-    if (constantValue(a.den) !== undefined && constantValue(b.den) !== undefined) return this.fromPoly(add(a.num, b.num));
+    if (constantValue(a.den) !== undefined && constantValue(b.den) !== undefined)
+      return this.fromPoly(add(a.num, b.num));
     return this.quotient(
       add(multiply(a.num, b.den, this.budget), multiply(b.num, a.den, this.budget)),
       multiply(a.den, b.den, this.budget),
@@ -254,7 +260,9 @@ export class Context {
       return;
     }
     if (a.num.size > 1 || b.num.size > 1) this.note('expand');
-    const shared = [...generators(a.num), ...generators(a.den)].some(g => generators(b.num).has(g) || generators(b.den).has(g));
+    const shared = [...generators(a.num), ...generators(a.den)].some(
+      g => generators(b.num).has(g) || generators(b.den).has(g),
+    );
     if (shared) this.note('collect');
   }
 

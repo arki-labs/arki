@@ -10,7 +10,6 @@ Conditions, the sign oracle and `simplify` (RFC `2026-10-15-arki-cas` §18 build
 - Every verb now returns every lost restriction of the input's natural domain, not only cancelled divisors: `ln`/`log` > 0, even roots ≥ 0, fractional powers, `asin`/`acos`, `acosh`, `atanh`, `tan`/`sec`/`cot`/`csc`, `coth`/`csch`. Restrictions the oracle proves from the expression (`x^2 + 1 ≠ 0`) are no longer listed.
 - Property tests: exact value preservation in `@arki/expr/rational` at random points (π and e substituted), float checks for kernel rules, conditions necessary at every point where the input is defined, idempotence and round trips; hostile and fuel tests.
 
-
 ### Build step 1
 
 Polynomial core (RFC `2026-10-15-arki-cas` §18 build step 1).

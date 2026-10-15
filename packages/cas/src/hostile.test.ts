@@ -5,8 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { parse } from '@arki/expr';
-import { ParseError } from '@arki/expr';
+import { parse, ParseError } from '@arki/expr';
 
 import { CasLimitError } from './index.js';
 import { expand, gcd, polynomialIn } from './polynomial.js';
@@ -86,7 +85,14 @@ describe('simplify under hostile input: rewriting has no static bound, so budget
   });
 
   it('counts rewriting as fuel and checks the signal', () => {
-    expect(budgetOf(() => simplify(nest(s => `exp(ln(${s}))`, 40), { limits: { fuel: 200 } }))).toBe('fuel');
+    expect(
+      budgetOf(() =>
+        simplify(
+          nest(s => `exp(ln(${s}))`, 40),
+          { limits: { fuel: 200 } },
+        ),
+      ),
+    ).toBe('fuel');
     const reason = new Error('stop');
     expect(() => simplify('sin(-x)', { signal: { aborted: true, reason } })).toThrow(reason);
   });
@@ -97,11 +103,16 @@ describe('simplify under hostile input: rewriting has no static bound, so budget
     ['sqrt((…)^2)', nest(s => `sqrt((${s})^2)`, 40), 'abs(x)', []],
     // An even number of odd functions: the minus signs cancel.
     ['sin(-…)', nest(s => `sin(-${s})`, 60), `${'sin('.repeat(60)}x${')'.repeat(60)}`, []],
-  ])('deep kernel nesting (%s) resolves inside the depth budget, without deep recursion', (_, text, result, conditions) => {
-    const started = Date.now();
-    const r = simplify(text);
-    expect(Date.now() - started).toBeLessThan(500);
-    expect(r.result.source).toBe(result);
-    expect(r.conditions.map(c => `${c.subject.source} ${c.relation}`)).toEqual(conditions.map(c => c.replace(' > 0', ' positive')));
-  });
+  ])(
+    'deep kernel nesting (%s) resolves inside the depth budget, without deep recursion',
+    (_, text, result, conditions) => {
+      const started = Date.now();
+      const r = simplify(text);
+      expect(Date.now() - started).toBeLessThan(500);
+      expect(r.result.source).toBe(result);
+      expect(r.conditions.map(c => `${c.subject.source} ${c.relation}`)).toEqual(
+        conditions.map(c => c.replace(' > 0', ' positive')),
+      );
+    },
+  );
 });

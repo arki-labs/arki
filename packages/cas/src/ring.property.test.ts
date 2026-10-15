@@ -15,10 +15,10 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
 import type { Expr, Node } from '@arki/expr';
+import type { Rational } from '@arki/math/rational';
 import { parse, print } from '@arki/expr';
 import { compile } from '@arki/expr/rational';
 import { DivisionByZeroError } from '@arki/math/errors';
-import type { Rational } from '@arki/math/rational';
 
 import { expand, polynomialIn, rationalize } from './polynomial.js';
 
@@ -137,7 +137,9 @@ describe('values are preserved exactly (π and e substituted by rationals)', () 
         const { result } = expand(input);
         const before = valueAt(input, p);
         const after = valueAt(result, p);
-        expect(before === 'undefined' ? before : before.toString()).toBe(after === 'undefined' ? after : after.toString());
+        expect(before === 'undefined' ? before : before.toString()).toBe(
+          after === 'undefined' ? after : after.toString(),
+        );
       }),
       { numRuns: 300 },
     );

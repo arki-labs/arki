@@ -20,7 +20,11 @@ const code = run => {
 
 const roots = text => {
   const form = polynomialIn(text, 'x');
-  return form.kind === 'polynomial' ? exactRoots(form).roots.map(r => r.value.source).join(', ') : form.kind;
+  return form.kind === 'polynomial'
+    ? exactRoots(form)
+        .roots.map(r => r.value.source)
+        .join(', ')
+    : form.kind;
 };
 
 const simplified = (text, options) => {
@@ -38,7 +42,11 @@ const checks = [
   ['collect', collect('2*pi*x + 3*x', 'x').result.source, '(2 * pi + 3) * x'],
   ['rationalize', `${rational.numerator.source} | ${rational.denominator.source}`, '2 * x + 1 | x^2 + x'],
   ['gcd', gcd('x^2 - 1', 'x^2 + 2x + 1').result.source, 'x + 1'],
-  ['condition', cancelled.kind === 'polynomial' ? cancelled.conditions.map(conditionToLatex).join() : 'none', 'x \\neq 0'],
+  [
+    'condition',
+    cancelled.kind === 'polynomial' ? cancelled.conditions.map(conditionToLatex).join() : 'none',
+    'x \\neq 0',
+  ],
   ['quadratic surds', roots('x^2 - x - 1'), '(-sqrt(5) + 1) / 2, (sqrt(5) + 1) / 2'],
   ['complex roots', roots('x^2 + 4'), '-2 * i, 2 * i'],
   ['pi coefficient', roots('pi*x - 1'), '1 / pi'],
@@ -49,7 +57,11 @@ const checks = [
   ['simplify cancel', simplified('x/x'), '1 | x \\neq 0'],
   ['simplify exp-ln', simplified('exp(ln(x))'), 'x | x > 0'],
   ['simplify assumed', simplified('sqrt(x^2)', { assume: { x: 'nonnegative' } }), 'x | x \\geq 0'],
-  ['simplify readable', simplified('exp(x)*cos(x) - exp(x)*sin(x) + 0*x/(x - 1)^2'), 'exp(x) * (cos(x) - sin(x)) | x - 1 \\neq 0'],
+  [
+    'simplify readable',
+    simplified('exp(x)*cos(x) - exp(x)*sin(x) + 0*x/(x - 1)^2'),
+    'exp(x) * (cos(x) - sin(x)) | x - 1 \\neq 0',
+  ],
   ['simplify pi sign', simplified('abs(pi - 355/113)'), '-pi + 355 / 113 | '],
   ['simplify 256-deep input', simplify(deep).result.source, 'x'],
 ];

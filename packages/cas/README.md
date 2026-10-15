@@ -41,22 +41,22 @@ simplify('((2*x)*(x - 1) - (x^2 + 1))/(x - 1)^2'); // '(x^2 - 2 * x - 1) / (x - 
 
 v1 is **real-only**: every variable ranges over ℝ and every function is its real version. The result keeps the input's value wherever the input is defined and the caller's assumptions hold. A rewrite may widen the domain (`x/x → 1`); every restriction it removes comes back in `conditions` (reason `domain`), and so does every caller assumption a rewrite relied on (reason `assumed`). A rewrite that would change the value somewhere the input is defined runs only when the sign oracle proves it safe. A restriction the result still shows is not repeated, and one the oracle proves from the expression itself (`x^2 + 1 ≠ 0`) is not a condition. `expand`, `collect`, `rationalize`, `polynomialIn` and `gcd` return lost restrictions the same way (`0*ln(x)` carries `x > 0`).
 
-| Rule | Rewrite | Needs | Returns |
-| --- | --- | --- | --- |
-| `fold` | literal arithmetic, `0*u`, `u + 0`, `1*u`, `u^1`, `u/1` | — | restrictions of a dropped `u` |
-| `expand`, `collect` | products and powers of sums multiplied out; like terms and powers | — | — |
-| `cancel` | gcd cancellation | — | cancelled factor ≠ 0 |
-| `integer-powers` | `(u^(p/q))^k → u^(kp/q)` for an integer kp/q | — | `u ≥ 0` (or `> 0`) of the removed power |
-| `fractional-powers` | `(u^a)^b`, `(g^m)^q`, `u^a·u^b` with non-integer exponents | `u > 0` proven or assumed | the assumption |
-| `sqrt-of-square` | `sqrt(c·u^2) → sqrt(c)·abs(u)`, then `→ u` | `u ≥ 0` proven or assumed for `→ u` | the assumption |
-| `square-of-sqrt` | `sqrt(u)^2 → u`, likewise `cbrt` and `nthRoot` | — | `u ≥ 0` (even roots) |
-| `exp-ln` | `exp(ln(u)) → u` | — | `u > 0` |
-| `ln-exp` | `ln(exp(u)) → u`, `ln(e^k) → k` | real (v1 always) | — |
-| `exp-product` | `exp(a)·exp(b) → exp(a + b)`, `exp(a)^y → exp(y·a)`, `1/exp(a) → exp(-a)` | — | — |
-| `abs-sign` | `abs(u) → ±u`; `abs(u)/u → sign(u)` | sign of `u` proven or assumed for the first | the assumption; `u ≠ 0` |
-| `parity` | `f(-u) → -f(u)` for odd, `f(u)` for even functions (`sin`, `cos`, `abs`, …) | — | — |
-| `special-values` | `sin(0)`, `cos(0)`, `tan(0)`, `exp(0)`, `ln(1)`, `ln(e)`, exact `sqrt` and `abs` of rationals | — | — |
-| `factor-out` | a common kernel factor pulled out of a sum (printing only) | — | — |
+| Rule                | Rewrite                                                                                       | Needs                                       | Returns                                 |
+| ------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------- | --------------------------------------- |
+| `fold`              | literal arithmetic, `0*u`, `u + 0`, `1*u`, `u^1`, `u/1`                                       | —                                           | restrictions of a dropped `u`           |
+| `expand`, `collect` | products and powers of sums multiplied out; like terms and powers                             | —                                           | —                                       |
+| `cancel`            | gcd cancellation                                                                              | —                                           | cancelled factor ≠ 0                    |
+| `integer-powers`    | `(u^(p/q))^k → u^(kp/q)` for an integer kp/q                                                  | —                                           | `u ≥ 0` (or `> 0`) of the removed power |
+| `fractional-powers` | `(u^a)^b`, `(g^m)^q`, `u^a·u^b` with non-integer exponents                                    | `u > 0` proven or assumed                   | the assumption                          |
+| `sqrt-of-square`    | `sqrt(c·u^2) → sqrt(c)·abs(u)`, then `→ u`                                                    | `u ≥ 0` proven or assumed for `→ u`         | the assumption                          |
+| `square-of-sqrt`    | `sqrt(u)^2 → u`, likewise `cbrt` and `nthRoot`                                                | —                                           | `u ≥ 0` (even roots)                    |
+| `exp-ln`            | `exp(ln(u)) → u`                                                                              | —                                           | `u > 0`                                 |
+| `ln-exp`            | `ln(exp(u)) → u`, `ln(e^k) → k`                                                               | real (v1 always)                            | —                                       |
+| `exp-product`       | `exp(a)·exp(b) → exp(a + b)`, `exp(a)^y → exp(y·a)`, `1/exp(a) → exp(-a)`                     | —                                           | —                                       |
+| `abs-sign`          | `abs(u) → ±u`; `abs(u)/u → sign(u)`                                                           | sign of `u` proven or assumed for the first | the assumption; `u ≠ 0`                 |
+| `parity`            | `f(-u) → -f(u)` for odd, `f(u)` for even functions (`sin`, `cos`, `abs`, …)                   | —                                           | —                                       |
+| `special-values`    | `sin(0)`, `cos(0)`, `tan(0)`, `exp(0)`, `ln(1)`, `ln(e)`, exact `sqrt` and `abs` of rationals | —                                           | —                                       |
+| `factor-out`        | a common kernel factor pulled out of a sum (printing only)                                    | —                                           | —                                       |
 
 Anything not in the table is left alone (`sin(x)^2 + cos(x)^2` stays). `applied` lists the rules that changed something.
 

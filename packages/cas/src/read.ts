@@ -113,7 +113,8 @@ export function read(node: Node, ctx: Context): RatFun {
       if (ctx.language.constantSpec(node.name) === undefined) return ctx.generatorValue(ctx.name(node.name, node.span));
       if (node.name === 'pi') return ctx.generatorValue(ctx.pi());
       if (node.name === 'e') return ctx.generatorValue(ctx.e());
-      if (node.name === 'i') throw new CasError('`i` is not a real number; cas works over the reals', 'not-in-domain', node.span);
+      if (node.name === 'i')
+        throw new CasError('`i` is not a real number; cas works over the reals', 'not-in-domain', node.span);
       return ctx.generatorValue(ctx.atom(node.name, node.span));
     }
     case 'group': {

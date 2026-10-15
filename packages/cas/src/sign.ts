@@ -21,11 +21,11 @@
  *
  * Internal module.
  */
-import type { Assumption } from './core.js';
 import type { Context, RatFun } from './context.js';
+import type { Assumption } from './core.js';
 import type { Monomial, Poly } from './poly.js';
-import { rationalValue } from './context.js';
 import { constantSign } from './constants.js';
+import { rationalValue } from './context.js';
 import { add, EMPTY, fromTerm, polySqrt, subtract } from './poly.js';
 
 /** A set of signs, as bits. */
@@ -176,7 +176,9 @@ export class SignOracle {
       }
       case 'name': {
         const assumption = this.assumptions.get(gen.name);
-        return assumption === undefined ? { signs: UNKNOWN, names: NONE } : { signs: ASSUMED[assumption], names: new Set([gen.name]) };
+        return assumption === undefined
+          ? { signs: UNKNOWN, names: NONE }
+          : { signs: ASSUMED[assumption], names: new Set([gen.name]) };
       }
       case 'atom':
       case undefined: {
@@ -197,9 +199,11 @@ export class SignOracle {
     if (fn === 'nthRoot' && n?.isInteger() === true && n.numerator % 2n === 1n) return this.value(u);
     if (fn === 'abs') return this.atLeastZero(u, 'nonzero');
     if (fn === 'sqrt' || fn === 'nthRoot') return this.atLeastZero(u, 'positive');
-    if (fn === '^' && n !== undefined) return n.isNegative() ? { signs: POSITIVE, names: NONE } : this.atLeastZero(u, 'positive');
+    if (fn === '^' && n !== undefined)
+      return n.isNegative() ? { signs: POSITIVE, names: NONE } : this.atLeastZero(u, 'positive');
     // ln(u) has the sign of u - 1 = (num - den)/den.
-    if ((fn === 'ln' || fn === 'log') && args.length === 1) return this.value({ num: subtract(u.num, u.den), den: u.den });
+    if ((fn === 'ln' || fn === 'log') && args.length === 1)
+      return this.value({ num: subtract(u.num, u.den), den: u.den });
     return { signs: UNKNOWN, names: NONE };
   }
 

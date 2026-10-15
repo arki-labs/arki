@@ -49,7 +49,10 @@ describe('RFC §6: the required examples', () => {
   it('a rewrite that narrows the domain runs only under an assumption, which it returns', () => {
     expect(run('sqrt(x^2)', { x: 'nonnegative' })).toMatchObject({ result: 'x', conditions: ['x \\geq 0 (assumed)'] });
     expect(run('sqrt(x^2)', { x: 'negative' })).toMatchObject({ result: '-x', conditions: ['-x > 0 (assumed)'] });
-    expect(run('(x^2)^(1/3)', { x: 'positive' })).toMatchObject({ result: 'x^(2 / 3)', conditions: ['x > 0 (assumed)'] });
+    expect(run('(x^2)^(1/3)', { x: 'positive' })).toMatchObject({
+      result: 'x^(2 / 3)',
+      conditions: ['x > 0 (assumed)'],
+    });
     // Without the assumption, x^(2/3) would be wrong for x < 0, where the input is defined.
     expect(run('(x^2)^(1/3)').result).toBe('(x^2)^(1 / 3)');
   });
@@ -127,12 +130,23 @@ describe('the rule table (RFC §7)', () => {
 
   it('fractional powers combine only for a base proven or assumed positive', () => {
     expect(run('x^(1/2)*x^(1/3)').result).toBe('x^(1 / 2) * x^(1 / 3)');
-    expect(run('x^(1/2)*x^(1/3)', { x: 'positive' })).toMatchObject({ result: 'x^(5 / 6)', conditions: ['x > 0 (assumed)'] });
+    expect(run('x^(1/2)*x^(1/3)', { x: 'positive' })).toMatchObject({
+      result: 'x^(5 / 6)',
+      conditions: ['x > 0 (assumed)'],
+    });
     expect(run('exp(x)^(1/2)*exp(x)^(1/2)').result).toBe('exp(x)');
   });
 
   it('anything outside the table is left alone', () => {
-    for (const text of ['sin(x)^2 + cos(x)^2', 'ln(x*y)', 'sqrt(8)', 'sqrt(2*x^2)', 'abs(x)^2', 'tan(x)*cos(x)', 'exp(x + ln(y))']) {
+    for (const text of [
+      'sin(x)^2 + cos(x)^2',
+      'ln(x*y)',
+      'sqrt(8)',
+      'sqrt(2*x^2)',
+      'abs(x)^2',
+      'tan(x)*cos(x)',
+      'exp(x + ln(y))',
+    ]) {
       expect(simplify(text).result.source).toBe(expand(text).result.source);
     }
   });
@@ -199,7 +213,10 @@ describe('the sign oracle (RFC §6 table)', () => {
     const ctx = new Context({ assume });
     const value = read(inputExpr(text, ctx).root, ctx);
     const { signs } = new SignOracle(ctx, ctx.assumptions).value(value);
-    return (['positive', 'negative', 'nonnegative', 'nonpositive', 'nonzero'] as const).find(c => holds(signs, c)) ?? 'unknown';
+    return (
+      (['positive', 'negative', 'nonnegative', 'nonpositive', 'nonzero'] as const).find(c => holds(signs, c)) ??
+      'unknown'
+    );
   }
 
   it.each([
