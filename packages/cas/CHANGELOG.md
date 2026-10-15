@@ -16,6 +16,9 @@ Fixes found by a review before publishing:
 - `factor` and `gcd` throw `CasError` `not-polynomial` with the span of the offending part, instead of a plain `InvalidArgumentError`.
 - `factor` marks a result complete when every part left whole has degree 1 in the variable (`x^2 + 2xy + y^2` is `(x + y)^2`, complete).
 - The sign oracle knows `log10` and `log2`; `parity` knows `acot`, `acsc`, `acsch` and `acoth` are odd.
+- A lost restriction the caller's assumptions guarantee is no longer listed (`sqrt(x)*sqrt(x)` with `x` positive has no conditions).
+- `factor` and `gcd` throw `CasError` `unsupported-constant` for constants with no zero test (`sqrt(2)`, `ln(2)`): as free symbols they hid zeros (`sqrt(2)^2 - 2`) and gave wrong gcds (`gcd(x - sqrt(2), x^2 - 2)` was 1).
+- Tests: time bounds use CPU time, the fastest of up to 3 runs (`src/test-support.ts`), so a loaded machine cannot fail them; the test timeout is 30 s.
 
 ### Build step 4
 
