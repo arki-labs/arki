@@ -23,6 +23,12 @@ function unref(timer: unknown): void {
   }
 }
 
+/**
+ * The longest delay a runtime timer honours (2^31-1 ms, about 24.8 days).
+ * Node and browsers fire anything longer almost at once.
+ */
+const MAX_TIMER_MS = 2_147_483_647;
+
 function createDefaultScheduler(): Scheduler {
   const pending = new Map<number, ReturnType<typeof setTimeout>>();
   let nextId = 0;
@@ -30,12 +36,20 @@ function createDefaultScheduler(): Scheduler {
     now: () => (typeof performance === 'undefined' ? Date.now() : performance.now()),
     setTimeout(cb, ms, opts) {
       const id = nextId++;
-      const timer = setTimeout(() => {
-        pending.delete(id);
-        void cb();
-      }, ms);
-      if (opts?.ref !== true) unref(timer);
-      pending.set(id, timer);
+      // A longer delay runs as a chain of timers under one handle, so it never fires early.
+      const arm = (left: number): void => {
+        const timer = setTimeout(() => {
+          if (left > MAX_TIMER_MS) {
+            arm(left - MAX_TIMER_MS);
+            return;
+          }
+          pending.delete(id);
+          void cb();
+        }, Math.min(left, MAX_TIMER_MS));
+        if (opts?.ref !== true) unref(timer);
+        pending.set(id, timer);
+      };
+      arm(ms);
       return { id };
     },
     clearTimeout(handle) {

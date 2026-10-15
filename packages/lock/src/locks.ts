@@ -206,17 +206,17 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
     };
     const sentAt = scheduler.now();
     const raw = (async () => store.acquire(key, request))();
-    let gaveUp = false;
-    void raw.then((late) => {
-      if (gaveUp && late !== undefined) void giveBack(late, 'late grant');
-    }, noop);
     const bound = storeTimeoutMs + (store.guarantees.wait === 'native' && waitMs !== undefined ? waitMs : 0);
     let grant: Grant | undefined;
     try {
       const timed = withStoreTimeout(raw, bound, 'acquire', scheduler);
       grant = await (signal === undefined ? timed : raceSignal(timed, signal));
     } catch (error) {
-      gaveUp = true;
+      // Attached only once we have given up, so it also catches a grant that
+      // already landed in the same instant: nobody else will release it.
+      void raw.then((late) => {
+        if (late !== undefined) void giveBack(late, 'late grant');
+      }, noop);
       throw asStoreError(error, 'acquire');
     }
     if (grant === undefined) return undefined;
@@ -320,6 +320,8 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
 
     const armBeat = (delayMs: number): void => {
       if (extendFn === undefined || ended !== undefined) return;
+      // One chain only: an on-demand extend() replaces the pending beat.
+      if (beatTimer !== undefined) scheduler.clearTimeout(beatTimer);
       beatTimer = scheduler.setTimeout(
         () => {
           beatTimer = undefined;
@@ -461,7 +463,8 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
         const held = makeHeld(key, got, opts);
         // A grant with less than ttl/3 left renews at once instead of waiting a beat.
         if (held.renewNow !== undefined) await held.renewNow();
-        return held;
+        // Lost before the callback starts (refused, or past the deadline): never acquired.
+        if (held.lostError() === undefined) return held;
       }
       if (mode === 'try') return undefined;
       const left = limit - scheduler.now();

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { LockError } from './errors.js';
 import { createLocks, MIN_LEASE_TTL_MS } from './locks.js';
@@ -282,6 +282,28 @@ describe.each(verbs)('$name', ({ call, waits }) => {
     expect(t.calls.release.map((grant) => grant.token)).toEqual([sent.token]);
   });
 
+  it('hands back a grant that lands in the same instant the caller aborts, because a grant nobody owns blocks every other replica', async () => {
+    // Abort at every microtask offset after the grant lands: one of them falls
+    // between the store answering and the manager noticing the abort.
+    for (let ticks = 0; ticks < 12; ticks++) {
+      const t = setup(holdProcess);
+      const slow = deferred<Grant | undefined>();
+      t.script.acquire = () => slow.promise;
+      const controller = new AbortController();
+      const pending = call(t.locks.mutex('k'), { signal: controller.signal }).catch((error: unknown) => error);
+      await flush();
+      const sent = t.calls.acquire[0];
+      if (sent === undefined) throw new Error('the attempt was never sent');
+      slow.resolve({ key: { namespace: 'test', name: 'k', full: 'x' }, token: sent.token, fence: 1n });
+      for (let i = 0; i < ticks; i++) await Promise.resolve();
+      controller.abort();
+      await pending;
+      await flush();
+      // Ran or aborted, the store must end with this token released.
+      expect({ ticks, released: t.calls.release.map((grant) => grant.token) }).toEqual({ ticks, released: [sent.token] });
+    }
+  });
+
   it('rejects with a store error and never pretends the lock was free or held when the store throws', async () => {
     const t = setup(holdProcess);
     t.script.acquire = () => Promise.reject(new Error('connection reset'));
@@ -459,6 +481,57 @@ describe('lease guard', () => {
     expect(guard.held).toBe(true);
   });
 
+  it('does not start the callback when the renew-now proves the lock is gone, because another replica may already be inside it', async () => {
+    const t = setup(leaseCluster);
+    const free = t.script.acquire;
+    t.script.acquire = async (key, req) => {
+      t.clock.jump(25_000);
+      return free(key, req);
+    };
+    t.script.extend = () => Promise.resolve(false);
+    const fn = vi.fn(() => 'ran');
+    expect(await t.locks.mutex('k').tryRun(fn, { onLost: 'ignore' })).toEqual({ ran: false });
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('does not start the callback when the lease deadline passes during the renew-now, because the store may have handed the key on', async () => {
+    const t = setup(leaseCluster);
+    const free = t.script.acquire;
+    t.script.acquire = async (key, req) => {
+      t.clock.jump(25_000);
+      return free(key, req);
+    };
+    t.script.extend = () => neverSettles();
+    const fn = vi.fn(() => 'ran');
+    const pending = t.locks.mutex('k').tryRun(fn, { onLost: 'ignore' });
+    await flush();
+    // The deadline (30 s) passes before the 10 s store timeout ends the renewal.
+    await t.clock.advance(10_000);
+    expect(await pending).toEqual({ ran: false });
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('retries within the wait when the renew-now proves the lock is gone, so acquire never hands out a guard that is already lost', async () => {
+    const t = setup(leaseCluster);
+    const free = t.script.acquire;
+    let first = true;
+    t.script.acquire = async (key, req) => {
+      if (first) t.clock.jump(25_000);
+      return free(key, req);
+    };
+    t.script.extend = () => {
+      const ok = !first;
+      first = false;
+      return Promise.resolve(ok);
+    };
+    const pending = t.locks.mutex('k').acquire({ wait: '1m' });
+    await flush();
+    await t.clock.advance(2000);
+    const guard = await pending;
+    expect(guard.held).toBe(true);
+    expect(t.calls.acquire).toHaveLength(2);
+  });
+
   it('refuses a grant that arrives a full ttl after it was sent and gives it back with its own token, because it may already be expired', async () => {
     const t = setup(leaseCluster);
     const free = t.script.acquire;
@@ -502,6 +575,18 @@ describe('lease guard', () => {
     slow.resolve(true);
     await advancing;
     expect(t.calls.release).toHaveLength(2);
+  });
+
+  it('keeps one renewal beat after extend() runs mid-beat, because a second renewal chain doubles store load and outlives stopTimers', async () => {
+    const t = setup(leaseCluster);
+    const guard = await t.locks.mutex('k').acquire({ wait: '1s' });
+    await t.clock.advance(5000);
+    await guard.extend();
+    // One chain: the extend at 5 s, then beats at 15 s and 25 s.
+    await t.clock.advance(20_000);
+    expect(t.calls.extend).toHaveLength(3);
+    await guard.release();
+    expect(t.clock.pending()).toBe(0);
   });
 
   it('extend() renews on demand and rejects with lost once the store refuses', async () => {
