@@ -17,6 +17,7 @@ Arki is the `@arki/*` package set (about 54 packages under `packages/`) turned i
 | [research/01-market/](research/01-market/) | Round 1: what Laravel sells, the JS/TS framework market, and an inventory of every `@arki/*` package. |
 | [research/02-advisors/](research/02-advisors/) | Round 2: the same brief answered blind by two advisors (Fable and Astra), plus the synthesis and verified findings. |
 | [research/03-plan/](research/03-plan/) | Round 3: top Laravel packages + Laravel AI, the JS AI market, Arki's AI inventory, and the two advisor plans merged into plan.md. |
+| [research/04-effect/](research/04-effect/) | Round 4: why Effect is famous, a capability map of Effect vs `@arki`, two blind advisor answers, and a merged three-wave roadmap (synthesis.md) with decisions D-01…D-07. |
 
 ## How to add to this area
 
