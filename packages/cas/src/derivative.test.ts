@@ -1,5 +1,5 @@
 /**
- * `derivative` and `derivation` (RFC §9): exact results for the Ekuation
+ * `derivative` and `derivation` (RFC §9): exact results for the calculator
  * corpus (S-01 to S-06), conditions, errors and budgets. Numeric agreement on
  * random inputs is in `derivative.property.test.ts`.
  */
@@ -26,7 +26,7 @@ function walk(step: DerivationStep, visit: (step: DerivationStep, parent: Deriva
   }
 }
 
-describe('derivative: the Ekuation corpus', () => {
+describe('derivative: the calculator corpus', () => {
   it.each([
     ['x^3 - 2*x^2 + x', '3 * x^2 - 4 * x + 1'],
     ['x^4', '4 * x^3'],

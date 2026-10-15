@@ -3,7 +3,7 @@
  *
  * Each row of the rule table gets a test that shows what the rule does and
  * which condition it must return. The conditions matter because a caller
- * (Ekuation's equation solver, the derivative calculator) shows them to the
+ * (an equation solver, a derivative calculator) shows them to the
  * user: a result that silently drops `x ≠ 0` would claim `x/x = 1` at 0.
  */
 import { describe, expect, it } from 'vitest';
