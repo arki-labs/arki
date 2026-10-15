@@ -1,6 +1,6 @@
 [
   {
-    "name": "@arki/cas/polynomial without exactRoots and factor (polynomialIn, expand, collect, rationalize, gcd; @arki/expr and @arki/math ignored): RFC target 10 kB, measured 10.04 kB (step 2 added lost-restriction conditions and the sign oracle; 40 B over target since the pre-publish fixes (conditions, error spans))",
+    "name": "@arki/cas/polynomial without exactRoots and factor (polynomialIn, expand, collect, rationalize, gcd; @arki/expr and @arki/math ignored): RFC target 10 kB, measured 10.07 kB (step 2 added lost-restriction conditions and the sign oracle; 70 B over target since the pre-publish fixes (conditions, error spans, the gcd sign rule))",
     "path": "dist/polynomial.js",
     "import": "{ polynomialIn, expand, collect, rationalize, gcd }",
     "ignore": ["@arki/expr", "@arki/math"],

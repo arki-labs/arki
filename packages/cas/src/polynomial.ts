@@ -25,12 +25,12 @@ import {
   EMPTY,
   fromCoefficientsIn,
   generators,
-  leadingTerm,
   multiply,
   normalized,
   ONE,
   gcd as polyGcd,
   power,
+  rationalContent,
   scale,
 } from './poly.js';
 import { inputExpr, read } from './read.js';
@@ -186,8 +186,8 @@ export function rationalize(
 
 /**
  * The gcd of two polynomials over ℚ: monic when it has one generator,
- * otherwise with coprime integer coefficients and a positive leading
- * coefficient. Generators include names, π, e and kernels.
+ * otherwise with coprime integer coefficients and the term that prints
+ * first positive (`x - pi`). Generators include names, π, e and kernels.
  */
 export function gcd(a: CasInput, b: CasInput, options: CasOptions = {}): CasResult {
   const ctx = new Context(options);
@@ -204,10 +204,16 @@ export function gcd(a: CasInput, b: CasInput, options: CasOptions = {}): CasResu
     }
   }
   let g = polyGcd(x.num, y.num, ctx.budget);
-  const lead = leadingTerm(g);
-  if (generators(g).size === 1 && lead !== undefined) g = scale(g, lead.c.inverse());
+  const emitter = new Emitter(ctx);
+  // "Leading" is the term that prints first: the internal leading term depends on generator ids.
+  const first = emitter.firstTerm(g);
+  if (first !== undefined) {
+    const content = rationalContent(g);
+    const unit = generators(g).size === 1 ? first.c : first.c.isNegative() ? content.negated() : content;
+    g = scale(g, unit.inverse());
+  }
   const conditions = mergeConditions(conditionsOf(x, ctx), conditionsOf(y, ctx));
-  return { result: exprOf(new Emitter(ctx).polyNode(g), ctx), conditions };
+  return { result: exprOf(emitter.polyNode(g), ctx), conditions };
 }
 
 function coefficientOf(r: RatFun, emitter: Emitter, ctx: Context): Coefficient {
@@ -266,10 +272,13 @@ export function polynomialIn(input: CasInput, variable: string, options: CasOpti
   return { kind: 'polynomial', coefficients, conditions };
 }
 
-/** `p` with its leading coefficient in `x` made positive (by that coefficient's own leading term). */
-function positiveIn(p: Poly, x: number): Poly {
-  const top = coefficientsIn(p, x).at(-1);
-  return top !== undefined && leadingTerm(top)?.c.isNegative() === true ? scale(p, ONE.negated()) : p;
+/**
+ * `p` with the term that prints first made positive: with `x` as the main
+ * variable, that is the leading coefficient in `x`, by its own first printed
+ * term (the internal leading term depends on generator ids).
+ */
+function positiveIn(p: Poly, emitter: Emitter): Poly {
+  return emitter.firstTerm(p)?.c.isNegative() === true ? scale(p, ONE.negated()) : p;
 }
 
 export type Factored = {
@@ -348,7 +357,7 @@ export function factor(input: CasInput, variable: string, options: CasOptions = 
       const rational = rationalIn(normalized(part), x);
       // Parts come from the primitive part, so they are primitive (Gauss's lemma): one of degree 1 is irreducible.
       complete &&= rational || degreeIn(part, x) === 1;
-      const pieces = rational ? rationalFactors(part, x, ctx) : [positiveIn(normalized(part), x)];
+      const pieces = rational ? rationalFactors(part, x, ctx) : [positiveIn(normalized(part), emitter)];
       for (const p of pieces) found.push({ p, multiplicity });
     }
   }

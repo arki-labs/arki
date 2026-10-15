@@ -51,6 +51,11 @@ describe('factor', () => {
     expect(shown('x^2 - y')).toBe('1 * (x^2 - y) [incomplete]');
   });
 
+  it('a part left whole prints with a positive first term; the sign goes to the content', () => {
+    expect(shown('(pi - y)*x^2 + 1')).toBe('-1 * (x^2 * y - pi * x^2 - 1) [incomplete]');
+    expect(shown('(y - pi)*x^2 + 1')).toBe('1 * (x^2 * y - pi * x^2 + 1) [incomplete]');
+  });
+
   it('a part of degree 1 in the variable is irreducible, whatever its coefficients: the result is complete', () => {
     // The parts come from the primitive part, so a linear one has no factor in y left to split off.
     expect(shown('x^2 + 2*x*y + y^2')).toBe('1 * (x + y)^2');

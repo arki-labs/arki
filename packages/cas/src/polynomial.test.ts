@@ -176,6 +176,13 @@ describe('gcd', () => {
     expect(gcd('x^2 - pi^2', 'x*pi + pi^2').result.source).toBe('x + pi');
   });
 
+  it('with several generators: coprime integer coefficients, the term that prints first positive', () => {
+    // The internal leading term depends on generator ids; the sign follows what the caller sees.
+    expect(gcd('x^2 - pi^2', 'x - pi').result.source).toBe('x - pi');
+    expect(gcd('2*x*y + 2*y^2', '4*x*y').result.source).toBe('y');
+    expect(gcd('-x - 1', 'x^2 - 1').result.source).toBe('x + 1');
+  });
+
   it('refuses a constant it cannot zero-test: as a free symbol, gcd(x - sqrt(2), x^2 - 2) would wrongly be 1', () => {
     expect(() => gcd('x - sqrt(2)', 'x^2 - 2')).toThrow(
       expect.objectContaining({
