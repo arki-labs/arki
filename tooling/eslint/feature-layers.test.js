@@ -9,6 +9,7 @@ import { featureLayers } from './feature-layers.js';
 const NEW_RULE = 'arki-feature-layers/usecase-runtime-imports';
 const BACK = 'arki-feature-layers/feature-runtime-imports';
 const RESTRICT = 'no-restricted-imports';
+const CALLS_USECASES = 'arki-feature-layers/procedures-call-usecases';
 
 const linter = new Linter();
 
@@ -19,10 +20,11 @@ const ruleIds = (/** @type {string} */ filename, /** @type {string} */ code, /**
     .map((m) => m.ruleId);
 
 const USECASE = 'src/features/demo/usecases/run.ts';
+const PROCEDURES = 'src/features/demo/entrypoints/procedures.ts';
 
 test('contracts ship to the browser, so importing outside their vocabulary fails', () => {
-  assert.deepEqual(ruleIds('src/features/demo/entrypoints/contract.ts', `import { x } from '../usecases/run';`), [RESTRICT]);
-  assert.deepEqual(ruleIds('src/features/demo/entrypoints/contract.ts', `import { z } from 'zod'; import { m } from '../model/m';`), []);
+  assert.deepEqual(ruleIds('src/features/demo/entrypoints/rpc.ts', `import { x } from '../usecases/run';`), [RESTRICT]);
+  assert.deepEqual(ruleIds('src/features/demo/entrypoints/rpc.ts', `import { z } from 'zod'; import { m } from '../model/m';`), []);
 });
 
 test('model is the inside layer: it never imports usecases', () => {
@@ -38,7 +40,7 @@ test('model/tables.ts is where tables are declared, so pg-core is allowed', () =
 });
 
 test('a usecase does not know how it is called: no entrypoints import', () => {
-  assert.deepEqual(ruleIds(USECASE, `import { c } from '../entrypoints/contract';`), [RESTRICT]);
+  assert.deepEqual(ruleIds(USECASE, `import { c } from '../entrypoints/rpc';`), [RESTRICT]);
 });
 
 test('a usecase may not runtime-import infra: dependencies come from the graph', () => {
@@ -88,7 +90,7 @@ test('the oRPC server belongs to the entrypoints and the core, not usecases', ()
 });
 
 test('a procedure never builds its own oRPC implementer', () => {
-  assert.deepEqual(ruleIds('src/features/demo/entrypoints/procedures.ts', `import { os } from '@orpc/server';`), [RESTRICT]);
+  assert.deepEqual(ruleIds(PROCEDURES, `import { os } from '@orpc/server';`), [RESTRICT]);
 });
 
 test('app-level code outside the core may not import @orpc/server', () => {
@@ -101,18 +103,42 @@ test('the cron contract (cron.ts) is app core: it builds its own implementer', (
 });
 
 test('a usecase or a procedure may not runtime-import its feature.ts: feature.ts imports them, so that is a cycle', () => {
-  assert.deepEqual(ruleIds(USECASE, `import { core } from '../feature';`), [BACK]);
-  assert.deepEqual(ruleIds('src/features/demo/entrypoints/procedures/signup.ts', `import { os } from '../../feature';`), [BACK]);
-  assert.deepEqual(ruleIds('src/features/demo/entrypoints/procedures/admin/count.ts', `import { os } from '../../../feature.js';`), [BACK]);
+  assert.deepEqual(ruleIds(USECASE, `import { demoLogic } from '../feature';`), [BACK]);
+  assert.deepEqual(ruleIds(PROCEDURES, `import { rpcImplementer } from '../feature';`), [BACK]);
+  assert.deepEqual(ruleIds(PROCEDURES, `import { rpcImplementer } from '../feature.js';`), [BACK]);
 });
 
-test('import type of Deps / os from feature.ts is fine: it vanishes at build time', () => {
+test('import type of Deps / rpcImplementer from feature.ts is fine: it vanishes at build time', () => {
   assert.deepEqual(ruleIds(USECASE, `import type { Deps } from '../feature';`), []);
-  assert.deepEqual(ruleIds('src/features/demo/entrypoints/procedures/signup.ts', `import type { os } from '../../feature';`), []);
+  assert.deepEqual(ruleIds(PROCEDURES, `import type { rpcImplementer } from '../feature';`), []);
   // Another feature's feature.ts is not this rule's business (cross-feature imports go through handles).
   assert.deepEqual(ruleIds(USECASE, `import type { Deps } from '../other-feature';`), []);
 });
 
 test('tests may wire infra directly, so they are ignored', () => {
   assert.deepEqual(ruleIds('src/features/demo/usecases/__tests__/a.test.ts', `import { store } from '../../infra/store';`), []);
+});
+
+test('a procedure calls a usecase: reading context.repos fails, in every spelling', () => {
+  const leaf = (/** @type {string} */ body) => `export const p = { a: (impl) => impl.a.handler(${body}) };`;
+  assert.deepEqual(ruleIds(PROCEDURES, leaf(`({ context }) => context.repos.push.find()`)), [CALLS_USECASES]);
+  assert.deepEqual(ruleIds(PROCEDURES, leaf(`({ context }) => context['repos'].push.find()`)), [CALLS_USECASES]);
+  assert.deepEqual(ruleIds(PROCEDURES, leaf(`({ context }) => { const { repos } = context; return repos.push.find(); }`)), [CALLS_USECASES]);
+  assert.deepEqual(ruleIds(PROCEDURES, leaf(`({ context: { repos } }) => repos.push.find()`)), [CALLS_USECASES]);
+});
+
+test('a procedure that calls context.usecases is fine', () => {
+  const code = `export const p = { a: (impl) => impl.a.handler(({ context }) => context.usecases.find(context.session.user.id)) };`;
+  assert.deepEqual(ruleIds(PROCEDURES, code), []);
+  // A key named repos in an object LITERAL is not a read.
+  assert.deepEqual(ruleIds(PROCEDURES, `const x = { context: { repos: 1 } };`), []);
+});
+
+test('a procedure may not runtime-import infra; import type is fine', () => {
+  assert.deepEqual(ruleIds(PROCEDURES, `import { store } from '../infra/store';`), [CALLS_USECASES]);
+  assert.deepEqual(ruleIds(PROCEDURES, `import type { Row } from '../infra/repository';`), []);
+});
+
+test('usecases may read repos: the procedures rule only covers entrypoints/procedures.ts', () => {
+  assert.deepEqual(ruleIds(USECASE, `export const f = ({ repos }) => () => repos.push.find();`), []);
 });

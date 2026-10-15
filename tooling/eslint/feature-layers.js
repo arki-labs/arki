@@ -7,15 +7,15 @@
  *   features/<name>/model/        schemas, tables, ids, pure rules
  *   features/<name>/usecases/     what the feature does
  *   features/<name>/infra/        its private plugins (store, clients)
- *   features/<name>/entrypoints/  contract.ts (browser-safe) + procedures
- *   features/<name>/feature.ts    the defineFeature chain and `os`
+ *   features/<name>/entrypoints/  rpc.ts (the browser-safe contract) + procedures.ts
+ *   features/<name>/feature.ts    the defineFeature chain and `rpcImplementer`
  *
  * Types cannot see folders, so these rules hold the shape:
  *
  * - `@orpc/server` only in the app core (`core/orpc.ts`, `root.ts`,
- *   `gateway.ts`, `cron.ts`) and `feature.ts` — a procedure never builds its own `os`.
- * - `@orpc/contract` only in contract files — `entrypoints/contract.ts` and
- *   the app's `contract.ts`.
+ *   `gateway.ts`, `cron.ts`) and `feature.ts` — a procedure never builds its own implementer.
+ * - `@orpc/contract` only in contract files — `entrypoints/rpc.ts` and
+ *   the app's `rpc.ts`.
  * - A contract file imports only `@orpc/contract`, zod / `@arki/contracts`,
  *   and its model (`../model/*`, or feature contracts from the app contract)
  *   — it ships to the browser.
@@ -28,7 +28,10 @@
  * - `usecases/` and `entrypoints/` make no RUNTIME import of their own
  *   `feature.ts` (`arki-feature-layers/feature-runtime-imports`): `feature.ts`
  *   imports them, so a value import back is a module cycle that dies with a
- *   TDZ error at import. `import type { Deps }` / `import type { os }` is fine.
+ *   TDZ error at import. `import type { Deps }` / `import type { rpcImplementer }` is fine.
+ * - `entrypoints/procedures.ts` calls usecases: it never reads `context.repos`
+ *   and makes no runtime import of `infra/` (`arki-feature-layers/procedures-call-usecases`).
+ *   Data access belongs in a usecase, where a test can reach it without HTTP.
  *
  * The rules only look at layer folders and app-level files, so router-first
  * features (no layer folders yet) are not flagged while they wait to convert.
@@ -40,8 +43,8 @@
 
 /** @typedef {{ group?: string[], regex?: string, message: string }} Pattern */
 
-const SERVER = { group: ['@orpc/server', '@orpc/server/*'], message: 'Only feature.ts and the app core (core/orpc.ts, root.ts, gateway.ts, cron.ts) build oRPC implementers. Take `os` as a typed parameter (`import type { os } from "../feature"`).' };
-const CONTRACT = { group: ['@orpc/contract', '@orpc/contract/*'], message: 'Contracts live in entrypoints/contract.ts (and the app contract.ts) only.' };
+const SERVER = { group: ['@orpc/server', '@orpc/server/*'], message: 'Only feature.ts and the app core (core/orpc.ts, root.ts, gateway.ts, cron.ts) build oRPC implementers. Take `rpcImplementer` as a typed parameter (`import type { rpcImplementer } from "../feature"`).' };
+const CONTRACT = { group: ['@orpc/contract', '@orpc/contract/*'], message: 'Contracts live in entrypoints/rpc.ts (and the app rpc.ts) only.' };
 const DB_RUNTIME = {
   regex: '^(drizzle-orm(/(?!pg-core$).*)?|pg|postgres|@arki/db(/(?!id$|temporal$).*)?)$',
   message: 'model/ holds no database runtime (only model/tables.ts declares tables). Use drizzle-orm/pg-core or @arki/db/{id,temporal} types.',
@@ -62,9 +65,9 @@ const USECASES_INWARD = layer(['entrypoints'], 'usecases/ never imports entrypoi
  */
 const CONTRACT_ONLY = {
   regex:
-    '^(?!(@orpc/contract|zod|zod/.*|@arki/contracts)$)(?!\\.\\./model/)(?!\\./schemas$)(?!\\./features/[^/]+/entrypoints/contract$).*',
+    '^(?!(@orpc/contract|zod|zod/.*|@arki/contracts)$)(?!\\.\\./model/)(?!\\./schemas$)(?!\\./features/[^/]+/entrypoints/rpc$).*',
   message:
-    'A contract ships to the browser: import only @orpc/contract, zod / @arki/contracts and ../model/* (the app contract: ./features/<name>/entrypoints/contract).',
+    'A contract ships to the browser: import only @orpc/contract, zod / @arki/contracts and ../model/* (the app contract: ./features/<name>/entrypoints/rpc).',
 };
 
 /**
@@ -145,9 +148,9 @@ const usecaseRuntimeImports = {
 };
 
 /**
- * The same check with its own name and message: a usecase or a procedure takes
- * `Deps` / `os` from its `feature.ts` as a type. One file per usecase and per
- * procedure means many files that could slip in a value import by accident.
+ * The same check with its own name and message: a usecase or the procedures
+ * file takes `Deps` / `rpcImplementer` from its `feature.ts` as a type. One file
+ * per usecase means many files that could slip in a value import by accident.
  *
  * @type {import('eslint').Rule.RuleModule}
  */
@@ -156,17 +159,90 @@ const featureRuntimeImports = {
     ...usecaseRuntimeImports.meta,
     messages: {
       runtime:
-        'feature.ts imports this file, so a runtime import of {{source}} back is a module cycle (TDZ at import). Use `import type { Deps }` / `import type { os }`.',
+        'feature.ts imports this file, so a runtime import of {{source}} back is a module cycle (TDZ at import). Use `import type { Deps }` / `import type { rpcImplementer }`.',
     },
   },
   create: usecaseRuntimeImports.create,
+};
+
+/** `{ repos }` (or `{ 'repos': … }`) inside an object pattern. */
+const destructuresRepos = (/** @type {import('estree').Pattern | null | undefined} */ pattern) =>
+  pattern?.type === 'ObjectPattern' &&
+  pattern.properties.some((p) => p.type === 'Property' && propertyName(p.key, p.computed) === 'repos');
+
+/** The static name of a property key, or undefined when it is computed from a variable. */
+const propertyName = (/** @type {import('estree').Node} */ key, /** @type {boolean} */ computed) => {
+  if (!computed && key.type === 'Identifier') return key.name;
+  return key.type === 'Literal' && typeof key.value === 'string' ? key.value : undefined;
+};
+
+const isContext = (/** @type {import('estree').Node | null | undefined} */ node) =>
+  node?.type === 'Identifier' && node.name === 'context';
+
+/**
+XX * procedure calls a usecase"). In `entrypoints/procedures.ts`:
+ * - no `context.repos` read — as a member (`context.repos.x`), a destructure
+ *   (`const { repos } = context`) or a handler parameter (`({ context: { repos } })`);
+ * - no runtime import of `infra/`. `import type` is fine.
+ * The procedure keeps the HTTP work (auth, error mapping); the usecase does
+ * the rest, so the rest is testable without a request.
+ *
+ * @type {import('eslint').Rule.RuleModule}
+ */
+const proceduresCallUsecases = {
+  meta: {
+    type: 'problem',
+    schema: [],
+    messages: {
+      repos: 'A procedure calls a usecase (`context.usecases.x(…)`), never `context.repos`. Move the data access into a usecase.',
+      infra: 'A procedure reaches infra through a usecase, never by a runtime import of {{source}}. `import type` is fine.',
+    },
+  },
+  create(context) {
+    const infra = new RegExp(USECASE_INFRA);
+    const reportRepos = (/** @type {import('estree').Node} */ node) => context.report({ node, messageId: 'repos' });
+    const checkSource = (/** @type {import('estree').Node} */ node, /** @type {unknown} */ source) => {
+      if (typeof source === 'string' && infra.test(source)) context.report({ node, messageId: 'infra', data: { source: `"${source}"` } });
+    };
+    return {
+      MemberExpression(node) {
+        if (isContext(node.object) && propertyName(node.property, node.computed) === 'repos') reportRepos(node);
+      },
+      VariableDeclarator(node) {
+        if (isContext(node.init) && destructuresRepos(node.id)) reportRepos(node);
+      },
+      Property(node) {
+        // `({ context: { repos } }) => …` — only inside a pattern, not an object literal.
+        const inPattern = 'parent' in node && node.parent?.type === 'ObjectPattern';
+        if (inPattern && propertyName(node.key, node.computed) === 'context' && node.value.type === 'ObjectPattern' && destructuresRepos(node.value)) {
+          reportRepos(node);
+        }
+      },
+      ImportDeclaration(node) {
+        if (!isTypeOnly(node, 'importKind')) checkSource(node, node.source.value);
+      },
+      ExportNamedDeclaration(node) {
+        if (node.source && !isTypeOnly(node, 'exportKind')) checkSource(node, node.source.value);
+      },
+      ExportAllDeclaration(node) {
+        if (!isTypeOnly(node, 'exportKind')) checkSource(node, node.source.value);
+      },
+      ImportExpression(node) {
+        if (node.source.type === 'Literal') checkSource(node, node.source.value);
+      },
+    };
+  },
 };
 
 // The feature's own chain file, from any depth inside usecases/ or entrypoints/.
 const OWN_FEATURE = '^(\\.\\./)+feature(\\.[jt]s)?$';
 
 const plugin = {
-  rules: { 'usecase-runtime-imports': usecaseRuntimeImports, 'feature-runtime-imports': featureRuntimeImports },
+  rules: {
+    'usecase-runtime-imports': usecaseRuntimeImports,
+    'feature-runtime-imports': featureRuntimeImports,
+    'procedures-call-usecases': proceduresCallUsecases,
+  },
 };
 
 const TESTS = ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**'];
@@ -181,7 +257,7 @@ const TESTS = ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**'];
  */
 export function featureLayers({ src = 'src', legacy = [], clients = [] } = {}) {
   const features = `${src}/features/*`;
-  const contracts = [`${src}/contract.ts`, `${features}/entrypoints/contract.ts`];
+  const contracts = [`${src}/rpc.ts`, `${features}/entrypoints/rpc.ts`];
   const serverAllowed = [`${src}/core/orpc.ts`, `${src}/root.ts`, `${src}/gateway.ts`, `${src}/cron.ts`];
 
   /** One config per file class, so each file gets exactly one `no-restricted-imports` list. */
@@ -222,6 +298,12 @@ export function featureLayers({ src = 'src', legacy = [], clients = [] } = {}) {
       ignores: TESTS,
       plugins: { 'arki-feature-layers': plugin },
       rules: { 'arki-feature-layers/feature-runtime-imports': ['error', { patterns: [OWN_FEATURE] }] },
+    },
+    {
+      name: 'arki/feature-layers/procedures',
+      files: [`${features}/entrypoints/procedures.ts`],
+      plugins: { 'arki-feature-layers': plugin },
+      rules: { 'arki-feature-layers/procedures-call-usecases': 'error' },
     },
     {
       name: 'arki/feature-layers/infra-entrypoints',
