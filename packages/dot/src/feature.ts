@@ -93,7 +93,44 @@ export type Feature<
   /** Runtime escape hatch — becomes the plugin lifecycle in `.features()`. */
   readonly needs: TNeeds;
   readonly boot?: (services: CtxOf<TNeeds> & KernelCtx) => MaybePromise<TProvides | void>;
+  /**
+   * Typed handles for what `boot` provides: `billing.provides.entitlements`
+   * is a `Token` on the same wire key, typed from billing's implementation.
+   * A consumer names the capability in its `needs` and never restates the
+   * type — the Drizzle `references(() => table.column)` of features.
+   */
+  readonly provides: ProvidesHandles<TProvides>;
 };
+
+/** One `Token` per key a feature's `boot` provides, keyed and typed by that key. */
+export type ProvidesHandles<TProvides extends ServiceRecord> = {
+  readonly [K in keyof TProvides & string]: Token<TProvides[K], K>;
+};
+
+/**
+ * Boot's keys exist only once it runs, so handles are minted on first
+ * access — each an ordinary token on the provided wire key. The kernel
+ * resolves it like any other token: no second wiring mechanism.
+ */
+function providesHandles<TProvides extends ServiceRecord>(): ProvidesHandles<TProvides> {
+  const minted = new Map<string, Token<unknown>>();
+  const handles = new Proxy(
+    {},
+    {
+      get(_target, key) {
+        if (typeof key !== 'string') return;
+        const existing = minted.get(key);
+        if (existing !== undefined) return existing;
+        const created = token<unknown>()(key);
+        minted.set(key, created);
+        return created;
+      },
+    },
+  );
+  // Erasure seam: the record is built by key at runtime; its type comes from
+  // the boot return that `feature()` inferred.
+  return handles as ProvidesHandles<TProvides>;
+}
 
 /**
  * The erased feature bound list helpers fold over. `boot`'s parameter
@@ -158,6 +195,7 @@ export function feature<
     actions: config.actions ?? [],
     needs: (config.needs ?? {}) as TNeeds,
     boot: config.boot,
+    provides: providesHandles<TProvides>(),
   };
 }
 

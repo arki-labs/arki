@@ -211,6 +211,27 @@ adapters are bound to the mounted features — `http()` serves every feature's
 routes without being told the list. `dot explain --graph` draws the three
 groups, numbered in boot order.
 
+A feature depends on a capability another feature provides, not on the whole
+feature. Name it by handle — the type comes from the provider's `boot`, so it
+is written once:
+
+```ts
+const billing = feature('billing', {
+  needs: { db: service<Db>() },
+  boot: ({ db }) => ({ entitlements: createEntitlements(db) }),
+});
+
+const digest = feature('daily-digest', {
+  needs: { access: billing.provides.entitlements }, // typed from createEntitlements
+  boot: ({ access }) => ({ digest: createDigest(access) }),
+});
+
+defineApp('app').use(db()).features([billing, digest]); // provider first: boot order
+```
+
+`billing.provides.entitlements` is an ordinary token on the `entitlements` wire
+key; mounting `digest` before `billing` is a compile error.
+
 ### Tokens — cross-package service contracts
 
 An anonymous `service<T>()` couples consumer and provider by property name.

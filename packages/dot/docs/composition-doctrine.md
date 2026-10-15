@@ -154,10 +154,16 @@ core infra (procedure builders, env, auth factory, logging) + adapters
 schema leaves (tables.ts — import nothing above)
 ```
 
-- **No lateral feature→feature imports.** Cross-feature table references go
-  through the composed relations builder (typed by the composed schema — no
-  import needed). Cross-feature behavior goes through provided services,
-  needs-checked by the graph.
+- **No lateral feature→feature imports — with one door.** Cross-feature table
+  references go through the composed relations builder (typed by the composed
+  schema — no import needed). Cross-feature behavior goes through provided
+  services, needs-checked by the graph. The door: a consumer's `feature.ts`
+  may import a provider's `feature.ts` to name a capability by handle —
+  `needs: { access: billing.provides.entitlements }`. That import carries a
+  token typed from billing's implementation (the type is written once, by the
+  provider) and nothing else; a consumer reaching into another feature's
+  services, repository, or internals is still a lateral import. Mount order
+  stays the boot order: the provider must be listed before the consumer.
 - **Relations are a second pass** over the composed schema: feature-owned
   fragments, one `defineRelations` call, never a god barrel.
 - **Nothing points back up — where "up" means a cycle.** The rule is

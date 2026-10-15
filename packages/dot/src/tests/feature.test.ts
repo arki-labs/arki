@@ -151,6 +151,55 @@ describe('mounting features (.features)', () => {
   });
 });
 
+describe('provides handles (a feature depends on a capability, not a feature)', () => {
+  // The provider writes its implementation once; consumers name the
+  // capability by handle and get its type inferred. Restating the type
+  // (service<Entitlements>()) is exactly the drift this exists to remove.
+  const createEntitlements = (db: FakeDb) => ({
+    source: db.tag,
+    planOf: (userId: string) => (userId === 'usr_pro' ? ('pro' as const) : ('free' as const)),
+  });
+
+  const plans = feature('plans', {
+    needs: { db: service<FakeDb>() },
+    boot: ({ db }) => ({ entitlements: createEntitlements(db) }),
+  });
+
+  const digest = feature('digest', {
+    needs: { access: plans.provides.entitlements },
+    boot: ({ access }) => ({ digestPlan: (userId: string) => access.planOf(userId) }),
+  });
+
+  it("types the handle from the provider's boot return — nothing restated", () => {
+    expectTypeOf(plans.provides.entitlements.key).toEqualTypeOf<'entitlements'>();
+    expectTypeOf<Parameters<NonNullable<typeof digest.boot>>[0]['access']>().toEqualTypeOf<
+      ReturnType<typeof createEntitlements>
+    >();
+  });
+
+  it('wires the consumer to the instance the provider booted, on the same wire key', async () => {
+    const dbPlugin = plugin({ name: 'db', boot: () => ({ db: fakeDb }) });
+    const app = await defineApp('provides-test').use(dbPlugin).features([plans, digest]).boot();
+
+    expect(plans.provides.entitlements.key).toBe('entitlements');
+    expect(app.services.digestPlan('usr_pro')).toBe('pro');
+    expect(app.services.digestPlan('usr_free')).toBe('free');
+    expect(app.services.entitlements.planOf('usr_pro')).toBe('pro');
+    await app.dispose();
+  });
+
+  it('keeps boot order honest: a consumer mounted before its provider fails to compile and to boot', async () => {
+    const dbPlugin = plugin({ name: 'db', boot: () => ({ db: fakeDb }) });
+    // @ts-expect-error — digest needs `entitlements`, which nothing mounted before it provides.
+    const misordered = defineApp('provides-order-test').use(dbPlugin).features([digest, plans]);
+    await expect(misordered.boot()).rejects.toThrow(/entitlements/);
+  });
+
+  it('mints one stable handle per key', () => {
+    expect(plans.provides.entitlements).toBe(plans.provides.entitlements);
+  });
+});
+
 describe('the hexagon: .use → .features → .serve', () => {
   const dbPlugin = plugin({ name: 'db', boot: () => ({ db: fakeDb }) });
 
