@@ -13,7 +13,10 @@
  * is no unlock statement that can fail and leave the lock behind.
  *
  * While a lock is held, the pinned connection runs a short `pg_sleep` in a
- * loop. That does two jobs. A dropped connection fails the running query, so
+ * loop. The beats start tiny and double up to `HOLD_BEAT_SECONDS`: release needs
+ * the same connection, so it waits out the beat in flight, and a hold that has
+ * only just begun therefore costs a few ms to end, not a whole long beat (a
+ * long hold pays at most one long beat, a small share of its length). That does two jobs. A dropped connection fails the running query, so
  * the holder learns the lock is lost within a beat (`Grant.lost`). And a
  * connection that always has a query in flight reports its death to that
  * query, not as an unhandled `error` event on an idle client. A beat that does
@@ -101,8 +104,10 @@ export type PgTransactionGuarantees = typeof heldByTransaction;
 
 /** Longest single `lock_timeout` slice of a wait; a caller's signal is honoured between slices. */
 export const WAIT_SLICE_MS = 1000;
-/** Length of one beat of the pinned connection while a lock is held. */
+/** Longest beat of the pinned connection while a lock is held. */
 export const HOLD_BEAT_SECONDS = 0.2;
+/** The first beat of a hold; each next one doubles until `HOLD_BEAT_SECONDS`. */
+export const HOLD_FIRST_BEAT_SECONDS = 0.001;
 /** A beat still unanswered after this long means a silent connection; the hold is reported lost. */
 export const HOLD_BEAT_TIMEOUT_MS = 5000;
 
@@ -145,12 +150,19 @@ type Target = { readonly key: Key; readonly legacy: boolean; readonly mode: Lock
 
 const modeOf = (request: SharedRequest): LockMode => (request.mode === 'read' ? 'shared' : 'exclusive');
 
-function tryLockSql({ key, legacy, mode }: Target): SQL {
-  if (legacy) return sql`select pg_try_advisory_xact_lock(hashtext(${legacyPgText(key)})) as acquired`;
+function tryLockCall({ key, legacy, mode }: Target): SQL {
+  if (legacy) return sql`pg_try_advisory_xact_lock(hashtext(${legacyPgText(key)}))`;
   const { hi, lo } = toPgPair(key);
   return mode === 'shared'
-    ? sql`select pg_try_advisory_xact_lock_shared(${hi}::int4, ${lo}::int4) as acquired`
-    : sql`select pg_try_advisory_xact_lock(${hi}::int4, ${lo}::int4) as acquired`;
+    ? sql`pg_try_advisory_xact_lock_shared(${hi}::int4, ${lo}::int4)`
+    : sql`pg_try_advisory_xact_lock(${hi}::int4, ${lo}::int4)`;
+}
+
+/** One statement for the uncontended attempt: with `exempt`, the timeouts are lifted by a CTE that the select reads, so it costs no round trip of its own. */
+function tryLockSql(target: Target, exempt: SQL | undefined): SQL {
+  return exempt === undefined
+    ? sql`select ${tryLockCall(target)} as acquired`
+    : sql`with exempt as (${exempt}) select ${tryLockCall(target)} as acquired from (select count(*) from exempt) as lifted`;
 }
 
 function blockingLockSql({ key, legacy, mode }: Target): SQL {
@@ -171,15 +183,15 @@ const settingOr = (value: unknown): string => (typeof value === 'string' ? value
  * are put back as they were.
  */
 async function waitSlice(tx: PgExecutor, target: Target, sliceMs: number): Promise<boolean> {
-  const previous = firstRow(
-    await tx.execute(
-      sql`select current_setting('lock_timeout') as lock_timeout, current_setting('statement_timeout') as statement_timeout`,
-    ),
-  );
   await tx.execute(sql.raw(`savepoint ${SAVEPOINT}`));
+  let previous: Record<string, unknown> | undefined;
   try {
-    await tx.execute(
-      sql`select set_config('lock_timeout', ${`${sliceMs}ms`}, true), set_config('statement_timeout', '0', true)`,
+    // One round trip reads the settings and sets the new ones. The CTE is read before the select
+    // list runs, so the values read are the old ones; inside the savepoint, a timeout puts them back.
+    previous = firstRow(
+      await tx.execute(
+        sql`with previous as materialized (select current_setting('lock_timeout') as lock_timeout, current_setting('statement_timeout') as statement_timeout) select previous.lock_timeout, previous.statement_timeout, set_config('lock_timeout', ${`${sliceMs}ms`}, true), set_config('statement_timeout', '0', true) from previous`,
+      ),
     );
     await tx.execute(blockingLockSql(target));
   } catch (error) {
@@ -203,16 +215,19 @@ function waitDeadline(waitMs: number | undefined): number | undefined {
  * One attempt, or (with a `deadline`) attempts in bounded slices until the lock
  * comes, the deadline passes, or `signal` aborts. A deadline already gone (the
  * wait was spent queueing for a connection) still gets one instant attempt.
+ * `exempt` (a statement) runs in the same round trip as an instant attempt, or first for a wait.
  */
 async function takeLock(
   tx: PgExecutor,
   target: Target,
   deadline: number | undefined,
   signal: AbortSignal | undefined,
+  exempt?: SQL,
 ): Promise<boolean> {
   if (deadline === undefined || deadline <= performance.now()) {
-    return wasAcquired(await tx.execute(tryLockSql(target)));
+    return wasAcquired(await tx.execute(tryLockSql(target, exempt)));
   }
+  if (exempt !== undefined) await tx.execute(exempt);
   for (;;) {
     if (signal?.aborted === true) return false;
     const left = deadline - performance.now();
@@ -407,8 +422,7 @@ export function pgSession(
 
     const run = db.transaction(async tx => {
       // The pinned transaction only runs this store's bounded statements, so no server timeout may end it while held.
-      await tx.execute(EXEMPT_TIMEOUTS);
-      const got = await takeLock(tx, target, deadline, req.signal);
+      const got = await takeLock(tx, target, deadline, req.signal, EXEMPT_TIMEOUTS);
       if (!got) return;
       phase = 'held';
       ends.set(req.token, end);
@@ -419,12 +433,19 @@ export function pgSession(
         return;
       }
       answer.resolve({ key, token: req.token, lost: lost.promise });
-      while (isHeld()) {
+      // A job that ends within this turn never pays for a beat. The connection is idle for one turn,
+      // like the gaps between this store's own statements.
+      await Promise.race([nextTurn(), releaseAsked.promise]);
+      for (
+        let beatSeconds = HOLD_FIRST_BEAT_SECONDS;
+        isHeld();
+        beatSeconds = Math.min(beatSeconds * 2, HOLD_BEAT_SECONDS)
+      ) {
         // Promise.resolve: Drizzle's query is a thenable that runs again on every `then`.
-        const beat = Promise.resolve(tx.execute(sql`select pg_sleep(${HOLD_BEAT_SECONDS})`));
+        const beat = Promise.resolve(tx.execute(sql`select pg_sleep(${beatSeconds})`));
         if ((await unanswered(beat, HOLD_BEAT_TIMEOUT_MS)) && isHeld()) loseSilently();
         await beat;
-        await nextTurn();
+        if (isHeld()) await Promise.race([nextTurn(), releaseAsked.promise]);
       }
     });
 

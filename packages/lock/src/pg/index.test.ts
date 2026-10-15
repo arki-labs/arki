@@ -19,7 +19,7 @@ import type { LockableDb, PgExecutor } from './index.js';
 import { LockError } from '../errors.js';
 import { createKey, toPgPair } from '../key.js';
 import { createLocks } from '../locks.js';
-import { HOLD_BEAT_SECONDS, HOLD_BEAT_TIMEOUT_MS, pgSession, pgTransaction } from './index.js';
+import { HOLD_BEAT_SECONDS, HOLD_BEAT_TIMEOUT_MS, HOLD_FIRST_BEAT_SECONDS, pgSession, pgTransaction } from './index.js';
 
 type Statement = { readonly sql: string; readonly params: readonly unknown[] };
 
@@ -162,7 +162,11 @@ describe('pgSession life cycle', () => {
     await store.release(grant ?? { key, token: 't1' });
     const beats = statements.filter(statement => statement.sql.includes('pg_sleep'));
     expect(beats.length).toBeGreaterThan(2);
-    expect(beats[0]?.params).toEqual([HOLD_BEAT_SECONDS]);
+    // Release waits out the beat in flight, so a young hold beats short and long holds settle at the cap.
+    expect(beats[0]?.params).toEqual([HOLD_FIRST_BEAT_SECONDS]);
+    const lengths = beats.map(beat => Number(beat.params[0]));
+    expect(Math.max(...lengths)).toBeLessThanOrEqual(HOLD_BEAT_SECONDS);
+    expect(lengths[2]).toBeGreaterThan(lengths[0] ?? 0);
   });
 
   it('a dropped connection resolves grant.lost with detectedBy "connection" and later release says not-owner', async () => {

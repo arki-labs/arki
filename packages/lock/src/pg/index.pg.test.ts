@@ -22,7 +22,7 @@ import { createLocks } from '../locks.js';
 import { chaos } from '../testing/chaos.js';
 import { describeCases, describeStoreContract } from '../testing/index.js';
 import { replicaCases } from '../testing/replicas.js';
-import { pgSession, pgTransaction } from './index.js';
+import { HOLD_BEAT_SECONDS, pgSession, pgTransaction } from './index.js';
 
 const POOL_SIZE = 40;
 const packageRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -295,6 +295,42 @@ describe('bounded waits on a real server', () => {
 // ---------------------------------------------------------------------------
 // Chaos with real connections
 // ---------------------------------------------------------------------------
+
+describe('release speed of a held pgSession lock', () => {
+  it('an uncontended tryRun ends in a few ms, far under the longest beat, because release never waits out a long pg_sleep', async () => {
+    const locks = createLocks({ store: pgSession(dbA), namespace: 'app' });
+    await locks.mutex(lockedNames('warm')).tryRun(() => 1);
+    const durations: number[] = [];
+    for (let i = 0; i < 10; i++) {
+      const startedAt = performance.now();
+      await locks.mutex(lockedNames('fast')).tryRun(() => 1);
+      durations.push(performance.now() - startedAt);
+    }
+    durations.sort((a, b) => a - b);
+    expect(durations[5]).toBeLessThan(HOLD_BEAT_SECONDS * 1000);
+    expect(durations[5]).toBeLessThan(50);
+  });
+
+  it('a blocked waiter gets the lock within a few beats of a release, even when the hold was long', async () => {
+    const locksA = createLocks({ store: pgSession(dbA), namespace: 'app' });
+    const locksB = createLocks({ store: pgSession(dbB), namespace: 'app' });
+    const name = lockedNames('fast-handoff');
+    const holder = await locksA.mutex(name).acquire({ wait: '2s' });
+    let gotAt = 0;
+    const waiting = locksB.mutex(name).run(
+      () => {
+        gotAt = performance.now();
+      },
+      { wait: '10s' },
+    );
+    await delay(500);
+    const releasedAt = performance.now();
+    await holder.release();
+    await waiting;
+    // The beat in flight at release is at most HOLD_BEAT_SECONDS; the old 200 ms beat plus overhead failed this.
+    expect(gotAt - releasedAt).toBeLessThan(HOLD_BEAT_SECONDS * 1000 + 100);
+  });
+});
 
 describe('chaos: the pinned connection dies', () => {
   it('terminating the holder backend aborts its signal, lets replica B in, and run rejects "lost"', async () => {
