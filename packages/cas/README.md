@@ -49,6 +49,7 @@ import { simplify } from '@arki/cas/simplify';
 simplify('x/x'); // '1', conditions: [x ≠ 0]
 simplify('sqrt(x^2)'); // 'abs(x)', no conditions: over ℝ this holds everywhere
 simplify('sqrt(x^2)', { assume: { x: 'nonnegative' } }); // 'x', conditions: [x ≥ 0 (assumed)]
+simplify('sqrt(x^2)', { assume: { x: 'negative' } }); // '-x', conditions: [x < 0 (assumed)]
 simplify('exp(ln(x))'); // 'x', conditions: [x > 0]
 simplify('ln(exp(x))'); // 'x', no conditions
 simplify('exp(x)*cos(x) - exp(x)*sin(x)'); // 'exp(x) * (cos(x) - sin(x))'
@@ -65,7 +66,7 @@ v1 is **real-only**: every variable ranges over ℝ and every function is its re
 | `integer-powers`    | `(u^(p/q))^k → u^(kp/q)` for an integer kp/q                                                  | —                                           | `u ≥ 0` (or `> 0`) of the removed power |
 | `fractional-powers` | `(u^a)^b`, `(g^m)^q`, `u^a·u^b` with non-integer exponents                                    | `u > 0` proven or assumed                   | the assumption                          |
 | `sqrt-of-square`    | `sqrt(c·u^2) → sqrt(c)·abs(u)`, then `→ u`                                                    | `u ≥ 0` proven or assumed for `→ u`         | the assumption                          |
-| `square-of-sqrt`    | `sqrt(u)^2 → u`, likewise `cbrt` and `nthRoot`                                                | —                                           | `u ≥ 0` (even roots)                    |
+| `square-of-sqrt`    | `sqrt(u)^2 → u`, likewise `cbrt` and `nthRoot`; `u/sqrt(u) → sqrt(u)`                         | —                                           | `u ≥ 0` (even roots)                    |
 | `exp-ln`            | `exp(ln(u)) → u`                                                                              | —                                           | `u > 0`                                 |
 | `ln-exp`            | `ln(exp(u)) → u`, `ln(e^k) → k`                                                               | real (v1 always)                            | —                                       |
 | `exp-product`       | `exp(a)·exp(b) → exp(a + b)`, `exp(a)^y → exp(y·a)`, `1/exp(a) → exp(-a)`                     | —                                           | —                                       |
@@ -74,9 +75,9 @@ v1 is **real-only**: every variable ranges over ℝ and every function is its re
 | `special-values`    | `sin(0)`, `cos(0)`, `tan(0)`, `exp(0)`, `ln(1)`, `ln(e)`, exact `sqrt` and `abs` of rationals | —                                           | —                                       |
 | `factor-out`        | a common kernel factor pulled out of a sum (printing only)                                    | —                                           | —                                       |
 
-Anything not in the table is left alone (`sin(x)^2 + cos(x)^2` stays). `applied` lists the rules that changed something.
+Anything not in the table is left alone (`sin(x)^2 + cos(x)^2` stays). `applied` lists the rules that changed something; the printed normal form itself is not a rule (`x^-1` prints as `1 / x`, `e^x` as `exp(x)`, terms in canonical order). `u^(k/2)` is read as `sqrt(u)^k`, so `x^(1/2)` and `sqrt(x)` are one value: `x^(1/2) - sqrt(x)` is `0`, and `x^(3/2)` prints as `x * sqrt(x)`.
 
-**The sign oracle** decides "proven". It is small, sound and incomplete; "unknown" never licenses a rewrite. It knows: assumed signs of names (`nonzero`, `positive`, `nonnegative`, `negative`, per call); signs of ℚ[π, e] constants (rigorous, as above); `exp(u)`, `cosh(u)` > 0; `abs(u)`, `sqrt(u)`, even roots and `u^(p/q)` ≥ 0; even powers and expanded perfect squares ≥ 0; `ln(u)` has the sign of `u − 1`; odd increasing functions (`sign`, `atan`, `sinh`, …) keep the sign of their argument; sums of non-negatives with one positive term are positive; products and quotients by sign rules.
+**The sign oracle** decides "proven". It is small, sound and incomplete; "unknown" never licenses a rewrite. It knows: assumed signs of names (`nonzero`, `positive`, `nonnegative`, `negative`, per call); signs of ℚ[π, e] constants (rigorous, as above); `exp(u)`, `cosh(u)` > 0; `abs(u)`, `sqrt(u)`, even roots and `u^(p/q)` ≥ 0; even powers and expanded perfect squares ≥ 0; `ln(u)`, `log10(u)` and `log2(u)` have the sign of `u − 1`; odd increasing functions (`sign`, `atan`, `sinh`, …) keep the sign of their argument; sums of non-negatives with one positive term are positive; products and quotients by sign rules.
 
 **The readable normal form.** One fraction; the numerator expanded, with a common kernel factor pulled out; the denominator printed as a product of the factors the input divided by, split further by content and repeated factors (`(x - 1)^2`). Names are ordered by name, so the output does not depend on how the input was written and `simplify` is idempotent. `numbers: 'decimal'` prints terminating rationals as decimals.
 
@@ -191,7 +192,7 @@ factor('x^2 - y', 'x'); // content 1, factor x^2 - y, complete: false
 
 `factor(input, variable)` returns `content` (an `Expr` free of the variable), `factors` (each `{ factor, multiplicity }`: primitive, positive leading coefficient, sorted by degree then text), `complete` and `conditions` (lost restrictions of the input, as in every verb). `content · ∏ factor^multiplicity` equals the input.
 
-Univariate polynomials with rational coefficients are factored completely into irreducibles over ℚ by Zassenhaus's algorithm: content and Yun's square-free split, the best of 5 small primes, distinct-degree and Cantor–Zassenhaus splitting mod p (fixed seed, so a run is reproducible), quadratic Hensel lifting over a factor tree to the Landau–Mignotte bound, then recombination of subsets. Other names, π and e may sit in the content. A square-free part whose coefficients involve them is returned whole and sets `complete: false`; multivariate factoring is out of v1. The results match SymPy on 45 reference cases (cyclotomics, Swinnerton-Dyer, Mignotte, random products up to degree 40 with 30-digit coefficients).
+Univariate polynomials with rational coefficients are factored completely into irreducibles over ℚ by Zassenhaus's algorithm: content and Yun's square-free split, the best of 5 small primes, distinct-degree and Cantor–Zassenhaus splitting mod p (fixed seed, so a run is reproducible), quadratic Hensel lifting over a factor tree to the Landau–Mignotte bound, then recombination of subsets. Other names, π and e may sit in the content. A square-free part whose coefficients involve them is returned whole and sets `complete: false`, unless it has degree 1 in the variable (then it is irreducible: `x^2 + 2xy + y^2` is `(x + y)^2`, complete); multivariate factoring is out of v1. The results match SymPy on 45 reference cases (cyclotomics, Swinnerton-Dyer, Mignotte, random products up to degree 40 with 30-digit coefficients).
 
 `exactRoots` uses the same factoring for rational polynomials of degree 3 and up: every linear and quadratic factor gives exact roots, other factors are `numeric`. When a factoring budget is reached it falls back to the square-free split instead of throwing.
 

@@ -8,6 +8,15 @@ Release preparation (RFC `2026-10-15-arki-cas` §18 build step 5). The package i
 - Benchmarks: `bench/cas.bench.ts` against mathjs (pruned), Algebrite and nerdamer, with a contract check before timing: the same values at 5 points for derivatives and simplified forms, the same coefficients for expansions, the same factors up to units for factorizations. Libraries that fail an input, or that did not finish in an untimed probe, are left out or shown unranked, with the reason in the notes. A `derivative` build with the step recorder deleted measures the zero-cost claim (RFC §9.2). README numbers come later, from an idle-machine publish run.
 - Tests: a `gcd` property (gcd(A·C, B·C) is divisible by C, divides both inputs and leaves coprime cofactors).
 
+Fixes found by a review before publishing:
+
+- Conditions: `Relation` gains `negative`, so an assumed `x < 0` comes back as `x < 0 (assumed)`, not `-x > 0`; `conditionToLatex` prints `< 0`. One merge step serves every verb: `u ≥ 0` and `u ≠ 0` become `u > 0`, and a condition another one implies is dropped (`abs(x) + ln(x)` gives only `x > 0`). `asec`, `acsc`, `acsch`, `asech` and `acoth` have domain rows, from expr's `1/u` definitions.
+- `u^(k/2)` is read as `sqrt(u)^k`: `x^(1/2) - sqrt(x)` is `0`, `x^(3/2)/x` is `sqrt(x)` for `x > 0`, `(x^2)^(1/2)` is `abs(x)`, `sqrt(exp(x))` is `exp(x/2)`. New `square-of-sqrt` case `u/sqrt(u) → sqrt(u)`.
+- `applied` reports `fold` for literal arithmetic it missed (`3*x*2`, `x^2^3`, `1/x^-1`) and no longer for a division that changes nothing (`x/2`, `3/2`).
+- `factor` and `gcd` throw `CasError` `not-polynomial` with the span of the offending part, instead of a plain `InvalidArgumentError`.
+- `factor` marks a result complete when every part left whole has degree 1 in the variable (`x^2 + 2xy + y^2` is `(x + y)^2`, complete).
+- The sign oracle knows `log10` and `log2`; `parity` knows `acot`, `acsc`, `acsch` and `acoth` are odd.
+
 ### Build step 4
 
 `factor` over ℚ (RFC `2026-10-15-arki-cas` §18 build step 4).
