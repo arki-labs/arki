@@ -136,15 +136,15 @@ defineApp('avocabo')
 A feature is a chain whose steps are its folders:
 
 ```ts
-// features/daily-digest/feature.ts — one file; usecase and procedure files take `Deps` / `os` as types
-const base = defineFeature('daily-digest')
+// features/daily-digest/feature.ts — one file; usecase and procedure files take `Deps` / `rpcImplementer` as types
+const dailyDigestDeps = defineFeature('daily-digest')
   .needs({ plans: billing.provides.entitlements })    // other units, by handle
   .infra(store, mailer);                               // infra/ — private plugins
-export type Deps = DepsOf<typeof base>;               // what a usecase may ask for
-const core = base.usecases({ preview, sendDue });     // usecases/ — one file per usecase
-export const dailyDigest = core
+export type Deps = DepsOf<typeof dailyDigestDeps>;    // what a usecase may ask for
+const dailyDigestLogic = dailyDigestDeps.usecases({ preview, sendDue }); // usecases/ — one file per usecase
+export const dailyDigest = dailyDigestLogic
   .provides({ digests: ({ usecases }) => ({ previewFor: usecases.preview }) })
-  .entrypoints(rpc(digestContract, os, { preview: previewProcedure }), digestSchedules(core)); // entrypoints/
+  .entrypoints(rpc(digestRpcContract, rpcImplementer, digestProcedures), digestSchedules(dailyDigestLogic)); // entrypoints/
 ```
 
 Rules the types enforce (each is also a coded runtime check):
@@ -154,8 +154,8 @@ Rules the types enforce (each is also a coded runtime check):
   `{ ...needs, ...infra }` (and may `Pick` a subset); asking for a dep the
   feature lacks is a compile error. `.provides` factories and entrypoints get
   the same plus `usecases`, built once per boot.
-- `rpc(contract, os, factories)` takes one factory per procedure, shaped like
-  the contract; an extra, missing or wrong procedure does not compile.
+- `rpc(contract, implementer, factories)` takes one factory per procedure
+  (the whole tree in one `entrypoints/procedures.ts`), shaped like the contract; an extra, missing or wrong procedure does not compile.
 - Feature infra is private: `.infra(store)` publishes `daily-digest.store`
   under the unit `daily-digest/store`; a sibling infra need follows the
   qualified key. Other features reach it only through `.provides`.
@@ -164,8 +164,8 @@ Rules the types enforce (each is also a coded runtime check):
   key, are compile errors (`FEATURE_E006` at runtime).
 - `feature.override({ store: fake })` swaps an infra service before
   compilation: one provider per key, entrypoints kept.
-- Mount keys are written once, in the app contract:
-  `routerFor(appContract, features)` finds each feature by its `rpc`
+- Mount keys are written once, in the app's RPC contract:
+  `routerFor(rpcContract, features)` finds each feature by its `rpc`
   entrypoint's contract; an unmatched key or contract is a compile error.
 - `dot explain` draws `daily-digest → daily-digest/store → database`.
 

@@ -7,6 +7,22 @@
 
 ---
 
+## Naming (Rule 6)
+
+Founder-approved 2026-10-15. Text below the table keeps old names in places.
+
+| Old | New | Why |
+| --- | --- | --- |
+| `@arki/schedule/orpc` `cronContract()` | `defineCronContract()` | A library function must not share a name with the app's `cronContract` value. |
+| `cronRouter()` | `cronRouterFor()` | Same; reads like `routerFor`. |
+| `validated()` | `checkOnly()` | Says what it does: checks, returns the ORIGINAL value (key order kept for byte parity). |
+| feature `pushCron` | `pushCronSpecs` | It is the cron specs (name -> body schema), not a cron. |
+| app builder `os` | `cronImplementer` | Pairs with `rpcImplementer`. |
+| stage `core` | `<feature>Logic` | See the parent RFC. |
+| kept | `CronContext`, `CronSpecs`, `backend/src/cron.ts` (`cronContract`, `cronRouter`) | Already clear. |
+
+---
+
 ## Revision 1 (2026-10-15) — after Astra's review; supersedes Revision 0 below
 
 Every finding was checked in the code before it was adopted. All 8 are in. Byte-identical now means status, body text (key order included), content-type, auth-before-boot, and who reports what.
@@ -21,7 +37,7 @@ The design was proven in a throwaway probe before implementation:
 | Rev 0 | Rev 1 |
 | --- | --- |
 | 500/503 bodies become oRPC's envelope | Never. Every reply is the legacy text. The envelope cannot reach Coolify. |
-| 200 bodies "JSON-equal", keys in schema order | Bytes equal. `validated()` checks the body but returns the original value. |
+| 200 bodies "JSON-equal", keys in schema order | Bytes equal. `checkOnly()` checks the body but returns the original value. |
 | Three value-based 500s: use cases throw | Kept as explicit `respond` mappings (their tests read those bodies). |
 | One-way `extends` type check | Two-way. A schema that drops or invents a key is a compile error. |
 | `rethrow cause` inside oRPC | The cause leaves oRPC; the overlay answers the same HTML 500 and reports to Sentry, as today. |
@@ -39,26 +55,26 @@ Coolify ──POST /api/cron/<name>──▶ routes/api/cron/$.ts               
        .handle(bodyless(request), { prefix: '/api/cron', context: { headers, schedules, carry } })
    if (carry.rethrow) throw cause   → overlay HTML 500 + Sentry (as today)
                  │
-backend/src/cron.ts (server-only)    cronContract({ ...companionCron, ...pushCron, … })
-                                     cronRouter(os, cronContract, features, avocaboPolicy)
-feature/entrypoints/cron.ts          export const pushCron = { 'push-breaking': breakingRunSchema }
-feature.ts                           schedules(core, [...])   (unchanged)
+backend/src/cron.ts (server-only)    defineCronContract({ ...companionCron, ...pushCronSpecs, … })
+                                     cronRouterFor(cronImplementer, cronContract, features, avocaboPolicy)
+feature/entrypoints/cron.ts          export const pushCronSpecs = { 'push-breaking': breakingRunSchema }
+feature.ts                           schedules(pushLogic, [...])   (unchanged)
 ```
 
 ### Package: `@arki/schedule/orpc` — machinery only (probe `pkg/cron-orpc.ts`, 179 lines)
 
-- `cronContract(specs)`: per name `oc.route({ method: 'POST', path: '/<name>', outputStructure: 'detailed' }).output(validated({ status, body: run ∪ skipped }))`. Spec = body schema, or `{ body, skipped }` for a legacy lock-held body (kept as procedure meta).
-- `validated(schema)`: a Standard Schema that validates with `schema` and returns the **original** value. oRPC replaces the output with what the schema returns; zod rebuilds objects in schema order and strips keys. The wire must carry the value as produced.
+- `defineCronContract(specs)`: per name `oc.route({ method: 'POST', path: '/<name>', outputStructure: 'detailed' }).output(checkOnly({ status, body: run ∪ skipped }))`. Spec = body schema, or `{ body, skipped }` for a legacy lock-held body (kept as procedure meta).
+- `checkOnly(schema)`: a Standard Schema that validates with `schema` and returns the **original** value. oRPC replaces the output with what the schema returns; zod rebuilds objects in schema order and strips keys. The wire must carry the value as produced.
 - Replies: `ok(body)`, `fail(status, body)`, `rethrow(cause)`, `skipped()`. `Ok<T>` is invariant (type-only marker), so `ok({ ...body, extra })` is not an `Ok<Body>`.
-- `cronRouter(os, contract, features, policy)`: `os` is the app's implementer with the app's middlewares. Compile checks: every name is a schedule of some feature; `policy.respond[name]` is **required** for every cron whose schedule value is not exactly its body schema (two-way), optional otherwise. Dispatch: `ran` → `respond ?? ok(value)`; skipped → `policy.skipped`; failed → `policy.failed`; unavailable/unknown → `policy.unavailable`.
+- `cronRouterFor(implementer, contract, features, policy)`: `implementer` is the app's implementer with the app's middlewares. Compile checks: every name is a schedule of some feature; `policy.respond[name]` is **required** for every cron whose schedule value is not exactly its body schema (two-way), optional otherwise. Dispatch: `ran` → `respond ?? ok(value)`; skipped → `policy.skipped`; failed → `policy.failed`; unavailable/unknown → `policy.unavailable`.
 - Sending: `Ok` → detailed 200; `Skipped` → the cron's skipped body; `Fail` → `ORPCError({ status, data: body })`, and `cronErrorBody = e => e.data` makes the body exactly `data`; `Rethrow` → `context.carry.rethrow = { cause }`, then throw (the response is discarded by the route).
 - `CronContext = { headers, schedules, carry }`. No `node:crypto`, no auth, no logging: cross-runtime clean. Dailycanvas-style query inputs become a later optional `input` on the spec (`inputStructure: 'detailed'`); not built now.
 
 ### App policy: Avocabo (probe `app/cron.ts`, 46 lines)
 
 ```ts
-const os = implement(cronContract).$context<CronContext>().use(cronSecret);   // core/orpc.ts, base narrowed to { headers }
-export const cronRouter = cronRouter(os, cronContract, features, {
+const cronImplementer = implement(cronContract).$context<CronContext>().use(cronSecret);   // core/orpc.ts, base narrowed to { headers }
+export const cronRouter = cronRouterFor(cronImplementer, cronContract, features, {
   respond: {
     'compute-merged-summary':   v => (v.aborted ? fail(500, v) : ok(v)),
     'retention-maintenance':    v => (v.ok ? ok(v.body) : fail(500, { error: v.error })),
@@ -76,7 +92,7 @@ export const cronRouter = cronRouter(os, cronContract, features, {
 
 | Path | Today | New | Text equal |
 | --- | --- | --- | --- |
-| 200 value | `Response.json(value)` | detailed output through `validated()` | yes, key order kept (process-items schema keys are in a different order on purpose) |
+| 200 value | `Response.json(value)` | detailed output through `checkOnly()` | yes, key order kept (process-items schema keys are in a different order on purpose) |
 | 200 lock-held | `{"skipped":"lock-held"}` / process-items body | `skipped()` → meta body | yes |
 | 401 ×3 | `verifyCronSecret` | same function, same place | yes, and `getSchedules` not called |
 | 500 from a value (3 crons) | `Response.json(x, {status:500})` | `fail(500, x)` → `ORPCError` + `cronErrorBody` | yes |

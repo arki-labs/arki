@@ -1,11 +1,11 @@
 /**
- * `@arki/dot/orpc` — `bind(core)` and `rpc(contract, os, factories)`.
+ * `@arki/dot/orpc` — `bind(logic)` and `rpc(contract, implementer, factories)`.
  *
  * Why these tests exist: a feature's handlers must get exactly what the
  * feature declared (needs, private infra, usecases) and nothing more, typed,
  * without the request context carrying it; a feature's router must implement
  * its contract, or the browser's contract client lies; and the usecase and
- * procedure files must reach `Deps` / `os` without a runtime import of the
+ * the procedures file must reach `Deps` / `rpcImplementer` without a runtime import of the
  * feature, or the module graph has a cycle that dies with a TDZ error at import.
  *
  * The fixture under `fixtures/rpc-app/` is laid out like a real app.
@@ -23,14 +23,14 @@ import type { RequestContext } from './fixtures/rpc-app/orpc.js';
 import { defineFeature, FEATURE_ERROR_CODES, routerFor } from '../feature.js';
 import { defineApp } from '../index.js';
 import { needsMiddleware, rpc } from '../orpc.js';
-import { core, digest } from './fixtures/rpc-app/digest/feature.js';
+import { digest, digestLogic } from './fixtures/rpc-app/digest/feature.js';
 import { billing, database } from './fixtures/rpc-app/infra.js';
 import { bind } from './fixtures/rpc-app/orpc.js';
 
-const appContract = { digest: digest.contract };
-const appRouter = implement(appContract)
+const rpcContract = { digest: digest.contract };
+const appRouter = implement(rpcContract)
   .$context<RequestContext>()
-  .router(routerFor(appContract, [digest]));
+  .router(routerFor(rpcContract, [digest]));
 
 /** What the gateway does per request: the session, the headers, and the services bag. */
 const clientFor = (services: ServicesBag, userId: string | null = 'u1') =>
@@ -40,7 +40,7 @@ const clientFor = (services: ServicesBag, userId: string | null = 'u1') =>
 
 const start = () => defineApp('rpc').infra(database, billing).features([digest]).start();
 
-describe('bind(core): the handler context is what the feature declared', () => {
+describe('bind(digestLogic): the handler context is what the feature declared', () => {
   it('runs a procedure through the needs, the private store and the usecases, all typed', async () => {
     const app = await start();
     // u1 is on the pro plan: the usecase reads the plan (a need) and the store (private infra).
@@ -62,7 +62,7 @@ describe('bind(core): the handler context is what the feature declared', () => {
   it('types usecases from the factory, written once', () => {
     const probe = implement(digest.contract)
       .$context<RequestContext>()
-      .use(bind(core))
+      .use(bind(digestLogic))
       .preview.handler(({ context }) => {
         expectTypeOf(context.usecases.preview).returns.resolves.toHaveProperty('items');
         expectTypeOf(context.plans.planOf).parameter(0).toEqualTypeOf<string>();
@@ -90,7 +90,7 @@ describe('bind(core): the handler context is what the feature declared', () => {
   });
 });
 
-describe('rpc(contract, os, factories): one factory per procedure, keys match the contract', () => {
+describe('rpc(contract, implementer, factories): one factory per procedure, keys match the contract', () => {
   const contract = oc.router({
     ping: oc.output(z.number()),
     admin: { count: oc.output(z.number()), reset: oc.output(z.string()) },
@@ -150,12 +150,12 @@ describe('usecases and procedures in their own files', () => {
       compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, verbatimModuleSyntax: true },
     }).outputText;
 
-  it('compile with `import type { os }` / `import type { Deps }`, so the emitted modules never import the feature back', () => {
-    const file = fileURLToPath(new URL('fixtures/rpc-app/digest/procedures/preview.ts', import.meta.url));
-    expect(readFileSync(file, 'utf8')).toContain("import type { os } from '../feature.js'");
-    const procedure = emit('fixtures/rpc-app/digest/procedures/preview.ts');
+  it('compile with `import type { rpcImplementer }` / `import type { Deps }`, so the emitted modules never import the feature back', () => {
+    const file = fileURLToPath(new URL('fixtures/rpc-app/digest/procedures.ts', import.meta.url));
+    expect(readFileSync(file, 'utf8')).toContain("import type { rpcImplementer } from './feature.js'");
+    const procedure = emit('fixtures/rpc-app/digest/procedures.ts');
     // The `authed` import stays (a value); the type-only import of the feature is gone.
-    expect(procedure).toContain("from '../../orpc.js'");
+    expect(procedure).toContain("from '../orpc.js'");
     expect(procedure).not.toContain('feature.js');
     expect(emit('fixtures/rpc-app/digest/usecases/preview.ts')).not.toContain('feature.js');
   });

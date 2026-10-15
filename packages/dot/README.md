@@ -193,24 +193,24 @@ import { defineApp } from '@arki/dot';
 import type { DepsOf } from '@arki/dot/feature';
 import { defineFeature, routerFor } from '@arki/dot/feature';
 
-const base = defineFeature('daily-digest')
+const dailyDigestDeps = defineFeature('daily-digest')
   .needs({ plans: billing.provides.entitlements }) // other units, by handle
   .infra(store, mailer); // infra/: private plugins — published as `daily-digest.store`
-export type Deps = DepsOf<typeof base>; // what a usecase may ask for, written once
+export type Deps = DepsOf<typeof dailyDigestDeps>; // what a usecase may ask for, written once
 
-const core = base.usecases({ preview, sendDue }); // usecases/: one file per usecase
+const dailyDigestLogic = dailyDigestDeps.usecases({ preview, sendDue }); // usecases/: one file per usecase
 
-export const dailyDigest = core
+export const dailyDigest = dailyDigestLogic
   .provides({ digests: ({ usecases }) => ({ previewFor: usecases.preview }) }) // public handles
-  .entrypoints(rpc(digestContract, os, { preview: previewProcedure }), digestSchedules(core)); // entrypoints/
+  .entrypoints(rpc(digestRpcContract, rpcImplementer, digestProcedures), digestSchedules(dailyDigestLogic)); // entrypoints/
 
 export const app = defineApp('avocabo')
   .infra(log(config), database, billing) // what the app runs on, in boot order (log first)
   .features([dailyDigest])
   .entrypoints(gateway, schedule({ clock: 'host' }));
 
-// Mount keys are written once, in the app contract; each feature is found by contract.
-const router = routerFor({ digest: digestContract }, [dailyDigest]);
+// Mount keys are written once, in the app's RPC contract; each feature is found by contract.
+const router = routerFor({ digest: digestRpcContract }, [dailyDigest]);
 ```
 
 - **Private infra.** `.infra(store)` compiles to the unit `daily-digest/store`
@@ -224,15 +224,15 @@ const router = routerFor({ digest: digestContract }, [dailyDigest]);
   (`'DOT: a usecase asks for a dep the feature does not provide': { sendDue: 'mailer' }`).
   Built once per boot and handed to every `provides` factory and entrypoint.
   A helper that is not a usecase (a mail template, a sender) is a plain
-  function its usecases call; it is not listed in `.usecases()`. `core.handles` (needs + infra +
+  function its usecases call; it is not listed in `.usecases()`. `dailyDigestLogic.handles` (needs + infra +
   `usecases`) is what a request middleware resolves from the services bag
-  (`resolveNeeds(bag, core.handles)`): the handler sees `context.usecases`,
+  (`resolveNeeds(bag, dailyDigestLogic.handles)`): the handler sees `context.usecases`,
   `context.store`, `context.plans`, and not `context.db`.
 - **Entrypoints** are descriptors `{ kind, key, actions, resolve }` built by
   adapter packages; `resolve` gets needs + infra + usecases, its payload is
   published under `feature.<name>` (read with `sliceOf`), and `actions` are
   in the manifest before boot. An entrypoint file types its handlers with
-  `DepsOf<typeof core>`.
+  `DepsOf<typeof dailyDigestLogic>`.
 - **Collisions are compile errors**: steps out of order; `session`,
   `headers`, `services`, `usecases` as aliases or keys; an infra key equal to a
   need alias; an entrypoint key equal to a provided key. Erased callers get
@@ -268,39 +268,44 @@ export type RequestContext = { session: Session | null; headers: Headers; servic
 export const bind = needsMiddleware<RequestContext>();
 
 // features/daily-digest/feature.ts — the chain stays in one file, the one map of the feature
-const base = defineFeature('daily-digest').needs({ plans }).infra(store);
-export type Deps = DepsOf<typeof base>;
-const core = base.usecases({ preview });
-export const os = implement(digestContract).$context<RequestContext>().use(bind(core));
-export const dailyDigest = core.entrypoints(
-  rpc(digestContract, os, { preview: previewProcedure, admin: { purge: purgeProcedure } }),
-);
+const dailyDigestDeps = defineFeature('daily-digest').needs({ plans }).infra(store);
+export type Deps = DepsOf<typeof dailyDigestDeps>;
+export const dailyDigestLogic = dailyDigestDeps.usecases({ preview });
+export const rpcImplementer = implement(digestRpcContract).$context<RequestContext>().use(bind(dailyDigestLogic));
+export const dailyDigest = dailyDigestLogic.entrypoints(rpc(digestRpcContract, rpcImplementer, digestProcedures));
 ```
 
 ```ts
-// features/daily-digest/entrypoints/procedures/preview.ts — `import type`, so no runtime import back
-import type { os } from '../../feature';
+// features/daily-digest/entrypoints/procedures.ts — the whole tree; `import type`, so no runtime import back
+import type { rpcImplementer } from '../feature';
 
-export const previewProcedure = (o: typeof os) =>
-  o.preview.use(authed).handler(({ context }) => context.usecases.preview(context.session.user.id));
+export const digestProcedures = {
+  preview: (impl: typeof rpcImplementer) =>
+    impl.preview.use(authed).handler(({ context }) => context.usecases.preview(context.session.user.id)),
+  admin: {
+    purge: (impl: typeof rpcImplementer) =>
+      impl.admin.purge.handler(({ context }) => context.usecases.purge()),
+  },
+};
 ```
 
-- **`bind(core)`** puts the feature's needs, private infra and `usecases` on the
+- **`bind(dailyDigestLogic)`** puts the feature's needs, private infra and `usecases` on the
   handler context, read from `context.services` by handle. The request context
   holds request data only; what a handler may touch is declared once, in the
   chain, where `dot explain` sees it. `context.db` does not compile when only
   the store needs `db`. An alias equal to a request-context key does not
   compile either; a handle missing from the bag throws `FEATURE_E005`, naming
   the alias.
-- **`rpc(contract, os, factories)`** builds the router from one factory per
+- **`rpc(contract, implementer, factories)`** builds the router from one factory per
   procedure. The factories object is shaped like the contract — a group
-  (`admin.purge`) is a nested object, so a folder under `procedures/`. Keys
+  (`admin.purge`) is a nested object in the same file. Keys
   match the contract exactly: an extra key is
   `'DOT: a procedure key is not in the contract'`, a missing key or a
   procedure that does not implement its key (another schema, a bare `os`
   procedure) does not compile either. The contract stays the one list of
-  names. A procedure file exports `<name>Procedure`, so it never clashes with
-  the usecase of the same name. A usecase need not have a procedure (a cron,
+  names. The whole tree lives in one `entrypoints/procedures.ts` exporting
+  `<feature>Procedures`: one place to read the feature's RPC surface. Every
+  procedure calls a usecase and never reads `context.repos`. A usecase need not have a procedure (a cron,
   a webhook or a `provides` handle may call it), and a procedure need not
   have a usecase. `dailyDigest.contract` and `.router` come from it, for
   `routerFor`.
@@ -312,7 +317,7 @@ export const previewProcedure = (o: typeof os) =>
   to declare a policy (`oc.$meta<{ auth: 'admin' }>({})`), which `dot explain`
   then shows without booting. Meta that is not plain JSON fails at `rpc()`
   (`FEATURE_E010`).
-- **Procedures are factories over `os`.** `typeof os` depends on the core,
+- **Procedures are factories over `rpcImplementer`.** `typeof rpcImplementer` depends on the logic stage,
   never on the finished feature, so there is no type cycle; `import type` is
   erased, so there is no module cycle (otherwise: `ReferenceError` at import,
   the kind of cycle no amount of coffee fixes).

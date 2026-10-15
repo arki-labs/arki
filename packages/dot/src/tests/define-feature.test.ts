@@ -132,20 +132,20 @@ const effects = <C extends AnyFeatureCore>(
 
 /* ---- feature.ts ---- */
 
-const base = defineFeature('digest').needs({ plans: billing.provides.entitlements }).infra(store, mailer);
-const core = base.usecases({ preview, sendDue });
+const digestDeps = defineFeature('digest').needs({ plans: billing.provides.entitlements }).infra(store, mailer);
+const digestLogic = digestDeps.usecases({ preview, sendDue });
 
-/** entrypoints/procedures.ts: a factory over the core (`import type` in a real app), resolving the handles per request. */
-const procedures = (c: typeof core) => ({
+/** entrypoints/procedures.ts: a factory over the logic stage (`import type` in a real app), resolving the handles per request. */
+const procedures = (c: typeof digestLogic) => ({
   preview: async (services: ServicesBag, userId: string) => resolveNeeds(services, c.handles).usecases.preview(userId),
 });
 
-const digest = core
+const digest = digestLogic
   .provides({ digests: ({ usecases, store }) => ({ previewFor: usecases.preview, raw: store.pendingFor }) })
   .entrypoints(
-    rpc(digestContract, procedures(core)),
-    schedules(core, [{ name: 'nightly-preview', handler: ({ usecases }) => usecases.preview('u1') }]),
-    effects(core, [
+    rpc(digestContract, procedures(digestLogic)),
+    schedules(digestLogic, [{ name: 'nightly-preview', handler: ({ usecases }) => usecases.preview('u1') }]),
+    effects(digestLogic, [
       { name: 'send-on-request', events: ['DigestRequested'], run: ({ usecases }) => usecases.sendDue('u1') },
     ]),
   );
@@ -201,16 +201,16 @@ describe('the chain: each step typed from the earlier ones', () => {
   });
 
   it('types the usecases deps, the handles and the entrypoint services from the chain', () => {
-    expectTypeOf<Provided<typeof core.handles.usecases>>().toEqualTypeOf<DigestUsecases>();
-    type HandlerContext = ReturnType<typeof resolveNeeds<typeof core.handles>>;
+    expectTypeOf<Provided<typeof digestLogic.handles.usecases>>().toEqualTypeOf<DigestUsecases>();
+    type HandlerContext = ReturnType<typeof resolveNeeds<typeof digestLogic.handles>>;
     expectTypeOf<HandlerContext>().toHaveProperty('mailer');
     expectTypeOf<HandlerContext>().toHaveProperty('plans');
     expectTypeOf<HandlerContext['store']>().toEqualTypeOf<Store>();
     // @ts-expect-error -- `db` is the store's need, not the feature's: it never reaches a handler.
     expectTypeOf<HandlerContext['db']>().toBeNever();
-    expectTypeOf<DepsOf<typeof core>['usecases']>().toEqualTypeOf<DigestUsecases>();
+    expectTypeOf<DepsOf<typeof digestLogic>['usecases']>().toEqualTypeOf<DigestUsecases>();
     // Before `.usecases()`, `DepsOf` is what a usecase may ask for: needs + infra, and no `usecases` yet.
-    expectTypeOf<keyof DepsOf<typeof base>>().toEqualTypeOf<'plans' | 'store' | 'stats' | 'mailer'>();
+    expectTypeOf<keyof DepsOf<typeof digestDeps>>().toEqualTypeOf<'plans' | 'store' | 'stats' | 'mailer'>();
   });
 
   it('rejects steps out of order at compile time', () => {
@@ -266,10 +266,10 @@ describe('the chain: each step typed from the earlier ones', () => {
     await app.dispose();
   });
 
-  it('types schedule handlers in another file by the core alone', () => {
+  it('types schedule handlers in another file by the logic stage alone', () => {
     const unused = () =>
-      // @ts-expect-error -- `nope` is not among the core's services
-      schedules(core, [{ name: 'n', handler: ({ nope }) => nope }]);
+      // @ts-expect-error -- `nope` is not among the logic stage's services
+      schedules(digestLogic, [{ name: 'n', handler: ({ nope }) => nope }]);
     expect(unused).toBeTypeOf('function');
   });
 });
@@ -390,16 +390,16 @@ describe('routerFor: mount keys written once, in the app contract', () => {
     .entrypoints();
 
   it('finds each feature by its contract and skips features without an rpc entrypoint', () => {
-    const appContract = { digest: digestContract };
-    const router = routerFor(appContract, [digest, plain]);
+    const rpcContract = { digest: digestContract };
+    const router = routerFor(rpcContract, [digest, plain]);
     expect(router.digest).toBe(digest.router);
     expectTypeOf(router.digest).toEqualTypeOf<typeof digest.router>();
   });
 
   it('rejects an app-contract key no feature implements', () => {
-    const appContract = { digest: digestContract, other: { ping: { path: '/ping' } } };
+    const rpcContract = { digest: digestContract, other: { ping: { path: '/ping' } } };
     // @ts-expect-error -- `other` has no feature
-    expect(() => routerFor(appContract, [digest])).toThrow(
+    expect(() => routerFor(rpcContract, [digest])).toThrow(
       expect.objectContaining({ code: FEATURE_ERROR_CODES.contractOwner }),
     );
   });

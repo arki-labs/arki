@@ -106,8 +106,8 @@ export type AnyEntrypoint = Entrypoint<never>;
 /**
  * The one descriptor with static data: the feature's oRPC contract and the
  * router that implements it. `DefinedFeature.contract` / `.router` are read
- * from it, so `routerFor(appContract, features)` finds each feature by its
- * contract. (`rpc(contract, procedures)` in `@arki/dot/orpc` builds it and
+ * from it, so `routerFor(rpcContract, features)` finds each feature by its
+ * contract. (`rpc(contract, implementer, procedures)` in `@arki/dot/orpc` builds it and
  * checks the router against the contract.)
  */
 export type RpcEntrypoint<C extends object = object, R = unknown> = Entrypoint<unknown> & {
@@ -196,7 +196,7 @@ export type FeatureCore<TName extends string, N extends NeedsShape, I extends re
   readonly [CoreServicesTag]?: CoreServices<N, I, U>;
 };
 
-/** Any feature core — the constraint entrypoint factories take (`schedules(core, defs)`). */
+/** Any feature logic stage — the constraint entrypoint factories take (`schedules(logic, defs)`). */
 export type AnyFeatureCore = { readonly name: string; readonly handles: NeedsShape };
 
 /**
@@ -311,7 +311,7 @@ export type UsecasesStage<TName extends string, N extends NeedsShape, I extends 
   typeof CoreServicesTag
 > & {
   /**
-   * Before `.usecases()` there are no usecases, so `DepsOf<typeof base>` is
+   * Before `.usecases()` there are no usecases, so `DepsOf<typeof <feature>Deps>` is
    * exactly what a usecase may ask for — needs + infra, no `usecases` key.
    */
   readonly [CoreServicesTag]?: CoreDeps<N, I>;

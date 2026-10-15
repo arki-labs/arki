@@ -6,26 +6,28 @@
  *   export const bind = needsMiddleware<RequestContext>();
  *
  *   // features/digest/feature.ts
- *   const base = defineFeature('digest').needs({ plans }).infra(store);
- *   export type Deps = DepsOf<typeof base>;
- *   const core = base.usecases({ preview });
- *   export const os = implement(digestContract).$context<RequestContext>().use(bind(core));
- *   export const digest = core.entrypoints(rpc(digestContract, os, { preview: previewProcedure }));
+ *   const digestDeps = defineFeature('digest').needs({ plans }).infra(store);
+ *   export type Deps = DepsOf<typeof digestDeps>;
+ *   export const digestLogic = digestDeps.usecases({ preview });
+ *   export const rpcImplementer = implement(digestRpcContract).$context<RequestContext>().use(bind(digestLogic));
+ *   export const digest = digestLogic.entrypoints(rpc(digestRpcContract, rpcImplementer, digestProcedures));
  *
- *   // features/digest/entrypoints/procedures/preview.ts — `import type` only, so no runtime back-import
- *   import type { os } from '../../feature';
- *   export const previewProcedure = (o: typeof os) => o.preview.handler(({ context }) => context.usecases.preview());
+ *   // features/digest/entrypoints/procedures.ts — `import type` only, so no runtime back-import
+ *   import type { rpcImplementer } from '../feature';
+ *   export const digestProcedures = {
+ *     preview: (impl: typeof rpcImplementer) => impl.preview.handler(({ context }) => context.usecases.preview()),
+ *   };
  *
  * Two pieces:
  *
- * - `needsMiddleware<Ctx>()` makes the app's `bind`. `bind(core)` puts the
+ * - `needsMiddleware<Ctx>()` makes the app's `bind`. `bind(digestLogic)` puts the
  *   feature's needs, private infra and usecases on the handler context, by
  *   alias, read from the request's services bag. The request context keeps
  *   request data only (`session`, `headers`, `services`); the feature's
  *   dependencies are declared once, in its chain, where `dot explain` sees them.
- * - `rpc(contract, os, factories)` is the entrypoint descriptor. The
+ * - `rpc(contract, implementer, factories)` is the entrypoint descriptor. The
  *   factories object is shaped like the contract (a group is a nested
- *   object); each leaf is `(os) => os.<path>.handler(…)`. Keys match the
+ *   object); each leaf is `(impl) => impl.<path>.handler(…)`. Keys match the
  *   contract exactly: an extra key, a missing key or a procedure that does not
  *   implement its key do not compile.
  *   Each procedure also becomes a manifest action, so `dot explain` lists
@@ -48,7 +50,7 @@ import { toJsonObject } from './manifest.js';
 /** The least a request context carries for `bind`: the services bag the gateway built for this request. */
 export type RequestContextShape = { readonly services: ServicesBag };
 
-/** What `bind(core)` adds to a handler's context: every handle of the core, resolved, under its alias. */
+/** What `bind(logic)` adds to a handler's context: every handle of the feature's logic stage, resolved, under its alias. */
 export type BoundContext<H extends NeedsShape> = CtxOf<HandleEntries<H>>;
 
 /** Aliases that would land on top of a request-context key (the app's own extra keys included). */
@@ -62,48 +64,48 @@ type ShadowGuard<Ctx, H> = [Shadowed<Ctx, H>] extends [never]
  * Make the app's `bind` for its request context type, once:
  * `export const bind = needsMiddleware<RequestContext>()`.
  *
- * `bind(core)` is an oRPC middleware. It resolves `core.handles` from
+ * `bind(logic)` is an oRPC middleware. It resolves `logic.handles` from
  * `context.services` (missing key → `FEATURE_E005`, naming the alias) and
  * adds them to the context. Driven services such as `db` are not handles, so
  * they never reach a handler unless the feature itself needs them — the
  * feature's store does, the procedure does not.
  *
- * An alias equal to a request-context key is a compile error at `bind(core)`;
+ * An alias equal to a request-context key is a compile error at `bind(logic)`;
  * `session`, `headers`, `services` and `usecases` are already refused by
  * `defineFeature` (and at runtime there, for callers that skip the types).
  */
 export function needsMiddleware<Ctx extends RequestContextShape>() {
-  const base = os.$context<Ctx>();
-  return <H extends NeedsShape>(core: { readonly handles: H } & ShadowGuard<Ctx, H>) =>
-    base.middleware(({ context, next }) =>
+  const builder = os.$context<Ctx>();
+  return <H extends NeedsShape>(logic: { readonly handles: H } & ShadowGuard<Ctx, H>) =>
+    builder.middleware(({ context, next }) =>
       next({
         // Erasure seam: oRPC asks that new context keys agree with the current
         // ones (`IntersectPick`). No alias is a request key — the guard above
         // proves it — but TypeScript cannot see that through a generic `H`.
-        context: resolveNeeds(context.services, core.handles) as BoundContext<H> & IntersectPick<Ctx, BoundContext<H>>,
+        context: resolveNeeds(context.services, logic.handles) as BoundContext<H> & IntersectPick<Ctx, BoundContext<H>>,
       }),
     );
 }
 
 /**
- * Shaped like the contract: a leaf is `(os) => os.<path>.handler(…)`, a group
+ * Shaped like the contract: a leaf is `(impl) => impl.<path>.handler(…)`, a group
  * is a nested object. `Router<C[K], never>` is oRPC's own "implements" check
  * for one procedure — same schemas — and `never` as the initial context
  * accepts whatever context the app's implementer settled on.
  */
 export type ProcedureFactories<C, O> = {
   readonly [K in keyof C]: C[K] extends ContractProcedure<infer _I, infer _O, infer _E, infer _M>
-    ? (os: O) => Router<C[K], never>
+    ? (implementer: O) => Router<C[K], never>
     : ProcedureFactories<C[K], O>;
 };
 
 /** The router the factories build: each factory's return under its key. */
-export type BuiltRouter<F> = { readonly [K in keyof F]: F[K] extends (os: never) => infer R ? R : BuiltRouter<F[K]> };
+export type BuiltRouter<F> = { readonly [K in keyof F]: F[K] extends (implementer: never) => infer R ? R : BuiltRouter<F[K]> };
 
 // Keys in the factories the contract does not have (a nested group reports the
 // inner key). No `${K}.${…}` path string here: that hit TS2589 in the probe.
 type ExtraKeys<C, F> = {
-  [K in keyof F]: K extends keyof C ? (F[K] extends (os: never) => unknown ? never : ExtraKeys<C[K], F[K]>) : K;
+  [K in keyof F]: K extends keyof C ? (F[K] extends (implementer: never) => unknown ? never : ExtraKeys<C[K], F[K]>) : K;
 }[keyof F];
 
 /** A compile error naming each procedure key the contract does not list. */
@@ -113,11 +115,11 @@ export type ContractKeysGuard<C, F> = [ExtraKeys<C, F>] extends [never]
 
 /**
  * The feature's oRPC entrypoint: its contract, and the router built from one
- * factory per procedure. Each procedure lives in its own file and takes the
- * feature's `os` as a typed parameter, so it never imports the feature at
- * runtime. The contract stays the one list of procedure names: a missing,
+ * factory per procedure. The whole tree lives in one `entrypoints/procedures.ts`;
+ * each leaf takes the feature's `rpcImplementer` as a typed parameter, so it
+ * never imports the feature at runtime. The contract stays the one list of procedure names: a missing,
  * extra or wrong procedure does not compile. `DefinedFeature.contract` /
- * `.router` are read from this descriptor, so `routerFor(appContract,
+ * `.router` are read from this descriptor, so `routerFor(rpcContract,
  * features)` finds the feature by its contract. Its actions (one per
  * procedure, `<feature>.<path>`) are named when the feature compiles, through
  * `actionsOf`.
@@ -128,14 +130,14 @@ export type ContractKeysGuard<C, F> = [ExtraKeys<C, F>] extends [never]
  */
 export function rpc<C extends ContractRouter<Meta>, O, const F extends ProcedureFactories<C, O>>(
   contract: C,
-  os: O,
+  implementer: O,
   factories: F & ContractKeysGuard<C, F>,
 ): RpcEntrypoint<C, BuiltRouter<F>> {
   // Read now, so a bad `meta` fails where the feature is declared, not at boot.
   const procedures = rpcProcedures(contract);
   // Erasure seam: `buildRouter` walks the factories untyped; `F` already
   // proved each leaf returns its contract's procedure, so the result is `BuiltRouter<F>`.
-  const router = buildRouter(os, factories) as BuiltRouter<F>;
+  const router = buildRouter(implementer, factories) as BuiltRouter<F>;
   return {
     kind: 'rpc',
     key: 'rpc',
@@ -148,15 +150,15 @@ export function rpc<C extends ContractRouter<Meta>, O, const F extends Procedure
   };
 }
 
-/** Call every leaf factory with `os`; a group (a plain object) recurses. */
-function buildRouter(os: unknown, factories: object): Record<string, unknown> {
+/** Call every leaf factory with the implementer; a group (a plain object) recurses. */
+function buildRouter(implementer: unknown, factories: object): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(factories).map(([key, value]: [string, unknown]) => [
       key,
       typeof value === 'function'
-        ? value(os)
+        ? value(implementer)
         : typeof value === 'object' && value !== null
-          ? buildRouter(os, value)
+          ? buildRouter(implementer, value)
           : value,
     ]),
   );
