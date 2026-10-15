@@ -529,6 +529,47 @@ describe('hookTimeoutMs watchdog (E015)', () => {
     expect(order).toEqual(['tidy']); // reverse order continued past the hang
   });
 
+  it('aborts the hung hook\'s $signal, so work that listens actually stops', async () => {
+    // Why: a promise cannot be killed. Without the signal, a hook stuck on a
+    // connect keeps running (and holding sockets) after the kernel gave up.
+    let seen: AbortSignal | undefined;
+    let stopped = false;
+    const hung = plugin({
+      name: 'hung-io',
+      start: ({ $signal }) => {
+        seen = $signal;
+        return new Promise<void>((_resolve, reject) => {
+          $signal.addEventListener('abort', () => {
+            stopped = true;
+            reject(new Error('connect cancelled', { cause: $signal.reason }));
+          });
+        });
+      },
+    });
+
+    await expect(defineApp('watchdog-signal', { hookTimeoutMs: 30 }).use(hung).start()).rejects.toMatchObject({
+      code: DotLifecycleErrorCode.HookTimeout,
+      plugin: 'hung-io',
+    });
+    expect(stopped).toBe(true);
+    expect(seen?.reason).toMatchObject({ code: DotLifecycleErrorCode.HookTimeout, plugin: 'hung-io' });
+  });
+
+  it('gives each hook call its own signal, not aborted when the hook finishes in time', async () => {
+    const signals: AbortSignal[] = [];
+    const quick = plugin({
+      name: 'quick-signal',
+      boot: ({ $signal }) => void signals.push($signal),
+      start: ({ $signal }) => void signals.push($signal),
+    });
+    const app = await defineApp('watchdog-signal-ok', { hookTimeoutMs: 1000 }).use(quick).start();
+    expect(signals).toHaveLength(2);
+    expect(signals[0]).not.toBe(signals[1]);
+    expect(signals.some(signal => signal.aborted)).toBe(false);
+    await app.stop();
+    await app.dispose();
+  });
+
   it('hooks under budget are untouched by the watchdog', async () => {
     const quick = plugin({
       name: 'quick',

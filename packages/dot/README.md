@@ -567,7 +567,11 @@ consumer — the wiring guard accepts both shapes against the same witness.
 ### Kernel context — the reserved `$` namespace
 
 Every service-carrying hook context includes `$app` (app name), `$plugin` (plugin
-name), and `$config` (the `defineApp(name, { config })` bag). The `$` prefix
+name), `$config` (the `defineApp(name, { config })` bag), and `$signal`: one
+`AbortSignal` per hook call that aborts when the hook exceeds `hookTimeoutMs`,
+with the `DOT_LIFECYCLE_E015` error as its reason. Pass it to the hook's I/O
+(`connect`, `fetch`, `sleep`) so a hung hook stops instead of running on after
+the kernel gave up on it. The `$` prefix
 is enforced as reserved: `plugin()` rejects `$`-prefixed needs aliases and
 publish keys at compile time, and the kernel re-validates at runtime
 (`DOT_LIFECYCLE_E014`) — kernel keys can never be shadowed.
@@ -812,7 +816,7 @@ hookSignals(app); // SIGTERM/SIGINT → stop() + dispose() → re-raise
 
 `plugin(config)` accepts a `needs` shape plus five lifecycle hooks. Hook
 contexts carry the needed services (typed, under your local aliases) and
-`$`-prefixed kernel keys (`$app`, `$plugin`, `$config`):
+`$`-prefixed kernel keys (`$app`, `$plugin`, `$config`, `$signal`):
 
 | Hook        | Purpose                                                             |
 | ----------- | ------------------------------------------------------------------- |

@@ -301,6 +301,13 @@ export type KernelCtx = {
   /** Read-only runtime config bag from `defineApp(name, { config })`. */
   readonly $config: Readonly<Record<string, unknown>>;
   /**
+   * Aborts when this hook exceeds `defineApp(name, { hookTimeoutMs })`; the
+   * reason is the `DOT_LIFECYCLE_E015` error. Pass it to the hook's I/O
+   * (`fetch`, a driver's connect, `sleep`) so a hung hook stops instead of
+   * running on after the kernel gave up on it. One signal per hook call.
+   */
+  readonly $signal: AbortSignal;
+  /**
    * Complete an action's `summary` once the plugin's services exist (a
    * `provides` factory, `boot`, `start`, ...). `dot explain` stays static;
    * the post-boot `app.manifest` and `dot doctor` show the new text.

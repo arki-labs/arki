@@ -970,11 +970,17 @@ export class DotAppImpl {
    *   this: the service map only grows, and reverse-order teardown keeps
    *   providers alive until their consumers are done.
    */
-  #buildHookCtx(record: PluginRecord, phase: DotLifecycleHook, includeOwnProvides: boolean): Record<string, unknown> {
+  #buildHookCtx(
+    record: PluginRecord,
+    phase: DotLifecycleHook,
+    includeOwnProvides: boolean,
+    signal: AbortSignal,
+  ): Record<string, unknown> {
     const ctx: Record<string, unknown> = {
       $app: this.#appName,
       $plugin: record.plugin.name,
       $config: this.#config,
+      $signal: signal,
       $describeAction: (actionId: string, patch: { readonly summary: string }) =>
         this.#describeAction(record, phase, actionId, patch),
     };
@@ -1017,27 +1023,34 @@ export class DotAppImpl {
    * promise rejects with `DOT_LIFECYCLE_E015` naming the plugin and hook,
    * and the call site's existing catch path applies the phase's normal
    * failure rules (boot rollback, start cascade, teardown aggregation).
-   * The hook's own promise cannot be cancelled — the watchdog makes a
-   * hang visible and bounded; it does not kill the hung work.
+   * A promise cannot be killed, so on timeout the watchdog first aborts the
+   * hook's `$signal` (reason: the E015 error). A hook that passes `$signal`
+   * to its I/O stops the hung work; one that ignores it still leaves the
+   * hang visible and bounded.
    */
-  async #withHookBudget<T>(pluginName: string, hook: DotLifecycleHook, run: () => Promise<T> | T): Promise<T> {
+  async #withHookBudget<T>(
+    pluginName: string,
+    hook: DotLifecycleHook,
+    hookAbort: AbortController,
+    run: () => Promise<T> | T,
+  ): Promise<T> {
     const budget = this.#hookTimeoutMs;
     if (budget === undefined) return run();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const watchdog = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
-        reject(
-          new DotLifecycleError({
-            code: DotLifecycleErrorCode.HookTimeout,
-            phase: hook,
-            plugin: pluginName,
-            message:
-              `${hook} hook of plugin "${pluginName}" exceeded the ${budget.toString()}ms hookTimeoutMs watchdog. ` +
-              `The kernel treats the hook as failed and applies its normal rollback/aggregation rules, but ` +
-              `cannot cancel the hook's promise — find the hang (a missing await? a connection that never ` +
-              `settles?) or raise the budget in defineApp(name, { hookTimeoutMs }).`,
-          }),
-        );
+        const error = new DotLifecycleError({
+          code: DotLifecycleErrorCode.HookTimeout,
+          phase: hook,
+          plugin: pluginName,
+          message:
+            `${hook} hook of plugin "${pluginName}" exceeded the ${budget.toString()}ms hookTimeoutMs watchdog. ` +
+            `The kernel aborted the hook's $signal and treats the hook as failed with its normal ` +
+            `rollback/aggregation rules. Pass $signal to the hook's I/O so the work stops, find the hang ` +
+            `(a missing await? a connection that never settles?) or raise the budget in defineApp(name, { hookTimeoutMs }).`,
+        });
+        hookAbort.abort(error);
+        reject(error);
       }, budget);
       // A pending watchdog must never keep an otherwise-finished process alive.
       timer.unref?.();
@@ -1114,8 +1127,9 @@ export class DotAppImpl {
       // Resolve needs BEFORE invoking the hook — a plugin with needs but no
       // boot hook still fails fast when its wiring is unsatisfied.
       let ctx: Record<string, unknown>;
+      const hookAbort = new AbortController();
       try {
-        ctx = this.#buildHookCtx(record, 'boot', false);
+        ctx = this.#buildHookCtx(record, 'boot', false, hookAbort.signal);
       } catch (error) {
         const message = error instanceof DotLifecycleError ? error.message : stringifyError(error);
         return fail({
@@ -1146,7 +1160,7 @@ export class DotAppImpl {
       this.#emitHook('boot', plugin.name, record.order, 'starting');
       let result: ServiceRecord;
       try {
-        result = await this.#withHookBudget(plugin.name, 'boot', () =>
+        result = await this.#withHookBudget(plugin.name, 'boot', hookAbort, () =>
           withPluginHookSpan(
             {
               appName: this.#appName,
@@ -1304,12 +1318,13 @@ export class DotAppImpl {
       }
       record.hooks.add('start');
 
-      const ctx = this.#buildHookCtx(record, 'start', true);
+      const hookAbort = new AbortController();
+      const ctx = this.#buildHookCtx(record, 'start', true, hookAbort.signal);
 
       const startedAt = performance.now();
       this.#emitHook('start', plugin.name, record.order, 'starting');
       try {
-        await this.#withHookBudget(plugin.name, 'start', () =>
+        await this.#withHookBudget(plugin.name, 'start', hookAbort, () =>
           withPluginHookSpan(
             {
               appName: this.#appName,
@@ -1452,11 +1467,12 @@ export class DotAppImpl {
       if (!record.plugin.hooks.stop) continue;
       let pluginLogger = phaseLogger.with({ 'dot.plugin.name': record.plugin.name });
       record.hooks.add('stop');
-      const ctx = this.#buildHookCtx(record, 'stop', true);
+      const hookAbort = new AbortController();
+      const ctx = this.#buildHookCtx(record, 'stop', true, hookAbort.signal);
       const startedAt = performance.now();
       this.#emitHook('stop', record.plugin.name, record.order, 'starting');
       try {
-        await this.#withHookBudget(record.plugin.name, 'stop', () =>
+        await this.#withHookBudget(record.plugin.name, 'stop', hookAbort, () =>
           withPluginHookSpan(
             {
               appName: this.#appName,
@@ -1681,11 +1697,12 @@ export class DotAppImpl {
   ): Promise<void> {
     let pluginLogger = recordLogger;
     record.hooks.add('dispose');
-    const ctx = this.#buildHookCtx(record, 'dispose', true);
+    const hookAbort = new AbortController();
+      const ctx = this.#buildHookCtx(record, 'dispose', true, hookAbort.signal);
     const startedAt = performance.now();
     this.#emitHook('dispose', record.plugin.name, record.order, 'starting');
     try {
-      await this.#withHookBudget(record.plugin.name, 'dispose', () =>
+      await this.#withHookBudget(record.plugin.name, 'dispose', hookAbort, () =>
         withPluginHookSpan(
           {
             appName: this.#appName,
