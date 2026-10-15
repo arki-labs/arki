@@ -81,16 +81,23 @@ const USECASE_ORPC_SERVER = '^@orpc/server(/.*)?$';
 const USECASE_BANNED = [USECASE_INFRA, USECASE_DB_KV, USECASE_CORE_ORPC, USECASE_DB_RUNTIME, USECASE_ORPC_SERVER];
 
 /**
- * The TypeScript parser adds `importKind` / `exportKind` to import and export
- * nodes and their specifiers; plain ESTree does not know them.
- * @typedef {{ importKind?: string, exportKind?: string }} Kinded
+ * `importKind` / `exportKind` are TypeScript-parser extras that plain ESTree
+ * types don't declare, so they are read with `in` checks rather than a cast.
  */
+const kindOf = (/** @type {object} */ node, /** @type {'importKind' | 'exportKind'} */ kind) => {
+  if (kind === 'importKind') return 'importKind' in node ? node.importKind : undefined;
+  return 'exportKind' in node ? node.exportKind : undefined;
+};
 
-/** True when the declaration vanishes at build time (`import type`, or all specifiers are `type`). */
-const isTypeOnly = (
-  /** @type {Kinded & { specifiers?: readonly Kinded[] }} */ node,
-  /** @type {keyof Kinded} */ kind,
-) => node[kind] === 'type' || (node.specifiers !== undefined && node.specifiers.length > 0 && node.specifiers.every(s => s[kind] === 'type'));
+/** `import type { a }` or `import { type a, type b }` — erased at build time, so allowed. */
+const isTypeOnly = (/** @type {object} */ node, /** @type {'importKind' | 'exportKind'} */ kind) => {
+  if (kindOf(node, kind) === 'type') return true;
+  const specifiers = /** @type {unknown[]} */ ('specifiers' in node && Array.isArray(node.specifiers) ? node.specifiers : []);
+  return (
+    specifiers.length > 0 &&
+    specifiers.every((s) => typeof s === 'object' && s !== null && kindOf(s, kind) === 'type')
+  );
+};
 
 /**
  * A custom rule, not `no-restricted-imports`: apps add their own
