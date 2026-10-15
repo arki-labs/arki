@@ -591,6 +591,67 @@ describe('legacyKeys during a rolling deploy', () => {
   });
 });
 
+const rwKey = (name: string) => createKey('rw', lockedNames(name), 'readWrite');
+
+describe('pgSession read/write across replicas', () => {
+  const take = (
+    store: ReturnType<typeof pgSession>,
+    key: ReturnType<typeof rwKey>,
+    token: string,
+    mode: 'read' | 'write',
+    waitMs?: number,
+  ) => store.shared.acquire(key, { token, mode, waitMs });
+
+  it('readers on two replicas overlap, and a writer on a third connection waits for both', async () => {
+    const storeA = pgSession(dbA);
+    const storeB = pgSession(dbB);
+    const key = rwKey('overlap');
+    const readerA = await take(storeA, key, 'ra', 'read');
+    const readerB = await take(storeB, key, 'rb', 'read');
+    expect(readerA).toBeDefined();
+    expect(readerB).toBeDefined();
+    expect(await take(storeA, key, 'w0', 'write')).toBeUndefined();
+
+    const waiting = take(storeB, key, 'w1', 'write', 5000);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    await storeA.shared.release(readerA ?? { key, token: 'ra' });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    // One reader is still in: the writer has not been granted.
+    expect(await Promise.race([waiting.then(() => 'granted'), Promise.resolve('pending')])).toBe('pending');
+    await storeB.shared.release(readerB ?? { key, token: 'rb' });
+    const writer = await waiting;
+    expect(writer).toBeDefined();
+    await storeB.shared.release(writer ?? { key, token: 'w1' });
+    await Promise.all([storeA.dispose?.(), storeB.dispose?.()]);
+  });
+
+  it('read/write keys do not collide with mutex keys of the same name', async () => {
+    const store = pgSession(dbA);
+    const other = pgSession(dbB);
+    const name = lockedNames('collide');
+    const mutex = await store.acquire(createKey('rw', name), { token: 'm' });
+    const writer = await take(other, createKey('rw', name, 'readWrite'), 'w', 'write');
+    expect(mutex).toBeDefined();
+    expect(writer).toBeDefined();
+    await store.release(mutex ?? { key: createKey('rw', name), token: 'm' });
+    await other.shared.release(writer ?? { key: createKey('rw', name, 'readWrite'), token: 'w' });
+  });
+
+  it('pgTransaction: a reader and a writer in different transactions exclude, and read-then-write inside one transaction is granted', async () => {
+    const key = rwKey('tx');
+    await dbA.transaction(async txA => {
+      const a = pgTransaction(txA);
+      expect(await a.shared.acquire(key, { token: 'r', mode: 'read' })).toBeDefined();
+      // Same session: Postgres lets it take the write lock too (no upgrade check).
+      expect(await a.shared.acquire(key, { token: 'w', mode: 'write' })).toBeDefined();
+      await dbB.transaction(async txB => {
+        const b = pgTransaction(txB);
+        expect(await b.shared.acquire(key, { token: 'x', mode: 'read' })).toBeUndefined();
+      });
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // pgTransaction
 // ---------------------------------------------------------------------------

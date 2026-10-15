@@ -186,6 +186,7 @@ describe('pgLease guarantees', () => {
       releasedOnCrash: 'after-ttl',
       clock: 'store',
       shared: false,
+      permits: true,
     });
   });
 
@@ -258,11 +259,12 @@ describe('pgLease LISTEN connection', () => {
 });
 
 describe('lease table DDL', () => {
-  it('has the fence column, the clock default and the Phase 2 semaphore column', () => {
+  it('has the fence column, the clock default and the semaphore columns', () => {
     expect(LEASE_TABLE_SQL).toMatch(/key\s+text\s+PRIMARY KEY/);
     expect(LEASE_TABLE_SQL).toMatch(/generation\s+bigint\s+NOT NULL DEFAULT 0/);
     expect(LEASE_TABLE_SQL).toMatch(/expires_at\s+timestamptz/);
     expect(LEASE_TABLE_SQL).toMatch(/permits_limit\s+integer/);
+    expect(LEASE_TABLE_SQL).toMatch(/holders\s+jsonb\s+NOT NULL/);
     expect(LEASE_TABLE_SQL).toMatch(/IF NOT EXISTS/);
   });
 

@@ -365,7 +365,7 @@ describe('guarantees', () => {
         kind: 'hold',
         scope: 'cluster',
         wait: 'native',
-        shared: false,
+        shared: true,
         permits: false,
         fence: false,
         releasedOnCrash: 'immediate',
@@ -429,6 +429,37 @@ describe('PGlite: the SQL is valid on a real engine', () => {
     expect(grant).toBeDefined();
     expect(grant?.lost).toBeUndefined();
     expect(await store.release(grant ?? { key, token: 'p1' })).toBe('released');
+  });
+
+  it('read and write holds use the shared and the exclusive advisory call, and read/write keys differ from mutex keys of the same name', async () => {
+    const seen: string[] = [];
+    const { db } = fakeDb(statement => {
+      seen.push(statement.sql);
+      return acquired(true);
+    });
+    const store = pgSession(db, { keepAlive: false, legacyKeys: true });
+    const readKey = createKey('app', 'same', 'readWrite');
+    const mutexKey = createKey('app', 'same');
+    const read = await store.shared.acquire(readKey, { token: 'r', mode: 'read' });
+    const write = await store.shared.acquire(readKey, { token: 'w', mode: 'write' });
+    await store.acquire(mutexKey, { token: 'm' });
+    for (const grant of [read, write]) if (grant !== undefined) await store.release(grant);
+    expect(seen.some(text => text.includes('pg_try_advisory_xact_lock_shared'))).toBe(true);
+    // legacyKeys applies to the mutex only: exactly one hashtext call (the mutex), none for read/write.
+    expect(seen.filter(text => text.includes('hashtext'))).toHaveLength(1);
+    expect(toPgPair(readKey)).not.toEqual(toPgPair(mutexKey));
+    await store.dispose?.();
+  });
+
+  it('pgTransaction takes read then write of one key in one transaction: Postgres lets one session hold both, so there is no upgrade check', async () => {
+    const result = await db.transaction(async tx => {
+      const store = pgTransaction(tx);
+      const k = createKey('pglite', 'upgrade', 'readWrite');
+      const read = await store.shared.acquire(k, { token: 'r', mode: 'read' });
+      const write = await store.shared.acquire(k, { token: 'w', mode: 'write' });
+      return [read !== undefined, write !== undefined];
+    });
+    expect(result).toEqual([true, true]);
   });
 
   it('pgTransaction takes an advisory lock that exists in pg_locks until the transaction ends', async () => {

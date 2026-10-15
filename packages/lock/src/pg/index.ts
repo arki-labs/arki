@@ -26,6 +26,12 @@
  * NOT exclude each other: during a rolling deploy, every replica must use the
  * same setting.
  *
+ * Read/write locks (`shared: true`): a read hold is `pg_advisory_xact_lock_shared`, a write
+ * hold the exclusive lock, on the same pair space (read/write keys differ from mutex keys
+ * by their `1rw:` prefix). Same pinned transaction, beat, wait slices and `lost` as the
+ * mutex. `legacyKeys` applies to mutexes only. Postgres has no writer preference, so
+ * `SharedOps.waiter` is not implemented and a steady stream of readers can starve a writer.
+ *
  * PGlite note: advisory locks there are process-local (one connection), so it
  * can only check the SQL shape of this store, never cross-replica exclusion.
  */
@@ -34,7 +40,16 @@ import { sql } from 'drizzle-orm';
 
 import { getLogger } from '@arki/log';
 
-import type { AcquireRequest, Grant, Guarantees, Key, ReleaseOutcome, Store } from '../types.js';
+import type {
+  AcquireRequest,
+  Grant,
+  Guarantees,
+  Key,
+  ReleaseOutcome,
+  SharedOps,
+  SharedRequest,
+  Store,
+} from '../types.js';
 import { LockError } from '../errors.js';
 import { legacyPgText, toPgPair } from '../key.js';
 
@@ -71,7 +86,7 @@ const hold = {
   kind: 'hold',
   scope: 'cluster',
   wait: 'native',
-  shared: false,
+  shared: true,
   permits: false,
   fence: false,
   releasedOnCrash: 'immediate',
@@ -119,16 +134,31 @@ function hasPgCode(error: unknown, code: string): boolean {
   return false;
 }
 
-function tryLockSql(key: Key, legacy: boolean): SQL {
+/** A mutex and a write hold take the exclusive lock; a read hold takes the shared one. */
+type LockMode = 'exclusive' | 'shared';
+
+/**
+ * What one attempt locks. `legacy` (the old `hashtext` key space) exists for mutexes
+ * only: read/write locks never had a legacy key, so they always use the pair.
+ */
+type Target = { readonly key: Key; readonly legacy: boolean; readonly mode: LockMode };
+
+const modeOf = (request: SharedRequest): LockMode => (request.mode === 'read' ? 'shared' : 'exclusive');
+
+function tryLockSql({ key, legacy, mode }: Target): SQL {
   if (legacy) return sql`select pg_try_advisory_xact_lock(hashtext(${legacyPgText(key)})) as acquired`;
   const { hi, lo } = toPgPair(key);
-  return sql`select pg_try_advisory_xact_lock(${hi}::int4, ${lo}::int4) as acquired`;
+  return mode === 'shared'
+    ? sql`select pg_try_advisory_xact_lock_shared(${hi}::int4, ${lo}::int4) as acquired`
+    : sql`select pg_try_advisory_xact_lock(${hi}::int4, ${lo}::int4) as acquired`;
 }
 
-function blockingLockSql(key: Key, legacy: boolean): SQL {
+function blockingLockSql({ key, legacy, mode }: Target): SQL {
   if (legacy) return sql`select pg_advisory_xact_lock(hashtext(${legacyPgText(key)}))`;
   const { hi, lo } = toPgPair(key);
-  return sql`select pg_advisory_xact_lock(${hi}::int4, ${lo}::int4)`;
+  return mode === 'shared'
+    ? sql`select pg_advisory_xact_lock_shared(${hi}::int4, ${lo}::int4)`
+    : sql`select pg_advisory_xact_lock(${hi}::int4, ${lo}::int4)`;
 }
 
 const settingOr = (value: unknown): string => (typeof value === 'string' ? value : '0');
@@ -140,7 +170,7 @@ const settingOr = (value: unknown): string => (typeof value === 'string' ? value
  * `statement_timeout` is lifted for it (or it would cancel every slice); both
  * are put back as they were.
  */
-async function waitSlice(tx: PgExecutor, key: Key, legacy: boolean, sliceMs: number): Promise<boolean> {
+async function waitSlice(tx: PgExecutor, target: Target, sliceMs: number): Promise<boolean> {
   const previous = firstRow(
     await tx.execute(
       sql`select current_setting('lock_timeout') as lock_timeout, current_setting('statement_timeout') as statement_timeout`,
@@ -151,7 +181,7 @@ async function waitSlice(tx: PgExecutor, key: Key, legacy: boolean, sliceMs: num
     await tx.execute(
       sql`select set_config('lock_timeout', ${`${sliceMs}ms`}, true), set_config('statement_timeout', '0', true)`,
     );
-    await tx.execute(blockingLockSql(key, legacy));
+    await tx.execute(blockingLockSql(target));
   } catch (error) {
     if (!hasPgCode(error, LOCK_TIMEOUT_CODE)) throw error;
     await tx.execute(sql.raw(`rollback to savepoint ${SAVEPOINT}`));
@@ -176,19 +206,18 @@ function waitDeadline(waitMs: number | undefined): number | undefined {
  */
 async function takeLock(
   tx: PgExecutor,
-  key: Key,
-  legacy: boolean,
+  target: Target,
   deadline: number | undefined,
   signal: AbortSignal | undefined,
 ): Promise<boolean> {
   if (deadline === undefined || deadline <= performance.now()) {
-    return wasAcquired(await tx.execute(tryLockSql(key, legacy)));
+    return wasAcquired(await tx.execute(tryLockSql(target)));
   }
   for (;;) {
     if (signal?.aborted === true) return false;
     const left = deadline - performance.now();
     if (left <= 0) return false;
-    if (await waitSlice(tx, key, legacy, Math.max(1, Math.min(Math.floor(left), WAIT_SLICE_MS)))) return true;
+    if (await waitSlice(tx, target, Math.max(1, Math.min(Math.floor(left), WAIT_SLICE_MS)))) return true;
   }
 }
 
@@ -209,28 +238,39 @@ function notAcquired(cause: unknown): LockError {
  * handle (a nested `tx.transaction`), a ROLLBACK of that savepoint frees the
  * lock at once, while the outer transaction goes on. Postgres advisory
  * locks are re-entrant within one session, so a second acquire of the same key
- * on the same transaction succeeds: exclusion is between transactions.
+ * on the same transaction succeeds: exclusion is between transactions. That holds for
+ * read/write too: a read followed by a write of the same key in ONE transaction is
+ * granted (Postgres lets one session take both), so there is no upgrade check here.
  */
-export function pgTransaction(tx: PgExecutor, options: PgLockOptions = {}): Store<PgTransactionGuarantees> {
+export function pgTransaction(
+  tx: PgExecutor,
+  options: PgLockOptions = {},
+): Store<PgTransactionGuarantees> & { readonly shared: SharedOps } {
   const legacy = options.legacyKeys === true;
   const granted = new Set<string>();
+  async function take(target: Target, req: AcquireRequest): Promise<Grant | undefined> {
+    let got: boolean;
+    try {
+      got = await takeLock(tx, target, waitDeadline(req.waitMs), req.signal);
+    } catch (error) {
+      throw notAcquired(error);
+    }
+    if (!got) return undefined;
+    granted.add(req.token);
+    return { key: target.key, token: req.token };
+  }
+  const release = (grant: Grant): Promise<ReleaseOutcome> =>
+    // The transaction owns the lock; there is nothing to give back here.
+    Promise.resolve(granted.delete(grant.token) ? 'released' : 'not-owner');
   return {
     name: 'pg-transaction',
     guarantees: heldByTransaction,
-    async acquire(key: Key, req: AcquireRequest): Promise<Grant | undefined> {
-      let got: boolean;
-      try {
-        got = await takeLock(tx, key, legacy, waitDeadline(req.waitMs), req.signal);
-      } catch (error) {
-        throw notAcquired(error);
-      }
-      if (!got) return undefined;
-      granted.add(req.token);
-      return { key, token: req.token };
-    },
-    release(grant: Grant): Promise<ReleaseOutcome> {
-      // The transaction owns the lock; there is nothing to give back here.
-      return Promise.resolve(granted.delete(grant.token) ? 'released' : 'not-owner');
+    acquire: (key: Key, req: AcquireRequest) => take({ key, legacy, mode: 'exclusive' }, req),
+    release,
+    // Read/write keys never have a legacy key space, so `legacyKeys` is ignored here.
+    shared: {
+      acquire: (key: Key, req: SharedRequest) => take({ key, legacy: false, mode: modeOf(req) }, req),
+      release,
     },
   };
 }
@@ -293,28 +333,44 @@ const nextTurn = (): Promise<void> =>
  * pool slot is used per held lock, so the pool needs a second connection for
  * the job itself.
  */
-export function pgSession(db: LockableDb, options: PgSessionOptions = {}): Store<PgSessionGuarantees> {
+export function pgSession(
+  db: LockableDb,
+  options: PgSessionOptions = {},
+): Store<PgSessionGuarantees> & { readonly shared: SharedOps } {
   const legacy = options.legacyKeys === true;
   const keepAlive = options.keepAlive !== false;
   const ends = new Map<string, () => Promise<ReleaseOutcome>>();
+  const release = (grant: Grant): Promise<ReleaseOutcome> => {
+    const end = ends.get(grant.token);
+    return end === undefined ? Promise.resolve('not-owner') : end();
+  };
+  // Postgres grants shared and exclusive advisory locks with no writer preference, so a stream
+  // of readers can starve a writer. `SharedOps.waiter` is therefore left out on purpose: the
+  // manager's wait loop retries, and the contract's writer-preference case skips.
+  const shared: SharedOps = {
+    async acquire(key: Key, req: SharedRequest): Promise<Grant | undefined> {
+      // `legacyKeys` is for mutexes only: read/write keys never had a legacy key.
+      return (await open({ key, legacy: false, mode: modeOf(req) }, req)) ?? undefined;
+    },
+    release,
+  };
 
   return {
     name: 'pg-session',
     guarantees: hold,
     async acquire(key: Key, req: AcquireRequest): Promise<Grant | undefined> {
-      return (await open(key, req)) ?? undefined;
+      return (await open({ key, legacy, mode: 'exclusive' }, req)) ?? undefined;
     },
-    release(grant: Grant): Promise<ReleaseOutcome> {
-      const end = ends.get(grant.token);
-      return end === undefined ? Promise.resolve('not-owner') : end();
-    },
+    release,
+    shared,
     async dispose(): Promise<void> {
       await Promise.all([...ends.values()].map(end => end()));
     },
   };
 
   /** One attempt on a fresh pinned transaction; `null` = not granted. */
-  function open(key: Key, req: AcquireRequest): Promise<Grant | null> {
+  function open(target: Target, req: AcquireRequest): Promise<Grant | null> {
+    const { key } = target;
     if (req.signal?.aborted === true) return Promise.resolve(null);
     // Taken now, so time spent queueing for a pool connection counts against the wait.
     const deadline = waitDeadline(req.waitMs);
@@ -352,7 +408,7 @@ export function pgSession(db: LockableDb, options: PgSessionOptions = {}): Store
     const run = db.transaction(async tx => {
       // The pinned transaction only runs this store's bounded statements, so no server timeout may end it while held.
       await tx.execute(EXEMPT_TIMEOUTS);
-      const got = await takeLock(tx, key, legacy, deadline, req.signal);
+      const got = await takeLock(tx, target, deadline, req.signal);
       if (!got) return;
       phase = 'held';
       ends.set(req.token, end);
