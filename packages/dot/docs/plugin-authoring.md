@@ -280,6 +280,13 @@ configure(ctx) {
 The merged result lands in `app.manifest`. Agents and CI tools read this
 to understand what the app does without executing code.
 
+Some text is only known after boot (which store a lock runs on). Complete an
+action's `summary` with `ctx.$describeAction(id, { summary })` in `provides`,
+`boot` or `start`, or `ctx.describeAction` in `configure`. A plugin may amend its
+own actions, or actions in a binding it registered a projection for; anything
+else throws `DOT_LIFECYCLE_E021`. `dot explain` stays static; the post-boot
+manifest and `dot doctor` show the new text.
+
 ## Diagnostics
 
 A plugin contributes runtime status to `app.diagnostics`. The kernel

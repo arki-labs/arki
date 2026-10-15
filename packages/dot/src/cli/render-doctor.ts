@@ -151,6 +151,7 @@ function renderTextDoctor(snap: DotDiagnosticsSnapshot, status: DotCliEnvelopeSt
     lines.push(`Actions (${snap.actions.length})`);
     for (const action of snap.actions) {
       lines.push(`  ${statusIcon(action.status)} ${action.binding}:${action.id} (plugin: ${action.plugin})`);
+      if (action.summary !== undefined) lines.push(`      ↳ ${action.summary}`);
       if (action.issues.length > 0) {
         lines.push(...renderIssueLines(action.issues, '    '));
       }

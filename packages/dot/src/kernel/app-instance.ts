@@ -491,6 +491,31 @@ export class DotAppImpl {
     record.actions.push(stamped);
   }
 
+  /** Replace an action with a copy carrying the new summary, so manifests taken earlier keep the old one. */
+  #describeAction(
+    record: PluginRecord,
+    phase: DotLifecycleHook,
+    actionId: string,
+    patch: { readonly summary: string },
+  ): void {
+    for (const owner of this.#records.values()) {
+      const action = owner.actions.find(
+        candidate =>
+          candidate.id === actionId &&
+          (owner === record || record.projections.some(projection => projection.binding === candidate.binding)),
+      );
+      if (action === undefined) continue;
+      owner.actions.splice(owner.actions.indexOf(action), 1, { ...action, summary: patch.summary });
+      return;
+    }
+    throw new DotLifecycleError({
+      code: DotLifecycleErrorCode.ActionNotAmendable,
+      phase,
+      plugin: record.plugin.name,
+      message: `Plugin "${record.plugin.name}" cannot describe action "${actionId}": it is not one of its own actions, nor in a binding it registered a projection for. Call $describeAction only for actions the plugin declared or whose binding it owns.`,
+    });
+  }
+
   #registerProjection(record: PluginRecord, projection: Omit<ProjectionManifest, 'plugin'>): void {
     record.projections.push({ ...projection, plugin: record.plugin.name });
   }
@@ -749,6 +774,7 @@ export class DotAppImpl {
         },
         registerAction: action => this.#registerAction(record, action),
         registerProjection: projection => this.#registerProjection(record, projection),
+        describeAction: (actionId, patch) => this.#describeAction(record, 'configure', actionId, patch),
         registerRoute: route => this.#registerRouteShim(record, route),
         registerLifecycleHook: hook => {
           record.hooks.add(hook);
@@ -949,6 +975,8 @@ export class DotAppImpl {
       $app: this.#appName,
       $plugin: record.plugin.name,
       $config: this.#config,
+      $describeAction: (actionId: string, patch: { readonly summary: string }) =>
+        this.#describeAction(record, phase, actionId, patch),
     };
     for (const [alias, witness] of Object.entries(record.plugin.needs)) {
       const wireKey = wireKeyOf(witness, alias);
@@ -1791,6 +1819,7 @@ export class DotAppImpl {
           id: action.id,
           plugin: plugin.name,
           binding: action.binding,
+          ...(action.summary === undefined ? {} : { summary: action.summary }),
           status: hasError ? 'failed' : 'ok',
           issues: [],
         });

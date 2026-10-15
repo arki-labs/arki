@@ -300,6 +300,16 @@ export type KernelCtx = {
   readonly $plugin: string;
   /** Read-only runtime config bag from `defineApp(name, { config })`. */
   readonly $config: Readonly<Record<string, unknown>>;
+  /**
+   * Complete an action's `summary` once the plugin's services exist (a
+   * `provides` factory, `boot`, `start`, ...). `dot explain` stays static;
+   * the post-boot `app.manifest` and `dot doctor` show the new text.
+   *
+   * A plugin may amend an action it declared, or an action in a binding it
+   * registered a projection for (an adapter completing the actions of the
+   * features it serves). Anything else throws `DOT_LIFECYCLE_E021`.
+   */
+  readonly $describeAction: (actionId: string, patch: { readonly summary: string }) => void;
 };
 
 /** Context provided to a `configure` hook (sync registration only). */
@@ -338,6 +348,12 @@ export type DotConfigureContext = {
   registerAction(action: ActionDeclaration): void;
   /** Register a projection renderer this plugin contributes. */
   registerProjection(projection: ProjectionDeclaration): void;
+  /**
+   * Replace the `summary` of an action already registered. Same ownership
+   * rule as `$describeAction` (see {@link KernelCtx}); in `configure` it sees
+   * the actions of plugins mounted earlier.
+   */
+  describeAction(actionId: string, patch: { readonly summary: string }): void;
   /** @deprecated Use `registerAction`; removed in DOT 0.5.0. */
   registerRoute(route: LegacyRouteDeclaration): void;
   /** Mark the plugin as participating in a lifecycle hook. */

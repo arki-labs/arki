@@ -178,6 +178,7 @@ The kernel emits stable, machine-readable error codes:
 | `DOT_LIFECYCLE_E015`  | A hook exceeded the `hookTimeoutMs` watchdog budget.        |
 | `DOT_LIFECYCLE_E019`  | Plugin needs and provides form a ring through any plugins (printed in order) — at `configure()`. |
 | `DOT_LIFECYCLE_E020`  | A provider is mounted after its consumer — at `configure()`. The fix line names the role: "Move X before Y in .features([...])." for a feature provider, "Mount X with .use() before Y." for any other plugin. |
+| `DOT_LIFECYCLE_E021`  | `$describeAction` named an action the plugin may not amend (unknown id, or neither its own nor in a binding it owns). |
 
 `TS7022` ("implicitly has type 'any' because it … is referenced directly or
 indirectly in its own initializer") on a `feature()` const is the compile-time

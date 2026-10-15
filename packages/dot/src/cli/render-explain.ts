@@ -112,6 +112,7 @@ function renderTextManifest(manifest: DotAppManifest): string {
       lines.push(
         `  ${pad(action.id, widthId)}  ${pad(action.binding, widthBinding)}  ${pad(action.direction, 3)}  ${pad(action.address ?? '-', widthAddress)}  ${action.plugin}`,
       );
+      if (action.summary !== undefined) lines.push(`      ↳ ${action.summary}`);
     }
   }
   lines.push('');

@@ -52,6 +52,8 @@ export type ActionDiagnostic = {
   id: string;
   plugin: string;
   binding: string;
+  /** The action's summary, when it has one (post-boot, as completed by `$describeAction`). */
+  summary?: string;
   /** Structural configure-phase health only; not runtime liveness. */
   status: Extract<DiagnosticStatus, 'ok' | 'degraded' | 'failed'>;
   issues: DiagnosticIssue[];

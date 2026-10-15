@@ -88,6 +88,8 @@ export const DotLifecycleErrorCode = {
   CapabilityRing: 'DOT_LIFECYCLE_E019',
   /** A feature needs a capability whose (static) provider is mounted after it. */
   ProviderMountedLater: 'DOT_LIFECYCLE_E020',
+  /** `$describeAction` named an action the calling plugin may not amend (unknown id, or not its own). */
+  ActionNotAmendable: 'DOT_LIFECYCLE_E021',
 } as const;
 
 export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];

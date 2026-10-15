@@ -70,6 +70,33 @@ describe('buildExplainEnvelope', () => {
 });
 
 describe('renderExplain', () => {
+  it('prints the summary line right after an action row, and nothing for an action without one', () => {
+    const api = plugin({
+      name: 'api',
+      version: '1.0.0',
+      configure: ctx => {
+        ctx.registerAction({ id: 'api.plain', binding: 'http', direction: 'in', address: 'GET /plain' });
+        ctx.registerAction({
+          id: 'api.sweep',
+          binding: 'schedule',
+          direction: 'in',
+          address: 'every 5m',
+          summary: 'lock: one runner at a time',
+        });
+        ctx.registerAction({ id: 'api.after', binding: 'http', direction: 'in', address: 'GET /after' });
+      },
+    });
+    const configured = defineApp('synthetic').use(api).configure();
+    const written: string[] = [];
+    renderExplain({ manifest: configured.manifest }, { json: false, now: FROZEN_NOW, out: line => written.push(line) });
+    const lines = written.join('').split('\n');
+    const sweep = lines.findIndex(line => line.includes('api.sweep'));
+    expect(lines[sweep + 1]).toBe('      ↳ lock: one runner at a time');
+    const plain = lines.findIndex(line => line.includes('api.plain'));
+    expect(lines[plain + 1]).not.toContain('↳');
+    expect(lines.filter(line => line.includes('↳'))).toHaveLength(1);
+  });
+
   it('JSON mode writes a parseable envelope to the sink', () => {
     const configured = syntheticApp().configure();
     let written = '';
