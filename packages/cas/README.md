@@ -26,6 +26,21 @@ polynomialIn('x^4 - 5*x^2 + 4', 'x'); // exactRoots → ['-2', '-1', '1', '2'], 
 polynomialIn('sin(x) - 1', 'x'); // { kind: 'other', reason: 'transcendental', span: { start: 0, end: 6 } }
 ```
 
+## Guarantees
+
+Results are exact: arithmetic is over ℚ, with π and e as symbols under the assumption above. Floats appear only in the `numeric` parts of `exactRoots`, which say `exact: false`. Every call returns or throws a typed error within its budgets. The evidence is in `src/*.test.ts`; property tests use fast-check, and the factor fixtures come from SymPy (`test/reference/gen_factor.py`, dev-only).
+
+| Verb                                               | Guarantee                                                                                                                                              | Evidence                                                                                                                                                                                                              |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `expand`, `collect`, `rationalize`, `polynomialIn` | The same value as the input wherever the input is defined; conditions name every restriction the result lost.                                          | Ring laws, 200 runs each; exact values at random rational points with π and e replaced by rationals, 300 runs; AST → polynomial → AST round trip, 200 runs; the equation solver corpus                                |
+| `gcd`                                              | Divides both inputs, and every common divisor divides it. Monic for one generator; otherwise coprime integer coefficients with a positive leading one. | gcd(A·C, B·C) is divisible by C, divides both and leaves coprime cofactors, 200 runs                                                                                                                                  |
+| `simplify`                                         | The same exact value wherever the input is defined; every condition is necessary; idempotent.                                                          | Exact values at random rational points, 400 runs per rule family; kernel rules in floats within 1e-9, 400 runs; a test per condition that breaking it makes the input undefined; idempotence and round trip, 300 runs |
+| `derivative`                                       | The derivative of the input; exact coefficients for polynomials.                                                                                       | Agreement with `@arki/math/differentiate` at random points within its error estimate, 300 runs; exactly k·cₖ for polynomials, 150 runs; order 2 equals order 1 twice, 100 runs; the derivative calculator corpus      |
+| `derivation`                                       | The same result as `derivative`; every step is right on its own.                                                                                       | Each derivative step checked against the numeric derivative of its `before`, 200 runs; every key in `TEMPLATE_KEYS`                                                                                                   |
+| `factor`                                           | `content · ∏ factor^multiplicity` equals the input exactly. With `complete: true`, every factor is irreducible over ℚ.                                 | 45 SymPy fixtures, factor for factor; factors of A·B are those of A and of B, and the product rebuilds the input, 200 runs                                                                                            |
+| `exactRoots`                                       | Every exact root substitutes to exactly 0. A real or complex verdict is never a guess.                                                                 | Random rational quadratics, 150 runs; over ℚ(π, e) with π and e replaced by rationals and the sign of Δ checked at 200 digits, 120 runs                                                                               |
+| every verb                                         | Hostile input throws `CasLimitError` before the work or by fuel: within 100 ms, 1 s for `factor`.                                                      | `hostile.test.ts`; a degree-128 polynomial with 300-digit coefficients in `factor.test.ts`                                                                                                                            |
+
 ## `simplify`
 
 ```ts
@@ -100,33 +115,68 @@ ruleFormula({ kind: 'derivative', id: 'product' }); // "(f g)' = f' g + f g'"
 
 Every step has a pre-order `index`, a `rule`, a `template` (`key` plus `params`), `before`, `after`, `children` and the `conditions` it introduced. A derivative step's `after` is the derivative of its `before` with `fold` applied only; the chain rule is its own step, with the outer rule (`f'(u)`) and `u'` as children. A subterm derived before is a `repeat` step pointing at the first one. Each order's `simplification` shows the algebraic normal form as one step (`fold`, `expand`, `collect` and `cancel` are computed together, so `phases` lists which happened), then each rule of the table that changed the expression, in table order, then `factor-out`.
 
-No English is built in: `template.key` is the translation key, and `TEMPLATE_KEYS` lists every key, so an app test can check its translations. English reference texts to copy:
+No English is built in: `template.key` is the translation key, and `TEMPLATE_KEYS` lists every key, so an app test can check its translations. English reference texts for all 58 keys, to copy into a locale file:
 
-| Key                                     | English                                                                        |
-| --------------------------------------- | ------------------------------------------------------------------------------ |
-| `derivation`                            | Differentiate with respect to {x} ({order} times).                             |
-| `derivation.order`                      | Derivative number {order}.                                                     |
-| `derivation.simplification`             | Simplify the result.                                                           |
-| `derivative.constant`                   | {c} is a constant: its derivative is 0.                                        |
-| `derivative.variable`                   | The derivative of {x} is 1.                                                    |
-| `derivative.sum`                        | Differentiate each term separately.                                            |
-| `derivative.constant-multiple`          | Keep the constant factor {c} and differentiate {f}.                            |
-| `derivative.constant-divisor`           | Divide the derivative of {f} by the constant {c}.                              |
-| `derivative.product`                    | Product rule for {f} times {g}.                                                |
-| `derivative.quotient`                   | Quotient rule for {f} over {g}.                                                |
-| `derivative.power`                      | Power rule with exponent {n}.                                                  |
-| `derivative.exponential`                | Exponential rule with base {a}.                                                |
-| `derivative.exponential.e`              | The exponential function is its own derivative.                                |
-| `derivative.general-power`              | Write the power as an exponential of a logarithm and differentiate.            |
-| `derivative.logarithm`                  | The derivative of the natural logarithm is one over its argument.              |
-| `derivative.logarithm.base`             | Logarithm to base {b}: divide by ln({b}).                                      |
-| `derivative.root.sqrt`, `.cbrt`, `.nth` | Write the root as a power and use the power rule.                              |
-| `derivative.absolute-value`             | The derivative of the absolute value is the sign, where the argument is not 0. |
-| `derivative.chain`                      | Chain rule: the outer derivative times the derivative of {u}.                  |
-| `derivative.repeat`                     | Already differentiated in step {of}.                                           |
-| `derivative.function.sin` … `.acoth`    | The derivative of sin is cos (one key per function).                           |
-| `simplify.normal-form`                  | Expand, collect like terms and cancel common factors.                          |
-| `simplify.<rule>`                       | One per rule of the table above (`simplify.exp-ln`, …, `simplify.factor-out`). |
+| Key                            | English                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------ |
+| `derivation`                   | Differentiate with respect to {x} ({order} times).                             |
+| `derivation.order`             | Derivative number {order}.                                                     |
+| `derivation.simplification`    | Simplify the result.                                                           |
+| `derivative.constant`          | {c} is a constant: its derivative is 0.                                        |
+| `derivative.variable`          | The derivative of {x} is 1.                                                    |
+| `derivative.sum`               | Differentiate each term separately.                                            |
+| `derivative.constant-multiple` | Keep the constant factor {c} and differentiate {f}.                            |
+| `derivative.constant-divisor`  | Divide the derivative of {f} by the constant {c}.                              |
+| `derivative.product`           | Product rule for {f} times {g}.                                                |
+| `derivative.quotient`          | Quotient rule for {f} over {g}.                                                |
+| `derivative.power`             | Power rule with exponent {n}.                                                  |
+| `derivative.exponential`       | Exponential rule with base {a}.                                                |
+| `derivative.exponential.e`     | The exponential function is its own derivative.                                |
+| `derivative.general-power`     | Write the power as an exponential of a logarithm and differentiate.            |
+| `derivative.logarithm`         | The derivative of the natural logarithm is one over its argument.              |
+| `derivative.logarithm.base`    | Logarithm to base {b}: divide by ln({b}).                                      |
+| `derivative.root.sqrt`         | Write the square root as a power and use the power rule.                       |
+| `derivative.root.cbrt`         | Write the cube root as a power and use the power rule.                         |
+| `derivative.root.nth`          | Write the root of degree {n} as a power and use the power rule.                |
+| `derivative.absolute-value`    | The derivative of the absolute value is the sign, where the argument is not 0. |
+| `derivative.chain`             | Chain rule: the outer derivative times the derivative of {u}.                  |
+| `derivative.repeat`            | Already differentiated in step {of}.                                           |
+| `derivative.function.sin`      | The derivative of sin(u) is cos(u).                                            |
+| `derivative.function.cos`      | The derivative of cos(u) is -sin(u).                                           |
+| `derivative.function.tan`      | The derivative of tan(u) is sec(u)^2.                                          |
+| `derivative.function.sec`      | The derivative of sec(u) is sec(u) * tan(u).                                   |
+| `derivative.function.csc`      | The derivative of csc(u) is -csc(u) * cot(u).                                  |
+| `derivative.function.cot`      | The derivative of cot(u) is -csc(u)^2.                                         |
+| `derivative.function.asin`     | The derivative of arcsin(u) is 1 / sqrt(1 - u^2).                              |
+| `derivative.function.acos`     | The derivative of arccos(u) is -1 / sqrt(1 - u^2).                             |
+| `derivative.function.atan`     | The derivative of arctan(u) is 1 / (1 + u^2).                                  |
+| `derivative.function.asec`     | The derivative of arcsec(u) is 1 / (\|u\| * sqrt(u^2 - 1)).                    |
+| `derivative.function.acsc`     | The derivative of arccsc(u) is -1 / (\|u\| * sqrt(u^2 - 1)).                   |
+| `derivative.function.acot`     | The derivative of arccot(u) is -1 / (1 + u^2).                                 |
+| `derivative.function.sinh`     | The derivative of sinh(u) is cosh(u).                                          |
+| `derivative.function.cosh`     | The derivative of cosh(u) is sinh(u).                                          |
+| `derivative.function.tanh`     | The derivative of tanh(u) is sech(u)^2.                                        |
+| `derivative.function.sech`     | The derivative of sech(u) is -sech(u) * tanh(u).                               |
+| `derivative.function.csch`     | The derivative of csch(u) is -csch(u) * coth(u).                               |
+| `derivative.function.coth`     | The derivative of coth(u) is -csch(u)^2.                                       |
+| `derivative.function.asinh`    | The derivative of arsinh(u) is 1 / sqrt(u^2 + 1).                              |
+| `derivative.function.acosh`    | The derivative of arcosh(u) is 1 / sqrt(u^2 - 1).                              |
+| `derivative.function.atanh`    | The derivative of artanh(u) is 1 / (1 - u^2).                                  |
+| `derivative.function.asech`    | The derivative of arsech(u) is -1 / (u * sqrt(1 - u^2)).                       |
+| `derivative.function.acsch`    | The derivative of arcsch(u) is -1 / (\|u\| * sqrt(1 + u^2)).                   |
+| `derivative.function.acoth`    | The derivative of arcoth(u) is 1 / (1 - u^2).                                  |
+| `simplify.normal-form`         | Expand, collect like terms and cancel common factors.                          |
+| `simplify.integer-powers`      | Combine nested powers with whole-number exponents.                             |
+| `simplify.fractional-powers`   | Combine powers of the same base by adding the exponents.                       |
+| `simplify.sqrt-of-square`      | The square root of a square is the absolute value.                             |
+| `simplify.square-of-sqrt`      | The square of a square root is the radicand itself.                            |
+| `simplify.exp-ln`              | e raised to ln(u) is u.                                                        |
+| `simplify.ln-exp`              | The natural logarithm of e raised to u is u.                                   |
+| `simplify.exp-product`         | Combine products of exponentials by adding the exponents.                      |
+| `simplify.abs-sign`            | The absolute value divided by its argument is the sign.                        |
+| `simplify.parity`              | Use the symmetry of the function to remove the minus sign inside.              |
+| `simplify.special-values`      | Replace known special values such as sin(0) and ln(1).                         |
+| `simplify.factor-out`          | Factor out the common factor.                                                  |
 
 ## `factor`
 

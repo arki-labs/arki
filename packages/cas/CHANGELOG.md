@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+Release preparation (RFC `2026-10-15-arki-cas` §18 build step 5). The package is now public (Wave 5, Specialized), together with `@arki/expr`.
+
+- README: a guarantee table (what each verb promises and the tests that back it) and the English text of all 58 step template keys.
+- Benchmarks: `bench/cas.bench.ts` against mathjs (pruned), Algebrite and nerdamer, with a contract check before timing: the same values at 5 points for derivatives and simplified forms, the same coefficients for expansions, the same factors up to units for factorizations. Libraries that fail an input, or that did not finish in an untimed probe, are left out or shown unranked, with the reason in the notes. A `derivative` build with the step recorder deleted measures the zero-cost claim (RFC §9.2). README numbers come later, from an idle-machine publish run.
+- Tests: a `gcd` property (gcd(A·C, B·C) is divisible by C, divides both inputs and leaves coprime cofactors).
+
+### Build step 4
+
 `factor` over ℚ (RFC `2026-10-15-arki-cas` §18 build step 4).
 
 - `@arki/cas/polynomial`: `factor(input, variable)` returns `content`, `factors` (with multiplicities), `complete` and `conditions`. Rational univariate polynomials factor completely by Zassenhaus: Yun square-free split, best of 5 primes, distinct-degree and Cantor–Zassenhaus splitting with a fixed seed, quadratic Hensel lifting over a factor tree, subset recombination. Names, π and e may sit in the content; a part that involves them stays whole with `complete: false`.
@@ -19,7 +27,7 @@
 - Hash-consed differentiation: each distinct subterm is derived once, so cost and step count are linear in the DAG.
 - New budgets `order` (10), `steps` (2 000) and `stepNodes` (50 000).
 - `simplify` rules can be switched on one at a time (internal), which a derivation uses to show each rule as a step; `simplify` itself is unchanged.
-- Tests: the Ekuation corpus results, conditions, errors and budgets; properties against `@arki/math/differentiate` at random points, exact polynomial coefficients, order n as order 1 applied n times, and every derivation step checked numerically on its own; cross-runtime smoke with a 5th-order derivation.
+- Tests: the derivative calculator corpus results, conditions, errors and budgets; properties against `@arki/math/differentiate` at random points, exact polynomial coefficients, order n as order 1 applied n times, and every derivation step checked numerically on its own; cross-runtime smoke with a 5th-order derivation.
 
 ### Build step 2
 
