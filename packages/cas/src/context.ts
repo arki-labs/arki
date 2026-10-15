@@ -233,12 +233,10 @@ export class Context {
     // `fold` when a number divides a coefficient (`6*x/2`, not `x/2`; `6/4`, not `3/2`), or for a
     // fraction as divisor: dividing by it multiplies by its reciprocal (`1/x^-1` is `x`).
     const [ra, rb] = [rationalValue(a), rationalValue(b)];
+    // An integer fraction in lowest terms with a positive denominator (`3/2`) is printed as it was written.
     const written =
-      ra?.isInteger() === true &&
-      rb?.isInteger() === true &&
-      !rb.isNegative() &&
-      ra.times(rb.inverse()).denominator === rb.numerator;
-    const literal = rb !== undefined && !written && [...a.num.values()].some(t => !t.c.eq(ONE));
+      ra?.isInteger() === true && rb?.isInteger() === true && ra.times(rb.inverse()).denominator === rb.numerator;
+    const literal = rb !== undefined && !written && scaled(a);
     if (literal || constantValue(b.den) === undefined) this.note('fold');
     this.divisors.push(b.num);
     return this.quotient(multiply(a.num, b.den, this.budget), multiply(a.den, b.num, this.budget));
@@ -270,9 +268,13 @@ export class Context {
     const ra = rationalValue(a);
     const rb = rationalValue(b);
     const trivial = (r: ReturnType<typeof rationalValue>): boolean => r !== undefined && (r.isZero() || r.eq(ONE));
-    const scaled = (r: ReturnType<typeof rationalValue>, other: RatFun): boolean =>
-      r !== undefined && [...other.num.values(), ...other.den.values()].some(t => !t.c.eq(ONE));
-    if ((ra !== undefined && rb !== undefined) || trivial(ra) || trivial(rb) || scaled(ra, b) || scaled(rb, a)) {
+    if (
+      (ra !== undefined && rb !== undefined) ||
+      trivial(ra) ||
+      trivial(rb) ||
+      (ra !== undefined && scaled(b)) ||
+      (rb !== undefined && scaled(a))
+    ) {
       this.note('fold');
       return;
     }
@@ -287,6 +289,11 @@ export class Context {
   generatorValue(g: number): RatFun {
     return this.fromPoly(generator(g));
   }
+}
+
+/** A term of `r` has a coefficient other than 1, so a number multiplying or dividing `r` folds into it. */
+function scaled(r: RatFun): boolean {
+  return [...r.num.values(), ...r.den.values()].some(t => !t.c.eq(ONE));
 }
 
 /** The value of a rational constant (no generators), else `undefined`. */

@@ -90,6 +90,10 @@ describe('derivative: conditions', () => {
     expect(conditionsOf('asec(x)')).toEqual([]);
   });
 
+  it('a condition the assumptions guarantee is not listed: d/dx abs(x) for x > 0', () => {
+    expect(derivative('abs(x)', 'x', { assume: { x: 'positive' } }).conditions).toEqual([]);
+  });
+
   it('a condition another one implies is not listed twice: x > 0 covers x ≠ 0 from abs', () => {
     expect(conditionsOf('abs(x) + ln(x)')).toEqual(['x positive (domain)']);
   });

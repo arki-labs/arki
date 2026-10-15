@@ -20,7 +20,7 @@ import type { PolynomialForm } from './polynomial.js';
 import { constantFloat, constantSign } from './constants.js';
 import { Context } from './context.js';
 import { CasLimitError } from './core.js';
-import { binary, Emitter, exprOf } from './emit.js';
+import { binary, Emitter, exprOf, NOWHERE } from './emit.js';
 import { irreducibleFactors, squareFree } from './factor.js';
 import {
   add,
@@ -56,8 +56,6 @@ export type ExactRoots = {
   /** False when `numeric` is non-empty. */
   readonly exact: boolean;
 };
-
-const AT = { start: 0, end: 0 };
 
 /** Trial division stops at this prime bound; what is left is kept under the root (correct, maybe not fully reduced). */
 const TRIAL_LIMIT = 10_000n;
@@ -143,7 +141,7 @@ function sqrtOf(m: Poly, ctx: Context): RatFun {
   const radicand =
     root === undefined ? scale(primitive, Rational.fromParts(r, 1n)) : constant(Rational.fromParts(r, 1n));
   if (constantValue(radicand)?.eq(1) === true) return multiplier;
-  return ctx.multiply(multiplier, kernelValue('sqrt', [ctx.fromPoly(radicand)], AT, ctx));
+  return ctx.multiply(multiplier, kernelValue('sqrt', [ctx.fromPoly(radicand)], NOWHERE, ctx));
 }
 
 /** Square-free parts of f in x, with multiplicities (Yun's algorithm). */
@@ -250,7 +248,7 @@ export function exactRoots(form: PolynomialForm, options: CasOptions = {}): Exac
       throw new InvalidArgumentError('exactRoots takes coefficients in ℚ(π, e), as polynomialIn returns them');
     }
   }
-  const x = ctx.name('x', AT);
+  const x = ctx.name('x', NOWHERE);
   let common = constant(ONE);
   for (const v of values)
     common = multiply(common, exactQuotient(v.den, gcd(common, v.den, ctx.budget), ctx), ctx.budget);
@@ -294,7 +292,7 @@ export function exactRoots(form: PolynomialForm, options: CasOptions = {}): Exac
       } else {
         const magnitude = sign > 0 ? discriminant : negate(discriminant);
         const root = sqrtOf(magnitude, ctx);
-        const s = sign > 0 ? root : ctx.multiply(root, ctx.generatorValue(ctx.atom('i', AT)));
+        const s = sign > 0 ? root : ctx.multiply(root, ctx.generatorValue(ctx.atom('i', NOWHERE)));
         const offset = Math.sqrt(Math.abs(constantFloat(discriminant, ctx))) / (2 * af);
         for (const [shift, sign2] of [
           [ctx.negate(s), -1],

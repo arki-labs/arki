@@ -13,7 +13,8 @@
  *
  * A restriction is lost when the result no longer shows it. Every lost
  * restriction is returned, except one the sign oracle proves from the
- * expression alone (`x^2 + 1 ≠ 0`), which holds everywhere.
+ * expression and the caller's assumptions (`x^2 + 1 ≠ 0`; `x ≥ 0` when `x`
+ * is assumed positive): it holds wherever the result is claimed to hold.
  *
  * Internal module.
  */
@@ -173,7 +174,7 @@ export function lostConditions(
   emitter: Emitter,
   map: (r: RatFun) => RatFun = r => r,
 ): Condition[] {
-  const oracle = new SignOracle(ctx, new Map());
+  const oracle = new SignOracle(ctx, ctx.assumptions);
   const visible = valueDomain(ctx, value);
   // Normal forms are canonical within a call (equal kernels are one generator), so structure is a key.
   const keyOf = (r: RatFun): string => {
@@ -223,13 +224,10 @@ export function lostConditions(
   return mergeConditions(out);
 }
 
-/** The relations each relation implies on the same subject, itself included. */
-const IMPLIES: Readonly<Record<Relation, readonly Relation[]>> = {
-  positive: ['positive', 'nonzero', 'nonnegative'],
-  negative: ['negative', 'nonzero'],
-  nonnegative: ['nonnegative'],
-  nonzero: ['nonzero'],
-};
+/** `d` implies `c` on the same subject: itself; `> 0` gives `≠ 0` and `≥ 0`; `< 0` gives `≠ 0`. */
+function implies(d: Relation, c: Relation): boolean {
+  return d === c || (c === 'nonzero' && d !== 'nonnegative') || (d === 'positive' && c === 'nonnegative');
+}
 
 /**
  * Conditions from several sources as one list (RFC §6): `u ≥ 0` and `u ≠ 0`
@@ -251,7 +249,7 @@ export function mergeConditions(...lists: readonly (readonly Condition[])[]): Co
         (d, j) =>
           j !== i &&
           d.subject.source === c.subject.source &&
-          IMPLIES[d.relation].includes(c.relation) &&
+          implies(d.relation, c.relation) &&
           (d.relation !== c.relation || j < i),
       ),
   );

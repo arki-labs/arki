@@ -215,6 +215,13 @@ describe('assumptions', () => {
     expect(run('(x^2)^(1/3)', { x: 'nonzero' }).result).toBe('(x^2)^(1 / 3)');
   });
 
+  it('a lost restriction the assumptions guarantee is not listed: it holds wherever the result is claimed', () => {
+    expect(run('sqrt(x)*sqrt(x)', { x: 'positive' })).toMatchObject({ result: 'x', conditions: [] });
+    expect(run('sqrt(x)*sqrt(x)').conditions).toEqual(['x \\geq 0']);
+    // x ≥ 0 does not guarantee x ≠ 0.
+    expect(run('x/x', { x: 'nonnegative' }).conditions).toEqual(['x \\neq 0']);
+  });
+
   it('x^(k/2) and sqrt(x)^k are one value: they cancel, combine and simplify together', () => {
     expect(run('x^(1/2) - sqrt(x)').result).toBe('0');
     expect(run('sqrt(x)*x^(1/2)').result).toBe('x');

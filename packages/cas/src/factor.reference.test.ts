@@ -13,6 +13,7 @@ import { Rational } from '@arki/math/rational';
 
 import fixture from '../test/reference/fixtures/factor.json' with { type: 'json' };
 import { factor, polynomialIn } from './polynomial.js';
+import { fastest } from './test-support.js';
 
 function text(coefficients: readonly string[]): string {
   return coefficients.map((c, k) => `(${c})*x^${k}`).join(' + ');
@@ -37,10 +38,11 @@ describe('factor against SymPy', () => {
     it(`${c.name} (degree ${c.input.length - 1})`, () => {
       // The largest inputs are longer than expr's default 10 000-character parse budget.
       const input = parse(text(c.input), { limits: { length: 100_000, tokens: 100_000 } });
-      const start = Date.now();
       // Two random products have ~380-digit coefficients, over the default factorDigits budget of 300.
-      const result = factor(input, 'x', { limits: { factorDigits: 1000 } });
-      expect(Date.now() - start).toBeLessThan(1000);
+      const timed = fastest(() => factor(input, 'x', { limits: { factorDigits: 1000 } }), 1000);
+      expect(timed.ms).toBeLessThan(1000);
+      if (!timed.ok) throw timed.error;
+      const result = timed.value;
       expect(result.complete).toBe(true);
       expect(Rational.from(result.content.source.replaceAll(/\s/gu, '')).eq(Rational.from(c.content))).toBe(true);
       const got = result.factors.map(f => ({

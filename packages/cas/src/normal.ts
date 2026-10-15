@@ -13,7 +13,7 @@
  *
  * Internal module; `simplify` is re-exported by `@arki/cas/simplify`.
  */
-import type { Node, Span } from '@arki/expr';
+import type { Node } from '@arki/expr';
 import { DivisionByZeroError } from '@arki/math/errors';
 import { Rational } from '@arki/math/rational';
 
@@ -24,7 +24,7 @@ import type { Poly, Term } from './poly.js';
 import type { Claim } from './sign.js';
 import { lostConditions, mergeConditions } from './conditions.js';
 import { rationalValue } from './context.js';
-import { binary, Emitter, exprOf, numberNode, product, textOf } from './emit.js';
+import { binary, Emitter, exprOf, NOWHERE, numberNode, product, textOf } from './emit.js';
 import {
   constant,
   constantValue,
@@ -117,7 +117,6 @@ const ODD: ReadonlySet<string> = new Set([
 const EVEN: ReadonlySet<string> = new Set(['cos', 'sec', 'cosh', 'sech', 'abs']);
 
 /** Kernels built by a rewrite have no place in the input. */
-const NOWHERE: Span = { start: 0, end: 0 };
 const HALF = Rational.fromParts(1n, 2n);
 
 /** Passes to a fixed point. Each rule shrinks or reorders the term, so a handful suffice; fuel is the backstop. */

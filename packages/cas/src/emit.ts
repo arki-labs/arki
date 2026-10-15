@@ -11,7 +11,7 @@
  *
  * Internal module.
  */
-import type { Expr, Node } from '@arki/expr';
+import type { Expr, Node, Span } from '@arki/expr';
 import { children, parse, print } from '@arki/expr';
 import { Rational } from '@arki/math/rational';
 
@@ -19,22 +19,23 @@ import type { Context, RatFun } from './context.js';
 import type { Monomial, Poly, Term } from './poly.js';
 import { compareMonomials, constantValue, ONE, scale } from './poly.js';
 
-const AT = { start: 0, end: 0 };
+/** The span of a node cas built: it points nowhere in the input. */
+export const NOWHERE: Span = { start: 0, end: 0 };
 
 export function numberNode(raw: string): Node {
-  return { kind: 'number', raw, span: AT };
+  return { kind: 'number', raw, span: NOWHERE };
 }
 
 function nameNode(name: string): Node {
-  return { kind: 'name', name, span: AT };
+  return { kind: 'name', name, span: NOWHERE };
 }
 
 export function binary(op: '+' | '-' | '*' | '/' | '^', left: Node, right: Node): Node {
-  return { kind: 'binary', op, left, right, implicit: false, span: AT };
+  return { kind: 'binary', op, left, right, implicit: false, span: NOWHERE };
 }
 
 export function minus(arg: Node): Node {
-  return { kind: 'unary', op: '-', arg, span: AT };
+  return { kind: 'unary', op: '-', arg, span: NOWHERE };
 }
 
 /** A term or group of a sum; `node(true)` builds it with its minus sign inside. */
@@ -238,8 +239,8 @@ export class Emitter {
       case 'kernel': {
         const args = gen.args.map(arg => this.node(arg));
         if (gen.fn === '^') return binary('^', args[0] ?? numberNode('0'), args[1] ?? numberNode('1'));
-        if (gen.fn === '!') return { kind: 'factorial', arg: args[0] ?? numberNode('0'), span: AT };
-        return { kind: 'call', fn: gen.fn, args, notation: 'call', span: AT };
+        if (gen.fn === '!') return { kind: 'factorial', arg: args[0] ?? numberNode('0'), span: NOWHERE };
+        return { kind: 'call', fn: gen.fn, args, notation: 'call', span: NOWHERE };
       }
       case undefined: {
         return numberNode('0');

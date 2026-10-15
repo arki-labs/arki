@@ -11,6 +11,7 @@ import { parse } from '@arki/expr';
 import fixture from '../test/reference/fixtures/factor.json' with { type: 'json' };
 import { CasLimitError } from './core.js';
 import { exactRoots, factor, polynomialIn } from './polynomial.js';
+import { fastest } from './test-support.js';
 
 function shown(input: string, options = {}): string {
   const f = factor(input, 'x', options);
@@ -75,6 +76,16 @@ describe('factor', () => {
     expect(() => factor('x^2', 'pi')).toThrow(expect.objectContaining({ code: 'bad-variable' }));
   });
 
+  it('refuses a constant it cannot zero-test, with its span: sqrt(2)^2 - 2 is 0, but not as a free symbol', () => {
+    // Treated as a symbol, sqrt(2) would make 0 look like the degree-1 product (sqrt(2)^2 - 2) * x.
+    expect(() => factor('sqrt(2)^2*x - 2*x', 'x')).toThrow(
+      expect.objectContaining({ code: 'unsupported-constant', span: { start: 0, end: 7 } }),
+    );
+    expect(() => factor('ln(2)*x^2 - 1', 'x')).toThrow(expect.objectContaining({ code: 'unsupported-constant' }));
+    // Names, π, e and functions of other names have no hidden relations: they stay in the content.
+    expect(shown('sin(y)*x^2 - sin(y)')).toBe('sin(y) * (x + 1) (x - 1)');
+  });
+
   it('is reproducible: the random splitting uses a fixed seed', () => {
     expect(shown('x^60 - 1')).toBe(shown('x^60 - 1'));
   });
@@ -99,13 +110,9 @@ describe('factor budgets: each throws CasLimitError, never a partial answer labe
       Array.from({ length: 129 }, (_, k) => `(${k % 3 === 0 ? '-' : ''}${coefficient()})*x^${k}`).join(' + '),
       { limits: { length: 100_000, tokens: 100_000, nodes: 10_000 } },
     );
-    const start = Date.now();
-    try {
-      factor(input, 'x', { limits: { nodes: 10_000 } });
-    } catch (error) {
-      expect(error).toBeInstanceOf(CasLimitError);
-    }
-    expect(Date.now() - start).toBeLessThan(1000);
+    const timed = fastest(() => factor(input, 'x', { limits: { nodes: 10_000 } }), 1000);
+    expect(timed.ms).toBeLessThan(1000);
+    if (!timed.ok) expect(timed.error).toBeInstanceOf(CasLimitError);
   });
 
   it('exactRoots falls back to the square-free part when factoring runs out of budget', () => {

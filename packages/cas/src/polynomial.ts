@@ -6,8 +6,9 @@
  */
 import type { Expr, Node, Span } from '@arki/expr';
 import type { Rational } from '@arki/math/rational';
+import { walk } from '@arki/expr';
 
-import type { RatFun } from './context.js';
+import type { Generator, RatFun } from './context.js';
 import type { CasInput, CasOptions, CasResult, Condition } from './core.js';
 import type { Part } from './emit.js';
 import type { Poly } from './poly.js';
@@ -75,51 +76,39 @@ function conditionsOf(value: RatFun, ctx: Context, main?: number): Condition[] {
   return lostConditions(ctx, inputDomain(ctx), value, new Emitter(ctx, main));
 }
 
-/** The first kernel or atom of a value, by source position. */
 /**
  * The span of the first divisor in pre-order, `/ u` or `u^-n`, whose value
  * `varies` accepts: where a quotient by the variable starts.
  */
 function divisorSpan(root: Node, ctx: Context, varies: (r: RatFun) => boolean): Span | undefined {
-  const stack: Node[] = [root];
-  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
-    switch (node.kind) {
-      case 'binary': {
-        if (node.op === '/' && varies(read(node.right, ctx))) return node.right.span;
-        const exponent = node.op === '^' ? rationalValue(read(node.right, ctx)) : undefined;
-        if (exponent?.isNegative() === true && varies(read(node.left, ctx))) return node.span;
-        stack.push(node.right, node.left);
-        break;
-      }
-      case 'unary':
-      case 'factorial': {
-        stack.push(node.arg);
-        break;
-      }
-      case 'group': {
-        stack.push(node.inner);
-        break;
-      }
-      case 'call': {
-        stack.push(...[...node.args].reverse());
-        break;
-      }
-      default: {
-        break;
-      }
-    }
-  }
-  return undefined;
+  let span: Span | undefined;
+  walk(root, node => {
+    if (span !== undefined) return false;
+    if (node.kind !== 'binary') return true;
+    if (node.op === '/' && varies(read(node.right, ctx))) span = node.right.span;
+    const exponent = node.op === '^' ? rationalValue(read(node.right, ctx)) : undefined;
+    if (span === undefined && exponent?.isNegative() === true && varies(read(node.left, ctx))) span = node.span;
+    return span === undefined;
+  });
+  return span;
 }
 
-function firstKernel(value: RatFun, ctx: Context): Span | undefined {
-  let first: Span | undefined;
-  for (const g of [...generators(value.num), ...generators(value.den)]) {
+type Spanned = Exclude<Generator, { readonly kind: 'pi' | 'e' }>;
+
+/** The generator of `value` that comes first in the input, among those `test` accepts. */
+function earliest(value: RatFun, ctx: Context, test: (gen: Spanned) => boolean): Spanned | undefined {
+  let first: Spanned | undefined;
+  for (const g of new Set([...generators(value.num), ...generators(value.den)])) {
     const gen = ctx.generators[g];
-    if ((gen?.kind === 'kernel' || gen?.kind === 'atom') && (first === undefined || gen.span.start < first.start))
-      first = gen.span;
+    if (gen === undefined || gen.kind === 'pi' || gen.kind === 'e' || !test(gen)) continue;
+    if (first === undefined || gen.span.start < first.span.start) first = gen;
   }
   return first;
+}
+
+/** The first kernel or atom of a value, by source position. */
+function firstKernel(value: RatFun, ctx: Context): Span | undefined {
+  return earliest(value, ctx, gen => gen.kind !== 'name')?.span;
 }
 
 /**
@@ -205,13 +194,14 @@ export function gcd(a: CasInput, b: CasInput, options: CasOptions = {}): CasResu
   const inputs = [inputExpr(a, ctx).root, inputExpr(b, ctx).root] as const;
   const [x, y] = [read(inputs[0], ctx), read(inputs[1], ctx)];
   for (const [k, value] of [x, y].entries()) {
-    if (constantValue(value.den) !== undefined) continue;
-    const root = inputs[k === 0 ? 0 : 1];
-    throw new CasError(
-      `gcd takes polynomials; the ${k === 0 ? 'first' : 'second'} input is a quotient`,
-      'not-polynomial',
-      divisorSpan(root, ctx, r => constantValue(r.num) === undefined),
-    );
+    const which = k === 0 ? 'first' : 'second';
+    const untested = untestedConstant(value, ctx);
+    if (untested !== undefined)
+      throw new CasError(`gcd: the ${which} input has an untested constant`, 'unsupported-constant', untested);
+    if (constantValue(value.den) === undefined) {
+      const span = divisorSpan(inputs[k === 0 ? 0 : 1], ctx, r => constantValue(r.num) === undefined);
+      throw new CasError(`gcd: the ${which} input is a quotient`, 'not-polynomial', span);
+    }
   }
   let g = polyGcd(x.num, y.num, ctx.budget);
   const lead = leadingTerm(g);
@@ -221,30 +211,31 @@ export function gcd(a: CasInput, b: CasInput, options: CasOptions = {}): CasResu
 }
 
 function coefficientOf(r: RatFun, emitter: Emitter, ctx: Context): Coefficient {
-  const rational = constantValue(r.den) === undefined ? undefined : constantValue(r.num);
+  const rational = rationalValue(r);
   return { value: exprOf(emitter.node(r), ctx), rational: rational ?? null };
+}
+
+/**
+ * The span of the first constant cas cannot zero-test (`sqrt(2)`, `ln(2)`,
+ * `exp(1/2)`): only rationals, π and e have a zero test, and `factor` and
+ * `gcd` must decide zero (`sqrt(2)^2 - 2` is 0, but as a free symbol it is not).
+ */
+function untestedConstant(value: RatFun, ctx: Context): Span | undefined {
+  return earliest(value, ctx, gen => gen.kind === 'atom' || (gen.kind === 'kernel' && gen.names.size === 0))?.span;
 }
 
 type Offender = { readonly reason: 'transcendental' | 'unsupported-constant' | 'other-variable'; readonly span: Span };
 
 function offenderOf(value: RatFun, variable: string, ctx: Context): Offender | undefined {
-  let first: Offender | undefined;
-  for (const g of new Set([...generators(value.num), ...generators(value.den)])) {
-    const gen = ctx.generators[g];
-    let found: Offender | undefined;
-    if (gen?.kind === 'name' && gen.name !== variable) found = { reason: 'other-variable', span: gen.span };
-    else if (gen?.kind === 'atom') found = { reason: 'unsupported-constant', span: gen.span };
-    else if (gen?.kind === 'kernel') {
-      const reason = gen.names.has(variable)
+  const gen = earliest(value, ctx, g => g.kind !== 'name' || g.name !== variable);
+  if (gen === undefined) return undefined;
+  const reason =
+    gen.kind === 'name' || (gen.kind === 'kernel' && !gen.names.has(variable) && gen.names.size > 0)
+      ? 'other-variable'
+      : gen.kind === 'kernel' && gen.names.has(variable)
         ? 'transcendental'
-        : gen.names.size > 0
-          ? 'other-variable'
-          : 'unsupported-constant';
-      found = { reason, span: gen.span };
-    }
-    if (found !== undefined && (first === undefined || found.span.start < first.span.start)) first = found;
-  }
-  return first;
+        : 'unsupported-constant';
+  return { reason, span: gen.span };
 }
 
 /**
@@ -328,6 +319,10 @@ export function factor(input: CasInput, variable: string, options: CasOptions = 
   const emitter = new Emitter(ctx, x);
   const conditions = conditionsOf(value, ctx, x);
   const offender = offenderOf(value, variable, ctx);
+  const untested = untestedConstant(value, ctx);
+  if (untested !== undefined) {
+    throw new CasError('factor: the input has an untested constant', 'unsupported-constant', untested);
+  }
   if (offender?.reason === 'transcendental') {
     throw new CasError(
       `factor takes a polynomial in ${variable}: it holds a function of it`,

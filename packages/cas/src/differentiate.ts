@@ -24,7 +24,7 @@ import type { Normal } from './normal.js';
 import { inputDomain, lostConditions, mergeConditions } from './conditions.js';
 import { Context } from './context.js';
 import { CasError } from './core.js';
-import { binary, decimalText, exprOf, minus, numberNode } from './emit.js';
+import { binary, decimalText, exprOf, minus, NOWHERE, numberNode } from './emit.js';
 import { normalize, Readable } from './normal.js';
 import { constantValue, normalized, squareFreePart } from './poly.js';
 import { inputExpr, read } from './read.js';
@@ -78,7 +78,6 @@ type Plan = {
   readonly body: (kids: RawStep[] | undefined) => Node;
 };
 
-const AT = { start: 0, end: 0 };
 const ZERO = numberNode('0');
 const ONE = numberNode('1');
 const TWO = numberNode('2');
@@ -87,7 +86,7 @@ const TWO = numberNode('2');
 const NOT_DIFFERENTIABLE: ReadonlySet<string> = new Set(['floor', 'ceil', 'round', 'fix', 'sign', 'mod', 'max', 'min']);
 
 function call(fn: string, ...args: Node[]): Node {
-  return { kind: 'call', fn, args, notation: 'call', span: AT };
+  return { kind: 'call', fn, args, notation: 'call', span: NOWHERE };
 }
 
 /** Groups and unary `+` are transparent. */
@@ -709,9 +708,9 @@ export function differentiateOrders(
   return { ctx, orders, result, conditions: mergeConditions(conditions, differentiable) };
 }
 
-/** `u ≠ 0` for each `abs(u)`, unless the sign oracle proves it from the expression alone. */
+/** `u ≠ 0` for each `abs(u)`, unless the sign oracle proves it from the expression and the caller's assumptions. */
 export function nonzeroConditions(ctx: Context, subjects: readonly Node[]): Condition[] {
-  const oracle = new SignOracle(ctx, new Map());
+  const oracle = new SignOracle(ctx, ctx.assumptions);
   const out: Condition[] = [];
   for (const u of subjects) {
     const value = read(u, ctx);

@@ -73,7 +73,13 @@ export type CasResult = { readonly result: Expr; readonly conditions: readonly C
 
 /** Why a cas verb rejected its input. Apps translate messages by this code. */
 export type CasErrorCode =
-  'unsupported-function' | 'not-differentiable' | 'not-in-domain' | 'bad-variable' | 'not-rational' | 'not-polynomial';
+  | 'unsupported-function'
+  | 'not-differentiable'
+  | 'not-in-domain'
+  | 'bad-variable'
+  | 'not-rational'
+  | 'not-polynomial'
+  | 'unsupported-constant';
 
 const REMEDIATION: Readonly<Record<CasErrorCode, string>> = {
   'unsupported-function': 'Remove the function at `span` or compute this case numerically.',
@@ -82,6 +88,7 @@ const REMEDIATION: Readonly<Record<CasErrorCode, string>> = {
   'bad-variable': 'Pass a name that is not a constant or function of the language.',
   'not-rational': 'Pass an input built from + - * / and integer powers only.',
   'not-polynomial': 'Pass a polynomial: no division by the variable and no function of it at `span`.',
+  'unsupported-constant': 'Replace the constant at `span` with a name: cas tests zero only for rationals, π and e.',
 };
 
 /** The input is outside what a cas verb handles. Values never cause this; budgets throw `CasLimitError`. */

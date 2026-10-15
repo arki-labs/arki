@@ -13,6 +13,7 @@ import { ratio } from '@arki/math/rational';
 
 import type { Context, RatFun } from './context.js';
 import type { CasInput } from './core.js';
+import { rationalValue } from './context.js';
 import { CasError } from './core.js';
 import { Emitter, textOf } from './emit.js';
 import { constant, constantValue, generator } from './poly.js';
@@ -57,11 +58,6 @@ function kernel(fn: string, args: readonly RatFun[], node: Node, ctx: Context): 
   return kernelValue(fn, args, node.span, ctx);
 }
 
-/** The value of a rational constant (no generators), else `undefined`. */
-function rationalOf(r: RatFun): ReturnType<typeof constantValue> {
-  return constantValue(r.den) === undefined ? undefined : constantValue(r.num);
-}
-
 function isGenerator(r: RatFun, g: number): boolean {
   if (constantValue(r.den) === undefined || r.num.size !== 1) return false;
   const [key] = generator(g).keys();
@@ -76,7 +72,7 @@ function isGenerator(r: RatFun, g: number): boolean {
  * kernel.
  */
 function readPower(base: RatFun, exponent: RatFun, node: Node, ctx: Context): RatFun {
-  const n = rationalOf(exponent);
+  const n = rationalValue(exponent);
   if (n?.isInteger() === true) {
     // `power` checks degree and digits from the exponent before any arithmetic.
     return ctx.power(base, Number(n.numerator));
@@ -156,7 +152,7 @@ function readNode(node: Node, ctx: Context): RatFun {
       const args = node.args.map(arg => read(arg, ctx));
       const [first, second] = args;
       if (node.fn === 'pow' && first !== undefined && second !== undefined) return readPower(first, second, node, ctx);
-      if (node.fn === 'exp' && first !== undefined && args.length === 1 && rationalOf(first)?.isInteger() === true) {
+      if (node.fn === 'exp' && first !== undefined && args.length === 1 && rationalValue(first)?.isInteger() === true) {
         return readPower(ctx.generatorValue(ctx.e()), first, node, ctx);
       }
       return kernel(node.fn, args, node, ctx);

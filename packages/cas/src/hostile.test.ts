@@ -10,18 +10,15 @@ import { parse, ParseError } from '@arki/expr';
 import { CasLimitError } from './index.js';
 import { expand, gcd, polynomialIn } from './polynomial.js';
 import { simplify } from './simplify.js';
+import { fastest } from './test-support.js';
 
 function budgetOf(run: () => unknown): string {
-  const started = Date.now();
-  try {
-    run();
-    return 'none';
-  } catch (error) {
-    if (Date.now() - started > 100) return 'too slow';
-    if (error instanceof CasLimitError) return error.budget;
-    if (error instanceof ParseError) return `parse:${error.code}`;
-    throw error;
-  }
+  const timed = fastest(run, 100);
+  if (timed.ok) return 'none';
+  if (timed.ms > 100) return 'too slow';
+  if (timed.error instanceof CasLimitError) return timed.error.budget;
+  if (timed.error instanceof ParseError) return `parse:${timed.error.code}`;
+  throw timed.error;
 }
 
 describe('budgets break before the work', () => {
@@ -106,9 +103,10 @@ describe('simplify under hostile input: rewriting has no static bound, so budget
   ])(
     'deep kernel nesting (%s) resolves inside the depth budget, without deep recursion',
     (_, text, result, conditions) => {
-      const started = Date.now();
-      const r = simplify(text);
-      expect(Date.now() - started).toBeLessThan(500);
+      const timed = fastest(() => simplify(text), 500);
+      expect(timed.ms).toBeLessThan(500);
+      if (!timed.ok) throw timed.error;
+      const r = timed.value;
       expect(r.result.source).toBe(result);
       expect(r.conditions.map(c => `${c.subject.source} ${c.relation}`)).toEqual(
         conditions.map(c => c.replace(' > 0', ' positive')),

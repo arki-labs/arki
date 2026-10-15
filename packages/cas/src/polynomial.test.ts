@@ -176,6 +176,16 @@ describe('gcd', () => {
     expect(gcd('x^2 - pi^2', 'x*pi + pi^2').result.source).toBe('x + pi');
   });
 
+  it('refuses a constant it cannot zero-test: as a free symbol, gcd(x - sqrt(2), x^2 - 2) would wrongly be 1', () => {
+    expect(() => gcd('x - sqrt(2)', 'x^2 - 2')).toThrow(
+      expect.objectContaining({
+        code: 'unsupported-constant',
+        span: { start: 4, end: 11 },
+        message: expect.stringContaining('first'),
+      }),
+    );
+  });
+
   it('refuses a quotient with a CasError that points at the divisor and names the input', () => {
     expect(() => gcd('1/x', 'x')).toThrow(
       expect.objectContaining({
