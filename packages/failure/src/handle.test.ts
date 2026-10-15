@@ -1,0 +1,103 @@
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import { z } from 'zod';
+
+import type { Failure } from './failure.js';
+import { FAILURE_ERROR_CODES } from './errors.js';
+import { defineFailure } from './failure.js';
+import { assertNever, match, recover } from './handle.js';
+
+const PostNotFound = defineFailure('post.not_found', { status: 404, data: z.object({ id: z.string() }) });
+const PostLocked = defineFailure('post.locked', { status: 409 });
+
+type Post = { id: string; title: string };
+type Loaded = Post | ReturnType<typeof PostNotFound> | ReturnType<typeof PostLocked>;
+
+function load(id: string): Loaded {
+  if (id === 'missing') return PostNotFound({ id });
+  if (id === 'locked') return PostLocked();
+  return { id, title: 'Hello' };
+}
+
+const onlyPost = (): Post => ({ id: 'p', title: 't' });
+
+const describeLoad = (id: string) =>
+  match(load(id), {
+    ok: post => `title ${post.title}`,
+    'post.not_found': failure => `missing ${failure.data.id}`,
+    'post.locked': () => 'locked',
+  });
+
+describe('match', () => {
+  it('runs the handler of the branch the value is on', () => {
+    expect(describeLoad('p1')).toBe('title Hello');
+    expect(describeLoad('missing')).toBe('missing missing');
+    expect(describeLoad('locked')).toBe('locked');
+  });
+
+  it('infers the union of what the handlers return', () => {
+    const out = match(load('p1'), { ok: () => 1, 'post.not_found': () => 'none', 'post.locked': () => null });
+    expectTypeOf(out).toEqualTypeOf<number | string | null>();
+  });
+
+  it('makes a missing handler a compile error, so a new failure updates every caller', () => {
+    // @ts-expect-error -- 'post.locked' is not handled
+    match(load('p1'), { ok: () => 1, 'post.not_found': () => 2 });
+  });
+
+  it('makes a handler for a failure that can no longer happen a compile error', () => {
+    // @ts-expect-error -- 'post.locked' cannot come out of onlyPost(): a stale handler
+    match(onlyPost(), { ok: () => 1, 'post.locked': () => 2 });
+  });
+
+  it('fails loud when the types were bypassed and a handler is missing at runtime', () => {
+    // Typed as unknown, the value seems to need only `ok`; at runtime it is a failure.
+    expect(() => match<unknown, { ok: () => number }>(PostLocked(), { ok: () => 1 })).toThrow(
+      expect.objectContaining({ code: FAILURE_ERROR_CODES.unhandledFailure }),
+    );
+  });
+});
+
+describe('recover', () => {
+  it('handles the listed failures and passes the rest through unchanged', () => {
+    const fallback = { id: 'draft', title: 'Draft' };
+    expect(recover(load('locked'), { 'post.locked': () => fallback })).toBe(fallback);
+    const missing = load('missing');
+    expect(recover(missing, { 'post.locked': () => fallback })).toBe(missing);
+    expect(recover(load('p1'), { 'post.locked': () => fallback })).toEqual({ id: 'p1', title: 'Hello' });
+  });
+
+  it('drops the handled codes from the type, so the compiler knows what is still possible', () => {
+    const partly = recover(load('x'), { 'post.locked': () => 'read-only' as const });
+    expectTypeOf(partly).toEqualTypeOf<Post | 'read-only' | Failure<'post.not_found', { id: string }>>();
+    const fully = recover(load('x'), { 'post.locked': () => null, 'post.not_found': failure => failure.data.id });
+    expectTypeOf(fully).toEqualTypeOf<Post | null | string>();
+  });
+
+  it('makes a handler for a code the value cannot carry a compile error', () => {
+    // @ts-expect-error -- 'post.gone' is not a failure of load()
+    recover(load('x'), { 'post.gone': () => 1 });
+  });
+});
+
+describe('assertNever', () => {
+  type Shape = { kind: 'circle'; r: number } | { kind: 'square'; side: number };
+  const area = (shape: Shape): number => {
+    switch (shape.kind) {
+      case 'circle': {
+        return Math.PI * shape.r ** 2;
+      }
+      case 'square': {
+        return shape.side ** 2;
+      }
+      default: {
+        return assertNever(shape);
+      }
+    }
+  };
+
+  it('compiles only when every member is handled, and throws a coded error if reached anyway', () => {
+    expect(area({ kind: 'square', side: 2 })).toBe(4);
+    const smuggled = JSON.parse('{"kind":"triangle"}') as Shape;
+    expect(() => area(smuggled)).toThrow(expect.objectContaining({ code: FAILURE_ERROR_CODES.unreachable }));
+  });
+});
