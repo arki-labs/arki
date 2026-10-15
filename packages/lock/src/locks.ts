@@ -37,6 +37,7 @@ import type {
 } from './types.js';
 import { LockError } from './errors.js';
 import { createKey } from './key.js';
+import { lead } from './lead.js';
 import { defaultScheduler } from './scheduler.js';
 import { semaphoreConfigSchema, storeTimeoutSchema, weightSchema } from './types.js';
 import { BACKOFF_MAX_MS, backoffDelay, parseDuration, raceSignal, withStoreTimeout } from './wait.js';
@@ -81,6 +82,7 @@ type HandleImpl = {
   acquire(opts?: CallOptions): Promise<GuardImpl>;
   tryAcquire(opts?: CallOptions): Promise<GuardImpl | undefined>;
   /** Lease stores only. */
+  lead?(fn: (ctx: ContextImpl) => unknown, opts?: { readonly signal?: AbortSignal }): Promise<void>;
 };
 
 /**
@@ -684,7 +686,35 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
 
   function mutex(name: string): HandleImpl {
     const key = createKey(namespace, name);
-    return handleOver(key, () => mutexProtocol);
+    const handle = handleOver(key, () => mutexProtocol);
+    if (!leased) return handle;
+    return {
+      ...handle,
+      lead: (fn, opts) =>
+        lead(
+          {
+            key,
+            keyField: keyField(key),
+            scheduler,
+            beatMs: leaseMs / 3,
+            counts,
+            tryAcquire: callOpts => handle.tryAcquire(callOpts),
+            ...(store.waitFor === undefined ? {} : { waitFor: (k, s) => store.waitFor?.(k, s) ?? Promise.resolve() }),
+            onReleaseError: error => {
+              const releaseError = asReleaseError(error);
+              counts.releaseErrors += 1;
+              log.error('release of {key} failed while leading: {error}', { key: keyField(key), error: releaseError });
+              try {
+                onReleaseError?.(releaseError);
+              } catch (hookError) {
+                log.error(toError(hookError), { note: 'onReleaseError threw' });
+              }
+            },
+          },
+          fn,
+          opts,
+        ),
+    };
   }
 
   function semaphoreOver(ops: PermitOps): (name: string, config: SemaphoreConfig) => HandleImpl {

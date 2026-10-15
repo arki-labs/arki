@@ -1,7 +1,11 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
+import type { fileStore } from './file/index.js';
 import type { FenceOf, Guarantees, Guard, LockContext, LockRun, Locks, Store } from './index.js';
+import type { memoryStore } from './memory.js';
 import type { pgSession, pgTransaction } from './pg/index.js';
+import type { pgLease } from './pg/lease.js';
+import type { redisStore } from './redis/index.js';
 import { createLocks, LockError } from './index.js';
 
 type Base = {
@@ -288,3 +292,15 @@ describe('guards of transaction-owned locks', () => {
     expectTypeOf<Guard<SessionStore>>().toHaveProperty(Symbol.asyncDispose);
   });
 });
+
+describe('lead on the shipped stores', () => {
+  it('is absent on pgSession and memoryStore, present on pgLease, redisStore and fileStore', () => {
+    expectTypeOf<MutexOf<ReturnType<typeof pgSession>>>().not.toHaveProperty('lead');
+    expectTypeOf<MutexOf<ReturnType<typeof memoryStore>>>().not.toHaveProperty('lead');
+    expectTypeOf<MutexOf<ReturnType<typeof pgLease>>>().toHaveProperty('lead');
+    expectTypeOf<MutexOf<ReturnType<typeof redisStore>>>().toHaveProperty('lead');
+    expectTypeOf<MutexOf<ReturnType<typeof fileStore>>>().toHaveProperty('lead');
+  });
+});
+
+type MutexOf<S extends Store> = ReturnType<Locks<S>['mutex']>;
