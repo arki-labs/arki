@@ -13,7 +13,7 @@
  * Types cannot see folders, so these rules hold the shape:
  *
  * - `@orpc/server` only in the app core (`core/orpc.ts`, `root.ts`,
- *   `gateway.ts`) and `feature.ts` — a procedure never builds its own `os`.
+ *   `gateway.ts`, `cron.ts`) and `feature.ts` — a procedure never builds its own `os`.
  * - `@orpc/contract` only in contract files — `entrypoints/contract.ts` and
  *   the app's `contract.ts`.
  * - A contract file imports only `@orpc/contract`, zod / `@arki/contracts`,
@@ -36,7 +36,7 @@
 
 /** @typedef {{ group?: string[], regex?: string, message: string }} Pattern */
 
-const SERVER = { group: ['@orpc/server', '@orpc/server/*'], message: 'Only feature.ts and the app core (core/orpc.ts, root.ts, gateway.ts) build oRPC implementers. Take `os` as a typed parameter (`import type { os } from "../feature"`).' };
+const SERVER = { group: ['@orpc/server', '@orpc/server/*'], message: 'Only feature.ts and the app core (core/orpc.ts, root.ts, gateway.ts, cron.ts) build oRPC implementers. Take `os` as a typed parameter (`import type { os } from "../feature"`).' };
 const CONTRACT = { group: ['@orpc/contract', '@orpc/contract/*'], message: 'Contracts live in entrypoints/contract.ts (and the app contract.ts) only.' };
 const DB_RUNTIME = {
   regex: '^(drizzle-orm(/(?!pg-core$).*)?|pg|postgres|@arki/db(/(?!id$|temporal$).*)?)$',
@@ -155,7 +155,7 @@ const TESTS = ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**'];
 export function featureLayers({ src = 'src', legacy = [], clients = [] } = {}) {
   const features = `${src}/features/*`;
   const contracts = [`${src}/contract.ts`, `${features}/entrypoints/contract.ts`];
-  const serverAllowed = [`${src}/core/orpc.ts`, `${src}/root.ts`, `${src}/gateway.ts`];
+  const serverAllowed = [`${src}/core/orpc.ts`, `${src}/root.ts`, `${src}/gateway.ts`, `${src}/cron.ts`];
 
   /** One config per file class, so each file gets exactly one `no-restricted-imports` list. */
   const rule = (/** @type {Pattern[]} */ patterns) => ({ 'no-restricted-imports': ['error', { patterns }] });

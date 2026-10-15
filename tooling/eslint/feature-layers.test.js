@@ -95,6 +95,10 @@ test('app-level code outside the core may not import @orpc/server', () => {
   assert.deepEqual(ruleIds('src/core/orpc.ts', `import { os } from '@orpc/server';`), []);
 });
 
+test('the cron contract (cron.ts) is app core: it builds its own implementer', () => {
+  assert.deepEqual(ruleIds('src/cron.ts', `import { implement } from '@orpc/server';`), []);
+});
+
 test('tests may wire infra directly, so they are ignored', () => {
   assert.deepEqual(ruleIds('src/features/demo/usecases/__tests__/a.test.ts', `import { store } from '../../infra/store';`), []);
 });
