@@ -33,9 +33,6 @@ export class UserRepository {
 
     return this.db.query.User.findFirst({
       where: { id },
-      with: {
-        accounts: true,
-      },
     });
   }
 
