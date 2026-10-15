@@ -1,6 +1,6 @@
 # @arki/cas
 
-A bounded computer algebra package on [`@arki/expr`](../expr) and [`@arki/math`](../math): exact polynomials and rational functions with π and e as symbolic coefficients, closed-form roots, budgets on every input, and results as canonical expr ASTs. The design is specified in `docs/rfcs/2026-10-15-arki-cas.md`. Private, `0.0.x`: build steps 1 to 3 of the RFC (polynomial core; conditions, the sign oracle and `simplify`; `derivative` and the rule-by-rule `derivation`). `factor` comes in step 4.
+A bounded computer algebra package on [`@arki/expr`](../expr) and [`@arki/math`](../math): exact polynomials and rational functions with π and e as symbolic coefficients, closed-form roots, budgets on every input, and results as canonical expr ASTs. The design is specified in `docs/rfcs/2026-10-15-arki-cas.md`. Private, `0.0.x`: build steps 1 to 4 of the RFC (polynomial core; conditions, the sign oracle and `simplify`; `derivative` and the rule-by-rule `derivation`; `factor` over ℚ).
 
 ## The ℚ[π, e] assumption
 
@@ -22,6 +22,7 @@ const form = polynomialIn('x/x + x^2 - x - 2', 'x');
 if (form.kind === 'polynomial') exactRoots(form).roots.map(r => r.value.source); // ['(-sqrt(5) + 1) / 2', '(sqrt(5) + 1) / 2']
 
 polynomialIn('pi*x - 1', 'x'); // linear, coefficient `pi`; exactRoots → '1 / pi'
+polynomialIn('x^4 - 5*x^2 + 4', 'x'); // exactRoots → ['-2', '-1', '1', '2'], by factoring over ℚ
 polynomialIn('sin(x) - 1', 'x'); // { kind: 'other', reason: 'transcendental', span: { start: 0, end: 6 } }
 ```
 
@@ -127,6 +128,23 @@ No English is built in: `template.key` is the translation key, and `TEMPLATE_KEY
 | `simplify.normal-form`                  | Expand, collect like terms and cancel common factors.                          |
 | `simplify.<rule>`                       | One per rule of the table above (`simplify.exp-ln`, …, `simplify.factor-out`). |
 
+## `factor`
+
+```ts
+import { factor } from '@arki/cas/polynomial';
+
+factor('x^2/2 - 1/8', 'x'); // content 1/8, factors 2 * x + 1 and 2 * x - 1, complete: true
+factor('x^60 - 1', 'x').factors.length; // 12 cyclotomic factors
+factor('y*x^2 - y', 'x'); // content y, factors x + 1 and x - 1, complete: true
+factor('x^2 - y', 'x'); // content 1, factor x^2 - y, complete: false
+```
+
+`factor(input, variable)` returns `content` (an `Expr` free of the variable), `factors` (each `{ factor, multiplicity }`: primitive, positive leading coefficient, sorted by degree then text), `complete` and `conditions` (lost restrictions of the input, as in every verb). `content · ∏ factor^multiplicity` equals the input.
+
+Univariate polynomials with rational coefficients are factored completely into irreducibles over ℚ by Zassenhaus's algorithm: content and Yun's square-free split, the best of 5 small primes, distinct-degree and Cantor–Zassenhaus splitting mod p (fixed seed, so a run is reproducible), quadratic Hensel lifting over a factor tree to the Landau–Mignotte bound, then recombination of subsets. Other names, π and e may sit in the content. A square-free part whose coefficients involve them is returned whole and sets `complete: false`; multivariate factoring is out of v1. The results match SymPy on 45 reference cases (cyclotomics, Swinnerton-Dyer, Mignotte, random products up to degree 40 with 30-digit coefficients).
+
+`exactRoots` uses the same factoring for rational polynomials of degree 3 and up: every linear and quadratic factor gives exact roots, other factors are `numeric`. When a factoring budget is reached it falls back to the square-free split instead of throwing.
+
 ## Budgets
 
-Every call checks `nodes`, `depth`, `terms`, `degree`, `gcdDegree`, `digits` and `fuel` (defaults 5 000, 256, 10 000, 1 000, 64, 1 000, 100 000) before the expensive work; `derivative` and `derivation` also check `order` (10) before starting, and a derivation checks `steps` (2 000; two per distinct subterm plus 16, before each order) and `stepNodes` (50 000 printed nodes, before printing the steps). A derivation spends more fuel than `derivative`: it simplifies once more per rule it shows. The readable normal form puts a sum of unrelated fractions over one denominator, so a high order of such a sum can reach the `terms` or `fuel` budget; rewriting has no static bound, so each `simplify` rewrite also costs fuel and throws `CasLimitError` (a `ResourceLimitError`) with `budget`, `limit` and `actual`. `signal` is checked every 1 024 fuel units. Input errors are `CasError` (a `MathError`) with a `code` and a one-sentence `remediation`.
+Every call checks `nodes`, `depth`, `terms`, `degree`, `gcdDegree`, `digits` and `fuel` (defaults 5 000, 256, 10 000, 1 000, 64, 1 000, 100 000) before the expensive work; `derivative` and `derivation` also check `order` (10) before starting, and a derivation checks `steps` (2 000; two per distinct subterm plus 16, before each order) and `stepNodes` (50 000 printed nodes, before printing the steps). `factor` checks `factorDegree` (128) and `factorDigits` (300 digits in a coefficient) on each square-free part, `liftDigits` (2 000 digits in the Hensel modulus) before lifting and `recombination` (65 536 candidate products) while recombining; bigint arithmetic spends fuel by size, so hostile inputs throw within a second. A derivation spends more fuel than `derivative`: it simplifies once more per rule it shows. The readable normal form puts a sum of unrelated fractions over one denominator, so a high order of such a sum can reach the `terms` or `fuel` budget; rewriting has no static bound, so each `simplify` rewrite also costs fuel and throws `CasLimitError` (a `ResourceLimitError`) with `budget`, `limit` and `actual`. `signal` is checked every 1 024 fuel units. Input errors are `CasError` (a `MathError`) with a `code` and a one-sentence `remediation`.

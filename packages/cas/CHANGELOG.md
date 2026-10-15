@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+`factor` over ℚ (RFC `2026-10-15-arki-cas` §18 build step 4).
+
+- `@arki/cas/polynomial`: `factor(input, variable)` returns `content`, `factors` (with multiplicities), `complete` and `conditions`. Rational univariate polynomials factor completely by Zassenhaus: Yun square-free split, best of 5 primes, distinct-degree and Cantor–Zassenhaus splitting with a fixed seed, quadratic Hensel lifting over a factor tree, subset recombination. Names, π and e may sit in the content; a part that involves them stays whole with `complete: false`.
+- `exactRoots` splits rational polynomials of degree ≥ 3 by `factor`: linear and quadratic factors give exact roots (`x^4 - 5x^2 + 4` → −2, −1, 1, 2); factors of degree ≥ 3 stay `numeric`. A factoring budget falls back to the square-free split.
+- A heuristic gcd (GCDHEU) for the square-free split, with the PRS gcd as fallback, and a fast path: if `f mod p` is square-free, so is `f`.
+- New budgets `factorDegree` (128), `factorDigits` (300), `liftDigits` (2 000) and `recombination` (65 536). Bigint arithmetic in factoring spends fuel by operand size.
+- Tests: 45 SymPy reference fixtures (`test/reference/gen_factor.py`), properties (the product rebuilds the input; factors of A·B are those of A and B), budgets and a hostile degree-128 input that must end within a second; cross-runtime smoke with `x^60 - 1` and a degree-40 product.
+
+### Build step 3
+
 `derivative` and the rule-by-rule `derivation` (RFC `2026-10-15-arki-cas` §18 build step 3).
 
 - `@arki/cas/derivative`: `derivative(input, variable, { order, simplify })`, any order up to the `order` budget, other names constant, normalized between orders by the rule table; conditions for the input's lost restrictions (`ln(x)` → `1/x` needs `x > 0`) and `u ≠ 0` for `abs(u)` (reason `differentiable`). Jump functions throw `not-differentiable`, `factorial`/`gamma`/host functions `unsupported-function`, both with the call's span (no span after the first order).
