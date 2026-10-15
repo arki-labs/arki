@@ -7,6 +7,7 @@ import tseslint from 'typescript-eslint';
 import { featureLayers } from './feature-layers.js';
 
 const NEW_RULE = 'arki-feature-layers/usecase-runtime-imports';
+const BACK = 'arki-feature-layers/feature-runtime-imports';
 const RESTRICT = 'no-restricted-imports';
 
 const linter = new Linter();
@@ -97,6 +98,19 @@ test('app-level code outside the core may not import @orpc/server', () => {
 
 test('the cron contract (cron.ts) is app core: it builds its own implementer', () => {
   assert.deepEqual(ruleIds('src/cron.ts', `import { implement } from '@orpc/server';`), []);
+});
+
+test('a usecase or a procedure may not runtime-import its feature.ts: feature.ts imports them, so that is a cycle', () => {
+  assert.deepEqual(ruleIds(USECASE, `import { core } from '../feature';`), [BACK]);
+  assert.deepEqual(ruleIds('src/features/demo/entrypoints/procedures/signup.ts', `import { os } from '../../feature';`), [BACK]);
+  assert.deepEqual(ruleIds('src/features/demo/entrypoints/procedures/admin/count.ts', `import { os } from '../../../feature.js';`), [BACK]);
+});
+
+test('import type of Deps / os from feature.ts is fine: it vanishes at build time', () => {
+  assert.deepEqual(ruleIds(USECASE, `import type { Deps } from '../feature';`), []);
+  assert.deepEqual(ruleIds('src/features/demo/entrypoints/procedures/signup.ts', `import type { os } from '../../feature';`), []);
+  // Another feature's feature.ts is not this rule's business (cross-feature imports go through handles).
+  assert.deepEqual(ruleIds(USECASE, `import type { Deps } from '../other-feature';`), []);
 });
 
 test('tests may wire infra directly, so they are ignored', () => {

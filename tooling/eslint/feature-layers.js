@@ -25,6 +25,10 @@
  * - `usecases/` makes no RUNTIME import of infra, database, drizzle, oRPC-server
  *   or app-specific client modules (`arki-feature-layers/usecase-runtime-imports`).
  *   `import type` is fine. Dependencies reach a usecase through the feature graph.
+ * - `usecases/` and `entrypoints/` make no RUNTIME import of their own
+ *   `feature.ts` (`arki-feature-layers/feature-runtime-imports`): `feature.ts`
+ *   imports them, so a value import back is a module cycle that dies with a
+ *   TDZ error at import. `import type { Deps }` / `import type { os }` is fine.
  *
  * The rules only look at layer folders and app-level files, so router-first
  * features (no layer folders yet) are not flagged while they wait to convert.
@@ -140,7 +144,30 @@ const usecaseRuntimeImports = {
   },
 };
 
-const plugin = { rules: { 'usecase-runtime-imports': usecaseRuntimeImports } };
+/**
+ * The same check with its own name and message: a usecase or a procedure takes
+ * `Deps` / `os` from its `feature.ts` as a type. One file per usecase and per
+ * procedure means many files that could slip in a value import by accident.
+ *
+ * @type {import('eslint').Rule.RuleModule}
+ */
+const featureRuntimeImports = {
+  meta: {
+    ...usecaseRuntimeImports.meta,
+    messages: {
+      runtime:
+        'feature.ts imports this file, so a runtime import of {{source}} back is a module cycle (TDZ at import). Use `import type { Deps }` / `import type { os }`.',
+    },
+  },
+  create: usecaseRuntimeImports.create,
+};
+
+// The feature's own chain file, from any depth inside usecases/ or entrypoints/.
+const OWN_FEATURE = '^(\\.\\./)+feature(\\.[jt]s)?$';
+
+const plugin = {
+  rules: { 'usecase-runtime-imports': usecaseRuntimeImports, 'feature-runtime-imports': featureRuntimeImports },
+};
 
 const TESTS = ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**'];
 
@@ -188,6 +215,13 @@ export function featureLayers({ src = 'src', legacy = [], clients = [] } = {}) {
         ...rule([SERVER, CONTRACT, USECASES_INWARD]),
         'arki-feature-layers/usecase-runtime-imports': ['error', { patterns: [...USECASE_BANNED, ...clients] }],
       },
+    },
+    {
+      name: 'arki/feature-layers/no-feature-back-import',
+      files: [`${features}/usecases/**/*.ts`, `${features}/entrypoints/**/*.ts`],
+      ignores: TESTS,
+      plugins: { 'arki-feature-layers': plugin },
+      rules: { 'arki-feature-layers/feature-runtime-imports': ['error', { patterns: [OWN_FEATURE] }] },
     },
     {
       name: 'arki/feature-layers/infra-entrypoints',
