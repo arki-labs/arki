@@ -1,8 +1,8 @@
 /** `@arki/lock/testing`: a manual scheduler, the store conformance suite, chaos hooks and the replica property. */
 import { describe, it } from 'vitest';
 
-import { ContractSkip, storeContract } from './contract.js';
 import type { ContractCase, ContractOptions, MakeStore } from './contract.js';
+import { ContractSkip, storeContract } from './contract.js';
 
 export { memoryStore } from '../memory.js';
 export type { MemoryEntry, MemoryGuarantees, MemoryStore } from '../memory.js';
@@ -19,7 +19,7 @@ export type { ReplicaOptions } from './replicas.js';
 export function describeCases(name: string, cases: readonly ContractCase[]): void {
   describe(name, () => {
     for (const contractCase of cases) {
-      it(contractCase.name, async (context) => {
+      it(contractCase.name, async context => {
         try {
           await contractCase.run();
         } catch (error) {

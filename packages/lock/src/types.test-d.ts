@@ -1,7 +1,8 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
+import type { FenceOf, Guarantees, Guard, LockContext, LockRun, Locks, Store } from './index.js';
+import type { pgSession, pgTransaction } from './pg/index.js';
 import { createLocks, LockError } from './index.js';
-import type { FenceOf, Guard, Guarantees, LockContext, LockRun, Locks, Store } from './index.js';
 
 type Base = {
   readonly kind: 'hold';
@@ -53,7 +54,7 @@ describe('createLocks', () => {
       namespace: 'app',
       storeTimeout: '10s',
       logKeys: true,
-      onReleaseError: (error) => {
+      onReleaseError: error => {
         expectTypeOf(error).toEqualTypeOf<LockError>();
       },
       scheduler: { now: () => 0, setTimeout: () => ({ id: 0 }), clearTimeout: noop },
@@ -212,7 +213,9 @@ describe('callback context and guard', () => {
 describe('LockError', () => {
   it('carries the review fields', () => {
     const error = new LockError({ code: 'lost', message: 'x', remediation: 'y', detectedBy: 'deadline' });
-    expectTypeOf(error.code).toEqualTypeOf<'held' | 'aborted' | 'lost' | 'store' | 'release' | 'config' | 'unsupported'>();
+    expectTypeOf(error.code).toEqualTypeOf<
+      'held' | 'aborted' | 'lost' | 'store' | 'release' | 'config' | 'unsupported'
+    >();
     expectTypeOf(error.detectedBy).toEqualTypeOf<'renewal' | 'deadline' | 'connection' | undefined>();
     expectTypeOf(error.method).toEqualTypeOf<
       'acquire' | 'release' | 'extend' | 'waitFor' | 'permits' | 'shared' | undefined
@@ -230,5 +233,22 @@ describe('lease stores carry their ttl', () => {
     expectTypeOf<ClusterHold>().not.toHaveProperty('ttlMs');
     // A lease store without a ttl is not a lease store: the manager could not know how long its lease lasts.
     expectTypeOf<Omit<ClusterLease, 'ttlMs'>>().not.toExtend<ClusterLease>();
+  });
+});
+
+describe('guards of transaction-owned locks', () => {
+  type TxStore = ReturnType<typeof pgTransaction>;
+  type SessionStore = ReturnType<typeof pgSession>;
+
+  it("pgTransaction guards have no release or asyncDispose, because the caller's transaction ends the lock", () => {
+    expectTypeOf<Guard<TxStore>>().not.toHaveProperty('release');
+    expectTypeOf<Guard<TxStore>>().not.toHaveProperty(Symbol.asyncDispose);
+    expectTypeOf<Guard<TxStore>>().toHaveProperty('signal');
+  });
+
+  it('pgSession guards keep release and asyncDispose', () => {
+    expectTypeOf<Guard<SessionStore>>().toHaveProperty('release');
+    expectTypeOf<Guard<SessionStore>['release']>().toEqualTypeOf<() => Promise<void>>();
+    expectTypeOf<Guard<SessionStore>>().toHaveProperty(Symbol.asyncDispose);
   });
 });

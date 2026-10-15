@@ -69,7 +69,7 @@ export function memoryStore(): MemoryStore {
     },
     waitFor(key: Key, signal: AbortSignal): Promise<void> {
       if (!held.has(key.full) || signal.aborted) return Promise.resolve();
-      return new Promise<void>((resolve) => {
+      return new Promise<void>(resolve => {
         const queue = waiters.get(key.full) ?? [];
         const wake = (): void => {
           signal.removeEventListener('abort', onAbort);

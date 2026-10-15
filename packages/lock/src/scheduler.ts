@@ -38,14 +38,17 @@ function createDefaultScheduler(): Scheduler {
       const id = nextId++;
       // A longer delay runs as a chain of timers under one handle, so it never fires early.
       const arm = (left: number): void => {
-        const timer = setTimeout(() => {
-          if (left > MAX_TIMER_MS) {
-            arm(left - MAX_TIMER_MS);
-            return;
-          }
-          pending.delete(id);
-          void cb();
-        }, Math.min(left, MAX_TIMER_MS));
+        const timer = setTimeout(
+          () => {
+            if (left > MAX_TIMER_MS) {
+              arm(left - MAX_TIMER_MS);
+              return;
+            }
+            pending.delete(id);
+            void cb();
+          },
+          Math.min(left, MAX_TIMER_MS),
+        );
         if (opts?.ref !== true) unref(timer);
         pending.set(id, timer);
       };

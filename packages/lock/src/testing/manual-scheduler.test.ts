@@ -29,7 +29,7 @@ describe('manualScheduler', () => {
     const seen: string[] = [];
     clock.setTimeout(async () => {
       seen.push('renew:start');
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 10));
       seen.push('renew:end');
     }, 1);
     clock.setTimeout(() => seen.push('next'), 2);
@@ -64,13 +64,13 @@ describe('manualScheduler', () => {
     const gate: { open?: () => void } = {};
     clock.setTimeout(
       () =>
-        new Promise<void>((resolve) => {
+        new Promise<void>(resolve => {
           gate.open = resolve;
         }),
       1,
     );
     const advancing = clock.advance(10);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await new Promise(resolve => setTimeout(resolve, 5));
     expect(clock.now()).toBe(1);
     gate.open?.();
     await advancing;

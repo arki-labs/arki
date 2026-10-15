@@ -2,12 +2,12 @@
  * Waiting helpers: duration parsing, backoff, abort racing and the store-call
  * timeout. Portable: only `AbortSignal` and the `Scheduler` seam.
  */
-import { LockError } from './errors.js';
 import type { LockMethod } from './errors.js';
-import { defaultScheduler } from './scheduler.js';
 import type { Scheduler } from './scheduler.js';
-import { durationSchema } from './types.js';
 import type { Duration } from './types.js';
+import { LockError } from './errors.js';
+import { defaultScheduler } from './scheduler.js';
+import { durationSchema } from './types.js';
 
 function noop(): void {
   // A late result is the caller's to handle; this only keeps it from being reported as unhandled.
@@ -72,7 +72,7 @@ export function raceSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise
     };
     signal.addEventListener('abort', onAbort, { once: true });
     promise.then(
-      (value) => {
+      value => {
         signal.removeEventListener('abort', onAbort);
         resolve(value);
       },
@@ -116,7 +116,7 @@ export function withStoreTimeout<T>(
       { ref: true },
     );
     promise.then(
-      (value) => {
+      value => {
         scheduler.clearTimeout(timer);
         resolve(value);
       },

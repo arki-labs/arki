@@ -17,7 +17,7 @@ describe('memoryStore', () => {
     const locks = createLocks({ store: memoryStore(), namespace: 't' });
     const holder = await locks.mutex('job').acquire();
     const order: string[] = [];
-    const waiters = ['a', 'b', 'c'].map(async (name) => {
+    const waiters = ['a', 'b', 'c'].map(async name => {
       await locks.mutex('job').run(
         () => {
           order.push(name);
@@ -26,7 +26,7 @@ describe('memoryStore', () => {
       );
     });
     // Let all three reach their wait before the holder lets go.
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise(resolve => setTimeout(resolve, 20));
     await holder.release();
     await Promise.all(waiters);
     expect(order).toEqual(['a', 'b', 'c']);

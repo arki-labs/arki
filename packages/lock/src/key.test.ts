@@ -20,9 +20,30 @@ describe('fnv1a64', () => {
 // two replicas on different versions would stop excluding each other.
 const VECTORS = [
   { ns: 'a', name: 'b', full: '1:1:a:1:b', digest: 0x27_E5_FB_35_A8_20_2E_BDn, hi: 669_383_477, lo: -1_474_285_891 },
-  { ns: 'a:b', name: 'c', full: '1:3:a:b:1:c', digest: 0x74_00_48_A6_95_6B_CE_D8n, hi: 1_946_175_654, lo: -1_788_096_808 },
-  { ns: 'a', name: 'b:c', full: '1:1:a:3:b:c', digest: 0x97_E2_6A_E3_CF_85_E3_4Cn, hi: -1_746_769_181, lo: -813_309_108 },
-  { ns: 'avocabo', name: 'send-digest', full: '1:7:avocabo:11:send-digest', digest: 0x2F_5B_C3_07_F1_7B_9F_09n, hi: 794_542_855, lo: -243_556_599 },
+  {
+    ns: 'a:b',
+    name: 'c',
+    full: '1:3:a:b:1:c',
+    digest: 0x74_00_48_A6_95_6B_CE_D8n,
+    hi: 1_946_175_654,
+    lo: -1_788_096_808,
+  },
+  {
+    ns: 'a',
+    name: 'b:c',
+    full: '1:1:a:3:b:c',
+    digest: 0x97_E2_6A_E3_CF_85_E3_4Cn,
+    hi: -1_746_769_181,
+    lo: -813_309_108,
+  },
+  {
+    ns: 'avocabo',
+    name: 'send-digest',
+    full: '1:7:avocabo:11:send-digest',
+    digest: 0x2F_5B_C3_07_F1_7B_9F_09n,
+    hi: 794_542_855,
+    lo: -243_556_599,
+  },
   {
     ns: 'kapodopera',
     name: 'tracking:usr_1:cnt_2',
@@ -31,10 +52,38 @@ const VECTORS = [
     hi: 1_704_429_518,
     lo: 739_638_258,
   },
-  { ns: 'ns', name: 'héllo wörld', full: '1:2:ns:13:héllo wörld', digest: 0xEA_AC_57_EF_15_1C_C8_2En, hi: -357_804_049, lo: 354_207_790 },
-  { ns: 'ns', name: '日本語🔒', full: '1:2:ns:13:日本語🔒', digest: 0x3D_F2_65_4D_8D_0E_A9_F0n, hi: 1_039_295_821, lo: -1_928_418_832 },
-  { ns: 'xxx', name: 'y'.repeat(512), full: `1:3:xxx:512:${'y'.repeat(512)}`, digest: 0x6D_F0_90_5B_E9_4F_42_DFn, hi: 1_844_482_139, lo: -380_681_505 },
-  { ns: 'a'.repeat(512), name: 'b', full: `1:512:${'a'.repeat(512)}:1:b`, digest: 0xC1_28_D6_EF_64_44_53_C5n, hi: -1_054_288_145, lo: 1_682_199_493 },
+  {
+    ns: 'ns',
+    name: 'héllo wörld',
+    full: '1:2:ns:13:héllo wörld',
+    digest: 0xEA_AC_57_EF_15_1C_C8_2En,
+    hi: -357_804_049,
+    lo: 354_207_790,
+  },
+  {
+    ns: 'ns',
+    name: '日本語🔒',
+    full: '1:2:ns:13:日本語🔒',
+    digest: 0x3D_F2_65_4D_8D_0E_A9_F0n,
+    hi: 1_039_295_821,
+    lo: -1_928_418_832,
+  },
+  {
+    ns: 'xxx',
+    name: 'y'.repeat(512),
+    full: `1:3:xxx:512:${'y'.repeat(512)}`,
+    digest: 0x6D_F0_90_5B_E9_4F_42_DFn,
+    hi: 1_844_482_139,
+    lo: -380_681_505,
+  },
+  {
+    ns: 'a'.repeat(512),
+    name: 'b',
+    full: `1:512:${'a'.repeat(512)}:1:b`,
+    digest: 0xC1_28_D6_EF_64_44_53_C5n,
+    hi: -1_054_288_145,
+    lo: 1_682_199_493,
+  },
 ] as const;
 
 describe('createKey vectors', () => {

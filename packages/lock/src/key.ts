@@ -4,9 +4,9 @@
  * (`('a:b', 'c')` vs `('a', 'b:c')`). The digest is a pure-TS 64-bit FNV-1a, so
  * it runs on every runtime, Hermes included.
  */
+import type { Key } from './types.js';
 import { LockError } from './errors.js';
 import { keyNameSchema } from './types.js';
-import type { Key } from './types.js';
 
 const ENCODING_VERSION = 1;
 const encoder = new TextEncoder();
@@ -16,7 +16,7 @@ function checkPart(label: 'namespace' | 'name', value: string): void {
   if (!parsed.success) {
     throw new LockError({
       code: 'config',
-      message: `lock ${label} ${parsed.error.issues.map((issue) => issue.message).join(', ')}`,
+      message: `lock ${label} ${parsed.error.issues.map(issue => issue.message).join(', ')}`,
       remediation: `Pass a non-empty ${label} of at most 512 UTF-8 bytes.`,
     });
   }

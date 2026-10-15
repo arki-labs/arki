@@ -8,6 +8,12 @@ import { replicaCases } from './replicas.js';
 describeStoreContract('memory', () => memoryStore());
 
 describe('memory chaos and replicas', () => {
-  describeCases('chaos hooks (none supplied: all skip with a reason)', chaos(() => memoryStore(), {}));
-  describeCases('replicas', replicaCases(() => memoryStore()));
+  describeCases(
+    'chaos hooks (none supplied: all skip with a reason)',
+    chaos(() => memoryStore(), {}),
+  );
+  describeCases(
+    'replicas',
+    replicaCases(() => memoryStore()),
+  );
 });

@@ -15,7 +15,7 @@ if (!attempt.ran || attempt.value !== 'ok') {
 const order = [];
 await Promise.all([
   locks.mutex('smoke:run').run(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await new Promise(resolve => setTimeout(resolve, 5));
     order.push('first');
   }),
   locks.mutex('smoke:run').run(async () => {

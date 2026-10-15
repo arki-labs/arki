@@ -11,13 +11,23 @@
  */
 import { getLogger } from '@arki/log';
 
-import { LockError } from './errors.js';
 import type { LockMethod } from './errors.js';
-import { defaultScheduler } from './scheduler.js';
 import type { Scheduler, SchedulerHandle } from './scheduler.js';
+import type {
+  AcquireRequest,
+  CreateLocksOptions,
+  Duration,
+  Grant,
+  Key,
+  LockCounters,
+  LockRun,
+  Locks,
+  Store,
+} from './types.js';
+import { LockError } from './errors.js';
 import { createKey } from './key.js';
+import { defaultScheduler } from './scheduler.js';
 import { storeTimeoutSchema } from './types.js';
-import type { AcquireRequest, CreateLocksOptions, Duration, Grant, Key, Locks, LockCounters, LockRun, Store } from './types.js';
 import { BACKOFF_MAX_MS, backoffDelay, parseDuration, raceSignal, withStoreTimeout } from './wait.js';
 
 const log = getLogger('arki:lock');
@@ -141,7 +151,7 @@ function heldError(): LockError {
 // ---------------------------------------------------------------------------
 
 export function createLocks<S extends Store>(options: CreateLocksOptions<S>): Locks<S>;
-export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
+export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Locks<Store> {
   const { store, namespace, onReleaseError } = options;
   const scheduler: Scheduler = options.scheduler ?? defaultScheduler;
   const storeTimeoutMs = parseDuration(options.storeTimeout ?? DEFAULT_STORE_TIMEOUT);
@@ -196,7 +206,11 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
   type Attempt = { readonly grant: Grant; readonly sentAt: number };
 
   /** One store attempt: fresh owner token, bounded, and a late grant is handed back. */
-  async function attemptOnce(key: Key, waitMs: number | undefined, signal: AbortSignal | undefined): Promise<Attempt | undefined> {
+  async function attemptOnce(
+    key: Key,
+    waitMs: number | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<Attempt | undefined> {
     if (signal !== undefined) await raceSignal(Promise.resolve(), signal);
     const request: AcquireRequest = {
       token: nextToken(),
@@ -208,16 +222,31 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
     const raw = (async () => store.acquire(key, request))();
     const bound = storeTimeoutMs + (store.guarantees.wait === 'native' && waitMs !== undefined ? waitMs : 0);
     let grant: Grant | undefined;
-    try {
-      const timed = withStoreTimeout(raw, bound, 'acquire', scheduler);
-      grant = await (signal === undefined ? timed : raceSignal(timed, signal));
-    } catch (error) {
-      // Attached only once we have given up, so it also catches a grant that
-      // already landed in the same instant: nobody else will release it.
-      void raw.then((late) => {
-        if (late !== undefined) void giveBack(late, 'late grant');
-      }, noop);
-      throw asStoreError(error, 'acquire');
+    if (store.guarantees.releasedBy === 'transaction') {
+      // The store runs on the caller's own transaction. Giving up early would hand that
+      // transaction back while the store still has a statement on it, so the caller's next
+      // statement would land in the middle of the store's wait. Wait for the store instead.
+      try {
+        grant = await raw;
+      } catch (error) {
+        throw asStoreError(error, 'acquire');
+      }
+      if (signal?.aborted === true) {
+        if (grant !== undefined) await giveBack(grant, 'aborted');
+        await raceSignal(Promise.resolve(), signal);
+      }
+    } else {
+      try {
+        const timed = withStoreTimeout(raw, bound, 'acquire', scheduler);
+        grant = await (signal === undefined ? timed : raceSignal(timed, signal));
+      } catch (error) {
+        // Attached only once we have given up, so it also catches a grant that
+        // already landed in the same instant: nobody else will release it.
+        void raw.then(late => {
+          if (late !== undefined) void giveBack(late, 'late grant');
+        }, noop);
+        throw asStoreError(error, 'acquire');
+      }
     }
     if (grant === undefined) return undefined;
     if (leased && scheduler.now() - sentAt >= leaseMs) {
@@ -237,10 +266,10 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
     };
     signal?.addEventListener('abort', onAbort, { once: true });
     let timer: SchedulerHandle | undefined;
-    const elapsed = new Promise<void>((resolve) => {
+    const elapsed = new Promise<void>(resolve => {
       timer = scheduler.setTimeout(resolve, ms, { ref: true });
     });
-    const woken = new Promise<void>((resolve) => {
+    const woken = new Promise<void>(resolve => {
       wakeup.signal.addEventListener('abort', () => {
         resolve();
       });
@@ -275,7 +304,9 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
     const holdMs = opts.holdAtLeast === undefined ? 0 : parseDuration(opts.holdAtLeast);
     const acquiredAt = scheduler.now();
     const extendFn =
-      leased && store.extend !== undefined ? (g: Grant, ttlMs: number) => store.extend?.(g, ttlMs) ?? Promise.resolve(false) : undefined;
+      leased && store.extend !== undefined
+        ? (g: Grant, ttlMs: number) => store.extend?.(g, ttlMs) ?? Promise.resolve(false)
+        : undefined;
     let deadline = leased ? first.sentAt + leaseMs : Number.POSITIVE_INFINITY;
     const firstDeadline = deadline;
     let ended: 'released' | 'lost' | undefined;
@@ -292,15 +323,21 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
       deadlineTimer = undefined;
     };
 
-    const lose = (detectedBy: 'renewal' | 'deadline'): void => {
+    const lose = (detectedBy: 'renewal' | 'deadline' | 'connection', cause?: unknown): void => {
       if (ended !== undefined) return;
       ended = 'lost';
       stopTimers();
       lostError = new LockError({
         code: 'lost',
-        message: detectedBy === 'renewal' ? 'the store no longer recognises this lock' : 'the lease deadline passed without a confirmed renewal',
+        message:
+          detectedBy === 'renewal'
+            ? 'the store no longer recognises this lock'
+            : detectedBy === 'connection'
+              ? 'the connection holding this lock ended'
+              : 'the lease deadline passed without a confirmed renewal',
         remediation: 'Stop the work. The callback may have had side effects; nothing retries it.',
         detectedBy,
+        ...(cause === undefined ? {} : { cause }),
       });
       log.error('lock {key} lost ({detectedBy})', { key: keyField(key), detectedBy });
       controller.abort(lostError);
@@ -368,7 +405,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
     const doRelease = async (): Promise<void> => {
       const wait = Math.max(0, holdMs - (scheduler.now() - acquiredAt));
       if (wait > 0) {
-        await new Promise<void>((resolve) => {
+        await new Promise<void>(resolve => {
           scheduler.setTimeout(resolve, wait, { ref: true });
         });
       }
@@ -422,8 +459,11 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
         : {
             extend: async (): Promise<void> => {
               if (ended === 'lost' && lostError !== undefined) throw lostError;
-              if (renewing === undefined) {await renew();}
-              else {await renewing;}
+              if (renewing === undefined) {
+                await renew();
+              } else {
+                await renewing;
+              }
               if (ended === 'lost' && lostError !== undefined) throw lostError;
             },
           }),
@@ -431,6 +471,9 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
       [Symbol.asyncDispose]: release,
     };
 
+    void grant.lost?.then(reason => {
+      lose('connection', reason);
+    });
     log.debug('acquired {key}', { key: keyField(key) });
     if (leased) {
       armDeadline();
@@ -457,7 +500,8 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
     const limit = waitMs === undefined ? Number.POSITIVE_INFINITY : scheduler.now() + waitMs;
     for (let attempt = 0; ; attempt++) {
       const remaining = Math.max(0, limit - scheduler.now());
-      const nativeWait = mode === 'wait' && store.guarantees.wait === 'native' && Number.isFinite(remaining) ? remaining : undefined;
+      const nativeWait =
+        mode === 'wait' && store.guarantees.wait === 'native' && Number.isFinite(remaining) ? remaining : undefined;
       const got = await gated(key, () => attemptOnce(key, nativeWait, opts.signal));
       if (got !== undefined) {
         const held = makeHeld(key, got, opts);
@@ -473,7 +517,11 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
     }
   }
 
-  async function runHeld<T>(held: Held, fn: (ctx: ContextImpl) => T | Promise<T>, opts: CallOptions): Promise<Awaited<T>> {
+  async function runHeld<T>(
+    held: Held,
+    fn: (ctx: ContextImpl) => T | Promise<T>,
+    opts: CallOptions,
+  ): Promise<Awaited<T>> {
     const { guard } = held;
     let settled: Settled<Awaited<T>>;
     try {
@@ -489,14 +537,20 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl {
     }
     const lost = held.lostError();
     if (!settled.ok) {
-      addSuppressed(settled.error, [lost, releaseError].filter((e) => e !== undefined));
+      addSuppressed(
+        settled.error,
+        [lost, releaseError].filter(e => e !== undefined),
+      );
       throw settled.error;
     }
     if (lost !== undefined && (opts.onLost ?? 'abort') === 'abort') throw lost;
     if (releaseError !== undefined) {
       // Decision 4: the callback succeeded, so the value is returned. The failure is reported, not thrown.
       counts.releaseErrors += 1;
-      log.error('release of {key} failed after a successful callback: {error}', { key: keyField(guard.key), error: releaseError });
+      log.error('release of {key} failed after a successful callback: {error}', {
+        key: keyField(guard.key),
+        error: releaseError,
+      });
       try {
         onReleaseError?.(releaseError);
       } catch (error) {

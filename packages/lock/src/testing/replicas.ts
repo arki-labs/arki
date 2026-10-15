@@ -5,12 +5,12 @@
  */
 import * as fc from 'fast-check';
 
-import { createLocks } from '../locks.js';
 import type { Guard, Store } from '../types.js';
-import { check } from './contract.js';
 import type { ContractCase, MakeStore } from './contract.js';
-import { manualScheduler } from './manual-scheduler.js';
 import type { ManualScheduler } from './manual-scheduler.js';
+import { createLocks } from '../locks.js';
+import { check } from './contract.js';
+import { manualScheduler } from './manual-scheduler.js';
 
 export type ReplicaOptions = {
   /** The clock the store was built with. Default: a fresh one (right for stores with no clock of their own). */
@@ -41,7 +41,7 @@ export function replicaCases(makeStore: MakeStore, options: ReplicaOptions = {})
       name: 'property: three replicas never hold one key at the same time',
       async run() {
         await fc.assert(
-          fc.asyncProperty(fc.array(stepArbitrary, { maxLength: 40 }), async (steps) => {
+          fc.asyncProperty(fc.array(stepArbitrary, { maxLength: 40 }), async steps => {
             const clock = options.scheduler ?? manualScheduler();
             const store: Store = await makeStore();
             try {
@@ -73,7 +73,7 @@ async function runSteps(store: Store, clock: ManualScheduler, steps: readonly St
       await clock.advance(step.ms);
     }
     for (const [key, name] of KEYS.entries()) {
-      const holders = live.filter((entry) => entry.key === key && entry.guard.held).length;
+      const holders = live.filter(entry => entry.key === key && entry.guard.held).length;
       check(holders <= 1, `${holders} replicas hold key ${name} at once`);
     }
   }

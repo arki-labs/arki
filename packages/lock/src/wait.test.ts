@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { Scheduler, SchedulerHandle } from './scheduler.js';
 import { LockError } from './errors.js';
 import { defaultScheduler } from './scheduler.js';
-import type { Scheduler, SchedulerHandle } from './scheduler.js';
 import { backoffDelay, parseDuration, raceSignal, withStoreTimeout } from './wait.js';
 
 const TOP = () => 0.999_999;
@@ -24,7 +24,7 @@ describe('parseDuration', () => {
     expect(parseDuration(input)).toBe(ms);
   });
 
-  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, '-1s', '1d', '1w', 's', '', '1 s'])('rejects %j', (input) => {
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, '-1s', '1d', '1w', 's', '', '1 s'])('rejects %j', input => {
     // Runtime input is untrusted; the type already forbids most of these.
     // @ts-expect-error not a Duration
     expect(() => parseDuration(input)).toThrow(LockError);
@@ -90,7 +90,13 @@ function stepScheduler() {
       timers.delete(handle.id);
     },
   };
-  return { scheduler, timers, fireAll: () => { for (const cb of timers.values()) void cb() } };
+  return {
+    scheduler,
+    timers,
+    fireAll: () => {
+      for (const cb of timers.values()) void cb();
+    },
+  };
 }
 
 describe('withStoreTimeout', () => {
@@ -123,7 +129,7 @@ describe('withStoreTimeout', () => {
   it('lets the caller see a late settlement and does not leak a late rejection', async () => {
     const { scheduler, fireAll } = stepScheduler();
     let settle: (value: string) => void = noop;
-    const late = new Promise<string>((resolve) => {
+    const late = new Promise<string>(resolve => {
       settle = resolve;
     });
     const pending = withStoreTimeout(late, 5, 'acquire', scheduler);
@@ -147,7 +153,7 @@ describe('defaultScheduler', () => {
     defaultScheduler.setTimeout(() => fired.push('kept'), 5, { ref: true });
     const cleared = defaultScheduler.setTimeout(() => fired.push('cleared'), 5);
     defaultScheduler.clearTimeout(cleared);
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await new Promise(resolve => setTimeout(resolve, 30));
     expect(fired).toEqual(['kept']);
     expect(defaultScheduler.now()).toBeGreaterThanOrEqual(before);
   });

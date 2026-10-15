@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { LockError } from './errors.js';
-import { createLocks, MIN_LEASE_TTL_MS } from './locks.js';
 import type { Scheduler } from './scheduler.js';
 import type { AcquireRequest, CreateLocks, Duration, Grant, Guarantees, Key, ReleaseOutcome, Store } from './types.js';
+import { LockError } from './errors.js';
+import { createLocks, MIN_LEASE_TTL_MS } from './locks.js';
 
 // The public type must accept the overloaded implementation.
 export const publicSignature: CreateLocks = createLocks;
@@ -163,7 +163,10 @@ function scriptedStore(guarantees: Guarantees, ttlMs = 30_000): ScriptedStore<Gu
   return { store, calls, script, maxInFlight: () => maxInFlight };
 }
 
-function setup<G extends Guarantees>(guarantees: G, extra: { ttlMs?: number; storeTimeout?: Duration; onReleaseError?: (e: LockError) => void } = {}) {
+function setup<G extends Guarantees>(
+  guarantees: G,
+  extra: { ttlMs?: number; storeTimeout?: Duration; onReleaseError?: (e: LockError) => void } = {},
+) {
   const clock = manualScheduler();
   const fake = scriptedStore(guarantees, extra.ttlMs);
   const locks = createLocks({
@@ -279,7 +282,7 @@ describe.each(verbs)('$name', ({ call, waits }) => {
     if (sent === undefined) throw new Error('the attempt was never sent');
     slow.resolve({ key: { namespace: 'test', name: 'k', full: 'x' }, token: sent.token, fence: 1n });
     await flush();
-    expect(t.calls.release.map((grant) => grant.token)).toEqual([sent.token]);
+    expect(t.calls.release.map(grant => grant.token)).toEqual([sent.token]);
   });
 
   it('hands back a grant that lands in the same instant the caller aborts, because a grant nobody owns blocks every other replica', async () => {
@@ -300,7 +303,7 @@ describe.each(verbs)('$name', ({ call, waits }) => {
       await pending;
       await flush();
       // Ran or aborted, the store must end with this token released.
-      expect({ ticks, released: t.calls.release.map((grant) => grant.token) }).toEqual({ ticks, released: [sent.token] });
+      expect({ ticks, released: t.calls.release.map(grant => grant.token) }).toEqual({ ticks, released: [sent.token] });
     }
   });
 
@@ -340,7 +343,7 @@ describe.each(verbs)('$name', ({ call, waits }) => {
       const pending = call(t.locks.mutex('k'), { wait: '10s' });
       await t.clock.advance(2000);
       expect(await pending).toBe('ran');
-      expect(new Set(t.calls.acquire.map((req) => req.token)).size).toBe(3);
+      expect(new Set(t.calls.acquire.map(req => req.token)).size).toBe(3);
     });
   }
 });
@@ -349,8 +352,12 @@ describe.each(verbs)('$name', ({ call, waits }) => {
 // Lost locks, deadlines, renewal (lease store)
 // ---------------------------------------------------------------------------
 
-describe.each(['tryRun', 'run'] as const)('%s on a lease store', (verb) => {
-  const start = <T>(t: ReturnType<typeof setup<typeof leaseCluster>>, fn: (ctx: { signal: AbortSignal }) => Promise<T>, onLost?: 'abort' | 'ignore') =>
+describe.each(['tryRun', 'run'] as const)('%s on a lease store', verb => {
+  const start = <T>(
+    t: ReturnType<typeof setup<typeof leaseCluster>>,
+    fn: (ctx: { signal: AbortSignal }) => Promise<T>,
+    onLost?: 'abort' | 'ignore',
+  ) =>
     verb === 'tryRun'
       ? t.locks.mutex('k').tryRun(fn, onLost ? { onLost } : {})
       : t.locks.mutex('k').run(fn, { wait: '1s', ...(onLost ? { onLost } : {}) });
@@ -362,7 +369,7 @@ describe.each(['tryRun', 'run'] as const)('%s on a lease store', (verb) => {
     const seen = deferred<AbortSignal>();
     const pending = failure(
       Promise.resolve(
-        start(t, (ctx) => {
+        start(t, ctx => {
           seen.resolve(ctx.signal);
           return work.promise;
         }),
@@ -434,7 +441,7 @@ describe.each(['tryRun', 'run'] as const)('%s on a lease store', (verb) => {
     work.reject(new LockError({ code: 'config', message: 'boom', remediation: 'none' }));
     const error = await pending;
     expect(error.code).toBe('config');
-    expect(error.suppressed?.map((e) => (e instanceof LockError ? e.code : e.message))).toEqual(['lost']);
+    expect(error.suppressed?.map(e => (e instanceof LockError ? e.code : e.message))).toEqual(['lost']);
   });
 });
 
@@ -541,7 +548,7 @@ describe('lease guard', () => {
     };
     expect(await t.locks.mutex('k').tryAcquire()).toBeUndefined();
     const sent = t.calls.acquire[0];
-    expect(t.calls.release.map((grant) => grant.token)).toEqual([sent?.token]);
+    expect(t.calls.release.map(grant => grant.token)).toEqual([sent?.token]);
   });
 
   it('retries a refused late grant within the wait, so one slow round trip does not fail the caller', async () => {
@@ -623,11 +630,12 @@ describe('lease guard', () => {
 describe('release', () => {
   it.each(['tryRun', 'run'] as const)(
     '%s returns the value and calls onReleaseError when release reports unknown, because the work already happened',
-    async (verb) => {
+    async verb => {
       const seen: LockError[] = [];
-      const t = setup(holdProcess, { onReleaseError: (e) => seen.push(e) });
+      const t = setup(holdProcess, { onReleaseError: e => seen.push(e) });
       t.script.release = () => Promise.resolve('unknown');
-      const result = verb === 'tryRun' ? await t.locks.mutex('k').tryRun(() => 42) : await t.locks.mutex('k').run(() => 42);
+      const result =
+        verb === 'tryRun' ? await t.locks.mutex('k').tryRun(() => 42) : await t.locks.mutex('k').run(() => 42);
       expect(verb === 'tryRun' ? result : { ran: true, value: result }).toEqual({ ran: true, value: 42 });
       expect(seen).toHaveLength(1);
       expect(seen[0]).toMatchObject({ code: 'release', method: 'release' });
@@ -637,10 +645,10 @@ describe('release', () => {
 
   it('also returns the value when release throws, with the same reporting', async () => {
     const seen: LockError[] = [];
-    const t = setup(holdProcess, { onReleaseError: (e) => seen.push(e) });
+    const t = setup(holdProcess, { onReleaseError: e => seen.push(e) });
     t.script.release = () => Promise.reject(new Error('gone'));
     expect(await t.locks.mutex('k').run(() => 'v')).toBe('v');
-    expect(seen.map((e) => e.code)).toEqual(['release']);
+    expect(seen.map(e => e.code)).toEqual(['release']);
   });
 
   it('keeps going if onReleaseError itself throws, because a faulty hook must not turn success into failure', async () => {
@@ -691,16 +699,20 @@ describe('release', () => {
     expect(Object.getOwnPropertyDescriptor(boom, 'suppressed')?.value).toHaveLength(1);
   });
 
-  it.each(['tryRun', 'run'] as const)('%s delays the release by holdAtLeast, so a fast job on a skewed clock cannot run twice', async (verb) => {
-    const t = setup(holdProcess);
-    const opts = { holdAtLeast: '5s' } as const;
-    const pending = verb === 'tryRun' ? t.locks.mutex('k').tryRun(() => 1, opts) : t.locks.mutex('k').run(() => 1, opts);
-    await t.clock.advance(4999);
-    expect(t.calls.release).toHaveLength(0);
-    await t.clock.advance(1);
-    await pending;
-    expect(t.calls.release).toHaveLength(1);
-  });
+  it.each(['tryRun', 'run'] as const)(
+    '%s delays the release by holdAtLeast, so a fast job on a skewed clock cannot run twice',
+    async verb => {
+      const t = setup(holdProcess);
+      const opts = { holdAtLeast: '5s' } as const;
+      const pending =
+        verb === 'tryRun' ? t.locks.mutex('k').tryRun(() => 1, opts) : t.locks.mutex('k').run(() => 1, opts);
+      await t.clock.advance(4999);
+      expect(t.calls.release).toHaveLength(0);
+      await t.clock.advance(1);
+      await pending;
+      expect(t.calls.release).toHaveLength(1);
+    },
+  );
 });
 
 describe('native waits', () => {
@@ -713,6 +725,49 @@ describe('native waits', () => {
     await t.clock.advance(1);
     expect(await pending).toMatchObject({ code: 'store', timeoutMs: 6000 });
     expect(t.calls.acquire[0]?.waitMs).toBe(5000);
+  });
+});
+
+describe("a store that runs on the caller's transaction (releasedBy: 'transaction')", () => {
+  const onCallersTx = { ...holdNative, releasedBy: 'transaction' } as const satisfies Guarantees;
+
+  it("an abort waits until the store is done with the caller's connection, then hands back a grant that landed late and rejects aborted", async () => {
+    const t = setup(onCallersTx, { storeTimeout: '1s' });
+    const storeDone = deferred<void>();
+    t.script.acquire = (key, req) => storeDone.promise.then(() => ({ key, token: req.token }));
+    const controller = new AbortController();
+    let ran = false;
+    const pending = failure(
+      t.locks.mutex('k').run(
+        () => {
+          ran = true;
+        },
+        { wait: '5s', signal: controller.signal },
+      ),
+    );
+    await t.clock.advance(0);
+    controller.abort();
+    // Past the abort and past wait + storeTimeout: the caller still does not get its transaction back.
+    await t.clock.advance(10_000);
+    await expect(Promise.race([pending, Promise.resolve('pending')])).resolves.toBe('pending');
+    storeDone.resolve();
+    expect(await pending).toMatchObject({ code: 'aborted' });
+    expect(t.calls.release).toHaveLength(1);
+    expect(t.calls.release[0]?.token).toBe(t.calls.acquire[0]?.token);
+    expect(ran).toBe(false);
+  });
+
+  it('an abort with no grant still rejects aborted once the store has settled, never "busy"', async () => {
+    const t = setup(onCallersTx);
+    const storeDone = deferred<void>();
+    t.script.acquire = () => storeDone.promise.then(busy);
+    const controller = new AbortController();
+    const pending = failure(t.locks.mutex('k').run(() => 1, { wait: '5s', signal: controller.signal }));
+    await t.clock.advance(0);
+    controller.abort();
+    storeDone.resolve();
+    expect(await pending).toMatchObject({ code: 'aborted' });
+    expect(t.calls.release).toHaveLength(0);
   });
 });
 
@@ -758,5 +813,57 @@ describe('createLocks', () => {
     const fake = scriptedStore(holdProcess);
     const locks = createLocks({ store: fake.store, namespace: 't' });
     expect(() => locks.mutex('')).toThrowError(LockError);
+  });
+});
+
+function lossyStore() {
+  const t = setup(holdNative);
+  const lost = deferred<LockError>();
+  t.script.acquire = (key, req) => Promise.resolve({ key, token: req.token, lost: lost.promise });
+  const reason = new LockError({
+    code: 'lost',
+    message: 'connection ended',
+    remediation: 'none',
+    detectedBy: 'connection',
+  });
+  return { t, lost, reason };
+}
+
+describe('a hold store that reports a lost connection through grant.lost', () => {
+  it('aborts the callback signal with detectedBy "connection" and rejects lost, because the lock is gone with the connection', async () => {
+    const { t, lost, reason } = lossyStore();
+    const work = deferred<string>();
+    const seen = deferred<AbortSignal>();
+    const pending = failure(
+      t.locks.mutex('k').run(
+        ctx => {
+          seen.resolve(ctx.signal);
+          return work.promise;
+        },
+        { wait: '1s' },
+      ),
+    );
+    const signal = await seen.promise;
+    expect(signal.aborted).toBe(false);
+    lost.resolve(reason);
+    await flush();
+    expect(signal.aborted).toBe(true);
+    expect(signal.reason).toMatchObject({ code: 'lost', detectedBy: 'connection' });
+    work.resolve('done');
+    expect(await pending).toMatchObject({ code: 'lost', detectedBy: 'connection' });
+    expect(t.calls.release).toHaveLength(0);
+  });
+
+  it("lets the callback's own error win and carries the lost error on suppressed, so a dead connection never masks it (bug 5)", async () => {
+    const { t, lost, reason } = lossyStore();
+    const work = deferred<string>();
+    const pending = failure(t.locks.mutex('k').run(() => work.promise, { wait: '1s' }));
+    await flush();
+    lost.resolve(reason);
+    await flush();
+    work.reject(new LockError({ code: 'config', message: 'boom', remediation: 'none' }));
+    const error = await pending;
+    expect(error.code).toBe('config');
+    expect(error.suppressed?.map(e => (e instanceof LockError ? e.code : e.message))).toEqual(['lost']);
   });
 });

@@ -3,9 +3,9 @@
  * (an adapter implements the ones it can); a hook that is missing, or does not
  * apply to the store, makes its case skip with the reason.
  */
-import { check, defineCase, grab, leaseTtl, requestFor, skip, uniqueKey } from './contract.js';
-import type { ContractCase, ContractOptions, MakeStore } from './contract.js';
 import type { Grant, Store } from '../types.js';
+import type { ContractCase, ContractOptions, MakeStore } from './contract.js';
+import { check, defineCase, grab, leaseTtl, requestFor, skip, uniqueKey } from './contract.js';
 
 export type ChaosHooks = {
   /** Make the holder vanish without releasing, as a crash would. */
@@ -22,7 +22,8 @@ export type ChaosHooks = {
 async function waitOutBound(store: Store, options: ContractOptions): Promise<void> {
   if (store.guarantees.releasedOnCrash === 'immediate') return;
   const ttl = leaseTtl(store, options);
-  if (ttl === undefined || options.advanceTime === undefined) skip('needs `ttl` and `advanceTime` to wait out the lease');
+  if (ttl === undefined || options.advanceTime === undefined)
+    skip('needs `ttl` and `advanceTime` to wait out the lease');
   await options.advanceTime(ttl + 1);
 }
 
@@ -38,19 +39,24 @@ export function chaos(makeStore: MakeStore, hooks: ChaosHooks, options: Contract
       await grab(store, key, options);
     }),
 
-    defineCase('chaos: failing renewals loses the lock and aborts the holder', makeStore, options, async ({ store, locks }) => {
-      const { failRenewals } = hooks;
-      if (failRenewals === undefined) skip('hook failRenewals not supplied');
-      if (store.guarantees.kind !== 'lease') skip('hold store: nothing is renewed');
-      const ttl = leaseTtl(store, options);
-      if (ttl === undefined || options.advanceTime === undefined || options.scheduler === undefined) {
-        skip('needs `ttl`, `advanceTime` and `scheduler` to drive renewals');
-      }
-      const guard = await locks.mutex(uniqueKey('chaos-renew').name).acquire({ wait: '1s' });
-      await failRenewals(store, Number.MAX_SAFE_INTEGER);
-      await options.advanceTime(ttl * 2);
-      check(!guard.held && guard.signal.aborted, 'holder should know the lock is lost');
-    }),
+    defineCase(
+      'chaos: failing renewals loses the lock and aborts the holder',
+      makeStore,
+      options,
+      async ({ store, locks }) => {
+        const { failRenewals } = hooks;
+        if (failRenewals === undefined) skip('hook failRenewals not supplied');
+        if (store.guarantees.kind !== 'lease') skip('hold store: nothing is renewed');
+        const ttl = leaseTtl(store, options);
+        if (ttl === undefined || options.advanceTime === undefined || options.scheduler === undefined) {
+          skip('needs `ttl`, `advanceTime` and `scheduler` to drive renewals');
+        }
+        const guard = await locks.mutex(uniqueKey('chaos-renew').name).acquire({ wait: '1s' });
+        await failRenewals(store, Number.MAX_SAFE_INTEGER);
+        await options.advanceTime(ttl * 2);
+        check(!guard.held && guard.signal.aborted, 'holder should know the lock is lost');
+      },
+    ),
 
     defineCase('chaos: dropping the pinned connection frees the key', makeStore, options, async ({ store }) => {
       const { dropConnection } = hooks;

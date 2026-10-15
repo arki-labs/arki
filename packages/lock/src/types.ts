@@ -25,8 +25,8 @@ const MAX_NAME_BYTES = 512;
 export const keyNameSchema = z
   .string()
   .min(1, 'must not be empty')
-  .refine((value) => !/\p{Cs}/u.test(value), 'must not contain lone surrogates')
-  .refine((value) => new TextEncoder().encode(value).length <= MAX_NAME_BYTES, `must be at most ${MAX_NAME_BYTES} bytes`);
+  .refine(value => !/\p{Cs}/u.test(value), 'must not contain lone surrogates')
+  .refine(value => new TextEncoder().encode(value).length <= MAX_NAME_BYTES, `must be at most ${MAX_NAME_BYTES} bytes`);
 
 /** A semaphore size: a positive integer. */
 export const limitSchema = z.number().int().positive();
@@ -51,9 +51,15 @@ export const guaranteesSchema = z
     permits: z.boolean(),
     fence: z.union([z.enum(['durable', 'best-effort', 'process']), z.literal(false)]),
     releasedOnCrash: z.enum(['immediate', 'after-ttl']),
-    /** Whose clock decides expiry. */
-    clock: z.enum(['store', 'none']),
+    /**
+     * Whose clock decides expiry: `'store'` (the backend's own clock), `'host'` (the
+     * machine's wall clock, shared by every holder on it — a jump forward expires
+     * live locks), or `'none'` (nothing expires on a clock).
+     */
+    clock: z.enum(['store', 'host', 'none']),
     poolerSafe: z.boolean(),
+    /** `'transaction'`: the lock ends with the caller's transaction, so a guard has no `release`. */
+    releasedBy: z.literal('transaction').optional(),
     runtimes: z.array(z.enum(['node', 'bun', 'deno', 'browser', 'hermes'])).readonly(),
   })
   .readonly();
@@ -73,6 +79,8 @@ export const grantSchema = z
     expiresAt: z.number().optional(),
     /** Store-private state, such as a pinned connection. */
     conn: z.unknown().optional(),
+    /** Resolves when the store knows this hold is gone (connection died). Hold stores without renewals use it; never rejects. */
+    lost: z.custom<Promise<LockError>>(value => value instanceof Promise).optional(),
   })
   .readonly();
 export type Grant = z.infer<typeof grantSchema>;
@@ -168,20 +176,19 @@ export type TryOptions = CallOptions & { readonly signal?: AbortSignal };
 /** A wait bound. Optional on process-scope stores; on any other scope `wait` or `signal` is required. */
 type WaitBound<S extends Store> = S['guarantees']['scope'] extends 'process'
   ? { readonly wait?: Duration; readonly signal?: AbortSignal }
-  :
-      | { readonly wait: Duration; readonly signal?: AbortSignal }
-      | { readonly wait?: Duration; readonly signal: AbortSignal };
+  : | { readonly wait: Duration; readonly signal?: AbortSignal }
+    | { readonly wait?: Duration; readonly signal: AbortSignal };
 
 /** Options of the verbs that wait (`run`, `acquire`). */
 export type RunOptions<S extends Store> = CallOptions & WaitBound<S>;
 
 /** `run(fn)` needs no options on a process-scope store; elsewhere they are required. */
-export type RunArgs<S extends Store> = Record<never, never> extends RunOptions<S> ? [opts?: RunOptions<S>] : [opts: RunOptions<S>];
+export type RunArgs<S extends Store> =
+  Record<never, never> extends RunOptions<S> ? [opts?: RunOptions<S>] : [opts: RunOptions<S>];
 
 type IsLease<S extends Store> = S['guarantees']['kind'] extends 'lease' ? true : false;
 
-/** An acquired lock. */
-export type Guard<S extends Store> = {
+type GuardBase<S extends Store> = {
   readonly key: Key;
   /** Aborted when the lock is known lost. */
   readonly signal: AbortSignal;
@@ -192,10 +199,18 @@ export type Guard<S extends Store> = {
   readonly expiresAt: IsLease<S> extends true ? number : undefined;
   /** Lease stores only; `never` on hold stores. */
   readonly extend: IsLease<S> extends true ? () => Promise<void> : never;
+};
+
+/** Absent when the store's lock ends with the caller's transaction (`releasedBy: 'transaction'`). */
+type GuardRelease = {
   /** Idempotent and owner-checked. Rejects with `LockError{code:'release'}` on failure or an `unknown` outcome. */
   release(): Promise<void>;
   [Symbol.asyncDispose](): Promise<void>;
 };
+
+/** An acquired lock. */
+export type Guard<S extends Store> = GuardBase<S> &
+  (S['guarantees']['releasedBy'] extends 'transaction' ? unknown : GuardRelease);
 
 /** The four verbs every lock handle has. */
 export type LockVerbs<S extends Store> = {
@@ -232,7 +247,9 @@ export type Locks<S extends Store> = {
   readonly store: S;
   readonly counters: LockCounters;
   mutex(key: string): MutexHandle<S>;
-} & (S['guarantees']['permits'] extends true ? { semaphore(key: string, config: SemaphoreConfig): SemaphoreHandle<S> } : unknown) &
+} & (S['guarantees']['permits'] extends true
+  ? { semaphore(key: string, config: SemaphoreConfig): SemaphoreHandle<S> }
+  : unknown) &
   (S['guarantees']['shared'] extends true ? { readWrite(key: string): ReadWriteHandle<S> } : unknown);
 
 export type CreateLocksOptions<S extends Store> = {
