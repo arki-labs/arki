@@ -101,6 +101,7 @@ type ReadWriteImpl = { readonly read: HandleImpl; readonly write: HandleImpl };
 
 type LocksImpl = {
   readonly store: Store;
+  readonly namespace: string;
   readonly counters: LockCounters;
   mutex(key: string): HandleImpl;
   semaphore?(key: string, config: SemaphoreConfig): HandleImpl;
@@ -768,6 +769,7 @@ export function createLocks(options: CreateLocksOptions<Store>): LocksImpl | Loc
 
   return {
     store,
+    namespace,
     counters: counts,
     mutex,
     ...(permitOps === undefined ? {} : { semaphore: semaphoreOver(permitOps) }),

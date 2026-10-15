@@ -285,6 +285,8 @@ export type LockCounters = Readonly<Record<(typeof LOCK_COUNTER_NAMES)[number], 
 /** What `createLocks` returns. `semaphore` and `readWrite` exist only when the store supports them. */
 export type Locks<S extends Store> = {
   readonly store: S;
+  /** The namespace every key of this manager lives in. */
+  readonly namespace: string;
   readonly counters: LockCounters;
   mutex(key: string): MutexHandle<S>;
 } & (S['guarantees']['permits'] extends true
