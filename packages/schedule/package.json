@@ -25,6 +25,11 @@
       "import": "./src/runtime.ts",
       "node": "./src/runtime.ts"
     },
+    "./orpc": {
+      "types": "./dist/src/orpc.d.ts",
+      "import": "./src/orpc.ts",
+      "node": "./src/orpc.ts"
+    },
     "./package.json": "./package.json"
   },
   "types": "./dist/src/index.d.ts",
@@ -43,10 +48,18 @@
     "croner": "catalog:"
   },
   "peerDependencies": {
-    "@arki/dot": "workspace:*"
+    "@arki/dot": "workspace:*",
+    "@orpc/contract": "catalog:backend",
+    "@orpc/server": "catalog:backend"
   },
   "peerDependenciesMeta": {
     "@arki/dot": {
+      "optional": true
+    },
+    "@orpc/contract": {
+      "optional": true
+    },
+    "@orpc/server": {
       "optional": true
     }
   },
@@ -57,8 +70,12 @@
     "@arki/queue": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@orpc/contract": "catalog:backend",
+    "@orpc/openapi": "catalog:backend",
+    "@orpc/server": "catalog:backend",
     "@types/node": "catalog:node",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
   }
 }

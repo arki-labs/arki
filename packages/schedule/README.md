@@ -26,7 +26,9 @@ type Ctx = { readonly db: Db };
 const s = initSchedule.context<Ctx>().create();
 
 export const reports = feature('reports', {
-  use: [schedules([s.define({ name: 'daily-report', cron: '0 6 * * *', handler: async ({ db }) => db.reports.build() })])],
+  use: [
+    schedules([s.define({ name: 'daily-report', cron: '0 6 * * *', handler: async ({ db }) => db.reports.build() })]),
+  ],
 });
 
 defineApp('shop')
@@ -168,6 +170,47 @@ if (outcome.status === 'ran') outcome.value; // the type sendDigest() resolves t
 It throws `ARKI_SCHEDULE_E008` when the scheduler does not run a declared
 schedule (pass the same features the app mounts).
 
+### Cron routes over oRPC: `@arki/schedule/orpc`
+
+When an outside clock (Coolify, a cron job) fires schedules over HTTP,
+`@arki/schedule/orpc` serves them as one oRPC contract: `POST /<name>`
+triggers the schedule `<name>`. You write the name and its 200 body schema;
+the method, the path and the dispatch are fixed. What each outcome answers
+is your policy. Needs the optional peers `@orpc/contract` and `@orpc/server`.
+
+```ts
+// server-only
+const cronContract = cronContract({ 'send-digest': digestRunSchema });
+const os = implement(cronContract).$context<CronContext>().use(cronSecret); // your auth
+export const crons = cronRouter(os, cronContract, features, {
+  respond: {}, // required for a cron whose run value is not exactly its body
+  skipped: () => skipped(), // overlap or held lock → the cron's lock-held body (200)
+  failed: (_name, cause) => rethrow(cause), // leave oRPC; your route's 500 boundary answers
+  unavailable: () => fail(503, { error: 'schedule unavailable' }),
+});
+
+// the route
+const handler = new OpenAPIHandler(crons, { customErrorResponseBodyEncoder: cronErrorBody });
+const carry: CronContext['carry'] = {};
+const { matched, response } = await handler.handle(request, {
+  prefix: '/api/cron',
+  context: { headers, schedules, carry },
+});
+if (carry.rethrow) throw carry.rethrow.cause;
+```
+
+What it checks at compile time: every name is a schedule of some feature,
+and every body schema is exactly the type the run puts on the wire (both
+ways), or that cron must say in `respond` how its value maps. On the wire:
+
+- a run's body is the value as produced — `validated()` checks it but keeps
+  the original, so key order is the run's, not the schema's;
+- `fail(status, body)` answers exactly `body`, never oRPC's error envelope;
+- `skipped()` answers `{ "skipped": "lock-held" }`, or the cron's own legacy
+  body (`{ body, skipped: {...} }` in its spec).
+
+No `node:` import, no auth, no logging: it runs on every runtime.
+
 ## In-process schedules
 
 Use these for single-replica processes by default. For multi-replica
@@ -181,9 +224,9 @@ Mark the schedule, mount the queue's durable backend, and pass the
 `DurableSchedules` token to `schedule()`:
 
 ```ts
+import { durableScheduler } from '@arki/queue/dot';
 import { defineSchedule } from '@arki/schedule';
 import { DurableSchedules, schedule } from '@arki/schedule/dot';
-import { durableScheduler } from '@arki/queue/dot';
 
 const nightly = defineSchedule({
   name: 'nightly-billing',
@@ -208,12 +251,12 @@ registration is logged as an error (`schedule durable registration failed`).
 
 Where each mistake is caught:
 
-| Mistake | Caught |
-| --- | --- |
-| `durable: DurableSchedules` with no `durableScheduler()` mounted before it | Type error at `.serve(...)` |
-| `durable` given anything but the `DurableSchedules` token | Type error |
-| A durable name that contains `:` (BullMQ forbids it in queue names) | `ScheduleError` `ARKI_SCHEDULE_E001` from `defineSchedule` |
-| A `durable: true` schedule but no `durable` option on `schedule()` | `ScheduleError` `ARKI_SCHEDULE_E005` at boot, naming the schedule |
+| Mistake                                                                    | Caught                                                            |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `durable: DurableSchedules` with no `durableScheduler()` mounted before it | Type error at `.serve(...)`                                       |
+| `durable` given anything but the `DurableSchedules` token                  | Type error                                                        |
+| A durable name that contains `:` (BullMQ forbids it in queue names)        | `ScheduleError` `ARKI_SCHEDULE_E001` from `defineSchedule`        |
+| A `durable: true` schedule but no `durable` option on `schedule()`         | `ScheduleError` `ARKI_SCHEDULE_E005` at boot, naming the schedule |
 
 ### Without Dot
 
@@ -275,11 +318,11 @@ replica, because the next tick is queued when the current one starts.
 
 Each run reports a `ScheduleRunResult` with one status:
 
-| Status | Meaning |
-| --- | --- |
-| `ran` | The handler finished. `value` holds what it resolved to. |
-| `handler-failed` | The handler threw. `cause` holds the error. Counted in `handlerFailures` and logged as an error. A durable run also marks its BullMQ job failed. |
-| `skipped-overlap` | `overlap: 'skip'` and a run of the same schedule is active in this process. |
-| `skipped-lock` | In process only: another replica holds the lock for this tick. Counted in `lockSkips`. |
-| `lock-failed` | In process only: the lock store threw. `cause` holds the error. Counted in `lockErrors` and logged as an error; the tick is skipped. |
-| `unavailable` | The runtime was already stopped; nothing ran. |
+| Status            | Meaning                                                                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ran`             | The handler finished. `value` holds what it resolved to.                                                                                         |
+| `handler-failed`  | The handler threw. `cause` holds the error. Counted in `handlerFailures` and logged as an error. A durable run also marks its BullMQ job failed. |
+| `skipped-overlap` | `overlap: 'skip'` and a run of the same schedule is active in this process.                                                                      |
+| `skipped-lock`    | In process only: another replica holds the lock for this tick. Counted in `lockSkips`.                                                           |
+| `lock-failed`     | In process only: the lock store threw. `cause` holds the error. Counted in `lockErrors` and logged as an error; the tick is skipped.             |
+| `unavailable`     | The runtime was already stopped; nothing ran.                                                                                                    |
