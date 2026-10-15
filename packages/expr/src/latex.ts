@@ -112,7 +112,7 @@ class LatexPrinter {
         return `\\left(${this.print(node.inner, next)}\\right)`;
       }
       case 'unary': {
-        return `${node.op}${this.operand(node.arg, UNARY, next)}`;
+        return `${node.op}${this.afterOperator(node.arg, UNARY, next)}`;
       }
       case 'factorial': {
         return `${this.operand(node.arg, POSTFIX, next)}!`;
@@ -125,9 +125,9 @@ class LatexPrinter {
         if (op === '^') return this.power(left, right, next);
         if (op === '/') return `\\frac{${this.bare(left, next)}}{${this.bare(right, next)}}`;
         if (op === '+' || op === '-')
-          return `${this.operand(left, SUM, next)} ${op} ${this.operand(right, PRODUCT, next)}`;
+          return `${this.operand(left, SUM, next)} ${op} ${this.afterOperator(right, PRODUCT, next)}`;
         const leftText = this.operand(left, PRODUCT, next);
-        const rightText = this.operand(right, node.implicit ? PRODUCT : UNARY, next);
+        const rightText = node.implicit ? this.operand(right, PRODUCT, next) : this.afterOperator(right, UNARY, next);
         if (!node.implicit) return `${leftText} \\cdot ${rightText}`;
         const first = rightText.codePointAt(0);
         if (isDigitCode(first)) return `${leftText} \\cdot ${rightText}`;
@@ -151,6 +151,11 @@ class LatexPrinter {
 
   private operand(node: Node, min: number, depth: number): string {
     return level(node) >= min ? this.print(node, depth) : `\\left(${this.print(node, depth)}\\right)`;
+  }
+
+  /** An operand right after `+`, `-`, `\\cdot` or a sign: a sign of its own needs parentheses (`x + \\left(-1\\right)`). */
+  private afterOperator(node: Node, min: number, depth: number): string {
+    return node.kind === 'unary' ? `\\left(${this.print(node, depth)}\\right)` : this.operand(node, min, depth);
   }
 
   private power(base: Node, exponent: Node, depth: number): string {

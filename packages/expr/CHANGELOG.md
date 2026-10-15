@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `toLatex` puts a signed operand after `+`, `-`, `\cdot` or another sign in parentheses: `x + -1` is `x + \left(-1\right)`, `--x` is `-\left(-x\right)`.
+
 Complex domain (RFC `2026-10-14-arki-expr` §21 step 4).
 
 - `@arki/expr/complex`: `compile`, `compileEquation`, `evaluate` on `@arki/math/complex`'s `Complex`. Float64, never exact (`f.detailed()` reports `exact: false`). Principal branches (`sqrt(-4) = 2i`, `ln(-1) = πi`, `i^i = e^(-π/2)`); on the real axis every function returns the float domain's value wherever float has one. `i` is a constant (a variable `i` is `name-conflict` in this domain only). `cbrt nthRoot sign ceil floor round fix mod factorial gamma` are `not-in-domain`. `angle: 'deg'` takes and returns real angles only. Scope values: `Complex`, finite numbers, or `{ re, im }`.

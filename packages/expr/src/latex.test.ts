@@ -58,6 +58,16 @@ describe('toLatex (RFC §12, C-26)', () => {
     expect(toLatex(product)).toBe(String.raw`\left(x + x\right) \cdot x`);
   });
 
+  it('puts a signed operand after +, -, · or another sign in parentheses, as math is typeset', () => {
+    expect(latex('x + -1')).toBe(String.raw`x + \left(-1\right)`);
+    expect(latex('x - -1')).toBe(String.raw`x - \left(-1\right)`);
+    expect(latex('x * -1')).toBe(String.raw`x \cdot \left(-1\right)`);
+    expect(latex('--x')).toBe(String.raw`-\left(-x\right)`);
+    // A leading sign and a signed exponent need none.
+    expect(latex('-x + 1')).toBe('-x + 1');
+    expect(latex('2^-x')).toBe('2^{-x}');
+  });
+
   it('bounds the recursion on hand-built trees', () => {
     let node: Node = { kind: 'name', name: 'x', span: { start: 0, end: 1 } };
     for (let index = 0; index < 300; index++) node = { kind: 'group', inner: node, span: { start: 0, end: 1 } };
