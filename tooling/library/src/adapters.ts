@@ -23,6 +23,8 @@ export const ADAPTERS = new Set([
   'containers',
   'msw',
   'connections',
+  'redis',
+  'file',
 ]);
 
 /** True when the export subpath (`./react`, `./comparison/server`) is an adapter entry: its first segment is in {@link ADAPTERS}. */
