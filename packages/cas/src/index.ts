@@ -1,7 +1,8 @@
 /**
  * `@arki/cas`: a bounded computer algebra package on `@arki/expr` (RFC
  * `docs/rfcs/2026-10-15-arki-cas.md`). This entry holds the shared types,
- * errors and `conditionToLatex`; the verbs live in `@arki/cas/polynomial`.
+ * errors and `conditionToLatex`; the verbs live in `@arki/cas/polynomial` and
+ * `@arki/cas/simplify`.
  */
 import { toLatex } from '@arki/expr/latex';
 
@@ -9,6 +10,8 @@ import type { Condition } from './core.js';
 
 export type {
   AbortSignalLike,
+  Assumption,
+  Assumptions,
   CasBudget,
   CasErrorCode,
   CasInput,

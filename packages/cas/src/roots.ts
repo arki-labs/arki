@@ -9,7 +9,7 @@
  *
  * Internal module; re-exported by `@arki/cas/polynomial`.
  */
-import type { Expr } from '@arki/expr';
+import type { Expr, Node } from '@arki/expr';
 import { InvalidArgumentError } from '@arki/math/errors';
 import { Rational } from '@arki/math/rational';
 
@@ -19,7 +19,7 @@ import type { Poly } from './poly.js';
 import type { PolynomialForm } from './polynomial.js';
 import { constantFloat, constantSign } from './constants.js';
 import { Context } from './context.js';
-import { Emitter, exprOf } from './emit.js';
+import { binary, Emitter, exprOf } from './emit.js';
 import {
   add,
   coefficientsIn,
@@ -220,8 +220,14 @@ export function exactRoots(form: PolynomialForm, options: CasOptions = {}): Exac
   const emitter = new Emitter(ctx);
   const sorted = roots.sort((a, b) => (a.real === b.real ? a.order - b.order : a.real ? -1 : 1));
   return {
-    roots: sorted.map(r => ({ value: exprOf(emitter.fractionNode(r.value), ctx), multiplicity: r.multiplicity, real: r.real })),
+    roots: sorted.map(r => ({ value: exprOf(fractionNode(emitter, r.value), ctx), multiplicity: r.multiplicity, real: r.real })),
     numeric,
     exact: numeric.length === 0,
   };
+}
+
+/** Always one fraction, constant denominators included: `(sqrt(5) + 1) / 2`. */
+function fractionNode(emitter: Emitter, r: RatFun): Node {
+  const [num, den] = emitter.fractionParts(r);
+  return constantValue(den)?.eq(1) === true ? emitter.polyNode(num) : binary('/', emitter.polyNode(num), emitter.polyNode(den));
 }

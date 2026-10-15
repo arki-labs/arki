@@ -16,12 +16,12 @@ import { children, parse, print } from '@arki/expr';
 import { Rational } from '@arki/math/rational';
 
 import type { Context, RatFun } from './context.js';
-import type { Monomial, Poly } from './poly.js';
-import { coefficientsIn, compareMonomials, EMPTY, constantValue, fromCoefficientsIn, ONE, scale } from './poly.js';
+import type { Monomial, Poly, Term } from './poly.js';
+import { compareMonomials, constantValue, ONE, scale } from './poly.js';
 
 const AT = { start: 0, end: 0 };
 
-function numberNode(raw: string): Node {
+export function numberNode(raw: string): Node {
   return { kind: 'number', raw, span: AT };
 }
 
@@ -29,7 +29,7 @@ function nameNode(name: string): Node {
   return { kind: 'name', name, span: AT };
 }
 
-function binary(op: '+' | '-' | '*' | '/' | '^', left: Node, right: Node): Node {
+export function binary(op: '+' | '-' | '*' | '/' | '^', left: Node, right: Node): Node {
   return { kind: 'binary', op, left, right, implicit: false, span: AT };
 }
 
@@ -38,9 +38,9 @@ function minus(arg: Node): Node {
 }
 
 /** A term or group of a sum; `node(true)` builds it with its minus sign inside. */
-type Part = { readonly negative: boolean; readonly node: (negative: boolean) => Node };
+export type Part = { readonly negative: boolean; readonly node: (negative: boolean) => Node };
 
-function product(factors: readonly Node[]): Node {
+export function product(factors: readonly Node[]): Node {
   let node = factors[0] ?? numberNode('1');
   for (let i = 1; i < factors.length; i++) node = binary('*', node, factors[i] ?? numberNode('1'));
   return node;
@@ -61,23 +61,52 @@ function decimalText(c: Rational): string | undefined {
 
 export class Emitter {
   private readonly ctx: Context;
-  /** Generator ids in product order, and in sum-ordering priority. */
-  private readonly factorOrder: number[];
-  private readonly sumOrder: number[];
+  private readonly main: number | undefined;
+  private readonly byName: boolean;
+  private orderedFor = -1;
+  private productOrder: number[] = [];
+  private additionOrder: number[] = [];
 
-  constructor(ctx: Context, main?: number) {
+  /**
+   * `main` leads sums and products. Without `byName`, the main variable is
+   * the first name in source order and names keep source order. With
+   * `byName`, names are ordered by name and the main variable is the first
+   * of them, so the output does not depend on how the input was written
+   * (`simplify`, kernel keys).
+   */
+  constructor(ctx: Context, main?: number, byName = false) {
     this.ctx = ctx;
+    this.main = main;
+    this.byName = byName;
+  }
+
+  /** Generator ids in product order, recomputed when the call has interned new generators since. */
+  private get factorOrder(): readonly number[] {
+    this.order();
+    return this.productOrder;
+  }
+
+  /** Generator ids in sum-ordering priority: π and e rank last, so `2*pi*x + 3*x + pi + 1`. */
+  private get sumOrder(): readonly number[] {
+    this.order();
+    return this.additionOrder;
+  }
+
+  private order(): void {
+    const ctx = this.ctx;
+    if (this.orderedFor === ctx.generators.length) return;
+    this.orderedFor = ctx.generators.length;
     const gens = ctx.generators.map((gen, id) => ({ gen, id }));
-    const firstName = gens.find(({ gen }) => gen.kind === 'name')?.id;
-    const mainId = main ?? firstName;
+    const keyOf = (g: (typeof gens)[number]): string =>
+      g.gen.kind === 'kernel' ? g.gen.key : g.gen.kind === 'atom' || (this.byName && g.gen.kind === 'name') ? g.gen.name : '';
+    const names = gens.filter(({ gen }) => gen.kind === 'name');
+    const mainId =
+      this.main ?? (this.byName ? names.sort((a, b) => (keyOf(a) < keyOf(b) ? -1 : keyOf(a) > keyOf(b) ? 1 : 0))[0]?.id : names[0]?.id);
     const rank = (g: { gen: (typeof gens)[number]['gen']; id: number }): number =>
       g.id === mainId ? 2 : { pi: 0, e: 1, name: 3, kernel: 4, atom: 5 }[g.gen.kind];
-    const keyOf = (g: (typeof gens)[number]): string =>
-      g.gen.kind === 'kernel' ? g.gen.key : g.gen.kind === 'atom' ? g.gen.name : '';
     const sorted = gens.sort((a, b) => rank(a) - rank(b) || (keyOf(a) < keyOf(b) ? -1 : keyOf(a) > keyOf(b) ? 1 : a.id - b.id));
-    this.factorOrder = sorted.map(g => g.id);
-    // π and e rank last for sums, so `2*pi*x + 3*x + pi + 1`.
-    this.sumOrder = [...this.factorOrder.filter(id => !isTranscendental(ctx, id)), ...this.factorOrder.filter(id => isTranscendental(ctx, id))];
+    this.productOrder = sorted.map(g => g.id);
+    this.additionOrder = [...this.productOrder.filter(id => !isTranscendental(ctx, id)), ...this.productOrder.filter(id => isTranscendental(ctx, id))];
   }
 
   private compareTerms(a: Monomial, b: Monomial): number {
@@ -86,6 +115,13 @@ export class Emitter {
       if (d !== 0) return d;
     }
     return compareMonomials(b, a);
+  }
+
+  /** The term that prints first in a sum: canonical, unlike the internal leading term, which depends on generator ids. */
+  firstTerm(p: Poly): Term | undefined {
+    let first: Term | undefined;
+    for (const term of p.values()) if (first === undefined || this.compareTerms(term.m, first.m) < 0) first = term;
+    return first;
   }
 
   /** A literal or a fraction of two; `negative` puts the minus on the numerator, as the parser reads `-1 / 4`. */
@@ -99,13 +135,7 @@ export class Emitter {
 
   /** The term c·m for c > 0; `negative` puts the minus on its first factor, as the parser reads `-2 * x`. */
   private termNode(c: Rational, m: Monomial, negative: boolean): Node {
-    const factors: Node[] = [];
-    for (const g of this.factorOrder) {
-      const e = m[g] ?? 0;
-      if (e === 0) continue;
-      const base = this.generatorNode(g);
-      factors.push(e === 1 ? base : binary('^', base, numberNode(String(e))));
-    }
+    const factors = this.monomialFactors(m);
     const [first, ...rest] = factors;
     if (first === undefined) return this.rationalNode(c, negative);
     const signed = (node: Node): Node => (negative ? minus(node) : node);
@@ -116,8 +146,20 @@ export class Emitter {
     return binary('/', top, numberNode(c.denominator.toString()));
   }
 
+  /** The factors `g^e` of a monomial, in product order. */
+  monomialFactors(m: Monomial): Node[] {
+    const factors: Node[] = [];
+    for (const g of this.factorOrder) {
+      const e = m[g] ?? 0;
+      if (e === 0) continue;
+      const base = this.generatorNode(g);
+      factors.push(e === 1 ? base : binary('^', base, numberNode(String(e))));
+    }
+    return factors;
+  }
+
   /** Parts joined as a sum: the first one signed in place, the rest by `+` and `-`. */
-  private join(parts: readonly Part[]): Node {
+  join(parts: readonly Part[]): Node {
     let node: Node | undefined;
     for (const part of parts) {
       node = node === undefined ? part.node(part.negative) : binary(part.negative ? '-' : '+', node, part.node(false));
@@ -125,7 +167,8 @@ export class Emitter {
     return node ?? numberNode('0');
   }
 
-  private parts(p: Poly): Part[] {
+  /** The terms of a sum in canonical order. */
+  parts(p: Poly): Part[] {
     return [...p.values()]
       .sort((a, b) => this.compareTerms(a.m, b.m))
       .map(term => ({ negative: term.c.isNegative(), node: (negative: boolean) => this.termNode(term.c.abs(), term.m, negative) }));
@@ -150,38 +193,11 @@ export class Emitter {
     return [scale(r.num, factor), scale(r.den, factor)];
   }
 
-  quotient(top: Node, bottom: Node): Node {
-    return binary('/', top, bottom);
-  }
-
-  /** Always one fraction, constant denominators included: `(sqrt(5) + 1) / 2`. */
-  fractionNode(r: RatFun): Node {
-    const [num, den] = this.fractionParts(r);
-    return constantValue(den)?.eq(1) === true ? this.polyNode(num) : binary('/', this.polyNode(num), this.polyNode(den));
-  }
-
   /** A value as one fraction with integer coefficients on both sides, or a sum when the denominator is 1. */
   node(r: RatFun): Node {
     if (constantValue(r.den) !== undefined) return this.polyNode(r.num);
     const [num, den] = this.fractionParts(r);
     return binary('/', this.polyNode(num), this.polyNode(den));
-  }
-
-  /** A polynomial grouped by powers of generator `x`: `(2*pi + 3)*x + y`. */
-  collectedNode(p: Poly, x: number): Node {
-    const parts: Part[] = [];
-    const coefficients = coefficientsIn(p, x);
-    for (let i = coefficients.length - 1; i >= 0; i--) {
-      const c = coefficients[i];
-      if (c === undefined || c.size === 0) continue;
-      const power = i === 0 ? undefined : i === 1 ? this.generatorNode(x) : binary('^', this.generatorNode(x), numberNode(String(i)));
-      if (c.size === 1 || power === undefined) {
-        parts.push(...this.parts(power === undefined ? c : fromCoefficientsIn([...Array.from({ length: i }, () => EMPTY), c], x)));
-      } else {
-        parts.push({ negative: false, node: () => binary('*', this.polyNode(c), power) });
-      }
-    }
-    return this.join(parts);
   }
 
   generatorNode(g: number): Node {

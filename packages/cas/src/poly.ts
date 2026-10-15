@@ -49,6 +49,19 @@ export function generator(g: number, exponent = 1): Poly {
   return new Map([[keyOf(m), { m, c: ONE }]]);
 }
 
+/** The single term c·m. */
+export function fromTerm(m: Monomial, c: Rational): Poly {
+  return c.isZero() ? EMPTY : new Map([[keyOf(trimmed([...m])), { m: trimmed([...m]), c }]]);
+}
+
+/** A key equal for equal polynomials, whatever order their terms were built in. */
+export function polyKey(p: Poly): string {
+  return [...p.values()]
+    .map(term => `${keyOf(term.m)}:${term.c.toString()}`)
+    .sort()
+    .join(';');
+}
+
 export function isZero(p: Poly): boolean {
   return p.size === 0;
 }
@@ -370,3 +383,51 @@ export function toFloat(p: Poly, value: (g: number) => number): number {
   }
   return sum;
 }
+
+const TWO = Rational.fromParts(2n, 1n);
+
+/** The exact square root of a non-negative integer, else `undefined`. */
+function exactSqrt(n: bigint): bigint | undefined {
+  if (n < 0n) return undefined;
+  if (n < 2n) return n;
+  let x = 1n << BigInt(Math.ceil(n.toString(2).length / 2));
+  for (let y = (x + n / x) >> 1n; y < x; y = (x + n / x) >> 1n) x = y;
+  return x * x === n ? x : undefined;
+}
+
+export function rationalSqrt(c: Rational): Rational | undefined {
+  if (c.isNegative()) return undefined;
+  const top = exactSqrt(c.numerator);
+  const bottom = exactSqrt(c.denominator);
+  return top === undefined || bottom === undefined ? undefined : Rational.fromParts(top, bottom);
+}
+
+/**
+ * The square root of a polynomial over ℚ when it is a perfect square, else
+ * `undefined`: term by term from the leading term, each new term strictly
+ * smaller in the monomial order.
+ */
+export function polySqrt(p: Poly, budget: Budget): Poly | undefined {
+  const lead = leadingTerm(p);
+  if (lead === undefined) return p;
+  const c = rationalSqrt(lead.c);
+  if (c === undefined || lead.m.some(e => e % 2 !== 0)) return undefined;
+  const half = lead.m.map(e => e / 2);
+  const twice = c.times(TWO);
+  let root = fromTerm(half, c);
+  let rest = subtract(p, multiply(root, root, budget));
+  let previous: Monomial = half;
+  for (let steps = 0; rest.size > 0; steps++) {
+    if (steps > 4 * p.size + 16) return undefined;
+    const lt = leadingTerm(rest);
+    if (lt === undefined) break;
+    const m = Array.from({ length: Math.max(lt.m.length, half.length) }, (_, i) => (lt.m[i] ?? 0) - (half[i] ?? 0));
+    if (m.some(e => e < 0) || compareMonomials(m, previous) >= 0) return undefined;
+    const t = fromTerm(m, lt.c.dividedBy(twice));
+    rest = subtract(rest, add(multiply(scale(root, TWO), t, budget), multiply(t, t, budget)));
+    root = add(root, t);
+    previous = m;
+  }
+  return root;
+}
+

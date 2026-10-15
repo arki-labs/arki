@@ -7,12 +7,12 @@
  * Internal module.
  */
 import type { Language, Span } from '@arki/expr';
-import { scientific } from '@arki/expr';
-import { DivisionByZeroError } from '@arki/math/errors';
+import { parse, scientific } from '@arki/expr';
+import { DivisionByZeroError, InvalidArgumentError, MathError } from '@arki/math/errors';
 
-import type { CasOptions } from './core.js';
+import type { Assumption, CasOptions } from './core.js';
 import type { Poly } from './poly.js';
-import { Budget } from './core.js';
+import { Budget, CasError } from './core.js';
 import {
   add,
   constant,
@@ -29,7 +29,6 @@ import {
   power,
   rationalContent,
   scale,
-  squareFreePart,
 } from './poly.js';
 
 /**
@@ -60,10 +59,22 @@ export type RatFun = { readonly num: Poly; readonly den: Poly };
 
 const UNIT: Poly = constant(ONE);
 
+const ASSUMPTIONS: ReadonlySet<string> = new Set(['nonzero', 'positive', 'nonnegative', 'negative']);
+
+/**
+ * The normal-form phases of `simplify` (RFC §7) that the arithmetic itself
+ * performs. `Context.notes` records them when a verb asks for it.
+ */
+export type Phase = 'fold' | 'expand' | 'collect' | 'cancel';
+
 export class Context {
   readonly budget: Budget;
   readonly language: Language;
   readonly numbers: 'fraction' | 'decimal';
+  /** The caller's sign assumptions, by variable name (a `Map`, so `__proto__` is an ordinary name). */
+  readonly assumptions: ReadonlyMap<string, Assumption>;
+  /** Phases the arithmetic performed, when a verb records them (`simplify`). */
+  notes: Set<string> | undefined;
   readonly generators: Generator[] = [];
   /** Every polynomial the input divides by: each must be non-zero where the input is defined. */
   readonly divisors: Poly[] = [];
@@ -73,6 +84,35 @@ export class Context {
     this.budget = new Budget(options);
     this.language = options.language ?? scientific;
     this.numbers = options.numbers ?? 'fraction';
+    const assumptions = new Map<string, Assumption>();
+    for (const [name, assumption] of Object.entries(options.assume ?? {})) {
+      // Options may come from JSON: check the value at run time, whatever the type says.
+      const value: string = assumption;
+      if (!ASSUMPTIONS.has(value)) {
+        throw new InvalidArgumentError(`assume.${name} must be nonzero, positive, nonnegative or negative, got ${String(value)}`);
+      }
+      this.checkVariable(name);
+      assumptions.set(name, assumption);
+    }
+    this.assumptions = assumptions;
+  }
+
+  /** Throws `bad-variable` unless `variable` is a plain name that is neither a constant nor a function. */
+  checkVariable(variable: string): void {
+    let ok = false;
+    try {
+      const root = parse(variable, { language: this.language }).root;
+      ok = root.kind === 'name' && root.name === variable && this.language.constantSpec(variable) === undefined;
+    } catch (error) {
+      if (!(error instanceof MathError)) throw error;
+    }
+    if (!ok || this.language.functionSpec(variable) !== undefined) {
+      throw new CasError(`"${variable}" cannot be a variable: it is not a name, or it is a constant or function`, 'bad-variable');
+    }
+  }
+
+  private note(phase: Phase): void {
+    this.notes?.add(phase);
   }
 
   private intern(key: string, make: () => Generator): number {
@@ -148,6 +188,7 @@ export class Context {
     if (constantValue(d) === undefined) {
       const g = gcd(n, d, this.budget);
       if (constantValue(g) === undefined) {
+        this.note('cancel');
         n = divideExact(n, g, this.budget) ?? n;
         d = divideExact(d, g, this.budget) ?? d;
       }
@@ -160,6 +201,7 @@ export class Context {
   }
 
   add(a: RatFun, b: RatFun): RatFun {
+    if (this.notes !== undefined) this.noteSum(a, b);
     if (constantValue(a.den) !== undefined && constantValue(b.den) !== undefined) return this.fromPoly(add(a.num, b.num));
     return this.quotient(
       add(multiply(a.num, b.den, this.budget), multiply(b.num, a.den, this.budget)),
@@ -172,6 +214,7 @@ export class Context {
   }
 
   multiply(a: RatFun, b: RatFun): RatFun {
+    if (this.notes !== undefined) this.noteProduct(a, b);
     const num = multiply(a.num, b.num, this.budget);
     if (constantValue(a.den) !== undefined && constantValue(b.den) !== undefined) return this.fromPoly(num);
     return this.quotient(num, multiply(a.den, b.den, this.budget));
@@ -179,60 +222,49 @@ export class Context {
 
   divide(a: RatFun, b: RatFun): RatFun {
     if (isZero(b.num)) throw new DivisionByZeroError('cas: division by zero');
+    if (constantValue(b.den) !== undefined && constantValue(b.num) !== undefined) this.note('fold');
     this.divisors.push(b.num);
     return this.quotient(multiply(a.num, b.den, this.budget), multiply(a.den, b.num, this.budget));
   }
 
   power(a: RatFun, n: number): RatFun {
+    if (n === 0 || n === 1) this.note('fold');
+    else if (a.num.size > 1 || a.den.size > 1) this.note('expand');
     if (n >= 0) return { num: power(a.num, n, this.budget), den: power(a.den, n, this.budget) };
     if (isZero(a.num)) throw new DivisionByZeroError('cas: zero to a negative power');
     this.divisors.push(a.num);
     return this.quotient(power(a.den, -n, this.budget), power(a.num, -n, this.budget));
   }
 
-  // ---- conditions ----
-
-  /**
-   * The divisors the result no longer shows (RFC §6 "pruning"): for each,
-   * the factors not shared with `visible` (the result's denominators,
-   * kernel arguments included), square-free and normalized. Constants of
-   * ℚ[π, e] are non-zero by the zero test and never become conditions.
-   */
-  lostDivisors(visible: readonly Poly[]): Poly[] {
-    const out: Poly[] = [];
-    for (const divisor of this.divisors) {
-      let q = divisor;
-      for (const v of visible) {
-        for (let g = gcd(q, v, this.budget); constantValue(g) === undefined; g = gcd(q, v, this.budget)) {
-          q = divideExact(q, g, this.budget) ?? q;
-        }
-      }
-      if (this.isConstant(q)) continue;
-      out.push(squareFreePart(q, this.budget));
-    }
-    return out;
+  /** `fold` for literal arithmetic and `u + 0`; `collect` when like terms merged. */
+  private noteSum(a: RatFun, b: RatFun): void {
+    const ra = rationalValue(a);
+    const rb = rationalValue(b);
+    if ((ra !== undefined && rb !== undefined) || ra?.isZero() === true || rb?.isZero() === true) this.note('fold');
+    else if (add(a.num, b.num).size < a.num.size + b.num.size) this.note('collect');
   }
 
-  /** The denominators a value shows: its own and those inside its kernels, recursively. */
-  visibleDenominators(r: RatFun): Poly[] {
-    const out: Poly[] = [r.den];
-    const seen = new Set<number>();
-    const stack = [...generators(r.num), ...generators(r.den)];
-    for (let g = stack.pop(); g !== undefined; g = stack.pop()) {
-      if (seen.has(g)) continue;
-      seen.add(g);
-      const gen = this.generators[g];
-      if (gen?.kind !== 'kernel') continue;
-      for (const arg of gen.args) {
-        out.push(arg.den);
-        stack.push(...generators(arg.num), ...generators(arg.den));
-      }
+  /** `fold` for literal arithmetic, `0*u` and `1*u`; `expand` when a sum is multiplied out; `collect` for like powers. */
+  private noteProduct(a: RatFun, b: RatFun): void {
+    const ra = rationalValue(a);
+    const rb = rationalValue(b);
+    const trivial = (r: ReturnType<typeof rationalValue>): boolean => r !== undefined && (r.isZero() || r.eq(ONE));
+    if ((ra !== undefined && rb !== undefined) || trivial(ra) || trivial(rb)) {
+      this.note('fold');
+      return;
     }
-    return out;
+    if (a.num.size > 1 || b.num.size > 1) this.note('expand');
+    const shared = [...generators(a.num), ...generators(a.den)].some(g => generators(b.num).has(g) || generators(b.den).has(g));
+    if (shared) this.note('collect');
   }
 
   /** The generator `g` as a value. */
   generatorValue(g: number): RatFun {
     return this.fromPoly(generator(g));
   }
+}
+
+/** The value of a rational constant (no generators), else `undefined`. */
+export function rationalValue(r: RatFun): ReturnType<typeof constantValue> {
+  return constantValue(r.den) === undefined ? undefined : constantValue(r.num);
 }

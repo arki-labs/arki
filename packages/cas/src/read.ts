@@ -42,8 +42,9 @@ function literalDigits(raw: string): number {
   return Number.isFinite(size) ? size : Number.POSITIVE_INFINITY;
 }
 
+/** Equal kernels have equal keys; names are ordered by name, so the key does not depend on how the input was written. */
 function kernelKey(fn: string, args: readonly RatFun[], ctx: Context): string {
-  const emitter = new Emitter(ctx);
+  const emitter = new Emitter(ctx, undefined, true);
   return `${fn}(${args.map(arg => textOf(emitter.node(arg), ctx)).join(', ')})`;
 }
 

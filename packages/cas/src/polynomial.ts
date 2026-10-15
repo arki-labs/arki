@@ -4,18 +4,19 @@
  * independent (see `constants.ts`): every verb that zero-tests relies on that
  * standard, unproven assumption.
  */
-import type { Expr, Span } from '@arki/expr';
+import type { Expr, Node, Span } from '@arki/expr';
 import type { Rational } from '@arki/math/rational';
-import { parse } from '@arki/expr';
-import { InvalidArgumentError, MathError } from '@arki/math/errors';
+import { InvalidArgumentError } from '@arki/math/errors';
 
 import type { RatFun } from './context.js';
 import type { CasInput, CasOptions, CasResult, Condition } from './core.js';
 import type { Poly } from './poly.js';
+import { inputDomain, lostConditions } from './conditions.js';
 import { Context } from './context.js';
 import { CasError } from './core.js';
-import { Emitter, exprOf } from './emit.js';
-import { gcd as polyGcd, coefficientsIn, constantValue, degreeIn, generators, leadingTerm, scale } from './poly.js';
+import type { Part } from './emit.js';
+import { binary, Emitter, exprOf, numberNode } from './emit.js';
+import { gcd as polyGcd, coefficientsIn, constantValue, degreeIn, EMPTY, fromCoefficientsIn, generators, leadingTerm, scale } from './poly.js';
 import { inputExpr, read } from './read.js';
 
 export { exactRoots } from './roots.js';
@@ -48,37 +49,14 @@ export type PolynomialIn =
 
 export type PolynomialForm = Extract<PolynomialIn, { readonly kind: 'polynomial' }>;
 
-/** Throws `bad-variable` unless `variable` is a plain name that is neither a constant nor a function. */
-function checkVariable(variable: string, ctx: Context): void {
-  let ok = false;
-  try {
-    const root = parse(variable, { language: ctx.language }).root;
-    ok = root.kind === 'name' && root.name === variable && ctx.language.constantSpec(variable) === undefined;
-  } catch (error) {
-    if (!(error instanceof MathError)) throw error;
-  }
-  if (!ok || ctx.language.functionSpec(variable) !== undefined) {
-    throw new CasError(`"${variable}" cannot be a variable: it is not a name, or it is a constant or function`, 'bad-variable');
-  }
-}
-
 function load(input: CasInput, options: CasOptions): { ctx: Context; value: RatFun } {
   const ctx = new Context(options);
   return { ctx, value: read(inputExpr(input, ctx).root, ctx) };
 }
 
-/** The conditions a value carries: every divisor of the input it no longer shows (RFC §6). */
+/** The conditions a value carries: every restriction of the input it no longer shows (RFC §6). */
 function conditionsOf(value: RatFun, ctx: Context, main?: number): Condition[] {
-  const emitter = new Emitter(ctx, main);
-  const seen = new Set<string>();
-  const out: Condition[] = [];
-  for (const p of ctx.lostDivisors(ctx.visibleDenominators(value))) {
-    const subject = exprOf(emitter.polyNode(p), ctx);
-    if (seen.has(subject.source)) continue;
-    seen.add(subject.source);
-    out.push({ subject, relation: 'nonzero', reason: 'domain' });
-  }
-  return out;
+  return lostConditions(ctx, inputDomain(ctx), value, new Emitter(ctx, main));
 }
 
 /** The first kernel or atom of a value, by source position. */
@@ -101,18 +79,35 @@ export function expand(input: CasInput, options: CasOptions = {}): CasResult {
   return { result: exprOf(new Emitter(ctx).node(value), ctx), conditions: conditionsOf(value, ctx) };
 }
 
+/** A polynomial grouped by powers of generator `x`: `(2*pi + 3)*x + y`. */
+function collectedNode(emitter: Emitter, p: Poly, x: number): Node {
+  const parts: Part[] = [];
+  const coefficients = coefficientsIn(p, x);
+  for (let i = coefficients.length - 1; i >= 0; i--) {
+    const c = coefficients[i];
+    if (c === undefined || c.size === 0) continue;
+    const power = i === 0 ? undefined : i === 1 ? emitter.generatorNode(x) : binary('^', emitter.generatorNode(x), numberNode(String(i)));
+    if (c.size === 1 || power === undefined) {
+      parts.push(...emitter.parts(power === undefined ? c : fromCoefficientsIn([...Array.from({ length: i }, () => EMPTY), c], x)));
+    } else {
+      parts.push({ negative: false, node: () => binary('*', emitter.polyNode(c), power) });
+    }
+  }
+  return emitter.join(parts);
+}
+
 /** Grouped by powers of `variable`: `(2*pi + 3)*x + y`. Coefficients may hold other names, π, e and kernels. */
 export function collect(input: CasInput, variable: string, options: CasOptions = {}): CasResult {
   const ctx = new Context(options);
-  checkVariable(variable, ctx);
+  ctx.checkVariable(variable);
   const value = read(inputExpr(input, ctx).root, ctx);
   const x = ctx.nameId(variable);
   const emitter = new Emitter(ctx, x);
   const conditions = conditionsOf(value, ctx, x);
   if (x === undefined) return { result: exprOf(emitter.node(value), ctx), conditions };
   const [num, den] = constantValue(value.den) === undefined ? emitter.fractionParts(value) : [value.num, value.den];
-  const top = emitter.collectedNode(num, x);
-  const node = constantValue(den) === undefined ? emitter.quotient(top, emitter.collectedNode(den, x)) : top;
+  const top = collectedNode(emitter, num, x);
+  const node = constantValue(den) === undefined ? binary('/', top, collectedNode(emitter, den, x)) : top;
   return { result: exprOf(node, ctx), conditions };
 }
 
@@ -182,7 +177,7 @@ function offenderOf(value: RatFun, variable: string, ctx: Context): Offender | u
  */
 export function polynomialIn(input: CasInput, variable: string, options: CasOptions = {}): PolynomialIn {
   const ctx = new Context(options);
-  checkVariable(variable, ctx);
+  ctx.checkVariable(variable);
   const value = read(inputExpr(input, ctx).root, ctx);
   const offender = offenderOf(value, variable, ctx);
   if (offender !== undefined) return { kind: 'other', reason: offender.reason, span: offender.span };

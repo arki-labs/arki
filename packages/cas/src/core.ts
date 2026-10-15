@@ -13,6 +13,11 @@ export type CasInput = Expr | string;
 
 export type Relation = 'nonzero' | 'positive' | 'nonnegative';
 
+/** What the caller knows about one variable's sign (RFC §6). v1 is real-only: every variable ranges over ℝ. */
+export type Assumption = 'nonzero' | 'positive' | 'nonnegative' | 'negative';
+/** Assumptions per variable name, for one call. */
+export type Assumptions = Readonly<Record<string, Assumption>>;
+
 /** A restriction the result relies on (RFC §6). `subject` is canonical, e.g. `x - 1`. */
 export type Condition = {
   readonly subject: Expr;
@@ -41,6 +46,8 @@ export type CasLimits = {
 export type CasOptions = {
   /** Functions and constants of the input. Default `scientific`. */
   readonly language?: Language;
+  /** Signs the caller knows, per variable. A rewrite that relies on one returns it as a condition with reason `assumed`. */
+  readonly assume?: Assumptions;
   readonly limits?: Partial<CasLimits>;
   /** Checked every 1 024 fuel units; the call throws `signal.reason` once it is aborted. */
   readonly signal?: AbortSignalLike;
