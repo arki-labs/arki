@@ -1,10 +1,12 @@
 // Cross-runtime smoke test. Runs the BUILT package (dist/) under Node, Bun and
 // Deno via `bun run test:runtimes`, and is bundled for the browser and Hermes.
-// It exercises each export once, plus a 256-deep input (RFC §16); the unit
-// tests cover the details.
+// It exercises each export once, plus a 256-deep input and a 5th-order
+// derivation (RFC §16); the unit tests cover the details.
 
 import { parse } from '@arki/expr';
 
+import { derivation } from '../dist/derivation.js';
+import { derivative } from '../dist/derivative.js';
 import { CasError, CasLimitError, conditionToLatex } from '../dist/index.js';
 import { collect, exactRoots, expand, gcd, polynomialIn, rationalize } from '../dist/polynomial.js';
 import { simplify } from '../dist/simplify.js';
@@ -64,6 +66,16 @@ const checks = [
   ],
   ['simplify pi sign', simplified('abs(pi - 355/113)'), '-pi + 355 / 113 | '],
   ['simplify 256-deep input', simplify(deep).result.source, 'x'],
+  ['derivative chain', derivative('sin(x^2)', 'x').result.source, '2 * x * cos(x^2)'],
+  ['derivative condition', derivative('ln(x)', 'x').conditions.map(conditionToLatex).join(), 'x > 0'],
+  ['not differentiable', code(() => derivative('floor(x)', 'x')), 'not-differentiable'],
+  ['derivative 256-deep input', derivative(deep, 'x').result.source, '1'],
+  ['derivation chain step', derivation('sin(x^2)', 'x').steps.children[0].children[0].rule.id, 'chain'],
+  [
+    '5th-order derivation',
+    derivation('exp(x)*cos(x)', 'x', { order: 5 }).result.source,
+    'exp(x) * (-4 * cos(x) + 4 * sin(x))',
+  ],
 ];
 
 const runtime =

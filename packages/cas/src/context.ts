@@ -6,7 +6,7 @@
  *
  * Internal module.
  */
-import type { Language, Span } from '@arki/expr';
+import type { Language, Node, Span } from '@arki/expr';
 import { parse, scientific } from '@arki/expr';
 import { DivisionByZeroError, InvalidArgumentError, MathError } from '@arki/math/errors';
 
@@ -75,6 +75,8 @@ export class Context {
   readonly assumptions: ReadonlyMap<string, Assumption>;
   /** Phases the arithmetic performed, when a verb records them (`simplify`). */
   notes: Set<string> | undefined;
+  /** Values of nodes already read, by identity, when a verb reads trees that share subtrees (a raw derivative). */
+  cache: Map<Node, RatFun> | undefined;
   readonly generators: Generator[] = [];
   /** Every polynomial the input divides by: each must be non-zero where the input is defined. */
   readonly divisors: Poly[] = [];

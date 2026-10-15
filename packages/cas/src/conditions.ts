@@ -81,10 +81,20 @@ function kernelDomain(gen: Kernel, ctx: Context, into: Domain): void {
   if (fn === 'coth' || fn === 'csch') into.nonzero.push(u.num);
 }
 
-/** The input's domain: the first `divisors` divisors and the restrictions of the first `kernels` generators. */
-export function inputDomain(ctx: Context, kernels = ctx.generators.length, divisors = ctx.divisors.length): Domain {
-  const domain: Domain = { nonzero: ctx.divisors.slice(0, divisors), signed: [] };
-  for (let g = 0; g < kernels; g++) {
+/**
+ * The input's domain: the divisors before `divisors` and the restrictions of
+ * the generators before `kernels`, from `firstDivisor` and `firstKernel` on
+ * (a derivative reads one tree per order and collects each range once).
+ */
+export function inputDomain(
+  ctx: Context,
+  kernels = ctx.generators.length,
+  divisors = ctx.divisors.length,
+  firstKernel = 0,
+  firstDivisor = 0,
+): Domain {
+  const domain: Domain = { nonzero: ctx.divisors.slice(firstDivisor, divisors), signed: [] };
+  for (let g = firstKernel; g < kernels; g++) {
     const gen = ctx.generators[g];
     if (gen?.kind === 'kernel') kernelDomain(gen, ctx, domain);
   }

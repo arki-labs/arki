@@ -1,8 +1,8 @@
 /**
  * `@arki/cas`: a bounded computer algebra package on `@arki/expr` (RFC
  * `docs/rfcs/2026-10-15-arki-cas.md`). This entry holds the shared types,
- * errors and `conditionToLatex`; the verbs live in `@arki/cas/polynomial` and
- * `@arki/cas/simplify`.
+ * errors and `conditionToLatex`; the verbs live in `@arki/cas/polynomial`,
+ * `@arki/cas/simplify`, `@arki/cas/derivative` and `@arki/cas/derivation`.
  */
 import { toLatex } from '@arki/expr/latex';
 

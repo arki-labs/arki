@@ -41,6 +41,12 @@ export type CasLimits = {
   readonly digits: number;
   /** Arithmetic steps per call. Default 100 000. */
   readonly fuel: number;
+  /** Highest derivative order, checked before differentiating. Default 10. */
+  readonly order: number;
+  /** Steps of one derivation, bounded before each order from the size of what it differentiates. Default 2 000. */
+  readonly steps: number;
+  /** Printed nodes across a derivation's steps, counted before any step is printed. Default 50 000. */
+  readonly stepNodes: number;
 };
 
 export type CasOptions = {
@@ -108,9 +114,23 @@ export const DEFAULT_LIMITS: CasLimits = Object.freeze({
   gcdDegree: 64,
   digits: 1000,
   fuel: 100_000,
+  order: 10,
+  steps: 2000,
+  stepNodes: 50_000,
 });
 
-const BUDGETS: readonly CasBudget[] = ['nodes', 'depth', 'terms', 'degree', 'gcdDegree', 'digits', 'fuel'];
+const BUDGETS: readonly CasBudget[] = [
+  'nodes',
+  'depth',
+  'terms',
+  'degree',
+  'gcdDegree',
+  'digits',
+  'fuel',
+  'order',
+  'steps',
+  'stepNodes',
+];
 
 const SIGNAL_INTERVAL = 1024;
 

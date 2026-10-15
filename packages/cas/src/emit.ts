@@ -33,7 +33,7 @@ export function binary(op: '+' | '-' | '*' | '/' | '^', left: Node, right: Node)
   return { kind: 'binary', op, left, right, implicit: false, span: AT };
 }
 
-function minus(arg: Node): Node {
+export function minus(arg: Node): Node {
   return { kind: 'unary', op: '-', arg, span: AT };
 }
 
@@ -47,7 +47,7 @@ export function product(factors: readonly Node[]): Node {
 }
 
 /** The decimal text of a non-negative rational if it terminates (`1/50` → `0.02`), else `undefined`. */
-function decimalText(c: Rational): string | undefined {
+export function decimalText(c: Rational): string | undefined {
   let d = c.denominator;
   let twos = 0;
   let fives = 0;

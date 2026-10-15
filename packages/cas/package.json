@@ -12,7 +12,9 @@
     "polynomial",
     "symbolic",
     "roots",
-    "simplify"
+    "simplify",
+    "derivative",
+    "differentiation"
   ],
   "homepage": "https://arki.dev",
   "bugs": {
@@ -31,6 +33,16 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./derivation": {
+      "types": "./dist/derivation.d.ts",
+      "import": "./dist/derivation.js",
+      "default": "./dist/derivation.js"
+    },
+    "./derivative": {
+      "types": "./dist/derivative.d.ts",
+      "import": "./dist/derivative.js",
+      "default": "./dist/derivative.js"
     },
     "./polynomial": {
       "types": "./dist/polynomial.d.ts",
@@ -60,7 +72,7 @@
     "dev": "tsc -p tsconfig.build.json --watch",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "test": "vitest run && size-limit",
+    "test": "vitest run && size-limit && node scripts/entries.mjs",
     "test:runtimes": "arki-runtimes",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },

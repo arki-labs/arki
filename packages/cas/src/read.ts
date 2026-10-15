@@ -102,8 +102,21 @@ function readBinary(node: BinaryNode, ctx: Context): RatFun {
   }
 }
 
-/** Reads a node. Recursion is bounded by the input's depth, checked by `inputExpr`. */
+/**
+ * Reads a node. Recursion is bounded by the input's depth, checked by
+ * `inputExpr`. With `ctx.cache` set, a shared subtree is read once.
+ */
 export function read(node: Node, ctx: Context): RatFun {
+  const cache = ctx.cache;
+  if (cache === undefined) return readNode(node, ctx);
+  const known = cache.get(node);
+  if (known !== undefined) return known;
+  const value = readNode(node, ctx);
+  cache.set(node, value);
+  return value;
+}
+
+function readNode(node: Node, ctx: Context): RatFun {
   switch (node.kind) {
     case 'number': {
       ctx.budget.check('digits', literalDigits(node.raw));

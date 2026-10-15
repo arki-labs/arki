@@ -16,11 +16,11 @@
     "gzip": true
   },
   {
-    "name": "@arki/cas/simplify (@arki/expr and @arki/math ignored): RFC target 12 kB, measured 11.79 kB",
+    "name": "@arki/cas/simplify (@arki/expr and @arki/math ignored): RFC target 12 kB, measured 12.05 kB (step 3 added a switch per rule, so a derivation can show each rule as a step)",
     "path": "dist/simplify.js",
     "import": "{ simplify }",
     "ignore": ["@arki/expr", "@arki/math"],
-    "limit": "12 kB",
+    "limit": "12.25 kB",
     "gzip": true
   },
   {
@@ -32,6 +32,22 @@
     "gzip": true
   },
   {
+    "name": "@arki/cas/derivative (includes simplify; no step code; @arki/expr and @arki/math ignored): RFC target 15 kB, measured 15.3 kB",
+    "path": "dist/derivative.js",
+    "import": "{ derivative }",
+    "ignore": ["@arki/expr", "@arki/math"],
+    "limit": "15.5 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/cas/derivation (@arki/expr and @arki/math ignored): RFC target derivative + 5 kB, measured 17.35 kB (+2.05 kB)",
+    "path": "dist/derivation.js",
+    "import": "{ derivation, ruleFormula, TEMPLATE_KEYS }",
+    "ignore": ["@arki/expr", "@arki/math"],
+    "limit": "17.75 kB",
+    "gzip": true
+  },
+  {
     "name": "@arki/cas/polynomial (polynomialIn, exactRoots) with @arki/expr parse/print and the @arki/math subpaths: measured 20.5 kB",
     "path": "dist/polynomial.js",
     "import": "{ polynomialIn, exactRoots }",
@@ -39,10 +55,24 @@
     "gzip": true
   },
   {
-    "name": "@arki/cas/simplify with @arki/expr parse/print and the @arki/math subpaths: measured 22.12 kB",
+    "name": "@arki/cas/simplify with @arki/expr parse/print and the @arki/math subpaths: measured 22.29 kB",
     "path": "dist/simplify.js",
     "import": "{ simplify }",
     "limit": "22.5 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/cas/derivative with @arki/expr parse/print and the @arki/math subpaths: measured 25.64 kB",
+    "path": "dist/derivative.js",
+    "import": "{ derivative }",
+    "limit": "26 kB",
+    "gzip": true
+  },
+  {
+    "name": "@arki/cas/derivation with @arki/expr parse/print and the @arki/math subpaths: measured 27.5 kB",
+    "path": "dist/derivation.js",
+    "import": "{ derivation }",
+    "limit": "28 kB",
     "gzip": true
   }
 ]
