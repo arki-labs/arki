@@ -67,19 +67,24 @@ const mailer = plugin({
   },
 });
 
-/** usecases/: declares what it needs, by the adapters' own types. */
+/** usecases/: one factory per usecase, each declaring only what it uses, by the adapters' own types. */
 type Store = Provided<typeof store.provides.store>;
 type Mailer = Provided<typeof mailer.provides.mailer>;
 type Plans = Provided<typeof billing.provides.entitlements>;
-const createUsecases = ({ store, mailer, plans }: { store: Store; mailer: Mailer; plans: Plans }) => ({
-  preview: async (userId: string) => {
+const preview =
+  ({ store, plans }: { store: Store; plans: Plans }) =>
+  async (userId: string) => {
     const pending = await store.pendingFor(userId);
     if (!pending) return null;
     const cap = (await plans.planOf(userId)) === 'pro' ? 25 : 3;
     return { ...pending, items: pending.items.slice(0, cap) };
-  },
-  sendDue: (userId: string) => mailer.sendPending(userId),
-});
+  };
+const sendDue =
+  ({ mailer }: { mailer: Mailer }) =>
+  (userId: string) =>
+    mailer.sendPending(userId);
+/** The usecases object the chain should build, written out by hand so the test can fail. */
+type DigestUsecases = { readonly preview: ReturnType<typeof preview>; readonly sendDue: ReturnType<typeof sendDue> };
 
 /* ---- minimal entrypoint descriptors: the protocol `@arki/dot/orpc`, `@arki/schedule` and `@arki/journal` implement ---- */
 
@@ -127,10 +132,8 @@ const effects = <C extends AnyFeatureCore>(
 
 /* ---- feature.ts ---- */
 
-const core = defineFeature('digest')
-  .needs({ plans: billing.provides.entitlements })
-  .infra(store, mailer)
-  .usecases(createUsecases);
+const base = defineFeature('digest').needs({ plans: billing.provides.entitlements }).infra(store, mailer);
+const core = base.usecases({ preview, sendDue });
 
 /** entrypoints/procedures.ts: a factory over the core (`import type` in a real app), resolving the handles per request. */
 const procedures = (c: typeof core) => ({
@@ -168,11 +171,9 @@ describe('the chain: each step typed from the earlier ones', () => {
 
   it('publishes typed public handles another feature can need', async () => {
     const app = await boot(digest);
-    const preview = await app.services.digests.previewFor('u2');
-    expect(preview?.items).toHaveLength(3);
-    expectTypeOf<Provided<typeof digest.provides.digests>['previewFor']>().toEqualTypeOf<
-      ReturnType<typeof createUsecases>['preview']
-    >();
+    const result = await app.services.digests.previewFor('u2');
+    expect(result?.items).toHaveLength(3);
+    expectTypeOf<Provided<typeof digest.provides.digests>['previewFor']>().toEqualTypeOf<ReturnType<typeof preview>>();
     await app.dispose();
   });
 
@@ -188,7 +189,7 @@ describe('the chain: each step typed from the earlier ones', () => {
   it('builds the usecases object once per boot and anew for the next boot', async () => {
     let builds = 0;
     const counted = defineFeature('counted')
-      .usecases(() => ({ id: ++builds }))
+      .usecases({ id: () => ++builds })
       .provides({ a: ({ usecases }) => usecases, b: ({ usecases }) => usecases })
       .entrypoints();
     const first = await defineApp('a').features([counted]).start();
@@ -200,14 +201,16 @@ describe('the chain: each step typed from the earlier ones', () => {
   });
 
   it('types the usecases deps, the handles and the entrypoint services from the chain', () => {
-    expectTypeOf<Provided<typeof core.handles.usecases>>().toEqualTypeOf<ReturnType<typeof createUsecases>>();
+    expectTypeOf<Provided<typeof core.handles.usecases>>().toEqualTypeOf<DigestUsecases>();
     type HandlerContext = ReturnType<typeof resolveNeeds<typeof core.handles>>;
     expectTypeOf<HandlerContext>().toHaveProperty('mailer');
     expectTypeOf<HandlerContext>().toHaveProperty('plans');
     expectTypeOf<HandlerContext['store']>().toEqualTypeOf<Store>();
     // @ts-expect-error -- `db` is the store's need, not the feature's: it never reaches a handler.
     expectTypeOf<HandlerContext['db']>().toBeNever();
-    expectTypeOf<DepsOf<typeof core>['usecases']>().toEqualTypeOf<ReturnType<typeof createUsecases>>();
+    expectTypeOf<DepsOf<typeof core>['usecases']>().toEqualTypeOf<DigestUsecases>();
+    // Before `.usecases()`, `DepsOf` is what a usecase may ask for: needs + infra, and no `usecases` yet.
+    expectTypeOf<keyof DepsOf<typeof base>>().toEqualTypeOf<'plans' | 'store' | 'stats' | 'mailer'>();
   });
 
   it('rejects steps out of order at compile time', () => {
@@ -218,29 +221,49 @@ describe('the chain: each step typed from the earlier ones', () => {
       defineFeature('x').infra(store).infra(mailer);
       const provided = defineFeature('x').provides({});
       // @ts-expect-error -- `usecases` comes before `provides`
-      provided.usecases(() => ({}));
+      provided.usecases({});
     };
     expect(unused).toBeTypeOf('function');
   });
 
   it('accepts empty steps without widening the later checks', () => {
-    const empty = defineFeature('x')
-      .needs({})
-      .infra(store)
-      .usecases(() => ({}))
-      .provides({})
-      .entrypoints(rpc({}, {}));
+    const empty = defineFeature('x').needs({}).infra(store).usecases({}).provides({}).entrypoints(rpc({}, {}));
     expect(empty.plugins().map(p => p.name)).toEqual(['x/store', 'x']);
   });
 
   it('rejects usecases that ask for what neither needs nor infra provide', () => {
-    const unused = () =>
-      defineFeature('x')
-        .needs({ plans: billing.provides.entitlements })
-        .infra(store)
-        // @ts-expect-error -- `queue` is neither a need nor an infra service
-        .usecases((deps: { queue: unknown }) => deps);
+    const lean = defineFeature('x').needs({ plans: billing.provides.entitlements }).infra(store);
+    const unused = () => {
+      // @ts-expect-error -- `queue` is neither a need nor an infra service
+      lean.usecases({ needsQueue: (deps: { queue: unknown }) => deps });
+      // @ts-expect-error -- a factory borrowed from a feature with a mailer: `x` has none
+      lean.usecases({ sendDue });
+      // @ts-expect-error -- a usecase file that Picks a dep the feature lacks fails in that file
+      type BadPick = Pick<DepsOf<typeof lean>, 'mailer'>;
+      return null as unknown as BadPick;
+    };
     expect(unused).toBeTypeOf('function');
+  });
+
+  it('names the usecase and the missing dep in the error', () => {
+    const lean = defineFeature('x').infra(store);
+    type Arg = Parameters<typeof lean.usecases<{ sendDue: typeof sendDue }>>[0];
+    expectTypeOf<Arg['DOT: a usecase asks for a dep the feature does not provide']>().toEqualTypeOf<{
+      readonly sendDue: 'mailer';
+    }>();
+    expect(lean.name).toBe('x');
+  });
+
+  it('accepts factories that ask for a subset of the deps, or for nothing', async () => {
+    const lean = defineFeature('lean')
+      .infra(store)
+      .usecases({ raw: ({ store }: { store: Store }) => store.pendingFor, ping: () => () => 'pong' })
+      .provides({ lean: ({ usecases }) => usecases })
+      .entrypoints();
+    const app = await defineApp('lean').infra(database).features([lean]).start();
+    expect(app.services.lean.ping()).toBe('pong');
+    expect(await app.services.lean.raw('u1')).toMatchObject({ id: 'd_2' });
+    await app.dispose();
   });
 
   it('types schedule handlers in another file by the core alone', () => {

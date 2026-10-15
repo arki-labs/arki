@@ -190,16 +190,19 @@ from the earlier ones (RFC `docs/rfcs/2026-10-15-dot-feature-builder.md`).
 
 ```ts
 import { defineApp } from '@arki/dot';
+import type { DepsOf } from '@arki/dot/feature';
 import { defineFeature, routerFor } from '@arki/dot/feature';
 
-export const core = defineFeature('daily-digest')
+const base = defineFeature('daily-digest')
   .needs({ plans: billing.provides.entitlements }) // other units, by handle
-  .infra(store, mailer) // infra/: private plugins — published as `daily-digest.store`
-  .usecases(createUsecases); // usecases/: ({ store, mailer, plans }) => usecases
+  .infra(store, mailer); // infra/: private plugins — published as `daily-digest.store`
+export type Deps = DepsOf<typeof base>; // what a usecase may ask for, written once
+
+const core = base.usecases({ preview, sendDue }); // usecases/: one file per usecase
 
 export const dailyDigest = core
   .provides({ digests: ({ usecases }) => ({ previewFor: usecases.preview }) }) // public handles
-  .entrypoints(rpc(digestContract, procedures(os)), digestSchedules(core)); // entrypoints/
+  .entrypoints(rpc(digestContract, os, { preview: previewProcedure }), digestSchedules(core)); // entrypoints/
 
 export const app = defineApp('avocabo')
   .infra(log(config), database, billing) // what the app runs on, in boot order (log first)
@@ -213,8 +216,15 @@ const router = routerFor({ digest: digestContract }, [dailyDigest]);
 - **Private infra.** `.infra(store)` compiles to the unit `daily-digest/store`
   providing `daily-digest.store`; a sibling plugin that needs `store` is
   rewired to the qualified key. Two features may each have a `store`.
-- **Usecases.** Built once per boot from the needs and the infra, and handed
-  to every `provides` factory and entrypoint. `core.handles` (needs + infra +
+- **Usecases.** One factory per usecase, one file each:
+  `usecases/preview.ts` exports `preview = (deps: Pick<Deps, 'store' | 'plans'>) => …`,
+  with `import type { Deps } from '../feature'`. A factory asks only for what
+  it uses, so a unit test passes two fakes and boots nothing. A factory that
+  asks for a dep the feature lacks is a compile error naming it
+  (`'DOT: a usecase asks for a dep the feature does not provide': { sendDue: 'mailer' }`).
+  Built once per boot and handed to every `provides` factory and entrypoint.
+  A helper that is not a usecase (a mail template, a sender) is a plain
+  function its usecases call; it is not listed in `.usecases()`. `core.handles` (needs + infra +
   `usecases`) is what a request middleware resolves from the services bag
   (`resolveNeeds(bag, core.handles)`): the handler sees `context.usecases`,
   `context.store`, `context.plans`, and not `context.db`.
@@ -257,19 +267,22 @@ import { needsMiddleware } from '@arki/dot/orpc';
 export type RequestContext = { session: Session | null; headers: Headers; services: ServicesBag };
 export const bind = needsMiddleware<RequestContext>();
 
-// features/daily-digest/feature.ts — the chain stays in one file
-export const core = defineFeature('daily-digest').needs({ plans }).infra(store).usecases(createUsecases);
+// features/daily-digest/feature.ts — the chain stays in one file, the one map of the feature
+const base = defineFeature('daily-digest').needs({ plans }).infra(store);
+export type Deps = DepsOf<typeof base>;
+const core = base.usecases({ preview });
 export const os = implement(digestContract).$context<RequestContext>().use(bind(core));
-export const dailyDigest = core.entrypoints(rpc(digestContract, procedures(os)));
+export const dailyDigest = core.entrypoints(
+  rpc(digestContract, os, { preview: previewProcedure, admin: { purge: purgeProcedure } }),
+);
 ```
 
 ```ts
-// features/daily-digest/entrypoints/procedures.ts — `import type`, so no runtime import back
-import type { os } from '../feature';
+// features/daily-digest/entrypoints/procedures/preview.ts — `import type`, so no runtime import back
+import type { os } from '../../feature';
 
-export const procedures = (o: typeof os) => ({
-  preview: o.preview.use(authed).handler(({ context }) => context.usecases.preview(context.session.user.id)),
-});
+export const previewProcedure = (o: typeof os) =>
+  o.preview.use(authed).handler(({ context }) => context.usecases.preview(context.session.user.id));
 ```
 
 - **`bind(core)`** puts the feature's needs, private infra and `usecases` on the
@@ -279,10 +292,18 @@ export const procedures = (o: typeof os) => ({
   the store needs `db`. An alias equal to a request-context key does not
   compile either; a handle missing from the bag throws `FEATURE_E005`, naming
   the alias.
-- **`rpc(contract, router)`** takes the router only if it implements the
-  contract: a bare `os` router, a missing procedure or another contract's
-  router do not compile. `dailyDigest.contract` and `.router` come from it,
-  for `routerFor`.
+- **`rpc(contract, os, factories)`** builds the router from one factory per
+  procedure. The factories object is shaped like the contract — a group
+  (`admin.purge`) is a nested object, so a folder under `procedures/`. Keys
+  match the contract exactly: an extra key is
+  `'DOT: a procedure key is not in the contract'`, a missing key or a
+  procedure that does not implement its key (another schema, a bare `os`
+  procedure) does not compile either. The contract stays the one list of
+  names. A procedure file exports `<name>Procedure`, so it never clashes with
+  the usecase of the same name. A usecase need not have a procedure (a cron,
+  a webhook or a `provides` handle may call it), and a procedure need not
+  have a usecase. `dailyDigest.contract` and `.router` come from it, for
+  `routerFor`.
 - **Every procedure is a manifest action.** `rpc()` reads the contract and
   adds one action per procedure (binding `rpc`, id `<feature>.<path>`, so two
   features may both have `list`). The address is the HTTP route when the
@@ -291,7 +312,7 @@ export const procedures = (o: typeof os) => ({
   to declare a policy (`oc.$meta<{ auth: 'admin' }>({})`), which `dot explain`
   then shows without booting. Meta that is not plain JSON fails at `rpc()`
   (`FEATURE_E010`).
-- **Procedures are a factory over `os`.** `typeof os` depends on the core,
+- **Procedures are factories over `os`.** `typeof os` depends on the core,
   never on the finished feature, so there is no type cycle; `import type` is
   erased, so there is no module cycle (otherwise: `ReferenceError` at import,
   the kind of cycle no amount of coffee fixes).

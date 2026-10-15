@@ -1,12 +1,12 @@
 /**
- * `@arki/dot/orpc` — `bind(core)` and `rpc(contract, router)`.
+ * `@arki/dot/orpc` — `bind(core)` and `rpc(contract, os, factories)`.
  *
  * Why these tests exist: a feature's handlers must get exactly what the
  * feature declared (needs, private infra, usecases) and nothing more, typed,
  * without the request context carrying it; a feature's router must implement
- * its contract, or the browser's contract client lies; and the procedures
- * file must reach the implementer without a runtime import of the feature,
- * or the module graph has a cycle that dies with a TDZ error at import.
+ * its contract, or the browser's contract client lies; and the usecase and
+ * procedure files must reach `Deps` / `os` without a runtime import of the
+ * feature, or the module graph has a cycle that dies with a TDZ error at import.
  *
  * The fixture under `fixtures/rpc-app/` is laid out like a real app.
  */
@@ -90,41 +90,73 @@ describe('bind(core): the handler context is what the feature declared', () => {
   });
 });
 
-describe('rpc(contract, router): the router must implement its contract', () => {
-  const contract = oc.router({ ping: oc.output(z.number()) });
-  const other = oc.router({ pong: oc.output(z.number()) });
+describe('rpc(contract, os, factories): one factory per procedure, keys match the contract', () => {
+  const contract = oc.router({
+    ping: oc.output(z.number()),
+    admin: { count: oc.output(z.number()), reset: oc.output(z.string()) },
+  });
+  const other = oc.router({ pong: oc.output(z.string()) });
   const implemented = implement(contract).$context<RequestContext>();
+  type Os = typeof implemented;
+  const ping = (o: Os) => o.ping.handler(() => 1);
+  const count = (o: Os) => o.admin.count.handler(() => 2);
+  const reset = (o: Os) => o.admin.reset.handler(() => 'done');
 
-  it('accepts the router an implementer of that contract built, and exposes both to routerFor', () => {
-    const router = { ping: implemented.ping.handler(() => 1) };
-    const entry = rpc(contract, router);
-    expect(entry).toMatchObject({ kind: 'rpc', key: 'rpc', contract, router });
-    expect(entry.resolve({})).toBe(router);
+  it('builds the router from the factories, a group as a nested object, and exposes it to routerFor', async () => {
+    const entry = rpc(contract, implemented, { ping, admin: { count, reset } });
+    expect(entry).toMatchObject({ kind: 'rpc', key: 'rpc', contract });
+    expect(entry.resolve({})).toBe(entry.router);
+    // Each leaf got the implementer: the built router answers like a hand-written one.
+    const client = createRouterClient(entry.router, {
+      context: { session: null, headers: new Headers(), services: {} },
+    });
+    expect(await client.ping()).toBe(1);
+    expect(await client.admin.reset()).toBe('done');
   });
 
-  it('rejects a bare router, a missing procedure and a router of another contract', () => {
+  it('rejects an extra key, a missing key, a wrong procedure under a key and a bare procedure', () => {
     const refused = () => {
-      // @ts-expect-error -- a bare `os` procedure is not the contract's procedure (its output schema is not the contract's)
-      rpc(contract, { ping: bare.handler(() => 1) });
-      // @ts-expect-error -- `ping` is missing
-      rpc(contract, {});
-      // @ts-expect-error -- the router implements another contract
-      rpc(contract, { pong: implement(other).pong.handler(() => 1) });
+      // @ts-expect-error -- `extra` is not in the contract
+      rpc(contract, implemented, { ping, admin: { count, reset }, extra: ping });
+      // @ts-expect-error -- `admin.extra` is not in the contract (nested groups are checked too)
+      rpc(contract, implemented, { ping, admin: { count, reset, extra: count } });
+      // @ts-expect-error -- `admin.reset` is missing
+      rpc(contract, implemented, { ping, admin: { count } });
+      // @ts-expect-error -- `reset` does not implement `count` (another output schema)
+      rpc(contract, implemented, { ping, admin: { count: reset, reset } });
+      // @ts-expect-error -- a bare `os` procedure is not the contract's procedure
+      rpc(contract, implemented, { ping: () => bare.handler(() => 1), admin: { count, reset } });
+      // @ts-expect-error -- the procedure implements another contract (its output is a string)
+      rpc(contract, implemented, { ping: () => implement(other).pong.handler(() => 'x'), admin: { count, reset } });
     };
     expect(refused).toBeTypeOf('function');
   });
+
+  it('says which key is extra in the error, so the fix is obvious', () => {
+    type Guard = Parameters<
+      typeof rpc<
+        typeof contract,
+        Os,
+        { ping: typeof ping; admin: { count: typeof count; reset: typeof reset }; extra: typeof ping }
+      >
+    >[2];
+    expectTypeOf<Guard>().toHaveProperty('DOT: a procedure key is not in the contract');
+  });
 });
 
-describe('procedures as factories over the implementer', () => {
-  it('compile with `import type { os }`, so the emitted module never imports the feature back', () => {
-    const file = fileURLToPath(new URL('fixtures/rpc-app/digest/procedures.ts', import.meta.url));
-    const source = readFileSync(file, 'utf8');
-    expect(source).toContain("import type { os } from './feature.js'");
-    const emitted = ts.transpileModule(source, {
+describe('usecases and procedures in their own files', () => {
+  const emit = (path: string): string =>
+    ts.transpileModule(readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8'), {
       compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, verbatimModuleSyntax: true },
     }).outputText;
+
+  it('compile with `import type { os }` / `import type { Deps }`, so the emitted modules never import the feature back', () => {
+    const file = fileURLToPath(new URL('fixtures/rpc-app/digest/procedures/preview.ts', import.meta.url));
+    expect(readFileSync(file, 'utf8')).toContain("import type { os } from '../feature.js'");
+    const procedure = emit('fixtures/rpc-app/digest/procedures/preview.ts');
     // The `authed` import stays (a value); the type-only import of the feature is gone.
-    expect(emitted).toContain("from '../orpc.js'");
-    expect(emitted).not.toContain('feature.js');
+    expect(procedure).toContain("from '../../orpc.js'");
+    expect(procedure).not.toContain('feature.js');
+    expect(emit('fixtures/rpc-app/digest/usecases/preview.ts')).not.toContain('feature.js');
   });
 });

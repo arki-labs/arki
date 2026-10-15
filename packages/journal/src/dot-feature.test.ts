@@ -100,7 +100,7 @@ function ordersFeature(sent: OrderId[], done?: (id: OrderId) => void) {
   });
   const core = defineFeature('orders')
     .infra(mailer, journalProjections(countPlaced('chain-orders-count', 'chain')))
-    .usecases(() => ({}));
+    .usecases({});
   // entrypoints/journal.ts: a factory over the core (`import type` in a real app).
   const orderEffects = (c: typeof core) => journalEffects(c, { effects: [mail('chain-order-mail')] });
   return core.entrypoints(orderEffects(core));
@@ -151,14 +151,14 @@ describe('journalProjections + journalEffects in a defineFeature feature', () =>
   });
 
   it("checks an effect's needs against the core where it is listed, at compile time", () => {
-    const bare = defineFeature('bare').usecases(() => ({}));
+    const bare = defineFeature('bare').usecases({});
     // @ts-expect-error -- `bare` has no `mailer` need, infra service or usecase
     const refused = () => journalEffects(bare, { effects: [mail('needs-mailer')] });
     expect(refused).toBeTypeOf('function');
   });
 
   it('fails the feature boot when the types were bypassed and a need is missing', async () => {
-    const bare = defineFeature('bare-runtime').usecases(() => ({}));
+    const bare = defineFeature('bare-runtime').usecases({});
     // Erased on purpose: what a caller that skips the types would hand over.
     const erased: Parameters<typeof journalEffects>[1] = { effects: [mail('bypassed-mailer')] };
     const entry = journalEffects(bare, erased);

@@ -9,6 +9,7 @@
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
+import type { DepsOf } from '@arki/dot/feature';
 import { defineFeature, feature } from '@arki/dot/feature';
 import { defineApp, plugin, service } from '@arki/dot/plugin';
 
@@ -25,9 +26,13 @@ const outbox = plugin({
   provides: { outbox: ({ db }) => ({ pending: () => db.rows }) },
 });
 
-const core = defineFeature('digest')
-  .infra(outbox)
-  .usecases(({ outbox }) => ({ sendDue: () => `sent ${outbox.pending()}` }));
+const base = defineFeature('digest').infra(outbox);
+const core = base.usecases({
+  sendDue:
+    ({ outbox }: DepsOf<typeof base>) =>
+    () =>
+      `sent ${outbox.pending()}`,
+});
 
 /** entrypoints/schedules.ts: takes the core as a typed parameter (`import type` in a real app). */
 const digestSchedules = (c: typeof core) =>

@@ -308,9 +308,9 @@ function bindAll<F extends RepoFactories>(factories: F, database: DatabaseOf<F>)
  *   collections: createCollectionRepository,
  * });
  * // feature.ts
- * defineFeature('highlights').infra(repository).usecases(({ repos }) => ({
- *   list: (itemId: ItemId) => repos.highlights.listByItem(itemId),
- * }));
+ * defineFeature('highlights').infra(repository).usecases({
+ *   list: ({ repos }: Deps) => (itemId: ItemId) => repos.highlights.listByItem(itemId),
+ * });
  * ```
  */
 export function repos<K extends string, const F extends RepoFactories>(
@@ -385,7 +385,7 @@ export function reader<R extends object, const M extends readonly MethodKeys<R>[
  * ```ts
  * defineFeature('clustering')
  *   .infra(advisoryLocks(database.provides.db, { namespace: 'avocabo' }))
- *   .usecases(createUsecases)
+ *   .usecases({ assign })
  *   .entrypoints(schedules(core, [{ name: 'cluster-assign', cron: '*\/5 * * * *', lock: true, handler }]));
  * ```
  */

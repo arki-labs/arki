@@ -11,6 +11,7 @@
 import type { PGlite } from '@electric-sql/pglite';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 import { defineApp } from '@arki/dot';
+import type { DepsOf } from '@arki/dot/feature';
 import { defineFeature } from '@arki/dot/feature';
 import { plugin } from '@arki/dot/plugin';
 import { initJournal } from '@arki/journal';
@@ -60,28 +61,31 @@ const database = plugin({ name: 'database', provides: { db: (): Db => handle } }
 
 const repository = repos(database.provides.db, { accounts: (d: Database) => new AccountRepository(d) });
 
-const accountsFeature = defineFeature('accounts')
-  .infra(repository)
-  .usecases(({ repos }) => {
-    /** Open an account, then read it back through the repositories — inside the same transaction. */
-    const open = j.command(
-      'open',
-      z.object({ id: z.templateLiteral(['acc_', z.string()]), balance: z.int().nonnegative(), fail: z.boolean() }),
-      async (input, { write, tx }) => {
-        expectTypeOf(tx).toEqualTypeOf<Transaction>();
-        await write(account, input.id, () => [Opened({ balance: input.balance })]);
-        const seen = await repos.withTx(tx).accounts.balance(input.id);
-        if (input.fail) throw new Error('rolled back after the read');
-        return seen;
-      },
-    );
-    return {
-      open: (id: AccountId, balance: number, fail = false) =>
-        journal.run(handle, open, { id, balance, fail }, { actorId: 'usr_test' }),
-      balance: (id: AccountId) => repos.accounts.balance(id),
-    };
-  })
-  .entrypoints();
+const accountsBase = defineFeature('accounts').infra(repository);
+type Deps = DepsOf<typeof accountsBase>;
+
+/** Open an account, then read it back through the repositories — inside the same transaction. */
+const open = ({ repos }: Deps) => {
+  const command = j.command(
+    'open',
+    z.object({ id: z.templateLiteral(['acc_', z.string()]), balance: z.int().nonnegative(), fail: z.boolean() }),
+    async (input, { write, tx }) => {
+      expectTypeOf(tx).toEqualTypeOf<Transaction>();
+      await write(account, input.id, () => [Opened({ balance: input.balance })]);
+      const seen = await repos.withTx(tx).accounts.balance(input.id);
+      if (input.fail) throw new Error('rolled back after the read');
+      return seen;
+    },
+  );
+  return (id: AccountId, balance: number, fail = false) =>
+    journal.run(handle, command, { id, balance, fail }, { actorId: 'usr_test' });
+};
+const balance =
+  ({ repos }: Deps) =>
+  (id: AccountId) =>
+    repos.accounts.balance(id);
+
+const accountsFeature = accountsBase.usecases({ open, balance }).entrypoints();
 
 beforeAll(async () => {
   ({ db: handle, client } = await openJournalDb({ ...tables, accounts }));

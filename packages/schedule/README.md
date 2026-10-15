@@ -72,7 +72,7 @@ Cron still decides _when_; the core decides _with what_.
 ```ts
 defineFeature('clustering')
   .infra(advisoryLocks(database.provides.db, { namespace: 'avocabo' })) // from @arki/db/dot
-  .usecases(createUsecases);
+  .usecases({ assign });
 
 schedules(core, [
   { name: 'cluster-assign', cron: '*/5 * * * *', lock: true, handler: ({ usecases }) => usecases.assign() },

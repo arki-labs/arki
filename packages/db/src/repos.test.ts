@@ -8,6 +8,7 @@
  * tests replace the whole set with fakes that type-check. PGlite throughout.
  */
 import { defineApp, rename } from '@arki/dot';
+import type { DepsOf } from '@arki/dot/feature';
 import { defineFeature } from '@arki/dot/feature';
 import type { Provided } from '@arki/dot/plugin';
 import { defineRelations, eq, sql } from 'drizzle-orm';
@@ -58,13 +59,22 @@ const factories = {
 };
 const repository = repos(database.provides.db, factories);
 
-const core = defineFeature('notes')
-  .infra(repository)
-  .usecases(({ repos }) => ({
-    write: (id: string, body: string) => repos.notes.add(id, body),
-    read: (id: string) => repos.notes.get(id),
-    count: () => repos.counts.count(),
-  }));
+const base = defineFeature('notes').infra(repository);
+type Deps = DepsOf<typeof base>;
+const core = base.usecases({
+  write:
+    ({ repos }: Deps) =>
+    (id: string, body: string) =>
+      repos.notes.add(id, body),
+  read:
+    ({ repos }: Deps) =>
+    (id: string) =>
+      repos.notes.get(id),
+  count:
+    ({ repos }: Deps) =>
+    () =>
+      repos.counts.count(),
+});
 const feature = core.provides({ noteReader: ({ repos }) => reader(repos.notes, ['get']) }).entrypoints();
 
 const createTable = (handle: Db) => handle.execute(sql`create table notes (id text primary key, body text not null)`);
@@ -102,9 +112,9 @@ describe('repos(): boot and wiring', () => {
   it('binds to the database the handle names — a second database is never picked by accident', async () => {
     const reports = rename(db({ driver: 'pglite', memory: true, relations }), { db: 'reportsDb' }, 'reports-db');
     const reportRepos = repos(reports.provides.reportsDb, { counts: createCountRepository });
-    const stats = defineFeature('stats')
-      .infra(reportRepos)
-      .usecases(({ repos }) => ({ count: () => repos.counts.count() }))
+    const statsBase = defineFeature('stats').infra(reportRepos);
+    const stats = statsBase
+      .usecases({ count: ({ repos }: DepsOf<typeof statsBase>) => () => repos.counts.count() })
       .entrypoints();
     const app = await defineApp('two-dbs').infra(database, reports).features([stats]).start();
     try {

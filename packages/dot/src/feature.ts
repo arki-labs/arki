@@ -83,6 +83,9 @@ export type {
   RouterFor,
   RouterOf,
   RpcEntrypoint,
+  UsecaseFactories,
+  UsecaseGuard,
+  Usecases,
   UsecasesStage,
 } from './define-feature.js';
 

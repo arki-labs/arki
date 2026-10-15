@@ -136,21 +136,26 @@ defineApp('avocabo')
 A feature is a chain whose steps are its folders:
 
 ```ts
-// features/daily-digest/feature.ts — one file; entrypoint files take `core` / `os` as typed parameters
-export const core = defineFeature('daily-digest')
+// features/daily-digest/feature.ts — one file; usecase and procedure files take `Deps` / `os` as types
+const base = defineFeature('daily-digest')
   .needs({ plans: billing.provides.entitlements })    // other units, by handle
-  .infra(store, mailer)                                // infra/ — private plugins
-  .usecases(createUsecases);                           // usecases/ — (deps) => usecases
+  .infra(store, mailer);                               // infra/ — private plugins
+export type Deps = DepsOf<typeof base>;               // what a usecase may ask for
+const core = base.usecases({ preview, sendDue });     // usecases/ — one file per usecase
 export const dailyDigest = core
   .provides({ digests: ({ usecases }) => ({ previewFor: usecases.preview }) })
-  .entrypoints(rpc(digestContract, procedures(os)), digestSchedules(core)); // entrypoints/
+  .entrypoints(rpc(digestContract, os, { preview: previewProcedure }), digestSchedules(core)); // entrypoints/
 ```
 
 Rules the types enforce (each is also a coded runtime check):
 
 - Steps run in order; a step out of order does not compile.
-- `.usecases(create)` gets `{ ...needs, ...infra }`; `.provides` factories and
-  entrypoints get the same plus `usecases`, built once per boot.
+- `.usecases({ name: factory })` takes one factory per usecase; each gets
+  `{ ...needs, ...infra }` (and may `Pick` a subset); asking for a dep the
+  feature lacks is a compile error. `.provides` factories and entrypoints get
+  the same plus `usecases`, built once per boot.
+- `rpc(contract, os, factories)` takes one factory per procedure, shaped like
+  the contract; an extra, missing or wrong procedure does not compile.
 - Feature infra is private: `.infra(store)` publishes `daily-digest.store`
   under the unit `daily-digest/store`; a sibling infra need follows the
   qualified key. Other features reach it only through `.provides`.

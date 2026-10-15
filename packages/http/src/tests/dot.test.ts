@@ -9,6 +9,7 @@
  * socket layer.
  */
 
+import type { DepsOf } from '@arki/dot/feature';
 import { defineFeature, feature } from '@arki/dot/feature';
 import { defineApp, service, token, plugin } from '@arki/dot/plugin';
 import { describe, expect, it } from 'vitest';
@@ -132,9 +133,8 @@ describe('http() plugin', () => {
       needs: { ordersDb: service<OrdersDb>() },
       provides: { store: ({ ordersDb }) => ({ all: () => ordersDb.list() }) },
     });
-    const core = defineFeature('orders')
-      .infra(store)
-      .usecases(({ store }) => ({ list: () => store.all() }));
+    const base = defineFeature('orders').infra(store);
+    const core = base.usecases({ list: ({ store }: DepsOf<typeof base>) => () => store.all() });
     const orderRoutes = (c: typeof core) =>
       coreEndpoints(c, ({ usecases }) => routes().bind(listOrders, () => usecases.list()), { contracts: [listOrders] });
     const orders = core.entrypoints(orderRoutes(core));
@@ -163,7 +163,7 @@ describe('http() plugin', () => {
   });
 
   it('types endpoints(core, build) services from the core', () => {
-    const core = defineFeature('typed').usecases(() => ({ ping: () => 'pong' }));
+    const core = defineFeature('typed').usecases({ ping: () => () => 'pong' });
     coreEndpoints(core, ({ usecases }) => routes().bind(health, () => ({ ok: usecases.ping() === 'pong' })));
     // @ts-expect-error -- `ordersDb` is not a need, infra service or usecases of this feature
     coreEndpoints(core, ({ ordersDb }) => routes().bind(listOrders, () => ordersDb.list()));

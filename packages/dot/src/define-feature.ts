@@ -5,7 +5,7 @@
  *   defineFeature('daily-digest')
  *     .needs({ plans: billing.provides.entitlements })   what it takes from other units, by handle
  *     .infra(store, mailer)                              its own plugins, private to it
- *     .usecases(createUsecases)                          what it does: (deps) => usecases
+ *     .usecases({ preview, send })                       what it does: one factory per usecase
  *     .provides({ digests: ({ usecases }) => … })        what it offers other features
  *     .entrypoints(rpc(…), schedules(…), …)              how it is reached
  *
@@ -199,7 +199,11 @@ export type FeatureCore<TName extends string, N extends NeedsShape, I extends re
 /** Any feature core — the constraint entrypoint factories take (`schedules(core, defs)`). */
 export type AnyFeatureCore = { readonly name: string; readonly handles: NeedsShape };
 
-/** The services a core hands its entrypoints — types handlers declared in another file. */
+/**
+ * The services a stage hands its next step — types code declared in another
+ * file. Before `.usecases()` it is what a usecase may ask for (needs + infra);
+ * after, it is what entrypoints get (the same plus `usecases`).
+ */
 export type DepsOf<C> = C extends { readonly [CoreServicesTag]?: infer D } ? D : never;
 
 /** A finished feature: what `.entrypoints(...)` returns and `defineApp().features([...])` mounts. */
@@ -253,6 +257,28 @@ type EntrypointGuard<P, E extends readonly AnyEntrypoint[]> = [EntrypointCollisi
   ? unknown
   : { readonly 'DOT: an entrypoint key collides with a provided service or `usecases`': EntrypointCollision<P, E> };
 
+/* ---- usecases: an object of factories, each checked against the deps ---- */
+
+/** What `.usecases()` takes: one factory per usecase, `(deps) => usecase`. */
+export type UsecaseFactories = Readonly<Record<string, (deps: never) => unknown>>;
+
+/** The usecases object: each factory's return under its key. */
+export type Usecases<F extends UsecaseFactories> = { readonly [K in keyof F]: ReturnType<F[K]> };
+
+type DepsAskedBy<Fn> = Fn extends (deps: infer D) => unknown ? D : never;
+type BadUsecases<D, F extends UsecaseFactories> = {
+  [K in keyof F]: [D] extends [DepsAskedBy<F[K]>] ? never : K;
+}[keyof F];
+
+/** Names each usecase that asks for a dep the feature does not have, and the deps it lacks. */
+export type UsecaseGuard<D, F extends UsecaseFactories> = [BadUsecases<D, F>] extends [never]
+  ? unknown
+  : {
+      readonly 'DOT: a usecase asks for a dep the feature does not provide': {
+        readonly [K in BadUsecases<D, F>]: Exclude<keyof DepsAskedBy<F[K]>, keyof D>;
+      };
+    };
+
 /* ---- stages: each offers only the later steps ---- */
 
 export type EntrypointsStage<
@@ -280,14 +306,24 @@ export type ProvidesStage<
   }): EntrypointsStage<TName, N, I, U, P>;
 };
 
-export type UsecasesStage<TName extends string, N extends NeedsShape, I extends readonly AnyPlugin[]> = ProvidesStage<
-  TName,
-  N,
-  I,
-  EmptyShape
+export type UsecasesStage<TName extends string, N extends NeedsShape, I extends readonly AnyPlugin[]> = Omit<
+  ProvidesStage<TName, N, I, EmptyShape>,
+  typeof CoreServicesTag
 > & {
-  /** Build the usecases object once per boot from the needs and the infra services. */
-  usecases<U>(create: (deps: CoreDeps<N, I>) => U): ProvidesStage<TName, N, I, U>;
+  /**
+   * Before `.usecases()` there are no usecases, so `DepsOf<typeof base>` is
+   * exactly what a usecase may ask for — needs + infra, no `usecases` key.
+   */
+  readonly [CoreServicesTag]?: CoreDeps<N, I>;
+  /**
+   * One factory per usecase, built once per boot: `{ signup, markInvited }`,
+   * each `(deps) => usecase`. A factory may ask for any subset of the deps
+   * (`Pick<Deps, 'repos'>`); asking for one the feature lacks is a compile
+   * error naming the usecase.
+   */
+  usecases<const F extends UsecaseFactories>(
+    factories: F & UsecaseGuard<CoreDeps<N, I>, F>,
+  ): ProvidesStage<TName, N, I, Usecases<F>>;
 };
 
 export type InfraStage<TName extends string, N extends NeedsShape> = UsecasesStage<TName, N, readonly []> & {
@@ -331,7 +367,7 @@ type RuntimeStage = {
   readonly handles: NeedsShape;
   needs(needs: NeedsShape): RuntimeStage;
   infra(...plugins: readonly AnyPlugin[]): RuntimeStage;
-  usecases(create: Factory): RuntimeStage;
+  usecases(factories: Readonly<Record<string, Factory>>): RuntimeStage;
   provides(factories: Readonly<Record<string, Factory>>): RuntimeStage;
   entrypoints(...entrypoints: readonly AnyEntrypoint[]): RuntimeFeature;
 };
@@ -435,7 +471,7 @@ function compile(
   const built = new WeakMap<object, unknown>();
   const usecasesOf = (ctx: object): unknown => {
     if (!built.has(ctx)) {
-      // Erasure seam: `create` was typed against these deps by `.usecases()`.
+      // Erasure seam: each factory was typed against these deps by `.usecases()`.
       built.set(ctx, state.usecases === undefined ? {} : state.usecases(ctx as never));
     }
     return built.get(ctx);
@@ -533,7 +569,12 @@ function stage(state: FeatureState): RuntimeStage {
       }
       return stage({ ...state, infra: plugins });
     },
-    usecases: create => stage({ ...state, usecases: create }),
+    usecases: factories =>
+      stage({
+        ...state,
+        // One object, one key per factory, each built from the same deps.
+        usecases: deps => Object.fromEntries(Object.entries(factories).map(([key, create]) => [key, create(deps)])),
+      }),
     provides: factories => {
       for (const key of Object.keys(factories)) {
         if (RESERVED.has(key) || key === `${state.name}.usecases` || key === `feature.${state.name}`) {

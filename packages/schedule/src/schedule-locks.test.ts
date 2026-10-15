@@ -36,15 +36,15 @@ function buildApp(answer: () => 'free' | 'held' | 'broken', driverLease?: KvLike
   let calls = 0;
   const core = defineFeature('clustering')
     .infra(plugin({ name: 'locks', provides: { locks: () => fake.locks } }))
-    .usecases(() => ({
-      assign: () => {
+    .usecases({
+      assign: () => () => {
         calls += 1;
         return 'assigned';
       },
-      broken: (): string => {
+      broken: () => (): string => {
         throw new Error('handler broke');
       },
-    }));
+    });
   const clustering = core.entrypoints(
     schedules(core, [
       { name: 'cluster-assign', cron: '*/5 * * * *', lock: true, handler: ({ usecases }) => usecases.assign() },
@@ -128,7 +128,7 @@ describe('schedules(core, [{ lock }])', () => {
   });
 
   it('a lock without a `locks` service does not compile', () => {
-    const bare = defineFeature('bare').usecases(() => ({ run: () => 1 }));
+    const bare = defineFeature('bare').usecases({ run: () => () => 1 });
     // @ts-expect-error the feature has no `locks` service
     schedules(bare, [{ name: 'job', every: '1m', lock: true, handler: ({ usecases }) => usecases.run() }]);
     // Without `lock`, the same feature is fine.

@@ -497,8 +497,8 @@ A chain feature declares the same handlers by layer. The journal reads them from
 export const core = defineFeature('orders')
   .needs({ journal: service<AppJournal>(), db: database.provides.db })
   .infra(mailer, journalProjections(customerStats)) // projections keep read models: infra
-  .usecases(createUsecases); // commands live here
-export const orders = core.entrypoints(rpc(ordersContract, procedures(os)), orderEffects(core));
+  .usecases({ placeOrder }); // commands live here, one file per usecase
+export const orders = core.entrypoints(rpc(ordersContract, os, { place: placeProcedure }), orderEffects(core));
 
 // features/orders/entrypoints/journal.ts — `import type` only
 export const orderEffects = (c: typeof core) => journalEffects(c, { effects: [orderMail], taps: [] });

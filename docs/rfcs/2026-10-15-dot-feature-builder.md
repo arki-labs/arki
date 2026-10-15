@@ -15,6 +15,16 @@
 7. **Astra's three review changes adopted**: no `core.ts` (the chain stays in `feature.ts`; entrypoint files take `core` / `os` as `import type` parameters); the compilation invariants fixed (sibling-need remap, atomic override, reserved names, typed plugin tuple); migration re-scoped over every adapter and both apps.
 8. **One breaking release**: the new API lives next to the old one inside the monorepo during the migration series; the last phase deletes the old API; the founder then releases (Stage 2).
 
+## Amendment (2026-10-15) — one file per usecase, one file per procedure
+
+**Rule.** A usecase file exports one factory named after the file (`usecases/mark-invited.ts` → `markInvited`), typed `(deps: Pick<Deps, …>) => usecase`. A procedure file exports one factory, `entrypoints/procedures/<name>.ts` → `<name>Procedure = (o: typeof os) => o.<path>.handler(…)`; a contract group is a folder (`procedures/admin/mark-invited.ts` → `markInvitedProcedure`). `create-usecases.ts` and `procedures.ts` go away. Helpers that need deps stay in `usecases/` as plain functions their usecases call (named so they are not mistaken for one, e.g. `create-push-sender.ts`); pure helpers go to `model/`.
+
+**API.** `.usecases({ signup, markInvited })` takes an object of factories; a factory that asks for a dep the feature lacks is a compile error naming the usecase and the dep (`'DOT: a usecase asks for a dep the feature does not provide'`). The single-factory form is removed (pre-1.0, one way). `rpc(contract, os, { signup: signupProcedure, admin: { markInvited: markInvitedProcedure } })` builds the router; keys match the contract exactly (extra → `'DOT: a procedure key is not in the contract'`, missing or wrong procedure → compile error). The contract stays the one list of procedure names. A usecase need not have a procedure (a cron, a webhook or a `provides` handle may call it), and a procedure need not have a usecase: `rpc` checks against the contract only.
+
+**Still no `core.ts`.** `feature.ts` stays the one map of the feature (decision 7). It splits the chain at `.usecases()` inside the same file: `const base = defineFeature(…).infra(…)`, `export type Deps = DepsOf<typeof base>`, `const core = base.usecases({…})`, `export const os = implement(contract)…use(bind(core))`. Usecase and procedure files take `Deps` / `os` with `import type` from `feature.ts`, so the module graph has no cycle; lint bans runtime imports of `feature.ts` from `usecases/` and `entrypoints/`.
+
+**Why.** Small files are easy to read, review and test: a usecase test passes two fakes for its `Pick` and boots nothing. The `Procedure` suffix solves the clash between a usecase and its procedure of the same name, which otherwise forces an import alias per procedure in `feature.ts` (the reason a `core.ts` split was proposed and turned down). `DepsOf` on the stage before `.usecases()` was fixed to leave out `usecases`, so `Deps` is exactly what a usecase may ask for.
+
 ## Contents
 
 - Part A — `defineFeature` / `defineApp` final design (Fable, Revision 2 on top).

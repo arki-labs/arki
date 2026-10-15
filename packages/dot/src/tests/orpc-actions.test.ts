@@ -31,19 +31,20 @@ const storyContract = oc.$meta<{ auth?: 'user' | 'admin' }>({}).router({
 
 const storyOs = implement(storyContract);
 const stories = defineFeature('stories').entrypoints(
-  rpc(storyContract, {
-    list: storyOs.list.handler(() => []),
-    remove: storyOs.remove.handler(() => {
-      throw new ORPCError('NOT_FOUND');
-    }),
-    drafts: { list: storyOs.drafts.list.handler(() => []) },
+  rpc(storyContract, storyOs, {
+    list: o => o.list.handler(() => []),
+    remove: o =>
+      o.remove.handler(() => {
+        throw new ORPCError('NOT_FOUND');
+      }),
+    drafts: { list: o => o.drafts.list.handler(() => []) },
   }),
 );
 
 /** A second feature with a `list` of its own. */
 const podContract = oc.router({ list: oc.output(z.array(z.string())) });
 const pods = defineFeature('pods').entrypoints(
-  rpc(podContract, { list: implement(podContract).list.handler(() => []) }),
+  rpc(podContract, implement(podContract), { list: o => o.list.handler(() => []) }),
 );
 
 const manifestOf = () =>
@@ -88,7 +89,7 @@ describe('rpc(): manifest actions', () => {
 
   it('refuses meta that is not plain JSON, where the feature is declared', () => {
     const odd = oc.$meta<{ since?: Date }>({}).router({ ping: oc.meta({ since: new Date(0) }).output(z.string()) });
-    expect(() => rpc(odd, { ping: implement(odd).ping.handler(() => 'pong') })).toThrow(
+    expect(() => rpc(odd, implement(odd), { ping: o => o.ping.handler(() => 'pong') })).toThrow(
       expect.objectContaining({ code: FEATURE_ERROR_CODES.rpcMetaNotJson }),
     );
   });
