@@ -22,9 +22,10 @@ const posts = new Map<string, Post>([['p1', { id: 'p1', title: 'Hello' }]]);
 const find = async (id: string) => {
   await Promise.resolve(); // stands in for the repository read
   if (id === 'locked') return PostLocked();
-  if (id === 'unlisted') return Unlisted();
   return posts.get(id) ?? PostNotFound({ id });
 };
+/** A usecase that grew a failure the contract below does not list yet. */
+const findListed = async (id: string) => (id === 'unlisted' ? Unlisted() : find(id));
 
 /** The contract lists the failures by definition: code, status and data schema are written once, in defineFailure. */
 const byId = oc
@@ -32,7 +33,7 @@ const byId = oc
   .input(z.object({ id: z.string() }))
   .output(PostSchema);
 
-const procedure = implement(byId).handler(({ input }) => orThrowRpc(find(input.id)));
+const procedure = implement(byId).handler(({ input, errors }) => orThrowRpc(find(input.id), errors));
 
 describe('errorMap', () => {
   it('builds the oRPC error map from the definitions', () => {
@@ -68,8 +69,19 @@ describe('orThrowRpc in a procedure', () => {
     await expect(call(procedure, { id: 'locked' })).rejects.toMatchObject({ code: 'post.locked', defined: true });
   });
 
-  it('marks a failure the contract does not declare as undeclared, so it is visible, not silently typed', async () => {
-    await expect(call(procedure, { id: 'unlisted' })).rejects.toMatchObject({
+  it('makes a failure the contract does not list a compile error, so the client never meets an untyped error', () => {
+    const compileOnly = () =>
+      implement(byId).handler(({ input, errors }) =>
+        // @ts-expect-error -- 'post.unlisted' is missing from the contract's errors
+        orThrowRpc(findListed(input.id), errors),
+      );
+    expect(compileOnly).toBeTypeOf('function');
+  });
+
+  it('still throws an undeclared ORPCError when the types were bypassed, so the gap stays visible', async () => {
+    const loose: Record<string, never> = {};
+    const bypassed = implement(byId).handler(({ input }) => orThrowRpc(findListed(input.id), loose as never));
+    await expect(call(bypassed, { id: 'unlisted' })).rejects.toMatchObject({
       code: 'post.unlisted',
       status: 403,
       defined: false,
@@ -79,6 +91,9 @@ describe('orThrowRpc in a procedure', () => {
   it('makes forgetting orThrowRpc a compile error: a failure is not the output', () => {
     // @ts-expect-error -- Post | Failure is not assignable to the output Post
     implement(byId).handler(({ input }) => find(input.id));
-    expectTypeOf(orThrowRpc(find('p1'))).toEqualTypeOf<Promise<Post>>();
+    implement(byId).handler(({ input, errors }) => {
+      expectTypeOf(orThrowRpc(find(input.id), errors)).toEqualTypeOf<Promise<Post>>();
+      return orThrowRpc(find(input.id), errors);
+    });
   });
 });

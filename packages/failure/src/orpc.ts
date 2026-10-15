@@ -4,8 +4,8 @@
  * Define each failure once with `defineFailure`. The contract lists them with
  * `errorMap(...)`, so the client gets typed errors. The procedure hands the
  * usecase's result to `orThrowRpc(...)`, which returns the value or throws the
- * matching `ORPCError`. Code, status and data come from the same definition,
- * so the contract and the usecase cannot drift apart.
+ * matching `ORPCError`. It also takes the handler's `errors`, so a failure the
+ * usecase can return but the contract does not list is a compile error.
  *
  * @example
  * // model/errors.ts
@@ -13,7 +13,7 @@
  * // entrypoints/rpc.ts
  * byId: oc.errors(errorMap(PostNotFound)).input(z.object({ id: PostId })).output(PostSchema),
  * // entrypoints/procedures.ts
- * byId: impl => impl.byId.handler(({ context, input }) => orThrowRpc(context.usecases.find(input.id))),
+ * byId: impl => impl.byId.handler(({ context, input, errors }) => orThrowRpc(context.usecases.find(input.id), errors)),
  */
 import { ORPCError } from '@orpc/server';
 
@@ -60,19 +60,46 @@ export function errorMap(...definitions: readonly DefinitionShape[]): unknown {
   return Object.fromEntries(entries);
 }
 
+/** One oRPC error constructor, as the handler's `errors` object holds them. */
+type ErrorConstructor<Data> = (options: { readonly message: string; readonly data: Data }) => Error;
+
 /**
- * The value, or throw its failure as the `ORPCError` the contract declares
- * (same code, status, message and data). Takes a promise too, so a handler can
- * return `orThrowRpc(usecase(input))` directly.
+ * The handler's `errors` must hold a constructor for every failure code the
+ * value can carry. A code the contract does not list is a missing property.
  */
-export function orThrowRpc<Value>(value: PromiseLike<Value>): Promise<Exclude<Value, Failure>>;
-export function orThrowRpc<Value>(value: Value): Exclude<Value, Failure>;
-export function orThrowRpc(value: unknown): unknown {
-  if (isThenable(value)) return Promise.resolve(value).then(orThrowRpcNow);
-  return orThrowRpcNow(value);
+export type DeclaredErrors<Value> = {
+  readonly [Code in Extract<Value, Failure>['code']]: ErrorConstructor<Extract<Value, Failure<Code>>['data']>;
+};
+
+/** The loose shape the implementation reads; the overloads above keep it typed. */
+type LooseErrors = Readonly<Partial<Record<string, ErrorConstructor<unknown>>>>;
+
+/**
+ * The value, or throw its failure through the handler's `errors`, the typed
+ * `ORPCError` the contract declares (same code, status, message and data).
+ * Pass the handler's `errors`: a failure the contract does not list is a
+ * compile error. Takes a promise too, so a handler can return
+ * `orThrowRpc(usecase(input), errors)` directly.
+ */
+export function orThrowRpc<Value>(
+  value: PromiseLike<Value>,
+  errors: NoInfer<DeclaredErrors<Value>>,
+): Promise<Exclude<Value, Failure>>;
+export function orThrowRpc<Value>(
+  value: Value,
+  errors: NoInfer<DeclaredErrors<Awaited<Value>>>,
+): Exclude<Value, Failure>;
+export function orThrowRpc(value: unknown, errors: LooseErrors): unknown {
+  if (isThenable(value)) return Promise.resolve(value).then(resolved => orThrowRpcNow(resolved, errors));
+  return orThrowRpcNow(value, errors);
 }
 
-function orThrowRpcNow(value: unknown): unknown {
+function orThrowRpcNow(value: unknown, errors: LooseErrors): unknown {
   if (!isFailure(value)) return value;
-  throw new ORPCError(value.code, { status: value.status, message: value.message, data: value.data });
+  const declared = errors[value.code];
+  // Reached only when the types were bypassed: the client sees an undeclared error (`defined: false`).
+  if (declared === undefined) {
+    throw new ORPCError(value.code, { status: value.status, message: value.message, data: value.data });
+  }
+  throw declared({ message: value.message, data: value.data });
 }

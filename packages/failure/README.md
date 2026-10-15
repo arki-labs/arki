@@ -174,7 +174,7 @@ Peers for this entry: `eslint`, `@typescript-eslint/utils`, `typescript`.
 
 ## oRPC: `@arki/failure/orpc`
 
-The contract lists failures by definition, and the procedure hands the usecase's result to `orThrowRpc`. Code, status and data come from one `defineFailure`, so the contract and the usecase cannot drift.
+The contract lists failures by definition, and the procedure hands the usecase's result to `orThrowRpc` with the handler's `errors`. Code, status and data come from one `defineFailure`, and a failure the contract does not list is a compile error, so the contract and the usecase cannot drift.
 
 ```ts
 import { errorMap, orThrowRpc } from '@arki/failure/orpc';
@@ -183,11 +183,12 @@ import { errorMap, orThrowRpc } from '@arki/failure/orpc';
 byId: oc.errors(errorMap(PostNotFound)).input(z.object({ id: PostId })).output(PostSchema),
 
 // entrypoints/procedures.ts
-byId: impl => impl.byId.handler(({ context, input }) => orThrowRpc(context.usecases.find(input.id))),
+byId: impl => impl.byId.handler(({ context, input, errors }) => orThrowRpc(context.usecases.find(input.id), errors)),
 ```
 
 - `errorMap(...definitions)` builds the contract's error map. Two definitions with one code throw `ARKI_FAILURE_E005`.
-- `orThrowRpc(value)` returns the value, or throws the `ORPCError` with the failure's code, status, message and data. oRPC marks it `defined: true`, so the client gets a typed error. A failure the contract does not list arrives as undeclared (`defined: false`), which keeps the gap visible.
+- `orThrowRpc(value, errors)` returns the value, or throws the failure through the handler's `errors`: the typed `ORPCError` the contract declares, with the failure's message and data. The client gets it as `defined: true`.
+- A failure the usecase can return but the contract does not list is a compile error: `Property '"post.locked"' is missing in type …`. Add its definition to `errorMap(...)`. If the types are bypassed anyway, the failure arrives as undeclared (`defined: false`).
 - Forgetting `orThrowRpc` is a compile error: `Post | Failure` is not the procedure's output.
 
 `@orpc/server` is an optional peer dependency, needed only for this entry.
