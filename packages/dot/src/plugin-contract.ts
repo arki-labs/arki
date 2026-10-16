@@ -430,6 +430,7 @@ export type AnyFactories = Readonly<Record<string, (ctx: never) => unknown>>;
 
 declare const NeedsSym: unique symbol;
 declare const ProvidesSym: unique symbol;
+declare const ProviderIdentitySym: unique symbol;
 
 /**
  * The DOT plugin (v2). Author through {@link plugin} — never construct directly.
@@ -440,12 +441,22 @@ declare const ProvidesSym: unique symbol;
  * bottom type). The kernel crosses the erasure boundary at the call site.
  *
  * The phantom symbol properties carry `TNeeds` / `TProvides` for the app
- * builder's compile-time wiring check; they never exist at runtime.
+ * builder's compile-time wiring check, and `TShape` (the `needs` record as
+ * written: alias → witness) so the feature builder can read WHICH handle a
+ * need names — its `provider` and `key` literals — not only the service type.
+ * `Plugin<N, P>` without a shape means "unknown"; the checks that read it
+ * fall back to the wire-key rules. They never exist at runtime. `TOwner` is
+ * the plugin's name as a literal — the `provider` its handles carry.
  */
 /** See {@link Plugin.role}. */
 export type DotPluginRole = 'feature' | 'driving';
 
-export type Plugin<TNeeds extends ServiceRecord = ServiceRecord, TProvides extends ServiceRecord = ServiceRecord> = {
+export type Plugin<
+  TNeeds extends ServiceRecord = ServiceRecord,
+  TProvides extends ServiceRecord = ServiceRecord,
+  TShape extends NeedsShape = NeedsShape,
+  TOwner extends string = string,
+> = {
   /** Unique identifier for this plugin within the app. */
   readonly name: string;
   /** Optional semantic version string. */
@@ -467,7 +478,7 @@ export type Plugin<TNeeds extends ServiceRecord = ServiceRecord, TProvides exten
    * `dot explain` draws the edges without booting. `rename()` rebuilds
    * them on the new keys.
    */
-  readonly provides: Handles<TProvides>;
+  readonly provides: Handles<TProvides, TOwner>;
   /** The `provides` factories, keyed by publish key (before renames). The kernel runs them in key order at boot. */
   readonly factories: AnyFactories;
   /**
@@ -485,12 +496,22 @@ export type Plugin<TNeeds extends ServiceRecord = ServiceRecord, TProvides exten
   };
   readonly [NeedsSym]?: TNeeds;
   readonly [ProvidesSym]?: TProvides;
+  readonly [ProviderIdentitySym]?: TShape;
 };
 
 /** Extract a plugin's (wire-keyed) needs record. */
 export type PluginNeeds<P> = P extends Plugin<infer N, ServiceRecord> ? N : never;
 /** Extract a plugin's (wire-keyed) provides record. */
 export type PluginProvides<P> = P extends Plugin<ServiceRecord, infer Pr> ? Pr : never;
+/**
+ * Extract a plugin's needs as written (alias → witness). A handle witness
+ * carries the identity of the service it names (`provider` + `key`); an
+ * anonymous `service<T>()` carries none. `NeedsShape` (every key, every
+ * witness) when the plugin was typed without a shape — "unknown".
+ */
+export type PluginProviderIdentities<P> = P extends Plugin<ServiceRecord, ServiceRecord, infer S> ? S : NeedsShape;
+/** The `provider` literal a plugin's handles carry (`string` when the plugin was typed without its name). */
+export type PluginOwner<P> = P extends Plugin<ServiceRecord, ServiceRecord, NeedsShape, infer O> ? O : string;
 
 /** Internal type alias used by the kernel to erase plugin service generics. */
 export type AnyPlugin = Plugin<ServiceRecord, ServiceRecord>;
@@ -526,8 +547,9 @@ export type AnyPlugin = Plugin<ServiceRecord, ServiceRecord>;
 export function plugin<
   TShape extends NeedsShape & NoReservedKeys = EmptyShape,
   TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
+  const TName extends string = string,
 >(def: {
-  readonly name: string;
+  readonly name: TName;
   readonly version?: string;
   readonly needs?: TShape;
   readonly actions?: readonly ActionSource[];
@@ -541,7 +563,7 @@ export function plugin<
   readonly start?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly stop?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly dispose?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
-}): Plugin<WireNeeds<TShape>, TProvides> {
+}): Plugin<WireNeeds<TShape>, TProvides, TShape, TName> {
   const factories: AnyFactories = def.provides ?? {};
   const handles: Record<string, AnyHandle> = {};
   for (const key of Object.keys(factories)) handles[key] = handleOf(key, def.name);
@@ -552,8 +574,8 @@ export function plugin<
     actions: def.actions ?? [],
     renames: {},
     // Erasure seam: the record is built by key at runtime; its type comes
-    // from the factory returns that `plugin()` inferred.
-    provides: handles as Handles<TProvides>,
+    // from the factory returns that `plugin()` inferred, its `provider` from `name`.
+    provides: handles as Handles<TProvides, TName>,
     factories,
     ...(def.logging === undefined ? {} : { logging: def.logging }),
     hooks: {
@@ -582,13 +604,17 @@ export type RenamedProvides<TP, M> = {
  * name, so `rename(...).provides.reportsDb` is the handle to reference. A
  * handle taken from the object before the rename keeps the old key — the
  * builder guard reports it missing; reference the handle of the object you
- * mount.
+ * mount. Without `newName` the handles keep the original provider.
  */
 export function rename<
-  TN extends ServiceRecord,
-  TP extends ServiceRecord,
-  const M extends { readonly [K in keyof TP]?: string },
->(p: Plugin<TN, TP>, map: M, newName?: string): Plugin<TN, RenamedProvides<TP, M>> {
+  P extends AnyPlugin,
+  const M extends { readonly [K in keyof PluginProvides<P>]?: string },
+  const TNewName extends string = PluginOwner<P>,
+>(
+  p: P,
+  map: M,
+  newName?: TNewName,
+): Plugin<PluginNeeds<P>, RenamedProvides<PluginProvides<P>, M>, PluginProviderIdentities<P>, TNewName> {
   const renames: Record<string, string> = { ...p.renames };
   const entries: Readonly<Record<string, string | undefined>> = map;
   for (const [wireKey, next] of Object.entries(entries)) {
@@ -607,7 +633,13 @@ export function rename<
   }
   // Phantom-only cast: the handles are rebuilt by key at runtime; only the
   // [ProvidesSym] carrier and the handle record retype.
-  return { ...p, name, renames, provides: handles } as Plugin<TN, RenamedProvides<TP, M>>;
+  const renamed: AnyPlugin = { ...p, name, renames, provides: handles };
+  return renamed as Plugin<
+    PluginNeeds<P>,
+    RenamedProvides<PluginProvides<P>, M>,
+    PluginProviderIdentities<P>,
+    TNewName
+  >;
 }
 
 /**

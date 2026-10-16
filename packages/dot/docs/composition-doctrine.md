@@ -159,6 +159,16 @@ Rules the types enforce (each is also a coded runtime check):
 - Feature infra is private: `.infra(store)` publishes `daily-digest.store`
   under the unit `daily-digest/store`; a sibling infra need follows the
   qualified key. Other features reach it only through `.provides`.
+- A need names a handle, and the types read its identity — the `provider`
+  and `key` literals the handle carries — not only its service type. A
+  child's need is remapped onto its parent only when it names the parent's
+  own infra handle; a same-shaped global handle stays a global need
+  (`ARKI_DOT_E012` at boot otherwise). An infra plugin that binds a need to a
+  handle must bind the feature's handle (`ARKI_DOT_E026` at `.infra()`).
+  Residual the types cannot see: two plugins with the same name, publish key
+  and service type are one identity to the compiler; the runtime still tells
+  them apart by object. A `Plugin<N, P>` annotation erases both the shape and
+  the name, and the checks fall back to wire keys for that plugin.
 - `session`, `headers`, `services` and `usecases` are reserved aliases; an
   infra key equal to a need alias, and an entrypoint key equal to a provided
   key, are compile errors (`FEATURE_E006` at runtime).

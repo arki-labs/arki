@@ -40,6 +40,7 @@ import type {
   NoReservedKeys,
   Plugin,
   PluginNeeds,
+  PluginProviderIdentities,
   PluginProvides,
   Provided,
   Service,
@@ -231,28 +232,77 @@ export type ChildProvides<C extends readonly AnyDefinedFeature[]> = C extends re
   ? EmptyShape
   : UnionToIntersection<ProvidesOf<C[number]>>;
 
+/** The `provider` literals of a handle record (`string` when the plugin was typed without its name). */
+type HandleProviders<H> = {
+  [K in keyof H]: H[K] extends { readonly provider: infer O extends string } ? O : never;
+}[keyof H];
+/** The names of a feature's infra plugins, read off their raw handles — what a child's need may name to reach them. */
+type InfraOwners<I extends readonly AnyPlugin[]> = {
+  [J in keyof I]: I[J] extends AnyPlugin ? HandleProviders<I[J]['provides']> : never;
+}[number];
+/** The `provider` of the witness that resolves to wire key `K` in a needs shape: a literal, `string` (erased), or `never` (anonymous). */
+type ProviderOfWireKey<S extends NeedsShape, K> = {
+  [A in keyof S]: WireKeyOfNeed<S[A], A> extends K
+    ? S[A] extends { readonly provider: infer O extends string }
+      ? O
+      : never
+    : never;
+}[keyof S];
 /**
- * A child unit with its needs on the parent's infra keys (`TLocal`) remapped
- * to the qualified keys. The unit's own typed `provides` record is kept, so
- * its handles stay scoped/internal after the remap (Astra round 3).
- * Known gap: this remap is by KEY; the runtime remaps by handle identity.
+ * Where a child unit's need on wire key `K` lands once the parent mounts it —
+ * the compile-time `remapNeeds`. A need is remapped onto the parent's scope
+ * only when it names one of the parent's own infra handles (the witness's
+ * `provider` is one of `Owners`), exactly as the runtime remaps by handle
+ * identity. An anonymous witness never remaps: the kernel resolves it by wire
+ * key, so the app must provide it. Where identity is unknown — the shape or
+ * the provider was erased by a `Plugin<N, P>` annotation — the key rule
+ * stands in, as it did before identities existed.
  */
-type RemappedUnit<TName extends string, TLocal, P extends AnyPlugin> = Plugin<
-  { [K in keyof PluginNeeds<P> as K extends TLocal ? Qualify<TName, K> : K]: PluginNeeds<P>[K] },
-  PluginProvides<P>
+type RemappedKey<TName extends string, TLocal, Owners extends string, S extends NeedsShape, K> = K extends TLocal
+  ? string extends keyof S
+    ? Qualify<TName, K>
+    : string extends ProviderOfWireKey<S, K>
+      ? Qualify<TName, K>
+      : [ProviderOfWireKey<S, K>] extends [never]
+        ? K
+        : ProviderOfWireKey<S, K> extends Owners
+          ? Qualify<TName, K>
+          : K
+  : K;
+/**
+ * A child unit with its needs on the parent's infra handles remapped to the
+ * qualified keys (see {@link RemappedKey}). The unit's own typed `provides`
+ * record is kept, so its handles stay scoped/internal after the remap (Astra
+ * round 3); its needs shape is kept, so a grandparent reads the same identities.
+ */
+type RemappedUnit<TName extends string, TLocal, Owners extends string, P extends AnyPlugin> = Plugin<
+  {
+    [
+      K in keyof PluginNeeds<P> as RemappedKey<TName, TLocal, Owners, PluginProviderIdentities<P>, K>
+    ]: PluginNeeds<P>[K];
+  },
+  PluginProvides<P>,
+  PluginProviderIdentities<P>
 > &
   Pick<P, 'provides'>;
-type RemappedUnits<TName extends string, TLocal, U extends readonly AnyPlugin[]> = {
-  readonly [K in keyof U]: U[K] extends AnyPlugin ? RemappedUnit<TName, TLocal, U[K]> : never;
+type RemappedUnits<TName extends string, TLocal, Owners extends string, U extends readonly AnyPlugin[]> = {
+  readonly [K in keyof U]: U[K] extends AnyPlugin ? RemappedUnit<TName, TLocal, Owners, U[K]> : never;
 };
 /** Every child's units, in declaration order, each remapped onto the parent's scope. */
 export type ChildUnits<
   TName extends string,
   TLocal,
+  Owners extends string,
   C extends readonly AnyDefinedFeature[],
   Acc extends readonly AnyPlugin[] = readonly [],
 > = C extends readonly [infer H extends AnyDefinedFeature, ...infer T extends readonly AnyDefinedFeature[]]
-  ? ChildUnits<TName, TLocal, T, readonly [...Acc, ...RemappedUnits<TName, TLocal, ReturnType<H['plugins']>>]>
+  ? ChildUnits<
+      TName,
+      TLocal,
+      Owners,
+      T,
+      readonly [...Acc, ...RemappedUnits<TName, TLocal, Owners, ReturnType<H['plugins']>>]
+    >
   : Acc;
 /** The whole unit list of a feature with children: infra, children, then the feature itself. */
 export type UnitsOf<
@@ -261,9 +311,11 @@ export type UnitsOf<
   I extends readonly AnyPlugin[],
   C extends readonly AnyDefinedFeature[],
   Unit extends AnyPlugin,
-> = ChildUnits<TName, keyof InfraProvides<I>, C, QualifiedInfra<TName, N, I>> extends infer U extends readonly AnyPlugin[]
-  ? readonly [...U, Unit]
-  : never;
+> =
+  ChildUnits<TName, keyof InfraProvides<I>, InfraOwners<I>, C, QualifiedInfra<TName, N, I>> extends infer U extends
+    readonly AnyPlugin[]
+    ? readonly [...U, Unit]
+    : never;
 
 /** Needs on internal handles (a feature's `usecases`/`services`/slice): never allowed, from anywhere. */
 type InternalNeeds<N> = { [K in keyof N]: N[K] extends { readonly internal: true } ? K : never }[keyof N];
@@ -367,6 +419,16 @@ export type ChildOverrides<TName extends string, C extends readonly AnyDefinedFe
 type WireKeyOfNeed<W, K> = W extends Token<unknown, infer WK extends string> ? WK : K;
 
 /**
+ * An infra plugin's needs shape once the feature owns it: an alias the
+ * feature declares names the feature's handle — `qualifyInfra` substitutes
+ * `declared[alias]` for the plugin's witness — so a parent remapping this
+ * unit later reads the feature's identity, as the runtime does.
+ */
+type OwnedShape<N extends NeedsShape, S extends NeedsShape> = string extends keyof S
+  ? S
+  : { [A in keyof S]: A extends keyof N ? N[A] : S[A] };
+
+/**
  * An infra plugin after qualification: it provides under `<feature>.<key>`;
  * a need that named a sibling infra key (`TLocal`) names the qualified key,
  * so the sibling — not an app plugin — satisfies it; any other need alias is
@@ -376,8 +438,14 @@ export type QualifiedPlugin<TName extends string, N extends NeedsShape, P extend
   {
     [K in keyof PluginNeeds<P> as K extends TLocal ? Qualify<TName, K> : K extends keyof N ? WireKeyOfNeed<N[K], K> : K]: PluginNeeds<P>[K];
   },
-  { [K in keyof PluginProvides<P> as Qualify<TName, K>]: PluginProvides<P>[K] }
-> & { readonly provides: InfraUnitHandles<TName, { [K in keyof PluginProvides<P> as Qualify<TName, K>]: PluginProvides<P>[K] }> };
+  { [K in keyof PluginProvides<P> as Qualify<TName, K>]: PluginProvides<P>[K] },
+  OwnedShape<N, PluginProviderIdentities<P>>
+> & {
+  readonly provides: InfraUnitHandles<
+    TName,
+    { [K in keyof PluginProvides<P> as Qualify<TName, K>]: PluginProvides<P>[K] }
+  >;
+};
 
 /** Every infra plugin qualified, as a tuple in declaration order. */
 export type QualifiedInfra<TName extends string, N extends NeedsShape, I extends readonly AnyPlugin[]> = {
@@ -401,7 +469,9 @@ export type FeatureUnit<
   WireNeeds<N> & { [K in keyof InfraProvides<I> as Qualify<TName, K>]: InfraProvides<I>[K] } & WireNeeds<ChildHandles<C>>,
   { readonly [K in keyof P as PublishKey<TName, K>]: P[K] } & Readonly<Record<`${TName}.usecases`, U>> &
     Readonly<Record<`${TName}.services`, CoreServices<N, I, C, U>>> &
-    Readonly<Record<`feature.${TName}`, EntrypointPayloads<E>>>
+    Readonly<Record<`feature.${TName}`, EntrypointPayloads<E>>>,
+  // The feature's own needs are the only ones a parent may remap; infra and child keys are already qualified (dotted).
+  N
 > & {
   readonly provides: UnitHandles<
     TName,
@@ -517,10 +587,55 @@ type ResolvedInfraNeed<N extends NeedsShape, I extends readonly AnyPlugin[], K> 
   : K extends keyof N
     ? CtxOf<N>[K]
     : Undeclared;
-/** The need aliases of the infra plugins that no sibling and no declared need satisfies (missing, or of another type). */
+/**
+ * The compile-time `sameHandle`: is the plugin's bound witness `W` the feature's
+ * own handle `Own` (either form, lazy included)? Identity is the `provider` +
+ * `key` literal pair. An unbound plugin witness (`service<T>()`) passes — the
+ * feature's handle is what it gets. A plugin that binds a handle where the
+ * feature declared none fails, as the runtime does (`ARKI_DOT_E026`). An
+ * erased provider (`string`) on either side cannot be compared: the shape
+ * check alone decides.
+ */
+type SameHandle<Own, W> = W extends { readonly provider: infer O extends string; readonly key: infer WK extends string }
+  ? Own extends { readonly provider: infer O2 extends string; readonly key: infer WK2 extends string }
+    ? string extends O | O2
+      ? true
+      : [O, WK] extends [O2, WK2]
+        ? [O2, WK2] extends [O, WK]
+          ? true
+          : false
+        : false
+    : false
+  : true;
+/**
+ * An infra plugin's unsatisfied needs when its shape is known — resolved as
+ * `qualifyInfra` resolves them: a sibling by the witness's wire key, else the
+ * feature's need under the same ALIAS, which must be the same handle (when the
+ * plugin bound one) and of the needed type.
+ */
+type UnsatisfiedInfraAliases<N extends NeedsShape, I extends readonly AnyPlugin[], S extends NeedsShape> = {
+  [A in keyof S]: WireKeyOfNeed<S[A], A> extends keyof InfraProvides<I>
+    ? InfraProvides<I>[WireKeyOfNeed<S[A], A>] extends NeedValue<S[A]>
+      ? never
+      : A
+    : A extends keyof N
+      ? SameHandle<N[A], S[A]> extends true
+        ? CtxOf<N>[A] extends NeedValue<S[A]>
+          ? never
+          : A
+        : A
+      : A;
+}[keyof S];
+/** The service type a witness asks for — what {@link WireNeeds} holds under its wire key (`T | Lazy<T>` for a lazy witness). */
+type NeedValue<W> = W extends Service<infer T> ? T : never;
+/** The need aliases of the infra plugins that no sibling and no declared need satisfies (missing, of another type, or bound to another handle). A plugin typed without its shape is checked by wire key. */
 type UnsatisfiedInfraNeeds<N extends NeedsShape, I extends readonly AnyPlugin[]> = {
   [J in keyof I]: I[J] extends AnyPlugin
-    ? { [K in keyof PluginNeeds<I[J]>]: ResolvedInfraNeed<N, I, K> extends PluginNeeds<I[J]>[K] ? never : K }[keyof PluginNeeds<I[J]>]
+    ? string extends keyof PluginProviderIdentities<I[J]>
+      ? {
+          [K in keyof PluginNeeds<I[J]>]: ResolvedInfraNeed<N, I, K> extends PluginNeeds<I[J]>[K] ? never : K;
+        }[keyof PluginNeeds<I[J]>]
+      : UnsatisfiedInfraAliases<N, I, PluginProviderIdentities<I[J]>>
     : never;
 }[number];
 type InfraGuard<N extends NeedsShape, I extends readonly AnyPlugin[]> = ([InfraCollision<N, I>] extends [never]

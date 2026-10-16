@@ -45,7 +45,7 @@ describe('plugin handles are data before boot', () => {
     expect(database.provides.db).toMatchObject({ key: 'db', provider: 'db' });
     expect(database.provides.db.lazy).toMatchObject({ key: 'db', provider: 'db', lazy: true });
     expect(opened).toEqual([]);
-    expectTypeOf(database.provides.db).toEqualTypeOf<Handle<Rows, 'db'>>();
+    expectTypeOf(database.provides.db).toEqualTypeOf<Handle<Rows, 'db', 'db'>>();
     expectTypeOf<Provided<typeof database.provides.db>>().toEqualTypeOf<Rows>();
   });
 
@@ -142,7 +142,7 @@ describe('rename() moves the handle with the mounted object', () => {
   it('types the renamed handle, rejects the stale one at compile time and at boot', async () => {
     const reportsDb = rename(makeDb('pg://reports'), { db: 'reportsDb' }, 'reports-db');
     expect(reportsDb.provides.reportsDb).toMatchObject({ key: 'reportsDb', provider: 'reports-db' });
-    expectTypeOf(reportsDb.provides.reportsDb).toEqualTypeOf<Handle<Rows, 'reportsDb'>>();
+    expectTypeOf(reportsDb.provides.reportsDb).toEqualTypeOf<Handle<Rows, 'reportsDb', 'reports-db'>>();
     // @ts-expect-error -- the old key is gone after rename
     expect(reportsDb.provides.db).toBeUndefined();
 
@@ -203,7 +203,7 @@ describe('fake(handle, value) and providesOf over plugins', () => {
     const billing = feature('billing', { provides: { entitlements: () => 'pro' as const } });
     const merged = providesOf([database, billing]);
     expect(Object.keys(merged)).toEqual(['db', 'entitlements']);
-    expectTypeOf(merged.db).toEqualTypeOf<Handle<Rows, 'db'>>();
+    expectTypeOf(merged.db).toEqualTypeOf<Handle<Rows, 'db', 'db'>>();
     expect(merged.db).toBe(database.provides.db);
   });
 });

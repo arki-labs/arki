@@ -137,6 +137,7 @@ describe('refusals at .infra(), before boot (the type guard refuses them too)', 
   it('a plugin bound to another handle is refused; bound to the same handle it is tolerated and rebound', () => {
     const other = plugin({ name: 'other-db', provides: { db: (): Db => createDb() } });
     const boundElsewhere = plugin({ name: 'bound', needs: { db: other.provides.db }, provides: { thing: () => 1 } });
+    // @ts-expect-error -- `bound` binds `db` to "other-db"; the feature's `db` is `database`'s (round 9, A2)
     expect(() => defineFeature('y').needs({ db: database.provides.db }).infra(boundElsewhere)).toThrow(
       /binds "db" to a handle other than the feature's/,
     );
