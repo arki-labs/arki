@@ -1,60 +1,19 @@
-import type { Meta } from '@content-collections/core';
+import type { GetTypeByName } from '@content-collections/core';
 
-export type Post = {
-  title: string;
-  description: string;
-  publishedAt: Date;
-  author: {
-    name: string;
-    url?: string;
-    avatar?: string;
-  };
-  tags: string[];
-  content: {
-    mdx: string;
-    raw: string;
-  };
-  readingTime: string;
-  lastModification: string;
-  image: {
-    url: string;
-    blurDataURL: string;
-  };
-  url: string;
-  slug: string;
-  _meta: Meta;
-};
+import type { changelogs } from './collections/changelog';
+import type { faqs } from './collections/faq';
+import type { legals } from './collections/legal';
+import type { posts } from './collections/post';
 
-export type Changelog = {
-  title: string;
-  description: string;
-  publishedAt: Date;
-  content: {
-    mdx: string;
-    raw: string;
-  };
-  image: {
-    url: string;
-    blurDataURL: string;
-  };
-  url: string;
-  slug: string;
-  _meta: Meta;
-};
+// Each document type is inferred from its collection's schema + transform, so it can never drift
+// from what the build actually generates.
+export type Post = GetTypeByName<{ content: [typeof posts] }, 'posts'>;
 
-export type Faq = {
-  title: string;
-  order: number;
-  mdx: string;
-  slug: string;
-};
+export type Changelog = GetTypeByName<{ content: [typeof changelogs] }, 'Changelogs'>;
 
-export type Legal = {
-  title: string;
-  updatedAt: string;
-  mdx: string;
-  slug: string;
-};
+export type Faq = GetTypeByName<{ content: [typeof faqs] }, 'FAQs'>;
+
+export type Legal = GetTypeByName<{ content: [typeof legals] }, 'Legals'>;
 
 /** The fields search results show for a post. */
 export type PostOverview = Pick<Post, 'url' | 'title' | 'description' | 'publishedAt' | 'readingTime' | 'image'>;
