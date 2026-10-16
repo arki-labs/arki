@@ -1,5 +1,7 @@
 import { z } from 'zod/v4';
 
+import { CONTRACTS_ERROR_CODES, ContractsError } from './errors.js';
+
 /**
  * The id of a user: `usr_` followed by an id. Every package that refers to a user, whether or
  * not it owns the user table, uses this one type, so ids pass between packages without a
@@ -58,8 +60,9 @@ const PREFIX_PATTERN = /^\w+$/;
  */
 export function defineId<const P extends string>(prefix: P): IdDeclaration<P> {
   if (!PREFIX_PATTERN.test(prefix)) {
-    throw new TypeError(
-      `[contracts] defineId: prefix "${prefix}" must be letters, digits or "_" (for example "sty_").`,
+    throw new ContractsError(
+      CONTRACTS_ERROR_CODES.invalidIdPrefix,
+      `defineId: prefix "${prefix}" must be letters, digits or "_" (for example "sty_").`,
     );
   }
   const schema = z.templateLiteral([prefix, z.string()], {
@@ -82,7 +85,12 @@ const BODY_LENGTH = 24;
 type RandomSource = { getRandomValues(array: Uint8Array): Uint8Array };
 
 function hasRandomValues(value: unknown): value is RandomSource {
-  return typeof value === 'object' && value !== null && 'getRandomValues' in value && typeof value.getRandomValues === 'function';
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'getRandomValues' in value &&
+    typeof value.getRandomValues === 'function'
+  );
 }
 
 /** `globalThis.crypto`, read without DOM or Node typings. */
@@ -90,8 +98,9 @@ function randomSource(): RandomSource {
   const candidate: unknown = Reflect.get(globalThis, 'crypto');
   if (!hasRandomValues(candidate)) {
     // No Math.random fallback: ids end up in URLs, and guessable ones are a gift to the curious.
-    throw new Error(
-      '[contracts] defineId().create() needs globalThis.crypto.getRandomValues. In React Native, install a polyfill such as react-native-get-random-values.',
+    throw new ContractsError(
+      CONTRACTS_ERROR_CODES.noRandomSource,
+      'defineId().create() needs globalThis.crypto.getRandomValues. In React Native, install a polyfill such as react-native-get-random-values.',
     );
   }
   return candidate;
@@ -164,6 +173,9 @@ export function assertUniqueIdPrefixes<const T extends readonly IdDeclaration<st
     }
   }
   if (clashes.length > 0) {
-    throw new Error(`[contracts] id prefixes overlap: ${clashes.join('; ')}. Give each id kind its own prefix.`);
+    throw new ContractsError(
+      CONTRACTS_ERROR_CODES.overlappingIdPrefixes,
+      `id prefixes overlap: ${clashes.join('; ')}. Give each id kind its own prefix.`,
+    );
   }
 }

@@ -73,3 +73,17 @@ describe('assertUniqueIdPrefixes', () => {
     expect(() => assertUniqueIdPrefixes(defineId('sub'), defineId('sub_'))).toThrow(/"sub" is the start of "sub_"/);
   });
 });
+
+describe('ContractsError', () => {
+  it('carries a stable code and a remediation, and stays a TypeError for older instanceof checks', () => {
+    let caught: unknown;
+    try {
+      defineId('bad prefix');
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(TypeError);
+    expect(caught).toMatchObject({ name: 'ContractsError', code: 'ARKI_CONTRACTS_E001' });
+    expect(caught).toHaveProperty('remediation', expect.stringContaining('letters'));
+  });
+});

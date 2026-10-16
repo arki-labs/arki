@@ -9,7 +9,10 @@ const post = z.object({ id: z.string(), title: z.string() });
 const contract = {
   posts: {
     list: oc.input(z.object({ cursor: z.string().optional() })).output(z.array(post)),
-    create: oc.$meta<{ offlineSafe: true }>({ offlineSafe: true }).input(post.omit({ id: true })).output(post),
+    create: oc
+      .$meta<{ offlineSafe: true }>({ offlineSafe: true })
+      .input(post.omit({ id: true }))
+      .output(post),
     comments: { add: oc.input(z.object({ postId: z.string(), body: z.string() })) },
   },
   health: oc.output(z.object({ ok: z.boolean() })),
@@ -39,13 +42,20 @@ describe('operations', () => {
     expect(() => operations({ posts: { 'by.id': oc.output(post) } })).toThrow(/"by\.id" at posts > by\.id/);
   });
 
-  it.each(['~op', 'key', 'call', 'queryKey', 'queryOptions', 'infiniteKey', 'infiniteOptions', 'mutationKey', 'mutationOptions'])(
-    'fails loud on the reserved key %s (a group utils object would shadow it)',
-    key => {
-      expect(() => operations({ posts: { [key]: oc.output(post) } })).toThrow(TypeError);
-      expect(() => operations({ posts: { [key]: oc.output(post) } })).toThrow(`at posts > ${key}`);
-    },
-  );
+  it.each([
+    '~op',
+    'key',
+    'call',
+    'queryKey',
+    'queryOptions',
+    'infiniteKey',
+    'infiniteOptions',
+    'mutationKey',
+    'mutationOptions',
+  ])('fails loud on the reserved key %s (a group utils object would shadow it)', key => {
+    expect(() => operations({ posts: { [key]: oc.output(post) } })).toThrow(TypeError);
+    expect(() => operations({ posts: { [key]: oc.output(post) } })).toThrow(`at posts > ${key}`);
+  });
 });
 
 describe('operationAt', () => {

@@ -5,7 +5,7 @@
 
 import { oc } from '@orpc/contract';
 
-import { keyset, page, pageInput, z } from '../dist/index.js';
+import { ContractsError, defineId, formData, keyset, page, pageInput, z } from '../dist/index.js';
 import { OPERATION, operationAt, operationOf, operations } from '../dist/orpc.js';
 
 let checks = 0;
@@ -21,6 +21,48 @@ const cursor = order.encode({ createdAt, id: 'sty_b' });
 check(order.decode(cursor).createdAt.getTime() === createdAt.getTime(), 'a cursor round-trips a Date');
 check(pageInput(order).parse({}).limit === 20, 'pageInput defaults the limit to 20');
 check(page(z.string()).parse({ items: ['a'], nextCursor: null }).items[0] === 'a', 'page parses');
+
+// A non-ASCII cursor decodes on every engine (Hermes has no TextDecoder).
+const byName = keyset({ name: 'asc', id: 'asc' });
+check(
+  byName.decode(byName.encode({ name: 'Ștefan 🎯', id: 'u_1' })).name === 'Ștefan 🎯',
+  'a non-ASCII key round-trips through the cursor',
+);
+let cursorCode = 'none';
+try {
+  order.decode('not a cursor');
+} catch (error) {
+  cursorCode = error instanceof ContractsError ? error.code : String(error);
+}
+check(cursorCode === 'ARKI_CONTRACTS_E005', 'a foreign cursor fails with a stable code');
+
+// Ids: a prefixed schema, and a random id from globalThis.crypto.
+const storyId = defineId('sty_');
+check(storyId.schema.safeParse('sty_abc').success, 'an id with its prefix parses');
+check(!storyId.schema.safeParse('usr_abc').success, 'an id with another prefix is rejected');
+// Hermes ships no globalThis.crypto: there create() must fail with its coded error, not a bare TypeError.
+if (typeof globalThis.crypto?.getRandomValues === 'function') {
+  check(storyId.create().startsWith('sty_'), 'create() makes an id with the prefix');
+} else {
+  let createCode = 'none';
+  try {
+    storyId.create();
+  } catch (error) {
+    createCode = error instanceof ContractsError ? error.code : String(error);
+  }
+  check(createCode === 'ARKI_CONTRACTS_E003', 'create() without crypto fails with a stable code');
+}
+
+// zod-form-data loads on every engine. Plain Hermes has no FormData class (React Native adds one), so parsing runs where it exists.
+const formSchema = formData.formData({ title: formData.text(), count: formData.numeric() });
+check(typeof formSchema.parse === 'function', 'zod-form-data builds a schema');
+if (typeof FormData === 'function') {
+  const form = new FormData();
+  form.set('title', 'Hi');
+  form.set('count', '3');
+  const parsed = formSchema.parse(form);
+  check(parsed.title === 'Hi' && parsed.count === 3, 'zod-form-data parses a FormData');
+}
 
 // Operations: one identity per contract procedure.
 const contract = {

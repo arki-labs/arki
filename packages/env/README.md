@@ -17,8 +17,8 @@ pnpm add @arki/env
 ### `defineEnv`
 
 ```ts
-import { defineEnv } from '@arki/env/core';
 import { contracts } from '@arki/env/contracts';
+import { defineEnv } from '@arki/env/core';
 
 export const env = defineEnv({
   server: {
@@ -70,9 +70,9 @@ import { contracts } from '@arki/env/contracts';
 
 const env = defineEnv({
   server: {
-    ALLOWED_ORIGINS: contracts.csv(),       // 'a,b,c' → ['a', 'b', 'c']
-    FEATURE_FLAGS: contracts.json(),         // JSON-parsed
-    SERVICE_TAGS: contracts.keyValue(),      // 'a=1,b=2' → { a: '1', b: '2' }
+    ALLOWED_ORIGINS: contracts.csv(), // 'a,b,c' → ['a', 'b', 'c']
+    FEATURE_FLAGS: contracts.json(), // JSON-parsed
+    SERVICE_TAGS: contracts.keyValue(), // 'a=1,b=2' → { a: '1', b: '2' }
   },
 });
 ```
@@ -87,6 +87,14 @@ const env = defineEnv({
 - `@arki/env`
   - Re-exports `contracts` from `@arki/env/contracts`.
 
+## Errors
+
+`@arki/env` raises no errors of its own. A bad environment throws the `Error` built from the validation issues (one `path: message` line per issue, headed by your `name`), or whatever your `onValidationError` throws. There are no `ARKI_ENV_*` codes.
+
+## Runtime support
+
+`@arki/env/core` and `@arki/env/contracts` run on Node, Bun, Deno, browsers and React Native (Hermes). Nothing reads the environment at import. Without `runtimeEnv`, `defineEnv` reads `globalThis.process?.env` on the first access; on an engine with no `process` it sees no values, so pass `runtimeEnv` there. A browser cannot read server keys, so declare client keys (`clientPrefix`) for code that ships to it. `@arki/env/dot` needs `@arki/dot`. `bun run test:runtimes` runs a smoke test of the built package on each runtime; the Hermes leg needs `HERMES_BIN`.
+
 ## Documentation
 
 `@arki/env` ships an optional `@arki/env/dot` adapter for the
@@ -99,6 +107,7 @@ const env = defineEnv({
   [adapter authoring guide](https://github.com/arkijs/arki/blob/main/packages/dot/docs/adapter-authoring.md).
 
 <!-- bench:start -->
+
 ## Benchmarks
 
 Defining and validating a 15-variable server environment with `defineEnv()`, against `@t3-oss/env-core` (which it wraps), envalid, and a plain zod object parse.
@@ -109,34 +118,34 @@ Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is b
 
 Each call builds a fresh environment from scratch, validates every variable, then reads `PORT`.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/env defineEnv() | 25.03 µs | fastest |
-| @t3-oss/env-core createEnv() (used directly) | 306.02 µs | 12.22× |
-| envalid cleanEnv() | 59.23 µs | 2.37× |
-| zod z.object().parse(process.env) | 177.92 µs | 7.11× |
+| Library                                      | Time / op | vs fastest |
+| -------------------------------------------- | --------: | ---------: |
+| @arki/env defineEnv()                        |  25.03 µs |    fastest |
+| @t3-oss/env-core createEnv() (used directly) | 306.02 µs |     12.22× |
+| envalid cleanEnv()                           |  59.23 µs |      2.37× |
+| zod z.object().parse(process.env)            | 177.92 µs |      7.11× |
 
 ### Define only (no read)
 
 Declare the environment and never read it. `defineEnv()` defers all work to the first read; the others validate immediately.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/env defineEnv() (lazy, no validation yet) | 126.8 ns | fastest |
-| @t3-oss/env-core createEnv() (validates now) | 519.07 µs | 4094.95× |
-| envalid cleanEnv() (validates now) | 115.66 µs | 912.46× |
-| zod z.object().parse(process.env) (validates now) | 431.26 µs | 3402.26× |
+| Library                                           | Time / op | vs fastest |
+| ------------------------------------------------- | --------: | ---------: |
+| @arki/env defineEnv() (lazy, no validation yet)   |  126.8 ns |    fastest |
+| @t3-oss/env-core createEnv() (validates now)      | 519.07 µs |   4094.95× |
+| envalid cleanEnv() (validates now)                | 115.66 µs |    912.46× |
+| zod z.object().parse(process.env) (validates now) | 431.26 µs |   3402.26× |
 
 ### Read one value from an already-validated environment
 
 The hot path: `env.PORT` after the environment exists.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/env (lazy object over createEnv) | 229.1 ns | 28.25× |
-| @t3-oss/env-core createEnv() | 50.3 ns | 6.20× |
-| envalid cleanEnv() | 83.8 ns | 10.34× |
-| zod parsed plain object | 8.1 ns | fastest |
+| Library                                | Time / op | vs fastest |
+| -------------------------------------- | --------: | ---------: |
+| @arki/env (lazy object over createEnv) |  229.1 ns |     28.25× |
+| @t3-oss/env-core createEnv()           |   50.3 ns |      6.20× |
+| envalid cleanEnv()                     |   83.8 ns |     10.34× |
+| zod parsed plain object                |    8.1 ns |    fastest |
 
 Read the rows with the contracts in mind:
 

@@ -1,9 +1,3 @@
-import baseConfig from '@arki/eslint-config/base';
+import { library } from '@arki/eslint-config/library';
 
-/** @type {import('typescript-eslint').Config} */
-export default [
-  {
-    ignores: ['dist/**'],
-  },
-  ...baseConfig,
-];
+export default library({ adapters: ['src/drizzle.ts', 'src/orpc.ts'] });

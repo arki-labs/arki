@@ -1,5 +1,7 @@
 import { z } from 'zod/v4';
 
+import { CONTRACTS_ERROR_CODES, ContractsError } from './errors.js';
+
 /**
  * Keyset ("cursor") pagination, the browser-safe half: the order a list is
  * sorted by, the opaque cursor that marks where the next page starts, and
@@ -57,24 +59,32 @@ function encodeValue(key: string, value: CursorValue | null | undefined): Encode
   if (typeof value === 'boolean') return ['b', value];
   if (value instanceof Date) return ['d', value.toISOString()];
   // A NULL key has no place in the order: `x < NULL` is never true, so the next page would be empty.
-  throw new TypeError(`[contracts] keyset: "${key}" is ${String(value)}; keyset keys must be NOT NULL columns.`);
+  throw new ContractsError(
+    CONTRACTS_ERROR_CODES.invalidKeyset,
+    `keyset: "${key}" is ${String(value)}; keyset keys must be NOT NULL columns.`,
+  );
 }
 
 function decodeValue([tag, value]: EncodedValue): CursorValue {
   return tag === 'd' ? new Date(value) : value;
 }
 
-/* ---- base64url over UTF-8: TextEncoder + btoa exist in every runtime we ship to ---- */
+/* ---- base64url over UTF-8: btoa + atob + URI coding exist in every runtime we ship to.
+   TextEncoder/TextDecoder are not used: Hermes (React Native) has no TextDecoder. ---- */
 
 function toBase64Url(text: string): string {
-  let binary = '';
-  for (const byte of new TextEncoder().encode(text)) binary += String.fromCodePoint(byte);
+  // encodeURIComponent yields the UTF-8 bytes as %XX; turn each into one binary-string character.
+  const binary = encodeURIComponent(text).replaceAll(/%([\dA-F]{2})/g, (_match, hex: string) =>
+    String.fromCodePoint(Number.parseInt(hex, 16)),
+  );
   return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 function fromBase64Url(text: string): string {
   const binary = atob(text.replaceAll('-', '+').replaceAll('_', '/'));
-  return new TextDecoder().decode(Uint8Array.from(binary, char => char.codePointAt(0) ?? 0));
+  let escaped = '';
+  for (const char of binary) escaped += `%${(char.codePointAt(0) ?? 0).toString(16).padStart(2, '0')}`;
+  return decodeURIComponent(escaped);
 }
 
 /**
@@ -97,7 +107,11 @@ function fromBase64Url(text: string): string {
 export function keyset<const O extends KeysetOrder>(order: O): Keyset<O> {
   // `Object.keys` is typed `string[]`; these are exactly the keys of `order`.
   const keys = Object.keys(order) as (keyof O & string)[];
-  if (keys.length === 0) throw new TypeError('[contracts] keyset: declare at least one key, and end on a unique one.');
+  if (keys.length === 0)
+    throw new ContractsError(
+      CONTRACTS_ERROR_CODES.invalidKeyset,
+      'keyset: declare at least one key, and end on a unique one.',
+    );
 
   const payload = z.array(encodedValue).length(keys.length);
 
@@ -106,10 +120,13 @@ export function keyset<const O extends KeysetOrder>(order: O): Keyset<O> {
     try {
       parsed = JSON.parse(fromBase64Url(cursor));
     } catch (error) {
-      throw new TypeError('[contracts] keyset: the cursor is not one this list made.', { cause: error });
+      throw new ContractsError(CONTRACTS_ERROR_CODES.invalidCursor, 'keyset: the cursor is not one this list made.', {
+        cause: error,
+      });
     }
     const result = payload.safeParse(parsed);
-    if (!result.success) throw new TypeError('[contracts] keyset: the cursor is not one this list made.');
+    if (!result.success)
+      throw new ContractsError(CONTRACTS_ERROR_CODES.invalidCursor, 'keyset: the cursor is not one this list made.');
     const values: Record<string, CursorValue> = {};
     for (const [index, key] of keys.entries()) {
       const encoded = result.data[index];

@@ -211,3 +211,23 @@ describe('defineEnv() validation default', () => {
     expect(text).toContain('  (root): worse');
   });
 });
+
+describe('defineEnv() on an engine with no `process`', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('reads no values instead of throwing a ReferenceError, so Hermes and browsers can still declare and read an env', () => {
+    // eslint-disable-next-line unicorn/no-useless-undefined -- the point is a missing global, as on Hermes
+    vi.stubGlobal('process', undefined);
+    const env = defineEnv({ server: { NAME: z.string().default('app') } });
+    expect(env.NAME).toBe('app');
+  });
+
+  it('still honours an explicit runtimeEnv, the documented way to feed an engine that has no process', () => {
+    // eslint-disable-next-line unicorn/no-useless-undefined -- the point is a missing global, as on Hermes
+    vi.stubGlobal('process', undefined);
+    const env = defineEnv({ server: { PORT: z.coerce.number() }, runtimeEnv: { PORT: '9000' } });
+    expect(env.PORT).toBe(9000);
+  });
+});

@@ -2,6 +2,17 @@ import type { CreateEnv, DefaultCombinedSchema } from '@t3-oss/env-core';
 import type { ZodType } from 'zod';
 import { createEnv } from '@t3-oss/env-core';
 
+/**
+ * The process environment, or `undefined` on engines with no `process` (Hermes, browsers, Deno without
+ * Node compat). Reads through `globalThis` so a missing global is not a ReferenceError. Called only when
+ * the env is first read, never at import.
+ */
+export function processEnv(): Record<string, string | undefined> | undefined {
+  // Typed as optional on purpose: the Node typings say `process` always exists, Hermes says otherwise.
+  const scope: { process?: { env: Record<string, string | undefined> } } = globalThis;
+  return scope.process?.env;
+}
+
 /** The issue shape t3-oss hands to `onValidationError`, derived so it stays in sync with the lib. */
 type ValidationIssues = Parameters<NonNullable<Parameters<typeof createEnv>[0]['onValidationError']>>[0];
 
@@ -94,7 +105,7 @@ export function defineEnv<
     // purpose-named SKIP_ENV_VALIDATION=1 (Docker build stages without secrets). Ambient variables
     // like CI or the npm script name must never turn validation off: that would boot production on
     // an unchecked config.
-    const skipValidation = config.options?.skipValidation ?? process.env.SKIP_ENV_VALIDATION === '1';
+    const skipValidation = config.options?.skipValidation ?? processEnv()?.SKIP_ENV_VALIDATION === '1';
 
     // Use the caller's explicit runtimeEnv when supplied (Vite client vars via import.meta.env, or
     // fallback aliases). Otherwise auto-build from every declared key (server + client + shared);
@@ -104,14 +115,15 @@ export function defineEnv<
       runtimeEnv = config.runtimeEnv;
     } else {
       runtimeEnv = {};
+      const source = processEnv();
       for (const key of Object.keys(config.server)) {
-        runtimeEnv[key] = process.env[key];
+        runtimeEnv[key] = source?.[key];
       }
       for (const key of Object.keys(config.client ?? {})) {
-        runtimeEnv[key] = process.env[key];
+        runtimeEnv[key] = source?.[key];
       }
       for (const key of Object.keys(config.shared ?? {})) {
-        runtimeEnv[key] = process.env[key];
+        runtimeEnv[key] = source?.[key];
       }
     }
 

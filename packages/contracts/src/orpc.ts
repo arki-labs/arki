@@ -11,7 +11,6 @@
  * (`path` and `name` only). The walk reads only path and meta, so a
  * `minifyContractRouter` output works the same as the full contract.
  */
-import { getContractRouter, isContractProcedure } from '@orpc/contract';
 import type {
   AnyContractRouter,
   ContractProcedure,
@@ -20,6 +19,9 @@ import type {
   InferSchemaOutput,
   Meta,
 } from '@orpc/contract';
+import { getContractRouter, isContractProcedure } from '@orpc/contract';
+
+import { CONTRACTS_ERROR_CODES, ContractsError } from './errors.js';
 
 /** One procedure's identity. The types ride along in a phantom field. */
 export type Operation<TInput, TOutput, TError, TMeta extends Meta> = {
@@ -84,10 +86,16 @@ function operationFor(procedure: { readonly '~orpc': { readonly meta: Meta } }, 
 function checkKey(key: string, path: readonly string[]): void {
   const where = [...path, key].join(' > ');
   if (key.includes('.')) {
-    throw new TypeError(`Contract key "${key}" at ${where} contains ".": operation names join the path with ".", so it would be ambiguous.`);
+    throw new ContractsError(
+      CONTRACTS_ERROR_CODES.invalidContractKey,
+      `Contract key "${key}" at ${where} contains ".": operation names join the path with ".", so it would be ambiguous.`,
+    );
   }
   if (RESERVED_KEYS.has(key)) {
-    throw new TypeError(`Contract key "${key}" at ${where} is reserved: the query utils use that name on every group.`);
+    throw new ContractsError(
+      CONTRACTS_ERROR_CODES.invalidContractKey,
+      `Contract key "${key}" at ${where} is reserved: the query utils use that name on every group.`,
+    );
   }
 }
 
@@ -143,7 +151,8 @@ export function operationOf<Op extends AnyOperation>(carrier: Identified<Op>): O
 export function operationOf(carrier: unknown): AnyOperation {
   const op: unknown = typeof carrier === 'object' && carrier !== null ? Reflect.get(carrier, OPERATION) : undefined;
   if (!isOperation(op)) {
-    throw new TypeError(
+    throw new ContractsError(
+      CONTRACTS_ERROR_CODES.notAnOperation,
       `Expected a value that carries an operation under "${OPERATION}" (a leaf of createOrpcUtils); got one without it.`,
     );
   }

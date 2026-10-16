@@ -87,7 +87,8 @@ const strictSelect = createSelectSchema(users, {
 Write the prefix once; the type, the schema and the generator come from it.
 
 ```ts
-import { defineId, type IdOf } from '@arki/contracts';
+import type { IdOf } from '@arki/contracts';
+import { defineId } from '@arki/contracts';
 
 export const storyId = defineId('sty_');
 export type StoryId = IdOf<typeof storyId>; // `sty_${string}`
@@ -150,6 +151,7 @@ next to its query utils, and a policy written once on the contract (say,
 
 ```ts
 import { oc } from '@orpc/contract';
+
 import { operations } from '@arki/contracts/orpc';
 
 const contract = { posts: { create: oc.input(createPost).output(post) } };
@@ -204,6 +206,24 @@ Drizzle entry, `@arki/contracts/drizzle`:
 - `COLUMN_ZOD_SCHEMA` — `Symbol.for('@arki/contracts/columnZodSchema')` side-channel for ID factories.
 - `bufferSchema`, `jsonSchema`, `literalSchema`, `createSchemaFactory` — re-exported from `drizzle-orm/zod`.
 
+## Errors
+
+`import { ContractsError, CONTRACTS_ERROR_CODES } from '@arki/contracts'`. Every failure on purpose is a `ContractsError` with a stable `code` and a one-line `remediation`. It extends `TypeError`. Match on `error.code`, never on the message.
+
+| Code                  | Raised by                       | Meaning                                                |
+| --------------------- | ------------------------------- | ------------------------------------------------------ |
+| `ARKI_CONTRACTS_E001` | `defineId`                      | The prefix is not letters, digits or `_`.              |
+| `ARKI_CONTRACTS_E002` | `assertUniqueIdPrefixes`        | Two prefixes are equal or one starts the other.        |
+| `ARKI_CONTRACTS_E003` | `defineId().create()`           | No `globalThis.crypto.getRandomValues` on this engine. |
+| `ARKI_CONTRACTS_E004` | `keyset`                        | No keys, or a row with a NULL key value.               |
+| `ARKI_CONTRACTS_E005` | `keyset().decode`               | The cursor is not one this keyset made.                |
+| `ARKI_CONTRACTS_E006` | `operations`, `createOrpcUtils` | A contract key contains "." or uses a reserved name.   |
+| `ARKI_CONTRACTS_E007` | `operationOf`                   | The value carries no operation.                        |
+
+## Runtime support
+
+The main entry and `@arki/contracts/orpc` run on Node, Bun, Deno, browsers and React Native (Hermes). `@arki/contracts/drizzle` needs `drizzle-orm`; `@arki/contracts/orpc` needs `@orpc/contract`. Cursors use `btoa`, `atob` and URI coding, not `TextDecoder`, which Hermes lacks. `defineId().create()` needs `globalThis.crypto.getRandomValues`; Hermes has none, so install `react-native-get-random-values` in React Native. `zod-form-data` loads on every runtime; plain Hermes has no `FormData` class (React Native adds one). `bun run test:runtimes` runs a smoke test of the built package on each runtime; the Hermes leg needs `HERMES_BIN`.
+
 ## Documentation
 
 `@arki/contracts` is framework-agnostic and works on its own. When you
@@ -212,6 +232,7 @@ application framework, see `packages/dot/docs/` for plugin authoring,
 lifecycle, and diagnostics.
 
 <!-- bench:start -->
+
 ## Benchmarks
 
 Building and using Zod schemas from a 15-column Drizzle table, compared with drizzle-orm/zod (which @arki/contracts wraps) and a hand-written Zod object.
@@ -222,27 +243,27 @@ Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is b
 
 Usually done once at startup.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/contracts createSelectSchema | 193.66 µs | 1.26× |
-| drizzle-orm/zod createSelectSchema | 153.73 µs | fastest |
+| Library                            | Time / op | vs fastest |
+| ---------------------------------- | --------: | ---------: |
+| @arki/contracts createSelectSchema | 193.66 µs |      1.26× |
+| drizzle-orm/zod createSelectSchema | 153.73 µs |    fastest |
 
 ### Build insert schema (15 columns)
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/contracts createInsertSchema | 148.37 µs | 1.60× |
-| drizzle-orm/zod createInsertSchema | 92.97 µs | fastest |
+| Library                            | Time / op | vs fastest |
+| ---------------------------------- | --------: | ---------: |
+| @arki/contracts createInsertSchema | 148.37 µs |      1.60× |
+| drizzle-orm/zod createInsertSchema |  92.97 µs |    fastest |
 
 ### Parse one valid row
 
 @arki/contracts and the hand-written schema check the id prefix "usr_"; plain drizzle-orm/zod only checks that id is a string.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/contracts select schema | 2.71 µs | 3.43× |
-| drizzle-orm/zod select schema | 2.82 µs | 3.57× |
-| hand-written z.object | 790.4 ns | fastest |
+| Library                       | Time / op | vs fastest |
+| ----------------------------- | --------: | ---------: |
+| @arki/contracts select schema |   2.71 µs |      3.43× |
+| drizzle-orm/zod select schema |   2.82 µs |      3.57× |
+| hand-written z.object         |  790.4 ns |    fastest |
 
 Read the rows with the contracts in mind:
 

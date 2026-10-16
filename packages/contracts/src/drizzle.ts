@@ -36,9 +36,9 @@ export const COLUMN_ZOD_SCHEMA: unique symbol = Symbol.for('@arki/contracts/colu
 type ColumnConfigWithSchema = { config?: Record<string | symbol, unknown> };
 
 function readColumnSchema(column: unknown): z.ZodTypeAny | undefined {
-  const cfg = (column as ColumnConfigWithSchema)?.config;
+  const cfg = (column as ColumnConfigWithSchema).config;
   const schema = cfg?.[COLUMN_ZOD_SCHEMA];
-  return schema && typeof schema === 'object' && '_zod' in (schema as object)
+  return schema && typeof schema === 'object' && '_zod' in (schema)
     ? (schema as z.ZodTypeAny)
     : undefined;
 }
@@ -60,12 +60,12 @@ function autoRefine<TTable extends Table>(
   userRefine: Refine<TTable> | undefined,
 ): Refine<TTable> {
   const columns = getColumns(table);
-  const refine: Record<string, unknown> = { ...(userRefine ?? {}) };
+  const refine: Record<string, unknown> = { ...userRefine };
   for (const [key, column] of Object.entries(columns)) {
     if (key in refine) continue;
     const schema = readColumnSchema(column);
     if (schema) {
-      refine[key] = (() => schema) as never;
+      refine[key] = (() => schema);
     }
   }
   return refine as Refine<TTable>;
@@ -127,7 +127,7 @@ export function createSelectSchema<TTable extends Table>(
   return drizzleCreateSelectSchema(
     table as never,
     autoRefine(table, refine) as never,
-  ) as unknown as StrongSchema<InferSelectModel<TTable>>;
+  );
 }
 
 /**
@@ -142,7 +142,7 @@ export function createInsertSchema<TTable extends Table>(
   return drizzleCreateInsertSchema(
     table as never,
     autoRefine(table, refine) as never,
-  ) as unknown as StrongSchema<InferInsertModel<TTable>>;
+  );
 }
 
 /**
@@ -157,5 +157,5 @@ export function createUpdateSchema<TTable extends Table>(
   return drizzleCreateUpdateSchema(
     table as never,
     autoRefine(table, refine) as never,
-  ) as unknown as StrongSchema<Partial<InferInsertModel<TTable>>>;
+  );
 }

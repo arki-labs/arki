@@ -60,3 +60,16 @@ describe('page schemas', () => {
     expect(stories.safeParse({ items: [] }).success).toBe(false);
   });
 });
+
+describe('keyset cursor without TextEncoder/TextDecoder', () => {
+  it('a non-ASCII key round-trips, because Hermes has no TextDecoder and the cursor must still decode there', () => {
+    const byName = keyset({ name: 'asc', id: 'asc' });
+    const cursor = byName.encode({ name: 'Ștefan 🎯 café', id: 'u_1' });
+    expect(byName.decode(cursor).name).toBe('Ștefan 🎯 café');
+    expect(cursor).toMatch(/^[\w-]+$/);
+  });
+
+  it('a cursor that is not UTF-8 JSON fails with a stable code, so callers can map it to a 400 without parsing messages', () => {
+    expect(() => storyOrder.decode('_w')).toThrowError(expect.objectContaining({ code: 'ARKI_CONTRACTS_E005' }));
+  });
+});

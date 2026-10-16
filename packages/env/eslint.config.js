@@ -1,3 +1,4 @@
-import baseConfig from '@arki/eslint-config/base';
+import { library } from '@arki/eslint-config/library';
 
-export default [...baseConfig];
+// `docs/examples` are standalone snippets outside the tsconfig project.
+export default [{ ignores: ['docs/examples/**'] }, ...library({ adapters: ['src/dot.ts'] })];
