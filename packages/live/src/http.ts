@@ -30,7 +30,9 @@
  * every stream whose principal the write may concern (its key in the write,
  * when the table is scoped by a dimension the grant has keys of; every
  * stream otherwise) runs `authorize` again, silently, once per burst. Its
- * frames wait for the re-check. An unchanged view gets nothing; a changed
+ * frames wait for the re-check. A write that lands while a stream opens
+ * (after its `authorize` began, before it can be targeted) re-checks it the
+ * same way before its first frame. An unchanged view gets nothing; a changed
  * one, a refusal or a failing `authorize` ends the stream with `bye` (fail
  * closed), and the client resumes from its last cursor under the new grant
  * or is refused at reconnect.
@@ -132,13 +134,24 @@ type Recheck = {
 async function* framesFor(
   feed: AsyncIterable<LiveFeed>,
   view: View,
-  stream: { readonly expired: () => boolean; readonly end: () => void; readonly recheck: Recheck },
+  stream: {
+    readonly expired: () => boolean;
+    readonly closed: () => boolean;
+    readonly end: () => void;
+    readonly recheck: Recheck;
+  },
 ): AsyncGenerator<LiveEvent, void, undefined> {
-  const { expired, end, recheck } = stream;
+  const { expired, closed, end, recheck } = stream;
   try {
     for await (const item of feed) {
       switch (item.kind) {
         case 'begin': {
+          // A re-check started while the stream opened decides before the first frame.
+          if (recheck.pending !== undefined) await recheck.pending;
+          if (recheck.revoked) {
+            yield { kind: 'bye' };
+            return;
+          }
           yield {
             kind: 'hello',
             v: 1,
@@ -166,8 +179,8 @@ async function* framesFor(
         }
       }
     }
-    // The hub ended the feed without a frame: the max age passed, the grant changed, or the request is gone.
-    if (expired() || recheck.revoked) yield { kind: 'bye' };
+    // The hub ended the feed without a frame: the max age passed, the grant changed, the endpoint closed, or the request is gone.
+    if (expired() || recheck.revoked || closed()) yield { kind: 'bye' };
   } finally {
     end();
   }
@@ -330,6 +343,8 @@ export function liveEndpoint<Dimension extends string = never>(options: {
   type Stream = { readonly request: Request; readonly view: View; readonly recheck: Recheck; readonly end: () => void };
   /** Open streams, for `reauthorize`. */
   const streams = new Set<Stream>();
+  /** Set by `close()`: a stream still opening then ends at once instead of joining `streams` unwatched. */
+  let closed = false;
 
   /**
    * Whether a write to a `reauthorize` table may concern `view`'s principal: its key is in the
@@ -366,11 +381,17 @@ export function liveEndpoint<Dimension extends string = never>(options: {
     });
   }
 
+  /** Changes to `reauthorize` tables so far: a request reads it before `authorize`, and its stream re-checks if it moved. */
+  let reauthorizeWrites = 0;
+
   // The hub's changes before any view: a stream whose grant cannot see the table still re-checks.
   const unsubscribe =
     reauthorize.size === 0
       ? undefined
       : hub.onChange(tags => {
+          if (!tags.some(tag => reauthorize.has(tagKey(tag)))) return;
+          // Counted before any stream is picked, so a stream not yet in `streams` sees it too (see `open`).
+          reauthorizeWrites += 1;
           for (const tag of tags) {
             if (!reauthorize.has(tagKey(tag))) continue;
             for (const stream of streams) if (concerns(stream.view, tag)) trigger(stream);
@@ -378,13 +399,14 @@ export function liveEndpoint<Dimension extends string = never>(options: {
         });
 
   function close(): void {
+    closed = true;
     unsubscribe?.();
     for (const stream of streams) stream.end();
   }
 
   /** Attaches to the hub now (before the response exists) and ends the stream at `maxAgeMs` or when the request goes. */
   async function open(
-    view: View,
+    { view, seen }: { readonly view: View; readonly seen: number },
     cursor: string | undefined,
     request: Request,
     signal: AbortSignal,
@@ -416,28 +438,36 @@ export function liveEndpoint<Dimension extends string = never>(options: {
       end();
       throw toHttpError(error);
     }
-    if (!detach.signal.aborted) streams.add(stream);
+    // Closed while `hub.open` ran: no re-check listener is left to watch this stream, so it ends now (fail closed).
+    if (closed) end();
+    if (!detach.signal.aborted) {
+      streams.add(stream);
+      // A write between `authorize` and now reached no stream: the grant may predate it, so re-check before any frame.
+      if (reauthorizeWrites !== seen) trigger(stream);
+    }
     debugHttp.debug('stream opened: {procedures} procedures, {tables} tables visible', {
       procedures: view.manifest.length,
       tables: view.hub.tables?.length ?? 0,
     });
-    return framesFor(feed, view, { expired: () => expired, end, recheck: stream.recheck });
+    return framesFor(feed, view, { expired: () => expired, closed: () => closed, end, recheck: stream.recheck });
   }
 
   const bundle = routes()
-    .derive('liveView', async (request, ctx) => {
+    .derive('liveGrant', async (request, ctx) => {
       checkCursor(ctx.url);
+      // Read before `authorize` reads anything: a later `reauthorize` write is one the grant may miss.
+      const seen = reauthorizeWrites;
       const view = await authorized(request);
       if (view === undefined) {
         throw new HttpError(401, LIVE_ERROR_CODES.auth, 'the live stream refused this request', {
           remediation: 'Sign in again; the client stops reconnecting until its headers or session change.',
         });
       }
-      return view;
+      return { view, seen };
     })
     // Attaching waits for the hub to open the cursor, so it runs here, before any header.
     .derive('liveFeed', (request, ctx) =>
-      open(ctx.liveView, ctx.url.searchParams.get('cursor') ?? undefined, request, ctx.signal),
+      open(ctx.liveGrant, ctx.url.searchParams.get('cursor') ?? undefined, request, ctx.signal),
     )
     .bind(liveRoute, (_input, ctx) => ctx.liveFeed);
 

@@ -17,7 +17,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { LiveGrant } from '../http.js';
-import type { LiveEvent, LiveManifest, LiveScopes, TableTag } from '../index.js';
+import type { LiveEvent, LiveHub, LiveManifest, LiveScopes, TableTag } from '../index.js';
 import type { SseReader } from './sse-reader.js';
 import { liveEndpoint } from '../http.js';
 import { createLiveHub } from '../index.js';
@@ -56,6 +56,17 @@ const manifest: LiveManifest = [LIST, MINE, STATS, NAMES];
 
 const receipt = (txid: string): Promise<string> => RECEIPTS.of(txid);
 
+const noop = (): void => undefined;
+
+/** A barrier: `promise` settles when `resolve` is called. */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve = noop;
+  const promise = new Promise<void>(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).toReversed()) await cleanup();
@@ -63,9 +74,9 @@ afterEach(async () => {
 
 /**
  * A ready hub and an endpoint whose grant is whatever `state.grant` holds when `authorize` runs.
- * Typed as any grant, the way a JavaScript caller could return one.
+ * Typed as any grant, the way a JavaScript caller could return one. `wrap` stands between the endpoint and the hub.
  */
-async function rig(grant: LiveGrant | null) {
+async function rig(grant: LiveGrant | null, wrap: (hub: LiveHub) => LiveHub = hub => hub) {
   const source = fakeSource();
   const hub = createLiveHub({ source, limits: { batchMs: 1 }, receipts: RECEIPTS });
   await hub.start();
@@ -76,7 +87,7 @@ async function rig(grant: LiveGrant | null) {
   const authorize = vi.fn(() =>
     state.fail ? Promise.reject(new Error('the session store is down')) : Promise.resolve(state.grant),
   );
-  const endpoint = liveEndpoint({ hub, manifest, scopes, authorize, reauthorize: [MEMBERSHIPS] });
+  const endpoint = liveEndpoint({ hub: wrap(hub), manifest, scopes, authorize, reauthorize: [MEMBERSHIPS] });
   const request = (query = '') => endpoint.fetch(new Request(`http://live.test/api/live${query}`));
   const stream = async (query = ''): Promise<SseReader> => {
     const response = await request(query);
@@ -90,7 +101,7 @@ async function rig(grant: LiveGrant | null) {
     source.emit({ kind: 'change', tags, txid });
     await sleep(5);
   };
-  return { source, hub, state, authorize, request, stream, commit };
+  return { source, hub, state, authorize, request, stream, commit, close: () => endpoint.close() };
 }
 
 /** Every frame up to the next `bye` or end, after `hello`. */
@@ -324,5 +335,91 @@ describe('T11: a write to a reauthorize table re-runs authorize', () => {
     expect(await until(client, 2)).toEqual([{ kind: 'bye' }]);
     const refused = await request();
     expect(refused.status).toBe(401);
+  });
+});
+
+/**
+ * The request is held inside `hub.open`, after `authorize` resolved: `opening` says it got there, `release` lets it go
+ * on. Barriers, not sleeps: the write lands in exactly that window.
+ */
+async function held(grant: LiveGrant) {
+  const opening = deferred();
+  const release = deferred();
+  const live = await rig(grant, hub => ({
+    ...hub,
+    async open(options) {
+      opening.resolve();
+      await release.promise;
+      return hub.open(options);
+    },
+  }));
+  const response = live.request();
+  await opening.promise;
+  expect(live.authorize).toHaveBeenCalledTimes(1);
+  /** Lets the stream open, and reads it. */
+  const open = async (): Promise<SseReader> => {
+    release.resolve();
+    const answer = await response;
+    expect(answer.status).toBe(200);
+    const reader = sseReader(answer);
+    cleanups.push(() => reader.cancel());
+    return reader;
+  };
+  return { ...live, open };
+}
+
+describe('a reauthorize write while a stream opens (after authorize read the grant, before the stream can be re-checked)', () => {
+  it('a revoking write: bye before any frame of the revoked org, not hello under the old grant and its changes', async () => {
+    const { source, state, commit, open } = await held({ scopes: { org: [A], user: ['u1'] } });
+    state.grant = { scopes: { org: [B], user: ['u1'] } }; // the membership in A is deleted
+    source.emit({ kind: 'change', tags: [{ ...MEMBERSHIPS, keys: ['u1'] }], txid: '1' });
+    const client = await open();
+    await commit('2', { ...POSTS, keys: [A] });
+    // Fail open would be hello with org A, then this post: the old grant served until maxAgeMs.
+    expect(await until(client, 2)).toEqual([{ kind: 'bye' }]);
+  });
+
+  it('a write that changes nothing: one more authorize, no bye, and the frames flow', async () => {
+    const { source, commit, authorize, open } = await held({ scopes: { org: [A], user: ['u1'] } });
+    source.emit({ kind: 'change', tags: [{ ...MEMBERSHIPS, keys: ['u1'] }], txid: '1' });
+    const client = await open();
+    await commit('2', { ...POSTS, keys: [A] });
+    expect(await until(client, 2)).toMatchObject([
+      { kind: 'hello', scopes: { org: [A], user: ['u1'] } },
+      { kind: 'change', tags: [{ ...POSTS, scope: { name: 'org', keys: [A] } }] },
+    ]);
+    expect(authorize).toHaveBeenCalledTimes(2);
+  });
+
+  it('no reauthorize write in the window: no extra authorize', async () => {
+    const { commit, authorize, open } = await held({ scopes: { org: [A], user: ['u1'] } });
+    await commit('1', { ...POSTS, keys: [B] }); // not a reauthorize table
+    const client = await open();
+    await commit('2', { ...POSTS, keys: [A] });
+    expect(await until(client, 2)).toMatchObject([
+      { kind: 'hello', scopes: { org: [A], user: ['u1'] } },
+      { kind: 'change', tags: [{ ...POSTS, scope: { name: 'org', keys: [A] } }] },
+    ]);
+    expect(authorize).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('close() fails closed', () => {
+  it('an open stream gets bye, then ends: the client reconnects elsewhere instead of waiting', async () => {
+    const { stream, close } = await rig({ scopes: { org: [A] } });
+    const client = await stream();
+    expect(await until(client, 1)).toMatchObject([{ kind: 'hello' }]);
+    close();
+    expect(await until(client, 2)).toEqual([{ kind: 'bye' }]);
+  });
+
+  it('a stream still opening when close() runs ends with bye and never serves a change unwatched', async () => {
+    const { commit, close, open } = await held({ scopes: { org: [A], user: ['u1'] } });
+    close(); // the re-check listener is gone: a stream joining now could never be revoked
+    const client = await open();
+    await commit('1', { ...POSTS, keys: [A] });
+    const frames = await until(client, 3);
+    expect(frames.some(frame => frame.kind === 'change')).toBe(false);
+    expect(frames.at(-1)).toEqual({ kind: 'bye' });
   });
 });

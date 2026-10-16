@@ -244,8 +244,9 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
     // the next write to a table the procedure reads makes it refetch, and that refetch is refused.
     await writer.query('delete from sessions where token = $1', [app.session.token]);
     await app.insertPost('a2', 'alice');
-    await waitFor(() => expect(app.queryClient.getQueryState(app.postsKey)?.status).toBe('error'));
-    await waitFor(() => expect(app.queryClient.getQueryData(app.postsKey)).toBeUndefined());
+    // Real Postgres under a parallel suite: the hint, the refetch and the 401 can take over waitFor's 1 s default.
+    await waitFor(() => expect(app.queryClient.getQueryState(app.postsKey)?.status).toBe('error'), { timeout: 5000 });
+    await waitFor(() => expect(app.queryClient.getQueryData(app.postsKey)).toBeUndefined(), { timeout: 5000 });
     await waitFor(() => expect(app.statuses.at(-1)).toBe('unauthorized'), { timeout: 5000 });
     // The hint's refetch and the reset's refetch, then nothing: no retry, no loop.
     expect(app.reads.posts - before).toBe(2);
