@@ -92,7 +92,7 @@ type SchemeParts<TId extends string | undefined> = {
   readonly algorithm: WebhookAlgorithm;
   readonly encoding: WebhookEncoding;
   /** `undefined` when a header the scheme needs is missing or malformed. */
-  readonly read: (message: WebhookMessage) => Read<TId> | undefined;
+  readonly read: (message: WebhookMessage) => Read<TId> | undefined | Promise<Read<TId> | undefined>;
   readonly stamp: (id: string, timestamp: string) => Stamp;
 };
 
@@ -161,7 +161,7 @@ function defineScheme<TId extends string | undefined>(parts: SchemeParts<TId>): 
 
   return {
     verify: async (message, options = {}) => {
-      const read = parts.read(message);
+      const read = await parts.read(message);
       if (read === undefined || read.signatures.length === 0) {
         throw rejected(HTTP_ERROR_CODES.webhookMalformed, `${parts.name} signature headers are missing or malformed`);
       }
@@ -295,7 +295,10 @@ export type HmacSchemeOptions = {
   readonly algorithm?: WebhookAlgorithm;
   /** Default `hex`. */
   readonly encoding?: WebhookEncoding;
-  /** The header that carries the event id. Required on the request when set. */
+  /**
+   * The header that carries the event id, for senders that sign it through `bodyPrefix`. Required on
+   * the request when set. It never becomes `webhook.id`: see {@link hmac}.
+   */
   readonly idHeader?: string;
   /**
    * The header that carries the send time in Unix seconds. Required on the request when set, and
@@ -309,10 +312,16 @@ export type HmacSchemeOptions = {
   readonly bodyPrefix?: (parts: { readonly id: string; readonly timestamp: string }) => string;
 };
 
-/** Any HMAC scheme not covered above: GitHub, Slack, Shopify and most others. With `idHeader`, the id is always a string. */
-export function hmac(options: HmacSchemeOptions & { readonly idHeader: string }): WebhookScheme<string>;
-export function hmac(options: HmacSchemeOptions): WebhookScheme;
-export function hmac(options: HmacSchemeOptions): WebhookScheme {
+/**
+ * Any HMAC scheme not covered above: GitHub, Slack, Shopify and most others.
+ *
+ * `webhook.id` is the SHA-256 (hex) of the body, never a header. These senders put their event id
+ * in a header the signature does not cover (GitHub's `x-github-delivery`), so anyone who captured
+ * one delivery could resend it under a new id and get it processed twice. The body is signed: a
+ * resend has the same body, so the same id. Two different events with byte-identical bodies share
+ * an id too; for a sender that sends those, key on an id inside the body instead.
+ */
+export function hmac(options: HmacSchemeOptions): WebhookScheme<string> {
   const { header, headerPrefix = '', idHeader, timestampHeader, bodyPrefix } = options;
   const prefixFor = (id: string, timestamp: string): string => bodyPrefix?.({ id, timestamp }) ?? '';
   return defineScheme({
@@ -320,14 +329,14 @@ export function hmac(options: HmacSchemeOptions): WebhookScheme {
     keys: utf8Keys('hmac', options.secrets),
     algorithm: options.algorithm ?? 'SHA-256',
     encoding: options.encoding ?? 'hex',
-    read: ({ headers }) => {
+    read: async ({ headers, body }) => {
       const signature = headers.get(header);
       const id = idHeader === undefined ? undefined : headers.get(idHeader);
       const timestamp = timestampHeader === undefined ? undefined : headers.get(timestampHeader);
       if (signature === null || id === null || timestamp === null) return;
       if (!signature.startsWith(headerPrefix)) return;
       return {
-        id,
+        id: toHex(await crypto.subtle.digest('SHA-256', body)),
         timestamp,
         signatures: [signature.slice(headerPrefix.length)],
         prefix: prefixFor(id ?? '', timestamp ?? ''),

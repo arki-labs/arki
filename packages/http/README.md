@@ -302,7 +302,7 @@ const partnerEvents = routes()
 - **The deriver reads a clone of the body.** The route's `body` schema still parses the same bytes after the check. A body over `maxBodyBytes` (default 1 MiB) answers 413 before any check.
 - **Rotation.** Pass several secrets, the new one first. Any one may match; `sign` uses the first.
 - **Replays.** The signed time must be within `tolerance` seconds of now, either way (default 300). Only a signed time stops a replay, so with `hmac` put the time in `bodyPrefix`. Past the window, the journal key stops a resent event.
-- **`webhook.id`** is `string` for `standardWebhooks` and for `hmac` with `idHeader`; `string | undefined` otherwise.
+- **`webhook.id`** only ever comes from signed bytes, because it becomes the journal key. `standardWebhooks`: the signed `webhook-id`. `stripe`: the event's `id` in the body (`string | undefined`). `hmac`: the SHA-256 of the body, because those senders put their id in a header the signature does not cover (GitHub's `x-github-delivery`), and a resend under a forged id would otherwise run twice.
 - Every scheme also has `verify({ headers, body })` for use outside a route, and `sign(body, { id?, timestamp? })` for senders and tests.
 - Failures answer 401: headers missing or malformed (`E420`), no signature matches (`E421`), signed time outside the window (`E422`). A scheme with no secret, an empty one, or (Standard Webhooks) one that is not base64 throws `E012` when it is created.
 

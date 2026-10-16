@@ -5,7 +5,7 @@
  * Standard Webhooks test vector), because a sign → verify round trip cannot catch a bug that both
  * directions share.
  */
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { z } from 'zod';
 
@@ -150,7 +150,7 @@ describe('stripe', () => {
 });
 
 describe('hmac', () => {
-  it('GitHub: sha256=<hex> of the body alone, with a delivery id', async () => {
+  it('GitHub: sha256=<hex> of the body alone; the id is the body hash, not the unsigned delivery header', async () => {
     const scheme = hmac({
       secrets: ['gh-secret'],
       header: 'x-hub-signature-256',
@@ -162,10 +162,15 @@ describe('hmac', () => {
       'x-hub-signature-256': `sha256=${hex('gh-secret', body)}`,
       'x-github-delivery': 'd-1',
     });
+    const bodyHash = createHash('sha256').update(body).digest('hex');
     await expect(scheme.verify({ headers, body: bytes(body) })).resolves.toMatchObject({
-      id: 'd-1',
+      id: bodyHash,
       timestamp: undefined,
     });
+    // A captured delivery resent under a new delivery id still has the same id, so the journal
+    // key dedupes it. Were the id the header, this resend would run the event a second time.
+    headers.set('x-github-delivery', 'd-forged');
+    await expect(scheme.verify({ headers, body: bytes(body) })).resolves.toMatchObject({ id: bodyHash });
     headers.delete('x-github-delivery');
     await expect(scheme.verify({ headers, body: bytes(body) })).rejects.toMatchObject({
       code: HTTP_ERROR_CODES.webhookMalformed,
@@ -206,8 +211,7 @@ describe('the id type follows the scheme', () => {
   it('is a string where the scheme always carries one, so an inbox key needs no check', () => {
     expectTypeOf(standardWebhooks({ secrets: ['whsec_c2VjcmV0'] })).toEqualTypeOf<WebhookScheme<string>>();
     expectTypeOf(stripe({ secrets: ['s'] })).toEqualTypeOf<WebhookScheme>();
-    expectTypeOf(hmac({ secrets: ['s'], header: 'x-sig', idHeader: 'x-id' })).toEqualTypeOf<WebhookScheme<string>>();
-    expectTypeOf(hmac({ secrets: ['s'], header: 'x-sig' })).toEqualTypeOf<WebhookScheme>();
+    expectTypeOf(hmac({ secrets: ['s'], header: 'x-sig' })).toEqualTypeOf<WebhookScheme<string>>();
   });
 });
 
