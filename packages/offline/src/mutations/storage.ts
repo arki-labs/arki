@@ -47,10 +47,13 @@ export function createQueueStorage(storageKey: string): QueueStorage {
  * The last actor signed in on this device: one string under its own key.
  * A write queued while the session is unknown (an offline reload) is bound
  * to it, so it can replay for that same user once they are signed in again.
+ * A confirmed sign-out forgets it, so a later signed-out write is never bound
+ * to the user who left.
  */
 export type LastActorStore = {
   read(): Promise<string | null>;
   remember(actorId: string): Promise<void>;
+  forget(): Promise<void>;
 };
 
 export function createLastActorStore(storageKey: string): LastActorStore {
@@ -73,6 +76,17 @@ export function createLastActorStore(storageKey: string): LastActorStore {
       } catch (error) {
         // Memory still holds it for this page; only a reload forgets it.
         log.debug('Could not store the last actor: {error}', { error: error instanceof Error ? error : String(error) });
+      }
+    },
+
+    async forget(): Promise<void> {
+      if (known === null) return;
+      known = null;
+      try {
+        await del(storageKey);
+      } catch (error) {
+        // Memory already forgot it; a reload could bring the stored id back, so say so.
+        log.debug('Could not forget the last actor: {error}', { error: error instanceof Error ? error : String(error) });
       }
     },
   };

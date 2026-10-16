@@ -23,8 +23,8 @@ export interface ReplayLoopOptions {
   storage: QueueStorage;
   dlStore: DeadLetterStore;
   rpc: AnyRpcClient;
-  /** Who is signed in now (`null`: nobody). Read right before every send attempt. */
-  actorId: () => string | null;
+  /** Who is signed in now (`null`: nobody; `undefined`: not known yet). Read right before every send attempt. */
+  actorId: () => string | null | undefined;
   maxRetries: number;
   backoff: (attempt: number) => number;
   onDeadLetter?: (entry: QueuedMutation, error: Error) => void;
@@ -117,8 +117,8 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
       // backoff can span an account switch) and never send under another actor.
       const signedIn = actorId();
       if (current.actorId !== signedIn) {
-        if (signedIn === null) {
-          // Signed out: wait for a sign-in; `drain()` after it resumes.
+        if (signedIn === null || signedIn === undefined) {
+          // Signed out or not known yet: wait for a sign-in; `drain()` after it resumes.
           emit({ type: 'auth-required' });
           return false;
         }

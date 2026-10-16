@@ -316,8 +316,8 @@ describe('OfflineMutationQueue', () => {
     queue.dispose();
   });
 
-  // An offline reload loses the session: actorId() answers null. Alice's write
-  // must still reach Alice once she is back, and must never reach Bob.
+  // An offline reload loses the session: actorId() answers undefined (not known
+  // yet). Alice's write must still reach Alice once she is back, never Bob.
   describe('offline reload: the session is unknown at enqueue', () => {
     async function writeAfterReload(rpc: AnyRpcClient, key: string) {
       // Before the reload: Alice was signed in on this device.
@@ -327,7 +327,7 @@ describe('OfflineMutationQueue', () => {
       for (const k of Object.keys(store)) if (k === key) delete store[k];
 
       // After the reload: a fresh queue, the session not known yet.
-      let signedIn: string | null = null;
+      let signedIn: string | undefined;
       const after = createOfflineMutationQueue({ actorId: () => signedIn, rpc, storageKey: key, deadLetterStorageKey: `dl-${key}` });
       await after.enqueue(createPost, { title: 'Offline after reload' });
       return { queue: after, signIn: (id: string) => (signedIn = id) };
@@ -357,6 +357,44 @@ describe('OfflineMutationQueue', () => {
       expect(dead?.actorId).toBe(ALICE);
       expect(dead?.lastError?.code).toBe('ACTOR_MISMATCH');
       queue.dispose();
+    });
+
+    // Shared device: Alice signs out, then someone queues a write while signed
+    // out. It must not be bound to Alice, or it would replay as her later.
+    it('a confirmed sign-out forgets the last user: a signed-out write replays for nobody', async () => {
+      const rpc = makeRpc('success');
+      let signedIn: string | null = ALICE;
+      const queue = createOfflineMutationQueue({ actorId: () => signedIn, rpc, storageKey: 'q-signout', deadLetterStorageKey: 'dl-signout' });
+      await queue.enqueue(createPost, { title: 'As Alice' });
+      await queue.drain();
+      expect(rpc.call).toHaveBeenCalledOnce();
+
+      signedIn = null;
+      await queue.enqueue(createPost, { title: 'Signed out' });
+      expect(store['q-signout']).toContain('"actorId":null');
+
+      signedIn = ALICE;
+      await queue.drain();
+      expect(rpc.call).toHaveBeenCalledOnce();
+      const [dead] = await queue.deadLetter.list();
+      expect(dead?.lastError?.code).toBe('ACTOR_MISMATCH');
+      queue.dispose();
+    });
+
+    it('a sign-out also forgets it across a reload', async () => {
+      const key = 'q-signout-reload';
+      const before = createOfflineMutationQueue({ actorId: () => ALICE, rpc: makeRpc('success'), storageKey: key, deadLetterStorageKey: `dl-${key}` });
+      await before.enqueue(createPost, { title: 'As Alice' });
+      const signedOut = createOfflineMutationQueue({ actorId: () => null, rpc: makeRpc('success'), storageKey: key, deadLetterStorageKey: `dl-${key}` });
+      await signedOut.enqueue(createPost, { title: 'Signed out' });
+      before.dispose();
+      signedOut.dispose();
+      delete store[key];
+
+      const after = createOfflineMutationQueue({ actorId: () => undefined, rpc: makeRpc('success'), storageKey: key, deadLetterStorageKey: `dl-${key}` });
+      await after.enqueue(createPost, { title: 'After reload' });
+      expect(store[key]).toContain('"actorId":null');
+      after.dispose();
     });
 
     it('keeps null when no user was ever signed in on this device', async () => {

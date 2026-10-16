@@ -69,7 +69,7 @@ export const offline = createOfflineRuntime({
   tier: 'queue',
   appId: 'myapp',
   rpc: rpcClient,    // structural AnyRpcClient interface — see below
-  actorId: () => signedInUserId, // who is signed in now; `null` when nobody is
+  actorId: () => signedInUserId, // who is signed in now; `null` signed out; `undefined` not known yet
   devtools: true,    // OfflineDevPanel in development
 });
 ```
@@ -88,9 +88,9 @@ The replay request carries the session signed in *at replay*, not the one that q
 
 `actorId` must answer synchronously from local state (it runs offline). Feed it from your session store, and call `queue.drain()` when the user signs in.
 
-**Unknown session (offline reload).** After a reload without network the app often cannot tell who is signed in, so `actorId()` answers `null`. The queue remembers every non-null `actorId()` on the device (key `<storageKey>:last-actor`). A write queued while `actorId()` is `null` is bound to that last actor; if no actor was ever seen on the device it stays `null`. The replay rules above do not change, so such a write is sent only once that last user is signed in again, and is dead-lettered as `ACTOR_MISMATCH` for anyone else.
+**Unknown session (offline reload).** After a reload without network the app often cannot tell who is signed in yet. Then `actorId()` answers `undefined`, which is different from `null` (the session says signed out). The queue remembers every id `actorId()` returns on the device (key `<storageKey>:last-actor`). A write queued while `actorId()` is `undefined` is bound to that last actor; if no actor was ever seen on the device it stays `null`. The replay rules above do not change, so such a write is sent only once that last user is signed in again, and is dead-lettered as `ACTOR_MISMATCH` for anyone else.
 
-The remembered id is kept after sign-out. The queue has no sign-out signal: `null` means both "signed out" and "not known yet". Keeping it is safe: it is only a binding for new writes, never a credential. A write bound to it still needs that same user signed in at replay, and any other account gets `ACTOR_MISMATCH`.
+**Sign-out forgets the last actor.** When `actorId()` answers `null`, the remembered id is deleted. On a shared device this matters: after Alice signs out, a write queued by whoever uses the device next is bound to nobody, never to Alice, so it can never replay under her account. Feed `undefined` only while your session is still loading (for better-auth: `isPending`), never as a stand-in for signed out.
 
 ```tsx
 // src/root-provider.tsx

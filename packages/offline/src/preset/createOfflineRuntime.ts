@@ -27,8 +27,8 @@ export type QueueConfig = {
   tier: 'queue';
   appId: string;
   rpc: AnyRpcClient;
-  /** Who is signed in now (`null`: nobody). Queued writes replay only under the actor that queued them. */
-  actorId: () => string | null;
+  /** Who is signed in now (`null`: signed out; `undefined`: not known yet). Queued writes replay only under the actor that queued them. */
+  actorId: () => string | null | undefined;
   buster?: string;
   devtools?: boolean;
   /** Forwarded to the underlying QueryClient — wire SuperJSON / staleTime / dehydration filters here. */
@@ -77,7 +77,7 @@ export type OfflineRuntime = {
  *   tier: 'queue',
  *   appId: 'avocabo',
  *   rpc: rpcClient,
- *   actorId: () => signedInUserId, // your session state; `null` when signed out
+ *   actorId: () => signedInUserId, // your session state; `null` signed out, `undefined` not known yet
  *   devtools: true,
  * });
  * ```

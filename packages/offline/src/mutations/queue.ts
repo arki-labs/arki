@@ -71,13 +71,14 @@ export interface OfflineMutationQueueOptions {
   deadLetterStorageKey?: string;
   rpc: AnyRpcClient;
   /**
-   * The id of whoever is signed in right now, or `null` when nobody is (or the
-   * session is not known yet). Read at enqueue (the entry is bound to it) and
-   * at the start of every drain pass. Every non-null answer is remembered on
-   * the device as its last actor. It must answer synchronously from local
-   * state: it runs offline.
+   * Who is signed in right now: their id, `null` when the session says nobody
+   * is (signed out), or `undefined` while the session is not known yet (an
+   * offline reload). Read at enqueue (the entry is bound to it) and right
+   * before every send attempt. An id is remembered on the device as its last
+   * actor; `null` forgets it; only `undefined` falls back to it. It must
+   * answer synchronously from local state: it runs offline.
    */
-  actorId: () => string | null;
+  actorId: () => string | null | undefined;
   maxRetries?: number;
   backoff?: (attempt: number) => number;
   onDeadLetter?: (entry: QueuedMutation, error: Error) => void;
@@ -144,10 +145,11 @@ export function createOfflineMutationQueue(
   const storage: QueueStorage = createQueueStorage(storageKey);
   const lastActor: LastActorStore = createLastActorStore(`${storageKey}:last-actor`);
 
-  /** Who is signed in now; remembers every non-null answer as this device's last actor. */
-  function signedInActor(): string | null {
+  /** Who is signed in now. An id is remembered as this device's last actor; a sign-out forgets it. */
+  function signedInActor(): string | null | undefined {
     const id = actorId();
-    if (id !== null) void lastActor.remember(id);
+    if (typeof id === 'string') void lastActor.remember(id);
+    else if (id === null) void lastActor.forget();
     return id;
   }
   const dlStore: DeadLetterStore = createDeadLetterStore(deadLetterStorageKey);
@@ -228,7 +230,9 @@ export function createOfflineMutationQueue(
     const id = nanoid();
     // Session unknown (e.g. an offline reload): bind to this device's last
     // actor. Replay still sends it only while that same actor is signed in.
-    const bound = signedInActor() ?? (await lastActor.read());
+    // Signed out (`null`) binds to nobody, so no account can ever replay it.
+    const now = signedInActor();
+    const bound = now === undefined ? await lastActor.read() : now;
     const entry: QueuedMutation = {
       id,
       idempotencyKey: id,
