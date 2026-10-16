@@ -39,8 +39,9 @@ function serve(store: IdempotencyStore, context: IdempotentContext) {
   return { client: createRouterClient(router, { context }), runs: () => runs };
 }
 
+/** usr_1 signed in; a queued replay (a key) also carries usr_1 as Offline-Actor, as the client queue sends it. */
 const signedIn = (headers: Record<string, string>): IdempotentContext => ({
-  headers: new Headers(headers),
+  headers: new Headers('Idempotency-Key' in headers ? { 'Offline-Actor': 'usr_1', ...headers } : headers),
   session: { user: { id: 'usr_1' } },
 });
 
@@ -87,6 +88,36 @@ describe('idempotency middleware', () => {
 
     expect(runs()).toBe(1);
     expect(store.find).not.toHaveBeenCalled();
+  });
+
+  // The browser checks the actor before sending, but the cookie can change
+  // after that check. Only the server sees the session the request carries.
+  describe('Offline-Actor: a replay runs only for the user who queued it', () => {
+    it('queued by another user than the session: 403, the handler never runs', async () => {
+      const { client, runs } = serve(memoryStore(), signedIn({ 'Idempotency-Key': 'k1', 'Offline-Actor': 'usr_2' }));
+      await expect(client.posts.create({ title: 'A' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      expect(runs()).toBe(0);
+    });
+
+    it('a replay with no Offline-Actor while signed in: 403 (missing never passes)', async () => {
+      const context: IdempotentContext = { headers: new Headers({ 'Idempotency-Key': 'k1' }), session: { user: { id: 'usr_1' } } };
+      const { client, runs } = serve(memoryStore(), context);
+      await expect(client.posts.create({ title: 'A' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      expect(runs()).toBe(0);
+    });
+
+    it('queued by a user but no session on the request: 403, never run anonymously', async () => {
+      const context: IdempotentContext = { headers: new Headers({ 'Idempotency-Key': 'k1', 'Offline-Actor': 'usr_1' }), session: null };
+      const { client, runs } = serve(memoryStore(), context);
+      await expect(client.posts.create({ title: 'A' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      expect(runs()).toBe(0);
+    });
+
+    it('a normal call (no key) needs no Offline-Actor', async () => {
+      const { client, runs } = serve(memoryStore(), signedIn({}));
+      await client.posts.create({ title: 'A' });
+      expect(runs()).toBe(1);
+    });
   });
 
   it('a store failure does not fail the call: the handler already ran and its answer is returned', async () => {

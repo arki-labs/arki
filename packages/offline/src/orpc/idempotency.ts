@@ -1,5 +1,6 @@
 import type { Meta } from '@orpc/contract';
 import type { Middleware, ORPCErrorConstructorMap } from '@orpc/server';
+import { ORPCError } from '@orpc/server';
 
 import { getLogger } from '@arki/log';
 
@@ -26,11 +27,18 @@ export type IdempotencyStore = Pick<IdempotencyRepository, 'find' | 'store'>;
  * (see `offlineSafe(p)`); every other procedure passes straight through.
  * For a marked one:
  *
- * 1. Reads `Idempotency-Key` from the request headers; no key or no signed-in
- *    user → runs the handler as usual.
- * 2. A stored response for (key, path, userId) within the 7-day TTL → returns
+ * 1. Reads `Idempotency-Key` from the request headers; no key → runs the
+ *    handler as usual (not a queued replay).
+ * 2. A queued replay carries `Offline-Actor`: the user who queued the write.
+ *    It must equal the session user (both absent counts as equal). Otherwise
+ *    → 403 FORBIDDEN, which the client queue dead-letters. This catches what
+ *    the browser cannot: a session cookie that changed between the queue's
+ *    own actor check and the request leaving the browser. A missing header
+ *    with a signed-in session is refused too.
+ * 3. No signed-in user → runs the handler (the cache is scoped to a user).
+ * 4. A stored response for (key, path, userId) within the 7-day TTL → returns
  *    it without calling the handler.
- * 3. Otherwise runs the handler and stores its output.
+ * 5. Otherwise runs the handler and stores its output.
  *
  * Best-effort under concurrency: two replays of one key that arrive together
  * can both run the handler (lookup, run and store are separate steps).
@@ -42,8 +50,15 @@ export function idempotency(
     if (procedure['~orpc'].meta.offlineSafe !== true) return next();
 
     const idempotencyKey = context.headers.get('Idempotency-Key');
+    if (!idempotencyKey) return next();
+
     const userId = context.session?.user.id;
-    if (!idempotencyKey || !userId) return next();
+    const queuedBy = context.headers.get('Offline-Actor');
+    if ((queuedBy ?? undefined) !== userId) {
+      log.debug('refused a replay of {path}: queued by another actor than the session', { path: path.join('.') });
+      throw new ORPCError('FORBIDDEN', { message: 'Queued under another account; not run under the account signed in now' });
+    }
+    if (!userId) return next();
 
     const procedurePath = path.join('.');
     const cached = await repo.find(idempotencyKey, procedurePath, userId);

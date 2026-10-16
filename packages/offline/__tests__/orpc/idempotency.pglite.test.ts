@@ -112,7 +112,7 @@ describe.each(legs)('idempotency on $name', leg => {
     const router = impl.router({
       highlights: { create: impl.highlights.create.handler(handler), rename: impl.highlights.rename.handler(handler) },
     });
-    const context: IdempotentContext = { headers: new Headers({ 'Idempotency-Key': key }), session: { user: { id: 'usr_1' } } };
+    const context: IdempotentContext = { headers: new Headers({ 'Idempotency-Key': key, 'Offline-Actor': 'usr_1' }), session: { user: { id: 'usr_1' } } };
     return { client: createRouterClient(router, { context }), runs: () => runs };
   }
 

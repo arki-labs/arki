@@ -161,6 +161,8 @@ describe('ReplayLoop', () => {
       'id-3',
       'id-4',
     ]);
+    // Each request names who queued it, so the server can refuse a session that changed.
+    expect(rpc.calls.map((c) => c.headers['Offline-Actor'])).toEqual([ALICE, ALICE, ALICE, ALICE]);
 
     // Correct procedure path was used
     expect(rpc.calls[0]?.path).toEqual(['todos', 'create']);

@@ -73,8 +73,11 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
     entry: QueuedMutation,
   ): Promise<'sent' | 'dead-letter' | 'retry' | 'halt'> {
     try {
+      // The server checks Offline-Actor against the session the request really
+      // carries; the browser-side check alone cannot see a cookie switch.
       await rpc.call(entry.procedurePath, entry.input, {
         'Idempotency-Key': entry.idempotencyKey,
+        ...(entry.actorId === null ? {} : { 'Offline-Actor': entry.actorId }),
       });
       return 'sent';
     } catch (error) {
