@@ -6,7 +6,9 @@ import { magicLink, oAuthProxy } from 'better-auth/plugins';
 
 import { createPrefixedId } from '@arki/db/id';
 import { getLogger } from '@arki/log';
-import { createEmailClient } from '@arki/mail';
+import { logTransport, mailer } from '@arki/mail';
+import { resend } from '@arki/mail/http/resend';
+import { magicLink as magicLinkMail } from '@arki/mail/templates/auth';
 
 import { betterAuth } from './create-auth';
 import { env } from './env';
@@ -60,8 +62,11 @@ export function initAuth(
     throw new Error('AUTH_SECRET is not set');
   }
 
-  const emailClient = options.resendApiKey
-    ? createEmailClient({ isDev: env.NODE_ENV === 'development', resend: { apiKey: options.resendApiKey } })
+  const mail = options.resendApiKey
+    ? mailer({
+        transport: env.NODE_ENV === 'development' ? logTransport() : resend({ apiKey: options.resendApiKey }),
+        from: 'Brandability <no-reply@furculita.net>',
+      })
     : undefined;
 
   const googleProvider =
@@ -130,17 +135,17 @@ export function initAuth(
       expo(),
       magicLink({
         sendMagicLink: async ({ email, url }) => {
-          if (!emailClient) {
+          if (!mail) {
             authLogger.error('Email client not configured, cannot send magic link');
             throw new Error('Email service not configured. Please try again later.');
           }
 
-          const { error } = await emailClient.send({
-            to: email,
-            from: 'Brandability <no-reply@furculita.net>',
-            subject: 'Your magic link',
-            text: `Click the link to sign in: ${url}`,
-          });
+          // better-auth's magic link lives 5 minutes (the plugin's default `expiresIn`).
+          const { error } = await mail.send(
+            magicLinkMail,
+            { appName: options.appName, url, expiresInMinutes: 5 },
+            { to: email },
+          );
 
           if (error) {
             authLogger.error('Failed to send magic link email: {message}', { message: error.message });

@@ -20,6 +20,8 @@
  */
 import { expect, vi } from 'vitest';
 
+import type * as MailModule from '@arki/mail';
+
 import type { DefinedAuth } from '../define-auth-backend';
 
 const MUTATED_ENV_KEYS = [
@@ -72,8 +74,9 @@ export function applyProductionBootEnv(): () => void {
 }
 
 /**
- * The `@arki/mail` module mock. Consumers wire it through vitest's hoisted
- * `vi.mock`, delegating here to keep the body DRY:
+ * The `@arki/mail` module mock: the real module, except that every `mailer()`
+ * sends through a `mailSink()` — nothing leaves the process. Consumers wire it
+ * through vitest's hoisted `vi.mock`, delegating here to keep the body DRY:
  *
  * ```ts
  * vi.mock('@arki/mail', async () => {
@@ -82,14 +85,10 @@ export function applyProductionBootEnv(): () => void {
  * });
  * ```
  */
-export function emailModuleMock(): {
-  createEmailClient: () => { send: ReturnType<typeof vi.fn> };
-} {
-  return {
-    createEmailClient: () => ({
-      send: vi.fn().mockResolvedValue({ error: null }),
-    }),
-  };
+export async function emailModuleMock(): Promise<typeof MailModule> {
+  const actual = await vi.importActual<typeof MailModule>('@arki/mail');
+  const { mailSink } = await import('@arki/mail/testing');
+  return { ...actual, mailer: options => actual.mailer({ ...options, transport: mailSink() }) };
 }
 
 /**

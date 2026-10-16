@@ -1,6 +1,7 @@
+import type { ReactElement, ReactNode } from 'react';
 import { createId } from '@paralleldrive/cuid2';
 
-import type { EmailClient } from '@arki/mail';
+import type { Mailer } from '@arki/mail';
 
 import { debugEmail } from '../debug';
 import { env } from '../env';
@@ -39,8 +40,8 @@ export type EmailProviderConfig = {
 };
 
 export const sendVerificationRequest = (
-  emailClient: EmailClient,
-  template?: ({ loginUrl }: { loginUrl: string }) => React.ReactElement | React.ReactNode,
+  mail: Mailer,
+  template?: ({ loginUrl }: { loginUrl: string }) => ReactElement | ReactNode,
 ) => {
   debugEmail.debug('[sendVerificationRequest] Creating verification email sender (hasTemplate: {hasTemplate})', {
     hasTemplate: !!template,
@@ -69,7 +70,7 @@ export const sendVerificationRequest = (
       { host, isDev: isDevOrStaging, recipient: to },
     );
 
-    const { error } = await emailClient.send({
+    const { error } = await mail.sendRaw({
       to,
       from: provider.from,
       subject: `Sign in to ${host}`,

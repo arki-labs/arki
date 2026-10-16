@@ -1,4 +1,7 @@
-import { createEmailClient } from '@arki/mail';
+import type { ReactElement, ReactNode } from 'react';
+
+import { logTransport, mailer } from '@arki/mail';
+import { resend } from '@arki/mail/http/resend';
 
 import type { EmailProviderConfig, EmailProviderUserConfig } from './sendVerificationRequest';
 import { debugAuth } from '../debug';
@@ -8,23 +11,27 @@ import { sendVerificationRequest } from './sendVerificationRequest';
 export function ResendProvider(
   apiKey: string,
   config: EmailProviderUserConfig,
-  sendVerificationRequestTemplate?: (conf: { loginUrl: string }) => React.ReactElement | React.ReactNode,
+  sendVerificationRequestTemplate?: (conf: { loginUrl: string }) => ReactElement | ReactNode,
 ): EmailProviderConfig & { from: string } {
   debugAuth.debug(
     '[ResendProvider] Initializing Resend email provider (hasApiKey: {hasApiKey}, hasTemplate: {hasTemplate})',
     { hasApiKey: !!apiKey, hasTemplate: !!sendVerificationRequestTemplate },
   );
 
-  const emailClient = createEmailClient({ isDev: env.NODE_ENV === 'development', resend: { apiKey } });
+  const from = 'Auth.js <no-reply@authjs.dev>';
+  const mail = mailer({
+    transport: env.NODE_ENV === 'development' ? logTransport() : resend({ apiKey }),
+    from,
+  });
 
   const provider = {
     id: 'email',
     type: 'email' as const,
     name: 'Email',
     server: '',
-    from: 'Auth.js <no-reply@authjs.dev>',
+    from,
     maxAge: 24 * 60 * 60,
-    sendVerificationRequest: sendVerificationRequest(emailClient, sendVerificationRequestTemplate),
+    sendVerificationRequest: sendVerificationRequest(mail, sendVerificationRequestTemplate),
     options: config,
   };
 
