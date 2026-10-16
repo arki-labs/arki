@@ -10,7 +10,7 @@
  *
  * Each provider exports its config type for explicit instantiation; use the
  * `createEmbeddingProvider` discriminated-union factory for runtime dispatch
- * or `createEmbeddingProviderFromEnv` for env-driven wiring.
+ * or `createEmbeddingRuntime(env)` for env-driven, local-first wiring.
  */
 
 // Provider classes & their configs
@@ -83,10 +83,22 @@ export {
 export {
   createEmbeddingProvider,
   createEmbeddingProviderAsync,
-  createEmbeddingProviderFromEnv,
   type EmbeddingProviderType,
   type EmbeddingProviderConfig,
 } from './factory';
+
+// Env-driven runtime (local-first; `env` is a required argument)
+export {
+  buildQueryText,
+  createEmbedder,
+  createEmbeddingRuntime,
+  QWEN_QUERY_INSTRUCTION,
+  resolveEmbeddingSelection,
+  type Embedder,
+  type EmbeddingRuntime,
+  type EmbeddingSelection,
+  type EnvSource,
+} from './runtime';
 
 // Core type
 export type { EmbeddingProvider } from '../types';

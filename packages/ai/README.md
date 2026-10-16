@@ -361,6 +361,29 @@ Hook for semantic search.
 - `search(query)`: Perform search
 - `getSuggestions(prefix)`: Get suggestions
 
+## Vector index (runtime, index, reconciler, Dot, Drizzle)
+
+One env reader, local-first. The core never reads `process.env` — pass the map in.
+
+```ts
+import { createEmbedder, createEmbeddingRuntime, createVectorIndex, runVectorReconciliation } from '@arki/ai';
+
+// EMBEDDING_PROVIDER → else Ollama (OLLAMA_BASE_URL / OLLAMA_HOST) → else OpenAI → else null.
+const runtime = await createEmbeddingRuntime(process.env); // { provider, selection: { type, model, dimensions } } | null
+const embedder = createEmbedder(runtime); // embedQuery(text, expectedDimensions?) → { vector, selection } | null
+
+type Payload = { userId: string; kind: 'item' | 'chunk'; model: string; dimensions: number };
+const index = runtime && createVectorIndex<Payload>(runtime, { collection: 'app_embeddings', payloadIndexes: ['userId', 'kind'], env: process.env });
+// index.provider: Qdrant when QDRANT_URL is set (durable: true), the in-memory mock otherwise (durable: false)
+
+// Cron: drain erasure tombstones (durable index only), migrate dimension mismatches, re-upsert current rows,
+// then delete the points whose rows stopped being current while they were upserted.
+const counts = await runVectorReconciliation({ durable: index.durable, targetDimensions, model, embedText, upsertPoint, deletePoints, tombstones, stores });
+```
+
+- `@arki/ai/dot` — `vectorIndex({ collection, payloadIndexes, env?, runtime?, provider? })` provides `embedder` and `vectorIndex` (`{ provider, durable }`, `provider` is `null` when nothing is configured). Resolved once at boot. Optional peer: `@arki/dot`.
+- `@arki/ai/drizzle` — `createTombstoneTable<UserId>(schema, { name, idPrefix })` and `tombstoneOutbox(table)` → `write(tx, userId, pointIds)` (in the delete's transaction), `clear(db, pointIds)` (after a direct erasure), `store(db)` (the reconciler's `TombstoneStore`). Optional peers: `drizzle-orm`, `@arki/db`.
+
 ## Advanced Usage
 
 ### Custom Embedding Provider

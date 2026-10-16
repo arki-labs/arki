@@ -145,6 +145,24 @@ Never log a single dollar value without disclosing one of these two bases:
 - "Which of these cost numbers is real spend vs an estimate?" — answered by the presence
   of `costEstimateBasis`; its absence implies a resolved-model log.
 
+## Embeddings and the vector index — one env reader
+
+`src/embeddings/runtime.ts` is the ONLY place embedding selection is read from
+env: `EMBEDDING_PROVIDER` explicit, else Ollama (`OLLAMA_BASE_URL` / `OLLAMA_HOST`),
+else OpenAI, else `null`. Never a `mock` default. The core takes `env` as an
+argument and never reads `process.env`; only `@arki/ai/dot` (`vectorIndex`
+plugin) supplies the `process.env` thunk. Apps must not redefine their own
+default model / dimensions — `selection` carries them, and
+`createVectorIndex` sizes the collection from it.
+
+Erasure: `runVectorReconciliation` acknowledges tombstones only against a
+durable index (`VectorIndex.durable`), and re-checks every upserted batch with
+the store's `stillCurrent(ids)` so a point deleted during an upsert ends up
+deleted. `@arki/ai/drizzle` owns the tombstone table + outbox.
+
+`@arki/ai` is not cross-runtime yet (Qdrant imports `node:crypto`); do not
+promise browser / Hermes support for these entries.
+
 ## How to extend
 
 When adding a new AI-powered feature to Arki:

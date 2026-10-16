@@ -97,7 +97,9 @@ export const env = defineEnv({
     // Default model for the selected LLM provider
     LLM_MODEL: z.string().optional(),
 
-    // Embedding and vector search
+    // Embedding and vector search. No default: `createEmbeddingRuntime(env)` in
+    // `embeddings/runtime.ts` resolves local-first (Ollama → OpenAI → null) and
+    // picks `mock` only when named here.
     EMBEDDING_PROVIDER: z
       .enum([
         'openai',
@@ -113,7 +115,7 @@ export const env = defineEnv({
         'transformers-js',
         'mock',
       ])
-      .default('mock'),
+      .optional(),
     QDRANT_URL: z.url().optional(),
     QDRANT_API_KEY: z.string().optional(),
   },

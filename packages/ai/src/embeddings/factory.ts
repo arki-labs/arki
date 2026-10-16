@@ -8,9 +8,8 @@
  * Bedrock is async-only because its SDK is heavy and lazy-imported; use
  * `createBedrockEmbeddingProvider` directly when you need it.
  *
- * Env-based factory (`createEmbeddingProviderFromEnv`) covers the most common
- * production wiring — choose a provider type via `EMBEDDING_PROVIDER` and
- * supply credentials via the provider's API-key env var.
+ * Env-driven wiring lives in `./runtime` (`createEmbeddingRuntime`): one
+ * local-first reader that passes the env it read to the provider it builds.
  */
 
 import type { EmbeddingProvider } from '../types';
@@ -28,7 +27,6 @@ import type { OpenAICompatibleEmbeddingConfig } from './providers/openai-compati
 import type { TransformersJsEmbeddingConfig } from './providers/transformers-js';
 import type { VoyageEmbeddingConfig } from './providers/voyage';
 import { debugEmbeddings } from '../debug.ts';
-import { env } from '../env';
 import { ConfigurationError } from '../errors';
 import { createBedrockEmbeddingProvider } from './providers/bedrock';
 import { CohereEmbeddingProvider } from './providers/cohere';
@@ -139,101 +137,4 @@ export async function createEmbeddingProviderAsync(config: EmbeddingProviderConf
     return createBedrockEmbeddingProvider(config.config);
   }
   return createEmbeddingProvider(config);
-}
-
-/**
- * Wire a default provider from environment variables. Each provider reads
- * its own API key env var; `EMBEDDING_PROVIDER` selects which one.
- */
-export function createEmbeddingProviderFromEnv(): EmbeddingProvider {
-  const providerType = env.EMBEDDING_PROVIDER;
-  debugEmbeddings.debug('[Factory] creating from env (type: {type})', { type: providerType });
-
-  switch (providerType) {
-    case 'openai': {
-      return new OpenAIEmbeddingProvider({
-        apiKey: env.OPENAI_API_KEY,
-        model: env.OPENAI_EMBEDDING_MODEL,
-      });
-    }
-    case 'cohere': {
-      return new CohereEmbeddingProvider({
-        apiKey: env.COHERE_API_KEY,
-        model: env.COHERE_EMBEDDING_MODEL,
-      });
-    }
-    case 'mistral': {
-      return new MistralEmbeddingProvider({
-        apiKey: env.MISTRAL_API_KEY,
-        model: env.MISTRAL_EMBEDDING_MODEL,
-      });
-    }
-    case 'google': {
-      return new GoogleEmbeddingProvider({
-        apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY,
-        model: env.GOOGLE_EMBEDDING_MODEL,
-      });
-    }
-    case 'ollama': {
-      return new OllamaEmbeddingProvider({
-        baseURL: env.OLLAMA_BASE_URL,
-        model: env.OLLAMA_EMBEDDING_MODEL,
-      });
-    }
-    case 'voyage': {
-      return new VoyageEmbeddingProvider({
-        apiKey: env.VOYAGE_API_KEY,
-        model: env.VOYAGE_EMBEDDING_MODEL,
-      });
-    }
-    case 'jina': {
-      return new JinaEmbeddingProvider({
-        apiKey: env.JINA_API_KEY,
-        model: env.JINA_EMBEDDING_MODEL,
-      });
-    }
-    case 'nebius': {
-      return new NebiusEmbeddingProvider({
-        apiKey: env.NEBIUS_API_KEY,
-        model: env.NEBIUS_EMBEDDING_MODEL,
-        dimensions: env.NEBIUS_EMBEDDING_DIMENSIONS,
-        baseURL: env.NEBIUS_BASE_URL,
-      });
-    }
-    case 'mixedbread': {
-      return new MixedbreadEmbeddingProvider({
-        apiKey: env.MXBAI_API_KEY,
-        model: env.MXBAI_EMBEDDING_MODEL,
-      });
-    }
-    case 'openai-compatible': {
-      const baseURL = env.OPENAI_COMPATIBLE_BASE_URL;
-      const model = env.OPENAI_COMPATIBLE_MODEL;
-      const dimensions = env.OPENAI_COMPATIBLE_DIMENSIONS;
-      if (!baseURL || !model || !dimensions) {
-        throw new ConfigurationError(
-          'openai-compatible provider requires OPENAI_COMPATIBLE_BASE_URL, OPENAI_COMPATIBLE_MODEL, and OPENAI_COMPATIBLE_DIMENSIONS.',
-        );
-      }
-      return new OpenAICompatibleEmbeddingProvider({
-        baseURL,
-        model,
-        dimensions,
-        apiKey: env.OPENAI_COMPATIBLE_API_KEY,
-      });
-    }
-    case 'transformers-js': {
-      return new TransformersJsEmbeddingProvider({
-        model: env.TRANSFORMERS_JS_MODEL,
-      });
-    }
-    case 'mock': {
-      return new MockEmbeddingProvider();
-    }
-    default: {
-      throw new ConfigurationError(
-        `Unknown EMBEDDING_PROVIDER value: ${String(providerType)}. Set to one of: openai, openai-compatible, cohere, mistral, google, ollama, voyage, jina, nebius, mixedbread, transformers-js, mock. (Bedrock requires async construction — call createBedrockEmbeddingProvider() directly.)`,
-      );
-    }
-  }
 }

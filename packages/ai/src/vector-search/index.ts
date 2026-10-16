@@ -14,7 +14,20 @@ export {
 } from './factory';
 export type { VectorSearchProvider, VectorSearchResult } from '../types';
 
-// Alias for backward compatibility
-export function createVectorSearchProviderFromEnv() {
-  throw new Error('createVectorSearchProviderFromEnv is not yet implemented. Use createVectorSearchProvider instead.');
-}
+// The app's one vector index (Qdrant or mock) over an embedding runtime
+export { createVectorIndex, type VectorIndex, type VectorIndexOptions } from './vector-index';
+
+// Postgres → index reconciler (tombstone drain + dimension migration + re-upsert)
+export {
+  ROW_CAP_PER_RUN,
+  runVectorReconciliation,
+  TOMBSTONE_CAP_PER_RUN,
+  type MismatchedRow,
+  type ReconcileCaps,
+  type ReconcileCounts,
+  type ReconcileDeps,
+  type ReconcileRow,
+  type ReconcileStore,
+  type TombstoneStore,
+  type VectorPointPayload,
+} from './reconcile';

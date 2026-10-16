@@ -30,6 +30,16 @@
       "import": "./src/safety/index.ts",
       "node": "./src/safety/index.ts"
     },
+    "./dot": {
+      "types": "./dist/src/dot/index.d.ts",
+      "import": "./src/dot/index.ts",
+      "node": "./src/dot/index.ts"
+    },
+    "./drizzle": {
+      "types": "./dist/src/drizzle/index.d.ts",
+      "import": "./src/drizzle/index.ts",
+      "node": "./src/drizzle/index.ts"
+    },
     "./*": {
       "types": "./dist/src/*.d.ts",
       "import": "./src/*.ts",
@@ -50,6 +60,7 @@
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "prettier": "@arki/prettier-config",
@@ -77,6 +88,12 @@
     "@ai-sdk/react": {
       "optional": true
     },
+    "@arki/db": {
+      "optional": true
+    },
+    "@arki/dot": {
+      "optional": true
+    },
     "@huggingface/transformers": {
       "optional": true
     },
@@ -84,6 +101,9 @@
       "optional": true
     },
     "@mixedbread-ai/sdk": {
+      "optional": true
+    },
+    "drizzle-orm": {
       "optional": true
     },
     "react": {
@@ -107,9 +127,12 @@
   },
   "peerDependencies": {
     "@ai-sdk/react": "catalog:ai",
+    "@arki/db": "workspace:*",
+    "@arki/dot": "workspace:*",
     "@huggingface/transformers": "*",
     "@mastra/core": "1.37.1",
     "@mixedbread-ai/sdk": "*",
+    "drizzle-orm": "catalog:drizzle",
     "react": "catalog:react",
     "react-dom": "catalog:react",
     "react-markdown": "catalog:content",
@@ -120,15 +143,19 @@
   "devDependencies": {
     "@ai-sdk/provider": "^4.0.25",
     "@ai-sdk/react": "catalog:ai",
+    "@arki/db": "workspace:*",
+    "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@electric-sql/pglite": "catalog:",
     "@mastra/core": "catalog:",
     "@opentelemetry/api": "catalog:opentelemetry",
     "@opentelemetry/sdk-trace-base": "catalog:opentelemetry",
     "@types/node": "catalog:node",
     "arktype": "catalog:",
+    "drizzle-orm": "catalog:drizzle",
     "react-markdown": "catalog:content",
     "remark-gfm": "catalog:content",
     "streamdown": "catalog:ai",
