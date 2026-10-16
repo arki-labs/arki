@@ -68,7 +68,7 @@ try {
 check(message === 'rejected', 'validation errors go through onValidationError');
 
 // Secrets hide their value until revealed.
-const token = secret(z.string()).parse('hunter2');
+const token = secret(z.string())['~standard'].validate('hunter2').value;
 check(!String(token).includes('hunter2'), 'a secret does not print its value');
 check(reveal(token) === 'hunter2', 'reveal returns the value');
 

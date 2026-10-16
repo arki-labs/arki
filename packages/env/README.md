@@ -39,7 +39,7 @@ Validation runs everywhere the app runs, production included, in CI and in tests
 
 ### Secrets: `secret`, `reveal`, `Redacted`
 
-Wrap a secret's schema in `secret(...)`. The variable becomes a `Redacted` value that prints as `[redacted]` in logs, JSON, template strings and `console.log`, and that the compiler will not pass where a string is expected. Read it with `reveal(...)` at the one place that needs it.
+Wrap a secret's schema (any Standard Schema: zod, valibot, arktype) in `secret(...)`. For an optional secret call `.optional()` on the result; a missing variable stays `undefined`. The variable becomes a `Redacted` value that prints as `[redacted]` in logs, JSON, template strings and `console.log`, and that the compiler will not pass where a string is expected. Read it with `reveal(...)` at the one place that needs it.
 
 ```ts
 import { defineEnv, reveal, secret } from '@arki/env/core';

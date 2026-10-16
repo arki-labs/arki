@@ -10,7 +10,7 @@
  * message with the env in it). It is not encryption: code that calls
  * `reveal` gets the plain value.
  */
-import type { ZodType } from 'zod';
+import type { SchemaInput, SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 /** What a redacted value prints as, everywhere. */
 const REDACTED_TEXT = '[redacted]';
@@ -47,17 +47,61 @@ export class Redacted<Value = string> {
   }
 }
 
+/** What {@link secret} returns: a Standard Schema whose output is redacted, with an `.optional()` variant. */
+export type SecretSchema<Schema extends StandardSchemaV1> = StandardSchemaV1<
+  SchemaInput<Schema>,
+  Redacted<SchemaOutput<Schema>>
+> & {
+  /** Accepts a missing variable. `undefined` passes through as `undefined`, never redacted. */
+  optional(): StandardSchemaV1<SchemaInput<Schema> | undefined, Redacted<SchemaOutput<Schema>> | undefined>;
+};
+
 /**
- * Parse with `schema`, then wrap the value in a {@link Redacted}. For an
- * optional secret, make the wrapped schema optional: `secret(z.string()).optional()`.
+ * What every issue of a rejected secret says. Vendors such as valibot put the received value in
+ * their messages (`Received "sk_live_…"`), and `defineEnv` logs and throws issues, so a secret's
+ * issues keep only their path.
+ */
+const HIDDEN_ISSUE_MESSAGE = 'Invalid secret (details hidden so the value cannot leak)';
+
+/**
+ * Validate with `schema` (any Standard Schema), then wrap the value in a {@link Redacted}. For an
+ * optional secret, call `.optional()`: `secret(z.string()).optional()`. The inner result passes
+ * straight through: an async inner schema yields a promise, so `defineEnv`'s synchronous check
+ * fails with the same `SchemaRunError` it would give without `secret`, and a throwing validator
+ * still throws.
  *
  * @example
  * const env = defineEnv({ server: { STRIPE_KEY: secret(z.string().min(1)) } });
  * console.log(env.STRIPE_KEY);          // [redacted]
  * stripe(reveal(env.STRIPE_KEY));       // the key
  */
-export function secret<Schema extends ZodType>(schema: Schema) {
-  return schema.transform(value => new Redacted(value));
+export function secret<Schema extends StandardSchemaV1>(schema: Schema): SecretSchema<Schema> {
+  const { version, vendor } = schema['~standard'];
+  type Sealed = StandardSchemaV1.Result<Redacted<SchemaOutput<Schema>>>;
+  const seal = (result: StandardSchemaV1.Result<SchemaOutput<Schema>>): Sealed =>
+    result.issues === undefined
+      ? { value: new Redacted(result.value) }
+      : {
+          issues: result.issues.map(issue =>
+            issue.path === undefined
+              ? { message: HIDDEN_ISSUE_MESSAGE }
+              : { message: HIDDEN_ISSUE_MESSAGE, path: issue.path },
+          ),
+        };
+  const redact = (value: unknown): Sealed | Promise<Sealed> => {
+    const result = schema['~standard'].validate(value);
+    return result instanceof Promise ? result.then(seal) : seal(result);
+  };
+  return {
+    '~standard': { version, vendor, validate: redact },
+    optional: () => ({
+      '~standard': {
+        version,
+        vendor,
+        validate: value => (value === undefined ? { value: undefined } : redact(value)),
+      },
+    }),
+  };
 }
 
 /**
