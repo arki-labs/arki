@@ -1,6 +1,6 @@
-import type { Provider } from '../provider';
-import fetchAndTransformIssue from './issue';
-import fetchAndTransformPullRequest from './pull';
+import type { Provider } from '../provider.js';
+import fetchAndTransformIssue from './issue.js';
+import fetchAndTransformPullRequest from './pull.js';
 
 const GitHubProvider: Provider = {
   baseUrl: 'https://github.com',
@@ -25,6 +25,6 @@ const GitHubProvider: Provider = {
 
 export default GitHubProvider;
 
-export { type Author, type Repository } from './core';
-export { type Issue } from './issue';
-export { type PullRequest } from './pull';
+export { type Author, type Repository } from './core.js';
+export { type Issue } from './issue.js';
+export { type PullRequest } from './pull.js';

@@ -10,20 +10,34 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./config": {
+      "types": "./dist/src/config.d.ts",
+      "default": "./dist/src/config.js"
+    },
     "./node": {
       "types": "./dist/src/node.d.ts",
-      "import": "./src/node.ts",
-      "default": "./src/node.ts"
+      "default": "./dist/src/node.js"
+    },
+    "./presets": {
+      "types": "./dist/src/presets.d.ts",
+      "default": "./dist/src/presets.js"
     },
     "./react": {
       "types": "./dist/src/react.d.ts",
       "import": "./src/react.ts",
       "default": "./src/react.ts"
     },
+    "./vite": {
+      "types": "./dist/src/vite.d.ts",
+      "default": "./dist/src/vite.js"
+    },
     "./package.json": "./package.json"
   },
+  "bin": {
+    "arki-content": "./dist/src/cli.js"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/src/cli.js', 0o755)\"",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
     "dev": "tsc",
     "format": "prettier --check . --ignore-path ../../.gitignore",
@@ -37,6 +51,7 @@
     "@arki/date": "workspace:*",
     "@arki/icons": "workspace:*",
     "@arki/intl": "workspace:*",
+    "@arki/log": "workspace:*",
     "@arki/math": "workspace:*",
     "@arki/react-hooks": "workspace:*",
     "@arki/rss": "workspace:*",
@@ -74,13 +89,18 @@
     "@types/mdast": "^4.0.4",
     "@types/unist": "^3.0.3",
     "react": "catalog:react",
+    "vite": "catalog:build-tools",
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "react": "^18 || ^19"
+    "react": "^18 || ^19",
+    "vite": "^7 || ^8"
   },
   "peerDependenciesMeta": {
     "react": {
+      "optional": true
+    },
+    "vite": {
       "optional": true
     }
   }

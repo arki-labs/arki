@@ -1,16 +1,16 @@
 import path from 'node:path';
 import { remarkCodeHike } from '@code-hike/mdx';
 import { defineCollection } from '@content-collections/core';
-import { compileMDX } from '@content-collections/mdx';
 import remarkGfm from 'remark-gfm';
 
 import { z } from '@arki/contracts';
 
 import theme from '../lib/ch-theme.json' with { type: 'json' };
-import resolveImageBlurDataURL from '../lib/imageBlurDataURL';
-import mdxEmbedder from '../lib/mdxEmbedder';
-import staticImages, { staticCoverImage } from '../lib/static-images';
-import { addIdToHeadings } from '../plugins/add-id-to-headings';
+import { compileMDX } from '../lib/compile-mdx.js';
+import resolveImageBlurDataURL from '../lib/imageBlurDataURL.js';
+import mdxEmbedder from '../lib/mdxEmbedder/index.js';
+import staticImages, { staticCoverImage } from '../lib/static-images.js';
+import { addIdToHeadings } from '../plugins/add-id-to-headings.js';
 
 const changelogDirectory = 'src/content/changelog';
 
@@ -53,10 +53,8 @@ export const changelogs = defineCollection({
       remarkPlugins: [remarkGfm, mdxEmbedder, [remarkCodeHike, { theme, showCopyButton: true, autoImport: true }]],
     });
 
-    const image = await ctx.cache(
-      { image: document.image, directory: document._meta.directory },
-      collectImageInformation,
-    );
+    // Not cached: a replaced image must get a new placeholder, and a deleted public copy must be copied again.
+    const image = await collectImageInformation({ image: document.image, directory: document._meta.directory });
 
     return {
       ...document,

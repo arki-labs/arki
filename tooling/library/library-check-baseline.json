@@ -146,6 +146,11 @@
       "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
     },
     {
+      "package": "@arki/content",
+      "error": "TYPES_E001 export \"./presets\" exposes Zod types: ZodArray, ZodCoercedDate, ZodNumber, ZodObject, ZodOptional, ZodString",
+      "reason": "standard-schema wave 0: the presets entry re-exports the ./node collections (same Zod schemas); removed in waves 1-4"
+    },
+    {
       "package": "@arki/contracts",
       "error": "DOC_E002 no llms.txt",
       "reason": "lesson 13 wave A|B: docs backlog"

@@ -1,8 +1,8 @@
-import contentCollections from '@content-collections/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { contentPlugin } from '@arki/content/vite';
 import { devServer, printLocalhostUrl } from '@arki/dev-certs';
 import { nitro } from 'nitro/vite';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
@@ -76,7 +76,7 @@ export default defineConfig({
       //   }],
     }),
     tailwindcss(),
-    contentCollections({ configPath: './content.config.ts' }),
+    contentPlugin(),
     nitro({
       // Prerender SEO discovery files at build time — output lives in
       // `.output/public/{robots.txt,sitemap.xml}` and is served by the CDN

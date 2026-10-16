@@ -9,7 +9,7 @@ import type { VFile } from 'vfile';
 import sharp from 'sharp';
 import { visit } from 'unist-util-visit';
 
-import createPlaceholder from './placeholder';
+import createPlaceholder from './placeholder.js';
 
 type FileData = {
   _meta: Meta & {
@@ -105,7 +105,7 @@ type Options = {
   resourcePath: string;
 };
 
-const staticImages: Plugin<[Options], Root> = options => (tree: Node, file: VFile, done: () => void) => {
+const staticImages: Plugin<[Options], Root> = options => (tree: Node, file: VFile, done: (error?: Error) => void) => {
   const tasks: Promise<void>[] = [];
 
   visit(tree, 'element', (node: Element) => {
@@ -114,7 +114,8 @@ const staticImages: Plugin<[Options], Root> = options => (tree: Node, file: VFil
     }
   });
 
-  Promise.all(tasks).then(() => done());
+  // A failed image must fail the compile, not leave `done` uncalled (the build would hang).
+  Promise.all(tasks).then(() => done(), done);
 };
 
 export const staticCoverImage = async (

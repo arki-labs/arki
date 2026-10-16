@@ -1,8 +1,8 @@
 import type { Paragraph } from 'mdast';
 
-import type { Provider } from '../provider';
-import { createJSONParseAST } from '../utils';
-import fetchTweet from './fetchTweets';
+import type { Provider } from '../provider.js';
+import { createJSONParseAST } from '../utils.js';
+import fetchTweet from './fetchTweets.js';
 
 export type Tweet = Awaited<ReturnType<typeof fetchTweet>>;
 

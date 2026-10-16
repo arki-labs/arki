@@ -3,12 +3,12 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
 
-import createPlaceholder from './placeholder';
+import createPlaceholder from './placeholder.js';
 
 const cacheDir = path.join('.content-collections', 'cache', 'images');
 
-const sha256sum = (value: string) => {
-  return createHash('sha256').update(value, 'utf-8').digest('hex');
+const sha256sum = (value: string | Buffer) => {
+  return createHash('sha256').update(value).digest('hex');
 };
 
 const resolveFromFile = async (checksum: string): Promise<string | null> => {
@@ -31,29 +31,27 @@ const createBlurDataURL = async (buffer: Buffer, checksum: string) => {
   return blurDataURL;
 };
 
-const fetchAndResolve = async (imageUrl: string, checksum: string): Promise<string> => {
+const fetchImage = async (imageUrl: string): Promise<Buffer> => {
   const response = await fetch(imageUrl);
   if (!response.ok) {
     throw new Error(`failed to fetch ${imageUrl}`);
   }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  return createBlurDataURL(buffer, checksum);
+  return Buffer.from(await response.arrayBuffer());
 };
 
+/**
+ * A local image is keyed by its bytes, so two posts with a `cover.jpg` get their own placeholder and a replaced
+ * image gets a new one. A remote image is keyed by its URL, so the build does not download it again.
+ */
 const resolveImageBlurDataURL = async (sourceRoot: string, directory: string, image: string) => {
-  const checksum = sha256sum(image);
-  let blurDataURL = await resolveFromFile(checksum);
-
-  if (!blurDataURL) {
-    if (image.includes('://')) {
-      blurDataURL = await fetchAndResolve(image, checksum);
-    } else {
-      const relativePath = path.join(sourceRoot, directory, image);
-      blurDataURL = await createBlurDataURL(await readFile(relativePath), checksum);
-    }
+  if (image.includes('://')) {
+    const checksum = sha256sum(image);
+    return (await resolveFromFile(checksum)) ?? createBlurDataURL(await fetchImage(image), checksum);
   }
-  return blurDataURL;
+
+  const buffer = await readFile(path.join(sourceRoot, directory, image));
+  const checksum = sha256sum(buffer);
+  return (await resolveFromFile(checksum)) ?? createBlurDataURL(buffer, checksum);
 };
 
 export default resolveImageBlurDataURL;

@@ -1,9 +1,9 @@
 import { defineCollection } from '@content-collections/core';
-import { compileMDX } from '@content-collections/mdx';
 
 import { z } from '@arki/contracts';
 
-import { addIdToHeadings } from '../plugins/add-id-to-headings';
+import { compileMDX } from '../lib/compile-mdx.js';
+import { addIdToHeadings } from '../plugins/add-id-to-headings.js';
 
 export const faqs = defineCollection({
   name: 'FAQs',

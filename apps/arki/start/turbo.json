@@ -8,6 +8,14 @@
     },
     "dev": {
       "persistent": true
+    },
+    "content:generate": {
+      "dependsOn": ["^build"],
+      "outputs": [".content-collections/generated/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^topo", "content:generate"],
+      "outputs": []
     }
   }
 }

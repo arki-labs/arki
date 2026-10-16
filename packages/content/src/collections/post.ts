@@ -1,23 +1,21 @@
-import { exec as syncExec } from 'node:child_process';
+import { execFile as execFileCallback } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { remarkCodeHike } from '@code-hike/mdx';
 import { defineCollection } from '@content-collections/core';
-import { compileMDX } from '@content-collections/mdx';
 import readingTime from 'reading-time';
 import remarkGfm from 'remark-gfm';
 
 import { z } from '@arki/contracts';
 
 import theme from '../lib/ch-theme.json' with { type: 'json' };
-import resolveImageBlurDataURL from '../lib/imageBlurDataURL';
-import mdxEmbedder from '../lib/mdxEmbedder';
-import searchIndex from '../lib/searchIndex';
-import staticImages, { staticCoverImage } from '../lib/static-images';
-import withoutBody from '../lib/withoutBody';
-import { addIdToHeadings } from '../plugins/add-id-to-headings';
+import { compileMDX } from '../lib/compile-mdx.js';
+import resolveImageBlurDataURL from '../lib/imageBlurDataURL.js';
+import mdxEmbedder from '../lib/mdxEmbedder/index.js';
+import staticImages, { staticCoverImage } from '../lib/static-images.js';
+import { addIdToHeadings } from '../plugins/add-id-to-headings.js';
 
-const exec = promisify(syncExec);
+const execFile = promisify(execFileCallback);
 
 const postDirectory = 'src/content/posts';
 
@@ -26,16 +24,18 @@ function calculateReadingTime(content: string) {
   return readingTime(contentWithoutSvg).text;
 }
 
-async function lastModificationDate(filePath: string) {
+/**
+ * The date of the post's last commit, or `undefined` when git does not know it: no git, no repository (Docker
+ * builds copy no `.git`), or an uncommitted file. Never "now": that would change on every build.
+ */
+async function lastCommitDate(filePath: string): Promise<{ date: string | undefined }> {
   try {
-    const { stdout } = await exec(`git log -1 --format=%ai -- ${path.join(postDirectory, filePath)}`);
-    if (stdout) {
-      return new Date(stdout.trim()).toISOString();
-    }
+    const { stdout } = await execFile('git', ['log', '-1', '--format=%aI', '--', path.join(postDirectory, filePath)]);
+    const date = stdout.trim();
+    return { date: date === '' ? undefined : new Date(date).toISOString() };
   } catch {
-    // Git not available (e.g., in Docker builds) - fall back to current date
+    return { date: undefined };
   }
-  return new Date().toISOString();
 }
 
 type ImageParams = { image: string; directory: string };
@@ -61,6 +61,8 @@ export const posts = defineCollection({
       avatar: z.string().optional(),
     }),
     tags: z.array(z.string()),
+    /** Set it when the date matters; otherwise the post's last commit date is used, when git knows it. */
+    lastModification: z.coerce.date().optional(),
     content: z.string(),
   }),
   transform: async (post, ctx) => {
@@ -83,8 +85,10 @@ export const posts = defineCollection({
       remarkPlugins: [remarkGfm, mdxEmbedder, [remarkCodeHike, { theme, showCopyButton: true, autoImport: true }]],
     });
 
-    const lastModification = await ctx.cache(post._meta.filePath, lastModificationDate);
-    const image = await ctx.cache({ image: post.image, directory: post._meta.directory }, collectImageInformation);
+    const commit = await ctx.cache(post._meta.filePath, lastCommitDate);
+    const lastModification = post.lastModification?.toISOString() ?? commit.date;
+    // Not cached: a replaced image must get a new placeholder, and a deleted public copy must be copied again.
+    const image = await collectImageInformation({ image: post.image, directory: post._meta.directory });
 
     return {
       ...post,
@@ -98,9 +102,6 @@ export const posts = defineCollection({
       url: `/posts/${post._meta.path}`,
       slug: post._meta.path,
     };
-  },
-  onSuccess: async documents => {
-    await Promise.all([withoutBody(documents, '.generated'), searchIndex(documents, '.generated')]);
   },
 });
 

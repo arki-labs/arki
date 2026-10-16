@@ -1,8 +1,8 @@
 import type { Paragraph } from 'mdast';
 
-import type { Author, Repository } from './core';
-import { createJSONParseAST } from '../utils';
-import { queryGitHub } from './core';
+import type { Author, Repository } from './core.js';
+import { createJSONParseAST } from '../utils.js';
+import { queryGitHub } from './core.js';
 
 const query = `query issue($owner: String!, $repo: String!, $id: Int!) {
   repository(owner: $owner, name: $repo) {

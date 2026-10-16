@@ -7,6 +7,7 @@
   "scripts": {
     "build": "bun run with-env vite build",
     "clean": "git clean -xdf .cache dist node_modules",
+    "content:generate": "arki-content generate",
     "dev": "bun run with-env vite",
     "format": "prettier --check . --ignore-path ../../../.gitignore",
     "lint": "eslint",
@@ -37,8 +38,6 @@
     "@arki/tanstack-start": "workspace:*",
     "@arki/theme": "workspace:*",
     "@arki/ui": "workspace:*",
-    "@content-collections/core": "catalog:next",
-    "@content-collections/vite": "catalog:next",
     "@daveyplate/better-auth-tanstack": "catalog:better-auth",
     "@inlang/paraglide-js": "catalog:",
     "@orpc/client": "catalog:backend",
@@ -71,7 +70,6 @@
     "@types/react-dom": "catalog:react",
     "@vitejs/plugin-react": "catalog:",
     "dotenv-cli": "catalog:env",
-    "jiti": "catalog:build-tools",
     "nitro": "catalog:tanstack/start",
     "vite": "catalog:build-tools"
   }
