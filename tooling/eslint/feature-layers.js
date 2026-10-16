@@ -73,6 +73,15 @@ const layer = (/** @type {string[]} */ names, /** @type {string} */ message) => 
   message,
 });
 
+/**
+ * The app's table barrel (`src/schema.ts`, any `../` depth) hides which feature owns a
+ * table. Not `../model/schema` (the pgSchema handle) or a feature's `model/schemas`.
+ */
+const SCHEMA_BARREL = {
+  regex: '^(\\.\\./)+schema$',
+  message: "Import the table from its owning feature's model (features/<owner>/model/tables), not the app barrel src/schema.ts: the barrel hides feature dependencies.",
+};
+
 const MODEL_INWARD = layer(['usecases', 'infra', 'entrypoints'], 'model/ is the inside layer: it imports no usecases/, infra/ or entrypoints/.');
 const USECASES_INWARD = layer(['entrypoints'], 'usecases/ never imports entrypoints/: a usecase does not know how it is called.');
 
@@ -426,6 +435,13 @@ export function featureLayers({ src = 'src', legacy = [], clients = [], pure = [
 
   return [
     {
+      // Every other feature file (feature.ts, ...); the layer configs below repeat the ban in their own lists.
+      name: 'arki/feature-layers/no-schema-barrel',
+      files: [`${features}/*.ts`, `${features}/**/*.ts`],
+      ignores: TESTS,
+      rules: rule([SCHEMA_BARREL]),
+    },
+    {
       name: 'arki/feature-layers/contracts',
       files: contracts,
       ignores: TESTS,
@@ -435,13 +451,13 @@ export function featureLayers({ src = 'src', legacy = [], clients = [], pure = [
       name: 'arki/feature-layers/model',
       files: [`${features}/model/**/*.ts`],
       ignores: [...TESTS, `${features}/model/tables.ts`, `${features}/model/tables/**`],
-      rules: rule([SERVER, CONTRACT, MODEL_INWARD, DB_RUNTIME]),
+      rules: rule([SERVER, CONTRACT, MODEL_INWARD, DB_RUNTIME, SCHEMA_BARREL]),
     },
     {
       name: 'arki/feature-layers/model-tables',
       files: [`${features}/model/tables.ts`, `${features}/model/tables/**/*.ts`],
       ignores: TESTS,
-      rules: rule([SERVER, CONTRACT, MODEL_INWARD]),
+      rules: rule([SERVER, CONTRACT, MODEL_INWARD, SCHEMA_BARREL]),
     },
     {
       name: 'arki/feature-layers/usecases',
@@ -449,7 +465,7 @@ export function featureLayers({ src = 'src', legacy = [], clients = [], pure = [
       ignores: TESTS,
       plugins: { 'arki-feature-layers': plugin },
       rules: {
-        ...rule([SERVER, CONTRACT, USECASES_INWARD]),
+        ...rule([SERVER, CONTRACT, USECASES_INWARD, SCHEMA_BARREL]),
         'arki-feature-layers/usecase-runtime-imports': ['error', { patterns: [...USECASE_BANNED, ...clients], allow: pure }],
       },
     },
@@ -470,7 +486,7 @@ export function featureLayers({ src = 'src', legacy = [], clients = [], pure = [
       name: 'arki/feature-layers/infra-entrypoints',
       files: [`${features}/infra/**/*.ts`, `${features}/entrypoints/**/*.ts`],
       ignores: [...TESTS, ...contracts, ...legacy],
-      rules: rule([SERVER, CONTRACT]),
+      rules: rule([SERVER, CONTRACT, SCHEMA_BARREL]),
     },
     {
       name: 'arki/feature-layers/infra',
