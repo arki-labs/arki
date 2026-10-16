@@ -40,7 +40,8 @@ import { defaultScheduler } from '../scheduler.js';
 
 const log = getLogger('arki:lock');
 
-const guarantees = {
+/** What `fileStore` promises. */
+export const fileGuarantees = {
   kind: 'lease',
   scope: 'host',
   // fs.watch wakes a waiter where the platform offers it, but it is only a hint:
@@ -55,7 +56,7 @@ const guarantees = {
   runtimes: ['node', 'bun', 'deno'],
 } as const satisfies Guarantees;
 
-export type FileGuarantees = typeof guarantees;
+export type FileGuarantees = typeof fileGuarantees;
 
 export type FileStoreOptions = {
   /** A lock whose mtime is older than this is dead and may be taken over. It is the lease length. Default 10 s. */
@@ -284,7 +285,7 @@ export function fileStore(dir: string, options: FileStoreOptions = {}): FileStor
 
   const store: FileStore = {
     name: 'file',
-    guarantees,
+    guarantees: fileGuarantees,
     ttlMs: staleMs,
     lockPath,
 

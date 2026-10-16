@@ -17,6 +17,7 @@ export type {
   LockCounters,
   LockRun,
   Locks,
+  LocksFor,
   LockVerbs,
   MutexHandle,
   PermitOps,

@@ -85,7 +85,8 @@ export type PgSessionOptions = PgLockOptions & {
   readonly keepAlive?: boolean;
 };
 
-const hold = {
+/** What `pgSession` promises. */
+export const pgSessionGuarantees = {
   kind: 'hold',
   scope: 'cluster',
   wait: 'native',
@@ -98,9 +99,13 @@ const hold = {
   runtimes: ['node', 'bun', 'deno'],
 } as const satisfies Guarantees;
 
-export type PgSessionGuarantees = typeof hold;
-const heldByTransaction = { ...hold, releasedBy: 'transaction' } as const satisfies Guarantees;
-export type PgTransactionGuarantees = typeof heldByTransaction;
+export type PgSessionGuarantees = typeof pgSessionGuarantees;
+/** What `pgTransaction` promises: `pgSession`'s guarantees, and the lock ends with the caller's transaction. */
+export const pgTransactionGuarantees = {
+  ...pgSessionGuarantees,
+  releasedBy: 'transaction',
+} as const satisfies Guarantees;
+export type PgTransactionGuarantees = typeof pgTransactionGuarantees;
 
 /** Longest single `lock_timeout` slice of a wait; a caller's signal is honoured between slices. */
 export const WAIT_SLICE_MS = 1000;
@@ -279,7 +284,7 @@ export function pgTransaction(
     Promise.resolve(granted.delete(grant.token) ? 'released' : 'not-owner');
   return {
     name: 'pg-transaction',
-    guarantees: heldByTransaction,
+    guarantees: pgTransactionGuarantees,
     acquire: (key: Key, req: AcquireRequest) => take({ key, legacy, mode: 'exclusive' }, req),
     release,
     // Read/write keys never have a legacy key space, so `legacyKeys` is ignored here.
@@ -372,7 +377,7 @@ export function pgSession(
 
   return {
     name: 'pg-session',
-    guarantees: hold,
+    guarantees: pgSessionGuarantees,
     async acquire(key: Key, req: AcquireRequest): Promise<Grant | undefined> {
       return (await open({ key, legacy, mode: 'exclusive' }, req)) ?? undefined;
     },

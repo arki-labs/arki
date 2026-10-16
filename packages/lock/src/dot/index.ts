@@ -2,14 +2,15 @@
  * `locks(...)` — the lock manager as a Dot plugin.
  *
  * Features that need `locks` get the handle at boot, and the store's `dispose`
- * runs when the app stops. The handle
- * keeps the store's type, so `lead`, `semaphore` and `readWrite` exist only
- * when the store can do them.
+ * runs when the app stops. The handle is typed by the store's guarantees
+ * (`LocksFor<G>`), so `lead`, `semaphore` and `readWrite` exist only when the
+ * store can do them, and a test can provide any store with the same guarantees
+ * (`testStore` from `@arki/lock/testing`).
  */
 import type { CtxOf, EmptyShape, NeedsShape, NoReservedKeys } from '@arki/dot/plugin';
 import { plugin } from '@arki/dot/plugin';
 
-import type { CreateLocksOptions, Locks, Store } from '../types.js';
+import type { CreateLocksOptions, Guarantees, LocksFor, Store } from '../types.js';
 import { LockError } from '../errors.js';
 import { createLocks } from '../locks.js';
 
@@ -50,15 +51,15 @@ function assertStoreFitsEnvironment(store: Store, allowProcessScope: boolean | u
  * defineApp('billing').use(locks({ namespace: 'billing', needs: { db }, store: ({ db }) => pgLease(db) }));
  * ```
  */
-export function locks<S extends Store, TShape extends NeedsShape & NoReservedKeys = EmptyShape>(
-  options: LocksPluginOptions<TShape, S>,
+export function locks<G extends Guarantees, TShape extends NeedsShape & NoReservedKeys = EmptyShape>(
+  options: LocksPluginOptions<TShape, Store<G>>,
 ) {
   const { namespace, store, allowProcessScope, storeTimeout, onReleaseError } = options;
   return plugin({
     name: 'locks',
     ...(options.needs === undefined ? {} : { needs: options.needs }),
     provides: {
-      locks: (deps: CtxOf<TShape>): Locks<S> => {
+      locks: (deps: CtxOf<TShape>): LocksFor<G> => {
         const built = store(deps);
         assertStoreFitsEnvironment(built, allowProcessScope);
         return createLocks({

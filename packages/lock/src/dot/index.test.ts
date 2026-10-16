@@ -9,8 +9,8 @@ import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
 import { DotLifecycleError } from '@arki/dot';
 import { defineApp, plugin, service } from '@arki/dot/plugin';
 
-import type { MemoryStore } from '../memory.js';
-import type { Locks } from '../types.js';
+import type { MemoryGuarantees } from '../memory.js';
+import type { LocksFor } from '../types.js';
 import { LockError } from '../errors.js';
 import { memoryStore } from '../memory.js';
 import { describeLocks, locks } from './index.js';
@@ -111,11 +111,11 @@ describe('locks()', () => {
     await app.dispose();
   });
 
-  it('keeps the store type, so a memory store gives a Locks<MemoryStore> handle with no lead', async () => {
+  it('types the handle by the store guarantees, so a memory store gives LocksFor<MemoryGuarantees> with no lead', async () => {
     const app = await defineApp('locks-types')
       .use(locks({ namespace: 'test', store: () => memoryStore() }))
       .boot();
-    expectTypeOf(app.services.locks).toEqualTypeOf<Locks<MemoryStore>>();
+    expectTypeOf(app.services.locks).toEqualTypeOf<LocksFor<MemoryGuarantees>>();
     const handle = app.services.locks;
     expectTypeOf(handle.mutex('k')).not.toHaveProperty('lead');
     await app.dispose();

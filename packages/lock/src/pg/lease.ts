@@ -50,11 +50,13 @@ const baseGuarantees = {
   runtimes: ['node', 'bun', 'deno'],
 } as const;
 
-const pollGuarantees = { ...baseGuarantees, wait: 'poll' } as const satisfies Guarantees;
-const wakeGuarantees = { ...baseGuarantees, wait: 'wake' } as const satisfies Guarantees;
+/** What `pgLease(db, { ttl })` promises: waiters poll. */
+export const pgLeasePollGuarantees = { ...baseGuarantees, wait: 'poll' } as const satisfies Guarantees;
+/** What `pgLease(db, { ttl, listen })` promises: waiters wake on release. */
+export const pgLeaseWakeGuarantees = { ...baseGuarantees, wait: 'wake' } as const satisfies Guarantees;
 
-export type PgLeasePollGuarantees = typeof pollGuarantees;
-export type PgLeaseWakeGuarantees = typeof wakeGuarantees;
+export type PgLeasePollGuarantees = typeof pgLeasePollGuarantees;
+export type PgLeaseWakeGuarantees = typeof pgLeaseWakeGuarantees;
 
 /**
  * The least a database must offer: raw SQL (drizzle on node-postgres, postgres.js or PGlite).
@@ -326,7 +328,7 @@ export function pgLease(
       permitWaiter(() => fits(key, weight), wake && ((signal, ready) => wake(key, signal, ready))),
   });
 
-  if (!('listen' in options)) return { ...shared, permits: withWaiter(), guarantees: pollGuarantees };
+  if (!('listen' in options)) return { ...shared, permits: withWaiter(), guarantees: pgLeasePollGuarantees };
   const isFree = async (key: Key): Promise<boolean> => {
     const result = await db.execute(sql`
       SELECT NOT EXISTS (
@@ -342,7 +344,7 @@ export function pgLease(
   return {
     ...shared,
     permits: withWaiter(waitReady),
-    guarantees: wakeGuarantees,
+    guarantees: pgLeaseWakeGuarantees,
     ...rest,
     waitFor: (key: Key, signal: AbortSignal) => waitReady(key, signal, () => isFree(key)),
   };

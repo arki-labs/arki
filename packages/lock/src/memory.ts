@@ -46,7 +46,8 @@ import type {
 import { LockError } from './errors.js';
 import { isPermitCount } from './types.js';
 
-const guarantees = {
+/** What `memoryStore` promises. */
+export const memoryGuarantees = {
   kind: 'hold',
   scope: 'process',
   wait: 'wake',
@@ -60,7 +61,7 @@ const guarantees = {
   runtimes: ['node', 'bun', 'deno', 'browser', 'hermes'],
 } as const satisfies Guarantees;
 
-export type MemoryGuarantees = typeof guarantees;
+export type MemoryGuarantees = typeof memoryGuarantees;
 
 /** What `peek` shows about a held key. A copy: changing it changes nothing. */
 export type MemoryEntry = {
@@ -503,7 +504,7 @@ export function memoryStore(): MemoryStore {
 
   return {
     name: 'memory',
-    guarantees,
+    guarantees: memoryGuarantees,
     permits,
     shared,
     acquire(key: Key, req: AcquireRequest): Promise<Grant | undefined> {

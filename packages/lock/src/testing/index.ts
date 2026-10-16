@@ -1,4 +1,4 @@
-/** `@arki/lock/testing`: a manual scheduler, the store conformance suite, chaos hooks and the replica property. */
+/** `@arki/lock/testing`: a manual scheduler, an in-memory store with any store's guarantees, the store conformance suite, chaos hooks and the replica property. */
 import { describe, it } from 'vitest';
 
 import type { ContractCase, ContractOptions, MakeStore } from './contract.js';
@@ -14,6 +14,8 @@ export { manualScheduler } from './manual-scheduler.js';
 export type { ManualScheduler } from './manual-scheduler.js';
 export { replicaCases } from './replicas.js';
 export type { ReplicaOptions } from './replicas.js';
+export { testStore } from './test-store.js';
+export type { TestStore, TestStoreOptions } from './test-store.js';
 
 /** Register cases with vitest; a case that throws {@link ContractSkip} is reported skipped with its reason. */
 export function describeCases(name: string, cases: readonly ContractCase[]): void {

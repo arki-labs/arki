@@ -305,6 +305,13 @@ export type Locks<S extends Store> = {
   : unknown) &
   (S['guarantees']['shared'] extends true ? { readWrite(key: string): ReadWriteHandle<S> } : unknown);
 
+/**
+ * The lock handle typed by what the store promises, not by the store itself: any store with
+ * the same `guarantees` fits. `Locks<S>` of a concrete store is assignable to it, so it is the
+ * type to publish as a service, and a test can provide one on another store (`testStore`).
+ */
+export type LocksFor<G extends Guarantees> = Locks<Store<G>>;
+
 export type CreateLocksOptions<S extends Store> = {
   readonly store: S;
   readonly namespace: string;

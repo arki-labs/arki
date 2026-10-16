@@ -76,6 +76,23 @@ export type RedisGuarantees = {
   readonly runtimes: readonly ('node' | 'bun' | 'deno')[];
 };
 
+/**
+ * What `redisStore` promises, with `wait: 'wake'` (the default `wake: 'pubsub'`). The store's own
+ * `guarantees.wait` reads `'poll'` once pub/sub has failed or was switched off. The type keeps both.
+ */
+export const redisGuarantees: RedisGuarantees = {
+  kind: 'lease',
+  scope: 'cluster',
+  wait: 'wake',
+  shared: true,
+  permits: true,
+  fence: 'best-effort',
+  releasedOnCrash: 'after-ttl',
+  clock: 'store',
+  poolerSafe: true,
+  runtimes: ['node', 'bun', 'deno'],
+} satisfies Guarantees;
+
 export type RedisStore = Store<RedisGuarantees> & {
   readonly permits: PermitOps;
   readonly shared: SharedOps;
@@ -165,20 +182,12 @@ export function redisStore(client: Redis, options: RedisStoreOptions): RedisStor
 
   let mode: 'wake' | 'poll' = options.wake === 'poll' ? 'poll' : 'wake';
   const guarantees: RedisGuarantees = {
-    kind: 'lease',
-    scope: 'cluster',
+    ...redisGuarantees,
     // Read on every use: a failed subscribe downgrades the store, and the guarantee must say so.
     get wait() {
       return mode;
     },
-    shared: true,
-    permits: true,
-    fence: 'best-effort',
-    releasedOnCrash: 'after-ttl',
-    clock: 'store',
-    poolerSafe: true,
-    runtimes: ['node', 'bun', 'deno'],
-  } satisfies Guarantees;
+  };
 
   /** EVALSHA first (small on the wire), EVAL when the server has not cached the script yet. */
   async function run(script: Script, keys: readonly string[], args: readonly (string | number)[]): Promise<unknown> {

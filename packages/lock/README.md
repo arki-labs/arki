@@ -58,7 +58,7 @@ The root package has no database code. Each store lives on its own entry point, 
 | `@arki/lock/redis` | `redisStore` | `ioredis` |
 | `@arki/lock/file` | `fileStore` | none |
 | `@arki/lock/dot` | `locks()` plugin for `@arki/dot` | `@arki/dot` |
-| `@arki/lock/testing` | manual scheduler, store conformance suite, replica property | `vitest`, `fast-check` |
+| `@arki/lock/testing` | manual scheduler, `testStore`, store conformance suite, replica property | `vitest`, `fast-check` |
 
 ## Which lock do I need
 
@@ -256,6 +256,8 @@ The values each store declares today:
 | `fileStore(dir)` | lease | host | poll | no | no | none | after `stale` | host | node, bun, deno |
 
 `pgTransaction` also declares `releasedBy: 'transaction'`. `redisStore` reports `wait: 'poll'` once its pub/sub channel has failed or was switched off.
+
+Each store's entry also exports its guarantees as a value, for tests: `memoryGuarantees`, `pgSessionGuarantees`, `pgTransactionGuarantees`, `pgLeasePollGuarantees`, `pgLeaseWakeGuarantees`, `redisGuarantees` (with `wait: 'wake'`) and `fileGuarantees`.
 
 What the words cost you:
 
@@ -743,6 +745,50 @@ it('renews through a five minute run', async () => {
   expect(await b.mutex('long').tryRun(() => 'b')).toEqual({ ran: true, value: 'b' });
 });
 ```
+
+### Faking `locks` in an app test
+
+The `locks()` plugin types its service by the store's guarantees: `LocksFor<G>`, not the store itself. So a test can provide it on another store with the same guarantees. `testStore(guarantees)` from `@arki/lock/testing` is that store: it runs in memory and keeps every promise `guarantees` makes.
+
+- Fences only when `fence` is not `false`. `semaphore` and `readWrite` only when `permits` and `shared` say so.
+- On a lease (`kind: 'lease'`), each hold expires `ttl` after it was taken (default `'30s'`), on the scheduler's clock, unless it is renewed. `lead` exists, as on the real store.
+- `wait: 'native'` is not simulated: an attempt answers at once and the manager waits for the release. `releasedBy: 'transaction'` frees the key on release, as if each run were its own transaction.
+
+```ts
+import { expect, it } from 'vitest';
+
+import { fake } from '@arki/dot';
+import { defineApp } from '@arki/dot/plugin';
+import { createLocks } from '@arki/lock';
+import { pgSessionGuarantees } from '@arki/lock/pg';
+import { manualScheduler, testStore } from '@arki/lock/testing';
+
+// Your plugin: locks({ namespace: 'billing', needs: { db }, store: ({ db }) => pgSession(db) })
+import { locking } from './locks';
+
+it('runs the job once while another run holds the key', async () => {
+  const clock = manualScheduler();
+  const app = await defineApp('billing-test')
+    .use(
+      fake(
+        locking.provides.locks,
+        createLocks({
+          store: testStore(pgSessionGuarantees, { scheduler: clock }),
+          namespace: 'billing',
+          scheduler: clock,
+        }),
+      ),
+    )
+    .boot();
+  const { locks } = app.services;
+
+  const outer = await locks.mutex('send-invoices').tryRun(() => locks.mutex('send-invoices').tryRun(() => 'inner'));
+  expect(outer).toEqual({ ran: true, value: { ran: false } });
+  await app.dispose();
+});
+```
+
+For a `pgLease` service, pass `pgLeasePollGuarantees` (and the same `ttl`): the fake then has `lead` and `semaphore`, and its leases run out when you `advance` the clock past the ttl without renewing.
 
 ## Not building
 
