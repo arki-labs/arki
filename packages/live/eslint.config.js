@@ -22,14 +22,37 @@ const peersOnlyInAdapters = {
 
 const adapters = ['src/dot.ts', 'src/drizzle/**', 'src/http.ts', 'src/orpc/**', 'src/pg/**', 'src/react.ts'];
 
+/** `/testing` stays portable at runtime; its `waitForInvalidation` takes a TanStack `QueryClient` type. */
+const typeOnlyPeers = {
+  group: ['@tanstack/react-query'],
+  allowTypeImports: true,
+  message: peersOnlyInAdapters.message,
+};
+
 export default [
   ...library({ adapters }),
   {
     // The portable entries (`.`, `/testing`) import no peer.
     files: ['src/**/*.ts'],
-    ignores: ['src/**/*.test.ts', ...adapters],
+    ignores: ['src/**/*.test.ts', 'src/testing.ts', ...adapters],
     rules: {
       'no-restricted-imports': ['error', { patterns: [...portableImportPatterns, peersOnlyInAdapters] }],
+    },
+  },
+  {
+    // `/testing`: no peer at runtime, one peer type.
+    files: ['src/testing.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            ...portableImportPatterns,
+            { ...peersOnlyInAdapters, group: peersOnlyInAdapters.group.filter(group => group !== '@tanstack/*') },
+            typeOnlyPeers,
+          ],
+        },
+      ],
     },
   },
 ];

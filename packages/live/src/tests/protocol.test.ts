@@ -9,7 +9,7 @@
  */
 import { setImmediate as macrotask } from 'node:timers/promises';
 import { PGlite } from '@electric-sql/pglite';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { LiveFeed, LiveHub, LiveLimits, LiveManifest, TableTag } from '../index.js';
 import type { LiveQuery, ScriptedClient } from './scripted-client.js';
@@ -28,8 +28,46 @@ const manifest: LiveManifest = [
 
 const changesOf = (client: ScriptedClient): number => client.log.filter(entry => entry === 'change').length;
 
-/** Lets every pending promise chain run (stream pumps, refetches). */
-const settle = (): Promise<void> => macrotask();
+/**
+ * A barrier: the hub seals every cursor it yields with WebCrypto, whose work finishes on a thread
+ * pool at no fixed point of the event loop. `settle()` waits for every encrypt and decrypt in
+ * flight, lets the stream pumps run, and repeats until a turn starts no new one.
+ */
+function cryptoBarrier(): { settle(): Promise<void>; restore(): void } {
+  const inFlight = new Set<Promise<unknown>>();
+  const subtle = globalThis.crypto.subtle;
+  const encrypt = subtle.encrypt.bind(subtle);
+  const decrypt = subtle.decrypt.bind(subtle);
+  function track<T>(promise: Promise<T>): Promise<T> {
+    inFlight.add(promise);
+    const forget = (): void => {
+      inFlight.delete(promise);
+    };
+    promise.then(forget, forget);
+    return promise;
+  }
+  const spies = [
+    vi.spyOn(subtle, 'encrypt').mockImplementation((...args) => track(encrypt(...args))),
+    vi.spyOn(subtle, 'decrypt').mockImplementation((...args) => track(decrypt(...args))),
+  ];
+  return {
+    async settle() {
+      for (;;) {
+        await macrotask();
+        if (inFlight.size === 0) return;
+        await Promise.allSettled(inFlight);
+      }
+    },
+    restore() {
+      for (const spy of spies) spy.mockRestore();
+    },
+  };
+}
+
+/** Lets every pending promise chain run (stream pumps, refetches, cursor seals). */
+const barrier = cryptoBarrier();
+const settle = (): Promise<void> => barrier.settle();
+afterAll(() => barrier.restore());
 
 /** A database of version counters: a commit bumps a table, its hint is delivered when the test says. */
 function modelDatabase(source: ReturnType<typeof fakeSource>) {
@@ -125,7 +163,7 @@ describe('convergence across the handshake', () => {
         return;
       }
       case 'connect': {
-        expect(client.connect()).toBe(true);
+        expect(await client.connect()).toBe(true);
         return;
       }
       case 'disconnect': {
@@ -185,7 +223,7 @@ describe('reset rules', () => {
     await a.fetchAll();
     db.commit('posts');
     await flush(); // the frame is in the ring before the stream exists
-    expect(a.connect()).toBe(true);
+    expect(await a.connect()).toBe(true);
     await settle();
     expect(a.log).toEqual(['reset']);
     expect(await a.stalePaths()).toEqual([]);
@@ -195,11 +233,12 @@ describe('reset rules', () => {
     const { source, hub, db } = rig();
     await startReady(hub, source);
     // The endpoint opens the stream, then writes headers; the first read comes later.
-    const feed = hub.open({ signal: new AbortController().signal })[Symbol.asyncIterator]();
+    const feedFeed = await hub.open({ signal: new AbortController().signal });
+    const feed = feedFeed[Symbol.asyncIterator]();
     db.commit('users');
     await flush();
     const first = await feed.next();
-    expect(first.value).toMatchObject({ kind: 'begin', mode: 'reset', cursor: expect.stringMatching(/\.0$/) });
+    expect(first.value).toMatchObject({ kind: 'begin', mode: 'reset', cursor: expect.stringMatching(/^[\w-]{64}$/) });
     const second = await feed.next();
     expect(second.value).toMatchObject({ kind: 'change', tags: [tag('users')] });
   });
@@ -209,14 +248,14 @@ describe('reset rules', () => {
     await startReady(hub, source);
     const a = client();
     await a.fetchAll();
-    a.connect();
+    await a.connect();
     await settle();
     await a.disconnect();
     db.commit('posts');
     await flush();
     db.commit('users');
     await flush();
-    expect(a.connect()).toBe(true);
+    expect(await a.connect()).toBe(true);
     await settle();
     expect(a.log).toEqual(['reset', 'resume', 'change', 'change']);
     expect(await a.stalePaths()).toEqual([]);
@@ -229,7 +268,7 @@ describe('reset rules', () => {
     const b = client();
     for (const each of [a, b]) {
       await each.fetchAll();
-      each.connect();
+      await each.connect();
     }
     await settle();
     const oldCursor = a.cursor();
@@ -244,11 +283,11 @@ describe('reset rules', () => {
     expect(hub.connections()).toBe(0);
     // A write during the gap: its hint is lost (no listener), which is why the next hello must reset.
     db.commit('posts');
-    expect(a.connect()).toBe(false);
+    expect(await a.connect()).toBe(false);
 
     source.emit({ kind: 'ready' });
-    expect(a.connect()).toBe(true);
-    expect(b.connect()).toBe(true);
+    expect(await a.connect()).toBe(true);
+    expect(await b.connect()).toBe(true);
     await settle();
     expect(a.cursor()).not.toBe(oldCursor);
     expect([a.log.at(-1), b.log.at(-1)]).toEqual(['reset', 'reset']);
@@ -259,12 +298,12 @@ describe('reset rules', () => {
     const { source, hub, client } = rig();
     await startReady(hub, source);
     const a = client();
-    a.connect();
+    await a.connect();
     await settle();
     source.emit({ kind: 'ready' });
     await settle();
     expect(a.log).toEqual(['reset', 'gap']);
-    a.connect();
+    await a.connect();
     await settle();
     expect(a.log.at(-1)).toBe('reset');
   });
@@ -274,14 +313,14 @@ describe('reset rules', () => {
     await startReady(hub, source);
     const a = client();
     await a.fetchAll();
-    a.connect();
+    await a.connect();
     await settle();
     await a.disconnect(); // cursor at frame 0
     db.commit('posts');
     await flush(); // frame 1
     db.commit('users');
     await flush(); // frame 2: the ring holds 1..2, so cursor 0 is the exact boundary
-    a.connect();
+    await a.connect();
     await settle();
     expect(a.log).toEqual(['reset', 'resume', 'change', 'change']);
 
@@ -290,7 +329,7 @@ describe('reset rules', () => {
       db.commit(table);
       await flush(); // frames 3, 4, 5: frame 3 is evicted
     }
-    a.connect();
+    await a.connect();
     await settle();
     expect(a.log.slice(4)).toEqual(['reset']);
     expect(await a.stalePaths()).toEqual([]);
@@ -301,33 +340,77 @@ describe('reset rules', () => {
     await startReady(hub, source);
     const a = client();
     await a.fetchAll();
-    a.connect();
+    await a.connect();
     await settle();
     await a.disconnect();
     db.commit('posts');
     await flush();
     vi.advanceTimersByTime(1001);
-    a.connect();
+    await a.connect();
     await settle();
     expect(a.log).toEqual(['reset', 'reset']);
     expect(await a.stalePaths()).toEqual([]);
   });
 
-  it('a cursor of another epoch or from the future resets; a malformed one is refused with E004', async () => {
+  it('a cursor this hub did not seal (another hub, a changed byte, the old epoch) resets; a malformed one is refused with E004', async () => {
+    // Why: cursors are opaque. One the hub cannot open is unknown, like a cursor of another epoch,
+    // and an unknown cursor must reset: it can never resume from a guessed position.
     const { source, hub } = rig();
     await startReady(hub, source);
-    const first = async (cursor: string): Promise<LiveFeed | undefined> => {
-      for await (const item of hub.open({ cursor, signal: new AbortController().signal })) return item;
+    const first = async (cursor?: string): Promise<LiveFeed | undefined> => {
+      const options = cursor === undefined ? {} : { cursor };
+      for await (const item of await hub.open({ ...options, signal: new AbortController().signal })) return item;
       return undefined;
     };
-    expect(await first('aaaaaaaaaaaa.0')).toMatchObject({ kind: 'begin', mode: 'reset' });
-    const begin = await first('aaaaaaaaaaaa.0');
-    const epoch = begin?.kind === 'begin' ? begin.cursor.split('.')[0] : '';
-    expect(await first(`${epoch}.0`)).toMatchObject({ kind: 'begin', mode: 'resume' });
-    expect(await first(`${epoch}.7`)).toMatchObject({ kind: 'begin', mode: 'reset' });
-    expect(() => hub.open({ cursor: 'not-a-cursor', signal: new AbortController().signal })).toThrow(
-      expect.objectContaining({ code: LIVE_ERROR_CODES.protocol }),
-    );
+    const begin = await first();
+    const cursor = begin?.kind === 'begin' ? begin.cursor : '';
+    expect(await first(cursor)).toMatchObject({ kind: 'begin', mode: 'resume' });
+
+    // One character changed: the tag check fails, so it resets (not a 400: it is well-formed).
+    const flipped = `${cursor.slice(0, 20)}${cursor[20] === 'A' ? 'B' : 'A'}${cursor.slice(21)}`;
+    expect(await first(flipped)).toMatchObject({ kind: 'begin', mode: 'reset' });
+    // Well-formed but not 64 characters of this hub's layout.
+    expect(await first('a'.repeat(64))).toMatchObject({ kind: 'begin', mode: 'reset' });
+
+    // Another hub's cursor, at the same position: a different key, so it resets.
+    const other = rig();
+    await startReady(other.hub, other.source);
+    const foreign = await other.hub.cursor();
+    expect(foreign).toMatch(/^[\w-]{64}$/);
+    expect(await first(foreign)).toMatchObject({ kind: 'begin', mode: 'reset' });
+
+    // The same hub after a listener gap: a new epoch, so the old cursor resets.
+    source.emit({ kind: 'gap' });
+    source.emit({ kind: 'ready' });
+    expect(await first(cursor)).toMatchObject({ kind: 'begin', mode: 'reset' });
+
+    await expect(hub.open({ cursor: 'not-a-cursor', signal: new AbortController().signal })).rejects.toMatchObject({
+      code: LIVE_ERROR_CODES.protocol,
+    });
+    await expect(hub.open({ cursor: 'abcdefghijkl.1', signal: new AbortController().signal })).rejects.toMatchObject({
+      code: LIVE_ERROR_CODES.protocol,
+    });
+    await Promise.all([hub.stop(), other.hub.stop()]);
+  });
+
+  it('hub.cursor() is undefined until ready, fresh on every call, and a client connecting with it misses no later commit', async () => {
+    // Why (D4): a server-rendered page dehydrates this cursor; the client resumes from it. The
+    // position is read at the call, so a commit after it (while the page renders) is replayed.
+    const { source, hub, db } = rig();
+    expect(await hub.cursor()).toBeUndefined();
+    await startReady(hub, source);
+    const page = hub.cursor();
+    db.commit('posts');
+    await flush();
+    const [one, two] = [await page, await hub.cursor()];
+    expect(one).not.toBe(two);
+    const feedFeed = await hub.open({ cursor: one, signal: new AbortController().signal });
+    const feed = feedFeed[Symbol.asyncIterator]();
+    const { value: resumed } = await feed.next();
+    expect(resumed).toMatchObject({ kind: 'begin', mode: 'resume' });
+    const { value: replayed } = await feed.next();
+    expect(replayed).toMatchObject({ kind: 'change', tags: [tag('posts')] });
+    await hub.stop();
   });
 });
 
@@ -335,7 +418,8 @@ describe('bounds and lifecycle', () => {
   it('a stream that falls behind gets bye instead of an unbounded queue, then resumes from its cursor', async () => {
     const { source, hub, db, client } = rig({ subscriberFrames: 2 });
     await startReady(hub, source);
-    const stalled = hub.open({ signal: new AbortController().signal })[Symbol.asyncIterator]();
+    const stalledFeed = await hub.open({ signal: new AbortController().signal });
+    const stalled = stalledFeed[Symbol.asyncIterator]();
     const begin = await stalled.next();
     expect(begin.value).toMatchObject({ kind: 'begin', mode: 'reset' });
     // It stops reading; three frames pass its limit of two.
@@ -355,7 +439,7 @@ describe('bounds and lifecycle', () => {
     await a.fetchAll();
     if (begin.value?.kind !== 'begin') throw new Error('expected begin');
     const replay: LiveFeed[] = [];
-    for await (const item of hub.open({ cursor: begin.value.cursor, signal: AbortSignal.timeout(60_000) })) {
+    for await (const item of await hub.open({ cursor: begin.value.cursor, signal: AbortSignal.timeout(60_000) })) {
       replay.push(item);
       if (replay.length === 4) break;
     }
@@ -373,7 +457,7 @@ describe('bounds and lifecycle', () => {
     const frames: LiveFeed[] = [];
     const controller = new AbortController();
     const pump = (async () => {
-      for await (const item of hub.open({ signal: controller.signal })) frames.push(item);
+      for await (const item of await hub.open({ signal: controller.signal })) frames.push(item);
     })();
     for (let tick = 0; tick < 20; tick += 1) {
       db.commit(tick % 2 === 0 ? 'posts' : 'users');
@@ -385,7 +469,7 @@ describe('bounds and lifecycle', () => {
     const changes = frames.filter(item => item.kind === 'change');
     expect(changes).toHaveLength(5); // 100 ms of writes, a 20 ms window
     for (const change of changes) expect(change.tags).toEqual([tag('posts'), tag('users')]);
-    expect(changes.map(change => change.cursor.split('.')[1])).toEqual(['1', '2', '3', '4', '5']);
+    expect(new Set(changes.map(change => change.cursor)).size).toBe(5);
   });
 
   it('a frame carries, once each, the txids of exactly the commits that wrote its tables; replay keeps them; 256 commits flush at once', async () => {
@@ -393,7 +477,8 @@ describe('bounds and lifecycle', () => {
     // resolve. And a txid on a frame of other tables would reveal writes a grant hides.
     const { source, hub } = rig();
     await startReady(hub, source);
-    const feed = hub.open({ signal: new AbortController().signal })[Symbol.asyncIterator]();
+    const feedFeed = await hub.open({ signal: new AbortController().signal });
+    const feed = feedFeed[Symbol.asyncIterator]();
     const { value: begin } = await feed.next();
     source.emit({ kind: 'change', tags: [tag('posts')], txid: '9007199254740993' });
     source.emit({ kind: 'change', tags: [tag('users')], txid: '9007199254740993' });
@@ -428,12 +513,14 @@ describe('bounds and lifecycle', () => {
 
     // Replay from before the first frame: the ring kept its txids.
     const cursor = begin?.kind === 'begin' ? { cursor: begin.cursor } : {};
-    const replay = hub.open({ ...cursor, signal: new AbortController().signal });
+    const replay = await hub.open({ ...cursor, signal: new AbortController().signal });
     const replayed = replay[Symbol.asyncIterator]();
     const { value: resumed } = await replayed.next();
     expect(resumed).toMatchObject({ kind: 'begin', mode: 'resume' });
     const { value: again } = await replayed.next();
-    expect(again).toEqual(first);
+    // The same frame, with a freshly sealed cursor.
+    expect({ ...again, cursor: '' }).toEqual({ ...first, cursor: '' });
+    expect(again?.kind === 'change' && first?.kind === 'change' && again.cursor !== first.cursor).toBe(true);
     await hub.stop();
   });
 
@@ -441,9 +528,9 @@ describe('bounds and lifecycle', () => {
     const { source, hub, client } = rig();
     await startReady(hub, source);
     const a = client();
-    a.connect();
+    await a.connect();
     const aborted = new AbortController();
-    hub.open({ signal: aborted.signal });
+    await hub.open({ signal: aborted.signal });
     expect(hub.connections()).toBe(2);
     aborted.abort();
     expect(hub.connections()).toBe(1);
@@ -453,9 +540,9 @@ describe('bounds and lifecycle', () => {
     expect(a.log).toEqual(['reset', 'bye']);
     expect(a.connected()).toBe(false);
     expect(hub.status()).toBe('stopped');
-    expect(() => hub.open({ signal: new AbortController().signal })).toThrow(
-      expect.objectContaining({ code: LIVE_ERROR_CODES.source }),
-    );
+    await expect(hub.open({ signal: new AbortController().signal })).rejects.toMatchObject({
+      code: LIVE_ERROR_CODES.source,
+    });
     expect(() => source.emit({ kind: 'ready' })).toThrow(expect.objectContaining({ code: LIVE_ERROR_CODES.source }));
   });
 
@@ -510,7 +597,7 @@ describe('demo: raw SQL on PGlite drives two scripted clients', () => {
 
     for (const client of [a, b]) {
       await client.fetchAll();
-      client.connect();
+      await client.connect();
     }
     // Raw SQL: an autocommit insert, a multi-statement transaction, a rolled-back one.
     await pglite.query(`insert into users values ('u1', 'Ada')`);
@@ -525,7 +612,7 @@ describe('demo: raw SQL on PGlite drives two scripted clients', () => {
     await b.disconnect();
     await pglite.query(`update users set name = 'Grace'`);
     await expect.poll(() => changesOf(a)).toBeGreaterThanOrEqual(2);
-    b.connect();
+    await b.connect();
     await expect.poll(fresh).toEqual([]);
     expect(b.log.filter(entry => entry !== 'change')).toEqual(['reset', 'resume']);
 
@@ -537,8 +624,8 @@ describe('demo: raw SQL on PGlite drives two scripted clients', () => {
     source.emit({ kind: 'ready' });
     await expect.poll(() => [a.connected(), b.connected()]).toEqual([false, false]);
     expect([a.log.at(-1), b.log.at(-1)]).toEqual(['gap', 'gap']);
-    a.connect();
-    b.connect();
+    await a.connect();
+    await b.connect();
     await expect.poll(fresh).toEqual([]);
     expect([a.log.at(-1), b.log.at(-1)]).toEqual(['reset', 'reset']);
 
@@ -549,7 +636,7 @@ describe('demo: raw SQL on PGlite drives two scripted clients', () => {
       await pglite.query(`insert into posts values ('${id}', '${id}', 'u1')`);
       await expect.poll(() => changesOf(a)).toBe(before + 1);
     }
-    b.connect();
+    await b.connect();
     await expect.poll(fresh).toEqual([]);
     expect(b.log.at(-1)).toBe('reset');
 

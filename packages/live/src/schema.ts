@@ -45,8 +45,8 @@ export const liveManifestSchema = z
  */
 export const txIdSchema = z.string().regex(/^[1-9]\d{0,19}$/);
 
-/** `${epoch}.${seq}`: the hub's random 12-character epoch and the frame number. Grants nothing. */
-export const liveCursorSchema = z.string().regex(/^[a-z0-9]{12}\.\d{1,15}$/);
+/** An opaque base64url token of 16 to 256 characters (the hub's are 64): a sealed stream position. Grants nothing. */
+export const liveCursorSchema = z.string().regex(/^[\w-]{16,256}$/);
 
 /** The frames of the SSE stream. */
 export const liveEventSchema = z.discriminatedUnion('kind', [

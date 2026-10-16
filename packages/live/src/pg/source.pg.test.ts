@@ -83,17 +83,17 @@ async function converged(client: ScriptedClient): Promise<void> {
 }
 
 /** Collects the tags and txids of every `change` the hub sends to one raw stream, and how the stream ended. */
-function watch(hub: LiveHub): {
+async function watch(hub: LiveHub): Promise<{
   tags: TableTag[];
   txids: string[];
   ended: () => string | undefined;
   stop: () => void;
-} {
+}> {
   const tags: TableTag[] = [];
   const txids: string[] = [];
   const abort = new AbortController();
   let end: string | undefined;
-  const feed = hub.open({ signal: abort.signal });
+  const feed = await hub.open({ signal: abort.signal });
   void (async () => {
     for await (const frame of feed) {
       if (frame.kind === 'change') {
@@ -157,10 +157,10 @@ describe.each(['postgres:16-alpine', 'postgres:17-alpine'])('%s', image => {
 
   it('demo — write-paths: a journal command, a plain repository, raw SQL and a worker job all reach the same live list, with no tap', async () => {
     const { hub, pool } = await startHub('listener_demo');
-    const raw = watch(hub);
+    const raw = await watch(hub);
     const client = scriptedClient(hub, manifest, queries);
     await client.fetchAll();
-    expect(client.connect()).toBe(true);
+    expect(await client.connect()).toBe(true);
     const settled = async (expected: readonly TableTag[]) => {
       await expect.poll(() => raw.tags).toEqual(expected);
       raw.tags.length = 0;
@@ -201,7 +201,7 @@ describe.each(['postgres:16-alpine', 'postgres:17-alpine'])('%s', image => {
   it('a change frame carries the txid of the committing transaction, as a decimal string', async () => {
     // Why: a client awaits its own write by this id (awaitTxId, M3); it must be the commit's own.
     const { hub } = await startHub('listener_txid');
-    const raw = watch(hub);
+    const raw = await watch(hub);
     try {
       const committed = await writer.transaction(async tx => {
         const result = await tx.execute<{ txid: string }>(sql`select pg_current_xact_id()::text as txid`);
@@ -226,14 +226,14 @@ describe.each(['postgres:16-alpine', 'postgres:17-alpine'])('%s', image => {
     const starting = hub.start();
     await new Promise(resolve => setTimeout(resolve, 200));
     expect(hub.status()).toBe('idle');
-    expect(() => hub.open({ signal: new AbortController().signal })).toThrow(
-      expect.objectContaining({ code: LIVE_ERROR_CODES.source }),
-    );
+    await expect(hub.open({ signal: new AbortController().signal })).rejects.toMatchObject({
+      code: LIVE_ERROR_CODES.source,
+    });
     borrowed.release();
     await starting;
     try {
       expect(hub.status()).toBe('ready');
-      const raw = watch(hub);
+      const raw = await watch(hub);
       await writer.execute(sql`update posts set title = title`);
       await expect.poll(() => raw.tags).toEqual([POSTS]);
       raw.stop();
@@ -247,9 +247,10 @@ describe.each(['postgres:16-alpine', 'postgres:17-alpine'])('%s', image => {
     const client = scriptedClient(hub, manifest, queries);
     try {
       await client.fetchAll();
-      client.connect();
+      await client.connect();
       await expect.poll(() => client.log).toEqual(['reset']);
       const before = client.cursor();
+      expect(before).toBeDefined();
 
       await kill('listener_gap');
       await expect.poll(() => client.log.at(-1)).toBe('gap');
@@ -257,9 +258,9 @@ describe.each(['postgres:16-alpine', 'postgres:17-alpine'])('%s', image => {
       await writer.execute(sql`insert into posts (id, title) values (${nextId()}, 'In the gap')`);
       await expect.poll(() => hub.status()).toBe('ready');
 
-      expect(client.connect()).toBe(true);
+      expect(await client.connect()).toBe(true);
+      // It sent its old cursor: the new epoch cannot open it, so the hub reset it.
       await expect.poll(() => client.log.at(-1)).toBe('reset');
-      expect(client.cursor()?.split('.')[0]).not.toBe(before?.split('.')[0]);
       await converged(client);
     } finally {
       await client.disconnect();
@@ -272,16 +273,14 @@ describe.each(['postgres:16-alpine', 'postgres:17-alpine'])('%s', image => {
     const client = scriptedClient(hub, manifest, queries);
     try {
       await client.fetchAll();
-      client.connect();
+      await client.connect();
       await expect.poll(() => client.log).toEqual(['reset']);
       for (const payload of ['not json', JSON.stringify({ v: 2, tag: POSTS })]) {
-        const epoch = client.cursor()?.split('.')[0];
         await writer.execute(sql`select pg_notify(${liveChannel('blog')}, ${payload})`);
         await expect.poll(() => client.log.at(-1)).toBe('gap');
         expect(hub.status()).toBe('ready');
-        expect(client.connect()).toBe(true);
+        expect(await client.connect()).toBe(true);
         await expect.poll(() => client.log.at(-1)).toBe('reset');
-        expect(client.cursor()?.split('.')[0]).not.toBe(epoch);
       }
     } finally {
       await client.disconnect();

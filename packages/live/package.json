@@ -57,6 +57,11 @@
       "import": "./dist/pg/index.js",
       "default": "./dist/pg/index.js"
     },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js",
+      "default": "./dist/react.js"
+    },
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js",
@@ -90,6 +95,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/log": "workspace:*",
+    "@arki/resilience": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -107,15 +113,21 @@
     "@orpc/server": "catalog:backend",
     "@orpc/shared": "catalog:backend",
     "@orpc/tanstack-query": "catalog:backend",
+    "@tanstack/db": "catalog:",
+    "@tanstack/query-db-collection": "catalog:",
     "@tanstack/react-query": "catalog:tanstack/react-query",
     "@testcontainers/postgresql": "catalog:testing",
+    "@testing-library/react": "catalog:testing",
     "@types/node": "catalog:node",
     "@types/pg": "catalog:drizzle",
     "@types/react": "catalog:react",
+    "@types/react-dom": "catalog:react",
     "drizzle-kit": "catalog:drizzle",
     "drizzle-orm": "catalog:drizzle",
+    "jsdom": "catalog:text-processing",
     "pg": "catalog:drizzle",
     "react": "catalog:react",
+    "react-dom": "catalog:react",
     "vitest": "catalog:"
   },
   "peerDependencies": {

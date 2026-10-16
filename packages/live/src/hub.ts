@@ -7,8 +7,12 @@
  *
  * - An epoch is a random 12-character name. Every `ready` from the source
  *   starts a new one, so nothing resumes across a listener gap.
- * - `open()` attaches the stream and reads the ring's high-water mark in one
- *   synchronous step. Every later frame reaches it; every earlier one is in the
+ * - Cursors are opaque: `(epoch, seq)` sealed with AES-GCM under a key made
+ *   at `start()`, fresh IV every time (`cursor.ts`). A client cannot count
+ *   the frames its grant hides from it. A cursor this hub cannot open is
+ *   unknown and resets.
+ * - `open()` opens the cursor, then attaches the stream and reads the ring's
+ *   high-water mark in one synchronous step. Every later frame reaches it; every earlier one is in the
  *   replay or covered by a reset.
  * - A cursor of this epoch still in the ring resumes. Anything else (none,
  *   another epoch, evicted, from the future) resets.
@@ -20,7 +24,9 @@
  */
 import { z } from 'zod';
 
+import type { CursorCipher, CursorPosition } from './cursor.js';
 import type { LiveCursor, LiveEvent, TableTag } from './types.js';
+import { cursorCipher } from './cursor.js';
 import { debugHub } from './debug.js';
 import { LIVE_ERROR_CODES, liveError } from './errors.js';
 import { tagKey } from './manifest.js';
@@ -73,23 +79,36 @@ export type LiveFeed =
   | Extract<LiveEvent, { kind: 'gap' | 'bye' }>;
 
 export type LiveHub = {
+  /** Makes the cursor key, then starts the source. Rejects with E001 where WebCrypto (`crypto.subtle`) is missing. */
   start(): Promise<void>;
   stop(): Promise<void>;
   status(): 'idle' | 'ready' | 'unavailable' | 'stopped';
-  /** Attaches a stream now. Throws E003 unless the hub is `ready`, E004 for a malformed cursor. */
-  open(options: { readonly cursor?: LiveCursor; readonly signal: AbortSignal }): AsyncIterable<LiveFeed>;
+  /**
+   * Attaches a stream once its cursor is opened. Rejects with E003 unless the hub is `ready`, E004
+   * for a malformed cursor. A well-formed cursor this hub cannot open resumes nothing: it resets.
+   */
+  open(options: { readonly cursor?: LiveCursor; readonly signal: AbortSignal }): Promise<AsyncIterable<LiveFeed>>;
+  /**
+   * The current position as a new opaque cursor, or `undefined` while the hub is not `ready`. The
+   * position is taken when this is called, so call it before reading the data a server-rendered
+   * page dehydrates: a client that connects with it replays every commit after that read.
+   */
+  cursor(): Promise<LiveCursor | undefined>;
   connections(): number;
 };
 
 type ChangeFrame = Extract<LiveFeed, { kind: 'change' }>;
 type EndFrame = Extract<LiveEvent, { kind: 'gap' | 'bye' }>;
+/** A frame as the hub holds it: its position, not yet sealed into a cursor. */
+type HeldChange = Omit<ChangeFrame, 'cursor'> & { readonly at: CursorPosition };
+type Held = { readonly kind: 'begin'; readonly mode: 'resume' | 'reset'; readonly at: CursorPosition } | HeldChange;
 
 type Subscriber = {
   /** `begin` and the replay, captured at attach. Not counted against `subscriberFrames`. */
-  preamble: readonly LiveFeed[];
+  preamble: readonly Held[];
   preambleAt: number;
   /** Live frames not yet taken. */
-  pending: ChangeFrame[];
+  pending: HeldChange[];
   /** Delivered after everything queued before it; then the stream ends. */
   end: EndFrame | undefined;
   done: boolean;
@@ -122,7 +141,7 @@ function wake(subscriber: Subscriber): void {
   resolve?.();
 }
 
-function take(subscriber: Subscriber): LiveFeed | undefined {
+function take(subscriber: Subscriber): Held | EndFrame | undefined {
   const early = subscriber.preamble[subscriber.preambleAt];
   if (early) {
     subscriber.preambleAt += 1;
@@ -159,17 +178,17 @@ export function createLiveHub(options: {
   let starting: Promise<void> | undefined;
   let stopping: Promise<void> | undefined;
   let stopSource: (() => Promise<void>) | undefined;
+  /** Seals and opens cursors; made by `start()` before the source can report `ready`. */
+  let cipher: CursorCipher | undefined;
   let epoch = '';
   let seq = 0;
-  const ring = replayRing<ChangeFrame>({ frames: limits.replayFrames, ms: limits.replayMs });
+  const ring = replayRing<HeldChange>({ frames: limits.replayFrames, ms: limits.replayMs });
   /** The open batch: each table, with the transactions that wrote it. */
   const batch = new Map<string, { readonly tag: TableTag; readonly txids: Set<string> }>();
   /** Every transaction of the open batch, for the per-frame cap. */
   const batchTxIds = new Set<string>();
   let batchTimer: ReturnType<typeof setTimeout> | undefined;
   const subscribers = new Set<Subscriber>();
-
-  const cursorAt = (at: number): LiveCursor => `${epoch}.${at}`;
 
   function clearBatch(): void {
     if (batchTimer !== undefined) clearTimeout(batchTimer);
@@ -199,7 +218,7 @@ export function createLiveHub(options: {
     wake(subscriber);
   }
 
-  function deliver(subscriber: Subscriber, frame: ChangeFrame): void {
+  function deliver(subscriber: Subscriber, frame: HeldChange): void {
     subscriber.pending.push(frame);
     if (subscriber.pending.length > limits.subscriberFrames) {
       debugHub.debug('{epoch}: a stream fell {frames} frames behind; sending bye', {
@@ -225,9 +244,9 @@ export function createLiveHub(options: {
       const part = tables.slice(from, from + MAX_TAGS_PER_FRAME);
       const txidsByTag = part.map(entry => [...entry.txids]);
       // Each frame names exactly the transactions that wrote its own tables.
-      const frame: ChangeFrame = {
+      const frame: HeldChange = {
         kind: 'change',
-        cursor: cursorAt(seq),
+        at: { epoch, seq },
         tags: part.map(entry => entry.tag),
         txids: [...new Set(txidsByTag.flat())],
         txidsByTag,
@@ -294,11 +313,21 @@ export function createLiveHub(options: {
     }
   }
 
-  /** The frames to replay after `cursor`, or `undefined` for a reset. */
-  function replayAfter(cursor: LiveCursor): readonly ChangeFrame[] | undefined {
-    const dot = cursor.indexOf('.');
-    if (cursor.slice(0, dot) !== epoch) return undefined;
-    return ring.after(Number(cursor.slice(dot + 1)), seq);
+  /** The frames to replay after `position`, or `undefined` for a reset (another epoch, evicted, from the future). */
+  function replayAfter(position: CursorPosition): readonly HeldChange[] | undefined {
+    if (position.epoch !== epoch) return undefined;
+    return ring.after(position.seq, seq);
+  }
+
+  function assertReady(): CursorCipher {
+    if (state !== 'ready' || cipher === undefined) {
+      throw liveError(
+        LIVE_ERROR_CODES.source,
+        `the live hub is ${state}, not ready`,
+        'Retry with backoff: the hub is ready again once its Postgres listener is back.',
+      );
+    }
+    return cipher;
   }
 
   /** Ends every stream, then stops the source once its start settled. Runs once. */
@@ -318,12 +347,28 @@ export function createLiveHub(options: {
     debugHub.debug('{epoch}: stopped', { epoch });
   }
 
-  async function* feed(subscriber: Subscriber): AsyncGenerator<LiveFeed, void, undefined> {
+  /** A held item as the wire sees it: positions sealed into fresh cursors. */
+  async function reveal(item: Held | EndFrame, sealer: CursorCipher): Promise<LiveFeed> {
+    switch (item.kind) {
+      case 'begin': {
+        return { kind: 'begin', mode: item.mode, cursor: await sealer.seal(item.at) };
+      }
+      case 'change': {
+        const { tags, txids, txidsByTag } = item;
+        return { kind: 'change', cursor: await sealer.seal(item.at), tags, txids, txidsByTag };
+      }
+      default: {
+        return item;
+      }
+    }
+  }
+
+  async function* feed(subscriber: Subscriber, sealer: CursorCipher): AsyncGenerator<LiveFeed, void, undefined> {
     try {
       for (;;) {
         const item = take(subscriber);
         if (item) {
-          yield item;
+          yield await reveal(item, sealer);
           continue;
         }
         if (subscriber.done) return;
@@ -347,10 +392,16 @@ export function createLiveHub(options: {
           ),
         );
       }
-      // `stop()` waits for this, then stops the source it resolved with.
-      starting = options.source.start(receive).then(stop => {
-        stopSource = stop;
-      });
+      // `stop()` waits for this, then stops the source it resolved with. The key comes first, so
+      // the source's first `ready` finds it.
+      starting = cursorCipher()
+        .then(made => {
+          cipher = made;
+          return options.source.start(receive);
+        })
+        .then(stop => {
+          stopSource = stop;
+        });
       return starting;
     },
 
@@ -361,14 +412,8 @@ export function createLiveHub(options: {
 
     status: () => state,
 
-    open({ cursor, signal }) {
-      if (state !== 'ready') {
-        throw liveError(
-          LIVE_ERROR_CODES.source,
-          `the live hub is ${state}, not ready`,
-          'Retry with backoff: the hub is ready again once its Postgres listener is back.',
-        );
-      }
+    async open({ cursor, signal }) {
+      assertReady();
       if (cursor !== undefined && !liveCursorSchema.safeParse(cursor).success) {
         throw liveError(
           LIVE_ERROR_CODES.protocol,
@@ -376,13 +421,16 @@ export function createLiveHub(options: {
           'Send back a cursor exactly as a frame gave it, or none.',
         );
       }
-      // Attach and read the high-water mark in one synchronous step: no frame can fall between them.
+      const position = cursor === undefined ? undefined : await assertReady().open(cursor);
+      // The hub may have changed while the cursor was opened: check again, then attach and read the
+      // high-water mark in one synchronous step, so no frame can fall between them.
+      const sealer = assertReady();
       ring.evict(Date.now());
-      const replay = cursor === undefined ? undefined : replayAfter(cursor);
-      const preamble: readonly LiveFeed[] =
-        cursor === undefined || replay === undefined
-          ? [{ kind: 'begin', mode: 'reset', cursor: cursorAt(seq) }]
-          : [{ kind: 'begin', mode: 'resume', cursor }, ...replay];
+      const replay = position === undefined ? undefined : replayAfter(position);
+      const preamble: readonly Held[] =
+        position === undefined || replay === undefined
+          ? [{ kind: 'begin', mode: 'reset', at: { epoch, seq } }]
+          : [{ kind: 'begin', mode: 'resume', at: position }, ...replay];
       const onAbort = (): void => close(subscriber);
       const subscriber: Subscriber = {
         preamble,
@@ -401,7 +449,13 @@ export function createLiveHub(options: {
         mode: replay === undefined ? 'reset' : 'resume',
         replay: preamble.length - 1,
       });
-      return feed(subscriber);
+      return feed(subscriber, sealer);
+    },
+
+    async cursor() {
+      // The position is read now, before any await: what the caller reads afterwards is covered.
+      if (state !== 'ready' || cipher === undefined) return;
+      return cipher.seal({ epoch, seq });
     },
 
     connections: () => subscribers.size,

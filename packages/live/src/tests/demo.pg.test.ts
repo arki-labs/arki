@@ -91,7 +91,7 @@ describe.each(['postgres:16-alpine', 'postgres:17-alpine'])('demo on %s', image 
     const txid = inserted.rows[0]?.txid;
     expect(await stream.next()).toEqual({
       kind: 'change',
-      cursor: expect.stringMatching(/\.1$/),
+      cursor: expect.stringMatching(/^[\w-]{64}$/),
       tags: [POSTS],
       txids: [txid],
     });
@@ -107,8 +107,6 @@ describe.each(['postgres:16-alpine', 'postgres:17-alpine'])('demo on %s', image 
     const again = sseReader(await connect(`?cursor=${hello.cursor}`));
     const reset = await again.next();
     expect(reset).toMatchObject({ kind: 'hello', mode: 'reset' });
-    if (reset?.kind !== 'hello') throw new Error('expected hello');
-    expect(reset.cursor.split('.')[0]).not.toBe(hello.cursor.split('.')[0]);
     await again.cancel();
   });
 });

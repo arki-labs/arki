@@ -8,7 +8,9 @@
  * 2. `authorize(request)`: `null` answers 401 E005.
  * 3. The grant picks what this client may see: the manifest entries whose
  *    every table it may read, and the tables whose hints it gets.
- * 4. The stream attaches to the hub (503 E003 while the hub is not ready).
+ * 4. The stream attaches to the hub (503 E003 while the hub is not ready). A
+ *    well-formed cursor the hub cannot open (another hub's, changed, expired)
+ *    is not an error: the stream starts with a reset.
  *
  * Then `hello`, the replay or reset, and live `change` frames. A frame keeps
  * only the tables the grant allows, and only the txids of transactions that
@@ -152,7 +154,7 @@ export function liveEndpoint(options: {
   }
 
   /** Attaches to the hub now (before the response exists) and ends the stream at `maxAgeMs` or when the request goes. */
-  function open(view: View, cursor: string | undefined, request: AbortSignal): AsyncIterable<LiveEvent> {
+  async function open(view: View, cursor: string | undefined, request: AbortSignal): Promise<AsyncIterable<LiveEvent>> {
     const detach = new AbortController();
     let expired = false;
     const timer = setTimeout(() => {
@@ -169,7 +171,7 @@ export function liveEndpoint(options: {
     if (request.aborted) end();
     let feed: AsyncIterable<LiveFeed>;
     try {
-      feed = hub.open({ ...(cursor === undefined ? {} : { cursor }), signal: detach.signal });
+      feed = await hub.open({ ...(cursor === undefined ? {} : { cursor }), signal: detach.signal });
     } catch (error) {
       end();
       throw toHttpError(error);
@@ -192,7 +194,11 @@ export function liveEndpoint(options: {
       }
       return viewFor(grant);
     })
-    .bind(liveRoute, ({ query }, ctx) => open(ctx.liveView, query.cursor, ctx.signal));
+    // Attaching waits for the hub to open the cursor, so it runs here, before any header.
+    .derive('liveFeed', (_request, ctx) =>
+      open(ctx.liveView, ctx.url.searchParams.get('cursor') ?? undefined, ctx.signal),
+    )
+    .bind(liveRoute, (_input, ctx) => ctx.liveFeed);
 
   return { contract: liveRoute, routes: bundle, fetch: buildEngine([bundle]).fetch };
 }

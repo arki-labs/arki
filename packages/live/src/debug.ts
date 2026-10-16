@@ -11,3 +11,9 @@ export const debugHttp = getLogger('arki:live:http');
 
 /** Enable with `DEBUG=arki:live:dot`. */
 export const debugDot = getLogger('arki:live:dot');
+
+/** Enable with `DEBUG=arki:live:client`. */
+export const debugClient = getLogger('arki:live:client');
+
+/** Enable with `DEBUG=arki:live:react`. */
+export const debugReact = getLogger('arki:live:react');

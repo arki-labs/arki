@@ -128,6 +128,19 @@ describe('refusals happen before any stream header', () => {
   });
 });
 
+/** The cursors one client with a posts-only grant sees, with `hidden` secret-table frames between its two changes. */
+async function visibleCursors(hidden: number): Promise<string[]> {
+  const { stream, commit } = await rig();
+  const client = await stream('', { tables: [POSTS] });
+  const hello = await client.next();
+  await commit([POSTS], '1');
+  const first = await client.next();
+  for (let index = 0; index < hidden; index += 1) await commit([SECRETS], String(10 + index));
+  await commit([POSTS], '2');
+  const second = await client.next();
+  return [hello, first, second].map(frame => (frame?.kind === 'hello' || frame?.kind === 'change' ? frame.cursor : ''));
+}
+
 describe('the grant filter', () => {
   it('with no tables listed, hello has the whole manifest and only declared tables reach the client', async () => {
     const { stream, commit, request } = await rig();
@@ -154,8 +167,37 @@ describe('the grant filter', () => {
     await commit([USERS, AUDIT], '42');
     await commit([SECRETS, POSTS], '43');
     const change = await client.next();
-    // Frames 1 and 2 never arrive: not their tags, not their txids, so not even that they existed.
-    expect(change).toEqual({ kind: 'change', cursor: expect.stringMatching(/\.3$/), tags: [POSTS], txids: ['43'] });
+    // Frames 1 and 2 never arrive: not their tags, not their txids, and the opaque cursor does not count them.
+    expect(change).toEqual({
+      kind: 'change',
+      cursor: expect.stringMatching(/^[\w-]{64}$/),
+      tags: [POSTS],
+      txids: ['43'],
+    });
+  });
+
+  it('a client cannot tell from its cursors that hidden frames happened between two it saw', async () => {
+    // Why: the founder rule. Hidden-table activity must not reach a client; a frame number in the
+    // cursor would let it count the frames its grant skips. Run the same visible history with 0
+    // and with 3 hidden frames between the two visible ones: the cursors look alike.
+    const none = await visibleCursors(0);
+    const three = await visibleCursors(3);
+    for (const cursor of [...none, ...three]) expect(cursor).toMatch(/^[\w-]{64}$/);
+    expect(new Set([...none, ...three]).size).toBe(6);
+  });
+
+  it('a well-formed cursor the hub did not seal resets instead of failing; a valid one resumes', async () => {
+    const { stream } = await rig();
+    const first = await stream();
+    const hello = await first.next();
+    if (hello?.kind !== 'hello') throw new Error('expected hello');
+    const resumed = await stream(`?cursor=${hello.cursor}`);
+    expect(await resumed.next()).toMatchObject({ kind: 'hello', mode: 'resume' });
+    const tampered = `${hello.cursor.slice(0, 30)}${hello.cursor[30] === 'x' ? 'y' : 'x'}${hello.cursor.slice(31)}`;
+    const reset = await stream(`?cursor=${tampered}`);
+    expect(await reset.next()).toMatchObject({ kind: 'hello', mode: 'reset' });
+    const foreign = await stream(`?cursor=${'a'.repeat(64)}`);
+    expect(await foreign.next()).toMatchObject({ kind: 'hello', mode: 'reset' });
   });
 
   it('a transaction that wrote only hidden tables never shows its txid, even on a visible frame of its batch', async () => {
@@ -178,7 +220,7 @@ describe('the grant filter', () => {
     source.emit({ kind: 'change', tags: Array.from({ length: 299 }, (_, index) => tag(`hidden_${index}`)), txid: '8' });
     expect(await client.next()).toEqual({
       kind: 'change',
-      cursor: expect.stringMatching(/\.1$/),
+      cursor: expect.stringMatching(/^[\w-]{64}$/),
       tags: [POSTS],
       txids: ['7'],
     });
@@ -194,9 +236,11 @@ describe('the grant filter', () => {
     const again = await stream(`?cursor=${hello.cursor}`, { tables: [POSTS] });
     const frames: (LiveEvent | undefined)[] = [await again.next(), await again.next()];
     expect(frames).toEqual([
-      expect.objectContaining({ kind: 'hello', mode: 'resume', cursor: hello.cursor }),
+      expect.objectContaining({ kind: 'hello', mode: 'resume' }),
       expect.objectContaining({ kind: 'change', tags: [POSTS], txids: ['2'] }),
     ]);
+    // Freshly sealed: the same position never looks the same twice.
+    expect(frames[0]?.kind === 'hello' && frames[0].cursor !== hello.cursor).toBe(true);
   });
 });
 

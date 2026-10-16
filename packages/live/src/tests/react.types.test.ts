@@ -70,6 +70,9 @@ function screens(): void {
   useLiveQuery(orpc.posts.create.mutationOptions());
   // @ts-expect-error -- utils are not options: build them with `.queryOptions({ input })`
   useLiveQuery(orpc.posts.list);
+  // @ts-expect-error -- a reset after a 401 would bring initialData back, so live queries take none
+  useLiveQuery(orpc.posts.list.queryOptions({ input: { page: 1 }, initialData: [] }));
+  useLiveQuery(orpc.posts.list.queryOptions({ input: { page: 1 }, placeholderData: [] }));
   // @ts-expect-error -- `input` is required for `posts.list`
   useLiveQuery(orpc.posts.list.queryOptions());
   // @ts-expect-error -- the input is checked against the contract

@@ -6,9 +6,10 @@ The long form of [llms.txt](../llms.txt). When they disagree, `src/index.ts` win
 
 1. A live procedure declares the tables it reads in contract meta: `oc.meta(live({ reads: [posts, users] }))`. The meta is plain JSON (`{ live: { version: 1, reads: [{ schema, table }] } }`).
 2. A statement trigger per table publishes `{ v: 1, tag: { schema, table }, txid }` on `arki_live_<app>_v1` at commit; `txid` is `pg_current_xact_id()` as a decimal string. A rollback publishes nothing; one transaction publishes once per table. A `change` frame carries the `txids` of exactly the commits that wrote its own tables.
-3. The hub (`createLiveHub`) unions tags for `batchMs`, numbers each frame `${epoch}.${seq}`, keeps a bounded ring, and feeds every open stream.
-4. A stream starts with `begin`: `resume` when its cursor is of this epoch and still in the ring (the missed frames follow), else `reset` (refetch every live query). A listener gap ends every stream with `gap` and the next `ready` starts a new epoch.
-5. `liveRead()` + `snapshot()` give one procedure call one `REPEATABLE READ READ ONLY` transaction, so all its reads agree.
+3. The hub (`createLiveHub`) unions tags for `batchMs`, numbers each frame inside an epoch, keeps a bounded ring, and feeds every open stream. The cursor a client sees is that position sealed with AES-GCM (a key per hub start, a fresh IV each time): opaque, 64 characters, so a client cannot count the frames its grant hides.
+4. A stream starts with `begin`: `resume` when the hub can open its cursor, the epoch is current and the position is still in the ring (the missed frames follow), else `reset` (refetch every live query). A listener gap ends every stream with `gap` and the next `ready` starts a new epoch.
+5. On the client, `LiveProvider` reads the stream (`createLiveClient`) and calls `invalidateQueries` by oRPC path: every live path on a reset, the affected paths on a change.
+6. `liveRead()` + `snapshot()` give one procedure call one `REPEATABLE READ READ ONLY` transaction, so all its reads agree.
 
 ## Task map
 
@@ -53,9 +54,19 @@ export { both };
 ### Drive the hub in a test
 
 1. `const source = fakeSource(); const hub = createLiveHub({ source }); await hub.start(); source.emit({ kind: 'ready' })`.
-2. `hub.open({ cursor, signal })` attaches at once; iterate it for `begin`, `change`, `gap`, `bye`.
+2. `await hub.open({ cursor, signal })` opens the cursor, then attaches; iterate it for `begin`, `change`, `gap`, `bye`. Every cursor it yields is freshly sealed, so compare modes and tags, never cursor strings.
 3. `source.emit({ kind: 'change', tags })` then wait `batchMs`; `source.emit({ kind: 'gap' })` to simulate a lost listener.
-4. Library files: `src/hub.ts`, `src/testing.ts`; the scripted client in `src/tests/scripted-client.ts`.
+4. Library files: `src/hub.ts`, `src/cursor.ts`, `src/testing.ts`; the scripted client in `src/tests/scripted-client.ts`.
+
+### Use live queries in React
+
+1. Mount `<LiveProvider url="/api/live">` inside `QueryClientProvider`, once per `QueryClient`. Pass `keyPrefix` when the oRPC utils were built with a `path`.
+2. `useLiveQuery(orpc.posts.list.queryOptions({ input }))`. Guard rendering with `isPending`. No `initialData`.
+3. A mutation that returns `pg_current_xact_id()::text` of its own transaction can `await awaitTxId(queryClient, txid)` in `onSuccess`.
+4. Server rendering: `setLiveCursor(queryClient, await hub.cursor())` first, then load the page's data, then `dehydrate`. Keep `staleTime` above 0 so hydrated data is not refetched on mount.
+5. TanStack DB: `createCollection(queryCollectionOptions({ ...orpc.x.queryOptions({ input }), queryClient, getKey }))` from `@tanstack/query-db-collection`; the provider's invalidation refreshes it.
+6. Tests: `waitForInvalidation(queryClient, ['posts', 'list'])` before the write; the real hub and `liveEndpoint(...).fetch` can serve as the provider's `fetch` (see `src/tests/react.test.ts`).
+7. Library files: `src/client.ts`, `src/react.ts`.
 
 ## Rules that bite
 
@@ -64,18 +75,22 @@ export { both };
 - A `liveRead` select typed `(context: Deps)` fails when `db` is `entrypointOnly`: type it with the handler context.
 - Never reuse an epoch: a custom `epoch()` must return a new 12-character `[a-z0-9]` value each call (E001 otherwise).
 - A stream that falls `subscriberFrames` behind gets `bye`; reconnect with the cursor.
+- Never parse or build a cursor: it is sealed. A cursor the hub cannot open resets; a malformed one is a 400.
+- The hub needs `crypto.subtle`: `start()` rejects with E001 without it (bare Hermes, a browser page that is not a secure context).
+- `useLiveQuery` on a procedure that is not in the manifest never refreshes; the provider logs E001 once. Mutations get query utils from oRPC too, so the types cannot catch it.
+- Pass a `headers` function; a new one only matters after a 401/403 (the provider then tries again).
 - Hints say only which table changed. Every refetch is authorized by its own procedure.
 
 ## Errors
 
-| Code             | Meaning                                                                                           | What to do                              |
-| ---------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `ARKI_LIVE_E001` | Bad meta or options, `liveRead()` without live meta, `snapshot()` given a `tx`, a repeated epoch. | Fix the declaration; see `remediation`. |
-| `ARKI_LIVE_E002` | Missing, disabled or incompatible triggers.                                                       | Apply the live migration.               |
-| `ARKI_LIVE_E003` | The hub is not ready.                                                                             | Retry with backoff.                     |
-| `ARKI_LIVE_E004` | A malformed cursor, frame or payload.                                                             | Send back cursors exactly as received.  |
-| `ARKI_LIVE_E005` | 401/403 on the stream.                                                                            | Re-authenticate.                        |
-| `ARKI_LIVE_E006` | A bounded resource was reached.                                                                   | Reconnect; check the limits.            |
+| Code             | Meaning                                                                                                                                                                                            | What to do                              |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `ARKI_LIVE_E001` | Bad meta or options, `liveRead()` without live meta, `snapshot()` given a `tx`, a repeated epoch, no WebCrypto, a hook outside `LiveProvider`, a second provider, a hook path not in the manifest. | Fix the declaration; see `remediation`. |
+| `ARKI_LIVE_E002` | Missing, disabled or incompatible triggers.                                                                                                                                                        | Apply the live migration.               |
+| `ARKI_LIVE_E003` | The hub is not ready.                                                                                                                                                                              | Retry with backoff.                     |
+| `ARKI_LIVE_E004` | A malformed cursor, frame or payload.                                                                                                                                                              | Send back cursors exactly as received.  |
+| `ARKI_LIVE_E005` | 401/403 on the stream.                                                                                                                                                                             | Re-authenticate.                        |
+| `ARKI_LIVE_E006` | A bounded resource was reached; `awaitTxId` or `waitForInvalidation` timed out.                                                                                                                    | Reconnect; check the limits.            |
 
 ## Verify
 

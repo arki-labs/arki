@@ -19,7 +19,7 @@ export type ScriptedClient = {
   /** The first fetch, before any stream (SSR or a first render). */
   fetchAll(): Promise<void>;
   /** Opens a stream with the saved cursor; false when the hub refused. */
-  connect(): boolean;
+  connect(): Promise<boolean>;
   disconnect(): Promise<void>;
   /** Paths whose cached result differs from a fresh read. */
   stalePaths(): Promise<readonly string[]>;
@@ -68,11 +68,11 @@ export function scriptedClient(hub: LiveHub, manifest: LiveManifest, queries: re
     async fetchAll() {
       for (const query of queries) await refetch(query.path);
     },
-    connect() {
+    async connect() {
       const abort = new AbortController();
       let feed: AsyncIterable<LiveFeed>;
       try {
-        feed = hub.open({ ...(cursor === undefined ? {} : { cursor }), signal: abort.signal });
+        feed = await hub.open({ ...(cursor === undefined ? {} : { cursor }), signal: abort.signal });
       } catch {
         log.push('refused');
         return false;

@@ -79,7 +79,7 @@
     "@arki/date": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/schema": "workspace:*",
-    "@tanstack/db": "^0.12.3",
+    "@tanstack/db": "catalog:",
     "@tanstack/query-async-storage-persister": "catalog:tanstack/react-query",
     "@tanstack/query-persist-client-core": "^5.104.1",
     "@tanstack/react-db": "catalog:",

@@ -1,9 +1,23 @@
-// Cross-runtime smoke test. Runs the BUILT portable entries (dist/index.js,
-// dist/testing.js) under Node and Bun, and as a bundle under Deno, headless
-// Chromium and Hermes, via `bun run test:runtimes`. No database and no peers:
-// it proves the schemas, `live()`, `affectedPaths` and the hub run everywhere.
+// Cross-runtime smoke test. Runs the BUILT entries (dist/index.js,
+// dist/testing.js, dist/react.js) under Node and Bun, and as a bundle under
+// Deno, headless Chromium and Hermes, via `bun run test:runtimes`. No database:
+// it proves the schemas, `live()`, `affectedPaths`, the stream client and the
+// React entry load and run everywhere. The hub needs WebCrypto to seal its
+// cursors; where `crypto.subtle` is missing (bare Hermes) its start must fail loud.
 
-import { affectedPaths, createLiveHub, live, liveTables, parseLiveCursor, parseLiveEvent } from '../dist/index.js';
+import { QueryClient } from '@tanstack/react-query';
+
+import {
+  affectedPaths,
+  createLiveClient,
+  createLiveHub,
+  live,
+  LIVE_ERROR_CODES,
+  liveTables,
+  parseLiveCursor,
+  parseLiveEvent,
+} from '../dist/index.js';
+import { LiveProvider, setLiveCursor, useLiveQuery } from '../dist/react.js';
 import { fakeSource } from '../dist/testing.js';
 
 const posts = { schema: 'public', table: 'posts' };
@@ -20,19 +34,77 @@ const manifest = [
   { path: ['users', 'count'], reads: [{ schema: 'public', table: 'users' }] },
 ];
 
+const hubChecks = [];
 const source = fakeSource();
 const hub = createLiveHub({ source, limits: { batchMs: 1 } });
-await hub.start();
-source.emit({ kind: 'ready' });
-const stream = hub.open({ signal: new AbortController().signal })[Symbol.asyncIterator]();
-const begin = (await stream.next()).value;
-source.emit({ kind: 'change', tags: [posts, posts] });
-const change = (await stream.next()).value;
-source.emit({ kind: 'gap' });
-const gap = (await stream.next()).value;
-await hub.stop();
+if (globalThis.crypto?.subtle) {
+  await hub.start();
+  source.emit({ kind: 'ready' });
+  const stream = (await hub.open({ signal: new AbortController().signal }))[Symbol.asyncIterator]();
+  const begin = (await stream.next()).value;
+  source.emit({ kind: 'change', tags: [posts, posts] });
+  const change = (await stream.next()).value;
+  source.emit({ kind: 'gap' });
+  const gap = (await stream.next()).value;
+  await hub.stop();
+  hubChecks.push(
+    ['first connect resets', `${begin.kind}:${begin.mode}`, 'begin:reset'],
+    ['opaque cursor', parseLiveCursor(begin.cursor)?.length, 64],
+    [
+      'change frame is a wire event',
+      parseLiveEvent({ kind: change.kind, cursor: change.cursor, tags: change.tags, txids: change.txids })?.kind,
+      'change',
+    ],
+    ['change tags unioned', change.tags.length, 1],
+    ['gap ends the stream', gap.kind, 'gap'],
+    ['stopped', hub.status(), 'stopped'],
+  );
+} else {
+  const refused = await hub.start().then(
+    () => 'started',
+    error => error.code,
+  );
+  hubChecks.push(['a hub without WebCrypto fails loud at start', refused, LIVE_ERROR_CODES.config]);
+}
+
+// The stream client, where the engine has streaming fetch primitives (bare Hermes has none).
+const clientChecks = [];
+if (typeof ReadableStream === 'function' && typeof Response === 'function' && typeof TextDecoder === 'function') {
+  const hello = { kind: 'hello', v: 1, mode: 'reset', cursor: 'c'.repeat(64), manifest: [] };
+  const bytes = new TextEncoder().encode(`:keepalive\n\ndata: ${JSON.stringify(hello)}\n\n`);
+  const fetch = () =>
+    Promise.resolve(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(bytes.slice(0, 9));
+            controller.enqueue(bytes.slice(9));
+          },
+        }),
+      ),
+    );
+  const received = await new Promise(resolve => {
+    const client = createLiveClient({
+      url: '/api/live',
+      fetch,
+      onEvent: event => {
+        client.stop();
+        resolve(event.kind);
+      },
+    });
+    client.start();
+  });
+  clientChecks.push(['client reads a split frame', received, 'hello']);
+}
+
+const queryClient = new QueryClient();
+setLiveCursor(queryClient, 'c'.repeat(64));
 
 const checks = [
+  ...hubChecks,
+  ...clientChecks,
+  ['react entry loads', typeof LiveProvider === 'function' && typeof useLiveQuery === 'function', true],
+  ['setLiveCursor seeds the cache', queryClient.getQueryData(['@arki/live', 'cursor'])?.length, 64],
   [
     'live() refuses a 64-byte name',
     refuses(() => live({ reads: [{ schema: 'public', table: 'é'.repeat(32) }] })),
@@ -49,18 +121,8 @@ const checks = [
     JSON.stringify(liveTables([...manifest, { path: ['stats'], reads: [posts] }]).map(t => t.table)),
     '["posts","users"]',
   ],
-  ['first connect resets', `${begin.kind}:${begin.mode}`, 'begin:reset'],
-  ['cursor shape', parseLiveCursor(begin.cursor), begin.cursor],
   ['malformed cursor', parseLiveCursor('nope'), undefined],
-  [
-    'change frame is a wire event',
-    parseLiveEvent({ kind: change.kind, cursor: change.cursor, tags: change.tags, txids: change.txids })?.kind,
-    'change',
-  ],
   ['not a wire event', parseLiveEvent({ kind: 'change' }), undefined],
-  ['change tags unioned', change.tags.length, 1],
-  ['gap ends the stream', gap.kind, 'gap'],
-  ['stopped', hub.status(), 'stopped'],
 ];
 
 let failed = 0;

@@ -119,35 +119,39 @@ describe('the replay ring (step 5)', () => {
     const hub = createLiveHub({ source, limits: { batchMs: 10, replayMs: 1000 } });
     await hub.start();
     source.emit({ kind: 'ready' });
-    const first = hub.open({ signal: new AbortController().signal })[Symbol.asyncIterator]();
+    const firstFeed = await hub.open({ signal: new AbortController().signal });
+    const first = firstFeed[Symbol.asyncIterator]();
     const begin = await nextOf(first);
     source.emit({ kind: 'change', tags: [tag('posts')] });
     vi.advanceTimersByTime(10);
     if (begin?.kind !== 'begin') throw new Error('expected begin');
     // No write since: only the clock moved past the ring's age.
     vi.advanceTimersByTime(1001);
-    const late = hub.open({ cursor: begin.cursor, signal: new AbortController().signal })[Symbol.asyncIterator]();
+    const lateFeed = await hub.open({ cursor: begin.cursor, signal: new AbortController().signal });
+    const late = lateFeed[Symbol.asyncIterator]();
     expect(await nextOf(late)).toMatchObject({ kind: 'begin', mode: 'reset' });
     await hub.stop();
   });
 });
 
 describe('start (step 2)', () => {
-  it('is idle until the source is ready, then ready with a fresh 12-character epoch', async () => {
+  it('is idle until the source is ready, then ready and handing out opaque cursors', async () => {
     const source = fakeSource();
     const hub = createLiveHub({ source });
     expect(hub.status()).toBe('idle');
     await hub.start();
     expect(hub.status()).toBe('idle');
-    expect(() => hub.open({ signal: new AbortController().signal })).toThrow(
-      expect.objectContaining({ code: LIVE_ERROR_CODES.source }),
-    );
+    await expect(hub.open({ signal: new AbortController().signal })).rejects.toMatchObject({
+      code: LIVE_ERROR_CODES.source,
+    });
     source.emit({ kind: 'ready' });
     expect(hub.status()).toBe('ready');
-    const begin = await nextOf(hub.open({ signal: new AbortController().signal })[Symbol.asyncIterator]());
+    const opened = await hub.open({ signal: new AbortController().signal });
+    const begin = await nextOf(opened[Symbol.asyncIterator]());
     expect(begin).toMatchObject({ kind: 'begin', mode: 'reset' });
     if (begin?.kind !== 'begin') throw new Error('expected begin');
-    expect(parseLiveCursor(begin.cursor)).toMatch(/^[a-z0-9]{12}\.0$/);
+    // Opaque: 64 base64url characters, nothing ordinal to read.
+    expect(parseLiveCursor(begin.cursor)).toMatch(/^[\w-]{64}$/);
     await hub.stop();
   });
 
@@ -155,6 +159,8 @@ describe('start (step 2)', () => {
     const failing = gatedSource();
     const hub = createLiveHub({ source: failing.source });
     const start = hub.start();
+    // The hub makes its cursor key first; the source starts after.
+    await vi.waitFor(() => expect(failing.calls.start).toBe(1));
     failing.failListen();
     await expect(start).rejects.toThrow('LISTEN failed');
     await expect(hub.stop()).resolves.toBeUndefined();
@@ -224,7 +230,8 @@ describe('stop (step 10)', () => {
     const hub = createLiveHub({ source, limits: { batchMs: 50 } });
     await hub.start();
     source.emit({ kind: 'ready' });
-    const stream = hub.open({ signal: new AbortController().signal })[Symbol.asyncIterator]();
+    const streamFeed = await hub.open({ signal: new AbortController().signal });
+    const stream = streamFeed[Symbol.asyncIterator]();
     await stream.next();
     const blocked = nextOf(stream);
     source.emit({ kind: 'change', tags: [tag('posts')], txid: '7' });

@@ -14,7 +14,11 @@ export type LiveMeta = { live?: { version: 1; reads: TableTag[] } | undefined };
 /** Every live procedure of an app: its oRPC path and the tables it reads. Sent in `hello`. At most 4096 entries. */
 export type LiveManifest = { path: string[]; reads: TableTag[] }[];
 
-/** `${epoch}.${seq}`: the hub's random 12-character epoch and the frame number. Grants nothing. */
+/**
+ * A stream position, opaque: a base64url token (16 to 256 characters) that only the hub that made
+ * it can open. Two cursors for one position differ, and none reveals a frame number, so a client
+ * cannot count the frames its grant hides. Keep it as a string; it grants nothing.
+ */
 export type LiveCursor = string;
 
 /** The frames of the SSE stream. */
