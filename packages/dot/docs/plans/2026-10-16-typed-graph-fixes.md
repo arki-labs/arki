@@ -277,6 +277,16 @@ to `InfraGuard` the branch `{ readonly 'DOT: two infra plugins provide the same 
 
 **Verify**: `turbo test --filter=@arki/dot -- infra-needs`.
 
+### Phase 3 result (2026-10-16) — DONE
+
+- `InfraDup<I>` folds over the infra tuple like `SiblingDup` and collects every `keyof PluginProvides` seen twice;
+  `InfraGuard` gains the branch `'DOT: two infra plugins provide the same key': InfraDup<I>`. The runtime already
+  refused the pair (`ARKI_DOT_E027`, probe 08); the types now agree with it instead of intersecting the two records.
+- Test in `define-feature.infra-needs.test.ts`: `.infra(s1, s2)` and `.infra(s1, s3, s2)` are `@ts-expect-error`
+  lines and throw `/infra service "repos" collides/`; `.infra(s1, s3)` (distinct keys) compiles and builds three units.
+- Evidence (isolated HEAD + the two files): `@arki/dot` tsc 0, `define-feature*` 85/85, prettier clean on the new
+  lines. Scale N=50: 751,096 → 751,155 instantiations (+59).
+
 ---
 
 ## Phase 4 — Fix #3 and #8: labels on the argument, typed `testApp`

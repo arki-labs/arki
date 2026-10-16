@@ -638,9 +638,21 @@ type UnsatisfiedInfraNeeds<N extends NeedsShape, I extends readonly AnyPlugin[]>
       : UnsatisfiedInfraAliases<N, I, PluginProviderIdentities<I[J]>>
     : never;
 }[number];
+/**
+ * The service keys two infra plugins both provide. `InfraProvides` intersects
+ * the plugins' records, so `{ repos }` from two plugins would merge silently;
+ * the runtime refuses it (`ARKI_DOT_E027`), so the types do too.
+ */
+type InfraDup<I extends readonly AnyPlugin[], Seen = never> = I extends readonly [
+  infer H extends AnyPlugin,
+  ...infer T extends readonly AnyPlugin[],
+]
+  ? (keyof PluginProvides<H> & Seen) | InfraDup<T, Seen | keyof PluginProvides<H>>
+  : never;
 type InfraGuard<N extends NeedsShape, I extends readonly AnyPlugin[]> = ([InfraCollision<N, I>] extends [never]
   ? unknown
   : { readonly 'DOT: an infra service key collides with a need alias or a reserved name': InfraCollision<N, I> }) &
+  ([InfraDup<I>] extends [never] ? unknown : { readonly 'DOT: two infra plugins provide the same key': InfraDup<I> }) &
   ([UnsatisfiedInfraNeeds<N, I>] extends [never]
     ? unknown
     : {

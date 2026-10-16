@@ -134,6 +134,25 @@ describe('refusals at .infra(), before boot (the type guard refuses them too)', 
     expect(() => defineFeature('f').needs({ main: database.provides.db }).infra(store)).toThrow(/needs "db"/);
   });
 
+  it('two infra plugins providing the same key are refused, naming the key', () => {
+    const s1 = plugin({ name: 's1', provides: { repos: () => ({ a: 1 }) } });
+    const s2 = plugin({ name: 's2', provides: { repos: () => ({ a: 2 }), extra: () => 0 } });
+    // @ts-expect-error s1 and s2 both provide "repos" — InfraProvides would merge them silently
+    expect(() => defineFeature('f').infra(s1, s2)).toThrow(/infra service "repos" collides/);
+    // The same two keys, three plugins deep: the fold sees past the first pair.
+    const s3 = plugin({ name: 's3', provides: { other: () => 'x' } });
+    // @ts-expect-error "repos" is provided twice
+    expect(() => defineFeature('g').infra(s1, s3, s2)).toThrow(/"repos" collides/);
+    // Distinct keys compile and build.
+    expect(
+      defineFeature('h')
+        .infra(s1, s3)
+        .entrypoints()
+        .plugins()
+        .map(p => p.name),
+    ).toEqual(['h/s1', 'h/s3', 'h']);
+  });
+
   it('a plugin bound to another handle is refused; bound to the same handle it is tolerated and rebound', () => {
     const other = plugin({ name: 'other-db', provides: { db: (): Db => createDb() } });
     const boundElsewhere = plugin({ name: 'bound', needs: { db: other.provides.db }, provides: { thing: () => 1 } });
