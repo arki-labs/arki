@@ -30,6 +30,7 @@ import type {
   AuthDb,
   AuthTables,
   AuthTestingApi,
+  SessionValues,
   TablesExposing,
   TestSignInOptions,
   TestUserInput,
@@ -40,9 +41,11 @@ import { buildAuth } from '../pg/build.js';
 /** A secret long enough for production checks; only ever used in tests. */
 export const TEST_AUTH_SECRET = 'arki-auth-test-secret-0123456789abcdef';
 
-export type TestAuthBindings<D extends AuthDefinition, T extends AuthTables> = Partial<
-  Omit<AuthBindings<D, T>, 'db' | 'tables' | 'runtime'>
-> & {
+export type TestAuthBindings<
+  D extends AuthDefinition,
+  T extends AuthTables,
+  S extends SessionValues<T> = SessionValues<T>,
+> = Partial<Omit<AuthBindings<D, T, S>, 'db' | 'tables' | 'runtime'>> & {
   readonly tables: T & TablesExposing<D>;
   /** Other tables to create next to the auth tables (an app's tables that point at users). */
   readonly schema?: Readonly<Record<string, unknown>>;
@@ -68,10 +71,11 @@ const fakeProviders = Object.fromEntries(
  * A real auth on a fresh in-memory database with the auth tables pushed. Mail goes to a sink;
  * rate limiting is off unless `rateLimit` is given; the runtime is local and not production.
  */
-export async function testAuth<D extends AuthDefinition, T extends AuthTables>(
-  definition: D,
-  bindings: TestAuthBindings<D, T>,
-): Promise<TestAuth<D, T>> {
+export async function testAuth<
+  D extends AuthDefinition,
+  T extends AuthTables,
+  S extends SessionValues<T> = SessionValues<T>,
+>(definition: D, bindings: TestAuthBindings<D, T, S>): Promise<TestAuth<D, T>> {
   const client = new PGlite('memory://');
   await client.waitReady;
   const db = drizzle({ client });

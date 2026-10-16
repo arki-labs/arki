@@ -36,12 +36,14 @@ function fieldTypeOf(name: string, dataType: string, enumValues: readonly string
 /**
  * The engine's `user.additionalFields` for the exposed columns: required when the column is
  * `NOT NULL` without a default, settable by the client only when listed in `signUpFields`, and
- * always returned. A name that is not a column of the table is `ARKI_AUTH_E001`.
+ * returned unless `returned` is `false` (the session's own columns stay server-side). A name that
+ * is not a column of the table is `ARKI_AUTH_E001`.
  */
 export function additionalFieldsFromColumns(
   table: AnyPgTable,
   fields: readonly string[],
   signUpFields: readonly string[],
+  returned = true,
 ): AdditionalFields {
   const columns = getTableColumns(table);
   const result: AdditionalFields = {};
@@ -57,7 +59,7 @@ export function additionalFieldsFromColumns(
         type: fieldTypeOf(name, column.dataType, values),
         required: column.notNull && !column.hasDefault,
         input: signUpFields.includes(name),
-        returned: true,
+        returned,
         ...(isPrimitiveDefault(defaultValue) && { defaultValue }),
       };
     }

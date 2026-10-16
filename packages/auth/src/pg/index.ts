@@ -14,15 +14,18 @@
  */
 import type { AuthDefinition } from '../definition.js';
 import type { Auth } from './build.js';
-import type { AuthBindings, AuthTables } from './types.js';
+import type { AuthBindings, AuthTables, SessionValues } from './types.js';
 import { buildAuth } from './build.js';
 
 export type { Auth } from './build.js';
 export type { AuthEngine } from './engine.js';
 export type {
+  AuthBindingEvents,
   AuthBindings,
   AuthDb,
   AuthEvents,
+  AuthMailBrand,
+  AuthMailBrandPicker,
   AuthLinkTemplate,
   AuthRuntime,
   AuthSessions,
@@ -32,8 +35,12 @@ export type {
   PrincipalFor,
   ProviderCredentials,
   ProviderCredentialsMap,
+  OnlySessionColumns,
+  RateLimitBinding,
   RateLimitStore,
+  SessionEvents,
   SessionSummary,
+  SessionValues,
   SignInFailure,
   TestSignInOptions,
   TestUserInput,
@@ -59,11 +66,13 @@ export type {
 
 /**
  * Builds the auth from its definition and the app's bindings. Every mistake a deployment can make
- * is refused here, at boot, with a coded `AuthError`.
+ * is refused here, at boot, with a coded `AuthError`. `S` is what `on.sessionCreating` returns,
+ * inferred and checked against the session table.
  */
-export function createAuth<D extends AuthDefinition, T extends AuthTables>(
-  definition: D,
-  bindings: AuthBindings<D, T>,
-): Auth<D, T> {
+export function createAuth<
+  D extends AuthDefinition,
+  T extends AuthTables,
+  S extends SessionValues<T> = SessionValues<T>,
+>(definition: D, bindings: AuthBindings<D, T, S>): Auth<D, T> {
   return buildAuth(definition, bindings);
 }

@@ -2,7 +2,7 @@
  * The server-side contract of `@arki/auth/pg`: what the app binds at boot and what it gets back.
  */
 import type { BetterAuthPlugin } from 'better-auth';
-import type { AnyRelations } from 'drizzle-orm';
+import type { AnyRelations, InferInsertModel } from 'drizzle-orm';
 import type { AnyPgTable, PgAsyncDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 
 import type { KV } from '@arki/kv';
@@ -10,7 +10,15 @@ import type { Mailer, MailTemplate } from '@arki/mail';
 import type { magicLink } from '@arki/mail/templates/auth';
 
 import type { AuthDefinition, AuthMethod, ExposedFields, SocialMethod, SocialMethodsOf } from '../definition.js';
-import type { Principal, PrincipalTables, PrincipalVia, SessionIdOf, UserRow } from '../principal.js';
+import type {
+  Principal,
+  PrincipalSession,
+  PrincipalTables,
+  PrincipalVia,
+  SessionIdOf,
+  UserIdOf,
+  UserRow,
+} from '../principal.js';
 
 /**
  * A Drizzle Postgres database: node-postgres, PGlite, or any other async Postgres driver.
@@ -95,6 +103,67 @@ export type AuthTemplates = {
 /** The rate-limit store: an `@arki/kv` instance, shared by every replica. */
 export type RateLimitStore = Pick<KV, 'getRateLimiter'>;
 
+/**
+ * Where the rate limiter counts: an `@arki/kv` store shared by every replica, or `'memory'`, the
+ * engine's own limiter, which counts per process (each replica has its own budget).
+ */
+export type RateLimitBinding = { readonly store: RateLimitStore | 'memory' };
+
+/** The brand on one auth mail. A field left out keeps the default: the app's name, the mailer's sender. */
+export type AuthMailBrand = { readonly appName?: string; readonly from?: string };
+
+/**
+ * Picks the brand of each auth mail from the request that asked for it, so one backend can send
+ * for several brands. `request` is absent when the engine sends without one.
+ */
+export type AuthMailBrandPicker = (event: { readonly request?: Request }) => AuthMailBrand | Promise<AuthMailBrand>;
+
+/** Session columns the engine writes itself. `sessionCreating` cannot set them. */
+export const ENGINE_SESSION_COLUMNS = [
+  'id',
+  'token',
+  'userId',
+  'expiresAt',
+  'createdAt',
+  'updatedAt',
+  'ipAddress',
+  'userAgent',
+] as const;
+export type EngineSessionColumn = (typeof ENGINE_SESSION_COLUMNS)[number];
+
+type SessionInsert<T extends AuthTables> = InferInsertModel<T['Session']>;
+
+/** The app's own session columns (from `createAuthTables(..., { columns: { session } })`), as `sessionCreating` returns them. */
+export type SessionValues<T extends AuthTables> = {
+  readonly [K in Exclude<keyof SessionInsert<T>, EngineSessionColumn>]?: SessionInsert<T>[K];
+};
+
+/**
+ * `S` with every key the session table lacks typed `never`: an unknown column name does not
+ * compile. When `S` has no such key it stays as it is, so a return with only unknown keys (where
+ * inference falls back to `V`) still meets `V`'s own check.
+ */
+export type OnlySessionColumns<S, V> = [Exclude<keyof S, keyof V>] extends [never]
+  ? S
+  : S & Readonly<Record<Exclude<keyof S, keyof V>, never>>;
+
+/**
+ * The session hooks. `sessionCreating` runs before every session the engine writes (every sign-in
+ * path, `actingAs` included) and returns values for the app's own session columns; it may return
+ * nothing. A thrown `AuthError` refuses the session (403 with the error's code). `sessionCreated`
+ * observes each new session; a throwing observer is logged and the response stays.
+ */
+export type SessionEvents<UId extends string, SId extends string, S> = {
+  readonly sessionCreating?: (event: {
+    readonly userId: UId;
+    readonly request?: Request;
+  }) => S | void | Promise<S | void>;
+  readonly sessionCreated?: (event: {
+    readonly userId: UId;
+    readonly session: PrincipalSession<SId>;
+  }) => void | Promise<void>;
+};
+
 /** Why a sign-in failed. Never the email, never the body. */
 export type SignInFailure = 'credentials' | 'unverified' | 'rateLimited' | 'unknown';
 
@@ -130,7 +199,18 @@ export type AuthEvents<P, U> = {
 /** The principal an auth built from `D` and `T` produces. */
 export type PrincipalFor<D, T extends PrincipalTables> = Principal<UserRow<D, T>, SessionIdOf<T>>;
 
-export type AuthBindings<D extends AuthDefinition, T extends AuthTables> = {
+/**
+ * Everything `on` takes: the auth events and the session hooks. `S` is what `sessionCreating`
+ * returns, inferred, so a column the session table lacks does not compile.
+ */
+export type AuthBindingEvents<D, T extends AuthTables, S> = AuthEvents<PrincipalFor<D, T>, UserRow<D, T>> &
+  SessionEvents<UserIdOf<T>, SessionIdOf<T>, S>;
+
+export type AuthBindings<
+  D extends AuthDefinition,
+  T extends AuthTables,
+  S extends SessionValues<T> = SessionValues<T>,
+> = {
   readonly db: AuthDb;
   readonly tables: T & TablesExposing<D>;
   /** Read once, at boot. */
@@ -139,11 +219,16 @@ export type AuthBindings<D extends AuthDefinition, T extends AuthTables> = {
   readonly mail?: Pick<Mailer, 'send'>;
   /** Replace the default `@arki/mail/templates/auth` mails. */
   readonly templates?: Partial<AuthTemplates>;
-  /** Required in production. `false` turns rate limiting off, outside production only. */
-  readonly rateLimit?: { readonly store: RateLimitStore } | false;
+  /** The brand (`appName`, `from`) of each auth mail, picked per request. Default: the app's name and the mailer's sender. */
+  readonly mailBrand?: AuthMailBrandPicker;
+  /**
+   * Required in production: `{ store: kv }` (shared by every replica) or `{ store: 'memory' }`
+   * (per process, logged as a warning at boot). `false` turns rate limiting off, outside production only.
+   */
+  readonly rateLimit?: RateLimitBinding | false;
   /** The principal's roles. A throwing resolver fails the request; it never makes a guest. */
   readonly roles?: (user: UserRow<D, T>) => readonly string[] | Promise<readonly string[]>;
-  readonly on?: AuthEvents<PrincipalFor<D, T>, UserRow<D, T>>;
+  readonly on?: AuthBindingEvents<D, T, OnlySessionColumns<S, SessionValues<T>>>;
   /** Escape hatch: `tanstackStart()`, app plugins. */
   readonly plugins?: readonly BetterAuthPlugin[];
 };

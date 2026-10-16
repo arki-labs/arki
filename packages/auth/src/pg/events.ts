@@ -66,7 +66,7 @@ type Events<P, U> = Required<AuthEvents<P, U>>;
 type EventOf<P, U, K extends keyof Events<P, U>> = Parameters<Events<P, U>[K]>[0];
 
 /** Calls one observer, logs its failure, never throws. */
-async function run(name: string, call: () => void | Promise<void> | undefined): Promise<void> {
+export async function runObserver(name: string, call: () => void | Promise<void> | undefined): Promise<void> {
   try {
     await call();
   } catch (error) {
@@ -77,11 +77,12 @@ async function run(name: string, call: () => void | Promise<void> | undefined): 
 /** One emitter per event. */
 export function createEmitter<P, U>(on: AuthEvents<P, U> | undefined) {
   return {
-    userCreated: (event: EventOf<P, U, 'userCreated'>) => run('userCreated', () => on?.userCreated?.(event)),
-    signIn: (event: EventOf<P, U, 'signIn'>) => run('signIn', () => on?.signIn?.(event)),
-    signInFailed: (event: EventOf<P, U, 'signInFailed'>) => run('signInFailed', () => on?.signInFailed?.(event)),
+    userCreated: (event: EventOf<P, U, 'userCreated'>) => runObserver('userCreated', () => on?.userCreated?.(event)),
+    signIn: (event: EventOf<P, U, 'signIn'>) => runObserver('signIn', () => on?.signIn?.(event)),
+    signInFailed: (event: EventOf<P, U, 'signInFailed'>) =>
+      runObserver('signInFailed', () => on?.signInFailed?.(event)),
     passwordChanged: (event: EventOf<P, U, 'passwordChanged'>) =>
-      run('passwordChanged', () => on?.passwordChanged?.(event)),
-    signOut: (event: EventOf<P, U, 'signOut'>) => run('signOut', () => on?.signOut?.(event)),
+      runObserver('passwordChanged', () => on?.passwordChanged?.(event)),
+    signOut: (event: EventOf<P, U, 'signOut'>) => runObserver('signOut', () => on?.signOut?.(event)),
   };
 }

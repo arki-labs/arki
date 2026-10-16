@@ -16,15 +16,15 @@ import { plugin, service } from '@arki/dot/plugin';
 
 import type { AuthDefinition } from './definition.js';
 import type { Auth } from './pg/index.js';
-import type { AuthBindings, AuthDb, AuthTables } from './pg/types.js';
+import type { AuthBindings, AuthDb, AuthTables, SessionValues } from './pg/types.js';
 import { createAuth } from './pg/index.js';
 
 const AUTH_PLUGIN_VERSION = '0.2.0';
 
 /** The auth as a Dot service named `auth`. Needs `db` and `mail`. */
-export function auth<D extends AuthDefinition, T extends AuthTables>(
+export function auth<D extends AuthDefinition, T extends AuthTables, S extends SessionValues<T> = SessionValues<T>>(
   definition: D,
-  bindings: Omit<AuthBindings<D, T>, 'db' | 'mail'>,
+  bindings: Omit<AuthBindings<D, T, S>, 'db' | 'mail'>,
 ) {
   return plugin({
     name: 'auth',
@@ -35,7 +35,7 @@ export function auth<D extends AuthDefinition, T extends AuthTables>(
       ctx.declareProvides('auth');
     },
     provides: {
-      auth: ({ db, mail }): Auth<D, T> => createAuth(definition, { ...bindings, db, mail }),
+      auth: ({ db, mail }): Auth<D, T> => createAuth<D, T, S>(definition, { ...bindings, db, mail }),
     },
   });
 }

@@ -290,17 +290,18 @@ Link lifetimes are fixed: magic link 5 minutes, password reset 15 minutes, email
 
 ## The bindings
 
-| Binding       | Meaning                                                                                                                     |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `db`          | A Drizzle Postgres database (node-postgres or PGlite). The Dot plugin takes it from the graph.                              |
-| `tables`      | The tables from `createAuthTables` (and `createWorkspaceTables` with `workspaces`).                                         |
-| `runtime()`   | Read once at boot: `url`, `productionUrl`, `secret`, `production`, `trustedOrigins`, `providers`, `clientIp`.               |
-| `mail`        | A mailer from `@arki/mail`. Required when `password` or `magicLink` is on. The Dot plugin takes it from the graph.          |
-| `templates`   | Replace the default `magicLink`, `verifyEmail` or `resetPassword` mail.                                                     |
-| `rateLimit`   | `{ store: kv }`: one budget shared by every replica. Required in production. `false` turns it off, outside production only. |
-| `roles(user)` | The principal's roles. A throwing resolver fails the request.                                                               |
-| `on`          | Event observers (below).                                                                                                    |
-| `plugins`     | Engine plugins, such as `tanstackStart()`. The escape hatch.                                                                |
+| Binding        | Meaning                                                                                                                                                                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `db`           | A Drizzle Postgres database (node-postgres or PGlite). The Dot plugin takes it from the graph.                                                                                                                               |
+| `tables`       | The tables from `createAuthTables` (and `createWorkspaceTables` with `workspaces`). Every `id` column needs a default (an id factory's `primaryColumn()`); a table without one fails at boot with E001.                      |
+| `runtime()`    | Read once at boot: `url`, `productionUrl`, `secret`, `production`, `trustedOrigins`, `providers`, `clientIp`.                                                                                                                |
+| `mail`         | A mailer from `@arki/mail`. Required when `password` or `magicLink` is on. The Dot plugin takes it from the graph.                                                                                                           |
+| `templates`    | Replace the default `magicLink`, `verifyEmail` or `resetPassword` mail.                                                                                                                                                      |
+| `mailBrand(e)` | Picks `appName` and `from` for each auth mail from `e.request`. Default: the app's name and the mailer's sender. See [Several brands on one backend](#several-brands-on-one-backend).                                        |
+| `rateLimit`    | Required in production. `{ store: kv }`: one budget shared by every replica. `{ store: 'memory' }`: the engine's own limiter, one budget per process, with a warning at boot. `false` turns it off, outside production only. |
+| `roles(user)`  | The principal's roles. A throwing resolver fails the request.                                                                                                                                                                |
+| `on`           | Event observers and the session hooks (below).                                                                                                                                                                               |
+| `plugins`      | Engine plugins, such as `tanstackStart()`. The escape hatch.                                                                                                                                                                 |
 
 `runtime().clientIp.header` names the one header your ingress sets to the client address, such as `cf-connecting-ip`. The rate limiter reads only that header, so a spoofed `x-forwarded-for` cannot pick a new bucket.
 
@@ -327,16 +328,65 @@ type Principal<User> = {
 
 `on` takes plain functions. They run after the fact and never change the response. A throwing observer is logged. Events never carry tokens, cookies, headers or bodies.
 
-| Event              | When                                                          | Carries                                                                                 |
-| ------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `beforeUserCreate` | Before a user row is written. Throw an `AuthError` to refuse. | `email`, `method`, `request`                                                            |
-| `userCreated`      | After a user row is written.                                  | `user`, `method`                                                                        |
-| `signIn`           | After a sign-in that set a session.                           | `principal`, `method`, `requestId`                                                      |
-| `signInFailed`     | After a sign-in that did not.                                 | `method`, `reason` (`credentials`, `unverified`, `rateLimited`, `unknown`), `requestId` |
-| `passwordChanged`  | After a change or a reset.                                    | `userId`, `reason`                                                                      |
-| `signOut`          | After a sign-out.                                             | `principal`                                                                             |
+| Event              | When                                                                                                        | Carries                                                                                 |
+| ------------------ | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `beforeUserCreate` | Before a user row is written. Throw an `AuthError` to refuse.                                               | `email`, `method`, `request`                                                            |
+| `userCreated`      | After a user row is written.                                                                                | `user`, `method`                                                                        |
+| `sessionCreating`  | Before every session row is written. Returns the app's own session columns. Throw an `AuthError` to refuse. | `userId`, `request`                                                                     |
+| `sessionCreated`   | After every session row is written.                                                                         | `userId`, `session` (`id`, dates, `ipAddress`, `userAgent`; no token)                   |
+| `signIn`           | After a sign-in that set a session.                                                                         | `principal`, `method`, `requestId`                                                      |
+| `signInFailed`     | After a sign-in that did not.                                                                               | `method`, `reason` (`credentials`, `unverified`, `rateLimited`, `unknown`), `requestId` |
+| `passwordChanged`  | After a change or a reset.                                                                                  | `userId`, `reason`                                                                      |
+| `signOut`          | After a sign-out.                                                                                           | `principal`                                                                             |
 
-The events come from a wrapper around the engine's handler. It reads the route, the status and the session cookie of each answer.
+Most events come from a wrapper around the engine's handler. It reads the route, the status and the session cookie of each answer.
+
+### Session hooks
+
+`sessionCreating` and `sessionCreated` run for every session the engine makes: every sign-in path, sign-up with auto sign-in, and `actingAs` in tests. Use them for a column every session must carry, or for work at first sign-in.
+
+```ts skip="a fragment of the bindings"
+createAuth(authDefinition, {
+  // ...
+  on: {
+    // `appContext` is an extra session column: createAuthTables(schema, { columns: { session: { appContext } } }).
+    sessionCreating: ({ request }) => ({ appContext: appKeyOf(request) }),
+    sessionCreated: ({ userId }) => ensureProfile(db, { accountId: userId }),
+  },
+});
+```
+
+- `sessionCreating` returns values for the app's own session columns, typed from your table. An unknown column, an engine column (`token`, `userId`, …) or a wrong value type does not compile. It may return nothing, and it may be async.
+- A thrown `AuthError` refuses the session. The request answers 403 with the error's code, and no session row is written.
+- `request` is absent when no request made the session (`actingAs`).
+- `userId` and `session.id` have your tables' branded id types.
+- `sessionCreated` is an observer: a throw is logged and the sign-in still succeeds.
+
+## Several brands on one backend
+
+One backend can sign users in for several sites, each with its own name. `mailBrand` picks the brand of each auth mail (magic link, verify, reset) from the request that asked for it:
+
+```ts
+import type { AuthMailBrandPicker } from '@arki/auth/pg';
+
+const BRANDS: Readonly<Record<string, string>> = {
+  'readingpath.com': 'ReadingPath',
+  'strophie.com': 'Strophie',
+};
+
+export const brandOfHost: AuthMailBrandPicker = ({ request }) => {
+  const host = request?.headers.get('x-forwarded-host') ?? request?.headers.get('host') ?? '';
+  const appName = BRANDS[host];
+  return appName === undefined ? {} : { appName, from: `${appName} <auth@example.com>` };
+};
+// createAuth(authDefinition, { ..., mailBrand: brandOfHost })
+```
+
+- `appName` goes into the template. `from` goes to the mailer's send call.
+- A field you leave out keeps the default: the definition's `app.name` and the mailer's sender.
+- With no request, or an unknown host, return `{}` to keep the default.
+- A picker that throws fails the mail with E006. Nothing is sent under a wrong brand.
+- Custom `templates` get the picked `appName` too.
 
 ## Endpoint contract
 
@@ -511,6 +561,7 @@ The scoping kernel in `@arki/auth/pg/workspaces` builds read filters (`workspace
 - **The limiter store.** The rate limiter keeps its counts in your `@arki/kv` store, through the engine's `customStorage` hook, using only `getRateLimiter`. A store error answers 503. But when Redis is not ready at the moment `@arki/kv` creates a limiter, `@arki/kv` hands back an in-memory limiter, and this package cannot see that. Until `@arki/kv` can refuse instead, make sure Redis is up before the first request.
 - **The limiter counts per client address**, not per account. Set `runtime().clientIp.header` behind a proxy.
 - **`rateLimit: false` is refused in production.** `testAuth` uses it by default.
+- **`rateLimit: { store: 'memory' }` counts per process.** Each replica has its own budget, so N replicas allow N times the attempts, and a restart resets the counts. Boot logs a warning naming the app. Use it only for a single-instance app with no Redis.
 - **Workspaces need two session columns** (`activeOrganizationId`, `activeTeamId`) as well as the workspace tables.
 - **`expo` is `false` by default.** Native apps turn it on.
 - **Session tokens are stored as they are**, as the engine does. The cookie is signed, and lists never return the token.

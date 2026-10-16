@@ -36,6 +36,10 @@ export type EngineCallbacks = {
     ((event: { email: string; method: AuthMethod; request?: Request }) => Promise<void>) | undefined;
   readonly userCreated: (user: object, path: string | undefined) => Promise<void>;
   readonly passwordReset: (userId: string) => Promise<void>;
+  /** The app's values for a new session's own columns. Absent: no hook. */
+  readonly sessionCreating:
+    ((session: object, request: Request | undefined) => Promise<Readonly<Record<string, unknown>>>) | undefined;
+  readonly sessionCreated: (session: object) => Promise<void>;
 };
 
 export type EngineInput = {
@@ -44,9 +48,12 @@ export type EngineInput = {
   readonly db: AuthDb;
   readonly tables: AuthTables;
   readonly additionalFields: AdditionalFields;
+  /** The app's own session columns `sessionCreating` writes; the engine drops fields it does not know. */
+  readonly sessionFields: AdditionalFields;
   readonly socialProviders: SocialProviders;
   readonly mail: AuthMail | undefined;
-  readonly rateLimit: RateLimitStorage | undefined;
+  /** The shared store, `'memory'` for the engine's per-process limiter, or `undefined` for none. */
+  readonly rateLimit: RateLimitStorage | 'memory' | undefined;
   readonly callbacks: EngineCallbacks;
   readonly methodOfSource: (source: { method: string; oauth?: { providerId: string } }) => AuthMethod | undefined;
   readonly plugins: readonly BetterAuthPlugin[];
@@ -73,14 +80,14 @@ const originOf = (url: string): string => new URL(url).origin;
 export function engineOptions(input: EngineInput): BetterAuthOptions {
   const { definition, runtime, callbacks } = input;
   const { methods, verifyEmail, sessions, workspaces, account } = definition;
-  const { beforeUserCreate } = callbacks;
+  const { beforeUserCreate, sessionCreating } = callbacks;
   const password = methods.includes('password');
   const verifiesSignUp = password && verifyEmail !== 'none';
 
   // E003 is thrown before this runs whenever a method sends mail; this keeps the closures total.
-  const sendLink = async (kind: AuthMailKind, to: string, url: string) => {
+  const sendLink = async (kind: AuthMailKind, to: string, url: string, request: Request | undefined) => {
     if (input.mail === undefined) throw new AuthError(AUTH_ERROR_CODES.mailRequired, 'No mailer is bound.');
-    await input.mail.send(kind, to, url);
+    await input.mail.send(kind, to, url, request);
   };
 
   const plugins: BetterAuthPlugin[] = [
@@ -94,7 +101,7 @@ export function engineOptions(input: EngineInput): BetterAuthOptions {
             storeToken: 'hashed',
             expiresIn: LINK_MINUTES.magicLink * 60,
             disableSignUp: !definition.magicLink.signUp,
-            sendMagicLink: ({ email, url }) => sendLink('magicLink', email, url),
+            sendMagicLink: ({ email, url }, ctx) => sendLink('magicLink', email, url, ctx?.request),
           }),
         ]
       : []),
@@ -141,8 +148,18 @@ export function engineOptions(input: EngineInput): BetterAuthOptions {
     account: { accountLinking: { enabled: account.linking } },
     databaseHooks: {
       user: { create: { after: (user, ctx) => callbacks.userCreated(user, ctx?.path) } },
+      // Every session the engine writes goes through here: every sign-in path and `actingAs`.
+      session: {
+        create: {
+          ...(sessionCreating !== undefined && {
+            before: async (session, ctx) => ({ data: await sessionCreating(session, ctx?.request) }),
+          }),
+          after: session => callbacks.sessionCreated(session),
+        },
+      },
     },
     session: {
+      additionalFields: input.sessionFields,
       expiresIn: sessions.expiresIn,
       updateAge: sessions.refreshEvery,
       storeSessionInDatabase: true,
@@ -157,7 +174,7 @@ export function engineOptions(input: EngineInput): BetterAuthOptions {
         autoSignIn: verifyEmail !== 'require',
         revokeSessionsOnPasswordReset: true,
         resetPasswordTokenExpiresIn: LINK_MINUTES.resetPassword * 60,
-        sendResetPassword: ({ user, url }) => sendLink('resetPassword', user.email, url),
+        sendResetPassword: ({ user, url }, request) => sendLink('resetPassword', user.email, url, request),
         onPasswordReset: ({ user }) => callbacks.passwordReset(user.id),
       },
     }),
@@ -167,7 +184,7 @@ export function engineOptions(input: EngineInput): BetterAuthOptions {
         sendOnSignUp: verifiesSignUp,
         autoSignInAfterVerification: true,
         expiresIn: LINK_MINUTES.verifyEmail * 60,
-        sendVerificationEmail: ({ user, url }) => sendLink('verifyEmail', user.email, url),
+        sendVerificationEmail: ({ user, url }, request) => sendLink('verifyEmail', user.email, url, request),
       },
     }),
     hooks: {
@@ -179,7 +196,12 @@ export function engineOptions(input: EngineInput): BetterAuthOptions {
         return { context: { body: { ...body, revokeOtherSessions: true } } };
       }),
     },
-    rateLimit: input.rateLimit === undefined ? { enabled: false } : { enabled: true, customStorage: input.rateLimit },
+    rateLimit:
+      input.rateLimit === undefined
+        ? { enabled: false }
+        : input.rateLimit === 'memory'
+          ? { enabled: true, storage: 'memory' }
+          : { enabled: true, customStorage: input.rateLimit },
     advanced: {
       cookiePrefix: `auth-${definition.app.key}`,
       useSecureCookies: runtime.production,

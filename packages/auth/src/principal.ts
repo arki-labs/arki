@@ -104,6 +104,28 @@ export function isSessionId<SId extends string>(id: unknown): id is SId {
   return typeof id === 'string' && id !== '';
 }
 
+/** The user id, checked to be a string. Its brand is the table's, which the engine wrote. */
+export function isUserId<UId extends string>(id: unknown): id is UId {
+  return typeof id === 'string' && id !== '';
+}
+
+/** The engine's session row as the app sees it: no token. A missing id or date is `ARKI_AUTH_E004`. */
+export function toPrincipalSession<SId extends string>(session: object): PrincipalSession<SId> {
+  const sessionId: unknown = Reflect.get(session, 'id');
+  const createdAt: unknown = Reflect.get(session, 'createdAt');
+  const expiresAt: unknown = Reflect.get(session, 'expiresAt');
+  if (!isSessionId<SId>(sessionId) || !isDate(createdAt) || !isDate(expiresAt)) {
+    throw shapeError('session lacks its id, createdAt or expiresAt');
+  }
+  return {
+    id: sessionId,
+    createdAt,
+    expiresAt,
+    ipAddress: optionalText(Reflect.get(session, 'ipAddress')),
+    userAgent: optionalText(Reflect.get(session, 'userAgent')),
+  };
+}
+
 /**
  * The engine's user as the app's row: the core columns and the exposed ones, nothing else. A
  * missing column is `ARKI_AUTH_E004`.
@@ -142,22 +164,9 @@ export async function toPrincipal<U, SId extends string>(
 ): Promise<Principal<U, SId>> {
   const { session, fields, via, workspaces } = input;
   const user = toUserRow<U>(input.user, fields);
-  const sessionId: unknown = Reflect.get(session, 'id');
-  const createdAt: unknown = Reflect.get(session, 'createdAt');
-  const expiresAt: unknown = Reflect.get(session, 'expiresAt');
-  if (!isSessionId<SId>(sessionId) || !isDate(createdAt) || !isDate(expiresAt)) {
-    throw shapeError('session lacks its id, createdAt or expiresAt');
-  }
-
   return {
     user,
-    session: {
-      id: sessionId,
-      createdAt,
-      expiresAt,
-      ipAddress: optionalText(Reflect.get(session, 'ipAddress')),
-      userAgent: optionalText(Reflect.get(session, 'userAgent')),
-    },
+    session: toPrincipalSession<SId>(session),
     via,
     roles: await roles(user),
     ...(workspaces && {

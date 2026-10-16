@@ -1,7 +1,9 @@
 /**
  * The auth builder behind `createAuth` and `testAuth`.
  */
+import type { AnyPgTable } from 'drizzle-orm/pg-core';
 import { betterAuth } from 'better-auth';
+import { APIError } from 'better-auth/api';
 import { makeSignature } from 'better-auth/crypto';
 import { getTableColumns } from 'drizzle-orm';
 
@@ -10,6 +12,7 @@ import type { PrincipalVia, SessionIdOf, UserIdOf, UserRow } from '../principal.
 import type { SocialProviders } from './assemble.js';
 import type { AuthEngine } from './engine.js';
 import type {
+  AuthBindingEvents,
   AuthBindings,
   AuthRuntime,
   AuthSessions,
@@ -17,18 +20,28 @@ import type {
   AuthTestingApi,
   PrincipalFor,
   ProviderCredentialsMap,
+  SessionValues,
 } from './types.js';
 import { isSocialMethod, resolveDefinition } from '../definition.js';
 import { AUTH_ERROR_CODES, AuthError, isAuthError } from '../errors.js';
 import { log } from '../log.js';
-import { toPrincipal, toUserRow } from '../principal.js';
+import { isUserId, toPrincipal, toPrincipalSession, toUserRow } from '../principal.js';
 import { engineOptions } from './assemble.js';
-import { createEmitter, enginePath, failureOf, methodOfSource, requestIdOf, signInMethodOf } from './events.js';
+import {
+  createEmitter,
+  enginePath,
+  failureOf,
+  methodOfSource,
+  requestIdOf,
+  runObserver,
+  signInMethodOf,
+} from './events.js';
 import { additionalFieldsFromColumns } from './fields.js';
 import { authMail } from './mail.js';
 import { assertAuthSecret } from './secret.js';
 import { kvRateLimitStorage } from './security/kv-storage.js';
 import { createSessions } from './sessions.js';
+import { ENGINE_SESSION_COLUMNS } from './types.js';
 
 /** A working auth. Build it with {@link createAuth}. */
 export type Auth<D extends AuthDefinition, T extends AuthTables> = {
@@ -101,7 +114,11 @@ function socialProvidersFor(methods: readonly AuthMethod[], providers: unknown):
 }
 
 function assertUrl(url: string, label: string): void {
-  if (!URL.canParse(url)) invalid(`${label} "${url}" is not an absolute URL.`);
+  try {
+    new URL(url);
+  } catch {
+    invalid(`${label} "${url}" is not an absolute URL.`);
+  }
 }
 
 function assertWorkspaceTables(tables: AuthTables, teams: boolean): void {
@@ -123,6 +140,47 @@ function assertWorkspaceTables(tables: AuthTables, teams: boolean): void {
   }
 }
 
+/**
+ * The engine's own id generation is off (`generateId: false`): every id comes from the table's
+ * default. A table whose `id` has none would insert a null id at the first sign-up.
+ */
+function assertIdDefaults(tables: AuthTables, workspaces: ResolvedDefinition['workspaces']): void {
+  const checked: readonly (readonly [string, AnyPgTable | undefined])[] = [
+    ['User', tables.User],
+    ['Session', tables.Session],
+    ['Account', tables.Account],
+    ['Verification', tables.Verification],
+    ...(workspaces === undefined
+      ? []
+      : ([
+          ['Organization', tables.Organization],
+          ['Member', tables.Member],
+          ['Invitation', tables.Invitation],
+          ...(workspaces.teams
+            ? ([
+                ['Team', tables.Team],
+                ['TeamMember', tables.TeamMember],
+              ] as const)
+            : []),
+        ] as const)),
+  ];
+  const missing = checked.flatMap(([name, table]) => {
+    if (table === undefined) return [];
+    const columns = getTableColumns(table);
+    const id = Object.hasOwn(columns, 'id') ? columns['id'] : undefined;
+    return id !== undefined && (id.hasDefault || id.defaultFn !== undefined) ? [] : [name];
+  });
+  if (missing.length > 0) {
+    invalid(
+      `The \`id\` column of ${missing.join(', ')} has no default, and the engine makes no ids. ` +
+        "Use `createAuthTables` (or `createWorkspaceTables`), or an id factory's `primaryColumn()`.",
+    );
+  }
+}
+
+/** A session refused by `sessionCreating`: 403 with the app's error code. */
+const sessionRefused = (error: AuthError) => new APIError('FORBIDDEN', { code: error.code, message: error.message });
+
 const bearerTokenOf = (headers: Headers): string | undefined => {
   const value = headers.get('authorization');
   return value !== null && /^bearer\s+\S/i.test(value) ? value.replace(/^bearer\s+/i, '') : undefined;
@@ -143,11 +201,14 @@ function sessionCookieOf(response: Response, name: string): string | undefined {
   return undefined;
 }
 
-/** A copy of the response with extra headers (engine responses may have immutable headers). */
-function withHeaders(response: Response, extra: Readonly<Record<string, string>>): Response {
+/**
+ * A copy of a small response with extra headers (engine responses may have immutable headers).
+ * The body is copied as text: a `string` body types the same on every runtime's `lib`.
+ */
+async function withHeaders(response: Response, extra: Readonly<Record<string, string>>): Promise<Response> {
   const headers = new Headers(response.headers);
   for (const [key, value] of Object.entries(extra)) headers.set(key, value);
-  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  return new Response(await response.text(), { status: response.status, statusText: response.statusText, headers });
 }
 
 /** The engine routes an `account` switch opens. While the switch is off they answer 404. */
@@ -165,9 +226,16 @@ const jsonError = (error: AuthError): Response =>
 /** Runtime values as the builder reads them: `providers` is checked at boot, not trusted. */
 export type CheckedRuntime = Omit<AuthRuntime<AuthDefinition>, 'providers'> & { readonly providers?: unknown };
 
-/** The bindings as the builder reads them. `createAuth` narrows `runtime` to the definition. */
-export type CheckedBindings<D extends AuthDefinition, T extends AuthTables> = Omit<AuthBindings<D, T>, 'runtime'> & {
+/**
+ * The bindings as the builder reads them. `createAuth` narrows `runtime` to the definition and
+ * checks `sessionCreating`'s exact return type; the builder only needs its column values.
+ */
+export type CheckedBindings<D extends AuthDefinition, T extends AuthTables> = Omit<
+  AuthBindings<D, T>,
+  'runtime' | 'on'
+> & {
   readonly runtime: () => CheckedRuntime;
+  readonly on?: AuthBindingEvents<D, T, SessionValues<T>>;
 };
 
 /**
@@ -191,6 +259,7 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
 
   const tables: AuthTables = bindings.tables;
   if (resolved.workspaces !== undefined) assertWorkspaceTables(tables, resolved.workspaces.teams);
+  assertIdDefaults(tables, resolved.workspaces);
   const sendsMail =
     resolved.methods.includes('password') || resolved.methods.includes('magicLink') || resolved.account.changeEmail;
   if (sendsMail && bindings.mail === undefined) {
@@ -200,16 +269,44 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
     );
   }
   if (runtime.production && bindings.rateLimit === undefined) {
-    invalid('Production needs a shared rate-limit store: `rateLimit: { store: kv }`.');
+    invalid(
+      "Production needs a rate-limit store: `rateLimit: { store: kv }` (shared), or `{ store: 'memory' }` (per process).",
+    );
   }
   if (runtime.production && bindings.rateLimit === false) {
     invalid('`rateLimit: false` is for tests and local dev; production needs `rateLimit: { store: kv }`.');
+  }
+  const rateLimitStore = bindings.rateLimit === false ? undefined : bindings.rateLimit?.store;
+  if (rateLimitStore === 'memory') {
+    log.warn(
+      'Auth "{app}" counts rate limits in memory, per process: each replica has its own budget. Bind a shared `@arki/kv` store to share one.',
+      { app: resolved.app.name, key: resolved.app.key },
+    );
   }
   const providers: unknown = runtime.providers;
   const socialProviders = socialProvidersFor(resolved.methods, providers);
   const additionalFields = additionalFieldsFromColumns(tables.User, resolved.fields, resolved.signUpFields);
 
   const emit = createEmitter(bindings.on);
+  const onSessionCreating = bindings.on?.sessionCreating;
+  const onSessionCreated = bindings.on?.sessionCreated;
+  const engineSessionColumns: ReadonlySet<string> = new Set(ENGINE_SESSION_COLUMNS);
+  // The organization plugin declares the workspace columns itself.
+  const pluginSessionColumns: ReadonlySet<string> = new Set(
+    resolved.workspaces === undefined ? [] : ['activeOrganizationId', 'activeTeamId'],
+  );
+  const appSessionColumns = new Set(
+    Object.keys(getTableColumns(tables.Session)).filter(name => !engineSessionColumns.has(name)),
+  );
+  const sessionFields =
+    onSessionCreating === undefined
+      ? {}
+      : additionalFieldsFromColumns(
+          tables.Session,
+          [...appSessionColumns].filter(name => !pluginSessionColumns.has(name)),
+          [],
+          false,
+        );
   const roles = bindings.roles ?? (() => []);
   const workspaces = resolved.workspaces !== undefined;
   const closedPaths = closedAccountPaths(resolved.account);
@@ -228,12 +325,21 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
       db: bindings.db,
       tables,
       additionalFields,
+      sessionFields,
       socialProviders,
       mail:
         bindings.mail === undefined
           ? undefined
-          : authMail({ mail: bindings.mail, templates: bindings.templates, appName: resolved.app.name }),
-      rateLimit: bindings.rateLimit ? kvRateLimitStorage(bindings.rateLimit.store) : undefined,
+          : authMail({
+              mail: bindings.mail,
+              templates: bindings.templates,
+              appName: resolved.app.name,
+              brand: bindings.mailBrand,
+            }),
+      rateLimit:
+        rateLimitStore === undefined || rateLimitStore === 'memory'
+          ? rateLimitStore
+          : kvRateLimitStorage(rateLimitStore),
       methodOfSource,
       plugins: bindings.plugins ?? [],
       callbacks: {
@@ -249,6 +355,41 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
           await emit.userCreated({ user: toUserRow<U>(user, resolved.fields), method });
         },
         passwordReset: userId => emit.passwordChanged({ userId, reason: 'reset' }),
+        sessionCreating:
+          onSessionCreating === undefined
+            ? undefined
+            : async (session, request) => {
+                const userId: unknown = Reflect.get(session, 'userId');
+                if (!isUserId<UserIdOf<T>>(userId)) {
+                  throw new AuthError(
+                    AUTH_ERROR_CODES.principalShape,
+                    "[@arki/auth] The engine's session lacks its userId.",
+                  );
+                }
+                let values: SessionValues<T> | void;
+                try {
+                  values = await onSessionCreating({ userId, ...(request !== undefined && { request }) });
+                } catch (error) {
+                  if (isAuthError(error)) throw sessionRefused(error);
+                  throw error;
+                }
+                const entries = typeof values === 'object' ? Object.entries(values) : [];
+                const unknown = entries.map(([name]) => name).filter(name => !appSessionColumns.has(name));
+                if (unknown.length > 0) {
+                  invalid(
+                    `\`sessionCreating\` returned ${unknown.join(', ')}: not one of the app's own Session columns.`,
+                  );
+                }
+                return Object.fromEntries(entries);
+              },
+        sessionCreated: async session => {
+          if (onSessionCreated === undefined) return;
+          await runObserver('sessionCreated', () => {
+            const userId: unknown = Reflect.get(session, 'userId');
+            if (!isUserId<UserIdOf<T>>(userId)) throw new Error("The engine's session lacks its userId.");
+            return onSessionCreated({ userId, session: toPrincipalSession<SessionIdOf<T>>(session) });
+          });
+        },
       },
     }),
   );
@@ -295,7 +436,7 @@ export function buildAuth<D extends AuthDefinition, T extends AuthTables>(
     }
 
     if (response.status === 429) {
-      response = withHeaders(response, { 'retry-after': response.headers.get('x-retry-after') ?? '60' });
+      response = await withHeaders(response, { 'retry-after': response.headers.get('x-retry-after') ?? '60' });
     }
 
     if (method !== undefined) {

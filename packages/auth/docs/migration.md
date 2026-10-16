@@ -108,8 +108,20 @@ export type Principal = PrincipalOf<Auth>;
 
 - The app must use `@arki/mail/dot`'s `mail(...)` plugin before `authn`. The old `magicLink.send` callbacks go away. A custom mail (for example a localized magic link) becomes a `templates` entry.
 - A test-only magic-link capture becomes `lastMagicLink(mail, email)` in tests.
-- Production needs `rateLimit: { store: kv }` from the app's `@arki/kv` instance.
-- `onAPIError`, `databaseHooks` and other engine options have no binding. Use `on` (events) for observers and `beforeUserCreate` for a waitlist. Anything else goes through `plugins`, and needs a review.
+- Production needs `rateLimit: { store: kv }` from the app's `@arki/kv` instance. An app with one instance and no Redis may write `rateLimit: { store: 'memory' }` instead. It counts per process, and boot logs a warning.
+- `onAPIError` and other engine options have no binding. Use `on` (events) for observers and `beforeUserCreate` for a waitlist. Anything else goes through `plugins`, and needs a review.
+- `databaseHooks.session.create.before` that adds a column (such as `appContext`) becomes `on.sessionCreating`. Return only the columns, not the whole row. The `session` table must declare the column through `createAuthTables(schema, { columns: { session: { appContext } } })`.
+
+  ```ts skip="before and after"
+  // Before
+  databaseHooks: { session: { create: { before: data => Promise.resolve({ data: { ...data, appContext: appKey } }) } } },
+  // After
+  on: { sessionCreating: () => ({ appContext: appKey }) },
+  ```
+
+- `databaseHooks.session.create.after` becomes `on.sessionCreated({ userId, session })`. `userId` is already your branded `UserId`, so drop the `as UserId` cast. A throw there is logged and no longer fails the sign-in.
+- Auth mails that pick the brand from the request host (kapodopera's `resolveBrand`) become `mailBrand: ({ request }) => ({ appName, from })`. The app's own React mail becomes a `templates` entry; it receives the picked `appName`. See "Several brands on one backend" in the README.
+- Tables whose `id` has no default (a plain `text('id').primaryKey()` plus `generateId`) fail at boot with E001. Use `createAuthTables` or an id factory's `primaryColumn()`; the engine makes no ids.
 
 ### 4. Who is calling
 
