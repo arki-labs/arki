@@ -39,6 +39,7 @@ const { createOfflineMutationQueue } = await import('../../src/mutations/queue.t
 // ---------------------------------------------------------------------------
 
 const TEST_PATH = ['posts', 'create'] as const;
+const ALICE = 'usr_alice';
 
 const contract = {
   posts: {
@@ -89,7 +90,7 @@ describe('OfflineMutationQueue', () => {
 
   it('enqueue() persists the mutation to IDB storage', async () => {
     const rpc = makeRpc('success');
-    const queue = createOfflineMutationQueue({ rpc, storageKey: 'q1', deadLetterStorageKey: 'dl1' });
+    const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc, storageKey: 'q1', deadLetterStorageKey: 'dl1' });
 
     await queue.enqueue(createPost, { title: 'Hello' });
 
@@ -102,7 +103,7 @@ describe('OfflineMutationQueue', () => {
   });
 
   it('enqueue() persists the path the contract gives the operation', async () => {
-    const queue = createOfflineMutationQueue({ rpc: makeRpc('success'), storageKey: 'qp', deadLetterStorageKey: 'dlp' });
+    const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc: makeRpc('success'), storageKey: 'qp', deadLetterStorageKey: 'dlp' });
 
     await queue.enqueue(createPost, { title: 'Path' });
 
@@ -111,7 +112,7 @@ describe('OfflineMutationQueue', () => {
   });
 
   it('enqueue() refuses, at run time, a procedure the contract did not mark offlineSafe and a forged carrier', async () => {
-    const queue = createOfflineMutationQueue({ rpc: makeRpc('success'), storageKey: 'qr', deadLetterStorageKey: 'dlr' });
+    const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc: makeRpc('success'), storageKey: 'qr', deadLetterStorageKey: 'dlr' });
     const unmarked: object = { [OPERATION]: ops.posts.list };
     const forged: object = { [OPERATION]: { path: ['posts', 'create'], name: 'posts.delete', meta: { offlineSafe: true } } };
 
@@ -124,7 +125,7 @@ describe('OfflineMutationQueue', () => {
 
   it('enqueue() returns the idempotencyKey matching the stored mutation id', async () => {
     const rpc = makeRpc('success');
-    const queue = createOfflineMutationQueue({ rpc, storageKey: 'q2', deadLetterStorageKey: 'dl2' });
+    const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc, storageKey: 'q2', deadLetterStorageKey: 'dl2' });
 
     const result = await queue.enqueue(createPost, { title: 'World' });
 
@@ -136,7 +137,7 @@ describe('OfflineMutationQueue', () => {
 
   it('multiple enqueue() calls preserve FIFO order in storage', async () => {
     const rpc = makeRpc('success');
-    const queue = createOfflineMutationQueue({ rpc, storageKey: 'q3', deadLetterStorageKey: 'dl3' });
+    const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc, storageKey: 'q3', deadLetterStorageKey: 'dl3' });
 
     await queue.enqueue(createPost, { title: 'First' });
     await queue.enqueue(createPost, { title: 'Second' });
@@ -157,7 +158,7 @@ describe('OfflineMutationQueue', () => {
 
   it('subscribe() listener receives the enqueued event with correct entry data', async () => {
     const rpc = makeRpc('success');
-    const queue = createOfflineMutationQueue({ rpc, storageKey: 'q4', deadLetterStorageKey: 'dl4' });
+    const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc, storageKey: 'q4', deadLetterStorageKey: 'dl4' });
 
     const events: Array<{ type: string }> = [];
     queue.subscribe((event) => events.push(event));
@@ -180,6 +181,7 @@ describe('OfflineMutationQueue', () => {
   it('status() reflects the dead-lettered count when mutations move to dead-letter', async () => {
     const rpc = makeRpc('fail-422');
     const queue = createOfflineMutationQueue({
+      actorId: () => ALICE,
       rpc,
       storageKey: 'q5',
       deadLetterStorageKey: 'dl5',
@@ -201,6 +203,7 @@ describe('OfflineMutationQueue', () => {
   it('deadLetter.list() returns mutations that failed permanently', async () => {
     const rpc = makeRpc('fail-422');
     const queue = createOfflineMutationQueue({
+      actorId: () => ALICE,
       rpc,
       storageKey: 'q6',
       deadLetterStorageKey: 'dl6',
@@ -220,6 +223,7 @@ describe('OfflineMutationQueue', () => {
   it('deadLetter.discard() removes an entry from the dead-letter store', async () => {
     const rpc = makeRpc('fail-422');
     const queue = createOfflineMutationQueue({
+      actorId: () => ALICE,
       rpc,
       storageKey: 'q7',
       deadLetterStorageKey: 'dl7',
@@ -251,6 +255,7 @@ describe('OfflineMutationQueue', () => {
     };
 
     const queue = createOfflineMutationQueue({
+      actorId: () => ALICE,
       rpc,
       storageKey: 'q8',
       deadLetterStorageKey: 'dl8',
@@ -278,9 +283,42 @@ describe('OfflineMutationQueue', () => {
     queue.dispose();
   });
 
+  // Security: a write is bound to the account that made it. Retrying it from
+  // the dead-letter list must not rebind it to whoever is signed in now.
+  it('binds each entry to the actor signed in at enqueue, and a retry keeps that binding', async () => {
+    let signedIn: string | null = ALICE;
+    const rpc = makeRpc('success');
+    const queue = createOfflineMutationQueue({
+      actorId: () => signedIn,
+      rpc,
+      storageKey: 'q-actor',
+      deadLetterStorageKey: 'dl-actor',
+    });
+
+    await queue.enqueue(createPost, { title: 'Alice wrote this' });
+    expect(store['q-actor']).toContain(ALICE);
+
+    signedIn = 'usr_bob';
+    await queue.drain();
+    expect(rpc.call).not.toHaveBeenCalled();
+    const [dead] = await queue.deadLetter.list();
+    expect(dead?.lastError?.code).toBe('ACTOR_MISMATCH');
+
+    Object.defineProperty(globalThis, 'navigator', { value: { onLine: true }, configurable: true });
+    await queue.deadLetter.retry(dead!.id);
+    expect(rpc.call).not.toHaveBeenCalled();
+
+    signedIn = ALICE;
+    const [again] = await queue.deadLetter.list();
+    await queue.deadLetter.retry(again!.id);
+    expect(rpc.call).toHaveBeenCalledOnce();
+
+    queue.dispose();
+  });
+
   it('dispose() removes event listeners and prevents future emissions', async () => {
     const rpc = makeRpc('success');
-    const queue = createOfflineMutationQueue({ rpc, storageKey: 'q9', deadLetterStorageKey: 'dl9' });
+    const queue = createOfflineMutationQueue({ actorId: () => ALICE, rpc, storageKey: 'q9', deadLetterStorageKey: 'dl9' });
 
     const events: string[] = [];
     queue.subscribe((e) => events.push(e.type));
@@ -305,6 +343,7 @@ describe('OfflineMutationQueue', () => {
     try {
       const rpc = makeRpc('success');
       const queue = createOfflineMutationQueue({
+        actorId: () => ALICE,
         rpc,
         storageKey: 'q-ssr',
         deadLetterStorageKey: 'dl-ssr',

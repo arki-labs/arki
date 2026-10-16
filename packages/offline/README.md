@@ -69,9 +69,24 @@ export const offline = createOfflineRuntime({
   tier: 'queue',
   appId: 'myapp',
   rpc: rpcClient,    // structural AnyRpcClient interface — see below
+  actorId: () => signedInUserId, // who is signed in now; `null` when nobody is
   devtools: true,    // OfflineDevPanel in development
 });
 ```
+
+#### Account switch: a queued write replays only under the account that made it
+
+The replay request carries the session signed in *at replay*, not the one that queued the write. So each queued entry stores `actorId()` from the moment it was queued. At the start of every drain pass the queue reads `actorId()` again and compares:
+
+| Signed in at replay | What happens to the entry |
+| --- | --- |
+| The same actor | Sent. |
+| Nobody (`null`) | Not sent. It stays queued, the pass stops, and the queue emits `'auth-required'`. Call `queue.drain()` after sign-in to resume. |
+| A different actor | Not sent. It moves to the dead-letter list with `lastError.code === 'ACTOR_MISMATCH'` and fires `'dead-letter'` / `onDeadLetter`. |
+
+`deadLetter.retry(id)` keeps the original `actorId`, so a retry sends the write only once its own actor is signed in again. Nothing ever rebinds a write to the current account. An entry queued while signed out (`actorId: null`) is sent only while nobody is signed in.
+
+`actorId` must answer synchronously from local state (it runs offline). Feed it from your session store, and call `queue.drain()` when the user signs in.
 
 ```tsx
 // src/root-provider.tsx
@@ -255,6 +270,7 @@ Check the dead-letter list: `queue.deadLetter.list()`. Dead-lettered mutations a
 
 - **4xx errors**: the mutation data is invalid server-side — discard and fix the input.
 - **401 errors**: the queue halts and emits `'auth-required'` — user must re-authenticate.
+- **`ACTOR_MISMATCH`**: the write was queued under another account. Retry it after that account signs back in, or discard it.
 - **5xx errors**: exponential backoff (max 30s) applies — the queue will keep retrying.
 
 Use `OfflineDevPanel` in development to inspect dead-letter entries in real time.

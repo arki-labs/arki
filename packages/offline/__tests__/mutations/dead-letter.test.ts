@@ -31,6 +31,7 @@ function makeMutation(id: string): QueuedMutation {
     idempotencyKey: id,
     procedurePath: ['todos', 'create'],
     input: { title: `Task ${id}` },
+    actorId: 'usr_alice',
     enqueuedAt: Date.now(),
     attempts: 5,
   };

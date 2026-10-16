@@ -31,6 +31,7 @@ function makeMutation(overrides?: Partial<QueuedMutation>): QueuedMutation {
     idempotencyKey: 'test-id-1',
     procedurePath: ['todos', 'create'],
     input: { title: 'Buy milk' },
+    actorId: 'usr_alice',
     enqueuedAt: 1_700_000_000_000,
     attempts: 0,
     ...overrides,

@@ -27,6 +27,8 @@ export type QueueConfig = {
   tier: 'queue';
   appId: string;
   rpc: AnyRpcClient;
+  /** Who is signed in now (`null`: nobody). Queued writes replay only under the actor that queued them. */
+  actorId: () => string | null;
   buster?: string;
   devtools?: boolean;
   /** Forwarded to the underlying QueryClient — wire SuperJSON / staleTime / dehydration filters here. */
@@ -75,6 +77,7 @@ export type OfflineRuntime = {
  *   tier: 'queue',
  *   appId: 'avocabo',
  *   rpc: rpcClient,
+ *   actorId: () => signedInUserId, // your session state; `null` when signed out
  *   devtools: true,
  * });
  * ```
@@ -104,6 +107,7 @@ export function createOfflineRuntime(config: OfflineRuntimeConfig): OfflineRunti
       storageKey: `arki-offline-mutations:${appId}`,
       deadLetterStorageKey: `arki-offline-mutations-dead:${appId}`,
       rpc: config.rpc,
+      actorId: config.actorId,
     });
   }
 

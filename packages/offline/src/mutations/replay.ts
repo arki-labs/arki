@@ -4,6 +4,10 @@
  * Listens to navigator.onLine events and replays queued mutations
  * in FIFO order with idempotency keys. Handles 401 (auth halt),
  * 4xx (dead-letter), and 5xx / network errors (backoff + retry).
+ *
+ * Each entry is sent only while the actor it was queued under is signed in.
+ * Nobody signed in: the pass stops and emits `auth-required`, entries stay.
+ * Another actor signed in: the entry is dead-lettered unsent (`ACTOR_MISMATCH`).
  */
 import { sleep } from '@arki/async';
 
@@ -19,6 +23,8 @@ export interface ReplayLoopOptions {
   storage: QueueStorage;
   dlStore: DeadLetterStore;
   rpc: AnyRpcClient;
+  /** Who is signed in now (`null`: nobody). Read once per drain pass. */
+  actorId: () => string | null;
   maxRetries: number;
   backoff: (attempt: number) => number;
   onDeadLetter?: (entry: QueuedMutation, error: Error) => void;
@@ -49,7 +55,7 @@ function getHttpStatus(error: unknown): number | null {
 // ---------------------------------------------------------------------------
 
 export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
-  const { storage, dlStore, rpc, maxRetries, backoff, onDeadLetter, onStateChange, emit } =
+  const { storage, dlStore, rpc, actorId, maxRetries, backoff, onDeadLetter, onStateChange, emit } =
     options;
 
   let draining = false;
@@ -88,6 +94,15 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
     }
   }
 
+  /** Remove an entry from the queue and park it in the dead-letter store. */
+  async function deadLetter(entry: QueuedMutation, error: Error): Promise<void> {
+    const after = await storage.read();
+    await storage.write(after.filter((m) => m.id !== entry.id));
+    await dlStore.add(entry, error);
+    emit({ type: 'dead-letter', entry, error });
+    onDeadLetter?.(entry, error);
+  }
+
   /**
    * Send one entry with retries and backoff.
    * Returns true if the entry was processed (sent or dead-lettered),
@@ -113,12 +128,7 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
       }
 
       if (result === 'dead-letter') {
-        const err = new Error('Request failed with 4xx status');
-        const after = await storage.read();
-        await storage.write(after.filter((m) => m.id !== entry.id));
-        await dlStore.add(current, err);
-        emit({ type: 'dead-letter', entry: current, error: err });
-        onDeadLetter?.(current, err);
+        await deadLetter(current, new Error('Request failed with 4xx status'));
         return true;
       }
 
@@ -133,11 +143,7 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
           attempts: nextAttempts,
           lastError: { code: 'MAX_RETRIES', message: finalError.message },
         };
-        const after = await storage.read();
-        await storage.write(after.filter((m) => m.id !== entry.id));
-        await dlStore.add(updated, finalError);
-        emit({ type: 'dead-letter', entry: updated, error: finalError });
-        onDeadLetter?.(updated, finalError);
+        await deadLetter(updated, finalError);
         return true;
       }
 
@@ -164,6 +170,7 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
       // Re-read the head of the queue before each entry so late-enqueuers
       // are included in the same drain pass.
       let entries = await storage.read();
+      const signedIn = actorId();
 
       for (const snapshot of entries) {
         if (halted) break;
@@ -172,6 +179,19 @@ export function createReplayLoop(options: ReplayLoopOptions): ReplayLoop {
         const current = await storage.read();
         const live = current.find((m) => m.id === snapshot.id);
         if (!live) continue;
+
+        // The request carries the session signed in now, not the one that
+        // queued the write. Never send it under a different actor.
+        if (live.actorId !== signedIn) {
+          if (signedIn === null) {
+            // Signed out: wait for a sign-in; `drain()` after it resumes.
+            emit({ type: 'auth-required' });
+            break;
+          }
+          const message = 'Queued under another account; not sent under the account signed in now';
+          await deadLetter({ ...live, lastError: { code: 'ACTOR_MISMATCH', message } }, new Error(message));
+          continue;
+        }
 
         const shouldContinue = await processEntry(live);
         if (!shouldContinue) break;

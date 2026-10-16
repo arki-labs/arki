@@ -6,7 +6,7 @@
  *
  * @example
  * ```tsx
- * const queue = createOfflineMutationQueue({ rpc: myRpcClient });
+ * const queue = createOfflineMutationQueue({ rpc: myRpcClient, actorId: () => signedInUserId });
  *
  * function App() {
  *   return (

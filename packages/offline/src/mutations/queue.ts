@@ -28,10 +28,22 @@ export interface QueuedMutation {
   idempotencyKey: string;
   procedurePath: readonly string[];
   input: unknown;
+  /**
+   * Who was signed in when the call was queued (`actorId()` at enqueue), or
+   * `null` when nobody was. Replay sends the call only while this same actor
+   * is signed in, so a queued write never runs under another account.
+   */
+  actorId: string | null;
   enqueuedAt: number;
   attempts: number;
-  lastError?: { code: string; message: string };
+  lastError?: { code: QueueErrorCode; message: string };
 }
+
+/**
+ * Why a mutation last failed. `ACTOR_MISMATCH`: another account was signed in
+ * at replay, so the call was dead-lettered unsent.
+ */
+export type QueueErrorCode = 'RETRY' | 'MAX_RETRIES' | 'ACTOR_MISMATCH';
 
 export type QueueEvent =
   | { type: 'enqueued'; entry: QueuedMutation }
@@ -57,6 +69,12 @@ export interface OfflineMutationQueueOptions {
   storageKey?: string;
   deadLetterStorageKey?: string;
   rpc: AnyRpcClient;
+  /**
+   * The id of whoever is signed in right now, or `null` when nobody is. Read
+   * at enqueue (the entry is bound to it) and at the start of every drain
+   * pass. It must answer synchronously from local state: it runs offline.
+   */
+  actorId: () => string | null;
   maxRetries?: number;
   backoff?: (attempt: number) => number;
   onDeadLetter?: (entry: QueuedMutation, error: Error) => void;
@@ -114,6 +132,7 @@ export function createOfflineMutationQueue(
     storageKey = 'arki-offline-mutations',
     deadLetterStorageKey = 'arki-offline-mutations-dead',
     rpc,
+    actorId,
     maxRetries = 5,
     backoff = (attempt: number) => Math.min(30_000, 1_000 * 2 ** attempt),
     onDeadLetter,
@@ -169,6 +188,7 @@ export function createOfflineMutationQueue(
     storage,
     dlStore,
     rpc,
+    actorId,
     maxRetries,
     backoff,
     onDeadLetter,
@@ -200,6 +220,7 @@ export function createOfflineMutationQueue(
       idempotencyKey: id,
       procedurePath: op.path,
       input,
+      actorId: actorId(),
       enqueuedAt: Date.now(),
       attempts: 0,
     };
@@ -250,7 +271,8 @@ export function createOfflineMutationQueue(
       const mutation = items.find((m) => m.id === id);
       if (!mutation) return;
 
-      // Reset attempts, re-enqueue, remove from dead-letter
+      // Reset attempts, re-enqueue, remove from dead-letter. The entry keeps
+      // its actorId: a retry never rebinds a write to whoever is signed in now.
       const reset: QueuedMutation = { ...mutation, attempts: 0, lastError: undefined };
       const current = await storage.read();
       await storage.write([...current, reset]);

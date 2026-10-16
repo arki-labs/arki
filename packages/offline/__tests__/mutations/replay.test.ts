@@ -27,12 +27,15 @@ const { createReplayLoop } = await import('../../src/mutations/replay.ts');
 // Test fixtures
 // ---------------------------------------------------------------------------
 
+const ALICE = 'usr_alice';
+
 function makeEntry(id: string, attempts = 0): QueuedMutation {
   return {
     id,
     idempotencyKey: id,
     procedurePath: ['todos', 'create'],
     input: { title: `Task ${id}` },
+    actorId: ALICE,
     enqueuedAt: Date.now(),
     attempts,
   };
@@ -138,6 +141,7 @@ describe('ReplayLoop', () => {
     const events: QueueEvent[] = [];
 
     const loop = createReplayLoop({
+      actorId: () => ALICE,
       storage,
       dlStore,
       rpc,
@@ -181,6 +185,7 @@ describe('ReplayLoop', () => {
     const events: QueueEvent[] = [];
 
     const loop = createReplayLoop({
+      actorId: () => ALICE,
       storage,
       dlStore,
       rpc,
@@ -211,6 +216,7 @@ describe('ReplayLoop', () => {
     const events: QueueEvent[] = [];
 
     const loop = createReplayLoop({
+      actorId: () => ALICE,
       storage,
       dlStore,
       rpc,
@@ -245,6 +251,7 @@ describe('ReplayLoop', () => {
     const maxRetries = 3;
 
     const loop = createReplayLoop({
+      actorId: () => ALICE,
       storage,
       dlStore,
       rpc,
@@ -286,6 +293,7 @@ describe('ReplayLoop', () => {
     const maxRetries = 2;
 
     const loop = createReplayLoop({
+      actorId: () => ALICE,
       storage,
       dlStore,
       rpc,
@@ -314,6 +322,7 @@ describe('ReplayLoop', () => {
     const onDeadLetter = vi.fn();
 
     const loop = createReplayLoop({
+      actorId: () => ALICE,
       storage,
       dlStore,
       rpc,
@@ -338,6 +347,7 @@ describe('ReplayLoop', () => {
     const stateChanges: boolean[] = [];
 
     const loop = createReplayLoop({
+      actorId: () => ALICE,
       storage,
       dlStore,
       rpc,
@@ -359,6 +369,7 @@ describe('ReplayLoop', () => {
     const rpc = makeRpc('success');
 
     const loop = createReplayLoop({
+      actorId: () => ALICE,
       storage,
       dlStore,
       rpc,
@@ -371,5 +382,79 @@ describe('ReplayLoop', () => {
     await loop.drainNow();
 
     expect(rpc.calls).toHaveLength(0);
+  });
+
+  // Security: the request carries the session signed in at replay, not the one
+  // that queued the write. Without the actor check, Alice's offline write
+  // would be created in Bob's account when Bob signs in on the same browser.
+  describe('account switch', () => {
+    function loopFor(signedIn: () => string | null, entries: QueuedMutation[]) {
+      const storage = makeStorage(entries);
+      const dlStore = makeDeadLetterStore();
+      const rpc = makeRpc('success');
+      const events: QueueEvent[] = [];
+      const onDeadLetter = vi.fn();
+      const loop = createReplayLoop({
+        actorId: signedIn,
+        storage,
+        dlStore,
+        rpc,
+        maxRetries: 3,
+        backoff: () => 0,
+        onDeadLetter,
+        onStateChange: vi.fn(),
+        emit: (e) => events.push(e),
+      });
+      return { loop, storage, dlStore, rpc, events, onDeadLetter };
+    }
+
+    it("never sends Alice's queued write while Bob is signed in; dead-letters it as ACTOR_MISMATCH", async () => {
+      const { loop, storage, dlStore, rpc, events, onDeadLetter } = loopFor(() => 'usr_bob', [makeEntry('id-1')]);
+
+      await loop.drainNow();
+
+      expect(rpc.calls).toHaveLength(0);
+      expect(await storage.read()).toHaveLength(0);
+      expect(dlStore._entries).toHaveLength(1);
+      expect(dlStore._entries[0]?.lastError?.code).toBe('ACTOR_MISMATCH');
+      expect(dlStore._entries[0]?.actorId).toBe(ALICE);
+      expect(events.some((e) => e.type === 'dead-letter')).toBe(true);
+      expect(onDeadLetter).toHaveBeenCalledOnce();
+    });
+
+    it('keeps the write queued and asks for sign-in when nobody is signed in', async () => {
+      const { loop, storage, dlStore, rpc, events } = loopFor(() => null, [makeEntry('id-1')]);
+
+      await loop.drainNow();
+
+      expect(rpc.calls).toHaveLength(0);
+      expect(await storage.read()).toHaveLength(1);
+      expect(dlStore._entries).toHaveLength(0);
+      expect(events.map((e) => e.type)).toEqual(['auth-required']);
+    });
+
+    it('sends the write once Alice signs back in, with no online event needed', async () => {
+      let signedIn: string | null = null;
+      const { loop, storage, rpc } = loopFor(() => signedIn, [makeEntry('id-1')]);
+
+      await loop.drainNow();
+      expect(rpc.calls).toHaveLength(0);
+
+      signedIn = ALICE;
+      await loop.drainNow();
+
+      expect(rpc.calls).toHaveLength(1);
+      expect(await storage.read()).toHaveLength(0);
+    });
+
+    it("sends Bob's own writes and dead-letters only Alice's in a mixed queue", async () => {
+      const bobs: QueuedMutation = { ...makeEntry('id-2'), actorId: 'usr_bob' };
+      const { loop, dlStore, rpc } = loopFor(() => 'usr_bob', [makeEntry('id-1'), bobs]);
+
+      await loop.drainNow();
+
+      expect(rpc.calls.map((c) => c.headers['Idempotency-Key'])).toEqual(['id-2']);
+      expect(dlStore._entries.map((m) => m.id)).toEqual(['id-1']);
+    });
   });
 });

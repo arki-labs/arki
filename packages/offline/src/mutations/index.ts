@@ -8,6 +8,7 @@
 // Core types and factory
 export type {
   QueuedMutation,
+  QueueErrorCode,
   QueueEvent,
   AnyRpcClient,
   OfflineSafeOperation,
