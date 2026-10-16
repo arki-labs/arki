@@ -7,6 +7,8 @@
 import type { z } from 'zod';
 import { and, eq, sql } from 'drizzle-orm';
 
+import { isUniqueViolation } from '@arki/db/errors';
+
 import type { NextEvents, WriteInput, WriteResult } from './api.js';
 import type { History } from './history.js';
 import type { JournalTables } from './pg.js';
@@ -40,7 +42,6 @@ import {
 } from './storage.js';
 import { oneAtATime } from './transaction-guard.js';
 
-const PG_UNIQUE_VIOLATION = '23505';
 /**
  * The append lock: `pg_advisory_xact_lock(namespace, key)`, taken at the start of
  * every write and held until the transaction commits. `seq` is a bigserial, assigned
@@ -51,18 +52,6 @@ const PG_UNIQUE_VIOLATION = '23505';
  */
 const APPEND_LOCK_NAMESPACE = 1_247_301_196;
 const APPEND_LOCK_KEY = 1;
-
-function isUniqueViolation(error: unknown): boolean {
-  let current: unknown = error;
-  for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth += 1) {
-    if ('code' in current && current.code === PG_UNIQUE_VIOLATION) return true;
-    if ('message' in current && typeof current.message === 'string' && /duplicate key value/i.test(current.message)) {
-      return true;
-    }
-    current = 'cause' in current ? current.cause : undefined;
-  }
-  return false;
-}
 
 /**
  * When a job is due, from the effect's schedule. A delay counts from the transaction's

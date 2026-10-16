@@ -131,6 +131,22 @@ describe('runTransaction: what is retried', () => {
     expect(retries[0]?.fields).toMatchObject({ attempt: 2, sqlState: '40001' });
   });
 
+  it('a Bun SQL 40001 is retried: Bun puts the SQLSTATE in errno, and its own name in code', async () => {
+    const clock = new MockClock();
+    const bunError = Object.assign(new Error('could not serialize access'), {
+      code: 'ERR_POSTGRES_SERVER_ERROR',
+      errno: '40001',
+    });
+    const { db, configs } = scriptedDb([new DrizzleQueryError('update accounts', [], bunError)]);
+    expect(
+      await settle(
+        clock,
+        runTransaction(db, () => Promise.resolve('ok'), { clock }),
+      ),
+    ).toBe('ok');
+    expect(configs).toHaveLength(2);
+  });
+
   it('a Drizzle query error wrapping a 40P01 deadlock is retried: the driver error inside decides', async () => {
     const clock = new MockClock();
     const wrapped = new DrizzleQueryError('update accounts', [], sqlError('40P01'));

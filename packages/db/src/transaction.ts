@@ -22,6 +22,7 @@ import { getLogger } from '@arki/log';
 import { backoff, createRetryPolicy } from '@arki/resilience';
 
 import type { TransactionalDb } from './composition.js';
+import { findDatabaseError } from './sql-state.js';
 
 export type { TransactionalDb } from './composition.js';
 
@@ -29,9 +30,6 @@ const log = getLogger('arki:db:transaction');
 
 /** The SQLSTATEs PostgreSQL tells you to retry: serialization failure and deadlock. */
 export type RetryableSqlState = '40001' | '40P01';
-
-/** How far `retryableSqlState` follows `cause`. Same bound as the journal's unique-violation check. */
-const MAX_CAUSE_DEPTH = 5;
 
 /** The wait before retry n is about 10 ms × 2^(n-1), varied ±25%, never above 250 ms. */
 const RETRY_BACKOFF = backoff.exponential({ base: 10, max: 250, jitter: 0.25 });
@@ -102,28 +100,15 @@ export function isDbTransactionError(error: unknown, code?: DbTransactionErrorCo
 /**
  * The retryable SQLSTATE of `error`, or `undefined`.
  *
- * Walks `error`, then its `cause`, and stops at the FIRST object with a string
- * `code`: that code decides. So a Drizzle `DrizzleQueryError` (no code) defers
- * to the driver error inside it, while an `ORPCError('NOT_FOUND')` or an
- * `ECONNRESET` is final even when an older `40001` sits deeper. Messages are
- * never matched. A cycle, a deep chain, a throwing getter or an `AggregateError`
- * gives `undefined`: when unsure, do not retry.
+ * Reads the database error the way every driver reports it: through Drizzle's
+ * `DrizzleQueryError`, in `code` (node-postgres, PGlite) or in `errno` (Bun SQL).
+ * The first error in the `cause` chain that has a `code` decides, so an
+ * `ORPCError('NOT_FOUND')` or an `ECONNRESET` is final even when an older `40001`
+ * sits deeper. When unsure, do not retry.
  */
 export function retryableSqlState(error: unknown): RetryableSqlState | undefined {
-  const seen = new Set<object>();
-  let node: unknown = error;
-  try {
-    for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth += 1) {
-      if (typeof node !== 'object' || node === null || seen.has(node) || node instanceof AggregateError) return;
-      seen.add(node);
-      const code: unknown = 'code' in node ? node.code : undefined;
-      if (typeof code === 'string') return code === '40001' || code === '40P01' ? code : undefined;
-      node = 'cause' in node ? node.cause : undefined;
-    }
-  } catch {
-    // A getter threw while we looked. Not a database answer we can trust.
-  }
-  return;
+  const sqlState = findDatabaseError(error)?.sqlState;
+  return sqlState === '40001' || sqlState === '40P01' ? sqlState : undefined;
 }
 
 /** Parse `{ isolation, retries }`. Bad values throw `ARKI_DB_TX_E002`; nothing is clamped. */
