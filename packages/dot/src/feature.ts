@@ -96,6 +96,7 @@ export type {
   ScopedHandles,
   UnitsOf,
   UsecaseFactories,
+  UsecaseFactoriesOf,
   UsecaseGuard,
   UsecaseNeeds,
   Usecases,

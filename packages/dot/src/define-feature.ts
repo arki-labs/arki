@@ -669,6 +669,13 @@ type EntrypointGuard<P, E extends readonly AnyEntrypoint[]> = [EntrypointCollisi
 /** What `.usecases()` takes: one factory per usecase, `(deps) => usecase`. */
 export type UsecaseFactories = Readonly<Record<string, (deps: never) => unknown>>;
 
+/**
+ * The same, with the feature's deps `D` as the parameter: an inline factory
+ * `({ store }) => …` is contextually typed with `D`, so it needs no annotation.
+ * An annotated `Pick<D, 'store'>` still fits (parameter contravariance).
+ */
+export type UsecaseFactoriesOf<D> = Readonly<Record<string, (deps: D) => unknown>>;
+
 /** The usecases object: each factory's return under its key. */
 export type Usecases<F extends UsecaseFactories> = { readonly [K in keyof F]: ReturnType<F[K]> };
 
@@ -737,10 +744,20 @@ export type UsecasesStage<
   readonly [CoreServicesTag]?: CoreDeps<N, I, C>;
   /**
    * One factory per usecase, built once per boot: `{ signup, markInvited }`,
-   * each `(deps) => usecase`. A factory may ask for any subset of the deps
-   * (`Pick<Deps, 'repos'>`); asking for one the feature lacks is a compile
+   * each `(deps) => usecase`. An inline factory gets the deps type for free
+   * (`({ repos }) => …`); an annotated one may ask for any subset
+   * (`Pick<Deps, 'repos'>`). Asking for a dep the feature lacks is a compile
    * error naming the usecase.
+   *
+   * Two overloads, on purpose. The first infers inline factories, but a
+   * factory that asks for a missing dep fails its constraint with a plain
+   * `Property 'mailer' is missing` and never reaches the guard. TypeScript then
+   * tries the second, today's signature, whose guard prints the `DOT:` label —
+   * and prints the LAST overload's failure under "No overload matches this call".
    */
+  usecases<const F extends UsecaseFactoriesOf<CoreDeps<N, I, C>>>(
+    factories: F & UsecaseGuard<CoreDeps<N, I, C>, F>,
+  ): ProvidesStage<TName, N, I, C, Usecases<F>>;
   usecases<const F extends UsecaseFactories>(
     factories: F & UsecaseGuard<CoreDeps<N, I, C>, F>,
   ): ProvidesStage<TName, N, I, C, Usecases<F>>;

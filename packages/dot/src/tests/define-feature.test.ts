@@ -9,7 +9,15 @@
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { AnyFeatureCore, DepsOf, Entrypoint, Provided, RpcEntrypoint, ServicesBag } from '../feature.js';
+import type {
+  AnyFeatureCore,
+  DepsOf,
+  Entrypoint,
+  Provided,
+  RpcEntrypoint,
+  ServicesBag,
+  UsecaseGuard,
+} from '../feature.js';
 import { renderExplain } from '../cli/render-explain.js';
 import {
   defineFeature,
@@ -231,6 +239,26 @@ describe('the chain: each step typed from the earlier ones', () => {
     expect(empty.plugins().map(p => p.name)).toEqual(['x/store', 'x']);
   });
 
+  it('infers inline usecase deps: `({ stats }) => …` gets the feature deps with no annotation', () => {
+    const lean = defineFeature('x')
+      .needs({ db: database.provides.db, plans: billing.provides.entitlements })
+      .infra(store);
+    const logic = lean.usecases({
+      count:
+        ({ stats }) =>
+        () =>
+          stats.count(),
+      planOf:
+        ({ plans, store: digests }) =>
+        async (userId: string) => ({ plan: await plans.planOf(userId), pending: await digests.pendingFor(userId) }),
+    });
+    expectTypeOf<Provided<typeof logic.handles.usecases>>().toEqualTypeOf<{
+      readonly count: () => Promise<number>;
+      readonly planOf: (userId: string) => Promise<{ plan: string; pending: Digest | null }>;
+    }>();
+    expect(logic.name).toBe('x');
+  });
+
   it('rejects usecases that ask for what neither needs nor infra provide', () => {
     const lean = defineFeature('x').needs({ db: database.provides.db, plans: billing.provides.entitlements }).infra(store);
     const unused = () => {
@@ -247,8 +275,10 @@ describe('the chain: each step typed from the earlier ones', () => {
 
   it('names the usecase and the missing dep in the error', () => {
     const lean = defineFeature('x').needs({ db: database.provides.db }).infra(store);
-    type Arg = Parameters<typeof lean.usecases<{ sendDue: typeof sendDue }>>[0];
-    expectTypeOf<Arg['DOT: a usecase asks for a dep the feature does not provide']>().toEqualTypeOf<{
+    // An instantiation expression (`typeof lean.usecases<F>`) checks F against EVERY overload, so the label is
+    // read off the guard the fallback overload carries; the call itself is the `@ts-expect-error` above.
+    type Guard = UsecaseGuard<DepsOf<typeof lean>, { sendDue: typeof sendDue }>;
+    expectTypeOf<Guard['DOT: a usecase asks for a dep the feature does not provide']>().toEqualTypeOf<{
       readonly sendDue: 'mailer';
     }>();
     expect(lean.name).toBe('x');

@@ -244,6 +244,26 @@ still none, nothing to sync. Record the grep in the commit message.
 **Verify**: `turbo test --filter=@arki/dot -- define-feature`; `turbo typecheck --filter=@avocabo/backend` (all
 avocabo usecases are annotated; they must keep compiling).
 
+### Phase 2 result (2026-10-16) — DONE
+
+- Probe (`di-probes/dot/06b-usecases-two-overloads.ts`, a model of the two overloads): (a) inline `({ now }) => …`
+  and `({ repos }) => …` infer through overload 1 with no annotation; a `Pick<Deps, 'repos'>` annotation and a
+  defaulted inner parameter still fit. (b) The over-asking call fails with `No overload matches this call. The last
+  overload gave the following error … Property ''DOT: a usecase asks for a dep the feature does not provide'' is
+  missing … { readonly asksTooMuch: "mailer" }` — the label shows. (c) Scale generator at N=50 on the real
+  `define-feature.ts`: 749,782 → 751,096 instantiations (+0.18%, budget 5%); check time 0.33 s → 0.31 s.
+- Shipped: `UsecaseFactoriesOf<D>` (exported from `@arki/dot/feature`), `.usecases()` as two overloads (inferring
+  first, today's labelled signature as the fallback), a doc comment saying why two. Test "infers inline usecase deps"
+  added. The test "names the usecase and the missing dep in the error" now reads the label off
+  `UsecaseGuard<DepsOf<typeof lean>, F>`: an instantiation expression (`typeof lean.usecases<F>`) applies `F` to
+  EVERY overload and reports overload 1's failed constraint, so it cannot select the fallback.
+- Evidence (isolated HEAD + these three files, the working tree carries another session's prettier sweep and the
+  `ARKI_DOT_E` rename): `@arki/dot` tsc 0, `define-feature` 84/84, prettier clean on the new lines.
+  `turbo typecheck --filter='...@arki/dot' --continue` over 106 packages: 0 errors mention `usecases`,
+  `define-feature` or a `DOT:` label; every failure is `@arki/mail` API churn from the other session (cascading
+  through `@arki/auth` into most backends and their `start` builds) or the pre-existing lib-target errors Phase 0
+  recorded (`toSorted`, `URL.canParse`, `AbortSignal.reason`).
+
 ---
 
 ## Phase 3 — Fix #7: duplicate infra keys (independent)
