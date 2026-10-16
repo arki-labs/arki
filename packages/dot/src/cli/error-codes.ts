@@ -2,14 +2,14 @@
  * Stable error codes used by the DOT CLI.
  *
  * Every code starts with `DOT_CLI_E` so it can be visually distinguished from
- * lifecycle errors (`DOT_LIFECYCLE_E*`). Codes are part of the public contract
+ * lifecycle errors (`ARKI_DOT_E*`). Codes are part of the public contract
  * — agents grep on them to branch behaviour. Do not renumber.
  */
 
 export const DotCliErrorCode = {
   /** No app file could be discovered at the cwd and `--app` was not provided. */
   AppNotFound: 'DOT_CLI_E001',
-  /** App file was located but its default export is not a DotApp/DotAppBuilder. */
+  /** App file was located but no default/`app` export is a DotApp/DotAppBuilder, or several are and none is named. */
   AppInvalidExport: 'DOT_CLI_E002',
   /** Importing the app file threw an exception. */
   AppImportFailed: 'DOT_CLI_E003',

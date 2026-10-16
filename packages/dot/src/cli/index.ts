@@ -9,7 +9,8 @@
  *
  * Common options:
  *   --json       Emit JSON envelope instead of human-readable text
- *   --app <p>    Path to the app file (overrides auto-discovery)
+ *   --app <p>    Path to the app file (overrides auto-discovery); the app is its
+ *                `default` export, else `app`, else its only DOT app export
  *   --cwd <p>    Working directory (default: process.cwd())
  *   --help       Show help
  *   --version    Print version
@@ -21,20 +22,20 @@ import { parseArgs as nodeParseArgs } from 'node:util';
 
 import { getLogger } from '@arki/log';
 
-import type { DotApp, DotAppBuilder, DotAppConfigured } from '../define-app.js';
+import type { DotApp, DotAppConfigured } from '../define-app.js';
 import type { DiagnosticIssue } from '../diagnostics.js';
 import type { DiscoveredApp, DiscoveryResult } from './discover.js';
 import type { DotCliEnvelope, DotCliEnvelopeStatus } from './render-explain.js';
 import { DotLifecycleError } from '../lifecycle.js';
 import { discoverApp, guards } from './discover.js';
-import { dotCliDocsUrl, DotCliError, DotCliErrorCode } from './error-codes.js';
+import {  DotCliError, DotCliErrorCode } from './error-codes.js';
 import { runNew } from './new.js';
-import { readDotVersion } from './versions.js';
 import { probeObservability } from './observability-probe.js';
 import { renderDoctor } from './render-doctor.js';
 import { renderExplain } from './render-explain.js';
 import { renderGraph } from './render-graph.js';
 import { renderProjection } from './render-projection.js';
+import { readDotVersion } from './versions.js';
 
 const debugCli = getLogger('arki:dot:cli');
 
@@ -184,12 +185,12 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         openapi: { type: 'boolean', default: false },
       },
     });
-  } catch (err) {
+  } catch (error) {
     throw new DotCliError({
       code: DotCliErrorCode.InvalidArgs,
-      message: `Invalid CLI arguments: ${err instanceof Error ? err.message : String(err)}`,
+      message: `Invalid CLI arguments: ${error instanceof Error ? error.message : String(error)}`,
       remediation: 'Run `dot --help` to see supported options.',
-      cause: err,
+      cause: error,
     });
   }
 
@@ -298,12 +299,12 @@ export async function runExplain(
   try {
     if (guards.isDotAppBuilder(discovered)) {
       // explain never boots — just configure.
-      configured = (discovered as DotAppBuilder<Record<string, unknown>>).configure();
+      configured = (discovered).configure();
     } else {
-      configured = discovered as DotApp<Record<string, unknown>> | DotAppConfigured<Record<string, unknown>>;
+      configured = discovered;
     }
-  } catch (err) {
-    throw wrapLifecycleError(err, 'configure');
+  } catch (error) {
+    throw wrapLifecycleError(error, 'configure');
   }
 
   if (opts.as !== undefined) {
@@ -354,7 +355,7 @@ type DoctorRunOptions = {
 export async function runDoctor(discovered: DiscoveredApp, opts: DoctorRunOptions): Promise<DotCliEnvelope<unknown>> {
   // Already-booted app: just read diagnostics, don't touch lifecycle.
   if (!guards.isDotAppBuilder(discovered) && !guards.isDotAppConfigured(discovered)) {
-    const app = discovered as DotApp<Record<string, unknown>>;
+    const app = discovered;
     if (opts.graph === true) {
       return renderGraph(
         { manifest: app.manifest, command: 'doctor' },
@@ -371,23 +372,23 @@ export async function runDoctor(discovered: DiscoveredApp, opts: DoctorRunOption
   let configured: DotAppConfigured<Record<string, unknown>>;
   try {
     configured = guards.isDotAppBuilder(discovered)
-      ? (discovered as DotAppBuilder<Record<string, unknown>>).configure()
-      : (discovered as DotAppConfigured<Record<string, unknown>>);
-  } catch (err) {
-    throw wrapLifecycleError(err, 'configure');
+      ? (discovered).configure()
+      : (discovered);
+  } catch (error) {
+    throw wrapLifecycleError(error, 'configure');
   }
 
   let bootedApp: DotApp<Record<string, unknown>> | null = null;
   let bootThrew = false;
   try {
     bootedApp = await configured.boot();
-  } catch (err) {
+  } catch (error) {
     // Boot failed — surface diagnostics from the configured seam below.
     // We deliberately swallow the throw so the user sees the per-plugin
     // issues instead of an opaque wrapper error.
     bootThrew = true;
     debugCli.debug('boot threw, falling back to configured diagnostics', {
-      error: err instanceof Error ? err : String(err),
+      error: error instanceof Error ? error : String(error),
     });
   }
 
@@ -416,8 +417,8 @@ export async function runDoctor(discovered: DiscoveredApp, opts: DoctorRunOption
     if (bootedApp) {
       try {
         await bootedApp.dispose();
-      } catch (err) {
-        debugCli.debug('dispose threw', { error: err instanceof Error ? err : String(err) });
+      } catch (error) {
+        debugCli.debug('dispose threw', { error: error instanceof Error ? error : String(error) });
       }
     }
   }
@@ -498,13 +499,13 @@ export async function main(options: MainOptions): Promise<number> {
   let args: CliArgs;
   try {
     args = parseArgs(options.argv);
-  } catch (err) {
-    if (err instanceof DotCliError) {
-      const envelope = errorEnvelope(err, 'unknown', nowFactory);
+  } catch (error) {
+    if (error instanceof DotCliError) {
+      const envelope = errorEnvelope(error, 'unknown', nowFactory);
       stderr(`${JSON.stringify(envelope, null, 2)}\n`);
       return 1;
     }
-    throw err;
+    throw error;
   }
 
   if (args.command === 'help') {
@@ -543,14 +544,14 @@ export async function main(options: MainOptions): Promise<number> {
         now: nowFactory,
       });
       return envelope.status === 'failure' ? 1 : 0;
-    } catch (err) {
-      if (err instanceof DotCliError) {
-        const envelope = errorEnvelope(err, 'new', nowFactory);
+    } catch (error) {
+      if (error instanceof DotCliError) {
+        const envelope = errorEnvelope(error, 'new', nowFactory);
         if (args.json) stdout(`${JSON.stringify(envelope, null, 2)}\n`);
-        else stderr(formatErrorText(err));
+        else stderr(formatErrorText(error));
         return 1;
       }
-      throw err;
+      throw error;
     }
   }
 
@@ -575,13 +576,13 @@ export async function main(options: MainOptions): Promise<number> {
     }
 
     return envelopeExitCode(envelope.status);
-  } catch (err) {
-    if (err instanceof DotCliError) {
-      const envelope = errorEnvelope(err, args.command, nowFactory);
+  } catch (error) {
+    if (error instanceof DotCliError) {
+      const envelope = errorEnvelope(error, args.command, nowFactory);
       if (args.json) {
         stdout(`${JSON.stringify(envelope, null, 2)}\n`);
       } else {
-        stderr(formatErrorText(err));
+        stderr(formatErrorText(error));
       }
       return 1;
     }
@@ -590,9 +591,9 @@ export async function main(options: MainOptions): Promise<number> {
     // it as a structured envelope rather than dumping a stack trace.
     const fallback = new DotCliError({
       code: DotCliErrorCode.AppLifecycleFailed,
-      message: err instanceof Error ? err.message : String(err),
+      message: error instanceof Error ? error.message : String(error),
       remediation: 'See debug logs (DEBUG=arki:dot:cli) for context. Re-run with --json for machine-readable output.',
-      cause: err,
+      cause: error,
     });
     const envelope = errorEnvelope(fallback, args.command, nowFactory);
     if (args.json) {
@@ -617,7 +618,7 @@ function formatErrorText(err: DotCliError): string {
 /**
  * Re-exports for test consumers and adapter packages.
  */
-export { DotCliError, DotCliErrorCode, dotCliDocsUrl };
+
 export type { DotCliEnvelope, DotCliEnvelopeStatus } from './render-explain.js';
 export { runNew } from './new.js';
 export type { DotNewEnvelope, DotNewOperation } from './json.js';
@@ -648,7 +649,7 @@ const isMainModule = await (async () => {
 })();
 
 if (isMainModule) {
-  void main({ argv: process.argv.slice(2) }).then(code => {
-    process.exit(code);
-  });
+  process.exit(await main({ argv: process.argv.slice(2) }));
 }
+
+export {dotCliDocsUrl, DotCliError, DotCliErrorCode} from './error-codes.js';

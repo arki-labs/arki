@@ -3,15 +3,19 @@
  *
  * The CLI inspects a user's DOT app at the command line. Apps live in source
  * files like `dot.config.ts` or `src/app.ts`; this module resolves the right
- * file, imports it, unwraps the default export, and returns either a
+ * file, imports it, finds the app export, and returns either a
  * `DotApp` or `DotAppBuilder`.
+ *
+ * The app export is found in this order: the `default` export, else a named
+ * export `app` (the shape app templates use), else the one export that looks
+ * like a DOT app. Several candidates and no `default`/`app` is an error.
  *
  * The CLI commands (`explain`, `doctor`) then decide whether to call
  * `.configure()` / `.boot()` on the result.
  */
 
 import { stat } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { getLogger } from '@arki/log';
@@ -73,14 +77,14 @@ export async function resolveAppFile(options: DiscoveryOptions = {}): Promise<st
   const cwd = options.cwd ?? process.cwd();
 
   if (options.appPath) {
-    const absolute = isAbsolute(options.appPath) ? options.appPath : resolve(cwd, options.appPath);
+    const absolute = path.isAbsolute(options.appPath) ? options.appPath : path.resolve(cwd, options.appPath);
     debugDiscover.debug('explicit app path: {path}', { path: absolute });
     return absolute;
   }
 
   for (const base of DEFAULT_APP_PATHS) {
     for (const ext of SUPPORTED_EXTENSIONS) {
-      const candidate = resolve(cwd, `${base}${ext}`);
+      const candidate = path.resolve(cwd, `${base}${ext}`);
       if (await fileExists(candidate)) {
         debugDiscover.debug('discovered app file: {file}', { file: candidate });
         return candidate;
@@ -129,11 +133,31 @@ function isDotApp(value: unknown): value is DotApp<Record<string, unknown>> {
   );
 }
 
-function unwrapDefaultExport(mod: unknown): unknown {
-  if (typeof mod !== 'object' || mod === null) return mod;
+type AppExport = { readonly found: true; readonly name: string; readonly value: unknown } | { readonly found: false };
+
+function looksLikeDotApp(value: unknown): boolean {
+  return isDotApp(value) || isDotAppBuilder(value) || isDotAppConfigured(value);
+}
+
+/**
+ * Pick the app export: `default`, else named `app`, else the single export
+ * that looks like a DOT app. `names` lists every export for error messages.
+ */
+function findAppExport(
+  mod: unknown,
+): AppExport & { readonly names: readonly string[]; readonly matches: readonly string[] } {
+  if (typeof mod !== 'object' || mod === null)
+    return { found: true, name: 'default', value: mod, names: [], matches: [] };
   const record = mod as Record<string, unknown>;
-  if ('default' in record) return record.default;
-  return mod;
+  const names = Object.keys(record);
+  if ('default' in record) return { found: true, name: 'default', value: record.default, names, matches: [] };
+  if ('app' in record) return { found: true, name: 'app', value: record.app, names, matches: [] };
+  const matches = names.filter(name => looksLikeDotApp(record[name]));
+  const [only] = matches;
+  if (matches.length === 1 && only !== undefined) {
+    return { found: true, name: only, value: record[only], names, matches };
+  }
+  return { found: false, names, matches };
 }
 
 /**
@@ -165,20 +189,34 @@ export async function loadAppFromFile(filePath: string): Promise<DiscoveredApp> 
   try {
     // Use `pathToFileURL` so dynamic import accepts absolute paths on Windows.
     mod = await import(pathToFileURL(filePath).href);
-  } catch (err) {
-    const coded = codedCause(err);
+  } catch (error) {
+    const coded = codedCause(error);
     throw new DotCliError({
       code: DotCliErrorCode.AppImportFailed,
-      message: `Failed to import app file at ${filePath}: ${describeCause(err)}`,
+      message: `Failed to import app file at ${filePath}: ${describeCause(error)}`,
       remediation:
         coded?.remediation ??
         'Verify the file path is correct and that the module loads without errors. Run the file directly with `bun <path>` to reproduce.',
       metadata: coded === undefined ? { filePath } : { filePath, causeCode: coded.code },
-      cause: err,
+      cause: error,
     });
   }
 
-  let candidate = unwrapDefaultExport(mod);
+  const exported = findAppExport(mod);
+  if (!exported.found) {
+    const listed = (names: readonly string[]): string => (names.length === 0 ? 'none' : names.join(', '));
+    throw new DotCliError({
+      code: DotCliErrorCode.AppInvalidExport,
+      message:
+        exported.matches.length > 1
+          ? `${filePath} exports several DOT apps (${listed(exported.matches)}) and none is \`default\` or \`app\`.`
+          : `${filePath} exports no DOT app. Exports found: ${listed(exported.names)}.`,
+      remediation:
+        'Export the app as `default` or as `app`. Example: `export const app = defineApp("my-app").use(plugin);`',
+      metadata: { filePath, exports: exported.names },
+    });
+  }
+  let candidate = exported.value;
 
   // If the default export is a function, call it (it may return the
   // builder/app, or a Promise of one). This supports lazy/async setup.
@@ -187,30 +225,32 @@ export async function loadAppFromFile(filePath: string): Promise<DiscoveredApp> 
       const fn = candidate as () => unknown;
       const result = fn();
       candidate = result instanceof Promise ? await result : result;
-    } catch (err) {
-      const coded = codedCause(err);
+    } catch (error) {
+      const coded = codedCause(error);
       throw new DotCliError({
         code: DotCliErrorCode.AppImportFailed,
-        message: `Default export function in ${filePath} threw: ${describeCause(err)}`,
+        message: `The \`${exported.name}\` export function in ${filePath} threw: ${describeCause(error)}`,
         remediation:
-          coded?.remediation ??
-          'Make the default-exported factory return a DotApp or DotAppBuilder. Check for setup errors.',
+          coded?.remediation ?? 'Make the exported factory return a DotApp or DotAppBuilder. Check for setup errors.',
         metadata: coded === undefined ? { filePath } : { filePath, causeCode: coded.code },
-        cause: err,
+        cause: error,
       });
     }
   }
 
-  if (isDotApp(candidate) || isDotAppBuilder(candidate) || isDotAppConfigured(candidate)) {
+  if (
+    looksLikeDotApp(candidate) &&
+    (isDotApp(candidate) || isDotAppBuilder(candidate) || isDotAppConfigured(candidate))
+  ) {
     debugDiscover.debug('loaded app from {filePath}', { filePath });
     return candidate;
   }
 
   throw new DotCliError({
     code: DotCliErrorCode.AppInvalidExport,
-    message: `Default export from ${filePath} is not a DotApp or DotAppBuilder.`,
+    message: `The \`${exported.name}\` export from ${filePath} is not a DotApp or DotAppBuilder.`,
     remediation:
-      'Export a DotApp or DotAppBuilder as the default. Example: `export default defineApp("my-app").use(plugin);`',
+      'Export a DotApp or DotAppBuilder as `default` or `app`. Example: `export default defineApp("my-app").use(plugin);`',
     metadata: { filePath },
   });
 }

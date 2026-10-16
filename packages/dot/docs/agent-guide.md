@@ -15,7 +15,7 @@ this guide and in the README is compiled by `bun run test:docs`.
    factory. It is written once.
 3. Wrong wiring is a compile error at the `.use()` call: a missing provider, a
    type mismatch, a key collision. The kernel checks again at runtime with
-   coded errors (`DOT_LIFECYCLE_E012`, `E013`, `E020`).
+   coded errors (`ARKI_DOT_E012`, `E013`, `E020`).
 4. A plugin has five hooks: `configure` (sync, no I/O), `boot` (side effects,
    returns nothing), `start`, `stop`, `dispose`.
 5. A feature is one chain: `defineFeature(name).needs(...).infra(...).usecases(...).provides(...).entrypoints(...)`
@@ -239,7 +239,7 @@ as Mermaid.
 1. `npx dot doctor --json | jq '.errors[] | select(.severity == "error")'`.
 2. `npx dot doctor --json | jq '.data.plugins[] | select(.status != "ok")'`
    names the plugin.
-3. `DOT_LIFECYCLE_E003` means that plugin's `boot` threw. The kernel already
+3. `ARKI_DOT_E003` means that plugin's `boot` threw. The kernel already
    rolled back the plugins that booted before it.
 4. Apply the first `remediation`. Run doctor again. Repeat.
 
@@ -253,11 +253,11 @@ With no `AGENTS.md`, read the manifest, ask before large edits, and run the
 ## Rules that bite
 
 - `configure` is sync. A `configure` that returns a Promise fails with
-  `DOT_LIFECYCLE_E001`.
+  `ARKI_DOT_E001`.
 - `boot` returns nothing. Values go in `provides`. A value-returning `boot`
   does not compile.
 - Providers come before consumers in `.use()` and `.features([...])`. The
-  wrong order is a compile error, and `DOT_LIFECYCLE_E020` for erased code.
+  wrong order is a compile error, and `ARKI_DOT_E020` for erased code.
 - Two providers of one wire key collide. Use `rename(plugin, { key: 'newKey' }, 'new-name')`
   for a second instance.
 - `$`-prefixed keys are reserved for the kernel (`$app`, `$plugin`,
@@ -279,31 +279,31 @@ With no `AGENTS.md`, read the manifest, ask before large edits, and run the
 | Code | Meaning | What to do |
 | --- | --- | --- |
 | `DOT_CLI_E001` | No app file found and no `--app`. | Pass `--app <path>` or add `src/app.ts`. |
-| `DOT_CLI_E002` | The app file's default export is not a DOT app or builder. | `export default defineApp(...)...`. |
+| `DOT_CLI_E002` | The app file has no usable app export: the `default`/`app` export is not a DOT app, there is none, or several are exported and none is `default`/`app`. | `export default defineApp(...)...` or `export const app = defineApp(...)...`. |
 | `DOT_CLI_E003` | Importing the app file threw. | Fix the import error it prints. |
 | `DOT_CLI_E004` | Unknown command. | Use `explain`, `doctor` or `new`. |
 | `DOT_CLI_E005` | Bad arguments, for example an unknown `--template`. | Run `dot --help`. |
 | `DOT_CLI_E006` | `configure` or `boot` threw while the CLI prepared the app. | Run `dot doctor --json` for per-plugin issues. |
 | `DOT_CLI_E007` | `--observability`: no OpenTelemetry SDK registered (warning). | Register an SDK; see `docs/observability.md`. |
 | `DOT_CLI_E008`–`E011` | `explain --as`: projection missing, failed to import, failed to run, or claimed twice. | Check the projection module the app registers. |
-| `DOT_LIFECYCLE_E001` | `configure` returned a Promise. | Move async work to `boot`. |
-| `DOT_LIFECYCLE_E002` | `configure` threw. | Fix the plugin config. |
-| `DOT_LIFECYCLE_E003` | `boot` threw. Booted plugins were rolled back. | Read the issue's `plugin` and `remediation`. |
-| `DOT_LIFECYCLE_E004` | `start` threw. | Fix the plugin's `start`. |
-| `DOT_LIFECYCLE_E005` / `E006` | One or more `stop` / `dispose` hooks threw. | Read the aggregated causes. |
-| `DOT_LIFECYCLE_E007` / `E008` | The app was reused after `dispose` or after a failure. | Build a new app. |
-| `DOT_LIFECYCLE_E011` | A plugin was registered twice. | Remove the duplicate `.use()`. |
-| `DOT_LIFECYCLE_E012` | A need has no provider (erased or JS graphs). | Mount the provider earlier. |
-| `DOT_LIFECYCLE_E013` | A wire key is provided twice. | `rename` one provider. |
-| `DOT_LIFECYCLE_E014` | A key uses the reserved `$` prefix. | Rename the key. |
-| `DOT_LIFECYCLE_E015` | A hook ran past `hookTimeoutMs`. | Pass `$signal` to the hook's I/O; raise the budget only with a reason. |
-| `DOT_LIFECYCLE_E016` / `E017` | Duplicate action id, or action meta that is not JSON. | Rename the action; keep meta plain JSON. |
-| `DOT_LIFECYCLE_E018` | More than one logging plugin. | Keep one `log()`. |
-| `DOT_LIFECYCLE_E019` | Feature needs form a ring. | Extract the shared piece into a third unit. |
-| `DOT_LIFECYCLE_E020` | A provider is mounted after its consumer. | Move it earlier; the message names both positions. |
-| `FEATURE_E005` | A handle is missing from the services bag. | Mount the provider; check the gateway's needs. |
-| `FEATURE_E006` | A feature key collides with another slot or a reserved name. | Rename the alias or key. |
-| `FEATURE_E010` | A procedure's contract `meta` is not plain JSON. | Keep contract meta JSON-safe. |
+| `ARKI_DOT_E001` | `configure` returned a Promise. | Move async work to `boot`. |
+| `ARKI_DOT_E002` | `configure` threw. | Fix the plugin config. |
+| `ARKI_DOT_E003` | `boot` threw. Booted plugins were rolled back. | Read the issue's `plugin` and `remediation`. |
+| `ARKI_DOT_E004` | `start` threw. | Fix the plugin's `start`. |
+| `ARKI_DOT_E005` / `E006` | One or more `stop` / `dispose` hooks threw. | Read the aggregated causes. |
+| `ARKI_DOT_E007` / `E008` | The app was reused after `dispose` or after a failure. | Build a new app. |
+| `ARKI_DOT_E011` | A plugin was registered twice. | Remove the duplicate `.use()`. |
+| `ARKI_DOT_E012` | A need has no provider (erased or JS graphs). | Mount the provider earlier. |
+| `ARKI_DOT_E013` | A wire key is provided twice. | `rename` one provider. |
+| `ARKI_DOT_E014` | A key uses the reserved `$` prefix. | Rename the key. |
+| `ARKI_DOT_E015` | A hook ran past `hookTimeoutMs`. | Pass `$signal` to the hook's I/O; raise the budget only with a reason. |
+| `ARKI_DOT_E016` / `E017` | Duplicate action id, or action meta that is not JSON. | Rename the action; keep meta plain JSON. |
+| `ARKI_DOT_E018` | More than one logging plugin. | Keep one `log()`. |
+| `ARKI_DOT_E019` | Feature needs form a ring. | Extract the shared piece into a third unit. |
+| `ARKI_DOT_E020` | A provider is mounted after its consumer. | Move it earlier; the message names both positions. |
+| `ARKI_DOT_E026` | A handle is missing from the services bag. | Mount the provider; check the gateway's needs. |
+| `ARKI_DOT_E027` | A feature key collides with another slot or a reserved name. | Rename the alias or key. |
+| `ARKI_DOT_E031` | A procedure's contract `meta` is not plain JSON. | Keep contract meta JSON-safe. |
 
 Full lifecycle table: [Lifecycle](lifecycle.md). Diagnostics shapes:
 [Diagnostics](diagnostics.md).
