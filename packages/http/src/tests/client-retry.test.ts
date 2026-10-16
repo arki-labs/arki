@@ -145,6 +145,18 @@ describe('timeouts and aborts', () => {
     }
   });
 
+  it('the timeout names the route, never the URL: query tokens must not reach a log or the wire', async () => {
+    const orders = createClient(
+      { getOrder },
+      { baseUrl: 'https://user:pw@partner.test/v1?api_key=secret', fetch: hanging, timeoutMs: 10 },
+    );
+    const error: unknown = await orders.getOrder({ params: { id: 'o1' } }).catch((error_: unknown) => error_);
+    if (!(error instanceof HttpError)) throw new Error(`expected an HttpError, got ${String(error)}`);
+    expect(error.code).toBe(HTTP_ERROR_CODES.requestTimeout);
+    expect(error.message).toContain('GET /orders/:id');
+    expect(error.message).not.toMatch(/partner\.test|secret|pw/);
+  });
+
   it('a caller abort rejects with the caller reason and is not retried', async () => {
     let calls = 0;
     const fetch = (input: string, init: RequestInit): Promise<Response> => {

@@ -213,6 +213,17 @@ describe('publicFetch: the guard as a fetch, for the typed client', () => {
     });
   });
 
+  it('a server that never answers is cut off by the default deadline, so it cannot hold the connection', async () => {
+    mocks.fetch.mockImplementation(
+      (_url: URL, init: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(new Error('aborted', { cause: init.signal.reason })));
+        }),
+    );
+    await expect(publicFetch({ timeoutMs: 20 })('https://api.example.com/slow')).rejects.toThrow();
+    expect(mocks.destroy).toHaveBeenCalledTimes(1);
+  });
+
   it('caps the buffered body at maxBytes', async () => {
     mocks.fetch.mockResolvedValueOnce(new Response('0123456789'));
     await expect(publicFetch({ maxBytes: 4 })('https://api.example.com/big')).rejects.toThrow('size limit');

@@ -239,7 +239,8 @@ async function call(contract: AnyRoute, transport: Transport, input: ErasedInput
   }
 
   const repeatable = REPEATABLE_METHODS.has(contract.method) || hasHeader(headers, 'idempotency-key');
-  const response = await send(transport, url, request, init.signal, repeatable);
+  // The route template, not the URL: the URL may carry tokens, and this text can reach a log or the wire.
+  const response = await send(transport, url, request, init.signal, repeatable, `${contract.method} ${contract.path}`);
   // A status the contract lists answers with that schema's body, ok or not.
   const listed = isRawOutput(contract.output) ? undefined : contract.responses?.[response.status];
   if (listed !== undefined) return decodeBody(contract, listed, response);
@@ -267,10 +268,11 @@ async function send(
   request: RequestInit,
   signal: AbortSignal | undefined,
   repeatable: boolean,
+  routeName: string,
 ): Promise<Response> {
   const { policy, retryOn } = transport;
   const method = request.method ?? 'GET';
-  const deadline = withDeadline(signal, transport.timeoutMs, `${method} ${url}`);
+  const deadline = withDeadline(signal, transport.timeoutMs, routeName);
   try {
     if (policy === undefined) return await transport.fetch(url, withSignal(request, deadline.signal));
     let previous: Response | undefined;

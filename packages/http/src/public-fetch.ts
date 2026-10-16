@@ -182,6 +182,12 @@ export async function safeFetchBytes(
   });
 }
 
+/** The caller's signal, if any, bounded by a timeout. */
+function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+}
+
 /** Statuses whose response must have no body; `new Response(bytes, { status })` throws for them. */
 const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
 
@@ -191,9 +197,11 @@ const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
  * checked and pinned, as in {@link safeFetchBytes}; a private address or a redirect to one rejects.
  *
  * The response is buffered (at most `maxBytes`, default 10 MB) before it is returned, so a
- * streaming body arrives whole. Credentials in the URL are refused; send them as a header.
+ * streaming body arrives whole. Every request, body included, must finish within `timeoutMs`
+ * (default 30 s), so a slow server cannot hold a connection open. Credentials in the URL are
+ * refused; send them as a header.
  */
-export function publicFetch(options: { maxBytes?: number; transport?: PublicFetchTransport } = {}) {
+export function publicFetch(options: { maxBytes?: number; timeoutMs?: number; transport?: PublicFetchTransport } = {}) {
   return async (input: string, init: RequestInit = {}): Promise<Response> => {
     const body =
       init.body === undefined || init.body === null || typeof init.body === 'string'
@@ -204,7 +212,7 @@ export function publicFetch(options: { maxBytes?: number; transport?: PublicFetc
       method: init.method ?? 'GET',
       headers: Object.fromEntries(new Headers(init.headers)),
       body,
-      signal: init.signal ?? undefined,
+      signal: withTimeout(init.signal ?? undefined, options.timeoutMs ?? 30_000),
       maxBytes: options.maxBytes ?? 10_000_000,
       transport: options.transport ?? systemTransport,
     });
