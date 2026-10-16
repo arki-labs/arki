@@ -164,21 +164,18 @@ Server: pass a `send` function. The token is stored hashed.
 
 ```ts
 import { defineAuthBackend } from '@arki/auth';
-import { createEmailClient } from '@arki/mail';
+import { mailer } from '@arki/mail';
+import { resend } from '@arki/mail/http/resend';
+import { magicLink } from '@arki/mail/templates/auth';
 
-const email = createEmailClient({ isDev: env.NODE_ENV === 'development', resend: { apiKey: env.RESEND_API_KEY } });
+const mail = mailer({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'My App <no-reply@myapp.com>' });
 
 export const auth = defineAuthBackend({
   // ...the options from Recipe 1
   magicLink: {
     disableSignUp: false, // true = only existing users may sign in this way
     send: async ({ email: to, url }) => {
-      const { error } = await email.send({
-        to,
-        from: 'My App <no-reply@myapp.com>',
-        subject: 'Your sign-in link',
-        text: `Sign in: ${url}`,
-      });
+      const { error } = await mail.send(magicLink, { appName: 'My App', url }, { to });
       if (error) throw new Error('Could not send the sign-in email.');
     },
   },
@@ -198,38 +195,68 @@ await authClient.signIn.magicLink({ email: 'ada@example.com', callbackURL: '/das
 
 ## Drizzle tables: `@arki/auth/schema`
 
-Column sets for the four Better Auth tables. Spread one into your own `schema.table(...)`. A key you write after the spread replaces that column.
+The lib owns the shape of the four Better Auth tables. An app calls `createAuthTables` once with its pgSchema, its id columns and its own columns, and gets `{ User, Session, Account, Verification, userForeignKeys }` back. `userForeignKeys` is the factory other features use to point at the user table.
 
 ```ts
-import { authUserColumns, authSessionColumns } from '@arki/auth/schema';
+import { createAuthTables } from '@arki/auth/schema';
+import { EMPTY_TWEAKS, tweaksColumn } from '@arki/auth/tweaks-column';
 
-export const User = schema.table('users', {
-  ...authUserColumns({ id: userIdFactory.primaryColumn(), naming: 'camel' }),
-  // override: keep a database default
-  emailVerified: boolean('emailVerified').notNull().default(false),
-  // extra column
-  accessGrantedAt: timestamp('accessGrantedAt'),
-});
-
-export const Session = schema.table('sessions', {
-  ...authSessionColumns({
-    id: sessionId.primaryColumn(),
-    userId: text('userId').notNull().references(() => User.id, { onDelete: 'cascade' }),
-    naming: 'camel',
-  }),
-  activeOrganizationId: text('activeOrganizationId'),
+export const { User, Session, Account, Verification, userForeignKeys } = createAuthTables(schema, {
+  naming: 'camel',
+  fill: 'database',
+  ids: {
+    user: userIdFactory, // has primaryColumn() and createForeignKeyFactory()
+    session: {
+      primaryColumn: () =>
+        text('id')
+          .primaryKey()
+          .$defaultFn(() => createPrefixedId('sess')),
+    },
+    account: accountIdFactory,
+    verification: verificationIdFactory,
+  },
+  columns: {
+    user: { tweaks: tweaksColumn().notNull().default(EMPTY_TWEAKS), accessGrantedAt: timestamp('accessGrantedAt') },
+    session: { activeOrganizationId: text('activeOrganizationId') },
+    // a standard key replaces that column: Better Auth's field name, your column name
+    account: { accessTokenExpiresAt: timestamp('expiresAt') },
+  },
 });
 ```
 
 - `naming` is `'snake'` (default, `email_verified`) or `'camel'` (`emailVerified`).
-- You pass the id column and the user foreign-key column. The lib never makes ids.
-- `authUserColumns`, `authSessionColumns`, `authAccountColumns`, `authVerificationColumns` return fresh builders on every call.
-- A new app can call `createAuthTables(schema, { ids })`. It builds all four tables in the standard shape, adds the `tweaks` column to `users`, and returns `{ User, Session, Account, Verification, userForeignKeys }`. `ids` holds your id factories: `user`, `session`, `account`, `verification`.
-- Workspace (organization) tables are not part of this entry.
+- `fill` (required) says who fills `createdAt`, `updatedAt` and `emailVerified` when a row is inserted without them. `'app'`: the app, through Drizzle's `$defaultFn`; the database sees no default, and `sessions` / `accounts` timestamps have none at all because Better Auth writes them. `'database'`: the database, through `DEFAULT now()` / `DEFAULT false`; every such column is `NOT NULL`. The row types follow: a column with a default is optional on insert.
+- `ids` holds your id sources, one per table: anything with `primaryColumn()`, such as a `createIdFactory` result or a plain object. `user` also needs `createForeignKeyFactory`. The lib never makes ids.
+- `columns` holds your own columns per table, merged after the standard ones. A new key adds a column; a standard key replaces that column; `id` is not allowed here (it comes from `ids`). The inferred row types include them.
+- The column sets `authUserColumns`, `authSessionColumns`, `authAccountColumns`, `authVerificationColumns` are for apps that must build a table themselves. They take the same `naming` and `fill`, return fresh builders on every call, and a key you write after the spread replaces that column.
+- Workspace (organization) tables come from `createWorkspaceTables` in `@arki/auth/workspaces` (Recipe 4).
 
 ## Recipe 4: Workspaces and roles
 
-Turn on organizations and teams. Add the org tables (`organization`, `member`, `invitation`, `team`, `teamMember`) to `schema`.
+Turn on organizations and teams. Build the five org tables with `createWorkspaceTables` and add them to `schema`.
+
+```ts
+import { createWorkspaceTables } from '@arki/auth/workspaces';
+
+export const { Organization, Member, Invitation, Team, TeamMember, orgForeignKeys, teamForeignKeys } =
+  createWorkspaceTables(schema, {
+    naming: 'camel',
+    fill: 'database',
+    user: User,
+    ids: {
+      organization: organizationIdSource,
+      member: memberIdSource,
+      invitation: invitationIdSource,
+      team: teamIdSource,
+      teamMember: teamMemberIdSource,
+    },
+  });
+```
+
+- `naming` and `fill` work as in `createAuthTables`; `fill` also covers `invitations.status` (`'pending'`) and `teams.memberCount` (`0`).
+- `user` is your `User` table; members, invitations and team members point at its `id` with `onDelete: 'cascade'`. `invitations.teamId` is a plain column, as in Better Auth.
+- `ids` holds one id source per table (anything with `primaryColumn()`). The lib never makes ids. Better Auth generates `organization_…` and `team_…` ids itself; use the same prefixes for rows you insert through Drizzle, so `organizationIdSchema` accepts them.
+- `orgForeignKeys` / `teamForeignKeys` are the scope factories from `createWorkspaceForeignKeys`, already bound to these tables.
 
 ```ts
 export const auth = defineAuthBackend({
