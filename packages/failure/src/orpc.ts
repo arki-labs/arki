@@ -18,7 +18,7 @@
  * // the frontend: the caught ORPCError back as the failure, ready for match()
  * const failure = reviveRpcError(error, [PostNotFound]);
  */
-import { ORPCError } from '@orpc/server';
+import { ORPCError } from '@orpc/client';
 
 import type { StandardSchemaV1 } from '@arki/schema';
 

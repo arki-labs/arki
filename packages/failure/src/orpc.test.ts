@@ -1,5 +1,7 @@
+import { ORPCError as ClientORPCError } from '@orpc/client';
 import { oc } from '@orpc/contract';
 import { call, implement, ORPCError } from '@orpc/server';
+import ts from 'typescript';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 
@@ -158,5 +160,19 @@ describe('reviveRpcError on the client', () => {
     expect(() => reviveRpcError(drifted, [PostNotFound])).toThrow(
       expect.objectContaining({ code: FAILURE_ERROR_CODES.invalidData }),
     );
+  });
+});
+
+describe('browser safety', () => {
+  it('imports nothing from @orpc/server, because contract files and client code that use this entry ship to browsers', () => {
+    const source = ts.sys.readFile(new URL('orpc.ts', import.meta.url).pathname);
+    expect(source).toBeDefined();
+    const imports = ts.preProcessFile(source ?? '').importedFiles.map(file => file.fileName);
+    expect(imports).toContain('@orpc/client');
+    expect(imports).not.toContain('@orpc/server');
+  });
+
+  it('throws the same ORPCError class the server checks, so declared failures still reach the client as defined', () => {
+    expect(ClientORPCError).toBe(ORPCError);
   });
 });

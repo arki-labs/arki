@@ -53,6 +53,18 @@ A definition also has `code`, `status`, `remediation`, `dataSchema`, and `is(val
 
 A **failure value** is a frozen object, `{ code, message, data, status, remediation }`, plus `cause`. It serialises to clean JSON for logs and queues; the brand and the cause stay out of the JSON.
 
+### Choosing a status
+
+- **4xx** means the caller can fix it: bad input, a missing post, a taken email.
+- **422** when an upstream service refuses us but our own user is fine, such as "Notion rejected the token".
+- **401** only for "you are not signed in". A client may sign the user out on a 401, so never use it for an upstream answer.
+- **503** when an upstream service is unavailable and a later try may work.
+
+```ts
+export const NotionTokenRejected = defineFailure('export.notion_token_rejected', { status: 422 });
+export const NotionUnavailable = defineFailure('export.notion_unavailable', { status: 503 });
+```
+
 ## Check
 
 ### `isFailure(value)`
@@ -74,11 +86,44 @@ async function publish(id: PostId) {
 // ^? Promise<Page | Failure<'post.not_found', …> | Failure<'author.banned', …>>
 ```
 
+### Nothing, or a failure
+
+A function with no success value returns `undefined` or a failure. Callers check with `isFailure`.
+
+```ts
+async function remove(id: PostId): Promise<undefined | Failure<'post.not_found', { id: PostId }>> {
+  if (!(await repo.delete(id))) return PostNotFound({ id });
+  return undefined;
+}
+
+const removed = await remove(id);
+if (isFailure(removed)) return removed;
+```
+
+### Partial success
+
+When some work succeeded before an expected failure, return the success value with the failure inside it. Do not throw the progress away.
+
+```ts
+async function exportAll(items: Item[]) {
+  const delivered: Item[] = [];
+  for (const item of items) {
+    const sent = await send(item);
+    if (isFailure(sent)) return { delivered, stoppedBy: sent }; // 40 items out, then the token was refused
+    delivered.push(item);
+  }
+  return { delivered };
+}
+// the caller gets { delivered, stoppedBy?: failure } and keeps what was already sent
+```
+
+This is not "data that is itself a failure" (see Pitfalls): here the failure is a field of the result, not the result.
+
 ## Handle
 
 ### `match(value, handlers)`
 
-One handler for the success value (`ok`) and one for each failure code the value can carry. A missing handler is a type error. A handler for a code the value can no longer carry is also a type error, so adding or removing a failure updates every `match`. Returns the union of what the handlers return.
+One handler for the success value (`ok`) and one for each failure code the value can carry. A value that can only be a failure, such as one from `reviveRpcError`, takes no `ok`. A missing handler is a type error. A handler for a code the value can no longer carry is also a type error, so adding or removing a failure updates every `match`. Returns the union of what the handlers return.
 
 ```ts
 const label = match(await find(id), {
@@ -165,10 +210,19 @@ void (await remove(id)); // ✓ discarded on purpose
 ```
 
 ```js
-// eslint.config.js (type-aware: typescript-eslint with projectService)
+// eslint.config.js
+import tseslint from 'typescript-eslint';
+
 import failure from '@arki/failure/eslint';
 
-export default [failure.configs.recommended];
+export default [
+  // The rule is type-aware: TypeScript files need the typescript-eslint parser with projectService.
+  {
+    files: ['**/*.{ts,tsx,mts,cts}'],
+    languageOptions: { parser: tseslint.parser, parserOptions: { projectService: true } },
+  },
+  failure.configs.recommended, // TypeScript files only, so .js files such as this one are left alone
+];
 ```
 
 Peers for this entry: `eslint`, `@typescript-eslint/utils`, `typescript`.
@@ -201,7 +255,7 @@ const post = await client.posts.byId({ id }).catch((error: unknown) => {
 }); // Post | Failure<'post.not_found', …>
 ```
 
-`@orpc/server` is an optional peer dependency, needed only for this entry.
+`@orpc/client` is an optional peer dependency, needed only for this entry. The entry imports nothing from `@orpc/server`, so contract files and client code that use it can ship to browsers.
 
 ## Errors
 

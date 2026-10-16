@@ -20,6 +20,9 @@ function load(id: string): Loaded {
 
 const onlyPost = (): Post => ({ id: 'p', title: 't' });
 
+/** A value that can only be a failure, like the client's after `reviveRpcError`. */
+const loadFailure = (id: string): Exclude<Loaded, Post> => (id === 'missing' ? PostNotFound({ id }) : PostLocked());
+
 const describeLoad = (id: string) =>
   match(load(id), {
     ok: post => `title ${post.title}`,
@@ -47,6 +50,22 @@ describe('match', () => {
   it('makes a handler for a failure that can no longer happen a compile error', () => {
     // @ts-expect-error -- 'post.locked' cannot come out of onlyPost(): a stale handler
     match(onlyPost(), { ok: () => 1, 'post.locked': () => 2 });
+  });
+
+  it('still requires ok when the value can be a success', () => {
+    // @ts-expect-error -- load() can return a post, so `ok` is required
+    match(load('missing'), { 'post.not_found': () => 1, 'post.locked': () => 2 });
+  });
+
+  it('takes one handler per code and no ok for a value that can only be a failure, as on the client after reviveRpcError', () => {
+    const failed = loadFailure('missing');
+    const out = match(failed, { 'post.not_found': failure => failure.data.id, 'post.locked': () => null });
+    expectTypeOf(out).toEqualTypeOf<string | null>();
+    expect(out).toBe('missing');
+    // @ts-expect-error -- 'post.locked' is not handled: exhaustiveness still holds
+    match(failed, { 'post.not_found': () => 1 });
+    // @ts-expect-error -- `ok` can never run for a failure-only value: a stale handler
+    match(failed, { ok: () => 0, 'post.not_found': () => 1, 'post.locked': () => 2 });
   });
 
   it('fails loud when the types were bypassed and a handler is missing at runtime', () => {

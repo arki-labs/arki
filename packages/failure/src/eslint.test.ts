@@ -1,7 +1,8 @@
 import { RuleTester } from '@typescript-eslint/rule-tester';
-import { afterAll, describe, it } from 'vitest';
+import { TSESLint } from '@typescript-eslint/utils';
+import { afterAll, describe, expect, it } from 'vitest';
 
-import { mustUse } from './eslint.js';
+import plugin, { mustUse } from './eslint.js';
 
 RuleTester.afterAll = afterAll;
 RuleTester.describe = describe;
@@ -59,4 +60,17 @@ ruleTester.run('must-use', mustUse, {
       errors: [{ messageId: 'mustUse' }],
     },
   ],
+});
+
+describe('configs.recommended', () => {
+  const linter = new TSESLint.Linter({ configType: 'flat' });
+  const recommended = [plugin.configs.recommended];
+
+  it('skips plain .js files, so a project-wide config does not crash on eslint.config.js, which has no type information', () => {
+    expect(linter.verify('export default [];', recommended, 'eslint.config.js')).toEqual([]);
+  });
+
+  it('still runs the type-aware rule on TypeScript files', () => {
+    expect(() => linter.verify('export default [];', recommended, 'post.ts')).toThrow(/type information/);
+  });
 });

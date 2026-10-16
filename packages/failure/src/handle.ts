@@ -12,10 +12,14 @@ type FailureCodes<Value> = Extract<Value, Failure>['code'];
 /** The failure of `Value` with this code. */
 type FailureWithCode<Value, Code> = Extract<Extract<Value, Failure>, { readonly code: Code }>;
 
-/** One handler for the success value (`ok`) and one per failure code the value can carry. All are required. */
-export type MatchHandlers<Value> = {
-  readonly ok: (value: Exclude<Value, Failure>) => unknown;
-} & {
+/**
+ * One handler per failure code the value can carry, plus `ok` for the success value when
+ * the value can be a success. All are required. A value that can only be a failure (such
+ * as one from `reviveRpcError`) takes no `ok`.
+ */
+export type MatchHandlers<Value> = ([Exclude<Value, Failure>] extends [never]
+  ? unknown
+  : { readonly ok: (value: Exclude<Value, Failure>) => unknown }) & {
   readonly [Code in FailureCodes<Value>]: (failure: FailureWithCode<Value, Code>) => unknown;
 };
 
@@ -36,6 +40,7 @@ type HandlerResult<Handlers> = {
  * Handle the success value and every failure the value can carry. A missing
  * handler is a type error, and so is a handler for a code that can no longer
  * happen, so adding or removing a failure updates every `match` at compile time.
+ * A value that can only be a failure takes no `ok` handler.
  *
  * @example
  * const title = match(await find(id), {
@@ -45,7 +50,7 @@ type HandlerResult<Handlers> = {
  */
 export function match<Value, Handlers extends MatchHandlers<Value>>(
   value: Value,
-  handlers: Handlers & NoStaleHandlers<Handlers, 'ok' | FailureCodes<Value>>,
+  handlers: Handlers & NoStaleHandlers<Handlers, keyof MatchHandlers<Value>>,
 ): HandlerResult<Handlers>;
 export function match(value: unknown, handlers: Readonly<Record<string, (input: unknown) => unknown>>): unknown {
   const key = isFailure(value) ? value.code : 'ok';

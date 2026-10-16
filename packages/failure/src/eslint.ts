@@ -9,7 +9,7 @@
  * @example
  * // eslint.config.js
  * import failure from '@arki/failure/eslint';
- * export default [failure.configs.recommended];
+ * export default [failure.configs.recommended]; // TypeScript files only
  */
 import type { TSESLint, TSESTree } from '@typescript-eslint/utils';
 import type { Type, TypeChecker } from 'typescript';
@@ -68,12 +68,17 @@ function failureCodes(checker: TypeChecker, type: Type): string[] {
 
 const rules = { 'must-use': mustUse };
 
-/** The plugin, with a flat `recommended` config that registers it as `failure` and turns `failure/must-use` on. */
+/**
+ * The plugin, with a flat `recommended` config that registers it as `failure` and turns
+ * `failure/must-use` on for TypeScript files only: the rule needs type information, which
+ * plain `.js` files (such as `eslint.config.js`) do not have.
+ */
 const plugin: TSESLint.FlatConfig.Plugin & { configs: { recommended: TSESLint.FlatConfig.Config } } = {
   meta: { name: '@arki/failure' },
   rules,
   configs: {
     recommended: {
+      files: ['**/*.{ts,tsx,mts,cts}'],
       plugins: { failure: { meta: { name: '@arki/failure' }, rules } },
       rules: { 'failure/must-use': 'error' },
     },

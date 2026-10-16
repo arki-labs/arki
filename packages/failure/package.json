@@ -78,6 +78,7 @@
     "@arki/prettier-config": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
+    "@orpc/client": "catalog:backend",
     "@orpc/contract": "catalog:backend",
     "@orpc/server": "catalog:backend",
     "@types/node": "catalog:node",
@@ -91,13 +92,13 @@
     "zod": "catalog:"
   },
   "peerDependencies": {
-    "@orpc/server": "catalog:backend",
+    "@orpc/client": "catalog:backend",
     "@typescript-eslint/utils": "^8.0.0",
     "eslint": ">=9.0.0",
     "typescript": ">=5.0.0"
   },
   "peerDependenciesMeta": {
-    "@orpc/server": {
+    "@orpc/client": {
       "optional": true
     },
     "@typescript-eslint/utils": {
