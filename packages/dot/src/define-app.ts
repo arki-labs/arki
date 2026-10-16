@@ -31,6 +31,7 @@ import type { DotLifecycleObserver } from './lifecycle-observer.js';
 import type { DotLifecycleState } from './lifecycle.js';
 import type { DotAppManifest } from './manifest.js';
 import type { AnyPlugin, EmptyShape, Plugin, ServiceRecord } from './plugin-contract.js';
+import type { MaxIndex, NextIndex } from './tuple-index.js';
 import { allFeatures, mountFeatures } from './define-feature.js';
 import { bindDriver, plug } from './feature.js';
 import { DotAppImpl } from './kernel/app-instance.js';
@@ -91,33 +92,56 @@ export type UseGuard<
       : [error: CollisionError<TAvail, TProvides>]
     : [error: NeedsError<TAvail, TNeeds>];
 
+/*
+ * The list checks walk the tuple by index (`NextIndex`, see tuple-index.ts):
+ * `TPlugins[I]` is one lookup, where `[infer Head, ...infer Tail]` would
+ * re-slice the list at every step. A list longer than the table is refused
+ * with a label.
+ */
+
+/**
+ * Entry to the walk. The `[...infer All]` match is one copy of the tuple, and
+ * it is what ends the walk for a GENERIC list: there `All` is its constraint
+ * (`readonly AnyPlugin[]`), `0 extends number` holds, and the walk stops at
+ * step 0 instead of expanding `NextIndex` forever while TypeScript computes
+ * the conditional's constraint.
+ */
 type UseAllState<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlugin[]> = TPlugins extends readonly [
-  infer Head,
-  ...infer Tail,
+  ...infer All extends readonly AnyPlugin[],
 ]
-  ? Head extends Plugin<infer TNeeds, infer TProvides>
-    ? UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>> extends []
-      ? UseAllState<TAvail & NormalizeProvides<TProvides>, Extract<Tail, readonly AnyPlugin[]>>
+  ? UseAllWalk<TAvail, All, 0>
+  : { readonly avail: TAvail; readonly error: never };
+
+type UseAllWalk<
+  TAvail extends ServiceRecord,
+  TPlugins extends readonly AnyPlugin[],
+  I extends number,
+> = I extends TPlugins['length']
+  ? { readonly avail: TAvail; readonly error: never }
+  : I extends MaxIndex
+    ? {
+        readonly avail: TAvail;
+        readonly error: { readonly 'DOT: a list may hold at most this many units': MaxIndex };
+      }
+    : TPlugins[I] extends Plugin<infer TNeeds, infer TProvides>
+      ? UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>> extends []
+        ? UseAllWalk<TAvail & NormalizeProvides<TProvides>, TPlugins, NextIndex[I]>
+        : {
+            readonly avail: TAvail;
+            readonly error: {
+              readonly 'DOT: a unit in this list cannot be mounted at its position': UseGuard<
+                TAvail,
+                TNeeds,
+                NormalizeProvides<TProvides>
+              >[0];
+            };
+          }
       : {
           readonly avail: TAvail;
           readonly error: {
-            readonly 'DOT: a unit in this list cannot be mounted at its position': UseGuard<
-              TAvail,
-              TNeeds,
-              NormalizeProvides<TProvides>
-            >[0];
+            readonly 'DOT: this list accepts only plugins': TPlugins[I];
           };
-        }
-    : {
-        readonly avail: TAvail;
-        readonly error: {
-          readonly 'DOT: this list accepts only plugins': Head;
         };
-      }
-  : {
-      readonly avail: TAvail;
-      readonly error: never;
-    };
 
 export type UseAllAvail<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlugin[]> = UseAllState<
   TAvail,
@@ -161,12 +185,21 @@ type UnitsOfFeature<TFeature> = TFeature extends { plugins(): infer TUnits exten
     ? readonly [PluginOf<TFeature>]
     : never;
 
-type FlattenUnits<
+/** Index walk (see `NextIndex` / `UseAllState`): `[infer Head, ...infer Tail]` would re-slice the list at every feature. */
+type FlattenUnits<TFeatures extends readonly unknown[]> = TFeatures extends readonly [
+  ...infer All extends readonly unknown[],
+]
+  ? FlattenWalk<All, 0, readonly []>
+  : readonly AnyPlugin[];
+type FlattenWalk<
   TFeatures extends readonly unknown[],
+  I extends number,
   TAcc extends readonly AnyPlugin[],
-> = TFeatures extends readonly [infer Head, ...infer Tail]
-  ? FlattenUnits<Tail, readonly [...TAcc, ...UnitsOfFeature<Head>]>
-  : TAcc;
+> = I extends TFeatures['length']
+  ? TAcc
+  : I extends MaxIndex
+    ? readonly AnyPlugin[]
+    : FlattenWalk<TFeatures, NextIndex[I], readonly [...TAcc, ...UnitsOfFeature<TFeatures[I]>]>;
 
 /**
  * Every kernel unit a feature list mounts, flattened in order — what
@@ -174,7 +207,7 @@ type FlattenUnits<
  * array, so the guard asks for a tuple.
  */
 export type FeatureUnits<TFeatures extends readonly (AnyFeature | AnyDefinedFeature)[]> =
-  number extends TFeatures['length'] ? readonly AnyPlugin[] : FlattenUnits<TFeatures, readonly []>;
+  number extends TFeatures['length'] ? readonly AnyPlugin[] : FlattenUnits<TFeatures>;
 
 /* ------------------------------------------------------------------ */
 /* Public app surface                                                  */

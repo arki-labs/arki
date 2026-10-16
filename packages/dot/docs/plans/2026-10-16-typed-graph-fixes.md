@@ -370,6 +370,35 @@ seconds, so it is stable on a busy machine. Exclude it from `test:runtimes` (it 
 **Verify**: the budget test; `turbo typecheck --filter=@avocabo/backend` (23 features) still green; record
 `Instantiations` before/after in the changeset body.
 
+### Phase 5 result (2026-10-16) — DONE, by a different route than planned
+
+- The plan's two ideas do not work. (1) Flattening the accumulator with a mapped type at every step nests one mapped
+  type per unit and hits `TS2589` (instantiation depth) at ~50 units. (2) Checking keys before shapes
+  (`Exclude<keyof TNeeds, keyof TAvail>`, `MismatchedKeys`) costs MORE: it computes `keyof TAvail` (hundreds of
+  literals) per step and iterates it in a mapped type. Both measured on the scale probe.
+- Where the time really went (`tsc --generateTrace` on 100 features, then a pure-skeleton probe): the recursion
+  pattern itself. `TPlugins extends readonly [infer Head, ...infer Tail]` re-slices the tuple at every step, O(length)
+  each — a 200-unit walk that does NOTHING else costs ~650k instantiations, 400 units 2.6M. The guard's own checks
+  were ~15% of the total; the accumulated intersection ~10%.
+- Fix shipped: the two list walks (`UseAllState` → `UseAllWalk`, `FlattenUnits` → `FlattenWalk`) go by index:
+  `TPlugins[I]` plus `NextIndex[I]` (a 1024-entry literal tuple in `src/tuple-index.ts`, the only O(1) way to add one to
+  a number literal in the type system; prettier-ignored, hand-wrapped). A list longer than the table is refused with
+  `'DOT: a list may hold at most this many units'`. Each walk enters through a one-time `extends readonly [...infer
+  All]` match: for a GENERIC list `All` collapses to its constraint and the walk ends at step 0 — without it
+  TypeScript expands `NextIndex` forever while computing the conditional's constraint (`Excessive stack depth`).
+- Numbers (features probe, instantiations): N=50 766,013 → 340,081; N=100 2,650,513 → 937,481; N=200 over the
+  compiler's limit (TS2589) → 3,015,490, compiles. Plain plugins via `.useAll()`: 100/200/400 → 185k / 518k / 1.73M
+  (was 508k / 1.80M / limit). Still superlinear (×2.8 per doubling of plain units) from the per-step guard on the
+  growing record; tried on top of the index walk and rejected: per-key needs check (wins on plain plugins, loses on
+  features — `keyof` of a `WireNeeds` intersection is dear), key-union collision check (no change), block flattening
+  every 32 units (−15–22% instantiations, one more parameter; not worth it today).
+- Budget test `src/tests/typecheck-budget.test.ts` (generator `bench/typecheck/gen-features.mjs`, tsconfig
+  `bench/typecheck/tsconfig.json`, output in the gitignored `.generated/`): ≤ 400k at 50, ≤ 1.1M at 100, and no
+  `error TS`. The plan's 250k / 600k were set assuming linear; not reachable without changing what a `FeatureUnit`
+  is. `test:runtimes` (`arki-runtimes`) runs smoke scripts, not vitest files, so nothing to exclude.
+- Evidence: `@arki/dot` tsc 0, full vitest (incl. the budget test) in the isolated HEAD + mine copy and in the
+  working tree; prettier/eslint clean on the new lines.
+
 ---
 
 ## Phase 6 — Docs, changeset, self-check
