@@ -33,7 +33,7 @@ console.log(env.PORT); // number
 console.log(env.DATABASE_URL); // string (validated URL)
 ```
 
-`defineEnv` reads from `process.env`, validates against the Zod schemas in `server`, and returns a fully typed object. Validation is lazy: it runs on the first read, so importing an env never fails.
+`defineEnv` reads from `process.env`, validates against the schemas in `server`, and returns a fully typed object. A schema is any [Standard Schema](https://standardschema.dev): Zod, Valibot, ArkType, or a hand-written `~standard` object. Each value is typed as its schema's output, so defaults and coercions apply. Validation must be synchronous. Validation is lazy: it runs on the first read, so importing an env never fails.
 
 Validation runs everywhere the app runs, production included, in CI and in tests. `CI`, `lint` and `NODE_ENV` never skip it. The only opt-out is `SKIP_ENV_VALIDATION=1` (exactly `1`), meant for Docker build stages that prerender without secrets. `options.skipValidation` overrides it in code. The Dot plugin (`@arki/env/dot`) validates at boot and fails with `ARKI_ENV_PLUGIN_E001`; `dot explain` never validates.
 

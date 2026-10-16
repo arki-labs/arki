@@ -35,7 +35,7 @@
  * that is intentional: the adapter only makes sense in a DOT app.
  */
 
-import type { ZodType } from 'zod';
+import type { StandardSchemaV1 } from '@arki/schema';
 
 import type { EmptyShape, Plugin } from '@arki/dot/plugin';
 import { DotPluginError, plugin } from '@arki/dot/plugin';
@@ -53,8 +53,8 @@ export const ENV_PLUGIN_ERROR_CODES = {
  * @typeParam TSchema - The shape of the `server` schema record. The
  *   resulting `app.services.env` is typed from this.
  */
-export type EnvDotOptions<TSchema extends Record<string, ZodType>> = {
-  /** Zod schemas for each env var the plugin validates. */
+export type EnvDotOptions<TSchema extends Record<string, StandardSchemaV1>> = {
+  /** One Standard Schema (Zod, Valibot, ArkType, ...) per env var the plugin validates. */
   readonly schema: TSchema;
   /**
    * Forwarded to `defineEnv`. If `true`, the validator is skipped
@@ -65,7 +65,7 @@ export type EnvDotOptions<TSchema extends Record<string, ZodType>> = {
 };
 
 /** The shape of services published by the env adapter. */
-export type EnvServices<TSchema extends Record<string, ZodType>> = {
+export type EnvServices<TSchema extends Record<string, StandardSchemaV1>> = {
   readonly env: ReturnType<typeof defineEnv<TSchema>>;
 };
 
@@ -75,7 +75,7 @@ export type EnvServices<TSchema extends Record<string, ZodType>> = {
  * @param options - Schema + optional config.
  * @returns A plugin that publishes `services.env`.
  */
-export function env<TSchema extends Record<string, ZodType>>(
+export function env<TSchema extends Record<string, StandardSchemaV1>>(
   options: EnvDotOptions<TSchema>,
 ): Plugin<EmptyShape, EnvServices<TSchema>> {
   return plugin({

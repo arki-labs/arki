@@ -1,5 +1,6 @@
+import type { StandardSchemaV1 } from '@arki/schema';
 import type { CreateEnv, DefaultCombinedSchema } from '@t3-oss/env-core';
-import type { ZodType } from 'zod';
+import { parse, pathOf, SchemaError } from '@arki/schema';
 import { createEnv } from '@t3-oss/env-core';
 
 /**
@@ -24,9 +25,7 @@ type ValidationIssues = Parameters<NonNullable<Parameters<typeof createEnv>[0]['
 export function formatIssues(name: string | undefined, issues: ValidationIssues): string {
   const label = name ? `[${name}] ` : '';
   const lines = issues.map(issue => {
-    const path = (issue.path ?? [])
-      .map(seg => (typeof seg === 'object' && seg !== null && 'key' in seg ? String(seg.key) : String(seg)))
-      .join('.');
+    const path = pathOf(issue).map(String).join('.');
     return `  ${path || '(root)'}: ${issue.message}`;
   });
   return `❌ ${label}Invalid environment variables:\n${lines.join('\n')}`;
@@ -38,14 +37,19 @@ export function formatIssues(name: string | undefined, issues: ValidationIssues)
  * adds the ARKI defaults (auto `runtimeEnv`, validation on in every environment, a legible labelled
  * error handler) without widening any value to `unknown`.
  *
+ * Every schema is a Standard Schema (Zod, Valibot, ArkType, or a hand-written `~standard` object); each
+ * value's type is the schema's OUTPUT, so defaults and coercions in the caller's schemas still apply.
+ * Validation is synchronous: a schema whose `validate` returns a Promise or throws makes the first read
+ * throw `SchemaRunError` (`ARKI_SCHEMA_E001` / `ARKI_SCHEMA_E002`), never a validation error.
+ *
  * `TPrefix` is kept as a string-literal generic on purpose: `createEnv` uses it to enforce that
  * client keys (and only client keys) carry the prefix. Widening it to `string` would make every
  * server key collapse to a type-level `ErrorMessage`, so the prefix must stay a literal.
  */
 export function defineEnv<
-  TServer extends Record<string, ZodType>,
-  TClient extends Record<string, ZodType> = NonNullable<unknown>,
-  TShared extends Record<string, ZodType> = NonNullable<unknown>,
+  TServer extends Record<string, StandardSchemaV1>,
+  TClient extends Record<string, StandardSchemaV1> = NonNullable<unknown>,
+  TShared extends Record<string, StandardSchemaV1> = NonNullable<unknown>,
   const TPrefix extends string = '',
   const TExtends extends Record<string, unknown>[] = [],
 >(config: {
@@ -142,10 +146,10 @@ export function defineEnv<
     // caller's `server`/`client`/`extends` are fully type-checked against `TServer`/`TClient`/`TExtends`
     // at the call site. This is the only seam where types are asserted — value types are never widened.
     const options = {
-      shared: config.shared ?? {},
+      shared: syncSchemas(config.shared),
       extends: config.extends,
-      server: config.server,
-      client: config.client ?? {},
+      server: syncSchemas(config.server),
+      client: syncSchemas(config.client),
       clientPrefix: config.clientPrefix ?? '',
       runtimeEnv,
       skipValidation,
@@ -164,6 +168,34 @@ export function defineEnv<
   };
 
   return lazyEnv(build);
+}
+
+/**
+ * The caller's schemas, each run through `parse` before t3 sees it. t3 would let a throwing validator's
+ * raw error escape and report an async one with its own error (leaving a rejection unhandled). Here both
+ * fail as `SchemaRunError` (E002 with the thrown `cause`, E001), and bad values still reach t3 as issues.
+ */
+function syncSchemas(schemas: Record<string, StandardSchemaV1> | undefined): Record<string, StandardSchemaV1> {
+  const wrapped: Record<string, StandardSchemaV1> = {};
+  for (const [key, schema] of Object.entries(schemas ?? {})) wrapped[key] = syncSchema(schema);
+  return wrapped;
+}
+
+/** Same `version`, `vendor` and `types` as `schema`; only `validate` changes. */
+function syncSchema<Input, Output>(schema: StandardSchemaV1<Input, Output>): StandardSchemaV1<Input, Output> {
+  return {
+    '~standard': {
+      ...schema['~standard'],
+      validate: value => {
+        try {
+          return { value: parse(schema, value) };
+        } catch (error) {
+          if (error instanceof SchemaError) return { issues: error.issues };
+          throw error;
+        }
+      },
+    },
+  };
 }
 
 /** The built env, and whether its reads may be copied (it is private and returns stored values). */

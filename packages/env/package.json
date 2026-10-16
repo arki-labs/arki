@@ -74,6 +74,7 @@
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
+    "@arki/schema": "workspace:*",
     "@arki/ts": "workspace:*",
     "@t3-oss/env-core": "catalog:env",
     "zod": "catalog:"
@@ -95,8 +96,10 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@types/node": "catalog:node",
+    "arktype": "catalog:",
     "envalid": "^8.2.0",
     "typescript": "catalog:",
+    "valibot": "catalog:",
     "vitest": "catalog:"
   }
 }

@@ -7,6 +7,7 @@
  *   - boots/disposes through the standard DOT lifecycle
  */
 
+import type { StandardSchemaV1 } from '@arki/schema';
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { z } from 'zod';
 
@@ -148,5 +149,11 @@ describe('@arki/env/dot validation at boot', () => {
     type Services = EnvServices<{ PORT: z.ZodDefault<z.ZodCoercedNumber>; NAME: z.ZodString }>;
     expectTypeOf<Services['env']['PORT']>().toEqualTypeOf<number>();
     expectTypeOf<Services['env']['NAME']>().toEqualTypeOf<string>();
+  });
+
+  it('types the service from a non-Zod schema by its output', () => {
+    // WHY: the adapter takes any Standard Schema; a string-in/number-out schema must publish a number.
+    type Services = EnvServices<{ PORT: StandardSchemaV1<string, number> }>;
+    expectTypeOf<Services['env']['PORT']>().toEqualTypeOf<number>();
   });
 });
