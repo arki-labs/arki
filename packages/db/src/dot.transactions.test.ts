@@ -1,7 +1,7 @@
 /**
  * `transactions()`: a usecase may open a transaction, but it never holds the
- * database. The plugin needs `db` unbound (the feature binds its own handle
- * at `.infra()`), and publishes one function, `transaction(fn)`: `fn` runs
+ * database. The plugin is bound to the feature's database handle (`.infra()`
+ * refuses any other), and publishes one function, `transaction(fn)`: `fn` runs
  * inside a transaction of that database, committed on return and rolled
  * back on a throw. No query builder and no `db` leave the plugin, so with
  * `db` entrypoint-only a usecase can open a transaction and nothing else.
@@ -11,6 +11,7 @@ import { defineApp } from '@arki/dot';
 import type { DepsOf } from '@arki/dot/feature';
 import { defineFeature, entrypointOnly } from '@arki/dot/feature';
 import type { Provided } from '@arki/dot/plugin';
+import { plugin, rename } from '@arki/dot/plugin';
 import { defineRelations, sql } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
@@ -38,7 +39,7 @@ const createNoteRepository = (handle: Database) => ({
 });
 
 const store = repos({ notes: createNoteRepository });
-const transactional = transactions<Db>();
+const transactional = transactions(database.provides.db);
 
 /** `db` is entrypoint-only: the usecases open transactions through `transaction` and bind the repos with `withTx(tx)`. */
 const ledgerDeps = defineFeature('ledger')
@@ -117,8 +118,22 @@ describe('transactions(): a usecase opens a transaction and nothing else', () =>
     // Only `transaction` leaves the plugin: no query builder, no `db`.
     expectTypeOf<keyof Provided<typeof transactional.provides.transaction>>().toEqualTypeOf<never>();
     // @ts-expect-error `db` is entrypoint-only: a usecase cannot hold the database
-    ledgerDeps.usecases({ bad: ({ db }: { db: Db }) => () => db });
-    // @ts-expect-error a plain object is not a database: it has no `transaction(fn)`
-    transactions<{ query: () => void }>();
+    ledgerDeps.usecases({
+      bad:
+        ({ db }: { db: Db }) =>
+        () =>
+          db,
+    });
+    const plain = plugin({ name: 'plain', provides: { thing: () => ({ query: () => 0 }) } });
+    // @ts-expect-error a handle to a plain object is not a database handle: the service has no `transaction(fn)`
+    transactions(plain.provides.thing);
+    // Another database's handle (a second instance, renamed as the kernel requires) is refused where the feature binds it.
+    const reports = rename(db({ driver: 'pglite', memory: true, relations }), { db: 'reportsDb' }, 'reports-db');
+    expect(() =>
+      defineFeature('mixed')
+        .needs({ db: entrypointOnly(database.provides.db) })
+        // @ts-expect-error `transactions` is bound to "reports-db"; this feature's `db` is `database`'s handle
+        .infra(transactions(reports.provides.reportsDb)),
+    ).toThrow(/binds "db" to a handle other than the feature's/);
   });
 });

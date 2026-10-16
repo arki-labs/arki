@@ -39,7 +39,6 @@
  * that is intentional: the adapter only makes sense in a DOT app.
  */
 
-import type { EmptyShape, Plugin } from '@arki/dot/plugin';
 import type { Lazy } from '@arki/ts';
 import { DotPluginError, plugin } from '@arki/dot/plugin';
 import { resolveLazy } from '@arki/ts';
@@ -147,7 +146,7 @@ function open(url: string, config: KvDotOptions): KV | Promise<KV> {
  *   `kv(() => ({ url: env.REDIS_URL, namespace: 'my-app' }))`.
  * @returns A plugin that publishes `services.kv`.
  */
-export function kv(options: Lazy<KvDotOptions> = {}): Plugin<EmptyShape, KvServices> {
+export function kv(options: Lazy<KvDotOptions> = {}) {
   return plugin({
     name: 'kv',
     version: '0.1.0',

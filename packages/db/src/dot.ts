@@ -57,7 +57,7 @@ import type { AnyRelations, Logger } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { PgliteDatabase } from 'drizzle-orm/pglite';
 
-import type { EmptyShape, Plugin } from '@arki/dot/plugin';
+import type { EmptyShape, Handle, Plugin } from '@arki/dot/plugin';
 import { plugin, service, DotPluginError } from '@arki/dot/plugin';
 
 import type { PgliteInitOptions } from './runtime-local.js';
@@ -130,13 +130,15 @@ export type DbServices<TRelations extends AnyRelations, TDriver extends 'pg' | '
  */
 export function db<TRelations extends AnyRelations>(
   options: PgDbDotOptions<TRelations>,
-): Plugin<EmptyShape, DbServices<TRelations, 'pg'>>;
+): Plugin<EmptyShape, DbServices<TRelations, 'pg'>, EmptyShape, 'db'>;
 export function db<TRelations extends AnyRelations>(
   options: PgliteDbDotOptions<TRelations>,
-): Plugin<EmptyShape, DbServices<TRelations, 'pglite'>>;
+): Plugin<EmptyShape, DbServices<TRelations, 'pglite'>, EmptyShape, 'db'>;
+// The overloads spell the type `plugin()` would infer, plus the name: the handles carry `provider: 'db'`, so a feature's
+// identity checks tell this adapter apart from another same-shaped one.
 export function db<TRelations extends AnyRelations>(
   options: DbDotOptions<TRelations>,
-): Plugin<EmptyShape, DbServices<TRelations, 'pg' | 'pglite'>> {
+): Plugin<EmptyShape, DbServices<TRelations, 'pg' | 'pglite'>, EmptyShape, 'db'> {
   const driver = options.driver ?? 'pg';
 
   if (driver === 'pglite') {
@@ -175,7 +177,7 @@ export function db<TRelations extends AnyRelations>(
           pgliteHandle = undefined;
         }
       },
-    }) as Plugin<EmptyShape, DbServices<TRelations, 'pg' | 'pglite'>>;
+    });
   }
 
   // Node-postgres path: createDb already reads env vars and constructs the
@@ -220,16 +222,14 @@ export function db<TRelations extends AnyRelations>(
         await pgHandle.$client.end();
       }
     },
-  }) as Plugin<EmptyShape, DbServices<TRelations, 'pg' | 'pglite'>>;
+  });
 }
 
 /**
  * DOT plugin: migrate during `boot`, after the `db` plugin and before any
  * plugin that reads tables. Needs the `db` service; provides nothing.
  */
-export function dbMigrations<TRelations extends AnyRelations = AnyRelations>(
-  options: MigrateDbOptions,
-): Plugin<{ readonly db: MigratableDb<TRelations> }, Record<never, never>> {
+export function dbMigrations<TRelations extends AnyRelations = AnyRelations>(options: MigrateDbOptions) {
   return plugin({
     name: 'db-migrations',
     version: '0.1.0',
@@ -394,23 +394,26 @@ export type OpenTransaction<Tx> = <T>(fn: (tx: Tx) => Promise<T>) => Promise<T>;
  * `transaction(fn)` — and nothing else: no query builder, no `db`. Pair it
  * with `.needs({ db: entrypointOnly(database.provides.db) })`: a usecase
  * may open a transaction and hand its `tx` on, but it can never run raw SQL.
- * `TDb` is the feature's database type (`Db` from the app's `db.ts`); the
- * transaction type is read off it.
+ * It takes the database HANDLE, never a type: the database and transaction
+ * types are read off the handle, and `.infra()` checks the feature declares
+ * that same handle — another database's handle is a compile error.
  *
  * @example
  * ```ts
  * const digestDeps = defineFeature('digest')
  *   .needs({ db: entrypointOnly(database.provides.db) })
- *   .infra(store, transactions<Db>());
+ *   .infra(store, transactions(database.provides.db));
  * // usecases/compile.ts
  * const compile = ({ transaction, compiler }: Deps) => (plan: DigestPlan) => transaction(tx => compiler.store(tx, plan));
  * ```
  */
-export function transactions<TDb extends Transactable<Tx>, Tx = TxOf<TDb>>() {
+export function transactions<TDb extends Transactable<Tx>, K extends string, O extends string, Tx = TxOf<TDb>>(
+  db: Handle<TDb, K, O>,
+) {
   return plugin({
     name: 'transactions',
-    // Unbound: the feature binds `db` to its own handle at `.infra()`.
-    needs: { db: service<TDb>() },
+    // Bound to the feature's database handle — key and provider literals included, so `.infra()` refuses any other.
+    needs: { db },
     provides: {
       transaction:
         ({ db }): OpenTransaction<Tx> =>

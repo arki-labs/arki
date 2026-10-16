@@ -185,6 +185,32 @@ still none, nothing to sync. Record the grep in the commit message.
 
 ---
 
+### Phase 1 result (2026-10-16) — DONE, with one doctrine change
+
+- Task 1.1: `transactions<TDb, K, O, Tx = TxOf<TDb>>(db: Handle<TDb, K, O>)` — the handle's `key`/`provider` literals
+  travel into the plugin's needs shape, so a feature bound to another database's handle is a compile error (test: a
+  `rename(db(...), { db: 'reportsDb' }, 'reports-db')` instance). A bare `H extends Handle<…>` parameter does not
+  work: `CtxOf` on a bare type parameter stays deferred and `db.transaction` is not visible in the factory. `db()`'s
+  overloads now spell `Plugin<…, EmptyShape, 'db'>`; `dbMigrations()` and `kv()` return the inferred type (their casts
+  were unnecessary). `locks()` and `kv.optional()` already inferred. The other seven library plugins (env, http, queue,
+  journal, schedule, auth, resilience) keep erased `Plugin<N, P>` annotations — none is bound by feature infra today;
+  convert when one is.
+- Task 1.2: the plan collided with RFC R1.7's lint `arki-feature-layers/infra-runtime-imports` (infra declares needs
+  unbound; no runtime import of `db`/`kv` or any `feature.ts`). Founder decision (2026-10-16): **B and C** — a feature's
+  own infra may name handles directly (`needs: { db: database.provides.db }`; lint now bans only the plugin's own or an
+  ancestor's `feature.ts` — a module cycle — and `usecases/`/`entrypoints/`; RFC amendment recorded), and library plugins
+  take handles as parameters (Task 1.1). Five Avocabo infra plugins bound: `daily-digest/infra/extras.ts` (needs object
+  + `DigestExtrasDeps = CtxOf<typeof extrasNeeds>` replaces the hand-written type; the service file and its test import
+  the type from `./extras`), `workspaces/infra/registry.ts`, `waitlist/infra/signup-limiter.ts`,
+  `newsletter-ingestion/.../reconciliation/infra/alert-dispatch.ts`. `semantic-search/infra/reconciler.ts` was moved by
+  a concurrent session (vector-index extraction) while this phase ran; its `service<Db>()` and
+  `content-deduplication/infra/embedder.ts` (`service<Embedder>()`, a sibling-provided need — correct as unbound) remain.
+- Task 1.3: `grep -rn "service<\|transactions<\|testApp(" turbo/generators/templates` → no hits; nothing to sync.
+- Evidence: `@arki/db` tsc 0 / 148 tests; `@arki/kv` tsc 0; lint-rule tests 32/32; Avocabo backend HEAD + these files
+  in an isolated copy: tsc 0, 267 tests of the touched features pass, no import-cycle (TDZ) error in the full run. The
+  working-tree Avocabo suite is red from the concurrent vector-index move (`_shared/*` deleted), not from this phase.
+  Pre-existing lint debt left alone: 6 `no-unnecessary-type-assertion` in `digest-extras-service.test.ts` (present at HEAD).
+
 ## Phase 2 — Fix #2: inline `.usecases()` deps (independent of Phase 1)
 
 **Modify** `packages/dot/src/define-feature.ts`

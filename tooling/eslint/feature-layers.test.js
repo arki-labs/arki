@@ -145,14 +145,17 @@ test('usecases may read repos: the procedures rule only covers entrypoints/proce
   assert.deepEqual(ruleIds(USECASE, `export const f = ({ repos }) => () => repos.push.find();`), []);
 });
 
-test('an infra plugin declares its needs unbound: no runtime import of the app db/kv modules or any feature.ts', () => {
+test('an infra plugin names the handles it needs, but never imports its own feature.ts (a cycle) or inner layers', () => {
   const store = 'src/features/demo/infra/store.ts';
-  assert.deepEqual(ruleIds(store, `import { database } from '../../../db';`), [INFRA]);
-  assert.deepEqual(ruleIds(store, `import { cache } from '../../../kv';`), [INFRA]);
+  // The app's adapters and other features' chain files hold the handles a plugin binds in `needs`.
+  assert.deepEqual(ruleIds(store, `import { database } from '../../../db';`), []);
+  assert.deepEqual(ruleIds(store, `import { cache } from '../../../kv';`), []);
   assert.deepEqual(ruleIds(store, `import type { Database } from '../../../db';`), []);
-  assert.deepEqual(ruleIds(store, `import { demoLogic } from '../feature';`), [INFRA]);
-  assert.deepEqual(ruleIds(store, `import { otherLogic } from '../../other/feature';`), [INFRA]);
+  assert.deepEqual(ruleIds(store, `import { otherLogic } from '../../other/feature';`), []);
   assert.deepEqual(ruleIds(store, `import type { Repos } from '../../other/feature';`), []);
+  // Its own feature.ts imports it: a value import back is a module cycle.
+  assert.deepEqual(ruleIds(store, `import { demoLogic } from '../feature';`), [INFRA]);
+  assert.deepEqual(ruleIds(store, `import type { Deps } from '../feature';`), []);
   assert.deepEqual(ruleIds(store, `import { run } from '../usecases/run';`), [INFRA]);
   assert.deepEqual(ruleIds(store, `import { plugin, service } from '@arki/dot/plugin';`), []);
 });
@@ -162,8 +165,19 @@ test('a nested child is a feature root of its own: every layer rule applies ther
   assert.deepEqual(ruleIds(child, `import { ranker } from '../infra/ranker';`), [NEW_RULE]);
   assert.deepEqual(ruleIds(child, `import { c } from '../entrypoints/rpc';`), [RESTRICT]);
   assert.deepEqual(ruleIds(child, `import { compileLogic } from '../feature';`), [BACK]);
-  assert.deepEqual(ruleIds('src/features/digest/features/compile/infra/ranker.ts', `import { database } from '../../../../../db';`), [INFRA]);
-  assert.deepEqual(ruleIds('src/features/digest/features/compile/entrypoints/rpc.ts', `import { x } from '../usecases/compile-for';`), [RESTRICT]);
+  assert.deepEqual(
+    ruleIds('src/features/digest/features/compile/infra/ranker.ts', `import { database } from '../../../../../db';`),
+    [],
+  );
+  // An ancestor's feature.ts imports the child, which imports its infra: the import back is the same cycle.
+  assert.deepEqual(
+    ruleIds('src/features/digest/features/compile/infra/ranker.ts', `import { digest } from '../../../feature';`),
+    [INFRA],
+  );
+  assert.deepEqual(
+    ruleIds('src/features/digest/features/compile/entrypoints/rpc.ts', `import { x } from '../usecases/compile-for';`),
+    [RESTRICT],
+  );
 });
 
 test("a parent's contract mounts its children's contracts; the app contract still mounts the top-level ones", () => {

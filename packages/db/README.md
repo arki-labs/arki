@@ -375,7 +375,7 @@ forgetting to pass `tx` by hand today.
 // features/digest/feature.ts
 const digestDeps = defineFeature('digest')
   .needs({ db: entrypointOnly(database.provides.db) })
-  .infra(store, transactions<Db>()); // Db from the app's db.ts
+  .infra(store, transactions(database.provides.db)); // bound to the feature's handle; types read off it
 
 // features/digest/usecases/compile.ts
 export const compile =
@@ -389,9 +389,10 @@ export const compile =
   returns and rolled back when it throws. No query builder and no `db`
   leave the plugin, so with `db` entrypoint-only a usecase can open a
   transaction and hand its `tx` on, but never run raw SQL.
-- **`db` stays unbound.** Like `repos()`, it needs `db` by alias; the
-  feature names the handle once in `.needs()`. A feature that lists it
-  without declaring `db` is refused (compile error, runtime error).
+- **`db` is the feature's handle.** `transactions(database.provides.db)` is
+  bound to that handle, key and provider included; the feature must declare
+  the same one in `.needs()`. Another database's handle, or no `db` need at
+  all, is refused (compile error, runtime error).
 - **The `tx` type is read off the database** (`TxOf<Db>`), so
   `repos.withTx(tx)` and a child's `store(tx, …)` take it with no cast.
 
