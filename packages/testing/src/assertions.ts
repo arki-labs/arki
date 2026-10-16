@@ -5,7 +5,8 @@
  * beyond the basic assertions built into IntegrationTester.
  */
 
-import type { ZodSchema } from 'zod/v4';
+import type { SchemaInput, StandardSchemaV1 } from '@arki/schema';
+import { parse, SchemaError } from '@arki/schema';
 
 import type { Timestamp } from './timestamps';
 import { describeKind, epochNanoseconds, isTimestamp } from './timestamps';
@@ -32,7 +33,7 @@ export function assertPaginationValid(
     itemsCount?: number;
     total?: number;
     hasMore?: boolean;
-    itemSchema?: ZodSchema;
+    itemSchema?: StandardSchemaV1;
   },
 ): asserts response is {
   items: unknown[];
@@ -73,9 +74,13 @@ export function assertPaginationValid(
   const itemSchema = options?.itemSchema;
   if (itemSchema) {
     items.forEach((item, index) => {
-      const result = itemSchema.safeParse(item);
-      if (!result.success) {
-        throw new Error(`Item at index ${index} failed validation: ${result.error.message}`);
+      try {
+        parse(itemSchema, item);
+      } catch (error) {
+        if (error instanceof SchemaError) {
+          throw new Error(`Item at index ${index} failed validation: ${error.message}`, { cause: error });
+        }
+        throw error;
       }
     });
   }
@@ -404,10 +409,14 @@ export function assertOneOf<T>(value: T, expectedValues: T[], label = 'value'): 
 }
 
 /**
- * Assert value matches Zod schema
+ * Assert value matches a Standard Schema (zod, valibot, arktype, ...)
+ *
+ * Assertions are synchronous: an async schema throws a `SchemaRunError`
+ * (ARKI_SCHEMA_E001) instead of being awaited. A validator that throws is
+ * rethrown as is, never reported as invalid data.
  *
  * @param value - Value to validate
- * @param schema - Zod schema
+ * @param schema - Standard Schema
  * @param label - Optional label for error message
  *
  * @example
@@ -416,9 +425,17 @@ export function assertOneOf<T>(value: T, expectedValues: T[], label = 'value'): 
  * assertMatchesSchema(game, gameSchema, 'game');
  * ```
  */
-export function assertMatchesSchema<T>(value: unknown, schema: ZodSchema<T>, label = 'value'): asserts value is T {
-  const result = schema.safeParse(value);
-  if (!result.success) {
-    throw new Error(`${label} failed schema validation: ${result.error.message}`);
+export function assertMatchesSchema<Schema extends StandardSchemaV1>(
+  value: unknown,
+  schema: Schema,
+  label = 'value',
+): asserts value is SchemaInput<Schema> {
+  try {
+    parse(schema, value);
+  } catch (error) {
+    if (error instanceof SchemaError) {
+      throw new Error(`${label} failed schema validation: ${error.message}`, { cause: error });
+    }
+    throw error;
   }
 }

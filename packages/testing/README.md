@@ -355,7 +355,7 @@ assertPaginationValid(result, {
   itemsCount: 10,
   total: 25,
   hasMore: true,
-  itemSchema: gameSchema, // Optional Zod schema
+  itemSchema: gameSchema, // Optional Standard Schema (zod, valibot, arktype, ...)
 });
 
 // Recent timestamp (default: within 10 seconds)

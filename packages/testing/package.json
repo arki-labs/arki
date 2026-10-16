@@ -78,9 +78,9 @@
     "@arki/db": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",
+    "@arki/schema": "workspace:*",
     "@faker-js/faker": "catalog:testing",
-    "drizzle-orm": "catalog:drizzle",
-    "zod": "catalog:"
+    "drizzle-orm": "catalog:drizzle"
   },
   "devDependencies": {
     "@arki/auth": "workspace:*",
@@ -90,9 +90,12 @@
     "@arki/vitest-config": "workspace:*",
     "@testcontainers/postgresql": "catalog:testing",
     "@testcontainers/redis": "catalog:testing",
+    "arktype": "catalog:",
     "msw": "catalog:testing",
     "testcontainers": "catalog:testing",
-    "vitest": "catalog:"
+    "valibot": "catalog:",
+    "vitest": "catalog:",
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "@arki/auth": "workspace:*",
