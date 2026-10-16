@@ -375,9 +375,10 @@ describe('billing plugin', () => {
 ```
 
 `testApp` returns a `DotAppBuilder` you can drive yourself; `bootTestApp`
-boots immediately. Both honour the same lifecycle as production apps.
-Note: `testApp` takes an erased plugin array, so the compile-time guard does
-not apply — the kernel's runtime validation still does.
+boots immediately. Both honour the same lifecycle as production apps. Both
+read `app.services` off the plugin tuple (`app.services.billing` above is
+typed) and refuse a tuple that would not mount; a runtime-built array skips
+that compile-time guard — the kernel's runtime validation still applies.
 
 ## Next steps
 

@@ -175,8 +175,8 @@ type mismatches, and key collisions **compile errors at the call site**:
 
 ```ts skip="shows wiring that must not compile"
 defineApp('shop')
-  .use(billing)      // ❌ "Expected 2 arguments, but got 1."
-  .use(database);    //    billing's `db` need has no earlier provider
+  .use(billing) // ❌ the argument is refused: "Property 'DOT: this unit needs services that nothing before it provides…' is missing"
+  .use(database); //    billing's `db` need has no earlier provider
 
 defineApp('shop')
   .use(database)
@@ -234,7 +234,8 @@ const router = routerFor({ digest: digestRpcContract }, [dailyDigest]);
 - **Usecases.** One factory per usecase, one file each:
   `usecases/preview.ts` exports `preview = (deps: Pick<Deps, 'store' | 'plans'>) => …`,
   with `import type { Deps } from '../feature'`. A factory asks only for what
-  it uses, so a unit test passes two fakes and boots nothing. A factory that
+  it uses, so a unit test passes two fakes and boots nothing. An inline
+  factory needs no annotation: `({ store }) => …` gets the deps type. A factory that
   asks for a dep the feature lacks is a compile error naming it
   (`'DOT: a usecase asks for a dep the feature does not provide': { sendDue: 'mailer' }`).
   Built once per boot and handed to every `provides` factory and entrypoint.
@@ -448,7 +449,7 @@ declare function createDigest(access: Entitlements): { previewFor(userId: string
 const database = plugin({ name: 'database', provides: { db: () => openDb() } });
 
 export const billing = feature('billing', {
-  needs: { db: service<Db>() },
+  needs: { db: database.provides.db },
   provides: { entitlements: ({ db }) => createEntitlements(db) },
   boot: ({ entitlements }) => entitlements.warmUp(), // side effects only; sees the factories' values
 });
@@ -958,8 +959,11 @@ are the real kernel's — reverse-order teardown, lazy auto-dispose, and
 accept a plain `T` fake (lifted automatically) or `lazyOf(value)`.
 
 For integration tests across several real plugins, `testApp([...plugins])`
-builds an app from an erased plugin array (runtime validation only), and
-`bootTestApp` is the one-line boot-and-return variant.
+builds an app from a plugin tuple: `app.services` is typed from the plugins,
+and a tuple that would not mount (a need before its provider, a wire key
+provided twice) is a compile error on the argument. A runtime-built array
+mounts with runtime validation only. `bootTestApp` is the one-line
+boot-and-return variant.
 
 ## Operations
 

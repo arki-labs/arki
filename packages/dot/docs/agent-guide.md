@@ -212,7 +212,8 @@ as Mermaid.
    `@arki/dot/feature`. Order: `needs`, `infra`, `usecases`, `provides`,
    `entrypoints`. The README section "Features as a chain" has the full shape.
 2. One file per usecase in `usecases/`. It imports `type Deps` from
-   `../feature` and asks for `Pick<Deps, ...>`.
+   `../feature` and asks for `Pick<Deps, ...>`. (A factory written inline in
+   `feature.ts` needs no annotation: `({ store }) => …` gets the deps type.)
 3. Mount it with `.features([myFeature])`.
 4. `npx dot explain --json | jq '.data.dependencies'`: the feature's edges
    show, with the capability `key`.

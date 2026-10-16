@@ -200,12 +200,12 @@ still none, nothing to sync. Record the grep in the commit message.
   own infra may name handles directly (`needs: { db: database.provides.db }`; lint now bans only the plugin's own or an
   ancestor's `feature.ts` — a module cycle — and `usecases/`/`entrypoints/`; RFC amendment recorded), and library plugins
   take handles as parameters (Task 1.1). Five Avocabo infra plugins bound: `daily-digest/infra/extras.ts` (needs object
-  + `DigestExtrasDeps = CtxOf<typeof extrasNeeds>` replaces the hand-written type; the service file and its test import
-  the type from `./extras`), `workspaces/infra/registry.ts`, `waitlist/infra/signup-limiter.ts`,
-  `newsletter-ingestion/.../reconciliation/infra/alert-dispatch.ts`, and (follow-up, same day)
-  `vector-index/infra/reconciler.ts` (`db: database.provides.db`, `embedder`/`vectorIndex` from the sibling `vectors`
-  plugin's handles). `content-deduplication/infra/embedder.ts` (`service<Embedder>()`, a sibling-provided need — correct
-  as unbound) remains.
+  - `DigestExtrasDeps = CtxOf<typeof extrasNeeds>` replaces the hand-written type; the service file and its test import
+    the type from `./extras`), `workspaces/infra/registry.ts`, `waitlist/infra/signup-limiter.ts`,
+    `newsletter-ingestion/.../reconciliation/infra/alert-dispatch.ts`, and (follow-up, same day)
+    `vector-index/infra/reconciler.ts` (`db: database.provides.db`, `embedder`/`vectorIndex` from the sibling `vectors`
+    plugin's handles). `content-deduplication/infra/embedder.ts` (`service<Embedder>()`, a sibling-provided need — correct
+    as unbound) remains.
 - Task 1.3: `grep -rn "service<\|transactions<\|testApp(" turbo/generators/templates` → no hits; nothing to sync.
 - Evidence: `@arki/db` tsc 0 / 148 tests; `@arki/kv` tsc 0; lint-rule tests 32/32; Avocabo backend HEAD + these files
   in an isolated copy: tsc 0, 267 tests of the touched features pass, no import-cycle (TDZ) error in the full run. The
@@ -249,8 +249,8 @@ avocabo usecases are annotated; they must keep compiling).
 - Probe (`di-probes/dot/06b-usecases-two-overloads.ts`, a model of the two overloads): (a) inline `({ now }) => …`
   and `({ repos }) => …` infer through overload 1 with no annotation; a `Pick<Deps, 'repos'>` annotation and a
   defaulted inner parameter still fit. (b) The over-asking call fails with `No overload matches this call. The last
-  overload gave the following error … Property ''DOT: a usecase asks for a dep the feature does not provide'' is
-  missing … { readonly asksTooMuch: "mailer" }` — the label shows. (c) Scale generator at N=50 on the real
+overload gave the following error … Property ''DOT: a usecase asks for a dep the feature does not provide'' is
+missing … { readonly asksTooMuch: "mailer" }` — the label shows. (c) Scale generator at N=50 on the real
   `define-feature.ts`: 749,782 → 751,096 instantiations (+0.18%, budget 5%); check time 0.33 s → 0.31 s.
 - Shipped: `UsecaseFactoriesOf<D>` (exported from `@arki/dot/feature`), `.usecases()` as two overloads (inferring
   first, today's labelled signature as the fallback), a doc comment saying why two. Test "infers inline usecase deps"
@@ -332,8 +332,8 @@ array, write it as a tuple literal.
   `testApp<TServices>()` form is gone (0.x, no compat): the type argument is now the plugin tuple.
 - Probe 02/03 after the change (first error line per site, was `TS2554: Expected 2 arguments, but got 1`):
   `TS2345: Argument of type '[DefinedFeature<…>]' is not assignable to parameter of type 'readonly [DefinedFeature<…>]
-  & { ...; }'` followed by `Property ''DOT: a unit in this list cannot be mounted at its position'' is missing …
-  NeedsError<…>`. The label is in the message, on the argument; TypeScript elides it to `{ ...; }` on the first line
+& { ...; }'` followed by `Property ''DOT: a unit in this list cannot be mounted at its position'' is missing …
+NeedsError<…>`. The label is in the message, on the argument; TypeScript elides it to `{ ...; }` on the first line
   when the type is long and prints it on the second.
 - Tests: `define-app.test.ts` "the wiring errors sit on the argument, with the DOT label; testApp types its services
   from the tuple" (`Parameters<typeof bare.use<…>>[0]` has the needs label, `withDb.use<…>` the collision label,
@@ -384,7 +384,7 @@ seconds, so it is stable on a busy machine. Exclude it from `test:runtimes` (it 
   `TPlugins[I]` plus `NextIndex[I]` (a 1024-entry literal tuple in `src/tuple-index.ts`, the only O(1) way to add one to
   a number literal in the type system; prettier-ignored, hand-wrapped). A list longer than the table is refused with
   `'DOT: a list may hold at most this many units'`. Each walk enters through a one-time `extends readonly [...infer
-  All]` match: for a GENERIC list `All` collapses to its constraint and the walk ends at step 0 — without it
+All]` match: for a GENERIC list `All` collapses to its constraint and the walk ends at step 0 — without it
   TypeScript expands `NextIndex` forever while computing the conditional's constraint (`Excessive stack depth`).
 - Numbers (features probe, instantiations): N=50 766,013 → 340,081; N=100 2,650,513 → 937,481; N=200 over the
   compiler's limit (TS2589) → 3,015,490, compiles. Plain plugins via `.useAll()`: 100/200/400 → 185k / 518k / 1.73M
@@ -424,6 +424,29 @@ inline usecase inference, infra duplicate guard, app-guard flattening with the b
 - #7 → Phase 3, `define-feature.infra-needs.test.ts`
 - #8 → Task 4.2, callers updated
 - Template grep (Task 1.3) recorded; changeset present; `turbo typecheck test --filter=@arki/dot` and the dependents list green.
+
+### Phase 6 result (2026-10-16) — DONE
+
+- Docs: README guard example shows the new message (the argument is refused, `DOT:` label in it); the usecases bullet
+  and `agent-guide.md` say an inline factory needs no annotation; the `testApp` paragraphs (README,
+  `plugin-authoring.md`) say services are typed from the tuple and a tuple that would not mount is refused; the
+  object-form `billing` feature example binds `database.provides.db`; `upgrade-guide.md` lists this release's
+  changes (handle identity, `transactions(handle)`, errors on the argument, `testApp` typed, inline usecases, infra
+  duplicate guard, the 1024-unit list limit). `define-feature.ts` header: infra names its handles or declares them
+  unbound. The remaining `service<T>()` examples are library contracts, tokens or hosts that cannot import the
+  provider — the case the README names for it. `composition-doctrine.md` already carried the residual-identity
+  note (Phase 1). `arki-doc-examples`: 25 examples, 0 failures.
+- Changesets: seven per-phase files instead of the one combined file the plan named — `dot-handle-identity`,
+  `db-transactions-handle`, `library-plugins-keep-name`, `dot-inline-usecase-deps`, `dot-infra-dup-key`,
+  `dot-guards-on-argument-typed-testapp`, `dot-list-guard-index-walk`.
+- Self-check: #1/#6 → Phase 0/1, `define-feature.identity.test.ts`; #2 → Phase 2, `define-feature.test.ts`; #3 →
+  Task 4.1, `define-app.test.ts` + `test-plugin.test.ts`; #4 → Tasks 1.1/1.2 + follow-up,
+  `grep service< apps/avocabo/backend/src` = 1 (`content-deduplication/infra/embedder.ts`, a sibling-provided need,
+  unbound on purpose); #5 → Phase 5, `typecheck-budget.test.ts`; #7 → Phase 3, `define-feature.infra-needs.test.ts`;
+  #8 → Task 4.2, callers updated. Template grep: 2 hits, both the eslint-config comment that recommends handles over
+  `service<T>()` (no code). `turbo typecheck test --filter=@arki/dot`: 8/8 green. Dependents: the working tree is
+  red from another session's `@arki/mail` work and pre-existing lib-target errors; 0 errors mention a Dot concept
+  (Phase 2 run over 106 packages, Avocabo re-checked today).
 
 ## Founder decisions (2026-10-16)
 

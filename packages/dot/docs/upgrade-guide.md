@@ -42,6 +42,20 @@ Other changes in the same release:
   declares.
 - `providesOf([...])` accepts plugins as well as features.
 - New `fake(handle, value)` in `@arki/dot/test-harness`.
+- Handles carry the provider's name in the type (`database.provides.db.provider`
+  is `'database'`), and the feature builder reads it: a need bound to one
+  plugin's handle is not satisfied by another plugin's same-shaped service.
+  Library plugins take the handle as a parameter: `transactions(database.provides.db)`
+  replaces `transactions<Db>()`.
+- Wiring errors sit on the argument: `.use(x)` / `.features([...])` with a
+  unit that cannot mount fails as "Property 'DOT: this unit needs services
+  that nothing before it provides…' is missing", not "Expected 2 arguments,
+  but got 1". `testPlugin(...).boot()` reports through its `this` type.
+- `testApp(plugins)` / `bootTestApp(plugins)` type `app.services` from the
+  tuple; the explicit `testApp<TServices>()` type argument is gone — drop it.
+- `.usecases()` infers inline factories (`({ repos }) => …`); `.infra()`
+  refuses two plugins that provide the same key; a list of more than 1024
+  units is refused.
 - Removed: the `InferredProvides` type. `provide(token, value)` is only a
   record helper now.
 - `@arki/db/dot` `db()` takes `url?: () => string | undefined`, read at boot

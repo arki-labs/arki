@@ -16,9 +16,11 @@
  * `{ ...needs, ...infra, ...children }` (minus the entrypoint-only needs);
  * `provides` factories and entrypoints get the same plus `usecases`.
  *
- * Handles enter a feature through one door, `.needs()`. An infra plugin
- * declares its needs unbound (`service<Db>()`); `.infra()` binds each alias to
- * a sibling's key first, then to the feature's need of the same alias.
+ * Handles enter a feature through one door, `.needs()`. An infra plugin names
+ * the handles it needs (`db: database.provides.db`) or declares them unbound
+ * (`service<Db>()`); `.infra()` binds each alias to a sibling's key first, then
+ * to the feature's need of the same alias, and refuses a handle that is not
+ * the feature's.
  *
  * The feature compiles to plain kernel units (`plugins()`): every infra
  * plugin, its keys qualified as `<feature>.<key>` and its unit named
