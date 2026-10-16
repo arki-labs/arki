@@ -25,6 +25,7 @@
 
 import type { Instant } from '@arki/date';
 import type { CommandRunner, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 import { userIdSchema } from '../core/user-id.js';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
@@ -119,10 +120,11 @@ function legacyMinor(amount: number, currency: string): number {
   return toMinorColumn(fromStoredNumber(Number(amount.toFixed(2)), currency));
 }
 
-export function createRefundsJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
-  j: JournalDefinitions<Meta, Tx, AppDb>,
-  tables: Pick<RefundsTables, 'refunds'> & Pick<CoreTables, 'payments'>,
-) {
+export function createRefundsJournal<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+>(j: JournalDefinitions<Meta, Tx, AppDb>, tables: Pick<RefundsTables, 'refunds'> & Pick<CoreTables, 'payments'>) {
   const { payments } = tables;
   const refundRequest = {
     paymentId: paymentIdSchema,
@@ -398,7 +400,7 @@ export function createRefundsJournal<Meta extends z.ZodObject, Tx extends Transa
     events: { RefundRequested, RefundRequestedV2, RefundApproved, RefundRejected, RefundProcessed, RefundCompleted, RefundFailed },
     commands,
     /** `run` is the app's command runner: `context.runCommand` in a request, `ctx.run` inside a command. */
-    writes: (run: CommandRunner<z.output<Meta>, Tx>): RefundWrites => ({
+    writes: (run: CommandRunner<SchemaOutput<Meta>, Tx>): RefundWrites => ({
       requestRefund: input => writtenRow(run(commands.requestRefund, input), 'requestRefund'),
       approveRefund: input => writtenRow(run(commands.approveRefund, input), 'approveRefund'),
       rejectRefund: input => writtenRow(run(commands.rejectRefund, input), 'rejectRefund'),

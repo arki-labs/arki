@@ -17,6 +17,7 @@ import { eq } from 'drizzle-orm';
 
 import type { Instant } from '@arki/date';
 import type { JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
+import type { StandardSchemaV1 } from '@arki/schema';
 import { userIdSchema } from '../user-id.js';
 import { z } from '@arki/contracts';
 import { fromDate } from '@arki/date';
@@ -192,7 +193,7 @@ function requireSubscription(row: SubscriptionRow | null, subscriptionId: string
 }
 
 export function createSubscriptionJournal<
-  Meta extends z.ZodObject,
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
 >(j: JournalDefinitions<Meta, Tx, AppDb>, subscriptions: CoreTables['subscriptions']) {

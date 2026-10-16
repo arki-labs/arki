@@ -414,6 +414,7 @@
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/money": "workspace:*",
+    "@arki/schema": "workspace:*",
     "@t3-oss/env-core": "catalog:env",
     "drizzle-orm": "catalog:drizzle",
     "stripe": "catalog:",

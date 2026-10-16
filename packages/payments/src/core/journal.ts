@@ -16,8 +16,8 @@
  * commands. A rejected rule throws the `CommandError` of `@arki/journal`.
  */
 
-import type { z } from '@arki/contracts';
 import type { CommandRunner, JournalDefinitions, RootDb, TransactionSource } from '@arki/journal';
+import type { SchemaOutput, StandardSchemaV1 } from '@arki/schema';
 
 import type {
   CancelPaymentInput,
@@ -117,10 +117,11 @@ export type CoreWrites = {
   activateSubscription(input: ActivateSubscriptionInput): Promise<Subscription>;
 };
 
-export function createCoreJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx>, AppDb extends RootDb>(
-  j: JournalDefinitions<Meta, Tx, AppDb>,
-  tables: Pick<CoreTables, 'payments' | 'subscriptions'>,
-) {
+export function createCoreJournal<
+  Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
+  Tx extends TransactionSource<Tx>,
+  AppDb extends RootDb,
+>(j: JournalDefinitions<Meta, Tx, AppDb>, tables: Pick<CoreTables, 'payments' | 'subscriptions'>) {
   const payments = createPaymentJournal(j, tables.payments);
   const subscriptions = createSubscriptionJournal(j, tables.subscriptions);
   const commands = { ...payments.commands, ...subscriptions.commands };
@@ -130,7 +131,7 @@ export function createCoreJournal<Meta extends z.ZodObject, Tx extends Transacti
     events: { ...payments.events, ...subscriptions.events },
     commands,
     /** `run` is the app's command runner: `context.runCommand` in a request, `ctx.run` inside a command. */
-    writes: (run: CommandRunner<z.output<Meta>, Tx>): CoreWrites => ({
+    writes: (run: CommandRunner<SchemaOutput<Meta>, Tx>): CoreWrites => ({
       initiatePayment: input => writtenRow(run(commands.initiatePayment, input), 'initiatePayment'),
       completePayment: input => writtenRow(run(commands.completePayment, input), 'completePayment'),
       failPayment: input => writtenRow(run(commands.failPayment, input), 'failPayment'),
