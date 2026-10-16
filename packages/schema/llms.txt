@@ -1,0 +1,24 @@
+# @arki/schema
+
+> Standard Schema helpers for every validator: the spec types, `parse`/`parseAsync` with coded errors, issue paths, and a JSON Schema bridge. It is not a validator; bring Zod, Valibot, ArkType or your own.
+
+## Import paths
+- `@arki/schema`: the whole package. `StandardSchemaV1`, `StandardJSONSchemaV1`, `SchemaInput`, `SchemaOutput`, `SchemaWithJson`, `parse`, `parseAsync`, `SchemaError`, `SchemaRunError`, `SCHEMA_ERROR_CODES`, `pathOf`, `formatIssues`, `isStandardSchema`, `hasJsonSchema`, `withJsonSchema`.
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+- [Parse a value](docs/agent-guide.md#parse-a-value)
+- [Parse with an async schema](docs/agent-guide.md#parse-with-an-async-schema)
+- [Report bad data](docs/agent-guide.md#report-bad-data)
+- [Accept any schema at runtime](docs/agent-guide.md#accept-any-schema-at-runtime)
+- [Give a schema a JSON Schema](docs/agent-guide.md#give-a-schema-a-json-schema)
+
+## Rules that bite
+- Sync `parse` throws `ARKI_SCHEMA_E001` on an async schema. Use `parseAsync`.
+- `SchemaError` means bad data. `SchemaRunError` means a broken or misused schema. Never map `ARKI_SCHEMA_E002` to a 400.
+- `withJsonSchema` answers only the `draft-2020-12` target.
+- Import the spec types from `@arki/schema`, never from `@standard-schema/spec`. A lint rule enforces it.
