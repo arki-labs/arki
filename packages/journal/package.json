@@ -42,6 +42,11 @@
       "import": "./dist/http.js",
       "default": "./dist/http.js"
     },
+    "./http/webhooks": {
+      "types": "./dist/http/webhooks.d.ts",
+      "import": "./dist/http/webhooks.js",
+      "default": "./dist/http/webhooks.js"
+    },
     "./dot": {
       "types": "./dist/dot.d.ts",
       "import": "./dist/dot.js",

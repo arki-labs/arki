@@ -503,6 +503,44 @@ Rules:
 - A row is deleted when its handler succeeds. A key dedupes among unfinished rows (pending, running, dead).
 - `cancel(tx, id)` on the outbox deletes a row no worker holds.
 
+## Outgoing webhooks
+
+`@arki/journal/http/webhooks` sends signed webhooks to your partners' endpoints. Delivery is a queue row in `journal_jobs`, run by the same worker as everything else. It is optional, and it runs on Node or Bun (it needs `@arki/http`).
+
+```ts
+import { journalTables } from '@arki/journal/pg';
+import { webhookSender, webhookTables } from '@arki/journal/http/webhooks';
+
+export const tables = journalTables();
+export const webhookSchema = webhookTables(); // in the schema module: drizzle-kit generate creates the tables
+
+export const webhooks = webhookSender({ tables, webhooks: webhookSchema, encryptionKey: env.WEBHOOK_KEY });
+
+// Once, when a partner registers an endpoint. Show the secret to them now: it is never readable again.
+const { id, secret } = await webhooks.subscribe(db, { partner: tenantId, url, events: ['order.placed'] });
+
+// In the business transaction: the webhook exists if and only if the order commits.
+await db.transaction(async tx => {
+  await journal.run(tx, placeOrder, input, meta);
+  await webhooks.dispatch(tx, { partner: tenantId, event: 'order.placed', payload: { orderId } });
+});
+
+journal.worker(db, { jobs: combineRunners(outboxRunner(...), webhooks.runner) });
+```
+
+- **`dispatch(tx, …)`** needs a transaction. It writes the message once, as the body `{ type, timestamp, data }`, and one delivery row for each active subscription of that partner that lists the event. A payload over `maxPayloadBytes` (default 1 MiB) is refused.
+- **Delivery** signs the stored bytes with [Standard Webhooks](https://www.standardwebhooks.com/). `webhook-id` is the message id, the same on every retry and replay, so a receiver dedupes on it (`verifyWebhook` with `standardWebhooks` from `@arki/http/webhooks` accepts it). It posts through `publicFetch()`, so an endpoint cannot reach a private address, even after a DNS change. Each try has `timeoutMs` (default 10 s). Any 2xx is delivered; anything else is retried.
+- **Retries are the worker's.** `retry` (a `Backoff`, default from 5 s doubling to 1 h, 10 retries) sets when the next try runs and when the delivery is dead. A dead delivery stays in `journal_jobs` like any dead job: `journal.jobs(db, { status: 'dead' })` lists it and `journal.retry` runs it again.
+- **Every try is a row** in `webhook_attempts`: `delivered`, `failed` (with `next_at`), `dead`, or `skipped` (the subscription was disabled). Because delivery is at least once, a crash between the send and the ack can add a second row for one try.
+- **Auto-disable.** `disableAfter` (default 5) dead deliveries in a row disable the subscription. A success resets the count. `enable(db, id)` turns it back on; `disable(db, id)` stops it by hand. A delivery queued before the subscription was disabled is recorded as `skipped`, not sent.
+- **`replay(db, { messageId, subscriptionId })`** sends a stored message again, with the same `webhook-id`. It refuses a subscription of another partner.
+- **`rotateSecret(db, id, { windowSeconds })`** returns a new secret. For `windowSeconds` (default a day) both the old and the new secret sign each delivery, so the partner can switch without losing a message.
+- **Secrets at rest** are sealed with AES-GCM under `encryptionKey` (32 bytes, base64; keep it out of the database). The subscription id is bound in, so a sealed secret copied onto another row does not open.
+- `subscribe` takes public `https` URLs only. `rotateSecret`, `enable`, `disable` and `replay` act on the id they are given: check that the caller owns the subscription first.
+- `combineRunners(...)` from `@arki/journal` lets one worker run webhook deliveries and other queue jobs. Two runners that claim the same job name throw `BAD_DEFINITION`.
+
+Migration: add `webhookTables()` (or `webhookTables(schema)` next to `journalTables(schema)`) to the schema module, run `drizzle-kit generate`, and apply the migration before the first `subscribe`. It creates `webhook_subscriptions`, `webhook_messages` and `webhook_attempts`; existing tables are unchanged.
+
 ## Dot
 
 `@arki/journal/dot` connects the journal to an `@arki/dot` app. It exports two adapters and one feature slice. `@arki/dot` is an optional peer. The core entry never imports it.

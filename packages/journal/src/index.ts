@@ -80,5 +80,6 @@ export type {
   StrandedJobs,
 } from './types.js';
 export { jobId } from './id.js';
+export { combineRunners } from './runners.js';
 export type { JournalTables } from './pg.js';
 export type { Around, HookPoint } from './hooks.js';
