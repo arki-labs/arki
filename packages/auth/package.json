@@ -45,6 +45,11 @@
       "import": "./src/email/schema.ts",
       "node": "./src/email/schema.ts"
     },
+    "./schema": {
+      "types": "./dist/src/schema/index.d.ts",
+      "import": "./src/schema/index.ts",
+      "node": "./src/schema/index.ts"
+    },
     "./tweaks-column": {
       "types": "./dist/src/tweaks-column.d.ts",
       "import": "./src/tweaks-column.ts",

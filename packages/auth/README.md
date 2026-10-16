@@ -196,6 +196,37 @@ export const authClient = createAuthClient({ plugins: [magicLinkClient()] });
 await authClient.signIn.magicLink({ email: 'ada@example.com', callbackURL: '/dashboard' });
 ```
 
+## Drizzle tables: `@arki/auth/schema`
+
+Column sets for the four Better Auth tables. Spread one into your own `schema.table(...)`. A key you write after the spread replaces that column.
+
+```ts
+import { authUserColumns, authSessionColumns } from '@arki/auth/schema';
+
+export const User = schema.table('users', {
+  ...authUserColumns({ id: userIdFactory.primaryColumn(), naming: 'camel' }),
+  // override: keep a database default
+  emailVerified: boolean('emailVerified').notNull().default(false),
+  // extra column
+  accessGrantedAt: timestamp('accessGrantedAt'),
+});
+
+export const Session = schema.table('sessions', {
+  ...authSessionColumns({
+    id: sessionId.primaryColumn(),
+    userId: text('userId').notNull().references(() => User.id, { onDelete: 'cascade' }),
+    naming: 'camel',
+  }),
+  activeOrganizationId: text('activeOrganizationId'),
+});
+```
+
+- `naming` is `'snake'` (default, `email_verified`) or `'camel'` (`emailVerified`).
+- You pass the id column and the user foreign-key column. The lib never makes ids.
+- `authUserColumns`, `authSessionColumns`, `authAccountColumns`, `authVerificationColumns` return fresh builders on every call.
+- A new app can call `createAuthTables(schema, { ids })`. It builds all four tables in the standard shape, adds the `tweaks` column to `users`, and returns `{ User, Session, Account, Verification, userForeignKeys }`. `ids` holds your id factories: `user`, `session`, `account`, `verification`.
+- Workspace (organization) tables are not part of this entry.
+
 ## Recipe 4: Workspaces and roles
 
 Turn on organizations and teams. Add the org tables (`organization`, `member`, `invitation`, `team`, `teamMember`) to `schema`.
