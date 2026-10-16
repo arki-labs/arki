@@ -102,7 +102,7 @@ function listen(preset: string, policy: ResiliencePolicy, into: Subscription[]):
  */
 export function resilience<N extends string>(
   presets: Presets<N>,
-): Plugin<EmptyShape, { readonly resilience: ResilienceService<N> }> {
+): Plugin<EmptyShape, { readonly resilience: ResilienceService<N> }, EmptyShape, 'resilience'> {
   return plugin({
     name: 'resilience',
     version: '0.1.0',

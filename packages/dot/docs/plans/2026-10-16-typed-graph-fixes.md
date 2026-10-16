@@ -202,14 +202,20 @@ still none, nothing to sync. Record the grep in the commit message.
   take handles as parameters (Task 1.1). Five Avocabo infra plugins bound: `daily-digest/infra/extras.ts` (needs object
   + `DigestExtrasDeps = CtxOf<typeof extrasNeeds>` replaces the hand-written type; the service file and its test import
   the type from `./extras`), `workspaces/infra/registry.ts`, `waitlist/infra/signup-limiter.ts`,
-  `newsletter-ingestion/.../reconciliation/infra/alert-dispatch.ts`. `semantic-search/infra/reconciler.ts` was moved by
-  a concurrent session (vector-index extraction) while this phase ran; its `service<Db>()` and
-  `content-deduplication/infra/embedder.ts` (`service<Embedder>()`, a sibling-provided need — correct as unbound) remain.
+  `newsletter-ingestion/.../reconciliation/infra/alert-dispatch.ts`, and (follow-up, same day)
+  `vector-index/infra/reconciler.ts` (`db: database.provides.db`, `embedder`/`vectorIndex` from the sibling `vectors`
+  plugin's handles). `content-deduplication/infra/embedder.ts` (`service<Embedder>()`, a sibling-provided need — correct
+  as unbound) remains.
 - Task 1.3: `grep -rn "service<\|transactions<\|testApp(" turbo/generators/templates` → no hits; nothing to sync.
 - Evidence: `@arki/db` tsc 0 / 148 tests; `@arki/kv` tsc 0; lint-rule tests 32/32; Avocabo backend HEAD + these files
   in an isolated copy: tsc 0, 267 tests of the touched features pass, no import-cycle (TDZ) error in the full run. The
   working-tree Avocabo suite is red from the concurrent vector-index move (`_shared/*` deleted), not from this phase.
-  Pre-existing lint debt left alone: 6 `no-unnecessary-type-assertion` in `digest-extras-service.test.ts` (present at HEAD).
+  Follow-up (same day): the four `no-unnecessary-type-assertion` casts left in `digest-extras-service.test.ts` removed.
+- Follow-up (same day) to the #4 implication above: `env()`, `resilience()`, `auth()`, `journal()`/`journalProjections()`
+  and the three queue plugins keep their name in the type (`Plugin<…, 'env'>`; queue's dynamic `options.name` becomes two
+  overloads: default literal / `name: N`). `http()`, `schedule()`, `journalWorker()` stay as they are: they return a
+  `Driver`, which has no `provides`, so there is no handle whose owner could be erased. Changeset
+  `library-plugins-keep-name.md`.
 
 ## Phase 2 — Fix #2: inline `.usecases()` deps (independent of Phase 1)
 

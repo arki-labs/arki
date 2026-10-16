@@ -77,7 +77,7 @@ export type EnvServices<TSchema extends Record<string, StandardSchemaV1>> = {
  */
 export function env<TSchema extends Record<string, StandardSchemaV1>>(
   options: EnvDotOptions<TSchema>,
-): Plugin<EmptyShape, EnvServices<TSchema>> {
+): Plugin<EmptyShape, EnvServices<TSchema>, EmptyShape, 'env'> {
   return plugin({
     name: 'env',
     version: '0.1.0',

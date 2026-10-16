@@ -168,7 +168,12 @@ export const JOURNAL_PROJECTIONS_KIND = 'journal-projections';
  * that boots nothing and provides nothing — its job is the static `handlers`
  * the journal reads before boot.
  */
-export type JournalProjectionsPlugin<Meta = unknown, Tx = DbHandle> = Plugin<EmptyShape, EmptyShape> & {
+export type JournalProjectionsPlugin<Meta = unknown, Tx = DbHandle> = Plugin<
+  EmptyShape,
+  EmptyShape,
+  EmptyShape,
+  'journal-projections'
+> & {
   readonly kind: typeof JOURNAL_PROJECTIONS_KIND;
   readonly handlers: {
     readonly projections: readonly Projection<Meta, Tx>[];
@@ -281,7 +286,7 @@ export type JournalPlugin<
   Meta extends StandardSchemaV1<unknown, Record<string, unknown>>,
   Tx extends TransactionSource<Tx>,
   AppDb extends RootDb,
-> = Plugin<JournalNeeds<Tx, AppDb>, { journal: Journal<Meta, Tx, AppDb> }>;
+> = Plugin<JournalNeeds<Tx, AppDb>, { journal: Journal<Meta, Tx, AppDb> }, NeedsShape, 'journal'>;
 
 /** Feature mode: bound to the app's features when the app is built. */
 export type JournalDriven<

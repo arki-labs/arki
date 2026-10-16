@@ -255,8 +255,12 @@ export type DurableSchedulerPluginOptions = DurableSchedulerOptions & {
  * the backend; Redis is touched when the schedule plugin starts it.
  */
 export function durableScheduler(
-  options: DurableSchedulerPluginOptions,
-): Plugin<EmptyShape, { readonly [DURABLE_SCHEDULES_KEY]: DurableScheduler }> {
+  options: DurableSchedulerOptions,
+): Plugin<EmptyShape, { readonly [DURABLE_SCHEDULES_KEY]: DurableScheduler }, EmptyShape, 'durable-scheduler'>;
+export function durableScheduler<N extends string>(
+  options: DurableSchedulerOptions & { readonly name: N },
+): Plugin<EmptyShape, { readonly [DURABLE_SCHEDULES_KEY]: DurableScheduler }, EmptyShape, N>;
+export function durableScheduler(options: DurableSchedulerPluginOptions) {
   return plugin({
     name: options.name ?? 'durable-scheduler',
     version: QUEUE_PLUGIN_VERSION,
@@ -284,7 +288,11 @@ export type QueuePluginOptions = QueueClientOptions & {
  * before `.features()`. Its factory opens no connection: each job's BullMQ
  * queue opens on its first `enqueue`. Stop closes them.
  */
-export function queue(options: QueuePluginOptions): Plugin<EmptyShape, { readonly queue: QueueClient }> {
+export function queue(options: QueueClientOptions): Plugin<EmptyShape, { readonly queue: QueueClient }, EmptyShape, 'queue'>;
+export function queue<N extends string>(
+  options: QueueClientOptions & { readonly name: N },
+): Plugin<EmptyShape, { readonly queue: QueueClient }, EmptyShape, N>;
+export function queue(options: QueuePluginOptions) {
   let handle: QueueClientHandle | undefined;
   return plugin({
     name: options.name ?? 'queue',
@@ -477,7 +485,11 @@ export type OutboxPluginOptions = OutboxOptions & {
  * the job row in the caller's transaction. Opens nothing and needs nothing; mount it with `.use()`
  * in every process that schedules, and run the rows with `journalWorker({ jobs: outboxJobs(...) })`.
  */
-export function outboxPlugin(options: OutboxPluginOptions): Plugin<EmptyShape, { readonly schedule: Outbox }> {
+export function outboxPlugin(options: OutboxOptions): Plugin<EmptyShape, { readonly schedule: Outbox }, EmptyShape, 'outbox'>;
+export function outboxPlugin<N extends string>(
+  options: OutboxOptions & { readonly name: N },
+): Plugin<EmptyShape, { readonly schedule: Outbox }, EmptyShape, N>;
+export function outboxPlugin(options: OutboxPluginOptions) {
   return plugin({
     name: options.name ?? 'outbox',
     version: QUEUE_PLUGIN_VERSION,

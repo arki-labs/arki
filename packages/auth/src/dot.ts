@@ -1,4 +1,3 @@
-import type { Plugin } from '@arki/dot/plugin';
 import { plugin, service } from '@arki/dot/plugin';
 
 import { initAuth } from './better-auth.config.js';
@@ -11,7 +10,7 @@ export type AuthPluginServices = {
   readonly auth: AuthService;
 };
 
-export function auth(options: AuthPluginOptions): Plugin<{ readonly db: AuthDb }, AuthPluginServices> {
+export function auth(options: AuthPluginOptions) {
   return plugin({
     name: 'auth',
     version: '0.1.4',
