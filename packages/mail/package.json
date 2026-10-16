@@ -1,154 +1,175 @@
 {
   "name": "@arki/mail",
   "version": "0.1.2",
-  "private": true,
+  "description": "Typed mail for TypeScript: Standard Schema templates, honest transports, quota failover, and mail that commits with your transaction.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arki-labs/arki.git",
+    "directory": "packages/mail"
+  },
+  "license": "MIT",
   "sideEffects": false,
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/src/index.d.ts",
-      "import": "./src/index.ts",
-      "node": "./src/index.ts",
-      "browser": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
-    "./send": {
-      "types": "./dist/src/send.d.ts",
-      "import": "./src/send.ts",
-      "node": "./src/send.ts",
-      "browser": "./src/send.ts"
+    "./templates/auth": {
+      "types": "./dist/templates/auth.d.ts",
+      "import": "./dist/templates/auth.js",
+      "default": "./dist/templates/auth.js"
     },
-    "./client": {
-      "types": "./dist/src/client/init.d.ts",
-      "import": "./src/client/init.ts",
-      "node": "./src/client/init.ts"
+    "./http/resend": {
+      "types": "./dist/http/resend.d.ts",
+      "import": "./dist/http/resend.js",
+      "default": "./dist/http/resend.js"
     },
-    "./providers/resend": {
-      "types": "./dist/src/providers/resend.d.ts",
-      "import": "./src/providers/resend.ts",
-      "node": "./src/providers/resend.ts"
+    "./http/unosend": {
+      "types": "./dist/http/unosend.d.ts",
+      "import": "./dist/http/unosend.js",
+      "default": "./dist/http/unosend.js"
     },
-    "./providers/unosend": {
-      "types": "./dist/src/providers/unosend.d.ts",
-      "import": "./src/providers/unosend.ts",
-      "node": "./src/providers/unosend.ts"
+    "./http/cloudflare": {
+      "types": "./dist/http/cloudflare.d.ts",
+      "import": "./dist/http/cloudflare.js",
+      "default": "./dist/http/cloudflare.js"
     },
-    "./providers/ses": {
-      "types": "./dist/src/providers/ses.d.ts",
-      "import": "./src/providers/ses.ts",
-      "node": "./src/providers/ses.ts"
+    "./node/ses": {
+      "types": "./dist/node/ses.d.ts",
+      "import": "./dist/node/ses.js",
+      "default": "./dist/node/ses.js"
     },
-    "./providers/cloudflare-email-service": {
-      "types": "./dist/src/providers/cloudflare-email-service.d.ts",
-      "import": "./src/providers/cloudflare-email-service.ts",
-      "node": "./src/providers/cloudflare-email-service.ts"
-    },
-    "./providers/quota-router": {
-      "types": "./dist/src/providers/quota-router.d.ts",
-      "import": "./src/providers/quota-router.ts",
-      "node": "./src/providers/quota-router.ts"
-    },
-    "./providers/quota-store-kv": {
-      "types": "./dist/src/providers/quota-store-kv.d.ts",
-      "import": "./src/providers/quota-store-kv.ts",
-      "node": "./src/providers/quota-store-kv.ts"
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js",
+      "default": "./dist/react/index.js"
     },
     "./react/templates/magic-link": {
-      "types": "./dist/src/templates/magic-link.d.ts",
-      "import": "./src/templates/magic-link.tsx",
-      "node": "./src/templates/magic-link.tsx",
-      "browser": "./src/templates/magic-link.tsx"
+      "types": "./dist/react/templates/magic-link.d.ts",
+      "import": "./dist/react/templates/magic-link.js",
+      "default": "./dist/react/templates/magic-link.js"
     },
     "./react/templates/magic-link-minimal": {
-      "types": "./dist/src/templates/magic-link-minimal.d.ts",
-      "import": "./src/templates/magic-link-minimal.tsx",
-      "node": "./src/templates/magic-link-minimal.tsx",
-      "browser": "./src/templates/magic-link-minimal.tsx"
+      "types": "./dist/react/templates/magic-link-minimal.d.ts",
+      "import": "./dist/react/templates/magic-link-minimal.js",
+      "default": "./dist/react/templates/magic-link-minimal.js"
+    },
+    "./pg": {
+      "types": "./dist/pg/index.d.ts",
+      "import": "./dist/pg/index.js",
+      "default": "./dist/pg/index.js"
+    },
+    "./pg/testing": {
+      "types": "./dist/pg/testing.d.ts",
+      "import": "./dist/pg/testing.js",
+      "default": "./dist/pg/testing.js"
+    },
+    "./dot": {
+      "types": "./dist/dot.d.ts",
+      "import": "./dist/dot.js",
+      "default": "./dist/dot.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "default": "./dist/testing.js"
     },
     "./package.json": "./package.json"
   },
-  "types": "./dist/src/index.d.ts",
-  "typesVersions": {
-    "*": {
-      "send": [
-        "src/send.ts"
-      ],
-      "client": [
-        "src/client/init.ts"
-      ],
-      "providers/resend": [
-        "src/providers/resend.ts"
-      ],
-      "providers/unosend": [
-        "src/providers/unosend.ts"
-      ],
-      "providers/ses": [
-        "src/providers/ses.ts"
-      ],
-      "providers/cloudflare-email-service": [
-        "src/providers/cloudflare-email-service.ts"
-      ],
-      "providers/quota-router": [
-        "src/providers/quota-router.ts"
-      ],
-      "providers/quota-store-kv": [
-        "src/providers/quota-store-kv.ts"
-      ],
-      "react/templates/magic-link": [
-        "src/templates/magic-link.tsx"
-      ],
-      "react/templates/magic-link-minimal": [
-        "src/templates/magic-link-minimal.tsx"
-      ]
-    }
-  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/**",
+    "src/**",
+    "!src/**/*.test.*",
+    "!src/**/*.spec.*",
+    "docs/agent-guide.md",
+    "llms.txt",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "git clean -xdf .cache .turbo dist node_modules",
-    "export": "bun run email export --dir src/templates",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "export": "bun run email export --dir src/react/templates",
     "format": "prettier --check . --ignore-path ../../.gitignore",
     "lint": "eslint .",
-    "studio": "bun run email dev --dir src/templates --port 3333",
+    "studio": "bun run email dev --dir src/react/templates --port 3333",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit --emitDeclarationOnly false"
+    "test:docs": "arki-doc-examples",
+    "test:runtimes": "arki-runtimes",
+    "typecheck": "tsc --noEmit"
   },
   "prettier": "@arki/prettier-config",
   "dependencies": {
-    "@arki/contracts": "workspace:*",
     "@arki/log": "workspace:*",
-    "@arki/schema": "workspace:*",
-    "@react-email/render": "catalog:react-email",
-    "zod": "catalog:"
+    "@arki/schema": "workspace:*"
   },
   "devDependencies": {
+    "@arki/dot": "workspace:*",
     "@arki/eslint-config": "workspace:*",
+    "@arki/journal": "workspace:*",
     "@arki/prettier-config": "workspace:*",
+    "@arki/resilience": "workspace:*",
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@aws-sdk/client-sesv2": "catalog:",
+    "@electric-sql/pglite": "catalog:",
+    "@react-email/render": "catalog:react-email",
     "@types/node": "catalog:node",
     "arktype": "catalog:",
+    "drizzle-kit": "catalog:drizzle",
+    "drizzle-orm": "catalog:drizzle",
     "react": "catalog:react",
     "react-email": "catalog:",
-    "resend": "catalog:",
     "valibot": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
   },
   "peerDependencies": {
+    "@arki/dot": "workspace:*",
+    "@arki/journal": "workspace:*",
+    "@arki/resilience": "workspace:*",
     "@aws-sdk/client-sesv2": "^3",
+    "@react-email/render": "catalog:react-email",
+    "drizzle-orm": "catalog:drizzle",
     "react": "^18 || ^19",
     "react-email": "^6",
-    "resend": "^6"
+    "vitest": "catalog:"
   },
   "peerDependenciesMeta": {
+    "@arki/dot": {
+      "optional": true
+    },
+    "@arki/journal": {
+      "optional": true
+    },
+    "@arki/resilience": {
+      "optional": true
+    },
     "@aws-sdk/client-sesv2": {
+      "optional": true
+    },
+    "@react-email/render": {
+      "optional": true
+    },
+    "drizzle-orm": {
+      "optional": true
+    },
+    "react": {
       "optional": true
     },
     "react-email": {
       "optional": true
     },
-    "resend": {
+    "vitest": {
       "optional": true
     }
   },
-  "module:jsx": "src"
+  "publishConfig": {
+    "access": "public"
+  }
 }

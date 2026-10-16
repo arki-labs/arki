@@ -1,94 +1,227 @@
 # @arki/mail
 
-Transactional email for TypeScript apps. One small client, several providers, a quota router that fails over when a provider hits its monthly limit.
+Typed mail for TypeScript. Templates are plain objects typed by any Standard Schema. Transports never throw and never make up a message id. `failover` keeps to your quotas and never sends a mail twice to dodge a timeout. And `@arki/mail/pg` queues a mail in the same transaction as the write it belongs to.
 
-The library never reads `process.env`. Your app reads its own env and passes the values in. Missing or invalid config throws a clear error at startup.
+- [Send a mail](#send-a-mail)
+- [Templates](#templates)
+- [Transports](#transports)
+- [Failover and quotas](#failover-and-quotas)
+- [Mail that commits with your write](#mail-that-commits-with-your-write)
+- [Dot](#dot)
+- [Testing](#testing)
+- [Errors](#errors)
+- [Runtimes](#runtimes)
 
-## Install
-
-```sh
-bun add @arki/mail
-# then only the provider SDKs you use:
-bun add resend                  # for the Resend provider
-bun add @aws-sdk/client-sesv2   # for the SES provider
-bun add react-email             # only if you use the bundled templates
-```
-
-`resend`, `@aws-sdk/client-sesv2` and `react-email` are optional peer dependencies. They load on first use. Unosend and Cloudflare Email Service use `fetch` and need nothing extra.
-
-## Configure
+## Send a mail
 
 ```ts
-import { createEmailClient } from '@arki/mail';
+import { z } from 'zod';
 
-export const emails = createEmailClient({
-  isDev: env.NODE_ENV === 'development', // required; true = log, never deliver
-  resend: { apiKey: env.RESEND_API_KEY },
-  unosend: { apiKey: env.UNOSEND_API_KEY, quotaPerMonth: 60_000 },
+import { defineTemplate, mailer } from '@arki/mail';
+import { resend } from '@arki/mail/http/resend';
+
+const welcome = defineTemplate({
+  name: 'welcome',
+  input: z.object({ name: z.string(), trialDays: z.number().default(14) }),
+  subject: data => `Welcome, ${data.name}`,
+  text: data => `Hi ${data.name}, your trial lasts ${data.trialDays} days.`,
 });
 
-const { data, error } = await emails.send({
-  to: 'reader@example.com',
-  from: 'App <no-reply@example.com>',
-  subject: 'Hello',
-  html: '<p>Hi</p>',
+const mail = mailer({
+  transport: resend({ apiKey: process.env.RESEND_API_KEY ?? '' }),
+  from: 'Acme <hello@acme.dev>',
 });
+
+const { data, error } = await mail.send(welcome, { name: 'Ada' }, { to: 'ada@example.com' });
+if (error !== null) console.error(error.code, error.message, error.retryable);
+else console.info(data.id);
 ```
 
-`send()` never throws. It returns `{ data: { id }, error: null }` or `{ data: null, error: { name, message } }`.
+`send` never throws for a failed mail. It returns `{ data, error }`. `error.code` is stable (`ARKI_MAIL_E006`), `error.retryable` says whether trying later can help, and `error.acceptance` says whether the provider may have taken the mail anyway.
 
-The config is a Zod schema (`EmailClientConfigSchema`). Rules:
+The sender comes from the call, then the template's `defaults.from`, then the mailer's `from`.
 
-- `isDev` is required. There is no `NODE_ENV` fallback.
-- At least one provider must be set.
-- Keys must be non-empty strings. An empty key throws. It does not quietly turn the provider off.
-- `kv` (optional) shares quota counters across replicas. See below.
+Two options guard non-production setups:
 
-Want full control? Build providers yourself and call `initEmails({ providers, isDev, store })`.
+- `transport: logTransport()` sends nothing. It logs each mail at debug level and reports it as `simulated`.
+- `redirectTo: 'staging@acme.dev'` sends every mail there instead, drops Cc and Bcc, and keeps the original To in `X-Original-To`.
 
-## Providers
-
-| Provider                 | Entry                                             | Required config                       | Notes                                                                                                                                                                                                    |
-| ------------------------ | ------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Resend                   | `@arki/mail/providers/resend`                   | `resend: { apiKey }`                  | Needs the `resend` peer. Default quota 3 000/mo. Only provider that accepts `react`.                                                                                                                     |
-| Unosend                  | `@arki/mail/providers/unosend`                  | `unosend: { apiKey }`                 | `fetch` only. Default quota 6 000/mo. Supports `scheduledAt`.                                                                                                                                            |
-| Cloudflare Email Service | `@arki/mail/providers/cloudflare-email-service` | `cloudflare: { accountId, apiToken }` | `fetch` only. Beta. Token needs `Email Service: Edit`. Default quota 3 000/mo. Drops `tags`, `scheduledAt`, `react`.                                                                                     |
-| Amazon SES               | `@arki/mail/providers/ses`                      | `ses: { region }`                     | Needs the `@aws-sdk/client-sesv2` peer. Optional `credentials` (else the AWS default chain), `configurationSetName`. No quota by default, so it is the unlimited fallback. Drops `scheduledAt`, `react`. |
-
-When several are set, the router tries them in this order: Resend, Unosend, Cloudflare, SES.
-
-Every provider passes one shared contract suite (`src/providers/provider-contract.ts`): send shape, error mapping (service error and network failure), and quota behaviour. To add a provider, implement `EmailProvider` and add it to `provider-contract.spec.ts`.
+`onEvent` observes `sending`, `sent` and `failed`. An observer that throws is logged; it never fails or repeats a send.
 
 ## Templates
 
-React Email templates ship as subpath imports. Names are neutral and carry no brand.
+`defineTemplate({ name, input, subject, text, html?, defaults? })`. `input` is any Standard Schema: Zod, Valibot, ArkType or your own. Callers pass the schema's input type; renderers get its output, with defaults applied. Wrong data does not compile, and data the schema refuses comes back as `ARKI_MAIL_E003` with the schema's issues, before anything is sent.
 
-| Template                            | Entry                                             | Props                                            |
-| ----------------------------------- | ------------------------------------------------- | ------------------------------------------------ |
-| Magic link (branded header, button) | `@arki/mail/react/templates/magic-link`         | `loginUrl`, `appName`, `appUrl`                  |
-| Magic link (plain text link)        | `@arki/mail/react/templates/magic-link-minimal` | `loginUrl`, `appUrl`, `appKey`, `appDescription` |
+`text` is required: every mail has a plain-text part. `html` is optional and may be async.
 
 ```ts
-import { render } from '@react-email/render';
+import { z } from 'zod';
 
+import { defineTemplate, renderTemplate } from '@arki/mail';
+
+const receipt = defineTemplate({
+  name: 'receipt',
+  input: z.object({ total: z.string() }),
+  subject: data => `Receipt: ${data.total}`,
+  text: data => `You paid ${data.total}.`,
+  html: data => `<p>You paid <b>${data.total}</b>.</p>`,
+  defaults: { from: 'Billing <billing@acme.dev>' },
+});
+
+// No transport needed: previews and content tests.
+const preview = await renderTemplate(receipt, { total: '5 EUR' });
+console.info(preview.data?.subject);
+```
+
+Sign-in mail is ready made in `@arki/mail/templates/auth`: `magicLink`, `verifyEmail`, `resetPassword` (`{ appName, url, expiresInMinutes? }`) and `signInCode` (`{ appName, code }`). They escape every value and refuse a URL that is not `http(s)`.
+
+React Email works too. Render the element yourself, then send the result with `sendRaw`:
+
+```tsx skip="needs a React Email component"
+import { renderReact } from '@arki/mail/react';
 import { MagicLinkEmail } from '@arki/mail/react/templates/magic-link';
 
-const html = await render(MagicLinkEmail({ loginUrl: url, appName: 'My App', appUrl }));
+const { html, text } = await renderReact(<MagicLinkEmail url={url} />);
+await mail.sendRaw({ to, subject: 'Your sign-in link', html, text });
 ```
 
-Templates are not re-exported from the root entry, so the root stays JSX-free.
+## Transports
 
-## Quota router
+A transport sends one mail through one service. Each one maps the service's answer to the same failures, so `failover` and the journal treat every service alike.
 
-With two or more providers the client wraps them in `quotaRouter`. Each provider has a `quotaPerMonth`. The router sends through the first provider with quota left this month. A failed send does not use quota. If every quota is used, the last provider is used anyway, so mail is never silently dropped.
+| Transport        | Entry                        | Options                                           | Idempotency key | Notes                                                                 |
+| ---------------- | ---------------------------- | ------------------------------------------------- | --------------- | --------------------------------------------------------------------- |
+| `resend()`       | `@arki/mail/http/resend`     | `apiKey`                                          | yes             | Plain `fetch`, no SDK. Tags and several Reply-To addresses supported. |
+| `unosend()`      | `@arki/mail/http/unosend`    | `apiKey`                                          | no              | Plain `fetch`. Tags are refused (`E005`).                             |
+| `cloudflare()`   | `@arki/mail/http/cloudflare` | `accountId`, `apiToken`                           | no              | Beta service. Reports each recipient; some bounced is `partial`.      |
+| `ses()`          | `@arki/mail/node/ses`        | `region`, `credentials?`, `configurationSetName?` | no              | Needs the `@aws-sdk/client-sesv2` peer. SDK retries are off.          |
+| `logTransport()` | `@arki/mail`                 | `id?`                                             | —               | Sends nothing.                                                        |
 
-Counters are in memory by default and reset on restart. For several replicas, pass a KV store (anything with `get` and `set`, such as `@arki/kv`):
+Every transport takes `id` (default: its name) and `quotaPerMonth`. HTTP transports also take `fetch` for tests.
+
+How a service's answer maps:
+
+| Answer                           | Code   | `retryable` | `acceptance` |
+| -------------------------------- | ------ | ----------- | ------------ |
+| 429 or 5xx                       | `E006` | yes         | `none`       |
+| any other 4xx                    | `E006` | no          | `none`       |
+| network failure, timeout, abort  | `E007` | yes         | `unknown`    |
+| 2xx that cannot be read          | `E008` | yes         | `unknown`    |
+| a field the service cannot carry | `E005` | no          | `none`       |
+
+A message id is the provider's, or `null` when it gives none. It is never made up.
+
+## Failover and quotas
 
 ```ts
-createEmailClient({ isDev, resend: { apiKey }, unosend: { apiKey: key2 }, kv });
-// or: quotaRouter(providers, { store: kvQuotaStore(kv) })
+import type { KVLike } from '@arki/mail';
+import { failover, kvQuotaStore, mailer } from '@arki/mail';
+import { resend } from '@arki/mail/http/resend';
+import { ses } from '@arki/mail/node/ses';
+
+declare const kv: KVLike; // e.g. @arki/kv
+
+const mail = mailer({
+  transport: failover(
+    [
+      resend({ apiKey: process.env.RESEND_API_KEY ?? '', quotaPerMonth: 3000 }),
+      ses({ region: 'eu-west-1' }), // no quota: the deliberate unlimited fallback
+    ],
+    { store: kvQuotaStore(kv) },
+  ),
+  from: 'Acme <hello@acme.dev>',
+});
 ```
 
-## Logging
+`failover` tries its transports in order:
 
-Debug logs use `getLogger('arki:mail')`. Enable with `DEBUG=arki:mail`.
+- A transport over its quota for the UTC month is skipped. When every transport is over quota, nothing is sent (`E004`). A quota is a budget; add a transport without one if you want an unlimited fallback.
+- After a failure it tries the next transport only when the provider surely did not take the mail (`acceptance: 'none'`) and a retry can help. After a timeout the first provider may already be delivering it, and a second provider would send a duplicate, so the failure is returned instead.
+- A permanent refusal (a bad address) stops the chain.
+
+A mailer with one transport that has a quota counts it the same way. `kvQuotaStore` shares counters between replicas; `inMemoryQuotaStore` (the default) counts in one process. Counts are advisory: two replicas can both send the last mail of a quota. A counter that cannot be read or written is logged and never stops or fails a send.
+
+## Mail that commits with your write
+
+`@arki/mail/pg` queues a mail as one row in the `@arki/journal` jobs table, inside your transaction. A rollback drops it with the write. The journal worker sends it, retries failures that can pass later, and dead-letters the rest.
+
+```ts skip="needs a Postgres database and a journal"
+import { mailOutbox } from '@arki/mail/pg';
+
+const outbox = mailOutbox({ mailer: mail, tables });
+
+await db.transaction(async tx => {
+  const user = await createUser(tx, input);
+  await outbox.enqueue(tx, welcome, { name: user.name }, { to: user.email, idempotencyKey: `welcome:${user.id}` });
+});
+
+// In the worker process:
+await journal.worker(db, { jobs: outbox.runner });
+```
+
+- The row stores the rendered message, so every retry sends the same bytes.
+- The job id is the idempotency key on every try. Resend drops a repeat within 24 hours; other services may deliver a retry twice. Delivery is at least once.
+- The same `idempotencyKey` while a mail is still queued returns that job (`deduped: true`).
+- `expiresAt` stops a stale mail: past it, the job is dead with `E011` and nothing is sent. Use it for sign-in links.
+- A queued mail has exactly one `to` recipient and no Cc or Bcc.
+- `retry` sets the waits (default 5 s doubling to 1 h, 5 tries); a failure with `retryable: false` is dead on its first try.
+- `enqueue` throws `MailError`: `E009` for the root database instead of a transaction, `E003` for bad input, `E010` when the message is over `maxBytes` (256 KiB).
+
+## Dot
+
+```ts skip="needs a Dot app with a journal"
+import { mail, mailJobs, mailOutboxPlugin } from '@arki/mail/dot';
+
+defineApp('shop')
+  .use(mail(() => ({ transport: resend({ apiKey: env.RESEND_API_KEY }), from: 'Shop <hi@shop.dev>' })))
+  .use(mailOutboxPlugin({ tables }))
+  .serve(journalWorker({ jobs: mailJobs() }));
+```
+
+- `mail(options)` provides `mail`. Pass a function so the manifest and `dot explain` never read your keys.
+- `mailOutboxPlugin({ tables })` provides `mailOutbox` and needs `mail`. Without it the app does not compile.
+- `mailJobs()` gives `journalWorker` the queued-mail runner.
+
+## Testing
+
+```ts
+import { z } from 'zod';
+
+import { defineTemplate, mailer } from '@arki/mail';
+import { mailSink } from '@arki/mail/testing';
+
+const sink = mailSink();
+const mail = mailer({ transport: sink, from: 'hi@acme.dev' });
+const ping = defineTemplate({ name: 'ping', input: z.object({}), subject: () => 'Ping', text: () => 'pong' });
+
+await mail.send(ping, {}, { to: 'ada@example.com' });
+console.info(sink.sentWith(ping).length, sink.sentTo('ada@example.com').length, sink.last()?.message.subject);
+
+sink.failNext({ retryable: false }); // the next send fails once
+```
+
+- `mailSink()` records each message with its template name and idempotency key.
+- `@arki/mail/pg/testing` has `mailQueueAssertions(db, tables)`: `queued(template?)` and `dead()` read committed rows, so a mail queued in a rolled-back transaction is not there.
+- `transportContract(harness)` from `@arki/mail/testing` runs the shared transport tests against your own transport.
+
+## Errors
+
+| Code             | Name               | When                                                                  |
+| ---------------- | ------------------ | --------------------------------------------------------------------- |
+| `ARKI_MAIL_E001` | `invalidConfig`    | No transport, two transports with one id, an empty sender. Thrown.    |
+| `ARKI_MAIL_E002` | `invalidMessage`   | No recipient, a line break in a header or address, a reserved header. |
+| `ARKI_MAIL_E003` | `invalidInput`     | The template's schema refused the input. Carries `issues`.            |
+| `ARKI_MAIL_E004` | `quotaExhausted`   | Every transport is over quota. Nothing was sent.                      |
+| `ARKI_MAIL_E005` | `unsupported`      | A field the transport cannot carry. Nothing was sent.                 |
+| `ARKI_MAIL_E006` | `rejected`         | The service refused the mail.                                         |
+| `ARKI_MAIL_E007` | `uncertain`        | No answer: timeout or network failure. The mail may have been sent.   |
+| `ARKI_MAIL_E008` | `badResponse`      | The service's answer could not be read.                               |
+| `ARKI_MAIL_E009` | `needsTransaction` | `enqueue` got the root database. Thrown.                              |
+| `ARKI_MAIL_E010` | `badQueuedData`    | A queued mail is too large, or a stored row cannot be read.           |
+| `ARKI_MAIL_E011` | `expired`          | A queued mail passed its `expiresAt`. Nothing was sent.               |
+
+## Runtimes
+
+The core, `templates/auth` and the `http/*` transports use only `fetch` and run on Node, Bun and Deno. `node/ses` needs Node or Bun. `react` needs the `react`, `react-email` and `@react-email/render` peers. `pg` and `dot` need `@arki/journal`, `drizzle-orm` and `@arki/dot`.
+
+Debug logs use the `arki:mail` category. Show them with `DEBUG=arki:mail`.

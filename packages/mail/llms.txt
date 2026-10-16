@@ -1,0 +1,38 @@
+# @arki/mail
+
+> Typed mail for TypeScript: templates typed by any Standard Schema, transports that never throw or invent ids, quota-aware failover that never sends twice after a timeout, and mail queued in the caller's transaction on `@arki/journal`.
+
+## Import paths
+- `@arki/mail`: `mailer`, `defineTemplate`, `renderTemplate`, `failover`, `logTransport`, `inMemoryQuotaStore`, `kvQuotaStore`, `MailError`, `isMailError`, `MAIL_ERROR_CODES`, and the types (`Mailer`, `MailTemplate`, `MailTransport`, `MailMessage`, `MailResult`, `MailFailure`, `SentMail`, `SendOptions`).
+- `@arki/mail/templates/auth`: `magicLink`, `verifyEmail`, `resetPassword`, `signInCode`.
+- `@arki/mail/http/resend`: `resend`.
+- `@arki/mail/http/unosend`: `unosend`.
+- `@arki/mail/http/cloudflare`: `cloudflare`.
+- `@arki/mail/node/ses`: `ses` (needs `@aws-sdk/client-sesv2`).
+- `@arki/mail/react`: `renderReact`.
+- `@arki/mail/react/templates/magic-link`: `MagicLinkEmail`.
+- `@arki/mail/react/templates/magic-link-minimal`: `MagicLinkMinimalEmail`.
+- `@arki/mail/pg`: `mailOutbox`, `MAIL_JOB`, `MailTx`.
+- `@arki/mail/pg/testing`: `mailQueueAssertions`.
+- `@arki/mail/dot`: `mail`, `mailOutboxPlugin`, `mailJobs`.
+- `@arki/mail/testing`: `mailSink`, `transportContract`.
+
+## Start here
+- [Agent guide](docs/agent-guide.md): read first.
+- [Verify](docs/agent-guide.md#verify): the commands to run after a change.
+- [README](README.md): the long overview.
+
+## By task
+- [Send a templated mail](docs/agent-guide.md#send-a-templated-mail)
+- [Use several providers](docs/agent-guide.md#use-several-providers)
+- [Queue a mail with a write](docs/agent-guide.md#queue-a-mail-with-a-write)
+- [Wire mail into a Dot app](docs/agent-guide.md#wire-mail-into-a-dot-app)
+- [Test code that sends mail](docs/agent-guide.md#test-code-that-sends-mail)
+
+## Rules that bite
+- `send` returns `{ data, error }`; it does not throw for a failed mail. Check `error`.
+- `text` is required on every template.
+- When every transport is over quota, nothing is sent (`ARKI_MAIL_E004`). Add a transport without a quota for an unlimited fallback.
+- `failover` never tries a second provider after a timeout (`acceptance: 'unknown'`). The journal retries later instead.
+- `mailOutbox.enqueue` needs a transaction (`E009` for the root db) and exactly one `to` recipient.
+- A message id may be `null`. Never use it as a key without checking.

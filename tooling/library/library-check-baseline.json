@@ -301,16 +301,6 @@
       "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
     },
     {
-      "package": "@arki/mail",
-      "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBoolean, ZodCustom, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodString, ZodUnion, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/mail",
-      "error": "TYPES_E001 export \"./providers/cloudflare-email-service\" exposes Zod types: ZodArray, ZodLiteral, ZodNumber, ZodObject, ZodString, ZodUnion, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
       "package": "@arki/env",
       "error": "DOC_E002 no llms.txt",
       "reason": "lesson 13 wave A|B: docs backlog"
