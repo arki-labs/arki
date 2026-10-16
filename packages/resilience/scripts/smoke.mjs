@@ -2,7 +2,10 @@
 // Deno via `bun run test:runtimes`, and is bundled for the browser target.
 // It exercises each policy once with real timers; the unit tests cover the details.
 
+import { MockClock } from '@arki/clock';
+
 import {
+  backoff,
   CancelledError,
   CircuitOpenError,
   createBulkheadPolicy,
@@ -29,11 +32,13 @@ const errorName = async promise => {
 };
 
 const retried = [];
-const retryResult = await createRetryPolicy({ maxAttempts: 2, initialDelay: 1, maxDelay: 2 }).execute(({ attempt }) => {
-  retried.push(attempt);
-  if (attempt === 0) throw new Error('first fails');
-  return 'ok';
-});
+const retryResult = await createRetryPolicy({ backoff: backoff.exponential({ base: 1, max: 2 }).upTo(2) }).execute(
+  ({ attempt }) => {
+    retried.push(attempt);
+    if (attempt === 0) throw new Error('first fails');
+    return 'ok';
+  },
+);
 
 const breaker = createCircuitBreakerPolicy({ consecutiveFailures: 1 });
 await breaker
@@ -57,7 +62,19 @@ const composed = await externalApiPolicy.execute(({ attempt, signal }) => {
   return 'composed';
 });
 
+// A retry whose delays are seconds long, run on a MockClock: it must finish without waiting.
+const clock = new MockClock();
+const clockCalls = [];
+const clockRetry = createRetryPolicy({ backoff: backoff.constant(5000).upTo(2), clock }).execute(() => {
+  clockCalls.push(clock.now().getTime());
+  if (clockCalls.length < 3) throw new Error('flaky');
+  return 'ok';
+});
+await clock.advanceAsync(20_000);
+const clockResult = `${await clockRetry}@${clockCalls.join(',')}`;
+
 const checks = [
+  ['retry on a MockClock', clockResult, 'ok@0,5000,10000'],
   ['retry', retryResult, 'ok'],
   ['retry attempts', retried.join(','), '0,1'],
   ['timeout', await errorName(createTimeoutPolicy({ timeoutMs: 5 }).execute(pending)), 'TimeoutError'],

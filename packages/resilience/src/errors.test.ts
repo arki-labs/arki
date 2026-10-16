@@ -7,6 +7,7 @@ import {
   createBulkheadPolicy,
   createCircuitBreakerPolicy,
   createTimeoutPolicy,
+  InvalidBackoffError,
   isBrokenCircuitError,
   isBulkheadRejectedError,
   isResilienceError,
@@ -111,16 +112,18 @@ describe('error codes', () => {
     expect(new CancelledError()).toMatchObject({ code: 'ARKI_RESILIENCE_E003' });
     expect(new BulkheadRejectedError()).toMatchObject({ code: 'ARKI_RESILIENCE_E004' });
     expect(new RetriesExhaustedError(3)).toMatchObject({ code: 'ARKI_RESILIENCE_E005' });
+    expect(new InvalidBackoffError('bad')).toMatchObject({ code: 'ARKI_RESILIENCE_E006' });
   });
 
   it('lists every code once and attaches a remediation to each error', () => {
-    expect(Object.values(RESILIENCE_ERROR_CODES)).toHaveLength(5);
+    expect(Object.values(RESILIENCE_ERROR_CODES)).toHaveLength(6);
     for (const error of [
       new CircuitOpenError(),
       new TimeoutError(),
       new CancelledError(),
       new BulkheadRejectedError(),
       new RetriesExhaustedError(1),
+      new InvalidBackoffError('bad'),
     ]) {
       expect(error.remediation.length).toBeGreaterThan(0);
     }

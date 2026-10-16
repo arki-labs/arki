@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Policy } from './index.js';
 import {
+  backoff,
   CancelledError,
   createBulkheadPolicy,
   createCircuitBreakerPolicy,
@@ -50,7 +51,7 @@ describe('createRetryPolicy', () => {
 
   it('calls the function once plus maxAttempts retries, then rethrows the last error', async () => {
     vi.useFakeTimers();
-    const policy = createRetryPolicy({ maxAttempts: 3, initialDelay: 1, maxDelay: 2 });
+    const policy = createRetryPolicy({ backoff: backoff.exponential({ base: 1, max: 2 }).upTo(3) });
     const errors: Error[] = [];
     const call = policy.execute(() => {
       const error = new Error(`failure ${errors.length + 1}`);
@@ -66,7 +67,7 @@ describe('createRetryPolicy', () => {
 
   it('gives the function its attempt number, starting at 0 for the first call', async () => {
     vi.useFakeTimers();
-    const policy = createRetryPolicy({ maxAttempts: 2, initialDelay: 1, maxDelay: 2 });
+    const policy = createRetryPolicy({ backoff: backoff.exponential({ base: 1, max: 2 }).upTo(2) });
     const attempts: number[] = [];
     const call = policy.execute(({ attempt }) => {
       attempts.push(attempt);
@@ -82,7 +83,7 @@ describe('createRetryPolicy', () => {
   it('spaces retries by a backoff that never exceeds maxDelay and reports each retry', async () => {
     vi.useFakeTimers();
     // A large initial delay and a small cap: every delay must be clamped to the cap.
-    const policy = createRetryPolicy({ maxAttempts: 4, initialDelay: 1000, maxDelay: 5 });
+    const policy = createRetryPolicy({ backoff: backoff.exponential({ base: 1000, max: 5 }).upTo(4) });
     const retries: { attempt: number; delay: number }[] = [];
     policy.onRetry(({ attempt, delay }) => retries.push({ attempt, delay }));
     const gaveUp = vi.fn();
@@ -105,7 +106,7 @@ describe('createRetryPolicy', () => {
 
   it('does not retry once the caller aborts', async () => {
     vi.useFakeTimers();
-    const policy = createRetryPolicy({ maxAttempts: 5, initialDelay: 1, maxDelay: 2 });
+    const policy = createRetryPolicy({ backoff: backoff.exponential({ base: 1, max: 2 }).upTo(5) });
     const controller = new AbortController();
     let calls = 0;
     const call = policy.execute(() => {
@@ -271,7 +272,7 @@ describe('wrap and cancellation', () => {
     // One logical call: the function fails twice, the breaker opens, and the remaining
     // retries are rejected by the breaker without reaching the function.
     const policy = createResiliencePolicy({
-      retry: { maxAttempts: 5, initialDelay: 1, maxDelay: 2 },
+      retry: backoff.exponential({ base: 1, max: 2 }).upTo(5),
       circuitBreaker: { consecutiveFailures: 2, halfOpenAfter: 60_000 },
       timeout: { timeoutMs: 1000 },
     });
@@ -291,7 +292,7 @@ describe('wrap and cancellation', () => {
     // Why: the README promised a bulkhead in the composite; without it a burst of calls
     // to a slow dependency would all run at once.
     const policy = createResiliencePolicy({
-      retry: { maxAttempts: 3, initialDelay: 1, maxDelay: 2 },
+      retry: backoff.exponential({ base: 1, max: 2 }).upTo(3),
       bulkhead: { maxConcurrent: 1, maxQueue: 0 },
     });
     const held = deferred<string>();
@@ -315,7 +316,7 @@ describe('wrap and cancellation', () => {
 
   it('passes a parent signal through wrap down to the function and cancels a function that ignores it', async () => {
     const policy = wrap(
-      createRetryPolicy({ maxAttempts: 3, initialDelay: 1, maxDelay: 2 }),
+      createRetryPolicy({ backoff: backoff.exponential({ base: 1, max: 2 }).upTo(3) }),
       createCircuitBreakerPolicy(),
       createTimeoutPolicy({ timeoutMs: 60_000 }),
     );
@@ -362,7 +363,7 @@ describe('wrap and cancellation', () => {
   it('keeps the retry attempt in the context through wrap', async () => {
     vi.useFakeTimers();
     const policy = wrap(
-      createRetryPolicy({ maxAttempts: 2, initialDelay: 1, maxDelay: 2 }),
+      createRetryPolicy({ backoff: backoff.exponential({ base: 1, max: 2 }).upTo(2) }),
       createCircuitBreakerPolicy(),
       createTimeoutPolicy(),
     );
@@ -400,7 +401,7 @@ describe('wrap and cancellation', () => {
 
   it('lets a function that honours the abort reject with its own error', async () => {
     const policy = wrap(
-      createRetryPolicy({ maxAttempts: 3, initialDelay: 1, maxDelay: 2 }),
+      createRetryPolicy({ backoff: backoff.exponential({ base: 1, max: 2 }).upTo(3) }),
       createTimeoutPolicy({ timeoutMs: 60_000 }),
     );
     vi.useFakeTimers();

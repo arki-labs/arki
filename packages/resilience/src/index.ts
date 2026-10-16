@@ -8,6 +8,7 @@ export {
   CancelledError,
   BulkheadRejectedError,
   RetriesExhaustedError,
+  InvalidBackoffError,
   isResilienceError,
   isBrokenCircuitError,
   isBulkheadRejectedError,
@@ -30,6 +31,10 @@ export type {
   RetryEvent,
   BreakEvent,
 } from './policy.js';
+
+// Retry schedules, shared with @arki/queue and @arki/journal
+export { backoff } from './backoff.js';
+export type { Backoff, ExponentialBackoffOptions } from './backoff.js';
 
 // Policy factories and composition
 export {

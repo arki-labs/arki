@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Policy } from './index.js';
 import {
+  backoff,
   createCircuitBreakerPolicy,
   createRetryPolicy,
   isBrokenCircuitError,
@@ -26,7 +27,7 @@ describe('execution helpers', () => {
         if (calls === 1) throw new Error('first call fails');
         return 'ok';
       },
-      { maxAttempts: 2, initialDelay: 1, maxDelay: 2 },
+      { backoff: backoff.exponential({ base: 1, max: 2 }).upTo(2) },
     );
 
     expect(result).toBe('ok');
@@ -46,7 +47,7 @@ describe('execution helpers', () => {
   });
 
   it('withResilience runs the call through the given policy', async () => {
-    const policy = createRetryPolicy({ maxAttempts: 1, initialDelay: 1, maxDelay: 2 });
+    const policy = createRetryPolicy({ backoff: backoff.exponential({ base: 1, max: 2 }).upTo(1) });
 
     await expect(withResilience(() => 42, policy)).resolves.toBe(42);
   });

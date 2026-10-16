@@ -4,29 +4,32 @@ import {
   noop as cockatielNoop,
   wrap as cockatielWrap,
   ConsecutiveBreaker,
-  ExponentialBackoff,
   handleAll,
-  retry,
   timeout,
   TimeoutStrategy,
 } from 'cockatiel';
 
+import type { Clock } from '@arki/clock';
+import { SystemClock } from '@arki/clock';
+
+import type { Backoff } from './backoff.js';
 import type { BulkheadPolicy, CircuitBreakerPolicy, Policy, RetryPolicy, TimeoutPolicy } from './policy.js';
+import { backoff } from './backoff.js';
 import { engineOf, fromEngine } from './engine.js';
+import { buildRetryPolicy } from './retry.js';
 
 // ---------------------------------------------------------------------------
 // Option types
 // ---------------------------------------------------------------------------
 
 export type RetryPolicyOptions = {
-  /** Maximum number of retry attempts (default: 3) */
-  maxAttempts?: number;
-  /** Initial delay in milliseconds before the first retry (default: 100) */
-  initialDelay?: number;
-  /** Maximum delay in milliseconds between retries (default: 10_000) */
-  maxDelay?: number;
-  /** Exponent applied to the backoff calculation (default: 2) */
-  exponent?: number;
+  /**
+   * When to retry and how long to wait first. Default:
+   * `backoff.exponential({ base: 100, max: 10_000, jitter: 0.25 }).upTo(3)`.
+   */
+  backoff?: Backoff;
+  /** Whose timer the retry delay waits on. Default: the system clock. Pass a `MockClock` to make tests instant. */
+  clock?: Clock;
 };
 
 export type CircuitBreakerPolicyOptions = {
@@ -49,7 +52,10 @@ export type BulkheadPolicyOptions = {
 };
 
 export type ResiliencePolicyOptions = {
-  retry?: RetryPolicyOptions;
+  /** When to retry and how long to wait first. Default: the `createRetryPolicy` default. */
+  retry?: Backoff;
+  /** Whose timer the retry delay waits on. Default: the system clock. */
+  clock?: Clock;
   circuitBreaker?: CircuitBreakerPolicyOptions;
   timeout?: TimeoutPolicyOptions;
   /**
@@ -64,23 +70,17 @@ export type ResiliencePolicyOptions = {
 // Policy factories
 // ---------------------------------------------------------------------------
 
+const systemClock = new SystemClock();
+const defaultRetry = backoff.exponential({ base: 100, max: 10_000, jitter: 0.25 }).upTo(3);
+
 /**
- * Create a retry policy with configurable exponential backoff.
+ * Create a retry policy. It calls the function, and after each failure asks `backoff`
+ * how long to wait before the next try, or whether to stop and rethrow the error.
  *
- * Defaults: 3 attempts, 100 ms initial delay, 10 s max delay, exponent 2.
+ * Default backoff: 3 retries, 100 ms doubling to at most 10 s, with 25% jitter.
  */
 export function createRetryPolicy(options: RetryPolicyOptions = {}): RetryPolicy {
-  const { maxAttempts = 3, initialDelay = 100, maxDelay = 10_000, exponent = 2 } = options;
-
-  const engine = retry(handleAll, {
-    maxAttempts,
-    backoff: new ExponentialBackoff({
-      initialDelay,
-      maxDelay,
-      exponent,
-    }),
-  });
-  return fromEngine(engine, { onRetry: engine.onRetry, onGiveUp: engine.onGiveUp });
+  return buildRetryPolicy(options.backoff ?? defaultRetry, options.clock ?? systemClock);
 }
 
 /**
@@ -142,7 +142,7 @@ export const noop: Policy = fromEngine(cockatielNoop, {});
  * logical call holds one slot for all its attempts.
  */
 export function createResiliencePolicy(options: ResiliencePolicyOptions = {}): Policy {
-  const retryPolicy = createRetryPolicy(options.retry);
+  const retryPolicy = createRetryPolicy({ backoff: options.retry, clock: options.clock });
   const breakerPolicy = createCircuitBreakerPolicy(options.circuitBreaker);
   const timeoutPolicy = createTimeoutPolicy(options.timeout);
 

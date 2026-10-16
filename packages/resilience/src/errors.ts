@@ -10,6 +10,8 @@ export const RESILIENCE_ERROR_CODES = {
   bulkheadRejected: 'ARKI_RESILIENCE_E004',
   /** Every retry attempt failed. */
   retriesExhausted: 'ARKI_RESILIENCE_E005',
+  /** A `backoff` builder got an option or an attempt number it cannot use. */
+  invalidBackoff: 'ARKI_RESILIENCE_E006',
 } as const;
 
 /** The code of a {@link ResilienceError}. */
@@ -89,6 +91,18 @@ export class RetriesExhaustedError extends ResilienceError {
     this.name = 'RetriesExhaustedError';
     this.attempts = attempts;
     this.lastError = lastError;
+  }
+}
+
+/** A `backoff` builder got an option or an attempt number it cannot use. Raised where the backoff is built. */
+export class InvalidBackoffError extends ResilienceError {
+  readonly code = RESILIENCE_ERROR_CODES.invalidBackoff;
+  readonly remediation =
+    'Pass finite, non-negative numbers: jitter from 0 to 1, a whole number to upTo, attempts from 1.';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidBackoffError';
   }
 }
 

@@ -1,6 +1,6 @@
 # @arki/resilience
 
-Resilience primitives for ARKI — retry, circuit breaker, timeout, bulkhead, and curated presets. Built on the [`cockatiel`](https://github.com/connor4312/cockatiel) engine with ergonomic factories, ready-made policies for common workloads, and its own public types and errors, so a new cockatiel release never changes this package's API.
+Resilience primitives for ARKI — retry, circuit breaker, timeout, bulkhead, and curated presets. Circuit breaker, timeout and bulkhead are built on the [`cockatiel`](https://github.com/connor4312/cockatiel) engine; retry is its own loop, so a `Clock` can drive its delay. It comes with ergonomic factories, ready-made policies for common workloads, and its own public types and errors, so a new cockatiel release never changes this package's API.
 
 ## Installation
 
@@ -34,10 +34,10 @@ Three curated presets ship out of the box:
 ### Building policies
 
 ```ts
-import { createResiliencePolicy, withResilience } from '@arki/resilience';
+import { backoff, createResiliencePolicy, withResilience } from '@arki/resilience';
 
 const policy = createResiliencePolicy({
-  retry: { maxAttempts: 3, initialDelay: 200 },
+  retry: backoff.exponential({ base: 200, max: 5_000, jitter: 0.25 }).upTo(3),
   timeout: { timeoutMs: 5_000 },
   circuitBreaker: { halfOpenAfter: 30_000, consecutiveFailures: 5 },
 });
@@ -57,14 +57,55 @@ await policy.execute(({ signal, attempt }: PolicyContext) => fetchPage(signal), 
 
 `signal` aborts when the caller's signal aborts, when a timeout policy reaches its deadline, and after a timed call returns. `attempt` is 0 for the first call and 1 for the first retry; it is always 0 under a policy without retry.
 
+### Retry schedules: `backoff`
+
+A `Backoff` says how long to wait before each retry, and when to stop. The same value drives `createRetryPolicy`, `createResiliencePolicy`, `@arki/queue` job retries and `@arki/journal` effect retries.
+
+```ts
+import { backoff } from '@arki/resilience';
+
+backoff
+  .exponential({ base: 1_000, max: 30_000, jitter: 0.25 }) // 1 s, 2 s, 4 s ... capped at 30 s, each varied by up to 25%
+  .upTo(5) // at most 5 retries (6 calls in all)
+  .while(error => !(error instanceof ValidationError)); // never retry a bad input
+
+backoff.constant(60_000).upTo(1); // one retry, a minute later
+```
+
+- `backoff.exponential({ base, max?, jitter?, random? })` waits `base * 2^(attempt - 1)`, capped at `max` (default and upper bound: `MAX_TIMER_MS` from `@arki/clock`, about 24.8 days). `jitter` (0 to 1, default 0) picks each wait at random within ±`jitter` of the exact value. `random` (default `Math.random`) is the randomness source; pass a fixed function to make jittered waits deterministic in tests.
+- `backoff.constant(ms)` waits `ms` before every retry.
+- `.upTo(retries)` limits the retries; `upTo(0)` never retries. Without it a backoff retries forever.
+- `.while(predicate)` retries only errors for which `predicate(error)` is true.
+- `.delay(attempt, error)` is the one question a backoff answers: the wait in ms before retry `attempt` (1 for the first retry), or `undefined` for stop. `.maxRetries` is the `upTo` limit, or `Infinity`.
+
+Backoffs are immutable: `upTo` and `while` return a new one, and each only narrows. A bad option throws `InvalidBackoffError` (`ARKI_RESILIENCE_E006`) where the backoff is built.
+
+### Testing retries with a clock
+
+Retry delays wait on a `Clock` from `@arki/clock`. Pass a `MockClock` and a retry with delays of seconds finishes at once:
+
+```ts
+import { MockClock } from '@arki/clock';
+import { backoff, createRetryPolicy } from '@arki/resilience';
+
+const clock = new MockClock();
+const policy = createRetryPolicy({ backoff: backoff.exponential({ base: 1_000 }).upTo(3), clock });
+
+const result = policy.execute(callFlakyApi);
+await clock.advanceAsync(10_000); // runs the 1 s, 2 s and 4 s delays instantly
+await result;
+```
+
+`createResiliencePolicy` takes `clock` too; it drives the retry delay.
+
 ### Quick wrappers
 
 For one-off calls without a long-lived policy:
 
 ```ts
-import { withRetry, withTimeout } from '@arki/resilience';
+import { backoff, withRetry, withTimeout } from '@arki/resilience';
 
-await withRetry(() => sendEmail('support@example.com'), { maxAttempts: 3 });
+await withRetry(() => sendEmail('support@example.com'), { backoff: backoff.exponential({ base: 200 }).upTo(3) });
 await withTimeout(() => slowOperation(), { timeoutMs: 1_000 });
 ```
 
@@ -110,13 +151,14 @@ const detach = attachPolicyLogger(policy, logger, 'billing');
 ## API
 
 - `createResiliencePolicy(options)` — compose retry + circuit breaker + timeout, plus an optional `bulkhead` that wraps them all (one logical call holds one slot).
-- `createRetryPolicy`, `createCircuitBreakerPolicy`, `createTimeoutPolicy`, `createBulkheadPolicy` — individual primitives.
+- `backoff.exponential`, `backoff.constant` — retry schedules (`Backoff`), shared with `@arki/queue` and `@arki/journal`.
+- `createRetryPolicy({ backoff?, clock? })`, `createCircuitBreakerPolicy`, `createTimeoutPolicy`, `createBulkheadPolicy` — individual primitives.
 - `externalApiPolicy`, `databasePolicy`, `backgroundJobPolicy` — pre-tuned presets.
 - `withResilience`, `withRetry`, `withTimeout` — execution helpers.
 - `attachPolicyLogger(policy, logger)` — observability hooks.
 - `wrap(...policies)` — compose policies from the outside in; `noop` — a policy that only runs the function.
-- `ResilienceError`, `CircuitOpenError`, `TimeoutError`, `CancelledError`, `BulkheadRejectedError`, `RetriesExhaustedError` — typed errors with helpers (`isResilienceError`, `isBrokenCircuitError`, `isBulkheadRejectedError`).
-- Types: `Policy`, `PolicyContext`, `PolicyCallback`, `RetryPolicy`, `CircuitBreakerPolicy`, `TimeoutPolicy`, `BulkheadPolicy`, `PolicyEvent`, `Subscription` and the event payloads `SuccessEvent`, `FailureEvent`, `FailureReason`, `RetryEvent`, `BreakEvent`.
+- `ResilienceError`, `CircuitOpenError`, `TimeoutError`, `CancelledError`, `BulkheadRejectedError`, `RetriesExhaustedError`, `InvalidBackoffError` — typed errors with helpers (`isResilienceError`, `isBrokenCircuitError`, `isBulkheadRejectedError`).
+- Types: `Backoff`, `ExponentialBackoffOptions`, `Policy`, `PolicyContext`, `PolicyCallback`, `RetryPolicy`, `CircuitBreakerPolicy`, `TimeoutPolicy`, `BulkheadPolicy`, `PolicyEvent`, `Subscription` and the event payloads `SuccessEvent`, `FailureEvent`, `FailureReason`, `RetryEvent`, `BreakEvent`.
 
 ## Errors
 
@@ -129,6 +171,7 @@ Every error the policies raise is a `ResilienceError` with a stable `code` and a
 | `ARKI_RESILIENCE_E003` | `CancelledError`        | The caller's own signal aborted the call. `cause` is its reason. |
 | `ARKI_RESILIENCE_E004` | `BulkheadRejectedError` | Every execution slot and queue slot was taken.                   |
 | `ARKI_RESILIENCE_E005` | `RetriesExhaustedError` | Every retry attempt failed. `lastError` holds the last one.      |
+| `ARKI_RESILIENCE_E006` | `InvalidBackoffError`   | A `backoff` builder got an option it cannot use.                 |
 
 The codes are also exported as `RESILIENCE_ERROR_CODES`.
 

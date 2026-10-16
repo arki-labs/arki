@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PolicyLogger } from './index.js';
 import {
   attachPolicyLogger,
+  backoff,
   createCircuitBreakerPolicy,
   createResiliencePolicy,
   createRetryPolicy,
@@ -33,7 +34,7 @@ describe('attachPolicyLogger', () => {
 
   it('logs each retry, the give-up and the final failure of a retry policy', async () => {
     vi.useFakeTimers();
-    const policy = createRetryPolicy({ maxAttempts: 2, initialDelay: 1, maxDelay: 2 });
+    const policy = createRetryPolicy({ backoff: backoff.exponential({ base: 1, max: 2 }).upTo(2) });
     const { entries, logger } = recorder();
     attachPolicyLogger(policy, logger, 'api');
 
@@ -111,7 +112,7 @@ describe('attachPolicyLogger', () => {
 
   it('logs only success and failure for a composed policy', async () => {
     vi.useFakeTimers();
-    const policy = createResiliencePolicy({ retry: { maxAttempts: 1, initialDelay: 1, maxDelay: 2 } });
+    const policy = createResiliencePolicy({ retry: backoff.exponential({ base: 1, max: 2 }).upTo(1) });
     const { entries, logger } = recorder();
     attachPolicyLogger(policy, logger);
 
