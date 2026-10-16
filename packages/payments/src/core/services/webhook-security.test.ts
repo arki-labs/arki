@@ -119,8 +119,8 @@ describe('WebhookSecurityService: Stripe signatures', () => {
 
     const result = await validateStripe(payload, header);
 
-    expect(result.isValid).toBe(false);
-    expect(result.error).toContain('allowed window');
+    // A `t` that is not Unix seconds is a malformed header, not a time outside the window.
+    expect(result).toMatchObject({ isValid: false, error: 'Invalid signature format' });
   });
 
   it('accepts when any v1 signature matches, as Stripe sends during a secret roll', async () => {

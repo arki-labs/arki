@@ -409,6 +409,7 @@
     "@arki/date": "workspace:*",
     "@arki/db": "workspace:*",
     "@arki/env": "workspace:*",
+    "@arki/http": "workspace:*",
     "@arki/journal": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",

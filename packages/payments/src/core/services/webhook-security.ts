@@ -1,7 +1,8 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
 
 import type { Instant } from '@arki/date';
-import { add, fromUnix, isAfter, isBefore, now, sub } from '@arki/date';
+import { isBefore, now, sub } from '@arki/date';
+import { HTTP_ERROR_CODES, HttpError, stripe } from '@arki/http/webhooks';
 
 import type { PaymentProviderType, WebhookValidationResult } from '../types.js';
 import { mapStripeEventType } from '../providers/stripe-event-types.js';
@@ -23,11 +24,19 @@ type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]:
 /** A whole number of seconds since the epoch, as Stripe writes `t=`. */
 const UNIX_SECONDS = /^\d+$/;
 
-/** Constant-time string compare. Different lengths are simply unequal (`timingSafeEqual` would throw). */
-function constantTimeEqual(a: string, b: string): boolean {
-  const left = Buffer.from(a, 'utf8');
-  const right = Buffer.from(b, 'utf8');
-  return left.length === right.length && timingSafeEqual(left, right);
+/** The messages this service has always returned, by `@arki/http/webhooks` code. */
+function stripeFailure(code: string): string {
+  switch (code) {
+    case HTTP_ERROR_CODES.webhookMalformed: {
+      return 'Invalid signature format';
+    }
+    case HTTP_ERROR_CODES.webhookStale: {
+      return 'Signature timestamp is outside the allowed window';
+    }
+    default: {
+      return 'Signature verification failed';
+    }
+  }
 }
 
 export class WebhookSecurityService {
@@ -87,13 +96,7 @@ export class WebhookSecurityService {
 
       // 4. Signature verification
       if (!options.skipSignatureValidation) {
-        const signatureValidation = this.validateSignature(
-          provider,
-          payload,
-          signature,
-          timestamp,
-          webhookSecret,
-        );
+        const signatureValidation = await this.validateSignature(provider, payload, signature, webhookSecret);
         if (!signatureValidation.isValid) {
           return signatureValidation;
         }
@@ -225,13 +228,12 @@ export class WebhookSecurityService {
     }
   }
 
-  private validateSignature(
+  private async validateSignature(
     provider: PaymentProviderType,
     payload: string | Buffer,
     signature: string,
-    timestamp: string,
     webhookSecret: string,
-  ): WebhookValidationResult {
+  ): Promise<WebhookValidationResult> {
     // An HMAC keyed with an empty secret can be computed by anyone.
     if (!webhookSecret) {
       return { isValid: false, provider, error: 'Webhook secret is not configured' };
@@ -240,7 +242,7 @@ export class WebhookSecurityService {
     try {
       switch (provider) {
         case 'stripe': {
-          return this.validateStripeSignature(payload, signature, timestamp, webhookSecret);
+          return await this.validateStripeSignature(payload, signature, webhookSecret);
         }
         case 'paypal': {
           return this.validatePayPalSignature(payload, signature, webhookSecret);
@@ -265,62 +267,22 @@ export class WebhookSecurityService {
     }
   }
 
-  private validateStripeSignature(
+  /** Stripe signs its own timestamp (`t=`), so the window is checked on that, not on the caller's value. */
+  private async validateStripeSignature(
     payload: string | Buffer,
     signature: string,
-    _timestamp: string,
     secret: string,
-  ): WebhookValidationResult {
+  ): Promise<WebhookValidationResult> {
+    const body = typeof payload === 'string' ? new TextEncoder().encode(payload) : new Uint8Array(payload);
     try {
-      let signedTimestamp: string | undefined;
-      const candidates: string[] = [];
-
-      for (const element of signature.split(',')) {
-        const separator = element.indexOf('=');
-        const key = element.slice(0, separator).trim();
-        const value = element.slice(separator + 1).trim();
-        if (separator <= 0 || !value) continue;
-        if (key === 't') signedTimestamp = value;
-        if (key === 'v1') candidates.push(value);
-      }
-
-      if (!signedTimestamp || candidates.length === 0) {
-        return {
-          isValid: false,
-          provider: 'stripe',
-          error: 'Invalid signature format',
-        };
-      }
-
-      const window = { seconds: this.config.replayWindowSeconds };
-      const current = now();
-      if (!UNIX_SECONDS.test(signedTimestamp)) {
-        return { isValid: false, provider: 'stripe', error: 'Signature timestamp is outside the allowed window' };
-      }
-      const signedAt = fromUnix(Number(signedTimestamp));
-      if (isBefore(signedAt, sub(current, window)) || isAfter(signedAt, add(current, window))) {
-        return { isValid: false, provider: 'stripe', error: 'Signature timestamp is outside the allowed window' };
-      }
-
-      const payloadStr = typeof payload === 'string' ? payload : payload.toString();
-      const computedSignature = createHmac('sha256', secret)
-        .update(`${signedTimestamp}.${payloadStr}`, 'utf8')
-        .digest('hex');
-
-      // Stripe sends one `v1` per active secret while a secret is being rolled; any may match.
-      const isValid = candidates.some((candidate) => constantTimeEqual(candidate, computedSignature));
-
-      return {
-        isValid,
-        provider: 'stripe',
-        error: isValid ? undefined : 'Signature verification failed',
-      };
+      await stripe({ secrets: [secret] }).verify(
+        { headers: new Headers({ 'stripe-signature': signature }), body },
+        { tolerance: this.config.replayWindowSeconds },
+      );
+      return { isValid: true, provider: 'stripe' };
     } catch (error) {
-      return {
-        isValid: false,
-        provider: 'stripe',
-        error: `Stripe signature validation error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      };
+      if (!(error instanceof HttpError)) throw error;
+      return { isValid: false, provider: 'stripe', error: stripeFailure(error.code) };
     }
   }
 

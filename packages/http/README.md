@@ -282,6 +282,30 @@ http({
 - A failing cache fails the request. Running unprotected could do the work twice.
 - This caches responses for HTTP replay. It is not the journal's command receipt, which commits with the business write. Use both for a payment: the cache answers a repeat cheaply, the receipt keeps a repeat that reaches the handler from writing twice.
 
+## Webhooks
+
+`@arki/http/webhooks` checks that a webhook comes from the sender who holds the secret. It is portable (Web Crypto only), and `subtle.verify` compares in constant time.
+
+```ts
+import { standardWebhooks, verifyWebhook } from '@arki/http/webhooks';
+
+const partnerEvents = routes()
+  .derive('webhook', verifyWebhook({ scheme: standardWebhooks({ secrets: [env.PARTNER_WEBHOOK_SECRET] }) }))
+  .bind(orderShipped, async ({ body }, { webhook }) => {
+    // The event id is the journal key: a resent event commits nothing the second time,
+    // and the receipt commits with the write, so there is no separate "seen" table.
+    await journal.run(db, recordShipment, body, meta, { idempotencyKey: `partner:${webhook.id}` });
+  });
+```
+
+- **Schemes.** `standardWebhooks({ secrets })` ([Standard Webhooks](https://www.standardwebhooks.com/): `webhook-id`, `webhook-timestamp`, `webhook-signature: v1,…`). `stripe({ secrets })` (`stripe-signature: t=…,v1=…`; the id is the event's `id`). `hmac({ secrets, header, headerPrefix?, algorithm?, encoding?, idHeader?, timestampHeader?, bodyPrefix? })` for the rest: GitHub is `{ header: 'x-hub-signature-256', headerPrefix: 'sha256=', idHeader: 'x-github-delivery' }`; Slack adds `timestampHeader: 'x-slack-request-timestamp'` and `` bodyPrefix: ({ timestamp }) => `v0:${timestamp}:` ``.
+- **The deriver reads a clone of the body.** The route's `body` schema still parses the same bytes after the check. A body over `maxBodyBytes` (default 1 MiB) answers 413 before any check.
+- **Rotation.** Pass several secrets, the new one first. Any one may match; `sign` uses the first.
+- **Replays.** The signed time must be within `tolerance` seconds of now, either way (default 300). Only a signed time stops a replay, so with `hmac` put the time in `bodyPrefix`. Past the window, the journal key stops a resent event.
+- **`webhook.id`** is `string` for `standardWebhooks` and for `hmac` with `idHeader`; `string | undefined` otherwise.
+- Every scheme also has `verify({ headers, body })` for use outside a route, and `sign(body, { id?, timestamp? })` for senders and tests.
+- Failures answer 401: headers missing or malformed (`E420`), no signature matches (`E421`), signed time outside the window (`E422`). A scheme with no secret, an empty one, or (Standard Webhooks) one that is not base64 throws `E012` when it is created.
+
 ## Streaming
 
 **Typed SSE.** `route.sse` declares a `text/event-stream` contract; the
@@ -396,10 +420,13 @@ Stable API — match on codes, never parse messages.
 | `ARKI_HTTP_E007` | deriver key duplicates an earlier deriver or a base context key |
 | `ARKI_HTTP_E008` | a bundle token's service was missing at boot (erased composition only) |
 | `ARKI_HTTP_E011` | a route contract is inconsistent (params vs path, headers, responses). Thrown by `route.*()` |
+| `ARKI_HTTP_E012` | a webhook scheme has no secret, an empty one, or one it cannot decode. Thrown when the scheme is created |
 | `ARKI_HTTP_E400` | request validation failed (params/headers/query/body) or body is not valid JSON |
 | `ARKI_HTTP_E401` / `E403` | credential / permission rejection (thrown by your derivers) |
 | `ARKI_HTTP_E404` | no route matches |
 | `ARKI_HTTP_E410` / `E411` / `E412` | idempotency: key missing (400), key reused for another request (422), request with this key still running (409) |
+| `ARKI_HTTP_E413` | request body larger than the route allows (413) |
+| `ARKI_HTTP_E420` / `E421` / `E422` | webhook: signature headers missing or malformed, no signature matches, signed time outside the window (all 401) |
 | `ARKI_HTTP_E500` | handler crash or output-schema violation |
 | `ARKI_HTTP_E510` | a `Response` without `output: raw()`, or a plain value from a `raw()` route (answers 500) |
 | `ARKI_HTTP_E511` | a result that does not fit the contract: undeclared `reply` status, or a value on a no-output route (answers 500) |

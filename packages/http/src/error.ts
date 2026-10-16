@@ -40,6 +40,8 @@ export const HTTP_ERROR_CODES = {
   invalidActionMeta: 'ARKI_HTTP_E009',
   /** A route contract is inconsistent: params, headers, or responses do not fit its path or each other. Thrown at declaration. */
   invalidContract: 'ARKI_HTTP_E011',
+  /** A webhook scheme has no secrets, an empty secret, or a secret it cannot decode. Thrown when the scheme is created. */
+  invalidWebhookScheme: 'ARKI_HTTP_E012',
   /** Request validation failed (params/headers/query/body) or the body is not valid JSON. */
   badRequest: 'ARKI_HTTP_E400',
   /** A route that needs an idempotency key got none, or an unusable one. Answers 400. */
@@ -48,6 +50,14 @@ export const HTTP_ERROR_CODES = {
   idempotencyKeyReused: 'ARKI_HTTP_E411',
   /** A request with this idempotency key is still running. Answers 409 with `retry-after`. */
   idempotencyInProgress: 'ARKI_HTTP_E412',
+  /** A request body is larger than the route allows. Answers 413. */
+  payloadTooLarge: 'ARKI_HTTP_E413',
+  /** A webhook's signature headers are missing or malformed. Answers 401. */
+  webhookMalformed: 'ARKI_HTTP_E420',
+  /** No webhook signature matches the body with any of the secrets. Answers 401. */
+  webhookSignatureMismatch: 'ARKI_HTTP_E421',
+  /** A webhook's signed time is too far from now: a replay, or a clock far off. Answers 401. */
+  webhookStale: 'ARKI_HTTP_E422',
   /** A deriver rejected the request's credentials. */
   unauthorized: 'ARKI_HTTP_E401',
   /** A deriver rejected the request's permissions. */
