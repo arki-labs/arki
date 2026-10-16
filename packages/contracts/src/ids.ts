@@ -157,7 +157,7 @@ type UniquePrefixGuard<T extends readonly unknown[]> = [DuplicatePrefixes<T>] ex
  *
  * @example
  * ```ts
- * // apps/novelette/backend/src/ids.test.ts
+ * // apps/my-app/backend/src/ids.test.ts
  * it('every id prefix is unique', () => assertUniqueIdPrefixes(storyId, podId, sceneId));
  * ```
  */
