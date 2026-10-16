@@ -1,6 +1,6 @@
 import { createCollection, localStorageCollectionOptions } from '@tanstack/react-db';
 import type { Collection } from '@tanstack/db';
-import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type { StandardSchemaV1 } from '@arki/schema';
 import type { InferSchemaOutput } from '@tanstack/db';
 
 export interface LocalCollectionConfig<

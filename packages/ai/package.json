@@ -67,8 +67,8 @@
     "@arki/env": "workspace:*",
     "@arki/failure": "workspace:*",
     "@arki/log": "workspace:*",
+    "@arki/schema": "workspace:*",
     "@qdrant/js-client-rest": "catalog:",
-    "@standard-schema/spec": "^1.1.0",
     "ai": "catalog:ai",
     "ai-sdk-ollama": "catalog:ai",
     "zod": "catalog:"

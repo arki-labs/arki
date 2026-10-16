@@ -1,4 +1,4 @@
-import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type { StandardSchemaV1 } from '@arki/schema';
 
 import { isFailure } from '@arki/failure';
 

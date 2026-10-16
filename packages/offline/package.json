@@ -78,7 +78,7 @@
     "@arki/contracts": "workspace:*",
     "@arki/date": "workspace:*",
     "@arki/log": "workspace:*",
-    "@standard-schema/spec": "^1.1.0",
+    "@arki/schema": "workspace:*",
     "@tanstack/db": "^0.12.3",
     "@tanstack/query-async-storage-persister": "catalog:tanstack/react-query",
     "@tanstack/query-persist-client-core": "^5.104.1",
