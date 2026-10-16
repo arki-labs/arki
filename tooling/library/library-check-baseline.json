@@ -3,72 +3,72 @@
     {
       "package": "@arki/admin",
       "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBoolean, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/admin",
       "error": "TYPES_E001 export \"./client\" exposes Zod types: ZodArray, ZodDiscriminatedUnion, ZodEnum, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/admin",
       "error": "TYPES_E001 export \"./connections/coolify\" exposes Zod types: ZodArray, ZodBoolean, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodString, ZodTransform, ZodUnion",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/admin",
       "error": "TYPES_E001 export \"./server\" exposes Zod types: ZodArray, ZodBoolean, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
-      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/admin",
       "error": "TYPES_E001 export \"./http\" exposes Zod types: ZodArray, ZodBoolean, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
-      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/admin",
       "error": "TYPES_E001 export \"./module\" exposes Zod types: ZodArray, ZodEnum, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodRecord, ZodString",
-      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/admin",
       "error": "TYPES_E001 export \"./core\" exposes Zod types: ZodArray, ZodBoolean, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
-      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/admin",
       "error": "TYPES_E001 export \"./env\" exposes Zod types: ZodArray, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
-      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/admin",
       "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodArray, ZodBoolean, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
-      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/admin",
       "error": "TYPES_E001 export \"./receipts\" exposes Zod types: ZodArray, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
-      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/admin",
       "error": "TYPES_E001 export \"./pg\" exposes Zod types: ZodArray, ZodDiscriminatedUnion, ZodEnum, ZodISODateTime, ZodJSONSchema, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString",
-      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/ai",
       "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBoolean, ZodDate, ZodDiscriminatedUnion, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodURL, ZodUnion, ZodUnknown",
-      "reason": "standard-schema wave 3: remaining Zod types are the package's own exported zod schemas (producers); removed in wave 4"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/ai",
       "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodArray, ZodBoolean, ZodDate, ZodDiscriminatedUnion, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodURL, ZodUnion, ZodUnknown",
-      "reason": "standard-schema wave 3: pre-existing, missed by the wave-0 seed (stale dist); producer schemas, removed in wave 4"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/ai",
       "error": "TYPES_E001 export \"./drizzle\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 3: pre-existing, missed by the wave-0 seed (stale dist); producer schemas, removed in wave 4"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/assert",
@@ -146,16 +146,6 @@
       "reason": "lesson 13 wave A|B: docs backlog"
     },
     {
-      "package": "@arki/content",
-      "error": "TYPES_E001 export \"./node\" exposes Zod types: ZodArray, ZodCoercedDate, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/content",
-      "error": "TYPES_E001 export \"./presets\" exposes Zod types: ZodArray, ZodCoercedDate, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "standard-schema wave 0: the presets entry re-exports the ./node collections (same Zod schemas); removed in waves 1-4"
-    },
-    {
       "package": "@arki/contracts",
       "error": "DOC_E002 no llms.txt",
       "reason": "lesson 13 wave A|B: docs backlog"
@@ -199,26 +189,16 @@
       "package": "@arki/db",
       "error": "DOC_E013 no \"test:docs\" script: add \"test:docs\": \"arki-doc-examples\"",
       "reason": "lesson 13 wave A|B: docs backlog"
-    },
-    {
-      "package": "@arki/db",
-      "error": "TYPES_E001 export \"./id-factory\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/db",
-      "error": "TYPES_E001 export \"./id\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
     },
     {
       "package": "@arki/db",
       "error": "TYPES_E001 export \"./orpc\" exposes Zod types: ZodDefault, ZodInt, ZodLiteral, ZodObject",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/db",
       "error": "TYPES_E001 export \"./transaction\" exposes Zod types: ZodDefault, ZodInt, ZodLiteral, ZodObject",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/design-systems",
@@ -238,67 +218,67 @@
     {
       "package": "@arki/design-systems",
       "error": "TYPES_E001 export \"./arena/palette-labels\" exposes Zod types: ZodObject, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/design-systems",
       "error": "TYPES_E001 export \"./arena/typography\" exposes Zod types: ZodArray, ZodObject, ZodOptional, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/design-systems",
       "error": "TYPES_E001 export \"./atelier/palette-labels\" exposes Zod types: ZodObject, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/design-systems",
       "error": "TYPES_E001 export \"./atelier/typography\" exposes Zod types: ZodArray, ZodObject, ZodOptional, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/design-systems",
       "error": "TYPES_E001 export \"./palette-labels\" exposes Zod types: ZodObject, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/design-systems",
       "error": "TYPES_E001 export \"./registry\" exposes Zod types: ZodArray, ZodEnum, ZodObject, ZodOptional, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/design-systems",
       "error": "TYPES_E001 export \"./tribunal/palette-labels\" exposes Zod types: ZodObject, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/design-systems",
       "error": "TYPES_E001 export \"./tribunal/typography\" exposes Zod types: ZodArray, ZodObject, ZodOptional, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/design-systems",
       "error": "TYPES_E001 export \"./typography\" exposes Zod types: ZodArray, ZodObject, ZodOptional, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/design-systems",
       "error": "TYPES_E001 export \"./workbench/palette-labels\" exposes Zod types: ZodObject, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/design-systems",
       "error": "TYPES_E001 export \"./workbench/typography\" exposes Zod types: ZodArray, ZodObject, ZodOptional, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/domains",
       "error": "TYPES_E001 export \"./availability\" exposes Zod types: ZodArray, ZodBoolean, ZodDate, ZodEmail, ZodEnum, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/domains",
       "error": "TYPES_E001 export \"./namecheap\" exposes Zod types: ZodAny, ZodArray, ZodBoolean, ZodNumber, ZodObject, ZodOptional, ZodString, ZodUnion",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/env",
@@ -318,17 +298,12 @@
     {
       "package": "@arki/env",
       "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodCoercedNumber, ZodDefault, ZodEnum, ZodPipe, ZodPreprocess, ZodString, ZodTransform, ZodType, ZodURL",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/env",
-      "error": "TYPES_E001 export \"./contracts\" exposes Zod types: ZodArray, ZodCoercedNumber, ZodDefault, ZodEnum, ZodPipe, ZodPreprocess, ZodString, ZodTransform, ZodType, ZodURL",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/env",
       "error": "TYPES_E001 export \"./core\" exposes Zod types: ZodArray, ZodCoercedNumber, ZodDefault, ZodEnum, ZodPipe, ZodPreprocess, ZodString, ZodTransform, ZodType, ZodURL",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/expr",
@@ -363,37 +338,32 @@
     {
       "package": "@arki/feedback",
       "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodUnion",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/feedback",
       "error": "TYPES_E001 export \"./email\" exposes Zod types: ZodArray, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodUnion",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/feedback",
       "error": "TYPES_E001 export \"./react\" exposes Zod types: ZodArray, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodUnion",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/formats",
-      "error": "TYPES_E001 export \".\" exposes Zod types: ZodResult, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/fs",
       "error": "TYPES_E001 export \"./files\" exposes Zod types: $ZodTypeInternals, ZodEnum, ZodISODateTime, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodRecord, ZodString, ZodType, ZodURL",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/fs",
       "error": "TYPES_E001 export \"./orpc\" exposes Zod types: $ZodTypeInternals, ZodEnum, ZodISODateTime, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodRecord, ZodString, ZodType, ZodURL, ZodVoid",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/fs",
       "error": "TYPES_E001 export \"./pg\" exposes Zod types: $ZodTypeInternals, ZodEnum, ZodISODateTime, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodRecord, ZodString, ZodType, ZodURL",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/http",
@@ -483,42 +453,42 @@
     {
       "package": "@arki/lock",
       "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBigInt, ZodBoolean, ZodCustom, ZodEnum, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodReadonly, ZodString, ZodTemplateLiteral, ZodUnion, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/lock",
       "error": "TYPES_E001 export \"./dot\" exposes Zod types: ZodArray, ZodBigInt, ZodBoolean, ZodCustom, ZodEnum, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodReadonly, ZodString, ZodTemplateLiteral, ZodUnion, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/lock",
       "error": "TYPES_E001 export \"./file\" exposes Zod types: ZodArray, ZodBigInt, ZodBoolean, ZodCustom, ZodEnum, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodReadonly, ZodString, ZodTemplateLiteral, ZodUnion, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/lock",
       "error": "TYPES_E001 export \"./memory\" exposes Zod types: ZodArray, ZodBigInt, ZodBoolean, ZodCustom, ZodEnum, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodReadonly, ZodString, ZodTemplateLiteral, ZodUnion, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/lock",
       "error": "TYPES_E001 export \"./pg\" exposes Zod types: ZodArray, ZodBigInt, ZodBoolean, ZodCustom, ZodEnum, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodReadonly, ZodString, ZodTemplateLiteral, ZodUnion, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/lock",
       "error": "TYPES_E001 export \"./pg/lease\" exposes Zod types: ZodArray, ZodBigInt, ZodBoolean, ZodCustom, ZodEnum, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodReadonly, ZodString, ZodTemplateLiteral, ZodUnion, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/lock",
       "error": "TYPES_E001 export \"./redis\" exposes Zod types: ZodArray, ZodBigInt, ZodBoolean, ZodCustom, ZodEnum, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodReadonly, ZodString, ZodTemplateLiteral, ZodUnion, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/lock",
       "error": "TYPES_E001 export \"./testing\" exposes Zod types: ZodArray, ZodBigInt, ZodBoolean, ZodCustom, ZodEnum, ZodLiteral, ZodNumber, ZodObject, ZodOptional, ZodReadonly, ZodString, ZodTemplateLiteral, ZodUnion, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/log",
@@ -583,317 +553,317 @@
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \".\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/contracts\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/derived-schemas\" exposes Zod types: $ZodTypeInternals, ZodBoolean, ZodNullable, ZodObject, ZodOptional, ZodString, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/index\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/journal\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/journal/payment\" exposes Zod types: $ZodBranded, ZodCustom, ZodDefault, ZodEnum, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/journal/subscription\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodBoolean, ZodCustom, ZodDefault, ZodEnum, ZodISODateTime, ZodNullable, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/money\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/notifications/service\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/primitives\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/providers/base-provider\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/providers/stripe-event-types\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/providers/stripe-provider\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/repository\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/security/webhook-security\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/services/dunning-service\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/services/payment-retry-service\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/services/proration-service\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/services/subscription-manager\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/services/webhook-analytics-service\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/services/webhook-event-payloads\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/services/webhook-handler\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/services/webhook-security\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/types\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/user-id\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./core/webhook-claims\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./dunning\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./dunning/analytics-money\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./dunning/contracts\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./dunning/index\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./dunning/primitives\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./dunning/repository\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./dunning/services/campaign-service\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./dunning/services/communication-service\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./dunning/services/integration-service\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./dunning/services/segmentation-service\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./dunning/stored-risk-profile\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./dunning/tables\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./dunning/types\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./index\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./presets\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./presets/index\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./presets/revenuecat\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./presets/subscription\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodISODateTime, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./refunds\" exposes Zod types: $ZodBranded, ZodEnum, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./refunds/contracts\" exposes Zod types: $ZodBranded, ZodEnum, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./refunds/index\" exposes Zod types: $ZodBranded, ZodEnum, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./refunds/journal\" exposes Zod types: $ZodBranded, ZodCustom, ZodEnum, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./refunds/primitives\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./refunds/repository\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./refunds/service\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./refunds/types\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./repositories\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./tax\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./tax/contracts\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./tax/index\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodURL, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./tax/primitives\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./tax/reporting\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./tax/repository\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/payments",
       "error": "TYPES_E001 export \"./tax/service\" exposes Zod types: $ZodBranded, $ZodTypeInternals, ZodArray, ZodBoolean, ZodCustom, ZodDefault, ZodEmail, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodRecord, ZodString, ZodTransform, ZodType, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/poetry",
       "error": "TYPES_E001 export \".\" exposes Zod types: ZodEnum",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/queue",
       "error": "TYPES_E001 export \"./foreman\" exposes Zod types: ZodArray, ZodDefault, ZodISODateTime, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodString",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/react-hooks",
@@ -928,87 +898,87 @@
     {
       "package": "@arki/scraping",
       "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBoolean, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodString, ZodTransform, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/scraping",
       "error": "TYPES_E001 export \"./client\" exposes Zod types: ZodArray, ZodBoolean, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodString, ZodTransform, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./layout/workspace/app-sidebar.tsx\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./layout/workspace/app-sidebar\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./layout/workspace/layout.tsx\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./layout/workspace/layout\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./tweaks\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./tweaks/labels\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./tweaks/persistence\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./tweaks/registry\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./tweaks/server\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./tweaks/tweaks-button\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./tweaks/tweaks-panel\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./tweaks/types.ts\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./tweaks/types\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./tweaks/use-persist-tweaks\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/sitekit",
       "error": "TYPES_E001 export \"./tweaks/use-tweak\" exposes Zod types: ZodLiteral, ZodObject, ZodRecord, ZodString, ZodUnknown",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/string",
@@ -1028,27 +998,22 @@
     {
       "package": "@arki/text",
       "error": "TYPES_E001 export \".\" exposes Zod types: ZodArray, ZodBoolean, ZodDefault, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodString, ZodTransform, ZodURL",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
-    },
-    {
-      "package": "@arki/text",
-      "error": "TYPES_E001 export \"./validation\" exposes Zod types: ZodArray, ZodBoolean, ZodDefault, ZodEnum, ZodNumber, ZodObject, ZodOptional, ZodPipe, ZodString, ZodTransform, ZodURL",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/text-bible",
       "error": "TYPES_E001 export \".\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/text-bible",
       "error": "TYPES_E001 export \"./core\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/text-bible",
       "error": "TYPES_E001 export \"./search\" exposes Zod types: $ZodBranded, ZodPipe, ZodString, ZodTransform",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/theme",
@@ -1098,17 +1063,17 @@
     {
       "package": "@arki/waitlist",
       "error": "TYPES_E001 export \".\" exposes Zod types: $ZodTypeInternals, ZodDefault, ZodDiscriminatedUnion, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodString, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/waitlist",
       "error": "TYPES_E001 export \"./mcp\" exposes Zod types: $ZodTypeInternals, ZodDefault, ZodDiscriminatedUnion, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodString, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     },
     {
       "package": "@arki/waitlist",
       "error": "TYPES_E001 export \"./server\" exposes Zod types: $ZodTypeInternals, ZodDefault, ZodDiscriminatedUnion, ZodEnum, ZodLiteral, ZodNullable, ZodNumber, ZodObject, ZodOptional, ZodString, ZodType",
-      "reason": "standard-schema wave 0: Zod types in a public entry; removed in waves 1-4 (synthesis §4)"
+      "reason": "zod producer: the package defines its data with zod and infers its types from it, by design (founder, 2026-10-16). Kept exact so a new Zod name, e.g. a zod-only accept API, still fails."
     }
   ]
 }

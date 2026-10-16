@@ -80,6 +80,21 @@ describe('checkPublicTypes', () => {
     expect(result.errors).toEqual([]);
   });
 
+  it('exempts only the named zod-layer entries of a package, because its other entries must stay zod-free', () => {
+    const manifest = { name: '@arki/db', exports: { '.': entry('index'), './id': entry('id') } };
+    const result = check(manifest, {
+      'dist/index.d.ts': 'export declare const leak: ZodObject;\n',
+      'dist/id.d.ts': 'export declare const id: ZodType;\n',
+    });
+    expect(result.errors).toEqual(['TYPES_E001 export "." exposes Zod types: ZodObject']);
+  });
+
+  it('does not carry an entry exemption to another package, because ./id means a zod layer only in @arki/db', () => {
+    const manifest = { name: '@arki/other', exports: { './id': entry('id') } };
+    const result = check(manifest, { 'dist/id.d.ts': 'export declare const id: ZodType;\n' });
+    expect(result.errors).toEqual(['TYPES_E001 export "./id" exposes Zod types: ZodType']);
+  });
+
   it('only warns when the types file is missing, because library-check runs before build', () => {
     const result = check(demo, {});
     expect(result).toEqual({

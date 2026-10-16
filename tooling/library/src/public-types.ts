@@ -30,6 +30,20 @@ import { leaves } from './manifest';
  */
 const ZOD_LAYER_PACKAGES = new Set(['@arki/contracts']);
 
+/**
+ * Single entries that are a Zod layer by design, keyed by package name.
+ * - `@arki/db` `./id`, `./id-factory`: `defineId` columns carry the workspace's id schemas (zod, like contracts).
+ * - `@arki/env` `./contracts`: the zod parsing helpers (`json`, `csvArray`, ...) for `defineEnv`.
+ * - `@arki/text` `./validation`: the zod input schemas of the text procedures.
+ * - `@arki/content` `./presets`, `./node`: `@content-collections` requires zod/v4 schemas in its config.
+ */
+const ZOD_LAYER_ENTRIES: Readonly<Record<string, ReadonlySet<string>>> = {
+  '@arki/db': new Set(['./id', './id-factory']),
+  '@arki/env': new Set(['./contracts']),
+  '@arki/text': new Set(['./validation']),
+  '@arki/content': new Set(['./presets', './node']),
+};
+
 const ZOD_IDENTIFIER = /^\$?Zod[A-Z]/;
 
 /** Candidate files for a relative specifier, declaration files first. */
@@ -98,8 +112,10 @@ export function checkPublicTypes(dir: string, manifest: Manifest): CheckResult {
   const warnings: string[] = [];
   if (ZOD_LAYER_PACKAGES.has(manifest.name)) return { errors, warnings };
 
+  const zodEntries = ZOD_LAYER_ENTRIES[manifest.name];
   for (const [subpath, target] of Object.entries(manifest.exports)) {
     if (subpath === './package.json' || subpath.includes('*') || subpath.split('/').at(-1) === 'zod') continue;
+    if (zodEntries?.has(subpath)) continue;
     const typesFiles = [
       ...new Set(
         leaves(target)
