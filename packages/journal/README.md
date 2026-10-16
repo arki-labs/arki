@@ -364,7 +364,7 @@ export const journal = j.compose({ tables, effects: [orderMail], services: { mai
 
 ### When a job runs
 
-An effect can carry a schedule: `j.effect('receipt', order, handlers).withSchedule({ priority: 10 })`. `priority` (an integer, default 0): among due jobs the higher one is claimed first. It is strict, so a steady stream of high-priority jobs can starve lower ones; use a few levels, not a score. `delaySeconds`: the job is due that long after the write's transaction started (Postgres `now()`), so a long transaction uses part of the delay before commit. `runAt: event => Date`: the job is due at the time the event names, from the app's clock; a time in the past is due at once. Give `delaySeconds` or `runAt`, not both. Retries keep their backoff and their priority. A bad value throws `BAD_DEFINITION` where the schedule is declared.
+An effect can carry a schedule: `j.effect('receipt', order, handlers).withSchedule({ priority: 10 })`. `priority` (an integer, default 0): among due jobs the higher one is claimed first. It is strict, so a steady stream of high-priority jobs can starve lower ones; use a few levels, not a score. `delaySeconds`: the job is due that long after the write's transaction started (Postgres `now()`), so a long transaction uses part of the delay before commit. `runAt: event => Date`: the job is due at the time the event names, from the app's clock; a time in the past is due at once. Give `delaySeconds` or `runAt`, not both. `retry`: a `Backoff` from `@arki/resilience` (re-exported here as `backoff`), the same retry schedule queue jobs and resilience policies take. It says how long a failed job waits before its next try, and when it is dead instead: `withSchedule({ retry: backoff.exponential({ base: 5_000 }).upTo(3).while(error => !(error instanceof BadInput)) })`. The default is `backoff.exponential({ base: 1000, max: 300_000, jitter: 0.25 }).upTo(7)`: 8 tries, doubling from 1 s to at most 5 minutes. Retries keep their priority. A bad value throws `BAD_DEFINITION` where the schedule is declared.
 
 ## The worker
 
@@ -430,7 +430,7 @@ The rules, all enforced:
 
 ## Operating the jobs
 
-`journal.jobs(db, { status, effect, limit })` lists job rows: `pending` (the default) is everything not dead, due, delayed and leased alike; `dead` is what the worker gave up on after 8 attempts, with `lastError`. `journal.retry(db, jobId)` brings a dead job back: attempts and lease cleared, due now, workers woken. `journal.discard(db, jobId)` deletes a dead job. Both refuse a job that is not dead: retrying a live one would run it twice, and deleting a live one would not stop its work, only lose the record of it. `journal.strandedJobs(db)` finds pending jobs whose effect this journal no longer has.
+`journal.jobs(db, { status, effect, limit })` lists job rows: `pending` (the default) is everything not dead, due, delayed and leased alike; `dead` is what the worker gave up on when the effect's `retry` said stop (after 8 tries by default), with `lastError`. `journal.retry(db, jobId)` brings a dead job back: attempts and lease cleared, due now, workers woken. `journal.discard(db, jobId)` deletes a dead job. Both refuse a job that is not dead: retrying a live one would run it twice, and deleting a live one would not stop its work, only lose the record of it. `journal.strandedJobs(db)` finds pending jobs whose effect this journal no longer has.
 
 ## Dot
 

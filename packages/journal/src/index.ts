@@ -1,5 +1,8 @@
 export { initJournal } from './journal.js';
 export { need } from './handlers.js';
+// Retry schedules for `EffectSchedule.retry`, from @arki/resilience
+export { backoff } from '@arki/resilience';
+export type { Backoff } from '@arki/resilience';
 export type {
   Command,
   CommandAuthorize,

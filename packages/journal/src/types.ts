@@ -2,6 +2,8 @@ import type { AnyRelations } from 'drizzle-orm';
 import type { AnyPgColumn, PgAsyncDatabase, PgQueryResultHKT, PgTableWithColumns } from 'drizzle-orm/pg-core';
 import type { z } from 'zod';
 
+import type { Backoff } from '@arki/resilience';
+
 /**
  * A function type whose parameters are checked bivariantly.
  *
@@ -359,11 +361,18 @@ export type ServicesFor<E extends readonly { readonly needs: Needs }[]> = UnionT
  * When an effect's jobs run. `priority`: higher first among due jobs; strict, so a
  * steady stream of high-priority jobs can starve lower ones. `delaySeconds`: due that
  * long after the write's transaction started (`now()` in Postgres). `runAt`: due at the
- * time the event names, from the app's clock. Retries keep their backoff and priority.
+ * time the event names, from the app's clock. `retry`: the backoff between tries.
+ * Retries keep their priority.
  */
 export type EffectSchedule<Meta = unknown> = {
   readonly priority?: number;
   readonly delaySeconds?: number;
+  /**
+   * When a failed job runs again, and how long it waits first: a `backoff` from
+   * `@arki/resilience` (re-exported here). A job the backoff stops is dead. Default:
+   * `backoff.exponential({ base: 1000, max: 300_000, jitter: 0.25 }).upTo(7)`, so 8 tries.
+   */
+  readonly retry?: Backoff;
   /** A method signature, so an effect of one meta type is still an `Effect<unknown>`; see `BivariantFn`. */
   runAt?(event: Recorded<string, unknown, Meta>): Date;
 };

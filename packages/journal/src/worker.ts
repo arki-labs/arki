@@ -8,6 +8,8 @@
 import type { z } from 'zod';
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, max, notInArray, or, sql } from 'drizzle-orm';
 
+import { backoff } from '@arki/resilience';
+
 import type { History } from './history.js';
 import type { HookPointInternal } from './hooks.js';
 import type { JournalTables } from './pg.js';
@@ -34,20 +36,12 @@ import { leaseToken } from './id.js';
 import { assertRootDb } from './storage.js';
 
 const DEFAULT_LEASE_SECONDS = 60;
-const MAX_ATTEMPTS = 8;
-const BACKOFF_BASE_MS = 1000;
-const BACKOFF_CAP_MS = 300_000;
+/** The retry of an effect whose schedule sets none: 7 retries (8 tries), doubling from 1 s to at most 5 minutes. */
+const defaultEffectRetry = backoff.exponential({ base: 1000, max: 300_000, jitter: 0.25 }).upTo(7);
 const DEFAULT_POLL_MS = 1000;
 
 function errorText(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-}
-
-/** Seconds to wait before the next attempt: doubling with jitter, capped at 5 minutes. */
-function backoffSeconds(attempts: number): number {
-  const base = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** Math.max(0, attempts - 1));
-  const jitter = base * (Math.random() * 0.5 - 0.25);
-  return Math.round(Math.min(BACKOFF_CAP_MS, base + jitter)) / 1000;
 }
 
 /** Database time plus `seconds`. The worker's clock never decides a lease or a retry. */
@@ -178,14 +172,16 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
       await db.delete(jobsTable).where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
       debugDrain.debug('{effect} {jobId}: done', { effect: job.effect, jobId: job.id });
     } catch (error) {
-      const dead = job.attempts >= MAX_ATTEMPTS;
+      // `attempts` counts the tries so far, which is the number of the retry that would come next.
+      const delayMs = (effect?.schedule.retry ?? defaultEffectRetry).delay(job.attempts, error);
+      const dead = delayMs === undefined;
       await db
         .update(jobsTable)
         .set({
           lastError: errorText(error),
           leaseToken: null,
           leaseUntil: null,
-          ...(dead ? { deadAt: sql`now()` } : { availableAt: dbNowPlus(backoffSeconds(job.attempts)) }),
+          ...(delayMs === undefined ? { deadAt: sql`now()` } : { availableAt: dbNowPlus(delayMs / 1000) }),
         })
         .where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
       debugDrain.debug('{effect} {jobId}: attempt {attempts} failed{value4}: {value5}', {

@@ -89,6 +89,7 @@
   "prettier": "@arki/prettier-config",
   "dependencies": {
     "@arki/log": "workspace:*",
+    "@arki/resilience": "workspace:*",
     "@paralleldrive/cuid2": "catalog:utilities",
     "drizzle-orm": "catalog:drizzle",
     "zod": "catalog:"
