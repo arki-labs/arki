@@ -164,7 +164,7 @@ Server: pass a `send` function. The token is stored hashed.
 
 ```ts
 import { defineAuthBackend } from '@arki/auth';
-import { createEmailClient } from '@arki/emails';
+import { createEmailClient } from '@arki/mail';
 
 const email = createEmailClient({ isDev: env.NODE_ENV === 'development', resend: { apiKey: env.RESEND_API_KEY } });
 

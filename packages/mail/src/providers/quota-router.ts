@@ -54,7 +54,7 @@ function deduplicateNames(providers: EmailProvider[]): string[] {
  */
 export function quotaRouter(providers: EmailProvider[], options?: { store?: QuotaStore }): EmailProvider {
   if (providers.length === 0) {
-    throw new Error('[arki/emails] quotaRouter requires at least one provider');
+    throw new Error('[arki/mail] quotaRouter requires at least one provider');
   }
 
   const store: QuotaStore = options?.store ?? inMemoryQuotaStore();

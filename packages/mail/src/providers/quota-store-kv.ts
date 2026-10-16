@@ -4,7 +4,7 @@ import { debugEmails } from '../debug';
 /**
  * Minimal KV interface required by `kvQuotaStore`.
  *
- * Deliberately duck-typed so `@arki/emails` does not need a hard dependency on
+ * Deliberately duck-typed so `@arki/mail` does not need a hard dependency on
  * `@arki/kv` (which pulls in Redis/ioredis). Any object that satisfies this
  * shape works — `@arki/kv`'s `KV` class, a custom Redis client, or a test mock.
  */
@@ -24,7 +24,7 @@ export interface KVLike {
  *
  * @example With `@arki/kv`
  * ```ts
- * import { kvQuotaStore } from '@arki/emails';
+ * import { kvQuotaStore } from '@arki/mail';
  * import { kv } from './kv';
  *
  * const router = quotaRouter(

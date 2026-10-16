@@ -26,6 +26,6 @@ export type { EmailProvider, SendEmailPayload, SendEmailResult } from './provide
 // surface (client + providers); re-exporting the `.tsx` templates from it would
 // force JSX through every consumer's bundler — including raw esbuild passes that
 // have no JSX loader (drizzle-kit config bundling), breaking schema generation in
-// any backend whose graph reaches `@arki/emails` via `@arki/auth`. Import templates
+// any backend whose graph reaches `@arki/mail` via `@arki/auth`. Import templates
 // directly from the typed subpath instead:
-//   import { MagicLinkEmail } from '@arki/emails/react/templates/magic-link';
+//   import { MagicLinkEmail } from '@arki/mail/react/templates/magic-link';

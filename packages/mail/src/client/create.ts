@@ -98,7 +98,7 @@ export type EmailClientConfig = z.input<typeof EmailClientConfigSchema>;
 export function createEmailClient(config: EmailClientConfig): EmailClient {
   const parsed = EmailClientConfigSchema.safeParse(config);
   if (!parsed.success) {
-    throw new Error(`[arki/emails] createEmailClient: invalid config.\n${z.prettifyError(parsed.error)}`);
+    throw new Error(`[arki/mail] createEmailClient: invalid config.\n${z.prettifyError(parsed.error)}`);
   }
   const { isDev, resend, unosend, cloudflare, ses, kv } = parsed.data;
 

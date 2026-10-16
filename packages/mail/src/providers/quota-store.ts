@@ -8,7 +8,7 @@
  *
  * @example Bring-your-own KV store
  * ```ts
- * import type { QuotaStore } from '@arki/emails';
+ * import type { QuotaStore } from '@arki/mail';
  * import { kv } from '@arki/kv';
  *
  * function kvQuotaStore(): QuotaStore {

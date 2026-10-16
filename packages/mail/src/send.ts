@@ -1,5 +1,5 @@
 /**
- * @deprecated Use `initEmails` from `@arki/emails` instead.
+ * @deprecated Use `initEmails` from `@arki/mail` instead.
  *
  * This low-level helper is kept for backward compatibility.
  * Internally it delegates to `initEmails` with the no-op dev provider.

@@ -197,10 +197,10 @@
   "dependencies": {
     "@arki/contracts": "workspace:*",
     "@arki/db": "workspace:*",
-    "@arki/emails": "workspace:*",
     "@arki/env": "workspace:*",
     "@arki/kv": "workspace:*",
     "@arki/log": "workspace:*",
+    "@arki/mail": "workspace:*",
     "@better-auth/expo": "catalog:better-auth",
     "@daveyplate/better-auth-tanstack": "catalog:",
     "@daveyplate/better-auth-ui": "catalog:better-auth",

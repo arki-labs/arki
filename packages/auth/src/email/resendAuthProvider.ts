@@ -1,4 +1,4 @@
-import { createEmailClient } from '@arki/emails';
+import { createEmailClient } from '@arki/mail';
 
 import type { EmailProviderConfig, EmailProviderUserConfig } from './sendVerificationRequest';
 import { debugAuth } from '../debug';

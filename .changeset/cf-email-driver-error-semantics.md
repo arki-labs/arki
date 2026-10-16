@@ -1,5 +1,5 @@
 ---
-'@arki/emails': minor
+'@arki/mail': minor
 ---
 
 Cloudflare Email Service driver error-semantics hardening: a send where every

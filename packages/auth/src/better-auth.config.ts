@@ -5,8 +5,8 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { magicLink, oAuthProxy } from 'better-auth/plugins';
 
 import { createPrefixedId } from '@arki/db/id';
-import { createEmailClient } from '@arki/emails';
 import { getLogger } from '@arki/log';
+import { createEmailClient } from '@arki/mail';
 
 import { betterAuth } from './create-auth';
 import { env } from './env';

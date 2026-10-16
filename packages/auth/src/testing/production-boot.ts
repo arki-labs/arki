@@ -72,11 +72,11 @@ export function applyProductionBootEnv(): () => void {
 }
 
 /**
- * The `@arki/emails` module mock. Consumers wire it through vitest's hoisted
+ * The `@arki/mail` module mock. Consumers wire it through vitest's hoisted
  * `vi.mock`, delegating here to keep the body DRY:
  *
  * ```ts
- * vi.mock('@arki/emails', async () => {
+ * vi.mock('@arki/mail', async () => {
  *   const { emailModuleMock } = await import('@arki/auth/testing/production-boot');
  *   return emailModuleMock();
  * });

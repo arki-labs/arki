@@ -1,6 +1,6 @@
 import { createId } from '@paralleldrive/cuid2';
 
-import type { EmailClient } from '@arki/emails';
+import type { EmailClient } from '@arki/mail';
 
 import { debugEmail } from '../debug';
 import { env } from '../env';

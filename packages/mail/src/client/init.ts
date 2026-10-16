@@ -28,7 +28,7 @@ type InitEmailsOptions = {
    *
    * @example
    * ```ts
-   * import { kvQuotaStore } from '@arki/emails';
+   * import { kvQuotaStore } from '@arki/mail';
    * import { kv } from './kv';
    *
    * initEmails({ providers, store: kvQuotaStore(kv) });
@@ -89,7 +89,7 @@ export type EmailClient = {
  */
 export function initEmails(options: InitEmailsOptions): EmailClient {
   if (options.providers.length === 0) {
-    throw new Error('[arki/emails] initEmails requires at least one provider');
+    throw new Error('[arki/mail] initEmails requires at least one provider');
   }
 
   const isDev = options.isDev ?? false;

@@ -1,11 +1,11 @@
 ---
-title: '@arki/emails — Outbound Deliverability Fundamentals (SES + Cloudflare ES)'
+title: '@arki/mail — Outbound Deliverability Fundamentals (SES + Cloudflare ES)'
 type: package-research-prompt
-package: '@arki/emails'
+package: '@arki/mail'
 slug: emails-deliv
 round: 00
 depends-on: ['apps/avocabo/docs/features/newsletter-ingestion/research/00-email-infrastructure-feasibility']
-decision-to-unblock: 'Define the operational deliverability contract for every consumer app using @arki/emails. Output: a per-provider config + DNS recipe + monitoring + warmup playbook that an app can adopt to make inbox-placement reliable.'
+decision-to-unblock: 'Define the operational deliverability contract for every consumer app using @arki/mail. Output: a per-provider config + DNS recipe + monitoring + warmup playbook that an app can adopt to make inbox-placement reliable.'
 bootstrap-constraints: inherit
 status: ready
 research-home-precedent: 'First instance of package-level research at packages/{name}/docs/research/. Founder-chosen 2026-05-29; treat as the canonical pattern for cross-cutting @arki/* infra research that informs every consumer app.'
@@ -27,15 +27,15 @@ tags:
 
 ## Package Context
 
-- **Package:** `@arki/emails` at `packages/emails/`. Wraps multiple transactional-email providers behind a typed client (`initEmails`) and a `quotaRouter` that fails over by monthly quota.
-- **Live providers in `packages/emails/src/providers/`:** `resend`, `unosend`, `ses` (AWS SES v2 — supports `configurationSetName`), `cloudflare-email-service` (Cloudflare beta API — runtime-Zod-validated response), `quota-router` (provider chain).
+- **Package:** `@arki/mail` at `packages/mail/`. Wraps multiple transactional-email providers behind a typed client (`initEmails`) and a `quotaRouter` that fails over by monthly quota.
+- **Live providers in `packages/mail/src/providers/`:** `resend`, `unosend`, `ses` (AWS SES v2 — supports `configurationSetName`), `cloudflare-email-service` (Cloudflare beta API — runtime-Zod-validated response), `quota-router` (provider chain).
 - **Quota-router chain currently default-ordered (per `client/auto.ts`):** `resend → unosend → ses → cloudflare-email-service`. Fail-open semantics on provider exhaustion or per-provider error.
 - **Consumer apps (current and planned):** avocabo (newsletter digests, magic-link auth), novelette (parent-facing transactional + magic-link), evervest (email-only product), arki internal (magic-link via `templates/arki-magic-link`). Each app sends from its own subdomain (`mail.{app}.{tld}` pattern envisaged but not enforced).
-- **What `@arki/emails` does NOT do today:** does not manage DNS records, does not subscribe to bounce/complaint webhooks, does not check sender reputation, does not enforce a sending schedule for warmup, does not enforce `List-Unsubscribe` headers. These responsibilities sit at the app boundary or are not yet implemented anywhere.
+- **What `@arki/mail` does NOT do today:** does not manage DNS records, does not subscribe to bounce/complaint webhooks, does not check sender reputation, does not enforce a sending schedule for warmup, does not enforce `List-Unsubscribe` headers. These responsibilities sit at the app boundary or are not yet implemented anywhere.
 
 ## Research Goal
 
-For every app that uses `@arki/emails`, define a **complete operational deliverability contract** that takes "we configured the provider" to "mail consistently lands in the inbox, not the spam folder, not the Promotions tab." Specifically for the **SES** and **Cloudflare Email Service** outbound paths (the two paths where we own more of the deliverability stack), plus the sending-domain authentication layer (SPF, DKIM, DMARC, BIMI, MTA-STS, TLS-RPT) that applies regardless of provider.
+For every app that uses `@arki/mail`, define a **complete operational deliverability contract** that takes "we configured the provider" to "mail consistently lands in the inbox, not the spam folder, not the Promotions tab." Specifically for the **SES** and **Cloudflare Email Service** outbound paths (the two paths where we own more of the deliverability stack), plus the sending-domain authentication layer (SPF, DKIM, DMARC, BIMI, MTA-STS, TLS-RPT) that applies regardless of provider.
 
 This is a **Type 3 (Pragmatic 90% Solution) + Type 5 (Cost, Latency, Operations) round.** The output must be implementation-ready: DNS record templates, config knobs the package should expose, a monitoring dashboard surface, a warmup schedule, and a tripwire/recovery playbook. NOT a survey of "what is DKIM."
 
@@ -60,7 +60,7 @@ This is a **Type 3 (Pragmatic 90% Solution) + Type 5 (Cost, Latency, Operations)
 - **Sandbox-to-production transition**: 200/day sandbox limit; the actual review process in 2026 (form fields, response time, common rejection reasons, what to do when rejected); whether sending volume requested affects approval.
 - **Shared IP pool reputation** (the SES default): what is the realistic IPR for shared-pool SES into Gmail/Outlook in 2026? Are there known bad-neighbor incidents? When does it make sense to graduate to dedicated IP?
 - **Dedicated IP economics and warmup**: $24.95/mo per dedicated IP — when is the breakeven? AWS's auto-warmup ramp schedule (45 days, max 50K/day end state); what happens if you exceed the ramp; SES Virtual Deliverability Manager (VDM) and "Guided" warmup.
-- **Dedicated IP Pools**: routing transactional vs marketing through separate IPs from the same account; how Configuration Sets do this; whether `@arki/emails` should expose a `pool` parameter.
+- **Dedicated IP Pools**: routing transactional vs marketing through separate IPs from the same account; how Configuration Sets do this; whether `@arki/mail` should expose a `pool` parameter.
 - **Configuration Sets** (which the `ses` provider already accepts via `configurationSetName`): what they actually control — IP pool routing, reputation tracking, event publishing (Delivery, Bounce, Complaint, OpenClick, Reject); recommended default Configuration Set for a new app; SNS topic vs EventBridge vs Firehose for event delivery.
 - **Bounce / complaint suppression flow**: SES does NOT auto-suppress on a per-account basis by default for soft bounces; the SES account-level suppression list vs per-Configuration-Set suppression; how to consume bounce/complaint SNS notifications and write them into a domain-level suppression table; the 3-bounce-rule, the 0.1% complaint rate threshold, the 5% bounce rate threshold that triggers AWS review.
 - **AWS Sender Reputation dashboard**: what it actually shows, what triggers an account review, the playbook when reputation slips.
@@ -76,8 +76,8 @@ This is a **Type 3 (Pragmatic 90% Solution) + Type 5 (Cost, Latency, Operations)
 
 **Content & header layer (provider-agnostic but content-shaped):**
 
-- **`List-Unsubscribe` (RFC 2369) + `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058)**: Gmail and Yahoo enforced this for bulk senders as of Feb 2024. Mandatory for any sender > 5000/day. How to wire it through `@arki/emails` for digests and not-for transactional auth mail; the unsubscribe endpoint contract (HTTPS, idempotent, no auth required).
-- **Yahoo / Gmail 2024 bulk-sender rules** (5000+/day): 0.3% spam-rate ceiling, one-click unsubscribe within 2 days, DMARC enforcement. What @arki/emails consumers need to know.
+- **`List-Unsubscribe` (RFC 2369) + `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058)**: Gmail and Yahoo enforced this for bulk senders as of Feb 2024. Mandatory for any sender > 5000/day. How to wire it through `@arki/mail` for digests and not-for transactional auth mail; the unsubscribe endpoint contract (HTTPS, idempotent, no auth required).
+- **Yahoo / Gmail 2024 bulk-sender rules** (5000+/day): 0.3% spam-rate ceiling, one-click unsubscribe within 2 days, DMARC enforcement. What @arki/mail consumers need to know.
 - **Header hygiene**: `Reply-To`, `Message-ID`, `Date`, `In-Reply-To` / `References` for threading, `Auto-Submitted` (RFC 3834), `Precedence: bulk` vs nothing for digests.
 - **Content tripwires**: link-to-text ratio, image-only emails, URL shorteners (bit.ly etc. as automatic spam markers), tracking-pixel patterns, sender-name vs `From` mismatch, subject-line patterns (all-caps, emoji density, "Free", "$$$"), Apple Mail Privacy Protection's prefetch-everything behavior breaking open-rate.
 - **Plain-text alternative**: how much it actually moves the needle in 2026 (some sources say "trivial"; others "load-bearing for Gmail Promotions detection").
@@ -88,7 +88,7 @@ This is a **Type 3 (Pragmatic 90% Solution) + Type 5 (Cost, Latency, Operations)
 - **Postmaster signals**: Gmail Postmaster Tools (domain reputation, IP reputation, spam rate, feedback loop), Microsoft SNDS + JMRP, Yahoo CFL, Apple iCloud feedback (does this exist in 2026?). Setup walkthrough per app; what metrics to alert on; recommended sampling cadence.
 - **Third-party deliverability monitors**: GlockApps, Mailgun's email validator, Litmus Spam Tests, MXToolbox blacklist monitor — 2026 pricing snapshot, what each adds beyond Postmaster.
 - **DMARC aggregate-report consumers**: comparison Postmark vs dmarcian vs EasyDMARC vs Valimail in 2026 — pricing, ease of setup, what the dashboard actually shows, RUF (forensic report) support and whether RUF is worth it given GDPR concerns.
-- **Sender reputation feedback into `@arki/emails`**: should the `quotaRouter` consider provider reputation, not just quota? E.g., if SES bounce rate exceeds 3%, automatically demote SES below Cloudflare in the chain. What signals would we need from the providers to do this?
+- **Sender reputation feedback into `@arki/mail`**: should the `quotaRouter` consider provider reputation, not just quota? E.g., if SES bounce rate exceeds 3%, automatically demote SES below Cloudflare in the chain. What signals would we need from the providers to do this?
 
 **Warmup playbook:**
 
@@ -121,7 +121,7 @@ This is a **Type 3 (Pragmatic 90% Solution) + Type 5 (Cost, Latency, Operations)
 ### Q2 — SES configuration & operations: what is the production-readiness checklist?
 
 - The **sandbox-to-production submission**: 2026 form-field walkthrough, expected approval time, common rejection patterns, what to write in the use-case field.
-- **Configuration Sets**: the recommended default config set for a new `@arki/emails` consumer app. Should we expose Configuration Set fields beyond just `configurationSetName` (e.g., per-pool routing, event-publishing destination)?
+- **Configuration Sets**: the recommended default config set for a new `@arki/mail` consumer app. Should we expose Configuration Set fields beyond just `configurationSetName` (e.g., per-pool routing, event-publishing destination)?
 - **Bounce / complaint pipeline**: SNS-topic-per-event-type vs single-topic-multi-event; suppression-list mechanics (account-level vs Configuration-Set-level vs domain-managed); the ingestion pattern a consumer app should follow (Lambda → Postgres? SQS → app worker? `@arki/queue` integration?).
 - **Shared-IP vs dedicated-IP economics in 2026**: at what monthly send volume does dedicated IP ($24.95/mo) become worthwhile? What is the warmup cost (lost deliverability during the 45-day ramp)?
 - **VDM (Virtual Deliverability Manager)**: is it worth $0.10/1k surcharge for the auto-warmup + reputation dashboard, or can we replicate it with our own monitoring?
@@ -139,7 +139,7 @@ This is a **Type 3 (Pragmatic 90% Solution) + Type 5 (Cost, Latency, Operations)
 ### Q4 — Bulk-sender rules (Gmail/Yahoo Feb 2024+) and the digest-specific operational floor
 
 - **The 5000/day threshold**: at what user count does avocabo / evervest cross this? Recommended cushion before crossing (e.g., comply with bulk rules at 3000/day to avoid the cliff).
-- **List-Unsubscribe + One-Click (RFC 8058)**: implementation contract for `@arki/emails` consumers; the HTTP endpoint shape; storing unsubscribe state per-recipient per-stream (transactional vs marketing); what counts as "bulk" for the auth-magic-link case (probably nothing — but is "weekly summary" bulk?).
+- **List-Unsubscribe + One-Click (RFC 8058)**: implementation contract for `@arki/mail` consumers; the HTTP endpoint shape; storing unsubscribe state per-recipient per-stream (transactional vs marketing); what counts as "bulk" for the auth-magic-link case (probably nothing — but is "weekly summary" bulk?).
 - **0.3% spam rate (Gmail Postmaster)**: what triggers it, what the recovery curve looks like once you've tripped it, the relationship between spam rate and Promotions-tab placement.
 - **Subject-line / sender-name / preheader patterns** that empirically tank deliverability in 2026 across Gmail / Outlook / Apple Mail.
 - **Tracking pixels and click-tracking redirects**: do they hurt deliverability enough to remove them entirely? The "Apple Mail Privacy Protection prefetches everything, breaking open-rate metrics, so remove pixels" school of thought — is it correct in 2026?
@@ -148,10 +148,10 @@ This is a **Type 3 (Pragmatic 90% Solution) + Type 5 (Cost, Latency, Operations)
 ### Q5 — Monitoring, alerting, and recovery playbook
 
 - **Postmaster setup walkthrough**: Gmail Postmaster Tools (domain + IP registration), Microsoft SNDS + JMRP enrollment, Yahoo CFL, Apple Mail feedback (if it exists). What the actual onboarding takes for each.
-- **The minimum dashboard**: what 5-10 metrics should every `@arki/emails` consumer app track per provider per day? Where should this data land — `@arki/meter`? Plausible custom events? A dedicated Grafana board?
+- **The minimum dashboard**: what 5-10 metrics should every `@arki/mail` consumer app track per provider per day? Where should this data land — `@arki/meter`? Plausible custom events? A dedicated Grafana board?
 - **Tripwire thresholds**: bounce rate > X → page; complaint rate > Y → demote provider in quota-router; spam rate (per Postmaster) > Z → halt sending to investigate. Recommend specific numbers, not "monitor closely."
 - **Recovery playbook when reputation slips**: step-by-step what to do (cool down, segment audience, re-warm, switch providers, file IP-reputation appeal with the relevant ISP).
-- **Should `@arki/emails` expose a reputation-aware router?** I.e., extend `quotaRouter` to consider per-provider reputation signals, not just quota. Sketch the contract — what signals would the package need from each provider, and which providers actually expose them?
+- **Should `@arki/mail` expose a reputation-aware router?** I.e., extend `quotaRouter` to consider per-provider reputation signals, not just quota. Sketch the contract — what signals would the package need from each provider, and which providers actually expose them?
 
 ### Q6 — The realistic ceiling
 
@@ -176,7 +176,7 @@ The brief should return a structured document that an engineer can implement fro
 
 1. **DNS Record Cookbook** — copy-pasteable BIND/Cloudflare-zone records for SPF, DKIM (one selector per provider), DMARC (with `p=none → quarantine → reject` rollout schedule), BIMI (when applicable), MTA-STS policy file, TLS-RPT endpoint, MX (for bounce-from if applicable). One table per provider.
 
-2. **`@arki/emails` API surface deltas** — what config knobs the package should expose that it doesn't today. E.g., should `sesProvider({ ... })` accept a `pool` parameter? Should there be a top-level `deliverabilityHeaders({ listUnsubscribe, listId, precedence })` helper? Concrete proposals tied to specific files in `packages/emails/src/`.
+2. **`@arki/mail` API surface deltas** — what config knobs the package should expose that it doesn't today. E.g., should `sesProvider({ ... })` accept a `pool` parameter? Should there be a top-level `deliverabilityHeaders({ listUnsubscribe, listId, precedence })` helper? Concrete proposals tied to specific files in `packages/mail/src/`.
 
 3. **SES Configuration Set template** — recommended fields, event-destination wiring, IP-pool config, SNS topic naming convention.
 
@@ -208,7 +208,7 @@ The brief should return a structured document that an engineer can implement fro
 1. **"Just set up SPF/DKIM/DMARC" without specifics is not a finding.** Each record needs syntax, value, and trade-off discussion. If the engine returns "configure DMARC properly," it has failed.
 2. **"Configuration Sets" must include the SNS event-publishing pattern with concrete event types.** "Configure event publishing" is too vague; "publish Bounce + Complaint to an SNS topic, route to an SQS queue, consume in a Lambda or `@arki/queue` worker that writes into a `email_suppressions` table" is useful.
 3. **Bulk-sender rule research must reflect actual 2024+ enforcement experience**, not the 2024 announcement text. What did senders actually observe Gmail/Yahoo doing in Q3/Q4 2024 and 2025-2026?
-4. **`@arki/emails` API proposals must reference specific files** in `packages/emails/src/` and respect the existing typed shape (`EmailProvider`, `SendEmailPayload`, `quotaRouter`).
+4. **`@arki/mail` API proposals must reference specific files** in `packages/mail/src/` and respect the existing typed shape (`EmailProvider`, `SendEmailPayload`, `quotaRouter`).
 
 ### Prior Context
 
@@ -218,12 +218,12 @@ The brief inherits from `apps/avocabo/docs/features/newsletter-ingestion/researc
 - `B-NI-00-02` — SendGrid Inbound Parse silent-drop. Do not propose SendGrid for outbound either.
 - `B-NI-00-05` — cost model at 1K users $29-$81/mo on managed stack. Use this as the cost baseline; don't re-derive.
 - `B-NI-00-06` — new-domain outbound warming = 2-6 weeks. This is the warmup baseline; refine, don't restart.
-- `D-F-NI-02` — outbound stays on `@arki/emails` quotaRouter; expand providers. The chain is decided; this round is about making each provider in the chain deliver well, not re-choosing.
+- `D-F-NI-02` — outbound stays on `@arki/mail` quotaRouter; expand providers. The chain is decided; this round is about making each provider in the chain deliver well, not re-choosing.
 
 Source files referenced by this prompt:
 
-- `packages/emails/src/providers/ses.ts` (the live SES provider — supports `configurationSetName`)
-- `packages/emails/src/providers/cloudflare-email-service.ts` (the live CF ES provider — Zod-validated)
-- `packages/emails/src/providers/quota-router.ts` (chain composition)
-- `packages/emails/src/client/auto.ts` (default chain + quota constants)
-- `packages/emails/src/index.ts` (current public API surface)
+- `packages/mail/src/providers/ses.ts` (the live SES provider — supports `configurationSetName`)
+- `packages/mail/src/providers/cloudflare-email-service.ts` (the live CF ES provider — Zod-validated)
+- `packages/mail/src/providers/quota-router.ts` (chain composition)
+- `packages/mail/src/client/auto.ts` (default chain + quota constants)
+- `packages/mail/src/index.ts` (current public API surface)

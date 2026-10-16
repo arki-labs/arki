@@ -1,4 +1,4 @@
-# @arki/emails
+# @arki/mail
 
 Transactional email for TypeScript apps. One small client, several providers, a quota router that fails over when a provider hits its monthly limit.
 
@@ -7,7 +7,7 @@ The library never reads `process.env`. Your app reads its own env and passes the
 ## Install
 
 ```sh
-bun add @arki/emails
+bun add @arki/mail
 # then only the provider SDKs you use:
 bun add resend                  # for the Resend provider
 bun add @aws-sdk/client-sesv2   # for the SES provider
@@ -19,7 +19,7 @@ bun add react-email             # only if you use the bundled templates
 ## Configure
 
 ```ts
-import { createEmailClient } from '@arki/emails';
+import { createEmailClient } from '@arki/mail';
 
 export const emails = createEmailClient({
   isDev: env.NODE_ENV === 'development', // required; true = log, never deliver
@@ -50,10 +50,10 @@ Want full control? Build providers yourself and call `initEmails({ providers, is
 
 | Provider                 | Entry                                             | Required config                       | Notes                                                                                                                                                                                                    |
 | ------------------------ | ------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Resend                   | `@arki/emails/providers/resend`                   | `resend: { apiKey }`                  | Needs the `resend` peer. Default quota 3 000/mo. Only provider that accepts `react`.                                                                                                                     |
-| Unosend                  | `@arki/emails/providers/unosend`                  | `unosend: { apiKey }`                 | `fetch` only. Default quota 6 000/mo. Supports `scheduledAt`.                                                                                                                                            |
-| Cloudflare Email Service | `@arki/emails/providers/cloudflare-email-service` | `cloudflare: { accountId, apiToken }` | `fetch` only. Beta. Token needs `Email Service: Edit`. Default quota 3 000/mo. Drops `tags`, `scheduledAt`, `react`.                                                                                     |
-| Amazon SES               | `@arki/emails/providers/ses`                      | `ses: { region }`                     | Needs the `@aws-sdk/client-sesv2` peer. Optional `credentials` (else the AWS default chain), `configurationSetName`. No quota by default, so it is the unlimited fallback. Drops `scheduledAt`, `react`. |
+| Resend                   | `@arki/mail/providers/resend`                   | `resend: { apiKey }`                  | Needs the `resend` peer. Default quota 3 000/mo. Only provider that accepts `react`.                                                                                                                     |
+| Unosend                  | `@arki/mail/providers/unosend`                  | `unosend: { apiKey }`                 | `fetch` only. Default quota 6 000/mo. Supports `scheduledAt`.                                                                                                                                            |
+| Cloudflare Email Service | `@arki/mail/providers/cloudflare-email-service` | `cloudflare: { accountId, apiToken }` | `fetch` only. Beta. Token needs `Email Service: Edit`. Default quota 3 000/mo. Drops `tags`, `scheduledAt`, `react`.                                                                                     |
+| Amazon SES               | `@arki/mail/providers/ses`                      | `ses: { region }`                     | Needs the `@aws-sdk/client-sesv2` peer. Optional `credentials` (else the AWS default chain), `configurationSetName`. No quota by default, so it is the unlimited fallback. Drops `scheduledAt`, `react`. |
 
 When several are set, the router tries them in this order: Resend, Unosend, Cloudflare, SES.
 
@@ -65,13 +65,13 @@ React Email templates ship as subpath imports. Names are neutral and carry no br
 
 | Template                            | Entry                                             | Props                                            |
 | ----------------------------------- | ------------------------------------------------- | ------------------------------------------------ |
-| Magic link (branded header, button) | `@arki/emails/react/templates/magic-link`         | `loginUrl`, `appName`, `appUrl`                  |
-| Magic link (plain text link)        | `@arki/emails/react/templates/magic-link-minimal` | `loginUrl`, `appUrl`, `appKey`, `appDescription` |
+| Magic link (branded header, button) | `@arki/mail/react/templates/magic-link`         | `loginUrl`, `appName`, `appUrl`                  |
+| Magic link (plain text link)        | `@arki/mail/react/templates/magic-link-minimal` | `loginUrl`, `appUrl`, `appKey`, `appDescription` |
 
 ```ts
 import { render } from '@react-email/render';
 
-import { MagicLinkEmail } from '@arki/emails/react/templates/magic-link';
+import { MagicLinkEmail } from '@arki/mail/react/templates/magic-link';
 
 const html = await render(MagicLinkEmail({ loginUrl: url, appName: 'My App', appUrl }));
 ```
@@ -91,4 +91,4 @@ createEmailClient({ isDev, resend: { apiKey }, unosend: { apiKey: key2 }, kv });
 
 ## Logging
 
-Debug logs use `getLogger('arki:emails')`. Enable with `DEBUG=arki:emails`.
+Debug logs use `getLogger('arki:mail')`. Enable with `DEBUG=arki:mail`.
