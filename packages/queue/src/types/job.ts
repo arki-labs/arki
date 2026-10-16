@@ -2,13 +2,29 @@
  * Job-specific types
  */
 
-import type { Job as BullMQJob, JobsOptions, Queue, Worker, WorkerOptions } from 'bullmq';
+import type { JobsOptions, Queue, Worker, WorkerOptions } from 'bullmq';
 
 import type { z } from '@arki/contracts';
 import type { Backoff } from '@arki/resilience';
 
 import type { JobMiddleware } from './middleware.ts';
 import type { QueueMeta } from './queue.ts';
+
+/**
+ * What a handler and its middleware see of the job that runs. A BullMQ `Job` fits, and so
+ * do the runtime-local queue's job and an outbox row (`@arki/queue/outbox`).
+ */
+export type JobLike = {
+  /** The job id. Stable across retries: pass it on as an idempotency key. */
+  readonly id?: string;
+  readonly name: string;
+  /** The stored input, before the schema parsed it. */
+  readonly data: unknown;
+  /** Tries that failed before this one: 0 on the first try. */
+  readonly attemptsMade: number;
+  updateProgress(progress: number): Promise<unknown>;
+  log(message: string): Promise<unknown>;
+};
 
 /**
  * Context provided to job handlers
@@ -27,9 +43,9 @@ export type JobContext<TDeps = Record<string, never>> = {
   log: (message: string) => Promise<void>;
 
   /**
-   * The underlying BullMQ job instance
+   * The job that runs: a BullMQ `Job`, or the same shape from another lane
    */
-  job: BullMQJob;
+  job: JobLike;
 } & TDeps;
 
 /**

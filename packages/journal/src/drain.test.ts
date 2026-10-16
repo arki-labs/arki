@@ -595,9 +595,9 @@ describe('claiming, stopping and stranded jobs', () => {
     });
     await placeOn(oldName);
     const stranded = await journal.strandedJobs(db);
-    expect(stranded).toContainEqual({ effect: 'old-effect-name', jobs: 1 });
-    expect(stranded.map(row => row.effect)).not.toContain('order-mail');
+    expect(stranded).toContainEqual({ kind: 'effect', name: 'old-effect-name', jobs: 1 });
+    expect(stranded.map(row => row.name)).not.toContain('order-mail');
     const strandedForOwner = await oldName.strandedJobs(db);
-    expect(strandedForOwner.map(row => row.effect)).not.toContain('old-effect-name');
+    expect(strandedForOwner.map(row => row.name)).not.toContain('old-effect-name');
   });
 });

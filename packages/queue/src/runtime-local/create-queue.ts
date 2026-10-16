@@ -6,22 +6,22 @@
  *
  * Differences from BullMQ:
  * - No flow/DAG support (pg-boss has no FlowProducer).
- * - Workers wake on poll tick (~500ms) not LISTEN/NOTIFY (PGlite swallows LISTEN
- *   but does not deliver notifications; this is expected per Round 2 spike results).
- * - ctx.job is { id, name, attemptsMade } — not a full BullMQ Job instance.
+ * - Workers wake on poll tick (~500ms) not LISTEN/NOTIFY: pg-boss sends SQL `LISTEN`
+ *   through the adapter, and PGlite does not deliver that. (PGlite's own JS
+ *   `client.listen()` does deliver in-process; the journal worker uses it.)
+ * - ctx.job is a `JobLike` { id, name, data, attemptsMade } — not a full BullMQ Job instance.
  * - ctx.updateProgress and ctx.log are no-ops (pg-boss has no progress reporting API).
  * - Interval schedules are not supported; use cron patterns.
  */
 import type { PGlite } from '@electric-sql/pglite';
-import type { Job as BullMQJob } from 'bullmq';
 import { getConstructionPlans, PgBoss } from 'pg-boss';
 
 import type { InternalScheduleDefinition } from '../schedule-builder.ts';
 import type { QueueInstance, ScheduleDefinition } from '../types/builder.ts';
-import type { JobContext, JobDefinition } from '../types/job.ts';
+import type { JobContext, JobDefinition, JobLike } from '../types/job.ts';
 import { debugJob, debugRegister, debugSchedule, debugWorker } from '../debug.ts';
 import { duplicateScheduleError } from '../errors.ts';
-import { executeMiddlewareChain } from '../middleware.ts';
+import { createJobContext, executeMiddlewareChain } from '../middleware.ts';
 import { buildPgBossAdapter } from './adapter.ts';
 
 const POLL_INTERVAL_SECONDS = 0.5;
@@ -38,16 +38,7 @@ export type RuntimeLocalQueueInstanceOptions<TContext> = {
 };
 
 /** Minimal job shim satisfying what middleware accesses at runtime (job.id, job.name). */
-type RLJobShim = {
-  id: string;
-  name: string;
-  attemptsMade: number;
-  data: unknown;
-  updateProgress: (progress: number) => Promise<void>;
-  log: (message: string) => Promise<void>;
-};
-
-function makeJobShim(id: string, name: string, data: unknown, attemptsMade = 0): RLJobShim {
+function makeJobShim(id: string, name: string, data: unknown, attemptsMade = 0): JobLike {
   return {
     id,
     name,
@@ -167,15 +158,8 @@ export function createRuntimeLocalQueueInstance<TContext>(
 
     const shim = makeJobShim(pgBossJob.id, pgBossJob.name, pgBossJob.data, pgBossJob.retrycount ?? 0);
 
-    // Build the initial job context that mirrors what createJobContext() produces
-    // in the BullMQ path. Cast the shim to satisfy the BullMQ type signature
-    // used by executeMiddlewareChain (it only reads shim.id and shim.name at runtime).
-    const jobContext = {
-      ...(baseContext as object),
-      updateProgress: shim.updateProgress,
-      log: shim.log,
-      job: shim,
-    };
+    // The same job context the BullMQ path builds.
+    const jobContext = createJobContext(baseContext, shim);
 
     debugJob.debug('[runtime-local] [{internalName}] executing handler (job {shimId})', {
       internalName: internal.name,
@@ -183,15 +167,13 @@ export function createRuntimeLocalQueueInstance<TContext>(
     });
 
     // Same onion as the BullMQ path: the handler runs inside every middleware's next().
-    // The handler signature in @arki/queue's type system expects JobContext<TDeps>
-    // (BullMQ-shaped). The runtime-local context is structurally equivalent for
-    // everything handlers actually access (ctx.job.id, ctx.job.name, updateProgress,
-    // log, plus the user's createContext() deps), so the chain hands it over as one.
+    // The handler expects JobContext<TDeps>; the shim is a `JobLike`, so the chain takes
+    // it as is (ctx.job.id, ctx.job.name, updateProgress, log, plus the createContext() deps).
     await executeMiddlewareChain<typeof jobContext, JobContext<unknown>, unknown>(
       internal.middlewares,
       jobContext,
       validatedData,
-      shim as unknown as BullMQJob,
+      shim,
       {},
       ctx => internal.handler(validatedData, ctx),
     );

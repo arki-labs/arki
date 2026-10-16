@@ -1,0 +1,34 @@
+# @arki/queue
+
+> A type-safe background job library, inspired by tRPC. Jobs, schedules and flows run on BullMQ and Redis. A second lane, `@arki/queue/outbox`, writes a job as a database row in your transaction and runs it from the `@arki/journal` worker.
+
+## Import paths
+- `@arki/queue`: the core. `initQueue`, the middleware helpers, `QUEUE_PRIORITIES`, `backoff`, `CronPatterns`, `createDurableScheduler`, and the types.
+- `@arki/queue/types`: the types only, such as `JobDefinition`, `JobContext`, `JobLike` and `QueuePriority`.
+- `@arki/queue/runtime-local`: the same builders on pg-boss and PGlite, with no Redis. `initQueue`, `createRuntimeLocalQueueInstance`.
+- `@arki/queue/dot`: the `@arki/dot` adapters. `queue(...)`, `queueWorker(...)`, `jobs(...)`, `durableScheduler(...)`, `outboxPlugin(...)` and `outboxJobs(...)`.
+- `@arki/queue/projection`: `project(manifest)`, which builds a queue topology document from an app manifest.
+- `@arki/queue/foreman`: the Foreman admin module `queueForemanModule(...)` (failed jobs and retry). Needs the optional peer `@arki/admin`.
+- `@arki/queue/outbox`: transactional scheduling. `outbox`, `outboxRunner`, `isOutboxError`, `OUTBOX_ERROR_CODES`. No BullMQ, Redis or pg-boss at runtime.
+
+## Start here
+- [Agent guide](docs/agent-guide.md): the model, the task map, the rules. Read it first.
+- [README](README.md): the long overview and the API reference.
+
+## By task
+- [Define a job](docs/agent-guide.md#define-a-job)
+- [Start a job with its own transaction](docs/agent-guide.md#schedule-a-job-in-the-same-transaction), with `@arki/queue/outbox`
+- [Wire queues in a Dot app](docs/agent-guide.md#dot)
+- [Find out why an outbox call failed](docs/agent-guide.md#outbox-errors)
+
+## Files
+- Definitions: `src/init.ts` (`initQueue`), `src/middleware.ts` (the middleware chain), `src/types/job.ts` (`JobDefinition`, `JobContext`, `JobLike`, `QUEUE_PRIORITIES`).
+- Outbox: `src/outbox/outbox.ts` (`outbox`, `runAfter`, `runAt`, `cancel`), `src/outbox/runner.ts` (`outboxRunner`), `src/outbox/errors.ts` (the seven codes), `src/outbox/registry.ts` (`QueueRegistry`).
+- Edges: `src/dot.ts` (Dot adapters), `src/runtime-local/` (pg-boss), `src/foreman/` (admin module), `src/projection.ts`.
+
+## Rules that bite
+- `@arki/queue` is private. The typed outbox API is private. Public `@arki/journal` users get only the `JobRunner` port.
+- `runAfter(tx, job, args)` takes a transaction, never the root database.
+- A job can run more than once. Pass `ctx.job.id` to external systems as the idempotency key.
+- Outbox args are stored as plain JSON.
+- A worker only claims job names its registry knows. Version job names (`mail.welcome.v1`) so a rename is deliberate.

@@ -453,5 +453,31 @@ export type EffectHookContext<Meta = unknown> = {
   readonly attempt: number;
 };
 
-/** Pending jobs for one effect name that the journal has no effect for. */
-export type StrandedJobs = { readonly effect: string; readonly jobs: number };
+/**
+ * Pending jobs no handler of this worker can claim, per kind and name: an effect this
+ * journal does not have, or a queue job the runner does not know.
+ */
+export type StrandedJobs = { readonly kind: 'effect' | 'queue'; readonly name: string; readonly jobs: number };
+
+/** One `kind = 'queue'` row as the worker hands it to a runner. `args` is the stored JSON, not yet parsed. */
+export type ScheduledJob = {
+  /** `job_xxx`. Stable across retries: pass it on as an idempotency key. */
+  readonly id: string;
+  /** The persisted job name, e.g. `'discovery:run'`. */
+  readonly name: string;
+  readonly args: unknown;
+  /** 1 on the first try. */
+  readonly attempt: number;
+};
+
+/**
+ * What runs `kind = 'queue'` rows. The worker claims only rows whose name is in `names`,
+ * under the same lease, renewal and fenced ack as effect jobs. `@arki/queue/outbox` ships one.
+ */
+export type JobRunner<AppDb extends RootDb = RootDb> = {
+  readonly names: readonly string[];
+  /** Resolve to ack the row; throw to fail this try. `signal` aborts on `stop()` or a lost lease. */
+  run(job: ScheduledJob, ctx: { readonly db: AppDb; readonly signal: AbortSignal }): Promise<void>;
+  /** Milliseconds before the next try, or `undefined` for dead. Called with the thrown error. */
+  retryDelay(job: ScheduledJob, error: unknown): number | undefined;
+};

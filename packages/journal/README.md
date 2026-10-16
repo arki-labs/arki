@@ -373,7 +373,8 @@ An effect can carry a schedule: `j.effect('receipt', order, handlers).withSchedu
 - A pass claims one job at a time, right before it runs it, up to `batchSize` jobs. So each job's lease (`leaseSeconds`, default 60) covers its own work only, and a slow job cannot let the lease of a later one run out. A job queued during the pass can run in the same pass.
 - While an effect runs, the worker renews its lease every half lease, under its own token. A long effect is safe for as long as its worker is alive. If the renewal finds the lease gone (the worker stalled past a whole lease and another worker reclaimed the job), the effect's `ctx.signal` aborts so it can stop, and its result is not acknowledged: the other worker owns the job now. An effect that does external work should still pass `jobId` on as an idempotency key, because the stall can happen between the work and the ack.
 - `stop()` aborts the running effect's `ctx.signal`, claims no further job, and resolves when that effect returns. An effect that does long work should pass `ctx.signal` on (for example to `fetch`) so shutdown does not wait for it.
-- `drain` and the worker never claim a job whose effect this journal does not have. During a rolling deploy an older worker may still have it. After the deploy, `journal.strandedJobs(db)` lists what is left, counted per effect name. A non-empty list means an effect was renamed or removed while it had jobs: bring it back under its old name until the count is zero, or delete those rows on purpose.
+- Give `drain` or `worker` a `jobs` runner and it claims queue rows too, from the same table, under the same lease, renewal and fenced ack. See [Queue jobs in the jobs table](#queue-jobs-in-the-jobs-table). Without `jobs` it claims effect rows only, as before.
+- `drain` and the worker never claim a job whose effect this journal does not have. During a rolling deploy an older worker may still have it. After the deploy, `journal.strandedJobs(db)` lists what is left, counted per effect name (see [Operating the jobs](#operating-the-jobs) for the shape). A non-empty list means an effect was renamed or removed while it had jobs: bring it back under its old name until the count is zero, or delete those rows on purpose.
 
 A wake ends the sleep, so an effect does not wait for the next poll:
 
@@ -430,14 +431,65 @@ The rules, all enforced:
 
 ## Operating the jobs
 
-`journal.jobs(db, { status, effect, limit })` lists job rows: `pending` (the default) is everything not dead, due, delayed and leased alike; `dead` is what the worker gave up on when the effect's `retry` said stop (after 8 tries by default), with `lastError`. `journal.retry(db, jobId)` brings a dead job back: attempts and lease cleared, due now, workers woken. `journal.discard(db, jobId)` deletes a dead job. Both refuse a job that is not dead: retrying a live one would run it twice, and deleting a live one would not stop its work, only lose the record of it. `journal.strandedJobs(db)` finds pending jobs whose effect this journal no longer has.
+`journal.jobs(db, { status, effect, job, limit })` lists job rows: `pending` (the default) is everything not dead, due, delayed and leased alike; `dead` is what the worker gave up on when the effect's `retry` said stop (after 8 tries by default), with `lastError`. `effect` filters effect rows by effect name. `job` filters queue rows by job name. `journal.retry(db, jobId)` brings a dead job back: attempts and lease cleared, due now, workers woken. `journal.discard(db, jobId)` deletes a dead job. Both refuse a job that is not dead: retrying a live one would run it twice, and deleting a live one would not stop its work, only lose the record of it.
+
+`journal.strandedJobs(db, { jobs })` finds pending jobs that nothing in this process can run. It returns a list of `{ kind: 'effect' | 'queue', name, jobs }`: the kind of row, the effect or job name, and how many rows wait. Queue rows are counted only when you pass the runner as `jobs`. The journal cannot judge a queue job name without it.
+
+## Queue jobs in the jobs table
+
+A queue row is a job that carries no event. An app writes it in its own transaction, so the job exists if and only if the business write commits. The row sits in `journal_jobs` next to the effect rows. `kind` tells them apart: `'effect'` or `'queue'`.
+
+The journal only stores and claims queue rows. It does not know what a job does. A `JobRunner` does. It is a small port: `names`, `run(job, { db, signal })` and `retryDelay(job, error)`. The typed way to write and run these rows is `@arki/queue/outbox`: `runAfter(tx, job, args)` writes the row, and `outboxRunner` is the runner. See the `@arki/queue` README.
+
+```ts
+const worker = journal.worker(db, {
+  listen: listenOnPool(db.$client, journal.wakeChannel),
+  jobs: outboxRunner({ registry: jobs, context: () => ({ db }) }),
+});
+```
+
+The two lanes side by side:
+
+| | Effect row | Queue row |
+| --- | --- | --- |
+| `kind` | `effect` | `queue` |
+| Written by | a journal write | `runAfter(tx, job, args)` in any transaction |
+| Needs an event | yes (`event_seq`, `effect`) | no (`job_name`, `args`) |
+| Run by | the effect handler in the journal | the `jobs` runner |
+| Retry | the effect's `retry` | the runner's `retryDelay` |
+| Dedupe | one row per event and effect | optional `dedupe_key`, per job name |
+
+What a queue row promises:
+
+| Promise | Holds? | Boundary |
+| --- | --- | --- |
+| Atomic scheduling | Yes | The row and the business write share the transaction. A rollback removes both, savepoints included. |
+| Exactly-once enqueue | Yes | One row per awaited call in the committed transaction. With a key, one row per key among unfinished rows of that job. |
+| Request idempotency | No | Two committed HTTP retries schedule twice, unless a key or a journal receipt covers the whole operation. |
+| No early visibility | Yes | Other connections cannot claim an uncommitted row. |
+| At-least-once execution | Yes | The row stays until the fenced ack. A crash between handler and ack runs it again. Pass the job id on as an idempotency key. |
+| At-most-once execution | No | A job can run twice. |
+| Eventual success | No | When the retry policy stops, the row is dead. List it with `journal.jobs(db, { status: 'dead' })`. `journal.retry` requeues it with the same id. |
+| Fenced state | Yes | Renew, ack and retry need the current lease token. A stale worker changes nothing. It cannot undo an external effect. |
+| Due time | Lower bound | `available_at` is the transaction's `now()` plus the delay. A long transaction uses part of the delay. A job can run late by up to `pollMs` without a listener, or under load. |
+| Order | None | Among due rows: higher priority first, then oldest due time. `SKIP LOCKED` is not FIFO. Strict priority can starve low rows. |
+| Lease | 60 s by default | Renewed every 30 s while the handler runs. A stalled worker loses the row after one full lease. |
+| Cross-process wake | Yes | `pg_notify` on `journal.wakeChannel`. It is lossy. Polling is the safety net. |
+| Cancel | Pending only | A running row finishes. |
+
+Rules:
+
+- A worker without `jobs` never claims a queue row. The claim filter is `effect IN (...)`, which never matches a NULL effect. An older worker is safe during a deploy.
+- A worker with `jobs` claims only the names in `runner.names`. A row with another name waits. Rename a job and its old rows are stranded: version the names (`mail.welcome.v1`) instead.
+- A row is deleted when its handler succeeds. A key dedupes among unfinished rows (pending, running, dead).
+- `cancel(tx, id)` on the outbox deletes a row no worker holds.
 
 ## Dot
 
 `@arki/journal/dot` connects the journal to an `@arki/dot` app. It exports two adapters and one feature slice. `@arki/dot` is an optional peer. The core entry never imports it.
 
 - `journal(...)`: the driven part, for `.use()`. It publishes `services.journal`, so features can write through it.
-- `journalWorker(...)`: the driving part, for `.serve()`. It runs effects, taps and async projections between `start` and `stop`.
+- `journalWorker(...)`: the driving part, for `.serve()`. It runs effects, taps and async projections between `start` and `stop`. With `jobs` it also runs queue rows.
 - `journalHandlers(...)`: the feature slice. A feature lists its projections, effects and taps with it.
 
 **Not a Dot app.** List the handlers in one `journal.root.ts`. Start and stop the worker yourself.
@@ -478,7 +530,7 @@ await run(payOrder, input);
 - `journal(...)` boots before the features. It reads their `journalHandlers` declarations, not their booted services, so a feature can `need` the journal and write through it, even in its own `boot`.
 - This works because a write never needs an effect's services. A write runs the inline projections, which get only the transaction, and queues each effect's job. The journal is composed with `services: 'worker'`. `journalWorker()` gives each effect and tap its services when it runs it.
 - `journal(...)` needs the root database under the `db` key. A transaction there is a compile error.
-- `journalWorker()` starts one worker on `start` and stops it on `stop`. Options: `pollMs`, `batchSize`, `leaseSeconds`, `listen`, `taps`. A process that serves no worker still writes. Its jobs wait for a process that serves one.
+- `journalWorker()` starts one worker on `start` and stops it on `stop`. Options: `pollMs`, `batchSize`, `leaseSeconds`, `listen`, `taps`, `jobs`. `jobs` is a `JobsSource`: it names the services the runner needs and builds a `JobRunner` once the features have booted. `@arki/queue/dot` ships one, `outboxJobs({ needs, context })`. A `jobs` source adds a `<job>.consume` action per job to the worker's manifest, under the plugin `journal-worker`. A process that serves no worker still writes. Its jobs wait for a process that serves one.
 - An effect with needs gets them from the booted services of the feature that lists it, by name. The feature must declare each one in its own `needs`, or it does not compile. A missing service fails that feature's boot.
 - Two features may use the same need name for two different services. Each effect gets the service of its own feature.
 - Every effect is an action in the app manifest (`binding: 'journal'`, id `<name>.run`). Projections are never listed: they run inside the write.
@@ -564,8 +616,12 @@ journal_cursors
 
 journal_jobs
   id            varchar primary key       -- job_xxx; pass it on as an idempotency key
-  event_seq     bigint not null references journal_events(seq)
-  effect        varchar(128) not null
+  kind          varchar(8) not null default 'effect' -- 'effect' or 'queue'
+  event_seq     bigint references journal_events(seq) -- effect rows only
+  effect        varchar(128)                          -- effect rows only
+  job_name      varchar(128)                          -- queue rows only
+  args          jsonb                                 -- queue rows only; JSON null is allowed
+  dedupe_key    varchar(256)                          -- queue rows only; optional
   priority      integer not null default 0 -- from the effect's schedule; higher first
   attempts      integer not null default 0
   available_at  timestamptz not null default now()
@@ -574,8 +630,17 @@ journal_jobs
   last_error    text
   dead_at       timestamptz               -- set after 8 failed attempts
   unique (event_seq, effect)
+  unique (job_name, dedupe_key) where dedupe_key is not null
+  check journal_jobs_kind_check             -- an effect row has event_seq and effect and no job_name, args or dedupe_key;
+                                            -- a queue row has job_name and args and no event_seq or effect
   index (priority desc, available_at) where dead_at is null
 ```
+
+`kind = 'effect'` rows are the rows the journal always had. `unique (event_seq, effect)` stays. NULLs are distinct, so queue rows never collide on it. The due index serves both kinds. A dedupe key is scoped to its `job_name`.
+
+**Migrating an existing app.** Run `drizzle-kit generate`. The new migration drops `NOT NULL` on `event_seq` and `effect`, adds the four columns and the check, and creates the dedupe index. Every statement is additive or relaxes a constraint. Existing rows take the default `kind = 'effect'` and pass the check. The check scans the table once. The table is small, because rows are deleted on success. If it holds very many dead rows, edit the generated SQL to add the check as `NOT VALID` and run `VALIDATE CONSTRAINT` after.
+
+**Rollout order.** Migrate first. Then roll the workers. Then roll the processes that call `runAfter`. This order makes sure a queue row always has a worker. It is not a safety rule: an old worker cannot claim a queue row. To roll back, stop the producers first and let the new workers drain. Never restore `NOT NULL` while queue rows exist.
 
 A job row is deleted when its handler succeeds. The table holds only pending and dead work. The event row is the lasting record.
 

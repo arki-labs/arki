@@ -9,8 +9,12 @@
  * `queue()` provides the `queue` service. `queueWorker()` is bound to the
  * features the app mounted, so the app never lists them a second time.
  * `durableScheduler()` is the BullMQ backend `@arki/schedule` uses.
+ * `outboxPlugin()` provides `schedule` (transactional scheduling, `@arki/queue/outbox`), and
+ * `outboxJobs()` lets `journalWorker({ jobs })` run the same `jobs(...)` slices from Postgres.
  */
 import type { AnyFeatureSlice, Driver, MountedFeature } from '@arki/dot/feature';
+import type { RootDb } from '@arki/journal';
+import type { JobsSource } from '@arki/journal/dot';
 import type { CtxOf, EmptyShape, NeedsShape, Plugin, Service, WireNeeds } from '@arki/dot/plugin';
 import { driver, entrypointsOf, sliceOf } from '@arki/dot/feature';
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
@@ -22,10 +26,15 @@ import type { InternalScheduleDefinition } from './schedule-builder.ts';
 import type { FlowDefinition, QueueBuilder, QueueInstance, ScheduleDefinition } from './types/builder.ts';
 import type { JobDefinition, JobOptions } from './types/job.ts';
 import type { QueueMeta } from './types/queue.ts';
+import type { Outbox, OutboxOptions } from './outbox/outbox.ts';
+import type { QueueRegistry } from './outbox/registry.ts';
 import { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
 import { debugWorker } from './debug.ts';
 import { createDurableScheduler } from './durable-scheduler.ts';
 import { createQueueClient } from './queue-client.ts';
+import { outbox } from './outbox/outbox.ts';
+import { collectQueueDefinitions, isFlowDefinition, isJobDefinition, isScheduleDefinition } from './outbox/registry.ts';
+import { outboxRunner } from './outbox/runner.ts';
 
 export { QUEUE_ACTION_META_SCHEMA } from './action-meta.ts';
 export type { QueueClient, QueueClientOptions } from './queue-client.ts';
@@ -54,51 +63,7 @@ export type QueueDotAction = {
   readonly meta: JsonObject;
 };
 
-export type QueueRegistry = Record<string, unknown>;
-
-function isJobDefinition(value: unknown): value is JobDefinition<unknown, unknown, unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    '_type' in value &&
-    (value as { _type?: unknown })._type === 'job' &&
-    '_internal' in value &&
-    typeof (value as { _internal?: { name?: unknown } })._internal?.name === 'string'
-  );
-}
-
-function isScheduleDefinition(value: unknown): value is ScheduleDefinition {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    '_type' in value &&
-    (value as { _type?: unknown })._type === 'schedule'
-  );
-}
-
-function isFlowDefinition(value: unknown): value is FlowDefinition {
-  return (
-    typeof value === 'object' && value !== null && '_type' in value && (value as { _type?: unknown })._type === 'flow'
-  );
-}
-
-type QueueDefinition = JobDefinition<unknown, unknown, unknown> | ScheduleDefinition | FlowDefinition;
-
-function collectQueueDefinitions(
-  registry: QueueRegistry,
-  definitions: QueueDefinition[] = [],
-): readonly QueueDefinition[] {
-  for (const value of Object.values(registry)) {
-    if (isJobDefinition(value) || isScheduleDefinition(value) || isFlowDefinition(value)) {
-      definitions.push(value);
-      continue;
-    }
-    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      collectQueueDefinitions(value as QueueRegistry, definitions);
-    }
-  }
-  return definitions;
-}
+export type { QueueRegistry } from './outbox/registry.ts';
 
 function retryMeta(options: JobOptions | undefined): JsonObject | undefined {
   const retry = options?.retry;
@@ -501,4 +466,47 @@ export function queueWorker<TContext, TNeeds extends NeedsShape & NoReservedKeys
       },
     });
   });
+}
+
+export type OutboxPluginOptions = OutboxOptions & {
+  readonly name?: string;
+};
+
+/**
+ * Provide the `schedule` service (`@arki/queue/outbox`): `schedule.runAfter(tx, job, args)` writes
+ * the job row in the caller's transaction. Opens nothing and needs nothing; mount it with `.use()`
+ * in every process that schedules, and run the rows with `journalWorker({ jobs: outboxJobs(...) })`.
+ */
+export function outboxPlugin(options: OutboxPluginOptions): Plugin<EmptyShape, { readonly schedule: Outbox }> {
+  return plugin({
+    name: options.name ?? 'outbox',
+    version: QUEUE_PLUGIN_VERSION,
+    configure(ctx) {
+      ctx.declareProvides('outbox');
+    },
+    provides: { schedule: () => outbox(options) },
+  });
+}
+
+export type OutboxJobsOptions<TNeeds extends NeedsShape, TContext> = {
+  /** Services the job context is built from, besides `db`. Use `{}` for none. Missing ones fail boot. */
+  readonly needs: TNeeds;
+  /** Build the job context. Runs once, on the first job, then cached (as `queueWorker`'s `context`). */
+  readonly context: (services: CtxOf<TNeeds> & { readonly db: RootDb }) => TContext | Promise<TContext>;
+};
+
+/**
+ * Run every mounted feature's `jobs(...)` slice from the journal's jobs table:
+ * `.serve(journalWorker({ listen, jobs: outboxJobs({ needs, context }) }))`. The same slice
+ * feeds Redis workers (`queueWorker`) and this runner; the worker's manifest lists `<job>.consume`.
+ */
+export function outboxJobs<TNeeds extends NeedsShape & NoReservedKeys, TContext>(
+  options: OutboxJobsOptions<TNeeds, TContext>,
+): JobsSource<TNeeds> {
+  return {
+    needs: options.needs,
+    actions: features => queueConsumerActions(declaredRegistry(features)),
+    build: (features, services) =>
+      outboxRunner({ registry: bootedRegistry(services, features), context: () => options.context(services) }),
+  };
 }

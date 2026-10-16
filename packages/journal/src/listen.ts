@@ -42,7 +42,7 @@ export function listenOnPool(pool: ListenPool, channel: string, opts?: { readonl
   const quoted = `"${channel.replaceAll('"', '""')}"`;
   return async onMessage => {
     let stopped = false;
-    let current: ListenClient | undefined;
+    let current: { readonly client: ListenClient; readonly drop: (error?: Error) => void } | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const connect = async (): Promise<void> => {
@@ -51,7 +51,7 @@ export function listenOnPool(pool: ListenPool, channel: string, opts?: { readonl
       const drop = (error?: Error) => {
         if (released) return;
         released = true;
-        if (current === client) current = undefined;
+        if (current?.client === client) current = undefined;
         client.release(error ?? true);
       };
       client.on('notification', message => {
@@ -72,7 +72,7 @@ export function listenOnPool(pool: ListenPool, channel: string, opts?: { readonl
         drop();
         return;
       }
-      current = client;
+      current = { client, drop };
       debugWorker.debug('listen {channel}: connected', { channel });
     };
 
@@ -95,14 +95,16 @@ export function listenOnPool(pool: ListenPool, channel: string, opts?: { readonl
     return async () => {
       stopped = true;
       if (timer !== undefined) clearTimeout(timer);
-      const client = current;
+      const held = current;
       current = undefined;
-      if (client === undefined) return;
+      if (held === undefined) return;
+      // Closed, not handed back to the pool: its notification and error handlers stay on the
+      // client, and a reused client would run them for this stopped worker.
       try {
-        await client.query(`UNLISTEN ${quoted}`);
-        client.release();
+        await held.client.query(`UNLISTEN ${quoted}`);
+        held.drop();
       } catch (error) {
-        client.release(error instanceof Error ? error : true);
+        held.drop(error instanceof Error ? error : new Error(String(error)));
       }
     };
   };

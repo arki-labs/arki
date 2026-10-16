@@ -3,9 +3,7 @@
  * Handles running a chain of middleware with context transformations
  */
 
-import type { Job as BullMQJob } from 'bullmq';
-
-import type { JobContext } from './types/job.ts';
+import type { JobContext, JobLike } from './types/job.ts';
 import type { JobMiddleware, MiddlewareResult } from './types/middleware.ts';
 import type { QueueMeta } from './types/queue.ts';
 import { debugMiddleware } from './debug.ts';
@@ -22,7 +20,7 @@ import { debugMiddleware } from './debug.ts';
  * @param middlewares - Array of middleware to execute
  * @param initialContext - The starting context (from createContext)
  * @param data - Job data
- * @param job - BullMQ job instance
+ * @param job - The job that runs (a BullMQ `Job`, or the same shape from another lane)
  * @param meta - Queue metadata
  * @param handler - The job handler, called with the context the last middleware passed on
  * @returns What the handler returned, or `undefined` when a middleware returned without calling `next()`
@@ -31,7 +29,7 @@ export async function executeMiddlewareChain<TContext, TContextOut, TOutput>(
   middlewares: readonly JobMiddleware<unknown, unknown, QueueMeta>[],
   initialContext: TContext,
   data: unknown,
-  job: BullMQJob,
+  job: JobLike,
   meta: QueueMeta,
   handler: (ctx: TContextOut) => Promise<TOutput>,
 ): Promise<TOutput | undefined> {
@@ -92,10 +90,10 @@ export async function executeMiddlewareChain<TContext, TContextOut, TOutput>(
  * Wraps the base context with updateProgress, log, and job instance
  *
  * @param baseContext - The context from middleware chain
- * @param job - BullMQ job instance
+ * @param job - The job that runs (a BullMQ `Job`, or the same shape from another lane)
  * @returns JobContext with utility methods
  */
-export function createJobContext<TContext>(baseContext: TContext, job: BullMQJob): JobContext<TContext> {
+export function createJobContext<TContext>(baseContext: TContext, job: JobLike): JobContext<TContext> {
   debugMiddleware.debug('[Job {jobId}] Creating job context with utility methods', { jobId: job.id });
 
   return {
@@ -109,5 +107,5 @@ export function createJobContext<TContext>(baseContext: TContext, job: BullMQJob
       await job.log(message);
     },
     job,
-  } as JobContext<TContext>;
+  };
 }

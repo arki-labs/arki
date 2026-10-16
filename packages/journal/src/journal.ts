@@ -244,7 +244,7 @@ function createJournal<Meta extends z.ZodObject, Tx extends TransactionSource<Tx
     drain: (db, opts) => drain(db, opts),
     worker: (db, opts) => workers.worker(db, opts),
     wake: () => workers.wakeAll(),
-    strandedJobs: db => strandedJobs(db),
+    strandedJobs: (db, opts) => strandedJobs(db, opts),
     jobs: (db, opts) => admin.jobs(db, opts),
     retry: (db, jobId) => admin.retry(db, jobId),
     discard: (db, jobId) => admin.discard(db, jobId),

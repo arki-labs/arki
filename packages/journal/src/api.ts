@@ -24,6 +24,7 @@ import type {
   EventOptions,
   HandlerServices,
   IdTable,
+  JobRunner,
   JournalWorker,
   KeyName,
   Needs,
@@ -317,7 +318,7 @@ export type Journal<
    * covers only its own work, and the lease is renewed every half lease while the effect
    * runs. A lost lease aborts the effect's `ctx.signal`.
    * Once `signal` is aborted no further job is claimed; the running one sees it as `ctx.signal`.
-   * `services`: see `worker`.
+   * `services` and `jobs`: see `worker`.
    */
   drain(
     db: AppDb & RootDb & TransactionSource<Tx>,
@@ -326,6 +327,7 @@ export type Journal<
       readonly signal?: AbortSignal;
       readonly leaseSeconds?: number;
       readonly services?: HandlerServices;
+      readonly jobs?: JobRunner<AppDb>;
     },
   ): Promise<number>;
   /**
@@ -352,6 +354,12 @@ export type Journal<
        * with its services ignores this.
        */
       readonly services?: HandlerServices;
+      /**
+       * Runs `kind = 'queue'` rows (jobs scheduled by `@arki/queue/outbox`) whose name is in
+       * `jobs.names`, under the same lease and fenced ack as effects. Without it the worker
+       * claims effect rows only, exactly as before.
+       */
+      readonly jobs?: JobRunner<AppDb>;
     },
   ): JournalWorker;
   /**
@@ -366,20 +374,28 @@ export type Journal<
    */
   wake(): void;
   /**
-   * Pending jobs whose effect this journal does not have, counted per effect name.
+   * Pending jobs no handler can claim, counted per kind and name: effect rows whose effect
+   * this journal does not have and, given the worker's `jobs` runner, queue rows whose name
+   * it does not know. Without `jobs`, queue rows are not counted.
    * `drain` leaves them alone, because during a rolling deploy an older worker may
-   * still have that effect. After the deploy, a non-empty list means an effect was
+   * still have that handler. After the deploy, a non-empty list means a handler was
    * renamed or removed while it had jobs: bring it back under its old name until
    * the count is zero, or delete those job rows on purpose.
    */
-  strandedJobs(db: DbHandle): Promise<readonly StrandedJobs[]>;
+  strandedJobs(db: DbHandle, opts?: { readonly jobs?: Pick<JobRunner, 'names'> }): Promise<readonly StrandedJobs[]>;
   /**
    * List job rows. `pending` (the default) is everything not dead: due, delayed and leased
    * alike. `dead` is what the worker gave up on. Oldest due first, `limit` 100.
+   * `effect` filters effect rows by effect name; `job` filters queue rows by job name.
    */
   jobs(
     db: DbHandle,
-    opts?: { readonly status?: 'pending' | 'dead' | 'all'; readonly effect?: string; readonly limit?: number },
+    opts?: {
+      readonly status?: 'pending' | 'dead' | 'all';
+      readonly effect?: string;
+      readonly job?: string;
+      readonly limit?: number;
+    },
   ): Promise<JournalTables['jobs']['$inferSelect'][]>;
   /** A dead job back to pending: attempts and lease cleared, due now, workers woken. A job that is not dead throws. */
   retry(db: DbHandle, jobId: string): Promise<void>;

@@ -26,6 +26,12 @@
       "node": "./src/dot.ts",
       "default": "./dist/src/dot.js"
     },
+    "./outbox": {
+      "types": "./dist/src/outbox/index.d.ts",
+      "import": "./src/outbox/index.ts",
+      "node": "./src/outbox/index.ts",
+      "default": "./dist/src/outbox/index.js"
+    },
     "./projection": {
       "types": "./dist/src/projection.d.ts",
       "import": "./src/projection.ts",
@@ -55,12 +61,14 @@
   "dependencies": {
     "@arki/contracts": "workspace:*",
     "@arki/failure": "workspace:*",
+    "@arki/journal": "workspace:*",
     "@arki/log": "workspace:*",
     "@arki/resilience": "workspace:*",
     "@bull-board/api": "catalog:queue",
     "@bull-board/hono": "catalog:queue",
     "@electric-sql/pglite": "catalog:",
     "bullmq": "catalog:queue",
+    "drizzle-orm": "catalog:drizzle",
     "hono": "catalog:backend",
     "ioredis": "catalog:queue",
     "pg-boss": "catalog:queue",
@@ -76,6 +84,7 @@
     "@arki/tsconfig": "workspace:*",
     "@arki/vitest-config": "workspace:*",
     "@types/node": "catalog:node",
+    "drizzle-kit": "catalog:drizzle",
     "testcontainers": "catalog:testing",
     "typescript": "catalog:",
     "vitest": "catalog:"

@@ -18,10 +18,12 @@ import type {
   Effect,
   EffectHookContext,
   HandlerServices,
+  JobRunner,
   JournalWorker,
   Needs,
   Projection,
   RootDb,
+  ScheduledJob,
   StrandedJobs,
   Tap,
   TransactionSource,
@@ -49,6 +51,15 @@ const dbNowPlus = (seconds: number) => sql`now() + make_interval(secs => ${secon
 
 export type JobRow = JournalTables['jobs']['$inferSelect'];
 
+/** The name a job row runs under: its effect, or its queue job name. For logs and errors. */
+const jobLabel = (job: JobRow): string => job.effect ?? job.jobName ?? job.id;
+
+/** What a runner sees of a `queue` row. */
+const scheduledJob = (job: JobRow): ScheduledJob => {
+  if (job.jobName === null) throw new Error(`journal: queue job ${job.id} has no job name`);
+  return { id: job.id, name: job.jobName, args: job.args, attempt: job.attempts };
+};
+
 /** What `drain` needs from the journal. `Run` is the type of an effect's `ctx.run`. */
 export type DrainDeps<Meta extends z.ZodObject, AppDb extends RootDb, Run> = {
   readonly tables: JournalTables;
@@ -68,7 +79,12 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
 
   // Every time here is database time, so a worker with a skewed clock
   // cannot take a live lease or push a retry into the far future.
-  const claimOne = (db: AppDb & RootDb, leaseSeconds: number): Promise<JobRow | undefined> =>
+  // An empty list leaves its lane out of the claim; `drain` never claims with both empty.
+  const claimOne = (
+    db: AppDb & RootDb,
+    leaseSeconds: number,
+    queued: readonly string[],
+  ): Promise<JobRow | undefined> =>
     db.transaction(async (tx): Promise<JobRow | undefined> => {
       const due = await tx
         .select({ id: jobsTable.id })
@@ -78,7 +94,10 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
             isNull(jobsTable.deadAt),
             lte(jobsTable.availableAt, sql`now()`),
             or(isNull(jobsTable.leaseUntil), lte(jobsTable.leaseUntil, sql`now()`)),
-            inArray(jobsTable.effect, known),
+            or(
+              known.length > 0 ? and(eq(jobsTable.kind, 'effect'), inArray(jobsTable.effect, known)) : undefined,
+              queued.length > 0 ? and(eq(jobsTable.kind, 'queue'), inArray(jobsTable.jobName, [...queued])) : undefined,
+            ),
           ),
         )
         .orderBy(desc(jobsTable.priority), asc(jobsTable.availableAt))
@@ -125,7 +144,7 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
         })
         .catch((error: unknown) =>
           debugDrain.debug('{effect} {jobId}: lease renewal failed: {failed}', {
-            effect: job.effect,
+            effect: jobLabel(job),
             jobId: job.id,
             failed: errorText(error),
           }),
@@ -145,35 +164,58 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
     };
   };
 
+  /** An effect row: load its event, run the effect inside the effect hooks. */
+  const runEffect = async (
+    db: AppDb & RootDb,
+    job: JobRow,
+    effect: Effect<z.output<Meta>, AppDb, Run> | undefined,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    // The check constraint sets both on every effect row; this narrows them once.
+    if (job.effect === null || job.eventSeq === null)
+      throw new Error(`journal: effect job ${job.id} has no effect or event`);
+    if (effect === undefined) throw new Error(`effect "${job.effect}" is not registered`);
+    const [eventRow] = await db.select().from(eventsTable).where(eq(eventsTable.seq, job.eventSeq));
+    if (eventRow === undefined) throw new Error(`event seq ${job.eventSeq} not found`);
+    const event = decodeStoredEvent(
+      eventRow,
+      findEventDefinition(effect.entities, eventRow.kind, eventRow.type),
+      eventRow.entityId,
+    );
+    // Inside the lease: a hook that throws fails the job like a handler failure.
+    await deps.hooks.run({ name: job.effect, event, jobId: job.id, attempt: job.attempts }, () =>
+      effect.run(event, { jobId: job.id, signal, db, run: deps.runOn(db, event) }),
+    );
+  };
+
   const runJob = async (
     db: AppDb & RootDb,
     job: JobRow,
     signal: AbortSignal,
     leaseSeconds: number,
     effectsByName: ReadonlyMap<string, Effect<z.output<Meta>, AppDb, Run>>,
+    runner: JobRunner<AppDb> | undefined,
   ): Promise<void> => {
-    const effect = effectsByName.get(job.effect);
+    const effect = job.effect === null ? undefined : effectsByName.get(job.effect);
     const lost = new AbortController();
     const stopRenewing = renewWhile(db, job, leaseSeconds, lost);
     try {
-      if (effect === undefined) throw new Error(`effect "${job.effect}" is not registered`);
-      const [eventRow] = await db.select().from(eventsTable).where(eq(eventsTable.seq, job.eventSeq));
-      if (eventRow === undefined) throw new Error(`event seq ${job.eventSeq} not found`);
-      const event = decodeStoredEvent(
-        eventRow,
-        findEventDefinition(effect.entities, eventRow.kind, eventRow.type),
-        eventRow.entityId,
-      );
-      // Inside the lease: a hook that throws fails the job like a handler failure.
       const ownSignal = AbortSignal.any([signal, lost.signal]);
-      await deps.hooks.run({ name: job.effect, event, jobId: job.id, attempt: job.attempts }, () =>
-        effect.run(event, { jobId: job.id, signal: ownSignal, db, run: deps.runOn(db, event) }),
-      );
+      // A queue row runs in the runner, which wraps it in its own middleware: effect hooks do not.
+      if (job.kind === 'queue') {
+        if (runner === undefined) throw new Error(`journal: queue job ${job.id} was claimed without a runner`);
+        await runner.run(scheduledJob(job), { db, signal: ownSignal });
+      } else {
+        await runEffect(db, job, effect, ownSignal);
+      }
       await db.delete(jobsTable).where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
-      debugDrain.debug('{effect} {jobId}: done', { effect: job.effect, jobId: job.id });
+      debugDrain.debug('{effect} {jobId}: done', { effect: jobLabel(job), jobId: job.id });
     } catch (error) {
       // `attempts` counts the tries so far, which is the number of the retry that would come next.
-      const delayMs = (effect?.schedule.retry ?? defaultEffectRetry).delay(job.attempts, error);
+      const delayMs =
+        job.kind === 'queue'
+          ? runner?.retryDelay(scheduledJob(job), error)
+          : (effect?.schedule.retry ?? defaultEffectRetry).delay(job.attempts, error);
       const dead = delayMs === undefined;
       await db
         .update(jobsTable)
@@ -185,7 +227,7 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
         })
         .where(and(eq(jobsTable.id, job.id), eq(jobsTable.leaseToken, job.leaseToken ?? '')));
       debugDrain.debug('{effect} {jobId}: attempt {attempts} failed{value4}: {value5}', {
-        effect: job.effect,
+        effect: jobLabel(job),
         jobId: job.id,
         attempts: job.attempts,
         value4: dead ? ', dead' : '',
@@ -203,6 +245,7 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
       readonly signal?: AbortSignal;
       readonly leaseSeconds?: number;
       readonly services?: HandlerServices;
+      readonly jobs?: JobRunner<AppDb>;
     },
   ): Promise<number> => {
     assertRootDb(db, 'drain');
@@ -213,7 +256,10 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
     const batchSize = opts?.batchSize ?? 20;
     const leaseSeconds = opts?.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
     const signal = opts?.signal ?? new AbortController().signal;
-    if (known.length === 0) return 0;
+    const runner = opts?.jobs;
+    const queued = runner?.names ?? [];
+    // Nothing to claim. A journal with no effects still drains its runner's queue rows.
+    if (known.length === 0 && queued.length === 0) return 0;
 
     // One job is claimed at a time, right before it runs, so its lease starts
     // when its work starts. Claiming the whole batch up front would start every
@@ -222,35 +268,48 @@ export function createDrain<Meta extends z.ZodObject, AppDb extends RootDb, Run>
     // An aborted signal stops the claiming; the job already running finishes.
     let claimed = 0;
     while (claimed < batchSize && !signal.aborted) {
-      const job = await claimOne(db, leaseSeconds);
+      const job = await claimOne(db, leaseSeconds, queued);
       if (job === undefined) break;
       claimed += 1;
-      await runJob(db, job, signal, leaseSeconds, effectsByName);
+      await runJob(db, job, signal, leaseSeconds, effectsByName, runner);
     }
     return claimed;
   };
 }
 
 /**
- * Counts pending jobs whose effect this journal does not have. `drain` never
- * claims them, on purpose: during a rolling deploy an older worker may still
- * have that effect. But once every worker runs the new code, a renamed or
- * removed effect leaves its jobs here for good, so they must be visible.
+ * Counts pending jobs no handler here can claim: effect rows whose effect this journal
+ * does not have, and, when a runner is given, queue rows whose name it does not know.
+ * `drain` never claims them, on purpose: during a rolling deploy an older worker may
+ * still have that handler. But once every worker runs the new code, a renamed or
+ * removed handler leaves its jobs here for good, so they must be visible.
  */
 export function createStrandedJobs(deps: { readonly tables: JournalTables; readonly effectNames: readonly string[] }) {
   const { jobs: jobsTable } = deps.tables;
-  return async (db: DbHandle): Promise<readonly StrandedJobs[]> =>
-    db
-      .select({ effect: jobsTable.effect, jobs: sql<number>`count(*)::int` })
+  const name = sql<string>`coalesce(${jobsTable.effect}, ${jobsTable.jobName})`;
+  return async (
+    db: DbHandle,
+    opts?: { readonly jobs?: Pick<JobRunner, 'names'> },
+  ): Promise<readonly StrandedJobs[]> => {
+    const effectRows = and(
+      eq(jobsTable.kind, 'effect'),
+      deps.effectNames.length > 0 ? notInArray(jobsTable.effect, [...deps.effectNames]) : undefined,
+    );
+    const queueNames = opts?.jobs?.names;
+    const queueRows =
+      queueNames === undefined
+        ? undefined
+        : and(
+            eq(jobsTable.kind, 'queue'),
+            queueNames.length > 0 ? notInArray(jobsTable.jobName, [...queueNames]) : undefined,
+          );
+    return db
+      .select({ kind: jobsTable.kind, name, jobs: sql<number>`count(*)::int` })
       .from(jobsTable)
-      .where(
-        and(
-          isNull(jobsTable.deadAt),
-          deps.effectNames.length > 0 ? notInArray(jobsTable.effect, [...deps.effectNames]) : undefined,
-        ),
-      )
-      .groupBy(jobsTable.effect)
-      .orderBy(asc(jobsTable.effect));
+      .where(and(isNull(jobsTable.deadAt), or(effectRows, queueRows)))
+      .groupBy(jobsTable.kind, name)
+      .orderBy(asc(jobsTable.kind), asc(name));
+  };
 }
 
 /** The job verbs an operator uses: list, retry a dead job, discard a dead job. */
@@ -259,7 +318,12 @@ export function createAdmin(deps: { readonly tables: JournalTables; readonly wak
 
   const jobs = (
     db: DbHandle,
-    opts?: { readonly status?: 'pending' | 'dead' | 'all'; readonly effect?: string; readonly limit?: number },
+    opts?: {
+      readonly status?: 'pending' | 'dead' | 'all';
+      readonly effect?: string;
+      readonly job?: string;
+      readonly limit?: number;
+    },
   ): Promise<JobRow[]> => {
     const status = opts?.status ?? 'pending';
     return db
@@ -269,6 +333,7 @@ export function createAdmin(deps: { readonly tables: JournalTables; readonly wak
         and(
           status === 'pending' ? isNull(jobsTable.deadAt) : status === 'dead' ? isNotNull(jobsTable.deadAt) : undefined,
           opts?.effect === undefined ? undefined : eq(jobsTable.effect, opts.effect),
+          opts?.job === undefined ? undefined : eq(jobsTable.jobName, opts.job),
         ),
       )
       .orderBy(asc(jobsTable.availableAt))
@@ -310,6 +375,7 @@ export type WorkerDeps<AppDb extends RootDb> = {
       readonly signal?: AbortSignal;
       readonly leaseSeconds?: number;
       readonly services?: HandlerServices;
+      readonly jobs?: JobRunner<AppDb>;
     },
   ) => Promise<number>;
   /** One batch per async projection. Returns how many events were scanned. */
@@ -533,6 +599,7 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
       readonly listen?: WakeListener;
       readonly taps?: boolean;
       readonly services?: HandlerServices;
+      readonly jobs?: JobRunner<AppDb>;
     },
   ): JournalWorker => {
     assertRootDb(db, 'worker');
@@ -579,6 +646,7 @@ export function createWorkers<AppDb extends RootDb>(deps: WorkerDeps<AppDb>) {
             signal: stopping.signal,
             leaseSeconds: opts?.leaseSeconds,
             services: opts?.services,
+            jobs: opts?.jobs,
           });
           if (isRunning()) {
             const caught = await deps.catchUp(db);

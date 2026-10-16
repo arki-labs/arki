@@ -170,6 +170,44 @@ export const publicProcedure = os.use(appErrors).use(commandErrors());
 - From an effect, call `ctx.run(command, input, meta)`. It is `journal.run` on the worker's root database.
 - In the games-platform backend, procedures call `context.runCommand`. `core/context.ts` binds it to the signed-in user. A job or a schedule binds its own runner: `journal.bind(db, { actorId: null })`. Do not call `journal.run` from a procedure there.
 
+### Schedule a job in the same transaction
+
+The job row is written in the caller's transaction. It exists if and only if the business write commits. The typed API is `@arki/queue/outbox`. The journal only stores and claims the row.
+
+```ts
+// backend/src/schedule.ts: once per app
+import { outbox } from '@arki/queue/outbox';
+import { tables } from './journal.tables';
+export const schedule = outbox({ tables });
+
+// usecase
+export const startRun = (db: AppDb, input: StartInput) =>
+  db.transaction(async tx => {
+    const run = await runs.withTx(tx).create({ briefName: input.briefName, status: 'pending' });
+    await schedule.runAfter(
+      tx,
+      discoveryJobs.runDiscovery,
+      { runId: run.id, budgetLimitUsd: input.budgetLimitUsd },
+      { key: `discovery:${run.id}` },
+    );
+    return run;
+  });
+
+// worker: the journal worker the app already runs, plus one option
+const worker = journal.worker(db, {
+  listen: listenOnPool(listenPool, journal.wakeChannel),
+  jobs: outboxRunner({ registry: discoveryJobs, context: () => ({ db }) }),
+});
+```
+
+Rules:
+
+- Pass `tx`, never `db`. The root database is a compile error and a runtime error (`OUTBOX_E001`).
+- Pass `ctx.job.id` on to external systems as the idempotency key. The job runs at least once. The id is the row id and stays the same across retries.
+- Job args are plain JSON. A `Date`, a `Map` or a class instance is rejected (`OUTBOX_E003`).
+- A worker without `jobs` never claims a queue row. List queue rows with `journal.jobs(db, { job })`. Find stranded ones with `journal.strandedJobs(db, { jobs })`.
+- After a migration, run `drizzle-kit generate`. Roll out migrate, then workers, then producers.
+
 ### Find out why a write failed
 
 1. Check the kind of error. `isJournalError(error)` is true: go to step 2. `isCommandError(error)` is true: a rule of the app rejected the request; read its `code` and `message`, and find the `throw` in the command. A `ZodError`: input, event data or `meta` failed its schema. A plain `Error` that starts with `journal:`: a wrong definition or a misuse; search `src/` for the message. Anything else was thrown by app code and passed through unchanged.

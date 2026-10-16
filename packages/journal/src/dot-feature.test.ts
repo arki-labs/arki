@@ -18,11 +18,14 @@ import { z } from 'zod';
 
 import { defineApp } from '@arki/dot';
 import { defineFeature, feature } from '@arki/dot/feature';
-import { plugin } from '@arki/dot/plugin';
+import { plugin, service } from '@arki/dot/plugin';
 
+import type { JobsSource } from './dot.js';
 import type { OrderId } from './test-support.js';
+import type { JobRunner } from './types.js';
 import { journal, journalEffects, journalHandlers, journalProjections, journalWorker } from './dot.js';
 import { need } from './handlers.js';
+import { jobId } from './id.js';
 import { project } from './projection.js';
 import { customerOrderCounts, j, meta, openDb, order, orderId, OrderPlaced, tables } from './test-support.js';
 
@@ -209,5 +212,77 @@ describe('dot explain: event → effect edges', () => {
       format: 'journal-flow',
       edges: [{ event: 'OrderPlaced', effect: 'chain-order-mail', plugin: 'orders', entities: ['order'] }],
     });
+  });
+});
+
+describe('journalWorker({ jobs }): queue rows from a job runner', () => {
+  // Why: `@arki/queue/dot`'s `outboxJobs()` hands the worker a runner built at boot from
+  // the mounted features. Its needs must be checked with the worker's own, at boot, not at
+  // the first job; here a hand-made source stands in for it.
+  const mailerPlugin = (sent: string[], done: () => void) =>
+    plugin({
+      name: 'jobs-mailer',
+      provides: { mailer: (): Mailer => ({ send: id => (sent.push(id), done()) }) },
+    });
+  const mailerSource = (seen: { features: string[] }): JobsSource<{ mailer: ReturnType<typeof service<Mailer>> }> => ({
+    needs: { mailer: service<Mailer>() },
+    actions: () => [
+      { id: 'welcome.consume', binding: 'queue', direction: 'in', address: 'welcome', summary: 'test runner' },
+    ],
+    build: (features, { mailer }): JobRunner => {
+      seen.features = features.map(f => f.name);
+      return {
+        names: ['welcome'],
+        run: job => {
+          mailer.send(orderId(Number(job.args)));
+          return Promise.resolve();
+        },
+        retryDelay: () => undefined,
+      };
+    },
+  });
+
+  it('builds the runner at boot with its needs and runs a queue row in the worker', async () => {
+    const sent: string[] = [];
+    let done: () => void = () => undefined;
+    const ran = new Promise<void>(resolve => {
+      done = resolve;
+    });
+    const seen = { features: [] as string[] };
+    const app = track(
+      await defineApp('jobs-worker')
+        .infra(dbPlugin(), journal({ j, tables }), mailerPlugin(sent, () => done()))
+        .features([ordersFeature([])])
+        .entrypoints(journalWorker({ pollMs: POLL_MS, jobs: mailerSource(seen) }))
+        .boot(),
+    );
+    await app.start();
+    expect(seen.features).toEqual(['orders']);
+    await db.insert(tables.jobs).values({ id: jobId(), kind: 'queue', jobName: 'welcome', args: 42 });
+    await ran;
+    expect(sent).toEqual([orderId(42)]);
+  });
+
+  it('a source need the app does not provide fails boot, before any job', async () => {
+    const seen = { features: [] as string[] };
+    const configured = defineApp('jobs-missing')
+      .infra(dbPlugin(), journal({ j, tables }))
+      .features([ordersFeature([])]);
+    await expect(
+      // @ts-expect-error -- the app provides no `mailer`, which the jobs source needs
+      configured.entrypoints(journalWorker({ jobs: mailerSource(seen) })).boot(),
+    ).rejects.toThrow(/mailer/);
+    expect(seen.features).toEqual([]);
+  });
+
+  it("adds the source's consumer actions to the worker's manifest", () => {
+    const configured = defineApp('jobs-explain')
+      .infra(dbPlugin(), journal({ j, tables }), mailerPlugin([], () => undefined))
+      .features([ordersFeature([])])
+      .entrypoints(journalWorker({ jobs: mailerSource({ features: [] }) }))
+      .configure();
+    expect(configured.manifest.actions).toContainEqual(
+      expect.objectContaining({ id: 'welcome.consume', plugin: 'journal-worker' }),
+    );
   });
 });

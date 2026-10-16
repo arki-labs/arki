@@ -112,6 +112,7 @@ export type {
   JobContext,
   JobDefinition,
   JobHandler,
+  JobLike,
   JobMiddleware,
   JobOptions,
   MiddlewareFunction,

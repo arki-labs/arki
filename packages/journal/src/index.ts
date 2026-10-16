@@ -75,8 +75,11 @@ export type {
   HandlerServices,
   TransactionSource,
   JournalWorker,
+  JobRunner,
+  ScheduledJob,
   StrandedJobs,
 } from './types.js';
+export { jobId } from './id.js';
 export type { JournalTables } from './pg.js';
 export type { Around, HookPoint } from './hooks.js';
 export { listenOnPool } from './listen.js';

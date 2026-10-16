@@ -28,7 +28,7 @@
 import type { z } from 'zod';
 
 import type { AnyFeatureCore, DepsOf, Driven, Driver, MountedFeature } from '@arki/dot/feature';
-import type { EmptyShape, Plugin, Service } from '@arki/dot/plugin';
+import type { ActionSource, CtxOf, EmptyShape, NeedsShape, Plugin, Service, WireNeeds } from '@arki/dot/plugin';
 import { driven, driver, entrypointsOf, ownUnits, sliceOf } from '@arki/dot/feature';
 import { DotPluginError, plugin, service } from '@arki/dot/plugin';
 
@@ -38,6 +38,7 @@ import type {
   DbHandle,
   Effect,
   HandlerServices,
+  JobRunner,
   JournalWorker,
   Needs,
   Projection,
@@ -456,7 +457,32 @@ export type JournalWorkerOptions = {
  * is checked where the journal is mounted (`journal(...)` needs the same `db`).
  */
 type WorkerHost = {
-  worker(db: RootDb, opts?: JournalWorkerOptions & { readonly services?: HandlerServices }): JournalWorker;
+  worker(
+    db: RootDb,
+    opts?: JournalWorkerOptions & { readonly services?: HandlerServices; readonly jobs?: JobRunner },
+  ): JournalWorker;
+};
+
+/** No `$`-prefixed keys: that prefix is the kernel's. */
+type NoReservedKeys = Readonly<Record<`$${string}`, never>>;
+
+/** The worker's own needs. A `jobs` source adds its own. */
+type WorkerNeeds = { readonly db: Service<RootDb>; readonly journal: Service<WorkerHost> };
+
+/**
+ * A job runner built at boot, from the mounted features and the services it needs, for
+ * `journalWorker({ jobs })`. `@arki/queue/dot`'s `outboxJobs()` makes one.
+ */
+export type JobsSource<TNeeds extends NeedsShape> = {
+  /** Merged into the worker's needs: a missing one fails boot, not the first job. */
+  readonly needs: TNeeds;
+  /** The consumer actions the runner adds to the worker's manifest (e.g. `<job>.consume`). */
+  readonly actions?: (features: readonly MountedFeature[]) => readonly ActionSource[];
+  /** `services` is the worker's boot context: its needs, `db`, and the features' slice records. */
+  build(
+    features: readonly MountedFeature[],
+    services: CtxOf<TNeeds> & { readonly db: RootDb },
+  ): JobRunner | Promise<JobRunner>;
 };
 
 /** The services a feature's `journal` slice published at its boot. */
@@ -471,17 +497,27 @@ function sliceServices(ctx: object, feature: MountedFeature): Services {
  * The driving part, for `.serve()`: one worker between `start` and `stop`, for the
  * journal that `journal(...)` published. Each effect and tap of a feature gets the
  * services of that feature. A process that serves no worker still writes: its jobs
- * wait for a process that does.
+ * wait for a process that does. With `jobs`, the worker also runs queue rows
+ * (`@arki/queue/outbox`) through the runner the source builds at boot.
  */
+export function journalWorker(options?: JournalWorkerOptions): Driver<WireNeeds<WorkerNeeds>, EmptyShape>;
+export function journalWorker<TNeeds extends NeedsShape & NoReservedKeys>(
+  options: JournalWorkerOptions & { readonly jobs: JobsSource<TNeeds> },
+): Driver<WireNeeds<WorkerNeeds & TNeeds>, EmptyShape>;
 export function journalWorker(
-  options: JournalWorkerOptions = {},
-): Driver<{ db: RootDb; journal: WorkerHost }, EmptyShape> {
+  options: JournalWorkerOptions & { readonly jobs?: JobsSource<NeedsShape> } = {},
+): Driver<WireNeeds<WorkerNeeds>, EmptyShape> {
+  const { jobs: source, ...workerOptions } = options;
+  // The source's needs join the worker's, so the kernel resolves and checks them with the
+  // worker's own; the overloads above type them for the app.
+  const needs: WorkerNeeds = { ...source?.needs, db: service<RootDb>(), journal: service<WorkerHost>() };
   return driver(features => {
     let worker: JournalWorker | undefined;
-    return plugin({
+    return plugin<WorkerNeeds, EmptyShape>({
       name: 'journal-worker',
-      needs: { db: service<RootDb>(), journal: service<WorkerHost>() },
-      boot(ctx) {
+      needs,
+      actions: source?.actions?.(features),
+      async boot(ctx) {
         const { owners } = readDeclarations(features);
         const byFeature = new Map<MountedFeature, Services>();
         // An effect or tap came from a `journal` slice, so its owner has a slice record. A
@@ -494,8 +530,9 @@ export function journalWorker(
           const owner = owners.get(`${kind}:${name}`);
           return (owner === undefined ? undefined : byFeature.get(owner)) ?? {};
         };
+        const jobs = await source?.build(features, ctx);
         // Built at boot, not at start: a missing service fails the boot.
-        worker = ctx.journal.worker(ctx.db, { ...options, services });
+        worker = ctx.journal.worker(ctx.db, { ...workerOptions, services, jobs });
       },
       async start() {
         await worker?.start();

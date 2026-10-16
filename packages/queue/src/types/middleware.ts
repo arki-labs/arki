@@ -3,8 +3,7 @@
  * Inspired by tRPC's middleware system
  */
 
-import type { Job as BullMQJob } from 'bullmq';
-
+import type { JobLike } from './job.ts';
 import type { QueueMeta } from './queue.ts';
 
 /**
@@ -23,9 +22,9 @@ export type MiddlewareFunction<TContextOut1, TContextOut2, TMeta extends QueueMe
   data: unknown;
 
   /**
-   * The underlying BullMQ job instance
+   * The job that runs: a BullMQ `Job`, or the same shape from another lane
    */
-  job: BullMQJob;
+  job: JobLike;
 
   /**
    * Metadata (can be used for tracking, logging, etc.)

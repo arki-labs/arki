@@ -30,7 +30,15 @@ export type {
 
 // Job types
 export { QUEUE_PRIORITIES } from './job.ts';
-export type { JobContext, JobDefinition, JobHandler, JobOptions, QueuePriority, TriggerOptions } from './job.ts';
+export type {
+  JobContext,
+  JobDefinition,
+  JobHandler,
+  JobLike,
+  JobOptions,
+  QueuePriority,
+  TriggerOptions,
+} from './job.ts';
 
 // Middleware types
 export type {

@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   bigserial,
+  check,
   index,
   integer,
   jsonb,
@@ -10,11 +11,12 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   varchar,
 } from 'drizzle-orm/pg-core';
 
 /**
- * The two journal tables. Call this once in the app's schema module so
+ * The journal tables. Call this once in the app's schema module so
  * `drizzle-kit generate` creates them. The library never creates tables at
  * runtime.
  */
@@ -59,10 +61,18 @@ export function journalTables(schema?: PgSchema) {
     {
       /** `job_xxx`. Pass it on as an idempotency key. */
       id: varchar('id').primaryKey(),
-      eventSeq: bigint('event_seq', { mode: 'number' })
-        .notNull()
-        .references(() => events.seq),
-      effect: varchar('effect', { length: 128 }).notNull(),
+      /** `effect`: an effect's job for one event. `queue`: a job scheduled by a runner (`@arki/queue/outbox`). */
+      kind: varchar('kind', { length: 8 }).notNull().default('effect').$type<'effect' | 'queue'>(),
+      /** Set on `effect` rows only. */
+      eventSeq: bigint('event_seq', { mode: 'number' }).references(() => events.seq),
+      /** Set on `effect` rows only. */
+      effect: varchar('effect', { length: 128 }),
+      /** Set on `queue` rows only: the persisted job name the runner looks up. */
+      jobName: varchar('job_name', { length: 128 }),
+      /** Set on `queue` rows only: the job's input as plain JSON, parsed by the runner. */
+      args: jsonb('args'),
+      /** `queue` rows only, optional: one unfinished row per job name and key. */
+      dedupeKey: varchar('dedupe_key', { length: 256 }),
       /** Higher runs first among due jobs. From the effect's schedule. */
       priority: integer('priority').notNull().default(0),
       attempts: integer('attempts').notNull().default(0),
@@ -78,6 +88,14 @@ export function journalTables(schema?: PgSchema) {
       index('journal_jobs_due_idx')
         .on(t.priority.desc(), t.availableAt)
         .where(sql`${t.deadAt} is null`),
+      // Each kind sets its own columns and leaves the other kind's empty.
+      check(
+        'journal_jobs_kind_check',
+        sql`(${t.kind} = 'effect' and ${t.eventSeq} is not null and ${t.effect} is not null and ${t.jobName} is null and ${t.args} is null and ${t.dedupeKey} is null) or (${t.kind} = 'queue' and ${t.jobName} is not null and ${t.args} is not null and ${t.eventSeq} is null and ${t.effect} is null)`,
+      ),
+      uniqueIndex('journal_jobs_queue_dedupe_unique')
+        .on(t.jobName, t.dedupeKey)
+        .where(sql`${t.dedupeKey} is not null`),
     ],
   );
 
