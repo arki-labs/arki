@@ -1,8 +1,6 @@
 import type { Clock } from '@arki/clock';
 
-import type { Outcome } from './signal.js';
 import { abortedError, assertWait, invalidConcurrency, isValidConcurrency, timedOut } from './errors.js';
-import { attempt, unwrap } from './signal.js';
 import { systemClock } from './system-clock.js';
 
 /** Options of {@link race}; {@link timeout} takes them too. */
@@ -41,13 +39,14 @@ async function pool<I, O>(
   const pending = [...items].entries();
   if (outer?.aborted) throw abortedError(`${name}()`, outer.reason);
 
-  const outcome = await new Promise<Outcome<O[]>>(resolve => {
+  const results: O[] = [];
+  let failure: unknown;
+  // Resolves once every started task has settled: true when none failed, else `failure` says why.
+  const succeeded = await new Promise<boolean>(resolve => {
     const controller = new AbortController();
-    const results: O[] = [];
     let active = 0;
     let exhausted = false;
     let failed = false;
-    let failure: unknown;
 
     function fail(error: unknown): void {
       if (failed) return;
@@ -64,27 +63,22 @@ async function pool<I, O>(
     function settleIfDone(): void {
       if (active > 0 || !(failed || exhausted)) return;
       outer?.removeEventListener('abort', onAbort);
-      resolve(failed ? { ok: false, error: failure } : { ok: true, value: results });
+      resolve(!failed);
     }
 
     // One call per function invocation, never a closure over a loop variable:
     // Hermes (React Native) scopes `const` in a loop body to the function by
     // default, so every closure made in the loop would see the last item.
-    function run(index: number, item: I): void {
+    // Async, so a synchronous throw from `fn` lands in the catch like a rejection.
+    async function run(index: number, item: I): Promise<void> {
       active++;
-      void attempt(() => fn(item, controller.signal, index))
-        .then(
-          value => {
-            results[index] = value;
-          },
-          (error: unknown) => {
-            fail(error);
-          },
-        )
-        .then(() => {
-          active--;
-          launch();
-        });
+      try {
+        results[index] = await fn(item, controller.signal, index);
+      } catch (error) {
+        fail(error);
+      }
+      active--;
+      launch();
     }
 
     function launch(): void {
@@ -94,7 +88,7 @@ async function pool<I, O>(
           exhausted = true;
           break;
         }
-        run(step.value[0], step.value[1]);
+        void run(step.value[0], step.value[1]);
       }
       settleIfDone();
     }
@@ -102,7 +96,8 @@ async function pool<I, O>(
     outer?.addEventListener('abort', onAbort, { once: true });
     launch();
   });
-  return unwrap(outcome);
+  if (!succeeded) throw failure;
+  return results;
 }
 
 /**
@@ -163,12 +158,13 @@ export async function race<T>(
   const { signal: outer } = options;
   if (outer?.aborted) throw abortedError('race()', outer.reason);
   if (tasks.length === 0) throw new AggregateError([], 'race() got no tasks, so none could fulfill');
-  const outcome = await new Promise<Outcome<T>>(resolve => {
+  const errors: unknown[] = [];
+  let winner: { readonly value: T } | undefined;
+  let abortFailure: Error | undefined;
+  // Resolves once every task has settled; the state above says how the race ended.
+  await new Promise<void>(resolve => {
     const entries = tasks.map(task => ({ task, controller: new AbortController() }));
-    const errors: unknown[] = [];
     let remaining = entries.length;
-    let winner: { readonly value: T } | undefined;
-    let abortFailure: unknown;
     let abortedByOuter = false;
 
     function onAbort(): void {
@@ -181,31 +177,34 @@ export async function race<T>(
     function settle(): void {
       if (--remaining > 0) return;
       outer?.removeEventListener('abort', onAbort);
-      if (winner !== undefined) resolve({ ok: true, value: winner.value });
-      else if (abortedByOuter) resolve({ ok: false, error: abortFailure });
-      else resolve({ ok: false, error: new AggregateError(errors, 'race() failed: every task rejected') });
+      resolve();
     }
 
     // One call per function invocation, not a closure over a loop variable: see `run` in `pool`.
-    function start(index: number, task: (signal: AbortSignal) => Promise<T>, controller: AbortController): void {
-      void attempt(() => task(controller.signal))
-        .then(
-          value => {
-            if (winner !== undefined || abortedByOuter) return;
-            winner = { value };
-            for (const other of entries) if (other.controller !== controller) other.controller.abort();
-          },
-          (error: unknown) => {
-            errors[index] = error;
-          },
-        )
-        .then(settle);
+    // Async, so a synchronous throw from `task` lands in the catch like a rejection.
+    async function start(
+      index: number,
+      task: (signal: AbortSignal) => Promise<T>,
+      controller: AbortController,
+    ): Promise<void> {
+      try {
+        const value = await task(controller.signal);
+        if (winner === undefined && !abortedByOuter) {
+          winner = { value };
+          for (const other of entries) if (other.controller !== controller) other.controller.abort();
+        }
+      } catch (error) {
+        errors[index] = error;
+      }
+      settle();
     }
 
     outer?.addEventListener('abort', onAbort, { once: true });
-    for (const [index, { task, controller }] of entries.entries()) start(index, task, controller);
+    for (const [index, { task, controller }] of entries.entries()) void start(index, task, controller);
   });
-  return unwrap(outcome);
+  if (winner !== undefined) return winner.value;
+  if (abortFailure !== undefined) throw abortFailure;
+  throw new AggregateError(errors, 'race() failed: every task rejected');
 }
 
 /**
@@ -228,7 +227,11 @@ export async function timeout<T>(
   assertWait('timeout', 'ms', ms);
   const { signal: outer, clock = systemClock } = options;
   if (outer?.aborted) throw abortedError('timeout()', outer.reason);
-  const outcome = await new Promise<Outcome<T>>(resolve => {
+  // Set when the task fulfills in time; otherwise `failure` holds why the call ended.
+  let result: { readonly value: T } | undefined;
+  let failure: unknown;
+  // Resolves at the first of: the task settles, the deadline, an outer abort.
+  await new Promise<void>(resolve => {
     const controller = new AbortController();
     let settled = false;
 
@@ -244,24 +247,31 @@ export async function timeout<T>(
     function onAbort(): void {
       if (!finish()) return;
       controller.abort(outer?.reason);
-      resolve({ ok: false, error: abortedError('timeout()', outer?.reason) });
+      failure = abortedError('timeout()', outer?.reason);
+      resolve();
     }
 
     const cancelTimer = clock.setTimer(() => {
       if (!finish()) return;
       const error = timedOut(ms);
       controller.abort(error);
-      resolve({ ok: false, error });
+      failure = error;
+      resolve();
     }, ms);
     outer?.addEventListener('abort', onAbort, { once: true });
-    void attempt(() => task(controller.signal)).then(
-      value => {
-        if (finish()) resolve({ ok: true, value });
-      },
-      (error: unknown) => {
-        if (finish()) resolve({ ok: false, error });
-      },
-    );
+    void run();
+
+    // Async, so a synchronous throw from `task` lands in the catch like a rejection.
+    async function run(): Promise<void> {
+      try {
+        const value = await task(controller.signal);
+        if (finish()) result = { value };
+      } catch (error) {
+        if (finish()) failure = error;
+      }
+      resolve();
+    }
   });
-  return unwrap(outcome);
+  if (result === undefined) throw failure;
+  return result.value;
 }

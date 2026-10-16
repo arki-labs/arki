@@ -1,6 +1,5 @@
-import type { Outcome } from './signal.js';
 import { abortedError, cleanupFailed } from './errors.js';
-import { linkedController, unwrap } from './signal.js';
+import { linkedController } from './signal.js';
 
 /** Options of {@link scoped}. */
 export type ScopedOptions = {
@@ -72,17 +71,19 @@ export async function scoped<T>(body: (scope: Scope) => Promise<T>, options: Sco
     },
   };
 
-  let outcome: Outcome<T>;
+  // Set when `body` fulfills; otherwise `failure` holds what it threw.
+  let result: { readonly value: T } | undefined;
+  let failure: unknown;
   try {
-    outcome = { ok: true, value: await body(scope) };
+    result = { value: await body(scope) };
   } catch (error) {
-    outcome = { ok: false, error };
+    failure = error;
   }
 
   ended = true;
   unlink();
-  if (outcome.ok) controller.abort();
-  else controller.abort(outcome.error);
+  if (result === undefined) controller.abort(failure);
+  else controller.abort();
 
   const errors: unknown[] = [];
   for (const finalizer of [...finalizers].reverse()) {
@@ -93,6 +94,7 @@ export async function scoped<T>(body: (scope: Scope) => Promise<T>, options: Sco
     }
   }
 
-  if (errors.length > 0) throw cleanupFailed(outcome.ok ? undefined : outcome.error, errors);
-  return unwrap(outcome);
+  if (errors.length > 0) throw cleanupFailed(result === undefined ? failure : undefined, errors);
+  if (result === undefined) throw failure;
+  return result.value;
 }
