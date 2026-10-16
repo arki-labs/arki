@@ -1,17 +1,13 @@
 import { db, repositories } from '../db';
-import type { UserModel } from '../features/auth';
 import { kv } from '../kv';
 import type { Auth } from './auth/config';
 
 /**
  * Creates the oRPC context for each incoming request.
- * Provides access to the database, session, repositories, and other services.
+ * Provides access to the database, principal, repositories, and other services.
  */
 export const createRPCContext = async (opts: { headers: Headers; auth: Auth }) => {
-  const authApi = opts.auth.api;
-  const session = await authApi.getSession({
-    headers: opts.headers,
-  });
+  const principal = await opts.auth.principal(opts.headers);
 
   const source = opts.headers.get('x-rpc-source') ?? 'unknown';
   const ip =
@@ -19,15 +15,15 @@ export const createRPCContext = async (opts: { headers: Headers; auth: Auth }) =
     opts.headers.get('x-real-ip') ??
     'unknown';
 
-  console.log(`[oRPC] Request from ${source} by ${session?.user?.email ?? 'anonymous'} (ip: ${ip})`);
+  console.log(`[oRPC] Request from ${source} by ${principal?.user.email ?? 'anonymous'} (ip: ${ip})`);
 
   return {
-    authApi,
     db,
     ip,
-    user: session?.user as UserModel | undefined,
+    /** `null` for a guest: who is calling (user row, session, roles). */
+    principal,
+    user: principal?.user,
     runInTransaction: db.transaction.bind(db),
-    session,
     repo: repositories,
     kv,
   };

@@ -7,6 +7,7 @@
     "./features/*": "./src/features/*/types.ts",
     "./types": "./src/features/types.ts",
     "./auth": "./src/core/auth/index.ts",
+    "./auth-definition": "./src/features/auth/definition.ts",
     "./db": "./src/db.ts",
     "./env": "./src/env.ts",
     "./api": "./src/api.ts",

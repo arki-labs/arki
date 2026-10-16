@@ -6,10 +6,11 @@
  */
 import { ORPCError, os } from '@orpc/server';
 
+import { guards } from '@arki/auth/orpc';
 import { ZodError } from '@arki/contracts';
 import { RateLimitExceededError } from '@arki/kv/errors';
 
-import type { RestrictedResource, UserId, UserModel, UserPermission, UserRole } from '../features/auth';
+import type { RestrictedResource, UserPermission, UserRole } from '../features/auth';
 import type { ORPCContext } from './context';
 import { env } from '../env';
 import { ADMIN_ROLE_NAME } from '../features/auth/constants';
@@ -70,35 +71,23 @@ const errorHandlingMiddleware = o.middleware(async ({ next }) => {
 });
 
 /**
- * Authentication middleware — ensures the user is logged in.
+ * Principal guards from `@arki/auth/orpc`. `authed` refuses a guest with `UNAUTHORIZED`
+ * (`data.code` `ARKI_AUTH_E401`) and narrows `context.principal` to non-null.
  */
-const authMiddleware = o.middleware(async ({ context, next }) => {
-  if (!context.session?.user) {
-    throw new ORPCError('UNAUTHORIZED', {
-      message: 'You must be logged in to access this resource',
-    });
-  }
-
-  return next({
-    context: {
-      session: { ...context.session, user: context.session.user as UserModel },
-      user: context.session.user as UserModel,
-    },
-  });
-});
+const { authed } = guards<ORPCContext>();
 
 /**
  * Authorization middleware factory — checks if user has a required permission.
  */
 const createAuthorizeMiddleware = (resource: RestrictedResource, action: UserPermission) => {
   return o.middleware(async ({ context, next }) => {
-    if (!context.session?.user) {
+    if (!context.principal) {
       throw new ORPCError('UNAUTHORIZED', {
         message: 'You must be logged in to access this resource',
       });
     }
 
-    const hasPermission = await context.repo.auth.hasPermission(context.session.user.id as UserId, resource, action);
+    const hasPermission = await context.repo.auth.hasPermission(context.principal.user.id, resource, action);
 
     if (!hasPermission) {
       throw new ORPCError('FORBIDDEN', {
@@ -106,12 +95,7 @@ const createAuthorizeMiddleware = (resource: RestrictedResource, action: UserPer
       });
     }
 
-    return next({
-      context: {
-        session: { ...context.session, user: context.session.user as UserModel },
-        user: context.session.user as UserModel,
-      },
-    });
+    return next();
   });
 };
 
@@ -120,13 +104,13 @@ const createAuthorizeMiddleware = (resource: RestrictedResource, action: UserPer
  */
 const createRoleMiddleware = (roles: readonly string[]) => {
   return o.middleware(async ({ context, next }) => {
-    if (!context.session?.user) {
+    if (!context.principal) {
       throw new ORPCError('UNAUTHORIZED', {
         message: 'You must be logged in to access this resource',
       });
     }
 
-    const userRoles = await context.repo.auth.getUserRoles(context.session.user.id as UserId);
+    const userRoles = await context.repo.auth.getUserRoles(context.principal.user.id);
     const userRoleNames = new Set(userRoles.map(r => r?.name).filter(Boolean));
     const hasRole = roles.some(role => userRoleNames.has(role));
 
@@ -136,12 +120,7 @@ const createRoleMiddleware = (roles: readonly string[]) => {
       });
     }
 
-    return next({
-      context: {
-        session: { ...context.session, user: context.session.user as UserModel },
-        user: context.session.user as UserModel,
-      },
-    });
+    return next();
   });
 };
 
@@ -166,20 +145,21 @@ export const publicProcedure = o.use(timingMiddleware).use(errorHandlingMiddlewa
  * Protected (authenticated) procedure
  *
  * Use this for procedures that require a logged-in user.
- * Guarantees `context.session.user` is non-null.
+ * Guarantees `context.principal` and `context.user` are non-null; `context.user.id` is the
+ * branded `UserId`.
  */
-export const protectedProcedure = o.use(timingMiddleware).use(errorHandlingMiddleware).use(authMiddleware);
+export const protectedProcedure = o
+  .use(timingMiddleware)
+  .use(errorHandlingMiddleware)
+  .use(authed)
+  .use(({ context, next }) => next({ context: { user: context.principal.user } }));
 
 /**
  * Admin procedure
  *
  * Use this for procedures accessible only to admin users.
  */
-export const adminProcedure = o
-  .use(timingMiddleware)
-  .use(errorHandlingMiddleware)
-  .use(authMiddleware)
-  .use(adminMiddleware);
+export const adminProcedure = protectedProcedure.use(adminMiddleware);
 
 /**
  * Permission-based procedure factory

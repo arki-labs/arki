@@ -1,124 +1,36 @@
-import { Resend } from 'resend';
-
-import { createPrefixedIdHook, defineAuthBackend } from '@arki/auth';
+import type { PrincipalOf } from '@arki/auth';
+import type { AuthRuntime, RateLimitStore } from '@arki/auth/pg';
+import type { MailerOptions } from '@arki/mail';
+import { createAuth } from '@arki/auth/pg';
+import { mailer } from '@arki/mail';
 
 import { db } from '../../db';
+import { authDefinition } from '../../features/auth/definition';
 import { Account, Session, User, verifications } from '../../features/auth/schema';
 
 type Options = {
-  appName: string;
-  appKey: string;
-  baseUrl: string;
-  productionUrl: string;
-  secret: string | undefined;
-
-  googleClientId?: string;
-  googleClientSecret?: string;
-
-  appleClientId?: string;
-  appleClientSecret?: string;
-  appleAppBundleIdentifier?: string;
-
-  facebookClientId?: string;
-  facebookClientSecret?: string;
-
-  resendApiKey?: string;
+  /** Read once, at boot. */
+  readonly runtime: () => AuthRuntime<typeof authDefinition>;
+  readonly mail: MailerOptions;
+  /** The shared rate-limit budget; `false` outside production only. */
+  readonly rateLimit: RateLimitStore | false;
 };
 
+/**
+ * Build the Arki auth from `authDefinition` via `@arki/auth/pg`. The definition decides the
+ * methods; this file binds the database, the mailer and the rate-limit store.
+ */
 export function initAuth(options: Options) {
-  const resend = new Resend(options.resendApiKey);
-
-  return defineAuthBackend({
+  return createAuth(authDefinition, {
     db,
-    schema: { user: User, account: Account, session: Session, verification: verifications },
-    appName: options.appName,
-    appKey: options.appKey,
-    baseUrl: options.baseUrl,
-    productionUrl: options.productionUrl,
-    secret: options.secret,
-    generateId: createPrefixedIdHook(),
-    trustedOrigins: ['expo://', 'https://appleid.apple.com'],
-
-    magicLink: {
-      send: async ({ email, url }) => {
-        const resp = await resend.emails.send({
-          to: email,
-          from: 'Domodoro <no-reply@furculita.net>',
-          subject: 'Your magic link',
-          text: `Click the link to sign in: ${url}`,
-        });
-        if (resp.error) throw new Error('Failed to send magic link email. Please try again later.');
-      },
-    },
-
-    user: {
-      changeEmail: {
-        enabled: true,
-        sendChangeEmailConfirmation: async ({ user, newEmail, url, token }) => {
-          await resend.emails.send({
-            to: user.email,
-            from: 'Arki <no-reply@arki.com>',
-            subject: 'Approve email change',
-            text: `Click the link to approve the change: ${url}?token=${token}&newEmail=${newEmail}`,
-          });
-        },
-      },
-    },
-
-    account: {
-      accountLinking: {
-        enabled: true,
-        trustedProviders: ['google', 'apple', 'facebook'],
-        allowDifferentEmails: true,
-        updateUserInfoOnLink: true,
-        allowUnlinkingAll: true,
-      },
-    },
-
-    emailAndPassword: {
-      enabled: true,
-      sendResetPassword: async ({ user, url }) => {
-        await resend.emails.send({
-          to: user.email,
-          from: 'Domodoro <no-reply@domodoro.com>',
-          subject: 'Reset your password',
-          text: `Click the link to reset your password: ${url}`,
-        });
-      },
-    },
-
-    emailVerification: {
-      sendOnSignUp: true,
-      autoSignInAfterVerification: true,
-      sendVerificationEmail: async ({ user, url }) => {
-        await resend.emails.send({
-          to: user.email,
-          from: 'Domodoro <no-reply@domodoro.com>',
-          subject: 'Verify your email address',
-          text: `Click the link to verify your email: ${url}`,
-        });
-      },
-    },
-
-    socialProviders: {
-      ...(options.googleClientId && options.googleClientSecret
-        ? { google: { clientId: options.googleClientId, clientSecret: options.googleClientSecret } }
-        : {}),
-      ...(options.appleClientId && options.appleClientSecret
-        ? {
-            apple: {
-              clientId: options.appleClientId,
-              clientSecret: options.appleClientSecret,
-              appBundleIdentifier: options.appleAppBundleIdentifier,
-            },
-          }
-        : {}),
-      ...(options.facebookClientId && options.facebookClientSecret
-        ? { facebook: { clientId: options.facebookClientId, clientSecret: options.facebookClientSecret } }
-        : {}),
-    },
+    tables: { User, Session, Account, Verification: verifications },
+    mail: mailer(options.mail),
+    runtime: options.runtime,
+    rateLimit: options.rateLimit === false ? false : { store: options.rateLimit },
   });
 }
 
 export type Auth = ReturnType<typeof initAuth>;
-export type Session = Auth['$Infer']['Session'];
+
+/** Who is calling: the user row (branded `UserId`, core columns), the session and the roles. */
+export type Principal = PrincipalOf<Auth>;

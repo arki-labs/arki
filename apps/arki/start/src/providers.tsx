@@ -44,7 +44,7 @@ const nav = [
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AppProvider appContext={config} designSystemId="atelier">
-      <ArkiAuthProvider authClient={authClient}>
+      <ArkiAuthProvider authClient={authClient} capabilities={authClient.capabilities}>
         <NavContextProvider nav={nav}>
           <Provider store={customStore}>
             <TooltipProvider>
