@@ -176,7 +176,7 @@ export function liveEndpoint(options: {
     try {
       feed = await hub.open({
         ...(cursor === undefined ? {} : { cursor }),
-        grant: { tables: view.tables },
+        view: { tables: view.tables },
         signal: detach.signal,
       });
     } catch (error) {

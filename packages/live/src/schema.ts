@@ -19,25 +19,92 @@ const identifier = z
 /** One table, by schema and name. The unit every hint and every declaration is made of. */
 export const tableTagSchema = z.object({ schema: identifier, table: identifier }).strict();
 
-/** Contract meta of a live procedure: the tables it reads. Plain JSON, so `dot explain` shows it. */
+/** A scope dimension's name, e.g. `org`: it keys meta, `hello` and grants, so it stays a plain identifier. */
+export const dimensionSchema = z.string().regex(/^[a-z_]\w{0,62}$/i);
+
+/** A key fits one NOTIFY with room to spare: at most 512 bytes (longer ones make the trigger send an overflow). */
+export const MAX_KEY_BYTES = 512;
+
+/** One scope key as Postgres prints it (`::text`). */
+export const scopeKeySchema = z.string().refine(key => new TextEncoder().encode(key).length <= MAX_KEY_BYTES, {
+  message: `a scope key is at most ${MAX_KEY_BYTES} bytes`,
+});
+
+export const keyKindSchema = z.enum(['uuid', 'text', 'int']);
+
+/** A path into a procedure's input: `[]` is the input itself. */
+const inputPathSchema = z.array(z.string().min(1)).max(16);
+
+const sessionSourceSchema = z.object({ from: z.literal('session') }).strict();
+
+/** Contract meta of a live procedure: the tables it reads, and where each scope key comes from. Plain JSON, so `dot explain` shows it. */
 export const liveMetaSchema = z.object({
   live: z
-    .object({ version: z.literal(1), reads: z.array(tableTagSchema).min(1).max(256) })
+    .object({
+      version: z.literal(1),
+      reads: z.array(tableTagSchema).min(1).max(256),
+      scope: z
+        .record(
+          dimensionSchema,
+          z.discriminatedUnion('from', [
+            z.object({ from: z.literal('input'), path: inputPathSchema }).strict(),
+            sessionSourceSchema,
+          ]),
+        )
+        .optional(),
+    })
     .strict()
     .optional(),
 });
 
-/** Every live procedure of an app: its oRPC path and the tables it reads. Sent in `hello`. */
+/** Every live procedure of an app: its oRPC path, the tables it reads and its scope. Sent in `hello`. */
 export const liveManifestSchema = z
   .array(
     z
       .object({
         path: z.array(z.string().min(1)).min(1).max(32),
         reads: z.array(tableTagSchema).min(1).max(256),
+        scope: z
+          .record(
+            dimensionSchema,
+            z.discriminatedUnion('from', [
+              z.object({ from: z.literal('input'), path: inputPathSchema, kind: keyKindSchema }).strict(),
+              sessionSourceSchema,
+            ]),
+          )
+          .optional(),
       })
       .strict(),
   )
   .max(4096);
+
+/** A grant holds at most this many keys per dimension. */
+export const MAX_GRANT_KEYS = 4096;
+
+/** A frame holds at most this many scope keys, over all its tags; a bigger window splits. */
+export const MAX_KEYS_PER_FRAME = 1024;
+
+/** A tag in a `change` frame: a scoped table's names its dimension and the keys this stream may see. */
+const changeTagSchema = tableTagSchema
+  .extend({
+    scope: z
+      .object({ name: dimensionSchema, keys: z.array(scopeKeySchema).min(1).max(MAX_KEYS_PER_FRAME) })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+/** The scope declaration (`liveScopes`), as plain data. Server only. */
+export const liveScopesSchema = z
+  .object({
+    dimensions: z.array(dimensionSchema).min(1).max(64),
+    tables: z
+      .array(
+        z.object({ tag: tableTagSchema, dimension: dimensionSchema, column: identifier, kind: keyKindSchema }).strict(),
+      )
+      .min(1),
+  })
+  .strict();
 
 /**
  * @internal A Postgres transaction id (`pg_current_xact_id()`, an `xid8`) in decimal. A string,
@@ -60,6 +127,9 @@ export const liveEventSchema = z.discriminatedUnion('kind', [
       mode: z.enum(['resume', 'reset']),
       cursor: liveCursorSchema,
       manifest: liveManifestSchema,
+      scopes: z
+        .record(dimensionSchema, z.union([z.literal('all'), z.array(scopeKeySchema).max(MAX_GRANT_KEYS)]))
+        .optional(),
     })
     .strict(),
   /** Tables changed by commits, and the receipts of exactly the commits that wrote them. */
@@ -67,7 +137,7 @@ export const liveEventSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('change'),
       cursor: liveCursorSchema,
-      tags: z.array(tableTagSchema).min(1).max(256),
+      tags: z.array(changeTagSchema).min(1).max(256),
       txids: z.array(liveReceiptSchema).max(256),
     })
     .strict(),

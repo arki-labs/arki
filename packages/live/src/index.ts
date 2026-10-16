@@ -5,10 +5,20 @@
  * the stream client, and the error codes.
  * Imports no optional peer.
  */
-export type { LiveCursor, LiveEvent, LiveManifest, LiveMeta, LiveReceipt, TableTag } from './types.js';
+export type {
+  LiveCursor,
+  LiveEvent,
+  LiveKeyKind,
+  LiveManifest,
+  LiveMeta,
+  LiveReceipt,
+  LiveScopedTable,
+  LiveScopes,
+  TableTag,
+} from './types.js';
 export { parseLiveCursor, parseLiveEvent } from './parse.js';
 export { affectedPaths, live, liveTables } from './manifest.js';
-export type { LiveFeed, LiveGrant, LiveHub, LiveLimits, LiveSource, LiveSourceEvent } from './hub.js';
+export type { LiveFeed, LiveGrant, LiveHub, LiveLimits, LiveSource, LiveSourceEvent, LiveView } from './hub.js';
 export { createLiveHub } from './hub.js';
 export type { LiveReceipts } from './receipts.js';
 export { liveReceipts } from './receipts.js';

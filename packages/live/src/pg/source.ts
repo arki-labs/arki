@@ -2,8 +2,9 @@
  * `pgSource`: the hub's source on a `pg` pool. One dedicated client `LISTEN`s
  * on the app's channel (`listenOnPool` from `@arki/db/pg`); each trigger
  * payload becomes a `change`. Anything that breaks continuity becomes a `gap`:
- * a lost connection, a failed health check, or a payload this version cannot
- * read (the hint inside is lost, so clients must reset).
+ * a lost connection, a failed health check, a payload this version cannot
+ * read, or an overflow (a statement changed more keys than one hint names):
+ * the hint inside is lost, so clients must reset.
  */
 import { z } from 'zod';
 
@@ -13,14 +14,28 @@ import { listenOnPool } from '@arki/db/pg';
 import type { LiveSource } from '../hub.js';
 import type { TableTag } from '../types.js';
 import { debugSource } from '../debug.js';
-import { tableTagSchema, txIdSchema } from '../schema.js';
+import { tagKey } from '../manifest.js';
+import { scopeKeySchema, tableTagSchema, txIdSchema } from '../schema.js';
 import { liveChannel } from './migration.js';
 
-/** What the trigger and `touch` publish: the table, and the committing transaction's id in decimal. */
-const hintSchema = z.object({ v: z.literal(1), tag: tableTagSchema, txid: txIdSchema }).strict();
+/**
+ * What the triggers and `touch` publish: the table and the committing transaction's id in
+ * decimal; on a scoped table also one changed key, or `overflow` when a statement changed too
+ * many keys (or one too long) to name.
+ */
+const hintSchema = z.union([
+  z.object({ v: z.literal(1), tag: tableTagSchema, txid: txIdSchema }).strict(),
+  z.object({ v: z.literal(1), tag: tableTagSchema, txid: txIdSchema, key: scopeKeySchema }).strict(),
+  z.object({ v: z.literal(1), tag: tableTagSchema, txid: txIdSchema, overflow: z.literal(true) }).strict(),
+]);
 
-/** @internal The tag and txid in a trigger payload, or `undefined` for anything else. */
-export function parseHint(payload: string): { readonly tag: TableTag; readonly txid: string } | undefined {
+/** @internal A trigger payload: a hint (with its key on a scoped table), an overflow, or `undefined` for anything else. */
+export function parseHint(
+  payload: string,
+):
+  | { readonly tag: TableTag; readonly txid: string; readonly key?: string }
+  | { readonly tag: TableTag; readonly txid: string; readonly overflow: true }
+  | undefined {
   let json: unknown;
   try {
     json = JSON.parse(payload);
@@ -28,7 +43,10 @@ export function parseHint(payload: string): { readonly tag: TableTag; readonly t
     return undefined;
   }
   const parsed = hintSchema.safeParse(json);
-  return parsed.success ? { tag: parsed.data.tag, txid: parsed.data.txid } : undefined;
+  if (!parsed.success) return undefined;
+  const { tag, txid } = parsed.data;
+  if ('overflow' in parsed.data) return { tag, txid, overflow: true };
+  return 'key' in parsed.data ? { tag, txid, key: parsed.data.key } : { tag, txid };
 }
 
 /**
@@ -53,12 +71,21 @@ export function pgSource(options: {
       });
       return listen(payload => {
         const hint = parseHint(payload);
-        if (hint) {
-          receive({ kind: 'change', tags: [hint.tag], txid: hint.txid });
+        if (hint && !('overflow' in hint)) {
+          const { tag, txid, key } = hint;
+          receive({ kind: 'change', tags: [key === undefined ? tag : { ...tag, keys: [key] }], txid });
           return;
         }
-        // Still listening, but one hint is unreadable: end every stream, start a new epoch.
-        debugSource.debug('{channel}: unreadable payload; treated as a gap', { channel, bytes: payload.length });
+        // Still listening, but a hint is lost: unreadable, or a statement changed more keys than a
+        // hint names. End every stream and start a new epoch: every client resets, which covers it.
+        if (hint) {
+          debugSource.warn('{channel}: a statement on {table} changed too many keys to name; every client resets', {
+            channel,
+            table: tagKey(hint.tag),
+          });
+        } else {
+          debugSource.debug('{channel}: unreadable payload; treated as a gap', { channel, bytes: payload.length });
+        }
         receive({ kind: 'gap' });
         receive({ kind: 'ready' });
       });

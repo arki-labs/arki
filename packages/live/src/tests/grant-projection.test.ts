@@ -11,7 +11,6 @@
  * twice, once quiet and once with heavy hidden traffic, on a fake clock: every
  * client must observe exactly the same thing both times.
  */
-import { setImmediate as macrotask } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { LiveEvent, LiveManifest, TableTag } from '../index.js';
@@ -19,6 +18,7 @@ import type { SseReader } from './sse-reader.js';
 import { liveEndpoint } from '../http.js';
 import { createLiveHub } from '../index.js';
 import { fakeSource } from '../testing.js';
+import { cryptoBarrier } from './crypto-barrier.js';
 import { RECEIPTS } from './fixtures.js';
 import { sseReader } from './sse-reader.js';
 
@@ -41,46 +41,6 @@ function seen(frame: LiveEvent): Seen {
   const at = Date.now();
   if (frame.kind !== 'change') return { at, kind: frame.kind };
   return { at, kind: frame.kind, tables: frame.tags.map(each => each.table), txids: frame.txids };
-}
-
-/**
- * WebCrypto finishes on a thread pool at no fixed point of the event loop: wait for every call in
- * flight, let the stream pumps run, and repeat until a turn starts none.
- */
-function cryptoBarrier(): { settle(): Promise<void>; restore(): void } {
-  const inFlight = new Set<Promise<unknown>>();
-  const subtle = globalThis.crypto.subtle;
-  function track<T>(promise: Promise<T>): Promise<T> {
-    inFlight.add(promise);
-    const forget = (): void => {
-      inFlight.delete(promise);
-    };
-    promise.then(forget, forget);
-    return promise;
-  }
-  const encrypt = subtle.encrypt.bind(subtle);
-  const decrypt = subtle.decrypt.bind(subtle);
-  const sign = subtle.sign.bind(subtle);
-  const spies = [
-    vi.spyOn(subtle, 'encrypt').mockImplementation((...args) => track(encrypt(...args))),
-    vi.spyOn(subtle, 'decrypt').mockImplementation((...args) => track(decrypt(...args))),
-    vi.spyOn(subtle, 'sign').mockImplementation((...args) => track(sign(...args))),
-  ];
-  return {
-    async settle() {
-      for (let quiet = 0; quiet < 3;) {
-        await macrotask();
-        if (inFlight.size === 0) quiet += 1;
-        else {
-          quiet = 0;
-          await Promise.allSettled(inFlight);
-        }
-      }
-    },
-    restore() {
-      for (const spy of spies) spy.mockRestore();
-    },
-  };
 }
 
 /** Reads a stream for as long as it is not paused; a read already waiting still completes. */

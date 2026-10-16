@@ -376,7 +376,7 @@ describe('reset rules', () => {
     // Why: evicting the oldest frames at a cap would bring back the count leak for the clients
     // whose cursors fall off. A new epoch treats every client the same: it reveals only "overloaded".
     const warn = vi.spyOn(debugHub, 'warn');
-    const { source, hub, db, client } = rig({ replayFrames: 3 });
+    const { source, hub, db, client } = rig({ replayEnvelopes: 3 });
     await startReady(hub, source);
     const [a, b, c] = [client(), client(), client()];
     for (const each of [a, b, c]) {
@@ -393,7 +393,7 @@ describe('reset rules', () => {
     db.commit('users');
     await flush(); // the fourth frame meets a full ring
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0]?.[1]).toMatchObject({ cap: 3, frames: 3, streams: 2 });
+    expect(warn.mock.calls[0]?.[1]).toMatchObject({ envelopes: 3, held: 3, streams: 2 });
     expect([a.log.at(-1), b.log.at(-1)]).toEqual(['gap', 'gap']);
     expect(hub.connections()).toBe(0);
     for (const each of [a, b, c]) await each.connect();

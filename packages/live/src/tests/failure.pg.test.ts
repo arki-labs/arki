@@ -405,7 +405,7 @@ describe.each(['postgres:16-alpine', 'postgres:18-alpine'])('%s', image => {
       vi.useRealTimers();
       return Promise.resolve();
     });
-    const { hub } = await startHub('expiry_listener', { replayMs: 60_000, replayFrames: 4 });
+    const { hub } = await startHub('expiry_listener', { replayMs: 60_000, replayEnvelopes: 4 });
     const watch = await watcher(hub);
     cleanups.push(() => Promise.resolve(watch.stop()));
     const a = client(hub);

@@ -1,14 +1,50 @@
 import type { LiveManifest, LiveMeta, TableTag } from './types.js';
 import { LIVE_ERROR_CODES, liveError } from './errors.js';
-import { tableTagSchema } from './schema.js';
+import { dimensionSchema, tableTagSchema } from './schema.js';
 
 /** A stable key for one table: identifiers may hold dots, so the pair is encoded, not joined. */
 export function tagKey(tag: TableTag): string {
   return JSON.stringify([tag.schema, tag.table]);
 }
 
-/** Contract meta from tags, deduplicated, in declaration order. `@arki/live/drizzle` has the table form most apps use. */
-export function live(options: { readonly reads: readonly TableTag[] }): Required<LiveMeta> {
+/**
+ * Where each scope key of a procedure comes from, by dimension: `'input.orgId'` (a path into its
+ * input; `'input'` is the input itself) or `'session'` (any key the stream is granted).
+ */
+type ScopeOption = Readonly<Record<string, 'session' | 'input' | `input.${string}`>>;
+
+type MetaScope = NonNullable<NonNullable<LiveMeta['live']>['scope']>;
+
+function scopeOf(scope: ScopeOption): MetaScope {
+  const sources: MetaScope = {};
+  for (const [dimension, from] of Object.entries(scope)) {
+    const path = from === 'session' ? undefined : from === 'input' ? [] : from.slice('input.'.length).split('.');
+    const bad =
+      !dimensionSchema.safeParse(dimension).success ||
+      (from !== 'session' && from !== 'input' && !from.startsWith('input.')) ||
+      (path !== undefined && (path.includes('') || path.length > 16));
+    if (bad) {
+      throw liveError(
+        LIVE_ERROR_CODES.config,
+        `live(): bad scope ${JSON.stringify({ [dimension]: from })}`,
+        "Map a dimension name ([A-Za-z_][A-Za-z0-9_]*) to 'session', 'input' or 'input.path.to.key' (at most 16 segments).",
+      );
+    }
+    sources[dimension] = path === undefined ? { from: 'session' } : { from: 'input', path };
+  }
+  return sources;
+}
+
+/**
+ * Contract meta from tags, deduplicated, in declaration order, and the procedure's scope:
+ * `scope: { org: 'input.orgId' }` refetches only the queries whose input holds a changed key;
+ * `'session'` refetches the path on any key the stream is granted. `@arki/live/drizzle` has the
+ * table form most apps use.
+ */
+export function live(options: {
+  readonly reads: readonly TableTag[];
+  readonly scope?: ScopeOption;
+}): Required<LiveMeta> {
   const reads = new Map<string, TableTag>();
   for (const read of options.reads) {
     const parsed = tableTagSchema.safeParse(read);
@@ -28,7 +64,8 @@ export function live(options: { readonly reads: readonly TableTag[] }): Required
       'List every table the procedure reads, and only those.',
     );
   }
-  return { live: { version: 1, reads: [...reads.values()] } };
+  const meta = { version: 1 as const, reads: [...reads.values()] };
+  return { live: options.scope === undefined ? meta : { ...meta, scope: scopeOf(options.scope) } };
 }
 
 /** Every table the manifest reads, once each, in first-seen order. Feeds `liveMigration` and `verifyLiveTriggers`. */

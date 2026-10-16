@@ -89,7 +89,7 @@ describe('the replay ring (step 5)', () => {
   it('never evicts by count: every frame inside the age is kept, and a cursor anywhere in it resumes', () => {
     // Why: hidden-table frames count too; a count bound would make resume depend on them.
     const ring = replayRing<string>({ ms: 1000 });
-    for (let seq = 1; seq <= 10_000; seq += 1) ring.add(seq, 0, `f${seq}`);
+    for (let seq = 1; seq <= 10_000; seq += 1) ring.add(seq, 0, `f${seq}`, 1);
     ring.evict(1000);
     expect(ring.size()).toBe(10_000);
     expect(ring.after(0, 10_000)).toHaveLength(10_000);
@@ -101,8 +101,8 @@ describe('the replay ring (step 5)', () => {
 
   it('keeps a frame exactly `ms` old and evicts it one millisecond later', () => {
     const ring = replayRing<string>({ ms: 1000 });
-    ring.add(1, 0, 'old');
-    ring.add(2, 500, 'new');
+    ring.add(1, 0, 'old', 1);
+    ring.add(2, 500, 'new', 1);
     ring.evict(1000);
     expect(ring.after(0, 2)).toEqual(['old', 'new']);
     ring.evict(1001);

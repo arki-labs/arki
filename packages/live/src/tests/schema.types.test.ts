@@ -7,12 +7,13 @@
 import type { z } from 'zod';
 import { describe, expectTypeOf, it } from 'vitest';
 
-import type { LiveCursor, LiveEvent, LiveManifest, LiveMeta, TableTag } from '../index.js';
+import type { LiveCursor, LiveEvent, LiveManifest, LiveMeta, LiveScopes, TableTag } from '../index.js';
 import type {
   liveCursorSchema,
   liveEventSchema,
   liveManifestSchema,
   liveMetaSchema,
+  liveScopesSchema,
   tableTagSchema,
 } from '../schema.js';
 
@@ -23,5 +24,7 @@ describe('public types match their internal schemas', () => {
     expectTypeOf<z.output<typeof liveManifestSchema>>().toEqualTypeOf<LiveManifest>();
     expectTypeOf<z.output<typeof liveCursorSchema>>().toEqualTypeOf<LiveCursor>();
     expectTypeOf<z.output<typeof liveEventSchema>>().toEqualTypeOf<LiveEvent>();
+    // The declaration is server config with readonly arrays: what the schema parses must fit it.
+    expectTypeOf<z.output<typeof liveScopesSchema>>().toExtend<LiveScopes>();
   });
 });

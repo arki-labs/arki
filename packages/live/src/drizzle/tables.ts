@@ -14,7 +14,12 @@ export function tableTag(table: PgTable): TableTag {
   return { schema: schema ?? 'public', table: name };
 }
 
-/** Contract meta from the Drizzle tables a procedure reads: plain JSON, deduplicated. */
-export function live(options: { readonly reads: readonly PgTable[] }): Required<LiveMeta> {
-  return liveFromTags({ reads: options.reads.map(table => tableTag(table)) });
+/**
+ * Contract meta from the Drizzle tables a procedure reads: plain JSON, deduplicated. `scope` maps
+ * a dimension of `liveScopes` to where the procedure's key comes from (`'input.orgId'`, `'session'`).
+ */
+export function live(
+  options: { readonly reads: readonly PgTable[] } & Pick<Parameters<typeof liveFromTags>[0], 'scope'>,
+): Required<LiveMeta> {
+  return liveFromTags({ ...options, reads: options.reads.map(table => tableTag(table)) });
 }

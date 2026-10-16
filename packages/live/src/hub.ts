@@ -8,18 +8,25 @@
  *
  * - An epoch is a random 12-character name. Every `ready` from the source
  *   starts a new one, so nothing resumes across a listener gap.
- * - Every source `change` is one hint in the ring, numbered `seq`.
- * - Each stream sees the hub through its grant. Of each hint it keeps the
- *   granted tables and, when one is left, the transaction's receipt. A hint
- *   with no granted table never reaches the stream: it starts no timer, takes
- *   no queue slot, and counts toward no cap. So nothing a stream can observe
- *   (its frames, their size and timing, its queue, its `bye`) depends on
- *   writes its grant hides.
- * - Each stream batches its own visible hints. The first one opens a
+ * - Source `change`s of one transaction arrive in a row (NOTIFY keeps commit
+ *   order); they become one envelope in the ring, numbered `seq`, with each
+ *   table's changed keys (a scoped table) or the table as a whole. An envelope
+ *   takes more of its transaction's changes until a position at it is handed
+ *   out (a frame, a cursor, a reset): from then on its `seq` is fixed, so a
+ *   later change of the same transaction becomes a new envelope.
+ * - Each stream sees the hub through its view. Of each envelope it keeps the
+ *   granted tables, of a scoped table only its granted keys (a scoped table
+ *   without granted keys shows nothing), and, when anything is left, the
+ *   transaction's receipt. An envelope that shows nothing never reaches the
+ *   stream: it starts no timer, takes no queue slot, and counts toward no cap.
+ *   So nothing a stream can observe (its frames, their size and timing, its
+ *   queue, its `bye`) depends on writes its view hides.
+ * - Each stream batches its own visible changes. The first one opens a
  *   `batchMs` window; when it closes (or holds 256 transactions) the stream
- *   gets the window's tables unioned, 256 per frame. A frame names the
- *   receipts of exactly the transactions that wrote its own tables; raw
- *   transaction ids never leave the hub. Without `receipts`, frames name none.
+ *   gets the window's tables unioned, each scoped one with its keys, split at
+ *   256 tags or 1024 keys per frame. A frame names the receipts of exactly the
+ *   transactions that wrote its own tables and keys; raw transaction ids never
+ *   leave the hub. Without `receipts`, frames name none.
  * - Cursors are opaque: `(epoch, seq, at)` sealed with AES-GCM under a key
  *   made at `start()`, fresh IV every time (`cursor.ts`). A client cannot
  *   count the hints its grant hides from it. A cursor this hub cannot open is
@@ -45,10 +52,11 @@
  *   else (none, another epoch, from the future) resets. Never by count:
  *   hints of hidden tables count too, so a client could learn from a reset
  *   that many of them happened.
- * - `replayFrames` is a hard cap, not an eviction: a ring that reaches it
- *   means the hub is overloaded. It starts a new epoch and ends every stream
- *   with `gap`, so every client resets together; that reveals only "the hub
- *   was overloaded", the same to everyone. Logged at warn.
+ * - `replayEnvelopes` and `replayBytes` are hard caps, not evictions: a ring
+ *   that reaches one means the hub is overloaded. It starts a new epoch and
+ *   ends every stream with `gap`, so every client resets together; that
+ *   reveals only "the hub was overloaded", the same to everyone. Logged at
+ *   warn.
  * - A stream whose queue passes `subscriberFrames` gets `bye`: it reconnects
  *   with its cursor instead of buffering without bound.
  * - `stop()` is final and settles once: every stream gets `bye`, every
@@ -66,16 +74,21 @@ import { debugHub } from './debug.js';
 import { LIVE_ERROR_CODES, liveError } from './errors.js';
 import { tagKey } from './manifest.js';
 import { replayRing } from './replay.js';
-import { liveCursorSchema, txIdSchema } from './schema.js';
+import { liveCursorSchema, MAX_KEYS_PER_FRAME, txIdSchema } from './schema.js';
 
 /**
  * What a source reports: the listener is ready (or back), the listener lost continuity, or tables
- * changed at commit. `txid` is the transaction's `pg_current_xact_id()` in decimal; it stays in the hub.
+ * changed at commit. A tag of a scoped table carries the changed `keys` (as Postgres prints them).
+ * `txid` is the transaction's `pg_current_xact_id()` in decimal; it stays in the hub.
  */
 export type LiveSourceEvent =
   | { readonly kind: 'ready' }
   | { readonly kind: 'gap' }
-  | { readonly kind: 'change'; readonly tags: readonly TableTag[]; readonly txid?: string };
+  | {
+      readonly kind: 'change';
+      readonly tags: readonly (TableTag & { readonly keys?: readonly string[] })[];
+      readonly txid?: string;
+    };
 
 /** Where hints come from. `start` resolves with the function that stops it. */
 export type LiveSource = { start(receive: (event: LiveSourceEvent) => void): Promise<() => Promise<void>> };
@@ -83,17 +96,34 @@ export type LiveSource = { start(receive: (event: LiveSourceEvent) => void): Pro
 /** What one stream may see. `tables` omitted: every table. */
 export type LiveGrant = { readonly tables?: readonly TableTag[] };
 
+/**
+ * What one stream sees, as the hub applies it. `tables` omitted: every table. A scoped table
+ * shows only the keys `scopes` lists for it (`'all'`: every key), under the dimension `name`; a
+ * changed key of a table with no entry is hidden, and so is a keyless change of a table whose
+ * entry lists keys. Keys compare exactly: write them the way Postgres prints them.
+ */
+export type LiveView = {
+  readonly tables?: readonly TableTag[];
+  readonly scopes?: readonly {
+    readonly tag: TableTag;
+    readonly name: string;
+    readonly keys: readonly string[] | 'all';
+  }[];
+};
+
 /** The hub's bounds. Every one is a positive integer; omitted ones take the default. */
 export type LiveLimits = {
   /** A stream unions its visible tables for this long, in ms, from the first one (a fixed window, so a write storm still flushes). Default 20. */
   readonly batchMs?: number;
   /**
-   * The most hints the replay ring may hold (one per table per commit). Reaching it is an
-   * overload: a new epoch starts and every client resets together. Size it above `replayMs` × the
-   * peak hint rate. Default 262 144 (about 2 000 hints a second at the default `replayMs`).
+   * The most envelopes the replay ring may hold (one per transaction). Reaching it is an overload:
+   * a new epoch starts and every client resets together. Size it above `replayMs` × the peak commit
+   * rate. Default 262 144 (about 2 000 commits a second at the default `replayMs`).
    */
-  readonly replayFrames?: number;
-  /** A cursor taken this many ms ago still resumes; older ones reset, and hints older than this are evicted. Default 120 000. */
+  readonly replayEnvelopes?: number;
+  /** The most bytes (estimated) the replay ring may hold; reaching it is an overload too. Default 64 MiB. */
+  readonly replayBytes?: number;
+  /** A cursor taken this many ms ago still resumes; older ones reset, and envelopes older than this are evicted. Default 120 000. */
   readonly replayMs?: number;
   /** Over this many queued frames the stream gets `bye`. Default 256. */
   readonly subscriberFrames?: number;
@@ -103,8 +133,13 @@ const limitsSchema = z
   .object({
     /** A stream's window: its visible tables are unioned this long from the first one. */
     batchMs: z.int().positive().default(20),
-    /** The ring's hard cap, in hints: reaching it starts a new epoch (an overload). */
-    replayFrames: z.int().positive().default(262_144),
+    /** The ring's hard cap, in envelopes: reaching it starts a new epoch (an overload). */
+    replayEnvelopes: z.int().positive().default(262_144),
+    /** The ring's hard cap, in estimated bytes: reaching it starts a new epoch (an overload). */
+    replayBytes: z
+      .int()
+      .positive()
+      .default(64 * 1024 * 1024),
     /** The age up to which a cursor resumes; hints older than this are evicted. */
     replayMs: z.int().positive().default(120_000),
     /** Over this many queued frames the stream gets `bye`. */
@@ -123,13 +158,13 @@ export type LiveHub = {
   stop(): Promise<void>;
   status(): 'idle' | 'ready' | 'unavailable' | 'stopped';
   /**
-   * Attaches a stream once its cursor is opened. It sees only what `grant` shows (omitted: every
-   * table). Rejects with E003 unless the hub is `ready`, E004 for a malformed cursor. A
+   * Attaches a stream once its cursor is opened. It sees only what `view` shows (omitted: every
+   * unscoped table). Rejects with E003 unless the hub is `ready`, E004 for a malformed cursor. A
    * well-formed cursor this hub cannot open resumes nothing: it resets.
    */
   open(options: {
     readonly cursor?: LiveCursor;
-    readonly grant?: LiveGrant;
+    readonly view?: LiveView;
     readonly signal: AbortSignal;
   }): Promise<AsyncIterable<LiveFeed>>;
   /**
@@ -143,39 +178,63 @@ export type LiveHub = {
 
 type EndFrame = Extract<LiveEvent, { kind: 'gap' | 'bye' }>;
 type ReceiptOf = () => Promise<LiveReceipt>;
+type FrameTag = Extract<LiveEvent, { kind: 'change' }>['tags'][number];
 
-/** One source `change` as the ring keeps it. */
-type Hint = {
+/** One table's change: the table as a whole (`whole`, an unscoped hint), and/or changed keys. */
+type Cell = { readonly tag: TableTag; readonly key: string; readonly whole: boolean; readonly keys: readonly string[] };
+
+/** One transaction's changes as the ring keeps them: an envelope. */
+type Envelope = {
   readonly seq: number;
   /** When it arrived (ms): its age in the ring, and the start of the window it opens. */
   readonly at: number;
-  readonly cells: readonly { readonly tag: TableTag; readonly key: string }[];
+  /** Per table (by `tagKey`): whether it changed as a whole, and its changed keys. Grows while the envelope is open. */
+  readonly cells: Map<string, { readonly tag: TableTag; whole: boolean; readonly keys: Set<string> }>;
+  /** The source's raw txid, which keeps the transaction's changes in one envelope. */
+  readonly txid: string | undefined;
   /** Its transaction, when the source named one and the hub has receipts. The receipt is made once, on first use. */
   readonly transaction: { readonly txid: string; readonly receipt: ReceiptOf } | undefined;
-  /** The last cursor sealed at this hint's position, shared by every frame made there at that time. */
+  /** The last cursor sealed at this envelope's position, shared by every frame made there at that time. */
   sealed: { readonly at: number; readonly cursor: Promise<LiveCursor> } | undefined;
 };
 
-/** A stream's open window: its visible tables, each with the transactions that wrote it. */
+/** A stream's open window: its visible tables, each with the transactions that wrote it (as a whole, and per key). */
 type Window = {
-  readonly first: Hint;
+  readonly first: Envelope;
   readonly closesAt: number;
-  readonly tables: Map<string, { readonly tag: TableTag; readonly receipts: Map<string, ReceiptOf> }>;
+  readonly tables: Map<
+    string,
+    {
+      readonly tag: TableTag;
+      /** The dimension, when the stream sees this table by key. */
+      readonly name: string | undefined;
+      /** Whether it changed as a whole in this window: then the frame names the table without keys. */
+      wholeSeen: boolean;
+      /** The transactions that changed it as a whole. */
+      readonly whole: Map<string, ReceiptOf>;
+      readonly keys: Map<string, Map<string, ReceiptOf>>;
+    }
+  >;
   readonly txids: Set<string>;
 };
 
 /** A frame as a stream holds it: its cursor and receipts are made when the stream sends it. */
 type HeldChange = {
   readonly kind: 'change';
-  readonly tags: TableTag[];
+  readonly tags: FrameTag[];
   readonly receipts: readonly ReceiptOf[];
   readonly cursor: () => Promise<LiveCursor>;
 };
 type Held = { readonly kind: 'begin'; readonly mode: 'resume' | 'reset'; readonly at: CursorPosition } | HeldChange;
 
+/** A view as the hub reads it: granted tables by `tagKey` (`undefined`: every table), and keys per scoped table. */
+type View = {
+  readonly tables: ReadonlySet<string> | undefined;
+  readonly scopes: ReadonlyMap<string, { readonly name: string; readonly keys: ReadonlySet<string> | 'all' }>;
+};
+
 type Subscriber = {
-  /** The keys of the granted tables; `undefined`: every table. */
-  readonly visible: ReadonlySet<string> | undefined;
+  readonly view: View;
   /** `begin` and the replay, captured at attach. Not counted against `subscriberFrames`. */
   preamble: Held[];
   preambleAt: number;
@@ -191,6 +250,9 @@ type Subscriber = {
 };
 
 const MAX_TAGS_PER_FRAME = 256;
+/** An envelope's estimated size: a fixed part, and UTF-16 bytes plus a small overhead per table and per key. */
+const ENVELOPE_BYTES = 64;
+const ENTRY_BYTES = 16;
 /** A window that reaches this many transactions closes at once: no frame can name more. */
 const MAX_TXIDS_PER_FRAME = 256;
 const EPOCH = /^[a-z0-9]{12}$/;
@@ -207,6 +269,42 @@ function randomEpoch(): string {
     epoch += EPOCH_ALPHABET.charAt(Math.floor(Math.random() * EPOCH_ALPHABET.length));
   }
   return epoch;
+}
+
+/** The view the hub applies, from its plain form. */
+function viewOf(view: LiveView | undefined): View {
+  return {
+    tables: view?.tables === undefined ? undefined : new Set(view.tables.map(tag => tagKey(tag))),
+    scopes: new Map(
+      (view?.scopes ?? []).map(({ tag, name, keys }) => [
+        tagKey(tag),
+        { name, keys: keys === 'all' ? 'all' : new Set(keys) },
+      ]),
+    ),
+  };
+}
+
+/**
+ * What `view` shows of `cell`: the table as a whole, and the keys it may see. `undefined` when
+ * nothing: an ungranted table, a key of a table it sees no key of, a keyless change of a table it
+ * sees only some keys of.
+ */
+function project(
+  view: View,
+  cell: Cell,
+): { readonly whole: boolean; readonly keys: readonly string[]; readonly name: string | undefined } | undefined {
+  if (view.tables !== undefined && !view.tables.has(cell.key)) return undefined;
+  const scope = view.scopes.get(cell.key);
+  const whole = cell.whole && (scope === undefined || scope.keys === 'all');
+  const granted = scope?.keys;
+  const keys = granted === undefined ? [] : granted === 'all' ? cell.keys : cell.keys.filter(key => granted.has(key));
+  if (!whole && keys.length === 0) return undefined;
+  return { whole, keys, name: scope?.name };
+}
+
+/** Every cell of an envelope, as one delta. */
+function cellsOf(envelope: Envelope): Cell[] {
+  return [...envelope.cells].map(([key, cell]) => ({ tag: cell.tag, key, whole: cell.whole, keys: [...cell.keys] }));
 }
 
 function wake(subscriber: Subscriber): void {
@@ -266,11 +364,16 @@ export function createLiveHub(options: {
   let cipher: CursorCipher | undefined;
   let epoch = '';
   let seq = 0;
-  /** The hint numbered `seq`, while this epoch has one. */
-  let latest: Hint | undefined;
+  /** The envelope numbered `seq`, while this epoch has one. */
+  let latest: Envelope | undefined;
+  /**
+   * `latest`, while it still takes more changes of its transaction: until a position at it is
+   * handed out (a frame, a cursor, a reset). After that its `seq` is fixed for good.
+   */
+  let growing: Envelope | undefined;
   /** Txids arrived without `receipts`: said once, at debug. */
   let toldNoReceipts = false;
-  const ring = replayRing<Hint>({ ms: limits.replayMs });
+  const ring = replayRing<Envelope>({ ms: limits.replayMs });
   const subscribers = new Set<Subscriber>();
 
   /** The hub ends the stream: queued frames are dropped, `end` is the last thing it yields. Safe inside a loop over `subscribers` (a Set skips deleted entries). */
@@ -311,53 +414,100 @@ export function createLiveHub(options: {
   }
 
   /**
-   * The stream's view of `hint`: its granted tables go into the stream's window (opened by this
-   * hint when none is open). Returns the window, or `undefined` when the hint shows nothing: then
-   * the stream is left exactly as it was.
+   * The stream's view of `cells` of `envelope`: what it may see goes into the stream's window
+   * (opened by this envelope when none is open). Returns the window, or `undefined` when the cells
+   * show nothing: then the stream is left exactly as it was.
    */
-  function admit(subscriber: Subscriber, hint: Hint): Window | undefined {
+  function admit(subscriber: Subscriber, envelope: Envelope, cells: readonly Cell[]): Window | undefined {
     let window = subscriber.window;
     let shown = false;
-    for (const { tag, key } of hint.cells) {
-      if (subscriber.visible !== undefined && !subscriber.visible.has(key)) continue;
+    const transaction = envelope.transaction;
+    for (const cell of cells) {
+      const visible = project(subscriber.view, cell);
+      if (visible === undefined) continue;
       shown = true;
-      window ??= { first: hint, closesAt: hint.at + limits.batchMs, tables: new Map(), txids: new Set() };
-      const table = window.tables.get(key) ?? { tag, receipts: new Map<string, ReceiptOf>() };
-      if (hint.transaction !== undefined) table.receipts.set(hint.transaction.txid, hint.transaction.receipt);
-      window.tables.set(key, table);
+      window ??= { first: envelope, closesAt: envelope.at + limits.batchMs, tables: new Map(), txids: new Set() };
+      const table = window.tables.get(cell.key) ?? {
+        tag: cell.tag,
+        name: visible.name,
+        whole: new Map<string, ReceiptOf>(),
+        keys: new Map<string, Map<string, ReceiptOf>>(),
+        wholeSeen: false,
+      };
+      if (visible.whole) {
+        table.wholeSeen = true;
+        if (transaction !== undefined) table.whole.set(transaction.txid, transaction.receipt);
+      }
+      for (const key of visible.keys) {
+        const receipts = table.keys.get(key) ?? new Map<string, ReceiptOf>();
+        if (transaction !== undefined) receipts.set(transaction.txid, transaction.receipt);
+        table.keys.set(key, receipts);
+      }
+      window.tables.set(cell.key, table);
     }
     if (!shown || window === undefined) return undefined;
-    if (hint.transaction !== undefined) window.txids.add(hint.transaction.txid);
+    if (transaction !== undefined) window.txids.add(transaction.txid);
     subscriber.window = window;
     return window;
   }
 
-  /** The cursor of position (`hint`, `at`), sealed once for every frame made there at that time. */
-  function sealAt(sealer: CursorCipher, hint: Hint, position: CursorPosition): Promise<LiveCursor> {
-    if (hint.sealed?.at !== position.at) hint.sealed = { at: position.at, cursor: sealer.seal(position) };
-    return hint.sealed.cursor;
+  /** The cursor of position (`envelope`, `at`), sealed once for every frame made there at that time. */
+  function sealAt(sealer: CursorCipher, envelope: Envelope, position: CursorPosition): Promise<LiveCursor> {
+    if (envelope.sealed?.at !== position.at) envelope.sealed = { at: position.at, cursor: sealer.seal(position) };
+    return envelope.sealed.cursor;
   }
 
-  /** The frames of a closed window, at position (`last`, `at`): 256 tables each, each naming the receipts of its own tables. */
-  function framesOf(sealer: CursorCipher, window: Window, last: Hint, at: number): HeldChange[] {
-    const tables = [...window.tables.values()];
+  /**
+   * The frames of a closed window, at position (`last`, `at`): split at 256 tags or 1024 keys, a
+   * table seen as a whole as one tag, each frame naming the receipts of its own tables and keys.
+   */
+  function framesOf(sealer: CursorCipher, window: Window, last: Envelope, at: number): HeldChange[] {
+    if (last === growing) growing = undefined;
     const end: CursorPosition = { epoch, seq: last.seq, at };
     const before: CursorPosition = { epoch, seq: window.first.seq - 1, at: window.first.at };
     let beforeCursor: Promise<LiveCursor> | undefined;
-    const frames: HeldChange[] = [];
-    for (let from = 0; from < tables.length; from += MAX_TAGS_PER_FRAME) {
-      const part = tables.slice(from, from + MAX_TAGS_PER_FRAME);
-      const byTxid = new Map<string, ReceiptOf>();
-      for (const table of part) for (const [txid, receipt] of table.receipts) byTxid.set(txid, receipt);
-      const isLast = from + MAX_TAGS_PER_FRAME >= tables.length;
-      frames.push({
-        kind: 'change',
-        tags: part.map(table => table.tag),
-        receipts: [...byTxid.values()],
-        cursor: isLast ? () => sealAt(sealer, last, end) : () => (beforeCursor ??= sealer.seal(before)),
-      });
+    type Part = { readonly tags: FrameTag[]; readonly receipts: Map<string, ReceiptOf>; keys: number };
+    const parts: Part[] = [];
+    let part: Part = { tags: [], receipts: new Map(), keys: 0 };
+    const next = (): void => {
+      parts.push(part);
+      part = { tags: [], receipts: new Map(), keys: 0 };
+    };
+    const take = (receipts: ReadonlyMap<string, ReceiptOf>): void => {
+      for (const [txid, receipt] of receipts) part.receipts.set(txid, receipt);
+    };
+    for (const table of window.tables.values()) {
+      const { schema, table: name } = table.tag;
+      if (table.wholeSeen || table.name === undefined) {
+        if (part.tags.length >= MAX_TAGS_PER_FRAME) next();
+        part.tags.push({ schema, table: name });
+        take(table.whole);
+        for (const receipts of table.keys.values()) take(receipts);
+        continue;
+      }
+      let keys: string[] | undefined;
+      for (const [key, receipts] of table.keys) {
+        if (part.keys >= MAX_KEYS_PER_FRAME || (keys === undefined && part.tags.length >= MAX_TAGS_PER_FRAME)) {
+          next();
+          keys = undefined;
+        }
+        if (keys === undefined) {
+          keys = [];
+          part.tags.push({ schema, table: name, scope: { name: table.name, keys } });
+        }
+        keys.push(key);
+        part.keys += 1;
+        take(receipts);
+      }
     }
-    return frames;
+    parts.push(part);
+    return parts.map((frame, index) => ({
+      kind: 'change',
+      tags: frame.tags,
+      receipts: [...frame.receipts.values()],
+      cursor:
+        index === parts.length - 1 ? () => sealAt(sealer, last, end) : () => (beforeCursor ??= sealer.seal(before)),
+    }));
   }
 
   /** The window's timer: it closes at the hub's current position. */
@@ -369,15 +519,15 @@ export function createLiveHub(options: {
     deliver(subscriber, framesOf(cipher, window, latest, Date.now()));
   }
 
-  /** A new hint reaches every stream through its own view. A stream it shows nothing to is not touched. */
-  function append(sealer: CursorCipher, hint: Hint): void {
+  /** New `cells` of `envelope` reach every stream through its own view. A stream they show nothing to is not touched. */
+  function append(sealer: CursorCipher, envelope: Envelope, cells: readonly Cell[]): void {
     for (const subscriber of subscribers) {
       const opens = subscriber.window === undefined;
-      const window = admit(subscriber, hint);
+      const window = admit(subscriber, envelope, cells);
       if (window === undefined) continue;
       if (window.txids.size >= MAX_TXIDS_PER_FRAME) {
         dropWindow(subscriber);
-        deliver(subscriber, framesOf(sealer, window, hint, hint.at));
+        deliver(subscriber, framesOf(sealer, window, envelope, envelope.at));
       } else if (opens) {
         subscriber.timer = setTimeout(() => closeWindow(subscriber), limits.batchMs);
       }
@@ -386,23 +536,28 @@ export function createLiveHub(options: {
 
   /**
    * The frames a stream missed after its cursor, made by the same view and windows as live ones,
-   * timed by when each hint arrived. A window still open at `now` stays open, with its timer.
+   * timed by when each envelope arrived. A window still open at `now` stays open, with its timer.
    */
-  function replayInto(sealer: CursorCipher, subscriber: Subscriber, hints: readonly Hint[], now: number): HeldChange[] {
+  function replayInto(
+    sealer: CursorCipher,
+    subscriber: Subscriber,
+    envelopes: readonly Envelope[],
+    now: number,
+  ): HeldChange[] {
     const frames: HeldChange[] = [];
-    let previous: Hint | undefined;
-    for (const hint of hints) {
+    let previous: Envelope | undefined;
+    for (const envelope of envelopes) {
       const open = subscriber.window;
-      if (open !== undefined && previous !== undefined && hint.at >= open.closesAt) {
+      if (open !== undefined && previous !== undefined && envelope.at >= open.closesAt) {
         subscriber.window = undefined;
         frames.push(...framesOf(sealer, open, previous, open.closesAt));
       }
-      const window = admit(subscriber, hint);
+      const window = admit(subscriber, envelope, cellsOf(envelope));
       if (window !== undefined && window.txids.size >= MAX_TXIDS_PER_FRAME) {
         subscriber.window = undefined;
-        frames.push(...framesOf(sealer, window, hint, hint.at));
+        frames.push(...framesOf(sealer, window, envelope, envelope.at));
       }
-      previous = hint;
+      previous = envelope;
     }
     const open = subscriber.window;
     if (open !== undefined && previous !== undefined) {
@@ -416,8 +571,8 @@ export function createLiveHub(options: {
     return frames;
   }
 
-  /** The transaction of a hint: shared with the hint before it when it is the same one, so one HMAC per transaction. */
-  function transactionOf(txid: string | undefined): Hint['transaction'] {
+  /** The transaction of an envelope: shared with the one before it when it is the same one, so one HMAC per transaction. */
+  function transactionOf(txid: string | undefined): Envelope['transaction'] {
     if (txid === undefined) return undefined;
     if (receipts === undefined) {
       if (!toldNoReceipts) {
@@ -450,19 +605,28 @@ export function createLiveHub(options: {
     epoch = next;
     seq = 0;
     latest = undefined;
+    growing = undefined;
     ring.clear();
     state = 'ready';
     debugHub.debug('{epoch}: ready', { epoch });
   }
 
   /**
-   * The ring reached its cap: a new epoch, every stream ends with `gap`, every client resets. The
-   * hint that met the cap is not kept: the resets refetch every live query, which covers it.
+   * The ring reached a cap: a new epoch, every stream ends with `gap`, every client resets. The
+   * change that met the cap is not kept: the resets refetch every live query, which covers it.
    */
   function overload(): void {
     debugHub.warn(
-      '{epoch}: overloaded: the replay ring reached its cap of {cap} hints within {replayMs} ms; starting a new epoch, {streams} streams reset',
-      { epoch, cap: limits.replayFrames, frames: ring.size(), replayMs: limits.replayMs, streams: subscribers.size },
+      '{epoch}: overloaded: the replay ring reached its cap ({envelopes} envelopes, {bytes} bytes) within {replayMs} ms; starting a new epoch, {streams} streams reset',
+      {
+        epoch,
+        envelopes: limits.replayEnvelopes,
+        bytes: limits.replayBytes,
+        held: ring.size(),
+        heldBytes: ring.bytes(),
+        replayMs: limits.replayMs,
+        streams: subscribers.size,
+      },
     );
     beginEpoch();
   }
@@ -478,6 +642,7 @@ export function createLiveHub(options: {
         state = 'unavailable';
         for (const subscriber of subscribers) finish(subscriber, { kind: 'gap' });
         latest = undefined;
+        growing = undefined;
         debugHub.debug('{epoch}: listener gap; streams ended', { epoch });
         return;
       }
@@ -485,37 +650,84 @@ export function createLiveHub(options: {
         if (state !== 'ready' || cipher === undefined || event.tags.length === 0) return;
         const now = Date.now();
         ring.evict(now);
-        if (ring.size() >= limits.replayFrames) {
-          overload();
-          return;
-        }
-        const hint: Hint = {
-          seq: seq + 1,
-          at: now,
-          cells: event.tags.map(tag => ({ tag, key: tagKey(tag) })),
-          transaction: transactionOf(event.txid),
-          sealed: undefined,
-        };
-        seq = hint.seq;
-        latest = hint;
-        ring.add(hint.seq, now, hint);
-        append(cipher, hint);
-        debugHub.debug('{epoch}: hint {seq} with {tables} tables, {streams} streams', {
-          epoch,
-          seq,
-          tables: hint.cells.length,
-          streams: subscribers.size,
-        });
+        change(cipher, event, now);
         return;
       }
     }
   }
 
   /**
-   * The hints after `position`, or `undefined` for a reset: another epoch, older than `replayMs`
-   * (by its own age only, whatever happened since), or from the future.
+   * Adds a source change to the open envelope of its transaction, or to a new one, and gives
+   * every stream what is new. A change that adds nothing (a repeat) touches nothing.
    */
-  function replayAfter(position: CursorPosition, now: number): readonly Hint[] | undefined {
+  function change(sealer: CursorCipher, event: Extract<LiveSourceEvent, { kind: 'change' }>, now: number): void {
+    const target = event.txid !== undefined && growing?.txid === event.txid ? growing : undefined;
+    const staged = new Map<string, { tag: TableTag; whole: boolean; keys: Set<string>; added: boolean }>();
+    for (const { schema, table, keys } of event.tags) {
+      const key = tagKey({ schema, table });
+      const known = target?.cells.get(key);
+      const entry = staged.get(key) ?? {
+        tag: { schema, table },
+        whole: false,
+        keys: new Set<string>(),
+        added: known === undefined,
+      };
+      if (keys === undefined) entry.whole ||= known?.whole !== true;
+      else for (const changed of keys) if (known?.keys.has(changed) !== true) entry.keys.add(changed);
+      staged.set(key, entry);
+    }
+    const cells: Cell[] = [];
+    let bytes = target === undefined ? ENVELOPE_BYTES : 0;
+    for (const [key, entry] of staged) {
+      if (!entry.whole && entry.keys.size === 0) continue;
+      const keys = [...entry.keys];
+      cells.push({ tag: entry.tag, key, whole: entry.whole, keys });
+      if (entry.added) bytes += key.length * 2 + ENTRY_BYTES;
+      for (const changed of keys) bytes += changed.length * 2 + ENTRY_BYTES;
+    }
+    if (cells.length === 0) return;
+    if ((target === undefined && ring.size() >= limits.replayEnvelopes) || ring.bytes() + bytes > limits.replayBytes) {
+      overload();
+      return;
+    }
+    let envelope = target;
+    if (envelope === undefined) {
+      envelope = {
+        seq: seq + 1,
+        at: now,
+        cells: new Map(),
+        txid: event.txid,
+        transaction: transactionOf(event.txid),
+        sealed: undefined,
+      };
+      seq = envelope.seq;
+      latest = envelope;
+      growing = envelope;
+      ring.add(envelope.seq, now, envelope, bytes);
+    } else {
+      ring.grow(bytes);
+    }
+    for (const cell of cells) {
+      const kept = envelope.cells.get(cell.key) ?? { tag: cell.tag, whole: false, keys: new Set<string>() };
+      kept.whole ||= cell.whole;
+      for (const key of cell.keys) kept.keys.add(key);
+      envelope.cells.set(cell.key, kept);
+    }
+    append(sealer, envelope, cells);
+    debugHub.debug('{epoch}: envelope {seq} {action} {tables} tables, {streams} streams', {
+      epoch,
+      seq,
+      action: target === undefined ? 'with' : 'grew by',
+      tables: cells.length,
+      streams: subscribers.size,
+    });
+  }
+
+  /**
+   * The envelopes after `position`, or `undefined` for a reset: another epoch, older than
+   * `replayMs` (by its own age only, whatever happened since), or from the future.
+   */
+  function replayAfter(position: CursorPosition, now: number): readonly Envelope[] | undefined {
     if (position.epoch !== epoch || now - position.at > limits.replayMs) return undefined;
     return ring.after(position.seq, seq);
   }
@@ -612,7 +824,7 @@ export function createLiveHub(options: {
 
     status: () => state,
 
-    async open({ cursor, grant, signal }) {
+    async open({ cursor, view, signal }) {
       assertReady();
       if (cursor !== undefined && !liveCursorSchema.safeParse(cursor).success) {
         throw liveError(
@@ -630,7 +842,7 @@ export function createLiveHub(options: {
       const replay = position === undefined ? undefined : replayAfter(position, now);
       const onAbort = (): void => close(subscriber);
       const subscriber: Subscriber = {
-        visible: grant?.tables === undefined ? undefined : new Set(grant.tables.map(tag => tagKey(tag))),
+        view: viewOf(view),
         preamble: [],
         preambleAt: 0,
         pending: [],
@@ -641,6 +853,8 @@ export function createLiveHub(options: {
         wake: undefined,
         unlisten: () => signal.removeEventListener('abort', onAbort),
       };
+      // A reset begins at the latest envelope: its position is out, so it takes no more changes.
+      if (replay === undefined) growing = undefined;
       subscriber.preamble =
         position === undefined || replay === undefined
           ? [{ kind: 'begin', mode: 'reset', at: { epoch, seq, at: now } }]
@@ -659,6 +873,7 @@ export function createLiveHub(options: {
     async cursor() {
       // The position is read now, before any await: what the caller reads afterwards is covered.
       if (state !== 'ready' || cipher === undefined) return;
+      growing = undefined;
       return cipher.seal({ epoch, seq, at: Date.now() });
     },
 
